@@ -49,8 +49,8 @@ See [LICENSE.txt](LICENSE.txt) for full terms.
 
 ## Links
 
-- **Website**: [https://dockhand.io](https://dockhand.io)
-- **Documentation**: [https://dockhand.io/docs](https://dockhand.io/docs)
+- **Website**: [https://dockhand.pro](https://dockhand.pro)
+- **Documentation**: [https://dockhand.pro/manual](https://dockhand.pro/manual)
 
 ---
 
