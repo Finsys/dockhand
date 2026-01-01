@@ -26,7 +26,6 @@
 	} from 'lucide-svelte';
 	import { authStore } from '$lib/stores/auth';
 	import * as Alert from '$lib/components/ui/alert';
-	import { licenseStore } from '$lib/stores/license';
 	import AvatarCropper from '$lib/components/AvatarCropper.svelte';
 	import * as Avatar from '$lib/components/ui/avatar';
 	import ChangePasswordModal from './ChangePasswordModal.svelte';
@@ -542,26 +541,19 @@
 									</p>
 								</div>
 							</div>
-							{#if $licenseStore.isEnterprise}
-								{#if profile.mfaEnabled}
-									<Button variant="outline" onclick={() => showDisableMfaModal = true}>
-										Disable MFA
-									</Button>
-								{:else}
-									<Button onclick={setupMfa} disabled={mfaLoading}>
-										{#if mfaLoading}
-											<RefreshCw class="w-4 h-4 mr-1 animate-spin" />
-										{:else}
-											<QrCode class="w-4 h-4 mr-1" />
-										{/if}
-										Setup MFA
-									</Button>
-								{/if}
+							{#if profile.mfaEnabled}
+								<Button variant="outline" onclick={() => showDisableMfaModal = true}>
+									Disable MFA
+								</Button>
 							{:else}
-								<Badge variant="outline" class="gap-1 rounded-sm">
-									<Crown class="w-3 h-3" />
-									Enterprise
-								</Badge>
+								<Button onclick={setupMfa} disabled={mfaLoading}>
+									{#if mfaLoading}
+										<RefreshCw class="w-4 h-4 mr-1 animate-spin" />
+									{:else}
+										<QrCode class="w-4 h-4 mr-1" />
+									{/if}
+									Setup MFA
+								</Button>
 							{/if}
 						</div>
 					{:else}

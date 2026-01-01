@@ -235,7 +235,7 @@
 				toast.success('User created');
 			} else {
 				const data = await response.json();
-				formError = data.error || 'Failed to create user';
+				formError = data.details ? `${data.error}: ${data.details}` : (data.error || 'Failed to create user');
 				toast.error(formError);
 			}
 		} catch {

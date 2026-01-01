@@ -5,7 +5,8 @@
 	import { Label } from '$lib/components/ui/label';
 	import { Input } from '$lib/components/ui/input';
 	import { TogglePill } from '$lib/components/ui/toggle-pill';
-	import { Loader2, GitBranch, RefreshCw, Webhook, Rocket, RefreshCcw, Copy, Check, FolderGit2, Github, Key, KeyRound, Lock, FileText } from 'lucide-svelte';
+	import { Loader2, GitBranch, RefreshCw, Webhook, Rocket, RefreshCcw, Copy, Check, FolderGit2, Github, Key, KeyRound, Lock, FileText, HelpCircle } from 'lucide-svelte';
+	import * as Tooltip from '$lib/components/ui/tooltip';
 	import CronEditor from '$lib/components/cron-editor.svelte';
 	import StackEnvVarsPanel from '$lib/components/StackEnvVarsPanel.svelte';
 	import { type EnvVar, type ValidationResult } from '$lib/components/StackEnvVarsEditor.svelte';
@@ -582,9 +583,23 @@
 				<p class="text-xs text-muted-foreground">Path to the compose file within the repository</p>
 			</div>
 
-			<!-- .env file path -->
+			<!-- Additional env file for variable substitution -->
 			<div class="space-y-2">
-				<Label for="env-file-path">.env file path</Label>
+				<div class="flex items-center gap-1.5">
+					<Label for="env-file-path">Additional .env file (optional)</Label>
+					<Tooltip.Root>
+						<Tooltip.Trigger>
+							<HelpCircle class="w-3.5 h-3.5 text-muted-foreground cursor-help" />
+						</Tooltip.Trigger>
+						<Tooltip.Content>
+							<div class="w-80">
+								<p class="text-xs">All files in the git repository are cloned automatically, including any files referenced by <code class="bg-muted px-1 rounded">env_file:</code> directives.</p>
+								<p class="text-xs mt-2">Only use this field for additional environment variables to be passed to Docker Compose.</p>
+								<p class="text-xs mt-2">The contents will be parsed and passed as shell environment variables.</p>
+							</div>
+						</Tooltip.Content>
+					</Tooltip.Root>
+				</div>
 				{#if gitStack && envFiles.length > 0}
 					<!-- Dropdown selector for existing stacks with discovered .env files -->
 					<Select.Root
@@ -633,7 +648,9 @@
 						placeholder=".env"
 					/>
 				{/if}
-				<p class="text-xs text-muted-foreground">Path to the .env file within the repository (optional)</p>
+				<p class="text-xs text-muted-foreground">
+				For variable substitution from a file outside the compose directory.
+			</p>
 			</div>
 
 			<!-- Auto-update section -->
@@ -740,15 +757,17 @@
 
 			<!-- Deploy now option (only for new stacks) -->
 			{#if !gitStack}
-				<div class="flex items-center gap-3">
-					<div class="flex items-center gap-2 flex-1">
-						<Rocket class="w-4 h-4 text-muted-foreground" />
-						<div class="flex-1">
-							<Label class="text-sm font-normal">Deploy now</Label>
-							<p class="text-xs text-muted-foreground">Clone and deploy the stack immediately</p>
+				<div class="space-y-3 p-3 bg-muted/50 rounded-md">
+					<div class="flex items-center gap-3">
+						<div class="flex items-center gap-2 flex-1">
+							<Rocket class="w-4 h-4 text-muted-foreground" />
+							<div class="flex-1">
+								<Label class="text-sm font-normal">Deploy now</Label>
+								<p class="text-xs text-muted-foreground">Clone and deploy the stack immediately</p>
+							</div>
 						</div>
+						<TogglePill bind:checked={formDeployNow} />
 					</div>
-					<TogglePill bind:checked={formDeployNow} />
 				</div>
 			{/if}
 

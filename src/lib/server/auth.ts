@@ -747,11 +747,69 @@ function getAttributeValue(entry: any, attribute: string): string | undefined {
 }
 
 // ============================================
-// MFA (TOTP)
+// MFA (TOTP) with Backup Codes
 // ============================================
 
 import * as OTPAuth from 'otpauth';
 import * as QRCode from 'qrcode';
+
+// MFA data stored in mfaSecret field as JSON
+interface MfaData {
+	secret: string;           // TOTP secret (base32)
+	backupCodes: string[];    // Hashed backup codes (unused ones)
+}
+
+/**
+ * Generate 10 random backup codes (8 characters each, alphanumeric)
+ */
+function generateBackupCodes(): string[] {
+	const codes: string[] = [];
+	const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Removed confusable chars: 0, O, 1, I
+	for (let i = 0; i < 10; i++) {
+		let code = '';
+		for (let j = 0; j < 8; j++) {
+			code += chars.charAt(Math.floor(Math.random() * chars.length));
+		}
+		codes.push(code);
+	}
+	return codes;
+}
+
+/**
+ * Hash a backup code for storage
+ */
+async function hashBackupCode(code: string): Promise<string> {
+	// Normalize: uppercase, remove spaces and dashes
+	const normalized = code.toUpperCase().replace(/[\s-]/g, '');
+	const hasher = new Bun.CryptoHasher('sha256');
+	hasher.update(normalized);
+	return hasher.digest('hex');
+}
+
+/**
+ * Parse MFA data from database field
+ */
+function parseMfaData(mfaSecret: string | null | undefined): MfaData | null {
+	if (!mfaSecret) return null;
+
+	try {
+		// Try parsing as JSON first (new format)
+		const parsed = JSON.parse(mfaSecret);
+		if (parsed && typeof parsed.secret === 'string') {
+			return {
+				secret: parsed.secret,
+				backupCodes: parsed.backupCodes || []
+			};
+		}
+	} catch {
+		// Legacy format: plain base32 secret string
+		return {
+			secret: mfaSecret,
+			backupCodes: []
+		};
+	}
+	return null;
+}
 
 /**
  * Generate MFA secret and QR code for setup
@@ -787,18 +845,24 @@ export async function generateMfaSetup(userId: number): Promise<{
 		margin: 2
 	});
 
-	// Store secret temporarily (user must verify before it's enabled)
-	await updateUser(userId, { mfaSecret: secretBase32 });
+	// Store secret temporarily as JSON (user must verify before it's enabled)
+	// Backup codes will be generated after verification
+	const mfaData: MfaData = { secret: secretBase32, backupCodes: [] };
+	await updateUser(userId, { mfaSecret: JSON.stringify(mfaData) });
 
 	return { secret: secretBase32, qrDataUrl };
 }
 
 /**
  * Verify MFA token and enable MFA if valid
+ * Returns backup codes on success (shown only once)
  */
-export async function verifyAndEnableMfa(userId: number, token: string): Promise<boolean> {
+export async function verifyAndEnableMfa(userId: number, token: string): Promise<{ success: false } | { success: true; backupCodes: string[] }> {
 	const user = await getUser(userId);
-	if (!user || !user.mfaSecret) return false;
+	if (!user || !user.mfaSecret) return { success: false };
+
+	const mfaData = parseMfaData(user.mfaSecret);
+	if (!mfaData) return { success: false };
 
 	const totp = new OTPAuth.TOTP({
 		issuer: 'Dockhand',
@@ -806,35 +870,74 @@ export async function verifyAndEnableMfa(userId: number, token: string): Promise
 		algorithm: 'SHA1',
 		digits: 6,
 		period: 30,
-		secret: OTPAuth.Secret.fromBase32(user.mfaSecret)
+		secret: OTPAuth.Secret.fromBase32(mfaData.secret)
 	});
 
 	const delta = totp.validate({ token, window: 1 });
-	if (delta === null) return false;
+	if (delta === null) return { success: false };
 
-	// Enable MFA
-	await updateUser(userId, { mfaEnabled: true });
-	return true;
+	// Generate backup codes
+	const plainBackupCodes = generateBackupCodes();
+	const hashedBackupCodes = await Promise.all(plainBackupCodes.map(hashBackupCode));
+
+	// Update MFA data with hashed backup codes and enable MFA
+	const updatedMfaData: MfaData = {
+		secret: mfaData.secret,
+		backupCodes: hashedBackupCodes
+	};
+	await updateUser(userId, {
+		mfaEnabled: true,
+		mfaSecret: JSON.stringify(updatedMfaData)
+	});
+
+	// Return plain backup codes (shown only once)
+	return { success: true, backupCodes: plainBackupCodes };
 }
 
 /**
- * Verify MFA token during login
+ * Verify MFA token during login (accepts TOTP code or backup code)
  */
 export async function verifyMfaToken(userId: number, token: string): Promise<boolean> {
 	const user = await getUser(userId);
 	if (!user || !user.mfaEnabled || !user.mfaSecret) return false;
 
+	const mfaData = parseMfaData(user.mfaSecret);
+	if (!mfaData) return false;
+
+	// First, try TOTP verification
 	const totp = new OTPAuth.TOTP({
 		issuer: 'Dockhand',
 		label: user.username,
 		algorithm: 'SHA1',
 		digits: 6,
 		period: 30,
-		secret: OTPAuth.Secret.fromBase32(user.mfaSecret)
+		secret: OTPAuth.Secret.fromBase32(mfaData.secret)
 	});
 
 	const delta = totp.validate({ token, window: 1 });
-	return delta !== null;
+	if (delta !== null) return true;
+
+	// If TOTP fails, try backup code
+	if (mfaData.backupCodes && mfaData.backupCodes.length > 0) {
+		const hashedInput = await hashBackupCode(token);
+		const codeIndex = mfaData.backupCodes.indexOf(hashedInput);
+
+		if (codeIndex !== -1) {
+			// Remove used backup code
+			const updatedBackupCodes = [...mfaData.backupCodes];
+			updatedBackupCodes.splice(codeIndex, 1);
+
+			const updatedMfaData: MfaData = {
+				secret: mfaData.secret,
+				backupCodes: updatedBackupCodes
+			};
+			await updateUser(userId, { mfaSecret: JSON.stringify(updatedMfaData) });
+
+			return true;
+		}
+	}
+
+	return false;
 }
 
 /**

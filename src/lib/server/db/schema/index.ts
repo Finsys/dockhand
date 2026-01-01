@@ -181,7 +181,7 @@ export const users = sqliteTable('users', {
 	avatar: text('avatar'),
 	authProvider: text('auth_provider').default('local'), // e.g., 'local', 'oidc:Keycloak', 'ldap:AD'
 	mfaEnabled: integer('mfa_enabled', { mode: 'boolean' }).default(false),
-	mfaSecret: text('mfa_secret'),
+	mfaSecret: text('mfa_secret'), // JSON: { secret: string, backupCodes: string[] }
 	isActive: integer('is_active', { mode: 'boolean' }).default(true),
 	lastLogin: text('last_login'),
 	createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),

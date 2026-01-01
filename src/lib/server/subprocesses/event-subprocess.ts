@@ -134,10 +134,16 @@ function processEvent(event: DockerEvent, envId: number) {
 	if (event.Type !== 'container') return;
 
 	// Map Docker action to our action type
-	const action = event.Action.split(':')[0] as ContainerEventAction;
+	// For health_status events, Docker sends "health_status: unhealthy" or "health_status: healthy"
+	// We need to preserve the full string for notifications to distinguish healthy vs unhealthy
+	const rawAction = event.Action;
+	const baseAction = rawAction.split(':')[0] as ContainerEventAction;
 
 	// Skip actions we don't care about
-	if (!CONTAINER_ACTIONS.includes(action)) return;
+	if (!CONTAINER_ACTIONS.includes(baseAction)) return;
+
+	// For notifications, preserve full action for health_status to enable proper mapping
+	const action = rawAction.startsWith('health_status') ? rawAction : baseAction;
 
 	const containerId = event.Actor?.ID;
 	const containerName = event.Actor?.Attributes?.name;
@@ -169,14 +175,17 @@ function processEvent(event: DockerEvent, envId: number) {
 	const timestamp = new Date(Math.floor(event.timeNano / 1000000)).toISOString();
 
 	// Prepare notification data
-	const actionLabel = action.charAt(0).toUpperCase() + action.slice(1);
+	// For health_status events, create a cleaner label
+	const actionLabel = action.startsWith('health_status')
+		? action.includes('unhealthy') ? 'Unhealthy' : 'Healthy'
+		: action.charAt(0).toUpperCase() + action.slice(1);
 	const containerLabel = containerName || containerId.substring(0, 12);
 	const notificationType =
-		action === 'die' || action === 'kill' || action === 'oom'
+		action === 'die' || action === 'kill' || action === 'oom' || action.includes('unhealthy')
 			? 'error'
 			: action === 'stop'
 				? 'warning'
-				: action === 'start'
+				: action === 'start' || (action.includes('healthy') && !action.includes('unhealthy'))
 					? 'success'
 					: 'info';
 

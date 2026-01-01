@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, rmSync, chmodSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join, resolve, dirname } from 'node:path';
 import {
 	getGitRepository,
 	getGitCredential,
@@ -134,7 +134,9 @@ export interface SyncResult {
 	success: boolean;
 	commit?: string;
 	composeContent?: string;
+	composeDir?: string; // Directory containing the compose file (for copying all files)
 	envFileVars?: Record<string, string>; // Variables from .env file in repo
+	envFileContent?: string; // Raw .env file content (for Hawser deployments)
 	error?: string;
 	updated?: boolean;
 }
@@ -609,16 +611,21 @@ export async function syncGitStack(stackId: number): Promise<SyncResult> {
 		console.log(`${logPrefix} Compose content:`);
 		console.log(composeContent);
 
+		// Determine the compose directory (for copying all files)
+		const composeDir = dirname(composePath);
+		console.log(`${logPrefix} Compose directory:`, composeDir);
+
 		// Read env file if configured (optional - don't fail if missing)
 		let envFileVars: Record<string, string> | undefined;
+		let envFileContent: string | undefined;
 		if (gitStack.envFilePath) {
 			const envFilePath = join(repoPath, gitStack.envFilePath);
 			console.log(`${logPrefix} Looking for env file at:`, envFilePath);
 			if (existsSync(envFilePath)) {
 				try {
 					console.log(`${logPrefix} Reading env file...`);
-					const envContent = await Bun.file(envFilePath).text();
-					envFileVars = parseEnvFileContent(envContent, gitStack.stackName);
+					envFileContent = await Bun.file(envFilePath).text();
+					envFileVars = parseEnvFileContent(envFileContent, gitStack.stackName);
 					console.log(`${logPrefix} Env file parsed, vars count:`, Object.keys(envFileVars).length);
 				} catch (err) {
 					// Log but don't fail - env file is optional
@@ -653,6 +660,7 @@ export async function syncGitStack(stackId: number): Promise<SyncResult> {
 			success: true,
 			commit: currentCommit,
 			composeContent,
+			composeDir,
 			envFileVars,
 			updated
 		};
@@ -719,11 +727,13 @@ export async function deployGitStack(stackId: number, options?: { force?: boolea
 	// This ensures containers pick up new env var values even if compose file didn't change
 	// Note: Without this, docker compose only detects compose file changes, not env var changes
 	console.log(`${logPrefix} Calling deployStack...`);
+	console.log(`${logPrefix} Source directory (composeDir):`, syncResult.composeDir);
 	const result = await deployStack({
 		name: gitStack.stackName,
 		compose: syncResult.composeContent!,
 		envId: gitStack.environmentId,
 		envFileVars: syncResult.envFileVars,
+		sourceDir: syncResult.composeDir, // Copy entire directory from git repo
 		forceRecreate
 	});
 
@@ -917,6 +927,9 @@ export async function deployGitStackWithProgress(
 
 		const composeContent = await Bun.file(composePath).text();
 
+		// Determine the compose directory (for copying all files)
+		const composeDir = dirname(composePath);
+
 		// Read env file if configured (optional - don't fail if missing)
 		let envFileVars: Record<string, string> | undefined;
 		if (gitStack.envFilePath) {
@@ -951,7 +964,8 @@ export async function deployGitStackWithProgress(
 			name: gitStack.stackName,
 			compose: composeContent,
 			envId: gitStack.environmentId,
-			envFileVars
+			envFileVars,
+			sourceDir: composeDir // Copy entire directory from git repo
 		});
 
 		if (result.success) {

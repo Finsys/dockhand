@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy, tick } from 'svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -7,11 +7,15 @@
 	import CodeEditor, { type VariableMarker } from '$lib/components/CodeEditor.svelte';
 	import StackEnvVarsPanel from '$lib/components/StackEnvVarsPanel.svelte';
 	import { type EnvVar, type ValidationResult } from '$lib/components/StackEnvVarsEditor.svelte';
-	import { Layers, Save, Play, Code, GitGraph, Loader2, AlertCircle, X, Sun, Moon, TriangleAlert, ChevronsLeft, ChevronsRight, Variable } from 'lucide-svelte';
+	import { Layers, Save, Play, Code, GitGraph, Loader2, AlertCircle, X, Sun, Moon, TriangleAlert, ChevronsLeft, ChevronsRight, Variable, HelpCircle, GripVertical } from 'lucide-svelte';
+	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { currentEnvironment, appendEnvParam } from '$lib/stores/environment';
 	import { focusFirstInput } from '$lib/utils';
 	import * as Alert from '$lib/components/ui/alert';
 	import ComposeGraphViewer from './ComposeGraphViewer.svelte';
+
+	// localStorage key for persisted split ratio
+	const STORAGE_KEY_SPLIT = 'dockhand-stack-modal-split';
 
 	interface Props {
 		open: boolean;
@@ -39,6 +43,8 @@
 	// Environment variables state
 	let envVars = $state<EnvVar[]>([]);
 	let originalEnvVars = $state<EnvVar[]>([]);
+	let rawEnvContent = $state('');
+	let originalRawEnvContent = $state('');
 	let envValidation = $state<ValidationResult | null>(null);
 	let validating = $state(false);
 	let existingSecretKeys = $state<Set<string>>(new Set());
@@ -48,6 +54,11 @@
 
 	// ComposeGraphViewer reference for resize on panel toggle
 	let graphViewerRef: ComposeGraphViewer | null = $state(null);
+
+	// Resizable split panel state
+	let splitRatio = $state(60); // percentage for compose panel
+	let isDraggingSplit = $state(false);
+	let containerRef: HTMLDivElement | null = $state(null);
 
 	// Debounce timer for validation
 	let validateTimer: ReturnType<typeof setTimeout> | null = null;
@@ -143,20 +154,22 @@ services:
 		if (validateTimer) clearTimeout(validateTimer);
 		validateTimer = setTimeout(() => {
 			validateEnvVars();
-		}, 500);
+		}, 1000);
 	}
 
-	// Explicitly push markers to the editor
+	// Explicitly push markers to the editor (immediate=true since this is called after validation)
 	function updateEditorMarkers() {
 		if (!codeEditorRef) return;
-		codeEditorRef.updateVariableMarkers(variableMarkers);
+		codeEditorRef.updateVariableMarkers(variableMarkers, true);
 	}
 
 	// Check for env var changes (compare by serializing)
 	const hasEnvVarChanges = $derived.by(() => {
-		const current = JSON.stringify(envVars.filter(v => v.key));
-		const original = JSON.stringify(originalEnvVars);
-		return current !== original;
+		const currentVars = JSON.stringify(envVars.filter(v => v.key));
+		const originalVars = JSON.stringify(originalEnvVars);
+		const varsChanged = currentVars !== originalVars;
+		const rawChanged = rawEnvContent !== originalRawEnvContent;
+		return varsChanged || rawChanged;
 	});
 
 	const hasChanges = $derived(hasComposeChanges || hasEnvVarChanges);
@@ -173,7 +186,47 @@ services:
 			// Fallback to system preference
 			editorTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 		}
+
+		// Load saved split ratio
+		const savedSplit = localStorage.getItem(STORAGE_KEY_SPLIT);
+		if (savedSplit) {
+			const ratio = parseFloat(savedSplit);
+			if (!isNaN(ratio) && ratio >= 30 && ratio <= 80) {
+				splitRatio = ratio;
+			}
+		}
+
+		// Add global mouse event listeners for split dragging
+		window.addEventListener('mousemove', handleMouseMove);
+		window.addEventListener('mouseup', handleMouseUp);
 	});
+
+	onDestroy(() => {
+		window.removeEventListener('mousemove', handleMouseMove);
+		window.removeEventListener('mouseup', handleMouseUp);
+	});
+
+	// Split panel drag handlers
+	function startSplitDrag(e: MouseEvent) {
+		e.preventDefault();
+		isDraggingSplit = true;
+	}
+
+	function handleMouseMove(e: MouseEvent) {
+		if (isDraggingSplit && containerRef) {
+			const rect = containerRef.getBoundingClientRect();
+			const newRatio = ((e.clientX - rect.left) / rect.width) * 100;
+			splitRatio = Math.max(30, Math.min(80, newRatio));
+		}
+	}
+
+	function handleMouseUp() {
+		if (isDraggingSplit) {
+			isDraggingSplit = false;
+			// Save split ratio
+			localStorage.setItem(STORAGE_KEY_SPLIT, splitRatio.toString());
+		}
+	}
 
 	async function loadComposeFile() {
 		if (mode !== 'edit' || !stackName) return;
@@ -196,17 +249,29 @@ services:
 			composeContent = data.content;
 			originalContent = data.content;
 
-			// Load environment variables
+			// Load environment variables (parsed)
 			const envResponse = await fetch(appendEnvParam(`/api/stacks/${encodeURIComponent(stackName)}/env`, envId));
 			if (envResponse.ok) {
 				const envData = await envResponse.json();
 				envVars = envData.variables || [];
-				originalEnvVars = JSON.parse(JSON.stringify(envData.variables || []));
 				// Track existing secret keys (secrets loaded from DB cannot have visibility toggled)
 				existingSecretKeys = new Set(
 					envVars.filter(v => v.isSecret && v.key.trim()).map(v => v.key.trim())
 				);
 			}
+
+			// Load raw .env file content
+			const rawEnvResponse = await fetch(appendEnvParam(`/api/stacks/${encodeURIComponent(stackName)}/env/raw`, envId));
+			if (rawEnvResponse.ok) {
+				const rawEnvData = await rawEnvResponse.json();
+				rawEnvContent = rawEnvData.content || '';
+			}
+
+			// Wait for $effects in StackEnvVarsPanel to settle (parses raw content, syncs variables)
+			// Then set originals to the post-effect state to avoid false "unsaved changes"
+			await tick();
+			originalEnvVars = JSON.parse(JSON.stringify(envVars.filter(v => v.key.trim())));
+			originalRawEnvContent = rawEnvContent;
 		} catch (e: any) {
 			loadError = e.message;
 		} finally {
@@ -276,40 +341,28 @@ services:
 		try {
 			const envId = $currentEnvironment?.id ?? null;
 
-			// Create the stack
+			// Collect environment variables
+			const definedVars = envVars.filter(v => v.key.trim());
+
+			// Create the stack (include env vars so they're available before start)
 			const response = await fetch(appendEnvParam('/api/stacks', envId), {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
 					name: newStackName.trim(),
 					compose: content,
-					start
+					start,
+					envVars: definedVars.length > 0 ? definedVars.map(v => ({
+						key: v.key.trim(),
+						value: v.value,
+						isSecret: v.isSecret
+					})) : undefined
 				})
 			});
 
 			if (!response.ok) {
 				const data = await response.json();
 				throw new Error(data.error || 'Failed to create stack');
-			}
-
-			// Save environment variables if any are defined
-			const definedVars = envVars.filter(v => v.key.trim());
-			if (definedVars.length > 0) {
-				const envResponse = await fetch(appendEnvParam(`/api/stacks/${encodeURIComponent(newStackName.trim())}/env`, envId), {
-					method: 'PUT',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({
-						variables: definedVars.map(v => ({
-							key: v.key.trim(),
-							value: v.value,
-							isSecret: v.isSecret
-						}))
-					})
-				});
-
-				if (!envResponse.ok) {
-					console.error('Failed to save environment variables');
-				}
 			}
 
 			onSuccess();
@@ -354,31 +407,59 @@ services:
 				throw new Error(data.error || 'Failed to save compose file');
 			}
 
-			// Save environment variables if any are defined
+			// Save environment variables
+			// Always save to raw endpoint for consistency
+			// If no raw content but has env vars, generate raw content from vars (backward compat)
 			const definedVars = envVars.filter(v => v.key.trim());
-			if (definedVars.length > 0 || originalEnvVars.length > 0) {
-				const envResponse = await fetch(
-					appendEnvParam(`/api/stacks/${encodeURIComponent(stackName)}/env`, envId),
+			let contentToSave = rawEnvContent;
+
+			// Backward compatibility: if no raw file but has DB envs, generate raw content
+			if (!contentToSave.trim() && definedVars.length > 0) {
+				contentToSave = definedVars.map(v => `${v.key.trim()}=${v.value}`).join('\n') + '\n';
+			}
+
+			// Save if there's any content OR if we need to clear an existing file
+			if (contentToSave.trim() || originalRawEnvContent.trim() || definedVars.length > 0 || originalEnvVars.length > 0) {
+				const rawEnvResponse = await fetch(
+					appendEnvParam(`/api/stacks/${encodeURIComponent(stackName)}/env/raw`, envId),
 					{
 						method: 'PUT',
 						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify({
-							variables: definedVars.map(v => ({
-								key: v.key.trim(),
-								value: v.value,
-								isSecret: v.isSecret
-							}))
-						})
+						body: JSON.stringify({ content: contentToSave })
 					}
 				);
 
-				if (!envResponse.ok) {
-					console.error('Failed to save environment variables');
+				if (!rawEnvResponse.ok) {
+					console.error('Failed to save environment file');
+				}
+
+				// Also save to DB for secret tracking
+				if (definedVars.some(v => v.isSecret)) {
+					const envResponse = await fetch(
+						appendEnvParam(`/api/stacks/${encodeURIComponent(stackName)}/env`, envId),
+						{
+							method: 'PUT',
+							headers: { 'Content-Type': 'application/json' },
+							body: JSON.stringify({
+								variables: definedVars.map(v => ({
+									key: v.key.trim(),
+									value: v.value,
+									isSecret: v.isSecret
+								}))
+							})
+						}
+					);
+
+					if (!envResponse.ok) {
+						console.error('Failed to save secret markers to database');
+					}
 				}
 			}
 
 			originalContent = composeContent;
-			originalEnvVars = JSON.parse(JSON.stringify(definedVars));
+			originalEnvVars = JSON.parse(JSON.stringify(envVars.filter(v => v.key.trim())));
+			originalRawEnvContent = contentToSave; // Use what was actually saved
+			rawEnvContent = contentToSave; // Sync raw content if it was generated
 			onSuccess();
 
 			if (!restart) {
@@ -417,6 +498,8 @@ services:
 		originalContent = '';
 		envVars = [];
 		originalEnvVars = [];
+		rawEnvContent = '';
+		originalRawEnvContent = '';
 		envValidation = null;
 		existingSecretKeys = new Set();
 		activeTab = 'editor';
@@ -462,7 +545,7 @@ services:
 		// Debounce to avoid too many API calls while typing
 		const timeout = setTimeout(() => {
 			validateEnvVars();
-		}, 300);
+		}, 800);
 
 		return () => clearTimeout(timeout);
 	});
@@ -484,8 +567,11 @@ services:
 		}
 	}}
 >
-	<Dialog.Content class="max-w-7xl w-[95vw] h-[90vh] flex flex-col p-0 gap-0 shadow-xl border-zinc-200 dark:border-zinc-700" showCloseButton={false}>
-		<Dialog.Header class="px-5 py-3 border-b border-zinc-200 dark:border-zinc-700 flex-shrink-0 bg-zinc-50 dark:bg-zinc-800">
+	<Dialog.Content
+		class="max-w-none w-[calc(100vw-12rem)] h-[95vh] ml-[4.5rem] flex flex-col p-0 gap-0 shadow-xl border-zinc-200 dark:border-zinc-700"
+		showCloseButton={false}
+	>
+		<Dialog.Header class="px-5 py-3 border-b border-zinc-200 dark:border-zinc-700 flex-shrink-0">
 			<div class="flex items-center justify-between">
 				<div class="flex items-center gap-3">
 					<div class="flex items-center gap-2">
@@ -529,7 +615,7 @@ services:
 					</div>
 				</div>
 
-				<div class="flex items-center gap-2">
+				<div class="flex items-center gap-1">
 					<!-- Theme toggle (only in editor mode) -->
 					{#if activeTab === 'editor'}
 						<button
@@ -612,10 +698,10 @@ services:
 				{/if}
 
 				<!-- Content area -->
-				<div class="flex-1 min-h-0 flex">
+				<div bind:this={containerRef} class="flex-1 min-h-0 flex {isDraggingSplit ? 'select-none' : ''}">
 					{#if activeTab === 'editor'}
 						<!-- Editor tab: Code editor + Env panel side by side -->
-						<div class="w-[60%] flex-shrink-0 border-r border-zinc-200 dark:border-zinc-700 flex flex-col min-w-0">
+						<div class="flex-shrink-0 flex flex-col min-w-0" style="width: {splitRatio}%">
 							{#if open}
 								<div class="flex-1 p-3 min-h-0">
 									<CodeEditor
@@ -630,18 +716,66 @@ services:
 								</div>
 							{/if}
 						</div>
+						<!-- Resizable divider -->
+						<div
+							class="w-1 flex-shrink-0 bg-zinc-200 dark:bg-zinc-700 hover:bg-blue-400 dark:hover:bg-blue-500 cursor-col-resize transition-colors flex items-center justify-center group {isDraggingSplit ? 'bg-blue-500 dark:bg-blue-400' : ''}"
+							onmousedown={startSplitDrag}
+							role="separator"
+							aria-orientation="vertical"
+							tabindex="0"
+						>
+							<div class="w-4 h-8 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity {isDraggingSplit ? 'opacity-100' : ''}">
+								<GripVertical class="w-3 h-3 text-white" />
+							</div>
+						</div>
 						<!-- Environment variables panel -->
 						<div class="flex-1 min-w-0 flex flex-col overflow-hidden bg-zinc-50 dark:bg-zinc-800/50">
 							<div class="flex items-center gap-1.5 px-3 py-1.5 border-b border-zinc-200 dark:border-zinc-700 text-xs font-medium text-zinc-600 dark:text-zinc-300">
 								<Variable class="w-3.5 h-3.5" />
 								Environment variables
+								<Tooltip.Root>
+									<Tooltip.Trigger>
+										<HelpCircle class="w-3.5 h-3.5 text-muted-foreground cursor-help" />
+									</Tooltip.Trigger>
+									<Tooltip.Content>
+										<div class="w-64">
+											<p class="text-xs">These variables will be written to a <code class="bg-muted px-1 rounded">.env</code> file in the stack directory.</p>
+										</div>
+									</Tooltip.Content>
+								</Tooltip.Root>
+								<!-- Validation status pills -->
+								{#if envValidation}
+									<div class="flex gap-1 ml-auto">
+										{#if envValidation.missing.length > 0}
+											<span class="inline-flex items-center px-1.5 py-0.5 rounded text-2xs font-medium bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300">
+												{envValidation.missing.length} missing
+											</span>
+										{/if}
+										{#if envValidation.required.length > 0}
+											<span class="inline-flex items-center px-1.5 py-0.5 rounded text-2xs font-medium bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300">
+												{envValidation.required.length - envValidation.missing.length} required
+											</span>
+										{/if}
+										{#if envValidation.optional.length > 0}
+											<span class="inline-flex items-center px-1.5 py-0.5 rounded text-2xs font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+												{envValidation.optional.length} optional
+											</span>
+										{/if}
+										{#if envValidation.unused.length > 0}
+											<span class="inline-flex items-center px-1.5 py-0.5 rounded text-2xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
+												{envValidation.unused.length} unused
+											</span>
+										{/if}
+									</div>
+								{/if}
 							</div>
 							<div class="flex-1 min-h-0 overflow-hidden">
 								<StackEnvVarsPanel
 									bind:variables={envVars}
+									bind:rawContent={rawEnvContent}
 									validation={envValidation}
 									existingSecretKeys={mode === 'edit' ? existingSecretKeys : new Set()}
-									onchange={() => validateEnvVars()}
+									onchange={debouncedValidate}
 								/>
 							</div>
 						</div>
@@ -659,7 +793,7 @@ services:
 		</div>
 
 		<!-- Footer -->
-		<div class="px-5 py-2.5 border-t border-zinc-200 dark:border-zinc-700 flex items-center justify-between flex-shrink-0 bg-zinc-50 dark:bg-zinc-800">
+		<div class="px-5 py-2.5 border-t border-zinc-200 dark:border-zinc-700 flex items-center justify-between flex-shrink-0">
 			<div class="text-xs text-zinc-500 dark:text-zinc-400">
 				{#if hasChanges}
 					<span class="text-amber-600 dark:text-amber-500">Unsaved changes</span>

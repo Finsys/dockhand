@@ -677,10 +677,13 @@ export async function listContainers(all = true, envId?: number | null): Promise
 		}));
 
 		// Extract health status from Status string
+		// Docker formats: "(healthy)", "(unhealthy)", "(health: starting)"
 		let health: string | undefined;
-		const healthMatch = container.Status?.match(/\((healthy|unhealthy|starting)\)/i);
+		const healthMatch = container.Status?.match(/\((healthy|unhealthy|health:\s*starting)\)/i);
 		if (healthMatch) {
-			health = healthMatch[1].toLowerCase();
+			const matched = healthMatch[1].toLowerCase();
+			// Normalize "health: starting" to just "starting"
+			health = matched.includes('starting') ? 'starting' : matched;
 		}
 
 		return {
@@ -803,6 +806,7 @@ export interface CreateContainerOptions {
 	labels?: { [key: string]: string };
 	cmd?: string[];
 	restartPolicy?: string;
+	restartMaxRetries?: number;
 	networkMode?: string;
 	networks?: string[];
 	user?: string;
@@ -831,7 +835,10 @@ export async function createContainer(options: CreateContainerOptions, envId?: n
 		Labels: options.labels || {},
 		HostConfig: {
 			RestartPolicy: {
-				Name: options.restartPolicy || 'no'
+				Name: options.restartPolicy || 'no',
+				...(options.restartPolicy === 'on-failure' && options.restartMaxRetries !== undefined
+					? { MaximumRetryCount: options.restartMaxRetries }
+					: {})
 			}
 		}
 	};
@@ -888,9 +895,9 @@ export async function createContainer(options: CreateContainerOptions, envId?: n
 	if (options.networks && options.networks.length > 0) {
 		containerConfig.HostConfig.NetworkMode = options.networks[0];
 		containerConfig.NetworkingConfig = {
-			EndpointsConfig: {
-				[options.networks[0]]: {}
-			}
+			EndpointsConfig: Object.fromEntries(
+				options.networks.map(network => [network, {}])
+			)
 		};
 	}
 
@@ -962,21 +969,6 @@ export async function createContainer(options: CreateContainerOptions, envId?: n
 		},
 		envId
 	);
-
-	// Connect to additional networks after container creation
-	if (options.networks && options.networks.length > 1) {
-		for (let i = 1; i < options.networks.length; i++) {
-			await dockerFetch(
-				`/networks/${options.networks[i]}/connect`,
-				{
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ Container: result.Id })
-				},
-				envId
-			);
-		}
-	}
 
 	return { id: result.Id, start: () => startContainer(result.Id, envId) };
 }

@@ -86,6 +86,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			tlsCa: data.tlsCa,
 			tlsCert: data.tlsCert,
 			tlsKey: data.tlsKey,
+			tlsSkipVerify: data.tlsSkipVerify || false,
 			icon: data.icon || 'globe',
 			socketPath: data.socketPath || '/var/run/docker.sock',
 			collectActivity: data.collectActivity !== false,

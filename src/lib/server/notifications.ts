@@ -27,6 +27,9 @@ async function sendSmtpNotification(config: SmtpConfig, payload: NotificationPay
 			auth: config.username ? {
 				user: config.username,
 				pass: config.password
+			} : undefined,
+			tls: config.skipTlsVerify ? {
+				rejectUnauthorized: false
 			} : undefined
 		});
 

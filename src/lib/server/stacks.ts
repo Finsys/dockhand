@@ -5,11 +5,12 @@
  * All lifecycle operations use docker compose commands.
  */
 
-import { existsSync, mkdirSync, rmSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, readdirSync, cpSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import {
 	getEnvironment,
 	getStackEnvVarsAsRecord,
+	setStackEnvVars,
 	getStackSource,
 	upsertStackSource,
 	deleteStackSource,
@@ -76,6 +77,7 @@ export interface DeployStackOptions {
 	compose: string;
 	envId?: number | null;
 	envFileVars?: Record<string, string>;
+	sourceDir?: string; // Directory to copy all files from (for git stacks)
 	forceRecreate?: boolean;
 }
 
@@ -155,6 +157,35 @@ async function withStackLock<T>(stackName: string, fn: () => Promise<T>): Promis
 // Timeout configuration for compose operations
 const COMPOSE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const COMPOSE_KILL_GRACE_MS = 5000; // 5 seconds grace period before SIGKILL
+
+/**
+ * Read all files from a directory as a map of relative path -> content.
+ * Used to send files to Hawser for remote deployments.
+ */
+async function readDirFilesAsMap(dirPath: string): Promise<Record<string, string>> {
+	const files: Record<string, string> = {};
+
+	async function scanDir(currentPath: string, relativePath: string = ''): Promise<void> {
+		const entries = readdirSync(currentPath, { withFileTypes: true });
+		for (const entry of entries) {
+			const fullPath = join(currentPath, entry.name);
+			const relPath = relativePath ? `${relativePath}/${entry.name}` : entry.name;
+
+			if (entry.isDirectory()) {
+				// Skip .git directory
+				if (entry.name === '.git') continue;
+				await scanDir(fullPath, relPath);
+			} else if (entry.isFile()) {
+				// Read file content
+				const content = await Bun.file(fullPath).text();
+				files[relPath] = content;
+			}
+		}
+	}
+
+	await scanDir(dirPath);
+	return files;
+}
 
 // =============================================================================
 // DEBUG UTILITIES
@@ -316,6 +347,7 @@ interface ComposeCommandOptions {
 	envId?: number | null;
 	forceRecreate?: boolean;
 	removeVolumes?: boolean;
+	stackFiles?: Record<string, string>; // All files to send to Hawser
 }
 
 /**
@@ -338,11 +370,14 @@ async function executeLocalCompose(
 	const composeFile = join(stackDir, 'docker-compose.yml');
 	await Bun.write(composeFile, composeContent);
 
+	// Note: .env file is written when env vars are saved via API
+	// Docker compose automatically reads .env from the stack directory
+	// We only need to pass env vars to process environment for variable substitution
+	// in case the .env file doesn't exist yet (e.g., first deploy)
 	const spawnEnv: Record<string, string> = { ...(process.env as Record<string, string>) };
 	if (dockerHost) {
 		spawnEnv.DOCKER_HOST = dockerHost;
 	}
-	// Add stack-specific environment variables
 	if (envVars) {
 		Object.assign(spawnEnv, envVars);
 	}
@@ -479,7 +514,8 @@ async function executeComposeViaHawser(
 	envId: number,
 	envVars?: Record<string, string>,
 	forceRecreate?: boolean,
-	removeVolumes?: boolean
+	removeVolumes?: boolean,
+	stackFiles?: Record<string, string>
 ): Promise<StackOperationResult> {
 	const logPrefix = `[Stack:${stackName}]`;
 	// Import dockerFetch dynamically to avoid circular dependency
@@ -497,13 +533,28 @@ async function executeComposeViaHawser(
 		console.log(`${logPrefix} Env vars being sent (masked):`, JSON.stringify(maskSecrets(envVars), null, 2));
 	}
 	console.log(`${logPrefix} Compose content length:`, composeContent.length, 'chars');
+	console.log(`${logPrefix} Stack files count:`, stackFiles ? Object.keys(stackFiles).length : 0);
+	if (stackFiles && Object.keys(stackFiles).length > 0) {
+		console.log(`${logPrefix} Stack files:`, Object.keys(stackFiles).join(', '));
+	}
 
 	try {
+		// Build files map - include .env file if envVars provided
+		const files: Record<string, string> = { ...(stackFiles || {}) };
+		if (envVars && Object.keys(envVars).length > 0) {
+			const envContent = Object.entries(envVars)
+				.map(([key, value]) => `${key}=${value}`)
+				.join('\n');
+			files['.env'] = envContent;
+			console.log(`${logPrefix} Added .env file to files map with ${Object.keys(envVars).length} variables`);
+		}
+
 		const body = JSON.stringify({
 			operation,
 			projectName: stackName,
 			composeFile: composeContent,
 			envVars: envVars || {},
+			files, // All files including .env
 			forceRecreate: forceRecreate || false,
 			removeVolumes: removeVolumes || false
 		});
@@ -567,7 +618,7 @@ async function executeComposeCommand(
 	composeContent: string,
 	envVars?: Record<string, string>
 ): Promise<StackOperationResult> {
-	const { stackName, envId, forceRecreate, removeVolumes } = options;
+	const { stackName, envId, forceRecreate, removeVolumes, stackFiles } = options;
 
 	// Get environment configuration
 	const env = envId ? await getEnvironment(envId) : null;
@@ -595,7 +646,8 @@ async function executeComposeCommand(
 				envId!,
 				envVars,
 				forceRecreate,
-				removeVolumes
+				removeVolumes,
+				stackFiles
 			);
 
 		case 'direct': {
@@ -808,7 +860,38 @@ async function requireComposeFile(
 	}
 
 	// Get environment variables from database
-	const envVars = await getStackEnvVarsAsRecord(stackName, envId);
+	const dbEnvVars = await getStackEnvVarsAsRecord(stackName, envId);
+
+	// Also read from .env file and merge (file + DB are equal sources)
+	// DB values take precedence for secrets, file values for new/changed vars
+	const stackDir = join(getStacksDir(), stackName);
+	const envFilePath = join(stackDir, '.env');
+	let fileEnvVars: Record<string, string> = {};
+
+	if (existsSync(envFilePath)) {
+		try {
+			const content = await Bun.file(envFilePath).text();
+			for (const line of content.split('\n')) {
+				const trimmed = line.trim();
+				if (!trimmed || trimmed.startsWith('#')) continue;
+				const eqIndex = trimmed.indexOf('=');
+				if (eqIndex > 0) {
+					const key = trimmed.substring(0, eqIndex).trim();
+					let value = trimmed.substring(eqIndex + 1);
+					if ((value.startsWith('"') && value.endsWith('"')) ||
+					    (value.startsWith("'") && value.endsWith("'"))) {
+						value = value.slice(1, -1);
+					}
+					fileEnvVars[key] = value;
+				}
+			}
+		} catch {
+			// Ignore file read errors
+		}
+	}
+
+	// Merge: file values as base, DB values override (DB is authoritative for managed vars)
+	const envVars = { ...fileEnvVars, ...dbEnvVars };
 
 	return { content: composeResult.content!, envVars };
 }
@@ -1018,7 +1101,7 @@ export async function removeStack(
  * Uses stack locking to prevent concurrent deployments.
  */
 export async function deployStack(options: DeployStackOptions): Promise<StackOperationResult> {
-	const { name, compose, envId, envFileVars, forceRecreate } = options;
+	const { name, compose, envId, envFileVars, sourceDir, forceRecreate } = options;
 	const logPrefix = `[Stack:${name}]`;
 
 	console.log(`${logPrefix} ========================================`);
@@ -1026,6 +1109,7 @@ export async function deployStack(options: DeployStackOptions): Promise<StackOpe
 	console.log(`${logPrefix} ========================================`);
 	console.log(`${logPrefix} Environment ID:`, envId ?? '(none - local)');
 	console.log(`${logPrefix} Force recreate:`, forceRecreate ?? false);
+	console.log(`${logPrefix} Source directory:`, sourceDir ?? '(none)');
 	console.log(`${logPrefix} Env file vars provided:`, envFileVars ? Object.keys(envFileVars).length : 0);
 	if (envFileVars && Object.keys(envFileVars).length > 0) {
 		console.log(`${logPrefix} Env file var keys:`, Object.keys(envFileVars).join(', '));
@@ -1043,14 +1127,34 @@ export async function deployStack(options: DeployStackOptions): Promise<StackOpe
 	}
 
 	return withStackLock(name, async () => {
-		// Ensure stack directory exists and write compose file (for local reference)
 		const stacksDir = getStacksDir();
 		const stackDir = join(stacksDir, name);
-		mkdirSync(stackDir, { recursive: true });
 
-		const composeFile = join(stackDir, 'docker-compose.yml');
-		await Bun.write(composeFile, compose);
-		console.log(`${logPrefix} Compose file written to:`, composeFile);
+		// Read all files from source directory if provided (for Hawser deployments)
+		let stackFiles: Record<string, string> | undefined;
+		if (sourceDir && existsSync(sourceDir)) {
+			stackFiles = await readDirFilesAsMap(sourceDir);
+			console.log(`${logPrefix} Read ${Object.keys(stackFiles).length} files from source directory`);
+			console.log(`${logPrefix} Files:`, Object.keys(stackFiles).join(', '));
+		}
+
+		// Handle stack directory setup
+		if (sourceDir && existsSync(sourceDir)) {
+			// Copy entire source directory to stack directory (for git stacks)
+			console.log(`${logPrefix} Copying source directory to stack directory...`);
+			if (existsSync(stackDir)) {
+				rmSync(stackDir, { recursive: true, force: true });
+			}
+			cpSync(sourceDir, stackDir, { recursive: true });
+			console.log(`${logPrefix} Copied ${sourceDir} -> ${stackDir}`);
+		} else {
+			// Traditional behavior: create directory and write compose file only
+			mkdirSync(stackDir, { recursive: true });
+			const composeFile = join(stackDir, 'docker-compose.yml');
+			await Bun.write(composeFile, compose);
+			console.log(`${logPrefix} Compose file written to:`, composeFile);
+		}
+
 		console.log(`${logPrefix} Compose content length:`, compose.length, 'chars');
 		console.log(`${logPrefix} Compose content (full):`);
 		console.log(compose);
@@ -1072,7 +1176,7 @@ export async function deployStack(options: DeployStackOptions): Promise<StackOpe
 		}
 
 		console.log(`${logPrefix} Calling executeComposeCommand...`);
-		const result = await executeComposeCommand('up', { stackName: name, envId, forceRecreate }, compose, envVars);
+		const result = await executeComposeCommand('up', { stackName: name, envId, forceRecreate, stackFiles }, compose, envVars);
 		console.log(`${logPrefix} ========================================`);
 		console.log(`${logPrefix} DEPLOY STACK RESULT`);
 		console.log(`${logPrefix} ========================================`);
@@ -1097,6 +1201,66 @@ export async function pullStackImages(
 	const { content, envVars } = await requireComposeFile(stackName, envId);
 
 	return executeComposeCommand('pull', { stackName, envId }, content, envVars);
+}
+
+// =============================================================================
+// ENVIRONMENT VARIABLE HELPERS
+// =============================================================================
+
+/**
+ * Save environment variables for a stack to the database (for secret tracking)
+ */
+export async function saveStackEnvVarsToDb(
+	stackName: string,
+	variables: { key: string; value: string; isSecret?: boolean }[],
+	envId?: number | null
+): Promise<void> {
+	await setStackEnvVars(stackName, envId ?? null, variables);
+}
+
+/**
+ * Write environment variables to the .env file on disk (simple key=value format)
+ *
+ * WARNING: This generates a simple key=value file WITHOUT comments or formatting.
+ * ONLY use during initial stack CREATION when no .env file exists.
+ *
+ * For EDITS, use PUT /api/stacks/[name]/env/raw which preserves the raw content
+ * including all comments, formatting, and structure.
+ */
+export async function writeStackEnvFile(
+	stackName: string,
+	variables: { key: string; value: string; isSecret?: boolean }[]
+): Promise<void> {
+	const stacksDir = getStacksDir();
+	const envFilePath = join(stacksDir, stackName, '.env');
+
+	const rawContent = variables
+		.filter(v => v.key?.trim())
+		.map(v => `${v.key.trim()}=${v.value}`)
+		.join('\n') + '\n';
+
+	await Bun.write(envFilePath, rawContent);
+}
+
+/**
+ * Save environment variables for a stack (both to database and .env file)
+ *
+ * WARNING: Only use during initial stack CREATION - this generates a simple
+ * key=value file that does NOT preserve comments or formatting.
+ *
+ * For EDITS, the StackModal saves to:
+ * - PUT /api/stacks/[name]/env/raw (preserves raw content with comments)
+ * - PUT /api/stacks/[name]/env (updates secret flags in DB only)
+ */
+export async function saveStackEnvVars(
+	stackName: string,
+	variables: { key: string; value: string; isSecret?: boolean }[],
+	envId?: number | null
+): Promise<void> {
+	// Save to database for secret tracking
+	await saveStackEnvVarsToDb(stackName, variables, envId);
+	// Write .env file to disk for Docker Compose
+	await writeStackEnvFile(stackName, variables);
 }
 
 // =============================================================================

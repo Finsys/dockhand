@@ -1,5 +1,25 @@
 [
   {
+    "version": "1.0.5",
+    "date": "2026-01-01",
+    "changes": [
+      { "type": "feature", "text": "Clicking container name opens container details" },
+      { "type": "feature", "text": "Clicking stack name opens stack editor (internal stacks)" },
+      { "type": "feature", "text": "Stack env editor now supports freestyle text entry for pasting env contents" },
+      { "type": "feature", "text": "Stack env vars saved as .env file next to compose, respecting external edits" },
+      { "type": "feature", "text": "Additional container options: ulimits, security options, DNS settings" },
+      { "type": "fix", "text": "More detailed error messages when stack fails to start" },
+      { "type": "fix", "text": "Container startup with user: directive in compose" },
+      { "type": "fix", "text": "Stack editor flickering when typing fast" },
+      { "type": "fix", "text": "Container unhealthy notifications not triggering" },
+      { "type": "fix", "text": "tlsSkipVerify not being saved in environment settings" },
+      { "type": "fix", "text": "MFA available to all users without enterprise license" },
+      { "type": "fix", "text": "Socket proxy documentation and examples" },
+      { "type": "fix", "text": "Edit container modal reloading during editing" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.5"
+  },
+  {
     "version": "1.0.4",
     "date": "2025-12-28",
     "changes": [

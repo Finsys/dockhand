@@ -3,10 +3,50 @@
 	import { EditorState, StateField, StateEffect, RangeSet } from '@codemirror/state';
 	import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, gutter, GutterMarker, Decoration, WidgetType, type DecorationSet } from '@codemirror/view';
 	import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
-	import { syntaxHighlighting, defaultHighlightStyle, indentOnInput, bracketMatching } from '@codemirror/language';
+	import { syntaxHighlighting, defaultHighlightStyle, indentOnInput, bracketMatching, StreamLanguage, type StreamParser } from '@codemirror/language';
 	import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 	import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap, type CompletionContext, type CompletionResult } from '@codemirror/autocomplete';
 	import { oneDarkHighlightStyle } from '@codemirror/theme-one-dark';
+
+	// Simple dotenv/env file language parser
+	const dotenvParser: StreamParser<{ inValue: boolean }> = {
+		startState() {
+			return { inValue: false };
+		},
+		token(stream, state) {
+			// Start of line
+			if (stream.sol()) {
+				state.inValue = false;
+				// Skip leading whitespace
+				stream.eatSpace();
+				// Comment line
+				if (stream.peek() === '#') {
+					stream.skipToEnd();
+					return 'comment';
+				}
+			}
+			// If in value part, consume the rest
+			if (state.inValue) {
+				stream.skipToEnd();
+				return 'string';
+			}
+			// Variable name before =
+			if (stream.match(/^[a-zA-Z_][a-zA-Z0-9_]*/)) {
+				if (stream.peek() === '=') {
+					return 'variableName.definition';
+				}
+				return 'variableName';
+			}
+			// Equals sign - switch to value mode
+			if (stream.eat('=')) {
+				state.inValue = true;
+				return 'operator';
+			}
+			// Skip anything else
+			stream.next();
+			return null;
+		}
+	};
 
 	// Docker Compose keywords for autocomplete
 	const COMPOSE_TOP_LEVEL = ['services', 'networks', 'volumes', 'configs', 'secrets', 'name', 'version'];
@@ -453,6 +493,9 @@
 			case 'sh':
 				// No dedicated shell/dockerfile support, use basic highlighting
 				return [];
+			case 'dotenv':
+			case 'env':
+				return StreamLanguage.define(dotenvParser);
 			default:
 				return [];
 		}
@@ -542,6 +585,13 @@
 	// Track if we're initialized (prevents multiple createEditor calls)
 	let initialized = false;
 
+	// Debounce timer for marker updates (prevents flicker during fast typing)
+	let markerUpdateTimer: ReturnType<typeof setTimeout> | null = null;
+	const MARKER_UPDATE_DEBOUNCE_MS = 300;
+
+	// Track last applied markers to avoid redundant updates
+	let lastAppliedMarkersJson = '';
+
 	function createEditor() {
 		if (!container || view || initialized) return;
 		initialized = true;
@@ -551,12 +601,14 @@
 			: [dockhandLight, syntaxHighlighting(defaultHighlightStyle)];
 
 		// Build autocompletion config - add Docker Compose completions for YAML
+		// Note: activateOnTyping can interfere with key repeat, so we disable it
+		// Users can still trigger autocomplete manually with Ctrl+Space
 		const autocompletionConfig = language === 'yaml'
 			? autocompletion({
 				override: [composeCompletions, composeValueCompletions],
-				activateOnTyping: true
+				activateOnTyping: false
 			})
-			: autocompletion();
+			: autocompletion({ activateOnTyping: false });
 
 		const extensions = [
 			lineNumbers(),
@@ -594,18 +646,25 @@
 			extensions
 		});
 
-		// Custom transaction handler - this is SYNCHRONOUS and more reliable than updateListener
+		// Custom transaction handler - applies transactions synchronously but defers callback
 		// Based on the Svelte Playground pattern: https://svelte.dev/playground/91649ba3e0ce4122b3b34f3a95a00104
 		const dispatchTransactions = (trs: readonly import('@codemirror/state').Transaction[]) => {
 			if (!view) return;
 
-			// Apply all transactions
+			// Apply all transactions synchronously (required by CodeMirror)
 			view.update(trs);
 
 			// Check if any transaction changed the document
 			const lastChangingTr = trs.findLast(tr => tr.docChanged);
 			if (lastChangingTr && onchangeRef) {
-				onchangeRef(lastChangingTr.newDoc.toString());
+				// Defer callback to next microtask to avoid blocking input handling
+				// This allows key repeat to work properly
+				const newContent = lastChangingTr.newDoc.toString();
+				queueMicrotask(() => {
+					if (onchangeRef) {
+						onchangeRef(newContent);
+					}
+				});
 			}
 		};
 
@@ -614,7 +673,6 @@
 			parent: container,
 			dispatchTransactions
 		});
-
 
 		// Push initial markers if provided
 		if (variableMarkers.length > 0) {
@@ -625,11 +683,16 @@
 	}
 
 	function destroyEditor() {
+		if (markerUpdateTimer) {
+			clearTimeout(markerUpdateTimer);
+			markerUpdateTimer = null;
+		}
 		if (view) {
 			view.destroy();
 			view = null;
 		}
 		initialized = false;
+		lastAppliedMarkersJson = '';
 	}
 
 	// Get current editor content
@@ -656,11 +719,35 @@
 	}
 
 	// Update variable markers - this is the key method for parent to call
-	export function updateVariableMarkers(markers: VariableMarker[]) {
-		if (view) {
-			view.dispatch({
-				effects: updateMarkersEffect.of(markers)
-			});
+	// Debounced to prevent flicker during fast typing
+	export function updateVariableMarkers(markers: VariableMarker[], immediate = false) {
+		if (!view) return;
+
+		// Check if markers actually changed (compare by content, not reference)
+		const newJson = JSON.stringify(markers);
+		if (newJson === lastAppliedMarkersJson) {
+			return; // No change, skip update
+		}
+
+		// Clear any pending update
+		if (markerUpdateTimer) {
+			clearTimeout(markerUpdateTimer);
+			markerUpdateTimer = null;
+		}
+
+		const applyUpdate = () => {
+			if (view) {
+				lastAppliedMarkersJson = newJson;
+				view.dispatch({
+					effects: updateMarkersEffect.of(markers)
+				});
+			}
+		};
+
+		if (immediate) {
+			applyUpdate();
+		} else {
+			markerUpdateTimer = setTimeout(applyUpdate, MARKER_UPDATE_DEBOUNCE_MS);
 		}
 	}
 
@@ -693,12 +780,11 @@
 	});
 
 	// Update markers when prop changes (backup mechanism, parent should also call updateVariableMarkers)
+	// Uses the debounced update to prevent flicker during fast typing
 	$effect(() => {
 		const markers = variableMarkers;
 		if (view && markers) {
-			view.dispatch({
-				effects: updateMarkersEffect.of(markers)
-			});
+			updateVariableMarkers(markers);
 		}
 	});
 </script>
@@ -706,7 +792,6 @@
 <div
 	bind:this={container}
 	class="h-full w-full overflow-hidden {className}"
-	onkeydown={(e) => e.stopPropagation()}
 ></div>
 
 <style>

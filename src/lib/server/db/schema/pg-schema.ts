@@ -184,7 +184,7 @@ export const users = pgTable('users', {
 	avatar: text('avatar'),
 	authProvider: text('auth_provider').default('local'), // e.g., 'local', 'oidc:Keycloak', 'ldap:AD'
 	mfaEnabled: boolean('mfa_enabled').default(false),
-	mfaSecret: text('mfa_secret'),
+	mfaSecret: text('mfa_secret'), // JSON: { secret: string, backupCodes: string[] }
 	isActive: boolean('is_active').default(true),
 	lastLogin: timestamp('last_login', { mode: 'string' }),
 	createdAt: timestamp('created_at', { mode: 'string' }).defaultNow(),

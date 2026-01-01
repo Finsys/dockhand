@@ -294,7 +294,8 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 		}
 
 		if (urlContainerId) {
-			// Single container from URL
+			// Single container from URL - always switch to single mode
+			layoutMode = 'single';
 			const container = fetchedContainers.find(c => c.id === urlContainerId || c.id.startsWith(urlContainerId));
 			if (container) {
 				selectContainer(container);

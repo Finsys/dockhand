@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { page } from '$app/stores';
 	import { toast } from 'svelte-sonner';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
@@ -671,8 +672,9 @@
 			const response = await fetch(appendEnvParam(`/api/stacks/${encodeURIComponent(name)}/start`, envId), { method: 'POST' });
 			if (!response.ok) {
 				const data = await response.json();
-				operationError = { id: name, message: data.error || 'Failed to start stack' };
-				toast.error(`Failed to start ${name}`);
+				const errorMsg = data.error || 'Failed to start stack';
+				operationError = { id: name, message: errorMsg };
+				toast.error(errorMsg);
 				clearErrorAfterDelay(name);
 				return;
 			}
@@ -680,8 +682,9 @@
 			await fetchStacks();
 		} catch (error) {
 			console.error('Failed to start stack:', error);
-			operationError = { id: name, message: 'Failed to start stack' };
-			toast.error(`Failed to start ${name}`);
+			const errorMsg = error instanceof Error ? error.message : 'Failed to start stack';
+			operationError = { id: name, message: errorMsg };
+			toast.error(errorMsg);
 			clearErrorAfterDelay(name);
 		} finally {
 			stackActionLoading = null;
@@ -695,8 +698,9 @@
 			const response = await fetch(appendEnvParam(`/api/stacks/${encodeURIComponent(name)}/stop`, envId), { method: 'POST' });
 			if (!response.ok) {
 				const data = await response.json();
-				operationError = { id: name, message: data.error || 'Failed to stop stack' };
-				toast.error(`Failed to stop ${name}`);
+				const errorMsg = data.error || 'Failed to stop stack';
+				operationError = { id: name, message: errorMsg };
+				toast.error(errorMsg);
 				clearErrorAfterDelay(name);
 				return;
 			}
@@ -704,8 +708,9 @@
 			await fetchStacks();
 		} catch (error) {
 			console.error('Failed to stop stack:', error);
-			operationError = { id: name, message: 'Failed to stop stack' };
-			toast.error(`Failed to stop ${name}`);
+			const errorMsg = error instanceof Error ? error.message : 'Failed to stop stack';
+			operationError = { id: name, message: errorMsg };
+			toast.error(errorMsg);
 			clearErrorAfterDelay(name);
 		} finally {
 			stackActionLoading = null;
@@ -719,8 +724,9 @@
 			const response = await fetch(appendEnvParam(`/api/stacks/${encodeURIComponent(name)}/restart`, envId), { method: 'POST' });
 			if (!response.ok) {
 				const data = await response.json();
-				operationError = { id: name, message: data.error || 'Failed to restart stack' };
-				toast.error(`Failed to restart ${name}`);
+				const errorMsg = data.error || 'Failed to restart stack';
+				operationError = { id: name, message: errorMsg };
+				toast.error(errorMsg);
 				clearErrorAfterDelay(name);
 				return;
 			}
@@ -728,8 +734,9 @@
 			await fetchStacks();
 		} catch (error) {
 			console.error('Failed to restart stack:', error);
-			operationError = { id: name, message: 'Failed to restart stack' };
-			toast.error(`Failed to restart ${name}`);
+			const errorMsg = error instanceof Error ? error.message : 'Failed to restart stack';
+			operationError = { id: name, message: errorMsg };
+			toast.error(errorMsg);
 			clearErrorAfterDelay(name);
 		} finally {
 			stackActionLoading = null;
@@ -743,8 +750,9 @@
 			const response = await fetch(appendEnvParam(`/api/stacks/${encodeURIComponent(name)}/down`, envId), { method: 'POST' });
 			if (!response.ok) {
 				const data = await response.json();
-				operationError = { id: name, message: data.error || 'Failed to bring down stack' };
-				toast.error(`Failed to bring down ${name}`);
+				const errorMsg = data.error || 'Failed to bring down stack';
+				operationError = { id: name, message: errorMsg };
+				toast.error(errorMsg);
 				clearErrorAfterDelay(name);
 				return;
 			}
@@ -752,8 +760,9 @@
 			await fetchStacks();
 		} catch (error) {
 			console.error('Failed to bring down stack:', error);
-			operationError = { id: name, message: 'Failed to bring down stack' };
-			toast.error(`Failed to bring down ${name}`);
+			const errorMsg = error instanceof Error ? error.message : 'Failed to bring down stack';
+			operationError = { id: name, message: errorMsg };
+			toast.error(errorMsg);
 			clearErrorAfterDelay(name);
 		} finally {
 			stackActionLoading = null;
@@ -779,8 +788,9 @@
 			const response = await fetch(appendEnvParam(`/api/stacks/${encodeURIComponent(name)}?force=true`, envId), { method: 'DELETE' });
 			if (!response.ok) {
 				const data = await response.json();
-				operationError = { id: name, message: data.error || 'Failed to remove stack' };
-				toast.error(`Failed to remove ${name}`);
+				const errorMsg = data.error || 'Failed to remove stack';
+				operationError = { id: name, message: errorMsg };
+				toast.error(errorMsg);
 				clearErrorAfterDelay(name);
 				return;
 			}
@@ -788,8 +798,9 @@
 			await fetchStacks();
 		} catch (error) {
 			console.error('Failed to remove stack:', error);
-			operationError = { id: name, message: 'Failed to remove stack' };
-			toast.error(`Failed to remove ${name}`);
+			const errorMsg = error instanceof Error ? error.message : 'Failed to remove stack';
+			operationError = { id: name, message: errorMsg };
+			toast.error(errorMsg);
 			clearErrorAfterDelay(name);
 		}
 	}
@@ -835,8 +846,9 @@
 			const response = await fetch(appendEnvParam(`/api/containers/${containerId}/start`, envId), { method: 'POST' });
 			if (!response.ok) {
 				const data = await response.json();
-				operationError = { id: containerId, message: data.error || 'Failed to start container' };
-				toast.error('Failed to start container');
+				const errorMsg = data.error || 'Failed to start container';
+				operationError = { id: containerId, message: errorMsg };
+				toast.error(errorMsg);
 				clearErrorAfterDelay(containerId);
 				return;
 			}
@@ -844,8 +856,9 @@
 			await fetchStacks();
 		} catch (error) {
 			console.error('Failed to start container:', error);
-			operationError = { id: containerId, message: 'Failed to start container' };
-			toast.error('Failed to start container');
+			const errorMsg = error instanceof Error ? error.message : 'Failed to start container';
+			operationError = { id: containerId, message: errorMsg };
+			toast.error(errorMsg);
 			clearErrorAfterDelay(containerId);
 		} finally {
 			containerActionLoading = null;
@@ -859,8 +872,9 @@
 			const response = await fetch(appendEnvParam(`/api/containers/${containerId}/stop`, envId), { method: 'POST' });
 			if (!response.ok) {
 				const data = await response.json();
-				operationError = { id: containerId, message: data.error || 'Failed to stop container' };
-				toast.error('Failed to stop container');
+				const errorMsg = data.error || 'Failed to stop container';
+				operationError = { id: containerId, message: errorMsg };
+				toast.error(errorMsg);
 				clearErrorAfterDelay(containerId);
 				return;
 			}
@@ -868,8 +882,9 @@
 			await fetchStacks();
 		} catch (error) {
 			console.error('Failed to stop container:', error);
-			operationError = { id: containerId, message: 'Failed to stop container' };
-			toast.error('Failed to stop container');
+			const errorMsg = error instanceof Error ? error.message : 'Failed to stop container';
+			operationError = { id: containerId, message: errorMsg };
+			toast.error(errorMsg);
 			clearErrorAfterDelay(containerId);
 		} finally {
 			containerActionLoading = null;
@@ -883,8 +898,9 @@
 			const response = await fetch(appendEnvParam(`/api/containers/${containerId}/restart`, envId), { method: 'POST' });
 			if (!response.ok) {
 				const data = await response.json();
-				operationError = { id: containerId, message: data.error || 'Failed to restart container' };
-				toast.error('Failed to restart container');
+				const errorMsg = data.error || 'Failed to restart container';
+				operationError = { id: containerId, message: errorMsg };
+				toast.error(errorMsg);
 				clearErrorAfterDelay(containerId);
 				return;
 			}
@@ -892,8 +908,9 @@
 			await fetchStacks();
 		} catch (error) {
 			console.error('Failed to restart container:', error);
-			operationError = { id: containerId, message: 'Failed to restart container' };
-			toast.error('Failed to restart container');
+			const errorMsg = error instanceof Error ? error.message : 'Failed to restart container';
+			operationError = { id: containerId, message: errorMsg };
+			toast.error(errorMsg);
 			clearErrorAfterDelay(containerId);
 		} finally {
 			containerActionLoading = null;
@@ -907,8 +924,9 @@
 			const response = await fetch(appendEnvParam(`/api/containers/${containerId}/pause`, envId), { method: 'POST' });
 			if (!response.ok) {
 				const data = await response.json();
-				operationError = { id: containerId, message: data.error || 'Failed to pause container' };
-				toast.error('Failed to pause container');
+				const errorMsg = data.error || 'Failed to pause container';
+				operationError = { id: containerId, message: errorMsg };
+				toast.error(errorMsg);
 				clearErrorAfterDelay(containerId);
 				return;
 			}
@@ -916,8 +934,9 @@
 			await fetchStacks();
 		} catch (error) {
 			console.error('Failed to pause container:', error);
-			operationError = { id: containerId, message: 'Failed to pause container' };
-			toast.error('Failed to pause container');
+			const errorMsg = error instanceof Error ? error.message : 'Failed to pause container';
+			operationError = { id: containerId, message: errorMsg };
+			toast.error(errorMsg);
 			clearErrorAfterDelay(containerId);
 		} finally {
 			containerActionLoading = null;
@@ -932,8 +951,9 @@
 			const response = await fetch(appendEnvParam(`/api/containers/${containerId}/unpause`, envId), { method: 'POST' });
 			if (!response.ok) {
 				const data = await response.json();
-				operationError = { id: containerId, message: data.error || 'Failed to unpause container' };
-				toast.error('Failed to unpause container');
+				const errorMsg = data.error || 'Failed to unpause container';
+				operationError = { id: containerId, message: errorMsg };
+				toast.error(errorMsg);
 				clearErrorAfterDelay(containerId);
 				return;
 			}
@@ -941,8 +961,9 @@
 			await fetchStacks();
 		} catch (error) {
 			console.error('Failed to unpause container:', error);
-			operationError = { id: containerId, message: 'Failed to unpause container' };
-			toast.error('Failed to unpause container');
+			const errorMsg = error instanceof Error ? error.message : 'Failed to unpause container';
+			operationError = { id: containerId, message: errorMsg };
+			toast.error(errorMsg);
 			clearErrorAfterDelay(containerId);
 		} finally {
 			containerActionLoading = null;
@@ -1012,6 +1033,13 @@
 	onMount(() => {
 		loadExpandedState();
 		loadStatusFilter();
+
+		// Check for search query param from URL (e.g., from container stack link)
+		const urlSearch = $page.url.searchParams.get('search');
+		if (urlSearch) {
+			searchInput = urlSearch;
+			searchQuery = urlSearch;
+		}
 
 		// Initial fetch is handled by $effect - no need to duplicate here
 
@@ -1258,7 +1286,17 @@
 			{#snippet cell(column, stack, rowState)}
 				{@const source = getStackSource(stack.name)}
 				{#if column.id === 'name'}
-					<span class="font-medium text-xs">{stack.name}</span>
+					{#if source.sourceType === 'internal'}
+						<button
+							type="button"
+							class="font-medium text-xs hover:text-primary hover:underline cursor-pointer text-left"
+							onclick={() => editStack(stack.name)}
+						>
+							{stack.name}
+						</button>
+					{:else}
+						<span class="font-medium text-xs">{stack.name}</span>
+					{/if}
 					{#if stackEnvVarCounts[stack.name]}
 						<Tooltip.Root>
 							<Tooltip.Trigger>

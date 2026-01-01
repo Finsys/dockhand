@@ -65,6 +65,7 @@ export const PUT: RequestHandler = async ({ params, request, cookies }) => {
 			tlsCa: data.tlsCa,
 			tlsCert: data.tlsCert,
 			tlsKey: data.tlsKey,
+			tlsSkipVerify: data.tlsSkipVerify,
 			icon: data.icon,
 			socketPath: data.socketPath,
 			collectActivity: data.collectActivity,

@@ -99,7 +99,7 @@
 <div class="space-y-3">
 	<!-- Variables List -->
 	<div class="space-y-3">
-		{#each variables as variable, index}
+		{#each variables as variable, index (index)}
 			{@const source = getSource(variable.key)}
 			{@const isVarRequired = isRequired(variable.key)}
 			{@const isVarOptional = isOptional(variable.key)}

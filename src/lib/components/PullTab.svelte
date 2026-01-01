@@ -46,6 +46,8 @@
 	let status = $state<PullStatus>('idle');
 	let image = $state(initialImageName);
 	let duration = $state(0);
+	// Track whether image was set from initial prop vs typed by user
+	let hasAutoStarted = $state(false);
 
 	// Notify parent of status changes
 	$effect(() => {
@@ -82,8 +84,10 @@
 		onImageChange?.(image);
 	});
 
+	// Auto-start only once for prefilled images, not when user is typing
 	$effect(() => {
-		if (autoStart && image && status === 'idle') {
+		if (autoStart && initialImageName && image === initialImageName && status === 'idle' && !hasAutoStarted) {
+			hasAutoStarted = true;
 			startPull();
 		}
 	});
@@ -133,6 +137,7 @@
 		layerOrder = 0;
 		outputLines = [];
 		duration = 0;
+		hasAutoStarted = false;
 	}
 
 	export function getImage() {

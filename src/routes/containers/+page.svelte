@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
+	import { goto } from '$app/navigation';
 	import { toast } from 'svelte-sonner';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Popover from '$lib/components/ui/popover';
@@ -1626,7 +1627,12 @@
 					{@const ports = formatPorts(container.ports)}
 					{@const stack = getComposeProject(container.labels)}
 					{#if column.id === 'name'}
-						<span class="text-xs font-medium truncate block" title={container.name}>{container.name}</span>
+						<button
+							type="button"
+							class="text-xs font-medium truncate block text-left hover:text-primary hover:underline cursor-pointer"
+							title={container.name}
+							onclick={(e) => { e.stopPropagation(); inspectContainer(container); }}
+						>{container.name}</button>
 					{:else if column.id === 'image'}
 						<div class="flex items-center gap-1.5 {$appSettings.highlightUpdates && containersWithUpdatesSet.has(container.id) ? 'update-border' : ''}">
 							{#if containersWithUpdatesSet.has(container.id)}
@@ -1765,7 +1771,13 @@
 						{/if}
 					{:else if column.id === 'stack'}
 						{#if stack}
-							<Badge variant="outline" class="text-xs py-0 px-1.5">{stack}</Badge>
+							<button
+								type="button"
+								onclick={(e) => { e.stopPropagation(); goto(appendEnvParam(`/stacks?search=${encodeURIComponent(stack)}`, envId)); }}
+								class="cursor-pointer"
+							>
+								<Badge variant="outline" class="text-xs py-0 px-1.5 hover:bg-primary/10 hover:border-primary/50 transition-colors">{stack}</Badge>
+							</button>
 						{:else}
 							<span class="text-gray-400 dark:text-gray-600 text-xs">-</span>
 						{/if}

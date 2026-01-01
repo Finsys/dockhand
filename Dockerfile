@@ -59,7 +59,7 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # Copy emergency scripts (only the emergency subfolder, not license generation scripts)
 COPY scripts/emergency/ ./scripts/
-RUN chmod +x ./scripts/*.sh 2>/dev/null || true
+RUN chmod +x ./scripts/*.sh ./scripts/**/*.sh 2>/dev/null || true
 
 # Create directories with proper ownership
 RUN mkdir -p /home/dockhand/.dockhand/stacks /app/data \

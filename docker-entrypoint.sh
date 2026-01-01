@@ -12,6 +12,60 @@ if [ "$(id -u)" = "0" ]; then
     RUNNING_AS_ROOT=true
 fi
 
+# === Non-root mode (user: directive in compose) ===
+# If container started as non-root, skip all user management and run directly
+if [ "$RUNNING_AS_ROOT" = "false" ]; then
+    echo "Running as user $(id -u):$(id -g) (set via container user directive)"
+
+    # Ensure data directories exist (user must have write access to DATA_DIR via volume mount)
+    DATA_DIR="${DATA_DIR:-/app/data}"
+    if [ ! -d "$DATA_DIR/db" ]; then
+        echo "Creating database directory at $DATA_DIR/db"
+        mkdir -p "$DATA_DIR/db" 2>/dev/null || {
+            echo "ERROR: Cannot create $DATA_DIR/db directory"
+            echo "Ensure the data volume is mounted with correct permissions for user $(id -u):$(id -g)"
+            echo ""
+            echo "Example docker-compose.yml:"
+            echo "  volumes:"
+            echo "    - ./data:/app/data  # This directory must be writable by user $(id -u)"
+            exit 1
+        }
+    fi
+    if [ ! -d "$DATA_DIR/stacks" ]; then
+        mkdir -p "$DATA_DIR/stacks" 2>/dev/null || true
+    fi
+
+    # Check Docker socket access if mounted
+    SOCKET_PATH="/var/run/docker.sock"
+    if [ -S "$SOCKET_PATH" ]; then
+        if test -r "$SOCKET_PATH" 2>/dev/null; then
+            echo "Docker socket accessible at $SOCKET_PATH"
+            # Detect hostname from Docker if not set
+            if [ -z "$DOCKHAND_HOSTNAME" ]; then
+                DETECTED_HOSTNAME=$(curl -s --unix-socket "$SOCKET_PATH" http://localhost/info 2>/dev/null | sed -n 's/.*"Name":"\([^"]*\)".*/\1/p')
+                if [ -n "$DETECTED_HOSTNAME" ]; then
+                    export DOCKHAND_HOSTNAME="$DETECTED_HOSTNAME"
+                    echo "Detected Docker host hostname: $DOCKHAND_HOSTNAME"
+                fi
+            fi
+        else
+            SOCKET_GID=$(stat -c '%g' "$SOCKET_PATH" 2>/dev/null || echo "unknown")
+            echo "WARNING: Docker socket not readable by user $(id -u)"
+            echo "Add --group-add $SOCKET_GID to your docker run command"
+        fi
+    else
+        echo "No Docker socket found at $SOCKET_PATH"
+        echo "Configure Docker environments via the web UI (Settings > Environments)"
+    fi
+
+    # Run directly as current user (no su-exec needed)
+    if [ "$1" = "" ]; then
+        exec bun run ./build/index.js
+    else
+        exec "$@"
+    fi
+fi
+
 # === User Setup ===
 # Root mode: PUID=0 requested OR already running as root with default PUID/PGID
 if [ "$PUID" = "0" ]; then

@@ -45,6 +45,7 @@
 	let formSmtpHost = $state('');
 	let formSmtpPort = $state(587);
 	let formSmtpSecure = $state(false);
+	let formSmtpSkipTlsVerify = $state(false);
 	let formSmtpUsername = $state('');
 	let formSmtpPassword = $state('');
 	let formSmtpFromEmail = $state('');
@@ -68,6 +69,7 @@
 		formSmtpHost = '';
 		formSmtpPort = 587;
 		formSmtpSecure = false;
+		formSmtpSkipTlsVerify = false;
 		formSmtpUsername = '';
 		formSmtpPassword = '';
 		formSmtpFromEmail = '';
@@ -98,6 +100,7 @@
 					formSmtpHost = notification.config.host || '';
 					formSmtpPort = notification.config.port || 587;
 					formSmtpSecure = notification.config.secure || false;
+					formSmtpSkipTlsVerify = notification.config.skipTlsVerify || false;
 					formSmtpUsername = notification.config.username || '';
 					formSmtpPassword = '';
 					formSmtpFromEmail = notification.config.from_email || '';
@@ -133,6 +136,7 @@
 				host: formSmtpHost.trim(),
 				port: formSmtpPort,
 				secure: formSmtpSecure,
+				skipTlsVerify: formSmtpSkipTlsVerify || undefined,
 				username: formSmtpUsername.trim() || undefined,
 				password: formSmtpPassword || undefined,
 				from_email: formSmtpFromEmail.trim(),
@@ -350,9 +354,15 @@
 							<Input id="notif-smtp-port" type="number" bind:value={formSmtpPort} />
 						</div>
 					</div>
-					<div class="flex items-center gap-2">
-						<Label>TLS/SSL</Label>
-						<TogglePill bind:checked={formSmtpSecure} onLabel="Yes" offLabel="No" />
+					<div class="flex items-center gap-4">
+						<div class="flex items-center gap-2">
+							<Label>TLS/SSL</Label>
+							<TogglePill bind:checked={formSmtpSecure} onLabel="Yes" offLabel="No" />
+						</div>
+						<div class="flex items-center gap-2">
+							<Label class="text-muted-foreground">Skip TLS verify</Label>
+							<TogglePill bind:checked={formSmtpSkipTlsVerify} onLabel="Yes" offLabel="No" />
+						</div>
 					</div>
 					<div class="grid grid-cols-2 gap-4">
 						<div class="space-y-2">

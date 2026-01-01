@@ -156,6 +156,7 @@ export async function updateEnvironment(id: number, env: Partial<Environment>): 
 	if (env.tlsCa !== undefined) updateData.tlsCa = env.tlsCa;
 	if (env.tlsCert !== undefined) updateData.tlsCert = env.tlsCert;
 	if (env.tlsKey !== undefined) updateData.tlsKey = env.tlsKey;
+	if (env.tlsSkipVerify !== undefined) updateData.tlsSkipVerify = env.tlsSkipVerify;
 	if (env.icon !== undefined) updateData.icon = env.icon;
 	if (env.socketPath !== undefined) updateData.socketPath = env.socketPath;
 	if (env.collectActivity !== undefined) updateData.collectActivity = env.collectActivity;
@@ -808,6 +809,7 @@ export interface SmtpConfig {
 	from_email: string;
 	from_name?: string;
 	to_emails: string[];
+	skipTlsVerify?: boolean; // Skip TLS certificate verification (useful for self-signed certs)
 }
 
 export interface AppriseConfig {

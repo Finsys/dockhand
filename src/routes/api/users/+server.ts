@@ -128,9 +128,15 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 		}, { status: 201 });
 	} catch (error: any) {
 		console.error('Failed to create user:', error);
-		if (error.message?.includes('UNIQUE constraint failed')) {
+		console.error('Error details:', {
+			message: error.message,
+			code: error.code,
+			name: error.name,
+			stack: error.stack
+		});
+		if (error.message?.includes('UNIQUE constraint failed') || error.code === '23505') {
 			return json({ error: 'Username already exists' }, { status: 409 });
 		}
-		return json({ error: 'Failed to create user' }, { status: 500 });
+		return json({ error: 'Failed to create user', details: error.message }, { status: 500 });
 	}
 };

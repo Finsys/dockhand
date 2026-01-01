@@ -1,5 +1,5 @@
 import { json } from '@sveltejs/kit';
-import { listComposeStacks, deployStack, saveStackComposeFile } from '$lib/server/stacks';
+import { listComposeStacks, deployStack, saveStackComposeFile, saveStackEnvVars } from '$lib/server/stacks';
 import { EnvironmentNotFoundError } from '$lib/server/docker';
 import { upsertStackSource, getStackSources } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
@@ -78,7 +78,7 @@ export const POST: RequestHandler = async ({ request, url, cookies }) => {
 
 	try {
 		const body = await request.json();
-		const { name, compose, start } = body;
+		const { name, compose, start, envVars } = body;
 
 		if (!name || typeof name !== 'string') {
 			return json({ error: 'Stack name is required' }, { status: 400 });
@@ -95,6 +95,11 @@ export const POST: RequestHandler = async ({ request, url, cookies }) => {
 				return json({ error: result.error }, { status: 400 });
 			}
 
+			// Save environment variables if provided (to both DB and .env file)
+			if (envVars && Array.isArray(envVars) && envVars.length > 0) {
+				await saveStackEnvVars(name, envVars, envIdNum);
+			}
+
 			// Record the stack as internally created
 			await upsertStackSource({
 				stackName: name,
@@ -103,6 +108,14 @@ export const POST: RequestHandler = async ({ request, url, cookies }) => {
 			});
 
 			return json({ success: true, started: false });
+		}
+
+		// Save environment variables BEFORE deploying so they're available during start
+		if (envVars && Array.isArray(envVars) && envVars.length > 0) {
+			// First ensure the stack directory exists by saving compose file
+			await saveStackComposeFile(name, compose, true);
+			// Save to both DB and .env file
+			await saveStackEnvVars(name, envVars, envIdNum);
 		}
 
 		// Deploy and start the stack

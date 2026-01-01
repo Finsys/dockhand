@@ -270,17 +270,14 @@
 							<Input
 								id="mfaToken"
 								type="text"
-								placeholder="Enter 6-digit code"
+								placeholder="Enter code"
 								bind:value={mfaToken}
 								required
 								disabled={loading}
 								autocomplete="one-time-code"
-								inputmode="numeric"
-								pattern="[0-9]*"
-								maxlength={6}
 							/>
 							<p class="text-xs text-muted-foreground">
-								Enter the code from your authenticator app
+								Enter the 6-digit code from your authenticator app, or use a backup code
 							</p>
 						</div>
 					{/if}

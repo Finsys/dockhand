@@ -1,9 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from '@sveltejs/kit';
-import { isEnterprise } from '$lib/server/license';
 import {
 	validateSession,
-	checkPermission,
 	generateMfaSetup,
 	verifyAndEnableMfa,
 	disableMfa
@@ -11,11 +9,6 @@ import {
 
 // POST /api/users/[id]/mfa - Setup MFA (generate QR code)
 export const POST: RequestHandler = async ({ params, request, cookies }) => {
-	// Check enterprise license
-	if (!(await isEnterprise())) {
-		return json({ error: 'Enterprise license required' }, { status: 403 });
-	}
-
 	const currentUser = await validateSession(cookies);
 
 	if (!params.id) {
@@ -38,12 +31,16 @@ export const POST: RequestHandler = async ({ params, request, cookies }) => {
 				return json({ error: 'MFA token is required' }, { status: 400 });
 			}
 
-			const success = await verifyAndEnableMfa(userId, body.token);
-			if (!success) {
+			const result = await verifyAndEnableMfa(userId, body.token);
+			if (!result.success) {
 				return json({ error: 'Invalid MFA code' }, { status: 400 });
 			}
 
-			return json({ success: true, message: 'MFA enabled successfully' });
+			return json({
+				success: true,
+				message: 'MFA enabled successfully',
+				backupCodes: result.backupCodes
+			});
 		}
 
 		// Generate new MFA setup
@@ -64,11 +61,6 @@ export const POST: RequestHandler = async ({ params, request, cookies }) => {
 
 // DELETE /api/users/[id]/mfa - Disable MFA
 export const DELETE: RequestHandler = async ({ params, cookies }) => {
-	// Check enterprise license
-	if (!(await isEnterprise())) {
-		return json({ error: 'Enterprise license required' }, { status: 403 });
-	}
-
 	const currentUser = await validateSession(cookies);
 
 	if (!params.id) {
