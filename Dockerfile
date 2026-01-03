@@ -6,6 +6,9 @@
 # - Full transparency (no dependency on pre-built Chainguard images)
 # - Reproducible builds from open-source Wolfi packages
 # - Minimal attack surface with only required packages
+#
+# Bun is copied from the official oven/bun image (app-builder stage) to ensure
+# compatibility with all x86_64 CPUs (including those without AVX2 like Celeron).
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -15,13 +18,14 @@
 # to build our custom Wolfi OS from scratch using open-source packages.
 FROM alpine:3.21 AS os-builder
 
+ARG TARGETARCH
+
 WORKDIR /work
 
 # Install apko tool (latest stable release)
 # apko is the tool Chainguard uses to build their images - we use it directly
 ARG APKO_VERSION=0.30.34
-ARG TARGETARCH
-RUN apk add --no-cache curl \
+RUN apk add --no-cache curl unzip \
     && ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "arm64" || echo "amd64") \
     && curl -sL "https://github.com/chainguard-dev/apko/releases/download/v${APKO_VERSION}/apko_${APKO_VERSION}_linux_${ARCH}.tar.gz" \
        | tar -xz --strip-components=1 -C /usr/local/bin \
@@ -29,6 +33,7 @@ RUN apk add --no-cache curl \
 
 # Generate apko.yaml for current target architecture only
 # We build single-arch to avoid multi-arch layer confusion in extraction
+# Note: Bun is NOT included here - it's copied from app-builder stage for CPU compatibility
 RUN APKO_ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "aarch64" || echo "x86_64") \
     && printf '%s\n' \
     "contents:" \
@@ -41,7 +46,6 @@ RUN APKO_ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "aarch64" || echo "x86_64") 
     "    - ca-certificates" \
     "    - busybox" \
     "    - tzdata" \
-    "    - bun" \
     "    - docker-cli" \
     "    - docker-compose" \
     "    - sqlite" \
@@ -98,6 +102,10 @@ FROM scratch
 
 # Install our custom-built Wolfi OS (now we have /bin/sh!)
 COPY --from=os-builder /work/rootfs/ /
+
+# Copy Bun from official image - ensures compatibility with all x86_64 CPUs (no AVX2 requirement)
+# Wolfi's bun package requires AVX2 which breaks on Celeron/Atom CPUs
+COPY --from=app-builder /usr/local/bin/bun /usr/bin/bun
 
 WORKDIR /app
 

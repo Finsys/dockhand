@@ -7,13 +7,16 @@
 	import CodeEditor, { type VariableMarker } from '$lib/components/CodeEditor.svelte';
 	import StackEnvVarsPanel from '$lib/components/StackEnvVarsPanel.svelte';
 	import { type EnvVar, type ValidationResult } from '$lib/components/StackEnvVarsEditor.svelte';
-	import { Layers, Save, Play, Code, GitGraph, Loader2, AlertCircle, X, Sun, Moon, TriangleAlert, ChevronsLeft, ChevronsRight, Variable, HelpCircle, GripVertical, FolderOpen, Copy, Check } from 'lucide-svelte';
-	import * as Tooltip from '$lib/components/ui/tooltip';
+	import { Layers, Save, Play, Code, GitGraph, Loader2, AlertCircle, X, Sun, Moon, TriangleAlert, GripVertical, FolderOpen, Copy, Check } from 'lucide-svelte';
 	import { currentEnvironment, appendEnvParam } from '$lib/stores/environment';
 	import { focusFirstInput } from '$lib/utils';
 	import * as Alert from '$lib/components/ui/alert';
 	import { ErrorDialog } from '$lib/components/ui/error-dialog';
 	import ComposeGraphViewer from './ComposeGraphViewer.svelte';
+	import { useSidebar } from '$lib/components/ui/sidebar/context.svelte';
+
+	// Get sidebar state to adjust modal positioning
+	const sidebar = useSidebar();
 
 	// localStorage key for persisted split ratio
 	const STORAGE_KEY_SPLIT = 'dockhand-stack-modal-split';
@@ -596,7 +599,7 @@ services:
 	}}
 >
 	<Dialog.Content
-		class="max-w-none w-[calc(100vw-12rem)] h-[95vh] ml-[4.5rem] flex flex-col p-0 gap-0 shadow-xl border-zinc-200 dark:border-zinc-700"
+		class="max-w-none h-[95vh] flex flex-col p-0 gap-0 shadow-xl border-zinc-200 dark:border-zinc-700 {sidebar.state === 'collapsed' ? 'w-[calc(100vw-6rem)] ml-[1.5rem]' : 'w-[calc(100vw-12rem)] ml-[4.5rem]'}"
 		showCloseButton={false}
 	>
 		<Dialog.Header class="px-5 py-3 border-b border-zinc-200 dark:border-zinc-700 flex-shrink-0">
@@ -767,56 +770,16 @@ services:
 						</div>
 						<!-- Environment variables panel -->
 						<div class="flex-1 min-w-0 flex flex-col overflow-hidden bg-zinc-50 dark:bg-zinc-800/50">
-							<div class="flex items-center gap-1.5 px-3 py-1.5 border-b border-zinc-200 dark:border-zinc-700 text-xs font-medium text-zinc-600 dark:text-zinc-300">
-								<Variable class="w-3.5 h-3.5" />
-								Environment variables
-								<Tooltip.Root>
-									<Tooltip.Trigger>
-										<HelpCircle class="w-3.5 h-3.5 text-muted-foreground cursor-help" />
-									</Tooltip.Trigger>
-									<Tooltip.Content>
-										<div class="w-64">
-											<p class="text-xs">These variables will be written to a <code class="bg-muted px-1 rounded">.env</code> file in the stack directory.</p>
-										</div>
-									</Tooltip.Content>
-								</Tooltip.Root>
-								<!-- Validation status pills -->
-								{#if envValidation}
-									<div class="flex gap-1 ml-auto">
-										{#if envValidation.missing.length > 0}
-											<span class="inline-flex items-center px-1.5 py-0.5 rounded text-2xs font-medium bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300">
-												{envValidation.missing.length} missing
-											</span>
-										{/if}
-										{#if envValidation.required.length > 0}
-											<span class="inline-flex items-center px-1.5 py-0.5 rounded text-2xs font-medium bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300">
-												{envValidation.required.length - envValidation.missing.length} required
-											</span>
-										{/if}
-										{#if envValidation.optional.length > 0}
-											<span class="inline-flex items-center px-1.5 py-0.5 rounded text-2xs font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
-												{envValidation.optional.length} optional
-											</span>
-										{/if}
-										{#if envValidation.unused.length > 0}
-											<span class="inline-flex items-center px-1.5 py-0.5 rounded text-2xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
-												{envValidation.unused.length} unused
-											</span>
-										{/if}
-									</div>
-								{/if}
-							</div>
-							<div class="flex-1 min-h-0 overflow-hidden">
-								<StackEnvVarsPanel
-									bind:this={envVarsPanelRef}
-									bind:variables={envVars}
-									bind:rawContent={rawEnvContent}
-									validation={envValidation}
-									existingSecretKeys={mode === 'edit' ? existingSecretKeys : new Set()}
-									onchange={() => { markDirty(); debouncedValidate(); }}
-									theme={editorTheme}
-								/>
-							</div>
+							<StackEnvVarsPanel
+								bind:this={envVarsPanelRef}
+								bind:variables={envVars}
+								bind:rawContent={rawEnvContent}
+								validation={envValidation}
+								existingSecretKeys={mode === 'edit' ? existingSecretKeys : new Set()}
+								onchange={() => { markDirty(); debouncedValidate(); }}
+								theme={editorTheme}
+								infoText="These variables will be written to a .env file in the stack directory."
+							/>
 						</div>
 					{:else if activeTab === 'graph'}
 						<!-- Graph tab: Full width -->

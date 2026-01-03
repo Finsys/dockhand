@@ -287,46 +287,68 @@
 <div class="flex flex-col h-full {className}">
 	<!-- Header -->
 	<div class="px-4 py-2.5 border-b border-zinc-200 dark:border-zinc-700 flex flex-col gap-1.5">
-		<div class="flex items-center justify-between gap-2">
-			<div class="flex items-center gap-2 flex-nowrap min-w-0">
-				<span class="text-xs text-zinc-500 dark:text-zinc-400">Environment variables</span>
-				{#if infoText}
-					<Tooltip.Root>
-						<Tooltip.Trigger>
-							<Info class="w-3.5 h-3.5 text-blue-400" />
-						</Tooltip.Trigger>
-						<Tooltip.Portal>
-							<Tooltip.Content side="bottom" sideOffset={8} class="max-w-xs w-64 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700">
-								<p class="text-xs text-left">{infoText}</p>
-							</Tooltip.Content>
-						</Tooltip.Portal>
-					</Tooltip.Root>
-				{/if}
-				<!-- View mode toggle -->
-				<div class="flex items-center gap-0.5 bg-zinc-100 dark:bg-zinc-800 rounded p-0.5 ml-1">
-					<button
-						type="button"
-						class="flex items-center gap-1 px-1.5 py-0.5 rounded text-2xs transition-colors {viewMode === 'form' ? 'bg-white dark:bg-zinc-700 text-zinc-800 dark:text-zinc-100 shadow-sm' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200'}"
-						onclick={() => handleViewModeChange('form')}
-						title="Form view"
-					>
-						<List class="w-3 h-3" />
-					</button>
-					<button
-						type="button"
-						class="flex items-center gap-1 px-1.5 py-0.5 rounded text-2xs transition-colors {viewMode === 'text' ? 'bg-white dark:bg-zinc-700 text-zinc-800 dark:text-zinc-100 shadow-sm' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200'}"
-						onclick={() => handleViewModeChange('text')}
-						title="Text view (raw .env file)"
-					>
-						<FileText class="w-3 h-3" />
-					</button>
-				</div>
+		<!-- Header row: title + info + view toggle + validation pills + actions -->
+		<div class="flex items-center gap-2 justify-between">
+			<div class="flex items-center gap-2 flex-wrap min-w-0">
+				<span class="text-xs text-zinc-500 dark:text-zinc-400 shrink-0">Environment variables</span>
+			{#if infoText}
+				<Tooltip.Root>
+					<Tooltip.Trigger>
+						<Info class="w-3.5 h-3.5 text-blue-400 shrink-0" />
+					</Tooltip.Trigger>
+					<Tooltip.Portal>
+						<Tooltip.Content side="bottom" sideOffset={8} class="max-w-xs w-64 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700">
+							<p class="text-xs text-left">{infoText}</p>
+						</Tooltip.Content>
+					</Tooltip.Portal>
+				</Tooltip.Root>
+			{/if}
+			<!-- View mode toggle -->
+			<div class="flex items-center gap-0.5 bg-zinc-100 dark:bg-zinc-800 rounded p-0.5 shrink-0">
+				<button
+					type="button"
+					class="flex items-center gap-1 px-1.5 py-0.5 rounded text-2xs transition-colors {viewMode === 'form' ? 'bg-white dark:bg-zinc-700 text-zinc-800 dark:text-zinc-100 shadow-sm' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200'}"
+					onclick={() => handleViewModeChange('form')}
+					title="Form view"
+				>
+					<List class="w-3 h-3" />
+				</button>
+				<button
+					type="button"
+					class="flex items-center gap-1 px-1.5 py-0.5 rounded text-2xs transition-colors {viewMode === 'text' ? 'bg-white dark:bg-zinc-700 text-zinc-800 dark:text-zinc-100 shadow-sm' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200'}"
+					onclick={() => handleViewModeChange('text')}
+					title="Text view (raw .env file)"
+				>
+					<FileText class="w-3 h-3" />
+				</button>
 			</div>
+			<!-- Validation status pills -->
+			{#if validation}
+				<div class="flex gap-1 flex-wrap">
+					{#if validation.missing.length > 0}
+						<span class="inline-flex items-center px-1.5 py-0.5 rounded text-2xs font-medium bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300">
+							{validation.missing.length} missing
+						</span>
+					{/if}
+					{#if validation.required.length > 0}
+						<span class="inline-flex items-center px-1.5 py-0.5 rounded text-2xs font-medium bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300">
+							{validation.required.length - validation.missing.length} defined
+						</span>
+					{/if}
+					{#if validation.optional.length > 0}
+						<span class="inline-flex items-center px-1.5 py-0.5 rounded text-2xs font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+							{validation.optional.length} optional
+						</span>
+					{/if}
+				</div>
+			{/if}
+			</div>
+			<!-- Actions - right-aligned -->
 			{#if !readonly}
-				<div class="flex items-center gap-1 shrink-0 ml-4">
+				<div class="flex items-center gap-1 shrink-0">
 					<Button type="button" size="sm" variant="ghost" onclick={handleLoadFromFile} class="h-6 text-xs px-2">
 						<Upload class="w-3.5 h-3.5 mr-1" />
-						Load .env
+						Load
 					</Button>
 					{#if viewMode === 'form'}
 						<Button type="button" size="sm" variant="ghost" onclick={addEnvVariable} class="h-6 text-xs px-2">
@@ -334,24 +356,28 @@
 							Add
 						</Button>
 					{/if}
-					<div class="{hasContent ? '' : 'invisible'}">
-						<ConfirmPopover
-							bind:open={confirmClearOpen}
-							title="Clear all variables?"
-							action="clear"
-							itemType="environment variables"
-							confirmText="Clear all"
-							onConfirm={clearAll}
-							onOpenChange={(o) => confirmClearOpen = o}
-						>
-							{#snippet children({ open })}
-								<Button type="button" size="sm" variant="ghost" class="h-6 text-xs px-2 text-destructive hover:text-destructive">
-									<Trash2 class="w-3.5 h-3.5 mr-1" />
-									Clear
-								</Button>
-							{/snippet}
-						</ConfirmPopover>
-					</div>
+					<ConfirmPopover
+						bind:open={confirmClearOpen}
+						title="Clear all variables?"
+						action="clear"
+						itemType="environment variables"
+						confirmText="Clear all"
+						onConfirm={clearAll}
+						onOpenChange={(o) => confirmClearOpen = o}
+					>
+						{#snippet children({ open })}
+							<Button
+								type="button"
+								size="sm"
+								variant="ghost"
+								class="h-6 text-xs px-2 {hasContent ? 'text-destructive hover:text-destructive' : 'text-muted-foreground/50 cursor-not-allowed'}"
+								disabled={!hasContent}
+							>
+								<Trash2 class="w-3.5 h-3.5 mr-1" />
+								Clear
+							</Button>
+						{/snippet}
+					</ConfirmPopover>
 				</div>
 				<input
 					bind:this={fileInputRef}

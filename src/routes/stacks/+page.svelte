@@ -1270,10 +1270,7 @@
 				sortDirection = state.direction;
 			}}
 			onRowClick={(stack, e) => {
-				const hasContainers = stack.containers && stack.containers.length > 0;
-				if (hasContainers) {
-					toggleExpand(stack.name);
-				}
+				toggleExpand(stack.name);
 			}}
 			rowClass={(stack) => {
 				const isExp = expandedStacks.has(stack.name);
@@ -1902,6 +1899,13 @@
 									</div>
 								</div>
 							{/each}
+						</div>
+					</div>
+				{:else}
+					<div class="p-4 pl-12 shadow-inner bg-muted/30">
+						<div class="flex items-center justify-center gap-2 py-4 text-muted-foreground text-sm">
+							<Box class="w-4 h-4" />
+							<span>No containers</span>
 						</div>
 					</div>
 				{/if}

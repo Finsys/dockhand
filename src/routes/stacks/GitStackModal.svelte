@@ -1,17 +1,25 @@
 <script lang="ts">
+	import { onMount, onDestroy } from 'svelte';
 	import { Button } from '$lib/components/ui/button';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Select from '$lib/components/ui/select';
 	import { Label } from '$lib/components/ui/label';
 	import { Input } from '$lib/components/ui/input';
 	import { TogglePill } from '$lib/components/ui/toggle-pill';
-	import { Loader2, GitBranch, RefreshCw, Webhook, Rocket, RefreshCcw, Copy, Check, FolderGit2, Github, Key, KeyRound, Lock, FileText, HelpCircle } from 'lucide-svelte';
+	import { Loader2, GitBranch, RefreshCw, Webhook, Rocket, RefreshCcw, Copy, Check, FolderGit2, Github, Key, KeyRound, Lock, FileText, HelpCircle, GripVertical, X } from 'lucide-svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import CronEditor from '$lib/components/cron-editor.svelte';
 	import StackEnvVarsPanel from '$lib/components/StackEnvVarsPanel.svelte';
 	import { type EnvVar, type ValidationResult } from '$lib/components/StackEnvVarsEditor.svelte';
 	import { toast } from 'svelte-sonner';
 	import { focusFirstInput } from '$lib/utils';
+	import { useSidebar } from '$lib/components/ui/sidebar/context.svelte';
+
+	// Get sidebar state to adjust modal positioning
+	const sidebar = useSidebar();
+
+	// localStorage key for persisted split ratio
+	const STORAGE_KEY_SPLIT = 'dockhand-git-stack-modal-split';
 
 	interface GitCredential {
 		id: number;
@@ -92,6 +100,11 @@
 	let loadingFileVars = $state(false);
 	let existingSecretKeys = $state<Set<string>>(new Set());
 
+	// Resizable split panel state
+	let splitRatio = $state(60); // percentage for form panel
+	let isDraggingSplit = $state(false);
+	let containerRef: HTMLDivElement | null = $state(null);
+
 	// Derived state for merged variables and sources
 	const envVarSources = $derived<Record<string, 'file' | 'override'>>(() => {
 		const sources: Record<string, 'file' | 'override'> = {};
@@ -123,6 +136,48 @@
 
 	// Derived state for selected repository
 	let selectedRepo = $derived(formRepositoryId ? repositories.find(r => r.id === formRepositoryId) : null);
+
+	onMount(() => {
+		// Load saved split ratio
+		const savedSplit = localStorage.getItem(STORAGE_KEY_SPLIT);
+		if (savedSplit) {
+			const ratio = parseFloat(savedSplit);
+			if (!isNaN(ratio) && ratio >= 30 && ratio <= 80) {
+				splitRatio = ratio;
+			}
+		}
+
+		// Add global mouse event listeners for split dragging
+		window.addEventListener('mousemove', handleMouseMove);
+		window.addEventListener('mouseup', handleMouseUp);
+	});
+
+	onDestroy(() => {
+		window.removeEventListener('mousemove', handleMouseMove);
+		window.removeEventListener('mouseup', handleMouseUp);
+	});
+
+	// Split panel drag handlers
+	function startSplitDrag(e: MouseEvent) {
+		e.preventDefault();
+		isDraggingSplit = true;
+	}
+
+	function handleMouseMove(e: MouseEvent) {
+		if (isDraggingSplit && containerRef) {
+			const rect = containerRef.getBoundingClientRect();
+			const newRatio = ((e.clientX - rect.left) / rect.width) * 100;
+			splitRatio = Math.max(30, Math.min(80, newRatio));
+		}
+	}
+
+	function handleMouseUp() {
+		if (isDraggingSplit) {
+			isDraggingSplit = false;
+			// Save split ratio
+			localStorage.setItem(STORAGE_KEY_SPLIT, splitRatio.toString());
+		}
+	}
 
 	function generateWebhookSecret(): string {
 		const array = new Uint8Array(24);
@@ -388,20 +443,40 @@
 </script>
 
 <Dialog.Root bind:open onOpenChange={(isOpen) => { if (isOpen) focusFirstInput(); }}>
-	<Dialog.Content class="max-w-6xl max-h-[90vh] flex flex-col overflow-hidden p-0">
-		<Dialog.Header class="shrink-0 px-6 pt-6 pb-4 border-b">
-			<Dialog.Title class="flex items-center gap-2">
-				<GitBranch class="w-5 h-5" />
-				{gitStack ? 'Edit git stack' : 'Deploy from Git'}
-			</Dialog.Title>
-			<Dialog.Description>
-				{gitStack ? 'Update git stack settings' : 'Deploy a compose stack from a Git repository'}
-			</Dialog.Description>
+	<Dialog.Content
+		class="max-w-none h-[95vh] flex flex-col p-0 gap-0 shadow-xl border-zinc-200 dark:border-zinc-700 {sidebar.state === 'collapsed' ? 'w-[calc(100vw-6rem)] ml-[1.5rem]' : 'w-[calc(100vw-12rem)] ml-[4.5rem]'}"
+		showCloseButton={false}
+	>
+		<Dialog.Header class="px-5 py-3 border-b border-zinc-200 dark:border-zinc-700 flex-shrink-0">
+			<div class="flex items-center justify-between">
+				<div class="flex items-center gap-3">
+					<div class="p-1.5 rounded-md bg-zinc-200 dark:bg-zinc-700">
+						<GitBranch class="w-4 h-4 text-zinc-600 dark:text-zinc-300" />
+					</div>
+					<div>
+						<Dialog.Title class="text-sm font-semibold text-zinc-800 dark:text-zinc-100">
+							{gitStack ? 'Edit git stack' : 'Deploy from Git'}
+						</Dialog.Title>
+						<Dialog.Description class="text-xs text-zinc-500 dark:text-zinc-400">
+							{gitStack ? 'Update git stack settings' : 'Deploy a compose stack from a Git repository'}
+						</Dialog.Description>
+					</div>
+				</div>
+
+				<!-- Close button -->
+				<button
+					onclick={onClose}
+					class="p-1.5 rounded-md text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+				>
+					<X class="w-4 h-4" />
+				</button>
+			</div>
 		</Dialog.Header>
 
-		<div class="flex-1 flex overflow-hidden">
+		<div bind:this={containerRef} class="flex-1 min-h-0 flex {isDraggingSplit ? 'select-none' : ''}">
 			<!-- Left column: Form fields -->
-			<div class="flex-1 overflow-y-auto space-y-4 py-4 px-6 border-r border-zinc-200 dark:border-zinc-700">
+			<div class="flex-shrink-0 flex flex-col min-w-0 overflow-y-auto" style="width: {splitRatio}%">
+				<div class="space-y-4 py-4 px-6">
 			<!-- Repository selection -->
 			{#if !gitStack}
 				<div class="space-y-3">
@@ -774,10 +849,24 @@
 			{#if formError}
 				<p class="text-sm text-destructive">{formError}</p>
 			{/if}
+				</div>
+			</div>
+
+			<!-- Resizable divider -->
+			<div
+				class="w-1 flex-shrink-0 bg-zinc-200 dark:bg-zinc-700 hover:bg-blue-400 dark:hover:bg-blue-500 cursor-col-resize transition-colors flex items-center justify-center group {isDraggingSplit ? 'bg-blue-500 dark:bg-blue-400' : ''}"
+				onmousedown={startSplitDrag}
+				role="separator"
+				aria-orientation="vertical"
+				tabindex="0"
+			>
+				<div class="w-4 h-8 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity {isDraggingSplit ? 'opacity-100' : ''}">
+					<GripVertical class="w-3 h-3 text-white" />
+				</div>
 			</div>
 
 			<!-- Right column: Environment Variables -->
-			<div class="w-[380px] flex-shrink-0 flex flex-col bg-zinc-50 dark:bg-zinc-800/50">
+			<div class="flex-1 min-w-0 flex flex-col overflow-hidden bg-zinc-50 dark:bg-zinc-800/50">
 				<StackEnvVarsPanel
 					bind:variables={envVars}
 					showSource={!!formEnvFilePath && gitStack !== null}
@@ -789,7 +878,7 @@
 			</div>
 		</div>
 
-		<Dialog.Footer class="shrink-0 border-t px-6 py-4">
+		<Dialog.Footer class="px-5 py-2.5 border-t border-zinc-200 dark:border-zinc-700 flex-shrink-0">
 			<Button variant="outline" onclick={onClose}>Cancel</Button>
 			{#if gitStack}
 				<Button variant="outline" onclick={() => saveGitStack(true)} disabled={formSaving}>

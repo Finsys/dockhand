@@ -307,7 +307,9 @@
 			total = data.total;
 
 			if (append) {
-				events = [...events, ...data.events];
+				// Use push() for O(k) append instead of spread for O(n) copy
+				events.push(...data.events);
+				events = events; // Trigger Svelte reactivity
 				hasMore = events.length < total;
 				// Update eventIds Set with new events
 				for (const evt of data.events) {
@@ -517,12 +519,16 @@
 				// Add to beginning of events (prepend new events) - use Set for fast duplicate check
 				if (!eventIds.has(newEvent.id)) {
 					eventIds.add(newEvent.id);
-					events = [newEvent, ...events];
+					// Use unshift() for in-place mutation instead of spread for O(n) copy
+					events.unshift(newEvent);
+					events = events; // Trigger Svelte reactivity
 					total = total + 1;
 
 					// Add container to list if not already there
 					if (newEvent.containerName && !containers.includes(newEvent.containerName)) {
-						containers = [...containers, newEvent.containerName].sort();
+						containers.push(newEvent.containerName);
+						containers.sort();
+						containers = containers; // Trigger Svelte reactivity
 					}
 				}
 			} catch {

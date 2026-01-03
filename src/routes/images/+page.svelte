@@ -7,7 +7,7 @@
 	import { Label } from '$lib/components/ui/label';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Select from '$lib/components/ui/select';
-	import { Trash2, Upload, RefreshCw, Play, Search, Layers, Server, ShieldCheck, CheckSquare, Square, Tag, Check, XCircle, Icon, AlertTriangle, X, Images, Copy, Download, ChevronRight, ChevronDown, Loader2 } from 'lucide-svelte';
+	import { Trash2, Upload, RefreshCw, Play, Search, Layers, Server, ShieldCheck, CheckSquare, Square, Tag, Check, XCircle, Icon, AlertTriangle, X, Images, Copy, Download, ChevronRight, ChevronDown, Loader2, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-svelte';
 	import { broom, whale } from '@lucide/lab';
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
 	import BatchOperationModal from '$lib/components/BatchOperationModal.svelte';
@@ -720,6 +720,25 @@
 							<Square class="w-3.5 h-3.5 text-muted-foreground" />
 						{/if}
 					</button>
+				{:else if column.sortable}
+					<button
+						type="button"
+						onclick={() => toggleSort(column.sortField ?? column.id)}
+						class="flex items-center gap-1 hover:text-foreground transition-colors w-full"
+					>
+						{column.label}
+						{#if sortState?.field === (column.sortField ?? column.id)}
+							{#if sortState.direction === 'asc'}
+								<ArrowUp class="w-3 h-3" />
+							{:else}
+								<ArrowDown class="w-3 h-3" />
+							{/if}
+						{:else}
+							<ArrowUpDown class="w-3 h-3 opacity-30" />
+						{/if}
+					</button>
+				{:else if column.id !== 'expand' && column.id !== 'actions'}
+					{column.label}
 				{/if}
 			{/snippet}
 			{#snippet cell(column, group, rowState)}

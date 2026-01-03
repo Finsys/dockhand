@@ -1,5 +1,15 @@
 [
   {
+    "version": "1.0.6",
+    "date": "2026-01-03",
+    "changes": [
+      { "type": "fix", "text": "Legacy CPU support (Celeron, Atom) - Bun binary now copied from official image instead of Wolfi package" },
+      { "type": "fix", "text": "Stack modal layouts improved with resizable split panels" },
+      { "type": "fix", "text": "Missing column headers in images overview" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.6"
+  },
+  {
     "version": "1.0.5",
     "date": "2026-01-01",
     "changes": [

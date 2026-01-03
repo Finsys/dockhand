@@ -498,12 +498,18 @@
 	// Row state cache to prevent creating new objects on every scroll
 	let rowStateCache = new WeakMap<object, DataGridRowState>();
 	let rowStateCacheDataRef: T[] | null = null;
+	let rowStateCacheExpandedRef: Set<unknown> | null = null;
+	let rowStateCacheSelectedRef: Set<unknown> | null = null;
 
-	// Clear row state cache when data reference changes
+	// Clear row state cache when data or selection/expansion state changes
 	$effect(() => {
-		if (data !== rowStateCacheDataRef) {
+		if (data !== rowStateCacheDataRef ||
+			expandedKeys !== rowStateCacheExpandedRef ||
+			selectedKeys !== rowStateCacheSelectedRef) {
 			rowStateCache = new WeakMap();
 			rowStateCacheDataRef = data;
+			rowStateCacheExpandedRef = expandedKeys;
+			rowStateCacheSelectedRef = selectedKeys;
 		}
 	});
 
