@@ -1,0 +1,425 @@
+DOCKHAND PRIVACY POLICY
+
+Last Updated: December 14, 2025
+Effective Date: December 14, 2025
+
+================================================================================
+
+1. INTRODUCTION
+
+This Privacy Policy describes how Finsys Jaroslaw Krochmalski ("Finsys," "we,"
+"us," or "our") handles data in connection with the Dockhand software
+application ("Software"). This Policy applies to all users of the Software.
+
+Finsys is committed to protecting your privacy and ensuring transparency
+about our data practices. This Policy explains that the Software operates
+entirely locally on your infrastructure with no data transmitted to Finsys.
+
+
+2. DATA CONTROLLER INFORMATION
+
+Finsys Jaroslaw Krochmalski
+ul. Borki 6
+05-119 Jozefow
+Poland
+
+VAT ID: PL7121835977
+REGON: 061576391
+
+Email: enterprise@dockhand.pro
+Website: https://dockhand.pro
+
+For the purpose of the General Data Protection Regulation (GDPR) and other
+applicable data protection laws, Finsys is NOT the data controller for any
+personal data processed through your installation of the Software. You (the
+user or your organization) are the data controller for all data stored in
+your Software installation.
+
+
+3. OUR FUNDAMENTAL PRINCIPLE: LOCAL-ONLY DATA
+
+The Software is designed with privacy as a core principle:
+
+- ALL DATA STAYS LOCAL: The Software stores all data exclusively on your
+  infrastructure (your servers, your databases, your storage).
+
+- NO DATA TRANSMISSION: The Software does not transmit any data to Finsys
+  servers, third-party servers, or any external services.
+
+- NO TELEMETRY: The Software contains no telemetry, analytics, usage
+  tracking, crash reporting, or any other data collection mechanisms.
+
+- FULLY SELF-CONTAINED: The Software operates entirely within your
+  infrastructure without requiring any connection to Finsys systems.
+
+- FINSYS HAS NO ACCESS: Finsys cannot access, view, retrieve, or process
+  any data stored in your Software installation.
+
+
+4. DATA PROCESSED BY THE SOFTWARE
+
+When you use the Software, the following types of data may be stored
+LOCALLY on your infrastructure:
+
+4.1 User Account Data
+- Usernames and email addresses
+- Password hashes (never stored in plain text)
+- Multi-factor authentication (MFA) secrets (Enterprise Edition)
+- User profile information and avatars
+- Role assignments and permissions (Enterprise Edition)
+
+4.2 Authentication Data
+- Session tokens and cookies
+- OIDC/SSO tokens and provider configurations
+- LDAP/Active Directory connection settings (Enterprise Edition)
+- API tokens for remote access
+
+4.3 Docker Environment Data
+- Docker host connection details (URLs, ports, socket paths)
+- Docker container information (names, IDs, configurations)
+- Container logs and metrics
+- Image and volume data
+- Network configurations
+- Compose stack definitions
+
+4.4 Git Integration Data
+- Git repository URLs and credentials
+- SSH keys and access tokens
+- Deployment webhooks
+
+4.5 Registry Data
+- Docker registry URLs and credentials
+- Image pull/push history
+
+4.6 Activity and Audit Data
+- User activity logs
+- Container events and operations
+- Audit trails (Enterprise Edition)
+
+4.7 Application Settings
+- General configuration preferences
+- Notification channel settings (SMTP, webhooks)
+- Scheduled task configurations
+
+All of the above data is stored exclusively in your local database
+(SQLite or PostgreSQL) and on your local filesystem. None of this data
+is transmitted to or accessible by Finsys.
+
+
+5. HOW DATA IS STORED
+
+5.1 Database Storage
+
+The Software uses either SQLite or PostgreSQL as configured by you:
+- SQLite: Data stored in a local file on your server
+- PostgreSQL: Data stored in your PostgreSQL database instance
+
+5.2 File Storage
+
+Certain data is stored in the local filesystem:
+- Compose stack files
+- Uploaded files (e.g., user avatars)
+- Temporary files during operations
+
+5.3 Encryption
+
+- Passwords are hashed using secure algorithms (Argon2id)
+- Sensitive credentials may be encrypted at rest depending on your
+  database configuration
+- You are responsible for implementing disk encryption, database
+  encryption, and network security for your infrastructure
+
+
+6. YOUR RESPONSIBILITIES AS DATA CONTROLLER
+
+Since all data is stored locally on your infrastructure, YOU are the
+data controller for purposes of GDPR and other data protection laws.
+As data controller, you are responsible for:
+
+6.1 Legal Basis for Processing
+Ensuring you have a valid legal basis for processing personal data of
+your users (e.g., consent, legitimate interest, contractual necessity).
+
+6.2 Data Subject Rights
+Responding to data subject requests including:
+- Right of access (Article 15 GDPR)
+- Right to rectification (Article 16 GDPR)
+- Right to erasure (Article 17 GDPR)
+- Right to restriction of processing (Article 18 GDPR)
+- Right to data portability (Article 20 GDPR)
+- Right to object (Article 21 GDPR)
+
+6.3 Security Measures
+Implementing appropriate technical and organizational measures to
+protect personal data, including:
+- Access controls and authentication
+- Encryption of data at rest and in transit
+- Regular security updates and patches
+- Backup and disaster recovery procedures
+- Network security (firewalls, VPNs, etc.)
+
+6.4 Data Retention
+Establishing and implementing appropriate data retention policies.
+
+6.5 Breach Notification
+Notifying supervisory authorities and affected individuals in case
+of a personal data breach, as required by applicable law.
+
+6.6 Privacy Notices
+Providing appropriate privacy notices to your users regarding how
+their data is processed within the Software.
+
+
+7. DATA WE DO NOT COLLECT
+
+To be absolutely clear, Finsys does NOT collect, receive, access, or
+process ANY of the following:
+
+- Your identity or contact information (unless you contact us directly)
+- Your Docker infrastructure information
+- Your container configurations or data
+- Your user accounts or credentials
+- Your activity logs or audit trails
+- Your git repositories or deployment data
+- Usage statistics or analytics
+- Error reports or crash data
+- Any telemetry or diagnostic data
+- Any data whatsoever from your Software installation
+
+
+8. WHEN FINSYS MAY RECEIVE DATA
+
+The only circumstances in which Finsys may receive data from you are:
+
+8.1 Direct Communication
+When you voluntarily contact us via email (enterprise@dockhand.pro),
+we receive and process the information you provide (name, email address,
+message content). This data is processed for the purpose of responding
+to your inquiry based on our legitimate interest in providing customer
+support.
+
+8.2 License Purchase
+
+When you purchase an Enterprise Edition license, we collect and process:
+
+Data Collected:
+- Name and/or company name
+- Email address
+- Billing address
+- Payment information (processed by payment provider)
+- Licensed hostname/identifier
+
+Legal Basis (GDPR Article 6):
+- Contract performance (Art. 6(1)(b)) - to fulfill the license agreement
+- Legal obligation (Art. 6(1)(c)) - for invoicing and tax records
+
+How We Use This Data:
+- To issue and deliver your License Key
+- To send license renewal reminders
+- To provide support related to your license
+- To comply with tax and accounting obligations
+
+Data Retention:
+- License and invoice records: 7 years (Polish tax law requirement)
+- Email correspondence: 3 years after last contact
+
+Data Sharing:
+- Payment processor (for payment transactions only)
+- No other third parties
+- No marketing or advertising use
+
+8.3 Website Visits
+If you visit our website (https://dockhand.pro), standard web server
+logs may be collected. See our website privacy policy for details.
+
+
+9. LICENSE KEY DATA
+
+Enterprise Edition License Keys contain:
+- Customer name (as registered)
+- Licensed hostname or identifier
+- Expiration date
+- Cryptographic signature
+
+This information is embedded in the License Key itself and stored
+locally in your Software installation. Finsys retains a record of
+issued licenses for license management purposes.
+
+
+10. INTERNATIONAL DATA TRANSFERS
+
+Since all Software data is stored locally on your infrastructure, no
+international data transfers occur through the Software itself.
+
+If your infrastructure is located outside the European Economic Area
+(EEA), you are responsible for ensuring appropriate safeguards for
+any personal data stored therein.
+
+
+11. DATA RETENTION
+
+11.1 Software Data
+You control the retention of all data in your Software installation.
+The Software does not automatically delete data unless you configure
+retention policies or manually delete data.
+
+11.2 Communication Data
+If you contact us directly, we retain correspondence for as long as
+necessary to respond to your inquiry and for our records, typically
+not exceeding 3 years unless required for legal purposes.
+
+11.3 License Records
+We retain license purchase and activation records for the duration
+required by tax and accounting regulations (typically 5-7 years).
+
+
+12. CHILDREN'S PRIVACY
+
+The Software is not intended for use by children under 16 years of age.
+We do not knowingly collect personal data from children. If you are a
+parent or guardian and believe your child has provided personal data
+to us through direct communication, please contact us.
+
+
+13. THIRD-PARTY SERVICES
+
+13.1 Software Integrations
+
+The Software may connect to third-party services as configured by you:
+- Docker registries
+- Git repositories (GitHub, GitLab, etc.)
+- OIDC/SSO providers
+- LDAP/Active Directory servers
+- Notification services (SMTP, Discord, Slack, etc.)
+
+These connections are initiated by you, configured by you, and occur
+between your infrastructure and these third-party services. Finsys is
+not involved in these connections and has no access to the data
+exchanged. The privacy policies of these third-party services apply
+to your use of them.
+
+13.2 No Hidden Third-Party Data Sharing
+
+The Software does not share any data with third parties on our behalf.
+There are no embedded analytics services, advertising networks, or
+data brokers within the Software.
+
+
+14. SECURITY
+
+14.1 Software Security
+
+We implement security measures in the Software design:
+- Secure password hashing (Argon2id)
+- Session management with secure tokens
+- Input validation and sanitization
+- Protection against common web vulnerabilities
+
+14.2 Your Security Responsibilities
+
+Since all data is stored on your infrastructure, you are responsible
+for:
+- Keeping the Software updated
+- Securing your server and database
+- Implementing network security measures
+- Managing user access and authentication
+- Creating and securing backups
+
+
+15. CHANGES TO THIS PRIVACY POLICY
+
+We may update this Privacy Policy from time to time. Material changes
+will be communicated through:
+- Updated "Last Updated" date at the top of this Policy
+- Notice on our website
+- Notice within the Software (for significant changes)
+
+We encourage you to review this Privacy Policy periodically.
+
+
+16. GDPR COMPLIANCE
+
+Finsys complies with the General Data Protection Regulation (EU) 2016/679.
+
+Summary of Our Data Processing:
+- We only collect personal data (email, name) when you purchase a license
+- Legal basis: Contract performance and legal obligation
+- Data is stored securely in the EU (Poland)
+- Retention: 7 years for tax records, 3 years for correspondence
+- No automated decision-making or profiling
+- No data sold or shared for marketing purposes
+
+Your GDPR Rights (Articles 15-22):
+You have the right to access, rectify, erase, restrict processing,
+data portability, and object to processing of your personal data.
+
+To exercise any of these rights, contact: enterprise@dockhand.pro
+We will respond within 30 days as required by GDPR.
+
+
+17. YOUR RIGHTS
+
+If you are located in the European Economic Area (EEA), United Kingdom,
+or other jurisdiction with data protection laws, you have rights
+regarding personal data we hold about you (from direct communications
+or license purchases):
+
+- Access: Request access to personal data we hold about you
+- Rectification: Request correction of inaccurate data
+- Erasure: Request deletion of your data
+- Restriction: Request restriction of processing
+- Portability: Request a copy of your data in portable format
+- Objection: Object to processing based on legitimate interests
+- Complaint: Lodge a complaint with a supervisory authority
+
+To exercise these rights, contact us at enterprise@dockhand.pro.
+
+Note: These rights apply to data WE hold (from direct communication or
+license purchases), not to data in YOUR Software installation. For data
+in your installation, YOU are the data controller and responsible for
+handling such requests from your users.
+
+
+18. SUPERVISORY AUTHORITY
+
+If you are located in Poland, the relevant supervisory authority is:
+
+Urzad Ochrony Danych Osobowych (UODO)
+ul. Stawki 2
+00-193 Warszawa
+Poland
+https://uodo.gov.pl
+
+If you are located in another EEA country, you may contact your local
+data protection authority.
+
+
+19. CONTACT US
+
+For any privacy-related questions, concerns, or requests:
+
+Finsys Jaroslaw Krochmalski
+ul. Borki 6
+05-119 Jozefow
+Poland
+
+Email: enterprise@dockhand.pro
+Website: https://dockhand.pro
+
+
+================================================================================
+SUMMARY
+
+Dockhand is a privacy-respecting application:
+- All data stays on YOUR infrastructure
+- NO data is sent to Finsys servers
+- NO telemetry or analytics
+- YOU are the data controller for your installation
+- Finsys has NO access to your data
+
+We believe privacy is a fundamental right, and we have designed Dockhand
+to respect that right by ensuring you maintain complete control over your
+data at all times.
+================================================================================
+
+Copyright (c) 2025-2026 Finsys Jaroslaw Krochmalski. All rights reserved.
