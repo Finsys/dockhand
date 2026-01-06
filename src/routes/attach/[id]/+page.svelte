@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/stores';
+	import { appendEnvParam, currentEnvironment } from '$lib/stores/environment';
+	import type { ContainerInfo } from '$lib/types';
 	import { Terminal as TerminalIcon } from 'lucide-svelte';
 	import { onDestroy, onMount } from 'svelte';
 
@@ -16,15 +18,75 @@
 	let connected = $state(false);
 	let error = $state<string | null>(null);
 	let containerName = $state('');
+	let containerValid = $state(false);
+	let validationError = $state<string | null>(null);
+	let envId = $state<number | null>(null);
+	let containerInfo = $state<ContainerInfo | null>(null);
 
 	// Get params from URL
 	let containerId = $derived($page.params.id);
 	let name = $derived($page.url.searchParams.get('name') || 'Container');
 
+	// Subscribe to environment changes
+	currentEnvironment.subscribe((env) => {
+		envId = env?.id ?? null;
+		if (env) {
+			validateContainer();
+		}
+	});
+
+	// Check if container can be attached to
+	function canAttachToContainer(container: ContainerInfo): boolean {
+		// Container must be running
+		if (container.state !== 'running') {
+			return false;
+		}
+		return true;
+	}
+
+	// Get validation error message for a container
+	function getAttachValidationError(container: ContainerInfo): string | null {
+		if (container.state !== 'running') {
+			return `Container is ${container.state} (must be running)`;
+		}
+		return null;
+	}
+
+	async function validateContainer() {
+		try {
+			const response = await fetch(appendEnvParam(`/api/containers/${containerId}`, envId));
+			if (!response.ok) {
+				validationError = 'Container not found';
+				containerValid = false;
+				return;
+			}
+
+			const container = await response.json();
+			containerInfo = container;
+
+			if (!canAttachToContainer(container)) {
+				validationError = getAttachValidationError(container);
+				containerValid = false;
+			} else {
+				validationError = null;
+				containerValid = true;
+			}
+		} catch (err) {
+			console.error('Failed to validate container:', err);
+			validationError = 'Failed to validate container';
+			containerValid = false;
+		}
+	}
+
 	function initTerminal() {
 		if (!terminalRef || terminal || !xtermLoaded) return;
 
-		containerName = name;
+		// Validate container before initializing terminal
+		if (!containerValid || !containerInfo) {
+			return;
+		}
+
+		containerName = containerInfo.name || name;
 
 		terminal = new Terminal({
 			cursorBlink: true,
@@ -62,6 +124,16 @@
 		terminal.open(terminalRef);
 		fitAddon.fit();
 
+		// Handle Ctrl+L to clear terminal
+		terminal.attachCustomKeyEventHandler((e: KeyboardEvent) => {
+			if ((e.ctrlKey || e.metaKey) && e.key === 'l') {
+				e.preventDefault();
+				terminal?.clear();
+				return false;
+			}
+			return true;
+		});
+
 		// Handle terminal input
 		terminal.onData((data: string) => {
 			if (ws && ws.readyState === WebSocket.OPEN) {
@@ -81,21 +153,24 @@
 	}
 
 	function connect() {
-		if (!terminal) return;
+		if (!terminal || !containerValid) return;
 
 		error = null;
 		const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+		let wsUrl = `${protocol}//${window.location.host}/api/containers/${containerId}/attach`;
+		if (envId) {
+			wsUrl += `?envId=${envId}`;
+		}
 
-		const wsUrl = `${protocol}//${'localhost:5174'}/api/containers/${containerId}/attach`;
-
-		terminal.writeln(`\x1b[90mAttaching to ${name}...\x1b[0m`);
+		terminal.writeln(`\x1b[90mAttaching to ${containerName}...\x1b[0m`);
+		terminal.writeln(`\x1b[90mContainer: ${containerInfo?.image || 'unknown'}\x1b[0m`);
 		terminal.writeln('');
 
 		ws = new WebSocket(wsUrl);
 
 		ws.onopen = () => {
 			connected = true;
-			document.title = `Attach - ${name}`;
+			document.title = `Attach - ${containerName}`;
 			terminal?.focus();
 			// Send initial resize
 			if (fitAddon && terminal) {
@@ -117,10 +192,6 @@
 				} else if (msg.type === 'exit') {
 					terminal?.writeln('\x1b[90m\r\nAttachment ended.\x1b[0m');
 					connected = false;
-					// Close the window after a brief delay so user sees the message
-					setTimeout(() => {
-						window.close();
-					}, 500);
 				}
 			} catch (e) {
 				terminal?.write(event.data);
@@ -135,7 +206,7 @@
 
 		ws.onclose = () => {
 			connected = false;
-			terminal?.writeln('\x1b[90mDisconnected.\x1b[0m');
+			terminal?.writeln('\x1b[90mDetached.\x1b[0m');
 		};
 	}
 
@@ -164,6 +235,9 @@
 
 	onMount(async () => {
 		window.addEventListener('resize', handleResize);
+
+		// Validate container immediately
+		await validateContainer();
 
 		// Dynamically load xterm modules (browser only)
 		const xtermModule = await import('@xterm/xterm');
@@ -202,16 +276,20 @@
 	>
 		<div class="flex items-center gap-2">
 			<TerminalIcon class="w-4 h-4 text-zinc-400" />
-			<span class="text-sm text-zinc-200 font-medium">{containerName}</span>
-			{#if connected}
-				<span class="inline-flex items-center gap-1 text-xs text-green-500">
-					<span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-					Connected
-				</span>
-			{:else if error}
-				<span class="text-xs text-red-500">{error}</span>
+			<span class="text-sm text-zinc-200 font-medium">{containerName || containerId}</span>
+			{#if containerValid}
+				{#if connected}
+					<span class="inline-flex items-center gap-1 text-xs text-green-500">
+						<span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+						Attached
+					</span>
+				{:else}
+					<span class="text-xs text-zinc-500">Connecting...</span>
+				{/if}
+			{:else if validationError}
+				<span class="text-xs text-red-500">{validationError}</span>
 			{:else}
-				<span class="text-xs text-zinc-500">Connecting...</span>
+				<span class="text-xs text-zinc-500">Validating...</span>
 			{/if}
 		</div>
 		<div class="flex items-center gap-2 text-xs text-zinc-500">
@@ -219,13 +297,23 @@
 		</div>
 	</div>
 
-	<!-- Terminal -->
-	<div class="flex-1 p-2 overflow-hidden">
-		{#if xtermLoaded}
+	<!-- Terminal or Error message -->
+	<div class="flex-1 p-2 overflow-hidden flex flex-col">
+		{#if validationError}
+			<div class="flex items-center justify-center h-full">
+				<div class="text-center">
+					<TerminalIcon class="w-12 h-12 mx-auto mb-3 opacity-50 text-red-500" />
+					<p class="text-zinc-400 mb-2">{validationError}</p>
+					<p class="text-zinc-600 text-sm">
+						Go back to <a href="/attach" class="text-blue-500 hover:text-blue-400">attach</a> page
+					</p>
+				</div>
+			</div>
+		{:else if xtermLoaded && containerValid}
 			<div bind:this={terminalRef} class="h-full w-full"></div>
 		{:else}
 			<div class="h-full w-full flex items-center justify-center">
-				<span class="text-zinc-500">Loading terminal...</span>
+				<span class="text-zinc-500">Loading...</span>
 			</div>
 		{/if}
 	</div>
