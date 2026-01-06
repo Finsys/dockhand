@@ -1,2 +1,14 @@
 .idea/
 .DS_Store
+
+# My data generated files
+data/
+
+# Node modules
+node_modules/
+
+# Development environment files
+.svelte-kit/
+
+# Development output
+bun.lock
