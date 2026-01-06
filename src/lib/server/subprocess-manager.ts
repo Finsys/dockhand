@@ -6,27 +6,35 @@
  */
 
 import { Subprocess } from 'bun';
-import { saveHostMetric, logContainerEvent, type ContainerEventAction } from './db';
-import { sendEventNotification, sendEnvironmentNotification } from './notifications';
-import { containerEventEmitter } from './event-collector';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { existsSync } from 'node:fs';
+import { logContainerEvent, saveHostMetric, type ContainerEventAction } from './db';
+import { containerEventEmitter } from './event-collector';
+import { sendEnvironmentNotification, sendEventNotification } from './notifications';
 
 // Get the directory of this file (works in both Vite and Bun)
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Determine subprocess script paths
-// In development: src/lib/server/subprocesses/*.ts (via __dirname)
-// In production: /app/subprocesses/*.js (bundled by scripts/build-subprocesses.ts)
+// In development (vite): src/lib/server/subprocesses/*.ts (via __dirname)
+// In production (Docker): /app/subprocesses/*.js (bundled by scripts/build-subprocesses.ts)
+// In local build: ./build/subprocesses/*.js (compiled for local testing)
 function getSubprocessPath(name: string): string {
 	// Production path (Docker container) - bundled JS files
 	const prodPath = `/app/subprocesses/${name}.js`;
 	if (existsSync(prodPath)) {
 		return prodPath;
 	}
-	// Development path (relative to this file) - raw TS files
+
+	// Local build path - when running bun ./build/index.js locally
+	const localBuildPath = path.join(process.cwd(), 'build', 'subprocesses', `${name}.js`);
+	if (existsSync(localBuildPath)) {
+		return localBuildPath;
+	}
+
+	// Development path (relative to this file) - raw TS files for Vite dev mode
 	return path.join(__dirname, 'subprocesses', `${name}.ts`);
 }
 
@@ -319,12 +327,23 @@ class SubprocessManager {
 
 					// Send notification if provided
 					if (message.notification) {
-						const { action, title, message: notifMessage, notificationType, image } = message.notification;
-						sendEnvironmentNotification(message.event.environmentId, action, {
+						const {
+							action,
 							title,
 							message: notifMessage,
-							type: notificationType
-						}, image).catch((err) => {
+							notificationType,
+							image
+						} = message.notification;
+						sendEnvironmentNotification(
+							message.event.environmentId,
+							action,
+							{
+								title,
+								message: notifMessage,
+								type: notificationType
+							},
+							image
+						).catch((err) => {
 							console.error('[SubprocessManager] Failed to send notification:', err);
 						});
 					}
@@ -357,7 +376,9 @@ class SubprocessManager {
 							'environment_offline',
 							{
 								title: 'Environment offline',
-								message: `Environment "${message.envName}" is unreachable${message.error ? `: ${message.error}` : ''}`,
+								message: `Environment "${message.envName}" is unreachable${
+									message.error ? `: ${message.error}` : ''
+								}`,
 								type: 'error'
 							},
 							message.envId

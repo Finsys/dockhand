@@ -1,11 +1,11 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import tailwindcss from '@tailwindcss/vite';
-import { defineConfig, type Plugin } from 'vite';
+import { Database } from 'bun:sqlite';
 import { execSync } from 'child_process';
 import { existsSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
-import { Database } from 'bun:sqlite';
+import { defineConfig, type Plugin } from 'vite';
 
 const WS_PORT = 5174;
 
@@ -63,10 +63,17 @@ function resolveDockerTarget(
 
 function buildExecStartHttpRequest(execId: string, target: DockerTarget): string {
 	const body = JSON.stringify({ Detach: false, Tty: true });
-	const tokenHeader = target.type === 'tcp' && target.hawserToken
-		? `X-Hawser-Token: ${target.hawserToken}\r\n`
-		: '';
+	const tokenHeader =
+		target.type === 'tcp' && target.hawserToken ? `X-Hawser-Token: ${target.hawserToken}\r\n` : '';
 	return `POST /exec/${execId}/start HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n${tokenHeader}Connection: Upgrade\r\nUpgrade: tcp\r\nContent-Length: ${body.length}\r\n\r\n${body}`;
+}
+
+// ============ Attach API Helpers ============
+
+function buildAttachHttpRequest(containerId: string, target: DockerTarget): string {
+	const tokenHeader =
+		target.type === 'tcp' && target.hawserToken ? `X-Hawser-Token: ${target.hawserToken}\r\n` : '';
+	return `POST /containers/${containerId}/attach?stream=1&stdout=1&stderr=1&stdin=1 HTTP/1.1\r\nHost: localhost\r\n${tokenHeader}Connection: Upgrade\r\nUpgrade: tcp\r\n\r\n`;
 }
 
 // ============ Stream Processing ============
@@ -99,12 +106,31 @@ function processTerminalOutput(
 
 // ============ Hawser Edge Exec Messages ============
 
-function createExecStartMessage(execId: string, containerId: string, shell: string, user: string, cols = 120, rows = 30) {
-	return { type: 'exec_start', execId, containerId, cmd: shell, user, cols, rows };
+function createExecStartMessage(
+	execId: string,
+	containerId: string,
+	shell: string,
+	user: string,
+	cols = 120,
+	rows = 30
+) {
+	return {
+		type: 'exec_start',
+		execId,
+		containerId,
+		cmd: shell,
+		user,
+		cols,
+		rows
+	};
 }
 
 function createExecInputMessage(execId: string, data: string) {
-	return { type: 'exec_input', execId, data: Buffer.from(data).toString('base64') };
+	return {
+		type: 'exec_input',
+		execId,
+		data: Buffer.from(data).toString('base64')
+	};
 }
 
 function createExecResizeMessage(execId: string, cols: number, rows: number) {
@@ -196,7 +222,8 @@ function bunExternals(): Plugin {
 
 // Detect Docker socket path
 function detectDockerSocket(): string {
-	if (process.env.DOCKER_SOCKET && existsSync(process.env.DOCKER_SOCKET)) return process.env.DOCKER_SOCKET;
+	if (process.env.DOCKER_SOCKET && existsSync(process.env.DOCKER_SOCKET))
+		return process.env.DOCKER_SOCKET;
 	if (process.env.DOCKER_HOST?.startsWith('unix://')) {
 		const p = process.env.DOCKER_HOST.replace('unix://', '');
 		if (existsSync(p)) return p;
@@ -226,7 +253,13 @@ function getDb(): Database | null {
 	return _db;
 }
 
-function getEnvironment(id: number): { host: string; port: number; is_local: boolean; connection_type?: string; hawser_token?: string } | null {
+function getEnvironment(id: number): {
+	host: string;
+	port: number;
+	is_local: boolean;
+	connection_type?: string;
+	hawser_token?: string;
+} | null {
 	const db = getDb();
 	if (!db) return null;
 	const row = db.prepare('SELECT * FROM environments WHERE id = ?').get(id) as any;
@@ -242,12 +275,26 @@ function getDockerTarget(envId?: number): DockerTarget {
 	);
 }
 
-async function createExecForWs(containerId: string, cmd: string[], user: string, target: ReturnType<typeof getDockerTarget>): Promise<{ Id: string }> {
-	const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+async function createExecForWs(
+	containerId: string,
+	cmd: string[],
+	user: string,
+	target: ReturnType<typeof getDockerTarget>
+): Promise<{ Id: string }> {
+	const headers: Record<string, string> = {
+		'Content-Type': 'application/json'
+	};
 	const fetchOpts: any = {
 		method: 'POST',
 		headers,
-		body: JSON.stringify({ AttachStdin: true, AttachStdout: true, AttachStderr: true, Tty: true, Cmd: cmd, User: user })
+		body: JSON.stringify({
+			AttachStdin: true,
+			AttachStdout: true,
+			AttachStderr: true,
+			Tty: true,
+			Cmd: cmd,
+			User: user
+		})
 	};
 	let url: string;
 	if (target.type === 'unix') {
@@ -264,7 +311,12 @@ async function createExecForWs(containerId: string, cmd: string[], user: string,
 	return res.json();
 }
 
-async function resizeExecForWs(execId: string, cols: number, rows: number, target: ReturnType<typeof getDockerTarget>): Promise<void> {
+async function resizeExecForWs(
+	execId: string,
+	cols: number,
+	rows: number,
+	target: ReturnType<typeof getDockerTarget>
+): Promise<void> {
 	try {
 		const fetchOpts: any = { method: 'POST' };
 		let url: string;
@@ -272,7 +324,17 @@ async function resizeExecForWs(execId: string, cols: number, rows: number, targe
 			url = 'http://localhost/exec/' + execId + '/resize?h=' + rows + '&w=' + cols;
 			fetchOpts.unix = target.socket;
 		} else {
-			url = 'http://' + target.host + ':' + target.port + '/exec/' + execId + '/resize?h=' + rows + '&w=' + cols;
+			url =
+				'http://' +
+				target.host +
+				':' +
+				target.port +
+				'/exec/' +
+				execId +
+				'/resize?h=' +
+				rows +
+				'&w=' +
+				cols;
 			if (target.hawserToken) {
 				fetchOpts.headers = { 'X-Hawser-Token': target.hawserToken };
 			}
@@ -285,7 +347,16 @@ async function resizeExecForWs(execId: string, cols: number, rows: number, targe
 
 // Map to track Docker streams per WebSocket (keyed by unique connection ID)
 // Includes WebSocket reference for orphan detection
-const dockerStreams = new Map<string, { stream: any; execId: string; target: ReturnType<typeof getDockerTarget>; state: { isChunked: boolean }; ws: any }>();
+const dockerStreams = new Map<
+	string,
+	{
+		stream: any;
+		execId: string;
+		target: ReturnType<typeof getDockerTarget>;
+		state: { isChunked: boolean };
+		ws: any;
+	}
+>();
 
 // Counter for unique WebSocket connection IDs
 let wsConnectionCounter = 0;
@@ -312,7 +383,9 @@ function startCleanupInterval() {
 			if (session.ws?.readyState !== 1) {
 				try {
 					session.stream?.end?.();
-				} catch { /* ignore */ }
+				} catch {
+					/* ignore */
+				}
 				dockerStreams.delete(connId);
 				dockerCleaned++;
 			}
@@ -326,7 +399,9 @@ function startCleanupInterval() {
 		}
 
 		if (dockerCleaned > 0 || edgeCleaned > 0) {
-			console.log(`[WS Cleanup] Removed ${dockerCleaned} orphaned docker streams, ${edgeCleaned} orphaned edge sessions`);
+			console.log(
+				`[WS Cleanup] Removed ${dockerCleaned} orphaned docker streams, ${edgeCleaned} orphaned edge sessions`
+			);
 		}
 	}, 5 * 60 * 1000);
 }
@@ -376,7 +451,9 @@ interface HawserMetrics {
 declare global {
 	var __hawserEdgeConnections: Map<number, EdgeConnection> | undefined;
 	var __hawserSendMessage: ((envId: number, message: string) => boolean) | undefined;
-	var __hawserHandleContainerEvent: ((envId: number, event: ContainerEventData) => Promise<void>) | undefined;
+	var __hawserHandleContainerEvent:
+		| ((envId: number, event: ContainerEventData) => Promise<void>)
+		| undefined;
 	var __hawserHandleMetrics: ((envId: number, metrics: HawserMetrics) => Promise<void>) | undefined;
 }
 const edgeConnections: Map<number, EdgeConnection> =
@@ -442,27 +519,75 @@ function webSocketPlugin(): Plugin {
 						const containerIdIndex = pathParts.indexOf('containers') + 1;
 						const containerId = pathParts[containerIdIndex];
 
+						// Detect if this is an exec or attach operation
+						const isAttach = url.pathname.includes('/attach');
+
 						const shell = url.searchParams.get('shell') || '/bin/sh';
 						const user = url.searchParams.get('user') || 'root';
 						const envIdParam = url.searchParams.get('envId');
 						const envId = envIdParam ? parseInt(envIdParam, 10) : undefined;
 
 						if (!containerId) {
-							ws.send(JSON.stringify({ type: 'error', message: 'No container ID' }));
+							ws.send(
+								JSON.stringify({
+									type: 'error',
+									message: 'No container ID'
+								})
+							);
 							ws.close();
 							return;
 						}
 
 						const target = getDockerTarget(envId);
-						console.log('[Terminal WS] Open connId:', connId, 'container:', containerId, 'target:', target.type);
+						const mode = isAttach ? 'attach' : 'exec';
+						console.log(
+							'[Terminal WS] Open connId:',
+							connId,
+							'container:',
+							containerId,
+							'mode:',
+							mode,
+							'target:',
+							target.type
+						);
 
 						try {
 							// Handle Hawser Edge mode differently - use WebSocket protocol
 							if (target.type === 'hawser-edge') {
 								const conn = edgeConnections.get(target.environmentId);
 								if (!conn) {
-									ws.send(JSON.stringify({ type: 'error', message: 'Edge agent not connected' }));
+									ws.send(
+										JSON.stringify({
+											type: 'error',
+											message: 'Edge agent not connected'
+										})
+									);
 									ws.close();
+									return;
+								}
+
+								if (isAttach) {
+									// For attach in Edge mode, send attach request to agent
+									const attachId = crypto.randomUUID();
+									console.log(
+										'[Terminal WS] Starting Edge attach:',
+										attachId,
+										'container:',
+										containerId
+									);
+									edgeExecSessions.set(attachId, {
+										ws,
+										execId: attachId,
+										environmentId: target.environmentId
+									});
+									(ws.data as any).edgeExecId = attachId;
+									conn.ws.send(
+										JSON.stringify({
+											type: 'attach',
+											containerId,
+											attachId
+										})
+									);
 									return;
 								}
 
@@ -471,7 +596,11 @@ function webSocketPlugin(): Plugin {
 								console.log('[Terminal WS] Starting Edge exec:', execId, 'container:', containerId);
 
 								// Track this session
-								edgeExecSessions.set(execId, { ws, execId, environmentId: target.environmentId });
+								edgeExecSessions.set(execId, {
+									ws,
+									execId,
+									environmentId: target.environmentId
+								});
 								(ws.data as any).edgeExecId = execId;
 
 								// Send exec_start to the agent (using shared helper)
@@ -481,8 +610,26 @@ function webSocketPlugin(): Plugin {
 							}
 
 							// Direct Docker connection (unix or tcp/hawser-standard)
-							const exec = await createExecForWs(containerId, [shell], user, target);
-							const execId = exec.Id;
+							let httpRequest: string;
+							let execId: string;
+
+							if (isAttach) {
+								// Attach directly to container streams
+								execId = crypto.randomUUID();
+								httpRequest = buildAttachHttpRequest(containerId, target);
+								console.log(
+									'[Terminal WS] Attaching to container:',
+									containerId,
+									'execId:',
+									execId
+								);
+							} else {
+								// Create exec instance for shell
+								const exec = await createExecForWs(containerId, [shell], user, target);
+								execId = exec.Id;
+								httpRequest = buildExecStartHttpRequest(execId, target);
+								console.log('[Terminal WS] Starting exec:', execId, 'container:', containerId);
+							}
 
 							// Track connection state (using object for mutability across closures)
 							let headersStripped = false;
@@ -514,7 +661,12 @@ function webSocketPlugin(): Plugin {
 											text = text.replace(/^[0-9a-fA-F]+\r\n/gm, '').replace(/\r\n$/g, '');
 										}
 										if (text) {
-											ws.send(JSON.stringify({ type: 'output', data: text }));
+											ws.send(
+												JSON.stringify({
+													type: 'output',
+													data: text
+												})
+											);
 										}
 									}
 								},
@@ -526,40 +678,72 @@ function webSocketPlugin(): Plugin {
 								},
 								error() {},
 								open(socket: any) {
-									// Send exec start request (using shared helper)
-									const httpRequest = buildExecStartHttpRequest(execId, target);
+									// Send request (exec start or attach)
 									socket.write(httpRequest);
 								}
 							};
 
 							let dockerStream: any;
 							if (target.type === 'unix') {
-								dockerStream = await Bun.connect({ unix: target.socket, socket: socketHandler });
+								dockerStream = await Bun.connect({
+									unix: target.socket,
+									socket: socketHandler
+								});
 							} else if (target.type === 'tcp') {
-								dockerStream = await Bun.connect({ hostname: target.host, port: target.port, socket: socketHandler });
+								dockerStream = await Bun.connect({
+									hostname: target.host,
+									port: target.port,
+									socket: socketHandler
+								});
 							}
 
-							dockerStreams.set(connId, { stream: dockerStream, execId, target, state, ws });
-							console.log('[Terminal WS] Stream stored for connId:', connId, 'total streams:', dockerStreams.size);
+							dockerStreams.set(connId, {
+								stream: dockerStream,
+								execId,
+								target,
+								state,
+								ws
+							});
+							console.log(
+								'[Terminal WS] Stream stored for connId:',
+								connId,
+								'total streams:',
+								dockerStreams.size
+							);
 						} catch (error: any) {
 							console.error('[Terminal WS] Error:', error.message);
-							ws.send(JSON.stringify({ type: 'error', message: error.message }));
+							ws.send(
+								JSON.stringify({
+									type: 'error',
+									message: error.message
+								})
+							);
 							ws.close();
 						}
 					},
 					async message(ws, message) {
 						const url = new URL((ws.data as any).url, `http://localhost:${WS_PORT}`);
 						const connId = (ws.data as any).connId as string | undefined;
-						console.log('[WS Message] connId:', connId, 'edgeExecId:', (ws.data as any)?.edgeExecId, 'pathname:', url.pathname.slice(0, 50));
+						console.log(
+							'[WS Message] connId:',
+							connId,
+							'edgeExecId:',
+							(ws.data as any)?.edgeExecId,
+							'pathname:',
+							url.pathname.slice(0, 50)
+						);
 
 						// Handle Hawser Edge messages
 						if (url.pathname === '/api/hawser/connect') {
 							try {
 								// Debug: Log raw message info
 								const msgType = typeof message;
-								const msgLen = typeof message === 'string' ? message.length :
-									message instanceof ArrayBuffer ? message.byteLength :
-									(message as Buffer).length || 0;
+								const msgLen =
+									typeof message === 'string'
+										? message.length
+										: message instanceof ArrayBuffer
+										? message.byteLength
+										: (message as Buffer).length || 0;
 								console.log(`[Hawser WS] Received message: type=${msgType}, length=${msgLen}`);
 
 								// Convert message to string properly (handles both string and ArrayBuffer)
@@ -587,9 +771,12 @@ function webSocketPlugin(): Plugin {
 								console.error('[Hawser WS] Error handling message:', error.message);
 								// More detailed debug output
 								const msgType = typeof message;
-								const msgLen = typeof message === 'string' ? message.length :
-									message instanceof ArrayBuffer ? message.byteLength :
-									(message as Buffer).length || 0;
+								const msgLen =
+									typeof message === 'string'
+										? message.length
+										: message instanceof ArrayBuffer
+										? message.byteLength
+										: (message as Buffer).length || 0;
 								console.error(`[Hawser WS] Message details: type=${msgType}, length=${msgLen}`);
 								if (typeof message === 'string' && message.length > 0) {
 									console.error(`[Hawser WS] Message preview: ${message.slice(0, 500)}`);
@@ -597,9 +784,16 @@ function webSocketPlugin(): Plugin {
 									const preview = new TextDecoder().decode(message.slice(0, 500));
 									console.error(`[Hawser WS] ArrayBuffer preview: ${preview}`);
 								} else if (Buffer.isBuffer(message) && message.length > 0) {
-									console.error(`[Hawser WS] Buffer preview: ${message.toString('utf-8').slice(0, 500)}`);
+									console.error(
+										`[Hawser WS] Buffer preview: ${message.toString('utf-8').slice(0, 500)}`
+									);
 								}
-								ws.send(JSON.stringify({ type: 'error', error: error.message }));
+								ws.send(
+									JSON.stringify({
+										type: 'error',
+										error: error.message
+									})
+								);
 							}
 							return;
 						}
@@ -618,7 +812,9 @@ function webSocketPlugin(): Plugin {
 											conn.ws.send(JSON.stringify(createExecInputMessage(edgeExecId, msg.data)));
 										} else if (msg.type === 'resize') {
 											// Forward resize to agent (using shared helper)
-											conn.ws.send(JSON.stringify(createExecResizeMessage(edgeExecId, msg.cols, msg.rows)));
+											conn.ws.send(
+												JSON.stringify(createExecResizeMessage(edgeExecId, msg.cols, msg.rows))
+											);
 										}
 									} catch (e) {
 										console.error('[Terminal WS] Error handling Edge message:', e);
@@ -635,7 +831,9 @@ function webSocketPlugin(): Plugin {
 						}
 						const d = dockerStreams.get(connId);
 						if (!d) {
-							console.log('[Terminal WS] No stream for connId:', connId, 'streams:', [...dockerStreams.keys()]);
+							console.log('[Terminal WS] No stream for connId:', connId, 'streams:', [
+								...dockerStreams.keys()
+							]);
 							return;
 						}
 						console.log('[Terminal WS] Found stream for connId:', connId);
@@ -726,7 +924,12 @@ async function handleHawserMessage(ws: any, msg: any) {
 		// In dev mode, we need to validate the token against the database
 		const db = getDb();
 		if (!db) {
-			ws.send(JSON.stringify({ type: 'error', error: 'Database not available' }));
+			ws.send(
+				JSON.stringify({
+					type: 'error',
+					error: 'Database not available'
+				})
+			);
 			ws.close();
 			return;
 		}
@@ -736,7 +939,9 @@ async function handleHawserMessage(ws: any, msg: any) {
 		const tokens = db.prepare('SELECT * FROM hawser_tokens WHERE is_active = 1').all() as any[];
 
 		// For dev mode, accept any valid token format and use the first environment with a token
-		const token = tokens.find((t: any) => msg.token && msg.token.startsWith(t.token_prefix.slice(0, 4)));
+		const token = tokens.find(
+			(t: any) => msg.token && msg.token.startsWith(t.token_prefix.slice(0, 4))
+		);
 
 		if (!token) {
 			console.log('[Hawser WS] Invalid token');
@@ -749,13 +954,15 @@ async function handleHawserMessage(ws: any, msg: any) {
 
 		// Update environment with agent info
 		try {
-			db.prepare(`UPDATE environments SET
+			db.prepare(
+				`UPDATE environments SET
 				hawser_last_seen = datetime('now'),
 				hawser_agent_id = ?,
 				hawser_agent_name = ?,
 				hawser_version = ?,
 				hawser_capabilities = ?
-			WHERE id = ?`).run(
+			WHERE id = ?`
+			).run(
 				msg.agentId,
 				msg.agentName,
 				msg.version,
@@ -773,12 +980,14 @@ async function handleHawserMessage(ws: any, msg: any) {
 			const streamCount = existing.pendingStreamRequests.size;
 			console.log(
 				`[Hawser WS] Replacing existing connection for environment ${environmentId}. ` +
-				`Rejecting ${pendingCount} pending requests and ${streamCount} stream requests.`
+					`Rejecting ${pendingCount} pending requests and ${streamCount} stream requests.`
 			);
 
 			// Reject all pending requests before closing
 			for (const [requestId, pending] of existing.pendingRequests) {
-				console.log(`[Hawser WS] Rejecting pending request ${requestId} due to connection replacement`);
+				console.log(
+					`[Hawser WS] Rejecting pending request ${requestId} due to connection replacement`
+				);
 				clearTimeout(pending.timeout);
 				pending.reject(new Error('Connection replaced by new agent'));
 			}
@@ -813,11 +1022,13 @@ async function handleHawserMessage(ws: any, msg: any) {
 		wsToEnvId.set(ws, environmentId);
 
 		// Send welcome
-		ws.send(JSON.stringify({
-			type: 'welcome',
-			environmentId,
-			message: `Welcome ${msg.agentName}! Connected to Dockhand dev server.`
-		}));
+		ws.send(
+			JSON.stringify({
+				type: 'welcome',
+				environmentId,
+				message: `Welcome ${msg.agentName}! Connected to Dockhand dev server.`
+			})
+		);
 
 		// Start server-side ping interval to keep connection alive through Traefik/proxies
 		// Traefik has ~10s idle timeout, so we ping every 5 seconds
@@ -884,7 +1095,9 @@ async function handleHawserMessage(ws: any, msg: any) {
 		}
 		const conn = edgeConnections.get(envId);
 		if (!conn) {
-			console.warn(`[Hawser WS] Stream data for unknown environment ${envId}, requestId=${msg.requestId}`);
+			console.warn(
+				`[Hawser WS] Stream data for unknown environment ${envId}, requestId=${msg.requestId}`
+			);
 			return;
 		}
 		const pending = conn.pendingStreamRequests?.get(msg.requestId);
@@ -902,7 +1115,9 @@ async function handleHawserMessage(ws: any, msg: any) {
 		}
 		const conn = edgeConnections.get(envId);
 		if (!conn) {
-			console.warn(`[Hawser WS] Stream end for unknown environment ${envId}, requestId=${msg.requestId}`);
+			console.warn(
+				`[Hawser WS] Stream end for unknown environment ${envId}, requestId=${msg.requestId}`
+			);
 			return;
 		}
 		const pending = conn.pendingStreamRequests.get(msg.requestId);

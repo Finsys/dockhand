@@ -5,11 +5,9 @@
  * No external dependencies like dockerode - uses native Bun fetch.
  */
 
+import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { existsSync, mkdirSync, rmSync, readdirSync } from 'node:fs';
-import { join, resolve } from 'node:path';
 import type { Environment } from './db';
-import { getStackEnvVarsAsRecord } from './db';
 
 /**
  * Custom error for when an environment is not found.
@@ -51,7 +49,11 @@ export class DockerConnectionError extends Error {
 			friendlyMessage = 'Connection lost';
 		} else if (errorStr.includes('verbose') || errorStr.includes('typo')) {
 			friendlyMessage = 'Connection failed';
-		} else if (errorStr.includes('timeout') || errorStr.includes('Timeout') || errorStr.includes('ETIMEDOUT')) {
+		} else if (
+			errorStr.includes('timeout') ||
+			errorStr.includes('Timeout') ||
+			errorStr.includes('ETIMEDOUT')
+		) {
 			friendlyMessage = 'Connection timeout';
 		} else if (errorStr.includes('ENOTFOUND') || errorStr.includes('getaddrinfo')) {
 			friendlyMessage = 'Host not found';
@@ -111,11 +113,14 @@ export interface ContainerInspectResult {
 		Entrypoint: string[] | null;
 	};
 	NetworkSettings: {
-		Networks: Record<string, {
-			IPAddress: string;
-			Gateway: string;
-			MacAddress: string;
-		}>;
+		Networks: Record<
+			string,
+			{
+				IPAddress: string;
+				Gateway: string;
+				MacAddress: string;
+			}
+		>;
 		Ports: Record<string, Array<{ HostIp: string; HostPort: string }> | null>;
 	};
 	Mounts: Array<{
@@ -166,7 +171,7 @@ function detectDockerSocket(): string {
 		'/var/run/docker.sock', // Standard Linux/Docker Desktop
 		`${homedir()}/.docker/run/docker.sock`, // Docker Desktop for Mac (new location)
 		`${homedir()}/.orbstack/run/docker.sock`, // OrbStack
-		'/run/docker.sock', // Alternative Linux location
+		'/run/docker.sock' // Alternative Linux location
 	];
 
 	for (const socket of possibleSockets) {
@@ -187,7 +192,10 @@ const socketPath = detectDockerSocket();
  * Demultiplex Docker stream output (strip 8-byte headers)
  * Docker streams have: 1 byte type, 3 bytes padding, 4 bytes size BE, then payload
  */
-function demuxDockerStream(buffer: Buffer, options?: { separateStreams?: boolean }): string | { stdout: string; stderr: string } {
+function demuxDockerStream(
+	buffer: Buffer,
+	options?: { separateStreams?: boolean }
+): string | { stdout: string; stderr: string } {
 	const stdout: string[] = [];
 	const stderr: string[] = [];
 	let offset = 0;
@@ -291,7 +299,12 @@ if (!globalThis.__dockerEnvCacheCleanupInterval) {
 import { getEnvironment } from './db';
 
 // Import hawser edge connection manager for edge mode routing
-import { sendEdgeRequest, sendEdgeStreamRequest, isEdgeConnected, type EdgeResponse } from './hawser';
+import {
+	isEdgeConnected,
+	sendEdgeRequest,
+	sendEdgeStreamRequest,
+	type EdgeResponse
+} from './hawser';
 
 /**
  * Docker API client configuration
@@ -392,7 +405,7 @@ function edgeResponseToResponse(edgeResponse: EdgeResponse): Response {
 	// The Go agent sends isBinary flag to indicate if body is base64-encoded
 	if (edgeResponse.isBinary && typeof body === 'string' && body.length > 0) {
 		// Decode base64 to binary
-		body = Uint8Array.from(atob(body), c => c.charCodeAt(0));
+		body = Uint8Array.from(atob(body), (c) => c.charCodeAt(0));
 	}
 
 	return new Response(body as BodyInit, {
@@ -425,7 +438,9 @@ export async function dockerFetch(
 		if (!isEdgeConnected(config.environmentId)) {
 			const error = new Error('Hawser Edge agent is not connected');
 			// Log without stack trace for cleaner output
-			console.warn(`[Docker] Edge env ${config.environmentId}: agent not connected for ${method} ${path}`);
+			console.warn(
+				`[Docker] Edge env ${config.environmentId}: agent not connected for ${method} ${path}`
+			);
 			throw error;
 		}
 
@@ -470,12 +485,17 @@ export async function dockerFetch(
 			);
 			const elapsed = Date.now() - startTime;
 			if (elapsed > 5000) {
-				console.warn(`[Docker] Edge env ${config.environmentId}: ${method} ${path} took ${elapsed}ms`);
+				console.warn(
+					`[Docker] Edge env ${config.environmentId}: ${method} ${path} took ${elapsed}ms`
+				);
 			}
 			return edgeResponseToResponse(edgeResponse);
 		} catch (error) {
 			const elapsed = Date.now() - startTime;
-			console.error(`[Docker] Edge env ${config.environmentId}: ${method} ${path} failed after ${elapsed}ms:`, error);
+			console.error(
+				`[Docker] Edge env ${config.environmentId}: ${method} ${path} failed after ${elapsed}ms:`,
+				error
+			);
 			throw DockerConnectionError.fromError(error);
 		}
 	}
@@ -551,12 +571,21 @@ export async function dockerFetch(
 			const response = await fetch(url, { ...finalOptions, ...bunOptions });
 			const elapsed = Date.now() - startTime;
 			if (elapsed > 5000) {
-				console.warn(`[Docker] ${config.connectionType || 'direct'} ${config.host}: ${method} ${path} took ${elapsed}ms`);
+				console.warn(
+					`[Docker] ${config.connectionType || 'direct'} ${
+						config.host
+					}: ${method} ${path} took ${elapsed}ms`
+				);
 			}
 			return response;
 		} catch (error) {
 			const elapsed = Date.now() - startTime;
-			console.error(`[Docker] ${config.connectionType || 'direct'} ${config.host}: ${method} ${path} failed after ${elapsed}ms:`, error);
+			console.error(
+				`[Docker] ${config.connectionType || 'direct'} ${
+					config.host
+				}: ${method} ${path} failed after ${elapsed}ms:`,
+				error
+			);
 			throw DockerConnectionError.fromError(error);
 		}
 	}
@@ -570,13 +599,17 @@ async function dockerJsonRequest<T>(
 	options: RequestInit = {},
 	envId?: number | null
 ): Promise<T> {
-	const response = await dockerFetch(path, {
-		...options,
-		headers: {
-			'Content-Type': 'application/json',
-			...options.headers
-		}
-	}, envId);
+	const response = await dockerFetch(
+		path,
+		{
+			...options,
+			headers: {
+				'Content-Type': 'application/json',
+				...options.headers
+			}
+		},
+		envId
+	);
 
 	if (!response.ok) {
 		const errorText = await response.text();
@@ -624,6 +657,7 @@ export interface ContainerInfo {
 	mounts: Array<{ type: string; source: string; destination: string; mode: string; rw: boolean }>;
 	labels: { [key: string]: string };
 	command: string;
+	attachable?: boolean;
 }
 
 export interface ImageInfo {
@@ -635,15 +669,15 @@ export interface ImageInfo {
 
 // Container operations
 export async function listContainers(all = true, envId?: number | null): Promise<ContainerInfo[]> {
-	const containers = await dockerJsonRequest<any[]>(
-		`/containers/json?all=${all}`,
-		{},
-		envId
-	);
+	const containers = await dockerJsonRequest<any[]>(`/containers/json?all=${all}`, {}, envId);
 
 	// Fetch restart counts only for restarting containers
 	const restartCounts = new Map<string, number>();
-	const restartingContainers = containers.filter(c => c.State === 'restarting');
+	const restartingContainers = containers.filter((c) => c.State === 'restarting');
+
+	// Fetch attachable status for running containers
+	const attachableMap = new Map<string, boolean>();
+	const runningContainers = containers.filter((c) => c.State === 'running');
 
 	await Promise.all(
 		restartingContainers.map(async (container) => {
@@ -652,6 +686,20 @@ export async function listContainers(all = true, envId?: number | null): Promise
 				restartCounts.set(container.Id, inspect.RestartCount || 0);
 			} catch {
 				// Ignore errors
+			}
+		})
+	);
+
+	await Promise.all(
+		runningContainers.map(async (container) => {
+			try {
+				const inspect = await inspectContainer(container.Id, envId);
+				// A container is attachable if it has TTY or OpenStdin enabled
+				const attachable = inspect.Config?.Tty || inspect.Config?.OpenStdin || false;
+				attachableMap.set(container.Id, attachable);
+			} catch {
+				// Default to not attachable if inspection fails
+				attachableMap.set(container.Id, false);
 			}
 		})
 	);
@@ -699,7 +747,8 @@ export async function listContainers(all = true, envId?: number | null): Promise
 			restartCount: restartCounts.get(container.Id) || 0,
 			mounts,
 			labels: container.Labels || {},
-			command: container.Command || ''
+			command: container.Command || '',
+			attachable: attachableMap.get(container.Id)
 		};
 	});
 }
@@ -729,7 +778,11 @@ export async function unpauseContainer(id: string, envId?: number | null) {
 }
 
 export async function removeContainer(id: string, force = false, envId?: number | null) {
-	const response = await dockerFetch(`/containers/${id}?force=${force}`, { method: 'DELETE' }, envId);
+	const response = await dockerFetch(
+		`/containers/${id}?force=${force}`,
+		{ method: 'DELETE' },
+		envId
+	);
 	if (!response.ok) {
 		const errorBody = await response.text();
 		let errorMessage = `Failed to remove container ${id}`;
@@ -748,10 +801,18 @@ export async function removeContainer(id: string, force = false, envId?: number 
 }
 
 export async function renameContainer(id: string, newName: string, envId?: number | null) {
-	await dockerFetch(`/containers/${id}/rename?name=${encodeURIComponent(newName)}`, { method: 'POST' }, envId);
+	await dockerFetch(
+		`/containers/${id}/rename?name=${encodeURIComponent(newName)}`,
+		{ method: 'POST' },
+		envId
+	);
 }
 
-export async function getContainerLogs(id: string, tail = 100, envId?: number | null): Promise<string> {
+export async function getContainerLogs(
+	id: string,
+	tail = 100,
+	envId?: number | null
+): Promise<string> {
 	// Check if container has TTY enabled
 	const info = await inspectContainer(id, envId);
 	const hasTty = info.Config?.Tty ?? false;
@@ -772,7 +833,10 @@ export async function getContainerLogs(id: string, tail = 100, envId?: number | 
 	return demuxDockerStream(buffer) as string;
 }
 
-export async function inspectContainer(id: string, envId?: number | null): Promise<ContainerInspectResult> {
+export async function inspectContainer(
+	id: string,
+	envId?: number | null
+): Promise<ContainerInspectResult> {
 	return dockerJsonRequest<ContainerInspectResult>(`/containers/${id}/json`, {}, envId);
 }
 
@@ -895,9 +959,7 @@ export async function createContainer(options: CreateContainerOptions, envId?: n
 	if (options.networks && options.networks.length > 0) {
 		containerConfig.HostConfig.NetworkMode = options.networks[0];
 		containerConfig.NetworkingConfig = {
-			EndpointsConfig: Object.fromEntries(
-				options.networks.map(network => [network, {}])
-			)
+			EndpointsConfig: Object.fromEntries(options.networks.map((network) => [network, {}]))
 		};
 	}
 
@@ -932,7 +994,7 @@ export async function createContainer(options: CreateContainerOptions, envId?: n
 	}
 
 	if (options.devices && options.devices.length > 0) {
-		containerConfig.HostConfig.Devices = options.devices.map(d => ({
+		containerConfig.HostConfig.Devices = options.devices.map((d) => ({
 			PathOnHost: d.hostPath,
 			PathInContainer: d.containerPath,
 			CgroupPermissions: d.permissions || 'rwm'
@@ -954,7 +1016,7 @@ export async function createContainer(options: CreateContainerOptions, envId?: n
 	}
 
 	if (options.ulimits && options.ulimits.length > 0) {
-		containerConfig.HostConfig.Ulimits = options.ulimits.map(u => ({
+		containerConfig.HostConfig.Ulimits = options.ulimits.map((u) => ({
 			Name: u.name,
 			Soft: u.soft,
 			Hard: u.hard
@@ -973,7 +1035,12 @@ export async function createContainer(options: CreateContainerOptions, envId?: n
 	return { id: result.Id, start: () => startContainer(result.Id, envId) };
 }
 
-export async function updateContainer(id: string, options: CreateContainerOptions, startAfterUpdate = false, envId?: number | null) {
+export async function updateContainer(
+	id: string,
+	options: CreateContainerOptions,
+	startAfterUpdate = false,
+	envId?: number | null
+) {
 	const oldContainerInfo = await inspectContainer(id, envId);
 	const wasRunning = oldContainerInfo.State.Running;
 
@@ -1003,7 +1070,11 @@ export async function listImages(envId?: number | null): Promise<ImageInfo[]> {
 	}));
 }
 
-export async function pullImage(imageName: string, onProgress?: (data: any) => void, envId?: number | null) {
+export async function pullImage(
+	imageName: string,
+	onProgress?: (data: any) => void,
+	envId?: number | null
+) {
 	// Parse image name and tag to avoid pulling all tags
 	// Docker API: if tag is empty, it pulls ALL tags for the image
 	// Format can be: repo:tag, repo@digest, or just repo (defaults to :latest)
@@ -1089,7 +1160,11 @@ export async function pullImage(imageName: string, onProgress?: (data: any) => v
 }
 
 export async function removeImage(id: string, force = false, envId?: number | null) {
-	const response = await dockerFetch(`/images/${encodeURIComponent(id)}?force=${force}`, { method: 'DELETE' }, envId);
+	const response = await dockerFetch(
+		`/images/${encodeURIComponent(id)}?force=${force}`,
+		{ method: 'DELETE' },
+		envId
+	);
 	if (!response.ok) {
 		const data = await response.json().catch(() => ({}));
 		const error: any = new Error(data.message || 'Failed to remove image');
@@ -1116,7 +1191,7 @@ export async function inspectImage(id: string, envId?: number | null) {
  *   registry.example.com:5000/repo:tag -> { registry: 'registry.example.com:5000', repo: 'repo', tag: 'tag' }
  */
 function parseImageReference(imageName: string): { registry: string; repo: string; tag: string } {
-	let registry = 'index.docker.io';  // Docker Hub's actual host
+	let registry = 'index.docker.io'; // Docker Hub's actual host
 	let repo = imageName;
 	let tag = 'latest';
 
@@ -1160,7 +1235,9 @@ function parseImageReference(imageName: string): { registry: string; repo: strin
  * Find registry credentials from Dockhand's stored registries.
  * Matches by registry host (url field).
  */
-async function findRegistryCredentials(registryHost: string): Promise<{ username: string; password: string } | null> {
+async function findRegistryCredentials(
+	registryHost: string
+): Promise<{ username: string; password: string } | null> {
 	try {
 		// Import here to avoid circular dependency
 		const { getRegistries } = await import('./db.js');
@@ -1181,9 +1258,13 @@ async function findRegistryCredentials(registryHost: string): Promise<{ username
 			for (const reg of registries) {
 				const storedHost = reg.url.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
 				// Match all Docker Hub URL variations
-				if (storedHost === 'docker.io' || storedHost === 'hub.docker.com' ||
-				    storedHost === 'registry.hub.docker.com' || storedHost === 'index.docker.io' ||
-				    storedHost === 'registry-1.docker.io') {
+				if (
+					storedHost === 'docker.io' ||
+					storedHost === 'hub.docker.com' ||
+					storedHost === 'registry.hub.docker.com' ||
+					storedHost === 'index.docker.io' ||
+					storedHost === 'registry-1.docker.io'
+				) {
 					if (reg.username && reg.password) {
 						return { username: reg.username, password: reg.password };
 					}
@@ -1236,7 +1317,9 @@ async function getRegistryBearerToken(registry: string, repo: string): Promise<s
 		if (challenge.startsWith('basic')) {
 			// Basic auth - use credentials if we have them
 			if (credentials) {
-				const basicAuth = Buffer.from(`${credentials.username}:${credentials.password}`).toString('base64');
+				const basicAuth = Buffer.from(`${credentials.username}:${credentials.password}`).toString(
+					'base64'
+				);
 				return `Basic ${basicAuth}`;
 			}
 			return null;
@@ -1269,7 +1352,9 @@ async function getRegistryBearerToken(registry: string, repo: string): Promise<s
 
 		// Add Basic auth header if we have credentials
 		if (credentials) {
-			const basicAuth = Buffer.from(`${credentials.username}:${credentials.password}`).toString('base64');
+			const basicAuth = Buffer.from(`${credentials.username}:${credentials.password}`).toString(
+				'base64'
+			);
 			tokenHeaders['Authorization'] = `Basic ${basicAuth}`;
 		}
 
@@ -1282,11 +1367,10 @@ async function getRegistryBearerToken(registry: string, repo: string): Promise<s
 			return null;
 		}
 
-		const tokenData = await tokenResponse.json() as { token?: string; access_token?: string };
+		const tokenData = (await tokenResponse.json()) as { token?: string; access_token?: string };
 		const token = tokenData.token || tokenData.access_token || null;
 
 		return token ? `Bearer ${token}` : null;
-
 	} catch (e) {
 		console.error('Failed to get registry bearer token:', e);
 		return null;
@@ -1306,7 +1390,7 @@ export async function getRegistryManifestDigest(imageName: string): Promise<stri
 
 		const headers: Record<string, string> = {
 			'User-Agent': 'Dockhand/1.0',
-			'Accept': [
+			Accept: [
 				'application/vnd.docker.distribution.manifest.list.v2+json',
 				'application/vnd.oci.image.index.v1+json',
 				'application/vnd.docker.distribution.manifest.v2+json',
@@ -1415,7 +1499,9 @@ export async function checkImageUpdateAvailable(
 
 export async function tagImage(id: string, repo: string, tag: string, envId?: number | null) {
 	await dockerFetch(
-		`/images/${encodeURIComponent(id)}/tag?repo=${encodeURIComponent(repo)}&tag=${encodeURIComponent(tag)}`,
+		`/images/${encodeURIComponent(id)}/tag?repo=${encodeURIComponent(
+			repo
+		)}&tag=${encodeURIComponent(tag)}`,
 		{ method: 'POST' },
 		envId
 	);
@@ -1497,11 +1583,14 @@ function normalizeImageTag(tag: string): string {
  * (docker.io, ghcr.io, custom registries, etc.)
  * @returns Image ID (sha256:...) or null if not found
  */
-export async function getImageIdByTag(tagName: string, envId?: number | null): Promise<string | null> {
+export async function getImageIdByTag(
+	tagName: string,
+	envId?: number | null
+): Promise<string | null> {
 	try {
 		// First try: Use Docker's image inspect API - this is the most reliable
 		// as Docker knows exactly how to resolve the image name
-		const imageInfo = await inspectImage(tagName, envId) as { Id?: string } | null;
+		const imageInfo = (await inspectImage(tagName, envId)) as { Id?: string } | null;
 		if (imageInfo?.Id) {
 			return imageInfo.Id;
 		}
@@ -1535,7 +1624,11 @@ export async function getImageIdByTag(tagName: string, envId?: number | null): P
  * @param imageIdOrTag - Image ID or tag to remove
  * @param force - Force removal even if image is in use
  */
-export async function removeTempImage(imageIdOrTag: string, envId?: number | null, force = true): Promise<void> {
+export async function removeTempImage(
+	imageIdOrTag: string,
+	envId?: number | null,
+	force = true
+): Promise<void> {
 	try {
 		await removeImage(imageIdOrTag, force, envId);
 	} catch (error: any) {
@@ -1676,7 +1769,11 @@ export async function getVolumeUsage(
 }
 
 export async function removeVolume(name: string, force = false, envId?: number | null) {
-	const response = await dockerFetch(`/volumes/${encodeURIComponent(name)}?force=${force}`, { method: 'DELETE' }, envId);
+	const response = await dockerFetch(
+		`/volumes/${encodeURIComponent(name)}?force=${force}`,
+		{ method: 'DELETE' },
+		envId
+	);
 	if (!response.ok) {
 		const data = await response.json().catch(() => ({}));
 		const error: any = new Error(data.message || 'Failed to remove volume');
@@ -1704,10 +1801,14 @@ export async function createVolume(options: CreateVolumeOptions, envId?: number 
 		DriverOpts: options.driverOpts || {},
 		Labels: options.labels || {}
 	};
-	return dockerJsonRequest('/volumes/create', {
-		method: 'POST',
-		body: JSON.stringify(volumeConfig)
-	}, envId);
+	return dockerJsonRequest(
+		'/volumes/create',
+		{
+			method: 'POST',
+			body: JSON.stringify(volumeConfig)
+		},
+		envId
+	);
 }
 
 // Network operations
@@ -1760,13 +1861,16 @@ export async function listNetworks(envId?: number | null): Promise<NetworkInfo[]
 				auxAddress: cfg.AuxAddress || cfg.auxAddress
 			}))
 		},
-		containers: Object.entries(network.Containers || {}).reduce((acc: any, [id, data]: [string, any]) => {
-			acc[id] = {
-				name: data.Name,
-				ipv4Address: data.IPv4Address
-			};
-			return acc;
-		}, {})
+		containers: Object.entries(network.Containers || {}).reduce(
+			(acc: any, [id, data]: [string, any]) => {
+				acc[id] = {
+					name: data.Name,
+					ipv4Address: data.IPv4Address
+				};
+				return acc;
+			},
+			{}
+		)
 	}));
 }
 
@@ -1821,20 +1925,27 @@ export async function createNetwork(options: CreateNetworkOptions, envId?: numbe
 	if (options.ipam) {
 		networkConfig.IPAM = {
 			Driver: options.ipam.driver || 'default',
-			Config: options.ipam.config?.map(cfg => ({
-				Subnet: cfg.subnet,
-				IPRange: cfg.ipRange,
-				Gateway: cfg.gateway,
-				AuxiliaryAddresses: cfg.auxAddress
-			})).filter(cfg => cfg.Subnet || cfg.Gateway) || [],
+			Config:
+				options.ipam.config
+					?.map((cfg) => ({
+						Subnet: cfg.subnet,
+						IPRange: cfg.ipRange,
+						Gateway: cfg.gateway,
+						AuxiliaryAddresses: cfg.auxAddress
+					}))
+					.filter((cfg) => cfg.Subnet || cfg.Gateway) || [],
 			Options: options.ipam.options || {}
 		};
 	}
 
-	return dockerJsonRequest('/networks/create', {
-		method: 'POST',
-		body: JSON.stringify(networkConfig)
-	}, envId);
+	return dockerJsonRequest(
+		'/networks/create',
+		{
+			method: 'POST',
+			body: JSON.stringify(networkConfig)
+		},
+		envId
+	);
 }
 
 // Network connect/disconnect operations
@@ -1899,13 +2010,22 @@ export async function createExec(options: ExecOptions): Promise<{ Id: string }> 
 		WorkingDir: options.workingDir
 	};
 
-	return dockerJsonRequest(`/containers/${options.containerId}/exec`, {
-		method: 'POST',
-		body: JSON.stringify(execConfig)
-	}, options.envId);
+	return dockerJsonRequest(
+		`/containers/${options.containerId}/exec`,
+		{
+			method: 'POST',
+			body: JSON.stringify(execConfig)
+		},
+		options.envId
+	);
 }
 
-export async function resizeExec(execId: string, cols: number, rows: number, envId?: number | null) {
+export async function resizeExec(
+	execId: string,
+	cols: number,
+	rows: number,
+	envId?: number | null
+) {
 	try {
 		await dockerFetch(`/exec/${execId}/resize?h=${rows}&w=${cols}`, { method: 'POST' }, envId);
 	} catch {
@@ -1944,7 +2064,11 @@ export async function pruneContainers(envId?: number | null) {
 
 export async function pruneImages(dangling = true, envId?: number | null) {
 	const filters = dangling ? '{"dangling":["true"]}' : '{}';
-	return dockerJsonRequest(`/images/prune?filters=${encodeURIComponent(filters)}`, { method: 'POST' }, envId);
+	return dockerJsonRequest(
+		`/images/prune?filters=${encodeURIComponent(filters)}`,
+		{ method: 'POST' },
+		envId
+	);
 }
 
 export async function pruneVolumes(envId?: number | null) {
@@ -1965,11 +2089,18 @@ export async function pruneAll(envId?: number | null) {
 
 // Registry operations
 export async function searchImages(term: string, limit = 25, envId?: number | null) {
-	return dockerJsonRequest(`/images/search?term=${encodeURIComponent(term)}&limit=${limit}`, {}, envId);
+	return dockerJsonRequest(
+		`/images/search?term=${encodeURIComponent(term)}&limit=${limit}`,
+		{},
+		envId
+	);
 }
 
 // List containers with size info (slower operation)
-export async function listContainersWithSize(all = true, envId?: number | null): Promise<Record<string, { sizeRw: number; sizeRootFs: number }>> {
+export async function listContainersWithSize(
+	all = true,
+	envId?: number | null
+): Promise<Record<string, { sizeRw: number; sizeRootFs: number }>> {
 	const containers = await dockerJsonRequest<any[]>(
 		`/containers/json?all=${all}&size=true`,
 		{},
@@ -1987,7 +2118,10 @@ export async function listContainersWithSize(all = true, envId?: number | null):
 }
 
 // Get container top (process list)
-export async function getContainerTop(id: string, envId?: number | null): Promise<{ Titles: string[]; Processes: string[][] }> {
+export async function getContainerTop(
+	id: string,
+	envId?: number | null
+): Promise<{ Titles: string[]; Processes: string[][] }> {
 	return dockerJsonRequest(`/containers/${id}/top`, {}, envId);
 }
 
@@ -2072,7 +2206,7 @@ export async function getDockerEvents(
 export async function volumeExists(volumeName: string, envId?: number | null): Promise<boolean> {
 	try {
 		const volumes = await listVolumes(envId);
-		return volumes.some(v => v.name === volumeName);
+		return volumes.some((v) => v.name === volumeName);
 	} catch {
 		return false;
 	}
@@ -2135,12 +2269,19 @@ export async function runContainer(options: {
 		);
 
 		const buffer = Buffer.from(await logsResponse.arrayBuffer());
-		return demuxDockerStream(buffer, { separateStreams: true }) as { stdout: string; stderr: string };
+		return demuxDockerStream(buffer, { separateStreams: true }) as {
+			stdout: string;
+			stderr: string;
+		};
 	} finally {
 		// Cleanup container if not auto-removed
 		if (options.autoRemove === false) {
 			try {
-				await dockerFetch(`/containers/${containerId}?force=true`, { method: 'DELETE' }, options.envId);
+				await dockerFetch(
+					`/containers/${containerId}?force=true`,
+					{ method: 'DELETE' },
+					options.envId
+				);
 			} catch {
 				// Ignore cleanup errors
 			}
@@ -2192,7 +2333,11 @@ export async function runContainerWithStreaming(options: {
 			console.log(`[Docker] Container name conflict for ${containerName}, attempting cleanup...`);
 			// Try to force remove the conflicting container
 			try {
-				await dockerFetch(`/containers/${containerName}?force=true`, { method: 'DELETE' }, options.envId);
+				await dockerFetch(
+					`/containers/${containerName}?force=true`,
+					{ method: 'DELETE' },
+					options.envId
+				);
 				console.log(`[Docker] Removed stale container ${containerName}`);
 			} catch (removeError) {
 				console.error(`[Docker] Failed to remove stale container:`, removeError);
@@ -2244,7 +2389,11 @@ export async function runContainerWithStreaming(options: {
 							buffer = result.remaining;
 						} catch {
 							// If not base64, try as raw data
-							const result = processStreamFrames(Buffer.from(data), options.onStdout, options.onStderr);
+							const result = processStreamFrames(
+								Buffer.from(data),
+								options.onStdout,
+								options.onStderr
+							);
 							stdout += result.stdout;
 						}
 					},
@@ -2253,7 +2402,10 @@ export async function runContainerWithStreaming(options: {
 					},
 					onError: (error: string) => {
 						// If container finished, treat as success
-						if (error.includes('container') && (error.includes('exited') || error.includes('not running'))) {
+						if (
+							error.includes('container') &&
+							(error.includes('exited') || error.includes('not running'))
+						) {
 							resolve(stdout);
 						} else {
 							reject(new Error(error));
@@ -2395,7 +2547,13 @@ function parseLsOutput(output: string): FileEntry[] {
 
 	for (const line of lines) {
 		// Skip total line, empty lines, and error messages
-		if (!line || line.startsWith('total ') || line.includes('cannot access') || line.includes('Permission denied')) continue;
+		if (
+			!line ||
+			line.startsWith('total ') ||
+			line.includes('cannot access') ||
+			line.includes('Permission denied')
+		)
+			continue;
 
 		let typeChar: string;
 		let perms: string;
@@ -2445,7 +2603,8 @@ function parseLsOutput(output: string): FileEntry[] {
 					let monthStr: string;
 					let dayStr: string;
 					let timeOrYear: string;
-					[, typeChar, perms, owner, group, , , monthStr, dayStr, timeOrYear, nameAndLink] = deviceMatch;
+					[, typeChar, perms, owner, group, , , monthStr, dayStr, timeOrYear, nameAndLink] =
+						deviceMatch;
 					sizeStr = '0'; // Device files don't have a traditional size
 
 					const month = monthMap[monthStr] || '01';
@@ -2546,16 +2705,16 @@ export async function listContainerDirectory(
 	// Commands to try in order of preference
 	const commands = useSimpleLs
 		? [
-			['ls', '-la', safePath],
-			['/bin/ls', '-la', safePath],
-			['/usr/bin/ls', '-la', safePath],
-		]
+				['ls', '-la', safePath],
+				['/bin/ls', '-la', safePath],
+				['/usr/bin/ls', '-la', safePath]
+		  ]
 		: [
-			['ls', '-la', '--time-style=iso', safePath],
-			['ls', '-la', safePath],
-			['/bin/ls', '-la', safePath],
-			['/usr/bin/ls', '-la', safePath],
-		];
+				['ls', '-la', '--time-style=iso', safePath],
+				['ls', '-la', safePath],
+				['/bin/ls', '-la', safePath],
+				['/usr/bin/ls', '-la', safePath]
+		  ];
 
 	let lastError: Error | null = null;
 
@@ -2725,7 +2884,10 @@ export async function writeContainerFile(
 	tarData.set(new TextEncoder().encode(sizeOctal), 124);
 
 	// Mtime (12 bytes octal) - current time
-	const mtime = Math.floor(Date.now() / 1000).toString(8).padStart(11, '0') + '\0';
+	const mtime =
+		Math.floor(Date.now() / 1000)
+			.toString(8)
+			.padStart(11, '0') + '\0';
 	tarData.set(new TextEncoder().encode(mtime), 136);
 
 	// Checksum placeholder (8 bytes) - filled with spaces initially
@@ -2804,7 +2966,18 @@ export async function deleteContainerPath(
 	const safePath = path.replace(/[;&|`$(){}[\]<>'"\\]/g, '');
 
 	// Safety check: don't allow deleting root or critical paths
-	const dangerousPaths = ['/', '/bin', '/sbin', '/usr', '/lib', '/lib64', '/etc', '/var', '/root', '/home'];
+	const dangerousPaths = [
+		'/',
+		'/bin',
+		'/sbin',
+		'/usr',
+		'/lib',
+		'/lib64',
+		'/etc',
+		'/var',
+		'/root',
+		'/home'
+	];
 	if (dangerousPaths.includes(safePath) || safePath === '') {
 		throw new Error('Cannot delete critical system path');
 	}
@@ -2874,7 +3047,11 @@ function getVolumeCacheKey(volumeName: string, envId?: number | null): string {
  */
 async function ensureVolumeHelperImage(envId?: number | null): Promise<void> {
 	// Check if image exists
-	const response = await dockerFetch(`/images/${encodeURIComponent(VOLUME_HELPER_IMAGE)}/json`, {}, envId);
+	const response = await dockerFetch(
+		`/images/${encodeURIComponent(VOLUME_HELPER_IMAGE)}/json`,
+		{},
+		envId
+	);
 
 	if (response.ok) {
 		return; // Image exists
@@ -3027,7 +3204,7 @@ export async function releaseVolumeHelperContainer(
 
 		if (cached) {
 			volumeHelperCache.delete(cacheKey);
-			await removeVolumeHelperContainer(cached.containerId, envId).catch(err => {
+			await removeVolumeHelperContainer(cached.containerId, envId).catch((err) => {
 				console.warn('Failed to cleanup volume helper container:', err);
 			});
 		}
@@ -3054,7 +3231,7 @@ export async function cleanupExpiredVolumeHelpers(): Promise<void> {
 	// Remove from cache and cleanup containers
 	for (const { key, containerId, envId } of expiredEntries) {
 		volumeHelperCache.delete(key);
-		removeVolumeHelperContainer(containerId, envId ?? undefined).catch(err => {
+		removeVolumeHelperContainer(containerId, envId ?? undefined).catch((err) => {
 			console.warn('Failed to cleanup expired volume helper container:', err);
 		});
 	}
@@ -3109,7 +3286,10 @@ async function cleanupStaleVolumeHelpersForEnv(envId?: number | null): Promise<n
 				await removeVolumeHelperContainer(container.Id, envId);
 				removed++;
 			} catch (err) {
-				console.warn(`Failed to remove stale helper container ${container.Names?.[0] || container.Id}:`, err);
+				console.warn(
+					`Failed to remove stale helper container ${container.Names?.[0] || container.Id}:`,
+					err
+				);
 			}
 		}
 
@@ -3125,7 +3305,9 @@ async function cleanupStaleVolumeHelpersForEnv(envId?: number | null): Promise<n
  * Should be called on startup to clean up orphaned containers.
  * @param environments - Optional pre-fetched environments (avoids dynamic import in production)
  */
-export async function cleanupStaleVolumeHelpers(environments: Array<{ id: number }>): Promise<void> {
+export async function cleanupStaleVolumeHelpers(
+	environments: Array<{ id: number }>
+): Promise<void> {
 	console.log('Cleaning up stale volume helper containers...');
 
 	if (!environments || environments.length === 0) {
