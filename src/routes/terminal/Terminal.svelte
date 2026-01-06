@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
 	import { themeStore } from '$lib/stores/theme';
 	import { getMonospaceFont } from '$lib/themes';
+	import { onDestroy, onMount } from 'svelte';
 
 	// Dynamic imports for browser-only xterm
 	let TerminalClass: any;
@@ -19,7 +19,15 @@
 		autoConnect?: boolean;
 	}
 
-	let { containerId, containerName, shell, user, envId, fontSize = 13, autoConnect = true }: Props = $props();
+	let {
+		containerId,
+		containerName,
+		shell,
+		user,
+		envId,
+		fontSize = 13,
+		autoConnect = true
+	}: Props = $props();
 
 	let terminal: any = null;
 	let fitAddon: any = null;
@@ -30,8 +38,12 @@
 	let error = $state<string | null>(null);
 
 	// Expose these via bindable props
-	export function getConnected() { return connected; }
-	export function getError() { return error; }
+	export function getConnected() {
+		return connected;
+	}
+	export function getError() {
+		return error;
+	}
 
 	export function clear() {
 		terminal?.clear();
@@ -180,7 +192,7 @@
 		// In dev mode (vite), connect directly to the WS server on port 5174
 		// In production, connect to the same port as the app
 		const isDev = import.meta.env.DEV;
-		const portPart = isDev ? ':5174' : (window.location.port ? `:${window.location.port}` : '');
+		const portPart = isDev ? ':5174' : window.location.port ? `:${window.location.port}` : '';
 		let wsUrl = `${protocol}//${wsHost}${portPart}/api/containers/${containerId}/exec?shell=${encodeURIComponent(shell)}&user=${encodeURIComponent(user)}`;
 		if (envId) {
 			wsUrl += `&envId=${envId}`;

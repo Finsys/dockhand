@@ -104,10 +104,17 @@
 	}
 
 	function selectContainer(container: ContainerInfo) {
+		// If already selected, do nothing
+		if (selectedContainer && selectedContainer.id === container.id) {
+			dropdownOpen = false;
+			return;
+		}
+
 		// Disconnect from previous container
 		if (selectedContainer) {
 			if (mode === 'exec' && terminalComponent) {
 				terminalComponent.dispose();
+				terminalComponent = undefined;
 			} else if (mode === 'attach' && attachComponent) {
 				attachComponent.dispose();
 			}
@@ -120,6 +127,7 @@
 	function clearSelection() {
 		if (mode === 'exec' && terminalComponent) {
 			terminalComponent.dispose();
+			terminalComponent = undefined;
 		} else if (mode === 'attach' && attachComponent) {
 			attachComponent.dispose();
 		}
