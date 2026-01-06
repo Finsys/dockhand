@@ -13,9 +13,11 @@
 		Copy,
 		RefreshCw,
 		Search,
+		Shell,
 		Terminal as TerminalIcon,
 		Trash2,
-		Unplug
+		Unplug,
+		Zap
 	} from 'lucide-svelte';
 	import { onDestroy, onMount } from 'svelte';
 	import AttachTerminal from './AttachTerminal.svelte';
@@ -199,7 +201,30 @@
 	<div class="flex flex-col flex-1 min-h-0 h-full gap-3">
 		<!-- Header with container selector -->
 		<div class="flex items-center gap-4 flex-wrap">
-			<PageHeader icon={TerminalIcon} title="Attach" />
+			<div class="flex items-center gap-3">
+				<PageHeader icon={TerminalIcon} title="Attach" />
+				<div class="flex items-center rounded-lg bg-muted p-1">
+					<Button
+						size="sm"
+						variant="ghost"
+						href="/terminal"
+						class="h-7 px-2.5 text-xs rounded gap-1.5 text-muted-foreground hover:text-foreground"
+					>
+						<Shell class="w-3.5 h-3.5" />
+						<span>Exec</span>
+					</Button>
+					<div class="w-px h-4 bg-border"></div>
+					<Button
+						size="sm"
+						variant="ghost"
+						disabled
+						class="h-7 px-2.5 text-xs rounded gap-1.5 text-foreground bg-accent/50"
+					>
+						<Zap class="w-3.5 h-3.5" />
+						<span>Attach</span>
+					</Button>
+				</div>
+			</div>
 			<div class="relative flex-1 max-w-md min-w-[200px]">
 				<!-- Search input - always visible, show selected container or placeholder -->
 				<div class="relative">
