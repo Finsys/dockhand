@@ -157,7 +157,10 @@
 
 		error = null;
 		const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-		let wsUrl = `${protocol}//${window.location.host}/api/containers/${containerId}/attach`;
+		const isDev = import.meta.env.DEV;
+		const wsHost = window.location.hostname;
+		const portPart = isDev ? ':5174' : window.location.port ? `:${window.location.port}` : '';
+		let wsUrl = `${protocol}//${wsHost}${portPart}/api/containers/${containerId}/attach`;
 		if (envId) {
 			wsUrl += `?envId=${envId}`;
 		}

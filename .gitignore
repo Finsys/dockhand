@@ -3,6 +3,7 @@
 
 # My data generated files
 data/
+build/
 
 # Node modules
 node_modules/
