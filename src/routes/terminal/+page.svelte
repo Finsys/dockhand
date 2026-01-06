@@ -21,10 +21,14 @@
 		Zap
 	} from 'lucide-svelte';
 	import { onDestroy, onMount } from 'svelte';
+	import AttachTerminal from '../attach/AttachTerminal.svelte';
 	import Terminal from './Terminal.svelte';
 
 	// Track if we've handled the initial container from URL
 	let initialContainerHandled = $state(false);
+
+	// Mode toggle
+	let mode = $state<'exec' | 'attach'>('exec');
 
 	let containers = $state<ContainerInfo[]>([]);
 	let selectedContainer = $state<ContainerInfo | null>(null);
@@ -32,6 +36,7 @@
 
 	// Terminal component reference
 	let terminalComponent: ReturnType<typeof Terminal> | undefined;
+	let attachComponent: ReturnType<typeof AttachTerminal> | undefined;
 	let connected = $state(false);
 
 	// Shell/user options
@@ -79,10 +84,17 @@
 		try {
 			const response = await fetch(appendEnvParam('/api/containers', envId));
 			const allContainers = await response.json();
-			// Only show running containers
-			containers = allContainers.filter((c: ContainerInfo) => c.state === 'running');
+			// In exec mode, only show running containers
+			// In attach mode, only show running containers that are attachable
+			if (mode === 'attach') {
+				containers = allContainers.filter(
+					(c: ContainerInfo) => c.state === 'running' && c.attachable
+				);
+			} else {
+				containers = allContainers.filter((c: ContainerInfo) => c.state === 'running');
+			}
 
-			// If selected container is no longer running, clear selection
+			// If selected container is no longer valid, clear selection
 			if (selectedContainer && !containers.find((c) => c.id === selectedContainer?.id)) {
 				clearSelection();
 			}
@@ -93,8 +105,12 @@
 
 	function selectContainer(container: ContainerInfo) {
 		// Disconnect from previous container
-		if (selectedContainer && terminalComponent) {
-			terminalComponent.dispose();
+		if (selectedContainer) {
+			if (mode === 'exec' && terminalComponent) {
+				terminalComponent.dispose();
+			} else if (mode === 'attach' && attachComponent) {
+				attachComponent.dispose();
+			}
 		}
 		selectedContainer = container;
 		searchQuery = '';
@@ -102,8 +118,10 @@
 	}
 
 	function clearSelection() {
-		if (terminalComponent) {
+		if (mode === 'exec' && terminalComponent) {
 			terminalComponent.dispose();
+		} else if (mode === 'attach' && attachComponent) {
+			attachComponent.dispose();
 		}
 		selectedContainer = null;
 		searchQuery = '';
@@ -132,12 +150,20 @@
 	// Change font size
 	function changeFontSize(newSize: number) {
 		terminalFontSize = newSize;
-		terminalComponent?.setFontSize(newSize);
+		if (mode === 'exec') {
+			terminalComponent?.setFontSize(newSize);
+		} else if (mode === 'attach') {
+			attachComponent?.setFontSize(newSize);
+		}
 	}
 
 	// Handle window resize
 	function handleResize() {
-		terminalComponent?.fit();
+		if (mode === 'exec') {
+			terminalComponent?.fit();
+		} else if (mode === 'attach') {
+			attachComponent?.fit();
+		}
 	}
 
 	onMount(async () => {
@@ -159,8 +185,10 @@
 
 		// Poll connected state from terminal component
 		const connectedPollInterval = setInterval(() => {
-			if (terminalComponent) {
+			if (mode === 'exec' && terminalComponent) {
 				connected = terminalComponent.getConnected();
+			} else if (mode === 'attach' && attachComponent) {
+				connected = attachComponent.getConnected();
 			}
 		}, 500);
 
@@ -175,6 +203,7 @@
 	onDestroy(() => {
 		window.removeEventListener('resize', handleResize);
 		terminalComponent?.dispose();
+		attachComponent?.dispose();
 	});
 </script>
 
@@ -188,13 +217,19 @@
 		<!-- Header with container selector -->
 		<div class="flex items-center gap-4 flex-wrap">
 			<div class="flex items-center gap-3">
-				<PageHeader icon={TerminalIcon} title="Shell" />
+				<PageHeader icon={TerminalIcon} title="Terminal" />
 				<div class="flex items-center rounded-lg bg-muted p-1">
 					<Button
 						size="sm"
 						variant="ghost"
-						disabled
-						class="h-7 px-2.5 text-xs rounded gap-1.5 text-foreground bg-accent/50"
+						onclick={() => {
+							mode = 'exec';
+							clearSelection();
+							fetchContainers();
+						}}
+						class="h-7 px-2.5 text-xs rounded gap-1.5 {mode === 'exec'
+							? 'text-foreground bg-accent/50'
+							: 'text-muted-foreground hover:text-foreground'}"
 					>
 						<Shell class="w-3.5 h-3.5" />
 						<span>Exec</span>
@@ -203,8 +238,14 @@
 					<Button
 						size="sm"
 						variant="ghost"
-						href="/attach"
-						class="h-7 px-2.5 text-xs rounded gap-1.5 text-muted-foreground hover:text-foreground"
+						onclick={() => {
+							mode = 'attach';
+							clearSelection();
+							fetchContainers();
+						}}
+						class="h-7 px-2.5 text-xs rounded gap-1.5 {mode === 'attach'
+							? 'text-foreground bg-accent/50'
+							: 'text-muted-foreground hover:text-foreground'}"
 					>
 						<Zap class="w-3.5 h-3.5" />
 						<span>Attach</span>
@@ -219,7 +260,9 @@
 						type="text"
 						placeholder={selectedContainer
 							? selectedContainer.name
-							: 'Search running containers...'}
+							: mode === 'exec'
+								? 'Search running containers...'
+								: 'Search containers...'}
 						bind:value={searchQuery}
 						onfocus={handleInputFocus}
 						onblur={handleInputBlur}
@@ -238,7 +281,11 @@
 					>
 						{#if filteredContainers().length === 0}
 							<div class="px-3 py-2 text-sm text-muted-foreground">
-								{containers.length === 0 ? 'No running containers' : 'No matches found'}
+								{containers.length === 0
+									? mode === 'exec'
+										? 'No running containers'
+										: 'No containers'
+									: 'No matches found'}
 							</div>
 						{:else}
 							{#each filteredContainers() as container}
@@ -275,40 +322,43 @@
 			{/if}
 
 			{#if !selectedContainer}
-				<div class="flex items-center gap-2">
-					<Label class="text-sm text-muted-foreground">Shell:</Label>
-					<Select.Root type="single" bind:value={selectedShell}>
-						<Select.Trigger class="h-9 w-36">
-							<Shell class="w-4 h-4 mr-2 text-muted-foreground" />
-							<span>{shellOptions.find((o) => o.value === selectedShell)?.label || 'Select'}</span>
-						</Select.Trigger>
-						<Select.Content>
-							{#each shellOptions as option}
-								<Select.Item value={option.value} label={option.label}>
-									<Shell class="w-4 h-4 mr-2 text-muted-foreground" />
-									{option.label}
-								</Select.Item>
-							{/each}
-						</Select.Content>
-					</Select.Root>
-				</div>
-				<div class="flex items-center gap-2">
-					<Label class="text-sm text-muted-foreground">User:</Label>
-					<Select.Root type="single" bind:value={selectedUser}>
-						<Select.Trigger class="h-9 w-40">
-							<User class="w-4 h-4 mr-2 text-muted-foreground" />
-							<span>{userOptions.find((o) => o.value === selectedUser)?.label || 'Select'}</span>
-						</Select.Trigger>
-						<Select.Content>
-							{#each userOptions as option}
-								<Select.Item value={option.value} label={option.label}>
-									<User class="w-4 h-4 mr-2 text-muted-foreground" />
-									{option.label}
-								</Select.Item>
-							{/each}
-						</Select.Content>
-					</Select.Root>
-				</div>
+				{#if mode === 'exec'}
+					<div class="flex items-center gap-2">
+						<Label class="text-sm text-muted-foreground">Shell:</Label>
+						<Select.Root type="single" bind:value={selectedShell}>
+							<Select.Trigger class="h-9 w-36">
+								<Shell class="w-4 h-4 mr-2 text-muted-foreground" />
+								<span>{shellOptions.find((o) => o.value === selectedShell)?.label || 'Select'}</span
+								>
+							</Select.Trigger>
+							<Select.Content>
+								{#each shellOptions as option}
+									<Select.Item value={option.value} label={option.label}>
+										<Shell class="w-4 h-4 mr-2 text-muted-foreground" />
+										{option.label}
+									</Select.Item>
+								{/each}
+							</Select.Content>
+						</Select.Root>
+					</div>
+					<div class="flex items-center gap-2">
+						<Label class="text-sm text-muted-foreground">User:</Label>
+						<Select.Root type="single" bind:value={selectedUser}>
+							<Select.Trigger class="h-9 w-40">
+								<User class="w-4 h-4 mr-2 text-muted-foreground" />
+								<span>{userOptions.find((o) => o.value === selectedUser)?.label || 'Select'}</span>
+							</Select.Trigger>
+							<Select.Content>
+								{#each userOptions as option}
+									<Select.Item value={option.value} label={option.label}>
+										<User class="w-4 h-4 mr-2 text-muted-foreground" />
+										{option.label}
+									</Select.Item>
+								{/each}
+							</Select.Content>
+						</Select.Root>
+					</div>
+				{/if}
 			{/if}
 		</div>
 
@@ -318,7 +368,7 @@
 				<div class="flex items-center justify-center h-full text-muted-foreground">
 					<div class="text-center">
 						<TerminalIcon class="w-12 h-12 mx-auto mb-3 opacity-50" />
-						<p>Select a container to open shell</p>
+						<p>Select a container to {mode === 'exec' ? 'open shell' : 'attach'}</p>
 					</div>
 				</div>
 			{:else}
@@ -330,10 +380,12 @@
 						{#if connected}
 							<span class="inline-flex items-center gap-1 text-xs text-green-500">
 								<span class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
-								Connected
+								{mode === 'exec' ? 'Connected' : 'Attached'}
 							</span>
 						{:else}
-							<span class="text-xs text-zinc-500">Disconnected</span>
+							<span class="text-xs text-zinc-500"
+								>{mode === 'exec' ? 'Disconnected' : 'Detached'}</span
+							>
 						{/if}
 					</div>
 					<div class="flex items-center gap-3">
@@ -358,21 +410,30 @@
 							</Select.Content>
 						</Select.Root>
 						<button
-							onclick={() => terminalComponent?.copyOutput()}
+							onclick={() => {
+								if (mode === 'exec') terminalComponent?.copyOutput();
+								else attachComponent?.copyOutput();
+							}}
 							class="p-1 rounded hover:bg-zinc-800 transition-colors"
 							title="Copy output"
 						>
 							<Copy class="w-3 h-3 text-zinc-500 hover:text-zinc-300" />
 						</button>
 						<button
-							onclick={() => terminalComponent?.clear()}
+							onclick={() => {
+								if (mode === 'exec') terminalComponent?.clear();
+								else attachComponent?.clear();
+							}}
 							class="p-1 rounded hover:bg-zinc-800 transition-colors"
 							title="Clear (Cmd+L)"
 						>
 							<Trash2 class="w-3 h-3 text-zinc-500 hover:text-zinc-300" />
 						</button>
 						<button
-							onclick={() => terminalComponent?.reconnect()}
+							onclick={() => {
+								if (mode === 'exec') terminalComponent?.reconnect();
+								else attachComponent?.reconnect();
+							}}
 							class="p-1 rounded hover:bg-zinc-800 transition-colors"
 							title="Reconnect"
 						>
@@ -381,16 +442,26 @@
 					</div>
 				</div>
 				<div class="flex-1 min-h-0 w-full">
-					{#key selectedContainer.id}
-						<Terminal
-							bind:this={terminalComponent}
-							containerId={selectedContainer.id}
-							containerName={selectedContainer.name}
-							shell={selectedShell}
-							user={selectedUser}
-							{envId}
-							fontSize={terminalFontSize}
-						/>
+					{#key `${selectedContainer.id}-${mode}`}
+						{#if mode === 'exec'}
+							<Terminal
+								bind:this={terminalComponent}
+								containerId={selectedContainer.id}
+								containerName={selectedContainer.name}
+								shell={selectedShell}
+								user={selectedUser}
+								{envId}
+								fontSize={terminalFontSize}
+							/>
+						{:else if mode === 'attach'}
+							<AttachTerminal
+								bind:this={attachComponent}
+								containerId={selectedContainer.id}
+								containerName={selectedContainer.name}
+								{envId}
+								fontSize={terminalFontSize}
+							/>
+						{/if}
 					{/key}
 				</div>
 			{/if}

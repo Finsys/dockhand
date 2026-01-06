@@ -24,6 +24,7 @@ export interface ContainerInfo {
 	}>;
 	networkMode: string;
 	networks: string[];
+	attachable?: boolean;
 }
 
 export interface ImageInfo {
@@ -65,10 +66,13 @@ export interface NetworkInfo {
 			gateway?: string;
 		}>;
 	};
-	containers: Record<string, {
-		name: string;
-		ipv4Address: string;
-	}>;
+	containers: Record<
+		string,
+		{
+			name: string;
+			ipv4Address: string;
+		}
+	>;
 	labels: Record<string, string>;
 }
 
@@ -148,7 +152,15 @@ export interface GitRepository {
 }
 
 // Grid column configuration types
-export type GridId = 'containers' | 'images' | 'imageTags' | 'networks' | 'stacks' | 'volumes' | 'activity' | 'schedules';
+export type GridId =
+	| 'containers'
+	| 'images'
+	| 'imageTags'
+	| 'networks'
+	| 'stacks'
+	| 'volumes'
+	| 'activity'
+	| 'schedules';
 
 export interface ColumnConfig {
 	id: string;

@@ -657,6 +657,7 @@ export interface ContainerInfo {
 	mounts: Array<{ type: string; source: string; destination: string; mode: string; rw: boolean }>;
 	labels: { [key: string]: string };
 	command: string;
+	attachable?: boolean;
 }
 
 export interface ImageInfo {
@@ -674,6 +675,10 @@ export async function listContainers(all = true, envId?: number | null): Promise
 	const restartCounts = new Map<string, number>();
 	const restartingContainers = containers.filter((c) => c.State === 'restarting');
 
+	// Fetch attachable status for running containers
+	const attachableMap = new Map<string, boolean>();
+	const runningContainers = containers.filter((c) => c.State === 'running');
+
 	await Promise.all(
 		restartingContainers.map(async (container) => {
 			try {
@@ -681,6 +686,20 @@ export async function listContainers(all = true, envId?: number | null): Promise
 				restartCounts.set(container.Id, inspect.RestartCount || 0);
 			} catch {
 				// Ignore errors
+			}
+		})
+	);
+
+	await Promise.all(
+		runningContainers.map(async (container) => {
+			try {
+				const inspect = await inspectContainer(container.Id, envId);
+				// A container is attachable if it has TTY or OpenStdin enabled
+				const attachable = inspect.Config?.Tty || inspect.Config?.OpenStdin || false;
+				attachableMap.set(container.Id, attachable);
+			} catch {
+				// Default to not attachable if inspection fails
+				attachableMap.set(container.Id, false);
 			}
 		})
 	);
@@ -728,7 +747,8 @@ export async function listContainers(all = true, envId?: number | null): Promise
 			restartCount: restartCounts.get(container.Id) || 0,
 			mounts,
 			labels: container.Labels || {},
-			command: container.Command || ''
+			command: container.Command || '',
+			attachable: attachableMap.get(container.Id)
 		};
 	});
 }
