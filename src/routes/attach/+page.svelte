@@ -201,7 +201,7 @@
 		<div class="flex items-center gap-4 flex-wrap">
 			<PageHeader icon={TerminalIcon} title="Attach" />
 			<div class="relative flex-1 max-w-md min-w-[200px]">
-				<!-- Search input - always visible, shows selected container or placeholder -->
+				<!-- Search input - always visible, show selected container or placeholder -->
 				<div class="relative">
 					<Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
 					<Input
