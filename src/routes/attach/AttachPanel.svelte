@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { Copy, RefreshCw, Trash2, X } from 'lucide-svelte';
+	import * as Select from '$lib/components/ui/select';
+	import { Copy, GripHorizontal, RefreshCw, Trash2, X } from 'lucide-svelte';
 	import { onDestroy, onMount } from 'svelte';
 	import AttachTerminal from './AttachTerminal.svelte';
 
@@ -100,6 +101,20 @@
 		setTimeout(() => attachComponent?.fit(), 50);
 	}
 
+	// Update font size
+	function updateFontSize(newSize: number) {
+		fontSize = newSize;
+		attachComponent?.setFontSize(newSize);
+		saveSettings();
+	}
+
+	// Close handler
+	function handleClose() {
+		attachComponent?.dispose();
+		connected = false;
+		onClose();
+	}
+
 	// Poll connected state
 	function pollConnected() {
 		if (attachComponent) {
@@ -121,62 +136,101 @@
 
 <div
 	bind:this={panelRef}
-	class="border-t {isDragging ? 'cursor-row-resize' : ''}"
-	style={fillHeight ? 'height: 100%;' : `height: ${panelHeight}px;`}
+	class="border rounded-lg bg-zinc-950 flex flex-col w-full"
+	class:fixed={!visible}
+	class:invisible={!visible}
+	class:pointer-events-none={!visible}
+	class:h-full={fillHeight}
+	style="{fillHeight ? '' : `height: ${panelHeight}px;`} {!visible ? 'left: -9999px;' : ''}"
 >
-	<div class="flex items-center justify-between h-9 px-3 py-1.5 border-b bg-muted/50 shrink-0">
-		<div class="flex items-center gap-2 min-w-0 flex-1">
-			<span class="text-xs font-medium truncate text-muted-foreground">Attach: {containerName}</span
-			>
+	<!-- Drag handle -->
+	<div
+		role="separator"
+		aria-orientation="horizontal"
+		class="h-2 cursor-ns-resize flex items-center justify-center hover:bg-zinc-800 transition-colors rounded-t-lg"
+		onmousedown={startDrag}
+	>
+		<GripHorizontal class="w-8 h-4 text-zinc-600" />
+	</div>
+
+	<!-- Header -->
+	<div
+		class="flex items-center justify-between px-3 py-1.5 border-b border-zinc-800 bg-zinc-900/50"
+	>
+		<div class="flex items-center gap-2">
+			<span class="text-xs text-zinc-400">Attach:</span>
+			<span class="text-xs text-zinc-200 font-medium">{containerName}</span>
 			{#if connected}
-				<span class="inline-flex items-center gap-1 text-xs text-green-500 whitespace-nowrap">
+				<span class="inline-flex items-center gap-1 text-xs text-green-500">
 					<span class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
 					Attached
 				</span>
 			{:else}
-				<span class="text-xs text-zinc-500 whitespace-nowrap">Detached</span>
+				<span class="text-xs text-zinc-500">Detached</span>
 			{/if}
 		</div>
-		<div class="flex items-center gap-2 shrink-0">
-			<button
-				onclick={() => attachComponent?.copyOutput()}
-				title="Copy output"
-				class="p-1 rounded hover:bg-background transition-colors"
+		<div class="flex items-center gap-2">
+			<!-- Font size -->
+			<Select.Root
+				type="single"
+				value={String(fontSize)}
+				onValueChange={(v) => updateFontSize(Number(v))}
 			>
-				<Copy class="w-3.5 h-3.5 text-muted-foreground hover:text-foreground" />
-			</button>
+				<Select.Trigger
+					size="sm"
+					class="!h-5 !py-0 w-14 bg-zinc-800 border-zinc-700 text-xs text-zinc-300 px-1.5 [&_svg]:size-3"
+				>
+					<span>{fontSize}px</span>
+				</Select.Trigger>
+				<Select.Content>
+					{#each fontSizeOptions as size}
+						<Select.Item
+							value={String(size)}
+							label="{size}px"
+							class="pe-2 [&>span:first-child]:hidden">{size}px</Select.Item
+						>
+					{/each}
+				</Select.Content>
+			</Select.Root>
+			<!-- Clear -->
 			<button
 				onclick={() => attachComponent?.clear()}
+				class="p-1 rounded hover:bg-zinc-800 transition-colors"
 				title="Clear"
-				class="p-1 rounded hover:bg-background transition-colors"
 			>
-				<Trash2 class="w-3.5 h-3.5 text-muted-foreground hover:text-foreground" />
+				<Trash2 class="w-3 h-3 text-zinc-500 hover:text-zinc-300" />
 			</button>
+			<!-- Copy -->
 			<button
-				onclick={() => attachComponent?.reconnect()}
-				title="Reconnect"
-				class="p-1 rounded hover:bg-background transition-colors"
+				onclick={() => attachComponent?.copyOutput()}
+				class="p-1 rounded hover:bg-zinc-800 transition-colors"
+				title="Copy output"
 			>
-				<RefreshCw class="w-3.5 h-3.5 text-muted-foreground hover:text-foreground" />
+				<Copy class="w-3 h-3 text-zinc-500 hover:text-zinc-300" />
 			</button>
+			<!-- Reconnect -->
+			{#if !connected}
+				<button
+					onclick={() => attachComponent?.reconnect()}
+					class="flex items-center gap-1 px-1.5 py-0.5 rounded text-xs bg-amber-500/20 ring-1 ring-amber-500/50 text-amber-400 hover:bg-amber-500/30 transition-colors"
+					title="Reconnect"
+				>
+					<RefreshCw class="w-3 h-3" />
+				</button>
+			{/if}
+			<!-- Close -->
 			<button
-				onclick={onClose}
-				title="Close"
-				class="p-1 rounded hover:bg-background transition-colors"
+				onclick={handleClose}
+				class="p-1 rounded hover:bg-zinc-800 transition-colors"
+				title="Close attach"
 			>
-				<X class="w-3.5 h-3.5 text-muted-foreground hover:text-foreground" />
+				<X class="w-3 h-3 text-zinc-500 hover:text-zinc-300" />
 			</button>
 		</div>
 	</div>
 
-	{#if !fillHeight}
-		<div
-			class="h-1 bg-border hover:bg-primary/30 cursor-row-resize transition-colors"
-			onmousedown={startDrag}
-		></div>
-	{/if}
-
-	<div class="flex-1 min-h-0 overflow-hidden">
+	<!-- Attach content -->
+	<div class="flex-1 overflow-hidden p-1">
 		<AttachTerminal bind:this={attachComponent} {containerId} {containerName} {envId} {fontSize} />
 	</div>
 </div>
