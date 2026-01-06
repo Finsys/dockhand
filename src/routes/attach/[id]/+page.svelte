@@ -19,8 +19,6 @@
 
 	// Get params from URL
 	let containerId = $derived($page.params.id);
-	let stdinOpen = $derived($page.url.searchParams.get('stdinOpen') === 'true');
-	let tty = $derived($page.url.searchParams.get('tty') === 'true');
 	let name = $derived($page.url.searchParams.get('name') || 'Container');
 
 	function initTerminal() {
@@ -88,12 +86,7 @@
 		error = null;
 		const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 
-		if (!stdinOpen && !tty) {
-			terminal.writeln('\x1b[31mError: Container has no open stdin or tty to attach to.\x1b[0m');
-			return;
-		}
-
-		const wsUrl = `${protocol}//${window.location.host}/api/containers/${containerId}/attach`;
+		const wsUrl = `${protocol}//${'localhost:5174'}/api/containers/${containerId}/attach`;
 
 		terminal.writeln(`\x1b[90mAttaching to ${name}...\x1b[0m`);
 		terminal.writeln('');
