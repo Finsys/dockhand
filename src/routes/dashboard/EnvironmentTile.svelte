@@ -26,9 +26,10 @@
 		width?: number;
 		height?: number;
 		oneventsclick?: () => void;
+		showStacksBreakdown?: boolean;
 	}
 
-	let { stats, width = 1, height = 1, oneventsclick }: Props = $props();
+	let { stats, width = 1, height = 1, oneventsclick, showStacksBreakdown = true }: Props = $props();
 
 	const EnvIcon = $derived(getIconComponent(stats.icon));
 
@@ -340,7 +341,7 @@
 					{#if stats.collectMetrics && stats.metrics}
 						<DashboardCpuMemoryBars metrics={stats.metrics} collectMetrics={stats.collectMetrics} />
 					{/if}
-					<DashboardResourceStats images={stats.images} volumes={stats.volumes} networks={stats.networks} stacks={stats.stacks} loading={stats.loading} />
+					<DashboardResourceStats images={stats.images} volumes={stats.volumes} networks={stats.networks} stacks={stats.stacks} loading={stats.loading} showStacksBreakdown={showStacksBreakdown} />
 					<DashboardEventsSummary today={stats.events.today} total={stats.events.total} />
 				</div>
 			{:else}
@@ -439,7 +440,7 @@
 					{#if stats.collectMetrics && stats.metrics}
 						<DashboardCpuMemoryBars metrics={stats.metrics} collectMetrics={stats.collectMetrics} />
 					{/if}
-					<DashboardResourceStats images={stats.images} volumes={stats.volumes} networks={stats.networks} stacks={stats.stacks} loading={stats.loading} />
+					<DashboardResourceStats images={stats.images} volumes={stats.volumes} networks={stats.networks} stacks={stats.stacks} loading={stats.loading} showStacksBreakdown={showStacksBreakdown} />
 					<DashboardEventsSummary today={stats.events.today} total={stats.events.total} />
 					{#if stats.recentEvents}
 						<DashboardRecentEvents events={stats.recentEvents} limit={8} onclick={oneventsclick} />
@@ -541,7 +542,7 @@
 					{#if stats.collectMetrics && stats.metrics}
 						<DashboardCpuMemoryBars metrics={stats.metrics} collectMetrics={stats.collectMetrics} />
 					{/if}
-					<DashboardResourceStats images={stats.images} volumes={stats.volumes} networks={stats.networks} stacks={stats.stacks} loading={stats.loading} />
+					<DashboardResourceStats images={stats.images} volumes={stats.volumes} networks={stats.networks} stacks={stats.stacks} loading={stats.loading} showStacksBreakdown={showStacksBreakdown} />
 					<DashboardEventsSummary today={stats.events.today} total={stats.events.total} />
 					{#if stats.recentEvents}
 						<DashboardRecentEvents events={stats.recentEvents} limit={8} onclick={oneventsclick} />
@@ -586,7 +587,7 @@
 						{#if stats.metrics}
 							<DashboardCpuMemoryBars metrics={stats.metrics} collectMetrics={stats.collectMetrics} />
 						{/if}
-						<DashboardResourceStats images={stats.images} volumes={stats.volumes} networks={stats.networks} stacks={stats.stacks} loading={stats.loading} />
+						<DashboardResourceStats images={stats.images} volumes={stats.volumes} networks={stats.networks} stacks={stats.stacks} loading={stats.loading} showStacksBreakdown={showStacksBreakdown} />
 						<DashboardEventsSummary today={stats.events.today} total={stats.events.total} />
 					</div>
 					<!-- Right column -->
@@ -632,7 +633,7 @@
 						{#if stats.metrics}
 							<DashboardCpuMemoryBars metrics={stats.metrics} collectMetrics={stats.collectMetrics} />
 						{/if}
-						<DashboardResourceStats images={stats.images} volumes={stats.volumes} networks={stats.networks} stacks={stats.stacks} loading={stats.loading} />
+						<DashboardResourceStats images={stats.images} volumes={stats.volumes} networks={stats.networks} stacks={stats.stacks} loading={stats.loading} showStacksBreakdown={showStacksBreakdown} />
 						<DashboardEventsSummary today={stats.events.today} total={stats.events.total} />
 						{#if stats.recentEvents}
 							<DashboardRecentEvents events={stats.recentEvents} limit={5} onclick={oneventsclick} />
@@ -684,7 +685,7 @@
 						{#if stats.metrics}
 							<DashboardCpuMemoryBars metrics={stats.metrics} collectMetrics={stats.collectMetrics} />
 						{/if}
-						<DashboardResourceStats images={stats.images} volumes={stats.volumes} networks={stats.networks} stacks={stats.stacks} loading={stats.loading} />
+						<DashboardResourceStats images={stats.images} volumes={stats.volumes} networks={stats.networks} stacks={stats.stacks} loading={stats.loading} showStacksBreakdown={showStacksBreakdown} />
 						<DashboardEventsSummary today={stats.events.today} total={stats.events.total} />
 						{#if stats.recentEvents}
 							<DashboardRecentEvents events={stats.recentEvents} limit={10} onclick={oneventsclick} />

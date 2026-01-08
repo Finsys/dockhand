@@ -994,6 +994,7 @@
 									width={2}
 									height={Math.max(item.h, 2)}
 									oneventsclick={() => handleEventsClick(tile.stats!.id)}
+									showStacksBreakdown={false}
 								/>
 							</div>
 						{/if}
