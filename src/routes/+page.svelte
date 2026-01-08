@@ -12,6 +12,7 @@
 	import DraggableGrid, { type GridItemLayout } from './dashboard/DraggableGrid.svelte';
 	import { dashboardPreferences, dashboardData, GRID_COLS, GRID_ROW_HEIGHT, type TileItem } from '$lib/stores/dashboard';
 	import { currentEnvironment } from '$lib/stores/environment';
+	import { IsMobile } from '$lib/hooks/is-mobile.svelte.js';
 	import type { EnvironmentStats } from './api/dashboard/stats/+server';
 	import { getLabelColor, getLabelBgColor } from '$lib/utils/label-colors';
 
@@ -43,6 +44,8 @@
 	let initialLoading = $state(true);
 	let refreshing = $state(false);
 	let prefsLoaded = $state(false);
+	const mobileWatcher = new IsMobile();
+	const isMobile = $derived.by(() => mobileWatcher.current);
 
 	// Label filtering - load from localStorage
 	let filterLabels = $state<string[]>([]);
@@ -112,6 +115,9 @@
 			const tileLabels = tile?.stats?.labels || [];
 			return tileLabels.some(label => filterLabels.includes(label));
 		});
+	});
+	const orderedGridItems = $derived.by(() => {
+		return [...filteredGridItems].sort((a, b) => (a.y - b.y) || (a.x - b.x));
 	});
 
 	// AbortController for SSE stream cleanup
@@ -965,36 +971,67 @@
 			</Button>
 		</div>
 	{:else}
-		<!-- Custom Draggable Grid -->
-		<DraggableGrid
-			items={filteredGridItems}
-			cols={GRID_COLS}
-			rowHeight={GRID_ROW_HEIGHT}
-			gap={10}
-			minW={1}
-			maxW={2}
-			minH={1}
-			maxH={4}
-			onchange={handleGridChange}
-			onitemclick={handleTileClick}
-		>
-			{#snippet children({ item })}
-				{@const tile = getTileById(item.id)}
-				{#if tile}
-					{#if tile.loading && !tile.stats}
-						<!-- Show skeleton while loading -->
-						<EnvironmentTileSkeleton
-							name={tile.info?.name}
-							host={tile.info?.host}
-							width={item.w}
-							height={item.h}
-						/>
-					{:else if tile.stats}
-						<!-- Show actual tile with data -->
-						<EnvironmentTile stats={tile.stats} width={item.w} height={item.h} oneventsclick={() => handleEventsClick(tile.stats!.id)} />
+		{#if isMobile}
+			<div class="flex flex-col gap-3">
+				{#each orderedGridItems as item (item.id)}
+					{@const tile = getTileById(item.id)}
+					{#if tile}
+						{#if tile.loading && !tile.stats}
+							<!-- Show skeleton while loading -->
+							<div class="w-full">
+								<EnvironmentTileSkeleton
+									name={tile.info?.name}
+									host={tile.info?.host}
+									width={2}
+									height={Math.max(item.h, 2)}
+								/>
+							</div>
+						{:else if tile.stats}
+							<!-- Show actual tile with data -->
+							<div class="w-full cursor-pointer" onclick={() => handleTileClick(tile.stats!.id)}>
+								<EnvironmentTile
+									stats={tile.stats}
+									width={2}
+									height={Math.max(item.h, 2)}
+									oneventsclick={() => handleEventsClick(tile.stats!.id)}
+								/>
+							</div>
+						{/if}
 					{/if}
-				{/if}
-			{/snippet}
-		</DraggableGrid>
+				{/each}
+			</div>
+		{:else}
+			<!-- Custom Draggable Grid -->
+			<DraggableGrid
+				items={filteredGridItems}
+				cols={GRID_COLS}
+				rowHeight={GRID_ROW_HEIGHT}
+				gap={10}
+				minW={1}
+				maxW={2}
+				minH={1}
+				maxH={4}
+				onchange={handleGridChange}
+				onitemclick={handleTileClick}
+			>
+				{#snippet children({ item })}
+					{@const tile = getTileById(item.id)}
+					{#if tile}
+						{#if tile.loading && !tile.stats}
+							<!-- Show skeleton while loading -->
+							<EnvironmentTileSkeleton
+								name={tile.info?.name}
+								host={tile.info?.host}
+								width={item.w}
+								height={item.h}
+							/>
+						{:else if tile.stats}
+							<!-- Show actual tile with data -->
+							<EnvironmentTile stats={tile.stats} width={item.w} height={item.h} oneventsclick={() => handleEventsClick(tile.stats!.id)} />
+						{/if}
+					{/if}
+				{/snippet}
+			</DraggableGrid>
+		{/if}
 	{/if}
 </div>
