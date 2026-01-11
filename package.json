@@ -1,7 +1,7 @@
 {
 	"name": "dockhand",
 	"private": true,
-	"version": "1.0.3",
+	"version": "1.0.7",
 	"type": "module",
 	"scripts": {
 		"dev": "bunx --bun vite dev",
