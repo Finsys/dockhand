@@ -12,14 +12,12 @@
 	interface Props {
 		containerId: string;
 		containerName: string;
-		shell: string;
-		user: string;
 		envId: number | null;
 		fontSize?: number;
 		autoConnect?: boolean;
 	}
 
-	let { containerId, containerName, shell, user, envId, fontSize = 13, autoConnect = true }: Props = $props();
+	let { containerId, containerName, envId, fontSize = 13, autoConnect = true }: Props = $props();
 
 	let terminal: any = null;
 	let fitAddon: any = null;
@@ -30,8 +28,12 @@
 	let error = $state<string | null>(null);
 
 	// Expose these via bindable props
-	export function getConnected() { return connected; }
-	export function getError() { return error; }
+	export function getConnected() {
+		return connected;
+	}
+	export function getError() {
+		return error;
+	}
 
 	export function clear() {
 		terminal?.clear();
@@ -155,7 +157,7 @@
 		// Handle terminal input
 		terminal.onData((data: string) => {
 			if (ws && ws.readyState === WebSocket.OPEN) {
-				ws.send(JSON.stringify({ type: 'input', data }));
+				ws.send(JSON.stringify({ type: 'input', data: data }));
 			}
 		});
 
@@ -181,13 +183,13 @@
 		// In production, connect to the same port as the app
 		const isDev = import.meta.env.DEV;
 		const portPart = isDev ? ':5174' : window.location.port ? `:${window.location.port}` : '';
-		let wsUrl = `${protocol}//${wsHost}${portPart}/api/containers/${containerId}/exec?shell=${encodeURIComponent(shell)}&user=${encodeURIComponent(user)}`;
+		let wsUrl = `${protocol}//${wsHost}${portPart}/api/containers/${containerId}/attach`;
+
 		if (envId) {
-			wsUrl += `&envId=${envId}`;
+			wsUrl += `?envId=${envId}`;
 		}
 
-		terminal.writeln(`\x1b[90mConnecting to ${containerName}...\x1b[0m`);
-		terminal.writeln(`\x1b[90mShell: ${shell}, User: ${user || 'default'}\x1b[0m`);
+		terminal.writeln(`\x1b[90mAttaching to ${containerName}...\x1b[0m`);
 		terminal.writeln('');
 
 		ws = new WebSocket(wsUrl);
@@ -212,7 +214,7 @@
 					error = msg.message;
 					terminal?.writeln(`\x1b[31mError: ${msg.message}\x1b[0m`);
 				} else if (msg.type === 'exit') {
-					terminal?.writeln('\x1b[90m\r\nSession ended.\x1b[0m');
+					terminal?.writeln('\x1b[90m\r\nAttachment ended.\x1b[0m');
 					connected = false;
 				}
 			} catch {
@@ -227,7 +229,7 @@
 
 		ws.onclose = () => {
 			connected = false;
-			terminal?.writeln('\x1b[90mDisconnected.\x1b[0m');
+			terminal?.writeln('\x1b[90mDetached.\x1b[0m');
 		};
 	}
 

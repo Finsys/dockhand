@@ -54,6 +54,17 @@ var handleUpgrade = (request, bunServer) => {
 		}
 	}
 
+	// Handle terminal attach WebSocket
+	if (url.pathname.includes('/api/containers/') && url.pathname.includes('/attach')) {
+		const pathParts = url.pathname.split('/');
+		const containerIdIndex = pathParts.indexOf('containers') + 1;
+		const containerId = pathParts[containerIdIndex];
+		const envId = url.searchParams.get('envId') ? parseInt(url.searchParams.get('envId'), 10) : undefined;
+		if (bunServer.upgrade(request, { data: { type: 'terminal', mode: 'attach', containerId, envId } })) {
+			return new Response(null, { status: 101 });
+		}
+	}
+
 	// Handle Hawser Edge WebSocket
 	if (url.pathname === '/api/hawser/connect') {
 		if (bunServer.upgrade(request, { data: { type: 'hawser' } })) {
@@ -415,10 +426,11 @@ const combinedWebsocket = {
 		const connId = 'ws-' + (++_wsConnCounter);
 		ws.data = ws.data || {};
 		ws.data.connId = connId;
-		const { containerId, shell, user, envId } = ws.data;
+		const { containerId, shell, user, envId, mode } = ws.data;
 		if (!containerId) { ws.send(JSON.stringify({ type: 'error', message: 'No container ID' })); ws.close(); return; }
 		const target = await _getDockerTarget(envId);
-		console.log('[WS] Open:', connId, containerId, 'target:', target.type);
+		const isAttach = mode === 'attach';
+		console.log('[WS] Open:', connId, containerId, 'mode:', mode || 'exec', 'target:', target.type);
 
 		// Handle Hawser Edge terminal
 		if (target.type === 'hawser-edge') {
@@ -427,13 +439,32 @@ const combinedWebsocket = {
 			const execId = crypto.randomUUID();
 			_edgeExecSessions.set(execId, { ws, execId, environmentId: target.environmentId });
 			ws.data.edgeExecId = execId;
-			conn.ws.send(JSON.stringify({ type: 'exec_start', execId, containerId, cmd: shell || '/bin/sh', user: user || 'root', cols: 120, rows: 30 }));
+			if (isAttach) {
+				conn.ws.send(JSON.stringify({ type: 'attach', containerId, attachId: execId }));
+			} else {
+				conn.ws.send(JSON.stringify({ type: 'exec_start', execId, containerId, cmd: shell || '/bin/sh', user: user || 'root', cols: 120, rows: 30 }));
+			}
 			return;
 		}
 
 		try {
-			const exec = await createExec(containerId, [shell || '/bin/sh'], user || 'root', target);
-			const execId = exec.Id;
+			let execId;
+			let httpRequest;
+			
+			if (isAttach) {
+				// Attach directly to container streams
+				execId = crypto.randomUUID();
+				const tokenHeader = target.type === 'tcp' && target.hawserToken ? 'X-Hawser-Token: ' + target.hawserToken + '\\r\\n' : '';
+				httpRequest = 'POST /containers/' + containerId + '/attach?stream=1&stdout=1&stderr=1&stdin=1 HTTP/1.1\\r\\nHost: localhost\\r\\nContent-Type: application/json\\r\\n' + tokenHeader + 'Connection: Upgrade\\r\\nUpgrade: tcp\\r\\nContent-Length: 0\\r\\n\\r\\n';
+			} else {
+				// Create exec instance for shell
+				const exec = await createExec(containerId, [shell || '/bin/sh'], user || 'root', target);
+				execId = exec.Id;
+				const body = JSON.stringify({ Detach: false, Tty: true });
+				const tokenHeader = target.type === 'tcp' && target.hawserToken ? 'X-Hawser-Token: ' + target.hawserToken + '\\r\\n' : '';
+				httpRequest = 'POST /exec/' + execId + '/start HTTP/1.1\\r\\nHost: localhost\\r\\nContent-Type: application/json\\r\\n' + tokenHeader + 'Connection: Upgrade\\r\\nUpgrade: tcp\\r\\nContent-Length: ' + body.length + '\\r\\n\\r\\n' + body;
+			}
+			
 			let dockerStream;
 			let headersStripped = false;
 			let isChunked = false;
@@ -454,9 +485,7 @@ const combinedWebsocket = {
 				close() { if (ws.readyState === 1) { ws.send(JSON.stringify({ type: 'exit' })); ws.close(); } },
 				error() {},
 				open(socket) {
-					const body = JSON.stringify({ Detach: false, Tty: true });
-					const tokenHeader = target.type === 'tcp' && target.hawserToken ? 'X-Hawser-Token: ' + target.hawserToken + '\\r\\n' : '';
-					socket.write('POST /exec/' + execId + '/start HTTP/1.1\\r\\nHost: localhost\\r\\nContent-Type: application/json\\r\\n' + tokenHeader + 'Connection: Upgrade\\r\\nUpgrade: tcp\\r\\nContent-Length: ' + body.length + '\\r\\n\\r\\n' + body);
+					socket.write(httpRequest);
 				}
 			};
 			if (target.type === 'unix') {

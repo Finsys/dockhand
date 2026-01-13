@@ -1,11 +1,11 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import tailwindcss from '@tailwindcss/vite';
-import { defineConfig, type Plugin } from 'vite';
+import { Database } from 'bun:sqlite';
 import { execSync } from 'child_process';
 import { existsSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
-import { Database } from 'bun:sqlite';
+import { defineConfig, type Plugin } from 'vite';
 
 const WS_PORT = 5174;
 
@@ -67,6 +67,14 @@ function buildExecStartHttpRequest(execId: string, target: DockerTarget): string
 		? `X-Hawser-Token: ${target.hawserToken}\r\n`
 		: '';
 	return `POST /exec/${execId}/start HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n${tokenHeader}Connection: Upgrade\r\nUpgrade: tcp\r\nContent-Length: ${body.length}\r\n\r\n${body}`;
+}
+
+// ============ Attach API Helpers ===========
+
+function buildAttachHttpRequest(containerId: string, target: DockerTarget): string {
+	const tokenHeader =
+		target.type === 'tcp' && target.hawserToken ? `X-Hawser-Token: ${target.hawserToken}\r\n` : '';
+	return `POST /containers/${containerId}/attach?stream=1&stdout=1&stderr=1&stdin=1 HTTP/1.1\r\nHost: localhost\r\n${tokenHeader}Connection: Upgrade\r\nUpgrade: tcp\r\n\r\n`;
 }
 
 // ============ Stream Processing ============
@@ -442,6 +450,8 @@ function webSocketPlugin(): Plugin {
 						const containerIdIndex = pathParts.indexOf('containers') + 1;
 						const containerId = pathParts[containerIdIndex];
 
+						const isAttach = url.pathname.includes('/attach');
+
 						const shell = url.searchParams.get('shell') || '/bin/sh';
 						const user = url.searchParams.get('user') || 'root';
 						const envIdParam = url.searchParams.get('envId');
@@ -453,8 +463,10 @@ function webSocketPlugin(): Plugin {
 							return;
 						}
 
+						console.log(envId)
 						const target = getDockerTarget(envId);
-						console.log('[Terminal WS] Open connId:', connId, 'container:', containerId, 'target:', target.type);
+						const mode = isAttach ? 'attach' : 'exec';
+						console.log('[Terminal WS] Open connId:', connId, 'container:', containerId, 'target:', 'mode:', mode, target.type);
 
 						try {
 							// Handle Hawser Edge mode differently - use WebSocket protocol
@@ -463,6 +475,17 @@ function webSocketPlugin(): Plugin {
 								if (!conn) {
 									ws.send(JSON.stringify({ type: 'error', message: 'Edge agent not connected' }));
 									ws.close();
+									return;
+								}
+
+								if(isAttach) {
+									// For attach, send attach_start message
+									const attachId = crypto.randomUUID();
+									console.log('[Terminal WS] Starting Edge attach:', attachId, 'container:', containerId);
+									edgeExecSessions.set(attachId, { ws, execId: attachId, environmentId: target.environmentId });
+
+									(ws.data as any).edgeExecId = attachId;
+									conn.ws.send(JSON.stringify({ type: 'attach', containerId, attachId }));
 									return;
 								}
 
@@ -480,9 +503,20 @@ function webSocketPlugin(): Plugin {
 								return;
 							}
 
-							// Direct Docker connection (unix or tcp/hawser-standard)
-							const exec = await createExecForWs(containerId, [shell], user, target);
-							const execId = exec.Id;
+							let httpRequest: string
+							let execId: string;
+
+							if(isAttach) {
+								// Attach mode
+								execId = crypto.randomUUID();
+								httpRequest = buildAttachHttpRequest(containerId, target);
+								console.log("[Terminal WS] Attaching to container: ", containerId, "execId:", execId);
+							} else {
+								// Exec mode
+								const exec = await createExecForWs(containerId, [shell], user, target);
+								httpRequest = buildExecStartHttpRequest(exec.Id, target);
+								console.log("[Terminal WS] Created exec: ", exec.Id, "for container:", containerId);
+							}
 
 							// Track connection state (using object for mutability across closures)
 							let headersStripped = false;
@@ -526,8 +560,6 @@ function webSocketPlugin(): Plugin {
 								},
 								error() {},
 								open(socket: any) {
-									// Send exec start request (using shared helper)
-									const httpRequest = buildExecStartHttpRequest(execId, target);
 									socket.write(httpRequest);
 								}
 							};
