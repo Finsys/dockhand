@@ -51,9 +51,11 @@
 		ShieldX,
 		Shield,
 		ShieldCheck,
-		Box
+		Box,
+		Zap
 	} from 'lucide-svelte';
 	import { broom } from '@lucide/lab';
+	import AttachPanel from '../attach/AttachPanel.svelte';
 	import CreateContainerModal from './CreateContainerModal.svelte';
 	import EditContainerModal from './EditContainerModal.svelte';
 	import TerminalPanel from '../terminal/TerminalPanel.svelte';
@@ -206,10 +208,26 @@
 		user: string;
 	}
 	let activeTerminals = $state<ActiveTerminal[]>([]);
-	let currentTerminalContainerId = $state<string | null>(null);
 	let terminalPopoverStates = $state<Record<string, boolean>>({});
 	let terminalShell = $state('/bin/bash');
 	let terminalUser = $state('root');
+
+	// Attach state - track active attach sessions per container
+	interface ActiveAttach {
+		containerId: string;
+		containerName: string;
+	}
+	let activeAttach = $state<ActiveAttach[]>([]);
+
+	// Helper to check if container has active terminal
+	function hasActiveAttach(containerId: string): boolean {
+		return activeAttach.some(t => t.containerId === containerId);
+	}
+
+	// Helper to get active terminal
+	function getActiveAttach(containerId: string): ActiveAttach | undefined {
+		return activeAttach.find(t => t.containerId === containerId);
+	}
 
 	// Confirmation popover state
 	let confirmStopId = $state<string | null>(null);
@@ -530,7 +548,6 @@
 		containerName: string;
 	}
 	let activeLogs = $state<ActiveLogs[]>([]);
-	let currentLogsContainerId = $state<string | null>(null);
 
 	// Helper to check if container has active logs
 	function hasActiveLogs(containerId: string): boolean {
@@ -1023,8 +1040,7 @@
 		const existingTerminal = getActiveTerminal(container.id);
 		if (existingTerminal) {
 			// Just show the existing terminal
-			currentTerminalContainerId = container.id;
-			terminalPopoverStates[container.id] = false;
+			return;
 		} else {
 			// Show popover to configure new terminal
 			terminalPopoverStates[container.id] = true;
@@ -1032,6 +1048,11 @@
 	}
 
 	function startTerminal(container: ContainerInfo) {
+		// Check if we already have 2 active sessions
+		if (activeTerminals.length + activeAttach.length >= 2) {
+			toast.error('Maximum 2 terminal sessions allowed');
+			return;
+		}
 		// Create new terminal session
 		const terminal: ActiveTerminal = {
 			containerId: container.id,
@@ -1040,22 +1061,35 @@
 			user: terminalUser
 		};
 		activeTerminals = [...activeTerminals, terminal];
-		currentTerminalContainerId = container.id;
-		terminalPopoverStates[container.id] = false;
 	}
 
 	function closeTerminal(containerId: string) {
 		activeTerminals = activeTerminals.filter(t => t.containerId !== containerId);
-		if (currentTerminalContainerId === containerId) {
-			currentTerminalContainerId = null;
+	}
+
+	function startAttach(container: ContainerInfo) {
+		// Check if we already have 2 active sessions
+		if (activeTerminals.length + activeAttach.length >= 2) {
+			toast.error('Maximum 2 terminal sessions allowed');
+			return;
 		}
+		// Create new attach session - automatically open it
+		const attach: ActiveAttach = {
+			containerId: container.id,
+			containerName: container.name
+		};
+		activeAttach = [...activeAttach, attach];
+	}
+
+	function closeAttach(containerId: string) {
+		activeAttach = activeAttach.filter((a) => a.containerId !== containerId);
 	}
 
 	function showLogs(container: ContainerInfo) {
 		// Check if there's already active logs for this container
 		if (hasActiveLogs(container.id)) {
 			// Just show the existing logs
-			currentLogsContainerId = container.id;
+			return;
 		} else {
 			// Create new logs session
 			const logs: ActiveLogs = {
@@ -1063,33 +1097,15 @@
 				containerName: container.name
 			};
 			activeLogs = [...activeLogs, logs];
-			currentLogsContainerId = container.id;
 		}
 	}
 
 	function closeLogs(containerId: string) {
 		activeLogs = activeLogs.filter(l => l.containerId !== containerId);
-		if (currentLogsContainerId === containerId) {
-			currentLogsContainerId = null;
-		}
 	}
 
 	function selectContainer(container: ContainerInfo) {
-		// Handle logs - show if container has active logs, hide otherwise
-		if (hasActiveLogs(container.id)) {
-			currentLogsContainerId = container.id;
-		} else if (currentLogsContainerId) {
-			// Hide current logs but keep the session active
-			currentLogsContainerId = null;
-		}
-
-		// Handle terminal - show if container has active terminal, hide otherwise
-		if (hasActiveTerminal(container.id)) {
-			currentTerminalContainerId = container.id;
-		} else if (currentTerminalContainerId) {
-			// Hide current terminal but keep the session active
-			currentTerminalContainerId = null;
-		}
+		// No longer needed since all panels are shown
 	}
 
 	function editContainer(id: string) {
@@ -1376,42 +1392,32 @@
 				defaultIcon={Box}
 			/>
 			<div class="flex gap-2">
-				{#if $canAccess('containers', 'create')}
-				<Button size="sm" variant="secondary" onclick={() => (showCreateModal = true)}>
-					<Plus class="w-3.5 h-3.5 mr-1" />
-					Create
-				</Button>
-				{/if}
-				<Button
-					size="sm"
-					variant="outline"
-					onclick={checkForUpdates}
-					disabled={updateCheckStatus === 'checking'}
-					title="Check for available updates"
-				>
-					{#if updateCheckStatus === 'checking'}
-						<CircleArrowUp class="w-3.5 h-3.5 mr-1 animate-spin" />
-					{:else if updateCheckStatus === 'none' || updateCheckStatus === 'found'}
-						<Check class="w-3.5 h-3.5 mr-1 text-green-600" />
-					{:else if updateCheckStatus === 'error'}
-						<XCircle class="w-3.5 h-3.5 mr-1 text-destructive" />
-					{:else}
-						<CircleArrowUp class="w-3.5 h-3.5 mr-1" />
+					{#if $canAccess('containers', 'create')}
+					<Button size="sm" variant="secondary" onclick={() => (showCreateModal = true)}>
+						<Plus class="w-3.5 h-3.5 mr-1" />
+						Create
+					</Button>
 					{/if}
-					Check for updates
-				</Button>
-				{#if batchUpdateContainerIds.length > 0}
-				<Button
-					size="sm"
-					variant="outline"
-					onclick={updateAllContainers}
-					class="border-amber-500/40 text-amber-600 hover:bg-amber-500/10 hover:border-amber-500"
-					title="Update all containers with available updates"
-				>
-					<CircleArrowUp class="w-3.5 h-3.5 mr-1" />
-					Update all ({batchUpdateContainerIds.length})
-				</Button>
-				{/if}
+
+					<!-- Check for updates -->
+					<Button size="sm" variant="outline" onclick={checkForUpdates} title="Check for container updates">
+						{#if updateCheckStatus === 'checking'}
+							<CircleArrowUp class="w-3.5 h-3.5 mr-1 animate-spin" />
+						{:else if updateCheckStatus === 'none' || updateCheckStatus === 'found'}
+							<Check class="w-3.5 h-3.5 mr-1 text-green-600" />
+						{:else if updateCheckStatus === 'error'}
+							<XCircle class="w-3.5 h-3.5 mr-1 text-destructive" />
+						{:else}
+							<CircleArrowUp class="w-3.5 h-3.5 mr-1" />
+						{/if}
+						Check for updates
+					</Button>
+
+					<!-- Update all (open batch modal) -->
+					<Button size="sm" variant="outline" onclick={updateAllContainers} disabled={batchUpdateContainerIds.length === 0} title="Update all containers with available updates">
+						<CircleArrowUp class="w-3.5 h-3.5 mr-1" />
+						Update all ({batchUpdateContainerIds.length})
+					</Button>
 				{#if $canAccess('containers', 'remove')}
 				<ConfirmPopover
 					open={confirmPrune}
@@ -1624,15 +1630,12 @@
 				highlightedKey={highlightedRowId}
 				rowClass={(container) => {
 					let classes = '';
-					if (currentLogsContainerId === container.id) classes += 'bg-blue-500/10 hover:bg-blue-500/15 ';
-					if (currentTerminalContainerId === container.id) classes += 'bg-green-500/10 hover:bg-green-500/15 ';
+					if (hasActiveLogs(container.id)) classes += 'bg-blue-500/10 hover:bg-blue-500/15 ';
+					if (hasActiveTerminal(container.id)) classes += 'bg-green-500/10 hover:bg-green-500/15 ';
 					if ($appSettings.highlightUpdates && containersWithUpdatesSet.has(container.id)) classes += 'has-update ';
 					return classes;
 				}}
 				onRowClick={(container, e) => {
-					if (activeLogs.length > 0 || activeTerminals.length > 0) {
-						selectContainer(container);
-					}
 					highlightedRowId = highlightedRowId === container.id ? null : container.id;
 				}}
 			>
@@ -1906,8 +1909,8 @@
 							{#if hasActiveLogs(container.id)}
 								<button
 									type="button"
-									onclick={(e) => { e.stopPropagation(); currentLogsContainerId = container.id; }}
-									title="Show logs"
+									onclick={(e) => { e.stopPropagation(); closeLogs(container.id); }}
+									title="Close logs"
 									class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
 								>
 									<FileText class="w-4 h-4 text-blue-400" style="filter: drop-shadow(0 0 4px rgba(96,165,250,0.9)) drop-shadow(0 0 8px rgba(96,165,250,0.6));" strokeWidth={2.5} />
@@ -1923,74 +1926,112 @@
 								</button>
 							{/if}
 							{/if}
-							{#if container.state === 'running' && $canAccess('containers', 'exec')}
-							{#if hasActiveTerminal(container.id)}
-								<button
-									type="button"
-									onclick={(e) => { e.stopPropagation(); currentTerminalContainerId = container.id; }}
-									title="Show terminal"
-									class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
-								>
-									<Terminal class="w-4 h-4 text-green-400" style="filter: drop-shadow(0 0 4px rgba(74,222,128,0.9)) drop-shadow(0 0 8px rgba(74,222,128,0.6));" strokeWidth={2.5} />
-								</button>
-							{:else}
-								<Popover.Root open={terminalPopoverStates[container.id] ?? false} onOpenChange={(open) => { terminalPopoverStates[container.id] = open; }}>
-									<Popover.Trigger
-										onclick={(e: MouseEvent) => e.stopPropagation()}
-										class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
+							   {#if container.state === 'running' && $canAccess('containers', 'exec')}
+							   {#if hasActiveTerminal(container.id) || hasActiveAttach(container.id)}
+								   <button
+									   type="button"
+									   onclick={(e) => {
+										   e.stopPropagation();
+										   if (hasActiveTerminal(container.id)) {
+											   closeTerminal(container.id);
+										   } else if (hasActiveAttach(container.id)) {
+											   closeAttach(container.id);
+										   }
+									   }}
+									   title={hasActiveTerminal(container.id) || hasActiveAttach(container.id) ? "Close terminal" : "Open terminal"}
+									   class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
+								   >
+									   {#if hasActiveAttach(container.id) && hasActiveTerminal(container.id)}
+										   <Terminal
+											   class="w-4 h-4 text-cyan-400"
+											   style="filter: drop-shadow(0 0 4px #06b6d4) drop-shadow(0 0 8px #06b6d4);"
+											   strokeWidth={2.5}
+										   />
+									   {:else if hasActiveAttach(container.id)}
+										   <Terminal
+											   class="w-4 h-4 text-yellow-400"
+											   style="filter: drop-shadow(0 0 4px #facc15) drop-shadow(0 0 8px #facc15);"
+											   strokeWidth={2.5}
+										   />
+									   {:else}
+										   <Terminal
+											   class="w-4 h-4 text-green-400"
+											   style="filter: drop-shadow(0 0 4px #4ade80) drop-shadow(0 0 8px #4ade80);"
+											   strokeWidth={2.5}
+										   />
+									   {/if}
+								   </button>
+							   {:else}
+									<Popover.Root
+										open={terminalPopoverStates[container.id] ?? false}
+										onOpenChange={(open) => {
+											terminalPopoverStates[container.id] = open;
+										}}
 									>
-										<Terminal class="w-3 h-3 text-muted-foreground hover:text-foreground" />
-									</Popover.Trigger>
-									<Popover.Content class="w-56 p-0" align="end" sideOffset={5}>
-										<div class="px-3 py-2 border-b bg-muted/50">
-											<div class="flex items-center gap-2">
+										<Popover.Trigger
+											onclick={(e: MouseEvent) => e.stopPropagation()}
+											class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
+										>
+											<Terminal class="w-3 h-3 text-muted-foreground hover:text-foreground" />
+										</Popover.Trigger>
+										<Popover.Content class="w-60 p-0" align="end" sideOffset={5}>
+											<div class="px-3 py-2 border-b bg-muted/50 flex items-center gap-2">
 												<Terminal class="w-3.5 h-3.5 text-muted-foreground" />
 												<span class="text-xs font-medium truncate" title={container.name}>{container.name}</span>
 											</div>
-										</div>
-										<div class="p-3 space-y-3">
-											<div class="space-y-1.5">
-												<Label class="text-xs">Shell</Label>
-												<Select.Root type="single" bind:value={terminalShell}>
-													<Select.Trigger class="w-full h-8 text-xs">
-														<Shell class="w-3 h-3 mr-1.5 text-muted-foreground" />
-														<span>{shellOptions.find(o => o.value === terminalShell)?.label || 'Select'}</span>
+
+											<div class="p-3 space-y-4">
+												<!-- Exec -->
+												{#if $canAccess('containers', 'exec')}
+												<div class="space-y-2">
+													<Label class="text-xs">Exec</Label>
+													<Select.Root type="single" bind:value={terminalShell}>
+													<Select.Trigger class="w-full h-7 text-xs">
+														<Shell class="w-3 h-3 mr-1 text-muted-foreground" />
+														<span>{shellOptions.find((o) => o.value === terminalShell)?.label || 'Shell'}</span>
 													</Select.Trigger>
 													<Select.Content>
 														{#each shellOptions as option}
-															<Select.Item value={option.value} label={option.label}>
-																<Shell class="w-3 h-3 mr-1.5 text-muted-foreground" />
-																{option.label}
-															</Select.Item>
+														<Select.Item value={option.value} label={option.label}>
+															<Shell class="w-3 h-3 mr-1 text-muted-foreground" /> {option.label}
+														</Select.Item>
 														{/each}
 													</Select.Content>
-												</Select.Root>
-											</div>
-											<div class="space-y-1.5">
-												<Label class="text-xs">User</Label>
-												<Select.Root type="single" bind:value={terminalUser}>
-													<Select.Trigger class="w-full h-8 text-xs">
-														<User class="w-3 h-3 mr-1.5 text-muted-foreground" />
-														<span>{userOptions.find(o => o.value === terminalUser)?.label || 'Select'}</span>
+													</Select.Root>
+
+													<Select.Root type="single" bind:value={terminalUser}>
+													<Select.Trigger class="w-full h-7 text-xs">
+														<User class="w-3 h-3 mr-1 text-muted-foreground" />
+														<span>{userOptions.find((o) => o.value === terminalUser)?.label || 'User'}</span>
 													</Select.Trigger>
 													<Select.Content>
 														{#each userOptions as option}
-															<Select.Item value={option.value} label={option.label}>
-																<User class="w-3 h-3 mr-1.5 text-muted-foreground" />
-																{option.label}
-															</Select.Item>
+														<Select.Item value={option.value} label={option.label}>
+															<User class="w-3 h-3 mr-1 text-muted-foreground" /> {option.label}
+														</Select.Item>
 														{/each}
 													</Select.Content>
-												</Select.Root>
+													</Select.Root>
+
+													<Button size="sm" class="w-full h-7 text-xs" onclick={() => startTerminal(container)}>
+													<Terminal class="w-3 h-3 mr-1" /> Connect
+													</Button>
+												</div>
+												{/if}
+
+												<!-- Attach -->
+												{#if container.attachable && $canAccess('containers', 'attach')}
+												<div class="space-y-2">
+													<Label class="text-xs">Attach</Label>
+													<Button size="sm" class="w-full h-7 text-xs" onclick={() => startAttach(container)}>
+													<Zap class="w-3 h-3 mr-1" /> Connect
+													</Button>
+												</div>
+												{/if}
 											</div>
-											<Button size="sm" class="w-full h-7 text-xs" onclick={() => startTerminal(container)}>
-												<Terminal class="w-3 h-3 mr-1" />
-												Connect
-											</Button>
-										</div>
-									</Popover.Content>
-								</Popover.Root>
-							{/if}
+										</Popover.Content>
+									</Popover.Root>
+								{/if}
 							{/if}
 							{#if $canAccess('containers', 'remove')}
 							<ConfirmPopover
@@ -2009,9 +2050,9 @@
 							{/if}
 							{#if operationError?.id === container.id}
 								<div class="absolute bottom-full right-0 mb-1 z-50 bg-destructive text-destructive-foreground rounded-md shadow-lg p-2 text-xs whitespace-nowrap flex items-center gap-2 max-w-xs">
-									<AlertTriangle class="w-3 h-3 flex-shrink-0" />
+									   <AlertTriangle class="w-3 h-3 shrink-0" />
 									<span class="truncate">{operationError.message}</span>
-									<button onclick={() => operationError = null} class="flex-shrink-0 hover:bg-white/20 rounded p-0.5">
+									   <button onclick={() => operationError = null} class="shrink-0 hover:bg-white/20 rounded p-0.5">
 										<X class="w-3 h-3" />
 									</button>
 								</div>
@@ -2022,7 +2063,7 @@
 			</DataGrid>
 
 			<!-- Panels section - in vertical mode this is a column on the right with resize handle -->
-			{#if layoutMode === 'vertical' && (currentLogsContainerId || currentTerminalContainerId)}
+			{#if layoutMode === 'vertical' && (activeLogs.length > 0 || activeTerminals.length > 0 || activeAttach.length > 0)}
 				<!-- Vertical resize handle -->
 				<div
 					role="separator"
@@ -2034,76 +2075,89 @@
 				</div>
 
 				<div class="flex flex-col gap-3 h-full overflow-hidden" style="width: {panelWidth}px; flex-shrink: 0;">
-					<!-- Current Logs Panel -->
-					{#if currentLogsContainerId}
-						{@const activeLog = activeLogs.find(l => l.containerId === currentLogsContainerId)}
-						{#if activeLog}
-							<div class="flex-1 min-h-0">
-								<LogsPanel
-									containerId={activeLog.containerId}
-									containerName={activeLog.containerName}
-									visible={true}
-									envId={envId}
-									fillHeight={true}
-									onClose={() => closeLogs(activeLog.containerId)}
-								/>
-							</div>
-						{/if}
-					{/if}
+					<!-- All Logs Panels -->
+					{#each activeLogs as activeLog (activeLog.containerId)}
+						<div class="flex-1 min-h-0">
+							<LogsPanel
+								containerId={activeLog.containerId}
+								containerName={activeLog.containerName}
+								visible={true}
+								envId={envId}
+								fillHeight={true}
+								onClose={() => closeLogs(activeLog.containerId)}
+							/>
+						</div>
+					{/each}
 
-					<!-- Current Terminal Panel -->
-					{#if currentTerminalContainerId}
-						{@const activeTerminal = activeTerminals.find(t => t.containerId === currentTerminalContainerId)}
-						{#if activeTerminal}
-							<div class="flex-1 min-h-0">
-								<TerminalPanel
-									containerId={activeTerminal.containerId}
-									containerName={activeTerminal.containerName}
-									shell={activeTerminal.shell}
-									user={activeTerminal.user}
-									visible={true}
-									envId={envId}
-									fillHeight={true}
-									onClose={() => closeTerminal(activeTerminal.containerId)}
-								/>
-							</div>
-						{/if}
-					{/if}
+					<!-- All Terminal Panels -->
+					{#each activeTerminals as activeTerminal (activeTerminal.containerId)}
+						<div class="flex-1 min-h-0">
+							<TerminalPanel
+								containerId={activeTerminal.containerId}
+								containerName={activeTerminal.containerName}
+								shell={activeTerminal.shell}
+								user={activeTerminal.user}
+								visible={true}
+								envId={envId}
+								fillHeight={true}
+								onClose={() => closeTerminal(activeTerminal.containerId)}
+							/>
+						</div>
+					{/each}
+
+					<!-- All Attach Panels -->
+					{#each activeAttach as activeAtt (activeAtt.containerId)}
+						<div class="flex-1 min-h-0">
+							<AttachPanel
+								containerId={activeAtt.containerId}
+								containerName={activeAtt.containerName}
+								visible={true}
+								{envId}
+								fillHeight={true}
+								onClose={() => closeAttach(activeAtt.containerId)}
+							/>
+						</div>
+					{/each}
 				</div>
 			{/if}
 		</div>
 
 		<!-- Panels for horizontal mode - below the table, full width -->
-		{#if layoutMode === 'horizontal'}
-			<!-- Show current logs panel -->
-			{#if currentLogsContainerId}
-				{@const activeLog = activeLogs.find(l => l.containerId === currentLogsContainerId)}
-				{#if activeLog}
-					<LogsPanel
-						containerId={activeLog.containerId}
-						containerName={activeLog.containerName}
-						visible={true}
-						envId={envId}
-						onClose={() => closeLogs(activeLog.containerId)}
-					/>
-				{/if}
-			{/if}
+		{#if layoutMode === 'horizontal' && (activeLogs.length > 0 || activeTerminals.length > 0 || activeAttach.length > 0)}
+			<!-- All Logs Panels -->
+			{#each activeLogs as activeLog (activeLog.containerId)}
+				<LogsPanel
+					containerId={activeLog.containerId}
+					containerName={activeLog.containerName}
+					visible={true}
+					envId={envId}
+					onClose={() => closeLogs(activeLog.containerId)}
+				/>
+			{/each}
 
-			<!-- Show current terminal panel -->
-			{#if currentTerminalContainerId}
-				{@const activeTerminal = activeTerminals.find(t => t.containerId === currentTerminalContainerId)}
-				{#if activeTerminal}
-					<TerminalPanel
-						containerId={activeTerminal.containerId}
-						containerName={activeTerminal.containerName}
-						shell={activeTerminal.shell}
-						user={activeTerminal.user}
-						visible={true}
-						envId={envId}
-						onClose={() => closeTerminal(activeTerminal.containerId)}
-					/>
-				{/if}
-			{/if}
+			<!-- All Terminal Panels -->
+			{#each activeTerminals as activeTerminal (activeTerminal.containerId)}
+				<TerminalPanel
+					containerId={activeTerminal.containerId}
+					containerName={activeTerminal.containerName}
+					shell={activeTerminal.shell}
+					user={activeTerminal.user}
+					visible={true}
+					envId={envId}
+					onClose={() => closeTerminal(activeTerminal.containerId)}
+				/>
+			{/each}
+
+			<!-- All Attach Panels -->
+			{#each activeAttach as activeAtt (activeAtt.containerId)}
+				<AttachPanel
+					containerId={activeAtt.containerId}
+					containerName={activeAtt.containerName}
+					visible={true}
+					{envId}
+					onClose={() => closeAttach(activeAtt.containerId)}
+				/>
+			{/each}
 		{/if}
 	{/if}
 </div>

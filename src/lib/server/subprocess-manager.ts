@@ -26,6 +26,13 @@ function getSubprocessPath(name: string): string {
 	if (existsSync(prodPath)) {
 		return prodPath;
 	}
+
+	// Local build path - when running built version locally
+	const localBuildPath = path.join(process.cwd(), 'build', 'subprocesses', `${name}.js`);
+	
+	if(existsSync(localBuildPath)) {
+		return localBuildPath;
+	}
 	// Development path (relative to this file) - raw TS files
 	return path.join(__dirname, 'subprocesses', `${name}.ts`);
 }

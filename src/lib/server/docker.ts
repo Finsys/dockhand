@@ -103,6 +103,7 @@ export interface ContainerInspectResult {
 		Hostname: string;
 		User: string;
 		Tty: boolean;
+		OpenStdin: boolean;
 		Env: string[];
 		Cmd: string[];
 		Image: string;
@@ -661,6 +662,7 @@ export interface ContainerInfo {
 	mounts: Array<{ type: string; source: string; destination: string; mode: string; rw: boolean }>;
 	labels: { [key: string]: string };
 	command: string;
+	attachable?: boolean
 }
 
 export interface ImageInfo {
@@ -682,6 +684,9 @@ export async function listContainers(all = true, envId?: number | null): Promise
 	const restartCounts = new Map<string, number>();
 	const restartingContainers = containers.filter(c => c.State === 'restarting');
 
+	const attachableMap = new Map<string, boolean>();
+	const runningContainers = containers.filter(c => c.State === 'running');
+
 	await Promise.all(
 		restartingContainers.map(async (container) => {
 			try {
@@ -692,6 +697,20 @@ export async function listContainers(all = true, envId?: number | null): Promise
 			}
 		})
 	);
+
+	await Promise.all(
+		runningContainers.map(async (container) => {
+			try {
+				const inspect = await inspectContainer(container.Id, envId);
+
+				const attachable = (inspect.Config.Tty && inspect.Config.OpenStdin) || false;
+
+				attachableMap.set(container.Id, attachable);
+			} catch (error) {
+				attachableMap.set(container.Id, false);
+			}
+		})
+	)
 
 	return containers.map((container) => {
 		// Extract network info with IP addresses
@@ -736,7 +755,8 @@ export async function listContainers(all = true, envId?: number | null): Promise
 			restartCount: restartCounts.get(container.Id) || 0,
 			mounts,
 			labels: container.Labels || {},
-			command: container.Command || ''
+			command: container.Command || '',
+			attachable: attachableMap.get(container.Id) || false
 		};
 	});
 }
