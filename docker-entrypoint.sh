@@ -86,8 +86,8 @@ else
 
         # Check for UID conflicts - warn but don't delete other users
         SKIP_USER_CREATE=false
-        if getent passwd "$PUID" >/dev/null 2>&1; then
-            EXISTING=$(getent passwd "$PUID" | cut -d: -f1)
+        EXISTING=$(awk -F: -v uid="$PUID" '$3 == uid { print $1 }' /etc/passwd)
+        if [ -n "$EXISTING" ]; then
             if [ "$EXISTING" = "bun" ]; then
                 echo "Note: UID $PUID is used by the 'bun' runtime user - reusing it for dockhand"
                 echo "If upgrading from a previous version, you may need to fix data permissions:"
@@ -101,9 +101,8 @@ else
         fi
 
         # Handle GID - reuse existing group or create new
-        if getent group "$PGID" >/dev/null 2>&1; then
-            TARGET_GROUP=$(getent group "$PGID" | cut -d: -f1)
-        else
+        TARGET_GROUP=$(awk -F: -v gid="$PGID" '$3 == gid { print $1 }' /etc/group)
+        if [ -z "$TARGET_GROUP" ]; then
             addgroup -g "$PGID" dockhand
             TARGET_GROUP="dockhand"
         fi
@@ -131,26 +130,37 @@ fi
 SOCKET_PATH="/var/run/docker.sock"
 
 if [ -S "$SOCKET_PATH" ]; then
-    # Socket exists - check if readable
     if [ "$RUN_USER" != "root" ]; then
-        if ! su-exec "$RUN_USER" test -r "$SOCKET_PATH" 2>/dev/null; then
-            SOCKET_GID=$(stat -c '%g' "$SOCKET_PATH" 2>/dev/null || echo "unknown")
-            echo "WARNING: Docker socket at $SOCKET_PATH is not readable by $RUN_USER user"
-            echo ""
-            echo "To use local Docker, fix with one of these options:"
-            echo ""
-            echo "  1. Add container to docker group (GID: $SOCKET_GID):"
-            echo "     docker run --group-add $SOCKET_GID ..."
-            echo ""
-            echo "  2. Use a socket proxy:"
-            echo "     Configure a 'direct' environment pointing to tcp://socket-proxy:2375"
-            echo ""
-            echo "  3. Make socket world-readable (less secure):"
-            echo "     chmod 666 /var/run/docker.sock"
-            echo ""
-            echo "Continuing startup - configure environments via the web UI..."
-        else
-            echo "Docker socket accessible at $SOCKET_PATH"
+        # Get socket GID
+        SOCKET_GID=$(stat -c '%g' "$SOCKET_PATH" 2>/dev/null || echo "")
+
+        if [ -n "$SOCKET_GID" ]; then
+            # Check if user already has access
+            if ! su-exec "$RUN_USER" test -r "$SOCKET_PATH" 2>/dev/null; then
+                echo "Docker socket GID: $SOCKET_GID - adding $RUN_USER to docker group..."
+
+                # Check if group with this GID exists (without getent, use /etc/group)
+                DOCKER_GROUP=$(awk -F: -v gid="$SOCKET_GID" '$3 == gid { print $1 }' /etc/group)
+                if [ -z "$DOCKER_GROUP" ]; then
+                    # Create docker group with socket's GID
+                    DOCKER_GROUP="docker"
+                    addgroup -g "$SOCKET_GID" "$DOCKER_GROUP" 2>/dev/null || true
+                fi
+
+                # Add user to docker group (try both busybox variants)
+                addgroup "$RUN_USER" "$DOCKER_GROUP" 2>/dev/null || \
+                adduser "$RUN_USER" "$DOCKER_GROUP" 2>/dev/null || true
+
+                # Verify access after adding to group
+                if su-exec "$RUN_USER" test -r "$SOCKET_PATH" 2>/dev/null; then
+                    echo "Docker socket accessible at $SOCKET_PATH"
+                else
+                    echo "WARNING: Could not grant Docker socket access to $RUN_USER"
+                    echo "Try running container with: --group-add $SOCKET_GID"
+                fi
+            else
+                echo "Docker socket accessible at $SOCKET_PATH"
+            fi
         fi
     else
         echo "Docker socket accessible at $SOCKET_PATH"

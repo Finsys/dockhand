@@ -124,14 +124,14 @@ export const POST: RequestHandler = async ({ request, url, cookies }) => {
 			return json({ success: true, started: false });
 		}
 
+		// ALWAYS save compose file first - deployStack expects it to exist
+		await saveStackComposeFile(name, compose, true, envIdNum, {
+			composePath: composePath || undefined,
+			envPath: envPath || undefined
+		});
+
 		// Save environment variables BEFORE deploying so they're available during start
 		if (rawEnvContent || (envVars && Array.isArray(envVars) && envVars.length > 0)) {
-			// First ensure the stack directory exists by saving compose file
-			await saveStackComposeFile(name, compose, true, envIdNum, {
-				composePath: composePath || undefined,
-				envPath: envPath || undefined
-			});
-
 			// - rawEnvContent: non-secret vars with comments → .env file
 			// - envVars: ALL vars → DB (secrets stored for shell injection, non-secrets for metadata)
 			if (rawEnvContent) {

@@ -1,5 +1,16 @@
 [
   {
+    "version": "1.0.10",
+    "date": "2026-01-18",
+    "changes": [
+      { "type": "fix", "text": "Fix docker socket access for custom PUID/PGID" },
+      { "type": "fix", "text": "Fix stack creation with deploy failing when no env vars provided" },
+      { "type": "fix", "text": "Fix env var validation flagging variables in commented lines as missing" },
+      { "type": "fix", "text": "Show stop button for stacks in restart loop" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.10"
+  },
+  {
     "version": "1.0.9",
     "date": "2026-01-17",
     "changes": [

@@ -390,7 +390,7 @@
 	);
 
 	// Count by status for selected stacks
-	const selectedRunning = $derived(selectedInFilter.filter(s => s.status === 'running' || s.status === 'partial'));
+	const selectedRunning = $derived(selectedInFilter.filter(s => s.status === 'running' || s.status === 'partial' || s.status === 'restarting'));
 	const selectedStopped = $derived(selectedInFilter.filter(s => s.status === 'stopped' || s.status === 'not deployed'));
 
 	function toggleSelectAll() {
@@ -1413,7 +1413,7 @@
 					<div class="text-right">
 						{#if stats}
 							<span class="text-xs font-mono {stats.cpuPercent > 80 ? 'text-red-500' : stats.cpuPercent > 50 ? 'text-yellow-500' : 'text-muted-foreground'}">{stats.cpuPercent.toFixed(1)}%</span>
-						{:else if stack.status === 'running' || stack.status === 'partial'}
+						{:else if stack.status === 'running' || stack.status === 'partial' || stack.status === 'restarting'}
 							<span class="text-xs text-muted-foreground/50">...</span>
 						{:else}
 							<span class="text-gray-400 dark:text-gray-600 text-xs">-</span>
@@ -1424,7 +1424,7 @@
 					<div class="text-right">
 						{#if stats}
 							<span class="text-xs font-mono text-muted-foreground" title="{formatBytes(stats.memoryUsage)} / {formatBytes(stats.memoryLimit)}">{formatBytes(stats.memoryUsage)}</span>
-						{:else if stack.status === 'running' || stack.status === 'partial'}
+						{:else if stack.status === 'running' || stack.status === 'partial' || stack.status === 'restarting'}
 							<span class="text-xs text-muted-foreground/50">...</span>
 						{:else}
 							<span class="text-gray-400 dark:text-gray-600 text-xs">-</span>
@@ -1437,7 +1437,7 @@
 							<span class="text-xs font-mono text-muted-foreground" title="↓{formatBytes(stats.networkRx)} received / ↑{formatBytes(stats.networkTx)} sent">
 								<span class="text-2xs text-blue-400">↓</span>{formatBytes(stats.networkRx, 0)} <span class="text-2xs text-orange-400">↑</span>{formatBytes(stats.networkTx, 0)}
 							</span>
-						{:else if stack.status === 'running' || stack.status === 'partial'}
+						{:else if stack.status === 'running' || stack.status === 'partial' || stack.status === 'restarting'}
 							<span class="text-xs text-muted-foreground/50">...</span>
 						{:else}
 							<span class="text-gray-400 dark:text-gray-600 text-xs">-</span>
@@ -1450,7 +1450,7 @@
 							<span class="text-xs font-mono text-muted-foreground" title="↓{formatBytes(stats.blockRead)} read / ↑{formatBytes(stats.blockWrite)} written">
 								<span class="text-2xs text-green-400">r</span>{formatBytes(stats.blockRead, 0)} <span class="text-2xs text-yellow-400">w</span>{formatBytes(stats.blockWrite, 0)}
 							</span>
-						{:else if stack.status === 'running' || stack.status === 'partial'}
+						{:else if stack.status === 'running' || stack.status === 'partial' || stack.status === 'restarting'}
 							<span class="text-xs text-muted-foreground/50">...</span>
 						{:else}
 							<span class="text-gray-400 dark:text-gray-600 text-xs">-</span>
@@ -1559,7 +1559,7 @@
 								<div class="p-1">
 									<Loader2 class="w-3 h-3 animate-spin text-muted-foreground" />
 								</div>
-							{:else if stack.status === 'running' || stack.status === 'partial'}
+							{:else if stack.status === 'running' || stack.status === 'partial' || stack.status === 'restarting'}
 								{#if $canAccess('stacks', 'restart')}
 									<ConfirmPopover
 										open={false}
