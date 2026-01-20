@@ -85,7 +85,8 @@ export async function audit(
 		await logAuditEvent(data);
 	} catch (error) {
 		// Don't let audit logging errors break the main operation
-		console.error('Failed to log audit event:', error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[Audit] Failed to log event:', errorMsg);
 	}
 }
 
@@ -302,6 +303,7 @@ export async function auditAuth(
 	try {
 		await logAuditEvent(data);
 	} catch (error) {
-		console.error('Failed to log audit event:', error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[Audit] Failed to log event:', errorMsg);
 	}
 }

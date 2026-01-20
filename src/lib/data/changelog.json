@@ -1,5 +1,17 @@
 [
   {
+    "version": "1.0.11",
+    "date": "2026-01-20",
+    "changes": [
+      { "type": "fix", "text": "Encryption at rest for sensitive credentials (AES-256-GCM)" },
+      { "type": "fix", "text": "Fix registry browsing and image push for registries with organization paths (e.g., registry.example.com/org)" },
+      { "type": "fix", "text": "Fix security scan failing to parse scanner output" },
+      { "type": "fix", "text": "Fix git sync stuck with sync_status set to running if app restarted during stack sync" },
+      { "type": "fix", "text": "Fix updating via containers tab doesn't properly restart the container" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.11"
+  },
+  {
     "version": "1.0.10",
     "date": "2026-01-18",
     "changes": [

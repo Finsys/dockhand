@@ -137,6 +137,45 @@ async function execGit(args: string[], cwd: string, env: GitEnv): Promise<{ stdo
 	}
 }
 
+/**
+ * Get list of files that changed between two commits in a specific directory.
+ * Returns array of changed file paths (relative to repo root).
+ */
+async function getChangedFilesInDir(
+	repoPath: string,
+	previousCommit: string,
+	newCommit: string,
+	dirPath: string,
+	env: GitEnv
+): Promise<{ changed: boolean; files: string[]; error?: string }> {
+	if (!previousCommit) {
+		// No previous commit means this is a new clone - always deploy
+		return { changed: true, files: ['(new clone - all files)'] };
+	}
+
+	// Use git diff --name-only to get all changed files in the directory
+	// The trailing slash ensures we only match files IN that directory (and subdirs)
+	const dirPattern = dirPath.endsWith('/') ? dirPath : `${dirPath}/`;
+	const result = await execGit(
+		['diff', '--name-only', previousCommit, newCommit, '--', dirPattern],
+		repoPath,
+		env
+	);
+
+	// If the command fails (e.g., previousCommit no longer exists after force push),
+	// assume files changed to be safe
+	if (result.code !== 0) {
+		return { changed: true, files: ['(diff failed - assuming changed)'], error: result.stderr };
+	}
+
+	// Parse changed files
+	const changedFiles = result.stdout.trim()
+		.split('\n')
+		.filter(f => f.length > 0);
+
+	return { changed: changedFiles.length > 0, files: changedFiles };
+}
+
 export interface SyncResult {
 	success: boolean;
 	commit?: string;
@@ -148,6 +187,7 @@ export interface SyncResult {
 	envFileName?: string; // Filename of env file relative to composeDir (e.g., ".env" or "../.env")
 	error?: string;
 	updated?: boolean;
+	changedFiles?: string[]; // List of files that changed (for logging/debugging)
 }
 
 export interface TestResult {
@@ -497,7 +537,8 @@ export function deleteRepositoryFiles(repoId: number): void {
 			rmSync(repoPath, { recursive: true, force: true });
 		}
 	} catch (error) {
-		console.error('Failed to delete repository files:', error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[Git] Failed to delete repository files:', errorMsg);
 	}
 }
 
@@ -600,8 +641,45 @@ export async function syncGitStack(stackId: number): Promise<SyncResult> {
 		// Check if commit changed
 		const newCommitResult = await execGit(['rev-parse', 'HEAD'], repoPath, env);
 		const newCommit = newCommitResult.stdout.trim();
-		updated = previousCommit !== newCommit;
-		console.log(`${logPrefix} Previous commit: ${previousCommit || '(none)'}, new commit: ${newCommit.substring(0, 7)}, updated: ${updated}`);
+		const commitChanged = previousCommit !== newCommit;
+		console.log(`${logPrefix} Previous commit: ${previousCommit || '(none)'}, new commit: ${newCommit.substring(0, 7)}, commit changed: ${commitChanged}`);
+
+		// Check if any files in the compose file's directory have changed
+		// This catches changes to the compose file, env files, and any other referenced files
+		// (e.g., config files, scripts, additional env files)
+		let changedFiles: string[] = [];
+		if (commitChanged) {
+			// Get the directory containing the compose file (relative to repo root)
+			const composeDirRelative = dirname(gitStack.composePath);
+			console.log(`${logPrefix} Checking for changes in directory: ${composeDirRelative || '(root)'}`);
+
+			const diffResult = await getChangedFilesInDir(
+				repoPath,
+				previousCommit,
+				newCommit,
+				composeDirRelative || '.',
+				env
+			);
+
+			updated = diffResult.changed;
+			changedFiles = diffResult.files;
+
+			if (diffResult.error) {
+				console.log(`${logPrefix} Diff error: ${diffResult.error}`);
+			}
+
+			if (changedFiles.length > 0) {
+				console.log(`${logPrefix} Changed files (${changedFiles.length}):`);
+				for (const file of changedFiles) {
+					console.log(`${logPrefix}   - ${file}`);
+				}
+			} else {
+				console.log(`${logPrefix} No files changed in stack directory`);
+			}
+		} else {
+			updated = false;
+			console.log(`${logPrefix} No commit change, skipping file diff`);
+		}
 
 		// Get current commit hash
 		const commitResult = await execGit(['rev-parse', 'HEAD'], repoPath, env);
@@ -671,6 +749,7 @@ export async function syncGitStack(stackId: number): Promise<SyncResult> {
 		console.log(`${logPrefix} ----------------------------------------`);
 		console.log(`${logPrefix} Success: true`);
 		console.log(`${logPrefix} Updated:`, updated);
+		console.log(`${logPrefix} Changed files:`, changedFiles.length > 0 ? changedFiles.join(', ') : '(none)');
 		console.log(`${logPrefix} Commit:`, currentCommit);
 		console.log(`${logPrefix} Env file vars count:`, envFileVars ? Object.keys(envFileVars).length : 0);
 
@@ -682,7 +761,8 @@ export async function syncGitStack(stackId: number): Promise<SyncResult> {
 			composeFileName,
 			envFileVars,
 			envFileName,
-			updated
+			updated,
+			changedFiles
 		};
 	} catch (error: any) {
 		cleanupSshKey(credential);
@@ -850,7 +930,8 @@ export function deleteGitStackFiles(stackId: number): void {
 			rmSync(repoPath, { recursive: true, force: true });
 		}
 	} catch (error) {
-		console.error('Failed to delete git stack files:', error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[Git] Failed to delete git stack files:', errorMsg);
 	}
 }
 
@@ -930,7 +1011,23 @@ export async function deployGitStackWithProgress(
 		// Check if commit changed
 		const newCommitResult = await execGit(['rev-parse', 'HEAD'], repoPath, env);
 		const newCommit = newCommitResult.stdout.trim();
-		updated = previousCommit !== newCommit;
+		const commitChanged = previousCommit !== newCommit;
+
+		// Check if any files in the compose file's directory have changed
+		// (for consistency with syncGitStack, though this function always deploys)
+		if (commitChanged) {
+			const composeDir = dirname(gitStack.composePath);
+			const diffResult = await getChangedFilesInDir(
+				repoPath,
+				previousCommit,
+				newCommit,
+				composeDir || '.',
+				env
+			);
+			updated = diffResult.changed;
+		} else {
+			updated = false;
+		}
 
 		// Get current commit hash
 		const commitResult = await execGit(['rev-parse', 'HEAD'], repoPath, env);

@@ -194,7 +194,8 @@ function readMigrationJournal(migrationsFolder: string): MigrationJournal | null
 	} catch (error) {
 		const config = getConfig();
 		if (config.verboseLogging) {
-			console.error('Failed to read migration journal:', error);
+			const errorMsg = error instanceof Error ? error.message : String(error);
+			console.error('[DB] Failed to read migration journal:', errorMsg);
 		}
 		return null;
 	}
@@ -986,7 +987,8 @@ export async function getDatabaseSchemaVersion(): Promise<SchemaInfo> {
 		}
 		return { version: null, date: null };
 	} catch (e) {
-		console.error('Error getting schema version:', e);
+		const errorMsg = e instanceof Error ? e.message : String(e);
+		console.error('[DB] Error getting schema version:', errorMsg);
 		return { version: null, date: null };
 	}
 }

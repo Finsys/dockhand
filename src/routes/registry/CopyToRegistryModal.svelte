@@ -80,16 +80,20 @@
 		const imageWithTag = imageName.includes(':') ? imageName : `${imageName}:${tagToUse}`;
 		if (sourceRegistry && !isDockerHub(sourceRegistry)) {
 			const urlObj = new URL(sourceRegistry.url);
-			return `${urlObj.host}/${imageWithTag}`;
+			// Include both host and path (e.g., registry.example.com/organization)
+			const hostWithPath = urlObj.host + (urlObj.pathname !== '/' ? urlObj.pathname.replace(/\/$/, '') : '');
+			return `${hostWithPath}/${imageWithTag}`;
 		}
 		return imageWithTag;
 	});
 
 	const targetImageName = $derived(() => {
 		if (!targetRegistryId || !targetRegistry) return customTag || 'image:latest';
-		const host = new URL(targetRegistry.url).host;
+		// Include both host and path (e.g., registry.example.com/organization)
+		const url = new URL(targetRegistry.url);
+		const hostWithPath = url.host + (url.pathname !== '/' ? url.pathname.replace(/\/$/, '') : '');
 		const tag = customTag ? (customTag.includes(':') ? customTag : customTag + ':latest') : 'image:latest';
-		return `${host}/${tag}`;
+		return `${hostWithPath}/${tag}`;
 	});
 
 	const isProcessing = $derived(pullStatus === 'pulling' || scanStatus === 'scanning' || pushStatus === 'pushing');

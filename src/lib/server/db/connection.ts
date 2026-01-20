@@ -153,7 +153,8 @@ export const sql = createConnection();
 
 // Initialize schema (runs async but we handle it)
 initializeSchema(sql).catch((error) => {
-	console.error('Database initialization failed:', error);
+	const errorMsg = error instanceof Error ? error.message : String(error);
+	console.error('[DB] Database initialization failed:', errorMsg);
 	process.exit(1);
 });
 

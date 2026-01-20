@@ -232,7 +232,8 @@ async function ensureScannerImage(
 		await pullImage(scannerImage, undefined, envId);
 		return true;
 	} catch (error) {
-		console.error(`Failed to pull scanner image ${scannerImage}:`, error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error(`[Scanner] Failed to pull image ${scannerImage}:`, errorMsg);
 		return false;
 	}
 }
@@ -281,8 +282,11 @@ function parseGrypeOutput(output: string): { vulnerabilities: Vulnerability[]; s
 			}
 		}
 	} catch (error) {
-		console.error('[Grype] Failed to parse output:', error);
-		console.error('[Grype] Output was:', output.slice(0, 500));
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[Grype] Failed to parse output:', errorMsg);
+		if (output.length > 0) {
+			console.error('[Grype] Output preview:', output.slice(0, 200));
+		}
 		// Check if output looks like an error message from grype
 		const firstLine = output.split('\n')[0].trim();
 		if (firstLine && !firstLine.startsWith('{')) {
@@ -337,8 +341,11 @@ function parseTrivyOutput(output: string): { vulnerabilities: Vulnerability[]; s
 			}
 		}
 	} catch (error) {
-		console.error('[Trivy] Failed to parse output:', error);
-		console.error('[Trivy] Output was:', output.slice(0, 500));
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[Trivy] Failed to parse output:', errorMsg);
+		if (output.length > 0) {
+			console.error('[Trivy] Output preview:', output.slice(0, 200));
+		}
 		// Check if output looks like an error message from trivy
 		const firstLine = output.split('\n')[0].trim();
 		if (firstLine && !firstLine.startsWith('{')) {
@@ -667,7 +674,8 @@ export async function scanImage(
 			const result = await scanWithGrype(imageName, envId, onProgress);
 			results.push(result);
 		} catch (error) {
-			console.error('Grype scan failed:', error);
+			const errorMsg = error instanceof Error ? error.message : String(error);
+			console.error('[Grype] Scan failed:', errorMsg);
 			errors.push(error instanceof Error ? error : new Error(String(error)));
 			if (scannerType === 'grype') throw error;
 		}
@@ -678,7 +686,8 @@ export async function scanImage(
 			const result = await scanWithTrivy(imageName, envId, onProgress);
 			results.push(result);
 		} catch (error) {
-			console.error('Trivy scan failed:', error);
+			const errorMsg = error instanceof Error ? error.message : String(error);
+			console.error('[Trivy] Scan failed:', errorMsg);
 			errors.push(error instanceof Error ? error : new Error(String(error)));
 			if (scannerType === 'trivy') throw error;
 		}
@@ -703,7 +712,8 @@ export async function scanImage(
 
 		// Send notifications (async, don't block return)
 		sendVulnerabilityNotifications(imageName, combinedSummary, envId).catch(err => {
-			console.error('[Scanner] Failed to send vulnerability notifications:', err);
+			const errorMsg = err instanceof Error ? err.message : String(err);
+			console.error('[Scanner] Failed to send vulnerability notifications:', errorMsg);
 		});
 	}
 
@@ -766,7 +776,8 @@ async function getScannerVersion(
 
 		return version;
 	} catch (error) {
-		console.error(`Failed to get ${scannerType} version:`, error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error(`[Scanner] Failed to get ${scannerType} version:`, errorMsg);
 		return null;
 	}
 }
@@ -815,11 +826,13 @@ export async function checkScannerUpdates(envId?: number): Promise<{
 					result[scanner].hasUpdate = false;
 				}
 			} catch (error) {
-				console.error(`Failed to check updates for ${scanner}:`, error);
+				const errorMsg = error instanceof Error ? error.message : String(error);
+				console.error(`[Scanner] Failed to check updates for ${scanner}:`, errorMsg);
 			}
 		}
 	} catch (error) {
-		console.error('Failed to check scanner updates:', error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[Scanner] Failed to check scanner updates:', errorMsg);
 	}
 
 	return result;
@@ -838,6 +851,7 @@ export async function cleanupScannerVolumes(envId?: number): Promise<void> {
 			}
 		}
 	} catch (error) {
-		console.error('Failed to cleanup scanner volumes:', error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[Scanner] Failed to cleanup scanner volumes:', errorMsg);
 	}
 }

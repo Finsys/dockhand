@@ -344,7 +344,8 @@ class SubprocessManager {
 							message: notifMessage,
 							type: notificationType
 						}, image).catch((err) => {
-							console.error('[SubprocessManager] Failed to send notification:', err);
+							const errorMsg = err instanceof Error ? err.message : String(err);
+							console.error('[SubprocessManager] Failed to send notification:', errorMsg);
 						});
 					}
 					break;
@@ -369,7 +370,8 @@ class SubprocessManager {
 							},
 							message.envId
 						).catch((err) => {
-							console.error('[SubprocessManager] Failed to send online notification:', err);
+							const errorMsg = err instanceof Error ? err.message : String(err);
+							console.error('[SubprocessManager] Failed to send online notification:', errorMsg);
 						});
 					} else {
 						await sendEventNotification(
@@ -381,7 +383,8 @@ class SubprocessManager {
 							},
 							message.envId
 						).catch((err) => {
-							console.error('[SubprocessManager] Failed to send offline notification:', err);
+							const errorMsg = err instanceof Error ? err.message : String(err);
+							console.error('[SubprocessManager] Failed to send offline notification:', errorMsg);
 						});
 					}
 					break;

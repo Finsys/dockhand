@@ -7,6 +7,7 @@ import { checkLicenseExpiry, getHostname } from '$lib/server/license';
 import { initCryptoFallback } from '$lib/server/crypto-fallback';
 import { detectHostDataDir } from '$lib/server/host-path';
 import { listContainers, removeContainer } from '$lib/server/docker';
+import { migrateCredentials } from '$lib/server/encryption';
 import { rmSync, readdirSync, existsSync } from 'fs';
 import { join } from 'path';
 import type { HandleServerError, Handle } from '@sveltejs/kit';
@@ -69,6 +70,13 @@ if (!initialized) {
 
 		setServerStartTime(); // Track when server started
 		initDatabase();
+
+		// Migrate plain text credentials to encrypted storage
+		// This also handles key rotation if ENCRYPTION_KEY env var differs from key file
+		migrateCredentials().catch(err => {
+			console.error('[Startup] Failed to migrate credentials:', err);
+		});
+
 		// Log hostname for license validation (set by entrypoint in Docker, or os.hostname() outside)
 		console.log('Hostname for license validation:', getHostname());
 

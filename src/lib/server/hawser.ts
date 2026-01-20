@@ -184,7 +184,8 @@ export async function handleEdgeContainerEvent(
 			type: notificationType as 'success' | 'error' | 'warning' | 'info'
 		}, event.image);
 	} catch (error) {
-		console.error('[Hawser] Error handling container event:', error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[Hawser] Error handling container event:', errorMsg);
 	}
 }
 
@@ -226,7 +227,8 @@ export async function handleEdgeMetrics(
 			environmentId
 		);
 	} catch (error) {
-		console.error('[Hawser] Error saving metrics:', error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[Hawser] Error saving metrics:', errorMsg);
 	}
 }
 
@@ -365,7 +367,8 @@ export function closeEdgeConnection(environmentId: number): void {
 	try {
 		connection.ws.close(1000, 'Environment deleted');
 	} catch (e) {
-		console.error(`[Hawser] Error closing WebSocket for environment ${environmentId}:`, e);
+		const errorMsg = e instanceof Error ? e.message : String(e);
+		console.error(`[Hawser] Error closing WebSocket for environment ${environmentId}:`, errorMsg);
 	}
 
 	edgeConnections.delete(environmentId);
@@ -578,7 +581,8 @@ export async function sendEdgeRequest(
 			try {
 				connection.ws.send(messageStr);
 			} catch (sendError) {
-				console.error(`[Hawser Edge] Error sending message:`, sendError);
+				const errorMsg = sendError instanceof Error ? sendError.message : String(sendError);
+				console.error(`[Hawser Edge] Error sending message:`, errorMsg);
 				connection.pendingRequests.delete(requestId);
 				if (streaming) {
 					connection.pendingStreamRequests.delete(requestId);
@@ -650,9 +654,10 @@ export function sendEdgeStreamRequest(
 		try {
 			connection.ws.send(messageStr);
 		} catch (sendError) {
-			console.error(`[Hawser Edge] Error sending streaming message:`, sendError);
+			const errorMsg = sendError instanceof Error ? sendError.message : String(sendError);
+			console.error(`[Hawser Edge] Error sending streaming message:`, errorMsg);
 			connection.pendingStreamRequests.delete(requestId);
-			callbacks.onError(sendError instanceof Error ? sendError.message : String(sendError));
+			callbacks.onError(errorMsg);
 			return { requestId: '', cancel: () => {} };
 		}
 	}

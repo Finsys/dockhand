@@ -704,7 +704,8 @@ async function tryLdapAuth(
 		};
 	} catch (error: any) {
 		try { await client.unbind(); } catch {}
-		console.error('LDAP authentication error:', error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[LDAP] Authentication error:', errorMsg);
 		return { success: false, error: 'LDAP authentication failed' };
 	}
 }
@@ -766,7 +767,8 @@ async function checkLdapGroupMembership(
 		await client.unbind();
 		return searchEntries.length > 0;
 	} catch (error) {
-		console.error('LDAP group membership check failed:', error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[LDAP] Group membership check failed:', errorMsg);
 		try { await client.unbind(); } catch {}
 		return false;
 	}
@@ -1214,7 +1216,8 @@ export async function buildOidcAuthorizationUrl(
 		const authUrl = `${discovery.authorization_endpoint}?${params.toString()}`;
 		return { url: authUrl, state };
 	} catch (error: any) {
-		console.error('Failed to build OIDC authorization URL:', error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[OIDC] Failed to build authorization URL:', errorMsg);
 		return { error: error.message || 'Failed to initialize SSO' };
 	}
 }
@@ -1415,7 +1418,8 @@ export async function handleOidcCallback(
 			providerName: config.name
 		};
 	} catch (error: any) {
-		console.error('OIDC callback error:', error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[OIDC] Callback error:', errorMsg);
 		return { success: false, error: error.message || 'SSO authentication failed' };
 	}
 }

@@ -256,8 +256,9 @@ export async function adoptStack(
 
 		return { success: true, adoptedName: finalName };
 	} catch (err) {
-		console.error(`[Stack Scanner] Failed to adopt ${stack.name}:`, err);
-		return { success: false, error: err instanceof Error ? err.message : 'Unknown error' };
+		const errorMsg = err instanceof Error ? err.message : String(err);
+		console.error(`[Stack Scanner] Failed to adopt ${stack.name}:`, errorMsg);
+		return { success: false, error: errorMsg };
 	}
 }
 

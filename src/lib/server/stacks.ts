@@ -735,7 +735,8 @@ async function loginToRegistries(dockerHost?: string, logPrefix = '[Stack]'): Pr
 				console.error(`${logPrefix} Failed to login to ${registryHost}: ${stderr}`);
 			}
 		} catch (e) {
-			console.error(`${logPrefix} Error logging into registry ${reg.name}:`, e);
+			const errorMsg = e instanceof Error ? e.message : String(e);
+			console.error(`${logPrefix} Error logging into registry ${reg.name}:`, errorMsg);
 		}
 	}
 }

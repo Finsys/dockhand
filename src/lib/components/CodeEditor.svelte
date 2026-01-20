@@ -385,6 +385,13 @@
 		for (let i = 0; i < lines.length; i++) {
 			const line = lines[i];
 
+			// Skip commented lines (YAML comments start with #)
+			const trimmedLine = line.trim();
+			if (trimmedLine.startsWith('#')) {
+				pos += line.length + 1;
+				continue;
+			}
+
 			// Check if this line contains any of our marked variables
 			for (const marker of markers) {
 				// Match ${VAR_NAME} or ${VAR_NAME:-...} patterns

@@ -4,7 +4,7 @@
 	import CronEditor from '$lib/components/cron-editor.svelte';
 	import VulnerabilityCriteriaSelector, { type VulnerabilityCriteria } from '$lib/components/VulnerabilityCriteriaSelector.svelte';
 	import { currentEnvironment } from '$lib/stores/environment';
-	import { Ship, Cable, ExternalLink, AlertTriangle } from 'lucide-svelte';
+	import { Ship, Cable, ExternalLink, AlertTriangle, Info, Layers } from 'lucide-svelte';
 	import type { SystemContainerType } from '$lib/types';
 
 	interface Props {
@@ -12,6 +12,8 @@
 		cronExpression: string;
 		vulnerabilityCriteria: VulnerabilityCriteria;
 		systemContainer?: SystemContainerType | null;
+		isComposeContainer?: boolean;
+		composeStackName?: string;
 		onenablechange?: (enabled: boolean) => void;
 		oncronchange?: (cron: string) => void;
 		oncriteriachange?: (criteria: VulnerabilityCriteria) => void;
@@ -22,6 +24,8 @@
 		cronExpression = $bindable(),
 		vulnerabilityCriteria = $bindable(),
 		systemContainer = null,
+		isComposeContainer = false,
+		composeStackName = '',
 		onenablechange,
 		oncronchange,
 		oncriteriachange
@@ -92,6 +96,20 @@
 				onchange={(value) => onenablechange?.(value)}
 			/>
 		</div>
+
+		{#if isComposeContainer && enabled}
+			<div class="flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 p-3 dark:border-blue-800 dark:bg-blue-950">
+				<Layers class="mt-0.5 h-4 w-4 text-blue-600 dark:text-blue-400 shrink-0" />
+				<div class="text-xs text-blue-800 dark:text-blue-200">
+					<p class="font-medium">Stack container update behavior</p>
+					<p class="mt-1 text-blue-700 dark:text-blue-300">
+						This container is part of the <strong>{composeStackName}</strong> stack.
+						Updates will use <code class="rounded bg-blue-100 px-1 dark:bg-blue-900">docker compose up -d</code>
+						to preserve all configuration from the compose file.
+					</p>
+				</div>
+			</div>
+		{/if}
 
 		{#if enabled}
 			<CronEditor

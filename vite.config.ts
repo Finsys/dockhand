@@ -791,21 +791,31 @@ async function handleHawserMessage(ws: any, msg: any) {
 			return;
 		}
 
-		// Simple token validation (in production this would use argon2 verification)
-		// For dev mode, just check if a token exists for any environment
+		// Token validation using proper Argon2id verification (same as production)
 		const tokens = db.prepare('SELECT * FROM hawser_tokens WHERE is_active = 1').all() as any[];
 
-		// For dev mode, accept any valid token format and use the first environment with a token
-		const token = tokens.find((t: any) => msg.token && msg.token.startsWith(t.token_prefix.slice(0, 4)));
+		// Validate token using Argon2id hash verification
+		let matchedToken: any = null;
+		for (const t of tokens) {
+			try {
+				const isValid = await Bun.password.verify(msg.token, t.token);
+				if (isValid) {
+					matchedToken = t;
+					break;
+				}
+			} catch {
+				// If verification fails, continue to next token
+			}
+		}
 
-		if (!token) {
+		if (!matchedToken) {
 			console.log('[Hawser WS] Invalid token');
 			ws.send(JSON.stringify({ type: 'error', error: 'Invalid token' }));
 			ws.close();
 			return;
 		}
 
-		const environmentId = token.environment_id;
+		const environmentId = matchedToken.environment_id;
 
 		// Update environment with agent info
 		try {

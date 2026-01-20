@@ -78,6 +78,7 @@ import {
 } from './db/drizzle.js';
 
 import type { AllGridPreferences, GridId, GridColumnPreferences } from '$lib/types';
+import { encrypt, decrypt } from './encryption.js';
 
 // Re-export for backwards compatibility
 export { db, isPostgres, isSqlite };
@@ -112,7 +113,12 @@ export function initDatabase() {
 // =============================================================================
 
 export async function getEnvironments(): Promise<Environment[]> {
-	return db.select().from(environments).orderBy(asc(environments.name));
+	const results = await db.select().from(environments).orderBy(asc(environments.name));
+	return results.map((e: Environment) => ({
+		...e,
+		tlsKey: decrypt(e.tlsKey),
+		hawserToken: decrypt(e.hawserToken)
+	}));
 }
 
 export async function hasEnvironments(): Promise<boolean> {
@@ -122,12 +128,22 @@ export async function hasEnvironments(): Promise<boolean> {
 
 export async function getEnvironment(id: number): Promise<Environment | undefined> {
 	const results = await db.select().from(environments).where(eq(environments.id, id));
-	return results[0];
+	if (!results[0]) return undefined;
+	return {
+		...results[0],
+		tlsKey: decrypt(results[0].tlsKey),
+		hawserToken: decrypt(results[0].hawserToken)
+	};
 }
 
 export async function getEnvironmentByName(name: string): Promise<Environment | undefined> {
 	const results = await db.select().from(environments).where(eq(environments.name, name));
-	return results[0];
+	if (!results[0]) return undefined;
+	return {
+		...results[0],
+		tlsKey: decrypt(results[0].tlsKey),
+		hawserToken: decrypt(results[0].hawserToken)
+	};
 }
 
 export async function createEnvironment(env: Omit<Environment, 'id' | 'createdAt' | 'updatedAt'>): Promise<Environment> {
@@ -138,7 +154,7 @@ export async function createEnvironment(env: Omit<Environment, 'id' | 'createdAt
 		protocol: env.protocol || 'http',
 		tlsCa: env.tlsCa || null,
 		tlsCert: env.tlsCert || null,
-		tlsKey: env.tlsKey || null,
+		tlsKey: encrypt(env.tlsKey) || null,
 		icon: env.icon || 'globe',
 		socketPath: env.socketPath || '/var/run/docker.sock',
 		collectActivity: env.collectActivity !== false,
@@ -146,9 +162,13 @@ export async function createEnvironment(env: Omit<Environment, 'id' | 'createdAt
 		highlightChanges: env.highlightChanges !== false,
 		labels: env.labels || null,
 		connectionType: env.connectionType || 'socket',
-		hawserToken: env.hawserToken || null
+		hawserToken: encrypt(env.hawserToken) || null
 	}).returning();
-	return result[0];
+	return {
+		...result[0],
+		tlsKey: decrypt(result[0].tlsKey),
+		hawserToken: decrypt(result[0].hawserToken)
+	};
 }
 
 export async function updateEnvironment(id: number, env: Partial<Environment>): Promise<Environment | undefined> {
@@ -160,7 +180,7 @@ export async function updateEnvironment(id: number, env: Partial<Environment>): 
 	if (env.protocol !== undefined) updateData.protocol = env.protocol;
 	if (env.tlsCa !== undefined) updateData.tlsCa = env.tlsCa;
 	if (env.tlsCert !== undefined) updateData.tlsCert = env.tlsCert;
-	if (env.tlsKey !== undefined) updateData.tlsKey = env.tlsKey;
+	if (env.tlsKey !== undefined) updateData.tlsKey = encrypt(env.tlsKey);
 	if (env.tlsSkipVerify !== undefined) updateData.tlsSkipVerify = env.tlsSkipVerify;
 	if (env.icon !== undefined) updateData.icon = env.icon;
 	if (env.socketPath !== undefined) updateData.socketPath = env.socketPath;
@@ -169,7 +189,7 @@ export async function updateEnvironment(id: number, env: Partial<Environment>): 
 	if (env.highlightChanges !== undefined) updateData.highlightChanges = env.highlightChanges;
 	if (env.labels !== undefined) updateData.labels = env.labels;
 	if (env.connectionType !== undefined) updateData.connectionType = env.connectionType;
-	if (env.hawserToken !== undefined) updateData.hawserToken = env.hawserToken;
+	if (env.hawserToken !== undefined) updateData.hawserToken = encrypt(env.hawserToken);
 
 	await db.update(environments).set(updateData).where(eq(environments.id, id));
 	return getEnvironment(id);
@@ -183,19 +203,22 @@ export async function deleteEnvironment(id: number): Promise<boolean> {
 	try {
 		await db.delete(hostMetrics).where(eq(hostMetrics.environmentId, id));
 	} catch (error) {
-		console.error('Failed to cleanup host metrics for environment:', error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[DB] Failed to cleanup host metrics for environment:', errorMsg);
 	}
 
 	try {
 		await db.delete(stackEvents).where(eq(stackEvents.environmentId, id));
 	} catch (error) {
-		console.error('Failed to cleanup stack events for environment:', error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[DB] Failed to cleanup stack events for environment:', errorMsg);
 	}
 
 	try {
 		await db.delete(autoUpdateSettings).where(eq(autoUpdateSettings.environmentId, id));
 	} catch (error) {
-		console.error('Failed to cleanup auto-update schedules for environment:', error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[DB] Failed to cleanup auto-update schedules for environment:', errorMsg);
 	}
 
 	await db.delete(environments).where(eq(environments.id, id));
@@ -207,17 +230,20 @@ export async function deleteEnvironment(id: number): Promise<boolean> {
 // =============================================================================
 
 export async function getRegistries(): Promise<Registry[]> {
-	return db.select().from(registries).orderBy(desc(registries.isDefault), asc(registries.name));
+	const results = await db.select().from(registries).orderBy(desc(registries.isDefault), asc(registries.name));
+	return results.map((r: Registry) => ({ ...r, password: decrypt(r.password) }));
 }
 
 export async function getRegistry(id: number): Promise<Registry | undefined> {
 	const results = await db.select().from(registries).where(eq(registries.id, id));
-	return results[0];
+	if (!results[0]) return undefined;
+	return { ...results[0], password: decrypt(results[0].password) };
 }
 
 export async function getDefaultRegistry(): Promise<Registry | undefined> {
 	const results = await db.select().from(registries).where(eq(registries.isDefault, true));
-	return results[0];
+	if (!results[0]) return undefined;
+	return { ...results[0], password: decrypt(results[0].password) };
 }
 
 export async function createRegistry(registry: Omit<Registry, 'id' | 'createdAt' | 'updatedAt'>): Promise<Registry> {
@@ -225,10 +251,13 @@ export async function createRegistry(registry: Omit<Registry, 'id' | 'createdAt'
 		name: registry.name,
 		url: registry.url,
 		username: registry.username || null,
-		password: registry.password || null,
+		password: encrypt(registry.password) || null,
 		isDefault: registry.isDefault || false
 	}).returning();
-	return result[0];
+	return {
+		...result[0],
+		password: decrypt(result[0].password)
+	};
 }
 
 export async function updateRegistry(id: number, registry: Partial<Registry>): Promise<Registry | undefined> {
@@ -237,7 +266,7 @@ export async function updateRegistry(id: number, registry: Partial<Registry>): P
 	if (registry.name !== undefined) updateData.name = registry.name;
 	if (registry.url !== undefined) updateData.url = registry.url;
 	if (registry.username !== undefined) updateData.username = registry.username || null;
-	if (registry.password !== undefined) updateData.password = registry.password || null;
+	if (registry.password !== undefined) updateData.password = encrypt(registry.password) || null;
 	if (registry.isDefault !== undefined) updateData.isDefault = registry.isDefault;
 
 	await db.update(registries).set(updateData).where(eq(registries.id, id));
@@ -474,7 +503,7 @@ export interface ConfigSetData {
 
 export async function getConfigSets(): Promise<ConfigSetData[]> {
 	const rows = await db.select().from(configSets).orderBy(asc(configSets.name));
-	return rows.map(row => ({
+	return rows.map((row: typeof configSets.$inferSelect) => ({
 		...row,
 		envVars: row.envVars ? JSON.parse(row.envVars) : [],
 		labels: row.labels ? JSON.parse(row.labels) : [],
@@ -821,11 +850,35 @@ export interface AppriseConfig {
 	urls: string[];
 }
 
+// Helper to encrypt sensitive fields in notification config
+function encryptNotificationConfig(type: 'smtp' | 'apprise', config: SmtpConfig | AppriseConfig): string {
+	if (type === 'smtp') {
+		const smtpConfig = config as SmtpConfig;
+		return JSON.stringify({
+			...smtpConfig,
+			password: encrypt(smtpConfig.password)
+		});
+	}
+	return JSON.stringify(config);
+}
+
+// Helper to decrypt sensitive fields in notification config
+function decryptNotificationConfig(type: string, configJson: string): any {
+	const config = JSON.parse(configJson);
+	if (type === 'smtp' && config.password) {
+		return {
+			...config,
+			password: decrypt(config.password)
+		};
+	}
+	return config;
+}
+
 export async function getNotificationSettings(): Promise<NotificationSettingData[]> {
 	const rows = await db.select().from(notificationSettings).orderBy(desc(notificationSettings.createdAt));
-	return rows.map(row => ({
+	return rows.map((row: typeof notificationSettings.$inferSelect) => ({
 		...row,
-		config: JSON.parse(row.config),
+		config: decryptNotificationConfig(row.type, row.config),
 		eventTypes: row.eventTypes ? JSON.parse(row.eventTypes) : NOTIFICATION_EVENT_TYPES.map(e => e.id)
 	})) as NotificationSettingData[];
 }
@@ -836,16 +889,16 @@ export async function getNotificationSetting(id: number): Promise<NotificationSe
 	const row = results[0];
 	return {
 		...row,
-		config: JSON.parse(row.config),
+		config: decryptNotificationConfig(row.type, row.config),
 		eventTypes: row.eventTypes ? JSON.parse(row.eventTypes) : NOTIFICATION_EVENT_TYPES.map(e => e.id)
 	} as NotificationSettingData;
 }
 
 export async function getEnabledNotificationSettings(): Promise<NotificationSettingData[]> {
 	const rows = await db.select().from(notificationSettings).where(eq(notificationSettings.enabled, true));
-	return rows.map(row => ({
+	return rows.map((row: typeof notificationSettings.$inferSelect) => ({
 		...row,
-		config: JSON.parse(row.config),
+		config: decryptNotificationConfig(row.type, row.config),
 		eventTypes: row.eventTypes ? JSON.parse(row.eventTypes) : NOTIFICATION_EVENT_TYPES.map(e => e.id)
 	})) as NotificationSettingData[];
 }
@@ -862,7 +915,7 @@ export async function createNotificationSetting(data: {
 		type: data.type,
 		name: data.name,
 		enabled: data.enabled !== false,
-		config: JSON.stringify(data.config),
+		config: encryptNotificationConfig(data.type, data.config),
 		eventTypes: JSON.stringify(eventTypes)
 	}).returning();
 	return getNotificationSetting(result[0].id) as Promise<NotificationSettingData>;
@@ -881,7 +934,7 @@ export async function updateNotificationSetting(id: number, data: {
 
 	if (data.name !== undefined) updateData.name = data.name;
 	if (data.enabled !== undefined) updateData.enabled = data.enabled;
-	if (data.config !== undefined) updateData.config = JSON.stringify(data.config);
+	if (data.config !== undefined) updateData.config = encryptNotificationConfig(existing.type, data.config);
 	if (data.eventTypes !== undefined) updateData.eventTypes = JSON.stringify(data.eventTypes);
 
 	await db.update(notificationSettings).set(updateData).where(eq(notificationSettings.id, id));
@@ -931,7 +984,7 @@ export async function getEnvironmentNotifications(environmentId: number): Promis
 		.where(eq(environmentNotifications.environmentId, environmentId))
 		.orderBy(asc(notificationSettings.name));
 
-	return rows.map(row => ({
+	return rows.map((row: any) => ({
 		...row,
 		eventTypes: row.eventTypes ? JSON.parse(row.eventTypes) : NOTIFICATION_EVENT_TYPES.map(e => e.id)
 	})) as EnvironmentNotificationData[];
@@ -1039,7 +1092,7 @@ export async function getEnabledEnvironmentNotifications(
 		.map(row => ({
 			...row,
 			eventTypes: row.eventTypes ? JSON.parse(row.eventTypes) : NOTIFICATION_EVENT_TYPES.map(e => e.id),
-			config: JSON.parse(row.config)
+			config: decryptNotificationConfig(row.channelType ?? 'apprise', row.config)
 		}))
 		.filter(row => !eventType || row.eventTypes.includes(eventType)) as (EnvironmentNotificationData & { config: any })[];
 }
@@ -1591,6 +1644,7 @@ export async function getLdapConfigs(): Promise<LdapConfigData[]> {
 	const results = await db.select().from(ldapConfig).orderBy(asc(ldapConfig.name));
 	return results.map((row: any) => ({
 		...row,
+		bindPassword: decrypt(row.bindPassword),
 		roleMappings: row.roleMappings ? JSON.parse(row.roleMappings) : null
 	})) as LdapConfigData[];
 }
@@ -1601,6 +1655,7 @@ export async function getLdapConfig(id: number): Promise<LdapConfigData | null> 
 	const row = results[0] as any;
 	return {
 		...row,
+		bindPassword: decrypt(row.bindPassword),
 		roleMappings: row.roleMappings ? JSON.parse(row.roleMappings) : null
 	} as LdapConfigData;
 }
@@ -1611,7 +1666,7 @@ export async function createLdapConfig(data: Omit<LdapConfigData, 'id' | 'create
 		enabled: data.enabled,
 		serverUrl: data.serverUrl,
 		bindDn: data.bindDn || null,
-		bindPassword: data.bindPassword || null,
+		bindPassword: encrypt(data.bindPassword) || null,
 		baseDn: data.baseDn,
 		userFilter: data.userFilter,
 		usernameAttribute: data.usernameAttribute,
@@ -1634,7 +1689,7 @@ export async function updateLdapConfig(id: number, data: Partial<LdapConfigData>
 	if (data.enabled !== undefined) updateData.enabled = data.enabled;
 	if (data.serverUrl !== undefined) updateData.serverUrl = data.serverUrl;
 	if (data.bindDn !== undefined) updateData.bindDn = data.bindDn || null;
-	if (data.bindPassword !== undefined) updateData.bindPassword = data.bindPassword || null;
+	if (data.bindPassword !== undefined) updateData.bindPassword = encrypt(data.bindPassword) || null;
 	if (data.baseDn !== undefined) updateData.baseDn = data.baseDn;
 	if (data.userFilter !== undefined) updateData.userFilter = data.userFilter;
 	if (data.usernameAttribute !== undefined) updateData.usernameAttribute = data.usernameAttribute;
@@ -1689,6 +1744,7 @@ export async function getOidcConfigs(): Promise<OidcConfigData[]> {
 	const rows = await db.select().from(oidcConfig).orderBy(asc(oidcConfig.name));
 	return rows.map(row => ({
 		...row,
+		clientSecret: decrypt(row.clientSecret) ?? '',
 		roleMappings: row.roleMappings ? JSON.parse(row.roleMappings) : undefined
 	})) as OidcConfigData[];
 }
@@ -1698,6 +1754,7 @@ export async function getOidcConfig(id: number): Promise<OidcConfigData | null> 
 	if (!results[0]) return null;
 	return {
 		...results[0],
+		clientSecret: decrypt(results[0].clientSecret) ?? '',
 		roleMappings: results[0].roleMappings ? JSON.parse(results[0].roleMappings) : undefined
 	} as OidcConfigData;
 }
@@ -1708,7 +1765,7 @@ export async function createOidcConfig(data: Omit<OidcConfigData, 'id' | 'create
 		enabled: data.enabled,
 		issuerUrl: data.issuerUrl,
 		clientId: data.clientId,
-		clientSecret: data.clientSecret,
+		clientSecret: encrypt(data.clientSecret) ?? '',
 		redirectUri: data.redirectUri,
 		scopes: data.scopes,
 		usernameClaim: data.usernameClaim,
@@ -1729,7 +1786,7 @@ export async function updateOidcConfig(id: number, data: Partial<OidcConfigData>
 	if (data.enabled !== undefined) updateData.enabled = data.enabled;
 	if (data.issuerUrl !== undefined) updateData.issuerUrl = data.issuerUrl;
 	if (data.clientId !== undefined) updateData.clientId = data.clientId;
-	if (data.clientSecret !== undefined) updateData.clientSecret = data.clientSecret;
+	if (data.clientSecret !== undefined) updateData.clientSecret = encrypt(data.clientSecret);
 	if (data.redirectUri !== undefined) updateData.redirectUri = data.redirectUri;
 	if (data.scopes !== undefined) updateData.scopes = data.scopes;
 	if (data.usernameClaim !== undefined) updateData.usernameClaim = data.usernameClaim;
@@ -1768,12 +1825,24 @@ export interface GitCredentialData {
 }
 
 export async function getGitCredentials(): Promise<GitCredentialData[]> {
-	return db.select().from(gitCredentials).orderBy(asc(gitCredentials.name)) as Promise<GitCredentialData[]>;
+	const results = await db.select().from(gitCredentials).orderBy(asc(gitCredentials.name));
+	return results.map(r => ({
+		...r,
+		password: decrypt(r.password),
+		sshPrivateKey: decrypt(r.sshPrivateKey),
+		sshPassphrase: decrypt(r.sshPassphrase)
+	})) as GitCredentialData[];
 }
 
 export async function getGitCredential(id: number): Promise<GitCredentialData | null> {
 	const results = await db.select().from(gitCredentials).where(eq(gitCredentials.id, id));
-	return results[0] as GitCredentialData || null;
+	if (!results[0]) return null;
+	return {
+		...results[0],
+		password: decrypt(results[0].password),
+		sshPrivateKey: decrypt(results[0].sshPrivateKey),
+		sshPassphrase: decrypt(results[0].sshPassphrase)
+	} as GitCredentialData;
 }
 
 export async function createGitCredential(data: {
@@ -1788,9 +1857,9 @@ export async function createGitCredential(data: {
 		name: data.name,
 		authType: data.authType,
 		username: data.username || null,
-		password: data.password || null,
-		sshPrivateKey: data.sshPrivateKey || null,
-		sshPassphrase: data.sshPassphrase || null
+		password: encrypt(data.password) || null,
+		sshPrivateKey: encrypt(data.sshPrivateKey) || null,
+		sshPassphrase: encrypt(data.sshPassphrase) || null
 	}).returning();
 	return getGitCredential(result[0].id) as Promise<GitCredentialData>;
 }
@@ -1803,9 +1872,9 @@ export async function updateGitCredential(id: number, data: Partial<GitCredentia
 	// Only update username if provided (empty string clears it)
 	if (data.username !== undefined) updateData.username = data.username || null;
 	// Only update password/ssh keys if they have actual values (preserve existing if empty)
-	if (data.password) updateData.password = data.password;
-	if (data.sshPrivateKey) updateData.sshPrivateKey = data.sshPrivateKey;
-	if (data.sshPassphrase) updateData.sshPassphrase = data.sshPassphrase;
+	if (data.password) updateData.password = encrypt(data.password);
+	if (data.sshPrivateKey) updateData.sshPrivateKey = encrypt(data.sshPrivateKey);
+	if (data.sshPassphrase) updateData.sshPassphrase = encrypt(data.sshPassphrase);
 
 	await db.update(gitCredentials).set(updateData).where(eq(gitCredentials.id, id));
 	return getGitCredential(id);
@@ -4215,16 +4284,20 @@ export async function getStackEnvVars(
 			.orderBy(asc(stackEnvironmentVariables.key));
 	}
 
-	return results.map(row => ({
-		id: row.id,
-		stackName: row.stackName,
-		environmentId: row.environmentId,
-		key: row.key,
-		value: maskSecrets && row.isSecret ? '***' : row.value,
-		isSecret: row.isSecret ?? false,
-		createdAt: row.createdAt ?? new Date().toISOString(),
-		updatedAt: row.updatedAt ?? new Date().toISOString()
-	}));
+	return results.map(row => {
+		// Decrypt secret values (decrypt handles both encrypted and plain text)
+		const decryptedValue = row.isSecret ? (decrypt(row.value) ?? '') : row.value;
+		return {
+			id: row.id,
+			stackName: row.stackName,
+			environmentId: row.environmentId,
+			key: row.key,
+			value: maskSecrets && row.isSecret ? '***' : decryptedValue,
+			isSecret: row.isSecret ?? false,
+			createdAt: row.createdAt ?? new Date().toISOString(),
+			updatedAt: row.updatedAt ?? new Date().toISOString()
+		};
+	});
 }
 
 /**
@@ -4309,7 +4382,8 @@ export async function setStackEnvVars(
 				stackName,
 				environmentId,
 				key: v.key,
-				value: v.value,
+				// Encrypt values that are marked as secrets
+				value: v.isSecret ? (encrypt(v.value) ?? '') : v.value,
 				isSecret: v.isSecret ?? false,
 				createdAt: now,
 				updatedAt: now

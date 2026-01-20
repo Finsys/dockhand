@@ -9,6 +9,18 @@ import {
 	type NotificationEventType
 } from './db';
 
+// Escape special characters for Telegram Markdown
+function escapeTelegramMarkdown(text: string): string {
+	// Escape characters that have special meaning in Telegram Markdown
+	return text
+		.replace(/\\/g, '\\\\')  // Escape backslashes first
+		.replace(/_/g, '\\_')    // Underscore (italic)
+		.replace(/\*/g, '\\*')   // Asterisk (bold)
+		.replace(/\[/g, '\\[')   // Opening bracket (link)
+		.replace(/\]/g, '\\]')   // Closing bracket (link)
+		.replace(/`/g, '\\`');   // Backtick (code)
+}
+
 export interface NotificationPayload {
 	title: string;
 	message: string;
@@ -57,7 +69,8 @@ async function sendSmtpNotification(config: SmtpConfig, payload: NotificationPay
 
 		return true;
 	} catch (error) {
-		console.error('[Notifications] SMTP send failed:', error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[Notifications] SMTP send failed:', errorMsg);
 		return false;
 	}
 }
@@ -71,7 +84,8 @@ async function sendAppriseNotification(config: AppriseConfig, payload: Notificat
 			const sent = await sendToAppriseUrl(url, payload);
 			if (!sent) success = false;
 		} catch (error) {
-			console.error(`[Notifications] Failed to send to ${url}:`, error);
+			const errorMsg = error instanceof Error ? error.message : String(error);
+			console.error(`[Notifications] Failed to send to ${url}:`, errorMsg);
 			success = false;
 		}
 	}
@@ -117,7 +131,8 @@ async function sendToAppriseUrl(url: string, payload: NotificationPayload): Prom
 				return false;
 		}
 	} catch (error) {
-		console.error('[Notifications] Failed to parse Apprise URL:', error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[Notifications] Failed to parse Apprise URL:', errorMsg);
 		return false;
 	}
 }
@@ -181,14 +196,18 @@ async function sendTelegram(appriseUrl: string, payload: NotificationPayload): P
 	const [, botToken, chatId] = match;
 	const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
 
-	const envTag = payload.environmentName ? ` \\[${payload.environmentName}\\]` : '';
+	// Escape markdown special characters in title and message
+	const escapedTitle = escapeTelegramMarkdown(payload.title);
+	const escapedMessage = escapeTelegramMarkdown(payload.message);
+	const envTag = payload.environmentName ? ` \\[${escapeTelegramMarkdown(payload.environmentName)}\\]` : '';
+
 	try {
 		const response = await fetch(url, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({
 				chat_id: chatId,
-				text: `*${payload.title}*${envTag}\n${payload.message}`,
+				text: `*${escapedTitle}*${envTag}\n${escapedMessage}`,
 				parse_mode: 'Markdown'
 			})
 		});
@@ -200,7 +219,8 @@ async function sendTelegram(appriseUrl: string, payload: NotificationPayload): P
 
 		return response.ok;
 	} catch (error) {
-		console.error('[Notifications] Telegram send failed:', error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[Notifications] Telegram send failed:', errorMsg);
 		return false;
 	}
 }
@@ -421,7 +441,8 @@ export async function sendEnvironmentNotification(
 			if (success) sent++;
 			else allSuccess = false;
 		} catch (error) {
-			console.error(`[Notifications] Failed to send to channel ${notif.channelName}:`, error);
+			const errorMsg = error instanceof Error ? error.message : String(error);
+			console.error(`[Notifications] Failed to send to channel ${notif.channelName}:`, errorMsg);
 			allSuccess = false;
 		}
 	}
@@ -493,7 +514,8 @@ export async function sendEventNotification(
 			if (success) sent++;
 			else allSuccess = false;
 		} catch (error) {
-			console.error(`[Notifications] Failed to send to channel ${channel.channel_name}:`, error);
+			const errorMsg = error instanceof Error ? error.message : String(error);
+			console.error(`[Notifications] Failed to send to channel ${channel.channel_name}:`, errorMsg);
 			allSuccess = false;
 		}
 	}

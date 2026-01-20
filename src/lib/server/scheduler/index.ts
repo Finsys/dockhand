@@ -28,6 +28,7 @@ import {
 	getEnvironmentTimezone,
 	getDefaultTimezone
 } from '../db';
+import { db, gitStacks, eq } from '../db/drizzle.js';
 import {
 	cleanupStaleVolumeHelpers,
 	cleanupExpiredVolumeHelpers
@@ -58,6 +59,30 @@ let volumeHelperCleanupJob: Cron | null = null;
 let isRunning = false;
 
 /**
+ * Clean up stale 'syncing' states from git stacks.
+ * Called on startup to recover from crashes during sync operations.
+ */
+async function cleanupStaleSyncStates(): Promise<void> {
+	const staleStacks = await db.select().from(gitStacks).where(eq(gitStacks.syncStatus, 'syncing'));
+
+	if (staleStacks.length === 0) {
+		return;
+	}
+
+	console.log(`[Scheduler] Recovering ${staleStacks.length} git stack(s) from stale syncing state`);
+
+	for (const stack of staleStacks) {
+		await db.update(gitStacks).set({
+			syncStatus: 'pending',
+			syncError: 'Recovered from interrupted sync on startup',
+			updatedAt: new Date().toISOString()
+		}).where(eq(gitStacks.id, stack.id));
+
+		console.log(`[Scheduler] Reset git stack "${stack.stackName}" (ID: ${stack.id}) to pending`);
+	}
+}
+
+/**
  * Start the unified scheduler service.
  * Registers all schedules with croner for automatic execution.
  */
@@ -69,6 +94,9 @@ export async function startScheduler(): Promise<void> {
 
 	console.log('[Scheduler] Starting scheduler service...');
 	isRunning = true;
+
+	// Clean up stale sync states from previous crashed processes
+	await cleanupStaleSyncStates();
 
 	// Get cron expressions and default timezone from database
 	const scheduleCleanupCron = await getScheduleCleanupCron();
@@ -102,7 +130,8 @@ export async function startScheduler(): Promise<void> {
 
 	// Run volume helper cleanup immediately on startup to clean up stale containers
 	runVolumeHelperCleanupJob('startup', volumeCleanupFns).catch(err => {
-		console.error('[Scheduler] Error during startup volume helper cleanup:', err);
+		const errorMsg = err instanceof Error ? err.message : String(err);
+		console.error('[Scheduler] Error during startup volume helper cleanup:', errorMsg);
 	});
 
 	console.log(`[Scheduler] System schedule cleanup: ${scheduleCleanupCron} [${defaultTimezone}]`);
@@ -177,7 +206,8 @@ export async function refreshAllSchedules(): Promise<void> {
 			}
 		}
 	} catch (error) {
-		console.error('[Scheduler] Error loading container schedules:', error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[Scheduler] Error loading container schedules:', errorMsg);
 	}
 
 	// Register git stack auto-sync schedules
@@ -194,7 +224,8 @@ export async function refreshAllSchedules(): Promise<void> {
 			}
 		}
 	} catch (error) {
-		console.error('[Scheduler] Error loading git stack schedules:', error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[Scheduler] Error loading git stack schedules:', errorMsg);
 	}
 
 	// Register environment update check schedules
@@ -212,7 +243,8 @@ export async function refreshAllSchedules(): Promise<void> {
 			}
 		}
 	} catch (error) {
-		console.error('[Scheduler] Error loading env update check schedules:', error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[Scheduler] Error loading env update check schedules:', errorMsg);
 	}
 
 	console.log(`[Scheduler] Registered ${containerCount} container schedules, ${gitStackCount} git stack schedules, ${envUpdateCheckCount} env update check schedules`);
@@ -337,7 +369,8 @@ export async function refreshSchedulesForEnvironment(environmentId: number): Pro
 			}
 		}
 	} catch (error) {
-		console.error('[Scheduler] Error refreshing container schedules:', error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[Scheduler] Error refreshing container schedules:', errorMsg);
 	}
 
 	// Re-register git stack auto-sync schedules for this environment
@@ -354,7 +387,8 @@ export async function refreshSchedulesForEnvironment(environmentId: number): Pro
 			}
 		}
 	} catch (error) {
-		console.error('[Scheduler] Error refreshing git stack schedules:', error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[Scheduler] Error refreshing git stack schedules:', errorMsg);
 	}
 
 	// Re-register environment update check schedule for this environment
@@ -369,7 +403,8 @@ export async function refreshSchedulesForEnvironment(environmentId: number): Pro
 			if (registered) refreshedCount++;
 		}
 	} catch (error) {
-		console.error('[Scheduler] Error refreshing env update check schedule:', error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[Scheduler] Error refreshing env update check schedule:', errorMsg);
 	}
 
 	console.log(`[Scheduler] Refreshed ${refreshedCount} schedules for environment ${environmentId}`);

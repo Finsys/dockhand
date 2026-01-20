@@ -248,6 +248,7 @@ export async function checkLicenseExpiry(): Promise<void> {
 			lastLicenseExpiryNotification = Date.now();
 		}
 	} catch (error) {
-		console.error('[License] Failed to check license expiry:', error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[License] Failed to check license expiry:', errorMsg);
 	}
 }

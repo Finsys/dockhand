@@ -80,6 +80,7 @@ async function searchPrivateRegistry(registry: any, term: string, limit: number)
 // Try to directly check if an image exists by querying its tags endpoint
 async function tryDirectImageLookup(registry: any, imageName: string): Promise<boolean> {
 	try {
+		// Note: orgPath is not used here because imageName already contains the full repo path
 		const { baseUrl, authHeader } = await getRegistryAuth(registry, `repository:${imageName}:pull`);
 
 		const headers: HeadersInit = {
@@ -104,6 +105,7 @@ async function tryDirectImageLookup(registry: any, imageName: string): Promise<b
 
 // Search through catalog (slow for large registries, limited to first few pages)
 async function searchCatalog(registry: any, term: string, limit: number): Promise<string[]> {
+	// Note: orgPath could be used here to filter results, but search is already term-based
 	const { baseUrl, authHeader } = await getRegistryAuth(registry, 'registry:catalog:*');
 
 	const headers: HeadersInit = {

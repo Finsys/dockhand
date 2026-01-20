@@ -835,24 +835,44 @@ export interface DeviceMapping {
 	permissions?: string;
 }
 
+/** GPU/device request for containers (e.g., Nvidia GPU) */
+export interface DeviceRequest {
+	driver?: string;
+	count?: number;
+	deviceIDs?: string[];
+	capabilities?: string[][];
+	options?: { [key: string]: string };
+}
+
 export interface CreateContainerOptions {
 	name: string;
 	image: string;
-	ports?: { [key: string]: { HostPort: string } };
+	ports?: { [key: string]: { HostIp?: string; HostPort: string } };
 	volumes?: { [key: string]: {} };
 	volumeBinds?: string[];
 	env?: string[];
 	labels?: { [key: string]: string };
 	cmd?: string[];
+	entrypoint?: string[];
+	workingDir?: string;
 	restartPolicy?: string;
 	restartMaxRetries?: number;
 	networkMode?: string;
 	networks?: string[];
+	/** Network aliases for the primary network */
+	networkAliases?: string[];
+	/** Static IPv4 address for the primary network */
+	networkIpv4Address?: string;
+	/** Static IPv6 address for the primary network */
+	networkIpv6Address?: string;
+	/** Gateway priority for the primary network (Docker Engine 28+) */
+	networkGwPriority?: number;
 	user?: string;
 	privileged?: boolean;
 	healthcheck?: HealthcheckConfig;
 	memory?: number;
 	memoryReservation?: number;
+	memorySwap?: number;
 	cpuShares?: number;
 	cpuQuota?: number;
 	cpuPeriod?: number;
@@ -865,6 +885,56 @@ export interface CreateContainerOptions {
 	dnsOptions?: string[];
 	securityOpt?: string[];
 	ulimits?: UlimitConfig[];
+	// Terminal settings
+	tty?: boolean;
+	stdinOpen?: boolean;
+	// Process and memory settings
+	oomKillDisable?: boolean;
+	pidsLimit?: number;
+	shmSize?: number;
+	// Tmpfs mounts
+	tmpfs?: { [key: string]: string };
+	// Sysctls
+	sysctls?: { [key: string]: string };
+	// Logging configuration
+	logDriver?: string;
+	logOptions?: { [key: string]: string };
+	// Namespace settings
+	ipcMode?: string;
+	pidMode?: string;
+	utsMode?: string;
+	// Hostname
+	hostname?: string;
+	// Cgroup parent
+	cgroupParent?: string;
+	// Stop signal
+	stopSignal?: string;
+	// Init process
+	init?: boolean;
+	// Stop timeout
+	stopTimeout?: number;
+	// MAC address
+	macAddress?: string;
+	// Extra hosts (/etc/hosts entries)
+	extraHosts?: string[];
+	// Device requests (GPU access, etc.)
+	deviceRequests?: DeviceRequest[];
+	// Container runtime (e.g., 'runc', 'nvidia' for GPU containers)
+	runtime?: string;
+	// Read-only root filesystem
+	readonlyRootfs?: boolean;
+	// CPU pinning (e.g., "0-3", "0,1")
+	cpusetCpus?: string;
+	// NUMA memory nodes (e.g., "0-1", "0")
+	cpusetMems?: string;
+	// Additional groups for the container process
+	groupAdd?: string[];
+	// Memory swappiness (0-100)
+	memorySwappiness?: number;
+	// User namespace mode
+	usernsMode?: string;
+	// Domain name
+	domainname?: string;
 }
 
 export async function createContainer(options: CreateContainerOptions, envId?: number | null) {
@@ -929,14 +999,74 @@ export async function createContainer(options: CreateContainerOptions, envId?: n
 
 	if (options.networkMode) {
 		containerConfig.HostConfig.NetworkMode = options.networkMode;
+
+		// Build endpoint config for primary network with aliases, static IP, and gateway priority
+		const hasNetworkConfig = options.networkAliases?.length || options.networkIpv4Address || options.networkIpv6Address || options.networkGwPriority !== undefined;
+		if (hasNetworkConfig) {
+			const endpointConfig: any = {};
+
+			if (options.networkAliases && options.networkAliases.length > 0) {
+				endpointConfig.Aliases = options.networkAliases;
+			}
+
+			if (options.networkIpv4Address || options.networkIpv6Address) {
+				endpointConfig.IPAMConfig = {};
+				if (options.networkIpv4Address) {
+					endpointConfig.IPAMConfig.IPv4Address = options.networkIpv4Address;
+				}
+				if (options.networkIpv6Address) {
+					endpointConfig.IPAMConfig.IPv6Address = options.networkIpv6Address;
+				}
+			}
+
+			// Gateway priority (Docker Engine 28+)
+			if (options.networkGwPriority !== undefined) {
+				endpointConfig.GwPriority = options.networkGwPriority;
+			}
+
+			containerConfig.NetworkingConfig = {
+				EndpointsConfig: {
+					[options.networkMode]: endpointConfig
+				}
+			};
+		}
 	}
 
 	if (options.networks && options.networks.length > 0) {
 		containerConfig.HostConfig.NetworkMode = options.networks[0];
+
+		// Build endpoint configs for all networks
+		const endpointsConfig: Record<string, any> = {};
+
+		for (const network of options.networks) {
+			const isFirstNetwork = network === options.networks[0];
+			const endpointConfig: any = {};
+
+			// Apply aliases, static IP, and gateway priority only to the first (primary) network
+			if (isFirstNetwork) {
+				if (options.networkAliases && options.networkAliases.length > 0) {
+					endpointConfig.Aliases = options.networkAliases;
+				}
+				if (options.networkIpv4Address || options.networkIpv6Address) {
+					endpointConfig.IPAMConfig = {};
+					if (options.networkIpv4Address) {
+						endpointConfig.IPAMConfig.IPv4Address = options.networkIpv4Address;
+					}
+					if (options.networkIpv6Address) {
+						endpointConfig.IPAMConfig.IPv6Address = options.networkIpv6Address;
+					}
+				}
+				// Gateway priority (Docker Engine 28+)
+				if (options.networkGwPriority !== undefined) {
+					endpointConfig.GwPriority = options.networkGwPriority;
+				}
+			}
+
+			endpointsConfig[network] = endpointConfig;
+		}
+
 		containerConfig.NetworkingConfig = {
-			EndpointsConfig: Object.fromEntries(
-				options.networks.map(network => [network, {}])
-			)
+			EndpointsConfig: endpointsConfig
 		};
 	}
 
@@ -998,6 +1128,163 @@ export async function createContainer(options: CreateContainerOptions, envId?: n
 			Soft: u.soft,
 			Hard: u.hard
 		}));
+	}
+
+	// Entrypoint
+	if (options.entrypoint && options.entrypoint.length > 0) {
+		containerConfig.Entrypoint = options.entrypoint;
+	}
+
+	// Working directory
+	if (options.workingDir) {
+		containerConfig.WorkingDir = options.workingDir;
+	}
+
+	// Hostname
+	if (options.hostname) {
+		containerConfig.Hostname = options.hostname;
+	}
+
+	// TTY and StdinOpen
+	if (options.tty !== undefined) {
+		containerConfig.Tty = options.tty;
+	}
+	if (options.stdinOpen !== undefined) {
+		containerConfig.OpenStdin = options.stdinOpen;
+	}
+
+	// Memory swap
+	if (options.memorySwap !== undefined) {
+		containerConfig.HostConfig.MemorySwap = options.memorySwap;
+	}
+
+	// OOM kill disable
+	if (options.oomKillDisable !== undefined) {
+		containerConfig.HostConfig.OomKillDisable = options.oomKillDisable;
+	}
+
+	// Pids limit
+	if (options.pidsLimit !== undefined) {
+		containerConfig.HostConfig.PidsLimit = options.pidsLimit;
+	}
+
+	// Shared memory size
+	if (options.shmSize !== undefined) {
+		containerConfig.HostConfig.ShmSize = options.shmSize;
+	}
+
+	// Tmpfs mounts
+	if (options.tmpfs && Object.keys(options.tmpfs).length > 0) {
+		containerConfig.HostConfig.Tmpfs = options.tmpfs;
+	}
+
+	// Sysctls
+	if (options.sysctls && Object.keys(options.sysctls).length > 0) {
+		containerConfig.HostConfig.Sysctls = options.sysctls;
+	}
+
+	// Logging configuration
+	if (options.logDriver) {
+		containerConfig.HostConfig.LogConfig = {
+			Type: options.logDriver,
+			Config: options.logOptions || {}
+		};
+	}
+
+	// IPC mode
+	if (options.ipcMode) {
+		containerConfig.HostConfig.IpcMode = options.ipcMode;
+	}
+
+	// PID mode
+	if (options.pidMode) {
+		containerConfig.HostConfig.PidMode = options.pidMode;
+	}
+
+	// UTS mode
+	if (options.utsMode) {
+		containerConfig.HostConfig.UTSMode = options.utsMode;
+	}
+
+	// Cgroup parent
+	if (options.cgroupParent) {
+		containerConfig.HostConfig.CgroupParent = options.cgroupParent;
+	}
+
+	// Stop signal
+	if (options.stopSignal) {
+		containerConfig.StopSignal = options.stopSignal;
+	}
+
+	// Init process
+	if (options.init !== undefined) {
+		containerConfig.HostConfig.Init = options.init;
+	}
+
+	// Stop timeout
+	if (options.stopTimeout !== undefined) {
+		containerConfig.StopTimeout = options.stopTimeout;
+	}
+
+	// MAC address
+	if (options.macAddress) {
+		containerConfig.MacAddress = options.macAddress;
+	}
+
+	// Extra hosts (/etc/hosts entries)
+	if (options.extraHosts && options.extraHosts.length > 0) {
+		containerConfig.HostConfig.ExtraHosts = options.extraHosts;
+	}
+
+	// Device requests (GPU access, etc.)
+	if (options.deviceRequests && options.deviceRequests.length > 0) {
+		containerConfig.HostConfig.DeviceRequests = options.deviceRequests.map(dr => ({
+			Driver: dr.driver || '',
+			Count: dr.count ?? -1,
+			DeviceIDs: dr.deviceIDs || [],
+			Capabilities: dr.capabilities || [],
+			Options: dr.options || {}
+		}));
+	}
+
+	// Container runtime (e.g., 'nvidia' for GPU containers)
+	if (options.runtime) {
+		containerConfig.HostConfig.Runtime = options.runtime;
+	}
+
+	// Read-only root filesystem
+	if (options.readonlyRootfs !== undefined) {
+		containerConfig.HostConfig.ReadonlyRootfs = options.readonlyRootfs;
+	}
+
+	// CPU pinning
+	if (options.cpusetCpus) {
+		containerConfig.HostConfig.CpusetCpus = options.cpusetCpus;
+	}
+
+	// NUMA memory nodes
+	if (options.cpusetMems) {
+		containerConfig.HostConfig.CpusetMems = options.cpusetMems;
+	}
+
+	// Additional groups
+	if (options.groupAdd && options.groupAdd.length > 0) {
+		containerConfig.HostConfig.GroupAdd = options.groupAdd;
+	}
+
+	// Memory swappiness
+	if (options.memorySwappiness !== undefined) {
+		containerConfig.HostConfig.MemorySwappiness = options.memorySwappiness;
+	}
+
+	// User namespace mode
+	if (options.usernsMode) {
+		containerConfig.HostConfig.UsernsMode = options.usernsMode;
+	}
+
+	// Domain name
+	if (options.domainname) {
+		containerConfig.Domainname = options.domainname;
 	}
 
 	const result = await dockerJsonRequest<{ Id: string }>(
@@ -1108,7 +1395,8 @@ export async function pullImage(imageName: string, onProgress?: (data: any) => v
 			console.log(`[Pull] No credentials found for ${registry}`);
 		}
 	} catch (e) {
-		console.error(`[Pull] Failed to lookup credentials:`, e);
+		const errorMsg = e instanceof Error ? e.message : String(e);
+		console.error(`[Pull] Failed to lookup credentials:`, errorMsg);
 	}
 
 	// Use streaming: true for longer timeout on edge environments
@@ -1221,8 +1509,37 @@ function parseImageReference(imageName: string): { registry: string; repo: strin
 }
 
 /**
+ * Parse a registry URL into host and path components.
+ * Handles URLs with or without protocol, and preserves organization paths.
+ *
+ * Examples:
+ *   'https://registry.example.com/org' -> { host: 'registry.example.com', path: '/org', fullRegistry: 'registry.example.com/org' }
+ *   'ghcr.io' -> { host: 'ghcr.io', path: '', fullRegistry: 'ghcr.io' }
+ *   'registry.example.com:5000/myorg' -> { host: 'registry.example.com:5000', path: '/myorg', fullRegistry: 'registry.example.com:5000/myorg' }
+ */
+export function parseRegistryUrl(url: string): { host: string; path: string; fullRegistry: string } {
+	// Remove protocol
+	const withoutProtocol = url.replace(/^https?:\/\//, '');
+	// Remove trailing slash
+	const trimmed = withoutProtocol.replace(/\/$/, '');
+	// Split on first slash (after port if present)
+	const slashIndex = trimmed.indexOf('/');
+	if (slashIndex === -1) {
+		return { host: trimmed, path: '', fullRegistry: trimmed };
+	}
+	const host = trimmed.substring(0, slashIndex);
+	const path = trimmed.substring(slashIndex); // includes leading /
+	return { host, path, fullRegistry: trimmed };
+}
+
+/**
  * Find registry credentials from Dockhand's stored registries.
- * Matches by registry host (url field).
+ * Matches by registry URL including organization path if present.
+ *
+ * Matching logic:
+ * - Full match: stored 'registry.example.com/org' matches requested 'registry.example.com/org'
+ * - Host-only stored: stored 'registry.example.com' matches requested 'registry.example.com/org'
+ *   (allows a single credential entry to work for all org paths)
  */
 async function findRegistryCredentials(registryHost: string): Promise<{ username: string; password: string } | null> {
 	try {
@@ -1230,10 +1547,16 @@ async function findRegistryCredentials(registryHost: string): Promise<{ username
 		const { getRegistries } = await import('./db.js');
 		const registries = await getRegistries();
 
+		const requested = parseRegistryUrl(registryHost);
+
 		for (const reg of registries) {
-			// Match by URL - extract host from stored URL
-			const storedHost = reg.url.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
-			if (storedHost === registryHost || reg.url.includes(registryHost)) {
+			const stored = parseRegistryUrl(reg.url);
+
+			// Match if:
+			// 1. Full registry paths match exactly, OR
+			// 2. Hosts match and stored registry has no path (applies to any org)
+			if (stored.fullRegistry === requested.fullRegistry ||
+			    (stored.host === requested.host && !stored.path)) {
 				if (reg.username && reg.password) {
 					return { username: reg.username, password: reg.password };
 				}
@@ -1241,13 +1564,13 @@ async function findRegistryCredentials(registryHost: string): Promise<{ username
 		}
 
 		// Also check for Docker Hub variations
-		if (registryHost === 'index.docker.io' || registryHost === 'registry-1.docker.io') {
+		if (requested.host === 'index.docker.io' || requested.host === 'registry-1.docker.io') {
 			for (const reg of registries) {
-				const storedHost = reg.url.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+				const stored = parseRegistryUrl(reg.url);
 				// Match all Docker Hub URL variations
-				if (storedHost === 'docker.io' || storedHost === 'hub.docker.com' ||
-				    storedHost === 'registry.hub.docker.com' || storedHost === 'index.docker.io' ||
-				    storedHost === 'registry-1.docker.io') {
+				if (stored.host === 'docker.io' || stored.host === 'hub.docker.com' ||
+				    stored.host === 'registry.hub.docker.com' || stored.host === 'index.docker.io' ||
+				    stored.host === 'registry-1.docker.io') {
 					if (reg.username && reg.password) {
 						return { username: reg.username, password: reg.password };
 					}
@@ -1257,7 +1580,8 @@ async function findRegistryCredentials(registryHost: string): Promise<{ username
 
 		return null;
 	} catch (e) {
-		console.error('Failed to lookup registry credentials:', e);
+		const errorMsg = e instanceof Error ? e.message : String(e);
+		console.error('[Registry] Failed to lookup credentials:', errorMsg);
 		return null;
 	}
 }
@@ -1352,7 +1676,8 @@ async function getRegistryBearerToken(registry: string, repo: string): Promise<s
 		return token ? `Bearer ${token}` : null;
 
 	} catch (e) {
-		console.error('Failed to get registry bearer token:', e);
+		const errorMsg = e instanceof Error ? e.message : String(e);
+		console.error('[Registry] Failed to get bearer token:', errorMsg);
 		return null;
 	}
 }
@@ -1364,7 +1689,7 @@ async function getRegistryBearerToken(registry: string, repo: string): Promise<s
  * 2. Parse realm, service from challenge
  * 3. Request token from realm with credentials (if available)
  *
- * @param registryUrl - Full registry URL (e.g., 'https://ghcr.io')
+ * @param registryUrl - Full registry URL (e.g., 'https://ghcr.io' or 'https://registry.example.com/org')
  * @param scope - Token scope (e.g., 'registry:catalog:*' or 'repository:user/repo:pull')
  * @param credentials - Optional credentials { username, password }
  * @returns Authorization header value (e.g., 'Bearer xxx' or 'Basic xxx') or null
@@ -1375,15 +1700,12 @@ export async function getRegistryAuthHeader(
 	credentials?: { username: string; password: string } | null
 ): Promise<string | null> {
 	try {
-		// Normalize URL
-		let baseUrl = registryUrl;
-		if (!baseUrl.startsWith('http')) {
-			baseUrl = `https://${baseUrl}`;
-		}
-		baseUrl = baseUrl.replace(/\/$/, '');
+		// Parse URL to extract host (V2 API is always at the host root)
+		const parsed = parseRegistryUrl(registryUrl);
+		const apiBaseUrl = `https://${parsed.host}`;
 
-		// Step 1: Challenge request to /v2/
-		const challengeResponse = await fetch(`${baseUrl}/v2/`, {
+		// Step 1: Challenge request to /v2/ (always at registry root, not under org path)
+		const challengeResponse = await fetch(`${apiBaseUrl}/v2/`, {
 			method: 'GET',
 			headers: { 'User-Agent': 'Dockhand/1.0' }
 		});
@@ -1458,7 +1780,8 @@ export async function getRegistryAuthHeader(
 		return token ? `Bearer ${token}` : null;
 
 	} catch (e) {
-		console.error('Failed to get registry auth header:', e);
+		const errorMsg = e instanceof Error ? e.message : String(e);
+		console.error('[Registry] Failed to get auth header:', errorMsg);
 		return null;
 	}
 }
@@ -1469,27 +1792,26 @@ export async function getRegistryAuthHeader(
  *
  * @param registry - Registry object from database
  * @param scope - Token scope (e.g., 'registry:catalog:*' or 'repository:user/repo:pull')
- * @returns { baseUrl, authHeader } - Normalized URL and auth header (or null)
+ * @returns { baseUrl, orgPath, authHeader } - Base URL (host only for V2 API), org path, and auth header
  */
 export async function getRegistryAuth(
 	registry: { url: string; username?: string | null; password?: string | null },
 	scope: string
-): Promise<{ baseUrl: string; authHeader: string | null }> {
-	// Normalize URL
-	let baseUrl = registry.url;
-	if (!baseUrl.startsWith('http')) {
-		baseUrl = `https://${baseUrl}`;
-	}
-	baseUrl = baseUrl.replace(/\/$/, '');
+): Promise<{ baseUrl: string; orgPath: string; authHeader: string | null }> {
+	// Parse registry URL to extract host and organization path
+	const parsed = parseRegistryUrl(registry.url);
+
+	// V2 API endpoints are always at the registry host root
+	const baseUrl = `https://${parsed.host}`;
 
 	// Get auth header using proper token flow
 	const credentials = registry.username && registry.password
 		? { username: registry.username, password: registry.password }
 		: null;
 
-	const authHeader = await getRegistryAuthHeader(baseUrl, scope, credentials);
+	const authHeader = await getRegistryAuthHeader(registry.url, scope, credentials);
 
-	return { baseUrl, authHeader };
+	return { baseUrl, orgPath: parsed.path, authHeader };
 }
 
 /**
@@ -2037,17 +2359,51 @@ export async function createNetwork(options: CreateNetworkOptions, envId?: numbe
 }
 
 // Network connect/disconnect operations
+export interface NetworkConnectOptions {
+	aliases?: string[];
+	ipv4Address?: string;
+	ipv6Address?: string;
+	gwPriority?: number;
+}
+
 export async function connectContainerToNetwork(
 	networkId: string,
 	containerId: string,
-	envId?: number | null
+	envId?: number | null,
+	options?: NetworkConnectOptions
 ): Promise<void> {
+	const body: any = { Container: containerId };
+
+	// Add EndpointConfig for aliases, static IP, and gateway priority
+	if (options?.aliases || options?.ipv4Address || options?.ipv6Address || options?.gwPriority !== undefined) {
+		body.EndpointConfig = {};
+
+		if (options.aliases && options.aliases.length > 0) {
+			body.EndpointConfig.Aliases = options.aliases;
+		}
+
+		if (options.ipv4Address || options.ipv6Address) {
+			body.EndpointConfig.IPAMConfig = {};
+			if (options.ipv4Address) {
+				body.EndpointConfig.IPAMConfig.IPv4Address = options.ipv4Address;
+			}
+			if (options.ipv6Address) {
+				body.EndpointConfig.IPAMConfig.IPv6Address = options.ipv6Address;
+			}
+		}
+
+		// Gateway priority (Docker Engine 28+)
+		if (options.gwPriority !== undefined) {
+			body.EndpointConfig.GwPriority = options.gwPriority;
+		}
+	}
+
 	const response = await dockerFetch(
 		`/networks/${networkId}/connect`,
 		{
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ Container: containerId })
+			body: JSON.stringify(body)
 		},
 		envId
 	);
@@ -2419,6 +2775,18 @@ export async function runContainerWithStreaming(options: {
 		} else {
 			await streamLocalStderr(containerId, options.envId, options.onStderr);
 		}
+
+		// Wait for container to fully exit before fetching stdout
+		// The stderr stream may close before the container finishes writing to stdout
+		// Use a timeout to prevent hanging if something goes wrong (container should already be exited)
+		const waitPromise = dockerFetch(`/containers/${containerId}/wait`, { method: 'POST' }, options.envId);
+		const timeoutPromise = new Promise((_, reject) =>
+			setTimeout(() => reject(new Error('Container wait timeout after 10s')), 10000)
+		);
+		await Promise.race([waitPromise, timeoutPromise]).catch((err) => {
+			// Log but don't fail - container might already be gone or stderr stream was reliable
+			console.warn(`[runContainerWithStreaming] Wait warning: ${err.message}`);
+		});
 
 		// Container has exited. Now fetch stdout reliably (no race condition).
 		const stdout = await fetchContainerStdout(containerId, config, options.envId);

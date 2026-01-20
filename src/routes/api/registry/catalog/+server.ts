@@ -24,7 +24,7 @@ export const GET: RequestHandler = async ({ url }) => {
 			return json({ error: 'Docker Hub does not support catalog listing. Please use search instead.' }, { status: 400 });
 		}
 
-		const { baseUrl, authHeader } = await getRegistryAuth(registry, 'registry:catalog:*');
+		const { baseUrl, orgPath, authHeader } = await getRegistryAuth(registry, 'registry:catalog:*');
 
 		// Build catalog URL with pagination
 		let catalogUrl = `${baseUrl}/v2/_catalog?n=${PAGE_SIZE}`;
@@ -58,7 +58,13 @@ export const GET: RequestHandler = async ({ url }) => {
 		const data = await response.json();
 
 		// The V2 API returns { repositories: [...] }
-		const repositories: string[] = data.repositories || [];
+		let repositories: string[] = data.repositories || [];
+
+		// If the registry URL has an organization path, filter to only show repos under that path
+		if (orgPath) {
+			const orgPrefix = orgPath.replace(/^\//, ''); // Remove leading slash
+			repositories = repositories.filter(repo => repo.startsWith(orgPrefix + '/') || repo === orgPrefix);
+		}
 
 		// Parse Link header for pagination
 		// Format: </v2/_catalog?last=xxx&n=100>; rel="next"

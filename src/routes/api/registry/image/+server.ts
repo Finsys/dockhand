@@ -39,6 +39,7 @@ export const DELETE: RequestHandler = async ({ url }) => {
 		}
 
 		const { baseUrl, authHeader } = await getRegistryAuth(registry, `repository:${imageName}:pull,push,delete`);
+		// Note: orgPath is not used here because imageName already contains the full repo path
 
 		const headers: HeadersInit = {
 			'Accept': 'application/vnd.docker.distribution.manifest.v2+json'

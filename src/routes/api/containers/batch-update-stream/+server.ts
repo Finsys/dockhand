@@ -4,9 +4,6 @@ import { authorize } from '$lib/server/authorize';
 import {
 	listContainers,
 	inspectContainer,
-	stopContainer,
-	removeContainer,
-	createContainer,
 	pullImage,
 	getTempImageTag,
 	isDigestBasedImage,
@@ -18,6 +15,7 @@ import { auditContainer } from '$lib/server/audit';
 import { getScannerSettings, scanImage } from '$lib/server/scanner';
 import { saveVulnerabilityScan, removePendingContainerUpdate, type VulnerabilityCriteria } from '$lib/server/db';
 import { parseImageNameAndTag, shouldBlockUpdate, combineScanSummaries, isDockhandContainer } from '$lib/server/scheduler/tasks/update-utils';
+import { recreateContainer, updateStackContainer } from '$lib/server/scheduler/tasks/container-update';
 
 export interface ScanResult {
 	critical: number;
@@ -401,81 +399,115 @@ export const POST: RequestHandler = async (event) => {
 						} catch { /* ignore cleanup errors */ }
 					}
 
-					// Step 3: Stop container if running
-					if (wasRunning) {
+					// Detect if container is part of a Docker Compose stack
+					const containerLabels = config.Labels || {};
+					const composeProject = containerLabels['com.docker.compose.project'];
+					const composeService = containerLabels['com.docker.compose.service'];
+					const isStackContainer = !!composeProject;
+
+					// Progress logging function for shared functions
+					const logProgress = (message: string) => {
 						safeEnqueue({
 							type: 'progress',
 							containerId,
 							containerName,
-							step: 'stopping',
+							step: 'creating',
 							current: i + 1,
 							total: containerIds.length,
-							message: `Stopping ${containerName}...`
+							message
 						});
-						await stopContainer(containerId, envIdNum);
-					}
+					};
 
-					// Step 4: Remove old container
-					safeEnqueue({
-						type: 'progress',
-						containerId,
-						containerName,
-						step: 'removing',
-						current: i + 1,
-						total: containerIds.length,
-						message: `Removing old container ${containerName}...`
-					});
-					await removeContainer(containerId, true, envIdNum);
+					let updateSuccess = false;
+					let newContainerId = containerId;
 
-					// Prepare port bindings
-					const ports: { [key: string]: { HostPort: string } } = {};
-					if (hostConfig.PortBindings) {
-						for (const [containerPort, bindings] of Object.entries(hostConfig.PortBindings)) {
-							if (bindings && (bindings as any[]).length > 0) {
-								ports[containerPort] = { HostPort: (bindings as any[])[0].HostPort || '' };
+					if (isStackContainer) {
+						// ===================================================================
+						// STACK CONTAINER: Use docker compose up -d to preserve ALL settings
+						// ===================================================================
+						safeEnqueue({
+							type: 'progress',
+							containerId,
+							containerName,
+							step: 'creating',
+							current: i + 1,
+							total: containerIds.length,
+							message: `Updating stack ${composeProject} (service: ${composeService})...`
+						});
+
+						// Try stack-based update first
+						const stackSuccess = await updateStackContainer(composeProject, composeService!, envIdNum, logProgress);
+
+						if (stackSuccess) {
+							updateSuccess = true;
+							// Find the new container ID
+							const updatedContainers = await listContainers(true, envIdNum);
+							const updatedContainer = updatedContainers.find(c => c.name === containerName);
+							if (updatedContainer) {
+								newContainerId = updatedContainer.id;
+							}
+						} else {
+							// Fallback: Stack is external, use container recreation with full settings
+							safeEnqueue({
+								type: 'progress',
+								containerId,
+								containerName,
+								step: 'creating',
+								current: i + 1,
+								total: containerIds.length,
+								message: `Recreating ${containerName} (external stack, preserving all settings)...`
+							});
+
+							updateSuccess = await recreateContainer(containerName, envIdNum, logProgress);
+							if (updateSuccess) {
+								const updatedContainers = await listContainers(true, envIdNum);
+								const updatedContainer = updatedContainers.find(c => c.name === containerName);
+								if (updatedContainer) {
+									newContainerId = updatedContainer.id;
+								}
+							}
+						}
+					} else {
+						// ===================================================================
+						// STANDALONE CONTAINER: Use shared recreation with ALL settings
+						// ===================================================================
+						safeEnqueue({
+							type: 'progress',
+							containerId,
+							containerName,
+							step: 'creating',
+							current: i + 1,
+							total: containerIds.length,
+							message: `Recreating ${containerName} (preserving all settings)...`
+						});
+
+						updateSuccess = await recreateContainer(containerName, envIdNum, logProgress);
+						if (updateSuccess) {
+							const updatedContainers = await listContainers(true, envIdNum);
+							const updatedContainer = updatedContainers.find(c => c.name === containerName);
+							if (updatedContainer) {
+								newContainerId = updatedContainer.id;
 							}
 						}
 					}
 
-					// Step 5: Create new container
-					safeEnqueue({
-						type: 'progress',
-						containerId,
-						containerName,
-						step: 'creating',
-						current: i + 1,
-						total: containerIds.length,
-						message: `Creating new container ${containerName}...`
-					});
-
-					const newContainer = await createContainer({
-						name: containerName,
-						image: imageName,
-						ports,
-						volumeBinds: hostConfig.Binds || [],
-						env: config.Env || [],
-						labels: config.Labels || {},
-						cmd: config.Cmd || undefined,
-						restartPolicy: hostConfig.RestartPolicy?.Name || 'no',
-						networkMode: hostConfig.NetworkMode || undefined
-					}, envIdNum);
-
-					// Step 6: Start if was running
-					if (wasRunning) {
+					if (!updateSuccess) {
 						safeEnqueue({
 							type: 'progress',
 							containerId,
 							containerName,
-							step: 'starting',
+							step: 'failed',
 							current: i + 1,
 							total: containerIds.length,
-							message: `Starting ${containerName}...`
+							success: false,
+							error: 'Container recreation failed'
 						});
-						await newContainer.start();
+						failCount++;
+						continue;
 					}
 
 					// Audit log
-					await auditContainer(event, 'update', newContainer.id, containerName, envIdNum, { batchUpdate: true });
+					await auditContainer(event, 'update', newContainerId, containerName, envIdNum, { batchUpdate: true });
 
 					// Done with this container - use original containerId for UI consistency
 					safeEnqueue({

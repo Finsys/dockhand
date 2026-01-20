@@ -73,6 +73,7 @@ async function fetchDockerHubTags(imageName: string, page: number = 1, pageSize:
 }
 
 async function fetchRegistryTags(registry: any, imageName: string): Promise<TagInfo[]> {
+	// Note: orgPath is not used here because imageName already contains the full repo path
 	const { baseUrl, authHeader } = await getRegistryAuth(registry, `repository:${imageName}:pull`);
 	const tagsUrl = `${baseUrl}/v2/${imageName}/tags/list`;
 

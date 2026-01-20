@@ -118,7 +118,8 @@ export function initCryptoFallback(): boolean {
 			}
 			console.log('[Crypto] /dev/urandom fallback initialized successfully');
 		} catch (err) {
-			console.error('[Crypto] FATAL: Failed to read from /dev/urandom:', err);
+			const errorMsg = err instanceof Error ? err.message : String(err);
+			console.error('[Crypto] FATAL: Failed to read from /dev/urandom:', errorMsg);
 			throw err;
 		}
 	} else {
