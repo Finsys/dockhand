@@ -105,7 +105,7 @@ function _getDb() {
 			_db = new _SQL(dbUrl);
 			_isPostgres = true;
 		} else {
-			const _dbPath = _join(process.cwd(), 'data', 'db', 'dockhand.db');
+			const dbPath = process.env.DATA_DIR ? _join(process.env.DATA_DIR, 'db', 'dockhand.db') : _join(process.cwd(), 'data', 'db', 'dockhand.db');
 			if (_existsSync(_dbPath)) {
 				_db = new _Database(_dbPath);
 			}
