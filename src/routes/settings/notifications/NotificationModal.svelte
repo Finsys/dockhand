@@ -417,11 +417,12 @@ slack://token_a/token_b/token_c
 tgram://bot_token/chat_id
 ntfy://my-topic
 pushover://user_key/api_token
+workflows://hostname/workflow/signature
 jsons://hostname/webhook/path"
 							class="flex min-h-[220px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
 						></textarea>
 						<p class="text-xs text-muted-foreground">
-							Supports Gotify (gotify:// or gotifys:// for HTTPS), Discord, Slack, Telegram, ntfy, Pushover, and generic JSON webhooks.
+							Supports Gotify (gotify:// or gotifys:// for HTTPS), Discord, Slack, Telegram, ntfy, Pushover, Workflows (for e.g. Microsoft Teams), and generic JSON webhooks.
 						</p>
 					</div>
 				</div>

@@ -126,6 +126,8 @@ async function sendToAppriseUrl(url: string, payload: NotificationPayload): Prom
 			case 'json':
 			case 'jsons':
 				return await sendGenericWebhook(url, payload);
+			case 'workflows':
+				return await sendWorkflows(url, payload);
 			default:
 				console.warn(`[Notifications] Unsupported Apprise protocol: ${protocol}`);
 				return false;
@@ -313,6 +315,49 @@ async function sendGenericWebhook(appriseUrl: string, payload: NotificationPaylo
 			message: payload.message,
 			type: payload.type || 'info',
 			timestamp: new Date().toISOString()
+		})
+	});
+
+	return response.ok;
+}
+// Microsoft Power Automate Workflows, for e.g. Microsoft Teams
+async function sendWorkflows(appriseUrl: string, payload: NotificationPayload): Promise<boolean> {
+	// workflows://hostname/workflow/signature
+	const match = appriseUrl.match(/^workflows?:\/\/([^/]+)\/(.+)\/(.+)/);
+	if (!match) return false;
+
+	const [, hostname, workflow, signature] = match;
+	const url = `https://${hostname}/powerautomate/automations/direct/workflows/${workflow}/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=${signature}`;
+
+	const response = await fetch(url, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({
+			type: 'message',
+			attachments: [
+				{
+					contentType: 'application/vnd.microsoft.card.adaptive',
+					content: {
+						$schema: 'https://adaptivecards.io/schemas/adaptive-card.json',
+						type: 'AdaptiveCard',
+						version: '1.2',
+						body: [
+							{
+								type: 'TextBlock',
+								style: 'heading',
+								wrap: true,
+								text: payload.title
+							},
+							{
+								type: 'TextBlock',
+								style: 'default',
+								wrap: true,
+								text: payload.message
+							}
+						]
+					}
+				}
+			]
 		})
 	});
 
