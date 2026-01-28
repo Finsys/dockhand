@@ -467,7 +467,7 @@ export async function dockerFetch(
 				body,
 				headers,
 				streaming || false,
-				streaming ? 300000 : 30000 // 5 min for streaming, 30s for normal requests
+				streaming ? 300000 : 120000 // 5 min for streaming, 2 min for normal requests
 			);
 			const elapsed = Date.now() - startTime;
 			// Only warn for slow requests, but skip /stats which is expected to be slow (5-10s)
