@@ -113,6 +113,9 @@ async function sendToAppriseUrl(url: string, payload: NotificationPayload): Prom
 			case 'slack':
 			case 'slacks':
 				return await sendSlack(url, payload);
+			case 'mmost':
+			case 'mmosts':
+				return await sendMattermost(url, payload);
 			case 'tgram':
 				return await sendTelegram(url, payload);
 			case 'gotify':
@@ -179,6 +182,54 @@ async function sendSlack(appriseUrl: string, payload: NotificationPayload): Prom
 		body: JSON.stringify({
 			text: `*${payload.title}*${envTag}\n${payload.message}`
 		})
+	});
+
+	return response.ok;
+}
+
+// Mattermost webhook
+async function sendMattermost(appriseUrl: string, payload: NotificationPayload): Promise<boolean> {
+	// mmost://[botname@]hostname[:port][/path]/token or mmosts://...
+	const isSecure = appriseUrl.startsWith('mmosts');
+	const protocol = isSecure ? 'https' : 'http';
+
+	// Remove the scheme
+	let urlPart = appriseUrl.replace(/^mmosts?:\/\//, '');
+
+	// Check for botname (username@hostname format)
+	let username: string | undefined;
+	const atIndex = urlPart.indexOf('@');
+	if (atIndex !== -1) {
+		username = urlPart.substring(0, atIndex);
+		urlPart = urlPart.substring(atIndex + 1);
+	}
+
+	// The token is the last segment, everything else is hostname[:port][/path]
+	const lastSlashIndex = urlPart.lastIndexOf('/');
+	if (lastSlashIndex === -1) {
+		console.error('[Notifications] Invalid Mattermost URL format. Expected: mmost://[botname@]hostname[:port][/path]/token');
+		return false;
+	}
+
+	const token = urlPart.substring(lastSlashIndex + 1);
+	const hostAndPath = urlPart.substring(0, lastSlashIndex);
+
+	// Build the webhook URL: {protocol}://{hostname}[:{port}][/{path}]/hooks/{token}
+	const url = `${protocol}://${hostAndPath}/hooks/${token}`;
+
+	const envTag = payload.environmentName ? ` \`${payload.environmentName}\`` : '';
+	const body: Record<string, string> = {
+		text: `*${payload.title}*${envTag}\n${payload.message}`
+	};
+
+	if (username) {
+		body.username = username;
+	}
+
+	const response = await fetch(url, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(body)
 	});
 
 	return response.ok;
