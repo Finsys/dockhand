@@ -1,4 +1,3 @@
-import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getGitStack } from '$lib/server/db';
 import { deployGitStackWithProgress } from '$lib/server/git';
@@ -29,16 +28,39 @@ export const POST: RequestHandler = async ({ params, cookies }) => {
 	const stream = new ReadableStream({
 		async start(controller) {
 			const encoder = new TextEncoder();
+			let heartbeatInterval: Timer | null = null;
+			let controllerClosed = false;
+
+			const safeEnqueue = (data: string) => {
+				if (!controllerClosed) {
+					try {
+						controller.enqueue(encoder.encode(data));
+					} catch {
+						controllerClosed = true;
+					}
+				}
+			};
+
+			heartbeatInterval = setInterval(() => {
+				// Send heartbeat messages to keep connection alive (every 5s to prevent Traefik/proxy 10s idle timeout)
+				// These will be ignored on the client side since they don't start with 'data:'
+				safeEnqueue(': heartbeat\n\n');
+			}, 5000);
 
 			const sendEvent = (data: any) => {
-				controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+				safeEnqueue(`data: ${JSON.stringify(data)}\n\n`);
 			};
 
 			try {
 				await deployGitStackWithProgress(id, sendEvent);
 			} catch (error: any) {
-				sendEvent({ status: 'error', error: error.message || 'Unknown error' });
+				safeEnqueue(`data: ${JSON.stringify({ status: 'error', error: error.message || 'Unknown error' })}\n\n`);
 			} finally {
+				controllerClosed = true;
+				if(heartbeatInterval) {
+					clearInterval(heartbeatInterval);
+					heartbeatInterval = null;
+				}
 				controller.close();
 			}
 		}
