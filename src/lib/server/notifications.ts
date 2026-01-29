@@ -289,14 +289,26 @@ async function sendNtfy(appriseUrl: string, payload: NotificationPayload): Promi
 	const path = appriseUrl.replace(/^ntfys?:\/\//, '');
 
 	let url: string;
-	let auth: string | null = null;
+	let authHeader: string | null = null;
 
-	// Check for user:pass@host/topic format
-	const authMatch = path.match(/^([^:]+):([^@]+)@(.+)$/);
-	if (authMatch) {
-		const [, user, pass, hostAndTopic] = authMatch;
-		auth = Buffer.from(`${user}:${pass}`).toString('base64');
+	// Check for user:pass@host/topic format (Basic auth)
+	const basicMatch = path.match(/^([^:]+):([^@]+)@(.+)$/);
+	if (basicMatch) {
+		const [, user, pass, hostAndTopic] = basicMatch;
+		const basic = Buffer.from(`${user}:${pass}`).toString('base64');
+		authHeader = `Basic ${basic}`;
 		url = `${isSecure ? 'https' : 'http'}://${hostAndTopic}`;
+	} else if (path.includes('@') && path.includes('/')) {
+		// token@host/topic -> Bearer token auth
+		const tokenMatch = path.match(/^([^@]+)@(.+)$/);
+		if (tokenMatch) {
+			const [, token, hostAndTopic] = tokenMatch;
+			authHeader = `Bearer ${token}`;
+			url = `${isSecure ? 'https' : 'http'}://${hostAndTopic}`;
+		} else {
+			// Fallback to custom server without auth
+			url = `${isSecure ? 'https' : 'http'}://${path}`;
+		}
 	} else if (path.includes('/')) {
 		// Custom server without auth
 		url = `${isSecure ? 'https' : 'http'}://${path}`;
@@ -311,8 +323,8 @@ async function sendNtfy(appriseUrl: string, payload: NotificationPayload): Promi
 		'Tags': payload.type || 'info'
 	};
 
-	if (auth) {
-		headers['Authorization'] = `Basic ${auth}`;
+	if (authHeader) {
+		headers['Authorization'] = authHeader;
 	}
 
 	try {
