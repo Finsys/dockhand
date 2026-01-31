@@ -283,23 +283,34 @@ async function sendNtfy(appriseUrl: string, payload: NotificationPayload): Promi
 	// Supported formats:
 	// ntfy://topic (public ntfy.sh)
 	// ntfy://host/topic (custom server, no auth)
-	// ntfy://user:pass@host/topic (custom server with auth)
+	// ntfy://user:pass@host/topic (custom server with user auth)
+	// ntfy://token@host/topic (custom server with token auth)
 	// ntfys:// variants for HTTPS
 	const isSecure = appriseUrl.startsWith('ntfys');
 	const path = appriseUrl.replace(/^ntfys?:\/\//, '');
+	const protocol = isSecure ? 'https' : 'http'
 
 	let url: string;
 	let auth: string | null = null;
 
-	// Check for user:pass@host/topic format
-	const authMatch = path.match(/^([^:]+):([^@]+)@(.+)$/);
-	if (authMatch) {
-		const [, user, pass, hostAndTopic] = authMatch;
-		auth = Buffer.from(`${user}:${pass}`).toString('base64');
-		url = `${isSecure ? 'https' : 'http'}://${hostAndTopic}`;
+	// Check for auth in apprise url
+	const urlParams = URL.parse(`${protocol}://${path}`)
+	if (urlParams && (urlParams.username || urlParams.password)) {
+		const user = urlParams.username;
+		const pass = urlParams.password;
+		const hostAndTopic = `${urlParams.hostname}${urlParams.pathname}`
+
+		if (urlParams.username && urlParams.password) {
+			// base64 encode username and password
+			auth = `Basic ${Buffer.from(decodeURIComponent(`${user}:${pass}`)).toString('base64')}`
+		} else {
+			// use token as provided
+			auth = `Bearer ${decodeURIComponent(urlParams.username)}`
+		}
+		url = `${protocol}://${hostAndTopic}`;
 	} else if (path.includes('/')) {
 		// Custom server without auth
-		url = `${isSecure ? 'https' : 'http'}://${path}`;
+		url = `${protocol}://${path}`;
 	} else {
 		// Default ntfy.sh
 		url = `https://ntfy.sh/${path}`;
@@ -312,7 +323,7 @@ async function sendNtfy(appriseUrl: string, payload: NotificationPayload): Promi
 	};
 
 	if (auth) {
-		headers['Authorization'] = `Basic ${auth}`;
+		headers['Authorization'] = auth;
 	}
 
 	try {
