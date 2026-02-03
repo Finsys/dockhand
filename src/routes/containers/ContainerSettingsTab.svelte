@@ -645,10 +645,12 @@
 			</div>
 		</div>
 
-		<div class="flex items-center gap-3 pt-1">
-			<Label class="text-xs font-normal">Pull image before update</Label>
-			<TogglePill bind:checked={repullImage} />
-		</div>
+		{#if mode !== 'create'}
+			<div class="flex items-center gap-3 pt-1">
+				<Label class="text-xs font-normal">Pull image before update</Label>
+				<TogglePill bind:checked={repullImage} />
+			</div>
+		{/if}
 
 		<div class="flex items-center gap-3 pt-1">
 			<Label class="text-xs font-normal">Start container after {mode === 'create' ? 'creation' : 'update'}</Label>
