@@ -70,6 +70,7 @@
 		restartMaxRetries: number | '';
 		networkMode: string;
 		startAfterCreate?: boolean;
+		repullImage?: boolean;
 		// Port mappings
 		portMappings: { hostPort: string; containerPort: string; protocol: string }[];
 		// Volume mappings
@@ -152,6 +153,7 @@
 		restartMaxRetries = $bindable(),
 		networkMode = $bindable(),
 		startAfterCreate = $bindable(true),
+		repullImage = $bindable(true),
 		portMappings = $bindable(),
 		volumeMappings = $bindable(),
 		envVars = $bindable(),
@@ -641,6 +643,11 @@
 					</Select.Content>
 				</Select.Root>
 			</div>
+		</div>
+
+		<div class="flex items-center gap-3 pt-1">
+			<Label class="text-xs font-normal">Pull image before update</Label>
+			<TogglePill bind:checked={repullImage} />
 		</div>
 
 		<div class="flex items-center gap-3 pt-1">

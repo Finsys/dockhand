@@ -87,6 +87,7 @@
 	let restartMaxRetries = $state<number | ''>('');
 	let networkMode = $state('bridge');
 	let startAfterUpdate = $state(true);
+	let repullImage = $state(true);
 
 	// Port mappings
 	let portMappings = $state<{ hostPort: string; containerPort: string; protocol: string }[]>([
@@ -894,6 +895,7 @@
 					networkMode,
 					networks: selectedNetworks.length > 0 ? selectedNetworks : undefined,
 					startAfterUpdate,
+					repullImage,
 					user: containerUser.trim() || undefined,
 					privileged: privilegedMode || undefined,
 					healthcheck,
@@ -1055,6 +1057,7 @@
 					bind:restartMaxRetries
 					bind:networkMode
 					startAfterCreate={startAfterUpdate}
+					{repullImage}
 					bind:portMappings
 					bind:volumeMappings
 					bind:envVars

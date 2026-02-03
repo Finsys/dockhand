@@ -1,5 +1,5 @@
 import { json } from '@sveltejs/kit';
-import { updateContainer, type CreateContainerOptions } from '$lib/server/docker';
+import { pullImage, updateContainer, type CreateContainerOptions } from '$lib/server/docker';
 import { authorize } from '$lib/server/authorize';
 import { auditContainer } from '$lib/server/audit';
 import { removePendingContainerUpdate } from '$lib/server/db';
@@ -19,7 +19,18 @@ export const POST: RequestHandler = async (event) => {
 
 	try {
 		const body = await request.json();
-		const { startAfterUpdate, ...options } = body;
+		const { startAfterUpdate, repullImage, ...options } = body;
+
+		if (repullImage) {
+			console.log(`Pulling image...`);
+			try {
+				await pullImage(options.image, undefined, envIdNum);
+				console.log(`Image pulled successfully`);
+			} catch (pullError: any) {
+				console.log(`Pull failed: ${pullError.message}`);
+				throw pullError;
+			}
+		}
 
 		console.log(`Updating container ${params.id} with name: ${options.name}`);
 
