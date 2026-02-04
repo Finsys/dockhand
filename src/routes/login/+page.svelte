@@ -294,6 +294,7 @@
 								required
 								disabled={loading}
 								autocomplete="one-time-code"
+								autofocus
 							/>
 							<p class="text-xs text-muted-foreground">
 								Enter the 6-digit code from your authenticator app, or use a backup code
