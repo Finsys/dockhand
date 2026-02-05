@@ -6,7 +6,7 @@
 	import { Label } from '$lib/components/ui/label';
 	import { Input } from '$lib/components/ui/input';
 	import { TogglePill } from '$lib/components/ui/toggle-pill';
-	import { Loader2, GitBranch, RefreshCw, Webhook, Rocket, RefreshCcw, Copy, Check, FolderGit2, Github, Key, KeyRound, Lock, FileText, HelpCircle, GripVertical, X, Download } from 'lucide-svelte';
+	import { Loader2, GitBranch, RefreshCw, Webhook, Rocket, RefreshCcw, Copy, Check, FolderGit2, Github, Key, KeyRound, Lock, FileText, HelpCircle, GripVertical, X, Download, Hammer } from 'lucide-svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import CronEditor from '$lib/components/cron-editor.svelte';
 	import StackEnvVarsPanel from '$lib/components/StackEnvVarsPanel.svelte';
@@ -84,6 +84,7 @@
 	let formAutoUpdateCron = $state('0 3 * * *');
 	let formWebhookEnabled = $state(false);
 	let formWebhookSecret = $state('');
+	let formBuildOnDeploy = $state(true);
 	let formDeployNow = $state(false);
 	let formError = $state('');
 	let formSaving = $state(false);
@@ -345,6 +346,7 @@
 			formAutoUpdateCron = gitStack.autoUpdateCron || '0 3 * * *';
 			formWebhookEnabled = gitStack.webhookEnabled;
 			formWebhookSecret = gitStack.webhookSecret || '';
+			formBuildOnDeploy = gitStack.buildOnDeploy !== false;
 			formDeployNow = false;
 			// Load env files and overrides for editing (async - will populate envFiles, envVars, fileEnvVars)
 			loadEnvFiles();
@@ -367,6 +369,7 @@
 			formAutoUpdateCron = '0 3 * * *';
 			formWebhookEnabled = false;
 			formWebhookSecret = '';
+			formBuildOnDeploy = true;
 			formDeployNow = false;
 		}
 	}
@@ -423,6 +426,7 @@
 				autoUpdateCron: formAutoUpdateCron,
 				webhookEnabled: formWebhookEnabled,
 				webhookSecret: formWebhookEnabled ? formWebhookSecret : null,
+				buildOnDeploy: formBuildOnDeploy,
 				deployNow: deployAfterSave,
 				envVars: overrideVars.map(v => ({
 					key: v.key.trim(),
@@ -850,6 +854,20 @@
 						</p>
 					{/if}
 				{/if}
+			</div>
+
+			<!-- Build on deploy option -->
+			<div class="space-y-3 p-3 bg-muted/50 rounded-md">
+				<div class="flex items-center gap-3">
+					<div class="flex items-center gap-2 flex-1">
+						<Hammer class="w-4 h-4 text-muted-foreground" />
+						<Label class="text-sm font-normal">Build images on deploy</Label>
+					</div>
+					<TogglePill bind:checked={formBuildOnDeploy} />
+				</div>
+				<p class="text-xs text-muted-foreground">
+					Rebuild Docker images when deploying. Required for stacks that use <code>build:</code> in their compose file.
+				</p>
 			</div>
 
 			<!-- Deploy now option (only for new stacks) -->

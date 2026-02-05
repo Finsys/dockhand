@@ -71,7 +71,8 @@ export const PUT: RequestHandler = async (event) => {
 			autoUpdateSchedule: data.autoUpdateSchedule,
 			autoUpdateCron: data.autoUpdateCron,
 			webhookEnabled: data.webhookEnabled,
-			webhookSecret: data.webhookSecret
+			webhookSecret: data.webhookSecret,
+			buildOnDeploy: data.buildOnDeploy
 		});
 
 		// If stack name changed, update related records

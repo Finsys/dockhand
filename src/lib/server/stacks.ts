@@ -96,6 +96,7 @@ export interface DeployStackOptions {
 	envId?: number | null;
 	sourceDir?: string; // Directory to copy all files from (for git stacks)
 	forceRecreate?: boolean;
+	build?: boolean; // Pass --build to docker compose up (for git stacks with build: directives)
 	composePath?: string; // Custom compose file path (for adopted/imported stacks)
 	envPath?: string; // Custom env file path (for adopted/imported stacks)
 	composeFileName?: string; // Compose filename to use (e.g., "docker-compose.yaml") for git stacks
@@ -742,6 +743,8 @@ interface ComposeCommandOptions {
 	envPath?: string;
 	/** When true, write non-secret envVars to .env.dockhand override file (git stacks only) */
 	useOverrideFile?: boolean;
+	/** When true, pass --build to docker compose up (for git stacks with build: directives) */
+	build?: boolean;
 }
 
 /**
@@ -767,7 +770,8 @@ async function executeLocalCompose(
 	workingDir?: string,
 	customComposePath?: string,
 	customEnvPath?: string,
-	useOverrideFile?: boolean
+	useOverrideFile?: boolean,
+	build?: boolean
 ): Promise<StackOperationResult> {
 	const logPrefix = `[Stack:${stackName}]`;
 
@@ -909,6 +913,7 @@ async function executeLocalCompose(
 		case 'up':
 			args.push('up', '-d', '--remove-orphans');
 			if (forceRecreate) args.push('--force-recreate');
+			if (build) args.push('--build');
 			break;
 		case 'down':
 			args.push('down');
@@ -1062,7 +1067,8 @@ async function executeComposeViaHawser(
 	secretVars?: Record<string, string>,
 	forceRecreate?: boolean,
 	removeVolumes?: boolean,
-	stackFiles?: Record<string, string>
+	stackFiles?: Record<string, string>,
+	build?: boolean
 ): Promise<StackOperationResult> {
 	const logPrefix = `[Stack:${stackName}]`;
 	// Import dockerFetch dynamically to avoid circular dependency
@@ -1132,6 +1138,7 @@ async function executeComposeViaHawser(
 			files, // Files including .env (secrets NOT in .env file)
 			forceRecreate: forceRecreate || false,
 			removeVolumes: removeVolumes || false,
+			build: build || false,
 			registries // Registry credentials for docker login
 		});
 
@@ -1198,7 +1205,7 @@ async function executeComposeCommand(
 	envVars?: Record<string, string>,
 	secretVars?: Record<string, string>
 ): Promise<StackOperationResult> {
-	const { stackName, envId, forceRecreate, removeVolumes, stackFiles, workingDir, composePath, envPath, useOverrideFile } = options;
+	const { stackName, envId, forceRecreate, removeVolumes, stackFiles, workingDir, composePath, envPath, useOverrideFile, build } = options;
 
 	// Get environment configuration
 	const env = envId ? await getEnvironment(envId) : null;
@@ -1219,7 +1226,8 @@ async function executeComposeCommand(
 			workingDir,
 			composePath,
 			envPath,
-			useOverrideFile
+			useOverrideFile,
+			build
 		);
 	}
 
@@ -1251,7 +1259,8 @@ async function executeComposeCommand(
 				secretVars,
 				forceRecreate,
 				removeVolumes,
-				stackFiles
+				stackFiles,
+				build
 			);
 		}
 
@@ -1281,7 +1290,8 @@ async function executeComposeCommand(
 				workingDir,
 				composePath,
 				envPath,
-				useOverrideFile
+				useOverrideFile,
+				build
 			);
 		}
 
@@ -1301,7 +1311,8 @@ async function executeComposeCommand(
 				workingDir,
 				composePath,
 				envPath,
-				useOverrideFile
+				useOverrideFile,
+				build
 			);
 	}
 }
@@ -1886,7 +1897,7 @@ export async function removeStack(
  * Uses stack locking to prevent concurrent deployments.
  */
 export async function deployStack(options: DeployStackOptions): Promise<StackOperationResult> {
-	const { name, compose, envId, sourceDir, forceRecreate, composePath, envPath, composeFileName, envFileName } = options;
+	const { name, compose, envId, sourceDir, forceRecreate, build, composePath, envPath, composeFileName, envFileName } = options;
 	const logPrefix = `[Stack:${name}]`;
 
 	console.log(`${logPrefix} ========================================`);
@@ -2007,6 +2018,7 @@ export async function deployStack(options: DeployStackOptions): Promise<StackOpe
 				stackName: name,
 				envId,
 				forceRecreate,
+				build,
 				stackFiles,
 				workingDir,
 				composePath: actualComposePath,

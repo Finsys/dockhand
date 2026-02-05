@@ -315,6 +315,7 @@ export const gitStacks = sqliteTable('git_stacks', {
 	autoUpdateCron: text('auto_update_cron').default('0 3 * * *'),
 	webhookEnabled: integer('webhook_enabled', { mode: 'boolean' }).default(false),
 	webhookSecret: text('webhook_secret'),
+	buildOnDeploy: integer('build_on_deploy', { mode: 'boolean' }).default(true),
 	lastSync: text('last_sync'),
 	lastCommit: text('last_commit'),
 	syncStatus: text('sync_status').default('pending'),

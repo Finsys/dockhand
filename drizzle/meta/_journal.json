@@ -29,6 +29,13 @@
       "when": 1767689000000,
       "tag": "0003_add_stack_paths",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1767900000000,
+      "tag": "0004_add_build_on_deploy",
+      "breakpoints": true
     }
   ]
 }

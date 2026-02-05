@@ -318,6 +318,7 @@ export const gitStacks = pgTable('git_stacks', {
 	autoUpdateCron: text('auto_update_cron').default('0 3 * * *'),
 	webhookEnabled: boolean('webhook_enabled').default(false),
 	webhookSecret: text('webhook_secret'),
+	buildOnDeploy: boolean('build_on_deploy').default(true),
 	lastSync: timestamp('last_sync', { mode: 'string' }),
 	lastCommit: text('last_commit'),
 	syncStatus: text('sync_status').default('pending'),
