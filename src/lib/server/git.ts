@@ -26,7 +26,7 @@ if (!existsSync(GIT_REPOS_DIR)) {
 /**
  * Mask sensitive values in environment variables for safe logging.
  */
-function maskSecrets(vars: Record<string, string>): Record<string, string> {
+export function maskSecrets(vars: Record<string, string>): Record<string, string> {
 	const masked: Record<string, string> = {};
 	const secretPatterns = /password|secret|token|key|api_key|apikey|auth|credential|private/i;
 	for (const [key, value] of Object.entries(vars)) {
