@@ -28,8 +28,8 @@ describe('API Smoke Tests', () => {
 		expect(status).toBe(200);
 	});
 
-	test('GET /api/system/version returns 200 with version info', async () => {
-		const { status, data } = await api('/api/system/version');
+	test('GET /api/system returns 200 with system info', async () => {
+		const { status, data } = await api('/api/system');
 		expect(status).toBe(200);
 		expect(data).toBeDefined();
 	});
