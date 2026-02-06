@@ -264,6 +264,7 @@
 								required
 								disabled={loading}
 								autocomplete="username"
+								autofocus
 							/>
 						</div>
 
