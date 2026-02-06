@@ -3,3 +3,5 @@
 node_modules/
 .svelte-kit/
 bun.lock
+data/db
+data/.encryption_key
