@@ -1,7 +1,74 @@
-.idea/
-.DS_Store
+# Dependencies
 node_modules/
+.pnpm-store/
+
+# Build outputs
 .svelte-kit/
+build/
+dist/
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.encryption_key
+
+# Data directory (local development)
+data/
+!data/.gitkeep
+
+# Test data (local testing)
+test-data/
+
+# Database files
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# IDE & editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Lock files
 bun.lock
-data/db
-data/.encryption_key
+bun.lockb
+package-lock.json
+
+# Vite
+vite.config.ts.timestamp-*
+
+# TypeScript
+*.tsbuildinfo
+
+# Drizzle
+drizzle/meta/*.json.bak
+drizzle-pg/meta/*.json.bak
+
+# Docker
+docker-compose.override.yml

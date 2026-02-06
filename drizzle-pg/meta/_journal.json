@@ -43,6 +43,20 @@
       "when": 1775312212996,
       "tag": "0005_add_api_tokens",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1776000000000,
+      "tag": "0006_add_vault_config",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1776000000001,
+      "tag": "0007_add_vault_tls_skip",
+      "breakpoints": true
     }
   ]
 }
