@@ -64,14 +64,6 @@ body:
       label: Hawser version (if used)
     validations:
       required: false
-  - type:input
-    id: connection
-    attributes:
-      label: Connection mod
-      description: How you connect your Docker host to Dockhand
-      placeholder: socket/direct IP/hawser/hawser-edge
-    validations:
-      required: false
   - type: checkboxes
     id: required-checks
     attributes:
