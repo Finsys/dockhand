@@ -16,14 +16,17 @@
 	import type { Snippet } from 'svelte';
 	import { Progress } from '$lib/components/ui/progress';
 
+	type SyncMode = 'git' | 'vault' | 'all' | 'deploy';
+
 	interface Props {
 		stackId: number;
 		stackName: string;
+		mode?: SyncMode;
 		onComplete?: () => void;
 		children: Snippet;
 	}
 
-	let { stackId, stackName, onComplete, children }: Props = $props();
+	let { stackId, stackName, mode = 'deploy', onComplete, children }: Props = $props();
 
 	interface StepProgress {
 		status: 'connecting' | 'cloning' | 'fetching' | 'reading' | 'deploying' | 'complete' | 'error';
@@ -73,6 +76,23 @@
 		return 'text-muted-foreground';
 	}
 
+	function getEndpointUrl(): string {
+		if (mode === 'deploy') {
+			return `/api/git/stacks/${stackId}/deploy-stream`;
+		}
+		// For sync modes, use the sync endpoint with mode parameter
+		return `/api/git/stacks/${stackId}/sync?mode=${mode}`;
+	}
+
+	function getActionLabel(): string {
+		switch (mode) {
+			case 'git': return 'Syncing Git';
+			case 'vault': return 'Syncing Vault';
+			case 'all': return 'Syncing All';
+			default: return 'Deploying';
+		}
+	}
+
 	async function startDeploy() {
 		steps = [];
 		currentStep = null;
@@ -80,8 +100,50 @@
 		errorMessage = '';
 		open = true;
 
+		// For sync modes, use a simple POST request (not streaming)
+		if (mode !== 'deploy') {
+			try {
+				currentStep = { status: 'connecting', message: getActionLabel() + '...' };
+				steps = [currentStep];
+
+				const response = await fetch(getEndpointUrl(), { method: 'POST' });
+				const data = await response.json();
+
+				if (!response.ok || !data.success) {
+					throw new Error(data.error || 'Sync failed');
+				}
+
+				// Build success message
+				let message = 'Sync complete';
+				if (mode === 'vault' && data.synced !== undefined) {
+					message = `Synced ${data.synced} secret(s)`;
+				} else if (mode === 'git') {
+					message = data.updated ? 'Repository updated' : 'Already up to date';
+				} else if (mode === 'all') {
+					message = data.updated ? 'Changes detected' : 'Already up to date';
+				}
+
+				if (data.deployed) {
+					message += data.deploySuccess ? ' (auto-deployed)' : ' (deploy failed)';
+				}
+
+				overallStatus = 'complete';
+				currentStep = { status: 'complete', message };
+				steps = [...steps, currentStep];
+				onComplete?.();
+			} catch (error: any) {
+				console.error('Sync failed:', error);
+				overallStatus = 'error';
+				errorMessage = error.message || 'Sync failed';
+				currentStep = { status: 'error', error: errorMessage };
+				steps = [...steps, currentStep];
+			}
+			return;
+		}
+
+		// Original deploy-stream logic for mode === 'deploy'
 		try {
-			const response = await fetch(`/api/git/stacks/${stackId}/deploy-stream`, {
+			const response = await fetch(getEndpointUrl(), {
 				method: 'POST'
 			});
 

@@ -12,7 +12,7 @@
 	import { Input } from '$lib/components/ui/input';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import MultiSelectFilter from '$lib/components/MultiSelectFilter.svelte';
-	import { Play, Square, Trash2, Plus, ArrowBigDown, Search, Pencil, ExternalLink, GitBranch, RefreshCw, Loader2, FileCode, Box, RotateCcw, ScrollText, Terminal, Eye, Network, HardDrive, Heart, HeartPulse, HeartOff, ChevronsUpDown, ChevronsDownUp, Rocket, AlertTriangle, X, Layers, Pause, CircleDashed, Skull, FolderOpen, Variable, Clock, RotateCw, Import } from 'lucide-svelte';
+	import { Play, Square, Trash2, Plus, ArrowBigDown, Search, Pencil, ExternalLink, GitBranch, RefreshCw, Loader2, FileCode, Box, RotateCcw, ScrollText, Terminal, Eye, Network, HardDrive, Heart, HeartPulse, HeartOff, ChevronsUpDown, ChevronsDownUp, Rocket, AlertTriangle, X, Layers, Pause, CircleDashed, Skull, FolderOpen, Variable, Clock, RotateCw, Import, KeyRound } from 'lucide-svelte';
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
 	import BatchOperationModal from '$lib/components/BatchOperationModal.svelte';
 	import type { ComposeStackInfo, ContainerStats } from '$lib/types';
@@ -834,6 +834,47 @@
 		showEditModal = true;
 	}
 
+	// Sync git stack with specified mode (git, vault, all)
+	let syncingStack = $state<string | null>(null);
+	let syncingStackMode = $state<'git' | 'vault' | 'all' | null>(null);
+
+	async function syncGitStackWithMode(stackId: number, stackName: string, mode: 'git' | 'vault' | 'all') {
+		syncingStack = stackName;
+		syncingStackMode = mode;
+		try {
+			const response = await fetch(`/api/git/stacks/${stackId}/sync?mode=${mode}`, { method: 'POST' });
+			const data = await response.json();
+
+			if (!response.ok || !data.success) {
+				throw new Error(data.error || 'Sync failed');
+			}
+
+			// Build success message
+			let message = `${stackName}: `;
+			if (mode === 'vault') {
+				message += `Synced ${data.synced ?? 0} secret(s)`;
+			} else if (mode === 'git') {
+				message += data.updated ? 'Repository updated' : 'Already up to date';
+			} else {
+				message += data.updated ? 'Changes synced' : 'Already up to date';
+			}
+
+			if (data.deployed) {
+				message += data.deploySuccess ? ' (auto-deployed)' : ' (deploy failed)';
+			}
+
+			toast.success(message);
+			await fetchStacks();
+		} catch (error) {
+			console.error('Sync failed:', error);
+			const errorMsg = error instanceof Error ? error.message : 'Sync failed';
+			toast.error(`Failed to sync ${stackName}: ${errorMsg}`);
+		} finally {
+			syncingStack = null;
+			syncingStackMode = null;
+		}
+	}
+
 	function getStatusClasses(status: string): string {
 		const base = 'text-xs px-1.5 py-0.5 rounded-sm font-medium inline-flex items-center gap-1 w-[6rem] justify-center shadow-sm whitespace-nowrap';
 		switch (status.toLowerCase()) {
@@ -1505,7 +1546,7 @@
 						<StatusIcon class="w-3 h-3" />
 						{displayStatus}
 					</span>
-				{:else if column.id === 'actions'}
+					{:else if column.id === 'actions'}
 					<div class="relative flex gap-1 justify-end">
 						{#if operationError?.id === stack.name && operationError?.message}
 							<div class="absolute bottom-full right-0 mb-1 z-50 bg-destructive text-destructive-foreground rounded-md shadow-lg p-2 text-xs flex items-start gap-2 max-w-lg w-max">
@@ -1542,21 +1583,48 @@
 							</GitDeployProgressPopover>
 						{:else}
 							{#if source.sourceType === 'git' && source.gitStack}
-								<GitDeployProgressPopover
-									stackId={source.gitStack.id}
-									stackName={stack.name}
-									onComplete={fetchStacks}
+								<!-- Sync buttons for Git stacks: Git, Vault, All -->
+								{@const gitStackId = source.gitStack.id}
+								{@const isSyncing = syncingStack === stack.name}
+								<button
+									type="button"
+									title="Sync Git only"
+									disabled={isSyncing}
+									onclick={() => syncGitStackWithMode(gitStackId, stack.name, 'git')}
+									class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
 								>
-									{#snippet children()}
-										<button
-											type="button"
-											title="Sync from Git"
-											class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
-										>
-											<RefreshCw class="w-3 h-3 text-muted-foreground hover:text-purple-500" />
-										</button>
-									{/snippet}
-								</GitDeployProgressPopover>
+									{#if syncingStackMode === 'git' && isSyncing}
+										<Loader2 class="w-3 h-3 text-purple-500 animate-spin" />
+									{:else}
+										<GitBranch class="w-3 h-3 text-purple-500" />
+									{/if}
+								</button>
+								<button
+									type="button"
+									title="Sync Vault only"
+									disabled={isSyncing}
+									onclick={() => syncGitStackWithMode(gitStackId, stack.name, 'vault')}
+									class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+								>
+									{#if syncingStackMode === 'vault' && isSyncing}
+										<Loader2 class="w-3 h-3 text-cyan-500 animate-spin" />
+									{:else}
+										<KeyRound class="w-3 h-3 text-cyan-500" />
+									{/if}
+								</button>
+								<button
+									type="button"
+									title="Sync All (Git + Vault)"
+									disabled={isSyncing}
+									onclick={() => syncGitStackWithMode(gitStackId, stack.name, 'all')}
+									class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+								>
+									{#if syncingStackMode === 'all' && isSyncing}
+										<Loader2 class="w-3 h-3 text-green-500 animate-spin" />
+									{:else}
+										<RefreshCw class="w-3 h-3 text-green-500" />
+									{/if}
+								</button>
 							{/if}
 							{#if $canAccess('stacks', 'edit')}
 								{#if source.sourceType === 'git' && source.gitStack}

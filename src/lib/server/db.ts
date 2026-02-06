@@ -48,6 +48,7 @@ import {
 	scheduleExecutions,
 	stackEnvironmentVariables,
 	pendingContainerUpdates,
+	vaultConfig,
 	// Types
 	type Environment,
 	type Registry,
@@ -74,7 +75,8 @@ import {
 	type ContainerEvent,
 	type ScheduleExecution,
 	type StackEnvironmentVariable,
-	type PendingContainerUpdate
+	type PendingContainerUpdate,
+	type VaultConfig
 } from './db/drizzle.js';
 
 import type { AllGridPreferences, GridId, GridColumnPreferences } from '$lib/types';
@@ -4636,4 +4638,161 @@ export async function removePendingContainerUpdate(environmentId: number, contai
 			eq(pendingContainerUpdates.environmentId, environmentId),
 			eq(pendingContainerUpdates.containerId, containerId)
 		));
+}
+
+// =============================================================================
+// VAULT CONFIGURATION OPERATIONS
+// =============================================================================
+
+/**
+ * Get the Vault configuration.
+ * Returns null if no configuration exists.
+ */
+export async function getVaultConfig(): Promise<VaultConfig | null> {
+	const results = await db.select().from(vaultConfig).limit(1);
+	return results[0] ?? null;
+}
+
+/**
+ * Save or update the Vault configuration.
+ * Only one configuration is stored at a time.
+ */
+export async function saveVaultConfig(config: {
+	address: string;
+	namespace?: string | null;
+	defaultPath?: string | null;
+	authMethod: string;
+	token?: string | null;
+	roleId?: string | null;
+	secretId?: string | null;
+	kubeRole?: string | null;
+	skipTlsVerify?: boolean;
+	enabled?: boolean;
+}): Promise<VaultConfig> {
+	const now = new Date().toISOString();
+	const existing = await getVaultConfig();
+
+	if (existing) {
+		// Update existing config
+		await db.update(vaultConfig)
+			.set({
+				address: config.address,
+				namespace: config.namespace,
+				defaultPath: config.defaultPath,
+				authMethod: config.authMethod,
+				token: config.token,
+				roleId: config.roleId,
+				secretId: config.secretId,
+				kubeRole: config.kubeRole,
+				skipTlsVerify: config.skipTlsVerify ?? false,
+				enabled: config.enabled ?? true,
+				updatedAt: now
+			})
+			.where(eq(vaultConfig.id, existing.id));
+
+		return (await getVaultConfig())!;
+	} else {
+		// Insert new config
+		await db.insert(vaultConfig).values({
+			address: config.address,
+			namespace: config.namespace,
+			defaultPath: config.defaultPath,
+			authMethod: config.authMethod,
+			token: config.token,
+			roleId: config.roleId,
+			secretId: config.secretId,
+			kubeRole: config.kubeRole,
+			skipTlsVerify: config.skipTlsVerify ?? false,
+			enabled: config.enabled ?? true,
+			createdAt: now,
+			updatedAt: now
+		});
+
+		return (await getVaultConfig())!;
+	}
+}
+
+/**
+ * Delete the Vault configuration.
+ */
+export async function deleteVaultConfig(): Promise<void> {
+	await db.delete(vaultConfig);
+}
+
+/**
+ * Enable or disable Vault integration.
+ */
+export async function setVaultEnabled(enabled: boolean): Promise<void> {
+	const now = new Date().toISOString();
+	await db.update(vaultConfig)
+		.set({ enabled, updatedAt: now });
+}
+
+// =============================================================================
+// STACK ENVIRONMENT VARIABLES - UPSERT OPERATIONS
+// =============================================================================
+
+/**
+ * Upsert stack environment variables (update existing, insert new).
+ * Unlike setStackEnvVars, this does NOT delete existing variables.
+ * Only updates/inserts the provided keys.
+ *
+ * @param stackName - Name of the stack
+ * @param environmentId - Optional environment ID
+ * @param variables - Array of {key, value, isSecret} objects
+ */
+export async function upsertStackEnvVars(
+	stackName: string,
+	environmentId: number | null,
+	variables: Array<{ key: string; value: string; isSecret?: boolean }>
+): Promise<void> {
+	const now = new Date().toISOString();
+
+	for (const v of variables) {
+		// Check if variable exists
+		let existing;
+		if (environmentId === null) {
+			existing = await db.select()
+				.from(stackEnvironmentVariables)
+				.where(and(
+					eq(stackEnvironmentVariables.stackName, stackName),
+					isNull(stackEnvironmentVariables.environmentId),
+					eq(stackEnvironmentVariables.key, v.key)
+				))
+				.limit(1);
+		} else {
+			existing = await db.select()
+				.from(stackEnvironmentVariables)
+				.where(and(
+					eq(stackEnvironmentVariables.stackName, stackName),
+					eq(stackEnvironmentVariables.environmentId, environmentId),
+					eq(stackEnvironmentVariables.key, v.key)
+				))
+				.limit(1);
+		}
+
+		const encryptedValue = v.isSecret ? (encrypt(v.value) ?? '') : v.value;
+
+		if (existing.length > 0) {
+			// Update existing
+			await db.update(stackEnvironmentVariables)
+				.set({
+					value: encryptedValue,
+					isSecret: v.isSecret ?? false,
+					updatedAt: now
+				})
+				.where(eq(stackEnvironmentVariables.id, existing[0].id));
+		} else {
+			// Insert new
+			await db.insert(stackEnvironmentVariables).values({
+				stackName,
+				environmentId,
+				key: v.key,
+				value: encryptedValue,
+				isSecret: v.isSecret ?? false,
+				createdAt: now,
+				updatedAt: now
+			});
+		}
+	}
 }
