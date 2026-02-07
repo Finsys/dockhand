@@ -2049,6 +2049,7 @@ export interface GitStackData {
 	autoUpdateCron: string;
 	webhookEnabled: boolean;
 	webhookSecret: string | null;
+	buildOnDeploy: boolean;
 	lastSync: string | null;
 	lastCommit: string | null;
 	syncStatus: GitSyncStatus;
@@ -2402,6 +2403,7 @@ export async function createGitStack(data: {
 	autoUpdateCron?: string;
 	webhookEnabled?: boolean;
 	webhookSecret?: string | null;
+	buildOnDeploy?: boolean;
 }): Promise<GitStackWithRepo> {
 	const result = await db.insert(gitStacks).values({
 		stackName: data.stackName,
@@ -2413,7 +2415,8 @@ export async function createGitStack(data: {
 		autoUpdateSchedule: data.autoUpdateSchedule || 'daily',
 		autoUpdateCron: data.autoUpdateCron || '0 3 * * *',
 		webhookEnabled: data.webhookEnabled || false,
-		webhookSecret: data.webhookSecret || null
+		webhookSecret: data.webhookSecret || null,
+		buildOnDeploy: data.buildOnDeploy ?? true
 	}).returning();
 	return getGitStack(result[0].id) as Promise<GitStackWithRepo>;
 }
@@ -2430,6 +2433,7 @@ export async function updateGitStack(id: number, data: Partial<GitStackData>): P
 	if (data.autoUpdateCron !== undefined) updateData.autoUpdateCron = data.autoUpdateCron;
 	if (data.webhookEnabled !== undefined) updateData.webhookEnabled = data.webhookEnabled;
 	if (data.webhookSecret !== undefined) updateData.webhookSecret = data.webhookSecret;
+	if (data.buildOnDeploy !== undefined) updateData.buildOnDeploy = data.buildOnDeploy;
 	if (data.lastSync !== undefined) updateData.lastSync = data.lastSync;
 	if (data.lastCommit !== undefined) updateData.lastCommit = data.lastCommit;
 	if (data.syncStatus !== undefined) updateData.syncStatus = data.syncStatus;

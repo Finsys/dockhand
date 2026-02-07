@@ -853,7 +853,8 @@ export async function deployGitStack(stackId: number, options?: { force?: boolea
 		sourceDir: syncResult.composeDir, // Copy entire directory from git repo
 		composeFileName: syncResult.composeFileName, // Use original compose filename from repo
 		envFileName: syncResult.envFileName, // Env file relative to compose dir (for --env-file flag, optional)
-		forceRecreate
+		forceRecreate,
+		build: gitStack.buildOnDeploy !== false // default true
 	});
 
 	console.log(`${logPrefix} ----------------------------------------`);
@@ -1093,7 +1094,8 @@ export async function deployGitStackWithProgress(
 			name: gitStack.stackName,
 			compose: composeContent,
 			envId: gitStack.environmentId,
-			sourceDir: composeDir // Copy entire directory from git repo
+			sourceDir: composeDir, // Copy entire directory from git repo
+			build: gitStack.buildOnDeploy !== false // default true
 		});
 
 		if (result.success) {
