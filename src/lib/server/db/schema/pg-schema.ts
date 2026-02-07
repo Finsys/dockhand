@@ -482,3 +482,24 @@ export const userPreferences = pgTable('user_preferences', {
 }, (table) => [
 	unique().on(table.userId, table.environmentId, table.key)
 ]);
+
+// =============================================================================
+// VAULT INTEGRATION TABLE
+// =============================================================================
+
+export const vaultConfig = pgTable('vault_config', {
+	id: serial('id').primaryKey(),
+	address: text('address').notNull(), // https://vault:8200
+	namespace: text('namespace'), // Optional: Vault Enterprise Namespace
+	defaultPath: text('default_path'), // Default path prefix, e.g., "secret/data"
+	authMethod: text('auth_method').notNull(), // 'token', 'approle', 'kubernetes'
+	// Auth credentials (encrypted)
+	token: text('token'), // For token auth (encrypted)
+	roleId: text('role_id'), // For AppRole auth
+	secretId: text('secret_id'), // For AppRole auth (encrypted)
+	kubeRole: text('kube_role'), // For Kubernetes auth
+	skipTlsVerify: boolean('skip_tls_verify').default(false), // Accept self-signed certs
+	enabled: boolean('enabled').default(true),
+	createdAt: timestamp('created_at', { mode: 'string' }).defaultNow(),
+	updatedAt: timestamp('updated_at', { mode: 'string' }).defaultNow()
+});
