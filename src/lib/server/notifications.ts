@@ -209,19 +209,21 @@ async function sendSlack(appriseUrl: string, payload: NotificationPayload): Prom
 
 // Telegram
 async function sendTelegram(appriseUrl: string, payload: NotificationPayload): Promise<NotificationResult> {
-	// tgram://bot_token/chat_id
-	const match = appriseUrl.match(/^tgram:\/\/([^/]+)\/(.+)/);
+	// tgram://bot_token/chat_id:topic_id?
+	const match = appriseUrl.match(/^tgram:\/\/([^/]+)\/([^:\/]+)(?::(\d+))?$/);
 	if (!match) {
-		return { success: false, error: 'Invalid Telegram URL format. Expected: tgram://bot_token/chat_id' };
+		return { success: false, error: 'Invalid Telegram URL format. Expected: tgram://bot_token/chat_id or tgram://bot_token/chat_id:topic_id' };
 	}
 
-	const [, botToken, chatId] = match;
+	const [, botToken, chatId, topicIdStr] = match;
 	const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
 
 	// Escape markdown special characters in title and message
 	const escapedTitle = escapeTelegramMarkdown(payload.title);
 	const escapedMessage = escapeTelegramMarkdown(payload.message);
 	const envTag = payload.environmentName ? ` \\[${escapeTelegramMarkdown(payload.environmentName)}\\]` : '';
+
+	const topicId = Number.parseInt(topicIdStr, 10)
 
 	try {
 		const response = await fetch(url, {
@@ -230,6 +232,7 @@ async function sendTelegram(appriseUrl: string, payload: NotificationPayload): P
 			body: JSON.stringify({
 				chat_id: chatId,
 				text: `*${escapedTitle}*${envTag}\n${escapedMessage}`,
+				message_thread_id: Number.isNaN(topicId) ? undefined : topicId,
 				parse_mode: 'Markdown'
 			})
 		});
