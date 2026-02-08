@@ -192,11 +192,11 @@
 			}
 
 			// Build IPAM config
-			if (subnet || gateway || ipRange || auxAddresses.length > 0 || ipamDriver !== 'default' || ipamOptions.length > 0) {
+			if (subnet.trim() || gateway.trim() || ipRange.trim() || auxAddresses.length > 0 || ipamDriver !== 'default' || ipamOptions.length > 0) {
 				const ipamConfig: Record<string, unknown> = {};
-				if (subnet) ipamConfig.subnet = subnet;
-				if (gateway) ipamConfig.gateway = gateway;
-				if (ipRange) ipamConfig.ipRange = ipRange;
+				if (subnet.trim()) ipamConfig.subnet = subnet.trim();
+				if (gateway.trim()) ipamConfig.gateway = gateway.trim();
+				if (ipRange.trim()) ipamConfig.ipRange = ipRange.trim();
 				if (auxAddresses.length > 0) {
 					const auxObj: Record<string, string> = {};
 					for (const a of auxAddresses) {
@@ -490,7 +490,7 @@
 					<div class="flex items-center justify-between">
 						<Label>Auxiliary addresses</Label>
 						<Button variant="outline" size="sm" onclick={() => auxAddresses = addItem(auxAddresses)}>
-							<Plus class="w-3 h-3 mr-1" />Add
+							<Plus class="w-3 h-3" />Add
 						</Button>
 					</div>
 					<p class="text-xs text-muted-foreground">Reserve IP addresses for network devices (e.g., host=192.168.1.1)</p>
@@ -516,7 +516,7 @@
 					<div class="flex items-center justify-between">
 						<Label>IPAM options</Label>
 						<Button variant="outline" size="sm" onclick={() => ipamOptions = addItem(ipamOptions)}>
-							<Plus class="w-3 h-3 mr-1" />Add
+							<Plus class="w-3 h-3" />Add
 						</Button>
 					</div>
 					{#each ipamOptions as opt, i}
@@ -543,7 +543,7 @@
 					<div class="flex items-center justify-between">
 						<Label>Driver options</Label>
 						<Button variant="outline" size="sm" onclick={() => driverOptions = addItem(driverOptions)}>
-							<Plus class="w-3 h-3 mr-1" />Add
+							<Plus class="w-3 h-3" />Add
 						</Button>
 					</div>
 					<p class="text-xs text-muted-foreground">Set driver-specific options (-o key=value)</p>
@@ -581,7 +581,7 @@
 					<div class="flex items-center justify-between">
 						<Label>Labels</Label>
 						<Button variant="outline" size="sm" onclick={() => labels = addItem(labels)}>
-							<Plus class="w-3 h-3 mr-1" />Add
+							<Plus class="w-3 h-3" />Add
 						</Button>
 					</div>
 					<p class="text-xs text-muted-foreground">Set metadata labels on the network</p>

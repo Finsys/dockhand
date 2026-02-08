@@ -151,7 +151,7 @@
 		<div class="flex gap-2">
 			{#if $canAccess('notifications', 'create')}
 				<Button size="sm" onclick={() => openNotifModal()}>
-					<Plus class="w-4 h-4 mr-1" />
+					<Plus class="w-4 h-4" />
 					Add channel
 				</Button>
 			{/if}
@@ -227,7 +227,7 @@
 								onclick={() => testNotification(notif.id)}
 								disabled={testingNotif !== null}
 							>
-								<Send class="w-3 h-3 mr-1" />
+								<Send class="w-3 h-3" />
 								Test
 							</Button>
 							{#if $canAccess('notifications', 'edit')}

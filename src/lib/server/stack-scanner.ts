@@ -213,9 +213,9 @@ export async function adoptStack(
 	// Get all existing stack sources to check for duplicates
 	const existingSources = await getStackSources();
 
-	// Check if already adopted (by composePath)
+	// Check if already adopted (by composePath within the same environment)
 	const alreadyAdopted = existingSources.some(
-		(s) => s.composePath === stack.composePath
+		(s) => s.composePath === stack.composePath && s.environmentId === environmentId
 	);
 
 	if (alreadyAdopted) {

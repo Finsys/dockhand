@@ -248,7 +248,7 @@
 				<p class="text-sm">No environment variables defined.</p>
 				{#if !readonly}
 					<Button type="button" variant="link" onclick={addVariable} class="mt-1 text-xs">
-						<Plus class="w-3 h-3 mr-1" />
+						<Plus class="w-3 h-3" />
 						Add your first variable
 					</Button>
 				{/if}

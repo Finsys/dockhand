@@ -22,7 +22,8 @@ import {
 	deleteStackEnvVars,
 	removePendingContainerUpdate,
 	deleteAutoUpdateSchedule,
-	getAutoUpdateSetting
+	getAutoUpdateSetting,
+	getStackSourceByComposePath
 } from './db';
 import { unregisterSchedule } from './scheduler';
 import { deleteGitStackFiles, parseEnvFileContent } from './git';
@@ -273,21 +274,31 @@ export async function getStackDir(stackName: string, envId?: number | null): Pro
 
 /**
  * Find stack directory, checking paths in order:
- * 1. New path (envName): $DATA_DIR/stacks/<envName>/<stackName>/
- * 2. ID-based path (envId): $DATA_DIR/stacks/<envId>/<stackName>/
- * 3. Legacy path: $DATA_DIR/stacks/<stackName>/
+ * 1. Database: Custom composePath in stackSources table (adopted/imported stacks)
+ * 2. New path (envName): $DATA_DIR/stacks/<envName>/<stackName>/
+ * 3. ID-based path (envId): $DATA_DIR/stacks/<envId>/<stackName>/
+ * 4. Legacy path: $DATA_DIR/stacks/<stackName>/
  *
  * Automatically looks up environment name from database.
  * Always checks legacy path for backwards compatibility with pre-env stacks.
  */
 export async function findStackDir(stackName: string, envId?: number | null): Promise<string | null> {
+	// 1. Check database for custom compose path first (adopted/imported stacks)
+	const source = await getStackSource(stackName, envId);
+	if (source?.composePath) {
+		const customDir = dirname(source.composePath);
+		if (existsSync(customDir)) {
+			return customDir;
+		}
+	}
+
 	const stacksDir = getStacksDir();
 
 	// Look up environment name if we have an ID
 	if (envId) {
 		const env = await getEnvironment(envId);
 
-		// 1. Check new path (with envName)
+		// 2. Check new path (with envName)
 		if (env) {
 			const namePath = join(stacksDir, env.name, stackName);
 			if (existsSync(namePath)) {
@@ -295,14 +306,14 @@ export async function findStackDir(stackName: string, envId?: number | null): Pr
 			}
 		}
 
-		// 2. Check ID-based path
+		// 3. Check ID-based path
 		const idPath = join(stacksDir, String(envId), stackName);
 		if (existsSync(idPath)) {
 			return idPath;
 		}
 	}
 
-	// 3. Always check legacy path (stacks created before env-scoping was added)
+	// 4. Always check legacy path (stacks created before env-scoping was added)
 	const legacyPath = join(stacksDir, stackName);
 	if (existsSync(legacyPath)) {
 		return legacyPath;
@@ -339,9 +350,15 @@ export interface GetComposeFileResult {
  */
 export async function getStackComposeFile(
 	stackName: string,
-	envId?: number | null
+	envId?: number | null,
+	composeConfigPath?: string
 ): Promise<GetComposeFileResult> {
-	const source = await getStackSource(stackName, envId);
+	let source = await getStackSource(stackName, envId);
+
+	// Fallback: try lookup by compose file path from Docker labels
+	if (!source && composeConfigPath) {
+		source = await getStackSourceByComposePath(composeConfigPath, envId);
+	}
 
 	// Case 1: Stack not in database = untracked (discovered from Docker but not imported)
 	// User must select the compose file location - don't guess from default location
@@ -742,6 +759,10 @@ interface ComposeCommandOptions {
 	envPath?: string;
 	/** When true, write non-secret envVars to .env.dockhand override file (git stacks only) */
 	useOverrideFile?: boolean;
+	/** Target specific service only (with --no-deps) for single-service updates */
+	serviceName?: string;
+	/** Compose filename for Hawser (e.g., "docker-compose.prod.yml") - extracted from composePath */
+	composeFileName?: string;
 }
 
 /**
@@ -767,7 +788,8 @@ async function executeLocalCompose(
 	workingDir?: string,
 	customComposePath?: string,
 	customEnvPath?: string,
-	useOverrideFile?: boolean
+	useOverrideFile?: boolean,
+	serviceName?: string
 ): Promise<StackOperationResult> {
 	const logPrefix = `[Stack:${stackName}]`;
 
@@ -817,20 +839,34 @@ async function executeLocalCompose(
 		}
 	}
 
-	// Build spawn environment:
-	// 1. Start with process.env
-	// 2. Add DOCKER_HOST if specified
-	// 3. Add non-secret envVars (for backward compat when .env file doesn't exist)
-	// 4. Add secret envVars (CRITICAL: these are NEVER written to disk, only passed via shell env)
-	const spawnEnv: Record<string, string> = { ...(process.env as Record<string, string>) };
+	// Build spawn environment with ONLY essential system variables.
+	// CRITICAL: Do NOT spread process.env! Docker Compose shell env has higher
+	// priority than --env-file, so Dockhand's vars would override user's .env values.
+	const spawnEnv: Record<string, string> = {
+		PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin',
+		HOME: process.env.HOME || '/root',
+	};
+
+	// Docker connection config
 	if (dockerHost) {
 		spawnEnv.DOCKER_HOST = dockerHost;
+	} else if (process.env.DOCKER_HOST) {
+		spawnEnv.DOCKER_HOST = process.env.DOCKER_HOST;
 	}
-	// Non-secret vars (backup for when .env file doesn't exist yet)
-	if (envVars) {
+
+	// Check if .env file exists on disk (for legacy support decision)
+	const defaultEnvPath = join(stackDir, '.env');
+	const hasEnvFile = existsSync(defaultEnvPath) || (customEnvPath && existsSync(customEnvPath));
+
+	// LEGACY SUPPORT: Only inject envVars via shell if NO .env file exists
+	// This is for stacks created with older Dockhand versions that stored env vars
+	// in DB but didn't write .env files to disk.
+	// For modern stacks with .env files, Docker Compose reads them via --env-file.
+	if (!hasEnvFile && envVars) {
 		Object.assign(spawnEnv, envVars);
 	}
-	// SECRET vars: injected via shell environment at runtime (NEVER written to .env file)
+
+	// SECRET vars: always injected via shell env (NEVER written to .env files)
 	if (secretVars) {
 		Object.assign(spawnEnv, secretVars);
 	}
@@ -876,8 +912,7 @@ async function executeLocalCompose(
 	const useStdin = finalComposeContent !== composeContent;
 	const args = ['docker', 'compose', '-p', stackName, '-f', useStdin ? '-' : composeFile];
 
-	// Always auto-detect .env in compose directory
-	const defaultEnvPath = join(stackDir, '.env');
+	// Always auto-detect .env in compose directory (defaultEnvPath already defined above)
 	if (existsSync(defaultEnvPath)) {
 		args.push('--env-file', defaultEnvPath);
 	}
@@ -909,6 +944,10 @@ async function executeLocalCompose(
 		case 'up':
 			args.push('up', '-d', '--remove-orphans');
 			if (forceRecreate) args.push('--force-recreate');
+			// If targeting a specific service, only update that service
+			if (serviceName) {
+				args.push(serviceName);
+			}
 			break;
 		case 'down':
 			args.push('down');
@@ -925,6 +964,10 @@ async function executeLocalCompose(
 			break;
 		case 'pull':
 			args.push('pull');
+			// If targeting a specific service, pull only that service
+			if (serviceName) {
+				args.push(serviceName);
+			}
 			break;
 	}
 
@@ -938,6 +981,7 @@ async function executeLocalCompose(
 	console.log(`${logPrefix} DOCKER_HOST:`, dockerHost || '(local socket)');
 	console.log(`${logPrefix} Force recreate:`, forceRecreate ?? false);
 	console.log(`${logPrefix} Remove volumes:`, removeVolumes ?? false);
+	console.log(`${logPrefix} Service name:`, serviceName ?? '(all services)');
 	console.log(`${logPrefix} Env vars count:`, envVars ? Object.keys(envVars).length : 0);
 	if (envVars && Object.keys(envVars).length > 0) {
 		console.log(`${logPrefix} Env vars being injected (masked):`, JSON.stringify(maskSecrets(envVars), null, 2));
@@ -1062,7 +1106,9 @@ async function executeComposeViaHawser(
 	secretVars?: Record<string, string>,
 	forceRecreate?: boolean,
 	removeVolumes?: boolean,
-	stackFiles?: Record<string, string>
+	stackFiles?: Record<string, string>,
+	serviceName?: string,
+	composeFileName?: string
 ): Promise<StackOperationResult> {
 	const logPrefix = `[Stack:${stackName}]`;
 	// Import dockerFetch dynamically to avoid circular dependency
@@ -1080,6 +1126,8 @@ async function executeComposeViaHawser(
 	console.log(`${logPrefix} Environment ID:`, envId);
 	console.log(`${logPrefix} Force recreate:`, forceRecreate ?? false);
 	console.log(`${logPrefix} Remove volumes:`, removeVolumes ?? false);
+	console.log(`${logPrefix} Service name:`, serviceName ?? '(all services)');
+	console.log(`${logPrefix} Compose filename:`, composeFileName ?? '(auto-detect)');
 	console.log(`${logPrefix} Non-secret env vars count:`, envVars ? Object.keys(envVars).length : 0);
 	console.log(`${logPrefix} Secret env vars count:`, secretCount);
 	if (allEnvVars && Object.keys(allEnvVars).length > 0) {
@@ -1128,11 +1176,13 @@ async function executeComposeViaHawser(
 			operation,
 			projectName: stackName,
 			composeFile: composeContent,
+			composeFileName, // Explicit compose filename to use (e.g., "docker-compose.prod.yml")
 			envVars: allEnvVars, // All vars (including secrets) - Hawser injects via shell env
 			files, // Files including .env (secrets NOT in .env file)
 			forceRecreate: forceRecreate || false,
 			removeVolumes: removeVolumes || false,
-			registries // Registry credentials for docker login
+			registries, // Registry credentials for docker login
+			serviceName // Target specific service only (with --no-deps)
 		});
 
 		console.log(`${logPrefix} Sending request to Hawser agent...`);
@@ -1198,7 +1248,7 @@ async function executeComposeCommand(
 	envVars?: Record<string, string>,
 	secretVars?: Record<string, string>
 ): Promise<StackOperationResult> {
-	const { stackName, envId, forceRecreate, removeVolumes, stackFiles, workingDir, composePath, envPath, useOverrideFile } = options;
+	const { stackName, envId, forceRecreate, removeVolumes, stackFiles, workingDir, composePath, envPath, useOverrideFile, serviceName, composeFileName } = options;
 
 	// Get environment configuration
 	const env = envId ? await getEnvironment(envId) : null;
@@ -1219,7 +1269,8 @@ async function executeComposeCommand(
 			workingDir,
 			composePath,
 			envPath,
-			useOverrideFile
+			useOverrideFile,
+			serviceName
 		);
 	}
 
@@ -1251,7 +1302,9 @@ async function executeComposeCommand(
 				secretVars,
 				forceRecreate,
 				removeVolumes,
-				stackFiles
+				stackFiles,
+				serviceName,
+				composeFileName
 			);
 		}
 
@@ -1281,7 +1334,8 @@ async function executeComposeCommand(
 				workingDir,
 				composePath,
 				envPath,
-				useOverrideFile
+				useOverrideFile,
+				serviceName
 			);
 		}
 
@@ -1301,7 +1355,8 @@ async function executeComposeCommand(
 				workingDir,
 				composePath,
 				envPath,
-				useOverrideFile
+				useOverrideFile,
+				serviceName
 			);
 	}
 }
@@ -1530,9 +1585,10 @@ export interface RequireComposeResult {
  */
 async function requireComposeFile(
 	stackName: string,
-	envId?: number | null
+	envId?: number | null,
+	composeConfigPath?: string
 ): Promise<RequireComposeResult> {
-	const composeResult = await getStackComposeFile(stackName, envId);
+	const composeResult = await getStackComposeFile(stackName, envId, composeConfigPath);
 
 	// If compose file not found, return info about what's needed
 	if (!composeResult.success) {
@@ -2011,7 +2067,9 @@ export async function deployStack(options: DeployStackOptions): Promise<StackOpe
 				workingDir,
 				composePath: actualComposePath,
 				envPath: actualEnvPath,
-				useOverrideFile: isGitStack
+				useOverrideFile: isGitStack,
+				// Pass compose filename for Hawser (extracted from path or provided explicitly)
+				composeFileName: composeFileName || (actualComposePath ? basename(actualComposePath) : undefined)
 			},
 			compose,
 			isGitStack ? dbNonSecretVars : undefined,
@@ -2050,6 +2108,93 @@ export async function pullStackImages(
 	return executeComposeCommand(
 		'pull',
 		{ stackName, envId, workingDir: result.stackDir, composePath: result.composePath, envPath: result.envPath },
+		result.content!,
+		result.nonSecretVars,
+		result.secretVars
+	);
+}
+
+/**
+ * Pull image for a specific service within a stack using docker compose pull <service>.
+ * This is the Compose-native approach to pulling images for auto-updates.
+ *
+ * @param stackName - The compose project name
+ * @param serviceName - The service name to pull
+ * @param envId - Optional environment ID
+ * @returns Operation result
+ */
+export async function pullStackService(
+	stackName: string,
+	serviceName: string,
+	envId?: number | null,
+	composeConfigPath?: string
+): Promise<StackOperationResult> {
+	const result = await requireComposeFile(stackName, envId, composeConfigPath);
+
+	if (!result.success) {
+		return {
+			success: false,
+			error: result.error || `Compose file not found for stack "${stackName}"`
+		};
+	}
+
+	return executeComposeCommand(
+		'pull',
+		{
+			stackName,
+			envId,
+			workingDir: result.stackDir,
+			composePath: result.composePath,
+			envPath: result.envPath,
+			serviceName
+		},
+		result.content!,
+		result.nonSecretVars,
+		result.secretVars
+	);
+}
+
+/**
+ * Update a specific service within a stack using docker compose up -d --no-deps.
+ * Docker Compose detects image changes naturally (the image is pulled beforehand),
+ * so --force-recreate is not needed and can cause permission issues on bind mounts.
+ * This preserves all compose configuration (static IPs, network aliases, etc.) while only
+ * recreating the specified service when its image has changed.
+ *
+ * @param stackName - The compose project name
+ * @param serviceName - The service name to update
+ * @param envId - Optional environment ID
+ * @returns Operation result
+ */
+export async function updateStackService(
+	stackName: string,
+	serviceName: string,
+	envId?: number | null,
+	composeConfigPath?: string
+): Promise<StackOperationResult> {
+	const result = await requireComposeFile(stackName, envId, composeConfigPath);
+
+	if (!result.success) {
+		return {
+			success: false,
+			error: result.error || `Compose file not found for stack "${stackName}"`
+		};
+	}
+
+	// Don't use forceRecreate - Docker Compose will detect the image change
+	// naturally since the image was already pulled before this function is called.
+	// Using forceRecreate can cause permission issues on bind mounts.
+	// This matches the behavior of: docker compose pull && docker compose up -d
+	return executeComposeCommand(
+		'up',
+		{
+			stackName,
+			envId,
+			workingDir: result.stackDir,
+			composePath: result.composePath,
+			envPath: result.envPath,
+			serviceName
+		},
 		result.content!,
 		result.nonSecretVars,
 		result.secretVars
@@ -2187,3 +2332,4 @@ export async function saveStackEnvVars(
 // They can be removed once all imports are updated
 
 export type { StackOperationResult as CreateStackResult };
+

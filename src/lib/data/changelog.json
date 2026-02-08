@@ -1,5 +1,39 @@
 [
   {
+    "version": "1.0.15",
+    "date": "2026-02-08",
+    "changes": [
+      { "type": "feature", "text": "Auto-detect build directives: Git stacks with build: directives now automatically rebuild images on deploy" },
+      { "type": "feature", "text": "Pull before update option: New option to pull latest image before container auto-update" },
+      { "type": "feature", "text": "Usage filter on images page by usage status (used/unused/all)" },
+      { "type": "feature", "text": "Show repository name for untagged images: Better identification of images without tags" },
+      { "type": "fix", "text": "Fix IPv6 address not accepted in environment Public IP field" },
+      { "type": "fix", "text": "Fix IPv6 port link URLs by adding bracket formatting" },
+      { "type": "fix", "text": "Fix custom compose filename not used in SSE deploy" },
+      { "type": "fix", "text": "Fix env var leakage from Dockhand to user stacks" },
+      { "type": "fix", "text": "Fix SMTP notification test returning false success" },
+      { "type": "fix", "text": "Fix custom compose file path ignored for Hawser git stack deployments" },
+      { "type": "fix", "text": "Fix escaped $$ variables (Docker Compose syntax) incorrectly flagged as missing" },
+      { "type": "fix", "text": "Use native compose pull and up when updating stack containers" },
+      { "type": "fix", "text": "Fix vulnerability scans hanging indefinitely or failing with JSON parse errors" },
+      { "type": "fix", "text": "Fix memory leaks in SSE event streams and unconsumed Docker API response bodies" },
+      { "type": "improvement", "text": "Sort vulnerability scan results by severity by default" },
+      { "type": "improvement", "text": "Copy button for compose file contents in stack modal" },
+      { "type": "improvement", "text": "Confirmation dialog before git stack sync" },
+      { "type": "fix", "text": "Fix timezone aliases (e.g. Europe/Kyiv) not saving correctly" },
+      { "type": "fix", "text": "Fix login crash with large session timeout values" },
+      { "type": "fix", "text": "Fix profile display name not persisting due to field name mismatch" },
+      { "type": "fix", "text": "Fix date formatting not respecting user preferences" },
+      { "type": "fix", "text": "Fix static IP not preserved during container auto-update" },
+      { "type": "fix", "text": "Fix stack adoption path conflict across different environments" },
+      { "type": "fix", "text": "Fix container auto-update causing permission denied on bind mounts" },
+      { "type": "fix", "text": "Fix health tab not showing healthcheck configuration" },
+      { "type": "fix", "text": "Fix stack custom paths reset after edit" },
+      { "type": "fix", "text": "Autofocus on login username and MFA code fields" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.15"
+  },
+  {
     "version": "1.0.14",
     "date": "2026-01-31",
     "changes": [

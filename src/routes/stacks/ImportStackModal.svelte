@@ -411,7 +411,7 @@
 							<Loader2 class="w-4 h-4 mr-2 animate-spin" />
 							Adopting...
 						{:else}
-							<Import class="w-4 h-4 mr-2" />
+							<Import class="w-4 h-4" />
 							Adopt {selectedCount} stack(s)
 						{/if}
 					</Button>
@@ -488,7 +488,7 @@
 					<Loader2 class="w-4 h-4 mr-2 animate-spin" />
 					Adopting...
 				{:else}
-					<Import class="w-4 h-4 mr-2" />
+					<Import class="w-4 h-4" />
 					Adopt stack
 				{/if}
 			</Button>

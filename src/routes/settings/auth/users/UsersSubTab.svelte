@@ -261,7 +261,7 @@
 				</div>
 				{#if $canAccess('users', 'create')}
 					<Button size="sm" onclick={() => openUserModal(null)}>
-						<UserPlus class="w-4 h-4 mr-1" />
+						<UserPlus class="w-4 h-4" />
 						Add user
 					</Button>
 				{/if}
@@ -482,7 +482,7 @@
 		<Dialog.Footer>
 			<Button variant="outline" onclick={cancelLastAdminDelete}>Cancel</Button>
 			<Button variant="destructive" onclick={confirmLastAdminDelete}>
-				<Trash2 class="w-4 h-4 mr-1" />
+				<Trash2 class="w-4 h-4" />
 				Delete and disable auth
 			</Button>
 		</Dialog.Footer>

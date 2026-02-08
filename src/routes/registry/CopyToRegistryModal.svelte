@@ -475,7 +475,7 @@
 						onclick={startCopy}
 						disabled={!targetRegistryId || pushableRegistries.length === 0}
 					>
-						<Copy class="w-4 h-4 mr-2" />
+						<Copy class="w-4 h-4" />
 						Start copy
 					</Button>
 				{:else if currentStep === 'scan' && scanStatus === 'complete'}
@@ -491,7 +491,7 @@
 						</div>
 					{/if}
 					<Button onclick={proceedToPush} variant={hasCriticalOrHigh ? 'destructive' : 'default'}>
-						<Upload class="w-4 h-4 mr-2" />
+						<Upload class="w-4 h-4" />
 						{hasCriticalOrHigh ? 'Push anyway' : 'Continue to push'}
 					</Button>
 				{/if}

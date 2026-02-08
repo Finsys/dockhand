@@ -847,7 +847,7 @@
 				Audit logging is an enterprise feature that tracks all user actions for compliance and security monitoring.
 			</p>
 			<Button variant="outline" href="/settings?tab=license">
-				<Key class="w-4 h-4 mr-2" />
+				<Key class="w-4 h-4" />
 				Activate license
 			</Button>
 		</div>

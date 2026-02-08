@@ -550,12 +550,12 @@
 			</ConfirmPopover>
 			{/if}
 			<Button size="sm" variant="outline" onclick={fetchNetworks}>
-				<RefreshCw class="w-3.5 h-3.5 mr-1" />
+				<RefreshCw class="w-3.5 h-3.5" />
 				Refresh
 			</Button>
 			{#if $canAccess('networks', 'create')}
 			<Button size="sm" variant="secondary" onclick={() => showCreateModal = true}>
-				<Plus class="w-3.5 h-3.5 mr-1" />
+				<Plus class="w-3.5 h-3.5" />
 				Create
 			</Button>
 			{/if}

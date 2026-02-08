@@ -471,7 +471,7 @@
 			<Button size="sm" variant="outline" onclick={fetchVolumes}>Refresh</Button>
 			{#if $canAccess('volumes', 'create')}
 			<Button size="sm" variant="secondary" onclick={() => showCreateModal = true}>
-				<Plus class="w-3.5 h-3.5 mr-1" />
+				<Plus class="w-3.5 h-3.5" />
 				Create
 			</Button>
 			{/if}

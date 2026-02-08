@@ -30,6 +30,7 @@
 	import { DataGrid } from '$lib/components/data-grid';
 	import type { DataGridSortState } from '$lib/components/data-grid/types';
 	import { ErrorDialog } from '$lib/components/ui/error-dialog';
+	import { formatHostPortUrl } from '$lib/utils/url';
 
 	type SortField = 'name' | 'containers' | 'status' | 'cpu' | 'memory';
 	type SortDirection = 'asc' | 'desc';
@@ -83,7 +84,7 @@
 
 		// Priority 1: Use publicIp if configured
 		if (env.publicIp) {
-			return `http://${env.publicIp}:${publicPort}`;
+			return formatHostPortUrl(env.publicIp, publicPort);
 		}
 
 		// Priority 2: Extract from host for direct/hawser-standard
@@ -91,10 +92,10 @@
 
 		if (connectionType === 'direct' && env.host) {
 			const host = extractHostFromUrl(env.host);
-			if (host) return `http://${host}:${publicPort}`;
+			if (host) return formatHostPortUrl(host, publicPort);
 		} else if (connectionType === 'hawser-standard' && env.host) {
 			const host = extractHostFromUrl(env.host);
-			if (host) return `http://${host}:${publicPort}`;
+			if (host) return formatHostPortUrl(host, publicPort);
 		}
 
 		// No public IP available for socket or hawser-edge
@@ -1157,20 +1158,20 @@
 				defaultIcon={Layers}
 			/>
 			<Button size="sm" variant="outline" onclick={fetchStacks}>
-				<RefreshCw class="w-3.5 h-3.5 mr-1" />
+				<RefreshCw class="w-3.5 h-3.5" />
 				Refresh
 			</Button>
 			{#if $canAccess('stacks', 'create')}
 				<Button size="sm" variant="outline" onclick={() => openGitModal()}>
-					<GitBranch class="w-3.5 h-3.5 mr-1" />
+					<GitBranch class="w-3.5 h-3.5" />
 					From Git
 				</Button>
 				<Button size="sm" variant="secondary" onclick={() => showCreateModal = true}>
-					<Plus class="w-3.5 h-3.5 mr-1" />
+					<Plus class="w-3.5 h-3.5" />
 					Create
 				</Button>
 				<Button size="sm" variant="outline" onclick={() => showImportModal = true}>
-					<Import class="w-3.5 h-3.5 mr-1" />
+					<Import class="w-3.5 h-3.5" />
 					Adopt
 				</Button>
 			{/if}

@@ -339,7 +339,7 @@
 						<Loader2 class="w-4 h-4 mr-2 animate-spin" />
 						Pulling...
 					{:else}
-						<Download class="w-4 h-4 mr-2" />
+						<Download class="w-4 h-4" />
 						Pull
 					{/if}
 				</Button>

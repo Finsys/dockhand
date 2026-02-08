@@ -170,7 +170,7 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 		if (error instanceof EnvironmentNotFoundError) {
 			return json({ error: 'Environment not found' }, { status: 404 });
 		}
-		console.error('Failed to get container stats:', error);
+		console.error('Failed to get container stats:', error.message || error);
 		return json([], { status: 200 }); // Return empty array instead of error
 	}
 };

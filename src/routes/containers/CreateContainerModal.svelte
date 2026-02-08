@@ -784,10 +784,10 @@
 				</Button>
 				<Button type="button" disabled={loading || isPulling || isScanning || activeTab !== 'container'} onclick={handleSubmit}>
 					{#if loading}
-						<Loader2 class="w-4 h-4 mr-2 animate-spin" />
+						<Loader2 class="w-4 h-4 animate-spin" />
 						Creating...
 					{:else}
-						<Play class="w-4 h-4 mr-2" />
+						<Play class="w-4 h-4" />
 						Create container
 					{/if}
 				</Button>

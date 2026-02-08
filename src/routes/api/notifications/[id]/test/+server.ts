@@ -15,11 +15,14 @@ export const POST: RequestHandler = async ({ params }) => {
 			return json({ error: 'Notification setting not found' }, { status: 404 });
 		}
 
-		const success = await testNotification(setting);
+		const result = await testNotification(setting);
 
 		return json({
-			success,
-			message: success ? 'Test notification sent successfully' : 'Failed to send test notification'
+			success: result.success,
+			message: result.success
+				? 'Test notification sent successfully'
+				: 'Failed to send test notification',
+			error: result.error
 		});
 	} catch (error: any) {
 		console.error('Error testing notification:', error);

@@ -11,10 +11,12 @@
 		GitBranch,
 		FileCode,
 		Server,
-		Link
+		Link,
+		AlertTriangle
 	} from 'lucide-svelte';
 	import type { Snippet } from 'svelte';
 	import { Progress } from '$lib/components/ui/progress';
+	import { appSettings } from '$lib/stores/settings';
 
 	interface Props {
 		stackId: number;
@@ -34,10 +36,13 @@
 	}
 
 	let open = $state(false);
-	let overallStatus = $state<'idle' | 'deploying' | 'complete' | 'error'>('idle');
+	let overallStatus = $state<'idle' | 'confirming' | 'deploying' | 'complete' | 'error'>('idle');
 	let currentStep = $state<StepProgress | null>(null);
 	let steps = $state<StepProgress[]>([]);
 	let errorMessage = $state('');
+
+	// Get the confirmDestructive setting from the store
+	const confirmDestructive = $derived($appSettings.confirmDestructive);
 
 	function getStepIcon(status: string) {
 		switch (status) {
@@ -140,18 +145,32 @@
 
 	function handleOpenChange(isOpen: boolean) {
 		// Only allow closing via the Close button (not by clicking outside)
-		// When deploying, complete, or error - require explicit close
+		// When confirming, deploying, complete, or error - require explicit close
 		if (!isOpen && overallStatus !== 'idle') {
 			return;
 		}
 
-		// Start deploy when opening
+		// When opening, show confirmation first if enabled
 		if (isOpen && !open) {
-			startDeploy();
+			if (confirmDestructive) {
+				overallStatus = 'confirming';
+				open = true;
+			} else {
+				startDeploy();
+			}
 			return;
 		}
 
 		open = isOpen;
+	}
+
+	function handleConfirmDeploy() {
+		startDeploy();
+	}
+
+	function handleCancelConfirm() {
+		open = false;
+		overallStatus = 'idle';
 	}
 
 	function handleClose() {
@@ -175,91 +194,114 @@
 		{@render children()}
 	</Popover.Trigger>
 	<Popover.Content
-		class="w-80 p-0 overflow-hidden flex flex-col z-[200]"
+		class="{overallStatus === 'confirming' ? 'w-auto' : 'w-80'} p-0 overflow-hidden flex flex-col z-[200]"
 		align="end"
 		sideOffset={8}
 		interactOutsideBehavior={overallStatus !== 'idle' ? 'ignore' : 'close'}
 		escapeKeydownBehavior={overallStatus !== 'idle' ? 'ignore' : 'close'}
 	>
-		<!-- Header -->
-		<div class="p-3 border-b space-y-2">
-			<div class="flex items-center gap-2 text-sm font-medium">
-				<Rocket class="w-4 h-4 text-violet-600" />
-				<span class="truncate">{stackName}</span>
+		{#if overallStatus === 'confirming'}
+			<!-- Confirmation Dialog -->
+			<div class="p-3 space-y-3">
+				<div class="flex items-start gap-2">
+					<AlertTriangle class="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+					<div class="space-y-1">
+						<p class="text-sm font-medium">Sync from git?</p>
+						<p class="text-xs text-muted-foreground">
+							This will pull latest changes for <strong class="text-foreground">{stackName}</strong>. Containers will only restart if the configuration changed.
+						</p>
+					</div>
+				</div>
+				<div class="flex justify-end gap-2">
+					<Button variant="outline" size="sm" class="h-7 text-xs" onclick={handleCancelConfirm}>
+						Cancel
+					</Button>
+					<Button variant="default" size="sm" class="h-7 text-xs" onclick={handleConfirmDeploy}>
+						Sync
+					</Button>
+				</div>
 			</div>
+		{:else}
+			<!-- Header -->
+			<div class="p-3 border-b space-y-2">
+				<div class="flex items-center gap-2 text-sm font-medium">
+					<Rocket class="w-4 h-4 text-violet-600" />
+					<span class="truncate">{stackName}</span>
+				</div>
 
-			<!-- Overall Progress -->
-			<div class="flex items-center justify-between">
-				<div class="flex items-center gap-2">
-					{#if overallStatus === 'idle'}
-						<Loader2 class="w-4 h-4 animate-spin text-muted-foreground" />
-						<span class="text-sm text-muted-foreground">Initializing...</span>
-					{:else if overallStatus === 'deploying'}
-						<Loader2 class="w-4 h-4 animate-spin text-violet-600" />
-						<span class="text-sm">Deploying...</span>
-					{:else if overallStatus === 'complete'}
-						<CheckCircle2 class="w-4 h-4 text-green-600" />
-						<span class="text-sm text-green-600">Complete!</span>
-					{:else if overallStatus === 'error'}
-						<XCircle class="w-4 h-4 text-red-600" />
-						<span class="text-sm text-red-600">Failed</span>
+				<!-- Overall Progress -->
+				<div class="flex items-center justify-between">
+					<div class="flex items-center gap-2">
+						{#if overallStatus === 'idle'}
+							<Loader2 class="w-4 h-4 animate-spin text-muted-foreground" />
+							<span class="text-sm text-muted-foreground">Initializing...</span>
+						{:else if overallStatus === 'deploying'}
+							<Loader2 class="w-4 h-4 animate-spin text-violet-600" />
+							<span class="text-sm">Deploying...</span>
+						{:else if overallStatus === 'complete'}
+							<CheckCircle2 class="w-4 h-4 text-green-600" />
+							<span class="text-sm text-green-600">Complete!</span>
+						{:else if overallStatus === 'error'}
+							<XCircle class="w-4 h-4 text-red-600" />
+							<span class="text-sm text-red-600">Failed</span>
+						{/if}
+					</div>
+					{#if currentStep?.step && currentStep?.totalSteps}
+						<Badge variant="secondary" class="text-xs">
+							{currentStep.step}/{currentStep.totalSteps}
+						</Badge>
 					{/if}
 				</div>
-				{#if currentStep?.step && currentStep?.totalSteps}
-					<Badge variant="secondary" class="text-xs">
-						{currentStep.step}/{currentStep.totalSteps}
-					</Badge>
+
+				{#if currentStep?.message && overallStatus === 'deploying'}
+					<p class="text-xs text-muted-foreground truncate">{currentStep.message}</p>
+				{/if}
+
+				{#if currentStep?.totalSteps}
+					<Progress value={progressPercentage} class="h-1.5 [&>[data-progress]]:bg-violet-600" />
+				{/if}
+
+				{#if errorMessage}
+					<div class="flex items-start gap-2 text-xs text-red-600 dark:text-red-400">
+						<AlertCircle class="w-3 h-3 shrink-0 mt-0.5" />
+						<span class="break-all">{errorMessage}</span>
+					</div>
 				{/if}
 			</div>
 
-			{#if currentStep?.message && overallStatus === 'deploying'}
-				<p class="text-xs text-muted-foreground truncate">{currentStep.message}</p>
-			{/if}
-
-			{#if currentStep?.totalSteps}
-				<Progress value={progressPercentage} class="h-1.5 [&>[data-progress]]:bg-violet-600" />
-			{/if}
-
-			{#if errorMessage}
-				<div class="flex items-start gap-2 text-xs text-red-600 dark:text-red-400">
-					<AlertCircle class="w-3 h-3 shrink-0 mt-0.5" />
-					<span class="break-all">{errorMessage}</span>
+			<!-- Steps List -->
+			{#if steps.length > 0}
+				<div class="p-2 max-h-48 overflow-auto">
+					<div class="space-y-1">
+						{#each steps as step, index (index)}
+							{@const StepIcon = getStepIcon(step.status)}
+							{@const isCurrentStep = index === steps.length - 1 && overallStatus === 'deploying'}
+							<div class="flex items-center gap-2 py-1 px-1 rounded text-xs hover:bg-muted/50">
+								<StepIcon
+									class="w-3.5 h-3.5 shrink-0 {getStepColor(step.status, isCurrentStep)} {isCurrentStep && step.status !== 'complete' && step.status !== 'error' ? 'animate-spin' : ''}"
+								/>
+								<span class="flex-1 {getStepColor(step.status, isCurrentStep)} truncate">
+									{step.message || step.status}
+								</span>
+							</div>
+						{/each}
+					</div>
 				</div>
 			{/if}
-		</div>
 
-		<!-- Steps List -->
-		{#if steps.length > 0}
-			<div class="p-2 max-h-48 overflow-auto">
-				<div class="space-y-1">
-					{#each steps as step, index (index)}
-						{@const StepIcon = getStepIcon(step.status)}
-						{@const isCurrentStep = index === steps.length - 1 && overallStatus === 'deploying'}
-						<div class="flex items-center gap-2 py-1 px-1 rounded text-xs hover:bg-muted/50">
-							<StepIcon
-								class="w-3.5 h-3.5 shrink-0 {getStepColor(step.status, isCurrentStep)} {isCurrentStep && step.status !== 'complete' && step.status !== 'error' ? 'animate-spin' : ''}"
-							/>
-							<span class="flex-1 {getStepColor(step.status, isCurrentStep)} truncate">
-								{step.message || step.status}
-							</span>
-						</div>
-					{/each}
+			<!-- Footer -->
+			{#if overallStatus === 'complete' || overallStatus === 'error'}
+				<div class="p-2 border-t">
+					<Button
+						variant="outline"
+						size="sm"
+						class="w-full"
+						onclick={handleClose}
+					>
+						Close
+					</Button>
 				</div>
-			</div>
-		{/if}
-
-		<!-- Footer -->
-		{#if overallStatus === 'complete' || overallStatus === 'error'}
-			<div class="p-2 border-t">
-				<Button
-					variant="outline"
-					size="sm"
-					class="w-full"
-					onclick={handleClose}
-				>
-					Close
-				</Button>
-			</div>
+			{/if}
 		{/if}
 	</Popover.Content>
 </Popover.Root>

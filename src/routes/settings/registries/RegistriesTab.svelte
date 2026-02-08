@@ -106,7 +106,7 @@
 		<div class="flex gap-2">
 			{#if $canAccess('registries', 'create')}
 				<Button size="sm" onclick={() => openRegModal()}>
-					<Plus class="w-4 h-4 mr-1" />
+					<Plus class="w-4 h-4" />
 					Add registry
 				</Button>
 			{/if}
@@ -167,7 +167,7 @@
 									size="sm"
 									onclick={() => setRegDefault(registry.id)}
 								>
-									<Star class="w-3 h-3 mr-1" />
+									<Star class="w-3 h-3" />
 									Set default
 								</Button>
 							{/if}

@@ -247,7 +247,7 @@
 						<DropdownMenu.Trigger>
 							{#snippet child({ props })}
 								<Button variant="outline" {...props}>
-									<Download class="w-4 h-4 mr-2" />
+									<Download class="w-4 h-4" />
 									Export
 								</Button>
 							{/snippet}

@@ -92,7 +92,7 @@
 					onclick={resetToDefaults}
 					title="Reset to defaults"
 				>
-					<RotateCcw class="w-3 h-3 mr-1" />
+					<RotateCcw class="w-3 h-3" />
 					Reset
 				</Button>
 			</div>

@@ -169,7 +169,7 @@
 				</div>
 				{#if $canAccess('settings', 'edit')}
 					<Button size="sm" onclick={() => openOidcModal(null)}>
-						<Plus class="w-4 h-4 mr-1" />
+						<Plus class="w-4 h-4" />
 						Add provider
 					</Button>
 				{/if}

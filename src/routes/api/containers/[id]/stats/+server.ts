@@ -113,7 +113,10 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 		if (error instanceof EnvironmentNotFoundError) {
 			return json({ error: 'Environment not found' }, { status: 404 });
 		}
-		console.error('Failed to get container stats:', error);
+		if (error.statusCode === 404) {
+			return json({ error: 'Container not found' }, { status: 404 });
+		}
+		console.error('Failed to get container stats:', error.message || error);
 		return json({ error: error.message || 'Failed to get stats' }, { status: 500 });
 	}
 };

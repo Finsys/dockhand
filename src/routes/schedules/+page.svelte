@@ -1061,10 +1061,10 @@
 					onclick={toggleHideSystemJobs}
 				>
 					{#if hideSystemJobs}
-						<Eye class="w-3.5 h-3.5 mr-1" />
+						<Eye class="w-3.5 h-3.5" />
 						Show system ({systemJobCount})
 					{:else}
-						<EyeOff class="w-3.5 h-3.5 mr-1" />
+						<EyeOff class="w-3.5 h-3.5" />
 						Hide system
 					{/if}
 				</Button>

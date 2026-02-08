@@ -645,12 +645,10 @@
 			</div>
 		</div>
 
-		{#if mode !== 'create'}
-			<div class="flex items-center gap-3 pt-1">
-				<Label class="text-xs font-normal">Pull image before update</Label>
-				<TogglePill bind:checked={repullImage} />
-			</div>
-		{/if}
+		<div class="flex items-center gap-3 pt-1">
+			<Label class="text-xs font-normal">Pull image before update</Label>
+			<TogglePill bind:checked={repullImage} />
+		</div>
 
 		<div class="flex items-center gap-3 pt-1">
 			<Label class="text-xs font-normal">Start container after {mode === 'create' ? 'creation' : 'update'}</Label>
@@ -719,7 +717,7 @@
 		<div class="flex justify-between items-center pb-2 border-b">
 			<h3 class="text-sm font-semibold text-foreground">Port mappings</h3>
 			<Button type="button" size="sm" variant="ghost" onclick={addPortMapping} class="h-7 text-xs">
-				<Plus class="w-3.5 h-3.5 mr-1" />
+				<Plus class="w-3.5 h-3.5" />
 				Add
 			</Button>
 		</div>
@@ -760,7 +758,7 @@
 		<div class="flex justify-between items-center pb-2 border-b">
 			<h3 class="text-sm font-semibold text-foreground">Volume mappings</h3>
 			<Button type="button" size="sm" variant="ghost" onclick={addVolumeMapping} class="h-7 text-xs">
-				<Plus class="w-3.5 h-3.5 mr-1" />
+				<Plus class="w-3.5 h-3.5" />
 				Add
 			</Button>
 		</div>
@@ -801,7 +799,7 @@
 		<div class="flex justify-between items-center pb-2 border-b">
 			<h3 class="text-sm font-semibold text-foreground">Environment variables</h3>
 			<Button type="button" size="sm" variant="ghost" onclick={addEnvVar} class="h-7 text-xs">
-				<Plus class="w-3.5 h-3.5 mr-1" />
+				<Plus class="w-3.5 h-3.5" />
 				Add
 			</Button>
 		</div>
@@ -837,7 +835,7 @@
 		<div class="flex justify-between items-center pb-2 border-b">
 			<h3 class="text-sm font-semibold text-foreground">Labels</h3>
 			<Button type="button" size="sm" variant="ghost" onclick={addLabel} class="h-7 text-xs">
-				<Plus class="w-3.5 h-3.5 mr-1" />
+				<Plus class="w-3.5 h-3.5" />
 				Add
 			</Button>
 		</div>
@@ -1239,7 +1237,7 @@
 			<div class="px-3 pb-3 space-y-3 border-t">
 				<div class="flex justify-end pt-2">
 					<Button type="button" size="sm" variant="ghost" onclick={addDeviceMapping} class="h-7 text-xs">
-						<Plus class="w-3.5 h-3.5 mr-1" />
+						<Plus class="w-3.5 h-3.5" />
 						Add device
 					</Button>
 				</div>
@@ -1426,7 +1424,7 @@
 			<div class="px-3 pb-3 space-y-3 border-t">
 				<div class="flex justify-end pt-2">
 					<Button type="button" size="sm" variant="ghost" onclick={addUlimit} class="h-7 text-xs">
-						<Plus class="w-3.5 h-3.5 mr-1" />
+						<Plus class="w-3.5 h-3.5" />
 						Add ulimit
 					</Button>
 				</div>

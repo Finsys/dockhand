@@ -4,7 +4,7 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { Progress } from '$lib/components/ui/progress';
 	import * as Tooltip from '$lib/components/ui/tooltip';
-	import { CircleArrowUp, Loader2, AlertCircle, CheckCircle2, XCircle, ChevronDown, ChevronRight } from 'lucide-svelte';
+	import { CircleArrowUp, Loader2, AlertCircle, CheckCircle2, XCircle, ChevronDown, ChevronRight, ExternalLink } from 'lucide-svelte';
 	import { appendEnvParam } from '$lib/stores/environment';
 	import type { VulnerabilityCriteria } from '$lib/server/db';
 	import type { StepType } from '$lib/utils/update-steps';
@@ -49,6 +49,16 @@
 		scanner: 'grype' | 'trivy';
 	}
 
+	interface VulnerabilityEntry {
+		id: string;
+		severity: string;
+		package: string;
+		version: string;
+		fixedVersion?: string;
+		link?: string;
+		scanner: string;
+	}
+
 	interface ContainerProgress {
 		containerId: string;
 		containerName: string;
@@ -59,12 +69,15 @@
 		scanLogs: ScanLogEntry[];
 		scanResult?: ScanResult;
 		scannerResults?: ScannerResult[];
+		vulnerabilities?: VulnerabilityEntry[];
 		blockReason?: string;
 		showLogs: boolean;
 	}
 
 	let status = $state<'idle' | 'updating' | 'complete' | 'error'>('idle');
 	let progress = $state<ContainerProgress[]>([]);
+	let progressListEl = $state<HTMLDivElement | null>(null);
+	let scrollTick = $state(0);
 	let currentIndex = $state(0);
 	let totalCount = $state(0);
 	let summary = $state<{ total: number; success: number; failed: number; blocked: number } | null>(null);
@@ -142,6 +155,7 @@
 
 					try {
 						const data = JSON.parse(line.slice(6));
+						scrollTick++;
 
 						if (data.type === 'start') {
 							totalCount = data.total;
@@ -164,7 +178,7 @@
 									error: data.error,
 									pullLogs: [],
 									scanLogs: [],
-									showLogs: true // Auto-expand for the first/current container
+									showLogs: true,
 								}];
 							}
 
@@ -217,11 +231,12 @@
 								progress = [...progress];
 							}
 						} else if (data.type === 'scan_complete') {
-							// Store scan result and individual scanner results
+							// Store scan result, individual scanner results, and vulnerabilities
 							const containerProgress = progress.find(p => p.containerId === data.containerId);
 							if (containerProgress) {
 								containerProgress.scanResult = data.scanResult;
 								containerProgress.scannerResults = data.scannerResults;
+								containerProgress.vulnerabilities = data.vulnerabilities;
 								progress = [...progress];
 							}
 						} else if (data.type === 'blocked') {
@@ -283,6 +298,22 @@
 		if (item) {
 			item.showLogs = !item.showLogs;
 			progress = [...progress];
+		}
+	}
+
+const severityOrder: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3, negligible: 4, unknown: 5 };
+
+	function sortedVulns(vulns: VulnerabilityEntry[]): VulnerabilityEntry[] {
+		return [...vulns].sort((a, b) => (severityOrder[a.severity.toLowerCase()] ?? 9) - (severityOrder[b.severity.toLowerCase()] ?? 9));
+	}
+
+	function severityColor(severity: string): string {
+		switch (severity.toLowerCase()) {
+			case 'critical': return 'bg-red-600 text-white';
+			case 'high': return 'bg-orange-500 text-white';
+			case 'medium': return 'bg-amber-500 text-white';
+			case 'low': return 'bg-blue-500 text-white';
+			default: return 'bg-gray-500 text-white';
 		}
 	}
 
@@ -389,6 +420,16 @@
 			startUpdate();
 		}
 	});
+
+	// Auto-scroll progress list to bottom on SSE data (not UI toggles)
+	$effect(() => {
+		scrollTick;
+		if (progressListEl) {
+			requestAnimationFrame(() => {
+				progressListEl?.scrollTo({ top: progressListEl.scrollHeight, behavior: 'smooth' });
+			});
+		}
+	});
 </script>
 
 <Dialog.Root {open} onOpenChange={handleOpenChange}>
@@ -436,11 +477,11 @@
 
 			<!-- Container list with status - scrollable area -->
 			{#if progress.length > 0}
-				<div class="border rounded-lg divide-y flex-1 min-h-0 overflow-auto">
+				<div bind:this={progressListEl} class="border rounded-lg divide-y flex-1 min-h-0 overflow-auto">
 					{#each progress as item (item.containerId)}
 						{@const StepIcon = getStepIcon(item.step)}
 						{@const isActive = item.step !== 'done' && item.step !== 'failed' && item.step !== 'blocked'}
-						{@const hasLogs = item.pullLogs.length > 0 || item.scanLogs.length > 0}
+						{@const hasLogs = item.pullLogs.length > 0 || item.scanLogs.length > 0 || (item.vulnerabilities && item.vulnerabilities.length > 0)}
 						<div class="text-sm">
 							<!-- Container header -->
 							<div class="flex items-center gap-3 p-3">
@@ -559,6 +600,54 @@
 												{formatScanLog(log)}
 											</div>
 										{/each}
+									{/if}
+									{#if item.vulnerabilities && item.vulnerabilities.length > 0}
+										<div class="border-t border-dashed my-1 border-muted-foreground/30"></div>
+										<div class="text-muted-foreground text-[10px] uppercase tracking-wider font-medium mb-1">
+											{item.vulnerabilities.length}{item.vulnerabilities.length >= 100 ? '+' : ''} vulnerabilities found
+										</div>
+										<div>
+											<table class="w-full">
+												<thead>
+													<tr class="text-left text-muted-foreground border-b">
+														<th class="pb-1 pr-2 font-medium">CVE</th>
+														<th class="pb-1 pr-2 font-medium">Severity</th>
+														<th class="pb-1 pr-2 font-medium">Package</th>
+														<th class="pb-1 pr-2 font-medium">Version</th>
+														<th class="pb-1 font-medium">Fixed</th>
+													</tr>
+												</thead>
+												<tbody>
+													{#each sortedVulns(item.vulnerabilities).slice(0, 50) as vuln}
+														<tr class="border-b border-muted/50">
+															<td class="py-1 pr-2 font-mono">
+																{#if vuln.link}
+																	<a href={vuln.link} target="_blank" rel="noopener noreferrer" class="text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-0.5">
+																		{vuln.id}
+																		<ExternalLink class="w-2.5 h-2.5" />
+																	</a>
+																{:else}
+																	{vuln.id}
+																{/if}
+															</td>
+															<td class="py-1 pr-2">
+																<span class="inline-block px-1.5 py-0 rounded text-[10px] font-medium {severityColor(vuln.severity)}">
+																	{vuln.severity}
+																</span>
+															</td>
+															<td class="py-1 pr-2 font-mono truncate max-w-[150px]">{vuln.package}</td>
+															<td class="py-1 pr-2 font-mono truncate max-w-[100px]">{vuln.version}</td>
+															<td class="py-1 font-mono truncate max-w-[100px]">{vuln.fixedVersion || '\u2014'}</td>
+														</tr>
+													{/each}
+												</tbody>
+											</table>
+											{#if item.vulnerabilities.length > 50}
+												<div class="text-muted-foreground mt-1">
+													...and {item.vulnerabilities.length - 50} more
+												</div>
+											{/if}
+										</div>
 									{/if}
 								</div>
 							{/if}

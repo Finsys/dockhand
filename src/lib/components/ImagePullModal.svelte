@@ -428,7 +428,7 @@
 							<Loader2 class="w-4 h-4 mr-2 animate-spin" />
 							Removing...
 						{:else}
-							<Trash2 class="w-4 h-4 mr-2" />
+							<Trash2 class="w-4 h-4" />
 							Remove image
 						{/if}
 					</Button>
@@ -437,7 +437,7 @@
 						onclick={handleClose}
 						disabled={isDeleting}
 					>
-						<CheckCircle2 class="w-4 h-4 mr-2" />
+						<CheckCircle2 class="w-4 h-4" />
 						Keep image
 					</Button>
 				{:else if showDeleteButton && pullStatus === 'complete' && !envHasScanning}
@@ -451,7 +451,7 @@
 							<Loader2 class="w-4 h-4 mr-2 animate-spin" />
 							Removing...
 						{:else}
-							<Trash2 class="w-4 h-4 mr-2" />
+							<Trash2 class="w-4 h-4" />
 							Remove image
 						{/if}
 					</Button>
@@ -460,7 +460,7 @@
 						onclick={handleClose}
 						disabled={isDeleting}
 					>
-						<CheckCircle2 class="w-4 h-4 mr-2" />
+						<CheckCircle2 class="w-4 h-4" />
 						Keep image
 					</Button>
 				{:else}
@@ -476,7 +476,7 @@
 							onclick={startPullFromConfigure}
 							disabled={!configImageName.trim()}
 						>
-							<Download class="w-4 h-4 mr-2" />
+							<Download class="w-4 h-4" />
 							Pull
 						</Button>
 					{:else if pullStatus === 'complete' || scanStatus === 'complete'}

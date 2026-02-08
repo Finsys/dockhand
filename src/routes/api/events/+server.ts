@@ -33,10 +33,13 @@ export const GET: RequestHandler = async ({ url }) => {
 		);
 	}
 
+	let heartbeatInterval: ReturnType<typeof setInterval>;
+	let controllerClosed = false;
+	let eventReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+
 	const stream = new ReadableStream({
 		async start(controller) {
 			const encoder = new TextEncoder();
-			let controllerClosed = false;
 
 			// Safe close helper - prevents "Controller is already closed" errors
 			const safeClose = () => {
@@ -50,7 +53,7 @@ export const GET: RequestHandler = async ({ url }) => {
 				}
 			};
 
-			// Send initial connection event
+			// Send SSE event
 			const sendEvent = (type: string, data: any) => {
 				if (controllerClosed) return;
 				try {
@@ -63,7 +66,7 @@ export const GET: RequestHandler = async ({ url }) => {
 			};
 
 			// Send heartbeat to keep connection alive (every 5s to prevent Traefik 10s idle timeout)
-			const heartbeatInterval = setInterval(() => {
+			heartbeatInterval = setInterval(() => {
 				try {
 					sendEvent('heartbeat', { timestamp: new Date().toISOString() });
 				} catch {
@@ -71,6 +74,7 @@ export const GET: RequestHandler = async ({ url }) => {
 				}
 			}, 5000);
 
+			// Send initial connection event
 			sendEvent('connected', { timestamp: new Date().toISOString(), envId: envIdNum });
 
 			try {
@@ -87,14 +91,14 @@ export const GET: RequestHandler = async ({ url }) => {
 					return;
 				}
 
-				const reader = eventStream.getReader();
+				eventReader = eventStream.getReader();
 				const decoder = new TextDecoder();
 				let buffer = '';
 
 				const processEvents = async () => {
 					try {
 						while (true) {
-							const { done, value } = await reader.read();
+							const { done, value } = await eventReader!.read();
 							if (done) break;
 
 							buffer += decoder.decode(value, { stream: true });
@@ -129,9 +133,7 @@ export const GET: RequestHandler = async ({ url }) => {
 					} catch (error: any) {
 						// Don't log full stack trace for expected connection errors
 						const isConnectionError = error?.code === 'ECONNRESET' || error?.code === 'ECONNREFUSED';
-						if (isConnectionError) {
-							// Silent - these are handled by event-subprocess reconnection logic
-						} else {
+						if (!isConnectionError) {
 							console.error('Docker event stream error:', error?.message || error);
 						}
 						sendEvent('error', { message: error?.message || 'Stream connection lost' });
@@ -157,6 +159,11 @@ export const GET: RequestHandler = async ({ url }) => {
 				clearInterval(heartbeatInterval);
 				safeClose();
 			}
+		},
+		cancel() {
+			controllerClosed = true;
+			clearInterval(heartbeatInterval);
+			eventReader?.cancel().catch(() => {});
 		}
 	});
 
