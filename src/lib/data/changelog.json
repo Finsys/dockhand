@@ -3,8 +3,7 @@
     "version": "1.0.15",
     "date": "2026-02-08",
     "changes": [
-      { "type": "feature", "text": "Auto-detect build directives: Git stacks with build: directives now automatically rebuild images on deploy" },
-      { "type": "feature", "text": "Pull before update option: New option to pull latest image before container auto-update" },
+{ "type": "feature", "text": "Pull before update option: New option to pull latest image before container auto-update" },
       { "type": "feature", "text": "Usage filter on images page by usage status (used/unused/all)" },
       { "type": "feature", "text": "Show repository name for untagged images: Better identification of images without tags" },
       { "type": "fix", "text": "Fix IPv6 address not accepted in environment Public IP field" },
