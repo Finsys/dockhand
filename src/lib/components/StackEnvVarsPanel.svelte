@@ -4,7 +4,7 @@
 	import StackEnvVarsEditor, { type EnvVar, type ValidationResult } from '$lib/components/StackEnvVarsEditor.svelte';
 	import CodeEditor from '$lib/components/CodeEditor.svelte';
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
-	import { Plus, Upload, Trash2, List, FileText, AlertTriangle, ShieldAlert, HelpCircle } from 'lucide-svelte';
+	import { Plus, Upload, Trash2, List, FileText, AlertTriangle, ShieldAlert, HelpCircle, Info } from 'lucide-svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 
 	interface Props {
@@ -18,6 +18,7 @@
 		placeholder?: { key: string; value: string };
 		infoText?: string;
 		existingSecretKeys?: Set<string>;
+		showInterpolationHint?: boolean;
 		theme?: 'light' | 'dark';
 		class?: string;
 		onchange?: () => void;
@@ -35,6 +36,7 @@
 		placeholder = { key: 'VARIABLE_NAME', value: 'value' },
 		infoText,
 		existingSecretKeys = new Set<string>(),
+		showInterpolationHint = false,
 		theme = 'dark',
 		class: className = '',
 		onchange,
@@ -54,6 +56,17 @@
 	// Count of secrets (for display in hint)
 	const secretCount = $derived(variables.filter(v => v.isSecret && v.key.trim()).length);
 
+	// Generate text representation from variables (non-secrets only)
+	// This is used for text view display
+	const generatedRawContent = $derived.by(() => {
+		const nonSecrets = variables.filter(v => v.key.trim() && !v.isSecret);
+		if (nonSecrets.length === 0) return '';
+		return nonSecrets.map(v => `${v.key.trim()}=${v.value}`).join('\n') + '\n';
+	});
+
+	// Text editor content - either from file (rawContent prop) or generated from variables
+	const textEditorContent = $derived(rawContent.trim() ? rawContent : generatedRawContent);
+
 	/**
 	 * Sync variables with rawContent after initial load.
 	 * Pass the loaded data directly to avoid timing issues with bindable props.
@@ -61,7 +74,7 @@
 	 */
 	export function syncAfterLoad(loadedVars: EnvVar[], loadedRaw: string) {
 		if (!loadedRaw.trim()) {
-			// No raw content - just use the loaded variables as-is
+			// No raw content from file - just set variables, text view will use generatedRawContent
 			variables = loadedVars;
 			rawContent = '';
 			return;
@@ -298,7 +311,7 @@
 						<HelpCircle class="w-3.5 h-3.5 text-muted-foreground cursor-help shrink-0" />
 					</Tooltip.Trigger>
 					<Tooltip.Content>
-						<div class="w-64">
+						<div class="w-80">
 							<p class="text-xs text-left">{@html infoText}</p>
 						</div>
 					</Tooltip.Content>
@@ -351,12 +364,12 @@
 						{@render headerActions()}
 					{/if}
 					<Button type="button" size="sm" variant="ghost" onclick={handleLoadFromFile} class="h-6 text-xs px-2">
-						<Upload class="w-3.5 h-3.5 mr-1" />
+						<Upload class="w-3.5 h-3.5" />
 						Load
 					</Button>
 					{#if viewMode === 'form'}
 						<Button type="button" size="sm" variant="ghost" onclick={addEnvVariable} class="h-6 text-xs px-2">
-							<Plus class="w-3.5 h-3.5 mr-1" />
+							<Plus class="w-3.5 h-3.5" />
 							Add
 						</Button>
 					{/if}
@@ -377,7 +390,7 @@
 								class="h-6 text-xs px-2 {hasContent ? 'text-destructive hover:text-destructive' : 'text-muted-foreground/50 cursor-not-allowed'}"
 								disabled={!hasContent}
 							>
-								<Trash2 class="w-3.5 h-3.5 mr-1" />
+								<Trash2 class="w-3.5 h-3.5" />
 								Clear
 							</Button>
 						{/snippet}
@@ -394,10 +407,46 @@
 		</div>
 		<!-- Help text -->
 		{#if viewMode === 'form'}
+			{#if showInterpolationHint}
+				<div class="flex items-start gap-2 px-2.5 py-2 rounded bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800/50">
+					<Info class="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
+					<p class="text-xs text-blue-700 dark:text-blue-300">
+						These variables are available for <strong>compose file interpolation</strong> using <code class="bg-blue-100 dark:bg-blue-800/40 px-1 rounded">${'{VAR_NAME}'}</code> syntax.
+						To pass them to containers, reference them in the compose file's <code class="bg-blue-100 dark:bg-blue-800/40 px-1 rounded">environment:</code> section.
+					</p>
+				</div>
+			{/if}
 			<div class="flex flex-wrap gap-x-3 gap-y-0.5 text-2xs text-zinc-400 dark:text-zinc-500 font-mono">
 				<span><span class="text-zinc-500 dark:text-zinc-400">${`{VAR}`}</span> required</span>
 				<span><span class="text-zinc-500 dark:text-zinc-400">${`{VAR:-default}`}</span> optional</span>
 				<span><span class="text-zinc-500 dark:text-zinc-400">${`{VAR:?error}`}</span> required w/ error</span>
+			</div>
+		{:else if showInterpolationHint && secretCount > 0}
+			<!-- Interpolation hint + secrets hint combined for text view -->
+			<div class="flex flex-col gap-1.5">
+				<div class="flex items-start gap-2 px-2.5 py-2 rounded bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800/50">
+					<Info class="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
+					<p class="text-xs text-blue-700 dark:text-blue-300">
+						These variables are available for <strong>compose file interpolation</strong> using <code class="bg-blue-100 dark:bg-blue-800/40 px-1 rounded">${'{VAR_NAME}'}</code> syntax.
+						To pass them to containers, reference them in the compose file's <code class="bg-blue-100 dark:bg-blue-800/40 px-1 rounded">environment:</code> section.
+					</p>
+				</div>
+				<div class="flex items-start gap-2 px-2.5 py-2 rounded bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50">
+					<ShieldAlert class="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+					<div class="text-xs text-amber-700 dark:text-amber-300">
+						<span class="font-medium">{secretCount} secret{secretCount === 1 ? '' : 's'} not shown.</span>
+						<span class="text-amber-600 dark:text-amber-400">Secrets are never written to disk and are injected via shell environment when the stack starts.</span>
+					</div>
+				</div>
+			</div>
+		{:else if showInterpolationHint}
+			<!-- Interpolation hint only (no secrets) -->
+			<div class="flex items-start gap-2 px-2.5 py-2 rounded bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800/50">
+				<Info class="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
+				<p class="text-xs text-blue-700 dark:text-blue-300">
+					These variables are available for <strong>compose file interpolation</strong> using <code class="bg-blue-100 dark:bg-blue-800/40 px-1 rounded">${'{VAR_NAME}'}</code> syntax.
+					To pass them to containers, reference them in the compose file's <code class="bg-blue-100 dark:bg-blue-800/40 px-1 rounded">environment:</code> section.
+				</p>
 			</div>
 		{:else if secretCount > 0}
 			<!-- Text view hint about secrets (only shown when secrets exist) -->
@@ -459,7 +508,7 @@
 			/>
 		{:else}
 			<CodeEditor
-				value={rawContent}
+				value={textEditorContent}
 				language="dotenv"
 				theme={theme}
 				readonly={readonly}

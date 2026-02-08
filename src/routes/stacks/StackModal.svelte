@@ -91,6 +91,7 @@
 	// UI state
 	let composePathCopied = $state(false);
 	let envPathCopied = $state(false);
+	let composeContentCopied = $state(false);
 	let needsFileLocation = $state(false);
 
 	// Container info for untracked stacks
@@ -1506,7 +1507,7 @@ services:
 													Browse to locate the compose file for this stack. The editor will load the file contents once selected.
 												</p>
 												<Button variant="outline" size="sm" onclick={openComposeBrowser}>
-													<FolderOpen class="w-4 h-4 mr-2" />
+													<FolderOpen class="w-4 h-4" />
 													Browse for compose file
 												</Button>
 												<!-- Info box explaining what happens -->
@@ -1516,15 +1517,35 @@ services:
 												</div>
 											</div>
 										{:else}
-											<CodeEditor
-												bind:this={codeEditorRef}
-												value={composeContent}
-												language="yaml"
-												theme={editorTheme}
-												onchange={handleComposeChange}
-												variableMarkers={variableMarkers}
-												class="h-full rounded-md overflow-hidden border border-zinc-200 dark:border-zinc-700"
-											/>
+											<div class="h-full flex flex-col">
+												<!-- Copy button row -->
+												<div class="flex justify-end mb-1">
+													<Button
+														variant="ghost"
+														size="sm"
+														class="h-6 px-2 text-xs text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+														onclick={() => copyToClipboard(composeContent, (v) => composeContentCopied = v)}
+														disabled={!composeContent}
+													>
+														{#if composeContentCopied}
+															<Check class="w-3 h-3 text-green-500" />
+															Copied
+														{:else}
+															<Copy class="w-3 h-3" />
+															Copy
+														{/if}
+													</Button>
+												</div>
+												<CodeEditor
+													bind:this={codeEditorRef}
+													value={composeContent}
+													language="yaml"
+													theme={editorTheme}
+													onchange={handleComposeChange}
+													variableMarkers={variableMarkers}
+													class="flex-1 rounded-md overflow-hidden border border-zinc-200 dark:border-zinc-700"
+												/>
+											</div>
 										{/if}
 									</div>
 								{/if}
@@ -1587,19 +1608,19 @@ services:
 					<!-- Create mode buttons -->
 					<Button variant="outline" onclick={() => handleCreate(false)} disabled={saving}>
 						{#if saving}
-							<Loader2 class="w-4 h-4 mr-2 animate-spin" />
+							<Loader2 class="w-4 h-4 animate-spin" />
 							Creating...
 						{:else}
-							<Save class="w-4 h-4 mr-2" />
+							<Save class="w-4 h-4" />
 							Create
 						{/if}
 					</Button>
 					<Button onclick={() => handleCreate(true)} disabled={saving}>
 						{#if saving}
-							<Loader2 class="w-4 h-4 mr-2 animate-spin" />
+							<Loader2 class="w-4 h-4 animate-spin" />
 							Starting...
 						{:else}
-							<Play class="w-4 h-4 mr-2" />
+							<Play class="w-4 h-4" />
 							Create & Start
 						{/if}
 					</Button>
@@ -1607,19 +1628,19 @@ services:
 					<!-- Edit mode buttons -->
 					<Button variant="outline" class="w-24" onclick={() => handleSave(false)} disabled={saving || loading || (needsFileLocation && !workingComposePath.trim())}>
 						{#if saving && !savingWithRestart}
-							<Loader2 class="w-4 h-4 mr-2 animate-spin" />
+							<Loader2 class="w-4 h-4 animate-spin" />
 							Saving...
 						{:else}
-							<Save class="w-4 h-4 mr-2" />
+							<Save class="w-4 h-4" />
 							Save
 						{/if}
 					</Button>
 					<Button class="w-36" onclick={() => handleSave(true)} disabled={saving || loading || (needsFileLocation && !workingComposePath.trim())}>
 						{#if saving && savingWithRestart}
-							<Loader2 class="w-4 h-4 mr-2 animate-spin" />
+							<Loader2 class="w-4 h-4 animate-spin" />
 							Deploying...
 						{:else}
-							<Play class="w-4 h-4 mr-2" />
+							<Play class="w-4 h-4" />
 							Save & redeploy
 						{/if}
 					</Button>
@@ -1677,7 +1698,7 @@ services:
 				Leave files
 			</Button>
 			<Button variant="default" size="sm" onclick={confirmPathChangeAndMove}>
-				<ArrowRight class="w-3.5 h-3.5 mr-1" />
+				<ArrowRight class="w-3.5 h-3.5" />
 				Move files
 			</Button>
 		</div>
@@ -1754,10 +1775,10 @@ services:
 			</Button>
 			<Button variant="default" size="sm" onclick={confirmChangeLocation} disabled={movingLocation}>
 				{#if movingLocation}
-					<Loader2 class="w-3.5 h-3.5 mr-1.5 animate-spin" />
+					<Loader2 class="w-3.5 h-3.5 animate-spin" />
 					Moving...
 				{:else}
-					<FolderSync class="w-3.5 h-3.5 mr-1" />
+					<FolderSync class="w-3.5 h-3.5" />
 					Move files
 				{/if}
 			</Button>

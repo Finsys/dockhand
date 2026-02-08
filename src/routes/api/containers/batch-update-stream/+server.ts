@@ -16,6 +16,7 @@ import { getScannerSettings, scanImage } from '$lib/server/scanner';
 import { saveVulnerabilityScan, removePendingContainerUpdate, type VulnerabilityCriteria } from '$lib/server/db';
 import { parseImageNameAndTag, shouldBlockUpdate, combineScanSummaries, isDockhandContainer } from '$lib/server/scheduler/tasks/update-utils';
 import { recreateContainer, updateStackContainer } from '$lib/server/scheduler/tasks/container-update';
+import { pullStackService } from '$lib/server/stacks';
 
 export interface ScanResult {
 	critical: number;
@@ -56,6 +57,15 @@ export interface UpdateProgress {
 	scannerResults?: ScannerResult[];
 	blockReason?: string;
 	scanner?: string;
+	vulnerabilities?: Array<{
+		id: string;
+		severity: string;
+		package: string;
+		version: string;
+		fixedVersion?: string;
+		link?: string;
+		scanner: string;
+	}>;
 }
 
 /**
@@ -198,6 +208,13 @@ export const POST: RequestHandler = async (event) => {
 						continue;
 					}
 
+					// Detect stack membership early (needed for both pull and recreate)
+					const containerLabels = config.Labels || {};
+					const composeProject = containerLabels['com.docker.compose.project'];
+					const composeService = containerLabels['com.docker.compose.service'];
+					const composeConfigFiles = containerLabels['com.docker.compose.project.config_files'];
+					const isStackContainer = !!(composeProject && composeService);
+
 					// Step 1: Pull latest image
 					safeEnqueue({
 						type: 'progress',
@@ -210,19 +227,37 @@ export const POST: RequestHandler = async (event) => {
 					});
 
 					try {
-						await pullImage(imageName, (data: any) => {
-							// Send pull progress as log entries
-							if (data.status) {
-								safeEnqueue({
-									type: 'pull_log',
-									containerId,
-									containerName,
-									pullStatus: data.status,
-									pullId: data.id,
-									pullProgress: data.progress
-								});
+						if (isStackContainer) {
+							const pullResult = await pullStackService(composeProject, composeService!, envIdNum, composeConfigFiles);
+							if (!pullResult.success) {
+								// Fallback to direct pull
+								await pullImage(imageName, (data: any) => {
+									if (data.status) {
+										safeEnqueue({
+											type: 'pull_log',
+											containerId,
+											containerName,
+											pullStatus: data.status,
+											pullId: data.id,
+											pullProgress: data.progress
+										});
+									}
+								}, envIdNum);
 							}
-						}, envIdNum);
+						} else {
+							await pullImage(imageName, (data: any) => {
+								if (data.status) {
+									safeEnqueue({
+										type: 'pull_log',
+										containerId,
+										containerName,
+										pullStatus: data.status,
+										pullId: data.id,
+										pullProgress: data.progress
+									});
+								}
+							}, envIdNum);
+						}
 					} catch (pullError: any) {
 						safeEnqueue({
 							type: 'progress',
@@ -289,13 +324,13 @@ export const POST: RequestHandler = async (event) => {
 
 						try {
 							const scanResults = await scanImage(tempTag, envIdNum, (progress) => {
-								if (progress.message) {
+								if (progress.output || progress.message) {
 									safeEnqueue({
 										type: 'scan_log',
 										containerId,
 										containerName,
 										scanner: progress.scanner,
-										message: progress.message
+										message: progress.output || progress.message
 									});
 								}
 							});
@@ -352,12 +387,27 @@ export const POST: RequestHandler = async (event) => {
 								}
 							}
 
+							// Collect vulnerabilities from all scanners (cap at 100)
+							const vulnerabilities = scanResults
+								.flatMap(r => r.vulnerabilities || [])
+								.slice(0, 100)
+								.map(v => ({
+									id: v.id,
+									severity: v.severity,
+									package: v.package,
+									version: v.version,
+									fixedVersion: v.fixedVersion,
+									link: v.link,
+									scanner: v.scanner
+								}));
+
 							safeEnqueue({
 								type: 'scan_complete',
 								containerId,
 								containerName,
 								scanResult: finalScanResult,
 								scannerResults: individualScannerResults.length > 0 ? individualScannerResults : undefined,
+								vulnerabilities: vulnerabilities.length > 0 ? vulnerabilities : undefined,
 								message: finalScanResult
 									? `Scan complete: ${finalScanResult.critical} critical, ${finalScanResult.high} high, ${finalScanResult.medium} medium, ${finalScanResult.low} low`
 									: 'Scan complete: no vulnerabilities found'
@@ -415,12 +465,6 @@ export const POST: RequestHandler = async (event) => {
 						} catch { /* ignore cleanup errors */ }
 					}
 
-					// Detect if container is part of a Docker Compose stack
-					const containerLabels = config.Labels || {};
-					const composeProject = containerLabels['com.docker.compose.project'];
-					const composeService = containerLabels['com.docker.compose.service'];
-					const isStackContainer = !!composeProject;
-
 					// Progress logging function for shared functions
 					const logProgress = (message: string) => {
 						safeEnqueue({
@@ -452,7 +496,7 @@ export const POST: RequestHandler = async (event) => {
 						});
 
 						// Try stack-based update first
-						const stackSuccess = await updateStackContainer(composeProject, composeService!, envIdNum, logProgress);
+						const stackSuccess = await updateStackContainer(composeProject, composeService!, envIdNum, logProgress, composeConfigFiles);
 
 						if (stackSuccess) {
 							updateSuccess = true;

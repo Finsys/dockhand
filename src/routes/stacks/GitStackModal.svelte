@@ -47,6 +47,7 @@
 		id: number;
 		stackName: string;
 		repositoryId: number;
+		environmentId: number | null;
 		composePath: string;
 		envFilePath: string | null;
 		autoUpdate: boolean;
@@ -112,13 +113,17 @@
 
 	// Track which gitStack was initialized to avoid repeated resets
 	let lastInitializedStackId = $state<number | null | undefined>(undefined);
+	let isInitializing = $state(false);
 
 	$effect(() => {
 		if (open) {
 			const currentStackId = gitStack?.id ?? null;
-			if (lastInitializedStackId !== currentStackId) {
+			if (lastInitializedStackId !== currentStackId && !isInitializing) {
 				lastInitializedStackId = currentStackId;
-				resetForm();
+				isInitializing = true;
+				resetForm().finally(() => {
+					isInitializing = false;
+				});
 			}
 		} else {
 			lastInitializedStackId = undefined;
@@ -237,14 +242,18 @@
 		if (!gitStack) return;
 
 		try {
-			const response = await fetch(`/api/stacks/${encodeURIComponent(gitStack.stackName)}/env${environmentId ? `?env=${environmentId}` : ''}`);
+			// Use gitStack.environmentId when editing, fall back to prop for new stacks
+			const envIdToUse = gitStack.environmentId ?? environmentId;
+			const response = await fetch(`/api/stacks/${encodeURIComponent(gitStack.stackName)}/env${envIdToUse ? `?env=${envIdToUse}` : ''}`);
 			if (response.ok) {
 				const data = await response.json();
-				envVars = data.variables || [];
+				const loadedVars = data.variables || [];
 				// Track existing secret keys (secrets loaded from DB cannot have visibility toggled)
 				existingSecretKeys = new Set(
-					envVars.filter(v => v.isSecret && v.key.trim()).map(v => v.key.trim())
+					loadedVars.filter((v: EnvVar) => v.isSecret && v.key.trim()).map((v: EnvVar) => v.key.trim())
 				);
+				// Set envVars - the panel's $effect will auto-sync rawContent for text view
+				envVars = loadedVars;
 			}
 		} catch (e) {
 			console.error('Failed to load env var overrides:', e);
@@ -324,7 +333,7 @@
 		}
 	}
 
-	function resetForm() {
+	async function resetForm() {
 		// Clear state BEFORE async loads to avoid race conditions
 		formError = '';
 		errors = {};
@@ -346,12 +355,14 @@
 			formWebhookEnabled = gitStack.webhookEnabled;
 			formWebhookSecret = gitStack.webhookSecret || '';
 			formDeployNow = false;
-			// Load env files and overrides for editing (async - will populate envFiles, envVars, fileEnvVars)
-			loadEnvFiles();
-			loadEnvVarsOverrides();
-			if (gitStack.envFilePath) {
-				loadEnvFileContents(gitStack.envFilePath);
-			}
+
+			// Load env files and overrides SYNCHRONOUSLY to avoid race conditions
+			// Wait for all loads to complete before allowing any other effect to run
+			await Promise.all([
+				loadEnvFiles(),
+				loadEnvVarsOverrides(),
+				gitStack.envFilePath ? loadEnvFileContents(gitStack.envFilePath) : Promise.resolve()
+			]);
 		} else {
 			formRepoMode = repositories.length > 0 ? 'existing' : 'new';
 			formRepositoryId = null;
@@ -892,8 +903,9 @@
 				<StackEnvVarsPanel
 					bind:variables={envVars}
 					placeholder={{ key: 'MY_VAR', value: 'value' }}
-					infoText="Override variables from your repository env files. Non-secrets are saved to <code class='bg-muted px-1 rounded'>.env.dockhand</code> in the stack directory. Secrets are stored in the database and injected via shell environment at deploy time."
+					infoText="Override variables from your repository env files. Non-secrets are saved to <code class='bg-muted px-1 rounded'>.env.dockhand</code> in the stack directory. Secrets are stored in the database and injected via shell environment at deploy time.<br/><br/>Variables are available for <strong>compose file interpolation</strong> using <code class='bg-muted px-1 rounded'>${'{VAR_NAME}'}</code> syntax. They are not automatically injected into containers — use <code class='bg-muted px-1 rounded'>environment:</code> or reference <code class='bg-muted px-1 rounded'>.env.dockhand</code> in <code class='bg-muted px-1 rounded'>env_file:</code> to pass them through."
 					existingSecretKeys={gitStack !== null ? existingSecretKeys : new Set()}
+					showInterpolationHint={true}
 				>
 					{#snippet headerActions()}
 						{#if !gitStack}
@@ -910,7 +922,7 @@
 										<Loader2 class="w-3.5 h-3.5 mr-1 animate-spin" />
 										Loading...
 									{:else}
-										<Download class="w-3.5 h-3.5 mr-1" />
+										<Download class="w-3.5 h-3.5" />
 										Populate
 									{/if}
 								</Button>
@@ -939,7 +951,7 @@
 						<Loader2 class="w-4 h-4 mr-1 animate-spin" />
 						Deploying...
 					{:else}
-						<Rocket class="w-4 h-4 mr-1" />
+						<Rocket class="w-4 h-4" />
 						Save and deploy
 					{/if}
 				</Button>

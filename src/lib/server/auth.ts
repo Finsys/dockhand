@@ -186,13 +186,19 @@ export async function createUserSession(
 
 	// Get session timeout from settings
 	const settings = await getAuthSettings();
-	const expiresAt = new Date(Date.now() + settings.sessionTimeout * 1000).toISOString();
+	// Safety: ensure sessionTimeout is valid (1 second to 30 days), default to 24h if invalid
+	const MAX_SESSION_TIMEOUT = 2592000; // 30 days in seconds
+	const DEFAULT_SESSION_TIMEOUT = 86400; // 24 hours in seconds
+	const sessionTimeout = (settings?.sessionTimeout > 0 && settings?.sessionTimeout <= MAX_SESSION_TIMEOUT)
+		? settings.sessionTimeout
+		: DEFAULT_SESSION_TIMEOUT;
+	const expiresAt = new Date(Date.now() + sessionTimeout * 1000).toISOString();
 
 	// Create session in database
 	const session = await dbCreateSession(sessionId, userId, provider, expiresAt);
 
 	// Set secure cookie
-	setSessionCookie(cookies, sessionId, settings.sessionTimeout);
+	setSessionCookie(cookies, sessionId, sessionTimeout);
 
 	// Update user's last login time
 	await updateUser(userId, { lastLogin: new Date().toISOString() });

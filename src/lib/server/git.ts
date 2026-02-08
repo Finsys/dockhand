@@ -1120,11 +1120,23 @@ export async function deployGitStackWithProgress(
 		// Step 5: Deploying stack
 		// Uses `docker compose up -d --remove-orphans` which only recreates changed services
 		onProgress({ status: 'deploying', message: `Deploying ${gitStack.stackName}...`, step: 5, totalSteps });
+
+		// Determine env filename relative to compose dir (same logic as syncGitStack)
+		let envFileName: string | undefined;
+		if (gitStack.envFilePath) {
+			const envFilePath = join(repoPath, gitStack.envFilePath);
+			if (existsSync(envFilePath)) {
+				envFileName = relative(composeDir, envFilePath);
+			}
+		}
+
 		const result = await deployStack({
 			name: gitStack.stackName,
 			compose: composeContent,
 			envId: gitStack.environmentId,
-			sourceDir: composeDir // Copy entire directory from git repo
+			sourceDir: composeDir, // Copy entire directory from git repo
+			composeFileName: basename(gitStack.composePath), // Use original compose filename from repo
+			envFileName // Env file relative to compose dir (for --env-file flag, optional)
 		});
 
 		if (result.success) {

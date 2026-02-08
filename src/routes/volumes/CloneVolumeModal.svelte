@@ -108,9 +108,9 @@
 			</Button>
 			<Button onclick={handleClone} disabled={cloning || !newName.trim()}>
 				{#if cloning}
-					<Loader2 class="w-4 h-4 mr-2 animate-spin" />
+					<Loader2 class="w-4 h-4 animate-spin" />
 				{:else}
-					<Copy class="w-4 h-4 mr-2" />
+					<Copy class="w-4 h-4" />
 				{/if}
 				Clone
 			</Button>

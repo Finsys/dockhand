@@ -372,7 +372,7 @@
 
 						<div class="flex gap-2">
 							<Button onclick={startSession} class="flex-1" disabled={!xtermLoaded || !anyShellAvailable}>
-								<TerminalIcon class="w-4 h-4 mr-2" />
+								<TerminalIcon class="w-4 h-4" />
 								{xtermLoaded ? 'Connect' : 'Loading...'}
 							</Button>
 							<Button onclick={openInNewWindow} variant="outline" disabled={!xtermLoaded} title="Open in new window">

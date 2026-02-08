@@ -314,14 +314,15 @@
 		for (const marker of markers) {
 			// Find all occurrences of this variable in the text
 			// Match ${VAR_NAME} or ${VAR_NAME:-...} or $VAR_NAME patterns
+			// Use negative lookbehind (?<!\$) to skip escaped $$ (Docker Compose escape syntax)
 			const patterns = [
-				{ regex: new RegExp(`\\$\\{${marker.name}\\}`, 'g'), hasDefault: false },
-				{ regex: new RegExp(`\\$\\{${marker.name}:-([^}]*)\\}`, 'g'), hasDefault: true },
-				{ regex: new RegExp(`\\$\\{${marker.name}-([^}]*)\\}`, 'g'), hasDefault: true },
-				{ regex: new RegExp(`\\$\\{${marker.name}:\\?[^}]*\\}`, 'g'), hasDefault: false },
-				{ regex: new RegExp(`\\$\\{${marker.name}\\?[^}]*\\}`, 'g'), hasDefault: false },
-				{ regex: new RegExp(`\\$\\{${marker.name}:\\+[^}]*\\}`, 'g'), hasDefault: false },
-				{ regex: new RegExp(`\\$\\{${marker.name}\\+[^}]*\\}`, 'g'), hasDefault: false },
+				{ regex: new RegExp(`(?<!\\$)\\$\\{${marker.name}\\}`, 'g'), hasDefault: false },
+				{ regex: new RegExp(`(?<!\\$)\\$\\{${marker.name}:-([^}]*)\\}`, 'g'), hasDefault: true },
+				{ regex: new RegExp(`(?<!\\$)\\$\\{${marker.name}-([^}]*)\\}`, 'g'), hasDefault: true },
+				{ regex: new RegExp(`(?<!\\$)\\$\\{${marker.name}:\\?[^}]*\\}`, 'g'), hasDefault: false },
+				{ regex: new RegExp(`(?<!\\$)\\$\\{${marker.name}\\?[^}]*\\}`, 'g'), hasDefault: false },
+				{ regex: new RegExp(`(?<!\\$)\\$\\{${marker.name}:\\+[^}]*\\}`, 'g'), hasDefault: false },
+				{ regex: new RegExp(`(?<!\\$)\\$\\{${marker.name}\\+[^}]*\\}`, 'g'), hasDefault: false },
 			];
 
 			for (const { regex, hasDefault } of patterns) {
@@ -395,18 +396,19 @@
 			// Check if this line contains any of our marked variables
 			for (const marker of markers) {
 				// Match ${VAR_NAME} or ${VAR_NAME:-...} patterns
-				const patterns = [
-					`\${${marker.name}}`,
-					`\${${marker.name}:-`,
-					`\${${marker.name}-`,
-					`\${${marker.name}:?`,
-					`\${${marker.name}?`,
-					`\${${marker.name}:+`,
-					`\${${marker.name}+`,
-					`$${marker.name}`
+				// Use regex with negative lookbehind to skip escaped $$ (Docker Compose escape syntax)
+				const varPatterns = [
+					new RegExp(`(?<!\\$)\\$\\{${marker.name}\\}`),
+					new RegExp(`(?<!\\$)\\$\\{${marker.name}:-`),
+					new RegExp(`(?<!\\$)\\$\\{${marker.name}-`),
+					new RegExp(`(?<!\\$)\\$\\{${marker.name}:\\?`),
+					new RegExp(`(?<!\\$)\\$\\{${marker.name}\\?`),
+					new RegExp(`(?<!\\$)\\$\\{${marker.name}:\\+`),
+					new RegExp(`(?<!\\$)\\$\\{${marker.name}\\+`),
+					new RegExp(`(?<!\\$)\\$${marker.name}(?![a-zA-Z0-9_])`)
 				];
 
-				const hasVariable = patterns.some(p => line.includes(p));
+				const hasVariable = varPatterns.some(p => p.test(line));
 				if (hasVariable) {
 					gutterMarkers.push({
 						from: pos,

@@ -368,7 +368,7 @@
 						<div class="space-y-2 pl-1">
 							<div class="flex items-center justify-end">
 								<Button type="button" size="sm" variant="outline" onclick={addDriverOpt} disabled={creating}>
-									<Plus class="w-3 h-3 mr-1" />
+									<Plus class="w-3 h-3" />
 									Add option
 								</Button>
 							</div>
@@ -462,7 +462,7 @@
 						<div class="space-y-2 pl-1">
 							<div class="flex items-center justify-end">
 								<Button type="button" size="sm" variant="outline" onclick={addDriverOpt} disabled={creating}>
-									<Plus class="w-3 h-3 mr-1" />
+									<Plus class="w-3 h-3" />
 									Add option
 								</Button>
 							</div>
@@ -494,7 +494,7 @@
 							onclick={addDriverOpt}
 							disabled={creating}
 						>
-							<Plus class="w-3 h-3 mr-1" />
+							<Plus class="w-3 h-3" />
 							Add option
 						</Button>
 					</div>
@@ -543,7 +543,7 @@
 						onclick={addLabel}
 						disabled={creating}
 					>
-						<Plus class="w-3 h-3 mr-1" />
+						<Plus class="w-3 h-3" />
 						Add label
 					</Button>
 				</div>

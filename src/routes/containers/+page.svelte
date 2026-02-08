@@ -80,6 +80,7 @@
 	import { canAccess } from '$lib/stores/auth';
 	import { vulnerabilityCriteriaIcons } from '$lib/utils/update-steps';
 	import { ipToNumber } from '$lib/utils/ip';
+	import { formatHostPortUrl } from '$lib/utils/url';
 	import { detectShells, getBestShell, hasAvailableShell, USER_OPTIONS, type ShellDetectionResult } from '$lib/utils/shell-detection';
 	import { DataGrid } from '$lib/components/data-grid';
 	import type { ColumnConfig } from '$lib/types';
@@ -1240,7 +1241,7 @@
 
 		// Priority 1: Use publicIp if configured
 		if (env.publicIp) {
-			return `http://${env.publicIp}:${publicPort}`;
+			return formatHostPortUrl(env.publicIp, publicPort);
 		}
 
 		// Priority 2: Extract from host for direct/hawser-standard
@@ -1249,11 +1250,11 @@
 		if (connectionType === 'direct' && env.host) {
 			// Remote Docker via TCP - extract host from URL (e.g., tcp://192.168.1.4:2376)
 			const host = extractHostFromUrl(env.host);
-			if (host) return `http://${host}:${publicPort}`;
+			if (host) return formatHostPortUrl(host, publicPort);
 		} else if (connectionType === 'hawser-standard' && env.host) {
 			// Hawser standard mode - extract host from URL
 			const host = extractHostFromUrl(env.host);
-			if (host) return `http://${host}:${publicPort}`;
+			if (host) return formatHostPortUrl(host, publicPort);
 		}
 
 		// No public IP available for socket or hawser-edge
@@ -1464,7 +1465,7 @@
 			<div class="flex gap-2">
 				{#if $canAccess('containers', 'create')}
 				<Button size="sm" variant="secondary" onclick={() => (showCreateModal = true)}>
-					<Plus class="w-3.5 h-3.5 mr-1" />
+					<Plus class="w-3.5 h-3.5" />
 					Create
 				</Button>
 				{/if}
@@ -1482,7 +1483,7 @@
 					{:else if updateCheckStatus === 'error'}
 						<XCircle class="w-3.5 h-3.5 mr-1 text-destructive" />
 					{:else}
-						<CircleArrowUp class="w-3.5 h-3.5 mr-1" />
+						<CircleArrowUp class="w-3.5 h-3.5" />
 					{/if}
 					Check for updates
 				</Button>
@@ -1494,7 +1495,7 @@
 					class="border-amber-500/40 text-amber-600 hover:bg-amber-500/10 hover:border-amber-500"
 					title="Update all containers with available updates"
 				>
-					<CircleArrowUp class="w-3.5 h-3.5 mr-1" />
+					<CircleArrowUp class="w-3.5 h-3.5" />
 					Update all ({updatableContainersCount})
 				</Button>
 				{/if}
@@ -1518,7 +1519,7 @@
 							{:else if pruneStatus === 'error'}
 								<XCircle class="w-3.5 h-3.5 mr-1 text-destructive" />
 							{:else}
-								<Icon iconNode={broom} class="w-3.5 h-3.5 mr-1" />
+								<Icon iconNode={broom} class="w-3.5 h-3.5" />
 							{/if}
 							Prune
 						</Button>
@@ -2177,7 +2178,7 @@
 													</Select.Root>
 												</div>
 												<Button size="sm" class="w-full h-7 text-xs" onclick={() => startTerminal(container)}>
-													<Terminal class="w-3 h-3 mr-1" />
+													<Terminal class="w-3 h-3" />
 													Connect
 												</Button>
 											</div>

@@ -8,6 +8,7 @@
 	import { Crown, Building2, Key, RefreshCw, ShieldCheck, XCircle } from 'lucide-svelte';
 	import { canAccess } from '$lib/stores/auth';
 	import { licenseStore } from '$lib/stores/license';
+	import { formatDate } from '$lib/stores/settings';
 
 	// License state
 	interface LicenseInfo {
@@ -169,11 +170,11 @@
 					</div>
 					<div>
 						<p class="text-muted-foreground">Issued</p>
-						<p class="font-medium">{new Date(licenseInfo.payload?.issued || '').toLocaleDateString()}</p>
+						<p class="font-medium">{formatDate(licenseInfo.payload?.issued || '')}</p>
 					</div>
 					<div>
 						<p class="text-muted-foreground">Expires</p>
-						<p class="font-medium">{licenseInfo.payload?.expires ? new Date(licenseInfo.payload.expires).toLocaleDateString() : 'Never (Perpetual)'}</p>
+						<p class="font-medium">{licenseInfo.payload?.expires ? formatDate(licenseInfo.payload.expires) : 'Never (Perpetual)'}</p>
 					</div>
 				</div>
 				<div class="pt-2 border-t">
@@ -183,7 +184,7 @@
 				{#if $canAccess('settings', 'edit')}
 				<div class="flex justify-end">
 					<Button variant="outline" size="sm" onclick={deactivateLicense}>
-						<XCircle class="w-4 h-4 mr-1" />
+						<XCircle class="w-4 h-4" />
 						Deactivate license
 					</Button>
 				</div>
@@ -245,7 +246,7 @@
 						{#if licenseFormSaving}
 							<RefreshCw class="w-4 h-4 mr-1 animate-spin" />
 						{:else}
-							<ShieldCheck class="w-4 h-4 mr-1" />
+							<ShieldCheck class="w-4 h-4" />
 						{/if}
 						Activate license
 					</Button>

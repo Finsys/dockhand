@@ -1150,7 +1150,11 @@ export async function updateAuthSettings(data: Partial<AuthSettingsData>): Promi
 
 	if (data.authEnabled !== undefined) updateData.authEnabled = data.authEnabled;
 	if (data.defaultProvider !== undefined) updateData.defaultProvider = data.defaultProvider;
-	if (data.sessionTimeout !== undefined) updateData.sessionTimeout = data.sessionTimeout;
+	if (data.sessionTimeout !== undefined) {
+		// Cap session timeout to safe maximum (30 days)
+		const MAX_SESSION_TIMEOUT = 2592000; // 30 days in seconds
+		updateData.sessionTimeout = Math.min(Math.max(1, data.sessionTimeout), MAX_SESSION_TIMEOUT);
+	}
 
 	// Get existing row's id (may not be 1 after db reset/migration)
 	const existing = await db.select({ id: authSettings.id }).from(authSettings).limit(1);
@@ -2595,6 +2599,34 @@ export async function getStackSource(stackName: string, environmentId?: number |
 				? eq(stackSources.environmentId, environmentId)
 				: isNull(stackSources.environmentId)
 		));
+
+	if (!results[0]) return null;
+	const row = results[0];
+
+	let repository = null;
+	let gitStackData = null;
+
+	if (row.gitRepositoryId) {
+		repository = await getGitRepository(row.gitRepositoryId);
+	}
+	if (row.gitStackId) {
+		gitStackData = await getGitStack(row.gitStackId);
+	}
+
+	return {
+		...row,
+		repository,
+		gitStack: gitStackData
+	} as StackSourceWithRepo;
+}
+
+export async function getStackSourceByComposePath(composePath: string, environmentId?: number | null): Promise<StackSourceWithRepo | null> {
+	const envCondition = environmentId !== undefined && environmentId !== null
+		? eq(stackSources.environmentId, environmentId)
+		: isNull(stackSources.environmentId);
+
+	const results = await db.select().from(stackSources)
+		.where(and(eq(stackSources.composePath, composePath), envCondition));
 
 	if (!results[0]) return null;
 	const row = results[0];

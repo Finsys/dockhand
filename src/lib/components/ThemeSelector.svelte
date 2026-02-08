@@ -5,6 +5,7 @@
 	import { Label } from '$lib/components/ui/label';
 	import { lightThemes, darkThemes, fonts, monospaceFonts } from '$lib/themes';
 	import { themeStore, applyTheme, type FontSize } from '$lib/stores/theme';
+	import { authStore } from '$lib/stores/auth';
 
 	// Preload all monospace Google Fonts so dropdown previews render correctly
 	let monoFontsLoaded = $state(false);
@@ -25,9 +26,12 @@
 
 	let { userId }: Props = $props();
 
-	// When editing global settings (no userId), skip applying theme visually
-	// This prevents global theme changes from affecting the current user's session
-	const skipApply = !userId;
+	// Only skip applying theme visually when:
+	// 1. Auth is enabled (there's a user session to protect)
+	// 2. AND we're editing global settings (no userId - these are for login page)
+	// When auth is disabled, always apply immediately since there's no user session
+	// Default to skip during loading to avoid race conditions
+	const skipApply = $derived($authStore.loading ? true : ($authStore.authEnabled && !userId));
 
 	// Local state bound to selects - initialized with defaults, will be populated on mount
 	let selectedLightTheme = $state('default');

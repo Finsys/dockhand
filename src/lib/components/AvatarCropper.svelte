@@ -257,7 +257,7 @@
 					onclick={handleCancel}
 					disabled={saving}
 				>
-					<X class="w-4 h-4 mr-2" />
+					<X class="w-4 h-4" />
 					Cancel
 				</Button>
 				<Button
@@ -265,7 +265,7 @@
 					onclick={handleSave}
 					disabled={saving || !imageLoaded}
 				>
-					<Check class="w-4 h-4 mr-2" />
+					<Check class="w-4 h-4" />
 					{saving ? 'Uploading...' : !imageLoaded ? 'Loading...' : 'Save avatar'}
 				</Button>
 			</div>

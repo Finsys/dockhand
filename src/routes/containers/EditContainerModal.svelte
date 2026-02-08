@@ -228,6 +228,7 @@
 	let loading = $state(false);
 	let loadingData = $state(true);
 	let error = $state('');
+	let abortController: AbortController | null = null;
 	let statusMessage = $state('');
 	let visible = $state(false);
 
@@ -764,6 +765,8 @@
 		}
 
 		loading = true;
+		abortController = new AbortController();
+		const signal = abortController.signal;
 
 		const containerConfigChanged = hasContainerConfigChanged();
 		const autoUpdateChanged = hasAutoUpdateChanged();
@@ -785,7 +788,8 @@
 				), {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ name: name.trim() })
+					body: JSON.stringify({ name: name.trim() }),
+					signal
 				});
 
 				const result = await response.json();
@@ -920,7 +924,8 @@
 				const response = await fetch(appendEnvParam(`/api/containers/${containerId}/update`, $currentEnvironment?.id), {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify(payload)
+					body: JSON.stringify(payload),
+					signal
 				});
 
 				const result = await response.json();
@@ -951,13 +956,20 @@
 			onSuccess();
 			onClose();
 		} catch (err) {
+			if (signal.aborted) return;
 			error = 'Failed to update container: ' + String(err);
 		} finally {
 			loading = false;
+			abortController = null;
 		}
 	}
 
 	function handleClose() {
+		if (abortController) {
+			abortController.abort();
+			abortController = null;
+		}
+		loading = false;
 		onClose();
 	}
 
@@ -1117,7 +1129,7 @@
 			</div>
 
 			<div class="flex justify-end gap-2 px-5 py-3 border-t bg-muted/30 shrink-0">
-				<Button type="button" variant="outline" onclick={handleClose} disabled={loading} size="sm">
+				<Button type="button" variant="outline" onclick={handleClose} size="sm">
 					Cancel
 				</Button>
 				<Button type="button" variant="secondary" disabled={loading} size="sm" onclick={handleSubmit}>

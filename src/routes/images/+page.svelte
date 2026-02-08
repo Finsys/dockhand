@@ -11,7 +11,7 @@
 	import { Label } from '$lib/components/ui/label';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Select from '$lib/components/ui/select';
-	import { Trash2, Upload, RefreshCw, Play, Search, Layers, Server, ShieldCheck, CheckSquare, Square, Tag, Check, XCircle, Icon, AlertTriangle, X, Images, Copy, Download, ChevronRight, ChevronDown, Loader2, ArrowUp, ArrowDown, ArrowUpDown, CircleDashed } from 'lucide-svelte';
+	import { Trash2, Upload, RefreshCw, Play, Search, Layers, Server, ShieldCheck, CheckSquare, Square, Tag, Check, XCircle, Icon, AlertTriangle, X, Images, Copy, Download, ChevronRight, ChevronDown, Loader2, ArrowUp, ArrowDown, ArrowUpDown, CircleDashed, CircleDot, Circle, Filter } from 'lucide-svelte';
 	import { broom, whale } from '@lucide/lab';
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
 	import BatchOperationModal from '$lib/components/BatchOperationModal.svelte';
@@ -106,6 +106,10 @@
 	let sortField = $state<SortField>('created');
 	let sortDirection = $state<SortDirection>('desc');
 
+	// Filter state
+	type UsageFilter = 'all' | 'in-use' | 'unused';
+	let usageFilter = $state<UsageFilter>('all');
+
 	// Expanded rows state
 	let expandedRepos = $state<Set<string>>(new Set());
 
@@ -187,11 +191,21 @@
 
 		for (const image of images) {
 			if (image.tags.length === 0) {
-				// Handle untagged images
-				const key = '<none>';
+				// Handle untagged images - try to extract repo name from RepoDigests
+				let repoName = '<none>';
+				if (image.repoDigests && image.repoDigests.length > 0) {
+					// RepoDigests format: "nginx@sha256:abc123" or "registry.example.com/myapp@sha256:abc123"
+					const digest = image.repoDigests[0];
+					const atIndex = digest.indexOf('@');
+					if (atIndex > 0) {
+						repoName = digest.slice(0, atIndex);
+					}
+				}
+
+				const key = repoName;
 				if (!groups.has(key)) {
 					groups.set(key, {
-						repoName: '<none>',
+						repoName,
 						tags: [],
 						totalSize: 0,
 						latestCreated: 0,
@@ -201,7 +215,7 @@
 				}
 				const group = groups.get(key)!;
 				group.tags.push({
-					tag: image.id.slice(7, 19),
+					tag: repoName === '<none>' ? image.id.slice(7, 19) : '<none>',
 					fullRef: image.id,
 					imageId: image.id,
 					size: image.size,
@@ -268,8 +282,18 @@
 		const query = searchQuery.toLowerCase().trim();
 
 		let filtered = groupedImages;
+
+		// Apply usage filter
+		if (usageFilter !== 'all') {
+			filtered = filtered.filter(group => {
+				const isInUse = group.containers > 0;
+				return usageFilter === 'in-use' ? isInUse : !isInUse;
+			});
+		}
+
+		// Apply search filter
 		if (query) {
-			filtered = groupedImages.filter(group => {
+			filtered = filtered.filter(group => {
 				if (group.repoName.toLowerCase().includes(query)) return true;
 				if (group.tags.some(t => t.tag.toLowerCase().includes(query))) return true;
 				if (group.tags.some(t => t.imageId.toLowerCase().includes(query))) return true;
@@ -656,7 +680,7 @@
 			icon={Images}
 			title="Images"
 			count={sortedGroups.length}
-			total={searchQuery && sortedGroups.length !== groupedImages.length ? groupedImages.length : undefined}
+			total={(searchQuery || usageFilter !== 'all') && sortedGroups.length !== groupedImages.length ? groupedImages.length : undefined}
 		/>
 		<div class="flex flex-wrap items-center gap-2">
 			<div class="relative">
@@ -669,6 +693,34 @@
 					class="pl-8 h-8 w-48 text-sm"
 				/>
 			</div>
+			<Select.Root type="single" bind:value={usageFilter}>
+				<Select.Trigger size="sm" class="w-28 text-sm">
+					{#if usageFilter === 'all'}
+						<Filter class="w-3.5 h-3.5 mr-1.5 text-muted-foreground shrink-0" />
+						<span class="text-muted-foreground">All</span>
+					{:else if usageFilter === 'in-use'}
+						<CircleDot class="w-3.5 h-3.5 mr-1.5 text-emerald-500 shrink-0" />
+						<span>In use</span>
+					{:else}
+						<Circle class="w-3.5 h-3.5 mr-1.5 text-muted-foreground shrink-0" />
+						<span>Unused</span>
+					{/if}
+				</Select.Trigger>
+				<Select.Content>
+					<Select.Item value="all">
+						<Filter class="w-4 h-4 mr-2 text-muted-foreground" />
+						All
+					</Select.Item>
+					<Select.Item value="in-use">
+						<CircleDot class="w-4 h-4 mr-2 text-emerald-500" />
+						In use
+					</Select.Item>
+					<Select.Item value="unused">
+						<Circle class="w-4 h-4 mr-2 text-muted-foreground" />
+						Unused
+					</Select.Item>
+				</Select.Content>
+			</Select.Root>
 			{#if $canAccess('images', 'remove')}
 			<ConfirmPopover
 				open={confirmPrune}

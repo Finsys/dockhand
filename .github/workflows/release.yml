@@ -1,0 +1,59 @@
+name: Create GitHub Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract changelog
+        id: changelog
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          BODY=$(jq -r --arg v "$VERSION" '
+            .[] | select(.version == $v) |
+            "## What'\''s new in v\(.version)\n\n" +
+            ([.changes[] |
+              if .type == "feature" then "- ✨ \(.text)"
+              elif .type == "fix" then "- 🐛 \(.text)"
+              elif .type == "improvement" then "- ⚡ \(.text)"
+              else "- \(.text)"
+              end
+            ] | join("\n")) +
+            "\n"
+          ' src/lib/data/changelog.json)
+
+          if [ -z "$BODY" ]; then
+            BODY="Release ${GITHUB_REF_NAME}"
+          fi
+
+          cat <<EOF > /tmp/release-body.md
+          ${BODY}
+
+          ## Docker image
+
+          \`\`\`bash
+          docker pull fnsys/dockhand:${GITHUB_REF_NAME}
+          \`\`\`
+
+          Also available as \`fnsys/dockhand:latest\`
+
+          [View on Docker Hub](https://hub.docker.com/r/fnsys/dockhand)
+          EOF
+
+          sed -i 's/^          //' /tmp/release-body.md
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: /tmp/release-body.md
+          generate_release_notes: false

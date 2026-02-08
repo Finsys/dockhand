@@ -24,6 +24,22 @@
 	let open = $state(false);
 	let searchQuery = $state('');
 
+	/** Map of modern IANA names to canonical equivalents (for search matching) */
+	const TIMEZONE_ALIASES: Record<string, string> = {
+		'Europe/Kyiv': 'Europe/Kiev',
+		'Asia/Ho_Chi_Minh': 'Asia/Saigon',
+		'America/Nuuk': 'America/Godthab',
+		'Pacific/Kanton': 'Pacific/Enderbury'
+	};
+
+	// Reverse map: canonical → modern alias names (for display hints)
+	const TIMEZONE_DISPLAY_HINTS: Record<string, string> = Object.fromEntries(
+		Object.entries(TIMEZONE_ALIASES).map(([modern, canonical]) => {
+			const city = modern.split('/').pop()!.replace(/_/g, ' ');
+			return [canonical, city];
+		})
+	);
+
 	// Common timezones to show at the top
 	const commonTimezones = [
 		'UTC',
@@ -47,16 +63,26 @@
 	// Other timezones (excluding common ones)
 	const otherTimezones = allTimezones.filter((tz) => !commonTimezones.includes(tz));
 
+	// Check if a timezone matches the search query (including alias names)
+	function matchesSearch(tz: string, query: string): boolean {
+		const q = query.toLowerCase();
+		if (tz.toLowerCase().includes(q)) return true;
+		// Check if any alias points to this timezone
+		const hint = TIMEZONE_DISPLAY_HINTS[tz];
+		if (hint && hint.toLowerCase().includes(q)) return true;
+		return false;
+	}
+
 	// Filter based on search query
 	const filteredCommon = $derived(
 		searchQuery
-			? commonTimezones.filter((tz) => tz.toLowerCase().includes(searchQuery.toLowerCase()))
+			? commonTimezones.filter((tz) => matchesSearch(tz, searchQuery))
 			: commonTimezones
 	);
 
 	const filteredOther = $derived(
 		searchQuery
-			? otherTimezones.filter((tz) => tz.toLowerCase().includes(searchQuery.toLowerCase()))
+			? otherTimezones.filter((tz) => matchesSearch(tz, searchQuery))
 			: otherTimezones
 	);
 
@@ -78,7 +104,9 @@
 			const parts = formatter.formatToParts(now);
 			const offsetPart = parts.find((p) => p.type === 'timeZoneName');
 			if (offsetPart) {
-				return `${tz} (${offsetPart.value})`;
+				const hint = TIMEZONE_DISPLAY_HINTS[tz];
+				const extra = hint ? `, ${hint}` : '';
+				return `${tz} (${offsetPart.value}${extra})`;
 			}
 		} catch {
 			// If formatting fails, just return the timezone name

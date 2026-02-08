@@ -96,7 +96,7 @@
 		<div class="flex gap-2">
 			{#if $canAccess('configsets', 'create')}
 				<Button size="sm" onclick={() => openCfgModal()}>
-					<Plus class="w-4 h-4 mr-1" />
+					<Plus class="w-4 h-4" />
 					Add config set
 				</Button>
 			{/if}
@@ -158,7 +158,7 @@
 									size="sm"
 									onclick={() => openCfgModal(cfg)}
 								>
-									<Pencil class="w-3 h-3 mr-1" />
+									<Pencil class="w-3 h-3" />
 									Edit
 								</Button>
 							{/if}

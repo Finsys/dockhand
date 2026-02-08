@@ -284,7 +284,7 @@
 						onclick={startPush}
 						disabled={!targetRegistryId || pushableRegistries.length === 0}
 					>
-						<Upload class="w-4 h-4 mr-2" />
+						<Upload class="w-4 h-4" />
 						Push
 					</Button>
 				{/if}

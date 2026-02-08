@@ -17,6 +17,7 @@ interface ValidationResult {
  * Extract environment variables from compose YAML content.
  * Matches ${VAR_NAME} and ${VAR_NAME:-default} patterns.
  * Ignores variables in commented lines (lines starting with #).
+ * Ignores escaped $$ (Docker Compose escape syntax for literal $).
  * Returns { required: [...], optional: [...] }
  */
 function extractComposeVars(yaml: string): { required: string[]; optional: string[] } {
@@ -33,7 +34,8 @@ function extractComposeVars(yaml: string): { required: string[]; optional: strin
 		}
 
 		// Match ${VAR_NAME} (required) and ${VAR_NAME:-default} or ${VAR_NAME-default} (optional)
-		const regex = /\$\{([A-Za-z_][A-Za-z0-9_]*)(?:(:-?)[^}]*)?\}/g;
+		// Use negative lookbehind (?<!\$) to skip escaped $$ (Docker Compose escape syntax)
+		const regex = /(?<!\$)\$\{([A-Za-z_][A-Za-z0-9_]*)(?:(:-?)[^}]*)?\}/g;
 		let match;
 
 		while ((match = regex.exec(line)) !== null) {
@@ -57,7 +59,8 @@ function extractComposeVars(yaml: string): { required: string[]; optional: strin
 		}
 
 		// Also match $VAR_NAME (simple variable substitution)
-		const simpleRegex = /\$([A-Za-z_][A-Za-z0-9_]*)(?![{A-Za-z0-9_])/g;
+		// Use negative lookbehind (?<!\$) to skip escaped $$
+		const simpleRegex = /(?<!\$)\$([A-Za-z_][A-Za-z0-9_]*)(?![{A-Za-z0-9_])/g;
 		while ((match = simpleRegex.exec(line)) !== null) {
 			const varName = match[1];
 			if (!required.includes(varName) && !optional.includes(varName)) {

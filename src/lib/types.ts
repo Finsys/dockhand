@@ -42,6 +42,7 @@ export interface ImageInfo {
 	id: string;
 	repoTags: string[];
 	tags: string[]; // Alias for repoTags, populated by API
+	repoDigests: string[]; // Repository digests (e.g., "nginx@sha256:abc123") - used for untagged images
 	created: number;
 	size: number;
 	virtualSize: number;

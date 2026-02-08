@@ -163,7 +163,7 @@
 				{#if submitting}
 					<Loader2 class="w-4 h-4 mr-2 animate-spin" />
 				{:else}
-					<Link class="w-4 h-4 mr-2" />
+					<Link class="w-4 h-4" />
 				{/if}
 				Connect
 			</Button>

@@ -270,10 +270,10 @@
 							disabled={scanning || !currentPath}
 						>
 							{#if scanning}
-								<Loader2 class="w-4 h-4 mr-2 animate-spin" />
+								<Loader2 class="w-4 h-4 animate-spin" />
 								Scanning...
 							{:else}
-								<Search class="w-4 h-4 mr-2" />
+								<Search class="w-4 h-4" />
 								Scan this folder
 							{/if}
 						</Button>
@@ -373,7 +373,7 @@
 				</Button>
 				{#if selectMode === 'directory'}
 					<Button onclick={handleConfirm}>
-						<FolderPlus class="w-4 h-4 mr-2" />
+						<FolderPlus class="w-4 h-4" />
 						Select
 					</Button>
 				{:else if selectMode === 'file_or_directory'}

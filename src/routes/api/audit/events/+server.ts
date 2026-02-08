@@ -21,11 +21,13 @@ export const GET: RequestHandler = async ({ cookies }) => {
 		});
 	}
 
+	let heartbeatInterval: ReturnType<typeof setInterval>;
+	let onAuditEvent: (data: AuditEventData) => void;
+
 	const stream = new ReadableStream({
 		start(controller) {
 			const encoder = new TextEncoder();
 
-			// Send SSE event
 			const sendEvent = (type: string, data: any) => {
 				const event = `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`;
 				try {
@@ -35,11 +37,9 @@ export const GET: RequestHandler = async ({ cookies }) => {
 				}
 			};
 
-			// Send initial connection event
 			sendEvent('connected', { timestamp: new Date().toISOString() });
 
-			// Send heartbeat to keep connection alive (every 5s to prevent Traefik 10s idle timeout)
-			const heartbeatInterval = setInterval(() => {
+			heartbeatInterval = setInterval(() => {
 				try {
 					sendEvent('heartbeat', { timestamp: new Date().toISOString() });
 				} catch {
@@ -47,24 +47,15 @@ export const GET: RequestHandler = async ({ cookies }) => {
 				}
 			}, 5000);
 
-			// Listen for audit events
-			const onAuditEvent = (data: AuditEventData) => {
+			onAuditEvent = (data: AuditEventData) => {
 				sendEvent('audit', data);
 			};
 
 			auditEvents.on('audit', onAuditEvent);
-
-			// Cleanup when client disconnects
-			const cleanup = () => {
-				clearInterval(heartbeatInterval);
-				auditEvents.off('audit', onAuditEvent);
-			};
-
-			// Note: SvelteKit doesn't provide a direct way to detect client disconnect
-			// The cleanup will happen when the stream errors or the server shuts down
-			// For production, consider using a WebSocket instead for better connection management
-
-			return cleanup;
+		},
+		cancel() {
+			clearInterval(heartbeatInterval);
+			auditEvents.off('audit', onAuditEvent);
 		}
 	});
 

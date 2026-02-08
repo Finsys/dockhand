@@ -536,7 +536,7 @@
 			{#if loading}
 				<RefreshCw class="w-4 h-4 mr-1 animate-spin" />
 			{:else}
-				<Search class="w-4 h-4 mr-1" />
+				<Search class="w-4 h-4" />
 			{/if}
 			Search
 		</Button>
@@ -545,7 +545,7 @@
 				{#if browsing}
 					<RefreshCw class="w-4 h-4 mr-1 animate-spin" />
 				{:else}
-					<List class="w-4 h-4 mr-1" />
+					<List class="w-4 h-4" />
 				{/if}
 				Browse
 			</Button>

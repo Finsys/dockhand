@@ -233,27 +233,39 @@ function processStreamFrames(
 	onStdout?: (data: string) => void,
 	onStderr?: (data: string) => void
 ): { stdout: string; remaining: Buffer<ArrayBufferLike> } {
-	let stdout = '';
+	// Collect stdout frame payloads as raw buffers first, then decode to UTF-8 once
+	// at the end. Decoding each frame individually corrupts multi-byte UTF-8 characters
+	// that may be split across frame boundaries (observed with Grype on Synology NAS).
+	const stdoutChunks: Buffer[] = [];
+	let stdoutLen = 0;
 	let offset = 0;
 
 	while (buffer.length >= offset + 8) {
 		const streamType = buffer.readUInt8(offset);
 		const frameSize = buffer.readUInt32BE(offset + 4);
 
+		// Validate stream type (0=stdin, 1=stdout, 2=stderr)
+		if (streamType > 2) break;
+
+		// Sanity check - no single frame should be > 10MB
+		if (frameSize > 10 * 1024 * 1024) break;
+
 		if (buffer.length < offset + 8 + frameSize) break;
 
-		const payload = buffer.slice(offset + 8, offset + 8 + frameSize).toString('utf-8');
+		const payloadBuf = buffer.slice(offset + 8, offset + 8 + frameSize);
 
 		if (streamType === 1) {
-			stdout += payload;
-			onStdout?.(payload);
+			stdoutChunks.push(payloadBuf);
+			stdoutLen += payloadBuf.length;
+			onStdout?.(payloadBuf.toString('utf-8'));
 		} else if (streamType === 2) {
-			onStderr?.(payload);
+			onStderr?.(payloadBuf.toString('utf-8'));
 		}
 
 		offset += 8 + frameSize;
 	}
 
+	const stdout = Buffer.concat(stdoutChunks, stdoutLen).toString('utf-8');
 	return { stdout, remaining: buffer.slice(offset) };
 }
 
@@ -400,6 +412,16 @@ function edgeResponseToResponse(edgeResponse: EdgeResponse): Response {
 		status: edgeResponse.statusCode,
 		headers: edgeResponse.headers
 	});
+}
+
+/**
+ * Drain a response body to release the underlying socket/TLS connection.
+ * Must be called on any Response whose body won't otherwise be consumed.
+ */
+export async function drainResponse(response: Response): Promise<void> {
+	if (!response.bodyUsed) {
+		try { await response.arrayBuffer(); } catch {}
+	}
 }
 
 /**
@@ -565,23 +587,18 @@ export async function dockerFetch(
 				finalOptions.keepalive = false;
 			}
 
-			// Explicitly close connection to prevent TLS session reuse issues
-			// But only for non-streaming requests (logs, events, exec need keep-alive)
-			if (!streaming) {
-				finalOptions.headers = {
-					...finalOptions.headers,
-					'Connection': 'close'
-				};
-			}
-
-			// Optional verbose TLS debugging
+				// Optional verbose TLS debugging
 			if (process.env.DEBUG_TLS) {
 				// @ts-ignore - Bun-specific verbose option
 				finalOptions.verbose = true;
 			}
 		}
 
-		// @ts-ignore - Bun supports timeout option
+		// Add default timeout for non-streaming requests to prevent socket accumulation
+		if (!streaming && !finalOptions.signal) {
+			finalOptions.signal = AbortSignal.timeout(30000);
+		}
+
 		try {
 			const response = await fetch(url, { ...finalOptions, ...bunOptions });
 			const elapsed = Date.now() - startTime;
@@ -748,23 +765,28 @@ export async function getContainerStats(id: string, envId?: number | null) {
 }
 
 export async function startContainer(id: string, envId?: number | null) {
-	await dockerFetch(`/containers/${id}/start`, { method: 'POST' }, envId);
+	const response = await dockerFetch(`/containers/${id}/start`, { method: 'POST' }, envId);
+	await drainResponse(response);
 }
 
 export async function stopContainer(id: string, envId?: number | null) {
-	await dockerFetch(`/containers/${id}/stop`, { method: 'POST' }, envId);
+	const response = await dockerFetch(`/containers/${id}/stop`, { method: 'POST' }, envId);
+	await drainResponse(response);
 }
 
 export async function restartContainer(id: string, envId?: number | null) {
-	await dockerFetch(`/containers/${id}/restart`, { method: 'POST' }, envId);
+	const response = await dockerFetch(`/containers/${id}/restart`, { method: 'POST' }, envId);
+	await drainResponse(response);
 }
 
 export async function pauseContainer(id: string, envId?: number | null) {
-	await dockerFetch(`/containers/${id}/pause`, { method: 'POST' }, envId);
+	const response = await dockerFetch(`/containers/${id}/pause`, { method: 'POST' }, envId);
+	await drainResponse(response);
 }
 
 export async function unpauseContainer(id: string, envId?: number | null) {
-	await dockerFetch(`/containers/${id}/unpause`, { method: 'POST' }, envId);
+	const response = await dockerFetch(`/containers/${id}/unpause`, { method: 'POST' }, envId);
+	await drainResponse(response);
 }
 
 export async function removeContainer(id: string, force = false, envId?: number | null) {
@@ -787,7 +809,8 @@ export async function removeContainer(id: string, force = false, envId?: number 
 }
 
 export async function renameContainer(id: string, newName: string, envId?: number | null) {
-	await dockerFetch(`/containers/${id}/rename?name=${encodeURIComponent(newName)}`, { method: 'POST' }, envId);
+	const response = await dockerFetch(`/containers/${id}/rename?name=${encodeURIComponent(newName)}`, { method: 'POST' }, envId);
+	await drainResponse(response);
 }
 
 export async function getContainerLogs(id: string, tail = 100, envId?: number | null): Promise<string> {
@@ -1643,6 +1666,7 @@ export async function listImages(envId?: number | null): Promise<ImageInfo[]> {
 		id: image.Id,
 		repoTags: image.RepoTags || [],
 		tags: image.RepoTags || [],
+		repoDigests: image.RepoDigests || [],
 		size: image.Size,
 		virtualSize: image.VirtualSize || image.Size,
 		created: image.Created,
@@ -1969,6 +1993,7 @@ async function getRegistryBearerToken(registry: string, repo: string): Promise<s
 		});
 
 		if (!tokenResponse.ok) {
+			await tokenResponse.text(); // Consume body to release socket
 			console.error(`Token request failed: ${tokenResponse.status}`);
 			return null;
 		}
@@ -2247,11 +2272,12 @@ export async function checkImageUpdateAvailable(
 }
 
 export async function tagImage(id: string, repo: string, tag: string, envId?: number | null) {
-	await dockerFetch(
+	const response = await dockerFetch(
 		`/images/${encodeURIComponent(id)}/tag?repo=${encodeURIComponent(repo)}&tag=${encodeURIComponent(tag)}`,
 		{ method: 'POST' },
 		envId
 	);
+	await drainResponse(response);
 }
 
 /**
@@ -2774,7 +2800,8 @@ export async function createExec(options: ExecOptions): Promise<{ Id: string }> 
 
 export async function resizeExec(execId: string, cols: number, rows: number, envId?: number | null) {
 	try {
-		await dockerFetch(`/exec/${execId}/resize?h=${rows}&w=${cols}`, { method: 'POST' }, envId);
+		const response = await dockerFetch(`/exec/${execId}/resize?h=${rows}&w=${cols}`, { method: 'POST' }, envId);
+		await drainResponse(response);
 	} catch {
 		// Resize may fail if exec is not running, ignore
 	}
@@ -2941,6 +2968,7 @@ export async function getDockerEvents(
 		);
 
 		if (!response.ok) {
+			await drainResponse(response);
 			throw new Error(`Docker events API returned ${response.status}`);
 		}
 
@@ -3007,7 +3035,7 @@ export async function runContainer(options: {
 	try {
 		// Start container
 		console.log(`[runContainer] Starting container ${containerId}...`);
-		await dockerFetch(`/containers/${containerId}/start`, { method: 'POST' }, options.envId);
+		await drainResponse(await dockerFetch(`/containers/${containerId}/start`, { method: 'POST' }, options.envId));
 
 		// Wait for container to finish
 		console.log(`[runContainer] Waiting for container ${containerId} to finish...`);
@@ -3035,7 +3063,7 @@ export async function runContainer(options: {
 	} finally {
 		// Always cleanup container manually
 		try {
-			await dockerFetch(`/containers/${containerId}?force=true`, { method: 'DELETE' }, options.envId);
+			await drainResponse(await dockerFetch(`/containers/${containerId}?force=true`, { method: 'DELETE' }, options.envId));
 		} catch {
 			// Ignore cleanup errors
 		}
@@ -3053,6 +3081,7 @@ export async function runContainerWithStreaming(options: {
 	envId?: number | null;
 	onStdout?: (data: string) => void;
 	onStderr?: (data: string) => void;
+	timeout?: number; // Overall timeout in ms (0 or undefined = no timeout)
 }): Promise<string> {
 	const baseName = options.name || `dockhand-stream-${Date.now()}`;
 	const containerName = `${baseName}-${randomSuffix()}`;
@@ -3084,60 +3113,79 @@ export async function runContainerWithStreaming(options: {
 	const config = await getDockerConfig(options.envId ?? undefined);
 
 	try {
-		// Start container
-		await dockerFetch(`/containers/${containerId}/start`, { method: 'POST' }, options.envId);
+		const doWork = async () => {
+			// Start container
+			await drainResponse(await dockerFetch(`/containers/${containerId}/start`, { method: 'POST' }, options.envId));
 
-		// Stream stderr for real-time progress while container runs
-		if (config.connectionType === 'hawser-edge' && config.environmentId) {
-			await streamEdgeStderr(config.environmentId, containerId, options.onStderr);
-		} else {
-			await streamLocalStderr(containerId, options.envId, options.onStderr);
-		}
+			// Create abort controller to cancel stderr stream when container exits
+			// On some Docker hosts (e.g. Synology NAS with older kernels), follow=true
+			// streams don't close when the container exits, causing indefinite hangs.
+			const abortController = new AbortController();
 
-		// Wait for container to fully exit before fetching stdout
-		// The stderr stream may close before the container finishes writing to stdout
-		// Use a timeout to prevent hanging if something goes wrong (container should already be exited)
-		let exitCode: number | undefined;
-		try {
-			const waitPromise = dockerFetch(`/containers/${containerId}/wait`, { method: 'POST' }, options.envId);
-			const timeoutPromise = new Promise<never>((_, reject) =>
-				setTimeout(() => reject(new Error('Container wait timeout after 10s')), 10000)
-			);
-			const waitResult = await Promise.race([waitPromise, timeoutPromise]);
-			const waitData = await waitResult.json() as { StatusCode?: number };
-			exitCode = waitData.StatusCode;
-			console.log(`[runContainerWithStreaming] Container exited with code: ${exitCode}`);
-		} catch (err) {
-			// Log but don't fail - container might already be gone or stderr stream was reliable
-			console.warn(`[runContainerWithStreaming] Wait warning: ${(err as Error).message}`);
-		}
+			// Start stderr streaming (non-blocking - may hang on some hosts)
+			const stderrPromise = (config.connectionType === 'hawser-edge' && config.environmentId)
+				? streamEdgeStderr(config.environmentId, containerId, options.onStderr, abortController.signal)
+				: streamLocalStderr(containerId, options.envId, options.onStderr, abortController.signal);
+			stderrPromise.catch(() => {}); // Suppress unhandled rejection
 
-		// Container has exited. Now fetch stdout reliably (no race condition).
-		const stdout = await fetchContainerStdout(containerId, config, options.envId);
-
-		// If stdout is empty and exit code is non-zero, fetch stderr for debugging
-		if (stdout.length === 0 && exitCode !== 0) {
+			// Wait for container to exit - this is the reliable signal
+			let exitCode: number | undefined;
 			try {
-				const stderrResponse = await dockerFetch(
-					`/containers/${containerId}/logs?stdout=false&stderr=true&follow=false`,
-					{},
-					options.envId
-				);
-				const stderrBuffer = Buffer.from(await stderrResponse.arrayBuffer());
-				const stderrResult = processStreamFrames(stderrBuffer, undefined, undefined);
-				if (stderrResult.stderr) {
-					console.error(`[runContainerWithStreaming] Container stderr: ${stderrResult.stderr.substring(0, 1000)}`);
-				}
-			} catch {
-				// Ignore stderr fetch errors
+				const waitResult = await dockerFetch(`/containers/${containerId}/wait`, { method: 'POST' }, options.envId);
+				const waitData = await waitResult.json() as { StatusCode?: number };
+				exitCode = waitData.StatusCode;
+				console.log(`[runContainerWithStreaming] Container exited with code: ${exitCode}`);
+			} catch (err) {
+				console.warn(`[runContainerWithStreaming] Wait warning: ${(err as Error).message}`);
 			}
-		}
 
-		return stdout;
+			// Container exited - abort stderr stream (it may be hanging on some Docker hosts)
+			abortController.abort();
+			// Give brief moment for any final stderr data to flush
+			await Promise.race([stderrPromise, new Promise(r => setTimeout(r, 1000))]);
+
+			// Container has exited. Now fetch stdout reliably (no race condition).
+			const stdout = await fetchContainerStdout(containerId, config, options.envId);
+
+			// If stdout is empty and exit code is non-zero, fetch stderr for debugging
+			if (stdout.length === 0 && exitCode !== 0) {
+				try {
+					const stderrResponse = await dockerFetch(
+						`/containers/${containerId}/logs?stdout=false&stderr=true&follow=false`,
+						{},
+						options.envId
+					);
+					const stderrBuffer = Buffer.from(await stderrResponse.arrayBuffer());
+					const stderrOutput = demuxDockerStream(stderrBuffer, { separateStreams: true });
+					const stderrText = typeof stderrOutput === 'string' ? stderrOutput : stderrOutput.stderr;
+					if (stderrText) {
+						console.error(`[runContainerWithStreaming] Container stderr: ${stderrText.substring(0, 1000)}`);
+					}
+				} catch {
+					// Ignore stderr fetch errors
+				}
+			}
+
+			return stdout;
+		};
+
+		const effectiveTimeout = options.timeout ?? 0;
+		if (effectiveTimeout > 0) {
+			return await Promise.race([
+				doWork(),
+				new Promise<never>((_, reject) =>
+					setTimeout(() => reject(new Error(
+						`Container execution timed out after ${Math.round(effectiveTimeout / 1000)}s`
+					)), effectiveTimeout)
+				)
+			]);
+		} else {
+			return await doWork();
+		}
 	} finally {
 		// Always cleanup container
 		try {
-			await dockerFetch(`/containers/${containerId}?force=true`, { method: 'DELETE' }, options.envId);
+			await drainResponse(await dockerFetch(`/containers/${containerId}?force=true`, { method: 'DELETE' }, options.envId));
 		} catch {
 			// Ignore cleanup errors
 		}
@@ -3148,7 +3196,8 @@ export async function runContainerWithStreaming(options: {
 async function streamLocalStderr(
 	containerId: string,
 	envId: number | null | undefined,
-	onStderr?: (data: string) => void
+	onStderr?: (data: string) => void,
+	signal?: AbortSignal
 ): Promise<void> {
 	const response = await dockerFetch(
 		`/containers/${containerId}/logs?stdout=false&stderr=true&follow=true`,
@@ -3159,13 +3208,20 @@ async function streamLocalStderr(
 	const reader = response.body?.getReader();
 	if (!reader) return;
 
-	let buffer: Buffer<ArrayBufferLike> = Buffer.alloc(0);
-	while (true) {
-		const { done, value } = await reader.read();
-		if (done) break;
-		buffer = Buffer.concat([buffer, Buffer.from(value)]);
-		const result = processStreamFrames(buffer, undefined, onStderr);
-		buffer = result.remaining;
+	// Cancel reader when abort signal fires (container exited)
+	signal?.addEventListener('abort', () => reader.cancel(), { once: true });
+
+	try {
+		let buffer: Buffer<ArrayBufferLike> = Buffer.alloc(0);
+		while (true) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			buffer = Buffer.concat([buffer, Buffer.from(value)]);
+			const result = processStreamFrames(buffer, undefined, onStderr);
+			buffer = result.remaining;
+		}
+	} catch {
+		// Reader was cancelled via abort signal - expected
 	}
 }
 
@@ -3173,10 +3229,16 @@ async function streamLocalStderr(
 async function streamEdgeStderr(
 	environmentId: number,
 	containerId: string,
-	onStderr?: (data: string) => void
+	onStderr?: (data: string) => void,
+	signal?: AbortSignal
 ): Promise<void> {
 	return new Promise((resolve, reject) => {
 		let buffer: Buffer<ArrayBufferLike> = Buffer.alloc(0);
+		let resolved = false;
+		const finish = () => { if (!resolved) { resolved = true; resolve(); } };
+
+		// Resolve when abort signal fires (container exited)
+		signal?.addEventListener('abort', finish, { once: true });
 
 		sendEdgeStreamRequest(
 			environmentId,
@@ -3184,6 +3246,7 @@ async function streamEdgeStderr(
 			`/containers/${containerId}/logs?stdout=false&stderr=true&follow=true`,
 			{
 				onData: (data: string) => {
+					if (resolved) return;
 					try {
 						const decoded = Buffer.from(data, 'base64');
 						buffer = Buffer.concat([buffer, decoded]);
@@ -3193,18 +3256,51 @@ async function streamEdgeStderr(
 						// Ignore decode errors
 					}
 				},
-				onEnd: () => resolve(),
+				onEnd: () => finish(),
 				onError: (error: string) => {
 					// Container exited = success
 					if (error.includes('container') && (error.includes('exited') || error.includes('not running'))) {
-						resolve();
-					} else {
+						finish();
+					} else if (!resolved) {
+						resolved = true;
 						reject(new Error(error));
 					}
 				}
 			}
 		);
 	});
+}
+
+// Extract stdout from a buffer, with raw fallback if frame parsing returns nothing.
+// Mirrors demuxDockerStream's fallback (line ~202-205) for non-multiplexed Docker output.
+function extractStdoutFromBuffer(buffer: Buffer): string {
+	const result = processStreamFrames(buffer, undefined, undefined);
+
+	if (buffer.length > 100000) {
+		console.log(
+			`[extractStdoutFromBuffer] Raw buffer: ${buffer.length} bytes, stdout: ${result.stdout.length} chars, ` +
+			`remaining: ${result.remaining.length} bytes`
+		);
+	}
+
+	if (result.stdout.length === 0 && buffer.length > 0) {
+		console.warn(
+			`[extractStdoutFromBuffer] Frame parsing empty but buffer has ${buffer.length} bytes. ` +
+			`First 16 bytes: [${Array.from(buffer.slice(0, 16)).join(', ')}]. Falling back to raw.`
+		);
+		return buffer.toString('utf-8').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
+	}
+
+	// If there's remaining data after frame parsing, append it as raw text
+	if (result.remaining.length > 0) {
+		console.warn(
+			`[extractStdoutFromBuffer] ${result.remaining.length} bytes remaining after frame parsing, appending as raw`
+		);
+		const rawTail = result.remaining.toString('utf-8').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
+		return result.stdout + rawTail;
+	}
+
+	return result.stdout;
 }
 
 // Fetch stdout after container has exited (reliable, no race)
@@ -3223,19 +3319,34 @@ async function fetchContainerStdout(
 		const bodyData = typeof response.body === 'string'
 			? Buffer.from(response.body, 'base64')
 			: Buffer.from(response.body);
-		const result = processStreamFrames(bodyData, undefined, undefined);
-		return result.stdout;
+		return extractStdoutFromBuffer(bodyData);
 	}
 
-	// Local/standard mode
+	// Local/standard mode - read via streaming to handle large Docker log responses
 	const response = await dockerFetch(
 		`/containers/${containerId}/logs?stdout=true&stderr=false&follow=false`,
 		{},
 		envId
 	);
-	const buffer = Buffer.from(await response.arrayBuffer());
-	const result = processStreamFrames(buffer, undefined, undefined);
-	return result.stdout;
+
+	const reader = response.body?.getReader();
+	if (!reader) {
+		const buffer = Buffer.from(await response.arrayBuffer());
+		return extractStdoutFromBuffer(buffer);
+	}
+	const chunks: Uint8Array[] = [];
+	let totalSize = 0;
+	while (true) {
+		const { done, value } = await reader.read();
+		if (done) break;
+		if (value) {
+			chunks.push(value);
+			totalSize += value.length;
+		}
+	}
+	const buffer = Buffer.concat(chunks, totalSize);
+
+	return extractStdoutFromBuffer(buffer);
 }
 
 // Push image to registry
@@ -3859,7 +3970,10 @@ async function ensureVolumeHelperImage(envId?: number | null): Promise<void> {
 async function isContainerRunning(containerId: string, envId?: number | null): Promise<boolean> {
 	try {
 		const response = await dockerFetch(`/containers/${containerId}/json`, {}, envId);
-		if (!response.ok) return false;
+		if (!response.ok) {
+			await response.text(); // Consume body to release socket
+			return false;
+		}
 		const info = await response.json();
 		return info.State?.Running === true;
 	} catch {
@@ -3934,7 +4048,7 @@ export async function getOrCreateVolumeHelperContainer(
 	const containerId = response.Id;
 
 	// Start the container
-	await dockerFetch(`/containers/${containerId}/start`, { method: 'POST' }, envId);
+	await drainResponse(await dockerFetch(`/containers/${containerId}/start`, { method: 'POST' }, envId));
 
 	// Cache the container
 	volumeHelperCache.set(cacheKey, {
@@ -4021,13 +4135,13 @@ export async function removeVolumeHelperContainer(
 ): Promise<void> {
 	try {
 		// Stop the container first (force)
-		await dockerFetch(`/containers/${containerId}/stop?t=1`, { method: 'POST' }, envId);
+		await drainResponse(await dockerFetch(`/containers/${containerId}/stop?t=1`, { method: 'POST' }, envId));
 	} catch {
 		// Ignore stop errors
 	}
 
 	// Remove the container
-	await dockerFetch(`/containers/${containerId}?force=true`, { method: 'DELETE' }, envId);
+	await drainResponse(await dockerFetch(`/containers/${containerId}?force=true`, { method: 'DELETE' }, envId));
 }
 
 /**
@@ -4046,6 +4160,7 @@ async function cleanupStaleVolumeHelpersForEnv(envId?: number | null): Promise<n
 		);
 
 		if (!response.ok) {
+			await response.text(); // Consume body to release socket
 			return 0;
 		}
 

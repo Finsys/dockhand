@@ -52,9 +52,9 @@
 			<Button variant="outline" onclick={onClose}>Cancel</Button>
 			<Button variant="destructive" onclick={disableMfa} disabled={loading}>
 				{#if loading}
-					<RefreshCw class="w-4 h-4 mr-1 animate-spin" />
+					<RefreshCw class="w-4 h-4 animate-spin" />
 				{:else}
-					<Shield class="w-4 h-4 mr-1" />
+					<Shield class="w-4 h-4" />
 				{/if}
 				Disable MFA
 			</Button>

@@ -122,9 +122,9 @@
 			<Button variant="outline" onclick={onClose}>Cancel</Button>
 			<Button onclick={changePassword} disabled={saving}>
 				{#if saving}
-					<RefreshCw class="w-4 h-4 mr-1 animate-spin" />
+					<RefreshCw class="w-4 h-4 animate-spin" />
 				{:else}
-					<Check class="w-4 h-4 mr-1" />
+					<Check class="w-4 h-4" />
 				{/if}
 				Change password
 			</Button>

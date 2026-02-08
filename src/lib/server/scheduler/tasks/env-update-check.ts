@@ -22,9 +22,6 @@ import {
 	inspectContainer,
 	checkImageUpdateAvailable,
 	pullImage,
-	stopContainer,
-	removeContainer,
-	createContainer,
 	getTempImageTag,
 	isDigestBasedImage,
 	getImageIdByTag,
@@ -34,6 +31,8 @@ import {
 import { sendEventNotification } from '../../notifications';
 import { getScannerSettings, scanImage, type VulnerabilitySeverity } from '../../scanner';
 import { parseImageNameAndTag, shouldBlockUpdate, combineScanSummaries, isSystemContainer } from './update-utils';
+import { recreateContainer, updateStackContainer } from './container-update';
+import { pullStackService } from '../../stacks';
 
 interface UpdateInfo {
 	containerId: string;
@@ -239,9 +238,14 @@ export async function runEnvUpdateCheckJob(
 
 					// Get full container config
 					const inspectData = await inspectContainer(update.containerId, environmentId) as any;
-					const wasRunning = inspectData.State.Running;
 					const containerConfig = inspectData.Config;
-					const hostConfig = inspectData.HostConfig;
+
+					// Detect stack membership early (needed for both pull and recreate)
+					const containerLabels = containerConfig.Labels || {};
+					const composeProject = containerLabels['com.docker.compose.project'];
+					const composeService = containerLabels['com.docker.compose.service'];
+					const composeConfigFiles = containerLabels['com.docker.compose.project.config_files'];
+					const isStackContainer = !!(composeProject && composeService);
 
 					// SAFE-PULL FLOW
 					if (shouldScan && !isDigestBasedImage(update.imageName)) {
@@ -249,8 +253,17 @@ export async function runEnvUpdateCheckJob(
 						await log(`  Safe-pull with temp tag: ${tempTag}`);
 
 						// Step 1: Pull new image
-						await log(`  Pulling ${update.imageName}...`);
-						await pullImage(update.imageName, () => {}, environmentId);
+						if (isStackContainer) {
+							await log(`  Pulling via compose (stack: ${composeProject}, service: ${composeService})...`);
+							const pullResult = await pullStackService(composeProject, composeService, environmentId, composeConfigFiles);
+							if (!pullResult.success) {
+								await log(`  Compose pull failed, falling back to direct pull...`);
+								await pullImage(update.imageName, () => {}, environmentId);
+							}
+						} else {
+							await log(`  Pulling ${update.imageName}...`);
+							await pullImage(update.imageName, () => {}, environmentId);
+						}
 
 						// Step 2: Get new image ID
 						const newImageId = await getImageIdByTag(update.imageName, environmentId);
@@ -359,48 +372,38 @@ export async function runEnvUpdateCheckJob(
 						} catch { /* ignore cleanup errors */ }
 					} else {
 						// Simple pull (no scanning or digest-based image)
-						await log(`  Pulling ${update.imageName}...`);
-						await pullImage(update.imageName, () => {}, environmentId);
-					}
-
-					// Stop container if running
-					if (wasRunning) {
-						await log(`  Stopping...`);
-						await stopContainer(update.containerId, environmentId);
-					}
-
-					// Remove old container
-					await log(`  Removing old container...`);
-					await removeContainer(update.containerId, true, environmentId);
-
-					// Prepare port bindings
-					const ports: { [key: string]: { HostPort: string } } = {};
-					if (hostConfig.PortBindings) {
-						for (const [containerPort, bindings] of Object.entries(hostConfig.PortBindings)) {
-							if (bindings && (bindings as any[]).length > 0) {
-								ports[containerPort] = { HostPort: (bindings as any[])[0].HostPort || '' };
+						if (isStackContainer) {
+							await log(`  Pulling via compose (stack: ${composeProject}, service: ${composeService})...`);
+							const pullResult = await pullStackService(composeProject, composeService, environmentId, composeConfigFiles);
+							if (!pullResult.success) {
+								await log(`  Compose pull failed, falling back to direct pull...`);
+								await pullImage(update.imageName, () => {}, environmentId);
 							}
+						} else {
+							await log(`  Pulling ${update.imageName}...`);
+							await pullImage(update.imageName, () => {}, environmentId);
 						}
 					}
 
-					// Create new container
-					await log(`  Creating new container...`);
-					const newContainer = await createContainer({
-						name: update.containerName,
-						image: update.imageName,
-						ports,
-						volumeBinds: hostConfig.Binds || [],
-						env: containerConfig.Env || [],
-						labels: containerConfig.Labels || {},
-						cmd: containerConfig.Cmd || undefined,
-						restartPolicy: hostConfig.RestartPolicy?.Name || 'no',
-						networkMode: hostConfig.NetworkMode || undefined
-					}, environmentId);
-
-					// Start if was running
-					if (wasRunning) {
-						await log(`  Starting...`);
-						await newContainer.start();
+					// Recreate container using compose-native or full recreation
+					if (isStackContainer) {
+						await log(`  Updating via compose (stack: ${composeProject}, service: ${composeService})`);
+						const stackSuccess = await updateStackContainer(
+							composeProject, composeService, environmentId,
+							(msg) => { log(`  ${msg}`); },
+							composeConfigFiles
+						);
+						if (!stackSuccess) {
+							await log(`  Compose file not found, falling back to container recreation...`);
+							const ok = await recreateContainer(update.containerName, environmentId,
+								(msg) => { log(`  ${msg}`); });
+							if (!ok) throw new Error('Container recreation failed');
+						}
+					} else {
+						await log(`  Recreating standalone container...`);
+						const ok = await recreateContainer(update.containerName, environmentId,
+							(msg) => { log(`  ${msg}`); });
+						if (!ok) throw new Error('Container recreation failed');
 					}
 
 					await log(`  Updated successfully`);
