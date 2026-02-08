@@ -551,10 +551,11 @@
 			loading = true;
 		}
 		try {
-			const [stacksRes, sourcesRes, gitStacksRes] = await Promise.all([
+			const [stacksRes, sourcesRes, gitStacksRes, vaultRes] = await Promise.all([
 				fetch(appendEnvParam('/api/stacks', envId)),
 				fetch(appendEnvParam('/api/stacks/sources', envId)),
-				fetch(appendEnvParam('/api/git/stacks', envId))
+				fetch(appendEnvParam('/api/git/stacks', envId)),
+				fetch('/api/vault/config')
 			]);
 
 			// Handle stale environment ID (e.g., after database reset)
@@ -578,6 +579,10 @@
 			const dockerStacks = await safeJson(stacksRes, []);
 			const sourcesData = await safeJson(sourcesRes, {});
 			const gitStacksData = await safeJson(gitStacksRes, []);
+			const vaultData = await safeJson(vaultRes, {});
+
+			// Update vault status
+			vaultEnabled = vaultData?.enabled === true && !!vaultData?.address;
 
 			// Debug logging
 			if (gitStacksData?.error) {
@@ -833,6 +838,9 @@
 		editingStackName = name;
 		showEditModal = true;
 	}
+
+	// Vault integration status
+	let vaultEnabled = $state(false);
 
 	// Sync git stack with specified mode (git, vault, all)
 	let syncingStack = $state<string | null>(null);
@@ -1583,48 +1591,65 @@
 							</GitDeployProgressPopover>
 						{:else}
 							{#if source.sourceType === 'git' && source.gitStack}
-								<!-- Sync buttons for Git stacks: Git, Vault, All -->
 								{@const gitStackId = source.gitStack.id}
 								{@const isSyncing = syncingStack === stack.name}
-								<button
-									type="button"
-									title="Sync Git only"
-									disabled={isSyncing}
-									onclick={() => syncGitStackWithMode(gitStackId, stack.name, 'git')}
-									class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-								>
-									{#if syncingStackMode === 'git' && isSyncing}
-										<Loader2 class="w-3 h-3 text-purple-500 animate-spin" />
-									{:else}
-										<GitBranch class="w-3 h-3 text-purple-500" />
-									{/if}
-								</button>
-								<button
-									type="button"
-									title="Sync Vault only"
-									disabled={isSyncing}
-									onclick={() => syncGitStackWithMode(gitStackId, stack.name, 'vault')}
-									class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-								>
-									{#if syncingStackMode === 'vault' && isSyncing}
-										<Loader2 class="w-3 h-3 text-cyan-500 animate-spin" />
-									{:else}
-										<KeyRound class="w-3 h-3 text-cyan-500" />
-									{/if}
-								</button>
-								<button
-									type="button"
-									title="Sync All (Git + Vault)"
-									disabled={isSyncing}
-									onclick={() => syncGitStackWithMode(gitStackId, stack.name, 'all')}
-									class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-								>
-									{#if syncingStackMode === 'all' && isSyncing}
-										<Loader2 class="w-3 h-3 text-green-500 animate-spin" />
-									{:else}
-										<RefreshCw class="w-3 h-3 text-green-500" />
-									{/if}
-								</button>
+								{#if vaultEnabled}
+									<!-- Sync buttons: Git, Vault, All -->
+									<button
+										type="button"
+										title="Sync Git only"
+										disabled={isSyncing}
+										onclick={() => syncGitStackWithMode(gitStackId, stack.name, 'git')}
+										class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+									>
+										{#if syncingStackMode === 'git' && isSyncing}
+											<Loader2 class="w-3 h-3 text-purple-500 animate-spin" />
+										{:else}
+											<GitBranch class="w-3 h-3 text-purple-500" />
+										{/if}
+									</button>
+									<button
+										type="button"
+										title="Sync Vault only"
+										disabled={isSyncing}
+										onclick={() => syncGitStackWithMode(gitStackId, stack.name, 'vault')}
+										class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+									>
+										{#if syncingStackMode === 'vault' && isSyncing}
+											<Loader2 class="w-3 h-3 text-cyan-500 animate-spin" />
+										{:else}
+											<KeyRound class="w-3 h-3 text-cyan-500" />
+										{/if}
+									</button>
+									<button
+										type="button"
+										title="Sync All (Git + Vault)"
+										disabled={isSyncing}
+										onclick={() => syncGitStackWithMode(gitStackId, stack.name, 'all')}
+										class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+									>
+										{#if syncingStackMode === 'all' && isSyncing}
+											<Loader2 class="w-3 h-3 text-green-500 animate-spin" />
+										{:else}
+											<RefreshCw class="w-3 h-3 text-green-500" />
+										{/if}
+									</button>
+								{:else}
+									<!-- Vault not active: single sync button (Git only) -->
+									<button
+										type="button"
+										title="Sync"
+										disabled={isSyncing}
+										onclick={() => syncGitStackWithMode(gitStackId, stack.name, 'git')}
+										class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+									>
+										{#if isSyncing}
+											<Loader2 class="w-3 h-3 text-green-500 animate-spin" />
+										{:else}
+											<RefreshCw class="w-3 h-3 text-green-500" />
+										{/if}
+									</button>
+								{/if}
 							{/if}
 							{#if $canAccess('stacks', 'edit')}
 								{#if source.sourceType === 'git' && source.gitStack}
