@@ -9,6 +9,18 @@ import {
 	type NotificationEventType
 } from './db';
 
+// Escape special characters for Telegram Markdown
+function escapeTelegramMarkdown(text: string): string {
+	// Escape characters that have special meaning in Telegram Markdown
+	return text
+		.replace(/\\/g, '\\\\')  // Escape backslashes first
+		.replace(/_/g, '\\_')    // Underscore (italic)
+		.replace(/\*/g, '\\*')   // Asterisk (bold)
+		.replace(/\[/g, '\\[')   // Opening bracket (link)
+		.replace(/\]/g, '\\]')   // Closing bracket (link)
+		.replace(/`/g, '\\`');   // Backtick (code)
+}
+
 export interface NotificationPayload {
 	title: string;
 	message: string;
@@ -17,8 +29,14 @@ export interface NotificationPayload {
 	environmentName?: string;
 }
 
+// Result type for functions that can return detailed errors
+export interface NotificationResult {
+	success: boolean;
+	error?: string;
+}
+
 // Send notification via SMTP
-async function sendSmtpNotification(config: SmtpConfig, payload: NotificationPayload): Promise<boolean> {
+async function sendSmtpNotification(config: SmtpConfig, payload: NotificationPayload): Promise<NotificationResult> {
 	try {
 		const transporter = nodemailer.createTransport({
 			host: config.host,
@@ -55,39 +73,43 @@ async function sendSmtpNotification(config: SmtpConfig, payload: NotificationPay
 			html
 		});
 
-		return true;
+		return { success: true };
 	} catch (error) {
-		console.error('[Notifications] SMTP send failed:', error);
-		return false;
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		return { success: false, error: `SMTP error: ${errorMsg}` };
 	}
 }
 
 // Parse Apprise URL and send notification
-async function sendAppriseNotification(config: AppriseConfig, payload: NotificationPayload): Promise<boolean> {
-	let success = true;
+async function sendAppriseNotification(config: AppriseConfig, payload: NotificationPayload): Promise<NotificationResult> {
+	const errors: string[] = [];
 
 	for (const url of config.urls) {
 		try {
-			const sent = await sendToAppriseUrl(url, payload);
-			if (!sent) success = false;
+			const result = await sendToAppriseUrl(url, payload);
+			if (!result.success && result.error) {
+				errors.push(result.error);
+			}
 		} catch (error) {
-			console.error(`[Notifications] Failed to send to ${url}:`, error);
-			success = false;
+			const errorMsg = error instanceof Error ? error.message : String(error);
+			errors.push(`Failed to send: ${errorMsg}`);
 		}
 	}
 
-	return success;
+	if (errors.length > 0) {
+		return { success: false, error: errors.join('; ') };
+	}
+	return { success: true };
 }
 
 // Send to a single Apprise URL
-async function sendToAppriseUrl(url: string, payload: NotificationPayload): Promise<boolean> {
+async function sendToAppriseUrl(url: string, payload: NotificationPayload): Promise<NotificationResult> {
 	try {
 		// Extract protocol from Apprise URL format (protocol://...)
 		// Note: Can't use new URL() because custom schemes like 'tgram://' are not valid URLs
 		const protocolMatch = url.match(/^([a-z]+):\/\//i);
 		if (!protocolMatch) {
-			console.error('[Notifications] Invalid Apprise URL format - missing protocol:', url);
-			return false;
+			return { success: false, error: 'Invalid Apprise URL format - missing protocol' };
 		}
 		const protocol = protocolMatch[1].toLowerCase();
 
@@ -113,41 +135,48 @@ async function sendToAppriseUrl(url: string, payload: NotificationPayload): Prom
 			case 'jsons':
 				return await sendGenericWebhook(url, payload);
 			default:
-				console.warn(`[Notifications] Unsupported Apprise protocol: ${protocol}`);
-				return false;
+				return { success: false, error: `Unsupported Apprise protocol: ${protocol}` };
 		}
 	} catch (error) {
-		console.error('[Notifications] Failed to parse Apprise URL:', error);
-		return false;
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		return { success: false, error: `Failed to parse Apprise URL: ${errorMsg}` };
 	}
 }
 
 // Discord webhook
-async function sendDiscord(appriseUrl: string, payload: NotificationPayload): Promise<boolean> {
+async function sendDiscord(appriseUrl: string, payload: NotificationPayload): Promise<NotificationResult> {
 	// discord://webhook_id/webhook_token or discords://...
 	const url = appriseUrl.replace(/^discords?:\/\//, 'https://discord.com/api/webhooks/');
 	const titleWithEnv = payload.environmentName ? `${payload.title} [${payload.environmentName}]` : payload.title;
 
-	const response = await fetch(url, {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({
-			embeds: [{
-				title: titleWithEnv,
-				description: payload.message,
-				color: payload.type === 'error' ? 0xff0000 : payload.type === 'warning' ? 0xffaa00 : payload.type === 'success' ? 0x00ff00 : 0x0099ff,
-				...(payload.environmentName && {
-					footer: { text: `Environment: ${payload.environmentName}` }
-				})
-			}]
-		})
-	});
+	try {
+		const response = await fetch(url, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				embeds: [{
+					title: titleWithEnv,
+					description: payload.message,
+					color: payload.type === 'error' ? 0xff0000 : payload.type === 'warning' ? 0xffaa00 : payload.type === 'success' ? 0x00ff00 : 0x0099ff,
+					...(payload.environmentName && {
+						footer: { text: `Environment: ${payload.environmentName}` }
+					})
+				}]
+			})
+		});
 
-	return response.ok;
+		if (!response.ok) {
+			const text = await response.text().catch(() => '');
+			return { success: false, error: `Discord error ${response.status}: ${text || response.statusText}` };
+		}
+		return { success: true };
+	} catch (error) {
+		return { success: false, error: `Discord connection failed: ${error instanceof Error ? error.message : String(error)}` };
+	}
 }
 
 // Slack webhook
-async function sendSlack(appriseUrl: string, payload: NotificationPayload): Promise<boolean> {
+async function sendSlack(appriseUrl: string, payload: NotificationPayload): Promise<NotificationResult> {
 	// slack://token_a/token_b/token_c or webhook URL
 	let url: string;
 	if (appriseUrl.includes('hooks.slack.com')) {
@@ -158,145 +187,210 @@ async function sendSlack(appriseUrl: string, payload: NotificationPayload): Prom
 	}
 
 	const envTag = payload.environmentName ? ` \`${payload.environmentName}\`` : '';
-	const response = await fetch(url, {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({
-			text: `*${payload.title}*${envTag}\n${payload.message}`
-		})
-	});
 
-	return response.ok;
+	try {
+		const response = await fetch(url, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				text: `*${payload.title}*${envTag}\n${payload.message}`
+			})
+		});
+
+		if (!response.ok) {
+			const text = await response.text().catch(() => '');
+			return { success: false, error: `Slack error ${response.status}: ${text || response.statusText}` };
+		}
+		return { success: true };
+	} catch (error) {
+		return { success: false, error: `Slack connection failed: ${error instanceof Error ? error.message : String(error)}` };
+	}
 }
 
 // Telegram
-async function sendTelegram(appriseUrl: string, payload: NotificationPayload): Promise<boolean> {
+async function sendTelegram(appriseUrl: string, payload: NotificationPayload): Promise<NotificationResult> {
 	// tgram://bot_token/chat_id
 	const match = appriseUrl.match(/^tgram:\/\/([^/]+)\/(.+)/);
 	if (!match) {
-		console.error('[Notifications] Invalid Telegram URL format. Expected: tgram://bot_token/chat_id');
-		return false;
+		return { success: false, error: 'Invalid Telegram URL format. Expected: tgram://bot_token/chat_id' };
 	}
 
 	const [, botToken, chatId] = match;
 	const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
 
-	const envTag = payload.environmentName ? ` \\[${payload.environmentName}\\]` : '';
+	// Escape markdown special characters in title and message
+	const escapedTitle = escapeTelegramMarkdown(payload.title);
+	const escapedMessage = escapeTelegramMarkdown(payload.message);
+	const envTag = payload.environmentName ? ` \\[${escapeTelegramMarkdown(payload.environmentName)}\\]` : '';
+
 	try {
 		const response = await fetch(url, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({
 				chat_id: chatId,
-				text: `*${payload.title}*${envTag}\n${payload.message}`,
+				text: `*${escapedTitle}*${envTag}\n${escapedMessage}`,
 				parse_mode: 'Markdown'
 			})
 		});
 
 		if (!response.ok) {
-			const errorData = await response.json().catch(() => ({}));
-			console.error('[Notifications] Telegram API error:', response.status, errorData);
+			const errorData = await response.json().catch(() => ({})) as { description?: string };
+			const errorMsg = errorData.description || response.statusText;
+			return { success: false, error: `Telegram error ${response.status}: ${errorMsg}` };
 		}
-
-		return response.ok;
+		return { success: true };
 	} catch (error) {
-		console.error('[Notifications] Telegram send failed:', error);
-		return false;
+		return { success: false, error: `Telegram connection failed: ${error instanceof Error ? error.message : String(error)}` };
 	}
 }
 
 // Gotify
-async function sendGotify(appriseUrl: string, payload: NotificationPayload): Promise<boolean> {
+async function sendGotify(appriseUrl: string, payload: NotificationPayload): Promise<NotificationResult> {
 	// gotify://hostname/token or gotifys://hostname/token
 	const match = appriseUrl.match(/^gotifys?:\/\/([^/]+)\/(.+)/);
-	if (!match) return false;
+	if (!match) {
+		return { success: false, error: 'Invalid Gotify URL format. Expected: gotify://hostname/token' };
+	}
 
 	const [, hostname, token] = match;
 	const protocol = appriseUrl.startsWith('gotifys') ? 'https' : 'http';
 	const url = `${protocol}://${hostname}/message?token=${token}`;
 
-	const response = await fetch(url, {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({
-			title: payload.title,
-			message: payload.message,
-			priority: payload.type === 'error' ? 8 : payload.type === 'warning' ? 5 : 2
-		})
-	});
+	try {
+		const response = await fetch(url, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				title: payload.title,
+				message: payload.message,
+				priority: payload.type === 'error' ? 8 : payload.type === 'warning' ? 5 : 2
+			})
+		});
 
-	return response.ok;
+		if (!response.ok) {
+			const text = await response.text().catch(() => '');
+			return { success: false, error: `Gotify error ${response.status}: ${text || response.statusText}` };
+		}
+		return { success: true };
+	} catch (error) {
+		return { success: false, error: `Gotify connection failed: ${error instanceof Error ? error.message : String(error)}` };
+	}
 }
 
 // ntfy
-async function sendNtfy(appriseUrl: string, payload: NotificationPayload): Promise<boolean> {
-	// ntfy://topic or ntfys://hostname/topic
-	let url: string;
+async function sendNtfy(appriseUrl: string, payload: NotificationPayload): Promise<NotificationResult> {
+	// Supported formats:
+	// ntfy://topic (public ntfy.sh)
+	// ntfy://host/topic (custom server, no auth)
+	// ntfy://user:pass@host/topic (custom server with auth)
+	// ntfys:// variants for HTTPS
 	const isSecure = appriseUrl.startsWith('ntfys');
 	const path = appriseUrl.replace(/^ntfys?:\/\//, '');
 
-	if (path.includes('/')) {
-		// Custom server
+	let url: string;
+	let auth: string | null = null;
+
+	// Check for user:pass@host/topic format
+	const authMatch = path.match(/^([^:]+):([^@]+)@(.+)$/);
+	if (authMatch) {
+		const [, user, pass, hostAndTopic] = authMatch;
+		auth = Buffer.from(`${user}:${pass}`).toString('base64');
+		url = `${isSecure ? 'https' : 'http'}://${hostAndTopic}`;
+	} else if (path.includes('/')) {
+		// Custom server without auth
 		url = `${isSecure ? 'https' : 'http'}://${path}`;
 	} else {
 		// Default ntfy.sh
 		url = `https://ntfy.sh/${path}`;
 	}
 
-	const response = await fetch(url, {
-		method: 'POST',
-		headers: {
-			'Title': payload.title,
-			'Priority': payload.type === 'error' ? '5' : payload.type === 'warning' ? '4' : '3',
-			'Tags': payload.type || 'info'
-		},
-		body: payload.message
-	});
+	const headers: Record<string, string> = {
+		'Title': payload.title,
+		'Priority': payload.type === 'error' ? '5' : payload.type === 'warning' ? '4' : '3',
+		'Tags': payload.type || 'info'
+	};
 
-	return response.ok;
+	if (auth) {
+		headers['Authorization'] = `Basic ${auth}`;
+	}
+
+	try {
+		const response = await fetch(url, {
+			method: 'POST',
+			headers,
+			body: payload.message
+		});
+
+		if (!response.ok) {
+			const text = await response.text().catch(() => '');
+			return { success: false, error: `ntfy error ${response.status}: ${text || response.statusText}` };
+		}
+		return { success: true };
+	} catch (error) {
+		return { success: false, error: `ntfy connection failed: ${error instanceof Error ? error.message : String(error)}` };
+	}
 }
 
 // Pushover
-async function sendPushover(appriseUrl: string, payload: NotificationPayload): Promise<boolean> {
+async function sendPushover(appriseUrl: string, payload: NotificationPayload): Promise<NotificationResult> {
 	// pushover://user_key/api_token
 	const match = appriseUrl.match(/^pushover:\/\/([^/]+)\/(.+)/);
-	if (!match) return false;
+	if (!match) {
+		return { success: false, error: 'Invalid Pushover URL format. Expected: pushover://user_key/api_token' };
+	}
 
 	const [, userKey, apiToken] = match;
 	const url = 'https://api.pushover.net/1/messages.json';
 
-	const response = await fetch(url, {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({
-			token: apiToken,
-			user: userKey,
-			title: payload.title,
-			message: payload.message,
-			priority: payload.type === 'error' ? 1 : 0
-		})
-	});
+	try {
+		const response = await fetch(url, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				token: apiToken,
+				user: userKey,
+				title: payload.title,
+				message: payload.message,
+				priority: payload.type === 'error' ? 1 : 0
+			})
+		});
 
-	return response.ok;
+		if (!response.ok) {
+			const text = await response.text().catch(() => '');
+			return { success: false, error: `Pushover error ${response.status}: ${text || response.statusText}` };
+		}
+		return { success: true };
+	} catch (error) {
+		return { success: false, error: `Pushover connection failed: ${error instanceof Error ? error.message : String(error)}` };
+	}
 }
 
 // Generic JSON webhook
-async function sendGenericWebhook(appriseUrl: string, payload: NotificationPayload): Promise<boolean> {
+async function sendGenericWebhook(appriseUrl: string, payload: NotificationPayload): Promise<NotificationResult> {
 	// json://hostname/path or jsons://hostname/path
 	const url = appriseUrl.replace(/^jsons?:\/\//, appriseUrl.startsWith('jsons') ? 'https://' : 'http://');
 
-	const response = await fetch(url, {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({
-			title: payload.title,
-			message: payload.message,
-			type: payload.type || 'info',
-			timestamp: new Date().toISOString()
-		})
-	});
+	try {
+		const response = await fetch(url, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				title: payload.title,
+				message: payload.message,
+				type: payload.type || 'info',
+				timestamp: new Date().toISOString()
+			})
+		});
 
-	return response.ok;
+		if (!response.ok) {
+			const text = await response.text().catch(() => '');
+			return { success: false, error: `Webhook error ${response.status}: ${text || response.statusText}` };
+		}
+		return { success: true };
+	} catch (error) {
+		return { success: false, error: `Webhook connection failed: ${error instanceof Error ? error.message : String(error)}` };
+	}
 }
 
 // Send notification to all enabled channels
@@ -305,15 +399,15 @@ export async function sendNotification(payload: NotificationPayload): Promise<{ 
 	const results: { name: string; success: boolean }[] = [];
 
 	for (const setting of settings) {
-		let success = false;
+		let result: NotificationResult = { success: false };
 
 		if (setting.type === 'smtp') {
-			success = await sendSmtpNotification(setting.config as SmtpConfig, payload);
+			result = await sendSmtpNotification(setting.config as SmtpConfig, payload);
 		} else if (setting.type === 'apprise') {
-			success = await sendAppriseNotification(setting.config as AppriseConfig, payload);
+			result = await sendAppriseNotification(setting.config as AppriseConfig, payload);
 		}
 
-		results.push({ name: setting.name, success });
+		results.push({ name: setting.name, success: result.success });
 	}
 
 	return {
@@ -323,7 +417,7 @@ export async function sendNotification(payload: NotificationPayload): Promise<{ 
 }
 
 // Test a specific notification setting
-export async function testNotification(setting: NotificationSettingData): Promise<boolean> {
+export async function testNotification(setting: NotificationSettingData): Promise<NotificationResult> {
 	const payload: NotificationPayload = {
 		title: 'Dockhand Test Notification',
 		message: 'This is a test notification from Dockhand. If you receive this, your notification settings are configured correctly.',
@@ -336,7 +430,7 @@ export async function testNotification(setting: NotificationSettingData): Promis
 		return await sendAppriseNotification(setting.config as AppriseConfig, payload);
 	}
 
-	return false;
+	return { success: false, error: 'Unknown notification type' };
 }
 
 // Map Docker action to notification event type
@@ -412,16 +506,17 @@ export async function sendEnvironmentNotification(
 
 	for (const notif of envNotifications) {
 		try {
-			let success = false;
+			let result: NotificationResult = { success: false };
 			if (notif.channelType === 'smtp') {
-				success = await sendSmtpNotification(notif.config as SmtpConfig, enrichedPayload);
+				result = await sendSmtpNotification(notif.config as SmtpConfig, enrichedPayload);
 			} else if (notif.channelType === 'apprise') {
-				success = await sendAppriseNotification(notif.config as AppriseConfig, enrichedPayload);
+				result = await sendAppriseNotification(notif.config as AppriseConfig, enrichedPayload);
 			}
-			if (success) sent++;
+			if (result.success) sent++;
 			else allSuccess = false;
 		} catch (error) {
-			console.error(`[Notifications] Failed to send to channel ${notif.channelName}:`, error);
+			const errorMsg = error instanceof Error ? error.message : String(error);
+			console.error(`[Notifications] Failed to send to channel ${notif.channelName}:`, errorMsg);
 			allSuccess = false;
 		}
 	}
@@ -484,16 +579,17 @@ export async function sendEventNotification(
 
 	for (const channel of channels) {
 		try {
-			let success = false;
+			let result: NotificationResult = { success: false };
 			if (channel.channel_type === 'smtp') {
-				success = await sendSmtpNotification(channel.config as SmtpConfig, enrichedPayload);
+				result = await sendSmtpNotification(channel.config as SmtpConfig, enrichedPayload);
 			} else if (channel.channel_type === 'apprise') {
-				success = await sendAppriseNotification(channel.config as AppriseConfig, enrichedPayload);
+				result = await sendAppriseNotification(channel.config as AppriseConfig, enrichedPayload);
 			}
-			if (success) sent++;
+			if (result.success) sent++;
 			else allSuccess = false;
 		} catch (error) {
-			console.error(`[Notifications] Failed to send to channel ${channel.channel_name}:`, error);
+			const errorMsg = error instanceof Error ? error.message : String(error);
+			console.error(`[Notifications] Failed to send to channel ${channel.channel_name}:`, errorMsg);
 			allSuccess = false;
 		}
 	}

@@ -8,6 +8,7 @@
 	import { getIconComponent } from '$lib/utils/icons';
 	import { toast } from 'svelte-sonner';
 	import { themeStore, type FontSize } from '$lib/stores/theme';
+	import { formatTime } from '$lib/stores/settings';
 
 	// Font size scaling for header
 	let fontSize = $state<FontSize>('normal');
@@ -316,13 +317,10 @@
 		envAbortController = new AbortController();
 		fetchHostInfo();
 		fetchDiskUsage();
-		const hostInterval = setInterval(fetchHostInfo, 30000);
-		const diskInterval = setInterval(fetchDiskUsage, 30000);
+		// No polling - only fetch on mount and environment switch
 		document.addEventListener('click', handleClickOutside);
 		return () => {
 			abortPendingRequests(); // Abort on destroy
-			clearInterval(hostInterval);
-			clearInterval(diskInterval);
 			document.removeEventListener('click', handleClickOutside);
 		};
 	});
@@ -454,7 +452,7 @@
 			class="flex items-center gap-2 {isConnected ? 'text-emerald-500' : 'text-muted-foreground'}"
 			title={isConnected ? 'Live updates connected' : 'Live updates disconnected'}
 		>
-			<span class="text-muted-foreground">{lastUpdated.toLocaleTimeString()}</span>
+			<span class="text-muted-foreground">{formatTime(lastUpdated, { includeSeconds: true })}</span>
 			{#if isConnected}
 				<Wifi class="{iconSizeLargeClass()}" />
 				<span class="font-medium">Live</span>

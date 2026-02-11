@@ -105,7 +105,7 @@ export const fonts: FontMeta[] = [
 	{ id: 'comfortaa', name: 'Comfortaa', family: "'Comfortaa', sans-serif", googleFont: 'Comfortaa:wght@400;500;600;700' }
 ];
 
-// Monospace fonts for terminal and logs
+// Monospace fonts for terminal, logs, and editors
 export const monospaceFonts: FontMeta[] = [
 	// System monospace (no external load)
 	{ id: 'system-mono', name: 'System Monospace', family: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace' },
@@ -115,6 +115,15 @@ export const monospaceFonts: FontMeta[] = [
 	{ id: 'fira-code', name: 'Fira Code', family: "'Fira Code', monospace", googleFont: 'Fira+Code:wght@400;500;600;700' },
 	{ id: 'source-code-pro', name: 'Source Code Pro', family: "'Source Code Pro', monospace", googleFont: 'Source+Code+Pro:wght@400;500;600;700' },
 	{ id: 'cascadia-code', name: 'Cascadia Code', family: "'Cascadia Code', monospace", googleFont: 'Cascadia+Code:wght@400;500;600;700' },
+	{ id: 'ibm-plex-mono', name: 'IBM Plex Mono', family: "'IBM Plex Mono', monospace", googleFont: 'IBM+Plex+Mono:wght@400;500;600;700' },
+	{ id: 'roboto-mono', name: 'Roboto Mono', family: "'Roboto Mono', monospace", googleFont: 'Roboto+Mono:wght@400;500;600;700' },
+	{ id: 'ubuntu-mono', name: 'Ubuntu Mono', family: "'Ubuntu Mono', monospace", googleFont: 'Ubuntu+Mono:wght@400;700' },
+	{ id: 'space-mono', name: 'Space Mono', family: "'Space Mono', monospace", googleFont: 'Space+Mono:wght@400;700' },
+	{ id: 'inconsolata', name: 'Inconsolata', family: "'Inconsolata', monospace", googleFont: 'Inconsolata:wght@400;500;600;700' },
+	{ id: 'hack', name: 'Hack', family: "'Hack', monospace", googleFont: 'Hack:wght@400;700' },
+	{ id: 'anonymous-pro', name: 'Anonymous Pro', family: "'Anonymous Pro', monospace", googleFont: 'Anonymous+Pro:wght@400;700' },
+	{ id: 'dm-mono', name: 'DM Mono', family: "'DM Mono', monospace", googleFont: 'DM+Mono:wght@400;500' },
+	{ id: 'red-hat-mono', name: 'Red Hat Mono', family: "'Red Hat Mono', monospace", googleFont: 'Red+Hat+Mono:wght@400;500;600;700' },
 
 	// Platform-specific (no external load)
 	{ id: 'menlo', name: 'Menlo', family: 'Menlo, Monaco, monospace' },

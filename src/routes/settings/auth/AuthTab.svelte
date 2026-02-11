@@ -279,7 +279,7 @@
 							{#if authSaving}
 								<RefreshCw class="w-4 h-4 mr-1 animate-spin" />
 							{:else}
-								<Save class="w-4 h-4 mr-1" />
+								<Save class="w-4 h-4" />
 							{/if}
 							Save settings
 						</Button>

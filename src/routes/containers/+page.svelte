@@ -1,10 +1,16 @@
+<svelte:head>
+	<title>Containers - Dockhand</title>
+</svelte:head>
+
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { page } from '$app/stores';
 	import { toast } from 'svelte-sonner';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Popover from '$lib/components/ui/popover';
 	import * as Select from '$lib/components/ui/select';
+	import * as Tooltip from '$lib/components/ui/tooltip';
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
 	import MultiSelectFilter from '$lib/components/MultiSelectFilter.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
@@ -50,7 +56,12 @@
 		ShieldX,
 		Shield,
 		ShieldCheck,
-		Box
+		Box,
+		Ship,
+		Cable,
+		Copy,
+		Loader2,
+		AlertCircle
 	} from 'lucide-svelte';
 	import { broom } from '@lucide/lab';
 	import CreateContainerModal from './CreateContainerModal.svelte';
@@ -69,6 +80,8 @@
 	import { canAccess } from '$lib/stores/auth';
 	import { vulnerabilityCriteriaIcons } from '$lib/utils/update-steps';
 	import { ipToNumber } from '$lib/utils/ip';
+	import { formatHostPortUrl } from '$lib/utils/url';
+	import { detectShells, getBestShell, hasAvailableShell, USER_OPTIONS, type ShellDetectionResult } from '$lib/utils/shell-detection';
 	import { DataGrid } from '$lib/components/data-grid';
 	import type { ColumnConfig } from '$lib/types';
 	import type { DataGridRowState } from '$lib/components/data-grid/types';
@@ -86,7 +99,7 @@
 		return parseFloat((bytes / Math.pow(k, i)).toFixed(decimals)) + sizes[i];
 	}
 
-	type SortField = 'name' | 'image' | 'state' | 'uptime' | 'stack' | 'ip' | 'cpu' | 'memory';
+	type SortField = 'name' | 'image' | 'state' | 'health' | 'uptime' | 'stack' | 'ip' | 'cpu' | 'memory';
 	type SortDirection = 'asc' | 'desc';
 
 	let containers = $state<ContainerInfo[]>([]);
@@ -169,6 +182,8 @@
 			batchUpdateContainerIds = [];
 			batchUpdateContainerNames = new Map();
 			updateCheckStatus = 'idle';
+			// Clear shell detection cache for new environment
+			shellDetectionCache = {};
 			fetchContainers();
 			fetchStats();
 			loadPendingUpdates();
@@ -180,6 +195,7 @@
 			batchUpdateContainerIds = [];
 			batchUpdateContainerNames = new Map();
 			updateCheckStatus = 'idle';
+			shellDetectionCache = {};
 		}
 	});
 	let loading = $state(true);
@@ -233,6 +249,10 @@
 	let batchUpdateContainerIds = $state<string[]>([]);
 	let batchUpdateContainerNames = $state<Map<string, string>>(new Map());
 
+	// Single container update mode (doesn't overwrite batch list)
+	let singleUpdateContainerId = $state<string | null>(null);
+	let singleUpdateContainerName = $state<string | null>(null);
+
 	// Operation error state
 	let operationError = $state<{ id: string; message: string } | null>(null);
 
@@ -262,14 +282,28 @@
 	// Set of container IDs with updates available (for O(1) lookup)
 	const containersWithUpdatesSet = $derived(new Set(batchUpdateContainerIds));
 
-	// Check if any selected container has an update available
-	const selectedHaveUpdates = $derived(
-		Array.from(selectedContainers).some(id => containersWithUpdatesSet.has(id))
+	// Count of updatable containers (excluding system containers like Dockhand/Hawser)
+	const updatableContainersCount = $derived(
+		batchUpdateContainerIds.filter(id => {
+			const container = containers.find(c => c.id === id);
+			return container && !container.systemContainer;
+		}).length
 	);
 
-	// Count selected containers with updates
+	// Check if any selected container has an update available (excluding system containers)
+	const selectedHaveUpdates = $derived(
+		Array.from(selectedContainers).some(id => {
+			const container = containers.find(c => c.id === id);
+			return container && containersWithUpdatesSet.has(id) && !container.systemContainer;
+		})
+	);
+
+	// Count selected containers with updates (excluding system containers)
 	const selectedWithUpdatesCount = $derived(
-		Array.from(selectedContainers).filter(id => containersWithUpdatesSet.has(id)).length
+		Array.from(selectedContainers).filter(id => {
+			const container = containers.find(c => c.id === id);
+			return container && containersWithUpdatesSet.has(id) && !container.systemContainer;
+		}).length
 	);
 
 	// Selection helpers
@@ -426,8 +460,11 @@
 	}
 
 	function updateSelectedContainers() {
-		// Only include selected containers that have updates available
-		const selectedWithUpdates = Array.from(selectedContainers).filter(id => containersWithUpdatesSet.has(id));
+		// Only include selected containers that have updates available (excluding system containers)
+		const selectedWithUpdates = Array.from(selectedContainers).filter(id => {
+			const container = containers.find(c => c.id === id);
+			return container && containersWithUpdatesSet.has(id) && !container.systemContainer;
+		});
 		if (selectedWithUpdates.length === 0) return;
 
 		const selectedNames = new Map<string, string>();
@@ -445,26 +482,30 @@
 	function updateAllContainers() {
 		if (batchUpdateContainerIds.length === 0) return;
 
-		// Build names map from all containers with updates
+		// Build names map from all containers with updates (excluding system containers)
 		const allNames = new Map<string, string>();
 		for (const id of batchUpdateContainerIds) {
 			const container = containers.find(c => c.id === id);
-			if (container) {
+			if (container && !container.systemContainer) {
 				allNames.set(id, container.name);
 			}
 		}
+		if (allNames.size === 0) return;
 		batchUpdateContainerNames = allNames;
 		showBatchUpdateModal = true;
 	}
 
 	function updateSingleContainer(containerId: string, containerName: string) {
-		batchUpdateContainerIds = [containerId];
-		batchUpdateContainerNames = new Map([[containerId, containerName]]);
+		// Use single-container mode to avoid overwriting the batch list
+		singleUpdateContainerId = containerId;
+		singleUpdateContainerName = containerName;
 		showBatchUpdateModal = true;
 	}
 
 	function handleBatchUpdateClose() {
 		showBatchUpdateModal = false;
+		singleUpdateContainerId = null;
+		singleUpdateContainerName = null;
 		updateCheckStatus = 'idle';
 	}
 
@@ -480,13 +521,12 @@
 		}
 		selectedContainers = new Set();
 
-		// Keep blocked containers in the update list - they still have updates available
-		// Only remove successfully updated containers
-		const successSet = new Set(results.success);
-		batchUpdateContainerIds = batchUpdateContainerIds.filter(id => !successSet.has(id));
-		for (const id of results.success) {
-			batchUpdateContainerNames.delete(id);
-		}
+		// Clear single-update mode
+		singleUpdateContainerId = null;
+		singleUpdateContainerName = null;
+
+		// Reload pending updates from database to restore highlighting for remaining containers
+		loadPendingUpdates();
 
 		fetchContainers();
 	}
@@ -505,18 +545,44 @@
 		return activeTerminals.find(t => t.containerId === containerId);
 	}
 
-	// Shell and user options
-	const shellOptions = [
-		{ value: '/bin/bash', label: 'Bash' },
-		{ value: '/bin/sh', label: 'Shell (sh)' },
-		{ value: '/bin/zsh', label: 'Zsh' },
-		{ value: '/bin/ash', label: 'Ash (Alpine)' }
-	];
-	const userOptions = [
-		{ value: 'root', label: 'root' },
-		{ value: 'nobody', label: 'nobody' },
-		{ value: '', label: 'Container default' }
-	];
+	// Shell detection state per container
+	let shellDetectionCache = $state<Record<string, ShellDetectionResult>>({});
+	let detectingShellsFor = $state<string | null>(null);
+
+	// Check if any shell is available for a container
+	function anyShellAvailableFor(containerId: string): boolean {
+		const detection = shellDetectionCache[containerId];
+		return !detection || hasAvailableShell(detection);
+	}
+
+	// Detect shells when popover opens
+	async function detectContainerShells(containerId: string) {
+		if (shellDetectionCache[containerId] || detectingShellsFor === containerId) return;
+
+		detectingShellsFor = containerId;
+		try {
+			const result = await detectShells(containerId, $currentEnvironment?.id ?? null);
+			shellDetectionCache[containerId] = result;
+
+			// Auto-select best available shell if current is not available
+			const bestShell = getBestShell(result, terminalShell);
+			if (bestShell && bestShell !== terminalShell) {
+				terminalShell = bestShell;
+			}
+		} catch (error) {
+			console.error('Failed to detect shells:', error);
+		} finally {
+			detectingShellsFor = null;
+		}
+	}
+
+	// User options from shared utilities
+	const userOptions = USER_OPTIONS;
+
+	// Stats polling interval - module scope for cleanup in onDestroy
+	let statsInterval: ReturnType<typeof setInterval> | null = null;
+	let unsubscribeDockerEvent: (() => void) | null = null;
+
 	// Logs state - track active logs per container (like terminals)
 	interface ActiveLogs {
 		containerId: string;
@@ -635,6 +701,12 @@
 					const stateOrder = { running: 0, paused: 1, created: 2, exited: 3 };
 					cmp = (stateOrder[a.state.toLowerCase() as keyof typeof stateOrder] ?? 4) -
 						  (stateOrder[b.state.toLowerCase() as keyof typeof stateOrder] ?? 4);
+					break;
+				case 'health':
+					const healthOrder: Record<string, number> = { unhealthy: 0, starting: 1, healthy: 2 };
+					const healthA = a.health ? (healthOrder[a.health] ?? 1) : 3;
+					const healthB = b.health ? (healthOrder[b.health] ?? 1) : 3;
+					cmp = healthA - healthB;
 					break;
 				case 'uptime':
 					cmp = parseUptimeToSeconds(a.status) - parseUptimeToSeconds(b.status);
@@ -1169,7 +1241,7 @@
 
 		// Priority 1: Use publicIp if configured
 		if (env.publicIp) {
-			return `http://${env.publicIp}:${publicPort}`;
+			return formatHostPortUrl(env.publicIp, publicPort);
 		}
 
 		// Priority 2: Extract from host for direct/hawser-standard
@@ -1178,11 +1250,11 @@
 		if (connectionType === 'direct' && env.host) {
 			// Remote Docker via TCP - extract host from URL (e.g., tcp://192.168.1.4:2376)
 			const host = extractHostFromUrl(env.host);
-			if (host) return `http://${host}:${publicPort}`;
+			if (host) return formatHostPortUrl(host, publicPort);
 		} else if (connectionType === 'hawser-standard' && env.host) {
 			// Hawser standard mode - extract host from URL
 			const host = extractHostFromUrl(env.host);
-			if (host) return `http://${host}:${publicPort}`;
+			if (host) return formatHostPortUrl(host, publicPort);
 		}
 
 		// No public IP available for socket or hawser-edge
@@ -1205,6 +1277,18 @@
 		const exitMatch = status.match(/Exited.+?(\d+\s+\w+)\s+ago/i);
 		if (exitMatch) return exitMatch[1] + ' ago';
 		return '-';
+	}
+
+	let copiedCommand = $state<string | null>(null);
+
+	function copyToClipboard(text: string) {
+		navigator.clipboard.writeText(text).then(() => {
+			copiedCommand = text;
+			toast.success('Copied to clipboard');
+			setTimeout(() => { copiedCommand = null; }, 2000);
+		}).catch(() => {
+			toast.error('Failed to copy to clipboard');
+		});
 	}
 
 	function parseUptimeToSeconds(status: string): number {
@@ -1300,6 +1384,12 @@
 		loadLayoutMode();
 		loadStatusFilter();
 
+		// Check for image filter from URL params (from images page link)
+		const imageParam = $page.url.searchParams.get('image');
+		if (imageParam) {
+			searchQuery = imageParam;
+		}
+
 		// Load persisted pending updates from database
 		loadPendingUpdates();
 
@@ -1309,27 +1399,37 @@
 
 		// Initial fetch is handled by $effect - no need to duplicate here
 
-		// Set up interval to refresh stats every 5 seconds
-		const statsInterval = setInterval(() => {
+		// Set up interval to refresh stats every 5 seconds (use module-scope var for cleanup)
+		statsInterval = setInterval(() => {
 			if (envId) fetchStats();
 		}, 5000);
 
 		// Subscribe to container events (SSE connection is global in layout)
-		const unsubscribe = onDockerEvent((event) => {
+		unsubscribeDockerEvent = onDockerEvent((event) => {
 			if (envId && isContainerListChange(event)) {
 				fetchContainers();
 				fetchStats();
 			}
 		});
 
-		return () => {
-			unsubscribe();
-			clearInterval(statsInterval);
-		};
+		// Note: In Svelte 5, cleanup must be in onDestroy, not returned from onMount
 	});
 
-	// Cleanup resize event listeners and pending timeouts on component destroy
+	// Cleanup on component destroy
 	onDestroy(() => {
+		// Clear stats polling interval
+		if (statsInterval) {
+			clearInterval(statsInterval);
+			statsInterval = null;
+		}
+
+		// Unsubscribe from Docker events
+		if (unsubscribeDockerEvent) {
+			unsubscribeDockerEvent();
+			unsubscribeDockerEvent = null;
+		}
+
+		// Cleanup resize event listeners and pending timeouts
 		document.removeEventListener('mousemove', handleWidthResize);
 		document.removeEventListener('mouseup', stopWidthResize);
 		document.removeEventListener('visibilitychange', handleVisibilityChange);
@@ -1340,7 +1440,7 @@
 </script>
 
 <div class="flex-1 min-h-0 flex flex-col gap-3 overflow-hidden">
-	<div class="shrink-0 flex flex-wrap justify-between items-center gap-3">
+	<div class="shrink-0 flex flex-wrap justify-between items-center gap-3 min-h-8">
 		<PageHeader icon={Box} title="Containers" count={containers.length} />
 		<div class="flex flex-wrap items-center gap-2">
 			<div class="relative">
@@ -1365,7 +1465,7 @@
 			<div class="flex gap-2">
 				{#if $canAccess('containers', 'create')}
 				<Button size="sm" variant="secondary" onclick={() => (showCreateModal = true)}>
-					<Plus class="w-3.5 h-3.5 mr-1" />
+					<Plus class="w-3.5 h-3.5" />
 					Create
 				</Button>
 				{/if}
@@ -1383,11 +1483,11 @@
 					{:else if updateCheckStatus === 'error'}
 						<XCircle class="w-3.5 h-3.5 mr-1 text-destructive" />
 					{:else}
-						<CircleArrowUp class="w-3.5 h-3.5 mr-1" />
+						<CircleArrowUp class="w-3.5 h-3.5" />
 					{/if}
 					Check for updates
 				</Button>
-				{#if batchUpdateContainerIds.length > 0}
+				{#if updatableContainersCount > 0}
 				<Button
 					size="sm"
 					variant="outline"
@@ -1395,8 +1495,8 @@
 					class="border-amber-500/40 text-amber-600 hover:bg-amber-500/10 hover:border-amber-500"
 					title="Update all containers with available updates"
 				>
-					<CircleArrowUp class="w-3.5 h-3.5 mr-1" />
-					Update all ({batchUpdateContainerIds.length})
+					<CircleArrowUp class="w-3.5 h-3.5" />
+					Update all ({updatableContainersCount})
 				</Button>
 				{/if}
 				{#if $canAccess('containers', 'remove')}
@@ -1419,7 +1519,7 @@
 							{:else if pruneStatus === 'error'}
 								<XCircle class="w-3.5 h-3.5 mr-1 text-destructive" />
 							{:else}
-								<Icon iconNode={broom} class="w-3.5 h-3.5 mr-1" />
+								<Icon iconNode={broom} class="w-3.5 h-3.5" />
 							{/if}
 							Prune
 						</Button>
@@ -1444,13 +1544,14 @@
 		</div>
 	</div>
 
-	<!-- Selection bar -->
-	{#if selectedContainers.size > 0}
-		<div class="flex items-center gap-2 text-xs text-muted-foreground">
+	<!-- Selection bar - always reserve space to prevent layout shift -->
+	<div class="h-4 shrink-0">
+		{#if selectedContainers.size > 0}
+			<div class="flex items-center gap-1 text-xs text-muted-foreground h-full">
 			<span>{selectedInFilter.length} selected</span>
 			<button
 				type="button"
-				class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-border shadow-sm hover:border-foreground/30 hover:shadow transition-all"
+				class="inline-flex items-center gap-1 px-1.5 py-0 rounded border border-border hover:border-foreground/30 hover:shadow transition-all"
 				onclick={selectNone}
 				disabled={bulkActionInProgress}
 			>
@@ -1468,7 +1569,7 @@
 					onOpenChange={(open) => confirmBulkStart = open}
 				>
 					{#snippet children({ open })}
-						<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-border shadow-sm hover:text-green-600 hover:border-green-500/40 hover:shadow transition-all cursor-pointer {bulkActionInProgress ? 'opacity-50' : ''}">
+						<span class="inline-flex items-center gap-1 px-1.5 py-0 rounded border border-border hover:text-green-600 hover:border-green-500/40 hover:shadow transition-all cursor-pointer {bulkActionInProgress ? 'opacity-50' : ''}">
 							<Play class="w-3 h-3" />
 							Start
 						</span>
@@ -1486,7 +1587,7 @@
 					onOpenChange={(open) => confirmBulkStop = open}
 				>
 					{#snippet children({ open })}
-						<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-border shadow-sm hover:text-red-600 hover:border-red-500/40 hover:shadow transition-all cursor-pointer {bulkActionInProgress ? 'opacity-50' : ''}">
+						<span class="inline-flex items-center gap-1 px-1.5 py-0 rounded border border-border hover:text-red-600 hover:border-red-500/40 hover:shadow transition-all cursor-pointer {bulkActionInProgress ? 'opacity-50' : ''}">
 							<Square class="w-3 h-3" />
 							Stop
 						</span>
@@ -1503,7 +1604,7 @@
 					onOpenChange={(open) => confirmBulkPause = open}
 				>
 					{#snippet children({ open })}
-						<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-border shadow-sm hover:text-yellow-600 hover:border-yellow-500/40 hover:shadow transition-all cursor-pointer {bulkActionInProgress ? 'opacity-50' : ''}">
+						<span class="inline-flex items-center gap-1 px-1.5 py-0 rounded border border-border hover:text-yellow-600 hover:border-yellow-500/40 hover:shadow transition-all cursor-pointer {bulkActionInProgress ? 'opacity-50' : ''}">
 							<Pause class="w-3 h-3" />
 							Pause
 						</span>
@@ -1522,7 +1623,7 @@
 					onOpenChange={(open) => confirmBulkUnpause = open}
 				>
 					{#snippet children({ open })}
-						<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-border shadow-sm hover:text-blue-600 hover:border-blue-500/40 hover:shadow transition-all cursor-pointer {bulkActionInProgress ? 'opacity-50' : ''}">
+						<span class="inline-flex items-center gap-1 px-1.5 py-0 rounded border border-border hover:text-blue-600 hover:border-blue-500/40 hover:shadow transition-all cursor-pointer {bulkActionInProgress ? 'opacity-50' : ''}">
 							<Play class="w-3 h-3" />
 							Unpause
 						</span>
@@ -1541,7 +1642,7 @@
 				onOpenChange={(open) => confirmBulkRestart = open}
 			>
 				{#snippet children({ open })}
-					<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-border shadow-sm hover:border-foreground/30 hover:shadow transition-all cursor-pointer {bulkActionInProgress ? 'opacity-50' : ''}">
+					<span class="inline-flex items-center gap-1 px-1.5 py-0 rounded border border-border hover:border-foreground/30 hover:shadow transition-all cursor-pointer {bulkActionInProgress ? 'opacity-50' : ''}">
 						<RotateCw class="w-3 h-3" />
 						Restart
 					</span>
@@ -1559,7 +1660,7 @@
 				onOpenChange={(open) => confirmBulkRemove = open}
 			>
 				{#snippet children({ open })}
-					<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-border shadow-sm hover:text-destructive hover:border-destructive/40 hover:shadow transition-all cursor-pointer {bulkActionInProgress ? 'opacity-50' : ''}">
+					<span class="inline-flex items-center gap-1 px-1.5 py-0 rounded border border-border hover:text-destructive hover:border-destructive/40 hover:shadow transition-all cursor-pointer {bulkActionInProgress ? 'opacity-50' : ''}">
 						<Trash2 class="w-3 h-3" />
 						Remove
 					</span>
@@ -1569,7 +1670,7 @@
 			{#if selectedHaveUpdates}
 			<button
 				type="button"
-				class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-amber-500/40 shadow-sm text-amber-600 hover:border-amber-500 hover:shadow transition-all cursor-pointer {bulkActionInProgress ? 'opacity-50' : ''}"
+				class="inline-flex items-center gap-1 px-1.5 py-0 rounded border border-amber-500/40 text-amber-600 hover:border-amber-500 hover:shadow transition-all cursor-pointer {bulkActionInProgress ? 'opacity-50' : ''}"
 				onclick={updateSelectedContainers}
 				disabled={bulkActionInProgress}
 				title="Update selected containers to latest image"
@@ -1581,10 +1682,11 @@
 			{#if bulkActionInProgress}
 				<CircleArrowUp class="w-3 h-3 animate-spin ml-1" />
 			{/if}
-		</div>
-	{/if}
+			</div>
+		{/if}
+	</div>
 
-	{#if $environments.length === 0 || !$currentEnvironment}
+	{#if !loading && ($environments.length === 0 || !$currentEnvironment)}
 		<NoEnvironment />
 	{:else if !loading && containers.length === 0}
 		<EmptyState
@@ -1613,7 +1715,7 @@
 					let classes = '';
 					if (currentLogsContainerId === container.id) classes += 'bg-blue-500/10 hover:bg-blue-500/15 ';
 					if (currentTerminalContainerId === container.id) classes += 'bg-green-500/10 hover:bg-green-500/15 ';
-					if ($appSettings.highlightUpdates && containersWithUpdatesSet.has(container.id)) classes += 'has-update ';
+					if ($appSettings.highlightUpdates && containersWithUpdatesSet.has(container.id) && !container.systemContainer) classes += 'has-update ';
 					return classes;
 				}}
 				onRowClick={(container, e) => {
@@ -1627,15 +1729,98 @@
 					{@const ports = formatPorts(container.ports)}
 					{@const stack = getComposeProject(container.labels)}
 					{#if column.id === 'name'}
-						<button
-							type="button"
-							class="text-xs font-medium truncate block text-left hover:text-primary hover:underline cursor-pointer"
-							title={container.name}
-							onclick={(e) => { e.stopPropagation(); inspectContainer(container); }}
-						>{container.name}</button>
+						<div class="flex items-center gap-1.5 min-w-0">
+							<button
+								type="button"
+								class="text-xs font-medium truncate text-left hover:text-primary hover:underline cursor-pointer"
+								title={container.name}
+								onclick={(e) => { e.stopPropagation(); inspectContainer(container); }}
+							>{container.name}</button>
+							{#if container.systemContainer}
+								{@const hasUpdate = containersWithUpdatesSet.has(container.id)}
+								<Tooltip.Root>
+									<Tooltip.Trigger>
+										<Badge variant="secondary" class="text-2xs py-0 px-1 shrink-0 {hasUpdate ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20' : 'bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-500/20'} cursor-help flex items-center gap-0.5">
+											{#if container.systemContainer === 'dockhand'}
+												<Ship class="w-2.5 h-2.5" />
+											{:else}
+												<Cable class="w-2.5 h-2.5" />
+											{/if}
+											{container.systemContainer === 'dockhand' ? 'Dockhand' : 'Hawser'}
+											{#if hasUpdate}
+												<CircleArrowUp class="w-2.5 h-2.5" />
+											{/if}
+										</Badge>
+									</Tooltip.Trigger>
+									<Tooltip.Content side="right" class="w-auto p-3">
+										{#if container.systemContainer === 'dockhand'}
+											{#if hasUpdate}
+												{@const composeCmd = 'docker compose pull && docker compose up -d'}
+												{@const dockerCmd = `docker stop ${container.name} && docker pull fnsys/dockhand:latest && docker start ${container.name}`}
+												<div class="space-y-2">
+													<p class="font-medium text-sm flex items-center gap-1.5">
+														<CircleArrowUp class="w-4 h-4 text-amber-500" />
+														Update available
+													</p>
+													<p class="text-muted-foreground text-xs">Cannot be updated from within Dockhand. Update manually:</p>
+													<div class="space-y-1.5">
+														<p class="text-muted-foreground text-2xs">Using Compose:</p>
+														<div class="flex items-center gap-2 bg-muted rounded p-2">
+															<code class="text-2xs font-mono whitespace-nowrap">{composeCmd}</code>
+															<Button size="icon" variant="ghost" class="h-5 w-5 shrink-0" onclick={(e) => { e.stopPropagation(); copyToClipboard(composeCmd); }}>
+																{#if copiedCommand === composeCmd}
+																	<Check class="w-3 h-3 text-green-500" />
+																{:else}
+																	<Copy class="w-3 h-3" />
+																{/if}
+															</Button>
+														</div>
+														<p class="text-muted-foreground text-2xs">Using Docker CLI:</p>
+														<div class="flex items-center gap-2 bg-muted rounded p-2">
+															<code class="text-2xs font-mono whitespace-nowrap">{dockerCmd}</code>
+															<Button size="icon" variant="ghost" class="h-5 w-5 shrink-0" onclick={(e) => { e.stopPropagation(); copyToClipboard(dockerCmd); }}>
+																{#if copiedCommand === dockerCmd}
+																	<Check class="w-3 h-3 text-green-500" />
+																{:else}
+																	<Copy class="w-3 h-3" />
+																{/if}
+															</Button>
+														</div>
+													</div>
+												</div>
+											{:else}
+												<p class="text-sm whitespace-nowrap">Dockhand management container</p>
+											{/if}
+										{:else}
+											{#if hasUpdate}
+												<div class="space-y-2">
+													<p class="font-medium text-sm flex items-center gap-1.5 whitespace-nowrap">
+														<CircleArrowUp class="w-4 h-4 text-amber-500" />
+														Update available
+													</p>
+													<p class="text-muted-foreground text-xs whitespace-nowrap">Update on the remote host where Hawser runs.</p>
+													<a
+														href="https://github.com/Finsys/hawser"
+														target="_blank"
+														rel="noopener noreferrer"
+														class="text-primary hover:underline text-xs flex items-center gap-1 whitespace-nowrap"
+														onclick={(e) => e.stopPropagation()}
+													>
+														<ExternalLink class="w-3 h-3" />
+														Update instructions on GitHub
+													</a>
+												</div>
+											{:else}
+												<p class="text-sm whitespace-nowrap">Hawser remote agent</p>
+											{/if}
+										{/if}
+									</Tooltip.Content>
+								</Tooltip.Root>
+							{/if}
+						</div>
 					{:else if column.id === 'image'}
-						<div class="flex items-center gap-1.5 {$appSettings.highlightUpdates && containersWithUpdatesSet.has(container.id) ? 'update-border' : ''}">
-							{#if containersWithUpdatesSet.has(container.id)}
+						<div class="flex items-center gap-1.5 {$appSettings.highlightUpdates && containersWithUpdatesSet.has(container.id) && !container.systemContainer ? 'update-border' : ''}">
+							{#if containersWithUpdatesSet.has(container.id) && !container.systemContainer}
 								<span title="Update available">
 									<CircleArrowUp class="w-3 h-3 text-amber-500 {$appSettings.highlightUpdates ? 'glow-amber' : ''} shrink-0" />
 								</span>
@@ -1687,7 +1872,10 @@
 						<div class="{isFieldHighlighted(container.id, 'memory') ? 'stat-highlight' : ''} text-right">
 							{#if containerStats.get(container.id)}
 								{@const stats = containerStats.get(container.id)}
-								<span class="text-xs font-mono {stats.memoryPercent > 80 ? 'text-red-500' : stats.memoryPercent > 50 ? 'text-yellow-500' : 'text-muted-foreground'}" title="{formatBytes(stats.memoryUsage)} / {formatBytes(stats.memoryLimit)}">{formatBytes(stats.memoryUsage)}</span>
+								{@const memoryTooltip = stats.memoryCache > 0
+									? `${formatBytes(stats.memoryUsage)} / ${formatBytes(stats.memoryLimit)} (Total: ${formatBytes(stats.memoryRaw)} | Cache: ${formatBytes(stats.memoryCache)})`
+									: `${formatBytes(stats.memoryUsage)} / ${formatBytes(stats.memoryLimit)}`}
+								<span class="text-xs font-mono {stats.memoryPercent > 80 ? 'text-red-500' : stats.memoryPercent > 50 ? 'text-yellow-500' : 'text-muted-foreground'}" title={memoryTooltip}>{formatBytes(stats.memoryUsage)}</span>
 							{:else if container.state === 'running'}
 								<span class="text-xs text-muted-foreground/50">...</span>
 							{:else}
@@ -1783,7 +1971,7 @@
 						{/if}
 					{:else if column.id === 'actions'}
 						<div class="relative flex gap-0.5 justify-end">
-							{#if containersWithUpdatesSet.has(container.id)}
+							{#if containersWithUpdatesSet.has(container.id) && !container.systemContainer}
 								<button
 									type="button"
 									onclick={() => updateSingleContainer(container.id, container.name)}
@@ -1918,7 +2106,10 @@
 									<Terminal class="w-4 h-4 text-green-400" style="filter: drop-shadow(0 0 4px rgba(74,222,128,0.9)) drop-shadow(0 0 8px rgba(74,222,128,0.6));" strokeWidth={2.5} />
 								</button>
 							{:else}
-								<Popover.Root open={terminalPopoverStates[container.id] ?? false} onOpenChange={(open) => { terminalPopoverStates[container.id] = open; }}>
+								<Popover.Root open={terminalPopoverStates[container.id] ?? false} onOpenChange={(open) => {
+									terminalPopoverStates[container.id] = open;
+									if (open) detectContainerShells(container.id);
+								}}>
 									<Popover.Trigger
 										onclick={(e: MouseEvent) => e.stopPropagation()}
 										class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
@@ -1932,46 +2123,66 @@
 												<span class="text-xs font-medium truncate" title={container.name}>{container.name}</span>
 											</div>
 										</div>
-										<div class="p-3 space-y-3">
-											<div class="space-y-1.5">
-												<Label class="text-xs">Shell</Label>
-												<Select.Root type="single" bind:value={terminalShell}>
-													<Select.Trigger class="w-full h-8 text-xs">
-														<Shell class="w-3 h-3 mr-1.5 text-muted-foreground" />
-														<span>{shellOptions.find(o => o.value === terminalShell)?.label || 'Select'}</span>
-													</Select.Trigger>
-													<Select.Content>
-														{#each shellOptions as option}
-															<Select.Item value={option.value} label={option.label}>
-																<Shell class="w-3 h-3 mr-1.5 text-muted-foreground" />
-																{option.label}
-															</Select.Item>
-														{/each}
-													</Select.Content>
-												</Select.Root>
+										{#if detectingShellsFor === container.id}
+											<div class="p-4 text-center">
+												<Loader2 class="w-5 h-5 mx-auto mb-2 text-muted-foreground animate-spin" />
+												<p class="text-xs text-muted-foreground">Detecting shells...</p>
 											</div>
-											<div class="space-y-1.5">
-												<Label class="text-xs">User</Label>
-												<Select.Root type="single" bind:value={terminalUser}>
-													<Select.Trigger class="w-full h-8 text-xs">
-														<User class="w-3 h-3 mr-1.5 text-muted-foreground" />
-														<span>{userOptions.find(o => o.value === terminalUser)?.label || 'Select'}</span>
-													</Select.Trigger>
-													<Select.Content>
-														{#each userOptions as option}
-															<Select.Item value={option.value} label={option.label}>
-																<User class="w-3 h-3 mr-1.5 text-muted-foreground" />
-																{option.label}
-															</Select.Item>
-														{/each}
-													</Select.Content>
-												</Select.Root>
+										{:else if !anyShellAvailableFor(container.id)}
+											<div class="p-4 text-center">
+												<AlertCircle class="w-5 h-5 mx-auto mb-2 text-amber-500" />
+												<p class="text-xs font-medium text-amber-500">No shell available</p>
+												<p class="text-xs text-muted-foreground mt-1">This container has no shell installed.</p>
 											</div>
-											<Button size="sm" class="w-full h-7 text-xs" onclick={() => startTerminal(container)}>
-												<Terminal class="w-3 h-3 mr-1" />
-												Connect
-											</Button>
-										</div>
+										{:else}
+											<div class="p-3 space-y-3">
+												<div class="space-y-1.5">
+													<Label class="text-xs">Shell</Label>
+													<Select.Root type="single" bind:value={terminalShell}>
+														<Select.Trigger class="w-full h-8 text-xs">
+															<Shell class="w-3 h-3 mr-1.5 text-muted-foreground" />
+															<span>{shellDetectionCache[container.id]?.allShells.find(o => o.path === terminalShell)?.label || 'Select'}</span>
+														</Select.Trigger>
+														<Select.Content>
+															{#if shellDetectionCache[container.id]}
+																{#each shellDetectionCache[container.id].allShells as option}
+																	<Select.Item value={option.path} label={option.label} disabled={!option.available}>
+																		<Shell class="w-3 h-3 mr-1.5 {option.available ? 'text-green-500' : 'text-muted-foreground/40'}" />
+																		<span class={option.available ? 'text-foreground' : 'text-muted-foreground/60'}>
+																			{option.label}
+																			{#if !option.available}
+																				<span class="text-xs ml-1">(unavailable)</span>
+																			{/if}
+																		</span>
+																	</Select.Item>
+																{/each}
+															{/if}
+														</Select.Content>
+													</Select.Root>
+												</div>
+												<div class="space-y-1.5">
+													<Label class="text-xs">User</Label>
+													<Select.Root type="single" bind:value={terminalUser}>
+														<Select.Trigger class="w-full h-8 text-xs">
+															<User class="w-3 h-3 mr-1.5 text-muted-foreground" />
+															<span>{userOptions.find(o => o.value === terminalUser)?.label || 'Select'}</span>
+														</Select.Trigger>
+														<Select.Content>
+															{#each userOptions as option}
+																<Select.Item value={option.value} label={option.label}>
+																	<User class="w-3 h-3 mr-1.5 text-muted-foreground" />
+																	{option.label}
+																</Select.Item>
+															{/each}
+														</Select.Content>
+													</Select.Root>
+												</div>
+												<Button size="sm" class="w-full h-7 text-xs" onclick={() => startTerminal(container)}>
+													<Terminal class="w-3 h-3" />
+													Connect
+												</Button>
+											</div>
+										{/if}
 									</Popover.Content>
 								</Popover.Root>
 							{/if}
@@ -2127,8 +2338,8 @@
 
 <BatchUpdateModal
 	bind:open={showBatchUpdateModal}
-	containerIds={batchUpdateContainerIds}
-	containerNames={batchUpdateContainerNames}
+	containerIds={singleUpdateContainerId ? [singleUpdateContainerId] : batchUpdateContainerIds}
+	containerNames={singleUpdateContainerId && singleUpdateContainerName ? new Map([[singleUpdateContainerId, singleUpdateContainerName]]) : batchUpdateContainerNames}
 	{envId}
 	vulnerabilityCriteria={envHasScanning ? envVulnerabilityCriteria : 'never'}
 	onClose={handleBatchUpdateClose}
@@ -2181,5 +2392,6 @@
 		border-radius: 4px;
 		box-shadow: 0 0 8px rgb(245 158 11 / 0.4);
 	}
+
 </style>
 

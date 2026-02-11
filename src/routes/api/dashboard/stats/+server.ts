@@ -5,7 +5,8 @@ import {
 	getContainerEventStats,
 	getEnvSetting,
 	hasEnvironments,
-	getEnvUpdateCheckSettings
+	getEnvUpdateCheckSettings,
+	getPendingContainerUpdates
 } from '$lib/server/db';
 import {
 	listContainers,
@@ -18,6 +19,9 @@ import {
 import { listComposeStacks } from '$lib/server/stacks';
 import { authorize } from '$lib/server/authorize';
 import { parseLabels } from '$lib/utils/label-colors';
+
+// Skip disk usage collection (Synology NAS performance fix)
+const SKIP_DF_COLLECTION = process.env.SKIP_DF_COLLECTION === 'true' || process.env.SKIP_DF_COLLECTION === '1';
 
 // Helper to add timeout to promises
 function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
@@ -52,7 +56,7 @@ export interface EnvironmentStats {
 	updateCheckAutoUpdate: boolean;
 	labels?: string[];
 	connectionType: 'socket' | 'direct' | 'hawser-standard' | 'hawser-edge';
-	online: boolean;
+	online?: boolean; // undefined = connecting, false = offline, true = online
 	error?: string;
 	containers: {
 		total: number;
@@ -61,6 +65,7 @@ export interface EnvironmentStats {
 		paused: number;
 		restarting: number;
 		unhealthy: number;
+		pendingUpdates: number;
 	};
 	images: {
 		total: number;
@@ -165,7 +170,7 @@ export const GET: RequestHandler = async ({ cookies, url }) => {
 				labels: parseLabels(env.labels),
 				connectionType: (env.connectionType as 'socket' | 'direct' | 'hawser-standard' | 'hawser-edge') || 'socket',
 				online: false,
-				containers: { total: 0, running: 0, stopped: 0, paused: 0, restarting: 0, unhealthy: 0 },
+				containers: { total: 0, running: 0, stopped: 0, paused: 0, restarting: 0, unhealthy: 0, pendingUpdates: 0 },
 				images: { total: 0, totalSize: 0 },
 				volumes: { total: 0, totalSize: 0 },
 				containersSize: 0,
@@ -198,13 +203,14 @@ export const GET: RequestHandler = async ({ cookies, url }) => {
 				envStats.online = true;
 
 				// Fetch all data in parallel (with 10 second timeout per operation)
+				// Disk usage can be disabled with SKIP_DF_COLLECTION for Synology NAS devices
 				const [containers, images, volumes, networks, stacks, diskUsage] = await Promise.all([
 					withTimeout(listContainers(true, env.id).catch(() => []), 10000, []),
 					withTimeout(listImages(env.id).catch(() => []), 10000, []),
 					withTimeout(listVolumes(env.id).catch(() => []), 10000, []),
 					withTimeout(listNetworks(env.id).catch(() => []), 10000, []),
 					withTimeout(listComposeStacks(env.id).catch(() => []), 10000, []),
-					withTimeout(getDiskUsage(env.id).catch(() => null), 10000, null)
+					SKIP_DF_COLLECTION ? Promise.resolve(null) : withTimeout(getDiskUsage(env.id).catch(() => null), 10000, null)
 				]);
 
 				// Process containers
@@ -252,10 +258,11 @@ export const GET: RequestHandler = async ({ cookies, url }) => {
 				envStats.stacks.partial = stacks.filter((s: any) => s.status === 'partial').length;
 				envStats.stacks.stopped = stacks.filter((s: any) => s.status === 'stopped').length;
 
-				// Get latest metrics and event stats in parallel
-				const [latestMetrics, eventStats] = await Promise.all([
+				// Get latest metrics, event stats, and pending updates in parallel
+				const [latestMetrics, eventStats, pendingUpdates] = await Promise.all([
 					getLatestHostMetrics(env.id),
-					getContainerEventStats(env.id)
+					getContainerEventStats(env.id),
+					getPendingContainerUpdates(env.id)
 				]);
 
 				if (latestMetrics) {
@@ -271,6 +278,8 @@ export const GET: RequestHandler = async ({ cookies, url }) => {
 					total: eventStats.total,
 					today: eventStats.today
 				};
+
+				envStats.containers.pendingUpdates = pendingUpdates.length;
 
 			} catch (error) {
 				// Convert technical error messages to user-friendly ones

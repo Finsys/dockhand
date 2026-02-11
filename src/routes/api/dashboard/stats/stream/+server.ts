@@ -6,13 +6,13 @@ import {
 	getContainerEventStats,
 	getContainerEvents,
 	getEnvSetting,
-	getEnvUpdateCheckSettings
+	getEnvUpdateCheckSettings,
+	getPendingContainerUpdates
 } from '$lib/server/db';
 import {
 	listContainers,
 	listImages,
 	listNetworks,
-	getDockerInfo,
 	getContainerStats,
 	getDiskUsage
 } from '$lib/server/docker';
@@ -20,6 +20,9 @@ import { listComposeStacks } from '$lib/server/stacks';
 import { authorize } from '$lib/server/authorize';
 import type { EnvironmentStats } from '../+server';
 import { parseLabels } from '$lib/utils/label-colors';
+
+// Skip disk usage collection (Synology NAS performance fix)
+const SKIP_DF_COLLECTION = process.env.SKIP_DF_COLLECTION === 'true' || process.env.SKIP_DF_COLLECTION === '1';
 
 // Helper to add timeout to promises
 function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
@@ -31,6 +34,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T
 
 // Disk usage cache - getDiskUsage() is very slow (30s timeout) but data changes rarely
 // Cache per environment with 5-minute TTL
+// DISABLED when SKIP_DF_COLLECTION is set (kills Synology NAS devices)
 interface DiskUsageCache {
 	data: any;
 	timestamp: number;
@@ -95,6 +99,28 @@ function calculateCpuPercent(stats: any): number {
 	return 0;
 }
 
+/**
+ * Calculate memory usage the same way Docker CLI does.
+ * Docker subtracts cache (inactive_file) from total usage to show actual memory consumption.
+ * - cgroup v2: subtract inactive_file from stats
+ * - cgroup v1: subtract total_inactive_file from stats
+ * See: https://docs.docker.com/engine/containers/runmetrics/
+ */
+function calculateMemoryUsage(memoryStats: any): number {
+	const usage = memoryStats?.usage || 0;
+	const stats = memoryStats?.stats || {};
+
+	// cgroup v2 uses 'inactive_file', cgroup v1 uses 'total_inactive_file'
+	const cache = stats.inactive_file ?? stats.total_inactive_file ?? 0;
+
+	// Only subtract cache if it's less than usage (sanity check)
+	if (cache > 0 && cache < usage) {
+		return usage - cache;
+	}
+
+	return usage;
+}
+
 // Progressive stats loading - returns stats object and emits partial updates via callback
 async function getEnvironmentStatsProgressive(
 	env: any,
@@ -115,7 +141,7 @@ async function getEnvironmentStatsProgressive(
 		labels: parseLabels(env.labels),
 		connectionType: (env.connectionType as 'socket' | 'direct' | 'hawser-standard' | 'hawser-edge') || 'socket',
 		online: false,
-		containers: { total: 0, running: 0, stopped: 0, paused: 0, restarting: 0, unhealthy: 0 },
+		containers: { total: 0, running: 0, stopped: 0, paused: 0, restarting: 0, unhealthy: 0, pendingUpdates: 0 },
 		images: { total: 0, totalSize: 0 },
 		volumes: { total: 0, totalSize: 0 },
 		containersSize: 0,
@@ -150,28 +176,15 @@ async function getEnvironmentStatsProgressive(
 			envStats.updateCheckAutoUpdate = updateCheckSettings.autoUpdate;
 		}
 
-		// Check if Docker is accessible (with 5 second timeout)
-		const dockerInfo = await withTimeout(getDockerInfo(env.id), 5000, null);
-		if (!dockerInfo) {
-			envStats.error = 'Connection timeout or Docker not accessible';
-			envStats.loading = undefined; // Clear loading states on error
-			// Send offline status to client
-			onPartialUpdate({
-				id: env.id,
-				online: false,
-				error: envStats.error,
-				loading: undefined
-			});
-			return envStats;
-		}
-		envStats.online = true;
-
 		// Get all database stats in parallel for better performance
-		const [latestMetrics, eventStats, recentEventsResult, metricsHistory] = await Promise.all([
+		// NOTE: We do NOT block on getDockerInfo() here - slow environments would block all others
+		// Instead, we determine online status from whether listContainers succeeds
+		const [latestMetrics, eventStats, recentEventsResult, metricsHistory, pendingUpdates] = await Promise.all([
 			getLatestHostMetrics(env.id),
 			getContainerEventStats(env.id),
 			getContainerEvents({ environmentId: env.id, limit: 10 }),
-			getHostMetrics(30, env.id)
+			getHostMetrics(30, env.id),
+			getPendingContainerUpdates(env.id)
 		]);
 
 		if (latestMetrics) {
@@ -187,6 +200,8 @@ async function getEnvironmentStatsProgressive(
 			total: eventStats.total,
 			today: eventStats.today
 		};
+
+		envStats.containers.pendingUpdates = pendingUpdates.length;
 
 		if (recentEventsResult.events.length > 0) {
 			envStats.recentEvents = recentEventsResult.events.map(e => ({
@@ -204,10 +219,9 @@ async function getEnvironmentStatsProgressive(
 			}));
 		}
 
-		// Send initial update with DB data and online status
+		// Send initial update with DB data (online status determined later by Docker API success)
 		onPartialUpdate({
 			id: env.id,
-			online: true,
 			metrics: envStats.metrics,
 			events: envStats.events,
 			recentEvents: envStats.recentEvents,
@@ -215,6 +229,7 @@ async function getEnvironmentStatsProgressive(
 			scannerEnabled: envStats.scannerEnabled,
 			updateCheckEnabled: envStats.updateCheckEnabled,
 			updateCheckAutoUpdate: envStats.updateCheckAutoUpdate,
+			containers: { ...envStats.containers },
 			loading: { ...envStats.loading }
 		});
 
@@ -223,24 +238,66 @@ async function getEnvironmentStatsProgressive(
 			return size && size > 0 ? size : 0;
 		};
 
-		// PHASE 1: Containers (usually fast)
-		const containersPromise = withTimeout(listContainers(true, env.id).catch(() => []), 10000, [])
+		// Track if Docker API is accessible - determined by listContainers success
+		let dockerApiAccessible = false;
+		let dockerApiError: string | null = null;
+
+		// PHASE 1: Containers (usually fast) - this determines online status
+		// Use 10s timeout - this is the critical path that determines if env is online
+		const containersPromise = withTimeout(listContainers(true, env.id), 10000, null)
 			.then(async (containers) => {
+				// Timeout returns null
+				if (containers === null) {
+					throw new Error('Connection timeout');
+				}
+				// If we got here, Docker API is accessible
+				dockerApiAccessible = true;
+				envStats.online = true;
+
 				envStats.containers.total = containers.length;
 				envStats.containers.running = containers.filter((c: any) => c.state === 'running').length;
 				envStats.containers.stopped = containers.filter((c: any) => c.state === 'exited').length;
 				envStats.containers.paused = containers.filter((c: any) => c.state === 'paused').length;
 				envStats.containers.restarting = containers.filter((c: any) => c.state === 'restarting').length;
 				envStats.containers.unhealthy = containers.filter((c: any) => c.health === 'unhealthy').length;
+				// Note: pendingUpdates is already set from DB query, preserve it
 				envStats.loading!.containers = false;
 
 				onPartialUpdate({
 					id: env.id,
+					online: true,
 					containers: { ...envStats.containers },
 					loading: { ...envStats.loading! }
 				});
 
 				return containers;
+			})
+			.catch((error) => {
+				// Docker API failed - mark as offline
+				dockerApiAccessible = false;
+				const errorStr = String(error);
+				if (errorStr.includes('not connected') || errorStr.includes('Edge agent')) {
+					dockerApiError = 'Agent not connected';
+				} else if (errorStr.includes('FailedToOpenSocket') || errorStr.includes('ECONNREFUSED')) {
+					dockerApiError = 'Docker socket not accessible';
+				} else if (errorStr.includes('ECONNRESET') || errorStr.includes('connection was closed')) {
+					dockerApiError = 'Connection lost';
+				} else if (errorStr.includes('timeout') || errorStr.includes('Timeout')) {
+					dockerApiError = 'Connection timeout';
+				} else {
+					dockerApiError = 'Connection error';
+				}
+				envStats.error = dockerApiError;
+				envStats.loading!.containers = false;
+
+				onPartialUpdate({
+					id: env.id,
+					online: false,
+					error: dockerApiError,
+					loading: { ...envStats.loading! }
+				});
+
+				return [] as any[];
 			});
 
 		// PHASE 2: Images, Networks, Stacks (medium speed) - run in parallel
@@ -257,6 +314,11 @@ async function getEnvironmentStatsProgressive(
 				});
 
 				return images;
+			})
+			.catch(() => {
+				envStats.loading!.images = false;
+				onPartialUpdate({ id: env.id, loading: { ...envStats.loading! } });
+				return [];
 			});
 
 		const networksPromise = withTimeout(listNetworks(env.id).catch(() => []), 10000, [])
@@ -271,6 +333,11 @@ async function getEnvironmentStatsProgressive(
 				});
 
 				return networks;
+			})
+			.catch(() => {
+				envStats.loading!.networks = false;
+				onPartialUpdate({ id: env.id, loading: { ...envStats.loading! } });
+				return [];
 			});
 
 		const stacksPromise = withTimeout(listComposeStacks(env.id).catch(() => []), 10000, [])
@@ -288,40 +355,63 @@ async function getEnvironmentStatsProgressive(
 				});
 
 				return stacks;
+			})
+			.catch(() => {
+				envStats.loading!.stacks = false;
+				onPartialUpdate({ id: env.id, loading: { ...envStats.loading! } });
+				return [];
 			});
 
 		// PHASE 3: Disk usage (slow - includes volumes) - uses cache for better performance
-		const diskUsagePromise = getCachedDiskUsage(env.id)
-			.then((diskUsage) => {
-				if (diskUsage) {
-					// Update images with disk usage data (more accurate)
-					envStats.images.total = diskUsage.Images?.length || envStats.images.total;
-					envStats.images.totalSize = diskUsage.Images?.reduce((sum: number, img: any) => sum + getValidSize(img.Size), 0) || envStats.images.totalSize;
-
-					// Volumes from disk usage
-					envStats.volumes.total = diskUsage.Volumes?.length || 0;
-					envStats.volumes.totalSize = diskUsage.Volumes?.reduce((sum: number, vol: any) => sum + getValidSize(vol.UsageData?.Size), 0) || 0;
-
-					// Containers disk size
-					envStats.containersSize = diskUsage.Containers?.reduce((sum: number, c: any) => sum + getValidSize(c.SizeRw), 0) || 0;
-
-					// Build cache
-					envStats.buildCacheSize = diskUsage.BuildCache?.reduce((sum: number, bc: any) => sum + getValidSize(bc.Size), 0) || 0;
-				}
+		// Can be disabled with SKIP_DF_COLLECTION env var for Synology NAS
+		const diskUsagePromise = SKIP_DF_COLLECTION
+			? Promise.resolve(null).then(() => {
 				envStats.loading!.volumes = false;
 				envStats.loading!.diskUsage = false;
-
 				onPartialUpdate({
 					id: env.id,
-					images: { ...envStats.images },
 					volumes: { ...envStats.volumes },
-					containersSize: envStats.containersSize,
-					buildCacheSize: envStats.buildCacheSize,
 					loading: { ...envStats.loading! }
 				});
+				return null;
+			})
+			: getCachedDiskUsage(env.id)
+				.then((diskUsage) => {
+					if (diskUsage) {
+						// Update images with disk usage data (more accurate)
+						envStats.images.total = diskUsage.Images?.length || envStats.images.total;
+						envStats.images.totalSize = diskUsage.Images?.reduce((sum: number, img: any) => sum + getValidSize(img.Size), 0) || envStats.images.totalSize;
 
-				return diskUsage;
-			});
+						// Volumes from disk usage
+						envStats.volumes.total = diskUsage.Volumes?.length || 0;
+						envStats.volumes.totalSize = diskUsage.Volumes?.reduce((sum: number, vol: any) => sum + getValidSize(vol.UsageData?.Size), 0) || 0;
+
+						// Containers disk size
+						envStats.containersSize = diskUsage.Containers?.reduce((sum: number, c: any) => sum + getValidSize(c.SizeRw), 0) || 0;
+
+						// Build cache
+						envStats.buildCacheSize = diskUsage.BuildCache?.reduce((sum: number, bc: any) => sum + getValidSize(bc.Size), 0) || 0;
+					}
+					envStats.loading!.volumes = false;
+					envStats.loading!.diskUsage = false;
+
+					onPartialUpdate({
+						id: env.id,
+						images: { ...envStats.images },
+						volumes: { ...envStats.volumes },
+						containersSize: envStats.containersSize,
+						buildCacheSize: envStats.buildCacheSize,
+						loading: { ...envStats.loading! }
+					});
+
+					return diskUsage;
+				})
+				.catch(() => {
+					envStats.loading!.volumes = false;
+					envStats.loading!.diskUsage = false;
+					onPartialUpdate({ id: env.id, loading: { ...envStats.loading! } });
+					return null;
+				});
 
 		// PHASE 4: Top containers (slow - requires per-container stats)
 		// Limited to TOP_CONTAINERS_LIMIT containers to reduce API calls
@@ -339,7 +429,7 @@ async function getEnvironmentStatsProgressive(
 					if (!stats) return null;
 
 					const cpuPercent = calculateCpuPercent(stats);
-					const memoryUsage = stats.memory_stats?.usage || 0;
+					const memoryUsage = calculateMemoryUsage(stats.memory_stats);
 					const memoryLimit = stats.memory_stats?.limit || 1;
 					const memoryPercent = (memoryUsage / memoryLimit) * 100;
 
@@ -367,10 +457,14 @@ async function getEnvironmentStatsProgressive(
 			});
 
 			return envStats.topContainers;
+		}).catch(() => {
+			envStats.loading!.topContainers = false;
+			onPartialUpdate({ id: env.id, loading: { ...envStats.loading! } });
+			return [];
 		});
 
 		// Wait for all to complete
-		await Promise.all([
+		await Promise.allSettled([
 			containersPromise,
 			imagesPromise,
 			networksPromise,
@@ -503,7 +597,7 @@ export const GET: RequestHandler = async ({ cookies }) => {
 			});
 
 			// Wait for all to complete
-			await Promise.all(promises);
+			await Promise.allSettled(promises);
 
 			// Send done event and close
 			if (!controllerClosed) {

@@ -7,8 +7,9 @@
 # - Reproducible builds from open-source Wolfi packages
 # - Minimal attack surface with only required packages
 #
-# Bun is copied from the official oven/bun image (app-builder stage) to ensure
-# compatibility with all x86_64 CPUs (including those without AVX2 like Celeron).
+# Bun is copied from the official oven/bun image (app-builder stage).
+# For CPUs without AVX support (Celeron, Atom, pre-Haswell), build with:
+#   docker build --build-arg BUN_VARIANT=baseline -t dockhand:baseline .
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -48,7 +49,9 @@ RUN APKO_ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "aarch64" || echo "x86_64") 
     "    - tzdata" \
     "    - docker-cli" \
     "    - docker-compose" \
+    "    - docker-cli-buildx" \
     "    - sqlite" \
+    "    - postgresql-client" \
     "    - git" \
     "    - openssh-client" \
     "    - curl" \
@@ -75,10 +78,15 @@ RUN apko build apko.yaml dockhand-base:latest output.tar \
 # Alpine's musl libc causes rayon/tokio thread pool panics during svelte-adapter-bun build
 FROM oven/bun:1.3.5-debian AS app-builder
 
+# Build argument for Bun variant (regular or baseline)
+# baseline is for CPUs without AVX support (Celeron, Atom, pre-Haswell)
+ARG BUN_VARIANT=regular
+ARG TARGETARCH
+
 WORKDIR /app
 
 # Install build dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends jq git && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends jq git curl unzip ca-certificates && rm -rf /var/lib/apt/lists/*
 
 # Copy package files and install ALL dependencies (needed for build)
 COPY package.json bun.lock* bunfig.toml ./
@@ -95,6 +103,19 @@ RUN NODE_OPTIONS="--max-old-space-size=8192 --max-semi-space-size=128" bun run b
 RUN rm -rf node_modules && bun install --production --frozen-lockfile \
     && rm -rf node_modules/@types node_modules/bun-types
 
+# Download baseline Bun binary if BUN_VARIANT=baseline (for CPUs without AVX)
+# Only applies to amd64 - ARM64 doesn't have AVX concept
+ARG BUN_VERSION=1.3.5
+RUN if [ "$BUN_VARIANT" = "baseline" ] && [ "$TARGETARCH" = "amd64" ]; then \
+      echo "Downloading Bun baseline binary for CPUs without AVX support..." && \
+      curl -fsSL "https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/bun-linux-x64-baseline.zip" -o /tmp/bun.zip && \
+      unzip -o /tmp/bun.zip -d /tmp && \
+      cp /tmp/bun-linux-x64-baseline/bun /usr/local/bin/bun && \
+      chmod +x /usr/local/bin/bun && \
+      rm -rf /tmp/bun.zip /tmp/bun-linux-x64-baseline && \
+      echo "Bun baseline binary installed successfully"; \
+    fi
+
 # -----------------------------------------------------------------------------
 # Stage 3: Final Image (Scratch + Custom Wolfi OS)
 # -----------------------------------------------------------------------------
@@ -105,6 +126,8 @@ COPY --from=os-builder /work/rootfs/ /
 
 # Copy Bun from official image - ensures compatibility with all x86_64 CPUs (no AVX2 requirement)
 # Wolfi's bun package requires AVX2 which breaks on Celeron/Atom CPUs
+# For baseline builds (BUN_VARIANT=baseline), this contains the baseline binary (no AVX requirement)
+# For regular builds, this contains the standard oven/bun binary
 COPY --from=app-builder /usr/local/bin/bun /usr/bin/bun
 
 WORKDIR /app
@@ -121,6 +144,7 @@ ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     PGID=1001
 
 # Create docker compose plugin symlink (we use `docker compose` syntax, Wolfi has standalone binary)
+# Note: docker-cli-buildx package already creates the buildx symlink
 RUN mkdir -p /usr/libexec/docker/cli-plugins \
     && ln -s /usr/bin/docker-compose /usr/libexec/docker/cli-plugins/docker-compose
 

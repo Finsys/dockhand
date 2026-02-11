@@ -1,9 +1,11 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getEnvironments, createEnvironment, assignUserRole, getRoleByName, getEnvironmentPublicIps, setEnvironmentPublicIp, getEnvUpdateCheckSettings, getEnvironmentTimezone, type Environment } from '$lib/server/db';
+import { getEnvironments, getEnvironmentByName, createEnvironment, assignUserRole, getRoleByName, getEnvironmentPublicIps, setEnvironmentPublicIp, getEnvUpdateCheckSettings, getEnvironmentTimezone, getImagePruneSettings, type Environment } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
+import { auditEnvironment } from '$lib/server/audit';
 import { refreshSubprocessEnvironments } from '$lib/server/subprocess-manager';
 import { serializeLabels, parseLabels, MAX_LABELS } from '$lib/utils/label-colors';
+import { cleanPem } from '$lib/utils/pem';
 
 export const GET: RequestHandler = async ({ cookies }) => {
 	const auth = await authorize(cookies);
@@ -35,16 +37,18 @@ export const GET: RequestHandler = async ({ cookies }) => {
 			}
 		}
 
-		// Parse labels from JSON string to array, add public IPs, update check settings, and timezone
+		// Parse labels from JSON string to array, add public IPs, update check settings, image prune settings, and timezone
 		const envWithParsedLabels = await Promise.all(environments.map(async env => {
 			const updateSettings = updateCheckSettingsMap.get(env.id);
 			const timezone = await getEnvironmentTimezone(env.id);
+			const imagePruneSettings = await getImagePruneSettings(env.id);
 			return {
 				...env,
 				labels: parseLabels(env.labels as string | null),
 				publicIp: publicIps[env.id.toString()] || null,
 				updateCheckEnabled: updateSettings?.enabled || false,
 				updateCheckAutoUpdate: updateSettings?.autoUpdate || false,
+				imagePruneEnabled: imagePruneSettings?.enabled || false,
 				timezone
 			};
 		}));
@@ -56,7 +60,8 @@ export const GET: RequestHandler = async ({ cookies }) => {
 	}
 };
 
-export const POST: RequestHandler = async ({ request, cookies }) => {
+export const POST: RequestHandler = async (event) => {
+	const { request, cookies } = event;
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !await auth.can('environments', 'create')) {
 		return json({ error: 'Permission denied' }, { status: 403 });
@@ -67,6 +72,12 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 
 		if (!data.name) {
 			return json({ error: 'Name is required' }, { status: 400 });
+		}
+
+		// Check if environment with this name already exists
+		const existing = await getEnvironmentByName(data.name);
+		if (existing) {
+			return json({ error: 'An environment with this name already exists' }, { status: 409 });
 		}
 
 		// Host is required for direct and hawser-standard connections
@@ -83,9 +94,9 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			host: data.host,
 			port: data.port || 2375,
 			protocol: data.protocol || 'http',
-			tlsCa: data.tlsCa,
-			tlsCert: data.tlsCert,
-			tlsKey: data.tlsKey,
+			tlsCa: cleanPem(data.tlsCa),
+			tlsCert: cleanPem(data.tlsCert),
+			tlsKey: cleanPem(data.tlsKey),
 			tlsSkipVerify: data.tlsSkipVerify || false,
 			icon: data.icon || 'globe',
 			socketPath: data.socketPath || '/var/run/docker.sock',
@@ -121,10 +132,12 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			}
 		}
 
+		// Audit log
+		await auditEnvironment(event, 'create', env.id, env.name);
+
 		return json(env);
 	} catch (error) {
 		console.error('Failed to create environment:', error);
-		const message = error instanceof Error ? error.message : 'Failed to create environment';
-		return json({ error: message }, { status: 500 });
+		return json({ error: 'Failed to create environment' }, { status: 500 });
 	}
 };

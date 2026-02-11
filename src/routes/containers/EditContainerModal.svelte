@@ -44,12 +44,12 @@
 		id: number;
 		name: string;
 		description?: string;
-		env_vars?: { key: string; value: string }[];
+		envVars?: { key: string; value: string }[];
 		labels?: { key: string; value: string }[];
 		ports?: { hostPort: string; containerPort: string; protocol: string }[];
 		volumes?: { hostPath: string; containerPath: string; mode: string }[];
-		network_mode: string;
-		restart_policy: string;
+		networkMode: string;
+		restartPolicy: string;
 	}
 
 	interface Props {
@@ -87,6 +87,7 @@
 	let restartMaxRetries = $state<number | ''>('');
 	let networkMode = $state('bridge');
 	let startAfterUpdate = $state(true);
+	let repullImage = $state(true);
 
 	// Port mappings
 	let portMappings = $state<{ hostPort: string; containerPort: string; protocol: string }[]>([
@@ -153,6 +154,15 @@
 	// Ulimits
 	let ulimits = $state<{ name: string; soft: string; hard: string }[]>([]);
 
+	// GPU settings
+	let gpuEnabled = $state(false);
+	let gpuMode = $state<'all' | 'count' | 'specific'>('all');
+	let gpuCount = $state(1);
+	let gpuDeviceIds = $state<string[]>([]);
+	let gpuDriver = $state('');
+	let gpuCapabilities = $state<string[]>(['gpu']);
+	let runtime = $state('');
+
 	// Auto-update settings
 	let autoUpdateEnabled = $state(false);
 	let autoUpdateCronExpression = $state('0 3 * * *');
@@ -195,11 +205,19 @@
 		dnsSearch: string[];
 		dnsOptions: string[];
 		ulimits: typeof ulimits;
+		gpuEnabled: boolean;
+		gpuMode: 'all' | 'count' | 'specific';
+		gpuCount: number;
+		gpuDeviceIds: string[];
+		gpuDriver: string;
+		gpuCapabilities: string[];
+		runtime: string;
 	} | null>(null);
 
 	// Compose container detection
 	let isComposeContainer = $state(false);
 	let composeStackName = $state('');
+
 
 	let originalAutoUpdate = $state<{
 		enabled: boolean;
@@ -210,6 +228,7 @@
 	let loading = $state(false);
 	let loadingData = $state(true);
 	let error = $state('');
+	let abortController: AbortController | null = null;
 	let statusMessage = $state('');
 	let visible = $state(false);
 
@@ -386,7 +405,7 @@
 						})
 				: [{ key: '', value: '' }];
 
-			// Parse labels
+			// Parse labels - filter out com.docker.* labels for UI (they're preserved automatically by updateContainer)
 			const containerLabels = data.Config.Labels || {};
 			const labelEntries = Object.entries(containerLabels).filter(
 				([key]) => !key.startsWith('com.docker.')
@@ -483,6 +502,36 @@
 				hard: String(u.Hard || 0)
 			}));
 
+			// Parse GPU / Device Requests
+			const deviceReqs = data.HostConfig?.DeviceRequests || [];
+			if (deviceReqs.length > 0) {
+				gpuEnabled = true;
+				const firstReq = deviceReqs[0];
+				if (firstReq.DeviceIDs?.length > 0) {
+					gpuMode = 'specific';
+					gpuDeviceIds = [...firstReq.DeviceIDs];
+				} else if (firstReq.Count === -1) {
+					gpuMode = 'all';
+				} else {
+					gpuMode = 'count';
+					gpuCount = firstReq.Count || 1;
+				}
+				gpuCapabilities = firstReq.Capabilities?.length > 0
+					? firstReq.Capabilities.flat() : ['gpu'];
+				gpuDriver = firstReq.Driver || '';
+			} else {
+				gpuEnabled = false;
+				gpuMode = 'all';
+				gpuCount = 1;
+				gpuDeviceIds = [];
+				gpuDriver = '';
+				gpuCapabilities = ['gpu'];
+			}
+
+			// Parse runtime
+			runtime = (data.HostConfig?.Runtime && data.HostConfig.Runtime !== 'runc')
+				? data.HostConfig.Runtime : '';
+
 			// Fetch available networks and auto-update settings
 			await fetchNetworks();
 			await fetchAutoUpdateSettings(name);
@@ -521,7 +570,14 @@
 				dnsServers: [...dnsServers],
 				dnsSearch: [...dnsSearch],
 				dnsOptions: [...dnsOptions],
-				ulimits: JSON.parse(JSON.stringify(ulimits))
+				ulimits: JSON.parse(JSON.stringify(ulimits)),
+				gpuEnabled,
+				gpuMode,
+				gpuCount,
+				gpuDeviceIds: [...gpuDeviceIds],
+				gpuDriver,
+				gpuCapabilities: [...gpuCapabilities],
+				runtime
 			};
 		} catch (err) {
 			error = 'Failed to load container data: ' + String(err);
@@ -600,6 +656,15 @@
 		const currentUlimits = ulimits.filter(u => u.name && u.soft && u.hard);
 		const originalUlimits = originalConfig.ulimits.filter(u => u.name && u.soft && u.hard);
 		if (JSON.stringify(currentUlimits) !== JSON.stringify(originalUlimits)) return true;
+
+		// GPU settings
+		if (gpuEnabled !== originalConfig.gpuEnabled) return true;
+		if (gpuMode !== originalConfig.gpuMode) return true;
+		if (gpuCount !== originalConfig.gpuCount) return true;
+		if (JSON.stringify([...gpuDeviceIds].sort()) !== JSON.stringify([...originalConfig.gpuDeviceIds].sort())) return true;
+		if (gpuDriver !== originalConfig.gpuDriver) return true;
+		if (JSON.stringify([...gpuCapabilities].sort()) !== JSON.stringify([...originalConfig.gpuCapabilities].sort())) return true;
+		if (runtime !== originalConfig.runtime) return true;
 
 		return false;
 	}
@@ -700,6 +765,8 @@
 		}
 
 		loading = true;
+		abortController = new AbortController();
+		const signal = abortController.signal;
 
 		const containerConfigChanged = hasContainerConfigChanged();
 		const autoUpdateChanged = hasAutoUpdateChanged();
@@ -721,7 +788,8 @@
 				), {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ name: name.trim() })
+					body: JSON.stringify({ name: name.trim() }),
+					signal
 				});
 
 				const result = await response.json();
@@ -801,6 +869,23 @@
 						hard: parseInt(u.hard) || 0
 					}));
 
+				let deviceRequests: any[] | undefined = undefined;
+				if (gpuEnabled) {
+					const dr: any = {
+						capabilities: gpuCapabilities.length > 0 ? [gpuCapabilities] : [['gpu']],
+						driver: gpuDriver || undefined
+					};
+					if (gpuMode === 'all') {
+						dr.count = -1;
+					} else if (gpuMode === 'count') {
+						dr.count = gpuCount || 1;
+					} else {
+						dr.count = 0;
+						dr.deviceIDs = gpuDeviceIds.filter(id => id.trim());
+					}
+					deviceRequests = [dr];
+				}
+
 				const payload = {
 					name: name.trim(),
 					image: image.trim(),
@@ -814,6 +899,7 @@
 					networkMode,
 					networks: selectedNetworks.length > 0 ? selectedNetworks : undefined,
 					startAfterUpdate,
+					repullImage,
 					user: containerUser.trim() || undefined,
 					privileged: privilegedMode || undefined,
 					healthcheck,
@@ -826,6 +912,8 @@
 					capAdd: capAdd.length > 0 ? capAdd : undefined,
 					capDrop: capDrop.length > 0 ? capDrop : undefined,
 					devices: devices.length > 0 ? devices : undefined,
+					deviceRequests,
+					runtime: runtime || undefined,
 					dns: dnsServers.length > 0 ? dnsServers : undefined,
 					dnsSearch: dnsSearch.length > 0 ? dnsSearch : undefined,
 					dnsOptions: dnsOptions.length > 0 ? dnsOptions : undefined,
@@ -836,7 +924,8 @@
 				const response = await fetch(appendEnvParam(`/api/containers/${containerId}/update`, $currentEnvironment?.id), {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify(payload)
+					body: JSON.stringify(payload),
+					signal
 				});
 
 				const result = await response.json();
@@ -867,13 +956,20 @@
 			onSuccess();
 			onClose();
 		} catch (err) {
+			if (signal.aborted) return;
 			error = 'Failed to update container: ' + String(err);
 		} finally {
 			loading = false;
+			abortController = null;
 		}
 	}
 
 	function handleClose() {
+		if (abortController) {
+			abortController.abort();
+			abortController = null;
+		}
+		loading = false;
 		onClose();
 	}
 
@@ -897,7 +993,7 @@
 </script>
 
 <Dialog.Root bind:open onOpenChange={(isOpen) => isOpen && focusFirstInput()}>
-	<Dialog.Content class="max-w-4xl w-[56rem] max-h-[90vh] p-0 flex flex-col overflow-hidden" style="min-height: 85vh; height: 85vh;">
+	<Dialog.Content class="max-w-4xl w-full max-h-[90vh] p-0 flex flex-col overflow-hidden sm:max-h-[85vh]">
 		<Dialog.Header class="px-5 py-4 border-b bg-muted/30 shrink-0 sticky top-0 z-10">
 			<Dialog.Title class="text-base font-semibold flex items-center gap-1">
 				Edit container
@@ -944,7 +1040,7 @@
 		</Dialog.Header>
 
 		{#if loadingData}
-			<div class="flex-1 flex items-center justify-center text-muted-foreground text-sm" style="min-height: calc(85vh - 120px);">
+			<div class="flex-1 flex items-center justify-center text-muted-foreground text-sm min-h-[200px]">
 				<Loader2 class="w-5 h-5 animate-spin mr-2" />
 				Loading container data...
 			</div>
@@ -973,6 +1069,7 @@
 					bind:restartMaxRetries
 					bind:networkMode
 					startAfterCreate={startAfterUpdate}
+					{repullImage}
 					bind:portMappings
 					bind:volumeMappings
 					bind:envVars
@@ -997,6 +1094,13 @@
 					bind:capDrop
 					bind:securityOptions
 					bind:deviceMappings
+					bind:gpuEnabled
+					bind:gpuMode
+					bind:gpuCount
+					bind:gpuDeviceIds
+					bind:gpuDriver
+					bind:gpuCapabilities
+					bind:runtime
 					bind:dnsServers
 					bind:dnsSearch
 					bind:dnsOptions
@@ -1023,7 +1127,7 @@
 			</div>
 
 			<div class="flex justify-end gap-2 px-5 py-3 border-t bg-muted/30 shrink-0">
-				<Button type="button" variant="outline" onclick={handleClose} disabled={loading} size="sm">
+				<Button type="button" variant="outline" onclick={handleClose} size="sm">
 					Cancel
 				</Button>
 				<Button type="button" variant="secondary" disabled={loading} size="sm" onclick={handleSubmit}>

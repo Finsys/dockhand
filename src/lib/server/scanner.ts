@@ -10,10 +10,14 @@ import {
 	removeVolume,
 	runContainer,
 	runContainerWithStreaming,
-	inspectImage
+	inspectImage,
+	checkImageUpdateAvailable
 } from './docker';
 import { getEnvironment, getEnvSetting, getSetting } from './db';
 import { sendEventNotification } from './notifications';
+import { getHostDockerSocket, getHostDataDir, extractUidFromSocketPath } from './host-path';
+import { resolve } from 'node:path';
+import { mkdir, chown } from 'node:fs/promises';
 
 export type ScannerType = 'none' | 'grype' | 'trivy' | 'both';
 
@@ -66,8 +70,39 @@ export async function sendVulnerabilityNotifications(
 const GRYPE_VOLUME_NAME = 'dockhand-grype-db';
 const TRIVY_VOLUME_NAME = 'dockhand-trivy-db';
 
-// Track running scanner instances to detect concurrent scans
-const runningScanners = new Map<string, number>(); // key: "grype" or "trivy", value: count
+// Scanner cache directory for rootless Docker (bind mounts instead of volumes)
+const DATA_DIR = process.env.DATA_DIR || '/app/data';
+const SCANNER_CACHE_DIR = 'scanner-cache';
+
+// Per-type serial lock to prevent concurrent scans of the same scanner type.
+// This avoids DB lock conflicts AND ensures the second scan uses warm cache
+// instead of re-downloading the entire vulnerability database (~100MB).
+const scannerLocks = new Map<string, Promise<void>>(); // key: "grype" or "trivy"
+
+async function withScannerLock<T>(scannerType: string, fn: () => Promise<T>): Promise<T> {
+	const existing = scannerLocks.get(scannerType);
+	if (existing) {
+		console.log(`[Scanner] Waiting for previous ${scannerType} scan to complete...`);
+		await existing.catch(() => {}); // Don't fail if previous scan errored
+	}
+
+	let resolve: () => void;
+	const lockPromise = new Promise<void>(r => { resolve = r; });
+	scannerLocks.set(scannerType, lockPromise);
+
+	try {
+		return await fn();
+	} finally {
+		resolve!();
+		if (scannerLocks.get(scannerType) === lockPromise) {
+			scannerLocks.delete(scannerType);
+		}
+	}
+}
+
+// Track in-progress scans per image to prevent duplicate scans
+// Key: "{scannerType}:{imageName}", Value: Promise that resolves to the scan result
+const inProgressScans = new Map<string, Promise<string>>();
 
 // Default CLI arguments for scanners (image name is substituted for {image})
 export const DEFAULT_GRYPE_ARGS = '-o json -v {image}';
@@ -232,9 +267,75 @@ async function ensureScannerImage(
 		await pullImage(scannerImage, undefined, envId);
 		return true;
 	} catch (error) {
-		console.error(`Failed to pull scanner image ${scannerImage}:`, error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error(`[Scanner] Failed to pull image ${scannerImage}:`, errorMsg);
 		return false;
 	}
+}
+
+// Extract JSON object from raw scanner output that may contain non-JSON content
+// (binary Docker stream headers, warning lines, control characters)
+function extractJson(output: string): string {
+	const firstBrace = output.indexOf('{');
+	const lastBrace = output.lastIndexOf('}');
+	if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
+		throw new Error('No JSON object found in scanner output');
+	}
+	return output.slice(firstBrace, lastBrace + 1);
+}
+
+/**
+ * Sanitize control characters inside JSON string values that would cause parse failures.
+ * Some scanners (Grype) may include raw control chars (newlines, tabs, null bytes)
+ * in vulnerability descriptions that aren't properly JSON-escaped.
+ */
+function sanitizeJsonString(json: string): string {
+	// Replace unescaped control characters (0x00-0x1F) inside JSON string values
+	// by walking through the string and tracking whether we're inside a quoted string
+	let result = '';
+	let inString = false;
+	let escaped = false;
+	let sanitized = 0;
+
+	for (let i = 0; i < json.length; i++) {
+		const ch = json.charCodeAt(i);
+
+		if (escaped) {
+			result += json[i];
+			escaped = false;
+			continue;
+		}
+
+		if (inString) {
+			if (ch === 0x5C) { // backslash
+				result += json[i];
+				escaped = true;
+			} else if (ch === 0x22) { // closing quote
+				result += json[i];
+				inString = false;
+			} else if (ch < 0x20) {
+				// Control character inside a string - escape it
+				if (ch === 0x0A) result += '\\n';
+				else if (ch === 0x0D) result += '\\r';
+				else if (ch === 0x09) result += '\\t';
+				else result += `\\u${ch.toString(16).padStart(4, '0')}`;
+				sanitized++;
+			} else {
+				result += json[i];
+			}
+		} else {
+			if (ch === 0x22) { // opening quote
+				inString = true;
+			}
+			result += json[i];
+		}
+	}
+
+	if (sanitized > 0) {
+		console.warn(`[Scanner] Sanitized ${sanitized} control characters in JSON output`);
+	}
+
+	return result;
 }
 
 // Parse Grype JSON output
@@ -251,10 +352,10 @@ function parseGrypeOutput(output: string): { vulnerabilities: Vulnerability[]; s
 
 	console.log('[Grype] Raw output length:', output.length);
 	console.log('[Grype] Output starts with:', output.slice(0, 200));
+	console.log('[Grype] Output ends with:', JSON.stringify(output.slice(-50)));
 
 	try {
-		const data = JSON.parse(output);
-		console.log('[Grype] Parsed JSON, matches count:', data.matches?.length || 0);
+		const data = JSON.parse(sanitizeJsonString(extractJson(output)));
 
 		if (data.matches) {
 			for (const match of data.matches) {
@@ -281,8 +382,11 @@ function parseGrypeOutput(output: string): { vulnerabilities: Vulnerability[]; s
 			}
 		}
 	} catch (error) {
-		console.error('[Grype] Failed to parse output:', error);
-		console.error('[Grype] Output was:', output.slice(0, 500));
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[Grype] Failed to parse output:', errorMsg);
+		console.error('[Grype] Output length:', output.length);
+		console.error('[Grype] First 200 chars:', output.slice(0, 200));
+		console.error('[Grype] Last 200 chars:', output.slice(-200));
 		// Check if output looks like an error message from grype
 		const firstLine = output.split('\n')[0].trim();
 		if (firstLine && !firstLine.startsWith('{')) {
@@ -291,7 +395,6 @@ function parseGrypeOutput(output: string): { vulnerabilities: Vulnerability[]; s
 		throw new Error('Failed to parse scanner output - ensure CLI args include "-o json"');
 	}
 
-	console.log('[Grype] Parsed vulnerabilities:', vulnerabilities.length);
 	return { vulnerabilities, summary };
 }
 
@@ -308,7 +411,7 @@ function parseTrivyOutput(output: string): { vulnerabilities: Vulnerability[]; s
 	};
 
 	try {
-		const data = JSON.parse(output);
+		const data = JSON.parse(sanitizeJsonString(extractJson(output)));
 
 		const results = data.Results || [];
 		for (const result of results) {
@@ -337,8 +440,11 @@ function parseTrivyOutput(output: string): { vulnerabilities: Vulnerability[]; s
 			}
 		}
 	} catch (error) {
-		console.error('[Trivy] Failed to parse output:', error);
-		console.error('[Trivy] Output was:', output.slice(0, 500));
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[Trivy] Failed to parse output:', errorMsg);
+		console.error('[Trivy] Output length:', output.length);
+		console.error('[Trivy] First 32 bytes (hex):', Buffer.from(output.slice(0, 32)).toString('hex'));
+		console.error('[Trivy] Full output:', output);
 		// Check if output looks like an error message from trivy
 		const firstLine = output.split('\n')[0].trim();
 		if (firstLine && !firstLine.startsWith('{')) {
@@ -374,6 +480,43 @@ async function ensureVolume(volumeName: string, envId?: number): Promise<void> {
 	}
 }
 
+/**
+ * Ensure scanner cache directory exists with correct ownership for rootless Docker.
+ * Creates the directory in Dockhand's data volume and chowns it to the target UID.
+ *
+ * This is needed because Docker volumes are always created with root ownership,
+ * but rootless Docker scanners run as a non-root user (e.g., UID 1000).
+ * By using a bind mount from Dockhand's data directory (which Dockhand can chown
+ * since it runs as root), the scanner can write to its cache.
+ *
+ * @param scannerType - 'grype' or 'trivy'
+ * @param uid - Target UID for ownership (e.g., '1000')
+ * @returns The HOST path to the cache directory (for bind mounting into scanner)
+ */
+async function ensureScannerCacheDir(
+	scannerType: 'grype' | 'trivy',
+	uid: string
+): Promise<string> {
+	const containerPath = resolve(DATA_DIR, SCANNER_CACHE_DIR, scannerType);
+
+	// Create directory if needed (recursive)
+	await mkdir(containerPath, { recursive: true });
+
+	// Chown to the target UID so scanner can write
+	const uidNum = parseInt(uid, 10);
+	await chown(containerPath, uidNum, uidNum);
+	console.log(`[Scanner] Set ownership of ${containerPath} to ${uid}:${uid}`);
+
+	// Return the HOST path for bind mounting
+	const hostDataDir = getHostDataDir();
+	if (hostDataDir) {
+		return `${hostDataDir}/${SCANNER_CACHE_DIR}/${scannerType}`;
+	}
+
+	// Fallback: not running in Docker, use container path as-is
+	return containerPath;
+}
+
 // Run scanner in a fresh container with volume-cached database
 async function runScannerContainer(
 	scannerImage: string,
@@ -383,69 +526,158 @@ async function runScannerContainer(
 	envId?: number,
 	onOutput?: (line: string) => void
 ): Promise<string> {
-	// Ensure database cache volume exists
-	const volumeName = scannerType === 'grype' ? GRYPE_VOLUME_NAME : TRIVY_VOLUME_NAME;
-	await ensureVolume(volumeName, envId);
+	// Check if a scan for this exact image is already in progress
+	// This prevents duplicate scans when multiple containers use the same image
+	const scanKey = `${scannerType}:${imageName}:${envId ?? 'local'}`;
+	const existingScan = inProgressScans.get(scanKey);
+	if (existingScan) {
+		console.log(`[Scanner] Reusing in-progress ${scannerType} scan for: ${imageName}`);
+		return existingScan;
+	}
 
-	// Check if another scanner of the same type is already running
-	// If so, use a unique cache subdirectory to avoid lock conflicts
-	const currentCount = runningScanners.get(scannerType) || 0;
-	const scanId = currentCount > 0 ? `-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` : '';
+	// Create the actual scan promise
+	const scanPromise = runScannerContainerImpl(scannerImage, scannerType, imageName, cmd, envId, onOutput);
 
-	// Increment running counter
-	runningScanners.set(scannerType, currentCount + 1);
+	// Register it so concurrent requests can reuse it
+	inProgressScans.set(scanKey, scanPromise);
 
-	// Configure volume mount based on scanner type
-	// Use a unique subdirectory if another scan is in progress
+	try {
+		return await scanPromise;
+	} finally {
+		// Clean up the tracking entry when done
+		inProgressScans.delete(scanKey);
+	}
+}
+
+// Internal implementation of scanner container run
+async function runScannerContainerImpl(
+	scannerImage: string,
+	scannerType: 'grype' | 'trivy',
+	imageName: string,
+	cmd: string[],
+	envId?: number,
+	onOutput?: (line: string) => void
+): Promise<string> {
+	// Serialize scans of the same type to avoid DB lock conflicts and re-downloads
+	return withScannerLock(scannerType, () =>
+		runScannerContainerCore(scannerImage, scannerType, imageName, cmd, envId, onOutput)
+	);
+}
+
+async function runScannerContainerCore(
+	scannerImage: string,
+	scannerType: 'grype' | 'trivy',
+	imageName: string,
+	cmd: string[],
+	envId?: number,
+	onOutput?: (line: string) => void
+): Promise<string> {
+	console.log(`[Scanner] Starting ${scannerType} scan for image: ${imageName}, envId: ${envId ?? 'local'}`);
+
+	// Always use the base cache path — serial lock prevents concurrent conflicts
 	const basePath = scannerType === 'grype' ? '/cache/grype' : '/cache/trivy';
-	const dbPath = scanId ? `${basePath}${scanId}` : basePath;
+	const dbPath = basePath;
+
+	// Detect the host Docker socket path based on connection type
+	// For local socket environments, detect the actual host socket path (handles rootless Docker)
+	// For remote environments (hawser/direct with host), scanner runs remotely and uses standard path
+	const env = envId ? await getEnvironment(envId) : undefined;
+	const connectionType = env?.connectionType;
+
+	// Determine if this is a local socket environment:
+	// - connectionType === 'socket' (explicit)
+	// - connectionType is null/undefined (default behavior)
+	// - connectionType === 'direct' but no host specified (legacy local environments)
+	const isLocalSocket = !connectionType ||
+		connectionType === 'socket' ||
+		(connectionType === 'direct' && !env?.host);
+
+	let hostSocketPath: string;
+	let rootlessUid: string | undefined;
+
+	if (isLocalSocket) {
+		// Local socket environment - detect host socket path (handles rootless Docker)
+		hostSocketPath = getHostDockerSocket();
+		console.log(`[Scanner] Local socket scan (${connectionType || 'default'}) - detected host Docker socket: ${hostSocketPath}`);
+
+		// For user-specific Docker sockets (rootless Docker), detect UID for cache ownership
+		// but do NOT set container user — in rootless Docker, root inside the container
+		// maps to the socket-owning UID on the host via user namespace remapping
+		const uid = extractUidFromSocketPath(hostSocketPath);
+		if (uid) {
+			rootlessUid = uid;
+			console.log(`[Scanner] Rootless Docker detected (UID ${rootlessUid})`);
+			console.log(`[Scanner] Scanner will run as root inside container (maps to UID ${rootlessUid} on host via user namespace)`);
+		}
+	} else {
+		// Remote environment (direct with host/hawser-standard/hawser-edge)
+		// Scanner runs on remote host, uses remote host's standard Docker socket
+		hostSocketPath = '/var/run/docker.sock';
+		console.log(`[Scanner] Remote scan (${connectionType}, host: ${env?.host}) - using standard socket path: ${hostSocketPath}`);
+	}
+
+	// Determine cache storage strategy based on environment
+	// For rootless Docker: use bind mount from data directory with correct ownership
+	// For standard Docker: use named volume (root-owned is fine when running as root)
+	let cacheBind: string;
+	const volumeName = scannerType === 'grype' ? GRYPE_VOLUME_NAME : TRIVY_VOLUME_NAME;
+
+	if (rootlessUid) {
+		// Rootless Docker: use bind mount from data directory with correct ownership
+		const hostCachePath = await ensureScannerCacheDir(scannerType, rootlessUid);
+		cacheBind = `${hostCachePath}:${basePath}`;
+		console.log(`[Scanner] Rootless mode - using bind mount: ${cacheBind}`);
+	} else {
+		// Standard Docker: use named volume (root-owned is fine when running as root)
+		await ensureVolume(volumeName, envId);
+		cacheBind = `${volumeName}:${basePath}`;
+		console.log(`[Scanner] Standard mode - using volume: ${volumeName}`);
+	}
 
 	const binds = [
-		'/var/run/docker.sock:/var/run/docker.sock:ro',
-		`${volumeName}:${basePath}` // Always mount to base path
+		`${hostSocketPath}:/var/run/docker.sock:ro`,
+		cacheBind
 	];
 
+	console.log(`[Scanner] Container bind mounts: ${JSON.stringify(binds)}`);
+
 	// Environment variables to ensure scanners use the correct cache path
-	// For concurrent scans, use a unique subdirectory
 	const envVars = scannerType === 'grype'
 		? [`GRYPE_DB_CACHE_DIR=${dbPath}`]
 		: [`TRIVY_CACHE_DIR=${dbPath}`];
 
-	if (scanId) {
-		console.log(`[Scanner] Concurrent scan detected - using unique cache dir: ${dbPath}`);
-	}
-	console.log(`[Scanner] Running ${scannerType} with volume ${volumeName} mounted at ${basePath}`);
-
-	try {
-		// Run the scanner container
-		const output = await runContainerWithStreaming({
-			image: scannerImage,
-			cmd,
-			binds,
-			env: envVars,
-			name: `dockhand-${scannerType}-${Date.now()}`,
-			envId,
-			onStderr: (data) => {
-				// Stream stderr lines for real-time progress output
-				const lines = data.split('\n');
-				for (const line of lines) {
-					if (line.trim()) {
-						onOutput?.(line);
-					}
+	console.log(`[Scanner] Running ${scannerType} with cache mounted at ${basePath}`);
+	console.log(`[Scanner] Container command: ${cmd.join(' ')}`);
+	// Run the scanner container with a 10-minute timeout to prevent indefinite hangs
+	const output = await runContainerWithStreaming({
+		image: scannerImage,
+		cmd,
+		binds,
+		env: envVars,
+		name: `dockhand-${scannerType}-${Date.now()}`,
+		envId,
+		timeout: 600_000, // 10 minutes
+		onStderr: (data) => {
+			// Stream stderr lines for real-time progress output
+			const lines = data.split('\n');
+			for (const line of lines) {
+				if (line.trim()) {
+					onOutput?.(line);
 				}
 			}
-		});
-
-		return output;
-	} finally {
-		// Decrement running counter
-		const newCount = (runningScanners.get(scannerType) || 1) - 1;
-		if (newCount <= 0) {
-			runningScanners.delete(scannerType);
-		} else {
-			runningScanners.set(scannerType, newCount);
 		}
+	});
+
+	console.log(`[Scanner] ${scannerType} container completed, output length: ${output.length}`);
+	if (output.length === 0) {
+		console.error(`[Scanner] WARNING: Empty output from ${scannerType} container`);
+		console.error(`[Scanner] This may indicate the scanner couldn't access Docker socket`);
+		console.error(`[Scanner] Host socket path used: ${hostSocketPath}`);
+	} else if (output.length < 100) {
+		console.log(`[Scanner] ${scannerType} output preview: ${output}`);
 	}
+
+	return output;
 }
 
 // Scan image with Grype
@@ -496,6 +728,12 @@ export async function scanWithGrype(
 				});
 			}
 		);
+
+		// Defensive logging for empty output
+		console.log(`[Grype] Scanner container output received, length: ${output.length}`);
+		if (output.length === 0) {
+			console.error('[Grype] WARNING: Empty output from scanner container - possible race condition');
+		}
 
 		onProgress?.({
 			stage: 'parsing',
@@ -589,6 +827,12 @@ export async function scanWithTrivy(
 			}
 		);
 
+		// Defensive logging for empty output
+		console.log(`[Trivy] Scanner container output received, length: ${output.length}`);
+		if (output.length === 0) {
+			console.error('[Trivy] WARNING: Empty output from scanner container - possible race condition');
+		}
+
 		onProgress?.({
 			stage: 'parsing',
 			message: 'Parsing scan results...',
@@ -655,7 +899,8 @@ export async function scanImage(
 			const result = await scanWithGrype(imageName, envId, onProgress);
 			results.push(result);
 		} catch (error) {
-			console.error('Grype scan failed:', error);
+			const errorMsg = error instanceof Error ? error.message : String(error);
+			console.error('[Grype] Scan failed:', errorMsg);
 			errors.push(error instanceof Error ? error : new Error(String(error)));
 			if (scannerType === 'grype') throw error;
 		}
@@ -666,7 +911,8 @@ export async function scanImage(
 			const result = await scanWithTrivy(imageName, envId, onProgress);
 			results.push(result);
 		} catch (error) {
-			console.error('Trivy scan failed:', error);
+			const errorMsg = error instanceof Error ? error.message : String(error);
+			console.error('[Trivy] Scan failed:', errorMsg);
 			errors.push(error instanceof Error ? error : new Error(String(error)));
 			if (scannerType === 'trivy') throw error;
 		}
@@ -691,7 +937,8 @@ export async function scanImage(
 
 		// Send notifications (async, don't block return)
 		sendVulnerabilityNotifications(imageName, combinedSummary, envId).catch(err => {
-			console.error('[Scanner] Failed to send vulnerability notifications:', err);
+			const errorMsg = err instanceof Error ? err.message : String(err);
+			console.error('[Scanner] Failed to send vulnerability notifications:', errorMsg);
 		});
 	}
 
@@ -731,6 +978,7 @@ async function getScannerVersion(
 
 		// Create temporary container to get version
 		const versionCmd = scannerType === 'grype' ? ['version'] : ['--version'];
+		console.log(`[Scanner] Getting ${scannerType} version with cmd:`, versionCmd);
 		const { stdout, stderr } = await runContainer({
 			image: scannerImage,
 			cmd: versionCmd,
@@ -738,6 +986,7 @@ async function getScannerVersion(
 			envId
 		});
 
+		console.log(`[Scanner] ${scannerType} version check result: stdout="${stdout.substring(0, 100)}", stderr="${stderr.substring(0, 100)}"`);
 		const output = stdout || stderr;
 
 		// Parse version from output
@@ -752,7 +1001,8 @@ async function getScannerVersion(
 
 		return version;
 	} catch (error) {
-		console.error(`Failed to get ${scannerType} version:`, error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error(`[Scanner] Failed to get ${scannerType} version:`, errorMsg);
 		return null;
 	}
 }
@@ -794,18 +1044,20 @@ export async function checkScannerUpdates(envId?: number): Promise<{
 					img.tags?.includes(imageName)
 				);
 
-				if (localImage) {
-					result[scanner].localDigest = localImage.id?.substring(7, 19); // Short digest
-					// Note: Remote digest checking would require pulling or using registry API
-					// For simplicity, we just note that checking for updates requires a pull
-					result[scanner].hasUpdate = false;
+				if (localImage && localImage.id) {
+					const updateResult = await checkImageUpdateAvailable(imageName, localImage.id, envId);
+					result[scanner].hasUpdate = updateResult.hasUpdate;
+					result[scanner].localDigest = updateResult.currentDigest;
+					result[scanner].remoteDigest = updateResult.registryDigest;
 				}
 			} catch (error) {
-				console.error(`Failed to check updates for ${scanner}:`, error);
+				const errorMsg = error instanceof Error ? error.message : String(error);
+				console.error(`[Scanner] Failed to check updates for ${scanner}:`, errorMsg);
 			}
 		}
 	} catch (error) {
-		console.error('Failed to check scanner updates:', error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[Scanner] Failed to check scanner updates:', errorMsg);
 	}
 
 	return result;
@@ -824,6 +1076,7 @@ export async function cleanupScannerVolumes(envId?: number): Promise<void> {
 			}
 		}
 	} catch (error) {
-		console.error('Failed to cleanup scanner volumes:', error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[Scanner] Failed to cleanup scanner volumes:', errorMsg);
 	}
 }

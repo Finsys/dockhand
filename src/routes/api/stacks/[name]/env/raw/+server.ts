@@ -1,8 +1,9 @@
 import { json } from '@sveltejs/kit';
-import { getStacksDir } from '$lib/server/stacks';
+import { findStackDir, getStackDir } from '$lib/server/stacks';
+import { getStackSource } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
 import { existsSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import type { RequestHandler } from './$types';
 
 /**
@@ -26,11 +27,36 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 
 	try {
 		const stackName = decodeURIComponent(params.name);
-		const stacksDir = getStacksDir();
-		const envFilePath = join(stacksDir, stackName, '.env');
+
+		// Check if this stack has custom paths configured
+		const source = await getStackSource(stackName, envIdNum);
+
+		// Determine the env file path based on path resolution rules:
+		// - envPath = '' (empty string) → explicitly no env file
+		// - envPath = '/path/.env' → use custom path
+		// - envPath = null with composePath → suggest .env next to compose
+		// - envPath = null without composePath → use default location
+		let envFilePath: string | null = null;
+
+		if (source?.envPath === '') {
+			// Empty string = explicitly no env file
+			return json({ content: '', noEnvFile: true });
+		} else if (source?.envPath) {
+			// Custom env path specified
+			envFilePath = source.envPath;
+		} else if (source?.composePath) {
+			// Custom compose path but no env path - suggest .env next to compose
+			envFilePath = join(dirname(source.composePath), '.env');
+		} else {
+			// Default location - .env in stack directory
+			const stackDir = await findStackDir(stackName, envIdNum);
+			if (stackDir) {
+				envFilePath = join(stackDir, '.env');
+			}
+		}
 
 		let content = '';
-		if (existsSync(envFilePath)) {
+		if (envFilePath && existsSync(envFilePath)) {
 			try {
 				content = await Bun.file(envFilePath).text();
 			} catch {
@@ -73,12 +99,35 @@ export const PUT: RequestHandler = async ({ params, url, cookies, request }) => 
 			return json({ error: 'Invalid request body: content string required' }, { status: 400 });
 		}
 
-		const stacksDir = getStacksDir();
-		const stackDir = join(stacksDir, stackName);
-		const envFilePath = join(stackDir, '.env');
+		// Check if this stack has custom paths configured
+		const source = await getStackSource(stackName, envIdNum);
 
-		// Only write if stack directory exists
-		if (!existsSync(stackDir)) {
+		// Determine the env file path based on path resolution rules:
+		// - envPath = '' (empty string) → explicitly no env file, don't write
+		// - envPath = '/path/.env' → use custom path
+		// - envPath = null with composePath → suggest .env next to compose
+		// - envPath = null without composePath → use default location
+		let envFilePath: string | null = null;
+
+		if (source?.envPath === '') {
+			// Empty string = explicitly no env file - don't allow writes
+			return json({ success: true, noEnvFile: true });
+		} else if (source?.envPath) {
+			// Custom env path specified
+			envFilePath = source.envPath;
+		} else if (source?.composePath) {
+			// Custom compose path but no env path - suggest .env next to compose
+			envFilePath = join(dirname(source.composePath), '.env');
+		} else {
+			// Default location - .env in stack directory
+			const stackDir = await findStackDir(stackName, envIdNum);
+			if (stackDir) {
+				envFilePath = join(stackDir, '.env');
+			}
+		}
+
+		// Only write if we have a valid path
+		if (!envFilePath) {
 			return json({ error: 'Stack directory not found' }, { status: 404 });
 		}
 

@@ -7,6 +7,8 @@ import {
 	type GitAuthType
 } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
+import { auditGitCredential } from '$lib/server/audit';
+import { computeAuditDiff } from '$lib/utils/diff';
 
 export const GET: RequestHandler = async ({ params, cookies }) => {
 	const auth = await authorize(cookies);
@@ -42,7 +44,8 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 	}
 };
 
-export const PUT: RequestHandler = async ({ params, request, cookies }) => {
+export const PUT: RequestHandler = async (event) => {
+	const { params, request, cookies } = event;
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !await auth.can('git', 'edit')) {
 		return json({ error: 'Permission denied' }, { status: 403 });
@@ -78,6 +81,15 @@ export const PUT: RequestHandler = async ({ params, request, cookies }) => {
 			return json({ error: 'Failed to update credential' }, { status: 500 });
 		}
 
+		// Compute diff for audit (only non-sensitive fields)
+		const diff = computeAuditDiff(
+			{ name: existing.name, authType: existing.authType, username: existing.username },
+			{ name: credential.name, authType: credential.authType, username: credential.username }
+		);
+
+		// Audit log
+		await auditGitCredential(event, 'update', credential.id, credential.name, diff);
+
 		return json({
 			id: credential.id,
 			name: credential.name,
@@ -97,7 +109,8 @@ export const PUT: RequestHandler = async ({ params, request, cookies }) => {
 	}
 };
 
-export const DELETE: RequestHandler = async ({ params, cookies }) => {
+export const DELETE: RequestHandler = async (event) => {
+	const { params, cookies } = event;
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !await auth.can('git', 'delete')) {
 		return json({ error: 'Permission denied' }, { status: 403 });
@@ -109,10 +122,19 @@ export const DELETE: RequestHandler = async ({ params, cookies }) => {
 			return json({ error: 'Invalid credential ID' }, { status: 400 });
 		}
 
-		const deleted = await deleteGitCredential(id);
-		if (!deleted) {
+		// Get credential name before deletion for audit log
+		const credential = await getGitCredential(id);
+		if (!credential) {
 			return json({ error: 'Credential not found' }, { status: 404 });
 		}
+
+		const deleted = await deleteGitCredential(id);
+		if (!deleted) {
+			return json({ error: 'Failed to delete credential' }, { status: 500 });
+		}
+
+		// Audit log
+		await auditGitCredential(event, 'delete', id, credential.name);
 
 		return json({ success: true });
 	} catch (error) {

@@ -14,9 +14,10 @@
 		networks: { total: number };
 		stacks: { total: number; running: number; partial: number; stopped: number };
 		loading?: LoadingStates;
+		showStacksBreakdown?: boolean;
 	}
 
-	let { images, volumes, networks, stacks, loading }: Props = $props();
+	let { images, volumes, networks, stacks, loading, showStacksBreakdown = true }: Props = $props();
 
 	// Only show skeleton if loading AND we don't have data yet
 	// This prevents blinking when refreshing with existing data
@@ -46,7 +47,7 @@
 		{:else}
 			<span class="font-medium">
 				{stacks.total}
-				{#if stacks.total > 0}
+				{#if showStacksBreakdown && stacks.total > 0}
 					<span class="text-emerald-500">{stacks.running}</span>/<span class="text-amber-500">{stacks.partial}</span>/<span class="text-red-500">{stacks.stopped}</span>
 				{/if}
 			</span>

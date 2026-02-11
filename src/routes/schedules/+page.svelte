@@ -142,7 +142,7 @@
 
 	interface ScheduleExecution {
 		id: number;
-		scheduleType: 'container_update' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check';
+		scheduleType: 'container_update' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune';
 		scheduleId: number;
 		environmentId: number | null;
 		entityName: string;
@@ -161,7 +161,7 @@
 	interface Schedule {
 		key: string; // Unique key: type-id
 		id: number;
-		type: 'container_update' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check';
+		type: 'container_update' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune';
 		name: string;
 		entityName: string;
 		description?: string;
@@ -894,7 +894,7 @@
 
 <div class="flex-1 min-h-0 flex flex-col gap-3 overflow-hidden">
 	<!-- Header with filters -->
-	<div class="shrink-0 flex flex-wrap justify-between items-center gap-3">
+	<div class="shrink-0 flex flex-wrap justify-between items-center gap-3 min-h-8">
 		<PageHeader icon={Timer} title="Schedules" count={filteredSchedules.length} />
 		<div class="flex flex-wrap items-center gap-2">
 			<div class="relative">
@@ -921,6 +921,8 @@
 								Git stack syncs
 							{:else if filterTypes[0] === 'env_update_check'}
 								Env update checks
+							{:else if filterTypes[0] === 'image_prune'}
+								Image prune
 							{:else}
 								System jobs
 							{/if}
@@ -950,6 +952,10 @@
 					<Select.Item value="env_update_check">
 						<CircleFadingArrowUp class="w-4 h-4 mr-2 inline text-green-500/50 drop-shadow-[0_0_3px_rgba(34,197,94,0.3)]" />
 						Env update checks
+					</Select.Item>
+					<Select.Item value="image_prune">
+						<Trash2 class="w-4 h-4 mr-2 inline text-amber-500 drop-shadow-[0_0_3px_rgba(245,158,11,0.4)]" />
+						Image prune
 					</Select.Item>
 					{#if !hideSystemJobs}
 						<Select.Item value="system_cleanup">
@@ -1055,10 +1061,10 @@
 					onclick={toggleHideSystemJobs}
 				>
 					{#if hideSystemJobs}
-						<Eye class="w-3.5 h-3.5 mr-1" />
+						<Eye class="w-3.5 h-3.5" />
 						Show system ({systemJobCount})
 					{:else}
-						<EyeOff class="w-3.5 h-3.5 mr-1" />
+						<EyeOff class="w-3.5 h-3.5" />
 						Hide system
 					{/if}
 				</Button>
@@ -1131,6 +1137,8 @@
 						{:else}
 							<CircleFadingArrowUp class="w-4 h-4 text-green-500 glow-green shrink-0" />
 						{/if}
+					{:else if schedule.type === 'image_prune'}
+						<Trash2 class="w-4 h-4 text-amber-500 glow-amber shrink-0" />
 					{:else}
 						<Wrench class="w-4 h-4 text-amber-500 shrink-0" />
 					{/if}
@@ -1166,6 +1174,8 @@
 									</span>
 								{/if}
 								<span class="truncate">{schedule.description || 'Env update check'}</span>
+							{:else if schedule.type === 'image_prune'}
+								<span class="truncate">{schedule.description || 'Prune unused images'}</span>
 							{:else}
 								<span class="truncate">{schedule.description || 'System job'}</span>
 							{/if}

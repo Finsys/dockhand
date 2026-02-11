@@ -1,13 +1,16 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getEnvironment, updateEnvironment, deleteEnvironment, getEnvironmentPublicIps, setEnvironmentPublicIp, deleteEnvironmentPublicIp, deleteEnvUpdateCheckSettings, getGitStacksForEnvironmentOnly, deleteGitStack } from '$lib/server/db';
+import { getEnvironment, updateEnvironment, deleteEnvironment, getEnvironmentPublicIps, setEnvironmentPublicIp, deleteEnvironmentPublicIp, deleteEnvUpdateCheckSettings, deleteImagePruneSettings, getGitStacksForEnvironmentOnly, deleteGitStack } from '$lib/server/db';
 import { clearDockerClientCache } from '$lib/server/docker';
 import { deleteGitStackFiles } from '$lib/server/git';
 import { authorize } from '$lib/server/authorize';
+import { auditEnvironment } from '$lib/server/audit';
 import { refreshSubprocessEnvironments } from '$lib/server/subprocess-manager';
 import { serializeLabels, parseLabels, MAX_LABELS } from '$lib/utils/label-colors';
+import { cleanPem } from '$lib/utils/pem';
 import { unregisterSchedule } from '$lib/server/scheduler';
 import { closeEdgeConnection } from '$lib/server/hawser';
+import { computeAuditDiff } from '$lib/utils/diff';
 
 export const GET: RequestHandler = async ({ params, cookies }) => {
 	const auth = await authorize(cookies);
@@ -39,7 +42,8 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 	}
 };
 
-export const PUT: RequestHandler = async ({ params, request, cookies }) => {
+export const PUT: RequestHandler = async (event) => {
+	const { params, request, cookies } = event;
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !await auth.can('environments', 'edit')) {
 		return json({ error: 'Permission denied' }, { status: 403 });
@@ -47,6 +51,13 @@ export const PUT: RequestHandler = async ({ params, request, cookies }) => {
 
 	try {
 		const id = parseInt(params.id);
+
+		// Get old values before update for diff
+		const oldEnv = await getEnvironment(id);
+		if (!oldEnv) {
+			return json({ error: 'Environment not found' }, { status: 404 });
+		}
+
 		const data = await request.json();
 
 		// Clear cached Docker client before updating
@@ -62,9 +73,9 @@ export const PUT: RequestHandler = async ({ params, request, cookies }) => {
 			host: data.host,
 			port: data.port,
 			protocol: data.protocol,
-			tlsCa: data.tlsCa,
-			tlsCert: data.tlsCert,
-			tlsKey: data.tlsKey,
+			tlsCa: cleanPem(data.tlsCa),
+			tlsCert: cleanPem(data.tlsCert),
+			tlsKey: cleanPem(data.tlsKey),
 			tlsSkipVerify: data.tlsSkipVerify,
 			icon: data.icon,
 			socketPath: data.socketPath,
@@ -94,6 +105,14 @@ export const PUT: RequestHandler = async ({ params, request, cookies }) => {
 		const publicIps = await getEnvironmentPublicIps();
 		const publicIp = publicIps[id.toString()] || null;
 
+		// Compute diff for audit (exclude sensitive TLS fields)
+		const diff = computeAuditDiff(oldEnv, env, {
+			excludeFields: ['tlsCa', 'tlsCert', 'tlsKey', 'hawserToken', 'labels']
+		});
+
+		// Audit log
+		await auditEnvironment(event, 'update', env.id, env.name, diff);
+
 		// Parse labels from JSON string to array
 		return json({
 			...env,
@@ -106,7 +125,8 @@ export const PUT: RequestHandler = async ({ params, request, cookies }) => {
 	}
 };
 
-export const DELETE: RequestHandler = async ({ params, cookies }) => {
+export const DELETE: RequestHandler = async (event) => {
+	const { params, cookies } = event;
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !await auth.can('environments', 'delete')) {
 		return json({ error: 'Permission denied' }, { status: 403 });
@@ -114,6 +134,12 @@ export const DELETE: RequestHandler = async ({ params, cookies }) => {
 
 	try {
 		const id = parseInt(params.id);
+
+		// Get environment name before deletion for audit log
+		const env = await getEnvironment(id);
+		if (!env) {
+			return json({ error: 'Environment not found' }, { status: 404 });
+		}
 
 		// Close Edge connection if this is a Hawser Edge environment
 		// This rejects any pending requests and closes the WebSocket
@@ -130,7 +156,7 @@ export const DELETE: RequestHandler = async ({ params, cookies }) => {
 				unregisterSchedule(stack.id, 'git_stack_sync');
 			}
 			// Delete git stack files from filesystem
-			deleteGitStackFiles(stack.id);
+			await deleteGitStackFiles(stack.id, stack.stackName, stack.environmentId);
 			// Delete git stack from database
 			await deleteGitStack(stack.id);
 		}
@@ -148,8 +174,15 @@ export const DELETE: RequestHandler = async ({ params, cookies }) => {
 		await deleteEnvUpdateCheckSettings(id);
 		unregisterSchedule(id, 'env_update_check');
 
+		// Clean up image prune settings and unregister schedule
+		await deleteImagePruneSettings(id);
+		unregisterSchedule(id, 'image_prune');
+
 		// Notify subprocesses to stop collecting from deleted environment
 		refreshSubprocessEnvironments();
+
+		// Audit log
+		await auditEnvironment(event, 'delete', id, env.name);
 
 		return json({ success: true });
 	} catch (error) {

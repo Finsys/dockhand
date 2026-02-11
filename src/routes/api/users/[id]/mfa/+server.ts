@@ -6,9 +6,12 @@ import {
 	verifyAndEnableMfa,
 	disableMfa
 } from '$lib/server/auth';
+import { auditUser } from '$lib/server/audit';
+import { getUser } from '$lib/server/db';
 
 // POST /api/users/[id]/mfa - Setup MFA (generate QR code)
-export const POST: RequestHandler = async ({ params, request, cookies }) => {
+export const POST: RequestHandler = async (event) => {
+	const { params, request, cookies } = event;
 	const currentUser = await validateSession(cookies);
 
 	if (!params.id) {
@@ -36,6 +39,15 @@ export const POST: RequestHandler = async ({ params, request, cookies }) => {
 				return json({ error: 'Invalid MFA code' }, { status: 400 });
 			}
 
+			// Audit log - MFA enabled
+			const targetUser = await getUser(userId);
+			if (targetUser) {
+				await auditUser(event, 'update', userId, targetUser.username, {
+					mfaEnabled: true,
+					enabledBy: currentUser?.id === userId ? 'self' : currentUser?.username
+				});
+			}
+
 			return json({
 				success: true,
 				message: 'MFA enabled successfully',
@@ -60,7 +72,8 @@ export const POST: RequestHandler = async ({ params, request, cookies }) => {
 };
 
 // DELETE /api/users/[id]/mfa - Disable MFA
-export const DELETE: RequestHandler = async ({ params, cookies }) => {
+export const DELETE: RequestHandler = async (event) => {
+	const { params, cookies } = event;
 	const currentUser = await validateSession(cookies);
 
 	if (!params.id) {
@@ -75,10 +88,22 @@ export const DELETE: RequestHandler = async ({ params, cookies }) => {
 	}
 
 	try {
-		const success = await disableMfa(userId);
-		if (!success) {
+		// Get user info before disabling for audit
+		const targetUser = await getUser(userId);
+		if (!targetUser) {
 			return json({ error: 'User not found' }, { status: 404 });
 		}
+
+		const success = await disableMfa(userId);
+		if (!success) {
+			return json({ error: 'Failed to disable MFA' }, { status: 500 });
+		}
+
+		// Audit log - MFA disabled
+		await auditUser(event, 'update', userId, targetUser.username, {
+			mfaDisabled: true,
+			disabledBy: currentUser?.id === userId ? 'self' : currentUser?.username
+		});
 
 		return json({ success: true, message: 'MFA disabled successfully' });
 	} catch (error) {

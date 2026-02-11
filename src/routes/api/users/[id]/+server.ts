@@ -14,6 +14,8 @@ import {
 } from '$lib/server/db';
 import { hashPassword } from '$lib/server/auth';
 import { authorize } from '$lib/server/authorize';
+import { auditUser } from '$lib/server/audit';
+import { computeAuditDiff } from '$lib/utils/diff';
 
 // GET /api/users/[id] - Get a specific user
 // Free for all - local users are needed for basic auth
@@ -60,7 +62,8 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 
 // PUT /api/users/[id] - Update a user
 // Free for all - local users are needed for basic auth
-export const PUT: RequestHandler = async ({ params, request, cookies }) => {
+export const PUT: RequestHandler = async (event) => {
+	const { params, request, cookies } = event;
 	const auth = await authorize(cookies);
 
 	if (!params.id) {
@@ -203,6 +206,15 @@ export const PUT: RequestHandler = async ({ params, request, cookies }) => {
 		// Compute final isAdmin status
 		const finalIsAdmin = shouldPromote || (existingUserIsAdmin && !shouldDemote);
 
+		// Compute diff for audit (exclude sensitive fields)
+		const diff = computeAuditDiff(
+			{ username: existingUser.username, email: existingUser.email, displayName: existingUser.displayName, isActive: existingUser.isActive, isAdmin: existingUserIsAdmin },
+			{ username: user.username, email: user.email, displayName: user.displayName, isActive: user.isActive, isAdmin: finalIsAdmin }
+		);
+
+		// Audit log
+		await auditUser(event, 'update', user.id, user.username, diff);
+
 		return json({
 			id: user.id,
 			username: user.username,
@@ -226,7 +238,8 @@ export const PUT: RequestHandler = async ({ params, request, cookies }) => {
 
 // DELETE /api/users/[id] - Delete a user
 // Free for all - local users are needed for basic auth
-export const DELETE: RequestHandler = async ({ params, url, cookies }) => {
+export const DELETE: RequestHandler = async (event) => {
+	const { params, url, cookies } = event;
 	const auth = await authorize(cookies);
 
 	// When auth is enabled, check permission (free edition allows all, enterprise checks RBAC)
@@ -279,6 +292,9 @@ export const DELETE: RequestHandler = async ({ params, url, cookies }) => {
 				// Disable authentication
 				await updateAuthSettings({ authEnabled: false });
 
+				// Audit log
+				await auditUser(event, 'delete', id, user.username);
+
 				return json({ success: true, authDisabled: true });
 			}
 		}
@@ -290,6 +306,9 @@ export const DELETE: RequestHandler = async ({ params, url, cookies }) => {
 		if (!deleted) {
 			return json({ error: 'Failed to delete user' }, { status: 500 });
 		}
+
+		// Audit log
+		await auditUser(event, 'delete', id, user.username);
 
 		return json({ success: true });
 	} catch (error) {

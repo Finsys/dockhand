@@ -6,7 +6,7 @@
 	import { Label } from '$lib/components/ui/label';
 	import { Input } from '$lib/components/ui/input';
 	import { TogglePill } from '$lib/components/ui/toggle-pill';
-	import { Loader2, GitBranch, RefreshCw, Webhook, Rocket, RefreshCcw, Copy, Check, FolderGit2, Github, Key, KeyRound, Lock, FileText, HelpCircle, GripVertical, X } from 'lucide-svelte';
+	import { Loader2, GitBranch, RefreshCw, Webhook, Rocket, RefreshCcw, Copy, Check, FolderGit2, Github, Key, KeyRound, Lock, FileText, HelpCircle, GripVertical, X, Download } from 'lucide-svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import CronEditor from '$lib/components/cron-editor.svelte';
 	import StackEnvVarsPanel from '$lib/components/StackEnvVarsPanel.svelte';
@@ -47,6 +47,7 @@
 		id: number;
 		stackName: string;
 		repositoryId: number;
+		environmentId: number | null;
 		composePath: string;
 		envFilePath: string | null;
 		autoUpdate: boolean;
@@ -79,7 +80,7 @@
 	// Form state - stack deployment config
 	let formStackName = $state('');
 	let formStackNameUserModified = $state(false);
-	let formComposePath = $state('docker-compose.yml');
+	let formComposePath = $state('compose.yaml');
 	let formAutoUpdate = $state(false);
 	let formAutoUpdateCron = $state('0 3 * * *');
 	let formWebhookEnabled = $state(false);
@@ -88,6 +89,9 @@
 	let formError = $state('');
 	let formSaving = $state(false);
 	let errors = $state<{ stackName?: string; repository?: string; repoName?: string; repoUrl?: string }>({});
+
+	// Stack name validation: must start with alphanumeric, can contain alphanumeric, hyphens, underscores
+	const STACK_NAME_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/;
 	let copiedWebhookUrl = $state(false);
 	let copiedWebhookSecret = $state(false);
 
@@ -99,35 +103,27 @@
 	let fileEnvVars = $state<Record<string, string>>({});
 	let loadingFileVars = $state(false);
 	let existingSecretKeys = $state<Set<string>>(new Set());
+	let populatingEnvVars = $state(false);
 
 	// Resizable split panel state
 	let splitRatio = $state(60); // percentage for form panel
 	let isDraggingSplit = $state(false);
 	let containerRef: HTMLDivElement | null = $state(null);
 
-	// Derived state for merged variables and sources
-	const envVarSources = $derived<Record<string, 'file' | 'override'>>(() => {
-		const sources: Record<string, 'file' | 'override'> = {};
-		// File vars
-		for (const key of Object.keys(fileEnvVars)) {
-			sources[key] = 'file';
-		}
-		// Overrides take precedence
-		for (const v of envVars.filter(v => v.key)) {
-			sources[v.key] = 'override';
-		}
-		return sources;
-	});
 
 	// Track which gitStack was initialized to avoid repeated resets
 	let lastInitializedStackId = $state<number | null | undefined>(undefined);
+	let isInitializing = $state(false);
 
 	$effect(() => {
 		if (open) {
 			const currentStackId = gitStack?.id ?? null;
-			if (lastInitializedStackId !== currentStackId) {
+			if (lastInitializedStackId !== currentStackId && !isInitializing) {
 				lastInitializedStackId = currentStackId;
-				resetForm();
+				isInitializing = true;
+				resetForm().finally(() => {
+					isInitializing = false;
+				});
 			}
 		} else {
 			lastInitializedStackId = undefined;
@@ -246,21 +242,108 @@
 		if (!gitStack) return;
 
 		try {
-			const response = await fetch(`/api/stacks/${encodeURIComponent(gitStack.stackName)}/env${environmentId ? `?env=${environmentId}` : ''}`);
+			// Use gitStack.environmentId when editing, fall back to prop for new stacks
+			const envIdToUse = gitStack.environmentId ?? environmentId;
+			const response = await fetch(`/api/stacks/${encodeURIComponent(gitStack.stackName)}/env${envIdToUse ? `?env=${envIdToUse}` : ''}`);
 			if (response.ok) {
 				const data = await response.json();
-				envVars = data.variables || [];
+				const loadedVars = data.variables || [];
 				// Track existing secret keys (secrets loaded from DB cannot have visibility toggled)
 				existingSecretKeys = new Set(
-					envVars.filter(v => v.isSecret && v.key.trim()).map(v => v.key.trim())
+					loadedVars.filter((v: EnvVar) => v.isSecret && v.key.trim()).map((v: EnvVar) => v.key.trim())
 				);
+				// Set envVars - the panel's $effect will auto-sync rawContent for text view
+				envVars = loadedVars;
 			}
 		} catch (e) {
 			console.error('Failed to load env var overrides:', e);
 		}
 	}
 
-	function resetForm() {
+	async function populateEnvVars() {
+		// Validate we have repository info
+		if (formRepoMode === 'existing' && !formRepositoryId) {
+			toast.error('Please select a repository first');
+			return;
+		}
+		if (formRepoMode === 'new' && !formNewRepoUrl.trim()) {
+			toast.error('Please enter a repository URL first');
+			return;
+		}
+
+		populatingEnvVars = true;
+		try {
+			const body: Record<string, any> = {
+				composePath: formComposePath || 'compose.yaml',
+				envFilePath: formEnvFilePath || null
+			};
+
+			if (formRepoMode === 'existing') {
+				body.repositoryId = formRepositoryId;
+			} else {
+				body.url = formNewRepoUrl;
+				body.branch = formNewRepoBranch || 'main';
+				body.credentialId = formNewRepoCredentialId;
+			}
+
+			const response = await fetch('/api/git/preview-env', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(body)
+			});
+
+			const data = await response.json();
+
+			if (!response.ok) {
+				toast.error('Failed to load env variables', {
+					description: data.error || 'Unknown error'
+				});
+				return;
+			}
+
+			const vars = data.vars as Record<string, string>;
+			const count = Object.keys(vars).length;
+
+			if (count === 0) {
+				toast.info('No environment variables found', {
+					description: 'No .env files found in the repository. You can still add variables manually.'
+				});
+				return;
+			}
+
+			// Convert to EnvVar array - preserve existing user entries that aren't in repo
+			const existingUserVars = envVars.filter(v => v.key.trim() && !(v.key in vars));
+			const newVars: EnvVar[] = Object.entries(vars).map(([key, value]) => ({
+				key,
+				value,
+				isSecret: false
+			}));
+
+			envVars = [...newVars, ...existingUserVars];
+			fileEnvVars = vars;
+
+			toast.success(`Loaded ${count} variable${count === 1 ? '' : 's'}`, {
+				description: 'You can now customize values before deploying'
+			});
+		} catch (e) {
+			console.error('Failed to populate env vars:', e);
+			toast.error('Failed to load env variables');
+		} finally {
+			populatingEnvVars = false;
+		}
+	}
+
+	async function resetForm() {
+		// Clear state BEFORE async loads to avoid race conditions
+		formError = '';
+		errors = {};
+		copiedWebhookUrl = false;
+		copiedWebhookSecret = false;
+		envFiles = [];
+		envVars = [];
+		fileEnvVars = {};
+		existingSecretKeys = new Set();
+
 		if (gitStack) {
 			formRepoMode = 'existing';
 			formRepositoryId = gitStack.repositoryId;
@@ -272,12 +355,14 @@
 			formWebhookEnabled = gitStack.webhookEnabled;
 			formWebhookSecret = gitStack.webhookSecret || '';
 			formDeployNow = false;
-			// Load env files and overrides for editing
-			loadEnvFiles();
-			loadEnvVarsOverrides();
-			if (gitStack.envFilePath) {
-				loadEnvFileContents(gitStack.envFilePath);
-			}
+
+			// Load env files and overrides SYNCHRONOUSLY to avoid race conditions
+			// Wait for all loads to complete before allowing any other effect to run
+			await Promise.all([
+				loadEnvFiles(),
+				loadEnvVarsOverrides(),
+				gitStack.envFilePath ? loadEnvFileContents(gitStack.envFilePath) : Promise.resolve()
+			]);
 		} else {
 			formRepoMode = repositories.length > 0 ? 'existing' : 'new';
 			formRepositoryId = null;
@@ -287,7 +372,7 @@
 			formNewRepoCredentialId = null;
 			formStackName = '';
 			formStackNameUserModified = false;
-			formComposePath = 'docker-compose.yml';
+			formComposePath = 'compose.yaml';
 			formEnvFilePath = null;
 			formAutoUpdate = false;
 			formAutoUpdateCron = '0 3 * * *';
@@ -295,22 +380,18 @@
 			formWebhookSecret = '';
 			formDeployNow = false;
 		}
-		formError = '';
-		errors = {};
-		copiedWebhookUrl = false;
-		copiedWebhookSecret = false;
-		envFiles = [];
-		envVars = [];
-		fileEnvVars = {};
-		existingSecretKeys = new Set();
 	}
 
 	async function saveGitStack(deployAfterSave: boolean = false) {
 		errors = {};
 		let hasErrors = false;
 
-		if (!formStackName.trim()) {
+		const trimmedStackName = formStackName.trim();
+		if (!trimmedStackName) {
 			errors.stackName = 'Stack name is required';
+			hasErrors = true;
+		} else if (!STACK_NAME_REGEX.test(trimmedStackName)) {
+			errors.stackName = 'Stack name must start with a letter or number, and contain only letters, numbers, hyphens, and underscores';
 			hasErrors = true;
 		}
 
@@ -335,16 +416,30 @@
 		formError = '';
 
 		try {
+			// Only save vars that are actual overrides (differ from file) or new (not in file)
+			// This ensures file updates from git are picked up on next sync
+			const overrideVars = envVars.filter(v => {
+				if (!v.key.trim()) return false;
+				const fileValue = fileEnvVars[v.key];
+				// Save if: not in file (new var), value differs from file, or is a secret
+				return fileValue === undefined || v.value !== fileValue || v.isSecret;
+			});
+
 			let body: any = {
 				stackName: formStackName,
-				composePath: formComposePath || 'docker-compose.yml',
+				composePath: formComposePath || 'compose.yaml',
 				envFilePath: formEnvFilePath,
 				environmentId: environmentId,
 				autoUpdate: formAutoUpdate,
 				autoUpdateCron: formAutoUpdateCron,
 				webhookEnabled: formWebhookEnabled,
 				webhookSecret: formWebhookEnabled ? formWebhookSecret : null,
-				deployNow: deployAfterSave
+				deployNow: deployAfterSave,
+				envVars: overrideVars.map(v => ({
+					key: v.key.trim(),
+					value: v.value,
+					isSecret: v.isSecret
+				}))
 			};
 
 			if (formRepoMode === 'existing') {
@@ -385,32 +480,6 @@
 				return;
 			}
 
-			// Save environment variable overrides if we have any
-			const definedVars = envVars.filter(v => v.key.trim());
-			if (definedVars.length > 0) {
-				try {
-					const envResponse = await fetch(
-						`/api/stacks/${encodeURIComponent(formStackName)}/env${environmentId ? `?env=${environmentId}` : ''}`,
-						{
-							method: 'PUT',
-							headers: { 'Content-Type': 'application/json' },
-							body: JSON.stringify({
-								variables: definedVars.map(v => ({
-									key: v.key.trim(),
-									value: v.value,
-									isSecret: v.isSecret
-								}))
-							})
-						}
-					);
-					if (!envResponse.ok) {
-						console.error('Failed to save environment variables');
-					}
-				} catch (e) {
-					console.error('Failed to save environment variables:', e);
-				}
-			}
-
 			onSaved();
 			onClose();
 		} catch (error) {
@@ -425,17 +494,26 @@
 		if (formRepoMode === 'existing' && formRepositoryId && !gitStack && !formStackNameUserModified) {
 			const repo = repositories.find(r => r.id === formRepositoryId);
 			if (repo) {
+				// Normalize repo name: lowercase, spaces/underscores to hyphens, strip invalid chars
+				const normalizedName = repo.name
+					.toLowerCase()
+					.replace(/[\s_]+/g, '-')
+					.replace(/[^a-z0-9-]/g, '')
+					.replace(/-+/g, '-')
+					.replace(/^-|-$/g, '');
+
 				// Extract compose filename without extension for stack name
 				const composeName = formComposePath
 					.replace(/^.*\//, '') // Remove directory path
 					.replace(/\.(yml|yaml)$/i, '') // Remove extension
-					.replace(/^docker-compose\.?/, ''); // Remove docker-compose prefix
+					.replace(/^docker-compose\.?/, '') // Remove docker-compose prefix
+					.replace(/^compose$/, ''); // Remove plain "compose"
 
 				// Combine repo name with compose name if it's not the default
 				if (composeName && composeName !== 'docker-compose') {
-					formStackName = `${repo.name}-${composeName}`;
+					formStackName = `${normalizedName}-${composeName}`;
 				} else {
-					formStackName = repo.name;
+					formStackName = normalizedName;
 				}
 			}
 		}
@@ -654,78 +732,33 @@
 
 			<div class="space-y-2">
 				<Label for="compose-path">Compose file path</Label>
-				<Input id="compose-path" bind:value={formComposePath} placeholder="docker-compose.yml" />
+				<Input id="compose-path" bind:value={formComposePath} placeholder="compose.yaml" />
 				<p class="text-xs text-muted-foreground">Path to the compose file within the repository</p>
 			</div>
 
 			<!-- Additional env file for variable substitution -->
 			<div class="space-y-2">
 				<div class="flex items-center gap-1.5">
-					<Label for="env-file-path">Additional .env file (optional)</Label>
+					<Label for="env-file-path">Additional env file (optional)</Label>
 					<Tooltip.Root>
 						<Tooltip.Trigger>
 							<HelpCircle class="w-3.5 h-3.5 text-muted-foreground cursor-help" />
 						</Tooltip.Trigger>
 						<Tooltip.Content>
 							<div class="w-80">
-								<p class="text-xs">All files in the git repository are cloned automatically, including any files referenced by <code class="bg-muted px-1 rounded">env_file:</code> directives.</p>
-								<p class="text-xs mt-2">Only use this field for additional environment variables to be passed to Docker Compose.</p>
-								<p class="text-xs mt-2">The contents will be parsed and passed as shell environment variables.</p>
+								<p class="text-xs">A <code class="bg-muted px-1 rounded">.env</code> file in the compose directory is always loaded automatically, if present.</p>
+								<p class="text-xs mt-2">Use this field for an additional env file with a non-standard name (e.g. <code class="bg-muted px-1 rounded">.env.production</code>). Its values override the default <code class="bg-muted px-1 rounded">.env</code>.</p>
+								<p class="text-xs mt-2">Overrides from the environment variables editor on the right always take highest precedence.</p>
 							</div>
 						</Tooltip.Content>
 					</Tooltip.Root>
 				</div>
-				{#if gitStack && envFiles.length > 0}
-					<!-- Dropdown selector for existing stacks with discovered .env files -->
-					<Select.Root
-						type="single"
-						value={formEnvFilePath ?? 'none'}
-						onValueChange={(v) => {
-							formEnvFilePath = v === 'none' ? null : v;
-							if (formEnvFilePath) {
-								loadEnvFileContents(formEnvFilePath);
-							} else {
-								fileEnvVars = {};
-							}
-						}}
-					>
-						<Select.Trigger class="w-full">
-							{#if loadingEnvFiles}
-								<Loader2 class="w-4 h-4 mr-2 animate-spin" />
-								Loading...
-							{:else if formEnvFilePath}
-								<FileText class="w-4 h-4 mr-2 text-muted-foreground" />
-								{formEnvFilePath}
-							{:else}
-								<FileText class="w-4 h-4 mr-2 text-muted-foreground" />
-								None
-							{/if}
-						</Select.Trigger>
-						<Select.Content>
-							<Select.Item value="none">
-								<span class="text-muted-foreground">None</span>
-							</Select.Item>
-							{#each envFiles as file}
-								<Select.Item value={file}>
-									<span class="flex items-center gap-2">
-										<FileText class="w-4 h-4 text-muted-foreground" />
-										{file}
-									</span>
-								</Select.Item>
-							{/each}
-						</Select.Content>
-					</Select.Root>
-				{:else}
-					<!-- Text input for new stacks or when no .env files discovered -->
 					<Input
 						id="env-file-path"
 						bind:value={formEnvFilePath}
-						placeholder=".env"
+						placeholder=""
 					/>
-				{/if}
-				<p class="text-xs text-muted-foreground">
-				For variable substitution from a file outside the compose directory.
-			</p>
+				<p class="text-xs text-muted-foreground">Additional env file to pass to Docker Compose</p>
 			</div>
 
 			<!-- Auto-update section -->
@@ -869,12 +902,44 @@
 			<div class="flex-1 min-w-0 flex flex-col overflow-hidden bg-zinc-50 dark:bg-zinc-800/50">
 				<StackEnvVarsPanel
 					bind:variables={envVars}
-					showSource={!!formEnvFilePath && gitStack !== null}
-					sources={envVarSources}
-					placeholder={{ key: 'OVERRIDE_VAR', value: 'override value' }}
-					infoText="These environment variables are optional. If a .env file is specified in the repository, these values will be merged with the file values. Variables defined here take precedence over .env file values."
+					placeholder={{ key: 'MY_VAR', value: 'value' }}
+					infoText="Override variables from your repository env files. Non-secrets are saved to <code class='bg-muted px-1 rounded'>.env.dockhand</code> in the stack directory. Secrets are stored in the database and injected via shell environment at deploy time.<br/><br/>Variables are available for <strong>compose file interpolation</strong> using <code class='bg-muted px-1 rounded'>${'{VAR_NAME}'}</code> syntax. They are not automatically injected into containers — use <code class='bg-muted px-1 rounded'>environment:</code> or reference <code class='bg-muted px-1 rounded'>.env.dockhand</code> in <code class='bg-muted px-1 rounded'>env_file:</code> to pass them through."
 					existingSecretKeys={gitStack !== null ? existingSecretKeys : new Set()}
-				/>
+					showInterpolationHint={true}
+				>
+					{#snippet headerActions()}
+						{#if !gitStack}
+							<div class="flex items-center gap-0.5">
+								<Button
+									type="button"
+									size="sm"
+									variant="ghost"
+									onclick={populateEnvVars}
+									disabled={populatingEnvVars || (formRepoMode === 'existing' && !formRepositoryId) || (formRepoMode === 'new' && !formNewRepoUrl.trim())}
+									class="h-6 text-xs px-2"
+								>
+									{#if populatingEnvVars}
+										<Loader2 class="w-3.5 h-3.5 mr-1 animate-spin" />
+										Loading...
+									{:else}
+										<Download class="w-3.5 h-3.5" />
+										Populate
+									{/if}
+								</Button>
+								<Tooltip.Root>
+									<Tooltip.Trigger>
+										<HelpCircle class="w-3.5 h-3.5 text-muted-foreground cursor-help" />
+									</Tooltip.Trigger>
+									<Tooltip.Content>
+										<div class="w-64">
+											<p class="text-xs">Clone the repository and load environment variables from the <code class="bg-muted px-1 rounded">.env</code> file (in compose directory) and additional env file (if specified), so you can see what you can override.</p>
+										</div>
+									</Tooltip.Content>
+								</Tooltip.Root>
+							</div>
+						{/if}
+					{/snippet}
+				</StackEnvVarsPanel>
 			</div>
 		</div>
 
@@ -886,7 +951,7 @@
 						<Loader2 class="w-4 h-4 mr-1 animate-spin" />
 						Deploying...
 					{:else}
-						<Rocket class="w-4 h-4 mr-1" />
+						<Rocket class="w-4 h-4" />
 						Save and deploy
 					{/if}
 				</Button>

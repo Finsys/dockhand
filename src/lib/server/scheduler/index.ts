@@ -24,10 +24,13 @@ import {
 	getEnvironments,
 	getEnvUpdateCheckSettings,
 	getAllEnvUpdateCheckSettings,
+	getImagePruneSettings,
+	getAllImagePruneSettings,
 	getEnvironment,
 	getEnvironmentTimezone,
 	getDefaultTimezone
 } from '../db';
+import { db, gitStacks, eq } from '../db/drizzle.js';
 import {
 	cleanupStaleVolumeHelpers,
 	cleanupExpiredVolumeHelpers
@@ -37,6 +40,7 @@ import {
 import { runContainerUpdate } from './tasks/container-update';
 import { runGitStackSync } from './tasks/git-stack-sync';
 import { runEnvUpdateCheckJob } from './tasks/env-update-check';
+import { runImagePrune } from './tasks/image-prune';
 import {
 	runScheduleCleanupJob,
 	runEventCleanupJob,
@@ -58,6 +62,30 @@ let volumeHelperCleanupJob: Cron | null = null;
 let isRunning = false;
 
 /**
+ * Clean up stale 'syncing' states from git stacks.
+ * Called on startup to recover from crashes during sync operations.
+ */
+async function cleanupStaleSyncStates(): Promise<void> {
+	const staleStacks = await db.select().from(gitStacks).where(eq(gitStacks.syncStatus, 'syncing'));
+
+	if (staleStacks.length === 0) {
+		return;
+	}
+
+	console.log(`[Scheduler] Recovering ${staleStacks.length} git stack(s) from stale syncing state`);
+
+	for (const stack of staleStacks) {
+		await db.update(gitStacks).set({
+			syncStatus: 'pending',
+			syncError: 'Recovered from interrupted sync on startup',
+			updatedAt: new Date().toISOString()
+		}).where(eq(gitStacks.id, stack.id));
+
+		console.log(`[Scheduler] Reset git stack "${stack.stackName}" (ID: ${stack.id}) to pending`);
+	}
+}
+
+/**
  * Start the unified scheduler service.
  * Registers all schedules with croner for automatic execution.
  */
@@ -69,6 +97,9 @@ export async function startScheduler(): Promise<void> {
 
 	console.log('[Scheduler] Starting scheduler service...');
 	isRunning = true;
+
+	// Clean up stale sync states from previous crashed processes
+	await cleanupStaleSyncStates();
 
 	// Get cron expressions and default timezone from database
 	const scheduleCleanupCron = await getScheduleCleanupCron();
@@ -102,7 +133,8 @@ export async function startScheduler(): Promise<void> {
 
 	// Run volume helper cleanup immediately on startup to clean up stale containers
 	runVolumeHelperCleanupJob('startup', volumeCleanupFns).catch(err => {
-		console.error('[Scheduler] Error during startup volume helper cleanup:', err);
+		const errorMsg = err instanceof Error ? err.message : String(err);
+		console.error('[Scheduler] Error during startup volume helper cleanup:', errorMsg);
 	});
 
 	console.log(`[Scheduler] System schedule cleanup: ${scheduleCleanupCron} [${defaultTimezone}]`);
@@ -177,7 +209,8 @@ export async function refreshAllSchedules(): Promise<void> {
 			}
 		}
 	} catch (error) {
-		console.error('[Scheduler] Error loading container schedules:', error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[Scheduler] Error loading container schedules:', errorMsg);
 	}
 
 	// Register git stack auto-sync schedules
@@ -194,7 +227,8 @@ export async function refreshAllSchedules(): Promise<void> {
 			}
 		}
 	} catch (error) {
-		console.error('[Scheduler] Error loading git stack schedules:', error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[Scheduler] Error loading git stack schedules:', errorMsg);
 	}
 
 	// Register environment update check schedules
@@ -212,10 +246,30 @@ export async function refreshAllSchedules(): Promise<void> {
 			}
 		}
 	} catch (error) {
-		console.error('[Scheduler] Error loading env update check schedules:', error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[Scheduler] Error loading env update check schedules:', errorMsg);
 	}
 
-	console.log(`[Scheduler] Registered ${containerCount} container schedules, ${gitStackCount} git stack schedules, ${envUpdateCheckCount} env update check schedules`);
+	// Register image prune schedules
+	let imagePruneCount = 0;
+	try {
+		const pruneConfigs = await getAllImagePruneSettings();
+		for (const { envId, settings } of pruneConfigs) {
+			if (settings.enabled && settings.cronExpression) {
+				const registered = await registerSchedule(
+					envId,
+					'image_prune',
+					envId
+				);
+				if (registered) imagePruneCount++;
+			}
+		}
+	} catch (error) {
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[Scheduler] Error loading image prune schedules:', errorMsg);
+	}
+
+	console.log(`[Scheduler] Registered ${containerCount} container schedules, ${gitStackCount} git stack schedules, ${envUpdateCheckCount} env update check schedules, ${imagePruneCount} image prune schedules`);
 }
 
 /**
@@ -224,7 +278,7 @@ export async function refreshAllSchedules(): Promise<void> {
  */
 export async function registerSchedule(
 	scheduleId: number,
-	type: 'container_update' | 'git_stack_sync' | 'env_update_check',
+	type: 'container_update' | 'git_stack_sync' | 'env_update_check' | 'image_prune',
 	environmentId: number | null
 ): Promise<boolean> {
 	const key = `${type}-${scheduleId}`;
@@ -258,6 +312,14 @@ export async function registerSchedule(
 			cronExpression = config.cron;
 			entityName = `Update: ${env.name}`;
 			enabled = config.enabled;
+		} else if (type === 'image_prune') {
+			const config = await getImagePruneSettings(scheduleId);
+			if (!config) return false;
+			const env = await getEnvironment(scheduleId);
+			if (!env) return false;
+			cronExpression = config.cronExpression;
+			entityName = `Prune: ${env.name}`;
+			enabled = config.enabled;
 		}
 
 		// Don't create job if disabled or no cron expression
@@ -283,6 +345,10 @@ export async function registerSchedule(
 				const config = await getEnvUpdateCheckSettings(scheduleId);
 				if (!config || !config.enabled) return;
 				await runEnvUpdateCheckJob(scheduleId, 'cron');
+			} else if (type === 'image_prune') {
+				const config = await getImagePruneSettings(scheduleId);
+				if (!config || !config.enabled) return;
+				await runImagePrune(scheduleId, 'cron');
 			}
 		});
 
@@ -302,7 +368,7 @@ export async function registerSchedule(
  */
 export function unregisterSchedule(
 	scheduleId: number,
-	type: 'container_update' | 'git_stack_sync' | 'env_update_check'
+	type: 'container_update' | 'git_stack_sync' | 'env_update_check' | 'image_prune'
 ): void {
 	const key = `${type}-${scheduleId}`;
 	const job = activeJobs.get(key);
@@ -337,7 +403,8 @@ export async function refreshSchedulesForEnvironment(environmentId: number): Pro
 			}
 		}
 	} catch (error) {
-		console.error('[Scheduler] Error refreshing container schedules:', error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[Scheduler] Error refreshing container schedules:', errorMsg);
 	}
 
 	// Re-register git stack auto-sync schedules for this environment
@@ -354,7 +421,8 @@ export async function refreshSchedulesForEnvironment(environmentId: number): Pro
 			}
 		}
 	} catch (error) {
-		console.error('[Scheduler] Error refreshing git stack schedules:', error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[Scheduler] Error refreshing git stack schedules:', errorMsg);
 	}
 
 	// Re-register environment update check schedule for this environment
@@ -369,7 +437,24 @@ export async function refreshSchedulesForEnvironment(environmentId: number): Pro
 			if (registered) refreshedCount++;
 		}
 	} catch (error) {
-		console.error('[Scheduler] Error refreshing env update check schedule:', error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[Scheduler] Error refreshing env update check schedule:', errorMsg);
+	}
+
+	// Re-register image prune schedule for this environment
+	try {
+		const config = await getImagePruneSettings(environmentId);
+		if (config && config.enabled && config.cronExpression) {
+			const registered = await registerSchedule(
+				environmentId,
+				'image_prune',
+				environmentId
+			);
+			if (registered) refreshedCount++;
+		}
+	} catch (error) {
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[Scheduler] Error refreshing image prune schedule:', errorMsg);
 	}
 
 	console.log(`[Scheduler] Refreshed ${refreshedCount} schedules for environment ${environmentId}`);
@@ -504,6 +589,30 @@ export async function triggerEnvUpdateCheck(environmentId: number): Promise<{ su
 
 		// Run in background
 		runEnvUpdateCheckJob(environmentId, 'manual');
+
+		return { success: true };
+	} catch (error: any) {
+		return { success: false, error: error.message };
+	}
+}
+
+/**
+ * Manually trigger an image prune for an environment.
+ */
+export async function triggerImagePrune(environmentId: number): Promise<{ success: boolean; executionId?: number; error?: string }> {
+	try {
+		const config = await getImagePruneSettings(environmentId);
+		if (!config) {
+			return { success: false, error: 'Image prune settings not found for this environment' };
+		}
+
+		const env = await getEnvironment(environmentId);
+		if (!env) {
+			return { success: false, error: 'Environment not found' };
+		}
+
+		// Run in background
+		runImagePrune(environmentId, 'manual');
 
 		return { success: true };
 	} catch (error: any) {

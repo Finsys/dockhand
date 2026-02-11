@@ -1,5 +1,189 @@
 [
   {
+    "version": "1.0.17",
+    "date": "2026-02-09",
+    "comingSoon": false,
+    "changes": [
+      { "type": "fix", "text": "Fix scanner failure on rootless Docker" },
+      { "type": "fix", "text": "Increase Hawser compose operation timeout" },
+      { "type": "fix", "text": "Fix regression in stack container updates" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.17"
+  },
+  {
+    "version": "1.0.16",
+    "date": "2026-02-09",
+    "changes": [
+      { "type": "feature", "text": "Support Docker Compose override files when deploying stacks" },
+      { "type": "fix", "text": "Fix Hawser stack deploy failing when compose file not present on remote host" },
+      { "type": "fix", "text": "Fix Hawser Standard TLS test connection sending HTTP to HTTPS server" },
+      { "type": "fix", "text": "Fix .env variables not applied on save & redeploy" },
+      { "type": "fix", "text": "Fix single Hawser node failure cascading offline state to all environments" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.16"
+  },
+  {
+    "version": "1.0.15",
+    "date": "2026-02-08",
+    "changes": [
+{ "type": "feature", "text": "Pull before update option: New option to pull latest image before container auto-update" },
+      { "type": "feature", "text": "Usage filter on images page by usage status (used/unused/all)" },
+      { "type": "feature", "text": "Show repository name for untagged images: Better identification of images without tags" },
+      { "type": "fix", "text": "Fix IPv6 address not accepted in environment Public IP field" },
+      { "type": "fix", "text": "Fix IPv6 port link URLs by adding bracket formatting" },
+      { "type": "fix", "text": "Fix custom compose filename not used in SSE deploy" },
+      { "type": "fix", "text": "Fix env var leakage from Dockhand to user stacks" },
+      { "type": "fix", "text": "Fix SMTP notification test returning false success" },
+      { "type": "fix", "text": "Fix custom compose file path ignored for Hawser git stack deployments" },
+      { "type": "fix", "text": "Fix escaped $$ variables (Docker Compose syntax) incorrectly flagged as missing" },
+      { "type": "fix", "text": "Use native compose pull and up when updating stack containers" },
+      { "type": "fix", "text": "Fix vulnerability scans hanging indefinitely or failing with JSON parse errors" },
+      { "type": "fix", "text": "Fix memory leaks in SSE event streams and unconsumed Docker API response bodies" },
+      { "type": "feature", "text": "Sort vulnerability scan results by severity by default" },
+      { "type": "feature", "text": "Copy button for compose file contents in stack modal" },
+      { "type": "feature", "text": "Confirmation dialog before git stack sync" },
+      { "type": "fix", "text": "Fix timezone aliases (e.g. Europe/Kyiv) not saving correctly" },
+      { "type": "fix", "text": "Fix login crash with large session timeout values" },
+      { "type": "fix", "text": "Fix profile display name not persisting due to field name mismatch" },
+      { "type": "fix", "text": "Fix date formatting not respecting user preferences" },
+      { "type": "fix", "text": "Fix static IP not preserved during container auto-update" },
+      { "type": "fix", "text": "Fix stack adoption path conflict across different environments" },
+      { "type": "fix", "text": "Fix container auto-update causing permission denied on bind mounts" },
+      { "type": "fix", "text": "Fix health tab not showing healthcheck configuration" },
+      { "type": "fix", "text": "Fix stack custom paths reset after edit" },
+      { "type": "fix", "text": "Autofocus on login username and MFA code fields" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.15"
+  },
+  {
+    "version": "1.0.14",
+    "date": "2026-01-31",
+    "changes": [
+      { "type": "fix", "text": "Fix environment variables in .env not interpolated during remote deployment" },
+      { "type": "fix", "text": "Fix stack variables not re-injected during stack start/stop" },
+      { "type": "fix", "text": "Fix time format 12/24 setting not respected in header clock" },
+      { "type": "fix", "text": "Fix skip TLS verification not saved on new environment" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.14"
+  },
+  {
+    "version": "1.0.13",
+    "date": "2026-01-23",
+    "changes": [
+      { "type": "feature", "text": "Add DISABLE_LOCAL_LOGIN env var to hide local password login when SSO/LDAP is configured" },
+      { "type": "feature", "text": "Add ntfy authentication support (user:pass@host/topic format)" },
+      { "type": "feature", "text": "Sortable health column in containers grid (unhealthy containers first)" },
+      { "type": "feature", "text": "GPU device configuration in container create/edit/inspect" },
+      { "type": "feature", "text": "Editor font setting with expanded monospace font options" },
+      { "type": "feature", "text": "Dedicated NFS/CIFS form fields in create volume modal" },
+      { "type": "feature", "text": "Scheduled image pruning per environment" },
+      { "type": "feature", "text": "Git stack env populate button to preview overridable variables before deploy" },
+      { "type": "fix", "text": "Fix vulnerability scanning failing with rootless Docker" },
+      { "type": "fix", "text": "Honor DATA_DIR env var in hawser SQLite operations" },
+      { "type": "fix", "text": "Show detailed error messages when notification test fails" },
+      { "type": "fix", "text": "Fix compose file browse in create mode showing default path instead of selected file" },
+      { "type": "fix", "text": "Fix custom env file path not preserved in create mode" },
+      { "type": "fix", "text": "Fix git stacks creating duplicate compose.yaml alongside repo file" },
+      { "type": "fix", "text": "Fix env vars not showing after stack create" },
+      { "type": "fix", "text": "Fix stack path defaults accidentally enforced over custom paths" },
+      { "type": "fix", "text": "Fix adopted stack save & restart breaking paths and env vars" },
+      { "type": "fix", "text": "Add more information to container audit logs including diff of changes" },
+      { "type": "fix", "text": "Preserve container settings on restart and auto-update" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.13"
+  },
+  {
+    "version": "1.0.12",
+    "date": "2026-01-22",
+    "changes": [
+      { "type": "feature", "text": "Add SKIP_DF_COLLECTION env var to disable slow disk usage collection on NAS devices" },
+      { "type": "fix", "text": "Fix terminal/shell connections to direct TLS/mTLS and Hawser Standard environments" },
+      { "type": "fix", "text": "Fix crash when Hawser agent is stopped from Dockhand" },
+      { "type": "fix", "text": "Skip auto-update for SHA-pinned images (image@sha256:...)" },
+      { "type": "fix", "text": "Fix pending updates not cleared when containers or stacks are deleted" },
+      { "type": "fix", "text": "Fix adopted stacks using wrong .env path from internal directory instead of original location" },
+      { "type": "fix", "text": "Improve /login audit logs information" },
+      { "type": "fix", "text": "Fix login/logout screen refresh issue" },
+      { "type": "fix", "text": "Fix password change not persisting" },
+      { "type": "fix", "text": "Fix audit log page showing empty values" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.12"
+  },
+  {
+    "version": "1.0.11",
+    "date": "2026-01-20",
+    "changes": [
+      { "type": "fix", "text": "Encryption at rest for sensitive credentials (AES-256-GCM)" },
+      { "type": "fix", "text": "Fix registry browsing and image push for registries with organization paths (e.g., registry.example.com/org)" },
+      { "type": "fix", "text": "Fix security scan failing to parse scanner output" },
+      { "type": "fix", "text": "Fix git sync stuck with sync_status set to running if app restarted during stack sync" },
+      { "type": "fix", "text": "Fix updating via containers tab doesn't properly restart the container" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.11"
+  },
+  {
+    "version": "1.0.10",
+    "date": "2026-01-18",
+    "changes": [
+      { "type": "fix", "text": "Fix docker socket access for custom PUID/PGID" },
+      { "type": "fix", "text": "Fix stack creation with deploy failing when no env vars provided" },
+      { "type": "fix", "text": "Fix env var validation flagging variables in commented lines as missing" },
+      { "type": "fix", "text": "Show stop button for stacks in restart loop" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.10"
+  },
+  {
+    "version": "1.0.9",
+    "date": "2026-01-17",
+    "changes": [
+      { "type": "feature", "text": "Shell: detect available shells in container before connecting" },
+      { "type": "fix", "text": "Fix GHCR registry authentication with OAuth2 token flow" },
+      { "type": "fix", "text": "Add page titles for browser tab updates on navigation" },
+      { "type": "fix", "text": "Add stack name conflict warning" },
+      { "type": "feature", "text": "Add docker-buildx plugin to container image" },
+      { "type": "fix", "text": "Fix relative paths not working for adopted/imported stacks" },
+      { "type": "fix", "text": "Fix TLS certificates not passed to docker-compose for direct connections" },
+      { "type": "fix", "text": "Fix registry queries for images with docker.io prefix" },
+      { "type": "fix", "text": "Fix compose editor issues when editing near env var references" },
+      { "type": "fix", "text": "Fix branch switching causing unknown revision error in git stacks" },
+      { "type": "fix", "text": "Fix SSE connection leak" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.9"
+  },
+  {
+    "version": "1.0.8",
+    "date": "2026-01-13",
+    "changes": [
+      { "type": "fix", "text": "Fix imported stack working directory for relative volume paths" },
+      { "type": "fix", "text": "Fix environment refresh after auth login" },
+      { "type": "fix", "text": "Fix single container update clearing up all update badges" },
+      { "type": "fix", "text": "Fix code editor paste issue on Safari on iPad" },
+      { "type": "fix", "text": "Fix registry login failing due to Bun stdin API incompatibility" },
+      { "type": "fix", "text": "Fix env var editor focus issues" },
+      { "type": "fix", "text": "Fix git stack naming issues: validation, rename sync, and delete cleanup" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.8"
+  },
+  {
+    "version": "1.0.7",
+    "date": "2026-01-06",
+    "comingSoon": false,
+    "changes": [
+      { "type": "feature", "text": "Adopt stacks created outside Dockhand" },
+      { "type": "feature", "text": "Activity event collection mode (Stream/Poll) and metrics interval settings for reduced CPU usage" },
+      { "type": "feature", "text": "Baseline Docker images for CPUs without AVX support" },
+      { "type": "feature", "text": "Show amber \"Unused\" badge for images not used by any container" },
+      { "type": "feature", "text": "Prune unused button to remove all unused images (not just dangling)" },
+      { "type": "fix", "text": "Stack collision on disk - stacks are now saved in environment folders" },
+      { "type": "fix", "text": "Checkbox selection delay in datagrid" },
+      { "type": "fix", "text": "Crypto fallback for old Linux kernels (<3.17) that lack getrandom() syscall" },
+      { "type": "fix", "text": "Dashboard performance with many environments" },
+      { "type": "fix", "text": "Can't use authenticated custom registry"},
+      { "type": "fix", "text": "mTLS connections failing due to Bun TLS caching bug"}
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.7"
+  },
+  {
     "version": "1.0.6",
     "date": "2026-01-03",
     "changes": [

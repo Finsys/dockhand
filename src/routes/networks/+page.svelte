@@ -1,3 +1,7 @@
+<svelte:head>
+	<title>Networks - Dockhand</title>
+</svelte:head>
+
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { toast } from 'svelte-sonner';
@@ -27,6 +31,10 @@
 	let networks = $state<NetworkInfo[]>([]);
 	let loading = $state(true);
 	let envId = $state<number | null>(null);
+
+	// Polling interval - module scope for cleanup in onDestroy
+	let refreshInterval: ReturnType<typeof setInterval> | null = null;
+	let unsubscribeDockerEvent: (() => void) | null = null;
 
 	// Search and sort state - with debounce
 	let searchInput = $state('');
@@ -452,22 +460,33 @@
 		document.addEventListener('resume', handleVisibilityChange);
 
 		// Subscribe to network events (SSE connection is global in layout)
-		const unsubscribe = onDockerEvent((event) => {
+		unsubscribeDockerEvent = onDockerEvent((event) => {
 			if (envId && isNetworkListChange(event)) {
 				fetchNetworks();
 			}
 		});
 
-		const interval = setInterval(() => {
+		refreshInterval = setInterval(() => {
 			if (envId) fetchNetworks();
 		}, 30000);
-		return () => {
-			clearInterval(interval);
-			unsubscribe();
-		};
+
+		// Note: In Svelte 5, cleanup must be in onDestroy, not returned from onMount
 	});
 
+	// Cleanup on component destroy
 	onDestroy(() => {
+		// Clear polling interval
+		if (refreshInterval) {
+			clearInterval(refreshInterval);
+			refreshInterval = null;
+		}
+
+		// Unsubscribe from Docker events
+		if (unsubscribeDockerEvent) {
+			unsubscribeDockerEvent();
+			unsubscribeDockerEvent = null;
+		}
+
 		document.removeEventListener('visibilitychange', handleVisibilityChange);
 		document.removeEventListener('resume', handleVisibilityChange);
 		pendingTimeouts.forEach(id => clearTimeout(id));
@@ -476,7 +495,7 @@
 </script>
 
 <div class="flex-1 min-h-0 flex flex-col gap-3 overflow-hidden">
-	<div class="shrink-0 flex flex-wrap justify-between items-center gap-3">
+	<div class="shrink-0 flex flex-wrap justify-between items-center gap-3 min-h-8">
 		<PageHeader icon={Network} title="Networks" count={networks.length} />
 		<div class="flex flex-wrap items-center gap-2">
 			<div class="relative">
@@ -512,6 +531,7 @@
 				position="left"
 				onConfirm={pruneNetworks}
 				onOpenChange={(open) => confirmPrune = open}
+				unstyled
 			>
 				{#snippet children({ open })}
 					<span class="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-sm bg-background shadow-xs border hover:bg-accent hover:text-accent-foreground dark:bg-input/30 dark:border-input dark:hover:bg-input/50 {pruneStatus === 'pruning' ? 'opacity-50 pointer-events-none' : ''}">
@@ -530,25 +550,26 @@
 			</ConfirmPopover>
 			{/if}
 			<Button size="sm" variant="outline" onclick={fetchNetworks}>
-				<RefreshCw class="w-3.5 h-3.5 mr-1" />
+				<RefreshCw class="w-3.5 h-3.5" />
 				Refresh
 			</Button>
 			{#if $canAccess('networks', 'create')}
 			<Button size="sm" variant="secondary" onclick={() => showCreateModal = true}>
-				<Plus class="w-3.5 h-3.5 mr-1" />
+				<Plus class="w-3.5 h-3.5" />
 				Create
 			</Button>
 			{/if}
 		</div>
 	</div>
 
-	<!-- Selection bar -->
-	{#if selectedNetworks.size > 0}
-		<div class="flex items-center gap-2 text-xs text-muted-foreground">
+	<!-- Selection bar - always reserve space to prevent layout shift -->
+	<div class="h-4 shrink-0">
+		{#if selectedNetworks.size > 0}
+			<div class="flex items-center gap-1 text-xs text-muted-foreground h-full">
 			<span>{selectedInFilter.length} selected</span>
 			<button
 				type="button"
-				class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-border shadow-sm hover:border-foreground/30 hover:shadow transition-all"
+				class="inline-flex items-center gap-1 px-1.5 py-0 rounded border border-border hover:border-foreground/30 hover:shadow transition-all"
 				onclick={selectNone}
 			>
 				Clear
@@ -564,15 +585,16 @@
 				onOpenChange={(open) => confirmBulkRemove = open}
 			>
 				{#snippet children({ open })}
-					<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-border shadow-sm hover:text-destructive hover:border-destructive/40 hover:shadow transition-all cursor-pointer">
+					<span class="inline-flex items-center gap-1 px-1.5 py-0 rounded border border-border hover:text-destructive hover:border-destructive/40 hover:shadow transition-all cursor-pointer">
 						<Trash2 class="w-3 h-3" />
 						Delete
 					</span>
 				{/snippet}
 			</ConfirmPopover>
 			{/if}
-		</div>
-	{/if}
+			</div>
+		{/if}
+	</div>
 
 	{#if !loading && ($environments.length === 0 || !$currentEnvironment)}
 		<NoEnvironment />

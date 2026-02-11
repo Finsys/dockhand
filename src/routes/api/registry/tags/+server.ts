@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getRegistry } from '$lib/server/db';
+import { getRegistryAuth } from '$lib/server/docker';
 
 interface TagInfo {
 	name: string;
@@ -16,7 +17,16 @@ function isDockerHub(url: string): boolean {
 		   lower.includes('registry.hub.docker.com');
 }
 
-async function fetchDockerHubTags(imageName: string): Promise<TagInfo[]> {
+interface PaginatedTags {
+	tags: TagInfo[];
+	total: number;
+	page: number;
+	pageSize: number;
+	hasNext: boolean;
+	hasPrev: boolean;
+}
+
+async function fetchDockerHubTags(imageName: string, page: number = 1, pageSize: number = 20): Promise<PaginatedTags> {
 	// Docker Hub uses a different API
 	// For official images: https://hub.docker.com/v2/repositories/library/<image>/tags
 	// For user images: https://hub.docker.com/v2/repositories/<user>/<image>/tags
@@ -27,7 +37,7 @@ async function fetchDockerHubTags(imageName: string): Promise<TagInfo[]> {
 		repoPath = `library/${imageName}`;
 	}
 
-	const url = `https://hub.docker.com/v2/repositories/${repoPath}/tags?page_size=100&ordering=last_updated`;
+	const url = `https://hub.docker.com/v2/repositories/${repoPath}/tags?page_size=${pageSize}&page=${page}&ordering=last_updated`;
 
 	const response = await fetch(url, {
 		headers: {
@@ -45,30 +55,34 @@ async function fetchDockerHubTags(imageName: string): Promise<TagInfo[]> {
 	const data = await response.json();
 	const results = data.results || [];
 
-	return results.map((tag: any) => ({
+	const tags = results.map((tag: any) => ({
 		name: tag.name,
 		size: tag.full_size || tag.images?.[0]?.size,
 		lastUpdated: tag.last_updated || tag.tag_last_pushed,
 		digest: tag.images?.[0]?.digest
 	}));
+
+	return {
+		tags,
+		total: data.count || 0,
+		page,
+		pageSize,
+		hasNext: !!data.next,
+		hasPrev: !!data.previous
+	};
 }
 
 async function fetchRegistryTags(registry: any, imageName: string): Promise<TagInfo[]> {
-	// Standard V2 registry API
-	let baseUrl = registry.url;
-	if (!baseUrl.endsWith('/')) {
-		baseUrl += '/';
-	}
-
-	const tagsUrl = `${baseUrl}v2/${imageName}/tags/list`;
+	// Note: orgPath is not used here because imageName already contains the full repo path
+	const { baseUrl, authHeader } = await getRegistryAuth(registry, `repository:${imageName}:pull`);
+	const tagsUrl = `${baseUrl}/v2/${imageName}/tags/list`;
 
 	const headers: HeadersInit = {
 		'Accept': 'application/json'
 	};
 
-	if (registry.username && registry.password) {
-		const credentials = Buffer.from(`${registry.username}:${registry.password}`).toString('base64');
-		headers['Authorization'] = `Basic ${credentials}`;
+	if (authHeader) {
+		headers['Authorization'] = authHeader;
 	}
 
 	const response = await fetch(tagsUrl, {
@@ -104,16 +118,18 @@ export const GET: RequestHandler = async ({ url }) => {
 	try {
 		const registryId = url.searchParams.get('registry');
 		const imageName = url.searchParams.get('image');
+		const page = parseInt(url.searchParams.get('page') || '1');
+		const pageSize = parseInt(url.searchParams.get('pageSize') || '20');
 
 		if (!imageName) {
 			return json({ error: 'Image name is required' }, { status: 400 });
 		}
 
-		let tags: TagInfo[];
+		let result: PaginatedTags;
 
 		if (!registryId) {
 			// No registry specified, assume Docker Hub
-			tags = await fetchDockerHubTags(imageName);
+			result = await fetchDockerHubTags(imageName, page, pageSize);
 		} else {
 			const registry = await getRegistry(parseInt(registryId));
 			if (!registry) {
@@ -121,13 +137,22 @@ export const GET: RequestHandler = async ({ url }) => {
 			}
 
 			if (isDockerHub(registry.url)) {
-				tags = await fetchDockerHubTags(imageName);
+				result = await fetchDockerHubTags(imageName, page, pageSize);
 			} else {
-				tags = await fetchRegistryTags(registry, imageName);
+				// V2 registries don't support pagination well, return all tags
+				const tags = await fetchRegistryTags(registry, imageName);
+				result = {
+					tags,
+					total: tags.length,
+					page: 1,
+					pageSize: tags.length,
+					hasNext: false,
+					hasPrev: false
+				};
 			}
 		}
 
-		return json(tags);
+		return json(result);
 	} catch (error: any) {
 		console.error('Error fetching tags:', error);
 

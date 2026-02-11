@@ -225,6 +225,9 @@
 	// Mutable ref for callback - allows updating without recreating editor
 	let onchangeRef: ((value: string) => void) | undefined = onchange;
 
+	// Flag to suppress onchange during programmatic value sync
+	let isSyncingExternalValue = false;
+
 	// Keep callback ref updated when prop changes
 	$effect(() => {
 		onchangeRef = onchange;
@@ -311,14 +314,15 @@
 		for (const marker of markers) {
 			// Find all occurrences of this variable in the text
 			// Match ${VAR_NAME} or ${VAR_NAME:-...} or $VAR_NAME patterns
+			// Use negative lookbehind (?<!\$) to skip escaped $$ (Docker Compose escape syntax)
 			const patterns = [
-				{ regex: new RegExp(`\\$\\{${marker.name}\\}`, 'g'), hasDefault: false },
-				{ regex: new RegExp(`\\$\\{${marker.name}:-([^}]*)\\}`, 'g'), hasDefault: true },
-				{ regex: new RegExp(`\\$\\{${marker.name}-([^}]*)\\}`, 'g'), hasDefault: true },
-				{ regex: new RegExp(`\\$\\{${marker.name}:\\?[^}]*\\}`, 'g'), hasDefault: false },
-				{ regex: new RegExp(`\\$\\{${marker.name}\\?[^}]*\\}`, 'g'), hasDefault: false },
-				{ regex: new RegExp(`\\$\\{${marker.name}:\\+[^}]*\\}`, 'g'), hasDefault: false },
-				{ regex: new RegExp(`\\$\\{${marker.name}\\+[^}]*\\}`, 'g'), hasDefault: false },
+				{ regex: new RegExp(`(?<!\\$)\\$\\{${marker.name}\\}`, 'g'), hasDefault: false },
+				{ regex: new RegExp(`(?<!\\$)\\$\\{${marker.name}:-([^}]*)\\}`, 'g'), hasDefault: true },
+				{ regex: new RegExp(`(?<!\\$)\\$\\{${marker.name}-([^}]*)\\}`, 'g'), hasDefault: true },
+				{ regex: new RegExp(`(?<!\\$)\\$\\{${marker.name}:\\?[^}]*\\}`, 'g'), hasDefault: false },
+				{ regex: new RegExp(`(?<!\\$)\\$\\{${marker.name}\\?[^}]*\\}`, 'g'), hasDefault: false },
+				{ regex: new RegExp(`(?<!\\$)\\$\\{${marker.name}:\\+[^}]*\\}`, 'g'), hasDefault: false },
+				{ regex: new RegExp(`(?<!\\$)\\$\\{${marker.name}\\+[^}]*\\}`, 'g'), hasDefault: false },
 			];
 
 			for (const { regex, hasDefault } of patterns) {
@@ -382,21 +386,29 @@
 		for (let i = 0; i < lines.length; i++) {
 			const line = lines[i];
 
+			// Skip commented lines (YAML comments start with #)
+			const trimmedLine = line.trim();
+			if (trimmedLine.startsWith('#')) {
+				pos += line.length + 1;
+				continue;
+			}
+
 			// Check if this line contains any of our marked variables
 			for (const marker of markers) {
 				// Match ${VAR_NAME} or ${VAR_NAME:-...} patterns
-				const patterns = [
-					`\${${marker.name}}`,
-					`\${${marker.name}:-`,
-					`\${${marker.name}-`,
-					`\${${marker.name}:?`,
-					`\${${marker.name}?`,
-					`\${${marker.name}:+`,
-					`\${${marker.name}+`,
-					`$${marker.name}`
+				// Use regex with negative lookbehind to skip escaped $$ (Docker Compose escape syntax)
+				const varPatterns = [
+					new RegExp(`(?<!\\$)\\$\\{${marker.name}\\}`),
+					new RegExp(`(?<!\\$)\\$\\{${marker.name}:-`),
+					new RegExp(`(?<!\\$)\\$\\{${marker.name}-`),
+					new RegExp(`(?<!\\$)\\$\\{${marker.name}:\\?`),
+					new RegExp(`(?<!\\$)\\$\\{${marker.name}\\?`),
+					new RegExp(`(?<!\\$)\\$\\{${marker.name}:\\+`),
+					new RegExp(`(?<!\\$)\\$\\{${marker.name}\\+`),
+					new RegExp(`(?<!\\$)\\$${marker.name}(?![a-zA-Z0-9_])`)
 				];
 
-				const hasVariable = patterns.some(p => line.includes(p));
+				const hasVariable = varPatterns.some(p => p.test(line));
 				if (hasVariable) {
 					gutterMarkers.push({
 						from: pos,
@@ -417,38 +429,61 @@
 	// Effect to update variable markers
 	const updateMarkersEffect = StateEffect.define<VariableMarker[]>();
 
+	// State field to store current markers (used for recalculation on doc change)
+	const currentMarkersField = StateField.define<VariableMarker[]>({
+		create() {
+			return [];
+		},
+		update(markers, tr) {
+			for (const effect of tr.effects) {
+				if (effect.is(updateMarkersEffect)) {
+					return effect.value;
+				}
+			}
+			return markers;
+		}
+	});
+
 	// State field to track variable markers (gutter)
-	// IMPORTANT: Only updates via effects, not closure reference (fixes stale closure bug)
+	// Recalculates on doc change to avoid position mapping issues
 	const variableMarkersField = StateField.define<RangeSet<GutterMarker>>({
 		create() {
-			// Start empty - markers will be pushed via effect
 			return RangeSet.empty;
 		},
 		update(markers, tr) {
+			// Check for marker updates first
 			for (const effect of tr.effects) {
 				if (effect.is(updateMarkersEffect)) {
 					return createVariableDecorations(tr.state.doc, effect.value);
 				}
 			}
-			// Don't recalculate on docChanged - wait for explicit effect from parent
+			// Recalculate on doc change using stored markers
+			if (tr.docChanged) {
+				const currentMarkers = tr.state.field(currentMarkersField);
+				return createVariableDecorations(tr.state.doc, currentMarkers);
+			}
 			return markers;
 		}
 	});
 
 	// State field to track value decorations (inline widgets)
-	// IMPORTANT: Only updates via effects, not closure reference (fixes stale closure bug)
+	// Recalculates on doc change to avoid widget duplication issues
 	const valueDecorationsField = StateField.define<DecorationSet>({
 		create() {
-			// Start empty - decorations will be pushed via effect
 			return Decoration.none;
 		},
 		update(decorations, tr) {
+			// Check for marker updates first
 			for (const effect of tr.effects) {
 				if (effect.is(updateMarkersEffect)) {
 					return createValueDecorations(tr.state.doc, effect.value);
 				}
 			}
-			// Don't recalculate on docChanged - wait for explicit effect from parent
+			// Recalculate on doc change using stored markers
+			if (tr.docChanged) {
+				const currentMarkers = tr.state.field(currentMarkersField);
+				return createValueDecorations(tr.state.doc, currentMarkers);
+			}
 			return decorations;
 		},
 		provide: f => EditorView.decorations.from(f)
@@ -515,14 +550,14 @@
 			fontSize: '13px'
 		},
 		'.cm-content': {
-			fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+			fontFamily: 'var(--font-editor, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace)',
 			padding: '8px 0'
 		},
 		'.cm-gutters': {
 			backgroundColor: '#1a1a1a',
 			color: '#858585',
 			border: 'none',
-			fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+			fontFamily: 'var(--font-editor, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace)',
 			fontSize: '13px'
 		},
 		'.cm-activeLineGutter': {
@@ -557,14 +592,14 @@
 			fontSize: '13px'
 		},
 		'.cm-content': {
-			fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+			fontFamily: 'var(--font-editor, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace)',
 			padding: '8px 0'
 		},
 		'.cm-gutters': {
 			backgroundColor: '#fafafa',
 			color: '#a1a1aa',
 			border: 'none',
-			fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+			fontFamily: 'var(--font-editor, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace)',
 			fontSize: '13px'
 		},
 		'.cm-activeLineGutter': {
@@ -644,7 +679,7 @@
 		}
 
 		// Always add variable markers gutter and value decorations (can be updated dynamically)
-		extensions.push(variableMarkersField, variableGutter, valueDecorationsField);
+		extensions.push(currentMarkersField, variableMarkersField, variableGutter, valueDecorationsField);
 
 		const state = EditorState.create({
 			doc: value,
@@ -660,16 +695,14 @@
 			view.update(trs);
 
 			// Check if any transaction changed the document
+			// Skip onchange during programmatic value sync (only fire for user edits)
 			const lastChangingTr = trs.findLast(tr => tr.docChanged);
-			if (lastChangingTr && onchangeRef) {
-				// Defer callback to next microtask to avoid blocking input handling
-				// This allows key repeat to work properly
+			if (lastChangingTr && onchangeRef && !isSyncingExternalValue) {
+				// Call synchronously to ensure parent state updates before any
+				// reactive $effect runs - this prevents race conditions on iPad Safari
+				// where paste content was being overwritten by stale external value
 				const newContent = lastChangingTr.newDoc.toString();
-				queueMicrotask(() => {
-					if (onchangeRef) {
-						onchangeRef(newContent);
-					}
-				});
+				onchangeRef(newContent);
 			}
 		};
 
@@ -801,9 +834,12 @@
 			// Only update if the external value differs from editor content
 			// This prevents feedback loops from editor changes
 			if (externalValue !== currentContent) {
+				// Suppress onchange during programmatic sync - only user edits should trigger it
+				isSyncingExternalValue = true;
 				view.dispatch({
 					changes: { from: 0, to: currentContent.length, insert: externalValue }
 				});
+				isSyncingExternalValue = false;
 			}
 		}
 	});

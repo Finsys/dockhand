@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getRegistry } from '$lib/server/db';
+import { getRegistryAuth } from '$lib/server/docker';
 
 interface SearchResult {
 	name: string;
@@ -44,52 +45,135 @@ async function searchDockerHub(term: string, limit: number): Promise<SearchResul
 }
 
 async function searchPrivateRegistry(registry: any, term: string, limit: number): Promise<SearchResult[]> {
-	// Private registries use the V2 catalog API
-	let baseUrl = registry.url;
-	if (!baseUrl.endsWith('/')) {
-		baseUrl += '/';
-	}
+	const results: string[] = [];
 
-	const catalogUrl = `${baseUrl}v2/_catalog?n=1000`;
-
-	const headers: HeadersInit = {
-		'Accept': 'application/json'
-	};
-
-	if (registry.username && registry.password) {
-		const credentials = Buffer.from(`${registry.username}:${registry.password}`).toString('base64');
-		headers['Authorization'] = `Basic ${credentials}`;
-	}
-
-	const response = await fetch(catalogUrl, {
-		method: 'GET',
-		headers
-	});
-
-	if (!response.ok) {
-		if (response.status === 401) {
-			throw new Error('Authentication failed');
+	// Strategy 1: If term looks like an image name (contains /), try direct lookup first
+	// This is much faster than iterating through catalog for large registries like ghcr.io
+	if (term.includes('/')) {
+		const directResult = await tryDirectImageLookup(registry, term);
+		if (directResult) {
+			results.push(term);
 		}
-		throw new Error(`Registry returned error: ${response.status}`);
 	}
 
-	const data = await response.json();
-	const repositories = data.repositories || [];
-
-	// Filter repositories by search term (case-insensitive)
-	const termLower = term.toLowerCase();
-	const filtered = repositories
-		.filter((name: string) => name.toLowerCase().includes(termLower))
-		.slice(0, limit);
+	// Strategy 2: Fall back to catalog search for partial matches or if direct lookup failed
+	if (results.length < limit) {
+		const catalogResults = await searchCatalog(registry, term, limit - results.length);
+		// Add catalog results, avoiding duplicates
+		for (const name of catalogResults) {
+			if (!results.includes(name)) {
+				results.push(name);
+			}
+		}
+	}
 
 	// Return results in the same format as Docker Hub
-	return filtered.map((name: string) => ({
+	return results.map((name: string) => ({
 		name,
 		description: '',
 		star_count: 0,
 		is_official: false,
 		is_automated: false
 	}));
+}
+
+// Try to directly check if an image exists by querying its tags endpoint
+async function tryDirectImageLookup(registry: any, imageName: string): Promise<boolean> {
+	try {
+		// Note: orgPath is not used here because imageName already contains the full repo path
+		const { baseUrl, authHeader } = await getRegistryAuth(registry, `repository:${imageName}:pull`);
+
+		const headers: HeadersInit = {
+			'Accept': 'application/json'
+		};
+
+		if (authHeader) {
+			headers['Authorization'] = authHeader;
+		}
+
+		const response = await fetch(`${baseUrl}/v2/${imageName}/tags/list`, {
+			method: 'GET',
+			headers
+		});
+
+		// 200 = image exists, 404 = doesn't exist
+		return response.ok;
+	} catch {
+		return false;
+	}
+}
+
+// Search through catalog (slow for large registries, limited to first few pages)
+async function searchCatalog(registry: any, term: string, limit: number): Promise<string[]> {
+	// Note: orgPath could be used here to filter results, but search is already term-based
+	const { baseUrl, authHeader } = await getRegistryAuth(registry, 'registry:catalog:*');
+
+	const headers: HeadersInit = {
+		'Accept': 'application/json'
+	};
+
+	if (authHeader) {
+		headers['Authorization'] = authHeader;
+	}
+
+	const termLower = term.toLowerCase();
+	const results: string[] = [];
+	const PAGE_SIZE = 200;
+	const MAX_PAGES = 3; // Limit pages to avoid long waits on huge registries
+
+	let lastRepo: string | null = null;
+	let pagesSearched = 0;
+
+	while (results.length < limit && pagesSearched < MAX_PAGES) {
+		let catalogUrl = `${baseUrl}/v2/_catalog?n=${PAGE_SIZE}`;
+		if (lastRepo) {
+			catalogUrl += `&last=${encodeURIComponent(lastRepo)}`;
+		}
+
+		const response = await fetch(catalogUrl, {
+			method: 'GET',
+			headers
+		});
+
+		if (!response.ok) {
+			if (response.status === 401) {
+				throw new Error('Authentication failed');
+			}
+			throw new Error(`Registry returned error: ${response.status}`);
+		}
+
+		const data = await response.json();
+		const repositories: string[] = data.repositories || [];
+
+		if (repositories.length === 0) {
+			break;
+		}
+
+		// Filter and add matching repos
+		for (const name of repositories) {
+			if (name.toLowerCase().includes(termLower)) {
+				results.push(name);
+				if (results.length >= limit) {
+					break;
+				}
+			}
+		}
+
+		// Get last repo for next page
+		lastRepo = repositories[repositories.length - 1];
+
+		// Check if there are more pages
+		const linkHeader = response.headers.get('Link');
+		if (!linkHeader || !linkHeader.includes('rel="next"')) {
+			if (repositories.length < PAGE_SIZE) {
+				break;
+			}
+		}
+
+		pagesSearched++;
+	}
+
+	return results;
 }
 
 export const GET: RequestHandler = async ({ url }) => {

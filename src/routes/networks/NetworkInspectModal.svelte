@@ -4,6 +4,7 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { Loader2, Network } from 'lucide-svelte';
 	import { currentEnvironment, appendEnvParam } from '$lib/stores/environment';
+	import { formatDateTime } from '$lib/stores/settings';
 	import ContainerTile from '../containers/ContainerTile.svelte';
 	import ContainerInspectModal from '../containers/ContainerInspectModal.svelte';
 
@@ -54,14 +55,14 @@
 		}
 	}
 
-	function formatDate(dateString: string): string {
+	function formatNetworkDate(dateString: string): string {
 		if (!dateString) return 'N/A';
-		return new Date(dateString).toLocaleString();
+		return formatDateTime(dateString, true);
 	}
 </script>
 
 <Dialog.Root bind:open>
-	<Dialog.Content class="max-w-4xl h-[90vh] flex flex-col">
+	<Dialog.Content class="max-w-4xl max-h-[90vh] flex flex-col">
 		<Dialog.Header class="shrink-0">
 			<Dialog.Title class="flex items-center gap-2">
 				<Network class="w-5 h-5" />
@@ -101,7 +102,7 @@
 						</div>
 						<div>
 							<p class="text-muted-foreground">Created</p>
-							<p>{formatDate(networkData.Created)}</p>
+							<p>{formatNetworkDate(networkData.Created)}</p>
 						</div>
 						<div>
 							<p class="text-muted-foreground">Internal</p>

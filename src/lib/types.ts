@@ -1,5 +1,10 @@
 // Shared types that can be used in both client and server code
 
+/**
+ * System container type - containers that cannot be updated from within Dockhand.
+ */
+export type SystemContainerType = 'dockhand' | 'hawser';
+
 export interface ContainerInfo {
 	id: string;
 	name: string;
@@ -24,16 +29,25 @@ export interface ContainerInfo {
 	}>;
 	networkMode: string;
 	networks: string[];
+	/**
+	 * Identifies system containers (Dockhand, Hawser) that cannot be updated from within Dockhand.
+	 * - 'dockhand': The Dockhand container itself
+	 * - 'hawser': A Hawser remote agent container
+	 * - null/undefined: Regular container
+	 */
+	systemContainer?: SystemContainerType | null;
 }
 
 export interface ImageInfo {
 	id: string;
 	repoTags: string[];
 	tags: string[]; // Alias for repoTags, populated by API
+	repoDigests: string[]; // Repository digests (e.g., "nginx@sha256:abc123") - used for untagged images
 	created: number;
 	size: number;
 	virtualSize: number;
 	labels: Record<string, string>;
+	containers: number; // Number of containers using this image
 }
 
 export interface VolumeUsage {
@@ -90,7 +104,9 @@ export interface ContainerStats {
 	id: string;
 	name: string;
 	cpuPercent: number;
-	memoryUsage: number;
+	memoryUsage: number;      // Actual usage (total - cache), same as docker stats
+	memoryRaw: number;        // Raw total usage before cache subtraction
+	memoryCache: number;      // File cache (inactive_file)
 	memoryLimit: number;
 	memoryPercent: number;
 	networkRx: number;
@@ -148,7 +164,7 @@ export interface GitRepository {
 }
 
 // Grid column configuration types
-export type GridId = 'containers' | 'images' | 'imageTags' | 'networks' | 'stacks' | 'volumes' | 'activity' | 'schedules';
+export type GridId = 'containers' | 'images' | 'imageTags' | 'networks' | 'stacks' | 'volumes' | 'activity' | 'schedules' | 'audit';
 
 export interface ColumnConfig {
 	id: string;

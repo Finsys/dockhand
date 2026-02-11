@@ -134,22 +134,22 @@
 				<div class="flex gap-2">
 					<Button variant="outline" class="flex-1" onclick={copyBackupCodes}>
 						{#if copied}
-							<Check class="w-4 h-4 mr-1" />
+							<Check class="w-4 h-4" />
 							Copied!
 						{:else}
-							<Copy class="w-4 h-4 mr-1" />
+							<Copy class="w-4 h-4" />
 							Copy codes
 						{/if}
 					</Button>
 					<Button variant="outline" class="flex-1" onclick={downloadBackupCodes}>
-						<Download class="w-4 h-4 mr-1" />
+						<Download class="w-4 h-4" />
 						Download
 					</Button>
 				</div>
 			</div>
 			<Dialog.Footer>
 				<Button onclick={handleDone}>
-					<ShieldCheck class="w-4 h-4 mr-1" />
+					<ShieldCheck class="w-4 h-4" />
 					Done
 				</Button>
 			</Dialog.Footer>
@@ -194,9 +194,9 @@
 				<Button variant="outline" onclick={onClose}>Cancel</Button>
 				<Button onclick={verifyAndEnableMfa} disabled={loading || !token}>
 					{#if loading}
-						<RefreshCw class="w-4 h-4 mr-1 animate-spin" />
+						<RefreshCw class="w-4 h-4 animate-spin" />
 					{:else}
-						<ShieldCheck class="w-4 h-4 mr-1" />
+						<ShieldCheck class="w-4 h-4" />
 					{/if}
 					Enable MFA
 				</Button>

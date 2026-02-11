@@ -9,6 +9,7 @@ import {
 	getAllAutoUpdateSettings,
 	getAllAutoUpdateGitStacks,
 	getAllEnvUpdateCheckSettings,
+	getAllImagePruneSettings,
 	getLastExecutionForSchedule,
 	getRecentExecutionsForSchedule,
 	getEnvironment,
@@ -139,6 +140,45 @@ async function getSchedulesData(): Promise<ScheduleInfo[]> {
 		})
 	);
 	schedules.push(...envUpdateCheckSchedules);
+
+	// Get image prune schedules
+	const imagePruneConfigs = await getAllImagePruneSettings();
+	const imagePruneSchedules = await Promise.all(
+		imagePruneConfigs.map(async ({ envId, settings }) => {
+			const [env, lastExecution, recentExecutions, timezone] = await Promise.all([
+				getEnvironment(envId),
+				getLastExecutionForSchedule('image_prune', envId),
+				getRecentExecutionsForSchedule('image_prune', envId, 5),
+				getEnvironmentTimezone(envId)
+			]);
+			const isEnabled = settings.enabled ?? false;
+			const nextRun = isEnabled && settings.cronExpression ? getNextRun(settings.cronExpression, timezone) : null;
+
+			// Build description based on prune mode
+			const description = settings.pruneMode === 'all'
+				? 'Prune all unused images'
+				: 'Prune dangling images only';
+
+			return {
+				id: envId,
+				type: 'image_prune' as const,
+				name: `Prune images: ${env?.name || 'Unknown'}`,
+				entityName: env?.name || 'Unknown',
+				description,
+				environmentId: envId,
+				environmentName: env?.name ?? null,
+				enabled: isEnabled,
+				scheduleType: 'custom',
+				cronExpression: settings.cronExpression ?? null,
+				nextRun: nextRun?.toISOString() ?? null,
+				lastExecution: lastExecution ?? null,
+				recentExecutions,
+				isSystem: false,
+				pruneMode: settings.pruneMode
+			};
+		})
+	);
+	schedules.push(...imagePruneSchedules);
 
 	// Get system schedules
 	const systemSchedules = await getSystemSchedules();

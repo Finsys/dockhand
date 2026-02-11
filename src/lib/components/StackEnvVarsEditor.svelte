@@ -2,7 +2,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import * as Tooltip from '$lib/components/ui/tooltip';
-	import { Plus, Trash2, Key, AlertCircle, CheckCircle2, FileText, Pencil, CircleDot } from 'lucide-svelte';
+	import { Plus, Trash2, Key, AlertCircle, CheckCircle2, FileText, Pencil, CircleDot, Undo2 } from 'lucide-svelte';
 
 	export interface EnvVar {
 		key: string;
@@ -25,6 +25,7 @@
 		readonly?: boolean;
 		showSource?: boolean; // For git stacks - show where variable comes from
 		sources?: Record<string, 'file' | 'override'>; // Key -> source mapping
+		fileValues?: Record<string, string>; // Original file values for revert
 		placeholder?: { key: string; value: string };
 		existingSecretKeys?: Set<string>; // Keys of secrets loaded from DB (can't toggle visibility)
 		onchange?: () => void;
@@ -36,6 +37,7 @@
 		readonly = false,
 		showSource = false,
 		sources = {},
+		fileValues = {},
 		placeholder = { key: 'VARIABLE_NAME', value: 'value' },
 		existingSecretKeys = new Set<string>(),
 		onchange
@@ -119,14 +121,29 @@
 								<Tooltip.Trigger>
 									<FileText class="w-3.5 h-3.5 text-muted-foreground" />
 								</Tooltip.Trigger>
-								<Tooltip.Content><p>From .env file</p></Tooltip.Content>
+								<Tooltip.Content side="bottom"><p class="whitespace-nowrap">From env file in repository</p></Tooltip.Content>
 							</Tooltip.Root>
 						{:else if source === 'override'}
 							<Tooltip.Root>
 								<Tooltip.Trigger>
-									<Pencil class="w-3.5 h-3.5 text-blue-500" />
+									{#if fileValues[variable.key] !== undefined}
+										<button
+											type="button"
+											class="cursor-pointer hover:text-orange-400 transition-colors"
+											onclick={() => {
+												variables = variables.map(v =>
+													v.key === variable.key ? { ...v, value: fileValues[variable.key] } : v
+												);
+												onchange?.();
+											}}
+										>
+											<Undo2 class="w-3.5 h-3.5 text-blue-500 hover:text-orange-400" />
+										</button>
+									{:else}
+										<Pencil class="w-3.5 h-3.5 text-blue-500" />
+									{/if}
 								</Tooltip.Trigger>
-								<Tooltip.Content><p>Manual override</p></Tooltip.Content>
+								<Tooltip.Content side="bottom"><p class="whitespace-nowrap">{fileValues[variable.key] !== undefined ? 'Revert to file value' : 'Manual override (not in file)'}</p></Tooltip.Content>
 							</Tooltip.Root>
 						{/if}
 					</div>
@@ -231,7 +248,7 @@
 				<p class="text-sm">No environment variables defined.</p>
 				{#if !readonly}
 					<Button type="button" variant="link" onclick={addVariable} class="mt-1 text-xs">
-						<Plus class="w-3 h-3 mr-1" />
+						<Plus class="w-3 h-3" />
 						Add your first variable
 					</Button>
 				{/if}

@@ -5,6 +5,7 @@ import {
 	createRole as dbCreateRole
 } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
+import { auditRole } from '$lib/server/audit';
 
 // GET /api/roles - List all roles
 export const GET: RequestHandler = async ({ cookies }) => {
@@ -26,7 +27,8 @@ export const GET: RequestHandler = async ({ cookies }) => {
 };
 
 // POST /api/roles - Create a new role
-export const POST: RequestHandler = async ({ request, cookies }) => {
+export const POST: RequestHandler = async (event) => {
+	const { request, cookies } = event;
 	const auth = await authorize(cookies);
 
 	// Check enterprise license
@@ -53,6 +55,9 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			permissions,
 			environmentIds: environmentIds ?? null
 		});
+
+		// Audit log
+		await auditRole(event, 'create', role.id, role.name);
 
 		return json(role, { status: 201 });
 	} catch (error: any) {

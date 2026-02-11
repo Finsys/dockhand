@@ -25,6 +25,7 @@
 		Palette
 	} from 'lucide-svelte';
 	import { authStore } from '$lib/stores/auth';
+	import { formatDateTime } from '$lib/stores/settings';
 	import * as Alert from '$lib/components/ui/alert';
 	import AvatarCropper from '$lib/components/AvatarCropper.svelte';
 	import * as Avatar from '$lib/components/ui/avatar';
@@ -116,7 +117,7 @@
 			if (response.ok) {
 				profile = await response.json();
 				formEmail = profile?.email || '';
-				formDisplayName = profile?.display_name || '';
+				formDisplayName = profile?.displayName || '';
 			} else if (response.status === 401) {
 				goto('/login');
 			} else {
@@ -141,7 +142,7 @@
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
 					email: formEmail.trim() || null,
-					display_name: formDisplayName.trim() || null
+					displayName: formDisplayName.trim() || null
 				})
 			});
 
@@ -208,9 +209,9 @@
 		showSuccessMessage('MFA disabled successfully');
 	}
 
-	function formatDate(dateStr: string | null): string {
+	function formatProfileDate(dateStr: string | null): string {
 		if (!dateStr) return 'Never';
-		return new Date(dateStr).toLocaleString();
+		return formatDateTime(dateStr, true);
 	}
 
 	async function saveAvatar(dataUrl: string) {
@@ -413,14 +414,14 @@
 									<Label class="text-muted-foreground text-xs">Created</Label>
 									<p class="text-sm flex items-center gap-1">
 										<Calendar class="w-3.5 h-3.5" />
-										{formatDate(profile.createdAt)}
+										{formatProfileDate(profile.createdAt)}
 									</p>
 								</div>
 								<div>
 									<Label class="text-muted-foreground text-xs">Last login</Label>
 									<p class="text-sm flex items-center gap-1">
 										<Clock class="w-3.5 h-3.5" />
-										{formatDate(profile.lastLogin)}
+										{formatProfileDate(profile.lastLogin)}
 									</p>
 								</div>
 							</div>
@@ -468,7 +469,7 @@
 							{#if formSaving}
 								<RefreshCw class="w-4 h-4 mr-1 animate-spin" />
 							{:else}
-								<Check class="w-4 h-4 mr-1" />
+								<Check class="w-4 h-4" />
 							{/if}
 							Save changes
 						</Button>
@@ -550,7 +551,7 @@
 									{#if mfaLoading}
 										<RefreshCw class="w-4 h-4 mr-1 animate-spin" />
 									{:else}
-										<QrCode class="w-4 h-4 mr-1" />
+										<QrCode class="w-4 h-4" />
 									{/if}
 									Setup MFA
 								</Button>

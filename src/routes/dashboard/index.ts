@@ -11,4 +11,5 @@ export { default as DashboardTopContainers } from './dashboard-top-containers.sv
 export { default as DashboardDiskUsage } from './dashboard-disk-usage.svelte';
 export { default as DashboardCpuMemoryCharts } from './dashboard-cpu-memory-charts.svelte';
 export { default as DashboardOfflineState } from './dashboard-offline-state.svelte';
+export { default as DashboardConnectingState } from './dashboard-connecting-state.svelte';
 export { default as DashboardStatusIcons } from './dashboard-status-icons.svelte';

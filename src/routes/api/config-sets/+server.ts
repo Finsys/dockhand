@@ -2,6 +2,7 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getConfigSets, createConfigSet } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
+import { auditConfigSet } from '$lib/server/audit';
 
 export const GET: RequestHandler = async ({ cookies }) => {
 	const auth = await authorize(cookies);
@@ -18,7 +19,8 @@ export const GET: RequestHandler = async ({ cookies }) => {
 	}
 };
 
-export const POST: RequestHandler = async ({ request, cookies }) => {
+export const POST: RequestHandler = async (event) => {
+	const { request, cookies } = event;
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !await auth.can('configsets', 'create')) {
 		return json({ error: 'Permission denied' }, { status: 403 });
@@ -41,6 +43,9 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			networkMode: body.networkMode || 'bridge',
 			restartPolicy: body.restartPolicy || 'no'
 		});
+
+		// Audit log
+		await auditConfigSet(event, 'create', configSet.id, configSet.name);
 
 		return json(configSet, { status: 201 });
 	} catch (error: any) {

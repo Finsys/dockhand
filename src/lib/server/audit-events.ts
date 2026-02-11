@@ -9,7 +9,9 @@ import type { AuditLogCreateData } from './db';
 
 export interface AuditEventData extends AuditLogCreateData {
 	id: number;
-	timestamp: string;
+	createdAt: string;
+	environmentName?: string | null;
+	environmentIcon?: string | null;
 }
 
 // Create a singleton event emitter for audit events

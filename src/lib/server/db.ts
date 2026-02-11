@@ -78,6 +78,7 @@ import {
 } from './db/drizzle.js';
 
 import type { AllGridPreferences, GridId, GridColumnPreferences } from '$lib/types';
+import { encrypt, decrypt } from './encryption.js';
 
 // Re-export for backwards compatibility
 export { db, isPostgres, isSqlite };
@@ -112,7 +113,12 @@ export function initDatabase() {
 // =============================================================================
 
 export async function getEnvironments(): Promise<Environment[]> {
-	return db.select().from(environments).orderBy(asc(environments.name));
+	const results = await db.select().from(environments).orderBy(asc(environments.name));
+	return results.map((e: Environment) => ({
+		...e,
+		tlsKey: decrypt(e.tlsKey),
+		hawserToken: decrypt(e.hawserToken)
+	}));
 }
 
 export async function hasEnvironments(): Promise<boolean> {
@@ -122,7 +128,22 @@ export async function hasEnvironments(): Promise<boolean> {
 
 export async function getEnvironment(id: number): Promise<Environment | undefined> {
 	const results = await db.select().from(environments).where(eq(environments.id, id));
-	return results[0];
+	if (!results[0]) return undefined;
+	return {
+		...results[0],
+		tlsKey: decrypt(results[0].tlsKey),
+		hawserToken: decrypt(results[0].hawserToken)
+	};
+}
+
+export async function getEnvironmentByName(name: string): Promise<Environment | undefined> {
+	const results = await db.select().from(environments).where(eq(environments.name, name));
+	if (!results[0]) return undefined;
+	return {
+		...results[0],
+		tlsKey: decrypt(results[0].tlsKey),
+		hawserToken: decrypt(results[0].hawserToken)
+	};
 }
 
 export async function createEnvironment(env: Omit<Environment, 'id' | 'createdAt' | 'updatedAt'>): Promise<Environment> {
@@ -133,7 +154,8 @@ export async function createEnvironment(env: Omit<Environment, 'id' | 'createdAt
 		protocol: env.protocol || 'http',
 		tlsCa: env.tlsCa || null,
 		tlsCert: env.tlsCert || null,
-		tlsKey: env.tlsKey || null,
+		tlsKey: encrypt(env.tlsKey) || null,
+		tlsSkipVerify: env.tlsSkipVerify ?? false,
 		icon: env.icon || 'globe',
 		socketPath: env.socketPath || '/var/run/docker.sock',
 		collectActivity: env.collectActivity !== false,
@@ -141,9 +163,13 @@ export async function createEnvironment(env: Omit<Environment, 'id' | 'createdAt
 		highlightChanges: env.highlightChanges !== false,
 		labels: env.labels || null,
 		connectionType: env.connectionType || 'socket',
-		hawserToken: env.hawserToken || null
+		hawserToken: encrypt(env.hawserToken) || null
 	}).returning();
-	return result[0];
+	return {
+		...result[0],
+		tlsKey: decrypt(result[0].tlsKey),
+		hawserToken: decrypt(result[0].hawserToken)
+	};
 }
 
 export async function updateEnvironment(id: number, env: Partial<Environment>): Promise<Environment | undefined> {
@@ -155,7 +181,7 @@ export async function updateEnvironment(id: number, env: Partial<Environment>): 
 	if (env.protocol !== undefined) updateData.protocol = env.protocol;
 	if (env.tlsCa !== undefined) updateData.tlsCa = env.tlsCa;
 	if (env.tlsCert !== undefined) updateData.tlsCert = env.tlsCert;
-	if (env.tlsKey !== undefined) updateData.tlsKey = env.tlsKey;
+	if (env.tlsKey !== undefined) updateData.tlsKey = encrypt(env.tlsKey);
 	if (env.tlsSkipVerify !== undefined) updateData.tlsSkipVerify = env.tlsSkipVerify;
 	if (env.icon !== undefined) updateData.icon = env.icon;
 	if (env.socketPath !== undefined) updateData.socketPath = env.socketPath;
@@ -164,7 +190,7 @@ export async function updateEnvironment(id: number, env: Partial<Environment>): 
 	if (env.highlightChanges !== undefined) updateData.highlightChanges = env.highlightChanges;
 	if (env.labels !== undefined) updateData.labels = env.labels;
 	if (env.connectionType !== undefined) updateData.connectionType = env.connectionType;
-	if (env.hawserToken !== undefined) updateData.hawserToken = env.hawserToken;
+	if (env.hawserToken !== undefined) updateData.hawserToken = encrypt(env.hawserToken);
 
 	await db.update(environments).set(updateData).where(eq(environments.id, id));
 	return getEnvironment(id);
@@ -178,19 +204,22 @@ export async function deleteEnvironment(id: number): Promise<boolean> {
 	try {
 		await db.delete(hostMetrics).where(eq(hostMetrics.environmentId, id));
 	} catch (error) {
-		console.error('Failed to cleanup host metrics for environment:', error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[DB] Failed to cleanup host metrics for environment:', errorMsg);
 	}
 
 	try {
 		await db.delete(stackEvents).where(eq(stackEvents.environmentId, id));
 	} catch (error) {
-		console.error('Failed to cleanup stack events for environment:', error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[DB] Failed to cleanup stack events for environment:', errorMsg);
 	}
 
 	try {
 		await db.delete(autoUpdateSettings).where(eq(autoUpdateSettings.environmentId, id));
 	} catch (error) {
-		console.error('Failed to cleanup auto-update schedules for environment:', error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[DB] Failed to cleanup auto-update schedules for environment:', errorMsg);
 	}
 
 	await db.delete(environments).where(eq(environments.id, id));
@@ -202,17 +231,20 @@ export async function deleteEnvironment(id: number): Promise<boolean> {
 // =============================================================================
 
 export async function getRegistries(): Promise<Registry[]> {
-	return db.select().from(registries).orderBy(desc(registries.isDefault), asc(registries.name));
+	const results = await db.select().from(registries).orderBy(desc(registries.isDefault), asc(registries.name));
+	return results.map((r: Registry) => ({ ...r, password: decrypt(r.password) }));
 }
 
 export async function getRegistry(id: number): Promise<Registry | undefined> {
 	const results = await db.select().from(registries).where(eq(registries.id, id));
-	return results[0];
+	if (!results[0]) return undefined;
+	return { ...results[0], password: decrypt(results[0].password) };
 }
 
 export async function getDefaultRegistry(): Promise<Registry | undefined> {
 	const results = await db.select().from(registries).where(eq(registries.isDefault, true));
-	return results[0];
+	if (!results[0]) return undefined;
+	return { ...results[0], password: decrypt(results[0].password) };
 }
 
 export async function createRegistry(registry: Omit<Registry, 'id' | 'createdAt' | 'updatedAt'>): Promise<Registry> {
@@ -220,10 +252,13 @@ export async function createRegistry(registry: Omit<Registry, 'id' | 'createdAt'
 		name: registry.name,
 		url: registry.url,
 		username: registry.username || null,
-		password: registry.password || null,
+		password: encrypt(registry.password) || null,
 		isDefault: registry.isDefault || false
 	}).returning();
-	return result[0];
+	return {
+		...result[0],
+		password: decrypt(result[0].password)
+	};
 }
 
 export async function updateRegistry(id: number, registry: Partial<Registry>): Promise<Registry | undefined> {
@@ -232,7 +267,7 @@ export async function updateRegistry(id: number, registry: Partial<Registry>): P
 	if (registry.name !== undefined) updateData.name = registry.name;
 	if (registry.url !== undefined) updateData.url = registry.url;
 	if (registry.username !== undefined) updateData.username = registry.username || null;
-	if (registry.password !== undefined) updateData.password = registry.password || null;
+	if (registry.password !== undefined) updateData.password = encrypt(registry.password) || null;
 	if (registry.isDefault !== undefined) updateData.isDefault = registry.isDefault;
 
 	await db.update(registries).set(updateData).where(eq(registries.id, id));
@@ -348,14 +383,16 @@ export async function getUserThemePreferences(userId: number): Promise<{
 	fontSize: string;
 	gridFontSize: string;
 	terminalFont: string;
+	editorFont: string;
 }> {
-	const [lightTheme, darkTheme, font, fontSize, gridFontSize, terminalFont] = await Promise.all([
+	const [lightTheme, darkTheme, font, fontSize, gridFontSize, terminalFont, editorFont] = await Promise.all([
 		getUserSetting(userId, 'light_theme'),
 		getUserSetting(userId, 'dark_theme'),
 		getUserSetting(userId, 'font'),
 		getUserSetting(userId, 'font_size'),
 		getUserSetting(userId, 'grid_font_size'),
-		getUserSetting(userId, 'terminal_font')
+		getUserSetting(userId, 'terminal_font'),
+		getUserSetting(userId, 'editor_font')
 	]);
 	return {
 		lightTheme: lightTheme || 'default',
@@ -363,13 +400,14 @@ export async function getUserThemePreferences(userId: number): Promise<{
 		font: font || 'system',
 		fontSize: fontSize || 'normal',
 		gridFontSize: gridFontSize || 'normal',
-		terminalFont: terminalFont || 'system-mono'
+		terminalFont: terminalFont || 'system-mono',
+		editorFont: editorFont || 'system-mono'
 	};
 }
 
 export async function setUserThemePreferences(
 	userId: number,
-	prefs: { lightTheme?: string; darkTheme?: string; font?: string; fontSize?: string; gridFontSize?: string; terminalFont?: string }
+	prefs: { lightTheme?: string; darkTheme?: string; font?: string; fontSize?: string; gridFontSize?: string; terminalFont?: string; editorFont?: string }
 ): Promise<void> {
 	const updates: Promise<void>[] = [];
 	if (prefs.lightTheme !== undefined) {
@@ -389,6 +427,9 @@ export async function setUserThemePreferences(
 	}
 	if (prefs.terminalFont !== undefined) {
 		updates.push(setUserSetting(userId, 'terminal_font', prefs.terminalFont));
+	}
+	if (prefs.editorFont !== undefined) {
+		updates.push(setUserSetting(userId, 'editor_font', prefs.editorFont));
 	}
 	await Promise.all(updates);
 }
@@ -469,7 +510,7 @@ export interface ConfigSetData {
 
 export async function getConfigSets(): Promise<ConfigSetData[]> {
 	const rows = await db.select().from(configSets).orderBy(asc(configSets.name));
-	return rows.map(row => ({
+	return rows.map((row: typeof configSets.$inferSelect) => ({
 		...row,
 		envVars: row.envVars ? JSON.parse(row.envVars) : [],
 		labels: row.labels ? JSON.parse(row.labels) : [],
@@ -769,6 +810,8 @@ export const NOTIFICATION_EVENT_TYPES = [
 	{ id: 'environment_offline', label: 'Environment offline', description: 'Environment became unreachable', group: 'system', scope: 'environment' },
 	{ id: 'environment_online', label: 'Environment online', description: 'Environment came back online', group: 'system', scope: 'environment' },
 	{ id: 'disk_space_warning', label: 'Disk space warning', description: 'Docker disk usage exceeds threshold', group: 'system', scope: 'environment' },
+	{ id: 'image_prune_success', label: 'Image prune success', description: 'Scheduled image prune completed successfully', group: 'system', scope: 'environment' },
+	{ id: 'image_prune_failed', label: 'Image prune failed', description: 'Scheduled image prune failed', group: 'system', scope: 'environment' },
 	{ id: 'license_expiring', label: 'License expiring', description: 'Enterprise license expiring soon (global)', group: 'system', scope: 'system' }
 ] as const;
 
@@ -816,11 +859,35 @@ export interface AppriseConfig {
 	urls: string[];
 }
 
+// Helper to encrypt sensitive fields in notification config
+function encryptNotificationConfig(type: 'smtp' | 'apprise', config: SmtpConfig | AppriseConfig): string {
+	if (type === 'smtp') {
+		const smtpConfig = config as SmtpConfig;
+		return JSON.stringify({
+			...smtpConfig,
+			password: encrypt(smtpConfig.password)
+		});
+	}
+	return JSON.stringify(config);
+}
+
+// Helper to decrypt sensitive fields in notification config
+function decryptNotificationConfig(type: string, configJson: string): any {
+	const config = JSON.parse(configJson);
+	if (type === 'smtp' && config.password) {
+		return {
+			...config,
+			password: decrypt(config.password)
+		};
+	}
+	return config;
+}
+
 export async function getNotificationSettings(): Promise<NotificationSettingData[]> {
 	const rows = await db.select().from(notificationSettings).orderBy(desc(notificationSettings.createdAt));
-	return rows.map(row => ({
+	return rows.map((row: typeof notificationSettings.$inferSelect) => ({
 		...row,
-		config: JSON.parse(row.config),
+		config: decryptNotificationConfig(row.type, row.config),
 		eventTypes: row.eventTypes ? JSON.parse(row.eventTypes) : NOTIFICATION_EVENT_TYPES.map(e => e.id)
 	})) as NotificationSettingData[];
 }
@@ -831,16 +898,16 @@ export async function getNotificationSetting(id: number): Promise<NotificationSe
 	const row = results[0];
 	return {
 		...row,
-		config: JSON.parse(row.config),
+		config: decryptNotificationConfig(row.type, row.config),
 		eventTypes: row.eventTypes ? JSON.parse(row.eventTypes) : NOTIFICATION_EVENT_TYPES.map(e => e.id)
 	} as NotificationSettingData;
 }
 
 export async function getEnabledNotificationSettings(): Promise<NotificationSettingData[]> {
 	const rows = await db.select().from(notificationSettings).where(eq(notificationSettings.enabled, true));
-	return rows.map(row => ({
+	return rows.map((row: typeof notificationSettings.$inferSelect) => ({
 		...row,
-		config: JSON.parse(row.config),
+		config: decryptNotificationConfig(row.type, row.config),
 		eventTypes: row.eventTypes ? JSON.parse(row.eventTypes) : NOTIFICATION_EVENT_TYPES.map(e => e.id)
 	})) as NotificationSettingData[];
 }
@@ -857,7 +924,7 @@ export async function createNotificationSetting(data: {
 		type: data.type,
 		name: data.name,
 		enabled: data.enabled !== false,
-		config: JSON.stringify(data.config),
+		config: encryptNotificationConfig(data.type, data.config),
 		eventTypes: JSON.stringify(eventTypes)
 	}).returning();
 	return getNotificationSetting(result[0].id) as Promise<NotificationSettingData>;
@@ -876,7 +943,7 @@ export async function updateNotificationSetting(id: number, data: {
 
 	if (data.name !== undefined) updateData.name = data.name;
 	if (data.enabled !== undefined) updateData.enabled = data.enabled;
-	if (data.config !== undefined) updateData.config = JSON.stringify(data.config);
+	if (data.config !== undefined) updateData.config = encryptNotificationConfig(existing.type, data.config);
 	if (data.eventTypes !== undefined) updateData.eventTypes = JSON.stringify(data.eventTypes);
 
 	await db.update(notificationSettings).set(updateData).where(eq(notificationSettings.id, id));
@@ -926,7 +993,7 @@ export async function getEnvironmentNotifications(environmentId: number): Promis
 		.where(eq(environmentNotifications.environmentId, environmentId))
 		.orderBy(asc(notificationSettings.name));
 
-	return rows.map(row => ({
+	return rows.map((row: any) => ({
 		...row,
 		eventTypes: row.eventTypes ? JSON.parse(row.eventTypes) : NOTIFICATION_EVENT_TYPES.map(e => e.id)
 	})) as EnvironmentNotificationData[];
@@ -1034,7 +1101,7 @@ export async function getEnabledEnvironmentNotifications(
 		.map(row => ({
 			...row,
 			eventTypes: row.eventTypes ? JSON.parse(row.eventTypes) : NOTIFICATION_EVENT_TYPES.map(e => e.id),
-			config: JSON.parse(row.config)
+			config: decryptNotificationConfig(row.channelType ?? 'apprise', row.config)
 		}))
 		.filter(row => !eventType || row.eventTypes.includes(eventType)) as (EnvironmentNotificationData & { config: any })[];
 }
@@ -1081,9 +1148,17 @@ export async function updateAuthSettings(data: Partial<AuthSettingsData>): Promi
 
 	if (data.authEnabled !== undefined) updateData.authEnabled = data.authEnabled;
 	if (data.defaultProvider !== undefined) updateData.defaultProvider = data.defaultProvider;
-	if (data.sessionTimeout !== undefined) updateData.sessionTimeout = data.sessionTimeout;
+	if (data.sessionTimeout !== undefined) {
+		// Cap session timeout to safe maximum (30 days)
+		const MAX_SESSION_TIMEOUT = 2592000; // 30 days in seconds
+		updateData.sessionTimeout = Math.min(Math.max(1, data.sessionTimeout), MAX_SESSION_TIMEOUT);
+	}
 
-	await db.update(authSettings).set(updateData).where(eq(authSettings.id, 1));
+	// Get existing row's id (may not be 1 after db reset/migration)
+	const existing = await db.select({ id: authSettings.id }).from(authSettings).limit(1);
+	if (existing[0]) {
+		await db.update(authSettings).set(updateData).where(eq(authSettings.id, existing[0].id));
+	}
 	return getAuthSettings();
 }
 
@@ -1586,6 +1661,7 @@ export async function getLdapConfigs(): Promise<LdapConfigData[]> {
 	const results = await db.select().from(ldapConfig).orderBy(asc(ldapConfig.name));
 	return results.map((row: any) => ({
 		...row,
+		bindPassword: decrypt(row.bindPassword),
 		roleMappings: row.roleMappings ? JSON.parse(row.roleMappings) : null
 	})) as LdapConfigData[];
 }
@@ -1596,6 +1672,7 @@ export async function getLdapConfig(id: number): Promise<LdapConfigData | null> 
 	const row = results[0] as any;
 	return {
 		...row,
+		bindPassword: decrypt(row.bindPassword),
 		roleMappings: row.roleMappings ? JSON.parse(row.roleMappings) : null
 	} as LdapConfigData;
 }
@@ -1606,7 +1683,7 @@ export async function createLdapConfig(data: Omit<LdapConfigData, 'id' | 'create
 		enabled: data.enabled,
 		serverUrl: data.serverUrl,
 		bindDn: data.bindDn || null,
-		bindPassword: data.bindPassword || null,
+		bindPassword: encrypt(data.bindPassword) || null,
 		baseDn: data.baseDn,
 		userFilter: data.userFilter,
 		usernameAttribute: data.usernameAttribute,
@@ -1629,7 +1706,7 @@ export async function updateLdapConfig(id: number, data: Partial<LdapConfigData>
 	if (data.enabled !== undefined) updateData.enabled = data.enabled;
 	if (data.serverUrl !== undefined) updateData.serverUrl = data.serverUrl;
 	if (data.bindDn !== undefined) updateData.bindDn = data.bindDn || null;
-	if (data.bindPassword !== undefined) updateData.bindPassword = data.bindPassword || null;
+	if (data.bindPassword !== undefined) updateData.bindPassword = encrypt(data.bindPassword) || null;
 	if (data.baseDn !== undefined) updateData.baseDn = data.baseDn;
 	if (data.userFilter !== undefined) updateData.userFilter = data.userFilter;
 	if (data.usernameAttribute !== undefined) updateData.usernameAttribute = data.usernameAttribute;
@@ -1684,6 +1761,7 @@ export async function getOidcConfigs(): Promise<OidcConfigData[]> {
 	const rows = await db.select().from(oidcConfig).orderBy(asc(oidcConfig.name));
 	return rows.map(row => ({
 		...row,
+		clientSecret: decrypt(row.clientSecret) ?? '',
 		roleMappings: row.roleMappings ? JSON.parse(row.roleMappings) : undefined
 	})) as OidcConfigData[];
 }
@@ -1693,6 +1771,7 @@ export async function getOidcConfig(id: number): Promise<OidcConfigData | null> 
 	if (!results[0]) return null;
 	return {
 		...results[0],
+		clientSecret: decrypt(results[0].clientSecret) ?? '',
 		roleMappings: results[0].roleMappings ? JSON.parse(results[0].roleMappings) : undefined
 	} as OidcConfigData;
 }
@@ -1703,7 +1782,7 @@ export async function createOidcConfig(data: Omit<OidcConfigData, 'id' | 'create
 		enabled: data.enabled,
 		issuerUrl: data.issuerUrl,
 		clientId: data.clientId,
-		clientSecret: data.clientSecret,
+		clientSecret: encrypt(data.clientSecret) ?? '',
 		redirectUri: data.redirectUri,
 		scopes: data.scopes,
 		usernameClaim: data.usernameClaim,
@@ -1724,7 +1803,7 @@ export async function updateOidcConfig(id: number, data: Partial<OidcConfigData>
 	if (data.enabled !== undefined) updateData.enabled = data.enabled;
 	if (data.issuerUrl !== undefined) updateData.issuerUrl = data.issuerUrl;
 	if (data.clientId !== undefined) updateData.clientId = data.clientId;
-	if (data.clientSecret !== undefined) updateData.clientSecret = data.clientSecret;
+	if (data.clientSecret !== undefined) updateData.clientSecret = encrypt(data.clientSecret);
 	if (data.redirectUri !== undefined) updateData.redirectUri = data.redirectUri;
 	if (data.scopes !== undefined) updateData.scopes = data.scopes;
 	if (data.usernameClaim !== undefined) updateData.usernameClaim = data.usernameClaim;
@@ -1763,12 +1842,24 @@ export interface GitCredentialData {
 }
 
 export async function getGitCredentials(): Promise<GitCredentialData[]> {
-	return db.select().from(gitCredentials).orderBy(asc(gitCredentials.name)) as Promise<GitCredentialData[]>;
+	const results = await db.select().from(gitCredentials).orderBy(asc(gitCredentials.name));
+	return results.map(r => ({
+		...r,
+		password: decrypt(r.password),
+		sshPrivateKey: decrypt(r.sshPrivateKey),
+		sshPassphrase: decrypt(r.sshPassphrase)
+	})) as GitCredentialData[];
 }
 
 export async function getGitCredential(id: number): Promise<GitCredentialData | null> {
 	const results = await db.select().from(gitCredentials).where(eq(gitCredentials.id, id));
-	return results[0] as GitCredentialData || null;
+	if (!results[0]) return null;
+	return {
+		...results[0],
+		password: decrypt(results[0].password),
+		sshPrivateKey: decrypt(results[0].sshPrivateKey),
+		sshPassphrase: decrypt(results[0].sshPassphrase)
+	} as GitCredentialData;
 }
 
 export async function createGitCredential(data: {
@@ -1783,9 +1874,9 @@ export async function createGitCredential(data: {
 		name: data.name,
 		authType: data.authType,
 		username: data.username || null,
-		password: data.password || null,
-		sshPrivateKey: data.sshPrivateKey || null,
-		sshPassphrase: data.sshPassphrase || null
+		password: encrypt(data.password) || null,
+		sshPrivateKey: encrypt(data.sshPrivateKey) || null,
+		sshPassphrase: encrypt(data.sshPassphrase) || null
 	}).returning();
 	return getGitCredential(result[0].id) as Promise<GitCredentialData>;
 }
@@ -1798,9 +1889,9 @@ export async function updateGitCredential(id: number, data: Partial<GitCredentia
 	// Only update username if provided (empty string clears it)
 	if (data.username !== undefined) updateData.username = data.username || null;
 	// Only update password/ssh keys if they have actual values (preserve existing if empty)
-	if (data.password) updateData.password = data.password;
-	if (data.sshPrivateKey) updateData.sshPrivateKey = data.sshPrivateKey;
-	if (data.sshPassphrase) updateData.sshPassphrase = data.sshPassphrase;
+	if (data.password) updateData.password = encrypt(data.password);
+	if (data.sshPrivateKey) updateData.sshPrivateKey = encrypt(data.sshPrivateKey);
+	if (data.sshPassphrase) updateData.sshPassphrase = encrypt(data.sshPassphrase);
 
 	await db.update(gitCredentials).set(updateData).where(eq(gitCredentials.id, id));
 	return getGitCredential(id);
@@ -1906,7 +1997,7 @@ export async function createGitRepository(data: {
 		name: data.name,
 		url: data.url,
 		branch: data.branch || 'main',
-		composePath: data.composePath || 'docker-compose.yml',
+		composePath: data.composePath || 'compose.yaml',
 		credentialId: data.credentialId || null,
 		environmentId: data.environmentId || null,
 		autoUpdate: data.autoUpdate || false,
@@ -2320,7 +2411,7 @@ export async function createGitStack(data: {
 		stackName: data.stackName,
 		environmentId: data.environmentId ?? null,
 		repositoryId: data.repositoryId,
-		composePath: data.composePath || 'docker-compose.yml',
+		composePath: data.composePath || 'compose.yaml',
 		envFilePath: data.envFilePath || null,
 		autoUpdate: data.autoUpdate || false,
 		autoUpdateSchedule: data.autoUpdateSchedule || 'daily',
@@ -2487,6 +2578,8 @@ export interface StackSourceData {
 	sourceType: StackSourceType;
 	gitRepositoryId: number | null;
 	gitStackId: number | null;
+	composePath: string | null;
+	envPath: string | null;
 	createdAt: string;
 	updatedAt: string;
 }
@@ -2525,11 +2618,40 @@ export async function getStackSource(stackName: string, environmentId?: number |
 	} as StackSourceWithRepo;
 }
 
+export async function getStackSourceByComposePath(composePath: string, environmentId?: number | null): Promise<StackSourceWithRepo | null> {
+	const envCondition = environmentId !== undefined && environmentId !== null
+		? eq(stackSources.environmentId, environmentId)
+		: isNull(stackSources.environmentId);
+
+	const results = await db.select().from(stackSources)
+		.where(and(eq(stackSources.composePath, composePath), envCondition));
+
+	if (!results[0]) return null;
+	const row = results[0];
+
+	let repository = null;
+	let gitStackData = null;
+
+	if (row.gitRepositoryId) {
+		repository = await getGitRepository(row.gitRepositoryId);
+	}
+	if (row.gitStackId) {
+		gitStackData = await getGitStack(row.gitStackId);
+	}
+
+	return {
+		...row,
+		repository,
+		gitStack: gitStackData
+	} as StackSourceWithRepo;
+}
+
 export async function getStackSources(environmentId?: number | null): Promise<StackSourceWithRepo[]> {
 	let results;
-	if (environmentId !== undefined) {
+	if (environmentId !== undefined && environmentId !== null) {
+		// Only get stacks for the specific environment
 		results = await db.select().from(stackSources)
-			.where(or(eq(stackSources.environmentId, environmentId), isNull(stackSources.environmentId)))
+			.where(eq(stackSources.environmentId, environmentId))
 			.orderBy(asc(stackSources.stackName));
 	} else {
 		results = await db.select().from(stackSources).orderBy(asc(stackSources.stackName));
@@ -2563,6 +2685,8 @@ export async function upsertStackSource(data: {
 	sourceType: StackSourceType;
 	gitRepositoryId?: number | null;
 	gitStackId?: number | null;
+	composePath?: string | null;
+	envPath?: string | null;
 }): Promise<StackSourceData> {
 	const existing = await getStackSource(data.stackName, data.environmentId);
 
@@ -2572,6 +2696,8 @@ export async function upsertStackSource(data: {
 				sourceType: data.sourceType,
 				gitRepositoryId: data.gitRepositoryId || null,
 				gitStackId: data.gitStackId || null,
+				composePath: data.composePath ?? null,
+				envPath: data.envPath ?? null,
 				updatedAt: new Date().toISOString()
 			})
 			.where(eq(stackSources.id, existing.id));
@@ -2582,10 +2708,31 @@ export async function upsertStackSource(data: {
 			environmentId: data.environmentId ?? null,
 			sourceType: data.sourceType,
 			gitRepositoryId: data.gitRepositoryId || null,
-			gitStackId: data.gitStackId || null
+			gitStackId: data.gitStackId || null,
+			composePath: data.composePath ?? null,
+			envPath: data.envPath ?? null
 		});
 		return getStackSource(data.stackName, data.environmentId) as Promise<StackSourceData>;
 	}
+}
+
+export async function updateStackSource(
+	stackName: string,
+	environmentId: number | null,
+	updates: { composePath?: string | null; envPath?: string | null }
+): Promise<boolean> {
+	const existing = await getStackSource(stackName, environmentId);
+	if (!existing) return false;
+
+	await db.update(stackSources)
+		.set({
+			composePath: updates.composePath !== undefined ? updates.composePath : existing.composePath,
+			envPath: updates.envPath !== undefined ? updates.envPath : existing.envPath,
+			updatedAt: new Date().toISOString()
+		})
+		.where(eq(stackSources.id, existing.id));
+
+	return true;
 }
 
 export async function deleteStackSource(stackName: string, environmentId?: number | null): Promise<boolean> {
@@ -2607,6 +2754,25 @@ export async function deleteStackSource(stackName: string, environmentId?: numbe
 				isNull(stackSources.environmentId)
 			));
 	}
+	return true;
+}
+
+export async function updateStackSourceName(
+	oldStackName: string,
+	newStackName: string,
+	environmentId?: number | null
+): Promise<boolean> {
+	await db.update(stackSources)
+		.set({
+			stackName: newStackName,
+			updatedAt: new Date().toISOString()
+		})
+		.where(and(
+			eq(stackSources.stackName, oldStackName),
+			environmentId !== undefined && environmentId !== null
+				? eq(stackSources.environmentId, environmentId)
+				: isNull(stackSources.environmentId)
+		));
 	return true;
 }
 
@@ -2820,7 +2986,8 @@ export type AuditAction =
 
 export type AuditEntityType =
 	| 'container' | 'image' | 'stack' | 'volume' | 'network'
-	| 'user' | 'settings' | 'environment' | 'registry';
+	| 'user' | 'role' | 'settings' | 'environment' | 'registry' | 'git_repository' | 'git_credential'
+	| 'config_set' | 'notification' | 'oidc_provider' | 'ldap_config' | 'git_stack';
 
 export interface AuditLogData {
 	id: number;
@@ -2902,13 +3069,32 @@ export async function logAuditEvent(data: AuditLogCreateData): Promise<AuditLogD
 	return auditLog!;
 }
 
-export async function getAuditLog(id: number): Promise<AuditLogData | undefined> {
-	const results = await db.select().from(auditLogs).where(eq(auditLogs.id, id));
+export async function getAuditLog(id: number): Promise<(AuditLogData & { environmentName?: string | null; environmentIcon?: string | null }) | undefined> {
+	const results = await db.select({
+		id: auditLogs.id,
+		userId: auditLogs.userId,
+		username: auditLogs.username,
+		action: auditLogs.action,
+		entityType: auditLogs.entityType,
+		entityId: auditLogs.entityId,
+		entityName: auditLogs.entityName,
+		environmentId: auditLogs.environmentId,
+		description: auditLogs.description,
+		details: auditLogs.details,
+		ipAddress: auditLogs.ipAddress,
+		userAgent: auditLogs.userAgent,
+		createdAt: auditLogs.createdAt,
+		environmentName: environments.name,
+		environmentIcon: environments.icon
+	})
+		.from(auditLogs)
+		.leftJoin(environments, eq(auditLogs.environmentId, environments.id))
+		.where(eq(auditLogs.id, id));
 	if (!results[0]) return undefined;
 	return {
 		...results[0],
 		details: results[0].details ? JSON.parse(results[0].details) : null
-	} as AuditLogData;
+	} as AuditLogData & { environmentName?: string | null; environmentIcon?: string | null };
 }
 
 export async function getAuditLogs(filters: AuditLogFilters = {}): Promise<AuditLogResult> {
@@ -3083,10 +3269,8 @@ export interface ContainerEventResult {
 }
 
 export async function logContainerEvent(data: ContainerEventCreateData): Promise<ContainerEventData> {
-	// Timestamp is always a string with nanosecond precision (stored as text in both SQLite and PostgreSQL)
-	// For PostgreSQL, we convert to Date since the schema uses native timestamp type
-	const timestamp = isPostgres ? new Date(data.timestamp) : data.timestamp;
-
+	// Timestamp is already an ISO-8601 string from event-subprocess
+	// Both SQLite and PostgreSQL schemas use mode: 'string' so we pass it directly
 	const result = await db.insert(containerEvents).values({
 		environmentId: data.environmentId ?? null,
 		containerId: data.containerId,
@@ -3094,7 +3278,7 @@ export async function logContainerEvent(data: ContainerEventCreateData): Promise
 		image: data.image ?? null,
 		action: data.action,
 		actorAttributes: data.actorAttributes ? JSON.stringify(data.actorAttributes) : null,
-		timestamp
+		timestamp: data.timestamp
 	}).returning();
 
 	return getContainerEvent(result[0].id) as Promise<ContainerEventData>;
@@ -3897,6 +4081,73 @@ export async function setEventCleanupEnabled(enabled: boolean): Promise<void> {
 }
 
 // =============================================================================
+// EXTERNAL STACK PATHS
+// =============================================================================
+
+const EXTERNAL_STACK_PATHS_KEY = 'external_stack_paths';
+
+export async function getExternalStackPaths(): Promise<string[]> {
+	const result = await db.select().from(settings).where(eq(settings.key, EXTERNAL_STACK_PATHS_KEY));
+	if (result[0]) {
+		try {
+			const parsed = JSON.parse(result[0].value);
+			return Array.isArray(parsed) ? parsed : [];
+		} catch {
+			return [];
+		}
+	}
+	return [];
+}
+
+export async function setExternalStackPaths(paths: string[]): Promise<void> {
+	const jsonValue = JSON.stringify(paths);
+	const existing = await db.select().from(settings).where(eq(settings.key, EXTERNAL_STACK_PATHS_KEY));
+	if (existing.length > 0) {
+		await db.update(settings)
+			.set({ value: jsonValue, updatedAt: new Date().toISOString() })
+			.where(eq(settings.key, EXTERNAL_STACK_PATHS_KEY));
+	} else {
+		await db.insert(settings).values({
+			key: EXTERNAL_STACK_PATHS_KEY,
+			value: jsonValue
+		});
+	}
+}
+
+// =============================================================================
+// PRIMARY STACK LOCATION
+// =============================================================================
+
+const PRIMARY_STACK_LOCATION_KEY = 'primary_stack_location';
+
+export async function getPrimaryStackLocation(): Promise<string | null> {
+	const result = await db.select().from(settings).where(eq(settings.key, PRIMARY_STACK_LOCATION_KEY));
+	if (result[0]?.value) {
+		return result[0].value;
+	}
+	return null;
+}
+
+export async function setPrimaryStackLocation(path: string | null): Promise<void> {
+	const existing = await db.select().from(settings).where(eq(settings.key, PRIMARY_STACK_LOCATION_KEY));
+	if (path === null) {
+		// Delete the setting if path is null
+		if (existing.length > 0) {
+			await db.delete(settings).where(eq(settings.key, PRIMARY_STACK_LOCATION_KEY));
+		}
+	} else if (existing.length > 0) {
+		await db.update(settings)
+			.set({ value: path, updatedAt: new Date().toISOString() })
+			.where(eq(settings.key, PRIMARY_STACK_LOCATION_KEY));
+	} else {
+		await db.insert(settings).values({
+			key: PRIMARY_STACK_LOCATION_KEY,
+			value: path
+		});
+	}
+}
+
+// =============================================================================
 // ENVIRONMENT UPDATE CHECK SETTINGS
 // =============================================================================
 
@@ -3956,6 +4207,68 @@ export async function getAllEnvUpdateCheckSettings(): Promise<Array<{ envId: num
 }
 
 // =============================================================================
+// IMAGE PRUNE SCHEDULE SETTINGS
+// =============================================================================
+
+export interface ImagePruneSettings {
+	enabled: boolean;
+	cronExpression: string;
+	pruneMode: 'dangling' | 'all';
+	lastPruned?: string;
+	lastResult?: {
+		spaceReclaimed: number;
+		imagesRemoved: number;
+	};
+}
+
+export async function getImagePruneSettings(envId: number): Promise<ImagePruneSettings | null> {
+	const key = `env_${envId}_image_prune`;
+	const result = await db.select().from(settings).where(eq(settings.key, key));
+	if (!result[0]) return null;
+	try {
+		return JSON.parse(result[0].value);
+	} catch {
+		return null;
+	}
+}
+
+export async function setImagePruneSettings(envId: number, config: ImagePruneSettings): Promise<void> {
+	const key = `env_${envId}_image_prune`;
+	const value = JSON.stringify(config);
+	const existing = await db.select().from(settings).where(eq(settings.key, key));
+	if (existing.length > 0) {
+		await db.update(settings)
+			.set({ value, updatedAt: new Date().toISOString() })
+			.where(eq(settings.key, key));
+	} else {
+		await db.insert(settings).values({ key, value });
+	}
+}
+
+export async function deleteImagePruneSettings(envId: number): Promise<void> {
+	const key = `env_${envId}_image_prune`;
+	await db.delete(settings).where(eq(settings.key, key));
+}
+
+export async function getAllImagePruneSettings(): Promise<Array<{ envId: number; settings: ImagePruneSettings }>> {
+	const rows = await db.select().from(settings).where(sql`${settings.key} LIKE 'env_%_image_prune'`);
+	const results: Array<{ envId: number; settings: ImagePruneSettings }> = [];
+	for (const row of rows) {
+		try {
+			const match = row.key.match(/^env_(\d+)_image_prune$/);
+			if (!match) continue;
+			const envId = parseInt(match[1]);
+			const config = JSON.parse(row.value) as ImagePruneSettings;
+			// Return all settings, not just enabled ones (UI needs to show disabled schedules too)
+			results.push({ envId, settings: config });
+		} catch {
+			// Skip invalid entries
+		}
+	}
+	return results;
+}
+
+// =============================================================================
 // ENVIRONMENT TIMEZONE SETTINGS
 // =============================================================================
 
@@ -3986,6 +4299,66 @@ export async function getDefaultTimezone(): Promise<string> {
  */
 export async function setDefaultTimezone(timezone: string): Promise<void> {
 	await setSetting('default_timezone', timezone);
+}
+
+// =============================================================================
+// BACKGROUND MONITORING SETTINGS
+// =============================================================================
+
+/**
+ * Get event collection mode ('stream' or 'poll').
+ * Defaults to 'stream' for real-time event streaming.
+ */
+export async function getEventCollectionMode(): Promise<'stream' | 'poll'> {
+	const value = await getSetting('event_collection_mode');
+	return value || 'stream';
+}
+
+/**
+ * Set event collection mode.
+ */
+export async function setEventCollectionMode(mode: 'stream' | 'poll'): Promise<void> {
+	await setSetting('event_collection_mode', mode);
+}
+
+/**
+ * Get event poll interval in milliseconds.
+ * Defaults to 60000ms (60 seconds).
+ */
+export async function getEventPollInterval(): Promise<number> {
+	const value = await getSetting('event_poll_interval');
+	return value || 60000;
+}
+
+/**
+ * Set event poll interval in milliseconds.
+ * Valid range: 30000ms (30s) to 300000ms (5min).
+ */
+export async function setEventPollInterval(interval: number): Promise<void> {
+	if (interval < 30000 || interval > 300000) {
+		throw new Error('Event poll interval must be between 30s and 300s');
+	}
+	await setSetting('event_poll_interval', interval);
+}
+
+/**
+ * Get metrics collection interval in milliseconds.
+ * Defaults to 30000ms (30 seconds) - changed from hardcoded 10s.
+ */
+export async function getMetricsCollectionInterval(): Promise<number> {
+	const value = await getSetting('metrics_collection_interval');
+	return value || 30000;
+}
+
+/**
+ * Set metrics collection interval in milliseconds.
+ * Valid range: 10000ms (10s) to 300000ms (5min).
+ */
+export async function setMetricsCollectionInterval(interval: number): Promise<void> {
+	if (interval < 10000 || interval > 300000) {
+		throw new Error('Metrics collection interval must be between 10s and 300s');
+	}
+	await setSetting('metrics_collection_interval', interval);
 }
 
 // =============================================================================
@@ -4038,16 +4411,20 @@ export async function getStackEnvVars(
 			.orderBy(asc(stackEnvironmentVariables.key));
 	}
 
-	return results.map(row => ({
-		id: row.id,
-		stackName: row.stackName,
-		environmentId: row.environmentId,
-		key: row.key,
-		value: maskSecrets && row.isSecret ? '***' : row.value,
-		isSecret: row.isSecret ?? false,
-		createdAt: row.createdAt ?? new Date().toISOString(),
-		updatedAt: row.updatedAt ?? new Date().toISOString()
-	}));
+	return results.map(row => {
+		// Decrypt secret values (decrypt handles both encrypted and plain text)
+		const decryptedValue = row.isSecret ? (decrypt(row.value) ?? '') : row.value;
+		return {
+			id: row.id,
+			stackName: row.stackName,
+			environmentId: row.environmentId,
+			key: row.key,
+			value: maskSecrets && row.isSecret ? '***' : decryptedValue,
+			isSecret: row.isSecret ?? false,
+			createdAt: row.createdAt ?? new Date().toISOString(),
+			updatedAt: row.updatedAt ?? new Date().toISOString()
+		};
+	});
 }
 
 /**
@@ -4132,7 +4509,8 @@ export async function setStackEnvVars(
 				stackName,
 				environmentId,
 				key: v.key,
-				value: v.value,
+				// Encrypt values that are marked as secrets
+				value: v.isSecret ? (encrypt(v.value) ?? '') : v.value,
 				isSecret: v.isSecret ?? false,
 				createdAt: now,
 				updatedAt: now
@@ -4177,6 +4555,39 @@ export async function deleteStackEnvVars(
 		await db.delete(stackEnvironmentVariables)
 			.where(and(
 				eq(stackEnvironmentVariables.stackName, stackName),
+				eq(stackEnvironmentVariables.environmentId, environmentId)
+			));
+	}
+}
+
+/**
+ * Update stack name in environment variables (for stack rename operations).
+ * @param oldStackName - Current stack name
+ * @param newStackName - New stack name
+ * @param environmentId - Optional environment ID (null = no environment, undefined = all environments)
+ */
+export async function updateStackEnvVarsName(
+	oldStackName: string,
+	newStackName: string,
+	environmentId?: number | null
+): Promise<void> {
+	if (environmentId === undefined) {
+		// Update all env vars for this stack (all environments)
+		await db.update(stackEnvironmentVariables)
+			.set({ stackName: newStackName })
+			.where(eq(stackEnvironmentVariables.stackName, oldStackName));
+	} else if (environmentId === null) {
+		await db.update(stackEnvironmentVariables)
+			.set({ stackName: newStackName })
+			.where(and(
+				eq(stackEnvironmentVariables.stackName, oldStackName),
+				isNull(stackEnvironmentVariables.environmentId)
+			));
+	} else {
+		await db.update(stackEnvironmentVariables)
+			.set({ stackName: newStackName })
+			.where(and(
+				eq(stackEnvironmentVariables.stackName, oldStackName),
 				eq(stackEnvironmentVariables.environmentId, environmentId)
 			));
 	}

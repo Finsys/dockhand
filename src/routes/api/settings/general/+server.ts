@@ -15,14 +15,26 @@ import {
 	getEventCleanupEnabled,
 	setEventCleanupEnabled,
 	getDefaultTimezone,
-	setDefaultTimezone
+	setDefaultTimezone,
+	getEventCollectionMode,
+	setEventCollectionMode,
+	getEventPollInterval,
+	setEventPollInterval,
+	getMetricsCollectionInterval,
+	setMetricsCollectionInterval,
+	getExternalStackPaths,
+	setExternalStackPaths,
+	getPrimaryStackLocation,
+	setPrimaryStackLocation
 } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
 import { refreshSystemJobs } from '$lib/server/scheduler';
+import { sendToEventSubprocess, sendToMetricsSubprocess, type UpdateIntervalCommand } from '$lib/server/subprocess-manager';
 
 export type TimeFormat = '12h' | '24h';
 export type DateFormat = 'MM/DD/YYYY' | 'DD/MM/YYYY' | 'YYYY-MM-DD' | 'DD.MM.YYYY';
 export type DownloadFormat = 'tar' | 'tar.gz';
+export type EventCollectionMode = 'stream' | 'poll';
 
 export interface GeneralSettings {
 	confirmDestructive: boolean;
@@ -41,6 +53,10 @@ export interface GeneralSettings {
 	eventCleanupEnabled: boolean;
 	logBufferSizeKb: number;
 	defaultTimezone: string;
+	// Background monitoring settings
+	eventCollectionMode: EventCollectionMode;
+	eventPollInterval: number;
+	metricsCollectionInterval: number;
 	// Theme settings (for when auth is disabled)
 	lightTheme: string;
 	darkTheme: string;
@@ -48,6 +64,11 @@ export interface GeneralSettings {
 	fontSize: string;
 	gridFontSize: string;
 	terminalFont: string;
+	editorFont: string;
+	// External stack paths
+	externalStackPaths: string[];
+	// Primary stack location
+	primaryStackLocation: string | null;
 }
 
 const DEFAULT_SETTINGS: Omit<GeneralSettings, 'scheduleRetentionDays' | 'eventRetentionDays' | 'scheduleCleanupCron' | 'eventCleanupCron' | 'scheduleCleanupEnabled' | 'eventCleanupEnabled'> = {
@@ -61,19 +82,24 @@ const DEFAULT_SETTINGS: Omit<GeneralSettings, 'scheduleRetentionDays' | 'eventRe
 	defaultTrivyArgs: 'image --format json {image}',
 	logBufferSizeKb: 500,
 	defaultTimezone: 'UTC',
+	eventCollectionMode: 'stream',
+	eventPollInterval: 60000,
+	metricsCollectionInterval: 30000,
 	lightTheme: 'default',
 	darkTheme: 'default',
 	font: 'system',
 	fontSize: 'normal',
 	gridFontSize: 'normal',
-	terminalFont: 'system-mono'
+	terminalFont: 'system-mono',
+	editorFont: 'system-mono'
 };
 
 const VALID_LIGHT_THEMES = ['default', 'catppuccin', 'rose-pine', 'nord', 'solarized', 'gruvbox', 'alucard', 'github', 'material', 'atom-one'];
 const VALID_DARK_THEMES = ['default', 'catppuccin', 'dracula', 'rose-pine', 'rose-pine-moon', 'tokyo-night', 'nord', 'one-dark', 'gruvbox', 'solarized', 'everforest', 'kanagawa', 'monokai', 'monokai-pro', 'material', 'palenight', 'github'];
 const VALID_FONTS = ['system', 'geist', 'inter', 'plus-jakarta', 'dm-sans', 'outfit', 'space-grotesk', 'sofia-sans', 'nunito', 'poppins', 'montserrat', 'raleway', 'manrope', 'roboto', 'open-sans', 'lato', 'source-sans', 'work-sans', 'fira-sans', 'jetbrains-mono', 'fira-code', 'quicksand', 'comfortaa'];
 const VALID_FONT_SIZES = ['xsmall', 'small', 'normal', 'medium', 'large', 'xlarge'];
-const VALID_TERMINAL_FONTS = ['system-mono', 'jetbrains-mono', 'fira-code', 'source-code-pro', 'cascadia-code', 'menlo', 'consolas', 'sf-mono'];
+const VALID_TERMINAL_FONTS = ['system-mono', 'jetbrains-mono', 'fira-code', 'source-code-pro', 'cascadia-code', 'ibm-plex-mono', 'roboto-mono', 'ubuntu-mono', 'space-mono', 'inconsolata', 'hack', 'anonymous-pro', 'dm-mono', 'red-hat-mono', 'menlo', 'consolas', 'sf-mono'];
+const VALID_EDITOR_FONTS = VALID_TERMINAL_FONTS;
 
 const VALID_DATE_FORMATS: DateFormat[] = ['MM/DD/YYYY', 'DD/MM/YYYY', 'YYYY-MM-DD', 'DD.MM.YYYY'];
 
@@ -104,12 +130,18 @@ export const GET: RequestHandler = async ({ cookies }) => {
 			eventCleanupEnabled,
 			logBufferSizeKb,
 			defaultTimezone,
+			eventCollectionMode,
+			eventPollInterval,
+			metricsCollectionInterval,
 			lightTheme,
 			darkTheme,
 			font,
 			fontSize,
 			gridFontSize,
-			terminalFont
+			terminalFont,
+			editorFont,
+			externalStackPaths,
+			primaryStackLocation
 		] = await Promise.all([
 			getSetting('confirm_destructive'),
 			getSetting('show_stopped_containers'),
@@ -127,12 +159,18 @@ export const GET: RequestHandler = async ({ cookies }) => {
 			getEventCleanupEnabled(),
 			getSetting('log_buffer_size_kb'),
 			getDefaultTimezone(),
+			getEventCollectionMode(),
+			getEventPollInterval(),
+			getMetricsCollectionInterval(),
 			getSetting('theme_light'),
 			getSetting('theme_dark'),
 			getSetting('theme_font'),
 			getSetting('theme_font_size'),
 			getSetting('theme_grid_font_size'),
-			getSetting('theme_terminal_font')
+			getSetting('theme_terminal_font'),
+			getSetting('theme_editor_font'),
+			getExternalStackPaths(),
+			getPrimaryStackLocation()
 		]);
 
 		const settings: GeneralSettings = {
@@ -152,12 +190,18 @@ export const GET: RequestHandler = async ({ cookies }) => {
 			eventCleanupEnabled,
 			logBufferSizeKb: logBufferSizeKb ?? DEFAULT_SETTINGS.logBufferSizeKb,
 			defaultTimezone: defaultTimezone ?? DEFAULT_SETTINGS.defaultTimezone,
+			eventCollectionMode: (eventCollectionMode ?? DEFAULT_SETTINGS.eventCollectionMode) as EventCollectionMode,
+			eventPollInterval: eventPollInterval ?? DEFAULT_SETTINGS.eventPollInterval,
+			metricsCollectionInterval: metricsCollectionInterval ?? DEFAULT_SETTINGS.metricsCollectionInterval,
 			lightTheme: lightTheme ?? DEFAULT_SETTINGS.lightTheme,
 			darkTheme: darkTheme ?? DEFAULT_SETTINGS.darkTheme,
 			font: font ?? DEFAULT_SETTINGS.font,
 			fontSize: fontSize ?? DEFAULT_SETTINGS.fontSize,
 			gridFontSize: gridFontSize ?? DEFAULT_SETTINGS.gridFontSize,
-			terminalFont: terminalFont ?? DEFAULT_SETTINGS.terminalFont
+			terminalFont: terminalFont ?? DEFAULT_SETTINGS.terminalFont,
+			editorFont: editorFont ?? DEFAULT_SETTINGS.editorFont,
+			externalStackPaths,
+			primaryStackLocation
 		};
 
 		return json(settings);
@@ -175,7 +219,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 
 	try {
 		const body = await request.json();
-		const { confirmDestructive, showStoppedContainers, highlightUpdates, timeFormat, dateFormat, downloadFormat, defaultGrypeArgs, defaultTrivyArgs, scheduleRetentionDays, eventRetentionDays, scheduleCleanupCron, eventCleanupCron, scheduleCleanupEnabled, eventCleanupEnabled, logBufferSizeKb, defaultTimezone, lightTheme, darkTheme, font, fontSize, gridFontSize, terminalFont } = body;
+		const { confirmDestructive, showStoppedContainers, highlightUpdates, timeFormat, dateFormat, downloadFormat, defaultGrypeArgs, defaultTrivyArgs, scheduleRetentionDays, eventRetentionDays, scheduleCleanupCron, eventCleanupCron, scheduleCleanupEnabled, eventCleanupEnabled, logBufferSizeKb, defaultTimezone, eventCollectionMode, eventPollInterval, metricsCollectionInterval, lightTheme, darkTheme, font, fontSize, gridFontSize, terminalFont, editorFont, externalStackPaths, primaryStackLocation } = body;
 
 		if (confirmDestructive !== undefined) {
 			await setSetting('confirm_destructive', confirmDestructive);
@@ -228,6 +272,25 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			// Refresh system jobs to use the new timezone
 			await refreshSystemJobs();
 		}
+		if (eventCollectionMode !== undefined && (eventCollectionMode === 'stream' || eventCollectionMode === 'poll')) {
+			await setEventCollectionMode(eventCollectionMode);
+			// Notify event subprocess to refresh collectors with new mode
+			sendToEventSubprocess({ type: 'refresh_environments' });
+		}
+		if (eventPollInterval !== undefined && typeof eventPollInterval === 'number') {
+			// Validate: 30s - 300s (30 seconds to 5 minutes)
+			const validatedInterval = Math.max(30000, Math.min(300000, eventPollInterval));
+			await setEventPollInterval(validatedInterval);
+			// Notify event subprocess to refresh collectors with new interval
+			sendToEventSubprocess({ type: 'refresh_environments' });
+		}
+		if (metricsCollectionInterval !== undefined && typeof metricsCollectionInterval === 'number') {
+			// Validate: 10s - 300s (10 seconds to 5 minutes)
+			const validatedInterval = Math.max(10000, Math.min(300000, metricsCollectionInterval));
+			await setMetricsCollectionInterval(validatedInterval);
+			// Notify metrics subprocess to update its collection interval
+			sendToMetricsSubprocess({ type: 'update_interval', intervalMs: validatedInterval });
+		}
 		if (lightTheme !== undefined && VALID_LIGHT_THEMES.includes(lightTheme)) {
 			await setSetting('theme_light', lightTheme);
 		}
@@ -245,6 +308,23 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 		}
 		if (terminalFont !== undefined && VALID_TERMINAL_FONTS.includes(terminalFont)) {
 			await setSetting('theme_terminal_font', terminalFont);
+		}
+		if (editorFont !== undefined && VALID_EDITOR_FONTS.includes(editorFont)) {
+			await setSetting('theme_editor_font', editorFont);
+		}
+		if (externalStackPaths !== undefined && Array.isArray(externalStackPaths)) {
+			// Filter to valid non-empty strings
+			const validPaths = externalStackPaths.filter((p: unknown) => typeof p === 'string' && p.trim());
+			await setExternalStackPaths(validPaths);
+		}
+		if (primaryStackLocation !== undefined) {
+			// Accept string or null
+			if (primaryStackLocation === null || (typeof primaryStackLocation === 'string' && primaryStackLocation.trim())) {
+				await setPrimaryStackLocation(primaryStackLocation);
+			} else if (primaryStackLocation === '') {
+				// Empty string means clear the setting
+				await setPrimaryStackLocation(null);
+			}
 		}
 
 		// Fetch all settings in parallel for the response
@@ -265,12 +345,18 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			eventCleanupEnabledVal,
 			logBufferSizeKbVal,
 			defaultTimezoneVal,
+			eventCollectionModeVal,
+			eventPollIntervalVal,
+			metricsCollectionIntervalVal,
 			lightThemeVal,
 			darkThemeVal,
 			fontVal,
 			fontSizeVal,
 			gridFontSizeVal,
-			terminalFontVal
+			terminalFontVal,
+			editorFontVal,
+			externalStackPathsVal,
+			primaryStackLocationVal
 		] = await Promise.all([
 			getSetting('confirm_destructive'),
 			getSetting('show_stopped_containers'),
@@ -288,12 +374,18 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			getEventCleanupEnabled(),
 			getSetting('log_buffer_size_kb'),
 			getDefaultTimezone(),
+			getEventCollectionMode(),
+			getEventPollInterval(),
+			getMetricsCollectionInterval(),
 			getSetting('theme_light'),
 			getSetting('theme_dark'),
 			getSetting('theme_font'),
 			getSetting('theme_font_size'),
 			getSetting('theme_grid_font_size'),
-			getSetting('theme_terminal_font')
+			getSetting('theme_terminal_font'),
+			getSetting('theme_editor_font'),
+			getExternalStackPaths(),
+			getPrimaryStackLocation()
 		]);
 
 		const settings: GeneralSettings = {
@@ -313,12 +405,18 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			eventCleanupEnabled: eventCleanupEnabledVal,
 			logBufferSizeKb: logBufferSizeKbVal ?? DEFAULT_SETTINGS.logBufferSizeKb,
 			defaultTimezone: defaultTimezoneVal ?? DEFAULT_SETTINGS.defaultTimezone,
+			eventCollectionMode: (eventCollectionModeVal ?? DEFAULT_SETTINGS.eventCollectionMode) as EventCollectionMode,
+			eventPollInterval: eventPollIntervalVal ?? DEFAULT_SETTINGS.eventPollInterval,
+			metricsCollectionInterval: metricsCollectionIntervalVal ?? DEFAULT_SETTINGS.metricsCollectionInterval,
 			lightTheme: lightThemeVal ?? DEFAULT_SETTINGS.lightTheme,
 			darkTheme: darkThemeVal ?? DEFAULT_SETTINGS.darkTheme,
 			font: fontVal ?? DEFAULT_SETTINGS.font,
 			fontSize: fontSizeVal ?? DEFAULT_SETTINGS.fontSize,
 			gridFontSize: gridFontSizeVal ?? DEFAULT_SETTINGS.gridFontSize,
-			terminalFont: terminalFontVal ?? DEFAULT_SETTINGS.terminalFont
+			terminalFont: terminalFontVal ?? DEFAULT_SETTINGS.terminalFont,
+			editorFont: editorFontVal ?? DEFAULT_SETTINGS.editorFont,
+			externalStackPaths: externalStackPathsVal,
+			primaryStackLocation: primaryStackLocationVal
 		};
 
 		return json(settings);

@@ -88,6 +88,7 @@ export function appendEnvParam(url: string, envId: number | null | undefined): s
 // Store for environments list with auto-refresh capability
 function createEnvironmentsStore() {
 	const { subscribe, set, update } = writable<Environment[]>([]);
+	const loaded = writable<boolean>(false); // Tracks if environments have been fetched at least once
 	let loading = false;
 
 	async function fetchEnvironments() {
@@ -98,6 +99,7 @@ function createEnvironmentsStore() {
 			if (response.ok) {
 				const data: Environment[] = await response.json();
 				set(data);
+				loaded.set(true);
 
 				// Auto-select environment if none selected or current one no longer exists
 				const current = get(currentEnvironment);
@@ -133,6 +135,7 @@ function createEnvironmentsStore() {
 			} else {
 				// Clear environments on permission denied or other errors
 				set([]);
+				loaded.set(true); // Mark as loaded even on error - we've completed the fetch
 				// Also clear the current environment from localStorage
 				localStorage.removeItem(STORAGE_KEY);
 				currentEnvironment.set(null);
@@ -140,6 +143,7 @@ function createEnvironmentsStore() {
 		} catch (error) {
 			console.error('Failed to fetch environments:', error);
 			set([]);
+			loaded.set(true); // Mark as loaded even on error - we've completed the fetch
 			localStorage.removeItem(STORAGE_KEY);
 			currentEnvironment.set(null);
 		} finally {
@@ -156,7 +160,19 @@ function createEnvironmentsStore() {
 		subscribe,
 		refresh: fetchEnvironments,
 		set,
-		update
+		update,
+		loaded, // Expose the loaded store for consumers to know when first fetch is complete
+		/**
+		 * Clear all environment data (used on logout)
+		 */
+		clear: () => {
+			set([]);
+			loaded.set(false);
+			if (browser) {
+				localStorage.removeItem(STORAGE_KEY);
+			}
+			currentEnvironment.set(null);
+		}
 	};
 }
 

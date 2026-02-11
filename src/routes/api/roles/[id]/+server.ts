@@ -6,6 +6,8 @@ import {
 	deleteRole as dbDeleteRole
 } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
+import { auditRole } from '$lib/server/audit';
+import { computeAuditDiff } from '$lib/utils/diff';
 
 // GET /api/roles/[id] - Get a specific role
 export const GET: RequestHandler = async ({ params, cookies }) => {
@@ -36,7 +38,8 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 };
 
 // PUT /api/roles/[id] - Update a role
-export const PUT: RequestHandler = async ({ params, request, cookies }) => {
+export const PUT: RequestHandler = async (event) => {
+	const { params, request, cookies } = event;
 	const auth = await authorize(cookies);
 
 	// Check enterprise license
@@ -72,6 +75,12 @@ export const PUT: RequestHandler = async ({ params, request, cookies }) => {
 			return json({ error: 'Failed to update role' }, { status: 500 });
 		}
 
+		// Compute diff for audit
+		const diff = computeAuditDiff(existingRole, role);
+
+		// Audit log
+		await auditRole(event, 'update', role.id, role.name, diff);
+
 		return json(role);
 	} catch (error: any) {
 		console.error('Failed to update role:', error);
@@ -83,7 +92,8 @@ export const PUT: RequestHandler = async ({ params, request, cookies }) => {
 };
 
 // DELETE /api/roles/[id] - Delete a role
-export const DELETE: RequestHandler = async ({ params, cookies }) => {
+export const DELETE: RequestHandler = async (event) => {
+	const { params, cookies } = event;
 	const auth = await authorize(cookies);
 
 	// Check enterprise license
@@ -117,6 +127,9 @@ export const DELETE: RequestHandler = async ({ params, cookies }) => {
 		if (!deleted) {
 			return json({ error: 'Failed to delete role' }, { status: 500 });
 		}
+
+		// Audit log
+		await auditRole(event, 'delete', id, role.name);
 
 		return json({ success: true });
 	} catch (error) {

@@ -62,7 +62,7 @@
 			<span class="text-xs">{placeholder}</span>
 		{/if}
 	</Popover.Trigger>
-	<Popover.Content class="w-auto p-0" align="start">
+	<Popover.Content class="w-auto p-0 z-[200]" align="start">
 		<Calendar
 			type="single"
 			value={dateValue}

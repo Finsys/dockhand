@@ -21,7 +21,7 @@
 		description="Add a Docker environment in Settings to get started"
 	>
 		<Button variant="secondary" onclick={() => goto('/settings?tab=environments')}>
-			<Settings class="w-4 h-4 mr-2" />
+			<Settings class="w-4 h-4" />
 			Go to Settings
 		</Button>
 	</EmptyState>

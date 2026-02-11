@@ -245,13 +245,13 @@
 </script>
 
 <div class="space-y-4">
-	<div class="flex flex-wrap justify-between items-center gap-3">
+	<div class="shrink-0 flex flex-wrap justify-between items-center gap-3 min-h-8">
 		<PageHeader icon={Globe} title="Environments">
 			<Badge variant="secondary" class="text-xs">{environments.length} total</Badge>
 		</PageHeader>
 		<div class="flex gap-2">
 			<Button size="sm" onclick={openAddModal}>
-				<Plus class="w-4 h-4 mr-1" />
+				<Plus class="w-4 h-4" />
 				Add environment
 			</Button>
 			<Button size="sm" variant="outline" onclick={fetchEnvironments}>Refresh</Button>
@@ -327,7 +327,7 @@
 								{#if testResult === 'testing'}
 									<RefreshCw class="w-3 h-3 mr-1 animate-spin" />
 								{:else}
-									<Wifi class="w-3 h-3 mr-1" />
+									<Wifi class="w-3 h-3" />
 								{/if}
 								Test
 							</Button>
@@ -464,7 +464,7 @@
 				{#if formSaving}
 					<RefreshCw class="w-4 h-4 mr-1 animate-spin" />
 				{:else}
-					<Plus class="w-4 h-4 mr-1" />
+					<Plus class="w-4 h-4" />
 				{/if}
 				Add
 			</Button>
@@ -583,7 +583,7 @@
 				{#if formSaving}
 					<RefreshCw class="w-4 h-4 mr-1 animate-spin" />
 				{:else}
-					<Check class="w-4 h-4 mr-1" />
+					<Check class="w-4 h-4" />
 				{/if}
 				Save
 			</Button>

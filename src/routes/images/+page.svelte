@@ -1,3 +1,7 @@
+<svelte:head>
+	<title>Images - Dockhand</title>
+</svelte:head>
+
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { toast } from 'svelte-sonner';
@@ -7,13 +11,14 @@
 	import { Label } from '$lib/components/ui/label';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Select from '$lib/components/ui/select';
-	import { Trash2, Upload, RefreshCw, Play, Search, Layers, Server, ShieldCheck, CheckSquare, Square, Tag, Check, XCircle, Icon, AlertTriangle, X, Images, Copy, Download, ChevronRight, ChevronDown, Loader2, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-svelte';
+	import { Trash2, Upload, RefreshCw, Play, Search, Layers, Server, ShieldCheck, CheckSquare, Square, Tag, Check, XCircle, Icon, AlertTriangle, X, Images, Copy, Download, ChevronRight, ChevronDown, Loader2, ArrowUp, ArrowDown, ArrowUpDown, CircleDashed, CircleDot, Circle, Filter } from 'lucide-svelte';
 	import { broom, whale } from '@lucide/lab';
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
 	import BatchOperationModal from '$lib/components/BatchOperationModal.svelte';
 	import ImageHistoryModal from './ImageHistoryModal.svelte';
 	import ImageScanModal from './ImageScanModal.svelte';
 	import PushToRegistryModal from './PushToRegistryModal.svelte';
+	import ImagePullModal from '$lib/components/ImagePullModal.svelte';
 	import type { ImageInfo } from '$lib/types';
 	import { currentEnvironment, environments, appendEnvParam, clearStaleEnvironment } from '$lib/stores/environment';
 	import CreateContainerModal from '../containers/CreateContainerModal.svelte';
@@ -46,10 +51,12 @@
 			imageId: string;
 			size: number;
 			created: number;
+			containers: number;
 		}>;
 		totalSize: number;
 		latestCreated: number;
 		imageIds: Set<string>;
+		containers: number;
 	}
 
 	// Check if a registry is Docker Hub
@@ -64,12 +71,19 @@
 	let loading = $state(true);
 	let envId = $state<number | null>(null);
 
+	// Polling interval - module scope for cleanup in onDestroy
+	let refreshInterval: ReturnType<typeof setInterval> | null = null;
+	let unsubscribeDockerEvent: (() => void) | null = null;
+
 	// Registry state
 	let registries = $state<Registry[]>([]);
 
 	// Push modal state
 	let showPushModal = $state(false);
 	let pushingImage = $state<{ id: string; tag: string } | null>(null);
+
+	// Pull modal state
+	let showPullModal = $state(false);
 
 	// Run modal state
 	let showRunModal = $state(false);
@@ -91,6 +105,10 @@
 	let searchQuery = $state('');
 	let sortField = $state<SortField>('created');
 	let sortDirection = $state<SortDirection>('desc');
+
+	// Filter state
+	type UsageFilter = 'all' | 'in-use' | 'unused';
+	let usageFilter = $state<UsageFilter>('all');
 
 	// Expanded rows state
 	let expandedRepos = $state<Set<string>>(new Set());
@@ -115,6 +133,8 @@
 	// Prune state
 	let confirmPrune = $state(false);
 	let pruneStatus = $state<'idle' | 'pruning' | 'success' | 'error'>('idle');
+	let confirmPruneUnused = $state(false);
+	let pruneUnusedStatus = $state<'idle' | 'pruning' | 'success' | 'error'>('idle');
 
 	// Multi-select state
 	let selectedImages = $state<Set<string>>(new Set());
@@ -171,28 +191,41 @@
 
 		for (const image of images) {
 			if (image.tags.length === 0) {
-				// Handle untagged images
-				const key = '<none>';
+				// Handle untagged images - try to extract repo name from RepoDigests
+				let repoName = '<none>';
+				if (image.repoDigests && image.repoDigests.length > 0) {
+					// RepoDigests format: "nginx@sha256:abc123" or "registry.example.com/myapp@sha256:abc123"
+					const digest = image.repoDigests[0];
+					const atIndex = digest.indexOf('@');
+					if (atIndex > 0) {
+						repoName = digest.slice(0, atIndex);
+					}
+				}
+
+				const key = repoName;
 				if (!groups.has(key)) {
 					groups.set(key, {
-						repoName: '<none>',
+						repoName,
 						tags: [],
 						totalSize: 0,
 						latestCreated: 0,
-						imageIds: new Set()
+						imageIds: new Set(),
+						containers: 0
 					});
 				}
 				const group = groups.get(key)!;
 				group.tags.push({
-					tag: image.id.slice(7, 19),
+					tag: repoName === '<none>' ? image.id.slice(7, 19) : '<none>',
 					fullRef: image.id,
 					imageId: image.id,
 					size: image.size,
-					created: image.created
+					created: image.created,
+					containers: image.containers
 				});
 				group.totalSize = Math.max(group.totalSize, image.size);
 				group.latestCreated = Math.max(group.latestCreated, image.created);
 				group.imageIds.add(image.id);
+				group.containers += image.containers;
 			} else {
 				for (const fullTag of image.tags) {
 					const colonIndex = fullTag.lastIndexOf(':');
@@ -205,7 +238,8 @@
 							tags: [],
 							totalSize: 0,
 							latestCreated: 0,
-							imageIds: new Set()
+							imageIds: new Set(),
+							containers: 0
 						});
 					}
 
@@ -217,11 +251,16 @@
 							fullRef: fullTag,
 							imageId: image.id,
 							size: image.size,
-							created: image.created
+							created: image.created,
+							containers: image.containers
 						});
 					}
 					group.totalSize = Math.max(group.totalSize, image.size);
 					group.latestCreated = Math.max(group.latestCreated, image.created);
+					// Only add containers count once per unique image ID
+					if (!group.imageIds.has(image.id)) {
+						group.containers += image.containers;
+					}
 					group.imageIds.add(image.id);
 				}
 			}
@@ -243,8 +282,18 @@
 		const query = searchQuery.toLowerCase().trim();
 
 		let filtered = groupedImages;
+
+		// Apply usage filter
+		if (usageFilter !== 'all') {
+			filtered = filtered.filter(group => {
+				const isInUse = group.containers > 0;
+				return usageFilter === 'in-use' ? isInUse : !isInUse;
+			});
+		}
+
+		// Apply search filter
 		if (query) {
-			filtered = groupedImages.filter(group => {
+			filtered = filtered.filter(group => {
 				if (group.repoName.toLowerCase().includes(query)) return true;
 				if (group.tags.some(t => t.tag.toLowerCase().includes(query))) return true;
 				if (group.tags.some(t => t.imageId.toLowerCase().includes(query))) return true;
@@ -432,7 +481,7 @@
 			const response = await fetch(appendEnvParam('/api/prune/images', envId), { method: 'POST' });
 			if (response.ok) {
 				pruneStatus = 'success';
-				toast.success('Unused images pruned');
+				toast.success('Dangling images pruned');
 				await fetchImages();
 			} else {
 				pruneStatus = 'error';
@@ -443,6 +492,26 @@
 			toast.error('Failed to prune images');
 		}
 		pendingTimeouts.push(setTimeout(() => { pruneStatus = 'idle'; }, 3000));
+	}
+
+	async function pruneUnusedImages() {
+		pruneUnusedStatus = 'pruning';
+		confirmPruneUnused = false;
+		try {
+			const response = await fetch(appendEnvParam('/api/prune/images?dangling=false', envId), { method: 'POST' });
+			if (response.ok) {
+				pruneUnusedStatus = 'success';
+				toast.success('Unused images pruned');
+				await fetchImages();
+			} else {
+				pruneUnusedStatus = 'error';
+				toast.error('Failed to prune unused images');
+			}
+		} catch (error) {
+			pruneUnusedStatus = 'error';
+			toast.error('Failed to prune unused images');
+		}
+		pendingTimeouts.push(setTimeout(() => { pruneUnusedStatus = 'idle'; }, 3000));
 	}
 
 	async function removeImage(id: string, tagName: string) {
@@ -571,22 +640,33 @@
 		document.addEventListener('visibilitychange', handleVisibilityChange);
 		document.addEventListener('resume', handleVisibilityChange);
 
-		const unsubscribe = onDockerEvent((event) => {
+		unsubscribeDockerEvent = onDockerEvent((event) => {
 			if (envId && isImageListChange(event)) {
 				fetchImages();
 			}
 		});
 
-		const interval = setInterval(() => {
+		refreshInterval = setInterval(() => {
 			if (envId) fetchImages();
 		}, 30000);
-		return () => {
-			clearInterval(interval);
-			unsubscribe();
-		};
+
+		// Note: In Svelte 5, cleanup must be in onDestroy, not returned from onMount
 	});
 
+	// Cleanup on component destroy
 	onDestroy(() => {
+		// Clear polling interval
+		if (refreshInterval) {
+			clearInterval(refreshInterval);
+			refreshInterval = null;
+		}
+
+		// Unsubscribe from Docker events
+		if (unsubscribeDockerEvent) {
+			unsubscribeDockerEvent();
+			unsubscribeDockerEvent = null;
+		}
+
 		document.removeEventListener('visibilitychange', handleVisibilityChange);
 		document.removeEventListener('resume', handleVisibilityChange);
 		pendingTimeouts.forEach(id => clearTimeout(id));
@@ -595,12 +675,12 @@
 </script>
 
 <div class="flex-1 min-h-0 flex flex-col gap-3 overflow-hidden">
-	<div class="shrink-0 flex flex-wrap justify-between items-center gap-3">
+	<div class="shrink-0 flex flex-wrap justify-between items-center gap-3 min-h-8">
 		<PageHeader
 			icon={Images}
 			title="Images"
 			count={sortedGroups.length}
-			total={searchQuery && sortedGroups.length !== groupedImages.length ? groupedImages.length : undefined}
+			total={(searchQuery || usageFilter !== 'all') && sortedGroups.length !== groupedImages.length ? groupedImages.length : undefined}
 		/>
 		<div class="flex flex-wrap items-center gap-2">
 			<div class="relative">
@@ -613,18 +693,50 @@
 					class="pl-8 h-8 w-48 text-sm"
 				/>
 			</div>
+			<Select.Root type="single" bind:value={usageFilter}>
+				<Select.Trigger size="sm" class="w-28 text-sm">
+					{#if usageFilter === 'all'}
+						<Filter class="w-3.5 h-3.5 mr-1.5 text-muted-foreground shrink-0" />
+						<span class="text-muted-foreground">All</span>
+					{:else if usageFilter === 'in-use'}
+						<CircleDot class="w-3.5 h-3.5 mr-1.5 text-emerald-500 shrink-0" />
+						<span>In use</span>
+					{:else}
+						<Circle class="w-3.5 h-3.5 mr-1.5 text-muted-foreground shrink-0" />
+						<span>Unused</span>
+					{/if}
+				</Select.Trigger>
+				<Select.Content>
+					<Select.Item value="all">
+						<Filter class="w-4 h-4 mr-2 text-muted-foreground" />
+						All
+					</Select.Item>
+					<Select.Item value="in-use">
+						<CircleDot class="w-4 h-4 mr-2 text-emerald-500" />
+						In use
+					</Select.Item>
+					<Select.Item value="unused">
+						<Circle class="w-4 h-4 mr-2 text-muted-foreground" />
+						Unused
+					</Select.Item>
+				</Select.Content>
+			</Select.Root>
 			{#if $canAccess('images', 'remove')}
 			<ConfirmPopover
 				open={confirmPrune}
 				action="Prune"
 				itemType="dangling images"
-				title="Prune images"
+				title="Prune dangling images"
 				position="left"
 				onConfirm={pruneImages}
 				onOpenChange={(open) => confirmPrune = open}
+				unstyled
 			>
 				{#snippet children({ open })}
-					<span class="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-sm bg-background shadow-xs border hover:bg-accent hover:text-accent-foreground dark:bg-input/30 dark:border-input dark:hover:bg-input/50 {pruneStatus === 'pruning' ? 'opacity-50 pointer-events-none' : ''}">
+					<span
+						class="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-sm bg-background shadow-xs border hover:bg-accent hover:text-accent-foreground dark:bg-input/30 dark:border-input dark:hover:bg-input/50 {pruneStatus === 'pruning' ? 'opacity-50 pointer-events-none' : ''}"
+						title="Remove untagged intermediate layers (dangling images)"
+					>
 						{#if pruneStatus === 'pruning'}
 							<RefreshCw class="w-3.5 h-3.5 animate-spin" />
 						{:else if pruneStatus === 'success'}
@@ -638,18 +750,53 @@
 					</span>
 				{/snippet}
 			</ConfirmPopover>
+			<ConfirmPopover
+				open={confirmPruneUnused}
+				action="Prune"
+				itemType="all unused images"
+				title="Prune unused images"
+				position="left"
+				onConfirm={pruneUnusedImages}
+				onOpenChange={(open) => confirmPruneUnused = open}
+				unstyled
+			>
+				{#snippet children({ open })}
+					<span
+						class="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-sm bg-background shadow-xs border hover:bg-accent hover:text-accent-foreground dark:bg-input/30 dark:border-input dark:hover:bg-input/50 {pruneUnusedStatus === 'pruning' ? 'opacity-50 pointer-events-none' : ''}"
+						title="Remove ALL images not used by any container (including tagged images)"
+					>
+						{#if pruneUnusedStatus === 'pruning'}
+							<RefreshCw class="w-3.5 h-3.5 animate-spin" />
+						{:else if pruneUnusedStatus === 'success'}
+							<Check class="w-3.5 h-3.5 text-green-600" />
+						{:else if pruneUnusedStatus === 'error'}
+							<XCircle class="w-3.5 h-3.5 text-destructive" />
+						{:else}
+							<Icon iconNode={broom} class="w-3.5 h-3.5 text-amber-600" />
+						{/if}
+						Prune unused
+					</span>
+				{/snippet}
+			</ConfirmPopover>
+			{/if}
+			{#if $canAccess('images', 'pull')}
+			<Button size="sm" variant="default" onclick={() => showPullModal = true}>
+				<Download class="w-3.5 h-3.5 mr-1.5" />
+				Pull
+			</Button>
 			{/if}
 			<Button size="sm" variant="outline" onclick={fetchImages}>Refresh</Button>
 		</div>
 	</div>
 
-	<!-- Selection bar -->
-	{#if selectedImages.size > 0}
-		<div class="flex items-center gap-2 text-xs text-muted-foreground">
+	<!-- Selection bar - always reserve space to prevent layout shift -->
+	<div class="h-4 shrink-0">
+		{#if selectedImages.size > 0}
+			<div class="flex items-center gap-1 text-xs text-muted-foreground h-full">
 			<span>{selectedInFilter.length} selected</span>
 			<button
 				type="button"
-				class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-border shadow-sm hover:border-foreground/30 hover:shadow transition-all"
+				class="inline-flex items-center gap-1 px-1.5 py-0 rounded border border-border hover:border-foreground/30 hover:shadow transition-all"
 				onclick={selectNone}
 			>
 				Clear
@@ -657,7 +804,7 @@
 			{#if $canAccess('images', 'remove')}
 			<button
 				type="button"
-				class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-border shadow-sm hover:text-destructive hover:border-destructive/40 hover:shadow transition-all disabled:opacity-50 cursor-pointer"
+				class="inline-flex items-center gap-1 px-1.5 py-0 rounded border border-border hover:text-destructive hover:border-destructive/40 hover:shadow transition-all disabled:opacity-50 cursor-pointer"
 				onclick={bulkRemove}
 				disabled={selectedInFilter.length === 0}
 			>
@@ -665,8 +812,9 @@
 				Delete
 			</button>
 			{/if}
-		</div>
-	{/if}
+			</div>
+		{/if}
+	</div>
 
 	{#if !loading && ($environments.length === 0 || !$currentEnvironment)}
 		<NoEnvironment />
@@ -785,6 +933,16 @@
 								{group.tags[0].tag}
 							</span>
 						{/if}
+						{#if group.containers === 0}
+							<Badge variant="outline" class="text-2xs px-1.5 py-0 border-amber-500/50 text-amber-600 dark:text-amber-400 shadow-[0_0_4px_rgba(245,158,11,0.4)]">
+								Unused
+							</Badge>
+						{:else if group.tags.length > 1 && group.tags.some(t => t.containers === 0)}
+							<Badge variant="outline" class="text-2xs px-1.5 py-0 border-amber-500/30 text-amber-600/70 dark:text-amber-400/70 shadow-[0_0_3px_rgba(245,158,11,0.25)]" title="Some tags are unused">
+								<CircleDashed class="w-2.5 h-2.5 mr-0.5" />
+								Some unused
+							</Badge>
+						{/if}
 					</div>
 				{:else if column.id === 'tags'}
 					<Badge variant="secondary" class="text-xs">
@@ -867,6 +1025,22 @@
 								<span class="text-muted-foreground">{formatSize(tagInfo.size)}</span>
 							{:else if column.id === 'created'}
 								<span class="text-muted-foreground">{formatImageDate(tagInfo.created)}</span>
+							{:else if column.id === 'used'}
+								{#if tagInfo.containers > 0}
+									<a
+										href="/containers?image={encodeURIComponent(tagInfo.fullRef)}"
+										class="text-muted-foreground hover:text-foreground hover:underline"
+										title="View containers using this image"
+									>
+										{tagInfo.containers} container{tagInfo.containers === 1 ? '' : 's'}
+									</a>
+								{:else if tagInfo.containers === 0}
+									<Badge variant="outline" class="text-2xs px-1.5 py-0 border-amber-500/50 text-amber-600 dark:text-amber-400 shadow-[0_0_4px_rgba(245,158,11,0.4)]">
+										Unused
+									</Badge>
+								{:else}
+									<span class="text-muted-foreground/50">—</span>
+								{/if}
 							{:else if column.id === 'actions'}
 								<div class="flex items-center gap-1">
 									{#if $canAccess('images', 'inspect')}
@@ -930,7 +1104,7 @@
 										<Tag class="w-3 h-3 text-muted-foreground hover:text-foreground" />
 									</button>
 									{/if}
-									{#if $canAccess('images', 'remove')}
+									{#if $canAccess('images', 'remove') && tagInfo.containers === 0}
 									<div class="relative">
 										<ConfirmPopover
 											open={confirmDeleteId === tagInfo.fullRef}
@@ -938,7 +1112,7 @@
 											itemType="image"
 											itemName={tagInfo.fullRef}
 											title="Remove"
-											onConfirm={() => removeImage(tagInfo.fullRef, tagInfo.fullRef)}
+											onConfirm={() => removeImage(tagInfo.imageId, tagInfo.fullRef)}
 											onOpenChange={(open) => confirmDeleteId = open ? tagInfo.fullRef : null}
 										>
 											{#snippet children({ open })}
@@ -956,6 +1130,16 @@
 		</DataGrid>
 	{/if}
 </div>
+
+<!-- Pull Image Modal -->
+<ImagePullModal
+	bind:open={showPullModal}
+	{registries}
+	{envId}
+	envHasScanning={scannerEnabled}
+	showDeleteButton={true}
+	onComplete={fetchImages}
+/>
 
 <!-- Push to Registry Modal -->
 {#if pushingImage}

@@ -2,6 +2,9 @@
  * Container Auto-Update Task
  *
  * Handles automatic container updates with vulnerability scanning.
+ * Uses direct Docker API recreation with full Config/HostConfig passthrough
+ * from inspect data. No compose commands for
+ * individual container updates, no manual field mapping, zero settings loss.
  */
 
 import type { ScheduleTrigger, VulnerabilityCriteria } from '../../db';
@@ -19,19 +22,271 @@ import {
 	pullImage,
 	listContainers,
 	inspectContainer,
-	createContainer,
 	stopContainer,
+	startContainer,
 	removeContainer,
 	checkImageUpdateAvailable,
 	getTempImageTag,
 	isDigestBasedImage,
 	getImageIdByTag,
 	removeTempImage,
-	tagImage
+	tagImage,
+	connectContainerToNetwork,
+	disconnectContainerFromNetwork,
+	recreateContainerFromInspect
 } from '../../docker';
 import { getScannerSettings, scanImage, type ScanResult, type VulnerabilitySeverity } from '../../scanner';
 import { sendEventNotification } from '../../notifications';
-import { parseImageNameAndTag, shouldBlockUpdate, combineScanSummaries, isDockhandContainer } from './update-utils';
+import { parseImageNameAndTag, shouldBlockUpdate, combineScanSummaries, isSystemContainer } from './update-utils';
+
+// =============================================================================
+// TYPES
+// =============================================================================
+
+interface ScanContext {
+	newImageId: string;
+	currentImageId: string;
+	envId: number | undefined;
+	vulnerabilityCriteria: VulnerabilityCriteria;
+	log: (msg: string) => void;
+}
+
+interface ScanOutcome {
+	blocked: boolean;
+	reason?: string;
+	scanResults?: ScanResult[];
+	scanSummary?: VulnerabilitySeverity;
+}
+
+interface ExecutionDetails {
+	mode: string;
+	newDigest?: string;
+	vulnerabilityCriteria: VulnerabilityCriteria;
+	reason?: string;
+	blockReason?: string;
+	summary: { checked: number; updated: number; blocked: number; failed: number };
+	containers: Array<{
+		name: string;
+		status: string;
+		blockReason?: string;
+		scannerResults?: Array<{
+			scanner: string;
+			critical: number;
+			high: number;
+			medium: number;
+			low: number;
+			negligible: number;
+			unknown: number;
+		}>;
+	}>;
+	scanResult?: {
+		summary: VulnerabilitySeverity;
+		scanners: string[];
+		scannedAt?: string;
+		scannerResults: Array<{
+			scanner: string;
+			critical: number;
+			high: number;
+			medium: number;
+			low: number;
+			negligible: number;
+			unknown: number;
+		}>;
+	};
+}
+
+// =============================================================================
+// HELPER FUNCTIONS
+// =============================================================================
+
+/**
+ * Scan an image and check if the update should be blocked based on vulnerability criteria.
+ * Handles scanning, saving results, and comparing with current image for 'more_than_current'.
+ */
+async function scanAndCheckBlock(ctx: ScanContext): Promise<ScanOutcome> {
+	const { newImageId, currentImageId, envId, vulnerabilityCriteria, log } = ctx;
+
+	log(`Scanning new image for vulnerabilities...`);
+
+	const scanResults = await scanImage(newImageId, envId, (progress) => {
+		const scannerTag = progress.scanner ? `[${progress.scanner}]` : '[scan]';
+		if (progress.message) {
+			log(`${scannerTag} ${progress.message}`);
+		}
+		if (progress.output) {
+			log(`${scannerTag} ${progress.output}`);
+		}
+	});
+
+	if (scanResults.length === 0) {
+		return { blocked: false, scanResults };
+	}
+
+	const scanSummary = combineScanSummaries(scanResults);
+	log(`Scan result: ${scanSummary.critical} critical, ${scanSummary.high} high, ${scanSummary.medium} medium, ${scanSummary.low} low`);
+
+	// Save scan results
+	for (const result of scanResults) {
+		try {
+			await saveVulnerabilityScan({
+				environmentId: envId ?? null,
+				imageId: newImageId,
+				imageName: result.imageName,
+				scanner: result.scanner,
+				scannedAt: result.scannedAt,
+				scanDuration: result.scanDuration,
+				criticalCount: result.summary.critical,
+				highCount: result.summary.high,
+				mediumCount: result.summary.medium,
+				lowCount: result.summary.low,
+				negligibleCount: result.summary.negligible,
+				unknownCount: result.summary.unknown,
+				vulnerabilities: result.vulnerabilities,
+				error: result.error ?? null
+			});
+		} catch (saveError: any) {
+			log(`Warning: Could not save scan results: ${saveError.message}`);
+		}
+	}
+
+	// Handle 'more_than_current' criteria - need to get/scan current image
+	let currentScanSummary: VulnerabilitySeverity | undefined;
+	if (vulnerabilityCriteria === 'more_than_current') {
+		log(`Looking up cached scan for current image...`);
+		try {
+			const cachedScan = await getCombinedScanForImage(currentImageId, envId ?? null);
+			if (cachedScan) {
+				currentScanSummary = cachedScan;
+				log(`Cached scan: ${currentScanSummary.critical} critical, ${currentScanSummary.high} high`);
+			} else {
+				log(`No cached scan found, scanning current image...`);
+				const currentScanResults = await scanImage(currentImageId, envId, (progress) => {
+					const tag = progress.scanner ? `[${progress.scanner}]` : '[scan]';
+					if (progress.message) log(`${tag} ${progress.message}`);
+				});
+				if (currentScanResults.length > 0) {
+					currentScanSummary = combineScanSummaries(currentScanResults);
+					log(`Current image: ${currentScanSummary.critical} critical, ${currentScanSummary.high} high`);
+					// Save for future use
+					for (const result of currentScanResults) {
+						try {
+							await saveVulnerabilityScan({
+								environmentId: envId ?? null,
+								imageId: currentImageId,
+								imageName: result.imageName,
+								scanner: result.scanner,
+								scannedAt: result.scannedAt,
+								scanDuration: result.scanDuration,
+								criticalCount: result.summary.critical,
+								highCount: result.summary.high,
+								mediumCount: result.summary.medium,
+								lowCount: result.summary.low,
+								negligibleCount: result.summary.negligible,
+								unknownCount: result.summary.unknown,
+								vulnerabilities: result.vulnerabilities,
+								error: result.error ?? null
+							});
+						} catch { /* ignore */ }
+					}
+				}
+			}
+		} catch (cacheError: any) {
+			log(`Warning: Could not get current scan: ${cacheError.message}`);
+		}
+	}
+
+	// Check if update should be blocked
+	const { blocked, reason } = shouldBlockUpdate(vulnerabilityCriteria, scanSummary, currentScanSummary);
+
+	if (blocked) {
+		log(`UPDATE BLOCKED: ${reason}`);
+		return { blocked: true, reason, scanResults, scanSummary };
+	}
+
+	log(`Scan passed vulnerability criteria`);
+	return { blocked: false, scanResults, scanSummary };
+}
+
+/**
+ * Build scanner results array from scan results for execution details.
+ */
+function buildScannerResults(scanResults: ScanResult[]) {
+	return scanResults.map(r => ({
+		scanner: r.scanner,
+		critical: r.summary.critical,
+		high: r.summary.high,
+		medium: r.summary.medium,
+		low: r.summary.low,
+		negligible: r.summary.negligible,
+		unknown: r.summary.unknown
+	}));
+}
+
+/**
+ * Build execution details for a blocked update.
+ */
+function buildBlockedDetails(
+	containerName: string,
+	vulnerabilityCriteria: VulnerabilityCriteria,
+	reason: string,
+	scanResults: ScanResult[],
+	scanSummary: VulnerabilitySeverity
+): ExecutionDetails {
+	const scannerResults = buildScannerResults(scanResults);
+	return {
+		mode: 'auto_update',
+		reason: 'vulnerabilities_found',
+		blockReason: reason,
+		vulnerabilityCriteria,
+		summary: { checked: 1, updated: 0, blocked: 1, failed: 0 },
+		containers: [{
+			name: containerName,
+			status: 'blocked',
+			blockReason: reason,
+			scannerResults
+		}],
+		scanResult: {
+			summary: scanSummary,
+			scanners: scanResults.map(r => r.scanner),
+			scannedAt: scanResults[0]?.scannedAt,
+			scannerResults
+		}
+	};
+}
+
+/**
+ * Build execution details for a successful update.
+ */
+function buildSuccessDetails(
+	containerName: string,
+	newDigest: string | undefined,
+	vulnerabilityCriteria: VulnerabilityCriteria,
+	scanResults?: ScanResult[],
+	scanSummary?: VulnerabilitySeverity
+): ExecutionDetails {
+	const scannerResults = scanResults ? buildScannerResults(scanResults) : undefined;
+	return {
+		mode: 'auto_update',
+		newDigest,
+		vulnerabilityCriteria,
+		summary: { checked: 1, updated: 1, blocked: 0, failed: 0 },
+		containers: [{
+			name: containerName,
+			status: 'updated',
+			scannerResults
+		}],
+		scanResult: scanSummary ? {
+			summary: scanSummary,
+			scanners: scanResults?.map(r => r.scanner) || [],
+			scannedAt: scanResults?.[0]?.scannedAt,
+			scannerResults: scannerResults || []
+		} : undefined
+	};
+}
+
+// =============================================================================
+// MAIN UPDATE FUNCTION
+// =============================================================================
 
 /**
  * Execute a container auto-update.
@@ -98,14 +353,30 @@ export async function runContainerUpdate(
 			return;
 		}
 
-		// Prevent Dockhand from updating itself
-		if (isDockhandContainer(imageNameFromConfig)) {
-			log(`Skipping Dockhand container - cannot auto-update self`);
+		// Prevent system containers (Dockhand/Hawser) from being updated
+		const systemContainerType = isSystemContainer(imageNameFromConfig);
+		if (systemContainerType) {
+			const reason = systemContainerType === 'dockhand'
+				? 'Cannot auto-update Dockhand itself'
+				: 'Cannot auto-update Hawser agent';
+			log(`Skipping ${systemContainerType} container - ${reason}`);
 			await updateScheduleExecution(execution.id, {
 				status: 'skipped',
 				completedAt: new Date().toISOString(),
 				duration: Date.now() - startTime,
-				details: { reason: 'Cannot auto-update Dockhand itself' }
+				details: { reason }
+			});
+			return;
+		}
+
+		// Skip digest-pinned images - they are explicitly locked to a specific version
+		if (isDigestBasedImage(imageNameFromConfig)) {
+			log(`Skipping ${containerName} - image pinned to specific digest`);
+			await updateScheduleExecution(execution.id, {
+				status: 'skipped',
+				completedAt: new Date().toISOString(),
+				duration: Date.now() - startTime,
+				details: { reason: 'Image pinned to specific digest' }
 			});
 			return;
 		}
@@ -123,30 +394,15 @@ export async function runContainerUpdate(
 		]);
 
 		const vulnerabilityCriteria = (updateSetting?.vulnerabilityCriteria || 'never') as VulnerabilityCriteria;
-		// Scan if scanning is enabled (scanner !== 'none')
-		// The vulnerabilityCriteria only controls whether to BLOCK updates, not whether to SCAN
 		const shouldScan = scannerSettings.scanner !== 'none';
 
 		// =============================================================================
-		// SAFE UPDATE FLOW
-		// =============================================================================
-		// 1. Registry check (no pull) - determine if update is available
-		// 2. If scanning enabled:
-		//    a. Pull new image (overwrites original tag temporarily)
-		//    b. Get new image ID
-		//    c. SAFETY: Restore original tag to point to OLD image
-		//    d. Tag new image with temp suffix for scanning
-		//    e. Scan temp image
-		//    f. If blocked: remove temp image, original tag still safe
-		//    g. If approved: re-tag to original and proceed
-		// 3. If no scanning: simple pull and update
+		// CHECK FOR UPDATES
 		// =============================================================================
 
-		// Step 1: Check for update using registry check (no pull)
 		log(`Checking registry for updates: ${imageNameFromConfig}`);
 		const registryCheck = await checkImageUpdateAvailable(imageNameFromConfig, currentImageId, envId);
 
-		// Handle local images or registry errors
 		if (registryCheck.isLocalImage) {
 			log(`Local image detected - skipping (auto-update requires registry)`);
 			await updateScheduleExecution(execution.id, {
@@ -160,7 +416,6 @@ export async function runContainerUpdate(
 
 		if (registryCheck.error) {
 			log(`Registry check error: ${registryCheck.error}`);
-			// Don't fail on transient errors, just skip this run
 			await updateScheduleExecution(execution.id, {
 				status: 'skipped',
 				completedAt: new Date().toISOString(),
@@ -182,232 +437,114 @@ export async function runContainerUpdate(
 		}
 
 		log(`Update available! Registry digest: ${registryCheck.registryDigest?.substring(0, 19) || 'unknown'}`);
-
-		// Variables for scan results
-		let scanResults: ScanResult[] | undefined;
-		let scanSummary: VulnerabilitySeverity | undefined;
-		let newImageId: string | null = null;
 		const newDigest = registryCheck.registryDigest;
 
-		// Step 2: Safe pull with temp tag protection (if scanning enabled)
-		if (shouldScan) {
-			log(`Safe-pull enabled (scanner: ${scannerSettings.scanner}, criteria: ${vulnerabilityCriteria})`);
+		// =============================================================================
+		// PULL & SCAN: Temp-tag protection flow
+		// =============================================================================
+		// 1. Pull new image (overwrites tag)
+		// 2. Restore original tag to OLD image (safety)
+		// 3. Tag new image with temp suffix
+		// 4. Scan temp image, block if needed
+		// 5. Re-tag to original, recreate container
+		// =============================================================================
 
-			// Check if this is a digest-based image (can't use temp tags)
-			if (isDigestBasedImage(imageNameFromConfig)) {
-				log(`Digest-based image detected - temp tag protection not available`);
-				// Fall through to simple flow
-			} else {
-				const tempTag = getTempImageTag(imageNameFromConfig);
-				log(`Using temp tag for safe pull: ${tempTag}`);
+		let newImageId: string | null = null;
+		let scanOutcome: ScanOutcome = { blocked: false };
 
+		if (shouldScan && !isDigestBasedImage(imageNameFromConfig)) {
+			const tempTag = getTempImageTag(imageNameFromConfig);
+			log(`Using temp tag for safe pull: ${tempTag}`);
+
+			try {
+				// Pull new image
+				log(`Pulling new image: ${imageNameFromConfig}`);
+				await pullImage(imageNameFromConfig, undefined, envId);
+
+				// Get new image ID
+				newImageId = await getImageIdByTag(imageNameFromConfig, envId);
+				if (!newImageId) {
+					throw new Error('Failed to get new image ID after pull');
+				}
+				log(`New image pulled: ${newImageId.substring(0, 19)}`);
+
+				// Restore original tag to OLD image for safety
+				log(`Restoring original tag to safe image...`);
+				const [oldRepo, oldTag] = parseImageNameAndTag(imageNameFromConfig);
+				await tagImage(currentImageId, oldRepo, oldTag, envId);
+
+				// Tag new image with temp suffix
+				const [tempRepo, tempTagName] = parseImageNameAndTag(tempTag);
+				await tagImage(newImageId, tempRepo, tempTagName, envId);
+				log(`New image tagged as: ${tempTag}`);
+
+				// Scan new image (by ID, not temp tag - for proper cache storage)
 				try {
-					// Step 2a: Pull new image (overwrites original tag)
-					log(`Pulling new image: ${imageNameFromConfig}`);
-					await pullImage(imageNameFromConfig, undefined, envId);
+					scanOutcome = await scanAndCheckBlock({
+						newImageId,
+						currentImageId,
+						envId,
+						vulnerabilityCriteria,
+						log
+					});
 
-					// Step 2b: Get new image ID
-					newImageId = await getImageIdByTag(imageNameFromConfig, envId);
-					if (!newImageId) {
-						throw new Error('Failed to get new image ID after pull');
-					}
-					log(`New image pulled: ${newImageId.substring(0, 19)}`);
-
-					// Step 2c: SAFETY - Restore original tag to OLD image
-					log(`Restoring original tag to current safe image...`);
-					const [oldRepo, oldTag] = parseImageNameAndTag(imageNameFromConfig);
-					await tagImage(currentImageId, oldRepo, oldTag, envId);
-					log(`Original tag ${imageNameFromConfig} restored to safe image`);
-
-					// Step 2d: Tag new image with temp suffix
-					const [tempRepo, tempTagName] = parseImageNameAndTag(tempTag);
-					await tagImage(newImageId, tempRepo, tempTagName, envId);
-					log(`New image tagged as: ${tempTag}`);
-
-					// Step 2e: Scan temp image
-					log(`Scanning new image for vulnerabilities...`);
-					try {
-						scanResults = await scanImage(tempTag, envId, (progress) => {
-							const scannerTag = progress.scanner ? `[${progress.scanner}]` : '[scan]';
-							if (progress.message) {
-								log(`${scannerTag} ${progress.message}`);
-							}
-							if (progress.output) {
-								log(`${scannerTag} ${progress.output}`);
-							}
-						});
-
-						if (scanResults.length > 0) {
-							scanSummary = combineScanSummaries(scanResults);
-							log(`Scan result: ${scanSummary.critical} critical, ${scanSummary.high} high, ${scanSummary.medium} medium, ${scanSummary.low} low`);
-
-							// Save scan results
-							for (const result of scanResults) {
-								try {
-									await saveVulnerabilityScan({
-										environmentId: envId ?? null,
-										imageId: newImageId,
-										imageName: result.imageName,
-										scanner: result.scanner,
-										scannedAt: result.scannedAt,
-										scanDuration: result.scanDuration,
-										criticalCount: result.summary.critical,
-										highCount: result.summary.high,
-										mediumCount: result.summary.medium,
-										lowCount: result.summary.low,
-										negligibleCount: result.summary.negligible,
-										unknownCount: result.summary.unknown,
-										vulnerabilities: result.vulnerabilities,
-										error: result.error ?? null
-									});
-								} catch (saveError: any) {
-									log(`Warning: Could not save scan results: ${saveError.message}`);
-								}
-							}
-
-							// Handle 'more_than_current' criteria
-							let currentScanSummary: VulnerabilitySeverity | undefined;
-							if (vulnerabilityCriteria === 'more_than_current') {
-								log(`Looking up cached scan for current image...`);
-								try {
-									const cachedScan = await getCombinedScanForImage(currentImageId, envId ?? null);
-									if (cachedScan) {
-										currentScanSummary = cachedScan;
-										log(`Cached scan: ${currentScanSummary.critical} critical, ${currentScanSummary.high} high`);
-									} else {
-										log(`No cached scan found, scanning current image...`);
-										const currentScanResults = await scanImage(currentImageId, envId, (progress) => {
-											const tag = progress.scanner ? `[${progress.scanner}]` : '[scan]';
-											if (progress.message) log(`${tag} ${progress.message}`);
-										});
-										if (currentScanResults.length > 0) {
-											currentScanSummary = combineScanSummaries(currentScanResults);
-											log(`Current image: ${currentScanSummary.critical} critical, ${currentScanSummary.high} high`);
-											// Save for future use
-											for (const result of currentScanResults) {
-												try {
-													await saveVulnerabilityScan({
-														environmentId: envId ?? null,
-														imageId: currentImageId,
-														imageName: result.imageName,
-														scanner: result.scanner,
-														scannedAt: result.scannedAt,
-														scanDuration: result.scanDuration,
-														criticalCount: result.summary.critical,
-														highCount: result.summary.high,
-														mediumCount: result.summary.medium,
-														lowCount: result.summary.low,
-														negligibleCount: result.summary.negligible,
-														unknownCount: result.summary.unknown,
-														vulnerabilities: result.vulnerabilities,
-														error: result.error ?? null
-													});
-												} catch { /* ignore */ }
-											}
-										}
-									}
-								} catch (cacheError: any) {
-									log(`Warning: Could not get current scan: ${cacheError.message}`);
-								}
-							}
-
-							// Check if update should be blocked
-							const { blocked, reason } = shouldBlockUpdate(vulnerabilityCriteria, scanSummary, currentScanSummary);
-
-							if (blocked) {
-								// Step 2f: BLOCKED - Remove temp image, original tag is safe
-								log(`UPDATE BLOCKED: ${reason}`);
-								log(`Removing blocked image: ${tempTag}`);
-								await removeTempImage(newImageId, envId);
-								log(`Blocked image removed - container will continue using safe image`);
-
-								await updateScheduleExecution(execution.id, {
-									status: 'skipped',
-									completedAt: new Date().toISOString(),
-									duration: Date.now() - startTime,
-									details: {
-										mode: 'auto_update',
-										reason: 'vulnerabilities_found',
-										blockReason: reason,
-										vulnerabilityCriteria,
-										summary: { checked: 1, updated: 0, blocked: 1, failed: 0 },
-										containers: [{
-											name: containerName,
-											status: 'blocked',
-											blockReason: reason,
-											scannerResults: scanResults.map(r => ({
-												scanner: r.scanner,
-												critical: r.summary.critical,
-												high: r.summary.high,
-												medium: r.summary.medium,
-												low: r.summary.low,
-												negligible: r.summary.negligible,
-												unknown: r.summary.unknown
-											}))
-										}],
-										scanResult: {
-											summary: scanSummary,
-											scanners: scanResults.map(r => r.scanner),
-											scannedAt: scanResults[0]?.scannedAt,
-											scannerResults: scanResults.map(r => ({
-												scanner: r.scanner,
-												critical: r.summary.critical,
-												high: r.summary.high,
-												medium: r.summary.medium,
-												low: r.summary.low,
-												negligible: r.summary.negligible,
-												unknown: r.summary.unknown
-											}))
-										}
-									}
-								});
-
-								await sendEventNotification('auto_update_blocked', {
-									title: 'Auto-update blocked',
-									message: `Container "${containerName}" update blocked: ${reason}`,
-									type: 'warning'
-								}, envId);
-
-								return;
-							}
-
-							log(`Scan passed vulnerability criteria`);
-						}
-					} catch (scanError: any) {
-						// Scan failure - cleanup temp image and fail
-						log(`Scan failed: ${scanError.message}`);
-						log(`Removing temp image due to scan failure...`);
+					if (scanOutcome.blocked) {
+						log(`Removing blocked image: ${tempTag}`);
 						await removeTempImage(newImageId, envId);
 
 						await updateScheduleExecution(execution.id, {
-							status: 'failed',
+							status: 'skipped',
 							completedAt: new Date().toISOString(),
 							duration: Date.now() - startTime,
-							errorMessage: `Vulnerability scan failed: ${scanError.message}`
+							details: buildBlockedDetails(
+								containerName,
+								vulnerabilityCriteria,
+								scanOutcome.reason!,
+								scanOutcome.scanResults!,
+								scanOutcome.scanSummary!
+							)
 						});
+
+						await sendEventNotification('auto_update_blocked', {
+							title: 'Auto-update blocked',
+							message: `Container "${containerName}" update blocked: ${scanOutcome.reason}`,
+							type: 'warning'
+						}, envId);
+
 						return;
 					}
+				} catch (scanError: any) {
+					log(`Scan failed: ${scanError.message}`);
+					log(`Removing temp image...`);
+					await removeTempImage(newImageId, envId);
 
-					// Step 2g: APPROVED - Re-tag to original for update
-					log(`Re-tagging approved image to: ${imageNameFromConfig}`);
-					await tagImage(newImageId, oldRepo, oldTag, envId);
-					log(`Image ready for update`);
-
-					// Clean up temp tag (optional, image will be removed when container is recreated)
-					try {
-						await removeTempImage(tempTag, envId);
-					} catch { /* ignore cleanup errors */ }
-
-				} catch (pullError: any) {
-					log(`Safe-pull failed: ${pullError.message}`);
 					await updateScheduleExecution(execution.id, {
 						status: 'failed',
 						completedAt: new Date().toISOString(),
 						duration: Date.now() - startTime,
-						errorMessage: `Failed to pull image: ${pullError.message}`
+						errorMessage: `Vulnerability scan failed: ${scanError.message}`
 					});
 					return;
 				}
+
+				// Re-tag approved image to original
+				log(`Re-tagging approved image to: ${imageNameFromConfig}`);
+				await tagImage(newImageId, oldRepo, oldTag, envId);
+
+				// Clean up temp tag
+				try {
+					await removeTempImage(tempTag, envId);
+				} catch { /* ignore */ }
+
+			} catch (pullError: any) {
+				log(`Pull failed: ${pullError.message}`);
+				await updateScheduleExecution(execution.id, {
+					status: 'failed',
+					completedAt: new Date().toISOString(),
+					duration: Date.now() - startTime,
+					errorMessage: `Failed to pull image: ${pullError.message}`
+				});
+				return;
 			}
 		} else {
 			// No scanning - simple pull
@@ -427,52 +564,30 @@ export async function runContainerUpdate(
 			}
 		}
 
-		log(`Proceeding with container recreation...`);
+		// =============================================================================
+		// RECREATE CONTAINER (full config passthrough from inspect data)
+		// =============================================================================
+
+		log(`Recreating container with full config passthrough...`);
 		const success = await recreateContainer(containerName, envId, log);
 
 		if (success) {
 			await updateAutoUpdateLastUpdated(containerName, envId);
 			log(`Successfully updated container: ${containerName}`);
+
 			await updateScheduleExecution(execution.id, {
 				status: 'success',
 				completedAt: new Date().toISOString(),
 				duration: Date.now() - startTime,
-				details: {
-					mode: 'auto_update',
+				details: buildSuccessDetails(
+					containerName,
 					newDigest,
 					vulnerabilityCriteria,
-					summary: { checked: 1, updated: 1, blocked: 0, failed: 0 },
-					containers: [{
-						name: containerName,
-						status: 'updated',
-						scannerResults: scanResults?.map(r => ({
-							scanner: r.scanner,
-							critical: r.summary.critical,
-							high: r.summary.high,
-							medium: r.summary.medium,
-							low: r.summary.low,
-							negligible: r.summary.negligible,
-							unknown: r.summary.unknown
-						}))
-					}],
-					scanResult: scanSummary ? {
-						summary: scanSummary,
-						scanners: scanResults?.map(r => r.scanner) || [],
-						scannedAt: scanResults?.[0]?.scannedAt,
-						scannerResults: scanResults?.map(r => ({
-							scanner: r.scanner,
-							critical: r.summary.critical,
-							high: r.summary.high,
-							medium: r.summary.medium,
-							low: r.summary.low,
-							negligible: r.summary.negligible,
-							unknown: r.summary.unknown
-						})) || []
-					} : undefined
-				}
+					scanOutcome.scanResults,
+					scanOutcome.scanSummary
+				)
 			});
 
-			// Send notification for successful update
 			await sendEventNotification('auto_update_success', {
 				title: 'Container auto-updated',
 				message: `Container "${containerName}" was updated to a new image version`,
@@ -481,6 +596,7 @@ export async function runContainerUpdate(
 		} else {
 			throw new Error('Failed to recreate container');
 		}
+
 	} catch (error: any) {
 		log(`Error: ${error.message}`);
 		await updateScheduleExecution(execution.id, {
@@ -490,7 +606,6 @@ export async function runContainerUpdate(
 			errorMessage: error.message
 		});
 
-		// Send notification for failed update
 		await sendEventNotification('auto_update_failed', {
 			title: 'Auto-update failed',
 			message: `Container "${containerName}" auto-update failed: ${error.message}`,
@@ -500,16 +615,20 @@ export async function runContainerUpdate(
 }
 
 // =============================================================================
-// HELPER FUNCTIONS
+// EXPORTED HELPER FUNCTIONS
 // =============================================================================
 
-async function recreateContainer(
+/**
+ * Recreate a container using full Config/HostConfig passthrough from inspect data.
+ * Passes inspect data directly to Docker API create, only changing the image.
+ * No manual field mapping — zero settings loss.
+ */
+export async function recreateContainer(
 	containerName: string,
 	envId?: number,
 	log?: (msg: string) => void
 ): Promise<boolean> {
 	try {
-		// Find the container by name
 		const containers = await listContainers(true, envId);
 		const container = containers.find(c => c.name === containerName);
 
@@ -518,58 +637,16 @@ async function recreateContainer(
 			return false;
 		}
 
-		// Get full container config
 		const inspectData = await inspectContainer(container.id, envId) as any;
-		const wasRunning = inspectData.State.Running;
-		const config = inspectData.Config;
-		const hostConfig = inspectData.HostConfig;
+		const imageName = inspectData.Config?.Image;
 
-		log?.(`Recreating container: ${containerName} (was running: ${wasRunning})`);
+		log?.(`Recreating container: ${containerName} (image: ${imageName})`);
 
-		// Stop container if running
-		if (wasRunning) {
-			log?.('Stopping container...');
-			await stopContainer(container.id, envId);
-		}
-
-		// Remove old container
-		log?.('Removing old container...');
-		await removeContainer(container.id, true, envId);
-
-		// Prepare port bindings
-		const ports: { [key: string]: { HostPort: string } } = {};
-		if (hostConfig.PortBindings) {
-			for (const [containerPort, bindings] of Object.entries(hostConfig.PortBindings)) {
-				if (bindings && (bindings as any[]).length > 0) {
-					ports[containerPort] = { HostPort: (bindings as any[])[0].HostPort || '' };
-				}
-			}
-		}
-
-		// Create new container
-		log?.('Creating new container...');
-		const newContainer = await createContainer({
-			name: containerName,
-			image: config.Image,
-			ports,
-			volumeBinds: hostConfig.Binds || [],
-			env: config.Env || [],
-			labels: config.Labels || {},
-			cmd: config.Cmd || undefined,
-			restartPolicy: hostConfig.RestartPolicy?.Name || 'no',
-			networkMode: hostConfig.NetworkMode || undefined
-		}, envId);
-
-		// Start if was running
-		if (wasRunning) {
-			log?.('Starting new container...');
-			await newContainer.start();
-		}
-
-		log?.('Container recreated successfully');
+		await recreateContainerFromInspect(inspectData, imageName, envId, log);
 		return true;
 	} catch (error: any) {
 		log?.(`Failed to recreate container: ${error.message}`);
 		return false;
 	}
 }
+

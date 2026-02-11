@@ -4,7 +4,8 @@
 	import * as Select from '$lib/components/ui/select';
 	import { Button } from '$lib/components/ui/button';
 	import { Label } from '$lib/components/ui/label';
-	import { Terminal as TerminalIcon, X, ExternalLink, Shell, User } from 'lucide-svelte';
+	import { Terminal as TerminalIcon, X, ExternalLink, Shell, User, Loader2, AlertCircle } from 'lucide-svelte';
+	import { detectShells, getBestShell, hasAvailableShell, USER_OPTIONS, type ShellDetectionResult } from '$lib/utils/shell-detection';
 
 	// Dynamic imports for browser-only xterm
 	let Terminal: any;
@@ -16,10 +17,11 @@
 		open: boolean;
 		containerId: string;
 		containerName: string;
+		envId?: number | null;
 		onClose: () => void;
 	}
 
-	let { open = $bindable(), containerId, containerName, onClose }: Props = $props();
+	let { open = $bindable(), containerId, containerName, envId = null, onClose }: Props = $props();
 
 	let terminalRef: HTMLDivElement;
 	let terminal: Terminal | null = null;
@@ -28,19 +30,14 @@
 	let connected = $state(false);
 	let error = $state<string | null>(null);
 
-	// Shell options
-	const shellOptions = [
-		{ value: '/bin/bash', label: 'Bash' },
-		{ value: '/bin/sh', label: 'Shell (sh)' },
-		{ value: '/bin/zsh', label: 'Zsh' },
-		{ value: '/bin/ash', label: 'Ash (Alpine)' }
-	];
+	// Shell detection state
+	let shellDetection = $state<ShellDetectionResult | null>(null);
+	let detectingShells = $state(false);
 
-	const userOptions = [
-		{ value: 'root', label: 'root' },
-		{ value: 'nobody', label: 'nobody' },
-		{ value: '', label: 'Container default' }
-	];
+	// Derived: check if any shell is available
+	const anyShellAvailable = $derived(
+		!shellDetection || hasAvailableShell(shellDetection)
+	);
 
 	let selectedShell = $state('/bin/bash');
 	let selectedUser = $state('root');
@@ -108,7 +105,10 @@
 
 		error = null;
 		const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-		const wsUrl = `${protocol}//${window.location.host}/api/containers/${containerId}/exec?shell=${encodeURIComponent(selectedShell)}&user=${encodeURIComponent(selectedUser)}`;
+		let wsUrl = `${protocol}//${window.location.host}/api/containers/${containerId}/exec?shell=${encodeURIComponent(selectedShell)}&user=${encodeURIComponent(selectedUser)}`;
+		if (envId) {
+			wsUrl += `&envId=${envId}`;
+		}
 
 		terminal.writeln(`\x1b[90mConnecting to ${containerName}...\x1b[0m`);
 		terminal.writeln(`\x1b[90mShell: ${selectedShell}, User: ${selectedUser || 'default'}\x1b[0m`);
@@ -162,7 +162,7 @@
 	}
 
 	function startSession() {
-		if (!xtermLoaded) return;
+		if (!xtermLoaded || !anyShellAvailable) return;
 		showConfig = false;
 		// Wait for DOM update then init terminal
 		setTimeout(() => {
@@ -176,7 +176,7 @@
 			user: selectedUser,
 			name: containerName
 		});
-		const url = `/terminal/${containerId}?${params.toString()}`;
+		const url = `/terminal?container=${containerId}`;
 		window.open(url, `terminal_${containerId}`, 'width=900,height=600,resizable=yes,scrollbars=no');
 		handleClose();
 	}
@@ -212,6 +212,27 @@
 		}
 	}
 
+	// Detect shells when dialog opens
+	async function detectContainerShells() {
+		if (!containerId) return;
+
+		detectingShells = true;
+		shellDetection = null;
+		try {
+			shellDetection = await detectShells(containerId, envId);
+
+			// Auto-select best available shell if current is not available
+			const bestShell = getBestShell(shellDetection, selectedShell);
+			if (bestShell && bestShell !== selectedShell) {
+				selectedShell = bestShell;
+			}
+		} catch (error) {
+			console.error('Failed to detect shells:', error);
+		} finally {
+			detectingShells = false;
+		}
+	}
+
 	onMount(async () => {
 		window.addEventListener('resize', handleResize);
 
@@ -235,10 +256,13 @@
 		cleanup();
 	});
 
-	// Reset when dialog closes
+	// Detect shells when dialog opens, reset when it closes
 	$effect(() => {
-		if (!open) {
+		if (open) {
+			detectContainerShells();
+		} else {
 			cleanup();
+			shellDetection = null;
 		}
 	});
 </script>
@@ -268,63 +292,95 @@
 
 		{#if showConfig}
 			<div class="flex-1 flex items-center justify-center p-6">
-				<div class="w-full max-w-md space-y-6">
+				{#if detectingShells}
 					<div class="text-center">
-						<TerminalIcon class="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
-						<h3 class="text-lg font-medium">Open terminal session</h3>
-						<p class="text-sm text-muted-foreground mt-1">
-							Configure the shell and user for this session
+						<Loader2 class="w-12 h-12 mx-auto mb-4 text-muted-foreground animate-spin" />
+						<h3 class="text-lg font-medium">Detecting available shells...</h3>
+					</div>
+				{:else if !anyShellAvailable}
+					<div class="text-center">
+						<AlertCircle class="w-12 h-12 mx-auto mb-4 text-amber-500" />
+						<h3 class="text-lg font-medium text-amber-500">No shell available</h3>
+						<p class="text-sm text-muted-foreground mt-2">
+							This container does not have any shell installed.
 						</p>
-					</div>
-
-					<div class="space-y-4">
-						<div class="space-y-2">
-							<Label>Shell</Label>
-							<Select.Root type="single" bind:value={selectedShell}>
-								<Select.Trigger class="w-full h-10">
-									<Shell class="w-4 h-4 mr-2 text-muted-foreground" />
-									<span>{shellOptions.find(o => o.value === selectedShell)?.label || 'Select shell'}</span>
-								</Select.Trigger>
-								<Select.Content>
-									{#each shellOptions as option}
-										<Select.Item value={option.value} label={option.label}>
-											<Shell class="w-4 h-4 mr-2 text-muted-foreground" />
-											{option.label}
-										</Select.Item>
-									{/each}
-								</Select.Content>
-							</Select.Root>
-						</div>
-
-						<div class="space-y-2">
-							<Label>User</Label>
-							<Select.Root type="single" bind:value={selectedUser}>
-								<Select.Trigger class="w-full h-10">
-									<User class="w-4 h-4 mr-2 text-muted-foreground" />
-									<span>{userOptions.find(o => o.value === selectedUser)?.label || 'Select user'}</span>
-								</Select.Trigger>
-								<Select.Content>
-									{#each userOptions as option}
-										<Select.Item value={option.value} label={option.label}>
-											<User class="w-4 h-4 mr-2 text-muted-foreground" />
-											{option.label}
-										</Select.Item>
-									{/each}
-								</Select.Content>
-							</Select.Root>
-						</div>
-					</div>
-
-					<div class="flex gap-2">
-						<Button onclick={startSession} class="flex-1" disabled={!xtermLoaded}>
-							<TerminalIcon class="w-4 h-4 mr-2" />
-							{xtermLoaded ? 'Connect' : 'Loading...'}
-						</Button>
-						<Button onclick={openInNewWindow} variant="outline" disabled={!xtermLoaded} title="Open in new window">
-							<ExternalLink class="w-4 h-4" />
+						<p class="text-xs text-muted-foreground/70 mt-1">
+							Containers built from scratch or distroless images often don't include shells.
+						</p>
+						<Button onclick={handleClose} variant="outline" class="mt-6">
+							Close
 						</Button>
 					</div>
-				</div>
+				{:else}
+					<div class="w-full max-w-md space-y-6">
+						<div class="text-center">
+							<TerminalIcon class="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
+							<h3 class="text-lg font-medium">Open terminal session</h3>
+							<p class="text-sm text-muted-foreground mt-1">
+								Configure the shell and user for this session
+							</p>
+						</div>
+
+						<div class="space-y-4">
+							<div class="space-y-2">
+								<Label>Shell</Label>
+								<Select.Root type="single" bind:value={selectedShell}>
+									<Select.Trigger class="w-full h-10">
+										<Shell class="w-4 h-4 mr-2 text-muted-foreground" />
+										<span>{shellDetection?.allShells.find(o => o.path === selectedShell)?.label || 'Select shell'}</span>
+									</Select.Trigger>
+									<Select.Content>
+										{#if shellDetection}
+											{#each shellDetection.allShells as option}
+												<Select.Item
+													value={option.path}
+													label={option.label}
+													disabled={!option.available}
+												>
+													<Shell class="w-4 h-4 mr-2 {option.available ? 'text-green-500' : 'text-muted-foreground/40'}" />
+													<span class={option.available ? 'text-foreground' : 'text-muted-foreground/60'}>
+														{option.label}
+														{#if !option.available}
+															<span class="text-xs ml-1">(unavailable)</span>
+														{/if}
+													</span>
+												</Select.Item>
+											{/each}
+										{/if}
+									</Select.Content>
+								</Select.Root>
+							</div>
+
+							<div class="space-y-2">
+								<Label>User</Label>
+								<Select.Root type="single" bind:value={selectedUser}>
+									<Select.Trigger class="w-full h-10">
+										<User class="w-4 h-4 mr-2 text-muted-foreground" />
+										<span>{USER_OPTIONS.find(o => o.value === selectedUser)?.label || 'Select user'}</span>
+									</Select.Trigger>
+									<Select.Content>
+										{#each USER_OPTIONS as option}
+											<Select.Item value={option.value} label={option.label}>
+												<User class="w-4 h-4 mr-2 text-muted-foreground" />
+												{option.label}
+											</Select.Item>
+										{/each}
+									</Select.Content>
+								</Select.Root>
+							</div>
+						</div>
+
+						<div class="flex gap-2">
+							<Button onclick={startSession} class="flex-1" disabled={!xtermLoaded || !anyShellAvailable}>
+								<TerminalIcon class="w-4 h-4" />
+								{xtermLoaded ? 'Connect' : 'Loading...'}
+							</Button>
+							<Button onclick={openInNewWindow} variant="outline" disabled={!xtermLoaded} title="Open in new window">
+								<ExternalLink class="w-4 h-4" />
+							</Button>
+						</div>
+					</div>
+				{/if}
 			</div>
 		{:else}
 			<div class="flex-1 bg-[#0c0c0c] p-2 overflow-hidden">

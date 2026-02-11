@@ -69,9 +69,25 @@
 		initialPath?: string;
 		canEdit?: boolean;
 		onUsageChange?: (usage: VolumeUsageInfo[], isInUse: boolean) => void;
+		// File selection mode - when true, clicking a file selects it instead of opening viewer
+		selectMode?: boolean;
+		// Regex to filter which files can be selected (used with selectMode)
+		selectFilter?: RegExp;
+		// Callback when a file is selected (in selectMode)
+		onFileSelect?: (path: string, name: string) => void;
 	}
 
-	let { containerId, volumeName, envId, initialPath = '/', canEdit = true, onUsageChange }: Props = $props();
+	let {
+		containerId,
+		volumeName,
+		envId,
+		initialPath = '/',
+		canEdit = true,
+		onUsageChange,
+		selectMode = false,
+		selectFilter,
+		onFileSelect
+	}: Props = $props();
 
 	// For volume mode, track whether volume is in use (controls editing ability)
 	let volumeIsInUse = $state(false);
@@ -109,6 +125,15 @@
 	let fileInput: HTMLInputElement;
 	// Track if this container uses busybox (doesn't support --time-style=iso)
 	let useSimpleLs = $state(false);
+
+	// Selection mode state
+	let selectedFilePath = $state<string | null>(null);
+
+	// Check if a file matches the select filter (for highlighting)
+	function matchesSelectFilter(name: string): boolean {
+		if (!selectMode || !selectFilter) return false;
+		return selectFilter.test(name);
+	}
 
 	// Sort state
 	let sortField = $state<SortField>('name');
@@ -696,6 +721,11 @@
 		if (entry.type === 'directory') {
 			const newPath = currentPath === '/' ? `/${entry.name}` : `${currentPath}/${entry.name}`;
 			navigateTo(newPath);
+		} else if (selectMode && entry.type === 'file') {
+			// In select mode, clicking a file selects it
+			const filePath = currentPath === '/' ? `/${entry.name}` : `${currentPath}/${entry.name}`;
+			selectedFilePath = filePath;
+			onFileSelect?.(filePath, entry.name);
 		}
 		// Symlinks are not navigable - target path is displayed for reference
 	}
@@ -924,8 +954,11 @@
 				<Table.Body>
 					{#each displayEntries() as entry (entry.name)}
 						{@const Icon = getIcon(entry)}
-						{@const isClickable = entry.type === 'directory'}
-						<Table.Row class="{isClickable ? 'cursor-pointer' : ''} hover:bg-muted/50 group">
+						{@const isClickable = entry.type === 'directory' || (selectMode && entry.type === 'file')}
+						{@const isSelectable = selectMode && entry.type === 'file' && matchesSelectFilter(entry.name)}
+						{@const filePath = currentPath === '/' ? `/${entry.name}` : `${currentPath}/${entry.name}`}
+						{@const isSelected = selectMode && selectedFilePath === filePath}
+						<Table.Row class="{isClickable ? 'cursor-pointer' : ''} hover:bg-muted/50 group {isSelected ? 'bg-primary/10 hover:bg-primary/15' : ''} {isSelectable ? 'border-l-2 border-l-primary' : ''}">
 							<Table.Cell class="py-1">
 								<button
 									type="button"

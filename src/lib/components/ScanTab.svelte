@@ -298,7 +298,7 @@
 			<Shield class="w-12 h-12 opacity-50" />
 			<p class="text-sm">Scan <code class="bg-muted px-1.5 py-0.5 rounded">{imageName}</code> for vulnerabilities</p>
 			<Button onclick={startScan}>
-				<Shield class="w-4 h-4 mr-2" />
+				<Shield class="w-4 h-4" />
 				Start scan
 			</Button>
 		</div>

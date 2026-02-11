@@ -100,6 +100,32 @@ export function isDockhandContainer(imageName: string): boolean {
 }
 
 /**
+ * Check if a container is a Hawser agent.
+ * Official image: ghcr.io/finsys/hawser
+ */
+export function isHawserContainer(imageName: string): boolean {
+	const lower = imageName.toLowerCase();
+	return lower.includes('finsys/hawser') || lower.includes('ghcr.io/finsys/hawser');
+}
+
+/**
+ * System container type - containers that cannot be updated from within Dockhand.
+ */
+export type SystemContainerType = 'dockhand' | 'hawser';
+
+/**
+ * Check if a container is a system container (Dockhand or Hawser).
+ * System containers cannot be updated from within Dockhand because:
+ * - Dockhand: Would need to stop itself to update
+ * - Hawser: Would disconnect from the environment it's managing
+ */
+export function isSystemContainer(imageName: string): SystemContainerType | null {
+	if (isDockhandContainer(imageName)) return 'dockhand';
+	if (isHawserContainer(imageName)) return 'hawser';
+	return null;
+}
+
+/**
  * Combine multiple scan summaries by taking the maximum of each severity level.
  */
 export function combineScanSummaries(results: { summary: VulnerabilitySeverity }[]): VulnerabilitySeverity {

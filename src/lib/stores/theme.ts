@@ -19,6 +19,7 @@ export interface ThemePreferences {
 	fontSize: FontSize;
 	gridFontSize: FontSize;
 	terminalFont: string;
+	editorFont: string;
 }
 
 const STORAGE_KEY = 'dockhand-theme';
@@ -29,7 +30,8 @@ const defaultPrefs: ThemePreferences = {
 	font: 'system',
 	fontSize: 'normal',
 	gridFontSize: 'normal',
-	terminalFont: 'system-mono'
+	terminalFont: 'system-mono',
+	editorFont: 'system-mono'
 };
 
 // Font size scale mapping
@@ -83,9 +85,10 @@ function createThemeStore() {
 		// Initialize from API (called on mount)
 		async init(userId?: number) {
 			try {
+				// Use profile preferences for authenticated users, public theme endpoint otherwise
 				const url = userId
 					? `/api/profile/preferences`
-					: `/api/settings/general`;
+					: `/api/settings/theme`;
 
 				const res = await fetch(url);
 				if (res.ok) {
@@ -96,7 +99,8 @@ function createThemeStore() {
 						font: data.font || data.theme_font || 'system',
 						fontSize: data.fontSize || data.font_size || 'normal',
 						gridFontSize: data.gridFontSize || data.grid_font_size || 'normal',
-						terminalFont: data.terminalFont || data.terminal_font || 'system-mono'
+						terminalFont: data.terminalFont || data.terminal_font || 'system-mono',
+						editorFont: data.editorFont || data.editor_font || 'system-mono'
 					};
 					set(prefs);
 					saveToStorage(prefs);
@@ -109,18 +113,22 @@ function createThemeStore() {
 			}
 		},
 
-		// Update a preference and apply immediately
+		// Update a preference and optionally apply immediately
+		// skipApply: when true, saves to database but doesn't apply visually (for global settings when user is logged in)
 		async setPreference<K extends keyof ThemePreferences>(
 			key: K,
 			value: ThemePreferences[K],
-			userId?: number
+			userId?: number,
+			skipApply?: boolean
 		) {
-			update((prefs) => {
-				const newPrefs = { ...prefs, [key]: value };
-				saveToStorage(newPrefs);
-				applyTheme(newPrefs);
-				return newPrefs;
-			});
+			if (!skipApply) {
+				update((prefs) => {
+					const newPrefs = { ...prefs, [key]: value };
+					saveToStorage(newPrefs);
+					applyTheme(newPrefs);
+					return newPrefs;
+				});
+			}
 
 			// Save to database (async, non-blocking)
 			try {
@@ -187,6 +195,9 @@ export function applyTheme(prefs: ThemePreferences) {
 
 	// Apply terminal font
 	applyTerminalFont(prefs.terminalFont);
+
+	// Apply editor font
+	applyEditorFont(prefs.editorFont);
 }
 
 // Apply font to document
@@ -235,6 +246,22 @@ function applyTerminalFont(fontId: string) {
 
 	// Set CSS variable
 	document.documentElement.style.setProperty('--font-mono', fontMeta.family);
+}
+
+// Apply editor font to document
+function applyEditorFont(fontId: string) {
+	if (typeof document === 'undefined') return;
+
+	const fontMeta = getMonospaceFont(fontId);
+	if (!fontMeta) return;
+
+	// Load Google Font if needed
+	if (fontMeta.googleFont) {
+		loadGoogleFont(fontMeta);
+	}
+
+	// Set CSS variable
+	document.documentElement.style.setProperty('--font-editor', fontMeta.family);
 }
 
 // Load Google Font dynamically

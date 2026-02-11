@@ -6,6 +6,7 @@ import {
 	getGitCredentials
 } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
+import { auditGitRepository } from '$lib/server/audit';
 
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	const auth = await authorize(cookies);
@@ -24,7 +25,8 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 	}
 };
 
-export const POST: RequestHandler = async ({ request, cookies }) => {
+export const POST: RequestHandler = async (event) => {
+	const { request, cookies } = event;
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !await auth.can('git', 'create')) {
 		return json({ error: 'Permission denied' }, { status: 403 });
@@ -58,6 +60,9 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			branch: data.branch || 'main',
 			credentialId: data.credentialId || null
 		});
+
+		// Audit log
+		await auditGitRepository(event, 'create', repository.id, repository.name);
 
 		return json(repository);
 	} catch (error: any) {

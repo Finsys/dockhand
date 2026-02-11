@@ -1,4 +1,5 @@
 import { writable, derived } from 'svelte/store';
+import { environments } from './environment';
 
 export interface Permissions {
 	containers: string[];
@@ -128,12 +129,15 @@ function createAuthStore() {
 			try {
 				await fetch('/api/auth/logout', { method: 'POST' });
 			} finally {
+				// Clear auth state
 				set({
 					user: null,
 					loading: false,
 					authEnabled: true, // Keep authEnabled as we know it was on
 					authenticated: false
 				});
+				// Clear environment data to prevent showing stale info on login screen
+				environments.clear();
 			}
 		},
 

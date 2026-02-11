@@ -14,10 +14,10 @@
 		id: number;
 		name: string;
 		description?: string;
-		is_system: boolean;
+		isSystem: boolean;
 		permissions: any;
 		environmentIds?: number[] | null;
-		created_at: string;
+		createdAt: string;
 	}
 
 	interface Environment {
@@ -621,9 +621,9 @@
 				{#if formSaving}
 					<RefreshCw class="w-4 h-4 mr-1 animate-spin" />
 				{:else if isEditing}
-					<Check class="w-4 h-4 mr-1" />
+					<Check class="w-4 h-4" />
 				{:else}
-					<Plus class="w-4 h-4 mr-1" />
+					<Plus class="w-4 h-4" />
 				{/if}
 				{isEditing ? 'Save' : 'Create role'}
 			</Button>

@@ -259,7 +259,7 @@
 					roles with granular permissions and assign them to users.
 				</p>
 				<Button onclick={() => onTabChange('license')}>
-					<Key class="w-4 h-4 mr-2" />
+					<Key class="w-4 h-4" />
 					Activate license
 				</Button>
 			</div>
@@ -281,7 +281,7 @@
 					</div>
 					{#if $canAccess('settings', 'edit')}
 						<Button size="sm" onclick={() => openRoleModal(null)}>
-							<Plus class="w-4 h-4 mr-1" />
+							<Plus class="w-4 h-4" />
 							Add role
 						</Button>
 					{/if}

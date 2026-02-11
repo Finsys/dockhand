@@ -37,7 +37,7 @@
 			<CurrentIcon class="h-4 w-4" />
 		</Button>
 	</Popover.Trigger>
-	<Popover.Content class="w-80 p-3" align="start">
+	<Popover.Content class="w-80 p-3 z-[200]" align="start">
 		<div class="space-y-3">
 			<Input
 				bind:value={searchQuery}

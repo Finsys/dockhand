@@ -1,9 +1,11 @@
 import { json, redirect } from '@sveltejs/kit';
 import type { RequestHandler } from '@sveltejs/kit';
 import { handleOidcCallback, createUserSession, isAuthEnabled } from '$lib/server/auth';
+import { auditAuth } from '$lib/server/audit';
 
 // GET /api/auth/oidc/callback - Handle OIDC callback from IdP
-export const GET: RequestHandler = async ({ url, cookies }) => {
+export const GET: RequestHandler = async (event) => {
+	const { url, cookies } = event;
 	// Check if auth is enabled
 	if (!isAuthEnabled()) {
 		throw redirect(302, '/login?error=auth_disabled');
@@ -37,6 +39,13 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 
 		// Create session
 		await createUserSession(result.user.id, 'oidc', cookies);
+
+		// Audit log
+		await auditAuth(event, 'login', result.user.username, {
+			provider: 'oidc',
+			providerId: result.providerId,
+			providerName: result.providerName
+		});
 
 		// Redirect to the original destination or home
 		const redirectUrl = result.redirectUrl || '/';

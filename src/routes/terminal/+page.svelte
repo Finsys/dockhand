@@ -1,3 +1,7 @@
+<svelte:head>
+	<title>Terminal - Dockhand</title>
+</svelte:head>
+
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { page } from '$app/stores';
@@ -5,12 +9,13 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import * as Select from '$lib/components/ui/select';
-	import { Search, ChevronDown, Terminal as TerminalIcon, Unplug, RefreshCw, Trash2, Copy, Shell, User } from 'lucide-svelte';
+	import { Search, ChevronDown, Terminal as TerminalIcon, Unplug, RefreshCw, Trash2, Copy, Shell, User, Loader2, AlertCircle } from 'lucide-svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import type { ContainerInfo } from '$lib/types';
 	import { currentEnvironment, environments, appendEnvParam } from '$lib/stores/environment';
 	import Terminal from './Terminal.svelte';
 	import { NoEnvironment } from '$lib/components/ui/empty-state';
+	import { detectShells, getBestShell, hasAvailableShell, USER_OPTIONS, type ShellInfo, type ShellDetectionResult } from '$lib/utils/shell-detection';
 
 	// Track if we've handled the initial container from URL
 	let initialContainerHandled = $state(false);
@@ -23,29 +28,38 @@
 	let terminalComponent: ReturnType<typeof Terminal> | undefined;
 	let connected = $state(false);
 
+	// Shell detection state
+	let shellDetection = $state<ShellDetectionResult | null>(null);
+	let detectingShells = $state(false);
+
 	// Shell/user options
 	let selectedShell = $state('/bin/bash');
 	let selectedUser = $state('root');
 	let terminalFontSize = $state(14);
 
-	const shellOptions = [
-		{ value: '/bin/bash', label: 'Bash' },
-		{ value: '/bin/sh', label: 'Shell (sh)' },
-		{ value: '/bin/zsh', label: 'Zsh' },
-		{ value: '/bin/ash', label: 'Ash (Alpine)' }
-	];
-
-	const userOptions = [
-		{ value: 'root', label: 'root' },
-		{ value: 'nobody', label: 'nobody' },
-		{ value: '', label: 'Container default' }
-	];
+	// Track previous shell/user for reconnection
+	let prevShell = $state('/bin/bash');
+	let prevUser = $state('root');
 
 	const fontSizeOptions = [10, 12, 14, 16, 18];
 
 	// Searchable dropdown state
 	let searchQuery = $state('');
 	let dropdownOpen = $state(false);
+
+	// Derived: check if selected shell is available
+	const selectedShellAvailable = $derived(
+		!shellDetection || shellDetection.shells.includes(selectedShell)
+	);
+
+	// Derived: check if any shell is available
+	const anyShellAvailable = $derived(
+		!shellDetection || hasAvailableShell(shellDetection)
+	);
+
+	// Polling intervals - module scope for cleanup in onDestroy
+	let containerInterval: ReturnType<typeof setInterval> | null = null;
+	let connectedPollInterval: ReturnType<typeof setInterval> | null = null;
 
 	// Subscribe to environment changes
 	currentEnvironment.subscribe((env) => {
@@ -81,7 +95,7 @@
 		}
 	}
 
-	function selectContainer(container: ContainerInfo) {
+	async function selectContainer(container: ContainerInfo) {
 		// Disconnect from previous container
 		if (selectedContainer && terminalComponent) {
 			terminalComponent.dispose();
@@ -89,6 +103,23 @@
 		selectedContainer = container;
 		searchQuery = '';
 		dropdownOpen = false;
+
+		// Detect available shells
+		detectingShells = true;
+		shellDetection = null;
+		try {
+			shellDetection = await detectShells(container.id, envId);
+
+			// Auto-select best available shell if current is not available
+			const bestShell = getBestShell(shellDetection, selectedShell);
+			if (bestShell && bestShell !== selectedShell) {
+				selectedShell = bestShell;
+			}
+		} catch (error) {
+			console.error('Failed to detect shells:', error);
+		} finally {
+			detectingShells = false;
+		}
 	}
 
 	function clearSelection() {
@@ -98,6 +129,7 @@
 		selectedContainer = null;
 		searchQuery = '';
 		connected = false;
+		shellDetection = null;
 	}
 
 	function handleInputFocus() {
@@ -118,6 +150,18 @@
 			}
 		}
 	}
+
+	// Watch for shell/user changes while connected and trigger reconnect
+	$effect(() => {
+		if (selectedContainer && connected && terminalComponent) {
+			if (selectedShell !== prevShell || selectedUser !== prevUser) {
+				// Reconnect with new shell/user
+				terminalComponent.reconnect();
+			}
+		}
+		prevShell = selectedShell;
+		prevUser = selectedUser;
+	});
 
 	// Change font size
 	function changeFontSize(newSize: number) {
@@ -143,24 +187,28 @@
 			}
 		}
 
-		const containerInterval = setInterval(fetchContainers, 10000);
+		containerInterval = setInterval(fetchContainers, 10000);
 
 		// Poll connected state from terminal component
-		const connectedPollInterval = setInterval(() => {
+		connectedPollInterval = setInterval(() => {
 			if (terminalComponent) {
 				connected = terminalComponent.getConnected();
 			}
 		}, 500);
 
 		window.addEventListener('resize', handleResize);
-
-		return () => {
-			clearInterval(containerInterval);
-			clearInterval(connectedPollInterval);
-		};
+		// Note: In Svelte 5, cleanup must be in onDestroy, not returned from onMount
 	});
 
 	onDestroy(() => {
+		if (containerInterval) {
+			clearInterval(containerInterval);
+			containerInterval = null;
+		}
+		if (connectedPollInterval) {
+			clearInterval(connectedPollInterval);
+			connectedPollInterval = null;
+		}
 		window.removeEventListener('resize', handleResize);
 		terminalComponent?.dispose();
 	});
@@ -225,42 +273,83 @@
 			</Button>
 		{/if}
 
-		{#if !selectedContainer}
-			<div class="flex items-center gap-2">
-				<Label class="text-sm text-muted-foreground">Shell:</Label>
+		<!-- Shell selector - always visible -->
+		<div class="flex items-center gap-2">
+			<Label class="text-sm text-muted-foreground">Shell:</Label>
+			{#if detectingShells}
+				<div class="h-9 w-36 flex items-center justify-center border rounded-md bg-muted/50">
+					<Loader2 class="w-4 h-4 animate-spin text-muted-foreground" />
+				</div>
+			{:else}
 				<Select.Root type="single" bind:value={selectedShell}>
-					<Select.Trigger class="h-9 w-36">
+					<Select.Trigger class="h-9 w-44" disabled={!anyShellAvailable}>
 						<Shell class="w-4 h-4 mr-2 text-muted-foreground" />
-						<span>{shellOptions.find(o => o.value === selectedShell)?.label || 'Select'}</span>
+						<span class={!selectedShellAvailable ? 'text-muted-foreground line-through' : ''}>
+							{shellDetection?.allShells.find(o => o.path === selectedShell)?.label ||
+							 (selectedShell === '/bin/bash' ? 'Bash' :
+							  selectedShell === '/bin/sh' ? 'Shell (sh)' :
+							  selectedShell === '/bin/zsh' ? 'Zsh' :
+							  selectedShell === '/bin/ash' ? 'Ash (Alpine)' : 'Select')}
+						</span>
 					</Select.Trigger>
 					<Select.Content>
-						{#each shellOptions as option}
-							<Select.Item value={option.value} label={option.label}>
+						{#if shellDetection}
+							{#each shellDetection.allShells as option}
+								<Select.Item
+									value={option.path}
+									label={option.label}
+									disabled={!option.available}
+								>
+									<Shell class="w-4 h-4 mr-2 {option.available ? 'text-green-500' : 'text-muted-foreground/40'}" />
+									<span class={option.available ? 'text-foreground' : 'text-muted-foreground/60'}>
+										{option.label}
+										{#if !option.available}
+											<span class="text-xs ml-1">(unavailable)</span>
+										{/if}
+									</span>
+								</Select.Item>
+							{/each}
+						{:else}
+							<Select.Item value="/bin/bash" label="Bash">
 								<Shell class="w-4 h-4 mr-2 text-muted-foreground" />
-								{option.label}
+								Bash
 							</Select.Item>
-						{/each}
+							<Select.Item value="/bin/sh" label="Shell (sh)">
+								<Shell class="w-4 h-4 mr-2 text-muted-foreground" />
+								Shell (sh)
+							</Select.Item>
+							<Select.Item value="/bin/zsh" label="Zsh">
+								<Shell class="w-4 h-4 mr-2 text-muted-foreground" />
+								Zsh
+							</Select.Item>
+							<Select.Item value="/bin/ash" label="Ash (Alpine)">
+								<Shell class="w-4 h-4 mr-2 text-muted-foreground" />
+								Ash (Alpine)
+							</Select.Item>
+						{/if}
 					</Select.Content>
 				</Select.Root>
-			</div>
-			<div class="flex items-center gap-2">
-				<Label class="text-sm text-muted-foreground">User:</Label>
-				<Select.Root type="single" bind:value={selectedUser}>
-					<Select.Trigger class="h-9 w-40">
-						<User class="w-4 h-4 mr-2 text-muted-foreground" />
-						<span>{userOptions.find(o => o.value === selectedUser)?.label || 'Select'}</span>
-					</Select.Trigger>
-					<Select.Content>
-						{#each userOptions as option}
-							<Select.Item value={option.value} label={option.label}>
-								<User class="w-4 h-4 mr-2 text-muted-foreground" />
-								{option.label}
-							</Select.Item>
-						{/each}
-					</Select.Content>
-				</Select.Root>
-			</div>
-		{/if}
+			{/if}
+		</div>
+
+		<!-- User selector - always visible -->
+		<div class="flex items-center gap-2">
+			<Label class="text-sm text-muted-foreground">User:</Label>
+			<Select.Root type="single" bind:value={selectedUser}>
+				<Select.Trigger class="h-9 w-48">
+					<User class="w-4 h-4 mr-2 text-muted-foreground" />
+					<span>{USER_OPTIONS.find(o => o.value === selectedUser)?.label || 'Select'}</span>
+				</Select.Trigger>
+				<Select.Content>
+					{#each USER_OPTIONS as option}
+						<Select.Item value={option.value} label={option.label}>
+							<User class="w-4 h-4 mr-2 text-muted-foreground" />
+							{option.label}
+						</Select.Item>
+					{/each}
+				</Select.Content>
+			</Select.Root>
+		</div>
 	</div>
 
 	<!-- Shell output - full height -->
@@ -270,6 +359,24 @@
 				<div class="text-center">
 					<TerminalIcon class="w-12 h-12 mx-auto mb-3 opacity-50" />
 					<p>Select a container to open shell</p>
+				</div>
+			</div>
+		{:else if detectingShells}
+			<div class="flex items-center justify-center h-full text-muted-foreground">
+				<div class="text-center">
+					<Loader2 class="w-12 h-12 mx-auto mb-3 opacity-50 animate-spin" />
+					<p>Detecting available shells...</p>
+				</div>
+			</div>
+		{:else if !anyShellAvailable}
+			<div class="flex items-center justify-center h-full text-muted-foreground">
+				<div class="text-center">
+					<AlertCircle class="w-12 h-12 mx-auto mb-3 opacity-50 text-amber-500" />
+					<p class="font-medium text-amber-500">No shell available in this container</p>
+					<p class="text-sm mt-2">This container may not have a shell installed.</p>
+					<p class="text-xs mt-1 text-muted-foreground/70">
+						Containers built from scratch or distroless images often don't include shells.
+					</p>
 				</div>
 			</div>
 		{:else}
@@ -320,7 +427,7 @@
 				</div>
 			</div>
 			<div class="flex-1 min-h-0 w-full">
-				{#key selectedContainer.id}
+				{#key `${selectedContainer.id}-${selectedShell}-${selectedUser}`}
 					<Terminal
 						bind:this={terminalComponent}
 						containerId={selectedContainer.id}

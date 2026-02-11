@@ -1,6 +1,6 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { inspectImage, tagImage, pushImage } from '$lib/server/docker';
+import { inspectImage, tagImage, pushImage, parseRegistryUrl } from '$lib/server/docker';
 import { getRegistry, getEnvironment } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
 import { auditImage } from '$lib/server/audit';
@@ -69,8 +69,8 @@ export const POST: RequestHandler = async (event) => {
 		}
 
 		// Build the target tag
-		const registryUrl = new URL(registry.url);
-		const registryHost = registryUrl.host;
+		// Parse registry URL to get host and org path separately
+		const { host: registryHost, fullRegistry } = parseRegistryUrl(registry.url);
 
 		// Check if this is Docker Hub
 		const isDockerHub = registryHost.includes('docker.io') ||
@@ -81,7 +81,8 @@ export const POST: RequestHandler = async (event) => {
 		// Use custom tag if provided, otherwise use the base image name
 		const targetImageName = newTag || baseImageName;
 		// Docker Hub doesn't need host prefix - just username/image:tag
-		const targetTag = isDockerHub ? targetImageName : `${registryHost}/${targetImageName}`;
+		// For other registries, use full registry path including org (e.g., registry.example.com/org/image:tag)
+		const targetTag = isDockerHub ? targetImageName : `${fullRegistry}/${targetImageName}`;
 
 		// Parse repo and tag properly (handle registry:port/image:tag format)
 		// Find the last colon that's after the last slash (that's the tag separator)

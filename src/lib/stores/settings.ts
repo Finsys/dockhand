@@ -4,6 +4,7 @@ import { browser } from '$app/environment';
 export type TimeFormat = '12h' | '24h';
 export type DateFormat = 'MM/DD/YYYY' | 'DD/MM/YYYY' | 'YYYY-MM-DD' | 'DD.MM.YYYY';
 export type DownloadFormat = 'tar' | 'tar.gz';
+export type EventCollectionMode = 'stream' | 'poll';
 
 export interface AppSettings {
 	confirmDestructive: boolean;
@@ -22,6 +23,11 @@ export interface AppSettings {
 	eventCleanupEnabled: boolean;
 	logBufferSizeKb: number;
 	defaultTimezone: string;
+	eventCollectionMode: EventCollectionMode;
+	eventPollInterval: number;
+	metricsCollectionInterval: number;
+	externalStackPaths: string[];
+	primaryStackLocation: string | null;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -40,7 +46,12 @@ const DEFAULT_SETTINGS: AppSettings = {
 	scheduleCleanupEnabled: true,
 	eventCleanupEnabled: true,
 	logBufferSizeKb: 500,
-	defaultTimezone: 'UTC'
+	defaultTimezone: 'UTC',
+	eventCollectionMode: 'stream',
+	eventPollInterval: 60000,
+	metricsCollectionInterval: 30000,
+	externalStackPaths: [],
+	primaryStackLocation: null
 };
 
 // Create a writable store for app settings
@@ -73,7 +84,12 @@ function createSettingsStore() {
 					scheduleCleanupEnabled: settings.scheduleCleanupEnabled ?? DEFAULT_SETTINGS.scheduleCleanupEnabled,
 					eventCleanupEnabled: settings.eventCleanupEnabled ?? DEFAULT_SETTINGS.eventCleanupEnabled,
 					logBufferSizeKb: settings.logBufferSizeKb ?? DEFAULT_SETTINGS.logBufferSizeKb,
-					defaultTimezone: settings.defaultTimezone ?? DEFAULT_SETTINGS.defaultTimezone
+					defaultTimezone: settings.defaultTimezone ?? DEFAULT_SETTINGS.defaultTimezone,
+					eventCollectionMode: settings.eventCollectionMode ?? DEFAULT_SETTINGS.eventCollectionMode,
+					eventPollInterval: settings.eventPollInterval ?? DEFAULT_SETTINGS.eventPollInterval,
+					metricsCollectionInterval: settings.metricsCollectionInterval ?? DEFAULT_SETTINGS.metricsCollectionInterval,
+					externalStackPaths: settings.externalStackPaths ?? DEFAULT_SETTINGS.externalStackPaths,
+					primaryStackLocation: settings.primaryStackLocation ?? DEFAULT_SETTINGS.primaryStackLocation
 				});
 			}
 		} catch {
@@ -109,7 +125,12 @@ function createSettingsStore() {
 					scheduleCleanupEnabled: updatedSettings.scheduleCleanupEnabled ?? DEFAULT_SETTINGS.scheduleCleanupEnabled,
 					eventCleanupEnabled: updatedSettings.eventCleanupEnabled ?? DEFAULT_SETTINGS.eventCleanupEnabled,
 					logBufferSizeKb: updatedSettings.logBufferSizeKb ?? DEFAULT_SETTINGS.logBufferSizeKb,
-					defaultTimezone: updatedSettings.defaultTimezone ?? DEFAULT_SETTINGS.defaultTimezone
+					defaultTimezone: updatedSettings.defaultTimezone ?? DEFAULT_SETTINGS.defaultTimezone,
+					eventCollectionMode: updatedSettings.eventCollectionMode ?? DEFAULT_SETTINGS.eventCollectionMode,
+					eventPollInterval: updatedSettings.eventPollInterval ?? DEFAULT_SETTINGS.eventPollInterval,
+					metricsCollectionInterval: updatedSettings.metricsCollectionInterval ?? DEFAULT_SETTINGS.metricsCollectionInterval,
+					externalStackPaths: updatedSettings.externalStackPaths ?? DEFAULT_SETTINGS.externalStackPaths,
+					primaryStackLocation: updatedSettings.primaryStackLocation ?? DEFAULT_SETTINGS.primaryStackLocation
 				});
 			}
 		} catch (error) {
@@ -245,6 +266,41 @@ function createSettingsStore() {
 			update((current) => {
 				const newSettings = { ...current, defaultTimezone: value };
 				saveSettings({ defaultTimezone: value });
+				return newSettings;
+			});
+		},
+		setEventCollectionMode: (value: EventCollectionMode) => {
+			update((current) => {
+				const newSettings = { ...current, eventCollectionMode: value };
+				saveSettings({ eventCollectionMode: value });
+				return newSettings;
+			});
+		},
+		setEventPollInterval: (value: number) => {
+			update((current) => {
+				const newSettings = { ...current, eventPollInterval: value };
+				saveSettings({ eventPollInterval: value });
+				return newSettings;
+			});
+		},
+		setMetricsCollectionInterval: (value: number) => {
+			update((current) => {
+				const newSettings = { ...current, metricsCollectionInterval: value };
+				saveSettings({ metricsCollectionInterval: value });
+				return newSettings;
+			});
+		},
+		setExternalStackPaths: (value: string[]) => {
+			update((current) => {
+				const newSettings = { ...current, externalStackPaths: value };
+				saveSettings({ externalStackPaths: value });
+				return newSettings;
+			});
+		},
+		setPrimaryStackLocation: (value: string | null) => {
+			update((current) => {
+				const newSettings = { ...current, primaryStackLocation: value };
+				saveSettings({ primaryStackLocation: value });
 				return newSettings;
 			});
 		},

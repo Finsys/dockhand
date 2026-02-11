@@ -11,6 +11,7 @@ import {
 } from '$lib/server/db';
 import { hashPassword, createUserSession } from '$lib/server/auth';
 import { authorize } from '$lib/server/authorize';
+import { auditUser } from '$lib/server/audit';
 
 // GET /api/users - List all users
 // Free for all - local users are needed for basic auth
@@ -63,7 +64,8 @@ export const GET: RequestHandler = async ({ cookies }) => {
 
 // POST /api/users - Create a new user
 // Free for all - local users are needed for basic auth
-export const POST: RequestHandler = async ({ request, cookies }) => {
+export const POST: RequestHandler = async (event) => {
+	const { request, cookies } = event;
 	const auth = await authorize(cookies);
 
 	// When auth is enabled and user is logged in, check they can manage users
@@ -115,6 +117,9 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			await createUserSession(user.id, 'local', cookies);
 			autoLoggedIn = true;
 		}
+
+		// Audit log
+		await auditUser(event, 'create', user.id, user.username);
 
 		return json({
 			id: user.id,

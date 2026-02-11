@@ -6,8 +6,10 @@ import {
 	getUserRoles,
 	assignUserRole,
 	removeUserRole,
-	getUser
+	getUser,
+	getRole
 } from '$lib/server/db';
+import { auditUser } from '$lib/server/audit';
 
 // GET /api/users/[id]/roles - Get roles assigned to a user
 export const GET: RequestHandler = async ({ params, cookies }) => {
@@ -37,7 +39,8 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 };
 
 // POST /api/users/[id]/roles - Assign a role to a user
-export const POST: RequestHandler = async ({ params, request, cookies }) => {
+export const POST: RequestHandler = async (event) => {
+	const { params, request, cookies } = event;
 	// Check enterprise license
 	if (!(await isEnterprise())) {
 		return json({ error: 'Enterprise license required' }, { status: 403 });
@@ -66,6 +69,14 @@ export const POST: RequestHandler = async ({ params, request, cookies }) => {
 		}
 
 		const userRole = await assignUserRole(userId, roleId, environmentId);
+
+		// Audit log - role assigned
+		const role = await getRole(roleId);
+		await auditUser(event, 'update', userId, user.username, {
+			roleAssigned: role?.name || `Role #${roleId}`,
+			roleId
+		});
+
 		return json(userRole, { status: 201 });
 	} catch (error) {
 		console.error('Failed to assign role:', error);
@@ -74,7 +85,8 @@ export const POST: RequestHandler = async ({ params, request, cookies }) => {
 };
 
 // DELETE /api/users/[id]/roles - Remove a role from a user
-export const DELETE: RequestHandler = async ({ params, request, cookies }) => {
+export const DELETE: RequestHandler = async (event) => {
+	const { params, request, cookies } = event;
 	// Check enterprise license
 	if (!(await isEnterprise())) {
 		return json({ error: 'Enterprise license required' }, { status: 403 });
@@ -97,9 +109,21 @@ export const DELETE: RequestHandler = async ({ params, request, cookies }) => {
 			return json({ error: 'Role ID is required' }, { status: 400 });
 		}
 
+		// Get user and role info before deletion for audit
+		const user = await getUser(userId);
+		const role = await getRole(roleId);
+
 		const deleted = await removeUserRole(userId, roleId, environmentId);
 		if (!deleted) {
 			return json({ error: 'Role assignment not found' }, { status: 404 });
+		}
+
+		// Audit log - role removed
+		if (user) {
+			await auditUser(event, 'update', userId, user.username, {
+				roleRemoved: role?.name || `Role #${roleId}`,
+				roleId
+			});
 		}
 
 		return json({ success: true });

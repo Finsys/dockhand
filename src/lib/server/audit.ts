@@ -85,7 +85,8 @@ export async function audit(
 		await logAuditEvent(data);
 	} catch (error) {
 		// Don't let audit logging errors break the main operation
-		console.error('Failed to log audit event:', error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[Audit] Failed to log event:', errorMsg);
 	}
 }
 
@@ -207,6 +208,24 @@ export async function auditUser(
 }
 
 /**
+ * Helper for role actions
+ */
+export async function auditRole(
+	event: RequestEvent,
+	action: AuditAction,
+	roleId: number,
+	roleName: string,
+	details?: any
+): Promise<void> {
+	await audit(event, action, 'role', {
+		entityId: String(roleId),
+		entityName: roleName,
+		description: `Role ${roleName} ${action}`,
+		details
+	});
+}
+
+/**
  * Helper for settings actions
  */
 export async function auditSettings(
@@ -261,6 +280,134 @@ export async function auditRegistry(
 }
 
 /**
+ * Helper for git repository actions
+ */
+export async function auditGitRepository(
+	event: RequestEvent,
+	action: AuditAction,
+	repositoryId: number,
+	repositoryName: string,
+	details?: any
+): Promise<void> {
+	await audit(event, action, 'git_repository', {
+		entityId: String(repositoryId),
+		entityName: repositoryName,
+		description: `Git repository ${repositoryName} ${action}`,
+		details
+	});
+}
+
+/**
+ * Helper for git credential actions
+ */
+export async function auditGitCredential(
+	event: RequestEvent,
+	action: AuditAction,
+	credentialId: number,
+	credentialName: string,
+	details?: any
+): Promise<void> {
+	await audit(event, action, 'git_credential', {
+		entityId: String(credentialId),
+		entityName: credentialName,
+		description: `Git credential ${credentialName} ${action}`,
+		details
+	});
+}
+
+/**
+ * Helper for config set actions
+ */
+export async function auditConfigSet(
+	event: RequestEvent,
+	action: AuditAction,
+	configSetId: number,
+	configSetName: string,
+	details?: any
+): Promise<void> {
+	await audit(event, action, 'config_set', {
+		entityId: String(configSetId),
+		entityName: configSetName,
+		description: `Config set ${configSetName} ${action}`,
+		details
+	});
+}
+
+/**
+ * Helper for notification channel actions
+ */
+export async function auditNotification(
+	event: RequestEvent,
+	action: AuditAction,
+	notificationId: number,
+	notificationName: string,
+	details?: any
+): Promise<void> {
+	await audit(event, action, 'notification', {
+		entityId: String(notificationId),
+		entityName: notificationName,
+		description: `Notification channel ${notificationName} ${action}`,
+		details
+	});
+}
+
+/**
+ * Helper for OIDC provider actions
+ */
+export async function auditOidcProvider(
+	event: RequestEvent,
+	action: AuditAction,
+	providerId: number,
+	providerName: string,
+	details?: any
+): Promise<void> {
+	await audit(event, action, 'oidc_provider', {
+		entityId: String(providerId),
+		entityName: providerName,
+		description: `OIDC provider ${providerName} ${action}`,
+		details
+	});
+}
+
+/**
+ * Helper for LDAP config actions
+ */
+export async function auditLdapConfig(
+	event: RequestEvent,
+	action: AuditAction,
+	configId: number,
+	configName: string,
+	details?: any
+): Promise<void> {
+	await audit(event, action, 'ldap_config', {
+		entityId: String(configId),
+		entityName: configName,
+		description: `LDAP config ${configName} ${action}`,
+		details
+	});
+}
+
+/**
+ * Helper for git stack actions
+ */
+export async function auditGitStack(
+	event: RequestEvent,
+	action: AuditAction,
+	stackId: number,
+	stackName: string,
+	environmentId?: number | null,
+	details?: any
+): Promise<void> {
+	await audit(event, action, 'git_stack', {
+		entityId: String(stackId),
+		entityName: stackName,
+		environmentId,
+		description: `Git stack ${stackName} ${action}`,
+		details
+	});
+}
+
+/**
  * Helper for auth actions (login/logout)
  */
 export async function auditAuth(
@@ -302,6 +449,7 @@ export async function auditAuth(
 	try {
 		await logAuditEvent(data);
 	} catch (error) {
-		console.error('Failed to log audit event:', error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[Audit] Failed to log event:', errorMsg);
 	}
 }

@@ -22,6 +22,13 @@
       "when": 1766763860091,
       "tag": "0002_add_pending_container_updates",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1767689000000,
+      "tag": "0003_add_stack_paths",
+      "breakpoints": true
     }
   ]
 }

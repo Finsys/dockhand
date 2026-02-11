@@ -1,3 +1,7 @@
+<svelte:head>
+	<title>Stacks - Dockhand</title>
+</svelte:head>
+
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
@@ -8,12 +12,13 @@
 	import { Input } from '$lib/components/ui/input';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import MultiSelectFilter from '$lib/components/MultiSelectFilter.svelte';
-	import { Play, Square, Trash2, Plus, ArrowBigDown, Search, Pencil, GitBranch, RefreshCw, Loader2, FileCode, Box, RotateCcw, ScrollText, Terminal, Eye, Network, HardDrive, Heart, HeartPulse, HeartOff, ChevronsUpDown, ChevronsDownUp, ExternalLink, Rocket, AlertTriangle, X, Layers, Pause, CircleDashed, Skull, FolderOpen, Variable, Clock, RotateCw } from 'lucide-svelte';
+	import { Play, Square, Trash2, Plus, ArrowBigDown, Search, Pencil, ExternalLink, GitBranch, RefreshCw, Loader2, FileCode, Box, RotateCcw, ScrollText, Terminal, Eye, Network, HardDrive, Heart, HeartPulse, HeartOff, ChevronsUpDown, ChevronsDownUp, Rocket, AlertTriangle, X, Layers, Pause, CircleDashed, Skull, FolderOpen, Variable, Clock, RotateCw, Import } from 'lucide-svelte';
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
 	import BatchOperationModal from '$lib/components/BatchOperationModal.svelte';
 	import type { ComposeStackInfo, ContainerStats } from '$lib/types';
 	import StackModal from './StackModal.svelte';
 	import GitStackModal from './GitStackModal.svelte';
+	import ImportStackModal from './ImportStackModal.svelte';
 	import GitDeployProgressPopover from './GitDeployProgressPopover.svelte';
 	import ContainerInspectModal from '../containers/ContainerInspectModal.svelte';
 	import FileBrowserModal from '../containers/FileBrowserModal.svelte';
@@ -25,12 +30,13 @@
 	import { DataGrid } from '$lib/components/data-grid';
 	import type { DataGridSortState } from '$lib/components/data-grid/types';
 	import { ErrorDialog } from '$lib/components/ui/error-dialog';
+	import { formatHostPortUrl } from '$lib/utils/url';
 
 	type SortField = 'name' | 'containers' | 'status' | 'cpu' | 'memory';
 	type SortDirection = 'asc' | 'desc';
 
 	let stacks = $state<ComposeStackInfo[]>([]);
-	let stackSources = $state<Record<string, { sourceType: string; repository?: any; gitStack?: any }>>({});
+	let stackSources = $state<Record<string, { sourceType: string; composePath?: string | null; repository?: any; gitStack?: any }>>({});
 	let stackEnvVarCounts = $state<Record<string, number>>({});
 	let gitStacks = $state<any[]>([]);
 	let gitRepositories = $state<any[]>([]);
@@ -43,12 +49,18 @@
 	let showCreateModal = $state(false);
 	let showEditModal = $state(false);
 	let showGitModal = $state(false);
+	let showImportModal = $state(false);
 	let editingStackName = $state('');
 	let editingGitStack = $state<any>(null);
 	let envId = $state<number | null>(null);
 
 	// Derived: current environment details for reactive port URL generation
 	const currentEnvDetails = $derived($environments.find(e => e.id === $currentEnvironment?.id) ?? null);
+
+	// Polling intervals - module scope for cleanup in onDestroy
+	let stacksInterval: ReturnType<typeof setInterval> | null = null;
+	let statsInterval: ReturnType<typeof setInterval> | null = null;
+	let unsubscribeDockerEvent: (() => void) | null = null;
 
 	// Helper: extract host from URL (e.g., tcp://192.168.1.4:2376 -> 192.168.1.4)
 	function extractHostFromUrl(urlString: string): string | null {
@@ -72,7 +84,7 @@
 
 		// Priority 1: Use publicIp if configured
 		if (env.publicIp) {
-			return `http://${env.publicIp}:${publicPort}`;
+			return formatHostPortUrl(env.publicIp, publicPort);
 		}
 
 		// Priority 2: Extract from host for direct/hawser-standard
@@ -80,10 +92,10 @@
 
 		if (connectionType === 'direct' && env.host) {
 			const host = extractHostFromUrl(env.host);
-			if (host) return `http://${host}:${publicPort}`;
+			if (host) return formatHostPortUrl(host, publicPort);
 		} else if (connectionType === 'hawser-standard' && env.host) {
 			const host = extractHostFromUrl(env.host);
-			if (host) return `http://${host}:${publicPort}`;
+			if (host) return formatHostPortUrl(host, publicPort);
 		}
 
 		// No public IP available for socket or hawser-edge
@@ -232,6 +244,7 @@
 		{ value: 'running', label: 'Running', icon: Play, color: 'text-emerald-500' },
 		{ value: 'partial', label: 'Partial', icon: CircleDashed, color: 'text-amber-500' },
 		{ value: 'stopped', label: 'Stopped', icon: Square, color: 'text-rose-500' },
+		{ value: 'created', label: 'Created', icon: CircleDashed, color: 'text-slate-500' },
 		{ value: 'not deployed', label: 'Not deployed', icon: Rocket, color: 'text-violet-500' }
 	];
 
@@ -324,13 +337,13 @@
 			const query = searchQuery.toLowerCase();
 			result = result.filter(stack =>
 				stack.name.toLowerCase().includes(query) ||
-				stack.status.toLowerCase().includes(query)
+				getDisplayStatus(stack).toLowerCase().includes(query)
 			);
 		}
 
-		// Filter by status
+		// Filter by status (uses display status so git "created" matches "not deployed")
 		if (statusFilter.length > 0) {
-			result = result.filter(stack => statusFilter.includes(stack.status.toLowerCase()));
+			result = result.filter(stack => statusFilter.includes(getDisplayStatus(stack).toLowerCase()));
 		}
 
 		// Sort
@@ -344,7 +357,7 @@
 					cmp = a.containers.length - b.containers.length;
 					break;
 				case 'status':
-					cmp = a.status.localeCompare(b.status);
+					cmp = getDisplayStatus(a).localeCompare(getDisplayStatus(b));
 					break;
 				case 'cpu':
 					const cpuA = getStackStats(a)?.cpuPercent ?? -1;
@@ -379,8 +392,8 @@
 	);
 
 	// Count by status for selected stacks
-	const selectedRunning = $derived(selectedInFilter.filter(s => s.status === 'running' || s.status === 'partial'));
-	const selectedStopped = $derived(selectedInFilter.filter(s => s.status === 'stopped' || s.status === 'not deployed'));
+	const selectedRunning = $derived(selectedInFilter.filter(s => s.status === 'running' || s.status === 'partial' || s.status === 'restarting'));
+	const selectedStopped = $derived(selectedInFilter.filter(s => s.status === 'stopped' || s.status === 'not deployed' || s.status === 'created'));
 
 	function toggleSelectAll() {
 		if (allFilteredSelected) {
@@ -576,37 +589,24 @@
 			stackSources = sourcesData && !sourcesData.error ? sourcesData : {};
 			gitStacks = Array.isArray(gitStacksData) ? gitStacksData : [];
 
-			// Create a set of docker stack names for quick lookup
-			const dockerStackNames = new Set(dockerStacks.map((s: ComposeStackInfo) => s.name));
-
-			// Add undeployed git stacks as placeholder entries
-			const undeployedGitStacks: ComposeStackInfo[] = gitStacks
-				.filter((gs: any) => !dockerStackNames.has(gs.stackName))
-				.map((gs: any) => ({
-					name: gs.stackName,
-					status: 'not deployed',
-					containers: [],
-					containerDetails: [],
-					configFile: gs.composePath,
-					workingDir: ''
-				}));
-
-			// Add gitStack to all git-based stacks (both deployed and undeployed)
+			// Add gitStack details to all git-based stacks
+			// Note: The API already includes undeployed stacks from the database,
+			// so we just need to attach the gitStack object for additional metadata
 			for (const gs of gitStacks) {
 				if (!stackSources[gs.stackName]) {
-					// Undeployed git stack - create new source entry
+					// Git stack not in sources yet - create source entry
 					stackSources[gs.stackName] = {
 						sourceType: 'git',
 						repository: gs.repository,
 						gitStack: gs
 					};
 				} else if (stackSources[gs.stackName].sourceType === 'git') {
-					// Deployed git stack - add gitStack to existing source
+					// Git stack already in sources - add gitStack object
 					stackSources[gs.stackName].gitStack = gs;
 				}
 			}
 
-			stacks = [...dockerStacks, ...undeployedGitStacks];
+			stacks = dockerStacks;
 
 			// Fetch env var counts for internal and git stacks (in background, don't block UI)
 			const allStackNames = stacks.map(s => s.name);
@@ -657,6 +657,13 @@
 		return stackSources[stackName] || { sourceType: 'external' };
 	}
 
+	function getDisplayStatus(stack: ComposeStackInfo): string {
+		if (stack.status === 'created' && getStackSource(stack.name).sourceType === 'git') {
+			return 'not deployed';
+		}
+		return stack.status;
+	}
+
 	async function openGitModal(gitStack?: any) {
 		editingGitStack = gitStack || null;
 		// Fetch repositories and credentials before opening modal
@@ -681,8 +688,14 @@
 		try {
 			const response = await fetch(appendEnvParam(`/api/stacks/${encodeURIComponent(name)}/start`, envId), { method: 'POST' });
 			if (!response.ok) {
-				const data = await response.json();
-				const errorMsg = data.error || 'Failed to start stack';
+				const rawText = await response.text();
+				let errorMsg = 'Failed to start stack';
+				try {
+					const data = JSON.parse(rawText);
+					errorMsg = data.error || errorMsg;
+				} catch {
+					errorMsg = rawText || errorMsg;
+				}
 				showErrorDialog(`Failed to start ${name}`, errorMsg);
 				return;
 			}
@@ -703,8 +716,14 @@
 		try {
 			const response = await fetch(appendEnvParam(`/api/stacks/${encodeURIComponent(name)}/stop`, envId), { method: 'POST' });
 			if (!response.ok) {
-				const data = await response.json();
-				const errorMsg = data.error || 'Failed to stop stack';
+				const rawText = await response.text();
+				let errorMsg = 'Failed to stop stack';
+				try {
+					const data = JSON.parse(rawText);
+					errorMsg = data.error || errorMsg;
+				} catch {
+					errorMsg = rawText || errorMsg;
+				}
 				showErrorDialog(`Failed to stop ${name}`, errorMsg);
 				return;
 			}
@@ -725,8 +744,14 @@
 		try {
 			const response = await fetch(appendEnvParam(`/api/stacks/${encodeURIComponent(name)}/restart`, envId), { method: 'POST' });
 			if (!response.ok) {
-				const data = await response.json();
-				const errorMsg = data.error || 'Failed to restart stack';
+				const rawText = await response.text();
+				let errorMsg = 'Failed to restart stack';
+				try {
+					const data = JSON.parse(rawText);
+					errorMsg = data.error || errorMsg;
+				} catch {
+					errorMsg = rawText || errorMsg;
+				}
 				showErrorDialog(`Failed to restart ${name}`, errorMsg);
 				return;
 			}
@@ -819,6 +844,8 @@
 				return `${base} bg-red-200 dark:bg-red-800 text-red-900 dark:text-red-100`;
 			case 'partial':
 				return `${base} bg-amber-200 dark:bg-amber-800 text-amber-900 dark:text-amber-100`;
+			case 'created':
+				return `${base} bg-slate-200 dark:bg-slate-700 text-slate-900 dark:text-slate-100`;
 			case 'not deployed':
 				return `${base} bg-violet-200 dark:bg-violet-800 text-violet-900 dark:text-violet-100`;
 			default:
@@ -1048,38 +1075,51 @@
 		document.addEventListener('resume', handleVisibilityChange);
 
 		// Subscribe to container events (stacks are identified by container labels)
-		const unsubscribe = onDockerEvent((event) => {
+		unsubscribeDockerEvent = onDockerEvent((event) => {
 			if (envId && isContainerListChange(event)) {
 				fetchStacks();
 				fetchStats();
 			}
 		});
 
-		// Refresh stacks every 30 seconds
-		const stacksInterval = setInterval(() => {
+		// Refresh stacks every 30 seconds (use module-scope vars for cleanup)
+		stacksInterval = setInterval(() => {
 			if (envId) fetchStacks();
 		}, 30000);
 
 		// Refresh stats every 5 seconds (faster for resource monitoring)
-		const statsInterval = setInterval(() => {
+		statsInterval = setInterval(() => {
 			if (envId) fetchStats();
 		}, 5000);
 
-		return () => {
-			clearInterval(stacksInterval);
-			clearInterval(statsInterval);
-			unsubscribe();
-		};
+		// Note: In Svelte 5, cleanup must be in onDestroy, not returned from onMount
 	});
 
+	// Cleanup on component destroy
 	onDestroy(() => {
+		// Clear polling intervals
+		if (stacksInterval) {
+			clearInterval(stacksInterval);
+			stacksInterval = null;
+		}
+		if (statsInterval) {
+			clearInterval(statsInterval);
+			statsInterval = null;
+		}
+
+		// Unsubscribe from Docker events
+		if (unsubscribeDockerEvent) {
+			unsubscribeDockerEvent();
+			unsubscribeDockerEvent = null;
+		}
+
 		document.removeEventListener('visibilitychange', handleVisibilityChange);
 		document.removeEventListener('resume', handleVisibilityChange);
 	});
 </script>
 
 <div class="flex-1 min-h-0 flex flex-col gap-3 overflow-hidden">
-	<div class="shrink-0 flex flex-wrap justify-between items-center gap-3">
+	<div class="shrink-0 flex flex-wrap justify-between items-center gap-3 min-h-8">
 		<PageHeader icon={Layers} title="Compose stacks" count={stacks.length}>
 			{#if stacks.length > 0}
 				<button
@@ -1118,29 +1158,34 @@
 				defaultIcon={Layers}
 			/>
 			<Button size="sm" variant="outline" onclick={fetchStacks}>
-				<RefreshCw class="w-3.5 h-3.5 mr-1" />
+				<RefreshCw class="w-3.5 h-3.5" />
 				Refresh
 			</Button>
 			{#if $canAccess('stacks', 'create')}
 				<Button size="sm" variant="outline" onclick={() => openGitModal()}>
-					<GitBranch class="w-3.5 h-3.5 mr-1" />
+					<GitBranch class="w-3.5 h-3.5" />
 					From Git
 				</Button>
 				<Button size="sm" variant="secondary" onclick={() => showCreateModal = true}>
-					<Plus class="w-3.5 h-3.5 mr-1" />
+					<Plus class="w-3.5 h-3.5" />
 					Create
+				</Button>
+				<Button size="sm" variant="outline" onclick={() => showImportModal = true}>
+					<Import class="w-3.5 h-3.5" />
+					Adopt
 				</Button>
 			{/if}
 		</div>
 	</div>
 
-	<!-- Selection bar -->
-	{#if selectedStacks.size > 0}
-		<div class="flex items-center gap-2 text-xs text-muted-foreground">
+	<!-- Selection bar - always reserve space to prevent layout shift -->
+	<div class="h-4 shrink-0">
+		{#if selectedStacks.size > 0}
+			<div class="flex items-center gap-1 text-xs text-muted-foreground h-full">
 			<span>{selectedInFilter.length} selected</span>
 			<button
 				type="button"
-				class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-border shadow-sm hover:border-foreground/30 hover:shadow transition-all"
+				class="inline-flex items-center gap-1 px-1.5 py-0 rounded border border-border hover:border-foreground/30 hover:shadow transition-all"
 				onclick={selectNone}
 			>
 				Clear
@@ -1158,7 +1203,7 @@
 					onOpenChange={(open) => confirmBulkStart = open}
 				>
 					{#snippet children({ open })}
-						<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-border shadow-sm hover:text-green-600 hover:border-green-500/40 hover:shadow transition-all cursor-pointer">
+						<span class="inline-flex items-center gap-1 px-1.5 py-0 rounded border border-border hover:text-green-600 hover:border-green-500/40 hover:shadow transition-all cursor-pointer">
 							<Play class="w-3 h-3" />
 							Start
 						</span>
@@ -1178,7 +1223,7 @@
 					onOpenChange={(open) => confirmBulkRestart = open}
 				>
 					{#snippet children({ open })}
-						<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-border shadow-sm hover:text-amber-600 hover:border-amber-500/40 hover:shadow transition-all cursor-pointer">
+						<span class="inline-flex items-center gap-1 px-1.5 py-0 rounded border border-border hover:text-amber-600 hover:border-amber-500/40 hover:shadow transition-all cursor-pointer">
 							<RotateCcw class="w-3 h-3" />
 							Restart
 						</span>
@@ -1197,7 +1242,7 @@
 					onOpenChange={(open) => confirmBulkStop = open}
 				>
 					{#snippet children({ open })}
-						<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-border shadow-sm hover:text-red-600 hover:border-red-500/40 hover:shadow transition-all cursor-pointer">
+						<span class="inline-flex items-center gap-1 px-1.5 py-0 rounded border border-border hover:text-red-600 hover:border-red-500/40 hover:shadow transition-all cursor-pointer">
 							<Square class="w-3 h-3" />
 							Stop
 						</span>
@@ -1216,7 +1261,7 @@
 					onOpenChange={(open) => confirmBulkDown = open}
 				>
 					{#snippet children({ open })}
-						<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-border shadow-sm hover:text-orange-600 hover:border-orange-500/40 hover:shadow transition-all cursor-pointer">
+						<span class="inline-flex items-center gap-1 px-1.5 py-0 rounded border border-border hover:text-orange-600 hover:border-orange-500/40 hover:shadow transition-all cursor-pointer">
 							<ArrowBigDown class="w-3 h-3" />
 							Down
 						</span>
@@ -1235,15 +1280,16 @@
 				onOpenChange={(open) => confirmBulkRemove = open}
 			>
 				{#snippet children({ open })}
-					<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full border border-border shadow-sm hover:text-destructive hover:border-destructive/40 hover:shadow transition-all cursor-pointer">
+					<span class="inline-flex items-center gap-1 px-1.5 py-0 rounded border border-border hover:text-destructive hover:border-destructive/40 hover:shadow transition-all cursor-pointer">
 						<Trash2 class="w-3 h-3" />
 						Remove
 					</span>
 				{/snippet}
 			</ConfirmPopover>
 			{/if}
-		</div>
-	{/if}
+			</div>
+		{/if}
+	</div>
 
 	{#if !loading && ($environments.length === 0 || !$currentEnvironment)}
 		<NoEnvironment />
@@ -1281,7 +1327,8 @@
 			{#snippet cell(column, stack, rowState)}
 				{@const source = getStackSource(stack.name)}
 				{#if column.id === 'name'}
-					{#if source.sourceType === 'internal'}
+					{#if source.sourceType !== 'git'}
+						<!-- Internal stacks (including those needing file location) are clickable -->
 						<button
 							type="button"
 							class="font-medium text-xs hover:text-primary hover:underline cursor-pointer text-left"
@@ -1290,6 +1337,7 @@
 							{stack.name}
 						</button>
 					{:else}
+						<!-- Git stacks open in GitStackModal instead -->
 						<span class="font-medium text-xs">{stack.name}</span>
 					{/if}
 					{#if stackEnvVarCounts[stack.name]}
@@ -1307,41 +1355,51 @@
 					{/if}
 				{:else if column.id === 'source'}
 					{#if source.sourceType === 'git'}
-						<Tooltip.Root>
-							<Tooltip.Trigger>
-								<span class="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded-sm bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200 shadow-sm">
-									<GitBranch class="w-3 h-3" />
-									Git
-								</span>
-							</Tooltip.Trigger>
-							<Tooltip.Content>
-								{#if source.repository}
-									{source.repository.url} ({source.repository.branch})
-								{:else}
-									Deployed from Git repository
-								{/if}
-							</Tooltip.Content>
-						</Tooltip.Root>
+						<span
+							class="inline-flex items-center justify-center gap-1 text-xs px-1.5 py-0.5 rounded-sm bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200 shadow-sm min-w-[5.5rem]"
+							title={source.repository ? `${source.repository.url} (${source.repository.branch})` : 'Deployed from Git repository'}
+						>
+							<GitBranch class="w-3 h-3" />
+							Git
+						</span>
 					{:else if source.sourceType === 'internal'}
-						<Tooltip.Root>
-							<Tooltip.Trigger>
-								<span class="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded-sm bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 shadow-sm">
-									<FileCode class="w-3 h-3" />
-									Internal
-								</span>
-							</Tooltip.Trigger>
-							<Tooltip.Content class="whitespace-nowrap">Created in Dockhand</Tooltip.Content>
-						</Tooltip.Root>
+						<span
+							class="inline-flex items-center justify-center gap-1 text-xs px-1.5 py-0.5 rounded-sm bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 shadow-sm min-w-[5.5rem]"
+							title="Managed by Dockhand"
+						>
+							<FileCode class="w-3 h-3" />
+							Internal
+						</span>
 					{:else}
 						<Tooltip.Root>
 							<Tooltip.Trigger>
-								<span class="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded-sm bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200 shadow-sm">
+								<span
+									class="inline-flex items-center justify-center gap-1 text-xs px-1.5 py-0.5 rounded-sm bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200 shadow-sm min-w-[5.5rem]"
+								>
 									<ExternalLink class="w-3 h-3" />
-									External
+									Untracked
 								</span>
 							</Tooltip.Trigger>
-							<Tooltip.Content class="whitespace-nowrap">Created outside Dockhand</Tooltip.Content>
+							<Tooltip.Content class="whitespace-nowrap">
+								Compose file location unknown. Click the stack name or edit button to locate it.
+							</Tooltip.Content>
 						</Tooltip.Root>
+					{/if}
+				{:else if column.id === 'location'}
+					{#if source.composePath}
+						{@const dirPath = source.composePath.replace(/\/[^/]+$/, '')}
+						<Tooltip.Root>
+							<Tooltip.Trigger class="w-full text-left">
+								<span class="text-xs text-muted-foreground block truncate">
+									{dirPath}
+								</span>
+							</Tooltip.Trigger>
+							<Tooltip.Content class="max-w-md">
+								<code class="text-xs">{source.composePath}</code>
+							</Tooltip.Content>
+						</Tooltip.Root>
+					{:else}
+						<span class="text-xs text-muted-foreground/50 italic">Not set</span>
 					{/if}
 				{:else if column.id === 'containers'}
 					<div class="flex items-center gap-1">
@@ -1390,7 +1448,7 @@
 					<div class="text-right">
 						{#if stats}
 							<span class="text-xs font-mono {stats.cpuPercent > 80 ? 'text-red-500' : stats.cpuPercent > 50 ? 'text-yellow-500' : 'text-muted-foreground'}">{stats.cpuPercent.toFixed(1)}%</span>
-						{:else if stack.status === 'running' || stack.status === 'partial'}
+						{:else if stack.status === 'running' || stack.status === 'partial' || stack.status === 'restarting'}
 							<span class="text-xs text-muted-foreground/50">...</span>
 						{:else}
 							<span class="text-gray-400 dark:text-gray-600 text-xs">-</span>
@@ -1401,7 +1459,7 @@
 					<div class="text-right">
 						{#if stats}
 							<span class="text-xs font-mono text-muted-foreground" title="{formatBytes(stats.memoryUsage)} / {formatBytes(stats.memoryLimit)}">{formatBytes(stats.memoryUsage)}</span>
-						{:else if stack.status === 'running' || stack.status === 'partial'}
+						{:else if stack.status === 'running' || stack.status === 'partial' || stack.status === 'restarting'}
 							<span class="text-xs text-muted-foreground/50">...</span>
 						{:else}
 							<span class="text-gray-400 dark:text-gray-600 text-xs">-</span>
@@ -1414,7 +1472,7 @@
 							<span class="text-xs font-mono text-muted-foreground" title="↓{formatBytes(stats.networkRx)} received / ↑{formatBytes(stats.networkTx)} sent">
 								<span class="text-2xs text-blue-400">↓</span>{formatBytes(stats.networkRx, 0)} <span class="text-2xs text-orange-400">↑</span>{formatBytes(stats.networkTx, 0)}
 							</span>
-						{:else if stack.status === 'running' || stack.status === 'partial'}
+						{:else if stack.status === 'running' || stack.status === 'partial' || stack.status === 'restarting'}
 							<span class="text-xs text-muted-foreground/50">...</span>
 						{:else}
 							<span class="text-gray-400 dark:text-gray-600 text-xs">-</span>
@@ -1427,7 +1485,7 @@
 							<span class="text-xs font-mono text-muted-foreground" title="↓{formatBytes(stats.blockRead)} read / ↑{formatBytes(stats.blockWrite)} written">
 								<span class="text-2xs text-green-400">r</span>{formatBytes(stats.blockRead, 0)} <span class="text-2xs text-yellow-400">w</span>{formatBytes(stats.blockWrite, 0)}
 							</span>
-						{:else if stack.status === 'running' || stack.status === 'partial'}
+						{:else if stack.status === 'running' || stack.status === 'partial' || stack.status === 'restarting'}
 							<span class="text-xs text-muted-foreground/50">...</span>
 						{:else}
 							<span class="text-gray-400 dark:text-gray-600 text-xs">-</span>
@@ -1442,10 +1500,11 @@
 						{getStackVolumeCount(stack) || '-'}
 					</span>
 				{:else if column.id === 'status'}
-					{@const StatusIcon = getStackStatusIcon(stack.status)}
-					<span class={getStatusClasses(stack.status)}>
+					{@const displayStatus = getDisplayStatus(stack)}
+					{@const StatusIcon = getStackStatusIcon(displayStatus)}
+					<span class={getStatusClasses(displayStatus)}>
 						<StatusIcon class="w-3 h-3" />
-						{stack.status}
+						{displayStatus}
 					</span>
 				{:else if column.id === 'actions'}
 					<div class="relative flex gap-1 justify-end">
@@ -1458,7 +1517,7 @@
 								</button>
 							</div>
 						{/if}
-						{#if stack.status === 'not deployed' && source.gitStack}
+						{#if (stack.status === 'not deployed' || stack.status === 'created') && source.gitStack}
 							<button
 								type="button"
 								onclick={() => openGitModal(source.gitStack)}
@@ -1501,16 +1560,7 @@
 								</GitDeployProgressPopover>
 							{/if}
 							{#if $canAccess('stacks', 'edit')}
-								{#if source.sourceType === 'internal'}
-									<button
-										type="button"
-										onclick={() => editStack(stack.name)}
-										title="Edit"
-										class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
-									>
-										<Pencil class="w-3 h-3 text-muted-foreground hover:text-blue-500" />
-									</button>
-								{:else if source.sourceType === 'git' && source.gitStack}
+								{#if source.sourceType === 'git' && source.gitStack}
 									<button
 										type="button"
 										onclick={() => openGitModal(source.gitStack)}
@@ -1518,6 +1568,16 @@
 										class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
 									>
 										<Pencil class="w-3 h-3 text-muted-foreground hover:text-purple-500" />
+									</button>
+								{:else}
+									<!-- Internal stacks (including those needing file location) -->
+									<button
+										type="button"
+										onclick={() => editStack(stack.name)}
+										title="Edit"
+										class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
+									>
+										<Pencil class="w-3 h-3 text-muted-foreground hover:text-blue-500" />
 									</button>
 								{/if}
 							{/if}
@@ -1535,7 +1595,7 @@
 								<div class="p-1">
 									<Loader2 class="w-3 h-3 animate-spin text-muted-foreground" />
 								</div>
-							{:else if stack.status === 'running' || stack.status === 'partial'}
+							{:else if stack.status === 'running' || stack.status === 'partial' || stack.status === 'restarting'}
 								{#if $canAccess('stacks', 'restart')}
 									<ConfirmPopover
 										open={false}
@@ -1724,7 +1784,7 @@
 										<!-- Clickable ports (dedupe by publicPort for IPv4/IPv6) -->
 										{#if container.ports.length > 0}
 											{@const uniquePorts = container.ports.filter((p, i, arr) => p.publicPort && arr.findIndex(x => x.publicPort === p.publicPort) === i)}
-											{#each uniquePorts.slice(0, 2) as port}
+											{#each uniquePorts as port}
 												{@const url = getPortUrl(port.publicPort)}
 												{#if url}
 													<a
@@ -1744,9 +1804,6 @@
 													</span>
 												{/if}
 											{/each}
-											{#if uniquePorts.length > 2}
-												<span class="text-muted-foreground">+{uniquePorts.length - 2}</span>
-											{/if}
 										{/if}
 										<!-- Network with IP -->
 										{#if container.networks.length > 0}
@@ -1945,6 +2002,12 @@
 		editingGitStack = null;
 	}}
 	onSaved={fetchStacks}
+/>
+
+<ImportStackModal
+	bind:open={showImportModal}
+	onClose={() => showImportModal = false}
+	onAdopted={fetchStacks}
 />
 
 <ContainerInspectModal

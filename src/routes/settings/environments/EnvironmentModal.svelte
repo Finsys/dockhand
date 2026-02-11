@@ -72,8 +72,11 @@
 	import { focusFirstInput } from '$lib/utils';
 	import { authStore, canAccess } from '$lib/stores/auth';
 	import { licenseStore } from '$lib/stores/license';
+	import { formatDateTime, formatDate } from '$lib/stores/settings';
 	import { getLabelColor, getLabelBgColor, parseLabels, MAX_LABELS } from '$lib/utils/label-colors';
 	import EventTypesEditor from './EventTypesEditor.svelte';
+	import UpdatesTab from './tabs/UpdatesTab.svelte';
+	import ActivityTab from './tabs/ActivityTab.svelte';
 
 	// Scanner options for ToggleGroup
 	const scannerOptions = [
@@ -294,6 +297,13 @@
 	}
 
 	/**
+	 * Strip protocol and port from a host/IP string
+	 */
+	function stripHostProtocol(value: string): string {
+		return value.replace(/^(?:\w+:\/\/)/, '').replace(/[:/].*$/, '');
+	}
+
+	/**
 	 * Auto-copy host to publicIp when user enters host value
 	 * @param force - If true, always update publicIp (used on blur)
 	 */
@@ -366,6 +376,14 @@
 	let updateCheckVulnerabilityCriteria = $state<VulnerabilityCriteria>('never');
 	let updateCheckLoading = $state(false);
 
+	// Image prune settings state
+	let imagePruneEnabled = $state(false);
+	let imagePruneCron = $state('0 3 * * 0'); // Default: 3 AM Sunday
+	let imagePruneMode = $state<'dangling' | 'all'>('dangling');
+	let imagePruneLastPruned = $state<string | undefined>(undefined);
+	let imagePruneLastResult = $state<{ spaceReclaimed: number; imagesRemoved: number } | undefined>(undefined);
+	let imagePruneLoading = $state(false);
+
 	// === Validation Functions ===
 	function isValidHost(host: string): boolean {
 		if (!host) return false;
@@ -415,10 +433,15 @@
 			newLabelInput = '';
 			formPublicIp = environment.publicIp || '';
 			modalTab = 'general';
-			// Load scanner settings, notifications, update check settings, and timezone
+			// Reset token state for this environment (important when switching between envs)
+			hawserToken = null;
+			generatedToken = null;
+			pendingToken = null;
+			// Load scanner settings, notifications, update check settings, image prune settings, and timezone
 			loadScannerSettings(environment.id);
 			loadEnvNotifications(environment.id);
 			loadUpdateCheckSettings(environment.id);
+			loadImagePruneSettings(environment.id);
 			loadTimezone(environment.id);
 			// Load Hawser token if edge mode
 			if (formConnectionType === 'hawser-edge') {
@@ -457,6 +480,12 @@
 			updateCheckEnabled = false;
 			updateCheckCron = '0 4 * * *';
 			updateCheckAutoUpdate = false;
+			// Reset image prune settings
+			imagePruneEnabled = false;
+			imagePruneCron = '0 3 * * 0';
+			imagePruneMode = 'dangling';
+			imagePruneLastPruned = undefined;
+			imagePruneLastResult = undefined;
 			// Load default timezone from global settings
 			loadDefaultTimezone();
 		}
@@ -586,9 +615,12 @@
 			if (!formHost.trim()) {
 				formErrors.host = 'Host is required';
 				hasErrors = true;
-			} else if (!isValidHost(formHost.trim())) {
-				formErrors.host = 'Invalid host. Enter a valid IP address or hostname.';
-				hasErrors = true;
+			} else {
+				formHost = stripHostProtocol(formHost.trim());
+				if (!isValidHost(formHost)) {
+					formErrors.host = 'Enter an IP address or hostname only (no protocol or port)';
+					hasErrors = true;
+				}
 			}
 		}
 
@@ -618,7 +650,7 @@
 					labels: formLabels,
 					connectionType: formConnectionType,
 					hawserToken: formHawserToken || undefined,
-					publicIp: formConnectionType !== 'hawser-edge' ? (formPublicIp.trim() || undefined) : undefined
+					publicIp: formConnectionType !== 'hawser-edge' ? (stripHostProtocol(formPublicIp.trim()) || undefined) : undefined
 				})
 			});
 
@@ -660,6 +692,10 @@
 				if (updateCheckEnabled && newEnv?.id) {
 					await saveUpdateCheckSettings(newEnv.id);
 				}
+				// Save image prune settings if enabled
+				if (imagePruneEnabled && newEnv?.id) {
+					await saveImagePruneSettings(newEnv.id);
+				}
 				// Save timezone if not default
 				if (newEnv?.id) {
 					await saveTimezone(newEnv.id);
@@ -692,9 +728,12 @@
 			if (!formHost.trim()) {
 				formErrors.host = 'Host is required';
 				hasErrors = true;
-			} else if (!isValidHost(formHost.trim())) {
-				formErrors.host = 'Invalid host. Enter a valid IP address or hostname.';
-				hasErrors = true;
+			} else {
+				formHost = stripHostProtocol(formHost.trim());
+				if (!isValidHost(formHost)) {
+					formErrors.host = 'Enter an IP address or hostname only (no protocol or port)';
+					hasErrors = true;
+				}
 			}
 		}
 
@@ -724,13 +763,14 @@
 					labels: formLabels,
 					connectionType: formConnectionType,
 					hawserToken: formHawserToken || undefined,
-					publicIp: formConnectionType !== 'hawser-edge' ? (formPublicIp.trim() || null) : null
+					publicIp: formConnectionType !== 'hawser-edge' ? (stripHostProtocol(formPublicIp.trim()) || null) : null
 				})
 			});
 
 			if (response.ok) {
 				await saveScannerSettings(environment.id);
 				await saveUpdateCheckSettings(environment.id);
+				await saveImagePruneSettings(environment.id);
 				await saveTimezone(environment.id);
 				toast.success(`Updated environment: ${formName}`);
 				onSaved();
@@ -825,6 +865,11 @@
 		}
 	}
 
+	// Reload only availability/versions without overwriting user's unsaved settings changes
+	async function reloadScannerAvailability(envId?: number) {
+		await loadScannerVersionsAsync(envId);
+	}
+
 	async function saveScannerSettings(envId?: number) {
 		try {
 			const response = await fetch('/api/settings/scanner', {
@@ -888,6 +933,51 @@
 		}
 	}
 
+	// === Image Prune Settings Functions ===
+	async function loadImagePruneSettings(envId: number) {
+		imagePruneLoading = true;
+		try {
+			const response = await fetch(`/api/environments/${envId}/image-prune`);
+			if (response.ok) {
+				const data = await response.json();
+				if (data.settings) {
+					imagePruneEnabled = data.settings.enabled ?? false;
+					imagePruneCron = data.settings.cronExpression || '0 3 * * 0';
+					imagePruneMode = data.settings.pruneMode || 'dangling';
+					imagePruneLastPruned = data.settings.lastPruned;
+					imagePruneLastResult = data.settings.lastResult;
+				} else {
+					// No settings found - use defaults
+					imagePruneEnabled = false;
+					imagePruneCron = '0 3 * * 0';
+					imagePruneMode = 'dangling';
+					imagePruneLastPruned = undefined;
+					imagePruneLastResult = undefined;
+				}
+			}
+		} catch (error) {
+			console.error('Failed to load image prune settings:', error);
+		} finally {
+			imagePruneLoading = false;
+		}
+	}
+
+	async function saveImagePruneSettings(envId: number) {
+		try {
+			await fetch(`/api/environments/${envId}/image-prune`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					enabled: imagePruneEnabled,
+					cronExpression: imagePruneCron,
+					pruneMode: imagePruneMode
+				})
+			});
+		} catch (error) {
+			console.error('Failed to save image prune settings:', error);
+		}
+	}
+
 	async function removeGrype(envId?: number) {
 		removingGrype = true;
 		try {
@@ -930,7 +1020,8 @@
 		checkingGrypeUpdate = true;
 		grypeUpdateStatus = 'idle';
 		try {
-			const response = await fetch('/api/settings/scanner?checkUpdates=true');
+			const envParam = environment?.id ? `&env=${environment.id}` : '';
+			const response = await fetch(`/api/settings/scanner?checkUpdates=true${envParam}`);
 			const data = await response.json();
 			if (data.updates) {
 				grypeUpdateStatus = data.updates.grype?.hasUpdate ? 'update-available' : 'up-to-date';
@@ -947,7 +1038,8 @@
 		checkingTrivyUpdate = true;
 		trivyUpdateStatus = 'idle';
 		try {
-			const response = await fetch('/api/settings/scanner?checkUpdates=true');
+			const envParam = environment?.id ? `&env=${environment.id}` : '';
+			const response = await fetch(`/api/settings/scanner?checkUpdates=true${envParam}`);
 			const data = await response.json();
 			if (data.updates) {
 				trivyUpdateStatus = data.updates.trivy?.hasUpdate ? 'update-available' : 'up-to-date';
@@ -991,7 +1083,7 @@
 			}
 
 			// Refresh scanner status after pull
-			await checkScannerImages();
+			await loadScannerVersionsAsync(environment?.id);
 			grypeUpdateStatus = 'up-to-date';
 			setTimeout(() => { grypeUpdateStatus = 'idle'; }, 3000);
 		} catch (error) {
@@ -1032,7 +1124,7 @@
 			}
 
 			// Refresh scanner status after pull
-			await checkScannerImages();
+			await loadScannerVersionsAsync(environment?.id);
 			trivyUpdateStatus = 'up-to-date';
 			setTimeout(() => { trivyUpdateStatus = 'idle'; }, 3000);
 		} catch (error) {
@@ -1198,7 +1290,7 @@
 </script>
 
 <Dialog.Root bind:open onOpenChange={(o) => { if (o) focusFirstInput(); else onClose(); }}>
-	<Dialog.Content class="max-w-2xl min-h-[800px] max-h-[90vh] flex flex-col overflow-hidden">
+	<Dialog.Content class="max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
 		<Dialog.Header class="flex-shrink-0 border-b pb-4">
 			<Dialog.Title class="flex items-center gap-2">
 				{#if !isEditing}
@@ -1362,7 +1454,7 @@
 											<HelpCircle class="w-3.5 h-3.5" />
 										</button>
 									</Popover.Trigger>
-									<Popover.Content class="w-80 text-sm" side="right">
+									<Popover.Content class="w-80 text-sm z-[200]" side="right">
 										<div class="space-y-3">
 											<div class="flex items-start gap-2">
 												<Unplug class="w-4 h-4 mt-0.5 text-cyan-500 shrink-0" />
@@ -1718,7 +1810,7 @@
 												<p><span class="text-muted-foreground">Version:</span> {environment.hawserVersion}</p>
 											{/if}
 											{#if environment.hawserLastSeen}
-												<p><span class="text-muted-foreground">Last seen:</span> {new Date(environment.hawserLastSeen).toLocaleString()}</p>
+												<p><span class="text-muted-foreground">Last seen:</span> {formatDateTime(environment.hawserLastSeen, true)}</p>
 											{/if}
 										</div>
 									{/if}
@@ -1739,7 +1831,7 @@
 												{#if generatingToken}
 													<Loader2 class="w-3 h-3 mr-1 animate-spin" />
 												{:else}
-													<RefreshCw class="w-3 h-3 mr-1" />
+													<RefreshCw class="w-3 h-3" />
 												{/if}
 												Regenerate
 											</Button>
@@ -1754,7 +1846,7 @@
 												{#if generatingToken}
 													<Loader2 class="w-3 h-3 mr-1 animate-spin" />
 												{:else}
-													<Plus class="w-3 h-3 mr-1" />
+													<Plus class="w-3 h-3" />
 												{/if}
 												Generate
 											</Button>
@@ -1816,7 +1908,7 @@
 													</div>
 												</div>
 												<Button variant="ghost" size="sm" class="h-6 text-xs" onclick={generatePendingToken}>
-													<RefreshCw class="w-3 h-3 mr-1" />
+													<RefreshCw class="w-3 h-3" />
 													Generate new token
 												</Button>
 											</div>
@@ -1877,7 +1969,7 @@
 												{#if hawserToken.lastUsed}
 													<span class="text-muted-foreground ml-auto flex items-center gap-1">
 														<Clock class="w-3 h-3" />
-														Last used: {new Date(hawserToken.lastUsed).toLocaleDateString()}
+														Last used: {formatDate(hawserToken.lastUsed)}
 													</span>
 												{/if}
 											</div>
@@ -1918,117 +2010,30 @@
 
 				<!-- Updates Tab -->
 				<Tabs.Content value="updates" class="space-y-4 mt-0 h-full">
-					<div class="space-y-4">
-						<div class="text-sm font-medium">
-							Scheduled update check
-						</div>
-						<p class="text-xs text-muted-foreground">
-							Periodically check all containers in this environment for available image updates.
-						</p>
-
-						{#if updateCheckLoading}
-							<div class="flex items-center justify-center py-4">
-								<RefreshCw class="w-5 h-5 animate-spin text-muted-foreground" />
-							</div>
-						{:else}
-							<div class="flex items-start gap-2">
-								<CircleFadingArrowUp class="w-4 h-4 text-green-500 glow-green mt-0.5 shrink-0" />
-								<div class="flex-1">
-									<Label>Enable scheduled update check</Label>
-									<p class="text-xs text-muted-foreground">Automatically check for container updates on a schedule</p>
-								</div>
-								<TogglePill bind:checked={updateCheckEnabled} />
-							</div>
-
-							{#if updateCheckEnabled}
-								<div class="flex items-start gap-2">
-									<div class="w-4 shrink-0"></div>
-									<div class="flex-1 space-y-2">
-										<Label>Schedule</Label>
-										<CronEditor value={updateCheckCron} onchange={(cron) => updateCheckCron = cron} />
-									</div>
-								</div>
-
-								<div class="flex items-start gap-2">
-									<CircleArrowUp class="w-4 h-4 text-muted-foreground mt-0.5 shrink-0" />
-									<div class="flex-1">
-										<Label>Automatically update containers</Label>
-										<p class="text-xs text-muted-foreground">
-											When enabled, containers will be updated automatically when new images are found.
-											When disabled, only sends notifications about available updates.
-										</p>
-									</div>
-									<TogglePill bind:checked={updateCheckAutoUpdate} />
-								</div>
-
-								{#if updateCheckAutoUpdate && scannerEnabled}
-									<div class="flex items-start gap-2">
-										<div class="w-4 shrink-0"></div>
-										<div class="flex-1">
-											<Label>Block updates with vulnerabilities</Label>
-											<p class="text-xs text-muted-foreground">
-												Block auto-updates if the new image has vulnerabilities exceeding this criteria
-											</p>
-										</div>
-										<VulnerabilityCriteriaSelector
-											bind:value={updateCheckVulnerabilityCriteria}
-											class="w-[200px]"
-										/>
-									</div>
-								{/if}
-
-								<div class="text-xs text-muted-foreground bg-muted/50 rounded-md p-2 flex items-start gap-2">
-									<Info class="w-3 h-3 mt-0.5 shrink-0" />
-									{#if updateCheckAutoUpdate}
-										{#if scannerEnabled && updateCheckVulnerabilityCriteria !== 'never'}
-											<span>New images are pulled to a temporary tag, scanned, then deployed if they pass the vulnerability check. Blocked images are deleted automatically.</span>
-										{:else}
-											<span>Containers will be updated automatically when new images are available.</span>
-										{/if}
-									{:else}
-										<span>You'll receive notifications when updates are available. Containers won't be modified.</span>
-									{/if}
-								</div>
-							{/if}
-						{/if}
-					</div>
-
-					<!-- Timezone selector -->
-					<div class="space-y-2">
-						<Label>Timezone</Label>
-						<TimezoneSelector
-							bind:value={formTimezone}
-							id="edit-env-timezone"
-						/>
-						<p class="text-xs text-muted-foreground">
-							Used for scheduling auto-updates and git syncs
-						</p>
-					</div>
+					<UpdatesTab
+						updateCheckLoading={updateCheckLoading}
+						bind:updateCheckEnabled={updateCheckEnabled}
+						bind:updateCheckCron={updateCheckCron}
+						bind:updateCheckAutoUpdate={updateCheckAutoUpdate}
+						bind:updateCheckVulnerabilityCriteria={updateCheckVulnerabilityCriteria}
+						scannerEnabled={scannerEnabled}
+						imagePruneLoading={imagePruneLoading}
+						bind:imagePruneEnabled={imagePruneEnabled}
+						bind:imagePruneCron={imagePruneCron}
+						bind:imagePruneMode={imagePruneMode}
+						imagePruneLastPruned={imagePruneLastPruned}
+						imagePruneLastResult={imagePruneLastResult}
+						bind:timezone={formTimezone}
+					/>
 				</Tabs.Content>
 
 				<!-- Activity Tab -->
 				<Tabs.Content value="activity" class="space-y-4 mt-0 h-full">
-					<div class="flex items-start gap-3">
-						<div class="flex-1">
-							<Label>Collect container activity</Label>
-							<p class="text-xs text-muted-foreground">Track container events (start, stop, restart, etc.) from this environment in real-time</p>
-						</div>
-						<TogglePill bind:checked={formCollectActivity} />
-					</div>
-					<div class="flex items-start gap-3">
-						<div class="flex-1">
-							<Label>Collect system metrics</Label>
-							<p class="text-xs text-muted-foreground">Collect CPU and memory usage statistics from this environment</p>
-						</div>
-						<TogglePill bind:checked={formCollectMetrics} />
-					</div>
-					<div class="flex items-start gap-3">
-						<div class="flex-1">
-							<Label>Highlight value changes</Label>
-							<p class="text-xs text-muted-foreground">Show amber glow when container values change in the containers list</p>
-						</div>
-						<TogglePill bind:checked={formHighlightChanges} />
-					</div>
+					<ActivityTab
+						bind:collectActivity={formCollectActivity}
+						bind:collectMetrics={formCollectMetrics}
+						bind:highlightChanges={formHighlightChanges}
+					/>
 				</Tabs.Content>
 
 				<!-- Security Tab -->
@@ -2112,7 +2117,7 @@
 											{/if}
 											{#if !loadingScannerVersions}
 												{#if !scannerAvailability.grype}
-													<ImagePullProgressPopover imageName="anchore/grype:latest" envId={environment?.id} onComplete={() => loadScannerSettings(environment?.id)}>
+													<ImagePullProgressPopover imageName="anchore/grype:latest" envId={environment?.id} onComplete={() => reloadScannerAvailability(environment?.id)}>
 														<button class="inline-flex items-center text-2xs px-1.5 py-0 h-4 rounded-full border bg-muted/50 hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
 															<Download class="w-2.5 h-2.5 mr-0.5" />
 															Pull
@@ -2189,7 +2194,7 @@
 											{/if}
 											{#if !loadingScannerVersions}
 												{#if !scannerAvailability.trivy}
-													<ImagePullProgressPopover imageName="aquasec/trivy:latest" envId={environment?.id} onComplete={() => loadScannerSettings(environment?.id)}>
+													<ImagePullProgressPopover imageName="aquasec/trivy:latest" envId={environment?.id} onComplete={() => reloadScannerAvailability(environment?.id)}>
 														<button class="inline-flex items-center text-2xs px-1.5 py-0 h-4 rounded-full border bg-muted/50 hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
 															<Download class="w-2.5 h-2.5 mr-0.5" />
 															Pull
@@ -2483,16 +2488,16 @@
 					class="mr-auto"
 				>
 					{#if testingConnection}
-						<Loader2 class="w-4 h-4 mr-1 animate-spin" />
+						<Loader2 class="w-4 h-4 animate-spin" />
 						Testing...
 					{:else if testResult?.success}
-						<CheckCircle2 class="w-4 h-4 mr-1 text-green-500" />
+						<CheckCircle2 class="w-4 h-4 text-green-500" />
 						Test connection
 					{:else if testResult && !testResult.success}
-						<AlertCircle class="w-4 h-4 mr-1 text-red-500" />
+						<AlertCircle class="w-4 h-4 text-red-500" />
 						Test connection
 					{:else}
-						<Wifi class="w-4 h-4 mr-1" />
+						<Wifi class="w-4 h-4" />
 						Test connection
 					{/if}
 				</Button>
@@ -2504,9 +2509,9 @@
 					</Button>
 					<Button onclick={createEnvironment} disabled={formSaving}>
 						{#if formSaving}
-							<RefreshCw class="w-4 h-4 mr-1 animate-spin" />
+							<RefreshCw class="w-4 h-4 animate-spin" />
 						{:else}
-							<Plus class="w-4 h-4 mr-1" />
+							<Plus class="w-4 h-4" />
 						{/if}
 						Add
 					</Button>
@@ -2517,9 +2522,9 @@
 					</Button>
 					<Button onclick={updateEnvironment} disabled={formSaving}>
 						{#if formSaving}
-							<RefreshCw class="w-4 h-4 mr-1 animate-spin" />
+							<RefreshCw class="w-4 h-4 animate-spin" />
 						{:else}
-							<Check class="w-4 h-4 mr-1" />
+							<Check class="w-4 h-4" />
 						{/if}
 						Save
 					</Button>

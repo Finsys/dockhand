@@ -7,12 +7,12 @@
  * Communication with main process via IPC (process.send).
  */
 
-import { getEnvironments, getEnvSetting } from '../db';
+import { getEnvironments, getEnvSetting, getMetricsCollectionInterval } from '../db';
 import { listContainers, getContainerStats, getDockerInfo, getDiskUsage } from '../docker';
 import os from 'node:os';
 import type { MainProcessCommand } from '../subprocess-manager';
 
-const COLLECT_INTERVAL = 10000; // 10 seconds
+let COLLECT_INTERVAL = 30000; // 30 seconds (default, will be loaded from settings)
 const DISK_CHECK_INTERVAL = 300000; // 5 minutes
 const DEFAULT_DISK_THRESHOLD = 80; // 80% threshold for disk warnings
 const ENV_METRICS_TIMEOUT = 15000; // 15 seconds timeout per environment for metrics
@@ -20,12 +20,20 @@ const ENV_DISK_TIMEOUT = 20000; // 20 seconds timeout per environment for disk c
 
 /**
  * Timeout wrapper - returns fallback if promise takes too long
+ * IMPORTANT: Properly clears the timeout to prevent memory leaks
  */
 function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
-	return Promise.race([
-		promise,
-		new Promise<T>(resolve => setTimeout(() => resolve(fallback), ms))
-	]);
+	let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+	const timeoutPromise = new Promise<T>((resolve) => {
+		timeoutId = setTimeout(() => resolve(fallback), ms);
+	});
+
+	return Promise.race([promise, timeoutPromise]).finally(() => {
+		if (timeoutId !== null) {
+			clearTimeout(timeoutId);
+		}
+	});
 }
 
 // Track last disk warning sent per environment to avoid spamming
@@ -35,6 +43,8 @@ const DISK_WARNING_COOLDOWN = 3600000; // 1 hour between warnings
 let collectInterval: ReturnType<typeof setInterval> | null = null;
 let diskCheckInterval: ReturnType<typeof setInterval> | null = null;
 let isShuttingDown = false;
+let collectionCycleCount = 0;
+const MEMORY_LOG_INTERVAL = 10; // Log memory every 10 cycles (~5 minutes at 30s interval)
 
 /**
  * Send message to main process
@@ -82,12 +92,16 @@ async function collectEnvMetrics(env: { id: number; name: string; host?: string;
 					cpuPercent = (cpuDelta / systemDelta) * cpuCount * 100;
 				}
 
-				// Get container memory usage (subtract cache for actual usage)
+				// Get container memory usage using the same formula as Docker CLI
+				// Docker subtracts cache (inactive_file) from total usage
+				// - cgroup v2: uses 'inactive_file'
+				// - cgroup v1: uses 'total_inactive_file'
 				const memUsage = stats.memory_stats?.usage || 0;
-				const memCache = stats.memory_stats?.stats?.cache || 0;
-				const actualMemUsed = memUsage - memCache;
+				const memStats = stats.memory_stats?.stats || {};
+				const memCache = memStats.inactive_file ?? memStats.total_inactive_file ?? 0;
+				const actualMemUsed = memCache > 0 && memCache < memUsage ? memUsage - memCache : memUsage;
 
-				return { cpuPercent, memUsage: actualMemUsed > 0 ? actualMemUsed : memUsage };
+				return { cpuPercent, memUsage: actualMemUsed };
 			} catch {
 				return { cpuPercent: 0, memUsage: 0 };
 			}
@@ -128,7 +142,8 @@ async function collectEnvMetrics(env: { id: number; name: string; host?: string;
 		}
 	} catch (error) {
 		// Skip this environment if it fails (might be offline)
-		console.error(`[MetricsSubprocess] Failed to collect metrics for ${env.name}:`, error);
+		const message = error instanceof Error ? error.message : String(error);
+		console.warn(`[MetricsSubprocess] Failed to collect metrics for ${env.name}: ${message}`);
 	}
 }
 
@@ -161,12 +176,23 @@ async function collectMetrics() {
 			if (result.status === 'fulfilled' && result.value === null) {
 				console.warn(`[MetricsSubprocess] Environment "${enabledEnvs[index].name}" metrics timed out after ${ENV_METRICS_TIMEOUT}ms`);
 			} else if (result.status === 'rejected') {
-				console.warn(`[MetricsSubprocess] Environment "${enabledEnvs[index].name}" metrics failed:`, result.reason);
+				const reason = result.reason instanceof Error ? result.reason.message : String(result.reason);
+				console.warn(`[MetricsSubprocess] Environment "${enabledEnvs[index].name}" metrics failed: ${reason}`);
 			}
 		});
+
+		// Periodic memory logging for diagnostics
+		collectionCycleCount++;
+		if (collectionCycleCount % MEMORY_LOG_INTERVAL === 0) {
+			const memUsage = process.memoryUsage();
+			const heapMB = Math.round(memUsage.heapUsed / 1024 / 1024);
+			const rssMB = Math.round(memUsage.rss / 1024 / 1024);
+			console.log(`[MetricsSubprocess] Memory: heap=${heapMB}MB, rss=${rssMB}MB (cycle ${collectionCycleCount})`);
+		}
 	} catch (error) {
-		console.error('[MetricsSubprocess] Metrics collection error:', error);
-		send({ type: 'error', message: `Metrics collection error: ${error}` });
+		const message = error instanceof Error ? error.message : String(error);
+		console.error(`[MetricsSubprocess] Metrics collection error: ${message}`);
+		send({ type: 'error', message: `Metrics collection error: ${message}` });
 	}
 }
 
@@ -304,7 +330,8 @@ async function checkEnvDiskSpace(env: { id: number; name: string; collectMetrics
 		}
 	} catch (error) {
 		// Skip this environment if it fails
-		console.error(`[MetricsSubprocess] Failed to check disk space for ${env.name}:`, error);
+		const message = error instanceof Error ? error.message : String(error);
+		console.warn(`[MetricsSubprocess] Failed to check disk space for ${env.name}: ${message}`);
 	}
 }
 
@@ -337,12 +364,14 @@ async function checkDiskSpace() {
 			if (result.status === 'fulfilled' && result.value === null) {
 				console.warn(`[MetricsSubprocess] Environment "${enabledEnvs[index].name}" disk check timed out after ${ENV_DISK_TIMEOUT}ms`);
 			} else if (result.status === 'rejected') {
-				console.warn(`[MetricsSubprocess] Environment "${enabledEnvs[index].name}" disk check failed:`, result.reason);
+				const reason = result.reason instanceof Error ? result.reason.message : String(result.reason);
+				console.warn(`[MetricsSubprocess] Environment "${enabledEnvs[index].name}" disk check failed: ${reason}`);
 			}
 		});
 	} catch (error) {
-		console.error('[MetricsSubprocess] Disk space check error:', error);
-		send({ type: 'error', message: `Disk space check error: ${error}` });
+		const message = error instanceof Error ? error.message : String(error);
+		console.error(`[MetricsSubprocess] Disk space check error: ${message}`);
+		send({ type: 'error', message: `Disk space check error: ${message}` });
 	}
 }
 
@@ -354,6 +383,16 @@ function handleCommand(command: MainProcessCommand): void {
 		case 'refresh_environments':
 			console.log('[MetricsSubprocess] Refreshing environments...');
 			// The next collection cycle will pick up the new environments
+			break;
+
+		case 'update_interval':
+			console.log(`[MetricsSubprocess] Updating collection interval to ${command.intervalMs}ms`);
+			COLLECT_INTERVAL = command.intervalMs;
+			// Clear existing interval and restart with new timing
+			if (collectInterval) {
+				clearInterval(collectInterval);
+				collectInterval = setInterval(collectMetrics, COLLECT_INTERVAL);
+			}
 			break;
 
 		case 'shutdown':
@@ -386,8 +425,15 @@ function shutdown(): void {
 /**
  * Start the metrics collector
  */
-function start(): void {
-	console.log('[MetricsSubprocess] Starting metrics collection (every 10s)...');
+async function start(): Promise<void> {
+	// Load interval from settings
+	try {
+		COLLECT_INTERVAL = await getMetricsCollectionInterval();
+		console.log(`[MetricsSubprocess] Starting metrics collection (every ${COLLECT_INTERVAL / 1000}s)...`);
+	} catch (error) {
+		console.error('[MetricsSubprocess] Failed to load interval from settings, using default 30s');
+		COLLECT_INTERVAL = 30000;
+	}
 
 	// Initial collection
 	collectMetrics();
@@ -395,10 +441,24 @@ function start(): void {
 	// Schedule regular collection
 	collectInterval = setInterval(collectMetrics, COLLECT_INTERVAL);
 
-	// Start disk space checking (every 5 minutes)
-	console.log('[MetricsSubprocess] Starting disk space monitoring (every 5 minutes)');
-	checkDiskSpace(); // Initial check
-	diskCheckInterval = setInterval(checkDiskSpace, DISK_CHECK_INTERVAL);
+	// Start disk space checking (every 5 minutes) - can be disabled for Synology NAS
+	const skipDfCollection = process.env.SKIP_DF_COLLECTION === 'true' || process.env.SKIP_DF_COLLECTION === '1';
+	if (!skipDfCollection) {
+		console.log('[MetricsSubprocess] Starting disk space monitoring (every 5 minutes)');
+		checkDiskSpace(); // Initial check
+		diskCheckInterval = setInterval(checkDiskSpace, DISK_CHECK_INTERVAL);
+	} else {
+		console.log('[MetricsSubprocess] Disk space monitoring disabled (SKIP_DF_COLLECTION=true)');
+	}
+
+	// Start memory diagnostics logging (every 5 minutes)
+	setInterval(() => {
+		const mem = process.memoryUsage();
+		console.log(
+			`[MetricsSubprocess] Memory: heap=${Math.round(mem.heapUsed / 1024 / 1024)}MB, ` +
+			`rss=${Math.round(mem.rss / 1024 / 1024)}MB`
+		);
+	}, 5 * 60 * 1000);
 
 	// Listen for commands from main process
 	process.on('message', (message: MainProcessCommand) => {

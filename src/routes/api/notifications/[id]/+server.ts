@@ -8,6 +8,8 @@ import {
 	type NotificationEventType
 } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
+import { auditNotification } from '$lib/server/audit';
+import { computeAuditDiff } from '$lib/utils/diff';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ params, cookies }) => {
@@ -43,7 +45,8 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 	}
 };
 
-export const PUT: RequestHandler = async ({ params, request, cookies }) => {
+export const PUT: RequestHandler = async (event) => {
+	const { params, request, cookies } = event;
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !await auth.can('notifications', 'edit')) {
 		return json({ error: 'Permission denied' }, { status: 403 });
@@ -94,6 +97,15 @@ export const PUT: RequestHandler = async ({ params, request, cookies }) => {
 			return json({ error: 'Failed to update notification setting' }, { status: 500 });
 		}
 
+		// Compute diff for audit (exclude config to avoid logging sensitive data)
+		const diff = computeAuditDiff(
+			{ name: existing.name, enabled: existing.enabled, eventTypes: existing.eventTypes },
+			{ name: updated.name, enabled: updated.enabled, eventTypes: updated.eventTypes }
+		);
+
+		// Audit log
+		await auditNotification(event, 'update', updated.id, updated.name, diff);
+
 		// Don't expose passwords in response
 		const safeSetting = {
 			...updated,
@@ -110,7 +122,8 @@ export const PUT: RequestHandler = async ({ params, request, cookies }) => {
 	}
 };
 
-export const DELETE: RequestHandler = async ({ params, cookies }) => {
+export const DELETE: RequestHandler = async (event) => {
+	const { params, cookies } = event;
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !await auth.can('notifications', 'delete')) {
 		return json({ error: 'Permission denied' }, { status: 403 });
@@ -122,10 +135,19 @@ export const DELETE: RequestHandler = async ({ params, cookies }) => {
 			return json({ error: 'Invalid ID' }, { status: 400 });
 		}
 
-		const deleted = await deleteNotificationSetting(id);
-		if (!deleted) {
+		// Get notification name before deletion for audit log
+		const setting = await getNotificationSetting(id);
+		if (!setting) {
 			return json({ error: 'Notification setting not found' }, { status: 404 });
 		}
+
+		const deleted = await deleteNotificationSetting(id);
+		if (!deleted) {
+			return json({ error: 'Failed to delete notification setting' }, { status: 500 });
+		}
+
+		// Audit log
+		await auditNotification(event, 'delete', id, setting.name);
 
 		return json({ success: true });
 	} catch (error) {

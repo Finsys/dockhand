@@ -3,6 +3,7 @@ import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
 import { listContainers, inspectContainer, checkImageUpdateAvailable } from '$lib/server/docker';
 import { clearPendingContainerUpdates, addPendingContainerUpdate } from '$lib/server/db';
+import { isSystemContainer } from '$lib/server/scheduler/tasks/update-utils';
 
 export interface UpdateCheckResult {
 	containerId: string;
@@ -36,7 +37,10 @@ export const POST: RequestHandler = async ({ url, cookies }) => {
 			await clearPendingContainerUpdates(envIdNum);
 		}
 
-		const containers = await listContainers(true, envIdNum);
+		const allContainers = await listContainers(true, envIdNum);
+
+		// Filter out system containers (Dockhand, Hawser) - they cannot be updated from within Dockhand
+		const containers = allContainers.filter(c => !isSystemContainer(c.image));
 
 		// Check container for updates
 		const checkContainer = async (container: typeof containers[0]): Promise<UpdateCheckResult> => {

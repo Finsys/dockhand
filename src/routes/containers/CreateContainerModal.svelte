@@ -49,12 +49,12 @@
 		id: number;
 		name: string;
 		description?: string;
-		env_vars?: { key: string; value: string }[];
+		envVars?: { key: string; value: string }[];
 		labels?: { key: string; value: string }[];
 		ports?: { hostPort: string; containerPort: string; protocol: string }[];
 		volumes?: { hostPath: string; containerPath: string; mode: string }[];
-		network_mode: string;
-		restart_policy: string;
+		networkMode: string;
+		restartPolicy: string;
 	}
 
 
@@ -158,6 +158,15 @@
 
 	// Ulimits
 	let ulimits = $state<{ name: string; soft: string; hard: string }[]>([]);
+
+	// GPU settings
+	let gpuEnabled = $state(false);
+	let gpuMode = $state<'all' | 'count' | 'specific'>('all');
+	let gpuCount = $state(1);
+	let gpuDeviceIds = $state<string[]>([]);
+	let gpuDriver = $state('');
+	let gpuCapabilities = $state<string[]>(['gpu']);
+	let runtime = $state('');
 
 	let loading = $state(false);
 	let errors = $state<{ name?: string; image?: string }>({});
@@ -405,6 +414,23 @@
 					hard: parseInt(u.hard) || 0
 				}));
 
+			let deviceRequests: any[] | undefined = undefined;
+			if (gpuEnabled) {
+				const dr: any = {
+					capabilities: gpuCapabilities.length > 0 ? [gpuCapabilities] : [['gpu']],
+					driver: gpuDriver || undefined
+				};
+				if (gpuMode === 'all') {
+					dr.count = -1;
+				} else if (gpuMode === 'count') {
+					dr.count = gpuCount || 1;
+				} else {
+					dr.count = 0;
+					dr.deviceIDs = gpuDeviceIds.filter(id => id.trim());
+				}
+				deviceRequests = [dr];
+			}
+
 			const payload = {
 				name: name.trim(),
 				image: image.trim(),
@@ -430,6 +456,8 @@
 				capAdd: capAdd.length > 0 ? capAdd : undefined,
 				capDrop: capDrop.length > 0 ? capDrop : undefined,
 				devices: devices.length > 0 ? devices : undefined,
+				deviceRequests,
+				runtime: runtime || undefined,
 				dns: dnsServers.length > 0 ? dnsServers : undefined,
 				dnsSearch: dnsSearch.length > 0 ? dnsSearch : undefined,
 				dnsOptions: dnsOptions.length > 0 ? dnsOptions : undefined,
@@ -529,6 +557,13 @@
 		dnsOptions = [];
 		securityOptions = [];
 		ulimits = [];
+		gpuEnabled = false;
+		gpuMode = 'all';
+		gpuCount = 1;
+		gpuDeviceIds = [];
+		gpuDriver = '';
+		gpuCapabilities = ['gpu'];
+		runtime = '';
 		// Reset pull/scan state
 		activeTab = skipPullTab ? 'container' : 'pull';
 		pullStatus = 'idle';
@@ -706,6 +741,13 @@
 				bind:capDrop
 				bind:securityOptions
 				bind:deviceMappings
+				bind:gpuEnabled
+				bind:gpuMode
+				bind:gpuCount
+				bind:gpuDeviceIds
+				bind:gpuDriver
+				bind:gpuCapabilities
+				bind:runtime
 				bind:dnsServers
 				bind:dnsSearch
 				bind:dnsOptions
@@ -742,10 +784,10 @@
 				</Button>
 				<Button type="button" disabled={loading || isPulling || isScanning || activeTab !== 'container'} onclick={handleSubmit}>
 					{#if loading}
-						<Loader2 class="w-4 h-4 mr-2 animate-spin" />
+						<Loader2 class="w-4 h-4 animate-spin" />
 						Creating...
 					{:else}
-						<Play class="w-4 h-4 mr-2" />
+						<Play class="w-4 h-4" />
 						Create container
 					{/if}
 				</Button>

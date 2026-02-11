@@ -1,9 +1,14 @@
 <script lang="ts">
-	import { Sun, Moon, Type, AArrowUp, Table, Terminal } from 'lucide-svelte';
+	import { onMount } from 'svelte';
+	import { Sun, Moon, Type, AArrowUp, Table, Terminal, CodeXml } from 'lucide-svelte';
 	import * as Select from '$lib/components/ui/select';
 	import { Label } from '$lib/components/ui/label';
 	import { lightThemes, darkThemes, fonts, monospaceFonts } from '$lib/themes';
 	import { themeStore, applyTheme, type FontSize } from '$lib/stores/theme';
+	import { authStore } from '$lib/stores/auth';
+
+	// Preload all monospace Google Fonts so dropdown previews render correctly
+	let monoFontsLoaded = $state(false);
 
 	// Font size options
 	const fontSizes: { id: FontSize; name: string }[] = [
@@ -21,59 +26,121 @@
 
 	let { userId }: Props = $props();
 
-	// Local state bound to selects
-	let selectedLightTheme = $state($themeStore.lightTheme);
-	let selectedDarkTheme = $state($themeStore.darkTheme);
-	let selectedFont = $state($themeStore.font);
-	let selectedFontSize = $state($themeStore.fontSize);
-	let selectedGridFontSize = $state($themeStore.gridFontSize);
-	let selectedTerminalFont = $state($themeStore.terminalFont);
+	// Only skip applying theme visually when:
+	// 1. Auth is enabled (there's a user session to protect)
+	// 2. AND we're editing global settings (no userId - these are for login page)
+	// When auth is disabled, always apply immediately since there's no user session
+	// Default to skip during loading to avoid race conditions
+	const skipApply = $derived($authStore.loading ? true : ($authStore.authEnabled && !userId));
 
-	// Sync local state with store changes
+	// Local state bound to selects - initialized with defaults, will be populated on mount
+	let selectedLightTheme = $state('default');
+	let selectedDarkTheme = $state('default');
+	let selectedFont = $state('system');
+	let selectedFontSize = $state<FontSize>('normal');
+	let selectedGridFontSize = $state<FontSize>('normal');
+	let selectedTerminalFont = $state('system-mono');
+	let selectedEditorFont = $state('system-mono');
+
+	onMount(async () => {
+		// Load monospace fonts for dropdown previews
+		const fontsToLoad = monospaceFonts.filter(f => f.googleFont);
+		if (fontsToLoad.length > 0) {
+			const families = fontsToLoad.map(f => `family=${f.googleFont}`).join('&');
+			const link = document.createElement('link');
+			link.rel = 'stylesheet';
+			link.href = `https://fonts.googleapis.com/css2?${families}&display=swap`;
+			link.onload = () => { monoFontsLoaded = true; };
+			document.head.appendChild(link);
+		} else {
+			monoFontsLoaded = true;
+		}
+
+		// Fetch settings from the appropriate source
+		if (userId) {
+			// User profile: sync with themeStore (which has user's preferences)
+			selectedLightTheme = $themeStore.lightTheme;
+			selectedDarkTheme = $themeStore.darkTheme;
+			selectedFont = $themeStore.font;
+			selectedFontSize = $themeStore.fontSize;
+			selectedGridFontSize = $themeStore.gridFontSize;
+			selectedTerminalFont = $themeStore.terminalFont;
+			selectedEditorFont = $themeStore.editorFont;
+		} else {
+			// Global settings: fetch directly from API
+			try {
+				const res = await fetch('/api/settings/theme');
+				if (res.ok) {
+					const data = await res.json();
+					selectedLightTheme = data.lightTheme || 'default';
+					selectedDarkTheme = data.darkTheme || 'default';
+					selectedFont = data.font || 'system';
+					selectedFontSize = data.fontSize || 'normal';
+					selectedGridFontSize = data.gridFontSize || 'normal';
+					selectedTerminalFont = data.terminalFont || 'system-mono';
+					selectedEditorFont = data.editorFont || 'system-mono';
+				}
+			} catch {
+				// Use defaults on error
+			}
+		}
+	});
+
+	// Sync with themeStore changes only when editing user profile
 	$effect(() => {
-		selectedLightTheme = $themeStore.lightTheme;
-		selectedDarkTheme = $themeStore.darkTheme;
-		selectedFont = $themeStore.font;
-		selectedFontSize = $themeStore.fontSize;
-		selectedGridFontSize = $themeStore.gridFontSize;
-		selectedTerminalFont = $themeStore.terminalFont;
+		if (userId) {
+			selectedLightTheme = $themeStore.lightTheme;
+			selectedDarkTheme = $themeStore.darkTheme;
+			selectedFont = $themeStore.font;
+			selectedFontSize = $themeStore.fontSize;
+			selectedGridFontSize = $themeStore.gridFontSize;
+			selectedTerminalFont = $themeStore.terminalFont;
+			selectedEditorFont = $themeStore.editorFont;
+		}
 	});
 
 	async function handleLightThemeChange(value: string | undefined) {
 		if (!value) return;
 		selectedLightTheme = value;
-		await themeStore.setPreference('lightTheme', value, userId);
+		await themeStore.setPreference('lightTheme', value, userId, skipApply);
 	}
 
 	async function handleDarkThemeChange(value: string | undefined) {
 		if (!value) return;
 		selectedDarkTheme = value;
-		await themeStore.setPreference('darkTheme', value, userId);
+		await themeStore.setPreference('darkTheme', value, userId, skipApply);
 	}
 
 	async function handleFontChange(value: string | undefined) {
 		if (!value) return;
 		selectedFont = value;
-		await themeStore.setPreference('font', value, userId);
+		await themeStore.setPreference('font', value, userId, skipApply);
 	}
 
 	async function handleFontSizeChange(value: string | undefined) {
 		if (!value) return;
 		selectedFontSize = value as FontSize;
-		await themeStore.setPreference('fontSize', value as FontSize, userId);
+		await themeStore.setPreference('fontSize', value as FontSize, userId, skipApply);
 	}
 
 	async function handleGridFontSizeChange(value: string | undefined) {
 		if (!value) return;
 		selectedGridFontSize = value as FontSize;
-		await themeStore.setPreference('gridFontSize', value as FontSize, userId);
+		await themeStore.setPreference('gridFontSize', value as FontSize, userId, skipApply);
 	}
 
 	async function handleTerminalFontChange(value: string | undefined) {
 		if (!value) return;
 		selectedTerminalFont = value;
-		await themeStore.setPreference('terminalFont', value, userId);
+		await themeStore.setPreference('terminalFont', value, userId, skipApply);
 	}
+
+	async function handleEditorFontChange(value: string | undefined) {
+		if (!value) return;
+		selectedEditorFont = value;
+		await themeStore.setPreference('editorFont', value, userId, skipApply);
+	}
+
 </script>
 
 <div class="space-y-4">
@@ -231,6 +298,30 @@
 			<Select.Trigger class="w-56">
 				{#each monospaceFonts as font}
 					{#if font.id === selectedTerminalFont}
+						<span style="font-family: {font.family}">{font.name}</span>
+					{/if}
+				{/each}
+			</Select.Trigger>
+			<Select.Content>
+				{#each monospaceFonts as font}
+					<Select.Item value={font.id}>
+						<span style="font-family: {font.family}">{font.name}</span>
+					</Select.Item>
+				{/each}
+			</Select.Content>
+		</Select.Root>
+	</div>
+
+	<!-- Editor Font -->
+	<div class="flex items-center justify-between">
+		<div class="flex items-center gap-2">
+			<CodeXml class="w-4 h-4 text-muted-foreground" />
+			<Label>Editor font</Label>
+		</div>
+		<Select.Root type="single" value={selectedEditorFont} onValueChange={handleEditorFontChange}>
+			<Select.Trigger class="w-56">
+				{#each monospaceFonts as font}
+					{#if font.id === selectedEditorFont}
 						<span style="font-family: {font.family}">{font.name}</span>
 					{/if}
 				{/each}

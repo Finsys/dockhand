@@ -259,7 +259,7 @@
 	<Popover.Trigger asChild>
 		{@render children()}
 	</Popover.Trigger>
-	<Popover.Content class="w-[28rem] p-0 overflow-hidden flex flex-col max-h-96 z-[150]" align="end" sideOffset={8}>
+	<Popover.Content class="w-[28rem] p-0 overflow-hidden flex flex-col max-h-96 z-[200]" align="end" sideOffset={8}>
 		<!-- Sticky Header -->
 		<div class="p-3 border-b shrink-0 space-y-2">
 			<div class="flex items-center gap-2 text-sm font-medium min-w-0">

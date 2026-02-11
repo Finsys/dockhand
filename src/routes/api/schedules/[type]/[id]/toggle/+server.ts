@@ -5,7 +5,7 @@
 
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getAutoUpdateSettingById, updateAutoUpdateSettingById, getGitStack, updateGitStack, getEnvUpdateCheckSettings, setEnvUpdateCheckSettings } from '$lib/server/db';
+import { getAutoUpdateSettingById, updateAutoUpdateSettingById, getGitStack, updateGitStack, getEnvUpdateCheckSettings, setEnvUpdateCheckSettings, getImagePruneSettings, setImagePruneSettings } from '$lib/server/db';
 import { registerSchedule, unregisterSchedule } from '$lib/server/scheduler';
 
 export const POST: RequestHandler = async ({ params }) => {
@@ -73,6 +73,27 @@ export const POST: RequestHandler = async ({ params }) => {
 				await registerSchedule(scheduleId, 'env_update_check', scheduleId);
 			} else {
 				unregisterSchedule(scheduleId, 'env_update_check');
+			}
+
+			return json({ success: true, enabled: newEnabled });
+		} else if (type === 'image_prune') {
+			// scheduleId is environmentId for image prune
+			const config = await getImagePruneSettings(scheduleId);
+			if (!config) {
+				return json({ error: 'Schedule not found' }, { status: 404 });
+			}
+
+			const newEnabled = !config.enabled;
+			await setImagePruneSettings(scheduleId, {
+				...config,
+				enabled: newEnabled
+			});
+
+			// Register or unregister schedule with croner
+			if (newEnabled && config.cronExpression) {
+				await registerSchedule(scheduleId, 'image_prune', scheduleId);
+			} else {
+				unregisterSchedule(scheduleId, 'image_prune');
 			}
 
 			return json({ success: true, enabled: newEnabled });

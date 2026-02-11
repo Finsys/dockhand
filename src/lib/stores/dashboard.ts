@@ -74,19 +74,26 @@ function createDashboardDataStore() {
 				lastFetchTime: Date.now()
 			}));
 		},
-		// Partial update for progressive loading - merges into existing stats
+		// Partial update for progressive loading - deep merges into existing stats
+		// This preserves nested object properties (like containers.pendingUpdates)
 		updateTilePartial: (id: number, partialStats: Partial<EnvironmentStats>) => {
 			update(data => ({
 				...data,
 				tiles: data.tiles.map(t => {
 					if (t.id === id && t.stats) {
-						return {
-							...t,
-							stats: {
-								...t.stats,
-								...partialStats
+						// Deep merge: for nested objects, merge properties instead of replacing
+						const mergedStats = { ...t.stats };
+						for (const [key, value] of Object.entries(partialStats)) {
+							const existing = (mergedStats as any)[key];
+							// Deep merge for plain objects (not arrays or null)
+							if (existing && typeof existing === 'object' && !Array.isArray(existing) &&
+							    value && typeof value === 'object' && !Array.isArray(value)) {
+								(mergedStats as any)[key] = { ...existing, ...value };
+							} else if (value !== undefined) {
+								(mergedStats as any)[key] = value;
 							}
-						};
+						}
+						return { ...t, stats: mergedStats };
 					}
 					return t;
 				}),

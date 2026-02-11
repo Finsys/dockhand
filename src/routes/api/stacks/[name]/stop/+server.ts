@@ -1,5 +1,5 @@
 import { json } from '@sveltejs/kit';
-import { stopStack, ExternalStackError, ComposeFileNotFoundError } from '$lib/server/stacks';
+import { stopStack, ComposeFileNotFoundError } from '$lib/server/stacks';
 import { authorize } from '$lib/server/authorize';
 import { auditStack } from '$lib/server/audit';
 import type { RequestHandler } from './$types';
@@ -33,9 +33,6 @@ export const POST: RequestHandler = async (event) => {
 		}
 		return json({ success: true, output: result.output });
 	} catch (error) {
-		if (error instanceof ExternalStackError) {
-			return json({ error: error.message }, { status: 400 });
-		}
 		if (error instanceof ComposeFileNotFoundError) {
 			return json({ error: error.message }, { status: 404 });
 		}

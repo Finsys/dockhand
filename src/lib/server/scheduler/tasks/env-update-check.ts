@@ -22,18 +22,16 @@ import {
 	inspectContainer,
 	checkImageUpdateAvailable,
 	pullImage,
-	stopContainer,
-	removeContainer,
-	createContainer,
 	getTempImageTag,
 	isDigestBasedImage,
 	getImageIdByTag,
 	removeTempImage,
-	tagImage
+	tagImage,
 } from '../../docker';
 import { sendEventNotification } from '../../notifications';
 import { getScannerSettings, scanImage, type VulnerabilitySeverity } from '../../scanner';
-import { parseImageNameAndTag, shouldBlockUpdate, combineScanSummaries, isDockhandContainer } from './update-utils';
+import { parseImageNameAndTag, shouldBlockUpdate, combineScanSummaries, isSystemContainer } from './update-utils';
+import { recreateContainer } from './container-update';
 
 interface UpdateInfo {
 	containerId: string;
@@ -224,20 +222,18 @@ export async function runEnvUpdateCheckJob(
 			const blockedContainers: { name: string; reason: string; scannerResults?: { scanner: string; critical: number; high: number; medium: number; low: number }[] }[] = [];
 
 			for (const update of updatesAvailable) {
-				// Skip Dockhand container - cannot update itself
-				if (isDockhandContainer(update.imageName)) {
-					await log(`\n[${update.containerName}] Skipping - cannot auto-update Dockhand itself`);
+				// Skip system containers (Dockhand/Hawser) - cannot update themselves
+				const systemContainerType = isSystemContainer(update.imageName);
+				if (systemContainerType) {
+					const reason = systemContainerType === 'dockhand'
+						? 'cannot auto-update Dockhand itself'
+						: 'cannot auto-update Hawser agent';
+					await log(`\n[${update.containerName}] Skipping - ${reason}`);
 					continue;
 				}
 
 				try {
 					await log(`\nUpdating: ${update.containerName}`);
-
-					// Get full container config
-					const inspectData = await inspectContainer(update.containerId, environmentId) as any;
-					const wasRunning = inspectData.State.Running;
-					const containerConfig = inspectData.Config;
-					const hostConfig = inspectData.HostConfig;
 
 					// SAFE-PULL FLOW
 					if (shouldScan && !isDigestBasedImage(update.imageName)) {
@@ -359,45 +355,11 @@ export async function runEnvUpdateCheckJob(
 						await pullImage(update.imageName, () => {}, environmentId);
 					}
 
-					// Stop container if running
-					if (wasRunning) {
-						await log(`  Stopping...`);
-						await stopContainer(update.containerId, environmentId);
-					}
-
-					// Remove old container
-					await log(`  Removing old container...`);
-					await removeContainer(update.containerId, true, environmentId);
-
-					// Prepare port bindings
-					const ports: { [key: string]: { HostPort: string } } = {};
-					if (hostConfig.PortBindings) {
-						for (const [containerPort, bindings] of Object.entries(hostConfig.PortBindings)) {
-							if (bindings && (bindings as any[]).length > 0) {
-								ports[containerPort] = { HostPort: (bindings as any[])[0].HostPort || '' };
-							}
-						}
-					}
-
-					// Create new container
-					await log(`  Creating new container...`);
-					const newContainer = await createContainer({
-						name: update.containerName,
-						image: update.imageName,
-						ports,
-						volumeBinds: hostConfig.Binds || [],
-						env: containerConfig.Env || [],
-						labels: containerConfig.Labels || {},
-						cmd: containerConfig.Cmd || undefined,
-						restartPolicy: hostConfig.RestartPolicy?.Name || 'no',
-						networkMode: hostConfig.NetworkMode || undefined
-					}, environmentId);
-
-					// Start if was running
-					if (wasRunning) {
-						await log(`  Starting...`);
-						await newContainer.start();
-					}
+					// Recreate container with full config passthrough
+					await log(`  Recreating container...`);
+					const ok = await recreateContainer(update.containerName, environmentId,
+						(msg) => { log(`  ${msg}`); });
+					if (!ok) throw new Error('Container recreation failed');
 
 					await log(`  Updated successfully`);
 					successCount++;

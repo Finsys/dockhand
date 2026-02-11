@@ -269,7 +269,7 @@
 				<div class="flex justify-between items-center">
 					<Label class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Environment variables</Label>
 					<Button type="button" size="sm" variant="ghost" onclick={addEnvVar} class="h-7 text-xs">
-						<Plus class="w-3.5 h-3.5 mr-1" />Add
+						<Plus class="w-3.5 h-3.5" />Add
 					</Button>
 				</div>
 				{#each formEnvVars as envVar, i}
@@ -288,7 +288,7 @@
 				<div class="flex justify-between items-center">
 					<Label class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Labels</Label>
 					<Button type="button" size="sm" variant="ghost" onclick={addLabel} class="h-7 text-xs">
-						<Plus class="w-3.5 h-3.5 mr-1" />Add
+						<Plus class="w-3.5 h-3.5" />Add
 					</Button>
 				</div>
 				{#each formLabels as label, i}
@@ -307,7 +307,7 @@
 				<div class="flex justify-between items-center">
 					<Label class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Port mappings</Label>
 					<Button type="button" size="sm" variant="ghost" onclick={addPort} class="h-7 text-xs">
-						<Plus class="w-3.5 h-3.5 mr-1" />Add
+						<Plus class="w-3.5 h-3.5" />Add
 					</Button>
 				</div>
 				{#each formPorts as port, i}
@@ -351,7 +351,7 @@
 				<div class="flex justify-between items-center">
 					<Label class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Volume mappings</Label>
 					<Button type="button" size="sm" variant="ghost" onclick={addVolume} class="h-7 text-xs">
-						<Plus class="w-3.5 h-3.5 mr-1" />Add
+						<Plus class="w-3.5 h-3.5" />Add
 					</Button>
 				</div>
 				{#each formVolumes as vol, i}
@@ -376,9 +376,9 @@
 				{#if formSaving}
 					<RefreshCw class="w-4 h-4 mr-1 animate-spin" />
 				{:else if isEditing}
-					<Check class="w-4 h-4 mr-1" />
+					<Check class="w-4 h-4" />
 				{:else}
-					<Plus class="w-4 h-4 mr-1" />
+					<Plus class="w-4 h-4" />
 				{/if}
 				{isEditing ? 'Save' : 'Add'}
 			</Button>

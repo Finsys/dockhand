@@ -92,7 +92,7 @@
 		</div>
 		{#if $canAccess('settings', 'edit')}
 			<Button size="sm" onclick={() => openModal()}>
-				<Plus class="w-4 h-4 mr-1" />
+				<Plus class="w-4 h-4" />
 				Add credential
 			</Button>
 		{/if}

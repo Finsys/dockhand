@@ -1,3 +1,7 @@
+<svelte:head>
+	<title>Settings - Dockhand</title>
+</svelte:head>
+
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
@@ -37,7 +41,7 @@
 </script>
 
 <div class="flex-1 min-h-0 flex flex-col gap-3 overflow-hidden">
-	<div class="flex flex-wrap justify-between items-center gap-3">
+	<div class="shrink-0 flex flex-wrap justify-between items-center gap-3 min-h-8">
 		<PageHeader icon={Settings} title="Settings" showConnection={false} />
 	</div>
 

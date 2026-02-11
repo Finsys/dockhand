@@ -89,11 +89,55 @@ async function patchIndex() {
 	let content = await indexFile.text();
 
 	const wsHandler = `
-import { existsSync as _existsSync } from 'fs';
+import { existsSync as _existsSync, readFileSync as _readFileSync } from 'fs';
 import { homedir as _homedir } from 'os';
 import { Database as _Database } from 'bun:sqlite';
 import { SQL as _SQL } from 'bun';
 import { join as _join } from 'path';
+import { createDecipheriv as _createDecipheriv } from 'node:crypto';
+
+// Encryption/decryption for sensitive fields
+const _ENCRYPTED_PREFIX = 'enc:v1:';
+const _IV_LENGTH = 12;
+const _AUTH_TAG_LENGTH = 16;
+let _encryptionKey = null;
+
+function _getEncryptionKey() {
+	if (_encryptionKey) return _encryptionKey;
+	const dataDir = process.env.DATA_DIR || _join(process.cwd(), 'data');
+	const keyPath = _join(dataDir, '.encryption_key');
+	const envKey = process.env.ENCRYPTION_KEY;
+	if (_existsSync(keyPath)) {
+		try {
+			_encryptionKey = _readFileSync(keyPath);
+			return _encryptionKey;
+		} catch {}
+	}
+	if (envKey) {
+		try {
+			_encryptionKey = Buffer.from(envKey, 'base64');
+			return _encryptionKey;
+		} catch {}
+	}
+	return null;
+}
+
+function _decrypt(value) {
+	if (!value || !value.startsWith(_ENCRYPTED_PREFIX)) return value;
+	const key = _getEncryptionKey();
+	if (!key) { console.error('[WS] Cannot decrypt: no encryption key'); return value; }
+	try {
+		const payload = value.substring(_ENCRYPTED_PREFIX.length);
+		const combined = Buffer.from(payload, 'base64');
+		if (combined.length < _IV_LENGTH + _AUTH_TAG_LENGTH + 1) return value;
+		const iv = combined.subarray(0, _IV_LENGTH);
+		const authTag = combined.subarray(_IV_LENGTH, _IV_LENGTH + _AUTH_TAG_LENGTH);
+		const ciphertext = combined.subarray(_IV_LENGTH + _AUTH_TAG_LENGTH);
+		const decipher = _createDecipheriv('aes-256-gcm', key, iv);
+		decipher.setAuthTag(authTag);
+		return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
+	} catch (e) { console.error('[WS] Decryption failed:', e); return value; }
+}
 
 // Database connection (supports both SQLite and PostgreSQL)
 let _db = null;
@@ -105,7 +149,7 @@ function _getDb() {
 			_db = new _SQL(dbUrl);
 			_isPostgres = true;
 		} else {
-			const _dbPath = _join(process.cwd(), 'data', 'db', 'dockhand.db');
+			const _dbPath = process.env.DATA_DIR ? _join(process.env.DATA_DIR, 'db', 'dockhand.db') : _join(process.cwd(), 'data', 'db', 'dockhand.db');
 			if (_existsSync(_dbPath)) {
 				_db = new _Database(_dbPath);
 			}
@@ -153,7 +197,30 @@ async function _getDockerTarget(envId) {
 		return { type: 'unix', socket: env.socket_path || dockerSocketPath };
 	}
 	if (env.connection_type === 'hawser-edge') return { type: 'hawser-edge', environmentId: envId };
-	return { type: 'tcp', host: env.host, port: env.port || 2375, hawserToken: env.connection_type === 'hawser-standard' ? env.hawser_token : undefined };
+	// Build TLS config if using HTTPS
+	const protocol = env.protocol || 'http';
+	const useTls = protocol === 'https';
+	let tls = null;
+	if (useTls) {
+		tls = {
+			rejectUnauthorized: !env.tls_skip_verify,
+			ca: env.tls_ca || undefined,
+			cert: env.tls_cert || undefined,
+			// tls_key is encrypted - decrypt it
+			key: _decrypt(env.tls_key) || undefined
+		};
+	}
+	// hawser_token is also encrypted
+	const hawserToken = env.connection_type === 'hawser-standard' && env.hawser_token
+		? _decrypt(env.hawser_token) || undefined
+		: undefined;
+	return {
+		type: useTls ? 'tls' : 'tcp',
+		host: env.host,
+		port: env.port || 2375,
+		hawserToken,
+		tls
+	};
 }
 
 async function createExec(containerId, cmd, user, target) {
@@ -168,8 +235,20 @@ async function createExec(containerId, cmd, user, target) {
 		url = 'http://localhost/containers/' + containerId + '/exec';
 		fetchOpts.unix = target.socket;
 	} else {
-		url = 'http://' + target.host + ':' + target.port + '/containers/' + containerId + '/exec';
+		const protocol = target.type === 'tls' ? 'https' : 'http';
+		url = protocol + '://' + target.host + ':' + target.port + '/containers/' + containerId + '/exec';
 		if (target.hawserToken) headers['X-Hawser-Token'] = target.hawserToken;
+		if (target.tls) {
+			fetchOpts.tls = {
+				sessionTimeout: 0,
+				servername: target.host,
+				rejectUnauthorized: target.tls.rejectUnauthorized
+			};
+			if (target.tls.ca) fetchOpts.tls.ca = [target.tls.ca];
+			if (target.tls.cert) fetchOpts.tls.cert = [target.tls.cert];
+			if (target.tls.key) fetchOpts.tls.key = target.tls.key;
+			fetchOpts.keepalive = false;
+		}
 	}
 	const res = await fetch(url, fetchOpts);
 	if (!res.ok) throw new Error('Failed to create exec: ' + (await res.text()));
@@ -184,8 +263,20 @@ async function resizeExec(execId, cols, rows, target) {
 			url = 'http://localhost/exec/' + execId + '/resize?h=' + rows + '&w=' + cols;
 			fetchOpts.unix = target.socket;
 		} else {
-			url = 'http://' + target.host + ':' + target.port + '/exec/' + execId + '/resize?h=' + rows + '&w=' + cols;
+			const protocol = target.type === 'tls' ? 'https' : 'http';
+			url = protocol + '://' + target.host + ':' + target.port + '/exec/' + execId + '/resize?h=' + rows + '&w=' + cols;
 			if (target.hawserToken) fetchOpts.headers = { 'X-Hawser-Token': target.hawserToken };
+			if (target.tls) {
+				fetchOpts.tls = {
+					sessionTimeout: 0,
+					servername: target.host,
+					rejectUnauthorized: target.tls.rejectUnauthorized
+				};
+				if (target.tls.ca) fetchOpts.tls.ca = [target.tls.ca];
+				if (target.tls.cert) fetchOpts.tls.cert = [target.tls.cert];
+				if (target.tls.key) fetchOpts.tls.key = target.tls.key;
+				fetchOpts.keepalive = false;
+			}
 		}
 		await fetch(url, fetchOpts);
 	} catch {}
@@ -418,7 +509,7 @@ const combinedWebsocket = {
 		const { containerId, shell, user, envId } = ws.data;
 		if (!containerId) { ws.send(JSON.stringify({ type: 'error', message: 'No container ID' })); ws.close(); return; }
 		const target = await _getDockerTarget(envId);
-		console.log('[WS] Open:', connId, containerId, 'target:', target.type);
+		console.log('[Terminal WS] Target:', JSON.stringify({ type: target.type, host: target.host, port: target.port, hasTls: !!target.tls, hasCa: !!target.tls?.ca, hasCert: !!target.tls?.cert, hasKey: !!target.tls?.key }));
 
 		// Handle Hawser Edge terminal
 		if (target.type === 'hawser-edge') {
@@ -432,7 +523,9 @@ const combinedWebsocket = {
 		}
 
 		try {
+			console.log('[Terminal WS] Creating exec for container:', containerId);
 			const exec = await createExec(containerId, [shell || '/bin/sh'], user || 'root', target);
+			console.log('[Terminal WS] Exec created:', exec?.Id);
 			const execId = exec.Id;
 			let dockerStream;
 			let headersStripped = false;
@@ -452,20 +545,42 @@ const combinedWebsocket = {
 					}
 				},
 				close() { if (ws.readyState === 1) { ws.send(JSON.stringify({ type: 'exit' })); ws.close(); } },
-				error() {},
+				error(socket, error) {
+					console.error('[Terminal WS] Socket error:', error?.message || error);
+					if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'error', message: 'Connection error: ' + (error?.message || 'Unknown error') }));
+				},
+				connectError(socket, error) {
+					console.error('[Terminal WS] Connect error:', error?.message || error);
+					if (ws.readyState === 1) { ws.send(JSON.stringify({ type: 'error', message: 'Failed to connect: ' + (error?.message || 'Unknown error') })); ws.close(); }
+				},
 				open(socket) {
 					const body = JSON.stringify({ Detach: false, Tty: true });
-					const tokenHeader = target.type === 'tcp' && target.hawserToken ? 'X-Hawser-Token: ' + target.hawserToken + '\\r\\n' : '';
-					socket.write('POST /exec/' + execId + '/start HTTP/1.1\\r\\nHost: localhost\\r\\nContent-Type: application/json\\r\\n' + tokenHeader + 'Connection: Upgrade\\r\\nUpgrade: tcp\\r\\nContent-Length: ' + body.length + '\\r\\n\\r\\n' + body);
+					const tokenHeader = (target.type === 'tcp' || target.type === 'tls') && target.hawserToken ? 'X-Hawser-Token: ' + target.hawserToken + '\\r\\n' : '';
+					// Use actual host for proper routing through reverse proxies like Caddy
+					const host = target.host || 'localhost';
+					socket.write('POST /exec/' + execId + '/start HTTP/1.1\\r\\nHost: ' + host + '\\r\\nContent-Type: application/json\\r\\n' + tokenHeader + 'Connection: Upgrade\\r\\nUpgrade: tcp\\r\\nContent-Length: ' + body.length + '\\r\\n\\r\\n' + body);
 				}
 			};
 			if (target.type === 'unix') {
 				dockerStream = await Bun.connect({ unix: target.socket, socket: socketHandler });
 			} else {
-				dockerStream = await Bun.connect({ hostname: target.host, port: target.port, socket: socketHandler });
+				const connectOpts = { hostname: target.host, port: target.port, socket: socketHandler };
+				if (target.tls) {
+					connectOpts.tls = {
+						sessionTimeout: 0,
+						servername: target.host,
+						rejectUnauthorized: target.tls.rejectUnauthorized
+					};
+					if (target.tls.ca) connectOpts.tls.ca = [target.tls.ca];
+					if (target.tls.cert) connectOpts.tls.cert = [target.tls.cert];
+					if (target.tls.key) connectOpts.tls.key = target.tls.key;
+				}
+				console.log('[Terminal WS] Connecting to:', connectOpts.hostname, connectOpts.port, 'TLS:', !!connectOpts.tls);
+				dockerStream = await Bun.connect(connectOpts);
+				console.log('[Terminal WS] Connected!');
 			}
 			dockerStreams.set(connId, { stream: dockerStream, execId, target });
-		} catch (e) { ws.send(JSON.stringify({ type: 'error', message: e.message })); ws.close(); }
+		} catch (e) { console.error('[Terminal WS] Error:', e); ws.send(JSON.stringify({ type: 'error', message: e.message })); ws.close(); }
 	},
 	async message(ws, message) {
 		const connType = ws.data?.type;

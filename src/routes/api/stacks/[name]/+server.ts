@@ -1,5 +1,5 @@
 import { json } from '@sveltejs/kit';
-import { removeStack, ExternalStackError, ComposeFileNotFoundError } from '$lib/server/stacks';
+import { removeStack, ComposeFileNotFoundError } from '$lib/server/stacks';
 import { authorize } from '$lib/server/authorize';
 import { auditStack } from '$lib/server/audit';
 import type { RequestHandler } from './$types';
@@ -34,9 +34,6 @@ export const DELETE: RequestHandler = async (event) => {
 		}
 		return json({ success: true });
 	} catch (error) {
-		if (error instanceof ExternalStackError) {
-			return json({ error: error.message }, { status: 400 });
-		}
 		if (error instanceof ComposeFileNotFoundError) {
 			return json({ error: error.message }, { status: 404 });
 		}

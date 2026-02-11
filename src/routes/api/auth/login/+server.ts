@@ -12,9 +12,11 @@ import {
 	isAuthEnabled
 } from '$lib/server/auth';
 import { getUser, getUserByUsername } from '$lib/server/db';
+import { auditAuth } from '$lib/server/audit';
 
 // POST /api/auth/login - Authenticate user
-export const POST: RequestHandler = async ({ request, cookies, getClientAddress }) => {
+export const POST: RequestHandler = async (event) => {
+	const { request, cookies, getClientAddress } = event;
 	// Check if auth is enabled
 	if (!(await isAuthEnabled())) {
 		return json({ error: 'Authentication is not enabled' }, { status: 400 });
@@ -37,6 +39,11 @@ export const POST: RequestHandler = async ({ request, cookies, getClientAddress 
 				{ error: `Too many login attempts. Please try again in ${retryAfter} seconds.` },
 				{ status: 429 }
 			);
+		}
+
+		// Reject local login attempts when DISABLE_LOCAL_LOGIN is set
+		if (provider === 'local' && process.env.DISABLE_LOCAL_LOGIN === 'true') {
+			return json({ error: 'Local login is disabled' }, { status: 403 });
 		}
 
 		// Attempt authentication based on provider
@@ -80,6 +87,12 @@ export const POST: RequestHandler = async ({ request, cookies, getClientAddress 
 			const session = await createUserSession(user.id, authProviderType, cookies);
 			clearRateLimit(rateLimitKey);
 
+			// Audit log
+			await auditAuth(event, 'login', user.username, {
+				provider: authProviderType,
+				mfa: true
+			});
+
 			return json({
 				success: true,
 				user: {
@@ -96,6 +109,11 @@ export const POST: RequestHandler = async ({ request, cookies, getClientAddress 
 		if (result.user) {
 			const session = await createUserSession(result.user.id, authProviderType, cookies);
 			clearRateLimit(rateLimitKey);
+
+			// Audit log
+			await auditAuth(event, 'login', result.user.username, {
+				provider: authProviderType
+			});
 
 			return json({
 				success: true,

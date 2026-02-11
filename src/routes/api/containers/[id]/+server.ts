@@ -4,7 +4,7 @@ import {
 	removeContainer,
 	getContainerLogs
 } from '$lib/server/docker';
-import { deleteAutoUpdateSchedule, getAutoUpdateSetting } from '$lib/server/db';
+import { deleteAutoUpdateSchedule, getAutoUpdateSetting, removePendingContainerUpdate } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
 import { auditContainer } from '$lib/server/audit';
 import { unregisterSchedule } from '$lib/server/scheduler';
@@ -83,6 +83,16 @@ export const DELETE: RequestHandler = async (event) => {
 		} catch (error) {
 			console.error('Failed to cleanup auto-update schedule:', error);
 			// Don't fail the deletion if schedule cleanup fails
+		}
+
+		// Clean up pending container update if exists
+		try {
+			if (envIdNum) {
+				await removePendingContainerUpdate(envIdNum, params.id);
+			}
+		} catch (error) {
+			console.error('Failed to cleanup pending container update:', error);
+			// Don't fail the deletion if cleanup fails
 		}
 
 		return json({ success: true });

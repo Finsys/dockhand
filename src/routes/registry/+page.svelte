@@ -11,7 +11,7 @@
 	import { Label } from '$lib/components/ui/label';
 	import { Badge } from '$lib/components/ui/badge';
 	import CreateContainerModal from '../containers/CreateContainerModal.svelte';
-	import ImagePullModal from './ImagePullModal.svelte';
+	import ImagePullModal from '$lib/components/ImagePullModal.svelte';
 	import CopyToRegistryModal from './CopyToRegistryModal.svelte';
 	import { canAccess } from '$lib/stores/auth';
 	import { currentEnvironment, appendEnvParam } from '$lib/stores/environment';
@@ -43,8 +43,13 @@
 
 	interface ExpandedImageState {
 		loading: boolean;
+		loadingMore: boolean;
 		error: string;
 		tags: TagInfo[];
+		total: number;
+		page: number;
+		pageSize: number;
+		hasNext: boolean;
 	}
 
 	let registries = $state<Registry[]>([]);
@@ -52,12 +57,25 @@
 	let selectedRegistryId = $state<number | null>(null);
 
 	let searchTerm = $state('');
+	let browseFilter = $state('');
 	let results = $state<SearchResult[]>([]);
 	let loading = $state(false);
 	let browsing = $state(false);
+	let loadingMore = $state(false);
 	let searched = $state(false);
 	let browseMode = $state(false);
 	let errorMessage = $state('');
+
+	// Pagination state for browse mode
+	let hasMoreResults = $state(false);
+	let nextPageCursor = $state<string | null>(null);
+
+	// Filtered results for browse mode
+	let filteredResults = $derived(
+		browseMode && browseFilter.trim()
+			? results.filter(r => r.name.toLowerCase().includes(browseFilter.toLowerCase()))
+			: results
+	);
 
 	// Copy to registry modal state
 	let showCopyModal = $state(false);
@@ -169,28 +187,60 @@
 		}
 	}
 
-	async function browse() {
+	async function browse(loadMore = false) {
 		if (!selectedRegistryId) return;
 
-		browsing = true;
-		searched = true;
-		browseMode = true;
+		if (loadMore) {
+			loadingMore = true;
+		} else {
+			browsing = true;
+			searched = true;
+			browseMode = true;
+			results = [];
+			hasMoreResults = false;
+			nextPageCursor = null;
+		}
 		errorMessage = '';
+
 		try {
-			const response = await fetch(`/api/registry/catalog?registry=${selectedRegistryId}`);
+			let url = `/api/registry/catalog?registry=${selectedRegistryId}`;
+			if (loadMore && nextPageCursor) {
+				url += `&last=${encodeURIComponent(nextPageCursor)}`;
+			}
+
+			const response = await fetch(url);
 			if (response.ok) {
-				results = await response.json();
+				const data = await response.json();
+
+				// Handle both old array format and new paginated format
+				if (Array.isArray(data)) {
+					// Old format (backwards compat)
+					results = loadMore ? [...results, ...data] : data;
+					hasMoreResults = false;
+					nextPageCursor = null;
+				} else {
+					// New paginated format
+					const newResults = data.repositories || [];
+					results = loadMore ? [...results, ...newResults] : newResults;
+					hasMoreResults = data.pagination?.hasMore || false;
+					nextPageCursor = data.pagination?.nextLast || null;
+				}
 			} else {
 				const data = await response.json();
 				errorMessage = data.error || 'Failed to browse registry';
-				results = [];
+				if (!loadMore) {
+					results = [];
+				}
 			}
 		} catch (error) {
 			console.error('Failed to browse registry:', error);
 			errorMessage = 'Failed to browse registry';
-			results = [];
+			if (!loadMore) {
+				results = [];
+			}
 		} finally {
 			browsing = false;
+			loadingMore = false;
 		}
 	}
 
@@ -216,8 +266,11 @@
 		results = [];
 		searched = false;
 		browseMode = false;
+		browseFilter = '';
 		errorMessage = '';
 		expandedImages = {};
+		hasMoreResults = false;
+		nextPageCursor = null;
 	}
 
 	async function toggleImageExpansion(imageName: string) {
@@ -226,38 +279,100 @@
 			const { [imageName]: _, ...rest } = expandedImages;
 			expandedImages = rest;
 		} else {
-			// Expand and fetch tags
-			expandedImages = {
-				...expandedImages,
-				[imageName]: { loading: true, error: '', tags: [] }
-			};
+			// Expand and fetch first page
+			await fetchTagsPage(imageName, 1, true);
+		}
+	}
 
-			try {
-				let url = `/api/registry/tags?image=${encodeURIComponent(imageName)}`;
-				if (selectedRegistryId) {
-					url += `&registry=${selectedRegistryId}`;
-				}
+	async function loadMoreTags(imageName: string) {
+		const state = expandedImages[imageName];
+		if (!state || state.loading || state.loadingMore || !state.hasNext) return;
+		await fetchTagsPage(imageName, state.page + 1, false);
+	}
 
-				const response = await fetch(url);
-				if (response.ok) {
-					const tags = await response.json();
-					expandedImages = {
-						...expandedImages,
-						[imageName]: { loading: false, error: '', tags }
-					};
-				} else {
-					const data = await response.json();
-					expandedImages = {
-						...expandedImages,
-						[imageName]: { loading: false, error: data.error || 'Failed to fetch tags', tags: [] }
-					};
-				}
-			} catch (error: any) {
+	async function fetchTagsPage(imageName: string, page: number, isFirstLoad: boolean) {
+		const currentState = expandedImages[imageName];
+
+		expandedImages = {
+			...expandedImages,
+			[imageName]: {
+				loading: isFirstLoad,
+				loadingMore: !isFirstLoad,
+				error: '',
+				tags: currentState?.tags || [],
+				total: currentState?.total || 0,
+				page: currentState?.page || 0,
+				pageSize: 20,
+				hasNext: currentState?.hasNext || false
+			}
+		};
+
+		try {
+			let url = `/api/registry/tags?image=${encodeURIComponent(imageName)}&page=${page}&pageSize=20`;
+			if (selectedRegistryId) {
+				url += `&registry=${selectedRegistryId}`;
+			}
+
+			const response = await fetch(url);
+			if (response.ok) {
+				const data = await response.json();
+				const prevState = expandedImages[imageName];
+				const existingTags = isFirstLoad ? [] : (prevState?.tags || []);
 				expandedImages = {
 					...expandedImages,
-					[imageName]: { loading: false, error: error.message || 'Failed to fetch tags', tags: [] }
+					[imageName]: {
+						loading: false,
+						loadingMore: false,
+						error: '',
+						tags: [...existingTags, ...data.tags],
+						total: data.total,
+						page: data.page,
+						pageSize: data.pageSize,
+						hasNext: data.hasNext
+					}
+				};
+			} else {
+				const data = await response.json();
+				expandedImages = {
+					...expandedImages,
+					[imageName]: {
+						...expandedImages[imageName],
+						loading: false,
+						loadingMore: false,
+						error: data.error || 'Failed to fetch tags'
+					}
 				};
 			}
+		} catch (error: any) {
+			expandedImages = {
+				...expandedImages,
+				[imageName]: {
+					...expandedImages[imageName],
+					loading: false,
+					loadingMore: false,
+					error: error.message || 'Failed to fetch tags'
+				}
+			};
+		}
+	}
+
+	function handleTagsWheel(event: WheelEvent, imageName: string) {
+		const target = event.currentTarget as HTMLElement;
+
+		// Prevent page scroll when at top/bottom of tags list
+		const atTop = target.scrollTop === 0;
+		const atBottom = target.scrollHeight - target.scrollTop - target.clientHeight < 1;
+
+		if ((atTop && event.deltaY < 0) || (atBottom && event.deltaY > 0)) {
+			event.preventDefault();
+		}
+
+		// Load more when near bottom
+		const state = expandedImages[imageName];
+		if (!state || !state.hasNext || state.loading || state.loadingMore) return;
+
+		if (target.scrollHeight - target.scrollTop - target.clientHeight < 50) {
+			loadMoreTags(imageName);
 		}
 	}
 
@@ -328,7 +443,8 @@
 						...expandedImages,
 						[imageName]: {
 							...state,
-							tags: state.tags.filter(t => t.name !== tag)
+							tags: state.tags.filter(t => t.name !== tag),
+							total: Math.max(0, state.total - 1)
 						}
 					};
 				}
@@ -365,7 +481,7 @@
 </script>
 
 <div class="h-full flex flex-col gap-3 overflow-hidden">
-	<div class="shrink-0 flex flex-wrap justify-between items-center gap-3">
+	<div class="shrink-0 flex flex-wrap justify-between items-center gap-3 min-h-8">
 		<PageHeader icon={Download} title="Registry" showConnection={false} />
 		{#if $canAccess('registries', 'edit')}
 		<a href="/settings?tab=registries" class="inline-flex items-center justify-center gap-2 whitespace-nowrap font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground h-8 rounded-md px-3 text-xs">
@@ -378,14 +494,17 @@
 	<!-- Registry Selector + Search Bar -->
 	<div class="shrink-0 flex gap-2">
 		<Select.Root type="single" value={selectedRegistryId ? String(selectedRegistryId) : undefined} onValueChange={(v) => { selectedRegistryId = Number(v); handleRegistryChange(); }}>
-			<Select.Trigger class="h-9 w-48">
+			<Select.Trigger class="h-9 min-w-48 max-w-64 shrink-0">
 				{@const selected = registries.find(r => r.id === selectedRegistryId)}
 				{#if selected && isDockerHub(selected)}
-					<Icon iconNode={whale} class="w-4 h-4 mr-2 text-muted-foreground" />
+					<Icon iconNode={whale} class="w-4 h-4 mr-2 text-muted-foreground shrink-0" />
 				{:else}
-					<Server class="w-4 h-4 mr-2 text-muted-foreground" />
+					<Server class="w-4 h-4 mr-2 text-muted-foreground shrink-0" />
 				{/if}
-				<span>{selected ? `${selected.name}${selected.hasCredentials ? ' (auth)' : ''}` : 'Select registry'}</span>
+				<span class="truncate">{selected ? selected.name : 'Select registry'}</span>
+				{#if selected?.hasCredentials}
+					<Badge variant="outline" class="ml-1.5 text-xs shrink-0">auth</Badge>
+				{/if}
 			</Select.Trigger>
 			<Select.Content>
 				{#each registries as registry}
@@ -417,16 +536,16 @@
 			{#if loading}
 				<RefreshCw class="w-4 h-4 mr-1 animate-spin" />
 			{:else}
-				<Search class="w-4 h-4 mr-1" />
+				<Search class="w-4 h-4" />
 			{/if}
 			Search
 		</Button>
 		{#if supportsBrowsing()}
-			<Button variant="outline" onclick={browse} disabled={loading || browsing}>
+			<Button variant="outline" onclick={() => browse()} disabled={loading || browsing}>
 				{#if browsing}
 					<RefreshCw class="w-4 h-4 mr-1 animate-spin" />
 				{:else}
-					<List class="w-4 h-4 mr-1" />
+					<List class="w-4 h-4" />
 				{/if}
 				Browse
 			</Button>
@@ -439,10 +558,36 @@
 	{:else if errorMessage}
 		<p class="text-red-600 dark:text-red-400 text-sm">{errorMessage}</p>
 	{:else if searched && results.length === 0}
-		<p class="text-muted-foreground text-sm">
-			{browseMode ? 'No images found in this registry' : `No images found for "${searchTerm}"`}
-		</p>
+		<div class="text-sm">
+			<p class="text-muted-foreground">
+				{browseMode ? 'No images found in this registry' : `No images found for "${searchTerm}"`}
+			</p>
+			{#if !browseMode && supportsBrowsing()}
+				<p class="text-muted-foreground mt-2">
+					Tip: Large registries don't support search. Try <button class="text-primary underline" onclick={() => browse()}>Browse</button> and use the filter to find images.
+				</p>
+			{/if}
+		</div>
 	{:else if results.length > 0}
+		<!-- Browse mode filter -->
+		{#if browseMode}
+			<div class="shrink-0 flex items-center gap-2 text-sm">
+				<div class="relative flex-1 max-w-xs">
+					<Search class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+					<Input
+						type="text"
+						placeholder="Filter results..."
+						bind:value={browseFilter}
+						class="h-8 pl-8 text-xs"
+					/>
+				</div>
+				<span class="text-muted-foreground text-xs">
+					{filteredResults.length === results.length
+						? `${results.length} images`
+						: `${filteredResults.length} of ${results.length} images`}
+				</span>
+			</div>
+		{/if}
 		<div
 			bind:this={scrollContainer}
 			class="flex-1 min-h-0 rounded-lg overflow-auto"
@@ -459,7 +604,7 @@
 					</tr>
 				</thead>
 				<tbody>
-					{#each results as result (result.name)}
+					{#each filteredResults as result (result.name)}
 						{@const isExpanded = !!expandedImages[result.name]}
 						{@const expandState = expandedImages[result.name]}
 						<!-- Main row -->
@@ -514,9 +659,9 @@
 											{expandState.error}
 										</div>
 									{:else if expandState?.tags && expandState.tags.length > 0}
-										<div class="max-h-64 overflow-y-auto">
+										<div class="max-h-64 overflow-y-auto overscroll-contain" onwheel={(e) => handleTagsWheel(e, result.name)}>
 											<table class="text-xs">
-												<thead class="text-muted-foreground sticky top-0 bg-muted/50">
+												<thead class="text-muted-foreground sticky top-0 bg-background z-10">
 													<tr>
 														<th class="text-left py-1 px-2 pr-4 font-medium">Tag</th>
 														<th class="text-left py-1 px-2 pr-4 font-medium">Size</th>
@@ -590,7 +735,20 @@
 													{/each}
 												</tbody>
 											</table>
+											<!-- Loading more indicator -->
+											{#if expandState.loadingMore}
+												<div class="flex items-center justify-center py-2 text-xs text-muted-foreground">
+													<Loader2 class="w-3 h-3 animate-spin mr-2" />
+													Loading more...
+												</div>
+											{/if}
 										</div>
+										<!-- Tags count -->
+										{#if expandState.total > 0}
+											<div class="text-xs text-muted-foreground pt-1">
+												{expandState.tags.length} of {expandState.total} tags loaded
+											</div>
+										{/if}
 									{:else}
 										<div class="text-xs text-muted-foreground py-2">
 											No tags found
@@ -603,6 +761,24 @@
 				</tbody>
 			</table>
 		</div>
+		<!-- Load More button for pagination (outside scroll container so always visible) -->
+		{#if browseMode && hasMoreResults}
+			<div class="shrink-0 flex justify-center py-3 border-t border-muted">
+				<Button
+					variant="outline"
+					size="sm"
+					onclick={() => browse(true)}
+					disabled={loadingMore}
+				>
+					{#if loadingMore}
+						<Loader2 class="w-4 h-4 mr-2 animate-spin" />
+						Loading...
+					{:else}
+						Load more images
+					{/if}
+				</Button>
+			</div>
+		{/if}
 	{:else}
 		<div class="text-center py-12 text-muted-foreground">
 			<Download class="w-12 h-12 mx-auto mb-4 opacity-50" />
@@ -630,4 +806,10 @@
 <CreateContainerModal bind:open={showRunModal} prefilledImage={runImageName} autoPull={true} />
 
 <!-- Pull/Scan Modal -->
-<ImagePullModal bind:open={showPullModal} imageName={pullImageName} envHasScanning={envHasScanning} />
+<ImagePullModal
+	bind:open={showPullModal}
+	imageName={pullImageName}
+	envId={$currentEnvironment?.id}
+	envHasScanning={envHasScanning}
+	showDeleteButton={true}
+/>

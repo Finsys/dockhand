@@ -8,7 +8,9 @@
 	import * as Card from '$lib/components/ui/card';
 	import { Loader2, LogIn, Shield, AlertCircle, Network, User, KeyRound, TriangleAlert } from 'lucide-svelte';
 	import { authStore } from '$lib/stores/auth';
+	import { environments } from '$lib/stores/environment';
 	import * as Alert from '$lib/components/ui/alert';
+	import { themeStore, applyTheme } from '$lib/stores/theme';
 
 	interface AuthProvider {
 		id: string;
@@ -59,6 +61,22 @@
 	}
 
 	onMount(async () => {
+		// Set dark mode class based on saved preference or system preference
+		// This must happen before applyTheme since applyTheme reads the dark class
+		const savedTheme = localStorage.getItem('theme');
+		const prefersDark = savedTheme === 'dark' || (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches);
+		if (prefersDark) {
+			document.documentElement.classList.add('dark');
+		} else {
+			document.documentElement.classList.remove('dark');
+		}
+
+		// Apply theme from localStorage immediately (for flash-free loading)
+		applyTheme(themeStore.get());
+
+		// Initialize theme from app settings (no user yet, so fetches from /api/settings/theme)
+		await themeStore.init();
+
 		// Set error from URL if present
 		if (urlError) {
 			error = decodeURIComponent(urlError);
@@ -96,7 +114,8 @@
 				return;
 			}
 
-			// Success - redirect
+			// Success - refresh environments (they were cleared during pre-login fetch) then redirect
+			await environments.refresh();
 			goto(redirectUrl);
 		} catch (e) {
 			error = 'An unexpected error occurred';
@@ -245,6 +264,7 @@
 								required
 								disabled={loading}
 								autocomplete="username"
+								autofocus
 							/>
 						</div>
 
@@ -275,6 +295,7 @@
 								required
 								disabled={loading}
 								autocomplete="one-time-code"
+								autofocus
 							/>
 							<p class="text-xs text-muted-foreground">
 								Enter the 6-digit code from your authenticator app, or use a backup code

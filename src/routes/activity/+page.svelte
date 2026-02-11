@@ -30,7 +30,9 @@
 		Loader2,
 		FileX,
 		Heart,
-		Search
+		Search,
+		Wifi,
+		Radio
 	} from 'lucide-svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import { currentEnvironment, environments as environmentsStore } from '$lib/stores/environment';
@@ -38,7 +40,7 @@
 	import { canAccess } from '$lib/stores/auth';
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
 	import { toast } from 'svelte-sonner';
-	import { formatDateTime } from '$lib/stores/settings';
+	import { formatDateTime, appSettings } from '$lib/stores/settings';
 	import { NoEnvironment } from '$lib/components/ui/empty-state';
 	import { DataGrid } from '$lib/components/data-grid';
 
@@ -623,10 +625,7 @@
 			connectSSE();
 			initialLoadDone = true;
 		});
-
-		return () => {
-			disconnectSSE();
-		};
+		// Note: In Svelte 5, cleanup must be in onDestroy, not returned from onMount
 	});
 
 	onDestroy(() => {
@@ -642,8 +641,21 @@
 
 <div class="flex-1 min-h-0 flex flex-col gap-3 overflow-hidden">
 	<!-- Header with inline filters -->
-	<div class="shrink-0 flex flex-wrap justify-between items-center gap-3">
-		<PageHeader icon={Activity} title="Activity" count={visibleEnd > 0 ? `${visibleStart}-${visibleEnd}` : undefined} total={total > 0 ? total : undefined} countClass="min-w-32" />
+	<div class="shrink-0 flex flex-wrap justify-between items-center gap-3 min-h-8">
+		<div class="flex items-center gap-3">
+			<PageHeader icon={Activity} title="Activity" count={visibleEnd > 0 ? `${visibleStart}-${visibleEnd}` : undefined} total={total > 0 ? total : undefined} countClass="min-w-32" />
+			<Badge variant="outline" class="gap-1.5 {($appSettings.eventCollectionMode || 'stream') === 'stream' ? 'text-green-500 border-green-500/50' : 'text-amber-500 border-amber-500/50'}">
+				{#if ($appSettings.eventCollectionMode || 'stream') === 'stream'}
+					<Wifi class="w-3 h-3" />
+					<span>Stream</span>
+				{:else if ($appSettings.eventCollectionMode || 'stream') === 'poll'}
+					<Radio class="w-3 h-3" />
+					<span>Poll</span><span class="text-[10px] opacity-70">({($appSettings.eventPollInterval || 60000) / 1000}s)</span>
+				{:else}
+					<span class="text-muted-foreground">Off</span>
+				{/if}
+			</Badge>
+		</div>
 		<div class="flex flex-wrap items-center gap-2">
 			<!-- Container name search -->
 			<div class="relative">
@@ -767,6 +779,7 @@
 					variant="destructive"
 					disabled={clearingActivity}
 					onOpenChange={(open) => showClearConfirm = open}
+					unstyled
 				>
 					{#snippet children({ open })}
 						<Button variant="outline" size="sm" disabled={clearingActivity || total === 0}>

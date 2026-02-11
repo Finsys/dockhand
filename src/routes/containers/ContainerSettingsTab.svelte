@@ -5,10 +5,19 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { TogglePill, ToggleGroup } from '$lib/components/ui/toggle-pill';
-	import { Plus, Trash2, Settings2, RefreshCw, Network, X, Ban, RotateCw, AlertTriangle, PauseCircle, Share2, Server, CircleOff, ChevronDown, ChevronRight, Cpu, Shield, HeartPulse, Wifi, HardDrive, Lock, Loader2, CheckCircle2, Package } from 'lucide-svelte';
+	import { Plus, Trash2, Settings2, RefreshCw, Network, X, Ban, RotateCw, AlertTriangle, PauseCircle, Share2, Server, CircleOff, ChevronDown, ChevronRight, Cpu, Shield, HeartPulse, Wifi, HardDrive, Lock, Loader2, CheckCircle2, Package, Gpu } from 'lucide-svelte';
 	import { Badge } from '$lib/components/ui/badge';
 	import AutoUpdateSettings from './AutoUpdateSettings.svelte';
 	import type { VulnerabilityCriteria } from '$lib/components/VulnerabilityCriteriaSelector.svelte';
+	import type { SystemContainerType } from '$lib/types';
+
+	// Detect system containers (must match server-side logic in update-utils.ts)
+	function detectSystemContainer(imageName: string): SystemContainerType | null {
+		const lower = imageName.toLowerCase();
+		if (lower.includes('fnsys/dockhand')) return 'dockhand';
+		if (lower.includes('finsys/hawser') || lower.includes('ghcr.io/finsys/hawser')) return 'hawser';
+		return null;
+	}
 
 	// Protocol options for ports
 	const protocolOptions = [
@@ -23,7 +32,7 @@
 	];
 
 	const commonCapabilities = [
-		'SYS_ADMIN', 'SYS_PTRACE', 'NET_ADMIN', 'NET_RAW', 'IPC_LOCK',
+		'SYS_ADMIN', 'SYS_PTRACE', 'SYS_RAWIO', 'NET_ADMIN', 'NET_RAW', 'IPC_LOCK',
 		'SYS_TIME', 'SYS_RESOURCE', 'MKNOD', 'AUDIT_WRITE', 'SETFCAP',
 		'CHOWN', 'DAC_OVERRIDE', 'FOWNER', 'FSETID', 'KILL', 'SETGID',
 		'SETUID', 'SETPCAP', 'NET_BIND_SERVICE', 'SYS_CHROOT', 'AUDIT_CONTROL'
@@ -31,16 +40,18 @@
 
 	const commonUlimits = ['nofile', 'nproc', 'core', 'memlock', 'stack', 'cpu', 'fsize', 'locks'];
 
+	const commonGpuCapabilities = ['gpu', 'compute', 'utility', 'graphics', 'video', 'display'];
+
 	interface ConfigSet {
 		id: number;
 		name: string;
 		description?: string;
-		env_vars?: { key: string; value: string }[];
+		envVars?: { key: string; value: string }[];
 		labels?: { key: string; value: string }[];
 		ports?: { hostPort: string; containerPort: string; protocol: string }[];
 		volumes?: { hostPath: string; containerPath: string; mode: string }[];
-		network_mode: string;
-		restart_policy: string;
+		networkMode: string;
+		restartPolicy: string;
 	}
 
 	interface DockerNetwork {
@@ -59,6 +70,7 @@
 		restartMaxRetries: number | '';
 		networkMode: string;
 		startAfterCreate?: boolean;
+		repullImage?: boolean;
 		// Port mappings
 		portMappings: { hostPort: string; containerPort: string; protocol: string }[];
 		// Volume mappings
@@ -95,6 +107,14 @@
 		securityOptions: string[];
 		// Devices
 		deviceMappings: { hostPath: string; containerPath: string; permissions: string }[];
+		// GPU settings
+		gpuEnabled: boolean;
+		gpuMode: 'all' | 'count' | 'specific';
+		gpuCount: number;
+		gpuDeviceIds: string[];
+		gpuDriver: string;
+		gpuCapabilities: string[];
+		runtime: string;
 		// DNS settings
 		dnsServers: string[];
 		dnsSearch: string[];
@@ -130,6 +150,7 @@
 		restartMaxRetries = $bindable(),
 		networkMode = $bindable(),
 		startAfterCreate = $bindable(true),
+		repullImage = $bindable(true),
 		portMappings = $bindable(),
 		volumeMappings = $bindable(),
 		envVars = $bindable(),
@@ -154,6 +175,13 @@
 		capDrop = $bindable(),
 		securityOptions = $bindable(),
 		deviceMappings = $bindable(),
+		gpuEnabled = $bindable(),
+		gpuMode = $bindable(),
+		gpuCount = $bindable(),
+		gpuDeviceIds = $bindable(),
+		gpuDriver = $bindable(),
+		gpuCapabilities = $bindable(),
+		runtime = $bindable(),
 		dnsServers = $bindable(),
 		dnsSearch = $bindable(),
 		dnsOptions = $bindable(),
@@ -173,6 +201,7 @@
 	let showHealth = $state(false);
 	let showDns = $state(false);
 	let showDevices = $state(false);
+	let showGpu = $state(false);
 	let showUlimits = $state(false);
 
 	// DNS input fields
@@ -182,6 +211,10 @@
 
 	// Security options input
 	let securityOptionInput = $state('');
+
+	// GPU device ID input
+	let gpuDeviceIdInput = $state('');
+	let customRuntimeInput = $state('');
 
 	// Helper functions for form
 	function addPortMapping() {
@@ -240,6 +273,27 @@
 
 	function removeUlimit(index: number) {
 		ulimits = ulimits.filter((_, i) => i !== index);
+	}
+
+	function addGpuDeviceId() {
+		if (gpuDeviceIdInput.trim() && !gpuDeviceIds.includes(gpuDeviceIdInput.trim())) {
+			gpuDeviceIds = [...gpuDeviceIds, gpuDeviceIdInput.trim()];
+			gpuDeviceIdInput = '';
+		}
+	}
+
+	function removeGpuDeviceId(id: string) {
+		gpuDeviceIds = gpuDeviceIds.filter(d => d !== id);
+	}
+
+	function addGpuCapability(cap: string) {
+		if (cap && !gpuCapabilities.includes(cap)) {
+			gpuCapabilities = [...gpuCapabilities, cap];
+		}
+	}
+
+	function removeGpuCapability(cap: string) {
+		gpuCapabilities = gpuCapabilities.filter(c => c !== cap);
 	}
 
 	function addCapability(type: 'add' | 'drop', cap: string) {
@@ -315,15 +369,15 @@
 		const configSet = configSets.find((c) => c.id === parseInt(configSetId));
 		if (!configSet) return;
 
-		if (configSet.env_vars && configSet.env_vars.length > 0) {
+		if (configSet.envVars && configSet.envVars.length > 0) {
 			if (mode === 'edit') {
 				// Merge mode for edit
 				const existingKeys = new Set(envVars.map(e => e.key).filter(k => k));
-				const newEnvVars = configSet.env_vars.filter(e => !existingKeys.has(e.key));
+				const newEnvVars = configSet.envVars.filter(e => !existingKeys.has(e.key));
 				envVars = [...envVars.filter(e => e.key), ...newEnvVars.map(e => ({ ...e }))];
 				if (envVars.length === 0) envVars = [{ key: '', value: '' }];
 			} else {
-				envVars = configSet.env_vars.map((e) => ({ ...e }));
+				envVars = configSet.envVars.map((e) => ({ ...e }));
 			}
 		}
 		if (configSet.labels && configSet.labels.length > 0) {
@@ -356,11 +410,11 @@
 				volumeMappings = configSet.volumes.map((v) => ({ ...v }));
 			}
 		}
-		if (configSet.network_mode) {
-			networkMode = configSet.network_mode;
+		if (configSet.networkMode) {
+			networkMode = configSet.networkMode;
 		}
-		if (configSet.restart_policy) {
-			restartPolicy = configSet.restart_policy;
+		if (configSet.restartPolicy) {
+			restartPolicy = configSet.restartPolicy;
 		}
 	}
 
@@ -587,6 +641,11 @@
 		</div>
 
 		<div class="flex items-center gap-3 pt-1">
+			<Label class="text-xs font-normal">Pull image before update</Label>
+			<TogglePill bind:checked={repullImage} />
+		</div>
+
+		<div class="flex items-center gap-3 pt-1">
 			<Label class="text-xs font-normal">Start container after {mode === 'create' ? 'creation' : 'update'}</Label>
 			<TogglePill bind:checked={startAfterCreate} />
 		</div>
@@ -653,7 +712,7 @@
 		<div class="flex justify-between items-center pb-2 border-b">
 			<h3 class="text-sm font-semibold text-foreground">Port mappings</h3>
 			<Button type="button" size="sm" variant="ghost" onclick={addPortMapping} class="h-7 text-xs">
-				<Plus class="w-3.5 h-3.5 mr-1" />
+				<Plus class="w-3.5 h-3.5" />
 				Add
 			</Button>
 		</div>
@@ -694,7 +753,7 @@
 		<div class="flex justify-between items-center pb-2 border-b">
 			<h3 class="text-sm font-semibold text-foreground">Volume mappings</h3>
 			<Button type="button" size="sm" variant="ghost" onclick={addVolumeMapping} class="h-7 text-xs">
-				<Plus class="w-3.5 h-3.5 mr-1" />
+				<Plus class="w-3.5 h-3.5" />
 				Add
 			</Button>
 		</div>
@@ -735,7 +794,7 @@
 		<div class="flex justify-between items-center pb-2 border-b">
 			<h3 class="text-sm font-semibold text-foreground">Environment variables</h3>
 			<Button type="button" size="sm" variant="ghost" onclick={addEnvVar} class="h-7 text-xs">
-				<Plus class="w-3.5 h-3.5 mr-1" />
+				<Plus class="w-3.5 h-3.5" />
 				Add
 			</Button>
 		</div>
@@ -771,7 +830,7 @@
 		<div class="flex justify-between items-center pb-2 border-b">
 			<h3 class="text-sm font-semibold text-foreground">Labels</h3>
 			<Button type="button" size="sm" variant="ghost" onclick={addLabel} class="h-7 text-xs">
-				<Plus class="w-3.5 h-3.5 mr-1" />
+				<Plus class="w-3.5 h-3.5" />
 				Add
 			</Button>
 		</div>
@@ -1173,7 +1232,7 @@
 			<div class="px-3 pb-3 space-y-3 border-t">
 				<div class="flex justify-end pt-2">
 					<Button type="button" size="sm" variant="ghost" onclick={addDeviceMapping} class="h-7 text-xs">
-						<Plus class="w-3.5 h-3.5 mr-1" />
+						<Plus class="w-3.5 h-3.5" />
 						Add device
 					</Button>
 				</div>
@@ -1192,6 +1251,146 @@
 						</Button>
 					</div>
 				{/each}
+			</div>
+		{/if}
+	</div>
+
+	<!-- GPU Section (Collapsible) -->
+	<div class="border rounded-lg">
+		<button
+			type="button"
+			onclick={() => showGpu = !showGpu}
+			class="w-full flex items-center justify-between p-3 hover:bg-muted/50 transition-colors"
+		>
+			<div class="flex items-center gap-2">
+				<Gpu class="w-4 h-4 text-muted-foreground" />
+				<span class="text-sm font-medium">GPU</span>
+				{#if gpuEnabled}
+					<Badge variant="secondary" class="text-2xs">configured</Badge>
+				{/if}
+			</div>
+			{#if showGpu}
+				<ChevronDown class="w-4 h-4 text-muted-foreground" />
+			{:else}
+				<ChevronRight class="w-4 h-4 text-muted-foreground" />
+			{/if}
+		</button>
+		{#if showGpu}
+			<div class="px-3 pb-3 space-y-3 border-t">
+				<div class="flex items-center justify-between pt-2">
+					<Label class="text-xs font-medium">Enable GPU access</Label>
+					<TogglePill bind:checked={gpuEnabled} />
+				</div>
+
+				<div class="space-y-1.5">
+					<Label class="text-xs font-medium">Runtime</Label>
+					<div class="flex gap-2">
+						<Select.Root type="single" value={runtime === '' ? '' : runtime === 'nvidia' ? 'nvidia' : 'custom'} onValueChange={(v) => {
+							if (v === '') runtime = '';
+							else if (v === 'nvidia') runtime = 'nvidia';
+							else if (v === 'custom') runtime = customRuntimeInput || '';
+						}}>
+							<Select.Trigger class="h-9 flex-1">
+								<span>{runtime === '' ? 'Default (runc)' : runtime === 'nvidia' ? 'NVIDIA' : `Custom: ${runtime}`}</span>
+							</Select.Trigger>
+							<Select.Content>
+								<Select.Item value="" label="Default (runc)" />
+								<Select.Item value="nvidia" label="NVIDIA" />
+								<Select.Item value="custom" label="Custom..." />
+							</Select.Content>
+						</Select.Root>
+						{#if runtime !== '' && runtime !== 'nvidia'}
+							<Input
+								bind:value={customRuntimeInput}
+								placeholder="Runtime name"
+								class="h-9 w-40"
+								oninput={() => { runtime = customRuntimeInput; }}
+							/>
+						{/if}
+					</div>
+				</div>
+
+				{#if gpuEnabled}
+					<div class="space-y-1.5">
+						<Label class="text-xs font-medium">GPU mode</Label>
+						<ToggleGroup
+							value={gpuMode}
+							options={[
+								{ value: 'all', label: 'All' },
+								{ value: 'count', label: 'Count' },
+								{ value: 'specific', label: 'Specific' }
+							]}
+							onchange={(v) => { gpuMode = v as 'all' | 'count' | 'specific'; }}
+						/>
+					</div>
+
+					{#if gpuMode === 'count'}
+						<div class="space-y-1.5">
+							<Label class="text-xs font-medium">GPU count</Label>
+							<Input type="number" bind:value={gpuCount} min="1" placeholder="1" class="h-9 w-24" />
+						</div>
+					{/if}
+
+					{#if gpuMode === 'specific'}
+						<div class="space-y-2">
+							<Label class="text-xs font-medium">Device IDs</Label>
+							<div class="flex gap-2">
+								<Input
+									bind:value={gpuDeviceIdInput}
+									placeholder="e.g., 0, GPU-xxxx"
+									class="h-9 flex-1"
+									onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addGpuDeviceId(); } }}
+								/>
+								<Button type="button" size="sm" variant="outline" onclick={addGpuDeviceId} class="h-9">
+									<Plus class="w-4 h-4" />
+								</Button>
+							</div>
+							{#if gpuDeviceIds.length > 0}
+								<div class="flex flex-wrap gap-1.5">
+									{#each gpuDeviceIds as id}
+										<Badge variant="secondary" class="text-2xs">
+											{id}
+											<button type="button" onclick={() => removeGpuDeviceId(id)} class="ml-1 hover:text-destructive">
+												<X class="w-3 h-3" />
+											</button>
+										</Badge>
+									{/each}
+								</div>
+							{/if}
+						</div>
+					{/if}
+
+					<div class="space-y-1.5">
+						<Label class="text-xs font-medium">Driver</Label>
+						<Input bind:value={gpuDriver} placeholder="nvidia" class="h-9" />
+					</div>
+
+					<div class="space-y-2">
+						<Label class="text-xs font-medium">Capabilities</Label>
+						<Select.Root type="single" value="" onValueChange={(v) => { addGpuCapability(v); }}>
+							<Select.Trigger class="h-9">
+								<span class="text-muted-foreground">Add capability...</span>
+							</Select.Trigger>
+							<Select.Content>
+								{#each commonGpuCapabilities.filter(c => !gpuCapabilities.includes(c)) as cap}
+									<Select.Item value={cap} label={cap} />
+								{/each}
+							</Select.Content>
+						</Select.Root>
+						{#if gpuCapabilities.length > 0}
+							<div class="flex flex-wrap gap-1.5">
+								{#each gpuCapabilities as cap}
+									<Badge variant="outline" class="text-2xs bg-violet-50 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400">
+										{cap}
+										<button type="button" onclick={() => removeGpuCapability(cap)} class="ml-1 hover:text-destructive">
+											<X class="w-3 h-3" />
+										</button>
+									</Badge>
+								{/each}
+							</div>
+						{/if}
+					</div>
+				{/if}
 			</div>
 		{/if}
 	</div>
@@ -1220,7 +1419,7 @@
 			<div class="px-3 pb-3 space-y-3 border-t">
 				<div class="flex justify-end pt-2">
 					<Button type="button" size="sm" variant="ghost" onclick={addUlimit} class="h-7 text-xs">
-						<Plus class="w-3.5 h-3.5 mr-1" />
+						<Plus class="w-3.5 h-3.5" />
 						Add ulimit
 					</Button>
 				</div>
@@ -1263,6 +1462,7 @@
 			bind:enabled={autoUpdateEnabled}
 			bind:cronExpression={autoUpdateCronExpression}
 			bind:vulnerabilityCriteria={vulnerabilityCriteria}
+			systemContainer={detectSystemContainer(image)}
 		/>
 	</div>
 </div>

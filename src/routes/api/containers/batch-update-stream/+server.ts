@@ -4,9 +4,6 @@ import { authorize } from '$lib/server/authorize';
 import {
 	listContainers,
 	inspectContainer,
-	stopContainer,
-	removeContainer,
-	createContainer,
 	pullImage,
 	getTempImageTag,
 	isDigestBasedImage,
@@ -18,6 +15,7 @@ import { auditContainer } from '$lib/server/audit';
 import { getScannerSettings, scanImage } from '$lib/server/scanner';
 import { saveVulnerabilityScan, removePendingContainerUpdate, type VulnerabilityCriteria } from '$lib/server/db';
 import { parseImageNameAndTag, shouldBlockUpdate, combineScanSummaries, isDockhandContainer } from '$lib/server/scheduler/tasks/update-utils';
+import { recreateContainer } from '$lib/server/scheduler/tasks/container-update';
 
 export interface ScanResult {
 	critical: number;
@@ -58,6 +56,15 @@ export interface UpdateProgress {
 	scannerResults?: ScannerResult[];
 	blockReason?: string;
 	scanner?: string;
+	vulnerabilities?: Array<{
+		id: string;
+		severity: string;
+		package: string;
+		version: string;
+		fixedVersion?: string;
+		link?: string;
+		scanner: string;
+	}>;
 }
 
 /**
@@ -184,6 +191,22 @@ export const POST: RequestHandler = async (event) => {
 						continue;
 					}
 
+					// Skip digest-pinned images - they are explicitly locked to a specific version
+					if (isDigestBasedImage(imageName)) {
+						safeEnqueue({
+							type: 'progress',
+							containerId,
+							containerName,
+							step: 'skipped',
+							current: i + 1,
+							total: containerIds.length,
+							success: true,
+							message: `Skipping ${containerName} - image pinned to specific digest`
+						});
+						skippedCount++;
+						continue;
+					}
+
 					// Step 1: Pull latest image
 					safeEnqueue({
 						type: 'progress',
@@ -197,7 +220,6 @@ export const POST: RequestHandler = async (event) => {
 
 					try {
 						await pullImage(imageName, (data: any) => {
-							// Send pull progress as log entries
 							if (data.status) {
 								safeEnqueue({
 									type: 'pull_log',
@@ -275,13 +297,13 @@ export const POST: RequestHandler = async (event) => {
 
 						try {
 							const scanResults = await scanImage(tempTag, envIdNum, (progress) => {
-								if (progress.message) {
+								if (progress.output || progress.message) {
 									safeEnqueue({
 										type: 'scan_log',
 										containerId,
 										containerName,
 										scanner: progress.scanner,
-										message: progress.message
+										message: progress.output || progress.message
 									});
 								}
 							});
@@ -338,12 +360,27 @@ export const POST: RequestHandler = async (event) => {
 								}
 							}
 
+							// Collect vulnerabilities from all scanners (cap at 100)
+							const vulnerabilities = scanResults
+								.flatMap(r => r.vulnerabilities || [])
+								.slice(0, 100)
+								.map(v => ({
+									id: v.id,
+									severity: v.severity,
+									package: v.package,
+									version: v.version,
+									fixedVersion: v.fixedVersion,
+									link: v.link,
+									scanner: v.scanner
+								}));
+
 							safeEnqueue({
 								type: 'scan_complete',
 								containerId,
 								containerName,
 								scanResult: finalScanResult,
 								scannerResults: individualScannerResults.length > 0 ? individualScannerResults : undefined,
+								vulnerabilities: vulnerabilities.length > 0 ? vulnerabilities : undefined,
 								message: finalScanResult
 									? `Scan complete: ${finalScanResult.critical} critical, ${finalScanResult.high} high, ${finalScanResult.medium} medium, ${finalScanResult.low} low`
 									: 'Scan complete: no vulnerabilities found'
@@ -401,43 +438,22 @@ export const POST: RequestHandler = async (event) => {
 						} catch { /* ignore cleanup errors */ }
 					}
 
-					// Step 3: Stop container if running
-					if (wasRunning) {
+					// Progress logging function for shared functions
+					const logProgress = (message: string) => {
 						safeEnqueue({
 							type: 'progress',
 							containerId,
 							containerName,
-							step: 'stopping',
+							step: 'creating',
 							current: i + 1,
 							total: containerIds.length,
-							message: `Stopping ${containerName}...`
+							message
 						});
-						await stopContainer(containerId, envIdNum);
-					}
+					};
 
-					// Step 4: Remove old container
-					safeEnqueue({
-						type: 'progress',
-						containerId,
-						containerName,
-						step: 'removing',
-						current: i + 1,
-						total: containerIds.length,
-						message: `Removing old container ${containerName}...`
-					});
-					await removeContainer(containerId, true, envIdNum);
+					let updateSuccess = false;
+					let newContainerId = containerId;
 
-					// Prepare port bindings
-					const ports: { [key: string]: { HostPort: string } } = {};
-					if (hostConfig.PortBindings) {
-						for (const [containerPort, bindings] of Object.entries(hostConfig.PortBindings)) {
-							if (bindings && (bindings as any[]).length > 0) {
-								ports[containerPort] = { HostPort: (bindings as any[])[0].HostPort || '' };
-							}
-						}
-					}
-
-					// Step 5: Create new container
 					safeEnqueue({
 						type: 'progress',
 						containerId,
@@ -445,37 +461,35 @@ export const POST: RequestHandler = async (event) => {
 						step: 'creating',
 						current: i + 1,
 						total: containerIds.length,
-						message: `Creating new container ${containerName}...`
+						message: `Recreating ${containerName}...`
 					});
 
-					const newContainer = await createContainer({
-						name: containerName,
-						image: imageName,
-						ports,
-						volumeBinds: hostConfig.Binds || [],
-						env: config.Env || [],
-						labels: config.Labels || {},
-						cmd: config.Cmd || undefined,
-						restartPolicy: hostConfig.RestartPolicy?.Name || 'no',
-						networkMode: hostConfig.NetworkMode || undefined
-					}, envIdNum);
+					updateSuccess = await recreateContainer(containerName, envIdNum, logProgress);
+					if (updateSuccess) {
+						const updatedContainers = await listContainers(true, envIdNum);
+						const updatedContainer = updatedContainers.find(c => c.name === containerName);
+						if (updatedContainer) {
+							newContainerId = updatedContainer.id;
+						}
+					}
 
-					// Step 6: Start if was running
-					if (wasRunning) {
+					if (!updateSuccess) {
 						safeEnqueue({
 							type: 'progress',
 							containerId,
 							containerName,
-							step: 'starting',
+							step: 'failed',
 							current: i + 1,
 							total: containerIds.length,
-							message: `Starting ${containerName}...`
+							success: false,
+							error: 'Container recreation failed'
 						});
-						await newContainer.start();
+						failCount++;
+						continue;
 					}
 
 					// Audit log
-					await auditContainer(event, 'update', newContainer.id, containerName, envIdNum, { batchUpdate: true });
+					await auditContainer(event, 'update', newContainerId, containerName, envIdNum, { batchUpdate: true });
 
 					// Done with this container - use original containerId for UI consistency
 					safeEnqueue({
@@ -527,8 +541,18 @@ export const POST: RequestHandler = async (event) => {
 					: `Updated ${successCount} of ${containerIds.length} containers`
 			});
 
-			clearInterval(keepaliveInterval);
-			controller.close();
+			if (keepaliveInterval) {
+				clearInterval(keepaliveInterval);
+			}
+			if (!controllerClosed) {
+				try {
+					controller.close();
+					controllerClosed = true;
+				} catch {
+					// Controller already closed - ignore
+					controllerClosed = true;
+				}
+			}
 		},
 		cancel() {
 			controllerClosed = true;

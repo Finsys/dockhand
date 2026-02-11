@@ -50,7 +50,7 @@
 </script>
 
 <Dialog.Root bind:open onOpenChange={handleOpenChange}>
-	<Dialog.Content class="max-w-4xl h-[80vh] flex flex-col">
+	<Dialog.Content class="max-w-4xl h-[90vh] sm:h-[80vh] flex flex-col">
 		<Dialog.Header>
 			<Dialog.Title class="flex items-center gap-2">
 				<HardDrive class="w-5 h-5" />

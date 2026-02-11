@@ -8,6 +8,18 @@ import {
 } from '$lib/server/db';
 import { refreshSchedulesForEnvironment } from '$lib/server/scheduler';
 
+/** Map of modern IANA timezone names to their canonical equivalents recognized by Bun/ICU */
+const TIMEZONE_ALIASES: Record<string, string> = {
+	'Europe/Kyiv': 'Europe/Kiev',
+	'Asia/Ho_Chi_Minh': 'Asia/Saigon',
+	'America/Nuuk': 'America/Godthab',
+	'Pacific/Kanton': 'Pacific/Enderbury'
+};
+
+function normalizeTimezone(tz: string): string {
+	return TIMEZONE_ALIASES[tz] || tz;
+}
+
 /**
  * Get timezone for an environment.
  */
@@ -26,7 +38,8 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 			return json({ error: 'Environment not found' }, { status: 404 });
 		}
 
-		const timezone = await getEnvironmentTimezone(id);
+		const rawTimezone = await getEnvironmentTimezone(id);
+		const timezone = normalizeTimezone(rawTimezone);
 
 		return json({ timezone });
 	} catch (error) {
@@ -54,7 +67,7 @@ export const POST: RequestHandler = async ({ params, request, cookies }) => {
 		}
 
 		const data = await request.json();
-		const timezone = data.timezone || 'UTC';
+		const timezone = normalizeTimezone(data.timezone || 'UTC');
 
 		// Validate timezone
 		const validTimezones = Intl.supportedValuesOf('timeZone');

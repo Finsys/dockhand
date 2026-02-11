@@ -3,8 +3,10 @@ import type { RequestHandler } from './$types';
 import { getGitStack } from '$lib/server/db';
 import { deployGitStack } from '$lib/server/git';
 import { authorize } from '$lib/server/authorize';
+import { auditGitStack } from '$lib/server/audit';
 
-export const POST: RequestHandler = async ({ params, cookies }) => {
+export const POST: RequestHandler = async (event) => {
+	const { params, cookies } = event;
 	const auth = await authorize(cookies);
 
 	try {
@@ -20,6 +22,10 @@ export const POST: RequestHandler = async ({ params, cookies }) => {
 		}
 
 		const result = await deployGitStack(id);
+
+		// Audit log
+		await auditGitStack(event, 'deploy', id, gitStack.stackName, gitStack.environmentId);
+
 		return json(result);
 	} catch (error) {
 		console.error('Failed to deploy git stack:', error);

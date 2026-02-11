@@ -3,6 +3,9 @@ import { getDiskUsage } from '$lib/server/docker';
 import { authorize } from '$lib/server/authorize';
 import type { RequestHandler } from './$types';
 
+// Skip disk usage collection (Synology NAS performance fix)
+const SKIP_DF_COLLECTION = process.env.SKIP_DF_COLLECTION === 'true' || process.env.SKIP_DF_COLLECTION === '1';
+
 const DISK_USAGE_TIMEOUT = 15000; // 15 second timeout
 
 export const GET: RequestHandler = async ({ url, cookies }) => {
@@ -21,6 +24,11 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 	// Check environment access in enterprise mode
 	if (auth.authEnabled && auth.isEnterprise && !await auth.canAccessEnvironment(envId)) {
 		return json({ error: 'Access denied to this environment' }, { status: 403 });
+	}
+
+	// Skip disk usage when disabled (Synology NAS performance fix)
+	if (SKIP_DF_COLLECTION) {
+		return json({ diskUsage: null });
 	}
 
 	try {

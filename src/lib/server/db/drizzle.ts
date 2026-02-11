@@ -194,7 +194,8 @@ function readMigrationJournal(migrationsFolder: string): MigrationJournal | null
 	} catch (error) {
 		const config = getConfig();
 		if (config.verboseLogging) {
-			console.error('Failed to read migration journal:', error);
+			const errorMsg = error instanceof Error ? error.message : String(error);
+			console.error('[DB] Failed to read migration journal:', errorMsg);
 		}
 		return null;
 	}
@@ -604,21 +605,21 @@ async function initializeDatabase() {
 	logHeader('DATABASE INITIALIZATION');
 
 	if (isPostgres) {
-		// PostgreSQL via Bun.sql
+		// PostgreSQL via postgres-js (more stable than bun:sql for concurrent queries)
 		validatePostgresUrl(config.databaseUrl!);
 
 		logInfo(`Database: PostgreSQL`);
 		logInfo(`Connection: ${maskPassword(config.databaseUrl!)}`);
 
-		const { drizzle } = await import('drizzle-orm/bun-sql');
-		const { SQL } = await import('bun');
+		const { drizzle } = await import('drizzle-orm/postgres-js');
+		const postgres = (await import('postgres')).default;
 
 		// Import PostgreSQL schema
 		schema = await import('./schema/pg-schema.js');
 
 		if (verbose) logStep('Connecting to PostgreSQL...');
 		try {
-			rawClient = new SQL(config.databaseUrl!);
+			rawClient = postgres(config.databaseUrl!);
 			db = drizzle({ client: rawClient, schema });
 			logSuccess('PostgreSQL connection established');
 		} catch (error) {
@@ -986,7 +987,8 @@ export async function getDatabaseSchemaVersion(): Promise<SchemaInfo> {
 		}
 		return { version: null, date: null };
 	} catch (e) {
-		console.error('Error getting schema version:', e);
+		const errorMsg = e instanceof Error ? e.message : String(e);
+		console.error('[DB] Error getting schema version:', errorMsg);
 		return { version: null, date: null };
 	}
 }

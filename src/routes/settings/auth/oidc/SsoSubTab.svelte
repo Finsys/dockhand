@@ -44,9 +44,9 @@
 		id: number;
 		name: string;
 		description?: string;
-		is_system: boolean;
+		isSystem: boolean;
 		permissions: any;
-		created_at: string;
+		createdAt: string;
 	}
 
 	interface Props {
@@ -169,7 +169,7 @@
 				</div>
 				{#if $canAccess('settings', 'edit')}
 					<Button size="sm" onclick={() => openOidcModal(null)}>
-						<Plus class="w-4 h-4 mr-1" />
+						<Plus class="w-4 h-4" />
 						Add provider
 					</Button>
 				{/if}

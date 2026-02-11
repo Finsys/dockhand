@@ -4,13 +4,13 @@
  * POST /api/schedules/[type]/[id]/run - Trigger a manual execution
  *
  * Path params:
- *   - type: 'container_update' | 'git_stack_sync' | 'system_cleanup'
+ *   - type: 'container_update' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune'
  *   - id: schedule ID
  */
 
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { triggerContainerUpdate, triggerGitStackSync, triggerSystemJob, triggerEnvUpdateCheck } from '$lib/server/scheduler';
+import { triggerContainerUpdate, triggerGitStackSync, triggerSystemJob, triggerEnvUpdateCheck, triggerImagePrune } from '$lib/server/scheduler';
 
 export const POST: RequestHandler = async ({ params }) => {
 	try {
@@ -35,6 +35,9 @@ export const POST: RequestHandler = async ({ params }) => {
 				break;
 			case 'env_update_check':
 				result = await triggerEnvUpdateCheck(scheduleId);
+				break;
+			case 'image_prune':
+				result = await triggerImagePrune(scheduleId);
 				break;
 			default:
 				return json({ error: 'Invalid schedule type' }, { status: 400 });

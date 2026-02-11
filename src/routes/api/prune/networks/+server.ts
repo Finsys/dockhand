@@ -1,9 +1,11 @@
 import { json } from '@sveltejs/kit';
 import { pruneNetworks } from '$lib/server/docker';
 import { authorize } from '$lib/server/authorize';
+import { audit } from '$lib/server/audit';
 import type { RequestHandler } from './$types';
 
-export const POST: RequestHandler = async ({ url, cookies }) => {
+export const POST: RequestHandler = async (event) => {
+	const { url, cookies } = event;
 	const auth = await authorize(cookies);
 
 	const envId = url.searchParams.get('env');
@@ -16,6 +18,14 @@ export const POST: RequestHandler = async ({ url, cookies }) => {
 
 	try {
 		const result = await pruneNetworks(envIdNum);
+
+		// Audit log
+		await audit(event, 'prune', 'network', {
+			environmentId: envIdNum,
+			description: 'Pruned unused networks',
+			details: { result }
+		});
+
 		return json({ success: true, result });
 	} catch (error) {
 		console.error('Error pruning networks:', error);

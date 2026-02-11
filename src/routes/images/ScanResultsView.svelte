@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { Badge } from '$lib/components/ui/badge';
-	import { CheckCircle2, ExternalLink } from 'lucide-svelte';
+	import { CheckCircle2, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-svelte';
 
 	interface ScanResult {
 		scanner: 'grype' | 'trivy';
@@ -35,6 +35,37 @@
 
 	let activeTab = $state<'grype' | 'trivy'>(results[0]?.scanner || 'grype');
 	let expandedVulns = $state<Set<string>>(new Set());
+	let sortBy = $state<'severity' | 'id' | 'package'>('severity');
+	let sortDir = $state<'asc' | 'desc'>('asc');
+
+	const SEVERITY_ORDER: Record<string, number> = {
+		critical: 0, high: 1, medium: 2, low: 3, negligible: 4, unknown: 5
+	};
+
+	const sortedVulns = $derived.by(() => {
+		if (!activeResult) return [];
+		const vulns = [...activeResult.vulnerabilities];
+		vulns.sort((a, b) => {
+			if (sortBy === 'severity') {
+				const diff = (SEVERITY_ORDER[a.severity.toLowerCase()] ?? 5) - (SEVERITY_ORDER[b.severity.toLowerCase()] ?? 5);
+				return sortDir === 'asc' ? diff : -diff;
+			}
+			const aVal = sortBy === 'id' ? a.id : a.package;
+			const bVal = sortBy === 'id' ? b.id : b.package;
+			const cmp = (aVal ?? '').localeCompare(bVal ?? '');
+			return sortDir === 'asc' ? cmp : -cmp;
+		});
+		return vulns;
+	});
+
+	function toggleSort(column: 'severity' | 'id' | 'package') {
+		if (sortBy === column) {
+			sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+		} else {
+			sortBy = column;
+			sortDir = 'asc';
+		}
+	}
 
 	const activeResult = $derived(results.find(r => r.scanner === activeTab) || results[0]);
 
@@ -149,15 +180,42 @@
 					<table class="w-full text-xs">
 						<thead class="bg-muted sticky top-0">
 							<tr>
-								<th class="text-left py-1.5 px-2 font-medium w-[22%]">CVE ID</th>
-								<th class="text-left py-1.5 px-2 font-medium w-[12%]">Severity</th>
-								<th class="text-left py-1.5 px-2 font-medium w-[28%]">Package</th>
+								<th class="text-left py-1.5 px-2 font-medium w-[22%]">
+									<button type="button" class="flex items-center gap-1 hover:text-foreground transition-colors" onclick={() => toggleSort('id')}>
+										CVE ID
+										{#if sortBy === 'id'}
+											{#if sortDir === 'asc'}<ArrowUp class="w-3 h-3" />{:else}<ArrowDown class="w-3 h-3" />{/if}
+										{:else}
+											<ArrowUpDown class="w-3 h-3 opacity-30" />
+										{/if}
+									</button>
+								</th>
+								<th class="text-left py-1.5 px-2 font-medium w-[12%]">
+									<button type="button" class="flex items-center gap-1 hover:text-foreground transition-colors" onclick={() => toggleSort('severity')}>
+										Severity
+										{#if sortBy === 'severity'}
+											{#if sortDir === 'asc'}<ArrowUp class="w-3 h-3" />{:else}<ArrowDown class="w-3 h-3" />{/if}
+										{:else}
+											<ArrowUpDown class="w-3 h-3 opacity-30" />
+										{/if}
+									</button>
+								</th>
+								<th class="text-left py-1.5 px-2 font-medium w-[28%]">
+									<button type="button" class="flex items-center gap-1 hover:text-foreground transition-colors" onclick={() => toggleSort('package')}>
+										Package
+										{#if sortBy === 'package'}
+											{#if sortDir === 'asc'}<ArrowUp class="w-3 h-3" />{:else}<ArrowDown class="w-3 h-3" />{/if}
+										{:else}
+											<ArrowUpDown class="w-3 h-3 opacity-30" />
+										{/if}
+									</button>
+								</th>
 								<th class="text-left py-1.5 px-2 font-medium w-[18%]">Installed</th>
 								<th class="text-left py-1.5 px-2 font-medium w-[20%]">Fixed in</th>
 							</tr>
 						</thead>
 						<tbody>
-							{#each activeResult.vulnerabilities as vuln, i}
+							{#each sortedVulns as vuln, i}
 								<tr
 									class="border-t border-muted hover:bg-muted/30 cursor-pointer transition-colors"
 									onclick={() => toggleVulnDetails(vuln.id + i)}

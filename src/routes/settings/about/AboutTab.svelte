@@ -3,7 +3,7 @@
 	import * as Card from '$lib/components/ui/card';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Input } from '$lib/components/ui/input';
-	import { Box, Images, HardDrive, Network, Cpu, Server, Crown, Building2, Layers, Clock, Code, Package, ExternalLink, Search, FileText, Tag, Sparkles, Bug, ChevronDown, ChevronRight, Plug, ScrollText, Shield, MessageSquarePlus, GitBranch, Coffee } from 'lucide-svelte';
+	import { Box, Images, HardDrive, Network, Cpu, Server, Crown, Building2, Layers, Clock, Code, Package, ExternalLink, Search, FileText, Tag, Sparkles, Bug, ChevronDown, ChevronRight, Plug, ScrollText, Shield, MessageSquarePlus, GitBranch, Coffee, Monitor, Cog, MemoryStick, Database } from 'lucide-svelte';
 	import * as Tabs from '$lib/components/ui/tabs';
 	import { onMount, onDestroy } from 'svelte';
 	import { licenseStore } from '$lib/stores/license';
@@ -198,6 +198,7 @@
 			nodeVersion: string;
 			platform: string;
 			arch: string;
+			kernel: string;
 			memory: {
 				heapUsed: number;
 				heapTotal: number;
@@ -438,7 +439,7 @@
 							</div>
 						{/if}
 						{#if serverUptime !== null}
-							<div class="flex items-center gap-1">
+							<div class="flex items-center gap-1 min-w-[8.5rem]">
 								<Clock class="w-3 h-3 shrink-0" />
 								<span class="tabular-nums">Uptime {formatUptime(serverUptime)}</span>
 							</div>
@@ -558,10 +559,13 @@
 										</span>
 									{/if}
 									<span class="text-muted-foreground/50">|</span>
-									<span class="text-muted-foreground">Platform</span>
+									<Server class="w-3 h-3 text-muted-foreground" />
 									<span>{systemInfo.runtime.platform}/{systemInfo.runtime.arch}</span>
 									<span class="text-muted-foreground/50">|</span>
-									<span class="text-muted-foreground">Memory</span>
+									<Cpu class="w-3 h-3 text-muted-foreground" />
+									<span>{systemInfo.runtime.kernel}</span>
+									<span class="text-muted-foreground/50">|</span>
+									<MemoryStick class="w-3 h-3 text-muted-foreground" />
 									<span>{formatBytes(systemInfo.runtime.memory.rss)}</span>
 								</div>
 								{#if systemInfo.runtime.container.inContainer}
@@ -585,7 +589,7 @@
 						<!-- Database Info -->
 						<div class="space-y-1.5">
 							<div class="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-								<HardDrive class="w-3.5 h-3.5" />
+								<Database class="w-3.5 h-3.5" />
 								Database
 							</div>
 							<div class="text-sm pl-5 space-y-1">

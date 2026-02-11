@@ -7,6 +7,7 @@ import {
 	type NotificationEventType
 } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
+import { auditNotification } from '$lib/server/audit';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ cookies }) => {
@@ -32,7 +33,8 @@ export const GET: RequestHandler = async ({ cookies }) => {
 	}
 };
 
-export const POST: RequestHandler = async ({ request, cookies }) => {
+export const POST: RequestHandler = async (event) => {
+	const { request, cookies } = event;
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !await auth.can('notifications', 'create')) {
 		return json({ error: 'Permission denied' }, { status: 403 });
@@ -72,6 +74,9 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			config,
 			eventTypes: resolvedEventTypes as NotificationEventType[]
 		});
+
+		// Audit log
+		await auditNotification(event, 'create', setting.id, setting.name);
 
 		return json(setting);
 	} catch (error: any) {

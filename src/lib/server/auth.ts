@@ -9,8 +9,9 @@
  * - SameSite=Strict (CSRF protection)
  */
 
-import { randomBytes } from 'node:crypto';
 import os from 'node:os';
+import { secureRandomBytes, usingFallback } from './crypto-fallback';
+import { argon2id, argon2Verify } from 'hash-wasm';
 import type { Cookies } from '@sveltejs/kit';
 import {
 	getAuthSettings,
@@ -94,27 +95,62 @@ export interface LoginResult {
 }
 
 // ============================================
-// Password Hashing (Argon2id via Bun.password)
+// Password Hashing (Argon2id)
 // ============================================
 
+// Argon2id parameters (matching Bun.password defaults)
+const ARGON2_MEMORY_COST = 65536; // 64 MB in kibibytes
+const ARGON2_TIME_COST = 3;       // 3 iterations
+const ARGON2_PARALLELISM = 1;     // Single-threaded
+const ARGON2_HASH_LENGTH = 32;    // 256-bit output
+const ARGON2_SALT_LENGTH = 16;    // 128-bit salt
+
 /**
- * Hash a password using Argon2id via Bun's native password API
+ * Hash a password using Argon2id
+ *
+ * On modern kernels (>=3.17): Uses Bun's native password API (faster)
+ * On old kernels (<3.17): Uses hash-wasm (WASM-based, no getrandom dependency)
+ *
  * Argon2id is the recommended variant - resistant to both side-channel and GPU attacks
  */
 export async function hashPassword(password: string): Promise<string> {
+	// On old kernels, Bun.password.hash() crashes because it internally uses getrandom()
+	// Use hash-wasm as a fallback which is pure WASM and doesn't depend on the syscall
+	if (usingFallback()) {
+		const salt = secureRandomBytes(ARGON2_SALT_LENGTH);
+		return argon2id({
+			password,
+			salt,
+			iterations: ARGON2_TIME_COST,
+			parallelism: ARGON2_PARALLELISM,
+			memorySize: ARGON2_MEMORY_COST,
+			hashLength: ARGON2_HASH_LENGTH,
+			outputType: 'encoded'  // Returns PHC format: $argon2id$v=19$m=65536,t=3,p=1$...
+		});
+	}
+
+	// Modern kernels: use Bun's native implementation (faster)
 	return Bun.password.hash(password, {
 		algorithm: 'argon2id',
-		memoryCost: 65536, // 64 MB
-		timeCost: 3        // 3 iterations
+		memoryCost: ARGON2_MEMORY_COST,
+		timeCost: ARGON2_TIME_COST
 	});
 }
 
 /**
  * Verify a password against a hash
  * Uses constant-time comparison internally
+ *
+ * Both Bun.password and hash-wasm use the same PHC format, so hashes are compatible
  */
 export async function verifyPassword(password: string, hash: string): Promise<boolean> {
 	try {
+		// On old kernels, use hash-wasm for verification
+		if (usingFallback()) {
+			return await argon2Verify({ password, hash });
+		}
+
+		// Modern kernels: use Bun's native implementation
 		return await Bun.password.verify(password, hash);
 	} catch {
 		return false;
@@ -130,7 +166,7 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
  * 32 bytes = 256 bits of entropy
  */
 function generateSessionToken(): string {
-	return randomBytes(32).toString('base64url');
+	return secureRandomBytes(32).toString('base64url');
 }
 
 /**
@@ -150,13 +186,19 @@ export async function createUserSession(
 
 	// Get session timeout from settings
 	const settings = await getAuthSettings();
-	const expiresAt = new Date(Date.now() + settings.sessionTimeout * 1000).toISOString();
+	// Safety: ensure sessionTimeout is valid (1 second to 30 days), default to 24h if invalid
+	const MAX_SESSION_TIMEOUT = 2592000; // 30 days in seconds
+	const DEFAULT_SESSION_TIMEOUT = 86400; // 24 hours in seconds
+	const sessionTimeout = (settings?.sessionTimeout > 0 && settings?.sessionTimeout <= MAX_SESSION_TIMEOUT)
+		? settings.sessionTimeout
+		: DEFAULT_SESSION_TIMEOUT;
+	const expiresAt = new Date(Date.now() + sessionTimeout * 1000).toISOString();
 
 	// Create session in database
 	const session = await dbCreateSession(sessionId, userId, provider, expiresAt);
 
 	// Set secure cookie
-	setSessionCookie(cookies, sessionId, settings.sessionTimeout);
+	setSessionCookie(cookies, sessionId, sessionTimeout);
 
 	// Update user's last login time
 	await updateUser(userId, { lastLogin: new Date().toISOString() });
@@ -411,7 +453,7 @@ export async function authenticateLocal(
 
 	if (!user) {
 		// Use constant time to prevent timing attacks
-		await Bun.password.hash('dummy', { algorithm: 'argon2id' });
+		await hashPassword('dummy');
 		return { success: false, error: 'Invalid username or password' };
 	}
 
@@ -668,7 +710,8 @@ async function tryLdapAuth(
 		};
 	} catch (error: any) {
 		try { await client.unbind(); } catch {}
-		console.error('LDAP authentication error:', error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[LDAP] Authentication error:', errorMsg);
 		return { success: false, error: 'LDAP authentication failed' };
 	}
 }
@@ -730,7 +773,8 @@ async function checkLdapGroupMembership(
 		await client.unbind();
 		return searchEntries.length > 0;
 	} catch (error) {
-		console.error('LDAP group membership check failed:', error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[LDAP] Group membership check failed:', errorMsg);
 		try { await client.unbind(); } catch {}
 		return false;
 	}
@@ -1127,7 +1171,7 @@ async function getOidcDiscovery(issuerUrl: string): Promise<OidcDiscoveryDocumen
  * Generate PKCE code verifier and challenge
  */
 function generatePkce(): { codeVerifier: string; codeChallenge: string } {
-	const codeVerifier = randomBytes(32).toString('base64url');
+	const codeVerifier = secureRandomBytes(32).toString('base64url');
 	const hasher = new Bun.CryptoHasher('sha256');
 	hasher.update(codeVerifier);
 	const codeChallenge = hasher.digest('base64url') as string;
@@ -1150,8 +1194,8 @@ export async function buildOidcAuthorizationUrl(
 		const discovery = await getOidcDiscovery(config.issuerUrl);
 
 		// Generate state, nonce, and PKCE
-		const state = randomBytes(32).toString('base64url');
-		const nonce = randomBytes(16).toString('base64url');
+		const state = secureRandomBytes(32).toString('base64url');
+		const nonce = secureRandomBytes(16).toString('base64url');
 		const { codeVerifier, codeChallenge } = generatePkce();
 
 		// Store state for callback verification (expires in 10 minutes)
@@ -1178,7 +1222,8 @@ export async function buildOidcAuthorizationUrl(
 		const authUrl = `${discovery.authorization_endpoint}?${params.toString()}`;
 		return { url: authUrl, state };
 	} catch (error: any) {
-		console.error('Failed to build OIDC authorization URL:', error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[OIDC] Failed to build authorization URL:', errorMsg);
 		return { error: error.message || 'Failed to initialize SSO' };
 	}
 }
@@ -1379,7 +1424,8 @@ export async function handleOidcCallback(
 			providerName: config.name
 		};
 	} catch (error: any) {
-		console.error('OIDC callback error:', error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[OIDC] Callback error:', errorMsg);
 		return { success: false, error: error.message || 'SSO authentication failed' };
 	}
 }

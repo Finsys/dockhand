@@ -45,7 +45,7 @@ export const PUT: RequestHandler = async ({ request, cookies }) => {
 		const validTerminalFontIds = monospaceFonts.map(f => f.id);
 		const validFontSizes = ['xsmall', 'small', 'normal', 'medium', 'large', 'xlarge'];
 
-		const updates: { lightTheme?: string; darkTheme?: string; font?: string; fontSize?: string; gridFontSize?: string; terminalFont?: string } = {};
+		const updates: { lightTheme?: string; darkTheme?: string; font?: string; fontSize?: string; gridFontSize?: string; terminalFont?: string; editorFont?: string } = {};
 
 		if (data.lightTheme !== undefined) {
 			if (!validLightThemeIds.includes(data.lightTheme)) {
@@ -87,6 +87,13 @@ export const PUT: RequestHandler = async ({ request, cookies }) => {
 				return json({ error: 'Invalid terminal font' }, { status: 400 });
 			}
 			updates.terminalFont = data.terminalFont;
+		}
+
+		if (data.editorFont !== undefined) {
+			if (!validTerminalFontIds.includes(data.editorFont)) {
+				return json({ error: 'Invalid editor font' }, { status: 400 });
+			}
+			updates.editorFont = data.editorFont;
 		}
 
 		await setUserThemePreferences(currentUser.id, updates);

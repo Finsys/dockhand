@@ -1,0 +1,83 @@
+name: Bug report
+description: Something is not working
+title: "[BUG] Concise description of the issue"
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        #### Thank you for taking the time to report a bug!
+        #### Have a question? 👉 [Start a new discussion](https://github.com/Finsys/dockhand/discussions/new).
+
+        #### Before opening an issue, please double check:
+
+        - [The troubleshooting documentation](https://dockhand.pro/manual/#troubleshooting).
+        - [The installation instructions](https://dockhand.pro/manual/#quick-start).
+        - [Existing issues and discussions](https://github.com/Finsys/dockhand/search?q=&type=issues).
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear and concise description of what the bug is. If applicable, add screenshots to help explain your problem.
+      placeholder: |
+        Currently Dockhand does not work when...
+
+        [Screenshot if applicable]
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Steps to reproduce the behavior.
+      placeholder: |
+        1. Go to '...'
+        2. Click on '....'
+        3. See error
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Logs related to your issue.
+      render: bash
+    validations:
+      required: true
+  - type: textarea
+    id: logs_browser
+    attributes:
+      label: Browser logs
+      description: Logs from the web browser related to your issue, if needed
+      render: bash
+  - type: input
+    id: version
+    attributes:
+      label: Dockhand version
+      description: Check the 'About' section in Settings for the version number
+      placeholder: e.g. 1.0.14 352a295 (Jan 30, 2026)
+    validations:
+      required: true
+  - type: input
+    id: hawser-version
+    attributes:
+      label: Hawser version (if used)
+    validations:
+      required: false
+  - type: input
+    id: connection
+    attributes:
+      label: Connection mode
+      description: How you connect your Docker host to Dockhand
+      placeholder: socket/direct IP/hawser/hawser-edge
+    validations:
+      required: true
+  - type: checkboxes
+    id: required-checks
+    attributes:
+      label: Please confirm the following
+      options:
+        - label: I have already searched for relevant existing issues and discussions before opening this report.
+          required: true
+        - label: I have updated the title field above with a concise description.
+          required: true

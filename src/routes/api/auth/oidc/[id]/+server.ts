@@ -6,6 +6,8 @@ import {
 	updateOidcConfig,
 	deleteOidcConfig
 } from '$lib/server/db';
+import { auditOidcProvider } from '$lib/server/audit';
+import { computeAuditDiff } from '$lib/utils/diff';
 
 // GET /api/auth/oidc/[id] - Get specific OIDC configuration
 export const GET: RequestHandler = async ({ params, cookies }) => {
@@ -43,7 +45,8 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 };
 
 // PUT /api/auth/oidc/[id] - Update OIDC configuration
-export const PUT: RequestHandler = async ({ params, request, cookies }) => {
+export const PUT: RequestHandler = async (event) => {
+	const { params, request, cookies } = event;
 	const auth = await authorize(cookies);
 
 	// When auth is enabled, require authentication and settings:edit permission
@@ -93,6 +96,14 @@ export const PUT: RequestHandler = async ({ params, request, cookies }) => {
 			return json({ error: 'Failed to update OIDC configuration' }, { status: 500 });
 		}
 
+		// Compute diff for audit (exclude sensitive fields)
+		const diff = computeAuditDiff(existing, config, {
+			excludeFields: ['clientSecret', 'createdAt', 'updatedAt']
+		});
+
+		// Audit log
+		await auditOidcProvider(event, 'update', config.id, config.name, diff);
+
 		return json({
 			...config,
 			clientSecret: config.clientSecret ? '********' : ''
@@ -104,7 +115,8 @@ export const PUT: RequestHandler = async ({ params, request, cookies }) => {
 };
 
 // DELETE /api/auth/oidc/[id] - Delete OIDC configuration
-export const DELETE: RequestHandler = async ({ params, cookies }) => {
+export const DELETE: RequestHandler = async (event) => {
+	const { params, cookies } = event;
 	const auth = await authorize(cookies);
 
 	// When auth is enabled, require authentication and settings:edit permission
@@ -123,10 +135,19 @@ export const DELETE: RequestHandler = async ({ params, cookies }) => {
 	}
 
 	try {
-		const deleted = await deleteOidcConfig(id);
-		if (!deleted) {
+		// Get config before deletion for audit
+		const config = await getOidcConfig(id);
+		if (!config) {
 			return json({ error: 'OIDC configuration not found' }, { status: 404 });
 		}
+
+		const deleted = await deleteOidcConfig(id);
+		if (!deleted) {
+			return json({ error: 'Failed to delete OIDC configuration' }, { status: 500 });
+		}
+
+		// Audit log
+		await auditOidcProvider(event, 'delete', id, config.name);
 
 		return json({ success: true });
 	} catch (error) {

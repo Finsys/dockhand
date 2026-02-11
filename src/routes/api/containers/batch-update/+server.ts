@@ -1,15 +1,9 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
-import {
-	listContainers,
-	inspectContainer,
-	stopContainer,
-	removeContainer,
-	createContainer,
-	pullImage
-} from '$lib/server/docker';
+import { listContainers, pullImage, inspectContainer } from '$lib/server/docker';
 import { auditContainer } from '$lib/server/audit';
+import { recreateContainer } from '$lib/server/scheduler/tasks/container-update';
 
 export interface BatchUpdateResult {
 	containerId: string;
@@ -20,6 +14,8 @@ export interface BatchUpdateResult {
 
 /**
  * Batch update containers by recreating them with latest images.
+ * Preserves ALL container settings including health checks, resource limits,
+ * capabilities, DNS, security options, ulimits, and network connections.
  * Expects JSON body: { containerIds: string[] }
  */
 export const POST: RequestHandler = async (event) => {
@@ -62,9 +58,7 @@ export const POST: RequestHandler = async (event) => {
 
 				// Get full container config
 				const inspectData = await inspectContainer(containerId, envIdNum) as any;
-				const wasRunning = inspectData.State.Running;
 				const config = inspectData.Config;
-				const hostConfig = inspectData.HostConfig;
 				const imageName = config.Image;
 				const containerName = container.name;
 
@@ -81,47 +75,33 @@ export const POST: RequestHandler = async (event) => {
 					continue;
 				}
 
-				// Stop container if running
-				if (wasRunning) {
-					await stopContainer(containerId, envIdNum);
-				}
+				let updateSuccess = false;
+				let newContainerId = containerId;
 
-				// Remove old container
-				await removeContainer(containerId, true, envIdNum);
-
-				// Prepare port bindings
-				const ports: { [key: string]: { HostPort: string } } = {};
-				if (hostConfig.PortBindings) {
-					for (const [containerPort, bindings] of Object.entries(hostConfig.PortBindings)) {
-						if (bindings && (bindings as any[]).length > 0) {
-							ports[containerPort] = { HostPort: (bindings as any[])[0].HostPort || '' };
-						}
+				updateSuccess = await recreateContainer(containerName, envIdNum);
+				if (updateSuccess) {
+					const updatedContainers = await listContainers(true, envIdNum);
+					const updatedContainer = updatedContainers.find(c => c.name === containerName);
+					if (updatedContainer) {
+						newContainerId = updatedContainer.id;
 					}
 				}
 
-				// Create new container
-				const newContainer = await createContainer({
-					name: containerName,
-					image: imageName,
-					ports,
-					volumeBinds: hostConfig.Binds || [],
-					env: config.Env || [],
-					labels: config.Labels || {},
-					cmd: config.Cmd || undefined,
-					restartPolicy: hostConfig.RestartPolicy?.Name || 'no',
-					networkMode: hostConfig.NetworkMode || undefined
-				}, envIdNum);
-
-				// Start if was running
-				if (wasRunning) {
-					await newContainer.start();
+				if (!updateSuccess) {
+					results.push({
+						containerId,
+						containerName,
+						success: false,
+						error: 'Container recreation failed'
+					});
+					continue;
 				}
 
 				// Audit log
-				await auditContainer(event, 'update', newContainer.id, containerName, envIdNum, { batchUpdate: true });
+				await auditContainer(event, 'update', newContainerId, containerName, envIdNum, { batchUpdate: true });
 
 				results.push({
-					containerId: newContainer.id,
+					containerId: newContainerId,
 					containerName,
 					success: true
 				});

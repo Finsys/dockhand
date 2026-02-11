@@ -64,8 +64,10 @@
 		if (isDockerHub(targetRegistry)) {
 			return tag;
 		}
-		const host = new URL(targetRegistry.url).host;
-		return `${host}/${tag}`;
+		// Include both host and path (e.g., registry.example.com/organization)
+		const url = new URL(targetRegistry.url);
+		const hostWithPath = url.host + (url.pathname !== '/' ? url.pathname.replace(/\/$/, '') : '');
+		return `${hostWithPath}/${tag}`;
 	});
 
 	const isProcessing = $derived(pushStatus === 'pushing');
@@ -282,7 +284,7 @@
 						onclick={startPush}
 						disabled={!targetRegistryId || pushableRegistries.length === 0}
 					>
-						<Upload class="w-4 h-4 mr-2" />
+						<Upload class="w-4 h-4" />
 						Push
 					</Button>
 				{/if}

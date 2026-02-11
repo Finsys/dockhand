@@ -11,7 +11,8 @@
 		Unplug,
 		Icon,
 		CircleArrowUp,
-		CircleFadingArrowUp
+		CircleFadingArrowUp,
+		Loader2
 	} from 'lucide-svelte';
 	import { whale } from '@lucide/lab';
 	import { getIconComponent } from '$lib/utils/icons';
@@ -27,7 +28,7 @@
 		port?: number | null;
 		icon: string;
 		socketPath?: string;
-		online: boolean;
+		online?: boolean; // undefined = connecting, false = offline, true = online
 		scannerEnabled: boolean;
 		collectActivity: boolean;
 		collectMetrics: boolean;
@@ -39,6 +40,10 @@
 		height?: number;
 		compact?: boolean;
 	}
+
+	// Derived states for connecting/offline
+	const showConnecting = $derived(online === undefined);
+	const showOffline = $derived(online === false);
 
 	let {
 		name,
@@ -88,10 +93,12 @@
 		<div class="min-w-0 flex-1">
 			<div class="flex items-center gap-1.5">
 				<span class="font-medium text-sm truncate">{name}</span>
-				{#if online}
-					<Wifi class="w-3 h-3 text-green-500 shrink-0" />
-				{:else}
+				{#if showConnecting}
+					<Loader2 class="w-3 h-3 text-muted-foreground animate-spin shrink-0" />
+				{:else if showOffline}
 					<WifiOff class="w-3 h-3 text-red-500 shrink-0" />
+				{:else}
+					<Wifi class="w-3 h-3 text-green-500 shrink-0" />
 				{/if}
 			</div>
 			<span class="text-xs text-muted-foreground truncate block">{hostDisplay}</span>
@@ -124,10 +131,12 @@
 			<div class="min-w-0 flex-1">
 				<div class="flex items-center gap-1.5">
 					<span class="font-medium text-sm truncate">{name}</span>
-					{#if online}
-						<Wifi class="w-3 h-3 text-green-500 shrink-0" />
-					{:else}
+					{#if showConnecting}
+						<Loader2 class="w-3 h-3 text-muted-foreground animate-spin shrink-0" />
+					{:else if showOffline}
 						<WifiOff class="w-3 h-3 text-red-500 shrink-0" />
+					{:else}
+						<Wifi class="w-3 h-3 text-green-500 shrink-0" />
 					{/if}
 				</div>
 				<span class="text-xs text-muted-foreground truncate block">{hostDisplay}</span>

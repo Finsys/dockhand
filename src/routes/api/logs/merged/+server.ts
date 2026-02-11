@@ -36,6 +36,7 @@ interface DockerClientConfig {
 	ca?: string;
 	cert?: string;
 	key?: string;
+	skipVerify?: boolean;
 	hawserToken?: string;
 	environmentId?: number;
 }
@@ -62,6 +63,7 @@ async function getDockerConfig(envId?: number | null): Promise<DockerClientConfi
 		ca: env.tlsCa || undefined,
 		cert: env.tlsCert || undefined,
 		key: env.tlsKey || undefined,
+		skipVerify: env.tlsSkipVerify || undefined,
 		hawserToken: env.connectionType === 'hawser-standard' ? env.hawserToken || undefined : undefined
 	};
 }
@@ -432,13 +434,21 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 						if (config.hawserToken) inspectHeaders['X-Hawser-Token'] = config.hawserToken;
 
 						// Build fetch options - only include tls for HTTPS
-						const fetchOptions: RequestInit & { tls?: unknown } = {
+						const fetchOptions: any = {
 							headers: inspectHeaders,
-							signal: AbortSignal.timeout(30000) // 30 second timeout for inspect
+							signal: AbortSignal.timeout(30000)
 						};
-						if (config.type === 'https' && config.ca) {
-							// @ts-ignore - Bun TLS option
-							fetchOptions.tls = { ca: config.ca, cert: config.cert, key: config.key };
+						if (config.type === 'https') {
+							fetchOptions.tls = {
+								sessionTimeout: 0,
+								servername: config.host,
+								rejectUnauthorized: !config.skipVerify
+							};
+							if (config.ca) fetchOptions.tls.ca = [config.ca];
+							if (config.cert) fetchOptions.tls.cert = [config.cert];
+							if (config.key) fetchOptions.tls.key = config.key;
+							fetchOptions.keepalive = false;
+							if (process.env.DEBUG_TLS) fetchOptions.verbose = true;
 						}
 
 						inspectResponse = await fetch(inspectUrl, fetchOptions);
@@ -470,13 +480,21 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 
 						// For logs streaming, use the cleanup abort controller without a timeout
 						// (the stream needs to stay open indefinitely)
-						const fetchOptions: RequestInit & { tls?: unknown } = {
+						const fetchOptions: any = {
 							headers: logsHeaders,
 							signal: abortController.signal
 						};
-						if (config.type === 'https' && config.ca) {
-							// @ts-ignore - Bun TLS option
-							fetchOptions.tls = { ca: config.ca, cert: config.cert, key: config.key };
+						if (config.type === 'https') {
+							fetchOptions.tls = {
+								sessionTimeout: 0,
+								servername: config.host,
+								rejectUnauthorized: !config.skipVerify
+							};
+							if (config.ca) fetchOptions.tls.ca = [config.ca];
+							if (config.cert) fetchOptions.tls.cert = [config.cert];
+							if (config.key) fetchOptions.tls.key = config.key;
+							fetchOptions.keepalive = false;
+							if (process.env.DEBUG_TLS) fetchOptions.verbose = true;
 						}
 
 						logsResponse = await fetch(logsUrl, fetchOptions);

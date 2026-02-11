@@ -2,6 +2,7 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from '@sveltejs/kit';
 import { authorize } from '$lib/server/authorize';
 import { getLdapConfigs, createLdapConfig } from '$lib/server/db';
+import { auditLdapConfig } from '$lib/server/audit';
 
 // GET /api/auth/ldap - List all LDAP configurations
 export const GET: RequestHandler = async ({ cookies }) => {
@@ -31,7 +32,8 @@ export const GET: RequestHandler = async ({ cookies }) => {
 };
 
 // POST /api/auth/ldap - Create a new LDAP configuration
-export const POST: RequestHandler = async ({ request, cookies }) => {
+export const POST: RequestHandler = async (event) => {
+	const { request, cookies } = event;
 	const auth = await authorize(cookies);
 
 	// Allow access when auth is disabled (setup mode) or when user is admin
@@ -69,6 +71,9 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			tlsEnabled: data.tlsEnabled ?? false,
 			tlsCa: data.tlsCa || undefined
 		});
+
+		// Audit log
+		await auditLdapConfig(event, 'create', config.id, config.name);
 
 		return json({
 			...config,

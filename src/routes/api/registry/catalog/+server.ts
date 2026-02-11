@@ -1,10 +1,14 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getRegistry } from '$lib/server/db';
+import { getRegistryAuth } from '$lib/server/docker';
+
+const PAGE_SIZE = 100;
 
 export const GET: RequestHandler = async ({ url }) => {
 	try {
 		const registryId = url.searchParams.get('registry');
+		const lastParam = url.searchParams.get('last'); // For pagination
 
 		if (!registryId) {
 			return json({ error: 'Registry ID is required' }, { status: 400 });
@@ -20,22 +24,20 @@ export const GET: RequestHandler = async ({ url }) => {
 			return json({ error: 'Docker Hub does not support catalog listing. Please use search instead.' }, { status: 400 });
 		}
 
-		// Build the catalog URL
-		let catalogUrl = registry.url;
-		if (!catalogUrl.endsWith('/')) {
-			catalogUrl += '/';
-		}
-		catalogUrl += 'v2/_catalog';
+		const { baseUrl, orgPath, authHeader } = await getRegistryAuth(registry, 'registry:catalog:*');
 
-		// Prepare headers
+		// Build catalog URL with pagination
+		let catalogUrl = `${baseUrl}/v2/_catalog?n=${PAGE_SIZE}`;
+		if (lastParam) {
+			catalogUrl += `&last=${encodeURIComponent(lastParam)}`;
+		}
+
 		const headers: HeadersInit = {
 			'Accept': 'application/json'
 		};
 
-		// Add auth if credentials are present
-		if (registry.username && registry.password) {
-			const credentials = Buffer.from(`${registry.username}:${registry.password}`).toString('base64');
-			headers['Authorization'] = `Basic ${credentials}`;
+		if (authHeader) {
+			headers['Authorization'] = authHeader;
 		}
 
 		const response = await fetch(catalogUrl, {
@@ -56,7 +58,24 @@ export const GET: RequestHandler = async ({ url }) => {
 		const data = await response.json();
 
 		// The V2 API returns { repositories: [...] }
-		const repositories = data.repositories || [];
+		let repositories: string[] = data.repositories || [];
+
+		// If the registry URL has an organization path, filter to only show repos under that path
+		if (orgPath) {
+			const orgPrefix = orgPath.replace(/^\//, ''); // Remove leading slash
+			repositories = repositories.filter(repo => repo.startsWith(orgPrefix + '/') || repo === orgPrefix);
+		}
+
+		// Parse Link header for pagination
+		// Format: </v2/_catalog?last=xxx&n=100>; rel="next"
+		let nextLast: string | null = null;
+		const linkHeader = response.headers.get('Link');
+		if (linkHeader) {
+			const nextMatch = linkHeader.match(/<[^>]*[?&]last=([^&>]+)[^>]*>;\s*rel="next"/);
+			if (nextMatch) {
+				nextLast = decodeURIComponent(nextMatch[1]);
+			}
+		}
 
 		// For each repository, we could fetch tags, but that's expensive
 		// Just return the repository names for now
@@ -68,7 +87,14 @@ export const GET: RequestHandler = async ({ url }) => {
 			is_automated: false
 		}));
 
-		return json(results);
+		return json({
+			repositories: results,
+			pagination: {
+				pageSize: PAGE_SIZE,
+				hasMore: !!nextLast,
+				nextLast: nextLast
+			}
+		});
 	} catch (error: any) {
 		console.error('Error fetching registry catalog:', error);
 

@@ -2,6 +2,8 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from '@sveltejs/kit';
 import { authorize } from '$lib/server/authorize';
 import { getLdapConfig, updateLdapConfig, deleteLdapConfig } from '$lib/server/db';
+import { auditLdapConfig } from '$lib/server/audit';
+import { computeAuditDiff } from '$lib/utils/diff';
 
 // GET /api/auth/ldap/[id] - Get a specific LDAP configuration
 export const GET: RequestHandler = async ({ params, cookies }) => {
@@ -38,7 +40,8 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 };
 
 // PUT /api/auth/ldap/[id] - Update a LDAP configuration
-export const PUT: RequestHandler = async ({ params, request, cookies }) => {
+export const PUT: RequestHandler = async (event) => {
+	const { params, request, cookies } = event;
 	const auth = await authorize(cookies);
 
 	// Allow access when auth is disabled (setup mode) or when user is admin
@@ -89,6 +92,14 @@ export const PUT: RequestHandler = async ({ params, request, cookies }) => {
 			return json({ error: 'Failed to update configuration' }, { status: 500 });
 		}
 
+		// Compute diff for audit (exclude sensitive fields)
+		const diff = computeAuditDiff(existing, config, {
+			excludeFields: ['bindPassword', 'tlsCa', 'createdAt', 'updatedAt']
+		});
+
+		// Audit log
+		await auditLdapConfig(event, 'update', config.id, config.name, diff);
+
 		return json({
 			...config,
 			bindPassword: config.bindPassword ? '********' : undefined
@@ -100,7 +111,8 @@ export const PUT: RequestHandler = async ({ params, request, cookies }) => {
 };
 
 // DELETE /api/auth/ldap/[id] - Delete a LDAP configuration
-export const DELETE: RequestHandler = async ({ params, cookies }) => {
+export const DELETE: RequestHandler = async (event) => {
+	const { params, cookies } = event;
 	const auth = await authorize(cookies);
 
 	// Allow access when auth is disabled (setup mode) or when user is admin
@@ -118,10 +130,19 @@ export const DELETE: RequestHandler = async ({ params, cookies }) => {
 	}
 
 	try {
-		const deleted = await deleteLdapConfig(id);
-		if (!deleted) {
+		// Get config before deletion for audit
+		const config = await getLdapConfig(id);
+		if (!config) {
 			return json({ error: 'LDAP configuration not found' }, { status: 404 });
 		}
+
+		const deleted = await deleteLdapConfig(id);
+		if (!deleted) {
+			return json({ error: 'Failed to delete LDAP configuration' }, { status: 500 });
+		}
+
+		// Audit log
+		await auditLdapConfig(event, 'delete', id, config.name);
 
 		return json({ success: true });
 	} catch (error) {

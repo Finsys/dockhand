@@ -2,10 +2,86 @@ import { sveltekit } from '@sveltejs/kit/vite';
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig, type Plugin } from 'vite';
 import { execSync } from 'child_process';
-import { existsSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 import { Database } from 'bun:sqlite';
+import { createDecipheriv } from 'node:crypto';
+
+// ============ Encryption/Decryption for dev mode ============
+const ENCRYPTED_PREFIX = 'enc:v1:';
+const IV_LENGTH = 12;
+const AUTH_TAG_LENGTH = 16;
+
+let _encryptionKey: Buffer | null = null;
+
+function getEncryptionKey(): Buffer | null {
+	if (_encryptionKey) return _encryptionKey;
+
+	const dataDir = process.env.DATA_DIR || './data';
+	const keyPath = join(dataDir, '.encryption_key');
+	const envKey = process.env.ENCRYPTION_KEY;
+
+	// Try file first
+	if (existsSync(keyPath)) {
+		try {
+			_encryptionKey = readFileSync(keyPath);
+			return _encryptionKey;
+		} catch {
+			// Fall through
+		}
+	}
+
+	// Try env var
+	if (envKey) {
+		try {
+			_encryptionKey = Buffer.from(envKey, 'base64');
+			return _encryptionKey;
+		} catch {
+			// Fall through
+		}
+	}
+
+	return null;
+}
+
+function decrypt(value: string | null | undefined): string | null {
+	if (!value || !value.startsWith(ENCRYPTED_PREFIX)) {
+		return value as string | null;
+	}
+
+	const key = getEncryptionKey();
+	if (!key) {
+		console.error('[vite.config] Cannot decrypt: no encryption key available');
+		return value;
+	}
+
+	try {
+		const payload = value.substring(ENCRYPTED_PREFIX.length);
+		const combined = Buffer.from(payload, 'base64');
+
+		if (combined.length < IV_LENGTH + AUTH_TAG_LENGTH + 1) {
+			return value;
+		}
+
+		const iv = combined.subarray(0, IV_LENGTH);
+		const authTag = combined.subarray(IV_LENGTH, IV_LENGTH + AUTH_TAG_LENGTH);
+		const ciphertext = combined.subarray(IV_LENGTH + AUTH_TAG_LENGTH);
+
+		const decipher = createDecipheriv('aes-256-gcm', key, iv);
+		decipher.setAuthTag(authTag);
+
+		const decrypted = Buffer.concat([
+			decipher.update(ciphertext),
+			decipher.final()
+		]);
+
+		return decrypted.toString('utf8');
+	} catch (error) {
+		console.error('[vite.config] Decryption failed:', error);
+		return value;
+	}
+}
 
 const WS_PORT = 5174;
 
@@ -18,6 +94,13 @@ interface DockerTarget {
 	port?: number;
 	hawserToken?: string;
 	environmentId?: number;
+	// TLS configuration for mTLS connections
+	tls?: {
+		ca?: string;
+		cert?: string;
+		key?: string;
+		rejectUnauthorized?: boolean;
+	};
 }
 
 interface EnvironmentRow {
@@ -28,6 +111,11 @@ interface EnvironmentRow {
 	host?: string;
 	port?: number;
 	hawser_token?: string;
+	protocol?: string;
+	tls_ca?: string;
+	tls_cert?: string;
+	tls_key?: string;
+	tls_skip_verify?: boolean | number;
 }
 
 // ============ Docker Target Resolution ============
@@ -51,11 +139,29 @@ function resolveDockerTarget(
 		return { type: 'hawser-edge', environmentId: envId };
 	}
 
+	// Build TLS config if using HTTPS protocol
+	let tls: DockerTarget['tls'] | undefined;
+	if (env.protocol === 'https') {
+		tls = {
+			rejectUnauthorized: !env.tls_skip_verify
+		};
+		if (env.tls_ca) tls.ca = env.tls_ca;
+		if (env.tls_cert) tls.cert = env.tls_cert;
+		// tls_key is encrypted in database - decrypt it
+		if (env.tls_key) tls.key = decrypt(env.tls_key) || undefined;
+	}
+
+	// hawser_token is also encrypted
+	const hawserToken = env.connection_type === 'hawser-standard' && env.hawser_token
+		? decrypt(env.hawser_token) || undefined
+		: undefined;
+
 	return {
 		type: 'tcp',
 		host: env.host || 'localhost',
 		port: env.port || 2375,
-		hawserToken: env.connection_type === 'hawser-standard' ? env.hawser_token : undefined
+		hawserToken,
+		tls
 	};
 }
 
@@ -66,7 +172,9 @@ function buildExecStartHttpRequest(execId: string, target: DockerTarget): string
 	const tokenHeader = target.type === 'tcp' && target.hawserToken
 		? `X-Hawser-Token: ${target.hawserToken}\r\n`
 		: '';
-	return `POST /exec/${execId}/start HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n${tokenHeader}Connection: Upgrade\r\nUpgrade: tcp\r\nContent-Length: ${body.length}\r\n\r\n${body}`;
+	// Use actual host for proper routing through reverse proxies like Caddy
+	const host = target.host || 'localhost';
+	return `POST /exec/${execId}/start HTTP/1.1\r\nHost: ${host}\r\nContent-Type: application/json\r\n${tokenHeader}Connection: Upgrade\r\nUpgrade: tcp\r\nContent-Length: ${body.length}\r\n\r\n${body}`;
 }
 
 // ============ Stream Processing ============
@@ -254,9 +362,22 @@ async function createExecForWs(containerId: string, cmd: string[], user: string,
 		url = 'http://localhost/containers/' + containerId + '/exec';
 		fetchOpts.unix = target.socket;
 	} else {
-		url = 'http://' + target.host + ':' + target.port + '/containers/' + containerId + '/exec';
+		const protocol = target.tls ? 'https' : 'http';
+		url = protocol + '://' + target.host + ':' + target.port + '/containers/' + containerId + '/exec';
 		if (target.hawserToken) {
 			headers['X-Hawser-Token'] = target.hawserToken;
+		}
+		// Add TLS options for mTLS connections
+		if (target.tls) {
+			fetchOpts.tls = {
+				sessionTimeout: 0, // Disable TLS session caching
+				servername: target.host,
+				rejectUnauthorized: target.tls.rejectUnauthorized ?? true
+			};
+			if (target.tls.ca) fetchOpts.tls.ca = [target.tls.ca];
+			if (target.tls.cert) fetchOpts.tls.cert = [target.tls.cert];
+			if (target.tls.key) fetchOpts.tls.key = target.tls.key;
+			fetchOpts.keepalive = false;
 		}
 	}
 	const res = await fetch(url, fetchOpts);
@@ -272,9 +393,22 @@ async function resizeExecForWs(execId: string, cols: number, rows: number, targe
 			url = 'http://localhost/exec/' + execId + '/resize?h=' + rows + '&w=' + cols;
 			fetchOpts.unix = target.socket;
 		} else {
-			url = 'http://' + target.host + ':' + target.port + '/exec/' + execId + '/resize?h=' + rows + '&w=' + cols;
+			const protocol = target.tls ? 'https' : 'http';
+			url = protocol + '://' + target.host + ':' + target.port + '/exec/' + execId + '/resize?h=' + rows + '&w=' + cols;
 			if (target.hawserToken) {
 				fetchOpts.headers = { 'X-Hawser-Token': target.hawserToken };
+			}
+			// Add TLS options for mTLS connections
+			if (target.tls) {
+				fetchOpts.tls = {
+					sessionTimeout: 0,
+					servername: target.host,
+					rejectUnauthorized: target.tls.rejectUnauthorized ?? true
+				};
+				if (target.tls.ca) fetchOpts.tls.ca = [target.tls.ca];
+				if (target.tls.cert) fetchOpts.tls.cert = [target.tls.cert];
+				if (target.tls.key) fetchOpts.tls.key = target.tls.key;
+				fetchOpts.keepalive = false;
 			}
 		}
 		await fetch(url, fetchOpts);
@@ -454,7 +588,6 @@ function webSocketPlugin(): Plugin {
 						}
 
 						const target = getDockerTarget(envId);
-						console.log('[Terminal WS] Open connId:', connId, 'container:', containerId, 'target:', target.type);
 
 						try {
 							// Handle Hawser Edge mode differently - use WebSocket protocol
@@ -468,7 +601,6 @@ function webSocketPlugin(): Plugin {
 
 								// Generate unique exec ID
 								const execId = crypto.randomUUID();
-								console.log('[Terminal WS] Starting Edge exec:', execId, 'container:', containerId);
 
 								// Track this session
 								edgeExecSessions.set(execId, { ws, execId, environmentId: target.environmentId });
@@ -524,7 +656,19 @@ function webSocketPlugin(): Plugin {
 										ws.close();
 									}
 								},
-								error() {},
+								error(socket: any, error: any) {
+									console.error('[Terminal WS] Socket error:', error?.message || error);
+									if (ws.readyState === 1) {
+										ws.send(JSON.stringify({ type: 'error', message: `Connection error: ${error?.message || 'Unknown error'}` }));
+									}
+								},
+								connectError(socket: any, error: any) {
+									console.error('[Terminal WS] Connect error:', error?.message || error);
+									if (ws.readyState === 1) {
+										ws.send(JSON.stringify({ type: 'error', message: `Failed to connect: ${error?.message || 'Unknown error'}` }));
+										ws.close();
+									}
+								},
 								open(socket: any) {
 									// Send exec start request (using shared helper)
 									const httpRequest = buildExecStartHttpRequest(execId, target);
@@ -536,13 +680,24 @@ function webSocketPlugin(): Plugin {
 							if (target.type === 'unix') {
 								dockerStream = await Bun.connect({ unix: target.socket, socket: socketHandler });
 							} else if (target.type === 'tcp') {
-								dockerStream = await Bun.connect({ hostname: target.host, port: target.port, socket: socketHandler });
+								// Build connection options with TLS if configured
+								const connectOpts: any = { hostname: target.host, port: target.port, socket: socketHandler };
+								if (target.tls) {
+									connectOpts.tls = {
+										sessionTimeout: 0,  // Disable TLS session caching for mTLS
+										servername: target.host,  // Required for SNI
+										rejectUnauthorized: target.tls.rejectUnauthorized ?? true
+									};
+									if (target.tls.ca) connectOpts.tls.ca = [target.tls.ca];
+									if (target.tls.cert) connectOpts.tls.cert = [target.tls.cert];
+									if (target.tls.key) connectOpts.tls.key = target.tls.key;
+								}
+								dockerStream = await Bun.connect(connectOpts);
 							}
 
 							dockerStreams.set(connId, { stream: dockerStream, execId, target, state, ws });
-							console.log('[Terminal WS] Stream stored for connId:', connId, 'total streams:', dockerStreams.size);
 						} catch (error: any) {
-							console.error('[Terminal WS] Error:', error.message);
+							console.error('[Terminal WS] Connection error:', error?.message || error);
 							ws.send(JSON.stringify({ type: 'error', message: error.message }));
 							ws.close();
 						}
@@ -550,7 +705,6 @@ function webSocketPlugin(): Plugin {
 					async message(ws, message) {
 						const url = new URL((ws.data as any).url, `http://localhost:${WS_PORT}`);
 						const connId = (ws.data as any).connId as string | undefined;
-						console.log('[WS Message] connId:', connId, 'edgeExecId:', (ws.data as any)?.edgeExecId, 'pathname:', url.pathname.slice(0, 50));
 
 						// Handle Hawser Edge messages
 						if (url.pathname === '/api/hawser/connect') {
@@ -629,16 +783,9 @@ function webSocketPlugin(): Plugin {
 						}
 
 						// Terminal message handling (direct Docker connection)
-						if (!connId) {
-							console.log('[Terminal WS] No connId for terminal message');
-							return;
-						}
+						if (!connId) return;
 						const d = dockerStreams.get(connId);
-						if (!d) {
-							console.log('[Terminal WS] No stream for connId:', connId, 'streams:', [...dockerStreams.keys()]);
-							return;
-						}
-						console.log('[Terminal WS] Found stream for connId:', connId);
+						if (!d) return;
 
 						try {
 							const msg = JSON.parse(message.toString());
@@ -731,21 +878,31 @@ async function handleHawserMessage(ws: any, msg: any) {
 			return;
 		}
 
-		// Simple token validation (in production this would use argon2 verification)
-		// For dev mode, just check if a token exists for any environment
+		// Token validation using proper Argon2id verification (same as production)
 		const tokens = db.prepare('SELECT * FROM hawser_tokens WHERE is_active = 1').all() as any[];
 
-		// For dev mode, accept any valid token format and use the first environment with a token
-		const token = tokens.find((t: any) => msg.token && msg.token.startsWith(t.token_prefix.slice(0, 4)));
+		// Validate token using Argon2id hash verification
+		let matchedToken: any = null;
+		for (const t of tokens) {
+			try {
+				const isValid = await Bun.password.verify(msg.token, t.token);
+				if (isValid) {
+					matchedToken = t;
+					break;
+				}
+			} catch {
+				// If verification fails, continue to next token
+			}
+		}
 
-		if (!token) {
+		if (!matchedToken) {
 			console.log('[Hawser WS] Invalid token');
 			ws.send(JSON.stringify({ type: 'error', error: 'Invalid token' }));
 			ws.close();
 			return;
 		}
 
-		const environmentId = token.environment_id;
+		const environmentId = matchedToken.environment_id;
 
 		// Update environment with agent info
 		try {
@@ -981,6 +1138,15 @@ export default defineConfig({
 	},
 	optimizeDeps: {
 		include: ['lucide-svelte', '@xterm/xterm', '@xterm/addon-fit']
+	},
+	resolve: {
+		dedupe: [
+			'@codemirror/state',
+			'@codemirror/view',
+			'@codemirror/language',
+			'@lezer/common',
+			'@lezer/highlight'
+		]
 	},
 	build: {
 		target: 'esnext',

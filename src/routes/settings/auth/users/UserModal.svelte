@@ -570,14 +570,14 @@
 				</div>
 			{/if}
 		</div>
-		<Dialog.Footer>
+		<Dialog.Footer class="mt-4">
 			{#if isEditing}
 				<Button variant="outline" type="button" onclick={handleClose}>Cancel</Button>
 				<Button type="submit" disabled={formSaving}>
 					{#if formSaving}
 						<RefreshCw class="w-4 h-4 mr-1 animate-spin" />
 					{:else}
-						<Check class="w-4 h-4 mr-1" />
+						<Check class="w-4 h-4" />
 					{/if}
 					Save
 				</Button>
@@ -587,7 +587,7 @@
 					{#if formSaving}
 						<RefreshCw class="w-4 h-4 mr-1 animate-spin" />
 					{:else}
-						<UserPlus class="w-4 h-4 mr-1" />
+						<UserPlus class="w-4 h-4" />
 					{/if}
 					Create user
 				</Button>

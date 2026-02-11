@@ -1,6 +1,6 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getContainerStats } from '$lib/server/docker';
+import { getContainerStats, EnvironmentNotFoundError } from '$lib/server/docker';
 import { authorize } from '$lib/server/authorize';
 import { hasEnvironments } from '$lib/server/db';
 
@@ -47,6 +47,28 @@ function calculateBlockIO(stats: any): { read: number; write: number } {
 	return { read, write };
 }
 
+/**
+ * Calculate memory usage the same way Docker CLI does.
+ * Docker subtracts cache (inactive_file) from total usage to show actual memory consumption.
+ * - cgroup v2: subtract inactive_file from stats
+ * - cgroup v1: subtract total_inactive_file from stats
+ * See: https://docs.docker.com/engine/containers/runmetrics/
+ *
+ * Returns: { usage: actual memory (minus cache), raw: total usage, cache: file cache }
+ */
+function calculateMemoryUsage(memoryStats: any): { usage: number; raw: number; cache: number } {
+	const raw = memoryStats?.usage || 0;
+	const stats = memoryStats?.stats || {};
+
+	// cgroup v2 uses 'inactive_file', cgroup v1 uses 'total_inactive_file'
+	const cache = stats.inactive_file ?? stats.total_inactive_file ?? 0;
+
+	// Only subtract cache if it's less than raw usage (sanity check)
+	const usage = (cache > 0 && cache < raw) ? raw - cache : raw;
+
+	return { usage, raw, cache };
+}
+
 export const GET: RequestHandler = async ({ params, url, cookies }) => {
 	const auth = await authorize(cookies);
 
@@ -67,15 +89,17 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 		const stats = await getContainerStats(params.id, envIdNum) as any;
 
 		const cpuPercent = calculateCpuPercent(stats);
-		const memoryUsage = stats.memory_stats?.usage || 0;
+		const memory = calculateMemoryUsage(stats.memory_stats);
 		const memoryLimit = stats.memory_stats?.limit || 1;
-		const memoryPercent = (memoryUsage / memoryLimit) * 100;
+		const memoryPercent = (memory.usage / memoryLimit) * 100;
 		const networkIO = calculateNetworkIO(stats);
 		const blockIO = calculateBlockIO(stats);
 
 		return json({
 			cpuPercent: Math.round(cpuPercent * 100) / 100,
-			memoryUsage,
+			memoryUsage: memory.usage,
+			memoryRaw: memory.raw,
+			memoryCache: memory.cache,
 			memoryLimit,
 			memoryPercent: Math.round(memoryPercent * 100) / 100,
 			networkRx: networkIO.rx,
@@ -85,7 +109,14 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 			timestamp: Date.now()
 		});
 	} catch (error: any) {
-		console.error('Failed to get container stats:', error);
+		// Return 404 for deleted environments so client can clear stale cache
+		if (error instanceof EnvironmentNotFoundError) {
+			return json({ error: 'Environment not found' }, { status: 404 });
+		}
+		if (error.statusCode === 404) {
+			return json({ error: 'Container not found' }, { status: 404 });
+		}
+		console.error('Failed to get container stats:', error.message || error);
 		return json({ error: error.message || 'Failed to get stats' }, { status: 500 });
 	}
 };

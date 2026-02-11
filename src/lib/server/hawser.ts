@@ -9,6 +9,8 @@ import { db, hawserTokens, environments, eq } from './db/drizzle.js';
 import { logContainerEvent, saveHostMetric, type ContainerEventAction } from './db.js';
 import { containerEventEmitter } from './event-collector.js';
 import { sendEnvironmentNotification } from './notifications.js';
+import { secureGetRandomValues, secureRandomUUID } from './crypto-fallback.js';
+import { hashPassword, verifyPassword } from './auth.js';
 
 // Protocol constants
 export const HAWSER_PROTOCOL_VERSION = '1.0';
@@ -182,7 +184,8 @@ export async function handleEdgeContainerEvent(
 			type: notificationType as 'success' | 'error' | 'warning' | 'info'
 		}, event.image);
 	} catch (error) {
-		console.error('[Hawser] Error handling container event:', error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[Hawser] Error handling container event:', errorMsg);
 	}
 }
 
@@ -224,7 +227,8 @@ export async function handleEdgeMetrics(
 			environmentId
 		);
 	} catch (error) {
-		console.error('[Hawser] Error saving metrics:', error);
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[Hawser] Error saving metrics:', errorMsg);
 	}
 }
 
@@ -243,7 +247,7 @@ export async function validateHawserToken(
 	// Check each token (tokens are hashed)
 	for (const t of tokens) {
 		try {
-			const isValid = await Bun.password.verify(token, t.token);
+			const isValid = await verifyPassword(token, t.token);
 			if (isValid) {
 				// Update last used timestamp
 				await db
@@ -292,16 +296,12 @@ export async function generateHawserToken(
 	} else {
 		// Generate a secure random token (32 bytes = 256 bits)
 		const tokenBytes = new Uint8Array(32);
-		crypto.getRandomValues(tokenBytes);
+		secureGetRandomValues(tokenBytes);
 		token = Buffer.from(tokenBytes).toString('base64url');
 	}
 
-	// Hash the token for storage (using Bun's built-in Argon2id)
-	const hashedToken = await Bun.password.hash(token, {
-		algorithm: 'argon2id',
-		memoryCost: 19456,
-		timeCost: 2
-	});
+	// Hash the token for storage (using Argon2id)
+	const hashedToken = await hashPassword(token);
 
 	// Get prefix for identification
 	const tokenPrefix = token.substring(0, 8);
@@ -367,7 +367,8 @@ export function closeEdgeConnection(environmentId: number): void {
 	try {
 		connection.ws.close(1000, 'Environment deleted');
 	} catch (e) {
-		console.error(`[Hawser] Error closing WebSocket for environment ${environmentId}:`, e);
+		const errorMsg = e instanceof Error ? e.message : String(e);
+		console.error(`[Hawser] Error closing WebSocket for environment ${environmentId}:`, errorMsg);
 	}
 
 	edgeConnections.delete(environmentId);
@@ -477,7 +478,7 @@ export async function sendEdgeRequest(
 		throw new Error('Edge agent not connected');
 	}
 
-	const requestId = crypto.randomUUID();
+	const requestId = secureRandomUUID();
 
 	return new Promise((resolve, reject) => {
 		const timeoutHandle = setTimeout(() => {
@@ -580,7 +581,8 @@ export async function sendEdgeRequest(
 			try {
 				connection.ws.send(messageStr);
 			} catch (sendError) {
-				console.error(`[Hawser Edge] Error sending message:`, sendError);
+				const errorMsg = sendError instanceof Error ? sendError.message : String(sendError);
+				console.error(`[Hawser Edge] Error sending message:`, errorMsg);
 				connection.pendingRequests.delete(requestId);
 				if (streaming) {
 					connection.pendingStreamRequests.delete(requestId);
@@ -614,7 +616,7 @@ export function sendEdgeStreamRequest(
 		return { requestId: '', cancel: () => {} };
 	}
 
-	const requestId = crypto.randomUUID();
+	const requestId = secureRandomUUID();
 
 	// Initialize pendingStreamRequests if not present (can happen in dev mode due to HMR)
 	if (!connection.pendingStreamRequests) {
@@ -652,9 +654,10 @@ export function sendEdgeStreamRequest(
 		try {
 			connection.ws.send(messageStr);
 		} catch (sendError) {
-			console.error(`[Hawser Edge] Error sending streaming message:`, sendError);
+			const errorMsg = sendError instanceof Error ? sendError.message : String(sendError);
+			console.error(`[Hawser Edge] Error sending streaming message:`, errorMsg);
 			connection.pendingStreamRequests.delete(requestId);
-			callbacks.onError(sendError instanceof Error ? sendError.message : String(sendError));
+			callbacks.onError(errorMsg);
 			return { requestId: '', cancel: () => {} };
 		}
 	}

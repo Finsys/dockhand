@@ -8,8 +8,8 @@
 	import { TogglePill, ToggleSwitch } from '$lib/components/ui/toggle-pill';
 	import CronEditor from '$lib/components/cron-editor.svelte';
 	import TimezoneSelector from '$lib/components/TimezoneSelector.svelte';
-	import { Eye, Bell, Database, Calendar, ShieldCheck, FileText, AlertTriangle, HelpCircle, Globe } from 'lucide-svelte';
-	import { appSettings, type DateFormat, type DownloadFormat } from '$lib/stores/settings';
+	import { Eye, Bell, Database, Calendar, ShieldCheck, FileText, AlertTriangle, HelpCircle, Globe, Activity, Clock } from 'lucide-svelte';
+	import { appSettings, type DateFormat, type DownloadFormat, type EventCollectionMode } from '$lib/stores/settings';
 	import { canAccess, authStore } from '$lib/stores/auth';
 	import { toast } from 'svelte-sonner';
 	import ThemeSelector from '$lib/components/ThemeSelector.svelte';
@@ -32,6 +32,9 @@
 	let eventCleanupEnabled = $derived($appSettings.eventCleanupEnabled);
 	let logBufferSizeKb = $derived($appSettings.logBufferSizeKb);
 	let defaultTimezone = $derived($appSettings.defaultTimezone);
+	let eventCollectionMode = $derived($appSettings.eventCollectionMode);
+	let eventPollInterval = $derived($appSettings.eventPollInterval);
+	let metricsCollectionInterval = $derived($appSettings.metricsCollectionInterval);
 
 	const dateFormatOptions: { value: DateFormat; label: string; example: string }[] = [
 		{ value: 'DD.MM.YYYY', label: 'DD.MM.YYYY', example: '31.12.2024' },
@@ -93,6 +96,27 @@
 		appSettings.setLogBufferSizeKb(value);
 		toast.success('Log buffer size updated');
 	}
+
+	function handleEventCollectionModeChange(value: string | undefined) {
+		if (value === 'stream' || value === 'poll') {
+			appSettings.setEventCollectionMode(value);
+			toast.success(`Event collection mode: ${value}`);
+		}
+	}
+
+	function handleEventPollIntervalChange(selected: { value: number } | undefined) {
+		if (selected?.value) {
+			appSettings.setEventPollInterval(selected.value);
+			toast.success(`Event poll interval: ${selected.value / 1000}s`);
+		}
+	}
+
+	function handleMetricsIntervalChange(selected: { value: number } | undefined) {
+		if (selected?.value) {
+			appSettings.setMetricsCollectionInterval(selected.value);
+			toast.success(`Metrics interval: ${selected.value / 1000}s`);
+		}
+	}
 </script>
 
 <div class="flex-1 min-h-0 overflow-y-auto">
@@ -104,20 +128,22 @@
 					<Card.Title class="text-sm font-medium flex items-center gap-2">
 						<Eye class="w-4 h-4" />
 						Appearance
-						{#if !$authStore.authEnabled}
-							<Tooltip.Provider delayDuration={100}>
-								<Tooltip.Root>
-									<Tooltip.Trigger>
-										<HelpCircle class="w-4 h-4 text-muted-foreground cursor-help" />
-									</Tooltip.Trigger>
-									<Tooltip.Portal>
-										<Tooltip.Content side="right" sideOffset={8} class="!w-80">
-											Theme and font settings are global when authentication is disabled. When auth is enabled, users can customize their appearance in their profile.
-										</Tooltip.Content>
-									</Tooltip.Portal>
-								</Tooltip.Root>
-							</Tooltip.Provider>
-						{/if}
+						<Tooltip.Provider delayDuration={100}>
+							<Tooltip.Root>
+								<Tooltip.Trigger>
+									<HelpCircle class="w-4 h-4 text-muted-foreground cursor-help" />
+								</Tooltip.Trigger>
+								<Tooltip.Portal>
+									<Tooltip.Content side="right" sideOffset={8} class="!w-80">
+										{#if $authStore.authEnabled}
+											These settings apply to the login page and as defaults. Personal preferences can be configured in your profile.
+										{:else}
+											Theme and font settings are global when authentication is disabled.
+										{/if}
+									</Tooltip.Content>
+								</Tooltip.Portal>
+							</Tooltip.Root>
+						</Tooltip.Provider>
 					</Card.Title>
 				</Card.Header>
 				<Card.Content>
@@ -201,20 +227,18 @@
 								<p class="text-xs text-muted-foreground">How dates are displayed throughout the app</p>
 							</div>
 						</div>
-						<!-- Right column: Theme settings (only when auth disabled) -->
-						{#if !$authStore.authEnabled}
-							<div class="space-y-4">
-								<ThemeSelector />
-							</div>
-						{:else}
-							<div class="text-xs text-muted-foreground flex items-start gap-1.5">
-								<HelpCircle class="w-3.5 h-3.5 shrink-0 mt-0.5" />
-								<div>
-									<p>Appearance settings (theme, fonts) are personal when auth is enabled.</p>
-									<a href="/profile" class="text-primary hover:underline">Configure in your profile</a>
+						<!-- Right column: Theme settings (always shown, with hint when auth enabled) -->
+						<div class="space-y-4">
+							<ThemeSelector />
+							{#if $authStore.authEnabled}
+								<div class="text-xs text-muted-foreground flex items-start gap-1.5 mt-2 p-2 bg-muted/50 rounded-md">
+									<HelpCircle class="w-3.5 h-3.5 shrink-0 mt-0.5" />
+									<div>
+										<p>Personal theme preferences can be configured in your <a href="/profile" class="text-primary hover:underline">profile</a>.</p>
+									</div>
 								</div>
-							</div>
-						{/if}
+							{/if}
+						</div>
 					</div>
 				</Card.Content>
 			</Card.Root>
@@ -362,7 +386,107 @@
 					</Card.Title>
 				</Card.Header>
 				<Card.Content class="space-y-4">
-					<div class="space-y-1">
+					<div class="space-y-3">
+						<div>
+							<div class="flex items-center gap-2">
+								<Label>Activity event collection mode</Label>
+								<Tooltip.Root>
+									<Tooltip.Trigger>
+										<HelpCircle class="w-3.5 h-3.5 text-muted-foreground" />
+									</Tooltip.Trigger>
+									<Tooltip.Content class="w-80">
+										<p class="text-xs">
+											<strong>Stream:</strong> Continuous event stream from Docker, instant notifications, higher CPU usage<br />
+											<strong>Poll:</strong> Periodic checks for new events, slight notification delay, lower CPU usage
+										</p>
+									</Tooltip.Content>
+								</Tooltip.Root>
+							</div>
+							<div class="flex items-center gap-4 mt-2">
+								<label class="flex items-center gap-2 cursor-pointer">
+									<input
+										type="radio"
+										name="eventCollectionMode"
+										value="stream"
+										checked={(eventCollectionMode || 'stream') === 'stream'}
+										onchange={() => handleEventCollectionModeChange('stream')}
+										disabled={!$canAccess('settings', 'edit')}
+										class="accent-primary w-4 h-4"
+									/>
+									<Activity class="w-3.5 h-3.5" />
+									<span class="text-sm">Stream</span>
+								</label>
+								<label class="flex items-center gap-2 cursor-pointer">
+									<input
+										type="radio"
+										name="eventCollectionMode"
+										value="poll"
+										checked={(eventCollectionMode || 'stream') === 'poll'}
+										onchange={() => handleEventCollectionModeChange('poll')}
+										disabled={!$canAccess('settings', 'edit')}
+										class="accent-primary w-4 h-4"
+									/>
+									<Clock class="w-3.5 h-3.5" />
+									<span class="text-sm">Poll</span>
+								</label>
+
+								<span class="text-xs text-muted-foreground {(eventCollectionMode || 'stream') === 'poll' ? '' : 'invisible'}">every</span>
+								<Select.Root
+									type="single"
+									value={String(eventPollInterval || 60000)}
+									onValueChange={(v) => v && handleEventPollIntervalChange({ value: parseInt(v) })}
+									disabled={!$canAccess('settings', 'edit') || (eventCollectionMode || 'stream') !== 'poll'}
+								>
+									<Select.Trigger class="w-24 h-8 {(eventCollectionMode || 'stream') === 'poll' ? '' : 'invisible'}">
+										{(eventPollInterval || 60000) === 30000 ? '30s' : (eventPollInterval || 60000) === 60000 ? '60s' : (eventPollInterval || 60000) === 120000 ? '120s' : '300s'}
+									</Select.Trigger>
+									<Select.Content>
+										<Select.Item value="30000">30s</Select.Item>
+										<Select.Item value="60000">60s</Select.Item>
+										<Select.Item value="120000">120s</Select.Item>
+										<Select.Item value="300000">300s</Select.Item>
+									</Select.Content>
+								</Select.Root>
+							</div>
+						</div>
+					</div>
+
+					<div class="space-y-1 pt-2 border-t">
+						<div class="flex items-center gap-2">
+							<Label for="metrics-interval">Metrics collection interval</Label>
+							<Tooltip.Root>
+								<Tooltip.Trigger>
+									<HelpCircle class="w-3.5 h-3.5 text-muted-foreground" />
+								</Tooltip.Trigger>
+								<Tooltip.Content class="w-80">
+									<p class="text-xs">
+										How often to collect CPU/memory metrics from running containers. Lower intervals
+										provide more frequent updates but increase CPU usage.
+									</p>
+								</Tooltip.Content>
+							</Tooltip.Root>
+						</div>
+						<div class="flex items-center gap-2 mt-2">
+							<Select.Root
+								type="single"
+								value={String(metricsCollectionInterval || 30000)}
+								onValueChange={(v) => v && handleMetricsIntervalChange({ value: parseInt(v) })}
+								disabled={!$canAccess('settings', 'edit')}
+							>
+								<Select.Trigger class="w-24 h-8">
+									{(metricsCollectionInterval || 30000) === 10000 ? '10s' : (metricsCollectionInterval || 30000) === 30000 ? '30s' : (metricsCollectionInterval || 30000) === 60000 ? '60s' : '120s'}
+								</Select.Trigger>
+								<Select.Content>
+									<Select.Item value="10000">10s</Select.Item>
+									<Select.Item value="30000">30s</Select.Item>
+									<Select.Item value="60000">60s</Select.Item>
+									<Select.Item value="120000">120s</Select.Item>
+								</Select.Content>
+							</Select.Root>
+						</div>
+					</div>
+
+					<div class="space-y-1 pt-2 border-t">
 						<div class="flex items-center gap-3">
 							<Label for="schedule-retention">Schedule execution cleanup</Label>
 							<TogglePill

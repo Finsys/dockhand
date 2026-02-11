@@ -21,8 +21,10 @@ export const GET: RequestHandler = async () => {
 
 		const providers: { id: string; name: string; type: 'local' | 'ldap' | 'oidc'; initiateUrl?: string }[] = [];
 
-		// Local auth is always available when auth is enabled
-		providers.push({ id: 'local', name: 'Local', type: 'local' });
+		// Local auth is available unless DISABLE_LOCAL_LOGIN is set
+		if (process.env.DISABLE_LOCAL_LOGIN !== 'true') {
+			providers.push({ id: 'local', name: 'Local', type: 'local' });
+		}
 
 		// Add enabled LDAP providers (enterprise only)
 		for (const config of ldapConfigs) {
@@ -49,6 +51,9 @@ export const GET: RequestHandler = async () => {
 		});
 	} catch (error) {
 		console.error('Failed to get auth providers:', error);
-		return json({ providers: [{ id: 'local', name: 'Local', type: 'local' }] });
+		const fallbackProviders = process.env.DISABLE_LOCAL_LOGIN === 'true'
+			? []
+			: [{ id: 'local', name: 'Local', type: 'local' }];
+		return json({ providers: fallbackProviders });
 	}
 };

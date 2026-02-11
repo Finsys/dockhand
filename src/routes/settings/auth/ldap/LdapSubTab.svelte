@@ -194,7 +194,7 @@
 					LDAP / Active Directory integration is available with an enterprise license. Connect to your organization's directory services for centralized authentication.
 				</p>
 				<Button onclick={() => onTabChange('license')}>
-					<Key class="w-4 h-4 mr-2" />
+					<Key class="w-4 h-4" />
 					Activate license
 				</Button>
 			</div>
@@ -214,7 +214,7 @@
 					</div>
 					{#if $canAccess('settings', 'edit')}
 						<Button size="sm" onclick={() => openLdapModal(null)}>
-							<Plus class="w-4 h-4 mr-1" />
+							<Plus class="w-4 h-4" />
 							Add LDAP
 						</Button>
 					{/if}

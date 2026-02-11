@@ -8,6 +8,8 @@ import {
 } from '$lib/server/db';
 import { deleteRepositoryFiles } from '$lib/server/git';
 import { authorize } from '$lib/server/authorize';
+import { auditGitRepository } from '$lib/server/audit';
+import { computeAuditDiff } from '$lib/utils/diff';
 
 export const GET: RequestHandler = async ({ params, cookies }) => {
 	const auth = await authorize(cookies);
@@ -33,7 +35,8 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 	}
 };
 
-export const PUT: RequestHandler = async ({ params, request, cookies }) => {
+export const PUT: RequestHandler = async (event) => {
+	const { params, request, cookies } = event;
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !await auth.can('git', 'edit')) {
 		return json({ error: 'Permission denied' }, { status: 403 });
@@ -74,6 +77,12 @@ export const PUT: RequestHandler = async ({ params, request, cookies }) => {
 			return json({ error: 'Failed to update repository' }, { status: 500 });
 		}
 
+		// Compute diff for audit
+		const diff = computeAuditDiff(existing, repository);
+
+		// Audit log
+		await auditGitRepository(event, 'update', repository.id, repository.name, diff);
+
 		return json(repository);
 	} catch (error: any) {
 		console.error('Failed to update git repository:', error);
@@ -84,7 +93,8 @@ export const PUT: RequestHandler = async ({ params, request, cookies }) => {
 	}
 };
 
-export const DELETE: RequestHandler = async ({ params, cookies }) => {
+export const DELETE: RequestHandler = async (event) => {
+	const { params, cookies } = event;
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !await auth.can('git', 'delete')) {
 		return json({ error: 'Permission denied' }, { status: 403 });
@@ -96,13 +106,22 @@ export const DELETE: RequestHandler = async ({ params, cookies }) => {
 			return json({ error: 'Invalid repository ID' }, { status: 400 });
 		}
 
+		// Get repository name before deletion for audit log
+		const repository = await getGitRepository(id);
+		if (!repository) {
+			return json({ error: 'Repository not found' }, { status: 404 });
+		}
+
 		// Delete repository files first
 		deleteRepositoryFiles(id);
 
 		const deleted = await deleteGitRepository(id);
 		if (!deleted) {
-			return json({ error: 'Repository not found' }, { status: 404 });
+			return json({ error: 'Failed to delete repository' }, { status: 500 });
 		}
+
+		// Audit log
+		await auditGitRepository(event, 'delete', id, repository.name);
 
 		return json({ success: true });
 	} catch (error) {

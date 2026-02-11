@@ -9,7 +9,8 @@ import {
 	getAutoUpdateSettingById,
 	deleteAutoUpdateSchedule,
 	updateGitStack,
-	deleteEnvUpdateCheckSettings
+	deleteEnvUpdateCheckSettings,
+	deleteImagePruneSettings
 } from '$lib/server/db';
 import { unregisterSchedule } from '$lib/server/scheduler';
 
@@ -47,6 +48,12 @@ export const DELETE: RequestHandler = async ({ params }) => {
 			// Delete env update check settings (scheduleId is environmentId)
 			await deleteEnvUpdateCheckSettings(scheduleId);
 			unregisterSchedule(scheduleId, 'env_update_check');
+			return json({ success: true });
+
+		} else if (type === 'image_prune') {
+			// Delete image prune settings (scheduleId is environmentId)
+			await deleteImagePruneSettings(scheduleId);
+			unregisterSchedule(scheduleId, 'image_prune');
 			return json({ success: true });
 
 		} else if (type === 'system_cleanup') {

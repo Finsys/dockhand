@@ -8,7 +8,7 @@ import {
 	listNetworks,
 	getDockerConnectionInfo
 } from '$lib/server/docker';
-import { listManagedStacks } from '$lib/server/stacks';
+import { getStackSources } from '$lib/server/db';
 import { isPostgres, isSqlite, getDatabaseSchemaVersion, getPostgresConnectionInfo } from '$lib/server/db/drizzle';
 import { hasEnvironments } from '$lib/server/db';
 import type { RequestHandler } from './$types';
@@ -149,7 +149,7 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 			}
 		}
 
-		const stacks = listManagedStacks();
+		const stacks = await getStackSources();
 		const runningContainers = containers.filter(c => c.state === 'running').length;
 		const stoppedContainers = containers.length - runningContainers;
 
@@ -186,6 +186,7 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 				nodeVersion: process.version,
 				platform: os.platform(),
 				arch: os.arch(),
+				kernel: os.release(),
 				memory: bunInfo.memory,
 				container: containerRuntime,
 				ownContainer

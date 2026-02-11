@@ -1,5 +1,5 @@
 import type { RequestHandler } from './$types';
-import { getDockerEvents } from '$lib/server/docker';
+import { getDockerEvents, EnvironmentNotFoundError } from '$lib/server/docker';
 import { getEnvironment } from '$lib/server/db';
 
 export const GET: RequestHandler = async ({ url }) => {
@@ -33,18 +33,40 @@ export const GET: RequestHandler = async ({ url }) => {
 		);
 	}
 
+	let heartbeatInterval: ReturnType<typeof setInterval>;
+	let controllerClosed = false;
+	let eventReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+
 	const stream = new ReadableStream({
 		async start(controller) {
 			const encoder = new TextEncoder();
 
-			// Send initial connection event
+			// Safe close helper - prevents "Controller is already closed" errors
+			const safeClose = () => {
+				if (controllerClosed) return;
+				try {
+					controller.close();
+					controllerClosed = true;
+				} catch {
+					// Controller already closed - ignore
+					controllerClosed = true;
+				}
+			};
+
+			// Send SSE event
 			const sendEvent = (type: string, data: any) => {
-				const event = `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`;
-				controller.enqueue(encoder.encode(event));
+				if (controllerClosed) return;
+				try {
+					const event = `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`;
+					controller.enqueue(encoder.encode(event));
+				} catch {
+					// Controller closed or errored - mark as closed
+					controllerClosed = true;
+				}
 			};
 
 			// Send heartbeat to keep connection alive (every 5s to prevent Traefik 10s idle timeout)
-			const heartbeatInterval = setInterval(() => {
+			heartbeatInterval = setInterval(() => {
 				try {
 					sendEvent('heartbeat', { timestamp: new Date().toISOString() });
 				} catch {
@@ -52,6 +74,7 @@ export const GET: RequestHandler = async ({ url }) => {
 				}
 			}, 5000);
 
+			// Send initial connection event
 			sendEvent('connected', { timestamp: new Date().toISOString(), envId: envIdNum });
 
 			try {
@@ -64,18 +87,18 @@ export const GET: RequestHandler = async ({ url }) => {
 				if (!eventStream) {
 					sendEvent('error', { message: 'Failed to connect to Docker events' });
 					clearInterval(heartbeatInterval);
-					controller.close();
+					safeClose();
 					return;
 				}
 
-				const reader = eventStream.getReader();
+				eventReader = eventStream.getReader();
 				const decoder = new TextDecoder();
 				let buffer = '';
 
 				const processEvents = async () => {
 					try {
 						while (true) {
-							const { done, value } = await reader.read();
+							const { done, value } = await eventReader!.read();
 							if (done) break;
 
 							buffer += decoder.decode(value, { stream: true });
@@ -108,21 +131,39 @@ export const GET: RequestHandler = async ({ url }) => {
 							}
 						}
 					} catch (error: any) {
-						console.error('Docker event stream error:', error);
-						sendEvent('error', { message: error.message });
+						// Don't log full stack trace for expected connection errors
+						const isConnectionError = error?.code === 'ECONNRESET' || error?.code === 'ECONNREFUSED';
+						if (!isConnectionError) {
+							console.error('Docker event stream error:', error?.message || error);
+						}
+						sendEvent('error', { message: error?.message || 'Stream connection lost' });
 					} finally {
 						clearInterval(heartbeatInterval);
-						controller.close();
+						safeClose();
 					}
 				};
 
 				processEvents();
 			} catch (error: any) {
-				console.error('Failed to connect to Docker events:', error);
-				sendEvent('error', { message: error.message || 'Failed to connect to Docker' });
+				if (error instanceof EnvironmentNotFoundError) {
+					// Expected error when environment doesn't exist - don't spam logs
+					sendEvent('error', { message: 'Environment not found' });
+				} else {
+					// Don't log full stack trace for expected connection errors
+					const isConnectionError = error?.code === 'ECONNRESET' || error?.code === 'ECONNREFUSED';
+					if (!isConnectionError) {
+						console.error('Failed to connect to Docker events:', error?.message || error);
+					}
+					sendEvent('error', { message: error?.message || 'Failed to connect to Docker' });
+				}
 				clearInterval(heartbeatInterval);
-				controller.close();
+				safeClose();
 			}
+		},
+		cancel() {
+			controllerClosed = true;
+			clearInterval(heartbeatInterval);
+			eventReader?.cancel().catch(() => {});
 		}
 	});
 

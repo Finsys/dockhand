@@ -1,3 +1,7 @@
+<svelte:head>
+	<title>Logs - Dockhand</title>
+</svelte:head>
+
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { page } from '$app/stores';
@@ -226,6 +230,9 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 	let logsRef: HTMLDivElement | undefined;
 	let envId = $state<number | null>(null);
 	let isInitialLoad = $state(true);
+
+	// Polling interval - module scope for cleanup in onDestroy
+	let containerInterval: ReturnType<typeof setInterval> | null = null;
 
 	// Searchable dropdown state
 	let searchQuery = $state('');
@@ -1399,11 +1406,15 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 	onMount(() => {
 		// All initialization is handled in currentEnvironment.subscribe
 		// This just sets up the refresh interval
-		const containerInterval = setInterval(fetchContainers, 10000);
-		return () => clearInterval(containerInterval);
+		containerInterval = setInterval(fetchContainers, 10000);
+		// Note: In Svelte 5, cleanup must be in onDestroy, not returned from onMount
 	});
 
 	onDestroy(() => {
+		if (containerInterval) {
+			clearInterval(containerInterval);
+			containerInterval = null;
+		}
 		stopStreaming();
 	});
 </script>

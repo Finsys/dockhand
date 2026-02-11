@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getRegistry } from '$lib/server/db';
+import { getRegistryAuth } from '$lib/server/docker';
 
 function isDockerHub(url: string): boolean {
 	const lower = url.toLowerCase();
@@ -37,22 +38,19 @@ export const DELETE: RequestHandler = async ({ url }) => {
 			return json({ error: 'Docker Hub does not support image deletion via API. Please use the Docker Hub web interface.' }, { status: 400 });
 		}
 
-		let baseUrl = registry.url;
-		if (!baseUrl.endsWith('/')) {
-			baseUrl += '/';
-		}
+		const { baseUrl, authHeader } = await getRegistryAuth(registry, `repository:${imageName}:pull,push,delete`);
+		// Note: orgPath is not used here because imageName already contains the full repo path
 
 		const headers: HeadersInit = {
 			'Accept': 'application/vnd.docker.distribution.manifest.v2+json'
 		};
 
-		if (registry.username && registry.password) {
-			const credentials = Buffer.from(`${registry.username}:${registry.password}`).toString('base64');
-			headers['Authorization'] = `Basic ${credentials}`;
+		if (authHeader) {
+			headers['Authorization'] = authHeader;
 		}
 
 		// Step 1: Get the manifest digest
-		const manifestUrl = `${baseUrl}v2/${imageName}/manifests/${tag}`;
+		const manifestUrl = `${baseUrl}/v2/${imageName}/manifests/${tag}`;
 		const headResponse = await fetch(manifestUrl, {
 			method: 'HEAD',
 			headers
@@ -74,7 +72,7 @@ export const DELETE: RequestHandler = async ({ url }) => {
 		}
 
 		// Step 2: Delete the manifest by digest
-		const deleteUrl = `${baseUrl}v2/${imageName}/manifests/${digest}`;
+		const deleteUrl = `${baseUrl}/v2/${imageName}/manifests/${digest}`;
 		const deleteResponse = await fetch(deleteUrl, {
 			method: 'DELETE',
 			headers

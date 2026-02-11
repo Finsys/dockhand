@@ -2,18 +2,20 @@ import { writable, get } from 'svelte/store';
 
 export interface AuditLogEntry {
 	id: number;
-	user_id: number | null;
+	userId: number | null;
 	username: string;
 	action: string;
-	entity_type: string;
-	entity_id: string | null;
-	entity_name: string | null;
-	environment_id: number | null;
+	entityType: string;
+	entityId: string | null;
+	entityName: string | null;
+	environmentId: number | null;
+	environmentName: string | null;
+	environmentIcon: string | null;
 	description: string | null;
 	details: any | null;
-	ip_address: string | null;
-	user_agent: string | null;
-	timestamp: string;
+	ipAddress: string | null;
+	userAgent: string | null;
+	createdAt: string;
 }
 
 export type AuditEventCallback = (event: AuditLogEntry) => void;

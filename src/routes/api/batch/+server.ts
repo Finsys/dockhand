@@ -21,7 +21,7 @@ import {
 	downStack,
 	removeStack
 } from '$lib/server/stacks';
-import { deleteAutoUpdateSchedule, getAutoUpdateSetting } from '$lib/server/db';
+import { deleteAutoUpdateSchedule, getAutoUpdateSetting, removePendingContainerUpdate } from '$lib/server/db';
 import { unregisterSchedule } from '$lib/server/scheduler';
 
 // SSE Event types
@@ -371,6 +371,15 @@ async function executeContainerOperation(
 				if (setting) {
 					unregisterSchedule(setting.id, 'container_update');
 					await deleteAutoUpdateSchedule(name, envIdNum);
+				}
+			} catch {
+				// Ignore cleanup errors
+			}
+
+			// Clean up pending container update if exists
+			try {
+				if (envIdNum) {
+					await removePendingContainerUpdate(envIdNum, id);
 				}
 			} catch {
 				// Ignore cleanup errors

@@ -496,34 +496,32 @@
 	});
 
 	// Row state cache to prevent creating new objects on every scroll
+	// Use $derived to track dependencies synchronously (unlike $effect which is async)
 	let rowStateCache = new WeakMap<object, DataGridRowState>();
-	let rowStateCacheDataRef: T[] | null = null;
-	let rowStateCacheExpandedRef: Set<unknown> | null = null;
-	let rowStateCacheSelectedRef: Set<unknown> | null = null;
 
-	// Clear row state cache when data or selection/expansion state changes
-	$effect(() => {
-		if (data !== rowStateCacheDataRef ||
-			expandedKeys !== rowStateCacheExpandedRef ||
-			selectedKeys !== rowStateCacheSelectedRef) {
-			rowStateCache = new WeakMap();
-			rowStateCacheDataRef = data;
-			rowStateCacheExpandedRef = expandedKeys;
-			rowStateCacheSelectedRef = selectedKeys;
-		}
-	});
+	// Track cache invalidation keys - when these change, cache is stale
+	let cachedSelectedKeysRef: Set<unknown> | null = null;
+	let cachedExpandedKeysRef: Set<unknown> | null = null;
+	let cachedHighlightedKeyRef: unknown = undefined;
 
 	// Helper to get row state (memoized via WeakMap)
+	// Cache is invalidated synchronously when selection/expansion changes
 	function getRowState(item: T, index: number): DataGridRowState {
 		const actualIndex = virtualScroll ? startIndex + index : index;
+
+		// Check if cache needs to be cleared (synchronous check)
+		if (selectedKeys !== cachedSelectedKeysRef ||
+			expandedKeys !== cachedExpandedKeysRef ||
+			highlightedKey !== cachedHighlightedKeyRef) {
+			rowStateCache = new WeakMap();
+			cachedSelectedKeysRef = selectedKeys;
+			cachedExpandedKeysRef = expandedKeys;
+			cachedHighlightedKeyRef = highlightedKey;
+		}
 
 		// Try to get cached state
 		const cached = rowStateCache.get(item as object);
 		if (cached && cached.index === actualIndex) {
-			// Update mutable fields that may have changed
-			cached.isSelected = isSelected(item[keyField]);
-			cached.isHighlighted = highlightedKey === item[keyField];
-			cached.isExpanded = isExpanded(item[keyField]);
 			return cached;
 		}
 
@@ -761,7 +759,7 @@
 										e.stopPropagation();
 										toggleSelection(item[keyField]);
 									}}
-									class="flex items-center justify-center transition-colors cursor-pointer {rowState.isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-40 hover:!opacity-100'}"
+									class="flex items-center justify-center w-full h-full min-h-[24px] transition-colors cursor-pointer {rowState.isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-40 hover:!opacity-100'}"
 								>
 									{#if rowState.isSelected}
 										<CheckSquare class="w-3.5 h-3.5 text-muted-foreground" />
@@ -870,7 +868,7 @@
 										<button
 											type="button"
 											onclick={(e) => { e.stopPropagation(); toggleSelection(item[keyField]); }}
-											class="flex items-center justify-center transition-colors cursor-pointer {rowState.isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-40 hover:!opacity-100'}"
+											class="flex items-center justify-center w-full h-full min-h-[24px] transition-colors cursor-pointer {rowState.isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-40 hover:!opacity-100'}"
 										>
 											{#if rowState.isSelected}
 												<CheckSquare class="w-3.5 h-3.5 text-muted-foreground" />

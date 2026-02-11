@@ -6,6 +6,7 @@ import {
 	createOidcConfig,
 	type OidcConfig
 } from '$lib/server/db';
+import { auditOidcProvider } from '$lib/server/audit';
 
 // GET /api/auth/oidc - List all OIDC configurations
 export const GET: RequestHandler = async ({ cookies }) => {
@@ -36,7 +37,8 @@ export const GET: RequestHandler = async ({ cookies }) => {
 };
 
 // POST /api/auth/oidc - Create new OIDC configuration
-export const POST: RequestHandler = async ({ request, cookies }) => {
+export const POST: RequestHandler = async (event) => {
+	const { request, cookies } = event;
 	const auth = await authorize(cookies);
 
 	// When auth is enabled, require authentication and settings:edit permission
@@ -76,6 +78,9 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			roleMappingsClaim: data.roleMappingsClaim || 'groups',
 			roleMappings: data.roleMappings || undefined
 		});
+
+		// Audit log
+		await auditOidcProvider(event, 'create', config.id, config.name);
 
 		return json({
 			...config,

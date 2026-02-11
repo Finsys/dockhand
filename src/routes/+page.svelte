@@ -1,3 +1,7 @@
+<svelte:head>
+	<title>Dashboard - Dockhand</title>
+</svelte:head>
+
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { browser } from '$app/environment';
@@ -11,7 +15,8 @@
 	import EnvironmentTileSkeleton from './dashboard/EnvironmentTileSkeleton.svelte';
 	import DraggableGrid, { type GridItemLayout } from './dashboard/DraggableGrid.svelte';
 	import { dashboardPreferences, dashboardData, GRID_COLS, GRID_ROW_HEIGHT, type TileItem } from '$lib/stores/dashboard';
-	import { currentEnvironment } from '$lib/stores/environment';
+	import { currentEnvironment, environments } from '$lib/stores/environment';
+	import { IsMobile } from '$lib/hooks/is-mobile.svelte';
 	import type { EnvironmentStats } from './api/dashboard/stats/+server';
 	import { getLabelColor, getLabelBgColor } from '$lib/utils/label-colors';
 
@@ -41,8 +46,68 @@
 	let tiles = $state<TileItem[]>([]);
 	let gridItems = $state<GridItemLayout[]>([]);
 	let initialLoading = $state(true);
+	let environmentsLoaded = $state(false); // Tracks if environments were ever received (prevents false "no environments" message)
 	let refreshing = $state(false);
 	let prefsLoaded = $state(false);
+	const mobileWatcher = new IsMobile();
+	const isMobile = $derived.by(() => mobileWatcher.current);
+
+	// Subscribe to environments store's loaded flag for quick "loaded" detection
+	// When loaded, immediately create skeleton tiles so the UI shows something useful
+	// The SSE stream will then update these tiles with real stats
+	$effect(() => {
+		const unsubscribe = environments.loaded.subscribe(loaded => {
+			if (loaded) {
+				environmentsLoaded = true;
+
+				// Create skeleton tiles immediately from the fast environments store
+				// This avoids waiting for the slower SSE stream to show initial UI
+				const envList = $environments;
+				if (tiles.length === 0 && envList.length > 0) {
+					const skeletonTiles = envList.map(env => ({
+						id: env.id,
+						stats: {
+							id: env.id,
+							name: env.name,
+							host: env.host,
+							port: env.port,
+							icon: env.icon || 'globe',
+							socketPath: env.socketPath,
+							collectActivity: false,
+							collectMetrics: true,
+							connectionType: env.connectionType || 'socket',
+							labels: [],
+							scannerEnabled: false,
+							online: undefined,
+							containers: { total: 0, running: 0, stopped: 0, paused: 0, restarting: 0, unhealthy: 0, pendingUpdates: 0 },
+							images: { total: 0, totalSize: 0 },
+							volumes: { total: 0, totalSize: 0 },
+							containersSize: 0,
+							buildCacheSize: 0,
+							networks: { total: 0 },
+							stacks: { total: 0, running: 0, partial: 0, stopped: 0 },
+							metrics: null,
+							events: { total: 0, today: 0 },
+							topContainers: [],
+							loading: { containers: true, images: true, volumes: true, networks: true, stacks: true, diskUsage: true, topContainers: true }
+						} as EnvironmentStats,
+						info: { id: env.id, name: env.name, host: env.host, port: env.port, icon: env.icon || 'globe', socketPath: env.socketPath, collectActivity: false, collectMetrics: true, connectionType: env.connectionType || 'socket' },
+						loading: true
+					}));
+					tiles = skeletonTiles;
+
+					// Generate grid layout for these tiles
+					const savedLayout = $dashboardPreferences.gridLayout;
+					const tileIds = envList.map(env => env.id);
+					const newGridItems = savedLayout.length > 0
+						? mergeLayout(tileIds, savedLayout)
+						: generateDefaultLayout(tileIds);
+					gridItems = newGridItems;
+				}
+			}
+		});
+		return unsubscribe;
+	});
 
 	// Label filtering - load from localStorage
 	let filterLabels = $state<string[]>([]);
@@ -112,6 +177,9 @@
 			const tileLabels = tile?.stats?.labels || [];
 			return tileLabels.some(label => filterLabels.includes(label));
 		});
+	});
+	const orderedGridItems = $derived.by(() => {
+		return [...filteredGridItems].sort((a, b) => (a.y - b.y) || (a.x - b.x));
 	});
 
 	// AbortController for SSE stream cleanup
@@ -315,6 +383,8 @@
 								const data = JSON.parse(eventData);
 
 								if (eventType === 'environments') {
+									// Mark that we've received environment data (prevents false "no environments" message)
+									environmentsLoaded = true;
 									// Create tiles for each environment with initial loading state
 									const envList = data as (EnvironmentInfo & { loading?: EnvironmentStats['loading'] })[];
 									const cachedData = dashboardData.getData();
@@ -335,8 +405,8 @@
 												connectionType: env.connectionType || 'socket',
 												labels: env.labels || [],
 												scannerEnabled: false,
-												online: false,
-												containers: { total: 0, running: 0, stopped: 0, paused: 0, restarting: 0, unhealthy: 0 },
+												online: undefined, // undefined = connecting, false = offline, true = online
+												containers: { total: 0, running: 0, stopped: 0, paused: 0, restarting: 0, unhealthy: 0, pendingUpdates: 0 },
 												images: { total: 0, totalSize: 0 },
 												volumes: { total: 0, totalSize: 0 },
 												containersSize: 0,
@@ -388,18 +458,26 @@
 									}
 								} else if (eventType === 'partial') {
 									// Progressive update - merge partial data into existing stats
-									// Only apply defined values to avoid overwriting with undefined
+									// Use deep merge for nested objects to preserve existing values
 									const partialStats = data as Partial<EnvironmentStats> & { id: number };
 									const tile = tiles.find(t => t.id === partialStats.id);
 									if (tile?.stats) {
 										// Use direct mutation for Svelte 5 reactivity
+										// Deep merge for nested objects like containers, images, etc.
 										for (const [key, value] of Object.entries(partialStats)) {
 											if (value !== undefined && key !== 'id') {
-												(tile.stats as any)[key] = value;
+												const existing = (tile.stats as any)[key];
+												// Deep merge for plain objects (not arrays or null)
+												if (existing && typeof existing === 'object' && !Array.isArray(existing) &&
+												    value && typeof value === 'object' && !Array.isArray(value)) {
+													Object.assign(existing, value);
+												} else {
+													(tile.stats as any)[key] = value;
+												}
 											}
 										}
 									}
-									// Also update the store
+									// Also update the store with deep merge
 									const definedStats: Partial<EnvironmentStats> = {};
 									for (const [key, value] of Object.entries(partialStats)) {
 										if (value !== undefined) {
@@ -793,6 +871,7 @@
 			tiles = cachedData.tiles;
 			gridItems = cachedData.gridItems;
 			initialLoading = false;
+			environmentsLoaded = true;
 
 			// Then refresh in background
 			fetchStatsStreaming(true);
@@ -846,7 +925,7 @@
 
 <div class="flex flex-col gap-4 h-full overflow-auto pb-4">
 	<!-- Header -->
-	<div class="flex flex-wrap justify-between items-center gap-3">
+	<div class="shrink-0 flex flex-wrap justify-between items-center gap-3 min-h-8">
 		<div class="flex items-center gap-4">
 			<PageHeader icon={LayoutGrid} title="Environments" />
 
@@ -934,14 +1013,14 @@
 		</div>
 	</div>
 
-	<!-- Initial loading state before any tiles -->
-	{#if initialLoading && tiles.length === 0}
+	<!-- Initial loading state before any tiles - show until we know whether environments exist -->
+	{#if !environmentsLoaded && tiles.length === 0}
 		<div class="flex items-center justify-center gap-2 text-muted-foreground py-8">
 			<Loader2 class="w-5 h-5 animate-spin text-primary" />
 			<span class="text-sm">Loading environments...</span>
 		</div>
-	{:else if tiles.length === 0}
-		<!-- No environments -->
+	{:else if tiles.length === 0 && environmentsLoaded && $environments.length === 0}
+		<!-- No environments - only shown after we've confirmed there are none -->
 		<div class="flex flex-col items-center justify-center h-64 text-muted-foreground">
 			<div class="w-16 h-16 mb-4 rounded-2xl border-2 border-dashed border-muted-foreground/30 flex items-center justify-center">
 				<Server class="w-8 h-8 opacity-40" />
@@ -965,36 +1044,68 @@
 			</Button>
 		</div>
 	{:else}
-		<!-- Custom Draggable Grid -->
-		<DraggableGrid
-			items={filteredGridItems}
-			cols={GRID_COLS}
-			rowHeight={GRID_ROW_HEIGHT}
-			gap={10}
-			minW={1}
-			maxW={2}
-			minH={1}
-			maxH={4}
-			onchange={handleGridChange}
-			onitemclick={handleTileClick}
-		>
-			{#snippet children({ item })}
-				{@const tile = getTileById(item.id)}
-				{#if tile}
-					{#if tile.loading && !tile.stats}
-						<!-- Show skeleton while loading -->
-						<EnvironmentTileSkeleton
-							name={tile.info?.name}
-							host={tile.info?.host}
-							width={item.w}
-							height={item.h}
-						/>
-					{:else if tile.stats}
-						<!-- Show actual tile with data -->
-						<EnvironmentTile stats={tile.stats} width={item.w} height={item.h} oneventsclick={() => handleEventsClick(tile.stats!.id)} />
+		{#if isMobile}
+			<div class="flex flex-col gap-3">
+				{#each orderedGridItems as item (item.id)}
+					{@const tile = getTileById(item.id)}
+					{#if tile}
+						{#if tile.loading && !tile.stats}
+							<!-- Show skeleton while loading -->
+							<div class="w-full">
+								<EnvironmentTileSkeleton
+									name={tile.info?.name}
+									host={tile.info?.host}
+									width={2}
+									height={Math.max(item.h, 2)}
+								/>
+							</div>
+						{:else if tile.stats}
+							<!-- Show actual tile with data -->
+							<div class="w-full cursor-pointer" onclick={() => handleTileClick(tile.stats!.id)}>
+								<EnvironmentTile
+									stats={tile.stats}
+									width={2}
+									height={Math.max(item.h, 2)}
+									oneventsclick={() => handleEventsClick(tile.stats!.id)}
+									showStacksBreakdown={false}
+								/>
+							</div>
+						{/if}
 					{/if}
-				{/if}
-			{/snippet}
-		</DraggableGrid>
+				{/each}
+			</div>
+		{:else}
+			<!-- Custom Draggable Grid -->
+			<DraggableGrid
+				items={filteredGridItems}
+				cols={GRID_COLS}
+				rowHeight={GRID_ROW_HEIGHT}
+				gap={10}
+				minW={1}
+				maxW={2}
+				minH={1}
+				maxH={4}
+				onchange={handleGridChange}
+				onitemclick={handleTileClick}
+			>
+				{#snippet children({ item })}
+					{@const tile = getTileById(item.id)}
+					{#if tile}
+						{#if tile.loading && !tile.stats}
+							<!-- Show skeleton while loading -->
+							<EnvironmentTileSkeleton
+								name={tile.info?.name}
+								host={tile.info?.host}
+								width={item.w}
+								height={item.h}
+							/>
+						{:else if tile.stats}
+							<!-- Show actual tile with data -->
+							<EnvironmentTile stats={tile.stats} width={item.w} height={item.h} oneventsclick={() => handleEventsClick(tile.stats!.id)} />
+						{/if}
+					{/if}
+				{/snippet}
+			</DraggableGrid>
+		{/if}
 	{/if}
 </div>

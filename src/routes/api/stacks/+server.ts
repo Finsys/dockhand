@@ -1,8 +1,9 @@
 import { json } from '@sveltejs/kit';
-import { listComposeStacks, deployStack, saveStackComposeFile, saveStackEnvVars, writeRawStackEnvFile, saveStackEnvVarsToDb } from '$lib/server/stacks';
+import { listComposeStacks, deployStack, saveStackComposeFile, writeStackEnvFile, writeRawStackEnvFile, saveStackEnvVarsToDb } from '$lib/server/stacks';
 import { EnvironmentNotFoundError } from '$lib/server/docker';
 import { upsertStackSource, getStackSources } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
+import { auditStack } from '$lib/server/audit';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ url, cookies }) => {
@@ -34,18 +35,25 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 		const stackSources = await getStackSources(envIdNum);
 		const existingNames = new Set(stacks.map((s) => s.name));
 
+		// Enrich Docker-discovered stacks with source type from DB
+		for (const stack of stacks) {
+			const source = stackSources.find(s => s.stackName === stack.name);
+			if (source) {
+				(stack as any).sourceType = source.sourceType;
+			}
+		}
+
 		for (const source of stackSources) {
-			// Only add internal/git stacks that aren't already in the list
-			if (
-				!existingNames.has(source.stackName) &&
-				(source.sourceType === 'internal' || source.sourceType === 'git')
-			) {
+			// Add stacks from database that aren't already in the Docker list
+			// This includes internal, git, and external (adopted) stacks that are currently down
+			if (!existingNames.has(source.stackName)) {
 				stacks.push({
 					name: source.stackName,
 					containers: [],
 					containerDetails: [],
-					status: 'created' as any
-				});
+					status: 'created' as any,
+					sourceType: source.sourceType
+				} as any);
 			}
 		}
 
@@ -60,7 +68,8 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 	}
 };
 
-export const POST: RequestHandler = async ({ request, url, cookies }) => {
+export const POST: RequestHandler = async (event) => {
+	const { request, url, cookies } = event;
 	const auth = await authorize(cookies);
 
 	const envId = url.searchParams.get('env');
@@ -78,7 +87,7 @@ export const POST: RequestHandler = async ({ request, url, cookies }) => {
 
 	try {
 		const body = await request.json();
-		const { name, compose, start, envVars, rawEnvContent } = body;
+		const { name, compose, start, envVars, rawEnvContent, composePath, envPath } = body;
 
 		if (!name || typeof name !== 'string') {
 			return json({ error: 'Stack name is required' }, { status: 400 });
@@ -90,55 +99,66 @@ export const POST: RequestHandler = async ({ request, url, cookies }) => {
 
 		// If start is false, only create the compose file without deploying
 		if (start === false) {
-			const result = await saveStackComposeFile(name, compose, true);
+			const result = await saveStackComposeFile(name, compose, true, envIdNum, {
+				composePath: composePath || undefined,
+				envPath: envPath || undefined
+			});
 			if (!result.success) {
 				return json({ error: result.error }, { status: 400 });
 			}
 
 			// Save environment variables
-			// - rawEnvContent: non-secret vars with comments → .env file
-			// - envVars: ALL vars → DB (secrets stored for shell injection, non-secrets for metadata)
+			// - rawEnvContent → .env file (non-secrets with comments)
+			// - secrets only → DB (for shell injection at runtime)
 			if (rawEnvContent) {
-				// Write raw content to .env file (should NOT contain secrets)
-				await writeRawStackEnvFile(name, rawEnvContent);
+				await writeRawStackEnvFile(name, rawEnvContent, envIdNum, envPath || undefined);
 			}
-			// Save ALL vars to DB (secrets for shell injection at runtime)
 			if (envVars && Array.isArray(envVars) && envVars.length > 0) {
-				await saveStackEnvVarsToDb(name, envVars, envIdNum);
-			}
-			// Fallback: if no rawEnvContent, generate .env from non-secret vars
-			if (!rawEnvContent && envVars && Array.isArray(envVars) && envVars.length > 0) {
-				await saveStackEnvVars(name, envVars, envIdNum);
+				const secrets = envVars.filter((v: any) => v.isSecret);
+				if (secrets.length > 0) {
+					await saveStackEnvVarsToDb(name, secrets, envIdNum);
+				}
+				// Fallback: if no rawEnvContent, generate .env from non-secret vars
+				if (!rawEnvContent) {
+					await writeStackEnvFile(name, envVars, envIdNum, envPath || undefined);
+				}
 			}
 
-			// Record the stack as internally created
+			// Record the stack as internally created with custom paths if provided
 			await upsertStackSource({
 				stackName: name,
 				environmentId: envIdNum,
-				sourceType: 'internal'
+				sourceType: 'internal',
+				composePath: composePath || undefined,
+				envPath: envPath || undefined
 			});
+
+			// Audit log
+			await auditStack(event, 'create', name, envIdNum);
 
 			return json({ success: true, started: false });
 		}
 
+		// ALWAYS save compose file first - deployStack expects it to exist
+		await saveStackComposeFile(name, compose, true, envIdNum, {
+			composePath: composePath || undefined,
+			envPath: envPath || undefined
+		});
+
 		// Save environment variables BEFORE deploying so they're available during start
 		if (rawEnvContent || (envVars && Array.isArray(envVars) && envVars.length > 0)) {
-			// First ensure the stack directory exists by saving compose file
-			await saveStackComposeFile(name, compose, true);
-
-			// - rawEnvContent: non-secret vars with comments → .env file
-			// - envVars: ALL vars → DB (secrets stored for shell injection, non-secrets for metadata)
 			if (rawEnvContent) {
-				// Write raw content to .env file (should NOT contain secrets)
-				await writeRawStackEnvFile(name, rawEnvContent);
+				await writeRawStackEnvFile(name, rawEnvContent, envIdNum, envPath || undefined);
 			}
-			// Save ALL vars to DB (secrets for shell injection at runtime)
 			if (envVars && Array.isArray(envVars) && envVars.length > 0) {
-				await saveStackEnvVarsToDb(name, envVars, envIdNum);
-			}
-			// Fallback: if no rawEnvContent, generate .env from non-secret vars
-			if (!rawEnvContent && envVars && Array.isArray(envVars) && envVars.length > 0) {
-				await saveStackEnvVars(name, envVars, envIdNum);
+				const secrets = envVars.filter((v: any) => v.isSecret);
+				if (secrets.length > 0) {
+					await saveStackEnvVarsToDb(name, secrets, envIdNum);
+				}
+				// Fallback: if no rawEnvContent, generate .env from non-secret vars
+				if (!rawEnvContent) {
+					await writeStackEnvFile(name, envVars, envIdNum, envPath || undefined);
+				}
 			}
 		}
 
@@ -146,19 +166,26 @@ export const POST: RequestHandler = async ({ request, url, cookies }) => {
 		const result = await deployStack({
 			name,
 			compose,
-			envId: envIdNum
+			envId: envIdNum,
+			composePath: composePath || undefined,
+			envPath: envPath || undefined
 		});
 
 		if (!result.success) {
 			return json({ error: result.error, output: result.output }, { status: 400 });
 		}
 
-		// Record the stack as internally created
+		// Record the stack as internally created with custom paths if provided
 		await upsertStackSource({
 			stackName: name,
 			environmentId: envIdNum,
-			sourceType: 'internal'
+			sourceType: 'internal',
+			composePath: composePath || undefined,
+			envPath: envPath || undefined
 		});
+
+		// Audit log (create + deploy in one action)
+		await auditStack(event, 'deploy', name, envIdNum);
 
 		return json({ success: true, started: true, output: result.output });
 	} catch (error: any) {

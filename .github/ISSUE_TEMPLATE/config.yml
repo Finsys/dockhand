@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 🤔 Questions and Help
+    url: https://github.com/Finsys/dockhand/discussions
+    about: General questions or support for using Dockhand.

@@ -70,8 +70,21 @@ function createGridPreferencesStore() {
 				return getDefaultColumnPreferences(gridId);
 			}
 
-			// Return columns in saved order, filtering to visible ones
-			return gridPrefs.columns.filter((col) => col.visible);
+			// Merge with defaults to ensure new columns are included
+			const defaults = getDefaultColumnPreferences(gridId);
+			const savedIds = new Set(gridPrefs.columns.map((c) => c.id));
+
+			// Start with saved visible columns
+			const result = gridPrefs.columns.filter((col) => col.visible);
+
+			// Add any new default columns that aren't in saved preferences
+			for (const def of defaults) {
+				if (!savedIds.has(def.id) && def.visible) {
+					result.push(def);
+				}
+			}
+
+			return result;
 		},
 
 		// Get all columns for a grid (visible and hidden, in order)
