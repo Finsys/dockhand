@@ -481,6 +481,27 @@ export const userPreferences = sqliteTable('user_preferences', {
 ]);
 
 // =============================================================================
+// VAULT INTEGRATION TABLE
+// =============================================================================
+
+export const vaultConfig = sqliteTable('vault_config', {
+	id: integer('id').primaryKey({ autoIncrement: true }),
+	address: text('address').notNull(), // https://vault:8200
+	namespace: text('namespace'), // Optional: Vault Enterprise Namespace
+	defaultPath: text('default_path'), // Default path prefix, e.g., "secret/data"
+	authMethod: text('auth_method').notNull(), // 'token', 'approle', 'kubernetes'
+	// Auth credentials (encrypted)
+	token: text('token'), // For token auth (encrypted)
+	roleId: text('role_id'), // For AppRole auth
+	secretId: text('secret_id'), // For AppRole auth (encrypted)
+	kubeRole: text('kube_role'), // For Kubernetes auth
+	skipTlsVerify: integer('skip_tls_verify', { mode: 'boolean' }).default(false), // Accept self-signed certs
+	enabled: integer('enabled', { mode: 'boolean' }).default(true),
+	createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+	updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`)
+});
+
+// =============================================================================
 // TYPE EXPORTS
 // =============================================================================
 
@@ -567,3 +588,6 @@ export type NewStackEnvironmentVariable = typeof stackEnvironmentVariables.$infe
 
 export type PendingContainerUpdate = typeof pendingContainerUpdates.$inferSelect;
 export type NewPendingContainerUpdate = typeof pendingContainerUpdates.$inferInsert;
+
+export type VaultConfig = typeof vaultConfig.$inferSelect;
+export type NewVaultConfig = typeof vaultConfig.$inferInsert;
