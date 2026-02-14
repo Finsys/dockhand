@@ -298,35 +298,36 @@ async function sendTelegram(appriseUrl: string, payload: NotificationPayload): P
 
 // Gotify
 async function sendGotify(appriseUrl: string, payload: NotificationPayload): Promise<NotificationResult> {
-	// gotify://hostname/token or gotifys://hostname/token
-	const match = appriseUrl.match(/^gotifys?:\/\/([^/]+)\/(.+)/);
-	if (!match) {
-		return { success: false, error: 'Invalid Gotify URL format. Expected: gotify://hostname/token' };
-	}
+    // gotify{s}://hostname/{subpath}/token
+    // sample: gotify://hostname/token or gotifys://hostname/subpath/token
+    const match = appriseUrl.match(/^gotifys?:\/\/([^/]+)(\/.*)?\/([^/]+)$/);
+    if (!match) {
+        return { success: false, error: 'Invalid Gotify URL format. Expected: gotify://hostname/token or gotifys://hostname/subpath/token' };
+    }
 
-	const [, hostname, token] = match;
-	const protocol = appriseUrl.startsWith('gotifys') ? 'https' : 'http';
-	const url = `${protocol}://${hostname}/message?token=${token}`;
+    const [, hostname, subpath = '', token] = match;
+    const protocol = appriseUrl.startsWith('gotifys') ? 'https' : 'http';
+    const url = `${protocol}://${hostname}${subpath}/message?token=${token}`;
 
-	try {
-		const response = await fetch(url, {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({
-				title: payload.title,
-				message: payload.message,
-				priority: payload.type === 'error' ? 8 : payload.type === 'warning' ? 5 : 2
-			})
-		});
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                title: payload.title,
+                message: payload.message,
+                priority: payload.type === 'error' ? 8 : payload.type === 'warning' ? 5 : 2
+            })
+        });
 
-		if (!response.ok) {
-			const text = await response.text().catch(() => '');
-			return { success: false, error: `Gotify error ${response.status}: ${text || response.statusText}` };
-		}
-		return { success: true };
-	} catch (error) {
-		return { success: false, error: `Gotify connection failed: ${error instanceof Error ? error.message : String(error)}` };
-	}
+        if (!response.ok) {
+            return { success: false, error: `Gotify error ${response.status}: ${await response.text()}` };
+        }
+
+        return { success: true };
+    } catch (err: any) {
+        return { success: false, error: err.message };
+    }
 }
 
 // ntfy
