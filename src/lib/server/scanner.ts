@@ -239,7 +239,7 @@ async function isScannerImageAvailable(scannerImage: string, envId?: number): Pr
 	try {
 		const images = await listImages(envId);
 		return images.some((img) =>
-			img.tags?.some((tag: string) => tag.includes(scannerImage.split(':')[0]))
+			img.tags?.some((tag: string) => tag === scannerImage)
 		);
 	} catch {
 		return false;
@@ -759,7 +759,7 @@ export async function scanWithGrype(
 
 		onProgress?.({
 			stage: 'complete',
-			message: 'Grype scan complete',
+			message: `Grype scan complete: ${summary.critical} critical, ${summary.high} high, ${summary.medium} medium, ${summary.low} low`,
 			scanner: 'grype',
 			progress: 100,
 			result
@@ -857,7 +857,7 @@ export async function scanWithTrivy(
 
 		onProgress?.({
 			stage: 'complete',
-			message: 'Trivy scan complete',
+			message: `Trivy scan complete: ${summary.critical} critical, ${summary.high} high, ${summary.medium} medium, ${summary.low} low`,
 			scanner: 'trivy',
 			progress: 100,
 			result
@@ -972,7 +972,7 @@ async function getScannerVersion(
 		// Check if image exists first
 		const images = await listImages(envId);
 		const hasImage = images.some((img) =>
-			img.tags?.some((tag: string) => tag.includes(scannerImage.split(':')[0]))
+			img.tags?.some((tag: string) => tag === scannerImage)
 		);
 		if (!hasImage) return null;
 
