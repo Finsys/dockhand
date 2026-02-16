@@ -1,0 +1,15 @@
+services:
+  env-viewer:
+    image: php:8-apache
+    ports:
+      - "8080:80"
+    volumes:
+      - ./index.php:/var/www/html/index.php:ro
+    environment:
+      # Default values (can be overridden by Vault secrets)
+      - APP_NAME=${APP_NAME:-Dockhand Vault Test}
+      - APP_ENV=${APP_ENV:-development}
+      # These will be injected from Vault
+      - DATABASE_PASSWORD=${DATABASE_PASSWORD:-not-set}
+      - API_KEY=${API_KEY:-not-set}
+      - ADMIN_TOKEN=${ADMIN_TOKEN:-not-set}

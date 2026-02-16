@@ -634,7 +634,11 @@ export function deleteRepositoryFiles(repoId: number): void {
 
 // === Git Stack Functions ===
 
-async function getStackRepoPath(stackId: number, stackName?: string, environmentId?: number | null): Promise<string> {
+/**
+ * Get the repository path for a git stack
+ * Exported for use by other modules (e.g., secrets sync)
+ */
+export async function getGitStackRepoPath(stackId: number, stackName?: string, environmentId?: number | null): Promise<string> {
 	if (stackName && environmentId) {
 		// Use old path if it already exists (backward compat), otherwise use name-based path
 		const oldPath = join(GIT_REPOS_DIR, `stack-${stackId}`);
@@ -668,7 +672,8 @@ async function getPreviousCommit(repoPath: string, env: GitEnv): Promise<string 
 	}
 }
 
-export async function syncGitStack(stackId: number): Promise<SyncResult> {
+export async function syncGitStack(stackId: number, options?: { skipVault?: boolean }): Promise<SyncResult> {
+	const skipVault = options?.skipVault ?? false;
 	const gitStack = await getGitStack(stackId);
 	if (!gitStack) {
 		return { success: false, error: 'Git stack not found' };
@@ -701,7 +706,7 @@ export async function syncGitStack(stackId: number): Promise<SyncResult> {
 	console.log(`${logPrefix} Repository branch:`, repo.branch);
 
 	const credential = repo.credentialId ? await getGitCredential(repo.credentialId) : null;
-	const repoPath = await getStackRepoPath(stackId, gitStack.stackName, gitStack.environmentId);
+	const repoPath = await getGitStackRepoPath(stackId, gitStack.stackName, gitStack.environmentId);
 	const env = await buildGitEnv(credential);
 
 	console.log(`${logPrefix} Local repo path:`, repoPath);
@@ -836,6 +841,32 @@ export async function syncGitStack(stackId: number): Promise<SyncResult> {
 			}
 		} else {
 			console.log(`${logPrefix} No env file path configured`);
+		}
+
+		// Sync secrets from Vault if .secrets.yaml exists (unless skipVault is true)
+		if (skipVault) {
+			console.log(`${logPrefix} Skipping Vault sync (mode: git-only)`);
+		} else {
+			try {
+				const { syncStackSecrets } = await import('./vault-sync.js');
+				const vaultResult = await syncStackSecrets(gitStack.stackName, repoPath, gitStack.environmentId);
+				if (!vaultResult.skipped) {
+					if (vaultResult.success) {
+						console.log(`${logPrefix} Vault secrets synced: ${vaultResult.synced} secret(s)`);
+					} else {
+						console.warn(`${logPrefix} Vault sync had errors:`, vaultResult.errors.join(', '));
+					}
+
+					// Check if any secrets with triggerRedeploy changed
+					if (vaultResult.triggerRedeploySecrets.length > 0) {
+						console.log(`${logPrefix} Vault secrets changed (trigger redeploy): ${vaultResult.triggerRedeploySecrets.join(', ')}`);
+						updated = true;
+					}
+				}
+			} catch (vaultError) {
+				// Don't fail the sync if Vault sync fails - just log and continue
+				console.warn(`${logPrefix} Vault sync error (non-fatal):`, vaultError);
+			}
 		}
 
 		// Update git stack status
@@ -1026,7 +1057,7 @@ export async function testGitStack(stackId: number): Promise<TestResult> {
 }
 
 export async function deleteGitStackFiles(stackId: number, stackName?: string, environmentId?: number | null): Promise<void> {
-	const repoPath = await getStackRepoPath(stackId, stackName, environmentId);
+	const repoPath = await getGitStackRepoPath(stackId, stackName, environmentId);
 	try {
 		if (existsSync(repoPath)) {
 			rmSync(repoPath, { recursive: true, force: true });
@@ -1069,7 +1100,7 @@ export async function deployGitStackWithProgress(
 	}
 
 	const credential = repo.credentialId ? await getGitCredential(repo.credentialId) : null;
-	const repoPath = await getStackRepoPath(stackId, gitStack.stackName, gitStack.environmentId);
+	const repoPath = await getGitStackRepoPath(stackId, gitStack.stackName, gitStack.environmentId);
 	const env = await buildGitEnv(credential);
 
 	const totalSteps = 5;
@@ -1241,7 +1272,7 @@ export async function listGitStackEnvFiles(stackId: number): Promise<{ files: st
 		return { files: [], error: 'Git stack not found' };
 	}
 
-	const repoPath = await getStackRepoPath(stackId, gitStack.stackName, gitStack.environmentId);
+	const repoPath = await getGitStackRepoPath(stackId, gitStack.stackName, gitStack.environmentId);
 	if (!existsSync(repoPath)) {
 		return { files: [], error: 'Repository not synced - deploy the stack first' };
 	}
@@ -1354,7 +1385,7 @@ export async function readGitStackEnvFile(
 		return { vars: {}, error: 'Git stack not found' };
 	}
 
-	const repoPath = await getStackRepoPath(stackId, gitStack.stackName, gitStack.environmentId);
+	const repoPath = await getGitStackRepoPath(stackId, gitStack.stackName, gitStack.environmentId);
 	if (!existsSync(repoPath)) {
 		return { vars: {}, error: 'Repository not synced - deploy the stack first' };
 	}

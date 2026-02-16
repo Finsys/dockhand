@@ -898,6 +898,7 @@ export const userPreferences = schemaProxy.userPreferences;
 export const scheduleExecutions = schemaProxy.scheduleExecutions;
 export const stackEnvironmentVariables = schemaProxy.stackEnvironmentVariables;
 export const pendingContainerUpdates = schemaProxy.pendingContainerUpdates;
+export const vaultConfig = schemaProxy.vaultConfig;
 
 // Re-export types from SQLite schema (they're compatible with PostgreSQL)
 export type {
@@ -956,7 +957,9 @@ export type {
 	StackEnvironmentVariable,
 	NewStackEnvironmentVariable,
 	PendingContainerUpdate,
-	NewPendingContainerUpdate
+	NewPendingContainerUpdate,
+	VaultConfig,
+	NewVaultConfig
 } from './schema/index.js';
 
 export { eq, and, or, desc, asc, like, sql, inArray, isNull, isNotNull } from 'drizzle-orm';
