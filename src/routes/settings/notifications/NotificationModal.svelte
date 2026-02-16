@@ -416,6 +416,7 @@ discord://webhook_id/webhook_token
 slack://token_a/token_b/token_c
 mmost://hostname/webhook-token
 tgram://bot_token/chat_id
+tgram://bot_token/chat_id:topic_id
 ntfy://my-topic
 pushover://user_key/api_token
 jsons://hostname/webhook/path"
