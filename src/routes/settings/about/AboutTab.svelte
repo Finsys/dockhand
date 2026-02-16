@@ -305,7 +305,6 @@
 					containerName: data.containerName,
 					isComposeManaged: data.isComposeManaged
 				};
-				showSelfUpdateDialog = true;
 			}
 		} catch (err) {
 			updateCheckError = 'Check failed: ' + String(err);
