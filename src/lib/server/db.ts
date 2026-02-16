@@ -779,6 +779,7 @@ export const NOTIFICATION_EVENT_TYPES = [
 	{ id: 'container_restarted', label: 'Container restarted', description: 'When a container restarts (manual or automatic)', group: 'container', scope: 'environment' },
 	{ id: 'container_exited', label: 'Container exited', description: 'When a container exits unexpectedly', group: 'container', scope: 'environment' },
 	{ id: 'container_unhealthy', label: 'Container unhealthy', description: 'When a container health check fails', group: 'container', scope: 'environment' },
+	{ id: 'container_healthy', label: 'Container healthy', description: 'When a container health check recovers', group: 'container', scope: 'environment' },
 	{ id: 'container_oom', label: 'Out of memory', description: 'When a container is killed due to out of memory', group: 'container', scope: 'environment' },
 	{ id: 'container_updated', label: 'Container updated', description: 'When a container image is updated', group: 'container', scope: 'environment' },
 	{ id: 'image_pulled', label: 'Image pulled', description: 'When a new image is pulled', group: 'container', scope: 'environment' },
@@ -2982,7 +2983,7 @@ export async function deleteOldScans(keepDays = 30): Promise<number> {
 export type AuditAction =
 	| 'create' | 'update' | 'delete' | 'start' | 'stop' | 'restart' | 'down'
 	| 'pause' | 'unpause' | 'pull' | 'push' | 'prune' | 'login'
-	| 'logout' | 'view' | 'exec' | 'connect' | 'disconnect' | 'deploy' | 'sync' | 'rename';
+	| 'logout' | 'view' | 'exec' | 'connect' | 'disconnect' | 'deploy' | 'sync' | 'rename' | 'webhook';
 
 export type AuditEntityType =
 	| 'container' | 'image' | 'stack' | 'volume' | 'network'

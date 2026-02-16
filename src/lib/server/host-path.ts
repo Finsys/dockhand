@@ -32,7 +32,7 @@ let cachedMounts: Array<{ source: string; destination: string }> | null = null;
 /**
  * Get our own container ID
  */
-function getOwnContainerId(): string | null {
+export function getOwnContainerId(): string | null {
 	// Method 1: From cgroup (works in most cases)
 	try {
 		const cgroup = readFileSync('/proc/self/cgroup', 'utf-8');

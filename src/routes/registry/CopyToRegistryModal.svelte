@@ -7,6 +7,8 @@
 	import * as Select from '$lib/components/ui/select';
 	import { CheckCircle2, XCircle, Download, Upload, Server, Settings2, Copy, Check, Clipboard, Icon, ShieldCheck, ShieldAlert, ShieldX, ArrowBigRight } from 'lucide-svelte';
 	import { whale } from '@lucide/lab';
+	import * as Tooltip from '$lib/components/ui/tooltip';
+	import { copyToClipboard } from '$lib/utils/clipboard';
 	import { currentEnvironment } from '$lib/stores/environment';
 	import PullTab from '$lib/components/PullTab.svelte';
 	import ScanTab from '$lib/components/ScanTab.svelte';
@@ -68,7 +70,7 @@
 	let scanResults = $state<ScanResult[]>([]);
 	let pushStatus = $state<'idle' | 'pushing' | 'complete' | 'error'>('idle');
 	let pushStarted = $state(false);
-	let copiedToClipboard = $state(false);
+	let copiedToClipboard = $state<'ok' | 'error' | null>(null);
 
 	// Computed
 	const sourceRegistry = $derived(registries.find(r => r.id === sourceRegistryId));
@@ -233,9 +235,9 @@
 	}
 
 	async function copyTargetToClipboard() {
-		await navigator.clipboard.writeText(targetImageName());
-		copiedToClipboard = true;
-		setTimeout(() => copiedToClipboard = false, 2000);
+		const ok = await copyToClipboard(targetImageName());
+		copiedToClipboard = ok ? 'ok' : 'error';
+		setTimeout(() => copiedToClipboard = null, 2000);
 	}
 
 	const effectiveEnvId = $derived(envId ?? $currentEnvironment?.id ?? null);
@@ -390,7 +392,14 @@
 								class="p-0.5 rounded hover:bg-muted transition-colors cursor-pointer"
 								title="Copy to clipboard"
 							>
-								{#if copiedToClipboard}
+								{#if copiedToClipboard === 'error'}
+									<Tooltip.Root open>
+										<Tooltip.Trigger>
+											<XCircle class="w-3 h-3 text-red-500" />
+										</Tooltip.Trigger>
+										<Tooltip.Content>Copy requires HTTPS</Tooltip.Content>
+									</Tooltip.Root>
+								{:else if copiedToClipboard === 'ok'}
 									<Check class="w-3 h-3 text-green-500" />
 								{:else}
 									<Clipboard class="w-3 h-3 text-muted-foreground hover:text-foreground" />

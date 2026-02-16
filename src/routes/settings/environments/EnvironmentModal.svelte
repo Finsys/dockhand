@@ -57,7 +57,8 @@
 		X,
 		Tags,
 		ChevronDown,
-		ChevronRight
+		ChevronRight,
+		XCircle
 	} from 'lucide-svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import * as Alert from '$lib/components/ui/alert';
@@ -70,6 +71,7 @@
 	import { TogglePill, ToggleGroup } from '$lib/components/ui/toggle-pill';
 	import { ShieldOff } from 'lucide-svelte';
 	import { focusFirstInput } from '$lib/utils';
+	import { copyToClipboard } from '$lib/utils/clipboard';
 	import { authStore, canAccess } from '$lib/stores/auth';
 	import { licenseStore } from '$lib/stores/license';
 	import { formatDateTime, formatDate } from '$lib/stores/settings';
@@ -321,8 +323,8 @@
 	let hawserTokenLoading = $state(false);
 	let generatingToken = $state(false);
 	let generatedToken = $state<string | null>(null); // Full token shown once after generation
-	let copySuccess = $state(false);
-	let copyCmdSuccess = $state(false);
+	let copySuccess = $state<'ok' | 'error' | null>(null);
+	let copyCmdSuccess = $state<'ok' | 'error' | null>(null);
 	// For add mode - auto-generated token stored until save
 	let pendingToken = $state<string | null>(null);
 
@@ -1268,17 +1270,17 @@
 		await generateHawserToken(envId);
 	}
 
-	function copyToken(token: string) {
-		navigator.clipboard.writeText(token);
-		copySuccess = true;
-		setTimeout(() => { copySuccess = false; }, 2000);
+	async function copyToken(token: string) {
+		const ok = await copyToClipboard(token);
+		copySuccess = ok ? 'ok' : 'error';
+		setTimeout(() => { copySuccess = null; }, 2000);
 	}
 
-	function copyCommand(token: string) {
+	async function copyCommand(token: string) {
 		const cmd = `DOCKHAND_SERVER_URL=${getConnectionUrl()} TOKEN=${token} hawser`;
-		navigator.clipboard.writeText(cmd);
-		copyCmdSuccess = true;
-		setTimeout(() => { copyCmdSuccess = false; }, 2000);
+		const ok = await copyToClipboard(cmd);
+		copyCmdSuccess = ok ? 'ok' : 'error';
+		setTimeout(() => { copyCmdSuccess = null; }, 2000);
 	}
 
 	function getConnectionUrl() {
@@ -1883,7 +1885,14 @@
 														class="font-mono text-xs flex-1"
 													/>
 													<Button variant="outline" size="sm" onclick={() => copyToken(pendingToken!)}>
-														{#if copySuccess}
+														{#if copySuccess === 'error'}
+															<Tooltip.Root open>
+																<Tooltip.Trigger>
+																	<XCircle class="w-4 h-4 text-red-500" />
+																</Tooltip.Trigger>
+																<Tooltip.Content>Copy requires HTTPS</Tooltip.Content>
+															</Tooltip.Root>
+														{:else if copySuccess === 'ok'}
 															<Check class="w-4 h-4 text-green-500" />
 														{:else}
 															<Copy class="w-4 h-4" />
@@ -1899,7 +1908,14 @@
 															onclick={() => copyCommand(pendingToken!)}
 															title="Copy command"
 														>
-															{#if copyCmdSuccess}
+															{#if copyCmdSuccess === 'error'}
+																<Tooltip.Root open>
+																	<Tooltip.Trigger>
+																		<XCircle class="w-3 h-3 text-red-500" />
+																	</Tooltip.Trigger>
+																	<Tooltip.Content>Copy requires HTTPS</Tooltip.Content>
+																</Tooltip.Root>
+															{:else if copyCmdSuccess === 'ok'}
 																<Check class="w-3 h-3 text-green-600" />
 															{:else}
 																<Copy class="w-3 h-3" />
@@ -1936,7 +1952,14 @@
 														class="font-mono text-xs flex-1"
 													/>
 													<Button variant="outline" size="sm" onclick={() => copyToken(generatedToken!)}>
-														{#if copySuccess}
+														{#if copySuccess === 'error'}
+															<Tooltip.Root open>
+																<Tooltip.Trigger>
+																	<XCircle class="w-4 h-4 text-red-500" />
+																</Tooltip.Trigger>
+																<Tooltip.Content>Copy requires HTTPS</Tooltip.Content>
+															</Tooltip.Root>
+														{:else if copySuccess === 'ok'}
 															<Check class="w-4 h-4 text-green-500" />
 														{:else}
 															<Copy class="w-4 h-4" />
@@ -1952,7 +1975,14 @@
 															onclick={() => copyCommand(generatedToken!)}
 															title="Copy command"
 														>
-															{#if copyCmdSuccess}
+															{#if copyCmdSuccess === 'error'}
+																<Tooltip.Root open>
+																	<Tooltip.Trigger>
+																		<XCircle class="w-3 h-3 text-red-500" />
+																	</Tooltip.Trigger>
+																	<Tooltip.Content>Copy requires HTTPS</Tooltip.Content>
+																</Tooltip.Root>
+															{:else if copyCmdSuccess === 'ok'}
 																<Check class="w-3 h-3 text-green-600" />
 															{:else}
 																<Copy class="w-3 h-3" />

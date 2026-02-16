@@ -299,14 +299,19 @@ async function sendTelegram(appriseUrl: string, payload: NotificationPayload): P
 // Gotify
 async function sendGotify(appriseUrl: string, payload: NotificationPayload): Promise<NotificationResult> {
 	// gotify://hostname/token or gotifys://hostname/token
+	// gotify://hostname/subpath/token (subpath support)
 	const match = appriseUrl.match(/^gotifys?:\/\/([^/]+)\/(.+)/);
 	if (!match) {
 		return { success: false, error: 'Invalid Gotify URL format. Expected: gotify://hostname/token' };
 	}
 
-	const [, hostname, token] = match;
+	const [, hostname, pathPart] = match;
 	const protocol = appriseUrl.startsWith('gotifys') ? 'https' : 'http';
-	const url = `${protocol}://${hostname}/message?token=${token}`;
+	// Token is always the last path segment; anything before it is a subpath
+	const lastSlash = pathPart.lastIndexOf('/');
+	const subpath = lastSlash >= 0 ? pathPart.substring(0, lastSlash) : '';
+	const token = lastSlash >= 0 ? pathPart.substring(lastSlash + 1) : pathPart;
+	const url = `${protocol}://${hostname}${subpath ? '/' + subpath : ''}/message?token=${token}`;
 
 	try {
 		const response = await fetch(url, {
@@ -506,6 +511,7 @@ function mapActionToEventType(action: string): NotificationEventType | null {
 		'kill': 'container_exited',
 		'oom': 'container_oom',
 		'health_status: unhealthy': 'container_unhealthy',
+		'health_status: healthy': 'container_healthy',
 		'pull': 'image_pulled'
 	};
 	return mapping[action] || null;

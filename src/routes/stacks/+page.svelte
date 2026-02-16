@@ -1626,21 +1626,6 @@
 										{/snippet}
 									</ConfirmPopover>
 								{/if}
-								{#if $canAccess('stacks', 'stop')}
-									<ConfirmPopover
-										open={confirmDownName === stack.name}
-										action="Down"
-										itemType="stack"
-										itemName={stack.name}
-										title="Down (remove containers)"
-										onConfirm={() => downStack(stack.name)}
-										onOpenChange={(open) => confirmDownName = open ? stack.name : null}
-									>
-										{#snippet children({ open })}
-											<ArrowBigDown class="w-3 h-3 {open ? 'text-orange-500' : 'text-muted-foreground hover:text-orange-500'}" />
-										{/snippet}
-									</ConfirmPopover>
-								{/if}
 							{:else}
 								{#if $canAccess('stacks', 'start')}
 									<button
@@ -1653,6 +1638,21 @@
 									</button>
 								{/if}
 							{/if}
+						{/if}
+						{#if $canAccess('stacks', 'stop')}
+							<ConfirmPopover
+								open={confirmDownName === stack.name}
+								action="Down"
+								itemType="stack"
+								itemName={stack.name}
+								title="Down (remove containers)"
+								onConfirm={() => downStack(stack.name)}
+								onOpenChange={(open) => confirmDownName = open ? stack.name : null}
+							>
+								{#snippet children({ open })}
+									<ArrowBigDown class="w-3 h-3 {open ? 'text-orange-500' : 'text-muted-foreground hover:text-orange-500'}" />
+								{/snippet}
+							</ConfirmPopover>
 						{/if}
 						{#if $canAccess('stacks', 'remove')}
 							<ConfirmPopover

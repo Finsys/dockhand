@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { X, GripHorizontal, RefreshCw, Copy, Download, WrapText, ArrowDownToLine, Search, ChevronUp, ChevronDown, Sun, Moon, Wifi, WifiOff, Pause, Play } from 'lucide-svelte';
+	import { copyToClipboard } from '$lib/utils/clipboard';
 	import * as Select from '$lib/components/ui/select';
 	import { appSettings } from '$lib/stores/settings';
 	import { themeStore } from '$lib/stores/theme';
@@ -422,11 +423,7 @@
 	// Copy logs to clipboard
 	async function copyLogs() {
 		if (logs) {
-			try {
-				await navigator.clipboard.writeText(logs);
-			} catch (err) {
-				console.error('Failed to copy:', err);
-			}
+			await copyToClipboard(logs);
 		}
 	}
 

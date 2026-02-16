@@ -368,6 +368,12 @@ async function checkDiskSpace() {
 				console.warn(`[MetricsSubprocess] Environment "${enabledEnvs[index].name}" disk check failed: ${reason}`);
 			}
 		});
+
+		// Clean up stale lastDiskWarning entries for deleted environments
+		const activeEnvIds = new Set(environments.map((e) => e.id));
+		for (const envId of lastDiskWarning.keys()) {
+			if (!activeEnvIds.has(envId)) lastDiskWarning.delete(envId);
+		}
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		console.error(`[MetricsSubprocess] Disk space check error: ${message}`);

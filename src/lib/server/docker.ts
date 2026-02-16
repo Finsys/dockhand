@@ -807,7 +807,7 @@ export async function unpauseContainer(id: string, envId?: number | null) {
 
 export async function removeContainer(id: string, force = false, envId?: number | null) {
 	const response = await dockerFetch(`/containers/${id}?force=${force}`, { method: 'DELETE' }, envId);
-	if (!response.ok) {
+	if (!response.ok && response.status !== 404) {
 		const errorBody = await response.text();
 		let errorMessage = `Failed to remove container ${id}`;
 		try {
@@ -1339,6 +1339,43 @@ export async function createContainer(options: CreateContainerOptions, envId?: n
 }
 
 /**
+ * Deep-diff two objects recursively, returning all paths that differ.
+ */
+export function deepDiff(a: any, b: any, path = ''): string[] {
+	const diffs: string[] = [];
+
+	if (a === b) return diffs;
+	if (a === null || b === null || typeof a !== typeof b) {
+		diffs.push(`${path}: ${JSON.stringify(a)} → ${JSON.stringify(b)}`);
+		return diffs;
+	}
+	if (typeof a !== 'object') {
+		if (a !== b) diffs.push(`${path}: ${JSON.stringify(a)} → ${JSON.stringify(b)}`);
+		return diffs;
+	}
+	if (Array.isArray(a) || Array.isArray(b)) {
+		const aStr = JSON.stringify(a);
+		const bStr = JSON.stringify(b);
+		if (aStr !== bStr) diffs.push(`${path}: ${aStr} → ${bStr}`);
+		return diffs;
+	}
+
+	const allKeys = Array.from(new Set([...Object.keys(a), ...Object.keys(b)]));
+	for (const key of allKeys) {
+		const childPath = path ? `${path}.${key}` : key;
+		if (!(key in a)) {
+			diffs.push(`${childPath}: <missing> → ${JSON.stringify(b[key])}`);
+		} else if (!(key in b)) {
+			diffs.push(`${childPath}: ${JSON.stringify(a[key])} → <missing>`);
+		} else {
+			diffs.push(...deepDiff(a[key], b[key], childPath));
+		}
+	}
+
+	return diffs;
+}
+
+/**
  * Recreate a container using full Config/HostConfig passthrough from inspect data.
  * Passes Config and HostConfig directly from inspect to create, only changing
  * the image. No field mapping or stripping.
@@ -1519,7 +1556,23 @@ export async function recreateContainerFromInspect(
 		}
 	}
 
-	// 8. Remove old container (best effort)
+	// 8. Log config diff between old and new container
+	try {
+		const newInspect = await inspectContainer(newContainerId, envId);
+		const diffs = deepDiff(inspectData, newInspect);
+		if (diffs.length === 0) {
+			log?.(`[${name}] Config diff: no differences (all settings preserved)`);
+		} else {
+			log?.(`[${name}] Config diff: ${diffs.length} difference(s):`);
+			for (const d of diffs) {
+				log?.(`  [${name}] ${d}`);
+			}
+		}
+	} catch {
+		// Non-critical, don't fail the update
+	}
+
+	// 9. Remove old container (best effort)
 	log?.('Removing old container...');
 	await removeContainer(oldContainerId, true, envId).catch(() => {});
 
@@ -2649,13 +2702,17 @@ export async function getHawserInfo(envId: number): Promise<{
 	mode: string;
 	uptime: number;
 } | null> {
-	try {
-		const response = await dockerFetch('/_hawser/info', {}, envId);
-		if (response.ok) {
-			return await response.json();
+	for (let attempt = 0; attempt < 2; attempt++) {
+		try {
+			const response = await dockerFetch('/_hawser/info', {}, envId);
+			if (response.ok) {
+				return await response.json();
+			}
+			console.warn(`[Hawser] Info endpoint returned ${response.status} for env ${envId}`);
+		} catch (error) {
+			const msg = error instanceof Error ? error.message : String(error);
+			console.warn(`[Hawser] Failed to fetch info for env ${envId} (attempt ${attempt + 1}): ${msg}`);
 		}
-	} catch {
-		// Hawser info not available
 	}
 	return null;
 }
@@ -3275,7 +3332,7 @@ export async function runContainer(options: {
 
 		// Wait for container to finish
 		console.log(`[runContainer] Waiting for container ${containerId} to finish...`);
-		const waitResponse = await dockerFetch(`/containers/${containerId}/wait`, { method: 'POST' }, options.envId);
+		const waitResponse = await dockerFetch(`/containers/${containerId}/wait`, { method: 'POST', streaming: true }, options.envId);
 		const waitResult = await waitResponse.json().catch(() => ({}));
 		console.log(`[runContainer] Container ${containerId} finished with exit code:`, waitResult?.StatusCode);
 
@@ -3367,7 +3424,7 @@ export async function runContainerWithStreaming(options: {
 			// Wait for container to exit - this is the reliable signal
 			let exitCode: number | undefined;
 			try {
-				const waitResult = await dockerFetch(`/containers/${containerId}/wait`, { method: 'POST' }, options.envId);
+				const waitResult = await dockerFetch(`/containers/${containerId}/wait`, { method: 'POST', streaming: true }, options.envId);
 				const waitData = await waitResult.json() as { StatusCode?: number };
 				exitCode = waitData.StatusCode;
 				console.log(`[runContainerWithStreaming] Container exited with code: ${exitCode}`);

@@ -54,6 +54,7 @@ RUN APKO_ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "aarch64" || echo "x86_64") 
     "    - postgresql-client" \
     "    - git" \
     "    - openssh-client" \
+    "    - openssh-keygen" \
     "    - curl" \
     "    - tini" \
     "    - su-exec" \
@@ -86,7 +87,9 @@ ARG TARGETARCH
 WORKDIR /app
 
 # Install build dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends jq git curl unzip ca-certificates && rm -rf /var/lib/apt/lists/*
+# libnss-wrapper: needed for git SSH with arbitrary UIDs on read-only containers (getpwuid workaround)
+RUN apt-get update && apt-get install -y --no-install-recommends jq git curl unzip ca-certificates libnss-wrapper && rm -rf /var/lib/apt/lists/* \
+    && cp "$(dpkg -L libnss-wrapper | grep 'libnss_wrapper\.so$')" /usr/local/lib/libnss_wrapper.so
 
 # Copy package files and install ALL dependencies (needed for build)
 COPY package.json bun.lock* bunfig.toml ./
@@ -95,7 +98,7 @@ RUN bun install --frozen-lockfile
 # Copy source code and build
 COPY . .
 
-# Build with parallelism - dedicated build VM has 16 CPUs and 32GB RAM
+# Build the application
 RUN NODE_OPTIONS="--max-old-space-size=8192 --max-semi-space-size=128" bun run build
 
 # Prepare production node_modules (do this in builder where we have compilers)
@@ -129,6 +132,9 @@ COPY --from=os-builder /work/rootfs/ /
 # For baseline builds (BUN_VARIANT=baseline), this contains the baseline binary (no AVX requirement)
 # For regular builds, this contains the standard oven/bun binary
 COPY --from=app-builder /usr/local/bin/bun /usr/bin/bun
+
+# Copy libnss_wrapper for git SSH with arbitrary UIDs (same cross-copy pattern as Bun above)
+COPY --from=app-builder /usr/local/lib/libnss_wrapper.so /usr/lib/libnss_wrapper.so
 
 WORKDIR /app
 

@@ -49,6 +49,80 @@ interface GitEnv {
 	[key: string]: string;
 }
 
+const NSS_WRAPPER_LIB = '/usr/lib/libnss_wrapper.so';
+const TMP_PASSWD = '/tmp/dockhand-passwd';
+const TMP_GROUP = '/tmp/dockhand-group';
+
+// Cache the check so we only do it once per process
+let _nssWrapperChecked = false;
+let _nssWrapperNeeded = false;
+
+/**
+ * Ensures the current UID exists in /etc/passwd for git/SSH operations.
+ * SSH calls getpwuid() which fails with "No user exists for uid XXXX" if the
+ * UID isn't in /etc/passwd (common with Docker --user or read-only containers).
+ * Creates a temp passwd file and configures LD_PRELOAD with libnss_wrapper.
+ */
+async function ensurePasswdEntry(env: GitEnv): Promise<void> {
+	if (_nssWrapperChecked) {
+		if (_nssWrapperNeeded) {
+			env.LD_PRELOAD = NSS_WRAPPER_LIB;
+			env.NSS_WRAPPER_PASSWD = TMP_PASSWD;
+			env.NSS_WRAPPER_GROUP = TMP_GROUP;
+		}
+		return;
+	}
+	_nssWrapperChecked = true;
+
+	// Check if current UID is in /etc/passwd
+	const uid = process.getuid?.();
+	if (uid === undefined || uid === 0) return; // root or not available
+
+	try {
+		const passwd = await Bun.file('/etc/passwd').text();
+		const uidStr = `:${uid}:`;
+		if (passwd.split('\n').some(line => {
+			const parts = line.split(':');
+			return parts[2] === String(uid);
+		})) {
+			return; // UID exists, nothing to do
+		}
+	} catch {
+		return; // can't read passwd, bail
+	}
+
+	// UID not found — check if libnss_wrapper is available
+	if (!existsSync(NSS_WRAPPER_LIB)) {
+		console.warn(`[git] UID ${uid} not in /etc/passwd and libnss_wrapper not found — SSH may fail`);
+		return;
+	}
+
+	// Create temp passwd/group with the missing entry
+	try {
+		const gid = process.getgid?.() ?? uid;
+		const passwd = await Bun.file('/etc/passwd').text();
+		const group = await Bun.file('/etc/group').text();
+
+		const passwdEntry = `dockhand:x:${uid}:${gid}:Dockhand:/home/dockhand:/bin/sh`;
+		await Bun.write(TMP_PASSWD, passwd.trimEnd() + '\n' + passwdEntry + '\n');
+
+		const gidExists = group.split('\n').some(line => line.split(':')[2] === String(gid));
+		if (gidExists) {
+			await Bun.write(TMP_GROUP, group);
+		} else {
+			await Bun.write(TMP_GROUP, group.trimEnd() + '\n' + `dockhand:x:${gid}:\n`);
+		}
+
+		_nssWrapperNeeded = true;
+		env.LD_PRELOAD = NSS_WRAPPER_LIB;
+		env.NSS_WRAPPER_PASSWD = TMP_PASSWD;
+		env.NSS_WRAPPER_GROUP = TMP_GROUP;
+		console.log(`[git] Created temp passwd for UID ${uid} with libnss_wrapper`);
+	} catch (err) {
+		console.warn(`[git] Failed to create temp passwd:`, err);
+	}
+}
+
 async function buildGitEnv(credential: GitCredential | null): Promise<GitEnv> {
 	const env: GitEnv = {
 		...process.env as GitEnv,
@@ -56,6 +130,9 @@ async function buildGitEnv(credential: GitCredential | null): Promise<GitEnv> {
 		// Prevent SSH agent from providing keys automatically
 		SSH_AUTH_SOCK: ''
 	};
+
+	// Ensure current UID is resolvable for SSH/git operations
+	await ensurePasswdEntry(env);
 
 	if (credential?.authType === 'ssh' && credential.sshPrivateKey) {
 		// Create a temporary SSH key file (use absolute path so SSH can find it)
@@ -72,9 +149,20 @@ async function buildGitEnv(credential: GitCredential | null): Promise<GitEnv> {
 		// Bun.write's mode option doesn't always work reliably, so use chmodSync
 		chmodSync(sshKeyPath, 0o600);
 
+		// If key has a passphrase, decrypt it in-place so SSH can use it non-interactively
+		if (credential.sshPassphrase) {
+			const result = Bun.spawnSync([
+				'ssh-keygen', '-p', '-f', sshKeyPath,
+				'-P', credential.sshPassphrase, '-N', ''
+			], { env, stderr: 'pipe' });
+			if (result.exitCode !== 0) {
+				const stderr = result.stderr.toString().trim();
+				console.warn(`[git] Failed to decrypt SSH key: ${stderr}`);
+			}
+		}
+
 		// Configure SSH to use ONLY this key (no agent, no default keys)
-		const sshCommand = `ssh -i "${sshKeyPath}" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes`;
-		env.GIT_SSH_COMMAND = sshCommand;
+		env.GIT_SSH_COMMAND = `ssh -i "${sshKeyPath}" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes`;
 	} else {
 		// No SSH credential - prevent using any keys (IdentitiesOnly=yes with no -i means no keys)
 		env.GIT_SSH_COMMAND = 'ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes -o PasswordAuthentication=no -o PubkeyAuthentication=no';

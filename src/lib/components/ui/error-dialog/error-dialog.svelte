@@ -1,7 +1,9 @@
 <script lang="ts">
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
-	import { AlertCircle, Copy, Check, AlertTriangle, CheckCircle2, XCircle } from 'lucide-svelte';
+	import { AlertCircle, Copy, Check, XCircle, AlertTriangle, CheckCircle2 } from 'lucide-svelte';
+	import * as Tooltip from '$lib/components/ui/tooltip';
+	import { copyToClipboard } from '$lib/utils/clipboard';
 
 	interface Props {
 		open: boolean;
@@ -12,7 +14,7 @@
 	}
 
 	let { open = $bindable(), title, message, details, onClose }: Props = $props();
-	let copied = $state(false);
+	let copied = $state<'ok' | 'error' | null>(null);
 
 	interface ParsedOutput {
 		warnings: string[];
@@ -87,9 +89,9 @@
 
 	async function copyError() {
 		const text = details ? `${message}\n\n${details}` : message;
-		await navigator.clipboard.writeText(text);
-		copied = true;
-		setTimeout(() => (copied = false), 2000);
+		const ok = await copyToClipboard(text);
+		copied = ok ? 'ok' : 'error';
+		setTimeout(() => (copied = null), 2000);
 	}
 
 	function handleClose() {
@@ -145,7 +147,14 @@
 							class="absolute top-2 right-2 p-1 rounded text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-opacity"
 							title="Copy error"
 						>
-							{#if copied}
+							{#if copied === 'error'}
+								<Tooltip.Root open>
+									<Tooltip.Trigger>
+										<XCircle class="w-3.5 h-3.5 text-red-500" />
+									</Tooltip.Trigger>
+									<Tooltip.Content>Copy requires HTTPS</Tooltip.Content>
+								</Tooltip.Root>
+							{:else if copied === 'ok'}
 								<Check class="w-3.5 h-3.5" />
 							{:else}
 								<Copy class="w-3.5 h-3.5" />

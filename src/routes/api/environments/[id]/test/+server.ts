@@ -70,24 +70,27 @@ export const POST: RequestHandler = async ({ params }) => {
 			}
 		}
 
-		const info = await getDockerInfo(env.id) as any;
-
-		// For Hawser Standard mode, fetch Hawser info (Edge mode handled above with early return)
+		// For Hawser Standard mode, fetch Docker info and Hawser info in parallel
+		// (sequential calls can fail due to Bun TLS connection reuse issues)
+		let info: any;
 		let hawserInfo = null;
 		if (env.connectionType === 'hawser-standard') {
-			try {
-				hawserInfo = await getHawserInfo(id);
-				if (hawserInfo?.hawserVersion) {
-					await updateEnvironment(id, {
-						hawserVersion: hawserInfo.hawserVersion,
-						hawserAgentId: hawserInfo.agentId,
-						hawserAgentName: hawserInfo.agentName,
-						hawserLastSeen: new Date().toISOString()
-					});
-				}
-			} catch {
-				// Hawser info fetch failed, continue without it
+			const [dockerResult, hawserResult] = await Promise.all([
+				getDockerInfo(env.id),
+				getHawserInfo(id)
+			]);
+			info = dockerResult;
+			hawserInfo = hawserResult;
+			if (hawserInfo?.hawserVersion) {
+				await updateEnvironment(id, {
+					hawserVersion: hawserInfo.hawserVersion,
+					hawserAgentId: hawserInfo.agentId,
+					hawserAgentName: hawserInfo.agentName,
+					hawserLastSeen: new Date().toISOString()
+				});
 			}
+		} else {
+			info = await getDockerInfo(env.id);
 		}
 
 		return json({

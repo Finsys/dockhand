@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { RefreshCw, Copy, Download, WrapText, ArrowDownToLine, Search, ChevronUp, ChevronDown, X, Type } from 'lucide-svelte';
+	import { copyToClipboard } from '$lib/utils/clipboard';
 	import * as Select from '$lib/components/ui/select';
 	import { themeStore } from '$lib/stores/theme';
 	import { getMonospaceFont } from '$lib/themes';
@@ -59,11 +60,7 @@
 	// Copy logs to clipboard
 	async function copyLogs() {
 		if (logs) {
-			try {
-				await navigator.clipboard.writeText(logs);
-			} catch (err) {
-				console.error('Failed to copy:', err);
-			}
+			await copyToClipboard(logs);
 		}
 	}
 

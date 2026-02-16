@@ -64,6 +64,7 @@
 		AlertCircle
 	} from 'lucide-svelte';
 	import { broom } from '@lucide/lab';
+	import { copyToClipboard } from '$lib/utils/clipboard';
 	import CreateContainerModal from './CreateContainerModal.svelte';
 	import EditContainerModal from './EditContainerModal.svelte';
 	import TerminalPanel from '../terminal/TerminalPanel.svelte';
@@ -1280,15 +1281,18 @@
 	}
 
 	let copiedCommand = $state<string | null>(null);
+	let copyFailed = $state(false);
 
-	function copyToClipboard(text: string) {
-		navigator.clipboard.writeText(text).then(() => {
+	async function copyCommand(text: string) {
+		const ok = await copyToClipboard(text);
+		if (ok) {
 			copiedCommand = text;
 			toast.success('Copied to clipboard');
 			setTimeout(() => { copiedCommand = null; }, 2000);
-		}).catch(() => {
-			toast.error('Failed to copy to clipboard');
-		});
+		} else {
+			copyFailed = true;
+			setTimeout(() => { copyFailed = false; }, 2000);
+		}
 	}
 
 	function parseUptimeToSeconds(status: string): number {
@@ -1715,7 +1719,7 @@
 					let classes = '';
 					if (currentLogsContainerId === container.id) classes += 'bg-blue-500/10 hover:bg-blue-500/15 ';
 					if (currentTerminalContainerId === container.id) classes += 'bg-green-500/10 hover:bg-green-500/15 ';
-					if ($appSettings.highlightUpdates && containersWithUpdatesSet.has(container.id) && !container.systemContainer) classes += 'has-update ';
+					if ($appSettings.highlightUpdates && containersWithUpdatesSet.has(container.id)) classes += 'has-update ';
 					return classes;
 				}}
 				onRowClick={(container, e) => {
@@ -1755,38 +1759,19 @@
 									<Tooltip.Content side="right" class="w-auto p-3">
 										{#if container.systemContainer === 'dockhand'}
 											{#if hasUpdate}
-												{@const composeCmd = 'docker compose pull && docker compose up -d'}
-												{@const dockerCmd = `docker stop ${container.name} && docker pull fnsys/dockhand:latest && docker start ${container.name}`}
 												<div class="space-y-2">
 													<p class="font-medium text-sm flex items-center gap-1.5">
 														<CircleArrowUp class="w-4 h-4 text-amber-500" />
 														Update available
 													</p>
-													<p class="text-muted-foreground text-xs">Cannot be updated from within Dockhand. Update manually:</p>
-													<div class="space-y-1.5">
-														<p class="text-muted-foreground text-2xs">Using Compose:</p>
-														<div class="flex items-center gap-2 bg-muted rounded p-2">
-															<code class="text-2xs font-mono whitespace-nowrap">{composeCmd}</code>
-															<Button size="icon" variant="ghost" class="h-5 w-5 shrink-0" onclick={(e) => { e.stopPropagation(); copyToClipboard(composeCmd); }}>
-																{#if copiedCommand === composeCmd}
-																	<Check class="w-3 h-3 text-green-500" />
-																{:else}
-																	<Copy class="w-3 h-3" />
-																{/if}
-															</Button>
-														</div>
-														<p class="text-muted-foreground text-2xs">Using Docker CLI:</p>
-														<div class="flex items-center gap-2 bg-muted rounded p-2">
-															<code class="text-2xs font-mono whitespace-nowrap">{dockerCmd}</code>
-															<Button size="icon" variant="ghost" class="h-5 w-5 shrink-0" onclick={(e) => { e.stopPropagation(); copyToClipboard(dockerCmd); }}>
-																{#if copiedCommand === dockerCmd}
-																	<Check class="w-3 h-3 text-green-500" />
-																{:else}
-																	<Copy class="w-3 h-3" />
-																{/if}
-															</Button>
-														</div>
-													</div>
+													<p class="text-muted-foreground text-xs">Update Dockhand from the About page:</p>
+													<a
+														href="/settings?tab=about"
+														class="text-primary hover:underline text-xs flex items-center gap-1"
+														onclick={(e) => e.stopPropagation()}
+													>
+														Settings &gt; About &gt; Update now
+													</a>
 												</div>
 											{:else}
 												<p class="text-sm whitespace-nowrap">Dockhand management container</p>
@@ -1819,8 +1804,8 @@
 							{/if}
 						</div>
 					{:else if column.id === 'image'}
-						<div class="flex items-center gap-1.5 {$appSettings.highlightUpdates && containersWithUpdatesSet.has(container.id) && !container.systemContainer ? 'update-border' : ''}">
-							{#if containersWithUpdatesSet.has(container.id) && !container.systemContainer}
+						<div class="flex items-center gap-1.5 {$appSettings.highlightUpdates && containersWithUpdatesSet.has(container.id) ? 'update-border' : ''}">
+							{#if containersWithUpdatesSet.has(container.id)}
 								<span title="Update available">
 									<CircleArrowUp class="w-3 h-3 text-amber-500 {$appSettings.highlightUpdates ? 'glow-amber' : ''} shrink-0" />
 								</span>

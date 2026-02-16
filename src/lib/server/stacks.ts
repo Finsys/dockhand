@@ -1563,6 +1563,43 @@ export async function getStackPathHints(
 }
 
 /**
+ * Stop or remove orphan containers that belong to a stack but aren't defined in the compose file.
+ * These are dynamically-spawned child containers (e.g., nextcloud-aio master creates worker containers).
+ * Best-effort: errors are logged but don't fail the overall operation.
+ */
+async function cleanupOrphanStackContainers(
+	stackName: string,
+	envId: number | null | undefined,
+	operation: 'stop' | 'remove' | 'restart'
+): Promise<void> {
+	try {
+		const containers = await getStackContainers(stackName, envId);
+		const targets = containers.filter(
+			(c) => c.state === 'running' || c.state === 'restarting'
+		);
+		if (targets.length === 0) return;
+
+		const { stopContainer, removeContainer, restartContainer } = await import('./docker.js');
+		const results = await Promise.allSettled(
+			targets.map((c) => {
+				if (operation === 'remove') return removeContainer(c.id, true, envId);
+				if (operation === 'restart') return restartContainer(c.id, envId);
+				return stopContainer(c.id, envId);
+			})
+		);
+
+		const failures = results.filter((r) => r.status === 'rejected');
+		if (failures.length > 0) {
+			console.warn(
+				`[stacks] ${failures.length} orphan container(s) failed to ${operation} for stack "${stackName}"`
+			);
+		}
+	} catch (err) {
+		console.warn(`[stacks] Failed to cleanup orphan containers for stack "${stackName}":`, err);
+	}
+}
+
+/**
  * Helper to perform container-based operations for external stacks
  * Used as fallback when no compose file exists.
  * Uses Promise.allSettled for parallel execution.
@@ -1767,13 +1804,18 @@ export async function stopStack(
 		return withContainerFallback(stackName, envId, 'stop');
 	}
 
-	return executeComposeCommand(
+	const composeResult = await executeComposeCommand(
 		'stop',
 		{ stackName, envId, workingDir: result.stackDir, composePath: result.composePath, envPath: result.envPath },
 		result.content!,
 		result.nonSecretVars,
 		result.secretVars
 	);
+
+	// Stop any dynamically-spawned child containers not in the compose file
+	await cleanupOrphanStackContainers(stackName, envId, 'stop');
+
+	return composeResult;
 }
 
 /**
@@ -1791,13 +1833,18 @@ export async function restartStack(
 		return withContainerFallback(stackName, envId, 'restart');
 	}
 
-	return executeComposeCommand(
+	const composeResult = await executeComposeCommand(
 		'restart',
 		{ stackName, envId, workingDir: result.stackDir, composePath: result.composePath, envPath: result.envPath },
 		result.content!,
 		result.nonSecretVars,
 		result.secretVars
 	);
+
+	// Restart any dynamically-spawned child containers not in the compose file
+	await cleanupOrphanStackContainers(stackName, envId, 'restart');
+
+	return composeResult;
 }
 
 /**
@@ -1816,13 +1863,18 @@ export async function downStack(
 		return withContainerFallback(stackName, envId, 'stop');
 	}
 
-	return executeComposeCommand(
+	const composeResult = await executeComposeCommand(
 		'down',
 		{ stackName, envId, removeVolumes, workingDir: result.stackDir, composePath: result.composePath, envPath: result.envPath },
 		result.content!,
 		result.nonSecretVars,
 		result.secretVars
 	);
+
+	// Remove any dynamically-spawned child containers not in the compose file
+	await cleanupOrphanStackContainers(stackName, envId, 'remove');
+
+	return composeResult;
 }
 
 /**
@@ -1861,6 +1913,9 @@ export async function removeStack(
 			if (!downResult.success && !force) {
 				return downResult;
 			}
+
+			// Remove any dynamically-spawned child containers not handled by compose
+			await cleanupOrphanStackContainers(stackName, envId, 'remove');
 		} else {
 			// External stack - remove containers directly in parallel
 			const { removeContainer } = await import('./docker.js');

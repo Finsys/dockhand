@@ -11,6 +11,7 @@
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { ToggleGroup } from '$lib/components/ui/toggle-pill';
 	import { RefreshCw, Search, ChevronDown, ChevronUp, Unplug, Copy, Download, WrapText, ArrowDownToLine, X, Sun, Moon, LayoutList, Square, Box, Wifi, WifiOff, Pause, Play, ScrollText, Star, GripVertical, Layers, Check, FolderHeart, Save, Trash2, MoreHorizontal } from 'lucide-svelte';
+	import { copyToClipboard } from '$lib/utils/clipboard';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 	import type { ContainerInfo } from '$lib/types';
@@ -1135,11 +1136,7 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 			? mergedLogs.map(l => `[${l.containerName}] ${l.text}`).join('')
 			: logs;
 		if (textToCopy) {
-			try {
-				await navigator.clipboard.writeText(textToCopy);
-			} catch (err) {
-				console.error('Failed to copy:', err);
-			}
+			await copyToClipboard(textToCopy);
 		}
 	}
 

@@ -14,6 +14,7 @@ export interface UpdateCheckResult {
 	newDigest?: string;
 	error?: string;
 	isLocalImage?: boolean;
+	systemContainer?: 'dockhand' | 'hawser' | null;
 }
 
 /**
@@ -39,8 +40,8 @@ export const POST: RequestHandler = async ({ url, cookies }) => {
 
 		const allContainers = await listContainers(true, envIdNum);
 
-		// Filter out system containers (Dockhand, Hawser) - they cannot be updated from within Dockhand
-		const containers = allContainers.filter(c => !isSystemContainer(c.image));
+		// Include all containers (system containers get flagged, not filtered)
+		const containers = allContainers;
 
 		// Check container for updates
 		const checkContainer = async (container: typeof containers[0]): Promise<UpdateCheckResult> => {
@@ -56,7 +57,8 @@ export const POST: RequestHandler = async ({ url, cookies }) => {
 						containerName: container.name,
 						imageName: container.image,
 						hasUpdate: false,
-						error: 'Could not determine image name'
+						error: 'Could not determine image name',
+						systemContainer: isSystemContainer(container.image) || null
 					};
 				}
 
@@ -71,7 +73,8 @@ export const POST: RequestHandler = async ({ url, cookies }) => {
 					currentDigest: result.currentDigest,
 					newDigest: result.registryDigest,
 					error: result.error,
-					isLocalImage: result.isLocalImage
+					isLocalImage: result.isLocalImage,
+					systemContainer: isSystemContainer(imageName) || null
 				};
 			} catch (error: any) {
 				return {
@@ -79,7 +82,8 @@ export const POST: RequestHandler = async ({ url, cookies }) => {
 					containerName: container.name,
 					imageName: container.image,
 					hasUpdate: false,
-					error: error.message
+					error: error.message,
+					systemContainer: isSystemContainer(container.image) || null
 				};
 			}
 		};
@@ -90,9 +94,10 @@ export const POST: RequestHandler = async ({ url, cookies }) => {
 		const updatesFound = results.filter(r => r.hasUpdate).length;
 
 		// Save containers with updates to the database for persistence
+		// Skip system containers (Dockhand/Hawser) - they use their own update paths
 		if (envIdNum) {
 			for (const result of results) {
-				if (result.hasUpdate) {
+				if (result.hasUpdate && !result.systemContainer) {
 					await addPendingContainerUpdate(
 						envIdNum,
 						result.containerId,

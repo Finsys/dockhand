@@ -1,8 +1,27 @@
 [
   {
+    "version": "1.0.18",
+    "date": "2026-02-16",
+    "comingSoon": false,
+    "changes": [
+      { "type": "feature", "text": "Dockhand self-update from the UI" },
+      { "type": "feature", "text": "Show freed disk space after image removal and pruning" },
+      { "type": "feature", "text": "Handle dynamically-spawned child containers in stack stop/down/restart/remove" },
+      { "type": "feature", "text": "Git webhooks are logged to the audit log" },
+      { "type": "fix", "text": "Fix file upload CSRF 403 error on plain HTTP deployments" },
+      { "type": "fix", "text": "Fix scanner container /wait timeout causing empty scan output" },
+      { "type": "fix", "text": "Fix saving adopted external stack failing with 'Stack directory not found'" },
+      { "type": "fix", "text": "Add Bearer token auth support for ntfy notifications" },
+      { "type": "feature", "text": "Add Mattermost notification support" },
+      { "type": "fix", "text": "Fix git SSH failing with 'No user exists for uid' with arbitrary UIDs" },
+      { "type": "fix", "text": "Fix command palette flooding API requests on open" },
+      { "type": "fix", "text": "Normalize stack names when adopting to prevent uppercase rejection" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.18"
+  },
+  {
     "version": "1.0.17",
     "date": "2026-02-09",
-    "comingSoon": false,
     "changes": [
       { "type": "fix", "text": "Fix scanner failure on rootless Docker" },
       { "type": "fix", "text": "Increase Hawser compose operation timeout" },

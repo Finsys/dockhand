@@ -182,7 +182,8 @@
 
 		try {
 			const parentDir = entry.path.replace(/\/[^/]+$/, '');
-			const stackName = parentDir.split('/').pop() || 'adopted-stack';
+			const rawName = parentDir.split('/').pop() || 'adopted-stack';
+			const stackName = rawName.toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'adopted-stack';
 			const envFilePath = `${parentDir}/.env`;
 
 			const stack: DiscoveredStack = {

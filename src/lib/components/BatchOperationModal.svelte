@@ -5,6 +5,14 @@
 	import { Check, X, Loader2, Circle, Ban } from 'lucide-svelte';
 	import { onDestroy } from 'svelte';
 
+	function formatBytes(bytes: number): string {
+		if (bytes === 0) return '0 B';
+		const k = 1024;
+		const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+		const i = Math.floor(Math.log(bytes) / Math.log(k));
+		return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+	}
+
 	const progressText: Record<string, string> = {
 		remove: 'removing',
 		start: 'starting',
@@ -30,6 +38,7 @@
 		items: Array<{ id: string; name: string }>;
 		envId?: number;
 		options?: Record<string, any>;
+		totalSize?: number;
 		onClose: () => void;
 		onComplete: () => void;
 	}
@@ -42,6 +51,7 @@
 		items,
 		envId,
 		options = {},
+		totalSize,
 		onClose,
 		onComplete
 	}: Props = $props();
@@ -233,7 +243,7 @@
 				{#if isRunning}
 					Processing {items.length} {entityType}...
 				{:else if isComplete}
-					Completed: {successCount} succeeded{#if failCount > 0}, {failCount} failed{/if}{#if cancelledCount > 0}, {cancelledCount} cancelled{/if}
+					Completed: {successCount} succeeded{#if failCount > 0}, {failCount} failed{/if}{#if cancelledCount > 0}, {cancelledCount} cancelled{/if}{#if totalSize && successCount > 0} ({formatBytes(totalSize)}){/if}
 				{:else}
 					Preparing to {operation} {items.length} {entityType}...
 				{/if}

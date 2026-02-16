@@ -128,7 +128,7 @@ export const PUT: RequestHandler = async ({ params, url, cookies, request }) => 
 
 		// Only write if we have a valid path
 		if (!envFilePath) {
-			return json({ error: 'Stack directory not found' }, { status: 404 });
+			return json({ success: true });
 		}
 
 		let content = body.content;

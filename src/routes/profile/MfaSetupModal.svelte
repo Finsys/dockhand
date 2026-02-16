@@ -3,7 +3,9 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Label } from '$lib/components/ui/label';
 	import { Input } from '$lib/components/ui/input';
-	import { QrCode, RefreshCw, ShieldCheck, TriangleAlert, Copy, Download, Check } from 'lucide-svelte';
+	import { QrCode, RefreshCw, ShieldCheck, TriangleAlert, Copy, Download, Check, XCircle } from 'lucide-svelte';
+	import * as Tooltip from '$lib/components/ui/tooltip';
+	import { copyToClipboard } from '$lib/utils/clipboard';
 	import * as Alert from '$lib/components/ui/alert';
 	import { focusFirstInput } from '$lib/utils';
 
@@ -23,14 +25,14 @@
 	let error = $state('');
 	let backupCodes = $state<string[]>([]);
 	let showBackupCodes = $state(false);
-	let copied = $state(false);
+	let copied = $state<'ok' | 'error' | null>(null);
 
 	function resetForm() {
 		token = '';
 		error = '';
 		backupCodes = [];
 		showBackupCodes = false;
-		copied = false;
+		copied = null;
 	}
 
 	async function verifyAndEnableMfa() {
@@ -69,13 +71,9 @@
 	}
 
 	async function copyBackupCodes() {
-		try {
-			await navigator.clipboard.writeText(formatBackupCodes());
-			copied = true;
-			setTimeout(() => copied = false, 2000);
-		} catch {
-			error = 'Failed to copy to clipboard';
-		}
+		const ok = await copyToClipboard(formatBackupCodes());
+		copied = ok ? 'ok' : 'error';
+		setTimeout(() => copied = null, 2000);
 	}
 
 	function downloadBackupCodes() {
@@ -133,7 +131,15 @@
 
 				<div class="flex gap-2">
 					<Button variant="outline" class="flex-1" onclick={copyBackupCodes}>
-						{#if copied}
+						{#if copied === 'error'}
+							<Tooltip.Root open>
+								<Tooltip.Trigger>
+									<XCircle class="w-4 h-4 text-red-500" />
+								</Tooltip.Trigger>
+								<Tooltip.Content>Copy requires HTTPS</Tooltip.Content>
+							</Tooltip.Root>
+							Failed
+						{:else if copied === 'ok'}
 							<Check class="w-4 h-4" />
 							Copied!
 						{:else}

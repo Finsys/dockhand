@@ -20,7 +20,7 @@ const MAX_RECONNECT_DELAY = 60000; // 1 minute max
 const environmentOnlineStatus: Map<number, boolean> = new Map();
 
 // Active collectors per environment (for streaming mode)
-const collectors: Map<number, AbortController> = new Map();
+const collectors: Map<number, { controller: AbortController; reconnectTimeout: ReturnType<typeof setTimeout> | null }> = new Map();
 
 // Poll intervals per environment (for polling mode)
 const pollIntervals: Map<number, ReturnType<typeof setInterval>> = new Map();
@@ -313,7 +313,8 @@ async function startEnvironmentCollector(envId: number, envName: string) {
 	stopEnvironmentCollector(envId);
 
 	const controller = new AbortController();
-	collectors.set(envId, controller);
+	const entry = { controller, reconnectTimeout: null as ReturnType<typeof setTimeout> | null };
+	collectors.set(envId, entry);
 
 	let reconnectDelay = RECONNECT_DELAY;
 
@@ -415,7 +416,8 @@ async function startEnvironmentCollector(envId: number, envName: string) {
 		if (controller.signal.aborted || isShuttingDown) return;
 
 		console.log(`[EventSubprocess] Reconnecting to ${envName} in ${reconnectDelay / 1000}s...`);
-		setTimeout(() => {
+		entry.reconnectTimeout = setTimeout(() => {
+			entry.reconnectTimeout = null;
 			if (!controller.signal.aborted && !isShuttingDown) {
 				connect();
 			}
@@ -468,9 +470,12 @@ function stopEnvironmentPoller(envId: number) {
  * Stop collecting events for a specific environment (streaming mode)
  */
 function stopEnvironmentCollector(envId: number) {
-	const controller = collectors.get(envId);
-	if (controller) {
-		controller.abort();
+	const entry = collectors.get(envId);
+	if (entry) {
+		if (entry.reconnectTimeout !== null) {
+			clearTimeout(entry.reconnectTimeout);
+		}
+		entry.controller.abort();
 		collectors.delete(envId);
 		environmentOnlineStatus.delete(envId);
 	}
@@ -526,6 +531,15 @@ async function refreshEventCollectors() {
 				console.log(`[EventSubprocess] Restarting poller for environment ${envId} with new interval`);
 				stopEnvironmentPoller(envId);
 			}
+		}
+
+		// Clean up stale map entries for deleted environments
+		const allEnvIds = new Set(environments.map((e) => e.id));
+		for (const envId of environmentOnlineStatus.keys()) {
+			if (!allEnvIds.has(envId)) environmentOnlineStatus.delete(envId);
+		}
+		for (const envId of lastPollTime.keys()) {
+			if (!allEnvIds.has(envId)) lastPollTime.delete(envId);
 		}
 
 		// Start collectors based on mode

@@ -6,8 +6,9 @@
 	import { Label } from '$lib/components/ui/label';
 	import { Input } from '$lib/components/ui/input';
 	import { TogglePill } from '$lib/components/ui/toggle-pill';
-	import { Loader2, GitBranch, RefreshCw, Webhook, Rocket, RefreshCcw, Copy, Check, FolderGit2, Github, Key, KeyRound, Lock, FileText, HelpCircle, GripVertical, X, Download } from 'lucide-svelte';
+	import { Loader2, GitBranch, RefreshCw, Webhook, Rocket, RefreshCcw, Copy, Check, XCircle, FolderGit2, Github, Key, KeyRound, Lock, FileText, HelpCircle, GripVertical, X, Download } from 'lucide-svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
+	import { copyToClipboard } from '$lib/utils/clipboard';
 	import CronEditor from '$lib/components/cron-editor.svelte';
 	import StackEnvVarsPanel from '$lib/components/StackEnvVarsPanel.svelte';
 	import { type EnvVar, type ValidationResult } from '$lib/components/StackEnvVarsEditor.svelte';
@@ -92,8 +93,8 @@
 
 	// Stack name validation: must start with alphanumeric, can contain alphanumeric, hyphens, underscores
 	const STACK_NAME_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/;
-	let copiedWebhookUrl = $state(false);
-	let copiedWebhookSecret = $state(false);
+	let copiedWebhookUrl = $state<'ok' | 'error' | null>(null);
+	let copiedWebhookSecret = $state<'ok' | 'error' | null>(null);
 
 	// Environment variables state
 	let formEnvFilePath = $state<string | null>(null);
@@ -185,14 +186,15 @@
 		return `${window.location.origin}/api/git/stacks/${stackId}/webhook`;
 	}
 
-	async function copyToClipboard(text: string, type: 'url' | 'secret') {
-		await navigator.clipboard.writeText(text);
+	async function copyWebhookField(text: string, type: 'url' | 'secret') {
+		const ok = await copyToClipboard(text);
+		const state = ok ? 'ok' : 'error';
 		if (type === 'url') {
-			copiedWebhookUrl = true;
-			setTimeout(() => copiedWebhookUrl = false, 2000);
+			copiedWebhookUrl = state;
+			setTimeout(() => copiedWebhookUrl = null, 2000);
 		} else {
-			copiedWebhookSecret = true;
-			setTimeout(() => copiedWebhookSecret = false, 2000);
+			copiedWebhookSecret = state;
+			setTimeout(() => copiedWebhookSecret = null, 2000);
 		}
 	}
 
@@ -337,8 +339,8 @@
 		// Clear state BEFORE async loads to avoid race conditions
 		formError = '';
 		errors = {};
-		copiedWebhookUrl = false;
-		copiedWebhookSecret = false;
+		copiedWebhookUrl = null;
+		copiedWebhookSecret = null;
 		envFiles = [];
 		envVars = [];
 		fileEnvVars = {};
@@ -806,10 +808,17 @@
 								<Button
 									variant="outline"
 									size="sm"
-									onclick={() => copyToClipboard(getWebhookUrl(gitStack.id), 'url')}
+									onclick={() => copyWebhookField(getWebhookUrl(gitStack.id), 'url')}
 									title="Copy URL"
 								>
-									{#if copiedWebhookUrl}
+									{#if copiedWebhookUrl === 'error'}
+										<Tooltip.Root open>
+											<Tooltip.Trigger>
+												<XCircle class="w-4 h-4 text-red-500" />
+											</Tooltip.Trigger>
+											<Tooltip.Content>Copy requires HTTPS</Tooltip.Content>
+										</Tooltip.Root>
+									{:else if copiedWebhookUrl === 'ok'}
 										<Check class="w-4 h-4 text-green-500" />
 									{:else}
 										<Copy class="w-4 h-4" />
@@ -831,10 +840,17 @@
 								<Button
 									variant="outline"
 									size="sm"
-									onclick={() => copyToClipboard(formWebhookSecret, 'secret')}
+									onclick={() => copyWebhookField(formWebhookSecret, 'secret')}
 									title="Copy secret"
 								>
-									{#if copiedWebhookSecret}
+									{#if copiedWebhookSecret === 'error'}
+										<Tooltip.Root open>
+											<Tooltip.Trigger>
+												<XCircle class="w-4 h-4 text-red-500" />
+											</Tooltip.Trigger>
+											<Tooltip.Content>Copy requires HTTPS</Tooltip.Content>
+										</Tooltip.Root>
+									{:else if copiedWebhookSecret === 'ok'}
 										<Check class="w-4 h-4 text-green-500" />
 									{:else}
 										<Copy class="w-4 h-4" />

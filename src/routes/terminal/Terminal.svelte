@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
+	import { copyToClipboard } from '$lib/utils/clipboard';
 	import { themeStore } from '$lib/stores/theme';
 	import { getMonospaceFont } from '$lib/themes';
 
@@ -56,11 +57,7 @@
 				text += line.translateToString(true) + '\n';
 			}
 		}
-		try {
-			await navigator.clipboard.writeText(text.trim());
-		} catch {
-			// Ignore clipboard errors
-		}
+		await copyToClipboard(text.trim());
 		terminal.focus();
 		return text.trim();
 	}

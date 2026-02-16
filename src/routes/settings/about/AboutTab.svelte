@@ -2,14 +2,16 @@
 	// Trigger rebuild for debug logging changes
 	import * as Card from '$lib/components/ui/card';
 	import { Badge } from '$lib/components/ui/badge';
+	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
-	import { Box, Images, HardDrive, Network, Cpu, Server, Crown, Building2, Layers, Clock, Code, Package, ExternalLink, Search, FileText, Tag, Sparkles, Bug, ChevronDown, ChevronRight, Plug, ScrollText, Shield, MessageSquarePlus, GitBranch, Coffee, Monitor, Cog, MemoryStick, Database } from 'lucide-svelte';
+	import { Box, Images, HardDrive, Network, Cpu, Server, Crown, Building2, Layers, Clock, Code, Package, ExternalLink, Search, FileText, Tag, Sparkles, Bug, ChevronDown, ChevronRight, Plug, ScrollText, Shield, MessageSquarePlus, GitBranch, Coffee, Monitor, Cog, MemoryStick, Database, CircleArrowUp, Loader2, CheckCircle2 } from 'lucide-svelte';
 	import * as Tabs from '$lib/components/ui/tabs';
 	import { onMount, onDestroy } from 'svelte';
 	import { licenseStore } from '$lib/stores/license';
 	import { browser } from '$app/environment';
 	import LicenseModal from './LicenseModal.svelte';
 	import PrivacyModal from './PrivacyModal.svelte';
+	import SelfUpdateDialog from './SelfUpdateDialog.svelte';
 
 	interface Dependency {
 		name: string;
@@ -253,6 +255,65 @@
 	let showLicenseModal = $state(false);
 	let showPrivacyModal = $state(false);
 
+	// Self-update state
+	let checkingUpdate = $state(false);
+	let updateCheckDone = $state(false);
+	let updateAvailable = $state(false);
+	let updateInfo = $state<{
+		currentImage: string;
+		newImage: string;
+		currentDigest: string;
+		newDigest: string;
+		containerName: string;
+		isComposeManaged: boolean;
+		error?: string;
+	} | null>(null);
+	let updateCheckError = $state<string | null>(null);
+	let showSelfUpdateDialog = $state(false);
+
+	async function checkForUpdates() {
+		checkingUpdate = true;
+		updateCheckDone = false;
+		updateAvailable = false;
+		updateInfo = null;
+		updateCheckError = null;
+
+		try {
+			const response = await fetch('/api/self-update/check');
+			if (!response.ok) {
+				updateCheckError = 'Failed to check for updates';
+				return;
+			}
+
+			const data = await response.json();
+
+			if (data.error && !data.updateAvailable) {
+				// Not in Docker or other non-critical issue
+				updateCheckError = data.error;
+				return;
+			}
+
+			updateAvailable = data.updateAvailable;
+			updateCheckDone = true;
+
+			if (data.updateAvailable) {
+				updateInfo = {
+					currentImage: data.currentImage,
+					newImage: data.currentImage,
+					currentDigest: data.currentDigest || '',
+					newDigest: data.newDigest || '',
+					containerName: data.containerName,
+					isComposeManaged: data.isComposeManaged
+				};
+				showSelfUpdateDialog = true;
+			}
+		} catch (err) {
+			updateCheckError = 'Check failed: ' + String(err);
+		} finally {
+			checkingUpdate = false;
+		}
+	}
+
 	function formatUptime(seconds: number): string {
 		const days = Math.floor(seconds / 86400);
 		const hours = Math.floor((seconds % 86400) / 3600);
@@ -364,6 +425,7 @@
 		fetchSystemInfo();
 		fetchDependencies();
 		fetchChangelog();
+		checkForUpdates();
 		// Increment uptime every second for real-time display
 		uptimeInterval = setInterval(() => {
 			if (serverUptime !== null) {
@@ -419,9 +481,29 @@
 						{/if}
 					</div>
 
-					<!-- Version Badge -->
-					<div class="flex items-center gap-2">
+					<!-- Version Badge + Update Check -->
+					<div class="flex flex-col items-center gap-1">
 						<Badge variant="secondary" class="text-xs">Version {currentVersion}</Badge>
+						{#if checkingUpdate}
+							<span class="flex items-center gap-1 text-xs text-muted-foreground">
+								<Loader2 class="w-3.5 h-3.5 animate-spin" />
+								Checking for updates...
+							</span>
+						{:else if updateAvailable && updateInfo}
+							<button class="flex items-center gap-1 text-xs text-amber-500 hover:text-amber-400 transition-colors" onclick={() => showSelfUpdateDialog = true}>
+								<CircleArrowUp class="w-3.5 h-3.5" />
+								Update available — click to see what's new
+							</button>
+						{:else if updateCheckDone && !updateAvailable}
+							<button class="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400 hover:text-emerald-500 dark:hover:text-emerald-300 transition-colors" onclick={checkForUpdates}>
+								<CheckCircle2 class="w-3.5 h-3.5" />
+								Up to date
+							</button>
+						{:else if updateCheckError}
+							<button class="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors" onclick={checkForUpdates} title={updateCheckError}>
+								Check for updates
+							</button>
+						{/if}
 					</div>
 
 					<!-- Build & Uptime Info -->
@@ -871,3 +953,16 @@
 
 <LicenseModal bind:open={showLicenseModal} />
 <PrivacyModal bind:open={showPrivacyModal} />
+
+{#if updateInfo}
+	<SelfUpdateDialog
+		bind:open={showSelfUpdateDialog}
+		currentImage={updateInfo.currentImage}
+		newImage={updateInfo.newImage}
+		currentDigest={updateInfo.currentDigest}
+		newDigest={updateInfo.newDigest}
+		containerName={updateInfo.containerName}
+		isComposeManaged={updateInfo.isComposeManaged}
+		onclose={() => showSelfUpdateDialog = false}
+	/>
+{/if}

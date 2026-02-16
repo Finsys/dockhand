@@ -25,11 +25,15 @@ import { parseLabels } from '$lib/utils/label-colors';
 const SKIP_DF_COLLECTION = process.env.SKIP_DF_COLLECTION === 'true' || process.env.SKIP_DF_COLLECTION === '1';
 
 // Helper to add timeout to promises
+// IMPORTANT: Clears the timeout to prevent memory leaks from accumulated timer closures
 function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
-	return Promise.race([
-		promise,
-		new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms))
-	]);
+	let timeoutId: ReturnType<typeof setTimeout> | null = null;
+	const timeoutPromise = new Promise<T>((resolve) => {
+		timeoutId = setTimeout(() => resolve(fallback), ms);
+	});
+	return Promise.race([promise, timeoutPromise]).finally(() => {
+		if (timeoutId !== null) clearTimeout(timeoutId);
+	});
 }
 
 // Disk usage cache - getDiskUsage() is very slow (30s timeout) but data changes rarely

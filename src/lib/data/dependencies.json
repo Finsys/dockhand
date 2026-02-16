@@ -7,12 +7,6 @@
   },
   {
     "name": "@codemirror/commands",
-    "version": "6.10.0",
-    "license": "MIT",
-    "repository": "https://github.com/codemirror/commands"
-  },
-  {
-    "name": "@codemirror/commands",
     "version": "6.10.1",
     "license": "MIT",
     "repository": "https://github.com/codemirror/commands"
@@ -553,7 +547,7 @@
   },
   {
     "name": "svelte",
-    "version": "5.47.1",
+    "version": "5.46.4",
     "license": "MIT",
     "repository": "https://github.com/sveltejs/svelte"
   },

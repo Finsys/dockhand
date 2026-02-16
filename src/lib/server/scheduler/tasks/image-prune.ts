@@ -116,12 +116,14 @@ export async function runImagePrune(
 			}
 		});
 
-		// Send success notification
-		await sendEventNotification('image_prune_success', {
-			title: 'Image prune completed',
-			message: `${imagesRemoved} unused images removed, ${formatBytes(spaceReclaimed)} disk space reclaimed`,
-			type: 'success'
-		}, envId);
+		// Send success notification only when something was actually cleaned up
+		if (imagesRemoved > 0) {
+			await sendEventNotification('image_prune_success', {
+				title: 'Image prune completed',
+				message: `${imagesRemoved} unused images removed, ${formatBytes(spaceReclaimed)} disk space reclaimed`,
+				type: 'success'
+			}, envId);
+		}
 
 	} catch (error: any) {
 		await log(`Error: ${error.message}`);
