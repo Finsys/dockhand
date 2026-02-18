@@ -10,7 +10,7 @@ import {
 } from './db';
 
 // Escape special characters for Telegram Markdown
-function escapeTelegramMarkdown(text: string): string {
+export function escapeTelegramMarkdown(text: string): string {
 	// Escape characters that have special meaning in Telegram Markdown
 	return text
 		.replace(/\\/g, '\\\\')  // Escape backslashes first
