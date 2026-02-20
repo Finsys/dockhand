@@ -1,7 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getRegistry } from '$lib/server/db';
-import { getRegistryAuth } from '$lib/server/docker';
+import { getRegistryAuth, isHarborRegistry, harborListRepositories, parseRegistryUrl } from '$lib/server/docker';
 
 const PAGE_SIZE = 100;
 
@@ -22,6 +22,12 @@ export const GET: RequestHandler = async ({ url }) => {
 		// Docker Hub doesn't support catalog listing
 		if (registry.url.includes('docker.io') || registry.url.includes('hub.docker.com') || registry.url.includes('registry.hub.docker.com')) {
 			return json({ error: 'Docker Hub does not support catalog listing. Please use search instead.' }, { status: 400 });
+		}
+
+		// Fallback Harbor : l'endpoint _catalog est interdit pour les robots Harbor.
+		// On utilise l'API projet native à la place.
+		if (await isHarborRegistry(registry.url)) {
+			return handleHarborCatalog(registry, lastParam);
 		}
 
 		const { baseUrl, orgPath, authHeader } = await getRegistryAuth(registry, 'registry:catalog:*');
@@ -114,3 +120,39 @@ export const GET: RequestHandler = async ({ url }) => {
 		return json({ error: 'Failed to fetch catalog: ' + (error.message || 'Unknown error') }, { status: 500 });
 	}
 };
+
+/**
+ * Gère le catalog pour un registry Harbor via l'API projet native.
+ * Décode le curseur "harbor:N" pour la pagination.
+ */
+async function handleHarborCatalog(
+	registry: { url: string; username?: string | null; password?: string | null },
+	lastParam: string | null
+): Promise<Response> {
+	const { path: orgPath } = parseRegistryUrl(registry.url);
+
+	// Décoder le curseur Harbor : "harbor:<page>" → numéro de page
+	let page = 1;
+	if (lastParam?.startsWith('harbor:')) {
+		page = parseInt(lastParam.substring(7), 10) || 1;
+	}
+
+	const result = await harborListRepositories(registry, orgPath, page, PAGE_SIZE);
+
+	const results = result.repositories.map((name: string) => ({
+		name,
+		description: '',
+		star_count: 0,
+		is_official: false,
+		is_automated: false
+	}));
+
+	return json({
+		repositories: results,
+		pagination: {
+			pageSize: PAGE_SIZE,
+			hasMore: !!result.nextLast,
+			nextLast: result.nextLast
+		}
+	});
+}

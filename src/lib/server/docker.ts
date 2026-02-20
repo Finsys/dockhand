@@ -2462,6 +2462,202 @@ export async function getRegistryAuth(
 	return { baseUrl, orgPath: parsed.path, authHeader };
 }
 
+// --- Harbor fallback pour le catalog et la recherche d'images ---
+// Harbor interdit l'accès au endpoint V2 _catalog pour les robots.
+// On détecte Harbor et on utilise l'API projet native en fallback.
+
+/** Cache de détection Harbor par host (TTL 5 min) */
+const harborDetectionCache = new Map<string, { isHarbor: boolean; ts: number }>();
+const HARBOR_CACHE_TTL = 5 * 60 * 1000;
+
+export interface HarborCatalogResult {
+	repositories: string[];
+	/** Curseur de pagination : "harbor:<page>" ou null si dernière page */
+	nextLast: string | null;
+}
+
+/**
+ * Détecte si un registry est une instance Harbor.
+ * Vérifie service="harbor-registry" dans le header WWW-Authenticate de /v2/,
+ * puis confirme via /api/v2.0/ping. Résultat mis en cache 5 min par host.
+ */
+export async function isHarborRegistry(registryUrl: string): Promise<boolean> {
+	const parsed = parseRegistryUrl(registryUrl);
+	const host = parsed.host;
+
+	const cached = harborDetectionCache.get(host);
+	if (cached && Date.now() - cached.ts < HARBOR_CACHE_TTL) {
+		return cached.isHarbor;
+	}
+
+	let isHarbor = false;
+	try {
+		const baseUrl = `https://${host}`;
+
+		// Étape 1 : vérifier le header WWW-Authenticate de /v2/
+		const challengeResp = await fetch(`${baseUrl}/v2/`, {
+			method: 'GET',
+			headers: { 'User-Agent': 'Dockhand/1.0' }
+		});
+		const wwwAuth = challengeResp.headers.get('WWW-Authenticate') || '';
+		if (wwwAuth.toLowerCase().includes('service="harbor-registry"')) {
+			// Étape 2 : confirmer via /api/v2.0/ping
+			const pingResp = await fetch(`${baseUrl}/api/v2.0/ping`, {
+				method: 'GET',
+				headers: { 'User-Agent': 'Dockhand/1.0' }
+			});
+			if (pingResp.ok) {
+				const body = await pingResp.text();
+				if (body.includes('Pong')) {
+					isHarbor = true;
+				}
+			}
+		}
+	} catch {
+		// En cas d'erreur réseau, on considère que ce n'est pas Harbor
+	}
+
+	harborDetectionCache.set(host, { isHarbor, ts: Date.now() });
+	return isHarbor;
+}
+
+/**
+ * Construit le header Basic auth pour l'API Harbor à partir d'un objet registry.
+ */
+function getHarborBasicAuth(registry: { username?: string | null; password?: string | null }): string | null {
+	if (registry.username && registry.password) {
+		return `Basic ${Buffer.from(`${registry.username}:${registry.password}`).toString('base64')}`;
+	}
+	return null;
+}
+
+/**
+ * Liste les repositories via l'API projet Harbor.
+ * Si orgPath est défini → un seul projet. Sinon → énumère tous les projets accessibles.
+ * @param page - numéro de page (1-based)
+ * @param pageSize - nombre de résultats par page
+ */
+export async function harborListRepositories(
+	registry: { url: string; username?: string | null; password?: string | null },
+	orgPath: string,
+	page: number = 1,
+	pageSize: number = 100
+): Promise<HarborCatalogResult> {
+	const parsed = parseRegistryUrl(registry.url);
+	const baseUrl = `https://${parsed.host}/api/v2.0`;
+	const authHeader = getHarborBasicAuth(registry);
+
+	const headers: Record<string, string> = {
+		'Accept': 'application/json',
+		'User-Agent': 'Dockhand/1.0'
+	};
+	if (authHeader) headers['Authorization'] = authHeader;
+
+	const repositories: string[] = [];
+	let totalCount = 0;
+
+	if (orgPath) {
+		// Un seul projet : le path sans le slash initial
+		const project = orgPath.replace(/^\//, '');
+		const url = `${baseUrl}/projects/${encodeURIComponent(project)}/repositories?page=${page}&page_size=${pageSize}`;
+		const resp = await fetch(url, { headers });
+
+		if (!resp.ok) {
+			throw new Error(`Harbor API erreur ${resp.status} pour le projet ${project}`);
+		}
+
+		totalCount = parseInt(resp.headers.get('X-Total-Count') || '0', 10);
+		const repos: Array<{ name: string }> = await resp.json();
+		for (const r of repos) {
+			repositories.push(r.name);
+		}
+	} else {
+		// Pas d'orgPath : énumérer tous les projets accessibles
+		const projectsResp = await fetch(`${baseUrl}/projects?page=1&page_size=100`, { headers });
+		if (!projectsResp.ok) {
+			throw new Error(`Harbor API erreur ${projectsResp.status} pour la liste des projets`);
+		}
+		const projects: Array<{ name: string }> = await projectsResp.json();
+
+		// Paginer les repos du premier projet correspondant à la page demandée
+		// Pour simplifier, on concatène tous les repos de tous les projets
+		for (const proj of projects) {
+			const url = `${baseUrl}/projects/${encodeURIComponent(proj.name)}/repositories?page=1&page_size=100`;
+			const resp = await fetch(url, { headers });
+			if (!resp.ok) continue;
+
+			const repos: Array<{ name: string }> = await resp.json();
+			for (const r of repos) {
+				repositories.push(r.name);
+			}
+		}
+		totalCount = repositories.length;
+	}
+
+	// Calculer si il y a une page suivante
+	const hasMore = orgPath ? (page * pageSize < totalCount) : false;
+	const nextLast = hasMore ? `harbor:${page + 1}` : null;
+
+	return { repositories, nextLast };
+}
+
+/**
+ * Recherche des repositories via l'API Harbor avec filtre q=name=~{term}.
+ * Parcourt tous les projets accessibles (ou un seul si orgPath défini).
+ * Double vérification substring côté client.
+ */
+export async function harborSearchRepositories(
+	registry: { url: string; username?: string | null; password?: string | null },
+	term: string,
+	orgPath: string,
+	limit: number = 25
+): Promise<string[]> {
+	const parsed = parseRegistryUrl(registry.url);
+	const baseUrl = `https://${parsed.host}/api/v2.0`;
+	const authHeader = getHarborBasicAuth(registry);
+
+	const headers: Record<string, string> = {
+		'Accept': 'application/json',
+		'User-Agent': 'Dockhand/1.0'
+	};
+	if (authHeader) headers['Authorization'] = authHeader;
+
+	const termLower = term.toLowerCase();
+	const results: string[] = [];
+
+	// Déterminer les projets à parcourir
+	let projectNames: string[];
+	if (orgPath) {
+		projectNames = [orgPath.replace(/^\//, '')];
+	} else {
+		const projectsResp = await fetch(`${baseUrl}/projects?page=1&page_size=100`, { headers });
+		if (!projectsResp.ok) return results;
+		const projects: Array<{ name: string }> = await projectsResp.json();
+		projectNames = projects.map(p => p.name);
+	}
+
+	// Chercher dans chaque projet avec le filtre Harbor
+	for (const proj of projectNames) {
+		if (results.length >= limit) break;
+
+		const q = encodeURIComponent(`name=~${term}`);
+		const url = `${baseUrl}/projects/${encodeURIComponent(proj)}/repositories?q=${q}&page=1&page_size=${limit}`;
+		const resp = await fetch(url, { headers });
+		if (!resp.ok) continue;
+
+		const repos: Array<{ name: string }> = await resp.json();
+		for (const r of repos) {
+			// Double vérification côté client
+			if (r.name.toLowerCase().includes(termLower)) {
+				results.push(r.name);
+				if (results.length >= limit) break;
+			}
+		}
+	}
+
+	return results;
+}
+
 /**
  * Check the registry for the current manifest digest of an image.
  * Simple HEAD request to get Docker-Content-Digest header.
