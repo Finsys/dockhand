@@ -24,8 +24,8 @@ export const GET: RequestHandler = async ({ url }) => {
 			return json({ error: 'Docker Hub does not support catalog listing. Please use search instead.' }, { status: 400 });
 		}
 
-		// Fallback Harbor : l'endpoint _catalog est interdit pour les robots Harbor.
-		// On utilise l'API projet native à la place.
+		// Harbor fallback: the _catalog endpoint is forbidden for Harbor robot accounts.
+		// Use the native project API instead.
 		if (await isHarborRegistry(registry.url)) {
 			return handleHarborCatalog(registry, lastParam);
 		}
@@ -122,8 +122,8 @@ export const GET: RequestHandler = async ({ url }) => {
 };
 
 /**
- * Gère le catalog pour un registry Harbor via l'API projet native.
- * Décode le curseur "harbor:N" pour la pagination.
+ * Handles catalog listing for a Harbor registry via the native project API.
+ * Decodes the "harbor:N" cursor for pagination.
  */
 async function handleHarborCatalog(
 	registry: { url: string; username?: string | null; password?: string | null },
@@ -131,7 +131,7 @@ async function handleHarborCatalog(
 ): Promise<Response> {
 	const { path: orgPath } = parseRegistryUrl(registry.url);
 
-	// Décoder le curseur Harbor : "harbor:<page>" → numéro de page
+	// Decode the Harbor cursor: "harbor:<page>" → page number
 	let page = 1;
 	if (lastParam?.startsWith('harbor:')) {
 		page = parseInt(lastParam.substring(7), 10) || 1;
