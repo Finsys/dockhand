@@ -105,7 +105,7 @@ async function tryDirectImageLookup(registry: any, imageName: string): Promise<b
 
 // Search through catalog (slow for large registries, limited to first few pages)
 async function searchCatalog(registry: any, term: string, limit: number): Promise<string[]> {
-	// Fallback Harbor : utiliser l'API projet native pour la recherche
+	// Harbor fallback: use the native project API for search
 	if (await isHarborRegistry(registry.url)) {
 		const { path: orgPath } = parseRegistryUrl(registry.url);
 		return harborSearchRepositories(registry, term, orgPath, limit);
