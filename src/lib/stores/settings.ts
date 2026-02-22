@@ -28,6 +28,7 @@ export interface AppSettings {
 	metricsCollectionInterval: number;
 	externalStackPaths: string[];
 	primaryStackLocation: string | null;
+	defaultComposeTemplate: string;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -51,7 +52,25 @@ const DEFAULT_SETTINGS: AppSettings = {
 	eventPollInterval: 60000,
 	metricsCollectionInterval: 30000,
 	externalStackPaths: [],
-	primaryStackLocation: null
+	primaryStackLocation: null,
+	defaultComposeTemplate: `version: "3.8"
+
+services:
+  app:
+    image: nginx:alpine
+    ports:
+      - "8080:80"
+    environment:
+      - APP_ENV=\${APP_ENV:-production}
+    volumes:
+      - ./html:/usr/share/nginx/html:ro
+    restart: unless-stopped
+
+# Add more services as needed
+# networks:
+#   default:
+#     driver: bridge
+`
 };
 
 // Create a writable store for app settings
@@ -89,7 +108,8 @@ function createSettingsStore() {
 					eventPollInterval: settings.eventPollInterval ?? DEFAULT_SETTINGS.eventPollInterval,
 					metricsCollectionInterval: settings.metricsCollectionInterval ?? DEFAULT_SETTINGS.metricsCollectionInterval,
 					externalStackPaths: settings.externalStackPaths ?? DEFAULT_SETTINGS.externalStackPaths,
-					primaryStackLocation: settings.primaryStackLocation ?? DEFAULT_SETTINGS.primaryStackLocation
+					primaryStackLocation: settings.primaryStackLocation ?? DEFAULT_SETTINGS.primaryStackLocation,
+					defaultComposeTemplate: settings.defaultComposeTemplate ?? DEFAULT_SETTINGS.defaultComposeTemplate
 				});
 			}
 		} catch {
@@ -130,7 +150,8 @@ function createSettingsStore() {
 					eventPollInterval: updatedSettings.eventPollInterval ?? DEFAULT_SETTINGS.eventPollInterval,
 					metricsCollectionInterval: updatedSettings.metricsCollectionInterval ?? DEFAULT_SETTINGS.metricsCollectionInterval,
 					externalStackPaths: updatedSettings.externalStackPaths ?? DEFAULT_SETTINGS.externalStackPaths,
-					primaryStackLocation: updatedSettings.primaryStackLocation ?? DEFAULT_SETTINGS.primaryStackLocation
+					primaryStackLocation: updatedSettings.primaryStackLocation ?? DEFAULT_SETTINGS.primaryStackLocation,
+					defaultComposeTemplate: updatedSettings.defaultComposeTemplate ?? DEFAULT_SETTINGS.defaultComposeTemplate
 				});
 			}
 		} catch (error) {
@@ -301,6 +322,13 @@ function createSettingsStore() {
 			update((current) => {
 				const newSettings = { ...current, primaryStackLocation: value };
 				saveSettings({ primaryStackLocation: value });
+				return newSettings;
+			});
+		},
+		setDefaultComposeTemplate: (value: string) => {
+			update((current) => {
+				const newSettings = { ...current, defaultComposeTemplate: value };
+				saveSettings({ defaultComposeTemplate: value });
 				return newSettings;
 			});
 		},
