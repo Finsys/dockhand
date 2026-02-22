@@ -4363,6 +4363,19 @@ export async function setMetricsCollectionInterval(interval: number): Promise<vo
 }
 
 // =============================================================================
+// COMPOSE TEMPLATE SETTINGS
+// =============================================================================
+
+export async function getDefaultComposeTemplate(): Promise<string> {
+	const value = await getSetting('default_compose_template');
+	return value || '';
+}
+
+export async function setDefaultComposeTemplate(template: string): Promise<void> {
+	await setSetting('default_compose_template', template);
+}
+
+// =============================================================================
 // STACK ENVIRONMENT VARIABLES OPERATIONS
 // =============================================================================
 

@@ -558,24 +558,7 @@
 	// Debounce timer for validation
 	let validateTimer: ReturnType<typeof setTimeout> | null = null;
 
-	const defaultCompose = `version: "3.8"
-
-services:
-  app:
-    image: nginx:alpine
-    ports:
-      - "8080:80"
-    environment:
-      - APP_ENV=\${APP_ENV:-production}
-    volumes:
-      - ./html:/usr/share/nginx/html:ro
-    restart: unless-stopped
-
-# Add more services as needed
-# networks:
-#   default:
-#     driver: bridge
-`;
+	const defaultCompose = $appSettings.defaultComposeTemplate;
 
 	// Count of defined environment variables (with non-empty keys)
 	const envVarCount = $derived(envVars.filter(v => v.key.trim()).length);
