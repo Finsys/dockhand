@@ -92,6 +92,82 @@ export function shouldBlockUpdate(
 }
 
 /**
+ * Determine if an update should be deferred based on minimum image age.
+ * @param createdDate - ISO date string of when the image was created/published
+ * @param minAgeDays - Minimum age in days before the image is eligible for update
+ * @returns Object with deferred flag, age in days, and reason string
+ */
+export function shouldDeferUpdate(
+	createdDate: string,
+	minAgeDays: number
+): { deferred: boolean; ageDays: number; reason: string } {
+	if (minAgeDays <= 0) {
+		return { deferred: false, ageDays: 0, reason: '' };
+	}
+
+	const created = new Date(createdDate);
+	if (isNaN(created.getTime())) {
+		// If we can't parse the date, defer as a safety measure
+		return {
+			deferred: true,
+			ageDays: 0,
+			reason: `Could not parse image creation date: ${createdDate}`
+		};
+	}
+
+	const now = new Date();
+	const ageMs = now.getTime() - created.getTime();
+	const ageDays = Math.floor(ageMs / (1000 * 60 * 60 * 24));
+
+	// Sanity check: dates before 2013 (Docker's creation year) or in the future are likely
+	// synthetic (e.g. reproducible builds using epoch zero). Treat as unparseable.
+	if (created.getFullYear() < 2013 || ageMs < 0) {
+		return {
+			deferred: true,
+			ageDays: 0,
+			reason: `Image has suspicious creation date (${createdDate}), deferring as safety measure`
+		};
+	}
+
+	if (ageDays < minAgeDays) {
+		return {
+			deferred: true,
+			ageDays,
+			reason: `Image is ${ageDays} day(s) old (minimum: ${minAgeDays})`
+		};
+	}
+
+	return { deferred: false, ageDays, reason: '' };
+}
+
+/**
+ * Determine if a security fix in the new image should bypass the age gate.
+ * Compares critical + high vulnerability counts between current and new scans.
+ * The new image must have strictly fewer critical+high CVEs to qualify as a security fix.
+ *
+ * @param currentScan - Vulnerability summary of the current running image
+ * @param newScan - Vulnerability summary of the new image
+ * @returns Object with bypass flag and reason
+ */
+export function shouldBypassAgeForSecurity(
+	currentScan: VulnerabilitySeverity,
+	newScan: VulnerabilitySeverity
+): { bypass: boolean; reason: string } {
+	const currentCritHigh = currentScan.critical + currentScan.high;
+	const newCritHigh = newScan.critical + newScan.high;
+
+	if (currentCritHigh > 0 && newCritHigh < currentCritHigh) {
+		const fixed = currentCritHigh - newCritHigh;
+		return {
+			bypass: true,
+			reason: `New image fixes ${fixed} critical/high CVE(s) (${currentCritHigh} → ${newCritHigh})`
+		};
+	}
+
+	return { bypass: false, reason: '' };
+}
+
+/**
  * Check if a container is the Dockhand application itself.
  * Used to prevent Dockhand from updating its own container.
  */

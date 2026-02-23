@@ -5,7 +5,7 @@
 	import CronEditor from '$lib/components/cron-editor.svelte';
 	import TimezoneSelector from '$lib/components/TimezoneSelector.svelte';
 	import VulnerabilityCriteriaSelector, { type VulnerabilityCriteria } from '$lib/components/VulnerabilityCriteriaSelector.svelte';
-	import { CircleFadingArrowUp, CircleArrowUp, RefreshCw, Info, Trash2 } from 'lucide-svelte';
+	import { CircleFadingArrowUp, CircleArrowUp, RefreshCw, Info, Trash2, Clock, ShieldCheck } from 'lucide-svelte';
 	import { formatDateTime } from '$lib/stores/settings';
 
 	interface Props {
@@ -15,6 +15,8 @@
 		updateCheckCron: string;
 		updateCheckAutoUpdate: boolean;
 		updateCheckVulnerabilityCriteria: VulnerabilityCriteria;
+		updateCheckMinimumImageAgeDays: number;
+		updateCheckBypassAgeForSecurityFixes: boolean;
 		scannerEnabled: boolean;
 		// Image prune settings
 		imagePruneLoading: boolean;
@@ -33,6 +35,8 @@
 		updateCheckCron = $bindable(),
 		updateCheckAutoUpdate = $bindable(),
 		updateCheckVulnerabilityCriteria = $bindable(),
+		updateCheckMinimumImageAgeDays = $bindable(),
+		updateCheckBypassAgeForSecurityFixes = $bindable(),
 		scannerEnabled,
 		imagePruneLoading,
 		imagePruneEnabled = $bindable(),
@@ -113,10 +117,44 @@
 				</div>
 			{/if}
 
+			{#if updateCheckAutoUpdate}
+				<div class="flex items-start gap-2">
+					<Clock class="w-4 h-4 text-blue-500 mt-0.5 shrink-0" />
+					<div class="flex-1">
+						<Label>Minimum image age (days)</Label>
+						<p class="text-xs text-muted-foreground">
+							Only update to images that have been published for at least this many days. Set to 0 to disable.
+						</p>
+					</div>
+					<input
+						type="number"
+						min="0"
+						max="365"
+						class="w-[80px] h-9 rounded-md border border-input bg-background px-3 py-1 text-sm"
+						bind:value={updateCheckMinimumImageAgeDays}
+					/>
+				</div>
+
+				{#if updateCheckMinimumImageAgeDays > 0 && scannerEnabled}
+					<div class="flex items-start gap-2">
+						<ShieldCheck class="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
+						<div class="flex-1">
+							<Label>Bypass age gate for security fixes</Label>
+							<p class="text-xs text-muted-foreground">
+								Allow early updates when the new image fixes critical or high severity vulnerabilities in the current image. Requires vulnerability scanning.
+							</p>
+						</div>
+						<TogglePill bind:checked={updateCheckBypassAgeForSecurityFixes} />
+					</div>
+				{/if}
+			{/if}
+
 			<div class="text-xs text-muted-foreground bg-muted/50 rounded-md p-2 flex items-start gap-2">
 				<Info class="w-3 h-3 mt-0.5 shrink-0" />
 				{#if updateCheckAutoUpdate}
-					{#if scannerEnabled && updateCheckVulnerabilityCriteria !== 'never'}
+					{#if updateCheckMinimumImageAgeDays > 0}
+						<span>Updates are deferred until images are at least {updateCheckMinimumImageAgeDays} day(s) old. {#if updateCheckBypassAgeForSecurityFixes && scannerEnabled}Security fixes that reduce critical/high CVEs bypass the age gate.{/if}</span>
+					{:else if scannerEnabled && updateCheckVulnerabilityCriteria !== 'never'}
 						<span>New images are pulled to a temporary tag, scanned, then deployed if they pass the vulnerability check. Blocked images are deleted automatically.</span>
 					{:else}
 						<span>Containers will be updated automatically when new images are available.</span>

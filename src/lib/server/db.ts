@@ -631,6 +631,12 @@ export interface AutoUpdateSettingData {
 	scheduleType: 'daily' | 'weekly' | 'custom';
 	cronExpression: string | null;
 	vulnerabilityCriteria: VulnerabilityCriteria | null;
+	/** Minimum image age in days. null = use environment default. */
+	minimumImageAgeDays: number | null;
+	/** Bypass age gate for security fixes. null = use environment default. */
+	bypassAgeForSecurityFixes: boolean | null;
+	/** Exclude from environment-level auto-updates. */
+	excludedFromEnvUpdate: boolean;
 	lastChecked: string | null;
 	lastUpdated: string | null;
 	createdAt: string;
@@ -686,6 +692,9 @@ export async function upsertAutoUpdateSetting(
 		scheduleType: 'daily' | 'weekly' | 'custom';
 		cronExpression?: string | null;
 		vulnerabilityCriteria?: VulnerabilityCriteria | null;
+		minimumImageAgeDays?: number | null;
+		bypassAgeForSecurityFixes?: boolean | null;
+		excludedFromEnvUpdate?: boolean;
 	},
 	environmentId?: number
 ): Promise<AutoUpdateSettingData> {
@@ -698,6 +707,9 @@ export async function upsertAutoUpdateSetting(
 				scheduleType: settingsData.scheduleType,
 				cronExpression: settingsData.cronExpression || null,
 				vulnerabilityCriteria: settingsData.vulnerabilityCriteria || 'never',
+				minimumImageAgeDays: settingsData.minimumImageAgeDays ?? null,
+				bypassAgeForSecurityFixes: settingsData.bypassAgeForSecurityFixes ?? null,
+				excludedFromEnvUpdate: settingsData.excludedFromEnvUpdate ?? false,
 				updatedAt: new Date().toISOString()
 			})
 			.where(eq(autoUpdateSettings.id, existing.id));
@@ -709,7 +721,10 @@ export async function upsertAutoUpdateSetting(
 			enabled: settingsData.enabled,
 			scheduleType: settingsData.scheduleType,
 			cronExpression: settingsData.cronExpression || null,
-			vulnerabilityCriteria: settingsData.vulnerabilityCriteria || 'never'
+			vulnerabilityCriteria: settingsData.vulnerabilityCriteria || 'never',
+			minimumImageAgeDays: settingsData.minimumImageAgeDays ?? null,
+			bypassAgeForSecurityFixes: settingsData.bypassAgeForSecurityFixes ?? null,
+			excludedFromEnvUpdate: settingsData.excludedFromEnvUpdate ?? false
 		});
 		return getAutoUpdateSetting(containerName, environmentId) as Promise<AutoUpdateSettingData>;
 	}
@@ -4157,6 +4172,10 @@ export interface EnvUpdateCheckSettings {
 	cron: string;
 	autoUpdate: boolean;
 	vulnerabilityCriteria: VulnerabilityCriteria;
+	/** Minimum image age in days before auto-updating. 0 = disabled. */
+	minimumImageAgeDays?: number;
+	/** Bypass the age gate when the new image fixes critical/high CVEs. Requires scanning. */
+	bypassAgeForSecurityFixes?: boolean;
 }
 
 export async function getEnvUpdateCheckSettings(envId: number): Promise<EnvUpdateCheckSettings | null> {

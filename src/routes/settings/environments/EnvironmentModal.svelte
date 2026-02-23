@@ -380,6 +380,8 @@
 	let updateCheckCron = $state('0 4 * * *'); // Default: 4 AM daily
 	let updateCheckAutoUpdate = $state(false);
 	let updateCheckVulnerabilityCriteria = $state<VulnerabilityCriteria>('never');
+	let updateCheckMinimumImageAgeDays = $state(0);
+	let updateCheckBypassAgeForSecurityFixes = $state(false);
 	let updateCheckLoading = $state(false);
 
 	// Image prune settings state
@@ -491,6 +493,8 @@
 			updateCheckEnabled = false;
 			updateCheckCron = '0 4 * * *';
 			updateCheckAutoUpdate = false;
+			updateCheckMinimumImageAgeDays = 0;
+			updateCheckBypassAgeForSecurityFixes = false;
 			// Reset image prune settings
 			imagePruneEnabled = false;
 			imagePruneCron = '0 3 * * 0';
@@ -947,12 +951,16 @@
 					updateCheckCron = data.settings.cron || '0 4 * * *';
 					updateCheckAutoUpdate = data.settings.autoUpdate ?? false;
 					updateCheckVulnerabilityCriteria = data.settings.vulnerabilityCriteria || 'never';
+					updateCheckMinimumImageAgeDays = data.settings.minimumImageAgeDays ?? 0;
+					updateCheckBypassAgeForSecurityFixes = data.settings.bypassAgeForSecurityFixes ?? false;
 				} else {
 					// No settings found - use defaults
 					updateCheckEnabled = false;
 					updateCheckCron = '0 4 * * *';
 					updateCheckAutoUpdate = false;
 					updateCheckVulnerabilityCriteria = 'never';
+					updateCheckMinimumImageAgeDays = 0;
+					updateCheckBypassAgeForSecurityFixes = false;
 				}
 			}
 		} catch (error) {
@@ -971,7 +979,9 @@
 					enabled: updateCheckEnabled,
 					cron: updateCheckCron,
 					autoUpdate: updateCheckAutoUpdate,
-					vulnerabilityCriteria: updateCheckVulnerabilityCriteria
+					vulnerabilityCriteria: updateCheckVulnerabilityCriteria,
+					minimumImageAgeDays: updateCheckMinimumImageAgeDays,
+					bypassAgeForSecurityFixes: updateCheckBypassAgeForSecurityFixes
 				})
 			});
 		} catch (error) {
@@ -2090,6 +2100,8 @@
 						bind:updateCheckCron={updateCheckCron}
 						bind:updateCheckAutoUpdate={updateCheckAutoUpdate}
 						bind:updateCheckVulnerabilityCriteria={updateCheckVulnerabilityCriteria}
+						bind:updateCheckMinimumImageAgeDays={updateCheckMinimumImageAgeDays}
+						bind:updateCheckBypassAgeForSecurityFixes={updateCheckBypassAgeForSecurityFixes}
 						scannerEnabled={scannerEnabled}
 						imagePruneLoading={imagePruneLoading}
 						bind:imagePruneEnabled={imagePruneEnabled}

@@ -125,6 +125,9 @@
 		autoUpdateEnabled: boolean;
 		autoUpdateCronExpression: string;
 		vulnerabilityCriteria: VulnerabilityCriteria;
+		minimumImageAgeDays: number | null;
+		bypassAgeForSecurityFixes: boolean | null;
+		excludedFromEnvUpdate: boolean;
 		// Config sets
 		configSets: ConfigSet[];
 		selectedConfigSetId: string;
@@ -189,6 +192,9 @@
 		autoUpdateEnabled = $bindable(),
 		autoUpdateCronExpression = $bindable(),
 		vulnerabilityCriteria = $bindable(),
+		minimumImageAgeDays = $bindable(),
+		bypassAgeForSecurityFixes = $bindable(),
+		excludedFromEnvUpdate = $bindable(),
 		configSets,
 		selectedConfigSetId = $bindable(),
 		errors = $bindable(),
@@ -1462,6 +1468,9 @@
 			bind:enabled={autoUpdateEnabled}
 			bind:cronExpression={autoUpdateCronExpression}
 			bind:vulnerabilityCriteria={vulnerabilityCriteria}
+			bind:minimumImageAgeDays={minimumImageAgeDays}
+			bind:bypassAgeForSecurityFixes={bypassAgeForSecurityFixes}
+			bind:excludedFromEnvUpdate={excludedFromEnvUpdate}
 			systemContainer={detectSystemContainer(image)}
 		/>
 	</div>
