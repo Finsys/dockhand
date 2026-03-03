@@ -162,19 +162,79 @@ if (typeof process !== 'undefined') {
  * Fetch and cache the Docker daemon's maximum supported API version for a given environment.
  * Used to set DOCKER_API_VERSION when spawning docker compose, preventing version mismatch
  * errors on older Docker hosts (e.g. Synology DSM).
+ *
+ * Strategy:
+ * 1. Try Dockhand's HTTP API call to the daemon (works for all environment types)
+ * 2. Fall back to `docker version` CLI command (works for local socket connections)
  */
 async function getDockerApiVersionForCli(envId: number | null | undefined): Promise<string | undefined> {
 	const key = String(envId ?? 'local');
 	if (dockerApiVersionCache.has(key)) return dockerApiVersionCache.get(key);
-	try {
-		const { getDockerVersion } = await import('./docker.js');
-		const version = await getDockerVersion(envId);
-		const apiVersion: string | undefined = version?.ApiVersion;
-		if (apiVersion) dockerApiVersionCache.set(key, apiVersion);
-		return apiVersion;
-	} catch {
-		return undefined;
+
+	// Strategy 1: Use Dockhand's HTTP API to query the daemon
+	if (envId) {
+		try {
+			const { getDockerVersion } = await import('./docker.js');
+			const version = await getDockerVersion(envId) as { ApiVersion?: string };
+			const apiVersion: string | undefined = version?.ApiVersion;
+			if (apiVersion) {
+				console.log(`[Docker API Version] Detected daemon API version ${apiVersion} for env ${key} (via HTTP API)`);
+				dockerApiVersionCache.set(key, apiVersion);
+				return apiVersion;
+			}
+		} catch (err: any) {
+			console.warn(`[Docker API Version] HTTP API query failed for env ${key}: ${err?.message || err}`);
+		}
 	}
+
+	// Strategy 2: Fall back to `docker version` CLI command
+	// This handles local socket connections where envId is null and also
+	// cases where the HTTP API query fails (e.g. daemon quirks on Synology)
+	try {
+		const apiVersion = await getDockerApiVersionViaCli();
+		if (apiVersion) {
+			console.log(`[Docker API Version] Detected daemon API version ${apiVersion} for env ${key} (via CLI)`);
+			dockerApiVersionCache.set(key, apiVersion);
+			return apiVersion;
+		}
+	} catch (err: any) {
+		console.warn(`[Docker API Version] CLI query failed for env ${key}: ${err?.message || err}`);
+	}
+
+	console.warn(`[Docker API Version] Could not detect daemon API version for env ${key}`);
+	return undefined;
+}
+
+/**
+ * Get the Docker daemon's API version using the `docker version` CLI command.
+ * This is a fallback for when the HTTP API query fails or envId is null.
+ */
+function getDockerApiVersionViaCli(): Promise<string | undefined> {
+	return new Promise((resolve) => {
+		const proc = nodeSpawn('docker', ['version', '--format', '{{.Server.APIVersion}}'], {
+			stdio: ['ignore', 'pipe', 'pipe'],
+			timeout: 5000,
+			// Use the minimum Docker API version (1.25) for this probe command.
+			// This ensures the probe itself doesn't fail due to the version mismatch
+			// we're trying to detect.
+			env: {
+				PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin',
+				DOCKER_API_VERSION: '1.25'
+			}
+		});
+		let stdout = '';
+		proc.stdout.on('data', (data: Buffer) => { stdout += data.toString(); });
+		proc.stderr?.on('data', () => {}); // drain stderr to prevent pipe buffer blocking
+		proc.on('close', (code) => {
+			const version = stdout.trim();
+			if (code === 0 && /^\d+\.\d+$/.test(version)) {
+				resolve(version);
+			} else {
+				resolve(undefined);
+			}
+		});
+		proc.on('error', () => resolve(undefined));
+	});
 }
 
 /**
@@ -749,7 +809,7 @@ export async function saveStackComposeFile(
  * Login to all configured Docker registries before running compose commands.
  * This ensures that `docker compose up` can pull images from private registries.
  */
-async function loginToRegistries(dockerHost?: string, logPrefix = '[Stack]'): Promise<void> {
+async function loginToRegistries(dockerHost?: string, logPrefix = '[Stack]', apiVersion?: string): Promise<void> {
 	const { getRegistries } = await import('./db.js');
 	const registries = await getRegistries();
 
@@ -760,6 +820,10 @@ async function loginToRegistries(dockerHost?: string, logPrefix = '[Stack]'): Pr
 	const spawnEnv: Record<string, string> = { ...(process.env as Record<string, string>) };
 	if (dockerHost) {
 		spawnEnv.DOCKER_HOST = dockerHost;
+	}
+	// Cap Docker CLI API version to prevent version mismatch errors
+	if (apiVersion) {
+		spawnEnv.DOCKER_API_VERSION = apiVersion;
 	}
 
 	for (const reg of registries) {
@@ -1098,6 +1162,7 @@ async function executeLocalCompose(
 	console.log(`${logPrefix} Working directory:`, stackDir);
 	console.log(`${logPrefix} Compose file:`, composeFile);
 	console.log(`${logPrefix} DOCKER_HOST:`, dockerHost || '(local socket)');
+	console.log(`${logPrefix} DOCKER_API_VERSION:`, daemonApiVersion || '(not set - using CLI default)');
 	console.log(`${logPrefix} Force recreate:`, forceRecreate ?? false);
 	console.log(`${logPrefix} Remove volumes:`, removeVolumes ?? false);
 	console.log(`${logPrefix} Service name:`, serviceName ?? '(all services)');
@@ -1108,7 +1173,7 @@ async function executeLocalCompose(
 
 	// Login to registries before pulling images
 	if (operation === 'up' || operation === 'pull') {
-		await loginToRegistries(dockerHost, logPrefix);
+		await loginToRegistries(dockerHost, logPrefix, daemonApiVersion);
 	}
 
 	try {
