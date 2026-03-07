@@ -8,12 +8,13 @@
 	import { TogglePill, ToggleSwitch } from '$lib/components/ui/toggle-pill';
 	import CronEditor from '$lib/components/cron-editor.svelte';
 	import TimezoneSelector from '$lib/components/TimezoneSelector.svelte';
-	import { Eye, Bell, Database, Calendar, ShieldCheck, FileText, AlertTriangle, HelpCircle, Globe, Activity, Clock } from 'lucide-svelte';
+	import { Eye, Bell, Database, Calendar, ShieldCheck, FileText, AlertTriangle, HelpCircle, Globe, Activity, Clock, Save } from 'lucide-svelte';
 	import { appSettings, type DateFormat, type DownloadFormat, type EventCollectionMode } from '$lib/stores/settings';
 	import { canAccess, authStore } from '$lib/stores/auth';
 	import { toast } from 'svelte-sonner';
 	import ThemeSelector from '$lib/components/ThemeSelector.svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
+	import CodeEditor from '$lib/components/CodeEditor.svelte';
 
 	// General settings state - these derive from the store
 	let confirmDestructive = $derived($appSettings.confirmDestructive);
@@ -35,6 +36,8 @@
 	let eventCollectionMode = $derived($appSettings.eventCollectionMode);
 	let eventPollInterval = $derived($appSettings.eventPollInterval);
 	let metricsCollectionInterval = $derived($appSettings.metricsCollectionInterval);
+	let defaultComposeTemplate = $derived($appSettings.defaultComposeTemplate);
+	let defaultComposeTemplateWIP = defaultComposeTemplate
 
 	const dateFormatOptions: { value: DateFormat; label: string; example: string }[] = [
 		{ value: 'DD.MM.YYYY', label: 'DD.MM.YYYY', example: '31.12.2024' },
@@ -116,6 +119,16 @@
 			appSettings.setMetricsCollectionInterval(selected.value);
 			toast.success(`Metrics interval: ${selected.value / 1000}s`);
 		}
+	}
+
+	function handleChangeDefaultComposeTemplate(newString: String) {
+		defaultComposeTemplateWIP = newString
+	}
+
+	function handleDefaultComposeTemplateSave() {
+		defaultComposeTemplate = defaultComposeTemplateWIP
+		appSettings.setDefaultComposeTemplate(defaultComposeTemplate);
+		toast.success('Compose template updated');
 	}
 </script>
 
@@ -558,6 +571,33 @@
 							Runs every 30 minutes and on startup.
 						</p>
 					</div>
+				</Card.Content>
+			</Card.Root>
+
+			<Card.Root>
+				<Card.Header>
+					<Card.Title class="text-sm font-medium flex items-center gap-2">
+						<FileText class="w-4 h-4" />
+						Compose Template
+					</Card.Title>
+					<p class="text-xs text-muted-foreground">Used as the default yaml content when creating a new stack.</p>
+				</Card.Header>
+				<Card.Content class="space-y-4">
+					<CodeEditor
+						value={defaultComposeTemplate}
+						onchange={handleChangeDefaultComposeTemplate}
+						language="yaml"
+						theme="dark"
+						readonly={!$canAccess('settings', 'edit')}
+						class="h-full rounded-md overflow-hidden border border-zinc-200 dark:border-zinc-700"
+					/>
+					
+					{#if $canAccess('settings', 'edit')}
+						<Button size="sm" variant="outline" onclick={handleDefaultComposeTemplateSave}>
+							<Save class="w-4 h-4" />
+							Save Template
+						</Button>
+					{/if}
 				</Card.Content>
 			</Card.Root>
 		</div>

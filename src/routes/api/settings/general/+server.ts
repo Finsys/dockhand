@@ -69,6 +69,8 @@ export interface GeneralSettings {
 	externalStackPaths: string[];
 	// Primary stack location
 	primaryStackLocation: string | null;
+	// Default compose template
+	defaultComposeTemplate: string;
 }
 
 const DEFAULT_SETTINGS: Omit<GeneralSettings, 'scheduleRetentionDays' | 'eventRetentionDays' | 'scheduleCleanupCron' | 'eventCleanupCron' | 'scheduleCleanupEnabled' | 'eventCleanupEnabled'> = {
@@ -91,7 +93,27 @@ const DEFAULT_SETTINGS: Omit<GeneralSettings, 'scheduleRetentionDays' | 'eventRe
 	fontSize: 'normal',
 	gridFontSize: 'normal',
 	terminalFont: 'system-mono',
-	editorFont: 'system-mono'
+	editorFont: 'system-mono',
+	defaultComposeTemplate: `version: "3.8"
+
+services:
+  app:
+    image: nginx:alpine
+    ports:
+      - "8080:80"
+    environment:
+      - APP_ENV=\${APP_ENV:-production}
+    volumes:
+      - ./html:/usr/share/nginx/html:ro
+    restart: unless-stopped
+
+# Add more services as needed
+# networks:
+#   default:
+#     driver: bridge
+`,
+	externalStackPaths: [],
+	primaryStackLocation: null
 };
 
 const VALID_LIGHT_THEMES = ['default', 'catppuccin', 'rose-pine', 'nord', 'solarized', 'gruvbox', 'alucard', 'github', 'material', 'atom-one'];
@@ -141,7 +163,8 @@ export const GET: RequestHandler = async ({ cookies }) => {
 			terminalFont,
 			editorFont,
 			externalStackPaths,
-			primaryStackLocation
+			primaryStackLocation,
+			defaultComposeTemplate
 		] = await Promise.all([
 			getSetting('confirm_destructive'),
 			getSetting('show_stopped_containers'),
@@ -170,7 +193,8 @@ export const GET: RequestHandler = async ({ cookies }) => {
 			getSetting('theme_terminal_font'),
 			getSetting('theme_editor_font'),
 			getExternalStackPaths(),
-			getPrimaryStackLocation()
+			getPrimaryStackLocation(),
+			getSetting('default_compose_template')
 		]);
 
 		const settings: GeneralSettings = {
@@ -201,7 +225,8 @@ export const GET: RequestHandler = async ({ cookies }) => {
 			terminalFont: terminalFont ?? DEFAULT_SETTINGS.terminalFont,
 			editorFont: editorFont ?? DEFAULT_SETTINGS.editorFont,
 			externalStackPaths,
-			primaryStackLocation
+			primaryStackLocation,
+			defaultComposeTemplate: defaultComposeTemplate ?? DEFAULT_SETTINGS.defaultComposeTemplate
 		};
 
 		return json(settings);
@@ -219,7 +244,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 
 	try {
 		const body = await request.json();
-		const { confirmDestructive, showStoppedContainers, highlightUpdates, timeFormat, dateFormat, downloadFormat, defaultGrypeArgs, defaultTrivyArgs, scheduleRetentionDays, eventRetentionDays, scheduleCleanupCron, eventCleanupCron, scheduleCleanupEnabled, eventCleanupEnabled, logBufferSizeKb, defaultTimezone, eventCollectionMode, eventPollInterval, metricsCollectionInterval, lightTheme, darkTheme, font, fontSize, gridFontSize, terminalFont, editorFont, externalStackPaths, primaryStackLocation } = body;
+		const { confirmDestructive, showStoppedContainers, highlightUpdates, timeFormat, dateFormat, downloadFormat, defaultGrypeArgs, defaultTrivyArgs, scheduleRetentionDays, eventRetentionDays, scheduleCleanupCron, eventCleanupCron, scheduleCleanupEnabled, eventCleanupEnabled, logBufferSizeKb, defaultTimezone, eventCollectionMode, eventPollInterval, metricsCollectionInterval, lightTheme, darkTheme, font, fontSize, gridFontSize, terminalFont, editorFont, externalStackPaths, primaryStackLocation, defaultComposeTemplate } = body;
 
 		if (confirmDestructive !== undefined) {
 			await setSetting('confirm_destructive', confirmDestructive);
@@ -326,6 +351,9 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 				await setPrimaryStackLocation(null);
 			}
 		}
+		if (defaultComposeTemplate !== undefined && typeof defaultComposeTemplate === 'string') {
+			await setSetting('default_compose_template', defaultComposeTemplate);
+		}
 
 		// Fetch all settings in parallel for the response
 		const [
@@ -356,7 +384,8 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			terminalFontVal,
 			editorFontVal,
 			externalStackPathsVal,
-			primaryStackLocationVal
+			primaryStackLocationVal,
+			defaultComposeTemplateVal
 		] = await Promise.all([
 			getSetting('confirm_destructive'),
 			getSetting('show_stopped_containers'),
@@ -385,7 +414,8 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			getSetting('theme_terminal_font'),
 			getSetting('theme_editor_font'),
 			getExternalStackPaths(),
-			getPrimaryStackLocation()
+			getPrimaryStackLocation(),
+			getSetting('default_compose_template')
 		]);
 
 		const settings: GeneralSettings = {
@@ -416,7 +446,8 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			terminalFont: terminalFontVal ?? DEFAULT_SETTINGS.terminalFont,
 			editorFont: editorFontVal ?? DEFAULT_SETTINGS.editorFont,
 			externalStackPaths: externalStackPathsVal,
-			primaryStackLocation: primaryStackLocationVal
+			primaryStackLocation: primaryStackLocationVal,
+			defaultComposeTemplate: defaultComposeTemplateVal ?? DEFAULT_SETTINGS.defaultComposeTemplate
 		};
 
 		return json(settings);
