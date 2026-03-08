@@ -3844,19 +3844,25 @@ export async function getContainerTop(id: string, envId?: number | null): Promis
 export async function execInContainer(
 	containerId: string,
 	cmd: string[],
-	envId?: number | null
+	envId?: number | null,
+	user?: string | null
 ): Promise<string> {
-	// Create exec instance
+	const execBody: any = {
+		Cmd: cmd,
+		AttachStdout: true,
+		AttachStderr: true,
+		Tty: false
+	};
+
+	if (user) {
+		execBody.User = user;
+	}
+
 	const execCreate = await dockerJsonRequest<{ Id: string }>(
 		`/containers/${containerId}/exec`,
 		{
 			method: 'POST',
-			body: JSON.stringify({
-				Cmd: cmd,
-				AttachStdout: true,
-				AttachStderr: true,
-				Tty: false
-			})
+			body: JSON.stringify(execBody)
 		},
 		envId
 	);

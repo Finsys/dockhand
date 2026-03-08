@@ -1,5 +1,5 @@
 import { json } from '@sveltejs/kit';
-import { putContainerArchive } from '$lib/server/docker';
+import { putContainerArchive, inspectContainer, execInContainer } from '$lib/server/docker';
 import { authorize } from '$lib/server/authorize';
 import { validateDockerIdParam } from '$lib/server/docker-validation';
 import type { RequestHandler } from './$types';
@@ -111,6 +111,15 @@ export const POST: RequestHandler = async ({ params, url, request, cookies }) =>
 			return json({ error: 'No files provided' }, { status: 400 });
 		}
 
+		// We'll inspect the container once to determine its default user
+		let defaultUser: string | undefined;
+		try {
+			const inspectData = await inspectContainer(params.id, envIdNum);
+			defaultUser = inspectData.Config.User || undefined;
+		} catch (e) {
+			console.warn('Failed to inspect container for user info', e);
+		}
+
 		// For simplicity, we'll upload files one at a time
 		// A more sophisticated implementation could pack multiple files into one tar
 		const uploaded: string[] = [];
@@ -127,6 +136,22 @@ export const POST: RequestHandler = async ({ params, url, request, cookies }) =>
 					tar,
 					envId ? parseInt(envId) : undefined
 				);
+
+				// chown the uploaded file
+				if (defaultUser) {
+					const targetPath = path.endsWith('/') ? `${path}${file.name}` : `${path}/${file.name}`;
+					const ownerGroup = defaultUser.includes(':') ? defaultUser : `${defaultUser}:${defaultUser}`;
+					try {
+						await execInContainer(
+							params.id,
+							['chown', '-R', ownerGroup, targetPath],
+							envId ? parseInt(envId) : undefined,
+							'root'
+						);
+					} catch (e) {
+						console.warn('Failed to set ownership on', targetPath, e);
+					}
+				}
 
 				uploaded.push(file.name);
 			} catch (err: any) {
