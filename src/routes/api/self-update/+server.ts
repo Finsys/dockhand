@@ -371,6 +371,22 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 					...networkEnvVars
 				];
 
+				// Pass Docker API version so the updater CLI speaks a compatible version.
+				// Without this, newer CLI versions (e.g. API 1.53) fail against older
+				// daemons (e.g. Synology DSM shipping API 1.43).
+				const dockerApiVersion = process.env.DOCKER_API_VERSION;
+				if (dockerApiVersion) {
+					updaterEnv.push(`DOCKER_API_VERSION=${dockerApiVersion}`);
+				} else {
+					const versionRes = await localDockerFetch('/version');
+					if (versionRes.ok) {
+						const vInfo = await versionRes.json() as { ApiVersion?: string };
+						if (vInfo.ApiVersion) {
+							updaterEnv.push(`DOCKER_API_VERSION=${vInfo.ApiVersion}`);
+						}
+					}
+				}
+
 				// Configure updater's Docker access based on connection type
 				const tcpHost = getDockerTcpHost();
 				const updaterHostConfig: Record<string, unknown> = { AutoRemove: true };
