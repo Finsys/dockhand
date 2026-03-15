@@ -10,6 +10,7 @@
 import type { ScheduleTrigger, VulnerabilityCriteria } from '../../db';
 import {
 	getAutoUpdateSettingById,
+	getEnvUpdateCheckSettings,
 	updateAutoUpdateLastChecked,
 	updateAutoUpdateLastUpdated,
 	createScheduleExecution,
@@ -26,6 +27,7 @@ import {
 	startContainer,
 	removeContainer,
 	checkImageUpdateAvailable,
+	getImageCreatedDate,
 	getTempImageTag,
 	isDigestBasedImage,
 	getImageIdByTag,
@@ -37,7 +39,7 @@ import {
 } from '../../docker';
 import { getScannerSettings, scanImage, type ScanResult, type VulnerabilitySeverity } from '../../scanner';
 import { sendEventNotification } from '../../notifications';
-import { parseImageNameAndTag, shouldBlockUpdate, combineScanSummaries, isSystemContainer } from './update-utils';
+import { parseImageNameAndTag, shouldBlockUpdate, shouldDeferUpdate, shouldBypassAgeForSecurity, combineScanSummaries, isSystemContainer } from './update-utils';
 
 // =============================================================================
 // TYPES
@@ -440,6 +442,124 @@ export async function runContainerUpdate(
 		const newDigest = registryCheck.registryDigest;
 
 		// =============================================================================
+		// MINIMUM IMAGE AGE GATE
+		// =============================================================================
+		// Check if the new image is old enough to be eligible for auto-update.
+		// Per-container setting overrides environment default (null = use env default).
+
+		const envConfig = envId ? await getEnvUpdateCheckSettings(envId) : null;
+		const minAgeDays = updateSetting?.minimumImageAgeDays ?? envConfig?.minimumImageAgeDays ?? 0;
+		let imageAlreadyPulled = false;
+
+		if (minAgeDays > 0) {
+			log(`Checking image age (minimum: ${minAgeDays} days)...`);
+			const createdDate = await getImageCreatedDate(imageNameFromConfig);
+
+			if (createdDate) {
+				const { deferred, ageDays, reason } = shouldDeferUpdate(createdDate, minAgeDays);
+
+				if (deferred) {
+					// Check if we should bypass for security fixes
+					const bypassEnabled = updateSetting?.bypassAgeForSecurityFixes ?? envConfig?.bypassAgeForSecurityFixes ?? false;
+					let bypassed = false;
+
+					if (bypassEnabled && shouldScan) {
+						log(`${reason} — checking for security fix bypass...`);
+
+						// Get current image scan (cached or fresh)
+						let currentScan: VulnerabilitySeverity | undefined;
+						try {
+							const cached = await getCombinedScanForImage(currentImageId, envId ?? null);
+							if (cached) {
+								currentScan = cached;
+							} else {
+								log(`Scanning current image for CVE comparison...`);
+								const currentResults = await scanImage(currentImageId, envId, (progress) => {
+									if (progress.message) log(`[scan] ${progress.message}`);
+								});
+								if (currentResults.length > 0) {
+									currentScan = combineScanSummaries(currentResults);
+									for (const result of currentResults) {
+										try { await saveVulnerabilityScan({ environmentId: envId ?? null, imageId: currentImageId, imageName: result.imageName, scanner: result.scanner, scannedAt: result.scannedAt, scanDuration: result.scanDuration, criticalCount: result.summary.critical, highCount: result.summary.high, mediumCount: result.summary.medium, lowCount: result.summary.low, negligibleCount: result.summary.negligible, unknownCount: result.summary.unknown, vulnerabilities: result.vulnerabilities, error: result.error ?? null }); } catch { /* ignore */ }
+									}
+								}
+							}
+						} catch { /* ignore */ }
+
+						if (currentScan && (currentScan.critical + currentScan.high) > 0) {
+							log(`Current image has ${currentScan.critical} critical + ${currentScan.high} high CVEs, scanning new image...`);
+							let pulledNewImage = false;
+							const [oldRepo, oldTag] = parseImageNameAndTag(imageNameFromConfig);
+							try {
+								// Pull and scan the new image via temp tag
+								const tempTag = getTempImageTag(imageNameFromConfig);
+								await pullImage(imageNameFromConfig, undefined, envId);
+								pulledNewImage = true;
+								const newImgId = await getImageIdByTag(imageNameFromConfig, envId);
+								if (newImgId) {
+									await tagImage(currentImageId, oldRepo, oldTag, envId);
+									const [tempRepo, tempTagName] = parseImageNameAndTag(tempTag);
+									await tagImage(newImgId, tempRepo, tempTagName, envId);
+
+									const newResults = await scanImage(tempTag, envId, (progress) => {
+										if (progress.message) log(`[scan] ${progress.message}`);
+									});
+									if (newResults.length > 0) {
+										const newScan = combineScanSummaries(newResults);
+										const { bypass, reason: bypassReason } = shouldBypassAgeForSecurity(currentScan, newScan);
+										if (bypass) {
+											log(`AGE GATE BYPASSED: ${bypassReason}`);
+											bypassed = true;
+											imageAlreadyPulled = true;
+											await tagImage(newImgId, oldRepo, oldTag, envId);
+											try { await removeTempImage(tempTag, envId); } catch { /* ignore */ }
+											for (const result of newResults) {
+												try { await saveVulnerabilityScan({ environmentId: envId ?? null, imageId: newImgId, imageName: result.imageName, scanner: result.scanner, scannedAt: result.scannedAt, scanDuration: result.scanDuration, criticalCount: result.summary.critical, highCount: result.summary.high, mediumCount: result.summary.medium, lowCount: result.summary.low, negligibleCount: result.summary.negligible, unknownCount: result.summary.unknown, vulnerabilities: result.vulnerabilities, error: result.error ?? null }); } catch { /* ignore */ }
+											}
+										} else {
+											await removeTempImage(newImgId, envId);
+										}
+									} else {
+										await removeTempImage(newImgId, envId);
+									}
+								}
+							} catch (err: any) {
+								log(`Security fix check failed: ${err.message}`);
+							} finally {
+								// Ensure original tag is restored if we pulled but didn't bypass
+								if (pulledNewImage && !bypassed) {
+									try { await tagImage(currentImageId, oldRepo, oldTag, envId); } catch { /* ignore */ }
+								}
+							}
+						}
+					}
+
+					if (!bypassed) {
+						log(`DEFERRED: ${reason}`);
+						await updateScheduleExecution(execution.id, {
+							status: 'skipped',
+							completedAt: new Date().toISOString(),
+							duration: Date.now() - startTime,
+							details: { reason }
+						});
+						return;
+					}
+				} else {
+					log(`Image is ${ageDays} day(s) old — age gate passed`);
+				}
+			} else {
+				log(`Could not determine image age — deferring as safety measure`);
+				await updateScheduleExecution(execution.id, {
+					status: 'skipped',
+					completedAt: new Date().toISOString(),
+					duration: Date.now() - startTime,
+					details: { reason: 'Could not determine image creation date' }
+				});
+				return;
+			}
+		}
+
+		// =============================================================================
 		// PULL & SCAN: Temp-tag protection flow
 		// =============================================================================
 		// 1. Pull new image (overwrites tag)
@@ -452,7 +572,9 @@ export async function runContainerUpdate(
 		let newImageId: string | null = null;
 		let scanOutcome: ScanOutcome = { blocked: false };
 
-		if (shouldScan && !isDigestBasedImage(imageNameFromConfig)) {
+		if (imageAlreadyPulled) {
+			log(`Image already pulled and scanned (security bypass) — skipping safe-pull`);
+		} else if (shouldScan && !isDigestBasedImage(imageNameFromConfig)) {
 			const tempTag = getTempImageTag(imageNameFromConfig);
 			log(`Using temp tag for safe pull: ${tempTag}`);
 

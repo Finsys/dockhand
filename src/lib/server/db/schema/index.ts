@@ -128,6 +128,12 @@ export const autoUpdateSettings = sqliteTable('auto_update_settings', {
 	scheduleType: text('schedule_type').default('daily'),
 	cronExpression: text('cron_expression'),
 	vulnerabilityCriteria: text('vulnerability_criteria').default('never'), // 'never' | 'any' | 'critical_high' | 'critical' | 'more_than_current'
+	/** Minimum image age in days before auto-updating. null = use environment default. */
+	minimumImageAgeDays: integer('minimum_image_age_days'),
+	/** Bypass age gate when new image fixes critical/high CVEs. null = use environment default. */
+	bypassAgeForSecurityFixes: integer('bypass_age_for_security_fixes', { mode: 'boolean' }),
+	/** Exclude this container from environment-level auto-updates (still shows update availability). */
+	excludedFromEnvUpdate: integer('excluded_from_env_update', { mode: 'boolean' }).default(false),
 	lastChecked: text('last_checked'),
 	lastUpdated: text('last_updated'),
 	createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),

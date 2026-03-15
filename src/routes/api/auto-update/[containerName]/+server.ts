@@ -21,7 +21,10 @@ export const GET: RequestHandler = async ({ params, url }) => {
 				enabled: false,
 				scheduleType: 'daily',
 				cronExpression: '0 3 * * *',
-				vulnerabilityCriteria: 'never'
+				vulnerabilityCriteria: 'never',
+				minimumImageAgeDays: null,
+				bypassAgeForSecurityFixes: null,
+				excludedFromEnvUpdate: false
 			});
 		}
 
@@ -50,8 +53,18 @@ export const POST: RequestHandler = async ({ params, url, request }) => {
 		const cronExpression = body.cronExpression ?? body.cron_expression;
 		const vulnerabilityCriteria = body.vulnerabilityCriteria ?? body.vulnerability_criteria;
 
-		// Hard delete when disabled
-		if (enabled === false) {
+		const rawAge = body.minimumImageAgeDays ?? body.minimum_image_age_days ?? null;
+		const minimumImageAgeDays = rawAge != null ? Math.max(0, Math.min(365, Math.floor(Number(rawAge)))) : null;
+		if (rawAge != null && (!Number.isFinite(Number(rawAge)) || Number(rawAge) < 0)) {
+			return json({ error: 'minimumImageAgeDays must be a non-negative integer (0-365)' }, { status: 400 });
+		}
+		const rawBypass = body.bypassAgeForSecurityFixes ?? body.bypass_age_for_security_fixes ?? null;
+		const bypassAgeForSecurityFixes = rawBypass != null ? Boolean(rawBypass) : null;
+		const excludedFromEnvUpdate = Boolean(body.excludedFromEnvUpdate ?? body.excluded_from_env_update ?? false);
+
+		// If disabled AND no per-container overrides are set, hard delete the row
+		const hasOverrides = excludedFromEnvUpdate || minimumImageAgeDays != null || bypassAgeForSecurityFixes != null;
+		if (enabled === false && !hasOverrides) {
 			await deleteAutoUpdateSchedule(containerName, envId);
 			return json({ success: true, deleted: true });
 		}
@@ -76,7 +89,10 @@ export const POST: RequestHandler = async ({ params, url, request }) => {
 				enabled: Boolean(enabled),
 				scheduleType: scheduleType,
 				cronExpression: cronExpression || null,
-				vulnerabilityCriteria: vulnerabilityCriteria || 'never'
+				vulnerabilityCriteria: vulnerabilityCriteria || 'never',
+				minimumImageAgeDays: minimumImageAgeDays != null ? Number(minimumImageAgeDays) : null,
+				bypassAgeForSecurityFixes: bypassAgeForSecurityFixes,
+				excludedFromEnvUpdate: Boolean(excludedFromEnvUpdate)
 			},
 			envId
 		);
