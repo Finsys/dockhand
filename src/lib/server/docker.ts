@@ -14,6 +14,7 @@ import * as tls from 'node:tls';
 import { createHash } from 'node:crypto';
 import type { Environment } from './db';
 import { getStackEnvVarsAsRecord } from './db';
+import { getAdditionalVolumeBinds } from './mount-dedupe';
 import { isSystemContainer } from './scheduler/tasks/update-utils';
 import { deepDiff } from '../utils/diff.js';
 
@@ -1866,20 +1867,7 @@ export async function recreateContainerFromInspect(
 		}
 	}
 
-	// Preserve anonymous volumes from Mounts not in HostConfig.Binds
-	const existingBinds = new Set((hostConfig.Binds || []).map((b: string) => {
-		const parts = b.split(':');
-		return parts.length >= 2 ? parts[1] : parts[0];
-	}));
-	const mounts = inspectData.Mounts || [];
-	const additionalBinds: string[] = [];
-	for (const mount of mounts) {
-		if (mount.Type === 'volume' && mount.Name && mount.Destination) {
-			if (!existingBinds.has(mount.Destination)) {
-				additionalBinds.push(`${mount.Name}:${mount.Destination}`);
-			}
-		}
-	}
+	const additionalBinds = getAdditionalVolumeBinds(hostConfig, inspectData.Mounts || []);
 	if (additionalBinds.length > 0) {
 		createConfig.HostConfig = {
 			...hostConfig,
