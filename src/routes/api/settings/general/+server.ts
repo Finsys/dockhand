@@ -99,7 +99,7 @@ const DEFAULT_SETTINGS: Omit<GeneralSettings, 'scheduleRetentionDays' | 'eventRe
 
 const VALID_LIGHT_THEMES = ['default', 'catppuccin', 'rose-pine', 'nord', 'solarized', 'gruvbox', 'alucard', 'github', 'material', 'atom-one'];
 const VALID_DARK_THEMES = ['default', 'catppuccin', 'dracula', 'rose-pine', 'rose-pine-moon', 'tokyo-night', 'nord', 'one-dark', 'gruvbox', 'solarized', 'everforest', 'kanagawa', 'monokai', 'monokai-pro', 'material', 'palenight', 'github'];
-const VALID_FONTS = ['system', 'geist', 'inter', 'plus-jakarta', 'dm-sans', 'outfit', 'space-grotesk', 'sofia-sans', 'nunito', 'poppins', 'montserrat', 'raleway', 'manrope', 'roboto', 'open-sans', 'lato', 'source-sans', 'work-sans', 'fira-sans', 'jetbrains-mono', 'fira-code', 'quicksand', 'comfortaa'];
+const VALID_FONTS = ['system', 'geist', 'inter', 'plus-jakarta', 'dm-sans', 'outfit', 'space-grotesk', 'sofia-sans', 'nunito', 'poppins', 'montserrat', 'raleway', 'manrope', 'roboto', 'open-sans', 'lato', 'source-sans', 'work-sans', 'fira-sans', 'jetbrains-mono', 'ibm-plex-mono', 'fira-code', 'quicksand', 'comfortaa'];
 const VALID_FONT_SIZES = ['xsmall', 'small', 'normal', 'medium', 'large', 'xlarge'];
 const VALID_TERMINAL_FONTS = ['system-mono', 'jetbrains-mono', 'fira-code', 'source-code-pro', 'cascadia-code', 'ibm-plex-mono', 'roboto-mono', 'ubuntu-mono', 'space-mono', 'inconsolata', 'hack', 'anonymous-pro', 'dm-mono', 'red-hat-mono', 'menlo', 'consolas', 'sf-mono'];
 const VALID_EDITOR_FONTS = VALID_TERMINAL_FONTS;
