@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import { authorize } from '$lib/server/authorize';
+import { getAdditionalVolumeBinds } from '$lib/server/mount-dedupe';
 import {
 	getOwnContainerId,
 	getHostDockerSocket,
@@ -166,20 +167,7 @@ function buildCreateConfig(inspectData: any, newImage: string): any {
 	// Otherwise the old container's hostname is inherited, breaking self-identification
 	delete createConfig.Hostname;
 
-	// Preserve anonymous volumes from Mounts not in HostConfig.Binds
-	const existingBinds = new Set((hostConfig.Binds || []).map((b: string) => {
-		const parts = b.split(':');
-		return parts.length >= 2 ? parts[1] : parts[0];
-	}));
-	const mounts = inspectData.Mounts || [];
-	const additionalBinds: string[] = [];
-	for (const mount of mounts) {
-		if (mount.Type === 'volume' && mount.Name && mount.Destination) {
-			if (!existingBinds.has(mount.Destination)) {
-				additionalBinds.push(`${mount.Name}:${mount.Destination}`);
-			}
-		}
-	}
+	const additionalBinds = getAdditionalVolumeBinds(hostConfig, inspectData.Mounts || []);
 	if (additionalBinds.length > 0) {
 		createConfig.HostConfig = {
 			...createConfig.HostConfig,
