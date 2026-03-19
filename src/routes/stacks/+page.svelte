@@ -114,6 +114,7 @@
 	let stackModalReadonly = $state(false);
 	let stackModalGitInfo = $state<{ commit?: string; url?: string; branch?: string } | null>(null);
 	let editingGitStack = $state<any>(null);
+	let convertingStackName = $state<string | null>(null);
 	let envId = $state<number | null>(null);
 
 	// User-defined tags: assignments (name -> tagId[]) + catalog + filter.
@@ -1134,8 +1135,9 @@
 		return stack.status;
 	}
 
-	async function openGitModal(gitStack: any = undefined) {
+	async function openGitModal(gitStack?: any, stackName?: string | null) {
 		editingGitStack = gitStack || null;
+		convertingStackName = stackName || null;
 		// Fetch repositories and credentials before opening modal
 		try {
 			const [reposRes, credsRes] = await Promise.all([
@@ -1180,6 +1182,13 @@
 			const errorMsg = error instanceof Error ? error.message : 'Failed to convert stack to local source';
 			showErrorDialog(`Failed to convert ${stackName}`, errorMsg);
 		}
+	}
+
+	async function convertLocalStackToGit(stackName: string) {
+		operationError = null;
+		showEditModal = false;
+		editingStackName = '';
+		await openGitModal(null, stackName);
 	}
 
 	async function startStack(name: string) {
@@ -3128,12 +3137,14 @@
 		stackModalGitInfo = null;
 		loadTags(envId);
 	}}
+	onConvertToGit={editingStackName ? () => convertLocalStackToGit(editingStackName) : null}
 	onSuccess={fetchStacks}
 />
 
 <GitStackModal
 	bind:open={showGitModal}
 	gitStack={editingGitStack}
+	convertStackName={convertingStackName}
 	environmentId={envId}
 	icon={editingGitStack ? (stackSources[editingGitStack.stackName]?.icon ?? null) : null}
 	repositories={gitRepositories}
@@ -3142,6 +3153,7 @@
 		showGitModal = false;
 		editingGitStack = null;
 		loadTags(envId);
+		convertingStackName = null;
 	}}
 	onConvertToLocal={editingGitStack ? () => convertGitStackToLocal(editingGitStack.stackName, editingGitStack.id) : null}
 	onSaved={fetchStacks}

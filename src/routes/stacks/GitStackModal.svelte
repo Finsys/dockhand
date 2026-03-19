@@ -83,6 +83,7 @@
 	interface Props {
 		open: boolean;
 		gitStack?: GitStack | null;
+		convertStackName?: string | null;
 		environmentId?: number | null;
 		icon?: string | null;
 		repositories: GitRepository[];
@@ -95,6 +96,7 @@
 	let {
 		open = $bindable(),
 		gitStack = null,
+		convertStackName = null,
 		environmentId = null,
 		icon = null,
 		repositories,
@@ -280,6 +282,7 @@
 	// Track which gitStack was initialized to avoid repeated resets
 	let lastInitializedStackId = $state<number | null | undefined>(undefined);
 	let isInitializing = $state(false);
+	const isConvertMode = $derived(!!convertStackName && !gitStack);
 
 	$effect(() => {
 		if (open) {
@@ -363,6 +366,10 @@
 
 	function getWebhookUrl(stackId: number): string {
 		return `${window.location.origin}/api/git/stacks/${stackId}/webhook`;
+	}
+
+	function withEnv(url: string): string {
+		return environmentId ? `${url}${url.includes('?') ? '&' : '?'}env=${environmentId}` : url;
 	}
 
 	async function copyWebhookField(text: string, type: 'url' | 'secret') {
@@ -457,6 +464,24 @@
 			}
 		} catch (e) {
 			console.error('Failed to load env var overrides:', e);
+		}
+	}
+
+	async function loadLocalStackEnvVars() {
+		if (!convertStackName) return;
+
+		try {
+			const response = await fetch(withEnv(`/api/stacks/${encodeURIComponent(convertStackName)}/env`));
+			if (response.ok) {
+				const data = await response.json();
+				const loadedVars = data.variables || [];
+				existingSecretKeys = new Set(
+					loadedVars.filter((v: EnvVar) => v.isSecret && v.key.trim()).map((v: EnvVar) => v.key.trim())
+				);
+				envVars = loadedVars;
+			}
+		} catch (e) {
+			console.error('Failed to load local stack env vars:', e);
 		}
 	}
 
@@ -595,6 +620,24 @@
 			// vars stay visible on reopen. The save filter still drops file-equal
 			// non-secrets, keeping the DB override-only (git-sync pickup intact).
 			envVars = mergeGitStackEnvVars(fileEnvVars, envVars);
+		} else if (convertStackName) {
+			formRepoMode = repositories.length > 0 ? 'existing' : 'new';
+			formRepositoryId = null;
+			formNewRepoName = '';
+			formNewRepoUrl = '';
+			formNewRepoBranch = 'main';
+			formNewRepoCredentialId = null;
+			formStackName = convertStackName;
+			formStackNameUserModified = true;
+			formComposePath = 'compose.yaml';
+			formEnvFilePath = null;
+			formAutoUpdate = false;
+			formAutoUpdateCron = '0 3 * * *';
+			formWebhookEnabled = false;
+			formWebhookSecret = '';
+			formDeployNow = false;
+
+			await loadLocalStackEnvVars();
 		} else {
 			formRepoMode = repositories.length > 0 ? 'existing' : 'new';
 			formRepositoryId = null;
@@ -771,7 +814,9 @@
 
 			const url = gitStack
 				? `/api/git/stacks/${gitStack.id}`
-				: '/api/git/stacks';
+				: convertStackName
+					? withEnv(`/api/stacks/${encodeURIComponent(convertStackName)}/attach`)
+					: '/api/git/stacks';
 			const method = gitStack ? 'PUT' : 'POST';
 
 			// Live-stream the compose output into the shared window when deploying, so
@@ -807,7 +852,7 @@
 					outputOk = false;
 					outputMs = Date.now() - outputStartedAt;
 				}
-				formError = data.error || m.stacks_git_error_save_failed();
+				formError = data.error || (convertStackName ? 'Failed to convert stack to Git management' : m.stacks_git_error_save_failed());
 				return;
 			}
 
@@ -920,10 +965,10 @@
 					{/if}
 					<div>
 						<Dialog.Title class="text-sm font-semibold text-zinc-800 dark:text-zinc-100">
-							{gitStack ? m.stacks_git_title_edit() : m.stacks_git_title_create()}
+							{gitStack ? m.stacks_git_title_edit() : isConvertMode ? 'Convert to Git' : m.stacks_git_title_create()}
 						</Dialog.Title>
 						<Dialog.Description class="text-xs text-zinc-500 dark:text-zinc-400">
-							{gitStack ? m.stacks_git_description_edit() : m.stacks_git_description_create()}
+							{gitStack ? m.stacks_git_description_edit() : isConvertMode ? 'Attach this local stack to a Git repository' : m.stacks_git_description_create()}
 						</Dialog.Description>
 					</div>
 				</div>
@@ -1201,6 +1246,7 @@
 					bind:value={formStackName}
 					placeholder={m.stacks_git_stack_name_placeholder()}
 					class={errors.stackName ? 'border-destructive focus-visible:ring-destructive' : ''}
+					disabled={isConvertMode}
 					oninput={() => { errors.stackName = undefined; formStackNameUserModified = true; }}
 				/>
 				{#if errors.stackName}
@@ -1614,9 +1660,9 @@
 							<Button onclick={() => saveGitStack(formDeployNow)} disabled={formSaving}>
 								{#if formSaving}
 									<Loader2 class="w-4 h-4 mr-1 animate-spin" />
-									{formDeployNow ? m.stacks_git_deploying() : m.stacks_git_creating()}
+									{formDeployNow ? m.stacks_git_deploying() : isConvertMode ? 'Converting...' : m.stacks_git_creating()}
 								{:else}
-									{formDeployNow ? m.stacks_git_deploy() : m.stacks_git_create()}
+									{formDeployNow ? m.stacks_git_deploy() : isConvertMode ? 'Convert' : m.stacks_git_create()}
 								{/if}
 							</Button>
 						{/if}
