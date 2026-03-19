@@ -6,6 +6,7 @@ import {
 	createGitStack,
 	getGitCredentials,
 	getGitRepository,
+	getStackEnvVars,
 	getStackSource,
 	setStackEnvVars,
 	upsertStackSource
@@ -118,19 +119,34 @@ export const POST: RequestHandler = async (event) => {
 			await registerSchedule(gitStack.id, 'git_stack_sync', gitStack.environmentId);
 		}
 
-		if (data.envVars && Array.isArray(data.envVars) && data.envVars.length > 0) {
+		if (data.envVars && Array.isArray(data.envVars)) {
+			const existingVars = await getStackEnvVars(stackName, envIdNum ?? null, false);
+			const existingByKey = new Map(existingVars.map((v) => [v.key, v]));
+
 			const varsToSave = data.envVars
 				.filter((v: any) => v.key?.trim())
-				.filter((v: any) => !(v.isSecret && v.value === '***'))
-				.map((v: any) => ({
-					key: v.key.trim(),
-					value: v.value ?? '',
-					isSecret: v.isSecret ?? false
-				}));
+				.map((v: any) => {
+					if (v.isSecret && v.value === '***') {
+						const existingVar = existingByKey.get(v.key.trim());
+						if (existingVar && existingVar.isSecret) {
+							return {
+								key: v.key.trim(),
+								value: existingVar.value,
+								isSecret: true
+							};
+						}
+						return null;
+					}
 
-			if (varsToSave.length > 0) {
-				await setStackEnvVars(stackName, envIdNum ?? null, varsToSave);
-			}
+					return {
+						key: v.key.trim(),
+						value: v.value ?? '',
+						isSecret: v.isSecret ?? false
+					};
+				})
+				.filter(Boolean);
+
+			await setStackEnvVars(stackName, envIdNum ?? null, varsToSave as any);
 		}
 
 		await auditStack(event, 'update', stackName, envIdNum ?? null, {
