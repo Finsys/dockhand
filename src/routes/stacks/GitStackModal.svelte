@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { Button } from '$lib/components/ui/button';
+	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Select from '$lib/components/ui/select';
 	import { Label } from '$lib/components/ui/label';
@@ -80,10 +81,21 @@
 		repositories: GitRepository[];
 		credentials: GitCredential[];
 		onClose: () => void;
+		onConvertToLocal?: (() => void) | null;
 		onSaved: () => void;
 	}
 
-	let { open = $bindable(), gitStack = null, environmentId = null, icon = null, repositories, credentials, onClose, onSaved }: Props = $props();
+	let {
+		open = $bindable(),
+		gitStack = null,
+		environmentId = null,
+		icon = null,
+		repositories,
+		credentials,
+		onClose,
+		onConvertToLocal = null,
+		onSaved
+	}: Props = $props();
 
 	// Per-stack icon override (same name-based /icon endpoint as internal stacks, #1473).
 	let formIcon = $state<string | null>(icon);
@@ -208,6 +220,7 @@
 	let loadingFileVars = $state(false);
 	let existingSecretKeys = $state<Set<string>>(new Set());
 	let populatingEnvVars = $state(false);
+	let confirmConvertToLocal = $state(false);
 
 	// Resizable split panel state
 	let splitRatio = $state(60); // percentage for form panel
@@ -231,6 +244,7 @@
 			}
 		} else {
 			lastInitializedStackId = undefined;
+			confirmConvertToLocal = false;
 		}
 	});
 
@@ -1406,39 +1420,64 @@
 		{/if}
 
 		<Dialog.Footer class="px-5 py-2.5 border-t border-zinc-200 dark:border-zinc-700 flex-shrink-0">
-			<Button variant="outline" onclick={onClose}>{activeTab === 'backups' ? 'Close' : 'Cancel'}</Button>
-			<!-- The deploy-form save buttons belong to the Settings tab. On the Backups
-			     tab the backup panel manages its own saving, so only Close is shown. -->
-			{#if activeTab !== 'backups'}
-				{#if gitStack}
-					<Button variant="outline" onclick={() => saveGitStack(true)} disabled={formSaving}>
-						{#if formSaving}
-							<Loader2 class="w-4 h-4 mr-1 animate-spin" />
-							Deploying...
+			<div class="flex items-center justify-between w-full gap-2">
+				<div class="flex items-center gap-2">
+					{#if activeTab !== 'backups' && gitStack && onConvertToLocal}
+						<ConfirmPopover
+							open={confirmConvertToLocal}
+							action="Convert"
+							itemType="stack"
+							itemName={gitStack.stackName}
+							title="Convert to local source"
+							description="Detach this stack from Git management and keep the current files."
+							onConfirm={onConvertToLocal}
+							onOpenChange={(open) => (confirmConvertToLocal = open)}
+						>
+							{#snippet children()}
+								<Button variant="outline" disabled={formSaving}>
+									<FileText class="w-4 h-4" />
+									Convert to local
+								</Button>
+							{/snippet}
+						</ConfirmPopover>
+					{/if}
+				</div>
+				<div class="flex items-center gap-2">
+					<Button variant="outline" onclick={onClose}>{activeTab === 'backups' ? 'Close' : 'Cancel'}</Button>
+					<!-- The deploy-form save buttons belong to the Settings tab. On the Backups
+					     tab the backup panel manages its own saving, so only Close is shown. -->
+					{#if activeTab !== 'backups'}
+						{#if gitStack}
+							<Button variant="outline" onclick={() => saveGitStack(true)} disabled={formSaving}>
+								{#if formSaving}
+									<Loader2 class="w-4 h-4 mr-1 animate-spin" />
+									Deploying...
+								{:else}
+									<Rocket class="w-4 h-4" />
+									Save and deploy
+								{/if}
+							</Button>
+							<Button onclick={() => saveGitStack(false)} disabled={formSaving}>
+								{#if formSaving}
+									<Loader2 class="w-4 h-4 mr-1 animate-spin" />
+									Saving...
+								{:else}
+									Save changes
+								{/if}
+							</Button>
 						{:else}
-							<Rocket class="w-4 h-4" />
-							Save and deploy
+							<Button onclick={() => saveGitStack(formDeployNow)} disabled={formSaving}>
+								{#if formSaving}
+									<Loader2 class="w-4 h-4 mr-1 animate-spin" />
+									{formDeployNow ? 'Deploying...' : 'Creating...'}
+								{:else}
+									{formDeployNow ? 'Deploy' : 'Create'}
+								{/if}
+							</Button>
 						{/if}
-					</Button>
-					<Button onclick={() => saveGitStack(false)} disabled={formSaving}>
-						{#if formSaving}
-							<Loader2 class="w-4 h-4 mr-1 animate-spin" />
-							Saving...
-						{:else}
-							Save changes
-						{/if}
-					</Button>
-				{:else}
-					<Button onclick={() => saveGitStack(formDeployNow)} disabled={formSaving}>
-						{#if formSaving}
-							<Loader2 class="w-4 h-4 mr-1 animate-spin" />
-							{formDeployNow ? 'Deploying...' : 'Creating...'}
-						{:else}
-							{formDeployNow ? 'Deploy' : 'Create'}
-						{/if}
-					</Button>
-				{/if}
-			{/if}
+					{/if}
+				</div>
+			</div>
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>
