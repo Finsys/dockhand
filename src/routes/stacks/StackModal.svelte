@@ -48,10 +48,11 @@
 		readonly?: boolean; // View compose content without allowing local changes
 		gitInfo?: { commit?: string; url?: string; branch?: string } | null; // Git provenance for read-only git stacks
 		onClose: () => void;
+		onConvertToGit?: (() => void) | null;
 		onSuccess: () => void; // Called after create or save
 	}
 
-	let { open = $bindable(), mode: propMode, stackName: propStackName = '', initialCompose, initialStackName, readonly = false, gitInfo = null, onClose, onSuccess }: Props = $props();
+	let { open = $bindable(), mode: propMode, stackName: propStackName = '', initialCompose, initialStackName, readonly = false, gitInfo = null, onClose, onConvertToGit = null, onSuccess }: Props = $props();
 
 	let gitCommitCopied = $state<'ok' | 'error' | null>(null);
 	let gitUrlCopied = $state<'ok' | 'error' | null>(null);
@@ -2196,13 +2197,21 @@
 
 		<!-- Footer -->
 		<div class="px-5 py-2.5 border-t border-zinc-200 dark:border-zinc-700 flex items-center justify-between flex-shrink-0">
-			<div class="text-xs text-zinc-500 dark:text-zinc-400">
-				{#if readonly}
-					Read-only
-				{:else if isDirty}
-					<span class="text-amber-600 dark:text-amber-500">Unsaved changes</span>
-				{:else}
-					No changes
+			<div class="flex items-center gap-2">
+				<div class="text-xs text-zinc-500 dark:text-zinc-400">
+					{#if readonly}
+						Read-only
+					{:else if isDirty}
+						<span class="text-amber-600 dark:text-amber-500">Unsaved changes</span>
+					{:else}
+						No changes
+					{/if}
+				</div>
+				{#if !readonly && mode === 'edit' && onConvertToGit}
+					<Button variant="outline" onclick={onConvertToGit} disabled={saving || loading}>
+						<GitGraph class="w-4 h-4" />
+						Convert to Git
+					</Button>
 				{/if}
 			</div>
 
