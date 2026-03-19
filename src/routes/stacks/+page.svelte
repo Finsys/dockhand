@@ -841,6 +841,36 @@
 		showGitModal = true;
 	}
 
+	async function convertGitStackToLocal(stackName: string, gitStackId: number) {
+		operationError = null;
+		try {
+			const response = await fetch(appendEnvParam(`/api/git/stacks/${gitStackId}/detach`, envId), {
+				method: 'POST'
+			});
+
+			if (!response.ok) {
+				let errorMsg = 'Failed to convert stack to local source';
+				try {
+					const data = await response.json();
+					errorMsg = data.error || errorMsg;
+				} catch {
+					// ignore parse errors
+				}
+				showErrorDialog(`Failed to convert ${stackName}`, errorMsg);
+				return;
+			}
+
+			toast.success(`Converted ${stackName} to local source`);
+			showGitModal = false;
+			editingGitStack = null;
+			await fetchStacks();
+		} catch (error) {
+			console.error('Failed to convert stack to local source:', error);
+			const errorMsg = error instanceof Error ? error.message : 'Failed to convert stack to local source';
+			showErrorDialog(`Failed to convert ${stackName}`, errorMsg);
+		}
+	}
+
 	async function startStack(name: string) {
 		operationError = null;
 		stackActionLoading = name;
@@ -2287,6 +2317,7 @@
 		showGitModal = false;
 		editingGitStack = null;
 	}}
+	onConvertToLocal={editingGitStack ? () => convertGitStackToLocal(editingGitStack.stackName, editingGitStack.id) : null}
 	onSaved={fetchStacks}
 />
 
