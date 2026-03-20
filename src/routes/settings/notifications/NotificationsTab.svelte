@@ -220,7 +220,7 @@
 							</div>
 						{/if}
 
-						<div class="flex gap-2 pt-2 flex-wrap">
+						<div class="flex items-center gap-2 pt-2 flex-wrap">
 							<Button
 								variant="outline"
 								size="sm"
