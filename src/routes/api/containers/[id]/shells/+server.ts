@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import { execInContainer } from '$lib/server/docker';
 import { authorize } from '$lib/server/authorize';
+import { validateDockerIdParam } from '$lib/server/docker-validation';
 import type { RequestHandler } from './$types';
 
 // Shell paths to check
@@ -12,6 +13,9 @@ const SHELLS_TO_CHECK = [
 ];
 
 export const GET: RequestHandler = async ({ params, url, cookies }) => {
+	const invalid = validateDockerIdParam(params.id, 'container');
+	if (invalid) return invalid;
+
 	const auth = await authorize(cookies);
 
 	const envId = url.searchParams.get('env');

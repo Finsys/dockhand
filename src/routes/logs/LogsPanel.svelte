@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { onMount, onDestroy, tick } from 'svelte';
-	import { X, GripHorizontal, RefreshCw, Copy, Download, WrapText, ArrowDownToLine, Search, ChevronUp, ChevronDown, Sun, Moon, Wifi, WifiOff, Pause, Play } from 'lucide-svelte';
+	import { X, GripHorizontal, RefreshCw, Copy, Download, WrapText, ArrowDownToLine, Search, ChevronUp, ChevronDown, Sun, Moon, Wifi, WifiOff, Pause, Play, Eraser } from 'lucide-svelte';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import * as Select from '$lib/components/ui/select';
-	import { appSettings } from '$lib/stores/settings';
+	import { appSettings, formatLogTimestamps } from '$lib/stores/settings';
 	import { themeStore } from '$lib/stores/theme';
 	import { getMonospaceFont } from '$lib/themes';
 	import { AnsiUp } from 'ansi_up';
@@ -469,6 +469,12 @@
 		}
 	}
 
+	// Clear logs buffer
+	function clearLogs() {
+		logs = '';
+		pendingText = '';
+	}
+
 	// Search functions
 	function toggleLogSearch() {
 		logSearchActive = !logSearchActive;
@@ -524,7 +530,11 @@
 
 	// Highlighted logs with search matches and ANSI color support
 	let highlightedLogs = $derived(() => {
-		const withAnsi = ansiUp.ansi_to_html(logs || '');
+		let text = logs || '';
+		if ($appSettings.formatLogTimestamps) {
+			text = formatLogTimestamps(text);
+		}
+		const withAnsi = ansiUp.ansi_to_html(text);
 		if (!logSearchQuery.trim()) return withAnsi;
 
 		const query = logSearchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -763,6 +773,14 @@
 				title="Download logs"
 			>
 				<Download class="w-3 h-3 {darkMode ? 'text-zinc-500 hover:text-zinc-300' : 'text-gray-500 hover:text-gray-700'}" />
+			</button>
+			<!-- Clear -->
+			<button
+				onclick={clearLogs}
+				class="p-1 rounded transition-colors {darkMode ? 'hover:bg-zinc-800' : 'hover:bg-gray-300'}"
+				title="Clear logs"
+			>
+				<Eraser class="w-3 h-3 {darkMode ? 'text-zinc-500 hover:text-zinc-300' : 'text-gray-500 hover:text-gray-700'}" />
 			</button>
 			<!-- Refresh -->
 			<button

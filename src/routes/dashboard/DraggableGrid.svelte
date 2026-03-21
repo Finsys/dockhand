@@ -20,6 +20,7 @@
 		maxW?: number;
 		minH?: number;
 		maxH?: number;
+		locked?: boolean;
 		onchange?: (items: GridItemLayout[]) => void;
 		onitemclick?: (id: number) => void;
 		children: import('svelte').Snippet<[{ item: GridItemLayout; width: number; height: number }]>;
@@ -34,6 +35,7 @@
 		maxW = 2,
 		minH = 1,
 		maxH = 4,
+		locked = false,
 		onchange,
 		onitemclick,
 		children
@@ -201,6 +203,11 @@
 	function handleDragStart(e: PointerEvent, item: GridItemLayout) {
 		if (e.button !== 0) return;
 		e.preventDefault();
+
+		if (locked) {
+			onitemclick?.(item.id);
+			return;
+		}
 
 		dragItem = item;
 		dragStartX = e.clientX;
@@ -409,6 +416,11 @@
 			class:resizing={isResizing}
 			style="left: {gridToPixel(item.x, colWidth)}px; top: {gridToPixel(item.y, rowHeight)}px; width: {currentWidth}px; height: {currentHeight}px; {isDragTarget ? `transform: translate(${dragOffsetX}px, ${dragOffsetY}px);` : ''}"
 			onpointerdown={(e) => {
+				if (locked) {
+					e.preventDefault();
+					onitemclick?.(item.id);
+					return;
+				}
 				// Check if clicking on resize handle area (bottom-right 28x28 corner)
 				const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
 				const x = e.clientX - rect.left;
@@ -428,11 +440,13 @@
 			</div>
 
 			<!-- Resize handle visual indicator -->
-			<div class="tile-resize-handle">
-				<svg viewBox="0 0 10 10" fill="currentColor">
-					<path d="M9 1v8H1" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/>
-				</svg>
-			</div>
+			{#if !locked}
+				<div class="tile-resize-handle">
+					<svg viewBox="0 0 10 10" fill="currentColor">
+						<path d="M9 1v8H1" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+					</svg>
+				</div>
+			{/if}
 		</div>
 	{/each}
 </div>

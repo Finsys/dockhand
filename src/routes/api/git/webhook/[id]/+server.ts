@@ -17,10 +17,10 @@ function verifySignature(payload: string, signature: string | null, secret: stri
 			.createHmac('sha256', secret)
 			.update(payload)
 			.digest('hex');
-		return crypto.timingSafeEqual(
-			Buffer.from(signature),
-			Buffer.from(expectedSignature)
-		);
+		const sigBuf = Buffer.from(signature);
+		const expectedBuf = Buffer.from(expectedSignature);
+		if (sigBuf.length !== expectedBuf.length) return false;
+		return crypto.timingSafeEqual(sigBuf, expectedBuf);
 	}
 
 	// GitLab uses X-Gitlab-Token which should match exactly

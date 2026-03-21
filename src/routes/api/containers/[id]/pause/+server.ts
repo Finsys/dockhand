@@ -3,9 +3,13 @@ import type { RequestHandler } from './$types';
 import { pauseContainer, inspectContainer } from '$lib/server/docker';
 import { authorize } from '$lib/server/authorize';
 import { auditContainer } from '$lib/server/audit';
+import { validateDockerIdParam } from '$lib/server/docker-validation';
 
 export const POST: RequestHandler = async (event) => {
 	const { params, url, cookies } = event;
+	const invalid = validateDockerIdParam(params.id, 'container');
+	if (invalid) return invalid;
+
 	const auth = await authorize(cookies);
 
 	const envId = url.searchParams.get('env');

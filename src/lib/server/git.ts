@@ -88,7 +88,7 @@ let _nssWrapperNeeded = false;
 async function ensurePasswdEntry(env: GitEnv): Promise<void> {
 	if (_nssWrapperChecked) {
 		if (_nssWrapperNeeded) {
-			env.LD_PRELOAD = NSS_WRAPPER_LIB;
+			env.LD_PRELOAD = env.LD_PRELOAD ? `${env.LD_PRELOAD}:${NSS_WRAPPER_LIB}` : NSS_WRAPPER_LIB;
 			env.NSS_WRAPPER_PASSWD = TMP_PASSWD;
 			env.NSS_WRAPPER_GROUP = TMP_GROUP;
 		}
@@ -136,7 +136,7 @@ async function ensurePasswdEntry(env: GitEnv): Promise<void> {
 		}
 
 		_nssWrapperNeeded = true;
-		env.LD_PRELOAD = NSS_WRAPPER_LIB;
+		env.LD_PRELOAD = env.LD_PRELOAD ? `${env.LD_PRELOAD}:${NSS_WRAPPER_LIB}` : NSS_WRAPPER_LIB;
 		env.NSS_WRAPPER_PASSWD = TMP_PASSWD;
 		env.NSS_WRAPPER_GROUP = TMP_GROUP;
 		console.log(`[git] Created temp passwd for UID ${uid} with libnss_wrapper`);
@@ -733,7 +733,8 @@ export async function syncGitStack(stackId: number): Promise<SyncResult> {
 
 		// Always re-clone to ensure clean state (handles branch/URL/credential changes, force pushes, etc.)
 		// Blobless clones fetch all commits (for git diff) but download blobs on-demand
-		const previousCommit = await getPreviousCommit(repoPath, env);
+		// Fall back to DB lastCommit when repo dir was deleted by a previous failed sync (#693)
+		const previousCommit = await getPreviousCommit(repoPath, env) ?? gitStack.lastCommit ?? null;
 		if (existsSync(repoPath)) {
 			console.log(`${logPrefix} Removing existing clone for fresh sync...`);
 			rmSync(repoPath, { recursive: true, force: true });
@@ -762,7 +763,8 @@ export async function syncGitStack(stackId: number): Promise<SyncResult> {
 		// Check if commit changed
 		const newCommitResult = await execGit(['rev-parse', 'HEAD'], repoPath, env);
 		const newCommit = newCommitResult.stdout.trim();
-		const commitChanged = previousCommit !== newCommit;
+		// Normalize to 7-char short hash for comparison (DB stores 7-char, git returns 40-char)
+		const commitChanged = previousCommit?.substring(0, 7) !== newCommit.substring(0, 7);
 		console.log(`${logPrefix} Previous commit: ${previousCommit || '(none)'}, new commit: ${newCommit.substring(0, 7)}, commit changed: ${commitChanged}`);
 
 		// Check if any files in the compose file's directory have changed
@@ -1101,7 +1103,8 @@ export async function deployGitStackWithProgress(
 
 		// Always re-clone to ensure clean state (handles branch/URL/credential changes, force pushes, etc.)
 		// Shallow clones are fast so this is acceptable
-		const previousCommit = await getPreviousCommit(repoPath, env);
+		// Fall back to DB lastCommit when repo dir was deleted by a previous failed sync (#693)
+		const previousCommit = await getPreviousCommit(repoPath, env) ?? gitStack.lastCommit ?? null;
 
 		// Step 2: Cloning
 		onProgress({ status: 'cloning', message: 'Cloning repository...', step: 2, totalSteps });
@@ -1130,7 +1133,8 @@ export async function deployGitStackWithProgress(
 		// Check if commit changed
 		const newCommitResult = await execGit(['rev-parse', 'HEAD'], repoPath, env);
 		const newCommit = newCommitResult.stdout.trim();
-		const commitChanged = previousCommit !== newCommit;
+		// Normalize to 7-char short hash for comparison (DB stores 7-char, git returns 40-char)
+		const commitChanged = previousCommit?.substring(0, 7) !== newCommit.substring(0, 7);
 
 		// Check if any files in the compose file's directory have changed
 		// (for consistency with syncGitStack, though this function always deploys)

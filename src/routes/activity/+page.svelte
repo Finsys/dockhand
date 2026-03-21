@@ -36,7 +36,7 @@
 	} from 'lucide-svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import { currentEnvironment, environments as environmentsStore } from '$lib/stores/environment';
-	import { getIconComponent } from '$lib/utils/icons';
+	import EnvironmentIcon from '$lib/components/EnvironmentIcon.svelte';
 	import { canAccess } from '$lib/stores/auth';
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
 	import { toast } from 'svelte-sonner';
@@ -683,14 +683,17 @@
 			<!-- Environment filter -->
 			{#if environments.length > 0}
 				{@const selectedEnv = environments.find(e => e.id === filterEnvironmentId)}
-				{@const SelectedEnvIcon = selectedEnv ? getIconComponent(selectedEnv.icon || 'globe') : Server}
 				<Select.Root
 					type="single"
 					value={filterEnvironmentId !== null ? String(filterEnvironmentId) : undefined}
 					onValueChange={(v) => filterEnvironmentId = v ? parseInt(v) : null}
 				>
 					<Select.Trigger size="sm" class="w-44 text-sm">
-						<SelectedEnvIcon class="w-3.5 h-3.5 mr-1.5 text-muted-foreground shrink-0" />
+						{#if selectedEnv}
+							<EnvironmentIcon icon={selectedEnv.icon || 'globe'} envId={selectedEnv.id} class="w-3.5 h-3.5 mr-1.5 text-muted-foreground shrink-0" />
+						{:else}
+							<Server class="w-3.5 h-3.5 mr-1.5 text-muted-foreground shrink-0" />
+						{/if}
 						<span class="truncate">
 							{#if filterEnvironmentId === null}
 								Environment
@@ -705,9 +708,8 @@
 							All environments
 						</Select.Item>
 						{#each environments as env}
-							{@const EnvIcon = getIconComponent(env.icon || 'globe')}
 							<Select.Item value={String(env.id)}>
-								<EnvIcon class="w-4 h-4 mr-2 text-muted-foreground" />
+								<EnvironmentIcon icon={env.icon || 'globe'} envId={env.id} class="w-4 h-4 mr-2 text-muted-foreground" />
 								{env.name}
 							</Select.Item>
 						{/each}
@@ -814,9 +816,8 @@
 					<span class="font-mono text-xs whitespace-nowrap">{formatTimestamp(event.timestamp)}</span>
 				{:else if column.id === 'environment'}
 					{#if event.environmentName}
-						{@const EventEnvIcon = getIconComponent(event.environmentIcon || 'globe')}
 						<div class="flex items-center gap-1 text-xs">
-							<EventEnvIcon class="w-3 h-3 text-muted-foreground shrink-0" />
+							<EnvironmentIcon icon={event.environmentIcon || 'globe'} envId={event.environmentId || 0} class="w-3 h-3 text-muted-foreground shrink-0" />
 							<span class="truncate">{event.environmentName}</span>
 						</div>
 					{:else}

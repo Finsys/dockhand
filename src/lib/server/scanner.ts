@@ -11,7 +11,8 @@ import {
 	runContainer,
 	runContainerWithStreaming,
 	inspectImage,
-	checkImageUpdateAvailable
+	checkImageUpdateAvailable,
+	getNegotiatedApiVersion
 } from './docker';
 import { getEnvironment, getEnvSetting, getSetting } from './db';
 import { sendEventNotification } from './notifications';
@@ -108,6 +109,10 @@ const inProgressScans = new Map<string, Promise<string>>();
 export const DEFAULT_GRYPE_ARGS = '-o json -v {image}';
 export const DEFAULT_TRIVY_ARGS = 'image --format json {image}';
 
+// Pinned scanner images — avoid :latest after the March 2026 Trivy supply chain attack
+export const DEFAULT_GRYPE_IMAGE = 'anchore/grype:v0.110.0';
+export const DEFAULT_TRIVY_IMAGE = 'aquasec/trivy:0.69.3';
+
 export interface VulnerabilitySeverity {
 	critical: number;
 	high: number;
@@ -150,28 +155,36 @@ export interface ScanProgress {
 	output?: string; // Line of scanner output
 }
 
-// Get global default scanner CLI args from general settings (or fallback to hardcoded defaults)
+// Get global default scanner CLI args and images from general settings (or fallback to hardcoded defaults)
 export async function getGlobalScannerDefaults(): Promise<{
 	grypeArgs: string;
 	trivyArgs: string;
+	grypeImage: string;
+	trivyImage: string;
 }> {
-	const [grypeArgs, trivyArgs] = await Promise.all([
+	const [grypeArgs, trivyArgs, grypeImage, trivyImage] = await Promise.all([
 		getSetting('default_grype_args'),
-		getSetting('default_trivy_args')
+		getSetting('default_trivy_args'),
+		getSetting('default_grype_image'),
+		getSetting('default_trivy_image')
 	]);
 	return {
 		grypeArgs: grypeArgs ?? DEFAULT_GRYPE_ARGS,
-		trivyArgs: trivyArgs ?? DEFAULT_TRIVY_ARGS
+		trivyArgs: trivyArgs ?? DEFAULT_TRIVY_ARGS,
+		grypeImage: grypeImage ?? DEFAULT_GRYPE_IMAGE,
+		trivyImage: trivyImage ?? DEFAULT_TRIVY_IMAGE
 	};
 }
 
-// Get scanner settings (scanner type is per-environment, CLI args are global)
+// Get scanner settings (scanner type is per-environment, CLI args and images are global)
 export async function getScannerSettings(envId?: number): Promise<{
 	scanner: ScannerType;
 	grypeArgs: string;
 	trivyArgs: string;
+	grypeImage: string;
+	trivyImage: string;
 }> {
-	// CLI args are always global - no need for per-env settings
+	// CLI args and images are always global - no need for per-env settings
 	const [globalDefaults, scanner] = await Promise.all([
 		getGlobalScannerDefaults(),
 		getEnvSetting('vulnerability_scanner', envId)
@@ -180,25 +193,31 @@ export async function getScannerSettings(envId?: number): Promise<{
 	return {
 		scanner: scanner || 'none',
 		grypeArgs: globalDefaults.grypeArgs,
-		trivyArgs: globalDefaults.trivyArgs
+		trivyArgs: globalDefaults.trivyArgs,
+		grypeImage: globalDefaults.grypeImage,
+		trivyImage: globalDefaults.trivyImage
 	};
 }
 
 // Optimized version that accepts pre-cached global defaults (avoids redundant DB calls)
-// Only looks up scanner type per-environment since CLI args are global
+// Only looks up scanner type per-environment since CLI args and images are global
 export async function getScannerSettingsWithDefaults(
 	envId: number | undefined,
-	globalDefaults: { grypeArgs: string; trivyArgs: string }
+	globalDefaults: { grypeArgs: string; trivyArgs: string; grypeImage: string; trivyImage: string }
 ): Promise<{
 	scanner: ScannerType;
 	grypeArgs: string;
 	trivyArgs: string;
+	grypeImage: string;
+	trivyImage: string;
 }> {
 	const scanner = await getEnvSetting('vulnerability_scanner', envId) || 'none';
 	return {
 		scanner,
 		grypeArgs: globalDefaults.grypeArgs,
-		trivyArgs: globalDefaults.trivyArgs
+		trivyArgs: globalDefaults.trivyArgs,
+		grypeImage: globalDefaults.grypeImage,
+		trivyImage: globalDefaults.trivyImage
 	};
 }
 
@@ -668,6 +687,28 @@ async function runScannerContainerCore(
 		? [`GRYPE_DB_CACHE_DIR=${dbPath}`]
 		: [`TRIVY_CACHE_DIR=${dbPath}`];
 
+	// Pin Docker API version so scanner's bundled Docker client doesn't request
+	// a version newer than the host daemon supports (e.g. grype ships client v1.53
+	// but the host may only support up to v1.43).
+	const apiVersion = await getNegotiatedApiVersion(envId);
+	if (apiVersion) {
+		envVars.push(`DOCKER_API_VERSION=${apiVersion}`);
+		console.log(`[Scanner] Using negotiated Docker API version: ${apiVersion}`);
+	}
+
+	// Propagate proxy env vars so scanners can reach the internet in proxied environments
+	const proxyVarNames = [
+		'HTTP_PROXY', 'http_proxy',
+		'HTTPS_PROXY', 'https_proxy',
+		'NO_PROXY', 'no_proxy',
+		'ALL_PROXY', 'all_proxy',
+	];
+	for (const name of proxyVarNames) {
+		if (process.env[name]) {
+			envVars.push(`${name}=${process.env[name]}`);
+		}
+	}
+
 	// In TCP mode, pass DOCKER_HOST so scanner connects to Docker via TCP
 	if (scannerDockerHost) {
 		envVars.push(`DOCKER_HOST=${scannerDockerHost}`);
@@ -697,11 +738,7 @@ async function runScannerContainerCore(
 	});
 
 	console.log(`[Scanner] ${scannerType} container completed, output length: ${output.length}`);
-	if (output.length === 0) {
-		console.error(`[Scanner] WARNING: Empty output from ${scannerType} container`);
-		console.error(`[Scanner] This may indicate the scanner couldn't access Docker`);
-		console.error(`[Scanner] Docker access: ${scannerDockerHost ? `TCP ${scannerDockerHost}` : `socket ${hostSocketPath}`}`);
-	} else if (output.length < 100) {
+	if (output.length < 100) {
 		console.log(`[Scanner] ${scannerType} output preview: ${output}`);
 	}
 
@@ -715,8 +752,7 @@ export async function scanWithGrype(
 	onProgress?: (progress: ScanProgress) => void
 ): Promise<ScanResult> {
 	const startTime = Date.now();
-	const scannerImage = 'anchore/grype:latest';
-	const { grypeArgs } = await getScannerSettings(envId);
+	const { grypeArgs, grypeImage: scannerImage } = await getScannerSettings(envId);
 
 	onProgress?.({
 		stage: 'checking',
@@ -813,8 +849,7 @@ export async function scanWithTrivy(
 	onProgress?: (progress: ScanProgress) => void
 ): Promise<ScanResult> {
 	const startTime = Date.now();
-	const scannerImage = 'aquasec/trivy:latest';
-	const { trivyArgs } = await getScannerSettings(envId);
+	const { trivyArgs, trivyImage: scannerImage } = await getScannerSettings(envId);
 
 	onProgress?.({
 		stage: 'checking',
@@ -978,9 +1013,10 @@ export async function checkScannerAvailability(envId?: number): Promise<{
 	grype: boolean;
 	trivy: boolean;
 }> {
+	const defaults = await getGlobalScannerDefaults();
 	const [grypeAvailable, trivyAvailable] = await Promise.all([
-		isScannerImageAvailable('anchore/grype', envId),
-		isScannerImageAvailable('aquasec/trivy', envId)
+		isScannerImageAvailable(defaults.grypeImage, envId),
+		isScannerImageAvailable(defaults.trivyImage, envId)
 	]);
 
 	return {
@@ -995,12 +1031,14 @@ async function getScannerVersion(
 	envId?: number
 ): Promise<string | null> {
 	try {
-		const scannerImage = scannerType === 'grype' ? 'anchore/grype:latest' : 'aquasec/trivy:latest';
+		const defaults = await getGlobalScannerDefaults();
+		const scannerImage = scannerType === 'grype' ? defaults.grypeImage : defaults.trivyImage;
 
-		// Check if image exists first
+		// Check if image exists first — match by repo name prefix, not exact tag
+		const imageRepo = scannerType === 'grype' ? 'anchore/grype' : 'aquasec/trivy';
 		const images = await listImages(envId);
 		const hasImage = images.some((img) =>
-			img.tags?.some((tag: string) => tag === scannerImage)
+			img.tags?.some((tag: string) => tag.startsWith(imageRepo + ':'))
 		);
 		if (!hasImage) return null;
 
@@ -1062,10 +1100,11 @@ export async function checkScannerUpdates(envId?: number): Promise<{
 	};
 
 	try {
+		const defaults = await getGlobalScannerDefaults();
 		const images = await listImages(envId);
 
 		// Check both scanners
-		for (const [scanner, imageName] of [['grype', 'anchore/grype:latest'], ['trivy', 'aquasec/trivy:latest']] as const) {
+		for (const [scanner, imageName] of [['grype', defaults.grypeImage], ['trivy', defaults.trivyImage]] as const) {
 			try {
 				// Find local image
 				const localImage = images.find((img) =>

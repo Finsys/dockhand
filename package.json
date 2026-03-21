@@ -1,7 +1,7 @@
 {
 	"name": "dockhand",
 	"private": true,
-	"version": "1.0.21",
+	"version": "1.0.22",
 	"type": "module",
 	"scripts": {
 		"dev": "npx vite dev",

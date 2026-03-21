@@ -1,4 +1,4 @@
-import { setGlobalDispatcher, Agent } from 'undici';
+import { setGlobalDispatcher, Agent, EnvHttpProxyAgent } from 'undici';
 import dns from 'node:dns';
 import net from 'node:net';
 
@@ -60,32 +60,44 @@ function lookupWithCache(hostname: string): Promise<{ address: string; family: n
 	return promise;
 }
 
-setGlobalDispatcher(
-	new Agent({
-		connect: {
-			// Undici default is 10s. Increase to 30s for NAS environments with slow NAT/firewalls (#676).
-			timeout: 30_000,
-			lookup(hostname: string, opts: any, cb: any) {
-				if (typeof opts === 'function') {
-					cb = opts;
-					opts = {};
-				}
-
-				// IP addresses / localhost → no DNS needed
-				if (net.isIP(hostname) || hostname === 'localhost') {
-					return origLookup(hostname, opts, cb);
-				}
-
-				lookupWithCache(hostname)
-					.then(({ address, family }) => {
-						if (opts.all) {
-							cb(null, [{ address, family }]);
-						} else {
-							cb(null, address, family);
-						}
-					})
-					.catch((err) => cb(err));
-			}
+// Shared connect options for DNS lookup
+const connectOptions = {
+	// Undici default is 10s. Increase to 30s for NAS environments with slow NAT/firewalls (#676).
+	timeout: 30_000,
+	lookup(hostname: string, opts: any, cb: any) {
+		if (typeof opts === 'function') {
+			cb = opts;
+			opts = {};
 		}
-	})
-);
+
+		// IP addresses / localhost → no DNS needed
+		if (net.isIP(hostname) || hostname === 'localhost') {
+			return origLookup(hostname, opts, cb);
+		}
+
+		lookupWithCache(hostname)
+			.then(({ address, family }) => {
+				if (opts.all) {
+					cb(null, [{ address, family }]);
+				} else {
+					cb(null, address, family);
+				}
+			})
+			.catch((err) => cb(err));
+	}
+};
+
+// Use EnvHttpProxyAgent when HTTP(S)_PROXY env vars are set, otherwise plain Agent.
+// Node.js fetch/undici does NOT respect proxy env vars by default — EnvHttpProxyAgent
+// reads HTTP_PROXY, HTTPS_PROXY, and NO_PROXY automatically.
+const hasProxy = process.env.HTTP_PROXY || process.env.HTTPS_PROXY ||
+	process.env.http_proxy || process.env.https_proxy;
+
+if (hasProxy) {
+	const proxyUrl = process.env.HTTPS_PROXY || process.env.https_proxy ||
+		process.env.HTTP_PROXY || process.env.http_proxy;
+	console.log(`[DNS] HTTP proxy detected (${proxyUrl}), using EnvHttpProxyAgent`);
+	setGlobalDispatcher(new EnvHttpProxyAgent({ connect: connectOptions }));
+} else {
+	setGlobalDispatcher(new Agent({ connect: connectOptions }));
+}

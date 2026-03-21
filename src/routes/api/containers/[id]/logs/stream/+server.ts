@@ -1,6 +1,7 @@
 import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
 import { getEnvironment } from '$lib/server/db';
+import { validateDockerIdParam } from '$lib/server/docker-validation';
 import { unixSocketRequest, unixSocketStreamRequest, httpsAgentRequest } from '$lib/server/docker';
 import type { DockerClientConfig as BaseDockerClientConfig } from '$lib/server/docker';
 import { sendEdgeRequest, sendEdgeStreamRequest, isEdgeConnected } from '$lib/server/hawser';
@@ -254,6 +255,9 @@ async function handleEdgeLogsStream(containerId: string, tail: string, environme
 }
 
 export const GET: RequestHandler = async ({ params, url, cookies }) => {
+	const invalid = validateDockerIdParam(params.id, 'container');
+	if (invalid) return invalid;
+
 	const auth = await authorize(cookies);
 
 	const containerId = params.id;

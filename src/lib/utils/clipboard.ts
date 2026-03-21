@@ -23,6 +23,7 @@ export async function copyToClipboard(text: string): Promise<boolean> {
 		document.body.appendChild(textarea);
 		textarea.focus();
 		textarea.select();
+		textarea.setSelectionRange(0, textarea.value.length);
 		const ok = document.execCommand('copy');
 		document.body.removeChild(textarea);
 		if (ok) return true;

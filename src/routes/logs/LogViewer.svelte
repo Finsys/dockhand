@@ -1,7 +1,8 @@
 <script lang="ts">
-	import { RefreshCw, Copy, Download, WrapText, ArrowDownToLine, Search, ChevronUp, ChevronDown, X, Type } from 'lucide-svelte';
+	import { RefreshCw, Copy, Download, WrapText, ArrowDownToLine, Search, ChevronUp, ChevronDown, X, Type, Eraser } from 'lucide-svelte';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import * as Select from '$lib/components/ui/select';
+	import { appSettings, formatLogTimestamps } from '$lib/stores/settings';
 	import { themeStore } from '$lib/stores/theme';
 	import { getMonospaceFont } from '$lib/themes';
 	import { AnsiUp } from 'ansi_up';
@@ -15,6 +16,7 @@
 		autoRefresh?: boolean;
 		autoScroll?: boolean;
 		onRefresh?: () => void;
+		onClear?: () => void;
 		onAutoRefreshChange?: (value: boolean) => void;
 		onAutoScrollChange?: (value: boolean) => void;
 		class?: string;
@@ -27,6 +29,7 @@
 		autoRefresh = true,
 		autoScroll = true,
 		onRefresh,
+		onClear,
 		onAutoRefreshChange,
 		onAutoScrollChange,
 		class: className = ''
@@ -144,7 +147,11 @@
 
 	// Highlighted logs with search matches and ANSI color support
 	let highlightedLogs = $derived(() => {
-		const withAnsi = ansiUp.ansi_to_html(logs || '');
+		let text = logs || '';
+		if ($appSettings.formatLogTimestamps) {
+			text = formatLogTimestamps(text);
+		}
+		const withAnsi = ansiUp.ansi_to_html(text);
 		if (!logSearchQuery.trim()) return withAnsi;
 
 		const query = logSearchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -278,6 +285,14 @@
 				title="Download logs"
 			>
 				<Download class="w-3 h-3 text-zinc-500 hover:text-zinc-300" />
+			</button>
+			<!-- Clear -->
+			<button
+				onclick={() => onClear?.()}
+				class="p-1 rounded hover:bg-zinc-800 transition-colors"
+				title="Clear logs"
+			>
+				<Eraser class="w-3 h-3 text-zinc-500 hover:text-zinc-300" />
 			</button>
 			<!-- Refresh -->
 			<button

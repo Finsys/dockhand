@@ -2,6 +2,7 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { execInContainer, getContainerTop } from '$lib/server/docker';
 import { authorize } from '$lib/server/authorize';
+import { validateDockerIdParam } from '$lib/server/docker-validation';
 
 function parsePsOutput(output: string): { Titles: string[]; Processes: string[][] } | null {
 	const lines = output.trim().split('\n').filter(line => line.trim());
@@ -28,6 +29,9 @@ function parsePsOutput(output: string): { Titles: string[]; Processes: string[][
 }
 
 export const GET: RequestHandler = async ({ params, url, cookies }) => {
+	const invalid = validateDockerIdParam(params.id, 'container');
+	if (invalid) return invalid;
+
 	const auth = await authorize(cookies);
 
 	const envId = url.searchParams.get('env');

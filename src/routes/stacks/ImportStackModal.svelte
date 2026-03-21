@@ -9,7 +9,7 @@
 	import yaml from 'js-yaml';
 	import { toast } from 'svelte-sonner';
 	import { currentEnvironment, environments } from '$lib/stores/environment';
-	import { getIconComponent } from '$lib/utils/icons';
+	import EnvironmentIcon from '$lib/components/EnvironmentIcon.svelte';
 
 	interface DiscoveredStack {
 		name: string;
@@ -56,7 +56,6 @@
 	// Look up the icon from the environments list since currentEnvironment doesn't store it
 	const currentEnvData = $derived($environments.find(e => e.id === envId));
 	const envIcon = $derived(currentEnvData?.icon || 'globe');
-	const EnvIconComponent = $derived(getIconComponent(envIcon));
 
 	// Reset when modal closes
 	$effect(() => {
@@ -330,7 +329,7 @@
 					<Import class="w-5 h-5" />
 					Select stacks to adopt
 					<span class="text-muted-foreground">·</span>
-					<EnvIconComponent class="w-4 h-4 text-muted-foreground" />
+					<EnvironmentIcon icon={envIcon} envId={envId} class="w-4 h-4 text-muted-foreground" />
 					<span class="text-muted-foreground font-normal">{envName}</span>
 				</Dialog.Title>
 				<Dialog.Description>

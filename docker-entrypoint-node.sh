@@ -10,10 +10,12 @@ PGID=${PGID:-1001}
 export BODY_SIZE_LIMIT=${BODY_SIZE_LIMIT:-2G}
 
 # Default command (--expose-gc allows forced GC from /api/debug/memory?gc=true)
+# Custom CA: set NODE_EXTRA_CA_CERTS=/path/to/ca.crt (appends to built-in CAs)
+# Enterprise (system CA store): set NODE_OPTIONS="--use-openssl-ca"
 if [ "$MEMORY_MONITOR" = "true" ]; then
-    DEFAULT_CMD="node --use-openssl-ca --dns-result-order=ipv4first --no-network-family-autoselection --expose-gc /app/server.js"
+    DEFAULT_CMD="node --dns-result-order=ipv4first --no-network-family-autoselection --expose-gc /app/server.js"
 else
-    DEFAULT_CMD="node --use-openssl-ca --dns-result-order=ipv4first --no-network-family-autoselection /app/server.js"
+    DEFAULT_CMD="node --dns-result-order=ipv4first --no-network-family-autoselection /app/server.js"
 fi
 
 # === Detect if running as root ===
@@ -100,14 +102,29 @@ else
         fi
     fi
 
-    chown -R "$RUN_USER":"$RUN_USER" /app/data 2>/dev/null || true
+    # === Directory Ownership ===
+    # Only chown Dockhand's own subdirectories, not the entire /app/data tree.
+    # Recursive chown on /app/data breaks stack volumes mounted with relative paths
+    # (e.g. ./postgresql:/var/lib/postgresql) that need different ownership (#719).
+    DATA_DIR="${DATA_DIR:-/app/data}"
+    chown "$RUN_USER":"$RUN_USER" "$DATA_DIR" 2>/dev/null || true
+    for subdir in db stacks git-repos tmp icons snapshots scanner-cache; do
+        if [ -d "$DATA_DIR/$subdir" ]; then
+            chown -R "$RUN_USER":"$RUN_USER" "$DATA_DIR/$subdir" 2>/dev/null || true
+        fi
+    done
     if [ "$RUN_USER" = "dockhand" ]; then
         chown -R dockhand:dockhand /home/dockhand 2>/dev/null || true
     fi
 
     if [ -n "$DATA_DIR" ] && [ "$DATA_DIR" != "/app/data" ] && [ "$DATA_DIR" != "./data" ]; then
         mkdir -p "$DATA_DIR"
-        chown -R "$RUN_USER":"$RUN_USER" "$DATA_DIR" 2>/dev/null || true
+        chown "$RUN_USER":"$RUN_USER" "$DATA_DIR" 2>/dev/null || true
+        for subdir in db stacks git-repos tmp icons snapshots scanner-cache; do
+            if [ -d "$DATA_DIR/$subdir" ]; then
+                chown -R "$RUN_USER":"$RUN_USER" "$DATA_DIR/$subdir" 2>/dev/null || true
+            fi
+        done
     fi
 fi
 

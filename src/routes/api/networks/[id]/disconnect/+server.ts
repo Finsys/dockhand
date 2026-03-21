@@ -3,9 +3,13 @@ import type { RequestHandler } from './$types';
 import { disconnectContainerFromNetwork, inspectNetwork } from '$lib/server/docker';
 import { authorize } from '$lib/server/authorize';
 import { auditNetwork } from '$lib/server/audit';
+import { validateDockerIdParam } from '$lib/server/docker-validation';
 
 export const POST: RequestHandler = async (event) => {
 	const { params, url, request, cookies } = event;
+	const invalid = validateDockerIdParam(params.id, 'network');
+	if (invalid) return invalid;
+
 	const auth = await authorize(cookies);
 
 	const envId = url.searchParams.get('env');
@@ -24,6 +28,9 @@ export const POST: RequestHandler = async (event) => {
 		if (!containerId) {
 			return json({ error: 'Container ID is required' }, { status: 400 });
 		}
+
+		const invalidContainer = validateDockerIdParam(containerId, 'container');
+		if (invalidContainer) return invalidContainer;
 
 		// Get network name for audit
 		let networkName = params.id;

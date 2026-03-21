@@ -11,6 +11,7 @@ import { cleanPem } from '$lib/utils/pem';
 import { unregisterSchedule } from '$lib/server/scheduler';
 import { closeEdgeConnection } from '$lib/server/hawser';
 import { computeAuditDiff } from '$lib/utils/diff';
+import { deleteEnvironmentIcon } from '$lib/server/env-icons';
 
 export const GET: RequestHandler = async ({ params, cookies }) => {
 	const auth = await authorize(cookies);
@@ -166,6 +167,9 @@ export const DELETE: RequestHandler = async (event) => {
 		if (!success) {
 			return json({ error: 'Cannot delete this environment' }, { status: 400 });
 		}
+
+		// Clean up custom icon file if exists
+		deleteEnvironmentIcon(id);
 
 		// Clean up public IP entry for this environment
 		await deleteEnvironmentPublicIp(id);

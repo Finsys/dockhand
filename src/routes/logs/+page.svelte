@@ -10,7 +10,7 @@
 	import * as Select from '$lib/components/ui/select';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { ToggleGroup } from '$lib/components/ui/toggle-pill';
-	import { RefreshCw, Search, ChevronDown, ChevronUp, Unplug, Copy, Download, WrapText, ArrowDownToLine, X, Sun, Moon, LayoutList, Square, Box, Wifi, WifiOff, Pause, Play, ScrollText, Star, GripVertical, Layers, Check, FolderHeart, Save, Trash2, MoreHorizontal } from 'lucide-svelte';
+	import { RefreshCw, Search, ChevronDown, ChevronUp, Unplug, Copy, Download, WrapText, ArrowDownToLine, X, Sun, Moon, LayoutList, Square, Box, Wifi, WifiOff, Pause, Play, ScrollText, Star, GripVertical, Layers, Check, FolderHeart, Save, Trash2, MoreHorizontal, Eraser } from 'lucide-svelte';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
@@ -1290,6 +1290,15 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 		}
 	}
 
+	// Clear displayed logs
+	function clearLogs() {
+		logs = '';
+		pendingText = '';
+		mergedLogs = [];
+		mergedHtml = '';
+		pendingLogs = [];
+	}
+
 	// Log search functions
 	function toggleLogSearch() {
 		logSearchActive = !logSearchActive;
@@ -1960,6 +1969,9 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 							<button onclick={downloadLogs} class="p-1 rounded transition-colors {darkMode ? 'hover:bg-zinc-800' : 'hover:bg-gray-200'}" title="Download logs">
 								<Download class="w-3 h-3 {darkMode ? 'text-zinc-500 hover:text-zinc-300' : 'text-gray-500 hover:text-gray-700'}" />
 							</button>
+							<button onclick={clearLogs} class="p-1 rounded transition-colors {darkMode ? 'hover:bg-zinc-800' : 'hover:bg-gray-200'}" title="Clear logs">
+								<Eraser class="w-3 h-3 {darkMode ? 'text-zinc-500 hover:text-zinc-300' : 'text-gray-500 hover:text-gray-700'}" />
+							</button>
 						</div>
 					</div>
 					<div class="flex-1 overflow-auto p-4 relative" bind:this={logsRef}>
@@ -2136,6 +2148,13 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 						title="Download logs"
 					>
 						<Download class="w-3 h-3 {darkMode ? 'text-zinc-500 hover:text-zinc-300' : 'text-gray-500 hover:text-gray-700'}" />
+					</button>
+					<button
+						onclick={clearLogs}
+						class="p-1 rounded transition-colors {darkMode ? 'hover:bg-zinc-800' : 'hover:bg-gray-200'}"
+						title="Clear logs"
+					>
+						<Eraser class="w-3 h-3 {darkMode ? 'text-zinc-500 hover:text-zinc-300' : 'text-gray-500 hover:text-gray-700'}" />
 					</button>
 					<button
 						onclick={() => fetchLogs()}

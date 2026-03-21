@@ -8,9 +8,13 @@ import { deleteAutoUpdateSchedule, getAutoUpdateSetting, removePendingContainerU
 import { authorize } from '$lib/server/authorize';
 import { auditContainer } from '$lib/server/audit';
 import { unregisterSchedule } from '$lib/server/scheduler';
+import { validateDockerIdParam } from '$lib/server/docker-validation';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ params, url, cookies }) => {
+	const invalid = validateDockerIdParam(params.id, 'container');
+	if (invalid) return invalid;
+
 	const auth = await authorize(cookies);
 
 	const envId = url.searchParams.get('env');
@@ -41,6 +45,9 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 
 export const DELETE: RequestHandler = async (event) => {
 	const { params, url, cookies } = event;
+	const invalid = validateDockerIdParam(params.id, 'container');
+	if (invalid) return invalid;
+
 	const auth = await authorize(cookies);
 
 	const force = url.searchParams.get('force') === 'true';

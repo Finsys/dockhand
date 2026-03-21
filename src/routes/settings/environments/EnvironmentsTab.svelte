@@ -29,7 +29,7 @@
 	import { broom, whale } from '@lucide/lab';
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
 	import { canAccess } from '$lib/stores/auth';
-	import { getIconComponent } from '$lib/utils/icons';
+	import EnvironmentIcon from '$lib/components/EnvironmentIcon.svelte';
 	import { getLabelColors } from '$lib/utils/label-colors';
 	import EnvironmentModal from './EnvironmentModal.svelte';
 	import { environments as environmentsStore } from '$lib/stores/environment';
@@ -380,12 +380,11 @@
 						{@const testResult = testResults[env.id]}
 						{@const isTesting = testingEnvs.has(env.id)}
 						{@const hasScannerEnabled = envScannerStatus[env.id]}
-						{@const EnvIcon = getIconComponent(env.icon || 'globe')}
 						<Table.Row>
 							<!-- Name Column -->
 							<Table.Cell>
 								<div class="flex items-center gap-2">
-									<EnvIcon class="w-4 h-4 text-muted-foreground shrink-0" />
+									<EnvironmentIcon icon={env.icon || 'globe'} envId={env.id} class="w-4 h-4 text-muted-foreground shrink-0" />
 									{#if env.connectionType === 'socket' || !env.connectionType}
 										<span title="Unix socket connection" class="shrink-0">
 											<Unplug class="w-3.5 h-3.5 text-cyan-500 glow-cyan" />

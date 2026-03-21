@@ -273,7 +273,6 @@ export const POST: RequestHandler = async (event) => {
 
 					let scanBlocked = false;
 					let blockReason = '';
-					let finalScanResult: ScanResult | undefined;
 					let individualScannerResults: ScannerResult[] = [];
 
 					try {
@@ -290,17 +289,7 @@ export const POST: RequestHandler = async (event) => {
 						});
 
 						if (scanResults.length > 0) {
-							const scanSummary = combineScanSummaries(scanResults);
-							finalScanResult = {
-								critical: scanSummary.critical,
-								high: scanSummary.high,
-								medium: scanSummary.medium,
-								low: scanSummary.low,
-								negligible: scanSummary.negligible,
-								unknown: scanSummary.unknown
-							};
-
-							// Build individual scanner results
+							// Build individual scanner results (used by frontend)
 							individualScannerResults = scanResults.map(result => ({
 								scanner: result.scanner as 'grype' | 'trivy',
 								critical: result.summary.critical,
@@ -333,8 +322,9 @@ export const POST: RequestHandler = async (event) => {
 								} catch { /* ignore save errors */ }
 							}
 
-							// Check if blocked
-							const { blocked, reason } = shouldBlockUpdate(vulnerabilityCriteria, scanSummary, undefined);
+							// Check if blocked (combineScanSummaries uses Math.max for security check)
+							const combinedForBlockCheck = combineScanSummaries(scanResults);
+							const { blocked, reason } = shouldBlockUpdate(vulnerabilityCriteria, combinedForBlockCheck, undefined);
 							if (blocked) {
 								scanBlocked = true;
 								blockReason = reason;
@@ -355,15 +345,21 @@ export const POST: RequestHandler = async (event) => {
 								scanner: v.scanner
 							}));
 
+						// Build scan message from individual results
+						const totalCritical = individualScannerResults.reduce((s, r) => s + r.critical, 0);
+						const totalHigh = individualScannerResults.reduce((s, r) => s + r.high, 0);
+						const totalMedium = individualScannerResults.reduce((s, r) => s + r.medium, 0);
+						const totalLow = individualScannerResults.reduce((s, r) => s + r.low, 0);
+						const hasVulns = totalCritical + totalHigh + totalMedium + totalLow > 0;
+
 						sendData({
 							type: 'scan_complete',
 							containerId,
 							containerName,
-							scanResult: finalScanResult,
 							scannerResults: individualScannerResults.length > 0 ? individualScannerResults : undefined,
 							vulnerabilities: vulnerabilities.length > 0 ? vulnerabilities : undefined,
-							message: finalScanResult
-								? `Scan complete: ${finalScanResult.critical} critical, ${finalScanResult.high} high, ${finalScanResult.medium} medium, ${finalScanResult.low} low`
+							message: hasVulns
+								? `Scan complete: ${totalCritical} critical, ${totalHigh} high, ${totalMedium} medium, ${totalLow} low`
 								: 'Scan complete: no vulnerabilities found'
 						});
 
@@ -398,7 +394,6 @@ export const POST: RequestHandler = async (event) => {
 							current: i + 1,
 							total: containerIds.length,
 							success: false,
-							scanResult: finalScanResult,
 							scannerResults: individualScannerResults.length > 0 ? individualScannerResults : undefined,
 							blockReason,
 							message: `Update blocked: ${blockReason}`

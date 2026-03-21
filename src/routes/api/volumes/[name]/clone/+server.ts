@@ -1,11 +1,15 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { inspectVolume, createVolume, type CreateVolumeOptions } from '$lib/server/docker';
+import { inspectVolume, createVolume, type CreateVolumeOptions, ensureVolumeHelperImage, dockerFetch, dockerJsonRequest, drainResponse } from '$lib/server/docker';
 import { authorize } from '$lib/server/authorize';
 import { auditVolume } from '$lib/server/audit';
+import { validateDockerIdParam } from '$lib/server/docker-validation';
 
 export const POST: RequestHandler = async (event) => {
 	const { params, url, request, cookies } = event;
+	const invalid = validateDockerIdParam(params.name, 'volume');
+	if (invalid) return invalid;
+
 	const auth = await authorize(cookies);
 
 	const envId = url.searchParams.get('env');
@@ -37,6 +41,49 @@ export const POST: RequestHandler = async (event) => {
 		};
 
 		const newVolume = await createVolume(options, envIdNum);
+
+		// Copy data from source to destination using a temporary busybox container
+		// Mount source read-only at /src and destination read-write at /dst
+		await ensureVolumeHelperImage(envIdNum);
+
+		const containerName = `dockhand-clone-${Date.now().toString(36)}`;
+		const containerConfig = {
+			Image: 'busybox:latest',
+			Cmd: ['cp', '-a', '/src/.', '/dst/'],
+			HostConfig: {
+				Binds: [
+					`${params.name}:/src:ro`,
+					`${newName}:/dst`
+				],
+				AutoRemove: false
+			},
+			Labels: { 'dockhand.volume.helper': 'true' }
+		};
+
+		let copyCtrId: string | undefined;
+		try {
+			const createRes = await dockerJsonRequest<{ Id: string }>(
+				`/containers/create?name=${encodeURIComponent(containerName)}`,
+				{ method: 'POST', body: JSON.stringify(containerConfig) },
+				envIdNum
+			);
+			copyCtrId = createRes.Id;
+
+			await drainResponse(await dockerFetch(`/containers/${copyCtrId}/start`, { method: 'POST' }, envIdNum));
+
+			// Wait for the copy to finish (must drain response to ensure wait completes)
+			const waitRes = await dockerFetch(`/containers/${copyCtrId}/wait`, { method: 'POST' }, envIdNum);
+			const waitBody = await waitRes.json().catch(() => ({ StatusCode: -1 }));
+			if (waitBody.StatusCode !== 0) {
+				throw new Error(`Volume copy failed with exit code ${waitBody.StatusCode}`);
+			}
+		} finally {
+			if (copyCtrId) {
+				await drainResponse(
+					await dockerFetch(`/containers/${copyCtrId}?force=true`, { method: 'DELETE' }, envIdNum)
+				).catch(() => { /* best effort cleanup */ });
+			}
+		}
 
 		// Audit log
 		await auditVolume(event, 'clone', newVolume.Name, `${params.name} → ${newName}`, envIdNum, {

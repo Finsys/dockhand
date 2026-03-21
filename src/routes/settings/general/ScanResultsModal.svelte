@@ -9,7 +9,7 @@
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { toast } from 'svelte-sonner';
 	import { onMount } from 'svelte';
-	import { getIconComponent } from '$lib/utils/icons';
+	import EnvironmentIcon from '$lib/components/EnvironmentIcon.svelte';
 
 	interface RunningStackInfo {
 		envId: number;
@@ -121,7 +121,6 @@
 
 	const defaultEnv = $derived(environments.find(e => e.id === defaultEnvId));
 	const defaultEnvName = $derived(defaultEnv?.name || 'Select environment');
-	const DefaultEnvIcon = $derived(defaultEnv ? getIconComponent(defaultEnv.icon || 'globe') : null);
 
 	function isSelected(composePath: string): boolean {
 		return stackSelections.has(composePath);
@@ -338,17 +337,16 @@
 								}}
 							>
 								<Select.Trigger class="w-[220px]">
-									{#if DefaultEnvIcon}
-										<DefaultEnvIcon class="w-4 h-4 mr-2 shrink-0" />
+									{#if defaultEnv}
+										<EnvironmentIcon icon={defaultEnv.icon || 'globe'} envId={defaultEnv.id} class="w-4 h-4 mr-2 shrink-0" />
 									{/if}
 									<span class="truncate">{defaultEnvName}</span>
 								</Select.Trigger>
 								<Select.Content>
 									{#each environments as env}
-										{@const EnvIcon = getIconComponent(env.icon || 'globe')}
 										<Select.Item value={env.id.toString()}>
 											<div class="flex items-center gap-2">
-												<EnvIcon class="w-4 h-4 shrink-0" />
+												<EnvironmentIcon icon={env.icon || 'globe'} envId={env.id} class="w-4 h-4 shrink-0" />
 												<span>{env.name}</span>
 											</div>
 										</Select.Item>
@@ -455,17 +453,16 @@
 											>
 												<Select.Trigger class="h-8 w-[220px] text-xs">
 													{#if getStackEnv(stack.composePath)}
-														{@const StackIcon = getIconComponent(getStackEnv(stack.composePath)?.icon || 'globe')}
-														<StackIcon class="w-3.5 h-3.5 mr-1.5 shrink-0" />
+														{@const stackEnv = getStackEnv(stack.composePath)}
+														<EnvironmentIcon icon={stackEnv?.icon || 'globe'} envId={stackEnv?.id || 0} class="w-3.5 h-3.5 mr-1.5 shrink-0" />
 													{/if}
 													<span class="truncate">{getStackEnv(stack.composePath)?.name || 'Select'}</span>
 												</Select.Trigger>
 												<Select.Content>
 													{#each environments as env}
-														{@const EnvIcon = getIconComponent(env.icon || 'globe')}
 														<Select.Item value={env.id.toString()}>
 															<div class="flex items-center gap-2">
-																<EnvIcon class="w-3.5 h-3.5 shrink-0" />
+																<EnvironmentIcon icon={env.icon || 'globe'} envId={env.id} class="w-3.5 h-3.5 shrink-0" />
 																<span>{env.name}</span>
 															</div>
 														</Select.Item>
@@ -490,15 +487,12 @@
 						<div class="space-y-1.5">
 							{#each adoptedStacks as adopted}
 								{@const env = environments.find(e => e.id === adopted.envId)}
-								{@const EnvIcon = env ? getIconComponent(env.icon || 'globe') : null}
 								<div class="flex items-center gap-2 p-2 rounded-md bg-green-500/10 border border-green-500/20">
 									<CheckCircle2 class="w-4 h-4 text-green-600 dark:text-green-500 shrink-0" />
 									<p class="text-sm font-medium flex-1">{adopted.name}</p>
 									{#if env}
 										<div class="flex items-center gap-1.5 text-xs text-muted-foreground shrink-0">
-											{#if EnvIcon}
-												<EnvIcon class="w-3.5 h-3.5" />
-											{/if}
+											<EnvironmentIcon icon={env.icon || 'globe'} envId={env.id} class="w-3.5 h-3.5" />
 											<span>{env.name}</span>
 										</div>
 									{/if}

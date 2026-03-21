@@ -264,7 +264,7 @@ function applyEditorFont(fontId: string) {
 	document.documentElement.style.setProperty('--font-editor', fontMeta.family);
 }
 
-// Load Google Font dynamically
+// Load bundled font CSS (fonts are bundled in static/fonts/)
 function loadGoogleFont(font: FontMeta) {
 	if (!font.googleFont) return;
 
@@ -274,7 +274,7 @@ function loadGoogleFont(font: FontMeta) {
 	const link = document.createElement('link');
 	link.id = linkId;
 	link.rel = 'stylesheet';
-	link.href = `https://fonts.googleapis.com/css2?family=${font.googleFont}&display=swap`;
+	link.href = `/fonts/${font.id}/font.css`;
 	document.head.appendChild(link);
 }
 

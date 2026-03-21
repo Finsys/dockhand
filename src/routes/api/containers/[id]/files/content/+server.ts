@@ -1,12 +1,16 @@
 import { json } from '@sveltejs/kit';
 import { readContainerFile, writeContainerFile } from '$lib/server/docker';
 import { authorize } from '$lib/server/authorize';
+import { validateDockerIdParam } from '$lib/server/docker-validation';
 import type { RequestHandler } from './$types';
 
 // Max file size for reading (1MB)
 const MAX_FILE_SIZE = 1024 * 1024;
 
 export const GET: RequestHandler = async ({ params, url, cookies }) => {
+	const invalid = validateDockerIdParam(params.id, 'container');
+	if (invalid) return invalid;
+
 	const auth = await authorize(cookies);
 
 	const path = url.searchParams.get('path');
@@ -60,6 +64,9 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 };
 
 export const PUT: RequestHandler = async ({ params, url, cookies, request }) => {
+	const invalid = validateDockerIdParam(params.id, 'container');
+	if (invalid) return invalid;
+
 	const auth = await authorize(cookies);
 
 	const path = url.searchParams.get('path');

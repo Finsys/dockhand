@@ -30,6 +30,7 @@ import {
 import { authorize } from '$lib/server/authorize';
 import { refreshSystemJobs } from '$lib/server/scheduler';
 import { sendToEventSubprocess, sendToMetricsSubprocess } from '$lib/server/subprocess-manager';
+import { DEFAULT_GRYPE_IMAGE, DEFAULT_TRIVY_IMAGE } from '$lib/server/scanner';
 
 export type TimeFormat = '12h' | '24h';
 export type DateFormat = 'MM/DD/YYYY' | 'DD/MM/YYYY' | 'YYYY-MM-DD' | 'DD.MM.YYYY';
@@ -67,10 +68,15 @@ export interface GeneralSettings {
 	editorFont: string;
 	// Compact ports
 	compactPorts: boolean;
+	// Log timestamp formatting
+	formatLogTimestamps: boolean;
 	// External stack paths
 	externalStackPaths: string[];
 	// Primary stack location
 	primaryStackLocation: string | null;
+	// Scanner images
+	defaultGrypeImage: string;
+	defaultTrivyImage: string;
 }
 
 const DEFAULT_SETTINGS: Omit<GeneralSettings, 'scheduleRetentionDays' | 'eventRetentionDays' | 'scheduleCleanupCron' | 'eventCleanupCron' | 'scheduleCleanupEnabled' | 'eventCleanupEnabled'> = {
@@ -88,13 +94,18 @@ const DEFAULT_SETTINGS: Omit<GeneralSettings, 'scheduleRetentionDays' | 'eventRe
 	eventPollInterval: 60000,
 	metricsCollectionInterval: 30000,
 	compactPorts: false,
+	formatLogTimestamps: false,
 	lightTheme: 'default',
 	darkTheme: 'default',
 	font: 'system',
 	fontSize: 'normal',
 	gridFontSize: 'normal',
 	terminalFont: 'system-mono',
-	editorFont: 'system-mono'
+	editorFont: 'system-mono',
+	externalStackPaths: [],
+	primaryStackLocation: null,
+	defaultGrypeImage: DEFAULT_GRYPE_IMAGE,
+	defaultTrivyImage: DEFAULT_TRIVY_IMAGE
 };
 
 const VALID_LIGHT_THEMES = ['default', 'catppuccin', 'rose-pine', 'nord', 'solarized', 'gruvbox', 'alucard', 'github', 'material', 'atom-one'];
@@ -144,8 +155,11 @@ export const GET: RequestHandler = async ({ cookies }) => {
 			terminalFont,
 			editorFont,
 			compactPorts,
+			formatLogTimestamps,
 			externalStackPaths,
-			primaryStackLocation
+			primaryStackLocation,
+			defaultGrypeImage,
+			defaultTrivyImage
 		] = await Promise.all([
 			getSetting('confirm_destructive'),
 			getSetting('show_stopped_containers'),
@@ -174,8 +188,11 @@ export const GET: RequestHandler = async ({ cookies }) => {
 			getSetting('theme_terminal_font'),
 			getSetting('theme_editor_font'),
 			getSetting('compact_ports'),
+			getSetting('format_log_timestamps'),
 			getExternalStackPaths(),
-			getPrimaryStackLocation()
+			getPrimaryStackLocation(),
+			getSetting('default_grype_image'),
+			getSetting('default_trivy_image')
 		]);
 
 		const settings: GeneralSettings = {
@@ -206,8 +223,11 @@ export const GET: RequestHandler = async ({ cookies }) => {
 			terminalFont: terminalFont ?? DEFAULT_SETTINGS.terminalFont,
 			editorFont: editorFont ?? DEFAULT_SETTINGS.editorFont,
 			compactPorts: compactPorts ?? DEFAULT_SETTINGS.compactPorts,
+			formatLogTimestamps: formatLogTimestamps ?? DEFAULT_SETTINGS.formatLogTimestamps,
 			externalStackPaths,
-			primaryStackLocation
+			primaryStackLocation,
+			defaultGrypeImage: defaultGrypeImage ?? DEFAULT_GRYPE_IMAGE,
+			defaultTrivyImage: defaultTrivyImage ?? DEFAULT_TRIVY_IMAGE
 		};
 
 		return json(settings);
@@ -225,7 +245,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 
 	try {
 		const body = await request.json();
-		const { confirmDestructive, showStoppedContainers, highlightUpdates, timeFormat, dateFormat, downloadFormat, defaultGrypeArgs, defaultTrivyArgs, scheduleRetentionDays, eventRetentionDays, scheduleCleanupCron, eventCleanupCron, scheduleCleanupEnabled, eventCleanupEnabled, logBufferSizeKb, defaultTimezone, eventCollectionMode, eventPollInterval, metricsCollectionInterval, lightTheme, darkTheme, font, fontSize, gridFontSize, terminalFont, editorFont, compactPorts, externalStackPaths, primaryStackLocation } = body;
+		const { confirmDestructive, showStoppedContainers, highlightUpdates, timeFormat, dateFormat, downloadFormat, defaultGrypeArgs, defaultTrivyArgs, scheduleRetentionDays, eventRetentionDays, scheduleCleanupCron, eventCleanupCron, scheduleCleanupEnabled, eventCleanupEnabled, logBufferSizeKb, defaultTimezone, eventCollectionMode, eventPollInterval, metricsCollectionInterval, lightTheme, darkTheme, font, fontSize, gridFontSize, terminalFont, editorFont, compactPorts, formatLogTimestamps, externalStackPaths, primaryStackLocation, defaultGrypeImage, defaultTrivyImage } = body;
 
 		if (confirmDestructive !== undefined) {
 			await setSetting('confirm_destructive', confirmDestructive);
@@ -321,6 +341,9 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 		if (compactPorts !== undefined) {
 			await setSetting('compact_ports', compactPorts);
 		}
+		if (formatLogTimestamps !== undefined) {
+			await setSetting('format_log_timestamps', formatLogTimestamps);
+		}
 		if (externalStackPaths !== undefined && Array.isArray(externalStackPaths)) {
 			// Filter to valid non-empty strings
 			const validPaths = externalStackPaths.filter((p: unknown) => typeof p === 'string' && p.trim());
@@ -334,6 +357,12 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 				// Empty string means clear the setting
 				await setPrimaryStackLocation(null);
 			}
+		}
+		if (defaultGrypeImage !== undefined && typeof defaultGrypeImage === 'string') {
+			await setSetting('default_grype_image', defaultGrypeImage);
+		}
+		if (defaultTrivyImage !== undefined && typeof defaultTrivyImage === 'string') {
+			await setSetting('default_trivy_image', defaultTrivyImage);
 		}
 
 		// Fetch all settings in parallel for the response
@@ -365,8 +394,11 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			terminalFontVal,
 			editorFontVal,
 			compactPortsVal,
+			formatLogTimestampsVal,
 			externalStackPathsVal,
-			primaryStackLocationVal
+			primaryStackLocationVal,
+			defaultGrypeImageVal,
+			defaultTrivyImageVal
 		] = await Promise.all([
 			getSetting('confirm_destructive'),
 			getSetting('show_stopped_containers'),
@@ -395,8 +427,11 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			getSetting('theme_terminal_font'),
 			getSetting('theme_editor_font'),
 			getSetting('compact_ports'),
+			getSetting('format_log_timestamps'),
 			getExternalStackPaths(),
-			getPrimaryStackLocation()
+			getPrimaryStackLocation(),
+			getSetting('default_grype_image'),
+			getSetting('default_trivy_image')
 		]);
 
 		const settings: GeneralSettings = {
@@ -427,8 +462,11 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			terminalFont: terminalFontVal ?? DEFAULT_SETTINGS.terminalFont,
 			editorFont: editorFontVal ?? DEFAULT_SETTINGS.editorFont,
 			compactPorts: compactPortsVal ?? DEFAULT_SETTINGS.compactPorts,
+			formatLogTimestamps: formatLogTimestampsVal ?? DEFAULT_SETTINGS.formatLogTimestamps,
 			externalStackPaths: externalStackPathsVal,
-			primaryStackLocation: primaryStackLocationVal
+			primaryStackLocation: primaryStackLocationVal,
+			defaultGrypeImage: defaultGrypeImageVal ?? DEFAULT_GRYPE_IMAGE,
+			defaultTrivyImage: defaultTrivyImageVal ?? DEFAULT_TRIVY_IMAGE
 		};
 
 		return json(settings);

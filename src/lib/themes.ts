@@ -120,7 +120,6 @@ export const monospaceFonts: FontMeta[] = [
 	{ id: 'ubuntu-mono', name: 'Ubuntu Mono', family: "'Ubuntu Mono', monospace", googleFont: 'Ubuntu+Mono:wght@400;700' },
 	{ id: 'space-mono', name: 'Space Mono', family: "'Space Mono', monospace", googleFont: 'Space+Mono:wght@400;700' },
 	{ id: 'inconsolata', name: 'Inconsolata', family: "'Inconsolata', monospace", googleFont: 'Inconsolata:wght@400;500;600;700' },
-	{ id: 'hack', name: 'Hack', family: "'Hack', monospace", googleFont: 'Hack:wght@400;700' },
 	{ id: 'anonymous-pro', name: 'Anonymous Pro', family: "'Anonymous Pro', monospace", googleFont: 'Anonymous+Pro:wght@400;700' },
 	{ id: 'dm-mono', name: 'DM Mono', family: "'DM Mono', monospace", googleFont: 'DM+Mono:wght@400;500' },
 	{ id: 'red-hat-mono', name: 'Red Hat Mono', family: "'Red Hat Mono', monospace", googleFont: 'Red+Hat+Mono:wght@400;500;600;700' },

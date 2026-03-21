@@ -118,6 +118,23 @@ export const scheduleColumns: ColumnConfig[] = [
 	{ id: 'actions', label: '', fixed: 'end', width: 100, resizable: false }
 ];
 
+// Environment grid columns (dashboard list view)
+export const environmentColumns: ColumnConfig[] = [
+	{ id: 'status', label: '', width: 36, resizable: false },
+	{ id: 'name', label: 'Environment', sortable: true, sortField: 'name', width: 180, minWidth: 100, grow: true },
+	{ id: 'connection', label: 'Connection', sortable: true, sortField: 'connection', width: 110, minWidth: 80 },
+	{ id: 'host', label: 'Host', sortable: true, sortField: 'host', width: 150, minWidth: 80 },
+	{ id: 'containers', label: 'Containers', sortable: true, sortField: 'containers', width: 100, minWidth: 70 },
+	{ id: 'updates', label: 'Updates', sortable: true, sortField: 'updates', width: 75, minWidth: 55 },
+	{ id: 'cpu', label: 'CPU', sortable: true, sortField: 'cpu', width: 110, minWidth: 80 },
+	{ id: 'memory', label: 'Memory', sortable: true, sortField: 'memory', width: 110, minWidth: 80 },
+	{ id: 'images', label: 'Images', sortable: true, sortField: 'images', width: 65, minWidth: 50 },
+	{ id: 'volumes', label: 'Volumes', sortable: true, sortField: 'volumes', width: 70, minWidth: 50 },
+	{ id: 'stacks', label: 'Stacks', sortable: true, sortField: 'stacks', width: 85, minWidth: 65 },
+	{ id: 'events', label: 'Events', sortable: true, sortField: 'events', width: 65, minWidth: 50 },
+	{ id: 'labels', label: 'Labels', width: 150, minWidth: 80 }
+];
+
 // Map of grid ID to column definitions
 export const gridColumnConfigs: Record<GridId, ColumnConfig[]> = {
 	containers: containerColumns,
@@ -128,7 +145,8 @@ export const gridColumnConfigs: Record<GridId, ColumnConfig[]> = {
 	volumes: volumeColumns,
 	activity: activityColumns,
 	schedules: scheduleColumns,
-	audit: auditColumns
+	audit: auditColumns,
+	environments: environmentColumns
 };
 
 // Get configurable columns (not fixed)

@@ -819,6 +819,11 @@ export async function dockerFetch(
 	options: DockerFetchOptions = {},
 	envId?: number | null
 ): Promise<Response> {
+	// Guard against path traversal — legitimate Docker API paths never contain '..'
+	if (path.includes('..')) {
+		throw new Error('Invalid Docker API path');
+	}
+
 	const startTime = Date.now();
 	const config = await getDockerConfig(envId);
 	const { streaming, ...fetchOptions } = options;
@@ -977,7 +982,7 @@ export async function dockerFetch(
 /**
  * Make a JSON request to Docker API
  */
-async function dockerJsonRequest<T>(
+export async function dockerJsonRequest<T>(
 	path: string,
 	options: RequestInit = {},
 	envId?: number | null
@@ -1789,6 +1794,40 @@ export async function recreateContainerFromInspect(
 		HostConfig: hostConfig
 	};
 
+	// 4a. Update image-embedded labels to match the new image.
+	// Docker's create API uses exactly the labels you pass, ignoring the new image's
+	// embedded labels. We inspect both old and new images to distinguish image-origin
+	// labels from user-set labels, then merge accordingly.
+	try {
+		const [oldImageInspect, newImageInspect] = await Promise.all([
+			inspectImage(config.Image, envId),
+			inspectImage(newImage, envId)
+		]);
+		const oldImageLabels: Record<string, string> = (oldImageInspect as any)?.Config?.Labels || {};
+		const newImageLabels: Record<string, string> = (newImageInspect as any)?.Config?.Labels || {};
+		const containerLabels: Record<string, string> = createConfig.Labels || {};
+
+		const mergedLabels: Record<string, string> = {};
+
+		// Keep user-set labels (not present in old image)
+		for (const [k, v] of Object.entries(containerLabels)) {
+			if (!(k in oldImageLabels)) {
+				mergedLabels[k] = v;
+			}
+		}
+
+		// Add all new image labels (overrides old image labels)
+		for (const [k, v] of Object.entries(newImageLabels)) {
+			mergedLabels[k] = v;
+		}
+
+		createConfig.Labels = mergedLabels;
+		log?.(`Updated image labels: ${Object.keys(newImageLabels).length} from new image, ${Object.keys(mergedLabels).length} total`);
+	} catch (e) {
+		log?.(`Warning: could not update image labels: ${e}`);
+		// Fall through with old labels — non-fatal
+	}
+
 	// Strip default MemorySwappiness — Podman + cgroupv2 rejects it.
 	// Docker returns -1, Podman returns 0 when unset.
 	const swappiness = createConfig.HostConfig?.MemorySwappiness;
@@ -2269,6 +2308,14 @@ export function extractContainerOptions(inspectData: any): CreateContainerOption
 export async function updateContainer(id: string, options: Partial<CreateContainerOptions>, startAfterUpdate = false, envId?: number | null) {
 	const oldContainerInfo = await inspectContainer(id, envId);
 	const wasRunning = oldContainerInfo.State.Running;
+	const name = oldContainerInfo.Name?.replace(/^\//, '') || '';
+	const oldContainerId = oldContainerInfo.Id;
+	const networks: Record<string, any> = oldContainerInfo.NetworkSettings?.Networks || {};
+	const hostConfig = oldContainerInfo.HostConfig || {};
+	const networkMode = hostConfig.NetworkMode || '';
+	const isSharedNetwork = networkMode.startsWith('container:') ||
+		networkMode.startsWith('service:') ||
+		networkMode === 'host' || networkMode === 'none';
 
 	// Extract ALL existing container options
 	const existingOptions = extractContainerOptions(oldContainerInfo);
@@ -2285,17 +2332,80 @@ export async function updateContainer(id: string, options: Partial<CreateContain
 		}
 	};
 
+	// 1. Stop old container
 	if (wasRunning) {
 		await stopContainer(id, envId);
 	}
 
-	await removeContainer(id, true, envId);
+	// 2. Rename old container to free the name (instead of removing — allows rollback)
+	await dockerFetch(
+		`/containers/${oldContainerId}/rename?name=${encodeURIComponent(name + '-old')}`,
+		{ method: 'POST' },
+		envId
+	).then(async r => { if (!r.ok) throw new Error('Failed to rename old container'); await drainResponse(r); });
 
-	const newContainer = await createContainer(mergedOptions, envId);
-
-	if (startAfterUpdate || wasRunning) {
-		await newContainer.start();
+	// 3. Disconnect networks from old container to free static IPs
+	if (!isSharedNetwork) {
+		for (const [, netConfig] of Object.entries(networks)) {
+			const nc = netConfig as any;
+			if (nc.NetworkID) {
+				await disconnectContainerFromNetwork(nc.NetworkID, oldContainerId, true, envId).catch(() => {});
+			}
+		}
 	}
+
+	// Rollback helper: restore old container on failure
+	const rollback = async () => {
+		try {
+			// Rename back
+			await dockerFetch(
+				`/containers/${oldContainerId}/rename?name=${encodeURIComponent(name)}`,
+				{ method: 'POST' },
+				envId
+			).then(r => drainResponse(r)).catch(() => {});
+
+			// Reconnect networks
+			if (!isSharedNetwork) {
+				for (const [, netConfig] of Object.entries(networks)) {
+					const nc = netConfig as any;
+					if (nc.NetworkID) {
+						await connectContainerToNetworkRaw(nc.NetworkID, oldContainerId, nc, envId).catch(() => {});
+					}
+				}
+			}
+
+			// Restart if it was running
+			if (wasRunning) {
+				await startContainer(oldContainerId, envId).catch(() => {});
+			}
+		} catch {
+			// Rollback is best-effort
+		}
+	};
+
+	// 4. Create new container
+	let newContainer;
+	try {
+		newContainer = await createContainer(mergedOptions, envId);
+	} catch (createError) {
+		await rollback();
+		throw createError;
+	}
+
+	// 5. Start if needed
+	if (startAfterUpdate || wasRunning) {
+		try {
+			await newContainer.start();
+		} catch (startError) {
+			// Remove failed new container and restore old one
+			await removeContainer(newContainer.id, true, envId).catch(() => {});
+			await rollback();
+			throw startError;
+		}
+	}
+
+	// 6. Remove old container (success path only)
+	await removeContainer(oldContainerId, true, envId).catch(() => {});
 
 	return newContainer;
 }
@@ -3135,6 +3245,22 @@ export async function getDockerVersion(envId?: number | null) {
 }
 
 /**
+ * Get the Docker daemon's API version string for a given environment.
+ * Used to pin DOCKER_API_VERSION when spawning sidecar containers (scanner, updater)
+ * whose bundled Docker CLI may be newer than the host daemon supports.
+ * Returns null if the version cannot be determined.
+ * Requires an envId — local Docker (no environment) must query /version directly.
+ */
+export async function getNegotiatedApiVersion(envId: number): Promise<string | null> {
+	try {
+		const versionInfo = await getDockerVersion(envId);
+		return versionInfo?.ApiVersion || null;
+	} catch {
+		return null;
+	}
+}
+
+/**
  * Lightweight ping check for Docker daemon availability.
  * Uses /_ping endpoint which returns "OK" as plain text with minimal overhead.
  * Used by the circuit breaker to probe offline environments.
@@ -3317,7 +3443,29 @@ export interface NetworkInfo {
 }
 
 export async function listNetworks(envId?: number | null): Promise<NetworkInfo[]> {
-	const networks = await dockerJsonRequest<any[]>('/networks', {}, envId);
+	const [networks, containers] = await Promise.all([
+		dockerJsonRequest<any[]>('/networks', {}, envId),
+		dockerJsonRequest<any[]>('/containers/json?all=true', {}, envId)
+	]);
+
+	// Build map of networkId -> container info from container network settings
+	const networkContainers = new Map<string, Record<string, { name: string; ipv4Address: string }>>();
+	for (const container of containers) {
+		const nets = container.NetworkSettings?.Networks;
+		if (!nets) continue;
+		const containerName = (container.Names?.[0] || '').replace(/^\//, '');
+		for (const [, netInfo] of Object.entries(nets as Record<string, any>)) {
+			const netId = netInfo.NetworkID;
+			if (!netId) continue;
+			if (!networkContainers.has(netId)) {
+				networkContainers.set(netId, {});
+			}
+			networkContainers.get(netId)![container.Id] = {
+				name: containerName,
+				ipv4Address: netInfo.IPAddress || ''
+			};
+		}
+	}
 
 	return networks.map((network: any) => ({
 		id: network.Id,
@@ -3335,13 +3483,7 @@ export async function listNetworks(envId?: number | null): Promise<NetworkInfo[]
 				auxAddress: cfg.AuxAddress || cfg.auxAddress
 			}))
 		},
-		containers: Object.entries(network.Containers || {}).reduce((acc: any, [id, data]: [string, any]) => {
-			acc[id] = {
-				name: data.Name,
-				ipv4Address: data.IPv4Address
-			};
-			return acc;
-		}, {})
+		containers: networkContainers.get(network.Id) || {}
 	}));
 }
 
@@ -3970,8 +4112,9 @@ export async function runContainerWithStreaming(options: {
 			// Container has exited. Now fetch stdout reliably (no race condition).
 			const stdout = await fetchContainerStdout(containerId, config, options.envId);
 
-			// If stdout is empty and exit code is non-zero, fetch stderr for debugging
+			// If stdout is empty and exit code is non-zero, fetch stderr and throw
 			if (stdout.length === 0 && exitCode !== 0) {
+				let stderrText = '';
 				try {
 					const stderrResponse = await dockerFetch(
 						`/containers/${containerId}/logs?stdout=false&stderr=true&follow=false`,
@@ -3980,13 +4123,12 @@ export async function runContainerWithStreaming(options: {
 					);
 					const stderrBuffer = Buffer.from(await stderrResponse.arrayBuffer());
 					const stderrOutput = demuxDockerStream(stderrBuffer, { separateStreams: true });
-					const stderrText = typeof stderrOutput === 'string' ? stderrOutput : stderrOutput.stderr;
-					if (stderrText) {
-						console.error(`[runContainerWithStreaming] Container stderr: ${stderrText.substring(0, 1000)}`);
-					}
+					stderrText = typeof stderrOutput === 'string' ? stderrOutput : stderrOutput.stderr;
 				} catch {
 					// Ignore stderr fetch errors
 				}
+				const detail = stderrText ? stderrText.substring(0, 1000) : 'no stderr output';
+				throw new Error(`Container exited with code ${exitCode}: ${detail}`);
 			}
 
 			return stdout;
@@ -4761,7 +4903,7 @@ function getVolumeCacheKey(volumeName: string, envId?: number | null): string {
 /**
  * Ensure the volume helper image (busybox) is available, pulling if necessary
  */
-async function ensureVolumeHelperImage(envId?: number | null): Promise<void> {
+export async function ensureVolumeHelperImage(envId?: number | null): Promise<void> {
 	// Check if image exists
 	const response = await dockerFetch(`/images/${encodeURIComponent(VOLUME_HELPER_IMAGE)}/json`, {}, envId);
 

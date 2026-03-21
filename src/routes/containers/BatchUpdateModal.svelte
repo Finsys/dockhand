@@ -3,7 +3,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Progress } from '$lib/components/ui/progress';
-	import * as Tooltip from '$lib/components/ui/tooltip';
+
 	import { CircleArrowUp, Loader2, AlertCircle, CheckCircle2, XCircle, ChevronDown, ChevronRight, ExternalLink } from 'lucide-svelte';
 	import { appendEnvParam } from '$lib/stores/environment';
 	import type { VulnerabilityCriteria } from '$lib/server/db';
@@ -68,7 +68,6 @@
 		error?: string;
 		pullLogs: PullLogEntry[];
 		scanLogs: ScanLogEntry[];
-		scanResult?: ScanResult;
 		scannerResults?: ScannerResult[];
 		vulnerabilities?: VulnerabilityEntry[];
 		blockReason?: string;
@@ -223,7 +222,6 @@
 							if (data.message && data.scannerResults && data.scannerResults.length > 1) {
 								containerProgress.scanLogs.push({ message: data.message });
 							}
-							containerProgress.scanResult = data.scanResult;
 							containerProgress.scannerResults = data.scannerResults;
 							containerProgress.vulnerabilities = data.vulnerabilities;
 							progress = [...progress];
@@ -234,7 +232,6 @@
 						if (existingIndex >= 0) {
 							progress[existingIndex].step = 'blocked';
 							progress[existingIndex].success = false;
-							progress[existingIndex].scanResult = data.scanResult;
 							progress[existingIndex].scannerResults = data.scannerResults;
 							progress[existingIndex].blockReason = data.blockReason;
 							progress = [...progress];
@@ -465,52 +462,9 @@ const severityOrder: Record<string, number> = { critical: 0, high: 1, medium: 2,
 									{/if}
 								</div>
 
-								<!-- Scan result badges - show per scanner when available -->
+								<!-- Scan result badges per scanner -->
 								{#if item.scannerResults && item.scannerResults.length > 0}
 									<ScannerSeverityPills results={item.scannerResults} />
-								{:else if item.scanResult}
-									<div class="flex items-center gap-1 text-xs shrink-0">
-										{#if item.scanResult.critical > 0}
-											<Tooltip.Root>
-												<Tooltip.Trigger>
-													<Badge variant="destructive" class="px-1.5 py-0 cursor-help">C:{item.scanResult.critical}</Badge>
-												</Tooltip.Trigger>
-												<Tooltip.Content>
-													<p>{item.scanResult.critical} Critical vulnerabilities</p>
-												</Tooltip.Content>
-											</Tooltip.Root>
-										{/if}
-										{#if item.scanResult.high > 0}
-											<Tooltip.Root>
-												<Tooltip.Trigger>
-													<Badge variant="destructive" class="px-1.5 py-0 bg-orange-500 cursor-help">H:{item.scanResult.high}</Badge>
-												</Tooltip.Trigger>
-												<Tooltip.Content>
-													<p>{item.scanResult.high} High severity vulnerabilities</p>
-												</Tooltip.Content>
-											</Tooltip.Root>
-										{/if}
-										{#if item.scanResult.medium > 0}
-											<Tooltip.Root>
-												<Tooltip.Trigger>
-													<Badge variant="secondary" class="px-1.5 py-0 bg-amber-500 text-white cursor-help">M:{item.scanResult.medium}</Badge>
-												</Tooltip.Trigger>
-												<Tooltip.Content>
-													<p>{item.scanResult.medium} Medium severity vulnerabilities</p>
-												</Tooltip.Content>
-											</Tooltip.Root>
-										{/if}
-										{#if item.scanResult.low > 0}
-											<Tooltip.Root>
-												<Tooltip.Trigger>
-													<Badge variant="secondary" class="px-1.5 py-0 cursor-help">L:{item.scanResult.low}</Badge>
-												</Tooltip.Trigger>
-												<Tooltip.Content>
-													<p>{item.scanResult.low} Low severity vulnerabilities</p>
-												</Tooltip.Content>
-											</Tooltip.Root>
-										{/if}
-									</div>
 								{/if}
 
 								{#if item.success === true}

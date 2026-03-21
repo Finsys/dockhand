@@ -13,7 +13,23 @@ const TIMEZONE_ALIASES: Record<string, string> = {
 	'Europe/Kyiv': 'Europe/Kiev',
 	'Asia/Ho_Chi_Minh': 'Asia/Saigon',
 	'America/Nuuk': 'America/Godthab',
-	'Pacific/Kanton': 'Pacific/Enderbury'
+	'Pacific/Kanton': 'Pacific/Enderbury',
+	// Modern IANA names that Node.js ICU maps to legacy names
+	'Asia/Kolkata': 'Asia/Calcutta',
+	'Asia/Kathmandu': 'Asia/Katmandu',
+	'Asia/Yangon': 'Asia/Rangoon',
+	'Asia/Kashgar': 'Asia/Urumqi',
+	'Atlantic/Faroe': 'Atlantic/Faeroe',
+	'Europe/Uzhgorod': 'Europe/Kiev',
+	'Europe/Zaporozhye': 'Europe/Kiev',
+	'America/Atikokan': 'America/Coral_Harbour',
+	'America/Argentina/Buenos_Aires': 'America/Buenos_Aires',
+	'America/Argentina/Catamarca': 'America/Catamarca',
+	'America/Argentina/Cordoba': 'America/Cordoba',
+	'America/Argentina/Jujuy': 'America/Jujuy',
+	'America/Argentina/Mendoza': 'America/Mendoza',
+	'Pacific/Pohnpei': 'Pacific/Ponape',
+	'Pacific/Chuuk': 'Pacific/Truk'
 };
 
 function normalizeTimezone(tz: string): string {

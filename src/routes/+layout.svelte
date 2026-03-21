@@ -82,9 +82,6 @@
 		// Check auth status
 		authStore.check();
 
-		// Check What's New popup
-		checkWhatsNew();
-
 		return () => {
 			disconnectSSE();
 		};
@@ -113,6 +110,15 @@
 			localStorage.setItem('dockhand-whats-new-version', currentVersion);
 		}
 	}
+
+	// Show What's New only after auth resolves — avoids leaking version info on login page (#717)
+	let whatsNewChecked = false;
+	$effect(() => {
+		if (!whatsNewChecked && !$authStore.loading && (!$authStore.authEnabled || $authStore.authenticated)) {
+			whatsNewChecked = true;
+			checkWhatsNew();
+		}
+	});
 </script>
 
 <svelte:head>

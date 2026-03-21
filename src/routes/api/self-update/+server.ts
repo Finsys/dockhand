@@ -371,19 +371,24 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 					...networkEnvVars
 				];
 
-				// Pass Docker API version so the updater CLI speaks a compatible version.
-				// Without this, newer CLI versions (e.g. API 1.53) fail against older
-				// daemons (e.g. Synology DSM shipping API 1.43).
-				const dockerApiVersion = process.env.DOCKER_API_VERSION;
-				if (dockerApiVersion) {
-					updaterEnv.push(`DOCKER_API_VERSION=${dockerApiVersion}`);
+				// Pin Docker API version so the updater's bundled Docker CLI
+				// doesn't request a version newer than the host daemon supports
+				// (e.g. Synology DSM with Docker 24.x / API 1.43)
+				if (process.env.DOCKER_API_VERSION) {
+					updaterEnv.push(`DOCKER_API_VERSION=${process.env.DOCKER_API_VERSION}`);
+					console.log(`[SelfUpdate] Forwarding explicit DOCKER_API_VERSION: ${process.env.DOCKER_API_VERSION}`);
 				} else {
-					const versionRes = await localDockerFetch('/version');
-					if (versionRes.ok) {
-						const vInfo = await versionRes.json() as { ApiVersion?: string };
-						if (vInfo.ApiVersion) {
-							updaterEnv.push(`DOCKER_API_VERSION=${vInfo.ApiVersion}`);
+					try {
+						const versionResp = await localDockerFetch('/version');
+						if (versionResp.ok) {
+							const versionInfo = await versionResp.json() as { ApiVersion?: string };
+							if (versionInfo.ApiVersion) {
+								updaterEnv.push(`DOCKER_API_VERSION=${versionInfo.ApiVersion}`);
+								console.log(`[SelfUpdate] Using negotiated Docker API version: ${versionInfo.ApiVersion}`);
+							}
 						}
+					} catch {
+						console.warn('[SelfUpdate] Could not detect Docker API version, updater will negotiate on its own');
 					}
 				}
 

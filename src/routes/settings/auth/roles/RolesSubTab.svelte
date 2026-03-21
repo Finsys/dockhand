@@ -47,7 +47,7 @@
 	import { canAccess } from '$lib/stores/auth';
 	import { licenseStore } from '$lib/stores/license';
 	import RoleModal from './RoleModal.svelte';
-	import { getIconComponent } from '$lib/utils/icons';
+	import EnvironmentIcon from '$lib/components/EnvironmentIcon.svelte';
 
 	interface Role {
 		id: number;
@@ -356,9 +356,8 @@
 													.map(id => environments.find(e => e.id === id))
 													.filter(Boolean)}
 												{#each envs as env}
-													{@const EnvIcon = getIconComponent(env.icon || 'globe')}
 													<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs border bg-indigo-500/15 text-indigo-700 dark:text-indigo-400 border-indigo-500/30">
-														<EnvIcon class="w-3 h-3" />
+														<EnvironmentIcon icon={env.icon || 'globe'} envId={env.id} class="w-3 h-3" />
 														{env.name}
 													</span>
 												{/each}

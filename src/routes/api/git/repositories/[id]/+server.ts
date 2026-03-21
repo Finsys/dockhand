@@ -4,9 +4,10 @@ import {
 	getGitRepository,
 	updateGitRepository,
 	deleteGitRepository,
-	getGitCredentials
+	getGitCredentials,
+	getGitStacksByRepositoryId
 } from '$lib/server/db';
-import { deleteRepositoryFiles } from '$lib/server/git';
+import { deleteRepositoryFiles, deleteGitStackFiles } from '$lib/server/git';
 import { authorize } from '$lib/server/authorize';
 import { auditGitRepository } from '$lib/server/audit';
 import { computeAuditDiff } from '$lib/utils/diff';
@@ -112,7 +113,13 @@ export const DELETE: RequestHandler = async (event) => {
 			return json({ error: 'Repository not found' }, { status: 404 });
 		}
 
-		// Delete repository files first
+		// Delete git stack clone directories before cascade deletes the DB rows
+		const stacks = await getGitStacksByRepositoryId(id);
+		for (const stack of stacks) {
+			await deleteGitStackFiles(stack.id, stack.stackName, stack.environmentId);
+		}
+
+		// Delete repository clone directory
 		deleteRepositoryFiles(id);
 
 		const deleted = await deleteGitRepository(id);

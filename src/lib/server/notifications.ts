@@ -42,47 +42,21 @@ export interface NotificationResult {
 	error?: string;
 }
 
-// SMTP transporter cache — reuses connections instead of creating a new TLS pool per notification.
-const transporterCache = new Map<string, { transporter: ReturnType<typeof nodemailer.createTransport>; lastUsed: number }>();
-
-function getOrCreateTransporter(config: SmtpConfig): ReturnType<typeof nodemailer.createTransport> {
-	const key = `${config.host}:${config.port}:${config.secure}:${config.username || ''}`;
-	const cached = transporterCache.get(key);
-	if (cached) {
-		cached.lastUsed = Date.now();
-		return cached.transporter;
-	}
-	const transporter = nodemailer.createTransport({
-		host: config.host,
-		port: config.port,
-		secure: config.secure,
-		auth: config.username ? {
-			user: config.username,
-			pass: config.password
-		} : undefined,
-		tls: config.skipTlsVerify ? {
-			rejectUnauthorized: false
-		} : undefined
-	});
-	transporterCache.set(key, { transporter, lastUsed: Date.now() });
-	return transporter;
-}
-
-// Clean up idle transporters every 10 minutes
-setInterval(() => {
-	const now = Date.now();
-	for (const [key, entry] of transporterCache) {
-		if (now - entry.lastUsed > 10 * 60 * 1000) {
-			entry.transporter.close();
-			transporterCache.delete(key);
-		}
-	}
-}, 10 * 60 * 1000);
-
 // Send notification via SMTP
 async function sendSmtpNotification(config: SmtpConfig, payload: NotificationPayload): Promise<NotificationResult> {
 	try {
-		const transporter = getOrCreateTransporter(config);
+		const transporter = nodemailer.createTransport({
+			host: config.host,
+			port: config.port,
+			secure: config.secure,
+			auth: config.username ? {
+				user: config.username,
+				pass: config.password
+			} : undefined,
+			tls: config.skipTlsVerify ? {
+				rejectUnauthorized: false
+			} : undefined
+		});
 
 		const envBadge = payload.environmentName
 			? `<span style="display: inline-block; background: #3b82f6; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; margin-left: 8px;">${payload.environmentName}</span>`

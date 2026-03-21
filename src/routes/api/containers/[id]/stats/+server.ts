@@ -3,6 +3,7 @@ import type { RequestHandler } from './$types';
 import { getContainerStats, EnvironmentNotFoundError } from '$lib/server/docker';
 import { authorize } from '$lib/server/authorize';
 import { hasEnvironments } from '$lib/server/db';
+import { validateDockerIdParam } from '$lib/server/docker-validation';
 
 function calculateCpuPercent(stats: any): number {
 	const cpuDelta = stats.cpu_stats.cpu_usage.total_usage - stats.precpu_stats.cpu_usage.total_usage;
@@ -70,6 +71,9 @@ function calculateMemoryUsage(memoryStats: any): { usage: number; raw: number; c
 }
 
 export const GET: RequestHandler = async ({ params, url, cookies }) => {
+	const invalid = validateDockerIdParam(params.id, 'container');
+	if (invalid) return invalid;
+
 	const auth = await authorize(cookies);
 
 	const envId = url.searchParams.get('env');

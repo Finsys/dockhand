@@ -28,7 +28,7 @@ export interface ContainerInfo {
 		rw: boolean;
 	}>;
 	networkMode: string;
-	networks: string[];
+	networks: Record<string, { ipAddress: string }>;
 	/**
 	 * Identifies system containers (Dockhand, Hawser) that cannot be updated from within Dockhand.
 	 * - 'dockhand': The Dockhand container itself
@@ -164,7 +164,7 @@ export interface GitRepository {
 }
 
 // Grid column configuration types
-export type GridId = 'containers' | 'images' | 'imageTags' | 'networks' | 'stacks' | 'volumes' | 'activity' | 'schedules' | 'audit';
+export type GridId = 'containers' | 'images' | 'imageTags' | 'networks' | 'stacks' | 'volumes' | 'activity' | 'schedules' | 'audit' | 'environments';
 
 export interface ColumnConfig {
 	id: string;

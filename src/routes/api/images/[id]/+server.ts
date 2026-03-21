@@ -2,10 +2,14 @@ import { json } from '@sveltejs/kit';
 import { removeImage, inspectImage } from '$lib/server/docker';
 import { authorize } from '$lib/server/authorize';
 import { auditImage } from '$lib/server/audit';
+import { validateDockerIdParam } from '$lib/server/docker-validation';
 import type { RequestHandler } from './$types';
 
 export const DELETE: RequestHandler = async (event) => {
 	const { params, url, cookies } = event;
+	const invalid = validateDockerIdParam(params.id, 'image');
+	if (invalid) return invalid;
+
 	const auth = await authorize(cookies);
 
 	const force = url.searchParams.get('force') === 'true';

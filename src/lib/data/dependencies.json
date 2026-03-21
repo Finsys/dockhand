@@ -276,6 +276,12 @@
     "repository": "https://github.com/chalk/ansi-styles"
   },
   {
+    "name": "ansi_up",
+    "version": "6.0.6",
+    "license": "MIT",
+    "repository": "https://github.com/drudru/ansi_up"
+  },
+  {
     "name": "argon2",
     "version": "0.41.1",
     "license": "MIT",
@@ -289,7 +295,7 @@
   },
   {
     "name": "aria-query",
-    "version": "5.3.2",
+    "version": "5.3.1",
     "license": "Apache-2.0",
     "repository": "https://github.com/A11yance/aria-query"
   },
@@ -422,6 +428,12 @@
   {
     "name": "devalue",
     "version": "5.6.3",
+    "license": "MIT",
+    "repository": "https://github.com/sveltejs/devalue"
+  },
+  {
+    "name": "devalue",
+    "version": "5.6.4",
     "license": "MIT",
     "repository": "https://github.com/sveltejs/devalue"
   },
@@ -781,7 +793,7 @@
   },
   {
     "name": "svelte",
-    "version": "5.53.1",
+    "version": "5.53.5",
     "license": "MIT",
     "repository": "https://github.com/sveltejs/svelte"
   },

@@ -265,6 +265,7 @@
 	let updateCheckStatus = $state<'idle' | 'checking' | 'found' | 'none' | 'error'>('idle');
 	let updateCheckProgress = $state({ checked: 0, total: 0 });
 	let updateCheckBtnEl = $state<HTMLButtonElement | null>(null);
+	let failedUpdateChecks = $state<Array<{ containerName: string; imageName: string; error: string }>>([]);
 	let showBatchUpdateModal = $state(false);
 	const batchUpdateContainerIds = $derived($containerStore.pendingUpdateIds);
 	const batchUpdateContainerNames = $derived($containerStore.pendingUpdateNames);
@@ -424,9 +425,24 @@
 		}, 3000));
 	}
 
+	function showFailedChecksToast(failed: typeof failedUpdateChecks, prefix: string) {
+		const details = failed.map(f => `• ${f.containerName}: ${f.error}`).join('\n');
+		toast.warning(`${prefix} (${failed.length} failed to check)`, {
+			description: details,
+			descriptionClass: 'whitespace-pre-line',
+			class: '!w-[28rem] !max-w-[28rem]',
+			duration: Infinity,
+			action: {
+				label: 'OK',
+				onClick: () => {}
+			}
+		});
+	}
+
 	async function checkForUpdates() {
 		updateCheckStatus = 'checking';
 		updateCheckProgress = { checked: 0, total: 0 };
+		failedUpdateChecks = [];
 
 		// Lock button width to prevent layout shift
 		if (updateCheckBtnEl) {
@@ -455,18 +471,24 @@
 			if (updateCheckBtnEl) updateCheckBtnEl.style.minWidth = '';
 
 			const containersWithUpdates = data.results.filter((r: any) => r.hasUpdate);
-			const failedChecks = data.results.filter((r: any) => r.error && !r.hasUpdate).length;
-			const failedSuffix = failedChecks > 0 ? ` (${failedChecks} failed to check)` : '';
+			const failed = data.results.filter((r: any) => r.error && !r.hasUpdate);
+			failedUpdateChecks = failed.map((r: any) => ({
+				containerName: r.containerName,
+				imageName: r.imageName,
+				error: r.error
+			}));
 
 			if (containersWithUpdates.length === 0) {
-				updateCheckStatus = 'none';
 				containerStore.setPendingUpdates([], new Map());
-				if (failedChecks > 0) {
-					toast.warning(`All containers are up to date${failedSuffix}`);
+				if (failed.length > 0) {
+					updateCheckStatus = 'none';
+					showFailedChecksToast(failedUpdateChecks, 'All containers are up to date');
+					pendingTimeouts.push(setTimeout(() => { updateCheckStatus = 'idle'; }, 3000));
 				} else {
+					updateCheckStatus = 'none';
 					toast.success('All containers are up to date');
+					pendingTimeouts.push(setTimeout(() => { updateCheckStatus = 'idle'; }, 3000));
 				}
-				pendingTimeouts.push(setTimeout(() => { updateCheckStatus = 'idle'; }, 3000));
 				return;
 			}
 
@@ -476,7 +498,11 @@
 				new Map(containersWithUpdates.map((r: any) => [r.containerId, r.containerName]))
 			);
 			updateCheckStatus = 'found';
-			toast.info(`${containersWithUpdates.length} update(s) available${failedSuffix}`);
+			if (failed.length > 0) {
+				showFailedChecksToast(failedUpdateChecks, `${containersWithUpdates.length} update(s) available`);
+			} else {
+				toast.info(`${containersWithUpdates.length} update(s) available`);
+			}
 		} catch (error) {
 			updateCheckStatus = 'error';
 			pendingTimeouts.push(setTimeout(() => { updateCheckStatus = 'idle'; }, 3000));
@@ -1823,7 +1849,25 @@
 							{/if}
 						</div>
 					{:else if column.id === 'ip'}
-						<code class="text-xs">{getContainerIp(container.networks)}</code>
+						{@const networkEntries = container.networks ? Object.entries(container.networks) : []}
+						{@const primaryIp = getContainerIp(container.networks)}
+						{#if networkEntries.length > 1 && primaryIp !== '-'}
+							<Tooltip.Root>
+								<Tooltip.Trigger>
+									<span class="inline-flex items-center gap-1">
+										<code class="text-xs">{primaryIp}</code>
+										<span class="text-2xs px-1 py-0.5 rounded bg-muted text-muted-foreground font-medium">+{networkEntries.length - 1}</span>
+									</span>
+								</Tooltip.Trigger>
+								<Tooltip.Content side="top" class="max-w-none">
+									{#each networkEntries as [name, net]}
+										<div class="font-mono text-xs">{name}: {net.ipAddress || 'no IP'}</div>
+									{/each}
+								</Tooltip.Content>
+							</Tooltip.Root>
+						{:else}
+							<code class="text-xs">{primaryIp}</code>
+						{/if}
 					{:else if column.id === 'ports'}
 						{#if ports.length > 0}
 							{@const compactPorts = $appSettings.compactPorts}

@@ -8,9 +8,26 @@
 		imageUrl: string;
 		onCancel: () => void;
 		onSave: (dataUrl: string) => void;
+		cropShape?: 'round' | 'rect';
+		outputSize?: number;
+		outputFormat?: 'image/jpeg' | 'image/webp';
+		outputQuality?: number;
+		title?: string;
+		saveLabel?: string;
 	}
 
-	let { show, imageUrl, onCancel, onSave }: Props = $props();
+	let {
+		show,
+		imageUrl,
+		onCancel,
+		onSave,
+		cropShape = 'round',
+		outputSize = 256,
+		outputFormat = 'image/jpeg',
+		outputQuality = 0.9,
+		title = 'Crop avatar',
+		saveLabel = 'Save avatar'
+	}: Props = $props();
 
 	// Cropper state
 	let crop = $state({ x: 0, y: 0 });
@@ -144,9 +161,9 @@
 					return;
 				}
 
-				// Set canvas size to output size (256x256 for avatar)
-				canvas.width = 256;
-				canvas.height = 256;
+				// Set canvas size to output size
+				canvas.width = outputSize;
+				canvas.height = outputSize;
 
 				// Ensure we use a square crop area to avoid stretching
 				// Center the square within the original crop area
@@ -163,12 +180,12 @@
 					size,
 					0,
 					0,
-					256,
-					256
+					outputSize,
+					outputSize
 				);
 
 				// Convert to data URL
-				const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+				const dataUrl = canvas.toDataURL(outputFormat, outputQuality);
 				resolve(dataUrl);
 			};
 
@@ -204,16 +221,18 @@
 			handleCancel();
 		}
 	}
+
+
 </script>
 
 <svelte:window onkeydown={handleKeydown} />
 
 {#if show && imageUrl}
-	<div class="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+	<div class="fixed inset-0 bg-black/80 z-[200] flex items-center justify-center p-4">
 		<div class="bg-background rounded-lg w-full max-w-2xl max-h-[90vh] flex flex-col shadow-2xl">
 			<!-- Header -->
 			<div class="p-4 border-b">
-				<h3 class="text-lg font-semibold">Crop avatar</h3>
+				<h3 class="text-lg font-semibold">{title}</h3>
 				<p class="text-sm text-muted-foreground mt-1">
 					Drag to reposition. Use the slider to zoom.
 				</p>
@@ -226,7 +245,8 @@
 					bind:crop
 					bind:zoom
 					aspect={1}
-					cropShape="round"
+					minZoom={0.5}
+					cropShape={cropShape}
 					showGrid={false}
 					on:cropcomplete={onCropComplete}
 					on:mediaLoaded={onMediaLoaded}
@@ -239,7 +259,7 @@
 					<ZoomOut class="w-5 h-5 text-muted-foreground shrink-0" />
 					<input
 						type="range"
-						min="1"
+						min="0.5"
 						max="3"
 						step="0.1"
 						bind:value={zoom}
@@ -266,7 +286,7 @@
 					disabled={saving || !imageLoaded}
 				>
 					<Check class="w-4 h-4" />
-					{saving ? 'Uploading...' : !imageLoaded ? 'Loading...' : 'Save avatar'}
+					{saving ? 'Uploading...' : !imageLoaded ? 'Loading...' : saveLabel}
 				</Button>
 			</div>
 		</div>

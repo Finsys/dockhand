@@ -9,8 +9,12 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { createExec, getDockerConnectionInfo } from '$lib/server/docker';
 import { authorize } from '$lib/server/authorize';
+import { validateDockerIdParam } from '$lib/server/docker-validation';
 
 export const POST: RequestHandler = async ({ params, request, cookies, url }) => {
+	const invalid = validateDockerIdParam(params.id, 'container');
+	if (invalid) return invalid;
+
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !auth.isAuthenticated) {
 		return json({ error: 'Unauthorized' }, { status: 401 });

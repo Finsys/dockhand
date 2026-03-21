@@ -35,6 +35,7 @@ export const GET: RequestHandler = async ({ cookies }) => {
 
 	const containerId = getOwnContainerId();
 	if (!containerId) {
+		console.log('[SelfUpdate] Not running in Docker, skipping update check');
 		return json({
 			updateAvailable: false,
 			error: 'Not running in Docker'
@@ -45,6 +46,7 @@ export const GET: RequestHandler = async ({ cookies }) => {
 		// Inspect own container to get current image info
 		const inspectResponse = await localDockerFetch(`/containers/${containerId}/json`);
 		if (!inspectResponse.ok) {
+			console.log(`[SelfUpdate] Failed to inspect container ${containerId.substring(0, 12)}: ${inspectResponse.status}`);
 			return json({
 				updateAvailable: false,
 				error: 'Failed to inspect own container'
@@ -61,7 +63,10 @@ export const GET: RequestHandler = async ({ cookies }) => {
 		const currentImageId = inspectData.Image || '';
 		const containerName = inspectData.Name?.replace(/^\//, '') || '';
 
+		console.log(`[SelfUpdate] Container: ${containerId.substring(0, 12)}, image: ${currentImage}, tag: ${currentImage.split(':').pop() || 'latest'}`);
+
 		if (!currentImage) {
+			console.log('[SelfUpdate] Could not determine current image from inspect data');
 			return json({
 				updateAvailable: false,
 				error: 'Could not determine current image'
@@ -73,6 +78,7 @@ export const GET: RequestHandler = async ({ cookies }) => {
 
 		// Digest-based images (e.g. image@sha256:...) can't be checked for updates
 		if (currentImage.includes('@sha256:')) {
+			console.log('[SelfUpdate] Image pinned by digest, cannot check for updates');
 			return json({
 				updateAvailable: false,
 				currentImage,
@@ -94,6 +100,7 @@ export const GET: RequestHandler = async ({ cookies }) => {
 			// Version-based check: compare against latest released version from changelog
 			const currentTagVersion = versionMatch[1];
 			const suffix = versionMatch[2] || ''; // '-baseline' or ''
+			console.log(`[SelfUpdate] Version-based check: current=${currentTagVersion}${suffix}`);
 
 			try {
 				const changelogResponse = await fetch(
@@ -102,6 +109,7 @@ export const GET: RequestHandler = async ({ cookies }) => {
 				);
 
 				if (!changelogResponse.ok) {
+					console.log(`[SelfUpdate] Failed to fetch changelog from GitHub: ${changelogResponse.status}`);
 					return json({
 						updateAvailable: false,
 						currentImage,
@@ -122,6 +130,7 @@ export const GET: RequestHandler = async ({ cookies }) => {
 				const latestRelease = changelog.find(entry => !entry.comingSoon);
 
 				if (!latestRelease) {
+					console.log('[SelfUpdate] No released version found in changelog');
 					return json({
 						updateAvailable: false,
 						currentImage,
@@ -133,12 +142,14 @@ export const GET: RequestHandler = async ({ cookies }) => {
 
 				const latestVersion = latestRelease.version;
 				const hasNewer = compareVersions(latestVersion, currentTagVersion) > 0;
+				console.log(`[SelfUpdate] Latest changelog version: ${latestVersion}, current: ${currentTagVersion}, hasNewer: ${hasNewer}`);
 
 				if (hasNewer) {
 					// Build new image tag preserving registry prefix and suffix
 					const newTag = `v${latestVersion.replace(/^v/, '')}${suffix}`;
 					const newImage = `${imageWithoutTag}:${newTag}`;
 
+					console.log(`[SelfUpdate] Update available: ${currentImage} → ${newImage}`);
 					return json({
 						updateAvailable: true,
 						currentImage,
@@ -149,6 +160,7 @@ export const GET: RequestHandler = async ({ cookies }) => {
 					});
 				}
 
+				console.log(`[SelfUpdate] Up to date (version ${currentTagVersion})`);
 				return json({
 					updateAvailable: false,
 					currentImage,
@@ -156,6 +168,7 @@ export const GET: RequestHandler = async ({ cookies }) => {
 					isComposeManaged
 				});
 			} catch (err) {
+				console.log(`[SelfUpdate] Version check failed: ${err}`);
 				return json({
 					updateAvailable: false,
 					currentImage,
@@ -167,10 +180,12 @@ export const GET: RequestHandler = async ({ cookies }) => {
 		}
 
 		// Digest-based check for mutable tags (:latest, :baseline, etc.)
+		console.log(`[SelfUpdate] Digest-based check for mutable tag: ${tag}`);
 
 		// Inspect image via local Docker socket to get RepoDigests
 		const imageResponse = await localDockerFetch(`/images/${encodeURIComponent(currentImageId)}/json`);
 		if (!imageResponse.ok) {
+			console.log(`[SelfUpdate] Failed to inspect image ${currentImageId}: ${imageResponse.status}`);
 			return json({
 				updateAvailable: false,
 				currentImage,
@@ -192,6 +207,7 @@ export const GET: RequestHandler = async ({ cookies }) => {
 			.filter(Boolean) as string[];
 
 		if (localDigests.length === 0) {
+			console.log('[SelfUpdate] No RepoDigests found — local/untagged image, cannot check registry');
 			return json({
 				updateAvailable: false,
 				currentImage,
@@ -202,9 +218,12 @@ export const GET: RequestHandler = async ({ cookies }) => {
 			});
 		}
 
+		console.log(`[SelfUpdate] Local digests: ${localDigests.map(d => d.substring(0, 19)).join(', ')}`);
+
 		// Query registry for latest digest
 		const registryDigest = await getRegistryManifestDigest(currentImage);
 		if (!registryDigest) {
+			console.log(`[SelfUpdate] Could not query registry for ${currentImage}`);
 			return json({
 				updateAvailable: false,
 				currentImage,
@@ -216,6 +235,7 @@ export const GET: RequestHandler = async ({ cookies }) => {
 		}
 
 		const hasUpdate = !localDigests.includes(registryDigest);
+		console.log(`[SelfUpdate] Registry digest: ${registryDigest.substring(0, 19)}, match: ${!hasUpdate}, updateAvailable: ${hasUpdate}`);
 
 		return json({
 			updateAvailable: hasUpdate,
@@ -227,6 +247,7 @@ export const GET: RequestHandler = async ({ cookies }) => {
 			isComposeManaged
 		});
 	} catch (err) {
+		console.log(`[SelfUpdate] Check failed with error: ${err}`);
 		return json({
 			updateAvailable: false,
 			error: 'Check failed: ' + String(err)

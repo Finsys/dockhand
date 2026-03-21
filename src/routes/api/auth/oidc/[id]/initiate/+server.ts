@@ -6,7 +6,7 @@ import { getOidcConfig } from '$lib/server/db';
 // GET /api/auth/oidc/[id]/initiate - Start OIDC authentication flow
 export const GET: RequestHandler = async ({ params, url }) => {
 	// Check if auth is enabled
-	if (!isAuthEnabled()) {
+	if (!await isAuthEnabled()) {
 		return json({ error: 'Authentication is not enabled' }, { status: 400 });
 	}
 
@@ -45,7 +45,7 @@ export const GET: RequestHandler = async ({ params, url }) => {
 // POST /api/auth/oidc/[id]/initiate - Get authorization URL without redirect
 export const POST: RequestHandler = async ({ params, request }) => {
 	// Check if auth is enabled
-	if (!isAuthEnabled()) {
+	if (!await isAuthEnabled()) {
 		return json({ error: 'Authentication is not enabled' }, { status: 400 });
 	}
 

@@ -7,7 +7,7 @@ import { auditAuth } from '$lib/server/audit';
 export const GET: RequestHandler = async (event) => {
 	const { url, cookies } = event;
 	// Check if auth is enabled
-	if (!isAuthEnabled()) {
+	if (!await isAuthEnabled()) {
 		throw redirect(302, '/login?error=auth_disabled');
 	}
 

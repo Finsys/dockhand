@@ -43,4 +43,8 @@ export function getIconComponent(iconName: string): ComponentType {
 	return iconMap[iconName] || Globe;
 }
 
+export function isCustomIcon(icon: string | null | undefined): boolean {
+	return !!icon && icon.startsWith('custom:');
+}
+
 export { iconMap };

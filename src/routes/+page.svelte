@@ -5,7 +5,7 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { browser } from '$app/environment';
-	import { RefreshCw, LayoutGrid, Loader2, Server, Tags, Square, RectangleVertical, Rows3, LayoutTemplate, Maximize2, Plus } from 'lucide-svelte';
+	import { RefreshCw, LayoutGrid, Loader2, Server, Tags, Square, RectangleVertical, Rows3, LayoutTemplate, Maximize2, Plus, Lock, LockOpen, List, Search, Plug, Route, UndoDot } from 'lucide-svelte';
 	import { toast } from 'svelte-sonner';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
@@ -14,11 +14,14 @@
 	import EnvironmentTile from './dashboard/EnvironmentTile.svelte';
 	import EnvironmentTileSkeleton from './dashboard/EnvironmentTileSkeleton.svelte';
 	import DraggableGrid, { type GridItemLayout } from './dashboard/DraggableGrid.svelte';
+	import EnvironmentListView from './dashboard/EnvironmentListView.svelte';
 	import { dashboardPreferences, dashboardData, GRID_COLS, GRID_ROW_HEIGHT, type TileItem } from '$lib/stores/dashboard';
 	import { currentEnvironment, environments } from '$lib/stores/environment';
 	import { IsMobile } from '$lib/hooks/is-mobile.svelte';
 	import type { EnvironmentStats } from './api/dashboard/stats/+server';
 	import { getLabelColor, getLabelBgColor } from '$lib/utils/label-colors';
+	import { Input } from '$lib/components/ui/input';
+	import MultiSelectFilter from '$lib/components/MultiSelectFilter.svelte';
 
 	const LABEL_FILTER_STORAGE_KEY = 'dockhand-dashboard-label-filter';
 
@@ -51,6 +54,42 @@
 	let prefsLoaded = $state(false);
 	const mobileWatcher = new IsMobile();
 	const isMobile = $derived.by(() => mobileWatcher.current);
+
+	// Dashboard lock and view mode from preferences
+	let locked = $state(false);
+	let viewMode = $state<'grid' | 'list'>('grid');
+
+	// List view filter state
+	let listSearchQuery = $state('');
+	let listConnectionFilter = $state<string[]>([]);
+	const connectionOptions = [
+		{ value: 'socket', label: 'Socket' },
+		{ value: 'direct', label: 'Direct', icon: Plug },
+		{ value: 'hawser-standard', label: 'Standard', icon: Route },
+		{ value: 'hawser-edge', label: 'Edge', icon: UndoDot }
+	];
+
+	// Count of list-filtered results (for header display)
+	const listFilteredCount = $derived.by(() => {
+		let result = filteredTiles;
+		if (listConnectionFilter.length > 0) {
+			result = result.filter(t => {
+				const type = t.stats?.connectionType || 'socket';
+				return listConnectionFilter.includes(type);
+			});
+		}
+		const q = listSearchQuery.trim().toLowerCase();
+		if (q) {
+			result = result.filter(t => {
+				const s = t.stats;
+				if (!s) return false;
+				return s.name.toLowerCase().includes(q) ||
+					s.host?.toLowerCase().includes(q) ||
+					s.labels?.some(l => l.toLowerCase().includes(q));
+			});
+		}
+		return result.length;
+	});
 
 	// Subscribe to environments store's loaded flag for quick "loaded" detection
 	// When loaded, immediately create skeleton tiles so the UI shows something useful
@@ -166,6 +205,17 @@
 		}
 	});
 
+	// Filter tiles for list view based on selected labels
+	const filteredTiles = $derived.by(() => {
+		if (filterLabels.length === 0) {
+			return tiles;
+		}
+		return tiles.filter(t => {
+			const tileLabels = t.stats?.labels || [];
+			return tileLabels.some(label => filterLabels.includes(label));
+		});
+	});
+
 	// Filter grid items based on selected labels
 	const filteredGridItems = $derived.by(() => {
 		if (filterLabels.length === 0) {
@@ -217,6 +267,8 @@
 
 	// Subscribe to preferences store to load saved layout
 	const unsubscribePrefs = dashboardPreferences.subscribe(prefs => {
+		locked = prefs.locked;
+		viewMode = prefs.viewMode;
 		if (prefs.gridLayout.length > 0 && tiles.length > 0 && !prefsLoaded) {
 			// Apply saved layout
 			gridItems = prefs.gridLayout.map(item => ({
@@ -614,8 +666,27 @@
 		}
 	}
 
+	function toggleLocked() {
+		locked = !locked;
+		dashboardPreferences.setLocked(locked);
+	}
+
+	function switchToListView() {
+		viewMode = 'list';
+		dashboardPreferences.setViewMode('list');
+		// Remove focus from trigger button
+		if (document.activeElement instanceof HTMLElement) {
+			document.activeElement.blur();
+		}
+	}
+
 	// Apply autolayout - arrange all tiles with specified dimensions
 	function applyAutoLayout(width: number, height: number) {
+		// Switch to grid view when selecting a grid layout
+		if (viewMode !== 'grid') {
+			viewMode = 'grid';
+			dashboardPreferences.setViewMode('grid');
+		}
 		const tileIds = tiles.map(t => t.id);
 		const newGridItems: GridItemLayout[] = [];
 
@@ -928,7 +999,7 @@
 	<!-- Header -->
 	<div class="shrink-0 flex flex-wrap justify-between items-center gap-3 min-h-8">
 		<div class="flex items-center gap-4">
-			<PageHeader icon={LayoutGrid} title="Environments" />
+			<PageHeader icon={LayoutGrid} title="Environments" count={tiles.length} />
 
 			<!-- Label filter toggles (only show if there are labels) -->
 			{#if allLabels.length > 0}
@@ -960,6 +1031,33 @@
 		</div>
 
 		<div class="flex items-center gap-1">
+			<!-- List view filters (search + connection type) -->
+			{#if viewMode === 'list'}
+				<div class="flex items-center gap-2 mr-2">
+					<div class="relative">
+						<Search class="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+						<Input
+							type="text"
+							placeholder="Search environments..."
+							bind:value={listSearchQuery}
+							onkeydown={(e) => e.key === 'Escape' && (listSearchQuery = '')}
+							class="pl-8 h-8 w-52 text-sm"
+						/>
+					</div>
+					<MultiSelectFilter
+						bind:value={listConnectionFilter}
+						options={connectionOptions}
+						placeholder="All connections"
+						pluralLabel="connections"
+						width="w-48"
+						defaultIcon={Plug}
+					/>
+					{#if listSearchQuery || listConnectionFilter.length > 0}
+						<span class="text-xs text-muted-foreground whitespace-nowrap">{listFilteredCount} of {filteredTiles.length}</span>
+					{/if}
+				</div>
+			{/if}
+
 			<!-- Add environment button -->
 			<button
 				onclick={() => goto('/settings?tab=environments&new=true')}
@@ -969,6 +1067,21 @@
 				<Plus class="w-4 h-4" />
 			</button>
 
+			<!-- Lock toggle (only in grid view) -->
+			{#if viewMode === 'grid'}
+				<button
+					onclick={toggleLocked}
+					class="p-1.5 rounded hover:bg-muted transition-colors"
+					title={locked ? 'Unlock tiles' : 'Lock tiles'}
+				>
+					{#if locked}
+						<Lock class="w-4 h-4 text-primary" />
+					{:else}
+						<LockOpen class="w-4 h-4" />
+					{/if}
+				</button>
+			{/if}
+
 			<!-- Autolayout dropdown -->
 			<DropdownMenu.Root>
 				<DropdownMenu.Trigger>
@@ -976,7 +1089,7 @@
 						<button
 							{...props}
 							class="p-1.5 rounded hover:bg-muted transition-colors"
-							title="Auto-layout tiles"
+							title="Layout options"
 						>
 							<LayoutTemplate class="w-4 h-4" />
 						</button>
@@ -998,6 +1111,11 @@
 					<DropdownMenu.Item onclick={() => applyAutoLayout(2, 4)} class="flex items-center gap-2 cursor-pointer">
 						<Maximize2 class="w-4 h-4" />
 						<span>Full</span>
+					</DropdownMenu.Item>
+					<DropdownMenu.Separator />
+					<DropdownMenu.Item onclick={switchToListView} class="flex items-center gap-2 cursor-pointer">
+						<List class="w-4 h-4" />
+						<span>List</span>
 					</DropdownMenu.Item>
 				</DropdownMenu.Content>
 			</DropdownMenu.Root>
@@ -1032,8 +1150,16 @@
 				Go to Settings
 			</Button>
 		</div>
+	{:else if viewMode === 'list'}
+		<!-- List view -->
+		<EnvironmentListView
+			tiles={filteredTiles}
+			searchQuery={listSearchQuery}
+			connectionFilter={listConnectionFilter}
+			onrowclick={handleTileClick}
+		/>
 	{:else if filteredGridItems.length === 0}
-		<!-- Filter shows no results -->
+		<!-- Filter shows no results (grid view) -->
 		<div class="flex flex-col items-center justify-center h-64 text-muted-foreground">
 			<div class="w-16 h-16 mb-4 rounded-2xl border-2 border-dashed border-muted-foreground/30 flex items-center justify-center">
 				<Tags class="w-8 h-8 opacity-40" />
@@ -1086,6 +1212,7 @@
 				maxW={2}
 				minH={1}
 				maxH={4}
+				{locked}
 				onchange={handleGridChange}
 				onitemclick={handleTileClick}
 			>

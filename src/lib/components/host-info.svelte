@@ -1,11 +1,11 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { Cpu, MemoryStick, Box, Globe, ChevronDown, Check, HardDrive, Clock, Wifi, WifiOff, Route, UndoDot, Icon, AlertCircle, Loader2 } from 'lucide-svelte';
+	import { Cpu, MemoryStick, Box, Globe, ChevronDown, Check, HardDrive, Clock, Wifi, WifiOff, Route, UndoDot, Icon, AlertCircle, Loader2, Search, X } from 'lucide-svelte';
 	import { whale } from '@lucide/lab';
 	import { Button } from '$lib/components/ui/button';
 	import { currentEnvironment, environments, type Environment } from '$lib/stores/environment';
 	import { sseConnected } from '$lib/stores/events';
-	import { getIconComponent } from '$lib/utils/icons';
+	import EnvironmentIcon from '$lib/components/EnvironmentIcon.svelte';
 	import { toast } from 'svelte-sonner';
 	import { themeStore, type FontSize } from '$lib/stores/theme';
 	import { getTimeFormat } from '$lib/stores/settings';
@@ -77,6 +77,8 @@
 	let diskUsageLoading = $state(false);
 	let envAbortController: AbortController | null = null; // Aborts ALL requests when switching envs
 	let showDropdown = $state(false);
+	let searchTerm = $state('');
+	let searchInputRef = $state<HTMLInputElement | null>(null);
 	let currentEnvId = $state<number | null>(null);
 	let lastUpdated = $state<Date>(new Date());
 	let isConnected = $state(false);
@@ -94,6 +96,22 @@
 
 	// Reactive environment list from store
 	let envList = $derived($environments);
+	const showSearch = $derived(envList.length > 8);
+	const filteredEnvList = $derived(
+		searchTerm.trim()
+			? envList.filter((e: Environment) => e.name.toLowerCase().includes(searchTerm.toLowerCase()))
+			: envList
+	);
+
+	// Clear search and focus when dropdown opens/closes
+	$effect(() => {
+		if (showDropdown && showSearch) {
+			// Use tick to wait for DOM render
+			setTimeout(() => searchInputRef?.focus(), 0);
+		} else {
+			searchTerm = '';
+		}
+	});
 
 	sseConnected.subscribe(v => isConnected = v);
 
@@ -349,14 +367,12 @@
 			class="flex items-center gap-1.5 -ml-1 px-1 py-1 rounded-md hover:bg-muted transition-colors cursor-pointer"
 		>
 			{#if hostInfo?.environment && Number(hostInfo.environment.id) === Number(currentEnvId)}
-				{@const EnvIcon = getIconComponent(hostInfo.environment.icon || 'globe')}
-				<EnvIcon class="{iconSizeLargeClass()} text-primary" />
+				<EnvironmentIcon icon={hostInfo.environment.icon || 'globe'} envId={hostInfo.environment.id} class="{iconSizeLargeClass()} text-primary" />
 				<span class="font-medium text-foreground">{hostInfo.environment.name}</span>
 			{:else if currentEnvId && envList.length > 0}
 				{@const currentEnv = envList.find(e => Number(e.id) === Number(currentEnvId))}
 				{#if currentEnv}
-					{@const EnvIcon = getIconComponent(currentEnv.icon || 'globe')}
-					<EnvIcon class="{iconSizeLargeClass()} text-primary" />
+					<EnvironmentIcon icon={currentEnv.icon || 'globe'} envId={currentEnv.id} class="{iconSizeLargeClass()} text-primary" />
 					<span class="font-medium text-foreground">{currentEnv.name}</span>
 				{:else}
 					<Globe class="{iconSizeLargeClass()} text-muted-foreground" />
@@ -371,9 +387,40 @@
 
 		{#if showDropdown && envList.length > 0}
 			<div class="absolute top-full left-0 mt-1 min-w-56 w-max max-w-80 bg-popover border rounded-md shadow-lg z-50">
-				<div class="py-1">
-					{#each envList as env (env.id)}
-						{@const EnvIcon = getIconComponent(env.icon || 'globe')}
+				{#if showSearch}
+					<div class="sticky top-0 bg-popover border-b px-2 py-1.5">
+						<div class="relative">
+							<Search class="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+							<input
+								bind:this={searchInputRef}
+								bind:value={searchTerm}
+								type="text"
+								placeholder="Search environments..."
+								class="w-full pl-7 pr-7 py-1 text-sm bg-transparent border rounded focus:outline-none focus:ring-1 focus:ring-ring"
+								onclick={(e) => e.stopPropagation()}
+								onkeydown={(e) => {
+									if (e.key === 'Escape') {
+										if (searchTerm) {
+											searchTerm = '';
+										} else {
+											showDropdown = false;
+										}
+									}
+								}}
+							/>
+							{#if searchTerm}
+								<button
+									class="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-muted"
+									onclick={(e) => { e.stopPropagation(); searchTerm = ''; searchInputRef?.focus(); }}
+								>
+									<X class="w-3 h-3 text-muted-foreground" />
+								</button>
+							{/if}
+						</div>
+					</div>
+				{/if}
+				<div class="py-1 max-h-[calc(100vh-8rem)] overflow-y-auto">
+					{#each filteredEnvList as env (env.id)}
 						{@const isOffline = offlineEnvIds.has(env.id)}
 						{@const isSwitching = switchingEnvId === env.id}
 						<button
@@ -387,7 +434,7 @@
 							{:else if isOffline}
 								<WifiOff class="{iconSizeLargeClass()} text-destructive shrink-0" />
 							{:else}
-								<EnvIcon class="{iconSizeLargeClass()} text-muted-foreground shrink-0" />
+								<EnvironmentIcon icon={env.icon || 'globe'} envId={env.id} class="{iconSizeLargeClass()} text-muted-foreground shrink-0" />
 							{/if}
 							<span class="flex-1 whitespace-nowrap" class:text-muted-foreground={isOffline}>{env.name}</span>
 							{#if isOffline && !isSwitching}
@@ -396,6 +443,10 @@
 								<Check class="{iconSizeLargeClass()} text-primary shrink-0" />
 							{/if}
 						</button>
+					{:else}
+						<div class="px-3 py-2 text-sm text-muted-foreground">
+							No matching environments
+						</div>
 					{/each}
 				</div>
 			</div>

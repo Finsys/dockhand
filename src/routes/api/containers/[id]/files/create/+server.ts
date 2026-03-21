@@ -1,9 +1,13 @@
 import { json } from '@sveltejs/kit';
 import { createContainerFile, createContainerDirectory } from '$lib/server/docker';
 import { authorize } from '$lib/server/authorize';
+import { validateDockerIdParam } from '$lib/server/docker-validation';
 import type { RequestHandler } from './$types';
 
 export const POST: RequestHandler = async ({ params, url, cookies, request }) => {
+	const invalid = validateDockerIdParam(params.id, 'container');
+	if (invalid) return invalid;
+
 	const auth = await authorize(cookies);
 
 	const envId = url.searchParams.get('env');

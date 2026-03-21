@@ -3,10 +3,14 @@ import { pullImage, updateContainer, type CreateContainerOptions } from '$lib/se
 import { authorize } from '$lib/server/authorize';
 import { auditContainer } from '$lib/server/audit';
 import { removePendingContainerUpdate } from '$lib/server/db';
+import { validateDockerIdParam } from '$lib/server/docker-validation';
 import type { RequestHandler } from './$types';
 
 export const POST: RequestHandler = async (event) => {
 	const { params, request, url, cookies } = event;
+	const invalid = validateDockerIdParam(params.id, 'container');
+	if (invalid) return invalid;
+
 	const auth = await authorize(cookies);
 
 	const envId = url.searchParams.get('env');

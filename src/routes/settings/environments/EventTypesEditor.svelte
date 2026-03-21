@@ -55,6 +55,7 @@
 				{ id: 'container_restarted', label: 'Container restarted', description: 'When a container restarts' },
 				{ id: 'container_exited', label: 'Container exited', description: 'When a container exits unexpectedly' },
 				{ id: 'container_unhealthy', label: 'Container unhealthy', description: 'When a container health check fails' },
+				{ id: 'container_healthy', label: 'Container healthy', description: 'When a container health check recovers' },
 				{ id: 'container_oom', label: 'Container OOM killed', description: 'When a container is killed due to out of memory' },
 				{ id: 'container_updated', label: 'Container updated', description: 'When a container image is updated' }
 			]
@@ -108,6 +109,8 @@
 			icon: HardDrive,
 			events: [
 				{ id: 'image_pulled', label: 'Image pulled', description: 'When a new image is pulled' },
+				{ id: 'image_prune_success', label: 'Image prune completed', description: 'Scheduled image prune completed successfully' },
+				{ id: 'image_prune_failed', label: 'Image prune failed', description: 'Scheduled image prune failed' },
 				{ id: 'environment_offline', label: 'Environment offline', description: 'Environment became unreachable' },
 				{ id: 'environment_online', label: 'Environment online', description: 'Environment came back online' },
 				{ id: 'disk_space_warning', label: 'Disk space warning', description: 'Docker disk usage exceeds threshold' }

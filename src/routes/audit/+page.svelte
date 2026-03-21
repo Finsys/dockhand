@@ -51,7 +51,7 @@
 		FileX
 	} from 'lucide-svelte';
 	import { licenseStore } from '$lib/stores/license';
-	import { getIconComponent } from '$lib/utils/icons';
+	import EnvironmentIcon from '$lib/components/EnvironmentIcon.svelte';
 	import {
 		auditSseConnected,
 		connectAuditSSE,
@@ -701,14 +701,17 @@
 				<!-- Environment filter -->
 				{#if environments.length > 0}
 					{@const selectedEnv = environments.find(e => e.id === filterEnvironmentId)}
-					{@const SelectedEnvIcon = selectedEnv ? getIconComponent(selectedEnv.icon || 'globe') : Server}
 					<Select.Root
 						type="single"
 						value={filterEnvironmentId !== null ? String(filterEnvironmentId) : undefined}
 						onValueChange={(v) => filterEnvironmentId = v ? parseInt(v) : null}
 					>
 						<Select.Trigger size="sm" class="w-40 text-sm">
-							<SelectedEnvIcon class="w-3.5 h-3.5 mr-1.5 text-muted-foreground shrink-0" />
+							{#if selectedEnv}
+								<EnvironmentIcon icon={selectedEnv.icon || 'globe'} envId={selectedEnv.id} class="w-3.5 h-3.5 mr-1.5 text-muted-foreground shrink-0" />
+							{:else}
+								<Server class="w-3.5 h-3.5 mr-1.5 text-muted-foreground shrink-0" />
+							{/if}
 							<span class="truncate">
 								{#if filterEnvironmentId === null}
 									Environment
@@ -723,9 +726,8 @@
 								All environments
 							</Select.Item>
 							{#each environments as env}
-								{@const EnvIcon = getIconComponent(env.icon || 'globe')}
 								<Select.Item value={String(env.id)}>
-									<EnvIcon class="w-4 h-4 mr-2 text-muted-foreground" />
+									<EnvironmentIcon icon={env.icon || 'globe'} envId={env.id} class="w-4 h-4 mr-2 text-muted-foreground" />
 									{env.name}
 								</Select.Item>
 							{/each}
@@ -870,9 +872,8 @@
 					<span class="font-mono text-xs whitespace-nowrap">{formatTimestamp(log.createdAt)}</span>
 				{:else if column.id === 'environment'}
 					{#if log.environmentName}
-						{@const LogEnvIcon = getIconComponent(log.environmentIcon || 'globe')}
 						<div class="flex items-center gap-1 text-xs">
-							<LogEnvIcon class="w-3 h-3 text-muted-foreground shrink-0" />
+							<EnvironmentIcon icon={log.environmentIcon || 'globe'} envId={log.environmentId || 0} class="w-3 h-3 text-muted-foreground shrink-0" />
 							<span class="truncate">{log.environmentName}</span>
 						</div>
 					{:else}

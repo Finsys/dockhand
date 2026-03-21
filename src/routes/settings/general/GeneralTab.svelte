@@ -8,7 +8,7 @@
 	import { TogglePill, ToggleSwitch } from '$lib/components/ui/toggle-pill';
 	import CronEditor from '$lib/components/cron-editor.svelte';
 	import TimezoneSelector from '$lib/components/TimezoneSelector.svelte';
-	import { Eye, Bell, Database, Calendar, ShieldCheck, FileText, AlertTriangle, HelpCircle, Globe, Activity, Clock } from 'lucide-svelte';
+	import { Eye, Bell, Database, Calendar, ShieldCheck, FileText, AlertTriangle, HelpCircle, Globe, Activity, Clock, Info } from 'lucide-svelte';
 	import { appSettings, type DateFormat, type DownloadFormat, type EventCollectionMode } from '$lib/stores/settings';
 	import { canAccess, authStore } from '$lib/stores/auth';
 	import { toast } from 'svelte-sonner';
@@ -25,6 +25,8 @@
 	let downloadFormat = $derived($appSettings.downloadFormat);
 	let defaultGrypeArgs = $derived($appSettings.defaultGrypeArgs);
 	let defaultTrivyArgs = $derived($appSettings.defaultTrivyArgs);
+	let defaultGrypeImage = $derived($appSettings.defaultGrypeImage);
+	let defaultTrivyImage = $derived($appSettings.defaultTrivyImage);
 	let scheduleRetentionDays = $derived($appSettings.scheduleRetentionDays);
 	let eventRetentionDays = $derived($appSettings.eventRetentionDays);
 	let scheduleCleanupCron = $derived($appSettings.scheduleCleanupCron);
@@ -32,6 +34,7 @@
 	let scheduleCleanupEnabled = $derived($appSettings.scheduleCleanupEnabled);
 	let eventCleanupEnabled = $derived($appSettings.eventCleanupEnabled);
 	let logBufferSizeKb = $derived($appSettings.logBufferSizeKb);
+	let formatLogTimestamps = $derived($appSettings.formatLogTimestamps);
 	let defaultTimezone = $derived($appSettings.defaultTimezone);
 	let eventCollectionMode = $derived($appSettings.eventCollectionMode);
 	let eventPollInterval = $derived($appSettings.eventPollInterval);
@@ -74,6 +77,22 @@
 	function handleEventCleanupEnabledChange() {
 		appSettings.setEventCleanupEnabled(!eventCleanupEnabled);
 		toast.success(eventCleanupEnabled ? 'Event cleanup disabled' : 'Event cleanup enabled');
+	}
+
+	function handleGrypeImageBlur(e: Event) {
+		const value = (e.target as HTMLInputElement).value.trim();
+		if (value && value !== defaultGrypeImage) {
+			appSettings.setDefaultGrypeImage(value);
+			toast.success('Grype image updated');
+		}
+	}
+
+	function handleTrivyImageBlur(e: Event) {
+		const value = (e.target as HTMLInputElement).value.trim();
+		if (value && value !== defaultTrivyImage) {
+			appSettings.setDefaultTrivyImage(value);
+			toast.success('Trivy image updated');
+		}
 	}
 
 	function handleGrypeArgsBlur(e: Event) {
@@ -313,45 +332,69 @@
 						Logs & files
 					</Card.Title>
 				</Card.Header>
-				<Card.Content class="space-y-4">
-					<div class="space-y-2">
-						<Label for="log-buffer-size">Log buffer size (KB)</Label>
-						<div class="flex items-center gap-2">
-							<Input
-								id="log-buffer-size"
-								type="number"
-								min="100"
-								max="5000"
-								value={logBufferSizeKb}
-								onchange={handleLogBufferSizeChange}
-								disabled={!$canAccess('settings', 'edit')}
-								class="w-24"
-							/>
-							<span class="text-sm text-muted-foreground">KB</span>
-						</div>
-						<p class="text-xs text-muted-foreground">Maximum log buffer per container panel. Older logs are truncated when exceeded.</p>
-						{#if logBufferSizeKb > 1000}
-							<div class="flex items-start gap-2 p-2 rounded-md bg-amber-500/10 border border-amber-500/20">
-								<AlertTriangle class="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
-								<p class="text-xs text-amber-600 dark:text-amber-400">High values may degrade browser performance with verbose containers. Recommended: 250-1000 KB.</p>
+				<Card.Content>
+					<div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+						<div class="space-y-4">
+							<div class="space-y-2">
+								<Label for="log-buffer-size">Log buffer size (KB)</Label>
+								<div class="flex items-center gap-2">
+									<Input
+										id="log-buffer-size"
+										type="number"
+										min="100"
+										max="5000"
+										value={logBufferSizeKb}
+										onchange={handleLogBufferSizeChange}
+										disabled={!$canAccess('settings', 'edit')}
+										class="w-24"
+									/>
+									<span class="text-sm text-muted-foreground">KB</span>
+								</div>
+								<p class="text-xs text-muted-foreground">Maximum log buffer per container panel. Older logs are truncated when exceeded.</p>
+								{#if logBufferSizeKb > 1000}
+									<div class="flex items-start gap-2 p-2 rounded-md bg-amber-500/10 border border-amber-500/20">
+										<AlertTriangle class="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+										<p class="text-xs text-amber-600 dark:text-amber-400">High values may degrade browser performance with verbose containers. Recommended: 250-1000 KB.</p>
+									</div>
+								{/if}
 							</div>
-						{/if}
-					</div>
-					<div class="space-y-1">
-						<div class="flex items-center gap-3">
-							<Label>Download format</Label>
-							<ToggleSwitch
-								value={downloadFormat}
-								leftValue="tar"
-								rightValue="tar.gz"
-								onchange={(newFormat) => {
-									appSettings.setDownloadFormat(newFormat as DownloadFormat);
-									toast.success(`Download format set to ${newFormat}`);
-								}}
-								disabled={!$canAccess('settings', 'edit')}
-							/>
+							<div class="space-y-1">
+								<div class="flex items-center gap-3">
+									<Label>Download format</Label>
+									<ToggleSwitch
+										value={downloadFormat}
+										leftValue="tar"
+										rightValue="tar.gz"
+										onchange={(newFormat) => {
+											appSettings.setDownloadFormat(newFormat as DownloadFormat);
+											toast.success(`Download format set to ${newFormat}`);
+										}}
+										disabled={!$canAccess('settings', 'edit')}
+									/>
+								</div>
+								<p class="text-xs text-muted-foreground">Archive format when downloading files from containers</p>
+							</div>
 						</div>
-						<p class="text-xs text-muted-foreground">Archive format when downloading files from containers</p>
+						<div class="space-y-4">
+							<div class="space-y-1">
+								<div class="flex items-center gap-3">
+									<Label>Format log timestamps</Label>
+									<TogglePill
+										checked={formatLogTimestamps}
+										onchange={() => {
+											appSettings.setFormatLogTimestamps(!formatLogTimestamps);
+											toast.success(formatLogTimestamps ? 'Log timestamp formatting disabled' : 'Log timestamp formatting enabled');
+										}}
+										disabled={!$canAccess('settings', 'edit')}
+									/>
+								</div>
+								<p class="text-xs text-muted-foreground">Convert ISO timestamps in logs to your configured date/time format</p>
+								<div class="flex items-start gap-1.5 mt-1">
+									<Info class="w-3.5 h-3.5 text-muted-foreground shrink-0 mt-0.5" />
+									<p class="text-xs text-muted-foreground">Docker logs use UTC timestamps by default. When enabled, timestamps like <code class="bg-muted px-1 rounded">2026-01-12T07:47:44Z</code> are converted to local time using your date/time settings.</p>
+								</div>
+							</div>
+						</div>
 					</div>
 				</Card.Content>
 			</Card.Root>
@@ -368,6 +411,28 @@
 					</Card.Title>
 				</Card.Header>
 				<Card.Content class="space-y-4">
+					<div class="space-y-2">
+						<Label for="grype-image">Grype image</Label>
+						<Input
+							id="grype-image"
+							value={defaultGrypeImage}
+							onblur={handleGrypeImageBlur}
+							disabled={!$canAccess('settings', 'edit')}
+							placeholder={"anchore/grype:v0.110.0"}
+						/>
+						<p class="text-xs text-muted-foreground">Docker image for Grype scanner. Pin to a specific version for supply chain security.</p>
+					</div>
+					<div class="space-y-2">
+						<Label for="trivy-image">Trivy image</Label>
+						<Input
+							id="trivy-image"
+							value={defaultTrivyImage}
+							onblur={handleTrivyImageBlur}
+							disabled={!$canAccess('settings', 'edit')}
+							placeholder={"aquasec/trivy:0.69.3"}
+						/>
+						<p class="text-xs text-muted-foreground">Docker image for Trivy scanner. Pin to a specific version for supply chain security.</p>
+					</div>
 					<div class="space-y-2">
 						<Label for="grype-args">Default Grype arguments</Label>
 						<Input

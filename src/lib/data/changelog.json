@@ -1,5 +1,26 @@
 [
   {
+    "version": "1.0.22",
+    "comingSoon": true,
+    "changes": [
+      { "type": "feature", "text": "dashboard list view with inline search and connection filters (#740)" },
+      { "type": "feature", "text": "custom environment icon (#754)" },
+      { "type": "feature", "text": "show +N indicator for containers with multiple IP addresses (#644)" },
+      { "type": "feature", "text": "bundle all fonts locally for privacy and offline use (#734)" },
+      { "type": "fix", "text": "respect PROXY settings when checking for container updates" },
+      { "type": "fix", "text": "git stacks force-redeploy after a failed sync (#693)" },
+      { "type": "fix", "text": "What's New modal shown before login, exposing version info (#717)" },
+      { "type": "fix", "text": "git repository files not removed from disk on delete (#671)" },
+      { "type": "fix", "text": "recursive chown at startup breaks stack volumes with different ownership (#719)" },
+      { "type": "fix", "text": "missing notification event toggles for container healthy, image prune events (#659)" },
+      { "type": "fix", "text": "container disappears when edit fails (e.g. invalid memory/swap) (#736)" },
+      { "type": "fix", "text": "regression: network container count always shows 0 (#761)" },
+      { "type": "fix", "text": "Grype/Trivy scan containers don't inherit proxy env vars (#780)" },
+      { "type": "fix", "text": "pin vulnerability scanner images to specific versions not :latest" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.22"
+  },
+  {
     "version": "1.0.21",
     "date": "2026-03-13",
     "changes": [
