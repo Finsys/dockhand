@@ -335,7 +335,8 @@ const REQUIRED_TABLES = [
 	'audit_logs',
 	'container_events',
 	'schedule_executions',
-	'user_preferences'
+	'user_preferences',
+	'api_tokens'
 ];
 
 /**
@@ -898,6 +899,7 @@ export const userPreferences = schemaProxy.userPreferences;
 export const scheduleExecutions = schemaProxy.scheduleExecutions;
 export const stackEnvironmentVariables = schemaProxy.stackEnvironmentVariables;
 export const pendingContainerUpdates = schemaProxy.pendingContainerUpdates;
+export const apiTokens = schemaProxy.apiTokens;
 
 // Re-export types from SQLite schema (they're compatible with PostgreSQL)
 export type {
@@ -956,7 +958,9 @@ export type {
 	StackEnvironmentVariable,
 	NewStackEnvironmentVariable,
 	PendingContainerUpdate,
-	NewPendingContainerUpdate
+	NewPendingContainerUpdate,
+	ApiToken,
+	NewApiToken
 } from './schema/index.js';
 
 export { eq, and, or, desc, asc, like, sql, inArray, isNull, isNotNull } from 'drizzle-orm';

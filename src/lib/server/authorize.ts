@@ -40,6 +40,7 @@ import type { Permissions } from './db';
 import { getUserAccessibleEnvironments, userCanAccessEnvironment, userHasAdminRole } from './db';
 import { validateSession, isAuthEnabled, checkPermission, type AuthenticatedUser } from './auth';
 import { isEnterprise } from './license';
+import { validateApiToken } from './api-tokens';
 
 export interface AuthorizationContext {
 	/** Whether authentication is enabled globally */
@@ -110,10 +111,26 @@ export interface AuthorizationContext {
  * Create an authorization context from cookies.
  * This is the main entry point for authorization checks.
  */
-export async function authorize(cookies: Cookies): Promise<AuthorizationContext> {
+export async function authorize(cookies: Cookies, request?: Request): Promise<AuthorizationContext> {
 	const authEnabled = await isAuthEnabled();
 	const enterprise = await isEnterprise();
-	const user = authEnabled ? await validateSession(cookies) : null;
+
+	// 1. Cookie-based session auth (existing, unchanged)
+	let user: AuthenticatedUser | null = null;
+	if (authEnabled) {
+		user = await validateSession(cookies);
+
+		// 2. Bearer token auth (fallback when no cookie session)
+		if (!user && request) {
+			const authHeader = request.headers.get('Authorization');
+			if (authHeader?.startsWith('Bearer ')) {
+				const token = authHeader.substring(7).trim();
+				if (token) {
+					user = await validateApiToken(token);
+				}
+			}
+		}
+	}
 
 	// Determine admin status:
 	// - Free edition: all authenticated users are effectively admins (full access)
