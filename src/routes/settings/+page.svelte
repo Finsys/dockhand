@@ -85,49 +85,40 @@
 			</Tabs.Trigger>
 		</Tabs.List>
 
-		<!-- General Tab -->
 		<Tabs.Content value="general" class="flex-1 min-h-0 overflow-y-auto">
-			<GeneralTab />
+			{#if activeTab === 'general'}<GeneralTab />{/if}
 		</Tabs.Content>
 
-		<!-- Environments Tab -->
 		<Tabs.Content value="environments" class="flex-1 min-h-0 overflow-y-auto">
-			<EnvironmentsTab {editEnvId} {newEnv} />
+			{#if activeTab === 'environments'}<EnvironmentsTab {editEnvId} {newEnv} />{/if}
 		</Tabs.Content>
 
-		<!-- Registries Tab -->
 		<Tabs.Content value="registries" class="flex-1 min-h-0 overflow-y-auto">
-			<RegistriesTab />
+			{#if activeTab === 'registries'}<RegistriesTab />{/if}
 		</Tabs.Content>
 
-		<!-- Git Tab -->
 		<Tabs.Content value="git" class="flex-1 min-h-0 overflow-y-auto">
-			<GitTab />
+			{#if activeTab === 'git'}<GitTab />{/if}
 		</Tabs.Content>
 
-		<!-- Config Sets Tab -->
 		<Tabs.Content value="config-sets" class="flex-1 min-h-0 overflow-y-auto">
-			<ConfigSetsTab />
+			{#if activeTab === 'config-sets'}<ConfigSetsTab />{/if}
 		</Tabs.Content>
 
-		<!-- Notifications Tab -->
 		<Tabs.Content value="notifications" class="flex-1 min-h-0 overflow-y-auto">
-			<NotificationsTab />
+			{#if activeTab === 'notifications'}<NotificationsTab />{/if}
 		</Tabs.Content>
 
-		<!-- Auth Tab -->
 		<Tabs.Content value="auth" class="flex-1 min-h-0 flex flex-col">
-			<AuthTab onTabChange={handleTabChange} />
+			{#if activeTab === 'auth'}<AuthTab onTabChange={handleTabChange} />{/if}
 		</Tabs.Content>
 
-		<!-- License Tab -->
 		<Tabs.Content value="license" class="flex-1 min-h-0 overflow-y-auto">
-			<LicenseTab />
+			{#if activeTab === 'license'}<LicenseTab />{/if}
 		</Tabs.Content>
 
-		<!-- About Tab -->
 		<Tabs.Content value="about" class="flex-1 min-h-0 overflow-y-auto">
-			<AboutTab />
+			{#if activeTab === 'about'}<AboutTab />{/if}
 		</Tabs.Content>
 	</Tabs.Root>
 </div>

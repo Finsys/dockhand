@@ -13,6 +13,8 @@
 	import * as Select from '$lib/components/ui/select';
 	import { Trash2, Upload, RefreshCw, Play, Search, Layers, Server, ShieldCheck, CheckSquare, Square, Tag, Check, XCircle, Icon, AlertTriangle, X, Images, Copy, Download, ChevronRight, ChevronDown, Loader2, ArrowUp, ArrowDown, ArrowUpDown, CircleDashed, CircleDot, Circle, Filter } from 'lucide-svelte';
 	import { broom, whale } from '@lucide/lab';
+	import * as Tooltip from '$lib/components/ui/tooltip';
+	import { copyToClipboard } from '$lib/utils/clipboard';
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
 	import BatchOperationModal from '$lib/components/BatchOperationModal.svelte';
 	import ImageHistoryModal from './ImageHistoryModal.svelte';
@@ -25,6 +27,7 @@
 	import { onDockerEvent, isImageListChange } from '$lib/stores/events';
 	import { canAccess } from '$lib/stores/auth';
 	import { formatDate, appSettings } from '$lib/stores/settings';
+	import { readJobResponse } from '$lib/utils/sse-fetch';
 	import { EmptyState, NoEnvironment } from '$lib/components/ui/empty-state';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import { DataGrid } from '$lib/components/data-grid';
@@ -144,17 +147,20 @@
 	let batchOpTitle = $state('');
 	let batchOpOperation = $state('');
 	let batchOpItems = $state<Array<{ id: string; name: string }>>([]);
+	let batchOpTotalSize = $state<number | undefined>(undefined);
 
 	// Copy ID state
 	let copiedId = $state<string | null>(null);
+	let copyIdFailed = $state(false);
 
 	async function copyImageId(imageId: string) {
-		try {
-			await navigator.clipboard.writeText(imageId);
+		const ok = await copyToClipboard(imageId);
+		if (ok) {
 			copiedId = imageId;
 			pendingTimeouts.push(setTimeout(() => copiedId = null, 2000));
-		} catch (err) {
-			console.error('Failed to copy:', err);
+		} else {
+			copyIdFailed = true;
+			pendingTimeouts.push(setTimeout(() => copyIdFailed = false, 2000));
 		}
 	}
 
@@ -466,6 +472,7 @@
 				: img.id.slice(7, 19);
 			return { id: img.id, name: displayName };
 		});
+		batchOpTotalSize = selectedInFilter.reduce((sum, img) => sum + img.size, 0);
 		showBatchOpModal = true;
 	}
 
@@ -479,13 +486,21 @@
 		confirmPrune = false;
 		try {
 			const response = await fetch(appendEnvParam('/api/prune/images', envId), { method: 'POST' });
-			if (response.ok) {
+			const data = await readJobResponse(response);
+			if (data.success) {
 				pruneStatus = 'success';
-				toast.success('Dangling images pruned');
+				const deleted = data.result?.ImagesDeleted;
+				const spaceReclaimed = data.result?.SpaceReclaimed ?? 0;
+				const count = deleted?.length ?? 0;
+				if (count > 0) {
+					toast.success(`Pruned ${count} image${count !== 1 ? 's' : ''}, freed ${formatBytes(spaceReclaimed)}`);
+				} else {
+					toast.success('No dangling images to prune');
+				}
 				await fetchImages();
 			} else {
 				pruneStatus = 'error';
-				toast.error('Failed to prune images');
+				toast.error(data.error || 'Failed to prune images');
 			}
 		} catch (error) {
 			pruneStatus = 'error';
@@ -499,13 +514,21 @@
 		confirmPruneUnused = false;
 		try {
 			const response = await fetch(appendEnvParam('/api/prune/images?dangling=false', envId), { method: 'POST' });
-			if (response.ok) {
+			const data = await readJobResponse(response);
+			if (data.success) {
 				pruneUnusedStatus = 'success';
-				toast.success('Unused images pruned');
+				const deleted = data.result?.ImagesDeleted;
+				const spaceReclaimed = data.result?.SpaceReclaimed ?? 0;
+				const count = deleted?.length ?? 0;
+				if (count > 0) {
+					toast.success(`Pruned ${count} image${count !== 1 ? 's' : ''}, freed ${formatBytes(spaceReclaimed)}`);
+				} else {
+					toast.success('No unused images to prune');
+				}
 				await fetchImages();
 			} else {
 				pruneUnusedStatus = 'error';
-				toast.error('Failed to prune unused images');
+				toast.error(data.error || 'Failed to prune unused images');
 			}
 		} catch (error) {
 			pruneUnusedStatus = 'error';
@@ -516,6 +539,7 @@
 
 	async function removeImage(id: string, tagName: string) {
 		deleteError = null;
+		const imageSize = images.find(img => img.id === id)?.size;
 		try {
 			const response = await fetch(appendEnvParam(`/api/images/${encodeURIComponent(id)}?force=true`, envId), { method: 'DELETE' });
 			if (!response.ok) {
@@ -527,7 +551,8 @@
 				}, 5000));
 				return;
 			}
-			toast.success(`Deleted ${tagName}`);
+			const sizeStr = imageSize ? ` (${formatBytes(imageSize)})` : '';
+			toast.success(`Deleted ${tagName}${sizeStr}`);
 			await fetchImages();
 		} catch (error) {
 			console.error('Failed to remove image:', error);
@@ -606,6 +631,14 @@
 			return `${mb.toFixed(1)} MB`;
 		}
 		return `${(mb / 1024).toFixed(2)} GB`;
+	}
+
+	function formatBytes(bytes: number): string {
+		if (bytes === 0) return '0 B';
+		const k = 1024;
+		const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+		const i = Math.floor(Math.log(bytes) / Math.log(k));
+		return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 	}
 
 	function formatImageDate(timestamp: number): string {
@@ -1028,7 +1061,7 @@
 							{:else if column.id === 'used'}
 								{#if tagInfo.containers > 0}
 									<a
-										href="/containers?image={encodeURIComponent(tagInfo.fullRef)}"
+										href="/containers?search={encodeURIComponent(tagInfo.fullRef)}"
 										class="text-muted-foreground hover:text-foreground hover:underline"
 										title="View containers using this image"
 									>
@@ -1186,6 +1219,7 @@
 	items={batchOpItems}
 	envId={envId ?? undefined}
 	options={{ force: true }}
+	totalSize={batchOpTotalSize}
 	onClose={() => showBatchOpModal = false}
 	onComplete={handleBatchComplete}
 />

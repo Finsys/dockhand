@@ -80,8 +80,14 @@ export const POST: RequestHandler = async (event) => {
 			return json({ error: 'An environment with this name already exists' }, { status: 409 });
 		}
 
-		// Host is required for direct and hawser-standard connections
+		// Validate connection type
+		const validConnectionTypes = ['socket', 'direct', 'hawser-standard', 'hawser-edge'];
 		const connectionType = data.connectionType || 'socket';
+		if (!validConnectionTypes.includes(connectionType)) {
+			return json({ error: `Invalid connection type: ${connectionType}` }, { status: 400 });
+		}
+
+		// Host is required for direct and hawser-standard connections
 		if ((connectionType === 'direct' || connectionType === 'hawser-standard') && !data.host) {
 			return json({ error: 'Host is required for this connection type' }, { status: 400 });
 		}
@@ -113,7 +119,7 @@ export const POST: RequestHandler = async (event) => {
 			await setEnvironmentPublicIp(env.id, data.publicIp);
 		}
 
-		// Notify subprocesses to pick up the new environment
+		// Notify event collectors to pick up the new environment
 		refreshSubprocessEnvironments();
 
 		// Auto-assign Admin role to creator (Enterprise only)

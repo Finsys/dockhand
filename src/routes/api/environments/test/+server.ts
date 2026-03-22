@@ -1,4 +1,6 @@
 import { json } from '@sveltejs/kit';
+import { unixSocketRequest, httpsAgentRequest } from '$lib/server/docker';
+import type { DockerClientConfig } from '$lib/server/docker';
 import type { RequestHandler } from './$types';
 
 interface TestConnectionRequest {
@@ -22,29 +24,19 @@ function cleanPem(pem: string): string {
 		.join('\n');
 }
 
-function buildTlsOptions(config: TestConnectionRequest): Record<string, any> | undefined {
+function buildDockerClientConfig(config: TestConnectionRequest): DockerClientConfig | null {
 	const protocol = config.protocol || 'http';
-	if (protocol !== 'https') return undefined;
+	if (protocol !== 'https') return null;
 
-	const tls: Record<string, any> = {
-		sessionTimeout: 0,
-		servername: config.host
+	return {
+		type: 'https',
+		host: config.host || 'localhost',
+		port: config.port || 2376,
+		ca: config.tlsCa ? cleanPem(config.tlsCa) || undefined : undefined,
+		cert: config.tlsCert ? cleanPem(config.tlsCert) || undefined : undefined,
+		key: config.tlsKey ? cleanPem(config.tlsKey) || undefined : undefined,
+		skipVerify: config.tlsSkipVerify || false
 	};
-	if (config.tlsSkipVerify) {
-		tls.rejectUnauthorized = false;
-	} else {
-		tls.rejectUnauthorized = true;
-		if (config.tlsCa) {
-			tls.ca = [cleanPem(config.tlsCa)];
-		}
-	}
-	if (config.tlsCert) {
-		tls.cert = [cleanPem(config.tlsCert)];
-	}
-	if (config.tlsKey) {
-		tls.key = cleanPem(config.tlsKey);
-	}
-	return tls;
 }
 
 /**
@@ -59,11 +51,7 @@ export const POST: RequestHandler = async ({ request }) => {
 
 		if (config.connectionType === 'socket') {
 			const socketPath = config.socketPath || '/var/run/docker.sock';
-			response = await fetch('http://localhost/info', {
-				// @ts-ignore - Bun supports unix socket
-				unix: socketPath,
-				signal: AbortSignal.timeout(10000)
-			});
+			response = await unixSocketRequest(socketPath, '/info');
 		} else if (config.connectionType === 'hawser-edge') {
 			// Edge mode - cannot test directly, agent connects to us
 			return json({
@@ -83,7 +71,6 @@ export const POST: RequestHandler = async ({ request }) => {
 				return json({ success: false, error: 'Host is required' }, { status: 400 });
 			}
 
-			const url = `${protocol}://${host}:${port}/info`;
 			const headers: Record<string, string> = {
 				'Content-Type': 'application/json'
 			};
@@ -92,19 +79,17 @@ export const POST: RequestHandler = async ({ request }) => {
 				headers['X-Hawser-Token'] = config.hawserToken;
 			}
 
-			const fetchOptions: any = {
-				headers,
-				signal: AbortSignal.timeout(10000),
-				keepalive: false
-			};
-
-			const tls = buildTlsOptions(config);
-			if (tls) {
-				fetchOptions.tls = tls;
-				if (process.env.DEBUG_TLS) fetchOptions.verbose = true;
+			const tlsConfig = buildDockerClientConfig(config);
+			if (tlsConfig) {
+				response = await httpsAgentRequest(tlsConfig, '/info', {}, false, headers);
+			} else {
+				const url = `http://${host}:${port}/info`;
+				response = await fetch(url, {
+					headers,
+					signal: AbortSignal.timeout(10000),
+					keepalive: false
+				});
 			}
-
-			response = await fetch(url, fetchOptions);
 		}
 
 		if (!response.ok) {
@@ -123,21 +108,19 @@ export const POST: RequestHandler = async ({ request }) => {
 				if (config.hawserToken) {
 					hawserHeaders['X-Hawser-Token'] = config.hawserToken;
 				}
-				const hawserUrl = `${protocol}://${config.host}:${config.port || 2375}/_hawser/info`;
 
-				const fetchOptions: any = {
-					headers: hawserHeaders,
-					signal: AbortSignal.timeout(5000),
-					keepalive: false
-				};
-
-				const tls = buildTlsOptions(config);
-				if (tls) {
-					fetchOptions.tls = tls;
-					if (process.env.DEBUG_TLS) fetchOptions.verbose = true;
+				let hawserResp: Response;
+				const tlsConfig = buildDockerClientConfig(config);
+				if (tlsConfig) {
+					hawserResp = await httpsAgentRequest(tlsConfig, '/_hawser/info', {}, false, hawserHeaders);
+				} else {
+					const hawserUrl = `http://${config.host}:${config.port || 2375}/_hawser/info`;
+					hawserResp = await fetch(hawserUrl, {
+						headers: hawserHeaders,
+						signal: AbortSignal.timeout(5000),
+						keepalive: false
+					});
 				}
-
-				const hawserResp = await fetch(hawserUrl, fetchOptions);
 				if (hawserResp.ok) {
 					hawserInfo = await hawserResp.json();
 				}
@@ -182,6 +165,8 @@ export const POST: RequestHandler = async ({ request }) => {
 			message = 'Connection failed - check host and port';
 		} else if (rawMessage.includes('self signed certificate') || rawMessage.includes('UNABLE_TO_VERIFY_LEAF_SIGNATURE')) {
 			message = 'TLS certificate error - provide CA certificate for self-signed certs';
+		} else if (rawMessage.includes('CERT_ALTNAME_INVALID') || rawMessage.includes('ERR_TLS_CERT_ALTNAME_INVALID')) {
+			message = 'Certificate hostname mismatch - your certificate\'s Subject Alternative Name (SAN) doesn\'t match the host. Regenerate with: -addext "subjectAltName=DNS:hostname,IP:x.x.x.x"';
 		} else if (rawMessage.includes('certificate') || rawMessage.includes('SSL') || rawMessage.includes('TLS')) {
 			message = 'TLS/SSL error - check certificate configuration';
 		}

@@ -2,12 +2,16 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { releaseVolumeHelperContainer } from '$lib/server/docker';
 import { authorize } from '$lib/server/authorize';
+import { validateDockerIdParam } from '$lib/server/docker-validation';
 
 /**
  * Release the cached volume helper container when done browsing.
  * This is called when the volume browser modal is closed.
  */
 export const POST: RequestHandler = async ({ params, url, cookies }) => {
+	const invalid = validateDockerIdParam(params.name, 'volume');
+	if (invalid) return invalid;
+
 	const auth = await authorize(cookies);
 
 	const envId = url.searchParams.get('env');

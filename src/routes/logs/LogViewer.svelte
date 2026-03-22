@@ -1,8 +1,13 @@
 <script lang="ts">
-	import { RefreshCw, Copy, Download, WrapText, ArrowDownToLine, Search, ChevronUp, ChevronDown, X, Type } from 'lucide-svelte';
+	import { RefreshCw, Copy, Download, WrapText, ArrowDownToLine, Search, ChevronUp, ChevronDown, X, Type, Eraser } from 'lucide-svelte';
+	import { copyToClipboard } from '$lib/utils/clipboard';
 	import * as Select from '$lib/components/ui/select';
+	import { appSettings, formatLogTimestamps } from '$lib/stores/settings';
 	import { themeStore } from '$lib/stores/theme';
 	import { getMonospaceFont } from '$lib/themes';
+	import { AnsiUp } from 'ansi_up';
+	const ansiUp = new AnsiUp();
+	ansiUp.use_classes = true;
 
 	interface Props {
 		logs: string;
@@ -11,6 +16,7 @@
 		autoRefresh?: boolean;
 		autoScroll?: boolean;
 		onRefresh?: () => void;
+		onClear?: () => void;
 		onAutoRefreshChange?: (value: boolean) => void;
 		onAutoScrollChange?: (value: boolean) => void;
 		class?: string;
@@ -23,6 +29,7 @@
 		autoRefresh = true,
 		autoScroll = true,
 		onRefresh,
+		onClear,
 		onAutoRefreshChange,
 		onAutoScrollChange,
 		class: className = ''
@@ -31,6 +38,9 @@
 	let logsRef: HTMLDivElement;
 	let wordWrap = $state(true);
 	let fontSize = $state(12);
+
+	// RAF-based auto-scroll
+	let scrollRafPending = false;
 
 	// Search state
 	let logSearchActive = $state(false);
@@ -50,20 +60,20 @@
 	// Auto-scroll when logs change
 	$effect(() => {
 		if (autoScroll && logsRef && logs) {
-			setTimeout(() => {
-				logsRef.scrollTop = logsRef.scrollHeight;
-			}, 50);
+			if (!scrollRafPending) {
+				scrollRafPending = true;
+				requestAnimationFrame(() => {
+					if (logsRef) logsRef.scrollTop = logsRef.scrollHeight;
+					scrollRafPending = false;
+				});
+			}
 		}
 	});
 
 	// Copy logs to clipboard
 	async function copyLogs() {
 		if (logs) {
-			try {
-				await navigator.clipboard.writeText(logs);
-			} catch (err) {
-				console.error('Failed to copy:', err);
-			}
+			await copyToClipboard(logs);
 		}
 	}
 
@@ -135,25 +145,24 @@
 		}
 	}
 
-	// Escape HTML to prevent XSS
-	function escapeHtml(text: string): string {
-		return text
-			.replace(/&/g, '&amp;')
-			.replace(/</g, '&lt;')
-			.replace(/>/g, '&gt;')
-			.replace(/"/g, '&quot;')
-			.replace(/'/g, '&#039;');
-	}
-
-	// Highlighted logs with search matches
+	// Highlighted logs with search matches and ANSI color support
 	let highlightedLogs = $derived(() => {
-		const escaped = escapeHtml(logs || '');
-		if (!logSearchQuery.trim()) return escaped;
+		let text = logs || '';
+		if ($appSettings.formatLogTimestamps) {
+			text = formatLogTimestamps(text);
+		}
+		const withAnsi = ansiUp.ansi_to_html(text);
+		if (!logSearchQuery.trim()) return withAnsi;
 
 		const query = logSearchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-		const escapedQuery = escapeHtml(query);
-		const regex = new RegExp(`(${escapedQuery})`, 'gi');
-		return escaped.replace(regex, '<mark class="search-match">$1</mark>');
+		const escapedQuery = query.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+		// Split by HTML tags and only process text parts
+		const parts = withAnsi.split(/(<[^>]*>)/);
+		return parts.map(part => {
+			if (part.startsWith('<')) return part;
+			return part.replace(new RegExp(`(${escapedQuery})`, 'gi'), '<mark class="search-match">$1</mark>');
+		}).join('');
 	});
 
 	// Update match count after render
@@ -277,6 +286,14 @@
 			>
 				<Download class="w-3 h-3 text-zinc-500 hover:text-zinc-300" />
 			</button>
+			<!-- Clear -->
+			<button
+				onclick={() => onClear?.()}
+				class="p-1 rounded hover:bg-zinc-800 transition-colors"
+				title="Clear logs"
+			>
+				<Eraser class="w-3 h-3 text-zinc-500 hover:text-zinc-300" />
+			</button>
 			<!-- Refresh -->
 			<button
 				onclick={() => onRefresh?.()}
@@ -318,4 +335,5 @@
 		box-shadow: 0 0 8px rgba(234, 179, 8, 0.9), 0 0 16px rgba(234, 179, 8, 0.5);
 		outline: 2px solid rgb(250, 204, 21);
 	}
+
 </style>

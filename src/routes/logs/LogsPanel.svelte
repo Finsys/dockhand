@@ -1,10 +1,14 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
-	import { X, GripHorizontal, RefreshCw, Copy, Download, WrapText, ArrowDownToLine, Search, ChevronUp, ChevronDown, Sun, Moon, Wifi, WifiOff, Pause, Play } from 'lucide-svelte';
+	import { onMount, onDestroy, tick } from 'svelte';
+	import { X, GripHorizontal, RefreshCw, Copy, Download, WrapText, ArrowDownToLine, Search, ChevronUp, ChevronDown, Sun, Moon, Wifi, WifiOff, Pause, Play, Eraser } from 'lucide-svelte';
+	import { copyToClipboard } from '$lib/utils/clipboard';
 	import * as Select from '$lib/components/ui/select';
-	import { appSettings } from '$lib/stores/settings';
+	import { appSettings, formatLogTimestamps } from '$lib/stores/settings';
 	import { themeStore } from '$lib/stores/theme';
 	import { getMonospaceFont } from '$lib/themes';
+	import { AnsiUp } from 'ansi_up';
+	const ansiUp = new AnsiUp();
+	ansiUp.use_classes = true;
 
 	interface Props {
 		containerId: string;
@@ -37,6 +41,14 @@
 	const RECONNECT_DELAY = 3000;
 	const OFFLINE_POLL_INTERVAL = 5000; // Check every 5 seconds when offline
 	let offlinePollingInterval: ReturnType<typeof setInterval> | null = null;
+
+	// SSE batching - buffer incoming text and flush to state periodically
+	let pendingText = '';
+	let flushTimer: ReturnType<typeof setTimeout> | null = null;
+	const FLUSH_INTERVAL = 100; // ms
+
+	// RAF-based auto-scroll
+	let scrollRafPending = false;
 
 	// Search state
 	let logSearchActive = $state(false);
@@ -145,6 +157,37 @@
 		return `${url}${separator}env=${envId}`;
 	}
 
+	// Flush buffered text to state
+	function flushLogs() {
+		if (flushTimer) {
+			clearTimeout(flushTimer);
+			flushTimer = null;
+		}
+		if (!pendingText) return;
+
+		logs += pendingText;
+		pendingText = '';
+
+		// Apply log buffer size limit (convert KB to characters, roughly 1 char = 1 byte)
+		const maxSize = $appSettings.logBufferSizeKb * 1024;
+		if (logs.length > maxSize) {
+			logs = logs.substring(logs.length - Math.floor(maxSize * 0.8));
+		}
+
+		scrollToBottom();
+	}
+
+	// RAF-based scroll to bottom (coalesces multiple calls into one frame)
+	async function scrollToBottom() {
+		if (!autoScroll || !logsRef || scrollRafPending) return;
+		scrollRafPending = true;
+		await tick();
+		requestAnimationFrame(() => {
+			if (logsRef) logsRef.scrollTop = logsRef.scrollHeight;
+			scrollRafPending = false;
+		});
+	}
+
 	// Start SSE streaming for logs
 	function startStreaming() {
 		if (!containerId || !streamingEnabled) return;
@@ -172,29 +215,17 @@
 						// Add container name prefix to each line if available
 						let text = data.text;
 						if (data.containerName) {
-							// Split by lines, prefix each non-empty line, rejoin
 							const lines = text.split('\n');
 							text = lines.map((line: string, i: number) => {
-								// Don't prefix empty lines at the end
 								if (line === '' && i === lines.length - 1) return line;
 								if (line === '') return line;
 								return `[${data.containerName}] ${line}`;
 							}).join('\n');
 						}
-						logs += text;
-
-						// Apply log buffer size limit (convert KB to characters, roughly 1 char = 1 byte)
-						const maxSize = $appSettings.logBufferSizeKb * 1024;
-						if (logs.length > maxSize) {
-							// Truncate from the beginning, keeping 80% of max size
-							logs = logs.substring(logs.length - Math.floor(maxSize * 0.8));
-						}
-
-						// Auto-scroll to bottom
-						if (autoScroll && logsRef) {
-							setTimeout(() => {
-								logsRef.scrollTop = logsRef.scrollHeight;
-							}, 50);
+						// Buffer text and schedule flush
+						pendingText += text;
+						if (!flushTimer) {
+							flushTimer = setTimeout(flushLogs, FLUSH_INTERVAL);
 						}
 					}
 				} catch {
@@ -292,6 +323,8 @@
 
 	// Stop SSE streaming
 	function stopStreaming(resetAttempts = true) {
+		// Flush any buffered text before stopping
+		flushLogs();
 		if (reconnectTimeout) {
 			clearTimeout(reconnectTimeout);
 			reconnectTimeout = null;
@@ -381,12 +414,7 @@
 				return;
 			}
 			logs = data.logs || '';
-			// Auto-scroll to bottom
-			if (autoScroll && logsRef) {
-				setTimeout(() => {
-					logsRef.scrollTop = logsRef.scrollHeight;
-				}, 50);
-			}
+			scrollToBottom();
 		} catch (error) {
 			console.error('Failed to fetch logs:', error);
 			logs = `Failed to fetch logs: ${error instanceof Error ? error.message : 'Unknown error'}`;
@@ -422,11 +450,7 @@
 	// Copy logs to clipboard
 	async function copyLogs() {
 		if (logs) {
-			try {
-				await navigator.clipboard.writeText(logs);
-			} catch (err) {
-				console.error('Failed to copy:', err);
-			}
+			await copyToClipboard(logs);
 		}
 	}
 
@@ -443,6 +467,12 @@
 			document.body.removeChild(a);
 			URL.revokeObjectURL(url);
 		}
+	}
+
+	// Clear logs buffer
+	function clearLogs() {
+		logs = '';
+		pendingText = '';
 	}
 
 	// Search functions
@@ -498,100 +528,17 @@
 		}
 	}
 
-	// Escape HTML to prevent XSS
-	function escapeHtml(text: string): string {
-		return text
-			.replace(/&/g, '&amp;')
-			.replace(/</g, '&lt;')
-			.replace(/>/g, '&gt;')
-			.replace(/"/g, '&quot;')
-			.replace(/'/g, '&#039;');
-	}
-
-	// ANSI color code to CSS class mapping
-	const ansiColorMap: Record<string, string> = {
-		'30': 'ansi-black',
-		'31': 'ansi-red',
-		'32': 'ansi-green',
-		'33': 'ansi-yellow',
-		'34': 'ansi-blue',
-		'35': 'ansi-magenta',
-		'36': 'ansi-cyan',
-		'37': 'ansi-white',
-		'90': 'ansi-bright-black',
-		'91': 'ansi-bright-red',
-		'92': 'ansi-bright-green',
-		'93': 'ansi-bright-yellow',
-		'94': 'ansi-bright-blue',
-		'95': 'ansi-bright-magenta',
-		'96': 'ansi-bright-cyan',
-		'97': 'ansi-bright-white',
-		'40': 'ansi-bg-black',
-		'41': 'ansi-bg-red',
-		'42': 'ansi-bg-green',
-		'43': 'ansi-bg-yellow',
-		'44': 'ansi-bg-blue',
-		'45': 'ansi-bg-magenta',
-		'46': 'ansi-bg-cyan',
-		'47': 'ansi-bg-white',
-		'1': 'ansi-bold',
-		'2': 'ansi-dim',
-		'3': 'ansi-italic',
-		'4': 'ansi-underline',
-	};
-
-	// Convert ANSI escape codes to HTML spans with CSS classes
-	function ansiToHtml(text: string): string {
-		// Strip control characters
-		let cleaned = text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1A]/g, '');
-
-		// Escape HTML
-		let escaped = escapeHtml(cleaned);
-
-		// Match ANSI escape sequences
-		const ansiRegex = /\x1b\[([0-9;]*)m/g;
-
-		let result = '';
-		let lastIndex = 0;
-		let openSpans = 0;
-		let match;
-
-		while ((match = ansiRegex.exec(escaped)) !== null) {
-			result += escaped.slice(lastIndex, match.index);
-			lastIndex = ansiRegex.lastIndex;
-
-			const codes = match[1].split(';').filter(c => c !== '');
-
-			for (const code of codes) {
-				if (code === '0' || code === '39' || code === '49' || code === '') {
-					while (openSpans > 0) {
-						result += '</span>';
-						openSpans--;
-					}
-				} else if (ansiColorMap[code]) {
-					result += `<span class="${ansiColorMap[code]}">`;
-					openSpans++;
-				}
-			}
-		}
-
-		result += escaped.slice(lastIndex);
-
-		while (openSpans > 0) {
-			result += '</span>';
-			openSpans--;
-		}
-
-		return result;
-	}
-
 	// Highlighted logs with search matches and ANSI color support
 	let highlightedLogs = $derived(() => {
-		const withAnsi = ansiToHtml(logs || '');
+		let text = logs || '';
+		if ($appSettings.formatLogTimestamps) {
+			text = formatLogTimestamps(text);
+		}
+		const withAnsi = ansiUp.ansi_to_html(text);
 		if (!logSearchQuery.trim()) return withAnsi;
 
 		const query = logSearchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-		const escapedQuery = escapeHtml(query);
+		const escapedQuery = query.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 		// Split by HTML tags and only process text parts
 		const parts = withAnsi.split(/(<[^>]*>)/);
@@ -656,6 +603,8 @@
 		document.removeEventListener('mouseup', stopDrag);
 		document.removeEventListener('visibilitychange', handleVisibilityChange);
 		document.removeEventListener('resume', handleVisibilityChange);
+		// Flush pending text and clean up timers
+		flushLogs();
 		stopStreaming();
 	});
 </script>
@@ -825,6 +774,14 @@
 			>
 				<Download class="w-3 h-3 {darkMode ? 'text-zinc-500 hover:text-zinc-300' : 'text-gray-500 hover:text-gray-700'}" />
 			</button>
+			<!-- Clear -->
+			<button
+				onclick={clearLogs}
+				class="p-1 rounded transition-colors {darkMode ? 'hover:bg-zinc-800' : 'hover:bg-gray-300'}"
+				title="Clear logs"
+			>
+				<Eraser class="w-3 h-3 {darkMode ? 'text-zinc-500 hover:text-zinc-300' : 'text-gray-500 hover:text-gray-700'}" />
+			</button>
 			<!-- Refresh -->
 			<button
 				onclick={fetchLogs}
@@ -873,42 +830,6 @@
 		box-shadow: 0 0 8px rgba(234, 179, 8, 0.9), 0 0 16px rgba(234, 179, 8, 0.5);
 		outline: 2px solid rgb(250, 204, 21);
 	}
-
-	/* ANSI color classes - foreground colors */
-	:global(.ansi-black) { color: #3f3f46; }
-	:global(.ansi-red) { color: #ef4444; }
-	:global(.ansi-green) { color: #22c55e; }
-	:global(.ansi-yellow) { color: #eab308; }
-	:global(.ansi-blue) { color: #3b82f6; }
-	:global(.ansi-magenta) { color: #d946ef; }
-	:global(.ansi-cyan) { color: #06b6d4; }
-	:global(.ansi-white) { color: #e4e4e7; }
-
-	/* Bright foreground colors */
-	:global(.ansi-bright-black) { color: #71717a; }
-	:global(.ansi-bright-red) { color: #f87171; }
-	:global(.ansi-bright-green) { color: #4ade80; }
-	:global(.ansi-bright-yellow) { color: #facc15; }
-	:global(.ansi-bright-blue) { color: #60a5fa; }
-	:global(.ansi-bright-magenta) { color: #e879f9; }
-	:global(.ansi-bright-cyan) { color: #22d3ee; }
-	:global(.ansi-bright-white) { color: #fafafa; }
-
-	/* Background colors */
-	:global(.ansi-bg-black) { background-color: #18181b; }
-	:global(.ansi-bg-red) { background-color: #dc2626; }
-	:global(.ansi-bg-green) { background-color: #16a34a; }
-	:global(.ansi-bg-yellow) { background-color: #ca8a04; }
-	:global(.ansi-bg-blue) { background-color: #2563eb; }
-	:global(.ansi-bg-magenta) { background-color: #c026d3; }
-	:global(.ansi-bg-cyan) { background-color: #0891b2; }
-	:global(.ansi-bg-white) { background-color: #d4d4d8; }
-
-	/* Text styles */
-	:global(.ansi-bold) { font-weight: bold; }
-	:global(.ansi-dim) { opacity: 0.7; }
-	:global(.ansi-italic) { font-style: italic; }
-	:global(.ansi-underline) { text-decoration: underline; }
 
 	/* Fade-in animation for logs */
 	@keyframes fadeIn {

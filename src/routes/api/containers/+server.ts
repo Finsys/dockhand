@@ -1,5 +1,5 @@
 import { json } from '@sveltejs/kit';
-import { listContainers, createContainer, pullImage, EnvironmentNotFoundError, type CreateContainerOptions } from '$lib/server/docker';
+import { listContainers, createContainer, pullImage, EnvironmentNotFoundError, DockerConnectionError, type CreateContainerOptions } from '$lib/server/docker';
 import { authorize } from '$lib/server/authorize';
 import { auditContainer } from '$lib/server/audit';
 import { hasEnvironments } from '$lib/server/db';
@@ -40,7 +40,9 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 		if (error instanceof EnvironmentNotFoundError) {
 			return json({ error: 'Environment not found' }, { status: 404 });
 		}
-		console.error('Error listing containers:', error);
+		if (!(error instanceof DockerConnectionError)) {
+			console.error('Error listing containers:', error);
+		}
 		// Return empty array instead of error to allow UI to load
 		return json([]);
 	}

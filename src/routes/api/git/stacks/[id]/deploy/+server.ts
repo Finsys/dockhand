@@ -4,6 +4,7 @@ import { getGitStack } from '$lib/server/db';
 import { deployGitStack } from '$lib/server/git';
 import { authorize } from '$lib/server/authorize';
 import { auditGitStack } from '$lib/server/audit';
+import { createJobResponse } from '$lib/server/sse';
 
 export const POST: RequestHandler = async (event) => {
 	const { params, cookies } = event;
@@ -21,12 +22,19 @@ export const POST: RequestHandler = async (event) => {
 			return json({ error: 'Permission denied' }, { status: 403 });
 		}
 
-		const result = await deployGitStack(id);
+		return createJobResponse(async (send) => {
+			try {
+				const result = await deployGitStack(id);
 
-		// Audit log
-		await auditGitStack(event, 'deploy', id, gitStack.stackName, gitStack.environmentId);
+				// Audit log
+				await auditGitStack(event, 'deploy', id, gitStack.stackName, gitStack.environmentId);
 
-		return json(result);
+				send('result', result);
+			} catch (error) {
+				console.error('Failed to deploy git stack:', error);
+				send('result', { success: false, error: 'Failed to deploy git stack' });
+			}
+		}, event.request);
 	} catch (error) {
 		console.error('Failed to deploy git stack:', error);
 		return json({ error: 'Failed to deploy git stack' }, { status: 500 });

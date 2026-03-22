@@ -3,6 +3,7 @@ import {
 	getEnvironments,
 	getLatestHostMetrics,
 	getHostMetrics,
+	getMetricsCollectionInterval,
 	getContainerEventStats,
 	getContainerEvents,
 	getEnvSetting,
@@ -14,22 +15,31 @@ import {
 	listImages,
 	listNetworks,
 	getContainerStats,
-	getDiskUsage
+	getDiskUsage,
+	dockerPing,
+	DockerConnectionError
 } from '$lib/server/docker';
 import { listComposeStacks } from '$lib/server/stacks';
 import { authorize } from '$lib/server/authorize';
+import { prefersJSON, sseToJSON } from '$lib/server/sse';
 import type { EnvironmentStats } from '../+server';
 import { parseLabels } from '$lib/utils/label-colors';
+import { isEdgeConnected } from '$lib/server/hawser';
+
 
 // Skip disk usage collection (Synology NAS performance fix)
 const SKIP_DF_COLLECTION = process.env.SKIP_DF_COLLECTION === 'true' || process.env.SKIP_DF_COLLECTION === '1';
 
 // Helper to add timeout to promises
+// IMPORTANT: Clears the timeout to prevent memory leaks from accumulated timer closures
 function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
-	return Promise.race([
-		promise,
-		new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms))
-	]);
+	let timeoutId: ReturnType<typeof setTimeout> | null = null;
+	const timeoutPromise = new Promise<T>((resolve) => {
+		timeoutId = setTimeout(() => resolve(fallback), ms);
+	});
+	return Promise.race([promise, timeoutPromise]).finally(() => {
+		if (timeoutId !== null) clearTimeout(timeoutId);
+	});
 }
 
 // Disk usage cache - getDiskUsage() is very slow (30s timeout) but data changes rarely
@@ -63,6 +73,9 @@ setInterval(() => {
 		}
 	}
 }, 10 * 60 * 1000); // Every 10 minutes
+
+// Register cache reporter for memory monitoring
+
 
 async function getCachedDiskUsage(envId: number): Promise<any> {
 	const cached = diskUsageCache.get(envId);
@@ -121,10 +134,14 @@ function calculateMemoryUsage(memoryStats: any): number {
 	return usage;
 }
 
+// Target time window for metrics history charts (15 minutes)
+const METRICS_HISTORY_WINDOW_MS = 15 * 60 * 1000;
+
 // Progressive stats loading - returns stats object and emits partial updates via callback
 async function getEnvironmentStatsProgressive(
 	env: any,
-	onPartialUpdate: (stats: Partial<EnvironmentStats> & { id: number }) => void
+	onPartialUpdate: (stats: Partial<EnvironmentStats> & { id: number }) => void,
+	metricsPointCount: number
 ): Promise<EnvironmentStats> {
 	const envStats: EnvironmentStats = {
 		id: env.id,
@@ -183,7 +200,7 @@ async function getEnvironmentStatsProgressive(
 			getLatestHostMetrics(env.id),
 			getContainerEventStats(env.id),
 			getContainerEvents({ environmentId: env.id, limit: 10 }),
-			getHostMetrics(30, env.id),
+			getHostMetrics(metricsPointCount, env.id),
 			getPendingContainerUpdates(env.id)
 		]);
 
@@ -232,6 +249,36 @@ async function getEnvironmentStatsProgressive(
 			containers: { ...envStats.containers },
 			loading: { ...envStats.loading }
 		});
+
+		// For edge envs with no connected agent, skip the 5s ping and fail immediately.
+		// On restart, agents take 30-70s to reconnect — without this check, every open
+		// dashboard tab fires a 5s ping per edge env simultaneously, creating a flood.
+		if (env.connectionType === 'hawser-edge' && !isEdgeConnected(env.id)) {
+			envStats.online = false;
+			envStats.error = 'Agent not connected';
+			envStats.loading = undefined;
+			onPartialUpdate({
+				id: env.id,
+				online: false,
+				error: 'Agent not connected',
+				loading: undefined
+			});
+			return envStats;
+		}
+
+		// Quick reachability check — if ping fails, skip all expensive Docker API calls
+		if (!await dockerPing(env.id)) {
+			envStats.online = false;
+			envStats.error = 'Environment offline';
+			envStats.loading = undefined;
+			onPartialUpdate({
+				id: env.id,
+				online: false,
+				error: 'Environment offline',
+				loading: undefined
+			});
+			return envStats;
+		}
 
 		// Helper to get valid size
 		const getValidSize = (size: number | undefined | null): number => {
@@ -507,7 +554,7 @@ async function getEnvironmentStatsProgressive(
 	return envStats;
 }
 
-export const GET: RequestHandler = async ({ cookies }) => {
+export const GET: RequestHandler = async ({ request, cookies }) => {
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !await auth.can('environments', 'view')) {
 		return new Response(JSON.stringify({ error: 'Permission denied' }), {
@@ -531,6 +578,7 @@ export const GET: RequestHandler = async ({ cookies }) => {
 	let controllerClosed = false;
 	const stream = new ReadableStream({
 		async start(controller) {
+
 			const encoder = new TextEncoder();
 
 			// Safe enqueue that checks if controller is still open
@@ -569,17 +617,23 @@ export const GET: RequestHandler = async ({ cookies }) => {
 			}));
 			safeEnqueue(`event: environments\ndata: ${JSON.stringify(envList)}\n\n`);
 
+			// Calculate metrics point count based on configured interval
+			const metricsIntervalMs = await getMetricsCollectionInterval();
+			const metricsPointCount = Math.ceil(METRICS_HISTORY_WINDOW_MS / metricsIntervalMs);
+
 			// Fetch stats for each environment with progressive updates
 			const promises = environments.map(async (env) => {
 				try {
 					await getEnvironmentStatsProgressive(env, (partialStats) => {
 						// Send partial update as it arrives
 						safeEnqueue(`event: partial\ndata: ${JSON.stringify(partialStats)}\n\n`);
-					});
+					}, metricsPointCount);
 					// Send final complete stats event for this environment
 					safeEnqueue(`event: complete\ndata: ${JSON.stringify({ id: env.id })}\n\n`);
 				} catch (error) {
-					console.error(`Failed to get stats for ${env.name}:`, error);
+					if (!(error instanceof DockerConnectionError)) {
+						console.error(`Failed to get stats for ${env.name}:`, error);
+					}
 					// Convert technical error to user-friendly message
 					const errorStr = String(error);
 					let friendlyError = 'Connection error';
@@ -607,19 +661,25 @@ export const GET: RequestHandler = async ({ cookies }) => {
 				} catch {
 					// Already closed
 				}
+
 			}
 		},
 		cancel() {
 			// Called when the client disconnects
 			controllerClosed = true;
+
 		}
 	});
 
-	return new Response(stream, {
+	const sseResponse = new Response(stream, {
 		headers: {
 			'Content-Type': 'text/event-stream',
 			'Cache-Control': 'no-cache',
-			'Connection': 'keep-alive'
+			'Connection': 'keep-alive',
+			'X-Accel-Buffering': 'no'
 		}
 	});
+
+	if (prefersJSON(request)) return sseToJSON(sseResponse);
+	return sseResponse;
 };

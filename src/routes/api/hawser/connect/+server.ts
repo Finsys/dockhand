@@ -2,7 +2,7 @@
  * Hawser Edge WebSocket Connect Endpoint
  *
  * This endpoint handles WebSocket connections from Hawser agents running in Edge mode.
- * In development: WebSocket is handled by Bun.serve in vite.config.ts on port 5174
+ * In development: WebSocket is handled by ws.WebSocketServer in vite.config.ts on port 5174
  * In production: WebSocket is handled by the server wrapper in server.ts
  *
  * The HTTP GET endpoint returns connection info for clients.
@@ -28,7 +28,7 @@ export const GET: RequestHandler = async () => {
 		hostname: conn.hostname,
 		capabilities: conn.capabilities,
 		connectedAt: conn.connectedAt.toISOString(),
-		lastHeartbeat: conn.lastHeartbeat.toISOString()
+		lastHeartbeat: new Date(conn.lastHeartbeat).toISOString()
 	}));
 
 	return json({

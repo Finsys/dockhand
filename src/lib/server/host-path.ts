@@ -20,6 +20,7 @@
  */
 
 import { readFileSync } from 'node:fs';
+import * as http from 'node:http';
 import { resolve } from 'node:path';
 
 // Cache the host data dir to avoid repeated API calls
@@ -29,10 +30,15 @@ let detectionAttempted = false;
 // Cache ALL mounts for path translation (not just DATA_DIR)
 let cachedMounts: Array<{ source: string; destination: string }> | null = null;
 
+// Cache Dockhand's own Docker access method (detected from container inspect)
+// Used by scanner to replicate how Dockhand connects to Docker
+let cachedOwnDockerHost: string | null = null;
+let cachedOwnNetworkMode: string | null = null;
+
 /**
  * Get our own container ID
  */
-function getOwnContainerId(): string | null {
+export function getOwnContainerId(): string | null {
 	// Method 1: From cgroup (works in most cases)
 	try {
 		const cgroup = readFileSync('/proc/self/cgroup', 'utf-8');
@@ -95,25 +101,48 @@ export async function detectHostDataDir(): Promise<string | null> {
 
 	try {
 		// Query Docker API to inspect our own container
+		// Try unix socket first, fall back to TCP if DOCKER_HOST is set
 		const socketPath = process.env.DOCKER_SOCKET || '/var/run/docker.sock';
+		const dockerHost = process.env.DOCKER_HOST;
 
-		// Use fetch with unix socket
-		const response = await fetch(`http://localhost/containers/${containerId}/json`, {
-			// @ts-ignore - Bun supports unix sockets
-			unix: socketPath
-		});
+		const containerInfo = await new Promise<any>((resolvePromise, reject) => {
+			const reqOptions: http.RequestOptions = dockerHost?.startsWith('tcp://')
+				? (() => {
+					const u = new URL(dockerHost.replace('tcp://', 'http://'));
+					return { hostname: u.hostname, port: u.port, path: `/containers/${containerId}/json`, method: 'GET' };
+				})()
+				: { socketPath, path: `/containers/${containerId}/json`, method: 'GET' };
 
-		if (!response.ok) {
-			console.warn(`[HostPath] Failed to inspect container: ${response.status}`);
-			return null;
-		}
-
-		const containerInfo = await response.json() as {
+			const req = http.request(reqOptions, (res) => {
+				const chunks: Buffer[] = [];
+				res.on('data', (chunk: Buffer) => chunks.push(chunk));
+				res.on('end', () => {
+					if (res.statusCode === 200) {
+						try {
+							resolvePromise(JSON.parse(Buffer.concat(chunks).toString('utf-8')));
+						} catch {
+							reject(new Error('Failed to parse container inspect response'));
+						}
+					} else {
+						reject(new Error(`Container inspect failed: ${res.statusCode}`));
+					}
+				});
+				res.on('error', reject);
+			});
+			req.on('error', reject);
+			req.end();
+		}) as {
 			Mounts?: Array<{
 				Type: string;
 				Source: string;
 				Destination: string;
 			}>;
+			Config?: {
+				Env?: string[];
+			};
+			NetworkSettings?: {
+				Networks?: Record<string, unknown>;
+			};
 		};
 
 		// Cache ALL mounts for later path translation (used by rewriteComposeVolumePaths)
@@ -122,6 +151,30 @@ export async function detectHostDataDir(): Promise<string | null> {
 			destination: m.Destination
 		}));
 		console.log(`[HostPath] Cached ${cachedMounts.length} mount(s)`);
+
+		// Cache DOCKER_HOST from Dockhand's own env vars (if set)
+		// This tells us how Dockhand was configured to reach Docker
+		const envVars = containerInfo.Config?.Env || [];
+		for (const v of envVars) {
+			if (v.startsWith('DOCKER_HOST=')) {
+				cachedOwnDockerHost = v.substring('DOCKER_HOST='.length);
+				console.log(`[HostPath] Detected own DOCKER_HOST: ${cachedOwnDockerHost}`);
+				break;
+			}
+		}
+
+		// Cache Dockhand's network (prefer non-default for service discovery)
+		const networks = containerInfo.NetworkSettings?.Networks;
+		if (networks) {
+			const custom = Object.keys(networks).filter(
+				n => n !== 'bridge' && n !== 'none' && n !== 'host'
+			);
+			cachedOwnNetworkMode = custom.length > 0 ? custom[0]
+				: networks.bridge ? 'bridge' : null;
+			if (cachedOwnNetworkMode) {
+				console.log(`[HostPath] Detected own network: ${cachedOwnNetworkMode}`);
+			}
+		}
 
 		// Find the mount for our DATA_DIR
 		const dataMount = containerInfo.Mounts?.find(m => m.Destination === dataDir);
@@ -155,6 +208,25 @@ export async function detectHostDataDir(): Promise<string | null> {
  */
 export function getHostDataDir(): string | null {
 	return cachedHostDataDir;
+}
+
+/**
+ * Get DOCKER_HOST from Dockhand's own container config (if set).
+ * Returns the TCP address (e.g., "tcp://socket-proxy:2375") or null.
+ * Populated by detectHostDataDir() at startup.
+ */
+export function getOwnDockerHost(): string | null {
+	return cachedOwnDockerHost;
+}
+
+/**
+ * Get the Docker network Dockhand is attached to.
+ * Used to place scanner containers on the same network so they can reach
+ * TCP-based Docker endpoints (e.g., socket proxy).
+ * Populated by detectHostDataDir() at startup.
+ */
+export function getOwnNetworkMode(): string | null {
+	return cachedOwnNetworkMode;
 }
 
 /**

@@ -119,9 +119,10 @@
 				<span class="text-muted-foreground text-2xs" title={formatDateTime(event.timestamp)}>
 					{formatTime(event.timestamp)}
 				</span>
+				{@const ActionIcon = getActionIcon(event.action)}
 				<!-- Action icon -->
 				<div class="flex items-center justify-center {getActionColor(event.action)}" title={event.action}>
-					<svelte:component this={getActionIcon(event.action)} class="w-3 h-3" />
+					<ActionIcon class="w-3 h-3" />
 				</div>
 				<!-- Container name -->
 				<span class="truncate text-foreground" title={event.container_name}>

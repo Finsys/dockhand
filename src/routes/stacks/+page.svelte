@@ -12,7 +12,7 @@
 	import { Input } from '$lib/components/ui/input';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import MultiSelectFilter from '$lib/components/MultiSelectFilter.svelte';
-	import { Play, Square, Trash2, Plus, ArrowBigDown, Search, Pencil, ExternalLink, GitBranch, RefreshCw, Loader2, FileCode, Box, RotateCcw, ScrollText, Terminal, Eye, Network, HardDrive, Heart, HeartPulse, HeartOff, ChevronsUpDown, ChevronsDownUp, Rocket, AlertTriangle, X, Layers, Pause, CircleDashed, Skull, FolderOpen, Variable, Clock, RotateCw, Import } from 'lucide-svelte';
+	import { Play, Square, Trash2, Plus, ArrowBigDown, Search, Pencil, ExternalLink, GitBranch, RefreshCw, Loader2, FileCode, FileText, FileOutput, Box, RotateCcw, ScrollText, Terminal, Eye, Network, HardDrive, Heart, HeartPulse, HeartOff, ChevronsUpDown, ChevronsDownUp, Rocket, AlertTriangle, X, Layers, Pause, CircleDashed, Skull, FolderOpen, Variable, Clock, RotateCw, Import, Ship, Cable, LayoutPanelLeft, Rows3, GripVertical } from 'lucide-svelte';
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
 	import BatchOperationModal from '$lib/components/BatchOperationModal.svelte';
 	import type { ComposeStackInfo, ContainerStats } from '$lib/types';
@@ -22,9 +22,11 @@
 	import GitDeployProgressPopover from './GitDeployProgressPopover.svelte';
 	import ContainerInspectModal from '../containers/ContainerInspectModal.svelte';
 	import FileBrowserModal from '../containers/FileBrowserModal.svelte';
+	import LogsPanel from '../logs/LogsPanel.svelte';
 	import { currentEnvironment, environments, appendEnvParam, clearStaleEnvironment } from '$lib/stores/environment';
 	import { onDockerEvent, isContainerListChange } from '$lib/stores/events';
 	import { canAccess } from '$lib/stores/auth';
+	import { readJobResponse } from '$lib/utils/sse-fetch';
 	import { EmptyState, NoEnvironment } from '$lib/components/ui/empty-state';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import { DataGrid } from '$lib/components/data-grid';
@@ -128,33 +130,74 @@
 	}
 
 	// Fetch container stats
+	let statsAbortController: AbortController | null = null;
+
 	async function fetchStats() {
+		// Abort any previous in-flight stream
+		statsAbortController?.abort();
+		statsAbortController = new AbortController();
+
 		try {
-			const response = await fetch(appendEnvParam('/api/containers/stats', envId));
-			const stats: ContainerStats[] = await response.json();
-			const statsMap = new Map<string, ContainerStats>();
-			const newHistory = new Map(containerStatsHistory);
+			const response = await fetch(
+				appendEnvParam('/api/containers/stats/stream', envId),
+				{ signal: statsAbortController.signal }
+			);
 
-			for (const stat of stats) {
-				if (!stat.id) continue;
-				statsMap.set(stat.id, stat);
+			if (!response.ok || !response.body) return;
 
-				// Update history for all metrics
-				const history = newHistory.get(stat.id) || { cpu: [], mem: [], netRx: [], netTx: [], diskR: [], diskW: [] };
-				history.cpu = [...history.cpu.slice(-(MAX_HISTORY - 1)), stat.cpuPercent];
-				history.mem = [...history.mem.slice(-(MAX_HISTORY - 1)), stat.memoryPercent];
-				history.netRx = [...history.netRx.slice(-(MAX_HISTORY - 1)), stat.networkRx];
-				history.netTx = [...history.netTx.slice(-(MAX_HISTORY - 1)), stat.networkTx];
-				history.diskR = [...history.diskR.slice(-(MAX_HISTORY - 1)), stat.blockRead];
-				history.diskW = [...history.diskW.slice(-(MAX_HISTORY - 1)), stat.blockWrite];
-				newHistory.set(stat.id, history);
+			const reader = response.body.getReader();
+			const decoder = new TextDecoder();
+			let buffer = '';
+
+			while (true) {
+				const { done, value } = await reader.read();
+				if (done) break;
+
+				buffer += decoder.decode(value, { stream: true });
+
+				const lines = buffer.split('\n');
+				buffer = lines.pop() || '';
+
+				let currentEvent = '';
+				for (const line of lines) {
+					if (line.startsWith(':')) continue;
+
+					if (line.startsWith('event: ')) {
+						currentEvent = line.slice(7).trim();
+					} else if (line.startsWith('data: ')) {
+						if (currentEvent === 'stat') {
+							try {
+								const stat: ContainerStats = JSON.parse(line.slice(6));
+								if (!stat.id) continue;
+
+								// Merge into existing stats map
+								containerStats = new Map(containerStats).set(stat.id, stat);
+
+								// Append to history
+								const newHistory = new Map(containerStatsHistory);
+								const history = newHistory.get(stat.id) || { cpu: [], mem: [], netRx: [], netTx: [], diskR: [], diskW: [] };
+								history.cpu = [...history.cpu.slice(-(MAX_HISTORY - 1)), stat.cpuPercent];
+								history.mem = [...history.mem.slice(-(MAX_HISTORY - 1)), stat.memoryPercent];
+								history.netRx = [...history.netRx.slice(-(MAX_HISTORY - 1)), stat.networkRx];
+								history.netTx = [...history.netTx.slice(-(MAX_HISTORY - 1)), stat.networkTx];
+								history.diskR = [...history.diskR.slice(-(MAX_HISTORY - 1)), stat.blockRead];
+								history.diskW = [...history.diskW.slice(-(MAX_HISTORY - 1)), stat.blockWrite];
+								newHistory.set(stat.id, history);
+								containerStatsHistory = newHistory;
+
+								statsUpdateCount++;
+							} catch {
+								// Skip malformed data
+							}
+						}
+						currentEvent = '';
+					}
+				}
 			}
-
-			containerStats = statsMap;
-			containerStatsHistory = newHistory;
-			statsUpdateCount++; // Trigger reactivity for expanded rows
-		} catch (error) {
-			console.error('Failed to fetch container stats:', error);
+		} catch (error: any) {
+			if (error?.name !== 'AbortError') {
+				console.error('Failed to fetch container stats:', error);
+			}
 		}
 	}
 
@@ -229,9 +272,10 @@
 		return { cpuPercent, memoryUsage, memoryLimit, networkRx, networkTx, blockRead, blockWrite, runningCount };
 	}
 
-	// Search and sort state
-	let searchInput = $state('');
-	let searchQuery = $state('');
+	// Search and sort state - initialize from URL for persistence across navigation
+	const initialSearch = $page.url.searchParams.get('search') ?? '';
+	let searchInput = $state(initialSearch);
+	let searchQuery = $state(initialSearch);
 	let sortField = $state<SortField>('name');
 	let sortDirection = $state<SortDirection>('asc');
 
@@ -281,6 +325,93 @@
 		saveStatusFilter();
 	});
 
+	// Inline logs panel state
+	interface ActiveLogs {
+		containerId: string;
+		containerName: string;
+	}
+	let activeLogs = $state<ActiveLogs[]>([]);
+	let currentLogsContainerId = $state<string | null>(null);
+
+	function hasActiveLogs(containerId: string): boolean {
+		return activeLogs.some(l => l.containerId === containerId);
+	}
+
+	function showContainerLogs(container: { id: string; name: string }) {
+		if (hasActiveLogs(container.id)) {
+			currentLogsContainerId = container.id;
+		} else {
+			activeLogs = [...activeLogs, { containerId: container.id, containerName: container.name }];
+			currentLogsContainerId = container.id;
+		}
+	}
+
+	function closeLogs(containerId: string) {
+		activeLogs = activeLogs.filter(l => l.containerId !== containerId);
+		if (currentLogsContainerId === containerId) {
+			currentLogsContainerId = null;
+		}
+	}
+
+	// Layout state - horizontal (panels below) or vertical (panels on right)
+	type LayoutMode = 'horizontal' | 'vertical';
+	const LAYOUT_STORAGE_KEY = 'dockhand-stacks-layout';
+	const PANEL_WIDTH_STORAGE_KEY = 'dockhand-stacks-panel-width';
+	const DEFAULT_PANEL_WIDTH = 400;
+	const MIN_PANEL_WIDTH = 250;
+	const MAX_PANEL_WIDTH = 800;
+
+	let layoutMode = $state<LayoutMode>('horizontal');
+	let panelWidth = $state(DEFAULT_PANEL_WIDTH);
+	let isResizingWidth = $state(false);
+	let mainContentRef: HTMLDivElement | undefined;
+
+	function loadLayoutMode() {
+		if (typeof window !== 'undefined') {
+			const saved = localStorage.getItem(LAYOUT_STORAGE_KEY) as LayoutMode;
+			if (saved === 'horizontal' || saved === 'vertical') {
+				layoutMode = saved;
+			}
+			const savedWidth = localStorage.getItem(PANEL_WIDTH_STORAGE_KEY);
+			if (savedWidth) {
+				const w = parseInt(savedWidth);
+				if (!isNaN(w) && w >= MIN_PANEL_WIDTH && w <= MAX_PANEL_WIDTH) {
+					panelWidth = w;
+				}
+			}
+		}
+	}
+
+	function toggleLayoutMode() {
+		layoutMode = layoutMode === 'horizontal' ? 'vertical' : 'horizontal';
+		if (typeof window !== 'undefined') {
+			localStorage.setItem(LAYOUT_STORAGE_KEY, layoutMode);
+		}
+	}
+
+	function startWidthResize(e: MouseEvent) {
+		e.preventDefault();
+		isResizingWidth = true;
+		document.addEventListener('mousemove', handleWidthResize);
+		document.addEventListener('mouseup', stopWidthResize);
+	}
+
+	function handleWidthResize(e: MouseEvent) {
+		if (!isResizingWidth || !mainContentRef) return;
+		const containerRect = mainContentRef.getBoundingClientRect();
+		const newWidth = containerRect.right - e.clientX;
+		panelWidth = Math.max(MIN_PANEL_WIDTH, Math.min(MAX_PANEL_WIDTH, newWidth));
+	}
+
+	function stopWidthResize() {
+		isResizingWidth = false;
+		document.removeEventListener('mousemove', handleWidthResize);
+		document.removeEventListener('mouseup', stopWidthResize);
+		if (typeof window !== 'undefined') {
+			localStorage.setItem(PANEL_WIDTH_STORAGE_KEY, String(panelWidth));
+		}
+	}
+
 	// Confirmation popover state
 	let confirmDeleteName = $state<string | null>(null);
 	let confirmStopName = $state<string | null>(null);
@@ -288,6 +419,7 @@
 
 	// Stack operation loading state
 	let stackActionLoading = $state<string | null>(null);
+	let stackDownLoading = $state<string | null>(null);
 
 	// Container-level confirmation popover state
 	let confirmStopContainerId = $state<string | null>(null);
@@ -520,6 +652,17 @@
 		return () => clearTimeout(searchTimeout);
 	});
 
+	// Sync search query to URL for persistence across navigation
+	$effect(() => {
+		const q = searchQuery;
+		const url = new URL($page.url);
+		if (q) url.searchParams.set('search', q);
+		else url.searchParams.delete('search');
+		if (url.toString() !== $page.url.toString()) {
+			goto(url.toString(), { replaceState: true, noScroll: true, keepFocus: true });
+		}
+	});
+
 	// Track last loaded environment to show skeleton on environment change
 	let lastLoadedEnvId = $state<number | null>(null);
 
@@ -657,6 +800,16 @@
 		return stackSources[stackName] || { sourceType: 'external' };
 	}
 
+	function getStackSystemType(stack: ComposeStackInfo): 'dockhand' | 'hawser' | null {
+		if (!stack.containerDetails) return null;
+		for (const c of stack.containerDetails) {
+			const img = (c.image || '').toLowerCase();
+			if (img.includes('fnsys/dockhand') || /(?:^|\/)dockhand(?::|$)/.test(img)) return 'dockhand';
+			if (img.includes('finsys/hawser') || img.includes('ghcr.io/finsys/hawser')) return 'hawser';
+		}
+		return null;
+	}
+
 	function getDisplayStatus(stack: ComposeStackInfo): string {
 		if (stack.status === 'created' && getStackSource(stack.name).sourceType === 'git') {
 			return 'not deployed';
@@ -687,16 +840,9 @@
 		stackActionLoading = name;
 		try {
 			const response = await fetch(appendEnvParam(`/api/stacks/${encodeURIComponent(name)}/start`, envId), { method: 'POST' });
-			if (!response.ok) {
-				const rawText = await response.text();
-				let errorMsg = 'Failed to start stack';
-				try {
-					const data = JSON.parse(rawText);
-					errorMsg = data.error || errorMsg;
-				} catch {
-					errorMsg = rawText || errorMsg;
-				}
-				showErrorDialog(`Failed to start ${name}`, errorMsg);
+			const data = await readJobResponse(response);
+			if (!data.success) {
+				showErrorDialog(`Failed to start ${name}`, data.error || 'Failed to start stack');
 				return;
 			}
 			toast.success(`Started ${name}`);
@@ -715,16 +861,9 @@
 		stackActionLoading = name;
 		try {
 			const response = await fetch(appendEnvParam(`/api/stacks/${encodeURIComponent(name)}/stop`, envId), { method: 'POST' });
-			if (!response.ok) {
-				const rawText = await response.text();
-				let errorMsg = 'Failed to stop stack';
-				try {
-					const data = JSON.parse(rawText);
-					errorMsg = data.error || errorMsg;
-				} catch {
-					errorMsg = rawText || errorMsg;
-				}
-				showErrorDialog(`Failed to stop ${name}`, errorMsg);
+			const data = await readJobResponse(response);
+			if (!data.success) {
+				showErrorDialog(`Failed to stop ${name}`, data.error || 'Failed to stop stack');
 				return;
 			}
 			toast.success(`Stopped ${name}`);
@@ -743,16 +882,9 @@
 		stackActionLoading = name;
 		try {
 			const response = await fetch(appendEnvParam(`/api/stacks/${encodeURIComponent(name)}/restart`, envId), { method: 'POST' });
-			if (!response.ok) {
-				const rawText = await response.text();
-				let errorMsg = 'Failed to restart stack';
-				try {
-					const data = JSON.parse(rawText);
-					errorMsg = data.error || errorMsg;
-				} catch {
-					errorMsg = rawText || errorMsg;
-				}
-				showErrorDialog(`Failed to restart ${name}`, errorMsg);
+			const data = await readJobResponse(response);
+			if (!data.success) {
+				showErrorDialog(`Failed to restart ${name}`, data.error || 'Failed to restart stack');
 				return;
 			}
 			toast.success(`Restarted ${name}`);
@@ -769,22 +901,12 @@
 	async function downStack(name: string) {
 		operationError = null;
 		stackActionLoading = name;
+		stackDownLoading = name;
 		try {
 			const response = await fetch(appendEnvParam(`/api/stacks/${encodeURIComponent(name)}/down`, envId), { method: 'POST' });
-			// Log raw response for debugging
-			const rawText = await response.text();
-			console.log(`[downStack] Response status: ${response.status}, raw body:`, rawText);
-
-			if (!response.ok) {
-				let errorMsg = 'Failed to bring down stack';
-				try {
-					const data = JSON.parse(rawText);
-					errorMsg = data.error || errorMsg;
-				} catch {
-					// Response may not be valid JSON
-					errorMsg = rawText || errorMsg;
-				}
-				showErrorDialog(`Failed to bring down ${name}`, errorMsg);
+			const data = await readJobResponse(response);
+			if (!data.success) {
+				showErrorDialog(`Failed to bring down ${name}`, data.error || 'Failed to bring down stack');
 				return;
 			}
 			toast.success(`Brought down ${name}`);
@@ -795,6 +917,7 @@
 			showErrorDialog(`Failed to bring down ${name}`, errorMsg);
 		} finally {
 			stackActionLoading = null;
+			stackDownLoading = null;
 		}
 	}
 
@@ -1060,13 +1183,7 @@
 	onMount(() => {
 		loadExpandedState();
 		loadStatusFilter();
-
-		// Check for search query param from URL (e.g., from container stack link)
-		const urlSearch = $page.url.searchParams.get('search');
-		if (urlSearch) {
-			searchInput = urlSearch;
-			searchQuery = urlSearch;
-		}
+		loadLayoutMode();
 
 		// Initial fetch is handled by $effect - no need to duplicate here
 
@@ -1115,6 +1232,11 @@
 
 		document.removeEventListener('visibilitychange', handleVisibilityChange);
 		document.removeEventListener('resume', handleVisibilityChange);
+		document.removeEventListener('mousemove', handleWidthResize);
+		document.removeEventListener('mouseup', stopWidthResize);
+
+		// Abort any in-flight stats stream
+		statsAbortController?.abort();
 	});
 </script>
 
@@ -1160,6 +1282,19 @@
 			<Button size="sm" variant="outline" onclick={fetchStacks}>
 				<RefreshCw class="w-3.5 h-3.5" />
 				Refresh
+			</Button>
+			<Button
+				size="sm"
+				variant="outline"
+				onclick={toggleLayoutMode}
+				class="h-8 w-8 p-0"
+				title={layoutMode === 'horizontal' ? 'Switch to vertical layout (logs on side)' : 'Switch to horizontal layout (logs below)'}
+			>
+				{#if layoutMode === 'horizontal'}
+					<LayoutPanelLeft class="w-4 h-4" />
+				{:else}
+					<Rows3 class="w-4 h-4" />
+				{/if}
 			</Button>
 			{#if $canAccess('stacks', 'create')}
 				<Button size="sm" variant="outline" onclick={() => openGitModal()}>
@@ -1300,6 +1435,11 @@
 			description="Create a stack or deploy from Git to get started"
 		/>
 	{:else}
+		<!-- Main content area - changes layout based on mode -->
+		<div
+			bind:this={mainContentRef}
+			class="flex-1 min-h-0 {layoutMode === 'vertical' ? 'flex gap-3' : 'flex flex-col gap-3'}"
+		>
 		<DataGrid
 			data={filteredStacks}
 			keyField="name"
@@ -1327,6 +1467,7 @@
 			{#snippet cell(column, stack, rowState)}
 				{@const source = getStackSource(stack.name)}
 				{#if column.id === 'name'}
+					{@const systemType = getStackSystemType(stack)}
 					{#if source.sourceType !== 'git'}
 						<!-- Internal stacks (including those needing file location) are clickable -->
 						<button
@@ -1339,6 +1480,23 @@
 					{:else}
 						<!-- Git stacks open in GitStackModal instead -->
 						<span class="font-medium text-xs">{stack.name}</span>
+					{/if}
+					{#if systemType}
+						<Tooltip.Root>
+							<Tooltip.Trigger>
+								<Badge variant="secondary" class="text-2xs py-0 px-1 shrink-0 bg-blue-500/10 text-blue-600 dark:text-blue-400 hover:bg-blue-500/20 cursor-help flex items-center gap-0.5">
+									{#if systemType === 'dockhand'}
+										<Ship class="w-2.5 h-2.5" />
+									{:else}
+										<Cable class="w-2.5 h-2.5" />
+									{/if}
+									{systemType === 'dockhand' ? 'Dockhand' : 'Hawser'}
+								</Badge>
+							</Tooltip.Trigger>
+							<Tooltip.Content>
+								<p class="text-sm whitespace-nowrap">{systemType === 'dockhand' ? 'Dockhand management container' : 'Hawser remote agent'}</p>
+							</Tooltip.Content>
+						</Tooltip.Root>
 					{/if}
 					{#if stackEnvVarCounts[stack.name]}
 						<Tooltip.Root>
@@ -1626,21 +1784,6 @@
 										{/snippet}
 									</ConfirmPopover>
 								{/if}
-								{#if $canAccess('stacks', 'stop')}
-									<ConfirmPopover
-										open={confirmDownName === stack.name}
-										action="Down"
-										itemType="stack"
-										itemName={stack.name}
-										title="Down (remove containers)"
-										onConfirm={() => downStack(stack.name)}
-										onOpenChange={(open) => confirmDownName = open ? stack.name : null}
-									>
-										{#snippet children({ open })}
-											<ArrowBigDown class="w-3 h-3 {open ? 'text-orange-500' : 'text-muted-foreground hover:text-orange-500'}" />
-										{/snippet}
-									</ConfirmPopover>
-								{/if}
 							{:else}
 								{#if $canAccess('stacks', 'start')}
 									<button
@@ -1653,6 +1796,21 @@
 									</button>
 								{/if}
 							{/if}
+						{/if}
+						{#if $canAccess('stacks', 'stop') && stack.status !== 'created' && stack.status !== 'not deployed'}
+							<ConfirmPopover
+								open={confirmDownName === stack.name}
+								action="Down"
+								itemType="stack"
+								itemName={stack.name}
+								title="Down (remove containers)"
+								onConfirm={() => downStack(stack.name)}
+								onOpenChange={(open) => confirmDownName = open ? stack.name : null}
+							>
+								{#snippet children({ open })}
+									<ArrowBigDown class="w-3 h-3 {stackDownLoading === stack.name ? 'animate-bounce text-orange-500' : open ? 'text-orange-500' : 'text-muted-foreground hover:text-orange-500'}" />
+								{/snippet}
+							</ConfirmPopover>
 						{/if}
 						{#if $canAccess('stacks', 'remove')}
 							<ConfirmPopover
@@ -1834,11 +1992,19 @@
 										<div class="flex gap-1">
 											<button
 												type="button"
-												title="View logs"
+												title="Open logs inline"
+												onclick={(e) => { e.stopPropagation(); showContainerLogs(container); }}
+												class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer {currentLogsContainerId === container.id ? 'bg-muted text-blue-500' : ''}"
+											>
+												<FileText class="w-3.5 h-3.5 {currentLogsContainerId === container.id ? 'text-blue-500' : 'text-muted-foreground hover:text-foreground'}" />
+											</button>
+											<button
+												type="button"
+												title="Open logs in full view"
 												onclick={(e) => { e.stopPropagation(); goto(appendEnvParam(`/logs?container=${container.id}`, envId)); }}
 												class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
 											>
-												<ScrollText class="w-3.5 h-3.5 text-muted-foreground hover:text-foreground" />
+												<FileOutput class="w-3.5 h-3.5 text-muted-foreground hover:text-foreground" />
 											</button>
 											{#if container.state === 'running' && $canAccess('containers', 'exec')}
 												<button
@@ -1968,6 +2134,50 @@
 				{/if}
 			{/snippet}
 		</DataGrid>
+
+			<!-- Panels section - in vertical mode this is a column on the right with resize handle -->
+			{#if layoutMode === 'vertical' && currentLogsContainerId}
+				{@const activeLog = activeLogs.find(l => l.containerId === currentLogsContainerId)}
+				{#if activeLog}
+					<!-- Vertical resize handle -->
+					<div
+						role="separator"
+						aria-orientation="vertical"
+						class="w-2 cursor-ew-resize flex items-center justify-center hover:bg-muted transition-colors {isResizingWidth ? 'bg-muted' : ''}"
+						onmousedown={startWidthResize}
+					>
+						<GripVertical class="w-4 h-8 text-zinc-600" />
+					</div>
+
+					<div class="flex flex-col gap-3 h-full overflow-hidden" style="width: {panelWidth}px; flex-shrink: 0;">
+						<div class="flex-1 min-h-0">
+							<LogsPanel
+								containerId={activeLog.containerId}
+								containerName={activeLog.containerName}
+								visible={true}
+								envId={envId}
+								fillHeight={true}
+								onClose={() => closeLogs(activeLog.containerId)}
+							/>
+						</div>
+					</div>
+				{/if}
+			{/if}
+		</div>
+
+		<!-- Panels for horizontal mode - below the table, full width -->
+		{#if layoutMode === 'horizontal' && currentLogsContainerId}
+			{@const activeLog = activeLogs.find(l => l.containerId === currentLogsContainerId)}
+			{#if activeLog}
+				<LogsPanel
+					containerId={activeLog.containerId}
+					containerName={activeLog.containerName}
+					visible={true}
+					envId={envId}
+					onClose={() => closeLogs(activeLog.containerId)}
+				/>
+			{/if}
+		{/if}
 	{/if}
 </div>
 

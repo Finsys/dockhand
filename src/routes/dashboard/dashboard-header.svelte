@@ -15,10 +15,9 @@
 		Loader2
 	} from 'lucide-svelte';
 	import { whale } from '@lucide/lab';
-	import { getIconComponent } from '$lib/utils/icons';
+	import EnvironmentIcon from '$lib/components/EnvironmentIcon.svelte';
 	import { goto } from '$app/navigation';
 	import { canAccess } from '$lib/stores/auth';
-	import type { Component } from 'svelte';
 
 	type ConnectionType = 'socket' | 'direct' | 'hawser-standard' | 'hawser-edge';
 
@@ -71,7 +70,6 @@
 		(port ? `${host}:${port}` : host || 'Unknown host')
 	);
 
-	const EnvIcon = $derived(getIconComponent(icon)) as Component;
 	const canEdit = $derived($canAccess('environments', 'edit'));
 
 	function openSettings(e: MouseEvent) {
@@ -88,7 +86,7 @@
 	<!-- Compact header for mini tiles -->
 	<div class="flex items-center gap-2 min-w-0 flex-1">
 		<div class="p-1.5 rounded-lg {online ? 'bg-primary/10' : 'bg-muted'}">
-			<EnvIcon class="w-4 h-4 {online ? 'text-primary' : 'text-muted-foreground'}" />
+			<EnvironmentIcon {icon} envId={environmentId} class="w-4 h-4 {online ? 'text-primary' : 'text-muted-foreground'}" />
 		</div>
 		<div class="min-w-0 flex-1">
 			<div class="flex items-center gap-1.5">
@@ -109,7 +107,7 @@
 	<div class="flex items-center justify-between">
 		<div class="flex items-center gap-2 min-w-0 flex-1">
 			<div class="p-1.5 rounded-lg {online ? 'bg-primary/10' : 'bg-muted'}">
-				<EnvIcon class="w-4 h-4 {online ? 'text-primary' : 'text-muted-foreground'}" />
+				<EnvironmentIcon {icon} envId={environmentId} class="w-4 h-4 {online ? 'text-primary' : 'text-muted-foreground'}" />
 			</div>
 			{#if connectionType === 'socket' || !connectionType}
 				<span title="Unix socket connection">

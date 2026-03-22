@@ -1,8 +1,98 @@
 [
   {
+    "version": "1.0.22",
+    "comingSoon": true,
+    "changes": [
+      { "type": "feature", "text": "dashboard list view with inline search and connection filters (#740)" },
+      { "type": "feature", "text": "custom environment icon (#754)" },
+      { "type": "feature", "text": "show +N indicator for containers with multiple IP addresses (#644)" },
+      { "type": "feature", "text": "bundle all fonts locally for privacy and offline use (#734)" },
+      { "type": "fix", "text": "respect PROXY settings when checking for container updates" },
+      { "type": "fix", "text": "git stacks force-redeploy after a failed sync (#693)" },
+      { "type": "fix", "text": "What's New modal shown before login, exposing version info (#717)" },
+      { "type": "fix", "text": "git repository files not removed from disk on delete (#671)" },
+      { "type": "fix", "text": "recursive chown at startup breaks stack volumes with different ownership (#719)" },
+      { "type": "fix", "text": "missing notification event toggles for container healthy, image prune events (#659)" },
+      { "type": "fix", "text": "container disappears when edit fails (e.g. invalid memory/swap) (#736)" },
+      { "type": "fix", "text": "regression: network container count always shows 0 (#761)" },
+      { "type": "fix", "text": "Grype/Trivy scan containers don't inherit proxy env vars (#780)" },
+      { "type": "fix", "text": "pin vulnerability scanner images to specific versions not :latest" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.22"
+  },
+  {
+    "version": "1.0.21",
+    "date": "2026-03-13",
+    "changes": [
+      { "type": "feature", "text": "option to truncate port list (#702)" },
+      { "type": "feature", "text": "log viewer supports ANSII 256 colors (#743)" },
+      { "type": "fix", "text": "IPv6 Problems (#714, #731)" },
+      { "type": "fix", "text": "polling storm & mass disconnect (#733, #741)" },
+      { "type": "fix", "text": "custom cron schedule displayed incorrectly (#727)" },
+      { "type": "fix", "text": "wrong cron schedule (#706)" },
+      { "type": "fix", "text": "file browser does not allow upload over 512 KB (#687)" },
+      { "type": "fix", "text": "can't set memory swappiness when using Podman (#691)" },
+      { "type": "fix", "text": "compose API negotiation fix (#692, #696)" },
+      { "type": "fix", "text": "not deployed git stacks continue to show the Down action (#694)" },
+      { "type": "fix", "text": "display time doesn't reflect time zone (#735)" },
+      { "type": "fix", "text": "prune dangling images counter not working (#718)" },
+      { "type": "fix", "text": "own PORT env not used in HEALTHCHECK (#745)" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.21"
+  },
+  {
+    "version": "1.0.20",
+    "date": "2026-03-02",
+    "changes": [
+      { "type": "fix", "text": "regression on Synology DSM" },
+      { "type": "fix", "text": "Fix ARM64 regression: Go collector crashing on Raspberry Pi and other ARM devices" },
+      { "type": "fix", "text": "autoupdate hangs on \"waiting for Dockhand\"" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.20"
+  },
+  {
+    "version": "1.0.19",
+    "date": "2026-03-01",
+    "changes": [
+      { "type": "feature", "text": "Inline logs panel on stacks page — view container logs without leaving the page" },
+      { "type": "feature", "text": "Make ports column sortable in containers grid" },
+      { "type": "feature", "text": "Structured auth logging with client IP (login/logout/MFA/OIDC events)" },
+      { "type": "fix", "text": "Fix memory leak: TLS context accumulation for HTTPS environments (Bun)" },
+      { "type": "fix", "text": "Fix security scanning on Docker with custom logging drivers (Loki, Fluentd, etc.)" },
+      { "type": "fix", "text": "Fix grouped log viewer not auto-scrolling on new entries" },
+      { "type": "fix", "text": "Fix container recreation error messages not surfacing actual Docker errors" },
+      { "type": "fix", "text": "Fix LDAP group-to-role mapping" },
+      { "type": "fix", "text": "Fix container file browser hiding old files" },
+      { "type": "fix", "text": "Fix SSH key permission issues on NAS filesystems" },
+      { "type": "fix", "text": "Fix binary file corruption when syncing stacks to Hawser agents" },
+      { "type": "fix", "text": "Fix UI timeout issues for long running operations" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.19"
+  },
+  {
+    "version": "1.0.18",
+    "date": "2026-02-16",
+    "changes": [
+      { "type": "feature", "text": "Dockhand self-update from the UI" },
+      { "type": "feature", "text": "Show freed disk space after image removal and pruning" },
+      { "type": "feature", "text": "Handle dynamically-spawned child containers in stack stop/down/restart/remove" },
+      { "type": "feature", "text": "Git webhooks are logged to the audit log" },
+      { "type": "feature", "text": "Add Mattermost notification support" },
+      { "type": "feature", "text": "Configurable disk usage warning threshold per environment" },
+      { "type": "fix", "text": "Fix file upload CSRF 403 error on plain HTTP deployments" },
+      { "type": "fix", "text": "Fix scanner container /wait timeout causing empty scan output" },
+      { "type": "fix", "text": "Fix saving adopted external stack failing with 'Stack directory not found'" },
+      { "type": "fix", "text": "Add Bearer token auth support for ntfy notifications" },
+      { "type": "fix", "text": "Fix git SSH failing with 'No user exists for uid' with arbitrary UIDs" },
+      { "type": "fix", "text": "Fix command palette flooding API requests on open" },
+      { "type": "fix", "text": "Normalize stack names when adopting to prevent uppercase rejection" },
+      { "type": "fix", "text": "Fix container update failing for shared network modes (container:<name>, host, none)" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.18"
+  },
+  {
     "version": "1.0.17",
     "date": "2026-02-09",
-    "comingSoon": false,
     "changes": [
       { "type": "fix", "text": "Fix scanner failure on rootless Docker" },
       { "type": "fix", "text": "Increase Hawser compose operation timeout" },

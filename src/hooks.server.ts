@@ -1,4 +1,5 @@
 // v1.0.12
+import '$lib/server/dns-dispatcher.js';
 import { initDatabase, hasAdminUser } from '$lib/server/db';
 import { startSubprocesses, stopSubprocesses } from '$lib/server/subprocess-manager';
 import { startScheduler } from '$lib/server/scheduler';
@@ -9,10 +10,74 @@ import { initCryptoFallback } from '$lib/server/crypto-fallback';
 import { detectHostDataDir } from '$lib/server/host-path';
 import { listContainers, removeContainer } from '$lib/server/docker';
 import { migrateCredentials } from '$lib/server/encryption';
+import { gzipSync } from 'node:zlib';
 import { rmSync, readdirSync, existsSync } from 'fs';
 import { join } from 'path';
 import type { HandleServerError, Handle } from '@sveltejs/kit';
 import { redirect } from '@sveltejs/kit';
+import { startRssTracker, stopRssTracker, rssBeforeOp, rssAfterOp } from '$lib/server/rss-tracker';
+
+// Content types worth compressing
+const COMPRESSIBLE_TYPES = [
+	'application/json',
+	'text/html',
+	'text/plain',
+	'text/css',
+	'application/javascript',
+	'text/javascript',
+	'application/xml',
+	'text/xml',
+	'image/svg+xml'
+];
+
+// Minimum response size to bother compressing (1KB)
+const MIN_COMPRESS_SIZE = 1024;
+
+function shouldCompress(request: Request, response: Response): boolean {
+	const acceptEncoding = request.headers.get('accept-encoding') || '';
+	if (!acceptEncoding.includes('gzip')) return false;
+
+	if (response.headers.has('content-encoding')) return false;
+
+	const contentType = response.headers.get('content-type') || '';
+	if (contentType.includes('text/event-stream')) return false;
+	if (contentType.includes('octet-stream')) return false;
+	if (contentType.startsWith('image/') && !contentType.includes('svg')) return false;
+
+	const isCompressible = COMPRESSIBLE_TYPES.some(type => contentType.includes(type));
+	if (!isCompressible) return false;
+
+	const contentLength = response.headers.get('content-length');
+	if (contentLength && parseInt(contentLength) < MIN_COMPRESS_SIZE) return false;
+
+	return true;
+}
+
+async function compressResponse(request: Request, response: Response): Promise<Response> {
+	if (!shouldCompress(request, response)) return response;
+
+	const body = await response.arrayBuffer();
+	if (body.byteLength < MIN_COMPRESS_SIZE) return new Response(body, {
+		status: response.status,
+		statusText: response.statusText,
+		headers: response.headers
+	});
+
+	const gzipBefore = rssBeforeOp();
+	const compressed = gzipSync(new Uint8Array(body));
+	rssAfterOp('gzip', gzipBefore);
+
+	const headers = new Headers(response.headers);
+	headers.set('content-encoding', 'gzip');
+	headers.set('vary', 'Accept-Encoding');
+	headers.delete('content-length');
+
+	return new Response(compressed, {
+		status: response.status,
+		statusText: response.statusText,
+		headers
+	});
+}
 
 // Cleanup orphaned scanner version containers from previous runs
 async function cleanupOrphanedScannerContainers() {
@@ -98,11 +163,12 @@ if (!initialized) {
 		cleanupOrphanedScannerContainers().catch(err => {
 			console.error('Failed to cleanup orphaned scanner containers:', err);
 		});
-		// Start background subprocesses for metrics and event collection (isolated processes)
+		// Start background subprocesses for metrics and event collection (worker thread)
 		startSubprocesses().catch(err => {
 			console.error('Failed to start background subprocesses:', err);
 		});
 		startScheduler(); // Start unified scheduler for auto-updates and git syncs (async)
+		startRssTracker(); // Start RSS memory tracking (no-op unless MEMORY_MONITOR=true)
 
 		// Check license expiry on startup and then daily (with HMR guard)
 		checkLicenseExpiry().catch(err => {
@@ -119,6 +185,7 @@ if (!initialized) {
 		// Graceful shutdown handling
 		const shutdown = async () => {
 			console.log('[Server] Shutting down...');
+			stopRssTracker();
 			await stopSubprocesses();
 			process.exit(0);
 		};
@@ -176,55 +243,57 @@ export const handle: Handle = async ({ event, resolve }) => {
 		return resolve(event);
 	}
 
-	// WebSocket upgrade for terminal connections is handled by the build patch (scripts/patch-build.ts)
-	// This is necessary because svelte-adapter-bun expects server.websocket() which doesn't exist in SvelteKit
+	const httpBefore = rssBeforeOp();
+	try {
+		// Check if auth is enabled
+		const authEnabled = await isAuthEnabled();
 
-	// Check if auth is enabled
-	const authEnabled = await isAuthEnabled();
-
-	// If auth is disabled, allow everything (app works as before)
-	if (!authEnabled) {
-		event.locals.user = null;
-		event.locals.authEnabled = false;
-		return resolve(event);
-	}
-
-	// Auth is enabled - check session
-	const user = await validateSession(event.cookies);
-	event.locals.user = user;
-	event.locals.authEnabled = true;
-
-	// Public paths don't require authentication
-	if (isPublicPath(event.url.pathname)) {
-		return resolve(event);
-	}
-
-	// If not authenticated
-	if (!user) {
-		// Special case: allow user creation when auth is enabled but no admin exists yet
-		// This enables the first admin user to be created during initial setup
-		const noAdminSetupMode = !(await hasAdminUser());
-		if (noAdminSetupMode && event.url.pathname === '/api/users' && event.request.method === 'POST') {
-			return resolve(event);
+		// If auth is disabled, allow everything (app works as before)
+		if (!authEnabled) {
+			event.locals.user = null;
+			event.locals.authEnabled = false;
+			return compressResponse(event.request, await resolve(event));
 		}
 
-		// API routes return 401
-		if (event.url.pathname.startsWith('/api/')) {
-			return new Response(
-				JSON.stringify({ error: 'Unauthorized', message: 'Authentication required' }),
-				{
-					status: 401,
-					headers: { 'Content-Type': 'application/json' }
-				}
-			);
+		// Auth is enabled - check session
+		const user = await validateSession(event.cookies);
+		event.locals.user = user;
+		event.locals.authEnabled = true;
+
+		// Public paths don't require authentication
+		if (isPublicPath(event.url.pathname)) {
+			return compressResponse(event.request, await resolve(event));
 		}
 
-		// UI routes redirect to login
-		const redirectUrl = encodeURIComponent(event.url.pathname + event.url.search);
-		redirect(307, `/login?redirect=${redirectUrl}`);
-	}
+		// If not authenticated
+		if (!user) {
+			// Special case: allow user creation when auth is enabled but no admin exists yet
+			// This enables the first admin user to be created during initial setup
+			const noAdminSetupMode = !(await hasAdminUser());
+			if (noAdminSetupMode && event.url.pathname === '/api/users' && event.request.method === 'POST') {
+				return compressResponse(event.request, await resolve(event));
+			}
 
-	return resolve(event);
+			// API routes return 401
+			if (event.url.pathname.startsWith('/api/')) {
+				return new Response(
+					JSON.stringify({ error: 'Unauthorized', message: 'Authentication required' }),
+					{
+						status: 401,
+						headers: { 'Content-Type': 'application/json' }
+					}
+				);
+			}
+
+			// UI routes redirect to login
+			const redirectUrl = encodeURIComponent(event.url.pathname + event.url.search);
+			redirect(307, `/login?redirect=${redirectUrl}`);
+		}
+
+		return compressResponse(event.request, await resolve(event));
+	} finally {
+		rssAfterOp('http', httpBefore);
+	}
 };
 
 export const handleError: HandleServerError = ({ error, event }) => {

@@ -2,7 +2,7 @@
  * Crypto Fallback for Old Linux Kernels
  *
  * The getrandom() syscall was added in Linux 3.17. On older kernels (like 3.10.x),
- * Bun's built-in crypto functions will fail with "getrandom() failed to provide entropy".
+ * Node.js crypto functions may fail with "getrandom() failed to provide entropy".
  *
  * This module provides fallback implementations that read from /dev/urandom directly
  * when running on kernels older than 3.17.

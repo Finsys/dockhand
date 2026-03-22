@@ -152,7 +152,7 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 
 		return json(hostInfo);
 	} catch (error) {
-		console.error('Failed to get host info:', error);
+		console.error('Failed to get host info:', (error as Error)?.message ?? error);
 		return json({ error: 'Failed to get host info' }, { status: 500 });
 	}
 };

@@ -78,7 +78,15 @@ export const POST: RequestHandler = async (event) => {
 		// Audit log
 		await auditNotification(event, 'create', setting.id, setting.name);
 
-		return json(setting);
+		// Don't expose passwords in response
+		const safeSetting = setting.type === 'smtp' ? {
+			...setting,
+			config: {
+				...setting.config,
+				password: setting.config.password ? '********' : undefined
+			}
+		} : setting;
+		return json(safeSetting);
 	} catch (error: any) {
 		console.error('Error creating notification setting:', error);
 		return json({ error: error.message || 'Failed to create notification setting' }, { status: 500 });

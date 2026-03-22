@@ -62,7 +62,7 @@
 	let connectedPollInterval: ReturnType<typeof setInterval> | null = null;
 
 	// Subscribe to environment changes
-	currentEnvironment.subscribe((env) => {
+	const unsubscribeEnv = currentEnvironment.subscribe((env) => {
 		envId = env?.id ?? null;
 		if (env) {
 			fetchContainers();
@@ -201,6 +201,7 @@
 	});
 
 	onDestroy(() => {
+		unsubscribeEnv();
 		if (containerInterval) {
 			clearInterval(containerInterval);
 			containerInterval = null;

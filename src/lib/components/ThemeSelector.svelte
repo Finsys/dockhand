@@ -43,15 +43,17 @@
 	let selectedEditorFont = $state('system-mono');
 
 	onMount(async () => {
-		// Load monospace fonts for dropdown previews
+		// Load bundled monospace fonts for dropdown previews
 		const fontsToLoad = monospaceFonts.filter(f => f.googleFont);
 		if (fontsToLoad.length > 0) {
-			const families = fontsToLoad.map(f => `family=${f.googleFont}`).join('&');
-			const link = document.createElement('link');
-			link.rel = 'stylesheet';
-			link.href = `https://fonts.googleapis.com/css2?${families}&display=swap`;
-			link.onload = () => { monoFontsLoaded = true; };
-			document.head.appendChild(link);
+			let loaded = 0;
+			for (const font of fontsToLoad) {
+				const link = document.createElement('link');
+				link.rel = 'stylesheet';
+				link.href = `/fonts/${font.id}/font.css`;
+				link.onload = () => { if (++loaded >= fontsToLoad.length) monoFontsLoaded = true; };
+				document.head.appendChild(link);
+			}
 		} else {
 			monoFontsLoaded = true;
 		}

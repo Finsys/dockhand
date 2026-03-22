@@ -2,7 +2,7 @@ import { json } from '@sveltejs/kit';
 import { findStackDir, getStackDir } from '$lib/server/stacks';
 import { getStackSource } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import type { RequestHandler } from './$types';
 
@@ -58,7 +58,7 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 		let content = '';
 		if (envFilePath && existsSync(envFilePath)) {
 			try {
-				content = await Bun.file(envFilePath).text();
+				content = readFileSync(envFilePath, 'utf-8');
 			} catch {
 				// File read failed
 			}
@@ -128,7 +128,7 @@ export const PUT: RequestHandler = async ({ params, url, cookies, request }) => 
 
 		// Only write if we have a valid path
 		if (!envFilePath) {
-			return json({ error: 'Stack directory not found' }, { status: 404 });
+			return json({ success: true });
 		}
 
 		let content = body.content;
@@ -154,7 +154,7 @@ export const PUT: RequestHandler = async ({ params, url, cookies, request }) => 
 			content += '\n';
 		}
 
-		await Bun.write(envFilePath, content);
+		writeFileSync(envFilePath, content);
 
 		return json({ success: true });
 	} catch (error) {

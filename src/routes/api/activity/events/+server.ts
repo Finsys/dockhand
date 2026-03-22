@@ -3,6 +3,7 @@ import { containerEventEmitter } from '$lib/server/event-collector';
 import { authorize } from '$lib/server/authorize';
 import { json } from '@sveltejs/kit';
 
+
 export const GET: RequestHandler = async ({ cookies }) => {
 	const auth = await authorize(cookies);
 
@@ -52,6 +53,7 @@ export const GET: RequestHandler = async ({ cookies }) => {
 			};
 
 			// Send initial connection event
+
 			sendEvent('connected', { timestamp: new Date().toISOString() });
 
 			// Send heartbeat to keep connection alive (every 5s to prevent Traefik 10s idle timeout)
@@ -84,6 +86,7 @@ export const GET: RequestHandler = async ({ cookies }) => {
 		},
 		cancel() {
 			// Cleanup when client disconnects
+
 			clearInterval(heartbeatInterval);
 			if (handleEvent) {
 				containerEventEmitter.off('event', handleEvent);

@@ -113,14 +113,28 @@ else
     fi
 
     # === Directory Ownership ===
-    chown -R "$RUN_USER":"$RUN_USER" /app/data 2>/dev/null || true
+    # Only chown Dockhand's own subdirectories, not the entire /app/data tree.
+    # Recursive chown on /app/data breaks stack volumes mounted with relative paths
+    # (e.g. ./postgresql:/var/lib/postgresql) that need different ownership (#719).
+    DATA_DIR="${DATA_DIR:-/app/data}"
+    chown "$RUN_USER":"$RUN_USER" "$DATA_DIR" 2>/dev/null || true
+    for subdir in db stacks git-repos tmp icons snapshots scanner-cache; do
+        if [ -d "$DATA_DIR/$subdir" ]; then
+            chown -R "$RUN_USER":"$RUN_USER" "$DATA_DIR/$subdir" 2>/dev/null || true
+        fi
+    done
     if [ "$RUN_USER" = "dockhand" ]; then
         chown -R dockhand:dockhand /home/dockhand 2>/dev/null || true
     fi
 
     if [ -n "$DATA_DIR" ] && [ "$DATA_DIR" != "/app/data" ] && [ "$DATA_DIR" != "./data" ]; then
         mkdir -p "$DATA_DIR"
-        chown -R "$RUN_USER":"$RUN_USER" "$DATA_DIR" 2>/dev/null || true
+        chown "$RUN_USER":"$RUN_USER" "$DATA_DIR" 2>/dev/null || true
+        for subdir in db stacks git-repos tmp icons snapshots scanner-cache; do
+            if [ -d "$DATA_DIR/$subdir" ]; then
+                chown -R "$RUN_USER":"$RUN_USER" "$DATA_DIR/$subdir" 2>/dev/null || true
+            fi
+        done
     fi
 fi
 

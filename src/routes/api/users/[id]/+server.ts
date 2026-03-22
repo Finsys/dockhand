@@ -229,7 +229,7 @@ export const PUT: RequestHandler = async (event) => {
 		});
 	} catch (error: any) {
 		console.error('Failed to update user:', error);
-		if (error.message?.includes('UNIQUE constraint failed')) {
+		if (error.message?.includes('UNIQUE constraint failed') || (error as any).cause?.code === '23505') {
 			return json({ error: 'Username already exists' }, { status: 409 });
 		}
 		return json({ error: 'Failed to update user' }, { status: 500 });

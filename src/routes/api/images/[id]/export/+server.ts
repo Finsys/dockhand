@@ -3,9 +3,13 @@ import { exportImage, inspectImage } from '$lib/server/docker';
 import { authorize } from '$lib/server/authorize';
 import { createGzip } from 'zlib';
 import { Readable } from 'stream';
+import { validateDockerIdParam } from '$lib/server/docker-validation';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ params, url, cookies }) => {
+	const invalid = validateDockerIdParam(params.id, 'image');
+	if (invalid) return invalid;
+
 	const auth = await authorize(cookies);
 
 	const envId = url.searchParams.get('env');

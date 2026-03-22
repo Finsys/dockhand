@@ -264,7 +264,11 @@
 								value={sessionTimeout}
 								min={3600}
 								max={604800}
-								onchange={(e) => (sessionTimeout = parseInt(e.currentTarget.value))}
+								onchange={(e) => {
+									const val = parseInt(e.currentTarget.value);
+									sessionTimeout = Math.max(3600, Math.min(604800, isNaN(val) ? 86400 : val));
+									e.currentTarget.value = String(sessionTimeout);
+								}}
 								class="w-32"
 								disabled={!$canAccess('settings', 'edit')}
 							/>

@@ -64,6 +64,7 @@
 		AlertCircle
 	} from 'lucide-svelte';
 	import { broom } from '@lucide/lab';
+	import { copyToClipboard } from '$lib/utils/clipboard';
 	import CreateContainerModal from './CreateContainerModal.svelte';
 	import EditContainerModal from './EditContainerModal.svelte';
 	import TerminalPanel from '../terminal/TerminalPanel.svelte';
@@ -72,13 +73,15 @@
 	import FileBrowserModal from './FileBrowserModal.svelte';
 	import BatchUpdateModal from './BatchUpdateModal.svelte';
 	import BatchOperationModal from '$lib/components/BatchOperationModal.svelte';
-	import type { ContainerInfo, ContainerStats } from '$lib/types';
+	import type { ContainerInfo } from '$lib/types';
 	import { EmptyState, NoEnvironment } from '$lib/components/ui/empty-state';
 	import { currentEnvironment, environments, appendEnvParam, clearStaleEnvironment } from '$lib/stores/environment';
+	import { containerStore } from '$lib/stores/containers';
 	import { onDockerEvent, isContainerListChange } from '$lib/stores/events';
 	import { appSettings } from '$lib/stores/settings';
 	import { canAccess } from '$lib/stores/auth';
 	import { vulnerabilityCriteriaIcons } from '$lib/utils/update-steps';
+	import { watchJob } from '$lib/utils/sse-fetch';
 	import { ipToNumber } from '$lib/utils/ip';
 	import { formatHostPortUrl } from '$lib/utils/url';
 	import { detectShells, getBestShell, hasAvailableShell, USER_OPTIONS, type ShellDetectionResult } from '$lib/utils/shell-detection';
@@ -86,8 +89,7 @@
 	import type { ColumnConfig } from '$lib/types';
 	import type { DataGridRowState } from '$lib/components/data-grid/types';
 
-	// Track previous stats for change detection
-	let previousStats = $state<Map<string, ContainerStats>>(new Map());
+	// Track change detection for stat highlighting (UI-only, stays in component)
 	let changedFields = $state<Map<string, Set<string>>>(new Map());
 
 	// Format bytes to human readable
@@ -99,21 +101,26 @@
 		return parseFloat((bytes / Math.pow(k, i)).toFixed(decimals)) + sizes[i];
 	}
 
-	type SortField = 'name' | 'image' | 'state' | 'health' | 'uptime' | 'stack' | 'ip' | 'cpu' | 'memory';
+	type SortField = 'name' | 'image' | 'state' | 'health' | 'uptime' | 'stack' | 'ip' | 'cpu' | 'memory' | 'ports';
 	type SortDirection = 'asc' | 'desc';
 
-	let containers = $state<ContainerInfo[]>([]);
-	let containerStats = $state<Map<string, ContainerStats>>(new Map());
-	let autoUpdateSettings = $state<Map<string, { enabled: boolean; label: string; tooltip: string; vulnerabilityCriteria?: string }>>(new Map());
+	// Data from persistent store (survives page navigation)
+	const containers = $derived($containerStore.data);
+	const containerStats = $derived($containerStore.stats);
+	const autoUpdateSettings = $derived($containerStore.autoUpdateSettings);
+	const envHasScanning = $derived($containerStore.envHasScanning);
+	const envVulnerabilityCriteria = $derived($containerStore.envVulnerabilityCriteria);
+	const loading = $derived($containerStore.loading);
+
 	let envId = $state<number | null>(null);
-	let envHasScanning = $state(false);
-	let envVulnerabilityCriteria = $state<'never' | 'any' | 'critical_high' | 'critical' | 'more_than_current'>('never');
 
 	// Derived: current environment details for reactive port URL generation
 	const currentEnvDetails = $derived($environments.find(e => e.id === $currentEnvironment?.id) ?? null);
 
-	// Search and sort state
-	let searchQuery = $state('');
+	// Search and sort state - initialize from URL for persistence across navigation
+	const initialSearch = $page.url.searchParams.get('search')
+		?? $page.url.searchParams.get('image') ?? '';
+	let searchQuery = $state(initialSearch);
 	let sortField = $state<SortField>('name');
 	let sortDirection = $state<SortDirection>('asc');
 
@@ -166,6 +173,18 @@
 		saveStatusFilter();
 	});
 
+	// Sync search query to URL for persistence across navigation
+	$effect(() => {
+		const q = searchQuery;
+		const url = new URL($page.url);
+		if (q) url.searchParams.set('search', q);
+		else url.searchParams.delete('search');
+		url.searchParams.delete('image'); // clean up legacy param
+		if (url.toString() !== $page.url.toString()) {
+			goto(url.toString(), { replaceState: true, noScroll: true, keepFocus: true });
+		}
+	});
+
 	// Track if initial fetch has been done
 	let initialFetchDone = $state(false);
 
@@ -176,29 +195,28 @@
 
 		// Only fetch if environment actually changed or this is initial load
 		if (env && (newEnvId !== envId || !initialFetchDone)) {
+			const isEnvSwitch = envId !== null && newEnvId !== envId;
 			envId = newEnvId;
 			initialFetchDone = true;
 			// Clear update state from previous environment
-			batchUpdateContainerIds = [];
-			batchUpdateContainerNames = new Map();
 			updateCheckStatus = 'idle';
 			// Clear shell detection cache for new environment
 			shellDetectionCache = {};
-			fetchContainers();
-			fetchStats();
-			loadPendingUpdates();
+
+			if (isEnvSwitch) {
+				// Full env switch — invalidate cache, show spinner
+				containerStore.invalidate();
+			}
+			// Refresh data (store handles loading state internally)
+			containerStore.refresh(newEnvId);
 		} else if (!env) {
 			// No environment - clear data and stop loading
 			envId = null;
-			containers = [];
-			loading = false;
-			batchUpdateContainerIds = [];
-			batchUpdateContainerNames = new Map();
 			updateCheckStatus = 'idle';
 			shellDetectionCache = {};
+			containerStore.clear();
 		}
 	});
-	let loading = $state(true);
 	let showCreateModal = $state(false);
 	let showEditModal = $state(false);
 	let editContainerId = $state('');
@@ -245,9 +263,12 @@
 
 	// Update check state
 	let updateCheckStatus = $state<'idle' | 'checking' | 'found' | 'none' | 'error'>('idle');
+	let updateCheckProgress = $state({ checked: 0, total: 0 });
+	let updateCheckBtnEl = $state<HTMLButtonElement | null>(null);
+	let failedUpdateChecks = $state<Array<{ containerName: string; imageName: string; error: string }>>([]);
 	let showBatchUpdateModal = $state(false);
-	let batchUpdateContainerIds = $state<string[]>([]);
-	let batchUpdateContainerNames = $state<Map<string, string>>(new Map());
+	const batchUpdateContainerIds = $derived($containerStore.pendingUpdateIds);
+	const batchUpdateContainerNames = $derived($containerStore.pendingUpdateNames);
 
 	// Single container update mode (doesn't overwrite batch list)
 	let singleUpdateContainerId = $state<string | null>(null);
@@ -331,7 +352,7 @@
 
 	function handleBatchOpComplete() {
 		selectedContainers = new Set();
-		fetchContainers();
+		containerStore.refreshContainers(envId);
 	}
 
 	function bulkStart() {
@@ -352,9 +373,9 @@
 
 	function bulkRestart() {
 		startBatchOperation(
-			`Restarting ${selectedInFilter.length} container${selectedInFilter.length !== 1 ? 's' : ''}`,
+			`Restarting ${selectedNonSystem.length} container${selectedNonSystem.length !== 1 ? 's' : ''}`,
 			'restart',
-			selectedInFilter
+			selectedNonSystem
 		);
 	}
 
@@ -376,9 +397,9 @@
 
 	function bulkRemove() {
 		startBatchOperation(
-			`Removing ${selectedInFilter.length} container${selectedInFilter.length !== 1 ? 's' : ''}`,
+			`Removing ${selectedNonSystem.length} container${selectedNonSystem.length !== 1 ? 's' : ''}`,
 			'remove',
-			selectedInFilter,
+			selectedNonSystem,
 			{ force: true }
 		);
 	}
@@ -392,7 +413,7 @@
 			});
 			if (response.ok) {
 				pruneStatus = 'success';
-				await fetchContainers();
+				await containerStore.refreshContainers(envId);
 			} else {
 				pruneStatus = 'error';
 			}
@@ -404,8 +425,30 @@
 		}, 3000));
 	}
 
+	function showFailedChecksToast(failed: typeof failedUpdateChecks, prefix: string) {
+		const details = failed.map(f => `• ${f.containerName}: ${f.error}`).join('\n');
+		toast.warning(`${prefix} (${failed.length} failed to check)`, {
+			description: details,
+			descriptionClass: 'whitespace-pre-line',
+			class: '!w-[28rem] !max-w-[28rem]',
+			duration: Infinity,
+			action: {
+				label: 'OK',
+				onClick: () => {}
+			}
+		});
+	}
+
 	async function checkForUpdates() {
 		updateCheckStatus = 'checking';
+		updateCheckProgress = { checked: 0, total: 0 };
+		failedUpdateChecks = [];
+
+		// Lock button width to prevent layout shift
+		if (updateCheckBtnEl) {
+			updateCheckBtnEl.style.minWidth = `${updateCheckBtnEl.offsetWidth}px`;
+		}
+
 		try {
 			const response = await fetch(appendEnvParam('/api/containers/check-updates', envId), {
 				method: 'POST'
@@ -413,49 +456,67 @@
 			if (!response.ok) {
 				updateCheckStatus = 'error';
 				pendingTimeouts.push(setTimeout(() => { updateCheckStatus = 'idle'; }, 3000));
+				if (updateCheckBtnEl) updateCheckBtnEl.style.minWidth = '';
 				return;
 			}
-			const data = await response.json();
+			const { jobId } = await response.json();
+
+			const data: any = await watchJob(jobId, (line) => {
+				if (line.event === 'progress') {
+					updateCheckProgress = line.data as { checked: number; total: number };
+				}
+			});
+
+			// Unlock button width
+			if (updateCheckBtnEl) updateCheckBtnEl.style.minWidth = '';
+
 			const containersWithUpdates = data.results.filter((r: any) => r.hasUpdate);
+			const failed = data.results.filter((r: any) => r.error && !r.hasUpdate);
+			failedUpdateChecks = failed.map((r: any) => ({
+				containerName: r.containerName,
+				imageName: r.imageName,
+				error: r.error
+			}));
 
 			if (containersWithUpdates.length === 0) {
-				updateCheckStatus = 'none';
-				batchUpdateContainerIds = [];
-				batchUpdateContainerNames.clear();
-				toast.success('All containers are up to date');
-				pendingTimeouts.push(setTimeout(() => { updateCheckStatus = 'idle'; }, 3000));
+				containerStore.setPendingUpdates([], new Map());
+				if (failed.length > 0) {
+					updateCheckStatus = 'none';
+					showFailedChecksToast(failedUpdateChecks, 'All containers are up to date');
+					pendingTimeouts.push(setTimeout(() => { updateCheckStatus = 'idle'; }, 3000));
+				} else {
+					updateCheckStatus = 'none';
+					toast.success('All containers are up to date');
+					pendingTimeouts.push(setTimeout(() => { updateCheckStatus = 'idle'; }, 3000));
+				}
 				return;
 			}
 
 			// Prepare data for batch update modal (but don't open it yet)
-			batchUpdateContainerIds = containersWithUpdates.map((r: any) => r.containerId);
-			batchUpdateContainerNames = new Map(
-				containersWithUpdates.map((r: any) => [r.containerId, r.containerName])
+			containerStore.setPendingUpdates(
+				containersWithUpdates.map((r: any) => r.containerId),
+				new Map(containersWithUpdates.map((r: any) => [r.containerId, r.containerName]))
 			);
 			updateCheckStatus = 'found';
-			toast.info(`${containersWithUpdates.length} update(s) available`);
+			if (failed.length > 0) {
+				showFailedChecksToast(failedUpdateChecks, `${containersWithUpdates.length} update(s) available`);
+			} else {
+				toast.info(`${containersWithUpdates.length} update(s) available`);
+			}
 		} catch (error) {
 			updateCheckStatus = 'error';
 			pendingTimeouts.push(setTimeout(() => { updateCheckStatus = 'idle'; }, 3000));
+			if (updateCheckBtnEl) updateCheckBtnEl.style.minWidth = '';
 		}
 	}
 
 	// Load pending updates from database (persisted from check-updates or scheduled jobs)
 	async function loadPendingUpdates() {
 		if (!envId) return;
-		try {
-			const response = await fetch(appendEnvParam('/api/containers/pending-updates', envId));
-			if (!response.ok) return;
-			const data = await response.json();
-			if (data.pendingUpdates && data.pendingUpdates.length > 0) {
-				batchUpdateContainerIds = data.pendingUpdates.map((u: any) => u.containerId);
-				batchUpdateContainerNames = new Map(
-					data.pendingUpdates.map((u: any) => [u.containerId, u.containerName])
-				);
-				updateCheckStatus = 'found';
-			}
-		} catch {
-			// Ignore errors - this is a background load
+		await containerStore.loadPendingUpdates(envId);
+		// Update local UI status if there are pending updates
+		if ($containerStore.pendingUpdateIds.length > 0) {
+			updateCheckStatus = 'found';
 		}
 	}
 
@@ -474,8 +535,7 @@
 				selectedNames.set(id, container.name);
 			}
 		}
-		batchUpdateContainerIds = selectedWithUpdates;
-		batchUpdateContainerNames = selectedNames;
+		containerStore.setPendingUpdates(selectedWithUpdates, selectedNames);
 		showBatchUpdateModal = true;
 	}
 
@@ -491,7 +551,7 @@
 			}
 		}
 		if (allNames.size === 0) return;
-		batchUpdateContainerNames = allNames;
+		containerStore.patch({ pendingUpdateNames: allNames });
 		showBatchUpdateModal = true;
 	}
 
@@ -528,7 +588,7 @@
 		// Reload pending updates from database to restore highlighting for remaining containers
 		loadPendingUpdates();
 
-		fetchContainers();
+		containerStore.refreshContainers(envId);
 	}
 
 	// Action in progress state (for animations)
@@ -716,6 +776,15 @@
 					const stackB = b.labels?.['com.docker.compose.project'] || '';
 					cmp = stackA.localeCompare(stackB);
 					break;
+				case 'ports':
+					const getLowestPort = (c: ContainerInfo) => {
+						const publicPorts = (c.ports || [])
+							.filter((p: any) => p.PublicPort)
+							.map((p: any) => p.PublicPort!);
+						return publicPorts.length > 0 ? Math.min(...publicPorts) : Infinity;
+					};
+					cmp = getLowestPort(a) - getLowestPort(b);
+					break;
 				case 'ip':
 					const ipA = getContainerIp(a.networks);
 					const ipB = getContainerIp(b.networks);
@@ -757,122 +826,15 @@
 		filteredContainers.filter(c => selectedContainers.has(c.id))
 	);
 
-	// Count by state for selected containers
-	const selectedRunning = $derived(selectedInFilter.filter(c => c.state === 'running'));
-	const selectedStopped = $derived(selectedInFilter.filter(c => c.state !== 'running' && c.state !== 'paused'));
-	const selectedPaused = $derived(selectedInFilter.filter(c => c.state === 'paused'));
+	// Count by state for selected containers (exclude system containers from destructive actions)
+	const selectedNonSystem = $derived(selectedInFilter.filter(c => !c.systemContainer));
+	const selectedRunning = $derived(selectedNonSystem.filter(c => c.state === 'running'));
+	const selectedStopped = $derived(selectedNonSystem.filter(c => c.state !== 'running' && c.state !== 'paused'));
+	const selectedPaused = $derived(selectedNonSystem.filter(c => c.state === 'paused'));
 
-	async function fetchContainers() {
-		loading = true;
-		try {
-			const response = await fetch(appendEnvParam('/api/containers', envId));
-			if (!response.ok) {
-				// Handle stale environment ID (e.g., after database reset)
-				if (response.status === 404 && envId) {
-					clearStaleEnvironment(envId);
-					environments.refresh();
-					return;
-				}
-				toast.error('Failed to load containers');
-				return;
-			}
-			containers = await response.json();
-			// Fetch auto-update settings for all containers
-			await fetchAutoUpdateSettings();
-		} catch (error) {
-			console.error('Failed to fetch containers:', error);
-			toast.error('Failed to load containers');
-		} finally {
-			loading = false;
-		}
-	}
-
-	async function checkScannerSettings() {
-		if (!envId) {
-			envHasScanning = false;
-			envVulnerabilityCriteria = 'never';
-			return;
-		}
-		try {
-			// Fetch scanner settings and environment update-check settings in parallel
-			const [scannerResponse, updateCheckResponse] = await Promise.all([
-				fetch(`/api/settings/scanner?env=${envId}&settingsOnly=true`),
-				fetch(`/api/environments/${envId}/update-check`)
-			]);
-
-			if (scannerResponse.ok) {
-				const data = await scannerResponse.json();
-				const settings = data.settings || data;
-				envHasScanning = settings.scanner !== 'none';
-			}
-
-			if (updateCheckResponse.ok) {
-				const data = await updateCheckResponse.json();
-				envVulnerabilityCriteria = data.settings?.vulnerabilityCriteria || 'never';
-			}
-		} catch {
-			envHasScanning = false;
-			envVulnerabilityCriteria = 'never';
-		}
-	}
-
-	async function fetchAutoUpdateSettings() {
-		const settings = new Map<string, { enabled: boolean; label: string; tooltip: string; vulnerabilityCriteria?: string }>();
-		const envParam = envId ? `?env=${envId}` : '';
-
-		// Check scanner settings first
-		await checkScannerSettings();
-
-		// Fetch all auto-update settings in a single request
-		try {
-			const response = await fetch(`/api/auto-update${envParam}`);
-			if (response.ok) {
-				const data = await response.json();
-				// data is a map of containerName -> settings
-				for (const [containerName, setting] of Object.entries(data)) {
-					if (setting && typeof setting === 'object' && 'enabled' in setting && setting.enabled) {
-						const s = setting as { enabled: boolean; scheduleType: string; cronExpression: string | null; vulnerabilityCriteria: string };
-						const { label, tooltip } = formatSchedule(s.scheduleType, s.cronExpression || '');
-						settings.set(containerName, {
-							enabled: true,
-							label,
-							tooltip,
-							vulnerabilityCriteria: s.vulnerabilityCriteria || 'never'
-						});
-					}
-				}
-			}
-		} catch (err) {
-			console.error('Failed to fetch auto-update settings:', err);
-		}
-
-		autoUpdateSettings = settings;
-	}
-
-	function formatSchedule(scheduleType: string, cronExpression: string): { label: string; tooltip: string } {
-		if (!cronExpression) return { label: 'on', tooltip: 'Auto-update enabled' };
-
-		const parts = cronExpression.split(' ');
-		if (parts.length < 5) return { label: 'cron', tooltip: cronExpression };
-
-		const [min, hr, , , dow] = parts;
-		const hourNum = parseInt(hr);
-		const minNum = parseInt(min);
-		const ampm = hourNum >= 12 ? 'PM' : 'AM';
-		const hour12 = hourNum === 0 ? 12 : hourNum > 12 ? hourNum - 12 : hourNum;
-		const timeStr = `${hour12}:${minNum.toString().padStart(2, '0')} ${ampm}`;
-
-		if (scheduleType === 'daily' || dow === '*') {
-			return { label: 'daily', tooltip: `Daily at ${timeStr}` };
-		}
-
-		if (scheduleType === 'weekly') {
-			const days = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
-			const dayName = days[parseInt(dow)] || dow;
-			return { label: dayName, tooltip: `Every ${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][parseInt(dow)] || dow} at ${timeStr}` };
-		}
-
-		return { label: 'cron', tooltip: cronExpression };
+	// Thin wrappers — delegate to persistent store
+	function fetchContainers() {
+		return containerStore.refreshContainers(envId);
 	}
 
 	// Check if highlightChanges is enabled for current environment
@@ -895,49 +857,37 @@
 		return changedFields.get(containerId)?.has(field) ?? false;
 	}
 
-	async function fetchStats() {
-		try {
-			const response = await fetch(appendEnvParam('/api/containers/stats', envId));
-			const stats: ContainerStats[] = await response.json();
-			const statsMap = new Map<string, ContainerStats>();
-			const newChangedFields = new Map<string, Set<string>>();
+	// Detect stat changes for highlighting when store stats update
+	$effect(() => {
+		const currentStats = $containerStore.stats;
+		const prevStats = $containerStore.previousStats;
 
-			for (const stat of stats) {
-				statsMap.set(stat.id, stat);
+		if (!highlightChangesEnabled || prevStats.size === 0) return;
 
-				// Track changes if highlighting is enabled
-				if (highlightChangesEnabled) {
-					const prev = previousStats.get(stat.id);
-					if (prev) {
-						const changes = new Set<string>();
-						if (hasFieldChanged(stat.id, 'cpu', prev.cpuPercent, stat.cpuPercent)) changes.add('cpu');
-						if (hasFieldChanged(stat.id, 'memory', prev.memoryUsage, stat.memoryUsage)) changes.add('memory');
-						if (hasFieldChanged(stat.id, 'networkRx', prev.networkRx, stat.networkRx)) changes.add('network');
-						if (hasFieldChanged(stat.id, 'networkTx', prev.networkTx, stat.networkTx)) changes.add('network');
-						if (hasFieldChanged(stat.id, 'blockRead', prev.blockRead, stat.blockRead)) changes.add('disk');
-						if (hasFieldChanged(stat.id, 'blockWrite', prev.blockWrite, stat.blockWrite)) changes.add('disk');
-						if (changes.size > 0) {
-							newChangedFields.set(stat.id, changes);
-						}
-					}
+		const newChangedFields = new Map<string, Set<string>>();
+		for (const [id, stat] of currentStats) {
+			const prev = prevStats.get(id);
+			if (prev) {
+				const changes = new Set<string>();
+				if (hasFieldChanged(id, 'cpu', prev.cpuPercent, stat.cpuPercent)) changes.add('cpu');
+				if (hasFieldChanged(id, 'memory', prev.memoryUsage, stat.memoryUsage)) changes.add('memory');
+				if (hasFieldChanged(id, 'networkRx', prev.networkRx, stat.networkRx)) changes.add('network');
+				if (hasFieldChanged(id, 'networkTx', prev.networkTx, stat.networkTx)) changes.add('network');
+				if (hasFieldChanged(id, 'blockRead', prev.blockRead, stat.blockRead)) changes.add('disk');
+				if (hasFieldChanged(id, 'blockWrite', prev.blockWrite, stat.blockWrite)) changes.add('disk');
+				if (changes.size > 0) {
+					newChangedFields.set(id, changes);
 				}
 			}
-
-			// Update changed fields and clear after animation duration
-			changedFields = newChangedFields;
-			if (newChangedFields.size > 0) {
-				pendingTimeouts.push(setTimeout(() => {
-					changedFields = new Map();
-				}, 1500));
-			}
-
-			// Store current stats as previous for next comparison
-			previousStats = new Map(statsMap);
-			containerStats = statsMap;
-		} catch (error) {
-			console.error('Failed to fetch container stats:', error);
 		}
-	}
+
+		changedFields = newChangedFields;
+		if (newChangedFields.size > 0) {
+			pendingTimeouts.push(setTimeout(() => {
+				changedFields = new Map();
+			}, 1500));
+		}
+	});
 
 	async function startContainer(id: string) {
 		operationError = null;
@@ -953,7 +903,7 @@
 				return;
 			}
 			toast.success(`Started ${name}`);
-			await fetchContainers();
+			await containerStore.refreshContainers(envId);
 		} catch (error) {
 			console.error('Failed to start container:', error);
 			operationError = { id, message: 'Failed to start container' };
@@ -977,7 +927,7 @@
 				return;
 			}
 			toast.success(`Stopped ${name}`);
-			await fetchContainers();
+			await containerStore.refreshContainers(envId);
 		} catch (error) {
 			console.error('Failed to stop container:', error);
 			operationError = { id, message: 'Failed to stop container' };
@@ -1002,7 +952,7 @@
 				return;
 			}
 			toast.success(`Paused ${name}`);
-			await fetchContainers();
+			await containerStore.refreshContainers(envId);
 		} catch (error) {
 			console.error('Failed to pause container:', error);
 			operationError = { id, message: 'Failed to pause container' };
@@ -1025,7 +975,7 @@
 				return;
 			}
 			toast.success(`Resumed ${name}`);
-			await fetchContainers();
+			await containerStore.refreshContainers(envId);
 		} catch (error) {
 			console.error('Failed to unpause container:', error);
 			operationError = { id, message: 'Failed to unpause container' };
@@ -1049,7 +999,7 @@
 				return;
 			}
 			toast.success(`Restarted ${name}`);
-			await fetchContainers();
+			await containerStore.refreshContainers(envId);
 		} catch (error) {
 			console.error('Failed to restart container:', error);
 			operationError = { id, message: 'Failed to restart container' };
@@ -1074,7 +1024,7 @@
 				return;
 			}
 			toast.success(`Removed ${name}`);
-			await fetchContainers();
+			await containerStore.refreshContainers(envId);
 		} catch (error) {
 			console.error('Failed to remove container:', error);
 			operationError = { id, message: 'Failed to remove container' };
@@ -1280,15 +1230,18 @@
 	}
 
 	let copiedCommand = $state<string | null>(null);
+	let copyFailed = $state(false);
 
-	function copyToClipboard(text: string) {
-		navigator.clipboard.writeText(text).then(() => {
+	async function copyCommand(text: string) {
+		const ok = await copyToClipboard(text);
+		if (ok) {
 			copiedCommand = text;
 			toast.success('Copied to clipboard');
 			setTimeout(() => { copiedCommand = null; }, 2000);
-		}).catch(() => {
-			toast.error('Failed to copy to clipboard');
-		});
+		} else {
+			copyFailed = true;
+			setTimeout(() => { copyFailed = false; }, 2000);
+		}
 	}
 
 	function parseUptimeToSeconds(status: string): number {
@@ -1375,20 +1328,14 @@
 	function handleVisibilityChange() {
 		if (document.visibilityState === 'visible' && envId) {
 			// Tab became visible - refresh data immediately
-			fetchContainers();
-			fetchStats();
+			containerStore.refreshContainers(envId);
+			containerStore.refreshStats(envId);
 		}
 	}
 
 	onMount(async () => {
 		loadLayoutMode();
 		loadStatusFilter();
-
-		// Check for image filter from URL params (from images page link)
-		const imageParam = $page.url.searchParams.get('image');
-		if (imageParam) {
-			searchQuery = imageParam;
-		}
 
 		// Load persisted pending updates from database
 		loadPendingUpdates();
@@ -1401,14 +1348,14 @@
 
 		// Set up interval to refresh stats every 5 seconds (use module-scope var for cleanup)
 		statsInterval = setInterval(() => {
-			if (envId) fetchStats();
+			if (envId) containerStore.refreshStats(envId);
 		}, 5000);
 
 		// Subscribe to container events (SSE connection is global in layout)
 		unsubscribeDockerEvent = onDockerEvent((event) => {
 			if (envId && isContainerListChange(event)) {
-				fetchContainers();
-				fetchStats();
+				containerStore.refreshContainers(envId);
+				containerStore.refreshStats(envId);
 			}
 		});
 
@@ -1470,22 +1417,35 @@
 				</Button>
 				{/if}
 				<Button
+					bind:ref={updateCheckBtnEl}
 					size="sm"
 					variant="outline"
 					onclick={checkForUpdates}
 					disabled={updateCheckStatus === 'checking'}
 					title="Check for available updates"
+					class="relative overflow-hidden"
 				>
 					{#if updateCheckStatus === 'checking'}
-						<CircleArrowUp class="w-3.5 h-3.5 mr-1 animate-spin" />
+						<CircleArrowUp class="w-3.5 h-3.5 animate-spin" />
+						{#if updateCheckProgress.total > 0}
+							<span class="tabular-nums">Checking {String(updateCheckProgress.checked).padStart(String(updateCheckProgress.total).length, '\u2007')}/{updateCheckProgress.total}</span>
+							<div
+								class="absolute bottom-0 left-0 h-px bg-foreground transition-[width] duration-150 ease-out"
+								style="width: {(updateCheckProgress.checked / updateCheckProgress.total) * 100}%"
+							></div>
+						{:else}
+							Check for updates
+						{/if}
 					{:else if updateCheckStatus === 'none' || updateCheckStatus === 'found'}
 						<Check class="w-3.5 h-3.5 mr-1 text-green-600" />
+						Check for updates
 					{:else if updateCheckStatus === 'error'}
 						<XCircle class="w-3.5 h-3.5 mr-1 text-destructive" />
+						Check for updates
 					{:else}
 						<CircleArrowUp class="w-3.5 h-3.5" />
+						Check for updates
 					{/if}
-					Check for updates
 				</Button>
 				{#if updatableContainersCount > 0}
 				<Button
@@ -1630,12 +1590,12 @@
 					{/snippet}
 				</ConfirmPopover>
 			{/if}
-			{#if $canAccess('containers', 'restart')}
+			{#if selectedNonSystem.length > 0 && $canAccess('containers', 'restart')}
 			<ConfirmPopover
 				open={confirmBulkRestart}
 				action="Restart"
-				itemType="{selectedInFilter.length} container{selectedInFilter.length !== 1 ? 's' : ''}"
-				title="Restart {selectedInFilter.length}"
+				itemType="{selectedNonSystem.length} container{selectedNonSystem.length !== 1 ? 's' : ''}"
+				title="Restart {selectedNonSystem.length}"
 				variant="secondary"
 				unstyled
 				onConfirm={bulkRestart}
@@ -1649,12 +1609,12 @@
 				{/snippet}
 			</ConfirmPopover>
 			{/if}
-			{#if $canAccess('containers', 'remove')}
+			{#if selectedNonSystem.length > 0 && $canAccess('containers', 'remove')}
 			<ConfirmPopover
 				open={confirmBulkRemove}
 				action="Remove"
-				itemType="{selectedInFilter.length} container{selectedInFilter.length !== 1 ? 's' : ''}"
-				title="Remove {selectedInFilter.length}"
+				itemType="{selectedNonSystem.length} container{selectedNonSystem.length !== 1 ? 's' : ''}"
+				title="Remove {selectedNonSystem.length}"
 				unstyled
 				onConfirm={bulkRemove}
 				onOpenChange={(open) => confirmBulkRemove = open}
@@ -1715,7 +1675,7 @@
 					let classes = '';
 					if (currentLogsContainerId === container.id) classes += 'bg-blue-500/10 hover:bg-blue-500/15 ';
 					if (currentTerminalContainerId === container.id) classes += 'bg-green-500/10 hover:bg-green-500/15 ';
-					if ($appSettings.highlightUpdates && containersWithUpdatesSet.has(container.id) && !container.systemContainer) classes += 'has-update ';
+					if ($appSettings.highlightUpdates && containersWithUpdatesSet.has(container.id)) classes += 'has-update ';
 					return classes;
 				}}
 				onRowClick={(container, e) => {
@@ -1755,38 +1715,18 @@
 									<Tooltip.Content side="right" class="w-auto p-3">
 										{#if container.systemContainer === 'dockhand'}
 											{#if hasUpdate}
-												{@const composeCmd = 'docker compose pull && docker compose up -d'}
-												{@const dockerCmd = `docker stop ${container.name} && docker pull fnsys/dockhand:latest && docker start ${container.name}`}
 												<div class="space-y-2">
-													<p class="font-medium text-sm flex items-center gap-1.5">
+													<p class="font-medium text-sm flex items-center gap-1.5 whitespace-nowrap">
 														<CircleArrowUp class="w-4 h-4 text-amber-500" />
 														Update available
 													</p>
-													<p class="text-muted-foreground text-xs">Cannot be updated from within Dockhand. Update manually:</p>
-													<div class="space-y-1.5">
-														<p class="text-muted-foreground text-2xs">Using Compose:</p>
-														<div class="flex items-center gap-2 bg-muted rounded p-2">
-															<code class="text-2xs font-mono whitespace-nowrap">{composeCmd}</code>
-															<Button size="icon" variant="ghost" class="h-5 w-5 shrink-0" onclick={(e) => { e.stopPropagation(); copyToClipboard(composeCmd); }}>
-																{#if copiedCommand === composeCmd}
-																	<Check class="w-3 h-3 text-green-500" />
-																{:else}
-																	<Copy class="w-3 h-3" />
-																{/if}
-															</Button>
-														</div>
-														<p class="text-muted-foreground text-2xs">Using Docker CLI:</p>
-														<div class="flex items-center gap-2 bg-muted rounded p-2">
-															<code class="text-2xs font-mono whitespace-nowrap">{dockerCmd}</code>
-															<Button size="icon" variant="ghost" class="h-5 w-5 shrink-0" onclick={(e) => { e.stopPropagation(); copyToClipboard(dockerCmd); }}>
-																{#if copiedCommand === dockerCmd}
-																	<Check class="w-3 h-3 text-green-500" />
-																{:else}
-																	<Copy class="w-3 h-3" />
-																{/if}
-															</Button>
-														</div>
-													</div>
+													<a
+														href="/settings?tab=about"
+														class="text-primary hover:underline text-xs flex items-center gap-1 whitespace-nowrap"
+														onclick={(e) => e.stopPropagation()}
+													>
+														Settings &gt; About
+													</a>
 												</div>
 											{:else}
 												<p class="text-sm whitespace-nowrap">Dockhand management container</p>
@@ -1819,8 +1759,8 @@
 							{/if}
 						</div>
 					{:else if column.id === 'image'}
-						<div class="flex items-center gap-1.5 {$appSettings.highlightUpdates && containersWithUpdatesSet.has(container.id) && !container.systemContainer ? 'update-border' : ''}">
-							{#if containersWithUpdatesSet.has(container.id) && !container.systemContainer}
+						<div class="flex items-center gap-1.5 {$appSettings.highlightUpdates && containersWithUpdatesSet.has(container.id) ? 'update-border' : ''}">
+							{#if containersWithUpdatesSet.has(container.id)}
 								<span title="Update available">
 									<CircleArrowUp class="w-3 h-3 text-amber-500 {$appSettings.highlightUpdates ? 'glow-amber' : ''} shrink-0" />
 								</span>
@@ -1909,11 +1849,32 @@
 							{/if}
 						</div>
 					{:else if column.id === 'ip'}
-						<code class="text-xs">{getContainerIp(container.networks)}</code>
+						{@const networkEntries = container.networks ? Object.entries(container.networks) : []}
+						{@const primaryIp = getContainerIp(container.networks)}
+						{#if networkEntries.length > 1 && primaryIp !== '-'}
+							<Tooltip.Root>
+								<Tooltip.Trigger>
+									<span class="inline-flex items-center gap-1">
+										<code class="text-xs">{primaryIp}</code>
+										<span class="text-2xs px-1 py-0.5 rounded bg-muted text-muted-foreground font-medium">+{networkEntries.length - 1}</span>
+									</span>
+								</Tooltip.Trigger>
+								<Tooltip.Content side="top" class="max-w-none">
+									{#each networkEntries as [name, net]}
+										<div class="font-mono text-xs">{name}: {net.ipAddress || 'no IP'}</div>
+									{/each}
+								</Tooltip.Content>
+							</Tooltip.Root>
+						{:else}
+							<code class="text-xs">{primaryIp}</code>
+						{/if}
 					{:else if column.id === 'ports'}
 						{#if ports.length > 0}
-							<div class="flex flex-wrap gap-1">
-								{#each ports.slice(0, 2) as port}
+							{@const compactPorts = $appSettings.compactPorts}
+							{@const displayPorts = compactPorts && ports.length > 1 ? [ports[0]] : ports}
+							{@const remainingCount = ports.length - 1}
+							<div class="flex {compactPorts ? 'flex-nowrap' : 'flex-wrap'} gap-1">
+								{#each displayPorts as port}
 									{@const url = currentEnvDetails ? getPortUrl(port.publicPort) : null}
 									{#if url}
 										<a
@@ -1921,18 +1882,21 @@
 											target="_blank"
 											rel="noopener noreferrer"
 											onclick={(e) => e.stopPropagation()}
-											class="inline-flex items-center gap-0.5 text-xs bg-muted hover:bg-blue-500/20 hover:text-blue-500 px-1 py-0.5 rounded transition-colors"
+											class="inline-flex items-center gap-0.5 text-xs bg-muted hover:bg-blue-500/20 hover:text-blue-500 px-1 py-0.5 rounded transition-colors shrink-0"
 											title="Open {url} in new tab"
 										>
 											<code>{port.display}</code>
 											<ExternalLink class="w-2.5 h-2.5 text-muted-foreground" />
 										</a>
 									{:else}
-										<code class="text-xs bg-muted px-1 py-0.5 rounded">{port.display}</code>
+										<code class="text-xs bg-muted px-1 py-0.5 rounded shrink-0">{port.display}</code>
 									{/if}
 								{/each}
-								{#if ports.length > 2}
-									<span class="text-xs text-muted-foreground">+{ports.length - 2}</span>
+								{#if compactPorts && remainingCount > 0}
+									<span
+										class="text-xs bg-muted text-muted-foreground px-1 py-0.5 rounded cursor-default shrink-0"
+										title={ports.map(p => p.display).join(', ')}
+									>+{remainingCount}</span>
 								{/if}
 							</div>
 						{:else}
@@ -1959,13 +1923,20 @@
 						{/if}
 					{:else if column.id === 'stack'}
 						{#if stack}
-							<button
-								type="button"
-								onclick={(e) => { e.stopPropagation(); goto(appendEnvParam(`/stacks?search=${encodeURIComponent(stack)}`, envId)); }}
-								class="cursor-pointer"
-							>
-								<Badge variant="outline" class="text-xs py-0 px-1.5 hover:bg-primary/10 hover:border-primary/50 transition-colors">{stack}</Badge>
-							</button>
+							<Tooltip.Root>
+								<Tooltip.Trigger>
+									<button
+										type="button"
+										onclick={(e) => { e.stopPropagation(); goto(appendEnvParam(`/stacks?search=${encodeURIComponent(stack)}`, envId)); }}
+										class="cursor-pointer"
+									>
+										<Badge variant="outline" class="text-xs py-0 px-1.5 hover:bg-primary/10 hover:border-primary/50 transition-colors truncate max-w-full">{stack}</Badge>
+									</button>
+								</Tooltip.Trigger>
+								<Tooltip.Content>
+									<p class="text-sm whitespace-nowrap">{stack}</p>
+								</Tooltip.Content>
+							</Tooltip.Root>
 						{:else}
 							<span class="text-gray-400 dark:text-gray-600 text-xs">-</span>
 						{/if}
@@ -1981,6 +1952,7 @@
 									<CircleArrowUp class="w-3 h-3 text-amber-500 {$appSettings.highlightUpdates ? 'glow-amber' : ''}" />
 								</button>
 							{/if}
+							{#if !container.systemContainer}
 							{#if container.state === 'running' || container.state === 'restarting'}
 								{#if $canAccess('containers', 'stop')}
 								<ConfirmPopover
@@ -2045,6 +2017,7 @@
 									<RotateCw class="w-3 h-3 {open ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'} {restartingId === container.id ? 'animate-spin text-foreground' : ''}" />
 								{/snippet}
 							</ConfirmPopover>
+							{/if}
 							{/if}
 							<button
 								type="button"
@@ -2187,7 +2160,7 @@
 								</Popover.Root>
 							{/if}
 							{/if}
-							{#if $canAccess('containers', 'remove')}
+							{#if !container.systemContainer && $canAccess('containers', 'remove')}
 							<ConfirmPopover
 								open={confirmDeleteId === container.id}
 								action="Delete"

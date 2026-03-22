@@ -5,10 +5,11 @@
  * Handles request/response correlation, heartbeat tracking, and metrics collection.
  */
 
-import { db, hawserTokens, environments, eq } from './db/drizzle.js';
-import { logContainerEvent, saveHostMetric, type ContainerEventAction } from './db.js';
+import { db, hawserTokens, environments, eq, and } from './db/drizzle.js';
+import { logContainerEvent, type ContainerEventAction } from './db.js';
 import { containerEventEmitter } from './event-collector.js';
 import { sendEnvironmentNotification } from './notifications.js';
+import { pushMetric } from './metrics-store.js';
 import { secureGetRandomValues, secureRandomUUID } from './crypto-fallback.js';
 import { hashPassword, verifyPassword } from './auth.js';
 
@@ -40,9 +41,10 @@ export interface EdgeConnection {
 	hostname: string;
 	capabilities: string[];
 	connectedAt: Date;
-	lastHeartbeat: Date;
+	lastHeartbeat: number;
 	pendingRequests: Map<string, PendingRequest>;
 	pendingStreamRequests: Map<string, PendingStreamRequest>;
+	pingInterval?: ReturnType<typeof setInterval>;
 	lastMetrics?: {
 		uptime?: number;
 		cpuUsage?: number;
@@ -76,6 +78,9 @@ declare global {
 	var __hawserSendMessage: ((envId: number, message: string) => boolean) | undefined;
 	var __hawserHandleContainerEvent: ((envId: number, event: ContainerEventMessage['event']) => Promise<void>) | undefined;
 	var __hawserHandleMetrics: ((envId: number, metrics: MetricsMessage['metrics']) => Promise<void>) | undefined;
+	var __hawserHandleMessage: ((ws: any, msg: any, connId: string, remoteIp?: string) => Promise<void>) | undefined;
+	var __hawserHandleDisconnect: ((ws: any, connId: string) => void) | undefined;
+	var __terminalHandleExecMessage: ((msg: any) => void) | undefined;
 }
 export const edgeConnections: Map<number, EdgeConnection> =
 	globalThis.__hawserEdgeConnections ?? (globalThis.__hawserEdgeConnections = new Map());
@@ -94,7 +99,7 @@ export function initializeEdgeManager(): void {
 		const timeout = 90 * 1000; // 90 seconds (3 missed heartbeats)
 
 		for (const [envId, conn] of edgeConnections) {
-			if (now - conn.lastHeartbeat.getTime() > timeout) {
+			if (now - conn.lastHeartbeat > timeout) {
 				const pendingCount = conn.pendingRequests.size;
 				const streamCount = conn.pendingStreamRequests.size;
 				console.log(
@@ -115,9 +120,29 @@ export function initializeEdgeManager(): void {
 				conn.pendingRequests.clear();
 				conn.pendingStreamRequests.clear();
 
+				if (conn.pingInterval) {
+					clearInterval(conn.pingInterval);
+					conn.pingInterval = undefined;
+				}
+
 				conn.ws.close(1001, 'Connection timeout');
 				edgeConnections.delete(envId);
 				updateEnvironmentStatus(envId, null);
+			}
+		}
+
+		// Maintain reconnection tracker: reset for stable connections, prune stale entries
+		for (const [envId, tracker] of reconnectTracker) {
+			const conn = edgeConnections.get(envId);
+			if (conn && now - conn.lastHeartbeat < STABLE_THRESHOLD_MS) {
+				// Connection is stable — reset tracker so next reconnect is unthrottled
+				reconnectTracker.delete(envId);
+			} else if (!conn && tracker.timestamps.length > 0) {
+				const lastAttempt = tracker.timestamps[tracker.timestamps.length - 1];
+				if (now - lastAttempt > STALE_TRACKER_MS) {
+					// No connection and no recent attempts — clean up
+					reconnectTracker.delete(envId);
+				}
 			}
 		}
 	}, 30000);
@@ -137,6 +162,7 @@ export function stopEdgeManager(): void {
 		conn.ws.close(1001, 'Server shutdown');
 	}
 	edgeConnections.clear();
+	reconnectTracker.clear();
 }
 
 /**
@@ -189,7 +215,7 @@ export async function handleEdgeContainerEvent(
 	}
 }
 
-// Register global handler for patch-build.ts to use
+// Register global handler for server.js to use
 globalThis.__hawserHandleContainerEvent = handleEdgeContainerEvent;
 
 /**
@@ -218,14 +244,8 @@ export async function handleEdgeMetrics(
 			? (metrics.memoryUsed / metrics.memoryTotal) * 100
 			: 0;
 
-		// Save to database using the existing function
-		await saveHostMetric(
-			cpuPercent,
-			memoryPercent,
-			metrics.memoryUsed,
-			metrics.memoryTotal,
-			environmentId
-		);
+		// Push to in-memory ring buffer
+		pushMetric(environmentId, cpuPercent, memoryPercent, metrics.memoryUsed, metrics.memoryTotal);
 	} catch (error) {
 		const errorMsg = error instanceof Error ? error.message : String(error);
 		console.error('[Hawser] Error saving metrics:', errorMsg);
@@ -241,11 +261,15 @@ globalThis.__hawserHandleMetrics = handleEdgeMetrics;
 export async function validateHawserToken(
 	token: string
 ): Promise<{ valid: boolean; environmentId?: number; tokenId?: number }> {
-	// Get all active tokens
-	const tokens = await db.select().from(hawserTokens).where(eq(hawserTokens.isActive, true));
+	// Fast path: lookup by token prefix (first 8 chars) instead of iterating all tokens.
+	// This reduces O(N) Argon2id verifications to O(1) DB lookup + 1 verify.
+	const prefix = token.substring(0, 8);
+	const candidates = await db
+		.select()
+		.from(hawserTokens)
+		.where(and(eq(hawserTokens.tokenPrefix, prefix), eq(hawserTokens.isActive, true)));
 
-	// Check each token (tokens are hashed)
-	for (const t of tokens) {
+	for (const t of candidates) {
 		try {
 			const isValid = await verifyPassword(token, t.token);
 			if (isValid) {
@@ -262,7 +286,7 @@ export async function validateHawserToken(
 				};
 			}
 		} catch {
-			// Invalid hash, continue checking
+			// Invalid hash format, skip
 		}
 	}
 
@@ -287,6 +311,13 @@ export async function generateHawserToken(
 		existingConnection.ws.close(1000, 'Token regenerated');
 		edgeConnections.delete(environmentId);
 	}
+
+	// Revoke all existing active tokens for this environment so the old agent
+	// can no longer reconnect and fight with the new one over the connection slot
+	await db
+		.update(hawserTokens)
+		.set({ isActive: false })
+		.where(and(eq(hawserTokens.environmentId, environmentId), eq(hawserTokens.isActive, true)));
 
 	// Use provided token or generate a new one
 	let token: string;
@@ -350,6 +381,12 @@ export function closeEdgeConnection(environmentId: number): void {
 		`Rejecting ${pendingCount} pending requests and ${streamCount} stream requests.`
 	);
 
+	// Clear ping interval
+	if (connection.pingInterval) {
+		clearInterval(connection.pingInterval);
+		connection.pingInterval = undefined;
+	}
+
 	// Reject all pending requests
 	for (const [requestId, pending] of connection.pendingRequests) {
 		console.log(`[Hawser] Rejecting pending request ${requestId} due to environment deletion`);
@@ -396,6 +433,7 @@ export function handleEdgeConnection(
 		// Reject all pending requests before closing
 		for (const [requestId, pending] of existing.pendingRequests) {
 			console.log(`[Hawser] Rejecting pending request ${requestId} due to connection replacement`);
+			clearTimeout(pending.timeout);
 			pending.reject(new Error('Connection replaced by new agent'));
 		}
 		for (const [requestId, pending] of existing.pendingStreamRequests) {
@@ -405,7 +443,18 @@ export function handleEdgeConnection(
 		existing.pendingRequests.clear();
 		existing.pendingStreamRequests.clear();
 
-		existing.ws.close(1000, 'Replaced by new connection');
+		// Clear ping interval before closing
+		if (existing.pingInterval) {
+			clearInterval(existing.pingInterval);
+			existing.pingInterval = undefined;
+		}
+
+		// Immediately destroy TCP socket — no graceful close needed for replaced connections
+		if (typeof existing.ws.terminate === 'function') {
+			existing.ws.terminate();
+		} else {
+			existing.ws.close(1000, 'Replaced by new connection');
+		}
 	}
 
 	const connection: EdgeConnection = {
@@ -418,12 +467,23 @@ export function handleEdgeConnection(
 		hostname: hello.hostname,
 		capabilities: hello.capabilities,
 		connectedAt: new Date(),
-		lastHeartbeat: new Date(),
+		lastHeartbeat: Date.now(),
 		pendingRequests: new Map(),
 		pendingStreamRequests: new Map()
 	};
 
 	edgeConnections.set(environmentId, connection);
+
+	// Start server-side ping interval to keep connection alive.
+	// 5s is conservative against reverse proxies with aggressive idle timeouts.
+	connection.pingInterval = setInterval(() => {
+		try {
+			connection.ws.send(JSON.stringify({ type: 'ping', timestamp: Date.now() }));
+		} catch {
+			clearInterval(connection.pingInterval!);
+			connection.pingInterval = undefined;
+		}
+	}, 5000);
 
 	// Update environment record
 	updateEnvironmentStatus(environmentId, connection);
@@ -471,7 +531,9 @@ export async function sendEdgeRequest(
 	body?: unknown,
 	headers?: Record<string, string>,
 	streaming = false,
-	timeout = 30000
+	timeout = 30000,
+	isBinary = false,
+	signal?: AbortSignal
 ): Promise<EdgeResponse> {
 	const connection = edgeConnections.get(environmentId);
 	if (!connection) {
@@ -488,6 +550,27 @@ export async function sendEdgeRequest(
 			}
 			reject(new Error('Request timeout'));
 		}, timeout);
+
+		// Honor AbortSignal from caller (e.g., AbortSignal.timeout(5000) for dockerPing)
+		if (signal) {
+			if (signal.aborted) {
+				clearTimeout(timeoutHandle);
+				reject(new Error('Request aborted'));
+				return;
+			}
+			signal.addEventListener(
+				'abort',
+				() => {
+					connection.pendingRequests.delete(requestId);
+					if (streaming) {
+						connection.pendingStreamRequests.delete(requestId);
+					}
+					clearTimeout(timeoutHandle);
+					reject(new Error('Request aborted'));
+				},
+				{ once: true }
+			);
+		}
 
 		// For streaming requests, the Go agent sends 'stream' messages instead of a single 'response'.
 		// We need to register a stream handler that collects all data and resolves when complete.
@@ -559,7 +642,8 @@ export async function sendEdgeRequest(
 			method,
 			path,
 			headers: headers || {},
-			body: body, // Body is already an object, will be serialized by JSON.stringify(message)
+			body: body,
+			isBinary, // true when body is base64-encoded binary (tar uploads)
 			streaming
 		};
 
@@ -753,7 +837,7 @@ export function handleEdgeResponse(environmentId: number, response: ResponseMess
 export function handleHeartbeat(environmentId: number): void {
 	const connection = edgeConnections.get(environmentId);
 	if (connection) {
-		connection.lastHeartbeat = new Date();
+		connection.lastHeartbeat = Date.now();
 	}
 }
 
@@ -763,6 +847,12 @@ export function handleHeartbeat(environmentId: number): void {
 export function handleDisconnect(environmentId: number): void {
 	const connection = edgeConnections.get(environmentId);
 	if (connection) {
+		// Clear ping interval
+		if (connection.pingInterval) {
+			clearInterval(connection.pingInterval);
+			connection.pingInterval = undefined;
+		}
+
 		// Reject all pending requests
 		for (const [, pending] of connection.pendingRequests) {
 			clearTimeout(pending.timeout);
@@ -824,7 +914,8 @@ export interface RequestMessage {
 	method: string;
 	path: string;
 	headers?: Record<string, string>;
-	body?: unknown; // JSON-serializable object, will be serialized when message is stringified
+	body?: unknown; // JSON-serializable object, or base64 string when isBinary=true
+	isBinary?: boolean; // true when body is base64-encoded binary data (tar uploads)
 	streaming?: boolean;
 }
 
@@ -946,3 +1037,271 @@ export type HawserMessage =
 	| ContainerEventMessage
 	| { type: 'ping'; timestamp: number }
 	| { type: 'pong'; timestamp: number };
+
+// ─── Production WebSocket message handler (used by server.js) ───
+
+// Maps WebSocket instances to environment IDs for message routing
+const wsToEnvId = new Map<any, number>();
+
+// Auth fail cache to prevent brute-force token validation.
+// 5 min cooldown — hawser agents use exponential backoff (30-60s),
+// so a short cooldown lets every retry through.
+const hawserAuthFailCache = new Map<string, number>();
+const HAWSER_AUTH_FAIL_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
+
+// Periodic cleanup of expired auth fail entries
+setInterval(() => {
+	const now = Date.now();
+	for (const [key, timestamp] of hawserAuthFailCache) {
+		if (now - timestamp > HAWSER_AUTH_FAIL_COOLDOWN_MS) {
+			hawserAuthFailCache.delete(key);
+		}
+	}
+}, HAWSER_AUTH_FAIL_COOLDOWN_MS);
+
+// ─── Reconnection storm throttle ───
+// Tracks per-environment reconnection frequency to detect storms
+// (e.g., agent can auth but Docker socket is broken → 30s timeout → reconnect loop)
+interface ReconnectTrackerEntry {
+	timestamps: number[];
+	cooldownUntil: number;   // 0 = no cooldown active
+	cooldownLevel: number;   // index into COOLDOWN_LEVELS
+}
+const reconnectTracker = new Map<number, ReconnectTrackerEntry>();
+const RECONNECT_WINDOW_MS = 2 * 60 * 1000;         // 2-minute sliding window
+const RECONNECT_BURST = 10;                          // allow 10 reconnections per window
+const COOLDOWN_LEVELS_SECS = [30, 60, 120, 300];    // escalating cooldown in seconds
+const STABLE_THRESHOLD_MS = 5 * 60 * 1000;          // stable connection resets tracker
+const STALE_TRACKER_MS = 10 * 60 * 1000;            // clean up stale tracker entries
+
+/**
+ * Record a reconnection for an environment and check if throttling is needed.
+ * Returns { allowed: true } or { allowed: false, retryAfter: seconds }.
+ */
+function recordReconnection(envId: number): { allowed: true } | { allowed: false; retryAfter: number } {
+	const now = Date.now();
+	let entry = reconnectTracker.get(envId);
+
+	if (!entry) {
+		entry = { timestamps: [now], cooldownUntil: 0, cooldownLevel: 0 };
+		reconnectTracker.set(envId, entry);
+		return { allowed: true };
+	}
+
+	// Check if currently in cooldown
+	if (now < entry.cooldownUntil) {
+		const retryAfter = Math.ceil((entry.cooldownUntil - now) / 1000);
+		return { allowed: false, retryAfter };
+	}
+
+	// Prune timestamps outside the sliding window
+	entry.timestamps = entry.timestamps.filter(ts => now - ts < RECONNECT_WINDOW_MS);
+	entry.timestamps.push(now);
+
+	// Check if burst limit exceeded
+	if (entry.timestamps.length > RECONNECT_BURST) {
+		const level = Math.min(entry.cooldownLevel, COOLDOWN_LEVELS_SECS.length - 1);
+		const cooldownSecs = COOLDOWN_LEVELS_SECS[level];
+		entry.cooldownUntil = now + cooldownSecs * 1000;
+		entry.cooldownLevel = Math.min(entry.cooldownLevel + 1, COOLDOWN_LEVELS_SECS.length - 1);
+
+		console.warn(
+			`[Hawser WS] Reconnection storm detected for env ${envId}: ` +
+			`${entry.timestamps.length} connections in ${RECONNECT_WINDOW_MS / 1000}s. ` +
+			`Cooldown ${cooldownSecs}s (level ${level})`
+		);
+
+		return { allowed: false, retryAfter: cooldownSecs };
+	}
+
+	return { allowed: true };
+}
+
+/**
+ * Handle a WebSocket message from a Hawser Edge agent.
+ * Full protocol handler: hello/welcome auth, ping/pong,
+ * response/stream routing, metrics, container events, exec sessions.
+ *
+ * Registered as globalThis.__hawserHandleMessage for server.js to call.
+ */
+async function handleHawserWsMessage(ws: any, msg: any, connId: string, remoteIp?: string): Promise<void> {
+	if (msg.type === 'hello') {
+		const rateLimitKey = remoteIp || connId;
+
+		// Rate limit auth failures by remote IP (not connId which is unique per connection)
+		const lastFail = hawserAuthFailCache.get(rateLimitKey);
+		if (lastFail && Date.now() - lastFail < HAWSER_AUTH_FAIL_COOLDOWN_MS) {
+			console.log(`[Hawser WS] Rate limited ${connId} (IP: ${rateLimitKey}) — ${Math.round((Date.now() - lastFail) / 1000)}s since last fail`);
+			ws.send(JSON.stringify({ type: 'error', message: 'Too many failed attempts' }));
+			ws.close(1008, 'Rate limited');
+			return;
+		}
+
+		if (!msg.token) {
+			ws.send(JSON.stringify({ type: 'error', message: 'No token provided' }));
+			ws.close(1008, 'Missing token');
+			return;
+		}
+
+		try {
+			const result = await validateHawserToken(msg.token);
+			if (!result.valid || !result.environmentId) {
+				console.log(`[Hawser WS] Authentication failed for connection ${connId} (IP: ${rateLimitKey})`);
+				hawserAuthFailCache.set(rateLimitKey, Date.now());
+				ws.send(JSON.stringify({ type: 'error', message: 'Invalid token' }));
+				ws.close(1008, 'Invalid token');
+				return;
+			}
+
+			// Throttle reconnection storms (successful auth but broken Docker = rapid reconnect loop)
+			const throttle = recordReconnection(result.environmentId);
+			if (!throttle.allowed) {
+				console.log(`[Hawser WS] Throttling reconnection for env ${result.environmentId}: retry after ${throttle.retryAfter}s`);
+				ws.send(JSON.stringify({
+					type: 'error',
+					message: `Reconnection throttled. Retry after ${throttle.retryAfter}s.`,
+					retryAfter: throttle.retryAfter
+				}));
+				ws.close(1008, 'Reconnection throttled');
+				return;
+			}
+
+			// Authenticated — register the connection
+			const connection = handleEdgeConnection(ws, result.environmentId, msg);
+			wsToEnvId.set(ws, result.environmentId);
+
+			// Send welcome
+			ws.send(JSON.stringify({
+				type: 'welcome',
+				serverId: 'dockhand',
+				version: HAWSER_PROTOCOL_VERSION
+			}));
+
+			console.log(`[Hawser WS] Agent authenticated: env=${result.environmentId} agent=${msg.agentName || msg.agentId}`);
+		} catch (error: any) {
+			console.error('[Hawser WS] Auth error:', error.message);
+			ws.send(JSON.stringify({ type: 'error', message: 'Authentication failed' }));
+			ws.close(1011, 'Auth error');
+		}
+		return;
+	}
+
+	// All other messages require an authenticated connection
+	const envId = wsToEnvId.get(ws);
+	if (!envId) {
+		ws.send(JSON.stringify({ type: 'error', message: 'Not authenticated' }));
+		return;
+	}
+
+	const connection = edgeConnections.get(envId);
+	if (!connection) return;
+
+	// Update heartbeat
+	connection.lastHeartbeat = Date.now();
+
+	switch (msg.type) {
+		case 'ping':
+			ws.send(JSON.stringify({ type: 'pong', timestamp: Date.now() }));
+			break;
+
+		case 'pong':
+			break;
+
+		case 'response': {
+			const pending = connection.pendingRequests.get(msg.requestId);
+			if (pending) {
+				clearTimeout(pending.timeout);
+				connection.pendingRequests.delete(msg.requestId);
+				pending.resolve({
+					statusCode: msg.statusCode,
+					headers: msg.headers || {},
+					body: msg.body,
+					isBinary: msg.isBinary
+				});
+			}
+			break;
+		}
+
+		case 'stream': {
+			const streamPending = connection.pendingStreamRequests.get(msg.requestId);
+			if (streamPending) {
+				streamPending.onData?.(msg.data);
+			}
+			break;
+		}
+
+		case 'stream_end': {
+			const streamReq = connection.pendingStreamRequests.get(msg.requestId);
+			if (streamReq) {
+				connection.pendingStreamRequests.delete(msg.requestId);
+				streamReq.onEnd?.(msg.reason);
+			}
+			break;
+		}
+
+		case 'metrics':
+			if (globalThis.__hawserHandleMetrics) {
+				await globalThis.__hawserHandleMetrics(envId, msg.metrics);
+			}
+			break;
+
+		case 'container_event':
+			if (globalThis.__hawserHandleContainerEvent) {
+				await globalThis.__hawserHandleContainerEvent(envId, msg.event);
+			}
+			break;
+
+		case 'exec_ready':
+		case 'exec_output':
+		case 'exec_end':
+			// Forward exec messages to server.js/vite.config.ts via global callback
+			if (globalThis.__terminalHandleExecMessage) {
+				globalThis.__terminalHandleExecMessage(msg);
+			}
+			break;
+
+		case 'error':
+			console.error(`[Hawser WS] Agent error (env ${envId}): ${msg.message}`);
+			// Forward exec-related errors (identified by requestId) to terminal handler
+			if (msg.requestId && globalThis.__terminalHandleExecMessage) {
+				globalThis.__terminalHandleExecMessage(msg);
+			}
+			break;
+	}
+}
+
+/**
+ * Handle WebSocket disconnect for a Hawser Edge agent.
+ * Receives the actual ws object to correctly identify which connection closed.
+ */
+function handleHawserWsDisconnect(disconnectedWs: any, connId: string): void {
+	const envId = wsToEnvId.get(disconnectedWs);
+	if (!envId) {
+		// This ws was never authenticated (e.g., auth failed), nothing to clean up
+		return;
+	}
+
+	const connection = edgeConnections.get(envId);
+	if (connection && connection.ws === disconnectedWs) {
+		console.log(`[Hawser WS] Agent disconnected: env=${envId}`);
+
+		for (const [, pending] of connection.pendingRequests) {
+			clearTimeout(pending.timeout);
+			pending.reject(new Error('Agent disconnected'));
+		}
+		for (const [, pending] of connection.pendingStreamRequests) {
+			pending.onEnd?.('Agent disconnected');
+		}
+		connection.pendingRequests.clear();
+		connection.pendingStreamRequests.clear();
+
+		edgeConnections.delete(envId);
+		updateEnvironmentStatus(envId, null);
+	}
+
+	wsToEnvId.delete(disconnectedWs);
+}
+
+// Register global handlers for server.js to call
+globalThis.__hawserHandleMessage = handleHawserWsMessage;
+globalThis.__hawserHandleDisconnect = handleHawserWsDisconnect;

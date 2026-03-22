@@ -7,7 +7,7 @@
 	import CodeEditor, { type VariableMarker } from '$lib/components/CodeEditor.svelte';
 	import StackEnvVarsPanel from '$lib/components/StackEnvVarsPanel.svelte';
 	import { type EnvVar, type ValidationResult } from '$lib/components/StackEnvVarsEditor.svelte';
-	import { Layers, Save, Play, Code, GitGraph, Loader2, AlertCircle, X, Sun, Moon, TriangleAlert, GripVertical, FolderOpen, Copy, Check, MapPin, ArrowRight, ArrowDown, Info, Box, FolderSync } from 'lucide-svelte';
+	import { Layers, Save, Play, Code, GitGraph, Loader2, AlertCircle, X, Sun, Moon, TriangleAlert, GripVertical, FolderOpen, Copy, Check, XCircle, MapPin, ArrowRight, ArrowDown, Info, Box, FolderSync } from 'lucide-svelte';
 	import type { Component } from 'svelte';
 	import FilesystemBrowser from './FilesystemBrowser.svelte';
 	import PathBarItem from './PathBarItem.svelte';
@@ -17,8 +17,11 @@
 	import { currentEnvironment, appendEnvParam } from '$lib/stores/environment';
 	import { appSettings } from '$lib/stores/settings';
 	import { focusFirstInput } from '$lib/utils';
+	import { copyToClipboard } from '$lib/utils/clipboard';
 	import * as Alert from '$lib/components/ui/alert';
 	import { ErrorDialog } from '$lib/components/ui/error-dialog';
+	import { readJobResponse } from '$lib/utils/sse-fetch';
+	import { toast } from 'svelte-sonner';
 	import ComposeGraphViewer from './ComposeGraphViewer.svelte';
 	import { useSidebar } from '$lib/components/ui/sidebar/context.svelte';
 
@@ -36,7 +39,11 @@
 		onSuccess: () => void; // Called after create or save
 	}
 
-	let { open = $bindable(), mode, stackName = '', onClose, onSuccess }: Props = $props();
+	let { open = $bindable(), mode: propMode, stackName: propStackName = '', onClose, onSuccess }: Props = $props();
+
+	// Local effective state - can transition from create → edit after failed deploy
+	let mode = $state(propMode);
+	let stackName = $state(propStackName);
 
 	// Form state
 	let newStackName = $state('');
@@ -89,9 +96,9 @@
 
 
 	// UI state
-	let composePathCopied = $state(false);
-	let envPathCopied = $state(false);
-	let composeContentCopied = $state(false);
+	let composePathCopied = $state<'ok' | 'error' | null>(null);
+	let envPathCopied = $state<'ok' | 'error' | null>(null);
+	let composeContentCopied = $state<'ok' | 'error' | null>(null);
 	let needsFileLocation = $state(false);
 
 	// Container info for untracked stacks
@@ -326,11 +333,11 @@
 	}
 
 	// Generic copy function that returns a reset callback
-	function copyToClipboard(text: string | null, setCopied: (v: boolean) => void) {
+	async function copyText(text: string | null, setCopied: (v: 'ok' | 'error' | null) => void) {
 		if (text) {
-			navigator.clipboard.writeText(text);
-			setCopied(true);
-			setTimeout(() => setCopied(false), 2000);
+			const ok = await copyToClipboard(text);
+			setCopied(ok ? 'ok' : 'error');
+			setTimeout(() => setCopied(null), 2000);
 		}
 	}
 
@@ -929,11 +936,17 @@ services:
 				body: JSON.stringify(requestBody)
 			});
 
-			if (!response.ok) {
-				const data = await response.json();
+			// When start=true, response is a job or JSON; when start=false, it's plain JSON
+			const data = start ? await readJobResponse(response) : await response.json();
+
+			if (!response.ok && !data.success) {
 				throw new Error((typeof data.error === 'string' ? data.error : data.message) || 'Failed to create stack');
 			}
+			if (data.success === false) {
+				throw new Error(data.error || 'Failed to create stack');
+			}
 
+			toast.success(`Created stack "${newStackName.trim()}"`);
 			onSuccess();
 			handleClose();
 		} catch (e: any) {
@@ -942,6 +955,13 @@ services:
 				message: e.message || 'An error occurred while creating the stack',
 				details: e.details
 			};
+			// If start=true, files were saved and stack is in DB — transition to edit mode
+			// so the user can fix and redeploy without leaving the modal
+			if (start) {
+				mode = 'edit';
+				stackName = newStackName.trim();
+				onSuccess(); // refresh stack list so the new stack appears
+			}
 		} finally {
 			saving = false;
 		}
@@ -1093,13 +1113,18 @@ services:
 				}
 			);
 
-			const data = await response.json();
+			// When restart=true, response is a job or JSON; when restart=false, it's plain JSON
+			const data = restart ? await readJobResponse(response) : await response.json();
 
-			if (!response.ok) {
+			if (!response.ok && !data.success) {
 				throw new Error((typeof data.error === 'string' ? data.error : data.message) || 'Failed to save compose file');
+			}
+			if (data.success === false) {
+				throw new Error(data.error || 'Failed to save compose file');
 			}
 
 			isDirty = false; // Reset dirty flag after successful save
+			toast.success(restart ? 'Stack applied' : 'Stack saved');
 			onSuccess();
 
 			if (!restart) {
@@ -1146,6 +1171,9 @@ services:
 			clearTimeout(validateTimer);
 			validateTimer = null;
 		}
+		// Reset mode back to prop values
+		mode = propMode;
+		stackName = propStackName;
 		// Reset all state
 		newStackName = '';
 		error = null;
@@ -1195,6 +1223,9 @@ services:
 	$effect(() => {
 		if (open && !hasInitialized) {
 			hasInitialized = true;
+			// Reset mode to prop values on each open
+			mode = propMode;
+			stackName = propStackName;
 			if (mode === 'edit' && stackName) {
 				loadComposeFile().then(() => {
 					// Auto-validate after loading
@@ -1463,7 +1494,7 @@ services:
 									path={workingComposePath || null}
 									placeholder="/path/to/compose.yaml"
 									copied={composePathCopied}
-									onCopy={() => copyToClipboard(workingComposePath, (v) => composePathCopied = v)}
+									onCopy={() => copyText(workingComposePath, (v) => composePathCopied = v)}
 									onBrowse={openComposeBrowser}
 									onChangeLocation={mode === 'edit' && !needsFileLocation ? openChangeLocationBrowser : undefined}
 									defaultText={mode === 'create' ? 'Enter stack name above' : 'Not specified'}
@@ -1480,7 +1511,7 @@ services:
 									selectedPath={workingEnvPath || suggestedEnvPath || ''}
 									placeholder="/path/to/.env (optional)"
 									copied={envPathCopied}
-									onCopy={() => copyToClipboard(displayEnvPath, (v) => envPathCopied = v)}
+									onCopy={() => copyText(displayEnvPath, (v) => envPathCopied = v)}
 									onBrowse={openEnvBrowser}
 									isEditable={true}
 									isCustom={!!workingEnvPath}
@@ -1525,10 +1556,18 @@ services:
 														variant="ghost"
 														size="sm"
 														class="h-6 px-2 text-xs text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
-														onclick={() => copyToClipboard(composeContent, (v) => composeContentCopied = v)}
+														onclick={() => copyText(composeContent, (v) => composeContentCopied = v)}
 														disabled={!composeContent}
 													>
-														{#if composeContentCopied}
+														{#if composeContentCopied === 'error'}
+															<Tooltip.Root open>
+																<Tooltip.Trigger>
+																	<XCircle class="w-3 h-3 text-red-500" />
+																</Tooltip.Trigger>
+																<Tooltip.Content>Copy requires HTTPS</Tooltip.Content>
+															</Tooltip.Root>
+															Failed
+														{:else if composeContentCopied === 'ok'}
 															<Check class="w-3 h-3 text-green-500" />
 															Copied
 														{:else}

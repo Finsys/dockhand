@@ -74,12 +74,17 @@ export async function runImagePrune(
 
 		// Extract space reclaimed and images removed from result
 		const spaceReclaimed = result?.SpaceReclaimed || 0;
-		// Count unique images by filtering Untagged entries that are not digest references
-		// Docker returns multiple entries per image: Untagged (tag), Untagged (digest @sha256:), Deleted (layers)
-		// We only count tag-based Untagged entries to get actual image count
-		const imagesRemoved = result?.ImagesDeleted
-			?.filter((img: any) => img.Untagged && !img.Untagged.includes('@sha256:'))
-			.length || 0;
+		// Count unique images removed.
+		// Docker returns: Untagged (tag), Untagged (digest @sha256:), Deleted (layer sha256:)
+		// For tagged images: count Untagged entries that are NOT digest references (tag-based)
+		// For dangling images: there are no tag-based entries, only digest-based Untagged entries
+		// So count tag-based Untagged first, fall back to digest-based Untagged for dangling prune
+		const deleted = result?.ImagesDeleted || [];
+		const tagEntries = deleted.filter((img: any) => img.Untagged && !img.Untagged.includes('@sha256:'));
+		const digestEntries = deleted.filter((img: any) => img.Untagged && img.Untagged.includes('@sha256:'));
+		const imagesRemoved = tagEntries.length > 0
+			? tagEntries.length
+			: digestEntries.length;
 
 		// Format space for human-readable output
 		const formatBytes = (bytes: number): string => {
@@ -116,12 +121,14 @@ export async function runImagePrune(
 			}
 		});
 
-		// Send success notification
-		await sendEventNotification('image_prune_success', {
-			title: 'Image prune completed',
-			message: `${imagesRemoved} unused images removed, ${formatBytes(spaceReclaimed)} disk space reclaimed`,
-			type: 'success'
-		}, envId);
+		// Send success notification only when something was actually cleaned up
+		if (imagesRemoved > 0) {
+			await sendEventNotification('image_prune_success', {
+				title: 'Image prune completed',
+				message: `${imagesRemoved} unused images removed, ${formatBytes(spaceReclaimed)} disk space reclaimed`,
+				type: 'success'
+			}, envId);
+		}
 
 	} catch (error: any) {
 		await log(`Error: ${error.message}`);

@@ -2,6 +2,7 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getStackComposeFile, deployStack, saveStackComposeFile } from '$lib/server/stacks';
 import { authorize } from '$lib/server/authorize';
+import { createJobResponse } from '$lib/server/sse';
 
 // GET /api/stacks/[name]/compose - Get compose file content
 export const GET: RequestHandler = async ({ params, url, cookies }) => {
@@ -66,7 +67,6 @@ export const PUT: RequestHandler = async ({ params, request, url, cookies }) => 
 			? { composePath, envPath, moveFromDir, oldComposePath, oldEnvPath }
 			: undefined;
 
-		let result;
 		if (restart) {
 			// Deploy with docker compose up -d --force-recreate
 			// Force recreate ensures env var changes are applied
@@ -79,18 +79,33 @@ export const PUT: RequestHandler = async ({ params, request, url, cookies }) => 
 			}
 			// Get authoritative paths from DB/filesystem for deploy
 			const composeInfo = await getStackComposeFile(name, envIdNum);
-			result = await deployStack({
-				name,
-				compose: content,
-				envId: envIdNum,
-				forceRecreate: true,
-				composePath: composeInfo.composePath || undefined,
-				envPath: composeInfo.envPath || undefined
-			});
-		} else {
-			// Just save the file without restarting (update operation, not create)
-			result = await saveStackComposeFile(name, content, false, envIdNum, pathOptions);
+
+			// Deploy via SSE to keep connection alive during long operations
+			return createJobResponse(async (send) => {
+				try {
+					const result = await deployStack({
+						name,
+						compose: content,
+						envId: envIdNum,
+						forceRecreate: true,
+						composePath: composeInfo.composePath || undefined,
+						envPath: composeInfo.envPath || undefined
+					});
+
+					if (!result.success) {
+						send('result', { success: false, error: result.error });
+						return;
+					}
+					send('result', { success: true });
+				} catch (error: any) {
+					console.error(`Error deploying stack ${name}:`, error);
+					send('result', { success: false, error: error.message || 'Failed to deploy stack' });
+				}
+			}, request);
 		}
+
+		// Just save the file without restarting (update operation, not create)
+		const result = await saveStackComposeFile(name, content, false, envIdNum, pathOptions);
 
 		if (!result.success) {
 			return json({ error: result.error }, { status: 500 });

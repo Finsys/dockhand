@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { RefreshCw, Copy, Trash2, Type } from 'lucide-svelte';
+	import { copyToClipboard } from '$lib/utils/clipboard';
 	import * as Select from '$lib/components/ui/select';
 
 	// Dynamic imports for browser-only xterm
@@ -53,11 +54,7 @@
 					text += line.translateToString(true) + '\n';
 				}
 			}
-			try {
-				await navigator.clipboard.writeText(text.trim());
-			} catch (err) {
-				console.error('Failed to copy:', err);
-			}
+			await copyToClipboard(text.trim());
 			terminal.focus();
 		}
 	}

@@ -26,8 +26,12 @@ export interface AppSettings {
 	eventCollectionMode: EventCollectionMode;
 	eventPollInterval: number;
 	metricsCollectionInterval: number;
+	compactPorts: boolean;
+	formatLogTimestamps: boolean;
 	externalStackPaths: string[];
 	primaryStackLocation: string | null;
+	defaultGrypeImage: string;
+	defaultTrivyImage: string;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -50,8 +54,12 @@ const DEFAULT_SETTINGS: AppSettings = {
 	eventCollectionMode: 'stream',
 	eventPollInterval: 60000,
 	metricsCollectionInterval: 30000,
+	compactPorts: false,
+	formatLogTimestamps: false,
 	externalStackPaths: [],
-	primaryStackLocation: null
+	primaryStackLocation: null,
+	defaultGrypeImage: 'anchore/grype:v0.110.0',
+	defaultTrivyImage: 'aquasec/trivy:0.69.3'
 };
 
 // Create a writable store for app settings
@@ -88,8 +96,12 @@ function createSettingsStore() {
 					eventCollectionMode: settings.eventCollectionMode ?? DEFAULT_SETTINGS.eventCollectionMode,
 					eventPollInterval: settings.eventPollInterval ?? DEFAULT_SETTINGS.eventPollInterval,
 					metricsCollectionInterval: settings.metricsCollectionInterval ?? DEFAULT_SETTINGS.metricsCollectionInterval,
+					compactPorts: settings.compactPorts ?? DEFAULT_SETTINGS.compactPorts,
+					formatLogTimestamps: settings.formatLogTimestamps ?? DEFAULT_SETTINGS.formatLogTimestamps,
 					externalStackPaths: settings.externalStackPaths ?? DEFAULT_SETTINGS.externalStackPaths,
-					primaryStackLocation: settings.primaryStackLocation ?? DEFAULT_SETTINGS.primaryStackLocation
+					primaryStackLocation: settings.primaryStackLocation ?? DEFAULT_SETTINGS.primaryStackLocation,
+					defaultGrypeImage: settings.defaultGrypeImage ?? DEFAULT_SETTINGS.defaultGrypeImage,
+					defaultTrivyImage: settings.defaultTrivyImage ?? DEFAULT_SETTINGS.defaultTrivyImage
 				});
 			}
 		} catch {
@@ -129,8 +141,12 @@ function createSettingsStore() {
 					eventCollectionMode: updatedSettings.eventCollectionMode ?? DEFAULT_SETTINGS.eventCollectionMode,
 					eventPollInterval: updatedSettings.eventPollInterval ?? DEFAULT_SETTINGS.eventPollInterval,
 					metricsCollectionInterval: updatedSettings.metricsCollectionInterval ?? DEFAULT_SETTINGS.metricsCollectionInterval,
+					compactPorts: updatedSettings.compactPorts ?? DEFAULT_SETTINGS.compactPorts,
+					formatLogTimestamps: updatedSettings.formatLogTimestamps ?? DEFAULT_SETTINGS.formatLogTimestamps,
 					externalStackPaths: updatedSettings.externalStackPaths ?? DEFAULT_SETTINGS.externalStackPaths,
-					primaryStackLocation: updatedSettings.primaryStackLocation ?? DEFAULT_SETTINGS.primaryStackLocation
+					primaryStackLocation: updatedSettings.primaryStackLocation ?? DEFAULT_SETTINGS.primaryStackLocation,
+					defaultGrypeImage: updatedSettings.defaultGrypeImage ?? DEFAULT_SETTINGS.defaultGrypeImage,
+					defaultTrivyImage: updatedSettings.defaultTrivyImage ?? DEFAULT_SETTINGS.defaultTrivyImage
 				});
 			}
 		} catch (error) {
@@ -290,6 +306,20 @@ function createSettingsStore() {
 				return newSettings;
 			});
 		},
+		setCompactPorts: (value: boolean) => {
+			update((current) => {
+				const newSettings = { ...current, compactPorts: value };
+				saveSettings({ compactPorts: value });
+				return newSettings;
+			});
+		},
+		setFormatLogTimestamps: (value: boolean) => {
+			update((current) => {
+				const newSettings = { ...current, formatLogTimestamps: value };
+				saveSettings({ formatLogTimestamps: value });
+				return newSettings;
+			});
+		},
 		setExternalStackPaths: (value: string[]) => {
 			update((current) => {
 				const newSettings = { ...current, externalStackPaths: value };
@@ -301,6 +331,20 @@ function createSettingsStore() {
 			update((current) => {
 				const newSettings = { ...current, primaryStackLocation: value };
 				saveSettings({ primaryStackLocation: value });
+				return newSettings;
+			});
+		},
+		setDefaultGrypeImage: (value: string) => {
+			update((current) => {
+				const newSettings = { ...current, defaultGrypeImage: value };
+				saveSettings({ defaultGrypeImage: value });
+				return newSettings;
+			});
+		},
+		setDefaultTrivyImage: (value: string) => {
+			update((current) => {
+				const newSettings = { ...current, defaultTrivyImage: value };
+				saveSettings({ defaultTrivyImage: value });
 				return newSettings;
 			});
 		},
@@ -418,4 +462,20 @@ export function getTimeFormat(): TimeFormat {
  */
 export function getDateFormat(): DateFormat {
 	return cachedDateFormat;
+}
+
+// Regex matching ISO 8601 timestamps at the start of log lines (after optional container prefix)
+// Matches: 2026-01-12T07:47:44.449821093Z or 2026-01-12T07:47:44Z
+const ISO_TIMESTAMP_RE = /(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.\d+)?Z/g;
+
+/**
+ * Replace ISO 8601 timestamps in log text with formatted local timestamps.
+ * Uses the user's configured date/time format settings.
+ */
+export function formatLogTimestamps(text: string): string {
+	return text.replace(ISO_TIMESTAMP_RE, (_match, dateTimePart) => {
+		const d = new Date(_match);
+		if (isNaN(d.getTime())) return _match;
+		return `${formatDatePart(d)} ${formatTimePart(d, true)}`;
+	});
 }

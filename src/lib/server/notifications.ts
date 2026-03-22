@@ -21,6 +21,13 @@ function escapeTelegramMarkdown(text: string): string {
 		.replace(/`/g, '\\`');   // Backtick (code)
 }
 
+/** Drain a response body to release the underlying socket/TLS connection. */
+async function drainResponse(response: Response): Promise<void> {
+	if (!response.bodyUsed) {
+		try { await response.arrayBuffer(); } catch {}
+	}
+}
+
 export interface NotificationPayload {
 	title: string;
 	message: string;
@@ -121,6 +128,9 @@ async function sendToAppriseUrl(url: string, payload: NotificationPayload): Prom
 			case 'slack':
 			case 'slacks':
 				return await sendSlack(url, payload);
+			case 'mmost':
+			case 'mmosts':
+				return await sendMattermost(url, payload);
 			case 'tgram':
 				return await sendTelegram(url, payload);
 			case 'gotify':
@@ -169,6 +179,7 @@ async function sendDiscord(appriseUrl: string, payload: NotificationPayload): Pr
 			const text = await response.text().catch(() => '');
 			return { success: false, error: `Discord error ${response.status}: ${text || response.statusText}` };
 		}
+		await drainResponse(response);
 		return { success: true };
 	} catch (error) {
 		return { success: false, error: `Discord connection failed: ${error instanceof Error ? error.message : String(error)}` };
@@ -201,9 +212,66 @@ async function sendSlack(appriseUrl: string, payload: NotificationPayload): Prom
 			const text = await response.text().catch(() => '');
 			return { success: false, error: `Slack error ${response.status}: ${text || response.statusText}` };
 		}
+		await drainResponse(response);
 		return { success: true };
 	} catch (error) {
 		return { success: false, error: `Slack connection failed: ${error instanceof Error ? error.message : String(error)}` };
+	}
+}
+
+// Mattermost webhook
+async function sendMattermost(appriseUrl: string, payload: NotificationPayload): Promise<NotificationResult> {
+	// mmost://[botname@]hostname[:port][/path]/token or mmosts://...
+	const isSecure = appriseUrl.startsWith('mmosts');
+	const protocol = isSecure ? 'https' : 'http';
+
+	// Remove the scheme
+	let urlPart = appriseUrl.replace(/^mmosts?:\/\//, '');
+
+	// Check for botname (username@hostname format)
+	let username: string | undefined;
+	const atIndex = urlPart.indexOf('@');
+	if (atIndex !== -1) {
+		username = urlPart.substring(0, atIndex);
+		urlPart = urlPart.substring(atIndex + 1);
+	}
+
+	// The token is the last segment, everything else is hostname[:port][/path]
+	const lastSlashIndex = urlPart.lastIndexOf('/');
+	if (lastSlashIndex === -1) {
+		return { success: false, error: 'Invalid Mattermost URL format. Expected: mmost://[botname@]hostname[:port][/path]/token' };
+	}
+
+	const token = urlPart.substring(lastSlashIndex + 1);
+	const hostAndPath = urlPart.substring(0, lastSlashIndex);
+
+	// Build the webhook URL: {protocol}://{hostname}[:{port}][/{path}]/hooks/{token}
+	const url = `${protocol}://${hostAndPath}/hooks/${token}`;
+
+	const envTag = payload.environmentName ? ` \`${payload.environmentName}\`` : '';
+	const body: Record<string, string> = {
+		text: `*${payload.title}*${envTag}\n${payload.message}`
+	};
+
+	if (username) {
+		body.username = username;
+	}
+
+	try {
+		const response = await fetch(url, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(body)
+		});
+
+		if (!response.ok) {
+			const text = await response.text().catch(() => '');
+			return { success: false, error: `Mattermost error ${response.status}: ${text || response.statusText}` };
+		}
+		await drainResponse(response);
+		return { success: true };
+	} catch (error) {
+		return { success: false, error: `Mattermost connection failed: ${error instanceof Error ? error.message : String(error)}` };
 	}
 }
 
@@ -239,6 +307,7 @@ async function sendTelegram(appriseUrl: string, payload: NotificationPayload): P
 			const errorMsg = errorData.description || response.statusText;
 			return { success: false, error: `Telegram error ${response.status}: ${errorMsg}` };
 		}
+		await drainResponse(response);
 		return { success: true };
 	} catch (error) {
 		return { success: false, error: `Telegram connection failed: ${error instanceof Error ? error.message : String(error)}` };
@@ -248,14 +317,19 @@ async function sendTelegram(appriseUrl: string, payload: NotificationPayload): P
 // Gotify
 async function sendGotify(appriseUrl: string, payload: NotificationPayload): Promise<NotificationResult> {
 	// gotify://hostname/token or gotifys://hostname/token
+	// gotify://hostname/subpath/token (subpath support)
 	const match = appriseUrl.match(/^gotifys?:\/\/([^/]+)\/(.+)/);
 	if (!match) {
 		return { success: false, error: 'Invalid Gotify URL format. Expected: gotify://hostname/token' };
 	}
 
-	const [, hostname, token] = match;
+	const [, hostname, pathPart] = match;
 	const protocol = appriseUrl.startsWith('gotifys') ? 'https' : 'http';
-	const url = `${protocol}://${hostname}/message?token=${token}`;
+	// Token is always the last path segment; anything before it is a subpath
+	const lastSlash = pathPart.lastIndexOf('/');
+	const subpath = lastSlash >= 0 ? pathPart.substring(0, lastSlash) : '';
+	const token = lastSlash >= 0 ? pathPart.substring(lastSlash + 1) : pathPart;
+	const url = `${protocol}://${hostname}${subpath ? '/' + subpath : ''}/message?token=${token}`;
 
 	try {
 		const response = await fetch(url, {
@@ -272,6 +346,7 @@ async function sendGotify(appriseUrl: string, payload: NotificationPayload): Pro
 			const text = await response.text().catch(() => '');
 			return { success: false, error: `Gotify error ${response.status}: ${text || response.statusText}` };
 		}
+		await drainResponse(response);
 		return { success: true };
 	} catch (error) {
 		return { success: false, error: `Gotify connection failed: ${error instanceof Error ? error.message : String(error)}` };
@@ -289,14 +364,26 @@ async function sendNtfy(appriseUrl: string, payload: NotificationPayload): Promi
 	const path = appriseUrl.replace(/^ntfys?:\/\//, '');
 
 	let url: string;
-	let auth: string | null = null;
+	let authHeader: string | null = null;
 
-	// Check for user:pass@host/topic format
-	const authMatch = path.match(/^([^:]+):([^@]+)@(.+)$/);
-	if (authMatch) {
-		const [, user, pass, hostAndTopic] = authMatch;
-		auth = Buffer.from(`${user}:${pass}`).toString('base64');
+	// Check for user:pass@host/topic format (Basic auth)
+	const basicMatch = path.match(/^([^:]+):([^@]+)@(.+)$/);
+	if (basicMatch) {
+		const [, user, pass, hostAndTopic] = basicMatch;
+		const basic = Buffer.from(`${user}:${pass}`).toString('base64');
+		authHeader = `Basic ${basic}`;
 		url = `${isSecure ? 'https' : 'http'}://${hostAndTopic}`;
+	} else if (path.includes('@') && path.includes('/')) {
+		// token@host/topic -> Bearer token auth
+		const tokenMatch = path.match(/^([^@]+)@(.+)$/);
+		if (tokenMatch) {
+			const [, token, hostAndTopic] = tokenMatch;
+			authHeader = `Bearer ${token}`;
+			url = `${isSecure ? 'https' : 'http'}://${hostAndTopic}`;
+		} else {
+			// Fallback to custom server without auth
+			url = `${isSecure ? 'https' : 'http'}://${path}`;
+		}
 	} else if (path.includes('/')) {
 		// Custom server without auth
 		url = `${isSecure ? 'https' : 'http'}://${path}`;
@@ -311,8 +398,8 @@ async function sendNtfy(appriseUrl: string, payload: NotificationPayload): Promi
 		'Tags': payload.type || 'info'
 	};
 
-	if (auth) {
-		headers['Authorization'] = `Basic ${auth}`;
+	if (authHeader) {
+		headers['Authorization'] = authHeader;
 	}
 
 	try {
@@ -326,6 +413,7 @@ async function sendNtfy(appriseUrl: string, payload: NotificationPayload): Promi
 			const text = await response.text().catch(() => '');
 			return { success: false, error: `ntfy error ${response.status}: ${text || response.statusText}` };
 		}
+		await drainResponse(response);
 		return { success: true };
 	} catch (error) {
 		return { success: false, error: `ntfy connection failed: ${error instanceof Error ? error.message : String(error)}` };
@@ -360,6 +448,7 @@ async function sendPushover(appriseUrl: string, payload: NotificationPayload): P
 			const text = await response.text().catch(() => '');
 			return { success: false, error: `Pushover error ${response.status}: ${text || response.statusText}` };
 		}
+		await drainResponse(response);
 		return { success: true };
 	} catch (error) {
 		return { success: false, error: `Pushover connection failed: ${error instanceof Error ? error.message : String(error)}` };
@@ -387,6 +476,7 @@ async function sendGenericWebhook(appriseUrl: string, payload: NotificationPaylo
 			const text = await response.text().catch(() => '');
 			return { success: false, error: `Webhook error ${response.status}: ${text || response.statusText}` };
 		}
+		await drainResponse(response);
 		return { success: true };
 	} catch (error) {
 		return { success: false, error: `Webhook connection failed: ${error instanceof Error ? error.message : String(error)}` };
@@ -443,6 +533,7 @@ function mapActionToEventType(action: string): NotificationEventType | null {
 		'kill': 'container_exited',
 		'oom': 'container_oom',
 		'health_status: unhealthy': 'container_unhealthy',
+		'health_status: healthy': 'container_healthy',
 		'pull': 'image_pulled'
 	};
 	return mapping[action] || null;

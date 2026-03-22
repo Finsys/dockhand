@@ -124,6 +124,11 @@ export async function runEnvUpdateCheckJob(
 					continue;
 				}
 
+				if (isSystemContainer(imageName)) {
+					await log(`  [${container.name}] Skipping - system container`);
+					continue;
+				}
+
 				checkedCount++;
 				await log(`  Checking: ${container.name} (${imageName})`);
 
@@ -222,16 +227,6 @@ export async function runEnvUpdateCheckJob(
 			const blockedContainers: { name: string; reason: string; scannerResults?: { scanner: string; critical: number; high: number; medium: number; low: number }[] }[] = [];
 
 			for (const update of updatesAvailable) {
-				// Skip system containers (Dockhand/Hawser) - cannot update themselves
-				const systemContainerType = isSystemContainer(update.imageName);
-				if (systemContainerType) {
-					const reason = systemContainerType === 'dockhand'
-						? 'cannot auto-update Dockhand itself'
-						: 'cannot auto-update Hawser agent';
-					await log(`\n[${update.containerName}] Skipping - ${reason}`);
-					continue;
-				}
-
 				try {
 					await log(`\nUpdating: ${update.containerName}`);
 
@@ -357,9 +352,9 @@ export async function runEnvUpdateCheckJob(
 
 					// Recreate container with full config passthrough
 					await log(`  Recreating container...`);
-					const ok = await recreateContainer(update.containerName, environmentId,
+					const result = await recreateContainer(update.containerName, environmentId,
 						(msg) => { log(`  ${msg}`); });
-					if (!ok) throw new Error('Container recreation failed');
+					if (!result.success) throw new Error(result.error || 'Container recreation failed');
 
 					await log(`  Updated successfully`);
 					successCount++;

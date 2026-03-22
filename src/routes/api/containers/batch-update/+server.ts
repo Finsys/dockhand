@@ -75,11 +75,10 @@ export const POST: RequestHandler = async (event) => {
 					continue;
 				}
 
-				let updateSuccess = false;
 				let newContainerId = containerId;
 
-				updateSuccess = await recreateContainer(containerName, envIdNum);
-				if (updateSuccess) {
+				const recreateResult = await recreateContainer(containerName, envIdNum);
+				if (recreateResult.success) {
 					const updatedContainers = await listContainers(true, envIdNum);
 					const updatedContainer = updatedContainers.find(c => c.name === containerName);
 					if (updatedContainer) {
@@ -87,12 +86,12 @@ export const POST: RequestHandler = async (event) => {
 					}
 				}
 
-				if (!updateSuccess) {
+				if (!recreateResult.success) {
 					results.push({
 						containerId,
 						containerName,
 						success: false,
-						error: 'Container recreation failed'
+						error: recreateResult.error || 'Container recreation failed'
 					});
 					continue;
 				}

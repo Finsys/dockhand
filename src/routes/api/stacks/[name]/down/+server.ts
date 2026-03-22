@@ -2,6 +2,7 @@ import { json } from '@sveltejs/kit';
 import { downStack, ComposeFileNotFoundError } from '$lib/server/stacks';
 import { authorize } from '$lib/server/authorize';
 import { auditStack } from '$lib/server/audit';
+import { createJobResponse } from '$lib/server/sse';
 import type { RequestHandler } from './$types';
 
 export const POST: RequestHandler = async (event) => {
@@ -21,31 +22,35 @@ export const POST: RequestHandler = async (event) => {
 		return json({ error: 'Access denied to this environment' }, { status: 403 });
 	}
 
+	// Parse body BEFORE creating SSE response (body can only be read once)
+	let removeVolumes = false;
 	try {
-		// Parse body for optional removeVolumes flag
-		let removeVolumes = false;
-		try {
-			const body = await request.json();
-			removeVolumes = body.removeVolumes === true;
-		} catch {
-			// No body or invalid JSON - use defaults
-		}
-
-		const stackName = decodeURIComponent(params.name);
-		const result = await downStack(stackName, envIdNum, removeVolumes);
-
-		// Audit log
-		await auditStack(event, 'down', stackName, envIdNum, { removeVolumes });
-
-		if (!result.success) {
-			return json({ success: false, error: result.error }, { status: 400 });
-		}
-		return json({ success: true, output: result.output });
-	} catch (error) {
-		if (error instanceof ComposeFileNotFoundError) {
-			return json({ error: error.message }, { status: 404 });
-		}
-		console.error('Error downing compose stack:', error);
-		return json({ error: 'Failed to down compose stack' }, { status: 500 });
+		const body = await request.json();
+		removeVolumes = body.removeVolumes === true;
+	} catch {
+		// No body or invalid JSON - use defaults
 	}
+
+	return createJobResponse(async (send) => {
+		try {
+			const stackName = decodeURIComponent(params.name);
+			const result = await downStack(stackName, envIdNum, removeVolumes);
+
+			// Audit log
+			await auditStack(event, 'down', stackName, envIdNum, { removeVolumes });
+
+			if (!result.success) {
+				send('result', { success: false, error: result.error });
+				return;
+			}
+			send('result', { success: true, output: result.output });
+		} catch (error) {
+			if (error instanceof ComposeFileNotFoundError) {
+				send('result', { success: false, error: error.message });
+				return;
+			}
+			console.error('Error downing compose stack:', error);
+			send('result', { success: false, error: 'Failed to down compose stack' });
+		}
+	}, request);
 };

@@ -23,6 +23,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 
 		// Detect which stacks are already running on any environment
 		const discoveredWithRunning = await detectRunningStacks(result.discovered);
+		discoveredWithRunning.sort((a, b) => a.name.localeCompare(b.name));
 
 		return json({
 			...result,

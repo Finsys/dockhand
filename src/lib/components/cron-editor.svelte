@@ -21,15 +21,18 @@
 		const parts = cron.split(' ');
 		if (parts.length < 5) return 'custom';
 
-		const [, , day, month, dow] = parts;
+		const [min, hr, day, month, dow] = parts;
 
-		// Weekly: specific day of week (0-6), day and month are wildcards
-		if (dow !== '*' && day === '*' && month === '*') {
+		// Simple minute and hour: plain numbers only (not */n, ranges, or lists)
+		const isSimpleNumber = (s: string) => /^\d+$/.test(s);
+
+		// Weekly: specific single day of week (0-6), day and month are wildcards, simple min/hour
+		if (dow !== '*' && /^\d$/.test(dow) && day === '*' && month === '*' && isSimpleNumber(min) && isSimpleNumber(hr)) {
 			return 'weekly';
 		}
 
-		// Daily: all wildcards except minute and hour
-		if (day === '*' && month === '*' && dow === '*') {
+		// Daily: all wildcards except simple minute and hour
+		if (day === '*' && month === '*' && dow === '*' && isSimpleNumber(min) && isSimpleNumber(hr)) {
 			return 'daily';
 		}
 

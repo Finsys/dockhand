@@ -208,11 +208,11 @@ function readMigrationJournal(migrationsFolder: string): MigrationJournal | null
 async function getAppliedMigrations(client: any, postgres: boolean): Promise<AppliedMigration[]> {
 	try {
 		if (postgres) {
-			// PostgreSQL using Bun.sql - note the 'drizzle' schema
+			// PostgreSQL using postgres-js - note the 'drizzle' schema
 			const result = await client`SELECT hash, created_at FROM drizzle.__drizzle_migrations ORDER BY id`;
 			return result.map((r: any) => ({ hash: r.hash, createdAt: r.created_at }));
 		} else {
-			// SQLite using bun:sqlite
+			// SQLite using better-sqlite3
 			const stmt = client.prepare('SELECT hash, created_at FROM __drizzle_migrations ORDER BY id');
 			return stmt.all().map((r: any) => ({ hash: r.hash, createdAt: r.created_at }));
 		}
@@ -484,10 +484,10 @@ async function runMigrations(
 	// Run migrations
 	try {
 		if (postgres) {
-			const { migrate } = await import('drizzle-orm/bun-sql/migrator');
+			const { migrate } = await import('drizzle-orm/postgres-js/migrator');
 			await migrate(database, { migrationsFolder });
 		} else {
-			const { migrate } = await import('drizzle-orm/bun-sqlite/migrator');
+			const { migrate } = await import('drizzle-orm/better-sqlite3/migrator');
 			await migrate(database, { migrationsFolder });
 		}
 
@@ -605,7 +605,7 @@ async function initializeDatabase() {
 	logHeader('DATABASE INITIALIZATION');
 
 	if (isPostgres) {
-		// PostgreSQL via postgres-js (more stable than bun:sql for concurrent queries)
+		// PostgreSQL via postgres-js
 		validatePostgresUrl(config.databaseUrl!);
 
 		logInfo(`Database: PostgreSQL`);
@@ -634,7 +634,7 @@ async function initializeDatabase() {
 			handleMigrationFailure(result.error, true);
 		}
 	} else {
-		// SQLite via bun:sqlite
+		// SQLite via better-sqlite3
 		const dbDir = join(config.dataDir, 'db');
 		if (!existsSync(dbDir)) {
 			mkdirSync(dbDir, { recursive: true });
@@ -645,8 +645,8 @@ async function initializeDatabase() {
 		logInfo(`Database: SQLite`);
 		logInfo(`Path: ${dbPath}`);
 
-		const { drizzle } = await import('drizzle-orm/bun-sqlite');
-		const { Database } = await import('bun:sqlite');
+		const { drizzle } = await import('drizzle-orm/better-sqlite3');
+		const Database = (await import('better-sqlite3')).default;
 
 		// Import SQLite schema
 		schema = await import('./schema/index.js');
@@ -655,11 +655,11 @@ async function initializeDatabase() {
 		rawClient = new Database(dbPath);
 
 		// Enable WAL mode for better performance and concurrency
-		rawClient.exec('PRAGMA journal_mode = WAL');
+		rawClient.pragma('journal_mode = WAL');
 		// Synchronous NORMAL is a good balance between safety and speed
-		rawClient.exec('PRAGMA synchronous = NORMAL');
+		rawClient.pragma('synchronous = NORMAL');
 		// Increase busy timeout to handle concurrent access (5 seconds)
-		rawClient.exec('PRAGMA busy_timeout = 5000');
+		rawClient.pragma('busy_timeout = 5000');
 
 		db = drizzle({ client: rawClient, schema });
 		logSuccess('SQLite database opened');

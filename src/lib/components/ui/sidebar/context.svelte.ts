@@ -57,6 +57,10 @@ class SidebarState {
 			? (this.openMobile = !this.openMobile)
 			: this.setOpen(!this.open);
 	};
+
+	destroy = () => {
+		this.#isMobile.destroy();
+	};
 }
 
 const SYMBOL_KEY = "scn-sidebar";

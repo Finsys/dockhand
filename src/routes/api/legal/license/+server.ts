@@ -10,7 +10,9 @@ export const GET: RequestHandler = async ({ url }) => {
 
 		// Return as plain text if requested
 		if (url.searchParams.get('format') === 'text') {
-			return text(content);
+			return text(content, {
+				headers: { 'content-type': 'text/plain; charset=utf-8' }
+			});
 		}
 
 		return json({ content });

@@ -11,6 +11,7 @@
 	import MultiSelectFilter from '$lib/components/MultiSelectFilter.svelte';
 	import { Trash2, Search, Plus, Eye, Check, XCircle, RefreshCw, Icon, AlertTriangle, X, Network, Link, Copy, CopyPlus, Share2, Server, Globe, MonitorSmartphone, Cpu, CircleOff } from 'lucide-svelte';
 	import { broom } from '@lucide/lab';
+	import { copyToClipboard } from '$lib/utils/clipboard';
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
 	import BatchOperationModal from '$lib/components/BatchOperationModal.svelte';
 	import NetworkInspectModal from './NetworkInspectModal.svelte';
@@ -375,10 +376,10 @@
 	}
 
 	async function copyNetworkId(id: string) {
-		try {
-			await navigator.clipboard.writeText(id);
+		const ok = await copyToClipboard(id);
+		if (ok) {
 			toast.success('Network ID copied to clipboard');
-		} catch {
+		} else {
 			toast.error('Failed to copy ID');
 		}
 	}

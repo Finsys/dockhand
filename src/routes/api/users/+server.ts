@@ -114,7 +114,7 @@ export const POST: RequestHandler = async (event) => {
 		// Auto-login if this is the first user being created (and auth is enabled)
 		let autoLoggedIn = false;
 		if (isFirstUser && auth.authEnabled) {
-			await createUserSession(user.id, 'local', cookies);
+			await createUserSession(user.id, 'local', cookies, event.request);
 			autoLoggedIn = true;
 		}
 
@@ -139,7 +139,7 @@ export const POST: RequestHandler = async (event) => {
 			name: error.name,
 			stack: error.stack
 		});
-		if (error.message?.includes('UNIQUE constraint failed') || error.code === '23505') {
+		if (error.message?.includes('UNIQUE constraint failed') || error.code === '23505' || (error as any).cause?.code === '23505') {
 			return json({ error: 'Username already exists' }, { status: 409 });
 		}
 		return json({ error: 'Failed to create user', details: error.message }, { status: 500 });

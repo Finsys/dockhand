@@ -1,6 +1,6 @@
 /**
  * Clean PEM content by removing whitespace artifacts from copy/paste.
- * Bun's TLS is strict about PEM format - it fails when certificates have
+ * TLS implementations are strict about PEM format - they fail when certificates have
  * leading/trailing spaces on lines or extra blank lines.
  *
  * @param pem - The PEM content to clean

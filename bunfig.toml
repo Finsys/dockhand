@@ -7,3 +7,7 @@ exact = true
 [run]
 # Enable source maps for better error messages
 sourcemap = "external"
+
+[test]
+# Disable auth before any integration test runs
+preload = ["./tests/helpers/preload.ts"]

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
+	import { readJobResponse } from '$lib/utils/sse-fetch';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
 	import * as Dialog from '$lib/components/ui/dialog';
@@ -57,12 +58,17 @@
 		X,
 		Tags,
 		ChevronDown,
-		ChevronRight
+		ChevronRight,
+		XCircle,
+		ImageUp
 	} from 'lucide-svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import * as Alert from '$lib/components/ui/alert';
 	import * as Popover from '$lib/components/ui/popover';
 	import IconPicker from '$lib/components/icon-picker.svelte';
+	import AvatarCropper from '$lib/components/AvatarCropper.svelte';
+	import { isCustomIcon } from '$lib/utils/icons';
+	import EnvironmentIcon from '$lib/components/EnvironmentIcon.svelte';
 	import CronEditor from '$lib/components/cron-editor.svelte';
 	import TimezoneSelector from '$lib/components/TimezoneSelector.svelte';
 	import { whale } from '@lucide/lab';
@@ -70,6 +76,7 @@
 	import { TogglePill, ToggleGroup } from '$lib/components/ui/toggle-pill';
 	import { ShieldOff } from 'lucide-svelte';
 	import { focusFirstInput } from '$lib/utils';
+	import { copyToClipboard } from '$lib/utils/clipboard';
 	import { authStore, canAccess } from '$lib/stores/auth';
 	import { licenseStore } from '$lib/stores/license';
 	import { formatDateTime, formatDate } from '$lib/stores/settings';
@@ -256,10 +263,19 @@
 	let formTlsKey = $state('');
 	let formTlsSkipVerify = $state(false);
 	let formIcon = $state('globe');
+	let pendingIconData = $state<string | null>(null);
+	let iconCropperImageUrl = $state('');
+	let showIconCropper = $state(false);
+	let iconFileInput: HTMLInputElement;
+	let iconCacheBust = $state(Date.now());
 	let formSocketPath = $state('/var/run/docker.sock');
 	let formCollectActivity = $state(true);
 	let formCollectMetrics = $state(true);
 	let formHighlightChanges = $state(true);
+	let formDiskWarningEnabled = $state(true);
+	let formDiskWarningMode = $state<'percentage' | 'absolute'>('percentage');
+	let formDiskWarningThreshold = $state(80);
+	let formDiskWarningThresholdGb = $state(50);
 	let formConnectionType = $state<ConnectionType>('socket');
 	let formHawserToken = $state('');
 	let formLabels = $state<string[]>([]);
@@ -275,6 +291,66 @@
 	 * Clean a PEM certificate - remove leading/trailing whitespace from each line
 	 * This handles copy/paste from formatted output with line numbers
 	 */
+	function handleIconFileSelect(e: Event) {
+		const input = e.target as HTMLInputElement;
+		const file = input.files?.[0];
+		if (!file) return;
+		const reader = new FileReader();
+		reader.onload = () => {
+			iconCropperImageUrl = reader.result as string;
+			showIconCropper = true;
+		};
+		reader.readAsDataURL(file);
+		input.value = '';
+	}
+
+	async function handleIconCropSave(dataUrl: string) {
+		showIconCropper = false;
+		if (environment) {
+			// Edit mode: upload immediately
+			const res = await fetch(`/api/environments/${environment.id}/icon`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ image: dataUrl })
+			});
+			if (res.ok) {
+				const result = await res.json();
+				formIcon = result.icon;
+				iconCacheBust = Date.now();
+				pendingIconData = null;
+			} else {
+				toast.error('Failed to upload icon');
+			}
+		} else {
+			// Create mode: store for later upload after environment is created
+			pendingIconData = dataUrl;
+			formIcon = 'custom:pending';
+		}
+	}
+
+	async function uploadPendingIcon(envId: number) {
+		if (!pendingIconData) return;
+		await fetch(`/api/environments/${envId}/icon`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ image: pendingIconData })
+		});
+		pendingIconData = null;
+	}
+
+	async function removeCustomIcon() {
+		if (environment) {
+			const res = await fetch(`/api/environments/${environment.id}/icon`, { method: 'DELETE' });
+			if (res.ok) {
+				formIcon = 'globe';
+				iconCacheBust = Date.now();
+			}
+		} else {
+			pendingIconData = null;
+			formIcon = 'globe';
+		}
+	}
+
 	function cleanCertificate(cert: string | undefined): string | undefined {
 		if (!cert) return undefined;
 		const cleaned = cert
@@ -300,7 +376,21 @@
 	 * Strip protocol and port from a host/IP string
 	 */
 	function stripHostProtocol(value: string): string {
-		return value.replace(/^(?:\w+:\/\/)/, '').replace(/[:/].*$/, '');
+		// Strip protocol prefix (e.g., tcp://, https://)
+		const stripped = value.replace(/^(?:\w+:\/\/)/, '');
+
+		// Handle bracketed IPv6 with optional port: [::1]:port → ::1
+		if (stripped.startsWith('[')) {
+			return stripped.replace(/^\[([^\]]+)\].*$/, '$1');
+		}
+
+		// Handle plain IPv6 (2+ colons = IPv6, not IPv4:port or hostname:port)
+		if ((stripped.match(/:/g) || []).length > 1) {
+			return stripped;
+		}
+
+		// IPv4 or hostname: strip :port and path
+		return stripped.replace(/[:/].*$/, '');
 	}
 
 	/**
@@ -321,8 +411,8 @@
 	let hawserTokenLoading = $state(false);
 	let generatingToken = $state(false);
 	let generatedToken = $state<string | null>(null); // Full token shown once after generation
-	let copySuccess = $state(false);
-	let copyCmdSuccess = $state(false);
+	let copySuccess = $state<'ok' | 'error' | null>(null);
+	let copyCmdSuccess = $state<'ok' | 'error' | null>(null);
 	// For add mode - auto-generated token stored until save
 	let pendingToken = $state<string | null>(null);
 
@@ -346,6 +436,8 @@
 	let scannerAvailability = $state<{ grype: boolean; trivy: boolean }>({ grype: false, trivy: false });
 	let scannerVersions = $state<{ grype: string | null; trivy: string | null }>({ grype: null, trivy: null });
 	let scannerLoading = $state(true);
+	let scannerGrypeImage = $state('anchore/grype:v0.110.0');
+	let scannerTrivyImage = $state('aquasec/trivy:0.69.3');
 	let loadingScannerVersions = $state(false);
 	let removingGrype = $state(false);
 	let removingTrivy = $state(false);
@@ -433,6 +525,9 @@
 			newLabelInput = '';
 			formPublicIp = environment.publicIp || '';
 			modalTab = 'general';
+			// Reset icon state
+			pendingIconData = null;
+			iconCacheBust = Date.now();
 			// Reset token state for this environment (important when switching between envs)
 			hawserToken = null;
 			generatedToken = null;
@@ -443,6 +538,7 @@
 			loadUpdateCheckSettings(environment.id);
 			loadImagePruneSettings(environment.id);
 			loadTimezone(environment.id);
+			loadDiskWarningSettings(environment.id);
 			// Load Hawser token if edge mode
 			if (formConnectionType === 'hawser-edge') {
 				loadHawserToken(environment.id);
@@ -457,10 +553,15 @@
 			formTlsKey = '';
 			formTlsSkipVerify = false;
 			formIcon = 'globe';
+			pendingIconData = null;
 			formSocketPath = '/var/run/docker.sock';
 			formCollectActivity = true;
 			formCollectMetrics = true;
 			formHighlightChanges = true;
+			formDiskWarningEnabled = true;
+			formDiskWarningMode = 'percentage';
+			formDiskWarningThreshold = 80;
+			formDiskWarningThresholdGb = 50;
 			formConnectionType = 'socket';
 			formHawserToken = '';
 			formLabels = [];
@@ -642,7 +743,7 @@
 					tlsCert: cleanCertificate(formTlsCert),
 					tlsKey: cleanCertificate(formTlsKey),
 					tlsSkipVerify: formTlsSkipVerify,
-					icon: formIcon,
+					icon: pendingIconData ? 'globe' : formIcon,
 					socketPath: formConnectionType === 'socket' ? formSocketPath : undefined,
 					collectActivity: formCollectActivity,
 					collectMetrics: formCollectMetrics,
@@ -656,6 +757,10 @@
 
 			if (response.ok) {
 				const newEnv = await response.json();
+				// Upload pending custom icon if set
+				if (pendingIconData && newEnv?.id) {
+					await uploadPendingIcon(newEnv.id);
+				}
 				// If scanner was enabled, save scanner settings for the new environment
 				if (formEnableScanner && newEnv?.id) {
 					scannerEnabled = true;
@@ -699,6 +804,7 @@
 				// Save timezone if not default
 				if (newEnv?.id) {
 					await saveTimezone(newEnv.id);
+					await saveDiskWarningSettings(newEnv.id);
 				}
 				onSaved();
 				onClose();
@@ -772,6 +878,7 @@
 				await saveUpdateCheckSettings(environment.id);
 				await saveImagePruneSettings(environment.id);
 				await saveTimezone(environment.id);
+				await saveDiskWarningSettings(environment.id);
 				toast.success(`Updated environment: ${formName}`);
 				onSaved();
 				onClose();
@@ -783,6 +890,39 @@
 			formError = 'Failed to update environment';
 		} finally {
 			formSaving = false;
+		}
+	}
+
+	// === Disk Warning Functions ===
+	async function loadDiskWarningSettings(envId: number) {
+		try {
+			const response = await fetch(`/api/environments/${envId}/disk-warning`);
+			if (response.ok) {
+				const data = await response.json();
+				formDiskWarningEnabled = data.enabled ?? true;
+				formDiskWarningMode = data.mode ?? 'percentage';
+				formDiskWarningThreshold = data.threshold ?? 80;
+				formDiskWarningThresholdGb = data.thresholdGb ?? 50;
+			}
+		} catch (error) {
+			console.error('Failed to load disk warning settings:', error);
+		}
+	}
+
+	async function saveDiskWarningSettings(envId: number) {
+		try {
+			await fetch(`/api/environments/${envId}/disk-warning`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					enabled: formDiskWarningEnabled,
+					mode: formDiskWarningMode,
+					threshold: formDiskWarningThreshold,
+					thresholdGb: formDiskWarningThresholdGb
+				})
+			});
+		} catch (error) {
+			console.error('Failed to save disk warning settings:', error);
 		}
 	}
 
@@ -815,11 +955,15 @@
 
 	async function saveTimezone(envId: number) {
 		try {
-			await fetch(`/api/environments/${envId}/timezone`, {
+			const response = await fetch(`/api/environments/${envId}/timezone`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ timezone: formTimezone })
 			});
+			if (!response.ok) {
+				const data = await response.json().catch(() => ({}));
+				console.error('Failed to save timezone:', data.error || response.status);
+			}
 		} catch (error) {
 			console.error('Failed to save timezone:', error);
 		}
@@ -837,6 +981,8 @@
 				const savedScanner = settingsData.settings.scanner || 'none';
 				scannerEnabled = savedScanner !== 'none';
 				selectedScanner = savedScanner === 'none' ? 'both' : savedScanner;
+				if (settingsData.settings.grypeImage) scannerGrypeImage = settingsData.settings.grypeImage;
+				if (settingsData.settings.trivyImage) scannerTrivyImage = settingsData.settings.trivyImage;
 			}
 			scannerLoading = false;
 			loadScannerVersionsAsync(envId);
@@ -1061,25 +1207,16 @@
 			const response = await fetch(pullUrl, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ image: 'anchore/grype:latest' })
+				body: JSON.stringify({ image: scannerGrypeImage })
 			});
 
 			if (!response.ok) {
 				throw new Error('Failed to pull Grype image');
 			}
 
-			// Read SSE stream to completion
-			const reader = response.body?.getReader();
-			if (reader) {
-				const decoder = new TextDecoder();
-				while (true) {
-					const { done, value } = await reader.read();
-					if (done) break;
-					const text = decoder.decode(value, { stream: true });
-					if (text.includes('"status":"error"')) {
-						throw new Error('Pull failed');
-					}
-				}
+			const result = await readJobResponse(response);
+			if (result.success === false) {
+				throw new Error(result.error as string || 'Pull failed');
 			}
 
 			// Refresh scanner status after pull
@@ -1102,25 +1239,16 @@
 			const response = await fetch(pullUrl, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ image: 'aquasec/trivy:latest' })
+				body: JSON.stringify({ image: scannerTrivyImage })
 			});
 
 			if (!response.ok) {
 				throw new Error('Failed to pull Trivy image');
 			}
 
-			// Read SSE stream to completion
-			const reader = response.body?.getReader();
-			if (reader) {
-				const decoder = new TextDecoder();
-				while (true) {
-					const { done, value } = await reader.read();
-					if (done) break;
-					const text = decoder.decode(value, { stream: true });
-					if (text.includes('"status":"error"')) {
-						throw new Error('Pull failed');
-					}
-				}
+			const result = await readJobResponse(response);
+			if (result.success === false) {
+				throw new Error(result.error as string || 'Pull failed');
 			}
 
 			// Refresh scanner status after pull
@@ -1268,17 +1396,17 @@
 		await generateHawserToken(envId);
 	}
 
-	function copyToken(token: string) {
-		navigator.clipboard.writeText(token);
-		copySuccess = true;
-		setTimeout(() => { copySuccess = false; }, 2000);
+	async function copyToken(token: string) {
+		const ok = await copyToClipboard(token);
+		copySuccess = ok ? 'ok' : 'error';
+		setTimeout(() => { copySuccess = null; }, 2000);
 	}
 
-	function copyCommand(token: string) {
+	async function copyCommand(token: string) {
 		const cmd = `DOCKHAND_SERVER_URL=${getConnectionUrl()} TOKEN=${token} hawser`;
-		navigator.clipboard.writeText(cmd);
-		copyCmdSuccess = true;
-		setTimeout(() => { copyCmdSuccess = false; }, 2000);
+		const ok = await copyToClipboard(cmd);
+		copyCmdSuccess = ok ? 'ok' : 'error';
+		setTimeout(() => { copyCmdSuccess = null; }, 2000);
 	}
 
 	function getConnectionUrl() {
@@ -1339,7 +1467,23 @@
 						<div class="space-y-2">
 							<Label for="edit-env-name">Name</Label>
 							<div class="flex gap-2">
-								<IconPicker value={formIcon} onchange={(icon) => formIcon = icon} />
+								{#if isCustomIcon(formIcon) || pendingIconData}
+									<Button variant="outline" size="sm" class="h-9 w-9 p-0 relative group" type="button" onclick={() => iconFileInput?.click()}>
+										{#if pendingIconData}
+											<img src={pendingIconData} alt="" class="w-5 h-5 rounded object-cover" />
+										{:else if environment}
+											<EnvironmentIcon icon={formIcon} envId={environment.id} class="w-5 h-5" cacheBust={iconCacheBust} />
+										{/if}
+									</Button>
+									<Button variant="ghost" size="sm" class="h-9 w-9 p-0" type="button" title="Remove custom icon" onclick={removeCustomIcon}>
+										<X class="w-3.5 h-3.5 text-muted-foreground" />
+									</Button>
+								{:else}
+									<IconPicker value={formIcon} onchange={(icon) => formIcon = icon} />
+									<Button variant="ghost" size="sm" class="h-9 w-9 p-0" type="button" title="Upload custom icon" onclick={() => iconFileInput?.click()}>
+										<ImageUp class="w-4 h-4 text-muted-foreground" />
+									</Button>
+								{/if}
 								<Input
 									id="edit-env-name"
 									bind:value={formName}
@@ -1352,6 +1496,13 @@
 								<p class="text-xs text-destructive">{formErrors.name}</p>
 							{/if}
 						</div>
+						<input
+							type="file"
+							accept="image/*"
+							class="hidden"
+							bind:this={iconFileInput}
+							onchange={handleIconFileSelect}
+						/>
 
 						<!-- Labels section -->
 						<div class="space-y-2">
@@ -1883,7 +2034,14 @@
 														class="font-mono text-xs flex-1"
 													/>
 													<Button variant="outline" size="sm" onclick={() => copyToken(pendingToken!)}>
-														{#if copySuccess}
+														{#if copySuccess === 'error'}
+															<Tooltip.Root open>
+																<Tooltip.Trigger>
+																	<XCircle class="w-4 h-4 text-red-500" />
+																</Tooltip.Trigger>
+																<Tooltip.Content>Copy requires HTTPS</Tooltip.Content>
+															</Tooltip.Root>
+														{:else if copySuccess === 'ok'}
 															<Check class="w-4 h-4 text-green-500" />
 														{:else}
 															<Copy class="w-4 h-4" />
@@ -1899,7 +2057,14 @@
 															onclick={() => copyCommand(pendingToken!)}
 															title="Copy command"
 														>
-															{#if copyCmdSuccess}
+															{#if copyCmdSuccess === 'error'}
+																<Tooltip.Root open>
+																	<Tooltip.Trigger>
+																		<XCircle class="w-3 h-3 text-red-500" />
+																	</Tooltip.Trigger>
+																	<Tooltip.Content>Copy requires HTTPS</Tooltip.Content>
+																</Tooltip.Root>
+															{:else if copyCmdSuccess === 'ok'}
 																<Check class="w-3 h-3 text-green-600" />
 															{:else}
 																<Copy class="w-3 h-3" />
@@ -1936,7 +2101,14 @@
 														class="font-mono text-xs flex-1"
 													/>
 													<Button variant="outline" size="sm" onclick={() => copyToken(generatedToken!)}>
-														{#if copySuccess}
+														{#if copySuccess === 'error'}
+															<Tooltip.Root open>
+																<Tooltip.Trigger>
+																	<XCircle class="w-4 h-4 text-red-500" />
+																</Tooltip.Trigger>
+																<Tooltip.Content>Copy requires HTTPS</Tooltip.Content>
+															</Tooltip.Root>
+														{:else if copySuccess === 'ok'}
 															<Check class="w-4 h-4 text-green-500" />
 														{:else}
 															<Copy class="w-4 h-4" />
@@ -1952,7 +2124,14 @@
 															onclick={() => copyCommand(generatedToken!)}
 															title="Copy command"
 														>
-															{#if copyCmdSuccess}
+															{#if copyCmdSuccess === 'error'}
+																<Tooltip.Root open>
+																	<Tooltip.Trigger>
+																		<XCircle class="w-3 h-3 text-red-500" />
+																	</Tooltip.Trigger>
+																	<Tooltip.Content>Copy requires HTTPS</Tooltip.Content>
+																</Tooltip.Root>
+															{:else if copyCmdSuccess === 'ok'}
 																<Check class="w-3 h-3 text-green-600" />
 															{:else}
 																<Copy class="w-3 h-3" />
@@ -2033,6 +2212,10 @@
 						bind:collectActivity={formCollectActivity}
 						bind:collectMetrics={formCollectMetrics}
 						bind:highlightChanges={formHighlightChanges}
+						bind:diskWarningEnabled={formDiskWarningEnabled}
+						bind:diskWarningMode={formDiskWarningMode}
+						bind:diskWarningThreshold={formDiskWarningThreshold}
+						bind:diskWarningThresholdGb={formDiskWarningThresholdGb}
 					/>
 				</Tabs.Content>
 
@@ -2117,7 +2300,7 @@
 											{/if}
 											{#if !loadingScannerVersions}
 												{#if !scannerAvailability.grype}
-													<ImagePullProgressPopover imageName="anchore/grype:latest" envId={environment?.id} onComplete={() => reloadScannerAvailability(environment?.id)}>
+													<ImagePullProgressPopover imageName={scannerGrypeImage} envId={environment?.id} onComplete={() => reloadScannerAvailability(environment?.id)}>
 														<button class="inline-flex items-center text-2xs px-1.5 py-0 h-4 rounded-full border bg-muted/50 hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
 															<Download class="w-2.5 h-2.5 mr-0.5" />
 															Pull
@@ -2194,7 +2377,7 @@
 											{/if}
 											{#if !loadingScannerVersions}
 												{#if !scannerAvailability.trivy}
-													<ImagePullProgressPopover imageName="aquasec/trivy:latest" envId={environment?.id} onComplete={() => reloadScannerAvailability(environment?.id)}>
+													<ImagePullProgressPopover imageName={scannerTrivyImage} envId={environment?.id} onComplete={() => reloadScannerAvailability(environment?.id)}>
 														<button class="inline-flex items-center text-2xs px-1.5 py-0 h-4 rounded-full border bg-muted/50 hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
 															<Download class="w-2.5 h-2.5 mr-0.5" />
 															Pull
@@ -2531,5 +2714,17 @@
 				{/if}
 			</div>
 		</Dialog.Footer>
+		<AvatarCropper
+			show={showIconCropper}
+			imageUrl={iconCropperImageUrl}
+			cropShape="round"
+			outputSize={128}
+			outputFormat="image/webp"
+			outputQuality={0.85}
+			title="Crop icon"
+			saveLabel="Save icon"
+			onCancel={() => showIconCropper = false}
+			onSave={handleIconCropSave}
+		/>
 	</Dialog.Content>
 </Dialog.Root>

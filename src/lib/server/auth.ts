@@ -2,16 +2,16 @@
  * Core Authentication Module
  *
  * Security features:
- * - Argon2id password hashing via Bun.password (memory-hard, timing-attack resistant)
+ * - Argon2id password hashing via argon2 (memory-hard, timing-attack resistant)
  * - Cryptographically secure 32-byte random session tokens
  * - HttpOnly cookies (prevents XSS from reading tokens)
- * - Secure flag (HTTPS only in production)
+ * - Secure flag (protocol-aware: x-forwarded-proto or COOKIE_SECURE env var, default off)
  * - SameSite=Strict (CSRF protection)
  */
 
 import os from 'node:os';
-import { secureRandomBytes, usingFallback } from './crypto-fallback';
-import { argon2id, argon2Verify } from 'hash-wasm';
+import { createHash } from 'node:crypto';
+import argon2 from 'argon2';
 import type { Cookies } from '@sveltejs/kit';
 import {
 	getAuthSettings,
@@ -43,6 +43,7 @@ import {
 } from './db';
 import { Client as LdapClient } from 'ldapts';
 import { isEnterprise } from './license';
+import { secureRandomBytes } from './crypto-fallback';
 
 // Session cookie name
 const SESSION_COOKIE_NAME = 'dockhand_session';
@@ -98,42 +99,25 @@ export interface LoginResult {
 // Password Hashing (Argon2id)
 // ============================================
 
-// Argon2id parameters (matching Bun.password defaults)
+// Argon2id parameters
 const ARGON2_MEMORY_COST = 65536; // 64 MB in kibibytes
 const ARGON2_TIME_COST = 3;       // 3 iterations
 const ARGON2_PARALLELISM = 1;     // Single-threaded
 const ARGON2_HASH_LENGTH = 32;    // 256-bit output
-const ARGON2_SALT_LENGTH = 16;    // 128-bit salt
 
 /**
  * Hash a password using Argon2id
  *
- * On modern kernels (>=3.17): Uses Bun's native password API (faster)
- * On old kernels (<3.17): Uses hash-wasm (WASM-based, no getrandom dependency)
- *
- * Argon2id is the recommended variant - resistant to both side-channel and GPU attacks
+ * Uses the argon2 npm package (C binding) for native performance.
+ * Returns PHC format: $argon2id$v=19$m=65536,t=3,p=1$...
  */
 export async function hashPassword(password: string): Promise<string> {
-	// On old kernels, Bun.password.hash() crashes because it internally uses getrandom()
-	// Use hash-wasm as a fallback which is pure WASM and doesn't depend on the syscall
-	if (usingFallback()) {
-		const salt = secureRandomBytes(ARGON2_SALT_LENGTH);
-		return argon2id({
-			password,
-			salt,
-			iterations: ARGON2_TIME_COST,
-			parallelism: ARGON2_PARALLELISM,
-			memorySize: ARGON2_MEMORY_COST,
-			hashLength: ARGON2_HASH_LENGTH,
-			outputType: 'encoded'  // Returns PHC format: $argon2id$v=19$m=65536,t=3,p=1$...
-		});
-	}
-
-	// Modern kernels: use Bun's native implementation (faster)
-	return Bun.password.hash(password, {
-		algorithm: 'argon2id',
+	return argon2.hash(password, {
+		type: argon2.argon2id,
 		memoryCost: ARGON2_MEMORY_COST,
-		timeCost: ARGON2_TIME_COST
+		timeCost: ARGON2_TIME_COST,
+		parallelism: ARGON2_PARALLELISM,
+		hashLength: ARGON2_HASH_LENGTH
 	});
 }
 
@@ -141,18 +125,13 @@ export async function hashPassword(password: string): Promise<string> {
  * Verify a password against a hash
  * Uses constant-time comparison internally
  *
- * Both Bun.password and hash-wasm use the same PHC format, so hashes are compatible
+ * The argon2 npm package uses standard PHC format, compatible with existing hashes
  */
 export async function verifyPassword(password: string, hash: string): Promise<boolean> {
 	try {
-		// On old kernels, use hash-wasm for verification
-		if (usingFallback()) {
-			return await argon2Verify({ password, hash });
-		}
-
-		// Modern kernels: use Bun's native implementation
-		return await Bun.password.verify(password, hash);
-	} catch {
+		return await argon2.verify(hash, password);
+	} catch (e) {
+		console.error('[Auth] argon2.verify() threw unexpectedly:', e);
 		return false;
 	}
 }
@@ -170,13 +149,42 @@ function generateSessionToken(): string {
 }
 
 /**
+ * Determine whether to set the Secure flag on the session cookie.
+ *
+ * Priority:
+ * 1. COOKIE_SECURE env var ('true' / 'false') — explicit override
+ * 2. x-forwarded-proto header — set by Traefik / Nginx / Caddy
+ * 3. false — default, matches v1.0.18 Bun behavior
+ *
+ * Defaulting to false (not NODE_ENV) is intentional: Dockhand is commonly
+ * run over plain HTTP in homelabs. Setting Secure unconditionally in production
+ * causes a login loop when there is no HTTPS reverse proxy, because browsers
+ * silently discard Secure cookies on HTTP connections.
+ *
+ * Users behind an HTTPS reverse proxy get Secure cookies automatically via
+ * x-forwarded-proto. Users who terminate TLS in the app itself can opt in
+ * with COOKIE_SECURE=true.
+ */
+function isSecureContext(request?: Request): boolean {
+	if (process.env.COOKIE_SECURE === 'false') return false;
+	if (process.env.COOKIE_SECURE === 'true') return true;
+	if (request) {
+		const proto = request.headers.get('x-forwarded-proto');
+		if (proto === 'https') return true;
+	}
+	return false;
+}
+
+/**
  * Create a new session for a user
  * @param provider - Auth provider: 'local', or provider name like 'Keycloak', 'Azure AD', etc.
+ * @param request  - Optional incoming request (used to detect HTTPS via x-forwarded-proto)
  */
 export async function createUserSession(
 	userId: number,
 	provider: string,
-	cookies: Cookies
+	cookies: Cookies,
+	request?: Request
 ): Promise<Session> {
 	// Clean up expired sessions periodically
 	await deleteExpiredSessions();
@@ -198,7 +206,7 @@ export async function createUserSession(
 	const session = await dbCreateSession(sessionId, userId, provider, expiresAt);
 
 	// Set secure cookie
-	setSessionCookie(cookies, sessionId, sessionTimeout);
+	setSessionCookie(cookies, sessionId, sessionTimeout, request);
 
 	// Update user's last login time
 	await updateUser(userId, { lastLogin: new Date().toISOString() });
@@ -209,11 +217,11 @@ export async function createUserSession(
 /**
  * Set the session cookie with secure attributes
  */
-function setSessionCookie(cookies: Cookies, sessionId: string, maxAge: number): void {
+function setSessionCookie(cookies: Cookies, sessionId: string, maxAge: number, request?: Request): void {
 	cookies.set(SESSION_COOKIE_NAME, sessionId, {
 		path: '/',
 		httpOnly: true,                    // Prevents XSS attacks from reading cookie
-		secure: process.env.NODE_ENV === 'production', // HTTPS only in production
+		secure: isSecureContext(request),  // Protocol-aware: checks x-forwarded-proto or NODE_ENV
 		sameSite: 'strict',                // CSRF protection
 		maxAge: maxAge                     // Session timeout in seconds
 	});
@@ -564,6 +572,19 @@ export async function authenticateLdap(
 }
 
 /**
+ * Escape special characters in an LDAP filter value (RFC 4515).
+ * Prevents LDAP injection via wildcards or control characters.
+ */
+function escapeLdapFilterValue(value: string): string {
+	return value
+		.replace(/\\/g, '\\5c')
+		.replace(/\*/g, '\\2a')
+		.replace(/\(/g, '\\28')
+		.replace(/\)/g, '\\29')
+		.replace(/\0/g, '\\00');
+}
+
+/**
  * Try authentication against a specific LDAP configuration
  */
 async function tryLdapAuth(
@@ -585,8 +606,10 @@ async function tryLdapAuth(
 			await client.bind(config.bindDn, config.bindPassword);
 		}
 
-		// Search for the user
-		const filter = config.userFilter.replace('{{username}}', username);
+		// Escape the username before interpolating into the LDAP filter (RFC 4515)
+		// to prevent LDAP injection via wildcards or special characters.
+		const safeUsername = escapeLdapFilterValue(username);
+		const filter = config.userFilter.replace('{{username}}', safeUsername);
 		const { searchEntries } = await client.search(config.baseDn, {
 			scope: 'sub',
 			filter: filter,
@@ -599,9 +622,11 @@ async function tryLdapAuth(
 			]
 		});
 
+		// Use a single generic error for both "not found" and "wrong password"
+		// to avoid leaking whether a username exists via response content or timing.
 		if (searchEntries.length === 0) {
 			await client.unbind();
-			return { success: false, error: 'User not found' };
+			return { success: false, error: 'Invalid username or password' };
 		}
 
 		const userEntry = searchEntries[0];
@@ -666,11 +691,11 @@ async function tryLdapAuth(
 		if (adminRole) {
 			const hasAdminRole = await userHasAdminRole(user.id);
 			if (shouldBeAdmin && !hasAdminRole) {
-				// Assign Admin role
 				await assignUserRole(user.id, adminRole.id, null);
+			} else if (!shouldBeAdmin && hasAdminRole && config.adminGroup) {
+				// Remove Admin role if user is no longer in admin group
+				await removeUserRole(user.id, adminRole.id);
 			}
-			// Note: We don't remove Admin role if not in LDAP group anymore
-			// to prevent accidental lockouts (same behavior as before)
 		}
 
 		// Process role mappings (Enterprise feature)
@@ -683,14 +708,29 @@ async function tryLdapAuth(
 			const userExistingRoles = await getUserRoles(user.id);
 			const existingRoleIds = new Set(userExistingRoles.map(r => r.roleId));
 
-			for (const mapping of roleMappings) {
-				// Skip if user already has this role
-				if (existingRoleIds.has(mapping.roleId)) continue;
+			// All role IDs referenced in mappings (these are LDAP-managed)
+			const mappedRoleIds = new Set(roleMappings.map(m => m.roleId));
 
-				// Check if user is a member of the LDAP group
+			// Determine which mapped roles user should have based on current group membership
+			const shouldHaveRoleIds = new Set<number>();
+			for (const mapping of roleMappings) {
 				const isInGroup = await checkLdapGroupMembership(config, userDn, mapping.groupDn);
 				if (isInGroup) {
-					await assignUserRole(user.id, mapping.roleId, undefined);
+					shouldHaveRoleIds.add(mapping.roleId);
+				}
+			}
+
+			// Add roles user should have but doesn't
+			for (const roleId of shouldHaveRoleIds) {
+				if (!existingRoleIds.has(roleId)) {
+					await assignUserRole(user.id, roleId, undefined);
+				}
+			}
+
+			// Remove mapped roles user has but shouldn't
+			for (const roleId of mappedRoleIds) {
+				if (existingRoleIds.has(roleId) && !shouldHaveRoleIds.has(roleId)) {
+					await removeUserRole(user.id, roleId);
 				}
 			}
 		}
@@ -744,8 +784,9 @@ async function checkLdapGroupMembership(
 		let groupFilter: string;
 
 		if (config.groupFilter) {
-			// User provided custom filter
-			searchBase = config.groupBaseDn || groupDnOrName;
+			// User provided custom filter - use group DN directly when it's a full DN
+			// to avoid searching all groups under groupBaseDn
+			searchBase = isFullDn ? groupDnOrName : (config.groupBaseDn || groupDnOrName);
 			groupFilter = config.groupFilter
 				.replace('{{username}}', userDn)
 				.replace('{{user_dn}}', userDn)
@@ -765,7 +806,7 @@ async function checkLdapGroupMembership(
 		}
 
 		const { searchEntries } = await client.search(searchBase, {
-			scope: isFullDn && !config.groupFilter ? 'base' : 'sub',
+			scope: isFullDn ? 'base' : 'sub',
 			filter: groupFilter,
 			sizeLimit: 1
 		});
@@ -825,9 +866,7 @@ function generateBackupCodes(): string[] {
 async function hashBackupCode(code: string): Promise<string> {
 	// Normalize: uppercase, remove spaces and dashes
 	const normalized = code.toUpperCase().replace(/[\s-]/g, '');
-	const hasher = new Bun.CryptoHasher('sha256');
-	hasher.update(normalized);
-	return hasher.digest('hex');
+	return createHash('sha256').update(normalized).digest('hex');
 }
 
 /**
@@ -1172,9 +1211,7 @@ async function getOidcDiscovery(issuerUrl: string): Promise<OidcDiscoveryDocumen
  */
 function generatePkce(): { codeVerifier: string; codeChallenge: string } {
 	const codeVerifier = secureRandomBytes(32).toString('base64url');
-	const hasher = new Bun.CryptoHasher('sha256');
-	hasher.update(codeVerifier);
-	const codeChallenge = hasher.digest('base64url') as string;
+	const codeChallenge = createHash('sha256').update(codeVerifier).digest('base64url');
 	return { codeVerifier, codeChallenge };
 }
 

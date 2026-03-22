@@ -2,7 +2,7 @@
 	import * as Card from '$lib/components/ui/card';
 	import { Wifi, WifiOff, ShieldCheck, Activity, Cpu, Settings, Unplug, Icon, Route, UndoDot, CircleArrowUp, CircleFadingArrowUp, Loader2 } from 'lucide-svelte';
 	import { whale } from '@lucide/lab';
-	import { getIconComponent } from '$lib/utils/icons';
+	import EnvironmentIcon from '$lib/components/EnvironmentIcon.svelte';
 	import { goto } from '$app/navigation';
 	import { canAccess } from '$lib/stores/auth';
 	import type { EnvironmentStats } from '../api/dashboard/stats/+server';
@@ -30,8 +30,6 @@
 	}
 
 	let { stats, width = 1, height = 1, oneventsclick, showStacksBreakdown = true }: Props = $props();
-
-	const EnvIcon = $derived(getIconComponent(stats.icon));
 
 	// Specific tile size conditionals for easy customization
 	const is1x1 = $derived(width === 1 && height === 1);
@@ -64,7 +62,7 @@
 				<!-- Left: Icons + Name/Host -->
 				<div class="flex items-center gap-2 min-w-0 overflow-hidden flex-1">
 					<div class="p-1.5 rounded-lg shrink-0 {stats.online ? 'bg-primary/10' : 'bg-muted'}">
-						<EnvIcon class="w-4 h-4 {stats.online ? 'text-primary' : 'text-muted-foreground'}" />
+						<EnvironmentIcon icon={stats.icon} envId={stats.id} class="w-4 h-4 {stats.online ? 'text-primary' : 'text-muted-foreground'}" />
 					</div>
 					{#if stats.connectionType === 'socket' || !stats.connectionType}
 						<span title="Unix socket connection" class="shrink-0">
@@ -160,7 +158,7 @@
 				<!-- Left: Icons + Name/Host -->
 				<div class="flex items-center gap-2 min-w-0 overflow-hidden flex-1">
 					<div class="p-1.5 rounded-lg shrink-0 {stats.online ? 'bg-primary/10' : 'bg-muted'}">
-						<EnvIcon class="w-4 h-4 {stats.online ? 'text-primary' : 'text-muted-foreground'}" />
+						<EnvironmentIcon icon={stats.icon} envId={stats.id} class="w-4 h-4 {stats.online ? 'text-primary' : 'text-muted-foreground'}" />
 					</div>
 					{#if stats.connectionType === 'socket' || !stats.connectionType}
 						<span title="Unix socket connection" class="shrink-0">
@@ -263,7 +261,7 @@
 			<!-- Left: Icons + Name/Host -->
 			<div class="flex items-center gap-2 min-w-0 overflow-hidden flex-1">
 				<div class="p-1.5 rounded-lg shrink-0 {stats.online ? 'bg-primary/10' : 'bg-muted'}">
-					<EnvIcon class="w-4 h-4 {stats.online ? 'text-primary' : 'text-muted-foreground'}" />
+					<EnvironmentIcon icon={stats.icon} envId={stats.id} class="w-4 h-4 {stats.online ? 'text-primary' : 'text-muted-foreground'}" />
 				</div>
 				{#if stats.connectionType === 'socket' || !stats.connectionType}
 					<span title="Unix socket connection" class="shrink-0">
@@ -364,7 +362,7 @@
 			<!-- Left: Icons + Name/Host -->
 			<div class="flex items-center gap-2 min-w-0 overflow-hidden flex-1">
 				<div class="p-1.5 rounded-lg shrink-0 {stats.online ? 'bg-primary/10' : 'bg-muted'}">
-					<EnvIcon class="w-4 h-4 {stats.online ? 'text-primary' : 'text-muted-foreground'}" />
+					<EnvironmentIcon icon={stats.icon} envId={stats.id} class="w-4 h-4 {stats.online ? 'text-primary' : 'text-muted-foreground'}" />
 				</div>
 				{#if stats.connectionType === 'socket' || !stats.connectionType}
 					<span title="Unix socket connection" class="shrink-0">
@@ -468,7 +466,7 @@
 			<!-- Left: Icons + Name/Host -->
 			<div class="flex items-center gap-2 min-w-0 overflow-hidden flex-1">
 				<div class="p-1.5 rounded-lg shrink-0 {stats.online ? 'bg-primary/10' : 'bg-muted'}">
-					<EnvIcon class="w-4 h-4 {stats.online ? 'text-primary' : 'text-muted-foreground'}" />
+					<EnvironmentIcon icon={stats.icon} envId={stats.id} class="w-4 h-4 {stats.online ? 'text-primary' : 'text-muted-foreground'}" />
 				</div>
 				{#if stats.connectionType === 'socket' || !stats.connectionType}
 					<span title="Unix socket connection" class="shrink-0">

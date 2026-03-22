@@ -2,6 +2,7 @@ import { json } from '@sveltejs/kit';
 import { pruneImages } from '$lib/server/docker';
 import { authorize } from '$lib/server/authorize';
 import { audit } from '$lib/server/audit';
+import { createJobResponse } from '$lib/server/sse';
 import type { RequestHandler } from './$types';
 
 export const POST: RequestHandler = async (event) => {
@@ -17,19 +18,21 @@ export const POST: RequestHandler = async (event) => {
 		return json({ error: 'Permission denied' }, { status: 403 });
 	}
 
-	try {
-		const result = await pruneImages(danglingOnly, envIdNum);
+	return createJobResponse(async (send) => {
+		try {
+			const result = await pruneImages(danglingOnly, envIdNum);
 
-		// Audit log
-		await audit(event, 'prune', 'image', {
-			environmentId: envIdNum,
-			description: `Pruned ${danglingOnly ? 'dangling' : 'unused'} images`,
-			details: { danglingOnly, result }
-		});
+			// Audit log
+			await audit(event, 'prune', 'image', {
+				environmentId: envIdNum,
+				description: `Pruned ${danglingOnly ? 'dangling' : 'unused'} images`,
+				details: { danglingOnly, result }
+			});
 
-		return json({ success: true, result });
-	} catch (error) {
-		console.error('Error pruning images:', error);
-		return json({ error: 'Failed to prune images' }, { status: 500 });
-	}
+			send('result', { success: true, result });
+		} catch (error) {
+			console.error('Error pruning images:', error);
+			send('result', { success: false, error: 'Failed to prune images' });
+		}
+	}, event.request);
 };

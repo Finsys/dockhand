@@ -11,6 +11,7 @@ import { cleanPem } from '$lib/utils/pem';
 import { unregisterSchedule } from '$lib/server/scheduler';
 import { closeEdgeConnection } from '$lib/server/hawser';
 import { computeAuditDiff } from '$lib/utils/diff';
+import { deleteEnvironmentIcon } from '$lib/server/env-icons';
 
 export const GET: RequestHandler = async ({ params, cookies }) => {
 	const auth = await authorize(cookies);
@@ -91,7 +92,7 @@ export const PUT: RequestHandler = async (event) => {
 			return json({ error: 'Environment not found' }, { status: 404 });
 		}
 
-		// Notify subprocesses if collectActivity or collectMetrics setting changed
+		// Notify event collectors if collectActivity or collectMetrics setting changed
 		if (data.collectActivity !== undefined || data.collectMetrics !== undefined) {
 			refreshSubprocessEnvironments();
 		}
@@ -167,6 +168,9 @@ export const DELETE: RequestHandler = async (event) => {
 			return json({ error: 'Cannot delete this environment' }, { status: 400 });
 		}
 
+		// Clean up custom icon file if exists
+		deleteEnvironmentIcon(id);
+
 		// Clean up public IP entry for this environment
 		await deleteEnvironmentPublicIp(id);
 
@@ -178,7 +182,7 @@ export const DELETE: RequestHandler = async (event) => {
 		await deleteImagePruneSettings(id);
 		unregisterSchedule(id, 'image_prune');
 
-		// Notify subprocesses to stop collecting from deleted environment
+		// Notify event collectors to stop collecting from deleted environment
 		refreshSubprocessEnvironments();
 
 		// Audit log

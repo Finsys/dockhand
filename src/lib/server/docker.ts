@@ -2,15 +2,20 @@
  * Docker Operations Module
  *
  * Uses direct Docker API calls over Unix socket or HTTP/HTTPS.
- * No external dependencies like dockerode - uses native Bun fetch.
+ * No external dependencies like dockerode - uses Node.js fetch.
  */
 
 import { homedir } from 'node:os';
 import { existsSync, mkdirSync, rmSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import * as http from 'node:http';
+import * as https from 'node:https';
+import * as tls from 'node:tls';
+import { createHash } from 'node:crypto';
 import type { Environment } from './db';
 import { getStackEnvVarsAsRecord } from './db';
 import { isSystemContainer } from './scheduler/tasks/update-utils';
+import { deepDiff } from '../utils/diff.js';
 
 /**
  * Custom error for when an environment is not found.
@@ -28,7 +33,7 @@ export class EnvironmentNotFoundError extends Error {
 
 /**
  * Custom error for Docker connection failures with user-friendly messages.
- * Wraps raw Bun fetch errors to hide technical details from users.
+ * Wraps raw fetch errors to hide technical details from users.
  */
 export class DockerConnectionError extends Error {
 	public readonly originalError: unknown;
@@ -279,6 +284,12 @@ const envCache = new Map<number, CachedEnv>();
 // Cache TTL: 30 minutes (in milliseconds)
 const CACHE_TTL = 30 * 60 * 1000;
 
+// All known Docker Hub hostname variations for credential matching
+const DOCKER_HUB_HOSTS = new Set([
+	'docker.io', 'hub.docker.com', 'registry.hub.docker.com',
+	'index.docker.io', 'registry-1.docker.io', 'registry.docker.io', 'docker.com'
+]);
+
 // Cleanup stale cache entries periodically
 function cleanupEnvCache() {
 	const now = Date.now();
@@ -300,6 +311,204 @@ if (!globalThis.__dockerEnvCacheCleanupInterval) {
 	globalThis.__dockerEnvCacheCleanupInterval = setInterval(cleanupEnvCache, 10 * 60 * 1000);
 }
 
+// =============================================================================
+// Per-environment HTTPS Agent pool
+// =============================================================================
+// Used as a fallback when the Go TLS proxy is not available.
+// Node's https.Agent with keepAlive reuses connections properly.
+// =============================================================================
+
+interface CachedAgent {
+	agent: https.Agent;
+	lastUsed: number;
+}
+
+const agentCache = new Map<string, CachedAgent>();
+
+function getHttpsAgent(config: DockerClientConfig): https.Agent {
+	// Hash actual cert content so rotated certs get a new agent
+	const h = createHash('sha256');
+	h.update(`${config.host}:${config.port}:`);
+	if (config.ca) h.update(`ca:${config.ca}`);
+	if (config.cert) h.update(`cert:${config.cert}`);
+	if (config.key) h.update(`key:${config.key}`);
+	if (config.skipVerify) h.update('skip');
+	const key = h.digest('hex');
+
+	const cached = agentCache.get(key);
+	if (cached) {
+		cached.lastUsed = Date.now();
+		return cached.agent;
+	}
+
+	const agentOptions: https.AgentOptions = {
+		keepAlive: true,
+		timeout: 30000,
+	};
+
+	if (config.ca) {
+		// Include both the custom CA and Node.js built-in root certificates.
+		// Node.js replaces the entire CA store when `ca` is set, unlike Bun which appends.
+		// Without this, certs signed by intermediate CAs fail with "unable to get local issuer certificate".
+		agentOptions.ca = [config.ca, ...tls.rootCertificates];
+	}
+	if (config.cert) agentOptions.cert = config.cert;
+	if (config.key) agentOptions.key = config.key;
+	if (config.skipVerify) agentOptions.rejectUnauthorized = false;
+
+	const agent = new https.Agent(agentOptions);
+	agentCache.set(key, { agent, lastUsed: Date.now() });
+	return agent;
+}
+
+function cleanupAgentCache() {
+	const now = Date.now();
+	for (const [key, cached] of agentCache.entries()) {
+		if (now - cached.lastUsed > CACHE_TTL) {
+			cached.agent.destroy();
+			agentCache.delete(key);
+		}
+	}
+}
+
+declare global {
+	var __dockerAgentCacheCleanupInterval: ReturnType<typeof setInterval> | undefined;
+}
+
+if (!globalThis.__dockerAgentCacheCleanupInterval) {
+	globalThis.__dockerAgentCacheCleanupInterval = setInterval(cleanupAgentCache, 10 * 60 * 1000);
+}
+
+/**
+ * Make an HTTPS request using Node.js https module with persistent Agent.
+ * Supports both buffered and streaming response modes.
+ */
+export function httpsAgentRequest(
+	config: DockerClientConfig,
+	path: string,
+	options: RequestInit = {},
+	streaming: boolean = false,
+	extraHeaders?: Record<string, string>
+): Promise<Response> {
+	return new Promise((resolve, reject) => {
+		const method = (options.method || 'GET').toUpperCase();
+		const agent = getHttpsAgent(config);
+
+		const reqHeaders: Record<string, string> = { ...(extraHeaders || {}) };
+		if (options.headers) {
+			if (options.headers instanceof Headers) {
+				options.headers.forEach((value, key) => { reqHeaders[key] = value; });
+			} else if (typeof options.headers === 'object') {
+				Object.assign(reqHeaders, options.headers);
+			}
+		}
+
+		const reqOptions: https.RequestOptions = {
+			hostname: config.host,
+			port: config.port,
+			path,
+			method,
+			agent,
+			headers: reqHeaders,
+		};
+
+		if (!streaming) {
+			const isComposeOperation = path === '/_hawser/compose';
+			const composeTimeoutMs = parseInt(process.env.COMPOSE_TIMEOUT || '900') * 1000;
+			reqOptions.timeout = isComposeOperation ? composeTimeoutMs : 30000;
+		}
+
+		// Honor AbortSignal from caller (e.g., AbortSignal.timeout(5000) for ping)
+		const signal = options.signal as AbortSignal | undefined;
+		if (signal?.aborted) {
+			reject(new Error('Request aborted'));
+			return;
+		}
+
+		const req = https.request(reqOptions, (res) => {
+			const headers = new Headers();
+			for (const [key, value] of Object.entries(res.headers)) {
+				if (value) {
+					if (Array.isArray(value)) {
+						value.forEach(v => headers.append(key, v));
+					} else {
+						headers.set(key, value);
+					}
+				}
+			}
+
+			const status = res.statusCode || 200;
+			const statusText = res.statusMessage || '';
+
+			// Status codes that must not have a body
+			if ([101, 204, 205, 304].includes(status)) {
+				resolve(new Response(null, { status, statusText, headers }));
+				res.resume(); // drain
+				return;
+			}
+
+			if (streaming) {
+				const readable = new ReadableStream({
+					start(controller) {
+						res.on('data', (chunk: Buffer) => controller.enqueue(new Uint8Array(chunk)));
+						res.on('end', () => controller.close());
+						res.on('error', (err) => controller.error(err));
+					},
+					cancel() { res.destroy(); }
+				});
+				resolve(new Response(readable, { status, statusText, headers }));
+			} else {
+				const chunks: Buffer[] = [];
+				res.on('data', (chunk: Buffer) => chunks.push(chunk));
+				res.on('end', () => {
+					resolve(new Response(Buffer.concat(chunks), { status, statusText, headers }));
+				});
+				res.on('error', reject);
+			}
+		});
+
+		req.on('error', reject);
+		req.on('timeout', () => { req.destroy(new Error('Request timeout')); });
+
+		if (signal) {
+			signal.addEventListener('abort', () => {
+				req.destroy(new Error('Request aborted'));
+			}, { once: true });
+		}
+
+		const body = options.body;
+		if (body) {
+			if (typeof body === 'string') {
+				req.end(body);
+			} else if (Buffer.isBuffer(body) || body instanceof Uint8Array) {
+				req.end(body);
+			} else if (body instanceof ArrayBuffer) {
+				req.end(Buffer.from(body));
+			} else if (body instanceof Blob) {
+				body.arrayBuffer().then(ab => req.end(Buffer.from(ab)), reject);
+			} else if (typeof (body as ReadableStream).getReader === 'function') {
+				const reader = (body as ReadableStream<Uint8Array>).getReader();
+				(async () => {
+					try {
+						while (true) {
+							const { done, value } = await reader.read();
+							if (done) break;
+							req.write(value);
+						}
+						req.end();
+					} catch (err) {
+						req.destroy(err as Error);
+					}
+				})();
+			} else {
+				req.end();
+			}
+		} else {
+			req.end();
+		}
+	});
+}
+
 // Import db functions for environment lookup
 import { getEnvironment } from './db';
 
@@ -309,7 +518,7 @@ import { sendEdgeRequest, sendEdgeStreamRequest, isEdgeConnected, type EdgeRespo
 /**
  * Docker API client configuration
  */
-interface DockerClientConfig {
+export interface DockerClientConfig {
 	type: 'socket' | 'http' | 'https';
 	socketPath?: string;
 	host?: string;
@@ -341,6 +550,7 @@ function buildConfigFromEnv(env: Environment): DockerClientConfig {
 
 	// Direct or Hawser connection types - use HTTP/HTTPS
 	const protocol = (env.protocol as 'http' | 'https') || 'http';
+
 	return {
 		type: protocol,
 		host: env.host || 'localhost',
@@ -381,7 +591,7 @@ async function getDockerConfig(envId?: number | null): Promise<DockerClientConfi
 }
 
 interface DockerFetchOptions extends RequestInit {
-	/** Set to true for long-lived streaming connections (disables Bun's idle timeout) */
+	/** Set to true for long-lived streaming connections */
 	streaming?: boolean;
 }
 
@@ -425,22 +635,199 @@ export async function drainResponse(response: Response): Promise<void> {
 }
 
 /**
+ * Drain a Docker API response, throwing if the status is not OK.
+ * Extracts the error message from the JSON body if available.
+ * Accepts optional extra status codes to treat as success (e.g. 304 Not Modified).
+ */
+async function throwDockerError(response: Response): Promise<never> {
+	const body = await response.text().catch(() => '');
+	let msg = `Docker API error: HTTP ${response.status}`;
+	if (body) {
+		try { msg = JSON.parse(body).message ?? body; } catch { msg = body; }
+	}
+	throw new Error(msg);
+}
+
+async function assertDockerResponse(response: Response, ...acceptStatuses: number[]): Promise<void> {
+	if (response.ok || acceptStatuses.includes(response.status)) {
+		await drainResponse(response);
+		return;
+	}
+	await throwDockerError(response);
+}
+
+/**
  * Make a request to the Docker API
  * Exported for use by stacks.ts module
  */
+const NULL_BODY_STATUSES = new Set([101, 204, 205, 304]);
+
+/**
+ * Build a Web API Response, handling null-body status codes.
+ */
+function buildResponse(body: Buffer | ReadableStream, status: number, statusText: string, headers: Headers): Response {
+	if (NULL_BODY_STATUSES.has(status)) {
+		return new Response(null, { status, statusText, headers });
+	}
+	return new Response(body, { status, statusText, headers });
+}
+
+/**
+ * Make an HTTP request over a Unix socket and return a Web API Response.
+ * Make an HTTP request over a Unix socket, returning a buffered Web API Response.
+ */
+export function unixSocketRequest(
+	socketPath: string,
+	path: string,
+	options: RequestInit = {}
+): Promise<Response> {
+	return new Promise((resolve, reject) => {
+		const method = (options.method || 'GET').toUpperCase();
+
+		const reqOptions: http.RequestOptions = {
+			socketPath,
+			path,
+			method,
+			headers: {},
+		};
+
+		if (options.headers) {
+			if (options.headers instanceof Headers) {
+				options.headers.forEach((value, key) => {
+					(reqOptions.headers as Record<string, string>)[key] = value;
+				});
+			} else if (typeof options.headers === 'object') {
+				Object.assign(reqOptions.headers!, options.headers);
+			}
+		}
+
+		const req = http.request(reqOptions, (res) => {
+			const chunks: Buffer[] = [];
+			res.on('data', (chunk: Buffer) => chunks.push(chunk));
+			res.on('end', () => {
+				const body = Buffer.concat(chunks);
+				const headers = new Headers();
+				for (const [key, value] of Object.entries(res.headers)) {
+					if (value) {
+						if (Array.isArray(value)) {
+							value.forEach(v => headers.append(key, v));
+						} else {
+							headers.set(key, value);
+						}
+					}
+				}
+				resolve(buildResponse(body, res.statusCode || 200, res.statusMessage || '', headers));
+			});
+			res.on('error', reject);
+		});
+
+		req.on('error', reject);
+
+		if (options.body) {
+			if (typeof options.body === 'string') {
+				req.write(options.body);
+			} else if (options.body instanceof Uint8Array || Buffer.isBuffer(options.body)) {
+				req.write(options.body);
+			}
+		}
+
+		req.end();
+	});
+}
+
+/**
+ * Make an HTTP request over a Unix socket and return a streaming Web API Response.
+ * Used for long-lived connections like Docker events, logs, stats streaming.
+ */
+export function unixSocketStreamRequest(
+	socketPath: string,
+	path: string,
+	options: RequestInit = {}
+): Promise<Response> {
+	return new Promise((resolve, reject) => {
+		const method = (options.method || 'GET').toUpperCase();
+
+		const reqOptions: http.RequestOptions = {
+			socketPath,
+			path,
+			method,
+			headers: {},
+		};
+
+		if (options.headers) {
+			if (options.headers instanceof Headers) {
+				options.headers.forEach((value, key) => {
+					(reqOptions.headers as Record<string, string>)[key] = value;
+				});
+			} else if (typeof options.headers === 'object') {
+				Object.assign(reqOptions.headers!, options.headers);
+			}
+		}
+
+		const req = http.request(reqOptions, (res) => {
+			const headers = new Headers();
+			for (const [key, value] of Object.entries(res.headers)) {
+				if (value) {
+					if (Array.isArray(value)) {
+						value.forEach(v => headers.append(key, v));
+					} else {
+						headers.set(key, value);
+					}
+				}
+			}
+
+			const readable = new ReadableStream({
+				start(controller) {
+					res.on('data', (chunk: Buffer) => {
+						controller.enqueue(new Uint8Array(chunk));
+					});
+					res.on('end', () => {
+						controller.close();
+					});
+					res.on('error', (err) => {
+						controller.error(err);
+					});
+				},
+				cancel() {
+					res.destroy();
+				}
+			});
+
+			resolve(new Response(readable, {
+				status: res.statusCode || 200,
+				statusText: res.statusMessage || '',
+				headers,
+			}));
+		});
+
+		req.on('error', reject);
+
+		if (options.body) {
+			if (typeof options.body === 'string') {
+				req.write(options.body);
+			} else if (options.body instanceof Uint8Array || Buffer.isBuffer(options.body)) {
+				req.write(options.body);
+			}
+		}
+
+		req.end();
+	});
+}
+
 export async function dockerFetch(
 	path: string,
 	options: DockerFetchOptions = {},
 	envId?: number | null
 ): Promise<Response> {
+	// Guard against path traversal — legitimate Docker API paths never contain '..'
+	if (path.includes('..')) {
+		throw new Error('Invalid Docker API path');
+	}
+
 	const startTime = Date.now();
 	const config = await getDockerConfig(envId);
 	const { streaming, ...fetchOptions } = options;
 	const method = (options.method || 'GET').toUpperCase();
-
-	// For streaming connections, disable Bun's idle timeout
-	// This prevents long-lived streams (like Docker events) from being terminated
-	const bunOptions = streaming ? { timeout: false } : {};
 
 	// Hawser Edge mode - route through WebSocket connection
 	if (config.connectionType === 'hawser-edge' && config.environmentId) {
@@ -468,6 +855,7 @@ export async function dockerFetch(
 
 		// Parse body if present
 		let body: unknown;
+		let isBinary = false;
 		if (fetchOptions.body) {
 			if (typeof fetchOptions.body === 'string') {
 				try {
@@ -475,6 +863,13 @@ export async function dockerFetch(
 				} catch {
 					body = fetchOptions.body;
 				}
+			} else if (fetchOptions.body instanceof ArrayBuffer || fetchOptions.body instanceof Uint8Array) {
+				// Binary body (tar uploads etc.) — base64 encode for JSON transport
+				const bytes = fetchOptions.body instanceof ArrayBuffer
+					? new Uint8Array(fetchOptions.body)
+					: fetchOptions.body;
+				body = Buffer.from(bytes).toString('base64');
+				isBinary = true;
 			} else {
 				body = fetchOptions.body;
 			}
@@ -489,7 +884,9 @@ export async function dockerFetch(
 				body,
 				headers,
 				streaming || false,
-				(streaming || path === '/_hawser/compose') ? 300000 : 30000 // 5 min for streaming/compose, 30s for normal
+				(streaming || path === '/_hawser/compose') ? 300000 : 30000, // 5 min for streaming/compose, 30s for normal
+				isBinary,
+				fetchOptions.signal ?? undefined
 			);
 			const elapsed = Date.now() - startTime;
 			// Only warn for slow requests, but skip /stats which is expected to be slow (5-10s)
@@ -507,15 +904,10 @@ export async function dockerFetch(
 	}
 
 	if (config.type === 'socket') {
-		// Use Bun's native Unix socket support
-		const url = `http://localhost${path}`;
+		// Unix socket via http.request({ socketPath })
 		try {
-			const response = await fetch(url, {
-				...fetchOptions,
-				// @ts-ignore - Bun supports unix socket and timeout options
-				unix: config.socketPath,
-				...bunOptions
-			});
+			const requestFn = streaming ? unixSocketStreamRequest : unixSocketRequest;
+			const response = await requestFn(config.socketPath!, path, fetchOptions);
 			const elapsed = Date.now() - startTime;
 			// Only warn for slow requests, but skip /stats which is expected to be slow (5-10s)
 			if (elapsed > 5000 && !path.includes('/stats')) {
@@ -537,95 +929,49 @@ export async function dockerFetch(
 		const finalOptions: RequestInit = { ...fetchOptions };
 
 		// For Hawser Standard mode with token authentication
+		const extraHeaders: Record<string, string> = {};
 		if (config.connectionType === 'hawser-standard' && config.hawserToken) {
+			extraHeaders['X-Hawser-Token'] = config.hawserToken;
 			finalOptions.headers = {
 				...finalOptions.headers,
 				'X-Hawser-Token': config.hawserToken
 			};
 		}
 
-		// For HTTPS with TLS certificates, we need to configure TLS
-		// Pass certificate strings directly to Bun's fetch - no temp files needed
+		// For HTTPS: use node:https with persistent Agent (fallback when Go proxy is down).
+		// For plain HTTP: use standard fetch().
 		if (config.type === 'https') {
-			const tlsOptions: Record<string, unknown> = {};
-
-			// Detect if mutual TLS (client certificate authentication) is in use
-			const isMtls = !!(config.cert && config.key);
-
-			if (isMtls) {
-				// mTLS: Disable session caching to prevent Bun from reusing a TLS session
-				// with wrong client certificates (pool key doesn't include certs)
-				tlsOptions.sessionTimeout = 0;
-			} else {
-				// Non-mTLS HTTPS (CA-only or skip-verify): Allow short-lived session reuse.
-				// Without this, every fetch allocates a new native TLS context in BoringSSL.
-				// Native memory (mmap) is never returned to the OS, causing RSS to grow
-				// continuously in long-running subprocesses (metrics, events).
-				// 30s allows sessions to be reused within one metrics cycle, then expire.
-				tlsOptions.sessionTimeout = 30;
-			}
-
-			// Set explicit servername for SNI - isolates TLS contexts per host
-			tlsOptions.servername = config.host;
-
-			// Load CA certificate (just this environment's CA, not composite)
-			if (config.ca) {
-				tlsOptions.ca = [config.ca];
-			}
-
-			// Client cert and key for mTLS authentication
-			if (config.cert) {
-				tlsOptions.cert = [config.cert];
-			}
-			if (config.key) {
-				tlsOptions.key = config.key;
-			}
-
-			// Skip verification (self-signed without CA)
-			if (config.skipVerify) {
-				tlsOptions.rejectUnauthorized = false;
-			} else {
-				tlsOptions.rejectUnauthorized = true;
-			}
-
-			if (Object.keys(tlsOptions).length > 0) {
-				// @ts-ignore - Bun supports tls options with string certs
-				finalOptions.tls = tlsOptions;
-				if (isMtls) {
-					// mTLS: Force new connection for each request to prevent Bun from
-					// reusing a TLS session with wrong client certificates
-					// @ts-ignore - Bun supports keepalive option
-					finalOptions.keepalive = false;
+			try {
+				const response = await httpsAgentRequest(config, path, finalOptions, streaming || false, extraHeaders);
+				const elapsed = Date.now() - startTime;
+				if (elapsed > 5000 && !path.includes('/stats')) {
+					console.warn(`[Docker] ${config.connectionType || 'direct'} ${config.host}: ${method} ${path} took ${elapsed}ms`);
 				}
-				// Non-mTLS: Use Bun's default keepalive (connection reuse) to avoid
-				// allocating a new native TLS context per request
-			}
-
-				// Optional verbose TLS debugging
-			if (process.env.DEBUG_TLS) {
-				// @ts-ignore - Bun-specific verbose option
-				finalOptions.verbose = true;
+				return response;
+			} catch (error: any) {
+				const elapsed = Date.now() - startTime;
+				const msg = error?.message || String(error);
+				console.error(`[Docker] ${config.connectionType || 'direct'} ${config.host}: ${method} ${path} failed after ${elapsed}ms: ${msg}`);
+				throw DockerConnectionError.fromError(error);
 			}
 		}
 
-		// Add default timeout for non-streaming requests to prevent socket accumulation
-		// Compose operations need more time (up to 5 minutes) for multi-service stacks
+		// Plain HTTP — use standard fetch()
 		if (!streaming && !finalOptions.signal) {
 			const isComposeOperation = path === '/_hawser/compose';
-			finalOptions.signal = AbortSignal.timeout(isComposeOperation ? 300000 : 30000);
+			const composeTimeoutMs = parseInt(process.env.COMPOSE_TIMEOUT || '900') * 1000;
+			finalOptions.signal = AbortSignal.timeout(isComposeOperation ? composeTimeoutMs : 30000);
 		}
 
 		try {
-			const response = await fetch(url, { ...finalOptions, ...bunOptions });
+			const response = await fetch(url, finalOptions);
 			const elapsed = Date.now() - startTime;
-			// Only warn for slow requests, but skip /stats which is expected to be slow (5-10s)
 			if (elapsed > 5000 && !path.includes('/stats')) {
 				console.warn(`[Docker] ${config.connectionType || 'direct'} ${config.host}: ${method} ${path} took ${elapsed}ms`);
 			}
 			return response;
 		} catch (error: any) {
 			const elapsed = Date.now() - startTime;
-			// Log error message only, not full stack trace
 			const msg = error?.message || String(error);
 			console.error(`[Docker] ${config.connectionType || 'direct'} ${config.host}: ${method} ${path} failed after ${elapsed}ms: ${msg}`);
 			throw DockerConnectionError.fromError(error);
@@ -636,7 +982,7 @@ export async function dockerFetch(
 /**
  * Make a JSON request to Docker API
  */
-async function dockerJsonRequest<T>(
+export async function dockerJsonRequest<T>(
 	path: string,
 	options: RequestInit = {},
 	envId?: number | null
@@ -673,6 +1019,11 @@ export function clearDockerClientCache(envId?: number) {
 		envCache.delete(envId);
 	} else {
 		envCache.clear();
+	}
+	// Destroy HTTPS agents (TLS config may have changed)
+	for (const [key, cached] of agentCache.entries()) {
+		cached.agent.destroy();
+		agentCache.delete(key);
 	}
 }
 
@@ -782,51 +1133,37 @@ export async function getContainerStats(id: string, envId?: number | null) {
 
 export async function startContainer(id: string, envId?: number | null) {
 	const response = await dockerFetch(`/containers/${id}/start`, { method: 'POST' }, envId);
-	await drainResponse(response);
+	await assertDockerResponse(response, 304); // 304 = already started
 }
 
 export async function stopContainer(id: string, envId?: number | null) {
 	const response = await dockerFetch(`/containers/${id}/stop`, { method: 'POST' }, envId);
-	await drainResponse(response);
+	await assertDockerResponse(response, 304); // 304 = already stopped
 }
 
 export async function restartContainer(id: string, envId?: number | null) {
 	const response = await dockerFetch(`/containers/${id}/restart`, { method: 'POST' }, envId);
-	await drainResponse(response);
+	await assertDockerResponse(response);
 }
 
 export async function pauseContainer(id: string, envId?: number | null) {
 	const response = await dockerFetch(`/containers/${id}/pause`, { method: 'POST' }, envId);
-	await drainResponse(response);
+	await assertDockerResponse(response);
 }
 
 export async function unpauseContainer(id: string, envId?: number | null) {
 	const response = await dockerFetch(`/containers/${id}/unpause`, { method: 'POST' }, envId);
-	await drainResponse(response);
+	await assertDockerResponse(response);
 }
 
 export async function removeContainer(id: string, force = false, envId?: number | null) {
 	const response = await dockerFetch(`/containers/${id}?force=${force}`, { method: 'DELETE' }, envId);
-	if (!response.ok) {
-		const errorBody = await response.text();
-		let errorMessage = `Failed to remove container ${id}`;
-		try {
-			const parsed = JSON.parse(errorBody);
-			if (parsed.message) {
-				errorMessage = parsed.message;
-			}
-		} catch {
-			if (errorBody) {
-				errorMessage = errorBody;
-			}
-		}
-		throw new Error(errorMessage);
-	}
+	await assertDockerResponse(response, 404); // 404 = already gone
 }
 
 export async function renameContainer(id: string, newName: string, envId?: number | null) {
 	const response = await dockerFetch(`/containers/${id}/rename?name=${encodeURIComponent(newName)}`, { method: 'POST' }, envId);
-	await drainResponse(response);
+	await assertDockerResponse(response);
 }
 
 export async function getContainerLogs(id: string, tail = 100, envId?: number | null): Promise<string> {
@@ -839,6 +1176,8 @@ export async function getContainerLogs(id: string, tail = 100, envId?: number | 
 		{},
 		envId
 	);
+
+	if (!response.ok) await throwDockerError(response);
 
 	const buffer = Buffer.from(await response.arrayBuffer());
 
@@ -906,7 +1245,7 @@ export interface CreateContainerOptions {
 	networkIpv6Address?: string;
 	/** Gateway priority for the primary network (Docker Engine 28+) */
 	networkGwPriority?: number;
-	user?: string;
+	user?: string | null;
 	privileged?: boolean;
 	healthcheck?: HealthcheckConfig;
 	memory?: number;
@@ -959,7 +1298,7 @@ export interface CreateContainerOptions {
 	// Device requests (GPU access, etc.)
 	deviceRequests?: DeviceRequest[];
 	// Container runtime (e.g., 'runc', 'nvidia' for GPU containers)
-	runtime?: string;
+	runtime?: string | null;
 	// Read-only root filesystem
 	readonlyRootfs?: boolean;
 	// CPU pinning (e.g., "0-3", "0,1")
@@ -995,8 +1334,8 @@ export async function createContainer(options: CreateContainerOptions, envId?: n
 		containerConfig.Cmd = options.cmd;
 	}
 
-	if (options.user) {
-		containerConfig.User = options.user;
+	if (options.user !== undefined) {
+		containerConfig.User = options.user ?? '';
 	}
 
 	if (options.healthcheck) {
@@ -1109,7 +1448,7 @@ export async function createContainer(options: CreateContainerOptions, envId?: n
 		};
 	}
 
-	if (options.privileged) {
+	if (options.privileged !== undefined) {
 		containerConfig.HostConfig.Privileged = options.privileged;
 	}
 
@@ -1287,8 +1626,8 @@ export async function createContainer(options: CreateContainerOptions, envId?: n
 	}
 
 	// Container runtime (e.g., 'nvidia' for GPU containers)
-	if (options.runtime) {
-		containerConfig.HostConfig.Runtime = options.runtime;
+	if (options.runtime !== undefined) {
+		containerConfig.HostConfig.Runtime = options.runtime ?? '';
 	}
 
 	// Read-only root filesystem
@@ -1338,6 +1677,7 @@ export async function createContainer(options: CreateContainerOptions, envId?: n
 	return { id: result.Id, start: () => startContainer(result.Id, envId) };
 }
 
+
 /**
  * Recreate a container using full Config/HostConfig passthrough from inspect data.
  * Passes Config and HostConfig directly from inspect to create, only changing
@@ -1367,6 +1707,17 @@ export async function recreateContainerFromInspect(
 	const oldContainerId = inspectData.Id;
 	const wasRunning = inspectData.State?.Running;
 
+	// Detect shared/special network modes where network manipulation must be skipped
+	const networkMode = hostConfig.NetworkMode || '';
+	const isSharedNetwork = networkMode.startsWith('container:') ||
+		networkMode.startsWith('service:') ||
+		networkMode === 'host' ||
+		networkMode === 'none';
+
+	if (isSharedNetwork) {
+		log?.(`Shared network mode detected: ${networkMode} — skipping network manipulation`);
+	}
+
 	// 1. Stop the container
 	if (wasRunning) {
 		log?.('Stopping container...');
@@ -1379,27 +1730,30 @@ export async function recreateContainerFromInspect(
 		`/containers/${oldContainerId}/rename?name=${encodeURIComponent(name + '-old')}`,
 		{ method: 'POST' },
 		envId
-	).then(r => { if (!r.ok) throw new Error('Failed to rename old container'); });
+	).then(async r => { if (!r.ok) throw new Error('Failed to rename old container'); await drainResponse(r); });
 
 	// 3. Disconnect all networks from old container (frees static IPs)
+	// Skip for shared network modes (container:X, host, none) — Docker manages these
 	// Capture the first network for use during container creation
 	let initialNetworkName: string | null = null;
 	let initialNetworkConfig: any = null;
 
-	for (const [netName, netConfig] of Object.entries(networks)) {
-		const networkId = (netConfig as any).NetworkID;
-		if (networkId) {
-			try {
-				await disconnectContainerFromNetwork(networkId, oldContainerId, true, envId);
-			} catch {
-				// Best effort - network may already be disconnected
+	if (!isSharedNetwork) {
+		for (const [netName, netConfig] of Object.entries(networks)) {
+			const networkId = (netConfig as any).NetworkID;
+			if (networkId) {
+				try {
+					await disconnectContainerFromNetwork(networkId, oldContainerId, true, envId);
+				} catch {
+					// Best effort - network may already be disconnected
+				}
 			}
-		}
 
-		// Use first network for creation
-		if (!initialNetworkName) {
-			initialNetworkName = netName;
-			initialNetworkConfig = netConfig;
+			// Use first network for creation
+			if (!initialNetworkName) {
+				initialNetworkName = netName;
+				initialNetworkConfig = netConfig;
+			}
 		}
 	}
 
@@ -1412,13 +1766,15 @@ export async function recreateContainerFromInspect(
 				`/containers/${oldContainerId}/rename?name=${encodeURIComponent(name)}`,
 				{ method: 'POST' },
 				envId
-			).catch(() => {});
+			).then(r => drainResponse(r)).catch(() => {});
 
 			// Reconnect networks using full EndpointSettings from inspect
-			for (const [, netConfig] of Object.entries(networks)) {
-				const nc = netConfig as any;
-				if (nc.NetworkID) {
-					await connectContainerToNetworkRaw(nc.NetworkID, oldContainerId, nc, envId).catch(() => {});
+			if (!isSharedNetwork) {
+				for (const [, netConfig] of Object.entries(networks)) {
+					const nc = netConfig as any;
+					if (nc.NetworkID) {
+						await connectContainerToNetworkRaw(nc.NetworkID, oldContainerId, nc, envId).catch(() => {});
+					}
 				}
 			}
 
@@ -1437,6 +1793,117 @@ export async function recreateContainerFromInspect(
 		Image: newImage,
 		HostConfig: hostConfig
 	};
+
+	// 4a. Update image-embedded labels to match the new image.
+	// Docker's create API uses exactly the labels you pass, ignoring the new image's
+	// embedded labels. We inspect both old and new images to distinguish image-origin
+	// labels from user-set labels, then merge accordingly.
+	try {
+		const [oldImageInspect, newImageInspect] = await Promise.all([
+			inspectImage(config.Image, envId),
+			inspectImage(newImage, envId)
+		]);
+		const oldImageLabels: Record<string, string> = (oldImageInspect as any)?.Config?.Labels || {};
+		const newImageLabels: Record<string, string> = (newImageInspect as any)?.Config?.Labels || {};
+		const containerLabels: Record<string, string> = createConfig.Labels || {};
+
+		const mergedLabels: Record<string, string> = {};
+
+		// Keep user-set labels (not present in old image)
+		for (const [k, v] of Object.entries(containerLabels)) {
+			if (!(k in oldImageLabels)) {
+				mergedLabels[k] = v;
+			}
+		}
+
+		// Add all new image labels (overrides old image labels)
+		for (const [k, v] of Object.entries(newImageLabels)) {
+			mergedLabels[k] = v;
+		}
+
+		createConfig.Labels = mergedLabels;
+		log?.(`Updated image labels: ${Object.keys(newImageLabels).length} from new image, ${Object.keys(mergedLabels).length} total`);
+	} catch (e) {
+		log?.(`Warning: could not update image labels: ${e}`);
+		// Fall through with old labels — non-fatal
+	}
+
+	// Strip default MemorySwappiness — Podman + cgroupv2 rejects it.
+	// Docker returns -1, Podman returns 0 when unset.
+	const swappiness = createConfig.HostConfig?.MemorySwappiness;
+	if (swappiness == null || swappiness === -1 || swappiness === 0) {
+		delete createConfig.HostConfig.MemorySwappiness;
+	}
+
+	// container:<name> mode shares the network namespace — Docker rejects
+	// networking-related fields on the dependent container since they're
+	// owned by the network provider container
+	if (networkMode.startsWith('container:')) {
+		delete createConfig.Hostname;
+		delete createConfig.Domainname;
+		delete createConfig.ExposedPorts;
+		delete createConfig.MacAddress;
+		// HostConfig fields that conflict with container network mode
+		if (createConfig.HostConfig) {
+			delete createConfig.HostConfig.PortBindings;
+			delete createConfig.HostConfig.PublishAllPorts;
+			delete createConfig.HostConfig.DNS;
+			delete createConfig.HostConfig.DNSOptions;
+			delete createConfig.HostConfig.DNSSearch;
+			delete createConfig.HostConfig.ExtraHosts;
+			delete createConfig.HostConfig.Links;
+		}
+
+		// Resolve container ID references to names for resilience.
+		// Docker stores NetworkMode with the full container SHA ID, but if that container
+		// gets recreated (new ID), the reference goes stale. Using the container name
+		// instead makes the reference survive recreation.
+		const containerRef = networkMode.slice('container:'.length);
+		const isHexId = /^[0-9a-f]{12,64}$/.test(containerRef);
+		if (isHexId) {
+			try {
+				const refInspect = await inspectContainer(containerRef, envId);
+				// Container exists — switch from ID to name for resilience
+				const refName = (refInspect as any).Name?.replace(/^\//, '');
+				if (refName) {
+					createConfig.HostConfig.NetworkMode = `container:${refName}`;
+					log?.(`Resolved network container ID to name: ${refName}`);
+				}
+			} catch {
+				// Container ID is stale — the referenced container was likely recreated
+				// with a new ID. We can't resolve without knowing the original name.
+				log?.(`WARNING: Network reference container:${containerRef.slice(0, 12)}... is stale (container not found). The container may fail to start if the referenced container was recreated.`);
+			}
+		}
+	}
+
+	// Deduplicate: remove Config.Volumes entries that conflict with HostConfig.Tmpfs or Binds.
+	// Read-only containers get tmpfs at paths like /tmp that may also be declared as image volumes.
+	// Docker rejects duplicate mount points, so the tmpfs/bind mount wins over the volume declaration.
+	if (createConfig.Volumes && hostConfig) {
+		const mountedPaths = new Set<string>();
+		if (hostConfig.Tmpfs) {
+			for (const p of Object.keys(hostConfig.Tmpfs)) {
+				mountedPaths.add(p);
+			}
+		}
+		if (hostConfig.Binds) {
+			for (const b of hostConfig.Binds) {
+				const parts = b.split(':');
+				if (parts.length >= 2) mountedPaths.add(parts[1].split(':')[0]);
+			}
+		}
+		if (mountedPaths.size > 0) {
+			for (const volPath of Object.keys(createConfig.Volumes)) {
+				if (mountedPaths.has(volPath)) {
+					delete createConfig.Volumes[volPath];
+				}
+			}
+			if (Object.keys(createConfig.Volumes).length === 0) {
+				delete createConfig.Volumes;
+			}
+		}
+	}
 
 	// Preserve anonymous volumes from Mounts not in HostConfig.Binds
 	const existingBinds = new Set((hostConfig.Binds || []).map((b: string) => {
@@ -1461,15 +1928,19 @@ export async function recreateContainerFromInspect(
 
 	// Docker can only connect to one network at creation. Pass the first network
 	// from the old container's settings to avoid getting a random bridge IP.
-	// Clear MacAddress for Docker API < 1.44 compatibility.
-	if (initialNetworkName && initialNetworkConfig) {
+	// Skip for shared network modes — EndpointsConfig conflicts with container:/host/none modes.
+	if (!isSharedNetwork && initialNetworkName && initialNetworkConfig) {
 		const endpointConfig = { ...initialNetworkConfig };
-		delete endpointConfig.MacAddress;
 		createConfig.NetworkingConfig = {
 			EndpointsConfig: {
 				[initialNetworkName]: endpointConfig
 			}
 		};
+		// Container-level MacAddress conflicts with endpoint-level MacAddress.
+		// Docker requires them to match or the top-level one to be empty.
+		// The MAC is preserved in the endpoint config (correct location per API v1.44+),
+		// so clear the top-level one to avoid the conflict error.
+		delete createConfig.MacAddress;
 	}
 
 	// 5. Create new container
@@ -1492,15 +1963,18 @@ export async function recreateContainerFromInspect(
 	}
 
 	// 6. Connect additional networks using full EndpointSettings from inspect
-	for (const [netName, netConfig] of Object.entries(networks)) {
-		if (netName === initialNetworkName) continue; // Already connected at creation
+	// Skip for shared network modes — Docker manages networking via the parent container
+	if (!isSharedNetwork) {
+		for (const [netName, netConfig] of Object.entries(networks)) {
+			if (netName === initialNetworkName) continue; // Already connected at creation
 
-		const nc = netConfig as any;
-		if (nc.NetworkID) {
-			try {
-				await connectContainerToNetworkRaw(nc.NetworkID, newContainerId, nc, envId);
-			} catch (netError: any) {
-				log?.(`Warning: Failed to connect to network "${netName}": ${netError.message}`);
+			const nc = netConfig as any;
+			if (nc.NetworkID) {
+				try {
+					await connectContainerToNetworkRaw(nc.NetworkID, newContainerId, nc, envId);
+				} catch (netError: any) {
+					log?.(`Warning: Failed to connect to network "${netName}": ${netError.message}`);
+				}
 			}
 		}
 	}
@@ -1519,7 +1993,23 @@ export async function recreateContainerFromInspect(
 		}
 	}
 
-	// 8. Remove old container (best effort)
+	// 8. Log config diff between old and new container
+	try {
+		const newInspect = await inspectContainer(newContainerId, envId);
+		const diffs = deepDiff(inspectData, newInspect);
+		if (diffs.length === 0) {
+			log?.(`[${name}] Config diff: no differences (all settings preserved)`);
+		} else {
+			log?.(`[${name}] Config diff: ${diffs.length} difference(s):`);
+			for (const d of diffs) {
+				log?.(`  [${name}] ${d}`);
+			}
+		}
+	} catch {
+		// Non-critical, don't fail the update
+	}
+
+	// 9. Remove old container (best effort)
 	log?.('Removing old container...');
 	await removeContainer(oldContainerId, true, envId).catch(() => {});
 
@@ -1804,7 +2294,7 @@ export function extractContainerOptions(inspectData: any): CreateContainerOption
 		groupAdd: hostConfig.GroupAdd?.length > 0 ? hostConfig.GroupAdd : undefined,
 
 		// Memory swappiness
-		memorySwappiness: hostConfig.MemorySwappiness !== null ? hostConfig.MemorySwappiness : undefined,
+		memorySwappiness: hostConfig.MemorySwappiness != null && hostConfig.MemorySwappiness !== -1 && hostConfig.MemorySwappiness !== 0 ? hostConfig.MemorySwappiness : undefined,
 
 		// User namespace mode
 		usernsMode: hostConfig.UsernsMode || undefined
@@ -1818,6 +2308,14 @@ export function extractContainerOptions(inspectData: any): CreateContainerOption
 export async function updateContainer(id: string, options: Partial<CreateContainerOptions>, startAfterUpdate = false, envId?: number | null) {
 	const oldContainerInfo = await inspectContainer(id, envId);
 	const wasRunning = oldContainerInfo.State.Running;
+	const name = oldContainerInfo.Name?.replace(/^\//, '') || '';
+	const oldContainerId = oldContainerInfo.Id;
+	const networks: Record<string, any> = oldContainerInfo.NetworkSettings?.Networks || {};
+	const hostConfig = oldContainerInfo.HostConfig || {};
+	const networkMode = hostConfig.NetworkMode || '';
+	const isSharedNetwork = networkMode.startsWith('container:') ||
+		networkMode.startsWith('service:') ||
+		networkMode === 'host' || networkMode === 'none';
 
 	// Extract ALL existing container options
 	const existingOptions = extractContainerOptions(oldContainerInfo);
@@ -1834,17 +2332,80 @@ export async function updateContainer(id: string, options: Partial<CreateContain
 		}
 	};
 
+	// 1. Stop old container
 	if (wasRunning) {
 		await stopContainer(id, envId);
 	}
 
-	await removeContainer(id, true, envId);
+	// 2. Rename old container to free the name (instead of removing — allows rollback)
+	await dockerFetch(
+		`/containers/${oldContainerId}/rename?name=${encodeURIComponent(name + '-old')}`,
+		{ method: 'POST' },
+		envId
+	).then(async r => { if (!r.ok) throw new Error('Failed to rename old container'); await drainResponse(r); });
 
-	const newContainer = await createContainer(mergedOptions, envId);
-
-	if (startAfterUpdate || wasRunning) {
-		await newContainer.start();
+	// 3. Disconnect networks from old container to free static IPs
+	if (!isSharedNetwork) {
+		for (const [, netConfig] of Object.entries(networks)) {
+			const nc = netConfig as any;
+			if (nc.NetworkID) {
+				await disconnectContainerFromNetwork(nc.NetworkID, oldContainerId, true, envId).catch(() => {});
+			}
+		}
 	}
+
+	// Rollback helper: restore old container on failure
+	const rollback = async () => {
+		try {
+			// Rename back
+			await dockerFetch(
+				`/containers/${oldContainerId}/rename?name=${encodeURIComponent(name)}`,
+				{ method: 'POST' },
+				envId
+			).then(r => drainResponse(r)).catch(() => {});
+
+			// Reconnect networks
+			if (!isSharedNetwork) {
+				for (const [, netConfig] of Object.entries(networks)) {
+					const nc = netConfig as any;
+					if (nc.NetworkID) {
+						await connectContainerToNetworkRaw(nc.NetworkID, oldContainerId, nc, envId).catch(() => {});
+					}
+				}
+			}
+
+			// Restart if it was running
+			if (wasRunning) {
+				await startContainer(oldContainerId, envId).catch(() => {});
+			}
+		} catch {
+			// Rollback is best-effort
+		}
+	};
+
+	// 4. Create new container
+	let newContainer;
+	try {
+		newContainer = await createContainer(mergedOptions, envId);
+	} catch (createError) {
+		await rollback();
+		throw createError;
+	}
+
+	// 5. Start if needed
+	if (startAfterUpdate || wasRunning) {
+		try {
+			await newContainer.start();
+		} catch (startError) {
+			// Remove failed new container and restore old one
+			await removeContainer(newContainer.id, true, envId).catch(() => {});
+			await rollback();
+			throw startError;
+		}
+	}
+
+	// 6. Remove old container (success path only)
+	await removeContainer(oldContainerId, true, envId).catch(() => {});
 
 	return newContainer;
 }
@@ -1880,6 +2441,39 @@ export async function listImages(envId?: number | null): Promise<ImageInfo[]> {
 	}));
 }
 
+/**
+ * Build X-Registry-Auth header for authenticated Docker image pulls.
+ * Looks up stored registry credentials and returns a headers object
+ * with the base64-encoded auth config, or an empty object if no credentials found.
+ */
+export async function buildRegistryAuthHeader(imageName: string): Promise<Record<string, string>> {
+	const headers: Record<string, string> = {};
+	try {
+		const { registry } = parseImageReference(imageName);
+		const creds = await findRegistryCredentials(registry);
+		if (creds) {
+			// Docker Engine requires 'https://index.docker.io/v1/' as serveraddress
+			// for Docker Hub auth — just the hostname is treated as unauthenticated
+			const serveraddress = DOCKER_HUB_HOSTS.has(registry)
+				? 'https://index.docker.io/v1/'
+				: registry;
+			console.log(`[Pull] Using credentials for ${serveraddress} (user: ${creds.username})`);
+			const authConfig = {
+				username: creds.username,
+				password: creds.password,
+				serveraddress
+			};
+			headers['X-Registry-Auth'] = Buffer.from(JSON.stringify(authConfig)).toString('base64');
+		} else {
+			console.log(`[Pull] No credentials found for ${registry}`);
+		}
+	} catch (e) {
+		const errorMsg = e instanceof Error ? e.message : String(e);
+		console.error(`[Pull] Failed to lookup credentials:`, errorMsg);
+	}
+	return headers;
+}
+
 export async function pullImage(imageName: string, onProgress?: (data: any) => void, envId?: number | null) {
 	// Parse image name and tag to avoid pulling all tags
 	// Docker API: if tag is empty, it pulls ALL tags for the image
@@ -1910,26 +2504,7 @@ export async function pullImage(imageName: string, onProgress?: (data: any) => v
 		: `/images/create?fromImage=${encodeURIComponent(fromImage)}`;
 
 	// Look up registry credentials for authenticated pulls
-	const headers: Record<string, string> = {};
-	try {
-		const { registry } = parseImageReference(imageName);
-		const creds = await findRegistryCredentials(registry);
-		if (creds) {
-			console.log(`[Pull] Using credentials for ${registry} (user: ${creds.username})`);
-			// Docker API expects X-Registry-Auth header with base64-encoded JSON
-			const authConfig = {
-				username: creds.username,
-				password: creds.password,
-				serveraddress: registry
-			};
-			headers['X-Registry-Auth'] = Buffer.from(JSON.stringify(authConfig)).toString('base64');
-		} else {
-			console.log(`[Pull] No credentials found for ${registry}`);
-		}
-	} catch (e) {
-		const errorMsg = e instanceof Error ? e.message : String(e);
-		console.error(`[Pull] Failed to lookup credentials:`, errorMsg);
-	}
+	const headers = await buildRegistryAuthHeader(imageName);
 
 	// Use streaming: true for longer timeout on edge environments
 	const response = await dockerFetch(url, { method: 'POST', streaming: true, headers }, envId);
@@ -1975,6 +2550,7 @@ export async function removeImage(id: string, force = false, envId?: number | nu
 		error.json = data;
 		throw error;
 	}
+	await drainResponse(response);
 }
 
 export async function getImageHistory(id: string, envId?: number | null) {
@@ -2095,14 +2671,12 @@ async function findRegistryCredentials(registryHost: string): Promise<{ username
 			}
 		}
 
-		// Also check for Docker Hub variations
-		if (requested.host === 'index.docker.io' || requested.host === 'registry-1.docker.io') {
+		// Bidirectional Docker Hub alias matching:
+		// If the requested host is any Docker Hub variant, match against any stored Docker Hub variant
+		if (DOCKER_HUB_HOSTS.has(requested.host)) {
 			for (const reg of registries) {
 				const stored = parseRegistryUrl(reg.url);
-				// Match all Docker Hub URL variations
-				if (stored.host === 'docker.io' || stored.host === 'hub.docker.com' ||
-				    stored.host === 'registry.hub.docker.com' || stored.host === 'index.docker.io' ||
-				    stored.host === 'registry-1.docker.io') {
+				if (DOCKER_HUB_HOSTS.has(stored.host)) {
 					if (reg.username && reg.password) {
 						return { username: reg.username, password: reg.password };
 					}
@@ -2140,11 +2714,13 @@ async function getRegistryBearerToken(registry: string, repo: string): Promise<s
 
 		// If 200, no auth needed
 		if (challengeResponse.ok) {
+			await drainResponse(challengeResponse);
 			return null;
 		}
 
 		// If not 401, something else is wrong
 		if (challengeResponse.status !== 401) {
+			await drainResponse(challengeResponse);
 			console.error(`Registry challenge failed: ${challengeResponse.status}`);
 			return null;
 		}
@@ -2155,6 +2731,7 @@ async function getRegistryBearerToken(registry: string, repo: string): Promise<s
 
 		if (challenge.startsWith('basic')) {
 			// Basic auth - use credentials if we have them
+			await drainResponse(challengeResponse);
 			if (credentials) {
 				const basicAuth = Buffer.from(`${credentials.username}:${credentials.password}`).toString('base64');
 				return `Basic ${basicAuth}`;
@@ -2163,9 +2740,13 @@ async function getRegistryBearerToken(registry: string, repo: string): Promise<s
 		}
 
 		if (!challenge.startsWith('bearer')) {
+			await drainResponse(challengeResponse);
 			console.error(`Unsupported auth type: ${wwwAuth}`);
 			return null;
 		}
+
+		// Drain 401 response body before bearer token fetch (required by Node.js/Undici for connection reuse)
+		await drainResponse(challengeResponse);
 
 		// Parse bearer challenge: Bearer realm="...",service="...",scope="..."
 		const realmMatch = wwwAuth.match(/realm="([^"]+)"/i);
@@ -2210,7 +2791,13 @@ async function getRegistryBearerToken(registry: string, repo: string): Promise<s
 
 	} catch (e) {
 		const errorMsg = e instanceof Error ? e.message : String(e);
-		console.error('[Registry] Failed to get bearer token:', errorMsg);
+		const cause = (e as any)?.cause;
+		const causeMsg = cause ? ` (cause: ${cause})` : '';
+		console.error('[Registry] Failed to get bearer token:', errorMsg + causeMsg);
+		const causeStr = String(cause ?? errorMsg);
+		if (causeStr.includes('EAI_AGAIN') || causeStr.includes('ENOTFOUND')) {
+			console.error('[Registry] DNS resolution failed. If you are on a NAS (Synology, uGreen, QNAP), try adding --dns=8.8.8.8 to your docker run command or set {"dns": ["8.8.8.8"]} in /etc/docker/daemon.json');
+		}
 		return null;
 	}
 }
@@ -2245,11 +2832,13 @@ export async function getRegistryAuthHeader(
 
 		// If 200, no auth needed
 		if (challengeResponse.ok) {
+			await drainResponse(challengeResponse);
 			return null;
 		}
 
 		// If not 401, something else is wrong
 		if (challengeResponse.status !== 401) {
+			await drainResponse(challengeResponse);
 			console.error(`Registry challenge failed: ${challengeResponse.status}`);
 			return null;
 		}
@@ -2260,6 +2849,7 @@ export async function getRegistryAuthHeader(
 
 		if (challenge.startsWith('basic')) {
 			// Basic auth - use credentials if we have them
+			await drainResponse(challengeResponse);
 			if (credentials) {
 				const basicAuth = Buffer.from(`${credentials.username}:${credentials.password}`).toString('base64');
 				return `Basic ${basicAuth}`;
@@ -2268,9 +2858,13 @@ export async function getRegistryAuthHeader(
 		}
 
 		if (!challenge.startsWith('bearer')) {
+			await drainResponse(challengeResponse);
 			console.error(`Unsupported auth type: ${wwwAuth}`);
 			return null;
 		}
+
+		// Drain 401 response body before bearer token fetch (required by Node.js/Undici for connection reuse)
+		await drainResponse(challengeResponse);
 
 		// Parse bearer challenge: Bearer realm="...",service="...",scope="..."
 		const realmMatch = wwwAuth.match(/realm="([^"]+)"/i);
@@ -2314,7 +2908,9 @@ export async function getRegistryAuthHeader(
 
 	} catch (e) {
 		const errorMsg = e instanceof Error ? e.message : String(e);
-		console.error('[Registry] Failed to get auth header:', errorMsg);
+		const cause = (e as any)?.cause;
+		const causeMsg = cause ? ` (cause: ${cause})` : '';
+		console.error('[Registry] Failed to get auth header:', errorMsg + causeMsg);
 		return null;
 	}
 }
@@ -2372,15 +2968,26 @@ export async function getRegistryManifestDigest(imageName: string): Promise<stri
 		const response = await fetch(manifestUrl, { method: 'HEAD', headers });
 
 		if (!response.ok) {
-			if (response.status !== 429) {
+			await drainResponse(response);
+			if (response.status === 429) {
+				const retryAfter = response.headers.get('Retry-After');
+				console.warn(`[Registry] ${imageName}: rate limited (429)${retryAfter ? `, retry after ${retryAfter}s` : ''}`);
+			} else {
 				console.error(`[Registry] ${imageName}: ${response.status}`);
 			}
 			return null;
 		}
 
-		return response.headers.get('Docker-Content-Digest');
+		const digest = response.headers.get('Docker-Content-Digest');
+		await drainResponse(response);
+		return digest;
 	} catch (e) {
-		console.error(`[Registry] ${imageName}: ${e}`);
+		const causeStr = String((e as any)?.cause ?? e);
+		if (causeStr.includes('EAI_AGAIN') || causeStr.includes('ENOTFOUND')) {
+			console.error(`[Registry] ${imageName}: DNS resolution failed. If you are on a NAS (Synology, uGreen, QNAP), add --dns=8.8.8.8 to your docker run command.`);
+		} else {
+			console.error(`[Registry] ${imageName}: ${e}`);
+		}
 		return null;
 	}
 }
@@ -2482,7 +3089,7 @@ export async function tagImage(id: string, repo: string, tag: string, envId?: nu
 		{ method: 'POST' },
 		envId
 	);
-	await drainResponse(response);
+	await assertDockerResponse(response);
 }
 
 /**
@@ -2638,6 +3245,47 @@ export async function getDockerVersion(envId?: number | null) {
 }
 
 /**
+ * Get the Docker daemon's API version string for a given environment.
+ * Used to pin DOCKER_API_VERSION when spawning sidecar containers (scanner, updater)
+ * whose bundled Docker CLI may be newer than the host daemon supports.
+ * Returns null if the version cannot be determined.
+ * Requires an envId — local Docker (no environment) must query /version directly.
+ */
+export async function getNegotiatedApiVersion(envId: number): Promise<string | null> {
+	try {
+		const versionInfo = await getDockerVersion(envId);
+		return versionInfo?.ApiVersion || null;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Lightweight ping check for Docker daemon availability.
+ * Uses /_ping endpoint which returns "OK" as plain text with minimal overhead.
+ * Used by the circuit breaker to probe offline environments.
+ */
+export async function dockerPing(envId: number): Promise<boolean> {
+	try {
+		// Edge connections go WebSocket → agent → Docker daemon, which adds latency on slow hosts.
+		// Use a longer timeout for edge to avoid false negatives on overloaded NAS/VPS devices.
+		const config = await getDockerConfig(envId).catch(() => null);
+		const timeoutMs = config?.connectionType === 'hawser-edge' ? 20000 : 5000;
+		const response = await dockerFetch('/_ping', {
+			signal: AbortSignal.timeout(timeoutMs)
+		}, envId);
+		await drainResponse(response);
+		return response.ok;
+	} catch (error: any) {
+		const msg = error?.message || String(error);
+		if (msg.includes('unreachable')) {
+			console.warn(`[Docker] ${config?.connectionType || 'direct'} ${config?.host || envId}: /_ping failed - host unreachable`);
+		}
+		return false;
+	}
+}
+
+/**
  * Get Hawser agent info (for hawser-standard mode)
  * Returns agent info including uptime
  */
@@ -2649,13 +3297,18 @@ export async function getHawserInfo(envId: number): Promise<{
 	mode: string;
 	uptime: number;
 } | null> {
-	try {
-		const response = await dockerFetch('/_hawser/info', {}, envId);
-		if (response.ok) {
-			return await response.json();
+	for (let attempt = 0; attempt < 2; attempt++) {
+		try {
+			const response = await dockerFetch('/_hawser/info', {}, envId);
+			if (response.ok) {
+				return await response.json();
+			}
+			await drainResponse(response);
+			console.warn(`[Hawser] Info endpoint returned ${response.status} for env ${envId}`);
+		} catch (error) {
+			const msg = error instanceof Error ? error.message : String(error);
+			console.warn(`[Hawser] Failed to fetch info for env ${envId} (attempt ${attempt + 1}): ${msg}`);
 		}
-	} catch {
-		// Hawser info not available
 	}
 	return null;
 }
@@ -2748,6 +3401,7 @@ export async function removeVolume(name: string, force = false, envId?: number |
 		error.json = data;
 		throw error;
 	}
+	await drainResponse(response);
 }
 
 export async function inspectVolume(name: string, envId?: number | null) {
@@ -2789,26 +3443,31 @@ export interface NetworkInfo {
 }
 
 export async function listNetworks(envId?: number | null): Promise<NetworkInfo[]> {
-	const networks = await dockerJsonRequest<any[]>('/networks', {}, envId);
+	const [networks, containers] = await Promise.all([
+		dockerJsonRequest<any[]>('/networks', {}, envId),
+		dockerJsonRequest<any[]>('/containers/json?all=true', {}, envId)
+	]);
 
-	// Docker's /networks endpoint returns empty Containers - we need to inspect each network
-	// to get the actual connected containers. Run inspections in parallel for performance.
-	const networkDetails = await Promise.all(
-		networks.map(async (network: any) => {
-			try {
-				const details = await dockerJsonRequest<any>(`/networks/${network.Id}`, {}, envId);
-				return {
-					...network,
-					Containers: details.Containers || {}
-				};
-			} catch {
-				// If inspection fails, return network with empty containers
-				return network;
+	// Build map of networkId -> container info from container network settings
+	const networkContainers = new Map<string, Record<string, { name: string; ipv4Address: string }>>();
+	for (const container of containers) {
+		const nets = container.NetworkSettings?.Networks;
+		if (!nets) continue;
+		const containerName = (container.Names?.[0] || '').replace(/^\//, '');
+		for (const [, netInfo] of Object.entries(nets as Record<string, any>)) {
+			const netId = netInfo.NetworkID;
+			if (!netId) continue;
+			if (!networkContainers.has(netId)) {
+				networkContainers.set(netId, {});
 			}
-		})
-	);
+			networkContainers.get(netId)![container.Id] = {
+				name: containerName,
+				ipv4Address: netInfo.IPAddress || ''
+			};
+		}
+	}
 
-	return networkDetails.map((network: any) => ({
+	return networks.map((network: any) => ({
 		id: network.Id,
 		name: network.Name,
 		driver: network.Driver,
@@ -2824,13 +3483,7 @@ export async function listNetworks(envId?: number | null): Promise<NetworkInfo[]
 				auxAddress: cfg.AuxAddress || cfg.auxAddress
 			}))
 		},
-		containers: Object.entries(network.Containers || {}).reduce((acc: any, [id, data]: [string, any]) => {
-			acc[id] = {
-				name: data.Name,
-				ipv4Address: data.IPv4Address
-			};
-			return acc;
-		}, {})
+		containers: networkContainers.get(network.Id) || {}
 	}));
 }
 
@@ -2843,6 +3496,7 @@ export async function removeNetwork(id: string, envId?: number | null) {
 		error.json = data;
 		throw error;
 	}
+	await drainResponse(response);
 }
 
 export async function inspectNetwork(id: string, envId?: number | null) {
@@ -2954,6 +3608,7 @@ export async function connectContainerToNetwork(
 		const data = await response.json().catch(() => ({}));
 		throw new Error(data.message || 'Failed to connect container to network');
 	}
+	await drainResponse(response);
 }
 
 /**
@@ -2985,6 +3640,7 @@ export async function connectContainerToNetworkRaw(
 		const data = await response.json().catch(() => ({}));
 		throw new Error(data.message || 'Failed to connect container to network');
 	}
+	await drainResponse(response);
 }
 
 export async function disconnectContainerFromNetwork(
@@ -3006,6 +3662,7 @@ export async function disconnectContainerFromNetwork(
 		const data = await response.json().catch(() => ({}));
 		throw new Error(data.message || 'Failed to disconnect container from network');
 	}
+	await drainResponse(response);
 }
 
 // Container exec operations
@@ -3061,6 +3718,63 @@ export async function getDockerConnectionInfo(envId?: number | null): Promise<{
 		port: config.port
 	};
 }
+
+// =============================================================================
+// Global handlers for server.js terminal WebSocket connections
+// =============================================================================
+// server.js cannot import SvelteKit modules directly, so we expose these
+// functions via globalThis (same pattern as Hawser handlers).
+// =============================================================================
+
+declare global {
+	var __terminalGetTarget: ((envId?: number) => Promise<{
+		type: 'socket' | 'http' | 'https';
+		connectionType?: string;
+		socketPath?: string;
+		host?: string;
+		port?: number;
+		hawserToken?: string;
+		environmentId?: number;
+		tls?: { ca?: string; cert?: string; key?: string; rejectUnauthorized: boolean };
+	}>) | undefined;
+	var __terminalCreateExec: ((containerId: string, shell: string, user: string, envId?: number) => Promise<string>) | undefined;
+	var __terminalResizeExec: ((execId: string, cols: number, rows: number, envId?: number) => Promise<void>) | undefined;
+}
+
+globalThis.__terminalGetTarget = async (envId?: number) => {
+	if (!envId) {
+		// No environment = local socket
+		return { type: 'socket', connectionType: 'socket', socketPath: '/var/run/docker.sock' };
+	}
+	const config = await getDockerConfig(envId);
+	const result: Awaited<ReturnType<NonNullable<typeof globalThis.__terminalGetTarget>>> = {
+		type: config.type,
+		connectionType: config.connectionType,
+		socketPath: config.socketPath,
+		host: config.host,
+		port: config.port,
+		hawserToken: config.hawserToken,
+		environmentId: config.environmentId,
+	};
+	if (config.type === 'https') {
+		result.tls = {
+			ca: config.ca,
+			cert: config.cert,
+			key: config.key,
+			rejectUnauthorized: !config.skipVerify,
+		};
+	}
+	return result;
+};
+
+globalThis.__terminalCreateExec = async (containerId, shell, user, envId) => {
+	const exec = await createExec({ containerId, cmd: [shell], user, envId });
+	return exec.Id;
+};
+
+globalThis.__terminalResizeExec = async (execId, cols, rows, envId) => {
+	await resizeExec(execId, cols, rows, envId);
+};
 
 // System disk usage
 export async function getDiskUsage(envId?: number | null) {
@@ -3156,6 +3870,8 @@ export async function execInContainer(
 		envId
 	);
 
+	if (!response.ok) await throwDockerError(response);
+
 	const buffer = Buffer.from(await response.arrayBuffer());
 	const output = demuxDockerStream(buffer) as string;
 
@@ -3194,9 +3910,8 @@ export async function getDockerEvents(
 	}
 
 	try {
-		// Note: We use streaming: true to disable Bun's idle timeout for this long-lived connection.
+		// Use streaming: true for this long-lived connection.
 		// The Docker events API keeps the connection open indefinitely, sending events as they occur.
-		// Without streaming: true, Bun would terminate the connection after ~5 seconds of inactivity.
 		const response = await dockerFetch(
 			`/events?${queryString}`,
 			{ streaming: true },
@@ -3271,11 +3986,12 @@ export async function runContainer(options: {
 	try {
 		// Start container
 		console.log(`[runContainer] Starting container ${containerId}...`);
-		await drainResponse(await dockerFetch(`/containers/${containerId}/start`, { method: 'POST' }, options.envId));
+		await assertDockerResponse(await dockerFetch(`/containers/${containerId}/start`, { method: 'POST' }, options.envId));
 
 		// Wait for container to finish
 		console.log(`[runContainer] Waiting for container ${containerId} to finish...`);
-		const waitResponse = await dockerFetch(`/containers/${containerId}/wait`, { method: 'POST' }, options.envId);
+		const waitResponse = await dockerFetch(`/containers/${containerId}/wait`, { method: 'POST', streaming: true }, options.envId);
+		if (!waitResponse.ok) await throwDockerError(waitResponse);
 		const waitResult = await waitResponse.json().catch(() => ({}));
 		console.log(`[runContainer] Container ${containerId} finished with exit code:`, waitResult?.StatusCode);
 
@@ -3286,6 +4002,8 @@ export async function runContainer(options: {
 			{},
 			options.envId
 		);
+
+		if (!logsResponse.ok) await throwDockerError(logsResponse);
 
 		const buffer = Buffer.from(await logsResponse.arrayBuffer());
 		console.log(`[runContainer] Got logs buffer, size: ${buffer.length} bytes`);
@@ -3318,6 +4036,7 @@ export async function runContainerWithStreaming(options: {
 	onStdout?: (data: string) => void;
 	onStderr?: (data: string) => void;
 	timeout?: number; // Overall timeout in ms (0 or undefined = no timeout)
+	networkMode?: string; // Docker network mode (e.g., network name for TCP access)
 }): Promise<string> {
 	const baseName = options.name || `dockhand-stream-${Date.now()}`;
 	const containerName = `${baseName}-${randomSuffix()}`;
@@ -3330,13 +4049,22 @@ export async function runContainerWithStreaming(options: {
 		Tty: false,
 		HostConfig: {
 			Binds: options.binds || [],
-			AutoRemove: false
+			AutoRemove: false,
+			LogConfig: {
+				Type: 'json-file',
+				Config: {}
+			}
 		}
 	};
 
 	// Set user if specified (needed for rootless Docker socket access)
 	if (options.user) {
 		containerConfig.User = options.user;
+	}
+
+	// Set network mode if specified (e.g., for scanner containers accessing Docker via TCP)
+	if (options.networkMode) {
+		containerConfig.HostConfig.NetworkMode = options.networkMode;
 	}
 
 	const createResult = await dockerJsonRequest<{ Id: string }>(
@@ -3367,7 +4095,8 @@ export async function runContainerWithStreaming(options: {
 			// Wait for container to exit - this is the reliable signal
 			let exitCode: number | undefined;
 			try {
-				const waitResult = await dockerFetch(`/containers/${containerId}/wait`, { method: 'POST' }, options.envId);
+				const waitResult = await dockerFetch(`/containers/${containerId}/wait`, { method: 'POST', streaming: true }, options.envId);
+				if (!waitResult.ok) await throwDockerError(waitResult);
 				const waitData = await waitResult.json() as { StatusCode?: number };
 				exitCode = waitData.StatusCode;
 				console.log(`[runContainerWithStreaming] Container exited with code: ${exitCode}`);
@@ -3383,8 +4112,9 @@ export async function runContainerWithStreaming(options: {
 			// Container has exited. Now fetch stdout reliably (no race condition).
 			const stdout = await fetchContainerStdout(containerId, config, options.envId);
 
-			// If stdout is empty and exit code is non-zero, fetch stderr for debugging
+			// If stdout is empty and exit code is non-zero, fetch stderr and throw
 			if (stdout.length === 0 && exitCode !== 0) {
+				let stderrText = '';
 				try {
 					const stderrResponse = await dockerFetch(
 						`/containers/${containerId}/logs?stdout=false&stderr=true&follow=false`,
@@ -3393,13 +4123,12 @@ export async function runContainerWithStreaming(options: {
 					);
 					const stderrBuffer = Buffer.from(await stderrResponse.arrayBuffer());
 					const stderrOutput = demuxDockerStream(stderrBuffer, { separateStreams: true });
-					const stderrText = typeof stderrOutput === 'string' ? stderrOutput : stderrOutput.stderr;
-					if (stderrText) {
-						console.error(`[runContainerWithStreaming] Container stderr: ${stderrText.substring(0, 1000)}`);
-					}
+					stderrText = typeof stderrOutput === 'string' ? stderrOutput : stderrOutput.stderr;
 				} catch {
 					// Ignore stderr fetch errors
 				}
+				const detail = stderrText ? stderrText.substring(0, 1000) : 'no stderr output';
+				throw new Error(`Container exited with code ${exitCode}: ${detail}`);
 			}
 
 			return stdout;
@@ -3440,6 +4169,8 @@ async function streamLocalStderr(
 		{ streaming: true },
 		envId
 	);
+
+	if (!response.ok) await throwDockerError(response);
 
 	const reader = response.body?.getReader();
 	if (!reader) return;
@@ -3561,9 +4292,11 @@ async function fetchContainerStdout(
 	// Local/standard mode - read via streaming to handle large Docker log responses
 	const response = await dockerFetch(
 		`/containers/${containerId}/logs?stdout=true&stderr=false&follow=false`,
-		{},
+		{ streaming: true },
 		envId
 	);
+
+	if (!response.ok) await throwDockerError(response);
 
 	const reader = response.body?.getReader();
 	if (!reader) {
@@ -3602,6 +4335,7 @@ export async function pushImage(
 		`/images/${encodeURIComponent(imageTag)}/push`,
 		{
 			method: 'POST',
+			streaming: true,
 			headers: {
 				'X-Registry-Auth': authHeader
 			}
@@ -3663,7 +4397,7 @@ export interface FileEntry {
 /**
  * Parse ls -la output into FileEntry array
  * Handles multiple formats:
- * - GNU ls with --time-style=iso: drwxr-xr-x 2 root root 4096 2024-12-08 10:30 dirname
+ * - GNU ls with --time-style=long-iso: drwxr-xr-x 2 root root 4096 2024-12-08 10:30 dirname
  * - Standard GNU ls: drwxr-xr-x  2 root root  4096 Dec  8 10:30 dirname
  * - Busybox ls: drwxr-xr-x    2 root     root          4096 Dec  8 10:30 dirname
  */
@@ -3701,7 +4435,7 @@ function parseLsOutput(output: string): FileEntry[] {
 		let time: string;
 		let nameAndLink: string;
 
-		// Try ISO format first (GNU ls with --time-style=iso)
+		// Try ISO format first (GNU ls with --time-style=long-iso)
 		// Format: drwxr-xr-x 2 root root 4096 2024-12-08 10:30 dirname
 		// With ACL: drwxr-xr-x+ 2 root root 4096 2024-12-08 10:30 dirname
 		// With extended attrs: drwxr-xr-x@ 2 root root 4096 2024-12-08 10:30 dirname
@@ -3846,7 +4580,7 @@ export async function listContainerDirectory(
 			['/usr/bin/ls', '-la', safePath],
 		]
 		: [
-			['ls', '-la', '--time-style=iso', safePath],
+			['ls', '-la', '--time-style=long-iso', safePath],
 			['ls', '-la', safePath],
 			['/bin/ls', '-la', safePath],
 			['/usr/bin/ls', '-la', safePath],
@@ -3882,7 +4616,7 @@ export async function getContainerArchive(
 
 	const response = await dockerFetch(
 		`/containers/${containerId}/archive?path=${encodeURIComponent(safePath)}`,
-		{},
+		{ streaming: true },
 		envId
 	);
 
@@ -3922,6 +4656,7 @@ export async function putContainerArchive(
 		const error = await response.text();
 		throw new Error(`Failed to upload archive: ${error}`);
 	}
+	await drainResponse(response);
 }
 
 /**
@@ -3942,6 +4677,7 @@ export async function statContainerPath(
 	);
 
 	if (!response.ok) {
+		await drainResponse(response);
 		throw new Error(`Path not found: ${safePath}`);
 	}
 
@@ -4167,19 +4903,21 @@ function getVolumeCacheKey(volumeName: string, envId?: number | null): string {
 /**
  * Ensure the volume helper image (busybox) is available, pulling if necessary
  */
-async function ensureVolumeHelperImage(envId?: number | null): Promise<void> {
+export async function ensureVolumeHelperImage(envId?: number | null): Promise<void> {
 	// Check if image exists
 	const response = await dockerFetch(`/images/${encodeURIComponent(VOLUME_HELPER_IMAGE)}/json`, {}, envId);
 
 	if (response.ok) {
+		await drainResponse(response);
 		return; // Image exists
 	}
 
 	// Image not found, pull it
 	console.log(`Pulling ${VOLUME_HELPER_IMAGE} for volume browsing...`);
+	const authHeaders = await buildRegistryAuthHeader(VOLUME_HELPER_IMAGE);
 	const pullResponse = await dockerFetch(
 		`/images/create?fromImage=${encodeURIComponent(VOLUME_HELPER_IMAGE)}`,
-		{ method: 'POST' },
+		{ method: 'POST', headers: authHeaders },
 		envId
 	);
 
@@ -4414,10 +5152,11 @@ async function cleanupStaleVolumeHelpersForEnv(envId?: number | null): Promise<n
 
 		return removed;
 	} catch (err: any) {
-		// Don't spam logs for expected failures (e.g., edge agent offline)
+		// Don't spam logs for expected connection failures (offline envs, TLS mismatches, etc.)
 		const msg = err?.message || String(err);
-		if (!msg.includes('not connected') && !msg.includes('offline')) {
-			console.warn('Failed to query stale volume helpers:', msg);
+		const isExpected = /not connected|offline|unreachable|fetch failed|EPROTO|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EHOSTUNREACH/i.test(msg);
+		if (!isExpected) {
+			console.warn(`Failed to query stale volume helpers for env ${envId}:`, msg);
 		}
 		return 0;
 	}
@@ -4429,22 +5168,16 @@ async function cleanupStaleVolumeHelpersForEnv(envId?: number | null): Promise<n
  * @param environments - Optional pre-fetched environments (avoids dynamic import in production)
  */
 export async function cleanupStaleVolumeHelpers(environments: Array<{ id: number }>): Promise<void> {
-	console.log('Cleaning up stale volume helper containers...');
-
-	if (!environments || environments.length === 0) {
-		console.log('No environments to clean up');
-		return;
-	}
+	if (!environments || environments.length === 0) return;
 
 	let totalRemoved = 0;
 
-	// Clean up all configured environments
 	for (const env of environments) {
 		totalRemoved += await cleanupStaleVolumeHelpersForEnv(env.id);
 	}
 
 	if (totalRemoved > 0) {
-		console.log(`Removed ${totalRemoved} stale volume helper container(s)`);
+		console.log(`[Volume Helper] Removed ${totalRemoved} stale container(s)`);
 	}
 }
 
@@ -4495,7 +5228,7 @@ export async function getVolumeArchive(
 
 	const response = await dockerFetch(
 		`/containers/${containerId}/archive?path=${encodeURIComponent(fullPath)}`,
-		{},
+		{ streaming: true },
 		envId
 	);
 

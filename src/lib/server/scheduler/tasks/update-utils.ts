@@ -96,7 +96,9 @@ export function shouldBlockUpdate(
  * Used to prevent Dockhand from updating its own container.
  */
 export function isDockhandContainer(imageName: string): boolean {
-	return imageName.toLowerCase().includes('fnsys/dockhand');
+	const lower = imageName.toLowerCase();
+	// Match fnsys/dockhand, registry.example.com/dockhand, or plain dockhand
+	return lower.includes('fnsys/dockhand') || /(?:^|\/)dockhand(?::|$)/.test(lower);
 }
 
 /**

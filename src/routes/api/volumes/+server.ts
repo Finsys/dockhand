@@ -1,6 +1,6 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { listVolumes, createVolume, EnvironmentNotFoundError, type CreateVolumeOptions } from '$lib/server/docker';
+import { listVolumes, createVolume, EnvironmentNotFoundError, DockerConnectionError, type CreateVolumeOptions } from '$lib/server/docker';
 import { authorize } from '$lib/server/authorize';
 import { auditVolume } from '$lib/server/audit';
 import { hasEnvironments } from '$lib/server/db';
@@ -33,7 +33,9 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 		if (error instanceof EnvironmentNotFoundError) {
 			return json({ error: 'Environment not found' }, { status: 404 });
 		}
-		console.error('Failed to list volumes:', error);
+		if (!(error instanceof DockerConnectionError)) {
+			console.error('Failed to list volumes:', error);
+		}
 		return json({ error: 'Failed to list volumes' }, { status: 500 });
 	}
 };

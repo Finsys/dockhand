@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { Copy, Check, FolderOpen, FolderSync } from 'lucide-svelte';
+	import { Copy, Check, XCircle, FolderOpen, FolderSync } from 'lucide-svelte';
+	import * as Tooltip from '$lib/components/ui/tooltip';
 
 	interface Props {
 		label: string;
@@ -10,7 +11,7 @@
 		onChangeLocation?: () => void; // Optional: relocate entire folder
 		defaultText?: string;
 		isSuggested?: boolean;
-		copied?: boolean;
+		copied?: 'ok' | 'error' | null;
 		sourceHint?: string; // e.g., "Using default location"
 	}
 
@@ -23,7 +24,7 @@
 		onChangeLocation,
 		defaultText = 'Default location',
 		isSuggested = false,
-		copied = false,
+		copied = null,
 		sourceHint
 	}: Props = $props();
 
@@ -79,7 +80,14 @@
 		title="Copy path"
 		disabled={!path}
 	>
-		{#if copied}
+		{#if copied === 'error'}
+			<Tooltip.Root open>
+				<Tooltip.Trigger>
+					<XCircle class="w-3.5 h-3.5 text-red-500" />
+				</Tooltip.Trigger>
+				<Tooltip.Content>Copy requires HTTPS</Tooltip.Content>
+			</Tooltip.Root>
+		{:else if copied === 'ok'}
 			<Check class="w-3.5 h-3.5 text-green-500" />
 		{:else}
 			<Copy class="w-3.5 h-3.5" />

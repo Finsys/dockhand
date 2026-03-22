@@ -7,7 +7,6 @@
 
 import {
 	db,
-	rawClient,
 	isPostgres,
 	isSqlite,
 	eq,
@@ -199,6 +198,10 @@ export async function updateEnvironment(id: number, env: Partial<Environment>): 
 export async function deleteEnvironment(id: number): Promise<boolean> {
 	const env = await getEnvironment(id);
 	if (!env) return false;
+
+	// Clean up in-memory metrics
+	const { clearEnvironmentMetrics } = await import('./metrics-store.js');
+	clearEnvironmentMetrics(id);
 
 	// Clean up related records that don't have cascade delete defined
 	try {
@@ -576,45 +579,28 @@ export async function saveHostMetric(
 	memoryPercent: number,
 	memoryUsed: number,
 	memoryTotal: number,
-	environmentId?: number
+	environmentId?: number,
+	_skipEnvCheck = false
 ): Promise<void> {
-	// Verify environment exists before inserting (avoids FK violations on deleted envs)
-	if (environmentId) {
-		const env = await getEnvironment(environmentId);
-		if (!env) return;
-	}
-
-	await db.insert(hostMetrics).values({
-		environmentId: environmentId || null,
-		cpuPercent,
-		memoryPercent,
-		memoryUsed,
-		memoryTotal
-	});
-
-	// Cleanup old metrics (keep last 24 hours)
-	const cutoff24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-	await db.delete(hostMetrics).where(sql`timestamp < ${cutoff24h}`);
+	// Delegated to in-memory ring buffer (no DB writes)
+	if (!environmentId) return;
+	const { pushMetric } = await import('./metrics-store.js');
+	pushMetric(environmentId, cpuPercent, memoryPercent, memoryUsed, memoryTotal);
 }
 
 export async function getHostMetrics(limit = 60, environmentId?: number): Promise<HostMetric[]> {
 	if (environmentId) {
-		return db.select().from(hostMetrics)
-			.where(eq(hostMetrics.environmentId, environmentId))
-			.orderBy(desc(hostMetrics.timestamp))
-			.limit(limit);
+		const { getMetricsHistory } = await import('./metrics-store.js');
+		// getMetricsHistory returns oldest-first, but callers expect newest-first
+		return getMetricsHistory(environmentId, limit).reverse();
 	}
-	return db.select().from(hostMetrics)
-		.orderBy(desc(hostMetrics.timestamp))
-		.limit(limit);
+	const { getAllMetrics } = await import('./metrics-store.js');
+	return getAllMetrics(limit);
 }
 
 export async function getLatestHostMetrics(environmentId: number): Promise<HostMetric | null> {
-	const results = await db.select().from(hostMetrics)
-		.where(eq(hostMetrics.environmentId, environmentId))
-		.orderBy(desc(hostMetrics.timestamp))
-		.limit(1);
-	return results[0] ?? null;
+	const { getLatestMetric } = await import('./metrics-store.js');
+	return getLatestMetric(environmentId);
 }
 
 // =============================================================================
@@ -779,6 +765,7 @@ export const NOTIFICATION_EVENT_TYPES = [
 	{ id: 'container_restarted', label: 'Container restarted', description: 'When a container restarts (manual or automatic)', group: 'container', scope: 'environment' },
 	{ id: 'container_exited', label: 'Container exited', description: 'When a container exits unexpectedly', group: 'container', scope: 'environment' },
 	{ id: 'container_unhealthy', label: 'Container unhealthy', description: 'When a container health check fails', group: 'container', scope: 'environment' },
+	{ id: 'container_healthy', label: 'Container healthy', description: 'When a container health check recovers', group: 'container', scope: 'environment' },
 	{ id: 'container_oom', label: 'Out of memory', description: 'When a container is killed due to out of memory', group: 'container', scope: 'environment' },
 	{ id: 'container_updated', label: 'Container updated', description: 'When a container image is updated', group: 'container', scope: 'environment' },
 	{ id: 'image_pulled', label: 'Image pulled', description: 'When a new image is pulled', group: 'container', scope: 'environment' },
@@ -831,6 +818,13 @@ export const SYSTEM_NOTIFICATION_EVENTS = NOTIFICATION_EVENT_TYPES.filter(e => e
 export const ENVIRONMENT_NOTIFICATION_EVENTS = NOTIFICATION_EVENT_TYPES.filter(e => e.scope === 'environment');
 
 export type NotificationEventType = typeof NOTIFICATION_EVENT_TYPES[number]['id'];
+
+const environmentEventIds = new Set(ENVIRONMENT_NOTIFICATION_EVENTS.map(e => e.id));
+
+/** Strip system-scoped events (e.g. license_expiring) from environment notification records */
+function filterEnvironmentEventTypes(eventTypes: string[]): string[] {
+	return eventTypes.filter(id => environmentEventIds.has(id));
+}
 
 export interface NotificationSettingData {
 	id: number;
@@ -995,7 +989,7 @@ export async function getEnvironmentNotifications(environmentId: number): Promis
 
 	return rows.map((row: any) => ({
 		...row,
-		eventTypes: row.eventTypes ? JSON.parse(row.eventTypes) : NOTIFICATION_EVENT_TYPES.map(e => e.id)
+		eventTypes: filterEnvironmentEventTypes(row.eventTypes ? JSON.parse(row.eventTypes) : ENVIRONMENT_NOTIFICATION_EVENTS.map(e => e.id))
 	})) as EnvironmentNotificationData[];
 }
 
@@ -1022,7 +1016,7 @@ export async function getEnvironmentNotification(environmentId: number, notifica
 	if (!rows[0]) return null;
 	return {
 		...rows[0],
-		eventTypes: rows[0].eventTypes ? JSON.parse(rows[0].eventTypes) : NOTIFICATION_EVENT_TYPES.map(e => e.id)
+		eventTypes: filterEnvironmentEventTypes(rows[0].eventTypes ? JSON.parse(rows[0].eventTypes) : ENVIRONMENT_NOTIFICATION_EVENTS.map(e => e.id))
 	} as EnvironmentNotificationData;
 }
 
@@ -1032,7 +1026,7 @@ export async function createEnvironmentNotification(data: {
 	enabled?: boolean;
 	eventTypes?: NotificationEventType[];
 }): Promise<EnvironmentNotificationData> {
-	const eventTypes = data.eventTypes || NOTIFICATION_EVENT_TYPES.map(e => e.id);
+	const eventTypes = data.eventTypes || ENVIRONMENT_NOTIFICATION_EVENTS.map(e => e.id);
 	await db.insert(environmentNotifications).values({
 		environmentId: data.environmentId,
 		notificationId: data.notificationId,
@@ -1100,7 +1094,7 @@ export async function getEnabledEnvironmentNotifications(
 	return rows
 		.map(row => ({
 			...row,
-			eventTypes: row.eventTypes ? JSON.parse(row.eventTypes) : NOTIFICATION_EVENT_TYPES.map(e => e.id),
+			eventTypes: filterEnvironmentEventTypes(row.eventTypes ? JSON.parse(row.eventTypes) : ENVIRONMENT_NOTIFICATION_EVENTS.map(e => e.id)),
 			config: decryptNotificationConfig(row.channelType ?? 'apprise', row.config)
 		}))
 		.filter(row => !eventType || row.eventTypes.includes(eventType)) as (EnvironmentNotificationData & { config: any })[];
@@ -2030,6 +2024,14 @@ export async function updateGitRepository(id: number, data: Partial<GitRepositor
 
 	await db.update(gitRepositories).set(updateData).where(eq(gitRepositories.id, id));
 	return getGitRepository(id);
+}
+
+export async function getGitStacksByRepositoryId(repositoryId: number): Promise<Array<{ id: number; stackName: string; environmentId: number | null }>> {
+	return db.select({
+		id: gitStacks.id,
+		stackName: gitStacks.stackName,
+		environmentId: gitStacks.environmentId
+	}).from(gitStacks).where(eq(gitStacks.repositoryId, repositoryId));
 }
 
 export async function deleteGitRepository(id: number): Promise<boolean> {
@@ -2982,7 +2984,7 @@ export async function deleteOldScans(keepDays = 30): Promise<number> {
 export type AuditAction =
 	| 'create' | 'update' | 'delete' | 'start' | 'stop' | 'restart' | 'down'
 	| 'pause' | 'unpause' | 'pull' | 'push' | 'prune' | 'login'
-	| 'logout' | 'view' | 'exec' | 'connect' | 'disconnect' | 'deploy' | 'sync' | 'rename';
+	| 'logout' | 'view' | 'exec' | 'connect' | 'disconnect' | 'deploy' | 'sync' | 'rename' | 'webhook';
 
 export type AuditEntityType =
 	| 'container' | 'image' | 'stack' | 'volume' | 'network'
@@ -3268,20 +3270,23 @@ export interface ContainerEventResult {
 	offset: number;
 }
 
-export async function logContainerEvent(data: ContainerEventCreateData): Promise<ContainerEventData> {
-	// Timestamp is already an ISO-8601 string from event-subprocess
-	// Both SQLite and PostgreSQL schemas use mode: 'string' so we pass it directly
-	const result = await db.insert(containerEvents).values({
+export async function logContainerEvent(
+	data: ContainerEventCreateData
+): Promise<ContainerEventData> {
+	const attrs = data.actorAttributes ? JSON.stringify(data.actorAttributes) : null;
+
+	const [inserted] = await db.insert(containerEvents).values({
 		environmentId: data.environmentId ?? null,
 		containerId: data.containerId,
 		containerName: data.containerName ?? null,
 		image: data.image ?? null,
 		action: data.action,
-		actorAttributes: data.actorAttributes ? JSON.stringify(data.actorAttributes) : null,
+		actorAttributes: attrs,
 		timestamp: data.timestamp
-	}).returning();
+	}).returning({ id: containerEvents.id });
 
-	return getContainerEvent(result[0].id) as Promise<ContainerEventData>;
+	const event = await getContainerEvent(inserted.id);
+	return event!;
 }
 
 export async function getContainerEvent(id: number): Promise<ContainerEventData | undefined> {
@@ -4501,11 +4506,16 @@ export async function setStackEnvVars(
 			));
 	}
 
-	// Insert new vars
+	// Insert new vars (deduplicate by key - last entry wins)
 	if (variables.length > 0) {
+		const seen = new Map<string, { key: string; value: string; isSecret?: boolean }>();
+		for (const v of variables) {
+			seen.set(v.key, v);
+		}
+		const deduped = Array.from(seen.values());
 		const now = new Date().toISOString();
 		await db.insert(stackEnvironmentVariables).values(
-			variables.map(v => ({
+			deduped.map(v => ({
 				stackName,
 				environmentId,
 				key: v.key,

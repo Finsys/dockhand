@@ -6,7 +6,7 @@
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { TogglePill } from '$lib/components/ui/toggle-pill';
 	import { Shield, Pencil, Plus, Check, RefreshCw, Box, Image, HardDrive, Cable, Layers, Globe, Download, Bell, Sliders, Settings, Users, Eye, SquarePlus, Play, Square, RotateCcw, Trash2, Terminal, ScrollText, Search, Upload, Plug, Unplug, Copy, GitBranch, KeyRound, Building2, Container, TriangleAlert, ClipboardList, Activity, Timer } from 'lucide-svelte';
-	import { getIconComponent } from '$lib/utils/icons';
+	import EnvironmentIcon from '$lib/components/EnvironmentIcon.svelte';
 	import * as Alert from '$lib/components/ui/alert';
 	import { focusFirstInput } from '$lib/utils';
 
@@ -546,13 +546,12 @@
 						{#if !formAllEnvironments}
 							<div class="mt-3 grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-2">
 								{#each environments as env}
-									{@const EnvIcon = getIconComponent(env.icon || 'globe')}
 									<label class="flex items-center gap-2 p-2 border rounded-md cursor-pointer hover:bg-muted/50 transition-colors text-xs {formEnvironmentIds.includes(env.id) ? 'border-primary bg-primary/5' : ''}">
 										<Checkbox
 											checked={formEnvironmentIds.includes(env.id)}
 											onCheckedChange={() => toggleEnvironment(env.id)}
 										/>
-										<EnvIcon class="w-3.5 h-3.5 flex-shrink-0 text-muted-foreground" />
+										<EnvironmentIcon icon={env.icon || 'globe'} envId={env.id} class="w-3.5 h-3.5 flex-shrink-0 text-muted-foreground" />
 										<span class="truncate">{env.name}</span>
 									</label>
 								{/each}

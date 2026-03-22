@@ -1,7 +1,8 @@
 <script lang="ts">
-	import * as Popover from '$lib/components/ui/popover';
+	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
+	import { Progress } from '$lib/components/ui/progress';
 	import {
 		Rocket,
 		CheckCircle2,
@@ -12,11 +13,15 @@
 		FileCode,
 		Server,
 		Link,
-		AlertTriangle
+		AlertTriangle,
+		Copy,
+		Check,
+		Database,
+		KeyRound
 	} from 'lucide-svelte';
 	import type { Snippet } from 'svelte';
-	import { Progress } from '$lib/components/ui/progress';
 	import { appSettings } from '$lib/stores/settings';
+	import { watchJob } from '$lib/utils/sse-fetch';
 
 	interface Props {
 		stackId: number;
@@ -28,7 +33,7 @@
 	let { stackId, stackName, onComplete, children }: Props = $props();
 
 	interface StepProgress {
-		status: 'connecting' | 'cloning' | 'fetching' | 'reading' | 'deploying' | 'complete' | 'error';
+		status: 'connecting' | 'cloning' | 'fetching' | 'reading' | 'env' | 'secrets' | 'deploying' | 'complete' | 'error';
 		message?: string;
 		step?: number;
 		totalSteps?: number;
@@ -40,41 +45,29 @@
 	let currentStep = $state<StepProgress | null>(null);
 	let steps = $state<StepProgress[]>([]);
 	let errorMessage = $state('');
+	let copied = $state(false);
 
-	// Get the confirmDestructive setting from the store
 	const confirmDestructive = $derived($appSettings.confirmDestructive);
 
 	function getStepIcon(status: string) {
 		switch (status) {
-			case 'connecting':
-				return Link;
-			case 'cloning':
-				return GitBranch;
-			case 'fetching':
-				return GitBranch;
-			case 'reading':
-				return FileCode;
-			case 'deploying':
-				return Server;
-			case 'complete':
-				return CheckCircle2;
-			case 'error':
-				return XCircle;
-			default:
-				return Loader2;
+			case 'connecting': return Link;
+			case 'cloning':    return GitBranch;
+			case 'fetching':   return GitBranch;
+			case 'reading':    return FileCode;
+			case 'env':        return Database;
+			case 'secrets':    return KeyRound;
+			case 'deploying':  return Server;
+			case 'complete':   return CheckCircle2;
+			case 'error':      return XCircle;
+			default:           return Loader2;
 		}
 	}
 
 	function getStepColor(status: string, isCurrentStep: boolean): string {
-		if (status === 'complete') {
-			return 'text-green-600 dark:text-green-400';
-		}
-		if (status === 'error') {
-			return 'text-red-600 dark:text-red-400';
-		}
-		if (isCurrentStep) {
-			return 'text-blue-600 dark:text-blue-400';
-		}
+		if (status === 'complete') return 'text-green-600 dark:text-green-400';
+		if (status === 'error')    return 'text-red-600 dark:text-red-400';
+		if (isCurrentStep)         return 'text-violet-600 dark:text-violet-400';
 		return 'text-muted-foreground';
 	}
 
@@ -83,11 +76,11 @@
 		currentStep = null;
 		overallStatus = 'deploying';
 		errorMessage = '';
-		open = true;
 
 		try {
 			const response = await fetch(`/api/git/stacks/${stackId}/deploy-stream`, {
-				method: 'POST'
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' }
 			});
 
 			if (!response.ok) {
@@ -95,46 +88,33 @@
 				throw new Error(data.error || 'Failed to start deployment');
 			}
 
-			const reader = response.body?.getReader();
-			if (!reader) {
-				throw new Error('No response body');
-			}
+			const { jobId } = await response.json();
 
-			const decoder = new TextDecoder();
-			let buffer = '';
-
-			while (true) {
-				const { done, value } = await reader.read();
-				if (done) break;
-
-				buffer += decoder.decode(value, { stream: true });
-				const lines = buffer.split('\n');
-				buffer = lines.pop() || '';
-
-				for (const line of lines) {
-					if (!line.trim() || !line.startsWith('data: ')) continue;
-
-					try {
-						const data: StepProgress = JSON.parse(line.slice(6));
-
-						if (data.status === 'complete') {
-							overallStatus = 'complete';
-							currentStep = data;
-							steps = [...steps, data];
-							onComplete?.();
-						} else if (data.status === 'error') {
-							overallStatus = 'error';
-							errorMessage = data.error || 'Unknown error occurred';
-							currentStep = data;
-							steps = [...steps, data];
-						} else {
-							currentStep = data;
-							steps = [...steps, data];
-						}
-					} catch (e) {
-						console.error('Failed to parse SSE data:', e);
+			await watchJob(jobId, (line) => {
+				try {
+					const data = line.data as StepProgress;
+					if (data.status === 'complete') {
+						overallStatus = 'complete';
+						currentStep = data;
+						steps = [...steps, data];
+						onComplete?.();
+					} else if (data.status === 'error') {
+						overallStatus = 'error';
+						errorMessage = data.error || 'Unknown error occurred';
+						currentStep = data;
+						steps = [...steps, data];
+					} else {
+						currentStep = data;
+						steps = [...steps, data];
 					}
+				} catch (e) {
+					console.error('Failed to process job line:', e);
 				}
+			});
+
+			if (overallStatus === 'deploying') {
+				overallStatus = 'complete';
+				onComplete?.();
 			}
 		} catch (error: any) {
 			console.error('Failed to deploy git stack:', error);
@@ -143,25 +123,14 @@
 		}
 	}
 
-	function handleOpenChange(isOpen: boolean) {
-		// Only allow closing via the Close button (not by clicking outside)
-		// When confirming, deploying, complete, or error - require explicit close
-		if (!isOpen && overallStatus !== 'idle') {
-			return;
+	function handleTriggerClick() {
+		if (overallStatus !== 'idle') return;
+		if (confirmDestructive) {
+			overallStatus = 'confirming';
+		} else {
+			startDeploy();
 		}
-
-		// When opening, show confirmation first if enabled
-		if (isOpen && !open) {
-			if (confirmDestructive) {
-				overallStatus = 'confirming';
-				open = true;
-			} else {
-				startDeploy();
-			}
-			return;
-		}
-
-		open = isOpen;
+		open = true;
 	}
 
 	function handleConfirmDeploy() {
@@ -174,12 +143,21 @@
 	}
 
 	function handleClose() {
+		if (overallStatus === 'deploying') return;
 		open = false;
-		// Reset state when closed
 		overallStatus = 'idle';
 		steps = [];
 		currentStep = null;
 		errorMessage = '';
+		copied = false;
+	}
+
+	async function copyLogs() {
+		const lines = steps.map(s => s.message || s.status);
+		if (errorMessage) lines.push(`Error: ${errorMessage}`);
+		await navigator.clipboard.writeText(lines.join('\n'));
+		copied = true;
+		setTimeout(() => { copied = false; }, 2000);
 	}
 
 	const progressPercentage = $derived(
@@ -187,121 +165,143 @@
 			? Math.round((currentStep.step / currentStep.totalSteps) * 100)
 			: 0
 	);
+
+	const isDeploying = $derived(overallStatus === 'deploying');
 </script>
 
-<Popover.Root {open} onOpenChange={handleOpenChange}>
-	<Popover.Trigger asChild>
-		{@render children()}
-	</Popover.Trigger>
-	<Popover.Content
-		class="{overallStatus === 'confirming' ? 'w-auto' : 'w-80'} p-0 overflow-hidden flex flex-col z-[200]"
-		align="end"
-		sideOffset={8}
-		interactOutsideBehavior={overallStatus !== 'idle' ? 'ignore' : 'close'}
-		escapeKeydownBehavior={overallStatus !== 'idle' ? 'ignore' : 'close'}
+<!-- Trigger wrapper: intercepts click to open the dialog -->
+<span role="none" style="display:contents" onclick={handleTriggerClick}>
+	{@render children()}
+</span>
+
+<Dialog.Root bind:open onOpenChange={(isOpen) => { if (!isOpen) handleClose(); }}>
+	<Dialog.Content
+		class="max-w-2xl flex flex-col gap-0 p-0 overflow-hidden"
+		showCloseButton={false}
+		interactOutsideBehavior={isDeploying ? 'ignore' : 'close'}
+		escapeKeydownBehavior={isDeploying ? 'ignore' : 'close'}
 	>
-		{#if overallStatus === 'confirming'}
-			<!-- Confirmation Dialog -->
-			<div class="p-3 space-y-3">
-				<div class="flex items-start gap-2">
-					<AlertTriangle class="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+		<!-- Header -->
+		<div class="px-6 py-4 border-b shrink-0">
+			<div class="flex items-center gap-2 min-w-0">
+				{#if overallStatus === 'complete'}
+					<CheckCircle2 class="w-5 h-5 text-green-500 shrink-0" />
+				{:else if overallStatus === 'error'}
+					<XCircle class="w-5 h-5 text-red-500 shrink-0" />
+				{:else if isDeploying}
+					<Loader2 class="w-5 h-5 text-violet-500 animate-spin shrink-0" />
+				{:else}
+					<Rocket class="w-5 h-5 text-violet-500 shrink-0" />
+				{/if}
+				<span class="text-base font-semibold">Git deploy</span>
+				<code class="text-sm font-normal bg-muted px-1.5 py-0.5 rounded ml-1 truncate">{stackName}</code>
+				{#if overallStatus === 'complete'}
+					<Badge variant="outline" class="ml-auto shrink-0 text-green-600 border-green-600/30">Complete</Badge>
+				{:else if overallStatus === 'error'}
+					<Badge variant="outline" class="ml-auto shrink-0 text-red-600 border-red-600/30">Failed</Badge>
+				{:else if isDeploying}
+					<Badge variant="secondary" class="ml-auto shrink-0 tabular-nums text-xs">
+						{#if currentStep?.step && currentStep?.totalSteps}
+							{currentStep.step}/{currentStep.totalSteps}
+						{:else}
+							Deploying...
+						{/if}
+					</Badge>
+				{/if}
+			</div>
+			{#if isDeploying && currentStep?.totalSteps}
+				<div class="mt-3">
+					<Progress value={progressPercentage} class="h-1.5 [&>[data-progress]]:bg-violet-600" />
+				</div>
+			{/if}
+		</div>
+
+		<!-- Body: steps log -->
+		<div class="overflow-y-auto px-4 py-3" style="max-height: 55vh; min-height: 12rem;">
+			{#if overallStatus === 'confirming'}
+				<div class="flex items-start gap-3 py-2 px-2">
+					<AlertTriangle class="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
 					<div class="space-y-1">
-						<p class="text-sm font-medium">Sync from git?</p>
-						<p class="text-xs text-muted-foreground">
-							This will pull latest changes for <strong class="text-foreground">{stackName}</strong>. Containers will only restart if the configuration changed.
+						<p class="font-medium">Sync from git?</p>
+						<p class="text-sm text-muted-foreground">
+							This will pull the latest changes for <strong class="text-foreground">{stackName}</strong>.
+							Containers will only restart if the configuration changed.
 						</p>
 					</div>
 				</div>
-				<div class="flex justify-end gap-2">
-					<Button variant="outline" size="sm" class="h-7 text-xs" onclick={handleCancelConfirm}>
-						Cancel
-					</Button>
-					<Button variant="default" size="sm" class="h-7 text-xs" onclick={handleConfirmDeploy}>
-						Sync
-					</Button>
+			{:else if steps.length === 0 && isDeploying}
+				<div class="flex items-center gap-3 text-muted-foreground py-2 px-2">
+					<Loader2 class="w-4 h-4 animate-spin shrink-0" />
+					<span class="text-sm">Initializing...</span>
 				</div>
-			</div>
-		{:else}
-			<!-- Header -->
-			<div class="p-3 border-b space-y-2">
-				<div class="flex items-center gap-2 text-sm font-medium">
-					<Rocket class="w-4 h-4 text-violet-600" />
-					<span class="truncate">{stackName}</span>
+			{:else}
+				<div class="space-y-0.5">
+					{#each steps as step, index (index)}
+						{@const StepIcon = getStepIcon(step.status)}
+						{@const isCurrentStep = index === steps.length - 1 && isDeploying}
+						<div class="flex items-center gap-3 py-1.5 px-2 rounded-md text-sm hover:bg-muted/40 transition-colors">
+							<StepIcon
+								class="w-4 h-4 shrink-0 {getStepColor(step.status, isCurrentStep)} {isCurrentStep && step.status !== 'complete' && step.status !== 'error' ? 'animate-spin' : ''}"
+							/>
+							<span class="{getStepColor(step.status, isCurrentStep)}">
+								{step.message || step.status}
+							</span>
+						</div>
+					{/each}
 				</div>
+			{/if}
 
-				<!-- Overall Progress -->
-				<div class="flex items-center justify-between">
-					<div class="flex items-center gap-2">
-						{#if overallStatus === 'idle'}
-							<Loader2 class="w-4 h-4 animate-spin text-muted-foreground" />
-							<span class="text-sm text-muted-foreground">Initializing...</span>
-						{:else if overallStatus === 'deploying'}
-							<Loader2 class="w-4 h-4 animate-spin text-violet-600" />
-							<span class="text-sm">Deploying...</span>
-						{:else if overallStatus === 'complete'}
-							<CheckCircle2 class="w-4 h-4 text-green-600" />
-							<span class="text-sm text-green-600">Complete!</span>
-						{:else if overallStatus === 'error'}
-							<XCircle class="w-4 h-4 text-red-600" />
-							<span class="text-sm text-red-600">Failed</span>
-						{/if}
-					</div>
-					{#if currentStep?.step && currentStep?.totalSteps}
-						<Badge variant="secondary" class="text-xs">
-							{currentStep.step}/{currentStep.totalSteps}
-						</Badge>
-					{/if}
-				</div>
-
-				{#if currentStep?.message && overallStatus === 'deploying'}
-					<p class="text-xs text-muted-foreground truncate">{currentStep.message}</p>
-				{/if}
-
-				{#if currentStep?.totalSteps}
-					<Progress value={progressPercentage} class="h-1.5 [&>[data-progress]]:bg-violet-600" />
-				{/if}
-
-				{#if errorMessage}
-					<div class="flex items-start gap-2 text-xs text-red-600 dark:text-red-400">
-						<AlertCircle class="w-3 h-3 shrink-0 mt-0.5" />
+			{#if errorMessage}
+				<div class="mt-3 mx-2 p-3 rounded-md bg-destructive/10 border border-destructive/20">
+					<div class="flex items-start gap-2 text-sm text-destructive">
+						<AlertCircle class="w-4 h-4 shrink-0 mt-0.5" />
 						<span class="break-all">{errorMessage}</span>
 					</div>
+				</div>
+			{/if}
+		</div>
+
+		<!-- Footer -->
+		<div class="px-6 py-4 border-t shrink-0 flex items-center justify-between gap-2">
+			<!-- Left: copy / cancel -->
+			<div>
+				{#if overallStatus === 'confirming'}
+					<Button variant="outline" onclick={handleCancelConfirm}>Cancel</Button>
+				{:else if steps.length > 0}
+					<Button variant="outline" size="sm" onclick={copyLogs} class="gap-1.5">
+						{#if copied}
+							<Check class="w-3.5 h-3.5" />
+							Copied!
+						{:else}
+							<Copy class="w-3.5 h-3.5" />
+							Copy logs
+						{/if}
+					</Button>
 				{/if}
 			</div>
 
-			<!-- Steps List -->
-			{#if steps.length > 0}
-				<div class="p-2 max-h-48 overflow-auto">
-					<div class="space-y-1">
-						{#each steps as step, index (index)}
-							{@const StepIcon = getStepIcon(step.status)}
-							{@const isCurrentStep = index === steps.length - 1 && overallStatus === 'deploying'}
-							<div class="flex items-center gap-2 py-1 px-1 rounded text-xs hover:bg-muted/50">
-								<StepIcon
-									class="w-3.5 h-3.5 shrink-0 {getStepColor(step.status, isCurrentStep)} {isCurrentStep && step.status !== 'complete' && step.status !== 'error' ? 'animate-spin' : ''}"
-								/>
-								<span class="flex-1 {getStepColor(step.status, isCurrentStep)} truncate">
-									{step.message || step.status}
-								</span>
-							</div>
-						{/each}
-					</div>
-				</div>
-			{/if}
-
-			<!-- Footer -->
-			{#if overallStatus === 'complete' || overallStatus === 'error'}
-				<div class="p-2 border-t">
-					<Button
-						variant="outline"
-						size="sm"
-						class="w-full"
-						onclick={handleClose}
-					>
-						Close
+			<!-- Right: confirm / close -->
+			<div class="flex gap-2">
+				{#if overallStatus === 'confirming'}
+					<Button onclick={handleConfirmDeploy}>
+						<Rocket class="w-4 h-4" />
+						Deploy
 					</Button>
-				</div>
-			{/if}
-		{/if}
-	</Popover.Content>
-</Popover.Root>
+				{:else}
+					<Button
+						variant={overallStatus === 'complete' ? 'default' : 'secondary'}
+						onclick={handleClose}
+						disabled={isDeploying}
+					>
+						{#if isDeploying}
+							<Loader2 class="w-4 h-4 animate-spin" />
+							Deploying...
+						{:else}
+							Close
+						{/if}
+					</Button>
+				{/if}
+			</div>
+		</div>
+	</Dialog.Content>
+</Dialog.Root>

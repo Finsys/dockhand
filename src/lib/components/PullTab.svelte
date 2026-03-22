@@ -8,6 +8,7 @@
 	import { CheckCircle2, XCircle, Loader2, AlertCircle, Terminal, Sun, Moon, Download } from 'lucide-svelte';
 	import { onMount } from 'svelte';
 	import { appendEnvParam } from '$lib/stores/environment';
+	import { watchJob } from '$lib/utils/sse-fetch';
 
 	interface LayerProgress {
 		id: string;
@@ -168,33 +169,10 @@
 				throw new Error('Failed to start pull');
 			}
 
-			const reader = response.body?.getReader();
-			if (!reader) {
-				throw new Error('No response body');
-			}
-
-			const decoder = new TextDecoder();
-			let buffer = '';
-
-			while (true) {
-				const { done, value } = await reader.read();
-				if (done) break;
-
-				buffer += decoder.decode(value, { stream: true });
-				const lines = buffer.split('\n');
-				buffer = lines.pop() || '';
-
-				for (const line of lines) {
-					if (!line.trim() || !line.startsWith('data: ')) continue;
-
-					try {
-						const data = JSON.parse(line.slice(6));
-						handlePullProgress(data);
-					} catch (e) {
-						// Ignore parse errors
-					}
-				}
-			}
+			const { jobId } = await response.json();
+			await watchJob(jobId, (line) => {
+				handlePullProgress(line.data as any);
+			});
 
 			if (status === 'pulling') {
 				duration = Date.now() - startTime;

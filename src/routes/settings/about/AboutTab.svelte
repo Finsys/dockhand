@@ -2,14 +2,16 @@
 	// Trigger rebuild for debug logging changes
 	import * as Card from '$lib/components/ui/card';
 	import { Badge } from '$lib/components/ui/badge';
+	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
-	import { Box, Images, HardDrive, Network, Cpu, Server, Crown, Building2, Layers, Clock, Code, Package, ExternalLink, Search, FileText, Tag, Sparkles, Bug, ChevronDown, ChevronRight, Plug, ScrollText, Shield, MessageSquarePlus, GitBranch, Coffee, Monitor, Cog, MemoryStick, Database } from 'lucide-svelte';
+	import { Box, Images, HardDrive, Network, Cpu, Server, Crown, Building2, Layers, Clock, Code, Package, ExternalLink, Search, FileText, Tag, Sparkles, Bug, ChevronDown, ChevronRight, Plug, ScrollText, Shield, MessageSquarePlus, GitBranch, Coffee, Monitor, Cog, MemoryStick, Database, CircleArrowUp, Loader2, CheckCircle2 } from 'lucide-svelte';
 	import * as Tabs from '$lib/components/ui/tabs';
 	import { onMount, onDestroy } from 'svelte';
 	import { licenseStore } from '$lib/stores/license';
 	import { browser } from '$app/environment';
 	import LicenseModal from './LicenseModal.svelte';
 	import PrivacyModal from './PrivacyModal.svelte';
+	import SelfUpdateDialog from './SelfUpdateDialog.svelte';
 
 	interface Dependency {
 		name: string;
@@ -193,8 +195,8 @@
 			storageDriver: string;
 		} | null;
 		runtime: {
-			bun: string | null;
-			bunRevision: string | null;
+			runtimeName: string;
+			runtimeVersion: string;
 			nodeVersion: string;
 			platform: string;
 			arch: string;
@@ -252,6 +254,66 @@
 	let serverUptime = $state<number | null>(null);
 	let showLicenseModal = $state(false);
 	let showPrivacyModal = $state(false);
+
+	// Self-update state
+	let checkingUpdate = $state(false);
+	let updateCheckDone = $state(false);
+	let updateAvailable = $state(false);
+	let updateInfo = $state<{
+		currentImage: string;
+		newImage: string;
+		currentDigest: string;
+		newDigest: string;
+		containerName: string;
+		isComposeManaged: boolean;
+		latestVersion?: string;
+		error?: string;
+	} | null>(null);
+	let updateCheckError = $state<string | null>(null);
+	let showSelfUpdateDialog = $state(false);
+
+	async function checkForUpdates() {
+		checkingUpdate = true;
+		updateCheckDone = false;
+		updateAvailable = false;
+		updateInfo = null;
+		updateCheckError = null;
+
+		try {
+			const response = await fetch('/api/self-update/check');
+			if (!response.ok) {
+				updateCheckError = 'Failed to check for updates';
+				return;
+			}
+
+			const data = await response.json();
+
+			if (data.error && !data.updateAvailable) {
+				// Not in Docker or other non-critical issue
+				updateCheckError = data.error;
+				return;
+			}
+
+			updateAvailable = data.updateAvailable;
+			updateCheckDone = true;
+
+			if (data.updateAvailable) {
+				updateInfo = {
+					currentImage: data.currentImage,
+					newImage: data.newImage || data.currentImage,
+					currentDigest: data.currentDigest || '',
+					newDigest: data.newDigest || '',
+					containerName: data.containerName,
+					isComposeManaged: data.isComposeManaged,
+					latestVersion: data.latestVersion
+				};
+			}
+		} catch (err) {
+			updateCheckError = 'Check failed: ' + String(err);
+		} finally {
+			checkingUpdate = false;
+		}
+	}
 
 	function formatUptime(seconds: number): string {
 		const days = Math.floor(seconds / 86400);
@@ -364,6 +426,7 @@
 		fetchSystemInfo();
 		fetchDependencies();
 		fetchChangelog();
+		checkForUpdates();
 		// Increment uptime every second for real-time display
 		uptimeInterval = setInterval(() => {
 			if (serverUptime !== null) {
@@ -419,9 +482,29 @@
 						{/if}
 					</div>
 
-					<!-- Version Badge -->
-					<div class="flex items-center gap-2">
+					<!-- Version Badge + Update Check -->
+					<div class="flex flex-col items-center gap-1">
 						<Badge variant="secondary" class="text-xs">Version {currentVersion}</Badge>
+						{#if checkingUpdate}
+							<span class="flex items-center gap-1 text-xs text-muted-foreground">
+								<Loader2 class="w-3.5 h-3.5 animate-spin" />
+								Checking for updates...
+							</span>
+						{:else if updateAvailable && updateInfo}
+							<button class="flex items-center gap-1 text-xs text-amber-500 hover:text-amber-400 transition-colors" onclick={() => showSelfUpdateDialog = true}>
+								<CircleArrowUp class="w-3.5 h-3.5" />
+								Update available — click to see what's new
+							</button>
+						{:else if updateCheckDone && !updateAvailable}
+							<button class="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400 hover:text-emerald-500 dark:hover:text-emerald-300 transition-colors" onclick={checkForUpdates}>
+								<CheckCircle2 class="w-3.5 h-3.5" />
+								Up to date
+							</button>
+						{:else if updateCheckError}
+							<button class="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors" onclick={checkForUpdates} title={updateCheckError}>
+								Check for updates
+							</button>
+						{/if}
 					</div>
 
 					<!-- Build & Uptime Info -->
@@ -553,9 +636,9 @@
 							</div>
 							<div class="text-sm pl-5">
 								<div class="flex items-center gap-2 flex-wrap">
-									{#if systemInfo.runtime.bun}
-										<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-500/15 text-amber-600 dark:text-amber-400 shadow-sm ring-1 ring-amber-500/20">
-											Bun {systemInfo.runtime.bun}
+									{#if systemInfo.runtime.runtimeVersion}
+										<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-500/15 text-green-600 dark:text-green-400 shadow-sm ring-1 ring-green-500/20">
+											{systemInfo.runtime.runtimeName} {systemInfo.runtime.runtimeVersion}
 										</span>
 									{/if}
 									<span class="text-muted-foreground/50">|</span>
@@ -662,6 +745,11 @@
 									<a href="https://github.com/Finsys/dockhand/issues" target="_blank" rel="noopener noreferrer" class="text-primary hover:underline inline-flex items-center gap-1.5 font-medium">
 										<MessageSquarePlus class="w-4 h-4" />
 										Submit issue or idea
+									</a>
+									<span class="text-muted-foreground/50">|</span>
+									<a href="https://discord.gg/rMxW9Y5cQw" target="_blank" rel="noopener noreferrer" class="hover:underline inline-flex items-center gap-1.5 font-medium text-indigo-500 dark:text-indigo-400">
+										<svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.09 14.09 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/></svg>
+										Discord
 									</a>
 									{#if !$licenseStore.isLicensed}
 										<span class="text-muted-foreground/50">|</span>
@@ -871,3 +959,17 @@
 
 <LicenseModal bind:open={showLicenseModal} />
 <PrivacyModal bind:open={showPrivacyModal} />
+
+{#if updateInfo}
+	<SelfUpdateDialog
+		bind:open={showSelfUpdateDialog}
+		currentImage={updateInfo.currentImage}
+		newImage={updateInfo.newImage}
+		currentDigest={updateInfo.currentDigest}
+		newDigest={updateInfo.newDigest}
+		containerName={updateInfo.containerName}
+		isComposeManaged={updateInfo.isComposeManaged}
+		latestVersion={updateInfo.latestVersion}
+		onclose={() => showSelfUpdateDialog = false}
+	/>
+{/if}

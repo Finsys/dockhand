@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import * as Command from '$lib/components/ui/command';
 	import {
@@ -183,7 +183,7 @@
 	// Load data when dialog opens
 	$effect(() => {
 		if (open) {
-			loadData();
+			untrack(() => loadData());
 		}
 	});
 

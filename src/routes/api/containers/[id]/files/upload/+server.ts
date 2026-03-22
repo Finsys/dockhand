@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import { putContainerArchive } from '$lib/server/docker';
 import { authorize } from '$lib/server/authorize';
+import { validateDockerIdParam } from '$lib/server/docker-validation';
 import type { RequestHandler } from './$types';
 
 /**
@@ -84,6 +85,9 @@ function createTarArchive(filename: string, content: Uint8Array): Uint8Array {
 }
 
 export const POST: RequestHandler = async ({ params, url, request, cookies }) => {
+	const invalid = validateDockerIdParam(params.id, 'container');
+	if (invalid) return invalid;
+
 	const auth = await authorize(cookies);
 
 	const path = url.searchParams.get('path');
@@ -140,7 +144,7 @@ export const POST: RequestHandler = async ({ params, url, request, cookies }) =>
 			errors: errors.length > 0 ? errors : undefined
 		});
 	} catch (error: any) {
-		console.error('Error uploading to container:', error);
+		console.error('Error uploading to container:', error?.message || error);
 
 		if (error.message?.includes('Permission denied')) {
 			return json({ error: 'Permission denied to write to this path' }, { status: 403 });

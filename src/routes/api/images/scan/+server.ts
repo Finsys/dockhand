@@ -2,6 +2,7 @@ import { json, type RequestHandler } from '@sveltejs/kit';
 import { scanImage, type ScanProgress, type ScanResult } from '$lib/server/scanner';
 import { saveVulnerabilityScan, getLatestScanForImage } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
+import { createJobResponse } from '$lib/server/sse';
 
 // Helper to convert ScanResult to database format
 function scanResultToDbFormat(result: ScanResult, envId?: number) {
@@ -23,7 +24,7 @@ function scanResultToDbFormat(result: ScanResult, envId?: number) {
 	};
 }
 
-// POST - Start a scan (returns SSE stream for progress)
+// POST - Start a scan (returns { jobId } for progress polling, or synchronous JSON for Accept: application/json)
 export const POST: RequestHandler = async ({ request, url, cookies }) => {
 	const auth = await authorize(cookies);
 
@@ -42,75 +43,39 @@ export const POST: RequestHandler = async ({ request, url, cookies }) => {
 		return json({ error: 'Image name is required' }, { status: 400 });
 	}
 
-	// Create a readable stream for SSE
-	const stream = new ReadableStream({
-		async start(controller) {
-			const encoder = new TextEncoder();
-			let controllerClosed = false;
+	return createJobResponse(async (send) => {
+		const sendProgress = (progress: ScanProgress) => {
+			send('progress', progress);
+		};
 
-			const sendProgress = (progress: ScanProgress) => {
-				if (controllerClosed) return;
-				try {
-					const data = `data: ${JSON.stringify(progress)}\n\n`;
-					controller.enqueue(encoder.encode(data));
-				} catch {
-					controllerClosed = true;
-				}
-			};
+		try {
+			const results = await scanImage(imageName, envId, sendProgress, forceScannerType);
 
-			// Send SSE keepalive comments every 5s to prevent Traefik timeout
-			const keepaliveInterval = setInterval(() => {
-				if (controllerClosed) return;
-				try {
-					controller.enqueue(encoder.encode(`: keepalive\n\n`));
-				} catch {
-					controllerClosed = true;
-				}
-			}, 5000);
-
-			try {
-				const results = await scanImage(imageName, envId, sendProgress, forceScannerType);
-
-				// Save results to database
-				for (const result of results) {
-					await saveVulnerabilityScan(scanResultToDbFormat(result, envId));
-				}
-
-				// Send final complete message with all results
-				sendProgress({
-					stage: 'complete',
-					message: `Scan complete - found ${results.reduce((sum, r) => sum + r.vulnerabilities.length, 0)} vulnerabilities`,
-					progress: 100,
-					result: results[0],
-					results: results // Include all scanner results
-				});
-			} catch (error) {
-				const errorMsg = error instanceof Error ? error.message : String(error);
-				sendProgress({
-					stage: 'error',
-					message: `Scan failed: ${errorMsg}`,
-					error: errorMsg
-				});
-			} finally {
-				clearInterval(keepaliveInterval);
-				if (!controllerClosed) {
-					try {
-						controller.close();
-					} catch {
-						// Already closed
-					}
-				}
+			// Save results to database
+			for (const result of results) {
+				await saveVulnerabilityScan(scanResultToDbFormat(result, envId));
 			}
-		}
-	});
 
-	return new Response(stream, {
-		headers: {
-			'Content-Type': 'text/event-stream',
-			'Cache-Control': 'no-cache',
-			'Connection': 'keep-alive'
+			// Send final complete message with all results
+			const completeProgress: ScanProgress = {
+				stage: 'complete',
+				message: `Scan complete - found ${results.reduce((sum, r) => sum + r.vulnerabilities.length, 0)} vulnerabilities`,
+				progress: 100,
+				result: results[0],
+				results: results // Include all scanner results
+			};
+			send('result', completeProgress);
+		} catch (error) {
+			const errorMsg = error instanceof Error ? error.message : String(error);
+			const errorProgress: ScanProgress = {
+				stage: 'error',
+				message: `Scan failed: ${errorMsg}`,
+				error: errorMsg
+			};
+			send('result', errorProgress);
+			throw error;
 		}
-	});
+	}, request);
 };
 
 // GET - Get cached scan results for an image

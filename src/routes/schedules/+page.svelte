@@ -42,7 +42,7 @@
 	import type { DataGridRowState } from '$lib/components/data-grid';
 	import { toast } from 'svelte-sonner';
 	import { formatDateTime, appSettings } from '$lib/stores/settings';
-	import { getIconComponent } from '$lib/utils/icons';
+	import EnvironmentIcon from '$lib/components/EnvironmentIcon.svelte';
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
 	import ScannerSeverityPills from '$lib/components/ScannerSeverityPills.svelte';
 	import VulnerabilityCriteriaBadge from '$lib/components/VulnerabilityCriteriaBadge.svelte';
@@ -991,9 +991,8 @@
 						</button>
 					{/if}
 					{#each environments as env}
-						{@const EnvIcon = getIconComponent(env.icon)}
 						<Select.Item value={String(env.id)}>
-							<EnvIcon class="w-4 h-4 mr-2 inline" />
+							<EnvironmentIcon icon={env.icon} envId={env.id} class="w-4 h-4 mr-2 inline" />
 							{env.name}
 						</Select.Item>
 					{/each}

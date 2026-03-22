@@ -1,7 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { readdirSync, statSync, existsSync } from 'node:fs';
-import { join, basename } from 'node:path';
+import { readdirSync, statSync, existsSync, mkdirSync } from 'node:fs';
+import { join, basename, isAbsolute } from 'node:path';
 import { authorize } from '$lib/server/authorize';
 
 export interface FileEntry {
@@ -12,6 +12,49 @@ export interface FileEntry {
 	mtime: string;
 	mode: string;
 }
+
+/**
+ * POST /api/system/files
+ * Create a directory
+ *
+ * Body: { path: string }
+ */
+export const POST: RequestHandler = async ({ request, cookies }) => {
+	const auth = await authorize(cookies);
+
+	if (auth.authEnabled && !await auth.can('stacks', 'edit')) {
+		return json({ error: 'Permission denied' }, { status: 403 });
+	}
+
+	try {
+		const body = await request.json();
+		const path = body.path;
+
+		if (!path || typeof path !== 'string') {
+			return json({ error: 'Path is required' }, { status: 400 });
+		}
+
+		if (!isAbsolute(path)) {
+			return json({ error: 'Path must be absolute' }, { status: 400 });
+		}
+
+		if (path.includes('..')) {
+			return json({ error: 'Path must not contain ..' }, { status: 400 });
+		}
+
+		if (existsSync(path)) {
+			return json({ error: 'Path already exists' }, { status: 409 });
+		}
+
+		mkdirSync(path, { recursive: true });
+
+		return json({ success: true, path });
+	} catch (error) {
+		console.error('Error creating directory:', error);
+		const message = error instanceof Error ? error.message : 'Unknown error';
+		return json({ error: `Failed to create directory: ${message}` }, { status: 500 });
+	}
+};
 
 /**
  * GET /api/system/files

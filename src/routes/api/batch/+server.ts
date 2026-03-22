@@ -8,8 +8,6 @@ import {
 	pauseContainer,
 	unpauseContainer,
 	removeContainer,
-	inspectContainer,
-	listContainers,
 	removeImage,
 	removeVolume,
 	removeNetwork
@@ -23,6 +21,8 @@ import {
 } from '$lib/server/stacks';
 import { deleteAutoUpdateSchedule, getAutoUpdateSetting, removePendingContainerUpdate } from '$lib/server/db';
 import { unregisterSchedule } from '$lib/server/scheduler';
+import { prefersJSON } from '$lib/server/sse';
+import { createJob, appendLine, completeJob, failJob } from '$lib/server/jobs';
 
 // SSE Event types
 export type BatchEventType = 'start' | 'progress' | 'complete' | 'error';
@@ -105,15 +105,13 @@ interface BatchRequest {
 async function processWithConcurrency<T>(
 	items: T[],
 	concurrency: number,
-	processor: (item: T, index: number) => Promise<void>,
-	signal: AbortSignal
+	processor: (item: T, index: number) => Promise<void>
 ): Promise<void> {
 	let currentIndex = 0;
 	const total = items.length;
 
 	async function processNext(): Promise<void> {
 		while (currentIndex < total) {
-			if (signal.aborted) return;
 			const index = currentIndex++;
 			await processor(items[index], index);
 		}
@@ -128,7 +126,7 @@ async function processWithConcurrency<T>(
 }
 
 /**
- * Unified batch operations endpoint with SSE streaming.
+ * Unified batch operations endpoint (job pattern).
  * Handles bulk operations for containers, images, volumes, networks, and stacks.
  */
 export const POST: RequestHandler = async ({ url, cookies, request }) => {
@@ -182,124 +180,74 @@ export const POST: RequestHandler = async ({ url, cookies, request }) => {
 	// Check if audit is needed (enterprise only)
 	const needsAudit = auth.isEnterprise;
 
-	// Create abort controller for cancellation
-	const abortController = new AbortController();
+	// Sync path for API clients that prefer plain JSON (Accept: application/json only)
+	if (prefersJSON(request)) {
+		let successCount = 0;
+		let failCount = 0;
 
-	const encoder = new TextEncoder();
-	let controllerClosed = false;
-	let keepaliveInterval: ReturnType<typeof setInterval> | null = null;
+		await processWithConcurrency(items, 3, async (item, index) => {
+			const { id, name } = item;
+			try {
+				await executeOperation(entityType, operation, id, name, envIdNum, options, needsAudit);
+				successCount++;
+			} catch {
+				failCount++;
+			}
+		});
 
-	const stream = new ReadableStream({
-		async start(controller) {
-			const safeEnqueue = (data: BatchEvent) => {
-				if (!controllerClosed) {
-					try {
-						controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
-					} catch {
-						controllerClosed = true;
-						abortController.abort();
-					}
-				}
-			};
+		return json({
+			type: 'complete',
+			summary: { total: items.length, success: successCount, failed: failCount }
+		});
+	}
 
-			// Send SSE keepalive comments every 5s
-			keepaliveInterval = setInterval(() => {
-				if (controllerClosed) return;
-				try {
-					controller.enqueue(encoder.encode(`: keepalive\n\n`));
-				} catch {
-					controllerClosed = true;
-					abortController.abort();
-				}
-			}, 5000);
+	// Job pattern: create job, process in background, return jobId immediately
+	const job = createJob();
 
-			let successCount = 0;
-			let failCount = 0;
+	(async () => {
+		let successCount = 0;
+		let failCount = 0;
 
-			// Send start event
-			safeEnqueue({
-				type: 'start',
-				total: items.length
+		appendLine(job, { data: { type: 'start', total: items.length } });
+
+		await processWithConcurrency(items, 3, async (item, index) => {
+			const { id, name } = item;
+
+			appendLine(job, {
+				data: { type: 'progress', id, name, status: 'processing', current: index + 1, total: items.length }
 			});
 
-			// Process items with concurrency of 3
-			await processWithConcurrency(
-				items,
-				3,
-				async (item, index) => {
-					if (abortController.signal.aborted) return;
-
-					const { id, name } = item;
-
-					// Send processing status
-					safeEnqueue({
+			try {
+				await executeOperation(entityType, operation, id, name, envIdNum, options, needsAudit);
+				appendLine(job, {
+					data: { type: 'progress', id, name, status: 'success', current: index + 1, total: items.length }
+				});
+				successCount++;
+			} catch (error: any) {
+				appendLine(job, {
+					data: {
 						type: 'progress',
 						id,
 						name,
-						status: 'processing',
+						status: 'error',
+						error: error.message || 'Unknown error',
 						current: index + 1,
 						total: items.length
-					});
-
-					try {
-						await executeOperation(entityType, operation, id, name, envIdNum, options, needsAudit);
-
-						safeEnqueue({
-							type: 'progress',
-							id,
-							name,
-							status: 'success',
-							current: index + 1,
-							total: items.length
-						});
-						successCount++;
-					} catch (error: any) {
-						safeEnqueue({
-							type: 'progress',
-							id,
-							name,
-							status: 'error',
-							error: error.message || 'Unknown error',
-							current: index + 1,
-							total: items.length
-						});
-						failCount++;
 					}
-				},
-				abortController.signal
-			);
-
-			// Send complete event
-			safeEnqueue({
-				type: 'complete',
-				summary: {
-					total: items.length,
-					success: successCount,
-					failed: failCount
-				}
-			});
-
-			if (keepaliveInterval) {
-				clearInterval(keepaliveInterval);
+				});
+				failCount++;
 			}
-			controller.close();
-		},
-		cancel() {
-			controllerClosed = true;
-			abortController.abort();
-			if (keepaliveInterval) {
-				clearInterval(keepaliveInterval);
-			}
-		}
-	});
+		});
 
-	return new Response(stream, {
-		headers: {
-			'Content-Type': 'text/event-stream',
-			'Cache-Control': 'no-cache',
-			'Connection': 'keep-alive'
-		}
-	});
+		const completeEvent = {
+			type: 'complete',
+			summary: { total: items.length, success: successCount, failed: failCount }
+		};
+		appendLine(job, { data: completeEvent });
+		completeJob(job, completeEvent);
+	})().catch((err) => failJob(job, err.message));
+
+	return json({ jobId: job.id });
 };
 
 /**

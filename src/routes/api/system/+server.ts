@@ -13,6 +13,7 @@ import { isPostgres, isSqlite, getDatabaseSchemaVersion, getPostgresConnectionIn
 import { hasEnvironments } from '$lib/server/db';
 import type { RequestHandler } from './$types';
 import { existsSync, readFileSync } from 'node:fs';
+import * as http from 'node:http';
 import os from 'node:os';
 import { authorize } from '$lib/server/authorize';
 
@@ -47,12 +48,12 @@ function detectContainerRuntime(): { inContainer: boolean; runtime?: string; con
 	return { inContainer: false };
 }
 
-// Get Bun runtime info
-function getBunInfo() {
+// Get runtime info
+function getRuntimeInfo() {
 	const memUsage = process.memoryUsage();
 	return {
-		version: typeof Bun !== 'undefined' ? Bun.version : null,
-		revision: typeof Bun !== 'undefined' ? Bun.revision?.slice(0, 7) : null,
+		name: 'Node.js',
+		version: process.version,
 		memory: {
 			heapUsed: memUsage.heapUsed,
 			heapTotal: memUsage.heapTotal,
@@ -67,7 +68,6 @@ async function getOwnContainerInfo(containerId: string | undefined): Promise<any
 	if (!containerId) return null;
 
 	try {
-		// Try to inspect our own container via local socket
 		const socketPaths = [
 			'/var/run/docker.sock',
 			process.env.DOCKER_SOCKET
@@ -77,18 +77,33 @@ async function getOwnContainerInfo(containerId: string | undefined): Promise<any
 			if (!socketPath || !existsSync(socketPath)) continue;
 
 			try {
-				const response = await fetch(`http://localhost/containers/${containerId}/json`, {
-					// @ts-ignore - Bun supports unix socket
-					unix: socketPath
+				const info = await new Promise<any>((resolve, reject) => {
+					const req = http.request({
+						socketPath,
+						path: `/containers/${containerId}/json`,
+						method: 'GET',
+					}, (res) => {
+						const chunks: Buffer[] = [];
+						res.on('data', (chunk: Buffer) => chunks.push(chunk));
+						res.on('end', () => {
+							if (res.statusCode === 200) {
+								resolve(JSON.parse(Buffer.concat(chunks).toString('utf-8')));
+							} else {
+								resolve(null);
+							}
+						});
+						res.on('error', () => resolve(null));
+					});
+					req.on('error', () => resolve(null));
+					req.end();
 				});
 
-				if (response.ok) {
-					const info = await response.json();
+				if (info) {
 					return {
 						id: info.Id?.slice(0, 12),
 						name: info.Name?.replace(/^\//, ''),
 						image: info.Config?.Image,
-						imageId: info.Image?.slice(7, 19), // Remove 'sha256:' prefix
+						imageId: info.Image?.slice(7, 19),
 						created: info.Created,
 						status: info.State?.Status,
 						restartCount: info.RestartCount,
@@ -153,7 +168,7 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 		const runningContainers = containers.filter(c => c.state === 'running').length;
 		const stoppedContainers = containers.length - runningContainers;
 
-		const bunInfo = getBunInfo();
+		const runtimeInfo = getRuntimeInfo();
 		const containerRuntime = detectContainerRuntime();
 		const ownContainer = containerRuntime.inContainer
 			? await getOwnContainerInfo(containerRuntime.containerId || os.hostname())
@@ -181,13 +196,13 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 				storageDriver: dockerInfo.Driver
 			} : null,
 			runtime: {
-				bun: bunInfo.version,
-				bunRevision: bunInfo.revision,
-				nodeVersion: process.version,
+				runtimeName: runtimeInfo.name,
+				runtimeVersion: runtimeInfo.version,
+				nodeVersion: runtimeInfo.version,
 				platform: os.platform(),
 				arch: os.arch(),
 				kernel: os.release(),
-				memory: bunInfo.memory,
+				memory: runtimeInfo.memory,
 				container: containerRuntime,
 				ownContainer
 			},

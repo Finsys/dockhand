@@ -186,6 +186,44 @@ function formatValue(val: any): any {
 }
 
 /**
+ * Deep-diff two objects recursively, returning all paths that differ.
+ * Used for comparing container inspect snapshots before and after recreation.
+ */
+export function deepDiff(a: any, b: any, path = ''): string[] {
+	const diffs: string[] = [];
+
+	if (a === b) return diffs;
+	if (a === null || b === null || typeof a !== typeof b) {
+		diffs.push(`${path}: ${JSON.stringify(a)} → ${JSON.stringify(b)}`);
+		return diffs;
+	}
+	if (typeof a !== 'object') {
+		if (a !== b) diffs.push(`${path}: ${JSON.stringify(a)} → ${JSON.stringify(b)}`);
+		return diffs;
+	}
+	if (Array.isArray(a) || Array.isArray(b)) {
+		const aStr = JSON.stringify(a);
+		const bStr = JSON.stringify(b);
+		if (aStr !== bStr) diffs.push(`${path}: ${aStr} → ${bStr}`);
+		return diffs;
+	}
+
+	const allKeys = Array.from(new Set([...Object.keys(a), ...Object.keys(b)]));
+	for (const key of allKeys) {
+		const childPath = path ? `${path}.${key}` : key;
+		if (!(key in a)) {
+			diffs.push(`${childPath}: <missing> → ${JSON.stringify(b[key])}`);
+		} else if (!(key in b)) {
+			diffs.push(`${childPath}: ${JSON.stringify(a[key])} → <missing>`);
+		} else {
+			diffs.push(...deepDiff(a[key], b[key], childPath));
+		}
+	}
+
+	return diffs;
+}
+
+/**
  * Format field name for display (camelCase to Title Case)
  */
 export function formatFieldName(field: string): string {

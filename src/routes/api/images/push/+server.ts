@@ -5,6 +5,8 @@ import { getRegistry, getEnvironment } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
 import { auditImage } from '$lib/server/audit';
 import { sendEdgeStreamRequest, isEdgeConnected } from '$lib/server/hawser';
+import { prefersJSON } from '$lib/server/sse';
+import { createJob, appendLine, completeJob, failJob } from '$lib/server/jobs';
 
 /**
  * Check if environment is edge mode
@@ -119,35 +121,6 @@ export const POST: RequestHandler = async (event) => {
 		// Check if this is an edge environment
 		const edgeCheck = await isEdgeMode(envIdNum);
 
-		// Stream the push progress
-		const encoder = new TextEncoder();
-		let controllerClosed = false;
-		let controller: ReadableStreamDefaultController<Uint8Array>;
-		let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
-		let cancelEdgeStream: (() => void) | null = null;
-
-		const safeEnqueue = (data: string) => {
-			if (!controllerClosed) {
-				try {
-					controller.enqueue(encoder.encode(data));
-				} catch {
-					controllerClosed = true;
-				}
-			}
-		};
-
-		const cleanup = () => {
-			if (heartbeatInterval) {
-				clearInterval(heartbeatInterval);
-				heartbeatInterval = null;
-			}
-			if (cancelEdgeStream) {
-				cancelEdgeStream();
-				cancelEdgeStream = null;
-			}
-			controllerClosed = true;
-		};
-
 		const formatError = (error: any): string => {
 			const errorMessage = error.message || error || '';
 			let userMessage = errorMessage || 'Failed to push image';
@@ -163,140 +136,87 @@ export const POST: RequestHandler = async (event) => {
 			return userMessage;
 		};
 
-		const stream = new ReadableStream({
-			async start(ctrl) {
-				controller = ctrl;
+		// Core push logic — emit callback receives progress data objects
+		async function runPush(emit: (data: unknown) => void): Promise<void> {
+			emit({ status: 'tagging', message: 'Tagging image...' });
+			await tagImage(imageId, repo, tag, envIdNum);
+			emit({ status: 'pushing', message: 'Pushing to registry...' });
 
-				// Start heartbeat to keep connection alive through Traefik (10s idle timeout)
-				heartbeatInterval = setInterval(() => {
-					safeEnqueue(`: keepalive\n\n`);
-				}, 5000);
+			if (edgeCheck.isEdge && edgeCheck.environmentId) {
+				if (!isEdgeConnected(edgeCheck.environmentId)) {
+					emit({ status: 'error', error: 'Edge agent not connected' });
+					return;
+				}
 
-				try {
-					// Send tagging status
-					safeEnqueue(`data: ${JSON.stringify({ status: 'tagging', message: 'Tagging image...' })}\n\n`);
+				const authHeader = Buffer.from(JSON.stringify(authConfig)).toString('base64');
 
-					// Tag the image with the target registry
-					await tagImage(imageId, repo, tag, envIdNum);
-
-					// Send pushing status
-					safeEnqueue(`data: ${JSON.stringify({ status: 'pushing', message: 'Pushing to registry...' })}\n\n`);
-
-					// Handle edge mode with streaming
-					if (edgeCheck.isEdge && edgeCheck.environmentId) {
-						if (!isEdgeConnected(edgeCheck.environmentId)) {
-							safeEnqueue(`data: ${JSON.stringify({ status: 'error', error: 'Edge agent not connected' })}\n\n`);
-							cleanup();
-							controller.close();
-							return;
-						}
-
-						// Create X-Registry-Auth header
-						const authHeader = Buffer.from(JSON.stringify(authConfig)).toString('base64');
-
-						const { cancel } = sendEdgeStreamRequest(
-							edgeCheck.environmentId,
-							'POST',
-							`/images/${encodeURIComponent(targetTag)}/push`,
-							{
-								onData: (data: string) => {
-									// Data is base64 encoded JSON lines from Docker
-									try {
-										const decoded = Buffer.from(data, 'base64').toString('utf-8');
-										const lines = decoded.split('\n').filter(line => line.trim());
-										for (const line of lines) {
-											try {
-												const progress = JSON.parse(line);
-												if (progress.error) {
-													safeEnqueue(`data: ${JSON.stringify({ status: 'error', error: formatError(progress.error) })}\n\n`);
-												} else {
-													safeEnqueue(`data: ${JSON.stringify(progress)}\n\n`);
-												}
-											} catch {
-												// Ignore parse errors for partial lines
-											}
-										}
-									} catch {
-										// If not base64, try as-is
+				await new Promise<void>((resolve, reject) => {
+					sendEdgeStreamRequest(
+						edgeCheck.environmentId!,
+						'POST',
+						`/images/${encodeURIComponent(targetTag)}/push`,
+						{
+							onData: (data: string) => {
+								try {
+									const decoded = Buffer.from(data, 'base64').toString('utf-8');
+									for (const line of decoded.split('\n').filter((l) => l.trim())) {
 										try {
-											const progress = JSON.parse(data);
-											if (progress.error) {
-												safeEnqueue(`data: ${JSON.stringify({ status: 'error', error: formatError(progress.error) })}\n\n`);
-											} else {
-												safeEnqueue(`data: ${JSON.stringify(progress)}\n\n`);
-											}
-										} catch {
-											// Ignore
-										}
+											const progress = JSON.parse(line);
+											emit(progress.error ? { status: 'error', error: formatError(progress.error) } : progress);
+										} catch { /* ignore partial lines */ }
 									}
-								},
-								onEnd: async () => {
-									// Audit log
-									await auditImage(event, 'push', imageId, imageName || targetTag, envIdNum, { targetTag, registry: registry.name });
-
-									safeEnqueue(`data: ${JSON.stringify({
-										status: 'complete',
-										message: `Image pushed to ${targetTag}`,
-										targetTag
-									})}\n\n`);
-
-									cleanup();
-									controller.close();
-								},
-								onError: (error: string) => {
-									console.error('Edge push error:', error);
-									safeEnqueue(`data: ${JSON.stringify({ status: 'error', error: formatError(error) })}\n\n`);
-									cleanup();
-									controller.close();
+								} catch {
+									try {
+										const progress = JSON.parse(data);
+										emit(progress.error ? { status: 'error', error: formatError(progress.error) } : progress);
+									} catch { /* ignore */ }
 								}
 							},
-							undefined,
-							{ 'X-Registry-Auth': authHeader }
-						);
-
-						cancelEdgeStream = cancel;
-					} else {
-						// Non-edge mode: use existing pushImage function
-						await pushImage(targetTag, authConfig, (progress) => {
-							safeEnqueue(`data: ${JSON.stringify(progress)}\n\n`);
-						}, envIdNum);
-
-						// Audit log
-						await auditImage(event, 'push', imageId, imageName || targetTag, envIdNum, { targetTag, registry: registry.name });
-
-						// Send completion message
-						safeEnqueue(`data: ${JSON.stringify({
-							status: 'complete',
-							message: `Image pushed to ${targetTag}`,
-							targetTag
-						})}\n\n`);
-
-						cleanup();
-						controller.close();
-					}
-				} catch (error: any) {
-					console.error('Error pushing image:', error);
-					safeEnqueue(`data: ${JSON.stringify({
-						status: 'error',
-						error: formatError(error)
-					})}\n\n`);
-					cleanup();
-					controller.close();
-				}
-			},
-			cancel() {
-				cleanup();
+							onEnd: async () => {
+								await auditImage(event, 'push', imageId, imageName || targetTag, envIdNum, { targetTag, registry: registry.name });
+								emit({ status: 'complete', message: `Image pushed to ${targetTag}`, targetTag });
+								resolve();
+							},
+							onError: (error: string) => {
+								console.error('Edge push error:', error);
+								emit({ status: 'error', error: formatError(error) });
+								reject(new Error(error));
+							}
+						},
+						undefined,
+						{ 'X-Registry-Auth': authHeader }
+					);
+				});
+			} else {
+				await pushImage(targetTag, authConfig, (progress) => emit(progress), envIdNum);
+				await auditImage(event, 'push', imageId, imageName || targetTag, envIdNum, { targetTag, registry: registry.name });
+				emit({ status: 'complete', message: `Image pushed to ${targetTag}`, targetTag });
 			}
-		});
+		}
 
-		return new Response(stream, {
-			headers: {
-				'Content-Type': 'text/event-stream',
-				'Cache-Control': 'no-cache',
-				'Connection': 'keep-alive',
-				'X-Accel-Buffering': 'no'
+		// Sync path for API clients sending Accept: application/json only
+		if (prefersJSON(request)) {
+			try {
+				let lastEvent: unknown = null;
+				await runPush((data) => { lastEvent = data; });
+				return json(lastEvent || { success: true });
+			} catch (error: any) {
+				return json({ status: 'error', error: formatError(error) }, { status: 500 });
 			}
-		});
+		}
+
+		// Job pattern: return jobId immediately, push runs in background
+		const job = createJob();
+		(async () => {
+			try {
+				await runPush((data) => appendLine(job, { data }));
+				completeJob(job, job.lines[job.lines.length - 1]?.data ?? { success: true });
+			} catch (error: any) {
+				appendLine(job, { data: { status: 'error', error: formatError(error) } });
+				failJob(job, error.message);
+			}
+		})();
+		return json({ jobId: job.id });
 	} catch (error: any) {
 		console.error('Error setting up push:', error);
 		return json({ error: error.message || 'Failed to push image' }, { status: 500 });

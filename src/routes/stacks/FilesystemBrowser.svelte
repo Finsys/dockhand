@@ -2,7 +2,8 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
-	import { Loader2, FolderOpen, File, FileText, ChevronRight, ArrowUp, AlertCircle, FolderPlus, Search, Import } from 'lucide-svelte';
+	import { Input } from '$lib/components/ui/input';
+	import { Loader2, FolderOpen, File, FileText, ChevronRight, ArrowUp, AlertCircle, FolderPlus, Search, Import, Check, X } from 'lucide-svelte';
 	import type { Component } from 'svelte';
 	import RecentLocationsPanel from './RecentLocationsPanel.svelte';
 
@@ -60,6 +61,12 @@
 	// Track selected file
 	let selectedPath = $state<string | null>(null);
 	let selectedName = $state<string | null>(null);
+
+	// New folder creation
+	let creatingFolder = $state(false);
+	let newFolderName = $state('');
+	let createError = $state<string | null>(null);
+	let folderInputEl = $state<HTMLInputElement | null>(null);
 
 	// Reference to recent locations panel
 	let recentLocationsPanel = $state<{ addLocation: (path: string) => Promise<void>; getFirstLocation: () => string | null } | null>(null);
@@ -176,6 +183,58 @@
 		onClose();
 	}
 
+	function startCreatingFolder() {
+		creatingFolder = true;
+		newFolderName = '';
+		createError = null;
+		// Focus input after it renders
+		setTimeout(() => folderInputEl?.focus(), 0);
+	}
+
+	function cancelCreatingFolder() {
+		creatingFolder = false;
+		newFolderName = '';
+		createError = null;
+	}
+
+	async function confirmCreateFolder() {
+		const name = newFolderName.trim();
+		if (!name || !currentPath) return;
+
+		createError = null;
+		const newPath = currentPath === '/' ? `/${name}` : `${currentPath}/${name}`;
+
+		try {
+			const res = await fetch('/api/system/files', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ path: newPath })
+			});
+			const data = await res.json();
+
+			if (!res.ok) {
+				createError = data.error || 'Failed to create folder';
+				return;
+			}
+
+			creatingFolder = false;
+			newFolderName = '';
+			loadDirectory(newPath);
+		} catch (e) {
+			createError = e instanceof Error ? e.message : 'Failed to create folder';
+		}
+	}
+
+	function handleFolderKeydown(e: KeyboardEvent) {
+		if (e.key === 'Enter') {
+			e.preventDefault();
+			confirmCreateFolder();
+		} else if (e.key === 'Escape') {
+			e.preventDefault();
+			cancelCreatingFolder();
+		}
+	}
+
 	function handleScan() {
 		if (currentPath && onScanDirectory) {
 			onScanDirectory(currentPath);
@@ -262,6 +321,46 @@
 						<ArrowUp class="w-4 h-4" />
 					</button>
 					<code class="text-xs bg-muted px-2 py-1 rounded truncate flex-1">{currentPath || '/'}</code>
+					{#if creatingFolder}
+						<div class="flex items-center gap-1">
+							<Input
+								bind:ref={folderInputEl}
+								bind:value={newFolderName}
+								placeholder="Folder name"
+								class="h-7 w-40 max-w-40 text-xs"
+								onkeydown={handleFolderKeydown}
+							/>
+							<button
+								type="button"
+								class="p-1 rounded hover:bg-muted text-green-600 disabled:opacity-40 disabled:cursor-not-allowed"
+								disabled={!newFolderName.trim()}
+								onclick={confirmCreateFolder}
+								title="Create folder"
+							>
+								<Check class="w-4 h-4" />
+							</button>
+							<button
+								type="button"
+								class="p-1 rounded hover:bg-muted text-muted-foreground"
+								onclick={cancelCreatingFolder}
+								title="Cancel"
+							>
+								<X class="w-4 h-4" />
+							</button>
+							{#if createError}
+								<span class="text-xs text-red-500 truncate max-w-48" title={createError}>{createError}</span>
+							{/if}
+						</div>
+					{:else}
+						<button
+							type="button"
+							class="p-1 rounded hover:bg-muted text-muted-foreground"
+							onclick={startCreatingFolder}
+							title="New folder"
+						>
+							<FolderPlus class="w-4 h-4" />
+						</button>
+					{/if}
 					{#if isAdoptMode}
 						<Button
 							variant="default"

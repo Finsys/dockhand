@@ -5,10 +5,12 @@
  * Discovered stacks are editable - compose and .env files are modified in their original location.
  */
 
-import { readdirSync, existsSync, statSync } from 'node:fs';
+import { readdirSync, existsSync, statSync, readFileSync } from 'node:fs';
 import { join, basename, dirname, resolve } from 'node:path';
 import yaml from 'js-yaml';
 import { getExternalStackPaths, getStackSources, upsertStackSource, type StackSourceType } from './db';
+import { DockerConnectionError } from './docker';
+import { normalizeStackName } from '$lib/utils/stack-name';
 
 // Compose file patterns to detect (in order of priority - prefer new style first)
 const COMPOSE_PATTERNS = ['compose.yaml', 'compose.yml', 'docker-compose.yml', 'docker-compose.yaml'];
@@ -41,24 +43,15 @@ export interface ScanResult {
 	errors: { path: string; error: string }[];
 }
 
-/**
- * Normalize a stack name to be valid (lowercase alphanumeric with hyphens/underscores)
- */
-function normalizeStackName(name: string): string {
-	return name
-		.toLowerCase()
-		.replace(/[^a-z0-9_-]/g, '-')
-		.replace(/-+/g, '-')
-		.replace(/^-|-$/g, '');
-}
+// normalizeStackName re-exported for backward compatibility
+export { normalizeStackName } from '$lib/utils/stack-name';
 
 /**
  * Check if a file looks like a compose file (contains 'services:' key)
  */
 async function isComposeFile(filePath: string): Promise<boolean> {
 	try {
-		const file = Bun.file(filePath);
-		const content = await file.text();
+		const content = readFileSync(filePath, 'utf-8');
 		// Basic check for services key - could be more sophisticated
 		return /^services:/m.test(content) || /\nservices:/m.test(content);
 	} catch {
@@ -72,8 +65,7 @@ async function isComposeFile(filePath: string): Promise<boolean> {
  */
 async function countServices(filePath: string): Promise<number> {
 	try {
-		const file = Bun.file(filePath);
-		const content = await file.text();
+		const content = readFileSync(filePath, 'utf-8');
 		const doc = yaml.load(content) as Record<string, unknown> | null;
 		if (doc?.services && typeof doc.services === 'object') {
 			return Object.keys(doc.services).length;
@@ -223,7 +215,7 @@ export async function adoptStack(
 	}
 
 	// Check for name conflict within the same environment
-	let finalName = stack.name;
+	let finalName = normalizeStackName(stack.name);
 	const existingNames = new Set(
 		existingSources
 			.filter((s) => s.environmentId === environmentId)
@@ -490,8 +482,11 @@ export async function detectRunningStacks(
 					runningStacksMap.set(stack.name, existing);
 				}
 			} catch (error) {
-				// Environment might be offline - skip silently
-				console.warn(`[Stack Scanner] Failed to query environment ${env.name}:`, error);
+				if (error instanceof DockerConnectionError) {
+					console.warn(`[Stack Scanner] Skipping offline environment ${env.name}: ${error.message}`);
+				} else {
+					console.warn(`[Stack Scanner] Failed to query environment ${env.name}:`, error);
+				}
 			}
 		})
 	);

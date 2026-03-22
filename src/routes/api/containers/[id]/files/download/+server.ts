@@ -1,8 +1,13 @@
+import { gzipSync } from 'node:zlib';
 import { getContainerArchive, statContainerPath } from '$lib/server/docker';
 import { authorize } from '$lib/server/authorize';
+import { validateDockerIdParam } from '$lib/server/docker-validation';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ params, url, cookies }) => {
+	const invalid = validateDockerIdParam(params.id, 'container');
+	if (invalid) return invalid;
+
 	const auth = await authorize(cookies);
 
 	const path = url.searchParams.get('path');
@@ -50,9 +55,9 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 		let extension = '.tar';
 
 		if (format === 'tar.gz') {
-			// Compress with gzip using Bun's native implementation
+			// Compress with gzip
 			const tarData = new Uint8Array(await response.arrayBuffer());
-			body = Bun.gzipSync(tarData);
+			body = gzipSync(tarData);
 			contentType = 'application/gzip';
 			extension = '.tar.gz';
 		}
@@ -75,7 +80,7 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 
 		return new Response(body, { headers });
 	} catch (error: any) {
-		console.error('Error downloading container file:', error);
+		console.error('Error downloading container file:', error?.message || error);
 
 		if (error.message?.includes('No such file or directory')) {
 			return new Response(JSON.stringify({ error: 'File not found' }), {

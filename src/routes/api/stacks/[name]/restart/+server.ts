@@ -2,6 +2,7 @@ import { json } from '@sveltejs/kit';
 import { restartStack, ComposeFileNotFoundError } from '$lib/server/stacks';
 import { authorize } from '$lib/server/authorize';
 import { auditStack } from '$lib/server/audit';
+import { createJobResponse } from '$lib/server/sse';
 import type { RequestHandler } from './$types';
 
 export const POST: RequestHandler = async (event) => {
@@ -21,22 +22,26 @@ export const POST: RequestHandler = async (event) => {
 		return json({ error: 'Access denied to this environment' }, { status: 403 });
 	}
 
-	try {
-		const stackName = decodeURIComponent(params.name);
-		const result = await restartStack(stackName, envIdNum);
+	return createJobResponse(async (send) => {
+		try {
+			const stackName = decodeURIComponent(params.name);
+			const result = await restartStack(stackName, envIdNum);
 
-		// Audit log
-		await auditStack(event, 'restart', stackName, envIdNum);
+			// Audit log
+			await auditStack(event, 'restart', stackName, envIdNum);
 
-		if (!result.success) {
-			return json({ success: false, error: result.error }, { status: 400 });
+			if (!result.success) {
+				send('result', { success: false, error: result.error });
+				return;
+			}
+			send('result', { success: true, output: result.output });
+		} catch (error) {
+			if (error instanceof ComposeFileNotFoundError) {
+				send('result', { success: false, error: error.message });
+				return;
+			}
+			console.error('Error restarting compose stack:', error);
+			send('result', { success: false, error: 'Failed to restart compose stack' });
 		}
-		return json({ success: true, output: result.output });
-	} catch (error) {
-		if (error instanceof ComposeFileNotFoundError) {
-			return json({ error: error.message }, { status: 404 });
-		}
-		console.error('Error restarting compose stack:', error);
-		return json({ error: 'Failed to restart compose stack' }, { status: 500 });
-	}
+	}, event.request);
 };

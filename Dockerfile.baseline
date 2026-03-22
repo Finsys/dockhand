@@ -1,0 +1,119 @@
+# syntax=docker/dockerfile:1.4
+# =============================================================================
+# Dockhand Docker Image - Baseline Build (Alpine/musl, amd64 only)
+# =============================================================================
+# For older x86_64 hardware without AVX2/SSE4.2 (TrueNAS, older Intel Atom/Celeron)
+# Uses node:24-alpine (musl libc) compiled conservatively for all x86_64 CPUs.
+# The Wolfi/glibc build crashes with SIGILL on CPUs that don't support the
+# microarchitecture level Wolfi packages are compiled for.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Stage 1: Application Builder (Alpine - musl-compatible native addons)
+# -----------------------------------------------------------------------------
+# IMPORTANT: Must use alpine builder so native addons (better-sqlite3) are
+# compiled against musl libc, not glibc. Cross-ABI copies would not work.
+FROM node:24-alpine AS app-builder
+
+WORKDIR /app
+
+# Install build dependencies
+RUN apk add --no-cache git curl python3 make g++
+
+# Copy package files and install dependencies
+COPY package.json package-lock.json ./
+RUN npm ci
+
+# Copy source code and build
+COPY . .
+RUN npm run build
+
+# Production dependencies only (rebuilds native addons against musl)
+RUN rm -rf node_modules \
+    && npm ci --omit=dev \
+    && rm -rf node_modules/@types
+
+# -----------------------------------------------------------------------------
+# Stage 2: Go Collector Builder
+# -----------------------------------------------------------------------------
+FROM golang:1.24 AS go-builder
+WORKDIR /app
+COPY collector/ ./collector/
+RUN cd collector && CGO_ENABLED=0 go build -o /app/bin/collection-worker .
+
+# -----------------------------------------------------------------------------
+# Stage 3: Final Image (Alpine-based runtime)
+# -----------------------------------------------------------------------------
+FROM node:24-alpine
+
+# Install runtime packages
+RUN apk add --no-cache \
+    ca-certificates \
+    tzdata \
+    docker-cli \
+    docker-compose \
+    docker-cli-buildx \
+    sqlite \
+    postgresql-client \
+    git \
+    openssh \
+    curl \
+    tini \
+    su-exec \
+    libstdc++
+
+# Create docker compose plugin symlink
+RUN mkdir -p /usr/libexec/docker/cli-plugins \
+    && ln -sf /usr/bin/docker-compose /usr/libexec/docker/cli-plugins/docker-compose
+
+# Create dockhand user and group
+RUN addgroup -g 1001 dockhand \
+    && adduser -u 1001 -G dockhand -h /home/dockhand -D dockhand
+
+WORKDIR /app
+
+# Set up environment variables
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
+    NODE_ENV=production \
+    PORT=3000 \
+    HOST=0.0.0.0 \
+    DATA_DIR=/app/data \
+    HOME=/home/dockhand \
+    PUID=1001 \
+    PGID=1001
+
+# Copy application files with correct ownership
+COPY --from=app-builder --chown=dockhand:dockhand /app/node_modules ./node_modules
+COPY --from=app-builder --chown=dockhand:dockhand /app/package.json ./
+COPY --from=app-builder --chown=dockhand:dockhand /app/build ./build
+COPY --from=app-builder --chown=dockhand:dockhand /app/server.js ./
+
+# Copy Go collector binary
+COPY --from=go-builder --chown=dockhand:dockhand /app/bin/collection-worker ./bin/collection-worker
+
+# Copy database migrations
+COPY --chown=dockhand:dockhand drizzle/ ./drizzle/
+COPY --chown=dockhand:dockhand drizzle-pg/ ./drizzle-pg/
+
+# Copy legal documents
+COPY --chown=dockhand:dockhand LICENSE.txt PRIVACY.txt ./
+
+# Copy entrypoint script
+COPY docker-entrypoint-node.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# Copy emergency scripts
+COPY --chown=dockhand:dockhand scripts/emergency/ ./scripts/
+RUN chmod +x ./scripts/*.sh ./scripts/**/*.sh 2>/dev/null || true
+
+# Create data directories
+RUN mkdir -p /home/dockhand/.dockhand/stacks /app/data \
+    && chown dockhand:dockhand /app/data /home/dockhand /home/dockhand/.dockhand /home/dockhand/.dockhand/stacks
+
+EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:3000/ || exit 1
+
+ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/docker-entrypoint.sh"]
+CMD ["node", "/app/server.js"]

@@ -5,6 +5,7 @@
 	import { Loader2, AlertCircle, Terminal, Sun, Moon, ShieldCheck, ShieldAlert, ShieldX, Shield } from 'lucide-svelte';
 	import { onMount } from 'svelte';
 	import { appendEnvParam } from '$lib/stores/environment';
+	import { watchJob } from '$lib/utils/sse-fetch';
 	import ScanResultsView from '../../routes/images/ScanResultsView.svelte';
 
 	export interface ScanResult {
@@ -148,31 +149,10 @@
 				throw new Error(`HTTP ${response.status}: ${response.statusText}`);
 			}
 
-			const reader = response.body?.getReader();
-			if (!reader) throw new Error('No response body');
-
-			const decoder = new TextDecoder();
-			let buffer = '';
-
-			while (true) {
-				const { done, value } = await reader.read();
-				if (done) break;
-
-				buffer += decoder.decode(value, { stream: true });
-				const lines = buffer.split('\n');
-				buffer = lines.pop() || '';
-
-				for (const line of lines) {
-					if (line.startsWith('data: ')) {
-						try {
-							const data = JSON.parse(line.slice(6));
-							handleScanProgress(data);
-						} catch (e) {
-							// Ignore parse errors
-						}
-					}
-				}
-			}
+			const { jobId } = await response.json();
+			await watchJob(jobId, (line) => {
+				handleScanProgress(line.data as any);
+			});
 
 			// If stream ended without complete status
 			if (status === 'scanning') {

@@ -107,11 +107,11 @@ export async function startScheduler(): Promise<void> {
 	const defaultTimezone = await getDefaultTimezone();
 
 	// Start system cleanup jobs (static schedules with default timezone)
-	cleanupJob = new Cron(scheduleCleanupCron, { timezone: defaultTimezone }, async () => {
+	cleanupJob = new Cron(scheduleCleanupCron, { timezone: defaultTimezone, legacyMode: false }, async () => {
 		await runScheduleCleanupJob();
 	});
 
-	eventCleanupJob = new Cron(eventCleanupCron, { timezone: defaultTimezone }, async () => {
+	eventCleanupJob = new Cron(eventCleanupCron, { timezone: defaultTimezone, legacyMode: false }, async () => {
 		await runEventCleanupJob();
 	});
 
@@ -127,15 +127,10 @@ export async function startScheduler(): Promise<void> {
 	};
 
 	// Volume helper cleanup runs every 30 minutes to clean up expired browse containers
-	volumeHelperCleanupJob = new Cron('*/30 * * * *', { timezone: defaultTimezone }, async () => {
+	volumeHelperCleanupJob = new Cron('*/30 * * * *', { timezone: defaultTimezone, legacyMode: false }, async () => {
 		await runVolumeHelperCleanupJob('cron', volumeCleanupFns);
 	});
 
-	// Run volume helper cleanup immediately on startup to clean up stale containers
-	runVolumeHelperCleanupJob('startup', volumeCleanupFns).catch(err => {
-		const errorMsg = err instanceof Error ? err.message : String(err);
-		console.error('[Scheduler] Error during startup volume helper cleanup:', errorMsg);
-	});
 
 	console.log(`[Scheduler] System schedule cleanup: ${scheduleCleanupCron} [${defaultTimezone}]`);
 	console.log(`[Scheduler] System event cleanup: ${eventCleanupCron} [${defaultTimezone}]`);
@@ -331,7 +326,7 @@ export async function registerSchedule(
 		const timezone = environmentId ? await getEnvironmentTimezone(environmentId) : 'UTC';
 
 		// Create new Cron instance with timezone
-		const job = new Cron(cronExpression, { timezone }, async () => {
+		const job = new Cron(cronExpression, { timezone, legacyMode: false }, async () => {
 			// Defensive check: verify schedule still exists and is enabled
 			if (type === 'container_update') {
 				const setting = await getAutoUpdateSettingById(scheduleId);
@@ -494,15 +489,15 @@ export async function refreshSystemJobs(): Promise<void> {
 	}
 
 	// Re-create with new timezone
-	cleanupJob = new Cron(scheduleCleanupCron, { timezone: defaultTimezone }, async () => {
+	cleanupJob = new Cron(scheduleCleanupCron, { timezone: defaultTimezone, legacyMode: false }, async () => {
 		await runScheduleCleanupJob();
 	});
 
-	eventCleanupJob = new Cron(eventCleanupCron, { timezone: defaultTimezone }, async () => {
+	eventCleanupJob = new Cron(eventCleanupCron, { timezone: defaultTimezone, legacyMode: false }, async () => {
 		await runEventCleanupJob();
 	});
 
-	volumeHelperCleanupJob = new Cron('*/30 * * * *', { timezone: defaultTimezone }, async () => {
+	volumeHelperCleanupJob = new Cron('*/30 * * * *', { timezone: defaultTimezone, legacyMode: false }, async () => {
 		await runVolumeHelperCleanupJob('cron', volumeCleanupFns);
 	});
 
@@ -654,35 +649,9 @@ export async function triggerSystemJob(jobId: string): Promise<{ success: boolea
 // UTILITY FUNCTIONS
 // =============================================================================
 
-/**
- * Get the next run time for a cron expression.
- * @param cronExpression - The cron expression
- * @param timezone - Optional IANA timezone (e.g., 'Europe/Warsaw'). Defaults to local timezone.
- */
-export function getNextRun(cronExpression: string, timezone?: string): Date | null {
-	try {
-		const options = timezone ? { timezone } : undefined;
-		const job = new Cron(cronExpression, options);
-		const next = job.nextRun();
-		job.stop();
-		return next;
-	} catch {
-		return null;
-	}
-}
-
-/**
- * Check if a cron expression is valid.
- */
-export function isValidCron(cronExpression: string): boolean {
-	try {
-		const job = new Cron(cronExpression);
-		job.stop();
-		return true;
-	} catch {
-		return false;
-	}
-}
+// Imported from cron-utils.ts (isolated from DB deps for unit test compatibility)
+import { getNextRun, isValidCron } from './cron-utils';
+export { getNextRun, isValidCron };
 
 /**
  * Get system schedules info for the API.

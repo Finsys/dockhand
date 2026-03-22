@@ -177,24 +177,28 @@
 		testResult = 'idle';
 
 		try {
-			const config = getFormConfig();
+			// When editing with no password entered, use stored credentials via [id]/test
+			// to avoid sending blank password and getting "Missing credentials" from SMTP server
+			const useStoredCredentials = isEditing && formType === 'smtp' && !formSmtpPassword && notification?.id;
 
-			// For editing, if password is empty, we can't test without the original password
-			if (isEditing && formType === 'smtp' && !formSmtpPassword && notification?.config?.username) {
-				formError = 'Please enter the password to test the connection';
-				formTesting = false;
-				return;
+			let response: Response;
+			if (useStoredCredentials) {
+				response = await fetch(`/api/notifications/${notification!.id}/test`, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' }
+				});
+			} else {
+				const config = getFormConfig();
+				response = await fetch('/api/notifications/test', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+						type: formType,
+						name: formName.trim() || 'Test',
+						config
+					})
+				});
 			}
-
-			const response = await fetch('/api/notifications/test', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					type: formType,
-					name: formName.trim() || 'Test',
-					config
-				})
-			});
 
 			const data = await response.json();
 
@@ -414,14 +418,15 @@
 							placeholder="gotify://hostname/app-token
 discord://webhook_id/webhook_token
 slack://token_a/token_b/token_c
+mmost://hostname/webhook-token
 tgram://bot_token/chat_id
 ntfy://my-topic
 pushover://user_key/api_token
 jsons://hostname/webhook/path"
-							class="flex min-h-[220px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-						></textarea>
-						<p class="text-xs text-muted-foreground">
-							Supports Gotify (gotify:// or gotifys:// for HTTPS), Discord, Slack, Telegram, ntfy, Pushover, and generic JSON webhooks.
+						class="flex min-h-[220px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+					></textarea>
+					<p class="text-xs text-muted-foreground">
+						Supports Gotify (gotify:// or gotifys:// for HTTPS), Discord, Slack, Mattermost (mmost:// or mmosts://), Telegram, ntfy, Pushover, and generic JSON webhooks.
 						</p>
 					</div>
 				</div>

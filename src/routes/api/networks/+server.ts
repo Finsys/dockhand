@@ -1,6 +1,6 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { listNetworks, createNetwork, EnvironmentNotFoundError, type CreateNetworkOptions } from '$lib/server/docker';
+import { listNetworks, createNetwork, EnvironmentNotFoundError, DockerConnectionError, type CreateNetworkOptions } from '$lib/server/docker';
 import { authorize } from '$lib/server/authorize';
 import { auditNetwork } from '$lib/server/audit';
 import { hasEnvironments } from '$lib/server/db';
@@ -33,7 +33,9 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 		if (error instanceof EnvironmentNotFoundError) {
 			return json({ error: 'Environment not found' }, { status: 404 });
 		}
-		console.error('Failed to list networks:', error);
+		if (!(error instanceof DockerConnectionError)) {
+			console.error('Failed to list networks:', error);
+		}
 		return json({ error: 'Failed to list networks' }, { status: 500 });
 	}
 };

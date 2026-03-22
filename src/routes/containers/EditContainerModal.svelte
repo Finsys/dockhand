@@ -452,9 +452,22 @@
 				healthcheckTimeout = Math.floor((healthcheck.Timeout || 30e9) / 1e9);
 				healthcheckRetries = healthcheck.Retries || 3;
 				healthcheckStartPeriod = Math.floor((healthcheck.StartPeriod || 0) / 1e9);
+			} else {
+				healthcheckEnabled = false;
+				healthcheckCommand = '';
+				healthcheckInterval = 30;
+				healthcheckTimeout = 30;
+				healthcheckRetries = 3;
+				healthcheckStartPeriod = 0;
 			}
 
-			// Parse advanced options - Resources
+			// Parse advanced options - Resources (reset first to avoid stale values)
+			memoryLimit = '';
+			memoryReservation = '';
+			cpuShares = '';
+			nanoCpus = '';
+			cpuQuota = '';
+			cpuPeriod = '';
 			if (data.HostConfig.Memory) {
 				memoryLimit = formatBytes(data.HostConfig.Memory);
 			}
@@ -900,8 +913,8 @@
 					networks: selectedNetworks.length > 0 ? selectedNetworks : undefined,
 					startAfterUpdate,
 					repullImage,
-					user: containerUser.trim() || undefined,
-					privileged: privilegedMode || undefined,
+					user: containerUser.trim() || null,
+					privileged: privilegedMode,
 					healthcheck,
 					memory: parseMemory(memoryLimit),
 					memoryReservation: parseMemory(memoryReservation),
@@ -913,7 +926,7 @@
 					capDrop: capDrop.length > 0 ? capDrop : undefined,
 					devices: devices.length > 0 ? devices : undefined,
 					deviceRequests,
-					runtime: runtime || undefined,
+					runtime: runtime || null,
 					dns: dnsServers.length > 0 ? dnsServers : undefined,
 					dnsSearch: dnsSearch.length > 0 ? dnsSearch : undefined,
 					dnsOptions: dnsOptions.length > 0 ? dnsOptions : undefined,

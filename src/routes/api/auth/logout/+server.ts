@@ -11,8 +11,12 @@ export const POST: RequestHandler = async (event) => {
 		// Get current user before destroying session for audit log
 		const auth = await authorize(cookies);
 		const username = auth.user?.username || 'unknown';
+		const clientIp = event.request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+			|| event.request.headers.get('x-real-ip')
+			|| event.getClientAddress();
 
 		await destroySession(cookies);
+		console.log(`[Auth] Logout: user=${username} ip=${clientIp}`);
 
 		// Audit log
 		await auditAuth(event, 'logout', username);

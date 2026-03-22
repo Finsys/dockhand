@@ -6,7 +6,7 @@ import { validateSession, testOidcConnection, isAuthEnabled } from '$lib/server/
 export const POST: RequestHandler = async ({ params, cookies }) => {
 	// When auth is disabled, allow access (for initial setup)
 	// When auth is enabled, require admin
-	if (isAuthEnabled()) {
+	if (await isAuthEnabled()) {
 		const user = await validateSession(cookies);
 		if (!user || !user.isAdmin) {
 			return json({ error: 'Admin access required' }, { status: 403 });

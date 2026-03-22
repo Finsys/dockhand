@@ -3,8 +3,12 @@ import type { RequestHandler } from './$types';
 import { removeNetwork, inspectNetwork } from '$lib/server/docker';
 import { authorize } from '$lib/server/authorize';
 import { auditNetwork } from '$lib/server/audit';
+import { validateDockerIdParam } from '$lib/server/docker-validation';
 
 export const GET: RequestHandler = async ({ params, url, cookies }) => {
+	const invalid = validateDockerIdParam(params.id, 'network');
+	if (invalid) return invalid;
+
 	const auth = await authorize(cookies);
 
 	const envId = url.searchParams.get('env');
@@ -32,6 +36,9 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 
 export const DELETE: RequestHandler = async (event) => {
 	const { params, url, cookies } = event;
+	const invalid = validateDockerIdParam(params.id, 'network');
+	if (invalid) return invalid;
+
 	const auth = await authorize(cookies);
 
 	const envId = url.searchParams.get('env');

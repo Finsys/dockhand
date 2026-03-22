@@ -49,7 +49,9 @@ async function fetchDockerHubTags(imageName: string, page: number = 1, pageSize:
 		if (response.status === 404) {
 			throw new Error('Image not found on Docker Hub');
 		}
-		throw new Error(`Docker Hub returned error: ${response.status}`);
+		const err = new Error(`Docker Hub returned error: ${response.status}`) as any;
+		err.statusCode = response.status;
+		throw err;
 	}
 
 	const data = await response.json();
@@ -161,6 +163,9 @@ export const GET: RequestHandler = async ({ url }) => {
 		}
 		if (error.code === 'ENOTFOUND') {
 			return json({ error: 'Registry host not found' }, { status: 503 });
+		}
+		if (error.statusCode) {
+			return json({ error: error.message || 'Failed to fetch tags' }, { status: error.statusCode });
 		}
 
 		return json({ error: error.message || 'Failed to fetch tags' }, { status: 500 });

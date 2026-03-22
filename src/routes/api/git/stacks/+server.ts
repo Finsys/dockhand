@@ -14,6 +14,7 @@ import { authorize } from '$lib/server/authorize';
 import { registerSchedule } from '$lib/server/scheduler';
 import { secureRandomBytes } from '$lib/server/crypto-fallback';
 import { auditGitStack } from '$lib/server/audit';
+import { createJobResponse } from '$lib/server/sse';
 
 // Stack name validation: must start with alphanumeric, can contain alphanumeric, hyphens, underscores
 const STACK_NAME_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/;
@@ -156,20 +157,33 @@ export const POST: RequestHandler = async (event) => {
 			}
 		}
 
-		// If deployNow is set, deploy immediately
+		// If deployNow is set, deploy immediately via SSE to keep connection alive
 		if (data.deployNow) {
-			const deployResult = await deployGitStack(gitStack.id);
-			await auditGitStack(event, 'deploy', gitStack.id, gitStack.stackName, gitStack.environmentId);
-			return json({
-				...gitStack,
-				deployResult: deployResult
-			});
+			return createJobResponse(async (send) => {
+				try {
+					const deployResult = await deployGitStack(gitStack.id);
+					await auditGitStack(event, 'deploy', gitStack.id, gitStack.stackName, gitStack.environmentId);
+					send('result', {
+						...gitStack,
+						deployResult: deployResult
+					});
+				} catch (error) {
+					console.error('Failed to deploy git stack:', error);
+					send('result', {
+						...gitStack,
+						deployResult: { success: false, error: 'Failed to deploy git stack' }
+					});
+				}
+			}, request);
 		}
 
 		return json(gitStack);
 	} catch (error: any) {
 		console.error('Failed to create git stack:', error);
 		if (error.message?.includes('UNIQUE constraint failed')) {
+			if (error.message?.includes('stack_environment_variables')) {
+				return json({ error: 'Duplicate environment variable keys detected' }, { status: 400 });
+			}
 			return json({ error: 'A git stack with this name already exists for this environment' }, { status: 400 });
 		}
 		return json({ error: 'Failed to create git stack' }, { status: 500 });

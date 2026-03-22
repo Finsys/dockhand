@@ -2,6 +2,7 @@
 	import { tick, onMount } from 'svelte';
 	import { CheckCircle2, XCircle, Loader2, AlertCircle, Terminal, Sun, Moon, Upload } from 'lucide-svelte';
 	import { appendEnvParam } from '$lib/stores/environment';
+	import { watchJob } from '$lib/utils/sse-fetch';
 
 	type PushStatus = 'idle' | 'pushing' | 'complete' | 'error';
 
@@ -144,39 +145,12 @@
 				return;
 			}
 
-			// Handle SSE stream
-			const reader = pushResponse.body?.getReader();
-			if (!reader) {
-				errorMessage = 'No response body';
-				status = 'error';
-				onError?.(errorMessage);
-				return;
-			}
+			const { jobId } = await pushResponse.json();
+			await watchJob(jobId, (line) => {
+				handlePushProgress(line.data as any);
+			});
 
-			const decoder = new TextDecoder();
-			let buffer = '';
-
-			while (true) {
-				const { done, value } = await reader.read();
-				if (done) break;
-
-				buffer += decoder.decode(value, { stream: true });
-				const lines = buffer.split('\n');
-				buffer = lines.pop() || '';
-
-				for (const line of lines) {
-					if (line.startsWith('data: ')) {
-						try {
-							const data = JSON.parse(line.slice(6));
-							handlePushProgress(data);
-						} catch (e) {
-							// Ignore parse errors
-						}
-					}
-				}
-			}
-
-			// If stream ended without complete/error status
+			// If job ended without an explicit complete/error event
 			if (status === 'pushing') {
 				status = 'complete';
 				statusMessage = 'Image pushed successfully!';

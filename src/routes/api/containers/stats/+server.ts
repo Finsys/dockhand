@@ -104,7 +104,7 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 		// Get all running containers with timeout
 		const containers = await withTimeout(
 			listContainers(true, envIdNum),
-			5000, // 5 second timeout
+			10000, // 10 second timeout
 			[]
 		);
 		const runningContainers = containers.filter(c => c.state === 'running');
@@ -127,7 +127,7 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 			try {
 				const stats = await withTimeout(
 					getContainerStats(container.id, envIdNum) as Promise<any>,
-					3000, // 3 second timeout per container
+					8000, // 8 second timeout per container (TLS proxy + Docker CPU sampling needs ~2s)
 					null
 				);
 

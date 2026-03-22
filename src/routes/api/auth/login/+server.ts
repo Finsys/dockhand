@@ -30,11 +30,14 @@ export const POST: RequestHandler = async (event) => {
 		}
 
 		// Rate limiting by IP and username
-		const clientIp = getClientAddress();
+		const clientIp = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+			|| request.headers.get('x-real-ip')
+			|| getClientAddress();
 		const rateLimitKey = `${clientIp}:${username}`;
 
 		const { limited, retryAfter } = isRateLimited(rateLimitKey);
 		if (limited) {
+			console.warn(`[Auth] Login rate-limited: user=${username} ip=${clientIp} retryAfter=${retryAfter}s`);
 			return json(
 				{ error: `Too many login attempts. Please try again in ${retryAfter} seconds.` },
 				{ status: 429 }
@@ -66,6 +69,7 @@ export const POST: RequestHandler = async (event) => {
 
 		if (!result.success) {
 			recordFailedAttempt(rateLimitKey);
+			console.warn(`[Auth] Login failed: user=${username} provider=${authProviderType} ip=${clientIp} reason=${result.error || 'Authentication failed'}`);
 			return json({ error: result.error || 'Authentication failed' }, { status: 401 });
 		}
 
@@ -80,12 +84,14 @@ export const POST: RequestHandler = async (event) => {
 			const user = await getUserByUsername(username);
 			if (!user || !(await verifyMfaToken(user.id, mfaToken))) {
 				recordFailedAttempt(rateLimitKey);
+				console.warn(`[Auth] MFA failed: user=${username} ip=${clientIp}`);
 				return json({ error: 'Invalid MFA code' }, { status: 401 });
 			}
 
 			// MFA verified, create session
-			const session = await createUserSession(user.id, authProviderType, cookies);
+			const session = await createUserSession(user.id, authProviderType, cookies, request);
 			clearRateLimit(rateLimitKey);
+			console.log(`[Auth] Login successful: user=${username} provider=${authProviderType} ip=${clientIp} mfa=yes`);
 
 			// Audit log
 			await auditAuth(event, 'login', user.username, {
@@ -107,8 +113,9 @@ export const POST: RequestHandler = async (event) => {
 
 		// No MFA, create session directly
 		if (result.user) {
-			const session = await createUserSession(result.user.id, authProviderType, cookies);
+			const session = await createUserSession(result.user.id, authProviderType, cookies, request);
 			clearRateLimit(rateLimitKey);
+			console.log(`[Auth] Login successful: user=${result.user.username} provider=${authProviderType} ip=${clientIp} mfa=no`);
 
 			// Audit log
 			await auditAuth(event, 'login', result.user.username, {

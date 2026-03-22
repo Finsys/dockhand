@@ -1,9 +1,10 @@
 import { json } from '@sveltejs/kit';
 import { listComposeStacks, deployStack, saveStackComposeFile, writeStackEnvFile, writeRawStackEnvFile, saveStackEnvVarsToDb } from '$lib/server/stacks';
-import { EnvironmentNotFoundError } from '$lib/server/docker';
+import { EnvironmentNotFoundError, DockerConnectionError } from '$lib/server/docker';
 import { upsertStackSource, getStackSources } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
 import { auditStack } from '$lib/server/audit';
+import { createJobResponse } from '$lib/server/sse';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ url, cookies }) => {
@@ -62,8 +63,11 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 		if (error instanceof EnvironmentNotFoundError) {
 			return json({ error: 'Environment not found' }, { status: 404 });
 		}
+		// Silently return empty for connection errors (offline environments)
+		if (error instanceof DockerConnectionError) {
+			return json([]);
+		}
 		console.error('Error listing compose stacks:', error);
-		// Return empty array instead of error to allow UI to load
 		return json([]);
 	}
 };
@@ -162,20 +166,7 @@ export const POST: RequestHandler = async (event) => {
 			}
 		}
 
-		// Deploy and start the stack
-		const result = await deployStack({
-			name,
-			compose,
-			envId: envIdNum,
-			composePath: composePath || undefined,
-			envPath: envPath || undefined
-		});
-
-		if (!result.success) {
-			return json({ error: result.error, output: result.output }, { status: 400 });
-		}
-
-		// Record the stack as internally created with custom paths if provided
+		// Record the stack in DB before deploying - ensures it exists even if deploy fails
 		await upsertStackSource({
 			stackName: name,
 			environmentId: envIdNum,
@@ -184,10 +175,31 @@ export const POST: RequestHandler = async (event) => {
 			envPath: envPath || undefined
 		});
 
-		// Audit log (create + deploy in one action)
-		await auditStack(event, 'deploy', name, envIdNum);
+		// Deploy via SSE to keep connection alive during long operations
+		return createJobResponse(async (send) => {
+			try {
+				const result = await deployStack({
+					name,
+					compose,
+					envId: envIdNum,
+					composePath: composePath || undefined,
+					envPath: envPath || undefined
+				});
 
-		return json({ success: true, started: true, output: result.output });
+				if (!result.success) {
+					send('result', { success: false, error: result.error, output: result.output });
+					return;
+				}
+
+				// Audit log (create + deploy in one action)
+				await auditStack(event, 'deploy', name, envIdNum);
+
+				send('result', { success: true, started: true, output: result.output });
+			} catch (error: any) {
+				console.error('Error deploying compose stack:', error);
+				send('result', { success: false, error: error.message || 'Failed to deploy stack' });
+			}
+		}, request);
 	} catch (error: any) {
 		console.error('Error creating compose stack:', error);
 		return json({ error: error.message || 'Failed to create stack' }, { status: 500 });

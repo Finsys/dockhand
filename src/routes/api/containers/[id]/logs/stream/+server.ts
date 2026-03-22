@@ -1,6 +1,9 @@
 import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
 import { getEnvironment } from '$lib/server/db';
+import { validateDockerIdParam } from '$lib/server/docker-validation';
+import { unixSocketRequest, unixSocketStreamRequest, httpsAgentRequest } from '$lib/server/docker';
+import type { DockerClientConfig as BaseDockerClientConfig } from '$lib/server/docker';
 import { sendEdgeRequest, sendEdgeStreamRequest, isEdgeConnected } from '$lib/server/hawser';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -56,6 +59,7 @@ async function getDockerConfig(envId?: number | null): Promise<DockerClientConfi
 		return { type: 'hawser-edge', environmentId: envId };
 	}
 	const protocol = (env.protocol as 'http' | 'https') || 'http';
+
 	return {
 		type: protocol,
 		host: env.host || 'localhost',
@@ -119,6 +123,7 @@ async function handleEdgeLogsStream(containerId: string, tail: string, environme
 
 	const stream = new ReadableStream({
 		start(controller) {
+
 			const encoder = new TextEncoder();
 
 			const safeEnqueue = (data: string) => {
@@ -226,6 +231,7 @@ async function handleEdgeLogsStream(containerId: string, tail: string, environme
 			cancelStream = cancel;
 		},
 		cancel() {
+
 			controllerClosed = true;
 			if (heartbeatInterval) {
 				clearInterval(heartbeatInterval);
@@ -249,6 +255,9 @@ async function handleEdgeLogsStream(containerId: string, tail: string, environme
 }
 
 export const GET: RequestHandler = async ({ params, url, cookies }) => {
+	const invalid = validateDockerIdParam(params.id, 'container');
+	if (invalid) return invalid;
+
 	const auth = await authorize(cookies);
 
 	const containerId = params.id;
@@ -279,28 +288,16 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 		let inspectResponse: Response;
 
 		if (config.type === 'socket') {
-			inspectResponse = await fetch(`http://localhost${inspectPath}`, {
-				// @ts-ignore - Bun supports unix socket
-				unix: config.socketPath
-			});
+			inspectResponse = await unixSocketRequest(config.socketPath, inspectPath);
+		} else if (config.type === 'https') {
+			const extraHeaders: Record<string, string> = {};
+			if (config.hawserToken) extraHeaders['X-Hawser-Token'] = config.hawserToken;
+			inspectResponse = await httpsAgentRequest(config as BaseDockerClientConfig, inspectPath, {}, false, extraHeaders);
 		} else {
-			const inspectUrl = `${config.type}://${config.host}:${config.port}${inspectPath}`;
+			const inspectUrl = `http://${config.host}:${config.port}${inspectPath}`;
 			const inspectHeaders: Record<string, string> = {};
 			if (config.hawserToken) inspectHeaders['X-Hawser-Token'] = config.hawserToken;
-			const fetchOpts: any = { headers: inspectHeaders };
-			if (config.type === 'https') {
-				fetchOpts.tls = {
-					sessionTimeout: 0,
-					servername: config.host,
-					rejectUnauthorized: !config.skipVerify
-				};
-				if (config.ca) fetchOpts.tls.ca = [config.ca];
-				if (config.cert) fetchOpts.tls.cert = [config.cert];
-				if (config.key) fetchOpts.tls.key = config.key;
-				fetchOpts.keepalive = false;
-				if (process.env.DEBUG_TLS) fetchOpts.verbose = true;
-			}
-			inspectResponse = await fetch(inspectUrl, fetchOpts);
+			inspectResponse = await fetch(inspectUrl, { headers: inspectHeaders });
 		}
 
 		if (inspectResponse.ok) {
@@ -322,6 +319,7 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 
 	const stream = new ReadableStream({
 		async start(controller) {
+
 			const encoder = new TextEncoder();
 
 			const safeEnqueue = (data: string) => {
@@ -343,32 +341,16 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 				let response: Response;
 
 				if (config.type === 'socket') {
-					response = await fetch(`http://localhost${logsPath}`, {
-						// @ts-ignore - Bun supports unix socket
-						unix: config.socketPath,
-						signal: abortController?.signal
-					});
+					response = await unixSocketStreamRequest(config.socketPath, logsPath);
+				} else if (config.type === 'https') {
+					const extraHeaders: Record<string, string> = {};
+					if (config.hawserToken) extraHeaders['X-Hawser-Token'] = config.hawserToken;
+					response = await httpsAgentRequest(config as BaseDockerClientConfig, logsPath, {}, true, extraHeaders);
 				} else {
-					const logsUrl = `${config.type}://${config.host}:${config.port}${logsPath}`;
+					const logsUrl = `http://${config.host}:${config.port}${logsPath}`;
 					const logsHeaders: Record<string, string> = {};
 					if (config.hawserToken) logsHeaders['X-Hawser-Token'] = config.hawserToken;
-					const fetchOpts: any = {
-						headers: logsHeaders,
-						signal: abortController?.signal
-					};
-					if (config.type === 'https') {
-						fetchOpts.tls = {
-							sessionTimeout: 0,
-							servername: config.host,
-							rejectUnauthorized: !config.skipVerify
-						};
-						if (config.ca) fetchOpts.tls.ca = [config.ca];
-						if (config.cert) fetchOpts.tls.cert = [config.cert];
-						if (config.key) fetchOpts.tls.key = config.key;
-						fetchOpts.keepalive = false;
-						if (process.env.DEBUG_TLS) fetchOpts.verbose = true;
-					}
-					response = await fetch(logsUrl, fetchOpts);
+					response = await fetch(logsUrl, { headers: logsHeaders });
 				}
 
 				if (!response.ok) {
@@ -434,7 +416,8 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 					}
 				}
 
-				reader.releaseLock();
+				await reader.cancel().catch(() => {});
+			reader.releaseLock();
 			} catch (error) {
 				if (!controllerClosed) {
 					const errorMsg = error instanceof Error ? error.message : String(error);
@@ -444,7 +427,14 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 				}
 			}
 
+			// Clean up on normal stream end (not just cancel)
+			if (heartbeatInterval) {
+				clearInterval(heartbeatInterval);
+				heartbeatInterval = null;
+			}
 			if (!controllerClosed) {
+				controllerClosed = true;
+	
 				try {
 					controller.close();
 				} catch {
@@ -453,7 +443,10 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 			}
 		},
 		cancel() {
-			controllerClosed = true;
+			if (!controllerClosed) {
+				controllerClosed = true;
+	
+			}
 			if (heartbeatInterval) {
 				clearInterval(heartbeatInterval);
 				heartbeatInterval = null;

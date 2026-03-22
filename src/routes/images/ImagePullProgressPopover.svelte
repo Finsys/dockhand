@@ -7,6 +7,7 @@
 	import { Progress } from '$lib/components/ui/progress';
 	import { tick } from 'svelte';
 	import ImageScanModal from './ImageScanModal.svelte';
+	import { watchJob } from '$lib/utils/sse-fetch';
 
 	interface Props {
 		imageName: string | (() => string);
@@ -113,103 +114,86 @@
 				throw new Error('Failed to start pull');
 			}
 
-			const reader = response.body?.getReader();
-			if (!reader) {
-				throw new Error('No response body');
-			}
+			const { jobId } = await response.json();
 
-			const decoder = new TextDecoder();
-			let buffer = '';
+			await watchJob(jobId, (line) => {
+				try {
+					const data = line.data as any;
 
-			while (true) {
-				const { done, value } = await reader.read();
-				if (done) break;
-
-				buffer += decoder.decode(value, { stream: true });
-				const lines = buffer.split('\n');
-				buffer = lines.pop() || '';
-
-				for (const line of lines) {
-					if (!line.trim() || !line.startsWith('data: ')) continue;
-
-					try {
-						const data = JSON.parse(line.slice(6));
-
-						if (data.status === 'complete') {
-							overallStatus = 'complete';
-							onComplete?.();
-							// Trigger scan if scanning is enabled
-							if (envHasScanning) {
-								// Close popover and open scan modal after short delay
-								setTimeout(() => {
-									scanImageName = displayImageName;
-									open = false;
-									showScanModal = true;
-								}, 500);
-							}
-						} else if (data.status === 'error') {
-							overallStatus = 'error';
-							errorMessage = data.error || 'Unknown error occurred';
-						} else if (data.id) {
-							// Layer progress update - only process if id looks like a layer hash (12 hex chars)
-							const isLayerId = /^[a-f0-9]{12}$/i.test(data.id);
-							if (!isLayerId) {
-								if (data.status) {
-									statusMessage = `${data.id}: ${data.status}`;
-								}
-								continue;
-							}
-
-							const existing = layers.get(data.id);
-							const statusLower = (data.status || '').toLowerCase();
-							// Only count "Pull complete" or "Already exists" as truly complete
-							const isFullyComplete = statusLower === 'pull complete' || statusLower === 'already exists';
-
-							if (!existing) {
-								totalLayers++;
-								layerOrder++;
-								if (isFullyComplete) {
-									completedLayers++;
-								}
-
-								const layerProgress: LayerProgress = {
-									id: data.id,
-									status: data.status || 'Processing',
-									progress: data.progress,
-									current: data.progressDetail?.current,
-									total: data.progressDetail?.total,
-									order: layerOrder,
-									isComplete: isFullyComplete
-								};
-								layers.set(data.id, layerProgress);
-								layers = new Map(layers);
-								scrollToBottom();
-							} else {
-								// Check if layer transitioned to complete (only count once)
-								if (isFullyComplete && !existing.isComplete) {
-									completedLayers++;
-								}
-
-								const layerProgress: LayerProgress = {
-									id: data.id,
-									status: data.status || 'Processing',
-									progress: data.progress,
-									current: data.progressDetail?.current,
-									total: data.progressDetail?.total,
-									order: existing.order,
-									isComplete: existing.isComplete || isFullyComplete
-								};
-								layers.set(data.id, layerProgress);
-								layers = new Map(layers);
-							}
-						} else if (data.status) {
-							statusMessage = data.status;
+					if (data.status === 'complete') {
+						overallStatus = 'complete';
+						onComplete?.();
+						// Trigger scan if scanning is enabled
+						if (envHasScanning) {
+							// Close popover and open scan modal after short delay
+							setTimeout(() => {
+								scanImageName = displayImageName;
+								open = false;
+								showScanModal = true;
+							}, 500);
 						}
-					} catch (e) {
-						console.error('Failed to parse SSE data:', e);
+					} else if (data.status === 'error') {
+						overallStatus = 'error';
+						errorMessage = data.error || 'Unknown error occurred';
+					} else if (data.id) {
+						// Layer progress update - only process if id looks like a layer hash (12 hex chars)
+						const isLayerId = /^[a-f0-9]{12}$/i.test(data.id);
+						if (!isLayerId) {
+							if (data.status) {
+								statusMessage = `${data.id}: ${data.status}`;
+							}
+							return;
+						}
+
+						const existing = layers.get(data.id);
+						const statusLower = (data.status || '').toLowerCase();
+						// Only count "Pull complete" or "Already exists" as truly complete
+						const isFullyComplete = statusLower === 'pull complete' || statusLower === 'already exists';
+
+						if (!existing) {
+							totalLayers++;
+							layerOrder++;
+							if (isFullyComplete) {
+								completedLayers++;
+							}
+
+							const layerProgress: LayerProgress = {
+								id: data.id,
+								status: data.status || 'Processing',
+								progress: data.progress,
+								current: data.progressDetail?.current,
+								total: data.progressDetail?.total,
+								order: layerOrder,
+								isComplete: isFullyComplete
+							};
+							layers.set(data.id, layerProgress);
+							layers = new Map(layers);
+							scrollToBottom();
+						} else {
+							// Check if layer transitioned to complete (only count once)
+							if (isFullyComplete && !existing.isComplete) {
+								completedLayers++;
+							}
+
+							const layerProgress: LayerProgress = {
+								id: data.id,
+								status: data.status || 'Processing',
+								progress: data.progress,
+								current: data.progressDetail?.current,
+								total: data.progressDetail?.total,
+								order: existing.order,
+								isComplete: existing.isComplete || isFullyComplete
+							};
+							layers.set(data.id, layerProgress);
+							layers = new Map(layers);
+						}
+					} else if (data.status) {
+						statusMessage = data.status;
 					}
+				} catch (e) {
+					console.error('Failed to process job line:', e);
 				}
-			}
+			});
 		} catch (error: any) {
 			console.error('Failed to pull image:', error);
 			overallStatus = 'error';

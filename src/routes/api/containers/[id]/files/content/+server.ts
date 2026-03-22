@@ -1,12 +1,16 @@
 import { json } from '@sveltejs/kit';
 import { readContainerFile, writeContainerFile } from '$lib/server/docker';
 import { authorize } from '$lib/server/authorize';
+import { validateDockerIdParam } from '$lib/server/docker-validation';
 import type { RequestHandler } from './$types';
 
 // Max file size for reading (1MB)
 const MAX_FILE_SIZE = 1024 * 1024;
 
 export const GET: RequestHandler = async ({ params, url, cookies }) => {
+	const invalid = validateDockerIdParam(params.id, 'container');
+	if (invalid) return invalid;
+
 	const auth = await authorize(cookies);
 
 	const path = url.searchParams.get('path');
@@ -36,7 +40,10 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 
 		return json({ content, path });
 	} catch (error: any) {
-		console.error('Error reading container file:', error);
+		if (error?.statusCode === 404 && !error.message?.includes('No such file')) {
+			return json({ error: error.json?.message || 'Container not found' }, { status: 404 });
+		}
+		console.error('Error reading container file:', error?.message || error);
 		const msg = error.message || String(error);
 
 		if (msg.includes('No such file or directory')) {
@@ -57,6 +64,9 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 };
 
 export const PUT: RequestHandler = async ({ params, url, cookies, request }) => {
+	const invalid = validateDockerIdParam(params.id, 'container');
+	if (invalid) return invalid;
+
 	const auth = await authorize(cookies);
 
 	const path = url.searchParams.get('path');
@@ -92,7 +102,7 @@ export const PUT: RequestHandler = async ({ params, url, cookies, request }) => 
 
 		return json({ success: true, path });
 	} catch (error: any) {
-		console.error('Error writing container file:', error);
+		console.error('Error writing container file:', error?.message || error);
 		const msg = error.message || String(error);
 
 		if (msg.includes('Permission denied')) {

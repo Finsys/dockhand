@@ -62,6 +62,11 @@ export const PUT: RequestHandler = async ({ request, cookies }) => {
 			}
 		}
 
+		// Enforce minimum session timeout of 1 hour
+		if (data.sessionTimeout !== undefined) {
+			data.sessionTimeout = Math.max(3600, Math.min(604800, parseInt(data.sessionTimeout) || 86400));
+		}
+
 		const settings = await updateAuthSettings(data);
 		return json(settings);
 	} catch (error) {

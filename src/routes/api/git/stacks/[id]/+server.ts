@@ -1,11 +1,12 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getGitStack, updateGitStack, deleteGitStack, deleteStackSource, updateStackSourceName, updateStackEnvVarsName, setStackEnvVars, getStackEnvVars } from '$lib/server/db';
+import { getGitStack, updateGitStack, deleteGitStack, deleteStackSource, updateStackSourceName, updateStackEnvVarsName, setStackEnvVars, getStackEnvVars, deleteStackEnvVars } from '$lib/server/db';
 import { deleteGitStackFiles, deployGitStack } from '$lib/server/git';
 import { authorize } from '$lib/server/authorize';
 import { registerSchedule, unregisterSchedule } from '$lib/server/scheduler';
 import { auditGitStack } from '$lib/server/audit';
 import { computeAuditDiff } from '$lib/utils/diff';
+import { createJobResponse } from '$lib/server/sse';
 
 // Stack name validation: must start with alphanumeric, can contain alphanumeric, hyphens, underscores
 const STACK_NAME_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/;
@@ -131,20 +132,33 @@ export const PUT: RequestHandler = async (event) => {
 			await setStackEnvVars(stackName, envId, varsToSave as any);
 		}
 
-		// If deployNow is set, deploy after saving
+		// If deployNow is set, deploy after saving via SSE to keep connection alive
 		if (data.deployNow) {
-			const deployResult = await deployGitStack(id);
-			await auditGitStack(event, 'deploy', updated.id, updated.stackName, updated.environmentId);
-			return json({
-				...updated,
-				deployResult
-			});
+			return createJobResponse(async (send) => {
+				try {
+					const deployResult = await deployGitStack(id);
+					await auditGitStack(event, 'deploy', updated.id, updated.stackName, updated.environmentId);
+					send('result', {
+						...updated,
+						deployResult
+					});
+				} catch (error) {
+					console.error('Failed to deploy git stack:', error);
+					send('result', {
+						...updated,
+						deployResult: { success: false, error: 'Failed to deploy git stack' }
+					});
+				}
+			}, request);
 		}
 
 		return json(updated);
 	} catch (error: any) {
 		console.error('Failed to update git stack:', error);
 		if (error.message?.includes('UNIQUE constraint failed')) {
+			if (error.message?.includes('stack_environment_variables')) {
+				return json({ error: 'Duplicate environment variable keys detected' }, { status: 400 });
+			}
 			return json({ error: 'A git stack with this name already exists for this environment' }, { status: 400 });
 		}
 		return json({ error: 'Failed to update git stack' }, { status: 500 });
@@ -175,6 +189,9 @@ export const DELETE: RequestHandler = async (event) => {
 
 		// Delete the stack_sources record to free up the stack name
 		await deleteStackSource(existing.stackName, existing.environmentId);
+
+		// Delete all env var overrides for this stack (all environments)
+		await deleteStackEnvVars(existing.stackName);
 
 		// Delete from database
 		await deleteGitStack(id);

@@ -1,5 +1,5 @@
 import { json, type RequestHandler } from '@sveltejs/kit';
-import { getEnvSetting, setEnvSetting, getEnvironment } from '$lib/server/db';
+import { getEnvSetting, setEnvSetting, getEnvironment, setSetting } from '$lib/server/db';
 import {
 	checkScannerAvailability,
 	getScannerVersions,
@@ -15,6 +15,8 @@ export interface ScannerSettings {
 	scanner: ScannerType;
 	grypeArgs: string;
 	trivyArgs: string;
+	grypeImage: string;
+	trivyImage: string;
 }
 
 export const GET: RequestHandler = async ({ url, cookies }) => {
@@ -39,7 +41,9 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 		const settings: ScannerSettings = {
 			scanner: await getEnvSetting('vulnerability_scanner', parsedEnvId) || 'none',
 			grypeArgs: await getEnvSetting('grype_cli_args', parsedEnvId) || globalDefaults.grypeArgs,
-			trivyArgs: await getEnvSetting('trivy_cli_args', parsedEnvId) || globalDefaults.trivyArgs
+			trivyArgs: await getEnvSetting('trivy_cli_args', parsedEnvId) || globalDefaults.trivyArgs,
+			grypeImage: globalDefaults.grypeImage,
+			trivyImage: globalDefaults.trivyImage
 		};
 
 		// Fast path: return just settings without Docker checks
@@ -80,7 +84,7 @@ export const POST: RequestHandler = async ({ request, url, cookies }) => {
 
 	try {
 		const body = await request.json();
-		const { scanner, grypeArgs, trivyArgs, envId } = body;
+		const { scanner, grypeArgs, trivyArgs, grypeImage, trivyImage, envId } = body;
 		const parsedEnvId = envId ? parseInt(envId) : undefined;
 
 		// Permission check with environment context
@@ -104,6 +108,12 @@ export const POST: RequestHandler = async ({ request, url, cookies }) => {
 		if (trivyArgs !== undefined) {
 			await setEnvSetting('trivy_cli_args', trivyArgs, parsedEnvId);
 		}
+		if (grypeImage !== undefined && typeof grypeImage === 'string') {
+			await setSetting('default_grype_image', grypeImage);
+		}
+		if (trivyImage !== undefined && typeof trivyImage === 'string') {
+			await setSetting('default_trivy_image', trivyImage);
+		}
 
 		// Get global defaults for fallback
 		const globalDefaults = await getGlobalScannerDefaults();
@@ -113,7 +123,9 @@ export const POST: RequestHandler = async ({ request, url, cookies }) => {
 			settings: {
 				scanner: await getEnvSetting('vulnerability_scanner', parsedEnvId) || 'none',
 				grypeArgs: await getEnvSetting('grype_cli_args', parsedEnvId) || globalDefaults.grypeArgs,
-				trivyArgs: await getEnvSetting('trivy_cli_args', parsedEnvId) || globalDefaults.trivyArgs
+				trivyArgs: await getEnvSetting('trivy_cli_args', parsedEnvId) || globalDefaults.trivyArgs,
+				grypeImage: globalDefaults.grypeImage,
+				trivyImage: globalDefaults.trivyImage
 			}
 		});
 	} catch (error) {
@@ -154,6 +166,9 @@ export const DELETE: RequestHandler = async ({ url, cookies }) => {
 		const removed: string[] = [];
 		const errors: string[] = [];
 
+		// Get configured scanner images
+		const globalDefaults = await getGlobalScannerDefaults();
+
 		// Determine which images to remove
 		const scannersToRemove: ('grype' | 'trivy')[] =
 			scanner === 'grype' ? ['grype'] :
@@ -161,7 +176,7 @@ export const DELETE: RequestHandler = async ({ url, cookies }) => {
 			['grype', 'trivy'];
 
 		for (const scannerType of scannersToRemove) {
-			const imageName = scannerType === 'grype' ? 'anchore/grype' : 'aquasec/trivy';
+			const imageName = scannerType === 'grype' ? globalDefaults.grypeImage.split(':')[0] : globalDefaults.trivyImage.split(':')[0];
 
 			// Find the image
 			const image = images.find((img) =>

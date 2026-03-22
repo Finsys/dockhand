@@ -3,10 +3,14 @@ import { renameContainer, inspectContainer } from '$lib/server/docker';
 import { renameAutoUpdateSchedule } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
 import { auditContainer } from '$lib/server/audit';
+import { validateDockerIdParam } from '$lib/server/docker-validation';
 import type { RequestHandler } from './$types';
 
 export const POST: RequestHandler = async (event) => {
 	const { params, request, url, cookies } = event;
+	const invalid = validateDockerIdParam(params.id, 'container');
+	if (invalid) return invalid;
+
 	const auth = await authorize(cookies);
 
 	const envId = url.searchParams.get('env');
@@ -46,8 +50,11 @@ export const POST: RequestHandler = async (event) => {
 		}
 
 		return json({ success: true });
-	} catch (error) {
-		console.error('Error renaming container:', error);
+	} catch (error: any) {
+		if (error?.statusCode === 404) {
+			return json({ error: error.json?.message || 'Container not found' }, { status: 404 });
+		}
+		console.error('Error renaming container:', error?.message || error);
 		return json({ error: 'Failed to rename container' }, { status: 500 });
 	}
 };

@@ -13,10 +13,14 @@ export interface GridItem {
 
 export interface DashboardPreferences {
 	gridLayout: GridItem[];
+	locked: boolean;
+	viewMode: 'grid' | 'list';
 }
 
 const defaultPreferences: DashboardPreferences = {
-	gridLayout: []
+	gridLayout: [],
+	locked: false,
+	viewMode: 'grid'
 };
 
 // Environment info from API
@@ -147,16 +151,20 @@ function createDashboardStore() {
 				const data = await response.json();
 				// Handle migration from old format
 				if (data.gridLayout && Array.isArray(data.gridLayout)) {
-					set({ gridLayout: data.gridLayout });
+					set({
+						gridLayout: data.gridLayout,
+						locked: data.locked ?? false,
+						viewMode: data.viewMode ?? 'grid'
+					});
 				} else {
-					set({ gridLayout: [] });
+					set(defaultPreferences);
 				}
 			} else {
-				set({ gridLayout: [] });
+				set(defaultPreferences);
 			}
 		} catch (error) {
 			console.error('Failed to load dashboard preferences:', error);
-			set({ gridLayout: [] });
+			set(defaultPreferences);
 		} finally {
 			// Always mark as initialized so saves can proceed
 			initialized = true;
@@ -200,6 +208,24 @@ function createDashboardStore() {
 					h: item.h
 				}));
 				const newPrefs = { ...prefs, gridLayout: cleanLayout };
+				if (initialized) {
+					scheduleSave(newPrefs);
+				}
+				return newPrefs;
+			});
+		},
+		setLocked: (locked: boolean) => {
+			update(prefs => {
+				const newPrefs = { ...prefs, locked };
+				if (initialized) {
+					scheduleSave(newPrefs);
+				}
+				return newPrefs;
+			});
+		},
+		setViewMode: (viewMode: 'grid' | 'list') => {
+			update(prefs => {
+				const newPrefs = { ...prefs, viewMode };
 				if (initialized) {
 					scheduleSave(newPrefs);
 				}
