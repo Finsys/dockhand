@@ -35,7 +35,7 @@ export const openapiSpec = {
 			cookieAuth: {
 				type: 'apiKey' as const,
 				in: 'cookie' as const,
-				name: 'session',
+				name: 'dockhand_session',
 				description: 'Session cookie set after successful login via /api/auth/login'
 			}
 		},
@@ -208,7 +208,15 @@ export const openapiSpec = {
 						properties: {
 							id: { type: 'integer' },
 							username: { type: 'string' },
-							isAdmin: { type: 'boolean' }
+							email: { type: 'string', nullable: true },
+							displayName: { type: 'string', nullable: true },
+							avatar: { type: 'string', nullable: true },
+							isAdmin: { type: 'boolean' },
+							provider: { type: 'string', nullable: true },
+							permissions: {
+								type: 'array',
+								items: { type: 'string' }
+							}
 						}
 					}
 				}
@@ -283,25 +291,42 @@ export const openapiSpec = {
 				},
 				responses: {
 					'200': {
-						description: 'Login successful. Session cookie is set.',
+						description: 'Login successful or MFA required. Session cookie is set on success.',
 						content: {
 							'application/json': {
 								schema: {
-									type: 'object',
-									properties: {
-										success: { type: 'boolean' },
-										user: {
+									oneOf: [
+										{
 											type: 'object',
+											description: 'MFA required – re-submit with mfaToken',
 											properties: {
-												id: { type: 'integer' },
-												username: { type: 'string' }
-											}
+												requiresMfa: {
+													type: 'boolean',
+													example: true,
+													description: 'If true, a second request with mfaToken is needed'
+												}
+											},
+											required: ['requiresMfa']
 										},
-										mfaRequired: {
-											type: 'boolean',
-											description: 'If true, a second request with mfaToken is needed'
+										{
+											type: 'object',
+											description: 'Login successful',
+											properties: {
+												success: { type: 'boolean', example: true },
+												user: {
+													type: 'object',
+													properties: {
+														id: { type: 'integer' },
+														username: { type: 'string' },
+														email: { type: 'string', nullable: true },
+														displayName: { type: 'string', nullable: true },
+														isAdmin: { type: 'boolean' }
+													}
+												}
+											},
+											required: ['success', 'user']
 										}
-									}
+									]
 								}
 							}
 						}
@@ -333,6 +358,7 @@ export const openapiSpec = {
 				description:
 					'Returns the current authentication state including whether auth is enabled and the authenticated user details.',
 				tags: ['Auth'],
+				security: [],
 				responses: {
 					'200': {
 						description: 'Current session information',

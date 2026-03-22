@@ -10,12 +10,6 @@
 		// Dynamically import swagger-ui-dist to avoid SSR issues
 		const { default: SwaggerUIBundle } = await import('swagger-ui-dist/swagger-ui-bundle');
 
-		// Import CSS
-		const link = document.createElement('link');
-		link.rel = 'stylesheet';
-		link.href = '/swagger-ui.css';
-		document.head.appendChild(link);
-
 		const el = document.getElementById('swagger-ui');
 		if (el) {
 			SwaggerUIBundle({
