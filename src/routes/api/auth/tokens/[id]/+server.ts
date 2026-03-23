@@ -14,8 +14,8 @@ import { audit } from '$lib/server/audit';
  * DELETE /api/auth/tokens/{id}
  */
 export const DELETE: RequestHandler = async (event) => {
-	const { cookies, request, params } = event;
-	const auth = await authorize(cookies, request);
+	const { cookies, params } = event;
+	const auth = await authorize(cookies);
 
 	if (!auth.authEnabled) {
 		return json({ error: 'Authentication is not enabled' }, { status: 400 });
@@ -37,11 +37,12 @@ export const DELETE: RequestHandler = async (event) => {
 			return json({ error: 'Token not found or access denied' }, { status: 404 });
 		}
 
-		// Audit log
+		// Audit log (entity is the user, token details in description)
 		await audit(event, 'delete', 'user', {
-			entityId: String(tokenId),
-			description: `API token ${tokenId} revoked`,
-			details: { tokenId }
+			entityId: String(auth.user.id),
+			entityName: auth.user.username,
+			description: `API token ${tokenId} revoked by ${auth.user.username}`,
+			details: { tokenId, revokedBy: auth.user.id }
 		});
 
 		return json({ success: true });

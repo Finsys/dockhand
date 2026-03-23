@@ -24,6 +24,18 @@ import type { AuthenticatedUser } from './auth';
 // Token prefix for detection in logs and secret scanners
 const TOKEN_PREFIX = 'dh_';
 const TOKEN_BYTES = 32;
+// Expected token length: 'dh_' (3) + 32 bytes base64url (43) = 46 chars
+const TOKEN_MAX_LENGTH = 200;
+
+// Pre-computed valid Argon2id hash for timing-attack protection.
+// Generated at module init so verifyPassword() never throws on the dummy path.
+let TIMING_DUMMY_HASH: string | null = null;
+hashPassword('dh_timing_attack_dummy_token_value').then(h => {
+	TIMING_DUMMY_HASH = h;
+}).catch(() => {
+	// Fallback: if hash generation fails, timing protection will be skipped
+	console.warn('[ApiToken] Failed to generate timing dummy hash');
+});
 
 /**
  * Generate a new API token for a user.
@@ -81,8 +93,8 @@ export async function generateApiToken(
  * @returns AuthenticatedUser or null for invalid/expired tokens
  */
 export async function validateApiToken(rawToken: string): Promise<AuthenticatedUser | null> {
-	// Quick check: format validation
-	if (!rawToken.startsWith(TOKEN_PREFIX)) {
+	// Input validation: reject malformed tokens early (prevents DoS via oversized Argon2id input)
+	if (!rawToken || rawToken.length > TOKEN_MAX_LENGTH || !rawToken.startsWith(TOKEN_PREFIX)) {
 		return null;
 	}
 
@@ -101,11 +113,9 @@ export async function validateApiToken(rawToken: string): Promise<AuthenticatedU
 
 	// Timing-attack protection: run hash operation even with no candidates
 	if (candidates.length === 0) {
-		// Dummy verification prevents timing leak from different response times
-		await verifyPassword(
-			rawToken,
-			'$argon2id$v=19$m=65536,t=3,p=1$dummysalt1234567$dummyhash12345678901234567890123456789012'
-		);
+		if (TIMING_DUMMY_HASH) {
+			await verifyPassword(rawToken, TIMING_DUMMY_HASH);
+		}
 		return null;
 	}
 
@@ -125,8 +135,8 @@ export async function validateApiToken(rawToken: string): Promise<AuthenticatedU
 			const isValid = await verifyPassword(rawToken, candidate.tokenHash);
 
 			if (isValid) {
-				// Update last_used (fire-and-forget)
-				db.update(apiTokens)
+				// Update last_used (fire-and-forget, void signals intentional Promise ignore)
+				void db.update(apiTokens)
 					.set({ lastUsed: new Date().toISOString() })
 					.where(eq(apiTokens.id, candidate.id))
 					.catch((err: unknown) => console.error('[ApiToken] Failed to update last_used:', err));

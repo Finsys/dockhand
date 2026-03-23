@@ -14,8 +14,8 @@ import { audit } from '$lib/server/audit';
 /**
  * GET /api/auth/tokens — List own tokens
  */
-export const GET: RequestHandler = async ({ cookies, request }) => {
-	const auth = await authorize(cookies, request);
+export const GET: RequestHandler = async ({ cookies }) => {
+	const auth = await authorize(cookies);
 
 	if (!auth.authEnabled) {
 		return json({ error: 'Authentication is not enabled' }, { status: 400 });
@@ -39,7 +39,7 @@ export const GET: RequestHandler = async ({ cookies, request }) => {
  */
 export const POST: RequestHandler = async (event) => {
 	const { cookies, request } = event;
-	const auth = await authorize(cookies, request);
+	const auth = await authorize(cookies);
 
 	if (!auth.authEnabled) {
 		return json({ error: 'Authentication is not enabled' }, { status: 400 });
@@ -84,12 +84,12 @@ export const POST: RequestHandler = async (event) => {
 			expiresAt ?? null
 		);
 
-		// Audit log
+		// Audit log (entity is the user, token details in description)
 		await audit(event, 'create', 'user', {
-			entityId: String(result.tokenId),
-			entityName: name.trim(),
-			description: `API token "${name.trim()}" created`,
-			details: { tokenPrefix: result.tokenPrefix, expiresAt: expiresAt ?? 'never' }
+			entityId: String(auth.user.id),
+			entityName: auth.user.username,
+			description: `API token "${name.trim()}" created (prefix: ${result.tokenPrefix})`,
+			details: { tokenId: result.tokenId, tokenPrefix: result.tokenPrefix, expiresAt: expiresAt ?? 'never' }
 		});
 
 		return json(
