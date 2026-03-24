@@ -34,6 +34,7 @@ let cachedMounts: Array<{ source: string; destination: string }> | null = null;
 // Used by scanner to replicate how Dockhand connects to Docker
 let cachedOwnDockerHost: string | null = null;
 let cachedOwnNetworkMode: string | null = null;
+let cachedOwnExtraHosts: string[] | null = null;
 
 /**
  * Get our own container ID
@@ -85,12 +86,11 @@ export async function detectHostDataDir(): Promise<string | null> {
 	if (process.env.HOST_DATA_DIR) {
 		cachedHostDataDir = process.env.HOST_DATA_DIR;
 		console.log(`[HostPath] Using HOST_DATA_DIR from environment: ${cachedHostDataDir}`);
-		return cachedHostDataDir;
 	}
 
 	const containerId = getOwnContainerId();
 	if (!containerId) {
-		console.warn('[HostPath] Running in Docker but could not detect container ID');
+		console.warn('[HostPath] Running in Docker but could not detect container ID; ExtraHosts will not be mirrored to sidecars');
 		return null;
 	}
 
@@ -140,6 +140,9 @@ export async function detectHostDataDir(): Promise<string | null> {
 			Config?: {
 				Env?: string[];
 			};
+			HostConfig?: {
+				ExtraHosts?: string[];
+			};
 			NetworkSettings?: {
 				Networks?: Record<string, unknown>;
 			};
@@ -174,6 +177,19 @@ export async function detectHostDataDir(): Promise<string | null> {
 			if (cachedOwnNetworkMode) {
 				console.log(`[HostPath] Detected own network: ${cachedOwnNetworkMode}`);
 			}
+		}
+
+		cachedOwnExtraHosts = containerInfo.HostConfig?.ExtraHosts?.length
+			? [...containerInfo.HostConfig.ExtraHosts]
+			: null;
+		if (cachedOwnExtraHosts) {
+			console.log(`[HostPath] Detected own ExtraHosts: ${cachedOwnExtraHosts.join(', ')}`);
+		}
+
+		// Explicit override wins for DATA_DIR path, but we still inspect to populate
+		// mounts/network/DOCKER_HOST/ExtraHosts caches for sibling sidecars.
+		if (cachedHostDataDir) {
+			return cachedHostDataDir;
 		}
 
 		// Find the mount for our DATA_DIR
@@ -227,6 +243,15 @@ export function getOwnDockerHost(): string | null {
  */
 export function getOwnNetworkMode(): string | null {
 	return cachedOwnNetworkMode;
+}
+
+/**
+ * Get the ExtraHosts entries configured on Dockhand itself.
+ * Used to mirror host aliases into sibling sidecar containers.
+ * Populated by detectHostDataDir() at startup.
+ */
+export function getOwnExtraHosts(): string[] | null {
+	return cachedOwnExtraHosts ? [...cachedOwnExtraHosts] : null;
 }
 
 /**

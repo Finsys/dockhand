@@ -3950,6 +3950,7 @@ export async function runContainer(options: {
 	cmd: string[];
 	binds?: string[];
 	env?: string[];
+	extraHosts?: string[];
 	name?: string;
 	envId?: number | null;
 }): Promise<{ stdout: string; stderr: string }> {
@@ -3970,6 +3971,10 @@ export async function runContainer(options: {
 			AutoRemove: false // Never use AutoRemove - we clean up manually after fetching logs
 		}
 	};
+
+	if (options.extraHosts && options.extraHosts.length > 0) {
+		containerConfig.HostConfig.ExtraHosts = options.extraHosts;
+	}
 
 	const createResult = await dockerJsonRequest<{ Id: string }>(
 		`/containers/create?name=${encodeURIComponent(containerName)}`,
@@ -4030,6 +4035,7 @@ export async function runContainerWithStreaming(options: {
 	cmd: string[];
 	binds?: string[];
 	env?: string[];
+	extraHosts?: string[];
 	name?: string;
 	user?: string;
 	envId?: number | null;
@@ -4056,6 +4062,10 @@ export async function runContainerWithStreaming(options: {
 			}
 		}
 	};
+
+	if (options.extraHosts && options.extraHosts.length > 0) {
+		containerConfig.HostConfig.ExtraHosts = options.extraHosts;
+	}
 
 	// Set user if specified (needed for rootless Docker socket access)
 	if (options.user) {

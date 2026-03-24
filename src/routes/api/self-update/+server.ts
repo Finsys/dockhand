@@ -1,6 +1,13 @@
 import { json } from '@sveltejs/kit';
 import { authorize } from '$lib/server/authorize';
-import { getOwnContainerId, getHostDockerSocket, getOwnDockerHost, getOwnNetworkMode } from '$lib/server/host-path';
+import {
+	detectHostDataDir,
+	getOwnContainerId,
+	getHostDockerSocket,
+	getOwnDockerHost,
+	getOwnExtraHosts,
+	getOwnNetworkMode
+} from '$lib/server/host-path';
 import { buildRegistryAuthHeader, unixSocketRequest, unixSocketStreamRequest } from '$lib/server/docker';
 import type { RequestHandler } from './$types';
 import { prefersJSON, sseToJSON } from '$lib/server/sse';
@@ -255,6 +262,9 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 		return json({ error: 'Not running in Docker' }, { status: 400 });
 	}
 
+	// Populate cached inspect data used to mirror Dockhand's own sidecar settings.
+	await detectHostDataDir().catch(() => null);
+
 	const writable = await isDockerWritable(containerId);
 	if (!writable) {
 		return json({
@@ -395,6 +405,12 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 				// Configure updater's Docker access based on connection type
 				const tcpHost = getDockerTcpHost();
 				const updaterHostConfig: Record<string, unknown> = { AutoRemove: true };
+				const updaterExtraHosts = getOwnExtraHosts() ?? undefined;
+
+				if (updaterExtraHosts?.length) {
+					updaterHostConfig.ExtraHosts = updaterExtraHosts;
+					console.log(`[SelfUpdate] Reusing ExtraHosts for updater: ${updaterExtraHosts.join(', ')}`);
+				}
 
 				if (tcpHost) {
 					// TCP: pass DOCKER_HOST so docker CLI in sidecar uses TCP

@@ -16,7 +16,15 @@ import {
 } from './docker';
 import { getEnvironment, getEnvSetting, getSetting } from './db';
 import { sendEventNotification } from './notifications';
-import { getHostDockerSocket, getHostDataDir, extractUidFromSocketPath, getOwnDockerHost, getOwnNetworkMode } from './host-path';
+import {
+	detectHostDataDir,
+	getHostDockerSocket,
+	getHostDataDir,
+	extractUidFromSocketPath,
+	getOwnDockerHost,
+	getOwnExtraHosts,
+	getOwnNetworkMode
+} from './host-path';
 import { resolve } from 'node:path';
 import { mkdir, chown } from 'node:fs/promises';
 
@@ -610,6 +618,10 @@ async function runScannerContainerCore(
 ): Promise<string> {
 	console.log(`[Scanner] Starting ${scannerType} scan for image: ${imageName}, envId: ${envId ?? 'local'}`);
 
+	// Ensure startup inspect caches are populated before we mirror Dockhand's own
+	// Docker access settings into sibling sidecars.
+	await detectHostDataDir().catch(() => null);
+
 	// Always use the base cache path — serial lock prevents concurrent conflicts
 	const basePath = scannerType === 'grype' ? '/cache/grype' : '/cache/trivy';
 	const dbPath = basePath;
@@ -625,6 +637,7 @@ async function runScannerContainerCore(
 	let rootlessUid: string | undefined;
 	let scannerNetworkMode: string | undefined;
 	let scannerDockerHost: string | undefined;
+	const scannerExtraHosts = !isHawser ? getOwnExtraHosts() ?? undefined : undefined;
 
 	// Check if Dockhand itself uses TCP to reach Docker (e.g., socket proxy).
 	// Detected at startup from Dockhand's own container inspect data.
@@ -636,7 +649,12 @@ async function runScannerContainerCore(
 		// TCP mode: scanner uses the same DOCKER_HOST + network as Dockhand
 		scannerDockerHost = ownDockerHost;
 		scannerNetworkMode = getOwnNetworkMode() ?? undefined;
-		console.log(`[Scanner] TCP mode (from container inspect) - DOCKER_HOST=${scannerDockerHost}, network=${scannerNetworkMode ?? 'default'}`);
+		console.log(
+			`[Scanner] TCP mode (from container inspect) - DOCKER_HOST=${scannerDockerHost}, network=${scannerNetworkMode ?? 'default'}`
+		);
+		if (scannerExtraHosts?.length) {
+			console.log(`[Scanner] Reusing ExtraHosts from Dockhand: ${scannerExtraHosts.join(', ')}`);
+		}
 	} else if (isHawser) {
 		// Hawser: scanner runs on remote host, uses remote host's standard Docker socket
 		hostSocketPath = '/var/run/docker.sock';
@@ -652,6 +670,10 @@ async function runScannerContainerCore(
 			rootlessUid = uid;
 			console.log(`[Scanner] Rootless Docker detected (UID ${rootlessUid})`);
 			console.log(`[Scanner] Scanner will run as root inside container (maps to UID ${rootlessUid} on host via user namespace)`);
+		}
+
+		if (scannerExtraHosts?.length) {
+			console.log(`[Scanner] Reusing ExtraHosts from Dockhand: ${scannerExtraHosts.join(', ')}`);
 		}
 	}
 
@@ -722,6 +744,7 @@ async function runScannerContainerCore(
 		cmd,
 		binds,
 		env: envVars,
+		extraHosts: scannerExtraHosts,
 		name: `dockhand-${scannerType}-${Date.now()}`,
 		envId,
 		networkMode: scannerNetworkMode,
