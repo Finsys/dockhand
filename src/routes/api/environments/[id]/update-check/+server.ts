@@ -33,7 +33,9 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 				enabled: false,
 				cron: '0 4 * * *',
 				autoUpdate: false,
-				vulnerabilityCriteria: 'never'
+				vulnerabilityCriteria: 'never',
+				minimumImageAgeDays: 0,
+				bypassAgeForSecurityFixes: false
 			}
 		});
 	} catch (error) {
@@ -62,11 +64,18 @@ export const POST: RequestHandler = async ({ params, request, cookies }) => {
 
 		const data = await request.json();
 
+		const rawAge = Number(data.minimumImageAgeDays ?? 0);
+		if (!Number.isFinite(rawAge) || rawAge < 0) {
+			return json({ error: 'minimumImageAgeDays must be a non-negative number' }, { status: 400 });
+		}
+
 		const settings = {
 			enabled: data.enabled ?? false,
 			cron: data.cron || '0 4 * * *',
 			autoUpdate: data.autoUpdate ?? false,
-			vulnerabilityCriteria: data.vulnerabilityCriteria || 'never'
+			vulnerabilityCriteria: data.vulnerabilityCriteria || 'never',
+			minimumImageAgeDays: Math.min(365, Math.floor(rawAge)),
+			bypassAgeForSecurityFixes: Boolean(data.bypassAgeForSecurityFixes ?? false)
 		};
 
 		// Save settings to database

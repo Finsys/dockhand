@@ -131,6 +131,12 @@ export const autoUpdateSettings = pgTable('auto_update_settings', {
 	scheduleType: text('schedule_type').default('daily'),
 	cronExpression: text('cron_expression'),
 	vulnerabilityCriteria: text('vulnerability_criteria').default('never'), // 'never' | 'any' | 'critical_high' | 'critical' | 'more_than_current'
+	/** Minimum image age in days before auto-updating. null = use environment default. */
+	minimumImageAgeDays: integer('minimum_image_age_days'),
+	/** Bypass age gate when new image fixes critical/high CVEs. null = use environment default. */
+	bypassAgeForSecurityFixes: boolean('bypass_age_for_security_fixes'),
+	/** Exclude this container from environment-level auto-updates (still shows update availability). */
+	excludedFromEnvUpdate: boolean('excluded_from_env_update').default(false),
 	lastChecked: timestamp('last_checked', { mode: 'string' }),
 	lastUpdated: timestamp('last_updated', { mode: 'string' }),
 	createdAt: timestamp('created_at', { mode: 'string' }).defaultNow(),

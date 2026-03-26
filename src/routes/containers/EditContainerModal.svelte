@@ -167,6 +167,9 @@
 	let autoUpdateEnabled = $state(false);
 	let autoUpdateCronExpression = $state('0 3 * * *');
 	let vulnerabilityCriteria = $state<VulnerabilityCriteria>('never');
+	let minimumImageAgeDays = $state<number | null>(null);
+	let bypassAgeForSecurityFixes = $state<boolean | null>(null);
+	let excludedFromEnvUpdate = $state(false);
 	let currentEnvId = $state<number | null>(null);
 	currentEnvironment.subscribe(env => currentEnvId = env?.id || null);
 
@@ -223,6 +226,9 @@
 		enabled: boolean;
 		cronExpression: string;
 		vulnerabilityCriteria: string;
+		minimumImageAgeDays: number | null;
+		bypassAgeForSecurityFixes: boolean | null;
+		excludedFromEnvUpdate: boolean;
 	} | null>(null);
 
 	let loading = $state(false);
@@ -305,10 +311,16 @@
 				autoUpdateEnabled = data.enabled || false;
 				autoUpdateCronExpression = data.cronExpression || '0 3 * * *';
 				vulnerabilityCriteria = data.vulnerabilityCriteria || 'never';
+				minimumImageAgeDays = data.minimumImageAgeDays ?? null;
+				bypassAgeForSecurityFixes = data.bypassAgeForSecurityFixes ?? null;
+				excludedFromEnvUpdate = data.excludedFromEnvUpdate ?? false;
 				originalAutoUpdate = {
 					enabled: autoUpdateEnabled,
 					cronExpression: autoUpdateCronExpression,
-					vulnerabilityCriteria: vulnerabilityCriteria
+					vulnerabilityCriteria: vulnerabilityCriteria,
+					minimumImageAgeDays: minimumImageAgeDays,
+					bypassAgeForSecurityFixes: bypassAgeForSecurityFixes,
+					excludedFromEnvUpdate: excludedFromEnvUpdate
 				};
 			}
 		} catch (err) {
@@ -325,7 +337,10 @@
 				body: JSON.stringify({
 					enabled: autoUpdateEnabled,
 					cronExpression: autoUpdateCronExpression,
-					vulnerabilityCriteria: vulnerabilityCriteria
+					vulnerabilityCriteria: vulnerabilityCriteria,
+					minimumImageAgeDays: minimumImageAgeDays,
+					bypassAgeForSecurityFixes: bypassAgeForSecurityFixes,
+					excludedFromEnvUpdate: excludedFromEnvUpdate
 				})
 			});
 		} catch (err) {
@@ -687,7 +702,10 @@
 		return (
 			autoUpdateEnabled !== originalAutoUpdate.enabled ||
 			autoUpdateCronExpression !== originalAutoUpdate.cronExpression ||
-			vulnerabilityCriteria !== originalAutoUpdate.vulnerabilityCriteria
+			vulnerabilityCriteria !== originalAutoUpdate.vulnerabilityCriteria ||
+			minimumImageAgeDays !== originalAutoUpdate.minimumImageAgeDays ||
+			bypassAgeForSecurityFixes !== originalAutoUpdate.bypassAgeForSecurityFixes ||
+			excludedFromEnvUpdate !== originalAutoUpdate.excludedFromEnvUpdate
 		);
 	}
 
@@ -1121,6 +1139,9 @@
 					bind:autoUpdateEnabled
 					bind:autoUpdateCronExpression
 					bind:vulnerabilityCriteria
+					bind:minimumImageAgeDays
+					bind:bypassAgeForSecurityFixes
+					bind:excludedFromEnvUpdate
 					{configSets}
 					bind:selectedConfigSetId
 					bind:errors

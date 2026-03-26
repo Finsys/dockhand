@@ -4,28 +4,55 @@
 	import CronEditor from '$lib/components/cron-editor.svelte';
 	import VulnerabilityCriteriaSelector, { type VulnerabilityCriteria } from '$lib/components/VulnerabilityCriteriaSelector.svelte';
 	import { currentEnvironment } from '$lib/stores/environment';
-	import { Ship, Cable, ExternalLink, AlertTriangle, Info } from 'lucide-svelte';
+	import { Ship, Cable, ExternalLink, AlertTriangle, Info, Clock, ShieldCheck, Ban } from 'lucide-svelte';
+	import { ToggleGroup } from '$lib/components/ui/toggle-pill';
 	import type { SystemContainerType } from '$lib/types';
 
 	interface Props {
 		enabled: boolean;
 		cronExpression: string;
 		vulnerabilityCriteria: VulnerabilityCriteria;
+		minimumImageAgeDays: number | null;
+		bypassAgeForSecurityFixes: boolean | null;
+		excludedFromEnvUpdate: boolean;
 		systemContainer?: SystemContainerType | null;
 		onenablechange?: (enabled: boolean) => void;
 		oncronchange?: (cron: string) => void;
 		oncriteriachange?: (criteria: VulnerabilityCriteria) => void;
+		onagechange?: (days: number | null) => void;
+		onbypasschange?: (bypass: boolean | null) => void;
+		onexcludedchange?: (excluded: boolean) => void;
 	}
 
 	let {
 		enabled = $bindable(),
 		cronExpression = $bindable(),
 		vulnerabilityCriteria = $bindable(),
+		minimumImageAgeDays = $bindable(),
+		bypassAgeForSecurityFixes = $bindable(),
+		excludedFromEnvUpdate = $bindable(),
 		systemContainer = null,
 		onenablechange,
 		oncronchange,
-		oncriteriachange
+		oncriteriachange,
+		onagechange,
+		onbypasschange,
+		onexcludedchange
 	}: Props = $props();
+
+	function handleAgeChange(e: Event) {
+		const val = (e.target as HTMLInputElement).value;
+		if (val === '') {
+			minimumImageAgeDays = null;
+			onagechange?.(null);
+		} else {
+			const num = parseInt(val);
+			if (!isNaN(num) && num >= 0) {
+				minimumImageAgeDays = num;
+				onagechange?.(num);
+			}
+		}
+	}
 
 	let envHasScanning = $state(false);
 
@@ -114,6 +141,62 @@
 					</p>
 				</div>
 			{/if}
+
+			<div class="space-y-1.5">
+				<div class="flex items-center gap-2">
+					<Clock class="w-3.5 h-3.5 text-blue-500" />
+					<Label class="text-xs font-medium">Minimum image age (days)</Label>
+				</div>
+				<input
+					type="number"
+					min="0"
+					max="365"
+					placeholder="Inherit from environment"
+					class="w-full h-8 rounded-md border border-input bg-background px-3 py-1 text-xs"
+					value={minimumImageAgeDays ?? ''}
+					oninput={handleAgeChange}
+				/>
+				<p class="text-xs text-muted-foreground">
+					Leave empty to use environment default. Set to 0 to disable for this container.
+				</p>
+			</div>
+
+			{#if minimumImageAgeDays !== 0 && envHasScanning}
+				<div class="space-y-1.5">
+					<div class="flex items-center gap-2">
+						<ShieldCheck class="w-3.5 h-3.5 text-emerald-500" />
+						<Label class="text-xs font-medium">Bypass age gate for security fixes</Label>
+					</div>
+					<ToggleGroup
+						value={bypassAgeForSecurityFixes === null ? 'inherit' : bypassAgeForSecurityFixes ? 'yes' : 'no'}
+						options={[
+							{ value: 'inherit', label: 'Inherit' },
+							{ value: 'yes', label: 'Yes' },
+							{ value: 'no', label: 'No' }
+						]}
+						onchange={(val) => {
+							const mapped = val === 'inherit' ? null : val === 'yes';
+							bypassAgeForSecurityFixes = mapped;
+							onbypasschange?.(mapped);
+						}}
+					/>
+				</div>
+			{/if}
+		{/if}
+
+		<!-- Env-level exclusion — shown even when per-container auto-update is off -->
+		<div class="flex items-center gap-2 pt-2 border-t">
+			<Ban class="w-3.5 h-3.5 text-amber-500" />
+			<Label class="text-xs font-normal flex-1">Exclude from environment auto-updates</Label>
+			<TogglePill
+				bind:checked={excludedFromEnvUpdate}
+				onchange={(value) => onexcludedchange?.(value)}
+			/>
+		</div>
+		{#if excludedFromEnvUpdate}
+			<p class="text-xs text-muted-foreground">
+				This container will be skipped during environment-level scheduled updates. Update checks still show availability.
+			</p>
 		{/if}
 	</div>
 {/if}

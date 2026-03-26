@@ -2992,6 +2992,96 @@ export async function getRegistryManifestDigest(imageName: string): Promise<stri
 	}
 }
 
+/**
+ * Get the creation date of an image from the registry.
+ * This requires two API calls:
+ * 1. GET manifest to find the config blob digest
+ * 2. GET config blob to read the 'created' timestamp
+ *
+ * For manifest lists (multi-arch images), we resolve to the first platform's manifest
+ * and then fetch that manifest's config blob.
+ *
+ * @param imageName - Image reference (e.g., "nginx:latest")
+ * @returns ISO date string or null if unavailable
+ */
+export async function getImageCreatedDate(imageName: string): Promise<string | null> {
+	try {
+		const { registry, repo, tag } = parseImageReference(imageName);
+		const token = await getRegistryBearerToken(registry, repo);
+
+		const headers: Record<string, string> = {
+			'User-Agent': 'Dockhand/1.0',
+			'Accept': [
+				'application/vnd.docker.distribution.manifest.v2+json',
+				'application/vnd.oci.image.manifest.v1+json',
+				'application/vnd.docker.distribution.manifest.list.v2+json',
+				'application/vnd.oci.image.index.v1+json'
+			].join(', ')
+		};
+		if (token) headers['Authorization'] = token;
+
+		// Step 1: GET manifest
+		const manifestUrl = `https://${registry}/v2/${repo}/manifests/${tag}`;
+		const manifestResponse = await fetch(manifestUrl, { headers });
+		if (!manifestResponse.ok) return null;
+
+		const manifest = await manifestResponse.json();
+		let configDigest: string | null = null;
+
+		// Handle manifest list / OCI index (multi-arch images)
+		if (manifest.mediaType === 'application/vnd.docker.distribution.manifest.list.v2+json' ||
+			manifest.mediaType === 'application/vnd.oci.image.index.v1+json' ||
+			manifest.manifests) {
+			// Resolve to a platform-specific manifest matching the host architecture
+			const hostArch = process.arch === 'arm64' ? 'arm64' : process.arch === 'arm' ? 'arm' : 'amd64';
+			const platformManifest = manifest.manifests?.find(
+				(m: any) => m.platform?.architecture === hostArch && m.platform?.os === 'linux'
+			) || manifest.manifests?.[0];
+
+			if (!platformManifest?.digest) return null;
+
+			// Fetch the platform-specific manifest
+			const platformHeaders: Record<string, string> = {
+				'User-Agent': 'Dockhand/1.0',
+				'Accept': [
+					'application/vnd.docker.distribution.manifest.v2+json',
+					'application/vnd.oci.image.manifest.v1+json'
+				].join(', ')
+			};
+			if (token) platformHeaders['Authorization'] = token;
+
+			const platformUrl = `https://${registry}/v2/${repo}/manifests/${platformManifest.digest}`;
+			const platformResponse = await fetch(platformUrl, { headers: platformHeaders });
+			if (!platformResponse.ok) return null;
+
+			const platformManifestData = await platformResponse.json();
+			configDigest = platformManifestData.config?.digest;
+		} else {
+			// Single-arch manifest - config digest is directly available
+			configDigest = manifest.config?.digest;
+		}
+
+		if (!configDigest) return null;
+
+		// Step 2: GET config blob
+		const configHeaders: Record<string, string> = {
+			'User-Agent': 'Dockhand/1.0',
+			'Accept': 'application/octet-stream'
+		};
+		if (token) configHeaders['Authorization'] = token;
+
+		const configUrl = `https://${registry}/v2/${repo}/blobs/${configDigest}`;
+		const configResponse = await fetch(configUrl, { headers: configHeaders });
+		if (!configResponse.ok) return null;
+
+		const configData = await configResponse.json();
+		return configData.created || null;
+	} catch (e) {
+		console.error(`[Registry] Failed to get created date for ${imageName}: ${e}`);
+		return null;
+	}
+}
+
 export interface ImageUpdateCheckResult {
 	hasUpdate: boolean;
 	currentDigest?: string;
