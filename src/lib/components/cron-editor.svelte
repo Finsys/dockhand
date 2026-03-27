@@ -19,7 +19,7 @@
 	// Detect schedule type from cron expression
 	function detectScheduleType(cron: string): 'daily' | 'weekly' | 'custom' {
 		const parts = cron.split(' ');
-		if (parts.length < 5) return 'custom';
+		if (parts.length !== 5) return 'custom';
 
 		const [min, hr, day, month, dow] = parts;
 
@@ -137,23 +137,15 @@
 		onchange(newValue);
 	}
 
-	// Validate cron expression
+	// Validate cron expression (supports 5-field and 6-field with seconds)
 	function isValidCron(cron: string): boolean {
 		const parts = cron.trim().split(/\s+/);
-		if (parts.length !== 5) return false;
-
-		const [min, hr, day, month, dow] = parts;
+		if (parts.length !== 5 && parts.length !== 6) return false;
 
 		// Basic pattern validation (number, *, */n, range, list)
 		const cronFieldPattern = /^(\*|(\*\/\d+)|\d+(-\d+)?(,\d+(-\d+)?)*)$/;
 
-		return (
-			cronFieldPattern.test(min) &&
-			cronFieldPattern.test(hr) &&
-			cronFieldPattern.test(day) &&
-			cronFieldPattern.test(month) &&
-			cronFieldPattern.test(dow)
-		);
+		return parts.every((part) => cronFieldPattern.test(part));
 	}
 
 	// Human-readable description using cronstrue
