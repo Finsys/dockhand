@@ -17,7 +17,6 @@ import {
 import { getEnvironment, getEnvSetting, getSetting } from './db';
 import { sendEventNotification } from './notifications';
 import {
-	detectHostDataDir,
 	getHostDockerSocket,
 	getHostDataDir,
 	extractUidFromSocketPath,
@@ -617,10 +616,6 @@ async function runScannerContainerCore(
 	onOutput?: (line: string) => void
 ): Promise<string> {
 	console.log(`[Scanner] Starting ${scannerType} scan for image: ${imageName}, envId: ${envId ?? 'local'}`);
-
-	// Ensure startup inspect caches are populated before we mirror Dockhand's own
-	// Docker access settings into sibling sidecars.
-	await detectHostDataDir().catch(() => null);
 
 	// Always use the base cache path — serial lock prevents concurrent conflicts
 	const basePath = scannerType === 'grype' ? '/cache/grype' : '/cache/trivy';

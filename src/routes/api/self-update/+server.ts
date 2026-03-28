@@ -1,7 +1,6 @@
 import { json } from '@sveltejs/kit';
 import { authorize } from '$lib/server/authorize';
 import {
-	detectHostDataDir,
 	getOwnContainerId,
 	getHostDockerSocket,
 	getOwnDockerHost,
@@ -261,9 +260,6 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 	if (!containerId) {
 		return json({ error: 'Not running in Docker' }, { status: 400 });
 	}
-
-	// Populate cached inspect data used to mirror Dockhand's own sidecar settings.
-	await detectHostDataDir().catch(() => null);
 
 	const writable = await isDockerWritable(containerId);
 	if (!writable) {
