@@ -60,7 +60,7 @@ export const POST: RequestHandler = async ({ params, url, request }) => {
 		let scheduleType: 'daily' | 'weekly' | 'custom' = 'custom';
 		if (cronExpression) {
 			const parts = cronExpression.split(' ');
-			if (parts.length >= 5) {
+			if (parts.length === 5) {
 				const [, , day, month, dow] = parts;
 				if (dow !== '*' && day === '*' && month === '*') {
 					scheduleType = 'weekly';
