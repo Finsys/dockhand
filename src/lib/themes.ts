@@ -99,6 +99,7 @@ export const fonts: FontMeta[] = [
 	// Monospace (for a techy look)
 	{ id: 'jetbrains-mono', name: 'JetBrains Mono', family: "'JetBrains Mono', monospace", googleFont: 'JetBrains+Mono:wght@400;500;600;700' },
 	{ id: 'fira-code', name: 'Fira Code', family: "'Fira Code', monospace", googleFont: 'Fira+Code:wght@400;500;600;700' },
+	{ id: 'ibm-plex-mono', name: 'IBM Plex Mono', family: "'IBM Plex Mono', monospace", googleFont: 'IBM+Plex+Mono:wght@400;500;600;700' },
 
 	// Rounded/friendly
 	{ id: 'quicksand', name: 'Quicksand', family: "'Quicksand', sans-serif", googleFont: 'Quicksand:wght@400;500;600;700' },
