@@ -1,1 +1,1 @@
-ALTER TABLE `stack_sources` ADD `locked` integer DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE `stack_sources` ADD `locked` integer DEFAULT false NOT NULL;
