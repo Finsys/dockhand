@@ -40,7 +40,7 @@
 	type SortDirection = 'asc' | 'desc';
 
 	let stacks = $state<ComposeStackInfo[]>([]);
-	let stackSources = $state<Record<string, { sourceType: string; composePath?: string | null; repository?: any; gitStack?: any }>>({});
+	let stackSources = $state<Record<string, { sourceType: string; composePath?: string | null; repository?: any; gitStack?: any; locked?: boolean }>>({});
 	let stackEnvVarCounts = $state<Record<string, number>>({});
 	let gitStacks = $state<any[]>([]);
 	let gitRepositories = $state<any[]>([]);

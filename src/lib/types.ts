@@ -136,6 +136,7 @@ export interface ComposeStackInfo {
 	containerDetails: StackContainer[];
 	status: string;
 	sourceType?: 'external' | 'internal' | 'git';
+	locked?: boolean;
 	repository?: {
 		id: number;
 		name: string;

@@ -89,6 +89,7 @@ export interface ComposeStackInfo {
 	containerDetails: ContainerDetail[];
 	status: 'running' | 'stopped' | 'partial' | 'created';
 	sourceType?: StackSourceType;
+	locked?: boolean;
 	hasComposeFile?: boolean;
 }
 
@@ -1881,8 +1882,14 @@ export async function startStack(
  */
 export async function stopStack(
 	stackName: string,
-	envId?: number | null
+	envId?: number | null,
+	overrideLock = false
 ): Promise<StackOperationResult> {
+	const source = await getStackSource(stackName, envId);
+	if (source?.locked && !overrideLock) {
+		return { success: false, error: `Stack "${stackName}" is locked and cannot be stopped without override` };
+	}
+
 	const result = await requireComposeFile(stackName, envId);
 
 	if (!result.success) {
@@ -1951,8 +1958,14 @@ export async function restartStack(
 export async function downStack(
 	stackName: string,
 	envId?: number | null,
-	removeVolumes = false
+	removeVolumes = false,
+	overrideLock = false
 ): Promise<StackOperationResult> {
+	const source = await getStackSource(stackName, envId);
+	if (source?.locked && !overrideLock) {
+		return { success: false, error: `Stack "${stackName}" is locked and cannot be brought down without override` };
+	}
+
 	const result = await requireComposeFile(stackName, envId);
 
 	if (!result.success) {
@@ -2585,4 +2598,3 @@ export async function saveStackEnvVars(
 // They can be removed once all imports are updated
 
 export type { StackOperationResult as CreateStackResult };
-

@@ -18,11 +18,12 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 		const sources = await getStackSources(envIdNum);
 
 		// Convert to a map for easier lookup in the frontend
-		const sourceMap: Record<string, { sourceType: string; composePath?: string | null; repository?: any }> = {};
+		const sourceMap: Record<string, { sourceType: string; composePath?: string | null; repository?: any; locked?: boolean }> = {};
 		for (const source of sources) {
 			sourceMap[source.stackName] = {
 				sourceType: source.sourceType,
 				composePath: source.composePath,
+				locked: source.locked,
 				repository: source.repository
 			};
 		}

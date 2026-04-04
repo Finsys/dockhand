@@ -395,7 +395,7 @@ async function executeStackOperation(
 			break;
 		}
 		case 'stop': {
-			const result = await stopStack(name, envIdNum);
+			const result = await stopStack(name, envIdNum, false);
 			if (!result.success) throw new Error(result.error || 'Failed to stop stack');
 			break;
 		}
@@ -405,7 +405,7 @@ async function executeStackOperation(
 			break;
 		}
 		case 'down': {
-			const result = await downStack(name, envIdNum, options.removeVolumes ?? false);
+			const result = await downStack(name, envIdNum, options.removeVolumes ?? false, false);
 			if (!result.success) throw new Error(result.error || 'Failed to down stack');
 			break;
 		}

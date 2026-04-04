@@ -36,6 +36,13 @@
       "when": 1774155653752,
       "tag": "0004_add_git_stack_deploy_options",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1775331300000,
+      "tag": "0005_add_stack_lock",
+      "breakpoints": true
     }
   ]
 }
