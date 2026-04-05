@@ -528,6 +528,7 @@
 
 	// Count by status for selected stacks
 	const selectedRunning = $derived(selectedInFilter.filter(s => s.status === 'running' || s.status === 'partial' || s.status === 'restarting'));
+	const selectedRunningUnlocked = $derived(selectedRunning.filter(s => !isStackLocked(s.name)));
 	const selectedStopped = $derived(selectedInFilter.filter(s => s.status === 'stopped' || s.status === 'not deployed' || s.status === 'created'));
 
 	function toggleSelectAll() {
@@ -560,16 +561,16 @@
 	}
 
 	function bulkStop() {
-		batchOpTitle = `Stopping ${selectedRunning.length} stack${selectedRunning.length !== 1 ? 's' : ''}`;
+		batchOpTitle = `Stopping ${selectedRunningUnlocked.length} stack${selectedRunningUnlocked.length !== 1 ? 's' : ''}`;
 		batchOpOperation = 'stop';
-		batchOpItems = selectedRunning.map(s => ({ id: s.name, name: s.name }));
+		batchOpItems = selectedRunningUnlocked.map(s => ({ id: s.name, name: s.name }));
 		showBatchOpModal = true;
 	}
 
 	function bulkDown() {
-		batchOpTitle = `Bringing down ${selectedRunning.length} stack${selectedRunning.length !== 1 ? 's' : ''}`;
+		batchOpTitle = `Bringing down ${selectedRunningUnlocked.length} stack${selectedRunningUnlocked.length !== 1 ? 's' : ''}`;
 		batchOpOperation = 'down';
-		batchOpItems = selectedRunning.map(s => ({ id: s.name, name: s.name }));
+		batchOpItems = selectedRunningUnlocked.map(s => ({ id: s.name, name: s.name }));
 		showBatchOpModal = true;
 	}
 
@@ -803,6 +804,10 @@
 		return stackSources[stackName] || { sourceType: 'external' };
 	}
 
+	function isStackLocked(stackName: string): boolean {
+		return !!getStackSource(stackName).locked;
+	}
+
 	function getStackSystemType(stack: ComposeStackInfo): 'dockhand' | 'hawser' | null {
 		if (!stack.containerDetails) return null;
 		for (const c of stack.containerDetails) {
@@ -860,6 +865,10 @@
 	}
 
 	async function stopStack(name: string) {
+		if (isStackLocked(name)) {
+			showErrorDialog(`Cannot stop ${name}`, 'This stack is locked and cannot be stopped.');
+			return;
+		}
 		operationError = null;
 		stackActionLoading = name;
 		try {
@@ -931,6 +940,10 @@
 	}
 
 	async function downStack(name: string) {
+		if (isStackLocked(name)) {
+			showErrorDialog(`Cannot bring down ${name}`, 'This stack is locked and cannot be brought down.');
+			return;
+		}
 		operationError = null;
 		stackActionLoading = name;
 		stackDownLoading = name;
@@ -1397,13 +1410,13 @@
 					{/snippet}
 				</ConfirmPopover>
 			{/if}
-			{#if selectedRunning.length > 0 && $canAccess('stacks', 'stop')}
+			{#if selectedRunningUnlocked.length > 0 && $canAccess('stacks', 'stop')}
 				<ConfirmPopover
 					open={confirmBulkStop}
 					action="Stop"
 					itemType="stacks"
-					itemName="{selectedRunning.length} stack{selectedRunning.length !== 1 ? 's' : ''}"
-					title="Stop {selectedRunning.length}"
+					itemName="{selectedRunningUnlocked.length} stack{selectedRunningUnlocked.length !== 1 ? 's' : ''}"
+					title="Stop {selectedRunningUnlocked.length}"
 					unstyled
 					onConfirm={bulkStop}
 					onOpenChange={(open) => confirmBulkStop = open}
@@ -1416,13 +1429,13 @@
 					{/snippet}
 				</ConfirmPopover>
 			{/if}
-			{#if selectedRunning.length > 0 && $canAccess('stacks', 'stop')}
+			{#if selectedRunningUnlocked.length > 0 && $canAccess('stacks', 'stop')}
 				<ConfirmPopover
 					open={confirmBulkDown}
 					action="Down"
 					itemType="stacks"
-					itemName="{selectedRunning.length} stack{selectedRunning.length !== 1 ? 's' : ''}"
-					title="Down {selectedRunning.length}"
+					itemName="{selectedRunningUnlocked.length} stack{selectedRunningUnlocked.length !== 1 ? 's' : ''}"
+					title="Down {selectedRunningUnlocked.length}"
 					unstyled
 					onConfirm={bulkDown}
 					onOpenChange={(open) => confirmBulkDown = open}
@@ -1498,6 +1511,7 @@
 		>
 			{#snippet cell(column, stack, rowState)}
 				{@const source = getStackSource(stack.name)}
+				{@const isLocked = !!source.locked}
 				{#if column.id === 'name'}
 					{@const systemType = getStackSystemType(stack)}
 					{#if source.sourceType !== 'git'}
@@ -1833,7 +1847,7 @@
 										</Popover.Content>
 									</Popover.Root>
 								{/if}
-								{#if $canAccess('stacks', 'stop')}
+								{#if $canAccess('stacks', 'stop') && !isLocked}
 									<ConfirmPopover
 										open={confirmStopName === stack.name}
 										action="Stop"
@@ -1861,7 +1875,7 @@
 								{/if}
 							{/if}
 						{/if}
-						{#if $canAccess('stacks', 'stop') && stack.status !== 'created' && stack.status !== 'not deployed'}
+						{#if $canAccess('stacks', 'stop') && stack.status !== 'created' && stack.status !== 'not deployed' && !isLocked}
 							<ConfirmPopover
 								open={confirmDownName === stack.name}
 								action="Down"
