@@ -41,6 +41,6 @@ export const POST: RequestHandler = async (event) => {
 		return json({ error: `Failed to update lock for "${stackName}"` }, { status: 400 });
 	}
 
-	await auditStack(event, 'update', stackName, envIdNum, { locked });
+	await auditStack(event, locked ? 'lock' : 'unlock', stackName, envIdNum, { locked });
 	return json({ success: true, stackName, locked });
 };

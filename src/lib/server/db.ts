@@ -3054,7 +3054,8 @@ export async function deleteOldScans(keepDays = 30): Promise<number> {
 export type AuditAction =
 	| 'create' | 'update' | 'delete' | 'start' | 'stop' | 'restart' | 'down'
 	| 'pause' | 'unpause' | 'pull' | 'push' | 'prune' | 'login'
-	| 'logout' | 'view' | 'exec' | 'connect' | 'disconnect' | 'deploy' | 'sync' | 'rename' | 'webhook';
+	| 'logout' | 'view' | 'exec' | 'connect' | 'disconnect' | 'deploy' | 'sync' | 'rename' | 'webhook'
+	| 'lock' | 'unlock';
 
 export type AuditEntityType =
 	| 'container' | 'image' | 'stack' | 'volume' | 'network'

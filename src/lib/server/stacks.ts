@@ -1994,8 +1994,14 @@ export async function downStack(
 export async function removeStack(
 	stackName: string,
 	envId?: number | null,
-	force = false
+	force = false,
+	overrideLock = false
 ): Promise<StackOperationResult> {
+	const source = await getStackSource(stackName, envId);
+	if (source?.locked && !overrideLock) {
+		return { success: false, error: `Stack "${stackName}" is locked and cannot be removed without override` };
+	}
+
 	return withStackLock(stackName, async () => {
 		// Get compose file (may not exist for external stacks)
 		const composeResult = await getStackComposeFile(stackName, envId);
