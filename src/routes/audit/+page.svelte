@@ -48,7 +48,8 @@
 		Activity,
 		Loader2,
 		Wifi,
-		FileX
+		FileX,
+		Lock
 	} from 'lucide-svelte';
 	import { licenseStore } from '$lib/stores/license';
 	import EnvironmentIcon from '$lib/components/EnvironmentIcon.svelte';
@@ -194,7 +195,9 @@
 		{ value: 'disconnect', label: 'Disconnect' },
 		{ value: 'login', label: 'Login' },
 		{ value: 'logout', label: 'Logout' },
-		{ value: 'sync', label: 'Sync' }
+		{ value: 'sync', label: 'Sync' },
+		{ value: 'lock', label: 'Lock' },
+		{ value: 'unlock', label: 'Unlock' }
 	];
 
 	// Date filter preset
@@ -481,6 +484,8 @@
 			case 'login': return LogIn;
 			case 'logout': return LogOut;
 			case 'sync': return GitPullRequest;
+			case 'lock':
+			case 'unlock': return Lock;
 			default: return Activity;
 		}
 	}
@@ -502,6 +507,9 @@
 			case 'push':
 			case 'sync':
 				return 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400';
+			case 'lock':
+			case 'unlock':
+				return 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400';
 			case 'exec':
 			case 'connect':
 			case 'disconnect':

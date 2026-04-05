@@ -2635,6 +2635,7 @@ export interface StackSourceData {
 	stackName: string;
 	environmentId: number | null;
 	sourceType: StackSourceType;
+	locked: boolean;
 	gitRepositoryId: number | null;
 	gitStackId: number | null;
 	composePath: string | null;
@@ -2742,6 +2743,7 @@ export async function upsertStackSource(data: {
 	stackName: string;
 	environmentId?: number | null;
 	sourceType: StackSourceType;
+	locked?: boolean;
 	gitRepositoryId?: number | null;
 	gitStackId?: number | null;
 	composePath?: string | null;
@@ -2753,6 +2755,7 @@ export async function upsertStackSource(data: {
 		await db.update(stackSources)
 			.set({
 				sourceType: data.sourceType,
+				locked: data.locked ?? existing.locked,
 				gitRepositoryId: data.gitRepositoryId || null,
 				gitStackId: data.gitStackId || null,
 				composePath: data.composePath ?? null,
@@ -2766,6 +2769,7 @@ export async function upsertStackSource(data: {
 			stackName: data.stackName,
 			environmentId: data.environmentId ?? null,
 			sourceType: data.sourceType,
+			locked: data.locked ?? false,
 			gitRepositoryId: data.gitRepositoryId || null,
 			gitStackId: data.gitStackId || null,
 			composePath: data.composePath ?? null,
@@ -2778,7 +2782,7 @@ export async function upsertStackSource(data: {
 export async function updateStackSource(
 	stackName: string,
 	environmentId: number | null,
-	updates: { composePath?: string | null; envPath?: string | null }
+	updates: { composePath?: string | null; envPath?: string | null; locked?: boolean }
 ): Promise<boolean> {
 	const existing = await getStackSource(stackName, environmentId);
 	if (!existing) return false;
@@ -2787,11 +2791,20 @@ export async function updateStackSource(
 		.set({
 			composePath: updates.composePath !== undefined ? updates.composePath : existing.composePath,
 			envPath: updates.envPath !== undefined ? updates.envPath : existing.envPath,
+			locked: updates.locked !== undefined ? updates.locked : existing.locked,
 			updatedAt: new Date().toISOString()
 		})
 		.where(eq(stackSources.id, existing.id));
 
 	return true;
+}
+
+export async function updateStackSourceLock(
+	stackName: string,
+	environmentId: number | null,
+	locked: boolean
+): Promise<boolean> {
+	return updateStackSource(stackName, environmentId, { locked });
 }
 
 export async function deleteStackSource(stackName: string, environmentId?: number | null): Promise<boolean> {
@@ -3041,7 +3054,8 @@ export async function deleteOldScans(keepDays = 30): Promise<number> {
 export type AuditAction =
 	| 'create' | 'update' | 'delete' | 'start' | 'stop' | 'restart' | 'down'
 	| 'pause' | 'unpause' | 'pull' | 'push' | 'prune' | 'login'
-	| 'logout' | 'view' | 'exec' | 'connect' | 'disconnect' | 'deploy' | 'sync' | 'rename' | 'webhook';
+	| 'logout' | 'view' | 'exec' | 'connect' | 'disconnect' | 'deploy' | 'sync' | 'rename' | 'webhook'
+	| 'lock' | 'unlock';
 
 export type AuditEntityType =
 	| 'container' | 'image' | 'stack' | 'volume' | 'network'

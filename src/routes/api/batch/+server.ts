@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
+import { auditStack } from '$lib/server/audit';
 import {
 	startContainer,
 	stopContainer,
@@ -19,7 +20,12 @@ import {
 	downStack,
 	removeStack
 } from '$lib/server/stacks';
-import { deleteAutoUpdateSchedule, getAutoUpdateSetting, removePendingContainerUpdate } from '$lib/server/db';
+import {
+	deleteAutoUpdateSchedule,
+	getAutoUpdateSetting,
+	removePendingContainerUpdate,
+	updateStackSourceLock
+} from '$lib/server/db';
 import { unregisterSchedule } from '$lib/server/scheduler';
 import { prefersJSON } from '$lib/server/sse';
 import { createJob, appendLine, completeJob, failJob } from '$lib/server/jobs';
@@ -66,7 +72,7 @@ const ENTITY_OPERATIONS: Record<string, string[]> = {
 	images: ['remove'],
 	volumes: ['remove'],
 	networks: ['remove'],
-	stacks: ['start', 'stop', 'restart', 'down', 'remove']
+	stacks: ['start', 'stop', 'restart', 'down', 'remove', 'lock', 'unlock']
 };
 
 // Permission mapping for entity operations
@@ -87,7 +93,9 @@ const PERMISSION_MAP: Record<string, Record<string, string>> = {
 		stop: 'stop',
 		restart: 'restart',
 		down: 'stop',
-		remove: 'remove'
+		remove: 'remove',
+		lock: 'edit',
+		unlock: 'edit'
 	}
 };
 
@@ -129,7 +137,8 @@ async function processWithConcurrency<T>(
  * Unified batch operations endpoint (job pattern).
  * Handles bulk operations for containers, images, volumes, networks, and stacks.
  */
-export const POST: RequestHandler = async ({ url, cookies, request }) => {
+export const POST: RequestHandler = async (event) => {
+	const { url, cookies, request } = event;
 	const auth = await authorize(cookies);
 
 	const envId = url.searchParams.get('env');
@@ -188,7 +197,7 @@ export const POST: RequestHandler = async ({ url, cookies, request }) => {
 		await processWithConcurrency(items, 3, async (item, index) => {
 			const { id, name } = item;
 			try {
-				await executeOperation(entityType, operation, id, name, envIdNum, options, needsAudit);
+				await executeOperation(entityType, operation, id, name, envIdNum, options, needsAudit, event);
 				successCount++;
 			} catch {
 				failCount++;
@@ -218,7 +227,7 @@ export const POST: RequestHandler = async ({ url, cookies, request }) => {
 			});
 
 			try {
-				await executeOperation(entityType, operation, id, name, envIdNum, options, needsAudit);
+				await executeOperation(entityType, operation, id, name, envIdNum, options, needsAudit, event);
 				appendLine(job, {
 					data: { type: 'progress', id, name, status: 'success', current: index + 1, total: items.length }
 				});
@@ -261,7 +270,8 @@ async function executeOperation(
 	name: string,
 	envIdNum: number | undefined,
 	options: { force?: boolean; removeVolumes?: boolean },
-	needsAudit: boolean
+	needsAudit: boolean,
+	event: Parameters<RequestHandler>[0]
 ): Promise<void> {
 	switch (entityType) {
 		case 'containers':
@@ -277,7 +287,7 @@ async function executeOperation(
 			await executeNetworkOperation(operation, id, envIdNum);
 			break;
 		case 'stacks':
-			await executeStackOperation(operation, id, envIdNum, options);
+			await executeStackOperation(operation, id, envIdNum, options, needsAudit, event);
 			break;
 		default:
 			throw new Error(`Unsupported entity type: ${entityType}`);
@@ -386,7 +396,9 @@ async function executeStackOperation(
 	operation: string,
 	name: string,
 	envIdNum: number | undefined,
-	options: { removeVolumes?: boolean; force?: boolean }
+	options: { removeVolumes?: boolean; force?: boolean },
+	needsAudit: boolean,
+	event: Parameters<RequestHandler>[0]
 ): Promise<void> {
 	switch (operation) {
 		case 'start': {
@@ -395,7 +407,7 @@ async function executeStackOperation(
 			break;
 		}
 		case 'stop': {
-			const result = await stopStack(name, envIdNum);
+			const result = await stopStack(name, envIdNum, false);
 			if (!result.success) throw new Error(result.error || 'Failed to stop stack');
 			break;
 		}
@@ -405,13 +417,25 @@ async function executeStackOperation(
 			break;
 		}
 		case 'down': {
-			const result = await downStack(name, envIdNum, options.removeVolumes ?? false);
+			const result = await downStack(name, envIdNum, options.removeVolumes ?? false, false);
 			if (!result.success) throw new Error(result.error || 'Failed to down stack');
 			break;
 		}
 		case 'remove': {
-			const result = await removeStack(name, envIdNum, options.force ?? false);
+			const result = await removeStack(name, envIdNum, options.force ?? false, false);
 			if (!result.success) throw new Error(result.error || 'Failed to remove stack');
+			break;
+		}
+		case 'lock': {
+			const updated = await updateStackSourceLock(name, envIdNum ?? null, true);
+			if (!updated) throw new Error('Failed to lock stack');
+			if (needsAudit) await auditStack(event, 'lock', name, envIdNum, { locked: true });
+			break;
+		}
+		case 'unlock': {
+			const updated = await updateStackSourceLock(name, envIdNum ?? null, false);
+			if (!updated) throw new Error('Failed to unlock stack');
+			if (needsAudit) await auditStack(event, 'unlock', name, envIdNum, { locked: false });
 			break;
 		}
 		default:

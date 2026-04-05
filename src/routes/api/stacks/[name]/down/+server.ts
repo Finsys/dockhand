@@ -11,6 +11,7 @@ export const POST: RequestHandler = async (event) => {
 
 	const envId = url.searchParams.get('env');
 	const envIdNum = envId ? parseInt(envId) : undefined;
+	const overrideLock = url.searchParams.get('override') === 'true';
 
 	// Permission check with environment context
 	if (auth.authEnabled && !(await auth.can('stacks', 'stop', envIdNum))) {
@@ -20,6 +21,10 @@ export const POST: RequestHandler = async (event) => {
 	// Environment access check (enterprise only)
 	if (envIdNum && auth.isEnterprise && !(await auth.canAccessEnvironment(envIdNum))) {
 		return json({ error: 'Access denied to this environment' }, { status: 403 });
+	}
+
+	if (overrideLock && !auth.isAdmin) {
+		return json({ error: 'Lock override requires admin privileges' }, { status: 403 });
 	}
 
 	// Parse body BEFORE creating SSE response (body can only be read once)
@@ -34,10 +39,13 @@ export const POST: RequestHandler = async (event) => {
 	return createJobResponse(async (send) => {
 		try {
 			const stackName = decodeURIComponent(params.name);
-			const result = await downStack(stackName, envIdNum, removeVolumes);
+			const result = await downStack(stackName, envIdNum, removeVolumes, overrideLock);
 
 			// Audit log
-			await auditStack(event, 'down', stackName, envIdNum, { removeVolumes });
+			await auditStack(event, 'down', stackName, envIdNum, {
+				removeVolumes,
+				...(overrideLock ? { overrideLock: true } : {})
+			});
 
 			if (!result.success) {
 				send('result', { success: false, error: result.error });

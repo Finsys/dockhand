@@ -333,6 +333,7 @@ export const stackSources = sqliteTable('stack_sources', {
 	stackName: text('stack_name').notNull(),
 	environmentId: integer('environment_id').references(() => environments.id, { onDelete: 'cascade' }),
 	sourceType: text('source_type').notNull().default('internal'),
+	locked: integer('locked', { mode: 'boolean' }).notNull().default(false),
 	gitRepositoryId: integer('git_repository_id').references(() => gitRepositories.id, { onDelete: 'set null' }),
 	gitStackId: integer('git_stack_id').references(() => gitStacks.id, { onDelete: 'set null' }),
 	composePath: text('compose_path'), // Custom path to compose file (for stacks with non-default location)

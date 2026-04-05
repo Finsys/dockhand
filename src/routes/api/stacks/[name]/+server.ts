@@ -9,6 +9,7 @@ export const DELETE: RequestHandler = async (event) => {
 	const auth = await authorize(cookies);
 
 	const force = url.searchParams.get('force') === 'true';
+	const overrideLock = url.searchParams.get('override') === 'true';
 	const envId = url.searchParams.get('env');
 	const envIdNum = envId ? parseInt(envId) : undefined;
 
@@ -22,12 +23,16 @@ export const DELETE: RequestHandler = async (event) => {
 		return json({ error: 'Access denied to this environment' }, { status: 403 });
 	}
 
+	if (overrideLock && !auth.isAdmin) {
+		return json({ error: 'Lock override requires admin privileges' }, { status: 403 });
+	}
+
 	try {
 		const stackName = decodeURIComponent(params.name);
-		const result = await removeStack(stackName, envIdNum, force);
+		const result = await removeStack(stackName, envIdNum, force, overrideLock);
 
 		// Audit log
-		await auditStack(event, 'delete', stackName, envIdNum, { force });
+		await auditStack(event, 'delete', stackName, envIdNum, { force, ...(overrideLock ? { overrideLock: true } : {}) });
 
 		if (!result.success) {
 			return json({ success: false, error: result.error }, { status: 400 });

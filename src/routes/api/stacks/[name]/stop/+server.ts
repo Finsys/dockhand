@@ -11,6 +11,7 @@ export const POST: RequestHandler = async (event) => {
 
 	const envId = url.searchParams.get('env');
 	const envIdNum = envId ? parseInt(envId) : undefined;
+	const overrideLock = url.searchParams.get('override') === 'true';
 
 	// Permission check with environment context
 	if (auth.authEnabled && !(await auth.can('stacks', 'stop', envIdNum))) {
@@ -22,13 +23,17 @@ export const POST: RequestHandler = async (event) => {
 		return json({ error: 'Access denied to this environment' }, { status: 403 });
 	}
 
+	if (overrideLock && !auth.isAdmin) {
+		return json({ error: 'Lock override requires admin privileges' }, { status: 403 });
+	}
+
 	return createJobResponse(async (send) => {
 		try {
 			const stackName = decodeURIComponent(params.name);
-			const result = await stopStack(stackName, envIdNum);
+			const result = await stopStack(stackName, envIdNum, overrideLock);
 
 			// Audit log
-			await auditStack(event, 'stop', stackName, envIdNum);
+			await auditStack(event, 'stop', stackName, envIdNum, overrideLock ? { overrideLock: true } : undefined);
 
 			if (!result.success) {
 				send('result', { success: false, error: result.error });

@@ -13,7 +13,7 @@
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import * as Popover from '$lib/components/ui/popover';
 	import MultiSelectFilter from '$lib/components/MultiSelectFilter.svelte';
-	import { Play, Square, Trash2, Plus, ArrowBigDown, Search, Pencil, ExternalLink, GitBranch, RefreshCw, Loader2, FileCode, FileText, FileOutput, Box, RotateCcw, ScrollText, Terminal, Eye, Network, HardDrive, Heart, HeartPulse, HeartOff, ChevronsUpDown, ChevronsDownUp, Rocket, AlertTriangle, X, Layers, Pause, CircleDashed, Skull, FolderOpen, Variable, Clock, RotateCw, Import, Ship, Cable, LayoutPanelLeft, Rows3, GripVertical } from 'lucide-svelte';
+	import { Play, Square, Trash2, Plus, ArrowBigDown, Search, Pencil, ExternalLink, GitBranch, RefreshCw, Loader2, FileCode, FileText, FileOutput, Box, RotateCcw, ScrollText, Terminal, Eye, Network, HardDrive, Heart, HeartPulse, HeartOff, ChevronsUpDown, ChevronsDownUp, Rocket, AlertTriangle, X, Layers, Pause, CircleDashed, Skull, FolderOpen, Variable, Clock, RotateCw, Import, Ship, Cable, LayoutPanelLeft, Rows3, GripVertical, Lock } from 'lucide-svelte';
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
 	import BatchOperationModal from '$lib/components/BatchOperationModal.svelte';
 	import type { ComposeStackInfo, ContainerStats } from '$lib/types';
@@ -40,7 +40,7 @@
 	type SortDirection = 'asc' | 'desc';
 
 	let stacks = $state<ComposeStackInfo[]>([]);
-	let stackSources = $state<Record<string, { sourceType: string; composePath?: string | null; repository?: any; gitStack?: any }>>({});
+	let stackSources = $state<Record<string, { sourceType: string; composePath?: string | null; repository?: any; gitStack?: any; locked?: boolean }>>({});
 	let stackEnvVarCounts = $state<Record<string, number>>({});
 	let gitStacks = $state<any[]>([]);
 	let gitRepositories = $state<any[]>([]);
@@ -418,6 +418,7 @@
 	let confirmDeleteName = $state<string | null>(null);
 	let confirmStopName = $state<string | null>(null);
 	let confirmDownName = $state<string | null>(null);
+	let confirmLockName = $state<string | null>(null);
 
 	// Stack operation loading state
 	let stackActionLoading = $state<string | null>(null);
@@ -456,6 +457,8 @@
 	let confirmBulkDown = $state(false);
 	let confirmBulkRestart = $state(false);
 	let confirmBulkRemove = $state(false);
+	let confirmBulkLock = $state(false);
+	let confirmBulkUnlock = $state(false);
 
 	// Batch operation modal state
 	let showBatchOpModal = $state(false);
@@ -528,7 +531,11 @@
 
 	// Count by status for selected stacks
 	const selectedRunning = $derived(selectedInFilter.filter(s => s.status === 'running' || s.status === 'partial' || s.status === 'restarting'));
+	const selectedRunningUnlocked = $derived(selectedRunning.filter(s => !isStackLocked(s.name)));
 	const selectedStopped = $derived(selectedInFilter.filter(s => s.status === 'stopped' || s.status === 'not deployed' || s.status === 'created'));
+	const selectedLocked = $derived(selectedInFilter.filter(s => isStackLocked(s.name)));
+	const selectedUnlocked = $derived(selectedInFilter.filter(s => !isStackLocked(s.name)));
+	const selectedUnlockedForRemove = $derived(selectedInFilter.filter(s => !isStackLocked(s.name)));
 
 	function toggleSelectAll() {
 		if (allFilteredSelected) {
@@ -560,16 +567,16 @@
 	}
 
 	function bulkStop() {
-		batchOpTitle = `Stopping ${selectedRunning.length} stack${selectedRunning.length !== 1 ? 's' : ''}`;
+		batchOpTitle = `Stopping ${selectedRunningUnlocked.length} stack${selectedRunningUnlocked.length !== 1 ? 's' : ''}`;
 		batchOpOperation = 'stop';
-		batchOpItems = selectedRunning.map(s => ({ id: s.name, name: s.name }));
+		batchOpItems = selectedRunningUnlocked.map(s => ({ id: s.name, name: s.name }));
 		showBatchOpModal = true;
 	}
 
 	function bulkDown() {
-		batchOpTitle = `Bringing down ${selectedRunning.length} stack${selectedRunning.length !== 1 ? 's' : ''}`;
+		batchOpTitle = `Bringing down ${selectedRunningUnlocked.length} stack${selectedRunningUnlocked.length !== 1 ? 's' : ''}`;
 		batchOpOperation = 'down';
-		batchOpItems = selectedRunning.map(s => ({ id: s.name, name: s.name }));
+		batchOpItems = selectedRunningUnlocked.map(s => ({ id: s.name, name: s.name }));
 		showBatchOpModal = true;
 	}
 
@@ -581,9 +588,23 @@
 	}
 
 	function bulkRemove() {
-		batchOpTitle = `Removing ${selectedInFilter.length} stack${selectedInFilter.length !== 1 ? 's' : ''}`;
+		batchOpTitle = `Removing ${selectedUnlockedForRemove.length} stack${selectedUnlockedForRemove.length !== 1 ? 's' : ''}`;
 		batchOpOperation = 'remove';
-		batchOpItems = selectedInFilter.map(s => ({ id: s.name, name: s.name }));
+		batchOpItems = selectedUnlockedForRemove.map(s => ({ id: s.name, name: s.name }));
+		showBatchOpModal = true;
+	}
+
+	function bulkLock() {
+		batchOpTitle = `Locking ${selectedUnlocked.length} stack${selectedUnlocked.length !== 1 ? 's' : ''}`;
+		batchOpOperation = 'lock';
+		batchOpItems = selectedUnlocked.map(s => ({ id: s.name, name: s.name }));
+		showBatchOpModal = true;
+	}
+
+	function bulkUnlock() {
+		batchOpTitle = `Unlocking ${selectedLocked.length} stack${selectedLocked.length !== 1 ? 's' : ''}`;
+		batchOpOperation = 'unlock';
+		batchOpItems = selectedLocked.map(s => ({ id: s.name, name: s.name }));
 		showBatchOpModal = true;
 	}
 
@@ -803,6 +824,10 @@
 		return stackSources[stackName] || { sourceType: 'external' };
 	}
 
+	function isStackLocked(stackName: string): boolean {
+		return !!getStackSource(stackName).locked;
+	}
+
 	function getStackSystemType(stack: ComposeStackInfo): 'dockhand' | 'hawser' | null {
 		if (!stack.containerDetails) return null;
 		for (const c of stack.containerDetails) {
@@ -860,6 +885,10 @@
 	}
 
 	async function stopStack(name: string) {
+		if (isStackLocked(name)) {
+			showErrorDialog(`Cannot stop ${name}`, 'This stack is locked and cannot be stopped.');
+			return;
+		}
 		operationError = null;
 		stackActionLoading = name;
 		try {
@@ -931,6 +960,10 @@
 	}
 
 	async function downStack(name: string) {
+		if (isStackLocked(name)) {
+			showErrorDialog(`Cannot bring down ${name}`, 'This stack is locked and cannot be brought down.');
+			return;
+		}
 		operationError = null;
 		stackActionLoading = name;
 		stackDownLoading = name;
@@ -953,6 +986,31 @@
 		}
 	}
 
+	async function setStackLock(name: string, locked: boolean) {
+		operationError = null;
+		stackActionLoading = name;
+		try {
+			const response = await fetch(appendEnvParam(`/api/stacks/${encodeURIComponent(name)}/lock`, envId), {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ locked })
+			});
+			const data = await response.json().catch(() => ({}));
+			if (!response.ok || !data.success) {
+				showErrorDialog(`Failed to ${locked ? 'lock' : 'unlock'} ${name}`, data.error || `Failed to ${locked ? 'lock' : 'unlock'} stack`);
+				return;
+			}
+			toast.success(`${locked ? 'Locked' : 'Unlocked'} ${name}`);
+			await fetchStacks();
+		} catch (error) {
+			console.error(`Failed to ${locked ? 'lock' : 'unlock'} stack:`, error);
+			const errorMsg = error instanceof Error ? error.message : `Failed to ${locked ? 'lock' : 'unlock'} stack`;
+			showErrorDialog(`Failed to ${locked ? 'lock' : 'unlock'} ${name}`, errorMsg);
+		} finally {
+			stackActionLoading = null;
+		}
+	}
+
 	function viewStackLogs(stack: ComposeStackInfo) {
 		// Navigate to logs page with all containers from the stack (grouped mode)
 		// Use containerDetails for full info, or fall back to containers (which is already string[])
@@ -967,6 +1025,10 @@
 	}
 
 	async function removeStack(name: string) {
+		if (isStackLocked(name)) {
+			showErrorDialog(`Cannot remove ${name}`, 'This stack is locked and cannot be removed.');
+			return;
+		}
 		operationError = null;
 		try {
 			const response = await fetch(appendEnvParam(`/api/stacks/${encodeURIComponent(name)}?force=true`, envId), { method: 'DELETE' });
@@ -1377,6 +1439,46 @@
 					{/snippet}
 				</ConfirmPopover>
 			{/if}
+			{#if selectedUnlocked.length > 0 && $canAccess('stacks', 'edit')}
+				<ConfirmPopover
+					open={confirmBulkLock}
+					action="Lock"
+					itemType="stacks"
+					itemName="{selectedUnlocked.length} stack{selectedUnlocked.length !== 1 ? 's' : ''}"
+					title="Lock {selectedUnlocked.length}"
+					variant="secondary"
+					unstyled
+					onConfirm={bulkLock}
+					onOpenChange={(open) => confirmBulkLock = open}
+				>
+					{#snippet children({ open })}
+						<span class="inline-flex items-center gap-1 px-1.5 py-0 rounded border border-border hover:text-amber-600 hover:border-amber-500/40 hover:shadow transition-all cursor-pointer">
+							<Lock class="w-3 h-3" />
+							Lock
+						</span>
+					{/snippet}
+				</ConfirmPopover>
+			{/if}
+			{#if selectedLocked.length > 0 && $canAccess('stacks', 'edit')}
+				<ConfirmPopover
+					open={confirmBulkUnlock}
+					action="Unlock"
+					itemType="stacks"
+					itemName="{selectedLocked.length} stack{selectedLocked.length !== 1 ? 's' : ''}"
+					title="Unlock {selectedLocked.length}"
+					variant="secondary"
+					unstyled
+					onConfirm={bulkUnlock}
+					onOpenChange={(open) => confirmBulkUnlock = open}
+				>
+					{#snippet children({ open })}
+						<span class="inline-flex items-center gap-1 px-1.5 py-0 rounded border border-border hover:text-emerald-600 hover:border-emerald-500/40 hover:shadow transition-all cursor-pointer">
+							<Lock class="w-3 h-3" />
+							Unlock
+						</span>
+					{/snippet}
+				</ConfirmPopover>
+			{/if}
 			{#if selectedRunning.length > 0 && $canAccess('stacks', 'restart')}
 				<ConfirmPopover
 					open={confirmBulkRestart}
@@ -1397,13 +1499,13 @@
 					{/snippet}
 				</ConfirmPopover>
 			{/if}
-			{#if selectedRunning.length > 0 && $canAccess('stacks', 'stop')}
+			{#if selectedRunningUnlocked.length > 0 && $canAccess('stacks', 'stop')}
 				<ConfirmPopover
 					open={confirmBulkStop}
 					action="Stop"
 					itemType="stacks"
-					itemName="{selectedRunning.length} stack{selectedRunning.length !== 1 ? 's' : ''}"
-					title="Stop {selectedRunning.length}"
+					itemName="{selectedRunningUnlocked.length} stack{selectedRunningUnlocked.length !== 1 ? 's' : ''}"
+					title="Stop {selectedRunningUnlocked.length}"
 					unstyled
 					onConfirm={bulkStop}
 					onOpenChange={(open) => confirmBulkStop = open}
@@ -1416,13 +1518,13 @@
 					{/snippet}
 				</ConfirmPopover>
 			{/if}
-			{#if selectedRunning.length > 0 && $canAccess('stacks', 'stop')}
+			{#if selectedRunningUnlocked.length > 0 && $canAccess('stacks', 'stop')}
 				<ConfirmPopover
 					open={confirmBulkDown}
 					action="Down"
 					itemType="stacks"
-					itemName="{selectedRunning.length} stack{selectedRunning.length !== 1 ? 's' : ''}"
-					title="Down {selectedRunning.length}"
+					itemName="{selectedRunningUnlocked.length} stack{selectedRunningUnlocked.length !== 1 ? 's' : ''}"
+					title="Down {selectedRunningUnlocked.length}"
 					unstyled
 					onConfirm={bulkDown}
 					onOpenChange={(open) => confirmBulkDown = open}
@@ -1435,13 +1537,13 @@
 					{/snippet}
 				</ConfirmPopover>
 			{/if}
-			{#if $canAccess('stacks', 'remove')}
+			{#if selectedUnlockedForRemove.length > 0 && $canAccess('stacks', 'remove')}
 			<ConfirmPopover
 				open={confirmBulkRemove}
 				action="Remove"
 				itemType="stacks"
-				itemName="{selectedInFilter.length} stack{selectedInFilter.length !== 1 ? 's' : ''}"
-				title="Remove {selectedInFilter.length}"
+				itemName="{selectedUnlockedForRemove.length} stack{selectedUnlockedForRemove.length !== 1 ? 's' : ''}"
+				title="Remove {selectedUnlockedForRemove.length}"
 				unstyled
 				onConfirm={bulkRemove}
 				onOpenChange={(open) => confirmBulkRemove = open}
@@ -1498,6 +1600,7 @@
 		>
 			{#snippet cell(column, stack, rowState)}
 				{@const source = getStackSource(stack.name)}
+				{@const isLocked = !!source.locked}
 				{#if column.id === 'name'}
 					{@const systemType = getStackSystemType(stack)}
 					{#if source.sourceType !== 'git'}
@@ -1540,6 +1643,19 @@
 							</Tooltip.Trigger>
 							<Tooltip.Content class="whitespace-nowrap">
 								{stackEnvVarCounts[stack.name]} environment variable{stackEnvVarCounts[stack.name] !== 1 ? 's' : ''} configured
+							</Tooltip.Content>
+						</Tooltip.Root>
+					{/if}
+					{#if isLocked}
+						<Tooltip.Root>
+							<Tooltip.Trigger>
+								<span class="inline-flex items-center gap-0.5 ml-1.5 text-2xs px-1 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300">
+									<Lock class="w-2.5 h-2.5" />
+									Locked
+								</span>
+							</Tooltip.Trigger>
+							<Tooltip.Content class="whitespace-nowrap">
+								This stack is locked. Stop, down, and remove actions are disabled.
 							</Tooltip.Content>
 						</Tooltip.Root>
 					{/if}
@@ -1771,6 +1887,21 @@
 									</button>
 								{/if}
 							{/if}
+							{#if $canAccess('stacks', 'edit')}
+								<ConfirmPopover
+									open={confirmLockName === stack.name}
+									action={isLocked ? 'Unlock' : 'Lock'}
+									itemType="stack"
+									itemName={stack.name}
+									title={isLocked ? 'Unlock' : 'Lock'}
+									onConfirm={() => setStackLock(stack.name, !isLocked)}
+									onOpenChange={(open) => confirmLockName = open ? stack.name : null}
+								>
+									{#snippet children({ open })}
+										<Lock class="w-3 h-3 {isLocked ? (open ? 'text-emerald-500' : 'text-amber-500 hover:text-emerald-500') : (open ? 'text-amber-500' : 'text-muted-foreground hover:text-amber-500')}" />
+									{/snippet}
+								</ConfirmPopover>
+							{/if}
 							{#if stack.containers && stack.containers.length > 0}
 								<button
 									type="button"
@@ -1833,7 +1964,7 @@
 										</Popover.Content>
 									</Popover.Root>
 								{/if}
-								{#if $canAccess('stacks', 'stop')}
+								{#if $canAccess('stacks', 'stop') && !isLocked}
 									<ConfirmPopover
 										open={confirmStopName === stack.name}
 										action="Stop"
@@ -1861,7 +1992,7 @@
 								{/if}
 							{/if}
 						{/if}
-						{#if $canAccess('stacks', 'stop') && stack.status !== 'created' && stack.status !== 'not deployed'}
+						{#if $canAccess('stacks', 'stop') && stack.status !== 'created' && stack.status !== 'not deployed' && !isLocked}
 							<ConfirmPopover
 								open={confirmDownName === stack.name}
 								action="Down"
@@ -1876,7 +2007,7 @@
 								{/snippet}
 							</ConfirmPopover>
 						{/if}
-						{#if $canAccess('stacks', 'remove')}
+						{#if $canAccess('stacks', 'remove') && !isLocked}
 							<ConfirmPopover
 								open={confirmDeleteName === stack.name}
 								action="Delete"
