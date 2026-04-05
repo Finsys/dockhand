@@ -2,6 +2,7 @@ import { json } from '@sveltejs/kit';
 import { removeStack, ComposeFileNotFoundError } from '$lib/server/stacks';
 import { authorize } from '$lib/server/authorize';
 import { auditStack } from '$lib/server/audit';
+import { getStackSource } from '$lib/server/db';
 import type { RequestHandler } from './$types';
 
 export const DELETE: RequestHandler = async (event) => {
@@ -24,6 +25,10 @@ export const DELETE: RequestHandler = async (event) => {
 
 	try {
 		const stackName = decodeURIComponent(params.name);
+		const source = await getStackSource(stackName, envIdNum);
+		if (source?.locked) {
+			return json({ error: `Stack "${stackName}" is locked and cannot be removed.` }, { status: 409 });
+		}
 		const result = await removeStack(stackName, envIdNum, force);
 
 		// Audit log

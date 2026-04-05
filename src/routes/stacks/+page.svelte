@@ -535,6 +535,7 @@
 	const selectedStopped = $derived(selectedInFilter.filter(s => s.status === 'stopped' || s.status === 'not deployed' || s.status === 'created'));
 	const selectedLocked = $derived(selectedInFilter.filter(s => isStackLocked(s.name)));
 	const selectedUnlocked = $derived(selectedInFilter.filter(s => !isStackLocked(s.name)));
+	const selectedUnlockedForRemove = $derived(selectedInFilter.filter(s => !isStackLocked(s.name)));
 
 	function toggleSelectAll() {
 		if (allFilteredSelected) {
@@ -587,9 +588,9 @@
 	}
 
 	function bulkRemove() {
-		batchOpTitle = `Removing ${selectedInFilter.length} stack${selectedInFilter.length !== 1 ? 's' : ''}`;
+		batchOpTitle = `Removing ${selectedUnlockedForRemove.length} stack${selectedUnlockedForRemove.length !== 1 ? 's' : ''}`;
 		batchOpOperation = 'remove';
-		batchOpItems = selectedInFilter.map(s => ({ id: s.name, name: s.name }));
+		batchOpItems = selectedUnlockedForRemove.map(s => ({ id: s.name, name: s.name }));
 		showBatchOpModal = true;
 	}
 
@@ -1024,6 +1025,10 @@
 	}
 
 	async function removeStack(name: string) {
+		if (isStackLocked(name)) {
+			showErrorDialog(`Cannot remove ${name}`, 'This stack is locked and cannot be removed.');
+			return;
+		}
 		operationError = null;
 		try {
 			const response = await fetch(appendEnvParam(`/api/stacks/${encodeURIComponent(name)}?force=true`, envId), { method: 'DELETE' });
@@ -1532,13 +1537,13 @@
 					{/snippet}
 				</ConfirmPopover>
 			{/if}
-			{#if $canAccess('stacks', 'remove')}
+			{#if selectedUnlockedForRemove.length > 0 && $canAccess('stacks', 'remove')}
 			<ConfirmPopover
 				open={confirmBulkRemove}
 				action="Remove"
 				itemType="stacks"
-				itemName="{selectedInFilter.length} stack{selectedInFilter.length !== 1 ? 's' : ''}"
-				title="Remove {selectedInFilter.length}"
+				itemName="{selectedUnlockedForRemove.length} stack{selectedUnlockedForRemove.length !== 1 ? 's' : ''}"
+				title="Remove {selectedUnlockedForRemove.length}"
 				unstyled
 				onConfirm={bulkRemove}
 				onOpenChange={(open) => confirmBulkRemove = open}
@@ -1650,7 +1655,7 @@
 								</span>
 							</Tooltip.Trigger>
 							<Tooltip.Content class="whitespace-nowrap">
-								This stack is locked. Stop and down actions are disabled.
+								This stack is locked. Stop, down, and remove actions are disabled.
 							</Tooltip.Content>
 						</Tooltip.Root>
 					{/if}
@@ -2002,7 +2007,7 @@
 								{/snippet}
 							</ConfirmPopover>
 						{/if}
-						{#if $canAccess('stacks', 'remove')}
+						{#if $canAccess('stacks', 'remove') && !isLocked}
 							<ConfirmPopover
 								open={confirmDeleteName === stack.name}
 								action="Delete"

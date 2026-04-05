@@ -19,7 +19,13 @@ import {
 	downStack,
 	removeStack
 } from '$lib/server/stacks';
-import { deleteAutoUpdateSchedule, getAutoUpdateSetting, removePendingContainerUpdate, updateStackSourceLock } from '$lib/server/db';
+import {
+	deleteAutoUpdateSchedule,
+	getAutoUpdateSetting,
+	removePendingContainerUpdate,
+	updateStackSourceLock,
+	getStackSource
+} from '$lib/server/db';
 import { unregisterSchedule } from '$lib/server/scheduler';
 import { prefersJSON } from '$lib/server/sse';
 import { createJob, appendLine, completeJob, failJob } from '$lib/server/jobs';
@@ -412,6 +418,8 @@ async function executeStackOperation(
 			break;
 		}
 		case 'remove': {
+			const source = await getStackSource(name, envIdNum);
+			if (source?.locked) throw new Error(`Stack "${name}" is locked and cannot be removed`);
 			const result = await removeStack(name, envIdNum, options.force ?? false);
 			if (!result.success) throw new Error(result.error || 'Failed to remove stack');
 			break;
