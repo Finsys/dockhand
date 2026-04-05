@@ -18,7 +18,9 @@
 		start: 'starting',
 		stop: 'stopping',
 		restart: 'restarting',
-		down: 'stopping'
+		down: 'stopping',
+		lock: 'locking',
+		unlock: 'unlocking'
 	};
 
 	// Local type definitions (matching server types)

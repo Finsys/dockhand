@@ -19,7 +19,7 @@ import {
 	downStack,
 	removeStack
 } from '$lib/server/stacks';
-import { deleteAutoUpdateSchedule, getAutoUpdateSetting, removePendingContainerUpdate } from '$lib/server/db';
+import { deleteAutoUpdateSchedule, getAutoUpdateSetting, removePendingContainerUpdate, updateStackSourceLock } from '$lib/server/db';
 import { unregisterSchedule } from '$lib/server/scheduler';
 import { prefersJSON } from '$lib/server/sse';
 import { createJob, appendLine, completeJob, failJob } from '$lib/server/jobs';
@@ -66,7 +66,7 @@ const ENTITY_OPERATIONS: Record<string, string[]> = {
 	images: ['remove'],
 	volumes: ['remove'],
 	networks: ['remove'],
-	stacks: ['start', 'stop', 'restart', 'down', 'remove']
+	stacks: ['start', 'stop', 'restart', 'down', 'remove', 'lock', 'unlock']
 };
 
 // Permission mapping for entity operations
@@ -87,7 +87,9 @@ const PERMISSION_MAP: Record<string, Record<string, string>> = {
 		stop: 'stop',
 		restart: 'restart',
 		down: 'stop',
-		remove: 'remove'
+		remove: 'remove',
+		lock: 'edit',
+		unlock: 'edit'
 	}
 };
 
@@ -412,6 +414,16 @@ async function executeStackOperation(
 		case 'remove': {
 			const result = await removeStack(name, envIdNum, options.force ?? false);
 			if (!result.success) throw new Error(result.error || 'Failed to remove stack');
+			break;
+		}
+		case 'lock': {
+			const updated = await updateStackSourceLock(name, envIdNum ?? null, true);
+			if (!updated) throw new Error('Failed to lock stack');
+			break;
+		}
+		case 'unlock': {
+			const updated = await updateStackSourceLock(name, envIdNum ?? null, false);
+			if (!updated) throw new Error('Failed to unlock stack');
 			break;
 		}
 		default:
