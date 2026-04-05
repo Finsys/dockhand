@@ -56,6 +56,7 @@
 	let showImportModal = $state(false);
 	let editingStackName = $state('');
 	let editingGitStack = $state<any>(null);
+	let convertingStackName = $state<string | null>(null);
 	let envId = $state<number | null>(null);
 
 	// Derived: current environment details for reactive port URL generation
@@ -820,8 +821,9 @@
 		return stack.status;
 	}
 
-	async function openGitModal(gitStack?: any) {
+	async function openGitModal(gitStack?: any, stackName?: string | null) {
 		editingGitStack = gitStack || null;
+		convertingStackName = stackName || null;
 		// Fetch repositories and credentials before opening modal
 		try {
 			const [reposRes, credsRes] = await Promise.all([
@@ -836,6 +838,43 @@
 			gitCredentials = [];
 		}
 		showGitModal = true;
+	}
+
+	async function convertGitStackToLocal(stackName: string, gitStackId: number) {
+		operationError = null;
+		try {
+			const response = await fetch(appendEnvParam(`/api/git/stacks/${gitStackId}/detach`, envId), {
+				method: 'POST'
+			});
+
+			if (!response.ok) {
+				let errorMsg = 'Failed to convert stack to local source';
+				try {
+					const data = await response.json();
+					errorMsg = data.error || errorMsg;
+				} catch {
+					// ignore parse errors
+				}
+				showErrorDialog(`Failed to convert ${stackName}`, errorMsg);
+				return;
+			}
+
+			toast.success(`Converted ${stackName} to local source`);
+			showGitModal = false;
+			editingGitStack = null;
+			await fetchStacks();
+		} catch (error) {
+			console.error('Failed to convert stack to local source:', error);
+			const errorMsg = error instanceof Error ? error.message : 'Failed to convert stack to local source';
+			showErrorDialog(`Failed to convert ${stackName}`, errorMsg);
+		}
+	}
+
+	async function convertLocalStackToGit(stackName: string) {
+		operationError = null;
+		showEditModal = false;
+		editingStackName = '';
+		await openGitModal(null, stackName);
 	}
 
 	async function startStack(name: string) {
@@ -2262,19 +2301,23 @@
 		showEditModal = false;
 		editingStackName = '';
 	}}
+	onConvertToGit={editingStackName ? () => convertLocalStackToGit(editingStackName) : null}
 	onSuccess={fetchStacks}
 />
 
 <GitStackModal
 	bind:open={showGitModal}
 	gitStack={editingGitStack}
+	convertStackName={convertingStackName}
 	environmentId={envId}
 	repositories={gitRepositories}
 	credentials={gitCredentials}
 	onClose={() => {
 		showGitModal = false;
 		editingGitStack = null;
+		convertingStackName = null;
 	}}
+	onConvertToLocal={editingGitStack ? () => convertGitStackToLocal(editingGitStack.stackName, editingGitStack.id) : null}
 	onSaved={fetchStacks}
 />
 
