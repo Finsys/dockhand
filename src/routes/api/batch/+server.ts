@@ -422,7 +422,7 @@ async function executeStackOperation(
 			break;
 		}
 		case 'remove': {
-			const result = await removeStack(name, envIdNum, options.force ?? false);
+			const result = await removeStack(name, envIdNum, options.force ?? false, false);
 			if (!result.success) throw new Error(result.error || 'Failed to remove stack');
 			break;
 		}
