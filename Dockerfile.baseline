@@ -18,25 +18,33 @@ FROM node:24-alpine AS app-builder
 WORKDIR /app
 
 # Install build dependencies
-RUN apk add --no-cache git curl python3 make g++
+RUN apk add --no-cache git curl python3 make g++ gcc musl-dev
 
-# Copy package files and install dependencies
+# Build getrandom shim for old kernels (< 3.17) that lack the syscall
+COPY shims/getrandom-shim.c /tmp/
+RUN gcc -shared -fPIC -O2 -o /tmp/libgetrandom-shim.so /tmp/getrandom-shim.c
+
+# Copy package files and install dependencies (--ignore-scripts blocks malicious postinstall hooks)
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm ci --ignore-scripts \
+    && npm rebuild better-sqlite3 argon2
 
 # Copy source code and build
 COPY . .
 RUN npm run build
 
-# Production dependencies only (rebuilds native addons against musl)
-RUN rm -rf node_modules \
-    && npm ci --omit=dev \
-    && rm -rf node_modules/@types
+# Production dependencies only
+# Preserve better-sqlite3 native addon (no prebuilds exist for Node 24 ABI 137)
+RUN cp -r node_modules/better-sqlite3/build /tmp/better-sqlite3-build \
+    && rm -rf node_modules \
+    && npm ci --omit=dev --ignore-scripts \
+    && cp -r /tmp/better-sqlite3-build node_modules/better-sqlite3/build \
+    && rm -rf node_modules/@types /tmp/better-sqlite3-build
 
 # -----------------------------------------------------------------------------
 # Stage 2: Go Collector Builder
 # -----------------------------------------------------------------------------
-FROM golang:1.24 AS go-builder
+FROM golang:1.25.8 AS go-builder
 WORKDIR /app
 COPY collector/ ./collector/
 RUN cd collector && CGO_ENABLED=0 go build -o /app/bin/collection-worker .
@@ -62,9 +70,10 @@ RUN apk add --no-cache \
     su-exec \
     libstdc++
 
-# Create docker compose plugin symlink
+# Create docker compose plugin symlink (skip if package already installed it there)
 RUN mkdir -p /usr/libexec/docker/cli-plugins \
-    && ln -sf /usr/bin/docker-compose /usr/libexec/docker/cli-plugins/docker-compose
+    && [ -x /usr/libexec/docker/cli-plugins/docker-compose ] \
+    || ln -sf /usr/bin/docker-compose /usr/libexec/docker/cli-plugins/docker-compose
 
 # Create dockhand user and group
 RUN addgroup -g 1001 dockhand \
@@ -80,7 +89,8 @@ ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
     DATA_DIR=/app/data \
     HOME=/home/dockhand \
     PUID=1001 \
-    PGID=1001
+    PGID=1001 \
+    LD_PRELOAD=/usr/lib/libgetrandom-shim.so
 
 # Copy application files with correct ownership
 COPY --from=app-builder --chown=dockhand:dockhand /app/node_modules ./node_modules
@@ -98,6 +108,9 @@ COPY --chown=dockhand:dockhand drizzle-pg/ ./drizzle-pg/
 # Copy legal documents
 COPY --chown=dockhand:dockhand LICENSE.txt PRIVACY.txt ./
 
+# Copy getrandom shim for old kernels (Synology DS1513+ with kernel 3.10.x)
+COPY --from=app-builder /tmp/libgetrandom-shim.so /usr/lib/libgetrandom-shim.so
+
 # Copy entrypoint script
 COPY docker-entrypoint-node.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
@@ -113,7 +126,7 @@ RUN mkdir -p /home/dockhand/.dockhand/stacks /app/data \
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:3000/ || exit 1
+    CMD curl -f http://localhost:${PORT:-3000}/ || exit 1
 
 ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/docker-entrypoint.sh"]
-CMD ["node", "/app/server.js"]
+CMD []
