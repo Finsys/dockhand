@@ -662,7 +662,7 @@
 
 	<div class="flex-1 flex min-h-0 h-full">
 		<!-- Graph container -->
-		<div class="flex-1 relative h-full {graphTheme === 'dark' ? 'bg-zinc-900' : 'bg-zinc-100'}">
+		<div class="flex-1 relative h-full min-w-0 {graphTheme === 'dark' ? 'bg-zinc-900' : 'bg-zinc-100'}">
 			<div bind:this={containerEl} class="w-full h-full"></div>
 
 			<!-- Footer: Legend -->
