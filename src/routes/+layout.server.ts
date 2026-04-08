@@ -4,7 +4,7 @@ import { isAuthEnabled, validateSession } from '$lib/server/auth';
 import { hasAdminUser } from '$lib/server/db';
 
 // Routes that don't require authentication
-const PUBLIC_PATHS = ['/login'];
+const PUBLIC_PATHS = ['/login', '/api/docs'];
 
 export const load: LayoutServerLoad = async ({ cookies, url }) => {
 	const authEnabled = await isAuthEnabled();

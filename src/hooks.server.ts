@@ -211,7 +211,8 @@ const PUBLIC_PATHS = [
 	'/api/changelog',
 	'/api/dependencies',
 	'/api/health',
-	'/api/settings/theme'
+	'/api/settings/theme',
+	'/api/docs'
 ];
 
 // Check if path is public
