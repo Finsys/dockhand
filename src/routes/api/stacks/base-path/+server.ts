@@ -5,8 +5,7 @@ import type { RequestHandler } from './$types';
 /**
  * GET /api/stacks/base-path
  *
- * Returns the default Dockhand stacks directory path.
- * This is where stacks are stored by default ($DATA_DIR/stacks/).
+ * Returns the current stacks base path.
  */
 export const GET: RequestHandler = async () => {
 	const basePath = getStacksDir();

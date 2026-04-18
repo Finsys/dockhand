@@ -289,7 +289,7 @@ export function getStacksDir(): string {
 	if (_stacksDir) return _stacksDir;
 	const dataDir = process.env.DATA_DIR || './data';
 	// Resolve to absolute path to avoid issues with relative paths in docker compose
-	_stacksDir = resolve(join(dataDir, 'stacks'));
+	_stacksDir = resolve(process.env.STACKS_DIR || join(dataDir, 'stacks'));
 	if (!existsSync(_stacksDir)) {
 		mkdirSync(_stacksDir, { recursive: true });
 	}
@@ -300,11 +300,15 @@ export function getStacksDir(): string {
  * Get stack directory path for a specific environment.
  * New stacks use: $DATA_DIR/stacks/<envName>/<stackName>/
  * Legacy stacks (no env): $DATA_DIR/stacks/<stackName>/
+ * If STACKS_DIR is set, new stacks use: $STACKS_DIR/<stackName>/
  *
  * Automatically looks up environment name from database.
  */
 export async function getStackDir(stackName: string, envId?: number | null): Promise<string> {
 	const stacksDir = getStacksDir();
+	if (process.env.STACKS_DIR) {
+		return join(stacksDir, stackName);
+	}
 	if (envId) {
 		const env = await getEnvironment(envId);
 		if (env) {
@@ -318,9 +322,10 @@ export async function getStackDir(stackName: string, envId?: number | null): Pro
 /**
  * Find stack directory, checking paths in order:
  * 1. Database: Custom composePath in stackSources table (adopted/imported stacks)
- * 2. New path (envName): $DATA_DIR/stacks/<envName>/<stackName>/
- * 3. ID-based path (envId): $DATA_DIR/stacks/<envId>/<stackName>/
- * 4. Legacy path: $DATA_DIR/stacks/<stackName>/
+ * 2. If STACKS_DIR is set: $STACKS_DIR/<stackName>/
+ * 3. New path (envName): $DATA_DIR/stacks/<envName>/<stackName>/
+ * 4. ID-based path (envId): $DATA_DIR/stacks/<envId>/<stackName>/
+ * 5. Legacy path: $DATA_DIR/stacks/<stackName>/
  *
  * Automatically looks up environment name from database.
  * Always checks legacy path for backwards compatibility with pre-env stacks.
@@ -337,11 +342,20 @@ export async function findStackDir(stackName: string, envId?: number | null): Pr
 
 	const stacksDir = getStacksDir();
 
+	// When STACKS_DIR is set, stacks are always stored flat at STACKS_DIR/<stackName>
+	if (process.env.STACKS_DIR) {
+		const customPath = join(stacksDir, stackName);
+		if (existsSync(customPath)) {
+			return customPath;
+		}
+		return null;
+	}
+
 	// Look up environment name if we have an ID
 	if (envId) {
 		const env = await getEnvironment(envId);
 
-		// 2. Check new path (with envName)
+		// 3. Check new path (with envName)
 		if (env) {
 			const namePath = join(stacksDir, env.name, stackName);
 			if (existsSync(namePath)) {
@@ -349,14 +363,14 @@ export async function findStackDir(stackName: string, envId?: number | null): Pr
 			}
 		}
 
-		// 3. Check ID-based path
+		// 4. Check ID-based path
 		const idPath = join(stacksDir, String(envId), stackName);
 		if (existsSync(idPath)) {
 			return idPath;
 		}
 	}
 
-	// 4. Always check legacy path (stacks created before env-scoping was added)
+	// 5. Always check legacy path (stacks created before env-scoping was added)
 	const legacyPath = join(stacksDir, stackName);
 	if (existsSync(legacyPath)) {
 		return legacyPath;
@@ -388,7 +402,7 @@ export interface GetComposeFileResult {
  *
  * Unified logic for all stacks:
  * - If composePath is set in DB → use custom path
- * - If composePath is NULL → use default location (data/stacks/{env}/{name}/)
+ * - If composePath is NULL → use the default managed stack location
  * - If no source record and no files found → return needsFileLocation: true
  */
 export async function getStackComposeFile(
@@ -2085,17 +2099,17 @@ export async function removeStack(
 			const resolvedCustomDir = resolve(customDir);
 			const resolvedStacksDir = resolve(stacksDir);
 
-			// Only delete if the directory is within DATA_DIR/stacks/ (files we created)
-			// AND the directory basename matches the stack name exactly (for safety)
-			if (resolvedCustomDir.startsWith(resolvedStacksDir) &&
-				basename(resolvedCustomDir) === stackName &&
+		// Only delete if the directory is within the managed stacks directory (files we created)
+		// AND the directory basename matches the stack name exactly (for safety)
+		if (resolvedCustomDir.startsWith(resolvedStacksDir) &&
+			basename(resolvedCustomDir) === stackName &&
 				existsSync(customDir)) {
 				stackDir = customDir;
 			}
 		}
 
 		// Fall back to default paths ONLY if no custom path was set in DB
-		// (Don't delete default-path files when an adopted stack has custom path outside DATA_DIR)
+		// (Don't delete default-path files when an adopted stack has custom path outside the managed stacks dir)
 		if (!stackDir && !stackSource?.composePath) {
 			const defaultDir = await findStackDir(stackName, envId) || await getStackDir(stackName, envId);
 			if (existsSync(defaultDir)) {
@@ -2586,4 +2600,3 @@ export async function saveStackEnvVars(
 // They can be removed once all imports are updated
 
 export type { StackOperationResult as CreateStackResult };
-

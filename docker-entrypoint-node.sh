@@ -29,6 +29,7 @@ if [ "$RUNNING_AS_ROOT" = "false" ]; then
     echo "Running as user $(id -u):$(id -g) (set via container user directive)"
 
     DATA_DIR="${DATA_DIR:-/app/data}"
+    STACKS_DIR="${STACKS_DIR:-$DATA_DIR/stacks}"
     if [ ! -d "$DATA_DIR/db" ]; then
         echo "Creating database directory at $DATA_DIR/db"
         mkdir -p "$DATA_DIR/db" 2>/dev/null || {
@@ -37,8 +38,8 @@ if [ "$RUNNING_AS_ROOT" = "false" ]; then
             exit 1
         }
     fi
-    if [ ! -d "$DATA_DIR/stacks" ]; then
-        mkdir -p "$DATA_DIR/stacks" 2>/dev/null || true
+    if [ ! -d "$STACKS_DIR" ]; then
+        mkdir -p "$STACKS_DIR" 2>/dev/null || true
     fi
 
     SOCKET_PATH="/var/run/docker.sock"
@@ -107,6 +108,7 @@ else
     # Recursive chown on /app/data breaks stack volumes mounted with relative paths
     # (e.g. ./postgresql:/var/lib/postgresql) that need different ownership (#719).
     DATA_DIR="${DATA_DIR:-/app/data}"
+    STACKS_DIR="${STACKS_DIR:-$DATA_DIR/stacks}"
     chown "$RUN_USER":"$RUN_USER" "$DATA_DIR" 2>/dev/null || true
     for subdir in db stacks git-repos tmp icons snapshots scanner-cache; do
         if [ -d "$DATA_DIR/$subdir" ]; then
@@ -125,6 +127,10 @@ else
                 chown -R "$RUN_USER":"$RUN_USER" "$DATA_DIR/$subdir" 2>/dev/null || true
             fi
         done
+    fi
+    if [ -n "$STACKS_DIR" ] && [ "$STACKS_DIR" != "$DATA_DIR/stacks" ]; then
+        mkdir -p "$STACKS_DIR" 2>/dev/null || true
+        chown -R "$RUN_USER":"$RUN_USER" "$STACKS_DIR" 2>/dev/null || true
     fi
 fi
 

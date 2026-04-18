@@ -15,7 +15,6 @@
 	import * as Select from '$lib/components/ui/select';
 	import { Badge } from '$lib/components/ui/badge';
 	import { currentEnvironment, appendEnvParam } from '$lib/stores/environment';
-	import { appSettings } from '$lib/stores/settings';
 	import { focusFirstInput } from '$lib/utils';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import * as Alert from '$lib/components/ui/alert';
@@ -1266,10 +1265,9 @@ services:
 	// Pre-fetched default base directory for create mode (fetched once on open/env change)
 	let defaultStackDir = $state<string | null>(null);
 
-	async function fetchDefaultBasePath(envId: number | null, location: string | null) {
+	async function fetchDefaultBasePath(envId: number | null) {
 		const params = new URLSearchParams({ name: '__placeholder__' });
 		if (envId) params.set('env', String(envId));
-		if (location) params.set('location', location);
 		try {
 			const r = await fetch(`/api/stacks/default-path?${params}`);
 			if (r.ok) {
@@ -1286,8 +1284,7 @@ services:
 	$effect(() => {
 		if (!open || mode !== 'create') return;
 		const envId = $currentEnvironment?.id ?? null;
-		const location = $appSettings.primaryStackLocation;
-		fetchDefaultBasePath(envId, location);
+		fetchDefaultBasePath(envId);
 	});
 
 	// Auto-update default paths when stack name changes in create mode
