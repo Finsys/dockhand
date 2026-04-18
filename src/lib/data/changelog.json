@@ -1,12 +1,12 @@
 [
   {
     "version": "1.0.25",
-    "date": "coming soon",
-    "comingSoon": true,
+    "date": "2026-04-18",
+    "comingSoon": false,
     "changes": [
       { "type": "feature", "text": "API token authentication — Bearer tokens for CI/CD pipelines and scripts" },
       { "type": "feature", "text": "Telegram topic support — send notifications to supergroup topics (#855)" },
-{ "type": "fix", "text": "allow removing healthcheck, ports, and honor startAfterUpdate=false during container edit (#892)" },
+      { "type": "fix", "text": "allow removing healthcheck, ports, and honor startAfterUpdate=false during container edit (#892)" },
       { "type": "fix", "text": "validate stack names and prevent broken DB entries on invalid input (#876)" },
       { "type": "fix", "text": "use per-environment timezone for schedule execution log timestamps (#882)" },
       { "type": "fix", "text": "\"Pull image before update\" and \"Start after update\" settings ignored (#909)" },
