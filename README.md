@@ -36,6 +36,12 @@ Dockhand is a modern, efficient Docker management application providing real-tim
 - **Database**: SQLite or PostgreSQL via Drizzle ORM
 - **Docker**: direct docker API calls.
 
+## Screenshots
+| Light Mode | Dark Mode |
+| --- | --- |
+| <img src="screenshots/dashboard1.webp" width="600" alt="Dashboard 1 Light"> | <img src="screenshots/dashboard2.webp" width="600" alt="Dashboard 2 Dark"> |
+| <img src="screenshots/dashboard3.webp" width="600" alt="Dashboard 3 Light"> | <img src="screenshots/dashboard4.webp" width="600" alt="Dashboard 4 Dark"> |
+
 ## License
 
 Dockhand is licensed under the [Business Source License 1.1](LICENSE.txt) (BSL 1.1).
