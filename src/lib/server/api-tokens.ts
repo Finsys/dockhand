@@ -191,13 +191,15 @@ async function buildUserFromToken(tokenRecord: any): Promise<AuthenticatedUser |
 		permissions = adminRole?.permissions ?? {} as Permissions;
 	} else {
 		isAdmin = await userHasAdminRole(dbUser.id);
-		const roles = await getUserRoles(dbUser.id);
+		const userRoleAssignments = await getUserRoles(dbUser.id);
 		// Merge permissions from all roles
 		permissions = {} as Permissions;
-		for (const role of roles) {
-			const rolePerms = typeof role.permissions === 'string'
-				? JSON.parse(role.permissions)
-				: role.permissions;
+		for (const assignment of userRoleAssignments) {
+			if (!assignment.role) continue;
+			const rolePerms = typeof assignment.role.permissions === 'string'
+				? JSON.parse(assignment.role.permissions)
+				: assignment.role.permissions;
+			if (!rolePerms) continue;
 			for (const [key, actions] of Object.entries(rolePerms)) {
 				if (!permissions[key as keyof Permissions]) {
 					permissions[key as keyof Permissions] = [];
