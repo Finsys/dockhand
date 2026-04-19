@@ -39,8 +39,8 @@ Dockhand is a modern, efficient Docker management application providing real-tim
 ## Screenshots
 | Light Mode | Dark Mode |
 | --- | --- |
-| <img src="screenshots/dashboard1.webp" width="600" alt="Dashboard 1 Light"> | <img src="screenshots/dashboard2.webp" width="600" alt="Dashboard 2 Dark"> |
-| <img src="screenshots/dashboard3.webp" width="600" alt="Dashboard 3 Light"> | <img src="screenshots/dashboard4.webp" width="600" alt="Dashboard 4 Dark"> |
+| <img src="docs/dashboard1.webp" width="600" alt="Dashboard 1 Light"> | <img src="docs/dashboard2.webp" width="600" alt="Dashboard 2 Dark"> |
+| <img src="docs/dashboard3.webp" width="600" alt="Dashboard 3 Light"> | <img src="docs/dashboard4.webp" width="600" alt="Dashboard 4 Dark"> |
 
 ## License
 
