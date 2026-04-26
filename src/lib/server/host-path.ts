@@ -83,14 +83,22 @@ export async function detectHostDataDir(): Promise<string | null> {
 	detectionAttempted = true;
 
 	// Check if user explicitly set HOST_DATA_DIR
-	if (process.env.HOST_DATA_DIR) {
-		cachedHostDataDir = process.env.HOST_DATA_DIR;
+	const explicitHostDataDir = process.env.HOST_DATA_DIR;
+	if (explicitHostDataDir) {
+		cachedHostDataDir = explicitHostDataDir;
 		console.log(`[HostPath] Using HOST_DATA_DIR from environment: ${cachedHostDataDir}`);
+		// Don't return early - still need to populate cachedMounts for path translation
 	}
 
 	const containerId = getOwnContainerId();
 	if (!containerId) {
 		console.warn('[HostPath] Running in Docker but could not detect container ID; ExtraHosts will not be mirrored to sidecars');
+		if (explicitHostDataDir) {
+			const dataDir = resolve(process.env.DATA_DIR || '/app/data');
+			cachedMounts = [{ source: explicitHostDataDir, destination: dataDir }];
+			console.log(`[HostPath] Created synthetic mount: ${explicitHostDataDir} -> ${dataDir}`);
+			return cachedHostDataDir;
+		}
 		return null;
 	}
 
@@ -189,6 +197,9 @@ export async function detectHostDataDir(): Promise<string | null> {
 		// Explicit override wins for DATA_DIR path, but we still inspect to populate
 		// mounts/network/DOCKER_HOST/ExtraHosts caches for sibling sidecars.
 		if (cachedHostDataDir) {
+			if (explicitHostDataDir) {
+				console.log(`[HostPath] Using explicit HOST_DATA_DIR with ${cachedMounts?.length || 0} cached mount(s)`);
+			}
 			return cachedHostDataDir;
 		}
 
@@ -215,6 +226,13 @@ export async function detectHostDataDir(): Promise<string | null> {
 		return null;
 	} catch (err) {
 		console.warn(`[HostPath] Failed to query Docker API: ${err}`);
+		// If HOST_DATA_DIR was explicitly set, still use it with synthetic mount
+		if (explicitHostDataDir) {
+			const dataDir = resolve(process.env.DATA_DIR || '/app/data');
+			cachedMounts = [{ source: explicitHostDataDir, destination: dataDir }];
+			console.log(`[HostPath] Created synthetic mount after API error: ${explicitHostDataDir} -> ${dataDir}`);
+			return cachedHostDataDir;
+		}
 		return null;
 	}
 }

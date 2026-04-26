@@ -68,7 +68,7 @@ export const stackColumns: ColumnConfig[] = [
 	{ id: 'diskIO', label: 'Disk I/O', width: 100, minWidth: 70, align: 'right' },
 	{ id: 'networks', label: 'Networks', width: 80, minWidth: 60 },
 	{ id: 'volumes', label: 'Volumes', width: 80, minWidth: 60 },
-	{ id: 'actions', label: '', fixed: 'end', width: 180, resizable: false }
+	{ id: 'actions', label: '', fixed: 'end', width: 250, resizable: false }
 ];
 
 // Volume grid columns
