@@ -10,7 +10,7 @@ Dockhand welcomes all contributions so thank you for considering contributing!
 
 ## Tech Stack
 
-- Base: own OS layer built from scratch using [Wolfi packages](https://github.com/wolfi-dev/os) via apko. Every package is explicitly declared in the Dockerfile.
+- Base: A custom OS layer built from scratch using [Wolfi packages](https://github.com/wolfi-dev/os) via apko. Every package is explicitly declared in the Dockerfile.
 - Frontend: [SvelteKit 2](https://svelte.dev/docs/kit/introduction), [Svelte 5](https://svelte.dev), [shadcn-svelte](https://www.shadcn-svelte.com), [TailwindCSS](https://tailwindcss.com)
 - Backend: [Bun](https://bun.sh/) runtime with SvelteKit API routes
 - Database: SQLite or PostgreSQL via [Drizzle ORM](https://orm.drizzle.team)

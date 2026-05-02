@@ -16,7 +16,7 @@
 
 ## About
 
-Dockhand is a modern, efficient Docker management application providing real-time container management, Compose stack orchestration, and multi-environment support.  All in a lightweight, secure and privacy-focused package.
+Dockhand is a modern, efficient Docker management application providing real-time container management, Compose stack orchestration, and multi-environment support.  All in a lightweight, secure, and privacy-focused package.
 
 ### Features
 
@@ -30,7 +30,7 @@ Dockhand is a modern, efficient Docker management application providing real-tim
 
 ## Tech Stack
 
-- **Base**: own OS layer built from scratch using <a href="https://github.com/wolfi-dev/os">Wolfi packages</a> via apko. Every package is explicitly declared in the Dockerfile.
+- **Base**: A custom OS layer built from scratch using <a href="https://github.com/wolfi-dev/os">Wolfi packages</a> via apko. Every package is explicitly declared in the Dockerfile.
 - **Frontend**: SvelteKit 2, Svelte 5, shadcn-svelte, TailwindCSS
 - **Backend**: Bun runtime with SvelteKit API routes
 - **Database**: SQLite or PostgreSQL via Drizzle ORM
