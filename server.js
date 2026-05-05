@@ -191,7 +191,7 @@ async function handleTerminalConnection(ws, url, connId) {
 			};
 			if (target.tls.ca) tlsOpts.ca = [target.tls.ca, ...rootCertificates];
 			if (target.tls.cert) tlsOpts.cert = [target.tls.cert];
-			if (target.tls.key) tlsOpts.key = target.tls.key;
+			if (target.tls.key) tlsOpts.key = [target.tls.key];
 			dockerStream = tlsConnect(tlsOpts);
 		} else {
 			// Plain HTTP (direct TCP or hawser-standard)
@@ -430,7 +430,12 @@ function handleHawserConnection(ws, connId, remoteIp) {
 
 			// Use the global hawser message handler injected by the SvelteKit app
 			if (typeof globalThis.__hawserHandleMessage === 'function') {
-				await globalThis.__hawserHandleMessage(ws, msg, connId, remoteIp);
+				try {
+					await globalThis.__hawserHandleMessage(ws, msg, connId, remoteIp);
+				} catch (handlerError) {
+					console.error('[Hawser WS] Handler error:', handlerError);
+					// Don't close connection - let it recover
+				}
 			} else {
 				console.warn('[Hawser WS] No global handler registered');
 				ws.send(JSON.stringify({ type: 'error', message: 'Server not ready' }));
@@ -455,5 +460,4 @@ function handleHawserConnection(ws, connId, remoteIp) {
 server.listen(PORT, HOST, () => {
 	console.log(`Listening on http://${HOST}:${PORT}/ with WebSocket`);
 });
-
 
