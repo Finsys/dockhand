@@ -15,6 +15,7 @@ import { auditContainer } from '$lib/server/audit';
 import { getScannerSettings, scanImage } from '$lib/server/scanner';
 import { saveVulnerabilityScan, removePendingContainerUpdate, type VulnerabilityCriteria } from '$lib/server/db';
 import { parseImageNameAndTag, shouldBlockUpdate, combineScanSummaries, isSystemContainer } from '$lib/server/scheduler/tasks/update-utils';
+import { isUpdateDisabledByLabel } from '$lib/server/container-labels';
 import { recreateContainer } from '$lib/server/scheduler/tasks/container-update';
 import { createJob, appendLine, completeJob, failJob } from '$lib/server/jobs';
 
@@ -168,6 +169,22 @@ export const POST: RequestHandler = async (event) => {
 						total: containerIds.length,
 						success: true,
 						message: `Skipping ${containerName} - cannot update ${systemType} container`
+					});
+					skippedCount++;
+					continue;
+				}
+
+				// Skip containers with dockhand.update=false label
+				if (isUpdateDisabledByLabel(config.Labels)) {
+					sendData({
+						type: 'progress',
+						containerId,
+						containerName,
+						step: 'skipped',
+						current: i + 1,
+						total: containerIds.length,
+						success: true,
+						message: `Skipping ${containerName} - dockhand.update=false label`
 					});
 					skippedCount++;
 					continue;

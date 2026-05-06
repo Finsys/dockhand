@@ -2058,7 +2058,7 @@
 										{#if container.ports.length > 0}
 											{@const mappedPorts = formatPorts(container.ports)}
 											{#each mappedPorts as port}
-												{@const url = !port.isRange ? getPortUrl(port.publicPort) : null}
+												{@const url = getPortUrl(port.publicPort)}
 												{#if url}
 													<a
 														href={url}

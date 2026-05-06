@@ -12,6 +12,7 @@
 	import * as Select from '$lib/components/ui/select';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
+	import { formatPorts, type PortMapping } from '$lib/utils/port-format';
 	import MultiSelectFilter from '$lib/components/MultiSelectFilter.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import { Badge } from '$lib/components/ui/badge';
@@ -1149,8 +1150,6 @@
 		}
 	}
 
-	import { formatPorts, type PortMapping } from '$lib/utils/port-format';
-
 	function extractHostFromUrl(urlString: string): string | null {
 		if (!urlString) return null;
 
@@ -1861,7 +1860,7 @@
 							{@const remainingCount = ports.length - 1}
 							<div class="flex {compactPorts ? 'flex-nowrap' : 'flex-wrap'} gap-1">
 								{#each displayPorts as port}
-									{@const url = !port.isRange && currentEnvDetails ? getPortUrl(port.publicPort) : null}
+									{@const url = currentEnvDetails ? getPortUrl(port.publicPort) : null}
 									{#if url}
 										<a
 											href={url}

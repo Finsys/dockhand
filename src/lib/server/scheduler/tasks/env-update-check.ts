@@ -31,6 +31,7 @@ import {
 import { sendEventNotification } from '../../notifications';
 import { getScannerSettings, scanImage, type VulnerabilitySeverity } from '../../scanner';
 import { parseImageNameAndTag, shouldBlockUpdate, combineScanSummaries, isSystemContainer } from './update-utils';
+import { isUpdateDisabledByLabel } from '../../container-labels';
 import { recreateContainer } from './container-update';
 
 interface UpdateInfo {
@@ -126,6 +127,12 @@ export async function runEnvUpdateCheckJob(
 
 				if (isSystemContainer(imageName)) {
 					await log(`  [${container.name}] Skipping - system container`);
+					continue;
+				}
+
+				// Check dockhand.update label (label wins over DB settings)
+				if (isUpdateDisabledByLabel(inspectData.Config?.Labels)) {
+					await log(`  [${container.name}] Skipping - dockhand.update=false label`);
 					continue;
 				}
 

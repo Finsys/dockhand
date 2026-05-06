@@ -3,6 +3,7 @@ import { listContainers, createContainer, pullImage, EnvironmentNotFoundError, D
 import { authorize } from '$lib/server/authorize';
 import { auditContainer } from '$lib/server/audit';
 import { hasEnvironments } from '$lib/server/db';
+import { isHiddenByLabel } from '$lib/server/container-labels';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ url, cookies }) => {
@@ -34,7 +35,9 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 
 	try {
 		const containers = await listContainers(all, envIdNum);
-		return json(containers);
+		// Filter out containers with dockhand.hidden=true label
+		const visible = containers.filter(c => !isHiddenByLabel(c.labels));
+		return json(visible);
 	} catch (error: any) {
 		// Return 404 for missing environment so frontend can clear stale localStorage
 		if (error instanceof EnvironmentNotFoundError) {

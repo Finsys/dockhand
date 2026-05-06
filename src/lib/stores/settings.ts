@@ -5,6 +5,7 @@ export type TimeFormat = '12h' | '24h';
 export type DateFormat = 'MM/DD/YYYY' | 'DD/MM/YYYY' | 'YYYY-MM-DD' | 'DD.MM.YYYY';
 export type DownloadFormat = 'tar' | 'tar.gz';
 export type EventCollectionMode = 'stream' | 'poll';
+export type LabelFilterMode = 'any' | 'all';
 
 export interface AppSettings {
 	confirmDestructive: boolean;
@@ -32,6 +33,8 @@ export interface AppSettings {
 	primaryStackLocation: string | null;
 	defaultGrypeImage: string;
 	defaultTrivyImage: string;
+	defaultComposeTemplate: string;
+	labelFilterMode: LabelFilterMode;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -59,7 +62,26 @@ const DEFAULT_SETTINGS: AppSettings = {
 	externalStackPaths: [],
 	primaryStackLocation: null,
 	defaultGrypeImage: 'anchore/grype:v0.110.0',
-	defaultTrivyImage: 'aquasec/trivy:0.69.3'
+	defaultTrivyImage: 'aquasec/trivy:0.69.3',
+	labelFilterMode: 'any',
+	defaultComposeTemplate: `version: "3.8"
+
+services:
+  app:
+    image: nginx:alpine
+    ports:
+      - "8080:80"
+    environment:
+      - APP_ENV=\${APP_ENV:-production}
+    volumes:
+      - ./html:/usr/share/nginx/html:ro
+    restart: unless-stopped
+
+# Add more services as needed
+# networks:
+#   default:
+#     driver: bridge
+`
 };
 
 // Create a writable store for app settings
@@ -101,7 +123,9 @@ function createSettingsStore() {
 					externalStackPaths: settings.externalStackPaths ?? DEFAULT_SETTINGS.externalStackPaths,
 					primaryStackLocation: settings.primaryStackLocation ?? DEFAULT_SETTINGS.primaryStackLocation,
 					defaultGrypeImage: settings.defaultGrypeImage ?? DEFAULT_SETTINGS.defaultGrypeImage,
-					defaultTrivyImage: settings.defaultTrivyImage ?? DEFAULT_SETTINGS.defaultTrivyImage
+					defaultTrivyImage: settings.defaultTrivyImage ?? DEFAULT_SETTINGS.defaultTrivyImage,
+					defaultComposeTemplate: settings.defaultComposeTemplate ?? DEFAULT_SETTINGS.defaultComposeTemplate,
+				labelFilterMode: settings.labelFilterMode ?? DEFAULT_SETTINGS.labelFilterMode
 				});
 			}
 		} catch {
@@ -146,7 +170,9 @@ function createSettingsStore() {
 					externalStackPaths: updatedSettings.externalStackPaths ?? DEFAULT_SETTINGS.externalStackPaths,
 					primaryStackLocation: updatedSettings.primaryStackLocation ?? DEFAULT_SETTINGS.primaryStackLocation,
 					defaultGrypeImage: updatedSettings.defaultGrypeImage ?? DEFAULT_SETTINGS.defaultGrypeImage,
-					defaultTrivyImage: updatedSettings.defaultTrivyImage ?? DEFAULT_SETTINGS.defaultTrivyImage
+					defaultTrivyImage: updatedSettings.defaultTrivyImage ?? DEFAULT_SETTINGS.defaultTrivyImage,
+					defaultComposeTemplate: updatedSettings.defaultComposeTemplate ?? DEFAULT_SETTINGS.defaultComposeTemplate,
+				labelFilterMode: updatedSettings.labelFilterMode ?? DEFAULT_SETTINGS.labelFilterMode
 				});
 			}
 		} catch (error) {
@@ -345,6 +371,20 @@ function createSettingsStore() {
 			update((current) => {
 				const newSettings = { ...current, defaultTrivyImage: value };
 				saveSettings({ defaultTrivyImage: value });
+				return newSettings;
+			});
+		},
+		setDefaultComposeTemplate: (value: string) => {
+			update((current) => {
+				const newSettings = { ...current, defaultComposeTemplate: value };
+				saveSettings({ defaultComposeTemplate: value });
+				return newSettings;
+			});
+		},
+		setLabelFilterMode: (value: LabelFilterMode) => {
+			update((current) => {
+				const newSettings = { ...current, labelFilterMode: value };
+				saveSettings({ labelFilterMode: value });
 				return newSettings;
 			});
 		},

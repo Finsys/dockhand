@@ -4,6 +4,7 @@ import { authorize } from '$lib/server/authorize';
 import { listContainers, inspectContainer, checkImageUpdateAvailable } from '$lib/server/docker';
 import { clearPendingContainerUpdates, addPendingContainerUpdate } from '$lib/server/db';
 import { isSystemContainer } from '$lib/server/scheduler/tasks/update-utils';
+import { isUpdateDisabledByLabel } from '$lib/server/container-labels';
 import { createJobResponse } from '$lib/server/sse';
 
 export interface UpdateCheckResult {
@@ -16,6 +17,7 @@ export interface UpdateCheckResult {
 	error?: string;
 	isLocalImage?: boolean;
 	systemContainer?: 'dockhand' | 'hawser' | null;
+	updateDisabled?: boolean;
 }
 
 /**
@@ -64,6 +66,7 @@ export const POST: RequestHandler = async ({ url, cookies, request }) => {
 				}
 
 				const result = await checkImageUpdateAvailable(imageName, currentImageId, envIdNum);
+				const updateDisabled = isUpdateDisabledByLabel(inspectData.Config?.Labels);
 
 				return {
 					containerId: container.id,
@@ -74,7 +77,8 @@ export const POST: RequestHandler = async ({ url, cookies, request }) => {
 					newDigest: result.registryDigest,
 					error: result.error,
 					isLocalImage: result.isLocalImage,
-					systemContainer: isSystemContainer(imageName) || null
+					systemContainer: isSystemContainer(imageName) || null,
+					updateDisabled
 				};
 			} catch (error: any) {
 				return {
@@ -102,12 +106,12 @@ export const POST: RequestHandler = async ({ url, cookies, request }) => {
 		}
 		await Promise.all(Array.from({ length: Math.min(CONCURRENCY, containers.length) }, () => runNext()));
 
-		const updatesFound = results.filter(r => r.hasUpdate && !r.systemContainer).length;
+		const updatesFound = results.filter(r => r.hasUpdate && !r.systemContainer && !r.updateDisabled).length;
 
 		// Save containers with updates to the database for persistence
 		if (envIdNum) {
 			for (const result of results) {
-				if (result.hasUpdate && !result.systemContainer) {
+				if (result.hasUpdate && !result.systemContainer && !result.updateDisabled) {
 					await addPendingContainerUpdate(
 						envIdNum,
 						result.containerId,

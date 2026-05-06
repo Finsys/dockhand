@@ -223,7 +223,7 @@ function setSessionCookie(cookies: Cookies, sessionId: string, maxAge: number, r
 		path: '/',
 		httpOnly: true,                    // Prevents XSS attacks from reading cookie
 		secure: isSecureContext(request),  // Protocol-aware: checks x-forwarded-proto or NODE_ENV
-		sameSite: 'strict',                // CSRF protection
+		sameSite: 'lax',                   // Lax required for OIDC/SSO cross-site redirects
 		maxAge: maxAge                     // Session timeout in seconds
 	});
 }

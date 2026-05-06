@@ -77,6 +77,10 @@ export interface GeneralSettings {
 	// Scanner images
 	defaultGrypeImage: string;
 	defaultTrivyImage: string;
+	// Compose template
+	defaultComposeTemplate: string;
+	// Label filter mode
+	labelFilterMode: 'any' | 'all';
 }
 
 const DEFAULT_SETTINGS: Omit<GeneralSettings, 'scheduleRetentionDays' | 'eventRetentionDays' | 'scheduleCleanupCron' | 'eventCleanupCron' | 'scheduleCleanupEnabled' | 'eventCleanupEnabled'> = {
@@ -105,7 +109,26 @@ const DEFAULT_SETTINGS: Omit<GeneralSettings, 'scheduleRetentionDays' | 'eventRe
 	externalStackPaths: [],
 	primaryStackLocation: null,
 	defaultGrypeImage: DEFAULT_GRYPE_IMAGE,
-	defaultTrivyImage: DEFAULT_TRIVY_IMAGE
+	defaultTrivyImage: DEFAULT_TRIVY_IMAGE,
+	labelFilterMode: 'any' as const,
+	defaultComposeTemplate: `version: "3.8"
+
+services:
+  app:
+    image: nginx:alpine
+    ports:
+      - "8080:80"
+    environment:
+      - APP_ENV=\${APP_ENV:-production}
+    volumes:
+      - ./html:/usr/share/nginx/html:ro
+    restart: unless-stopped
+
+# Add more services as needed
+# networks:
+#   default:
+#     driver: bridge
+`
 };
 
 const VALID_LIGHT_THEMES = ['default', 'catppuccin', 'rose-pine', 'nord', 'solarized', 'gruvbox', 'alucard', 'github', 'material', 'atom-one'];
@@ -159,7 +182,9 @@ export const GET: RequestHandler = async ({ cookies }) => {
 			externalStackPaths,
 			primaryStackLocation,
 			defaultGrypeImage,
-			defaultTrivyImage
+			defaultTrivyImage,
+			defaultComposeTemplate,
+			labelFilterMode
 		] = await Promise.all([
 			getSetting('confirm_destructive'),
 			getSetting('show_stopped_containers'),
@@ -192,7 +217,9 @@ export const GET: RequestHandler = async ({ cookies }) => {
 			getExternalStackPaths(),
 			getPrimaryStackLocation(),
 			getSetting('default_grype_image'),
-			getSetting('default_trivy_image')
+			getSetting('default_trivy_image'),
+			getSetting('default_compose_template'),
+			getSetting('label_filter_mode')
 		]);
 
 		const settings: GeneralSettings = {
@@ -227,7 +254,9 @@ export const GET: RequestHandler = async ({ cookies }) => {
 			externalStackPaths,
 			primaryStackLocation,
 			defaultGrypeImage: defaultGrypeImage ?? DEFAULT_GRYPE_IMAGE,
-			defaultTrivyImage: defaultTrivyImage ?? DEFAULT_TRIVY_IMAGE
+			defaultTrivyImage: defaultTrivyImage ?? DEFAULT_TRIVY_IMAGE,
+			defaultComposeTemplate: defaultComposeTemplate ?? DEFAULT_SETTINGS.defaultComposeTemplate,
+			labelFilterMode: labelFilterMode ?? DEFAULT_SETTINGS.labelFilterMode
 		};
 
 		return json(settings);
@@ -245,7 +274,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 
 	try {
 		const body = await request.json();
-		const { confirmDestructive, showStoppedContainers, highlightUpdates, timeFormat, dateFormat, downloadFormat, defaultGrypeArgs, defaultTrivyArgs, scheduleRetentionDays, eventRetentionDays, scheduleCleanupCron, eventCleanupCron, scheduleCleanupEnabled, eventCleanupEnabled, logBufferSizeKb, defaultTimezone, eventCollectionMode, eventPollInterval, metricsCollectionInterval, lightTheme, darkTheme, font, fontSize, gridFontSize, terminalFont, editorFont, compactPorts, formatLogTimestamps, externalStackPaths, primaryStackLocation, defaultGrypeImage, defaultTrivyImage } = body;
+		const { confirmDestructive, showStoppedContainers, highlightUpdates, timeFormat, dateFormat, downloadFormat, defaultGrypeArgs, defaultTrivyArgs, scheduleRetentionDays, eventRetentionDays, scheduleCleanupCron, eventCleanupCron, scheduleCleanupEnabled, eventCleanupEnabled, logBufferSizeKb, defaultTimezone, eventCollectionMode, eventPollInterval, metricsCollectionInterval, lightTheme, darkTheme, font, fontSize, gridFontSize, terminalFont, editorFont, compactPorts, formatLogTimestamps, externalStackPaths, primaryStackLocation, defaultGrypeImage, defaultTrivyImage, defaultComposeTemplate, labelFilterMode } = body;
 
 		if (confirmDestructive !== undefined) {
 			await setSetting('confirm_destructive', confirmDestructive);
@@ -364,6 +393,12 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 		if (defaultTrivyImage !== undefined && typeof defaultTrivyImage === 'string') {
 			await setSetting('default_trivy_image', defaultTrivyImage);
 		}
+		if (defaultComposeTemplate !== undefined && typeof defaultComposeTemplate === 'string') {
+			await setSetting('default_compose_template', defaultComposeTemplate);
+		}
+		if (labelFilterMode !== undefined && (labelFilterMode === 'any' || labelFilterMode === 'all')) {
+			await setSetting('label_filter_mode', labelFilterMode);
+		}
 
 		// Fetch all settings in parallel for the response
 		const [
@@ -398,7 +433,9 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			externalStackPathsVal,
 			primaryStackLocationVal,
 			defaultGrypeImageVal,
-			defaultTrivyImageVal
+			defaultTrivyImageVal,
+			defaultComposeTemplateVal,
+			labelFilterModeVal
 		] = await Promise.all([
 			getSetting('confirm_destructive'),
 			getSetting('show_stopped_containers'),
@@ -431,7 +468,9 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			getExternalStackPaths(),
 			getPrimaryStackLocation(),
 			getSetting('default_grype_image'),
-			getSetting('default_trivy_image')
+			getSetting('default_trivy_image'),
+			getSetting('default_compose_template'),
+			getSetting('label_filter_mode')
 		]);
 
 		const settings: GeneralSettings = {
@@ -466,7 +505,9 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			externalStackPaths: externalStackPathsVal,
 			primaryStackLocation: primaryStackLocationVal,
 			defaultGrypeImage: defaultGrypeImageVal ?? DEFAULT_GRYPE_IMAGE,
-			defaultTrivyImage: defaultTrivyImageVal ?? DEFAULT_TRIVY_IMAGE
+			defaultTrivyImage: defaultTrivyImageVal ?? DEFAULT_TRIVY_IMAGE,
+			defaultComposeTemplate: defaultComposeTemplateVal ?? DEFAULT_SETTINGS.defaultComposeTemplate,
+			labelFilterMode: labelFilterModeVal ?? DEFAULT_SETTINGS.labelFilterMode
 		};
 
 		return json(settings);

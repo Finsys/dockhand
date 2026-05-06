@@ -8,8 +8,9 @@
 	import { TogglePill, ToggleSwitch } from '$lib/components/ui/toggle-pill';
 	import CronEditor from '$lib/components/cron-editor.svelte';
 	import TimezoneSelector from '$lib/components/TimezoneSelector.svelte';
-	import { Eye, Bell, Database, Calendar, ShieldCheck, FileText, AlertTriangle, HelpCircle, Globe, Activity, Clock, Info } from 'lucide-svelte';
-	import { appSettings, type DateFormat, type DownloadFormat, type EventCollectionMode } from '$lib/stores/settings';
+	import { Eye, Bell, Database, Calendar, ShieldCheck, FileText, AlertTriangle, HelpCircle, Globe, Activity, Clock, Info, Save, RotateCcw, LayoutDashboard, Tags } from 'lucide-svelte';
+	import CodeEditor from '$lib/components/CodeEditor.svelte';
+	import { appSettings, type DateFormat, type DownloadFormat, type EventCollectionMode, type LabelFilterMode } from '$lib/stores/settings';
 	import { canAccess, authStore } from '$lib/stores/auth';
 	import { toast } from 'svelte-sonner';
 	import ThemeSelector from '$lib/components/ThemeSelector.svelte';
@@ -27,6 +28,46 @@
 	let defaultTrivyArgs = $derived($appSettings.defaultTrivyArgs);
 	let defaultGrypeImage = $derived($appSettings.defaultGrypeImage);
 	let defaultTrivyImage = $derived($appSettings.defaultTrivyImage);
+	let defaultComposeTemplate = $derived($appSettings.defaultComposeTemplate);
+	let labelFilterMode = $derived($appSettings.labelFilterMode);
+	let composeTemplateWIP = $state('');
+	let composeTemplateInitialized = false;
+
+	$effect(() => {
+		if (!composeTemplateInitialized && defaultComposeTemplate !== undefined) {
+			composeTemplateWIP = defaultComposeTemplate;
+			composeTemplateInitialized = true;
+		}
+	});
+
+	const builtinComposeTemplate = `version: "3.8"
+
+services:
+  app:
+    image: nginx:alpine
+    ports:
+      - "8080:80"
+    environment:
+      - APP_ENV=\${APP_ENV:-production}
+    volumes:
+      - ./html:/usr/share/nginx/html:ro
+    restart: unless-stopped
+
+# Add more services as needed
+# networks:
+#   default:
+#     driver: bridge
+`;
+
+	function saveComposeTemplate() {
+		appSettings.setDefaultComposeTemplate(composeTemplateWIP);
+		toast.success('Compose template updated');
+	}
+
+	function revertComposeTemplate() {
+		composeTemplateWIP = builtinComposeTemplate;
+		toast.info('Template reverted to default');
+	}
 	let scheduleRetentionDays = $derived($appSettings.scheduleRetentionDays);
 	let eventRetentionDays = $derived($appSettings.eventRetentionDays);
 	let scheduleCleanupCron = $derived($appSettings.scheduleCleanupCron);
@@ -425,6 +466,39 @@
 				</Card.Content>
 			</Card.Root>
 
+			<Card.Root>
+				<Card.Header>
+					<Card.Title class="text-sm font-medium flex items-center gap-2">
+						<FileText class="w-4 h-4" />
+						Compose template
+					</Card.Title>
+					<p class="text-xs text-muted-foreground">Default YAML content when creating a new stack.</p>
+				</Card.Header>
+				<Card.Content class="space-y-3">
+					<div class="h-64">
+						<CodeEditor
+							value={composeTemplateWIP}
+							onchange={(v) => { composeTemplateWIP = v; }}
+							language="yaml"
+							readonly={!$canAccess('settings', 'edit')}
+							class="h-full rounded-md overflow-hidden border border-zinc-200 dark:border-zinc-700"
+						/>
+					</div>
+					{#if $canAccess('settings', 'edit')}
+						<div class="flex gap-2">
+							<Button size="sm" variant="outline" onclick={saveComposeTemplate}>
+								<Save class="w-3.5 h-3.5" />
+								Save template
+							</Button>
+							<Button size="sm" variant="ghost" onclick={revertComposeTemplate}>
+								<RotateCcw class="w-3.5 h-3.5" />
+								Revert to default
+							</Button>
+						</div>
+					{/if}
+				</Card.Content>
+			</Card.Root>
+
 		</div>
 
 		<!-- Right column -->
@@ -683,6 +757,43 @@
 							Automatically removes temporary containers used for browsing volume contents.
 							Runs every 30 minutes and on startup.
 						</p>
+					</div>
+				</Card.Content>
+			</Card.Root>
+
+			<Card.Root>
+				<Card.Header>
+					<Card.Title class="text-sm font-medium flex items-center gap-2">
+						<LayoutDashboard class="w-4 h-4" />
+						Dashboard
+					</Card.Title>
+				</Card.Header>
+				<Card.Content class="space-y-4">
+					<div class="space-y-3">
+						<div class="space-y-1">
+							<div class="flex items-center gap-3">
+								<Label>Label filter matching</Label>
+								<Tooltip.Root>
+									<Tooltip.Trigger>
+										<HelpCircle class="w-3.5 h-3.5 text-muted-foreground" />
+									</Tooltip.Trigger>
+									<Tooltip.Content class="w-80">
+										<p class="text-xs">
+											Controls how multiple selected labels filter environments on the dashboard.
+											<strong>"Any"</strong>: shows environments that have at least one of the selected labels.
+											<strong>"All"</strong>: shows only environments that have every selected label.
+										</p>
+									</Tooltip.Content>
+								</Tooltip.Root>
+								<ToggleSwitch
+									value={labelFilterMode}
+									leftValue="any"
+									rightValue="all"
+									onchange={(mode) => appSettings.setLabelFilterMode(mode as LabelFilterMode)}
+									disabled={!$canAccess('settings', 'edit')}
+								/>
+							</div>
+						</div>
 					</div>
 				</Card.Content>
 			</Card.Root>

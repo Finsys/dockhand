@@ -4,7 +4,8 @@ import {
 	removeContainer,
 	getContainerLogs
 } from '$lib/server/docker';
-import { deleteAutoUpdateSchedule, getAutoUpdateSetting, getSecretKeyNames, removePendingContainerUpdate } from '$lib/server/db';
+import { deleteAutoUpdateSchedule, getAutoUpdateSetting, getSecretKeysToMask, removePendingContainerUpdate } from '$lib/server/db';
+import { getStackComposeFile } from '$lib/server/stacks';
 import { authorize } from '$lib/server/authorize';
 import { auditContainer } from '$lib/server/audit';
 import { unregisterSchedule } from '$lib/server/scheduler';
@@ -34,10 +35,12 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 
 		const details = await inspectContainer(params.id, envIdNum);
 
-		// Mask secret env vars for containers belonging to a Compose stack
+		// Mask secret env vars for containers belonging to a Compose stack.
+		// Uses compose file parsing to detect interpolation (e.g., MYSQL_PASSWORD=${db_secret}).
 		const stackName = details.Config?.Labels?.['com.docker.compose.project'];
 		if (stackName && Array.isArray(details.Config?.Env)) {
-			const secretKeys = await getSecretKeyNames(stackName, envIdNum);
+			const composeResult = await getStackComposeFile(stackName, envIdNum).catch(() => null);
+			const secretKeys = await getSecretKeysToMask(stackName, envIdNum, composeResult?.content);
 			if (secretKeys.size > 0) {
 				details.Config.Env = details.Config.Env.map((entry: string) => {
 					const eqIdx = entry.indexOf('=');

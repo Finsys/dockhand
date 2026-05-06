@@ -10,7 +10,7 @@ PGID=${PGID:-1001}
 export BODY_SIZE_LIMIT=${BODY_SIZE_LIMIT:-2G}
 
 # Default command (--expose-gc allows forced GC from /api/debug/memory?gc=true)
-# Custom CA: set NODE_EXTRA_CA_CERTS=/path/to/ca.crt (appends to built-in CAs)
+# Custom CA: set NODE_EXTRA_CA_CERTS=/path/to/ca.crt (appends to built-in CAs, git ops auto-merge with system CAs)
 # Enterprise (system CA store): set NODE_OPTIONS="--use-openssl-ca"
 if [ "$MEMORY_MONITOR" = "true" ]; then
     DEFAULT_CMD="node --dns-result-order=ipv4first --no-network-family-autoselection --expose-gc /app/server.js"

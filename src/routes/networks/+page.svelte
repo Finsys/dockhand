@@ -560,12 +560,12 @@
 				<RefreshCw class="w-3.5 h-3.5" />
 				Refresh
 			</Button>
-			<Button size="sm" variant="secondary" onclick={openGraphModal}>
+			<Button size="sm" variant="outline" onclick={openGraphModal}>
 				<GitGraph class="w-3.5 h-3.5" />
 				View Graph
 			</Button>
 			{#if $canAccess('networks', 'create')}
-			<Button size="sm" variant="secondary" onclick={() => showCreateModal = true}>
+			<Button size="sm" variant="outline" onclick={() => showCreateModal = true}>
 				<Plus class="w-3.5 h-3.5" />
 				Create
 			</Button>

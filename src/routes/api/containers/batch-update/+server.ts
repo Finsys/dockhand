@@ -4,6 +4,7 @@ import { authorize } from '$lib/server/authorize';
 import { listContainers, pullImage, inspectContainer } from '$lib/server/docker';
 import { auditContainer } from '$lib/server/audit';
 import { recreateContainer } from '$lib/server/scheduler/tasks/container-update';
+import { isUpdateDisabledByLabel } from '$lib/server/container-labels';
 
 export interface BatchUpdateResult {
 	containerId: string;
@@ -61,6 +62,17 @@ export const POST: RequestHandler = async (event) => {
 				const config = inspectData.Config;
 				const imageName = config.Image;
 				const containerName = container.name;
+
+				// Skip containers with dockhand.update=false label
+				if (isUpdateDisabledByLabel(config.Labels)) {
+					results.push({
+						containerId,
+						containerName,
+						success: true,
+						error: 'Skipped - dockhand.update=false label'
+					});
+					continue;
+				}
 
 				// Pull latest image first
 				try {

@@ -162,20 +162,37 @@
 	// Push colliding items down (returns new array)
 	function pushCollidingItems(movedItem: GridItemLayout, sourceItems: GridItemLayout[]): GridItemLayout[] {
 		const newItems = sourceItems.map(item => ({ ...item }));
+
+		// Step 1: Push items that directly collide with the moved item
+		for (const item of newItems) {
+			if (item.id === movedItem.id) continue;
+			const overlaps = !(item.x + item.w <= movedItem.x || item.x >= movedItem.x + movedItem.w ||
+			                  item.y + item.h <= movedItem.y || item.y >= movedItem.y + movedItem.h);
+			if (overlaps) {
+				item.y = movedItem.y + movedItem.h;
+			}
+		}
+
+		// Step 2: Resolve cascading collisions by sorting top-to-bottom and pushing down
 		let changed = true;
 		let iterations = 0;
-		const maxIterations = 100; // Prevent infinite loops
-
-		while (changed && iterations < maxIterations) {
+		while (changed && iterations < 100) {
 			changed = false;
 			iterations++;
-			for (const item of newItems) {
-				if (item.id === movedItem.id) continue;
+			const sorted = newItems
+				.filter(i => i.id !== movedItem.id)
+				.sort((a, b) => a.y - b.y || a.x - b.x);
 
-				if (hasCollision(item, movedItem)) {
-					// Push this item down
-					item.y = movedItem.y + movedItem.h;
-					changed = true;
+			for (let i = 0; i < sorted.length; i++) {
+				for (let j = i + 1; j < sorted.length; j++) {
+					const upper = sorted[i];
+					const lower = sorted[j];
+					const overlaps = !(upper.x + upper.w <= lower.x || upper.x >= lower.x + lower.w ||
+					                  upper.y + upper.h <= lower.y || upper.y >= lower.y + lower.h);
+					if (overlaps) {
+						lower.y = upper.y + upper.h;
+						changed = true;
+					}
 				}
 			}
 		}

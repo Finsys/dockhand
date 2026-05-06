@@ -78,6 +78,7 @@ import {
 
 import type { AllGridPreferences, GridId, GridColumnPreferences } from '$lib/types';
 import { encrypt, decrypt } from './encryption.js';
+import { parseEnvInterpolation } from './env-interpolation';
 
 // Re-export for backwards compatibility
 export { db, isPostgres, isSqlite };
@@ -2066,6 +2067,7 @@ export async function getGitStacksByRepositoryId(repositoryId: number): Promise<
 }
 
 export async function deleteGitRepository(id: number): Promise<boolean> {
+	console.log(`[GitStack] Deleting git repository id=${id} (will cascade-delete git_stacks, set null on stack_sources FKs)`);
 	await db.delete(gitRepositories).where(eq(gitRepositories.id, id));
 	return true;
 }
@@ -2522,6 +2524,7 @@ export async function updateGitStack(id: number, data: Partial<GitStackData>): P
 }
 
 export async function deleteGitStack(id: number): Promise<boolean> {
+	console.log(`[GitStack] Deleting git_stacks row id=${id}`);
 	await db.delete(gitStacks).where(eq(gitStacks.id, id));
 	return true;
 }
@@ -2781,11 +2784,21 @@ export async function upsertStackSource(data: {
 	const existing = await getStackSource(data.stackName, data.environmentId);
 
 	if (existing) {
+		const newRepoId = data.gitRepositoryId || null;
+		const newStackId = data.gitStackId || null;
+		const changes: string[] = [];
+		if (data.sourceType !== existing.sourceType) changes.push(`sourceType: ${existing.sourceType} → ${data.sourceType}`);
+		if (newRepoId !== existing.gitRepositoryId) changes.push(`gitRepoId: ${existing.gitRepositoryId} → ${newRepoId}`);
+		if (newStackId !== existing.gitStackId) changes.push(`gitStackId: ${existing.gitStackId} → ${newStackId}`);
+		if (changes.length > 0) {
+			console.log(`[GitStack] Updating stack_sources "${data.stackName}" env=${data.environmentId}: ${changes.join(', ')}`);
+		}
+
 		await db.update(stackSources)
 			.set({
 				sourceType: data.sourceType,
-				gitRepositoryId: data.gitRepositoryId || null,
-				gitStackId: data.gitStackId || null,
+				gitRepositoryId: newRepoId,
+				gitStackId: newStackId,
 				composePath: data.composePath ?? null,
 				envPath: data.envPath ?? null,
 				updatedAt: new Date().toISOString()
@@ -2793,6 +2806,7 @@ export async function upsertStackSource(data: {
 			.where(eq(stackSources.id, existing.id));
 		return getStackSource(data.stackName, data.environmentId) as Promise<StackSourceData>;
 	} else {
+		console.log(`[GitStack] Creating stack_sources "${data.stackName}" env=${data.environmentId} type=${data.sourceType} repoId=${data.gitRepositoryId || null} stackId=${data.gitStackId || null}`);
 		await db.insert(stackSources).values({
 			stackName: data.stackName,
 			environmentId: data.environmentId ?? null,
@@ -2826,6 +2840,7 @@ export async function updateStackSource(
 }
 
 export async function deleteStackSource(stackName: string, environmentId?: number | null): Promise<boolean> {
+	console.log(`[GitStack] Deleting stack_sources "${stackName}" env=${environmentId}`);
 	// Delete matching record (either with specific envId or NULL)
 	await db.delete(stackSources)
 		.where(and(
@@ -3193,14 +3208,16 @@ export async function getAuditLogs(filters: AuditLogFilters = {}): Promise<Audit
 	// Labels filter - find environments with matching labels first
 	let labelFilteredEnvIds: number[] | undefined;
 	if (filters.labels && filters.labels.length > 0) {
-		// Get environments that have ANY of the specified labels
+		const labelFilterMode = await getSetting('label_filter_mode') ?? 'any';
 		const allEnvs = await db.select({ id: environments.id, labels: environments.labels }).from(environments);
 		labelFilteredEnvIds = allEnvs
 			.filter(env => {
 				if (!env.labels) return false;
 				try {
 					const envLabels = JSON.parse(env.labels) as string[];
-					return filters.labels!.some(label => envLabels.includes(label));
+					return labelFilterMode === 'all'
+						? filters.labels!.every(label => envLabels.includes(label))
+						: filters.labels!.some(label => envLabels.includes(label));
 				} catch {
 					return false;
 				}
@@ -3408,14 +3425,16 @@ export async function getContainerEvents(filters: ContainerEventFilters = {}): P
 	// Labels filter - find environments with matching labels first
 	let labelFilteredEnvIds: number[] | undefined;
 	if (filters.labels && filters.labels.length > 0) {
-		// Get environments that have ANY of the specified labels
+		const labelFilterMode = await getSetting('label_filter_mode') ?? 'any';
 		const allEnvs = await db.select({ id: environments.id, labels: environments.labels }).from(environments);
 		labelFilteredEnvIds = allEnvs
 			.filter(env => {
 				if (!env.labels) return false;
 				try {
 					const envLabels = JSON.parse(env.labels) as string[];
-					return filters.labels!.some(label => envLabels.includes(label));
+					return labelFilterMode === 'all'
+						? filters.labels!.every(label => envLabels.includes(label))
+						: filters.labels!.some(label => envLabels.includes(label));
 				} catch {
 					return false;
 				}
@@ -4628,6 +4647,43 @@ export async function getSecretKeyNames(
 	const vars = await getStackEnvVars(stackName, environmentId, true);
 	return new Set(vars.filter(v => v.isSecret).map(v => v.key));
 }
+
+/**
+ * Get the set of env var keys that should be masked in container inspect responses.
+ * Handles two cases:
+ * 1. Direct match: env var key == secret key in DB (e.g., DB_PASS=${DB_PASS})
+ * 2. Interpolation: env var key differs from secret key (e.g., MYSQL_PASSWORD=${db_secret})
+ *    Detected by parsing the compose file for ${variable} references in environment: sections.
+ *
+ * @param composeContent - Optional compose file content. If provided, interpolation
+ *   references are parsed to detect secrets injected under different key names.
+ */
+export async function getSecretKeysToMask(
+	stackName: string,
+	environmentId?: number | null,
+	composeContent?: string | null
+): Promise<Set<string>> {
+	const vars = await getStackEnvVars(stackName, environmentId, true);
+	const secretKeyNames = new Set(vars.filter(v => v.isSecret).map(v => v.key));
+
+	if (secretKeyNames.size === 0) return secretKeyNames;
+
+	// If we have compose content, parse interpolation references to find
+	// container env keys that map to secret interpolation variables.
+	// e.g., "MYSQL_PASSWORD=${db_secret}" → if db_secret is a secret, mask MYSQL_PASSWORD too.
+	if (composeContent) {
+		const interpolated = parseEnvInterpolation(composeContent);
+		for (const [containerKey, varName] of interpolated) {
+			if (secretKeyNames.has(varName)) {
+				secretKeyNames.add(containerKey);
+			}
+		}
+	}
+
+	return secretKeyNames;
+}
+
+export { parseEnvInterpolation } from './env-interpolation';
 
 /**
  * Get count of environment variables for a stack.

@@ -115,6 +115,7 @@ export const DELETE: RequestHandler = async (event) => {
 
 		// Delete git stack clone directories before cascade deletes the DB rows
 		const stacks = await getGitStacksByRepositoryId(id);
+		console.log(`[GitStack] Repository "${repository.name}" (id=${id}) deletion affects ${stacks.length} stacks: ${stacks.map(s => s.stackName).join(', ')}`);
 		for (const stack of stacks) {
 			await deleteGitStackFiles(stack.id, stack.stackName, stack.environmentId);
 		}

@@ -38,6 +38,7 @@ import {
 import { getScannerSettings, scanImage, type ScanResult, type VulnerabilitySeverity } from '../../scanner';
 import { sendEventNotification } from '../../notifications';
 import { parseImageNameAndTag, shouldBlockUpdate, combineScanSummaries, isSystemContainer } from './update-utils';
+import { isUpdateDisabledByLabel } from '../../container-labels';
 
 // =============================================================================
 // TYPES
@@ -365,6 +366,18 @@ export async function runContainerUpdate(
 				completedAt: new Date().toISOString(),
 				duration: Date.now() - startTime,
 				details: { reason }
+			});
+			return;
+		}
+
+		// Check dockhand.update label (label wins over DB settings)
+		if (isUpdateDisabledByLabel(inspectData.Config?.Labels)) {
+			log(`Skipping - dockhand.update=false label set on container`);
+			await updateScheduleExecution(execution.id, {
+				status: 'skipped',
+				completedAt: new Date().toISOString(),
+				duration: Date.now() - startTime,
+				details: { reason: 'Skipped by dockhand.update=false label' }
 			});
 			return;
 		}

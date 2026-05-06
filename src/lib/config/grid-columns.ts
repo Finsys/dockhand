@@ -10,7 +10,7 @@ export const containerColumns: ColumnConfig[] = [
 	{ id: 'uptime', label: 'Uptime', sortable: true, sortField: 'uptime', width: 80, minWidth: 60 },
 	{ id: 'restartCount', label: 'Restarts', width: 70, minWidth: 50 },
 	{ id: 'cpu', label: 'CPU', sortable: true, sortField: 'cpu', width: 50, minWidth: 40, align: 'right' },
-	{ id: 'memory', label: 'Memory', sortable: true, sortField: 'memory', width: 60, minWidth: 50, align: 'right' },
+	{ id: 'memory', label: 'Memory', sortable: true, sortField: 'memory', width: 95, minWidth: 70, align: 'right' },
 	{ id: 'networkIO', label: 'Net I/O', width: 85, minWidth: 70, align: 'right' },
 	{ id: 'diskIO', label: 'Disk I/O', width: 85, minWidth: 70, align: 'right' },
 	{ id: 'ip', label: 'IP', sortable: true, sortField: 'ip', width: 100, minWidth: 80 },

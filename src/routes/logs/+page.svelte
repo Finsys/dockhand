@@ -10,13 +10,15 @@
 	import * as Select from '$lib/components/ui/select';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { ToggleGroup } from '$lib/components/ui/toggle-pill';
-	import { RefreshCw, Search, ChevronDown, ChevronUp, Unplug, Copy, Download, WrapText, ArrowDownToLine, X, Sun, Moon, LayoutList, Square, Box, Wifi, WifiOff, Pause, Play, ScrollText, Star, GripVertical, Layers, Check, FolderHeart, Save, Trash2, MoreHorizontal, Eraser } from 'lucide-svelte';
+	import { RefreshCw, Search, ChevronDown, ChevronUp, Unplug, Copy, Download, WrapText, ArrowDownToLine, X, Sun, Moon, LayoutList, Square, Box, Wifi, WifiOff, Pause, Play, ScrollText, Star, GripVertical, Layers, Check, FolderHeart, Save, Trash2, MoreHorizontal, Eraser, Filter, GripHorizontal, Terminal, ArrowDown, ArrowRight } from 'lucide-svelte';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import PageHeader from '$lib/components/PageHeader.svelte';
+	import TerminalPanel from '../terminal/TerminalPanel.svelte';
+	import { detectShells, getBestShell, getSavedUser } from '$lib/utils/shell-detection';
 import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 	import type { ContainerInfo } from '$lib/types';
 	import { currentEnvironment, environments, appendEnvParam } from '$lib/stores/environment';
-	import { appSettings } from '$lib/stores/settings';
+	import { appSettings, formatLogTimestamps } from '$lib/stores/settings';
 	import { NoEnvironment } from '$lib/components/ui/empty-state';
 	import { AnsiUp } from 'ansi_up';
 	const ansiUp = new AnsiUp();
@@ -306,11 +308,93 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 	// Log search state
 	let logSearchActive = $state(false);
 	let logSearchQuery = $state('');
+	let logSearchFilterMode = $state(false);
 	let currentMatchIndex = $state(0);
 	let matchCount = $state(0);
 	let logSearchInputRef: HTMLInputElement | undefined;
 
 	const fontSizeOptions = [10, 12, 14, 16];
+
+	// Terminal state
+	let terminalOpen = $state(false);
+	let terminalContainerId = $state<string | null>(null);
+	let terminalContainerName = $state('');
+	let terminalShell = $state('/bin/bash');
+	let terminalUser = $state('root');
+	let terminalLayout = $state<'below' | 'right'>('below');
+	let terminalSplitRatio = $state(0.5); // 0-1, ratio of logs panel
+	let isResizingTerminal = $state(false);
+	let terminalSplitRef: HTMLDivElement | undefined;
+
+	const TERMINAL_LAYOUT_KEY = 'dockhand-logs-terminal-layout';
+	const TERMINAL_SPLIT_KEY = 'dockhand-logs-terminal-split';
+
+	function loadTerminalSettings() {
+		if (typeof window === 'undefined') return;
+		const savedLayout = localStorage.getItem(TERMINAL_LAYOUT_KEY);
+		if (savedLayout === 'below' || savedLayout === 'right') terminalLayout = savedLayout;
+		const savedSplit = localStorage.getItem(TERMINAL_SPLIT_KEY);
+		if (savedSplit) {
+			const r = parseFloat(savedSplit);
+			if (!isNaN(r) && r >= 0.2 && r <= 0.8) terminalSplitRatio = r;
+		}
+	}
+
+	function saveTerminalSettings() {
+		if (typeof window === 'undefined') return;
+		localStorage.setItem(TERMINAL_LAYOUT_KEY, terminalLayout);
+		localStorage.setItem(TERMINAL_SPLIT_KEY, String(terminalSplitRatio));
+	}
+
+	async function openTerminal(containerId: string, containerName: string, layout?: 'below' | 'right') {
+		if (terminalOpen && terminalContainerId === containerId && (!layout || layout === terminalLayout)) {
+			closeTerminal();
+			return;
+		}
+		if (layout) {
+			terminalLayout = layout;
+			saveTerminalSettings();
+		}
+		terminalContainerId = containerId;
+		terminalContainerName = containerName;
+		const savedUser = getSavedUser(containerId);
+		if (savedUser) terminalUser = savedUser;
+		const result = await detectShells(containerId, envId);
+		const best = getBestShell(result, terminalShell);
+		if (best) terminalShell = best;
+		terminalOpen = true;
+	}
+
+	function closeTerminal() {
+		terminalOpen = false;
+		terminalContainerId = null;
+	}
+
+	function startTerminalResize(e: MouseEvent) {
+		e.preventDefault();
+		isResizingTerminal = true;
+		document.addEventListener('mousemove', handleTerminalResize);
+		document.addEventListener('mouseup', stopTerminalResize);
+	}
+
+	function handleTerminalResize(e: MouseEvent) {
+		if (!isResizingTerminal || !terminalSplitRef) return;
+		const rect = terminalSplitRef.getBoundingClientRect();
+		let ratio: number;
+		if (terminalLayout === 'below') {
+			ratio = (e.clientY - rect.top) / rect.height;
+		} else {
+			ratio = (e.clientX - rect.left) / rect.width;
+		}
+		terminalSplitRatio = Math.max(0.2, Math.min(0.8, ratio));
+	}
+
+	function stopTerminalResize() {
+		isResizingTerminal = false;
+		document.removeEventListener('mousemove', handleTerminalResize);
+		document.removeEventListener('mouseup', stopTerminalResize);
+		saveTerminalSettings();
+	}
 
 	// Subscribe to environment changes - restore state and fetch data
 	const unsubscribeEnv = currentEnvironment.subscribe(async (env) => {
@@ -769,6 +853,10 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 								return `[${data.containerName}] ${line}`;
 							}).join('\n');
 						}
+						// Format timestamps if enabled
+						if ($appSettings.formatLogTimestamps) {
+							text = formatLogTimestamps(text);
+						}
 						// Buffer text and schedule flush
 						pendingText += text;
 						if (!flushTimer) {
@@ -953,12 +1041,13 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 					if (data.text) {
 						// Use consistent color based on position in all selected containers
 						const color = getContainerColor(data.containerId);
+						const logText = $appSettings.formatLogTimestamps ? formatLogTimestamps(data.text) : data.text;
 						// Add to pending batch instead of updating state immediately
 						pendingLogs.push({
 							containerId: data.containerId,
 							containerName: data.containerName,
 							color,
-							text: data.text,
+							text: logText,
 							timestamp: data.timestamp,
 							stream: data.stream
 						});
@@ -1133,6 +1222,11 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 	function selectContainer(container: ContainerInfo) {
 		// Stop any existing stream
 		stopStreaming();
+
+		// Close terminal when switching containers
+		if (terminalOpen && terminalContainerId !== container.id) {
+			closeTerminal();
+		}
 
 		selectedContainer = container;
 		searchQuery = '';
@@ -1314,8 +1408,13 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 	function closeLogSearch() {
 		logSearchActive = false;
 		logSearchQuery = '';
+		logSearchFilterMode = false;
 		currentMatchIndex = 0;
 		matchCount = 0;
+	}
+
+	function toggleSearchFilterMode() {
+		logSearchFilterMode = !logSearchFilterMode;
 	}
 
 	function navigateMatch(direction: 'prev' | 'next') {
@@ -1368,38 +1467,54 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 
 	// Highlighted logs with search matches and ANSI color support (single container mode)
 	let highlightedLogs = $derived(() => {
-		// First convert ANSI codes to HTML
-		const withAnsi = ansiToHtml(logs || '');
-		if (!logSearchQuery.trim()) return withAnsi;
+		let text = logs || '';
+		const query = logSearchQuery.trim();
 
-		// For search, we need to highlight matches while preserving HTML tags
-		// We'll only highlight text outside of HTML tags
-		const query = logSearchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-		const escapedQuery = escapeHtml(query);
+		// Filter lines before ANSI conversion (plain text matching)
+		if (logSearchFilterMode && query) {
+			const escapedForRegex = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+			const filterRegex = new RegExp(escapedForRegex, 'i');
+			text = text.split('\n').filter(line => filterRegex.test(line)).join('\n');
+		}
 
-		// Split by HTML tags and only process text parts
+		const withAnsi = ansiToHtml(text);
+		if (!query) return withAnsi;
+
+		const escapedForRegex = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+		const escapedQuery = escapeHtml(escapedForRegex);
+
 		const parts = withAnsi.split(/(<[^>]*>)/);
-		const highlighted = parts.map(part => {
-			// Skip HTML tags
+		return parts.map(part => {
 			if (part.startsWith('<')) return part;
-			// Highlight matches in text
 			const regex = new RegExp(`(${escapedQuery})`, 'gi');
 			return part.replace(regex, '<mark class="search-match">$1</mark>');
 		}).join('');
-
-		return highlighted;
 	});
 
 	// Format merged logs HTML — uses pre-built mergedHtml string, only applies search highlighting when needed
 	let formattedMergedHtml = $derived(() => {
 		if (!mergedHtml) return '';
-		if (!logSearchQuery.trim()) return mergedHtml;
+		const query = logSearchQuery.trim();
 
-		// Apply search highlighting (same approach as single mode's highlightedLogs)
-		const query = logSearchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-		const escapedQuery = escapeHtml(query);
+		// Filter mode: remove non-matching lines from HTML
+		let html = mergedHtml;
+		if (logSearchFilterMode && query) {
+			const escapedForRegex = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+			const filterRegex = new RegExp(escapedForRegex, 'i');
+			// Split by <br/> or newlines, filter lines (strip HTML for matching, keep original for display)
+			const lines = html.split(/\n/);
+			html = lines.filter(line => {
+				const plainText = line.replace(/<[^>]*>/g, '');
+				return filterRegex.test(plainText);
+			}).join('\n');
+		}
+
+		if (!query) return html;
+
+		const escapedForRegex = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+		const escapedQuery = escapeHtml(escapedForRegex);
 		const searchRegex = new RegExp(`(${escapedQuery})`, 'gi');
-		const parts = mergedHtml.split(/(<[^>]*>)/);
+		const parts = html.split(/(<[^>]*>)/);
 		return parts.map(part => {
 			if (part.startsWith('<')) return part;
 			return part.replace(searchRegex, '<mark class="search-match">$1</mark>');
@@ -1430,6 +1545,7 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 
 
 	onMount(() => {
+		loadTerminalSettings();
 		// All initialization is handled in currentEnvironment.subscribe
 		// This just sets up the refresh interval
 		containerInterval = setInterval(fetchContainers, 10000);
@@ -1437,6 +1553,8 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 	});
 
 	onDestroy(() => {
+		document.removeEventListener('mousemove', handleTerminalResize);
+		document.removeEventListener('mouseup', stopTerminalResize);
 		unsubscribeEnv();
 		if (containerInterval) {
 			clearInterval(containerInterval);
@@ -1831,8 +1949,9 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 			</div>
 		{/if}
 
-		<!-- Logs panel -->
-		<div class="flex-1 min-h-0 border rounded-lg overflow-hidden flex flex-col transition-colors {darkMode ? 'bg-zinc-950 border-zinc-800' : 'bg-gray-50 border-gray-300'}">
+		<!-- Logs + Terminal split -->
+		<div bind:this={terminalSplitRef} class="flex-1 min-h-0 min-w-0 overflow-hidden flex {terminalOpen ? (terminalLayout === 'below' ? 'flex-col' : 'flex-row') : ''} gap-0">
+		<div class="{terminalOpen ? 'min-h-0 min-w-0' : 'flex-1'} border rounded-lg overflow-hidden flex flex-col transition-colors {darkMode ? 'bg-zinc-950 border-zinc-800' : 'bg-gray-50 border-gray-300'}" style="{terminalOpen ? (terminalLayout === 'below' ? `height: ${terminalSplitRatio * 100}%` : `width: ${terminalSplitRatio * 100}%`) : ''}">
 			{#if layoutMode === 'grouped'}
 				{#if selectedContainerIds.size === 0}
 					<div class="flex items-center justify-center h-full text-muted-foreground">
@@ -1840,8 +1959,8 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 					</div>
 				{:else}
 					<!-- Header bar for grouped mode -->
-					<div class="flex items-center justify-between px-3 py-1.5 border-b shrink-0 transition-colors {darkMode ? 'border-zinc-800 bg-zinc-900/50' : 'border-gray-300 bg-gray-100'}">
-						<div class="flex items-center gap-2 min-w-[100px]">
+					<div class="flex items-center flex-wrap gap-y-1 px-3 py-1.5 border-b shrink-0 transition-colors {darkMode ? 'border-zinc-800 bg-zinc-900/50' : 'border-gray-300 bg-gray-100'}">
+						<div class="flex items-center gap-2 shrink-0">
 							{#if streamingEnabled}
 								{#if isConnected}
 									<div class="flex items-center gap-1.5" title="Connected - Live streaming">
@@ -1885,7 +2004,7 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 								{/if}
 							</div>
 						</div>
-						<div class="flex items-center gap-3">
+						<div class="flex items-center gap-2 flex-wrap ml-auto">
 							<button
 								onclick={toggleStreaming}
 								class="flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-colors {streamingEnabled ? (darkMode ? 'bg-amber-500/20 ring-1 ring-amber-500/50 text-amber-400' : 'bg-amber-500/30 ring-1 ring-amber-600/50 text-amber-700') : darkMode ? 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200'}"
@@ -1943,6 +2062,13 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 										onkeydown={handleLogSearchKeydown}
 										class="bg-transparent border-none outline-none text-xs w-28 {darkMode ? 'text-zinc-200 placeholder:text-zinc-500' : 'text-gray-800 placeholder:text-gray-400'}"
 									/>
+									<button
+										onclick={toggleSearchFilterMode}
+										class="p-0.5 rounded transition-colors {logSearchFilterMode ? (darkMode ? 'bg-amber-500/20 ring-1 ring-amber-500/50' : 'bg-amber-500/30 ring-1 ring-amber-600/50') : darkMode ? 'hover:bg-zinc-700' : 'hover:bg-gray-300'}"
+										title={logSearchFilterMode ? 'Show all lines (filter mode active)' : 'Hide non-matching lines'}
+									>
+										<Filter class="w-3 h-3 transition-colors {logSearchFilterMode ? (darkMode ? 'text-amber-400' : 'text-amber-700') : darkMode ? 'text-zinc-400' : 'text-gray-500'}" />
+									</button>
 									{#if matchCount > 0}
 										<span class="text-xs {darkMode ? 'text-zinc-400' : 'text-gray-500'}">{currentMatchIndex + 1}/{matchCount}</span>
 									{:else if logSearchQuery}
@@ -1993,8 +2119,8 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 				</div>
 			{:else}
 			<!-- Header bar inside black area -->
-			<div class="flex items-center justify-between px-3 py-1.5 border-b shrink-0 transition-colors {darkMode ? 'border-zinc-800 bg-zinc-900/50' : 'border-gray-300 bg-gray-100'}">
-				<div class="flex items-center gap-2 min-w-[100px]">
+			<div class="flex items-center flex-wrap gap-y-1 px-3 py-1.5 border-b shrink-0 transition-colors {darkMode ? 'border-zinc-800 bg-zinc-900/50' : 'border-gray-300 bg-gray-100'}">
+				<div class="flex items-center gap-2 shrink-0">
 					<!-- Connection status indicator -->
 					{#if streamingEnabled}
 						{#if isConnected}
@@ -2028,14 +2154,34 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 							<span class="text-xs {darkMode ? 'text-zinc-500' : 'text-gray-400'}">Paused</span>
 						</div>
 					{/if}
-					<!-- Container name -->
+					<!-- Container name + terminal toggles -->
 					{#if selectedContainer}
-						<div class="flex items-center gap-1 ml-2">
+						<div class="flex items-center gap-1.5 ml-2">
 							<span class="text-xs font-medium {darkMode ? 'text-zinc-300' : 'text-gray-700'}">{selectedContainer.name}</span>
+							<button
+								onclick={() => openTerminal(selectedContainer!.id, selectedContainer!.name, 'below')}
+								class="p-0.5 rounded transition-colors {terminalOpen && terminalLayout === 'below' && terminalContainerId === selectedContainer.id ? (darkMode ? 'bg-amber-500/20 ring-1 ring-amber-500/50' : 'bg-amber-500/30 ring-1 ring-amber-600/50') : darkMode ? 'hover:bg-zinc-800' : 'hover:bg-gray-200'}"
+								title="Terminal below"
+							>
+								<span class="inline-flex items-center gap-px">
+									<Terminal class="w-3.5 h-3.5 {terminalOpen && terminalLayout === 'below' && terminalContainerId === selectedContainer.id ? (darkMode ? 'text-amber-400' : 'text-amber-700') : darkMode ? 'text-zinc-500 hover:text-zinc-300' : 'text-gray-500 hover:text-gray-700'}" />
+									<ArrowDown class="w-2.5 h-2.5 {terminalOpen && terminalLayout === 'below' && terminalContainerId === selectedContainer.id ? (darkMode ? 'text-amber-400' : 'text-amber-700') : darkMode ? 'text-zinc-600' : 'text-gray-400'}" strokeWidth={2.5} />
+								</span>
+							</button>
+							<button
+								onclick={() => openTerminal(selectedContainer!.id, selectedContainer!.name, 'right')}
+								class="p-0.5 rounded transition-colors {terminalOpen && terminalLayout === 'right' && terminalContainerId === selectedContainer.id ? (darkMode ? 'bg-amber-500/20 ring-1 ring-amber-500/50' : 'bg-amber-500/30 ring-1 ring-amber-600/50') : darkMode ? 'hover:bg-zinc-800' : 'hover:bg-gray-200'}"
+								title="Terminal on side"
+							>
+								<span class="inline-flex items-center gap-px">
+									<Terminal class="w-3.5 h-3.5 {terminalOpen && terminalLayout === 'right' && terminalContainerId === selectedContainer.id ? (darkMode ? 'text-amber-400' : 'text-amber-700') : darkMode ? 'text-zinc-500 hover:text-zinc-300' : 'text-gray-500 hover:text-gray-700'}" />
+									<ArrowRight class="w-2.5 h-2.5 {terminalOpen && terminalLayout === 'right' && terminalContainerId === selectedContainer.id ? (darkMode ? 'text-amber-400' : 'text-amber-700') : darkMode ? 'text-zinc-600' : 'text-gray-400'}" strokeWidth={2.5} />
+								</span>
+							</button>
 						</div>
 					{/if}
 				</div>
-				<div class="flex items-center gap-3">
+				<div class="flex items-center gap-2 flex-wrap ml-auto">
 					<!-- Streaming toggle -->
 					<button
 						onclick={toggleStreaming}
@@ -2099,6 +2245,13 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 								onkeydown={handleLogSearchKeydown}
 								class="bg-transparent border-none outline-none text-xs w-28 {darkMode ? 'text-zinc-200 placeholder:text-zinc-500' : 'text-gray-800 placeholder:text-gray-400'}"
 							/>
+							<button
+								onclick={toggleSearchFilterMode}
+								class="p-0.5 rounded transition-colors {logSearchFilterMode ? (darkMode ? 'bg-amber-500/20 ring-1 ring-amber-500/50' : 'bg-amber-500/30 ring-1 ring-amber-600/50') : darkMode ? 'hover:bg-zinc-700' : 'hover:bg-gray-300'}"
+								title={logSearchFilterMode ? 'Show all lines (filter mode active)' : 'Hide non-matching lines'}
+							>
+								<Filter class="w-3 h-3 transition-colors {logSearchFilterMode ? (darkMode ? 'text-amber-400' : 'text-amber-700') : darkMode ? 'text-zinc-400' : 'text-gray-500'}" />
+							</button>
 							{#if matchCount > 0}
 								<span class="text-xs {darkMode ? 'text-zinc-400' : 'text-gray-500'}">{currentMatchIndex + 1}/{matchCount}</span>
 							{:else if logSearchQuery}
@@ -2175,6 +2328,31 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 					<pre class="font-mono {wordWrap ? 'whitespace-pre-wrap' : 'whitespace-pre'} {darkMode ? 'text-zinc-50' : 'text-gray-900'}" style="font-size: {fontSize}px;">{@html highlightedLogs()}</pre>
 				</div>
 			{/if}
+		{/if}
+		</div>
+		<!-- Terminal panel with resize handle -->
+		{#if terminalOpen && terminalContainerId}
+			<!-- Resize handle -->
+			<div
+				role="separator"
+				class="{terminalLayout === 'below' ? 'h-2 cursor-ns-resize w-full' : 'w-2 cursor-ew-resize h-full'} flex items-center justify-center hover:bg-muted/50 transition-colors {isResizingTerminal ? 'bg-muted/50' : ''}"
+				onmousedown={startTerminalResize}
+			>
+				<GripHorizontal class="{terminalLayout === 'below' ? 'w-8 h-4' : 'w-4 h-8 rotate-90'} text-zinc-600" />
+			</div>
+			<!-- Terminal -->
+			<div class="min-h-0 min-w-0 border rounded-lg overflow-hidden" style="{terminalLayout === 'below' ? `height: ${(1 - terminalSplitRatio) * 100}%` : `width: ${(1 - terminalSplitRatio) * 100}%`}">
+				<TerminalPanel
+					containerId={terminalContainerId}
+					containerName={terminalContainerName}
+					shell={terminalShell}
+					user={terminalUser}
+					visible={true}
+					envId={envId}
+					fillHeight={true}
+					onClose={closeTerminal}
+				/>
+			</div>
 		{/if}
 		</div>
 	</div>

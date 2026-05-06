@@ -22,6 +22,7 @@
 	import { getLabelColor, getLabelBgColor } from '$lib/utils/label-colors';
 	import { Input } from '$lib/components/ui/input';
 	import MultiSelectFilter from '$lib/components/MultiSelectFilter.svelte';
+	import { appSettings } from '$lib/stores/settings';
 
 	const LABEL_FILTER_STORAGE_KEY = 'dockhand-dashboard-label-filter';
 
@@ -210,10 +211,10 @@
 		if (filterLabels.length === 0) {
 			return tiles;
 		}
-		return tiles.filter(t => {
-			const tileLabels = t.stats?.labels || [];
-			return tileLabels.some(label => filterLabels.includes(label));
-		});
+		const matchFn = $appSettings.labelFilterMode === 'all'
+			? (tileLabels: string[]) => filterLabels.every(label => tileLabels.includes(label))
+			: (tileLabels: string[]) => filterLabels.some(label => tileLabels.includes(label));
+		return tiles.filter(t => matchFn(t.stats?.labels || []));
 	});
 
 	// Filter grid items based on selected labels
@@ -221,11 +222,12 @@
 		if (filterLabels.length === 0) {
 			return gridItems;
 		}
-		// Filter to only show tiles whose environments have at least one matching label
+		const matchFn = $appSettings.labelFilterMode === 'all'
+			? (tileLabels: string[]) => filterLabels.every(label => tileLabels.includes(label))
+			: (tileLabels: string[]) => filterLabels.some(label => tileLabels.includes(label));
 		return gridItems.filter(item => {
 			const tile = tiles.find(t => t.id === item.id);
-			const tileLabels = tile?.stats?.labels || [];
-			return tileLabels.some(label => filterLabels.includes(label));
+			return matchFn(tile?.stats?.labels || []);
 		});
 	});
 	const orderedGridItems = $derived.by(() => {

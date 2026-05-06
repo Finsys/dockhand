@@ -9,17 +9,7 @@ import {
 	type NotificationEventType
 } from './db';
 
-// Escape special characters for Telegram Markdown
-function escapeTelegramMarkdown(text: string): string {
-	// Escape characters that have special meaning in Telegram Markdown
-	return text
-		.replace(/\\/g, '\\\\')  // Escape backslashes first
-		.replace(/_/g, '\\_')    // Underscore (italic)
-		.replace(/\*/g, '\\*')   // Asterisk (bold)
-		.replace(/\[/g, '\\[')   // Opening bracket (link)
-		.replace(/\]/g, '\\]')   // Closing bracket (link)
-		.replace(/`/g, '\\`');   // Backtick (code)
-}
+import { escapeTelegramMarkdown, parseTelegramUrl, buildGotifyUrl, parseWorkflowsUrl, buildWorkflowsHttpUrl } from '$lib/utils/notification-parsers';
 
 /** Drain a response body to release the underlying socket/TLS connection. */
 async function drainResponse(response: Response): Promise<void> {
@@ -279,21 +269,18 @@ async function sendMattermost(appriseUrl: string, payload: NotificationPayload):
 
 // Telegram
 async function sendTelegram(appriseUrl: string, payload: NotificationPayload): Promise<NotificationResult> {
-	// tgram://bot_token/chat_id:topic_id?
-	const match = appriseUrl.match(/^tgram:\/\/([^/]+)\/([^:\/]+)(?::(\d+))?$/);
-	if (!match) {
+	const parsed = parseTelegramUrl(appriseUrl);
+	if (!parsed) {
 		return { success: false, error: 'Invalid Telegram URL format. Expected: tgram://bot_token/chat_id or tgram://bot_token/chat_id:topic_id' };
 	}
 
-	const [, botToken, chatId, topicIdStr] = match;
+	const { botToken, chatId, topicId } = parsed;
 	const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
 
 	// Escape markdown special characters in title and message
 	const escapedTitle = escapeTelegramMarkdown(payload.title);
 	const escapedMessage = escapeTelegramMarkdown(payload.message);
-	const envTag = payload.environmentName ? ` \\[${escapeTelegramMarkdown(payload.environmentName)}\\]` : '';
-
-	const topicId = topicIdStr ? parseInt(topicIdStr, 10) : undefined;
+	const envTag = payload.environmentName ? ` [${escapeTelegramMarkdown(payload.environmentName)}]` : '';
 
 	try {
 		const response = await fetch(url, {
@@ -324,20 +311,10 @@ async function sendTelegram(appriseUrl: string, payload: NotificationPayload): P
 
 // Gotify
 async function sendGotify(appriseUrl: string, payload: NotificationPayload): Promise<NotificationResult> {
-	// gotify://hostname/token or gotifys://hostname/token
-	// gotify://hostname/subpath/token (subpath support)
-	const match = appriseUrl.match(/^gotifys?:\/\/([^/]+)\/(.+)/);
-	if (!match) {
+	const url = buildGotifyUrl(appriseUrl);
+	if (!url) {
 		return { success: false, error: 'Invalid Gotify URL format. Expected: gotify://hostname/token' };
 	}
-
-	const [, hostname, pathPart] = match;
-	const protocol = appriseUrl.startsWith('gotifys') ? 'https' : 'http';
-	// Token is always the last path segment; anything before it is a subpath
-	const lastSlash = pathPart.lastIndexOf('/');
-	const subpath = lastSlash >= 0 ? pathPart.substring(0, lastSlash) : '';
-	const token = lastSlash >= 0 ? pathPart.substring(lastSlash + 1) : pathPart;
-	const url = `${protocol}://${hostname}${subpath ? '/' + subpath : ''}/message?token=${token}`;
 
 	const titleWithEnv = payload.environmentName ? `${payload.title} [${payload.environmentName}]` : payload.title;
 
@@ -496,47 +473,57 @@ async function sendGenericWebhook(appriseUrl: string, payload: NotificationPaylo
 	}
 }
 // Microsoft Power Automate Workflows, for e.g. Microsoft Teams
-async function sendWorkflows(appriseUrl: string, payload: NotificationPayload): Promise<boolean> {
-	// workflows://hostname/workflow/signature
-	const match = appriseUrl.match(/^workflows?:\/\/([^/]+)\/(.+)\/(.+)/);
-	if (!match) return false;
+async function sendWorkflows(appriseUrl: string, payload: NotificationPayload): Promise<NotificationResult> {
+	const parsed = parseWorkflowsUrl(appriseUrl);
+	if (!parsed) {
+		return { success: false, error: 'Invalid Workflows URL format. Expected: workflows://hostname/workflow/signature' };
+	}
 
-	const [, hostname, workflow, signature] = match;
-	const url = `https://${hostname}/powerautomate/automations/direct/workflows/${workflow}/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=${signature}`;
+	const url = buildWorkflowsHttpUrl(parsed.hostname, parsed.workflow, parsed.signature);
+	const titleWithEnv = payload.environmentName ? `${payload.title} [${payload.environmentName}]` : payload.title;
 
-	const response = await fetch(url, {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({
-			type: 'message',
-			attachments: [
-				{
-					contentType: 'application/vnd.microsoft.card.adaptive',
-					content: {
-						$schema: 'https://adaptivecards.io/schemas/adaptive-card.json',
-						type: 'AdaptiveCard',
-						version: '1.2',
-						body: [
-							{
-								type: 'TextBlock',
-								style: 'heading',
-								wrap: true,
-								text: payload.title
-							},
-							{
-								type: 'TextBlock',
-								style: 'default',
-								wrap: true,
-								text: payload.message
-							}
-						]
+	try {
+		const response = await fetch(url, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				type: 'message',
+				attachments: [
+					{
+						contentType: 'application/vnd.microsoft.card.adaptive',
+						content: {
+							$schema: 'https://adaptivecards.io/schemas/adaptive-card.json',
+							type: 'AdaptiveCard',
+							version: '1.2',
+							body: [
+								{
+									type: 'TextBlock',
+									style: 'heading',
+									wrap: true,
+									text: titleWithEnv
+								},
+								{
+									type: 'TextBlock',
+									style: 'default',
+									wrap: true,
+									text: payload.message
+								}
+							]
+						}
 					}
-				}
-			]
-		})
-	});
+				]
+			})
+		});
 
-	return response.ok;
+		if (!response.ok) {
+			const text = await response.text().catch(() => '');
+			return { success: false, error: `Workflows error ${response.status}: ${text || response.statusText}` };
+		}
+		await drainResponse(response);
+		return { success: true };
+	} catch (error) {
+		return { success: false, error: `Workflows connection failed: ${error instanceof Error ? error.message : String(error)}` };
+	}
 }
 
 // Send notification to all enabled channels

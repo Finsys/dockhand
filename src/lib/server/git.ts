@@ -16,6 +16,70 @@ import {
 } from './db';
 import { deployStack, getStackDir } from './stacks';
 
+const MERGED_CA_BUNDLE_PATH = '/tmp/dockhand-merged-ca-bundle.crt';
+let mergedCaBundleReady = false;
+
+/**
+ * Create a merged CA bundle combining system CAs with the custom cert from
+ * NODE_EXTRA_CA_CERTS. GIT_SSL_CAINFO replaces the default CA store, so without
+ * merging, public CAs (GitHub, GitLab) break.
+ */
+function getMergedCaBundlePath(): string {
+	if (mergedCaBundleReady && existsSync(MERGED_CA_BUNDLE_PATH)) {
+		console.log(`[Git] Using cached merged CA bundle: ${MERGED_CA_BUNDLE_PATH}`);
+		return MERGED_CA_BUNDLE_PATH;
+	}
+
+	const customCertPath = process.env.NODE_EXTRA_CA_CERTS!;
+	console.log(`[Git] NODE_EXTRA_CA_CERTS set to: ${customCertPath}`);
+
+	const systemCaPaths = [
+		process.env.SSL_CERT_FILE,
+		'/etc/ssl/certs/ca-certificates.crt',
+		'/etc/pki/tls/certs/ca-bundle.crt',
+		'/etc/ssl/cert.pem'
+	];
+
+	let systemCaContent = '';
+	let systemCaSource = '';
+	for (const caPath of systemCaPaths) {
+		if (caPath && existsSync(caPath)) {
+			try {
+				systemCaContent = readFileSync(caPath, 'utf-8');
+				systemCaSource = caPath;
+				console.log(`[Git] Found system CA bundle: ${caPath} (${systemCaContent.split('-----BEGIN CERTIFICATE-----').length - 1} certs)`);
+				break;
+			} catch (err) {
+				console.log(`[Git] Failed to read system CA bundle ${caPath}: ${err}`);
+			}
+		}
+	}
+
+	if (!systemCaSource) {
+		console.log(`[Git] No system CA bundle found, using custom cert only: ${customCertPath}`);
+	}
+
+	try {
+		const customCaContent = readFileSync(customCertPath, 'utf-8');
+		const customCertCount = customCaContent.split('-----BEGIN CERTIFICATE-----').length - 1;
+		console.log(`[Git] Custom CA file contains ${customCertCount} cert(s)`);
+
+		const merged = systemCaContent
+			? systemCaContent.trimEnd() + '\n' + customCaContent.trimEnd() + '\n'
+			: customCaContent;
+		writeFileSync(MERGED_CA_BUNDLE_PATH, merged);
+		mergedCaBundleReady = true;
+
+		const totalCerts = merged.split('-----BEGIN CERTIFICATE-----').length - 1;
+		console.log(`[Git] Created merged CA bundle: ${MERGED_CA_BUNDLE_PATH} (${totalCerts} total certs — system from ${systemCaSource || 'none'} + custom from ${customCertPath})`);
+	} catch (err) {
+		console.warn(`[Git] Failed to create merged CA bundle, falling back to custom cert only: ${customCertPath}`, err);
+		return customCertPath;
+	}
+
+	return MERGED_CA_BUNDLE_PATH;
+}
+
 /**
  * Collect stdout, stderr and exit code from a spawned process.
  */
@@ -153,9 +217,11 @@ async function buildGitEnv(credential: GitCredential | null): Promise<GitEnv> {
 		SSH_AUTH_SOCK: ''
 	};
 
-	// Pass custom CA certificate to git CLI (NODE_EXTRA_CA_CERTS only affects Node.js)
+	// Pass custom CA certificate to git CLI (NODE_EXTRA_CA_CERTS only affects Node.js).
+	// GIT_SSL_CAINFO replaces the default CA store, so we merge system CAs with the
+	// custom cert so both self-signed repos and public repos (GitHub etc.) work (#967).
 	if (process.env.NODE_EXTRA_CA_CERTS) {
-		env.GIT_SSL_CAINFO = process.env.NODE_EXTRA_CA_CERTS;
+		env.GIT_SSL_CAINFO = getMergedCaBundlePath();
 	}
 
 	// Ensure current UID is resolvable for SSH/git operations

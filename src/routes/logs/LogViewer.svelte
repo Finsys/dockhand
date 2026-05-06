@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { RefreshCw, Copy, Download, WrapText, ArrowDownToLine, Search, ChevronUp, ChevronDown, X, Type, Eraser } from 'lucide-svelte';
+	import { RefreshCw, Copy, Download, WrapText, ArrowDownToLine, Search, ChevronUp, ChevronDown, X, Type, Eraser, Filter } from 'lucide-svelte';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import * as Select from '$lib/components/ui/select';
 	import { appSettings, formatLogTimestamps } from '$lib/stores/settings';
@@ -45,6 +45,7 @@
 	// Search state
 	let logSearchActive = $state(false);
 	let logSearchQuery = $state('');
+	let logSearchFilterMode = $state(typeof window !== 'undefined' && localStorage.getItem('dockhand-log-filter-mode') === 'true');
 	let currentMatchIndex = $state(0);
 	let matchCount = $state(0);
 	let logSearchInputRef: HTMLInputElement;
@@ -107,8 +108,14 @@
 	function closeLogSearch() {
 		logSearchActive = false;
 		logSearchQuery = '';
+		logSearchFilterMode = false;
 		currentMatchIndex = 0;
 		matchCount = 0;
+	}
+
+	function toggleSearchFilterMode() {
+		logSearchFilterMode = !logSearchFilterMode;
+		localStorage.setItem('dockhand-log-filter-mode', String(logSearchFilterMode));
 	}
 
 	function navigateMatch(direction: 'prev' | 'next') {
@@ -151,11 +158,22 @@
 		if ($appSettings.formatLogTimestamps) {
 			text = formatLogTimestamps(text);
 		}
-		const withAnsi = ansiUp.ansi_to_html(text);
-		if (!logSearchQuery.trim()) return withAnsi;
 
-		const query = logSearchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-		const escapedQuery = query.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+		const query = logSearchQuery.trim();
+
+		// Filter lines before ANSI conversion (plain text matching)
+		if (logSearchFilterMode && query) {
+			const escapedForRegex = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+			const filterRegex = new RegExp(escapedForRegex, 'i');
+			const lines = text.split('\n');
+			text = lines.filter(line => filterRegex.test(line)).join('\n');
+		}
+
+		const withAnsi = ansiUp.ansi_to_html(text);
+		if (!query) return withAnsi;
+
+		const escapedForRegex = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+		const escapedQuery = escapedForRegex.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 		// Split by HTML tags and only process text parts
 		const parts = withAnsi.split(/(<[^>]*>)/);
@@ -246,6 +264,13 @@
 						onkeydown={handleLogSearchKeydown}
 						class="bg-transparent border-none outline-none text-xs text-zinc-200 w-20 placeholder:text-zinc-500"
 					/>
+					<button
+						onclick={toggleSearchFilterMode}
+						class="p-0.5 rounded transition-colors {logSearchFilterMode ? 'bg-amber-500/20 ring-1 ring-amber-500/50' : 'hover:bg-zinc-700'}"
+						title={logSearchFilterMode ? 'Show all lines (filter mode active)' : 'Hide non-matching lines'}
+					>
+						<Filter class="w-3 h-3 transition-colors {logSearchFilterMode ? 'text-amber-400' : 'text-zinc-400'}" />
+					</button>
 					{#if matchCount > 0}
 						<span class="text-xs text-zinc-400">{currentMatchIndex + 1}/{matchCount}</span>
 					{:else if logSearchQuery}

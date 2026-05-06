@@ -6,6 +6,7 @@
 
 	import { CircleArrowUp, Loader2, AlertCircle, CheckCircle2, XCircle, ChevronDown, ChevronRight, ExternalLink } from 'lucide-svelte';
 	import { appendEnvParam } from '$lib/stores/environment';
+	import { untrack } from 'svelte';
 	import type { VulnerabilityCriteria } from '$lib/server/db';
 	import type { StepType } from '$lib/utils/update-steps';
 	import { getStepLabel, getStepIcon, getStepColor } from '$lib/utils/update-steps';
@@ -78,11 +79,33 @@
 	let progress = $state<ContainerProgress[]>([]);
 	let progressListEl = $state<HTMLDivElement | null>(null);
 	let scrollTick = $state(0);
+	let userScrolledUp = $state(false);
 	let currentIndex = $state(0);
 	let totalCount = $state(0);
 	let summary = $state<{ total: number; success: number; failed: number; blocked: number } | null>(null);
 	let errorMessage = $state('');
 	let forceUpdating = $state<Set<string>>(new Set()); // Track containers being force-updated
+	let filterMode = $state<'updated' | 'failed'>('updated');
+
+	let filteredProgress = $derived(
+		!summary
+			? progress
+			: filterMode === 'failed'
+				? progress.filter(p => p.step === 'failed' || p.step === 'blocked')
+				: progress.filter(p => p.step === 'done' || p.success)
+	);
+
+	$effect(() => {
+		// Only track filterMode, not progress — avoid re-running on every SSE update
+		const mode = filterMode;
+		if (mode === 'updated') {
+			untrack(() => {
+				for (const item of progress) {
+					item.showLogs = false;
+				}
+			});
+		}
+	});
 
 	function formatPullLog(entry: PullLogEntry): string {
 		// Clarify potentially confusing Docker messages
@@ -241,6 +264,9 @@
 					} else if (data.type === 'complete') {
 						status = 'complete';
 						summary = data.summary;
+						for (const item of progress) {
+							item.showLogs = false;
+						}
 						onComplete({ success: successIds, failed: failedIds, blocked: blockedIds });
 					} else if (data.type === 'error') {
 						status = 'error';
@@ -266,6 +292,7 @@
 		currentIndex = 0;
 		summary = null;
 		errorMessage = '';
+		filterMode = 'updated';
 	}
 
 	function handleOpenChange(isOpen: boolean) {
@@ -384,10 +411,18 @@ const severityOrder: Record<string, number> = { critical: 0, high: 1, medium: 2,
 		}
 	});
 
-	// Auto-scroll progress list to bottom on SSE data (not UI toggles)
+	// Track whether user has scrolled up to read earlier output
+	function handleProgressScroll() {
+		if (!progressListEl) return;
+		const { scrollTop, scrollHeight, clientHeight } = progressListEl;
+		// Consider "at bottom" if within 50px of the end
+		userScrolledUp = scrollHeight - scrollTop - clientHeight > 50;
+	}
+
+	// Auto-scroll progress list to bottom on SSE data, but only if user hasn't scrolled up
 	$effect(() => {
 		scrollTick;
-		if (progressListEl) {
+		if (progressListEl && !userScrolledUp) {
 			requestAnimationFrame(() => {
 				progressListEl?.scrollTo({ top: progressListEl.scrollHeight, behavior: 'smooth' });
 			});
@@ -438,10 +473,33 @@ const severityOrder: Record<string, number> = { critical: 0, high: 1, medium: 2,
 				<Progress value={progressPercentage} class="h-2" />
 			</div>
 
-			<!-- Container list with status - scrollable area -->
+			<!-- Filter toggle + Container list with status - scrollable area -->
 			{#if progress.length > 0}
-				<div bind:this={progressListEl} class="border rounded-lg divide-y flex-1 min-h-0 overflow-auto">
-					{#each progress as item (item.containerId)}
+				{#if summary && (summary.failed > 0 || summary.blocked > 0) && summary.success > 0}
+					<div class="flex items-center gap-1 shrink-0">
+						<Button
+							variant={filterMode === 'updated' ? 'default' : 'outline'}
+							size="sm"
+							class="h-7 text-xs"
+							onclick={() => filterMode = 'updated'}
+						>
+							<CheckCircle2 class="w-3 h-3 mr-1" />
+							Updated ({summary.success})
+						</Button>
+						<Button
+							variant={filterMode === 'failed' ? 'destructive' : 'outline'}
+							size="sm"
+							class="h-7 text-xs"
+							onclick={() => filterMode = 'failed'}
+						>
+							<XCircle class="w-3 h-3 mr-1" />
+							Failed ({summary.failed + summary.blocked})
+						</Button>
+					</div>
+				{/if}
+				<!-- svelte-ignore a11y_no_static_element_interactions -->
+			<div bind:this={progressListEl} onscroll={handleProgressScroll} class="border rounded-lg divide-y flex-1 min-h-0 overflow-auto">
+					{#each filteredProgress as item (item.containerId)}
 						{@const StepIcon = getStepIcon(item.step)}
 						{@const isActive = item.step !== 'done' && item.step !== 'failed' && item.step !== 'blocked'}
 						{@const hasLogs = item.pullLogs.length > 0 || item.scanLogs.length > 0 || (item.vulnerabilities && item.vulnerabilities.length > 0)}

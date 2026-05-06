@@ -1,5 +1,29 @@
 [
   {
+    "version": "1.0.27",
+    "comingSoon": false,
+    "date": "2026-04-26",
+    "changes": [
+      { "type": "feature", "text": "network graph visualization on networks page (#894, @Penlane)" },
+      { "type": "feature", "text": "customizable compose template for new stacks in settings (#632, @oratory)" },
+      { "type": "feature", "text": "Microsoft Teams notifications via Power Automate Workflows (#355, @slokhorst)" },
+      { "type": "feature", "text": "container label controls: dockhand.update, dockhand.hidden, dockhand.notify (#6, #53, #94, #215)" },
+      { "type": "feature", "text": "configurable label filter matching mode (any/all) for environment dashboard (#607)" },
+      { "type": "feature", "text": "log search filter mode to hide non-matching lines (#916)" },
+      { "type": "feature", "text": "inline terminal on logs page with resizable split layout (#900)" },
+      { "type": "fix", "text": "disable Telegram link preview in notifications (#910, @deenle)" },
+      { "type": "fix", "text": "cron editor rejects 6-field expressions with seconds (#839, @GiulioSavini)" },
+      { "type": "fix", "text": "mirror Dockhand's ExtraHosts into scanner and self-update containers (#836, @YewFence)" },
+      { "type": "fix", "text": "duplicate volume binds during container recreate (#765, @itsDNNS)" },
+      { "type": "fix", "text": "log timestamp formatting not applied on main logs page (#882)" },
+      { "type": "fix", "text": "uploaded files now inherit container user ownership (#732, @ivanjx)" },
+      { "type": "fix", "text": "extraneous backslash in Telegram notification environment name (#955)" },
+      { "type": "fix", "text": "collapse ports into ranges only if 3 or more consecutive ports" },
+      { "type": "fix", "text": "git operations auto-merge system CAs with custom cert (#967)" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.27"
+  },
+  {
     "version": "1.0.26",
     "date": "2026-04-19",
     "changes": [
@@ -12,7 +36,7 @@
       { "type": "fix", "text": "clicking stack name toggles stats accordion instead of just opening editor (#628)" },
       { "type": "fix", "text": "scheduled image prune notifications missing environment name (#770)" },
       { "type": "fix", "text": "Gotify, ntfy, Pushover, and webhook notifications missing environment name (#943)" },
-      { "type": "fix", "text": "MFA code field not recognized by Bitwarden and other password managers (#566)" }      
+      { "type": "fix", "text": "MFA code field not recognized by Bitwarden and other password managers (#566)" }
     ],
     "imageTag": "fnsys/dockhand:v1.0.26"
   },

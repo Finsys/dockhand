@@ -24,6 +24,7 @@ import {
 	type ContainerEventAction
 } from './db';
 import { sendEnvironmentNotification, sendEventNotification } from './notifications';
+import { isNotifyDisabledByLabel } from './container-labels';
 import { rssBeforeOp, rssAfterOp } from './rss-tracker';
 import { pushMetric } from './metrics-store';
 
@@ -285,24 +286,28 @@ async function handleContainerEvent(msg: GoMessage): Promise<void> {
 
 	// Sub-category: notification
 	const notifBefore = rssBeforeOp();
-	const actionLabel = action.startsWith('health_status')
-		? action.includes('unhealthy') ? 'Unhealthy' : 'Healthy'
-		: action.charAt(0).toUpperCase() + action.slice(1);
-	const containerLabel = containerName || containerId.substring(0, 12);
-	const notificationType =
-		action === 'die' || action === 'kill' || action === 'oom' || action.includes('unhealthy')
-			? 'error'
-			: action === 'stop'
-				? 'warning'
-				: action === 'start' || (action.includes('healthy') && !action.includes('unhealthy'))
-					? 'success'
-					: 'info';
 
-	sendEnvironmentNotification(msg.envId, action, {
-		title: `Container ${actionLabel}`,
-		message: `Container "${containerLabel}" ${action}${image ? ` (${image})` : ''}`,
-		type: notificationType
-	}, image).catch(() => {});
+	// Check dockhand.notify label — Docker includes container labels in event Actor.Attributes
+	if (!isNotifyDisabledByLabel(event.Actor?.Attributes)) {
+		const actionLabel = action.startsWith('health_status')
+			? action.includes('unhealthy') ? 'Unhealthy' : 'Healthy'
+			: action.charAt(0).toUpperCase() + action.slice(1);
+		const containerLabel = containerName || containerId.substring(0, 12);
+		const notificationType =
+			action === 'die' || action === 'kill' || action === 'oom' || action.includes('unhealthy')
+				? 'error'
+				: action === 'stop'
+					? 'warning'
+					: action === 'start' || (action.includes('healthy') && !action.includes('unhealthy'))
+						? 'success'
+						: 'info';
+
+		sendEnvironmentNotification(msg.envId, action, {
+			title: `Container ${actionLabel}`,
+			message: `Container "${containerLabel}" ${action}${image ? ` (${image})` : ''}`,
+			type: notificationType
+		}, image).catch(() => {});
+	}
 	rssAfterOp('events_notif', notifBefore);
 	rssAfterOp('events', before);
 }
