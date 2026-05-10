@@ -834,7 +834,7 @@ function findComposeOverrideFile(stackDir: string, composeFileName: string): str
  * @param customComposePath - Optional path to existing compose file (for imported stacks, skips writing)
  */
 async function executeLocalCompose(
-	operation: 'up' | 'down' | 'stop' | 'start' | 'restart' | 'pull',
+	operation: 'up' | 'down' | 'stop' | 'start' | 'restart' | 'pull' | 'build',
 	stackName: string,
 	composeContent: string,
 	dockerHost?: string,
@@ -1043,8 +1043,7 @@ async function executeLocalCompose(
 		case 'up':
 			args.push('up', '-d', '--remove-orphans');
 			if (forceRecreate) args.push('--force-recreate');
-			if (build) args.push('--build');
-			if (build && noBuildCache) args.push('--no-cache');
+			if (build && !noBuildCache) args.push('--build');
 			if (pullPolicy) args.push('--pull', pullPolicy);
 			// If targeting a specific service, only update that service
 			if (serviceName) {
@@ -1067,6 +1066,14 @@ async function executeLocalCompose(
 		case 'pull':
 			args.push('pull');
 			// If targeting a specific service, pull only that service
+			if (serviceName) {
+				args.push(serviceName);
+			}
+			break;
+		case 'build':
+			args.push('build');
+			if (noBuildCache) args.push('--no-cache');
+			if (pullPolicy) args.push('--pull');
 			if (serviceName) {
 				args.push(serviceName);
 			}
@@ -1209,7 +1216,7 @@ async function executeLocalCompose(
  * @param secretVars - Secret environment variables (injected via shell env on Hawser, NEVER in .env)
  */
 async function executeComposeViaHawser(
-	operation: 'up' | 'down' | 'stop' | 'start' | 'restart' | 'pull',
+	operation: 'up' | 'down' | 'stop' | 'start' | 'restart' | 'pull' | 'build',
 	stackName: string,
 	composeContent: string,
 	envId: number,
@@ -1359,7 +1366,7 @@ async function executeComposeViaHawser(
  * @param secretVars - Secret environment variables (from DB, injected via shell env)
  */
 async function executeComposeCommand(
-	operation: 'up' | 'down' | 'stop' | 'start' | 'restart' | 'pull',
+	operation: 'up' | 'down' | 'stop' | 'start' | 'restart' | 'pull' | 'build',
 	options: ComposeCommandOptions,
 	composeContent: string,
 	envVars?: Record<string, string>,
@@ -2315,24 +2322,41 @@ export async function deployStack(options: DeployStackOptions): Promise<StackOpe
 		// so no override file is needed - only pass secrets for shell injection.
 		const isGitStack = !!sourceDir;
 
-		console.log(`${logPrefix} Calling executeComposeCommand...`);
+		const cmdOptions: ComposeCommandOptions = {
+			stackName: name,
+			envId,
+			forceRecreate,
+			build,
+			noBuildCache,
+			pullPolicy,
+			stackFiles,
+			workingDir,
+			composePath: actualComposePath,
+			envPath: actualEnvPath,
+			useOverrideFile: isGitStack,
+			// Pass compose filename for Hawser (extracted from path or provided explicitly)
+			composeFileName: composeFileName || (actualComposePath ? basename(actualComposePath) : undefined)
+		};
+
+		// If build and noBuildCache are true, run a separate build step first
+		if (build && noBuildCache) {
+			console.log(`${logPrefix} Running separate build step with --no-cache...`);
+			const buildResult = await executeComposeCommand(
+				'build',
+				cmdOptions,
+				compose,
+				isGitStack ? dbNonSecretVars : undefined,
+				secretVars
+			);
+			if (!buildResult.success) {
+				return buildResult;
+			}
+		}
+
+		console.log(`${logPrefix} Calling executeComposeCommand (up)...`);
 		const result = await executeComposeCommand(
 			'up',
-			{
-				stackName: name,
-				envId,
-				forceRecreate,
-				build,
-				noBuildCache,
-				pullPolicy,
-				stackFiles,
-				workingDir,
-				composePath: actualComposePath,
-				envPath: actualEnvPath,
-				useOverrideFile: isGitStack,
-				// Pass compose filename for Hawser (extracted from path or provided explicitly)
-				composeFileName: composeFileName || (actualComposePath ? basename(actualComposePath) : undefined)
-			},
+			cmdOptions,
 			compose,
 			isGitStack ? dbNonSecretVars : undefined,
 			secretVars
