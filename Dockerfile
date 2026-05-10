@@ -93,7 +93,7 @@ RUN cp -r node_modules/better-sqlite3/build /tmp/better-sqlite3-build \
     && rm -rf node_modules/@types /tmp/better-sqlite3-build
 
 # Build Go collector
-FROM --platform=$BUILDPLATFORM golang:1.25.9 AS go-builder
+FROM --platform=$BUILDPLATFORM golang:1.25.10 AS go-builder
 ARG TARGETARCH
 WORKDIR /app
 COPY collector/ ./collector/
