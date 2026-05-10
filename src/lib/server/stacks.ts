@@ -1220,6 +1220,43 @@ async function executeLocalCompose(
 			}
 
 			if (code === 0) {
+				if (operation === 'up') {
+					// Create all containers with different profiles
+					const createArgs = ['docker', 'compose', '-p', stackName, '--profile', '*'];
+
+					if (tempOverridePath && existsSync(tempOverridePath)) {
+						createArgs.push('-f', tempOverridePath);
+					} else if (customComposePath) {
+						const ov = findComposeOverrideFile(stackDir, basename(composeFile));
+						if (ov) createArgs.push('-f', ov);
+					}
+
+					if (existsSync(defaultEnvPath)) {
+						createArgs.push('--env-file', defaultEnvPath);
+					}
+					if (customEnvPath && resolve(customEnvPath) !== resolve(defaultEnvPath) && existsSync(customEnvPath)) {
+						createArgs.push('--env-file', customEnvPath);
+					}
+
+					createArgs.push('create');
+
+					console.log(`${logPrefix} Creating containers with all profiles:`, createArgs.join(' '));
+
+					const createProc = nodeSpawn(createArgs[0], createArgs.slice(1), {
+						cwd: stackDir,
+						env: spawnEnv,
+						stdio: ['ignore', 'pipe', 'pipe']
+					});
+
+					const { exitCode: createCode, stdout: createOut, stderr: createErr } = await collectProcess(createProc);
+
+					if (createCode === 0) {
+						console.log(`${logPrefix} Create with profiles: OK`);
+					} else {
+						console.warn(`${logPrefix} Create with profiles exited with code ${createCode}: ${createErr}`);
+					}
+				}
+
 				return {
 					success: true,
 					output: stdout || stderr || `Stack "${stackName}" ${operation} completed successfully`,
