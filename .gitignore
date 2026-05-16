@@ -2,6 +2,9 @@
 .DS_Store
 node_modules/
 .svelte-kit/
+build/
+bin/collection-worker
 bun.lock
 data/db
 data/.encryption_key
+*~

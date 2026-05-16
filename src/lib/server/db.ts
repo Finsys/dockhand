@@ -79,9 +79,11 @@ import {
 import type { AllGridPreferences, GridId, GridColumnPreferences } from '$lib/types';
 import { encrypt, decrypt } from './encryption.js';
 import { parseEnvInterpolation } from './env-interpolation';
+import { DEFAULT_COMPOSE_PATH, normalizeComposePaths } from './compose-paths';
 
 // Re-export for backwards compatibility
 export { db, isPostgres, isSqlite };
+export { normalizeComposePaths } from './compose-paths';
 export type {
 	Environment,
 	Registry,
@@ -2082,6 +2084,7 @@ export interface GitStackData {
 	environmentId: number | null;
 	repositoryId: number;
 	composePath: string;
+	composePaths: string[];
 	envFilePath: string | null;
 	autoUpdate: boolean;
 	autoUpdateSchedule: 'daily' | 'weekly' | 'custom';
@@ -2111,6 +2114,19 @@ export interface GitStackWithRepo extends GitStackData {
 	};
 }
 
+function serializeComposePaths(paths: unknown, fallback = DEFAULT_COMPOSE_PATH): string {
+	return JSON.stringify(normalizeComposePaths(paths, fallback));
+}
+
+function parseComposePaths(value: string | null | undefined, fallback = DEFAULT_COMPOSE_PATH): string[] {
+	if (!value) return normalizeComposePaths(undefined, fallback);
+	try {
+		return normalizeComposePaths(JSON.parse(value), fallback);
+	} catch {
+		return normalizeComposePaths(undefined, fallback);
+	}
+}
+
 export async function getGitStacks(environmentId?: number): Promise<GitStackWithRepo[]> {
 	let rows;
 	if (environmentId !== undefined) {
@@ -2120,6 +2136,7 @@ export async function getGitStacks(environmentId?: number): Promise<GitStackWith
 			environmentId: gitStacks.environmentId,
 			repositoryId: gitStacks.repositoryId,
 			composePath: gitStacks.composePath,
+			composePaths: gitStacks.composePaths,
 			envFilePath: gitStacks.envFilePath,
 			autoUpdate: gitStacks.autoUpdate,
 			autoUpdateSchedule: gitStacks.autoUpdateSchedule,
@@ -2153,6 +2170,7 @@ export async function getGitStacks(environmentId?: number): Promise<GitStackWith
 			environmentId: gitStacks.environmentId,
 			repositoryId: gitStacks.repositoryId,
 			composePath: gitStacks.composePath,
+			composePaths: gitStacks.composePaths,
 			envFilePath: gitStacks.envFilePath,
 			autoUpdate: gitStacks.autoUpdate,
 			autoUpdateSchedule: gitStacks.autoUpdateSchedule,
@@ -2186,6 +2204,7 @@ export async function getGitStacks(environmentId?: number): Promise<GitStackWith
 		environmentId: row.environmentId,
 		repositoryId: row.repositoryId,
 		composePath: row.composePath,
+		composePaths: parseComposePaths(row.composePaths, row.composePath),
 		envFilePath: row.envFilePath,
 		autoUpdate: row.autoUpdate,
 		autoUpdateSchedule: row.autoUpdateSchedule,
@@ -2221,6 +2240,7 @@ export async function getGitStacksForEnvironmentOnly(environmentId: number): Pro
 		environmentId: gitStacks.environmentId,
 		repositoryId: gitStacks.repositoryId,
 		composePath: gitStacks.composePath,
+		composePaths: gitStacks.composePaths,
 		envFilePath: gitStacks.envFilePath,
 		autoUpdate: gitStacks.autoUpdate,
 		autoUpdateSchedule: gitStacks.autoUpdateSchedule,
@@ -2254,6 +2274,7 @@ export async function getGitStacksForEnvironmentOnly(environmentId: number): Pro
 		environmentId: row.environmentId,
 		repositoryId: row.repositoryId,
 		composePath: row.composePath,
+		composePaths: parseComposePaths(row.composePaths, row.composePath),
 		envFilePath: row.envFilePath,
 		autoUpdate: row.autoUpdate,
 		autoUpdateSchedule: row.autoUpdateSchedule,
@@ -2288,6 +2309,7 @@ export async function getGitStack(id: number): Promise<GitStackWithRepo | null> 
 		environmentId: gitStacks.environmentId,
 		repositoryId: gitStacks.repositoryId,
 		composePath: gitStacks.composePath,
+		composePaths: gitStacks.composePaths,
 		envFilePath: gitStacks.envFilePath,
 		autoUpdate: gitStacks.autoUpdate,
 		autoUpdateSchedule: gitStacks.autoUpdateSchedule,
@@ -2322,6 +2344,7 @@ export async function getGitStack(id: number): Promise<GitStackWithRepo | null> 
 		environmentId: row.environmentId,
 		repositoryId: row.repositoryId,
 		composePath: row.composePath,
+		composePaths: parseComposePaths(row.composePaths, row.composePath),
 		envFilePath: row.envFilePath,
 		autoUpdate: row.autoUpdate,
 		autoUpdateSchedule: row.autoUpdateSchedule,
@@ -2356,6 +2379,7 @@ export async function getGitStackByName(stackName: string, environmentId?: numbe
 		environmentId: gitStacks.environmentId,
 		repositoryId: gitStacks.repositoryId,
 		composePath: gitStacks.composePath,
+		composePaths: gitStacks.composePaths,
 		envFilePath: gitStacks.envFilePath,
 		autoUpdate: gitStacks.autoUpdate,
 		autoUpdateSchedule: gitStacks.autoUpdateSchedule,
@@ -2395,6 +2419,7 @@ export async function getGitStackByName(stackName: string, environmentId?: numbe
 		environmentId: row.environmentId,
 		repositoryId: row.repositoryId,
 		composePath: row.composePath,
+		composePaths: parseComposePaths(row.composePaths, row.composePath),
 		envFilePath: row.envFilePath,
 		autoUpdate: row.autoUpdate,
 		autoUpdateSchedule: row.autoUpdateSchedule,
@@ -2429,6 +2454,7 @@ export async function getGitStackByWebhookSecret(secret: string): Promise<GitSta
 		environmentId: gitStacks.environmentId,
 		repositoryId: gitStacks.repositoryId,
 		composePath: gitStacks.composePath,
+		composePaths: gitStacks.composePaths,
 		envFilePath: gitStacks.envFilePath,
 		autoUpdate: gitStacks.autoUpdate,
 		autoUpdateSchedule: gitStacks.autoUpdateSchedule,
@@ -2463,6 +2489,7 @@ export async function getGitStackByWebhookSecret(secret: string): Promise<GitSta
 		environmentId: row.environmentId,
 		repositoryId: row.repositoryId,
 		composePath: row.composePath,
+		composePaths: parseComposePaths(row.composePaths, row.composePath),
 		envFilePath: row.envFilePath,
 		autoUpdate: row.autoUpdate,
 		autoUpdateSchedule: row.autoUpdateSchedule,
@@ -2495,6 +2522,7 @@ export async function createGitStack(data: {
 	environmentId?: number | null;
 	repositoryId: number;
 	composePath?: string;
+	composePaths?: string[];
 	envFilePath?: string | null;
 	autoUpdate?: boolean;
 	autoUpdateSchedule?: 'daily' | 'weekly' | 'custom';
@@ -2507,11 +2535,13 @@ export async function createGitStack(data: {
 	repullImages?: boolean;
 	forceRedeploy?: boolean;
 }): Promise<GitStackWithRepo> {
+	const composePaths = normalizeComposePaths(data.composePaths, data.composePath || 'compose.yaml');
 	const result = await db.insert(gitStacks).values({
 		stackName: data.stackName,
 		environmentId: data.environmentId ?? null,
 		repositoryId: data.repositoryId,
-		composePath: data.composePath || 'compose.yaml',
+		composePath: composePaths[0],
+		composePaths: serializeComposePaths(composePaths),
 		envFilePath: data.envFilePath || null,
 		contextDir: data.contextDir || null,
 		autoUpdate: data.autoUpdate || false,
@@ -2532,7 +2562,11 @@ export async function updateGitStack(id: number, data: Partial<GitStackData>): P
 
 	if (data.stackName !== undefined) updateData.stackName = data.stackName;
 	if (data.repositoryId !== undefined) updateData.repositoryId = data.repositoryId;
-	if (data.composePath !== undefined) updateData.composePath = data.composePath;
+	if (data.composePath !== undefined || data.composePaths !== undefined) {
+		const composePaths = normalizeComposePaths(data.composePaths ?? data.composePath, data.composePath || 'compose.yaml');
+		updateData.composePath = composePaths[0];
+		updateData.composePaths = serializeComposePaths(composePaths);
+	}
 	if (data.envFilePath !== undefined) updateData.envFilePath = data.envFilePath;
 	if (data.autoUpdate !== undefined) updateData.autoUpdate = data.autoUpdate;
 	if (data.autoUpdateSchedule !== undefined) updateData.autoUpdateSchedule = data.autoUpdateSchedule;
@@ -2573,6 +2607,7 @@ export async function getEnabledAutoUpdateGitStacks(): Promise<GitStackWithRepo[
 		environmentId: gitStacks.environmentId,
 		repositoryId: gitStacks.repositoryId,
 		composePath: gitStacks.composePath,
+		composePaths: gitStacks.composePaths,
 		envFilePath: gitStacks.envFilePath,
 		autoUpdate: gitStacks.autoUpdate,
 		autoUpdateSchedule: gitStacks.autoUpdateSchedule,
@@ -2605,6 +2640,7 @@ export async function getEnabledAutoUpdateGitStacks(): Promise<GitStackWithRepo[
 		environmentId: row.environmentId,
 		repositoryId: row.repositoryId,
 		composePath: row.composePath,
+		composePaths: parseComposePaths(row.composePaths, row.composePath),
 		envFilePath: row.envFilePath,
 		autoUpdate: row.autoUpdate,
 		autoUpdateSchedule: row.autoUpdateSchedule,
@@ -2639,6 +2675,8 @@ export async function getAllAutoUpdateGitStacks(): Promise<GitStackWithRepo[]> {
 		environmentId: gitStacks.environmentId,
 		repositoryId: gitStacks.repositoryId,
 		composePath: gitStacks.composePath,
+		composePaths: gitStacks.composePaths,
+		envFilePath: gitStacks.envFilePath,
 		autoUpdate: gitStacks.autoUpdate,
 		autoUpdateSchedule: gitStacks.autoUpdateSchedule,
 		autoUpdateCron: gitStacks.autoUpdateCron,
@@ -2670,6 +2708,8 @@ export async function getAllAutoUpdateGitStacks(): Promise<GitStackWithRepo[]> {
 		environmentId: row.environmentId,
 		repositoryId: row.repositoryId,
 		composePath: row.composePath,
+		composePaths: parseComposePaths(row.composePaths, row.composePath),
+		envFilePath: row.envFilePath,
 		autoUpdate: row.autoUpdate,
 		autoUpdateSchedule: row.autoUpdateSchedule,
 		autoUpdateCron: row.autoUpdateCron,

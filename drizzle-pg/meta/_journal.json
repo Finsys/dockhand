@@ -50,6 +50,13 @@
       "when": 1777220350655,
       "tag": "0006_add_git_stack_context_dir",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1778947200000,
+      "tag": "0007_add_git_stack_compose_paths",
+      "breakpoints": true
     }
   ]
 }

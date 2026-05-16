@@ -8,7 +8,8 @@ import {
 	createGitRepository,
 	upsertStackSource,
 	setStackEnvVars,
-	getStackSource
+	getStackSource,
+	normalizeComposePaths
 } from '$lib/server/db';
 import { deployGitStack } from '$lib/server/git';
 import { authorize } from '$lib/server/authorize';
@@ -46,6 +47,7 @@ export const POST: RequestHandler = async (event) => {
 
 	try {
 		const data = await request.json();
+		const composePaths = normalizeComposePaths(data.composePaths ?? data.composePath ?? 'compose.yaml');
 
 		// Permission check with environment context
 		if (auth.authEnabled && !await auth.can('stacks', 'create', data.environmentId || undefined)) {
@@ -113,7 +115,8 @@ export const POST: RequestHandler = async (event) => {
 			stackName: trimmedStackName,
 			environmentId: data.environmentId || null,
 			repositoryId: repositoryId,
-			composePath: data.composePath || 'compose.yaml',
+			composePath: composePaths[0],
+			composePaths,
 			envFilePath: data.envFilePath || null,
 			autoUpdate: data.autoUpdate || false,
 			autoUpdateSchedule: data.autoUpdateSchedule || 'daily',

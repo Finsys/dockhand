@@ -1,6 +1,17 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getGitStack, updateGitStack, deleteGitStack, deleteStackSource, updateStackSourceName, updateStackEnvVarsName, setStackEnvVars, getStackEnvVars, deleteStackEnvVars } from '$lib/server/db';
+import {
+	getGitStack,
+	updateGitStack,
+	deleteGitStack,
+	deleteStackSource,
+	updateStackSourceName,
+	updateStackEnvVarsName,
+	setStackEnvVars,
+	getStackEnvVars,
+	deleteStackEnvVars,
+	normalizeComposePaths
+} from '$lib/server/db';
 import { deleteGitStackFiles, deployGitStack } from '$lib/server/git';
 import { authorize } from '$lib/server/authorize';
 import { registerSchedule, unregisterSchedule } from '$lib/server/scheduler';
@@ -50,6 +61,8 @@ export const PUT: RequestHandler = async (event) => {
 		}
 
 		const data = await request.json();
+		const requestedComposePaths = data.composePaths ?? (data.composePath ? data.composePath : existing.composePaths);
+		const composePaths = normalizeComposePaths(requestedComposePaths);
 
 		// Validate stack name if it's being changed
 		if (data.stackName !== undefined) {
@@ -66,7 +79,8 @@ export const PUT: RequestHandler = async (event) => {
 		const oldStackName = existing.stackName;
 		const updated = await updateGitStack(id, {
 			stackName: data.stackName,
-			composePath: data.composePath,
+			composePath: composePaths[0],
+			composePaths,
 			envFilePath: data.envFilePath,
 			autoUpdate: data.autoUpdate,
 			autoUpdateSchedule: data.autoUpdateSchedule,
@@ -79,6 +93,9 @@ export const PUT: RequestHandler = async (event) => {
 			repullImages: data.repullImages,
 			forceRedeploy: data.forceRedeploy
 		});
+		if (!updated) {
+			return json({ error: 'Git stack not found' }, { status: 404 });
+		}
 
 		// If stack name changed, update related records
 		if (data.stackName && data.stackName !== oldStackName) {

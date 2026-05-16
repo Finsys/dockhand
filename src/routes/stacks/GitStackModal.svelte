@@ -7,7 +7,7 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { Input } from '$lib/components/ui/input';
 	import { TogglePill } from '$lib/components/ui/toggle-pill';
-	import { Loader2, GitBranch, RefreshCw, Webhook, Rocket, RefreshCcw, Copy, Check, XCircle, FolderGit2, Github, Key, KeyRound, Lock, FileText, HelpCircle, GripVertical, X, Download, Hammer, ArrowDownToLine, Zap, FolderOpen, Ban, TriangleAlert } from 'lucide-svelte';
+	import { Loader2, GitBranch, RefreshCw, Webhook, Rocket, RefreshCcw, Copy, Check, XCircle, FolderGit2, Github, Key, KeyRound, Lock, FileText, HelpCircle, GripVertical, X, Download, Hammer, ArrowDownToLine, Zap, FolderOpen, Ban, TriangleAlert, Plus } from 'lucide-svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import CronEditor from '$lib/components/cron-editor.svelte';
@@ -23,6 +23,7 @@
 
 	// localStorage key for persisted split ratio
 	const STORAGE_KEY_SPLIT = 'dockhand-git-stack-modal-split';
+	const DEFAULT_COMPOSE_PATH = 'compose.yaml';
 
 	interface GitCredential {
 		id: number;
@@ -52,6 +53,7 @@
 		repositoryId: number;
 		environmentId: number | null;
 		composePath: string;
+		composePaths?: string[];
 		envFilePath: string | null;
 		autoUpdate: boolean;
 		autoUpdateSchedule: 'daily' | 'weekly' | 'custom';
@@ -88,7 +90,7 @@
 	// Form state - stack deployment config
 	let formStackName = $state('');
 	let formStackNameUserModified = $state(false);
-	let formComposePath = $state('compose.yaml');
+	let formComposePaths = $state<string[]>([DEFAULT_COMPOSE_PATH]);
 	let formAutoUpdate = $state(false);
 	let formAutoUpdateCron = $state('0 3 * * *');
 	let formWebhookEnabled = $state(false);
@@ -124,6 +126,27 @@
 	let isDraggingSplit = $state(false);
 	let containerRef: HTMLDivElement | null = $state(null);
 
+	function getComposePaths(): string[] {
+		const paths = formComposePaths.map(path => path.trim()).filter(Boolean);
+		return paths.length > 0 ? paths : [DEFAULT_COMPOSE_PATH];
+	}
+
+	function getPrimaryComposePath(): string {
+		return getComposePaths()[0];
+	}
+
+	function updateComposePath(index: number, value: string): void {
+		formComposePaths = formComposePaths.map((path, i) => i === index ? value : path);
+	}
+
+	function addComposePath(): void {
+		formComposePaths = [...formComposePaths, ''];
+	}
+
+	function removeComposePath(index: number): void {
+		const next = formComposePaths.filter((_, i) => i !== index);
+		formComposePaths = next.length > 0 ? next : [DEFAULT_COMPOSE_PATH];
+	}
 
 	// Track which gitStack was initialized to avoid repeated resets
 	let lastInitializedStackId = $state<number | null | undefined>(undefined);
@@ -289,7 +312,7 @@
 		populatingEnvVars = true;
 		try {
 			const body: Record<string, any> = {
-				composePath: formComposePath || 'compose.yaml',
+				composePath: getPrimaryComposePath(),
 				envFilePath: formEnvFilePath || null
 			};
 
@@ -363,7 +386,7 @@
 			formRepoMode = 'existing';
 			formRepositoryId = gitStack.repositoryId;
 			formStackName = gitStack.stackName;
-			formComposePath = gitStack.composePath;
+			formComposePaths = gitStack.composePaths?.length ? [...gitStack.composePaths] : [gitStack.composePath || DEFAULT_COMPOSE_PATH];
 			formEnvFilePath = gitStack.envFilePath;
 			formAutoUpdate = gitStack.autoUpdate;
 			formAutoUpdateCron = gitStack.autoUpdateCron || '0 3 * * *';
@@ -392,7 +415,7 @@
 			formNewRepoCredentialId = null;
 			formStackName = '';
 			formStackNameUserModified = false;
-			formComposePath = 'compose.yaml';
+			formComposePaths = [DEFAULT_COMPOSE_PATH];
 			formEnvFilePath = null;
 			formAutoUpdate = false;
 			formAutoUpdateCron = '0 3 * * *';
@@ -471,7 +494,8 @@
 
 			let body: any = {
 				stackName: formStackName,
-				composePath: formComposePath || 'compose.yaml',
+				composePath: getPrimaryComposePath(),
+				composePaths: getComposePaths(),
 				envFilePath: formEnvFilePath,
 				environmentId: environmentId,
 				autoUpdate: formAutoUpdate,
@@ -513,6 +537,7 @@
 			});
 
 			const data = await readJobResponse(response);
+			const deployResult = data.deployResult as { success?: boolean; error?: string } | undefined;
 
 			if (!response.ok) {
 				formError = data.error || 'Failed to save git stack';
@@ -520,9 +545,9 @@
 			}
 
 			// Check if deployment failed
-			if (data.deployResult && !data.deployResult.success) {
+			if (deployResult && !deployResult.success) {
 				toast.error('Deployment failed', {
-					description: data.deployResult.error || 'Unknown error'
+					description: deployResult.error || 'Unknown error'
 				});
 				onSaved(); // Still refresh the list to show the new stack
 				onClose(); // Close modal, error shown as toast
@@ -552,7 +577,7 @@
 					.replace(/^-|-$/g, '');
 
 				// Extract compose filename without extension for stack name
-				const composeName = formComposePath
+				const composeName = getPrimaryComposePath()
 					.replace(/^.*\//, '') // Remove directory path
 					.replace(/\.(yml|yaml)$/i, '') // Remove extension
 					.replace(/^docker-compose\.?/, '') // Remove docker-compose prefix
@@ -793,9 +818,37 @@
 			{/if}
 
 			<div class="space-y-2">
-				<Label for="compose-path">Compose file path</Label>
-				<Input id="compose-path" bind:value={formComposePath} placeholder="compose.yaml" />
-				<p class="text-xs text-muted-foreground">Path to the compose file within the repository</p>
+				<div class="flex items-center justify-between gap-3">
+					<Label>Compose files</Label>
+					<Button type="button" variant="outline" size="sm" onclick={addComposePath} title="Add compose file" class="h-8 w-8 p-0">
+						<Plus class="w-3.5 h-3.5" />
+					</Button>
+				</div>
+				<div class="space-y-2">
+					{#each formComposePaths as composePath, index}
+						<div class="flex items-center gap-2">
+							<div class="w-6 text-center text-xs text-muted-foreground shrink-0">{index + 1}</div>
+							<Input
+								id={index === 0 ? 'compose-path' : undefined}
+								value={composePath}
+								oninput={(e) => updateComposePath(index, (e.target as HTMLInputElement).value)}
+								placeholder={index === 0 ? DEFAULT_COMPOSE_PATH : 'docker-compose.prod.yml'}
+								class="font-mono text-xs"
+							/>
+							<Button
+								type="button"
+								variant="ghost"
+								size="sm"
+								onclick={() => removeComposePath(index)}
+								disabled={formComposePaths.length === 1}
+								title="Remove compose file"
+								class="h-8 w-8 p-0 shrink-0"
+							>
+								<X class="w-4 h-4" />
+							</Button>
+						</div>
+					{/each}
+				</div>
 			</div>
 
 			<!-- Additional env file for variable substitution -->
