@@ -62,7 +62,7 @@
 						<span class="text-muted-foreground font-normal">({release.date})</span>
 					</h3>
 					<div class="space-y-1.5 ml-1">
-						{#each release.changes as change}
+						{#each [...release.changes].sort((a, b) => a.type === b.type ? 0 : a.type === 'feature' ? -1 : 1) as change}
 							{@const { icon: Icon, class: iconClass } = getChangeIcon(change.type)}
 							<div class="flex items-start gap-2">
 								<Icon class="w-4 h-4 mt-0.5 shrink-0 {iconClass}" />

@@ -318,7 +318,9 @@ export const gitStacks = pgTable('git_stacks', {
 	autoUpdateCron: text('auto_update_cron').default('0 3 * * *'),
 	webhookEnabled: boolean('webhook_enabled').default(false),
 	webhookSecret: text('webhook_secret'),
+	contextDir: text('context_dir'), // Working directory relative to repo root (null = compose file's directory)
 	buildOnDeploy: boolean('build_on_deploy').default(false),
+	noBuildCache: boolean('no_build_cache').default(false),
 	repullImages: boolean('repull_images').default(false),
 	forceRedeploy: boolean('force_redeploy').default(false),
 	lastSync: timestamp('last_sync', { mode: 'string' }),

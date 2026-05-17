@@ -90,16 +90,25 @@
 	}
 
 	function formatChangelogDate(dateStr: string): string {
+		if (!dateStr) return 'Unreleased';
 		try {
 			const date = new Date(dateStr);
+			if (isNaN(date.getTime())) return 'Unreleased';
 			return date.toLocaleDateString('en-US', {
 				year: 'numeric',
 				month: 'long',
 				day: 'numeric'
 			});
 		} catch {
-			return dateStr;
+			return 'Unreleased';
 		}
+	}
+
+	function sortedChanges(changes: ChangelogChange[]): ChangelogChange[] {
+		return [...changes].sort((a, b) => {
+			if (a.type === b.type) return 0;
+			return a.type === 'feature' ? -1 : 1;
+		});
 	}
 
 	// Build info - injected at build time
@@ -867,7 +876,7 @@
 								{#if isExpanded}
 									<div class="px-4 pb-4">
 										<ul class="space-y-1.5 text-sm text-muted-foreground mb-3">
-											{#each release.changes as change}
+											{#each sortedChanges(release.changes) as change}
 												<li class="flex items-start gap-2">
 													{#if change.type === 'feature'}
 														<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-2xs font-medium bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 shrink-0">

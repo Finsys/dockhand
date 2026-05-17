@@ -74,6 +74,30 @@ html {
 	max-width: calc(90px * var(--grid-font-size-scale, 1)) !important;
 }
 
+/* Scrollbar theming */
+* {
+	scrollbar-color: hsl(var(--border) / 0.5) transparent;
+	scrollbar-width: thin;
+}
+
+::-webkit-scrollbar {
+	width: 8px;
+	height: 8px;
+}
+
+::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+	background: hsl(var(--border) / 0.5);
+	border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+	background: hsl(var(--border) / 0.7);
+}
+
 :root {
 	--font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 

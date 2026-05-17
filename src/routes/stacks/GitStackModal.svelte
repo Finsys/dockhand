@@ -8,7 +8,7 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { Input } from '$lib/components/ui/input';
 	import { TogglePill } from '$lib/components/ui/toggle-pill';
-	import { Loader2, GitBranch, RefreshCw, Webhook, Rocket, RefreshCcw, Copy, Check, XCircle, FolderGit2, Github, Key, KeyRound, Lock, FileText, HelpCircle, GripVertical, X, Download, Hammer, ArrowDownToLine, Zap } from 'lucide-svelte';
+	import { Loader2, GitBranch, RefreshCw, Webhook, Rocket, RefreshCcw, Copy, Check, XCircle, FolderGit2, Github, Key, KeyRound, Lock, FileText, HelpCircle, GripVertical, X, Download, Hammer, ArrowDownToLine, Zap, FolderOpen, Ban, TriangleAlert } from 'lucide-svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import CronEditor from '$lib/components/cron-editor.svelte';
@@ -59,7 +59,9 @@
 		autoUpdateCron: string;
 		webhookEnabled: boolean;
 		webhookSecret: string | null;
+		contextDir: string | null;
 		buildOnDeploy: boolean;
+		noBuildCache: boolean;
 		repullImages: boolean;
 		forceRedeploy: boolean;
 	}
@@ -104,12 +106,15 @@
 	let formAutoUpdateCron = $state('0 3 * * *');
 	let formWebhookEnabled = $state(false);
 	let formWebhookSecret = $state('');
+	let formContextDir = $state<string | null>(null);
 	let formBuildOnDeploy = $state(false);
+	let formNoBuildCache = $state(false);
 	let formRepullImages = $state(false);
 	let formForceRedeploy = $state(false);
 	let formDeployNow = $state(false);
 	let formError = $state('');
 	let formSaving = $state(false);
+	let showExistsWarning = $state(false);
 	let errors = $state<{ stackName?: string; repository?: string; repoName?: string; repoUrl?: string }>({});
 
 	// Stack name validation: must start with alphanumeric, can contain alphanumeric, hyphens, underscores
@@ -402,7 +407,9 @@
 			formAutoUpdateCron = gitStack.autoUpdateCron || '0 3 * * *';
 			formWebhookEnabled = gitStack.webhookEnabled;
 			formWebhookSecret = gitStack.webhookSecret || '';
+			formContextDir = gitStack.contextDir ?? null;
 			formBuildOnDeploy = gitStack.buildOnDeploy ?? false;
+			formNoBuildCache = gitStack.noBuildCache ?? false;
 			formRepullImages = gitStack.repullImages ?? false;
 			formForceRedeploy = gitStack.forceRedeploy ?? false;
 			formDeployNow = false;
@@ -447,7 +454,9 @@
 			formAutoUpdateCron = '0 3 * * *';
 			formWebhookEnabled = false;
 			formWebhookSecret = '';
+			formContextDir = null;
 			formBuildOnDeploy = false;
+			formNoBuildCache = false;
 			formRepullImages = false;
 			formForceRedeploy = false;
 			formDeployNow = false;
@@ -484,6 +493,25 @@
 
 		if (hasErrors) return;
 
+		// Check if stack already exists (only for new stacks)
+		if (!gitStack) {
+			try {
+				const stacksResponse = await fetch(`/api/stacks?env=${environmentId}`);
+				if (stacksResponse.ok) {
+					const stacks = await stacksResponse.json();
+					const existingStack = stacks.find((s: { name: string }) =>
+						s.name.toLowerCase() === formStackName.trim().toLowerCase()
+					);
+					if (existingStack) {
+						showExistsWarning = true;
+						return;
+					}
+				}
+			} catch (e) {
+				console.warn('Failed to check for existing stacks:', e);
+			}
+		}
+
 		formSaving = true;
 		formError = '';
 
@@ -506,7 +534,9 @@
 				autoUpdateCron: formAutoUpdateCron,
 				webhookEnabled: formWebhookEnabled,
 				webhookSecret: formWebhookEnabled ? formWebhookSecret : null,
+				contextDir: formContextDir || null,
 				buildOnDeploy: formBuildOnDeploy,
+				noBuildCache: formNoBuildCache,
 				repullImages: formRepullImages,
 				forceRedeploy: formForceRedeploy,
 				deployNow: deployAfterSave,
@@ -852,6 +882,32 @@
 				<p class="text-xs text-muted-foreground">Additional env file to pass to Docker Compose</p>
 			</div>
 
+			<!-- Context directory -->
+			<div class="space-y-2">
+				<div class="flex items-center gap-1.5">
+					<Label for="context-dir">Context directory (optional)</Label>
+					<Tooltip.Root>
+						<Tooltip.Trigger>
+							<HelpCircle class="w-3.5 h-3.5 text-muted-foreground cursor-help" />
+						</Tooltip.Trigger>
+						<Tooltip.Content>
+							<div class="w-80">
+								<p class="text-xs">Working directory for Docker Compose, relative to the repository root. All files in this directory will be available for volume mounts and build contexts.</p>
+								<p class="text-xs mt-2">Use <code class="bg-muted px-1 rounded">.</code> for the repository root when your compose file references files in sibling directories.</p>
+								<p class="text-xs mt-2">Defaults to the compose file's parent directory.</p>
+							</div>
+						</Tooltip.Content>
+					</Tooltip.Root>
+				</div>
+				<Input
+					id="context-dir"
+					value={formContextDir ?? ''}
+					oninput={(e) => { const v = (e.target as HTMLInputElement).value; formContextDir = v.trim() || null; }}
+					placeholder="Defaults to compose file's directory"
+				/>
+				<p class="text-xs text-muted-foreground">Relative to repository root, e.g. <code class="text-xs bg-muted px-1 rounded">.</code> for root</p>
+			</div>
+
 			<!-- Auto-update section -->
 			<div class="space-y-3 p-3 bg-muted/50 rounded-md">
 			<div class="flex items-center gap-3">
@@ -946,14 +1002,18 @@
 									{/if}
 								</Button>
 							{/if}
-							<Button
-								variant="outline"
-								size="sm"
-								onclick={() => formWebhookSecret = generateWebhookSecret()}
-								title="Generate new secret"
-							>
-								<RefreshCcw class="w-4 h-4" />
-							</Button>
+							<Tooltip.Root>
+								<Tooltip.Trigger>
+									<Button
+										variant="outline"
+										size="sm"
+										onclick={() => formWebhookSecret = generateWebhookSecret()}
+									>
+										<Key class="w-4 h-4" />
+									</Button>
+								</Tooltip.Trigger>
+								<Tooltip.Content>Generate secret</Tooltip.Content>
+							</Tooltip.Root>
 						</div>
 					</div>
 					{#if !gitStack}
@@ -981,6 +1041,18 @@
 				<p class="text-xs text-muted-foreground">
 					Run <code class="text-xs bg-muted px-1 rounded">--build</code> to build images from Dockerfiles before starting containers.
 				</p>
+				{#if formBuildOnDeploy}
+				<div class="flex items-center gap-3 ml-6">
+					<div class="flex items-center gap-2 flex-1">
+						<Ban class="w-4 h-4 text-muted-foreground" />
+						<Label class="text-sm font-normal">Disable build cache</Label>
+					</div>
+					<TogglePill bind:checked={formNoBuildCache} />
+				</div>
+				<p class="text-xs text-muted-foreground ml-6">
+					Pass <code class="text-xs bg-muted px-1 rounded">--no-cache</code> to force a clean build without using cached layers.
+				</p>
+				{/if}
 				<div class="flex items-center gap-3">
 					<div class="flex items-center gap-2 flex-1">
 						<ArrowDownToLine class="w-4 h-4 text-muted-foreground" />
@@ -1139,5 +1211,25 @@
 				</div>
 			</div>
 		</Dialog.Footer>
+	</Dialog.Content>
+</Dialog.Root>
+
+<!-- Stack already exists warning dialog -->
+<Dialog.Root bind:open={showExistsWarning}>
+	<Dialog.Content class="max-w-sm">
+		<Dialog.Header>
+			<Dialog.Title class="flex items-center gap-2">
+				<TriangleAlert class="w-5 h-5 text-amber-500" />
+				Stack already exists
+			</Dialog.Title>
+			<Dialog.Description>
+				A stack named "{formStackName}" already exists. Please choose a different name.
+			</Dialog.Description>
+		</Dialog.Header>
+		<div class="flex justify-end mt-4">
+			<Button size="sm" onclick={() => showExistsWarning = false}>
+				OK
+			</Button>
+		</div>
 	</Dialog.Content>
 </Dialog.Root>

@@ -200,8 +200,8 @@
 	 * Sync rawContent TO variables.
 	 * Parses raw content for non-secrets, preserves existing secrets.
 	 */
-	function syncRawToVariables() {
-		const { vars, warnings } = parseRawContent(rawContent);
+	function syncRawToVariables(content?: string) {
+		const { vars, warnings } = parseRawContent(content ?? rawContent);
 		parseWarnings = warnings;
 
 		// Preserve existing secrets (they're not in rawContent)
@@ -240,8 +240,9 @@
 			// Form → Text: sync variables to raw (preserves comments)
 			syncVariablesToRaw();
 		} else if (newMode === 'form' && viewMode === 'text') {
-			// Text → Form: sync raw to variables (preserves secrets)
-			syncRawToVariables();
+			// Text → Form: use textEditorContent which falls back to generatedRawContent
+			// when rawContent is empty (fixes vars lost on view switch for git stacks)
+			syncRawToVariables(textEditorContent);
 		}
 
 		viewMode = newMode;

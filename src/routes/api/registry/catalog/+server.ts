@@ -46,8 +46,8 @@ export const GET: RequestHandler = async ({ url }) => {
 		});
 
 		if (!response.ok) {
-			if (response.status === 401) {
-				return json({ error: 'Authentication failed. Please check your credentials.' }, { status: 401 });
+			if (response.status === 401 || response.status === 403) {
+				return json({ error: 'Catalog listing not available. This registry may not support the _catalog endpoint (common with GitLab and Harbor). Try searching for images by name instead.' }, { status: response.status });
 			}
 			if (response.status === 404) {
 				return json({ error: 'Registry does not support V2 catalog API' }, { status: 404 });

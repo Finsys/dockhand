@@ -405,7 +405,7 @@
 					new RegExp(`(?<!\\$)\\$\\{${marker.name}\\?`),
 					new RegExp(`(?<!\\$)\\$\\{${marker.name}:\\+`),
 					new RegExp(`(?<!\\$)\\$\\{${marker.name}\\+`),
-					new RegExp(`(?<!\\$)\\$${marker.name}(?![a-zA-Z0-9_])`)
+					new RegExp(`(?<![A-Za-z0-9\\$])\\$${marker.name}(?![a-zA-Z0-9_])`)
 				];
 
 				const hasVariable = varPatterns.some(p => p.test(line));

@@ -421,7 +421,7 @@ func (m *manager) collectMetrics(env *environment) {
 			sCtx, sCancel := context.WithTimeout(env.ctx, 10*time.Second)
 			defer sCancel()
 
-			sResp, sErr := env.doRequest(sCtx, "GET", fmt.Sprintf("/containers/%s/stats?stream=false&one-shot=true", id))
+			sResp, sErr := env.doRequest(sCtx, "GET", fmt.Sprintf("/containers/%s/stats?stream=false", id))
 			if sErr != nil {
 				return
 			}

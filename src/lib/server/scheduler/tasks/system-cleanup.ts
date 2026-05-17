@@ -11,6 +11,7 @@ import {
 	getEventRetentionDays,
 	getScheduleCleanupEnabled,
 	getEventCleanupEnabled,
+	getScannerCleanupEnabled,
 	createScheduleExecution,
 	updateScheduleExecution,
 	appendScheduleExecutionLog
@@ -210,6 +211,14 @@ export async function runScannerCacheCleanupJob(
 	triggeredBy: ScheduleTrigger = 'cron',
 	cleanupFn?: () => Promise<{ volumes: string[]; dirs: string[] }>
 ): Promise<void> {
+	// Check if cleanup is enabled (skip check if manually triggered)
+	if (triggeredBy === 'cron') {
+		const enabled = await getScannerCleanupEnabled();
+		if (!enabled) {
+			return; // Skip execution if disabled
+		}
+	}
+
 	const startTime = Date.now();
 
 	const execution = await createScheduleExecution({

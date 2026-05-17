@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy, tick } from 'svelte';
-	import { X, GripHorizontal, RefreshCw, Copy, Download, WrapText, ArrowDownToLine, Search, ChevronUp, ChevronDown, Sun, Moon, Wifi, WifiOff, Pause, Play, Eraser, Filter } from 'lucide-svelte';
+	import { X, GripHorizontal, RefreshCw, Copy, Download, WrapText, ArrowDownToLine, Search, ChevronUp, ChevronDown, Sun, Moon, Wifi, WifiOff, Pause, Play, Eraser, Filter, Clock, Tag } from 'lucide-svelte';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import * as Select from '$lib/components/ui/select';
 	import { appSettings, formatLogTimestamps } from '$lib/stores/settings';
@@ -29,6 +29,8 @@
 	let autoScroll = $state(true);
 	let wordWrap = $state(true);
 	let fontSize = $state(12);
+	let showTimestamps = $state(typeof localStorage !== 'undefined' ? localStorage.getItem('dockhand-log-timestamps') !== 'false' : true);
+	let showContainerName = $state(typeof localStorage !== 'undefined' ? localStorage.getItem('dockhand-log-container-name') !== 'false' : true);
 
 	// SSE Streaming state
 	let streamingEnabled = $state(true);
@@ -215,9 +217,9 @@
 				try {
 					const data = JSON.parse(event.data);
 					if (data.text) {
-						// Add container name prefix to each line if available
+						// Add container name prefix to each line if available and enabled
 						let text = data.text;
-						if (data.containerName) {
+						if (data.containerName && showContainerName) {
 							const lines = text.split('\n');
 							text = lines.map((line: string, i: number) => {
 								if (line === '' && i === lines.length - 1) return line;
@@ -540,7 +542,10 @@
 	// Highlighted logs with search matches and ANSI color support
 	let highlightedLogs = $derived(() => {
 		let text = logs || '';
-		if ($appSettings.formatLogTimestamps) {
+		if (!showTimestamps) {
+			// Strip ISO 8601 timestamps from start of each line (Docker log format)
+			text = text.replace(/^(\[.*?\] )?\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z /gm, '$1');
+		} else if ($appSettings.formatLogTimestamps) {
 			text = formatLogTimestamps(text);
 		}
 
@@ -729,6 +734,22 @@
 				title="Toggle word wrap"
 			>
 				<WrapText class="w-3 h-3 transition-colors {wordWrap ? (darkMode ? 'text-amber-400' : 'text-amber-700') : darkMode ? 'text-zinc-500 hover:text-zinc-300' : 'text-gray-500 hover:text-gray-700'}" />
+			</button>
+			<!-- Timestamps toggle -->
+			<button
+				onclick={() => { showTimestamps = !showTimestamps; localStorage.setItem('dockhand-log-timestamps', String(showTimestamps)); }}
+				class="p-1 rounded transition-colors {showTimestamps ? (darkMode ? 'bg-amber-500/20 ring-1 ring-amber-500/50' : 'bg-amber-500/30 ring-1 ring-amber-600/50') : ''} {darkMode ? 'hover:bg-zinc-800' : 'hover:bg-gray-300'}"
+				title={showTimestamps ? 'Hide timestamps' : 'Show timestamps'}
+			>
+				<Clock class="w-3 h-3 transition-colors {showTimestamps ? (darkMode ? 'text-amber-400' : 'text-amber-700') : darkMode ? 'text-zinc-500 hover:text-zinc-300' : 'text-gray-500 hover:text-gray-700'}" />
+			</button>
+			<!-- Container name toggle -->
+			<button
+				onclick={() => { showContainerName = !showContainerName; localStorage.setItem('dockhand-log-container-name', String(showContainerName)); }}
+				class="p-1 rounded transition-colors {showContainerName ? (darkMode ? 'bg-amber-500/20 ring-1 ring-amber-500/50' : 'bg-amber-500/30 ring-1 ring-amber-600/50') : ''} {darkMode ? 'hover:bg-zinc-800' : 'hover:bg-gray-300'}"
+				title={showContainerName ? 'Hide container name prefix' : 'Show container name prefix'}
+			>
+				<Tag class="w-3 h-3 transition-colors {showContainerName ? (darkMode ? 'text-amber-400' : 'text-amber-700') : darkMode ? 'text-zinc-500 hover:text-zinc-300' : 'text-gray-500 hover:text-gray-700'}" />
 			</button>
 			<!-- Theme toggle -->
 			<button

@@ -338,7 +338,7 @@
 			</div>
 		</Card.Header>
 		<DashboardLabels labels={stats.labels} />
-		<Card.Content class="overflow-auto" style="max-height: calc(100% - 60px);">
+		<Card.Content class="overflow-hidden" style="max-height: calc(100% - 60px);">
 			{#if showOffline}
 				<DashboardOfflineState error={stats.error} compact={isMini} />
 			{:else}
@@ -439,7 +439,7 @@
 			</div>
 		</Card.Header>
 		<DashboardLabels labels={stats.labels} />
-		<Card.Content class="overflow-auto" style="max-height: calc(100% - 60px);">
+		<Card.Content class="overflow-hidden" style="max-height: calc(100% - 60px);">
 			{#if showOffline}
 				<DashboardOfflineState error={stats.error} compact={isMini} />
 			{:else}
@@ -543,7 +543,7 @@
 			</div>
 		</Card.Header>
 		<DashboardLabels labels={stats.labels} />
-		<Card.Content class="overflow-auto" style="max-height: calc(100% - 60px);">
+		<Card.Content class="overflow-hidden" style="max-height: calc(100% - 60px);">
 			{#if showOffline}
 				<DashboardOfflineState error={stats.error} compact={isMini} />
 			{:else}
@@ -586,7 +586,7 @@
 			/>
 		</Card.Header>
 		<DashboardLabels labels={stats.labels} />
-		<Card.Content class="overflow-auto" style="max-height: calc(100% - 60px);">
+		<Card.Content class="overflow-hidden" style="max-height: calc(100% - 60px);">
 			{#if showOffline}
 				<DashboardOfflineState error={stats.error} compact={isMini} />
 			{:else}
@@ -632,7 +632,7 @@
 			/>
 		</Card.Header>
 		<DashboardLabels labels={stats.labels} />
-		<Card.Content class="overflow-auto" style="max-height: calc(100% - 60px);">
+		<Card.Content class="overflow-hidden" style="max-height: calc(100% - 60px);">
 			{#if showOffline}
 				<DashboardOfflineState error={stats.error} compact={isMini} />
 			{:else}
@@ -684,7 +684,7 @@
 			/>
 		</Card.Header>
 		<DashboardLabels labels={stats.labels} />
-		<Card.Content class="overflow-auto" style="max-height: calc(100% - 60px);">
+		<Card.Content class="overflow-hidden" style="max-height: calc(100% - 60px);">
 			{#if showOffline}
 				<DashboardOfflineState error={stats.error} compact={isMini} />
 			{:else}

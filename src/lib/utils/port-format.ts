@@ -3,6 +3,7 @@ export interface PortMapping {
 	privatePort: number;
 	display: string;
 	isRange?: boolean;
+	exposed?: boolean;
 }
 
 interface PortInfo {
@@ -60,6 +61,41 @@ export function formatPorts(ports: PortInfo[] | undefined | null): PortMapping[]
 	flushRange(individual, rangeStart, rangeEnd, result);
 
 	return result;
+}
+
+/**
+ * Extract exposed-only (internal) ports that have no published host mapping.
+ * These are ports with PrivatePort but no PublicPort in Docker's port list.
+ */
+export function formatExposedPorts(ports: PortInfo[] | undefined | null): PortMapping[] {
+	if (!ports || ports.length === 0) return [];
+
+	// Collect published private ports to exclude them
+	const publishedPrivate = new Set<number>();
+	for (const p of ports) {
+		if (p.PublicPort || p.publicPort) {
+			publishedPrivate.add(p.PrivatePort || p.privatePort || 0);
+		}
+	}
+
+	const seen = new Set<number>();
+	return ports
+		.filter(p => {
+			const priv = p.PrivatePort || p.privatePort;
+			const pub = p.PublicPort || p.publicPort;
+			// Only exposed (no public mapping) and not already shown as published
+			return priv && !pub && !publishedPrivate.has(priv);
+		})
+		.map(p => {
+			const priv = (p.PrivatePort || p.privatePort)!;
+			return { publicPort: 0, privatePort: priv, display: String(priv), exposed: true };
+		})
+		.filter(p => {
+			if (seen.has(p.privatePort)) return false;
+			seen.add(p.privatePort);
+			return true;
+		})
+		.sort((a, b) => a.privatePort - b.privatePort);
 }
 
 function flushRange(items: PortMapping[], start: number, end: number, result: PortMapping[]) {

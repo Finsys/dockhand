@@ -77,7 +77,9 @@ export interface ContainerDetail {
 	networks: Array<{ name: string; ipAddress: string }>;
 	volumeCount: number;
 	restartCount: number;
+	exitCode?: number;
 	created: number;
+	labels: Record<string, string>;
 }
 
 /**
@@ -102,6 +104,7 @@ export interface DeployStackOptions {
 	sourceDir?: string; // Directory to copy all files from (for git stacks)
 	forceRecreate?: boolean;
 	build?: boolean; // Build images before starting (--build)
+	noBuildCache?: boolean; // Disable build cache (--no-cache, requires --build)
 	pullPolicy?: string; // Pull policy: 'always' | 'missing' | 'never'
 	composePath?: string; // Custom compose file path (for adopted/imported stacks)
 	envPath?: string; // Custom env file path (for adopted/imported stacks)
@@ -259,23 +262,14 @@ async function readDirFilesAsMap(dirPath: string): Promise<Record<string, string
 // =============================================================================
 
 /**
- * Mask sensitive values in environment variables for safe logging.
- * Masks values for keys containing common secret patterns and truncates long values.
+ * Redact all env var values for safe logging. Only key names are preserved.
  */
-function maskSecrets(vars: Record<string, string>): Record<string, string> {
-	const masked: Record<string, string> = {};
-	const secretPatterns = /password|secret|token|key|api_key|apikey|auth|credential|private/i;
-	for (const [key, value] of Object.entries(vars)) {
-		if (secretPatterns.test(key)) {
-			masked[key] = '***';
-		} else if (value.length > 50) {
-			// Truncate long values that might be secrets
-			masked[key] = value.substring(0, 10) + '...(truncated)';
-		} else {
-			masked[key] = value;
-		}
+function redactEnvVarsForLog(vars: Record<string, string>): Record<string, string> {
+	const redacted: Record<string, string> = {};
+	for (const key of Object.keys(vars)) {
+		redacted[key] = '***';
 	}
-	return masked;
+	return redacted;
 }
 
 // =============================================================================
@@ -794,6 +788,7 @@ interface ComposeCommandOptions {
 	envId?: number | null;
 	forceRecreate?: boolean;
 	build?: boolean; // Build images before starting (--build)
+	noBuildCache?: boolean; // Disable build cache (--no-cache, requires --build)
 	pullPolicy?: string; // Pull policy: 'always' | 'missing' | 'never'
 	removeVolumes?: boolean;
 	stackFiles?: Record<string, string>; // All files to send to Hawser
@@ -857,6 +852,7 @@ async function executeLocalCompose(
 	useOverrideFile?: boolean,
 	serviceName?: string,
 	build?: boolean,
+	noBuildCache?: boolean,
 	pullPolicy?: string
 ): Promise<StackOperationResult> {
 	const logPrefix = `[Stack:${stackName}]`;
@@ -1050,6 +1046,7 @@ async function executeLocalCompose(
 			args.push('up', '-d', '--remove-orphans');
 			if (forceRecreate) args.push('--force-recreate');
 			if (build) args.push('--build');
+			if (build && noBuildCache) args.push('--no-cache');
 			if (pullPolicy) args.push('--pull', pullPolicy);
 			// If targeting a specific service, only update that service
 			if (serviceName) {
@@ -1094,7 +1091,7 @@ async function executeLocalCompose(
 	console.log(`${logPrefix} Service name:`, serviceName ?? '(all services)');
 	console.log(`${logPrefix} Env vars count:`, envVars ? Object.keys(envVars).length : 0);
 	if (envVars && Object.keys(envVars).length > 0) {
-		console.log(`${logPrefix} Env vars being injected (masked):`, JSON.stringify(maskSecrets(envVars), null, 2));
+		console.log(`${logPrefix} Env vars being injected (masked):`, JSON.stringify(redactEnvVarsForLog(envVars), null, 2));
 	}
 
 	// Login to registries before pulling images
@@ -1226,6 +1223,7 @@ async function executeComposeViaHawser(
 	serviceName?: string,
 	composeFileName?: string,
 	build?: boolean,
+	noBuildCache?: boolean,
 	pullPolicy?: string
 ): Promise<StackOperationResult> {
 	const logPrefix = `[Stack:${stackName}]`;
@@ -1249,7 +1247,7 @@ async function executeComposeViaHawser(
 	console.log(`${logPrefix} Non-secret env vars count:`, envVars ? Object.keys(envVars).length : 0);
 	console.log(`${logPrefix} Secret env vars count:`, secretCount);
 	if (allEnvVars && Object.keys(allEnvVars).length > 0) {
-		console.log(`${logPrefix} All env vars being sent (masked):`, JSON.stringify(maskSecrets(allEnvVars), null, 2));
+		console.log(`${logPrefix} All env vars being sent (masked):`, JSON.stringify(redactEnvVarsForLog(allEnvVars), null, 2));
 	}
 	console.log(`${logPrefix} Compose content length:`, composeContent.length, 'chars');
 	console.log(`${logPrefix} Stack files count:`, stackFiles ? Object.keys(stackFiles).length : 0);
@@ -1300,6 +1298,7 @@ async function executeComposeViaHawser(
 			forceRecreate: forceRecreate || false,
 			removeVolumes: removeVolumes || false,
 			build: build || false,
+			noBuildCache: (build && noBuildCache) || false,
 			pullPolicy: pullPolicy || '',
 			registries, // Registry credentials for docker login
 			serviceName // Target specific service only (with --no-deps)
@@ -1368,7 +1367,7 @@ async function executeComposeCommand(
 	envVars?: Record<string, string>,
 	secretVars?: Record<string, string>
 ): Promise<StackOperationResult> {
-	const { stackName, envId, forceRecreate, build, pullPolicy, removeVolumes, stackFiles, workingDir, composePath, envPath, useOverrideFile, serviceName, composeFileName } = options;
+	const { stackName, envId, forceRecreate, build, noBuildCache, pullPolicy, removeVolumes, stackFiles, workingDir, composePath, envPath, useOverrideFile, serviceName, composeFileName } = options;
 
 	// Get environment configuration
 	const env = envId ? await getEnvironment(envId) : null;
@@ -1392,6 +1391,7 @@ async function executeComposeCommand(
 			useOverrideFile,
 			serviceName,
 			build,
+			noBuildCache,
 			pullPolicy
 		);
 	}
@@ -1456,6 +1456,7 @@ async function executeComposeCommand(
 				serviceName,
 				composeFileName,
 				build,
+				noBuildCache,
 				pullPolicy
 			);
 		}
@@ -1489,6 +1490,7 @@ async function executeComposeCommand(
 				useOverrideFile,
 				serviceName,
 				build,
+				noBuildCache,
 				pullPolicy
 			);
 		}
@@ -1512,6 +1514,7 @@ async function executeComposeCommand(
 				useOverrideFile,
 				serviceName,
 				build,
+				noBuildCache,
 				pullPolicy
 			);
 	}
@@ -1544,6 +1547,12 @@ export async function listComposeStacks(envId?: number | null): Promise<ComposeS
 	const result: ComposeStackInfo[] = Array.from(stacks.entries()).map(([name, containerIds]) => {
 		const stackContainers = containers.filter((c) => containerIds.has(c.id));
 		const runningCount = stackContainers.filter((c) => c.state === 'running').length;
+		// Containers that exited with code 0 are "completed" (e.g., init/migration containers)
+		// and should not count against stack health
+		const completedCount = stackContainers.filter((c) =>
+			c.state === 'exited' && c.exitCode === 0
+		).length;
+		const activeTotal = stackContainers.length - completedCount;
 
 		const containerDetails: ContainerDetail[] = stackContainers
 			.map((c) => {
@@ -1579,7 +1588,9 @@ export async function listComposeStacks(envId?: number | null): Promise<ComposeS
 					networks,
 					volumeCount,
 					restartCount: c.restartCount || 0,
-					created: c.created
+					exitCode: c.exitCode,
+					created: c.created,
+					labels: c.labels || {}
 				};
 			})
 			.sort((a, b) => a.service.localeCompare(b.service));
@@ -1589,11 +1600,13 @@ export async function listComposeStacks(envId?: number | null): Promise<ComposeS
 			containers: Array.from(containerIds),
 			containerDetails,
 			status:
-				runningCount === stackContainers.length
-					? 'running'
-					: runningCount === 0
-						? 'stopped'
-						: 'partial'
+				activeTotal === 0
+					? 'stopped'
+					: runningCount >= activeTotal
+						? 'running'
+						: runningCount === 0
+							? 'stopped'
+							: 'partial'
 		};
 	});
 
@@ -2175,7 +2188,7 @@ export async function removeStack(
  * Uses stack locking to prevent concurrent deployments.
  */
 export async function deployStack(options: DeployStackOptions): Promise<StackOperationResult> {
-	const { name, compose, envId, sourceDir, forceRecreate, build, pullPolicy, composePath, envPath, composeFileName, envFileName } = options;
+	const { name, compose, envId, sourceDir, forceRecreate, build, noBuildCache, pullPolicy, composePath, envPath, composeFileName, envFileName } = options;
 	const logPrefix = `[Stack:${name}]`;
 
 	console.log(`${logPrefix} ========================================`);
@@ -2253,7 +2266,11 @@ export async function deployStack(options: DeployStackOptions): Promise<StackOpe
 			// and would be destroyed, causing data loss (#831).
 			console.log(`${logPrefix} Copying source directory to stack directory...`);
 			mkdirSync(workingDir, { recursive: true });
-			cpSync(sourceDir, workingDir, { recursive: true, force: true });
+			cpSync(sourceDir, workingDir, {
+				recursive: true,
+				force: true,
+				filter: (src) => !src.includes('/.git/') && !src.endsWith('/.git')
+			});
 			console.log(`${logPrefix} Copied ${sourceDir} -> ${workingDir}`);
 		} else {
 			// Internal stack: check if a custom path exists in DB (adopted/imported stacks)
@@ -2318,6 +2335,7 @@ export async function deployStack(options: DeployStackOptions): Promise<StackOpe
 				envId,
 				forceRecreate,
 				build,
+				noBuildCache,
 				pullPolicy,
 				stackFiles,
 				workingDir,

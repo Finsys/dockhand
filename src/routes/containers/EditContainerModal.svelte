@@ -113,6 +113,8 @@
 	}
 	let availableNetworks = $state<DockerNetwork[]>([]);
 	let selectedNetworks = $state<string[]>([]);
+	let networkConfigs = $state<Record<string, { ipv4Address: string; ipv6Address: string; aliases: string }>>({});
+	let macAddress = $state('');
 
 	// User/Group
 	let containerUser = $state('');
@@ -182,6 +184,8 @@
 		envVars: typeof envVars;
 		labels: typeof labels;
 		selectedNetworks: string[];
+		networkConfigs: Record<string, { ipv4Address: string; ipv6Address: string; aliases: string }>;
+		macAddress: string;
 		// Advanced options
 		containerUser: string;
 		privilegedMode: boolean;
@@ -428,6 +432,24 @@
 			const networks = data.NetworkSettings?.Networks || {};
 			selectedNetworks = Object.keys(networks);
 
+			// Parse per-network IP/alias config from NetworkSettings
+			const parsedNetConfigs: Record<string, { ipv4Address: string; ipv6Address: string; aliases: string }> = {};
+			for (const [netName, netData] of Object.entries(networks) as [string, any][]) {
+				const ipam = netData.IPAMConfig || {};
+				const aliases = netData.Aliases || [];
+				if (ipam.IPv4Address || ipam.IPv6Address || aliases.length > 0) {
+					parsedNetConfigs[netName] = {
+						ipv4Address: ipam.IPv4Address || '',
+						ipv6Address: ipam.IPv6Address || '',
+						aliases: aliases.join(', ')
+					};
+				}
+			}
+			networkConfigs = parsedNetConfigs;
+
+			// Parse MAC address
+			macAddress = data.Config?.MacAddress || '';
+
 			// Parse advanced options - User
 			containerUser = data.Config.User || '';
 
@@ -561,6 +583,8 @@
 				envVars: JSON.parse(JSON.stringify(envVars)),
 				labels: JSON.parse(JSON.stringify(labels)),
 				selectedNetworks: [...selectedNetworks],
+				networkConfigs: JSON.parse(JSON.stringify(networkConfigs)),
+				macAddress,
 				// Advanced options
 				containerUser,
 				privilegedMode,
@@ -631,6 +655,8 @@
 		if (JSON.stringify(currentLabels) !== JSON.stringify(originalLabels)) return true;
 
 		if (JSON.stringify([...selectedNetworks].sort()) !== JSON.stringify([...originalConfig.selectedNetworks].sort())) return true;
+		if (JSON.stringify(networkConfigs) !== JSON.stringify(originalConfig.networkConfigs)) return true;
+		if (macAddress !== originalConfig.macAddress) return true;
 
 		// Advanced options - User & Security
 		if (containerUser !== originalConfig.containerUser) return true;
@@ -701,7 +727,9 @@
 			volumeMappings: volumeMappings.filter(v => v.hostPath && v.containerPath),
 			envVars: envVars.filter(e => e.key),
 			labels: labels.filter(l => l.key),
-			selectedNetworks: [...selectedNetworks].sort()
+			selectedNetworks: [...selectedNetworks].sort(),
+			networkConfigs,
+			macAddress
 		});
 	}
 
@@ -716,7 +744,9 @@
 			volumeMappings: originalConfig.volumeMappings.filter(v => v.hostPath && v.containerPath),
 			envVars: originalConfig.envVars.filter(e => e.key),
 			labels: originalConfig.labels.filter(l => l.key),
-			selectedNetworks: [...originalConfig.selectedNetworks].sort()
+			selectedNetworks: [...originalConfig.selectedNetworks].sort(),
+			networkConfigs: originalConfig.networkConfigs,
+			macAddress: originalConfig.macAddress
 		});
 	}
 
@@ -901,18 +931,31 @@
 					deviceRequests = [dr];
 				}
 
+				// Build per-network configs for the API
+				const netConfigs: Record<string, { ipv4Address?: string; ipv6Address?: string; aliases?: string[] }> = {};
+				for (const [netName, cfg] of Object.entries(networkConfigs)) {
+					if (!selectedNetworks.includes(netName)) continue;
+					const entry: { ipv4Address?: string; ipv6Address?: string; aliases?: string[] } = {};
+					if (cfg.ipv4Address) entry.ipv4Address = cfg.ipv4Address;
+					if (cfg.ipv6Address) entry.ipv6Address = cfg.ipv6Address;
+					if (cfg.aliases) entry.aliases = cfg.aliases.split(',').map(a => a.trim()).filter(Boolean);
+					if (Object.keys(entry).length > 0) netConfigs[netName] = entry;
+				}
+
 				const payload = {
 					name: name.trim(),
 					image: image.trim(),
 					ports: Object.keys(ports).length > 0 ? ports : null,
 					volumeBinds: volumeBinds.length > 0 ? volumeBinds : null,
 					env: env.length > 0 ? env : undefined,
-					labels: Object.keys(labelsObj).length > 0 ? labelsObj : undefined,
+					labels: labelsObj,
 					cmd,
 					restartPolicy,
 					restartMaxRetries: restartPolicy === 'on-failure' && restartMaxRetries !== '' ? Number(restartMaxRetries) : undefined,
 					networkMode,
 					networks: selectedNetworks.length > 0 ? selectedNetworks : undefined,
+					networkConfigs: Object.keys(netConfigs).length > 0 ? netConfigs : undefined,
+					macAddress: macAddress.trim() || undefined,
 					startAfterUpdate,
 					repullImage,
 					user: containerUser.trim() || null,
@@ -1091,6 +1134,8 @@
 					bind:labels
 					{availableNetworks}
 					bind:selectedNetworks
+					bind:networkConfigs
+					bind:macAddress
 					bind:containerUser
 					bind:privilegedMode
 					bind:healthcheckEnabled

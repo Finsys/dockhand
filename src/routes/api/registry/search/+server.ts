@@ -1,7 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getRegistry } from '$lib/server/db';
-import { getRegistryAuth } from '$lib/server/docker';
+import { getRegistryAuth, parseRegistryUrl } from '$lib/server/docker';
 
 interface SearchResult {
 	name: string;
@@ -46,28 +46,50 @@ async function searchDockerHub(term: string, limit: number): Promise<SearchResul
 
 async function searchPrivateRegistry(registry: any, term: string, limit: number): Promise<SearchResult[]> {
 	const results: string[] = [];
+	const { orgPath } = parseRegistryUrl(registry.url);
+	const orgPrefix = orgPath ? orgPath.replace(/^\//, '') : '';
 
-	// Strategy 1: If term looks like an image name (contains /), try direct lookup first
-	// This is much faster than iterating through catalog for large registries like ghcr.io
+	// Strategy 1: Direct image lookup — try the exact term and org-prefixed variants
+	// This uses per-repository auth scope which works on all V2 registries (GitLab, Harbor, etc.)
+	const directCandidates: string[] = [];
 	if (term.includes('/')) {
-		const directResult = await tryDirectImageLookup(registry, term);
-		if (directResult) {
-			results.push(term);
+		directCandidates.push(term);
+	}
+	// If registry URL has an org path (e.g., https://registry.example.com/group),
+	// try prepending it to the search term
+	if (orgPrefix && !term.startsWith(orgPrefix + '/')) {
+		directCandidates.push(`${orgPrefix}/${term}`);
+	}
+
+	for (const candidate of directCandidates) {
+		if (results.length >= limit) break;
+		const exists = await tryDirectImageLookup(registry, candidate);
+		if (exists && !results.includes(candidate)) {
+			results.push(candidate);
 		}
 	}
 
-	// Strategy 2: Fall back to catalog search for partial matches or if direct lookup failed
+	// Strategy 2: Fall back to catalog search for partial/fuzzy matches
+	// Some registries (GitLab, Harbor) don't support _catalog for deploy tokens,
+	// so catch errors gracefully and return whatever we have from direct lookup
 	if (results.length < limit) {
-		const catalogResults = await searchCatalog(registry, term, limit - results.length);
-		// Add catalog results, avoiding duplicates
-		for (const name of catalogResults) {
-			if (!results.includes(name)) {
-				results.push(name);
+		try {
+			const catalogResults = await searchCatalog(registry, term, limit - results.length);
+			for (const name of catalogResults) {
+				if (!results.includes(name)) {
+					results.push(name);
+				}
+			}
+		} catch (e: any) {
+			// Catalog not supported but we have direct lookup results — that's fine
+			if (results.length > 0) {
+				console.warn(`[Registry] Catalog search failed (using direct lookup results): ${e.message}`);
+			} else {
+				throw e;
 			}
 		}
 	}
 
-	// Return results in the same format as Docker Hub
 	return results.map((name: string) => ({
 		name,
 		description: '',
@@ -136,8 +158,8 @@ async function searchCatalog(registry: any, term: string, limit: number): Promis
 		});
 
 		if (!response.ok) {
-			if (response.status === 401) {
-				throw new Error('Authentication failed');
+			if (response.status === 401 || response.status === 403) {
+				throw new Error('Authentication failed. This registry may not support catalog listing (common with GitLab and Harbor deploy tokens).');
 			}
 			throw new Error(`Registry returned error: ${response.status}`);
 		}

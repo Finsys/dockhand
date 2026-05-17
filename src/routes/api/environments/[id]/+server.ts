@@ -1,8 +1,11 @@
 import { json } from '@sveltejs/kit';
+import { join } from 'path';
+import { existsSync, rmSync } from 'fs';
 import type { RequestHandler } from './$types';
 import { getEnvironment, updateEnvironment, deleteEnvironment, getEnvironmentPublicIps, setEnvironmentPublicIp, deleteEnvironmentPublicIp, deleteEnvUpdateCheckSettings, deleteImagePruneSettings, getGitStacksForEnvironmentOnly, deleteGitStack } from '$lib/server/db';
 import { clearDockerClientCache } from '$lib/server/docker';
-import { deleteGitStackFiles } from '$lib/server/git';
+import { deleteGitStackFiles, getGitReposDir } from '$lib/server/git';
+import { getStacksDir } from '$lib/server/stacks';
 import { authorize } from '$lib/server/authorize';
 import { auditEnvironment } from '$lib/server/audit';
 import { refreshSubprocessEnvironments } from '$lib/server/subprocess-manager';
@@ -181,6 +184,28 @@ export const DELETE: RequestHandler = async (event) => {
 		// Clean up image prune settings and unregister schedule
 		await deleteImagePruneSettings(id);
 		unregisterSchedule(id, 'image_prune');
+
+		// Clean up stack directory for this environment
+		try {
+			const stacksDir = getStacksDir();
+			const envStackDir = join(stacksDir, env.name);
+			if (existsSync(envStackDir)) {
+				rmSync(envStackDir, { recursive: true, force: true });
+			}
+		} catch (err) {
+			console.error(`Failed to clean up stack directory for environment "${env.name}":`, err);
+		}
+
+		// Clean up git-repos directory for this environment
+		try {
+			const gitReposDir = getGitReposDir();
+			const envGitDir = join(gitReposDir, env.name);
+			if (existsSync(envGitDir)) {
+				rmSync(envGitDir, { recursive: true, force: true });
+			}
+		} catch (err) {
+			console.error(`Failed to clean up git-repos directory for environment "${env.name}":`, err);
+		}
 
 		// Notify event collectors to stop collecting from deleted environment
 		refreshSubprocessEnvironments();

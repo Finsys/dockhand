@@ -1,5 +1,54 @@
 [
   {
+    "version": "1.0.29",
+    "date": "2026-05-17",
+    "changes": [
+      { "type": "feature", "text": "optionally display internal (exposed) container ports alongside published ports (#193)" },
+      { "type": "feature", "text": "show app version in sidebar with build info tooltip (#209)" },
+      { "type": "feature", "text": "central label management — rename or delete labels across all environments (#661)" },
+      { "type": "feature", "text": "find next available host port when creating or editing containers (#116)" },
+      { "type": "feature", "text": "theme-aware scrollbar styling — scrollbars adapt to dark/light mode and color palettes (#462)" },
+      { "type": "fix", "text": "update buttons (single, selected, and all) now respect the \"confirm dangerous actions\" setting (#638, #751)" },
+      { "type": "feature", "text": "custom URL labels - dockhand.url or dockhand.port.{port}.url to add links alongside container ports (#266)" },
+      { "type": "feature", "text": "generate and copy token for Hawser Standard mode with run command hint (#337)" },
+      { "type": "fix", "text": "environment stack directory not cleaned up when environment is deleted (#1023)" },
+      { "type": "feature", "text": "toggle to hide timestamps and container name prefix in log viewer (#124)" },
+      { "type": "fix", "text": "Podman containers health status not showing (#737)" },
+      { "type": "fix", "text": "containers with exit code 0 (init/migration) no longer cause stack \"partial\" status (#1026)" },
+      { "type": "fix", "text": "stats stream 400 on reconnect by skipping overlapping fetches (#1044)" },
+      { "type": "fix", "text": "env var validation false positive for values containing $ followed by text (#1048)" },
+      { "type": "fix", "text": "git-repos directory not cleaned up when environment is deleted (#1049)" },
+      { "type": "fix", "text": "webhook secret auto-generated when left empty despite hint saying otherwise (#1050)" },
+      { "type": "feature", "text": "scan reports — combined or individual Grype/Trivy (#1056)" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.29"
+  },
+  {
+    "version": "1.0.28",
+    "date": "2026-05-09",
+    "changes": [
+      { "type": "feature", "text": "context directory for git stacks — reference files from anywhere in the repo (#864)" },
+      { "type": "feature", "text": "no-cache build option for git stacks (#880)" },
+      { "type": "fix", "text": "env vars lost when switching between raw/form view (#964)" },
+      { "type": "fix", "text": "compose name property not respected during stack scan (#922)" },
+      { "type": "feature", "text": "editable schedule for scanner cache cleanup (#979)" },
+      { "type": "fix", "text": "container labels cannot be deleted (#984)" },
+      { "type": "fix", "text": "env var values leaked in deploy logs — now all values are redacted (#985)" },
+      { "type": "fix", "text": "volume export keeps helper container alive, preventing volume prune/deletion (#983)" },
+      { "type": "fix", "text": "ntfy self-hosted notifications fail when using ?auth= query parameter (#840)" },
+      { "type": "fix", "text": "scrollbar appears in dashboard tiles when content overflows (#969)" },
+      { "type": "fix", "text": "case-sensitive environment sort order — lowercase names sorted after uppercase (#975)" },
+      { "type": "fix", "text": "inaccurate dashboard CPU gauge caused by one-shot stats flag (#932)" },
+      { "type": "feature", "text": "ntfy notifications support ?tags=, ?title=, and ?priority= URL query parameters (#689)" },
+      { "type": "fix", "text": "stack .env file wiped when saving from graph view (#988)" },
+      { "type": "feature", "text": "dismiss update available indicators without updating (#853)" },
+      { "type": "feature", "text": "public IP setting available for hawser-edge environments — enables clickable port links (#350)" },
+      { "type": "fix", "text": "git stack creation silently destroys existing stacks with the same name (#1001)" },
+      { "type": "feature", "text": "static IP/MAC address configuration for containers (#297)" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.28"
+  },
+  {
     "version": "1.0.27",
     "comingSoon": false,
     "date": "2026-04-26",

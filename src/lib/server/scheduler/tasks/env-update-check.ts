@@ -204,7 +204,7 @@ export async function runEnvUpdateCheckJob(
 			.map(u => {
 				const currentShort = u.currentDigest?.substring(0, 12) || 'unknown';
 				const newShort = u.newDigest?.substring(0, 12) || 'unknown';
-				return `- ${u.containerName} (${u.imageName})\n  ${currentShort}... -> ${newShort}...`;
+				return `- ${u.containerName} (${u.imageName}): ${currentShort} → ${newShort}`;
 			})
 			.join('\n');
 

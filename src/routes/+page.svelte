@@ -20,6 +20,7 @@
 	import { IsMobile } from '$lib/hooks/is-mobile.svelte';
 	import type { EnvironmentStats } from './api/dashboard/stats/+server';
 	import { getLabelColor, getLabelBgColor } from '$lib/utils/label-colors';
+	import { labelColorOverrides } from '$lib/stores/label-colors';
 	import { Input } from '$lib/components/ui/input';
 	import MultiSelectFilter from '$lib/components/MultiSelectFilter.svelte';
 	import { appSettings } from '$lib/stores/settings';
@@ -358,12 +359,18 @@
 		}
 	}
 
+	let statsStreamFetching = false;
+
 	async function fetchStatsStreaming(isRefresh = false) {
+		// Skip if previous fetch is still in-flight
+		if (statsStreamFetching) return;
+
 		// Abort any previous streaming request
 		if (abortController) {
 			abortController.abort();
 		}
 		abortController = new AbortController();
+		statsStreamFetching = true;
 
 		// Set up connection timeout
 		const timeoutController = new AbortController();
@@ -622,6 +629,7 @@
 		} finally {
 			initialLoading = false;
 			refreshing = false;
+			statsStreamFetching = false;
 		}
 	}
 
@@ -931,8 +939,9 @@
 		// Chrome 77+ Page Lifecycle API - fires when frozen tab is resumed
 		document.addEventListener('resume', handleVisibilityChange);
 
-		// Load label filter from localStorage
+		// Load label filter and custom label colors
 		loadLabelFilter();
+		labelColorOverrides.load();
 
 		// Load preferences first
 		await dashboardPreferences.load();
@@ -1021,7 +1030,7 @@
 							type="button"
 							class="px-2.5 py-1 text-xs font-medium rounded transition-colors border"
 							style={isSelected
-								? `background-color: ${getLabelBgColor(label)}; border-color: ${getLabelColor(label)}; color: ${getLabelColor(label)};`
+								? `background-color: ${getLabelBgColor(label, $labelColorOverrides)}; border-color: ${getLabelColor(label, $labelColorOverrides)}; color: ${getLabelColor(label, $labelColorOverrides)};`
 								: `background-color: transparent; border-color: hsl(var(--border)); color: hsl(var(--muted-foreground));`}
 							onclick={() => toggleLabel(label)}
 						>

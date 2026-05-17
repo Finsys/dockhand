@@ -112,6 +112,8 @@
 	}
 	let availableNetworks = $state<DockerNetwork[]>([]);
 	let selectedNetworks = $state<string[]>([]);
+	let networkConfigs = $state<Record<string, { ipv4Address: string; ipv6Address: string; aliases: string }>>({});
+	let macAddress = $state('');
 
 	// Auto-update settings
 	let autoUpdateEnabled = $state(false);
@@ -431,6 +433,17 @@
 				deviceRequests = [dr];
 			}
 
+			// Build per-network configs for the API
+			const netConfigs: Record<string, { ipv4Address?: string; ipv6Address?: string; aliases?: string[] }> = {};
+			for (const [netName, cfg] of Object.entries(networkConfigs)) {
+				if (!selectedNetworks.includes(netName)) continue;
+				const entry: { ipv4Address?: string; ipv6Address?: string; aliases?: string[] } = {};
+				if (cfg.ipv4Address) entry.ipv4Address = cfg.ipv4Address;
+				if (cfg.ipv6Address) entry.ipv6Address = cfg.ipv6Address;
+				if (cfg.aliases) entry.aliases = cfg.aliases.split(',').map(a => a.trim()).filter(Boolean);
+				if (Object.keys(entry).length > 0) netConfigs[netName] = entry;
+			}
+
 			const payload = {
 				name: name.trim(),
 				image: image.trim(),
@@ -443,6 +456,8 @@
 				restartMaxRetries: restartPolicy === 'on-failure' && restartMaxRetries !== '' ? Number(restartMaxRetries) : undefined,
 				networkMode,
 				networks: selectedNetworks.length > 0 ? selectedNetworks : undefined,
+				networkConfigs: Object.keys(netConfigs).length > 0 ? netConfigs : undefined,
+				macAddress: macAddress.trim() || undefined,
 				startAfterCreate,
 				user: containerUser.trim() || undefined,
 				privileged: privilegedMode || undefined,
@@ -530,6 +545,8 @@
 		envVars = [{ key: '', value: '' }];
 		labels = [{ key: '', value: '' }];
 		selectedNetworks = [];
+		networkConfigs = {};
+		macAddress = '';
 		autoUpdateEnabled = false;
 		autoUpdateCronExpression = '0 3 * * *';
 		vulnerabilityCriteria = 'never';
@@ -723,6 +740,8 @@
 				bind:labels
 				{availableNetworks}
 				bind:selectedNetworks
+				bind:networkConfigs
+				bind:macAddress
 				bind:containerUser
 				bind:privilegedMode
 				bind:healthcheckEnabled

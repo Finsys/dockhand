@@ -5,6 +5,8 @@
  * - dockhand.update=false  — Skip this container during auto-updates and batch updates
  * - dockhand.hidden=true   — Hide this container from the Dockhand UI
  * - dockhand.notify=false  — Suppress notifications for this container's events
+ * - dockhand.url=<url>     — Custom clickable URL displayed alongside container ports
+ * - dockhand.port.<hostPort>.url=<url> — Override the click URL for a specific published port
  *
  * All label values are case-insensitive and accept: true/yes/1 and false/no/0.
  * The opt-out model means labels override DB settings (label wins).
@@ -15,6 +17,7 @@ export const DOCKHAND_LABELS = {
 	UPDATE: 'dockhand.update',
 	HIDDEN: 'dockhand.hidden',
 	NOTIFY: 'dockhand.notify',
+	URL: 'dockhand.url',
 } as const;
 
 const TRUTHY_VALUES = new Set(['true', 'yes', '1']);
@@ -73,6 +76,15 @@ export function isNotifyDisabledByLabel(labels: Record<string, string> | undefin
 }
 
 /**
+ * Get the custom URL from dockhand.url label.
+ * Returns the URL string if set, or undefined.
+ */
+export function getCustomUrl(labels: Record<string, string> | undefined | null): string | undefined {
+	const value = getLabel(labels, DOCKHAND_LABELS.URL);
+	return value?.trim() || undefined;
+}
+
+/**
  * Extract all Dockhand label states from a container's labels.
  * Useful for including in API responses so the frontend knows about label overrides.
  */
@@ -80,10 +92,12 @@ export function getDockhandLabels(labels: Record<string, string> | undefined | n
 	updateDisabled: boolean;
 	hidden: boolean;
 	notifyDisabled: boolean;
+	customUrl?: string;
 } {
 	return {
 		updateDisabled: isUpdateDisabledByLabel(labels),
 		hidden: isHiddenByLabel(labels),
 		notifyDisabled: isNotifyDisabledByLabel(labels),
+		customUrl: getCustomUrl(labels),
 	};
 }

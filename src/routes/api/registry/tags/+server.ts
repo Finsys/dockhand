@@ -93,8 +93,8 @@ async function fetchRegistryTags(registry: any, imageName: string): Promise<TagI
 	});
 
 	if (!response.ok) {
-		if (response.status === 401) {
-			throw new Error('Authentication failed');
+		if (response.status === 401 || response.status === 403) {
+			throw new Error('Authentication failed. Please check your credentials and permissions.');
 		}
 		if (response.status === 404) {
 			throw new Error('Image not found in registry');

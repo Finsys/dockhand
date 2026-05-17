@@ -3,11 +3,12 @@
 
 import type { AuthenticatedUser } from '$lib/server/auth';
 
-// Build-time constants injected by Vite
-declare const __BUILD_DATE__: string | null;
-declare const __BUILD_COMMIT__: string | null;
-
 declare global {
+	// Build-time constants injected by Vite
+	const __APP_VERSION__: string | null;
+	const __BUILD_DATE__: string | null;
+	const __BUILD_COMMIT__: string | null;
+
 	namespace App {
 		// interface Error {}
 		interface Locals {

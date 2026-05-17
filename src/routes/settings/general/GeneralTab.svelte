@@ -21,6 +21,7 @@
 	let showStoppedContainers = $derived($appSettings.showStoppedContainers);
 	let highlightUpdates = $derived($appSettings.highlightUpdates);
 	let compactPorts = $derived($appSettings.compactPorts);
+	let showExposedPorts = $derived($appSettings.showExposedPorts);
 	let timeFormat = $derived($appSettings.timeFormat);
 	let dateFormat = $derived($appSettings.dateFormat);
 	let downloadFormat = $derived($appSettings.downloadFormat);
@@ -74,6 +75,8 @@ services:
 	let eventCleanupCron = $derived($appSettings.eventCleanupCron);
 	let scheduleCleanupEnabled = $derived($appSettings.scheduleCleanupEnabled);
 	let eventCleanupEnabled = $derived($appSettings.eventCleanupEnabled);
+	let scannerCleanupCron = $derived($appSettings.scannerCleanupCron);
+	let scannerCleanupEnabled = $derived($appSettings.scannerCleanupEnabled);
 	let logBufferSizeKb = $derived($appSettings.logBufferSizeKb);
 	let formatLogTimestamps = $derived($appSettings.formatLogTimestamps);
 	let defaultTimezone = $derived($appSettings.defaultTimezone);
@@ -144,6 +147,17 @@ services:
 		const newState = !eventCleanupEnabled;
 		appSettings.setEventCleanupEnabled(newState);
 		toast.success(newState ? 'Event cleanup enabled' : 'Event cleanup disabled');
+	}
+
+	function handleScannerCleanupCronChange(cron: string) {
+		appSettings.setScannerCleanupCron(cron);
+		toast.success('Scanner cleanup cron updated');
+	}
+
+	function handleScannerCleanupEnabledChange() {
+		const newState = !scannerCleanupEnabled;
+		appSettings.setScannerCleanupEnabled(newState);
+		toast.success(newState ? 'Scanner cleanup enabled' : 'Scanner cleanup disabled');
 	}
 
 	function handleGrypeImageBlur(e: Event) {
@@ -278,6 +292,28 @@ services:
 									/>
 								</div>
 								<p class="text-xs text-muted-foreground">Show first port with +N count instead of all ports</p>
+							</div>
+							<div class="space-y-1">
+								<div class="flex items-center gap-3">
+									<Label>Show exposed ports</Label>
+									<Tooltip.Root>
+										<Tooltip.Trigger>
+											<HelpCircle class="w-3.5 h-3.5 text-muted-foreground" />
+										</Tooltip.Trigger>
+										<Tooltip.Content side="top" class="max-w-xs">
+											<p>Shows internal container ports (from EXPOSE directives) that are not published to the host. These appear in the container list with an amber badge to distinguish them from published port mappings.</p>
+										</Tooltip.Content>
+									</Tooltip.Root>
+									<TogglePill
+										checked={showExposedPorts}
+										onchange={(checked) => {
+											appSettings.setShowExposedPorts(checked);
+											toast.success(checked ? 'Showing exposed ports in container list' : 'Exposed ports hidden from container list');
+										}}
+										disabled={!$canAccess('settings', 'edit')}
+									/>
+								</div>
+								<p class="text-xs text-muted-foreground">Display internal container ports in the container list grid</p>
 							</div>
 							<div class="space-y-1">
 								<div class="flex items-center gap-3">
@@ -757,6 +793,26 @@ services:
 							Automatically removes temporary containers used for browsing volume contents.
 							Runs every 30 minutes and on startup.
 						</p>
+					</div>
+					<div class="space-y-1 pt-2 border-t">
+						<div class="flex items-center gap-3">
+							<Label>Scanner cache cleanup</Label>
+							<TogglePill
+								checked={scannerCleanupEnabled}
+								onchange={handleScannerCleanupEnabledChange}
+								disabled={!$canAccess('settings', 'edit')}
+							/>
+						</div>
+						<p class="text-xs text-muted-foreground">Remove cached vulnerability databases to reclaim disk space</p>
+						<div class="flex items-center gap-2 mt-2">
+							<div class="ml-auto">
+								<CronEditor
+									value={scannerCleanupCron}
+									onchange={handleScannerCleanupCronChange}
+									disabled={!$canAccess('settings', 'edit') || !scannerCleanupEnabled}
+								/>
+							</div>
+						</div>
 					</div>
 				</Card.Content>
 			</Card.Root>

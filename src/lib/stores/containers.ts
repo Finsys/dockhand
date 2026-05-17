@@ -2,6 +2,7 @@ import { writable, get } from 'svelte/store';
 import { browser } from '$app/environment';
 import type { ContainerInfo, ContainerStats } from '$lib/types';
 import { appendEnvParam, clearStaleEnvironment, environments } from '$lib/stores/environment';
+import { appSettings } from '$lib/stores/settings';
 import { toast } from 'svelte-sonner';
 
 export interface AutoUpdateSetting {
@@ -70,9 +71,16 @@ function createContainerStore() {
 		const [min, hr, , , dow] = parts;
 		const hourNum = parseInt(hr);
 		const minNum = parseInt(min);
-		const ampm = hourNum >= 12 ? 'PM' : 'AM';
-		const hour12 = hourNum === 0 ? 12 : hourNum > 12 ? hourNum - 12 : hourNum;
-		const timeStr = `${hour12}:${minNum.toString().padStart(2, '0')} ${ampm}`;
+		const is12Hour = get(appSettings).timeFormat === '12h';
+
+		let timeStr: string;
+		if (is12Hour) {
+			const ampm = hourNum >= 12 ? 'PM' : 'AM';
+			const hour12 = hourNum === 0 ? 12 : hourNum > 12 ? hourNum - 12 : hourNum;
+			timeStr = `${hour12}:${minNum.toString().padStart(2, '0')} ${ampm}`;
+		} else {
+			timeStr = `${hourNum.toString().padStart(2, '0')}:${minNum.toString().padStart(2, '0')}`;
+		}
 
 		if (scheduleType === 'daily' || dow === '*') {
 			return { label: 'daily', tooltip: `Daily at ${timeStr}` };

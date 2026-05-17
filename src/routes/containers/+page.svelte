@@ -12,7 +12,7 @@
 	import * as Select from '$lib/components/ui/select';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
-	import { formatPorts, type PortMapping } from '$lib/utils/port-format';
+	import { formatPorts, formatExposedPorts } from '$lib/utils/port-format';
 	import MultiSelectFilter from '$lib/components/MultiSelectFilter.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import { Badge } from '$lib/components/ui/badge';
@@ -37,6 +37,7 @@
 		ArrowDown,
 		Search,
 		ExternalLink,
+		Globe,
 		LayoutPanelLeft,
 		Rows3,
 		GripVertical,
@@ -264,6 +265,11 @@
 	let confirmPrune = $state(false);
 	let pruneStatus = $state<'idle' | 'pruning' | 'success' | 'error'>('idle');
 
+	// Update confirmation
+	let confirmUpdateAll = $state(false);
+	let confirmUpdateId = $state<string | null>(null);
+	let confirmUpdateSelected = $state(false);
+
 	// Update check state
 	let updateCheckStatus = $state<'idle' | 'checking' | 'found' | 'none' | 'error'>('idle');
 	let updateCheckProgress = $state({ checked: 0, total: 0 });
@@ -473,7 +479,7 @@
 			// Unlock button width
 			if (updateCheckBtnEl) updateCheckBtnEl.style.minWidth = '';
 
-			const containersWithUpdates = data.results.filter((r: any) => r.hasUpdate && !r.systemContainer);
+			const containersWithUpdates = data.results.filter((r: any) => r.hasUpdate && !r.systemContainer && !r.updateDisabled && !r.isLocalImage);
 			const failed = data.results.filter((r: any) => r.error && !r.hasUpdate);
 			failedUpdateChecks = failed.map((r: any) => ({
 				containerName: r.containerName,
@@ -540,6 +546,19 @@
 		}
 		containerStore.setPendingUpdates(selectedWithUpdates, selectedNames);
 		showBatchUpdateModal = true;
+	}
+
+	async function dismissPendingUpdates() {
+		const envId = $currentEnvironment?.id;
+		if (!envId) return;
+		try {
+			const response = await fetch(`/api/containers/pending-updates?env=${envId}`, { method: 'DELETE' });
+			if (response.ok) {
+				containerStore.setPendingUpdates([], new Map());
+			}
+		} catch {
+			toast.error('Failed to clear update indicators');
+		}
 	}
 
 	function updateAllContainers() {
@@ -1433,16 +1452,35 @@
 					{/if}
 				</Button>
 				{#if updatableContainersCount > 0}
-				<Button
-					size="sm"
-					variant="outline"
-					onclick={updateAllContainers}
-					class="border-amber-500/40 text-amber-600 hover:bg-amber-500/10 hover:border-amber-500"
+				<ConfirmPopover
+					open={confirmUpdateAll}
+					action="Update"
+					itemType="all {updatableContainersCount} containers"
+					confirmText="Update all"
+					variant="default"
 					title="Update all containers with available updates"
+					position="left"
+					onConfirm={updateAllContainers}
+					onOpenChange={(open) => confirmUpdateAll = open}
+					unstyled
 				>
-					<CircleArrowUp class="w-3.5 h-3.5" />
-					Update all ({updatableContainersCount})
-				</Button>
+					{#snippet children({ open })}
+						<Button
+							size="sm"
+							variant="outline"
+							class="border-amber-500/40 text-amber-600 hover:bg-amber-500/10 hover:border-amber-500"
+						>
+							<CircleArrowUp class="w-3.5 h-3.5" />
+							Update all ({updatableContainersCount})
+							<button
+								type="button"
+								onclick={(e) => { e.stopPropagation(); dismissPendingUpdates(); }}
+								class="-mr-1 text-[12px] leading-none rounded-full hover:bg-destructive/20 hover:text-destructive transition-colors opacity-40 hover:opacity-100"
+								title="Dismiss all update indicators"
+							>×</button>
+						</Button>
+					{/snippet}
+				</ConfirmPopover>
 				{/if}
 				{#if $canAccess('containers', 'remove')}
 				<ConfirmPopover
@@ -1613,16 +1651,26 @@
 			</ConfirmPopover>
 			{/if}
 			{#if selectedHaveUpdates}
-			<button
-				type="button"
-				class="inline-flex items-center gap-1 px-1.5 py-0 rounded border border-amber-500/40 text-amber-600 hover:border-amber-500 hover:shadow transition-all cursor-pointer {bulkActionInProgress ? 'opacity-50' : ''}"
-				onclick={updateSelectedContainers}
-				disabled={bulkActionInProgress}
+			<ConfirmPopover
+				open={confirmUpdateSelected}
+				action="Update"
+				itemType="{selectedWithUpdatesCount} selected container(s)"
+				confirmText="Update"
+				variant="default"
 				title="Update selected containers to latest image"
+				onConfirm={updateSelectedContainers}
+				onOpenChange={(open) => confirmUpdateSelected = open}
+				unstyled
 			>
-				<CircleArrowUp class="w-3 h-3" />
-				Update {selectedWithUpdatesCount}
-			</button>
+				{#snippet children({ open })}
+					<span
+						class="inline-flex items-center gap-1 px-1.5 py-0 rounded border border-amber-500/40 text-amber-600 hover:border-amber-500 hover:shadow transition-all cursor-pointer {bulkActionInProgress ? 'opacity-50' : ''}"
+					>
+						<CircleArrowUp class="w-3 h-3" />
+						Update {selectedWithUpdatesCount}
+					</span>
+				{/snippet}
+			</ConfirmPopover>
 			{/if}
 			{#if bulkActionInProgress}
 				<CircleArrowUp class="w-3 h-3 animate-spin ml-1" />
@@ -1854,24 +1902,41 @@
 							<code class="text-xs">{primaryIp}</code>
 						{/if}
 					{:else if column.id === 'ports'}
-						{#if ports.length > 0}
+						{@const exposedPorts = $appSettings.showExposedPorts ? formatExposedPorts(container.ports) : []}
+						{@const customUrl = container.labels?.['dockhand.url']?.trim() || null}
+						{#if ports.length > 0 || exposedPorts.length > 0 || customUrl}
 							{@const compactPorts = $appSettings.compactPorts}
 							{@const displayPorts = compactPorts && ports.length > 1 ? [ports[0]] : ports}
 							{@const remainingCount = ports.length - 1}
 							<div class="flex {compactPorts ? 'flex-nowrap' : 'flex-wrap'} gap-1">
+								{#if customUrl}
+									<a
+										href={customUrl}
+										target="_blank"
+										rel="noopener noreferrer"
+										onclick={(e) => e.stopPropagation()}
+										class="inline-flex items-center gap-0.5 text-xs bg-primary/10 hover:bg-primary/20 text-primary px-1 py-0.5 rounded transition-colors shrink-0"
+										title="Open {customUrl} in new tab"
+									>
+										<Globe class="w-2.5 h-2.5" />
+										<span class="max-w-[120px] truncate">{customUrl.replace(/^https?:\/\//, '')}</span>
+										<ExternalLink class="w-2.5 h-2.5 opacity-60" />
+									</a>
+								{/if}
 								{#each displayPorts as port}
-									{@const url = currentEnvDetails ? getPortUrl(port.publicPort) : null}
+									{@const portUrl = container.labels?.[`dockhand.port.${port.publicPort}.url`]?.trim() || null}
+									{@const url = portUrl || (currentEnvDetails ? getPortUrl(port.publicPort) : null)}
 									{#if url}
 										<a
 											href={url}
 											target="_blank"
 											rel="noopener noreferrer"
 											onclick={(e) => e.stopPropagation()}
-											class="inline-flex items-center gap-0.5 text-xs bg-muted hover:bg-blue-500/20 hover:text-blue-500 px-1 py-0.5 rounded transition-colors shrink-0"
+											class="inline-flex items-center gap-0.5 text-xs {portUrl ? 'bg-primary/10 hover:bg-primary/20 text-primary' : 'bg-muted hover:bg-blue-500/20 hover:text-blue-500'} px-1 py-0.5 rounded transition-colors shrink-0"
 											title="Open {url} in new tab"
 										>
 											<code>{port.display}</code>
-											<ExternalLink class="w-2.5 h-2.5 text-muted-foreground" />
+											<ExternalLink class="w-2.5 h-2.5 {portUrl ? 'opacity-60' : 'text-muted-foreground'}" />
 										</a>
 									{:else}
 										<code class="text-xs bg-muted px-1 py-0.5 rounded shrink-0">{port.display}</code>
@@ -1883,6 +1948,9 @@
 										title={ports.map(p => p.display).join(', ')}
 									>+{remainingCount}</span>
 								{/if}
+								{#each exposedPorts as port}
+									<code class="text-xs bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 px-1 py-0.5 rounded shrink-0" title="Exposed (internal) port">{port.display}</code>
+								{/each}
 							</div>
 						{:else}
 							<span class="text-gray-400 dark:text-gray-600 text-xs">-</span>
@@ -1928,14 +1996,19 @@
 					{:else if column.id === 'actions'}
 						<div class="relative flex gap-0.5 justify-end">
 							{#if containersWithUpdatesSet.has(container.id) && !container.systemContainer}
-								<button
-									type="button"
-									onclick={() => updateSingleContainer(container.id, container.name)}
+								<ConfirmPopover
+									open={confirmUpdateId === container.id}
+									action="Update"
+									itemType="container"
+									itemName={container.name}
 									title="Update available - click to update"
-									class="p-0.5 rounded hover:bg-muted transition-colors cursor-pointer"
+									onConfirm={() => updateSingleContainer(container.id, container.name)}
+									onOpenChange={(open) => confirmUpdateId = open ? container.id : null}
 								>
-									<CircleArrowUp class="w-3 h-3 text-amber-500 {$appSettings.highlightUpdates ? 'glow-amber' : ''}" />
-								</button>
+									{#snippet children({ open })}
+										<CircleArrowUp class="w-3 h-3 text-amber-500 {$appSettings.highlightUpdates ? 'glow-amber' : ''}" />
+									{/snippet}
+								</ConfirmPopover>
 							{/if}
 							{#if !container.systemContainer}
 							{#if container.state === 'running' || container.state === 'restarting'}

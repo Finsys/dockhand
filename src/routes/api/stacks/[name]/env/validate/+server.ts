@@ -60,7 +60,8 @@ function extractComposeVars(yaml: string): { required: string[]; optional: strin
 
 		// Also match $VAR_NAME (simple variable substitution)
 		// Use negative lookbehind (?<!\$) to skip escaped $$
-		const simpleRegex = /(?<!\$)\$([A-Za-z_][A-Za-z0-9_]*)(?![{A-Za-z0-9_])/g;
+		// Also require $ to not be preceded by an alphanumeric char (avoids matching inside values like "1$abc")
+		const simpleRegex = /(?<![A-Za-z0-9\$])\$([A-Za-z_][A-Za-z0-9_]*)(?![{A-Za-z0-9_])/g;
 		while ((match = simpleRegex.exec(line)) !== null) {
 			const varName = match[1];
 			if (!required.includes(varName) && !optional.includes(varName)) {

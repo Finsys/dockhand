@@ -315,7 +315,9 @@ export const gitStacks = sqliteTable('git_stacks', {
 	autoUpdateCron: text('auto_update_cron').default('0 3 * * *'),
 	webhookEnabled: integer('webhook_enabled', { mode: 'boolean' }).default(false),
 	webhookSecret: text('webhook_secret'),
+	contextDir: text('context_dir'), // Working directory relative to repo root (null = compose file's directory)
 	buildOnDeploy: integer('build_on_deploy', { mode: 'boolean' }).default(false),
+	noBuildCache: integer('no_build_cache', { mode: 'boolean' }).default(false),
 	repullImages: integer('repull_images', { mode: 'boolean' }).default(false),
 	forceRedeploy: integer('force_redeploy', { mode: 'boolean' }).default(false),
 	lastSync: text('last_sync'),

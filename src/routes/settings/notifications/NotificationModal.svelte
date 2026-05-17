@@ -422,6 +422,8 @@ mmost://hostname/webhook-token
 tgram://bot_token/chat_id
 tgram://bot_token/chat_id:topic_id
 ntfy://my-topic
+ntfy://host/topic?auth=base64token
+ntfys://host/topic?auth=base64token
 pushover://user_key/api_token
 workflows://hostname/workflow/signature
 jsons://hostname/webhook/path"

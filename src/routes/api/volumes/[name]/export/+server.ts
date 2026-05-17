@@ -1,7 +1,7 @@
 import { gzipSync } from 'node:zlib';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getVolumeArchive } from '$lib/server/docker';
+import { getVolumeArchive, releaseVolumeHelperContainer } from '$lib/server/docker';
 import { authorize } from '$lib/server/authorize';
 import { validateDockerIdParam } from '$lib/server/docker-validation';
 
@@ -36,15 +36,33 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 		let body: ReadableStream<Uint8Array> | Uint8Array = response.body!;
 
 		if (format === 'tar.gz') {
-			// Compress with gzip
+			// Compress with gzip — fully consumes the archive stream
 			const tarData = new Uint8Array(await response.arrayBuffer());
 			body = gzipSync(tarData);
 			contentType = 'application/gzip';
 			extension = '.tar.gz';
-		}
 
-		// Note: Helper container is cached and reused for subsequent requests.
-		// Cache TTL handles cleanup automatically.
+			// Data fully read, release helper container immediately
+			releaseVolumeHelperContainer(params.name, envIdNum).catch(() => {});
+		} else {
+			// For streaming tar, wrap the stream to release on completion
+			const reader = body.getReader();
+			body = new ReadableStream({
+				async pull(controller) {
+					const { done, value } = await reader.read();
+					if (done) {
+						controller.close();
+						releaseVolumeHelperContainer(params.name, envIdNum).catch(() => {});
+					} else {
+						controller.enqueue(value);
+					}
+				},
+				cancel() {
+					reader.cancel();
+					releaseVolumeHelperContainer(params.name, envIdNum).catch(() => {});
+				}
+			});
+		}
 
 		const headers: Record<string, string> = {
 			'Content-Type': contentType,
@@ -65,6 +83,9 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 		return new Response(body, { headers });
 	} catch (error: any) {
 		console.error('Failed to export volume:', error);
+
+		// Best-effort cleanup on error
+		releaseVolumeHelperContainer(params.name, envIdNum).catch(() => {});
 
 		if (error.message?.includes('No such file or directory')) {
 			return json({ error: 'Path not found' }, { status: 404 });

@@ -303,7 +303,7 @@ async function getEnvironmentStatsProgressive(
 
 				envStats.containers.total = containers.length;
 				envStats.containers.running = containers.filter((c: any) => c.state === 'running').length;
-				envStats.containers.stopped = containers.filter((c: any) => c.state === 'exited').length;
+				envStats.containers.stopped = containers.filter((c: any) => c.state === 'exited' && c.exitCode !== 0).length;
 				envStats.containers.paused = containers.filter((c: any) => c.state === 'paused').length;
 				envStats.containers.restarting = containers.filter((c: any) => c.state === 'restarting').length;
 				envStats.containers.unhealthy = containers.filter((c: any) => c.health === 'unhealthy').length;

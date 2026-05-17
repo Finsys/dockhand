@@ -73,7 +73,9 @@ export const PUT: RequestHandler = async (event) => {
 			autoUpdateCron: data.autoUpdateCron,
 			webhookEnabled: data.webhookEnabled,
 			webhookSecret: data.webhookSecret,
+			contextDir: data.contextDir,
 			buildOnDeploy: data.buildOnDeploy,
+			noBuildCache: data.noBuildCache,
 			repullImages: data.repullImages,
 			forceRedeploy: data.forceRedeploy
 		});

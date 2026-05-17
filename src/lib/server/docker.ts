@@ -1046,6 +1046,7 @@ export interface ContainerInfo {
 	networks: { [networkName: string]: { ipAddress: string } };
 	health?: string;
 	restartCount: number;
+	exitCode?: number;
 	mounts: Array<{ type: string; source: string; destination: string; mode: string; rw: boolean }>;
 	labels: { [key: string]: string };
 	command: string;
@@ -1081,6 +1082,39 @@ export async function listContainers(all = true, envId?: number | null): Promise
 		})
 	);
 
+	// Fetch health status via inspect for containers with healthchecks where Status
+	// string doesn't include health info (Podman compat API omits it from the list endpoint).
+	// Skip entirely if any container already has health in Status (Docker includes it natively).
+	const healthStatuses = new Map<string, string>();
+	const healthRegex = /\((healthy|unhealthy|health:\s*starting)\)/i;
+	const anyHasHealthInStatus = containers.some(c => healthRegex.test(c.Status || ''));
+	if (!anyHasHealthInStatus) {
+		// Single API call to find which containers have healthchecks configured
+		try {
+			const healthFiltered = await dockerJsonRequest<any[]>(
+				'/containers/json?filters=' + encodeURIComponent(JSON.stringify({ health: ['healthy', 'unhealthy', 'starting'] })),
+				{}, envId
+			);
+			const healthIds = new Set((healthFiltered || []).map((c: any) => c.Id));
+			// Only inspect those specific containers (typically very few)
+			if (healthIds.size > 0) {
+				await Promise.all(
+					[...healthIds].map(async (id) => {
+						try {
+							const inspect = await inspectContainer(id, envId);
+							const h = inspect.State?.Health?.Status;
+							if (h) healthStatuses.set(id, h);
+						} catch {
+							// Ignore errors
+						}
+					})
+				);
+			}
+		} catch {
+			// Ignore - health filter may not be supported
+		}
+	}
+
 	return containers.map((container) => {
 		// Extract network info with IP addresses
 		const networks: { [networkName: string]: { ipAddress: string } } = {};
@@ -1103,13 +1137,24 @@ export async function listContainers(all = true, envId?: number | null): Promise
 
 		// Extract health status from Status string
 		// Docker formats: "(healthy)", "(unhealthy)", "(health: starting)"
+		// Podman compat API omits health from Status string, so fall back to inspect data
 		let health: string | undefined;
 		const healthMatch = container.Status?.match(/\((healthy|unhealthy|health:\s*starting)\)/i);
 		if (healthMatch) {
 			const matched = healthMatch[1].toLowerCase();
 			// Normalize "health: starting" to just "starting"
 			health = matched.includes('starting') ? 'starting' : matched;
+		} else {
+			const inspectHealth = healthStatuses.get(container.Id);
+			if (inspectHealth) {
+				health = inspectHealth === 'health: starting' ? 'starting' : inspectHealth;
+			}
 		}
+
+		// Parse exit code from Status string (e.g., "Exited (0) 5 minutes ago")
+		const exitCode = container.State === 'exited'
+			? parseInt(container.Status?.match(/\((\d+)\)/)?.[1] ?? '-1')
+			: undefined;
 
 		return {
 			id: container.Id,
@@ -1122,6 +1167,7 @@ export async function listContainers(all = true, envId?: number | null): Promise
 			networks,
 			health,
 			restartCount: restartCounts.get(container.Id) || 0,
+			exitCode,
 			mounts,
 			labels: container.Labels || {},
 			command: container.Command || '',
@@ -1248,6 +1294,12 @@ export interface CreateContainerOptions {
 	networkIpv6Address?: string;
 	/** Gateway priority for the primary network (Docker Engine 28+) */
 	networkGwPriority?: number;
+	/** Per-network endpoint configuration (IPv4, IPv6, aliases) */
+	networkConfigs?: Record<string, {
+		ipv4Address?: string;
+		ipv6Address?: string;
+		aliases?: string[];
+	}>;
 	user?: string | null;
 	privileged?: boolean;
 	healthcheck?: HealthcheckConfig | null;
@@ -1431,10 +1483,25 @@ export async function createContainer(options: CreateContainerOptions, envId?: n
 
 		for (const network of options.networks) {
 			const isFirstNetwork = network === options.networks[0];
+			const netCfg = options.networkConfigs?.[network];
 			const endpointConfig: any = {};
 
-			// Apply aliases, static IP, and gateway priority only to the first (primary) network
-			if (isFirstNetwork) {
+			// Per-network config from networkConfigs (takes precedence)
+			if (netCfg) {
+				if (netCfg.aliases && netCfg.aliases.length > 0) {
+					endpointConfig.Aliases = netCfg.aliases;
+				}
+				if (netCfg.ipv4Address || netCfg.ipv6Address) {
+					endpointConfig.IPAMConfig = {};
+					if (netCfg.ipv4Address) {
+						endpointConfig.IPAMConfig.IPv4Address = netCfg.ipv4Address;
+					}
+					if (netCfg.ipv6Address) {
+						endpointConfig.IPAMConfig.IPv6Address = netCfg.ipv6Address;
+					}
+				}
+			} else if (isFirstNetwork) {
+				// Backward compat: apply flat fields to first network if no networkConfigs
 				if (options.networkAliases && options.networkAliases.length > 0) {
 					endpointConfig.Aliases = options.networkAliases;
 				}
@@ -1617,9 +1684,22 @@ export async function createContainer(options: CreateContainerOptions, envId?: n
 		containerConfig.StopTimeout = options.stopTimeout;
 	}
 
-	// MAC address
+	// MAC address — set both top-level (API <1.44) and endpoint config (API 1.44+)
 	if (options.macAddress) {
 		containerConfig.MacAddress = options.macAddress;
+
+		// For Docker API 1.44+, MacAddress must be in EndpointConfig
+		const primaryNetwork = options.networks?.[0] || options.networkMode || 'bridge';
+		if (containerConfig.NetworkingConfig?.EndpointsConfig?.[primaryNetwork]) {
+			containerConfig.NetworkingConfig.EndpointsConfig[primaryNetwork].MacAddress = options.macAddress;
+		} else {
+			containerConfig.NetworkingConfig = containerConfig.NetworkingConfig || { EndpointsConfig: {} };
+			containerConfig.NetworkingConfig.EndpointsConfig = containerConfig.NetworkingConfig.EndpointsConfig || {};
+			containerConfig.NetworkingConfig.EndpointsConfig[primaryNetwork] = {
+				...containerConfig.NetworkingConfig.EndpointsConfig[primaryNetwork],
+				MacAddress: options.macAddress
+			};
+		}
 	}
 
 	// Extra hosts (/etc/hosts entries)
@@ -2325,11 +2405,15 @@ export async function updateContainer(id: string, options: Partial<CreateContain
 	const mergedOptions: CreateContainerOptions = {
 		...existingOptions,
 		...options,
-		// Special handling for labels - merge instead of replace to preserve Docker internal labels
-		labels: {
-			...existingOptions.labels,
-			...options.labels
-		}
+		// Replace labels, but preserve Docker internal labels (com.docker.*)
+		labels: options.labels !== undefined
+			? {
+					...Object.fromEntries(
+						Object.entries(existingOptions.labels || {}).filter(([k]) => k.startsWith('com.docker.'))
+					),
+					...options.labels
+				}
+			: existingOptions.labels
 	};
 
 	// 1. Stop old container

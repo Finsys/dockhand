@@ -87,8 +87,12 @@
 	let forceUpdating = $state<Set<string>>(new Set()); // Track containers being force-updated
 	let filterMode = $state<'updated' | 'failed'>('updated');
 
+	let showFilterButtons = $derived(
+		summary && (summary.failed > 0 || summary.blocked > 0) && summary.success > 0
+	);
+
 	let filteredProgress = $derived(
-		!summary
+		!summary || !showFilterButtons
 			? progress
 			: filterMode === 'failed'
 				? progress.filter(p => p.step === 'failed' || p.step === 'blocked')
@@ -475,7 +479,7 @@ const severityOrder: Record<string, number> = { critical: 0, high: 1, medium: 2,
 
 			<!-- Filter toggle + Container list with status - scrollable area -->
 			{#if progress.length > 0}
-				{#if summary && (summary.failed > 0 || summary.blocked > 0) && summary.success > 0}
+				{#if showFilterButtons}
 					<div class="flex items-center gap-1 shrink-0">
 						<Button
 							variant={filterMode === 'updated' ? 'default' : 'outline'}

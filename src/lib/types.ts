@@ -36,6 +36,7 @@ export interface ContainerInfo {
 	 * - null/undefined: Regular container
 	 */
 	systemContainer?: SystemContainerType | null;
+	exitCode?: number;
 }
 
 export interface ImageInfo {
@@ -128,6 +129,7 @@ export interface StackContainer {
 	volumeCount: number;
 	restartCount: number;
 	created: number;
+	labels: Record<string, string>;
 }
 
 export interface ComposeStackInfo {

@@ -1,7 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
-import { getPendingContainerUpdates, removePendingContainerUpdate } from '$lib/server/db';
+import { getPendingContainerUpdates, removePendingContainerUpdate, clearPendingContainerUpdates } from '$lib/server/db';
 
 /**
  * Get pending container updates for an environment.
@@ -48,8 +48,8 @@ export const DELETE: RequestHandler = async ({ url, cookies }) => {
 	const containerId = url.searchParams.get('containerId');
 	const envIdNum = envId ? parseInt(envId) : undefined;
 
-	if (!envIdNum || !containerId) {
-		return json({ error: 'Environment ID and container ID required' }, { status: 400 });
+	if (!envIdNum) {
+		return json({ error: 'Environment ID required' }, { status: 400 });
 	}
 
 	// Need manage permission to delete
@@ -58,7 +58,11 @@ export const DELETE: RequestHandler = async ({ url, cookies }) => {
 	}
 
 	try {
-		await removePendingContainerUpdate(envIdNum, containerId);
+		if (containerId) {
+			await removePendingContainerUpdate(envIdNum, containerId);
+		} else {
+			await clearPendingContainerUpdates(envIdNum);
+		}
 		return json({ success: true });
 	} catch (error: any) {
 		console.error('Error removing pending update:', error);

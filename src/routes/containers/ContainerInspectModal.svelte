@@ -4,7 +4,7 @@
 	import * as Tabs from '$lib/components/ui/tabs';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
-	import { Loader2, Box, Info, Layers, Cpu, MemoryStick, HardDrive, Network, Shield, Settings2, Code, Copy, Check, XCircle, Activity, Wifi, Pencil, RefreshCw, X, FolderOpen, Moon, Tags, ExternalLink, Gpu } from 'lucide-svelte';
+	import { Loader2, Box, Info, Layers, Cpu, MemoryStick, HardDrive, Network, Shield, Settings2, Code, Copy, Check, XCircle, Activity, Wifi, Pencil, RefreshCw, X, FolderOpen, Moon, Tags, ExternalLink, Gpu, Globe } from 'lucide-svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import { Input } from '$lib/components/ui/input';
@@ -875,13 +875,30 @@
 
 						<!-- Ports -->
 						{#if containerData.NetworkSettings?.Ports && Object.keys(containerData.NetworkSettings.Ports).length > 0}
+							{@const inspectCustomUrl = containerData.Config?.Labels?.['dockhand.url']?.trim() || null}
 							<div class="space-y-2">
 								<h3 class="text-sm font-semibold">Port mappings</h3>
 								<div class="flex flex-wrap gap-2">
+									{#if inspectCustomUrl}
+										<div class="flex items-center gap-2 text-xs p-2 bg-primary/10 rounded">
+											<a
+												href={inspectCustomUrl}
+												target="_blank"
+												rel="noopener noreferrer"
+												class="inline-flex items-center gap-1 text-primary hover:underline"
+												title="Open {inspectCustomUrl}"
+											>
+												<Globe class="w-3 h-3" />
+												<span>{inspectCustomUrl.replace(/^https?:\/\//, '')}</span>
+												<ExternalLink class="w-3 h-3 opacity-60" />
+											</a>
+										</div>
+									{/if}
 									{#each Object.entries(containerData.NetworkSettings.Ports) as [containerPort, hostBindings]}
 										{#if hostBindings && hostBindings.length > 0}
 											{#each hostBindings as binding}
-												{@const url = getPortUrl(parseInt(binding.HostPort))}
+												{@const portUrlOverride = containerData.Config?.Labels?.[`dockhand.port.${binding.HostPort}.url`]?.trim() || null}
+												{@const url = portUrlOverride || getPortUrl(parseInt(binding.HostPort))}
 												<div class="flex items-center gap-2 text-xs p-2 bg-muted rounded">
 													{#if url}
 														<a
@@ -902,9 +919,9 @@
 												</div>
 											{/each}
 										{:else}
-											<div class="flex items-center gap-2 text-xs p-2 bg-muted rounded">
-												<code class="text-muted-foreground">exposed</code>
-												<code>{containerPort}</code>
+											<div class="flex items-center gap-2 text-xs p-2 bg-amber-500/10 border border-amber-500/20 rounded">
+												<code class="text-amber-600 dark:text-amber-400">exposed</code>
+												<code class="text-amber-600 dark:text-amber-400">{containerPort}</code>
 											</div>
 										{/if}
 									{/each}

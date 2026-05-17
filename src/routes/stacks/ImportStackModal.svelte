@@ -48,6 +48,7 @@
 	let previewFile = $state<FileEntry | null>(null);
 	let previewContent = $state<string | null>(null);
 	let previewServiceCount = $state<number>(0);
+	let previewComposeName = $state<string | null>(null);
 	let loadingPreview = $state(false);
 
 	// Use current environment from store
@@ -72,6 +73,7 @@
 			previewFile = null;
 			previewContent = null;
 			previewServiceCount = 0;
+			previewComposeName = null;
 		}
 	});
 
@@ -81,15 +83,19 @@
 		loadingPreview = true;
 		previewContent = null;
 		previewServiceCount = 0;
+		previewComposeName = null;
 
 		try {
 			const res = await fetch(`/api/system/files/content?path=${encodeURIComponent(entry.path)}`);
 			if (res.ok) {
 				const data = await res.json();
 				previewContent = data.content || '';
-				// Count services in the compose file
+				// Parse compose metadata (name + service count)
 				try {
 					const doc = yaml.load(previewContent) as Record<string, unknown> | null;
+					if (typeof doc?.name === 'string' && doc.name.trim()) {
+						previewComposeName = doc.name.trim();
+					}
 					if (doc?.services && typeof doc.services === 'object') {
 						previewServiceCount = Object.keys(doc.services).length;
 					}
@@ -191,7 +197,8 @@
 
 		try {
 			const parentDir = entry.path.replace(/\/[^/]+$/, '');
-			const rawName = parentDir.split('/').pop() || 'adopted-stack';
+			// Use compose `name:` property if available, otherwise fall back to directory name
+			const rawName = previewComposeName || parentDir.split('/').pop() || 'adopted-stack';
 			const stackName = rawName.toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'adopted-stack';
 			const envFilePath = `${parentDir}/.env`;
 
@@ -462,7 +469,7 @@
 				<div class="px-5 py-3 border-b bg-muted/30 flex items-center gap-4 shrink-0">
 					<div class="flex items-center gap-2">
 						<span class="text-sm text-muted-foreground">Stack:</span>
-						<span class="font-medium">{previewFile.path.replace(/\/[^/]+$/, '').split('/').pop() || 'unknown'}</span>
+						<span class="font-medium">{previewComposeName || previewFile.path.replace(/\/[^/]+$/, '').split('/').pop() || 'unknown'}</span>
 						{#if previewServiceCount > 0}
 							<Badge variant="outline" class="text-xs">
 								{previewServiceCount} service{previewServiceCount !== 1 ? 's' : ''}

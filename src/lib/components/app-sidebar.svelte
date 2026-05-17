@@ -27,6 +27,10 @@
 	import { licenseStore } from '$lib/stores/license';
 	import { authStore, hasAnyAccess } from '$lib/stores/auth';
 	import * as Avatar from '$lib/components/ui/avatar';
+	import * as Tooltip from '$lib/components/ui/tooltip';
+
+	const appVersion = __APP_VERSION__ || 'unknown';
+	const buildCommit = __BUILD_COMMIT__ ?? null;
 
 	import type { Permissions } from '$lib/stores/auth';
 
@@ -154,6 +158,25 @@
 			</Sidebar.Menu>
 		</Sidebar.Group>
 	</Sidebar.Content>
+
+	<!-- Version (expanded sidebar only) -->
+	<div class="group-data-[state=collapsed]:hidden px-3 py-2 mt-auto text-center">
+		<Tooltip.Root>
+			<Tooltip.Trigger>
+				<span class="text-[10px] text-muted-foreground/60 hover:text-muted-foreground transition-colors cursor-default">
+					{appVersion}
+				</span>
+			</Tooltip.Trigger>
+			<Tooltip.Content side="top" align="start" sideOffset={8} class="text-xs">
+				<div class="space-y-0.5">
+					<div class="flex items-center gap-1.5"><svg class="w-4 h-4 shrink-0" viewBox="0 0 24 18" fill="currentColor"><path d="M23.76 8.68c-.26-.18-.86-.58-1.53-.58-.24 0-.48.04-.72.12-.12-.84-.68-1.56-1.34-2.14l-.28-.22-.24.26c-.28.34-.48.72-.56 1.14-.1.42-.06.82.1 1.2-.42.22-.88.36-1.32.42-.24.04-.48.06-.72.06H.78a.77.77 0 0 0-.78.78c-.02 1.46.22 2.9.72 4.24.56 1.44 1.4 2.5 2.5 3.16 1.26.74 3.32 1.16 5.64 1.16.98 0 2-.1 2.98-.3a11.5 11.5 0 0 0 3.3-1.3 9.67 9.67 0 0 0 2.54-2.34c1.16-1.42 1.86-3.02 2.34-4.38h.2c1.22 0 1.98-.48 2.4-.9.28-.26.5-.58.64-.94l.08-.24-.28-.2zM2.74 8.84H4.7c.1 0 .18-.08.18-.18V7.02c0-.1-.08-.18-.18-.18H2.74c-.1 0-.18.08-.18.18v1.64c0 .1.08.18.18.18zm2.72 0h1.96c.1 0 .18-.08.18-.18V7.02c0-.1-.08-.18-.18-.18H5.46c-.1 0-.18.08-.18.18v1.64c0 .1.08.18.18.18zm2.76 0h1.96c.1 0 .18-.08.18-.18V7.02c0-.1-.08-.18-.18-.18H8.22c-.1 0-.18.08-.18.18v1.64c0 .1.08.18.18.18zm2.76 0h1.96c.1 0 .18-.08.18-.18V7.02c0-.1-.08-.18-.18-.18h-1.96c-.1 0-.18.08-.18.18v1.64c0 .1.08.18.18.18zM5.46 6.2h1.96c.1 0 .18-.08.18-.18V4.38c0-.1-.08-.18-.18-.18H5.46c-.1 0-.18.08-.18.18v1.64c0 .1.08.18.18.18zm2.76 0h1.96c.1 0 .18-.08.18-.18V4.38c0-.1-.08-.18-.18-.18H8.22c-.1 0-.18.08-.18.18v1.64c0 .1.08.18.18.18zm2.76 0h1.96c.1 0 .18-.08.18-.18V4.38c0-.1-.08-.18-.18-.18h-1.96c-.1 0-.18.08-.18.18v1.64c0 .1.08.18.18.18zm0-2.64h1.96c.1 0 .18-.08.18-.18V1.74c0-.1-.08-.18-.18-.18h-1.96c-.1 0-.18.08-.18.18v1.64c0 .1.08.18.18.18zm2.76 5.28h1.96c.1 0 .18-.08.18-.18V7.02c0-.1-.08-.18-.18-.18h-1.96c-.1 0-.18.08-.18.18v1.64c0 .1.08.18.18.18z"/></svg><span class="font-mono">fnsys/dockhand:{appVersion}</span></div>
+					{#if buildCommit}
+						<div>Commit: <span class="font-mono">{buildCommit.slice(0, 7)}</span></div>
+					{/if}
+				</div>
+			</Tooltip.Content>
+		</Tooltip.Root>
+	</div>
 
 	<!-- User info footer (only when auth is enabled) -->
 	{#if $authStore.authEnabled && $authStore.authenticated && $authStore.user}

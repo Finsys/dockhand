@@ -51,9 +51,20 @@ function hashString(str: string): number {
 }
 
 /**
+ * Convert a hex color to rgba with alpha for backgrounds
+ */
+export function hexToRgba(hex: string, alpha: number = 0.15): string {
+	const r = parseInt(hex.slice(1, 3), 16);
+	const g = parseInt(hex.slice(3, 5), 16);
+	const b = parseInt(hex.slice(5, 7), 16);
+	return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+/**
  * Get the primary color for a label (for text/borders)
  */
-export function getLabelColor(label: string): string {
+export function getLabelColor(label: string, customColors?: Record<string, string>): string {
+	if (customColors?.[label]) return customColors[label];
 	const index = hashString(label) % LABEL_COLORS.length;
 	return LABEL_COLORS[index];
 }
@@ -61,7 +72,8 @@ export function getLabelColor(label: string): string {
 /**
  * Get the background color for a label (lighter, with transparency)
  */
-export function getLabelBgColor(label: string): string {
+export function getLabelBgColor(label: string, customColors?: Record<string, string>): string {
+	if (customColors?.[label]) return hexToRgba(customColors[label]);
 	const index = hashString(label) % LABEL_BG_COLORS.length;
 	return LABEL_BG_COLORS[index];
 }
@@ -69,13 +81,34 @@ export function getLabelBgColor(label: string): string {
 /**
  * Get both colors for a label as an object
  */
-export function getLabelColors(label: string): { color: string; bgColor: string } {
+export function getLabelColors(label: string, customColors?: Record<string, string>): { color: string; bgColor: string } {
+	if (customColors?.[label]) {
+		return { color: customColors[label], bgColor: hexToRgba(customColors[label]) };
+	}
 	const index = hashString(label) % LABEL_COLORS.length;
 	return {
 		color: LABEL_COLORS[index],
 		bgColor: LABEL_BG_COLORS[index]
 	};
 }
+
+/**
+ * The available color palette for the color picker (6 columns x 6 rows)
+ */
+export const COLOR_PALETTE = [
+	// Row 1: 400 (lighter)
+	'#f87171', '#fb923c', '#facc15', '#4ade80', '#2dd4bf', '#60a5fa',
+	// Row 2: 500 (standard)
+	'#ef4444', '#f97316', '#eab308', '#22c55e', '#14b8a6', '#3b82f6',
+	// Row 3: 600 (darker)
+	'#dc2626', '#ea580c', '#ca8a04', '#16a34a', '#0d9488', '#2563eb',
+	// Row 4: violet/pink/cyan/lime/indigo/fuchsia 400
+	'#a78bfa', '#f472b6', '#22d3ee', '#a3e635', '#818cf8', '#e879f9',
+	// Row 5: violet/pink/cyan/lime/indigo/fuchsia 500
+	'#8b5cf6', '#ec4899', '#06b6d4', '#84cc16', '#6366f1', '#d946ef',
+	// Row 6: neutral tones
+	'#78716c', '#a1a1aa', '#94a3b8', '#737373', '#57534e', '#44403c'
+];
 
 /**
  * Maximum number of labels allowed per environment

@@ -14,7 +14,7 @@
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import * as Popover from '$lib/components/ui/popover';
 	import MultiSelectFilter from '$lib/components/MultiSelectFilter.svelte';
-	import { Play, Square, Trash2, Plus, ArrowBigDown, Search, Pencil, ExternalLink, GitBranch, RefreshCw, Loader2, FileCode, FileText, FileOutput, Box, RotateCcw, ScrollText, Terminal, Eye, Network, HardDrive, Heart, HeartPulse, HeartOff, ChevronsUpDown, ChevronsDownUp, Rocket, AlertTriangle, X, Layers, Pause, CircleDashed, Skull, FolderOpen, Variable, Clock, RotateCw, Import, Ship, Cable, LayoutPanelLeft, Rows3, GripVertical } from 'lucide-svelte';
+	import { Play, Square, Trash2, Plus, ArrowBigDown, Search, Pencil, ExternalLink, GitBranch, RefreshCw, Loader2, FileCode, FileText, FileOutput, Box, RotateCcw, ScrollText, Terminal, Eye, Network, HardDrive, Heart, HeartPulse, HeartOff, ChevronsUpDown, ChevronsDownUp, Rocket, AlertTriangle, X, Layers, Pause, CircleDashed, Skull, FolderOpen, Variable, Clock, RotateCw, Import, Ship, Cable, LayoutPanelLeft, Rows3, GripVertical, Globe } from 'lucide-svelte';
 	import { formatPorts } from '$lib/utils/port-format';
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
 	import BatchOperationModal from '$lib/components/BatchOperationModal.svelte';
@@ -137,10 +137,15 @@
 	// Fetch container stats
 	let statsAbortController: AbortController | null = null;
 
+	let statsFetching = false;
+
 	async function fetchStats() {
-		// Abort any previous in-flight stream
+		// Skip if previous fetch is still in-flight
+		if (statsFetching) return;
+
 		statsAbortController?.abort();
 		statsAbortController = new AbortController();
+		statsFetching = true;
 
 		try {
 			const response = await fetch(
@@ -203,6 +208,8 @@
 			if (error?.name !== 'AbortError') {
 				console.error('Failed to fetch container stats:', error);
 			}
+		} finally {
+			statsFetching = false;
 		}
 	}
 
@@ -2054,22 +2061,38 @@
 										{/key}
 									{/if}
 									<div class="flex flex-wrap gap-1.5 mb-2 text-2xs">
+										<!-- Custom URL from dockhand.url label -->
+										{#if container.labels?.['dockhand.url']?.trim()}
+											<a
+												href={container.labels['dockhand.url'].trim()}
+												target="_blank"
+												rel="noopener noreferrer"
+												onclick={(e) => e.stopPropagation()}
+												class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+												title="Open {container.labels['dockhand.url'].trim()} in new tab"
+											>
+												<Globe class="w-2.5 h-2.5" />
+												<span class="max-w-[120px] truncate">{container.labels['dockhand.url'].trim().replace(/^https?:\/\//, '')}</span>
+												<ExternalLink class="w-2.5 h-2.5 opacity-60" />
+											</a>
+										{/if}
 										<!-- Clickable ports with range collapsing -->
 										{#if container.ports.length > 0}
 											{@const mappedPorts = formatPorts(container.ports)}
 											{#each mappedPorts as port}
-												{@const url = getPortUrl(port.publicPort)}
+												{@const portUrl = container.labels?.[`dockhand.port.${port.publicPort}.url`]?.trim() || null}
+												{@const url = portUrl || getPortUrl(port.publicPort)}
 												{#if url}
 													<a
 														href={url}
 														target="_blank"
 														rel="noopener noreferrer"
 														onclick={(e) => e.stopPropagation()}
-														class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 hover:bg-blue-200 dark:hover:bg-blue-800 transition-colors"
+														class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded {portUrl ? 'bg-primary/10 text-primary hover:bg-primary/20' : 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 hover:bg-blue-200 dark:hover:bg-blue-800'} transition-colors"
 														title="Open {url} in new tab"
 													>
 														<code>{port.display}</code>
-														<ExternalLink class="w-2.5 h-2.5" />
+														<ExternalLink class="w-2.5 h-2.5 {portUrl ? 'opacity-60' : ''}" />
 													</a>
 												{:else}
 													<span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">

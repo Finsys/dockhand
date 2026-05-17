@@ -38,6 +38,7 @@
 		imageName: string;
 		envId?: number | null;
 		autoStart?: boolean;
+		activeScanner?: 'grype' | 'trivy';
 		onComplete?: (results: ScanResult[]) => void;
 		onError?: (error: string) => void;
 		onStatusChange?: (status: ScanStatus) => void;
@@ -47,6 +48,7 @@
 		imageName,
 		envId = null,
 		autoStart = false,
+		activeScanner = $bindable<'grype' | 'trivy'>('grype'),
 		onComplete,
 		onError,
 		onStatusChange
@@ -362,7 +364,7 @@
 			{:else}
 				<!-- Scan Results -->
 				<div class="flex-1 min-h-0 overflow-auto">
-					<ScanResultsView {results} />
+					<ScanResultsView {results} bind:activeScanner />
 				</div>
 			{/if}
 		</div>

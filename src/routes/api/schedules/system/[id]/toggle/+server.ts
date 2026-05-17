@@ -2,13 +2,17 @@ import { json, type RequestHandler } from '@sveltejs/kit';
 import {
 	setScheduleCleanupEnabled,
 	setEventCleanupEnabled,
+	setScannerCleanupEnabled,
 	getScheduleCleanupEnabled,
-	getEventCleanupEnabled
+	getEventCleanupEnabled,
+	getScannerCleanupEnabled
 } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
+import { refreshSystemJobs } from '$lib/server/scheduler';
 
 const SYSTEM_SCHEDULE_CLEANUP_ID = 1;
 const SYSTEM_EVENT_CLEANUP_ID = 2;
+const SYSTEM_SCANNER_CLEANUP_ID = 4;
 
 export const POST: RequestHandler = async ({ params, cookies }) => {
 	const auth = await authorize(cookies);
@@ -31,6 +35,11 @@ export const POST: RequestHandler = async ({ params, cookies }) => {
 		} else if (systemId === SYSTEM_EVENT_CLEANUP_ID) {
 			const currentEnabled = await getEventCleanupEnabled();
 			await setEventCleanupEnabled(!currentEnabled);
+			return json({ success: true, enabled: !currentEnabled });
+		} else if (systemId === SYSTEM_SCANNER_CLEANUP_ID) {
+			const currentEnabled = await getScannerCleanupEnabled();
+			await setScannerCleanupEnabled(!currentEnabled);
+			await refreshSystemJobs();
 			return json({ success: true, enabled: !currentEnabled });
 		} else {
 			return json({ error: 'Unknown system schedule' }, { status: 400 });

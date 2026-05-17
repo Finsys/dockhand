@@ -7,12 +7,12 @@ import {
 	getGitRepository,
 	createGitRepository,
 	upsertStackSource,
-	setStackEnvVars
+	setStackEnvVars,
+	getStackSource
 } from '$lib/server/db';
 import { deployGitStack } from '$lib/server/git';
 import { authorize } from '$lib/server/authorize';
 import { registerSchedule } from '$lib/server/scheduler';
-import { secureRandomBytes } from '$lib/server/crypto-fallback';
 import { auditGitStack } from '$lib/server/audit';
 import { createJobResponse } from '$lib/server/sse';
 
@@ -61,6 +61,12 @@ export const POST: RequestHandler = async (event) => {
 			return json({ error: 'Stack name must start with a letter or number, and contain only letters, numbers, hyphens, and underscores' }, { status: 400 });
 		}
 
+		// Check for name conflicts with existing stacks (regular/external/git)
+		const existing = await getStackSource(trimmedStackName, data.environmentId || null);
+		if (existing) {
+			return json({ error: 'A stack with this name already exists on this environment' }, { status: 409 });
+		}
+
 		// Either repositoryId or new repo details (url, branch) must be provided
 		let repositoryId = data.repositoryId;
 
@@ -103,12 +109,6 @@ export const POST: RequestHandler = async (event) => {
 			}
 		}
 
-		// Generate webhook secret if webhook is enabled
-		let webhookSecret = data.webhookSecret;
-		if (data.webhookEnabled && !webhookSecret) {
-			webhookSecret = secureRandomBytes(32).toString('hex');
-		}
-
 		const gitStack = await createGitStack({
 			stackName: trimmedStackName,
 			environmentId: data.environmentId || null,
@@ -119,8 +119,10 @@ export const POST: RequestHandler = async (event) => {
 			autoUpdateSchedule: data.autoUpdateSchedule || 'daily',
 			autoUpdateCron: data.autoUpdateCron || '0 3 * * *',
 			webhookEnabled: data.webhookEnabled || false,
-			webhookSecret: webhookSecret,
+			webhookSecret: data.webhookSecret || null,
+			contextDir: data.contextDir || null,
 			buildOnDeploy: data.buildOnDeploy ?? false,
+			noBuildCache: data.noBuildCache ?? false,
 			repullImages: data.repullImages ?? false,
 			forceRedeploy: data.forceRedeploy ?? false
 		});

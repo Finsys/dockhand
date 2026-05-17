@@ -1,3 +1,3 @@
 module github.com/Finsys/dockhand/collector
 
-go 1.25.9
+go 1.25.10

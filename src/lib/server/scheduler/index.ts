@@ -17,10 +17,12 @@ import {
 	getGitStack,
 	getScheduleCleanupCron,
 	getEventCleanupCron,
+	getScannerCleanupCron,
 	getScheduleRetentionDays,
 	getEventRetentionDays,
 	getScheduleCleanupEnabled,
 	getEventCleanupEnabled,
+	getScannerCleanupEnabled,
 	getEnvironments,
 	getEnvUpdateCheckSettings,
 	getAllEnvUpdateCheckSettings,
@@ -65,6 +67,31 @@ let scannerCacheCleanupJob: Cron | null = null;
 let isRunning = false;
 
 /**
+ * Scanner cache cleanup function that cleans local and all remote environments.
+ * Shared between cron job, timezone refresh, and manual trigger.
+ */
+async function scannerCleanupAllEnvs(): Promise<{ volumes: string[]; dirs: string[] }> {
+	const { cleanupScannerCache } = await import('../scanner');
+	const envs = await getEnvironments();
+
+	// Clean local cache (volumes + bind mount dirs)
+	const localResult = await cleanupScannerCache();
+
+	// Clean remote environment volumes
+	for (const env of envs) {
+		try {
+			const envResult = await cleanupScannerCache(env.id);
+			localResult.volumes.push(...envResult.volumes);
+		} catch (error) {
+			const msg = error instanceof Error ? error.message : String(error);
+			console.log(`[Scanner] Skipping cache cleanup for env "${env.name}" (id=${env.id}): ${msg}`);
+		}
+	}
+
+	return localResult;
+}
+
+/**
  * Clean up stale 'syncing' states from git stacks.
  * Called on startup to recover from crashes during sync operations.
  */
@@ -107,6 +134,7 @@ export async function startScheduler(): Promise<void> {
 	// Get cron expressions and default timezone from database
 	const scheduleCleanupCron = await getScheduleCleanupCron();
 	const eventCleanupCron = await getEventCleanupCron();
+	const scannerCleanupCron = await getScannerCleanupCron();
 	const defaultTimezone = await getDefaultTimezone();
 
 	// Start system cleanup jobs (static schedules with default timezone)
@@ -134,35 +162,18 @@ export async function startScheduler(): Promise<void> {
 		await runVolumeHelperCleanupJob('cron', volumeCleanupFns);
 	});
 
-	// Scanner cache cleanup runs weekly (Sunday 3am) to prevent DB volume bloat
-	const scannerCleanupFn = async () => {
-		const { cleanupScannerCache } = await import('../scanner');
-		const envs = await getEnvironments();
-
-		// Clean local cache (volumes + bind mount dirs)
-		const localResult = await cleanupScannerCache();
-
-		// Clean remote environment volumes
-		for (const env of envs) {
-			try {
-				const envResult = await cleanupScannerCache(env.id);
-				localResult.volumes.push(...envResult.volumes);
-			} catch (error) {
-				const msg = error instanceof Error ? error.message : String(error);
-				console.log(`[Scanner] Skipping cache cleanup for env "${env.name}" (id=${env.id}): ${msg}`);
-			}
-		}
-
-		return localResult;
-	};
-	scannerCacheCleanupJob = new Cron('0 3 * * 0', { timezone: defaultTimezone, legacyMode: false }, async () => {
-		await runScannerCacheCleanupJob('cron', scannerCleanupFn);
-	});
+	// Scanner cache cleanup to prevent DB volume bloat (configurable schedule)
+	const scannerCleanupEnabled = await getScannerCleanupEnabled();
+	if (scannerCleanupEnabled) {
+		scannerCacheCleanupJob = new Cron(scannerCleanupCron, { timezone: defaultTimezone, legacyMode: false }, async () => {
+			await runScannerCacheCleanupJob('cron', scannerCleanupAllEnvs);
+		});
+	}
 
 	console.log(`[Scheduler] System schedule cleanup: ${scheduleCleanupCron} [${defaultTimezone}]`);
 	console.log(`[Scheduler] System event cleanup: ${eventCleanupCron} [${defaultTimezone}]`);
 	console.log(`[Scheduler] Volume helper cleanup: every 30 minutes [${defaultTimezone}]`);
-	console.log(`[Scheduler] Scanner cache cleanup: weekly (Sunday 3am) [${defaultTimezone}]`);
+	console.log(`[Scheduler] Scanner cache cleanup: ${scannerCleanupEnabled ? scannerCleanupCron : 'disabled'} [${defaultTimezone}]`);
 
 	// Register all dynamic schedules from database
 	await refreshAllSchedules();
@@ -497,6 +508,8 @@ export async function refreshSystemJobs(): Promise<void> {
 	// Get current settings
 	const scheduleCleanupCron = await getScheduleCleanupCron();
 	const eventCleanupCron = await getEventCleanupCron();
+	const scannerCleanupCron = await getScannerCleanupCron();
+	const scannerCleanupEnabled = await getScannerCleanupEnabled();
 	const defaultTimezone = await getDefaultTimezone();
 
 	// Cleanup functions to pass to the job
@@ -536,18 +549,16 @@ export async function refreshSystemJobs(): Promise<void> {
 		await runVolumeHelperCleanupJob('cron', volumeCleanupFns);
 	});
 
-	const scannerCleanupFn = async () => {
-		const { cleanupScannerCache } = await import('../scanner');
-		return cleanupScannerCache();
-	};
-	scannerCacheCleanupJob = new Cron('0 3 * * 0', { timezone: defaultTimezone, legacyMode: false }, async () => {
-		await runScannerCacheCleanupJob('cron', scannerCleanupFn);
-	});
+	if (scannerCleanupEnabled) {
+		scannerCacheCleanupJob = new Cron(scannerCleanupCron, { timezone: defaultTimezone, legacyMode: false }, async () => {
+			await runScannerCacheCleanupJob('cron', scannerCleanupAllEnvs);
+		});
+	}
 
 	console.log(`[Scheduler] System schedule cleanup: ${scheduleCleanupCron} [${defaultTimezone}]`);
 	console.log(`[Scheduler] System event cleanup: ${eventCleanupCron} [${defaultTimezone}]`);
 	console.log(`[Scheduler] Volume helper cleanup: every 30 minutes [${defaultTimezone}]`);
-	console.log(`[Scheduler] Scanner cache cleanup: weekly (Sunday 3am) [${defaultTimezone}]`);
+	console.log(`[Scheduler] Scanner cache cleanup: ${scannerCleanupEnabled ? scannerCleanupCron : 'disabled'} [${defaultTimezone}]`);
 }
 
 // =============================================================================
@@ -682,11 +693,7 @@ export async function triggerSystemJob(jobId: string): Promise<{ success: boolea
 			});
 			return { success: true };
 		} else if (jobId === String(SYSTEM_SCANNER_CLEANUP_ID) || jobId === 'scanner-cache-cleanup') {
-			const scannerCleanupFn = async () => {
-				const { cleanupScannerCache } = await import('../scanner');
-				return cleanupScannerCache();
-			};
-			runScannerCacheCleanupJob('manual', scannerCleanupFn);
+			runScannerCacheCleanupJob('manual', scannerCleanupAllEnvs);
 			return { success: true };
 		} else {
 			return { success: false, error: 'Unknown system job ID' };
@@ -712,8 +719,10 @@ export async function getSystemSchedules(): Promise<SystemScheduleInfo[]> {
 	const eventRetention = await getEventRetentionDays();
 	const scheduleCleanupCron = await getScheduleCleanupCron();
 	const eventCleanupCron = await getEventCleanupCron();
+	const scannerCleanupCron = await getScannerCleanupCron();
 	const scheduleCleanupEnabled = await getScheduleCleanupEnabled();
 	const eventCleanupEnabled = await getEventCleanupEnabled();
+	const scannerCleanupEnabled = await getScannerCleanupEnabled();
 
 	return [
 		{
@@ -751,10 +760,10 @@ export async function getSystemSchedules(): Promise<SystemScheduleInfo[]> {
 			type: 'system_cleanup' as const,
 			name: 'Scanner cache cleanup',
 			description: 'Removes scanner vulnerability database cache to reclaim disk space',
-			cronExpression: '0 3 * * 0',
-			nextRun: getNextRun('0 3 * * 0')?.toISOString() ?? null,
+			cronExpression: scannerCleanupCron,
+			nextRun: scannerCleanupEnabled ? getNextRun(scannerCleanupCron)?.toISOString() ?? null : null,
 			isSystem: true,
-			enabled: true
+			enabled: scannerCleanupEnabled
 		}
 	];
 }

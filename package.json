@@ -1,7 +1,7 @@
 {
 	"name": "dockhand",
 	"private": true,
-	"version": "1.0.27",
+	"version": "1.0.29",
 	"type": "module",
 	"scripts": {
 		"dev": "npx vite dev",
@@ -76,9 +76,9 @@
 		"better-sqlite3": "11.7.0",
 		"croner": "9.1.0",
 		"cronstrue": "3.9.0",
-		"devalue": "5.6.4",
+		"devalue": "5.8.1",
 		"drizzle-orm": "0.45.2",
-		"fast-xml-parser": "5.5.8",
+		"fast-xml-parser": "5.7.3",
 		"js-yaml": "4.1.1",
 		"ldapts": "8.1.3",
 		"nodemailer": "8.0.5",
@@ -119,7 +119,7 @@
 		"lucide-svelte": "^0.562.0",
 		"mode-watcher": "^1.1.0",
 		"postcss": "^8.5.6",
-		"svelte": "5.53.5",
+		"svelte": "5.55.7",
 		"svelte-check": "^4.3.5",
 		"svelte-easy-crop": "^5.0.0",
 		"tailwind-merge": "^3.4.0",
@@ -137,6 +137,6 @@
 		"@codemirror/search": "6.6.0",
 		"@lezer/common": "1.5.0",
 		"@lezer/highlight": "1.2.3",
-		"devalue": "5.6.4"
+		"devalue": "5.8.1"
 	}
 }

@@ -22,12 +22,15 @@ export interface AppSettings {
 	eventCleanupCron: string;
 	scheduleCleanupEnabled: boolean;
 	eventCleanupEnabled: boolean;
+	scannerCleanupCron: string;
+	scannerCleanupEnabled: boolean;
 	logBufferSizeKb: number;
 	defaultTimezone: string;
 	eventCollectionMode: EventCollectionMode;
 	eventPollInterval: number;
 	metricsCollectionInterval: number;
 	compactPorts: boolean;
+	showExposedPorts: boolean;
 	formatLogTimestamps: boolean;
 	externalStackPaths: string[];
 	primaryStackLocation: string | null;
@@ -52,12 +55,15 @@ const DEFAULT_SETTINGS: AppSettings = {
 	eventCleanupCron: '30 3 * * *',
 	scheduleCleanupEnabled: true,
 	eventCleanupEnabled: true,
+	scannerCleanupCron: '0 3 * * 0',
+	scannerCleanupEnabled: true,
 	logBufferSizeKb: 500,
 	defaultTimezone: 'UTC',
 	eventCollectionMode: 'stream',
 	eventPollInterval: 60000,
 	metricsCollectionInterval: 30000,
 	compactPorts: false,
+	showExposedPorts: false,
 	formatLogTimestamps: false,
 	externalStackPaths: [],
 	primaryStackLocation: null,
@@ -113,12 +119,15 @@ function createSettingsStore() {
 					eventCleanupCron: settings.eventCleanupCron ?? DEFAULT_SETTINGS.eventCleanupCron,
 					scheduleCleanupEnabled: settings.scheduleCleanupEnabled ?? DEFAULT_SETTINGS.scheduleCleanupEnabled,
 					eventCleanupEnabled: settings.eventCleanupEnabled ?? DEFAULT_SETTINGS.eventCleanupEnabled,
+					scannerCleanupCron: settings.scannerCleanupCron ?? DEFAULT_SETTINGS.scannerCleanupCron,
+					scannerCleanupEnabled: settings.scannerCleanupEnabled ?? DEFAULT_SETTINGS.scannerCleanupEnabled,
 					logBufferSizeKb: settings.logBufferSizeKb ?? DEFAULT_SETTINGS.logBufferSizeKb,
 					defaultTimezone: settings.defaultTimezone ?? DEFAULT_SETTINGS.defaultTimezone,
 					eventCollectionMode: settings.eventCollectionMode ?? DEFAULT_SETTINGS.eventCollectionMode,
 					eventPollInterval: settings.eventPollInterval ?? DEFAULT_SETTINGS.eventPollInterval,
 					metricsCollectionInterval: settings.metricsCollectionInterval ?? DEFAULT_SETTINGS.metricsCollectionInterval,
 					compactPorts: settings.compactPorts ?? DEFAULT_SETTINGS.compactPorts,
+					showExposedPorts: settings.showExposedPorts ?? DEFAULT_SETTINGS.showExposedPorts,
 					formatLogTimestamps: settings.formatLogTimestamps ?? DEFAULT_SETTINGS.formatLogTimestamps,
 					externalStackPaths: settings.externalStackPaths ?? DEFAULT_SETTINGS.externalStackPaths,
 					primaryStackLocation: settings.primaryStackLocation ?? DEFAULT_SETTINGS.primaryStackLocation,
@@ -160,12 +169,15 @@ function createSettingsStore() {
 					eventCleanupCron: updatedSettings.eventCleanupCron ?? DEFAULT_SETTINGS.eventCleanupCron,
 					scheduleCleanupEnabled: updatedSettings.scheduleCleanupEnabled ?? DEFAULT_SETTINGS.scheduleCleanupEnabled,
 					eventCleanupEnabled: updatedSettings.eventCleanupEnabled ?? DEFAULT_SETTINGS.eventCleanupEnabled,
+					scannerCleanupCron: updatedSettings.scannerCleanupCron ?? DEFAULT_SETTINGS.scannerCleanupCron,
+					scannerCleanupEnabled: updatedSettings.scannerCleanupEnabled ?? DEFAULT_SETTINGS.scannerCleanupEnabled,
 					logBufferSizeKb: updatedSettings.logBufferSizeKb ?? DEFAULT_SETTINGS.logBufferSizeKb,
 					defaultTimezone: updatedSettings.defaultTimezone ?? DEFAULT_SETTINGS.defaultTimezone,
 					eventCollectionMode: updatedSettings.eventCollectionMode ?? DEFAULT_SETTINGS.eventCollectionMode,
 					eventPollInterval: updatedSettings.eventPollInterval ?? DEFAULT_SETTINGS.eventPollInterval,
 					metricsCollectionInterval: updatedSettings.metricsCollectionInterval ?? DEFAULT_SETTINGS.metricsCollectionInterval,
 					compactPorts: updatedSettings.compactPorts ?? DEFAULT_SETTINGS.compactPorts,
+					showExposedPorts: updatedSettings.showExposedPorts ?? DEFAULT_SETTINGS.showExposedPorts,
 					formatLogTimestamps: updatedSettings.formatLogTimestamps ?? DEFAULT_SETTINGS.formatLogTimestamps,
 					externalStackPaths: updatedSettings.externalStackPaths ?? DEFAULT_SETTINGS.externalStackPaths,
 					primaryStackLocation: updatedSettings.primaryStackLocation ?? DEFAULT_SETTINGS.primaryStackLocation,
@@ -297,6 +309,20 @@ function createSettingsStore() {
 				return newSettings;
 			});
 		},
+		setScannerCleanupCron: (value: string) => {
+			update((current) => {
+				const newSettings = { ...current, scannerCleanupCron: value };
+				saveSettings({ scannerCleanupCron: value });
+				return newSettings;
+			});
+		},
+		setScannerCleanupEnabled: (value: boolean) => {
+			update((current) => {
+				const newSettings = { ...current, scannerCleanupEnabled: value };
+				saveSettings({ scannerCleanupEnabled: value });
+				return newSettings;
+			});
+		},
 		setLogBufferSizeKb: (value: number) => {
 			update((current) => {
 				const newSettings = { ...current, logBufferSizeKb: value };
@@ -336,6 +362,13 @@ function createSettingsStore() {
 			update((current) => {
 				const newSettings = { ...current, compactPorts: value };
 				saveSettings({ compactPorts: value });
+				return newSettings;
+			});
+		},
+		setShowExposedPorts: (value: boolean) => {
+			update((current) => {
+				const newSettings = { ...current, showExposedPorts: value };
+				saveSettings({ showExposedPorts: value });
 				return newSettings;
 			});
 		},

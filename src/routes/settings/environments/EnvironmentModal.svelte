@@ -81,6 +81,7 @@
 	import { licenseStore } from '$lib/stores/license';
 	import { formatDateTime, formatDate } from '$lib/stores/settings';
 	import { getLabelColor, getLabelBgColor, parseLabels, MAX_LABELS } from '$lib/utils/label-colors';
+	import { labelColorOverrides } from '$lib/stores/label-colors';
 	import EventTypesEditor from './EventTypesEditor.svelte';
 	import UpdatesTab from './tabs/UpdatesTab.svelte';
 	import ActivityTab from './tabs/ActivityTab.svelte';
@@ -531,6 +532,7 @@
 			// Reset token state for this environment (important when switching between envs)
 			hawserToken = null;
 			generatedToken = null;
+			generatedStandardToken = null;
 			pendingToken = null;
 			// Load scanner settings, notifications, update check settings, image prune settings, and timezone
 			loadScannerSettings(environment.id);
@@ -576,6 +578,7 @@
 			envNotifLoading = false;
 			hawserToken = null;
 			generatedToken = null;
+			generatedStandardToken = null;
 			pendingToken = null;
 			// Reset update check settings
 			updateCheckEnabled = false;
@@ -603,6 +606,8 @@
 	// Track which environment was initialized to avoid repeated resets
 	let lastInitializedEnvId = $state<number | null | undefined>(undefined);
 
+	$effect(() => { labelColorOverrides.load(); });
+
 	// Reset form when modal opens OR when environment prop changes (for edit mode)
 	$effect(() => {
 		if (open) {
@@ -624,6 +629,16 @@
 		// Convert to base64url (same format the server uses)
 		const base64 = btoa(String.fromCharCode(...array));
 		pendingToken = base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+	}
+
+	let generatedStandardToken = $state<string | null>(null);
+
+	function generateStandardToken() {
+		const array = new Uint8Array(32);
+		crypto.getRandomValues(array);
+		const base64 = btoa(String.fromCharCode(...array));
+		formHawserToken = base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+		generatedStandardToken = formHawserToken;
 	}
 
 	// === Test Connection ===
@@ -751,7 +766,7 @@
 					labels: formLabels,
 					connectionType: formConnectionType,
 					hawserToken: formHawserToken || undefined,
-					publicIp: formConnectionType !== 'hawser-edge' ? (stripHostProtocol(formPublicIp.trim()) || undefined) : undefined
+					publicIp: stripHostProtocol(formPublicIp.trim()) || undefined
 				})
 			});
 
@@ -869,7 +884,7 @@
 					labels: formLabels,
 					connectionType: formConnectionType,
 					hawserToken: formHawserToken || undefined,
-					publicIp: formConnectionType !== 'hawser-edge' ? (stripHostProtocol(formPublicIp.trim()) || null) : null
+					publicIp: stripHostProtocol(formPublicIp.trim()) || null
 				})
 			});
 
@@ -1516,7 +1531,7 @@
 										<Badge
 											variant="secondary"
 											class="gap-1 pr-1 rounded-md"
-											style="background-color: {getLabelBgColor(label)}; border-color: {getLabelColor(label)}; color: {getLabelColor(label)};"
+											style="background-color: {getLabelBgColor(label, $labelColorOverrides)}; border-color: {getLabelColor(label, $labelColorOverrides)}; color: {getLabelColor(label, $labelColorOverrides)};"
 										>
 											{label}
 											<button
@@ -1554,7 +1569,7 @@
 										{#if showLabelDropdown && filteredLabelSuggestions.length > 0}
 											<div class="absolute z-50 w-full mt-1 bg-popover border rounded-md shadow-md max-h-48 overflow-y-auto">
 												{#each filteredLabelSuggestions as suggestion}
-													{@const colors = { color: getLabelColor(suggestion), bgColor: getLabelBgColor(suggestion) }}
+													{@const colors = { color: getLabelColor(suggestion, $labelColorOverrides), bgColor: getLabelBgColor(suggestion, $labelColorOverrides) }}
 													<button
 														type="button"
 														class="w-full px-3 py-1.5 text-left text-sm hover:bg-accent flex items-center gap-2"
@@ -1923,13 +1938,91 @@
 								</div>
 							{/if}
 							<div class="space-y-2">
-								<Label for="edit-env-hawser-token">Agent token (optional)</Label>
-								<Input id="edit-env-hawser-token" type="password" bind:value={formHawserToken} placeholder="Token for agent authentication" />
-								<p class="text-xs text-muted-foreground">If the Hawser agent is configured with TOKEN, enter it here.</p>
+								<div class="flex items-center justify-between">
+									<Label for="edit-env-hawser-token">Agent token (optional)</Label>
+									{#if !formHawserToken}
+										<Button
+											variant="outline"
+											size="sm"
+											class="h-7 text-xs"
+											onclick={generateStandardToken}
+										>
+											<Key class="w-3 h-3" />
+											Generate
+										</Button>
+									{/if}
+								</div>
+								<Input id="edit-env-hawser-token" type="password" bind:value={formHawserToken} placeholder="Token for agent authentication" oninput={() => generatedStandardToken = null} />
+								{#if generatedStandardToken}
+									<div class="p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-700 rounded-md space-y-2">
+										<p class="text-xs font-medium text-amber-700 dark:text-amber-400 flex items-center gap-1">
+											<AlertTriangle class="w-3 h-3" />
+											Copy this token now — it won't be shown again!
+										</p>
+										<div class="flex gap-2">
+											<Input
+												type="text"
+												value={generatedStandardToken}
+												readonly
+												class="font-mono text-xs flex-1"
+											/>
+											<Button variant="outline" size="sm" onclick={() => copyToken(generatedStandardToken!)}>
+												{#if copySuccess === 'error'}
+													<Tooltip.Root open>
+														<Tooltip.Trigger>
+															<XCircle class="w-4 h-4 text-red-500" />
+														</Tooltip.Trigger>
+														<Tooltip.Content>Copy requires HTTPS</Tooltip.Content>
+													</Tooltip.Root>
+												{:else if copySuccess === 'ok'}
+													<Check class="w-4 h-4 text-green-500" />
+												{:else}
+													<Copy class="w-4 h-4" />
+												{/if}
+											</Button>
+											<Button variant="outline" size="sm" onclick={() => { formHawserToken = ''; generateStandardToken(); }}>
+												<RefreshCw class="w-4 h-4" />
+											</Button>
+										</div>
+									</div>
+								{:else}
+									<p class="text-xs text-muted-foreground">Enter a token manually or generate one. Set the same token as <code class="bg-muted px-1 rounded">TOKEN</code> env var on your Hawser agent.</p>
+								{/if}
 							</div>
 							<div class="text-xs text-muted-foreground bg-muted/50 rounded-md p-2 flex items-start gap-2">
 								<Info class="w-3 h-3 mt-0.5 shrink-0" />
-								<span>Run Hawser agent on the target host: <code class="bg-muted px-1 rounded">hawser --port {formPort}</code></span>
+								<div class="space-y-1 flex-1">
+									<span>Run Hawser agent on the target host:</span>
+									<div class="flex items-start gap-1.5">
+										<code class="bg-muted px-1.5 py-0.5 rounded break-all flex-1">{formHawserToken ? `TOKEN=${formHawserToken} ` : ''}hawser standard --port {formPort}</code>
+										{#if formHawserToken}
+											<button
+												class="shrink-0 p-0.5 rounded hover:bg-muted transition-colors"
+												onclick={() => {
+													const cmd = `${formHawserToken ? `TOKEN=${formHawserToken} ` : ''}hawser standard --port ${formPort}`;
+													copyToClipboard(cmd).then(ok => {
+														copyCmdSuccess = ok ? 'ok' : 'error';
+														setTimeout(() => { copyCmdSuccess = null; }, 2000);
+													});
+												}}
+												title="Copy command"
+											>
+												{#if copyCmdSuccess === 'error'}
+													<Tooltip.Root open>
+														<Tooltip.Trigger>
+															<XCircle class="w-3 h-3 text-red-500" />
+														</Tooltip.Trigger>
+														<Tooltip.Content>Copy requires HTTPS</Tooltip.Content>
+													</Tooltip.Root>
+												{:else if copyCmdSuccess === 'ok'}
+													<Check class="w-3 h-3 text-green-600" />
+												{:else}
+													<Copy class="w-3 h-3" />
+												{/if}
+											</button>
+										{/if}
+									</div>
+								</div>
 							</div>
 						{/if}
 
@@ -2160,31 +2253,29 @@
 							</div>
 						{/if}
 
-						<!-- Public IP field (for all types except hawser-edge) -->
-						{#if formConnectionType !== 'hawser-edge'}
-							<div class="space-y-2 pt-4 border-t">
-								<div class="flex items-center gap-2">
-									<Label for="edit-env-public-ip">Public IP</Label>
-									<Tooltip.Root>
-										<Tooltip.Trigger>
-											<HelpCircle class="w-3.5 h-3.5 text-muted-foreground" />
-										</Tooltip.Trigger>
-										<Tooltip.Content side="bottom" class="w-72">
-											<p>IP address or hostname where container ports are accessible from your browser. For local Docker, use the server's LAN IP.</p>
-										</Tooltip.Content>
-									</Tooltip.Root>
-								</div>
-								<Input
-									id="edit-env-public-ip"
-									bind:value={formPublicIp}
-									placeholder="e.g., 192.168.1.4"
-									class="w-full"
-								/>
-								<p class="text-xs text-muted-foreground">
-									Used for clickable port links on the containers page
-								</p>
+						<!-- Public IP field -->
+						<div class="space-y-2 pt-4 border-t">
+							<div class="flex items-center gap-2">
+								<Label for="edit-env-public-ip">Public IP</Label>
+								<Tooltip.Root>
+									<Tooltip.Trigger>
+										<HelpCircle class="w-3.5 h-3.5 text-muted-foreground" />
+									</Tooltip.Trigger>
+									<Tooltip.Content side="bottom" class="w-72">
+										<p>IP address or hostname where container ports are accessible from your browser. For local Docker, use the server's LAN IP.</p>
+									</Tooltip.Content>
+								</Tooltip.Root>
 							</div>
-						{/if}
+							<Input
+								id="edit-env-public-ip"
+								bind:value={formPublicIp}
+								placeholder="e.g., 192.168.1.4"
+								class="w-full"
+							/>
+							<p class="text-xs text-muted-foreground">
+								Used for clickable port links on the containers page
+							</p>
+						</div>
 					</Tabs.Content>
 
 				<!-- Updates Tab -->

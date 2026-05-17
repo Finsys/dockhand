@@ -113,7 +113,7 @@ export function initDatabase() {
 // =============================================================================
 
 export async function getEnvironments(): Promise<Environment[]> {
-	const results = await db.select().from(environments).orderBy(asc(environments.name));
+	const results = await db.select().from(environments).orderBy(sql`lower(${environments.name})`);
 	return results.map((e: Environment) => ({
 		...e,
 		tlsKey: decrypt(e.tlsKey),
@@ -2088,7 +2088,9 @@ export interface GitStackData {
 	autoUpdateCron: string;
 	webhookEnabled: boolean;
 	webhookSecret: string | null;
+	contextDir: string | null;
 	buildOnDeploy: boolean;
+	noBuildCache: boolean;
 	repullImages: boolean;
 	forceRedeploy: boolean;
 	lastSync: string | null;
@@ -2124,7 +2126,9 @@ export async function getGitStacks(environmentId?: number): Promise<GitStackWith
 			autoUpdateCron: gitStacks.autoUpdateCron,
 			webhookEnabled: gitStacks.webhookEnabled,
 			webhookSecret: gitStacks.webhookSecret,
+			contextDir: gitStacks.contextDir,
 			buildOnDeploy: gitStacks.buildOnDeploy,
+			noBuildCache: gitStacks.noBuildCache,
 			repullImages: gitStacks.repullImages,
 			forceRedeploy: gitStacks.forceRedeploy,
 			lastSync: gitStacks.lastSync,
@@ -2155,7 +2159,9 @@ export async function getGitStacks(environmentId?: number): Promise<GitStackWith
 			autoUpdateCron: gitStacks.autoUpdateCron,
 			webhookEnabled: gitStacks.webhookEnabled,
 			webhookSecret: gitStacks.webhookSecret,
+			contextDir: gitStacks.contextDir,
 			buildOnDeploy: gitStacks.buildOnDeploy,
+			noBuildCache: gitStacks.noBuildCache,
 			repullImages: gitStacks.repullImages,
 			forceRedeploy: gitStacks.forceRedeploy,
 			lastSync: gitStacks.lastSync,
@@ -2186,7 +2192,9 @@ export async function getGitStacks(environmentId?: number): Promise<GitStackWith
 		autoUpdateCron: row.autoUpdateCron,
 		webhookEnabled: row.webhookEnabled,
 		webhookSecret: row.webhookSecret,
+		contextDir: row.contextDir ?? null,
 		buildOnDeploy: row.buildOnDeploy ?? false,
+		noBuildCache: row.noBuildCache ?? false,
 		repullImages: row.repullImages ?? false,
 		forceRedeploy: row.forceRedeploy ?? false,
 		lastSync: row.lastSync,
@@ -2219,7 +2227,9 @@ export async function getGitStacksForEnvironmentOnly(environmentId: number): Pro
 		autoUpdateCron: gitStacks.autoUpdateCron,
 		webhookEnabled: gitStacks.webhookEnabled,
 		webhookSecret: gitStacks.webhookSecret,
+		contextDir: gitStacks.contextDir,
 		buildOnDeploy: gitStacks.buildOnDeploy,
+		noBuildCache: gitStacks.noBuildCache,
 		repullImages: gitStacks.repullImages,
 		forceRedeploy: gitStacks.forceRedeploy,
 		lastSync: gitStacks.lastSync,
@@ -2250,7 +2260,9 @@ export async function getGitStacksForEnvironmentOnly(environmentId: number): Pro
 		autoUpdateCron: row.autoUpdateCron,
 		webhookEnabled: row.webhookEnabled,
 		webhookSecret: row.webhookSecret,
+		contextDir: row.contextDir ?? null,
 		buildOnDeploy: row.buildOnDeploy ?? false,
+		noBuildCache: row.noBuildCache ?? false,
 		repullImages: row.repullImages ?? false,
 		forceRedeploy: row.forceRedeploy ?? false,
 		lastSync: row.lastSync,
@@ -2282,7 +2294,9 @@ export async function getGitStack(id: number): Promise<GitStackWithRepo | null> 
 		autoUpdateCron: gitStacks.autoUpdateCron,
 		webhookEnabled: gitStacks.webhookEnabled,
 		webhookSecret: gitStacks.webhookSecret,
+		contextDir: gitStacks.contextDir,
 		buildOnDeploy: gitStacks.buildOnDeploy,
+		noBuildCache: gitStacks.noBuildCache,
 		repullImages: gitStacks.repullImages,
 		forceRedeploy: gitStacks.forceRedeploy,
 		lastSync: gitStacks.lastSync,
@@ -2314,7 +2328,9 @@ export async function getGitStack(id: number): Promise<GitStackWithRepo | null> 
 		autoUpdateCron: row.autoUpdateCron,
 		webhookEnabled: row.webhookEnabled,
 		webhookSecret: row.webhookSecret,
+		contextDir: row.contextDir ?? null,
 		buildOnDeploy: row.buildOnDeploy ?? false,
+		noBuildCache: row.noBuildCache ?? false,
 		repullImages: row.repullImages ?? false,
 		forceRedeploy: row.forceRedeploy ?? false,
 		lastSync: row.lastSync,
@@ -2346,7 +2362,9 @@ export async function getGitStackByName(stackName: string, environmentId?: numbe
 		autoUpdateCron: gitStacks.autoUpdateCron,
 		webhookEnabled: gitStacks.webhookEnabled,
 		webhookSecret: gitStacks.webhookSecret,
+		contextDir: gitStacks.contextDir,
 		buildOnDeploy: gitStacks.buildOnDeploy,
+		noBuildCache: gitStacks.noBuildCache,
 		repullImages: gitStacks.repullImages,
 		forceRedeploy: gitStacks.forceRedeploy,
 		lastSync: gitStacks.lastSync,
@@ -2383,7 +2401,9 @@ export async function getGitStackByName(stackName: string, environmentId?: numbe
 		autoUpdateCron: row.autoUpdateCron,
 		webhookEnabled: row.webhookEnabled,
 		webhookSecret: row.webhookSecret,
+		contextDir: row.contextDir ?? null,
 		buildOnDeploy: row.buildOnDeploy ?? false,
+		noBuildCache: row.noBuildCache ?? false,
 		repullImages: row.repullImages ?? false,
 		forceRedeploy: row.forceRedeploy ?? false,
 		lastSync: row.lastSync,
@@ -2415,7 +2435,9 @@ export async function getGitStackByWebhookSecret(secret: string): Promise<GitSta
 		autoUpdateCron: gitStacks.autoUpdateCron,
 		webhookEnabled: gitStacks.webhookEnabled,
 		webhookSecret: gitStacks.webhookSecret,
+		contextDir: gitStacks.contextDir,
 		buildOnDeploy: gitStacks.buildOnDeploy,
+		noBuildCache: gitStacks.noBuildCache,
 		repullImages: gitStacks.repullImages,
 		forceRedeploy: gitStacks.forceRedeploy,
 		lastSync: gitStacks.lastSync,
@@ -2447,7 +2469,9 @@ export async function getGitStackByWebhookSecret(secret: string): Promise<GitSta
 		autoUpdateCron: row.autoUpdateCron,
 		webhookEnabled: row.webhookEnabled,
 		webhookSecret: row.webhookSecret,
+		contextDir: row.contextDir ?? null,
 		buildOnDeploy: row.buildOnDeploy ?? false,
+		noBuildCache: row.noBuildCache ?? false,
 		repullImages: row.repullImages ?? false,
 		forceRedeploy: row.forceRedeploy ?? false,
 		lastSync: row.lastSync,
@@ -2477,7 +2501,9 @@ export async function createGitStack(data: {
 	autoUpdateCron?: string;
 	webhookEnabled?: boolean;
 	webhookSecret?: string | null;
+	contextDir?: string | null;
 	buildOnDeploy?: boolean;
+	noBuildCache?: boolean;
 	repullImages?: boolean;
 	forceRedeploy?: boolean;
 }): Promise<GitStackWithRepo> {
@@ -2487,12 +2513,14 @@ export async function createGitStack(data: {
 		repositoryId: data.repositoryId,
 		composePath: data.composePath || 'compose.yaml',
 		envFilePath: data.envFilePath || null,
+		contextDir: data.contextDir || null,
 		autoUpdate: data.autoUpdate || false,
 		autoUpdateSchedule: data.autoUpdateSchedule || 'daily',
 		autoUpdateCron: data.autoUpdateCron || '0 3 * * *',
 		webhookEnabled: data.webhookEnabled || false,
 		webhookSecret: data.webhookSecret || null,
 		buildOnDeploy: data.buildOnDeploy ?? false,
+		noBuildCache: data.noBuildCache ?? false,
 		repullImages: data.repullImages ?? false,
 		forceRedeploy: data.forceRedeploy ?? false
 	}).returning();
@@ -2511,7 +2539,9 @@ export async function updateGitStack(id: number, data: Partial<GitStackData>): P
 	if (data.autoUpdateCron !== undefined) updateData.autoUpdateCron = data.autoUpdateCron;
 	if (data.webhookEnabled !== undefined) updateData.webhookEnabled = data.webhookEnabled;
 	if (data.webhookSecret !== undefined) updateData.webhookSecret = data.webhookSecret;
+	if (data.contextDir !== undefined) updateData.contextDir = data.contextDir;
 	if (data.buildOnDeploy !== undefined) updateData.buildOnDeploy = data.buildOnDeploy;
+	if (data.noBuildCache !== undefined) updateData.noBuildCache = data.noBuildCache;
 	if (data.repullImages !== undefined) updateData.repullImages = data.repullImages;
 	if (data.forceRedeploy !== undefined) updateData.forceRedeploy = data.forceRedeploy;
 	if (data.lastSync !== undefined) updateData.lastSync = data.lastSync;
@@ -2549,7 +2579,9 @@ export async function getEnabledAutoUpdateGitStacks(): Promise<GitStackWithRepo[
 		autoUpdateCron: gitStacks.autoUpdateCron,
 		webhookEnabled: gitStacks.webhookEnabled,
 		webhookSecret: gitStacks.webhookSecret,
+		contextDir: gitStacks.contextDir,
 		buildOnDeploy: gitStacks.buildOnDeploy,
+		noBuildCache: gitStacks.noBuildCache,
 		repullImages: gitStacks.repullImages,
 		forceRedeploy: gitStacks.forceRedeploy,
 		lastSync: gitStacks.lastSync,
@@ -2579,7 +2611,9 @@ export async function getEnabledAutoUpdateGitStacks(): Promise<GitStackWithRepo[
 		autoUpdateCron: row.autoUpdateCron,
 		webhookEnabled: row.webhookEnabled,
 		webhookSecret: row.webhookSecret,
+		contextDir: row.contextDir ?? null,
 		buildOnDeploy: row.buildOnDeploy ?? false,
+		noBuildCache: row.noBuildCache ?? false,
 		repullImages: row.repullImages ?? false,
 		forceRedeploy: row.forceRedeploy ?? false,
 		lastSync: row.lastSync,
@@ -2610,7 +2644,9 @@ export async function getAllAutoUpdateGitStacks(): Promise<GitStackWithRepo[]> {
 		autoUpdateCron: gitStacks.autoUpdateCron,
 		webhookEnabled: gitStacks.webhookEnabled,
 		webhookSecret: gitStacks.webhookSecret,
+		contextDir: gitStacks.contextDir,
 		buildOnDeploy: gitStacks.buildOnDeploy,
+		noBuildCache: gitStacks.noBuildCache,
 		repullImages: gitStacks.repullImages,
 		forceRedeploy: gitStacks.forceRedeploy,
 		lastSync: gitStacks.lastSync,
@@ -2639,7 +2675,9 @@ export async function getAllAutoUpdateGitStacks(): Promise<GitStackWithRepo[]> {
 		autoUpdateCron: row.autoUpdateCron,
 		webhookEnabled: row.webhookEnabled,
 		webhookSecret: row.webhookSecret,
+		contextDir: row.contextDir ?? null,
 		buildOnDeploy: row.buildOnDeploy ?? false,
+		noBuildCache: row.noBuildCache ?? false,
 		repullImages: row.repullImages ?? false,
 		forceRedeploy: row.forceRedeploy ?? false,
 		lastSync: row.lastSync,
@@ -4057,8 +4095,11 @@ const SCHEDULE_CLEANUP_CRON_KEY = 'schedule_cleanup_cron';
 const EVENT_CLEANUP_CRON_KEY = 'event_cleanup_cron';
 const SCHEDULE_CLEANUP_ENABLED_KEY = 'schedule_cleanup_enabled';
 const EVENT_CLEANUP_ENABLED_KEY = 'event_cleanup_enabled';
+const SCANNER_CLEANUP_CRON_KEY = 'scanner_cleanup_cron';
+const SCANNER_CLEANUP_ENABLED_KEY = 'scanner_cleanup_enabled';
 const DEFAULT_SCHEDULE_CLEANUP_CRON = '0 3 * * *'; // Daily at 3 AM
 const DEFAULT_EVENT_CLEANUP_CRON = '30 3 * * *'; // Daily at 3:30 AM
+const DEFAULT_SCANNER_CLEANUP_CRON = '0 3 * * 0'; // Weekly Sunday at 3 AM
 
 export async function getScheduleRetentionDays(): Promise<number> {
 	const result = await db.select().from(settings).where(eq(settings.key, SCHEDULE_RETENTION_KEY));
@@ -4187,6 +4228,50 @@ export async function setEventCleanupEnabled(enabled: boolean): Promise<void> {
 	} else {
 		await db.insert(settings).values({
 			key: EVENT_CLEANUP_ENABLED_KEY,
+			value: enabled ? 'true' : 'false'
+		});
+	}
+}
+
+export async function getScannerCleanupCron(): Promise<string> {
+	const result = await db.select().from(settings).where(eq(settings.key, SCANNER_CLEANUP_CRON_KEY));
+	if (result[0]) {
+		return result[0].value || DEFAULT_SCANNER_CLEANUP_CRON;
+	}
+	return DEFAULT_SCANNER_CLEANUP_CRON;
+}
+
+export async function setScannerCleanupCron(cron: string): Promise<void> {
+	const existing = await db.select().from(settings).where(eq(settings.key, SCANNER_CLEANUP_CRON_KEY));
+	if (existing.length > 0) {
+		await db.update(settings)
+			.set({ value: cron, updatedAt: new Date().toISOString() })
+			.where(eq(settings.key, SCANNER_CLEANUP_CRON_KEY));
+	} else {
+		await db.insert(settings).values({
+			key: SCANNER_CLEANUP_CRON_KEY,
+			value: cron
+		});
+	}
+}
+
+export async function getScannerCleanupEnabled(): Promise<boolean> {
+	const result = await db.select().from(settings).where(eq(settings.key, SCANNER_CLEANUP_ENABLED_KEY));
+	if (result[0]) {
+		return result[0].value === 'true';
+	}
+	return true; // Enabled by default
+}
+
+export async function setScannerCleanupEnabled(enabled: boolean): Promise<void> {
+	const existing = await db.select().from(settings).where(eq(settings.key, SCANNER_CLEANUP_ENABLED_KEY));
+	if (existing.length > 0) {
+		await db.update(settings)
+			.set({ value: enabled ? 'true' : 'false', updatedAt: new Date().toISOString() })
+			.where(eq(settings.key, SCANNER_CLEANUP_ENABLED_KEY));
+	} else {
+		await db.insert(settings).values({
+			key: SCANNER_CLEANUP_ENABLED_KEY,
 			value: enabled ? 'true' : 'false'
 		});
 	}

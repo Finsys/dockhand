@@ -15,13 +15,15 @@
 		Crown,
 		Users,
 		Info,
-		GitBranch
+		GitBranch,
+		Tags
 	} from 'lucide-svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 
 	// Import tab components
 	import GeneralTab from './general/GeneralTab.svelte';
 	import EnvironmentsTab from './environments/EnvironmentsTab.svelte';
+	import LabelsTab from './labels/LabelsTab.svelte';
 	import RegistriesTab from './registries/RegistriesTab.svelte';
 	import GitTab from './git/GitTab.svelte';
 	import ConfigSetsTab from './config-sets/ConfigSetsTab.svelte';
@@ -54,6 +56,10 @@
 			<Tabs.Trigger value="environments" class="flex-1 flex items-center justify-center gap-1.5">
 				<Globe class="w-4 h-4" />
 				Environments
+			</Tabs.Trigger>
+			<Tabs.Trigger value="labels" class="flex-1 flex items-center justify-center gap-1.5">
+				<Tags class="w-4 h-4" />
+				Labels
 			</Tabs.Trigger>
 			<Tabs.Trigger value="registries" class="flex-1 flex items-center justify-center gap-1.5">
 				<Download class="w-4 h-4" />
@@ -91,6 +97,10 @@
 
 		<Tabs.Content value="environments" class="flex-1 min-h-0 overflow-y-auto">
 			{#if activeTab === 'environments'}<EnvironmentsTab {editEnvId} {newEnv} />{/if}
+		</Tabs.Content>
+
+		<Tabs.Content value="labels" class="flex-1 min-h-0 overflow-y-auto">
+			{#if activeTab === 'labels'}<LabelsTab />{/if}
 		</Tabs.Content>
 
 		<Tabs.Content value="registries" class="flex-1 min-h-0 overflow-y-auto">

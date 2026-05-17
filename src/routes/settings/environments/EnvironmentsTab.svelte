@@ -31,6 +31,7 @@
 	import { canAccess } from '$lib/stores/auth';
 	import EnvironmentIcon from '$lib/components/EnvironmentIcon.svelte';
 	import { getLabelColors } from '$lib/utils/label-colors';
+	import { labelColorOverrides } from '$lib/stores/label-colors';
 	import EnvironmentModal from './EnvironmentModal.svelte';
 	import { environments as environmentsStore } from '$lib/stores/environment';
 	import { dashboardData } from '$lib/stores/dashboard';
@@ -111,6 +112,9 @@
 	const allLabels = $derived(
 		[...new Set(environments.flatMap(env => env.labels || []))].sort()
 	);
+
+	// Load custom label colors
+	$effect(() => { labelColorOverrides.load(); });
 
 	// === Environment Functions ===
 	async function fetchEnvironments() {
@@ -424,7 +428,7 @@
 								{#if env.labels && env.labels.length > 0}
 									<div class="flex flex-wrap gap-1">
 										{#each env.labels as label}
-											{@const colors = getLabelColors(label)}
+											{@const colors = getLabelColors(label, $labelColorOverrides)}
 											<span
 												class="px-1.5 py-0.5 text-2xs rounded font-medium"
 												style="background-color: {colors.bgColor}; color: {colors.color}"

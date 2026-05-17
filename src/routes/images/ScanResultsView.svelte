@@ -29,11 +29,13 @@
 	interface Props {
 		results: ScanResult[];
 		compact?: boolean;
+		activeScanner?: 'grype' | 'trivy';
 	}
 
-	let { results, compact = false }: Props = $props();
+	let { results, compact = false, activeScanner = $bindable<'grype' | 'trivy'>(results[0]?.scanner || 'grype') }: Props = $props();
 
-	let activeTab = $state<'grype' | 'trivy'>(results[0]?.scanner || 'grype');
+	// Use activeScanner directly as the tab state
+	let activeTab = $derived(activeScanner);
 	let expandedVulns = $state<Set<string>>(new Set());
 	let sortBy = $state<'severity' | 'id' | 'package'>('severity');
 	let sortDir = $state<'asc' | 'desc'>('asc');
@@ -112,7 +114,7 @@
 				{#each results as r}
 					<button
 						class="px-3 py-1.5 text-xs font-medium border-b-2 transition-colors cursor-pointer {activeTab === r.scanner ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}"
-						onclick={() => activeTab = r.scanner}
+						onclick={() => activeScanner = r.scanner}
 					>
 						{r.scanner === 'grype' ? 'Grype' : 'Trivy'}
 						{#if r.summary.critical > 0 || r.summary.high > 0}

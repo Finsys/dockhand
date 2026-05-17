@@ -60,19 +60,20 @@ async function isComposeFile(filePath: string): Promise<boolean> {
 }
 
 /**
- * Count the number of services defined in a compose file
- * Parses YAML to reliably count top-level keys under 'services:' section
+ * Parse compose file metadata: top-level `name` property and service count.
+ * The `name` property (if present) should be used as the stack name instead of the directory name,
+ * matching Docker Compose's behavior with `com.docker.compose.project`.
  */
-async function countServices(filePath: string): Promise<number> {
+function parseComposeMetadata(filePath: string): { name: string | null; serviceCount: number } {
 	try {
 		const content = readFileSync(filePath, 'utf-8');
 		const doc = yaml.load(content) as Record<string, unknown> | null;
-		if (doc?.services && typeof doc.services === 'object') {
-			return Object.keys(doc.services).length;
-		}
-		return 0;
+		const name = typeof doc?.name === 'string' ? doc.name.trim() : null;
+		const serviceCount = doc?.services && typeof doc.services === 'object'
+			? Object.keys(doc.services).length : 0;
+		return { name, serviceCount };
 	} catch {
-		return 0;
+		return { name: null, serviceCount: 0 };
 	}
 }
 
@@ -122,13 +123,12 @@ async function scanPath(basePath: string): Promise<{ stacks: DiscoveredStack[]; 
 		for (const pattern of COMPOSE_PATTERNS) {
 			const composePath = join(currentPath, pattern);
 			if (existsSync(composePath)) {
-				// Found a stack! Stack name = directory name
-				const stackName = normalizeStackName(basename(currentPath));
+				// Found a stack! Use compose name property if defined, otherwise directory name
+				const { name: composeName, serviceCount } = parseComposeMetadata(composePath);
+				const stackName = normalizeStackName(composeName || basename(currentPath));
 				if (stackName) {
 					// Check for .env file
 					const envPath = join(currentPath, '.env');
-					// Count services in compose file
-					const serviceCount = await countServices(composePath);
 					discovered.push({
 						name: stackName,
 						composePath,
@@ -166,14 +166,13 @@ async function scanPath(basePath: string): Promise<{ stacks: DiscoveredStack[]; 
 				if (lowerName.endsWith('.yml') || lowerName.endsWith('.yaml')) {
 					// Validate it's actually a compose file
 					if (await isComposeFile(entryPath)) {
+						const { name: composeName, serviceCount } = parseComposeMetadata(entryPath);
 						const stackName = normalizeStackName(
-							entry.name.replace(/\.(yml|yaml)$/i, '')
+							composeName || entry.name.replace(/\.(yml|yaml)$/i, '')
 						);
 						if (stackName) {
 							// Check for .env file in same directory
 							const envPath = join(currentPath, '.env');
-							// Count services in compose file
-							const serviceCount = await countServices(entryPath);
 							discovered.push({
 								name: stackName,
 								composePath: entryPath,
@@ -214,8 +213,18 @@ export async function adoptStack(
 		return { success: false, error: 'Already adopted' };
 	}
 
+	// If the compose file has a top-level `name:` property, prefer it over the passed name.
+	// This ensures Docker's project name (from the label) matches Dockhand's stack name.
+	let stackNameSource = stack.name;
+	if (stack.composePath && existsSync(stack.composePath)) {
+		const { name: composeName } = parseComposeMetadata(stack.composePath);
+		if (composeName) {
+			stackNameSource = composeName;
+		}
+	}
+
 	// Check for name conflict within the same environment
-	let finalName = normalizeStackName(stack.name);
+	let finalName = normalizeStackName(stackNameSource);
 	const existingNames = new Set(
 		existingSources
 			.filter((s) => s.environmentId === environmentId)
@@ -224,11 +233,12 @@ export async function adoptStack(
 
 	if (existingNames.has(finalName)) {
 		// Append suffix to make unique
+		const baseName = finalName;
 		let suffix = 1;
-		while (existingNames.has(`${stack.name}-${suffix}`)) {
+		while (existingNames.has(`${baseName}-${suffix}`)) {
 			suffix++;
 		}
-		finalName = `${stack.name}-${suffix}`;
+		finalName = `${baseName}-${suffix}`;
 	}
 
 	// Create stack source record - use 'internal' since we know the file paths

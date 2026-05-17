@@ -345,7 +345,10 @@ async function sendNtfy(appriseUrl: string, payload: NotificationPayload): Promi
 	// Supported formats:
 	// ntfy://topic (public ntfy.sh)
 	// ntfy://host/topic (custom server, no auth)
-	// ntfy://user:pass@host/topic (custom server with auth)
+	// ntfy://user:pass@host/topic (custom server with basic auth)
+	// ntfy://token@host/topic (custom server with bearer token)
+	// ntfy://host/topic?auth=BASE64 (custom server with base64-encoded bearer token)
+	// Query params: ?tags=ship,whale &title=Custom &priority=5
 	// ntfys:// variants for HTTPS
 	const isSecure = appriseUrl.startsWith('ntfys');
 	const path = appriseUrl.replace(/^ntfys?:\/\//, '');
@@ -353,37 +356,60 @@ async function sendNtfy(appriseUrl: string, payload: NotificationPayload): Promi
 	let url: string;
 	let authHeader: string | null = null;
 
+	// Extract query parameters (?auth=, ?tags=, ?title=, ?priority=)
+	let queryAuth: string | null = null;
+	let queryTags: string | null = null;
+	let queryTitle: string | null = null;
+	let queryPriority: string | null = null;
+	let cleanPath = path;
+	const qIndex = path.indexOf('?');
+	if (qIndex !== -1) {
+		const params = new URLSearchParams(path.substring(qIndex + 1));
+		queryAuth = params.get('auth');
+		queryTags = params.get('tags');
+		queryTitle = params.get('title');
+		queryPriority = params.get('priority');
+		cleanPath = path.substring(0, qIndex);
+	}
+
 	// Check for user:pass@host/topic format (Basic auth)
-	const basicMatch = path.match(/^([^:]+):([^@]+)@(.+)$/);
+	const basicMatch = cleanPath.match(/^([^:]+):([^@]+)@(.+)$/);
 	if (basicMatch) {
 		const [, user, pass, hostAndTopic] = basicMatch;
 		const basic = Buffer.from(`${user}:${pass}`).toString('base64');
 		authHeader = `Basic ${basic}`;
 		url = `${isSecure ? 'https' : 'http'}://${hostAndTopic}`;
-	} else if (path.includes('@') && path.includes('/')) {
+	} else if (cleanPath.includes('@') && cleanPath.includes('/')) {
 		// token@host/topic -> Bearer token auth
-		const tokenMatch = path.match(/^([^@]+)@(.+)$/);
+		const tokenMatch = cleanPath.match(/^([^@]+)@(.+)$/);
 		if (tokenMatch) {
 			const [, token, hostAndTopic] = tokenMatch;
 			authHeader = `Bearer ${token}`;
 			url = `${isSecure ? 'https' : 'http'}://${hostAndTopic}`;
 		} else {
 			// Fallback to custom server without auth
-			url = `${isSecure ? 'https' : 'http'}://${path}`;
+			url = `${isSecure ? 'https' : 'http'}://${cleanPath}`;
 		}
-	} else if (path.includes('/')) {
+	} else if (cleanPath.includes('/')) {
 		// Custom server without auth
-		url = `${isSecure ? 'https' : 'http'}://${path}`;
+		url = `${isSecure ? 'https' : 'http'}://${cleanPath}`;
 	} else {
 		// Default ntfy.sh
-		url = `https://ntfy.sh/${path}`;
+		url = `https://ntfy.sh/${cleanPath}`;
+	}
+
+	// Apply ?auth= as fallback if no explicit auth was set
+	if (!authHeader && queryAuth) {
+		const decoded = Buffer.from(queryAuth, 'base64').toString();
+		authHeader = decoded.startsWith('Bearer ') ? decoded : `Bearer ${decoded}`;
 	}
 
 	const titleWithEnv = payload.environmentName ? `${payload.title} [${payload.environmentName}]` : payload.title;
+	const defaultTags = payload.type || 'info';
 	const headers: Record<string, string> = {
-		'Title': titleWithEnv,
-		'Priority': payload.type === 'error' ? '5' : payload.type === 'warning' ? '4' : '3',
-		'Tags': payload.type || 'info'
+		'Title': queryTitle || titleWithEnv,
+		'Priority': queryPriority || (payload.type === 'error' ? '5' : payload.type === 'warning' ? '4' : '3'),
+		'Tags': queryTags ? `${queryTags},${defaultTags}` : defaultTags
 	};
 
 	if (authHeader) {

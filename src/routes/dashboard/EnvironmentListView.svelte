@@ -3,6 +3,7 @@
 	import { whale } from '@lucide/lab';
 	import EnvironmentIcon from '$lib/components/EnvironmentIcon.svelte';
 	import { getLabelColors } from '$lib/utils/label-colors';
+	import { labelColorOverrides } from '$lib/stores/label-colors';
 	import { DataGrid } from '$lib/components/data-grid';
 	import type { DataGridRowState, DataGridSortState } from '$lib/components/data-grid/types';
 	import type { ColumnConfig } from '$lib/types';
@@ -277,7 +278,7 @@
 				{#if s?.labels && s.labels.length > 0}
 					<div class="flex flex-wrap gap-1">
 						{#each s.labels as label}
-							{@const colors = getLabelColors(label)}
+							{@const colors = getLabelColors(label, $labelColorOverrides)}
 							<span
 								class="px-1.5 py-0.5 text-[11px] rounded-sm font-medium leading-tight whitespace-nowrap"
 								style="background-color: {colors.bgColor}; color: {colors.color}"
