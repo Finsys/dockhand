@@ -129,6 +129,9 @@ async function sendToAppriseUrl(url: string, payload: NotificationPayload): Prom
 			case 'ntfy':
 			case 'ntfys':
 				return await sendNtfy(url, payload);
+			case 'bark':
+			case 'barks':
+				return await sendBark(url, payload);
 			case 'pushover':
 				return await sendPushover(url, payload);
 			case 'json':
@@ -431,6 +434,66 @@ async function sendNtfy(appriseUrl: string, payload: NotificationPayload): Promi
 		return { success: true };
 	} catch (error) {
 		return { success: false, error: `ntfy connection failed: ${error instanceof Error ? error.message : String(error)}` };
+	}
+}
+
+// Bark
+async function sendBark(appriseUrl: string, payload: NotificationPayload): Promise<NotificationResult> {
+	// Supported formats:
+	// bark://device_key (official api.day.app server)
+	// bark://host/device_key (custom server over HTTP)
+	// barks://host/device_key (custom server over HTTPS)
+	const isSecure = appriseUrl.startsWith('barks');
+	const path = appriseUrl.replace(/^barks?:\/\//, '');
+
+	let url: string;
+	let deviceKey: string;
+
+	if (!path.includes('/')) {
+		if (!path) {
+			return { success: false, error: 'Invalid Bark URL format. Expected: bark://device_key, bark://host/device_key, or barks://host/device_key' };
+		}
+		url = 'https://api.day.app/push';
+		deviceKey = path;
+	} else {
+		const parts = path.split('/');
+		if (parts.length !== 2) {
+			return { success: false, error: 'Invalid Bark URL format. Expected: bark://device_key, bark://host/device_key, or barks://host/device_key' };
+		}
+		const [host, key] = parts;
+		deviceKey = key;
+		if (!host || !deviceKey) {
+			return { success: false, error: 'Invalid Bark URL format. Expected: bark://device_key, bark://host/device_key, or barks://host/device_key' };
+		}
+		url = `${isSecure ? 'https' : 'http'}://${host}/push`;
+	}
+
+	const titleWithEnv = payload.environmentName ? `${payload.title} [${payload.environmentName}]` : payload.title;
+	const body: Record<string, string> = {
+		device_key: deviceKey,
+		title: titleWithEnv,
+		body: payload.message
+	};
+
+	if (payload.type === 'error') {
+		body.level = 'timeSensitive';
+	}
+
+	try {
+		const response = await fetch(url, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(body)
+		});
+
+		if (!response.ok) {
+			const text = await response.text().catch(() => '');
+			return { success: false, error: `Bark error ${response.status}: ${text || response.statusText}` };
+		}
+		await drainResponse(response);
+		return { success: true };
+	} catch (error) {
+		return { success: false, error: `Bark connection failed: ${error instanceof Error ? error.message : String(error)}` };
 	}
 }
 
