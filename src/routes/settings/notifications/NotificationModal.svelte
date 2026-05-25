@@ -427,11 +427,14 @@ ntfy://host/topic?auth=base64token&priority=3
 ntfys://host/topic?auth=base64token
 pushover://user_key/api_token
 workflows://hostname/workflow/signature
+bark://bark_key
+bark://host/bark_key
+barks://host/bark_key
 jsons://hostname/webhook/path"
 						class="flex min-h-[220px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
 					></textarea>
 					<p class="text-xs text-muted-foreground">
-						Supports Gotify (gotify:// or gotifys:// for HTTPS), Discord, Slack, Mattermost (mmost:// or mmosts://), Telegram, ntfy, Pushover, Workflows (for e.g. Microsoft Teams), and generic JSON webhooks.
+						Supports Gotify (gotify:// or gotifys:// for HTTPS), Discord, Slack, Mattermost (mmost:// or mmosts://), Telegram, ntfy, Bark, Pushover, Workflows (for e.g. Microsoft Teams), and generic JSON webhooks.
 						</p>
 					</div>
 				</div>
