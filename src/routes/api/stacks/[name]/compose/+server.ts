@@ -56,15 +56,23 @@ export const PUT: RequestHandler = async ({ params, request, url, cookies }) => 
 
 	try {
 		const body = await request.json();
-		const { content, restart = false, composePath, envPath, moveFromDir, oldComposePath, oldEnvPath } = body;
+		const { content, restart = false, composePath, envPath, moveFromDir, oldComposePath, oldEnvPath, opServiceAccountId } = body;
 
 		if (!content || typeof content !== 'string') {
 			return json({ error: 'Compose file content is required' }, { status: 400 });
 		}
 
-		// Build options object for custom paths, move operation, and file renames
-		const pathOptions = (composePath || envPath !== undefined || moveFromDir || oldComposePath || oldEnvPath)
-			? { composePath, envPath, moveFromDir, oldComposePath, oldEnvPath }
+		if (
+			'opServiceAccountId' in body &&
+			opServiceAccountId !== null &&
+			typeof opServiceAccountId !== 'number'
+		) {
+			return json({ error: 'opServiceAccountId must be a number or null' }, { status: 400 });
+		}
+
+		// Build options object for custom paths, move operation, file renames, and 1Password binding
+		const pathOptions = (composePath || envPath !== undefined || moveFromDir || oldComposePath || oldEnvPath || opServiceAccountId !== undefined)
+			? { composePath, envPath, moveFromDir, oldComposePath, oldEnvPath, opServiceAccountId }
 			: undefined;
 
 		if (restart) {

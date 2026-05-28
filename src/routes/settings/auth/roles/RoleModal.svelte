@@ -65,6 +65,7 @@
 		audit_logs: string[];
 		activity: string[];
 		schedules: string[];
+		secrets: string[];
 	}>({
 		containers: [],
 		images: [],
@@ -81,7 +82,8 @@
 		license: [],
 		audit_logs: [],
 		activity: [],
-		schedules: []
+		schedules: [],
+		secrets: []
 	});
 
 
@@ -138,6 +140,12 @@
 			{ key: 'view', label: 'View schedules' },
 			{ key: 'edit', label: 'Edit schedules' },
 			{ key: 'run', label: 'Run schedules' }
+		],
+		secrets: [
+			{ key: 'view', label: 'View secrets' },
+			{ key: 'create', label: 'Create secrets' },
+			{ key: 'edit', label: 'Edit secrets' },
+			{ key: 'delete', label: 'Delete secrets' }
 		]
 	};
 
@@ -204,7 +212,8 @@
 		license: KeyRound,
 		audit_logs: ClipboardList,
 		activity: Activity,
-		schedules: Timer
+		schedules: Timer,
+		secrets: KeyRound
 	};
 
 	const categoryColorsSolid: Record<string, string> = {
@@ -223,7 +232,8 @@
 		license: 'bg-yellow-100 dark:bg-yellow-950 text-yellow-700 dark:text-yellow-400 border-yellow-300 dark:border-yellow-800',
 		audit_logs: 'bg-stone-100 dark:bg-stone-950 text-stone-700 dark:text-stone-400 border-stone-300 dark:border-stone-800',
 		activity: 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400 border-emerald-300 dark:border-emerald-800',
-		schedules: 'bg-sky-100 dark:bg-sky-950 text-sky-700 dark:text-sky-400 border-sky-300 dark:border-sky-800'
+		schedules: 'bg-sky-100 dark:bg-sky-950 text-sky-700 dark:text-sky-400 border-sky-300 dark:border-sky-800',
+		secrets: 'bg-lime-100 dark:bg-lime-950 text-lime-700 dark:text-lime-400 border-lime-300 dark:border-lime-800'
 	};
 
 	const permissionIcons: Record<string, typeof Eye> = {
@@ -272,7 +282,8 @@
 			license: [],
 			audit_logs: [],
 			activity: [],
-			schedules: []
+			schedules: [],
+			secrets: []
 		};
 	}
 
@@ -302,7 +313,8 @@
 					license: [...(role.permissions.license || [])],
 					audit_logs: [...(role.permissions.audit_logs || [])],
 					activity: [...(role.permissions.activity || [])],
-					schedules: [...(role.permissions.schedules || [])]
+					schedules: [...(role.permissions.schedules || [])],
+					secrets: [...(role.permissions.secrets || [])]
 				};
 				formError = '';
 				formErrors = {};
@@ -330,7 +342,8 @@
 					license: [...(copyFrom.permissions.license || [])],
 					audit_logs: [...(copyFrom.permissions.audit_logs || [])],
 					activity: [...(copyFrom.permissions.activity || [])],
-					schedules: [...(copyFrom.permissions.schedules || [])]
+					schedules: [...(copyFrom.permissions.schedules || [])],
+					secrets: [...(copyFrom.permissions.secrets || [])]
 				};
 				formError = '';
 				formErrors = {};
