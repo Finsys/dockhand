@@ -285,6 +285,14 @@ export const gitCredentials = pgTable('git_credentials', {
 	updatedAt: timestamp('updated_at', { mode: 'string' }).defaultNow()
 });
 
+export const opServiceAccounts = pgTable('op_service_accounts', {
+	id: serial('id').primaryKey(),
+	name: text('name').notNull().unique(),
+	token: text('token').notNull(),
+	createdAt: timestamp('created_at', { mode: 'string' }).defaultNow(),
+	updatedAt: timestamp('updated_at', { mode: 'string' }).defaultNow()
+});
+
 export const gitRepositories = pgTable('git_repositories', {
 	id: serial('id').primaryKey(),
 	name: text('name').notNull().unique(),
@@ -342,6 +350,7 @@ export const stackSources = pgTable('stack_sources', {
 	gitStackId: integer('git_stack_id').references(() => gitStacks.id, { onDelete: 'set null' }),
 	composePath: text('compose_path'), // Custom path to compose file (for stacks with non-default location)
 	envPath: text('env_path'), // Custom path to .env file (for stacks with non-default location)
+	opServiceAccountId: integer('op_service_account_id').references(() => opServiceAccounts.id, { onDelete: 'set null' }),
 	createdAt: timestamp('created_at', { mode: 'string' }).defaultNow(),
 	updatedAt: timestamp('updated_at', { mode: 'string' }).defaultNow()
 }, (table) => ({

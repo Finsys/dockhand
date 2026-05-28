@@ -25,13 +25,17 @@ import {
 	removePendingContainerUpdate,
 	deleteAutoUpdateSchedule,
 	getAutoUpdateSetting,
-	getStackSourceByComposePath
+	getStackSourceByComposePath,
+	getOpServiceAccountById,
+	type StackSourceWithRepo
 } from './db';
+import { resolveEnvironment as resolveOpEnvironment } from './onepassword';
 import { unregisterSchedule } from './scheduler';
 import { deleteGitStackFiles, parseEnvFileContent } from './git';
 import { cleanPem } from '$lib/utils/pem';
 import { rewriteComposeVolumePaths, getHostDataDir } from './host-path';
 import { getOrderValue } from './container-labels';
+import { opServiceAccounts } from './db/drizzle.js';
 
 // =============================================================================
 // TYPES
@@ -526,6 +530,7 @@ export async function saveStackComposeFile(
 		moveFromDir?: string;  // Old directory to move all files from when path changes
 		oldComposePath?: string;  // Old compose file path for renaming
 		oldEnvPath?: string;  // Old env file path for renaming
+		opServiceAccountId?: number | null;  // 1Password binding (undefined = unchanged)
 	}
 ): Promise<{ success: boolean; error?: string }> {
 	// Validate stack name - Docker Compose requires lowercase alphanumeric, hyphens, underscores
@@ -671,14 +676,22 @@ export async function saveStackComposeFile(
 		}
 	}
 
-	// If a custom composePath is being set (new or update), save it to the database
-	if (options?.composePath || options?.envPath !== undefined) {
+	// If a custom composePath, envPath, or 1Password binding is being set (new or update), save it to the database
+	if (
+		options?.composePath ||
+		options?.envPath !== undefined ||
+		options?.opServiceAccountId !== undefined
+	) {
 		await upsertStackSource({
 			stackName: name,
 			environmentId: envId ?? null,
 			sourceType: 'internal',
 			composePath: options?.composePath || source?.composePath || null,
-			envPath: options?.envPath !== undefined ? options.envPath : (source?.envPath ?? null)
+			envPath: options?.envPath !== undefined ? options.envPath : (source?.envPath ?? null),
+			opServiceAccountId:
+				options?.opServiceAccountId !== undefined
+					? options.opServiceAccountId
+					: (source?.opServiceAccountId ?? null),
 		});
 	}
 
@@ -2349,8 +2362,17 @@ export async function deployStack(options: DeployStackOptions): Promise<StackOpe
 		console.log(compose);
 
 		// Fetch overrides and secrets from DB
-		const dbNonSecretVars = await getNonSecretEnvVarsAsRecord(name, envId);
-		const secretVars = await getSecretEnvVarsAsRecord(name, envId);
+		const initialDbNonSecretVars = await getNonSecretEnvVarsAsRecord(name, envId);
+		const initialSecretVars = await getSecretEnvVarsAsRecord(name, envId);
+
+		// Add environment variables from 1Password
+		const source = await getStackSource(name, envId);
+		const { dbNonSecretVars, secretVars } = await resolveOpEnvVars(
+			initialDbNonSecretVars, 
+			initialSecretVars, 
+			logPrefix, 
+			source?.opServiceAccountId,
+		);
 		console.log(`${logPrefix} DB non-secret override vars:`, Object.keys(dbNonSecretVars).length);
 		console.log(`${logPrefix} DB secret vars:`, Object.keys(secretVars).length);
 
@@ -2633,6 +2655,59 @@ export async function saveStackEnvVars(
 }
 
 // =============================================================================
+// 1PASSWORD INTEGRATION
+// =============================================================================
+
+interface EnrichedEnvVars {
+	dbNonSecretVars: Record<string, string>;
+	secretVars: Record<string, string>;
+}
+
+async function resolveOpEnvVars(
+	dbNonSecretVars: Record<string, string>, 
+	secretVars: Record<string, string>, 
+	logPrefix: string, 
+	opServiceAccountId?: number | null
+): Promise<EnrichedEnvVars> {
+	const opEnvId = dbNonSecretVars['OP_ENVIRONMENT_ID'] ?? secretVars['OP_ENVIRONMENT_ID'];
+	if (opEnvId) {
+		// Strip OP_ENVIRONMENT_ID from values passed to the stack
+		delete secretVars['OP_ENVIRONMENT_ID'];
+		delete dbNonSecretVars['OP_ENVIRONMENT_ID'];
+
+		try {
+			if (opServiceAccountId) {
+				const account = await getOpServiceAccountById(opServiceAccountId);
+				if (account?.token) {
+					console.log(`${logPrefix} Resolving 1Password Environment via "${account.name}"`);
+
+					const opVars = await resolveOpEnvironment(account.token, opEnvId);
+					console.log(`${logPrefix} 1Password injected ${opVars.length} secret(s)`);
+
+					// merge secrets with override
+					return {
+						dbNonSecretVars,
+						secretVars: Object.assign(opVars, secretVars),
+					}
+				} else {
+					console.warn(`${logPrefix} OP_ENVIRONMENT_ID is set but service account ${opServiceAccountId} not found`);
+				}
+			} else {
+				console.warn(`${logPrefix} OP_ENVIRONMENT_ID is set but no 1Password service account is bound to this stack`);
+			}
+		} catch (e: any) {
+			const msg = e instanceof Error ? e.message : String(e);
+			throw new Error(`Failed to load 1Password environment: ${msg}`);
+		}
+	}
+
+	return {
+		dbNonSecretVars,
+		secretVars,
+	}
+}
+
+// =============================================================================
 // RE-EXPORTS FOR BACKWARDS COMPATIBILITY
 // =============================================================================
 
@@ -2640,4 +2715,3 @@ export async function saveStackEnvVars(
 // They can be removed once all imports are updated
 
 export type { StackOperationResult as CreateStackResult };
-

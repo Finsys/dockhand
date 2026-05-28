@@ -769,7 +769,8 @@ async function seedDatabase(): Promise<void> {
 		license: ['manage'],
 		audit_logs: ['view'],
 		activity: ['view'],
-		schedules: ['view', 'edit', 'run']
+		schedules: ['view', 'edit', 'run'],
+		secrets: ['view', 'create', 'edit', 'delete']
 	});
 
 	const operatorPermissions = JSON.stringify({
@@ -788,7 +789,8 @@ async function seedDatabase(): Promise<void> {
 		license: [],
 		audit_logs: [],
 		activity: ['view'],
-		schedules: ['view', 'edit', 'run']
+		schedules: ['view', 'edit', 'run'],
+		secrets: ['view']
 	});
 
 	const viewerPermissions = JSON.stringify({
@@ -807,7 +809,8 @@ async function seedDatabase(): Promise<void> {
 		license: [],
 		audit_logs: [],
 		activity: ['view'],
-		schedules: ['view']
+		schedules: ['view'],
+		secrets: []
 	});
 
 	const existingRoles = await db.select().from(schema.roles);
@@ -891,6 +894,7 @@ export const userRoles = schemaProxy.userRoles;
 export const gitCredentials = schemaProxy.gitCredentials;
 export const gitRepositories = schemaProxy.gitRepositories;
 export const gitStacks = schemaProxy.gitStacks;
+export const opServiceAccounts = schemaProxy.opServiceAccounts;
 export const stackSources = schemaProxy.stackSources;
 export const vulnerabilityScans = schemaProxy.vulnerabilityScans;
 export const auditLogs = schemaProxy.auditLogs;
@@ -937,6 +941,8 @@ export type {
 	NewGitRepository,
 	GitStack,
 	NewGitStack,
+	OpServiceAccount,
+	NewOpServiceAccount,
 	StackSource,
 	NewStackSource,
 	VulnerabilityScan,
