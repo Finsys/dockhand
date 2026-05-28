@@ -5,6 +5,7 @@
 	import * as Select from '$lib/components/ui/select';
 	import { Label } from '$lib/components/ui/label';
 	import { Input } from '$lib/components/ui/input';
+	import { TogglePill } from '$lib/components/ui/toggle-pill';
 	import { Loader2, GitBranch, KeyRound, Lock, Key, Globe, Play, CheckCircle2 } from 'lucide-svelte';
 	import { focusFirstInput } from '$lib/utils';
 
@@ -20,6 +21,7 @@
 		url: string;
 		branch: string;
 		credentialId: number | null;
+		submodulesEnabled: boolean;
 	}
 
 	interface Props {
@@ -37,6 +39,7 @@
 	let formUrl = $state('');
 	let formBranch = $state('main');
 	let formCredentialId = $state<number | null>(null);
+	let formSubmodulesEnabled = $state(false);
 	let formError = $state('');
 	let formErrors = $state<{ name?: string; url?: string }>({});
 	let formSaving = $state(false);
@@ -69,11 +72,13 @@
 			formUrl = repository.url;
 			formBranch = repository.branch;
 			formCredentialId = repository.credentialId;
+			formSubmodulesEnabled = repository.submodulesEnabled;
 		} else {
 			formName = '';
 			formUrl = '';
 			formBranch = 'main';
 			formCredentialId = null;
+			formSubmodulesEnabled = false;
 		}
 		formError = '';
 		formErrors = {};
@@ -154,7 +159,8 @@
 				name: formName.trim(),
 				url: formUrl.trim(),
 				branch: formBranch || 'main',
-				credentialId: formCredentialId
+				credentialId: formCredentialId,
+				submodulesEnabled: formSubmodulesEnabled
 			};
 
 			const url = repository
@@ -292,6 +298,11 @@
 						<a href="/settings?tab=git&subtab=credentials" class="text-primary hover:underline">Add credentials</a> for private repositories
 					</p>
 				{/if}
+			</div>
+
+			<div class="space-y-2">
+				<Label>Use submodules</Label>
+				<TogglePill bind:checked={formSubmodulesEnabled} onchange={() => testResult = null} />
 			</div>
 
 			{#if formError}

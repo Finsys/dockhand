@@ -1947,6 +1947,7 @@ export interface GitRepositoryData {
 	autoUpdateCron: string;
 	webhookEnabled: boolean;
 	webhookSecret: string | null;
+	submodulesEnabled: boolean;
 	lastSync: string | null;
 	lastCommit: string | null;
 	syncStatus: GitSyncStatus;
@@ -1973,6 +1974,7 @@ export async function getGitRepositories(): Promise<GitRepositoryWithCredential[
 		autoUpdateCron: gitRepositories.autoUpdateCron,
 		webhookEnabled: gitRepositories.webhookEnabled,
 		webhookSecret: gitRepositories.webhookSecret,
+		submodulesEnabled: gitRepositories.submodulesEnabled,
 		lastSync: gitRepositories.lastSync,
 		lastCommit: gitRepositories.lastCommit,
 		syncStatus: gitRepositories.syncStatus,
@@ -2018,6 +2020,7 @@ export async function createGitRepository(data: {
 	autoUpdateCron?: string;
 	webhookEnabled?: boolean;
 	webhookSecret?: string | null;
+	submodulesEnabled?: boolean;
 }): Promise<GitRepositoryData> {
 	const result = await db.insert(gitRepositories).values({
 		name: data.name,
@@ -2030,7 +2033,8 @@ export async function createGitRepository(data: {
 		autoUpdateSchedule: data.autoUpdateSchedule || 'daily',
 		autoUpdateCron: data.autoUpdateCron || '0 3 * * *',
 		webhookEnabled: data.webhookEnabled || false,
-		webhookSecret: data.webhookSecret || null
+		webhookSecret: data.webhookSecret || null,
+		submodulesEnabled: data.submodulesEnabled || false,
 	}).returning();
 	return getGitRepository(result[0].id) as Promise<GitRepositoryData>;
 }
@@ -2049,6 +2053,7 @@ export async function updateGitRepository(id: number, data: Partial<GitRepositor
 	if (data.autoUpdateCron !== undefined) updateData.autoUpdateCron = data.autoUpdateCron;
 	if (data.webhookEnabled !== undefined) updateData.webhookEnabled = data.webhookEnabled;
 	if (data.webhookSecret !== undefined) updateData.webhookSecret = data.webhookSecret;
+	if (data.submodulesEnabled !== undefined) updateData.submodulesEnabled = data.submodulesEnabled;
 	if (data.lastSync !== undefined) updateData.lastSync = data.lastSync;
 	if (data.lastCommit !== undefined) updateData.lastCommit = data.lastCommit;
 	if (data.syncStatus !== undefined) updateData.syncStatus = data.syncStatus;

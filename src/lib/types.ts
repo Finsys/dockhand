@@ -157,6 +157,7 @@ export interface GitRepository {
 	autoUpdate: boolean;
 	webhookEnabled: boolean;
 	webhookSecret: string | null;
+	submodulesEnabled: boolean;
 	lastSync: string | null;
 	lastCommit: string | null;
 	syncStatus: 'pending' | 'syncing' | 'synced' | 'error';
