@@ -29,13 +29,16 @@ import {
 	getOpServiceAccountById,
 	type StackSourceWithRepo
 } from './db';
-import { resolveEnvironment as resolveOpEnvironment } from './onepassword';
+import {
+	resolveEnvironment as resolveOpEnvironment,
+	isOpReference,
+	resolveSecretReferences
+} from './onepassword';
 import { unregisterSchedule } from './scheduler';
 import { deleteGitStackFiles, parseEnvFileContent } from './git';
 import { cleanPem } from '$lib/utils/pem';
 import { rewriteComposeVolumePaths, getHostDataDir } from './host-path';
 import { getOrderValue } from './container-labels';
-import { opServiceAccounts } from './db/drizzle.js';
 
 // =============================================================================
 // TYPES
@@ -1927,6 +1930,10 @@ export async function startStack(
 	const containers = await getStackContainers(stackName, envId);
 	const operation = containers.length > 0 ? 'start' : 'up';
 
+	if (operation === 'up') {
+		await applyOpReferencesToComposeResult(result, stackName, envId, `[Stack:${stackName}]`);
+	}
+
 	return executeComposeCommand(
 		operation,
 		opts,
@@ -1994,6 +2001,7 @@ export async function restartStack(
 	if (mode === 'recreate') {
 		// Stop first, then bring up with --force-recreate to ensure new container IDs
 		await executeComposeCommand('stop', opts, result.content!, result.nonSecretVars, result.secretVars);
+		await applyOpReferencesToComposeResult(result, stackName, envId, `[Stack:${stackName}]`);
 		composeResult = await executeComposeCommand('up', { ...opts, forceRecreate: true }, result.content!, result.nonSecretVars, result.secretVars);
 	} else {
 		composeResult = await executeComposeCommand('restart', opts, result.content!, result.nonSecretVars, result.secretVars);
@@ -2347,11 +2355,13 @@ export async function deployStack(options: DeployStackOptions): Promise<StackOpe
 			stackFiles[composeFilename] = compose;
 			console.log(`${logPrefix} Added ${composeFilename} to stackFiles for Hawser (${compose.length} chars)`);
 		}
-		if (actualEnvPath && existsSync(actualEnvPath) && !stackFiles['.env']) {
+
+		let envFileContent: string | undefined = stackFiles['.env'];
+		if (!envFileContent && actualEnvPath && existsSync(actualEnvPath)) {
 			try {
-				const envContent = readFileSync(actualEnvPath, 'utf-8');
-				stackFiles['.env'] = envContent;
-				console.log(`${logPrefix} Added .env to stackFiles for Hawser (${envContent.length} chars)`);
+				envFileContent = readFileSync(actualEnvPath, 'utf-8');
+				stackFiles['.env'] = envFileContent;
+				console.log(`${logPrefix} Added .env to stackFiles for Hawser (${envFileContent.length} chars)`);
 			} catch (err) {
 				console.warn(`${logPrefix} Failed to read .env file at ${actualEnvPath}:`, err);
 			}
@@ -2368,10 +2378,11 @@ export async function deployStack(options: DeployStackOptions): Promise<StackOpe
 		// Add environment variables from 1Password
 		const source = await getStackSource(name, envId);
 		const { dbNonSecretVars, secretVars } = await resolveOpEnvVars(
-			initialDbNonSecretVars, 
-			initialSecretVars, 
-			logPrefix, 
+			initialDbNonSecretVars,
+			initialSecretVars,
+			logPrefix,
 			source?.opServiceAccountId,
+			envFileContent
 		);
 		console.log(`${logPrefix} DB non-secret override vars:`, Object.keys(dbNonSecretVars).length);
 		console.log(`${logPrefix} DB secret vars:`, Object.keys(secretVars).length);
@@ -2510,6 +2521,8 @@ export async function updateStackService(
 			error: result.error || `Compose file not found for stack "${stackName}"`
 		};
 	}
+
+	await applyOpReferencesToComposeResult(result, stackName, envId, `[Stack:${stackName}]`);
 
 	// Don't use forceRecreate - Docker Compose will detect the image change
 	// naturally since the image was already pulled before this function is called.
@@ -2664,10 +2677,11 @@ interface EnrichedEnvVars {
 }
 
 async function resolveOpEnvVars(
-	dbNonSecretVars: Record<string, string>, 
-	secretVars: Record<string, string>, 
-	logPrefix: string, 
-	opServiceAccountId?: number | null
+	dbNonSecretVars: Record<string, string>,
+	secretVars: Record<string, string>,
+	logPrefix: string,
+	opServiceAccountId?: number | null,
+	stackEnvFileContent?: string
 ): Promise<EnrichedEnvVars> {
 	const opEnvId = dbNonSecretVars['OP_ENVIRONMENT_ID'] ?? secretVars['OP_ENVIRONMENT_ID'];
 	if (opEnvId) {
@@ -2682,29 +2696,132 @@ async function resolveOpEnvVars(
 					console.log(`${logPrefix} Resolving 1Password Environment via "${account.name}"`);
 
 					const opVars = await resolveOpEnvironment(account.token, opEnvId);
-					console.log(`${logPrefix} 1Password injected ${opVars.length} secret(s)`);
+					console.log(`${logPrefix} 1Password injected ${Object.keys(opVars).length} secret(s)`);
 
-					// merge secrets with override
-					return {
-						dbNonSecretVars,
-						secretVars: Object.assign(opVars, secretVars),
-					}
+					// 1Password Environment values are merged underneath, with explicit
+					// DB secrets retaining priority
+					secretVars = Object.assign(opVars, secretVars);
 				} else {
 					console.warn(`${logPrefix} OP_ENVIRONMENT_ID is set but service account ${opServiceAccountId} not found`);
 				}
 			} else {
 				console.warn(`${logPrefix} OP_ENVIRONMENT_ID is set but no 1Password service account is bound to this stack`);
 			}
-		} catch (e: any) {
+		} catch (e: unknown) {
 			const msg = e instanceof Error ? e.message : String(e);
 			throw new Error(`Failed to load 1Password environment: ${msg}`);
 		}
 	}
 
-	return {
-		dbNonSecretVars,
-		secretVars,
+	const envFileOpRefs = new Map<string, string>();
+	if (stackEnvFileContent) {
+		const parsed = parseEnvFileContent(stackEnvFileContent);
+		for (const [key, value] of Object.entries(parsed)) {
+			if (isOpReference(value)) {
+				envFileOpRefs.set(key, value.trim());
+			}
+		}
 	}
+
+	const refs = new Set<string>();
+	for (const value of Object.values(dbNonSecretVars)) {
+		if (isOpReference(value)) refs.add(value.trim());
+	}
+	for (const value of Object.values(secretVars)) {
+		if (isOpReference(value)) refs.add(value.trim());
+	}
+	for (const ref of envFileOpRefs.values()) refs.add(ref);
+
+	if (refs.size === 0) {
+		return { dbNonSecretVars, secretVars };
+	}
+
+	if (!opServiceAccountId) {
+		console.warn(`${logPrefix} Found ${refs.size} op:// reference(s) but no 1Password service account is bound to this stack; leaving them as literals`);
+		return { dbNonSecretVars, secretVars };
+	}
+
+	const account = await getOpServiceAccountById(opServiceAccountId);
+	if (!account?.token) {
+		console.warn(`${logPrefix} Found ${refs.size} op:// reference(s) but service account ${opServiceAccountId} not found; leaving them as literals`);
+		return { dbNonSecretVars, secretVars };
+	}
+
+	let refMap: Map<string, string>;
+	try {
+		refMap = await resolveSecretReferences(account.token, Array.from(refs), logPrefix);
+	} catch (e: unknown) {
+		const msg = e instanceof Error ? e.message : String(e);
+		throw new Error(`Failed to resolve 1Password references: ${msg}`);
+	}
+
+	let promotedFromDb = 0;
+	for (const [key, value] of Object.entries(dbNonSecretVars)) {
+		if (isOpReference(value)) {
+			const resolved = refMap.get(value.trim());
+			if (resolved !== undefined) {
+				delete dbNonSecretVars[key];
+				secretVars[key] = resolved;
+				promotedFromDb++;
+			}
+		}
+	}
+	for (const [key, value] of Object.entries(secretVars)) {
+		if (isOpReference(value)) {
+			const resolved = refMap.get(value.trim());
+			if (resolved !== undefined) {
+				secretVars[key] = resolved;
+			}
+		}
+	}
+	
+	let promotedFromEnvFile = 0;
+	for (const [key, ref] of envFileOpRefs) {
+		if (key in secretVars || key in dbNonSecretVars) continue;
+		const resolved = refMap.get(ref);
+		if (resolved !== undefined) {
+			secretVars[key] = resolved;
+			promotedFromEnvFile++;
+		}
+	}
+
+	console.log(`${logPrefix} 1Password resolved ${refMap.size}/${refs.size} op:// reference(s) (promoted from DB: ${promotedFromDb}, from .env: ${promotedFromEnvFile})`);
+
+	return { dbNonSecretVars, secretVars };
+}
+
+/**
+ * Resolve op:// references for a compose result produced by requireComposeFile().
+ * Mutates result.secretVars / result.nonSecretVars in place so callers can pass
+ * the result through to executeComposeCommand without further plumbing.
+ */
+async function applyOpReferencesToComposeResult(
+	result: RequireComposeResult,
+	stackName: string,
+	envId: number | null | undefined,
+	logPrefix: string
+): Promise<void> {
+	if (!result.success || !result.secretVars || !result.nonSecretVars) return;
+
+	let envFileContent: string | undefined;
+	if (result.envPath && existsSync(result.envPath)) {
+		try {
+			envFileContent = readFileSync(result.envPath, 'utf-8');
+		} catch (err) {
+			console.warn(`${logPrefix} Failed to read .env at ${result.envPath}:`, err);
+		}
+	}
+
+	const source = await getStackSource(stackName, envId ?? undefined);
+	const { dbNonSecretVars, secretVars } = await resolveOpEnvVars(
+		{ ...result.nonSecretVars },
+		{ ...result.secretVars },
+		logPrefix,
+		source?.opServiceAccountId,
+		envFileContent
+	);
+	result.nonSecretVars = dbNonSecretVars;
+	result.secretVars = secretVars;
 }
 
 // =============================================================================
