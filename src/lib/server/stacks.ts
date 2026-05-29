@@ -2937,14 +2937,20 @@ async function resolveOpEnvVars(
 	opServiceAccountId?: number | null,
 	stackEnvFileContent?: string
 ): Promise<EnrichedEnvVars> {
-	const opEnvId = dbNonSecretVars['OP_ENVIRONMENT_ID'] ?? secretVars['OP_ENVIRONMENT_ID'];
-	if (opEnvId) {
-		// Strip OP_ENVIRONMENT_ID from values passed to the stack
-		delete secretVars['OP_ENVIRONMENT_ID'];
-		delete dbNonSecretVars['OP_ENVIRONMENT_ID'];
+	const envFileVars = stackEnvFileContent ? parseEnvFileContent(stackEnvFileContent) : {};
 
+	// Priority: secrets > DB non-secrets > .env file (each tier overrides the previous)
+	const opEnvId =
+		secretVars['OP_ENVIRONMENT_ID'] ??
+		dbNonSecretVars['OP_ENVIRONMENT_ID'] ??
+		envFileVars['OP_ENVIRONMENT_ID'];
+	if (opEnvId) {
 		try {
 			if (opServiceAccountId) {
+				// Strip OP_ENVIRONMENT_ID from values passed to the stack
+				delete secretVars['OP_ENVIRONMENT_ID'];
+				delete dbNonSecretVars['OP_ENVIRONMENT_ID'];
+
 				const account = await getOpServiceAccountById(opServiceAccountId);
 				if (account?.token) {
 					console.log(`${logPrefix} Resolving 1Password Environment via "${account.name}"`);
@@ -2968,12 +2974,9 @@ async function resolveOpEnvVars(
 	}
 
 	const envFileOpRefs = new Map<string, string>();
-	if (stackEnvFileContent) {
-		const parsed = parseEnvFileContent(stackEnvFileContent);
-		for (const [key, value] of Object.entries(parsed)) {
-			if (isOpReference(value)) {
-				envFileOpRefs.set(key, value.trim());
-			}
+	for (const [key, value] of Object.entries(envFileVars)) {
+		if (isOpReference(value)) {
+			envFileOpRefs.set(key, value.trim());
 		}
 	}
 
@@ -3028,7 +3031,7 @@ async function resolveOpEnvVars(
 			}
 		}
 	}
-	
+
 	let promotedFromEnvFile = 0;
 	for (const [key, ref] of envFileOpRefs) {
 		if (key in secretVars || key in dbNonSecretVars) continue;
