@@ -61,3 +61,41 @@ export async function resolveEnvironment(
 	}
 	return result;
 }
+
+/**
+ * Returns true when the trimmed value is an op:// secret reference.
+ */
+export function isOpReference(value: unknown): value is string {
+	return typeof value === 'string' && value.trim().startsWith('op://');
+}
+
+/**
+ * Resolves a list of op:// secret references in a single SDK call.
+ * Returns a map of only the successfully resolved refs. Individual failures
+ * (ref not found, parsing errors, etc.) are logged as warnings and skipped,
+ * leaving the original literal for the caller to handle. The SDK itself may
+ * still throw on transport / auth failures — those propagate to the caller.
+ */
+export async function resolveSecretReferences(
+	token: string,
+	refs: string[],
+	logPrefix = '[1Password]'
+): Promise<Map<string, string>> {
+	const result = new Map<string, string>();
+	if (refs.length === 0) {
+		return result;
+	}
+	const client = await makeClient(token);
+	const response = await client.secrets.resolveAll(refs);
+	for (const [ref, item] of Object.entries(response.individualResponses)) {
+		if (item.error) {
+			const detail = item.error.message ?? item.error.type ?? 'unknown error';
+			console.warn(`${logPrefix} Skipping op:// reference ${ref}: ${detail}`);
+			continue;
+		}
+		if (item.content?.secret !== undefined) {
+			result.set(ref, item.content.secret);
+		}
+	}
+	return result;
+}
