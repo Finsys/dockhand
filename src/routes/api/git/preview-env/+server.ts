@@ -1,6 +1,6 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getGitRepository, getGitCredential } from '$lib/server/db';
+import { getGitRepository, getGitCredential, getComposePathsValidationError, normalizeComposePaths } from '$lib/server/db';
 import { previewRepoEnvFiles } from '$lib/server/git';
 import { authorize } from '$lib/server/authorize';
 
@@ -41,6 +41,22 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			return json({ error: 'Compose path is required' }, { status: 400 });
 		}
 
+		const composePaths = normalizeComposePaths(data.composePath);
+		const composePathsError = getComposePathsValidationError(composePaths);
+		if (composePathsError) {
+			return json({ error: composePathsError }, { status: 400 });
+		}
+
+		const envFilePath = typeof data.envFilePath === 'string' && data.envFilePath.trim()
+			? normalizeComposePaths(data.envFilePath)[0]
+			: null;
+		if (envFilePath) {
+			const envFilePathError = getComposePathsValidationError([envFilePath], 'env file path');
+			if (envFilePathError) {
+				return json({ error: envFilePathError }, { status: 400 });
+			}
+		}
+
 		let repoUrl: string;
 		let branch: string = 'main';
 		let credentialId: number | null = null;
@@ -73,8 +89,8 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			repoUrl,
 			branch,
 			credential,
-			composePath: data.composePath,
-			envFilePath: data.envFilePath || null
+			composePath: composePaths[0],
+			envFilePath
 		});
 
 		if (result.error) {

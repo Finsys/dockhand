@@ -10,6 +10,8 @@ import {
 	updateGitStack,
 	upsertStackSource,
 	getEnvironment,
+	assertValidComposePaths,
+	normalizeComposePaths,
 	type GitRepository,
 	type GitCredential,
 	type GitStackWithRepo
@@ -369,12 +371,79 @@ export interface SyncResult {
 	composeContent?: string;
 	composeDir?: string; // Directory containing the compose file (for copying all files)
 	composeFileName?: string; // Filename of the compose file (e.g., "docker-compose.yaml")
+	composeFileNames?: string[]; // Compose filenames in Docker Compose -f order, relative to composeDir
 	envFileVars?: Record<string, string>; // Variables from .env file in repo
 	envFileContent?: string; // Raw .env file content (for Hawser deployments)
 	envFileName?: string; // Filename of env file relative to composeDir (e.g., ".env" or "../.env")
 	error?: string;
 	updated?: boolean;
 	changedFiles?: string[]; // List of files that changed (for logging/debugging)
+}
+
+interface GitStackComposeFiles {
+	composeContent: string;
+	composeDir: string;
+	composeFileName: string;
+	composeFileNames: string[];
+}
+
+function getGitStackComposePaths(gitStack: GitStackWithRepo): string[] {
+	return normalizeComposePaths(gitStack.composePaths, gitStack.composePath);
+}
+
+function assertPathWithin(parent: string, child: string, message: string): void {
+	const rel = relative(resolve(parent), resolve(child));
+	if (rel === '..' || rel.startsWith('../') || rel.startsWith('..\\')) {
+		throw new Error(message);
+	}
+}
+
+function readGitStackComposeFiles(
+	gitStack: GitStackWithRepo,
+	repoPath: string,
+	logPrefix?: string
+): GitStackComposeFiles {
+	const composePaths = getGitStackComposePaths(gitStack);
+	assertValidComposePaths(composePaths);
+	const absoluteComposePaths = composePaths.map(path => join(repoPath, path));
+
+	for (let i = 0; i < absoluteComposePaths.length; i++) {
+		const composePath = absoluteComposePaths[i];
+		assertPathWithin(repoPath, composePath, 'Compose files must be within the repository');
+		if (logPrefix) {
+			console.log(`${logPrefix} Reading compose file ${i + 1}/${absoluteComposePaths.length} from:`, composePath);
+		}
+		if (!existsSync(composePath)) {
+			if (logPrefix) {
+				console.log(`${logPrefix} ERROR: Compose file not found at:`, composePath);
+			}
+			throw new Error(`Compose file not found: ${composePaths[i]}`);
+		}
+	}
+
+	const composeContent = readFileSync(absoluteComposePaths[0], 'utf-8');
+	const composeDir = gitStack.contextDir
+		? resolve(repoPath, gitStack.contextDir)
+		: dirname(absoluteComposePaths[0]);
+
+	if (gitStack.contextDir) {
+		assertPathWithin(repoPath, composeDir, 'Context directory must be within the repository');
+	}
+
+	const composePathBoundaryMessage = gitStack.contextDir
+		? 'Compose files must be within the context directory'
+		: 'Additional compose files must be in the primary compose directory unless a context directory is configured';
+	const composeFileNames = absoluteComposePaths.map((composePath) => {
+		assertPathWithin(composeDir, composePath, composePathBoundaryMessage);
+		return relative(composeDir, composePath);
+	});
+
+	return {
+		composeContent,
+		composeDir,
+		composeFileName: composeFileNames[0],
+		composeFileNames
+	};
 }
 
 export interface TestResult {
@@ -776,7 +845,7 @@ export async function syncGitStack(stackId: number): Promise<SyncResult> {
 	console.log(`${logPrefix} Stack ID:`, stackId);
 	console.log(`${logPrefix} Stack name:`, gitStack.stackName);
 	console.log(`${logPrefix} Repository ID:`, gitStack.repositoryId);
-	console.log(`${logPrefix} Compose path:`, gitStack.composePath);
+	console.log(`${logPrefix} Compose paths:`, getGitStackComposePaths(gitStack).join(', '));
 	console.log(`${logPrefix} Env file path:`, gitStack.envFilePath || '(none)');
 	console.log(`${logPrefix} Environment ID:`, gitStack.environmentId);
 
@@ -851,12 +920,12 @@ export async function syncGitStack(stackId: number): Promise<SyncResult> {
 		let changedFiles: string[] = [];
 		if (commitChanged) {
 			// Use contextDir if set, otherwise fall back to compose file's directory
-			const diffDirRelative = gitStack.contextDir || dirname(gitStack.composePath);
+			const diffDirRelative = gitStack.contextDir || dirname(getGitStackComposePaths(gitStack)[0]);
 			console.log(`${logPrefix} Checking for changes in directory: ${diffDirRelative || '(root)'}`);
 
 			const diffResult = await getChangedFilesInDir(
 				repoPath,
-				previousCommit,
+				previousCommit || '',
 				newCommit,
 				diffDirRelative || '.',
 				env
@@ -887,43 +956,17 @@ export async function syncGitStack(stackId: number): Promise<SyncResult> {
 		currentCommit = commitResult.stdout.substring(0, 7);
 		console.log(`${logPrefix} Current commit:`, currentCommit);
 
-		// Read the compose file
-		const composePath = join(repoPath, gitStack.composePath);
-		console.log(`${logPrefix} Reading compose file from:`, composePath);
-		if (!existsSync(composePath)) {
-			console.log(`${logPrefix} ERROR: Compose file not found at:`, composePath);
-			throw new Error(`Compose file not found: ${gitStack.composePath}`);
-		}
-
-		const composeContent = readFileSync(composePath, 'utf-8');
-		console.log(`${logPrefix} Compose content length:`, composeContent.length, 'chars');
-		console.log(`${logPrefix} Compose content:`);
+		const {
+			composeContent,
+			composeDir,
+			composeFileName,
+			composeFileNames
+		} = readGitStackComposeFiles(gitStack, repoPath, logPrefix);
+		console.log(`${logPrefix} Primary compose content length:`, composeContent.length, 'chars');
+		console.log(`${logPrefix} Primary compose content:`);
 		console.log(composeContent);
-
-		// Determine the source directory and compose filename
-		// If contextDir is set, use it as the source directory (relative to repo root)
-		// and compute composeFileName as relative path from contextDir to compose file
-		let composeDir: string;
-		let composeFileName: string;
-		if (gitStack.contextDir) {
-			const contextDirAbsolute = resolve(repoPath, gitStack.contextDir);
-			// Validate: context dir must be within repo
-			if (!contextDirAbsolute.startsWith(repoPath)) {
-				throw new Error('Context directory must be within the repository');
-			}
-			// Validate: compose file must be within context directory
-			const relCompose = relative(contextDirAbsolute, composePath);
-			if (relCompose.startsWith('..')) {
-				throw new Error('Compose file must be within the context directory');
-			}
-			composeDir = contextDirAbsolute;
-			composeFileName = relCompose; // e.g., "apps/myapp/compose.yaml"
-		} else {
-			composeDir = dirname(composePath);
-			composeFileName = basename(gitStack.composePath); // e.g., "docker-compose.yaml"
-		}
 		console.log(`${logPrefix} Source directory (composeDir):`, composeDir);
-		console.log(`${logPrefix} Compose filename:`, composeFileName);
+		console.log(`${logPrefix} Compose filenames:`, composeFileNames.join(', '));
 
 		// Read env file if configured (optional - don't fail if missing)
 		let envFileVars: Record<string, string> | undefined;
@@ -979,6 +1022,7 @@ export async function syncGitStack(stackId: number): Promise<SyncResult> {
 			composeContent,
 			composeDir,
 			composeFileName,
+			composeFileNames,
 			envFileVars,
 			envFileName,
 			updated,
@@ -1052,7 +1096,7 @@ export async function deployGitStack(stackId: number, options?: { force?: boolea
 	// new env var values even if compose file itself didn't change
 	console.log(`${logPrefix} Calling deployStack...`);
 	console.log(`${logPrefix} Source directory (composeDir):`, syncResult.composeDir);
-	console.log(`${logPrefix} Compose filename:`, syncResult.composeFileName);
+	console.log(`${logPrefix} Compose filenames:`, syncResult.composeFileNames?.join(', ') ?? syncResult.composeFileName);
 	console.log(`${logPrefix} Env filename:`, syncResult.envFileName ?? '(none)');
 
 	const result = await deployStack({
@@ -1061,6 +1105,7 @@ export async function deployGitStack(stackId: number, options?: { force?: boolea
 		envId: gitStack.environmentId,
 		sourceDir: syncResult.composeDir, // Copy entire directory from git repo
 		composeFileName: syncResult.composeFileName, // Use original compose filename from repo
+		composeFileNames: syncResult.composeFileNames,
 		envFileName: syncResult.envFileName, // Env file relative to compose dir (for --env-file flag, optional)
 		forceRecreate,
 		build: gitStack.buildOnDeploy,
@@ -1078,8 +1123,9 @@ export async function deployGitStack(stackId: number, options?: { force?: boolea
 	if (result.success) {
 		// Record the stack source with resolved compose path for consistency
 		const stackDir = await getStackDir(gitStack.stackName, gitStack.environmentId);
-		const resolvedComposePath = syncResult.composeFileName
-			? join(stackDir, syncResult.composeFileName)
+		const primaryComposeFileName = syncResult.composeFileNames?.[0] ?? syncResult.composeFileName;
+		const resolvedComposePath = primaryComposeFileName
+			? join(stackDir, primaryComposeFileName)
 			: undefined;
 
 		console.log(`${logPrefix} Resolved compose path for stack_sources:`, resolvedComposePath);
@@ -1244,10 +1290,10 @@ export async function deployGitStackWithProgress(
 		// Check if any files in the context/compose directory have changed
 		// (for consistency with syncGitStack, though this function always deploys)
 		if (commitChanged) {
-			const diffDir = gitStack.contextDir || dirname(gitStack.composePath);
+			const diffDir = gitStack.contextDir || dirname(getGitStackComposePaths(gitStack)[0]);
 			const diffResult = await getChangedFilesInDir(
 				repoPath,
-				previousCommit,
+				previousCommit || '',
 				newCommit,
 				diffDir || '.',
 				env
@@ -1262,32 +1308,14 @@ export async function deployGitStackWithProgress(
 		currentCommit = commitResult.stdout.substring(0, 7);
 
 		// Step 4: Reading compose file
-		onProgress({ status: 'reading', message: `Reading ${gitStack.composePath}...`, step: 4, totalSteps });
-		const composePath = join(repoPath, gitStack.composePath);
-		if (!existsSync(composePath)) {
-			throw new Error(`Compose file not found: ${gitStack.composePath}`);
-		}
-
-		const composeContent = readFileSync(composePath, 'utf-8');
-
-		// Determine the source directory and compose filename
-		let composeDir: string;
-		let progressComposeFileName: string;
-		if (gitStack.contextDir) {
-			const contextDirAbsolute = resolve(repoPath, gitStack.contextDir);
-			if (!contextDirAbsolute.startsWith(repoPath)) {
-				throw new Error('Context directory must be within the repository');
-			}
-			const relCompose = relative(contextDirAbsolute, composePath);
-			if (relCompose.startsWith('..')) {
-				throw new Error('Compose file must be within the context directory');
-			}
-			composeDir = contextDirAbsolute;
-			progressComposeFileName = relCompose;
-		} else {
-			composeDir = dirname(composePath);
-			progressComposeFileName = basename(gitStack.composePath);
-		}
+		const composePaths = getGitStackComposePaths(gitStack);
+		onProgress({ status: 'reading', message: `Reading ${composePaths.join(', ')}...`, step: 4, totalSteps });
+		const {
+			composeContent,
+			composeDir,
+			composeFileName,
+			composeFileNames
+		} = readGitStackComposeFiles(gitStack, repoPath);
 
 		// Read env file if configured (optional - don't fail if missing)
 		let envFileVars: Record<string, string> | undefined;
@@ -1334,7 +1362,8 @@ export async function deployGitStackWithProgress(
 			compose: composeContent,
 			envId: gitStack.environmentId,
 			sourceDir: composeDir, // Copy entire directory from git repo
-			composeFileName: progressComposeFileName, // Compose filename relative to source dir
+			composeFileName, // Compose filename relative to source dir
+			composeFileNames,
 			envFileName, // Env file relative to compose dir (for --env-file flag, optional)
 			build: gitStack.buildOnDeploy,
 			noBuildCache: gitStack.noBuildCache,
@@ -1344,7 +1373,7 @@ export async function deployGitStackWithProgress(
 		if (result.success) {
 			// Record the stack source with resolved compose path for consistency
 			const stackDir = await getStackDir(gitStack.stackName, gitStack.environmentId);
-			const resolvedComposePath = join(stackDir, progressComposeFileName);
+			const resolvedComposePath = join(stackDir, composeFileName);
 
 			await upsertStackSource({
 				stackName: gitStack.stackName,
@@ -1545,6 +1574,12 @@ interface PreviewEnvResult {
  */
 export async function previewRepoEnvFiles(options: PreviewEnvOptions): Promise<PreviewEnvResult> {
 	const { repoUrl, branch, credential, composePath, envFilePath } = options;
+	const normalizedComposePath = normalizeComposePaths(composePath)[0];
+	assertValidComposePaths([normalizedComposePath]);
+	const normalizedEnvFilePath = envFilePath ? normalizeComposePaths(envFilePath)[0] : null;
+	if (normalizedEnvFilePath) {
+		assertValidComposePaths([normalizedEnvFilePath]);
+	}
 	const logPrefix = '[Git:Preview]';
 
 	// Create a unique temp directory
@@ -1585,7 +1620,7 @@ export async function previewRepoEnvFiles(options: PreviewEnvOptions): Promise<P
 		console.log(`${logPrefix} Clone successful`);
 
 		// Determine the compose directory (where .env file should be)
-		const composeDir = dirname(composePath);
+		const composeDir = dirname(normalizedComposePath);
 		const baseEnvPath = join(tempDir, composeDir, '.env');
 
 		const vars: Record<string, string> = {};
@@ -1606,8 +1641,8 @@ export async function previewRepoEnvFiles(options: PreviewEnvOptions): Promise<P
 		}
 
 		// Read additional env file if specified
-		if (envFilePath) {
-			const additionalEnvPath = join(tempDir, envFilePath);
+		if (normalizedEnvFilePath) {
+			const additionalEnvPath = join(tempDir, normalizedEnvFilePath);
 			if (existsSync(additionalEnvPath)) {
 				console.log(`${logPrefix} Reading additional env file: ${additionalEnvPath}`);
 				const content = readFileSync(additionalEnvPath, 'utf-8');
@@ -1616,7 +1651,7 @@ export async function previewRepoEnvFiles(options: PreviewEnvOptions): Promise<P
 					vars[key] = value;
 					sources[key] = 'envFile';
 				}
-				console.log(`${logPrefix} Found ${Object.keys(additionalVars).length} vars in ${envFilePath}`);
+				console.log(`${logPrefix} Found ${Object.keys(additionalVars).length} vars in ${normalizedEnvFilePath}`);
 			} else {
 				console.log(`${logPrefix} Additional env file not found: ${additionalEnvPath}`);
 			}
