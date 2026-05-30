@@ -68,6 +68,17 @@
 	let rawEnvContent = $state(''); // Raw .env file content (comments preserved)
 	let envValidation = $state<ValidationResult | null>(null);
 	let validating = $state(false);
+
+	// OP_ENVIRONMENT_ID is consumed by the 1Password integration, not the compose file,
+	// so it only counts as "used" when a service account is bound to the stack.
+	const effectiveValidation = $derived.by<ValidationResult | null>(() => {
+		if (!envValidation || formOpServiceAccountId === null) return envValidation;
+		if (!envValidation.unused.includes('OP_ENVIRONMENT_ID')) return envValidation;
+		return {
+			...envValidation,
+			unused: envValidation.unused.filter((v) => v !== 'OP_ENVIRONMENT_ID')
+		};
+	});
 	let existingSecretKeys = $state<Set<string>>(new Set());
 	let hadExistingDbVars = $state(false); // Track if DB had any vars on load (for proper cleanup)
 
@@ -1673,7 +1684,7 @@
 									bind:this={envVarsPanelRef}
 									bind:variables={envVars}
 									bind:rawContent={rawEnvContent}
-									validation={envValidation}
+									validation={effectiveValidation}
 									existingSecretKeys={mode === 'edit' ? existingSecretKeys : new Set()}
 									onchange={() => { markDirty(); debouncedValidate(); }}
 									theme={editorTheme}
