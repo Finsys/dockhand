@@ -2,8 +2,8 @@
  * 1Password Service Account integration.
  *
  * Thin wrapper around the official @1password/sdk that exposes only what
- * Dockhand needs: validating a service account token and reading variables
- * from a 1Password Environment.
+ * Dockhand needs: validating a service account token, reading variables
+ * from a 1Password Environment, and interpolating op:// references.
  *
  * Decrypted tokens stay inside this module and the in-memory SDK client.
  * Nothing here writes to disk or to the database.
