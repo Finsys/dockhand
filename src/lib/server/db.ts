@@ -2901,19 +2901,17 @@ export async function upsertStackSource(data: {
 			console.log(`[GitStack] Updating stack_sources "${data.stackName}" env=${data.environmentId}: ${changes.join(', ')}`);
 		}
 
-		const updateSet: Record<string, any> = {
-			sourceType: data.sourceType,
-			gitRepositoryId: newRepoId,
-			gitStackId: newStackId,
-			composePath: data.composePath ?? null,
-			envPath: data.envPath ?? null,
-			updatedAt: new Date().toISOString()
-		};
-		if (data.opServiceAccountId !== undefined) {
-			updateSet.opServiceAccountId = data.opServiceAccountId;
-		}
 		await db.update(stackSources)
-			.set(updateSet)
+			.set({
+				sourceType: data.sourceType,
+				gitRepositoryId: newRepoId,
+				gitStackId: newStackId,
+				composePath: data.composePath ?? null,
+				envPath: data.envPath ?? null,
+				updatedAt: new Date().toISOString(),
+				// Preserve existing binding when caller (like git) omits it
+				...(data.opServiceAccountId !== undefined && { opServiceAccountId: data.opServiceAccountId })
+			})
 			.where(eq(stackSources.id, existing.id));
 		return getStackSource(data.stackName, data.environmentId) as Promise<StackSourceData>;
 	} else {
@@ -2940,16 +2938,13 @@ export async function updateStackSource(
 	const existing = await getStackSource(stackName, environmentId);
 	if (!existing) return false;
 
-	const set: Record<string, any> = {
-		composePath: updates.composePath !== undefined ? updates.composePath : existing.composePath,
-		envPath: updates.envPath !== undefined ? updates.envPath : existing.envPath,
-		updatedAt: new Date().toISOString()
-	};
-	if (updates.opServiceAccountId !== undefined) {
-		set.opServiceAccountId = updates.opServiceAccountId;
-	}
 	await db.update(stackSources)
-		.set(set)
+		.set({
+			composePath: updates.composePath !== undefined ? updates.composePath : existing.composePath,
+			envPath: updates.envPath !== undefined ? updates.envPath : existing.envPath,
+			opServiceAccountId: updates.opServiceAccountId !== undefined ? updates.opServiceAccountId : existing.opServiceAccountId,
+			updatedAt: new Date().toISOString()
+		})
 		.where(eq(stackSources.id, existing.id));
 
 	return true;
