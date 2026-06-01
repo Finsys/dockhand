@@ -291,7 +291,7 @@ export const gitRepositories = pgTable('git_repositories', {
 	url: text('url').notNull(),
 	branch: text('branch').default('main'),
 	credentialId: integer('credential_id').references(() => gitCredentials.id, { onDelete: 'set null' }),
-	composePath: text('compose_path').default('compose.yaml'),
+	composePath: text('compose_path').default('docker-compose.yml'),
 	environmentId: integer('environment_id'),
 	autoUpdate: boolean('auto_update').default(false),
 	autoUpdateSchedule: text('auto_update_schedule').default('daily'),
@@ -311,7 +311,7 @@ export const gitStacks = pgTable('git_stacks', {
 	stackName: text('stack_name').notNull(),
 	environmentId: integer('environment_id').references(() => environments.id, { onDelete: 'cascade' }),
 	repositoryId: integer('repository_id').notNull().references(() => gitRepositories.id, { onDelete: 'cascade' }),
-	composePath: text('compose_path').default('compose.yaml'),
+	composePath: text('compose_path').default('docker-compose.yml'),
 	envFilePath: text('env_file_path'), // Path to .env file in repository (e.g., ".env", "config/.env.prod")
 	autoUpdate: boolean('auto_update').default(false),
 	autoUpdateSchedule: text('auto_update_schedule').default('daily'),
