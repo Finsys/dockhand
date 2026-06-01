@@ -1,0 +1,1 @@
+ALTER TABLE "git_repositories" ADD COLUMN "submodules_enabled" boolean DEFAULT false;
