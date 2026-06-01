@@ -6,6 +6,8 @@
 	import { focusFirstInput } from '$lib/utils';
 	import ContainerSettingsTab from './ContainerSettingsTab.svelte';
 	import type { VulnerabilityCriteria } from '$lib/components/VulnerabilityCriteriaSelector.svelte';
+	import { parseHostPort, expandPortBindings, formatHostPort } from '$lib/utils/port-parse';
+	import { formatBytes } from '$lib/utils/format';
 
 	// Parse shell command respecting quotes
 	function parseShellCommand(cmd: string): string[] {
@@ -337,14 +339,6 @@
 		}
 	}
 
-	function formatBytes(bytes: number): string {
-		if (bytes === 0) return '';
-		const k = 1024;
-		const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-		const i = Math.floor(Math.log(bytes) / Math.log(k));
-		return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + sizes[i];
-	}
-
 	async function loadContainerData() {
 		loadingData = true;
 		try {
@@ -372,14 +366,16 @@
 				networkMode = 'bridge';
 			}
 
-			// Parse port mappings
+			// Parse port mappings (include HostIp if present)
 			const ports = data.HostConfig.PortBindings || {};
 			portMappings = Object.keys(ports).length > 0
 				? Object.entries(ports).map(([containerPort, bindings]: [string, any]) => {
 						const [port, protocol] = containerPort.split('/');
+						const hostIp = bindings[0]?.HostIp || '';
+						const hostPort = bindings[0]?.HostPort || '';
 						return {
 							containerPort: port,
-							hostPort: bindings[0]?.HostPort || '',
+							hostPort: formatHostPort(hostIp, hostPort),
 							protocol: protocol || 'tcp'
 						};
 				  })
@@ -860,12 +856,13 @@
 			if (containerConfigChanged) {
 				statusMessage = 'Updating container...';
 
-				const ports: any = {};
+				const ports: Record<string, { HostIp?: string; HostPort: string }> = {};
 				portMappings
-					.filter((p) => p.containerPort && p.hostPort)
+					.filter((p) => p.containerPort)
 					.forEach((p) => {
-						const key = `${p.containerPort}/${p.protocol}`;
-						ports[key] = { HostPort: String(p.hostPort) };
+						const parsed = parseHostPort(p.hostPort);
+						const bindings = expandPortBindings(parsed.hostPort, p.containerPort, p.protocol, parsed.hostIp);
+						Object.assign(ports, bindings);
 					});
 
 				const volumeBinds = volumeMappings

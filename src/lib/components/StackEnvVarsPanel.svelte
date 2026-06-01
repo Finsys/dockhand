@@ -114,12 +114,7 @@
 			}
 
 			const key = trimmed.slice(0, eqIndex).trim();
-			let value = trimmed.slice(eqIndex + 1);
-
-			if ((value.startsWith('"') && value.endsWith('"')) ||
-			    (value.startsWith("'") && value.endsWith("'"))) {
-				value = value.slice(1, -1);
-			}
+			const value = trimmed.slice(eqIndex + 1);
 
 			if (key) {
 				if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key)) {

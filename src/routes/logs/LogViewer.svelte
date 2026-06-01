@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { RefreshCw, Copy, Download, WrapText, ArrowDownToLine, Search, ChevronUp, ChevronDown, X, Type, Eraser, Filter } from 'lucide-svelte';
+	import { RefreshCw, Copy, Download, WrapText, ArrowDownToLine, Search, ChevronUp, ChevronDown, X, Type, Eraser, Filter, Hash } from 'lucide-svelte';
+	import { wrapHtmlLines } from '$lib/utils/log-lines';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import * as Select from '$lib/components/ui/select';
 	import { appSettings, formatLogTimestamps } from '$lib/stores/settings';
@@ -37,6 +38,7 @@
 
 	let logsRef: HTMLDivElement;
 	let wordWrap = $state(true);
+	let showLineNumbers = $state(typeof window !== 'undefined' && localStorage.getItem('dockhand-log-line-numbers') === 'true');
 	let fontSize = $state(12);
 
 	// RAF-based auto-scroll
@@ -252,6 +254,14 @@
 			>
 				<WrapText class="w-3 h-3 transition-colors {wordWrap ? 'text-amber-400' : 'text-zinc-500 hover:text-zinc-300'}" />
 			</button>
+			<!-- Line numbers -->
+			<button
+				onclick={() => { showLineNumbers = !showLineNumbers; localStorage.setItem('dockhand-log-line-numbers', String(showLineNumbers)); }}
+				class="p-1 rounded hover:bg-zinc-800 transition-colors {showLineNumbers ? 'bg-amber-500/20 ring-1 ring-amber-500/50' : ''}"
+				title={showLineNumbers ? 'Hide line numbers' : 'Show line numbers'}
+			>
+				<Hash class="w-3 h-3 transition-colors {showLineNumbers ? 'text-amber-400' : 'text-zinc-500 hover:text-zinc-300'}" />
+			</button>
 			<!-- Search -->
 			{#if logSearchActive}
 				<div class="flex items-center gap-1 bg-zinc-800 rounded px-1.5 py-0.5">
@@ -333,7 +343,7 @@
 	<!-- Logs content -->
 	<div bind:this={logsRef} class="flex-1 overflow-auto p-4">
 		{#if logs}
-			<pre class="text-zinc-50 {wordWrap ? 'whitespace-pre-wrap' : 'whitespace-pre'}" style="font-size: {fontSize}px; font-family: {terminalFontFamily()};">{@html highlightedLogs()}</pre>
+			<pre class="text-zinc-50 {wordWrap ? 'whitespace-pre-wrap' : 'whitespace-pre'} {showLineNumbers ? 'show-line-numbers' : ''}" style="font-size: {fontSize}px; font-family: {terminalFontFamily()};">{@html wrapHtmlLines(highlightedLogs())}</pre>
 		{:else if loading}
 			<div class="flex items-center justify-center h-full text-muted-foreground">
 				<RefreshCw class="w-5 h-5 animate-spin mr-2" />

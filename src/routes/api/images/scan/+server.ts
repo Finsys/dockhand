@@ -1,6 +1,7 @@
 import { json, type RequestHandler } from '@sveltejs/kit';
 import { scanImage, type ScanProgress, type ScanResult } from '$lib/server/scanner';
 import { saveVulnerabilityScan, getLatestScanForImage } from '$lib/server/db';
+import { inspectImage } from '$lib/server/docker';
 import { authorize } from '$lib/server/authorize';
 import { createJobResponse } from '$lib/server/sse';
 
@@ -97,8 +98,16 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 	}
 
 	try {
-		// Note: getLatestScanForImage signature is (imageId, scanner, environmentId)
-		const result = await getLatestScanForImage(imageName, scanner, envId);
+		// Resolve tag to SHA256 ID for reliable cache lookup
+		let imageId = imageName;
+		try {
+			const info = await inspectImage(imageName, envId) as any;
+			if (info.Id) imageId = info.Id;
+		} catch {
+			// Fall back to name if inspect fails
+		}
+
+		const result = await getLatestScanForImage(imageId, scanner, envId);
 		if (!result) {
 			return json({ found: false });
 		}

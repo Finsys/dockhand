@@ -6,6 +6,7 @@
  */
 
 import { homedir } from 'node:os';
+import { mergeImageEnvVars } from './container-env-merge';
 import { existsSync, mkdirSync, rmSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import * as http from 'node:http';
@@ -1215,13 +1216,26 @@ export async function renameContainer(id: string, newName: string, envId?: numbe
 	await assertDockerResponse(response);
 }
 
-export async function getContainerLogs(id: string, tail = 100, envId?: number | null): Promise<string> {
+export async function getContainerLogs(id: string, tail: number | 'all' = 100, envId?: number | null, since?: string, until?: string): Promise<string> {
 	// Check if container has TTY enabled
 	const info = await inspectContainer(id, envId);
 	const hasTty = info.Config?.Tty ?? false;
 
+	let query = `stdout=true&stderr=true&timestamps=true`;
+	if (tail === 'all') {
+		query += `&tail=all`;
+	} else {
+		query += `&tail=${tail}`;
+	}
+	if (since) {
+		query += `&since=${since}`;
+	}
+	if (until) {
+		query += `&until=${until}`;
+	}
+
 	const response = await dockerFetch(
-		`/containers/${id}/logs?stdout=true&stderr=true&tail=${tail}&timestamps=true`,
+		`/containers/${id}/logs?${query}`,
 		{},
 		envId
 	);
@@ -1887,15 +1901,17 @@ export async function recreateContainerFromInspect(
 		HostConfig: hostConfig
 	};
 
-	// 4a. Update image-embedded labels to match the new image.
-	// Docker's create API uses exactly the labels you pass, ignoring the new image's
-	// embedded labels. We inspect both old and new images to distinguish image-origin
-	// labels from user-set labels, then merge accordingly.
+	// 4a. Update image-embedded labels and env vars to match the new image.
+	// Docker's create API uses exactly the labels/env you pass, ignoring the new image's
+	// embedded values. We inspect both old and new images to distinguish image-origin
+	// values from user-set values, then merge accordingly.
 	try {
 		const [oldImageInspect, newImageInspect] = await Promise.all([
 			inspectImage(config.Image, envId),
 			inspectImage(newImage, envId)
 		]);
+
+		// Merge labels
 		const oldImageLabels: Record<string, string> = (oldImageInspect as any)?.Config?.Labels || {};
 		const newImageLabels: Record<string, string> = (newImageInspect as any)?.Config?.Labels || {};
 		const containerLabels: Record<string, string> = createConfig.Labels || {};
@@ -1916,9 +1932,17 @@ export async function recreateContainerFromInspect(
 
 		createConfig.Labels = mergedLabels;
 		log?.(`Updated image labels: ${Object.keys(newImageLabels).length} from new image, ${Object.keys(mergedLabels).length} total`);
+
+		// Merge env vars (same logic: image-baked vars get updated, user-set vars preserved)
+		const oldImageEnv: string[] = (oldImageInspect as any)?.Config?.Env || [];
+		const newImageEnv: string[] = (newImageInspect as any)?.Config?.Env || [];
+		const containerEnv: string[] = createConfig.Env || [];
+
+		createConfig.Env = mergeImageEnvVars(containerEnv, oldImageEnv, newImageEnv);
+		log?.(`Updated image env vars: ${newImageEnv.length} from new image, ${createConfig.Env.length} total`);
 	} catch (e) {
-		log?.(`Warning: could not update image labels: ${e}`);
-		// Fall through with old labels — non-fatal
+		log?.(`Warning: could not update image labels/env: ${e}`);
+		// Fall through with old values — non-fatal
 	}
 
 	// Strip default MemorySwappiness — Podman + cgroupv2 rejects it.

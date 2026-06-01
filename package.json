@@ -1,7 +1,7 @@
 {
 	"name": "dockhand",
 	"private": true,
-	"version": "1.0.29",
+	"version": "1.0.31",
 	"type": "module",
 	"scripts": {
 		"dev": "npx vite dev",
@@ -88,7 +88,7 @@
 		"rollup": "4.60.0",
 		"svelte-sonner": "1.0.7",
 		"undici": "7.24.5",
-		"ws": "8.18.0"
+		"ws": "8.20.1"
 	},
 	"devDependencies": {
 		"@internationalized/date": "^3.10.1",

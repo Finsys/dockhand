@@ -311,21 +311,22 @@ async function sendTelegram(appriseUrl: string, payload: NotificationPayload): P
 
 // Gotify
 async function sendGotify(appriseUrl: string, payload: NotificationPayload): Promise<NotificationResult> {
-	const url = buildGotifyUrl(appriseUrl);
-	if (!url) {
+	const parsed = buildGotifyUrl(appriseUrl);
+	if (!parsed) {
 		return { success: false, error: 'Invalid Gotify URL format. Expected: gotify://hostname/token' };
 	}
 
 	const titleWithEnv = payload.environmentName ? `${payload.title} [${payload.environmentName}]` : payload.title;
+	const defaultPriority = payload.type === 'error' ? 8 : payload.type === 'warning' ? 5 : 2;
 
 	try {
-		const response = await fetch(url, {
+		const response = await fetch(parsed.url, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({
 				title: titleWithEnv,
 				message: payload.message,
-				priority: payload.type === 'error' ? 8 : payload.type === 'warning' ? 5 : 2
+				priority: parsed.priority ?? defaultPriority
 			})
 		});
 

@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { onMount, onDestroy, tick } from 'svelte';
-	import { X, GripHorizontal, RefreshCw, Copy, Download, WrapText, ArrowDownToLine, Search, ChevronUp, ChevronDown, Sun, Moon, Wifi, WifiOff, Pause, Play, Eraser, Filter, Clock, Tag } from 'lucide-svelte';
+	import { X, GripHorizontal, RefreshCw, Copy, Download, WrapText, ArrowDownToLine, Search, ChevronUp, ChevronDown, Sun, Moon, Wifi, WifiOff, Pause, Play, Eraser, Filter, Clock, Tag, Hash } from 'lucide-svelte';
+	import { wrapHtmlLines } from '$lib/utils/log-lines';
+	import LogTimeRangeFilter from './LogTimeRangeFilter.svelte';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import * as Select from '$lib/components/ui/select';
 	import { appSettings, formatLogTimestamps } from '$lib/stores/settings';
@@ -31,6 +33,7 @@
 	let fontSize = $state(12);
 	let showTimestamps = $state(typeof localStorage !== 'undefined' ? localStorage.getItem('dockhand-log-timestamps') !== 'false' : true);
 	let showContainerName = $state(typeof localStorage !== 'undefined' ? localStorage.getItem('dockhand-log-container-name') !== 'false' : true);
+	let showLineNumbers = $state(false);
 
 	// SSE Streaming state
 	let streamingEnabled = $state(true);
@@ -61,6 +64,46 @@
 	let logSearchInputRef: HTMLInputElement | undefined;
 
 	const fontSizeOptions = [10, 12, 14, 16];
+	const tailOptions = [
+		{ value: '100', label: '100' },
+		{ value: '500', label: '500' },
+		{ value: '1000', label: '1K' },
+		{ value: '5000', label: '5K' },
+		{ value: '10000', label: '10K' },
+		{ value: 'all', label: 'All' }
+	];
+
+	// Tail count and time range filter
+	let tailCount = $state('500');
+	let sinceDate = $state('');
+	let sinceTime = $state('');
+	let untilDate = $state('');
+	let untilTime = $state('');
+	function getTimestamp(date: string, time: string, defaultTime: string): string {
+		if (!date) return '';
+		const dateStr = time ? `${date}T${time}` : `${date}T${defaultTime}`;
+		const ts = Math.floor(new Date(dateStr).getTime() / 1000);
+		return isNaN(ts) ? '' : String(ts);
+	}
+
+	function getSinceParam(): string {
+		return getTimestamp(sinceDate, sinceTime, '00:00:00');
+	}
+
+	function getUntilParam(): string {
+		return getTimestamp(untilDate, untilTime, '23:59:59');
+	}
+
+	function reloadLogs() {
+		logs = '';
+		pendingText = '';
+		if (streamingEnabled && containerId && visible) {
+			loading = true;
+			startStreaming();
+		} else {
+			fetchLogs();
+		}
+	}
 
 	// Get terminal font family from theme preferences
 	let terminalFontFamily = $derived(() => {
@@ -101,6 +144,8 @@
 					if (settings.autoScroll !== undefined) autoScroll = settings.autoScroll;
 					if (settings.streamingEnabled !== undefined) streamingEnabled = settings.streamingEnabled;
 					if (settings.logSearchFilterMode !== undefined) logSearchFilterMode = settings.logSearchFilterMode;
+					if (settings.tailCount !== undefined) tailCount = settings.tailCount;
+					if (settings.showLineNumbers !== undefined) showLineNumbers = settings.showLineNumbers;
 				} catch {
 					// Ignore parse errors
 				}
@@ -117,7 +162,9 @@
 				fontSize,
 				autoScroll,
 				streamingEnabled,
-				logSearchFilterMode
+				logSearchFilterMode,
+				tailCount,
+				showLineNumbers
 			}));
 		}
 	}
@@ -202,7 +249,9 @@
 		const currentContainerId = containerId; // Capture for closure
 
 		try {
-			const url = appendEnvParam(`/api/containers/${currentContainerId}/logs/stream?tail=500`, envId);
+			const since = getSinceParam();
+			const until = getUntilParam();
+			const url = appendEnvParam(`/api/containers/${currentContainerId}/logs/stream?tail=${tailCount}${since ? `&since=${since}` : ''}${until ? `&until=${until}` : ''}`, envId);
 			eventSource = new EventSource(url);
 
 			eventSource.addEventListener('connected', () => {
@@ -412,7 +461,9 @@
 		loading = true;
 		connectionError = null;
 		try {
-			const response = await fetch(appendEnvParam(`/api/containers/${containerId}/logs?tail=500`, envId));
+			const since = getSinceParam();
+			const until = getUntilParam();
+			const response = await fetch(appendEnvParam(`/api/containers/${containerId}/logs?tail=${tailCount}${since ? `&since=${since}` : ''}${until ? `&until=${until}` : ''}`, envId));
 			const data = await response.json();
 			if (!response.ok) {
 				logs = `Failed to fetch logs: ${data.error || response.statusText}`;
@@ -708,6 +759,27 @@
 					<Play class="w-3 h-3" />
 				{/if}
 			</button>
+			<!-- Tail lines selector -->
+			<Select.Root type="single" value={tailCount} onValueChange={(v) => { tailCount = v; saveSettings(); reloadLogs(); }}>
+				<Select.Trigger size="sm" class="!h-auto !py-0.5 w-[52px] text-xs px-1.5 {darkMode ? 'bg-zinc-800 border-zinc-700 text-zinc-300' : 'bg-white border-gray-300 text-gray-700'} [&_svg]:size-3" title="Number of log lines to load">
+					<span>{tailOptions.find(o => o.value === tailCount)?.label ?? tailCount}</span>
+				</Select.Trigger>
+				<Select.Content>
+					{#each tailOptions as opt}
+						<Select.Item value={opt.value} label={opt.label}>{opt.label} lines</Select.Item>
+					{/each}
+				</Select.Content>
+			</Select.Root>
+			<!-- Time range filter -->
+			<LogTimeRangeFilter
+				bind:sinceDate
+				bind:sinceTime
+				bind:untilDate
+				bind:untilTime
+				{darkMode}
+				onApply={reloadLogs}
+				onClear={reloadLogs}
+			/>
 			<!-- Auto-scroll button -->
 			<button
 				onclick={toggleAutoScroll}
@@ -718,7 +790,7 @@
 			</button>
 			<!-- Font size -->
 			<Select.Root type="single" value={String(fontSize)} onValueChange={(v) => updateFontSize(Number(v))}>
-				<Select.Trigger size="sm" class="!h-5 !py-0 w-14 text-xs px-1.5 {darkMode ? 'bg-zinc-800 border-zinc-700 text-zinc-300' : 'bg-white border-gray-300 text-gray-700'} [&_svg]:size-3">
+				<Select.Trigger size="sm" class="!h-auto !py-0.5 w-14 text-xs px-1.5 {darkMode ? 'bg-zinc-800 border-zinc-700 text-zinc-300' : 'bg-white border-gray-300 text-gray-700'} [&_svg]:size-3">
 					<span>{fontSize}px</span>
 				</Select.Trigger>
 				<Select.Content>
@@ -750,6 +822,14 @@
 				title={showContainerName ? 'Hide container name prefix' : 'Show container name prefix'}
 			>
 				<Tag class="w-3 h-3 transition-colors {showContainerName ? (darkMode ? 'text-amber-400' : 'text-amber-700') : darkMode ? 'text-zinc-500 hover:text-zinc-300' : 'text-gray-500 hover:text-gray-700'}" />
+			</button>
+			<!-- Line numbers -->
+			<button
+				onclick={() => { showLineNumbers = !showLineNumbers; saveSettings(); }}
+				class="p-1 rounded transition-colors {showLineNumbers ? (darkMode ? 'bg-amber-500/20 ring-1 ring-amber-500/50' : 'bg-amber-500/30 ring-1 ring-amber-600/50') : ''} {darkMode ? 'hover:bg-zinc-800' : 'hover:bg-gray-300'}"
+				title={showLineNumbers ? 'Hide line numbers' : 'Show line numbers'}
+			>
+				<Hash class="w-3 h-3 transition-colors {showLineNumbers ? (darkMode ? 'text-amber-400' : 'text-amber-700') : darkMode ? 'text-zinc-500 hover:text-zinc-300' : 'text-gray-500 hover:text-gray-700'}" />
 			</button>
 			<!-- Theme toggle -->
 			<button
@@ -854,7 +934,7 @@
 	<!-- Logs content -->
 	<div bind:this={logsRef} class="flex-1 overflow-auto p-3">
 		{#if logs}
-			<pre class="logs-fade-in {wordWrap ? 'whitespace-pre-wrap' : 'whitespace-pre'} {darkMode ? 'text-zinc-50' : 'text-gray-900'}" style="font-size: {fontSize}px; font-family: {terminalFontFamily()};">{@html highlightedLogs()}</pre>
+			<pre class="logs-fade-in {wordWrap ? 'whitespace-pre-wrap' : 'whitespace-pre'} {showLineNumbers ? 'show-line-numbers' : ''} {darkMode ? 'text-zinc-50' : 'text-gray-900'}" style="font-size: {fontSize}px; font-family: {terminalFontFamily()};">{@html wrapHtmlLines(highlightedLogs())}</pre>
 		{:else if loading}
 			<p class="text-xs {darkMode ? 'text-zinc-500' : 'text-gray-500'}">Connecting to log stream...</p>
 		{:else}

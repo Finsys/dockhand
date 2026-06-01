@@ -9,6 +9,7 @@
 	import { toast } from 'svelte-sonner';
 	import { themeStore, type FontSize } from '$lib/stores/theme';
 	import { getTimeFormat } from '$lib/stores/settings';
+	import { formatBytes } from '$lib/utils/format';
 
 	// Font size scaling for header
 	let fontSize = $state<FontSize>('normal');
@@ -217,14 +218,6 @@
 		return (diskUsage.LayersSize || 0) +
 			(diskUsage.Volumes?.reduce((sum: number, v: any) => sum + (v.UsageData?.Size || 0), 0) || 0);
 	});
-
-	function formatBytes(bytes: number): string {
-		if (bytes === 0) return '0 B';
-		const k = 1024;
-		const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-		const i = Math.floor(Math.log(bytes) / Math.log(k));
-		return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-	}
 
 	async function switchEnvironment(envId: number) {
 		// Don't switch if already on this environment

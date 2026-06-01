@@ -11,6 +11,7 @@
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
 	import { toast } from 'svelte-sonner';
 	import { whale } from '@lucide/lab';
+	import { formatBytes } from '$lib/utils/format';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Label } from '$lib/components/ui/label';
 	import { Badge } from '$lib/components/ui/badge';
@@ -380,12 +381,9 @@
 		}
 	}
 
-	function formatBytes(bytes?: number): string {
+	function formatRegistryBytes(bytes?: number): string {
 		if (!bytes) return '-';
-		if (bytes < 1024) return `${bytes} B`;
-		if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-		if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-		return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+		return formatBytes(bytes);
 	}
 
 	function formatDate(dateStr?: string): string {
@@ -683,7 +681,7 @@
 																</div>
 															</td>
 															<td class="py-1 px-2 pr-4 text-muted-foreground whitespace-nowrap">
-																{formatBytes(tag.size)}
+																{formatRegistryBytes(tag.size)}
 															</td>
 															<td class="py-1 px-2 pr-4 text-muted-foreground whitespace-nowrap">
 																{formatDate(tag.lastUpdated)}

@@ -31,6 +31,7 @@ import { unregisterSchedule } from './scheduler';
 import { deleteGitStackFiles, parseEnvFileContent } from './git';
 import { cleanPem } from '$lib/utils/pem';
 import { rewriteComposeVolumePaths, getHostDataDir } from './host-path';
+import { getOrderValue } from './container-labels';
 
 // =============================================================================
 // TYPES
@@ -229,8 +230,14 @@ function collectProcess(proc: ChildProcess): Promise<{ exitCode: number; stdout:
  * Used to send files to Hawser for remote deployments.
  * Binary files are base64-encoded with a "base64:" prefix to preserve all bytes.
  */
+// Max file size: 10 MB per file, 256 MB total payload
+const MAX_FILE_SIZE = 10 * 1024 * 1024;
+const MAX_TOTAL_SIZE = 256 * 1024 * 1024;
+
 async function readDirFilesAsMap(dirPath: string): Promise<Record<string, string>> {
 	const files: Record<string, string> = {};
+	let totalSize = 0;
+	const skipped: string[] = [];
 
 	async function scanDir(currentPath: string, relativePath: string = ''): Promise<void> {
 		const entries = readdirSync(currentPath, { withFileTypes: true });
@@ -243,7 +250,21 @@ async function readDirFilesAsMap(dirPath: string): Promise<Record<string, string
 				if (entry.name === '.git') continue;
 				await scanDir(fullPath, relPath);
 			} else if (entry.isFile()) {
+				const fileSize = statSync(fullPath).size;
+
+				if (fileSize > MAX_FILE_SIZE) {
+					skipped.push(`${relPath} (${(fileSize / 1024 / 1024).toFixed(1)} MB)`);
+					continue;
+				}
+
+				if (totalSize + fileSize > MAX_TOTAL_SIZE) {
+					skipped.push(`${relPath} (would exceed ${MAX_TOTAL_SIZE / 1024 / 1024} MB total limit)`);
+					continue;
+				}
+
 				const bytes = readFileSync(fullPath);
+				totalSize += fileSize;
+
 				if (isBinaryContent(bytes)) {
 					files[relPath] = `base64:${bytes.toString('base64')}`;
 				} else {
@@ -254,6 +275,11 @@ async function readDirFilesAsMap(dirPath: string): Promise<Record<string, string
 	}
 
 	await scanDir(dirPath);
+
+	if (skipped.length > 0) {
+		console.log(`[readDirFilesAsMap] Skipped ${skipped.length} file(s) exceeding size limits: ${skipped.join(', ')}`);
+	}
+
 	return files;
 }
 
@@ -1346,10 +1372,13 @@ async function executeComposeViaHawser(
 		}
 	} catch (err: any) {
 		console.log(`${logPrefix} EXCEPTION in executeComposeViaHawser:`, err.message);
+		const isStringLength = err.message?.includes('Invalid string length');
 		return {
 			success: false,
 			output: '',
-			error: `Failed to ${operation} via Hawser: ${err.message}`
+			error: isStringLength
+				? `Stack files too large to send via Hawser. The repository may contain large binary files. Consider using a .dockerignore or moving large files out of the compose directory.`
+				: `Failed to ${operation} via Hawser: ${err.message}`
 		};
 	}
 }
@@ -1593,7 +1622,12 @@ export async function listComposeStacks(envId?: number | null): Promise<ComposeS
 					labels: c.labels || {}
 				};
 			})
-			.sort((a, b) => a.service.localeCompare(b.service));
+			.sort((a, b) => {
+				const orderA = getOrderValue(a.labels);
+				const orderB = getOrderValue(b.labels);
+				if (orderA !== orderB) return orderA - orderB;
+				return a.service.localeCompare(b.service);
+			});
 
 		return {
 			name,

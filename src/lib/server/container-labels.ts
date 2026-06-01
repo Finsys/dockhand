@@ -7,6 +7,7 @@
  * - dockhand.notify=false  — Suppress notifications for this container's events
  * - dockhand.url=<url>     — Custom clickable URL displayed alongside container ports
  * - dockhand.port.<hostPort>.url=<url> — Override the click URL for a specific published port
+ * - dockhand.order=<int>  — Controls display order within a stack (lower = first, default 0)
  *
  * All label values are case-insensitive and accept: true/yes/1 and false/no/0.
  * The opt-out model means labels override DB settings (label wins).
@@ -18,6 +19,7 @@ export const DOCKHAND_LABELS = {
 	HIDDEN: 'dockhand.hidden',
 	NOTIFY: 'dockhand.notify',
 	URL: 'dockhand.url',
+	ORDER: 'dockhand.order',
 } as const;
 
 const TRUTHY_VALUES = new Set(['true', 'yes', '1']);
@@ -82,6 +84,17 @@ export function isNotifyDisabledByLabel(labels: Record<string, string> | undefin
 export function getCustomUrl(labels: Record<string, string> | undefined | null): string | undefined {
 	const value = getLabel(labels, DOCKHAND_LABELS.URL);
 	return value?.trim() || undefined;
+}
+
+/**
+ * Get the sort order value from dockhand.order label.
+ * Returns the parsed integer, or 0 for missing/invalid values.
+ */
+export function getOrderValue(labels: Record<string, string> | undefined | null): number {
+	const value = getLabel(labels, DOCKHAND_LABELS.ORDER);
+	if (value == null) return 0;
+	const parsed = parseInt(value.trim(), 10);
+	return Number.isNaN(parsed) ? 0 : parsed;
 }
 
 /**

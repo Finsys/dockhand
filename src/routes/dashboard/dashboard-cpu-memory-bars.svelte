@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Cpu, MemoryStick, Loader2 } from 'lucide-svelte';
+	import { formatBytes } from '$lib/utils/format';
 
 	interface Metrics {
 		cpuPercent?: number;
@@ -28,15 +29,6 @@
 
 	// Only show skeleton if loading AND we don't have metrics yet
 	const showSkeleton = $derived(loading && !hasMetrics);
-
-	function formatBytes(bytes: number): string {
-		if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
-		const k = 1024;
-		const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-		const i = Math.floor(Math.log(bytes) / Math.log(k));
-		if (i < 0 || i >= sizes.length) return '0 B';
-		return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-	}
 
 	function getProgressColor(percent: number): string {
 		if (percent >= 90) return 'bg-red-500';

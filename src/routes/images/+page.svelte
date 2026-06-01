@@ -13,6 +13,7 @@
 	import * as Select from '$lib/components/ui/select';
 	import { Trash2, Upload, RefreshCw, Play, Search, Layers, Server, ShieldCheck, CheckSquare, Square, Tag, Check, XCircle, Icon, AlertTriangle, X, Images, Copy, Download, ChevronRight, ChevronDown, Loader2, ArrowUp, ArrowDown, ArrowUpDown, CircleDashed, CircleDot, Circle, Filter } from 'lucide-svelte';
 	import { broom, whale } from '@lucide/lab';
+	import { formatBytes } from '$lib/utils/format';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
@@ -110,7 +111,7 @@
 	let sortDirection = $state<SortDirection>('desc');
 
 	// Filter state
-	type UsageFilter = 'all' | 'in-use' | 'unused';
+	type UsageFilter = 'all' | 'in-use' | 'unused' | 'some-unused';
 	let usageFilter = $state<UsageFilter>('all');
 
 	// Expanded rows state
@@ -292,8 +293,17 @@
 		// Apply usage filter
 		if (usageFilter !== 'all') {
 			filtered = filtered.filter(group => {
-				const isInUse = group.containers > 0;
-				return usageFilter === 'in-use' ? isInUse : !isInUse;
+				if (usageFilter === 'in-use') {
+					return group.containers > 0;
+				}
+				if (usageFilter === 'some-unused') {
+					// Only images that have BOTH used and unused tags
+					return group.containers > 0 && group.tags.some(t => t.containers === 0);
+				}
+				// 'unused' includes fully unused AND images with some unused tags
+				const fullyUnused = group.containers === 0;
+				const someUnused = group.tags.length > 1 && group.tags.some(t => t.containers === 0);
+				return fullyUnused || someUnused;
 			});
 		}
 
@@ -633,14 +643,6 @@
 		return `${(mb / 1024).toFixed(2)} GB`;
 	}
 
-	function formatBytes(bytes: number): string {
-		if (bytes === 0) return '0 B';
-		const k = 1024;
-		const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-		const i = Math.floor(Math.log(bytes) / Math.log(k));
-		return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-	}
-
 	function formatImageDate(timestamp: number): string {
 		return formatDate(new Date(timestamp * 1000));
 	}
@@ -734,6 +736,9 @@
 					{:else if usageFilter === 'in-use'}
 						<CircleDot class="w-3.5 h-3.5 mr-1.5 text-emerald-500 shrink-0" />
 						<span>In use</span>
+					{:else if usageFilter === 'some-unused'}
+						<CircleDot class="w-3.5 h-3.5 mr-1.5 text-amber-500 shrink-0" />
+						<span>Some unused</span>
 					{:else}
 						<Circle class="w-3.5 h-3.5 mr-1.5 text-muted-foreground shrink-0" />
 						<span>Unused</span>
@@ -747,6 +752,10 @@
 					<Select.Item value="in-use">
 						<CircleDot class="w-4 h-4 mr-2 text-emerald-500" />
 						In use
+					</Select.Item>
+					<Select.Item value="some-unused">
+						<CircleDot class="w-4 h-4 mr-2 text-amber-500" />
+						Some unused
 					</Select.Item>
 					<Select.Item value="unused">
 						<Circle class="w-4 h-4 mr-2 text-muted-foreground" />

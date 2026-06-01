@@ -183,7 +183,7 @@
 
 		<!-- Layer Stack with Expandable Details -->
 		<div class="space-y-1">
-			<h3 class="sticky top-0 z-10 bg-background text-sm font-semibold mb-2 pb-2 flex items-center gap-2">
+			<h3 class="text-sm font-semibold mb-2 pb-2 flex items-center gap-2">
 				<Layers class="w-4 h-4" />
 				Layer stack (bottom to top) - click to expand
 			</h3>
