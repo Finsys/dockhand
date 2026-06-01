@@ -1051,7 +1051,7 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false,
-          "default": "'compose.yaml'"
+          "default": "'docker-compose.yml'"
         },
         "environment_id": {
           "name": "environment_id",
@@ -1210,7 +1210,7 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false,
-          "default": "'compose.yaml'"
+          "default": "'docker-compose.yml'"
         },
         "env_file_path": {
           "name": "env_file_path",
