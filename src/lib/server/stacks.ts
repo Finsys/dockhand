@@ -2296,10 +2296,10 @@ export async function deployStack(options: DeployStackOptions): Promise<StackOpe
 			console.log(`${logPrefix} Files:`, Object.keys(stackFiles).join(', '));
 
 			// Copy git source files to stack directory (overlay, not replace).
-			// Do NOT rmSync first — relative volume mounts (e.g., ./data) live here
-			// and would be destroyed, causing data loss (#831).
+			// Clear directory first to allow full git sync, including deleted files.
 			console.log(`${logPrefix} Copying source directory to stack directory...`);
-			mkdirSync(workingDir, { recursive: true });
+            rmSync(workingDir, { recursive: true, force: true });
+            mkdirSync(workingDir, { recursive: true });
 			cpSync(sourceDir, workingDir, {
 				recursive: true,
 				force: true,
