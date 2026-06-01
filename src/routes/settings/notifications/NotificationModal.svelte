@@ -416,13 +416,14 @@
 							id="notif-apprise-urls"
 							bind:value={formAppriseUrls}
 							placeholder="gotify://hostname/app-token
+gotifys://hostname/app-token?priority=5
 discord://webhook_id/webhook_token
 slack://token_a/token_b/token_c
 mmost://hostname/webhook-token
 tgram://bot_token/chat_id
 tgram://bot_token/chat_id:topic_id
 ntfy://my-topic
-ntfy://host/topic?auth=base64token
+ntfy://host/topic?auth=base64token&priority=3
 ntfys://host/topic?auth=base64token
 pushover://user_key/api_token
 workflows://hostname/workflow/signature

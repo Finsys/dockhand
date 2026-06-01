@@ -138,11 +138,19 @@ export const DELETE: RequestHandler = async (event) => {
 
 	try {
 		const id = parseInt(params.id);
+		if (isNaN(id) || id <= 0) {
+			return json({ error: 'Invalid environment ID' }, { status: 400 });
+		}
 
 		// Get environment name before deletion for audit log
 		const env = await getEnvironment(id);
 		if (!env) {
 			return json({ error: 'Environment not found' }, { status: 404 });
+		}
+
+		// Safety: never delete directories if env name is empty/whitespace
+		if (!env.name?.trim()) {
+			return json({ error: 'Cannot delete environment with empty name' }, { status: 500 });
 		}
 
 		// Close Edge connection if this is a Hawser Edge environment
@@ -186,10 +194,11 @@ export const DELETE: RequestHandler = async (event) => {
 		unregisterSchedule(id, 'image_prune');
 
 		// Clean up stack directory for this environment
+		// Safety: only delete subdirectory named after the env, never the parent
 		try {
 			const stacksDir = getStacksDir();
 			const envStackDir = join(stacksDir, env.name);
-			if (existsSync(envStackDir)) {
+			if (envStackDir !== stacksDir && envStackDir.startsWith(stacksDir) && existsSync(envStackDir)) {
 				rmSync(envStackDir, { recursive: true, force: true });
 			}
 		} catch (err) {
@@ -200,7 +209,7 @@ export const DELETE: RequestHandler = async (event) => {
 		try {
 			const gitReposDir = getGitReposDir();
 			const envGitDir = join(gitReposDir, env.name);
-			if (existsSync(envGitDir)) {
+			if (envGitDir !== gitReposDir && envGitDir.startsWith(gitReposDir) && existsSync(envGitDir)) {
 				rmSync(envGitDir, { recursive: true, force: true });
 			}
 		} catch (err) {

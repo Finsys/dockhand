@@ -10,6 +10,7 @@
 	import ScanTab from '$lib/components/ScanTab.svelte';
 	import type { ScanResult } from '$lib/components/ScanTab.svelte';
 	import ContainerSettingsTab from './ContainerSettingsTab.svelte';
+	import { parseHostPort, expandPortBindings } from '$lib/utils/port-parse';
 	import type { VulnerabilityCriteria } from '$lib/components/VulnerabilityCriteriaSelector.svelte';
 
 	// Parse shell command respecting quotes
@@ -364,12 +365,13 @@
 		loading = true;
 
 		try {
-			const ports: any = {};
+			const ports: Record<string, { HostIp?: string; HostPort: string }> = {};
 			portMappings
-				.filter((p) => p.containerPort && p.hostPort)
+				.filter((p) => p.containerPort)
 				.forEach((p) => {
-					const key = `${p.containerPort}/${p.protocol}`;
-					ports[key] = { HostPort: String(p.hostPort) };
+					const parsed = parseHostPort(p.hostPort);
+					const bindings = expandPortBindings(parsed.hostPort, p.containerPort, p.protocol, parsed.hostIp);
+					Object.assign(ports, bindings);
 				});
 
 			const volumeBinds = volumeMappings

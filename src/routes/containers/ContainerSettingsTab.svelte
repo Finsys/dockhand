@@ -5,7 +5,8 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { TogglePill, ToggleGroup } from '$lib/components/ui/toggle-pill';
-	import { Plus, Trash2, Settings2, RefreshCw, Network, X, Ban, RotateCw, AlertTriangle, PauseCircle, Share2, Server, CircleOff, ChevronDown, ChevronRight, Cpu, Shield, HeartPulse, Wifi, HardDrive, Lock, Loader2, CheckCircle2, Package, Gpu, Search } from 'lucide-svelte';
+	import { Plus, Trash2, Settings2, RefreshCw, Network, X, Ban, RotateCw, AlertTriangle, PauseCircle, Share2, Server, CircleOff, ChevronDown, ChevronRight, Cpu, Shield, HeartPulse, Wifi, HardDrive, Lock, Loader2, CheckCircle2, Package, Gpu, Search, CircleHelp } from 'lucide-svelte';
+	import { parseHostPort, validatePort, validateIp, formatHostPort, expandPortBindings } from '$lib/utils/port-parse';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { currentEnvironment } from '$lib/stores/environment';
 	import { Badge } from '$lib/components/ui/badge';
@@ -305,15 +306,19 @@
 			// Also consider ports already typed in the form
 			for (let i = 0; i < portMappings.length; i++) {
 				if (i !== index && portMappings[i].hostPort) {
-					usedPorts.add(parseInt(portMappings[i].hostPort));
+					const p = parseHostPort(portMappings[i].hostPort);
+					const num = parseInt(p.hostPort);
+					if (!isNaN(num)) usedPorts.add(num);
 				}
 			}
 
-			const startFrom = parseInt(portMappings[index].hostPort) || 8080;
+			const currentParsed = parseHostPort(portMappings[index].hostPort);
+			const startFrom = parseInt(currentParsed.hostPort) || 8080;
 			let port = startFrom;
 			while (usedPorts.has(port) && port < 65535) port++;
 			if (port <= 65535) {
-				portMappings[index].hostPort = String(port);
+				// Preserve IP prefix if present
+				portMappings[index].hostPort = formatHostPort(currentParsed.hostIp, String(port));
 			}
 		} catch {
 			// Silently fail
@@ -897,28 +902,33 @@
 
 		<div class="space-y-2">
 			{#each portMappings as mapping, index}
-				<div class="flex gap-2 items-center">
-					<div class="flex-1 relative group/port">
-						<span class="absolute -top-2 left-2 text-2xs text-muted-foreground bg-background px-1">Host</span>
-						<Input bind:value={mapping.hostPort} type="number" class="h-9" />
-						<button
-							type="button"
-							class="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground/50 hover:text-primary transition-colors opacity-0 group-hover/port:opacity-100"
-							onclick={() => findFreePort(index)}
-							disabled={findingFreePort}
-							title="Find next available Docker port"
-						>
-							{#if findingFreePort}
-								<Loader2 class="w-3.5 h-3.5 animate-spin" />
-							{:else}
-								<Search class="w-3.5 h-3.5" />
-							{/if}
-						</button>
-					</div>
-					<div class="flex-1 relative">
-						<span class="absolute -top-2 left-2 text-2xs text-muted-foreground bg-background px-1">Container</span>
-						<Input bind:value={mapping.containerPort} type="number" class="h-9" />
-					</div>
+				{@const parsed = parseHostPort(mapping.hostPort)}
+				{@const hostPortError = validatePort(parsed.hostPort)}
+				{@const hostIpError = validateIp(parsed.hostIp)}
+				{@const containerPortError = validatePort(mapping.containerPort)}
+				<div class="flex flex-col gap-1">
+					<div class="flex gap-2 items-center">
+						<div class="flex-1 relative group/port">
+							<span class="absolute -top-2 left-2 text-2xs text-muted-foreground bg-background px-1">Host</span>
+							<Input bind:value={mapping.hostPort} type="text" placeholder="e.g. 8080 or 127.0.0.1:8080" class="h-9 {(hostPortError || hostIpError) && mapping.hostPort ? 'border-destructive' : ''}" />
+							<button
+								type="button"
+								class="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground/50 hover:text-primary transition-colors opacity-0 group-hover/port:opacity-100"
+								onclick={() => findFreePort(index)}
+								disabled={findingFreePort}
+								title="Find next available Docker port"
+							>
+								{#if findingFreePort}
+									<Loader2 class="w-3.5 h-3.5 animate-spin" />
+								{:else}
+									<Search class="w-3.5 h-3.5" />
+								{/if}
+							</button>
+						</div>
+						<div class="flex-1 relative">
+							<span class="absolute -top-2 left-2 text-2xs text-muted-foreground bg-background px-1">Container</span>
+							<Input bind:value={mapping.containerPort} type="text" placeholder="e.g. 8080 or 8000-8005" class="h-9 {containerPortError && mapping.containerPort ? 'border-destructive' : ''}" />
+						</div>
 					<ToggleGroup
 						value={mapping.protocol}
 						options={protocolOptions}
@@ -935,11 +945,30 @@
 						<Trash2 class="w-4 h-4" />
 					</Button>
 				</div>
+				{#if (hostPortError && mapping.hostPort) || (hostIpError && mapping.hostPort) || (containerPortError && mapping.containerPort)}
+					<p class="text-xs text-destructive pl-1">{hostIpError || hostPortError || containerPortError}</p>
+				{/if}
+				</div>
 			{/each}
 		</div>
-		<p class="text-2xs text-muted-foreground/60 flex items-center gap-1">
-			<Search class="w-3 h-3" />
-			Hover the host port field and click the search icon to find the next available port. Only checks Docker-published ports.
+		<p class="text-xs text-muted-foreground flex items-center gap-1.5">
+			<Tooltip.Provider>
+				<Tooltip.Root>
+					<Tooltip.Trigger>
+						<CircleHelp class="w-3.5 h-3.5 text-muted-foreground/70 cursor-help shrink-0" />
+					</Tooltip.Trigger>
+					<Tooltip.Content class="max-w-xs text-xs" side="right">
+						<p class="font-medium mb-1">Supported host port formats:</p>
+						<ul class="space-y-0.5 text-muted-foreground">
+							<li><code class="text-foreground">8080</code> — bind to all interfaces</li>
+							<li><code class="text-foreground">127.0.0.1:8080</code> — bind to specific IP</li>
+							<li><code class="text-foreground">8000-8005</code> — port range (container port must also be a range)</li>
+							<li>Leave host port empty for random allocation</li>
+						</ul>
+					</Tooltip.Content>
+				</Tooltip.Root>
+			</Tooltip.Provider>
+			Hover the host port field and click the search icon to find the next available port.
 		</p>
 	</div>
 

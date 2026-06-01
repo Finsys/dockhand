@@ -10,7 +10,9 @@
 	import * as Select from '$lib/components/ui/select';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { ToggleGroup } from '$lib/components/ui/toggle-pill';
-	import { RefreshCw, Search, ChevronDown, ChevronUp, Unplug, Copy, Download, WrapText, ArrowDownToLine, X, Sun, Moon, LayoutList, Square, Box, Wifi, WifiOff, Pause, Play, ScrollText, Star, GripVertical, Layers, Check, FolderHeart, Save, Trash2, MoreHorizontal, Eraser, Filter, GripHorizontal, Terminal, ArrowDown, ArrowRight, Clock, Tag } from 'lucide-svelte';
+	import { RefreshCw, Search, ChevronDown, ChevronUp, Unplug, Copy, Download, WrapText, ArrowDownToLine, X, Sun, Moon, LayoutList, Square, Box, Wifi, WifiOff, Pause, Play, ScrollText, Star, GripVertical, Layers, Check, FolderHeart, Save, Trash2, MoreHorizontal, Eraser, Filter, GripHorizontal, Terminal, ArrowDown, ArrowRight, Clock, Tag, Hash } from 'lucide-svelte';
+	import { wrapHtmlLines } from '$lib/utils/log-lines';
+	import LogTimeRangeFilter from './LogTimeRangeFilter.svelte';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import TerminalPanel from '../terminal/TerminalPanel.svelte';
@@ -36,6 +38,7 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 	let wordWrap = $state(true);
 	let showTimestamps = $state(typeof localStorage !== 'undefined' ? localStorage.getItem('dockhand-log-timestamps') !== 'false' : true);
 	let showContainerName = $state(typeof localStorage !== 'undefined' ? localStorage.getItem('dockhand-log-container-name') !== 'false' : true);
+	let showLineNumbers = $state(typeof localStorage !== 'undefined' && localStorage.getItem('dockhand-log-line-numbers') === 'true');
 	let darkMode = $state(true);
 	let layoutMode = $state<'single' | 'multi' | 'grouped'>('multi');
 	let streamingEnabled = $state(true);
@@ -71,6 +74,47 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 
 	// RAF-based auto-scroll
 	let scrollRafPending = false;
+
+	// Tail count and since filter
+	const tailOptions = [
+		{ value: '100', label: '100' },
+		{ value: '500', label: '500' },
+		{ value: '1000', label: '1K' },
+		{ value: '5000', label: '5K' },
+		{ value: '10000', label: '10K' },
+		{ value: 'all', label: 'All' }
+	];
+	let tailCount = $state('500');
+	let sinceDate = $state('');
+	let sinceTime = $state('');
+	let untilDate = $state('');
+	let untilTime = $state('');
+	function getTimestamp(date: string, time: string, defaultTime: string): string {
+		if (!date) return '';
+		const dateStr = time ? `${date}T${time}` : `${date}T${defaultTime}`;
+		const ts = Math.floor(new Date(dateStr).getTime() / 1000);
+		return isNaN(ts) ? '' : String(ts);
+	}
+
+	function getSinceParam(): string {
+		return getTimestamp(sinceDate, sinceTime, '00:00:00');
+	}
+
+	function getUntilParam(): string {
+		return getTimestamp(untilDate, untilTime, '23:59:59');
+	}
+
+	function reloadAllLogs() {
+		logs = '';
+		pendingText = '';
+		mergedLogs = []; mergedHtml = '';
+		if (layoutMode === 'grouped') {
+			if (streamingEnabled) startGroupedStreaming();
+		} else if (selectedContainer) {
+			if (streamingEnabled) startStreaming();
+			else fetchLogs();
+		}
+	}
 
 	// Flush pending logs to state (called on timer)
 	function flushPendingLogs() {
@@ -172,6 +216,7 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 		fontSize: number;
 		autoScroll: boolean;
 		streamingEnabled: boolean;
+		tailCount: string;
 		// Selection state (depends on mode)
 		selectedContainerId: string | null;      // for single/multi mode
 		selectedContainerIds: string[];          // for grouped mode
@@ -201,6 +246,7 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 			fontSize,
 			autoScroll,
 			streamingEnabled,
+			tailCount,
 			selectedContainerId: selectedContainer?.id ?? null,
 			selectedContainerIds: Array.from(selectedContainerIds),
 			stackName
@@ -411,6 +457,7 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 		if (savedUiState.fontSize !== undefined) fontSize = savedUiState.fontSize;
 		if (savedUiState.autoScroll !== undefined) autoScroll = savedUiState.autoScroll;
 		if (savedUiState.streamingEnabled !== undefined) streamingEnabled = savedUiState.streamingEnabled;
+		if (savedUiState.tailCount !== undefined) tailCount = savedUiState.tailCount;
 		initialStateLoaded = true;
 
 		// Fetch data for this environment
@@ -796,12 +843,15 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 		}
 	}
 
-	async function fetchLogs(tail: number = 500) {
+	async function fetchLogs(tail?: number | string) {
 		if (!selectedContainer) return;
+		const t = tail ?? tailCount;
 
 		loading = true;
 		try {
-			const response = await fetch(appendEnvParam(`/api/containers/${selectedContainer.id}/logs?tail=${tail}`, envId));
+			const since = getSinceParam();
+			const until = getUntilParam();
+			const response = await fetch(appendEnvParam(`/api/containers/${selectedContainer.id}/logs?tail=${t}${since ? `&since=${since}` : ''}${until ? `&until=${until}` : ''}`, envId));
 			const data = await response.json();
 			logs = data.logs || 'No logs available';
 			scrollToBottom(true); // Force scroll on initial load
@@ -819,7 +869,7 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 
 		// For stopped containers, just fetch logs once - no streaming
 		if (selectedContainer.state !== 'running') {
-			fetchLogs(500);
+			fetchLogs();
 			isConnected = false;
 			connectionError = null;
 			return;
@@ -831,7 +881,9 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 		const containerId = selectedContainer.id; // Capture for closure
 
 		try {
-			const url = appendEnvParam(`/api/containers/${containerId}/logs/stream?tail=500`, envId);
+			const since = getSinceParam();
+			const until = getUntilParam();
+			const url = appendEnvParam(`/api/containers/${containerId}/logs/stream?tail=${tailCount}${since ? `&since=${since}` : ''}${until ? `&until=${until}` : ''}`, envId);
 			eventSource = new EventSource(url);
 
 			eventSource.addEventListener('connected', () => {
@@ -917,7 +969,8 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 			if (!container) continue;
 
 			try {
-				const response = await fetch(appendEnvParam(`/api/containers/${containerId}/logs?tail=100`, envId));
+				const since = getSinceParam();
+				const response = await fetch(appendEnvParam(`/api/containers/${containerId}/logs?tail=${tailCount}${since ? `&since=${since}` : ''}`, envId));
 				const data = await response.json();
 				const containerName = container.name;
 				const color = getContainerColor(containerId);
@@ -1003,7 +1056,9 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 
 		try {
 			const containerIdsParam = runningIds.join(',');
-			const url = appendEnvParam(`/api/logs/merged?containers=${containerIdsParam}&tail=100`, envId);
+			const since = getSinceParam();
+			const until = getUntilParam();
+			const url = appendEnvParam(`/api/logs/merged?containers=${containerIdsParam}&tail=${tailCount}${since ? `&since=${since}` : ''}${until ? `&until=${until}` : ''}`, envId);
 			eventSource = new EventSource(url);
 
 			eventSource.addEventListener('connected', (event) => {
@@ -2035,8 +2090,29 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 								<ArrowDownToLine class="w-3 h-3" />
 								<span>Auto-scroll</span>
 							</button>
+							<!-- Tail lines selector -->
+							<Select.Root type="single" value={tailCount} onValueChange={(v) => { tailCount = v; saveState(); reloadAllLogs(); }}>
+								<Select.Trigger class="!h-7 w-[52px] text-xs px-2 [&_svg]:size-3 {darkMode ? 'bg-zinc-800 border-zinc-700 text-zinc-300' : 'bg-white border-gray-300 text-gray-700'}" title="Number of log lines to load">
+									<span>{tailOptions.find(o => o.value === tailCount)?.label ?? tailCount}</span>
+								</Select.Trigger>
+								<Select.Content>
+									{#each tailOptions as opt}
+										<Select.Item value={opt.value} label={opt.label} class="pe-2 [&>span:first-child]:hidden">{opt.label} lines</Select.Item>
+									{/each}
+								</Select.Content>
+							</Select.Root>
+							<!-- Time range filter -->
+							<LogTimeRangeFilter
+								bind:sinceDate
+								bind:sinceTime
+								bind:untilDate
+								bind:untilTime
+								{darkMode}
+								onApply={reloadAllLogs}
+								onClear={reloadAllLogs}
+							/>
 							<Select.Root type="single" value={String(fontSize)} onValueChange={(v) => { fontSize = Number(v); saveState(); }}>
-								<Select.Trigger class="!h-5 !py-0 w-14 text-xs px-1.5 [&_svg]:size-3 {darkMode ? 'bg-zinc-800 border-zinc-700 text-zinc-300' : 'bg-white border-gray-300 text-gray-700'}">
+								<Select.Trigger class="!h-7 w-14 text-xs px-2 [&_svg]:size-3 {darkMode ? 'bg-zinc-800 border-zinc-700 text-zinc-300' : 'bg-white border-gray-300 text-gray-700'}">
 									<span>{fontSize}px</span>
 								</Select.Trigger>
 								<Select.Content>
@@ -2066,6 +2142,13 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 								title={showContainerName ? 'Hide container name prefix' : 'Show container name prefix'}
 							>
 								<Tag class="w-3 h-3 transition-colors {showContainerName ? (darkMode ? 'text-amber-400' : 'text-amber-700') : darkMode ? 'text-zinc-500 hover:text-zinc-300' : 'text-gray-500 hover:text-gray-700'}" />
+							</button>
+							<button
+								onclick={() => { showLineNumbers = !showLineNumbers; localStorage.setItem('dockhand-log-line-numbers', String(showLineNumbers)); }}
+								class="p-1 rounded transition-colors {showLineNumbers ? (darkMode ? 'bg-amber-500/20 ring-1 ring-amber-500/50' : 'bg-amber-500/30 ring-1 ring-amber-600/50') : ''} {darkMode ? 'hover:bg-zinc-800' : 'hover:bg-gray-200'}"
+								title={showLineNumbers ? 'Hide line numbers' : 'Show line numbers'}
+							>
+								<Hash class="w-3 h-3 transition-colors {showLineNumbers ? (darkMode ? 'text-amber-400' : 'text-amber-700') : darkMode ? 'text-zinc-500 hover:text-zinc-300' : 'text-gray-500 hover:text-gray-700'}" />
 							</button>
 							<button onclick={toggleTheme} class="p-1 rounded transition-colors {darkMode ? 'hover:bg-zinc-800' : 'hover:bg-gray-200'}" title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}>
 								{#if darkMode}
@@ -2133,7 +2216,7 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 								<RefreshCw class="w-8 h-8 animate-spin {darkMode ? 'text-zinc-400' : 'text-gray-500'}" />
 							</div>
 						{/if}
-						<pre class="font-mono {wordWrap ? 'whitespace-pre-wrap' : 'whitespace-pre'} {darkMode ? 'text-zinc-50' : 'text-gray-900'}" style="font-size: {fontSize}px;">{@html formattedMergedHtml()}</pre>
+						<pre class="font-mono {wordWrap ? 'whitespace-pre-wrap' : 'whitespace-pre'} {showLineNumbers ? 'show-line-numbers' : ''} {darkMode ? 'text-zinc-50' : 'text-gray-900'}" style="font-size: {fontSize}px;">{@html wrapHtmlLines(formattedMergedHtml())}</pre>
 					</div>
 				{/if}
 			{:else if !selectedContainer}
@@ -2227,8 +2310,29 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 						<ArrowDownToLine class="w-3 h-3" />
 						<span>Auto-scroll</span>
 					</button>
+					<!-- Tail lines selector -->
+					<Select.Root type="single" value={tailCount} onValueChange={(v) => { tailCount = v; saveState(); reloadAllLogs(); }}>
+						<Select.Trigger class="!h-7 w-[52px] text-xs px-2 [&_svg]:size-3 {darkMode ? 'bg-zinc-800 border-zinc-700 text-zinc-300' : 'bg-white border-gray-300 text-gray-700'}" title="Number of log lines to load">
+							<span>{tailOptions.find(o => o.value === tailCount)?.label ?? tailCount}</span>
+						</Select.Trigger>
+						<Select.Content>
+							{#each tailOptions as opt}
+								<Select.Item value={opt.value} label={opt.label} class="pe-2 [&>span:first-child]:hidden">{opt.label} lines</Select.Item>
+							{/each}
+						</Select.Content>
+					</Select.Root>
+					<!-- Time range filter -->
+					<LogTimeRangeFilter
+						bind:sinceDate
+						bind:sinceTime
+						bind:untilDate
+						bind:untilTime
+						{darkMode}
+						onApply={reloadAllLogs}
+						onClear={reloadAllLogs}
+					/>
 					<Select.Root type="single" value={String(fontSize)} onValueChange={(v) => { fontSize = Number(v); saveState(); }}>
-						<Select.Trigger class="!h-5 !py-0 w-14 text-xs px-1.5 [&_svg]:size-3 {darkMode ? 'bg-zinc-800 border-zinc-700 text-zinc-300' : 'bg-white border-gray-300 text-gray-700'}">
+						<Select.Trigger class="!h-7 w-14 text-xs px-2 [&_svg]:size-3 {darkMode ? 'bg-zinc-800 border-zinc-700 text-zinc-300' : 'bg-white border-gray-300 text-gray-700'}">
 							<span>{fontSize}px</span>
 						</Select.Trigger>
 						<Select.Content>
@@ -2260,6 +2364,14 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 						title={showContainerName ? 'Hide container name prefix' : 'Show container name prefix'}
 					>
 						<Tag class="w-3 h-3 transition-colors {showContainerName ? (darkMode ? 'text-amber-400' : 'text-amber-700') : darkMode ? 'text-zinc-500 hover:text-zinc-300' : 'text-gray-500 hover:text-gray-700'}" />
+					</button>
+					<!-- Line numbers -->
+					<button
+						onclick={() => { showLineNumbers = !showLineNumbers; localStorage.setItem('dockhand-log-line-numbers', String(showLineNumbers)); }}
+						class="p-1 rounded transition-colors {showLineNumbers ? (darkMode ? 'bg-amber-500/20 ring-1 ring-amber-500/50' : 'bg-amber-500/30 ring-1 ring-amber-600/50') : ''} {darkMode ? 'hover:bg-zinc-800' : 'hover:bg-gray-200'}"
+						title={showLineNumbers ? 'Hide line numbers' : 'Show line numbers'}
+					>
+						<Hash class="w-3 h-3 transition-colors {showLineNumbers ? (darkMode ? 'text-amber-400' : 'text-amber-700') : darkMode ? 'text-zinc-500 hover:text-zinc-300' : 'text-gray-500 hover:text-gray-700'}" />
 					</button>
 					<!-- Theme toggle -->
 					<button
@@ -2364,7 +2476,7 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 				</div>
 			{:else}
 				<div bind:this={logsRef} class="flex-1 overflow-auto p-4">
-					<pre class="font-mono {wordWrap ? 'whitespace-pre-wrap' : 'whitespace-pre'} {darkMode ? 'text-zinc-50' : 'text-gray-900'}" style="font-size: {fontSize}px;">{@html highlightedLogs()}</pre>
+					<pre class="font-mono {wordWrap ? 'whitespace-pre-wrap' : 'whitespace-pre'} {showLineNumbers ? 'show-line-numbers' : ''} {darkMode ? 'text-zinc-50' : 'text-gray-900'}" style="font-size: {fontSize}px;">{@html wrapHtmlLines(highlightedLogs())}</pre>
 				</div>
 			{/if}
 		{/if}

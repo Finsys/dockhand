@@ -8,6 +8,7 @@
 	import * as Tabs from '$lib/components/ui/tabs';
 	import { onMount, onDestroy } from 'svelte';
 	import { licenseStore } from '$lib/stores/license';
+	import { formatBytes } from '$lib/utils/format';
 	import { browser } from '$app/environment';
 	import LicenseModal from './LicenseModal.svelte';
 	import PrivacyModal from './PrivacyModal.svelte';
@@ -401,11 +402,6 @@
 		setTimeout(() => {
 			isJumping = false;
 		}, 800);
-	}
-
-	function formatBytes(bytes: number): string {
-		const gb = bytes / (1024 * 1024 * 1024);
-		return `${gb.toFixed(1)} GB`;
 	}
 
 	async function fetchSystemInfo() {

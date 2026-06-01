@@ -1,5 +1,37 @@
 [
   {
+    "version": "1.0.31",
+    "date": "2026-05-30",
+    "changes": [
+      { "type": "fix", "text": "502 Bad Gateway behind nginx-based reverse proxies — SvelteKit 2.51+ bloated the Link response header, pinned to 2.50.0 (#1114)" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.31"
+  },
+  {
+    "version": "1.0.30",
+    "date": "2026-05-30",
+    "changes": [
+      { "type": "feature", "text": "time range filter for log viewer — filter logs by From/To date and time (#1068)" },
+      { "type": "feature", "text": "configurable tail line count in log viewer — choose from 100 to all lines (#1066)" },
+      { "type": "feature", "text": "toggleable line numbers in log viewer (#1067)" },
+      { "type": "feature", "text": "\"some unused\" image filter — show images with both used and unused tags for selective cleanup (#621)" },
+      { "type": "feature", "text": "IP binding and port ranges in container port mappings (#581)" },
+      { "type": "feature", "text": "remove individual containers directly from stacks page (#576)" },
+      { "type": "fix", "text": "scan cache lookup by tag name never matched — results now resolved via image digest (#1064)" },
+      { "type": "fix", "text": "image-baked env vars not updated during auto-update container recreation (#1061)" },
+      { "type": "fix", "text": "git stack deploy via Hawser fails with \"Invalid string length\" when repo has large files (#1040)" },
+      { "type": "feature", "text": "Gotify notification priority via URL query param — gotify://host/token?priority=5 (#1033)" },
+      { "type": "fix", "text": "consistent action button order across container and stack views (#1079)" },
+      { "type": "feature", "text": "named custom URL labels — dockhand.url=[Name](https://...) markdown syntax (#1065)" },
+      { "type": "fix", "text": "HTTPS git credentials no longer leaked in process arguments (#1081)" },
+      { "type": "feature", "text": "bump Docker Compose to 5.1.4 (GHSA-pmwq-pjrm-6p5r)" },
+      { "type": "feature", "text": "dockhand.order label to control container display order within stacks (#847)" },
+      { "type": "feature", "text": "live network attach/detach for running containers — join or leave Docker networks without restarting (#1051)" },
+      { "type": "fix", "text": "environment variable values with nested quotes progressively corrupted on each save (#1036, #1086)" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.30"
+  },
+  {
     "version": "1.0.29",
     "date": "2026-05-17",
     "changes": [

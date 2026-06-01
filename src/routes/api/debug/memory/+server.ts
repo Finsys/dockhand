@@ -13,6 +13,7 @@ import type { RequestHandler } from './$types';
 import v8 from 'node:v8';
 import os from 'node:os';
 import { getRssStats, dumpHeapSnapshot, listHeapSnapshots } from '$lib/server/rss-tracker';
+import { formatBytes } from '$lib/utils/format';
 
 // Track startup time and initial RSS for growth rate calculation
 const startupTime = Date.now();
@@ -98,16 +99,6 @@ export const GET: RequestHandler = async ({ url }) => {
 		rssTracker: getRssStats(),
 	});
 };
-
-function formatBytes(bytes: number): string {
-	if (bytes === 0) return '0 B';
-	const sign = bytes < 0 ? '-' : '';
-	const abs = Math.abs(bytes);
-	if (abs < 1024) return `${sign}${abs} B`;
-	if (abs < 1024 * 1024) return `${sign}${(abs / 1024).toFixed(1)} KB`;
-	if (abs < 1024 * 1024 * 1024) return `${sign}${(abs / (1024 * 1024)).toFixed(1)} MB`;
-	return `${sign}${(abs / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-}
 
 function formatUptime(ms: number): string {
 	const seconds = Math.floor(ms / 1000);

@@ -13,6 +13,7 @@
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
 	import { formatPorts, formatExposedPorts } from '$lib/utils/port-format';
+	import { formatBytes } from '$lib/utils/format';
 	import MultiSelectFilter from '$lib/components/MultiSelectFilter.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import { Badge } from '$lib/components/ui/badge';
@@ -86,6 +87,7 @@
 	import { watchJob } from '$lib/utils/sse-fetch';
 	import { ipToNumber } from '$lib/utils/ip';
 	import { formatHostPortUrl } from '$lib/utils/url';
+	import { parseCustomUrl } from '$lib/utils/custom-url';
 	import { detectShells, getBestShell, hasAvailableShell, USER_OPTIONS, getSavedUser, saveUserForContainer, getCustomUsers, removeCustomUser, type ShellDetectionResult } from '$lib/utils/shell-detection';
 	import { DataGrid } from '$lib/components/data-grid';
 	import type { ColumnConfig } from '$lib/types';
@@ -93,15 +95,6 @@
 
 	// Track change detection for stat highlighting (UI-only, stays in component)
 	let changedFields = $state<Map<string, Set<string>>>(new Map());
-
-	// Format bytes to human readable
-	function formatBytes(bytes: number, decimals = 1): string {
-		if (bytes === 0) return '0B';
-		const k = 1024;
-		const sizes = ['B', 'K', 'M', 'G', 'T'];
-		const i = Math.floor(Math.log(bytes) / Math.log(k));
-		return parseFloat((bytes / Math.pow(k, i)).toFixed(decimals)) + sizes[i];
-	}
 
 	type SortField = 'name' | 'image' | 'state' | 'health' | 'uptime' | 'stack' | 'ip' | 'cpu' | 'memory' | 'ports';
 	type SortDirection = 'asc' | 'desc';
@@ -1903,28 +1896,29 @@
 						{/if}
 					{:else if column.id === 'ports'}
 						{@const exposedPorts = $appSettings.showExposedPorts ? formatExposedPorts(container.ports) : []}
-						{@const customUrl = container.labels?.['dockhand.url']?.trim() || null}
-						{#if ports.length > 0 || exposedPorts.length > 0 || customUrl}
+						{@const parsedUrl = parseCustomUrl(container.labels?.['dockhand.url'])}
+						{#if ports.length > 0 || exposedPorts.length > 0 || parsedUrl}
 							{@const compactPorts = $appSettings.compactPorts}
 							{@const displayPorts = compactPorts && ports.length > 1 ? [ports[0]] : ports}
 							{@const remainingCount = ports.length - 1}
 							<div class="flex {compactPorts ? 'flex-nowrap' : 'flex-wrap'} gap-1">
-								{#if customUrl}
+								{#if parsedUrl}
 									<a
-										href={customUrl}
+										href={parsedUrl.url}
 										target="_blank"
 										rel="noopener noreferrer"
 										onclick={(e) => e.stopPropagation()}
 										class="inline-flex items-center gap-0.5 text-xs bg-primary/10 hover:bg-primary/20 text-primary px-1 py-0.5 rounded transition-colors shrink-0"
-										title="Open {customUrl} in new tab"
+										title="Open {parsedUrl.url} in new tab"
 									>
 										<Globe class="w-2.5 h-2.5" />
-										<span class="max-w-[120px] truncate">{customUrl.replace(/^https?:\/\//, '')}</span>
+										<span class="max-w-[120px] truncate">{parsedUrl.name || parsedUrl.url.replace(/^https?:\/\//, '')}</span>
 										<ExternalLink class="w-2.5 h-2.5 opacity-60" />
 									</a>
 								{/if}
 								{#each displayPorts as port}
-									{@const portUrl = container.labels?.[`dockhand.port.${port.publicPort}.url`]?.trim() || null}
+									{@const portParsed = parseCustomUrl(container.labels?.[`dockhand.port.${port.publicPort}.url`])}
+									{@const portUrl = portParsed?.url || null}
 									{@const url = portUrl || (currentEnvDetails ? getPortUrl(port.publicPort) : null)}
 									{#if url}
 										<a
@@ -2009,101 +2003,6 @@
 										<CircleArrowUp class="w-3 h-3 text-amber-500 {$appSettings.highlightUpdates ? 'glow-amber' : ''}" />
 									{/snippet}
 								</ConfirmPopover>
-							{/if}
-							{#if !container.systemContainer}
-							{#if container.state === 'running' || container.state === 'restarting'}
-								{#if $canAccess('containers', 'stop')}
-								<ConfirmPopover
-									open={confirmStopId === container.id}
-									action="Stop"
-									itemType="container"
-									itemName={container.name}
-									title="Stop"
-									onConfirm={() => stopContainer(container.id)}
-									onOpenChange={(open) => confirmStopId = open ? container.id : null}
-								>
-									{#snippet children({ open })}
-										<Square class="w-3 h-3 {open ? 'text-destructive' : 'text-muted-foreground hover:text-destructive'} {stoppingId === container.id ? 'animate-pulse text-destructive' : ''}" />
-									{/snippet}
-								</ConfirmPopover>
-								{#if container.state === 'running'}
-								<button
-									type="button"
-									onclick={() => pauseContainer(container.id)}
-									title="Pause"
-									class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
-								>
-									<Pause class="w-3 h-3 text-muted-foreground hover:text-yellow-500" />
-								</button>
-								{/if}
-								{/if}
-							{:else if container.state === 'paused'}
-								{#if $canAccess('containers', 'start')}
-								<button
-									type="button"
-									onclick={() => unpauseContainer(container.id)}
-									title="Unpause"
-									class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
-								>
-									<Play class="w-3 h-3 text-muted-foreground hover:text-green-500" />
-								</button>
-								{/if}
-							{:else}
-								{#if $canAccess('containers', 'start')}
-								<button
-									type="button"
-									onclick={() => startContainer(container.id)}
-									title="Start"
-									class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
-								>
-									<Play class="w-3 h-3 text-muted-foreground hover:text-green-500" />
-								</button>
-								{/if}
-							{/if}
-							{#if $canAccess('containers', 'restart')}
-							<ConfirmPopover
-								open={confirmRestartId === container.id}
-								action="Restart"
-								itemType="container"
-								itemName={container.name}
-								title="Restart"
-								variant="secondary"
-								onConfirm={() => restartContainer(container.id)}
-								onOpenChange={(open) => confirmRestartId = open ? container.id : null}
-							>
-								{#snippet children({ open })}
-									<RotateCw class="w-3 h-3 {open ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'} {restartingId === container.id ? 'animate-spin text-foreground' : ''}" />
-								{/snippet}
-							</ConfirmPopover>
-							{/if}
-							{/if}
-							<button
-								type="button"
-								onclick={() => inspectContainer(container)}
-								title="View details"
-								class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
-							>
-								<Eye class="w-3 h-3 text-muted-foreground hover:text-foreground" />
-							</button>
-							{#if container.state === 'running' && $canAccess('containers', 'exec')}
-							<button
-								type="button"
-								onclick={() => browseFiles(container)}
-								title="Browse files"
-								class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
-							>
-								<FolderOpen class="w-3 h-3 text-muted-foreground hover:text-foreground" />
-							</button>
-							{/if}
-							{#if $canAccess('containers', 'create')}
-							<button
-								type="button"
-								onclick={() => editContainer(container.id)}
-								title="Edit"
-								class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
-							>
-								<Pencil class="w-3 h-3 text-muted-foreground hover:text-foreground" />
-							</button>
 							{/if}
 							{#if $canAccess('containers', 'logs')}
 							{#if hasActiveLogs(container.id)}
@@ -2245,6 +2144,102 @@
 										{/if}
 									</Popover.Content>
 								</Popover.Root>
+							{/if}
+							{/if}
+							{#if container.state === 'running' && $canAccess('containers', 'exec')}
+							<button
+								type="button"
+								onclick={() => browseFiles(container)}
+								title="Browse files"
+								class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
+							>
+								<FolderOpen class="w-3 h-3 text-muted-foreground hover:text-foreground" />
+							</button>
+							{/if}
+							<button
+								type="button"
+								onclick={() => inspectContainer(container)}
+								title="View details"
+								class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
+							>
+								<Eye class="w-3 h-3 text-muted-foreground hover:text-foreground" />
+							</button>
+							{#if $canAccess('containers', 'create')}
+							<button
+								type="button"
+								onclick={() => editContainer(container.id)}
+								title="Edit"
+								class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
+							>
+								<Pencil class="w-3 h-3 text-muted-foreground hover:text-foreground" />
+							</button>
+							{/if}
+							{#if !container.systemContainer}
+							{#if container.state === 'paused'}
+								{#if $canAccess('containers', 'start')}
+								<button
+									type="button"
+									onclick={() => unpauseContainer(container.id)}
+									title="Unpause"
+									class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
+								>
+									<Play class="w-3 h-3 text-muted-foreground hover:text-green-500" />
+								</button>
+								{/if}
+							{:else if container.state !== 'running' && container.state !== 'restarting'}
+								{#if $canAccess('containers', 'start')}
+								<button
+									type="button"
+									onclick={() => startContainer(container.id)}
+									title="Start"
+									class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
+								>
+									<Play class="w-3 h-3 text-muted-foreground hover:text-green-500" />
+								</button>
+								{/if}
+							{/if}
+							{#if $canAccess('containers', 'restart')}
+							<ConfirmPopover
+								open={confirmRestartId === container.id}
+								action="Restart"
+								itemType="container"
+								itemName={container.name}
+								title="Restart"
+								variant="secondary"
+								onConfirm={() => restartContainer(container.id)}
+								onOpenChange={(open) => confirmRestartId = open ? container.id : null}
+							>
+								{#snippet children({ open })}
+									<RotateCw class="w-3 h-3 {open ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'} {restartingId === container.id ? 'animate-spin text-foreground' : ''}" />
+								{/snippet}
+							</ConfirmPopover>
+							{/if}
+							{#if container.state === 'running' || container.state === 'restarting'}
+								{#if container.state === 'running'}
+								<button
+									type="button"
+									onclick={() => pauseContainer(container.id)}
+									title="Pause"
+									class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
+								>
+									<Pause class="w-3 h-3 text-muted-foreground hover:text-yellow-500" />
+								</button>
+								{/if}
+								{#if $canAccess('containers', 'stop')}
+								<ConfirmPopover
+									open={confirmStopId === container.id}
+									action="Stop"
+									itemType="container"
+									itemName={container.name}
+									title="Stop"
+									onConfirm={() => stopContainer(container.id)}
+									onOpenChange={(open) => confirmStopId = open ? container.id : null}
+								>
+									{#snippet children({ open })}
+										<Square class="w-3 h-3 {open ? 'text-destructive' : 'text-muted-foreground hover:text-destructive'} {stoppingId === container.id ? 'animate-pulse text-destructive' : ''}" />
+									{/snippet}
+								</ConfirmPopover>
+								{/if}
 							{/if}
 							{/if}
 							{#if !container.systemContainer && $canAccess('containers', 'remove')}

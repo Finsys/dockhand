@@ -1777,3 +1777,31 @@ html {
 .ansi-dim { opacity: 0.7; }
 .ansi-italic { font-style: italic; }
 .ansi-underline { text-decoration: underline; }
+
+/* Log line numbers */
+.log-line {
+	min-height: 1.2em;
+}
+pre.show-line-numbers {
+	counter-reset: log-line;
+}
+pre.show-line-numbers .log-line {
+	counter-increment: log-line;
+	padding-left: 4.5em;
+	position: relative;
+}
+pre.show-line-numbers .log-line::before {
+	content: counter(log-line);
+	position: absolute;
+	left: 0;
+	width: 3.5em;
+	text-align: right;
+	padding-right: 0.75em;
+	user-select: none;
+	color: rgb(113 113 122); /* zinc-500 */
+	border-right: 1px solid rgb(63 63 70); /* zinc-700 */
+}
+:where(.light, .light *) pre.show-line-numbers .log-line::before {
+	color: rgb(156 163 175); /* gray-400 */
+	border-right-color: rgb(209 213 219); /* gray-300 */
+}

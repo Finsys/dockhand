@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { HardDrive, Image, Database, Box, Hammer, Loader2 } from 'lucide-svelte';
+	import { formatBytes } from '$lib/utils/format';
 	import { Chart, Svg, Pie, Arc } from 'layerchart';
 
 	interface Props {
@@ -33,14 +34,6 @@
 			{ key: 'buildCache', label: 'Build cache', value: buildCacheSize, color: '#8b5cf6' }
 		].filter(d => d.value > 0)
 	);
-
-	function formatBytes(bytes: number): string {
-		if (bytes === 0) return '0 B';
-		const k = 1024;
-		const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-		const i = Math.floor(Math.log(bytes) / Math.log(k));
-		return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-	}
 
 	function getPercentage(value: number): number {
 		if (totalSize === 0) return 0;

@@ -10,7 +10,9 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 
 	const auth = await authorize(cookies);
 
-	const tail = parseInt(url.searchParams.get('tail') || '100');
+	const tail = url.searchParams.get('tail') || '100';
+	const since = url.searchParams.get('since') || undefined;
+	const until = url.searchParams.get('until') || undefined;
 	const envId = url.searchParams.get('env');
 	const envIdNum = envId ? parseInt(envId) : undefined;
 
@@ -20,7 +22,7 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 	}
 
 	try {
-		const logs = await getContainerLogs(params.id, tail, envIdNum);
+		const logs = await getContainerLogs(params.id, tail === 'all' ? 'all' : parseInt(tail), envIdNum, since, until);
 		return json({ logs });
 	} catch (error: any) {
 		console.error('Error getting container logs:', error?.message || error, error?.stack);

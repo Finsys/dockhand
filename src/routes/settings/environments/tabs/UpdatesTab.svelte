@@ -7,6 +7,7 @@
 	import VulnerabilityCriteriaSelector, { type VulnerabilityCriteria } from '$lib/components/VulnerabilityCriteriaSelector.svelte';
 	import { CircleFadingArrowUp, CircleArrowUp, RefreshCw, Info, Trash2 } from 'lucide-svelte';
 	import { formatDateTime } from '$lib/stores/settings';
+	import { formatBytes } from '$lib/utils/format';
 
 	interface Props {
 		// Update check settings
@@ -43,14 +44,6 @@
 		timezone = $bindable()
 	}: Props = $props();
 
-	// Format bytes to human-readable string
-	function formatBytes(bytes: number): string {
-		if (bytes === 0) return '0 B';
-		const k = 1024;
-		const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-		const i = Math.floor(Math.log(bytes) / Math.log(k));
-		return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
-	}
 </script>
 
 <!-- Scheduled Update Check Section -->

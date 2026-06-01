@@ -4,9 +4,13 @@
 	import * as Tabs from '$lib/components/ui/tabs';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
-	import { Loader2, Box, Info, Layers, Cpu, MemoryStick, HardDrive, Network, Shield, Settings2, Code, Copy, Check, XCircle, Activity, Wifi, Pencil, RefreshCw, X, FolderOpen, Moon, Tags, ExternalLink, Gpu, Globe } from 'lucide-svelte';
+	import { Loader2, Box, Info, Layers, Cpu, MemoryStick, HardDrive, Network, Shield, Settings2, Code, Copy, Check, XCircle, Activity, Wifi, Pencil, RefreshCw, X, FolderOpen, Moon, Tags, ExternalLink, Gpu, Globe, Link, Unlink } from 'lucide-svelte';
+	import * as Select from '$lib/components/ui/select';
+	import { toast } from 'svelte-sonner';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { copyToClipboard } from '$lib/utils/clipboard';
+	import { parseCustomUrl } from '$lib/utils/custom-url';
+	import { formatBytes } from '$lib/utils/format';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import { currentEnvironment, appendEnvParam, environments } from '$lib/stores/environment';
@@ -92,6 +96,92 @@
 	let isLiveConnected = $state(false);
 
 	let editInputRef: HTMLInputElement | null = null;
+
+	// Network attach/detach state
+	interface NetworkListItem {
+		id: string;
+		name: string;
+		driver: string;
+	}
+	let availableNetworks = $state<NetworkListItem[]>([]);
+	let selectedNetwork = $state<string | undefined>(undefined);
+	let networkConnecting = $state(false);
+	let networkDisconnecting = $state<string | null>(null);
+	let networksLoading = $state(false);
+
+	const connectedNetworkNames = $derived(
+		containerData?.NetworkSettings?.Networks
+			? new Set(Object.keys(containerData.NetworkSettings.Networks))
+			: new Set<string>()
+	);
+
+	const unconnectedNetworks = $derived(
+		availableNetworks.filter(n => !connectedNetworkNames.has(n.name))
+	);
+
+	async function fetchNetworks() {
+		networksLoading = true;
+		try {
+			const envId = $currentEnvironment?.id ?? null;
+			const response = await fetch(appendEnvParam('/api/networks', envId));
+			if (response.ok) {
+				availableNetworks = await response.json();
+			}
+		} catch (err) {
+			console.error('Failed to fetch networks:', err);
+		} finally {
+			networksLoading = false;
+		}
+	}
+
+	async function connectToNetwork() {
+		if (!selectedNetwork || !containerId) return;
+		networkConnecting = true;
+		try {
+			const envId = $currentEnvironment?.id ?? null;
+			const response = await fetch(appendEnvParam(`/api/networks/${selectedNetwork}/connect`, envId), {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ containerId, containerName: displayName })
+			});
+			if (response.ok) {
+				const net = availableNetworks.find(n => n.id === selectedNetwork);
+				toast.success(`Connected to ${net?.name || 'network'}`);
+				selectedNetwork = undefined;
+				await fetchContainerInspect();
+			} else {
+				const data = await response.json();
+				toast.error(data.details || 'Failed to connect to network');
+			}
+		} catch (err) {
+			toast.error('Failed to connect to network');
+		} finally {
+			networkConnecting = false;
+		}
+	}
+
+	async function disconnectFromNetwork(networkId: string, networkName: string) {
+		networkDisconnecting = networkName;
+		try {
+			const envId = $currentEnvironment?.id ?? null;
+			const response = await fetch(appendEnvParam(`/api/networks/${networkId}/disconnect`, envId), {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ containerId, containerName: displayName })
+			});
+			if (response.ok) {
+				toast.success(`Disconnected from ${networkName}`);
+				await fetchContainerInspect();
+			} else {
+				const data = await response.json();
+				toast.error(data.details || 'Failed to disconnect from network');
+			}
+		} catch (err) {
+			toast.error('Failed to disconnect from network');
+		} finally {
+			networkDisconnecting = null;
+		}
+	}
 
 	// Current environment details for port URL generation
 	const currentEnvDetails = $derived($environments.find(e => e.id === $currentEnvironment?.id) ?? null);
@@ -203,6 +293,13 @@
 		}
 	});
 
+	// Fetch available networks when network tab is selected
+	$effect(() => {
+		if (open && activeTab === 'network') {
+			fetchNetworks();
+		}
+	});
+
 	// Reset when modal closes
 	$effect(() => {
 		if (!open) {
@@ -223,6 +320,8 @@
 			displayName = '';
 			isEditing = false;
 			editName = '';
+			availableNetworks = [];
+			selectedNetwork = undefined;
 		}
 	});
 
@@ -338,14 +437,6 @@
 	function formatDate(dateString: string): string {
 		if (!dateString) return 'N/A';
 		return formatDateTime(dateString);
-	}
-
-	function formatBytes(bytes: number): string {
-		if (!bytes || bytes === 0) return '0 B';
-		const k = 1024;
-		const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-		const i = Math.floor(Math.log(bytes) / Math.log(k));
-		return `${(bytes / Math.pow(k, i)).toFixed(i > 1 ? 2 : 0)} ${sizes[i]}`;
 	}
 
 	function formatMemory(bytes: number): string {
@@ -825,15 +916,34 @@
 						{/if}
 
 						<!-- Networks -->
-						{#if containerData.NetworkSettings?.Networks && Object.keys(containerData.NetworkSettings.Networks).length > 0}
-							<div class="space-y-2">
-								<h3 class="text-sm font-semibold">Connected networks</h3>
+						<div class="space-y-2">
+							<h3 class="text-sm font-semibold">Connected networks</h3>
+							{#if containerData.NetworkSettings?.Networks && Object.keys(containerData.NetworkSettings.Networks).length > 0}
 								<div class="space-y-2">
 									{#each Object.entries(containerData.NetworkSettings.Networks) as [networkName, networkData]}
+									{@const netData = networkData as any}
 										<div class="p-3 border border-border rounded-lg space-y-2">
 											<div class="flex items-center justify-between">
-												<span class="font-medium text-sm">{networkName}</span>
-												<Badge variant="secondary" class="text-xs">{networkData.NetworkID?.slice(0, 12)}</Badge>
+												<div class="flex items-center gap-2">
+													<span class="font-medium text-sm">{networkName}</span>
+													<Badge variant="secondary" class="text-xs">{netData.NetworkID?.slice(0, 12)}</Badge>
+												</div>
+												{#if containerData.State?.Running}
+													<Button
+														variant="ghost"
+														size="sm"
+														class="h-6 px-2 text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
+														disabled={networkDisconnecting === networkName}
+														onclick={() => disconnectFromNetwork(netData.NetworkID, networkName)}
+													>
+														{#if networkDisconnecting === networkName}
+															<Loader2 class="w-3 h-3 mr-1 animate-spin" />
+														{:else}
+															<Unlink class="w-3 h-3 mr-1" />
+														{/if}
+														Leave
+													</Button>
+												{/if}
 											</div>
 											<div class="grid grid-cols-2 lg:grid-cols-4 gap-2 text-xs">
 												{#if networkData.IPAddress}
@@ -870,26 +980,74 @@
 										</div>
 									{/each}
 								</div>
-							</div>
-						{/if}
+							{:else}
+								<p class="text-xs text-muted-foreground">No networks connected.</p>
+							{/if}
+
+							<!-- Join network dropdown -->
+							{#if containerData.State?.Running}
+								<div class="flex items-center gap-2 pt-1">
+									<Select.Root type="single" bind:value={selectedNetwork}>
+										<Select.Trigger class="flex-1 h-8 text-xs">
+											{#if selectedNetwork}
+												{@const net = unconnectedNetworks.find(n => n.id === selectedNetwork)}
+												<span class="flex items-center gap-2">
+													<Network class="w-3 h-3 text-muted-foreground" />
+													{net?.name || 'Unknown'}
+													<Badge variant="outline" class="text-[10px] px-1 py-0">{net?.driver}</Badge>
+												</span>
+											{:else}
+												<span class="text-muted-foreground">
+													{networksLoading ? 'Loading networks...' : unconnectedNetworks.length > 0 ? 'Join a network...' : 'No networks available'}
+												</span>
+											{/if}
+										</Select.Trigger>
+										<Select.Content>
+											{#each unconnectedNetworks as network}
+												<Select.Item value={network.id}>
+													<span class="flex items-center gap-2">
+														<Network class="w-3 h-3 text-muted-foreground" />
+														{network.name}
+														<Badge variant="outline" class="text-[10px] px-1 py-0 ml-auto">{network.driver}</Badge>
+													</span>
+												</Select.Item>
+											{/each}
+										</Select.Content>
+									</Select.Root>
+									<Button
+										size="sm"
+										class="h-8"
+										disabled={!selectedNetwork || networkConnecting}
+										onclick={connectToNetwork}
+									>
+										{#if networkConnecting}
+											<Loader2 class="w-3.5 h-3.5 mr-1 animate-spin" />
+										{:else}
+											<Link class="w-3.5 h-3.5 mr-1" />
+										{/if}
+										Join
+									</Button>
+								</div>
+							{/if}
+						</div>
 
 						<!-- Ports -->
 						{#if containerData.NetworkSettings?.Ports && Object.keys(containerData.NetworkSettings.Ports).length > 0}
-							{@const inspectCustomUrl = containerData.Config?.Labels?.['dockhand.url']?.trim() || null}
+							{@const inspectParsedUrl = parseCustomUrl(containerData.Config?.Labels?.['dockhand.url'])}
 							<div class="space-y-2">
 								<h3 class="text-sm font-semibold">Port mappings</h3>
 								<div class="flex flex-wrap gap-2">
-									{#if inspectCustomUrl}
+									{#if inspectParsedUrl}
 										<div class="flex items-center gap-2 text-xs p-2 bg-primary/10 rounded">
 											<a
-												href={inspectCustomUrl}
+												href={inspectParsedUrl.url}
 												target="_blank"
 												rel="noopener noreferrer"
 												class="inline-flex items-center gap-1 text-primary hover:underline"
-												title="Open {inspectCustomUrl}"
+												title="Open {inspectParsedUrl.url}"
 											>
 												<Globe class="w-3 h-3" />
-												<span>{inspectCustomUrl.replace(/^https?:\/\//, '')}</span>
+												<span>{inspectParsedUrl.name || inspectParsedUrl.url.replace(/^https?:\/\//, '')}</span>
 												<ExternalLink class="w-3 h-3 opacity-60" />
 											</a>
 										</div>
@@ -897,8 +1055,8 @@
 									{#each Object.entries(containerData.NetworkSettings.Ports) as [containerPort, hostBindings]}
 										{#if hostBindings && hostBindings.length > 0}
 											{#each hostBindings as binding}
-												{@const portUrlOverride = containerData.Config?.Labels?.[`dockhand.port.${binding.HostPort}.url`]?.trim() || null}
-												{@const url = portUrlOverride || getPortUrl(parseInt(binding.HostPort))}
+												{@const portParsedOverride = parseCustomUrl(containerData.Config?.Labels?.[`dockhand.port.${binding.HostPort}.url`])}
+												{@const url = portParsedOverride?.url || getPortUrl(parseInt(binding.HostPort))}
 												<div class="flex items-center gap-2 text-xs p-2 bg-muted rounded">
 													{#if url}
 														<a
