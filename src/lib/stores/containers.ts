@@ -4,6 +4,7 @@ import type { ContainerInfo, ContainerStats } from '$lib/types';
 import { appendEnvParam, clearStaleEnvironment, environments } from '$lib/stores/environment';
 import { appSettings } from '$lib/stores/settings';
 import { toast } from 'svelte-sonner';
+import cronstrue from 'cronstrue';
 
 export interface AutoUpdateSetting {
 	enabled: boolean;
@@ -59,43 +60,21 @@ function createContainerStore() {
 		update((s) => ({ ...s, ...partial }));
 	}
 
-	function formatSchedule(
-		scheduleType: string,
-		cronExpression: string
-	): { label: string; tooltip: string } {
+	function formatSchedule(cronExpression: string): { label: string; tooltip: string } {
 		if (!cronExpression) return { label: 'on', tooltip: 'Auto-update enabled' };
 
-		const parts = cronExpression.split(' ');
-		if (parts.length < 5) return { label: 'cron', tooltip: cronExpression };
-
-		const [min, hr, , , dow] = parts;
-		const hourNum = parseInt(hr);
-		const minNum = parseInt(min);
 		const is12Hour = get(appSettings).timeFormat === '12h';
 
-		let timeStr: string;
-		if (is12Hour) {
-			const ampm = hourNum >= 12 ? 'PM' : 'AM';
-			const hour12 = hourNum === 0 ? 12 : hourNum > 12 ? hourNum - 12 : hourNum;
-			timeStr = `${hour12}:${minNum.toString().padStart(2, '0')} ${ampm}`;
-		} else {
-			timeStr = `${hourNum.toString().padStart(2, '0')}:${minNum.toString().padStart(2, '0')}`;
+		try {
+			const description = cronstrue.toString(cronExpression, {
+				use24HourTimeFormat: !is12Hour,
+				throwExceptionOnParseError: true,
+				locale: 'en'
+			});
+			return { label: description, tooltip: description };
+		} catch {
+			return { label: 'cron', tooltip: cronExpression };
 		}
-
-		if (scheduleType === 'daily' || dow === '*') {
-			return { label: 'daily', tooltip: `Daily at ${timeStr}` };
-		}
-
-		if (scheduleType === 'weekly') {
-			const days = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
-			const dayName = days[parseInt(dow)] || dow;
-			return {
-				label: dayName,
-				tooltip: `Every ${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][parseInt(dow)] || dow} at ${timeStr}`
-			};
-		}
-
-		return { label: 'cron', tooltip: cronExpression };
 	}
 
 	async function checkScannerSettings(envId: number | null) {
@@ -152,10 +131,7 @@ function createContainerStore() {
 							cronExpression: string | null;
 							vulnerabilityCriteria: string;
 						};
-						const { label, tooltip } = formatSchedule(
-							s.scheduleType,
-							s.cronExpression || ''
-						);
+						const { label, tooltip } = formatSchedule(s.cronExpression || '');
 						settings.set(containerName, {
 							enabled: true,
 							label,
