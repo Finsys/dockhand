@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, rmSync, chmodSync, readFileSync, writeFileSync }
 import { join, resolve, dirname, basename, relative } from 'node:path';
 import { spawn as nodeSpawn, spawnSync } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import {
 	getGitRepository,
 	getGitCredential,
@@ -17,6 +18,7 @@ import {
 import { deployStack, getStackDir } from './stacks';
 
 const MERGED_CA_BUNDLE_PATH = '/tmp/dockhand-merged-ca-bundle.crt';
+const GIT_SSH_KEY_PATH_ENV = 'DOCKHAND_GIT_SSH_KEY_PATH';
 let mergedCaBundleReady = false;
 
 /**
@@ -242,7 +244,7 @@ async function buildGitEnv(credential: GitCredential | null): Promise<GitEnv> {
 		// Write SSH key to /tmp instead of data volume — some filesystems (TrueNAS ZFS,
 		// NFS, CIFS) silently ignore chmod, leaving the key group-readable (e.g. 0670).
 		// SSH refuses keys that are accessible by others. /tmp is always a proper filesystem.
-		const sshKeyPath = `/tmp/.ssh-key-${credential.id}`;
+		const sshKeyPath = `/tmp/.ssh-key-${credential.id}-${process.pid}-${randomUUID()}`;
 
 		// Ensure SSH key ends with a newline (newer SSH versions are strict about this)
 		let keyContent = credential.sshPrivateKey;
@@ -270,6 +272,7 @@ async function buildGitEnv(credential: GitCredential | null): Promise<GitEnv> {
 
 		// Configure SSH to use ONLY this key (no agent, no default keys)
 		env.GIT_SSH_COMMAND = `ssh -i "${sshKeyPath}" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes`;
+		env[GIT_SSH_KEY_PATH_ENV] = sshKeyPath;
 	} else {
 		// No SSH credential - prevent using any keys (IdentitiesOnly=yes with no -i means no keys)
 		env.GIT_SSH_COMMAND = 'ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes -o PasswordAuthentication=no -o PubkeyAuthentication=no';
@@ -278,9 +281,12 @@ async function buildGitEnv(credential: GitCredential | null): Promise<GitEnv> {
 	return env;
 }
 
-function cleanupSshKey(credential: GitCredential | null): void {
+function cleanupSshKey(
+	credential: Pick<GitCredential, 'authType' | 'id'> | null,
+	env?: Record<string, string>
+): void {
 	if (credential?.authType === 'ssh') {
-		const sshKeyPath = `/tmp/.ssh-key-${credential.id}`;
+		const sshKeyPath = env?.[GIT_SSH_KEY_PATH_ENV] || `/tmp/.ssh-key-${credential.id}`;
 		try {
 			if (existsSync(sshKeyPath)) {
 				rmSync(sshKeyPath);
@@ -496,7 +502,7 @@ async function testRepositoryConnection(options: {
 	} catch (error: any) {
 		return { success: false, error: error.message };
 	} finally {
-		cleanupSshKey(credential);
+		cleanupSshKey(credential, env);
 	}
 }
 
@@ -624,7 +630,7 @@ export async function syncRepository(repoId: number): Promise<SyncResult> {
 			syncError: null
 		});
 
-		cleanupSshKey(credential);
+		cleanupSshKey(credential, env);
 
 		return {
 			success: true,
@@ -633,7 +639,7 @@ export async function syncRepository(repoId: number): Promise<SyncResult> {
 			updated
 		};
 	} catch (error: any) {
-		cleanupSshKey(credential);
+		cleanupSshKey(credential, env);
 		await updateGitRepository(repoId, {
 			syncStatus: 'error',
 			syncError: error.message
@@ -688,6 +694,7 @@ export async function checkForUpdates(repoId: number): Promise<{ hasUpdates: boo
 
 	try {
 		if (!existsSync(repoPath)) {
+			cleanupSshKey(credential, env);
 			return { hasUpdates: true, currentCommit: 'none', latestCommit: 'unknown' };
 		}
 
@@ -702,7 +709,7 @@ export async function checkForUpdates(repoId: number): Promise<{ hasUpdates: boo
 		const latestResult = await execGit(['rev-parse', `origin/${repo.branch}`], repoPath, env);
 		const latestCommit = latestResult.stdout.substring(0, 7);
 
-		cleanupSshKey(credential);
+		cleanupSshKey(credential, env);
 
 		return {
 			hasUpdates: currentCommit !== latestCommit,
@@ -710,7 +717,7 @@ export async function checkForUpdates(repoId: number): Promise<{ hasUpdates: boo
 			latestCommit
 		};
 	} catch (error: any) {
-		cleanupSshKey(credential);
+		cleanupSshKey(credential, env);
 		return { hasUpdates: false, error: error.message };
 	}
 }
@@ -962,7 +969,7 @@ export async function syncGitStack(stackId: number): Promise<SyncResult> {
 			syncError: null
 		});
 
-		cleanupSshKey(credential);
+		cleanupSshKey(credential, env);
 
 		console.log(`${logPrefix} ----------------------------------------`);
 		console.log(`${logPrefix} SYNC GIT STACK COMPLETE`);
@@ -985,7 +992,7 @@ export async function syncGitStack(stackId: number): Promise<SyncResult> {
 			changedFiles
 		};
 	} catch (error: any) {
-		cleanupSshKey(credential);
+		cleanupSshKey(credential, env);
 		await updateGitStack(stackId, {
 			syncStatus: 'error',
 			syncError: error.message
@@ -1120,7 +1127,7 @@ export async function testGitStack(stackId: number): Promise<TestResult> {
 			env
 		);
 
-		cleanupSshKey(credential);
+		cleanupSshKey(credential, env);
 
 		if (result.code !== 0) {
 			return { success: false, error: result.stderr || 'Failed to connect to repository' };
@@ -1136,7 +1143,7 @@ export async function testGitStack(stackId: number): Promise<TestResult> {
 		const lastCommit = match ? match[1].substring(0, 7) : undefined;
 		const branch = match ? match[2] : repo.branch;
 
-		cleanupSshKey(credential);
+		cleanupSshKey(credential, env);
 
 		return {
 			success: true,
@@ -1144,7 +1151,7 @@ export async function testGitStack(stackId: number): Promise<TestResult> {
 			lastCommit
 		};
 	} catch (error: any) {
-		cleanupSshKey(credential);
+		cleanupSshKey(credential, env);
 		return { success: false, error: error.message };
 	}
 }
@@ -1314,7 +1321,7 @@ export async function deployGitStackWithProgress(
 			syncError: null
 		});
 
-		cleanupSshKey(credential);
+		cleanupSshKey(credential, env);
 
 		// Step 5: Deploying stack
 		// Uses `docker compose up -d --remove-orphans` which only recreates changed services
@@ -1362,7 +1369,7 @@ export async function deployGitStackWithProgress(
 
 		return result;
 	} catch (error: any) {
-		cleanupSshKey(credential);
+		cleanupSshKey(credential, env);
 		await updateGitStack(stackId, {
 			syncStatus: 'error',
 			syncError: error.message
@@ -1554,13 +1561,15 @@ export async function previewRepoEnvFiles(options: PreviewEnvOptions): Promise<P
 	console.log(`${logPrefix} Starting preview for ${repoUrl}`);
 	console.log(`${logPrefix} Temp directory: ${tempDir}`);
 
+	let env: GitEnv | undefined;
+
 	try {
 		// Ensure temp directory exists
 		mkdirSync(tempDir, { recursive: true });
 
 		// Build git environment with credentials
 		// Cast credential to GitCredential type (only uses id, authType, sshPrivateKey)
-		const env = await buildGitEnv(credential as GitCredential | null);
+		env = await buildGitEnv(credential as GitCredential | null);
 		const authenticatedUrl = buildRepoUrl(repoUrl, credential as GitCredential | null);
 
 		// Clone with depth 1 (shallow clone for speed)
@@ -1630,7 +1639,7 @@ export async function previewRepoEnvFiles(options: PreviewEnvOptions): Promise<P
 		return { vars: {}, sources: {}, error: error.message };
 	} finally {
 		// Always clean up temp directory
-		cleanupSshKey(credential as GitCredential | null);
+		cleanupSshKey(credential as GitCredential | null, env);
 		try {
 			if (existsSync(tempDir)) {
 				rmSync(tempDir, { recursive: true, force: true });
