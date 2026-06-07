@@ -10,6 +10,7 @@
 	import ScanTab from '$lib/components/ScanTab.svelte';
 	import type { ScanResult } from '$lib/components/ScanTab.svelte';
 	import ContainerSettingsTab from './ContainerSettingsTab.svelte';
+	import { parseHostPort, expandPortBindings } from '$lib/utils/port-parse';
 	import type { VulnerabilityCriteria } from '$lib/components/VulnerabilityCriteriaSelector.svelte';
 
 	// Parse shell command respecting quotes
@@ -105,12 +106,6 @@
 	let labels = $state<{ key: string; value: string }[]>([{ key: '', value: '' }]);
 
 	// Networks
-	interface DockerNetwork {
-		id: string;
-		name: string;
-		driver: string;
-	}
-	let availableNetworks = $state<DockerNetwork[]>([]);
 	let selectedNetworks = $state<string[]>([]);
 	let networkConfigs = $state<Record<string, { ipv4Address: string; ipv6Address: string; aliases: string }>>({});
 	let macAddress = $state('');
@@ -191,7 +186,6 @@
 	$effect(() => {
 		if (open) {
 			fetchConfigSets();
-			fetchNetworks();
 			fetchScannerSettings();
 		}
 	});
@@ -280,18 +274,6 @@
 		scanStatus = status;
 	}
 
-	async function fetchNetworks() {
-		try {
-			const envParam = $currentEnvironment ? `?env=${$currentEnvironment.id}` : '';
-			const response = await fetch(`/api/networks${envParam}`);
-			if (response.ok) {
-				availableNetworks = await response.json();
-			}
-		} catch (err) {
-			console.error('Failed to fetch networks:', err);
-		}
-	}
-
 	async function fetchConfigSets() {
 		try {
 			const response = await fetch('/api/config-sets');
@@ -364,12 +346,13 @@
 		loading = true;
 
 		try {
-			const ports: any = {};
+			const ports: Record<string, { HostIp?: string; HostPort: string }> = {};
 			portMappings
-				.filter((p) => p.containerPort && p.hostPort)
+				.filter((p) => p.containerPort)
 				.forEach((p) => {
-					const key = `${p.containerPort}/${p.protocol}`;
-					ports[key] = { HostPort: String(p.hostPort) };
+					const parsed = parseHostPort(p.hostPort);
+					const bindings = expandPortBindings(parsed.hostPort, p.containerPort, p.protocol, parsed.hostIp);
+					Object.assign(ports, bindings);
 				});
 
 			const volumeBinds = volumeMappings
@@ -455,7 +438,11 @@
 				restartPolicy,
 				restartMaxRetries: restartPolicy === 'on-failure' && restartMaxRetries !== '' ? Number(restartMaxRetries) : undefined,
 				networkMode,
-				networks: selectedNetworks.length > 0 ? selectedNetworks : undefined,
+				additionalNetworks: (() => {
+					const isSharedMode = networkMode === 'host' || networkMode === 'none' || networkMode.startsWith('container:');
+					if (isSharedMode) return undefined;
+					return selectedNetworks.length > 0 ? selectedNetworks : undefined;
+				})(),
 				networkConfigs: Object.keys(netConfigs).length > 0 ? netConfigs : undefined,
 				macAddress: macAddress.trim() || undefined,
 				startAfterCreate,
@@ -738,7 +725,6 @@
 				bind:volumeMappings
 				bind:envVars
 				bind:labels
-				{availableNetworks}
 				bind:selectedNetworks
 				bind:networkConfigs
 				bind:macAddress

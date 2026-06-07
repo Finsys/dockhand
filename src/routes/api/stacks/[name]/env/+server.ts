@@ -18,12 +18,7 @@ function parseEnvFile(content: string): Record<string, string> {
 		const eqIndex = trimmed.indexOf('=');
 		if (eqIndex > 0) {
 			const key = trimmed.substring(0, eqIndex).trim();
-			let value = trimmed.substring(eqIndex + 1);
-			// Remove surrounding quotes if present
-			if ((value.startsWith('"') && value.endsWith('"')) ||
-			    (value.startsWith("'") && value.endsWith("'"))) {
-				value = value.slice(1, -1);
-			}
+			const value = trimmed.substring(eqIndex + 1);
 			result[key] = value;
 		}
 	}

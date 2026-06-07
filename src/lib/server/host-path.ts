@@ -385,36 +385,39 @@ export function extractUidFromSocketPath(socketPath: string): string | null {
 export function rewriteComposeVolumePaths(composeContent: string, workingDir: string): { content: string; modified: boolean; changes: string[] } {
 	const changes: string[] = [];
 
-	// Try to translate workingDir to host path using ANY cached mount
-	// This handles both DATA_DIR mounts and external mounts (e.g., /external-stacks)
-	const hostWorkingDir = translateContainerPathViaMount(workingDir);
-
-	if (!hostWorkingDir) {
-		// Can't translate - workingDir is not under any known mount
-		return { content: composeContent, modified: false, changes };
-	}
-
-	// Parse compose content line by line to find and rewrite volume mounts
+	// Parse compose content line by line to find and rewrite volume mounts.
 	// We look for patterns like:
 	//   - ./something:/container/path
+	//   - ../something:/container/path
 	//   - "./something:/container/path"
-	//   - './something:/container/path'
+	//   - '../something:/container/path'
 	const lines = composeContent.split('\n');
 	const modifiedLines: string[] = [];
 
 	for (const line of lines) {
-		// Match volume mount patterns with relative paths
-		// Handles: - ./path:/dest, - "./path:/dest", - './path:/dest'
-		const volumeMatch = line.match(/^(\s*-\s*)(['"]?)(\.\/[^'":\s]+)(\2)(:.+)$/);
+		// Match volume mount patterns with relative paths.
+		// Handles ./path and ../path, optionally quoted with single or double quotes.
+		const volumeMatch = line.match(/^(\s*-\s*)(['"]?)(\.\.?\/[^'":\s]+)(\2)(:.+)$/);
 
 		if (volumeMatch) {
 			const [, prefix, quote, relativeSrc, , destPart] = volumeMatch;
-			// Convert relative path to absolute host path
-			const absoluteHostPath = hostWorkingDir + '/' + relativeSrc.substring(2); // Remove ./
+			// Resolve to an absolute container path, then translate to a host
+			// path via any known mount. Each line is translated independently so
+			// `../foo` can escape workingDir into a sibling that may map to a
+			// different mount than workingDir itself.
+			const absoluteContainerPath = resolve(workingDir, relativeSrc);
+			const absoluteHostPath = translateContainerPathViaMount(absoluteContainerPath);
 
-			const newLine = `${prefix}${absoluteHostPath}${destPart}`;
-			modifiedLines.push(newLine);
-			changes.push(`  ${relativeSrc} -> ${absoluteHostPath}`);
+			if (absoluteHostPath) {
+				const newLine = `${prefix}${absoluteHostPath}${destPart}`;
+				modifiedLines.push(newLine);
+				changes.push(`  ${relativeSrc} -> ${absoluteHostPath}`);
+			} else {
+				// Can't translate — leave line unchanged. Compose will resolve
+				// it relative to its cwd; if that's wrong the deploy fails
+				// loudly, which is better than producing a misleading host path.
+				modifiedLines.push(line);
+			}
 		} else {
 			modifiedLines.push(line);
 		}

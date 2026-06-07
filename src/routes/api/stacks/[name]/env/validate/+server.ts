@@ -13,6 +13,22 @@ interface ValidationResult {
 	unused: string[];
 }
 
+/** Docker and Compose built-in env vars consumed implicitly at runtime (not via ${} interpolation) */
+const DOCKER_COMPOSE_BUILTIN_VARS = new Set([
+	// Docker Compose
+	'COMPOSE_PROJECT_NAME', 'COMPOSE_FILE', 'COMPOSE_PROFILES',
+	'COMPOSE_CONVERT_WINDOWS_PATHS', 'COMPOSE_PATH_SEPARATOR',
+	'COMPOSE_IGNORE_ORPHANS', 'COMPOSE_REMOVE_ORPHANS',
+	'COMPOSE_PARALLEL_LIMIT', 'COMPOSE_ANSI', 'COMPOSE_STATUS_STDOUT',
+	'COMPOSE_ENV_FILES', 'COMPOSE_DISABLE_ENV_FILE', 'COMPOSE_MENU',
+	'COMPOSE_EXPERIMENTAL', 'COMPOSE_PROGRESS',
+	// Docker CLI
+	'DOCKER_API_VERSION', 'DOCKER_CERT_PATH', 'DOCKER_CONFIG',
+	'DOCKER_CONTEXT', 'DOCKER_CUSTOM_HEADERS', 'DOCKER_DEFAULT_PLATFORM',
+	'DOCKER_HIDE_LEGACY_COMMANDS', 'DOCKER_HOST', 'DOCKER_TLS',
+	'DOCKER_TLS_VERIFY', 'BUILDKIT_PROGRESS', 'NO_COLOR',
+]);
+
 /**
  * Extract environment variables from compose YAML content.
  * Matches ${VAR_NAME} and ${VAR_NAME:-default} patterns.
@@ -144,7 +160,7 @@ export const POST: RequestHandler = async ({ params, url, cookies, request }) =>
 
 		// Calculate missing and unused
 		const missing = required.filter(v => !defined.includes(v));
-		const unused = defined.filter(v => !required.includes(v) && !optional.includes(v));
+		const unused = defined.filter(v => !required.includes(v) && !optional.includes(v) && !DOCKER_COMPOSE_BUILTIN_VARS.has(v));
 
 		const result: ValidationResult = {
 			valid: missing.length === 0,

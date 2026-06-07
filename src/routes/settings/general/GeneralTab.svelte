@@ -77,7 +77,7 @@ services:
 	let eventCleanupEnabled = $derived($appSettings.eventCleanupEnabled);
 	let scannerCleanupCron = $derived($appSettings.scannerCleanupCron);
 	let scannerCleanupEnabled = $derived($appSettings.scannerCleanupEnabled);
-	let logBufferSizeKb = $derived($appSettings.logBufferSizeKb);
+	let logMaxLines = $derived($appSettings.logMaxLines);
 	let formatLogTimestamps = $derived($appSettings.formatLogTimestamps);
 	let defaultTimezone = $derived($appSettings.defaultTimezone);
 	let eventCollectionMode = $derived($appSettings.eventCollectionMode);
@@ -192,9 +192,17 @@ services:
 		}
 	}
 
-	function handleLogBufferSizeChange(e: Event) {
-		const value = Math.max(100, Math.min(5000, parseInt((e.target as HTMLInputElement).value) || 500));
-		appSettings.setLogBufferSizeKb(value);
+	// Anything above 2K starts feeling laggy in browsers without virtualized rendering.
+	const logMaxLinesOptions = [
+		{ value: '500', label: '500 lines' },
+		{ value: '1000', label: '1,000 lines' },
+		{ value: '2000', label: '2,000 lines' }
+	];
+
+	function handleLogMaxLinesChange(value: string | undefined) {
+		const n = parseInt(value ?? '');
+		if (!Number.isFinite(n) || n <= 0) return;
+		appSettings.setLogMaxLines(Math.min(2000, Math.max(100, n)));
 		toast.success('Log buffer size updated');
 	}
 
@@ -439,27 +447,23 @@ services:
 					<div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
 						<div class="space-y-4">
 							<div class="space-y-2">
-								<Label for="log-buffer-size">Log buffer size (KB)</Label>
-								<div class="flex items-center gap-2">
-									<Input
-										id="log-buffer-size"
-										type="number"
-										min="100"
-										max="5000"
-										value={logBufferSizeKb}
-										onchange={handleLogBufferSizeChange}
-										disabled={!$canAccess('settings', 'edit')}
-										class="w-24"
-									/>
-									<span class="text-sm text-muted-foreground">KB</span>
-								</div>
-								<p class="text-xs text-muted-foreground">Maximum log buffer per container panel. Older logs are truncated when exceeded.</p>
-								{#if logBufferSizeKb > 1000}
-									<div class="flex items-start gap-2 p-2 rounded-md bg-amber-500/10 border border-amber-500/20">
-										<AlertTriangle class="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
-										<p class="text-xs text-amber-600 dark:text-amber-400">High values may degrade browser performance with verbose containers. Recommended: 250-1000 KB.</p>
-									</div>
-								{/if}
+								<Label for="log-max-lines">Log buffer size</Label>
+								<Select.Root
+									type="single"
+									value={String(logMaxLines)}
+									onValueChange={handleLogMaxLinesChange}
+									disabled={!$canAccess('settings', 'edit')}
+								>
+									<Select.Trigger id="log-max-lines" class="w-48">
+										{logMaxLines.toLocaleString()} lines
+									</Select.Trigger>
+									<Select.Content>
+										{#each logMaxLinesOptions as opt}
+											<Select.Item value={opt.value}>{opt.label}</Select.Item>
+										{/each}
+									</Select.Content>
+								</Select.Root>
+								<p class="text-xs text-muted-foreground">Maximum number of log lines kept per container panel. Older lines are dropped when the limit is exceeded.</p>
 							</div>
 							<div class="space-y-1">
 								<div class="flex items-center gap-3">

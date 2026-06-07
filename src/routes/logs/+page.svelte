@@ -10,7 +10,8 @@
 	import * as Select from '$lib/components/ui/select';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { ToggleGroup } from '$lib/components/ui/toggle-pill';
-	import { RefreshCw, Search, ChevronDown, ChevronUp, Unplug, Copy, Download, WrapText, ArrowDownToLine, X, Sun, Moon, LayoutList, Square, Box, Wifi, WifiOff, Pause, Play, ScrollText, Star, GripVertical, Layers, Check, FolderHeart, Save, Trash2, MoreHorizontal, Eraser, Filter, GripHorizontal, Terminal, ArrowDown, ArrowRight, Clock, Tag } from 'lucide-svelte';
+	import { RefreshCw, Search, ChevronDown, ChevronUp, Unplug, Copy, Download, WrapText, ArrowDownToLine, X, Sun, Moon, LayoutList, Square, Box, Wifi, WifiOff, Pause, Play, ScrollText, Star, GripVertical, Layers, Check, FolderHeart, Save, Trash2, MoreHorizontal, Eraser, Filter, GripHorizontal, Terminal, ArrowDown, ArrowRight, Clock, Tag, Hash } from 'lucide-svelte';
+	import LogTimeRangeFilter from './LogTimeRangeFilter.svelte';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import TerminalPanel from '../terminal/TerminalPanel.svelte';
@@ -20,22 +21,29 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 	import { currentEnvironment, environments, appendEnvParam } from '$lib/stores/environment';
 	import { appSettings, formatLogTimestamps } from '$lib/stores/settings';
 	import { NoEnvironment } from '$lib/components/ui/empty-state';
-	import { AnsiUp } from 'ansi_up';
-	const ansiUp = new AnsiUp();
-	ansiUp.use_classes = true;
+	import { parseLines, renderLineHtml, type LogEntry } from '$lib/utils/log-entry';
+
+	function renderTimestamp(ts: string | undefined): string {
+		if (!ts) return '';
+		if ($appSettings.formatLogTimestamps) {
+			return formatLogTimestamps(ts + ' ').trimEnd();
+		}
+		return ts;
+	}
 
 	// Track if we've handled the initial container from URL
 	let initialContainerHandled = $state(false);
 
 	let containers = $state<ContainerInfo[]>([]);
 	let selectedContainer = $state<ContainerInfo | null>(null);
-	let logs = $state('');
+	let logs = $state<LogEntry[]>([]);
 	let loading = $state(false);
 	let autoScroll = $state(true);
 	let fontSize = $state(12);
 	let wordWrap = $state(true);
 	let showTimestamps = $state(typeof localStorage !== 'undefined' ? localStorage.getItem('dockhand-log-timestamps') !== 'false' : true);
 	let showContainerName = $state(typeof localStorage !== 'undefined' ? localStorage.getItem('dockhand-log-container-name') !== 'false' : true);
+	let showLineNumbers = $state(typeof localStorage !== 'undefined' && localStorage.getItem('dockhand-log-line-numbers') === 'true');
 	let darkMode = $state(true);
 	let layoutMode = $state<'single' | 'multi' | 'grouped'>('multi');
 	let streamingEnabled = $state(true);
@@ -48,95 +56,158 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 	const MAX_RECONNECT_ATTEMPTS = 5;
 	const RECONNECT_DELAY = 3000;
 
-	// Grouped mode state
+	// Grouped mode state. mergedLogs is the LogEntry[] equivalent for the merged
+	// view — same shape as single-mode logs but every entry has containerId/Name/color.
+	// Per-stream carryover preserves partial lines across SSE chunks.
 	let selectedContainerIds = $state<Set<string>>(new Set());
 	let groupedContainerInfo = $state<Map<string, { name: string; color: string }>>(new Map());
-	let mergedLogs = $state<Array<{ containerId: string; containerName: string; color: string; text: string; timestamp?: string; stream?: string }>>([]);
-	let mergedHtml = $state(''); // Pre-built HTML string for fast rendering (like single mode's `logs`)
+	let mergedLogs = $state<LogEntry[]>([]);
+	const groupedCarryover = new Map<string, string>();  // containerId → leftover
 	let stackName = $state<string | null>(null);
 
-	// Batching for grouped mode log updates to prevent UI blocking
-	let pendingLogs: Array<{ containerId: string; containerName: string; color: string; text: string; timestamp?: string; stream?: string }> = [];
-	let batchTimeout: ReturnType<typeof setTimeout> | null = null;
-	const BATCH_INTERVAL = 50; // ms - batch logs for 50ms before updating state
-	// Initial buffering: accumulate all tail lines before first render to avoid line-by-line appearance
+	// Microtask flush coalesces bursts within a tick; initial buffering window
+	// avoids the line-by-line appearance for the tail-N replay.
+	let pendingGroupedEntries: LogEntry[] = [];
+	let groupedFlushScheduled = false;
 	let initialBuffering = false;
 	let initialBufferTimeout: ReturnType<typeof setTimeout> | null = null;
-	const INITIAL_BUFFER_DELAY = 400; // ms - wait for all initial tail lines before first render
+	const INITIAL_BUFFER_DELAY = 400;
 
-	// Batching for single mode SSE logs
-	let pendingText = '';
-	let flushTimer: ReturnType<typeof setTimeout> | null = null;
-	const FLUSH_INTERVAL = 100; // ms
+	// Single mode flush — same microtask pattern + per-line carryover.
+	let pendingEntries: LogEntry[] = [];
+	let streamCarryover = '';
+	let flushScheduled = false;
+	const COMPACT_FACTOR = 2;
 
 	// RAF-based auto-scroll
 	let scrollRafPending = false;
 
-	// Flush pending logs to state (called on timer)
-	function flushPendingLogs() {
-		if (pendingLogs.length === 0) {
-			batchTimeout = null;
-			return;
-		}
-
-		// Build HTML for new lines and append (like single mode's logs += pendingText)
-		let newHtml = '';
-		for (const log of pendingLogs) {
-			const content = ansiToHtml(log.text);
-			newHtml += `<span style="color:${log.color};font-weight:600">[${escapeHtml(log.containerName)}]</span> ${content}`;
-		}
-
-		// Push into array (kept for copy/download)
-		mergedLogs.push(...pendingLogs);
-		pendingLogs = [];
-
-		// Keep only last 2000 lines to prevent memory issues
-		if (mergedLogs.length > 2000) {
-			const removed = mergedLogs.length - 1600;
-			mergedLogs.splice(0, removed);
-			// Rebuild HTML from trimmed array
-			mergedHtml = '';
-			for (const log of mergedLogs) {
-				mergedHtml += `<span style="color:${log.color};font-weight:600">[${escapeHtml(log.containerName)}]</span> ${ansiToHtml(log.text)}`;
-			}
-		} else {
-			mergedHtml += newHtml;
-		}
-
-		batchTimeout = null;
-		scrollToBottom();
+	// Tail count and since filter
+	// Capped at 1000 to avoid the frozen-browser hang from rendering thousands of
+	// nodes at once (no virtualization yet).
+	const tailOptions = [
+		{ value: '100', label: '100' },
+		{ value: '500', label: '500' },
+		{ value: '1000', label: '1K' }
+	];
+	const VALID_TAIL_VALUES = new Set(tailOptions.map(o => o.value));
+	let tailCount = $state('500');
+	let sinceDate = $state('');
+	let sinceTime = $state('');
+	let untilDate = $state('');
+	let untilTime = $state('');
+	function getTimestamp(date: string, time: string, defaultTime: string): string {
+		if (!date) return '';
+		const dateStr = time ? `${date}T${time}` : `${date}T${defaultTime}`;
+		const ts = Math.floor(new Date(dateStr).getTime() / 1000);
+		return isNaN(ts) ? '' : String(ts);
 	}
 
-	// Flush buffered single-mode text to state
+	function getSinceParam(): string {
+		return getTimestamp(sinceDate, sinceTime, '00:00:00');
+	}
+
+	function getUntilParam(): string {
+		return getTimestamp(untilDate, untilTime, '23:59:59');
+	}
+
+	function reloadAllLogs() {
+		logs = [];
+		pendingEntries = [];
+		streamCarryover = '';
+		mergedLogs = [];
+		pendingGroupedEntries = [];
+		groupedCarryover.clear();
+		if (layoutMode === 'grouped') {
+			if (streamingEnabled) startGroupedStreaming();
+		} else if (selectedContainer) {
+			if (streamingEnabled) startStreaming();
+			else fetchLogs();
+		}
+	}
+
+	// Compact a LogEntry[] in place by slicing to the last maxLines when it
+	// grows beyond the soft 2x threshold. The 2x slack amortizes the slice cost.
+	function compact(arr: LogEntry[], maxLines: number): LogEntry[] {
+		if (arr.length <= maxLines * COMPACT_FACTOR) return arr;
+		return arr.slice(arr.length - maxLines);
+	}
+
+	function getMaxLines(): number {
+		return $appSettings.logMaxLines;
+	}
+
+	// Microtask-scheduled flush — coalesces all SSE events arriving in the same
+	// tick into a single state update. Grouped and single modes share the same
+	// pattern; the flush callback differs per mode.
+	function scheduleSingleFlush() {
+		if (flushScheduled) return;
+		flushScheduled = true;
+		queueMicrotask(flushSingleLogs);
+	}
+
 	function flushSingleLogs() {
-		if (flushTimer) {
-			clearTimeout(flushTimer);
-			flushTimer = null;
-		}
-		if (!pendingText) return;
-
-		logs += pendingText;
-		pendingText = '';
-
-		// Apply log buffer size limit (convert KB to characters)
-		const maxSize = $appSettings.logBufferSizeKb * 1024;
-		if (logs.length > maxSize) {
-			logs = logs.substring(logs.length - Math.floor(maxSize * 0.8));
-		}
-
+		flushScheduled = false;
+		if (pendingEntries.length === 0) return;
+		const maxLines = getMaxLines();
+		// Trim oversize incoming batches before append — see LogsPanel for rationale.
+		const incoming = pendingEntries.length > maxLines
+			? pendingEntries.slice(pendingEntries.length - maxLines)
+			: pendingEntries;
+		logs = compact([...logs, ...incoming], maxLines);
+		pendingEntries = [];
 		scrollToBottom();
 	}
 
-	// Scroll to bottom after Svelte finishes rendering.
-	// Uses tick() to wait for DOM update, then RAF for smooth visual timing.
+	function scheduleGroupedFlush() {
+		if (groupedFlushScheduled) return;
+		groupedFlushScheduled = true;
+		queueMicrotask(flushGroupedLogs);
+	}
+
+	function flushGroupedLogs() {
+		groupedFlushScheduled = false;
+		if (pendingGroupedEntries.length === 0) return;
+		const maxLines = getMaxLines();
+		const incoming = pendingGroupedEntries.length > maxLines
+			? pendingGroupedEntries.slice(pendingGroupedEntries.length - maxLines)
+			: pendingGroupedEntries;
+		mergedLogs = compact([...mergedLogs, ...incoming], maxLines);
+		pendingGroupedEntries = [];
+		scrollToBottom();
+	}
+
+	// Auto-disable autoscroll when the user scrolls up, re-enable when they
+	// land back near the bottom. programmaticScroll guards against our own
+	// scrollTop writes re-enabling auto-scroll the moment the user paused it.
+	const BOTTOM_STICKINESS_PX = 40;
+	let programmaticScroll = false;
+
 	async function scrollToBottom(force = false) {
 		if ((!force && !autoScroll) || !logsRef || scrollRafPending) return;
 		scrollRafPending = true;
 		await tick();
 		requestAnimationFrame(() => {
-			if (logsRef) logsRef.scrollTop = logsRef.scrollHeight;
+			if (logsRef) {
+				programmaticScroll = true;
+				logsRef.scrollTop = logsRef.scrollHeight;
+				requestAnimationFrame(() => { programmaticScroll = false; });
+			}
 			scrollRafPending = false;
 		});
+	}
+
+	function handleLogsScroll() {
+		if (programmaticScroll || !logsRef) return;
+		const distance = logsRef.scrollHeight - logsRef.scrollTop - logsRef.clientHeight;
+		const atBottom = distance < BOTTOM_STICKINESS_PX;
+		if (atBottom && !autoScroll) {
+			autoScroll = true;
+			saveState();
+		} else if (!atBottom && autoScroll) {
+			autoScroll = false;
+			saveState();
+		}
 	}
 
 	// Multi-mode selection state (for merge feature)
@@ -172,6 +243,7 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 		fontSize: number;
 		autoScroll: boolean;
 		streamingEnabled: boolean;
+		tailCount: string;
 		// Selection state (depends on mode)
 		selectedContainerId: string | null;      // for single/multi mode
 		selectedContainerIds: string[];          // for grouped mode
@@ -201,6 +273,7 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 			fontSize,
 			autoScroll,
 			streamingEnabled,
+			tailCount,
 			selectedContainerId: selectedContainer?.id ?? null,
 			selectedContainerIds: Array.from(selectedContainerIds),
 			stackName
@@ -257,7 +330,7 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 			// selectedContainer stays as is, streaming continues
 			// Just clear grouped mode data
 			selectedContainerIds = new Set();
-			mergedLogs = []; mergedHtml = '';
+			mergedLogs = []; pendingGroupedEntries = []; groupedCarryover.clear();
 			// Save state if we have a container selected (carrying over selection)
 			if (selectedContainer) {
 				saveState();
@@ -272,7 +345,7 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 					// Stop grouped streaming and start single streaming
 					stopStreaming();
 					selectedContainerIds = new Set();
-					mergedLogs = []; mergedHtml = '';
+					mergedLogs = []; pendingGroupedEntries = []; groupedCarryover.clear();
 					selectedContainer = container;
 					if (streamingEnabled) {
 						startStreaming(container);
@@ -283,7 +356,7 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 				// Multiple containers - just stop streaming
 				stopStreaming();
 				selectedContainerIds = new Set();
-				mergedLogs = []; mergedHtml = '';
+				mergedLogs = []; pendingGroupedEntries = []; groupedCarryover.clear();
 			}
 			// If selectedContainer already exists (from multi mode), keep it streaming
 			// Save state if we have a container selected (carrying over selection)
@@ -411,6 +484,9 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 		if (savedUiState.fontSize !== undefined) fontSize = savedUiState.fontSize;
 		if (savedUiState.autoScroll !== undefined) autoScroll = savedUiState.autoScroll;
 		if (savedUiState.streamingEnabled !== undefined) streamingEnabled = savedUiState.streamingEnabled;
+		if (savedUiState.tailCount !== undefined) {
+			tailCount = VALID_TAIL_VALUES.has(savedUiState.tailCount) ? savedUiState.tailCount : '1000';
+		}
 		initialStateLoaded = true;
 
 		// Fetch data for this environment
@@ -445,7 +521,7 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 			} else {
 				// No running containers found - show empty state for this stack
 				selectedContainerIds = new Set();
-				mergedLogs = []; mergedHtml = '';
+				mergedLogs = []; pendingGroupedEntries = []; groupedCarryover.clear();
 				saveState();
 			}
 			return;
@@ -460,7 +536,7 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 			} else {
 				// Container not running - clear selection and logs
 				selectedContainer = null;
-				logs = '';
+				logs = [];
 			}
 			return;
 		}
@@ -536,7 +612,7 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 			// If selected container is no longer available, clear selection
 			if (selectedContainer && !containers.find((c) => c.id === selectedContainer?.id)) {
 				selectedContainer = null;
-				logs = '';
+				logs = [];
 			}
 
 			// Grouped mode: restart stream if the running/stopped split changed
@@ -796,18 +872,23 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 		}
 	}
 
-	async function fetchLogs(tail: number = 500) {
+	async function fetchLogs(tail?: number | string) {
 		if (!selectedContainer) return;
+		const t = tail ?? tailCount;
 
 		loading = true;
 		try {
-			const response = await fetch(appendEnvParam(`/api/containers/${selectedContainer.id}/logs?tail=${tail}`, envId));
+			const since = getSinceParam();
+			const until = getUntilParam();
+			const response = await fetch(appendEnvParam(`/api/containers/${selectedContainer.id}/logs?tail=${t}${since ? `&since=${since}` : ''}${until ? `&until=${until}` : ''}`, envId));
 			const data = await response.json();
-			logs = data.logs || 'No logs available';
-			scrollToBottom(true); // Force scroll on initial load
+			const { entries } = parseLines(data.logs || '', '');
+			logs = entries;
+			scrollToBottom(true);
 		} catch (error) {
 			console.error('Failed to fetch logs:', error);
-			logs = 'Failed to fetch logs: ' + String(error);
+			connectionError = 'Failed to fetch logs: ' + String(error);
+			logs = [];
 		} finally {
 			loading = false;
 		}
@@ -819,7 +900,7 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 
 		// For stopped containers, just fetch logs once - no streaming
 		if (selectedContainer.state !== 'running') {
-			fetchLogs(500);
+			fetchLogs();
 			isConnected = false;
 			connectionError = null;
 			return;
@@ -831,7 +912,9 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 		const containerId = selectedContainer.id; // Capture for closure
 
 		try {
-			const url = appendEnvParam(`/api/containers/${containerId}/logs/stream?tail=500`, envId);
+			const since = getSinceParam();
+			const until = getUntilParam();
+			const url = appendEnvParam(`/api/containers/${containerId}/logs/stream?tail=${tailCount}${since ? `&since=${since}` : ''}${until ? `&until=${until}` : ''}`, envId);
 			eventSource = new EventSource(url);
 
 			eventSource.addEventListener('connected', () => {
@@ -845,26 +928,11 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 				try {
 					const data = JSON.parse(event.data);
 					if (data.text) {
-						// Add container name prefix to each line if available and enabled
-						let text = data.text;
-						if (data.containerName && showContainerName) {
-							const lines = text.split('\n');
-							text = lines.map((line: string, i: number) => {
-								if (line === '' && i === lines.length - 1) return line;
-								if (line === '') return line;
-								return `[${data.containerName}] ${line}`;
-							}).join('\n');
-						}
-						// Strip or format timestamps
-						if (!showTimestamps) {
-							text = text.replace(/^(\[.*?\] )?\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z /gm, '$1');
-						} else if ($appSettings.formatLogTimestamps) {
-							text = formatLogTimestamps(text);
-						}
-						// Buffer text and schedule flush
-						pendingText += text;
-						if (!flushTimer) {
-							flushTimer = setTimeout(flushSingleLogs, FLUSH_INTERVAL);
+						const { entries, carryover } = parseLines(data.text, streamCarryover);
+						streamCarryover = carryover;
+						if (entries.length > 0) {
+							pendingEntries.push(...entries);
+							scheduleSingleFlush();
 						}
 					}
 				} catch {
@@ -917,7 +985,8 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 			if (!container) continue;
 
 			try {
-				const response = await fetch(appendEnvParam(`/api/containers/${containerId}/logs?tail=100`, envId));
+				const since = getSinceParam();
+				const response = await fetch(appendEnvParam(`/api/containers/${containerId}/logs?tail=${tailCount}${since ? `&since=${since}` : ''}`, envId));
 				const data = await response.json();
 				const containerName = container.name;
 				const color = getContainerColor(containerId);
@@ -926,20 +995,8 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 				groupedContainerInfo = new Map([...groupedContainerInfo, [containerId, { name: containerName, color }]]);
 
 				if (data.logs) {
-					// Parse and add logs
-					const lines = data.logs.split('\n').filter((line: string) => line.trim());
-					for (const line of lines) {
-						const text = line + '\n';
-						mergedLogs.push({
-							containerId,
-							containerName,
-							color,
-							text,
-							timestamp: new Date().toISOString()
-						});
-						mergedHtml += `<span style="color:${color};font-weight:600">[${escapeHtml(containerName)}]</span> ${ansiToHtml(text)}`;
-					}
-					mergedLogs = mergedLogs;
+					const { entries } = parseLines(data.logs, '', { containerId, containerName, color });
+					mergedLogs = compact([...mergedLogs, ...entries], getMaxLines());
 				}
 			} catch (error) {
 				console.error(`Failed to fetch logs for stopped container ${containerId}:`, error);
@@ -975,7 +1032,7 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 		loading = true;
 		// Clear container info for fresh selection (prevents icon accumulation)
 		groupedContainerInfo = new Map();
-		mergedLogs = []; mergedHtml = '';
+		mergedLogs = []; pendingGroupedEntries = []; groupedCarryover.clear();
 
 		// Separate running and stopped containers
 		const allIds = Array.from(selectedContainerIds);
@@ -1003,7 +1060,9 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 
 		try {
 			const containerIdsParam = runningIds.join(',');
-			const url = appendEnvParam(`/api/logs/merged?containers=${containerIdsParam}&tail=100`, envId);
+			const since = getSinceParam();
+			const until = getUntilParam();
+			const url = appendEnvParam(`/api/logs/merged?containers=${containerIdsParam}&tail=${tailCount}${since ? `&since=${since}` : ''}${until ? `&until=${until}` : ''}`, envId);
 			eventSource = new EventSource(url);
 
 			eventSource.addEventListener('connected', (event) => {
@@ -1035,35 +1094,34 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 					initialBuffering = false;
 					initialBufferTimeout = null;
 					loading = false;
-					flushPendingLogs();
+					flushGroupedLogs();
 				}, INITIAL_BUFFER_DELAY);
 			});
 
 			eventSource.addEventListener('log', (event) => {
 				try {
 					const data = JSON.parse(event.data);
-					if (data.text) {
-						// Use consistent color based on position in all selected containers
+					if (data.text && data.containerId) {
 						const color = getContainerColor(data.containerId);
-						let logText = data.text;
-						if (!showTimestamps) {
-							logText = logText.replace(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z /gm, '');
-						} else if ($appSettings.formatLogTimestamps) {
-							logText = formatLogTimestamps(logText);
-						}
-						// Add to pending batch instead of updating state immediately
-						pendingLogs.push({
+						const carry = groupedCarryover.get(data.containerId) ?? '';
+						const { entries, carryover } = parseLines(data.text, carry, {
 							containerId: data.containerId,
 							containerName: data.containerName,
 							color,
-							text: logText,
-							timestamp: data.timestamp,
 							stream: data.stream
 						});
-						// During initial buffering, just accumulate - don't schedule flushes
-						// The initial buffer timeout will flush everything in one go
-						if (!initialBuffering && !batchTimeout) {
-							batchTimeout = setTimeout(flushPendingLogs, BATCH_INTERVAL);
+						// /api/logs/merged strips Docker's ISO timestamp into a
+						// separate field, so parseLines can't recover it from text.
+						// Backfill from data.timestamp so the timestamp toggle works.
+						if (data.timestamp) {
+							for (const e of entries) {
+								if (!e.timestamp) e.timestamp = data.timestamp;
+							}
+						}
+						groupedCarryover.set(data.containerId, carryover);
+						if (entries.length > 0) {
+							pendingGroupedEntries.push(...entries);
+							if (!initialBuffering) scheduleGroupedFlush();
 						}
 					}
 				} catch {
@@ -1092,7 +1150,7 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 						initialBufferTimeout = null;
 					}
 					loading = false;
-					flushPendingLogs();
+					flushGroupedLogs();
 				}
 			});
 
@@ -1119,7 +1177,7 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 				clearTimeout(initialBufferTimeout);
 				initialBufferTimeout = null;
 			}
-			flushPendingLogs();
+			flushGroupedLogs();
 		}
 
 		// Close the broken connection
@@ -1167,8 +1225,8 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 	function retryConnection() {
 		reconnectAttempts = 0;
 		connectionError = null;
-		logs = '';
-		mergedLogs = []; mergedHtml = '';
+		logs = [];
+		mergedLogs = []; pendingGroupedEntries = []; groupedCarryover.clear();
 		loading = true;
 		if (layoutMode === 'grouped') {
 			startGroupedStreaming();
@@ -1186,17 +1244,13 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 			initialBufferTimeout = null;
 		}
 		flushSingleLogs();
-		flushPendingLogs();
+		flushGroupedLogs();
 		if (reconnectTimeout) {
 			clearTimeout(reconnectTimeout);
 			reconnectTimeout = null;
 		}
-		// Clear batch timeout and pending logs
-		if (batchTimeout) {
-			clearTimeout(batchTimeout);
-			batchTimeout = null;
-		}
-		pendingLogs = [];
+		// Drop any pending grouped entries (the microtask flush will see empty)
+		pendingGroupedEntries = [];
 		if (eventSource) {
 			eventSource.close();
 			eventSource = null;
@@ -1213,8 +1267,10 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 		streamingEnabled = !streamingEnabled;
 		saveState();
 		if (streamingEnabled) {
-			logs = '';
-			mergedLogs = []; mergedHtml = '';
+			logs = [];
+			pendingEntries = [];
+			streamCarryover = '';
+			mergedLogs = []; pendingGroupedEntries = []; groupedCarryover.clear();
 			reconnectAttempts = 0;
 			connectionError = null;
 			loading = true;
@@ -1240,7 +1296,7 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 		selectedContainer = container;
 		searchQuery = '';
 		dropdownOpen = false;
-		logs = ''; // Clear previous logs
+		logs = []; // Clear previous logs
 
 		// Save selection for persistence
 		saveState();
@@ -1274,14 +1330,14 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 			startGroupedStreaming();
 		} else if (newSet.size === 0) {
 			stopStreaming();
-			mergedLogs = []; mergedHtml = '';
+			mergedLogs = []; pendingGroupedEntries = []; groupedCarryover.clear();
 		}
 	}
 
 	// Start grouped streaming with current selection
 	function startGroupedView() {
 		if (selectedContainerIds.size === 0) return;
-		mergedLogs = []; mergedHtml = '';
+		mergedLogs = []; pendingGroupedEntries = []; groupedCarryover.clear();
 		loading = true;
 		startGroupedStreaming();
 	}
@@ -1296,7 +1352,7 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 	function clearContainerSelection() {
 		selectedContainerIds = new Set();
 		stopStreaming();
-		mergedLogs = []; mergedHtml = '';
+		mergedLogs = []; pendingGroupedEntries = []; groupedCarryover.clear();
 	}
 
 	// Multi-mode: toggle a container in the multi-select list
@@ -1336,7 +1392,7 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 	function clearSelection() {
 		stopStreaming();
 		selectedContainer = null;
-		logs = '';
+		logs = [];
 		searchQuery = '';
 	}
 
@@ -1361,45 +1417,54 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 	}
 
 
-	// Copy logs to clipboard
-	async function copyLogs() {
-		const textToCopy = layoutMode === 'grouped'
-			? mergedLogs.map(l => `[${l.containerName}] ${l.text}`).join('')
-			: logs;
-		if (textToCopy) {
-			await copyToClipboard(textToCopy);
-		}
+	// Serialize the displayed buffer to plain text, mirroring what's on screen
+	// (honors the timestamp toggle; grouped mode includes container-name prefix).
+	function entriesToText(arr: LogEntry[], includeContainerName: boolean): string {
+		return arr
+			.map(e => {
+				const parts: string[] = [];
+				if (showTimestamps && e.timestamp) parts.push(e.timestamp);
+				if (includeContainerName && e.containerName) parts.push(`[${e.containerName}]`);
+				parts.push(e.text);
+				return parts.join(' ');
+			})
+			.join('\n');
 	}
 
-	// Download logs as txt file
+	async function copyLogs() {
+		const text = layoutMode === 'grouped'
+			? entriesToText(mergedLogs, true)
+			: entriesToText(logs, false);
+		if (text) await copyToClipboard(text);
+	}
+
 	function downloadLogs() {
-		const textToDownload = layoutMode === 'grouped'
-			? mergedLogs.map(l => `[${l.containerName}] ${l.text}`).join('')
-			: logs;
+		const text = layoutMode === 'grouped'
+			? entriesToText(mergedLogs, true)
+			: entriesToText(logs, false);
 		const filename = layoutMode === 'grouped'
 			? 'merged-logs.txt'
 			: selectedContainer ? `${selectedContainer.name}-logs.txt` : 'logs.txt';
-
-		if (textToDownload) {
-			const blob = new Blob([textToDownload], { type: 'text/plain' });
-			const url = URL.createObjectURL(blob);
-			const a = document.createElement('a');
-			a.href = url;
-			a.download = filename;
-			document.body.appendChild(a);
-			a.click();
-			document.body.removeChild(a);
-			URL.revokeObjectURL(url);
-		}
+		if (!text) return;
+		const blob = new Blob([text], { type: 'text/plain' });
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = filename;
+		document.body.appendChild(a);
+		a.click();
+		document.body.removeChild(a);
+		URL.revokeObjectURL(url);
 	}
 
 	// Clear displayed logs
 	function clearLogs() {
-		logs = '';
-		pendingText = '';
+		logs = [];
+		pendingEntries = [];
+		streamCarryover = '';
 		mergedLogs = [];
-		mergedHtml = '';
-		pendingLogs = [];
+		pendingGroupedEntries = [];
+		groupedCarryover.clear();
 	}
 
 	// Log search functions
@@ -1462,78 +1527,22 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 		}
 	}
 
-	// Escape HTML to prevent XSS
-	function escapeHtml(text: string): string {
-		return text
-			.replace(/&/g, '&amp;')
-			.replace(/</g, '&lt;')
-			.replace(/>/g, '&gt;');
+	// Filter pass — array op over LogEntry[], not regex over a string.
+	function filterByQuery(arr: LogEntry[]): LogEntry[] {
+		const query = logSearchQuery.trim();
+		if (!logSearchFilterMode || !query) return arr;
+		const q = query.toLowerCase();
+		return arr.filter(e => e.text.toLowerCase().includes(q));
 	}
 
-	function ansiToHtml(text: string): string {
-		return ansiUp.ansi_to_html(text);
-	}
+	let filteredLogs = $derived(filterByQuery(logs));
+	let filteredMerged = $derived(filterByQuery(mergedLogs));
 
-	// Highlighted logs with search matches and ANSI color support (single container mode)
-	let highlightedLogs = $derived(() => {
-		let text = logs || '';
-		const query = logSearchQuery.trim();
-
-		// Filter lines before ANSI conversion (plain text matching)
-		if (logSearchFilterMode && query) {
-			const escapedForRegex = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-			const filterRegex = new RegExp(escapedForRegex, 'i');
-			text = text.split('\n').filter(line => filterRegex.test(line)).join('\n');
-		}
-
-		const withAnsi = ansiToHtml(text);
-		if (!query) return withAnsi;
-
-		const escapedForRegex = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-		const escapedQuery = escapeHtml(escapedForRegex);
-
-		const parts = withAnsi.split(/(<[^>]*>)/);
-		return parts.map(part => {
-			if (part.startsWith('<')) return part;
-			const regex = new RegExp(`(${escapedQuery})`, 'gi');
-			return part.replace(regex, '<mark class="search-match">$1</mark>');
-		}).join('');
-	});
-
-	// Format merged logs HTML — uses pre-built mergedHtml string, only applies search highlighting when needed
-	let formattedMergedHtml = $derived(() => {
-		if (!mergedHtml) return '';
-		const query = logSearchQuery.trim();
-
-		// Filter mode: remove non-matching lines from HTML
-		let html = mergedHtml;
-		if (logSearchFilterMode && query) {
-			const escapedForRegex = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-			const filterRegex = new RegExp(escapedForRegex, 'i');
-			// Split by <br/> or newlines, filter lines (strip HTML for matching, keep original for display)
-			const lines = html.split(/\n/);
-			html = lines.filter(line => {
-				const plainText = line.replace(/<[^>]*>/g, '');
-				return filterRegex.test(plainText);
-			}).join('\n');
-		}
-
-		if (!query) return html;
-
-		const escapedForRegex = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-		const escapedQuery = escapeHtml(escapedForRegex);
-		const searchRegex = new RegExp(`(${escapedQuery})`, 'gi');
-		const parts = html.split(/(<[^>]*>)/);
-		return parts.map(part => {
-			if (part.startsWith('<')) return part;
-			return part.replace(searchRegex, '<mark class="search-match">$1</mark>');
-		}).join('');
-	});
-
-	// Update match count after render
+	// Update match count after render. Tracks the entries currently displayed so
+	// it re-runs on append / toggle / search change.
 	$effect(() => {
-		// Track highlighted logs to re-run when content changes
-		const html = layoutMode === 'grouped' ? formattedMergedHtml() : highlightedLogs();
+		layoutMode === 'grouped' ? filteredMerged : filteredLogs;
+		logSearchQuery;
 
 		if (logSearchQuery && logsRef) {
 			setTimeout(() => {
@@ -1571,7 +1580,7 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 		}
 		// Flush pending text and clean up timers
 		flushSingleLogs();
-		flushPendingLogs();
+		flushGroupedLogs();
 		stopStreaming();
 	});
 </script>
@@ -1950,7 +1959,7 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 						{#if multiModeSelections.size >= 2}
 							<Button size="sm" variant="default" onclick={mergeSelectedContainers} class="w-full h-7 gap-1.5 text-xs">
 								<Layers class="w-3 h-3" />
-								Merge {multiModeSelections.size} containers
+								Merge {multiModeSelections.size} containers logs
 							</Button>
 						{/if}
 					</div>
@@ -2035,8 +2044,29 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 								<ArrowDownToLine class="w-3 h-3" />
 								<span>Auto-scroll</span>
 							</button>
+							<!-- Tail lines selector -->
+							<Select.Root type="single" value={tailCount} onValueChange={(v) => { tailCount = v; saveState(); reloadAllLogs(); }}>
+								<Select.Trigger class="!h-7 w-[52px] text-xs px-2 [&_svg]:size-3 {darkMode ? 'bg-zinc-800 border-zinc-700 text-zinc-300' : 'bg-white border-gray-300 text-gray-700'}" title="Number of log lines to load">
+									<span>{tailOptions.find(o => o.value === tailCount)?.label ?? tailCount}</span>
+								</Select.Trigger>
+								<Select.Content>
+									{#each tailOptions as opt}
+										<Select.Item value={opt.value} label={opt.label} class="pe-2 [&>span:first-child]:hidden">{opt.label} lines</Select.Item>
+									{/each}
+								</Select.Content>
+							</Select.Root>
+							<!-- Time range filter -->
+							<LogTimeRangeFilter
+								bind:sinceDate
+								bind:sinceTime
+								bind:untilDate
+								bind:untilTime
+								{darkMode}
+								onApply={reloadAllLogs}
+								onClear={reloadAllLogs}
+							/>
 							<Select.Root type="single" value={String(fontSize)} onValueChange={(v) => { fontSize = Number(v); saveState(); }}>
-								<Select.Trigger class="!h-5 !py-0 w-14 text-xs px-1.5 [&_svg]:size-3 {darkMode ? 'bg-zinc-800 border-zinc-700 text-zinc-300' : 'bg-white border-gray-300 text-gray-700'}">
+								<Select.Trigger class="!h-7 w-14 text-xs px-2 [&_svg]:size-3 {darkMode ? 'bg-zinc-800 border-zinc-700 text-zinc-300' : 'bg-white border-gray-300 text-gray-700'}">
 									<span>{fontSize}px</span>
 								</Select.Trigger>
 								<Select.Content>
@@ -2066,6 +2096,13 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 								title={showContainerName ? 'Hide container name prefix' : 'Show container name prefix'}
 							>
 								<Tag class="w-3 h-3 transition-colors {showContainerName ? (darkMode ? 'text-amber-400' : 'text-amber-700') : darkMode ? 'text-zinc-500 hover:text-zinc-300' : 'text-gray-500 hover:text-gray-700'}" />
+							</button>
+							<button
+								onclick={() => { showLineNumbers = !showLineNumbers; localStorage.setItem('dockhand-log-line-numbers', String(showLineNumbers)); }}
+								class="p-1 rounded transition-colors {showLineNumbers ? (darkMode ? 'bg-amber-500/20 ring-1 ring-amber-500/50' : 'bg-amber-500/30 ring-1 ring-amber-600/50') : ''} {darkMode ? 'hover:bg-zinc-800' : 'hover:bg-gray-200'}"
+								title={showLineNumbers ? 'Hide line numbers' : 'Show line numbers'}
+							>
+								<Hash class="w-3 h-3 transition-colors {showLineNumbers ? (darkMode ? 'text-amber-400' : 'text-amber-700') : darkMode ? 'text-zinc-500 hover:text-zinc-300' : 'text-gray-500 hover:text-gray-700'}" />
 							</button>
 							<button onclick={toggleTheme} class="p-1 rounded transition-colors {darkMode ? 'hover:bg-zinc-800' : 'hover:bg-gray-200'}" title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}>
 								{#if darkMode}
@@ -2123,7 +2160,7 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 							</button>
 						</div>
 					</div>
-					<div class="flex-1 overflow-auto p-4 relative" bind:this={logsRef}>
+					<div class="flex-1 overflow-auto p-4 relative" bind:this={logsRef} onscroll={handleLogsScroll}>
 						{#if loading && mergedLogs.length === 0}
 							<div class="absolute inset-0 flex items-center justify-center z-10">
 								<RefreshCw class="w-8 h-8 animate-spin {darkMode ? 'text-zinc-400' : 'text-gray-500'}" />
@@ -2133,7 +2170,7 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 								<RefreshCw class="w-8 h-8 animate-spin {darkMode ? 'text-zinc-400' : 'text-gray-500'}" />
 							</div>
 						{/if}
-						<pre class="font-mono {wordWrap ? 'whitespace-pre-wrap' : 'whitespace-pre'} {darkMode ? 'text-zinc-50' : 'text-gray-900'}" style="font-size: {fontSize}px;">{@html formattedMergedHtml()}</pre>
+						<pre class="font-mono {wordWrap ? 'whitespace-pre-wrap' : 'whitespace-pre'} {showLineNumbers ? 'show-line-numbers' : ''} {darkMode ? 'text-zinc-50' : 'text-gray-900'}" style="font-size: {fontSize}px;">{#each filteredMerged as e (e.id)}<div class="log-line">{#if showTimestamps && e.timestamp}<span class="log-ts">{renderTimestamp(e.timestamp)}</span>{' '}{/if}{#if showContainerName && e.containerName}<span class="log-cname" style="color:{e.color}">[{e.containerName}]</span>{' '}{/if}<span>{@html renderLineHtml(e, logSearchQuery.trim())}</span></div>{/each}</pre>
 					</div>
 				{/if}
 			{:else if !selectedContainer}
@@ -2227,8 +2264,29 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 						<ArrowDownToLine class="w-3 h-3" />
 						<span>Auto-scroll</span>
 					</button>
+					<!-- Tail lines selector -->
+					<Select.Root type="single" value={tailCount} onValueChange={(v) => { tailCount = v; saveState(); reloadAllLogs(); }}>
+						<Select.Trigger class="!h-7 w-[52px] text-xs px-2 [&_svg]:size-3 {darkMode ? 'bg-zinc-800 border-zinc-700 text-zinc-300' : 'bg-white border-gray-300 text-gray-700'}" title="Number of log lines to load">
+							<span>{tailOptions.find(o => o.value === tailCount)?.label ?? tailCount}</span>
+						</Select.Trigger>
+						<Select.Content>
+							{#each tailOptions as opt}
+								<Select.Item value={opt.value} label={opt.label} class="pe-2 [&>span:first-child]:hidden">{opt.label} lines</Select.Item>
+							{/each}
+						</Select.Content>
+					</Select.Root>
+					<!-- Time range filter -->
+					<LogTimeRangeFilter
+						bind:sinceDate
+						bind:sinceTime
+						bind:untilDate
+						bind:untilTime
+						{darkMode}
+						onApply={reloadAllLogs}
+						onClear={reloadAllLogs}
+					/>
 					<Select.Root type="single" value={String(fontSize)} onValueChange={(v) => { fontSize = Number(v); saveState(); }}>
-						<Select.Trigger class="!h-5 !py-0 w-14 text-xs px-1.5 [&_svg]:size-3 {darkMode ? 'bg-zinc-800 border-zinc-700 text-zinc-300' : 'bg-white border-gray-300 text-gray-700'}">
+						<Select.Trigger class="!h-7 w-14 text-xs px-2 [&_svg]:size-3 {darkMode ? 'bg-zinc-800 border-zinc-700 text-zinc-300' : 'bg-white border-gray-300 text-gray-700'}">
 							<span>{fontSize}px</span>
 						</Select.Trigger>
 						<Select.Content>
@@ -2260,6 +2318,14 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 						title={showContainerName ? 'Hide container name prefix' : 'Show container name prefix'}
 					>
 						<Tag class="w-3 h-3 transition-colors {showContainerName ? (darkMode ? 'text-amber-400' : 'text-amber-700') : darkMode ? 'text-zinc-500 hover:text-zinc-300' : 'text-gray-500 hover:text-gray-700'}" />
+					</button>
+					<!-- Line numbers -->
+					<button
+						onclick={() => { showLineNumbers = !showLineNumbers; localStorage.setItem('dockhand-log-line-numbers', String(showLineNumbers)); }}
+						class="p-1 rounded transition-colors {showLineNumbers ? (darkMode ? 'bg-amber-500/20 ring-1 ring-amber-500/50' : 'bg-amber-500/30 ring-1 ring-amber-600/50') : ''} {darkMode ? 'hover:bg-zinc-800' : 'hover:bg-gray-200'}"
+						title={showLineNumbers ? 'Hide line numbers' : 'Show line numbers'}
+					>
+						<Hash class="w-3 h-3 transition-colors {showLineNumbers ? (darkMode ? 'text-amber-400' : 'text-amber-700') : darkMode ? 'text-zinc-500 hover:text-zinc-300' : 'text-gray-500 hover:text-gray-700'}" />
 					</button>
 					<!-- Theme toggle -->
 					<button
@@ -2363,8 +2429,8 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 					Loading logs...
 				</div>
 			{:else}
-				<div bind:this={logsRef} class="flex-1 overflow-auto p-4">
-					<pre class="font-mono {wordWrap ? 'whitespace-pre-wrap' : 'whitespace-pre'} {darkMode ? 'text-zinc-50' : 'text-gray-900'}" style="font-size: {fontSize}px;">{@html highlightedLogs()}</pre>
+				<div bind:this={logsRef} onscroll={handleLogsScroll} class="flex-1 overflow-auto p-4">
+					<pre class="font-mono {wordWrap ? 'whitespace-pre-wrap' : 'whitespace-pre'} {showLineNumbers ? 'show-line-numbers' : ''} {darkMode ? 'text-zinc-50' : 'text-gray-900'}" style="font-size: {fontSize}px;">{#each filteredLogs as e (e.id)}<div class="log-line">{#if showTimestamps && e.timestamp}<span class="log-ts">{renderTimestamp(e.timestamp)}</span>{' '}{/if}{#if showContainerName && selectedContainer?.name}<span class="log-cname">[{selectedContainer.name}]</span>{' '}{/if}<span>{@html renderLineHtml(e, logSearchQuery.trim())}</span></div>{/each}</pre>
 				</div>
 			{/if}
 		{/if}
@@ -2399,6 +2465,12 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 {/if}
 
 <style>
+	:global(.log-ts) {
+		color: rgb(113, 113, 122);
+	}
+	:global(.log-cname) {
+		font-weight: 600;
+	}
 	:global(.search-match) {
 		background-color: rgba(234, 179, 8, 0.4);
 		color: #fef3c7;

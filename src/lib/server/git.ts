@@ -224,6 +224,20 @@ async function buildGitEnv(credential: GitCredential | null): Promise<GitEnv> {
 	// Ensure current UID is resolvable for SSH/git operations
 	await ensurePasswdEntry(env);
 
+	// For HTTPS password/token auth, inject credentials via http.extraHeader env vars
+	// instead of embedding them in the URL (which leaks via /proc/<pid>/cmdline, #1081).
+	// Uses GIT_CONFIG_COUNT mechanism (git >= 2.31) to set Authorization header.
+	if (credential?.authType === 'password' && (credential.username || credential.password)) {
+		const token = credential.password || '';
+		const username = credential.username || '';
+		// Use Basic auth (base64 of username:password) — works with GitHub PATs,
+		// GitLab tokens, Gitea tokens, and standard username/password combos.
+		const basicAuth = Buffer.from(`${username}:${token}`).toString('base64');
+		env.GIT_CONFIG_COUNT = '1';
+		env.GIT_CONFIG_KEY_0 = 'http.extraHeader';
+		env.GIT_CONFIG_VALUE_0 = `Authorization: Basic ${basicAuth}`;
+	}
+
 	if (credential?.authType === 'ssh' && credential.sshPrivateKey) {
 		// Write SSH key to /tmp instead of data volume — some filesystems (TrueNAS ZFS,
 		// NFS, CIFS) silently ignore chmod, leaving the key group-readable (e.g. 0670).
@@ -278,24 +292,20 @@ function cleanupSshKey(credential: GitCredential | null): void {
 }
 
 function buildRepoUrl(url: string, credential: GitCredential | null): string {
-	// For SSH URLs or no auth, return as-is
-	if (!credential || credential.authType !== 'password' || url.startsWith('git@')) {
-		return url;
-	}
-
-	// For HTTPS with password auth, embed credentials
-	try {
-		const parsed = new URL(url);
-		if (credential.username) {
-			parsed.username = credential.username;
+	// Never embed credentials in the URL — they leak via /proc/<pid>/cmdline (see #1081).
+	// HTTPS credentials are injected via GIT_CONFIG_COUNT env vars in buildGitEnv().
+	// Strip any existing credentials from the URL for safety.
+	if (credential?.authType === 'password' && !url.startsWith('git@')) {
+		try {
+			const parsed = new URL(url);
+			parsed.username = '';
+			parsed.password = '';
+			return parsed.toString();
+		} catch {
+			return url;
 		}
-		if (credential.password) {
-			parsed.password = credential.password;
-		}
-		return parsed.toString();
-	} catch {
-		return url;
 	}
+	return url;
 }
 
 async function execGit(args: string[], cwd: string, env: GitEnv): Promise<{ stdout: string; stderr: string; code: number }> {
@@ -1447,13 +1457,7 @@ export function parseEnvFileContent(content: string, stackName?: string): Record
 		}
 
 		const key = trimmed.substring(0, eqIndex).trim();
-		let value = trimmed.substring(eqIndex + 1).trim();
-
-		// Handle quoted values
-		if ((value.startsWith('"') && value.endsWith('"')) ||
-		    (value.startsWith("'") && value.endsWith("'"))) {
-			value = value.slice(1, -1);
-		}
+		const value = trimmed.substring(eqIndex + 1).trim();
 
 		// Only add if key is valid env var name
 		if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {

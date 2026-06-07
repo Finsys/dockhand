@@ -13,9 +13,11 @@
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import * as Popover from '$lib/components/ui/popover';
+	import { formatBytes } from '$lib/utils/format';
 	import MultiSelectFilter from '$lib/components/MultiSelectFilter.svelte';
 	import { Play, Square, Trash2, Plus, ArrowBigDown, Search, Pencil, ExternalLink, GitBranch, RefreshCw, Loader2, FileCode, FileText, FileOutput, Box, RotateCcw, ScrollText, Terminal, Eye, Network, HardDrive, Heart, HeartPulse, HeartOff, ChevronsUpDown, ChevronsDownUp, Rocket, AlertTriangle, X, Layers, Pause, CircleDashed, Skull, FolderOpen, Variable, Clock, RotateCw, Import, Ship, Cable, LayoutPanelLeft, Rows3, GripVertical, Globe } from 'lucide-svelte';
 	import { formatPorts } from '$lib/utils/port-format';
+	import { parseCustomUrl } from '$lib/utils/custom-url';
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
 	import BatchOperationModal from '$lib/components/BatchOperationModal.svelte';
 	import type { ComposeStackInfo, ContainerStats } from '$lib/types';
@@ -123,15 +125,6 @@
 	function getContainerIp(networks: Array<{ name: string; ipAddress: string }>): string {
 		if (!networks || networks.length === 0) return '-';
 		return networks[0]?.ipAddress || '-';
-	}
-
-	// Helper: format bytes to human readable
-	function formatBytes(bytes: number, decimals = 1): string {
-		if (bytes === 0) return '0B';
-		const k = 1024;
-		const sizes = ['B', 'K', 'M', 'G', 'T'];
-		const i = Math.floor(Math.log(bytes) / Math.log(k));
-		return parseFloat((bytes / Math.pow(k, i)).toFixed(decimals)) + sizes[i];
 	}
 
 	// Fetch container stats
@@ -439,6 +432,7 @@
 	let confirmStopContainerId = $state<string | null>(null);
 	let confirmRestartContainerId = $state<string | null>(null);
 	let confirmPauseContainerId = $state<string | null>(null);
+	let confirmRemoveContainerId = $state<string | null>(null);
 
 	// Operation error state (for stack and container operations)
 	let operationError = $state<{ id: string; title: string; message: string } | null>(null);
@@ -1204,6 +1198,32 @@
 		}
 	}
 
+	async function removeContainer(containerId: string) {
+		operationError = null;
+		containerActionLoading = containerId;
+		try {
+			const response = await fetch(appendEnvParam(`/api/containers/${containerId}?force=true`, envId), { method: 'DELETE' });
+			if (!response.ok) {
+				const data = await response.json();
+				const errorMsg = data.error || 'Failed to remove container';
+				operationError = { id: containerId, message: errorMsg };
+				toast.error(errorMsg);
+				clearErrorAfterDelay(containerId);
+				return;
+			}
+			toast.success('Container removed');
+			await fetchStacks();
+		} catch (error) {
+			console.error('Failed to remove container:', error);
+			const errorMsg = error instanceof Error ? error.message : 'Failed to remove container';
+			operationError = { id: containerId, message: errorMsg };
+			toast.error(errorMsg);
+			clearErrorAfterDelay(containerId);
+		} finally {
+			containerActionLoading = null;
+		}
+	}
+
 	function inspectContainer(containerId: string, containerName: string) {
 		inspectContainerId = containerId;
 		inspectContainerName = containerName;
@@ -1849,7 +1869,18 @@
 								<div class="p-1">
 									<Loader2 class="w-3 h-3 animate-spin text-muted-foreground" />
 								</div>
-							{:else if stack.status === 'running' || stack.status === 'partial' || stack.status === 'restarting'}
+							{:else if stack.status !== 'running' && stack.status !== 'partial' && stack.status !== 'restarting'}
+								{#if $canAccess('stacks', 'start')}
+									<button
+										type="button"
+										onclick={(e) => { e.stopPropagation(); startStack(stack.name); }}
+										title="Start"
+										class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
+									>
+										<Play class="w-3 h-3 text-muted-foreground hover:text-green-500" />
+									</button>
+								{/if}
+							{:else}
 								{#if $canAccess('stacks', 'restart')}
 									<Popover.Root open={restartPopoverOpen[stack.name] ?? false} onOpenChange={(v) => restartPopoverOpen[stack.name] = v}>
 										<Popover.Trigger asChild>
@@ -1899,17 +1930,6 @@
 											<Square class="w-3 h-3 {open ? 'text-destructive' : 'text-muted-foreground hover:text-destructive'}" />
 										{/snippet}
 									</ConfirmPopover>
-								{/if}
-							{:else}
-								{#if $canAccess('stacks', 'start')}
-									<button
-										type="button"
-										onclick={(e) => { e.stopPropagation(); startStack(stack.name); }}
-										title="Start"
-										class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
-									>
-										<Play class="w-3 h-3 text-muted-foreground hover:text-green-500" />
-									</button>
 								{/if}
 							{/if}
 						{/if}
@@ -2062,25 +2082,29 @@
 									{/if}
 									<div class="flex flex-wrap gap-1.5 mb-2 text-2xs">
 										<!-- Custom URL from dockhand.url label -->
-										{#if container.labels?.['dockhand.url']?.trim()}
-											<a
-												href={container.labels['dockhand.url'].trim()}
-												target="_blank"
-												rel="noopener noreferrer"
-												onclick={(e) => e.stopPropagation()}
-												class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
-												title="Open {container.labels['dockhand.url'].trim()} in new tab"
-											>
-												<Globe class="w-2.5 h-2.5" />
-												<span class="max-w-[120px] truncate">{container.labels['dockhand.url'].trim().replace(/^https?:\/\//, '')}</span>
-												<ExternalLink class="w-2.5 h-2.5 opacity-60" />
-											</a>
+										{#if parseCustomUrl(container.labels?.['dockhand.url'])}
+											{@const stackParsedUrl = parseCustomUrl(container.labels?.['dockhand.url'])}
+											{#if stackParsedUrl}
+												<a
+													href={stackParsedUrl.url}
+													target="_blank"
+													rel="noopener noreferrer"
+													onclick={(e) => e.stopPropagation()}
+													class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+													title="Open {stackParsedUrl.url} in new tab"
+												>
+													<Globe class="w-2.5 h-2.5" />
+													<span class="max-w-[120px] truncate">{stackParsedUrl.name || stackParsedUrl.url.replace(/^https?:\/\//, '')}</span>
+													<ExternalLink class="w-2.5 h-2.5 opacity-60" />
+												</a>
+											{/if}
 										{/if}
 										<!-- Clickable ports with range collapsing -->
 										{#if container.ports.length > 0}
 											{@const mappedPorts = formatPorts(container.ports)}
 											{#each mappedPorts as port}
-												{@const portUrl = container.labels?.[`dockhand.port.${port.publicPort}.url`]?.trim() || null}
+												{@const portParsed = parseCustomUrl(container.labels?.[`dockhand.port.${port.publicPort}.url`])}
+												{@const portUrl = portParsed?.url || null}
 												{@const url = portUrl || getPortUrl(port.publicPort)}
 												{#if url}
 													<a
@@ -2186,6 +2210,29 @@
 											{#if isLoading}
 												<Loader2 class="w-3.5 h-3.5 animate-spin text-muted-foreground" />
 											{:else}
+												{#if container.state === 'paused'}
+													{#if $canAccess('containers', 'unpause')}
+														<button
+															type="button"
+															title="Unpause"
+															onclick={(e) => unpauseContainer(container.id, e)}
+															class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
+														>
+															<Play class="w-3.5 h-3.5 text-muted-foreground hover:text-emerald-500" />
+														</button>
+													{/if}
+												{:else if container.state !== 'running'}
+													{#if $canAccess('containers', 'start')}
+														<button
+															type="button"
+															title="Start"
+															onclick={(e) => startContainer(container.id, e)}
+															class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
+														>
+															<Play class="w-3.5 h-3.5 text-muted-foreground hover:text-emerald-500" />
+														</button>
+													{/if}
+												{/if}
 												{#if container.state === 'running'}
 													{#if $canAccess('containers', 'restart')}
 														<ConfirmPopover
@@ -2232,29 +2279,22 @@
 															{/snippet}
 														</ConfirmPopover>
 													{/if}
-												{:else if container.state === 'paused'}
-													{#if $canAccess('containers', 'unpause')}
-														<button
-															type="button"
-															title="Unpause"
-															onclick={(e) => unpauseContainer(container.id, e)}
-															class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
-														>
-															<Play class="w-3.5 h-3.5 text-muted-foreground hover:text-emerald-500" />
-														</button>
-													{/if}
-												{:else}
-													{#if $canAccess('containers', 'start')}
-														<button
-															type="button"
-															title="Start"
-															onclick={(e) => startContainer(container.id, e)}
-															class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
-														>
-															<Play class="w-3.5 h-3.5 text-muted-foreground hover:text-emerald-500" />
-														</button>
-													{/if}
 												{/if}
+											{/if}
+											{#if $canAccess('containers', 'remove')}
+												<ConfirmPopover
+													open={confirmRemoveContainerId === container.id}
+													action="Remove"
+													itemType="container"
+													itemName={container.service}
+													title="Remove"
+													onConfirm={() => removeContainer(container.id)}
+													onOpenChange={(open) => confirmRemoveContainerId = open ? container.id : null}
+												>
+													{#snippet children({ open })}
+														<Trash2 class="w-3.5 h-3.5 {open ? 'text-destructive' : 'text-muted-foreground hover:text-destructive'}" />
+													{/snippet}
+												</ConfirmPopover>
 											{/if}
 										</div>
 									</div>

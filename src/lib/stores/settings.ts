@@ -24,7 +24,8 @@ export interface AppSettings {
 	eventCleanupEnabled: boolean;
 	scannerCleanupCron: string;
 	scannerCleanupEnabled: boolean;
-	logBufferSizeKb: number;
+	logBufferSizeKb: number;  // legacy, retained for migration — UI uses logMaxLines
+	logMaxLines: number;       // line-count cap for the log buffer (replaces KB-based limit)
 	defaultTimezone: string;
 	eventCollectionMode: EventCollectionMode;
 	eventPollInterval: number;
@@ -58,6 +59,7 @@ const DEFAULT_SETTINGS: AppSettings = {
 	scannerCleanupCron: '0 3 * * 0',
 	scannerCleanupEnabled: true,
 	logBufferSizeKb: 500,
+	logMaxLines: 2000,
 	defaultTimezone: 'UTC',
 	eventCollectionMode: 'stream',
 	eventPollInterval: 60000,
@@ -89,6 +91,20 @@ services:
 #     driver: bridge
 `
 };
+
+// Derive logMaxLines from a settings payload — prefers the new field; if absent
+// (older DB), converts the legacy KB value at ~8 lines/KB (Docker log lines
+// average ~120 chars). Clamps to a sensible range.
+function deriveLogMaxLines(s: { logMaxLines?: number; logBufferSizeKb?: number }): number {
+	// Cap at 2000 — anything larger thrashes the browser when rendering with no
+	// virtualization. Old DBs may have absurd values from when the cap was 50K;
+	// snap them down here so users don't get a stuck page after upgrade.
+	if (typeof s.logMaxLines === 'number' && s.logMaxLines > 0) {
+		return Math.min(2000, Math.max(100, s.logMaxLines));
+	}
+	const kb = s.logBufferSizeKb ?? DEFAULT_SETTINGS.logBufferSizeKb;
+	return Math.min(2000, Math.max(100, Math.round(kb * 8)));
+}
 
 // Create a writable store for app settings
 function createSettingsStore() {
@@ -122,6 +138,7 @@ function createSettingsStore() {
 					scannerCleanupCron: settings.scannerCleanupCron ?? DEFAULT_SETTINGS.scannerCleanupCron,
 					scannerCleanupEnabled: settings.scannerCleanupEnabled ?? DEFAULT_SETTINGS.scannerCleanupEnabled,
 					logBufferSizeKb: settings.logBufferSizeKb ?? DEFAULT_SETTINGS.logBufferSizeKb,
+					logMaxLines: deriveLogMaxLines(settings),
 					defaultTimezone: settings.defaultTimezone ?? DEFAULT_SETTINGS.defaultTimezone,
 					eventCollectionMode: settings.eventCollectionMode ?? DEFAULT_SETTINGS.eventCollectionMode,
 					eventPollInterval: settings.eventPollInterval ?? DEFAULT_SETTINGS.eventPollInterval,
@@ -172,6 +189,7 @@ function createSettingsStore() {
 					scannerCleanupCron: updatedSettings.scannerCleanupCron ?? DEFAULT_SETTINGS.scannerCleanupCron,
 					scannerCleanupEnabled: updatedSettings.scannerCleanupEnabled ?? DEFAULT_SETTINGS.scannerCleanupEnabled,
 					logBufferSizeKb: updatedSettings.logBufferSizeKb ?? DEFAULT_SETTINGS.logBufferSizeKb,
+					logMaxLines: deriveLogMaxLines(updatedSettings),
 					defaultTimezone: updatedSettings.defaultTimezone ?? DEFAULT_SETTINGS.defaultTimezone,
 					eventCollectionMode: updatedSettings.eventCollectionMode ?? DEFAULT_SETTINGS.eventCollectionMode,
 					eventPollInterval: updatedSettings.eventPollInterval ?? DEFAULT_SETTINGS.eventPollInterval,
@@ -327,6 +345,13 @@ function createSettingsStore() {
 			update((current) => {
 				const newSettings = { ...current, logBufferSizeKb: value };
 				saveSettings({ logBufferSizeKb: value });
+				return newSettings;
+			});
+		},
+		setLogMaxLines: (value: number) => {
+			update((current) => {
+				const newSettings = { ...current, logMaxLines: value };
+				saveSettings({ logMaxLines: value });
 				return newSettings;
 			});
 		},

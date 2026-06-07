@@ -74,28 +74,31 @@ html {
 	max-width: calc(90px * var(--grid-font-size-scale, 1)) !important;
 }
 
-/* Scrollbar theming */
-* {
-	scrollbar-color: hsl(var(--border) / 0.5) transparent;
-	scrollbar-width: thin;
-}
-
+/* Scrollbar theming — WebKit only (Sencho-style). No global * selector and
+ * no scrollbar-width override, so Firefox/native scrollbars render at OS
+ * default width. Dark-mode thumb bumped to be visible on dark surfaces. */
 ::-webkit-scrollbar {
 	width: 8px;
 	height: 8px;
 }
-
 ::-webkit-scrollbar-track {
 	background: transparent;
 }
-
 ::-webkit-scrollbar-thumb {
-	background: hsl(var(--border) / 0.5);
+	/* Light mode: medium gray that holds up against white. Pale border-color
+	 * at 50% was nearly invisible. */
+	background: hsl(0 0% 60% / 0.6);
 	border-radius: 4px;
+	transition: background 150ms ease;
 }
-
 ::-webkit-scrollbar-thumb:hover {
-	background: hsl(var(--border) / 0.7);
+	background: hsl(0 0% 40% / 0.8);
+}
+.dark ::-webkit-scrollbar-thumb {
+	background: hsl(0 0% 50% / 0.5);
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+	background: hsl(0 0% 65% / 0.7);
 }
 
 :root {
@@ -1777,3 +1780,31 @@ html {
 .ansi-dim { opacity: 0.7; }
 .ansi-italic { font-style: italic; }
 .ansi-underline { text-decoration: underline; }
+
+/* Log line numbers */
+.log-line {
+	min-height: 1.2em;
+}
+pre.show-line-numbers {
+	counter-reset: log-line;
+}
+pre.show-line-numbers .log-line {
+	counter-increment: log-line;
+	padding-left: 4.5em;
+	position: relative;
+}
+pre.show-line-numbers .log-line::before {
+	content: counter(log-line);
+	position: absolute;
+	left: 0;
+	width: 3.5em;
+	text-align: right;
+	padding-right: 0.75em;
+	user-select: none;
+	color: rgb(113 113 122); /* zinc-500 */
+	border-right: 1px solid rgb(63 63 70); /* zinc-700 */
+}
+:where(.light, .light *) pre.show-line-numbers .log-line::before {
+	color: rgb(156 163 175); /* gray-400 */
+	border-right-color: rgb(209 213 219); /* gray-300 */
+}

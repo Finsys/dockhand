@@ -2373,14 +2373,14 @@
           "primaryKey": false,
           "notNull": false
         },
-        "external_compose_path": {
-          "name": "external_compose_path",
+        "compose_path": {
+          "name": "compose_path",
           "type": "text",
           "primaryKey": false,
           "notNull": false
         },
-        "external_env_path": {
-          "name": "external_env_path",
+        "env_path": {
+          "name": "env_path",
           "type": "text",
           "primaryKey": false,
           "notNull": false

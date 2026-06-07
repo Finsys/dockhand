@@ -138,7 +138,7 @@ interface EdgeContainerLogSource {
 /**
  * Handle merged logs streaming for Hawser Edge connections
  */
-async function handleEdgeMergedLogs(containerIds: string[], tail: string, environmentId: number): Promise<Response> {
+async function handleEdgeMergedLogs(containerIds: string[], tail: string, environmentId: number, since?: string, until?: string): Promise<Response> {
 	// Check if edge agent is connected
 	if (!isEdgeConnected(environmentId)) {
 		return new Response(JSON.stringify({ error: 'Edge agent not connected' }), {
@@ -197,7 +197,7 @@ async function handleEdgeMergedLogs(containerIds: string[], tail: string, enviro
 					};
 
 					// Start log stream for this container via Edge
-					const logsPath = `/containers/${containerId}/logs?stdout=true&stderr=true&follow=true&tail=${tail}&timestamps=true`;
+					const logsPath = `/containers/${containerId}/logs?stdout=true&stderr=true&follow=true&timestamps=true&tail=${tail}${since ? `&since=${since}` : ''}${until ? `&until=${until}` : ''}`;
 
 					const { cancel } = sendEdgeStreamRequest(
 						environmentId,
@@ -362,6 +362,8 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 	// Parse container IDs from comma-separated list
 	const containerIds = url.searchParams.get('containers')?.split(',').filter(Boolean) || [];
 	const tail = url.searchParams.get('tail') || '100';
+	const since = url.searchParams.get('since') || '';
+	const until = url.searchParams.get('until') || '';
 	const envId = url.searchParams.get('env');
 	const envIdNum = envId ? parseInt(envId) : undefined;
 
@@ -386,7 +388,7 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 
 	// Handle Hawser Edge mode separately
 	if (config.type === 'hawser-edge') {
-		return handleEdgeMergedLogs(containerIds, tail, config.environmentId!);
+		return handleEdgeMergedLogs(containerIds, tail, config.environmentId!, since, until);
 	}
 
 	let controllerClosed = false;
@@ -449,7 +451,7 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 					const hasTty = info.Config?.Tty ?? false;
 
 					// Start log stream for this container
-					const logsPath = `/containers/${containerId}/logs?stdout=true&stderr=true&follow=true&tail=${tail}&timestamps=true`;
+					const logsPath = `/containers/${containerId}/logs?stdout=true&stderr=true&follow=true&timestamps=true&tail=${tail}${since ? `&since=${since}` : ''}${until ? `&until=${until}` : ''}`;
 					let logsResponse: Response;
 
 					if (config.type === 'socket') {

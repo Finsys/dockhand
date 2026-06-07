@@ -90,7 +90,7 @@ function parseDockerFrame(buffer: Buffer, offset: number): { type: number; size:
 /**
  * Handle logs streaming for Hawser Edge connections
  */
-async function handleEdgeLogsStream(containerId: string, tail: string, environmentId: number): Promise<Response> {
+async function handleEdgeLogsStream(containerId: string, tail: string, environmentId: number, since?: string, until?: string): Promise<Response> {
 	// Check if edge agent is connected
 	if (!isEdgeConnected(environmentId)) {
 		return new Response(JSON.stringify({ error: 'Edge agent not connected' }), {
@@ -115,7 +115,7 @@ async function handleEdgeLogsStream(containerId: string, tail: string, environme
 		// Ignore - default to demux mode
 	}
 
-	const logsPath = `/containers/${containerId}/logs?stdout=true&stderr=true&follow=true&tail=${tail}&timestamps=true`;
+	const logsPath = `/containers/${containerId}/logs?stdout=true&stderr=true&follow=true&timestamps=true&tail=${tail}${since ? `&since=${since}` : ''}${until ? `&until=${until}` : ''}`;
 
 	let controllerClosed = false;
 	let cancelStream: (() => void) | null = null;
@@ -262,6 +262,8 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 
 	const containerId = params.id;
 	const tail = url.searchParams.get('tail') || '100';
+	const since = url.searchParams.get('since') || '';
+	const until = url.searchParams.get('until') || '';
 	const envId = url.searchParams.get('env');
 	const envIdNum = envId ? parseInt(envId) : undefined;
 
@@ -277,7 +279,7 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 
 	// Handle Hawser Edge mode separately
 	if (config.type === 'hawser-edge') {
-		return handleEdgeLogsStream(containerId, tail, config.environmentId!);
+		return handleEdgeLogsStream(containerId, tail, config.environmentId!, since, until);
 	}
 
 	// First, check if container has TTY enabled and get container name
@@ -311,7 +313,7 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 	}
 
 	// Build the logs URL with follow=true for streaming
-	const logsPath = `/containers/${containerId}/logs?stdout=true&stderr=true&follow=true&tail=${tail}&timestamps=true`;
+	const logsPath = `/containers/${containerId}/logs?stdout=true&stderr=true&follow=true&timestamps=true&tail=${tail}${since ? `&since=${since}` : ''}${until ? `&until=${until}` : ''}`;
 
 	let controllerClosed = false;
 	let abortController: AbortController | null = new AbortController();

@@ -910,11 +910,11 @@
 							</Badge>
 						</p>
 					</div>
-					<div>
+					<div class="min-w-0">
 						<label class="text-sm font-medium text-muted-foreground">Container name</label>
-						<p class="flex items-center gap-1">
-							<Box class="w-4 h-4 text-muted-foreground" />
-							{selectedEvent.containerName || '-'}
+						<p class="flex items-start gap-1">
+							<Box class="w-4 h-4 mt-0.5 shrink-0 text-muted-foreground" />
+							<span class="font-mono text-sm break-all min-w-0">{selectedEvent.containerName || '-'}</span>
 						</p>
 					</div>
 					<div>

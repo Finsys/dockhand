@@ -22,15 +22,35 @@ export function parseTelegramUrl(url: string): { botToken: string; chatId: strin
 
 // --- Gotify ---
 
-export function buildGotifyUrl(appriseUrl: string): string | null {
-	const match = appriseUrl.match(/^gotifys?:\/\/([^/]+)\/(.+)/);
+export function buildGotifyUrl(appriseUrl: string): { url: string; priority?: number } | null {
+	// Strip query params before parsing path
+	const qIdx = appriseUrl.indexOf('?');
+	const baseUrl = qIdx >= 0 ? appriseUrl.substring(0, qIdx) : appriseUrl;
+	const queryStr = qIdx >= 0 ? appriseUrl.substring(qIdx + 1) : '';
+
+	const match = baseUrl.match(/^gotifys?:\/\/([^/]+)\/(.+)/);
 	if (!match) return null;
 	const [, hostname, pathPart] = match;
 	const protocol = appriseUrl.startsWith('gotifys') ? 'https' : 'http';
 	const lastSlash = pathPart.lastIndexOf('/');
 	const subpath = lastSlash >= 0 ? pathPart.substring(0, lastSlash) : '';
 	const token = lastSlash >= 0 ? pathPart.substring(lastSlash + 1) : pathPart;
-	return `${protocol}://${hostname}${subpath ? '/' + subpath : ''}/message?token=${token}`;
+
+	// Parse priority from query params
+	let priority: number | undefined;
+	if (queryStr) {
+		const params = new URLSearchParams(queryStr);
+		const p = params.get('priority');
+		if (p) {
+			const num = parseInt(p);
+			if (!isNaN(num) && num >= 0 && num <= 10) priority = num;
+		}
+	}
+
+	return {
+		url: `${protocol}://${hostname}${subpath ? '/' + subpath : ''}/message?token=${token}`,
+		priority
+	};
 }
 
 // --- Workflows (Microsoft Power Automate) ---
