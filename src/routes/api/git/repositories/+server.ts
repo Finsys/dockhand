@@ -52,13 +52,15 @@ export const POST: RequestHandler = async (event) => {
 			}
 		}
 
-		// Create repository with just the basic fields
-		// Deployment-specific config (composePath, autoUpdate, webhook) now belongs to git_stacks
 		const repository = await createGitRepository({
 			name: data.name,
 			url: data.url,
 			branch: data.branch || 'main',
-			credentialId: data.credentialId || null
+			credentialId: data.credentialId || null,
+			webhookEnabled: data.webhookEnabled || false,
+			webhookSecret: data.webhookSecret || null,
+			webhookDeployDelay: data.webhookDeployDelay ?? 0,
+			webhookDeployMode: data.webhookDeployMode ?? 'parallel'
 		});
 
 		// Audit log

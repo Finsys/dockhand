@@ -65,13 +65,15 @@ export const PUT: RequestHandler = async (event) => {
 			}
 		}
 
-		// Update only the basic repository fields
-		// Deployment-specific config (composePath, autoUpdate, webhook) now belongs to git_stacks
 		const repository = await updateGitRepository(id, {
 			name: data.name,
 			url: data.url,
 			branch: data.branch,
-			credentialId: data.credentialId
+			credentialId: data.credentialId,
+			webhookEnabled: data.webhookEnabled,
+			webhookSecret: data.webhookSecret,
+			webhookDeployDelay: data.webhookDeployDelay,
+			webhookDeployMode: data.webhookDeployMode
 		});
 
 		if (!repository) {

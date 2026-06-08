@@ -1967,6 +1967,8 @@ export interface GitRepositoryData {
 	autoUpdateCron: string;
 	webhookEnabled: boolean;
 	webhookSecret: string | null;
+	webhookDeployDelay: number;
+	webhookDeployMode: 'sequential' | 'parallel';
 	lastSync: string | null;
 	lastCommit: string | null;
 	syncStatus: GitSyncStatus;
@@ -1993,6 +1995,8 @@ export async function getGitRepositories(): Promise<GitRepositoryWithCredential[
 		autoUpdateCron: gitRepositories.autoUpdateCron,
 		webhookEnabled: gitRepositories.webhookEnabled,
 		webhookSecret: gitRepositories.webhookSecret,
+		webhookDeployDelay: gitRepositories.webhookDeployDelay,
+		webhookDeployMode: gitRepositories.webhookDeployMode,
 		lastSync: gitRepositories.lastSync,
 		lastCommit: gitRepositories.lastCommit,
 		syncStatus: gitRepositories.syncStatus,
@@ -2038,6 +2042,8 @@ export async function createGitRepository(data: {
 	autoUpdateCron?: string;
 	webhookEnabled?: boolean;
 	webhookSecret?: string | null;
+	webhookDeployDelay?: number;
+	webhookDeployMode?: 'sequential' | 'parallel';
 }): Promise<GitRepositoryData> {
 	const result = await db.insert(gitRepositories).values({
 		name: data.name,
@@ -2050,7 +2056,9 @@ export async function createGitRepository(data: {
 		autoUpdateSchedule: data.autoUpdateSchedule || 'daily',
 		autoUpdateCron: data.autoUpdateCron || '0 3 * * *',
 		webhookEnabled: data.webhookEnabled || false,
-		webhookSecret: data.webhookSecret || null
+		webhookSecret: data.webhookSecret || null,
+		webhookDeployDelay: data.webhookDeployDelay ?? 0,
+		webhookDeployMode: data.webhookDeployMode ?? 'parallel'
 	}).returning();
 	return getGitRepository(result[0].id) as Promise<GitRepositoryData>;
 }
@@ -2069,6 +2077,8 @@ export async function updateGitRepository(id: number, data: Partial<GitRepositor
 	if (data.autoUpdateCron !== undefined) updateData.autoUpdateCron = data.autoUpdateCron;
 	if (data.webhookEnabled !== undefined) updateData.webhookEnabled = data.webhookEnabled;
 	if (data.webhookSecret !== undefined) updateData.webhookSecret = data.webhookSecret;
+	if (data.webhookDeployDelay !== undefined) updateData.webhookDeployDelay = data.webhookDeployDelay;
+	if (data.webhookDeployMode !== undefined) updateData.webhookDeployMode = data.webhookDeployMode;
 	if (data.lastSync !== undefined) updateData.lastSync = data.lastSync;
 	if (data.lastCommit !== undefined) updateData.lastCommit = data.lastCommit;
 	if (data.syncStatus !== undefined) updateData.syncStatus = data.syncStatus;
@@ -2078,12 +2088,70 @@ export async function updateGitRepository(id: number, data: Partial<GitRepositor
 	return getGitRepository(id);
 }
 
-export async function getGitStacksByRepositoryId(repositoryId: number): Promise<Array<{ id: number; stackName: string; environmentId: number | null }>> {
-	return db.select({
+export async function getGitStacksByRepositoryId(repositoryId: number): Promise<GitStackWithRepo[]> {
+	const rows = await db.select({
 		id: gitStacks.id,
 		stackName: gitStacks.stackName,
-		environmentId: gitStacks.environmentId
-	}).from(gitStacks).where(eq(gitStacks.repositoryId, repositoryId));
+		environmentId: gitStacks.environmentId,
+		repositoryId: gitStacks.repositoryId,
+		composePath: gitStacks.composePath,
+		envFilePath: gitStacks.envFilePath,
+		autoUpdate: gitStacks.autoUpdate,
+		autoUpdateSchedule: gitStacks.autoUpdateSchedule,
+		autoUpdateCron: gitStacks.autoUpdateCron,
+		webhookEnabled: gitStacks.webhookEnabled,
+		webhookSecret: gitStacks.webhookSecret,
+		contextDir: gitStacks.contextDir,
+		buildOnDeploy: gitStacks.buildOnDeploy,
+		noBuildCache: gitStacks.noBuildCache,
+		repullImages: gitStacks.repullImages,
+		forceRedeploy: gitStacks.forceRedeploy,
+		lastSync: gitStacks.lastSync,
+		lastCommit: gitStacks.lastCommit,
+		syncStatus: gitStacks.syncStatus,
+		syncError: gitStacks.syncError,
+		createdAt: gitStacks.createdAt,
+		updatedAt: gitStacks.updatedAt,
+		repoName: gitRepositories.name,
+		repoUrl: gitRepositories.url,
+		repoBranch: gitRepositories.branch,
+		repoCredentialId: gitRepositories.credentialId
+	})
+		.from(gitStacks)
+		.innerJoin(gitRepositories, eq(gitStacks.repositoryId, gitRepositories.id))
+		.where(eq(gitStacks.repositoryId, repositoryId));
+
+	return rows.map(row => ({
+		id: row.id,
+		stackName: row.stackName,
+		environmentId: row.environmentId,
+		repositoryId: row.repositoryId,
+		composePath: row.composePath,
+		envFilePath: row.envFilePath,
+		autoUpdate: row.autoUpdate,
+		autoUpdateSchedule: row.autoUpdateSchedule,
+		autoUpdateCron: row.autoUpdateCron,
+		webhookEnabled: row.webhookEnabled,
+		webhookSecret: row.webhookSecret,
+		contextDir: row.contextDir ?? null,
+		buildOnDeploy: row.buildOnDeploy ?? false,
+		noBuildCache: row.noBuildCache ?? false,
+		repullImages: row.repullImages ?? false,
+		forceRedeploy: row.forceRedeploy ?? false,
+		lastSync: row.lastSync,
+		lastCommit: row.lastCommit,
+		syncStatus: row.syncStatus,
+		syncError: row.syncError,
+		createdAt: row.createdAt,
+		updatedAt: row.updatedAt,
+		repository: {
+			id: row.repositoryId,
+			name: row.repoName,
+			url: row.repoUrl,
+			branch: row.repoBranch,
+			credentialId: row.repoCredentialId
+		}
+	})) as GitStackWithRepo[];
 }
 
 export async function deleteGitRepository(id: number): Promise<boolean> {

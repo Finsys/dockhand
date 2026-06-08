@@ -298,6 +298,8 @@ export const gitRepositories = pgTable('git_repositories', {
 	autoUpdateCron: text('auto_update_cron').default('0 3 * * *'),
 	webhookEnabled: boolean('webhook_enabled').default(false),
 	webhookSecret: text('webhook_secret'),
+	webhookDeployDelay: integer('webhook_deploy_delay').default(0),
+	webhookDeployMode: text('webhook_deploy_mode').default('parallel'),
 	lastSync: timestamp('last_sync', { mode: 'string' }),
 	lastCommit: text('last_commit'),
 	syncStatus: text('sync_status').default('pending'),
