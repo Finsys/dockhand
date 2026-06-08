@@ -282,6 +282,14 @@ export const gitCredentials = sqliteTable('git_credentials', {
 	updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`)
 });
 
+export const opServiceAccounts = sqliteTable('op_service_accounts', {
+	id: integer('id').primaryKey({ autoIncrement: true }),
+	name: text('name').notNull().unique(),
+	token: text('token').notNull(),
+	createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+	updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`)
+});
+
 export const gitRepositories = sqliteTable('git_repositories', {
 	id: integer('id').primaryKey({ autoIncrement: true }),
 	name: text('name').notNull().unique(),
@@ -339,6 +347,7 @@ export const stackSources = sqliteTable('stack_sources', {
 	gitStackId: integer('git_stack_id').references(() => gitStacks.id, { onDelete: 'set null' }),
 	composePath: text('compose_path'), // Custom path to compose file (for stacks with non-default location)
 	envPath: text('env_path'), // Custom path to .env file (for stacks with non-default location)
+	opServiceAccountId: integer('op_service_account_id').references(() => opServiceAccounts.id, { onDelete: 'set null' }),
 	createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
 	updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`)
 }, (table) => ({
@@ -552,6 +561,9 @@ export type NewEnvironmentNotification = typeof environmentNotifications.$inferI
 
 export type GitCredential = typeof gitCredentials.$inferSelect;
 export type NewGitCredential = typeof gitCredentials.$inferInsert;
+
+export type OpServiceAccount = typeof opServiceAccounts.$inferSelect;
+export type NewOpServiceAccount = typeof opServiceAccounts.$inferInsert;
 
 export type GitRepository = typeof gitRepositories.$inferSelect;
 export type NewGitRepository = typeof gitRepositories.$inferInsert;

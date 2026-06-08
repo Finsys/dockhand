@@ -7,7 +7,7 @@
 	import CodeEditor, { type VariableMarker } from '$lib/components/CodeEditor.svelte';
 	import StackEnvVarsPanel from '$lib/components/StackEnvVarsPanel.svelte';
 	import { type EnvVar, type ValidationResult } from '$lib/components/StackEnvVarsEditor.svelte';
-	import { Layers, Save, Play, Code, GitGraph, Loader2, AlertCircle, X, Sun, Moon, TriangleAlert, GripVertical, FolderOpen, Copy, Check, XCircle, MapPin, ArrowRight, ArrowDown, Info, Box, FolderSync } from 'lucide-svelte';
+	import { Layers, Save, Play, Code, GitGraph, Loader2, AlertCircle, X, Sun, Moon, TriangleAlert, GripVertical, FolderOpen, Copy, Check, XCircle, MapPin, ArrowRight, ArrowDown, Info, Box, FolderSync, CircleQuestionMark } from 'lucide-svelte';
 	import type { Component } from 'svelte';
 	import FilesystemBrowser from './FilesystemBrowser.svelte';
 	import PathBarItem from './PathBarItem.svelte';
@@ -58,11 +58,27 @@
 	let showConfirmClose = $state(false);
 	let editorTheme = $state<'light' | 'dark'>('dark');
 
+	// 1Password service accounts
+	type OpAccountOption = { id: number; name: string };
+	let opAccounts = $state<OpAccountOption[]>([]);
+	let formOpServiceAccountId = $state<number | null>(null);
+
 	// Environment variables state
 	let envVars = $state<EnvVar[]>([]);
 	let rawEnvContent = $state(''); // Raw .env file content (comments preserved)
 	let envValidation = $state<ValidationResult | null>(null);
 	let validating = $state(false);
+
+	// OP_ENVIRONMENT_ID is consumed by the 1Password integration, not the compose file,
+	// so it only counts as "used" when a service account is bound to the stack.
+	const effectiveValidation = $derived.by<ValidationResult | null>(() => {
+		if (!envValidation || formOpServiceAccountId === null) return envValidation;
+		if (!envValidation.unused.includes('OP_ENVIRONMENT_ID')) return envValidation;
+		return {
+			...envValidation,
+			unused: envValidation.unused.filter((v) => v !== 'OP_ENVIRONMENT_ID')
+		};
+	});
 	let existingSecretKeys = $state<Set<string>>(new Set());
 	let hadExistingDbVars = $state(false); // Track if DB had any vars on load (for proper cleanup)
 
@@ -680,7 +696,20 @@
 		// Add global mouse event listeners for split dragging
 		window.addEventListener('mousemove', handleMouseMove);
 		window.addEventListener('mouseup', handleMouseUp);
+
+		fetchOpAccounts();
 	});
+
+	async function fetchOpAccounts() {
+		try {
+			const response = await fetch('/api/onepassword');
+			if (!response.ok) return;
+			const data = await response.json();
+			opAccounts = (data ?? []).map((a: any) => ({ id: a.id, name: a.name }));
+		} catch (e) {
+			console.warn('Failed to load 1Password service accounts:', e);
+		}
+	}
 
 	onDestroy(() => {
 		window.removeEventListener('mousemove', handleMouseMove);
@@ -766,6 +795,19 @@
 			// Track original paths for detecting changes
 			originalComposePath = data.composePath || null;
 			originalEnvPath = data.envPath || null;
+
+			// Load 1Password binding
+			try {
+				const envId = $currentEnvironment?.id ?? null;
+				const sourcesRes = await fetch(appendEnvParam('/api/stacks/sources', envId));
+				if (sourcesRes.ok) {
+					const sourceMap = await sourcesRes.json();
+					const source = sourceMap?.[stackName];
+					formOpServiceAccountId = source?.opServiceAccountId ?? null;
+				}
+			} catch (e) {
+				console.warn('Failed to load stack source for 1Password binding:', e);
+			}
 
 			// Load both env endpoints in parallel, then process results together
 			const [envResponse, rawEnvResponse] = await Promise.all([
@@ -917,6 +959,8 @@
 				requestBody.envPath = envPathToSave;
 			}
 
+			requestBody.opServiceAccountId = formOpServiceAccountId;
+
 			// Create the stack
 			response = await fetch(appendEnvParam('/api/stacks', envId), {
 				method: 'POST',
@@ -1047,6 +1091,8 @@
 			if (moveFromDir) {
 				requestBody.moveFromDir = moveFromDir;
 			}
+
+			requestBody.opServiceAccountId = formOpServiceAccountId;
 
 			// Save env files BEFORE compose to ensure deploy reads fresh values
 			// Save raw content to .env file (non-secrets only, comments preserved)
@@ -1594,11 +1640,51 @@
 							</div>
 							<!-- Environment variables panel -->
 							<div class="flex-1 min-w-0 flex flex-col overflow-hidden bg-zinc-50 dark:bg-zinc-800/50">
+								<!-- 1Password service account selector -->
+								<div class="px-3 py-2 border-b border-zinc-200 dark:border-zinc-700 bg-zinc-100/60 dark:bg-zinc-800/60 flex items-center gap-2 text-xs">
+									<Label for="op-account-select" class="text-xs text-muted-foreground shrink-0">1Password Service Account</Label>
+									<Select.Root
+										type="single"
+										value={formOpServiceAccountId !== null ? String(formOpServiceAccountId) : ''}
+										onValueChange={(v) => {
+											formOpServiceAccountId = v ? parseInt(v) : null;
+											markDirty();
+										}}
+									>
+										<Select.Trigger id="op-account-select" class="h-7 text-xs">
+											{#if formOpServiceAccountId !== null}
+												{opAccounts.find((a) => a.id === formOpServiceAccountId)?.name ?? 'Unknown account'}
+											{:else}
+												<span class="text-muted-foreground">None — disabled</span>
+											{/if}
+										</Select.Trigger>
+										<Select.Content>
+											<Select.Item value="" label="None">
+												<span class="text-muted-foreground">None — disabled</span>
+											</Select.Item>
+											{#each opAccounts as account (account.id)}
+												<Select.Item value={String(account.id)} label={account.name}>
+													{account.name}
+												</Select.Item>
+											{/each}
+										</Select.Content>
+									</Select.Root>
+									<Tooltip.Provider delayDuration={150}>
+										<Tooltip.Root>
+											<Tooltip.Trigger>
+												<CircleQuestionMark class="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+											</Tooltip.Trigger>
+											<Tooltip.Content class="max-w-xs text-xs">
+												Set <code>OP_ENVIRONMENT_ID</code> in env vars to a 1Password Environment ID. Its variables are loaded and injected as secrets.
+											</Tooltip.Content>
+										</Tooltip.Root>
+									</Tooltip.Provider>
+								</div>
 								<StackEnvVarsPanel
 									bind:this={envVarsPanelRef}
 									bind:variables={envVars}
 									bind:rawContent={rawEnvContent}
-									validation={envValidation}
+									validation={effectiveValidation}
 									existingSecretKeys={mode === 'edit' ? existingSecretKeys : new Set()}
 									onchange={() => { markDirty(); debouncedValidate(); }}
 									theme={editorTheme}
