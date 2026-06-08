@@ -71,7 +71,8 @@ export const PUT: RequestHandler = async (event) => {
 			name: data.name,
 			url: data.url,
 			branch: data.branch,
-			credentialId: data.credentialId
+			credentialId: data.credentialId,
+			submodulesEnabled: data.submodulesEnabled
 		});
 
 		if (!repository) {

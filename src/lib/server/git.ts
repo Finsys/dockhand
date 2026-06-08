@@ -308,7 +308,13 @@ function buildRepoUrl(url: string, credential: GitCredential | null): string {
 	return url;
 }
 
-async function execGit(args: string[], cwd: string, env: GitEnv): Promise<{ stdout: string; stderr: string; code: number }> {
+interface ProcessResult {
+	stdout: string;
+	stderr: string;
+	code: number;
+}
+
+async function execGit(args: string[], cwd: string, env: GitEnv): Promise<ProcessResult> {
 	try {
 		const proc = nodeSpawn('git', args, {
 			cwd,
@@ -604,6 +610,11 @@ export async function syncRepository(repoId: number): Promise<SyncResult> {
 			updated = beforeCommit !== afterCommit;
 		}
 
+		// Submodule
+		if (repo.submodulesEnabled) {
+			await syncGitSubmodules(repoPath, env);
+		}
+
 		// Get current commit hash
 		const commitResult = await execGit(['rev-parse', 'HEAD'], repoPath, env);
 		currentCommit = commitResult.stdout.substring(0, 7);
@@ -836,6 +847,11 @@ export async function syncGitStack(stackId: number): Promise<SyncResult> {
 				rmSync(repoPath, { recursive: true, force: true });
 			}
 			throw new Error(`Git clone failed: ${result.stderr}`);
+		}
+
+		// Submodule
+		if (repo.submodulesEnabled) {
+			await syncGitSubmodules(repoPath, env);
 		}
 
 		// Check if commit changed
@@ -1233,6 +1249,11 @@ export async function deployGitStackWithProgress(
 				rmSync(repoPath, { recursive: true, force: true });
 			}
 			throw new Error(`Git clone failed: ${cloneResult.stderr}`);
+		}
+
+		// Submodule
+		if (repo.submodulesEnabled) {
+			await syncGitSubmodules(repoPath, env);
 		}
 
 		// Check if commit changed
@@ -1639,5 +1660,38 @@ export async function previewRepoEnvFiles(options: PreviewEnvOptions): Promise<P
 		} catch (cleanupError) {
 			console.error(`${logPrefix} Failed to cleanup temp directory:`, cleanupError);
 		}
+	}
+}
+
+/**
+ * Sync and update a repository that contains submodules
+ */
+async function syncGitSubmodules(cwd: string, env: GitEnv): Promise<void> {
+	const logPrefix = '[Git:Submodule]';
+
+	// Sync submodule references
+	const syncResult = await execGit(['submodule', 'sync', '--recursive'], cwd, env);
+
+	if (syncResult.stdout) {
+		console.log(`${logPrefix} Submodule sync stdout:`, syncResult.stdout);
+	}
+	if (syncResult.stderr) {
+		console.log(`${logPrefix} Submodule sync stderr:`, syncResult.stderr);
+	}
+	if (syncResult.code !== 0) {
+		throw new Error('Git submodule sync has failed');
+	}
+
+	// Update submodules
+	const updateResult = await execGit(['submodule', 'update', '--init', '--recursive'], cwd, env);
+
+	if (updateResult.stdout) {
+		console.log(`${logPrefix} Submodule update stdout:`, updateResult.stdout);
+	}
+	if (updateResult.stderr) {
+		console.log(`${logPrefix} Submodule update stderr:`, updateResult.stderr);
+	}
+	if (updateResult.code !== 0) {
+		throw new Error('Git submodule update has failed');
 	}
 }

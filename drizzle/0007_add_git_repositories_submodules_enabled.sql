@@ -1,0 +1,1 @@
+ALTER TABLE `git_repositories` ADD `submodules_enabled` integer DEFAULT false;

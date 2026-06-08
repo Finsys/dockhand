@@ -295,6 +295,7 @@ export const gitRepositories = sqliteTable('git_repositories', {
 	autoUpdateCron: text('auto_update_cron').default('0 3 * * *'),
 	webhookEnabled: integer('webhook_enabled', { mode: 'boolean' }).default(false),
 	webhookSecret: text('webhook_secret'),
+	submodulesEnabled: integer('submodules_enabled', { mode: 'boolean' }).default(false),
 	lastSync: text('last_sync'),
 	lastCommit: text('last_commit'),
 	syncStatus: text('sync_status').default('pending'),
