@@ -3172,7 +3172,7 @@ export async function getRegistryAuth(
 // Harbor denies access to the V2 _catalog endpoint for robot accounts.
 // We detect Harbor and use the native project API as a fallback.
 
-/** Harbor detection cache per host (TTL 5 min) */
+/** Harbor detection cache per host (TTL 5 min). Only definitive (non-error) detections are cached. */
 const harborDetectionCache = new Map<string, { isHarbor: boolean; ts: number }>();
 const HARBOR_CACHE_TTL = 5 * 60 * 1000;
 
@@ -3196,10 +3196,11 @@ export async function isHarborRegistry(registryUrl: string): Promise<boolean> {
 		return cached.isHarbor;
 	}
 
+	// Respect the registry's configured scheme and port (parsed.host includes the port).
+	const baseUrl = `${parsed.protocol}://${parsed.host}`;
+
 	let isHarbor = false;
 	try {
-		const baseUrl = `https://${host}`;
-
 		// Step 1: check the WWW-Authenticate header from /v2/
 		const challengeResp = await fetch(`${baseUrl}/v2/`, {
 			method: 'GET',
@@ -3219,27 +3220,108 @@ export async function isHarborRegistry(registryUrl: string): Promise<boolean> {
 				}
 			}
 		}
+		// A definitive answer was obtained (no network error): cache it.
+		harborDetectionCache.set(host, { isHarbor, ts: Date.now() });
 	} catch {
-		// On network error, assume it's not Harbor
+		// Network error: detection is indeterminate. Do NOT cache, so a transient
+		// outage can't pin "not Harbor" for the whole TTL and keep returning 403s
+		// once Harbor recovers.
 	}
 
-	harborDetectionCache.set(host, { isHarbor, ts: Date.now() });
 	return isHarbor;
 }
 
 /**
  * Builds the Basic auth header for the Harbor API from a registry object.
+ * Credentials are trimmed: pasted values often carry trailing whitespace that
+ * silently breaks Basic auth.
  */
 function getHarborBasicAuth(registry: { username?: string | null; password?: string | null }): string | null {
-	if (registry.username && registry.password) {
-		return `Basic ${Buffer.from(`${registry.username}:${registry.password}`).toString('base64')}`;
+	const username = registry.username?.trim();
+	const password = registry.password?.trim();
+	if (username && password) {
+		return `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`;
 	}
 	return null;
 }
 
+/** Builds the common headers (JSON + Basic auth) for Harbor API requests. */
+function harborHeaders(registry: { username?: string | null; password?: string | null }): Record<string, string> {
+	const headers: Record<string, string> = {
+		'Accept': 'application/json',
+		'User-Agent': 'Dockhand/1.0'
+	};
+	const authHeader = getHarborBasicAuth(registry);
+	if (authHeader) headers['Authorization'] = authHeader;
+	return headers;
+}
+
+/** Removes Harbor query-grammar control characters so a search term can't break or alter the q filter. */
+function sanitizeHarborQueryTerm(term: string): string {
+	// Harbor's query grammar uses , = ~ ( ) as control characters.
+	return term.replace(/[,=~()]/g, '');
+}
+
+/**
+ * Follows Harbor list-endpoint pagination, collecting every item's name.
+ * Terminates on a short page or once X-Total-Count is reached; a safety cap
+ * bounds pathological servers (a warning is logged if it is hit).
+ */
+async function harborPaginateNames(
+	urlForPage: (page: number, pageSize: number) => string,
+	headers: Record<string, string>,
+	options: { throwOnFirstError: boolean; label: string }
+): Promise<string[]> {
+	const names: string[] = [];
+	const pageSize = 100;
+	const maxPages = 100; // ~10k items: defensive bound against a server that never returns a short page
+	let total = 0;
+	let page = 1;
+	while (page <= maxPages) {
+		const resp = await fetch(urlForPage(page, pageSize), { headers });
+		if (!resp.ok) {
+			if (page === 1 && options.throwOnFirstError) {
+				throw new Error(`Harbor API error ${resp.status} while ${options.label}`);
+			}
+			break;
+		}
+		if (page === 1) total = parseInt(resp.headers.get('X-Total-Count') || '0', 10);
+		const items: Array<{ name: string }> = await resp.json();
+		for (const item of items) names.push(item.name);
+		if (items.length < pageSize) break;
+		if (total > 0 && names.length >= total) break;
+		page++;
+	}
+	if (page > maxPages) {
+		console.warn(`[Harbor] Pagination safety cap (${maxPages} pages) reached while ${options.label}; the list may be truncated`);
+	}
+	return names;
+}
+
+/** Enumerates the names of all Harbor projects the account can access. */
+async function harborListAllProjects(baseUrl: string, headers: Record<string, string>): Promise<string[]> {
+	return harborPaginateNames(
+		(page, size) => `${baseUrl}/projects?page=${page}&page_size=${size}`,
+		headers,
+		{ throwOnFirstError: true, label: 'listing projects' }
+	);
+}
+
+/** Enumerates the names of all repositories within a single Harbor project. */
+async function harborListProjectRepositories(baseUrl: string, project: string, headers: Record<string, string>): Promise<string[]> {
+	return harborPaginateNames(
+		(page, size) => `${baseUrl}/projects/${encodeURIComponent(project)}/repositories?page=${page}&page_size=${size}`,
+		headers,
+		{ throwOnFirstError: false, label: `listing repositories of project ${project}` }
+	);
+}
+
 /**
  * Lists repositories via the Harbor project API.
- * If orgPath is set, queries a single project. Otherwise, enumerates all accessible projects.
+ * With orgPath set, paginates a single project natively (using X-Total-Count).
+ * Without orgPath, enumerates every accessible project and all of their
+ * repositories, then paginates the flattened list so the UI gets a correct
+ * hasMore signal instead of a silently truncated first page.
  * @param page - page number (1-based)
  * @param pageSize - number of results per page
  */
@@ -3250,67 +3332,44 @@ export async function harborListRepositories(
 	pageSize: number = 100
 ): Promise<HarborCatalogResult> {
 	const parsed = parseRegistryUrl(registry.url);
-	const baseUrl = `https://${parsed.host}/api/v2.0`;
-	const authHeader = getHarborBasicAuth(registry);
-
-	const headers: Record<string, string> = {
-		'Accept': 'application/json',
-		'User-Agent': 'Dockhand/1.0'
-	};
-	if (authHeader) headers['Authorization'] = authHeader;
-
-	const repositories: string[] = [];
-	let totalCount = 0;
+	const baseUrl = `${parsed.protocol}://${parsed.host}/api/v2.0`;
+	const headers = harborHeaders(registry);
 
 	if (orgPath) {
-		// Single project: path without the leading slash
+		// Single project: native page-based pagination.
 		const project = orgPath.replace(/^\//, '');
 		const url = `${baseUrl}/projects/${encodeURIComponent(project)}/repositories?page=${page}&page_size=${pageSize}`;
 		const resp = await fetch(url, { headers });
-
 		if (!resp.ok) {
 			throw new Error(`Harbor API error ${resp.status} for project ${project}`);
 		}
-
-		totalCount = parseInt(resp.headers.get('X-Total-Count') || '0', 10);
+		const totalCount = parseInt(resp.headers.get('X-Total-Count') || '0', 10);
 		const repos: Array<{ name: string }> = await resp.json();
-		for (const r of repos) {
-			repositories.push(r.name);
-		}
-	} else {
-		// No orgPath: enumerate all accessible projects
-		const projectsResp = await fetch(`${baseUrl}/projects?page=1&page_size=100`, { headers });
-		if (!projectsResp.ok) {
-			throw new Error(`Harbor API error ${projectsResp.status} when listing projects`);
-		}
-		const projects: Array<{ name: string }> = await projectsResp.json();
-
-		// Paginate repos from the first matching project
-		// For simplicity, concatenate all repos from all projects
-		for (const proj of projects) {
-			const url = `${baseUrl}/projects/${encodeURIComponent(proj.name)}/repositories?page=1&page_size=100`;
-			const resp = await fetch(url, { headers });
-			if (!resp.ok) continue;
-
-			const repos: Array<{ name: string }> = await resp.json();
-			for (const r of repos) {
-				repositories.push(r.name);
-			}
-		}
-		totalCount = repositories.length;
+		const repositories = repos.map(r => r.name);
+		const hasMore = page * pageSize < totalCount;
+		return { repositories, nextLast: hasMore ? `harbor:${page + 1}` : null };
 	}
 
-	// Check if there is a next page
-	const hasMore = orgPath ? (page * pageSize < totalCount) : false;
-	const nextLast = hasMore ? `harbor:${page + 1}` : null;
+	// No orgPath: enumerate all projects and all of their repositories, then
+	// slice the flattened list for the requested page.
+	const projects = await harborListAllProjects(baseUrl, headers);
+	const all: string[] = [];
+	for (const project of projects) {
+		const repos = await harborListProjectRepositories(baseUrl, project, headers);
+		for (const name of repos) all.push(name);
+	}
 
-	return { repositories, nextLast };
+	const start = (page - 1) * pageSize;
+	const repositories = all.slice(start, start + pageSize);
+	const hasMore = start + pageSize < all.length;
+	return { repositories, nextLast: hasMore ? `harbor:${page + 1}` : null };
 }
 
 /**
  * Searches repositories via the Harbor API using filter q=name=~{term}.
  * Iterates through all accessible projects (or a single one if orgPath is set).
- * Client-side substring double-check.
+ * The term is sanitized for the Harbor query grammar; a client-side substring
+ * check on the original term keeps the results precise.
  */
 export async function harborSearchRepositories(
 	registry: { url: string; username?: string | null; password?: string | null },
@@ -3319,41 +3378,30 @@ export async function harborSearchRepositories(
 	limit: number = 25
 ): Promise<string[]> {
 	const parsed = parseRegistryUrl(registry.url);
-	const baseUrl = `https://${parsed.host}/api/v2.0`;
-	const authHeader = getHarborBasicAuth(registry);
-
-	const headers: Record<string, string> = {
-		'Accept': 'application/json',
-		'User-Agent': 'Dockhand/1.0'
-	};
-	if (authHeader) headers['Authorization'] = authHeader;
+	const baseUrl = `${parsed.protocol}://${parsed.host}/api/v2.0`;
+	const headers = harborHeaders(registry);
 
 	const termLower = term.toLowerCase();
+	const safeTerm = sanitizeHarborQueryTerm(term);
 	const results: string[] = [];
 
-	// Determine which projects to iterate through
-	let projectNames: string[];
-	if (orgPath) {
-		projectNames = [orgPath.replace(/^\//, '')];
-	} else {
-		const projectsResp = await fetch(`${baseUrl}/projects?page=1&page_size=100`, { headers });
-		if (!projectsResp.ok) return results;
-		const projects: Array<{ name: string }> = await projectsResp.json();
-		projectNames = projects.map(p => p.name);
-	}
+	const projectNames = orgPath
+		? [orgPath.replace(/^\//, '')]
+		: await harborListAllProjects(baseUrl, headers);
 
 	// Search each project using the Harbor filter
-	for (const proj of projectNames) {
+	for (const project of projectNames) {
 		if (results.length >= limit) break;
 
-		const q = encodeURIComponent(`name=~${term}`);
-		const url = `${baseUrl}/projects/${encodeURIComponent(proj)}/repositories?q=${q}&page=1&page_size=${limit}`;
+		const q = encodeURIComponent(`name=~${safeTerm}`);
+		const url = `${baseUrl}/projects/${encodeURIComponent(project)}/repositories?q=${q}&page=1&page_size=${limit}`;
 		const resp = await fetch(url, { headers });
 		if (!resp.ok) continue;
 
 		const repos: Array<{ name: string }> = await resp.json();
 		for (const r of repos) {
-			// Client-side double-check
+			// The server filter ran on the sanitized term, so re-check the original
+			// term client-side to guarantee precise substring matches.
 			if (r.name.toLowerCase().includes(termLower)) {
 				results.push(r.name);
 				if (results.length >= limit) break;
