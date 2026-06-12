@@ -134,7 +134,7 @@ export const POST: RequestHandler = async ({ params, url, cookies, request }) =>
 
 		// If no compose in body, try to load from saved file
 		if (!composeContent) {
-			const savedCompose = await getStackComposeFile(stackName);
+			const savedCompose = await getStackComposeFile(stackName, envIdNum);
 			if (savedCompose.success && savedCompose.content) {
 				composeContent = savedCompose.content;
 			}
