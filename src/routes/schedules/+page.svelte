@@ -146,7 +146,7 @@
 
 	interface ScheduleExecution {
 		id: number;
-		scheduleType: 'container_update' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune';
+		scheduleType: 'container_update' | 'container_start' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune';
 		scheduleId: number;
 		environmentId: number | null;
 		entityName: string;
@@ -165,7 +165,7 @@
 	interface Schedule {
 		key: string; // Unique key: type-id
 		id: number;
-		type: 'container_update' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune';
+		type: 'container_update' | 'container_start' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune';
 		name: string;
 		entityName: string;
 		description?: string;
@@ -369,12 +369,12 @@
 							if (!latestCurrent || latestNew.id !== latestCurrent.id ||
 								latestNew.status !== latestCurrent.status) {
 								// Merge new executions with existing ones
-								const existingIds = new Set(currentExecutions.map(e => e.id));
-								const toAdd = newExecutions.filter(e => !existingIds.has(e.id));
+								const existingIds = new Set(currentExecutions.map((e: ScheduleExecution) => e.id));
+								const toAdd = newExecutions.filter((e: ScheduleExecution) => !existingIds.has(e.id));
 
 								// Update existing executions and prepend new ones
-								const updated = currentExecutions.map(e => {
-									const newer = newExecutions.find(n => n.id === e.id);
+								const updated = currentExecutions.map((e: ScheduleExecution) => {
+									const newer = newExecutions.find((n: ScheduleExecution) => n.id === e.id);
 									return newer || e;
 								});
 
@@ -916,7 +916,7 @@
 <div class="flex-1 min-h-0 flex flex-col gap-3 overflow-hidden">
 	<!-- Header with filters -->
 	<div class="shrink-0 flex flex-wrap justify-between items-center gap-3 min-h-8">
-		<PageHeader icon={Timer} title="Schedules" count={filteredSchedules.length} />
+		<PageHeader icon={Timer as any} title="Schedules" count={filteredSchedules.length} />
 		<div class="flex flex-wrap items-center gap-2">
 			<div class="relative">
 				<Search class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -938,6 +938,8 @@
 						{:else if filterTypes.length === 1}
 							{#if filterTypes[0] === 'container_update'}
 								Container updates
+							{:else if filterTypes[0] === 'container_start'}
+								Container starts
 							{:else if filterTypes[0] === 'git_stack_sync'}
 								Git stack syncs
 							{:else if filterTypes[0] === 'env_update_check'}
@@ -965,6 +967,10 @@
 					<Select.Item value="container_update">
 						<CircleArrowUp class="w-4 h-4 mr-2 inline text-green-500 drop-shadow-[0_0_3px_rgba(34,197,94,0.4)]" />
 						Container updates
+					</Select.Item>
+					<Select.Item value="container_start">
+						<PlayCircle class="w-4 h-4 mr-2 inline text-sky-500 drop-shadow-[0_0_3px_rgba(14,165,233,0.4)]" />
+						Container starts
 					</Select.Item>
 					<Select.Item value="git_stack_sync">
 						<GitBranch class="w-4 h-4 mr-2 inline text-purple-500 drop-shadow-[0_0_3px_rgba(168,85,247,0.4)]" />
@@ -1149,6 +1155,8 @@
 				<div class="flex flex-wrap items-center gap-2">
 					{#if schedule.type === 'container_update'}
 						<CircleArrowUp class="w-4 h-4 text-green-500 glow-green shrink-0" />
+					{:else if schedule.type === 'container_start'}
+						<PlayCircle class="w-4 h-4 text-sky-500 shrink-0" />
 					{:else if schedule.type === 'git_stack_sync'}
 						<GitBranch class="w-4 h-4 text-emerald-500 shrink-0" />
 					{:else if schedule.type === 'env_update_check'}
@@ -1182,6 +1190,8 @@
 								{:else}
 									Check & auto-update
 								{/if}
+							{:else if schedule.type === 'container_start'}
+								Start container on schedule
 							{:else if schedule.type === 'git_stack_sync'}
 								Git sync
 							{:else if schedule.type === 'env_update_check'}
@@ -1498,6 +1508,8 @@
 			<Dialog.Title class="flex items-center gap-2">
 				{#if selectedExecution?.scheduleType === 'container_update'}
 					<CircleArrowUp class="w-5 h-5 text-green-500 glow-green" />
+				{:else if selectedExecution?.scheduleType === 'container_start'}
+					<PlayCircle class="w-5 h-5 text-sky-500" />
 				{:else if selectedExecution?.scheduleType === 'git_stack_sync'}
 					<GitBranch class="w-5 h-5 text-emerald-500" />
 				{:else if selectedExecution?.scheduleType === 'env_update_check'}
@@ -1512,7 +1524,7 @@
 				Execution details
 				{#if selectedExecution}
 					<span class="text-muted-foreground font-normal">
-						({#if selectedExecution.scheduleType === 'container_update'}Container update{:else if selectedExecution.scheduleType === 'env_update_check'}Environment update{:else if selectedExecution.scheduleType === 'git_stack_sync'}Git stack sync{:else}System job{/if})
+						({#if selectedExecution.scheduleType === 'container_update'}Container update{:else if selectedExecution.scheduleType === 'container_start'}Container start{:else if selectedExecution.scheduleType === 'env_update_check'}Environment update{:else if selectedExecution.scheduleType === 'git_stack_sync'}Git stack sync{:else if selectedExecution.scheduleType === 'image_prune'}Image prune{:else}System job{/if})
 					</span>
 				{/if}
 			</Dialog.Title>

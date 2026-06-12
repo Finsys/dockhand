@@ -25,6 +25,8 @@ import {
 	removePendingContainerUpdate,
 	deleteAutoUpdateSchedule,
 	getAutoUpdateSetting,
+	deleteContainerStartSchedule,
+	getContainerStartSchedule,
 	getStackSourceByComposePath
 } from './db';
 import { unregisterSchedule } from './scheduler';
@@ -872,7 +874,7 @@ function findComposeOverrideFile(stackDir: string, composeFileName: string): str
  * @param customComposePath - Optional path to existing compose file (for imported stacks, skips writing)
  */
 async function executeLocalCompose(
-	operation: 'up' | 'down' | 'stop' | 'start' | 'restart' | 'pull',
+	operation: 'up' | 'down' | 'stop' | 'start' | 'restart' | 'pull' | 'create',
 	stackName: string,
 	composeContent: string,
 	dockerHost?: string,
@@ -1134,6 +1136,9 @@ async function executeLocalCompose(
 				args.push(serviceName);
 			}
 			break;
+		case 'create':
+			args.push('--profile', '*', 'create');
+			break;
 	}
 
 	const commandStr = args.join(' ');
@@ -1272,7 +1277,7 @@ async function executeLocalCompose(
  * @param secretVars - Secret environment variables (injected via shell env on Hawser, NEVER in .env)
  */
 async function executeComposeViaHawser(
-	operation: 'up' | 'down' | 'stop' | 'start' | 'restart' | 'pull',
+	operation: 'up' | 'down' | 'stop' | 'start' | 'restart' | 'pull' | 'create',
 	stackName: string,
 	composeContent: string,
 	envId: number,
@@ -1287,6 +1292,13 @@ async function executeComposeViaHawser(
 	noBuildCache?: boolean,
 	pullPolicy?: string
 ): Promise<StackOperationResult> {
+	if (operation === 'create') {
+		// No-op for now
+		return {
+			success: true
+		};
+	}
+
 	const logPrefix = `[Stack:${stackName}]`;
 	// Import dockerFetch dynamically to avoid circular dependency
 	const { dockerFetch } = await import('./docker.js');
@@ -1425,13 +1437,23 @@ async function executeComposeViaHawser(
  * @param secretVars - Secret environment variables (from DB, injected via shell env)
  */
 async function executeComposeCommand(
-	operation: 'up' | 'down' | 'stop' | 'start' | 'restart' | 'pull',
+	operation: 'up' | 'down' | 'stop' | 'start' | 'restart' | 'pull' | 'create',
 	options: ComposeCommandOptions,
 	composeContent: string,
 	envVars?: Record<string, string>,
 	secretVars?: Record<string, string>
 ): Promise<StackOperationResult> {
 	const { stackName, envId, forceRecreate, build, noBuildCache, pullPolicy, removeVolumes, stackFiles, workingDir, composePath, envPath, useOverrideFile, serviceName, composeFileName } = options;
+
+	// Always run 'create' before 'up' to ensure containers, networks, and volumes
+	// are created before starting. This handles cases where 'up' is called directly
+	// (e.g., deployStack, startStack when no containers exist, restartStack recreate mode).
+	if (operation === 'up') {
+		const createResult = await executeComposeCommand('create', options, composeContent, envVars, secretVars);
+		if (!createResult.success) {
+			return createResult;
+		}
+	}
 
 	// Get environment configuration
 	const env = envId ? await getEnvironment(envId) : null;
@@ -2053,6 +2075,9 @@ export async function downStack(
 		return withContainerFallback(stackName, envId, 'stop');
 	}
 
+	// Capture current stack containers before compose down removes them.
+	const stackContainers = await getStackContainers(stackName, envId);
+
 	const composeResult = await executeComposeCommand(
 		'down',
 		{ stackName, envId, removeVolumes, workingDir: result.stackDir, composePath: result.composePath, envPath: result.envPath },
@@ -2063,6 +2088,36 @@ export async function downStack(
 
 	// Remove any dynamically-spawned child containers not in the compose file
 	await cleanupOrphanStackContainers(stackName, envId, 'remove');
+
+	if (composeResult.success) {
+		const envIdNum = typeof envId === 'number' ? envId : undefined;
+		for (const container of stackContainers) {
+			const containerName = container.names?.[0]?.replace(/^\//, '') || container.name;
+			const containerId = container.id;
+
+			try {
+				const setting = await getAutoUpdateSetting(containerName, envIdNum);
+				if (setting) {
+					unregisterSchedule(setting.id, 'container_update');
+					await deleteAutoUpdateSchedule(containerName, envIdNum);
+				}
+			} catch { }
+
+			try {
+				const setting = await getContainerStartSchedule(containerName, envIdNum);
+				if (setting) {
+					unregisterSchedule(setting.id, 'container_start');
+					await deleteContainerStartSchedule(containerName, envIdNum);
+				}
+			} catch { }
+
+			try {
+				if (envIdNum) {
+					await removePendingContainerUpdate(envIdNum, containerId);
+				}
+			} catch { }
+		}
+	}
 
 	return composeResult;
 }
@@ -2146,6 +2201,17 @@ export async function removeStack(
 				if (setting) {
 					unregisterSchedule(setting.id, 'container_update');
 					await deleteAutoUpdateSchedule(containerName, envIdNum);
+				}
+			} catch {
+				// Ignore cleanup errors
+			}
+
+			// Clean up container start schedule
+			try {
+				const setting = await getContainerStartSchedule(containerName, envIdNum);
+				if (setting) {
+					unregisterSchedule(setting.id, 'container_start');
+					await deleteContainerStartSchedule(containerName, envIdNum);
 				}
 			} catch {
 				// Ignore cleanup errors

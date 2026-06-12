@@ -4,13 +4,13 @@
  * POST /api/schedules/[type]/[id]/run - Trigger a manual execution
  *
  * Path params:
- *   - type: 'container_update' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune'
+ *   - type: 'container_update' | 'container_start' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune'
  *   - id: schedule ID
  */
 
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { triggerContainerUpdate, triggerGitStackSync, triggerSystemJob, triggerEnvUpdateCheck, triggerImagePrune } from '$lib/server/scheduler';
+import { triggerContainerUpdate, triggerContainerStart, triggerGitStackSync, triggerSystemJob, triggerEnvUpdateCheck, triggerImagePrune } from '$lib/server/scheduler';
 import { authorize } from '$lib/server/authorize';
 
 export const POST: RequestHandler = async ({ params, cookies }) => {
@@ -32,6 +32,9 @@ export const POST: RequestHandler = async ({ params, cookies }) => {
 		switch (type) {
 			case 'container_update':
 				result = await triggerContainerUpdate(scheduleId);
+				break;
+			case 'container_start':
+				result = await triggerContainerStart(scheduleId);
 				break;
 			case 'git_stack_sync':
 				result = await triggerGitStackSync(scheduleId);

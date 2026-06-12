@@ -136,6 +136,20 @@ export const autoUpdateSettings = sqliteTable('auto_update_settings', {
 	envContainerUnique: unique().on(table.environmentId, table.containerName)
 }));
 
+export const containerStartSchedules = sqliteTable('container_start_schedules', {
+	id: integer('id').primaryKey({ autoIncrement: true }),
+	environmentId: integer('environment_id').references(() => environments.id),
+	containerName: text('container_name').notNull(),
+	enabled: integer('enabled', { mode: 'boolean' }).default(false),
+	scheduleType: text('schedule_type').default('daily'),
+	cronExpression: text('cron_expression'),
+	lastStarted: text('last_started'),
+	createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+	updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`)
+}, (table) => ({
+	envContainerUnique: unique().on(table.environmentId, table.containerName)
+}));
+
 export const notificationSettings = sqliteTable('notification_settings', {
 	id: integer('id').primaryKey({ autoIncrement: true }),
 	type: text('type').notNull(),
@@ -579,6 +593,9 @@ export type NewStackEvent = typeof stackEvents.$inferInsert;
 
 export type AutoUpdateSetting = typeof autoUpdateSettings.$inferSelect;
 export type NewAutoUpdateSetting = typeof autoUpdateSettings.$inferInsert;
+
+export type ContainerStartSchedule = typeof containerStartSchedules.$inferSelect;
+export type NewContainerStartSchedule = typeof containerStartSchedules.$inferInsert;
 
 export type UserPreference = typeof userPreferences.$inferSelect;
 export type NewUserPreference = typeof userPreferences.$inferInsert;

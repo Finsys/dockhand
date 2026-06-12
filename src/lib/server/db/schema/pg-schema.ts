@@ -139,6 +139,20 @@ export const autoUpdateSettings = pgTable('auto_update_settings', {
 	envContainerUnique: unique().on(table.environmentId, table.containerName)
 }));
 
+export const containerStartSchedules = pgTable('container_start_schedules', {
+	id: serial('id').primaryKey(),
+	environmentId: integer('environment_id').references(() => environments.id),
+	containerName: text('container_name').notNull(),
+	enabled: boolean('enabled').default(false),
+	scheduleType: text('schedule_type').default('daily'),
+	cronExpression: text('cron_expression'),
+	lastStarted: timestamp('last_started', { mode: 'string' }),
+	createdAt: timestamp('created_at', { mode: 'string' }).defaultNow(),
+	updatedAt: timestamp('updated_at', { mode: 'string' }).defaultNow()
+}, (table) => ({
+	envContainerUnique: unique().on(table.environmentId, table.containerName)
+}));
+
 export const notificationSettings = pgTable('notification_settings', {
 	id: serial('id').primaryKey(),
 	type: text('type').notNull(),

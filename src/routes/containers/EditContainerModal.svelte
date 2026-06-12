@@ -165,6 +165,8 @@
 	let autoUpdateEnabled = $state(false);
 	let autoUpdateCronExpression = $state('0 3 * * *');
 	let vulnerabilityCriteria = $state<VulnerabilityCriteria>('never');
+	let scheduledStartEnabled = $state(false);
+	let scheduledStartCronExpression = $state('0 3 * * *');
 	let currentEnvId = $state<number | null>(null);
 	currentEnvironment.subscribe(env => currentEnvId = env?.id || null);
 
@@ -224,6 +226,10 @@
 		cronExpression: string;
 		vulnerabilityCriteria: string;
 	} | null>(null);
+	let originalScheduledStart = $state<{
+		enabled: boolean;
+		cronExpression: string;
+	} | null>(null);
 
 	let loading = $state(false);
 	let loadingData = $state(true);
@@ -241,7 +247,7 @@
 	let renamingTitle = $state(false);
 
 	// Inline title rename functions
-	let titleInputRef: HTMLInputElement | null = null;
+	let titleInputRef = $state<HTMLInputElement | null>(null);
 
 	function startEditingTitle() {
 		editTitleName = name;
@@ -284,8 +290,9 @@
 	async function fetchAutoUpdateSettings(containerName: string) {
 		try {
 			const envParam = currentEnvId ? `?env=${currentEnvId}` : '';
-			const [autoUpdateResponse] = await Promise.all([
+			const [autoUpdateResponse, scheduledStartResponse] = await Promise.all([
 				fetch(`/api/auto-update/${encodeURIComponent(containerName)}${envParam}`),
+				fetch(`/api/container-start/${encodeURIComponent(containerName)}${envParam}`),
 				checkScannerSettings()
 			]);
 			if (autoUpdateResponse.ok) {
@@ -297,6 +304,16 @@
 					enabled: autoUpdateEnabled,
 					cronExpression: autoUpdateCronExpression,
 					vulnerabilityCriteria: vulnerabilityCriteria
+				};
+			}
+
+			if (scheduledStartResponse.ok) {
+				const data = await scheduledStartResponse.json();
+				scheduledStartEnabled = data.enabled || false;
+				scheduledStartCronExpression = data.cronExpression || '0 2 * * *';
+				originalScheduledStart = {
+					enabled: scheduledStartEnabled,
+					cronExpression: scheduledStartCronExpression
 				};
 			}
 		} catch (err) {
@@ -318,6 +335,22 @@
 			});
 		} catch (err) {
 			console.error('Failed to save auto-update settings:', err);
+		}
+	}
+
+	async function saveScheduledStartSettings(containerName: string) {
+		try {
+			const envParam = currentEnvId ? `?env=${currentEnvId}` : '';
+			await fetch(`/api/container-start/${encodeURIComponent(containerName)}${envParam}`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					enabled: scheduledStartEnabled,
+					cronExpression: scheduledStartCronExpression
+				})
+			});
+		} catch (err) {
+			console.error('Failed to save scheduled start settings:', err);
 		}
 	}
 
@@ -695,6 +728,14 @@
 		);
 	}
 
+	function hasScheduledStartChanged(): boolean {
+		if (!originalScheduledStart) return true;
+		return (
+			scheduledStartEnabled !== originalScheduledStart.enabled ||
+			scheduledStartCronExpression !== originalScheduledStart.cronExpression
+		);
+	}
+
 	function serializeConfigWithoutName() {
 		return JSON.stringify({
 			image: image.trim(),
@@ -791,8 +832,9 @@
 
 		const containerConfigChanged = hasContainerConfigChanged();
 		const autoUpdateChanged = hasAutoUpdateChanged();
+		const scheduledStartChanged = hasScheduledStartChanged();
 
-		if (!containerConfigChanged && !autoUpdateChanged) {
+		if (!containerConfigChanged && !autoUpdateChanged && !scheduledStartChanged) {
 			onClose();
 			loading = false;
 			return;
@@ -825,6 +867,10 @@
 
 				if (autoUpdateChanged) {
 					await saveAutoUpdateSettings(name.trim());
+				}
+
+				if (scheduledStartChanged) {
+					await saveScheduledStartSettings(name.trim());
 				}
 
 				await new Promise(resolve => setTimeout(resolve, 500));
@@ -999,6 +1045,16 @@
 				}
 			}
 
+			if (scheduledStartChanged) {
+				if (!containerConfigChanged && !autoUpdateChanged) {
+					statusMessage = 'Saving scheduled run settings...';
+				}
+				await saveScheduledStartSettings(name.trim());
+				if (!containerConfigChanged && !autoUpdateChanged) {
+					statusMessage = 'Scheduled run settings saved!';
+				}
+			}
+
 			await new Promise(resolve => setTimeout(resolve, 500));
 
 			onSuccess();
@@ -1157,6 +1213,8 @@
 					bind:autoUpdateEnabled
 					bind:autoUpdateCronExpression
 					bind:vulnerabilityCriteria
+					bind:scheduledStartEnabled
+					bind:scheduledStartCronExpression
 					{configSets}
 					bind:selectedConfigSetId
 					bind:errors

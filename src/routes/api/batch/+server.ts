@@ -19,7 +19,7 @@ import {
 	downStack,
 	removeStack
 } from '$lib/server/stacks';
-import { deleteAutoUpdateSchedule, getAutoUpdateSetting, removePendingContainerUpdate } from '$lib/server/db';
+import { deleteAutoUpdateSchedule, getAutoUpdateSetting, deleteContainerStartSchedule, getContainerStartSchedule, removePendingContainerUpdate } from '$lib/server/db';
 import { unregisterSchedule } from '$lib/server/scheduler';
 import { prefersJSON } from '$lib/server/sse';
 import { createJob, appendLine, completeJob, failJob } from '$lib/server/jobs';
@@ -319,6 +319,16 @@ async function executeContainerOperation(
 				if (setting) {
 					unregisterSchedule(setting.id, 'container_update');
 					await deleteAutoUpdateSchedule(name, envIdNum);
+				}
+			} catch {
+				// Ignore cleanup errors
+			}
+
+			try {
+				const setting = await getContainerStartSchedule(name, envIdNum);
+				if (setting) {
+					unregisterSchedule(setting.id, 'container_start');
+					await deleteContainerStartSchedule(name, envIdNum);
 				}
 			} catch {
 				// Ignore cleanup errors
