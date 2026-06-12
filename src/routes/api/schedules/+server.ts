@@ -7,9 +7,8 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import {
-	getEnabledAutoUpdateSettings,
-	getEnabledAutoUpdateGitStacks,
 	getAllAutoUpdateSettings,
+	getAllContainerStartSchedules,
 	getAllAutoUpdateGitStacks,
 	getAllEnvUpdateCheckSettings,
 	getAllImagePruneSettings,
@@ -25,7 +24,7 @@ import { getGlobalScannerDefaults, getScannerSettingsWithDefaults } from '$lib/s
 
 export interface ScheduleInfo {
 	id: number;
-	type: 'container_update' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune';
+	type: 'container_update' | 'container_start' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune';
 	name: string;
 	entityName: string;
 	description?: string;
@@ -86,6 +85,39 @@ export const GET: RequestHandler = async () => {
 			})
 		);
 		schedules.push(...containerSchedules);
+
+		// Get container start schedules
+		const containerStartSettings = await getAllContainerStartSchedules();
+		const containerStartSchedules = await Promise.all(
+			containerStartSettings.map(async (setting) => {
+				const [env, lastExecution, recentExecutions, timezone] = await Promise.all([
+					setting.environmentId ? getEnvironment(setting.environmentId) : null,
+					getLastExecutionForSchedule('container_start', setting.id),
+					getRecentExecutionsForSchedule('container_start', setting.id, 5),
+					setting.environmentId ? getEnvironmentTimezone(setting.environmentId) : 'UTC'
+				]);
+				const isEnabled = setting.enabled ?? false;
+				const nextRun = isEnabled && setting.cronExpression ? getNextRun(setting.cronExpression, timezone) : null;
+
+				return {
+					id: setting.id,
+					type: 'container_start' as const,
+					name: `Start container: ${setting.containerName}`,
+					entityName: setting.containerName,
+					description: 'Start container on a schedule',
+					environmentId: setting.environmentId ?? null,
+					environmentName: env?.name ?? null,
+					enabled: isEnabled,
+					scheduleType: setting.scheduleType ?? 'daily',
+					cronExpression: setting.cronExpression ?? null,
+					nextRun: nextRun?.toISOString() ?? null,
+					lastExecution: lastExecution ?? null,
+					recentExecutions,
+					isSystem: false
+				};
+			})
+		);
+		schedules.push(...containerStartSchedules);
 
 		// Get git stack auto-sync schedules
 		const gitStacks = await getAllAutoUpdateGitStacks();

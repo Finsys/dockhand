@@ -1,6 +1,6 @@
 import { json } from '@sveltejs/kit';
 import { renameContainer, inspectContainer } from '$lib/server/docker';
-import { renameAutoUpdateSchedule } from '$lib/server/db';
+import { renameAutoUpdateSchedule, renameContainerStartSchedule } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
 import { auditContainer } from '$lib/server/audit';
 import { validateDockerIdParam } from '$lib/server/docker-validation';
@@ -44,6 +44,7 @@ export const POST: RequestHandler = async (event) => {
 		// Update schedule if exists
 		try {
 			await renameAutoUpdateSchedule(oldName, name, envIdNum);
+			await renameContainerStartSchedule(oldName, name, envIdNum);
 		} catch (error) {
 			console.error('Failed to update schedule name:', error);
 			// Don't fail the rename if schedule update fails

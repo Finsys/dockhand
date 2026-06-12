@@ -25,6 +25,8 @@ import {
 	removePendingContainerUpdate,
 	deleteAutoUpdateSchedule,
 	getAutoUpdateSetting,
+	deleteContainerStartSchedule,
+	getContainerStartSchedule,
 	getStackSourceByComposePath
 } from './db';
 import { unregisterSchedule } from './scheduler';
@@ -2053,6 +2055,9 @@ export async function downStack(
 		return withContainerFallback(stackName, envId, 'stop');
 	}
 
+	// Capture current stack containers before compose down removes them.
+	const stackContainers = await getStackContainers(stackName, envId);
+
 	const composeResult = await executeComposeCommand(
 		'down',
 		{ stackName, envId, removeVolumes, workingDir: result.stackDir, composePath: result.composePath, envPath: result.envPath },
@@ -2063,6 +2068,36 @@ export async function downStack(
 
 	// Remove any dynamically-spawned child containers not in the compose file
 	await cleanupOrphanStackContainers(stackName, envId, 'remove');
+
+	if (composeResult.success) {
+		const envIdNum = typeof envId === 'number' ? envId : undefined;
+		for (const container of stackContainers) {
+			const containerName = container.names?.[0]?.replace(/^\//, '') || container.name;
+			const containerId = container.id;
+
+			try {
+				const setting = await getAutoUpdateSetting(containerName, envIdNum);
+				if (setting) {
+					unregisterSchedule(setting.id, 'container_update');
+					await deleteAutoUpdateSchedule(containerName, envIdNum);
+				}
+			} catch { }
+
+			try {
+				const setting = await getContainerStartSchedule(containerName, envIdNum);
+				if (setting) {
+					unregisterSchedule(setting.id, 'container_start');
+					await deleteContainerStartSchedule(containerName, envIdNum);
+				}
+			} catch { }
+
+			try {
+				if (envIdNum) {
+					await removePendingContainerUpdate(envIdNum, containerId);
+				}
+			} catch { }
+		}
+	}
 
 	return composeResult;
 }
@@ -2146,6 +2181,17 @@ export async function removeStack(
 				if (setting) {
 					unregisterSchedule(setting.id, 'container_update');
 					await deleteAutoUpdateSchedule(containerName, envIdNum);
+				}
+			} catch {
+				// Ignore cleanup errors
+			}
+
+			// Clean up container start schedule
+			try {
+				const setting = await getContainerStartSchedule(containerName, envIdNum);
+				if (setting) {
+					unregisterSchedule(setting.id, 'container_start');
+					await deleteContainerStartSchedule(containerName, envIdNum);
 				}
 			} catch {
 				// Ignore cleanup errors

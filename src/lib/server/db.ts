@@ -27,6 +27,7 @@ import {
 	configSets,
 	hostMetrics,
 	autoUpdateSettings,
+	containerStartSchedules,
 	notificationSettings,
 	environmentNotifications,
 	authSettings,
@@ -55,6 +56,7 @@ import {
 	type ConfigSet,
 	type HostMetric,
 	type AutoUpdateSetting,
+	type ContainerStartSchedule,
 	type NotificationSetting,
 	type EnvironmentNotification,
 	type AuthSetting,
@@ -88,6 +90,7 @@ export type {
 	ConfigSet,
 	HostMetric,
 	AutoUpdateSetting as AutoUpdateSettingType,
+	ContainerStartSchedule as ContainerStartScheduleType,
 	User,
 	Session,
 	Role,
@@ -624,6 +627,18 @@ export interface AutoUpdateSettingData {
 	updatedAt: string;
 }
 
+export interface ContainerStartScheduleData {
+	id: number;
+	environmentId: number | null;
+	containerName: string;
+	enabled: boolean;
+	scheduleType: 'daily' | 'weekly' | 'custom';
+	cronExpression: string | null;
+	lastStarted: string | null;
+	createdAt: string;
+	updatedAt: string;
+}
+
 export async function getAutoUpdateSettings(environmentId?: number): Promise<AutoUpdateSettingData[]> {
 	if (environmentId) {
 		return db.select().from(autoUpdateSettings)
@@ -750,6 +765,119 @@ export async function renameAutoUpdateSchedule(
 			environmentId
 				? eq(autoUpdateSettings.environmentId, environmentId)
 				: isNull(autoUpdateSettings.environmentId)
+		));
+	return true;
+}
+
+export async function getContainerStartSchedules(environmentId?: number): Promise<ContainerStartScheduleData[]> {
+	if (environmentId) {
+		return db.select().from(containerStartSchedules)
+			.where(eq(containerStartSchedules.environmentId, environmentId)) as Promise<ContainerStartScheduleData[]>;
+	}
+	return db.select().from(containerStartSchedules) as Promise<ContainerStartScheduleData[]>;
+}
+
+export async function getContainerStartSchedule(containerName: string, environmentId?: number): Promise<ContainerStartScheduleData | undefined> {
+	const results = await db.select().from(containerStartSchedules)
+		.where(and(
+			eq(containerStartSchedules.containerName, containerName),
+			environmentId ? eq(containerStartSchedules.environmentId, environmentId) : isNull(containerStartSchedules.environmentId)
+		));
+	return results[0] as ContainerStartScheduleData | undefined;
+}
+
+export async function getContainerStartScheduleById(id: number): Promise<ContainerStartScheduleData | undefined> {
+	const results = await db.select().from(containerStartSchedules)
+		.where(eq(containerStartSchedules.id, id));
+	return results[0] as ContainerStartScheduleData | undefined;
+}
+
+export async function updateContainerStartScheduleById(id: number, data: Partial<ContainerStartScheduleData>): Promise<void> {
+	await db.update(containerStartSchedules)
+		.set({
+			...data,
+			updatedAt: new Date().toISOString()
+		})
+		.where(eq(containerStartSchedules.id, id));
+}
+
+export async function getEnabledContainerStartSchedules(): Promise<ContainerStartScheduleData[]> {
+	return db.select().from(containerStartSchedules)
+		.where(eq(containerStartSchedules.enabled, true)) as Promise<ContainerStartScheduleData[]>;
+}
+
+export async function getAllContainerStartSchedules(): Promise<ContainerStartScheduleData[]> {
+	return db.select().from(containerStartSchedules)
+		.orderBy(desc(containerStartSchedules.containerName)) as Promise<ContainerStartScheduleData[]>;
+}
+
+export async function upsertContainerStartSchedule(
+	containerName: string,
+	settingsData: {
+		enabled: boolean;
+		scheduleType: 'daily' | 'weekly' | 'custom';
+		cronExpression?: string | null;
+	},
+	environmentId?: number
+): Promise<ContainerStartScheduleData> {
+	const existing = await getContainerStartSchedule(containerName, environmentId);
+
+	if (existing) {
+		await db.update(containerStartSchedules)
+			.set({
+				enabled: settingsData.enabled,
+				scheduleType: settingsData.scheduleType,
+				cronExpression: settingsData.cronExpression || null,
+				updatedAt: new Date().toISOString()
+			})
+			.where(eq(containerStartSchedules.id, existing.id));
+		return getContainerStartSchedule(containerName, environmentId) as Promise<ContainerStartScheduleData>;
+	}
+
+	await db.insert(containerStartSchedules).values({
+		environmentId: environmentId || null,
+		containerName,
+		enabled: settingsData.enabled,
+		scheduleType: settingsData.scheduleType,
+		cronExpression: settingsData.cronExpression || null
+	});
+
+	return getContainerStartSchedule(containerName, environmentId) as Promise<ContainerStartScheduleData>;
+}
+
+export async function updateContainerStartLastStarted(containerName: string, environmentId?: number): Promise<void> {
+	await db.update(containerStartSchedules)
+		.set({
+			lastStarted: new Date().toISOString(),
+			updatedAt: new Date().toISOString()
+		})
+		.where(and(
+			eq(containerStartSchedules.containerName, containerName),
+			environmentId ? eq(containerStartSchedules.environmentId, environmentId) : isNull(containerStartSchedules.environmentId)
+		));
+}
+
+export async function deleteContainerStartSchedule(containerName: string, environmentId?: number): Promise<boolean> {
+	await db.delete(containerStartSchedules)
+		.where(and(
+			eq(containerStartSchedules.containerName, containerName),
+			environmentId ? eq(containerStartSchedules.environmentId, environmentId) : isNull(containerStartSchedules.environmentId)
+		));
+	return true;
+}
+
+export async function renameContainerStartSchedule(
+	oldName: string,
+	newName: string,
+	environmentId?: number
+): Promise<boolean> {
+	await db.update(containerStartSchedules)
+		.set({ containerName: newName })
+		.where(and(
+			eq(containerStartSchedules.containerName, oldName),
+			environmentId
+				? eq(containerStartSchedules.environmentId, environmentId)
+				: isNull(containerStartSchedules.environmentId)
 		));
 	return true;
 }
@@ -3827,7 +3955,7 @@ export async function saveDashboardPreferences(data: {
 // SCHEDULE EXECUTION OPERATIONS
 // =============================================================================
 
-export type ScheduleType = 'container_update' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check';
+export type ScheduleType = 'container_update' | 'container_start' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune';
 export type ScheduleTrigger = 'cron' | 'webhook' | 'manual' | 'startup';
 export type ScheduleStatus = 'queued' | 'running' | 'success' | 'failed' | 'skipped';
 

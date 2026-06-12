@@ -879,6 +879,7 @@ export const stackEvents = schemaProxy.stackEvents;
 export const hostMetrics = schemaProxy.hostMetrics;
 export const configSets = schemaProxy.configSets;
 export const autoUpdateSettings = schemaProxy.autoUpdateSettings;
+export const containerStartSchedules = schemaProxy.containerStartSchedules;
 export const notificationSettings = schemaProxy.notificationSettings;
 export const environmentNotifications = schemaProxy.environmentNotifications;
 export const authSettings = schemaProxy.authSettings;
@@ -951,6 +952,8 @@ export type {
 	NewStackEvent,
 	AutoUpdateSetting,
 	NewAutoUpdateSetting,
+	ContainerStartSchedule,
+	NewContainerStartSchedule,
 	UserPreference,
 	NewUserPreference,
 	ScheduleExecution,

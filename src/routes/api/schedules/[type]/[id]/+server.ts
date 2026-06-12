@@ -8,6 +8,8 @@ import type { RequestHandler } from './$types';
 import {
 	getAutoUpdateSettingById,
 	deleteAutoUpdateSchedule,
+	getContainerStartScheduleById,
+	deleteContainerStartSchedule,
 	updateGitStack,
 	deleteEnvUpdateCheckSettings,
 	deleteImagePruneSettings
@@ -39,12 +41,18 @@ export const DELETE: RequestHandler = async ({ params, cookies }) => {
 			}
 			return json({ success: true });
 
+		} else if (type === 'container_start') {
+			const schedule = await getContainerStartScheduleById(scheduleId);
+			if (schedule) {
+				await deleteContainerStartSchedule(schedule.containerName, schedule.environmentId ?? undefined);
+				unregisterSchedule(scheduleId, 'container_start');
+			}
+			return json({ success: true });
+
 		} else if (type === 'git_stack_sync') {
 			// Disable auto-update for git stack (don't delete the stack itself)
 			await updateGitStack(scheduleId, {
-				autoUpdate: false,
-				autoUpdateSchedule: null,
-				autoUpdateCron: null
+				autoUpdate: false
 			});
 			// Unregister from croner
 			unregisterSchedule(scheduleId, 'git_stack_sync');

@@ -8,12 +8,13 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { TogglePill, ToggleGroup } from '$lib/components/ui/toggle-pill';
-	import { Plus, Trash2, Settings2, RefreshCw, Network, X, Ban, RotateCw, AlertTriangle, PauseCircle, Share2, Server, CircleOff, Box, ChevronDown, ChevronsUpDown, Check, ChevronRight, Cpu, Shield, HeartPulse, Wifi, HardDrive, Lock, Loader2, CheckCircle2, Package, Gpu, Search, CircleHelp } from 'lucide-svelte';
+	import { Plus, Trash2, Settings2, RefreshCw, Network, X, Ban, RotateCw, AlertTriangle, PauseCircle, Share2, Server, CircleOff, Box, ChevronDown, ChevronsUpDown, Check, ChevronRight, Cpu, Shield, HeartPulse, Wifi, HardDrive, Lock, Loader2, CheckCircle2, Package, Gpu, Search, CircleHelp, PlayCircle } from 'lucide-svelte';
 	import { parseHostPort, validatePort, validateIp, formatHostPort, expandPortBindings } from '$lib/utils/port-parse';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { currentEnvironment } from '$lib/stores/environment';
 	import { Badge } from '$lib/components/ui/badge';
 	import AutoUpdateSettings from './AutoUpdateSettings.svelte';
+	import ScheduledStartSettings from './ScheduledStartSettings.svelte';
 	import type { VulnerabilityCriteria } from '$lib/components/VulnerabilityCriteriaSelector.svelte';
 	import type { SystemContainerType } from '$lib/types';
 
@@ -145,6 +146,9 @@
 		autoUpdateEnabled: boolean;
 		autoUpdateCronExpression: string;
 		vulnerabilityCriteria: VulnerabilityCriteria;
+		// Scheduled start
+		scheduledStartEnabled: boolean;
+		scheduledStartCronExpression: string;
 		// Config sets
 		configSets: ConfigSet[];
 		selectedConfigSetId: string;
@@ -210,6 +214,8 @@
 		autoUpdateEnabled = $bindable(),
 		autoUpdateCronExpression = $bindable(),
 		vulnerabilityCriteria = $bindable(),
+		scheduledStartEnabled = $bindable(),
+		scheduledStartCronExpression = $bindable(),
 		configSets,
 		selectedConfigSetId = $bindable(),
 		errors = $bindable(),
@@ -1899,6 +1905,17 @@
 	</div>
 
 	<!-- Auto-update Settings -->
+	<div class="space-y-3">
+		<div class="flex items-center gap-2 pb-2 border-b">
+			<PlayCircle class="w-4 h-4 text-muted-foreground" />
+			<h3 class="text-sm font-semibold text-foreground">Scheduled run</h3>
+		</div>
+		<ScheduledStartSettings
+			bind:enabled={scheduledStartEnabled}
+			bind:cronExpression={scheduledStartCronExpression}
+		/>
+	</div>
+
 	<div class="space-y-3">
 		<div class="flex items-center gap-2 pb-2 border-b">
 			<RefreshCw class="w-4 h-4 text-muted-foreground" />
