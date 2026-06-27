@@ -163,6 +163,15 @@ RUN chmod +x ./scripts/*.sh ./scripts/**/*.sh 2>/dev/null || true
 RUN mkdir -p /home/dockhand/.dockhand/stacks /app/data \
     && chown dockhand:dockhand /app/data /home/dockhand /home/dockhand/.dockhand /home/dockhand/.dockhand/stacks
 
+# OCI image annotations (#1217) — lets tooling map this image back to its
+# source repo (image registry name differs from GitHub repo name).
+LABEL org.opencontainers.image.source="https://github.com/Finsys/dockhand" \
+      org.opencontainers.image.url="https://dockhand.pro" \
+      org.opencontainers.image.title="Dockhand" \
+      org.opencontainers.image.description="Docker management" \
+      org.opencontainers.image.vendor="Finsys" \
+      org.opencontainers.image.licenses="BUSL-1.1"
+
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \

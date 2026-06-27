@@ -58,6 +58,38 @@ html {
 	font-size: calc(12px * var(--grid-font-size-scale, 1)) !important;
 }
 
+/* Grid action icons (#1072) — size is independent of grid font size.
+ * Driven by --action-icon-size set from Settings > General. Default 12px
+ * matches the historical Tailwind w-3 size; users can bump up for high-DPI. */
+.grid-action-icon {
+	width: var(--action-icon-size, 12px) !important;
+	height: var(--action-icon-size, 12px) !important;
+}
+
+/* Colored action icons (#1072) — opt-in via Settings > General.
+ * When html.colored-actions is set, semantic .grid-action-* classes paint
+ * their icons. Default (no class) leaves them muted-foreground gray. */
+html.colored-actions .grid-action-start { color: rgb(22 163 74); }
+html.colored-actions.dark .grid-action-start { color: rgb(74 222 128); }
+html.colored-actions .grid-action-stop { color: rgb(217 119 6); }
+html.colored-actions.dark .grid-action-stop { color: rgb(251 191 36); }
+html.colored-actions .grid-action-pause { color: rgb(217 119 6); }
+html.colored-actions.dark .grid-action-pause { color: rgb(251 191 36); }
+html.colored-actions .grid-action-restart { color: rgb(37 99 235); }
+html.colored-actions.dark .grid-action-restart { color: rgb(96 165 250); }
+html.colored-actions .grid-action-delete { color: rgb(220 38 38); }
+html.colored-actions.dark .grid-action-delete { color: rgb(248 113 113); }
+html.colored-actions .grid-action-edit { color: rgb(37 99 235); }
+html.colored-actions.dark .grid-action-edit { color: rgb(96 165 250); }
+html.colored-actions .grid-action-info { color: rgb(71 85 105); }
+html.colored-actions.dark .grid-action-info { color: rgb(148 163 184); }
+html.colored-actions .grid-action-logs { color: rgb(37 99 235); }
+html.colored-actions.dark .grid-action-logs { color: rgb(96 165 250); }
+html.colored-actions .grid-action-terminal { color: rgb(22 163 74); }
+html.colored-actions.dark .grid-action-terminal { color: rgb(74 222 128); }
+html.colored-actions .grid-action-transfer { color: rgb(37 99 235); }
+html.colored-actions.dark .grid-action-transfer { color: rgb(96 165 250); }
+
 /* State badge - width scales with grid font size to stay consistent */
 .state-badge {
 	width: calc(70px * var(--grid-font-size-scale, 1));
@@ -1341,13 +1373,19 @@ html {
 		line-height: 14px;
 	}
 
-	/* Icon animation toggle (#1169): when html.no-icon-animation is set, the
-	   common Tailwind animation utilities collapse to no-op. This keeps the
-	   layout (spinners still occupy space) but removes the motion. */
-	html.no-icon-animation .animate-spin,
-	html.no-icon-animation .animate-pulse,
-	html.no-icon-animation .animate-bounce,
-	html.no-icon-animation .animate-ping {
+	/* Icon animation toggle (#1169): when html.no-icon-animation is set, kill
+	   the ambient/decorative spinners but leave active-operation indicators
+	   alone. Lucide icons that ONLY exist as "operation in progress" markers
+	   — Loader2 (renders as lucide-loader-circle), RefreshCw, RefreshCcw,
+	   RotateCw, RotateCcw — are excluded regardless of the toggle. So is
+	   anything explicitly tagged `animate-action`. Permanent ambient
+	   spinners (e.g. the "update available" CircleArrowUp glyph in container
+	   list rows) still stop. */
+	html.no-icon-animation
+		.animate-spin:not(.lucide-loader-circle):not(.lucide-refresh-cw):not(.lucide-refresh-ccw):not(.lucide-rotate-cw):not(.lucide-rotate-ccw):not(.animate-action),
+	html.no-icon-animation .animate-pulse:not(.animate-action),
+	html.no-icon-animation .animate-bounce:not(.animate-action),
+	html.no-icon-animation .animate-ping:not(.animate-action) {
 		animation: none !important;
 	}
 

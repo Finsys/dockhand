@@ -2,26 +2,13 @@ import { validateSessionById, isAuthEnabled, SESSION_COOKIE } from './auth';
 import { validateApiToken } from './api-tokens';
 import { isEnterprise } from './license';
 import { userHasAdminRole, userCanAccessEnvironment } from './db';
+import { parseCookieHeader } from '$lib/utils/cookie-parse';
 
 export interface WsUpgradeAuth {
 	userId: number;
 	username: string;
 	isAdmin: boolean;
 	authDisabled: boolean;
-}
-
-function parseCookieHeader(header: string | undefined): Record<string, string> {
-	if (!header) return {};
-	const out: Record<string, string> = {};
-	for (const part of header.split(';')) {
-		const eq = part.indexOf('=');
-		if (eq < 0) continue;
-		const k = part.slice(0, eq).trim();
-		let v = part.slice(eq + 1).trim();
-		if (v.startsWith('"') && v.endsWith('"')) v = v.slice(1, -1);
-		if (k) out[k] = decodeURIComponent(v);
-	}
-	return out;
 }
 
 type LowercasedHeaders = Record<string, string | string[] | undefined>;

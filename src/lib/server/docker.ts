@@ -6,14 +6,14 @@
  */
 
 import { homedir } from 'node:os';
-import { existsSync, mkdirSync, rmSync, readdirSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import * as http from 'node:http';
 import * as https from 'node:https';
 import * as tls from 'node:tls';
 import { createHash } from 'node:crypto';
 import type { Environment } from './db';
-import { getStackEnvVarsAsRecord, getSetting } from './db';
+import { getSetting } from './db';
 import { getAdditionalVolumeBinds } from './mount-dedupe';
 import { encodeRegistryAuth } from './registry-auth';
 import { isSystemContainer } from './scheduler/tasks/update-utils';
@@ -4501,6 +4501,8 @@ export async function runContainer(options: {
 	extraHosts?: string[];
 	name?: string;
 	envId?: number | null;
+	networkMode?: string; // Docker network mode (e.g., 'host', 'bridge', custom network name)
+	dns?: string[]; // Custom DNS servers; undefined = inherit from Docker daemon
 }): Promise<{ stdout: string; stderr: string }> {
 	// Add random suffix to avoid naming conflicts
 	const baseName = options.name || `dockhand-temp-${Date.now()}`;
@@ -4522,6 +4524,14 @@ export async function runContainer(options: {
 
 	if (options.extraHosts && options.extraHosts.length > 0) {
 		containerConfig.HostConfig.ExtraHosts = options.extraHosts;
+	}
+
+	if (options.networkMode) {
+		containerConfig.HostConfig.NetworkMode = options.networkMode;
+	}
+
+	if (options.dns && options.dns.length > 0) {
+		containerConfig.HostConfig.Dns = options.dns;
 	}
 
 	const createResult = await dockerJsonRequest<{ Id: string }>(
@@ -4591,6 +4601,7 @@ export async function runContainerWithStreaming(options: {
 	onStderr?: (data: string) => void;
 	timeout?: number; // Overall timeout in ms (0 or undefined = no timeout)
 	networkMode?: string; // Docker network mode (e.g., network name for TCP access)
+	dns?: string[]; // Custom DNS servers; undefined = inherit from Docker daemon
 }): Promise<string> {
 	const baseName = options.name || `dockhand-stream-${Date.now()}`;
 	const containerName = `${baseName}-${randomSuffix()}`;
@@ -4623,6 +4634,10 @@ export async function runContainerWithStreaming(options: {
 	// Set network mode if specified (e.g., for scanner containers accessing Docker via TCP)
 	if (options.networkMode) {
 		containerConfig.HostConfig.NetworkMode = options.networkMode;
+	}
+
+	if (options.dns && options.dns.length > 0) {
+		containerConfig.HostConfig.Dns = options.dns;
 	}
 
 	const createResult = await dockerJsonRequest<{ Id: string }>(

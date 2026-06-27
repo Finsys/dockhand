@@ -8,6 +8,7 @@ import type { RequestHandler } from './$types';
 import {
 	getAutoUpdateSettingById,
 	deleteAutoUpdateSchedule,
+	getGitStack,
 	updateGitStack,
 	deleteEnvUpdateCheckSettings,
 	deleteImagePruneSettings
@@ -17,9 +18,9 @@ import { authorize } from '$lib/server/authorize';
 
 export const DELETE: RequestHandler = async ({ params, cookies }) => {
 	const auth = await authorize(cookies);
-	if (auth.authEnabled && !await auth.can('schedules', 'edit')) {
-		return json({ error: 'Permission denied' }, { status: 403 });
-	}
+
+	const permDenied = await auth.requirePermission('schedules', 'edit');
+	if (permDenied) return permDenied;
 
 	try {
 		const { type, id } = params;
@@ -33,6 +34,8 @@ export const DELETE: RequestHandler = async ({ params, cookies }) => {
 			// Hard delete container schedule
 			const schedule = await getAutoUpdateSettingById(scheduleId);
 			if (schedule) {
+				const envDenied = await auth.requireEnvAccess(schedule.environmentId);
+				if (envDenied) return envDenied;
 				await deleteAutoUpdateSchedule(schedule.containerName, schedule.environmentId ?? undefined);
 				// Unregister from croner
 				unregisterSchedule(scheduleId, 'container_update');
@@ -40,6 +43,12 @@ export const DELETE: RequestHandler = async ({ params, cookies }) => {
 			return json({ success: true });
 
 		} else if (type === 'git_stack_sync') {
+			const stack = await getGitStack(scheduleId);
+			if (!stack) {
+				return json({ error: 'Schedule not found' }, { status: 404 });
+			}
+			const envDenied = await auth.requireEnvAccess(stack.environmentId);
+			if (envDenied) return envDenied;
 			// Disable auto-update for git stack (don't delete the stack itself)
 			await updateGitStack(scheduleId, {
 				autoUpdate: false,
@@ -52,12 +61,16 @@ export const DELETE: RequestHandler = async ({ params, cookies }) => {
 
 		} else if (type === 'env_update_check') {
 			// Delete env update check settings (scheduleId is environmentId)
+			const envDenied = await auth.requireEnvAccess(scheduleId);
+			if (envDenied) return envDenied;
 			await deleteEnvUpdateCheckSettings(scheduleId);
 			unregisterSchedule(scheduleId, 'env_update_check');
 			return json({ success: true });
 
 		} else if (type === 'image_prune') {
 			// Delete image prune settings (scheduleId is environmentId)
+			const envDenied = await auth.requireEnvAccess(scheduleId);
+			if (envDenied) return envDenied;
 			await deleteImagePruneSettings(scheduleId);
 			unregisterSchedule(scheduleId, 'image_prune');
 			return json({ success: true });

@@ -23,6 +23,9 @@
  *
  * dockhand.url labels override this — Pangolin extraction is a fallback,
  * never a winner over an explicit user-provided URL.
+ *
+ * Earlier v1.0.34 used `pangolin.proxy-resources.*` — that label was never
+ * recognised by Pangolin itself and is no longer accepted here.
  */
 export interface PangolinUrl {
 	url: string;

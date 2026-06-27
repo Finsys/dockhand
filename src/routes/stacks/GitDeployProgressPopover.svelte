@@ -22,6 +22,7 @@
 	import type { Snippet } from 'svelte';
 	import { appSettings } from '$lib/stores/settings';
 	import { watchJob } from '$lib/utils/sse-fetch';
+	import { copyToClipboard } from '$lib/utils/clipboard';
 
 	interface Props {
 		stackId: number;
@@ -155,7 +156,8 @@
 	async function copyLogs() {
 		const lines = steps.map(s => s.message || s.status);
 		if (errorMessage) lines.push(`Error: ${errorMessage}`);
-		await navigator.clipboard.writeText(lines.join('\n'));
+		const ok = await copyToClipboard(lines.join('\n'));
+		if (!ok) return;
 		copied = true;
 		setTimeout(() => { copied = false; }, 2000);
 	}

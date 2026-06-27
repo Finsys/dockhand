@@ -172,22 +172,24 @@
 		}
 	});
 
-	// Generate hours array based on time format preference
+	// Generate hours array based on time format preference. 24h shows just the
+	// 2-digit hour so the combined picker reads "at 03 :15" rather than
+	// the confusing "at 03:00 :15" (#1198).
 	const hours = $derived(
 		Array.from({ length: 24 }, (_, i) => ({
 			value: String(i),
 			label: is12Hour
 				? i === 0 ? '12 AM' : i < 12 ? `${i} AM` : i === 12 ? '12 PM' : `${i - 12} PM`
-				: i.toString().padStart(2, '0') + ':00'
+				: i.toString().padStart(2, '0')
 		}))
 	);
 
-	const minutes = [
-		{ value: '0', label: ':00' },
-		{ value: '15', label: ':15' },
-		{ value: '30', label: ':30' },
-		{ value: '45', label: ':45' }
-	];
+	// 5-minute granularity — fine enough to stagger notifications without
+	// drowning the dropdown in 60 entries (#1198).
+	const minutes = Array.from({ length: 12 }, (_, i) => ({
+		value: String(i * 5),
+		label: ':' + (i * 5).toString().padStart(2, '0')
+	}));
 
 	const daysOfWeek = [
 		{ value: '1', label: 'Monday' },

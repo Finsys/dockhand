@@ -8,13 +8,14 @@
 	import { TogglePill, ToggleSwitch } from '$lib/components/ui/toggle-pill';
 	import CronEditor from '$lib/components/cron-editor.svelte';
 	import TimezoneSelector from '$lib/components/TimezoneSelector.svelte';
-	import { Eye, Bell, Database, Calendar, ShieldCheck, FileText, AlertTriangle, HelpCircle, Globe, Activity, Clock, Info, Save, RotateCcw, LayoutDashboard, Tags } from 'lucide-svelte';
+	import { Eye, Bell, Database, Calendar, ShieldCheck, FileText, AlertTriangle, HelpCircle, Globe, Activity, Clock, Info, Save, RotateCcw, LayoutDashboard, Tags, ChevronRight, ChevronDown } from 'lucide-svelte';
 	import CodeEditor from '$lib/components/CodeEditor.svelte';
 	import { appSettings, type DateFormat, type DownloadFormat, type EventCollectionMode, type LabelFilterMode } from '$lib/stores/settings';
 	import { canAccess, authStore } from '$lib/stores/auth';
 	import { toast } from 'svelte-sonner';
 	import ThemeSelector from '$lib/components/ThemeSelector.svelte';
 	import AnimateIconsToggle from '$lib/components/AnimateIconsToggle.svelte';
+	import ColoredActionsToggle from '$lib/components/ColoredActionsToggle.svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 
 	// General settings state - these derive from the store
@@ -32,6 +33,9 @@
 	let defaultTrivyArgs = $derived($appSettings.defaultTrivyArgs);
 	let defaultGrypeImage = $derived($appSettings.defaultGrypeImage);
 	let defaultTrivyImage = $derived($appSettings.defaultTrivyImage);
+	let defaultScannerNetworkMode = $derived($appSettings.defaultScannerNetworkMode);
+	let defaultScannerDns = $derived($appSettings.defaultScannerDns);
+	let showAdvancedScannerSettings = $state(false);
 	let defaultComposeTemplate = $derived($appSettings.defaultComposeTemplate);
 	let labelFilterMode = $derived($appSettings.labelFilterMode);
 	let composeTemplateWIP = $state('');
@@ -204,6 +208,29 @@ services:
 		if (value !== defaultTrivyArgs) {
 			appSettings.setDefaultTrivyArgs(value);
 			toast.success('Trivy default arguments updated');
+		}
+	}
+
+	function handleScannerNetworkModeChange(value: string) {
+		const trimmed = (value ?? '').trim();
+		if (trimmed !== defaultScannerNetworkMode) {
+			appSettings.setDefaultScannerNetworkMode(trimmed);
+			toast.success(trimmed ? `Scanner network mode set to ${trimmed}` : 'Scanner network mode cleared');
+		}
+	}
+
+	function handleScannerDnsBlur(e: Event) {
+		const raw = (e.target as HTMLInputElement).value.trim();
+		const cleaned = raw
+			.split(',')
+			.map((s) => s.trim())
+			.filter(Boolean);
+		const sameAsCurrent =
+			cleaned.length === defaultScannerDns.length &&
+			cleaned.every((v, i) => v === defaultScannerDns[i]);
+		if (!sameAsCurrent) {
+			appSettings.setDefaultScannerDns(cleaned);
+			toast.success(cleaned.length ? `Scanner DNS set to ${cleaned.join(', ')}` : 'Scanner DNS cleared');
 		}
 	}
 
@@ -434,6 +461,7 @@ services:
 						<!-- Right column: Theme settings (always shown, with hint when auth enabled) -->
 						<div class="space-y-4">
 							<ThemeSelector />
+							<ColoredActionsToggle />
 							<AnimateIconsToggle />
 							{#if $authStore.authEnabled}
 								<div class="text-xs text-muted-foreground flex items-start gap-1.5 mt-2 p-2 bg-muted/50 rounded-md">
@@ -671,6 +699,51 @@ services:
 						/>
 						<p class="text-xs text-muted-foreground">Use <code class="bg-muted px-1 rounded">{'{image}'}</code> as placeholder for the image name</p>
 					</div>
+					<div class="pt-2">
+						<button
+							type="button"
+							class="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1 select-none"
+							onclick={() => (showAdvancedScannerSettings = !showAdvancedScannerSettings)}
+						>
+							{#if showAdvancedScannerSettings}
+								<ChevronDown class="w-3.5 h-3.5" />
+							{:else}
+								<ChevronRight class="w-3.5 h-3.5" />
+							{/if}
+							Advanced settings
+						</button>
+					</div>
+					{#if showAdvancedScannerSettings}
+						<div class="space-y-2">
+							<Label for="scanner-network-mode">Network mode</Label>
+							<Select.Root
+								type="single"
+								value={defaultScannerNetworkMode}
+								onValueChange={handleScannerNetworkModeChange}
+							>
+								<Select.Trigger id="scanner-network-mode" class="w-full" disabled={!$canAccess('settings', 'edit')}>
+									<span>{defaultScannerNetworkMode || 'Default (auto-detect)'}</span>
+								</Select.Trigger>
+								<Select.Content>
+									<Select.Item value="">Default (auto-detect)</Select.Item>
+									<Select.Item value="host">host</Select.Item>
+									<Select.Item value="bridge">bridge</Select.Item>
+									<Select.Item value="none">none</Select.Item>
+								</Select.Content>
+							</Select.Root>
+							<p class="text-xs text-muted-foreground">Override the Docker network mode for vulnerability scanner containers. Use <code class="bg-muted px-1 rounded">host</code> on hosts where the default bridge can't reach the internet (e.g. iptables disabled, SELinux restricted).</p>
+						</div>
+						<div class="space-y-2">
+							<Label for="scanner-dns">DNS servers</Label>
+							<Input
+								id="scanner-dns"
+								value={defaultScannerDns.join(', ')}
+								onblur={handleScannerDnsBlur}
+								disabled={!$canAccess('settings', 'edit')}
+							/>
+							<p class="text-xs text-muted-foreground">Comma-separated DNS IPs for scanner containers. Empty = inherit from the Docker daemon.</p>
+						</div>
+					{/if}
 					<div class="pt-2 border-t">
 						<div class="flex items-center justify-between">
 							<div>

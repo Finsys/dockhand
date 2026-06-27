@@ -3,7 +3,7 @@ import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
 import { listContainers, inspectContainer, checkImageUpdateAvailable } from '$lib/server/docker';
 import { clearPendingContainerUpdates, addPendingContainerUpdate } from '$lib/server/db';
-import { isSystemContainer } from '$lib/server/scheduler/tasks/update-utils';
+import { isSystemContainer, isPodmanInfraContainer } from '$lib/server/scheduler/tasks/update-utils';
 import { isUpdateDisabledByLabel, isHiddenByLabel } from '$lib/server/container-labels';
 import { createJobResponse } from '$lib/server/sse';
 
@@ -42,9 +42,12 @@ export const POST: RequestHandler = async ({ url, cookies, request }) => {
 		}
 
 		const allContainers = await listContainers(true, envIdNum);
-		// Containers labeled dockhand.hidden=true are excluded from update checks —
-		// they're invisible to the user, so we won't alert on updates for them either (#1083).
-		const containers = allContainers.filter(c => !isHiddenByLabel(c.labels));
+		// Skip:
+		// - dockhand.hidden=true (invisible to user, so no update alerts) (#1083)
+		// - Podman pod-infra containers (localhost/podman-pause, never published) (#1221)
+		const containers = allContainers.filter(
+			(c) => !isHiddenByLabel(c.labels) && !isPodmanInfraContainer(c.image, c.labels)
+		);
 
 		send('progress', { checked: 0, total: containers.length });
 

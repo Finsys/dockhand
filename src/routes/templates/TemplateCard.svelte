@@ -1,7 +1,7 @@
 <script lang="ts">
 	import * as Card from '$lib/components/ui/card';
 	import { Badge } from '$lib/components/ui/badge';
-	import { Package, Star, Download, Loader2 } from 'lucide-svelte';
+	import { Package, Star, Download, Loader2, ExternalLink } from 'lucide-svelte';
 	import type { TemplateItem } from '../api/templates/+server';
 
 	interface Props {
@@ -71,13 +71,17 @@
 			</div>
 		</Card.Header>
 		<!-- svelte-ignore a11y_click_events_have_key_events -->
-		<Card.Content class="px-3 pb-2 pt-0" onclick={(e: MouseEvent) => { if ((e.target as HTMLElement).tagName === 'A') e.stopPropagation(); }}>
+		<Card.Content class="px-3 pb-2 pt-0" onclick={(e: MouseEvent) => { if ((e.target as HTMLElement).closest('a')) e.stopPropagation(); }}>
 			<!-- eslint-disable-next-line svelte/no-at-html-tags -->
 			<p class="text-xs text-muted-foreground line-clamp-2">
 				{@html renderDescription(template.description) || 'No description available'}
 			</p>
 		</Card.Content>
-		<Card.Footer class="px-3 pb-3 pt-0 flex items-center gap-1.5 flex-wrap">
+		<!-- svelte-ignore a11y_click_events_have_key_events -->
+		<Card.Footer
+			class="px-3 pb-3 pt-0 flex items-center gap-1.5 flex-wrap"
+			onclick={(e: MouseEvent) => { if ((e.target as HTMLElement).closest('a')) e.stopPropagation(); }}
+		>
 			{#each visibleCategories as category}
 				<Badge variant="secondary" class="text-2xs px-1.5 py-0">
 					{category}
@@ -86,23 +90,37 @@
 			{#if overflowCount > 0}
 				<span class="text-2xs text-muted-foreground">+{overflowCount}</span>
 			{/if}
-			<!-- LinuxServer metadata -->
-			{#if template.stars || template.pulls}
-				<div class="ml-auto flex items-center gap-2 text-2xs text-muted-foreground">
-					{#if template.stars}
-						<span class="flex items-center gap-0.5">
-							<Star class="w-3 h-3" />
-							{template.stars}
-						</span>
-					{/if}
-					{#if template.pulls}
-						<span class="flex items-center gap-0.5">
-							<Download class="w-3 h-3" />
-							{formatPulls(template.pulls)}
-						</span>
-					{/if}
-				</div>
-			{/if}
+			<div class="ml-auto flex items-center gap-2 text-2xs text-muted-foreground">
+				{#if template.projectUrl}
+					<a
+						href={template.projectUrl}
+						target="_blank"
+						rel="noopener"
+						class="flex items-center gap-0.5 hover:text-primary hover:underline"
+						title={`Open project page: ${template.projectUrl}`}
+						onclick={(e: MouseEvent) => {
+							e.stopPropagation();
+							e.preventDefault();
+							window.open(template.projectUrl, '_blank', 'noopener');
+						}}
+					>
+						<ExternalLink class="w-3 h-3" />
+						Project
+					</a>
+				{/if}
+				{#if template.stars}
+					<span class="flex items-center gap-0.5">
+						<Star class="w-3 h-3" />
+						{template.stars}
+					</span>
+				{/if}
+				{#if template.pulls}
+					<span class="flex items-center gap-0.5">
+						<Download class="w-3 h-3" />
+						{formatPulls(template.pulls)}
+					</span>
+				{/if}
+			</div>
 		</Card.Footer>
 	</Card.Root>
 </button>

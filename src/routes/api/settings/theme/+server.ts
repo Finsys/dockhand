@@ -14,7 +14,9 @@ const DEFAULT_THEME_SETTINGS = {
 	gridFontSize: 'normal',
 	terminalFont: 'system-mono',
 	editorFont: 'system-mono',
-	animateIcons: true
+	animateIcons: true,
+	coloredActionButtons: false,
+	actionIconSize: 'normal'
 };
 
 export const GET: RequestHandler = async () => {
@@ -27,7 +29,9 @@ export const GET: RequestHandler = async () => {
 			gridFontSize,
 			terminalFont,
 			editorFont,
-			animateIcons
+			animateIcons,
+			coloredActionButtons,
+			actionIconSize
 		] = await Promise.all([
 			getSetting('theme_light'),
 			getSetting('theme_dark'),
@@ -36,7 +40,9 @@ export const GET: RequestHandler = async () => {
 			getSetting('theme_grid_font_size'),
 			getSetting('theme_terminal_font'),
 			getSetting('theme_editor_font'),
-			getSetting('animate_icons')
+			getSetting('animate_icons'),
+			getSetting('colored_action_buttons'),
+			getSetting('action_icon_size')
 		]);
 
 		return json({
@@ -47,7 +53,9 @@ export const GET: RequestHandler = async () => {
 			gridFontSize: gridFontSize ?? DEFAULT_THEME_SETTINGS.gridFontSize,
 			terminalFont: terminalFont ?? DEFAULT_THEME_SETTINGS.terminalFont,
 			editorFont: editorFont ?? DEFAULT_THEME_SETTINGS.editorFont,
-			animateIcons: animateIcons ?? DEFAULT_THEME_SETTINGS.animateIcons
+			animateIcons: animateIcons ?? DEFAULT_THEME_SETTINGS.animateIcons,
+			coloredActionButtons: coloredActionButtons ?? DEFAULT_THEME_SETTINGS.coloredActionButtons,
+			actionIconSize: actionIconSize ?? DEFAULT_THEME_SETTINGS.actionIconSize
 		});
 	} catch (error) {
 		console.error('Failed to get theme settings:', error);

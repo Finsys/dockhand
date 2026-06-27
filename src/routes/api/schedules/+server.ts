@@ -22,6 +22,7 @@ import {
 } from '$lib/server/db';
 import { getNextRun, getSystemSchedules } from '$lib/server/scheduler';
 import { getGlobalScannerDefaults, getScannerSettingsWithDefaults } from '$lib/server/scanner';
+import { authorize } from '$lib/server/authorize';
 
 export interface ScheduleInfo {
 	id: number;
@@ -43,7 +44,12 @@ export interface ScheduleInfo {
 	vulnerabilityCriteria?: VulnerabilityCriteria | null;
 }
 
-export const GET: RequestHandler = async () => {
+export const GET: RequestHandler = async ({ cookies }) => {
+	const auth = await authorize(cookies);
+
+	const permDenied = await auth.requirePermission('schedules', 'view');
+	if (permDenied) return permDenied;
+
 	try {
 		const schedules: ScheduleInfo[] = [];
 
@@ -233,13 +239,23 @@ export const GET: RequestHandler = async () => {
 		);
 		schedules.push(...sysSchedules);
 
+		// Filter by per-env access (enterprise): caller sees only schedules
+		// for envs they can access, plus all system schedules (env null).
+		// Free edition / admin: getAccessibleEnvironmentIds returns null,
+		// no filtering applied.
+		const accessibleEnvIds = await auth.getAccessibleEnvironmentIds();
+		const filtered = accessibleEnvIds === null
+			? schedules
+			: schedules.filter(s =>
+				s.environmentId === null || accessibleEnvIds.includes(s.environmentId));
+
 		// Sort: system jobs last, then by name
-		schedules.sort((a, b) => {
+		filtered.sort((a, b) => {
 			if (a.isSystem !== b.isSystem) return a.isSystem ? 1 : -1;
 			return a.name.localeCompare(b.name);
 		});
 
-		return json({ schedules });
+		return json({ schedules: filtered });
 	} catch (error: any) {
 		console.error('Failed to get schedules:', error);
 		return json({ error: error.message }, { status: 500 });

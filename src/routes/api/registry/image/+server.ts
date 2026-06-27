@@ -2,6 +2,7 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getRegistry } from '$lib/server/db';
 import { getRegistryAuth } from '$lib/server/docker';
+import { authorize } from '$lib/server/authorize';
 
 function isDockerHub(url: string): boolean {
 	const lower = url.toLowerCase();
@@ -18,7 +19,12 @@ const MANIFEST_TYPES = [
 	'application/vnd.oci.image.index.v1+json'
 ];
 
-export const DELETE: RequestHandler = async ({ url }) => {
+export const DELETE: RequestHandler = async ({ url, cookies }) => {
+	const auth = await authorize(cookies);
+	if (auth.authEnabled && !await auth.can('settings', 'edit')) {
+		return json({ error: 'Permission denied' }, { status: 403 });
+	}
+
 	try {
 		const registryId = url.searchParams.get('registry');
 		const imageName = url.searchParams.get('image');

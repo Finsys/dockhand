@@ -11,12 +11,14 @@
  * cause breakage are rejected.
  */
 
-// Allowed characters: ASCII letters/digits + _ . - ( ) space + @
+// Allowed characters: ASCII letters/digits + _ . - ( ) space + @ '
 // First char: any allowed except space (no leading whitespace).
 // Last char: any allowed except space and dot (no trailing whitespace,
 // no trailing dot to avoid Windows-style "hidden" trailing-dot issues).
 // Length: 1..64.
-export const ENV_NAME_RE = /^(?! )[A-Za-z0-9_.\-() +@](?:[A-Za-z0-9_.\-() +@]{0,62}[A-Za-z0-9_\-)+@])?$/;
+// Apostrophe (#1228): safe — env.name only lands in path.join() and
+// array-form spawn(), never in a shell-interpolated string.
+export const ENV_NAME_RE = /^(?! )[A-Za-z0-9_.\-()' +@](?:[A-Za-z0-9_.\-()' +@]{0,62}[A-Za-z0-9_\-)'+@])?$/;
 
 export const ENV_NAME_MAX_LENGTH = 64;
 
@@ -39,7 +41,7 @@ export function validateEnvName(name: unknown): ValidationResult {
 		return {
 			ok: false,
 			reason:
-				'Name may contain letters, digits, spaces, and any of - _ . ( ) + @ (no leading/trailing whitespace, no trailing dot, no slashes, no wildcards)'
+				'Name can\'t contain slashes, wildcards, or other shell-special characters, and can\'t start with whitespace or end with whitespace or a dot'
 		};
 	}
 	return { ok: true };

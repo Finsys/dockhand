@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import * as Sidebar from '$lib/components/ui/sidebar';
@@ -23,15 +24,24 @@
 		ClipboardList,
 		Activity,
 		Timer,
-		LibraryBig
+		LibraryBig,
+		CircleArrowUp
 	} from 'lucide-svelte';
 	import { licenseStore } from '$lib/stores/license';
 	import { authStore, hasAnyAccess } from '$lib/stores/auth';
+	import { selfUpdate } from '$lib/stores/self-update';
+	import { appSettings } from '$lib/stores/settings';
 	import * as Avatar from '$lib/components/ui/avatar';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 
 	const appVersion = __APP_VERSION__ || 'unknown';
 	const buildCommit = __BUILD_COMMIT__ ?? null;
+
+	onMount(() => {
+		// One-shot Dockhand update check (#1146). Result is cached for the
+		// browser session — the Settings → About page reads the same store.
+		selfUpdate.checkOnce();
+	});
 
 	import type { Permissions } from '$lib/stores/auth';
 
@@ -111,6 +121,21 @@
 	] as const;
 </script>
 
+{#snippet versionTooltip()}
+	<div class="space-y-0.5 text-left">
+		<div class="flex items-center gap-1.5"><svg class="w-4 h-4 shrink-0" viewBox="0 0 24 18" fill="currentColor"><path d="M23.76 8.68c-.26-.18-.86-.58-1.53-.58-.24 0-.48.04-.72.12-.12-.84-.68-1.56-1.34-2.14l-.28-.22-.24.26c-.28.34-.48.72-.56 1.14-.1.42-.06.82.1 1.2-.42.22-.88.36-1.32.42-.24.04-.48.06-.72.06H.78a.77.77 0 0 0-.78.78c-.02 1.46.22 2.9.72 4.24.56 1.44 1.4 2.5 2.5 3.16 1.26.74 3.32 1.16 5.64 1.16.98 0 2-.1 2.98-.3a11.5 11.5 0 0 0 3.3-1.3 9.67 9.67 0 0 0 2.54-2.34c1.16-1.42 1.86-3.02 2.34-4.38h.2c1.22 0 1.98-.48 2.4-.9.28-.26.5-.58.64-.94l.08-.24-.28-.2zM2.74 8.84H4.7c.1 0 .18-.08.18-.18V7.02c0-.1-.08-.18-.18-.18H2.74c-.1 0-.18.08-.18.18v1.64c0 .1.08.18.18.18zm2.72 0h1.96c.1 0 .18-.08.18-.18V7.02c0-.1-.08-.18-.18-.18H5.46c-.1 0-.18.08-.18.18v1.64c0 .1.08.18.18.18zm2.76 0h1.96c.1 0 .18-.08.18-.18V7.02c0-.1-.08-.18-.18-.18H8.22c-.1 0-.18.08-.18.18v1.64c0 .1.08.18.18.18zm2.76 0h1.96c.1 0 .18-.08.18-.18V7.02c0-.1-.08-.18-.18-.18h-1.96c-.1 0-.18.08-.18.18v1.64c0 .1.08.18.18.18zM5.46 6.2h1.96c.1 0 .18-.08.18-.18V4.38c0-.1-.08-.18-.18-.18H5.46c-.1 0-.18.08-.18.18v1.64c0 .1.08.18.18.18zm2.76 0h1.96c.1 0 .18-.08.18-.18V4.38c0-.1-.08-.18-.18-.18H8.22c-.1 0-.18.08-.18.18v1.64c0 .1.08.18.18.18zm2.76 0h1.96c.1 0 .18-.08.18-.18V4.38c0-.1-.08-.18-.18-.18h-1.96c-.1 0-.18.08-.18.18v1.64c0 .1.08.18.18.18zm0-2.64h1.96c.1 0 .18-.08.18-.18V1.74c0-.1-.08-.18-.18-.18h-1.96c-.1 0-.18.08-.18.18v1.64c0 .1.08.18.18.18zm2.76 5.28h1.96c.1 0 .18-.08.18-.18V7.02c0-.1-.08-.18-.18-.18h-1.96c-.1 0-.18.08-.18.18v1.64c0 .1.08.18.18.18z"/></svg><span class="font-mono">fnsys/dockhand:{appVersion}</span></div>
+		{#if buildCommit}
+			<div>Commit: <span class="font-mono">{buildCommit.slice(0, 7)}</span></div>
+		{/if}
+		{#if $selfUpdate.updateAvailable && $selfUpdate.latestVersion}
+			<div class="flex items-center gap-1.5 pt-1 text-amber-500">
+				<CircleArrowUp class="w-3.5 h-3.5 shrink-0" />
+				Update available: <span class="font-mono">v{$selfUpdate.latestVersion}</span>
+			</div>
+		{/if}
+	</div>
+{/snippet}
+
 <Sidebar.Root collapsible="icon">
 	<Sidebar.Header class="overflow-visible flex items-center justify-center p-0">
 		<!-- Expanded state: logo + collapse button -->
@@ -161,23 +186,48 @@
 		</Sidebar.Group>
 	</Sidebar.Content>
 
-	<!-- Version (expanded sidebar only) -->
-	<div class="group-data-[state=collapsed]:hidden px-3 py-2 mt-auto text-center">
-		<Tooltip.Root>
-			<Tooltip.Trigger>
-				<span class="text-[10px] text-muted-foreground/60 hover:text-muted-foreground transition-colors cursor-default">
-					{appVersion}
-				</span>
-			</Tooltip.Trigger>
-			<Tooltip.Content side="top" align="start" sideOffset={8} class="text-xs">
-				<div class="space-y-0.5">
-					<div class="flex items-center gap-1.5"><svg class="w-4 h-4 shrink-0" viewBox="0 0 24 18" fill="currentColor"><path d="M23.76 8.68c-.26-.18-.86-.58-1.53-.58-.24 0-.48.04-.72.12-.12-.84-.68-1.56-1.34-2.14l-.28-.22-.24.26c-.28.34-.48.72-.56 1.14-.1.42-.06.82.1 1.2-.42.22-.88.36-1.32.42-.24.04-.48.06-.72.06H.78a.77.77 0 0 0-.78.78c-.02 1.46.22 2.9.72 4.24.56 1.44 1.4 2.5 2.5 3.16 1.26.74 3.32 1.16 5.64 1.16.98 0 2-.1 2.98-.3a11.5 11.5 0 0 0 3.3-1.3 9.67 9.67 0 0 0 2.54-2.34c1.16-1.42 1.86-3.02 2.34-4.38h.2c1.22 0 1.98-.48 2.4-.9.28-.26.5-.58.64-.94l.08-.24-.28-.2zM2.74 8.84H4.7c.1 0 .18-.08.18-.18V7.02c0-.1-.08-.18-.18-.18H2.74c-.1 0-.18.08-.18.18v1.64c0 .1.08.18.18.18zm2.72 0h1.96c.1 0 .18-.08.18-.18V7.02c0-.1-.08-.18-.18-.18H5.46c-.1 0-.18.08-.18.18v1.64c0 .1.08.18.18.18zm2.76 0h1.96c.1 0 .18-.08.18-.18V7.02c0-.1-.08-.18-.18-.18H8.22c-.1 0-.18.08-.18.18v1.64c0 .1.08.18.18.18zm2.76 0h1.96c.1 0 .18-.08.18-.18V7.02c0-.1-.08-.18-.18-.18h-1.96c-.1 0-.18.08-.18.18v1.64c0 .1.08.18.18.18zM5.46 6.2h1.96c.1 0 .18-.08.18-.18V4.38c0-.1-.08-.18-.18-.18H5.46c-.1 0-.18.08-.18.18v1.64c0 .1.08.18.18.18zm2.76 0h1.96c.1 0 .18-.08.18-.18V4.38c0-.1-.08-.18-.18-.18H8.22c-.1 0-.18.08-.18.18v1.64c0 .1.08.18.18.18zm2.76 0h1.96c.1 0 .18-.08.18-.18V4.38c0-.1-.08-.18-.18-.18h-1.96c-.1 0-.18.08-.18.18v1.64c0 .1.08.18.18.18zm0-2.64h1.96c.1 0 .18-.08.18-.18V1.74c0-.1-.08-.18-.18-.18h-1.96c-.1 0-.18.08-.18.18v1.64c0 .1.08.18.18.18zm2.76 5.28h1.96c.1 0 .18-.08.18-.18V7.02c0-.1-.08-.18-.18-.18h-1.96c-.1 0-.18.08-.18.18v1.64c0 .1.08.18.18.18z"/></svg><span class="font-mono">fnsys/dockhand:{appVersion}</span></div>
-					{#if buildCommit}
-						<div>Commit: <span class="font-mono">{buildCommit.slice(0, 7)}</span></div>
-					{/if}
-				</div>
-			</Tooltip.Content>
-		</Tooltip.Root>
+	<!-- Collapsed-only update indicator at the bottom. Same CSS-popover trick
+	     as the expanded version row — anchored to the icon's top edge, grows
+	     upward, opens to the right of the narrow sidebar. -->
+	{#if $selfUpdate.updateAvailable}
+		<div class="hidden group-data-[state=collapsed]:flex justify-center mt-auto pb-2 relative group/update">
+			<a
+				href="/settings?tab=about"
+				class="inline-flex p-1 rounded-md hover:bg-sidebar-accent transition-colors"
+				aria-label="Dockhand update available"
+			>
+				<CircleArrowUp class="w-4 h-4 text-amber-500 {$appSettings.highlightUpdates ? 'glow-amber' : ''}" />
+			</a>
+			<div
+				role="tooltip"
+				class="pointer-events-none absolute left-0 bottom-full mb-1 whitespace-nowrap rounded-md border bg-popover text-popover-foreground text-xs px-3 py-1.5 shadow-lg opacity-0 group-hover/update:opacity-100 transition-opacity z-50"
+			>
+				{@render versionTooltip()}
+			</div>
+		</div>
+	{/if}
+
+	<!-- Version (expanded sidebar only). Pure-CSS popover anchored to the row's
+	     top edge, so it always grows upward into available space. -->
+	<div class="group-data-[state=collapsed]:hidden px-3 py-1 mt-auto text-center relative group/version">
+		<span class="inline-flex items-center gap-1.5 text-[10px] text-muted-foreground/60 hover:text-muted-foreground transition-colors cursor-default">
+			{appVersion}
+			{#if $selfUpdate.updateAvailable}
+				<a
+					href="/settings?tab=about"
+					class="inline-flex"
+					aria-label="Dockhand update available"
+				>
+					<CircleArrowUp class="w-3 h-3 text-amber-500 {$appSettings.highlightUpdates ? 'glow-amber' : ''}" />
+				</a>
+			{/if}
+		</span>
+		<div
+			role="tooltip"
+			class="pointer-events-none absolute left-0 bottom-full mb-1 whitespace-nowrap rounded-md border bg-popover text-popover-foreground text-xs px-3 py-1.5 shadow-lg opacity-0 group-hover/version:opacity-100 transition-opacity z-50"
+		>
+			{@render versionTooltip()}
+		</div>
 	</div>
 
 	<!-- User info footer (only when auth is enabled) -->

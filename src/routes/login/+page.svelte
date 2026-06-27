@@ -12,6 +12,7 @@
 	import { appSettings } from '$lib/stores/settings';
 	import * as Alert from '$lib/components/ui/alert';
 	import { themeStore, applyTheme } from '$lib/stores/theme';
+	import { safeRedirectOrRoot } from '$lib/utils/safe-redirect';
 
 	interface AuthProvider {
 		id: string;
@@ -31,8 +32,8 @@
 	let selectedProvider = $state('local');
 	let loadingProviders = $state(true);
 
-	// Get redirect URL from query params
-	const redirectUrl = $derived($page.url.searchParams.get('redirect') || '/');
+	// Get redirect URL from query params (validated path-relative only)
+	const redirectUrl = $derived(safeRedirectOrRoot($page.url.searchParams.get('redirect')));
 
 	// Get error from query params (from OIDC callback)
 	const urlError = $derived($page.url.searchParams.get('error'));

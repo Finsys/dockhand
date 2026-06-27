@@ -1305,7 +1305,7 @@
 							title="View last execution logs"
 							class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
 						>
-							<FileText class="w-3 h-3 text-muted-foreground hover:text-blue-500" />
+							<FileText class="grid-action-icon grid-action-logs text-muted-foreground hover:text-blue-500" />
 						</button>
 					{/if}
 					{#if canEditSchedules}
@@ -1316,9 +1316,9 @@
 							class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
 						>
 							{#if schedule.enabled}
-								<Pause class="w-3 h-3 text-muted-foreground hover:text-amber-500" />
+								<Pause class="grid-action-icon grid-action-pause text-muted-foreground hover:text-amber-500" />
 							{:else}
-								<PlayCircle class="w-3 h-3 text-muted-foreground hover:text-green-500" />
+								<PlayCircle class="grid-action-icon grid-action-start text-muted-foreground hover:text-green-500" />
 							{/if}
 						</button>
 					{/if}
@@ -1329,7 +1329,7 @@
 							title="Run now"
 							class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
 						>
-							<Play class="w-3 h-3 text-muted-foreground hover:text-green-500" />
+							<Play class="grid-action-icon grid-action-start text-muted-foreground hover:text-green-500" />
 						</button>
 					{/if}
 					{#if canEditSchedules && !schedule.isSystem}
@@ -1344,7 +1344,7 @@
 							onOpenChange={(open) => confirmDeleteId = open ? scheduleKey : null}
 						>
 							{#snippet children({ open })}
-								<Trash2 class="w-3 h-3 {open ? 'text-destructive' : 'text-muted-foreground hover:text-red-500'}" />
+								<Trash2 class="grid-action-icon grid-action-delete {open ? 'text-destructive' : 'text-muted-foreground hover:text-red-500'}" />
 							{/snippet}
 						</ConfirmPopover>
 					{/if}
@@ -1435,7 +1435,7 @@
 													title="View logs"
 													class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
 												>
-													<FileText class="w-3 h-3 text-muted-foreground hover:text-blue-500" />
+													<FileText class="grid-action-icon grid-action-logs text-muted-foreground hover:text-blue-500" />
 												</button>
 												{#if canEditSchedules}
 													<button

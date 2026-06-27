@@ -128,6 +128,22 @@ export function isSystemContainer(imageName: string): SystemContainerType | null
 }
 
 /**
+ * Podman creates a hidden "pod-infra" container for every pod it runs (#1221).
+ * The image (`localhost/podman-pause`) is generated locally and never published
+ * to any registry, so update checks always fail noisily. The label is the
+ * authoritative signal — but Podman may set Config.Image empty for these
+ * containers, so the name fallback catches that too.
+ */
+export function isPodmanInfraContainer(
+	imageName: string | undefined,
+	labels: Record<string, string> | undefined
+): boolean {
+	if (labels?.['io.podman.annotations.infra'] === 'true') return true;
+	if (imageName && /podman-pause/i.test(imageName)) return true;
+	return false;
+}
+
+/**
  * Combine multiple scan summaries by taking the maximum of each severity level.
  */
 export function combineScanSummaries(results: { summary: VulnerabilitySeverity }[]): VulnerabilitySeverity {

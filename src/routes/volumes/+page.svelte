@@ -599,7 +599,7 @@
 							title="View details"
 							class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
 						>
-							<Eye class="w-3 h-3 text-muted-foreground hover:text-foreground" />
+							<Eye class="grid-action-icon grid-action-info text-muted-foreground hover:text-foreground" />
 						</button>
 						<button
 							type="button"
@@ -607,7 +607,7 @@
 							title="Browse files"
 							class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
 						>
-							<FolderOpen class="w-3 h-3 text-muted-foreground hover:text-foreground" />
+							<FolderOpen class="grid-action-icon grid-action-info text-muted-foreground hover:text-foreground" />
 						</button>
 						<button
 							type="button"
@@ -616,7 +616,7 @@
 							class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer {exportingVolume === volume.name ? 'animate-pulse' : ''}"
 							disabled={exportingVolume === volume.name}
 						>
-							<Download class="w-3 h-3 text-muted-foreground hover:text-foreground" />
+							<Download class="grid-action-icon grid-action-transfer text-muted-foreground hover:text-foreground" />
 						</button>
 						{/if}
 						{#if $canAccess('volumes', 'create')}
@@ -626,7 +626,7 @@
 							title="Clone volume"
 							class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
 						>
-							<Stamp class="w-3 h-3 text-muted-foreground hover:text-foreground" />
+							<Stamp class="grid-action-icon grid-action-edit text-muted-foreground hover:text-foreground" />
 						</button>
 						{/if}
 						{#if $canAccess('volumes', 'remove')}
@@ -641,7 +641,7 @@
 								onOpenChange={(open) => confirmDeleteName = open ? volume.name : null}
 							>
 								{#snippet children({ open })}
-									<Trash2 class="w-3 h-3 {open ? 'text-destructive' : 'text-muted-foreground hover:text-destructive'}" />
+									<Trash2 class="grid-action-icon grid-action-delete {open ? 'text-destructive' : 'text-muted-foreground hover:text-destructive'}" />
 								{/snippet}
 							</ConfirmPopover>
 							{#if deleteError?.name === volume.name}

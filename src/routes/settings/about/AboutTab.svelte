@@ -8,6 +8,7 @@
 	import * as Tabs from '$lib/components/ui/tabs';
 	import { onMount, onDestroy } from 'svelte';
 	import { licenseStore } from '$lib/stores/license';
+	import { selfUpdate as selfUpdateStore } from '$lib/stores/self-update';
 	import { formatBytes } from '$lib/utils/format';
 	import { browser } from '$app/environment';
 	import LicenseModal from './LicenseModal.svelte';
@@ -307,6 +308,10 @@
 
 			updateAvailable = data.updateAvailable;
 			updateCheckDone = true;
+
+			// Mirror into the shared store so the sidebar indicator stays
+			// in sync with the result of a manual "Check now" (#1146).
+			selfUpdateStore.setFromResponse(data);
 
 			if (data.updateAvailable) {
 				updateInfo = {

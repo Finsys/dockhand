@@ -2091,7 +2091,7 @@
 									onOpenChange={(open) => confirmUpdateId = open ? container.id : null}
 								>
 									{#snippet children({ open })}
-										<CircleArrowUp class="w-3 h-3 text-amber-500 {$appSettings.highlightUpdates ? 'glow-amber' : ''}" />
+										<CircleArrowUp class="grid-action-icon text-amber-500 {$appSettings.highlightUpdates ? 'glow-amber' : ''}" />
 									{/snippet}
 								</ConfirmPopover>
 							{/if}
@@ -2112,7 +2112,7 @@
 									title="Open logs"
 									class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
 								>
-									<FileText class="w-3 h-3 text-muted-foreground hover:text-foreground" />
+									<FileText class="grid-action-icon grid-action-logs text-muted-foreground hover:text-foreground" />
 								</button>
 							{/if}
 							{/if}
@@ -2135,7 +2135,7 @@
 										onclick={(e: MouseEvent) => e.stopPropagation()}
 										class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
 									>
-										<Terminal class="w-3 h-3 text-muted-foreground hover:text-foreground" />
+										<Terminal class="grid-action-icon grid-action-terminal text-muted-foreground hover:text-foreground" />
 									</Popover.Trigger>
 									<Popover.Content class="w-56 p-0" align="end" sideOffset={5}>
 										<div class="px-3 py-2 border-b bg-muted/50">
@@ -2244,7 +2244,7 @@
 								title="Browse files"
 								class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
 							>
-								<FolderOpen class="w-3 h-3 text-muted-foreground hover:text-foreground" />
+								<FolderOpen class="grid-action-icon grid-action-info text-muted-foreground hover:text-foreground" />
 							</button>
 							{/if}
 							<button
@@ -2253,7 +2253,7 @@
 								title="View details"
 								class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
 							>
-								<Eye class="w-3 h-3 text-muted-foreground hover:text-foreground" />
+								<Eye class="grid-action-icon grid-action-info text-muted-foreground hover:text-foreground" />
 							</button>
 							{#if $canAccess('containers', 'create')}
 							<button
@@ -2262,7 +2262,7 @@
 								title="Edit"
 								class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
 							>
-								<Pencil class="w-3 h-3 text-muted-foreground hover:text-foreground" />
+								<Pencil class="grid-action-icon grid-action-edit text-muted-foreground hover:text-foreground" />
 							</button>
 							{/if}
 							{#if !container.systemContainer}
@@ -2274,7 +2274,7 @@
 									title="Unpause"
 									class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
 								>
-									<Play class="w-3 h-3 text-muted-foreground hover:text-green-500" />
+									<Play class="grid-action-icon grid-action-start text-muted-foreground hover:text-green-500" />
 								</button>
 								{/if}
 							{:else if container.state !== 'running' && container.state !== 'restarting'}
@@ -2285,7 +2285,7 @@
 									title="Start"
 									class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
 								>
-									<Play class="w-3 h-3 text-muted-foreground hover:text-green-500" />
+									<Play class="grid-action-icon grid-action-start text-muted-foreground hover:text-green-500" />
 								</button>
 								{/if}
 							{/if}
@@ -2301,7 +2301,7 @@
 								onOpenChange={(open) => confirmRestartId = open ? container.id : null}
 							>
 								{#snippet children({ open })}
-									<RotateCw class="w-3 h-3 {open ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'} {restartingId === container.id ? 'animate-spin text-foreground' : ''}" />
+									<RotateCw class="grid-action-icon grid-action-restart {open ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'} {restartingId === container.id ? 'animate-spin text-foreground' : ''}" />
 								{/snippet}
 							</ConfirmPopover>
 							{/if}
@@ -2313,7 +2313,7 @@
 									title="Pause"
 									class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
 								>
-									<Pause class="w-3 h-3 text-muted-foreground hover:text-yellow-500" />
+									<Pause class="grid-action-icon grid-action-pause text-muted-foreground hover:text-yellow-500" />
 								</button>
 								{/if}
 								{#if $canAccess('containers', 'stop')}
@@ -2327,7 +2327,7 @@
 									onOpenChange={(open) => confirmStopId = open ? container.id : null}
 								>
 									{#snippet children({ open })}
-										<Square class="w-3 h-3 {open ? 'text-destructive' : 'text-muted-foreground hover:text-destructive'} {stoppingId === container.id ? 'animate-pulse text-destructive' : ''}" />
+										<Square class="grid-action-icon grid-action-stop {open ? 'text-destructive' : 'text-muted-foreground hover:text-destructive'} {stoppingId === container.id ? 'animate-pulse text-destructive' : ''}" />
 									{/snippet}
 								</ConfirmPopover>
 								{/if}
@@ -2344,7 +2344,7 @@
 								onOpenChange={(open) => confirmDeleteId = open ? container.id : null}
 							>
 								{#snippet children({ open })}
-									<Trash2 class="w-3 h-3 {open ? 'text-destructive' : 'text-muted-foreground hover:text-destructive'}" />
+									<Trash2 class="grid-action-icon grid-action-delete {open ? 'text-destructive' : 'text-muted-foreground hover:text-destructive'}" />
 								{/snippet}
 							</ConfirmPopover>
 							{/if}

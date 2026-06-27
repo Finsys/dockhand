@@ -1,5 +1,27 @@
 [
   {
+    "version": "1.0.36",
+    "date": "2026-06-27",
+    "changes": [
+      { "type": "feature", "text": "sidebar shows an amber update indicator when a newer Dockhand image is available (#1146)" },
+      { "type": "fix", "text": "Tag image modal too narrow for images identified only by SHA (#1205)" },
+      { "type": "fix", "text": "self-hosted ntfy: accept raw `tk_...` access tokens in `?auth=` (#1209)" },
+      { "type": "fix", "text": "dashboard: a single failed DB stats query no longer poisons the whole environment tile (#1210)" },
+      { "type": "fix", "text": "UI dates and times now honor the configured default timezone instead of the browser's timezone (#1183)" },
+      { "type": "fix", "text": "add missing `reset-mfa.sh` emergency script referenced by the manual (#1214)" },
+      { "type": "fix", "text": "registry browser: copy between registries no longer duplicates the host (#1220)" },
+      { "type": "improvement", "text": "published image carries standard OCI annotations (source, url, title, description, vendor, licenses) (#1217)" },
+      { "type": "feature", "text": "scanner: configurable network mode and DNS servers for vulnerability scans (#1219)" },
+      { "type": "feature", "text": "template tiles now show a `Project` link that opens the upstream project page (#1211)" },
+      { "type": "improvement", "text": "cron picker: hour shows just `HH` (was `HH:00`), minute granularity bumped from 15 to 5 (#1198)" },
+      { "type": "feature", "text": "grid buttons: configurable size and optional semantic colors (#1072)" },
+      { "type": "fix", "text": "copy buttons (git deploy logs, API tokens) now work over plain HTTP (#1222)" },
+      { "type": "fix", "text": "Podman pod-infra containers no longer trigger update-check warnings (#1221)" },
+      { "type": "fix", "text": "terminal exec works even when the browser sends a cookie with stray `%` characters (#1224)" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.36"
+  },
+  {
     "version": "1.0.35",
     "date": "2026-06-19",
     "changes": [

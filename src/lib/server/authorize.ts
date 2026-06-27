@@ -36,6 +36,7 @@
  */
 
 import type { Cookies } from '@sveltejs/kit';
+import { json } from '@sveltejs/kit';
 import type { Permissions } from './db';
 import { getUserAccessibleEnvironments, userCanAccessEnvironment, userHasAdminRole } from './db';
 import { validateSession, isAuthEnabled, checkPermission, type AuthenticatedUser } from './auth';
@@ -105,6 +106,27 @@ export interface AuthorizationContext {
 	 * - (User is admin OR has audit_logs view permission)
 	 */
 	canViewAuditLog: () => Promise<boolean>;
+
+	/**
+	 * Gate handler: require a permission. Returns a 403 Response on denial,
+	 * null when allowed. Use at the top of a handler with `??`-chaining for
+	 * one-line auth/env checks:
+	 *
+	 *   const denied = (await auth.requirePermission('schedules', 'edit'))
+	 *               ?? (await auth.requireEnvAccess(envId));
+	 *   if (denied) return denied;
+	 *
+	 * No-op when authEnabled is false.
+	 */
+	requirePermission: (resource: keyof Permissions, action: string, environmentId?: number) => Promise<Response | null>;
+
+	/**
+	 * Gate handler: require access to the given environment. Returns a 403
+	 * Response on denial, null when allowed. Pass null/undefined to no-op
+	 * (e.g. system-scoped operations that don't target an env). No-op when
+	 * authEnabled is false.
+	 */
+	requireEnvAccess: (environmentId: number | null | undefined) => Promise<Response | null>;
 }
 
 /**
@@ -232,6 +254,25 @@ export async function authorize(cookies: Cookies): Promise<AuthorizationContext>
 
 			// Check for audit_logs permission
 			return checkPermission(user, 'audit_logs' as keyof Permissions, 'view');
+		},
+
+		async requirePermission(
+			resource: keyof Permissions,
+			action: string,
+			environmentId?: number
+		): Promise<Response | null> {
+			if (!authEnabled) return null;
+			return (await ctx.can(resource, action, environmentId))
+				? null
+				: json({ error: 'Permission denied' }, { status: 403 });
+		},
+
+		async requireEnvAccess(environmentId: number | null | undefined): Promise<Response | null> {
+			if (!authEnabled) return null;
+			if (environmentId === null || environmentId === undefined) return null;
+			return (await ctx.canAccessEnvironment(environmentId))
+				? null
+				: json({ error: 'Access denied to this environment' }, { status: 403 });
 		}
 	};
 

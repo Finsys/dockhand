@@ -11,6 +11,17 @@ import { writable, get } from 'svelte/store';
 import { getFont, getMonospaceFont, type FontMeta } from '$lib/themes';
 
 export type FontSize = 'xsmall' | 'small' | 'normal' | 'medium' | 'large' | 'xlarge';
+export type ActionIconSize = 'small' | 'normal' | 'large' | 'xlarge';
+
+// Pixel values for each action icon size (#1072).
+// Normal = 12px matches the historical Tailwind w-3 default — picking
+// Normal is a no-op for existing users.
+export const ACTION_ICON_SIZE_PX: Record<ActionIconSize, number> = {
+	small: 10,
+	normal: 12,
+	large: 16,
+	xlarge: 20
+};
 
 export interface ThemePreferences {
 	lightTheme: string;
@@ -21,6 +32,8 @@ export interface ThemePreferences {
 	terminalFont: string;
 	editorFont: string;
 	animateIcons: boolean;
+	coloredActionButtons: boolean;
+	actionIconSize: ActionIconSize;
 }
 
 const STORAGE_KEY = 'dockhand-theme';
@@ -33,7 +46,9 @@ const defaultPrefs: ThemePreferences = {
 	gridFontSize: 'normal',
 	terminalFont: 'system-mono',
 	editorFont: 'system-mono',
-	animateIcons: true
+	animateIcons: true,
+	coloredActionButtons: false,
+	actionIconSize: 'normal'
 };
 
 // Font size scale mapping
@@ -107,7 +122,10 @@ function createThemeStore() {
 						animateIcons:
 							data.animateIcons === undefined && data.animate_icons === undefined
 								? true
-								: !!(data.animateIcons ?? data.animate_icons)
+								: !!(data.animateIcons ?? data.animate_icons),
+						// Default OFF (#1072)
+						coloredActionButtons: !!(data.coloredActionButtons ?? data.colored_action_buttons ?? false),
+						actionIconSize: (data.actionIconSize || data.action_icon_size || 'normal') as ActionIconSize
 					};
 					set(prefs);
 					saveToStorage(prefs);
@@ -208,6 +226,17 @@ export function applyTheme(prefs: ThemePreferences) {
 
 	// Apply icon animation toggle (#1169) — single class on <html> drives a CSS rule in app.css
 	document.documentElement.classList.toggle('no-icon-animation', !prefs.animateIcons);
+
+	// Apply colored grid action buttons + action icon size (#1072)
+	applyActionButtonStyles(prefs.coloredActionButtons, prefs.actionIconSize);
+}
+
+// Apply colored-action class and action icon size CSS var
+function applyActionButtonStyles(colored: boolean, size: ActionIconSize) {
+	if (typeof document === 'undefined') return;
+	document.documentElement.classList.toggle('colored-actions', colored);
+	const px = ACTION_ICON_SIZE_PX[size] ?? ACTION_ICON_SIZE_PX.small;
+	document.documentElement.style.setProperty('--action-icon-size', `${px}px`);
 }
 
 // Apply font to document

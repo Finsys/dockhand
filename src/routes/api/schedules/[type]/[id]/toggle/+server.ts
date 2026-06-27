@@ -11,9 +11,9 @@ import { authorize } from '$lib/server/authorize';
 
 export const POST: RequestHandler = async ({ params, cookies }) => {
 	const auth = await authorize(cookies);
-	if (auth.authEnabled && !await auth.can('schedules', 'edit')) {
-		return json({ error: 'Permission denied' }, { status: 403 });
-	}
+
+	const permDenied = await auth.requirePermission('schedules', 'edit');
+	if (permDenied) return permDenied;
 
 	try {
 		const { type, id } = params;
@@ -28,6 +28,8 @@ export const POST: RequestHandler = async ({ params, cookies }) => {
 			if (!setting) {
 				return json({ error: 'Schedule not found' }, { status: 404 });
 			}
+			const envDenied = await auth.requireEnvAccess(setting.environmentId);
+			if (envDenied) return envDenied;
 
 			const newEnabled = !setting.enabled;
 			await updateAutoUpdateSettingById(scheduleId, {
@@ -47,6 +49,8 @@ export const POST: RequestHandler = async ({ params, cookies }) => {
 			if (!stack) {
 				return json({ error: 'Schedule not found' }, { status: 404 });
 			}
+			const envDenied = await auth.requireEnvAccess(stack.environmentId);
+			if (envDenied) return envDenied;
 
 			const newEnabled = !stack.autoUpdate;
 			await updateGitStack(scheduleId, {
@@ -63,6 +67,8 @@ export const POST: RequestHandler = async ({ params, cookies }) => {
 			return json({ success: true, enabled: newEnabled });
 		} else if (type === 'env_update_check') {
 			// scheduleId is environmentId for env update check
+			const envDenied = await auth.requireEnvAccess(scheduleId);
+			if (envDenied) return envDenied;
 			const config = await getEnvUpdateCheckSettings(scheduleId);
 			if (!config) {
 				return json({ error: 'Schedule not found' }, { status: 404 });
@@ -84,6 +90,8 @@ export const POST: RequestHandler = async ({ params, cookies }) => {
 			return json({ success: true, enabled: newEnabled });
 		} else if (type === 'image_prune') {
 			// scheduleId is environmentId for image prune
+			const envDenied = await auth.requireEnvAccess(scheduleId);
+			if (envDenied) return envDenied;
 			const config = await getImagePruneSettings(scheduleId);
 			if (!config) {
 				return json({ error: 'Schedule not found' }, { status: 404 });

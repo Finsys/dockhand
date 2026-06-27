@@ -906,7 +906,7 @@
 				{:else if column.id === 'actions'}
 					<div class="flex items-center justify-end">
 						<Button variant="ghost" size="icon" class="h-6 w-6" onclick={(e) => { e.stopPropagation(); showDetails(log); }}>
-							<Info class="w-3.5 h-3.5" />
+							<Info class="grid-action-icon grid-action-info" />
 						</Button>
 					</div>
 				{/if}

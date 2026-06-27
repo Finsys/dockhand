@@ -46,12 +46,11 @@ function cacheKey(rawToken: string): string {
 	return createHash('sha256').update(rawToken).digest('hex');
 }
 
-// Pre-computed dummy hash for timing protection on invalid prefixes
 let dummyHash: string | null = null;
 
 async function getDummyHash(): Promise<string> {
 	if (!dummyHash) {
-		dummyHash = await hashPassword('dh_dummy_token_for_timing_protection');
+		dummyHash = await hashPassword('dh_init_seed');
 	}
 	return dummyHash;
 }

@@ -258,11 +258,13 @@ export const GET: RequestHandler = async ({ cookies, url }) => {
 				envStats.stacks.partial = stacks.filter((s: any) => s.status === 'partial').length;
 				envStats.stacks.stopped = stacks.filter((s: any) => s.status === 'stopped').length;
 
-				// Get latest metrics, event stats, and pending updates in parallel
+				// Get latest metrics, event stats, and pending updates in parallel.
+				// Each call has its own catch so one failed DB query (e.g. a corrupt
+				// container_events index, #1210) doesn't poison the whole tile.
 				const [latestMetrics, eventStats, pendingUpdates] = await Promise.all([
-					getLatestHostMetrics(env.id),
-					getContainerEventStats(env.id),
-					getPendingContainerUpdates(env.id)
+					getLatestHostMetrics(env.id).catch(() => null),
+					getContainerEventStats(env.id).catch(() => ({ total: 0, today: 0, byAction: {} })),
+					getPendingContainerUpdates(env.id).catch(() => [])
 				]);
 
 				if (latestMetrics) {

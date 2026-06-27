@@ -84,7 +84,10 @@
 			const urlObj = new URL(sourceRegistry.url);
 			// Include both host and path (e.g., registry.example.com/organization)
 			const hostWithPath = urlObj.host + (urlObj.pathname !== '/' ? urlObj.pathname.replace(/\/$/, '') : '');
-			return `${hostWithPath}/${imageWithTag}`;
+			// Caller (e.g. registry browser) may already pass an image name with the host prefixed (#1220).
+			return imageWithTag.startsWith(hostWithPath + '/')
+				? imageWithTag
+				: `${hostWithPath}/${imageWithTag}`;
 		}
 		return imageWithTag;
 	});

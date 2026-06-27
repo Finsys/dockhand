@@ -2,6 +2,7 @@ import { json, redirect } from '@sveltejs/kit';
 import type { RequestHandler } from '@sveltejs/kit';
 import { buildOidcAuthorizationUrl, isAuthEnabled } from '$lib/server/auth';
 import { getOidcConfig } from '$lib/server/db';
+import { safeRedirectOrRoot } from '$lib/utils/safe-redirect';
 
 // GET /api/auth/oidc/[id]/initiate - Start OIDC authentication flow
 export const GET: RequestHandler = async ({ params, url }) => {
@@ -15,8 +16,8 @@ export const GET: RequestHandler = async ({ params, url }) => {
 		return json({ error: 'Invalid configuration ID' }, { status: 400 });
 	}
 
-	// Get redirect URL from query params
-	const redirectUrl = url.searchParams.get('redirect') || '/';
+	// Get redirect URL from query params (validated path-relative only)
+	const redirectUrl = safeRedirectOrRoot(url.searchParams.get('redirect'));
 
 	try {
 		const config = await getOidcConfig(id);
@@ -56,7 +57,7 @@ export const POST: RequestHandler = async ({ params, request }) => {
 
 	try {
 		const body = await request.json().catch(() => ({}));
-		const redirectUrl = body.redirect || '/';
+		const redirectUrl = safeRedirectOrRoot(body.redirect);
 
 		const config = await getOidcConfig(id);
 		if (!config || !config.enabled) {

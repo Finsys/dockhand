@@ -670,7 +670,7 @@
 							title="View details"
 							class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
 						>
-							<Eye class="w-3 h-3 text-muted-foreground hover:text-foreground" />
+							<Eye class="grid-action-icon grid-action-info text-muted-foreground hover:text-foreground" />
 						</button>
 						{/if}
 						{#if !isProtected && $canAccess('networks', 'connect')}
@@ -680,7 +680,7 @@
 							title="Connect container"
 							class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
 						>
-							<Link class="w-3 h-3 text-muted-foreground hover:text-green-600" />
+							<Link class="grid-action-icon grid-action-start text-muted-foreground hover:text-green-600" />
 						</button>
 						{/if}
 						<button
@@ -689,7 +689,7 @@
 							title="Copy network ID"
 							class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
 						>
-							<Copy class="w-3 h-3 text-muted-foreground hover:text-foreground" />
+							<Copy class="grid-action-icon grid-action-info text-muted-foreground hover:text-foreground" />
 						</button>
 						{#if !isProtected && $canAccess('networks', 'create')}
 						<button
@@ -698,7 +698,7 @@
 							title="Duplicate network"
 							class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
 						>
-							<CopyPlus class="w-3 h-3 text-muted-foreground hover:text-foreground" />
+							<CopyPlus class="grid-action-icon grid-action-edit text-muted-foreground hover:text-foreground" />
 						</button>
 						{/if}
 						{#if !isProtected && $canAccess('networks', 'remove')}
@@ -712,7 +712,7 @@
 							onOpenChange={(open) => confirmDeleteId = open ? network.id : null}
 						>
 							{#snippet children({ open })}
-								<Trash2 class="w-3 h-3 {open ? 'text-destructive' : 'text-muted-foreground hover:text-destructive'}" />
+								<Trash2 class="grid-action-icon grid-action-delete {open ? 'text-destructive' : 'text-muted-foreground hover:text-destructive'}" />
 							{/snippet}
 						</ConfirmPopover>
 						{/if}

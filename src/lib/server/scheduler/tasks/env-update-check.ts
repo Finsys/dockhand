@@ -30,7 +30,7 @@ import {
 } from '../../docker';
 import { sendEventNotification } from '../../notifications';
 import { getScannerSettings, scanImage, type VulnerabilitySeverity } from '../../scanner';
-import { parseImageNameAndTag, shouldBlockUpdate, combineScanSummaries, isSystemContainer } from './update-utils';
+import { parseImageNameAndTag, shouldBlockUpdate, combineScanSummaries, isSystemContainer, isPodmanInfraContainer } from './update-utils';
 import { isUpdateDisabledByLabel, isHiddenByLabel } from '../../container-labels';
 import { recreateContainer } from './container-update';
 
@@ -108,9 +108,12 @@ export async function runEnvUpdateCheckJob(
 		// Get all containers in this environment, excluding ones hidden via
 		// dockhand.hidden=true (consistent with manual check-updates, #1083).
 		const allContainers = await listContainers(true, environmentId);
-		const containers = allContainers.filter(c => !isHiddenByLabel(c.labels));
+		// Skip hidden + Podman pod-infra (#1083, #1221)
+		const containers = allContainers.filter(
+			(c) => !isHiddenByLabel(c.labels) && !isPodmanInfraContainer(c.image, c.labels)
+		);
 		const hiddenCount = allContainers.length - containers.length;
-		await log(`Found ${containers.length} containers${hiddenCount ? ` (${hiddenCount} hidden by label)` : ''}`);
+		await log(`Found ${containers.length} containers${hiddenCount ? ` (${hiddenCount} hidden/infra)` : ''}`);
 
 		const updatesAvailable: UpdateInfo[] = [];
 		let checkedCount = 0;

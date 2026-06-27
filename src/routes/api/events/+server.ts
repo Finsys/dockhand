@@ -1,10 +1,19 @@
 import type { RequestHandler } from './$types';
 import { getDockerEvents, EnvironmentNotFoundError } from '$lib/server/docker';
 import { getEnvironment } from '$lib/server/db';
+import { authorize } from '$lib/server/authorize';
 
-export const GET: RequestHandler = async ({ url }) => {
+export const GET: RequestHandler = async ({ url, cookies }) => {
+	const auth = await authorize(cookies);
+
+	const permDenied = await auth.requirePermission('activity', 'view');
+	if (permDenied) return permDenied;
+
 	const envId = url.searchParams.get('env');
 	const envIdNum = envId ? parseInt(envId) : undefined;
+
+	const envDenied = await auth.requireEnvAccess(envIdNum);
+	if (envDenied) return envDenied;
 
 	// Early return if no environment specified
 	if (!envIdNum) {

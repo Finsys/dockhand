@@ -9,11 +9,19 @@ import {
 import { registerSchedule, unregisterSchedule } from '$lib/server/scheduler';
 import { authorize } from '$lib/server/authorize';
 
-export const GET: RequestHandler = async ({ params, url }) => {
+export const GET: RequestHandler = async ({ params, url, cookies }) => {
+	const auth = await authorize(cookies);
+
+	const permDenied = await auth.requirePermission('schedules', 'view');
+	if (permDenied) return permDenied;
+
 	try {
 		const containerName = decodeURIComponent(params.containerName);
 		const envIdParam = url.searchParams.get('env');
 		const envId = envIdParam ? parseInt(envIdParam) : undefined;
+
+		const envDenied = await auth.requireEnvAccess(envId);
+		if (envDenied) return envDenied;
 
 		const setting = await getAutoUpdateSetting(containerName, envId);
 
@@ -41,14 +49,17 @@ export const GET: RequestHandler = async ({ params, url }) => {
 
 export const POST: RequestHandler = async ({ params, url, request, cookies }) => {
 	const auth = await authorize(cookies);
-	if (auth.authEnabled && !await auth.can('schedules', 'edit')) {
-		return json({ error: 'Permission denied' }, { status: 403 });
-	}
+
+	const permDenied = await auth.requirePermission('schedules', 'edit');
+	if (permDenied) return permDenied;
 
 	try {
 		const containerName = decodeURIComponent(params.containerName);
 		const envIdParam = url.searchParams.get('env');
 		const envId = envIdParam ? parseInt(envIdParam) : undefined;
+
+		const envDenied = await auth.requireEnvAccess(envId);
+		if (envDenied) return envDenied;
 
 		const body = await request.json();
 		// Accept both camelCase and snake_case for backward compatibility
@@ -109,14 +120,17 @@ export const POST: RequestHandler = async ({ params, url, request, cookies }) =>
 
 export const DELETE: RequestHandler = async ({ params, url, cookies }) => {
 	const auth = await authorize(cookies);
-	if (auth.authEnabled && !await auth.can('schedules', 'edit')) {
-		return json({ error: 'Permission denied' }, { status: 403 });
-	}
+
+	const permDenied = await auth.requirePermission('schedules', 'edit');
+	if (permDenied) return permDenied;
 
 	try {
 		const containerName = decodeURIComponent(params.containerName);
 		const envIdParam = url.searchParams.get('env');
 		const envId = envIdParam ? parseInt(envIdParam) : undefined;
+
+		const envDenied = await auth.requireEnvAccess(envId);
+		if (envDenied) return envDenied;
 
 		// Get the setting ID before deleting
 		const setting = await getAutoUpdateSetting(containerName, envId);

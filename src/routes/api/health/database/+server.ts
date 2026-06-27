@@ -1,38 +1,43 @@
 /**
  * Database Health Check Endpoint
  *
- * Returns detailed information about the database schema state,
- * including migration status, table existence, and connection info.
+ * Public endpoint suitable for external monitoring. The public payload reports
+ * enough detail to detect schema drift and table loss without exposing
+ * connection details (host, port, db name, user) or the running migration tag.
+ *
+ * Authenticated callers with settings:view get the full payload — connection
+ * string (password masked) and schema version included — which is useful for
+ * operators debugging from the admin UI.
  *
  * GET /api/health/database
- *
- * Response:
- * {
- *   healthy: boolean,
- *   database: 'sqlite' | 'postgresql',
- *   connection: string,
- *   migrationsTable: boolean,
- *   appliedMigrations: number,
- *   pendingMigrations: number,
- *   schemaVersion: string | null,
- *   tables: {
- *     expected: number,
- *     found: number,
- *     missing: string[]
- *   },
- *   timestamp: string
- * }
  */
 
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { checkSchemaHealth } from '$lib/server/db/drizzle';
+import { authorize } from '$lib/server/authorize';
 
-export const GET: RequestHandler = async () => {
+export const GET: RequestHandler = async ({ cookies }) => {
 	try {
 		const health = await checkSchemaHealth();
 
-		return json(health, {
+		const auth = await authorize(cookies);
+		const showFullDetail = !auth.authEnabled
+			|| (auth.isAuthenticated && await auth.can('settings', 'view'));
+
+		const payload = showFullDetail
+			? health
+			: {
+				healthy: health.healthy,
+				database: health.database,
+				migrationsTable: health.migrationsTable,
+				appliedMigrations: health.appliedMigrations,
+				pendingMigrations: health.pendingMigrations,
+				tables: health.tables,
+				timestamp: health.timestamp
+			};
+
+		return json(payload, {
 			status: health.healthy ? 200 : 503,
 			headers: {
 				'Cache-Control': 'no-cache, no-store, must-revalidate'

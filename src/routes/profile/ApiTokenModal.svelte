@@ -6,6 +6,7 @@
 	import * as Select from '$lib/components/ui/select';
 	import * as Alert from '$lib/components/ui/alert';
 	import { KeyRound, Copy, Check, TriangleAlert } from 'lucide-svelte';
+	import { copyToClipboard } from '$lib/utils/clipboard';
 
 	let {
 		open = $bindable(false),
@@ -100,13 +101,10 @@
 	}
 
 	async function copyToken() {
-		try {
-			await navigator.clipboard.writeText(createdToken);
-			copied = true;
-			setTimeout(() => copied = false, 2000);
-		} catch {
-			// Fallback: select the input text
-		}
+		const ok = await copyToClipboard(createdToken);
+		if (!ok) return;
+		copied = true;
+		setTimeout(() => copied = false, 2000);
 	}
 
 	function handleClose() {

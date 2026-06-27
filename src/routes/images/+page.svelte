@@ -589,14 +589,14 @@
 	}
 
 	async function tagImage() {
-		if (!tagNewRepo.trim()) return;
+		if (!tagNewRepo.trim() || !tagNewTag.trim()) return;
 		tagging = true;
-		const newTag = `${tagNewRepo.trim()}:${tagNewTag.trim() || 'latest'}`;
+		const newTag = `${tagNewRepo.trim()}:${tagNewTag.trim()}`;
 		try {
 			const response = await fetch(appendEnvParam(`/api/images/${encodeURIComponent(tagImageId)}/tag`, envId), {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ repo: tagNewRepo.trim(), tag: tagNewTag.trim() || 'latest' })
+				body: JSON.stringify({ repo: tagNewRepo.trim(), tag: tagNewTag.trim() })
 			});
 			if (response.ok) {
 				toast.success(`Tagged as ${newTag}`);
@@ -1007,7 +1007,7 @@
 								title="Run container"
 								class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
 							>
-								<Play class="w-3.5 h-3.5 text-muted-foreground hover:text-green-600" />
+								<Play class="grid-action-icon grid-action-start text-muted-foreground hover:text-green-600" />
 							</button>
 							{/if}
 							{#if scannerEnabled && $canAccess('images', 'inspect')}
@@ -1017,7 +1017,7 @@
 								title="Scan for vulnerabilities"
 								class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
 							>
-								<ShieldCheck class="w-3.5 h-3.5 text-muted-foreground hover:text-blue-500" />
+								<ShieldCheck class="grid-action-icon grid-action-info text-muted-foreground hover:text-blue-500" />
 							</button>
 							{/if}
 							{#if $canAccess('images', 'push')}
@@ -1027,7 +1027,7 @@
 								title="Push to registry"
 								class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
 							>
-								<Upload class="w-3.5 h-3.5 text-muted-foreground hover:text-foreground" />
+								<Upload class="grid-action-icon grid-action-transfer text-muted-foreground hover:text-foreground" />
 							</button>
 							{/if}
 						</div>
@@ -1092,7 +1092,7 @@
 										title="View layers"
 										class="p-1 rounded hover:bg-muted transition-colors cursor-pointer"
 									>
-										<Layers class="w-3 h-3 text-muted-foreground hover:text-foreground" />
+										<Layers class="grid-action-icon grid-action-info text-muted-foreground hover:text-foreground" />
 									</button>
 									{/if}
 									{#if $canAccess('containers', 'create')}
@@ -1102,7 +1102,7 @@
 										title="Run container"
 										class="p-1 rounded hover:bg-muted transition-colors cursor-pointer"
 									>
-										<Play class="w-3 h-3 text-muted-foreground hover:text-green-600" />
+										<Play class="grid-action-icon grid-action-start text-muted-foreground hover:text-green-600" />
 									</button>
 									{/if}
 									{#if scannerEnabled && $canAccess('images', 'inspect')}
@@ -1112,7 +1112,7 @@
 										title="Scan for vulnerabilities"
 										class="p-1 rounded hover:bg-muted transition-colors cursor-pointer"
 									>
-										<ShieldCheck class="w-3 h-3 text-muted-foreground hover:text-blue-500" />
+										<ShieldCheck class="grid-action-icon grid-action-info text-muted-foreground hover:text-blue-500" />
 									</button>
 									{/if}
 									{#if $canAccess('images', 'push')}
@@ -1122,7 +1122,7 @@
 										title="Push to registry"
 										class="p-1 rounded hover:bg-muted transition-colors cursor-pointer"
 									>
-										<Upload class="w-3 h-3 text-muted-foreground hover:text-foreground" />
+										<Upload class="grid-action-icon grid-action-transfer text-muted-foreground hover:text-foreground" />
 									</button>
 									{/if}
 									{#if $canAccess('images', 'inspect')}
@@ -1133,7 +1133,7 @@
 										class="p-1 rounded hover:bg-muted transition-colors cursor-pointer {exportingId === tagInfo.fullRef ? 'animate-pulse' : ''}"
 										disabled={exportingId === tagInfo.fullRef}
 									>
-										<Download class="w-3 h-3 text-muted-foreground hover:text-foreground" />
+										<Download class="grid-action-icon grid-action-transfer text-muted-foreground hover:text-foreground" />
 									</button>
 									{/if}
 									{#if $canAccess('images', 'build')}
@@ -1143,7 +1143,7 @@
 										title="Tag image"
 										class="p-1 rounded hover:bg-muted transition-colors cursor-pointer"
 									>
-										<Tag class="w-3 h-3 text-muted-foreground hover:text-foreground" />
+										<Tag class="grid-action-icon grid-action-edit text-muted-foreground hover:text-foreground" />
 									</button>
 									{/if}
 									{#if $canAccess('images', 'remove') && tagInfo.containers === 0}
@@ -1158,7 +1158,7 @@
 											onOpenChange={(open) => confirmDeleteId = open ? tagInfo.fullRef : null}
 										>
 											{#snippet children({ open })}
-												<Trash2 class="w-3 h-3 {open ? 'text-destructive' : 'text-muted-foreground hover:text-destructive'}" />
+												<Trash2 class="grid-action-icon grid-action-delete {open ? 'text-destructive' : 'text-muted-foreground hover:text-destructive'}" />
 											{/snippet}
 										</ConfirmPopover>
 									</div>
@@ -1235,14 +1235,14 @@
 
 <!-- Tag Image Dialog -->
 <Dialog.Root bind:open={showTagModal}>
-	<Dialog.Content class="max-w-md">
+	<Dialog.Content class="max-w-2xl">
 		<Dialog.Header>
 			<Dialog.Title class="flex items-center gap-2">
 				<Tag class="w-5 h-5" />
 				Tag image
 			</Dialog.Title>
 			<Dialog.Description>
-				Add a new tag to <span class="font-mono text-foreground">{tagImageCurrentName}</span>
+				Add a new tag to <span class="font-mono text-foreground truncate" title={tagImageCurrentName}>{tagImageCurrentName.startsWith('sha256:') ? tagImageCurrentName.slice(0, 19) : tagImageCurrentName}</span>
 			</Dialog.Description>
 		</Dialog.Header>
 		<div class="py-4 space-y-4">
@@ -1263,7 +1263,7 @@
 					placeholder="e.g., latest, v1.0.0"
 					class="mt-2"
 					onkeydown={(e: KeyboardEvent) => {
-						if (e.key === 'Enter' && !tagging && tagNewRepo.trim()) {
+						if (e.key === 'Enter' && !tagging && tagNewRepo.trim() && tagNewTag.trim()) {
 							tagImage();
 						}
 					}}
@@ -1276,7 +1276,7 @@
 			</Button>
 			<Button
 				onclick={tagImage}
-				disabled={tagging || !tagNewRepo.trim()}
+				disabled={tagging || !tagNewRepo.trim() || !tagNewTag.trim()}
 			>
 				{#if tagging}
 					<RefreshCw class="w-4 h-4 mr-2 animate-spin" />

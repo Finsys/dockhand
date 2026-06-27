@@ -1750,7 +1750,7 @@
 								title="Edit git stack"
 								class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
 							>
-								<Pencil class="w-3 h-3 text-muted-foreground hover:text-purple-500" />
+								<Pencil class="grid-action-icon grid-action-edit text-muted-foreground hover:text-purple-500" />
 							</button>
 							<GitDeployProgressPopover
 								stackId={source.gitStack.id}
@@ -1763,7 +1763,7 @@
 										title="Deploy"
 										class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
 									>
-										<Rocket class="w-3 h-3 text-muted-foreground hover:text-violet-500" />
+										<Rocket class="grid-action-icon grid-action-start text-muted-foreground hover:text-violet-500" />
 									</button>
 								{/snippet}
 							</GitDeployProgressPopover>
@@ -1780,7 +1780,7 @@
 											title="Sync from Git"
 											class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
 										>
-											<RefreshCw class="w-3 h-3 text-muted-foreground hover:text-purple-500" />
+											<RefreshCw class="grid-action-icon grid-action-restart text-muted-foreground hover:text-purple-500" />
 										</button>
 									{/snippet}
 								</GitDeployProgressPopover>
@@ -1793,7 +1793,7 @@
 										title="Edit git stack"
 										class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
 									>
-										<Pencil class="w-3 h-3 text-muted-foreground hover:text-purple-500" />
+										<Pencil class="grid-action-icon grid-action-edit text-muted-foreground hover:text-purple-500" />
 									</button>
 								{:else}
 									<!-- Internal stacks (including those needing file location) -->
@@ -1803,7 +1803,7 @@
 										title="Edit"
 										class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
 									>
-										<Pencil class="w-3 h-3 text-muted-foreground hover:text-blue-500" />
+										<Pencil class="grid-action-icon grid-action-edit text-muted-foreground hover:text-blue-500" />
 									</button>
 								{/if}
 							{/if}
@@ -1814,7 +1814,7 @@
 									title="View logs"
 									class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
 								>
-									<ScrollText class="w-3 h-3 text-muted-foreground hover:text-blue-500" />
+									<ScrollText class="grid-action-icon grid-action-logs text-muted-foreground hover:text-blue-500" />
 								</button>
 							{/if}
 							{#if source.sourceType !== 'git' && source.sourceType !== 'external' && $canAccess('stacks', 'start')}
@@ -1825,13 +1825,13 @@
 									onDeploy={(options) => redeployStack(stack.name, options)}
 								>
 									{#snippet children()}
-										<Rocket class="w-3 h-3 text-muted-foreground hover:text-violet-500" />
+										<Rocket class="grid-action-icon grid-action-start text-muted-foreground hover:text-violet-500" />
 									{/snippet}
 								</RedeployPopover>
 							{/if}
 							{#if stackActionLoading === stack.name}
 								<div class="p-1">
-									<Loader2 class="w-3 h-3 animate-spin text-muted-foreground" />
+									<Loader2 class="grid-action-icon animate-spin text-muted-foreground" />
 								</div>
 							{:else if stack.status !== 'running' && stack.status !== 'partial' && stack.status !== 'restarting'}
 								{#if $canAccess('stacks', 'start')}
@@ -1841,7 +1841,7 @@
 										title="Start"
 										class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
 									>
-										<Play class="w-3 h-3 text-muted-foreground hover:text-green-500" />
+										<Play class="grid-action-icon grid-action-start text-muted-foreground hover:text-green-500" />
 									</button>
 								{/if}
 							{:else}
@@ -1856,7 +1856,7 @@
 													onclick={(e) => { e.stopPropagation(); restartPopoverOpen[stack.name] = !restartPopoverOpen[stack.name]; }}
 													class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer inline-flex items-center"
 												>
-													<RotateCcw class="w-3 h-3 {restartPopoverOpen[stack.name] ? 'text-amber-500' : 'text-muted-foreground hover:text-amber-500'}" />
+													<RotateCcw class="grid-action-icon grid-action-restart {restartPopoverOpen[stack.name] ? 'text-amber-500' : 'text-muted-foreground hover:text-amber-500'}" />
 												</button>
 											{/snippet}
 										</Popover.Trigger>
@@ -1891,7 +1891,7 @@
 										onOpenChange={(open) => confirmStopName = open ? stack.name : null}
 									>
 										{#snippet children({ open })}
-											<Square class="w-3 h-3 {open ? 'text-destructive' : 'text-muted-foreground hover:text-destructive'}" />
+											<Square class="grid-action-icon grid-action-stop {open ? 'text-destructive' : 'text-muted-foreground hover:text-destructive'}" />
 										{/snippet}
 									</ConfirmPopover>
 								{/if}
@@ -1908,7 +1908,7 @@
 								onOpenChange={(open) => confirmDownName = open ? stack.name : null}
 							>
 								{#snippet children({ open })}
-									<ArrowBigDown class="w-3 h-3 {stackDownLoading === stack.name ? 'animate-bounce text-orange-500' : open ? 'text-orange-500' : 'text-muted-foreground hover:text-orange-500'}" />
+									<ArrowBigDown class="grid-action-icon grid-action-stop {stackDownLoading === stack.name ? 'animate-bounce text-orange-500' : open ? 'text-orange-500' : 'text-muted-foreground hover:text-orange-500'}" />
 								{/snippet}
 							</ConfirmPopover>
 						{/if}
@@ -1929,7 +1929,7 @@
 									</label>
 								{/snippet}
 								{#snippet children({ open })}
-									<Trash2 class="w-3 h-3 {open ? 'text-destructive' : 'text-muted-foreground hover:text-destructive'}" />
+									<Trash2 class="grid-action-icon grid-action-delete {open ? 'text-destructive' : 'text-muted-foreground hover:text-destructive'}" />
 								{/snippet}
 							</ConfirmPopover>
 						{/if}

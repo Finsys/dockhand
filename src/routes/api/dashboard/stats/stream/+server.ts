@@ -195,13 +195,15 @@ async function getEnvironmentStatsProgressive(
 
 		// Get all database stats in parallel for better performance
 		// NOTE: We do NOT block on getDockerInfo() here - slow environments would block all others
-		// Instead, we determine online status from whether listContainers succeeds
+		// Instead, we determine online status from whether listContainers succeeds.
+		// Each call has its own catch so one failed DB query (e.g. a corrupt
+		// container_events index, #1210) doesn't poison the whole tile.
 		const [latestMetrics, eventStats, recentEventsResult, metricsHistory, pendingUpdates] = await Promise.all([
-			getLatestHostMetrics(env.id),
-			getContainerEventStats(env.id),
-			getContainerEvents({ environmentId: env.id, limit: 10 }),
-			getHostMetrics(metricsPointCount, env.id),
-			getPendingContainerUpdates(env.id)
+			getLatestHostMetrics(env.id).catch(() => null),
+			getContainerEventStats(env.id).catch(() => ({ total: 0, today: 0, byAction: {} })),
+			getContainerEvents({ environmentId: env.id, limit: 10 }).catch(() => ({ events: [], total: 0, limit: 10, offset: 0 })),
+			getHostMetrics(metricsPointCount, env.id).catch(() => []),
+			getPendingContainerUpdates(env.id).catch(() => [])
 		]);
 
 		if (latestMetrics) {
