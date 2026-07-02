@@ -5,6 +5,13 @@ import { deployGitStack } from '$lib/server/git';
 import { auditGitStack } from '$lib/server/audit';
 import crypto from 'node:crypto';
 
+function timingSafeEqual(a: string, b: string): boolean {
+	const aBuf = Buffer.from(a);
+	const bBuf = Buffer.from(b);
+	if (aBuf.length !== bBuf.length) return false;
+	return crypto.timingSafeEqual(aBuf, bBuf);
+}
+
 function verifySignature(payload: string, signature: string | null, secret: string): boolean {
 	if (!signature) return false;
 
@@ -17,14 +24,10 @@ function verifySignature(payload: string, signature: string | null, secret: stri
 			.createHmac('sha256', secret)
 			.update(payload)
 			.digest('hex');
-		const sigBuf = Buffer.from(signature);
-		const expectedBuf = Buffer.from(expectedSignature);
-		if (sigBuf.length !== expectedBuf.length) return false;
-		return crypto.timingSafeEqual(sigBuf, expectedBuf);
+		return timingSafeEqual(signature, expectedSignature);
 	}
 
-	// GitLab uses X-Gitlab-Token which should match exactly
-	return signature === secret;
+	return timingSafeEqual(signature, secret);
 }
 
 function detectSource(request: Request): string {
@@ -76,45 +79,6 @@ export const POST: RequestHandler = async (event) => {
 		return json(result);
 	} catch (error: any) {
 		console.error('Webhook error:', error);
-		return json({ success: false, error: error.message }, { status: 500 });
-	}
-};
-
-// Also support GET for simple polling/manual triggers
-export const GET: RequestHandler = async (event) => {
-	const { params, url } = event;
-	try {
-		const id = parseInt(params.id);
-		if (isNaN(id)) {
-			return json({ error: 'Invalid stack ID' }, { status: 400 });
-		}
-
-		const gitStack = await getGitStack(id);
-		if (!gitStack) {
-			return json({ error: 'Git stack not found' }, { status: 404 });
-		}
-
-		if (!gitStack.webhookEnabled) {
-			return json({ error: 'Webhook is not enabled for this stack' }, { status: 403 });
-		}
-
-		// Verify secret via query parameter for GET requests
-		const secret = url.searchParams.get('secret');
-		if (gitStack.webhookSecret && secret !== gitStack.webhookSecret) {
-			await auditGitStack(event, 'webhook', id, gitStack.stackName, gitStack.environmentId, {
-				method: 'GET', source: 'get', error: 'invalid_secret'
-			});
-			return json({ error: 'Invalid webhook secret' }, { status: 401 });
-		}
-
-		// Deploy the git stack (syncs and deploys only if there are changes)
-		const result = await deployGitStack(id, { force: false });
-		await auditGitStack(event, 'webhook', id, gitStack.stackName, gitStack.environmentId, {
-			method: 'GET', source: 'get', result: result.skipped ? 'skipped' : result.success ? 'deployed' : 'failed'
-		});
-		return json(result);
-	} catch (error: any) {
-		console.error('Webhook GET error:', error);
 		return json({ success: false, error: error.message }, { status: 500 });
 	}
 };

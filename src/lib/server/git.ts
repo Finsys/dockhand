@@ -10,6 +10,7 @@ import {
 	updateGitStack,
 	upsertStackSource,
 	getEnvironment,
+	getGitStacksByRepositoryId,
 	type GitRepository,
 	type GitCredential,
 	type GitStackWithRepo
@@ -33,6 +34,26 @@ import {
 
 const MERGED_CA_BUNDLE_PATH = '/tmp/dockhand-merged-ca-bundle.crt';
 let mergedCaBundleReady = false;
+
+// Per-repository lock to prevent concurrent syncSharedRepository calls
+const repoLocks = new Map<number, Promise<void>>();
+
+async function withRepoLock<T>(repoId: number, fn: () => Promise<T>): Promise<T> {
+	while (repoLocks.has(repoId)) {
+		await repoLocks.get(repoId);
+	}
+	let releaseLock: () => void;
+	const lockPromise = new Promise<void>((resolve) => {
+		releaseLock = resolve;
+	});
+	repoLocks.set(repoId, lockPromise);
+	try {
+		return await fn();
+	} finally {
+		repoLocks.delete(repoId);
+		releaseLock!();
+	}
+}
 
 /**
  * Create a merged CA bundle combining system CAs with the custom cert from
@@ -592,7 +613,7 @@ async function testRepositoryConnection(options: {
 		}
 
 		const match = lines[0].match(/^([a-f0-9]+)\s+refs\/heads\/(.+)$/);
-		const lastCommit = match ? match[1].substring(0, 7) : undefined;
+		const lastCommit = match ? match[1] : undefined;
 		const foundBranch = match ? match[2] : branch;
 
 		return {
@@ -713,7 +734,7 @@ export async function syncRepository(repoId: number): Promise<SyncResult> {
 
 		// Get current commit hash
 		const commitResult = await execGit(['rev-parse', 'HEAD'], repoPath, env);
-		currentCommit = commitResult.stdout.substring(0, 7);
+		currentCommit = commitResult.stdout.trim();
 
 		// Read the compose file
 		const composePath = join(repoPath, repo.composePath);
@@ -783,6 +804,302 @@ export async function deployFromRepository(repoId: number): Promise<{ success: b
 	return result;
 }
 
+export function shortSha(sha: string | null | undefined): string {
+	return sha ? sha.substring(0, 7) : '';
+}
+
+async function deployStackWithContent(
+	stack: GitStackWithRepo,
+	repoId: number,
+	opts: {
+		composeContent: string;
+		composeDir: string;
+		composeFileName: string;
+		envFileName?: string;
+		envFileContent?: string;
+		forceRecreate: boolean;
+	}
+): Promise<{ success: boolean; output?: string; error?: string }> {
+	const result = await deployStack({
+		name: stack.stackName,
+		compose: opts.composeContent,
+		envId: stack.environmentId,
+		sourceDir: opts.composeDir,
+		composeFileName: opts.composeFileName,
+		envFileName: opts.envFileName,
+		forceRecreate: opts.forceRecreate,
+		build: stack.buildOnDeploy,
+		noBuildCache: stack.noBuildCache,
+		pullPolicy: stack.repullImages ? 'always' : undefined
+	});
+
+	if (result.success) {
+		const stackDir = await getStackDir(stack.stackName, stack.environmentId);
+		const resolvedComposePath = opts.composeFileName
+			? join(stackDir, opts.composeFileName)
+			: undefined;
+
+		await upsertStackSource({
+			stackName: stack.stackName,
+			environmentId: stack.environmentId,
+			sourceType: 'git',
+			gitRepositoryId: repoId,
+			gitStackId: stack.id,
+			composePath: resolvedComposePath
+		});
+	}
+
+	return result;
+}
+
+async function syncSharedRepository(repoId: number): Promise<{ success: boolean; repoPath?: string; previousCommit?: string | null; newCommit?: string; error?: string }> {
+	const repo = await getGitRepository(repoId);
+	if (!repo) {
+		return { success: false, error: 'Repository not found' };
+	}
+
+	const credential = repo.credentialId ? await getGitCredential(repo.credentialId) : null;
+	const repoPath = getRepoPath(repoId);
+	const env = await buildGitEnv(credential);
+
+	try {
+		await updateGitRepository(repoId, { syncStatus: 'syncing', syncError: null });
+
+		let previousCommit: string | null = null;
+		let newCommit: string;
+
+		if (!existsSync(repoPath)) {
+			const repoUrl = buildRepoUrl(repo.url, credential);
+			const result = await execGit(
+				['clone', '--filter=blob:none', '--branch', repo.branch, repoUrl, repoPath],
+				process.cwd(),
+				env
+			);
+			if (result.code !== 0) {
+				if (existsSync(repoPath)) {
+					rmSync(repoPath, { recursive: true, force: true });
+				}
+				throw new Error(`Git clone failed: ${result.stderr}`);
+			}
+		} else {
+			// Get current commit before fetch
+			const beforeResult = await execGit(['rev-parse', 'HEAD'], repoPath, env);
+			previousCommit = beforeResult.code === 0 ? beforeResult.stdout.trim() : null;
+
+			// Fetch latest and reset
+			await execGit(['fetch', 'origin', repo.branch], repoPath, env);
+			const resetResult = await execGit(['reset', '--hard', `origin/${repo.branch}`], repoPath, env);
+			if (resetResult.code !== 0) {
+				throw new Error(`Git fetch/reset failed: ${resetResult.stderr}`);
+			}
+		}
+
+		// Get commit after sync
+		const commitResult = await execGit(['rev-parse', 'HEAD'], repoPath, env);
+		newCommit = commitResult.stdout.trim();
+
+		await updateGitRepository(repoId, {
+			syncStatus: 'synced',
+			lastSync: new Date().toISOString(),
+			lastCommit: newCommit
+		});
+
+		cleanupSshKey(credential);
+		return { success: true, repoPath, previousCommit, newCommit };
+	} catch (error: any) {
+		cleanupSshKey(credential);
+		await updateGitRepository(repoId, {
+			syncStatus: 'error',
+			syncError: error.message
+		});
+		return { success: false, error: error.message };
+	}
+}
+
+function smartDirFilter(stackComposePath: string, changedFiles: string[]): boolean {
+	const stackDir = dirname(stackComposePath || 'docker-compose.yml');
+	const prefix = stackDir === '.' ? '' : stackDir + '/';
+	return changedFiles.some(file => file === stackComposePath || file.startsWith(prefix));
+}
+
+export async function deployAllStacksForRepository(repoId: number, options?: { deployMode?: 'sequential' | 'parallel'; delay?: number; changedFiles?: string[] }): Promise<{
+	success: boolean;
+	results: Array<{ stackId: number; stackName: string; success: boolean; skipped?: boolean; error?: string }>;
+	error?: string;
+}> {
+	return withRepoLock(repoId, async () => {
+		const repo = await getGitRepository(repoId);
+		if (!repo) {
+			return { success: false, results: [], error: 'Repository not found' };
+		}
+
+		let stacks = await getGitStacksByRepositoryId(repoId);
+		if (stacks.length === 0) {
+			return { success: true, results: [], error: 'No stacks found for this repository' };
+		}
+
+		// Smart filtering: only deploy stacks whose compose file directory
+		// was touched by the changed files in the webhook payload
+		const changedFiles = options?.changedFiles;
+		if (changedFiles && changedFiles.length > 0) {
+			stacks = stacks.filter(stack => smartDirFilter(stack.composePath, changedFiles));
+		}
+
+		if (stacks.length === 0) {
+			if (changedFiles && changedFiles.length > 0) {
+				console.log(`[Repo:${repo.name}] No stacks matched the changed files, skipping`);
+			}
+			return { success: true, results: [] };
+		}
+
+		const mode = options?.deployMode || repo.webhookDeployMode || 'parallel';
+		const delay = options?.delay ?? repo.webhookDeployDelay ?? 0;
+
+		// Sync the repository once for all stacks
+		const syncResult = await syncSharedRepository(repoId);
+		if (!syncResult.success) {
+			return { success: false, results: [], error: syncResult.error };
+		}
+
+		const repoPath = syncResult.repoPath!;
+		const previousCommit = syncResult.previousCommit ?? null;
+		const newCommit = syncResult.newCommit!;
+		const commitChanged = previousCommit !== null && previousCommit !== newCommit;
+
+		async function deployOne(stack: GitStackWithRepo): Promise<{ stackId: number; stackName: string; success: boolean; skipped?: boolean; error?: string }> {
+			try {
+				if (stack.lastCommit === newCommit) {
+					return {
+						stackId: stack.id,
+						stackName: stack.stackName,
+						success: true,
+						skipped: true
+					};
+				}
+
+				const diffDir = dirname(stack.composePath || 'docker-compose.yml');
+				if (previousCommit) {
+					if (commitChanged) {
+						const diffResult = await getChangedFilesInDir(repoPath, previousCommit, newCommit, diffDir || '.', {});
+						if (!diffResult.changed) {
+							return {
+								stackId: stack.id,
+								stackName: stack.stackName,
+								success: true,
+								skipped: true
+							};
+						}
+					} else {
+						await updateGitStack(stack.id, { lastCommit: newCommit });
+						return {
+							stackId: stack.id,
+							stackName: stack.stackName,
+							success: true,
+							skipped: true
+						};
+					}
+				}
+
+				const composePath = join(repoPath, stack.composePath);
+				if (!existsSync(composePath)) {
+					return {
+						stackId: stack.id,
+						stackName: stack.stackName,
+						success: false,
+						error: `Compose file not found: ${stack.composePath}`
+					};
+				}
+				const composeContent = readFileSync(composePath, 'utf-8');
+
+				let composeDir: string;
+				let composeFileName: string;
+				if (stack.contextDir) {
+					composeDir = resolve(repoPath, stack.contextDir);
+					composeFileName = relative(composeDir, composePath);
+				} else {
+					composeDir = dirname(composePath);
+					composeFileName = basename(stack.composePath);
+				}
+
+				let envFileContent: string | undefined;
+				let envFileName: string | undefined;
+				if (stack.envFilePath) {
+					const envFilePath = join(repoPath, stack.envFilePath);
+					if (existsSync(envFilePath)) {
+						envFileContent = readFileSync(envFilePath, 'utf-8');
+						envFileName = relative(composeDir, envFilePath);
+					}
+				}
+
+				await updateGitStack(stack.id, {
+					lastSync: new Date().toISOString(),
+					lastCommit: newCommit
+				});
+
+				const result = await deployStackWithContent(stack, repoId, {
+					composeContent,
+					composeDir,
+					composeFileName,
+					envFileName,
+					envFileContent,
+					forceRecreate: commitChanged
+				});
+
+				return {
+					stackId: stack.id,
+					stackName: stack.stackName,
+					success: result.success,
+					error: result.error
+				};
+			} catch (error: any) {
+				console.error(`[Stack:${stack.stackName}] Deploy error:`, error);
+				return {
+					stackId: stack.id,
+					stackName: stack.stackName,
+					success: false,
+					error: error.message
+				};
+			}
+		}
+
+		let results: Array<{ stackId: number; stackName: string; success: boolean; skipped?: boolean; error?: string }>;
+
+		if (mode === 'parallel') {
+			results = await Promise.all(stacks.map(s => deployOne(s)));
+		} else {
+			results = [];
+			for (let i = 0; i < stacks.length; i++) {
+				const result = await deployOne(stacks[i]);
+				results.push(result);
+				if (delay > 0 && !result.skipped && i < stacks.length - 1) {
+					console.log(`[Repo:${repo.name}] Delaying ${delay}s before next deployment...`);
+					await new Promise(resolve => setTimeout(resolve, delay * 1000));
+				}
+			}
+		}
+
+		const deployed = results.filter(r => !r.skipped);
+		const skippedCount = results.filter(r => r.skipped).length;
+		if (deployed.length === 1) {
+			const msg = skippedCount > 0
+				? `[Repo:${repo.name}] Deployed ${deployed[0].stackName}, ${skippedCount} stack(s) up to date`
+				: `[Repo:${repo.name}] Deployed ${deployed[0].stackName}`;
+			console.log(msg);
+		} else if (deployed.length > 1) {
+			const names = deployed.map(r => r.stackName).join(', ');
+			const msg = skippedCount > 0
+				? `[Repo:${repo.name}] Deployed ${deployed.length} stacks: ${names}, ${skippedCount} stack(s) up to date`
+				: `[Repo:${repo.name}] Deployed ${deployed.length} stacks: ${names}`;
+			console.log(msg);
+		} else if (results.length > 0) {
+			console.log(`[Repo:${repo.name}] All ${results.length} stacks already up to date, skipping`);
+		}
+
+		const allOk = results.every(r => r.success);
+		return { success: allOk, results };
+	});
+}
+
 export async function checkForUpdates(repoId: number): Promise<{ hasUpdates: boolean; currentCommit?: string; latestCommit?: string; error?: string }> {
 	const repo = await getGitRepository(repoId);
 	if (!repo) {
@@ -800,14 +1117,14 @@ export async function checkForUpdates(repoId: number): Promise<{ hasUpdates: boo
 
 		// Get current commit
 		const currentResult = await execGit(['rev-parse', 'HEAD'], repoPath, env);
-		const currentCommit = currentResult.stdout.substring(0, 7);
+		const currentCommit = currentResult.stdout.trim();
 
 		// Fetch latest without merging
 		await execGit(['fetch', 'origin', repo.branch], repoPath, env);
 
 		// Get remote commit
 		const latestResult = await execGit(['rev-parse', `origin/${repo.branch}`], repoPath, env);
-		const latestCommit = latestResult.stdout.substring(0, 7);
+		const latestCommit = latestResult.stdout.trim();
 
 		cleanupSshKey(credential);
 
@@ -948,9 +1265,8 @@ export async function syncGitStack(stackId: number): Promise<SyncResult> {
 		// Check if commit changed
 		const newCommitResult = await execGit(['rev-parse', 'HEAD'], repoPath, env);
 		const newCommit = newCommitResult.stdout.trim();
-		// Normalize to 7-char short hash for comparison (DB stores 7-char, git returns 40-char)
-		const commitChanged = previousCommit?.substring(0, 7) !== newCommit.substring(0, 7);
-		console.log(`${logPrefix} Previous commit: ${previousCommit || '(none)'}, new commit: ${newCommit.substring(0, 7)}, commit changed: ${commitChanged}`);
+		const commitChanged = previousCommit !== newCommit;
+		console.log(`${logPrefix} Previous commit: ${previousCommit || '(none)'}, new commit: ${shortSha(newCommit)}, commit changed: ${commitChanged}`);
 
 		// Check if any files in the compose file's directory have changed
 		// This catches changes to the compose file, env files, and any other referenced files
@@ -991,8 +1307,8 @@ export async function syncGitStack(stackId: number): Promise<SyncResult> {
 
 		// Get current commit hash
 		const commitResult = await execGit(['rev-parse', 'HEAD'], repoPath, env);
-		currentCommit = commitResult.stdout.substring(0, 7);
-		console.log(`${logPrefix} Current commit:`, currentCommit);
+		currentCommit = commitResult.stdout.trim();
+		console.log(`${logPrefix} Current commit: ${shortSha(currentCommit)}`);
 
 		// Read the compose file
 		const composePath = join(repoPath, gitStack.composePath);
@@ -1114,8 +1430,9 @@ export async function syncGitStack(stackId: number): Promise<SyncResult> {
 	}
 }
 
-export async function deployGitStack(stackId: number, options?: { force?: boolean }): Promise<{ success: boolean; output?: string; error?: string; skipped?: boolean }> {
+export async function deployGitStack(stackId: number, options?: { force?: boolean; commitHash?: string }): Promise<{ success: boolean; output?: string; error?: string; skipped?: boolean }> {
 	const force = options?.force ?? true; // Default to force for backward compatibility
+	const commitHash = options?.commitHash;
 
 	const gitStack = await getGitStack(stackId);
 	if (!gitStack) {
@@ -1128,6 +1445,16 @@ export async function deployGitStack(stackId: number, options?: { force?: boolea
 	console.log(`${logPrefix} ========================================`);
 	console.log(`${logPrefix} Stack ID:`, stackId);
 	console.log(`${logPrefix} Force deploy:`, force);
+
+	// Skip sync if the commit hash from the webhook payload matches the last deployed commit
+	if (commitHash && gitStack.lastCommit === commitHash) {
+		console.log(`${logPrefix} Commit ${commitHash} matches last sync, skipping git sync`);
+		return {
+			success: true,
+			output: `Already at commit ${commitHash}, no changes to deploy`,
+			skipped: true
+		};
+	}
 
 	// Sync first
 	console.log(`${logPrefix} Syncing git repository...`);
@@ -1266,7 +1593,7 @@ export async function testGitStack(stackId: number): Promise<TestResult> {
 		}
 
 		const match = lines[0].match(/^([a-f0-9]+)\s+refs\/heads\/(.+)$/);
-		const lastCommit = match ? match[1].substring(0, 7) : undefined;
+		const lastCommit = match ? match[1] : undefined;
 		const branch = match ? match[2] : repo.branch;
 
 		cleanupSshKey(credential);
@@ -1371,8 +1698,7 @@ export async function deployGitStackWithProgress(
 		// Check if commit changed
 		const newCommitResult = await execGit(['rev-parse', 'HEAD'], repoPath, env);
 		const newCommit = newCommitResult.stdout.trim();
-		// Normalize to 7-char short hash for comparison (DB stores 7-char, git returns 40-char)
-		const commitChanged = previousCommit?.substring(0, 7) !== newCommit.substring(0, 7);
+		const commitChanged = previousCommit !== newCommit;
 
 		// Check if any files in the context/compose directory have changed
 		// (for consistency with syncGitStack, though this function always deploys)
@@ -1392,7 +1718,7 @@ export async function deployGitStackWithProgress(
 
 		// Get current commit hash
 		const commitResult = await execGit(['rev-parse', 'HEAD'], repoPath, env);
-		currentCommit = commitResult.stdout.substring(0, 7);
+		currentCommit = commitResult.stdout.trim();
 
 		// Step 4: Reading compose file
 		onProgress({ status: 'reading', message: `Reading ${gitStack.composePath}...`, step: 4, totalSteps });

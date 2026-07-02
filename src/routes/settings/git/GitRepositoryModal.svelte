@@ -5,8 +5,11 @@
 	import * as Select from '$lib/components/ui/select';
 	import { Label } from '$lib/components/ui/label';
 	import { Input } from '$lib/components/ui/input';
-	import { Loader2, GitBranch, KeyRound, Lock, Key, Globe, Play, CheckCircle2 } from 'lucide-svelte';
+	import { TogglePill } from '$lib/components/ui/toggle-pill';
+	import * as Tooltip from '$lib/components/ui/tooltip';
+	import { Loader2, GitBranch, KeyRound, Lock, Key, Globe, Play, CheckCircle2, Webhook, Copy, Check, XCircle } from 'lucide-svelte';
 	import { focusFirstInput } from '$lib/utils';
+	import { copyToClipboard } from '$lib/utils/clipboard';
 
 	interface GitCredential {
 		id: number;
@@ -20,6 +23,10 @@
 		url: string;
 		branch: string;
 		credentialId: number | null;
+		webhookEnabled: boolean;
+		webhookSecret: string | null;
+		webhookDeployDelay: number;
+		webhookDeployMode: 'sequential' | 'parallel';
 	}
 
 	interface Props {
@@ -37,6 +44,13 @@
 	let formUrl = $state('');
 	let formBranch = $state('main');
 	let formCredentialId = $state<number | null>(null);
+	let formWebhookEnabled = $state(false);
+	let formWebhookSecret = $state('');
+	let formWebhookDeployDelay = $state(0);
+	let formWebhookDeployMode = $state<'sequential' | 'parallel'>('parallel');
+	let copiedWebhookUrl = $state<'ok' | 'error' | null>(null);
+	let copiedWebhookSecret = $state<'ok' | 'error' | null>(null);
+
 	let formError = $state('');
 	let formErrors = $state<{ name?: string; url?: string }>({});
 	let formSaving = $state(false);
@@ -44,6 +58,24 @@
 	// Test state
 	let testing = $state(false);
 	let testResult = $state<{ success: boolean; error?: string; branch?: string; lastCommit?: string } | null>(null);
+
+	function generateWebhookSecret(): string {
+		const array = new Uint8Array(24);
+		crypto.getRandomValues(array);
+		return Array.from(array, b => b.toString(16).padStart(2, '0')).join('');
+	}
+
+	async function copyWebhookField(text: string, type: 'url' | 'secret') {
+		const ok = await copyToClipboard(text);
+		const state = ok ? 'ok' : 'error';
+		if (type === 'url') {
+			copiedWebhookUrl = state;
+			setTimeout(() => copiedWebhookUrl = null, 2000);
+		} else {
+			copiedWebhookSecret = state;
+			setTimeout(() => copiedWebhookSecret = null, 2000);
+		}
+	}
 
 	const isEditing = $derived(repository !== null);
 
@@ -69,15 +101,25 @@
 			formUrl = repository.url;
 			formBranch = repository.branch;
 			formCredentialId = repository.credentialId;
+			formWebhookEnabled = repository.webhookEnabled;
+			formWebhookSecret = repository.webhookSecret || '';
+			formWebhookDeployDelay = repository.webhookDeployDelay ?? 0;
+			formWebhookDeployMode = repository.webhookDeployMode || 'parallel';
 		} else {
 			formName = '';
 			formUrl = '';
 			formBranch = 'main';
 			formCredentialId = null;
+			formWebhookEnabled = false;
+			formWebhookSecret = '';
+			formWebhookDeployDelay = 0;
+			formWebhookDeployMode = 'parallel';
 		}
 		formError = '';
 		formErrors = {};
 		testResult = null;
+		copiedWebhookUrl = null;
+		copiedWebhookSecret = null;
 	}
 
 	// Track which repository was initialized to avoid repeated resets
@@ -154,7 +196,11 @@
 				name: formName.trim(),
 				url: formUrl.trim(),
 				branch: formBranch || 'main',
-				credentialId: formCredentialId
+				credentialId: formCredentialId,
+				webhookEnabled: formWebhookEnabled,
+				webhookSecret: formWebhookSecret || null,
+				webhookDeployDelay: formWebhookDeployDelay,
+				webhookDeployMode: formWebhookDeployMode
 			};
 
 			const url = repository
@@ -291,6 +337,139 @@
 					<p class="text-xs text-muted-foreground">
 						<a href="/settings?tab=git&subtab=credentials" class="text-primary hover:underline">Add credentials</a> for private repositories
 					</p>
+				{/if}
+			</div>
+
+			<!-- Webhook section -->
+			<div class="space-y-3 p-3 bg-muted/50 rounded-md">
+				<div class="flex items-center gap-3">
+					<div class="flex items-center gap-2 flex-1">
+						<Webhook class="w-4 h-4 text-muted-foreground" />
+						<Label class="text-sm font-normal">Enable webhook</Label>
+					</div>
+					<TogglePill bind:checked={formWebhookEnabled} />
+				</div>
+				<p class="text-xs text-muted-foreground">
+					Receive push events from your Git provider to sync and redeploy all stacks belonging to this repository.
+				</p>
+				{#if formWebhookEnabled}
+					{#if repository}
+						<div class="space-y-2">
+							<Label>Webhook URL</Label>
+							<div class="flex gap-2">
+								<Input
+									value={`${window.location.origin}/api/git/webhook/${repository.id}`}
+									readonly
+									class="font-mono text-xs bg-background"
+								/>
+								<Button
+									variant="outline"
+									size="sm"
+									onclick={() => copyWebhookField(`${window.location.origin}/api/git/webhook/${repository.id}`, 'url')}
+									title="Copy URL"
+								>
+									{#if copiedWebhookUrl === 'error'}
+										<Tooltip.Root open>
+											<Tooltip.Trigger>
+												<XCircle class="w-4 h-4 text-red-500" />
+											</Tooltip.Trigger>
+											<Tooltip.Content>Copy requires HTTPS</Tooltip.Content>
+										</Tooltip.Root>
+									{:else if copiedWebhookUrl === 'ok'}
+										<Check class="w-4 h-4 text-green-500" />
+									{:else}
+										<Copy class="w-4 h-4" />
+									{/if}
+								</Button>
+							</div>
+						</div>
+					{/if}
+					<div class="space-y-2">
+						<Label for="webhook-secret">Webhook secret</Label>
+						<div class="flex gap-2">
+							<Input
+								id="webhook-secret"
+								bind:value={formWebhookSecret}
+								placeholder="Required to use webhook on a repository level"
+								class="font-mono text-xs"
+							/>
+							{#if repository && formWebhookSecret}
+								<Button
+									variant="outline"
+									size="sm"
+									onclick={() => copyWebhookField(formWebhookSecret, 'secret')}
+									title="Copy secret"
+								>
+									{#if copiedWebhookSecret === 'error'}
+										<Tooltip.Root open>
+											<Tooltip.Trigger>
+												<XCircle class="w-4 h-4 text-red-500" />
+											</Tooltip.Trigger>
+											<Tooltip.Content>Copy requires HTTPS</Tooltip.Content>
+										</Tooltip.Root>
+									{:else if copiedWebhookSecret === 'ok'}
+										<Check class="w-4 h-4 text-green-500" />
+									{:else}
+										<Copy class="w-4 h-4" />
+									{/if}
+								</Button>
+							{/if}
+							<Tooltip.Root>
+								<Tooltip.Trigger>
+									<Button
+										variant="outline"
+										size="sm"
+										onclick={() => formWebhookSecret = generateWebhookSecret()}
+									>
+										<Key class="w-4 h-4" />
+									</Button>
+								</Tooltip.Trigger>
+								<Tooltip.Content>Generate secret</Tooltip.Content>
+							</Tooltip.Root>
+						</div>
+					</div>
+					<div class="space-y-2">
+						<Label for="webhook-deploy-mode">Deploy mode</Label>
+						<Select.Root
+							type="single"
+							value={formWebhookDeployMode}
+							onValueChange={(v) => { formWebhookDeployMode = v as 'sequential' | 'parallel'; }}
+						>
+							<Select.Trigger class="w-full">
+								{formWebhookDeployMode === 'parallel' ? 'Parallel' : 'Sequential'}
+							</Select.Trigger>
+							<Select.Content>
+								<Select.Item value="parallel">
+									Parallel - deploy all stacks at once
+								</Select.Item>
+								<Select.Item value="sequential">
+									Sequential - deploy stacks one after another
+								</Select.Item>
+							</Select.Content>
+						</Select.Root>
+					</div>
+					{#if formWebhookDeployMode === 'sequential'}
+						<div class="space-y-2">
+							<Label for="webhook-delay">Delays between deployments (seconds)</Label>
+							<Input
+								id="webhook-delay"
+								type="number"
+								min="0"
+								max="3600"
+								bind:value={formWebhookDeployDelay}
+								placeholder="0"
+							/>
+						</div>
+					{/if}
+					{#if !repository}
+						<p class="text-xs text-muted-foreground">
+							The webhook URL will be available after saving the repository.
+						</p>
+					{:else}
+						<p class="text-xs text-muted-foreground">
+							Configure this URL in your Git provider to deploy all stacks on push. Secret is used for signature verification.
+						</p>
+					{/if}
 				{/if}
 			</div>
 
