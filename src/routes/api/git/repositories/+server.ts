@@ -52,6 +52,11 @@ export const POST: RequestHandler = async (event) => {
 			}
 		}
 
+		// Webhook requires a non-empty secret
+		if (data.webhookEnabled && !data.webhookSecret) {
+			return json({ error: 'Webhook secret is required' }, { status: 400 });
+		}
+
 		const repository = await createGitRepository({
 			name: data.name,
 			url: data.url,

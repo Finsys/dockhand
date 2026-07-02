@@ -65,6 +65,11 @@ export const PUT: RequestHandler = async (event) => {
 			}
 		}
 
+		// Webhook requires a non-empty secret
+		if (data.webhookEnabled && !data.webhookSecret) {
+			return json({ error: 'Webhook secret is required' }, { status: 400 });
+		}
+
 		const repository = await updateGitRepository(id, {
 			name: data.name,
 			url: data.url,

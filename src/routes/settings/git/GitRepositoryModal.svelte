@@ -385,12 +385,12 @@
 						</div>
 					{/if}
 					<div class="space-y-2">
-						<Label for="webhook-secret">Webhook secret (optional)</Label>
+						<Label for="webhook-secret">Webhook secret</Label>
 						<div class="flex gap-2">
 							<Input
 								id="webhook-secret"
 								bind:value={formWebhookSecret}
-								placeholder="Leave empty for no signature verification"
+								placeholder="Required to use webhook on a repository level"
 								class="font-mono text-xs"
 							/>
 							{#if repository && formWebhookSecret}

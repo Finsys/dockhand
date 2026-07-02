@@ -5,21 +5,29 @@ import { deployAllStacksForRepository } from '$lib/server/git';
 import { auditGitRepository, getAuditContext } from '$lib/server/audit';
 import crypto from 'node:crypto';
 
+function timingSafeEqual(a: string, b: string): boolean {
+	const aBuf = Buffer.from(a);
+	const bBuf = Buffer.from(b);
+	if (aBuf.length !== bBuf.length) return false;
+	return crypto.timingSafeEqual(aBuf, bBuf);
+}
+
 function verifySignature(payload: string, signature: string | null, secret: string): boolean {
 	if (!signature) return false;
+
+	// Support both GitHub and GitLab webhook signatures
+	// GitHub: sha256=<hash>
+	// GitLab: just the token value in X-Gitlab-Token header
 
 	if (signature.startsWith('sha256=')) {
 		const expectedSignature = 'sha256=' + crypto
 			.createHmac('sha256', secret)
 			.update(payload)
 			.digest('hex');
-		const sigBuf = Buffer.from(signature);
-		const expectedBuf = Buffer.from(expectedSignature);
-		if (sigBuf.length !== expectedBuf.length) return false;
-		return crypto.timingSafeEqual(sigBuf, expectedBuf);
+		return timingSafeEqual(signature, expectedSignature);
 	}
 
-	return signature === secret;
+	return timingSafeEqual(signature, secret);
 }
 
 function extractChangedFiles(bodyText: string): string[] | null {
@@ -74,7 +82,7 @@ export const POST: RequestHandler = async (event) => {
 
 		const source = detectSource(request);
 
-		// Read body once — used for both signature verification and file extraction
+		// Read body once — used for signature verification, branch check, and file extraction
 		bodyText = await request.text();
 
 		// Verify webhook secret if set
@@ -89,6 +97,19 @@ export const POST: RequestHandler = async (event) => {
 				});
 				return json({ error: 'Invalid webhook signature' }, { status: 401 });
 			}
+		}
+
+		// Check if the push is for the tracked branch
+		try {
+			const payload = JSON.parse(bodyText);
+			if (payload.ref) {
+				const expectedRef = `refs/heads/${repository.branch}`;
+				if (payload.ref !== expectedRef) {
+					return json({ accepted: true, message: `Push was to ${payload.ref}, not ${expectedRef}, ignoring` }, { status: 200 });
+				}
+			}
+		} catch {
+			// If body isn't valid JSON, proceed without branch check
 		}
 
 		// Extract changed files from the payload for smart filtering
@@ -127,48 +148,5 @@ export const POST: RequestHandler = async (event) => {
 	} catch (error: any) {
 		console.error('Webhook error:', error);
 		return json({ error: error.message, success: false }, { status: 500 });
-	}
-};
-
-// Also support GET for simple polling/manual triggers
-export const GET: RequestHandler = async (event) => {
-	const { params, url } = event;
-	try {
-		const id = parseInt(params.id);
-		if (isNaN(id)) {
-			return json({ error: 'Invalid repository ID' }, { status: 400 });
-		}
-
-		const repository = await getGitRepository(id);
-		if (!repository) {
-			return json({ error: 'Repository not found' }, { status: 404 });
-		}
-
-		if (!repository.webhookEnabled) {
-			return json({ error: 'Webhook is not enabled for this repository' }, { status: 403 });
-		}
-
-		// Verify secret via query parameter for GET requests
-		const secret = url.searchParams.get('secret');
-		if (repository.webhookSecret && secret !== repository.webhookSecret) {
-			await auditGitRepository(event, 'webhook', id, repository.name, {
-				method: 'GET', source: 'get', error: 'invalid_secret'
-			});
-			return json({ error: 'Invalid webhook secret' }, { status: 401 });
-		}
-
-		// Deploy all stacks for this repository
-		const result = await deployAllStacksForRepository(id, {
-			deployMode: repository.webhookDeployMode,
-			delay: repository.webhookDeployDelay
-		});
-		await auditGitRepository(event, 'webhook', id, repository.name, {
-			method: 'GET', source: 'get', result: result.success ? 'deployed' : 'partial',
-			stacks: result.results
-		});
-		return json(result);
-	} catch (error: any) {
-		console.error('Webhook GET error:', error);
-		return json({ success: false, error: error.message }, { status: 500 });
 	}
 };
