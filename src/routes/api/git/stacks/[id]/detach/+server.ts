@@ -11,7 +11,7 @@ import {
 import { deleteGitStackFiles } from '$lib/server/git';
 import { unregisterSchedule } from '$lib/server/scheduler';
 import { auditGitStack } from '$lib/server/audit';
-import { writeStackEnvFile } from '$lib/server/stacks';
+import { getStackComposeFile, writeStackEnvFile } from '$lib/server/stacks';
 
 export const POST: RequestHandler = async (event) => {
 	const { params, cookies } = event;
@@ -36,6 +36,15 @@ export const POST: RequestHandler = async (event) => {
 		}
 
 		const source = await getStackSource(gitStack.stackName, gitStack.environmentId ?? null);
+		const composeResult = await getStackComposeFile(
+			gitStack.stackName,
+			gitStack.environmentId ?? null
+		);
+
+		if (!composeResult.success || !composeResult.composePath) {
+			return json({ error: 'No deployed compose file is available. Deploy the Git stack successfully before converting it to a local source.' }, { status: 409 });
+		}
+
 		const envVars = await getStackEnvVars(gitStack.stackName, gitStack.environmentId ?? null, false);
 
 		// Internal stacks read non-secret vars from the env file on disk, not from DB.
@@ -55,7 +64,7 @@ export const POST: RequestHandler = async (event) => {
 			sourceType: 'internal',
 			gitRepositoryId: null,
 			gitStackId: null,
-			composePath: source?.composePath ?? null,
+			composePath: composeResult.composePath,
 			envPath: source?.envPath ?? null
 		});
 

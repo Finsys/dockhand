@@ -666,8 +666,8 @@
 
 		if (hasErrors) return;
 
-		// Check if stack already exists (only for new stacks)
-		if (!gitStack) {
+		// Check if stack already exists (only for brand new stacks, excludes conversions as they re-use the same stack name)
+		if (!gitStack && !isConvertMode) {
 			try {
 				const stacksResponse = await fetch(`/api/stacks?env=${environmentId}`);
 				if (stacksResponse.ok) {
