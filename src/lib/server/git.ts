@@ -922,7 +922,7 @@ function smartDirFilter(stackComposePath: string, changedFiles: string[]): boole
 	return changedFiles.some(file => file === stackComposePath || file.startsWith(prefix));
 }
 
-export async function deployAllStacksForRepository(repoId: number, options?: { deployMode?: 'sequential' | 'parallel'; delay?: number; changedFiles?: string[] }): Promise<{
+export async function deployAllStacksForRepository(repoId: number, options?: { deployMode?: 'sequential' | 'parallel'; delay?: number; changedFiles?: string[]; commitHash?: string }): Promise<{
 	success: boolean;
 	results: Array<{ stackId: number; stackName: string; success: boolean; skipped?: boolean; error?: string }>;
 	error?: string;
@@ -950,6 +950,25 @@ export async function deployAllStacksForRepository(repoId: number, options?: { d
 				console.log(`[Repo:${repo.name}] No stacks matched the changed files, skipping`);
 			}
 			return { success: true, results: [] };
+		}
+
+		// Early skip: if commitHash from webhook matches every stack's lastCommit, skip fetch+deploy
+		const commitHash = options?.commitHash;
+		if (commitHash && stacks.every(s => s.lastCommit === commitHash)) {
+			console.log(`[Repo:${repo.name}] All ${stacks.length} stacks already at commit ${commitHash}, skipping fetch and deploy`);
+			await updateGitRepository(repoId, {
+				lastSync: new Date().toISOString(),
+				syncStatus: 'synced'
+			});
+			return {
+				success: true,
+				results: stacks.map(s => ({
+					stackId: s.id,
+					stackName: s.stackName,
+					success: true,
+					skipped: true
+				}))
+			};
 		}
 
 		const mode = options?.deployMode || repo.webhookDeployMode || 'parallel';

@@ -53,6 +53,21 @@ function extractChangedFiles(bodyText: string): string[] | null {
 	}
 }
 
+function extractIncomingCommitSha(bodyText: string): string | null {
+	try {
+		const body = JSON.parse(bodyText);
+		if (!body || typeof body !== 'object') return null;
+
+		if (typeof body.after === 'string' && body.after.length === 40) return body.after;
+		if (body.head_commit && typeof body.head_commit.id === 'string' && body.head_commit.id.length === 40) return body.head_commit.id;
+		if (typeof body.checkout_sha === 'string' && body.checkout_sha.length === 40) return body.checkout_sha;
+
+		return null;
+	} catch {
+		return null;
+	}
+}
+
 function detectSource(request: Request): string {
 	if (request.headers.get('x-hub-signature-256')) return 'github';
 	if (request.headers.get('x-gitlab-token')) return 'gitlab';
@@ -112,8 +127,9 @@ export const POST: RequestHandler = async (event) => {
 			// If body isn't valid JSON, proceed without branch check
 		}
 
-		// Extract changed files from the payload for smart filtering
+		// Extract changed files and incoming commit SHA from the payload for optimization
 		const changedFiles = extractChangedFiles(bodyText);
+		const commitHash = extractIncomingCommitSha(bodyText);
 
 		// Capture audit context before returning 202 — event may be disposed after response
 		const auditCtx = await getAuditContext(event);
@@ -122,7 +138,8 @@ export const POST: RequestHandler = async (event) => {
 		deployAllStacksForRepository(id, {
 			deployMode: repository.webhookDeployMode,
 			delay: repository.webhookDeployDelay,
-			changedFiles: changedFiles ?? undefined
+			changedFiles: changedFiles ?? undefined,
+			commitHash: commitHash ?? undefined
 		}).then(async (result) => {
 			await logAuditEvent({
 				userId: auditCtx.userId,
@@ -135,7 +152,8 @@ export const POST: RequestHandler = async (event) => {
 				details: {
 					method: 'POST', source, result: result.success ? 'deployed' : 'partial',
 					stacks: result.results,
-					changedFiles: changedFiles?.length ?? 0
+					changedFiles: changedFiles?.length ?? 0,
+					commitHash
 				},
 				ipAddress: auditCtx.ipAddress,
 				userAgent: auditCtx.userAgent
