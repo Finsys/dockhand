@@ -887,7 +887,7 @@ async function syncSharedRepository(repoId: number): Promise<{ success: boolean;
 			previousCommit = beforeResult.code === 0 ? beforeResult.stdout.trim() : null;
 
 			// Fetch latest and reset
-			await execGit(['fetch', 'origin', repo.branch], repoPath, env);
+			await execGit(['fetch', '--force', 'origin', repo.branch], repoPath, env);
 			const resetResult = await execGit(['reset', '--hard', `origin/${repo.branch}`], repoPath, env);
 			if (resetResult.code !== 0) {
 				throw new Error(`Git fetch/reset failed: ${resetResult.stderr}`);
