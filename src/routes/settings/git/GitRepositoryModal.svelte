@@ -161,7 +161,7 @@
 			testResult = data;
 
 			if (data.success) {
-				toast.success(`Connection successful! Branch: ${data.branch}, Commit: ${data.lastCommit}`);
+				toast.success(`Connection successful! Branch: ${data.branch}, Commit: ${data.lastCommit?.slice(0, 7)}`);
 			} else {
 				toast.error(data.error || 'Connection test failed');
 			}
@@ -385,12 +385,12 @@
 						</div>
 					{/if}
 					<div class="space-y-2">
-						<Label for="webhook-secret">Webhook secret (optional)</Label>
+						<Label for="webhook-secret">Webhook secret</Label>
 						<div class="flex gap-2">
 							<Input
 								id="webhook-secret"
 								bind:value={formWebhookSecret}
-								placeholder="Leave empty for no signature verification"
+								placeholder="Required"
 								class="font-mono text-xs"
 							/>
 							{#if repository && formWebhookSecret}

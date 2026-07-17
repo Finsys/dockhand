@@ -96,7 +96,7 @@
 				testResult = {
 					id,
 					success: true,
-					message: `Connected! Branch: ${data.branch}, Last commit: ${data.lastCommit}`
+					message: `Connected! Branch: ${data.branch}, Last commit: ${data.lastCommit?.slice(0, 7)}`
 				};
 				toast.success('Repository connection successful');
 			} else {
