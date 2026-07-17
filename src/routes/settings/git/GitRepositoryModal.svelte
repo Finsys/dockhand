@@ -429,7 +429,7 @@
 						</div>
 					</div>
 					<div class="space-y-2">
-						<Label for="webhook-deploy-mode">Deploy mode</Label>
+						<Label for="webhook-deploy-mode">Deployment mode</Label>
 						<Select.Root
 							type="single"
 							value={formWebhookDeployMode}
