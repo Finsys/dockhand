@@ -65,6 +65,7 @@
 	let showGitModal = $state(false);
 	let showImportModal = $state(false);
 	let editingStackName = $state('');
+	let stackModalReadonly = $state(false);
 	let editingGitStack = $state<any>(null);
 	let envId = $state<number | null>(null);
 
@@ -1048,6 +1049,13 @@
 
 	function editStack(name: string) {
 		editingStackName = name;
+		stackModalReadonly = false;
+		showEditModal = true;
+	}
+
+	function viewGitStack(name: string) {
+		editingStackName = name;
+		stackModalReadonly = true;
 		showEditModal = true;
 	}
 
@@ -1593,19 +1601,17 @@
 				{#if column.id === 'name'}
 					{@const systemType = getStackSystemType(stack)}
 					<span class="flex items-center gap-1 min-w-0 w-full">
-					{#if source.sourceType !== 'git'}
-						<!-- Internal stacks (including those needing file location) are clickable -->
 						<button
 							type="button"
 							class="font-medium text-xs hover:text-primary hover:underline cursor-pointer text-left truncate min-w-0"
-							onclick={(e) => { e.stopPropagation(); editStack(stack.name); }}
+							onclick={(e) => {
+								e.stopPropagation();
+								if (source.sourceType === 'git') viewGitStack(stack.name);
+								else editStack(stack.name);
+							}}
 						>
 							{stack.name}
 						</button>
-					{:else}
-						<!-- Git stacks open in GitStackModal instead -->
-						<span class="font-medium text-xs truncate min-w-0">{stack.name}</span>
-					{/if}
 					{#if systemType}
 						<Tooltip.Root>
 							<Tooltip.Trigger>
@@ -2515,9 +2521,11 @@
 	bind:open={showEditModal}
 	mode="edit"
 	stackName={editingStackName}
+	readonly={stackModalReadonly}
 	onClose={() => {
 		showEditModal = false;
 		editingStackName = '';
+		stackModalReadonly = false;
 	}}
 	onSuccess={fetchStacks}
 />

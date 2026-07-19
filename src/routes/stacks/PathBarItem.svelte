@@ -7,7 +7,7 @@
 		path: string | null;
 		placeholder: string;
 		onCopy: () => void;
-		onBrowse: () => void;
+		onBrowse?: () => void;
 		onChangeLocation?: () => void; // Optional: relocate entire folder
 		defaultText?: string;
 		isSuggested?: boolean;
@@ -58,13 +58,15 @@
 	>
 		{displayPath.truncated || defaultText}
 	</code>
-	<button
-		onclick={onBrowse}
-		class="p-1 rounded transition-colors shrink-0 hover:bg-zinc-200 dark:hover:bg-zinc-700"
-		title={`Browse for ${label.toLowerCase()}`}
-	>
-		<FolderOpen class="w-3.5 h-3.5" />
-	</button>
+	{#if onBrowse}
+		<button
+			onclick={onBrowse}
+			class="p-1 rounded transition-colors shrink-0 hover:bg-zinc-200 dark:hover:bg-zinc-700"
+			title={`Browse for ${label.toLowerCase()}`}
+		>
+			<FolderOpen class="w-3.5 h-3.5" />
+		</button>
+	{/if}
 	{#if onChangeLocation}
 		<button
 			onclick={onChangeLocation}

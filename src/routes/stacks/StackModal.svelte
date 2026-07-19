@@ -37,11 +37,12 @@
 		stackName?: string; // Required for edit mode, optional for create
 		initialCompose?: string; // Pre-fill compose content (for library deploy)
 		initialStackName?: string; // Pre-fill stack name (for library deploy)
+		readonly?: boolean; // View compose content without allowing local changes
 		onClose: () => void;
 		onSuccess: () => void; // Called after create or save
 	}
 
-	let { open = $bindable(), mode: propMode, stackName: propStackName = '', initialCompose, initialStackName, onClose, onSuccess }: Props = $props();
+	let { open = $bindable(), mode: propMode, stackName: propStackName = '', initialCompose, initialStackName, readonly = false, onClose, onSuccess }: Props = $props();
 
 	// Local effective state - can transition from create → edit after failed deploy
 	let mode = $state(propMode);
@@ -1363,6 +1364,8 @@
 							<Dialog.Description class="text-xs text-zinc-500 dark:text-zinc-400">
 								{#if mode === 'create'}
 									Create a new Docker Compose stack
+								{:else if readonly}
+									View compose file and dependency graph
 								{:else}
 									Edit compose file and environment variables
 								{/if}
@@ -1454,7 +1457,7 @@
 				{/if}
 
 				<!-- File location needed banner -->
-				{#if mode === 'edit' && needsFileLocation}
+				{#if mode === 'edit' && needsFileLocation && !readonly}
 					<div class="px-4 py-3 border-b border-zinc-200 dark:border-zinc-700 bg-amber-50/50 dark:bg-amber-950/20">
 						<div class="flex items-start gap-3">
 							<AlertCircle class="w-4 h-4 shrink-0 text-amber-500 mt-0.5" />
@@ -1493,8 +1496,8 @@
 									placeholder="/path/to/compose.yaml"
 									copied={composePathCopied}
 									onCopy={() => copyText(workingComposePath, (v) => composePathCopied = v)}
-									onBrowse={openComposeBrowser}
-									onChangeLocation={mode === 'edit' && !needsFileLocation ? openChangeLocationBrowser : undefined}
+									onBrowse={readonly ? undefined : openComposeBrowser}
+									onChangeLocation={mode === 'edit' && !needsFileLocation && !readonly ? openChangeLocationBrowser : undefined}
 									defaultText={mode === 'create' ? 'Enter stack name above' : 'Not specified'}
 									sourceHint={pathSourceHint}
 								/>
@@ -1510,8 +1513,8 @@
 									placeholder="/path/to/.env (optional)"
 									copied={envPathCopied}
 									onCopy={() => copyText(displayEnvPath, (v) => envPathCopied = v)}
-									onBrowse={openEnvBrowser}
-									isEditable={true}
+									onBrowse={readonly ? undefined : openEnvBrowser}
+									isEditable={!readonly}
 									isCustom={!!workingEnvPath}
 									defaultText={mode === 'create' ? 'Enter stack name above' : 'Not specified'}
 									isSuggested={isEnvPathSuggested}
@@ -1528,7 +1531,15 @@
 							<div class="flex-shrink-0 flex flex-col min-w-0" style="width: {splitRatio}%">
 								{#if open}
 									<div class="flex-1 p-3 min-h-0">
-										{#if needsFileLocation && !composeContent}
+										{#if readonly && needsFileLocation && !composeContent}
+											<div class="h-full rounded-md border border-dashed border-zinc-300 dark:border-zinc-600 bg-zinc-50 dark:bg-zinc-800/30 flex flex-col items-center justify-center text-center px-8">
+												<GitGraph class="w-12 h-12 text-zinc-300 dark:text-zinc-600 mb-4" />
+												<h3 class="text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">Compose file not available</h3>
+												<p class="text-xs text-zinc-500 dark:text-zinc-400 max-w-sm">
+													Deploy or sync this Git stack first so Dockhand has a local copy of its compose file.
+												</p>
+											</div>
+										{:else if needsFileLocation && !composeContent}
 											<!-- Empty state for untracked stacks -->
 											<div class="h-full rounded-md border border-dashed border-zinc-300 dark:border-zinc-600 bg-zinc-50 dark:bg-zinc-800/30 flex flex-col items-center justify-center text-center px-8">
 												<FolderOpen class="w-12 h-12 text-zinc-300 dark:text-zinc-600 mb-4" />
@@ -1578,8 +1589,9 @@
 													bind:this={codeEditorRef}
 													value={composeContent}
 													language="yaml"
+													{readonly}
 													theme={editorTheme}
-													onchange={handleComposeChange}
+													onchange={readonly ? undefined : handleComposeChange}
 													variableMarkers={variableMarkers}
 													class="flex-1 rounded-md overflow-hidden border border-zinc-200 dark:border-zinc-700"
 												/>
@@ -1608,6 +1620,7 @@
 									bind:rawContent={rawEnvContent}
 									validation={envValidation}
 									existingSecretKeys={mode === 'edit' ? existingSecretKeys : new Set()}
+									{readonly}
 									onchange={() => { markDirty(); debouncedValidate(); }}
 									theme={editorTheme}
 									infoText="These variables will be written to a .env file in the stack directory and passed to the compose command."
@@ -1618,9 +1631,10 @@
 						<!-- Graph tab: Full width -->
 						<ComposeGraphViewer
 							bind:this={graphViewerRef}
-							composeContent={composeContent || defaultCompose}
+							composeContent={composeContent || (mode === 'create' ? defaultCompose : '')}
 							class="h-full flex-1"
-							onContentChange={handleGraphContentChange}
+							onContentChange={readonly ? undefined : handleGraphContentChange}
+							{readonly}
 						/>
 					{/if}
 				</div>
@@ -1630,7 +1644,9 @@
 		<!-- Footer -->
 		<div class="px-5 py-2.5 border-t border-zinc-200 dark:border-zinc-700 flex items-center justify-between flex-shrink-0">
 			<div class="text-xs text-zinc-500 dark:text-zinc-400">
-				{#if isDirty}
+				{#if readonly}
+					Read-only
+				{:else if isDirty}
 					<span class="text-amber-600 dark:text-amber-500">Unsaved changes</span>
 				{:else}
 					No changes
@@ -1638,11 +1654,15 @@
 			</div>
 
 			<div class="flex items-center gap-2">
-				<Button variant="outline" onclick={tryClose} disabled={saving}>
-					Cancel
-				</Button>
+				{#if readonly}
+					<Button onclick={tryClose}>Close</Button>
+				{:else}
+					<Button variant="outline" onclick={tryClose} disabled={saving}>
+						Cancel
+					</Button>
+				{/if}
 
-				{#if mode === 'create'}
+				{#if !readonly && mode === 'create'}
 					<!-- Create mode buttons -->
 					<Button variant="outline" onclick={() => handleCreate(false)} disabled={saving}>
 						{#if saving}
@@ -1662,7 +1682,7 @@
 							Create & Start
 						{/if}
 					</Button>
-				{:else}
+				{:else if !readonly}
 					<!-- Edit mode buttons -->
 					<Button variant="outline" class="w-24" onclick={() => handleSave(false)} disabled={saving || loading || (needsFileLocation && !workingComposePath.trim())}>
 						{#if saving && !savingWithRestart}

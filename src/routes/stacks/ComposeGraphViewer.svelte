@@ -19,9 +19,10 @@
 		composeContent: string;
 		class?: string;
 		onContentChange?: (content: string) => void;
+		readonly?: boolean;
 	}
 
-	let { composeContent, class: className = '', onContentChange }: Props = $props();
+	let { composeContent, class: className = '', onContentChange, readonly = false }: Props = $props();
 
 	let containerEl: HTMLDivElement | null = $state(null);
 	let cy: cytoscape.Core | null = null;
@@ -2103,6 +2104,7 @@
 	<!-- Toolbar -->
 	<div class="flex items-center justify-between px-2 py-1.5 border-b border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 min-h-[40px]">
 		<div class="flex items-center gap-2 flex-wrap">
+			{#if !readonly}
 			<!-- Add element dropdown -->
 			<div class="relative">
 				<Button
@@ -2197,6 +2199,7 @@
 						{/if}
 					{/if}
 				</div>
+			{/if}
 			{/if}
 		</div>
 
@@ -2333,7 +2336,7 @@
 				</div>
 			</div>
 			<!-- Details panel (overlay) -->
-			{#if selectedNode || selectedEdge}
+			{#if !readonly && (selectedNode || selectedEdge)}
 				<div class="absolute top-0 right-0 bottom-0 w-[420px] border-l border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/95 shadow-lg z-20 flex flex-col">
 				<!-- Sticky header -->
 				{#if selectedNode}
