@@ -16,6 +16,9 @@ import { registerSchedule } from '$lib/server/scheduler';
 import { auditGitStack, auditStack } from '$lib/server/audit';
 import { createJobResponse } from '$lib/server/sse';
 import { deployGitStack } from '$lib/server/git';
+import { getStackComposeFile } from '$lib/server/stacks';
+import { parseEnvVars } from '$lib/server/env-parser';
+import { existsSync, readFileSync } from 'node:fs';
 
 const STACK_NAME_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/;
 
@@ -119,34 +122,59 @@ export const POST: RequestHandler = async (event) => {
 			await registerSchedule(gitStack.id, 'git_stack_sync', gitStack.environmentId);
 		}
 
-		if (data.envVars && Array.isArray(data.envVars)) {
-			const existingVars = await getStackEnvVars(stackName, envIdNum ?? null, false);
-			const existingByKey = new Map(existingVars.map((v) => [v.key, v]));
+		// reload env file on disk right before converting to avoid edge case where the file is modified on disk before the conversion happens. 
+		// this only loads new variables, it does not overwrite them. the user using the interface should be the authoritative source of truth for
+		// the actual value
+		const composeResult = await getStackComposeFile(stackName, envIdNum ?? null);
+		const envFilePath = source.envPath === ''
+			? null
+			: source.envPath ?? composeResult.envPath ?? composeResult.suggestedEnvPath ?? null;
+		const fileVars = envFilePath && existsSync(envFilePath)
+			? parseEnvVars(readFileSync(envFilePath, 'utf-8'))
+			: null;
+		const dbVars = Array.isArray(data.envVars) ? data.envVars : null;
 
-			const varsToSave = data.envVars
-				.filter((v: any) => v.key?.trim())
-				.map((v: any) => {
-					if (v.isSecret && v.value === '***') {
-						const existingVar = existingByKey.get(v.key.trim());
-						if (existingVar && existingVar.isSecret) {
-							return {
-								key: v.key.trim(),
-								value: existingVar.value,
-								isSecret: true
-							};
+		if (fileVars || dbVars) {
+			const existingVars = await getStackEnvVars(stackName, envIdNum ?? null, false);
+			const existingByKey = new Map(existingVars.map((variable) => [variable.key, variable]));
+			const varsToSave = new Map<string, { key: string; value: string; isSecret: boolean }>();
+
+			for (const [key, value] of Object.entries(fileVars ?? {})) {
+				varsToSave.set(key, { key, value, isSecret: false });
+			}
+
+			if (dbVars) {
+				for (const variable of dbVars) {
+					const key = variable.key?.trim();
+					if (!key) continue;
+
+					if (variable.isSecret && variable.value === '***') {
+						const existingVar = existingByKey.get(key);
+						if (existingVar?.isSecret) {
+							varsToSave.set(key, { key, value: existingVar.value, isSecret: true });
 						}
-						return null;
+						continue;
 					}
 
-					return {
-						key: v.key.trim(),
-						value: v.value ?? '',
-						isSecret: v.isSecret ?? false
-					};
-				})
-				.filter(Boolean);
+					varsToSave.set(key, {
+						key,
+						value: variable.value ?? '',
+						isSecret: variable.isSecret ?? false
+					});
+				}
+			} else {
+				for (const variable of existingVars) {
+					if (variable.isSecret) {
+						varsToSave.set(variable.key, {
+							key: variable.key,
+							value: variable.value,
+							isSecret: true
+						});
+					}
+				}
+			}
 
-			await setStackEnvVars(stackName, envIdNum ?? null, varsToSave as any);
+			await setStackEnvVars(stackName, envIdNum ?? null, Array.from(varsToSave.values()));
 		}
 
 		await auditStack(event, 'update', stackName, envIdNum ?? null, {
