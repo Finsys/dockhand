@@ -61,10 +61,10 @@
 	let showConfirmClose = $state(false);
 	let editorTheme = $state<'light' | 'dark'>('dark');
 
-	// 1Password service accounts
-	type OpAccountOption = { id: number; name: string };
-	let opAccounts = $state<OpAccountOption[]>([]);
-	let formOpServiceAccountId = $state<number | null>(null);
+	// Secret providers
+	type SecretProviderOption = { id: number; name: string };
+	let secretProviders = $state<SecretProviderOption[]>([]);
+	let formSecretProviderId = $state<number | null>(null);
 
 	// Environment variables state
 	let envVars = $state<EnvVar[]>([]);
@@ -72,14 +72,17 @@
 	let envValidation = $state<ValidationResult | null>(null);
 	let validating = $state(false);
 
-	// OP_ENVIRONMENT_ID is consumed by the 1Password integration, not the compose file,
-	// so it only counts as "used" when a service account is bound to the stack.
+	// The bulk-pull selector vars (OP_ENVIRONMENT_ID for 1Password, the generic
+	// DOCKHAND_SECRET_SELECTOR for other providers) are consumed by the secret
+	// provider, not the compose file, so they only count as "used" when a provider
+	// is bound to the stack.
+	const SELECTOR_VARS = ['OP_ENVIRONMENT_ID', 'DOCKHAND_SECRET_SELECTOR'];
 	const effectiveValidation = $derived.by<ValidationResult | null>(() => {
-		if (!envValidation || formOpServiceAccountId === null) return envValidation;
-		if (!envValidation.unused.includes('OP_ENVIRONMENT_ID')) return envValidation;
+		if (!envValidation || formSecretProviderId === null) return envValidation;
+		if (!envValidation.unused.some((v) => SELECTOR_VARS.includes(v))) return envValidation;
 		return {
 			...envValidation,
-			unused: envValidation.unused.filter((v) => v !== 'OP_ENVIRONMENT_ID')
+			unused: envValidation.unused.filter((v) => !SELECTOR_VARS.includes(v))
 		};
 	});
 	let existingSecretKeys = $state<Set<string>>(new Set());
@@ -700,17 +703,17 @@
 		window.addEventListener('mousemove', handleMouseMove);
 		window.addEventListener('mouseup', handleMouseUp);
 
-		fetchOpAccounts();
+		fetchSecretProviders();
 	});
 
-	async function fetchOpAccounts() {
+	async function fetchSecretProviders() {
 		try {
-			const response = await fetch('/api/onepassword');
+			const response = await fetch('/api/secret-providers');
 			if (!response.ok) return;
 			const data = await response.json();
-			opAccounts = (data ?? []).map((a: any) => ({ id: a.id, name: a.name }));
+			secretProviders = (data ?? []).map((p: any) => ({ id: p.id, name: p.name }));
 		} catch (e) {
-			console.warn('Failed to load 1Password service accounts:', e);
+			console.warn('Failed to load secret providers:', e);
 		}
 	}
 
@@ -799,17 +802,17 @@
 			originalComposePath = data.composePath || null;
 			originalEnvPath = data.envPath || null;
 
-			// Load 1Password binding
+			// Load secret provider binding
 			try {
 				const envId = $currentEnvironment?.id ?? null;
 				const sourcesRes = await fetch(appendEnvParam('/api/stacks/sources', envId));
 				if (sourcesRes.ok) {
 					const sourceMap = await sourcesRes.json();
 					const source = sourceMap?.[stackName];
-					formOpServiceAccountId = source?.opServiceAccountId ?? null;
+					formSecretProviderId = source?.secretProviderId ?? null;
 				}
 			} catch (e) {
-				console.warn('Failed to load stack source for 1Password binding:', e);
+				console.warn('Failed to load stack source for secret provider binding:', e);
 			}
 
 			// Load both env endpoints in parallel, then process results together
@@ -962,7 +965,7 @@
 				requestBody.envPath = envPathToSave;
 			}
 
-			requestBody.opServiceAccountId = formOpServiceAccountId;
+			requestBody.secretProviderId = formSecretProviderId;
 
 			// Create the stack
 			response = await fetch(appendEnvParam('/api/stacks', envId), {
@@ -1095,7 +1098,7 @@
 				requestBody.moveFromDir = moveFromDir;
 			}
 
-			requestBody.opServiceAccountId = formOpServiceAccountId;
+			requestBody.secretProviderId = formSecretProviderId;
 
 			// Save env files BEFORE compose to ensure deploy reads fresh values
 			// Save raw content to .env file (non-secrets only, comments preserved)
@@ -1660,20 +1663,20 @@
 							</div>
 							<!-- Environment variables panel -->
 							<div class="flex-1 min-w-0 flex flex-col overflow-hidden bg-zinc-50 dark:bg-zinc-800/50">
-								<!-- 1Password service account selector -->
+								<!-- Secret provider selector -->
 								<div class="px-3 py-2 border-b border-zinc-200 dark:border-zinc-700 bg-zinc-100/60 dark:bg-zinc-800/60 flex items-center gap-2 text-xs">
-									<Label for="op-account-select" class="text-xs text-muted-foreground shrink-0">1Password Service Account</Label>
+									<Label for="secret-provider-select" class="text-xs text-muted-foreground shrink-0">Secret provider</Label>
 									<Select.Root
 										type="single"
-										value={formOpServiceAccountId !== null ? String(formOpServiceAccountId) : ''}
+										value={formSecretProviderId !== null ? String(formSecretProviderId) : ''}
 										onValueChange={(v) => {
-											formOpServiceAccountId = v ? parseInt(v) : null;
+											formSecretProviderId = v ? parseInt(v) : null;
 											markDirty();
 										}}
 									>
-										<Select.Trigger id="op-account-select" class="h-7 text-xs">
-											{#if formOpServiceAccountId !== null}
-												{opAccounts.find((a) => a.id === formOpServiceAccountId)?.name ?? 'Unknown account'}
+										<Select.Trigger id="secret-provider-select" class="h-7 text-xs">
+											{#if formSecretProviderId !== null}
+												{secretProviders.find((p) => p.id === formSecretProviderId)?.name ?? 'Unknown provider'}
 											{:else}
 												<span class="text-muted-foreground">None — disabled</span>
 											{/if}
@@ -1682,9 +1685,9 @@
 											<Select.Item value="" label="None">
 												<span class="text-muted-foreground">None — disabled</span>
 											</Select.Item>
-											{#each opAccounts as account (account.id)}
-												<Select.Item value={String(account.id)} label={account.name}>
-													{account.name}
+											{#each secretProviders as provider (provider.id)}
+												<Select.Item value={String(provider.id)} label={provider.name}>
+													{provider.name}
 												</Select.Item>
 											{/each}
 										</Select.Content>
@@ -1695,7 +1698,7 @@
 												<CircleQuestionMark class="w-3.5 h-3.5 text-muted-foreground shrink-0" />
 											</Tooltip.Trigger>
 											<Tooltip.Content class="max-w-xs text-xs">
-												Set <code>OP_ENVIRONMENT_ID</code> in env vars to a 1Password Environment ID. Its variables are loaded and injected as secrets.
+												Inline references (e.g. <code>op://</code> for 1Password) are still resolved. For bulk pull, set <code>OP_ENVIRONMENT_ID</code> (1Password Environment) or the generic <code>DOCKHAND_SECRET_SELECTOR</code> in env vars; the provider's secrets are loaded and injected.
 											</Tooltip.Content>
 										</Tooltip.Root>
 									</Tooltip.Provider>

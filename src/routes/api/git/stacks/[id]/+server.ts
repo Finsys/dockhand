@@ -52,11 +52,11 @@ export const PUT: RequestHandler = async (event) => {
 		const data = await request.json();
 
 		if (
-			'opServiceAccountId' in data &&
-			data.opServiceAccountId !== null &&
-			typeof data.opServiceAccountId !== 'number'
+			'secretProviderId' in data &&
+			data.secretProviderId !== null &&
+			typeof data.secretProviderId !== 'number'
 		) {
-			return json({ error: 'opServiceAccountId must be a number or null' }, { status: 400 });
+			return json({ error: 'secretProviderId must be a number or null' }, { status: 400 });
 		}
 
 		// Validate stack name if it's being changed
@@ -94,10 +94,10 @@ export const PUT: RequestHandler = async (event) => {
 			await updateStackEnvVarsName(oldStackName, data.stackName, existing.environmentId);
 		}
 
-		// Update 1Password binding
-		if ('opServiceAccountId' in data) {
+		// Update secret provider binding
+		if ('secretProviderId' in data) {
 			await updateStackSource(updated.stackName, existing.environmentId, {
-				opServiceAccountId: data.opServiceAccountId ?? null
+				secretProviderId: data.secretProviderId ?? null
 			});
 		}
 

@@ -62,11 +62,11 @@ export const POST: RequestHandler = async (event) => {
 		}
 
 		if (
-			'opServiceAccountId' in data &&
-			data.opServiceAccountId !== null &&
-			typeof data.opServiceAccountId !== 'number'
+			'secretProviderId' in data &&
+			data.secretProviderId !== null &&
+			typeof data.secretProviderId !== 'number'
 		) {
-			return json({ error: 'opServiceAccountId must be a number or null' }, { status: 400 });
+			return json({ error: 'secretProviderId must be a number or null' }, { status: 400 });
 		}
 
 		// Check for name conflicts with existing stacks (regular/external/git)
@@ -142,7 +142,7 @@ export const POST: RequestHandler = async (event) => {
 			sourceType: 'git',
 			gitRepositoryId: repositoryId,
 			gitStackId: gitStack.id,
-			opServiceAccountId: data.opServiceAccountId ?? null
+			secretProviderId: data.secretProviderId ?? null
 		});
 
 		// Register schedule with croner if auto-update is enabled

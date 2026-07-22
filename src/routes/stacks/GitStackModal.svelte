@@ -109,10 +109,10 @@
 	let copiedWebhookUrl = $state<'ok' | 'error' | null>(null);
 	let copiedWebhookSecret = $state<'ok' | 'error' | null>(null);
 
-	// 1Password service accounts
-	type OpAccountOption = { id: number; name: string };
-	let opAccounts = $state<OpAccountOption[]>([]);
-	let formOpServiceAccountId = $state<number | null>(null);
+	// Secret providers
+	type SecretProviderOption = { id: number; name: string };
+	let secretProviders = $state<SecretProviderOption[]>([]);
+	let formSecretProviderId = $state<number | null>(null);
 
 	// Environment variables state
 	let formEnvFilePath = $state<string | null>(null);
@@ -166,17 +166,17 @@
 		window.addEventListener('mousemove', handleMouseMove);
 		window.addEventListener('mouseup', handleMouseUp);
 
-		fetchOpAccounts();
+		fetchSecretProviders();
 	});
 
-	async function fetchOpAccounts() {
+	async function fetchSecretProviders() {
 		try {
-			const response = await fetch('/api/onepassword');
+			const response = await fetch('/api/secret-providers');
 			if (!response.ok) return;
 			const data = await response.json();
-			opAccounts = (data ?? []).map((a: any) => ({ id: a.id, name: a.name }));
+			secretProviders = (data ?? []).map((p: any) => ({ id: p.id, name: p.name }));
 		} catch (e) {
-			console.warn('Failed to load 1Password service accounts:', e);
+			console.warn('Failed to load secret providers:', e);
 		}
 	}
 
@@ -393,10 +393,10 @@
 			formRepullImages = gitStack.repullImages ?? false;
 			formForceRedeploy = gitStack.forceRedeploy ?? false;
 			formDeployNow = false;
-			formOpServiceAccountId = null;
+			formSecretProviderId = null;
 			
-			// Load 1Password binding
-			loadOpBindingForStack(gitStack.stackName);
+			// Load secret provider binding
+			loadSecretProviderBindingForStack(gitStack.stackName);
 
 			// Load env files and overrides SYNCHRONOUSLY to avoid race conditions
 			// Wait for all loads to complete before allowing any other effect to run
@@ -426,20 +426,20 @@
 			formRepullImages = false;
 			formForceRedeploy = false;
 			formDeployNow = false;
-			formOpServiceAccountId = null;
+			formSecretProviderId = null;
 		}
 	}
 
-	async function loadOpBindingForStack(stackName: string) {
+	async function loadSecretProviderBindingForStack(stackName: string) {
 		try {
 			const url = environmentId ? `/api/stacks/sources?env=${environmentId}` : '/api/stacks/sources';
 			const response = await fetch(url);
 			if (!response.ok) return;
 			const sourceMap = await response.json();
 			const source = sourceMap?.[stackName];
-			formOpServiceAccountId = source?.opServiceAccountId ?? null;
+			formSecretProviderId = source?.secretProviderId ?? null;
 		} catch (e) {
-			console.warn('Failed to load 1Password binding for git stack:', e);
+			console.warn('Failed to load secret provider binding for git stack:', e);
 		}
 	}
 
@@ -520,7 +520,7 @@
 				repullImages: formRepullImages,
 				forceRedeploy: formForceRedeploy,
 				deployNow: deployAfterSave,
-				opServiceAccountId: formOpServiceAccountId,
+				secretProviderId: formSecretProviderId,
 				envVars: overrideVars.map(v => ({
 					key: v.key.trim(),
 					value: v.value,
@@ -1090,17 +1090,17 @@
 
 			<!-- Right column: Environment Variables -->
 			<div class="flex-1 min-w-0 flex flex-col overflow-hidden bg-zinc-50 dark:bg-zinc-800/50">
-				<!-- 1Password service account selector -->
+				<!-- Secret provider selector -->
 				<div class="px-3 py-2 border-b border-zinc-200 dark:border-zinc-700 bg-zinc-100/60 dark:bg-zinc-800/60 flex items-center gap-2 text-xs">
-					<Label for="op-account-select-git" class="text-xs text-muted-foreground shrink-0">1Password Service Account</Label>
+					<Label for="secret-provider-select-git" class="text-xs text-muted-foreground shrink-0">Secret provider</Label>
 					<Select.Root
 						type="single"
-						value={formOpServiceAccountId !== null ? String(formOpServiceAccountId) : ''}
-						onValueChange={(v) => { formOpServiceAccountId = v ? parseInt(v) : null; }}
+						value={formSecretProviderId !== null ? String(formSecretProviderId) : ''}
+						onValueChange={(v) => { formSecretProviderId = v ? parseInt(v) : null; }}
 					>
-						<Select.Trigger id="op-account-select-git" class="h-7 text-xs">
-							{#if formOpServiceAccountId !== null}
-								{opAccounts.find((a) => a.id === formOpServiceAccountId)?.name ?? 'Unknown account'}
+						<Select.Trigger id="secret-provider-select-git" class="h-7 text-xs">
+							{#if formSecretProviderId !== null}
+								{secretProviders.find((p) => p.id === formSecretProviderId)?.name ?? 'Unknown provider'}
 							{:else}
 								<span class="text-muted-foreground">None — disabled</span>
 							{/if}
@@ -1109,9 +1109,9 @@
 							<Select.Item value="" label="None">
 								<span class="text-muted-foreground">None — disabled</span>
 							</Select.Item>
-							{#each opAccounts as account (account.id)}
-								<Select.Item value={String(account.id)} label={account.name}>
-									{account.name}
+							{#each secretProviders as provider (provider.id)}
+								<Select.Item value={String(provider.id)} label={provider.name}>
+									{provider.name}
 								</Select.Item>
 							{/each}
 						</Select.Content>
@@ -1121,7 +1121,7 @@
 							<CircleQuestionMark class="w-3.5 h-3.5 text-muted-foreground shrink-0" />
 						</Tooltip.Trigger>
 						<Tooltip.Content class="max-w-xs text-xs">
-							Set <code>OP_ENVIRONMENT_ID</code> in env vars to a 1Password Environment ID. Its variables are loaded and injected as secrets.
+							Inline references (e.g. <code>op://</code> for 1Password) are still resolved. For bulk pull, set <code>OP_ENVIRONMENT_ID</code> (1Password Environment) or the generic <code>DOCKHAND_SECRET_SELECTOR</code> in env vars; the provider's secrets are loaded and injected.
 						</Tooltip.Content>
 					</Tooltip.Root>
 				</div>

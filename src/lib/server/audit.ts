@@ -318,19 +318,19 @@ export async function auditGitCredential(
 }
 
 /**
- * Helper for 1Password service account actions
+ * Helper for secret provider actions
  */
-export async function auditOpServiceAccount(
+export async function auditSecretProvider(
 	event: RequestEvent,
 	action: AuditAction,
-	accountId: number,
-	accountName: string,
+	providerId: number,
+	providerName: string,
 	details?: any
 ): Promise<void> {
 	await audit(event, action, 'op_service_account', {
-		entityId: String(accountId),
-		entityName: accountName,
-		description: `1Password service account ${accountName} ${action}`,
+		entityId: String(providerId),
+		entityName: providerName,
+		description: `Secret provider ${providerName} ${action}`,
 		details
 	});
 }

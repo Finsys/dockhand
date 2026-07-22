@@ -56,23 +56,23 @@ export const PUT: RequestHandler = async ({ params, request, url, cookies }) => 
 
 	try {
 		const body = await request.json();
-		const { content, restart = false, composePath, envPath, moveFromDir, oldComposePath, oldEnvPath, opServiceAccountId } = body;
+		const { content, restart = false, composePath, envPath, moveFromDir, oldComposePath, oldEnvPath, secretProviderId } = body;
 
 		if (!content || typeof content !== 'string') {
 			return json({ error: 'Compose file content is required' }, { status: 400 });
 		}
 
 		if (
-			'opServiceAccountId' in body &&
-			opServiceAccountId !== null &&
-			typeof opServiceAccountId !== 'number'
+			'secretProviderId' in body &&
+			secretProviderId !== null &&
+			typeof secretProviderId !== 'number'
 		) {
-			return json({ error: 'opServiceAccountId must be a number or null' }, { status: 400 });
+			return json({ error: 'secretProviderId must be a number or null' }, { status: 400 });
 		}
 
-		// Build options object for custom paths, move operation, file renames, and 1Password binding
-		const pathOptions = (composePath || envPath !== undefined || moveFromDir || oldComposePath || oldEnvPath || opServiceAccountId !== undefined)
-			? { composePath, envPath, moveFromDir, oldComposePath, oldEnvPath, opServiceAccountId }
+		// Build options object for custom paths, move operation, file renames, and secret provider binding
+		const pathOptions = (composePath || envPath !== undefined || moveFromDir || oldComposePath || oldEnvPath || secretProviderId !== undefined)
+			? { composePath, envPath, moveFromDir, oldComposePath, oldEnvPath, secretProviderId }
 			: undefined;
 
 		if (restart) {

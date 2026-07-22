@@ -24,7 +24,7 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 				sourceType: string;
 				composePath?: string | null;
 				repository?: any;
-				opServiceAccountId?: number | null;
+				secretProviderId?: number | null;
 			}
 		> = {};
 		for (const source of sources) {
@@ -32,7 +32,7 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 				sourceType: source.sourceType,
 				composePath: source.composePath,
 				repository: source.repository,
-				opServiceAccountId: source.opServiceAccountId,
+				secretProviderId: source.secretProviderId,
 			};
 		}
 
