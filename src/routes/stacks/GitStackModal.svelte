@@ -7,7 +7,7 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { Input } from '$lib/components/ui/input';
 	import { TogglePill } from '$lib/components/ui/toggle-pill';
-	import { Loader2, GitBranch, RefreshCw, Webhook, Rocket, RefreshCcw, Copy, Check, XCircle, FolderGit2, Github, Key, KeyRound, Lock, FileText, HelpCircle, GripVertical, X, Download, Hammer, ArrowDownToLine, Zap, FolderOpen, Ban, TriangleAlert } from 'lucide-svelte';
+	import { Loader2, GitBranch, RefreshCw, Webhook, Rocket, RefreshCcw, Copy, Check, XCircle, FolderGit2, Github, Key, KeyRound, Lock, FileText, CircleQuestionMark, GripVertical, X, Download, Hammer, ArrowDownToLine, Zap, FolderOpen, Ban, TriangleAlert } from 'lucide-svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import CronEditor from '$lib/components/cron-editor.svelte';
@@ -109,6 +109,11 @@
 	let copiedWebhookUrl = $state<'ok' | 'error' | null>(null);
 	let copiedWebhookSecret = $state<'ok' | 'error' | null>(null);
 
+	// 1Password service accounts
+	type OpAccountOption = { id: number; name: string };
+	let opAccounts = $state<OpAccountOption[]>([]);
+	let formOpServiceAccountId = $state<number | null>(null);
+
 	// Environment variables state
 	let formEnvFilePath = $state<string | null>(null);
 	let envFiles = $state<string[]>([]);
@@ -160,7 +165,20 @@
 		// Add global mouse event listeners for split dragging
 		window.addEventListener('mousemove', handleMouseMove);
 		window.addEventListener('mouseup', handleMouseUp);
+
+		fetchOpAccounts();
 	});
+
+	async function fetchOpAccounts() {
+		try {
+			const response = await fetch('/api/onepassword');
+			if (!response.ok) return;
+			const data = await response.json();
+			opAccounts = (data ?? []).map((a: any) => ({ id: a.id, name: a.name }));
+		} catch (e) {
+			console.warn('Failed to load 1Password service accounts:', e);
+		}
+	}
 
 	onDestroy(() => {
 		window.removeEventListener('mousemove', handleMouseMove);
@@ -375,6 +393,10 @@
 			formRepullImages = gitStack.repullImages ?? false;
 			formForceRedeploy = gitStack.forceRedeploy ?? false;
 			formDeployNow = false;
+			formOpServiceAccountId = null;
+			
+			// Load 1Password binding
+			loadOpBindingForStack(gitStack.stackName);
 
 			// Load env files and overrides SYNCHRONOUSLY to avoid race conditions
 			// Wait for all loads to complete before allowing any other effect to run
@@ -404,6 +426,20 @@
 			formRepullImages = false;
 			formForceRedeploy = false;
 			formDeployNow = false;
+			formOpServiceAccountId = null;
+		}
+	}
+
+	async function loadOpBindingForStack(stackName: string) {
+		try {
+			const url = environmentId ? `/api/stacks/sources?env=${environmentId}` : '/api/stacks/sources';
+			const response = await fetch(url);
+			if (!response.ok) return;
+			const sourceMap = await response.json();
+			const source = sourceMap?.[stackName];
+			formOpServiceAccountId = source?.opServiceAccountId ?? null;
+		} catch (e) {
+			console.warn('Failed to load 1Password binding for git stack:', e);
 		}
 	}
 
@@ -484,6 +520,7 @@
 				repullImages: formRepullImages,
 				forceRedeploy: formForceRedeploy,
 				deployNow: deployAfterSave,
+				opServiceAccountId: formOpServiceAccountId,
 				envVars: overrideVars.map(v => ({
 					key: v.key.trim(),
 					value: v.value,
@@ -804,7 +841,7 @@
 					<Label for="env-file-path">Additional env file (optional)</Label>
 					<Tooltip.Root>
 						<Tooltip.Trigger>
-							<HelpCircle class="w-3.5 h-3.5 text-muted-foreground cursor-help" />
+							<CircleQuestionMark class="w-3.5 h-3.5 text-muted-foreground cursor-help" />
 						</Tooltip.Trigger>
 						<Tooltip.Content>
 							<div class="w-80">
@@ -829,7 +866,7 @@
 					<Label for="context-dir">Context directory (optional)</Label>
 					<Tooltip.Root>
 						<Tooltip.Trigger>
-							<HelpCircle class="w-3.5 h-3.5 text-muted-foreground cursor-help" />
+							<CircleQuestionMark class="w-3.5 h-3.5 text-muted-foreground cursor-help" />
 						</Tooltip.Trigger>
 						<Tooltip.Content>
 							<div class="w-80">
@@ -1053,6 +1090,41 @@
 
 			<!-- Right column: Environment Variables -->
 			<div class="flex-1 min-w-0 flex flex-col overflow-hidden bg-zinc-50 dark:bg-zinc-800/50">
+				<!-- 1Password service account selector -->
+				<div class="px-3 py-2 border-b border-zinc-200 dark:border-zinc-700 bg-zinc-100/60 dark:bg-zinc-800/60 flex items-center gap-2 text-xs">
+					<Label for="op-account-select-git" class="text-xs text-muted-foreground shrink-0">1Password Service Account</Label>
+					<Select.Root
+						type="single"
+						value={formOpServiceAccountId !== null ? String(formOpServiceAccountId) : ''}
+						onValueChange={(v) => { formOpServiceAccountId = v ? parseInt(v) : null; }}
+					>
+						<Select.Trigger id="op-account-select-git" class="h-7 text-xs">
+							{#if formOpServiceAccountId !== null}
+								{opAccounts.find((a) => a.id === formOpServiceAccountId)?.name ?? 'Unknown account'}
+							{:else}
+								<span class="text-muted-foreground">None — disabled</span>
+							{/if}
+						</Select.Trigger>
+						<Select.Content>
+							<Select.Item value="" label="None">
+								<span class="text-muted-foreground">None — disabled</span>
+							</Select.Item>
+							{#each opAccounts as account (account.id)}
+								<Select.Item value={String(account.id)} label={account.name}>
+									{account.name}
+								</Select.Item>
+							{/each}
+						</Select.Content>
+					</Select.Root>
+					<Tooltip.Root>
+						<Tooltip.Trigger>
+							<CircleQuestionMark class="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+						</Tooltip.Trigger>
+						<Tooltip.Content class="max-w-xs text-xs">
+							Set <code>OP_ENVIRONMENT_ID</code> in env vars to a 1Password Environment ID. Its variables are loaded and injected as secrets.
+						</Tooltip.Content>
+					</Tooltip.Root>
+				</div>
 				<StackEnvVarsPanel
 					bind:variables={envVars}
 					placeholder={{ key: 'MY_VAR', value: 'value' }}
@@ -1081,7 +1153,7 @@
 								</Button>
 								<Tooltip.Root>
 									<Tooltip.Trigger>
-										<HelpCircle class="w-3.5 h-3.5 text-muted-foreground cursor-help" />
+										<CircleQuestionMark class="w-3.5 h-3.5 text-muted-foreground cursor-help" />
 									</Tooltip.Trigger>
 									<Tooltip.Content>
 										<div class="w-64">

@@ -318,6 +318,24 @@ export async function auditGitCredential(
 }
 
 /**
+ * Helper for 1Password service account actions
+ */
+export async function auditOpServiceAccount(
+	event: RequestEvent,
+	action: AuditAction,
+	accountId: number,
+	accountName: string,
+	details?: any
+): Promise<void> {
+	await audit(event, action, 'op_service_account', {
+		entityId: String(accountId),
+		entityName: accountName,
+		description: `1Password service account ${accountName} ${action}`,
+		details
+	});
+}
+
+/**
  * Helper for config set actions
  */
 export async function auditConfigSet(

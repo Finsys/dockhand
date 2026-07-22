@@ -19,6 +19,7 @@ export interface Permissions {
 	activity: string[];
 	schedules: string[];
 	templates: string[];
+	secrets: string[];
 }
 
 export interface AuthUser {

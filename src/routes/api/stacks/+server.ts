@@ -91,7 +91,7 @@ export const POST: RequestHandler = async (event) => {
 
 	try {
 		const body = await request.json();
-		const { name, compose, start, envVars, rawEnvContent, composePath, envPath } = body;
+		const { name, compose, start, envVars, rawEnvContent, composePath, envPath, opServiceAccountId } = body;
 
 		if (!name || typeof name !== 'string') {
 			return json({ error: 'Stack name is required' }, { status: 400 });
@@ -99,6 +99,14 @@ export const POST: RequestHandler = async (event) => {
 
 		if (!compose || typeof compose !== 'string') {
 			return json({ error: 'Compose file content is required' }, { status: 400 });
+		}
+
+		if (
+			'opServiceAccountId' in body &&
+			opServiceAccountId !== null &&
+			typeof opServiceAccountId !== 'number'
+		) {
+			return json({ error: 'opServiceAccountId must be a number or null' }, { status: 400 });
 		}
 
 		// If start is false, only create the compose file without deploying
@@ -134,7 +142,8 @@ export const POST: RequestHandler = async (event) => {
 				environmentId: envIdNum,
 				sourceType: 'internal',
 				composePath: composePath || undefined,
-				envPath: envPath || undefined
+				envPath: envPath || undefined,
+				opServiceAccountId,
 			});
 
 			// Audit log
@@ -175,7 +184,8 @@ export const POST: RequestHandler = async (event) => {
 			environmentId: envIdNum,
 			sourceType: 'internal',
 			composePath: composePath || undefined,
-			envPath: envPath || undefined
+			envPath: envPath || undefined,
+			opServiceAccountId
 		});
 
 		// Deploy via SSE to keep connection alive during long operations

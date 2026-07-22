@@ -1,6 +1,6 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getGitStack, updateGitStack, deleteGitStack, deleteStackSource, updateStackSourceName, updateStackEnvVarsName, setStackEnvVars, getStackEnvVars, deleteStackEnvVars } from '$lib/server/db';
+import { getGitStack, updateGitStack, deleteGitStack, deleteStackSource, updateStackSourceName, updateStackEnvVarsName, setStackEnvVars, getStackEnvVars, deleteStackEnvVars, updateStackSource } from '$lib/server/db';
 import { deleteGitStackFiles, deployGitStack } from '$lib/server/git';
 import { authorize } from '$lib/server/authorize';
 import { registerSchedule, unregisterSchedule } from '$lib/server/scheduler';
@@ -51,6 +51,14 @@ export const PUT: RequestHandler = async (event) => {
 
 		const data = await request.json();
 
+		if (
+			'opServiceAccountId' in data &&
+			data.opServiceAccountId !== null &&
+			typeof data.opServiceAccountId !== 'number'
+		) {
+			return json({ error: 'opServiceAccountId must be a number or null' }, { status: 400 });
+		}
+
 		// Validate stack name if it's being changed
 		if (data.stackName !== undefined) {
 			const trimmedStackName = data.stackName.trim();
@@ -84,6 +92,13 @@ export const PUT: RequestHandler = async (event) => {
 		if (data.stackName && data.stackName !== oldStackName) {
 			await updateStackSourceName(oldStackName, data.stackName, existing.environmentId);
 			await updateStackEnvVarsName(oldStackName, data.stackName, existing.environmentId);
+		}
+
+		// Update 1Password binding
+		if ('opServiceAccountId' in data) {
+			await updateStackSource(updated.stackName, existing.environmentId, {
+				opServiceAccountId: data.opServiceAccountId ?? null
+			});
 		}
 
 		// Register or unregister schedule with croner
