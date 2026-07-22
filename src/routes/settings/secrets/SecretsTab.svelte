@@ -16,65 +16,66 @@
 	import ConfirmPopover from "$lib/components/ConfirmPopover.svelte";
 	import { canAccess } from "$lib/stores/auth";
 	import { EmptyState } from "$lib/components/ui/empty-state";
-	import ServiceAccountModal, {
-		type OpServiceAccount,
-	} from "./ServiceAccountModal.svelte";
+	import ProviderModal, {
+		type SecretProvider,
+		providerTypeLabel,
+	} from "./ProviderModal.svelte";
 
-	let accounts = $state<OpServiceAccount[]>([]);
+	let providers = $state<SecretProvider[]>([]);
 	let loading = $state(true);
 	let showModal = $state(false);
-	let editing = $state<OpServiceAccount | null>(null);
+	let editing = $state<SecretProvider | null>(null);
 	let confirmDeleteId = $state<number | null>(null);
 	let testingId = $state<number | null>(null);
 
-	async function fetchAccounts() {
+	async function fetchProviders() {
 		loading = true;
 		try {
-			const response = await fetch("/api/onepassword");
-			accounts = await response.json();
+			const response = await fetch("/api/secret-providers");
+			providers = await response.json();
 		} catch (e) {
-			console.error("Failed to fetch 1Password service accounts:", e);
-			toast.error("Failed to fetch service accounts");
+			console.error("Failed to fetch secret providers:", e);
+			toast.error("Failed to fetch secret providers");
 		} finally {
 			loading = false;
 		}
 	}
 
-	function openModal(account?: OpServiceAccount) {
-		editing = account || null;
+	function openModal(provider?: SecretProvider) {
+		editing = provider || null;
 		showModal = true;
 	}
 
-	async function deleteAccount(id: number) {
+	async function deleteProvider(id: number) {
 		try {
-			const response = await fetch(`/api/onepassword/${id}`, {
+			const response = await fetch(`/api/secret-providers/${id}`, {
 				method: "DELETE",
 			});
 			if (response.ok) {
-				await fetchAccounts();
-				toast.success("Service account deleted");
+				await fetchProviders();
+				toast.success("Secret provider deleted");
 			} else {
 				const data = await response.json();
-				toast.error(data.error || "Failed to delete service account");
+				toast.error(data.error || "Failed to delete secret provider");
 			}
 		} catch {
-			toast.error("Failed to delete service account");
+			toast.error("Failed to delete secret provider");
 		}
 	}
 
-	async function testAccount(account: OpServiceAccount) {
-		testingId = account.id;
+	async function testProvider(provider: SecretProvider) {
+		testingId = provider.id;
 		try {
 			const response = await fetch(
-				`/api/onepassword/${account.id}/test`,
+				`/api/secret-providers/${provider.id}/test`,
 				{ method: "POST" },
 			);
 			const data = await response.json();
 			if (data.ok) {
-				toast.success(`${account.name}: connection works`);
+				toast.success(`${provider.name}: connection works`);
 			} else {
 				toast.error(
-					`${account.name}: ${data.error || "connection failed"}`,
+					`${provider.name}: ${data.error || "connection failed"}`,
 				);
 			}
 		} catch {
@@ -85,7 +86,7 @@
 	}
 
 	onMount(() => {
-		fetchAccounts();
+		fetchProviders();
 	});
 </script>
 
@@ -93,33 +94,33 @@
 	<div class="flex justify-between items-center">
 		<div class="flex items-center gap-3">
 			<Badge variant="secondary" class="text-xs"
-				>{accounts.length} total</Badge
+				>{providers.length} total</Badge
 			>
 		</div>
 		<div class="flex gap-2">
 			{#if $canAccess("secrets", "create")}
 				<Button size="sm" onclick={() => openModal()}>
 					<Plus class="w-4 h-4" />
-					Add 1Password service account
+					Add secret provider
 				</Button>
 			{/if}
-			<Button size="sm" variant="outline" onclick={fetchAccounts}
+			<Button size="sm" variant="outline" onclick={fetchProviders}
 				>Refresh</Button
 			>
 		</div>
 	</div>
 
-	{#if loading && accounts.length === 0}
-		<p class="text-muted-foreground text-sm">Loading service accounts...</p>
-	{:else if accounts.length === 0}
+	{#if loading && providers.length === 0}
+		<p class="text-muted-foreground text-sm">Loading secret providers...</p>
+	{:else if providers.length === 0}
 		<EmptyState
 			icon={KeyRound}
-			title="No 1Password service accounts"
-			description="Add a service account to load secrets from 1Password at deploy time"
+			title="No secret providers"
+			description="Add a provider (1Password, Infisical, HashiCorp Vault, ...) to load secrets at deploy time"
 		/>
 	{:else}
 		<div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-			{#each accounts as account (account.id)}
+			{#each providers as provider (provider.id)}
 				<div out:fade={{ duration: 200 }}>
 					<Card.Root>
 						<Card.Header class="pb-2">
@@ -129,18 +130,18 @@
 										class="w-5 h-5 text-muted-foreground"
 									/>
 									<Card.Title class="text-base"
-										>{account.name}</Card.Title
+										>{provider.name}</Card.Title
 									>
 								</div>
 								<Badge variant="secondary" class="text-xs"
-									>Encrypted</Badge
+									>{providerTypeLabel(provider.type)}</Badge
 								>
 							</div>
 						</Card.Header>
 						<Card.Content class="space-y-3">
 							<div class="text-xs text-muted-foreground">
 								Added {new Date(
-									account.createdAt,
+									provider.createdAt,
 								).toLocaleDateString()}
 							</div>
 							<div class="flex gap-2 pt-2 min-h-[32px]">
@@ -148,10 +149,10 @@
 									<Button
 										variant="outline"
 										size="sm"
-										onclick={() => testAccount(account)}
-										disabled={testingId === account.id}
+										onclick={() => testProvider(provider)}
+										disabled={testingId === provider.id}
 									>
-										{#if testingId === account.id}
+										{#if testingId === provider.id}
 											<RefreshCw
 												class="w-3 h-3 animate-spin"
 											/>
@@ -165,24 +166,24 @@
 									<Button
 										variant="outline"
 										size="sm"
-										onclick={() => openModal(account)}
+										onclick={() => openModal(provider)}
 									>
 										<Pencil class="w-3 h-3" />
 									</Button>
 								{/if}
 								{#if $canAccess("secrets", "delete")}
 									<ConfirmPopover
-										open={confirmDeleteId === account.id}
+										open={confirmDeleteId === provider.id}
 										action="Delete"
-										itemType="service account"
-										itemName={account.name}
+										itemType="secret provider"
+										itemName={provider.name}
 										title="Remove"
 										position="left"
 										onConfirm={() =>
-											deleteAccount(account.id)}
+											deleteProvider(provider.id)}
 										onOpenChange={(open) =>
 											(confirmDeleteId = open
-												? account.id
+												? provider.id
 												: null)}
 									>
 										{#snippet children({ open })}
@@ -203,12 +204,12 @@
 	{/if}
 </div>
 
-<ServiceAccountModal
+<ProviderModal
 	bind:open={showModal}
-	account={editing}
+	provider={editing}
 	onClose={() => {
 		showModal = false;
 		editing = null;
 	}}
-	onSaved={fetchAccounts}
+	onSaved={fetchProviders}
 />
