@@ -3385,7 +3385,7 @@ export type AuditEntityType =
 	| 'container' | 'image' | 'stack' | 'volume' | 'network'
 	| 'user' | 'role' | 'settings' | 'environment' | 'registry' | 'git_repository' | 'git_credential'
 	| 'config_set' | 'notification' | 'oidc_provider' | 'ldap_config' | 'git_stack' | 'api_token'
-	| 'op_service_account';
+	| 'secret_provider';
 
 export interface AuditLogData {
 	id: number;

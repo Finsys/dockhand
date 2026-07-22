@@ -327,7 +327,7 @@ export async function auditSecretProvider(
 	providerName: string,
 	details?: any
 ): Promise<void> {
-	await audit(event, action, 'op_service_account', {
+	await audit(event, action, 'secret_provider', {
 		entityId: String(providerId),
 		entityName: providerName,
 		description: `Secret provider ${providerName} ${action}`,
