@@ -918,7 +918,7 @@ export const userRoles = schemaProxy.userRoles;
 export const gitCredentials = schemaProxy.gitCredentials;
 export const gitRepositories = schemaProxy.gitRepositories;
 export const gitStacks = schemaProxy.gitStacks;
-export const opServiceAccounts = schemaProxy.opServiceAccounts;
+export const secretProviders = schemaProxy.secretProviders;
 export const stackSources = schemaProxy.stackSources;
 export const vulnerabilityScans = schemaProxy.vulnerabilityScans;
 export const auditLogs = schemaProxy.auditLogs;
@@ -965,8 +965,8 @@ export type {
 	NewGitRepository,
 	GitStack,
 	NewGitStack,
-	OpServiceAccount,
-	NewOpServiceAccount,
+	SecretProviderRow,
+	NewSecretProviderRow,
 	StackSource,
 	NewStackSource,
 	VulnerabilityScan,

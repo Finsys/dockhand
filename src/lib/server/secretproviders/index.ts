@@ -14,11 +14,18 @@ import type {
 	TestConnectionResult
 } from './shared';
 import { serviceAccountProvider } from './service-account';
+import { connectProvider } from './connect';
+import { infisicalProvider } from './infisical';
+import { vaultProvider } from './vault';
 
-// Registered providers. New backends (connect, infisical, vault, ...) are added
-// here as they land; each implements the SecretProvider contract in ./shared.
+// Registered providers. Adding a new backend means dropping a file in this
+// directory and registering it here; each implements the SecretProvider
+// contract in ./shared.
 const providers: Record<string, SecretProvider> = {
-	[serviceAccountProvider.type]: serviceAccountProvider as SecretProvider
+	[serviceAccountProvider.type]: serviceAccountProvider as SecretProvider,
+	[connectProvider.type]: connectProvider as SecretProvider,
+	[infisicalProvider.type]: infisicalProvider as SecretProvider,
+	[vaultProvider.type]: vaultProvider as SecretProvider
 };
 
 /** Returns the provider for a stored type, or undefined if unknown. */

@@ -37,14 +37,10 @@ import {
 	deleteAutoUpdateSchedule,
 	getAutoUpdateSetting,
 	getStackSourceByComposePath,
-	getOpServiceAccountById,
+	getSecretProviderById,
 	type StackSourceWithRepo
 } from './db';
-import {
-	resolveEnvironment as resolveOpEnvironment,
-	isOpReference,
-	resolveSecretReferences
-} from './onepassword';
+import { getProvider } from './secretproviders';
 import { unregisterSchedule } from './scheduler';
 import { deleteGitStackFiles, parseEnvFileContent } from './git';
 import { cleanPem } from '$lib/utils/pem';
@@ -603,7 +599,7 @@ export async function saveStackComposeFile(
 		moveFromDir?: string;  // Old directory to move all files from when path changes
 		oldComposePath?: string;  // Old compose file path for renaming
 		oldEnvPath?: string;  // Old env file path for renaming
-		opServiceAccountId?: number | null;  // 1Password binding (undefined = unchanged)
+		secretProviderId?: number | null;  // secret provider binding (undefined = unchanged)
 	}
 ): Promise<{ success: boolean; error?: string }> {
 	// Validate stack name - Docker Compose requires lowercase alphanumeric, hyphens, underscores
@@ -766,7 +762,7 @@ export async function saveStackComposeFile(
 	if (
 		options?.composePath ||
 		options?.envPath !== undefined ||
-		options?.opServiceAccountId !== undefined
+		options?.secretProviderId !== undefined
 	) {
 		await upsertStackSource({
 			stackName: name,
@@ -774,10 +770,10 @@ export async function saveStackComposeFile(
 			sourceType: 'internal',
 			composePath: options?.composePath || source?.composePath || null,
 			envPath: options?.envPath !== undefined ? options.envPath : (source?.envPath ?? null),
-			opServiceAccountId:
-				options?.opServiceAccountId !== undefined
-					? options.opServiceAccountId
-					: (source?.opServiceAccountId ?? null),
+			secretProviderId:
+				options?.secretProviderId !== undefined
+					? options.secretProviderId
+					: (source?.secretProviderId ?? null),
 		});
 	}
 
@@ -2617,11 +2613,11 @@ export async function deployStack(options: DeployStackOptions): Promise<StackOpe
 
 		// Add environment variables from 1Password
 		const source = await getStackSource(name, envId);
-		const { dbNonSecretVars, secretVars } = await resolveOpEnvVars(
+		const { dbNonSecretVars, secretVars } = await resolveProviderEnvVars(
 			initialDbNonSecretVars,
 			initialSecretVars,
 			logPrefix,
-			source?.opServiceAccountId,
+			source?.secretProviderId,
 			envFileContent
 		);
 		console.log(`${logPrefix} DB non-secret override vars:`, Object.keys(dbNonSecretVars).length);
@@ -2922,99 +2918,119 @@ export async function saveStackEnvVars(
 }
 
 // =============================================================================
-// 1PASSWORD INTEGRATION
+// SECRET PROVIDER INJECTION (deploy-time)
 // =============================================================================
+// Resolves secrets from the stack's bound secret provider at deploy time and
+// merges them into the vars handed to `docker compose`. Two modes, depending on
+// what the provider supports:
+//   - bulk pull: a whole environment / path of secrets, triggered by a selector
+//     variable (OP_ENVIRONMENT_ID for 1Password back-compat, or the generic
+//     DOCKHAND_SECRET_SELECTOR for any bulk-capable provider).
+//   - inline references: values the provider recognises as references (e.g.
+//     1Password op://...), resolved in place.
+// The bound provider decides what a reference is and how to resolve it; nothing
+// here is 1Password-specific. Non-secret behaviour is untouched.
 
 interface EnrichedEnvVars {
 	dbNonSecretVars: Record<string, string>;
 	secretVars: Record<string, string>;
 }
 
-async function resolveOpEnvVars(
+// Variable names that trigger a bulk pull. OP_ENVIRONMENT_ID is retained for
+// backward compatibility with the original 1Password integration.
+const BULK_SELECTOR_VARS = ['DOCKHAND_SECRET_SELECTOR', 'OP_ENVIRONMENT_ID'];
+
+async function resolveProviderEnvVars(
 	dbNonSecretVars: Record<string, string>,
 	secretVars: Record<string, string>,
 	logPrefix: string,
-	opServiceAccountId?: number | null,
+	secretProviderId?: number | null,
 	stackEnvFileContent?: string
 ): Promise<EnrichedEnvVars> {
 	const envFileVars = stackEnvFileContent ? parseEnvFileContent(stackEnvFileContent) : {};
 
-	// Priority: secrets > DB non-secrets > .env file (each tier overrides the previous)
-	const opEnvId =
-		secretVars['OP_ENVIRONMENT_ID'] ??
-		dbNonSecretVars['OP_ENVIRONMENT_ID'] ??
-		envFileVars['OP_ENVIRONMENT_ID'];
-	if (opEnvId) {
+	const providerRow = secretProviderId ? await getSecretProviderById(secretProviderId) : undefined;
+	const provider = providerRow ? getProvider(providerRow.type) : undefined;
+
+	// --- Bulk pull (environment / path) --------------------------------------
+	// Priority: secrets > DB non-secrets > .env file (each overrides the previous)
+	let selector: string | undefined;
+	let selectorVar: string | undefined;
+	for (const name of BULK_SELECTOR_VARS) {
+		const v = secretVars[name] ?? dbNonSecretVars[name] ?? envFileVars[name];
+		if (v) {
+			selector = v;
+			selectorVar = name;
+			break;
+		}
+	}
+	if (selector && selectorVar) {
 		try {
-			if (opServiceAccountId) {
-				// Strip OP_ENVIRONMENT_ID from values passed to the stack
-				delete secretVars['OP_ENVIRONMENT_ID'];
-				delete dbNonSecretVars['OP_ENVIRONMENT_ID'];
+			if (providerRow && provider?.supportsBulk) {
+				// Strip the selector var from the values passed to the stack
+				delete secretVars[selectorVar];
+				delete dbNonSecretVars[selectorVar];
 
-				const account = await getOpServiceAccountById(opServiceAccountId);
-				if (account?.token) {
-					console.log(`${logPrefix} Resolving 1Password Environment via "${account.name}"`);
+				console.log(`${logPrefix} Resolving bulk selector via "${providerRow.name}" (${provider.label})`);
+				const bulkVars = await provider.resolveBulk(providerRow.config, selector);
+				console.log(`${logPrefix} ${provider.label} injected ${Object.keys(bulkVars).length} secret(s)`);
 
-					const opVars = await resolveOpEnvironment(account.token, opEnvId);
-					console.log(`${logPrefix} 1Password injected ${Object.keys(opVars).length} secret(s)`);
-
-					// 1Password Environment values are merged underneath, with explicit
-					// DB secrets retaining priority
-					secretVars = Object.assign(opVars, secretVars);
-				} else {
-					console.warn(`${logPrefix} OP_ENVIRONMENT_ID is set but service account ${opServiceAccountId} not found`);
-				}
+				// Bulk values merged underneath, with explicit DB secrets keeping priority
+				secretVars = Object.assign(bulkVars, secretVars);
+			} else if (!providerRow) {
+				console.warn(`${logPrefix} ${selectorVar} is set but no secret provider is bound to this stack`);
+			} else if (!provider) {
+				console.warn(`${logPrefix} ${selectorVar} is set but bound provider type "${providerRow.type}" is not registered`);
 			} else {
-				console.warn(`${logPrefix} OP_ENVIRONMENT_ID is set but no 1Password service account is bound to this stack`);
+				console.warn(`${logPrefix} ${selectorVar} is set but provider "${providerRow.name}" (${provider.label}) does not support bulk pull`);
 			}
 		} catch (e: unknown) {
 			const msg = e instanceof Error ? e.message : String(e);
-			throw new Error(`Failed to load 1Password environment: ${msg}`);
+			throw new Error(`Failed to load secrets from provider: ${msg}`);
 		}
 	}
 
-	const envFileOpRefs = new Map<string, string>();
+	// --- Inline references ----------------------------------------------------
+	// Only providers that support inline references detect any here.
+	const isRef = (value: unknown): value is string =>
+		provider?.supportsReferences ? provider.isReference(value) : false;
+
+	const envFileRefs = new Map<string, string>();
 	for (const [key, value] of Object.entries(envFileVars)) {
-		if (isOpReference(value)) {
-			envFileOpRefs.set(key, value.trim());
+		if (isRef(value)) {
+			envFileRefs.set(key, value.trim());
 		}
 	}
 
 	const refs = new Set<string>();
 	for (const value of Object.values(dbNonSecretVars)) {
-		if (isOpReference(value)) refs.add(value.trim());
+		if (isRef(value)) refs.add(value.trim());
 	}
 	for (const value of Object.values(secretVars)) {
-		if (isOpReference(value)) refs.add(value.trim());
+		if (isRef(value)) refs.add(value.trim());
 	}
-	for (const ref of envFileOpRefs.values()) refs.add(ref);
+	for (const ref of envFileRefs.values()) refs.add(ref);
 
 	if (refs.size === 0) {
 		return { dbNonSecretVars, secretVars };
 	}
 
-	if (!opServiceAccountId) {
-		console.warn(`${logPrefix} Found ${refs.size} op:// reference(s) but no 1Password service account is bound to this stack; leaving them as literals`);
-		return { dbNonSecretVars, secretVars };
-	}
-
-	const account = await getOpServiceAccountById(opServiceAccountId);
-	if (!account?.token) {
-		console.warn(`${logPrefix} Found ${refs.size} op:// reference(s) but service account ${opServiceAccountId} not found; leaving them as literals`);
+	if (!providerRow || !provider) {
+		console.warn(`${logPrefix} Found ${refs.size} reference(s) but no usable secret provider is bound to this stack; leaving them as literals`);
 		return { dbNonSecretVars, secretVars };
 	}
 
 	let refMap: Map<string, string>;
 	try {
-		refMap = await resolveSecretReferences(account.token, Array.from(refs), logPrefix);
+		refMap = await provider.resolveSecretReferences(providerRow.config, Array.from(refs), logPrefix);
 	} catch (e: unknown) {
 		const msg = e instanceof Error ? e.message : String(e);
-		throw new Error(`Failed to resolve 1Password references: ${msg}`);
+		throw new Error(`Failed to resolve secret references: ${msg}`);
 	}
 
 	let promotedFromDb = 0;
 	for (const [key, value] of Object.entries(dbNonSecretVars)) {
-		if (isOpReference(value)) {
+		if (isRef(value)) {
 			const resolved = refMap.get(value.trim());
 			if (resolved !== undefined) {
 				delete dbNonSecretVars[key];
@@ -3024,7 +3040,7 @@ async function resolveOpEnvVars(
 		}
 	}
 	for (const [key, value] of Object.entries(secretVars)) {
-		if (isOpReference(value)) {
+		if (isRef(value)) {
 			const resolved = refMap.get(value.trim());
 			if (resolved !== undefined) {
 				secretVars[key] = resolved;
@@ -3033,7 +3049,7 @@ async function resolveOpEnvVars(
 	}
 
 	let promotedFromEnvFile = 0;
-	for (const [key, ref] of envFileOpRefs) {
+	for (const [key, ref] of envFileRefs) {
 		if (key in secretVars || key in dbNonSecretVars) continue;
 		const resolved = refMap.get(ref);
 		if (resolved !== undefined) {
@@ -3042,7 +3058,7 @@ async function resolveOpEnvVars(
 		}
 	}
 
-	console.log(`${logPrefix} 1Password resolved ${refMap.size}/${refs.size} op:// reference(s) (promoted from DB: ${promotedFromDb}, from .env: ${promotedFromEnvFile})`);
+	console.log(`${logPrefix} ${provider.label} resolved ${refMap.size}/${refs.size} reference(s) (promoted from DB: ${promotedFromDb}, from .env: ${promotedFromEnvFile})`);
 
 	return { dbNonSecretVars, secretVars };
 }
@@ -3070,11 +3086,11 @@ async function applyOpReferencesToComposeResult(
 	}
 
 	const source = await getStackSource(stackName, envId ?? undefined);
-	const { dbNonSecretVars, secretVars } = await resolveOpEnvVars(
+	const { dbNonSecretVars, secretVars } = await resolveProviderEnvVars(
 		{ ...result.nonSecretVars },
 		{ ...result.secretVars },
 		logPrefix,
-		source?.opServiceAccountId,
+		source?.secretProviderId,
 		envFileContent
 	);
 	result.nonSecretVars = dbNonSecretVars;

@@ -71,6 +71,13 @@
       "when": 1783800723008,
       "tag": "0009_add_op_service_accounts",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1784761732000,
+      "tag": "0010_generalize_secret_providers",
+      "breakpoints": true
     }
   ]
 }
