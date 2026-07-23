@@ -236,7 +236,10 @@ export const connectProvider: SecretProvider<ConnectConfig> = {
 			return { ok: false, error: 'Token is empty' };
 		}
 		try {
-			const url = `${baseUrl(host)}/health`;
+			// GET /v1/vaults authenticates the token and confirms the host is a
+			// Connect server. Connect has no /v1/health endpoint, and the root
+			// /health is unauthenticated so it would not catch a bad token.
+			const url = `${baseUrl(host)}/vaults`;
 			const { statusCode, body } = await request(url, {
 				method: 'GET',
 				headers: authHeaders(token)
@@ -245,9 +248,12 @@ export const connectProvider: SecretProvider<ConnectConfig> = {
 			if (statusCode >= 200 && statusCode < 300) {
 				return { ok: true };
 			}
+			if (statusCode === 401 || statusCode === 403) {
+				return { ok: false, error: 'Invalid 1Password Connect token' };
+			}
 			return {
 				ok: false,
-				error: `1Password Connect health check failed (${statusCode}): ${text || 'no body'}`
+				error: `1Password Connect request failed (${statusCode}): ${text || 'no body'}`
 			};
 		} catch (e: unknown) {
 			const message = e instanceof Error ? e.message : String(e);

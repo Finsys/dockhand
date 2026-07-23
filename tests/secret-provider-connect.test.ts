@@ -114,21 +114,20 @@ describe('testConnection', () => {
 		expect(requestMock).not.toHaveBeenCalled();
 	});
 
-	test('ok on a 2xx health response and sends bearer auth to /v1/health', async () => {
-		responses = [{ status: 200, json: { name: 'connect', version: '1.7.0' } }];
+	test('ok on a 2xx /v1/vaults response and sends bearer auth', async () => {
+		responses = [{ status: 200, json: [{ id: 'v1', name: 'Vault' }] }];
 		const result = await connectProvider.testConnection(CONFIG);
 		expect(result).toEqual({ ok: true });
-		expect(calls[0].url).toBe('https://connect.example.com/v1/health');
+		expect(calls[0].url).toBe('https://connect.example.com/v1/vaults');
 		expect(calls[0].headers?.Authorization).toBe('Bearer test-token');
 		expect(calls[0].headers?.Accept).toBe('application/json');
 	});
 
-	test('ok:false with status/body on auth failure, without throwing', async () => {
+	test('ok:false with a clear message on auth failure, without throwing', async () => {
 		responses = [{ status: 401, text: 'invalid token' }];
 		const result = await connectProvider.testConnection(CONFIG);
 		expect(result.ok).toBe(false);
-		expect(result.error).toContain('401');
-		expect(result.error).toContain('invalid token');
+		expect(result.error).toBe('Invalid 1Password Connect token');
 	});
 
 	test('ok:false when the request throws (transport error)', async () => {
