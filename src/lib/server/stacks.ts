@@ -31,6 +31,7 @@ import { unregisterSchedule } from './scheduler';
 import { deleteGitStackFiles, parseEnvFileContent } from './git';
 import { cleanPem } from '$lib/utils/pem';
 import { rewriteComposeVolumePaths, getHostDataDir } from './host-path';
+import { buildComposeOperationArgs, shouldRunSeparateBuildStep } from './compose-args';
 
 // =============================================================================
 // TYPES
@@ -1039,46 +1040,7 @@ async function executeLocalCompose(
 		console.log(`${logPrefix} [HostPath] Using stdin for compose content (paths translated)`);
 	}
 
-	switch (operation) {
-		case 'up':
-			args.push('up', '-d', '--remove-orphans');
-			if (forceRecreate) args.push('--force-recreate');
-			if (build && !noBuildCache) args.push('--build');
-			if (pullPolicy) args.push('--pull', pullPolicy);
-			// If targeting a specific service, only update that service
-			if (serviceName) {
-				args.push(serviceName);
-			}
-			break;
-		case 'down':
-			args.push('down', '--remove-orphans');
-			if (removeVolumes) args.push('--volumes');
-			break;
-		case 'stop':
-			args.push('stop');
-			break;
-		case 'start':
-			args.push('start');
-			break;
-		case 'restart':
-			args.push('restart');
-			break;
-		case 'pull':
-			args.push('pull');
-			// If targeting a specific service, pull only that service
-			if (serviceName) {
-				args.push(serviceName);
-			}
-			break;
-		case 'build':
-			args.push('build');
-			if (noBuildCache) args.push('--no-cache');
-			if (pullPolicy) args.push('--pull');
-			if (serviceName) {
-				args.push(serviceName);
-			}
-			break;
-	}
+	args.push(...buildComposeOperationArgs(operation, { forceRecreate, removeVolumes, build, noBuildCache, pullPolicy, serviceName }));
 
 	const commandStr = args.join(' ');
 
@@ -2338,8 +2300,9 @@ export async function deployStack(options: DeployStackOptions): Promise<StackOpe
 			composeFileName: composeFileName || (actualComposePath ? basename(actualComposePath) : undefined)
 		};
 
-		// If build and noBuildCache are true, run a separate build step first
-		if (build && noBuildCache) {
+		const targetEnv = envId ? await getEnvironment(envId) : null;
+
+		if (shouldRunSeparateBuildStep(build, noBuildCache, targetEnv?.connectionType)) {
 			console.log(`${logPrefix} Running separate build step with --no-cache...`);
 			const buildResult = await executeComposeCommand(
 				'build',
@@ -2618,4 +2581,3 @@ export async function saveStackEnvVars(
 // They can be removed once all imports are updated
 
 export type { StackOperationResult as CreateStackResult };
-
