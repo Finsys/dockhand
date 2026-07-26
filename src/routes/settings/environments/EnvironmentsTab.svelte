@@ -37,6 +37,7 @@
 	import EnvironmentModal from './EnvironmentModal.svelte';
 	import { environments as environmentsStore } from '$lib/stores/environment';
 	import { dashboardData } from '$lib/stores/dashboard';
+	import { fetchEnvironmentDeleteCounts } from '$lib/utils/environment-delete';
 
 	interface Props {
 		editEnvId?: string | null;
@@ -110,6 +111,7 @@
 	let deleteStackCount = $state(0);
 	let deleteGitStackCount = $state(0);
 	let deleteCountsUnknown = $state(false);
+	let deleteCountsLoading = $state(false);
 
 	// Track which environments have scanner enabled (for shield indicator)
 	let envScannerStatus = $state<{ [id: number]: boolean }>({});
@@ -208,38 +210,36 @@
 		const env = environments.find(e => e.id === id);
 		if (!env) return;
 
-		const [stacksRes, gitRes] = await Promise.all([
-			fetch(`/api/stacks?env=${id}`).catch(() => null),
-			fetch(`/api/git/stacks?env=${id}`).catch(() => null)
-		]);
-
-		let unknown = false;
-		let stacks: unknown[] = [];
-		let gitStacks: unknown[] = [];
-		if (stacksRes?.ok) {
-			try { stacks = await stacksRes.json(); } catch { unknown = true; }
-		} else {
-			unknown = true;
-		}
-		if (gitRes?.ok) {
-			try { gitStacks = await gitRes.json(); } catch { unknown = true; }
-		} else {
-			unknown = true;
-		}
-		deleteStackCount = Array.isArray(stacks) ? stacks.length : 0;
-		deleteGitStackCount = Array.isArray(gitStacks) ? gitStacks.length : 0;
-		deleteCountsUnknown = unknown;
 		deleteEnvTarget = env;
+		deleteStackCount = 0;
+		deleteGitStackCount = 0;
+		deleteCountsUnknown = true;
+		deleteCountsLoading = true;
 		showDeleteConfirm = true;
+
+		const counts = await fetchEnvironmentDeleteCounts(id);
+		if (deleteEnvTarget?.id !== id || !showDeleteConfirm) return;
+
+		deleteStackCount = counts.stackCount;
+		deleteGitStackCount = counts.gitStackCount;
+		deleteCountsUnknown = counts.unknown;
+		deleteCountsLoading = false;
 	}
 
 	async function confirmAndDelete() {
 		const target = deleteEnvTarget;
 		showDeleteConfirm = false;
 		deleteEnvTarget = null;
+		deleteCountsLoading = false;
 		if (target) {
 			await deleteEnvironment(target.id);
 		}
+	}
+
+	function cancelDelete() {
+		showDeleteConfirm = false;
+		deleteEnvTarget = null;
+		deleteCountsLoading = false;
 	}
 
 	async function testConnection(id: number) {
@@ -718,7 +718,12 @@
 							<code class="whitespace-nowrap">$DATA_DIR/git-repos/{deleteEnvTarget.name}/</code>
 						</div>
 					</div>
-					{#if deleteCountsUnknown}
+					{#if deleteCountsLoading}
+						<p class="flex items-center gap-2">
+							<RefreshCw class="w-3.5 h-3.5 animate-spin" />
+							Checking tracked stacks…
+						</p>
+					{:else if deleteCountsUnknown}
 						<p>
 							Couldn't list the stacks on this environment — proceed only
 							if you're sure what's deployed here.
@@ -748,7 +753,7 @@
 			</Dialog.Description>
 		</Dialog.Header>
 		<div class="flex justify-end gap-2 mt-4">
-			<Button variant="outline" onclick={() => (showDeleteConfirm = false)}>
+			<Button variant="outline" onclick={cancelDelete}>
 				Cancel
 			</Button>
 			<Button variant="destructive" onclick={confirmAndDelete}>
