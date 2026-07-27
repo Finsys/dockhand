@@ -764,6 +764,7 @@
 					<th
 						class="{colConfig.align === 'right' ? 'text-right' : colConfig.align === 'center' ? 'text-center' : 'text-left'} py-2 px-2 font-medium"
 						style="width: {getDisplayWidth(colId)}px"
+						title={colConfig.hint || ''}
 					>
 						{#if headerCell}
 							{@render headerCell(colConfig, sortState)}

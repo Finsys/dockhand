@@ -6,15 +6,21 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Badge } from '$lib/components/ui/badge';
 	import { TogglePill } from '$lib/components/ui/toggle-pill';
-	import { Checkbox } from '$lib/components/ui/checkbox';
-	import { Plus, Check, RefreshCw, Mail, Zap, Info, Send, CheckCircle2, XCircle, Key, ChevronDown, HelpCircle } from 'lucide-svelte';
+	import { Plus, Check, RefreshCw, Mail, Zap, Send, CheckCircle2, XCircle, Bell, HelpCircle, Settings } from 'lucide-svelte';
+	import * as Tabs from '$lib/components/ui/tabs';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { toast } from 'svelte-sonner';
 	import { focusFirstInput } from '$lib/utils';
 
 	// System-only events (configured at channel level, not per-environment)
 	const SYSTEM_EVENTS = [
-		{ id: 'license_expiring', label: 'License expiring', description: 'Enterprise license expiring soon' }
+		{ id: 'license_expiring', label: 'License expiring', description: 'Enterprise license expiring soon' },
+		{ id: 'repo_prune_success', label: 'Backup repository prune success', description: 'Scheduled repository prune completed successfully' },
+		{ id: 'repo_prune_failed', label: 'Backup repository prune failed', description: 'Scheduled repository prune failed' },
+		{ id: 'repo_check_success', label: 'Backup repository check success', description: 'Scheduled integrity check completed successfully' },
+		{ id: 'repo_check_failed', label: 'Backup repository check failed', description: 'Scheduled integrity check found errors or failed' },
+		{ id: 'repo_verify_success', label: 'Backup repository data verification success', description: 'Scheduled data verification completed successfully' },
+		{ id: 'repo_verify_failed', label: 'Backup repository data verification failed', description: 'Scheduled data verification found corruption or failed' }
 	] as const;
 
 	export interface NotificationSetting {
@@ -56,7 +62,7 @@
 	let formAppriseUrls = $state('');
 	// System events
 	let formSystemEvents = $state<string[]>([]);
-	let showSystemEvents = $state(false);
+	let activeTab = $state<'channel' | 'events'>('channel');
 	let formError = $state('');
 	let formSaving = $state(false);
 	let formTesting = $state(false);
@@ -78,7 +84,7 @@
 		formSmtpToEmails = '';
 		formAppriseUrls = '';
 		formSystemEvents = [];
-		showSystemEvents = false;
+		activeTab = 'channel';
 		formError = '';
 		formSaving = false;
 		formTesting = false;
@@ -114,7 +120,7 @@
 				// Load system events (filter to only system-scoped events)
 				const systemEventIds = SYSTEM_EVENTS.map(e => e.id);
 				formSystemEvents = (notification.eventTypes || []).filter(e => systemEventIds.includes(e as typeof SYSTEM_EVENTS[number]['id']));
-				showSystemEvents = formSystemEvents.length > 0;
+				activeTab = 'channel';
 
 				formError = '';
 				formSaving = false;
@@ -293,15 +299,32 @@
 </script>
 
 <Dialog.Root bind:open onOpenChange={(o) => { if (o) { formError = ''; focusFirstInput(); } }}>
-	<Dialog.Content class="max-w-3xl max-h-[90vh] overflow-y-auto">
+	<Dialog.Content class="max-w-3xl max-h-[90vh] flex flex-col overflow-hidden">
 		<Dialog.Header>
 			<Dialog.Title>{isEditing ? 'Edit' : 'Add'} notification channel</Dialog.Title>
 		</Dialog.Header>
-		<div class="space-y-4">
-			{#if formError}
-				<div class="text-sm text-red-600 dark:text-red-400">{formError}</div>
-			{/if}
 
+		{#if formError}
+			<div class="text-sm text-red-600 dark:text-red-400">{formError}</div>
+		{/if}
+
+		<Tabs.Root bind:value={activeTab} class="flex-1 flex flex-col overflow-hidden mt-2">
+			<Tabs.List class="flex-shrink-0 mb-0 w-full grid grid-cols-2">
+				<Tabs.Trigger value="channel" class="flex items-center justify-center gap-1.5">
+					<Settings class="w-3.5 h-3.5" />
+					Channel
+				</Tabs.Trigger>
+				<Tabs.Trigger value="events" class="flex items-center justify-center gap-1.5">
+					<Bell class="w-3.5 h-3.5" />
+					System events
+					{#if formSystemEvents.length > 0}
+						<Badge variant="secondary" class="ml-1 h-4 px-1.5 text-[10px]">{formSystemEvents.length}</Badge>
+					{/if}
+				</Tabs.Trigger>
+			</Tabs.List>
+
+			<div class="overflow-y-auto pb-4 h-[520px]">
+				<Tabs.Content value="channel" class="space-y-4 mt-0">
 			<div class="grid grid-cols-2 gap-4">
 				<div class="space-y-2">
 					<Label for="notif-name">Name *</Label>
@@ -442,48 +465,31 @@ jsons://hostname/webhook/path"
 				</div>
 			{/if}
 
-			<!-- System events configuration -->
-			<div class="border-t pt-4">
-				<button
-					type="button"
-					class="w-full flex items-center justify-between text-left"
-					onclick={() => showSystemEvents = !showSystemEvents}
-				>
-					<div class="flex items-center gap-2">
-						<Key class="w-4 h-4 text-muted-foreground" />
-						<span class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Global system events</span>
-					</div>
-					<ChevronDown class="w-4 h-4 text-muted-foreground transition-transform {showSystemEvents ? 'rotate-180' : ''}" />
-				</button>
-				{#if showSystemEvents}
-					<div class="mt-3 space-y-2">
-						<p class="text-xs text-muted-foreground mb-3">
-							These events are not tied to specific environments and are configured globally here.
-						</p>
+				</Tabs.Content>
+
+				<Tabs.Content value="events" class="space-y-3 mt-0">
+					<p class="text-xs text-muted-foreground">
+						These events are not tied to specific environments and are configured globally here.
+						Environment-specific events (containers, stacks, auto-updates) are configured in each environment's settings.
+					</p>
+					<div class="space-y-1">
 						{#each SYSTEM_EVENTS as event}
-							<label class="flex items-start gap-3 p-2 rounded hover:bg-muted/50 cursor-pointer">
-								<Checkbox
+							<div class="flex items-center gap-3 p-2 rounded hover:bg-muted/50">
+								<TogglePill
 									checked={formSystemEvents.includes(event.id)}
-									onCheckedChange={(checked) => toggleSystemEvent(event.id, !!checked)}
+									onchange={() => toggleSystemEvent(event.id, !formSystemEvents.includes(event.id))}
 								/>
 								<div class="flex-1 min-w-0">
 									<span class="text-sm font-medium">{event.label}</span>
 									<p class="text-xs text-muted-foreground">{event.description}</p>
 								</div>
-							</label>
+							</div>
 						{/each}
 					</div>
-				{/if}
+				</Tabs.Content>
 			</div>
+		</Tabs.Root>
 
-			<!-- Info about per-env config -->
-			<div class="border-t pt-4">
-				<div class="text-xs text-muted-foreground bg-muted/50 rounded-md p-3 flex items-start gap-2">
-					<Info class="w-4 h-4 mt-0.5 shrink-0" />
-					<span>Environment-specific events (containers, stacks, auto-updates) are configured in each environment's settings.</span>
-				</div>
-			</div>
-		</div>
 		<Dialog.Footer class="flex justify-between sm:justify-between">
 			<Button variant="outline" onclick={testConfig} disabled={formTesting || formSaving}>
 				{#if formTesting}

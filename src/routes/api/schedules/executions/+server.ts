@@ -7,7 +7,7 @@
  *   - scheduleType: 'container_update' | 'git_stack_sync'
  *   - scheduleId: number
  *   - environmentId: number
- *   - status: 'queued' | 'running' | 'success' | 'failed' | 'skipped'
+ *   - status: 'queued' | 'running' | 'success' | 'warning' | 'failed' | 'skipped'
  *   - triggeredBy: 'cron' | 'webhook' | 'manual'
  *   - fromDate: ISO date string
  *   - toDate: ISO date string

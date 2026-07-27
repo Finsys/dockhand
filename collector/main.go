@@ -552,6 +552,14 @@ func (m *manager) collectMetrics(env *environment) {
 	}
 
 	normalizedCPU := totalCPU / float64(cpuCount)
+	// Host-normalized CPU can never legitimately exceed 100% of total host
+	// capacity. Values >100 are a transient artifact — a freshly started
+	// container's first stats sample has precpu_stats≈0, so cpuDelta is its
+	// whole lifetime usage, producing a garbage spike. Clamp so the artifact
+	// never enters history and blows out the dashboard chart (#1279).
+	if normalizedCPU > 100 {
+		normalizedCPU = 100
+	}
 	var memPct float64
 	if memTotal > 0 {
 		memPct = (float64(totalMem) / float64(memTotal)) * 100

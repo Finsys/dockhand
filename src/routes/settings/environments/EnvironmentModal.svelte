@@ -62,6 +62,7 @@
 		ChevronRight,
 		XCircle,
 		ImageUp,
+		Archive,
 		Upload,
 		ArrowRight
 	} from 'lucide-svelte';
@@ -76,6 +77,8 @@
 	import TimezoneSelector from '$lib/components/TimezoneSelector.svelte';
 	import { whale } from '@lucide/lab';
 	import ImagePullProgressPopover from '../../images/ImagePullProgressPopover.svelte';
+	import EnvironmentBackupsTab from './EnvironmentBackupsTab.svelte';
+	import { page } from '$app/stores'; // BETA GATE: backups feature flag
 	import { TogglePill, ToggleGroup } from '$lib/components/ui/toggle-pill';
 	import { ShieldOff } from 'lucide-svelte';
 	import { focusFirstInput } from '$lib/utils';
@@ -212,6 +215,16 @@
 				{ id: 'vulnerability_critical', label: 'Critical vulns found', description: 'Critical vulnerabilities found in image scan' },
 				{ id: 'vulnerability_high', label: 'High vulns found', description: 'High severity vulnerabilities found' },
 				{ id: 'vulnerability_any', label: 'Any vulns found', description: 'Any vulnerabilities found (medium/low)' }
+			]
+		},
+		{
+			id: 'backup',
+			label: 'Backup events',
+			events: [
+				{ id: 'backup_success', label: 'Backup succeeded', description: 'Backup completed successfully' },
+				{ id: 'backup_failed', label: 'Backup failed', description: 'Backup failed' },
+				{ id: 'restore_success', label: 'Restore succeeded', description: 'Restore completed successfully' },
+				{ id: 'restore_failed', label: 'Restore failed', description: 'Restore failed' }
 			]
 		},
 		{
@@ -1545,7 +1558,7 @@
 </script>
 
 <Dialog.Root bind:open onOpenChange={(o) => { if (o) focusFirstInput(); else onClose(); }}>
-	<Dialog.Content class="max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
+	<Dialog.Content class="max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
 		<Dialog.Header class="flex-shrink-0 border-b pb-4">
 			<Dialog.Title class="flex items-center gap-2">
 				{#if !isEditing}
@@ -1564,7 +1577,7 @@
 		{/if}
 
 		<Tabs.Root bind:value={modalTab} class="flex-1 flex flex-col overflow-hidden mt-4">
-			<Tabs.List class="flex-shrink-0 mb-0 w-full grid grid-cols-5">
+			<Tabs.List class="flex-shrink-0 mb-0 w-full grid grid-cols-6">
 				<Tabs.Trigger value="general" class="flex items-center justify-center gap-1.5">
 					<Globe class="w-3.5 h-3.5" />
 					General
@@ -1581,6 +1594,13 @@
 					<ShieldCheck class="w-3.5 h-3.5" />
 					Security
 				</Tabs.Trigger>
+				<!-- BETA GATE: Backups tab hidden unless FEAT_BACKUPS_ENABLED (see features.ts) -->
+				{#if $page.data.backupsEnabled}
+					<Tabs.Trigger value="backup" class="flex items-center justify-center gap-1.5">
+						<Archive class="w-3.5 h-3.5" />
+						Backups
+					</Tabs.Trigger>
+				{/if}
 				<Tabs.Trigger value="notifications" class="flex items-center justify-center gap-1.5">
 					<Bell class="w-3.5 h-3.5" />
 					Notifications
@@ -2705,6 +2725,20 @@
 				</Tabs.Content>
 
 				<!-- Notifications Tab -->
+				<!-- Backup Tab -->
+				<Tabs.Content value="backup" class="mt-0 h-full">
+					{#if environment?.id}
+						<EnvironmentBackupsTab
+							environmentId={environment.id}
+							environmentName={environment.name}
+							connectionType={environment.connectionType}
+							host={environment.host}
+						/>
+					{:else}
+						<p class="text-sm text-muted-foreground py-4">Save the environment first to configure backups.</p>
+					{/if}
+				</Tabs.Content>
+
 				<Tabs.Content value="notifications" class="mt-0 h-full flex flex-col">
 					<div class="flex items-center gap-2 text-sm font-medium flex-shrink-0">
 						<Bell class="w-4 h-4" />

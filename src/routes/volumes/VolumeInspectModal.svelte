@@ -6,6 +6,7 @@
 	import { Loader2, HardDrive, Layers } from 'lucide-svelte';
 	import { goto } from '$app/navigation';
 	import { currentEnvironment, appendEnvParam } from '$lib/stores/environment';
+	import ModalHeader from '$lib/components/ModalHeader.svelte';
 	import { formatDateTime } from '$lib/stores/settings';
 
 	interface Props {
@@ -50,35 +51,35 @@
 </script>
 
 <Dialog.Root bind:open>
-	<Dialog.Content class="max-w-4xl max-h-[90vh] flex flex-col">
+	<Dialog.Content class="max-w-4xl max-h-[90vh] flex flex-col" onOpenAutoFocus={(e) => e.preventDefault()}>
 		<Dialog.Header class="shrink-0">
-			<Dialog.Title class="flex items-center gap-2 flex-wrap">
-				<HardDrive class="w-5 h-5" />
-				Volume details: <span class="text-muted-foreground font-normal break-all">{volumeName}</span>
-				{@const composeStack = volumeData?.Labels?.['com.docker.compose.project']}
-				{#if composeStack && !loading}
-					<Tooltip.Root>
-						<Tooltip.Trigger>
-							<button
-								type="button"
-								onclick={() => {
-									open = false;
-									goto(appendEnvParam(`/stacks?search=${encodeURIComponent(composeStack)}`, $currentEnvironment?.id ?? null));
-								}}
-								class="cursor-pointer inline-flex items-center"
-							>
-								<Badge variant="outline" class="text-xs py-0 px-1.5 hover:bg-primary/10 hover:border-primary/50 transition-colors gap-1">
-									<Layers class="w-3 h-3" />
-									{composeStack}
-								</Badge>
-							</button>
-						</Tooltip.Trigger>
-						<Tooltip.Content>
-							<p class="text-xs whitespace-nowrap">Open stack "{composeStack}"</p>
-						</Tooltip.Content>
-					</Tooltip.Root>
-				{/if}
-			</Dialog.Title>
+			<ModalHeader icon={HardDrive} title="Volume" name={volumeName}>
+				{#snippet extra()}
+					{@const composeStack = volumeData?.Labels?.['com.docker.compose.project']}
+					{#if composeStack && !loading}
+						<Tooltip.Root>
+							<Tooltip.Trigger>
+								<button
+									type="button"
+									onclick={() => {
+										open = false;
+										goto(appendEnvParam(`/stacks?search=${encodeURIComponent(composeStack)}`, $currentEnvironment?.id ?? null));
+									}}
+									class="cursor-pointer inline-flex items-center"
+								>
+									<Badge variant="outline" class="text-xs py-0 px-1.5 hover:bg-primary/10 hover:border-primary/50 transition-colors gap-1">
+										<Layers class="w-3 h-3" />
+										{composeStack}
+									</Badge>
+								</button>
+							</Tooltip.Trigger>
+							<Tooltip.Content>
+								<p class="text-xs whitespace-nowrap">Open stack "{composeStack}"</p>
+							</Tooltip.Content>
+						</Tooltip.Root>
+					{/if}
+				{/snippet}
+			</ModalHeader>
 		</Dialog.Header>
 
 		<div class="flex-1 overflow-auto space-y-4 min-h-0">

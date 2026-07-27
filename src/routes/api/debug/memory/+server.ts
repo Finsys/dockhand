@@ -12,8 +12,8 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import v8 from 'node:v8';
 import os from 'node:os';
-import { getRssStats, dumpHeapSnapshot, listHeapSnapshots } from '$lib/server/rss-tracker';
 import { formatBytes } from '$lib/utils/format';
+import { getRssStats, dumpHeapSnapshot, listHeapSnapshots } from '$lib/server/rss-tracker';
 
 // Track startup time and initial RSS for growth rate calculation
 const startupTime = Date.now();

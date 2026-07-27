@@ -10,11 +10,13 @@
 
 	interface Props {
 		value: string;
-		onchange: (cron: string) => void;
+		onchange?: (cron: string) => void;
 		disabled?: boolean;
+		compact?: boolean;
+		invalid?: boolean;
 	}
 
-	let { value, onchange, disabled = false }: Props = $props();
+	let { value = $bindable(), onchange, disabled = false, compact = false, invalid = $bindable(false) }: Props = $props();
 
 	// Detect schedule type from cron expression
 	function detectScheduleType(cron: string): 'daily' | 'weekly' | 'custom' {
@@ -86,7 +88,8 @@
 			return;
 		}
 
-		onchange(newCron);
+		value = newCron;
+		onchange?.(newCron);
 	}
 
 	// Handle schedule type change
@@ -106,12 +109,14 @@
 			if (type === 'daily') {
 				minute = '0';
 				hour = '3';
-				onchange('0 3 * * *');
+				value = '0 3 * * *';
+				onchange?.(value);
 			} else if (type === 'weekly') {
 				minute = '0';
 				hour = '3';
 				dayOfWeek = '1'; // Monday
-				onchange('0 3 * * 1');
+				value = '0 3 * * 1';
+				onchange?.(value);
 			}
 			previousScheduleType = type;
 		}
@@ -134,7 +139,8 @@
 
 	function handleCustomCronInput(e: Event) {
 		const newValue = (e.currentTarget as HTMLInputElement).value;
-		onchange(newValue);
+		value = newValue;
+		onchange?.(newValue);
 	}
 
 	// Validate cron expression (supports 5-field and 6-field with seconds)
@@ -147,6 +153,12 @@
 
 		return parts.every((part) => cronFieldPattern.test(part));
 	}
+
+	// Sync validity to bindable prop so parents can gate Save buttons
+	$effect(() => {
+		const next = !value || !value.trim() ? true : !isValidCron(value);
+		if (invalid !== next) invalid = next;
+	});
 
 	// Human-readable description using cronstrue
 	let humanReadable = $derived(() => {
@@ -202,10 +214,26 @@
 	];
 </script>
 
-<div class="flex items-center gap-2 flex-wrap">
+{#if compact}
+<!-- Compact mode: single-line cron input with preview -->
+<div>
+	<Input
+		{value}
+		oninput={(e) => { value = e.currentTarget.value; onchange?.(e.currentTarget.value); }}
+		placeholder="0 2 * * *"
+		class="h-7 text-xs font-mono {humanReadable() === 'Invalid' ? 'border-destructive' : ''}"
+		{disabled}
+	/>
+	{#if value}
+		{@const readable = humanReadable()}
+		<p class="text-[9px] mt-0.5 {readable === 'Invalid' ? 'text-destructive' : 'text-muted-foreground/60'}">{readable}</p>
+	{/if}
+</div>
+{:else}
+<div class="flex items-center gap-2">
 	<!-- Schedule Type Selector -->
 	<Select.Root type="single" value={scheduleType} onValueChange={handleScheduleTypeChange} {disabled}>
-		<Select.Trigger class="w-[140px] h-9">
+		<Select.Trigger class="w-[120px] h-9 flex-shrink-0">
 			<div class="flex items-center gap-2">
 				{#if scheduleType === 'daily'}
 					<Calendar class="w-4 h-4" />
@@ -245,7 +273,7 @@
 		<!-- Time Selectors -->
 		<span class="text-sm text-muted-foreground">at</span>
 		<Select.Root type="single" value={hour} onValueChange={handleHourChange} {disabled}>
-			<Select.Trigger class="w-[100px] h-9">
+			<Select.Trigger class="w-[85px] h-9 flex-shrink-0">
 				<span>{hours.find((h: { value: string; label: string }) => h.value === hour)?.label || hour}</span>
 			</Select.Trigger>
 			<Select.Content>
@@ -255,7 +283,7 @@
 			</Select.Content>
 		</Select.Root>
 		<Select.Root type="single" value={minute} onValueChange={handleMinuteChange} {disabled}>
-			<Select.Trigger class="w-[70px] h-9">
+			<Select.Trigger class="w-[60px] h-9 flex-shrink-0">
 				<span>{minutes.find(m => m.value === minute)?.label || `:${minute}`}</span>
 			</Select.Trigger>
 			<Select.Content>
@@ -268,7 +296,7 @@
 		{#if scheduleType === 'weekly'}
 			<span class="text-sm text-muted-foreground">on</span>
 			<Select.Root type="single" value={dayOfWeek} onValueChange={handleDayOfWeekChange} {disabled}>
-				<Select.Trigger class="w-[110px] h-9">
+				<Select.Trigger class="w-[100px] h-9 flex-shrink-0">
 					<span>{daysOfWeek.find(d => d.value === dayOfWeek)?.label || dayOfWeek}</span>
 				</Select.Trigger>
 				<Select.Content>
@@ -293,13 +321,12 @@
 	{/if}
 </div>
 
-<!-- Description area with fixed height -->
-<div class="min-h-[20px] mt-1">
-	{#if value}
-		{@const readable = humanReadable()}
-		{@const isInvalid = readable === 'Invalid'}
-		<p class="text-xs {isInvalid ? 'text-destructive' : 'text-muted-foreground'}">
-			{readable}
-		</p>
-	{/if}
-</div>
+<!-- Description -->
+{#if value}
+	{@const readable = humanReadable()}
+	{@const isInvalid = readable === 'Invalid'}
+	<p class="text-[10px] mt-0.5 {isInvalid ? 'text-destructive' : 'text-muted-foreground/60'}">
+		{readable}
+	</p>
+{/if}
+{/if}

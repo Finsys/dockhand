@@ -5,11 +5,13 @@
 
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getAutoUpdateSettingById, updateAutoUpdateSettingById, getGitStack, updateGitStack, getEnvUpdateCheckSettings, setEnvUpdateCheckSettings, getImagePruneSettings, setImagePruneSettings } from '$lib/server/db';
+import { getAutoUpdateSettingById, updateAutoUpdateSettingById, getGitStack, updateGitStack, getEnvUpdateCheckSettings, setEnvUpdateCheckSettings, getImagePruneSettings, setImagePruneSettings, getBackupConfig, updateBackupConfig, getBackupDestination, updateBackupDestination } from '$lib/server/db';
 import { registerSchedule, unregisterSchedule } from '$lib/server/scheduler';
 import { authorize } from '$lib/server/authorize';
+import { auditBackup, auditBackupDestination } from '$lib/server/audit';
 
-export const POST: RequestHandler = async ({ params, cookies }) => {
+export const POST: RequestHandler = async (event) => {
+	const { params, cookies } = event;
 	const auth = await authorize(cookies);
 
 	const permDenied = await auth.requirePermission('schedules', 'edit');
@@ -109,6 +111,56 @@ export const POST: RequestHandler = async ({ params, cookies }) => {
 			} else {
 				unregisterSchedule(scheduleId, 'image_prune');
 			}
+
+			return json({ success: true, enabled: newEnabled });
+		} else if (type === 'backup') {
+			const config = await getBackupConfig(scheduleId);
+			if (!config) {
+				return json({ error: 'Backup config not found' }, { status: 404 });
+			}
+			const envDenied = await auth.requireEnvAccess(config.environmentId);
+			if (envDenied) return envDenied;
+
+			const newEnabled = !config.enabled;
+			await updateBackupConfig(scheduleId, { enabled: newEnabled });
+
+			if (newEnabled && config.schedule) {
+				await registerSchedule(scheduleId, 'backup', config.environmentId);
+			} else {
+				unregisterSchedule(scheduleId, 'backup');
+			}
+
+			await auditBackup(event, 'update', config.targetName, config.environmentId, { configId: scheduleId, enabled: newEnabled });
+
+			return json({ success: true, enabled: newEnabled });
+		} else if (type === 'repo_prune' || type === 'repo_check' || type === 'repo_verify') {
+			// Repo maintenance schedules are policy-driven on the destination.
+			// Toggling flips the corresponding *Enabled flag in the destination's
+			// policies JSON (audit #18). The schedule id is synthetic — decode it
+			// back to the real destination id (same offsets as the run endpoint).
+			const REPO_ID_OFFSET: Record<string, number> = {
+				repo_prune: 100000, repo_check: 200000, repo_verify: 300000
+			};
+			const destId = scheduleId - REPO_ID_OFFSET[type];
+			const dest = await getBackupDestination(destId);
+			if (!dest) {
+				return json({ error: 'Destination not found' }, { status: 404 });
+			}
+
+			const policies = dest.policies
+				? (() => { try { return JSON.parse(dest.policies); } catch { return {}; } })()
+				: {};
+			const enabledKey = type === 'repo_prune' ? 'pruneEnabled'
+				: type === 'repo_check' ? 'checkEnabled' : 'verifyEnabled';
+			const newEnabled = !policies[enabledKey];
+			policies[enabledKey] = newEnabled;
+
+			await updateBackupDestination(destId, { policies: JSON.stringify(policies) });
+
+			// Re-register (or unregister) the repo maintenance job (env-less).
+			await registerSchedule(destId, type, null);
+
+			await auditBackupDestination(event, 'update', destId, dest.name, { policy: enabledKey, enabled: newEnabled });
 
 			return json({ success: true, enabled: newEnabled });
 		} else if (type === 'system_cleanup') {

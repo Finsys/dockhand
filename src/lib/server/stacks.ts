@@ -42,10 +42,12 @@ import {
 } from './db';
 import { getProvider } from './secretproviders';
 import { unregisterSchedule } from './scheduler';
+import { sendEventNotification } from './notifications';
 import { deleteGitStackFiles, parseEnvFileContent } from './git';
 import { cleanPem } from '$lib/utils/pem';
 import { rewriteComposeVolumePaths, getHostDataDir } from './host-path';
 import { getOrderValue } from './container-labels';
+import { pendingRowsToClear } from './pending-updates-core';
 
 // =============================================================================
 // TYPES
@@ -129,6 +131,12 @@ export interface DeployStackOptions {
 	envFileName?: string; // Env filename relative to compose dir (e.g., ".env") for git stacks
 	/** Git deletion sync (#966): files confirmed safe to delete from the stack dir */
 	filesToDelete?: FileToDelete[];
+	/** Set by deployGitStack: this deploy is a git sync, so deployStack must NOT emit
+	 * the stack_deployed/stack_deploy_failed notification — the caller emits the more
+	 * specific git_sync_success/git_sync_failed instead, avoiding a double notification
+	 * (Stack events and Git sync are separate user-facing groups). stack_events is
+	 * still recorded regardless. (#1295) */
+	isGitDeploy?: boolean;
 }
 
 // =============================================================================
@@ -2096,10 +2104,73 @@ export async function requireComposeFile(
 }
 
 /**
+ * Redeploy a stack from a COMPLETE stack directory (the whole tree captured in a
+ * backup snapshot, extracted to `stackDir`), using the ORIGINAL compose filename.
+ * Reproduces the stack 1:1 — `include:`, override files, and sibling configs
+ * referenced by relative paths resolve from the extracted dir, and the compose
+ * file keeps its real name (e.g. immich.yaml). For Hawser envs every file in the
+ * dir is shipped as stackFiles so the remote host gets the full tree too.
+ *
+ * The caller owns `stackDir`'s lifecycle (extract then remove). Throws if the
+ * chosen compose file is missing from the dir.
+ */
+export async function redeployStackFromDir(
+	stackName: string,
+	stackDir: string,
+	composeFileName: string,
+	envId?: number | null
+): Promise<StackOperationResult> {
+	const composePath = join(stackDir, composeFileName);
+	if (!existsSync(composePath)) {
+		throw new Error(`compose file "${composeFileName}" not found in restored stack dir`);
+	}
+	const composeContent = readFileSync(composePath, 'utf-8');
+	if (!composeContent || composeContent.trim().length === 0) {
+		throw new Error('restored compose file is empty; cannot redeploy');
+	}
+	const envPath = join(stackDir, '.env');
+	const hasEnv = existsSync(envPath);
+	const envVars = hasEnv ? parseEnvFileContent(readFileSync(envPath, 'utf-8'), stackName) : undefined;
+	// For Hawser, ship the entire tree (compose + include:d files + sidecars + .env).
+	const stackFiles = await readDirFilesAsMap(stackDir);
+	return await executeComposeCommand(
+		'up',
+		{
+			stackName, envId,
+			workingDir: stackDir,
+			composePath,
+			envPath: hasEnv ? envPath : undefined,
+			composeFileName,
+			stackFiles
+		},
+		composeContent,
+		envVars
+	);
+}
+
+/**
  * Start a stack using docker compose start (resumes stopped containers).
  * Falls back to docker compose up if containers don't exist (stack was removed/down).
  * Falls back to individual container start for stacks without compose files.
  */
+/**
+ * Fire stack_started / stack_stopped after a successful start/stop. Best-effort;
+ * never changes the outcome. Only on success — a failed start/stop is not a
+ * "started/stopped" event. Individual container_started/stopped events still fire
+ * separately off the Docker event stream (different granularity). (#1295)
+ */
+async function notifyStackLifecycle(stackName: string, envId: number | null | undefined, event: 'stack_started' | 'stack_stopped', result: StackOperationResult): Promise<void> {
+	if (!result.success) return;
+	const started = event === 'stack_started';
+	try {
+		await sendEventNotification(event, {
+			title: started ? 'Stack started' : 'Stack stopped',
+			message: `Stack "${stackName}" ${started ? 'started' : 'stopped'}`,
+			type: 'success'
+		}, envId ?? undefined);
+	} catch { /* never changes the outcome */ }
+}
+
 export async function startStack(
 	stackName: string,
 	envId?: number | null
@@ -2108,7 +2179,9 @@ export async function startStack(
 
 	if (!result.success) {
 		// No compose file - fall back to container-based operations
-		return withContainerFallback(stackName, envId, 'start');
+		const fallback = await withContainerFallback(stackName, envId, 'start');
+		await notifyStackLifecycle(stackName, envId, 'stack_started', fallback);
+		return fallback;
 	}
 
 	// Check if this is a git stack - git stacks need useOverrideFile to write .env.dockhand
@@ -2127,13 +2200,15 @@ export async function startStack(
 		await applyOpReferencesToComposeResult(result, stackName, envId, `[Stack:${stackName}]`);
 	}
 
-	return executeComposeCommand(
+	const startResult = await executeComposeCommand(
 		operation,
 		opts,
 		result.content!,
 		result.nonSecretVars,
 		result.secretVars
 	);
+	await notifyStackLifecycle(stackName, envId, 'stack_started', startResult);
+	return startResult;
 }
 
 /**
@@ -2148,7 +2223,9 @@ export async function stopStack(
 
 	if (!result.success) {
 		// No compose file - fall back to container-based operations
-		return withContainerFallback(stackName, envId, 'stop');
+		const fallback = await withContainerFallback(stackName, envId, 'stop');
+		await notifyStackLifecycle(stackName, envId, 'stack_stopped', fallback);
+		return fallback;
 	}
 
 	const composeResult = await executeComposeCommand(
@@ -2162,6 +2239,7 @@ export async function stopStack(
 	// Stop any dynamically-spawned child containers not in the compose file
 	await cleanupOrphanStackContainers(stackName, envId, 'stop');
 
+	await notifyStackLifecycle(stackName, envId, 'stack_stopped', composeResult);
 	return composeResult;
 }
 
@@ -2459,11 +2537,73 @@ export async function removeStack(
 }
 
 /**
+ * Fire the stack_deployed / stack_deploy_failed notification for a completed deploy.
+ * Called from the single deployStack() return point, so EVERY deploy path (local,
+ * Hawser, git webhook/manual) dispatches it — previously nothing did, so these
+ * notifications never fired (#1295). Best-effort: a notification failure never changes
+ * the deploy outcome (mirrors backups/index.ts notify()).
+ */
+async function notifyStackDeploy(name: string, envId: number | null | undefined, result: StackOperationResult, isGitDeploy: boolean): Promise<void> {
+	const eventType = result.success ? 'stack_deployed' : 'stack_deploy_failed';
+	// A git deploy suppresses the stack_* notification — deployGitStack emits the more
+	// specific git_sync_success/git_sync_failed instead (no double notification).
+	if (isGitDeploy) return;
+	try {
+		await sendEventNotification(eventType, {
+			title: result.success ? 'Stack deployed' : 'Stack deploy failed',
+			message: result.success
+				? `Stack "${name}" deployed successfully`
+				: `Stack "${name}" deploy failed: ${result.error || 'unknown error'}`,
+			type: result.success ? 'success' : 'error'
+		}, envId ?? undefined);
+	} catch { /* never changes the deploy outcome */ }
+}
+
+/**
+ * After a pulled stack redeploy, clear the dashboard "pending update" rows for this
+ * stack's containers now on the newest local image (#1311). Fire-and-forget: fully
+ * wrapped so nothing here can affect the already-succeeded deploy; only DELETEs rows.
+ */
+async function reconcileStackPendingUpdates(stackName: string, envId: number): Promise<void> {
+	try {
+		const pending = await getPendingContainerUpdates(envId);
+		if (!pending || pending.length === 0) return;
+
+		const { listContainers, getImageIdByTag } = await import('./docker.js');
+		const containers = await listContainers(true, envId);
+		const live = containers.map((c) => ({
+			name: c.name,
+			imageId: c.imageId,
+			project: c.labels?.['com.docker.compose.project']
+		}));
+
+		// Resolve each distinct pending tag to its newest local image id once.
+		const tagCache = new Map<string, string | null>();
+		for (const p of pending) {
+			if (!tagCache.has(p.currentImage)) {
+				try {
+					tagCache.set(p.currentImage, await getImageIdByTag(p.currentImage, envId));
+				} catch {
+					tagCache.set(p.currentImage, null); // unresolvable → keep (fail-safe)
+				}
+			}
+		}
+
+		const toClear = pendingRowsToClear(pending, live, (tag) => tagCache.get(tag) ?? null, stackName);
+		for (const id of toClear) {
+			await removePendingContainerUpdate(envId, id).catch(() => {});
+		}
+	} catch {
+		// Never let update-badge cleanup affect a deploy that already succeeded.
+	}
+}
+
+/**
  * Deploy a stack (create or update)
  * Uses stack locking to prevent concurrent deployments.
  */
 export async function deployStack(options: DeployStackOptions): Promise<StackOperationResult> {
-	const { name, compose, envId, sourceDir, forceRecreate, build, noBuildCache, pullPolicy, composePath, envPath, composeFileName, envFileName, filesToDelete } = options;
+	const { name, compose, envId, sourceDir, forceRecreate, build, noBuildCache, pullPolicy, composePath, envPath, composeFileName, envFileName, filesToDelete, isGitDeploy } = options;
 	const logPrefix = `[Stack:${name}]`;
 
 	console.log(`${logPrefix} ========================================`);
@@ -2667,6 +2807,20 @@ export async function deployStack(options: DeployStackOptions): Promise<StackOpe
 		// for local deployments the local applier's result is the truth.
 		if (!result.deletion && localDeletionResult) {
 			result.deletion = localDeletionResult;
+		}
+		// Fire stack_deployed / stack_deploy_failed. This is the single point every deploy
+		// path funnels through, so all of them notify (#1295). A git deploy suppresses the
+		// stack_* notification (deployGitStack sends git_sync_*).
+		await notifyStackDeploy(name, envId, result, isGitDeploy ?? false);
+
+		// Clear stale pending-update badges (#1311). Fire-and-forget with a timeout so a
+		// slow Docker API can't delay or affect the already-succeeded deploy.
+		if (result.success && pullPolicy && typeof envId === 'number') {
+			const envIdNum = envId;
+			void Promise.race([
+				reconcileStackPendingUpdates(name, envIdNum),
+				new Promise<void>((resolve) => setTimeout(resolve, 15000))
+			]).catch(() => {});
 		}
 		return result;
 	});

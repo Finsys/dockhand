@@ -38,6 +38,34 @@ export function parseImageNameAndTag(imageName: string): [string, string] {
 }
 
 /**
+ * Classify a container whose RUNNING image carries NO local repo digests (#1288).
+ *
+ * An empty RepoDigests set is ambiguous: it is what you see BOTH for a genuinely
+ * local/built image (nothing to check against a registry) AND for a registry image
+ * whose tag has since moved to a newer pull — leaving the container on an old,
+ * now-untagged, digest-less image. The old code assumed "empty digests ⇒ local" and
+ * skipped the update check forever, stranding exactly the containers that DO need an
+ * update.
+ *
+ * The tie-breaker is whether the registry could resolve the container's Config.Image
+ * tag (looked up separately, since that's async I/O):
+ *  - registry answered  ⇒ it's a registry image, and since the running image has no
+ *    digest to match, an update is available.
+ *  - registry didn't    ⇒ truly local (or unreachable) ⇒ leave it classified local.
+ *
+ * @param registryDigest the digest returned for Config.Image's tag, or null/undefined
+ *                        if the registry couldn't resolve it.
+ */
+export function classifyEmptyDigestImage(
+	registryDigest: string | null | undefined
+): { hasUpdate: boolean; isLocalImage: boolean; registryDigest?: string } {
+	if (!registryDigest) {
+		return { hasUpdate: false, isLocalImage: true };
+	}
+	return { hasUpdate: true, isLocalImage: false, registryDigest };
+}
+
+/**
  * Determine if an update should be blocked based on vulnerability criteria.
  */
 export function shouldBlockUpdate(

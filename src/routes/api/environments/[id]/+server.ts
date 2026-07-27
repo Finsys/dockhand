@@ -2,7 +2,7 @@ import { json } from '@sveltejs/kit';
 import { join } from 'path';
 import { existsSync, rmSync, renameSync } from 'fs';
 import type { RequestHandler } from './$types';
-import { getEnvironment, updateEnvironment, deleteEnvironment, getEnvironmentPublicIps, setEnvironmentPublicIp, deleteEnvironmentPublicIp, deleteEnvUpdateCheckSettings, deleteImagePruneSettings, getGitStacksForEnvironmentOnly, deleteGitStack } from '$lib/server/db';
+import { getEnvironment, updateEnvironment, deleteEnvironment, getEnvironmentPublicIps, setEnvironmentPublicIp, deleteEnvironmentPublicIp, deleteEnvUpdateCheckSettings, deleteImagePruneSettings, getGitStacksForEnvironmentOnly, deleteGitStack, getBackupConfigs } from '$lib/server/db';
 import { clearDockerClientCache } from '$lib/server/docker';
 import { deleteGitStackFiles, getGitReposDir } from '$lib/server/git';
 import { getStacksDir } from '$lib/server/stacks';
@@ -252,6 +252,18 @@ export const DELETE: RequestHandler = async (event) => {
 		// Clean up image prune settings and unregister schedule
 		await deleteImagePruneSettings(id);
 		unregisterSchedule(id, 'image_prune');
+
+		// Unregister backup config schedules for this environment (audit #10).
+		// The config rows themselves cascade-delete with the environment, but the
+		// in-memory croner jobs would otherwise stay registered as orphans.
+		try {
+			const envBackupConfigs = await getBackupConfigs({ environmentId: id });
+			for (const config of envBackupConfigs) {
+				unregisterSchedule(config.id, 'backup');
+			}
+		} catch (err) {
+			console.error(`Failed to unregister backup schedules for environment "${env.name}":`, err);
+		}
 
 		// Clean up stack directory for this environment
 		// Safety: only delete subdirectory named after the env, never the parent

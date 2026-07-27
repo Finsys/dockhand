@@ -4,6 +4,22 @@ import net from 'node:net';
 
 const origLookup = dns.lookup.bind(dns);
 
+// DNS_RESULT_ORDER lets operators opt out of Dockhand's default IPv4-first pinning.
+//
+// By default Dockhand forces IPv4 (entrypoint: --dns-result-order=ipv4first
+// --no-network-family-autoselection) so outbound fetch never tries IPv6 on Docker
+// networks that lack IPv6 routing (#676 — each IPv6 attempt would hang and eat the
+// connect timeout). On hosts where the CONTAINER's IPv4 egress is broken while IPv6
+// works (a firewall dropping bridged IPv4, or a dual-stack setup), that pinning
+// guarantees `fetch failed` even though IPv6 would succeed (#1293, #777, #1115).
+//
+// Setting DNS_RESULT_ORDER=verbatim (or ipv6first) re-enables the OS-native order
+// plus Happy Eyeballs and, crucially, SKIPS Dockhand's custom IPv4-only DNS
+// dispatcher entirely — falling back to plain undici + Node's native resolver. This
+// keeps the risky path opt-in: unset (the default) runs the exact same code as before.
+const DNS_RESULT_ORDER = (process.env.DNS_RESULT_ORDER || '').trim().toLowerCase();
+const ALLOW_IPV6 = DNS_RESULT_ORDER === 'verbatim' || DNS_RESULT_ORDER === 'ipv6first';
+
 // DNS cache: hostname → { address, family, expiresAt } (positive)
 // DNS negative cache: hostname → { error, expiresAt } (failed lookups)
 const dnsCache = new Map<string, { address: string; family: number; expiresAt: number }>();
@@ -93,7 +109,26 @@ const connectOptions = {
 const hasProxy = process.env.HTTP_PROXY || process.env.HTTPS_PROXY ||
 	process.env.http_proxy || process.env.https_proxy;
 
-if (hasProxy) {
+if (ALLOW_IPV6) {
+	// Opt-in IPv6 fallback: undo the entrypoint's IPv4 pinning from within the process
+	// (both flags are overridable at runtime — verified) and DON'T install the custom
+	// IPv4-only dispatcher. Plain undici + Node's native resolver then honors the
+	// OS-native order and Happy Eyeballs, so a dead IPv4 path falls back to IPv6.
+	try {
+		dns.setDefaultResultOrder(DNS_RESULT_ORDER as 'verbatim' | 'ipv6first');
+		net.setDefaultAutoSelectFamily(true);
+	} catch (e) {
+		console.warn(`[DNS] Could not apply DNS_RESULT_ORDER=${DNS_RESULT_ORDER}:`, e);
+	}
+	console.log(`[DNS] DNS_RESULT_ORDER=${DNS_RESULT_ORDER} — IPv6 fallback enabled, using native resolver`);
+	if (hasProxy) {
+		const proxyUrl = process.env.HTTPS_PROXY || process.env.https_proxy ||
+			process.env.HTTP_PROXY || process.env.http_proxy;
+		console.log(`[DNS] HTTP proxy detected (${proxyUrl}), using EnvHttpProxyAgent`);
+		setGlobalDispatcher(new EnvHttpProxyAgent());
+	}
+	// else: leave undici's built-in global dispatcher untouched.
+} else if (hasProxy) {
 	const proxyUrl = process.env.HTTPS_PROXY || process.env.https_proxy ||
 		process.env.HTTP_PROXY || process.env.http_proxy;
 	console.log(`[DNS] HTTP proxy detected (${proxyUrl}), using EnvHttpProxyAgent`);

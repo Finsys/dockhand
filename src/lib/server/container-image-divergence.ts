@@ -3,18 +3,16 @@
  * container and its image. Pure read-only — never used to mutate
  * the container; used only to power UI hints.
  *
- * Background: as of #1135 / commit 0f989bd7 revert, Dockhand no
- * longer "merges" image-baked env or labels into a container during
- * auto-update. The container's Config.Env and Config.Labels are
- * preserved verbatim (so a user's runtime `-e` / `-l` override is
- * never silently wiped). The trade-off, originally raised by #1061,
- * is that an image's updated default env/label values do not
- * automatically propagate to running containers.
+ * Background: on update, Dockhand rebases env/labels onto the new image
+ * (#1226, #1256) — image-baked values the user never overrode are refreshed
+ * to the new image, while runtime `-e`/`-l` overrides are preserved (the
+ * #1135 contract). See container-env-merge.ts.
  *
- * These helpers let the UI surface "this container's value differs
- * from the image's current value" so users can decide whether to
- * Remove & Deploy. We do NOT try to classify "user-set vs
- * image-baked" — that information isn't recoverable from Docker.
+ * These helpers power a UI hint only: they report keys whose container value
+ * differs from the image's CURRENT value. They compare container-vs-image at
+ * display time and cannot themselves classify "user override vs stale
+ * image-baked" (that needs the OLD image, captured only at update time), so
+ * the hint's wording covers both cases.
  */
 
 /** Parse a Docker env list (`KEY=value` strings) into a Map. */

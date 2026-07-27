@@ -136,6 +136,32 @@ export const environmentColumns: ColumnConfig[] = [
 	{ id: 'labels', label: 'Labels', width: 150, minWidth: 80 }
 ];
 
+// Backups page grid columns (parent-child: configs → snapshots)
+export const backupColumns: ColumnConfig[] = [
+	{ id: 'expand', label: '', fixed: 'start', width: 24, resizable: false },
+	{ id: 'name', label: 'Name', sortable: true, sortField: 'targetName', width: 160, minWidth: 100, grow: true },
+	{ id: 'type', label: 'Type', sortable: true, sortField: 'type', width: 50, minWidth: 40, resizable: false, align: 'center' as any, hint: 'Container or stack backup' },
+	{ id: 'environment', label: 'Environment', sortable: true, sortField: 'environmentName', width: 120, minWidth: 80 },
+	{ id: 'repository', label: 'Repository', sortable: true, sortField: 'destinationName', width: 120, minWidth: 80, hint: 'Backup destination (S3, REST, local, etc.)' },
+	{ id: 'snapshots', label: 'Snapshots', width: 75, minWidth: 55, align: 'center' as any },
+	{ id: 'lastBackup', label: 'Last backup', sortable: true, sortField: 'lastBackupAt', width: 150, minWidth: 100 },
+	{ id: 'retention', label: 'Retention', width: 120, minWidth: 80 },
+	{ id: 'schedule', label: 'Schedule', width: 110, minWidth: 80 },
+	{ id: 'status', label: 'Status', sortable: true, sortField: 'lastBackupStatus', width: 75, resizable: false, align: 'center' as any, hint: 'Last backup status' },
+	{ id: 'actions', label: '', fixed: 'end', width: 100, resizable: false }
+];
+
+// Backup destination grid columns
+export const backupDestinationColumns: ColumnConfig[] = [
+	{ id: 'type', label: 'Type', width: 80, minWidth: 60, resizable: false },
+	{ id: 'name', label: 'Name', sortable: true, sortField: 'name', width: 180, minWidth: 120, grow: true },
+	{ id: 'repository', label: 'Repository', width: 280, minWidth: 150, grow: true },
+	{ id: 'usage', label: 'Usage', width: 100, minWidth: 70 },
+	{ id: 'stats', label: 'Stats', width: 140, minWidth: 100 },
+	{ id: 'status', label: 'Status', width: 110, minWidth: 80 },
+	{ id: 'actions', label: '', fixed: 'end', width: 300, resizable: false }
+];
+
 // Vulnerabilities dashboard grid columns
 export const vulnerabilityColumns: ColumnConfig[] = [
 	{ id: 'cve', label: 'CVE', sortable: true, sortField: 'cve', width: 160, minWidth: 110 },
@@ -163,6 +189,8 @@ export const gridColumnConfigs: Record<GridId, ColumnConfig[]> = {
 	schedules: scheduleColumns,
 	audit: auditColumns,
 	environments: environmentColumns,
+	backupDestinations: backupDestinationColumns,
+	backups: backupColumns,
 	vulnerabilities: vulnerabilityColumns
 };
 

@@ -3,6 +3,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Loader2, Network } from 'lucide-svelte';
+	import ModalHeader from '$lib/components/ModalHeader.svelte';
 	import { currentEnvironment, appendEnvParam } from '$lib/stores/environment';
 	import { formatDateTime } from '$lib/stores/settings';
 	import ContainerTile from '../containers/ContainerTile.svelte';
@@ -62,15 +63,12 @@
 </script>
 
 <Dialog.Root bind:open>
-	<Dialog.Content class="max-w-4xl max-h-[90vh] flex flex-col">
+	<Dialog.Content class="max-w-4xl max-h-[90vh] flex flex-col" onOpenAutoFocus={(e) => e.preventDefault()}>
 		<Dialog.Header class="shrink-0">
-			<Dialog.Title class="flex items-center gap-2">
-				<Network class="w-5 h-5" />
-				Network details: <span class="text-muted-foreground font-normal">{networkName || networkId.slice(0, 12)}</span>
-			</Dialog.Title>
+			<ModalHeader icon={Network} title="Network" name={networkName || networkId} />
 		</Dialog.Header>
 
-		<div class="flex-1 overflow-auto space-y-4 min-h-0">
+		<div class="flex-1 overflow-auto space-y-4 min-h-0 pr-2">
 			{#if loading}
 				<div class="flex items-center justify-center py-8">
 					<Loader2 class="w-6 h-6 animate-spin text-muted-foreground" />

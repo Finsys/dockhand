@@ -3,6 +3,7 @@
 	import { HardDrive, Lock, Container } from 'lucide-svelte';
 	import { Badge } from '$lib/components/ui/badge';
 	import FileBrowserPanel from '../containers/FileBrowserPanel.svelte';
+	import ModalHeader from '$lib/components/ModalHeader.svelte';
 
 	interface VolumeUsageInfo {
 		containerId: string;
@@ -50,18 +51,18 @@
 </script>
 
 <Dialog.Root bind:open onOpenChange={handleOpenChange}>
-	<Dialog.Content class="max-w-4xl h-[90vh] sm:h-[80vh] flex flex-col">
+	<Dialog.Content class="max-w-4xl h-[90vh] sm:h-[80vh] flex flex-col" onOpenAutoFocus={(e) => e.preventDefault()}>
 		<Dialog.Header>
-			<Dialog.Title class="flex items-center gap-2">
-				<HardDrive class="w-5 h-5" />
-				<span>Browse volume - {volumeName}</span>
-				{#if isInUse}
-					<Badge variant="secondary" class="flex items-center gap-1 ml-2">
-						<Lock class="w-3 h-3" />
-						<span>Read-only</span>
-					</Badge>
-				{/if}
-			</Dialog.Title>
+			<ModalHeader icon={HardDrive} title="Browse volume" name={volumeName}>
+				{#snippet extra()}
+					{#if isInUse}
+						<Badge variant="secondary" class="flex items-center gap-1">
+							<Lock class="w-3 h-3" />
+							<span>Read-only</span>
+						</Badge>
+					{/if}
+				{/snippet}
+			</ModalHeader>
 			<Dialog.Description>
 				{#if isInUse}
 					<span class="flex items-center gap-1.5 flex-wrap">

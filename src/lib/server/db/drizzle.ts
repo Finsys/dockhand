@@ -655,6 +655,11 @@ async function initializeDatabase() {
 		if (verbose) logStep('Opening SQLite database...');
 		rawClient = new Database(dbPath);
 
+		// Enforce foreign keys — better-sqlite3 defaults this OFF, which made every
+		// ON DELETE CASCADE in the schema (backup_configs → environments/destinations,
+		// etc.) dead code, leaving dangling rows + ghost schedules after a delete
+		// (audit #12). Must be set per-connection, before any statements run.
+		rawClient.pragma('foreign_keys = ON');
 		// Enable WAL mode for better performance and concurrency
 		rawClient.pragma('journal_mode = WAL');
 		// Synchronous NORMAL is a good balance between safety and speed
@@ -928,6 +933,8 @@ export const scheduleExecutions = schemaProxy.scheduleExecutions;
 export const stackEnvironmentVariables = schemaProxy.stackEnvironmentVariables;
 export const pendingContainerUpdates = schemaProxy.pendingContainerUpdates;
 export const apiTokens = schemaProxy.apiTokens;
+export const backupDestinations = schemaProxy.backupDestinations;
+export const backupConfigs = schemaProxy.backupConfigs;
 
 // Re-export types from SQLite schema (they're compatible with PostgreSQL)
 export type {
@@ -990,7 +997,11 @@ export type {
 	PendingContainerUpdate,
 	NewPendingContainerUpdate,
 	ApiToken,
-	NewApiToken
+	NewApiToken,
+	BackupDestination,
+	NewBackupDestination,
+	BackupConfig,
+	NewBackupConfig
 } from './schema/index.js';
 
 export { eq, and, or, desc, asc, like, sql, inArray, isNull, isNotNull } from 'drizzle-orm';

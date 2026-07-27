@@ -21,7 +21,7 @@
 			type = 'trivy';
 		} else if (content.startsWith('[grype]')) {
 			type = 'grype';
-		} else if (content.toLowerCase().includes('error')) {
+		} else if (/\berrors?\b/i.test(content) && !/\bno\s+errors?\b/i.test(content)) {
 			type = 'error';
 		}
 

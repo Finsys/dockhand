@@ -30,7 +30,11 @@ import {
 	getAllImagePruneSettings,
 	getEnvironment,
 	getEnvironmentTimezone,
-	getDefaultTimezone
+	getDefaultTimezone,
+	getBackupConfig,
+	getEnabledBackupConfigs,
+	getBackupDestinations,
+	getBackupDestination
 } from '../db';
 import { db, gitStacks, eq } from '../db/drizzle.js';
 import {
@@ -43,6 +47,10 @@ import { runContainerUpdate } from './tasks/container-update';
 import { runGitStackSync } from './tasks/git-stack-sync';
 import { runEnvUpdateCheckJob } from './tasks/env-update-check';
 import { runImagePrune } from './tasks/image-prune';
+import { runScheduledBackup } from './tasks/backup';
+import { runRepoPrune, runRepoCheck, runRepoVerify } from './tasks/repo-maintenance';
+import { parsePoliciesJson } from '../backups/helpers';
+import { BACKUPS_ENABLED } from '../features';
 import {
 	runScheduleCleanupJob,
 	runEventCleanupJob,
@@ -130,6 +138,45 @@ export async function startScheduler(): Promise<void> {
 
 	// Clean up stale sync states from previous crashed processes
 	await cleanupStaleSyncStates();
+
+	// Mark any schedule execution still 'queued'/'running' as failed (audit
+	// #49/#50) — a crash mid-run otherwise leaves the row perpetually in-progress.
+	try {
+		const { failStaleRunningExecutions } = await import('../db');
+		const swept = await failStaleRunningExecutions();
+		if (swept > 0) console.log(`[Scheduler] Marked ${swept} interrupted execution(s) as failed`);
+	} catch (err) {
+		console.warn(`[Scheduler] Stale-execution sweep failed: ${err instanceof Error ? err.message : String(err)}`);
+	}
+
+	// BETA GATE: backup startup recovery only runs when FEAT_BACKUPS_ENABLED (see features.ts).
+	if (BACKUPS_ENABLED) {
+		// Reap orphan backup/restore helper containers left by a crashed process BEFORE
+		// any backup can run — otherwise the next backup's repo unlock could wipe a lock
+		// an orphan restic is still holding. Runs before the engine reconciliation below
+		// so no live helper from a crashed run is still mid-operation.
+		try {
+			const { cleanupStaleBackupHelpers } = await import('../docker');
+			const envs = await getEnvironments();
+			const reaped = await cleanupStaleBackupHelpers(envs);
+			if (reaped > 0) console.log(`[Scheduler] Reaped ${reaped} orphan backup helper container(s) from a previous run`);
+		} catch (err) {
+			console.warn(`[Scheduler] Orphan helper reap failed: ${err instanceof Error ? err.message : String(err)}`);
+		}
+
+		// New backup/restore engine: roll back any restore swap it left interrupted,
+		// then scrub operations left `running` by a dead process. Runs after the orphan
+		// helper reap above; it recovers swaps recorded by the engine's journal.
+		try {
+			const { reconcileOnStartup } = await import('../backups');
+			const { swapsRolledBack, containersRestarted, opsScrubbed } = await reconcileOnStartup();
+			if (swapsRolledBack > 0) console.log(`[Scheduler] Rolled back ${swapsRolledBack} interrupted restore swap(s)`);
+			if (containersRestarted > 0) console.log(`[Scheduler] Restarted ${containersRestarted} target(s) left stopped for backup/restore`);
+			if (opsScrubbed > 0) console.log(`[Scheduler] Scrubbed ${opsScrubbed} interrupted operation(s)`);
+		} catch (err) {
+			console.warn(`[Scheduler] Backup engine startup reconciliation failed: ${err instanceof Error ? err.message : String(err)}`);
+		}
+	}
 
 	// Get cron expressions and default timezone from database
 	const scheduleCleanupCron = await getScheduleCleanupCron();
@@ -312,7 +359,54 @@ export async function refreshAllSchedules(): Promise<void> {
 		console.error('[Scheduler] Error loading image prune schedules:', errorMsg);
 	}
 
-	console.log(`[Scheduler] Registered ${containerCount} container schedules, ${gitStackCount} git stack schedules, ${envUpdateCheckCount} env update check schedules, ${imagePruneCount} image prune schedules`);
+	// Register backup + repo-maintenance schedules.
+	// BETA GATE: skip entirely unless FEAT_BACKUPS_ENABLED (see features.ts).
+	let backupCount = 0;
+	let repoPruneCount = 0;
+	let repoCheckCount = 0;
+	let repoVerifyCount = 0;
+	if (BACKUPS_ENABLED) {
+		try {
+			const backupConfigs = await getEnabledBackupConfigs();
+			for (const config of backupConfigs) {
+				if (config.schedule) {
+					const registered = await registerSchedule(
+						config.id,
+						'backup',
+						config.environmentId
+					);
+					if (registered) backupCount++;
+				}
+			}
+		} catch (error) {
+			const errorMsg = error instanceof Error ? error.message : String(error);
+			console.error('[Scheduler] Error loading backup schedules:', errorMsg);
+		}
+
+		// Register repo maintenance schedules (prune + check + verify from destination policies)
+		try {
+			const destinations = await getBackupDestinations();
+			for (const dest of destinations) {
+				const policies = parsePoliciesJson(dest.policies); // (audit #26) logs on malformed JSON
+				if (policies.pruneEnabled && policies.pruneSchedule) {
+					const registered = await registerSchedule(dest.id, 'repo_prune', null);
+					if (registered) repoPruneCount++;
+				}
+				if (policies.checkEnabled && policies.checkSchedule) {
+					const registered = await registerSchedule(dest.id, 'repo_check', null);
+					if (registered) repoCheckCount++;
+				}
+				if (policies.verifyEnabled && policies.verifySchedule) {
+					const registered = await registerSchedule(dest.id, 'repo_verify', null);
+					if (registered) repoVerifyCount++;
+				}
+			}
+		} catch (error) {
+			console.error('[Scheduler] Error loading repo maintenance schedules:', error instanceof Error ? error.message : String(error));
+		}
+	}
+
+	console.log(`[Scheduler] Registered ${containerCount} container schedules, ${gitStackCount} git stack schedules, ${envUpdateCheckCount} env update check schedules, ${imagePruneCount} image prune schedules, ${backupCount} backup schedules, ${repoPruneCount} repo prune schedules, ${repoCheckCount} repo check schedules, ${repoVerifyCount} repo verify schedules`);
 }
 
 /**
@@ -321,7 +415,7 @@ export async function refreshAllSchedules(): Promise<void> {
  */
 export async function registerSchedule(
 	scheduleId: number,
-	type: 'container_update' | 'git_stack_sync' | 'env_update_check' | 'image_prune',
+	type: 'container_update' | 'git_stack_sync' | 'env_update_check' | 'image_prune' | 'backup' | 'repo_prune' | 'repo_check' | 'repo_verify',
 	environmentId: number | null
 ): Promise<boolean> {
 	const key = `${type}-${scheduleId}`;
@@ -363,6 +457,29 @@ export async function registerSchedule(
 			cronExpression = config.cronExpression;
 			entityName = `Prune: ${env.name}`;
 			enabled = config.enabled;
+		} else if (type === 'backup') {
+			const config = await getBackupConfig(scheduleId);
+			if (!config) return false;
+			cronExpression = config.schedule;
+			entityName = `Backup: ${config.targetName}`;
+			enabled = config.enabled ?? false;
+		} else if (type === 'repo_prune' || type === 'repo_check' || type === 'repo_verify') {
+			const dest = await getBackupDestination(scheduleId);
+			if (!dest) return false;
+			const policies = parsePoliciesJson(dest.policies); // (audit #26) logs on malformed JSON
+			if (type === 'repo_prune') {
+				cronExpression = policies.pruneSchedule || null;
+				entityName = `Prune: ${dest.name}`;
+				enabled = policies.pruneEnabled ?? false;
+			} else if (type === 'repo_check') {
+				cronExpression = policies.checkSchedule || null;
+				entityName = `Check: ${dest.name}`;
+				enabled = policies.checkEnabled ?? false;
+			} else {
+				cronExpression = policies.verifySchedule || null;
+				entityName = `Verify: ${dest.name}`;
+				enabled = policies.verifyEnabled ?? false;
+			}
 		}
 
 		// Don't create job if disabled or no cron expression
@@ -370,8 +487,10 @@ export async function registerSchedule(
 			return false;
 		}
 
-		// Get timezone for this environment
-		const timezone = environmentId ? await getEnvironmentTimezone(environmentId) : 'UTC';
+		// Get timezone for this environment. Env-scoped jobs use the environment's
+		// timezone; env-less jobs (repo maintenance) fall back to the configured
+		// default timezone rather than a hardcoded 'UTC' (audit #5).
+		const timezone = environmentId ? await getEnvironmentTimezone(environmentId) : await getDefaultTimezone();
 
 		// Create new Cron instance with timezone.
 		// protect: skip a scheduled tick if the previous run is still in progress
@@ -395,6 +514,28 @@ export async function registerSchedule(
 				const config = await getImagePruneSettings(scheduleId);
 				if (!config || !config.enabled) return;
 				await runImagePrune(scheduleId, 'cron');
+			} else if (type === 'backup') {
+				const config = await getBackupConfig(scheduleId);
+				if (!config || !config.enabled) return;
+				await runScheduledBackup(scheduleId, config.targetName, environmentId, 'cron');
+			} else if (type === 'repo_prune') {
+				const dest = await getBackupDestination(scheduleId);
+				if (!dest) return;
+				const pol = parsePoliciesJson(dest.policies); // (audit #26) logs on malformed JSON
+				if (!pol.pruneEnabled) return;
+				await runRepoPrune(scheduleId, dest.name, 'cron');
+			} else if (type === 'repo_check') {
+				const dest = await getBackupDestination(scheduleId);
+				if (!dest) return;
+				const pol = parsePoliciesJson(dest.policies); // (audit #26) logs on malformed JSON
+				if (!pol.checkEnabled) return;
+				await runRepoCheck(scheduleId, dest.name, 'cron');
+			} else if (type === 'repo_verify') {
+				const dest = await getBackupDestination(scheduleId);
+				if (!dest) return;
+				const pol = parsePoliciesJson(dest.policies); // (audit #26) logs on malformed JSON
+				if (!pol.verifyEnabled) return;
+				await runRepoVerify(scheduleId, dest.name, pol.verifyDataSubset || '5%', 'cron');
 			}
 		});
 
@@ -414,7 +555,7 @@ export async function registerSchedule(
  */
 export function unregisterSchedule(
 	scheduleId: number,
-	type: 'container_update' | 'git_stack_sync' | 'env_update_check' | 'image_prune'
+	type: 'container_update' | 'git_stack_sync' | 'env_update_check' | 'image_prune' | 'backup' | 'repo_prune' | 'repo_check' | 'repo_verify'
 ): void {
 	const key = `${type}-${scheduleId}`;
 	const job = activeJobs.get(key);
@@ -501,6 +642,27 @@ export async function refreshSchedulesForEnvironment(environmentId: number): Pro
 	} catch (error) {
 		const errorMsg = error instanceof Error ? error.message : String(error);
 		console.error('[Scheduler] Error refreshing image prune schedule:', errorMsg);
+	}
+
+	// Re-register backup schedules for this environment (audit #11)
+	// BETA GATE: skip unless FEAT_BACKUPS_ENABLED (see features.ts).
+	if (BACKUPS_ENABLED) {
+		try {
+			const backupConfigs = await getEnabledBackupConfigs();
+			for (const config of backupConfigs) {
+				if (config.environmentId === environmentId && config.schedule) {
+					const registered = await registerSchedule(
+						config.id,
+						'backup',
+						config.environmentId
+					);
+					if (registered) refreshedCount++;
+				}
+			}
+		} catch (error) {
+			const errorMsg = error instanceof Error ? error.message : String(error);
+			console.error('[Scheduler] Error refreshing backup schedules:', errorMsg);
+		}
 	}
 
 	console.log(`[Scheduler] Refreshed ${refreshedCount} schedules for environment ${environmentId}`);

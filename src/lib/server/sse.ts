@@ -27,13 +27,19 @@ export function createJobResponse(
 		const stream = new ReadableStream({
 			async start(controller) {
 				let resultData: unknown = { success: false, error: 'No result' };
-				const send = (_event: string, data: unknown) => {
-					resultData = data;
+				let sentResult = false;
+				const send = (event: string, data: unknown) => {
+					// Keep the last 'result' payload as the response body. A handler
+					// may send progress events and then throw (e.g. a backup that
+					// returns { status: 'error' } and rethrows), so preserve the
+					// structured result rather than replacing it with a bare error.
+					if (event === 'result') { resultData = data; sentResult = true; }
+					else if (!sentResult) resultData = data;
 				};
 				try {
 					await operation(send, () => false);
 				} catch (error) {
-					resultData = { success: false, error: String(error) };
+					if (!sentResult) resultData = { success: false, error: String(error) };
 				}
 				controller.enqueue(encoder.encode(JSON.stringify(resultData)));
 				controller.close();

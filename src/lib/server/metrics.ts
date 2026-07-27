@@ -18,7 +18,7 @@ import { Registry, collectDefaultMetrics, Gauge } from 'prom-client';
 import {
 	getEnvironments, getContainerEventStats, getPendingContainerUpdates,
 	getUsers, getRegistries, getScanFreshness, getScheduleStats,
-	getGitRepositories, getConfigSets
+	getGitRepositories, getConfigSets, getBackupConfigMetrics
 } from '$lib/server/db';
 import { getApiTokenStats } from '$lib/server/api-tokens';
 import { listContainers, listImages, listVolumes, listNetworks } from '$lib/server/docker';
@@ -98,6 +98,10 @@ const apiTokens = g('api_tokens', 'API tokens by state.', ['state']);
 const scheduleExec = g('schedule_executions', 'Scheduled task executions by type and status.', ['type', 'status']);
 const scheduleLastRun = g('schedule_last_run_seconds', 'Age of the last execution, by schedule type.', ['type']);
 const scheduleLastSuccess = g('schedule_last_success_seconds', 'Age of the last SUCCESSFUL execution, by schedule type.', ['type']);
+// Per-backup-config visibility (audit medium #16) so one silently-failing target
+// is alertable, not hidden behind the type-level aggregates above.
+const backupLastSuccess = g('backup_last_success_seconds', 'Age of the last successful backup, per config.', ['config_id', 'target', 'env']);
+const backupLastStatus = g('backup_last_status', 'Last backup status per config (1=success, 0=failed/unknown).', ['config_id', 'target', 'env']);
 const hawserAgents = g('hawser_agents_connected', 'Connected hawser edge agents.');
 const hawserPending = g('hawser_pending_requests', 'In-flight requests across all edge agents.');
 const hawserAgentInfo = g('hawser_agent_info', 'Connected edge agent info; value is connection age in seconds.', ['env_id', 'agent', 'agent_version', 'docker_version', 'hostname']);
@@ -235,6 +239,19 @@ async function collectInternals(envCount: number): Promise<void> {
 		for (const r of s.byTypeStatus) scheduleExec.set({ type: r.type, status: r.status }, r.count);
 		for (const [type, age] of Object.entries(s.lastRunSecondsByType)) scheduleLastRun.set({ type }, age);
 		for (const [type, age] of Object.entries(s.lastSuccessSecondsByType)) scheduleLastSuccess.set({ type }, age);
+	} catch { /* best-effort */ }
+
+	// Per-config backup health (audit medium #16). A config that has never
+	// succeeded gets a last_status of 0 and NO last_success value emitted, so
+	// staleness/absence is visible to alerting rather than defaulting to green.
+	try {
+		backupLastSuccess.reset(); backupLastStatus.reset();
+		const configs = await getBackupConfigMetrics();
+		for (const c of configs) {
+			const labels = { config_id: String(c.configId), target: c.target, env: c.envId == null ? 'local' : String(c.envId) };
+			backupLastStatus.set(labels, c.status === 'success' ? 1 : 0);
+			if (c.lastSuccessSeconds !== null) backupLastSuccess.set(labels, c.lastSuccessSeconds);
+		}
 	} catch { /* best-effort */ }
 
 	hawserAgents.set(edgeConnections.size);

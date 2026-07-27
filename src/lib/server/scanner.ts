@@ -29,6 +29,7 @@ import {
 import { resolve } from 'node:path';
 import { mkdir, chown, rm } from 'node:fs/promises';
 import { resolveScannerOverrides } from '$lib/utils/scanner-overrides';
+import { PROTECTED_VOLUME_NAMES } from './volume-prune-core';
 
 export type ScannerType = 'none' | 'grype' | 'trivy' | 'both';
 
@@ -78,8 +79,9 @@ export async function sendVulnerabilityNotifications(
 }
 
 // Volume names for scanner database caching
-const GRYPE_VOLUME_NAME = 'dockhand-grype-db';
-const TRIVY_VOLUME_NAME = 'dockhand-trivy-db';
+// Names are the single source of truth in volume-prune-core (imported at top) so
+// the prune logic and the scanner agree on exactly which volumes to protect.
+const [GRYPE_VOLUME_NAME, TRIVY_VOLUME_NAME] = PROTECTED_VOLUME_NAMES;
 
 // Scanner cache directory for rootless Docker (bind mounts instead of volumes)
 const DATA_DIR = process.env.DATA_DIR || '/app/data';

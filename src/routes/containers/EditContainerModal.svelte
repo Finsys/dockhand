@@ -1,10 +1,14 @@
 <script lang="ts">
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
-	import { Pencil, Check, Loader2, X, Layers } from 'lucide-svelte';
+	import { Pencil, Check, Loader2, X, Layers, Settings, Archive } from 'lucide-svelte';
 	import { currentEnvironment, appendEnvParam } from '$lib/stores/environment';
+	import { page } from '$app/stores'; // BETA GATE: backups feature flag
 	import { focusFirstInput } from '$lib/utils';
 	import ContainerSettingsTab from './ContainerSettingsTab.svelte';
+	import BackupPanel from './BackupPanel.svelte';
+	import { volumeInfoFromBind } from '$lib/utils/mounts';
+	import { fetchBackupExecutions } from '$lib/utils/backup';
 	import type { VulnerabilityCriteria } from '$lib/components/VulnerabilityCriteriaSelector.svelte';
 	import { parseHostPort, expandPortBindings, formatHostPort } from '$lib/utils/port-parse';
 	import { formatBytes } from '$lib/utils/format';
@@ -228,7 +232,16 @@
 	let loading = $state(false);
 	let loadingData = $state(true);
 	let error = $state('');
+	let activeTab = $state<'settings' | 'backups'>('settings');
+	let backupCount = $state(0);
+	// Ok/fail run tally, reported by BackupPanel — shown on the Backups tab so a
+	// failed backup is visible without opening the tab.
+	let backupTally = $state<{ ok: number; failed: number }>({ ok: 0, failed: 0 });
 	let abortController: AbortController | null = null;
+	// Unsaved-changes guard on close (mirrors StackModal): settings changes OR a
+	// half-edited backup schedule in the embedded panel.
+	let showConfirmClose = $state(false);
+	let backupPanelRef = $state<BackupPanel | undefined>(undefined);
 	let statusMessage = $state('');
 	let visible = $state(false);
 
@@ -598,6 +611,25 @@
 			error = 'Failed to load container data: ' + String(err);
 		} finally {
 			loadingData = false;
+			// Fetch backup schedule count (BETA GATE: only when backups enabled)
+			if ($page.data.backupsEnabled) try {
+				const envId = $currentEnvironment?.id;
+				const bp = new URLSearchParams({ target: name, type: 'container' });
+				if (envId) bp.set('env', String(envId));
+				const bRes = await fetch(`/api/backup/configs?${bp}`);
+				if (bRes.ok) {
+						const bData = await bRes.json();
+						const cfgs = Array.isArray(bData) ? bData : bData?.id ? [bData] : [];
+						backupCount = cfgs.length;
+						// Compute the run tally at modal level (not from BackupPanel, which
+						// only mounts when the Backups tab is open) so the fail count shows
+						// on the tab immediately.
+						if (cfgs.length > 0) {
+							const t = await fetchBackupExecutions(cfgs.map((c: any) => c.id));
+							backupTally = { ok: t.ok, failed: t.failed };
+						}
+					}
+			} catch {}
 			requestAnimationFrame(() => {
 				visible = true;
 				focusFirstInput();
@@ -1018,7 +1050,32 @@
 			abortController = null;
 		}
 		loading = false;
+		showConfirmClose = false;
 		onClose();
+	}
+
+	/** True if closing now would lose unsaved work: container settings changed, OR the
+	 * embedded backup panel has a half-edited schedule. Guarded on `originalConfig`
+	 * (the loaded baseline) — while the container config is still loading it is null,
+	 * and hasContainerConfigChanged() returns true for a null baseline, which would
+	 * falsely block a close during load. No baseline yet ⇒ nothing to lose. */
+	function hasUnsavedChanges(): boolean {
+		if (!originalConfig) return false;
+		return hasContainerConfigChanged() || (backupPanelRef?.isDirty() ?? false);
+	}
+
+	/** Intercept a close request: confirm first if there are unsaved changes. */
+	function tryClose() {
+		if (hasUnsavedChanges()) {
+			showConfirmClose = true;
+		} else {
+			handleClose();
+		}
+	}
+
+	function discardAndClose() {
+		showConfirmClose = false;
+		handleClose();
 	}
 
 	$effect(() => {
@@ -1040,8 +1097,21 @@
 	});
 </script>
 
-<Dialog.Root bind:open onOpenChange={(isOpen) => isOpen && focusFirstInput()}>
-	<Dialog.Content class="max-w-4xl w-full max-h-[90vh] p-0 flex flex-col overflow-hidden sm:max-h-[85vh]">
+<Dialog.Root
+	bind:open
+	onOpenChange={(isOpen) => {
+		if (isOpen) {
+			focusFirstInput();
+		} else if (hasUnsavedChanges()) {
+			// Re-open and show the confirmation instead of closing on unsaved changes.
+			open = true;
+			showConfirmClose = true;
+		} else {
+			handleClose();
+		}
+	}}
+>
+	<Dialog.Content class="max-w-4xl w-full h-[85vh] p-0 flex flex-col overflow-hidden">
 		<Dialog.Header class="px-5 py-4 border-b bg-muted/30 shrink-0 sticky top-0 z-10">
 			<Dialog.Title class="text-base font-semibold flex items-center gap-1">
 				Edit container
@@ -1074,7 +1144,8 @@
 						<X class="w-3 h-3 text-muted-foreground hover:text-foreground" />
 					</button>
 				{:else if name}
-					<span class="font-normal text-muted-foreground ml-1">- {name}</span>
+					<span class="text-muted-foreground ml-1">-</span>
+					<span class="font-semibold">{name}</span>
 					<button
 						type="button"
 						onclick={startEditingTitle}
@@ -1083,6 +1154,9 @@
 					>
 						<Pencil class="w-3 h-3 text-muted-foreground hover:text-foreground" />
 					</button>
+					{#if $currentEnvironment}
+						<span class="font-semibold ml-1">on <span class="text-amber-600 dark:text-amber-400">{$currentEnvironment.name}</span></span>
+					{/if}
 				{/if}
 			</Dialog.Title>
 		</Dialog.Header>
@@ -1093,7 +1167,42 @@
 				Loading container data...
 			</div>
 		{:else}
-			<div class="px-5 py-4 flex-1 overflow-y-auto">
+			<div class="px-5 flex gap-1 border-b shrink-0">
+				<button
+					type="button"
+					class="flex items-center gap-1.5 px-3 py-2 text-sm transition-colors border-b-2 -mb-px {activeTab === 'settings' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}"
+					onclick={() => activeTab = 'settings'}
+				>
+					<Settings class="w-3.5 h-3.5" />
+					Settings
+				</button>
+				<!-- BETA GATE: Backups tab hidden unless FEAT_BACKUPS_ENABLED (see features.ts) -->
+				{#if $page.data.backupsEnabled}
+					<button
+						type="button"
+						class="flex items-center gap-1.5 px-3 py-2 text-sm transition-colors border-b-2 -mb-px {activeTab === 'backups' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}"
+						onclick={() => activeTab = 'backups'}
+					>
+						<Archive class="w-3.5 h-3.5" />
+						Backups
+						{#if backupCount > 0}<span class="bg-primary/15 text-primary text-[10px] px-1.5 rounded-full font-medium">{backupCount}</span>{/if}
+						<!-- Run tally so a failed backup is visible before opening the tab. -->
+						{#if backupTally.ok > 0}<span class="inline-flex items-center gap-0.5 rounded-full bg-emerald-500/15 px-1.5 text-[10px] font-medium text-emerald-500"><Check class="w-2.5 h-2.5" />{backupTally.ok}</span>{/if}
+						{#if backupTally.failed > 0}<span class="inline-flex items-center gap-0.5 rounded-full bg-red-500/15 px-1.5 text-[10px] font-semibold text-red-500"><X class="w-2.5 h-2.5" />{backupTally.failed}</span>{/if}
+					</button>
+				{/if}
+			</div>
+
+			<div class="px-5 py-4 flex-1 overflow-y-auto h-0">
+				{#if activeTab === 'backups'}
+					<BackupPanel
+						bind:this={backupPanelRef}
+						containerName={name}
+						volumes={volumeMappings.filter(v => v.hostPath && v.containerPath).map(volumeInfoFromBind)}
+						type="container"
+						onTally={(t) => (backupTally = t)}
+					/>
+				{:else}
 				<!-- Compose warning banners -->
 				{#if showComposeRenameWarning}
 					<div class="mb-4 px-3 py-2 text-xs text-amber-700 dark:text-amber-300 bg-amber-100/50 dark:bg-amber-900/30 rounded-md flex items-start gap-2">
@@ -1175,6 +1284,7 @@
 						{error}
 					</div>
 				{/if}
+				{/if}
 			</div>
 
 			<div class="flex justify-end gap-2 px-5 py-3 border-t bg-muted/30 shrink-0">
@@ -1191,5 +1301,25 @@
 				</Button>
 			</div>
 		{/if}
+	</Dialog.Content>
+</Dialog.Root>
+
+<!-- Unsaved changes confirmation dialog -->
+<Dialog.Root bind:open={showConfirmClose}>
+	<Dialog.Content class="max-w-sm">
+		<Dialog.Header>
+			<Dialog.Title>Unsaved changes</Dialog.Title>
+			<Dialog.Description>
+				You have unsaved changes. Are you sure you want to close without saving?
+			</Dialog.Description>
+		</Dialog.Header>
+		<div class="flex justify-end gap-1.5 mt-4">
+			<Button variant="outline" size="sm" onclick={() => showConfirmClose = false}>
+				Continue editing
+			</Button>
+			<Button variant="destructive" size="sm" onclick={discardAndClose}>
+				Discard changes
+			</Button>
+		</div>
 	</Dialog.Content>
 </Dialog.Root>

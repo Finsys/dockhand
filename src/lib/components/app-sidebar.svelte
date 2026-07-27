@@ -24,6 +24,7 @@
 		ClipboardList,
 		Activity,
 		Timer,
+		Archive,
 		LibraryBig,
 		CircleArrowUp,
 		Pencil,
@@ -89,6 +90,11 @@
 	 * - ENTERPRISE edition: check if user has ANY permission for the resource
 	 */
 	function canSeeMenuItem(item: MenuItem): boolean {
+		// BETA GATE: hide Backups unless FEAT_BACKUPS_ENABLED is on (see features.ts)
+		if (item.href === '/backups' && !$page.data.backupsEnabled) {
+			return false;
+		}
+
 		// Enterprise-only items are hidden without enterprise license
 		if (item.enterpriseOnly && !$licenseStore.isEnterprise) {
 			return false;
@@ -126,6 +132,7 @@
 		{ href: '/templates', Icon: LibraryBig, label: 'Templates', permission: 'templates' },
 		{ href: '/registry', Icon: Download, label: 'Registry', permission: 'registries' },
 		{ href: '/activity', Icon: Activity, label: 'Activity', permission: 'activity' },
+		{ href: '/backups', Icon: Archive, label: 'Backups', permission: 'backups' },
 		{ href: '/schedules', Icon: Timer, label: 'Schedules', permission: 'schedules' },
 		{ href: '/audit', Icon: ClipboardList, label: 'Audit log', permission: 'audit_logs', enterpriseOnly: true },
 		{ href: '/settings', Icon: Settings, label: 'Settings', permission: 'settings' }

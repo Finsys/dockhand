@@ -1,11 +1,12 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button';
+	import { page } from '$app/stores'; // BETA GATE: backups feature flag
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Label } from '$lib/components/ui/label';
 	import { Input } from '$lib/components/ui/input';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { TogglePill } from '$lib/components/ui/toggle-pill';
-	import { Shield, Pencil, Plus, Check, RefreshCw, Box, Image, HardDrive, Cable, Layers, Globe, Download, Bell, Sliders, Settings, Users, Eye, SquarePlus, Play, Square, RotateCcw, Trash2, Terminal, ScrollText, Search, Upload, Plug, Unplug, Copy, GitBranch, KeyRound, Building2, Container, TriangleAlert, ClipboardList, Activity, Timer } from 'lucide-svelte';
+	import { Shield, Pencil, Plus, Check, RefreshCw, Box, Image, HardDrive, Cable, Layers, Globe, Download, Bell, Sliders, Settings, Users, Eye, SquarePlus, Play, Square, RotateCcw, Trash2, Terminal, ScrollText, Search, Upload, Plug, Unplug, Copy, GitBranch, KeyRound, Building2, Container, TriangleAlert, ClipboardList, Activity, Timer, Archive } from 'lucide-svelte';
 	import EnvironmentIcon from '$lib/components/EnvironmentIcon.svelte';
 	import * as Alert from '$lib/components/ui/alert';
 	import { focusFirstInput } from '$lib/utils';
@@ -66,6 +67,7 @@
 		activity: string[];
 		schedules: string[];
 		secrets: string[];
+		backups: string[];
 	}>({
 		containers: [],
 		images: [],
@@ -83,7 +85,8 @@
 		audit_logs: [],
 		activity: [],
 		schedules: [],
-		secrets: []
+		secrets: [],
+		backups: []
 	});
 
 
@@ -146,6 +149,12 @@
 			{ key: 'create', label: 'Create secrets' },
 			{ key: 'edit', label: 'Edit secrets' },
 			{ key: 'delete', label: 'Delete secrets' }
+		],
+		backups: [
+			{ key: 'view', label: 'View backups' },
+			{ key: 'run', label: 'Run backups' },
+			{ key: 'restore', label: 'Restore from backups' },
+			{ key: 'manage', label: 'Manage destinations' }
 		]
 	};
 
@@ -213,7 +222,8 @@
 		audit_logs: ClipboardList,
 		activity: Activity,
 		schedules: Timer,
-		secrets: KeyRound
+		secrets: KeyRound,
+		backups: Archive
 	};
 
 	const categoryColorsSolid: Record<string, string> = {
@@ -233,7 +243,8 @@
 		audit_logs: 'bg-stone-100 dark:bg-stone-950 text-stone-700 dark:text-stone-400 border-stone-300 dark:border-stone-800',
 		activity: 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400 border-emerald-300 dark:border-emerald-800',
 		schedules: 'bg-sky-100 dark:bg-sky-950 text-sky-700 dark:text-sky-400 border-sky-300 dark:border-sky-800',
-		secrets: 'bg-lime-100 dark:bg-lime-950 text-lime-700 dark:text-lime-400 border-lime-300 dark:border-lime-800'
+		secrets: 'bg-fuchsia-100 dark:bg-fuchsia-950 text-fuchsia-700 dark:text-fuchsia-400 border-fuchsia-300 dark:border-fuchsia-800',
+		backups: 'bg-lime-100 dark:bg-lime-950 text-lime-700 dark:text-lime-400 border-lime-300 dark:border-lime-800'
 	};
 
 	const permissionIcons: Record<string, typeof Eye> = {
@@ -283,7 +294,8 @@
 			audit_logs: [],
 			activity: [],
 			schedules: [],
-			secrets: []
+			secrets: [],
+			backups: []
 		};
 	}
 
@@ -314,7 +326,8 @@
 					audit_logs: [...(role.permissions.audit_logs || [])],
 					activity: [...(role.permissions.activity || [])],
 					schedules: [...(role.permissions.schedules || [])],
-					secrets: [...(role.permissions.secrets || [])]
+					secrets: [...(role.permissions.secrets || [])],
+					backups: [...(role.permissions.backups || [])]
 				};
 				formError = '';
 				formErrors = {};
@@ -343,7 +356,8 @@
 					audit_logs: [...(copyFrom.permissions.audit_logs || [])],
 					activity: [...(copyFrom.permissions.activity || [])],
 					schedules: [...(copyFrom.permissions.schedules || [])],
-					secrets: [...(copyFrom.permissions.secrets || [])]
+					secrets: [...(copyFrom.permissions.secrets || [])],
+					backups: [...(copyFrom.permissions.backups || [])]
 				};
 				formError = '';
 				formErrors = {};
@@ -496,7 +510,8 @@
 					</div>
 				</div>
 				<div class="p-3 grid grid-cols-2 lg:grid-cols-4 gap-3">
-					{#each Object.entries(systemPermissions) as [category, permissions]}
+					<!-- BETA GATE: drop the backups permission group unless FEAT_BACKUPS_ENABLED (see features.ts) -->
+					{#each Object.entries(systemPermissions).filter(([c]) => c !== 'backups' || $page.data.backupsEnabled) as [category, permissions]}
 						{@const IconComponent = categoryIcons[category]}
 						<div class="relative border rounded-md pt-5 pb-3 px-3">
 							<!-- Category pill on border -->

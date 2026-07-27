@@ -15,9 +15,12 @@ import { createHash } from 'node:crypto';
 import type { Environment } from './db';
 import { getSetting } from './db';
 import { getAdditionalVolumeBinds } from './mount-dedupe';
+import { rebaseEnvOntoImage, rebaseLabelsOntoImage, describeEnvRebase, describeLabelRebase, type ImageEnvLabels } from './container-env-merge';
 import { encodeRegistryAuth } from './registry-auth';
-import { isSystemContainer } from './scheduler/tasks/update-utils';
+import { isSystemContainer, classifyEmptyDigestImage } from './scheduler/tasks/update-utils';
 import { deepDiff } from '../utils/diff.js';
+import { getInstanceId } from './backups/identity';
+import { isOwnedBackupHelper } from './backups/reap-core';
 
 /**
  * Custom error for when an environment is not found.
@@ -1050,7 +1053,7 @@ export interface ContainerInfo {
 	health?: string;
 	restartCount: number;
 	exitCode?: number;
-	mounts: Array<{ type: string; source: string; destination: string; mode: string; rw: boolean }>;
+	mounts: Array<{ type: string; name: string; source: string; destination: string; mode: string; rw: boolean }>;
 	labels: { [key: string]: string };
 	command: string;
 }
@@ -1058,6 +1061,7 @@ export interface ContainerInfo {
 export interface ImageInfo {
 	id: string;
 	tags: string[];
+	repoDigests?: string[];
 	size: number;
 	created: number;
 }
@@ -1129,9 +1133,13 @@ export async function listContainers(all = true, envId?: number | null): Promise
 			}
 		}
 
-		// Extract mount info
+		// Extract mount info. Carry the volume Name separately from Source: for a
+		// named volume Docker sets Name (e.g. "stack_data") AND Source (the host
+		// path /var/lib/docker/volumes/stack_data/_data). Keeping Name lets the
+		// backup picker show the clean volume name instead of the host path.
 		const mounts = (container.Mounts || []).map((m: any) => ({
 			type: m.Type || 'unknown',
+			name: m.Name || '',
 			source: m.Source || m.Name || '',
 			destination: m.Destination || '',
 			mode: m.Mode || '',
@@ -1888,7 +1896,15 @@ export async function recreateContainerFromInspect(
 	inspectData: any,
 	newImage: string,
 	envId?: number | null,
-	log?: (msg: string) => void
+	log?: (msg: string) => void,
+	/**
+	 * The OLD image's Config (Env/Labels), captured BEFORE the new image was
+	 * pulled. Required for the env/label rebase (#1226, #1256): once the tag is
+	 * repointed the old image may be untagged/GC'd and no longer inspectable, so
+	 * it cannot be re-fetched here. When omitted, the rebase falls back to a
+	 * best-effort inspect of the old image id and, failing that, verbatim.
+	 */
+	oldImageConfig?: ImageEnvLabels | null
 ): Promise<{ Id: string }> {
 	const config = inspectData.Config || {};
 	const hostConfig = inspectData.HostConfig || {};
@@ -1983,6 +1999,51 @@ export async function recreateContainerFromInspect(
 		Image: newImage,
 		HostConfig: hostConfig
 	};
+
+	// 4a. Rebase image-baked env/labels onto the NEW image (#1226, #1256).
+	// A container's Config.Env/Labels are flattened at create time, so the old
+	// image's baked defaults are indistinguishable from user overrides and would
+	// be frozen on recreation. We compare the container's values against the OLD
+	// image and rebase by VALUE: keys the user never touched (value == old image)
+	// follow the new image; user overrides (value differs) and user-only entries
+	// survive.
+	//
+	// The OLD image config MUST come from the caller (captured before the pull) —
+	// after the tag is repointed the old digest is often untagged/GC'd and can no
+	// longer be inspected. We fall back to inspecting the old image id only when
+	// the caller didn't provide it, and to verbatim if that also fails.
+	try {
+		let oldImg = oldImageConfig ?? null;
+		if (!oldImg) {
+			const oldInspect = await inspectImage(inspectData.Image || config.Image, envId);
+			oldImg = { Env: (oldInspect as any)?.Config?.Env, Labels: (oldInspect as any)?.Config?.Labels };
+		}
+		const newImg = await inspectImage(newImage, envId);
+		const oldEnv = oldImg?.Env || [];
+		const newEnv = (newImg as any)?.Config?.Env || [];
+		const oldLabels = oldImg?.Labels || {};
+		const newLabels = (newImg as any)?.Config?.Labels || {};
+		createConfig.Env = rebaseEnvOntoImage(config.Env || [], oldEnv, newEnv);
+		createConfig.Labels = rebaseLabelsOntoImage(config.Labels || {}, oldLabels, newLabels);
+
+		const envSummary = describeEnvRebase(config.Env || [], oldEnv, newEnv);
+		const labelSummary = describeLabelRebase(config.Labels || {}, oldLabels, newLabels);
+		const fmt = (label: string, keys: string[]) => keys.length ? `${label}: ${keys.join(', ')}` : '';
+		const envParts = [
+			fmt('adopted from new image', envSummary.adopted),
+			fmt('kept your overrides', envSummary.preserved),
+			fmt('kept your vars', envSummary.userOnly)
+		].filter(Boolean);
+		log?.(`Env rebase — ${envParts.length ? envParts.join('; ') : 'no changes'}`);
+		const labelParts = [
+			fmt('adopted from new image', labelSummary.adopted),
+			fmt('kept your overrides', labelSummary.preserved),
+			fmt('kept your labels', labelSummary.userOnly)
+		].filter(Boolean);
+		log?.(`Label rebase — ${labelParts.length ? labelParts.join('; ') : 'no changes'}`);
+	} catch (e: any) {
+		log?.(`Rebase skipped (image inspect failed), keeping env/labels verbatim: ${e?.message || e}`);
+	}
 
 	// Strip default MemorySwappiness — Podman + cgroupv2 rejects it.
 	// Docker returns -1, Podman returns 0 when unset.
@@ -2157,6 +2218,164 @@ export async function recreateContainerFromInspect(
 	await removeContainer(oldContainerId, true, envId).catch(() => {});
 
 	log?.('Container recreated successfully');
+	return { Id: newContainerId };
+}
+
+/**
+ * Ensure `image` is present on the target env, pulling it if not. Docker's
+ * `/containers/create` does NOT auto-pull (unlike `docker run`), so a cross-env
+ * clone restore onto a host that has never seen the image fails with
+ * "No such image". Check-then-pull closes that gap. A pull failure (private
+ * registry, missing arch, real 404) propagates so the caller surfaces the raw
+ * Docker error instead of the more confusing "No such image".
+ */
+async function ensureImagePresent(image: string, envId?: number | null, log?: (msg: string) => void): Promise<void> {
+	const res = await dockerFetch(`/images/${encodeURIComponent(image)}/json`, {}, envId);
+	if (res.ok) { await drainResponse(res); return; }
+	await drainResponse(res);
+	log?.(`Image ${image} not present — pulling…`);
+	await pullImage(image, undefined, envId);
+	log?.(`Pulled ${image}`);
+}
+
+/**
+ * Create a container from inspect-like metadata (for restore).
+ * Applies the same edge-case handling as recreateContainerFromInspect
+ * (Podman compat, shared network modes, volume deduplication, etc.)
+ * but without the stop/rename/rollback flow — creates fresh.
+ */
+export async function createContainerFromMetadata(
+	containerName: string,
+	image: string,
+	metadata: {
+		config?: any;
+		hostConfig?: any;
+		mounts?: any[];
+		networkSettings?: { Networks?: Record<string, any> };
+	},
+	envId?: number | null,
+	log?: (msg: string) => void
+): Promise<{ Id: string }> {
+	const config = { ...metadata.config } || {};
+	const hostConfig = { ...metadata.hostConfig } || {};
+	const networks: Record<string, any> = metadata.networkSettings?.Networks || {};
+
+	const networkMode = hostConfig.NetworkMode || '';
+	const isSharedNetwork = networkMode.startsWith('container:') ||
+		networkMode.startsWith('service:') ||
+		networkMode === 'host' ||
+		networkMode === 'none';
+
+	// Build create config
+	const createConfig: any = {
+		...config,
+		Image: image,
+		HostConfig: hostConfig
+	};
+
+	// Clean up fields not useful for restore
+	delete createConfig.Domainname;
+	delete createConfig.MacAddress;
+
+	// Strip default MemorySwappiness (Podman + cgroupv2 rejects it)
+	const swappiness = createConfig.HostConfig?.MemorySwappiness;
+	if (swappiness == null || swappiness === -1 || swappiness === 0) {
+		delete createConfig.HostConfig.MemorySwappiness;
+	}
+
+	// container:<name> mode: clean up conflicting network fields
+	if (networkMode.startsWith('container:')) {
+		delete createConfig.Hostname;
+		delete createConfig.ExposedPorts;
+		if (createConfig.HostConfig) {
+			delete createConfig.HostConfig.PortBindings;
+			delete createConfig.HostConfig.PublishAllPorts;
+			delete createConfig.HostConfig.DNS;
+			delete createConfig.HostConfig.DNSOptions;
+			delete createConfig.HostConfig.DNSSearch;
+			delete createConfig.HostConfig.ExtraHosts;
+			delete createConfig.HostConfig.Links;
+		}
+	}
+
+	// Volume/Tmpfs deduplication
+	if (createConfig.Volumes && hostConfig) {
+		const mountedPaths = new Set<string>();
+		if (hostConfig.Tmpfs) {
+			for (const p of Object.keys(hostConfig.Tmpfs)) mountedPaths.add(p);
+		}
+		if (hostConfig.Binds) {
+			for (const b of hostConfig.Binds) {
+				const parts = b.split(':');
+				if (parts.length >= 2) mountedPaths.add(parts[1].split(':')[0]);
+			}
+		}
+		if (mountedPaths.size > 0) {
+			for (const volPath of Object.keys(createConfig.Volumes)) {
+				if (mountedPaths.has(volPath)) delete createConfig.Volumes[volPath];
+			}
+			if (Object.keys(createConfig.Volumes).length === 0) delete createConfig.Volumes;
+		}
+	}
+
+	// Preserve anonymous volumes
+	const additionalBinds = getAdditionalVolumeBinds(hostConfig, metadata.mounts || []);
+	if (additionalBinds.length > 0) {
+		createConfig.HostConfig = {
+			...hostConfig,
+			Binds: [...(hostConfig.Binds || []), ...additionalBinds]
+		};
+	}
+
+	// Set initial network for creation
+	if (!isSharedNetwork) {
+		const firstNetName = Object.keys(networks)[0];
+		const firstNetConfig = firstNetName ? networks[firstNetName] : null;
+		if (firstNetName && firstNetConfig) {
+			// Strip NetworkID — it's the source env's ID and won't match on
+			// the target. Docker resolves by name when NetworkID is absent.
+			const { NetworkID: _id, ...endpointConfig } = firstNetConfig as Record<string, unknown>;
+			createConfig.NetworkingConfig = {
+				EndpointsConfig: { [firstNetName]: endpointConfig }
+			};
+		}
+	}
+
+	// Pull the image first if the target env doesn't have it — a cross-env clone
+	// restore lands on a host that may never have seen this image, and create
+	// (unlike run) won't pull it.
+	await ensureImagePresent(image, envId, log);
+
+	// Create container
+	log?.(`Creating container ${containerName}...`);
+	const result = await dockerJsonRequest<{ Id: string }>(
+		`/containers/create?name=${encodeURIComponent(containerName)}`,
+		{ method: 'POST', body: JSON.stringify(createConfig) },
+		envId
+	);
+	const newContainerId = result.Id;
+
+	// Connect additional networks (by name — source NetworkIDs don't exist on
+	// the target after a cross-env restore, and even on same-env restores the
+	// network may have been recreated with a new ID).
+	if (!isSharedNetwork) {
+		const firstNetName = Object.keys(networks)[0];
+		for (const [netName, netConfig] of Object.entries(networks)) {
+			if (netName === firstNetName) continue;
+			const { NetworkID: _id, ...nc } = (netConfig as Record<string, unknown>);
+			try {
+				await connectContainerToNetworkRaw(netName, newContainerId, nc, envId);
+			} catch (netError: any) {
+				log?.(`Warning: Failed to connect to network "${netName}": ${netError.message}`);
+			}
+		}
+	}
+
+	// Start container
+	log?.(`Starting container ${containerName}...`);
+	await startContainer(newContainerId, envId);
+
+	log?.(`Container ${containerName} created and started (${newContainerId.slice(0, 12)})`);
 	return { Id: newContainerId };
 }
 
@@ -2903,11 +3122,14 @@ async function findRegistryCredentials(registryHost: string): Promise<{ username
 			}
 		}
 
-		// No match — log what we tried so support cases are diagnosable
+		// No stored credentials matched. This is NOT an error for public images —
+		// anonymous access still works; it just means no auth header is attached.
+		// (A Docker Hub entry configured without a username/password is anonymous,
+		// so it logs here even though hub-alias matched the host — see #1255.)
 		const candidates = registries.map(r => parseRegistryUrl(r.url).host).join(', ');
 		console.log(
-			`[Registry] no match for requested=${registryHost} ` +
-			`(hub-alias=${DOCKER_HUB_HOSTS.has(requested.host)}); ` +
+			`[Registry] no stored credentials for requested=${registryHost} ` +
+			`(hub-alias=${DOCKER_HUB_HOSTS.has(requested.host)}); using anonymous access; ` +
 			`candidates=[${candidates || 'none configured'}]`
 		);
 		return null;
@@ -3537,13 +3759,22 @@ export async function checkImageUpdateAvailable(
 			.map(extractDigest)
 			.filter((d): d is string => d !== null);
 
-		// If no local digests, this is likely a local-only image
+		// The RUNNING image has no repo digests. That is ambiguous: it can be a
+		// genuinely local/built image (no registry to check against), OR a registry
+		// image whose tag has since moved to a newer pull — leaving the container
+		// running an old, now-untagged, digest-less image (#1288). The old code
+		// declared "local" here and skipped the check forever, which is exactly the
+		// state that means "this container needs updating".
+		//
+		// Distinguish by asking the registry for imageName's tag (imageName is the
+		// container's Config.Image, e.g. "rotki/rotki:latest"): if the registry
+		// answers, this IS a registry image, and since the running image can't match
+		// a digest we don't have, an update is available. If the registry can't
+		// resolve it (404 / unreachable / truly local), THEN treat it as local.
 		if (localDigests.length === 0) {
-			return {
-				hasUpdate: false,
-				isLocalImage: true,
-				currentDigest: currentImageId
-			};
+			const registryDigest = await getRegistryManifestDigest(imageName);
+			const { hasUpdate, isLocalImage, registryDigest: rd } = classifyEmptyDigestImage(registryDigest);
+			return { hasUpdate, isLocalImage, currentDigest: currentImageId, registryDigest: rd };
 		}
 
 		// Query registry for current manifest digest
@@ -3810,6 +4041,10 @@ export interface VolumeInfo {
 	scope: string;
 	created: string;
 	labels: { [key: string]: string };
+	/** Containers currently referencing this volume (running or stopped); empty = unused. */
+	usedBy: Array<{ containerId: string; containerName: string }>;
+	/** driver_opts (e.g. NFS/CIFS type+device+o), only when non-empty. */
+	options?: Record<string, string>;
 }
 
 export async function listVolumes(envId?: number | null): Promise<VolumeInfo[]> {
@@ -4345,8 +4580,37 @@ export async function pruneImages(dangling = true, envId?: number | null) {
 	}
 }
 
-export async function pruneVolumes(envId?: number | null) {
-	return dockerJsonRequest('/volumes/prune', { method: 'POST' }, envId);
+export async function pruneVolumes(
+	envId?: number | null
+): Promise<{ VolumesDeleted: string[]; SpaceReclaimed: number }> {
+	// Docker's own /volumes/prune only removes ANONYMOUS volumes since API v1.42
+	// (without filters={"all":["true"]}), so named dangling volumes survive — the
+	// bug in #1289. We prune explicitly instead: list volumes, pick the unused,
+	// unprotected ones, and remove each. This also lets us EXCLUDE the scanner
+	// cache volumes (dockhand-grype-db / -trivy-db) by name, which a plain
+	// all=true prune would wrongly delete.
+	const { selectVolumesToPrune, PROTECTED_VOLUME_NAMES } = await import('./volume-prune-core');
+	const volumes = await listVolumes(envId);
+	const toDelete = selectVolumesToPrune(volumes, PROTECTED_VOLUME_NAMES);
+
+	const deleted: string[] = [];
+	for (const name of toDelete) {
+		try {
+			// force=false: a volume that races into "in use" between the list and the
+			// delete errors out and is skipped, rather than being force-removed —
+			// matching Docker prune's non-forcing semantics.
+			await removeVolume(name, false, envId);
+			deleted.push(name);
+		} catch (err) {
+			console.error(`[Prune] Failed to remove volume "${name}":`, err instanceof Error ? err.message : err);
+			// Continue — one stubborn volume must not abort the whole prune.
+		}
+	}
+
+	// SpaceReclaimed is a placeholder 0: the /volumes list API carries no per-volume
+	// size, so we don't fabricate a byte count. The field is kept for backward
+	// compatibility (callers/audit and the test only check it is a number).
+	return { VolumesDeleted: deleted, SpaceReclaimed: 0 };
 }
 
 export async function pruneNetworks(envId?: number | null) {
@@ -4611,6 +4875,12 @@ export async function runContainerWithStreaming(options: {
 	timeout?: number; // Overall timeout in ms (0 or undefined = no timeout)
 	networkMode?: string; // Docker network mode (e.g., network name for TCP access)
 	dns?: string[]; // Custom DNS servers; undefined = inherit from Docker daemon
+	labels?: Record<string, string>; // Container labels (e.g. ownership tags for safe reaping)
+	// Hook run after the container is created but BEFORE it starts. Used by the
+	// backup helper to put-archive large metadata/stack files into the container
+	// (streamed via the Docker archive API) instead of embedding them in the Cmd,
+	// which would blow ARG_MAX. Receives the created container's id.
+	beforeStart?: (containerId: string) => Promise<void>;
 }): Promise<string> {
 	const baseName = options.name || `dockhand-stream-${Date.now()}`;
 	const containerName = `${baseName}-${randomSuffix()}`;
@@ -4620,6 +4890,7 @@ export async function runContainerWithStreaming(options: {
 		Image: options.image,
 		Cmd: options.cmd,
 		Env: options.env || [],
+		Labels: options.labels || {},
 		Tty: false,
 		HostConfig: {
 			Binds: options.binds || [],
@@ -4660,6 +4931,10 @@ export async function runContainerWithStreaming(options: {
 
 	try {
 		const doWork = async () => {
+			// Populate the container's filesystem (e.g. put-archive metadata files)
+			// before it starts, so the entrypoint sees them without inflating the Cmd.
+			if (options.beforeStart) await options.beforeStart(containerId);
+
 			// Start container
 			await drainResponse(await dockerFetch(`/containers/${containerId}/start`, { method: 'POST' }, options.envId));
 
@@ -4668,22 +4943,51 @@ export async function runContainerWithStreaming(options: {
 			// streams don't close when the container exits, causing indefinite hangs.
 			const abortController = new AbortController();
 
-			// Start stderr streaming (non-blocking - may hang on some hosts)
+			// Start stderr streaming (non-blocking - may hang on some hosts). When the
+			// caller wants live stdout too (backup helper → restic --json progress), the
+			// local path follows both streams; edge keeps stderr-only for now (its
+			// progress still lands after exit, an acceptable fallback for the minority
+			// edge transport). onStdout is opt-in, so all other callers are unaffected.
 			const stderrPromise = (config.connectionType === 'hawser-edge' && config.environmentId)
 				? streamEdgeStderr(config.environmentId, containerId, options.onStderr, abortController.signal)
-				: streamLocalStderr(containerId, options.envId, options.onStderr, abortController.signal);
+				: streamLocalStderr(containerId, options.envId, options.onStderr, abortController.signal, options.onStdout);
 			stderrPromise.catch(() => {}); // Suppress unhandled rejection
 
-			// Wait for container to exit - this is the reliable signal
+			// Wait for the container to exit — this is the reliable exit signal.
+			// A failed /wait must NOT be treated as success: on flaky hosts (Synology,
+			// older kernels) the stream can drop, and returning stdout as success would
+			// let a backup/restore whose OUTCOME IS UNKNOWN be recorded as a good run.
+			// Bounded-retry the wait; if it still can't be determined, fall back to
+			// inspecting the container's final State, and if that's also unavailable
+			// leave exitCode undefined — the guard below fails closed on undefined.
 			let exitCode: number | undefined;
-			try {
-				const waitResult = await dockerFetch(`/containers/${containerId}/wait`, { method: 'POST', streaming: true }, options.envId);
-				if (!waitResult.ok) await throwDockerError(waitResult);
-				const waitData = await waitResult.json() as { StatusCode?: number };
-				exitCode = waitData.StatusCode;
-				console.log(`[runContainerWithStreaming] Container exited with code: ${exitCode}`);
-			} catch (err) {
-				console.warn(`[runContainerWithStreaming] Wait warning: ${(err as Error).message}`);
+			for (let attempt = 0; attempt < 3 && exitCode === undefined; attempt++) {
+				try {
+					const waitResult = await dockerFetch(`/containers/${containerId}/wait`, { method: 'POST', streaming: true }, options.envId);
+					if (!waitResult.ok) await throwDockerError(waitResult);
+					const waitData = await waitResult.json() as { StatusCode?: number };
+					exitCode = waitData.StatusCode;
+					console.log(`[runContainerWithStreaming] Container exited with code: ${exitCode}`);
+				} catch (err) {
+					console.warn(`[runContainerWithStreaming] Wait attempt ${attempt + 1} failed: ${(err as Error).message}`);
+				}
+			}
+			if (exitCode === undefined) {
+				// Fallback: inspect the container. Only trust a definitively-exited
+				// state; a still-running/restarting/unknown state stays undefined.
+				try {
+					const insp = await dockerFetch(`/containers/${containerId}/json`, {}, options.envId);
+					if (insp.ok) {
+						const data = await insp.json() as { State?: { Status?: string; Running?: boolean; ExitCode?: number } };
+						const st = data.State;
+						if (st && st.Running === false && st.Status === 'exited' && typeof st.ExitCode === 'number') {
+							exitCode = st.ExitCode;
+							console.log(`[runContainerWithStreaming] Resolved exit code via inspect: ${exitCode}`);
+						}
+					}
+				} catch (err) {
+					console.warn(`[runContainerWithStreaming] Inspect fallback failed: ${(err as Error).message}`);
+				}
 			}
 
 			// Container exited - abort stderr stream (it may be hanging on some Docker hosts)
@@ -4694,8 +4998,10 @@ export async function runContainerWithStreaming(options: {
 			// Container has exited. Now fetch stdout reliably (no race condition).
 			const stdout = await fetchContainerStdout(containerId, config, options.envId);
 
-			// If stdout is empty and exit code is non-zero, fetch stderr and throw
-			if (stdout.length === 0 && exitCode !== 0) {
+			// Fail closed on a non-zero OR indeterminate exit. Callers (backup/restore
+			// helpers) explicitly assume a non-throwing return means a clean run, so an
+			// unknown outcome must be an error, not a silent success.
+			if (exitCode === undefined || exitCode !== 0) {
 				let stderrText = '';
 				try {
 					const stderrResponse = await dockerFetch(
@@ -4709,8 +5015,11 @@ export async function runContainerWithStreaming(options: {
 				} catch {
 					// Ignore stderr fetch errors
 				}
-				const detail = stderrText ? stderrText.substring(0, 1000) : 'no stderr output';
-				throw new Error(`Container exited with code ${exitCode}: ${detail}`);
+				// Include stdout in the detail too — restic often writes its error
+				// summary there — so callers' error matching (e.g. repo-not-init) works.
+				const detail = (stderrText || stdout || 'no output').substring(0, 1000);
+				const code = exitCode === undefined ? 'unknown (could not determine container exit status)' : String(exitCode);
+				throw new Error(`Container exited with code ${code}: ${detail}`);
 			}
 
 			return stdout;
@@ -4744,10 +5053,18 @@ async function streamLocalStderr(
 	containerId: string,
 	envId: number | null | undefined,
 	onStderr?: (data: string) => void,
-	signal?: AbortSignal
+	signal?: AbortSignal,
+	// Opt-in live STDOUT streaming. When provided, we follow stdout too and route
+	// frames by their Docker stream type (processStreamFrames already demuxes 1=stdout
+	// / 2=stderr). Callers that don't pass it (terminal/exec/logs) get the exact prior
+	// behaviour: stderr-only follow, stdout untouched. Used by the backup helper so
+	// restic's --json progress (which it writes to stdout) shows LIVE instead of
+	// arriving buffered after the container exits.
+	onStdout?: (data: string) => void
 ): Promise<void> {
+	const wantStdout = onStdout ? 'true' : 'false';
 	const response = await dockerFetch(
-		`/containers/${containerId}/logs?stdout=false&stderr=true&follow=true`,
+		`/containers/${containerId}/logs?stdout=${wantStdout}&stderr=true&follow=true`,
 		{ streaming: true },
 		envId
 	);
@@ -4766,7 +5083,7 @@ async function streamLocalStderr(
 			const { done, value } = await reader.read();
 			if (done) break;
 			buffer = Buffer.concat([buffer, Buffer.from(value)]);
-			const result = processStreamFrames(buffer, undefined, onStderr);
+			const result = processStreamFrames(buffer, onStdout, onStderr);
 			buffer = result.remaining;
 		}
 	} catch {
@@ -5780,6 +6097,57 @@ export async function cleanupStaleVolumeHelpers(environments: Array<{ id: number
 	if (totalRemoved > 0) {
 		console.log(`[Volume Helper] Removed ${totalRemoved} stale container(s)`);
 	}
+}
+
+/**
+ * Reap orphaned backup/restore helper containers on a specific environment left
+ * by a crashed process. Only removes helpers THIS installation owns (name prefix +
+ * matching dockhand.instance label); a missing/foreign label is skipped so a
+ * co-located Dockhand's live helper on a shared daemon is never touched.
+ */
+async function cleanupStaleBackupHelpersForEnv(myInstance: string, envId?: number | null): Promise<number> {
+	try {
+		const containers = await listContainers(true, envId ?? undefined);
+		let removed = 0;
+		for (const c of containers) {
+			if (!isOwnedBackupHelper(c.name, c.labels, myInstance)) continue;
+			try {
+				await removeVolumeHelperContainer(c.id, envId ?? undefined);
+				removed++;
+			} catch (err) {
+				console.warn(`Failed to remove orphan backup helper ${c.name || c.id}:`, err);
+			}
+		}
+		return removed;
+	} catch (err: any) {
+		// Don't spam logs for expected connection failures (offline envs, TLS mismatches, etc.)
+		const msg = err?.message || String(err);
+		const isExpected = /not connected|offline|unreachable|fetch failed|EPROTO|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EHOSTUNREACH/i.test(msg);
+		if (!isExpected) {
+			console.warn(`Failed to query orphan backup helpers for env ${envId}:`, msg);
+		}
+		return 0;
+	}
+}
+
+/**
+ * Reap orphaned backup/restore helper containers across all environments (plus
+ * the local daemon when there are none). Call on startup, BEFORE the backup engine
+ * reconciles, so no live helper from a crashed run is still mid-operation. Returns
+ * the number removed. Only reaps helpers this installation owns (fail-closed on the
+ * instance label).
+ */
+export async function cleanupStaleBackupHelpers(environments: Array<{ id: number }>): Promise<number> {
+	const myInstance = await getInstanceId();
+	const envIds: (number | undefined)[] = environments.length ? environments.map((e) => e.id) : [undefined];
+	let totalRemoved = 0;
+	for (const envId of envIds) {
+		totalRemoved += await cleanupStaleBackupHelpersForEnv(myInstance, envId);
+	}
+	if (totalRemoved > 0) {
+		console.log(`[Backups] Reaped ${totalRemoved} orphan helper container(s) from a previous run`);
+	}
+	return totalRemoved;
 }
 
 /**

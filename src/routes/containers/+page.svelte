@@ -13,7 +13,7 @@
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
 	import { formatPorts, formatExposedPorts } from '$lib/utils/port-format';
-	import { formatBytes } from '$lib/utils/format';
+	import { formatBytes, formatBytesCompact } from '$lib/utils/format';
 	import MultiSelectFilter from '$lib/components/MultiSelectFilter.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import { Badge } from '$lib/components/ui/badge';
@@ -306,6 +306,10 @@
 	// Set of container IDs with updates available (for O(1) lookup)
 	const containersWithUpdatesSet = $derived(new Set(batchUpdateContainerIds));
 
+	// Container IDs whose last update check failed (e.g. registry rate-limited) — #1255
+	const containersWithFailedCheckSet = $derived(new Set($containerStore.failedUpdateIds));
+	const failedUpdateErrors = $derived($containerStore.failedUpdateErrors);
+
 	// Filter dropdown entries: real statuses plus the synthetic
 	// "update-available" entry, only offered once we know about a pending
 	// update — picking it on an empty set would just empty the list (#1063).
@@ -460,6 +464,7 @@
 
 	function handleUpdateCheckComplete(result: {
 		withUpdates: Array<{ containerId: string; containerName: string }>;
+		failed?: Array<{ containerId: string; error: string }>;
 	}) {
 		if (result.withUpdates.length === 0) {
 			containerStore.setPendingUpdates([], new Map());
@@ -470,6 +475,13 @@
 				new Map(result.withUpdates.map((r) => [r.containerId, r.containerName]))
 			);
 		}
+		// Record failed checks so their containers show a "check failed" state
+		// instead of masquerading as up to date (#1255).
+		const failed = result.failed ?? [];
+		containerStore.setFailedUpdates(
+			failed.map((f) => f.containerId),
+			new Map(failed.map((f) => [f.containerId, f.error]))
+		);
 	}
 
 	// Load pending updates from database (persisted from check-updates or scheduled jobs)
@@ -505,6 +517,9 @@
 			const response = await fetch(`/api/containers/pending-updates?env=${envId}`, { method: 'DELETE' });
 			if (response.ok) {
 				containerStore.setPendingUpdates([], new Map());
+				// Failed-check state is session-only — clear it here too so "Clear"
+				// dismisses the red "check failed" icons alongside the amber ones.
+				containerStore.setFailedUpdates([], new Map());
 			}
 		} catch {
 			toast.error('Failed to clear update indicators');
@@ -1746,6 +1761,22 @@
 										</a>
 									{/if}
 								{/if}
+							{:else if containersWithFailedCheckSet.has(container.id)}
+								<Tooltip.Root>
+									<Tooltip.Trigger>
+										<AlertTriangle class="w-3 h-3 text-red-500 shrink-0 cursor-help" />
+									</Tooltip.Trigger>
+									<Tooltip.Content side="right" class="w-72 p-3">
+										<div class="space-y-1.5">
+											<p class="font-medium text-sm flex items-center gap-1.5 whitespace-nowrap">
+												<AlertTriangle class="w-4 h-4 text-red-500 shrink-0" />
+												Update check failed
+											</p>
+											<p class="text-muted-foreground text-xs break-words">{failedUpdateErrors.get(container.id) ?? 'Could not query registry'}</p>
+											<p class="text-muted-foreground text-xs">Update status unknown — often a Docker Hub rate limit. Try again later.</p>
+										</div>
+									</Tooltip.Content>
+								</Tooltip.Root>
 							{/if}
 							<span class="text-xs text-muted-foreground truncate" title={container.image}>{container.image}</span>
 						</div>
@@ -1797,7 +1828,7 @@
 								{@const memoryTooltip = stats.memoryCache > 0
 									? `${formatBytes(stats.memoryUsage)} / ${formatBytes(stats.memoryLimit)} (Total: ${formatBytes(stats.memoryRaw)} | Cache: ${formatBytes(stats.memoryCache)})`
 									: `${formatBytes(stats.memoryUsage)} / ${formatBytes(stats.memoryLimit)}`}
-								<span class="text-xs font-mono {stats.memoryPercent > 80 ? 'text-red-500' : stats.memoryPercent > 50 ? 'text-yellow-500' : 'text-muted-foreground'}" title={memoryTooltip}>{formatBytes(stats.memoryUsage)}<span class="text-muted-foreground/50">/{formatBytes(stats.memoryLimit, 0)}</span></span>
+								<span class="text-xs font-mono {stats.memoryPercent > 80 ? 'text-red-500' : stats.memoryPercent > 50 ? 'text-yellow-500' : 'text-muted-foreground'}" title={memoryTooltip}>{formatBytesCompact(stats.memoryUsage)}<span class="text-muted-foreground/50">/{formatBytesCompact(stats.memoryLimit, 0)}</span></span>
 							{:else if container.state === 'running'}
 								<span class="text-xs text-muted-foreground/50">...</span>
 							{:else}
@@ -1809,7 +1840,7 @@
 							{#if containerStats.get(container.id)}
 								{@const stats = containerStats.get(container.id)}
 								<span class="text-xs font-mono text-muted-foreground" title="↓{formatBytes(stats.networkRx)} received / ↑{formatBytes(stats.networkTx)} sent">
-									<span class="text-2xs text-blue-400">↓</span>{formatBytes(stats.networkRx, 0)} <span class="text-2xs text-orange-400">↑</span>{formatBytes(stats.networkTx, 0)}
+									<span class="text-2xs text-blue-400">↓</span>{formatBytesCompact(stats.networkRx, 0)} <span class="text-2xs text-orange-400">↑</span>{formatBytesCompact(stats.networkTx, 0)}
 								</span>
 							{:else if container.state === 'running'}
 								<span class="text-xs text-muted-foreground/50">...</span>
@@ -1822,7 +1853,7 @@
 							{#if containerStats.get(container.id)}
 								{@const stats = containerStats.get(container.id)}
 								<span class="text-xs font-mono text-muted-foreground" title="↓{formatBytes(stats.blockRead)} read / ↑{formatBytes(stats.blockWrite)} written">
-									<span class="text-2xs text-green-400">r</span>{formatBytes(stats.blockRead, 0)} <span class="text-2xs text-yellow-400">w</span>{formatBytes(stats.blockWrite, 0)}
+									<span class="text-2xs text-green-400">r</span>{formatBytesCompact(stats.blockRead, 0)} <span class="text-2xs text-yellow-400">w</span>{formatBytesCompact(stats.blockWrite, 0)}
 								</span>
 							{:else if container.state === 'running'}
 								<span class="text-xs text-muted-foreground/50">...</span>

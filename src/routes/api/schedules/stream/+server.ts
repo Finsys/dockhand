@@ -10,6 +10,9 @@ import {
 	getAllAutoUpdateGitStacks,
 	getAllEnvUpdateCheckSettings,
 	getAllImagePruneSettings,
+	getBackupConfigs,
+	getBackupDestination,
+	getBackupDestinations,
 	getLastExecutionForSchedule,
 	getRecentExecutionsForSchedule,
 	getEnvironment,
@@ -179,6 +182,121 @@ async function getSchedulesData(): Promise<ScheduleInfo[]> {
 		})
 	);
 	schedules.push(...imagePruneSchedules);
+
+	// Get backup schedules
+	const allBackupConfigs = await getBackupConfigs();
+	const backupSchedules = await Promise.all(
+		allBackupConfigs
+			.filter(c => c.schedule)
+			.map(async (config) => {
+				const [env, dest, lastExecution, recentExecutions] = await Promise.all([
+					config.environmentId ? getEnvironment(config.environmentId) : null,
+					getBackupDestination(config.destinationId),
+					getLastExecutionForSchedule('backup', config.id),
+					getRecentExecutionsForSchedule('backup', config.id, 5)
+				]);
+				const timezone = config.environmentId ? await getEnvironmentTimezone(config.environmentId) : 'UTC';
+				const isEnabled = config.enabled ?? false;
+				const nextRun = isEnabled && config.schedule ? getNextRun(config.schedule, timezone) : null;
+
+				return {
+					id: config.id,
+					type: 'backup' as const,
+					name: `Backup: ${config.targetName}`,
+					entityName: config.targetName,
+					description: `Back up ${config.type} to ${dest?.name || 'unknown destination'}`,
+					environmentId: config.environmentId,
+					environmentName: env?.name ?? null,
+					enabled: isEnabled,
+					scheduleType: 'custom',
+					cronExpression: config.schedule ?? null,
+					nextRun: nextRun?.toISOString() ?? null,
+					lastExecution: lastExecution ?? null,
+					recentExecutions,
+					isSystem: false
+				};
+			})
+	);
+	schedules.push(...backupSchedules);
+
+	// Get repo maintenance schedules (prune + check from destination policies)
+	const allDestinations = await getBackupDestinations();
+	for (const dest of allDestinations) {
+		const policies = dest.policies ? (() => { try { return JSON.parse(dest.policies); } catch { return {}; } })() : {};
+		if (policies.pruneEnabled && policies.pruneSchedule) {
+			const [lastExec, recentExecs] = await Promise.all([
+				getLastExecutionForSchedule('repo_prune', dest.id),
+				getRecentExecutionsForSchedule('repo_prune', dest.id, 5)
+			]);
+			const nextRun = getNextRun(policies.pruneSchedule, 'UTC');
+			const maxUnused = policies.pruneMaxUnused ?? '10';
+			schedules.push({
+				id: dest.id + 100000,
+				type: 'repo_prune' as any,
+				name: `Prune: ${dest.name}`,
+				entityName: dest.name,
+				description: `Prune unused data from ${dest.name} (max unused ${maxUnused}%)`,
+				maxUnused: String(maxUnused),
+				environmentId: null,
+				environmentName: null,
+				enabled: true,
+				scheduleType: 'custom',
+				cronExpression: policies.pruneSchedule,
+				nextRun: nextRun?.toISOString() ?? null,
+				lastExecution: lastExec ?? null,
+				recentExecutions: recentExecs,
+				isSystem: false
+			});
+		}
+		if (policies.checkEnabled && policies.checkSchedule) {
+			const [lastExec, recentExecs] = await Promise.all([
+				getLastExecutionForSchedule('repo_check', dest.id),
+				getRecentExecutionsForSchedule('repo_check', dest.id, 5)
+			]);
+			const nextRun = getNextRun(policies.checkSchedule, 'UTC');
+			schedules.push({
+				id: dest.id + 200000,
+				type: 'repo_check' as any,
+				name: `Check: ${dest.name}`,
+				entityName: dest.name,
+				description: `Check integrity of ${dest.name}`,
+				environmentId: null,
+				environmentName: null,
+				enabled: true,
+				scheduleType: 'custom',
+				cronExpression: policies.checkSchedule,
+				nextRun: nextRun?.toISOString() ?? null,
+				lastExecution: lastExec ?? null,
+				recentExecutions: recentExecs,
+				isSystem: false
+			});
+		}
+		if (policies.verifyEnabled && policies.verifySchedule) {
+			const [lastExec, recentExecs] = await Promise.all([
+				getLastExecutionForSchedule('repo_verify', dest.id),
+				getRecentExecutionsForSchedule('repo_verify', dest.id, 5)
+			]);
+			const nextRun = getNextRun(policies.verifySchedule, 'UTC');
+			const subset = policies.verifyDataSubset || '5%';
+			schedules.push({
+				id: dest.id + 300000,
+				type: 'repo_verify' as any,
+				name: `Verify: ${dest.name}`,
+				entityName: dest.name,
+				description: `Verify ${subset} of data in ${dest.name}`,
+				dataSubset: subset,
+				environmentId: null,
+				environmentName: null,
+				enabled: true,
+				scheduleType: 'custom',
+				cronExpression: policies.verifySchedule,
+				nextRun: nextRun?.toISOString() ?? null,
+				lastExecution: lastExec ?? null,
+				recentExecutions: recentExecs,
+				isSystem: false
+			});
+		}
+	}
 
 	// Get system schedules
 	const systemSchedules = await getSystemSchedules();

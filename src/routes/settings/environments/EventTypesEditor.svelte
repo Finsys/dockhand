@@ -7,9 +7,11 @@
 		Layers,
 		Shield,
 		HardDrive,
+		Archive,
 		ChevronDown,
 		ChevronRight
 	} from 'lucide-svelte';
+	import { page } from '$app/stores'; // BETA GATE: backups feature flag
 
 	interface EventType {
 		id: string;
@@ -104,6 +106,17 @@
 			]
 		},
 		{
+			id: 'backup',
+			label: 'Backup events',
+			icon: Archive,
+			events: [
+				{ id: 'backup_success', label: 'Backup succeeded', description: 'Backup completed successfully' },
+				{ id: 'backup_failed', label: 'Backup failed', description: 'Backup failed' },
+				{ id: 'restore_success', label: 'Restore succeeded', description: 'Restore completed successfully' },
+				{ id: 'restore_failed', label: 'Restore failed', description: 'Restore failed' }
+			]
+		},
+		{
 			id: 'system',
 			label: 'System events',
 			icon: HardDrive,
@@ -151,7 +164,8 @@
 </script>
 
 <div class="space-y-2 max-h-[300px] overflow-y-auto pr-1">
-	{#each NOTIFICATION_EVENT_GROUPS as group (group.id)}
+	<!-- BETA GATE: drop the Backup events group unless FEAT_BACKUPS_ENABLED (see features.ts) -->
+	{#each NOTIFICATION_EVENT_GROUPS.filter((g) => g.id !== 'backup' || $page.data.backupsEnabled) as group (group.id)}
 		{@const isCollapsed = collapsedGroups.has(group.id)}
 		{@const selectedCount = getGroupSelectedCount(group)}
 		{@const allSelected = selectedCount === group.events.length}

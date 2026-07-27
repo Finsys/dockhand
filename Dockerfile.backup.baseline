@@ -1,0 +1,28 @@
+# syntax=docker/dockerfile:1.4
+# Dockhand Backup Helper — BASELINE build (Alpine/musl, amd64 only)
+#
+# The normal helper (Dockerfile.backup) is Wolfi-based; Wolfi compiles its restic
+# and glibc for x86-64-v2 (SSE4.2/POPCNT). On older x86_64 CPUs without those
+# instructions (TrueNAS, old Intel Atom/Celeron — the same hardware that needs the
+# baseline Dockhand image) the Wolfi helper dies immediately:
+#   restic:  "This program can only be run on AMD64 processors with v2 microarchitecture"
+#   busybox: "Fatal glibc error: CPU does not support x86-64-v2"
+# so backups are completely broken for baseline users.
+#
+# Alpine's musl + its restic build run on x86-64-v1 (verified on a QEMU v1 CPU), so
+# the baseline helper is a plain Alpine image with restic. amd64 only — baseline is a
+# workaround for old x86_64 hardware, not an ARM concern.
+#
+# Rebuild trigger: the pipeline is change-gated on this file — bumping this comment
+# forces a rebuild so the versioned/-baseline tags are (re)published.
+# (revert rclone — the rclone: backend is unfinished/removed; see vault rclone.md)
+FROM alpine:3.21
+
+# restic + tar (busybox) + a real shell + CA certs cover everything the helper does:
+# restic backup/restore/forget, the metadata shell script (set -e, tar), and TLS to
+# the backup repository.
+RUN apk add --no-cache restic ca-certificates tar
+
+COPY scripts/backup-entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]

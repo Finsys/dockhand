@@ -8,8 +8,8 @@
 	import EnvironmentIcon from '$lib/components/EnvironmentIcon.svelte';
 	import { toast } from 'svelte-sonner';
 	import { themeStore, type FontSize } from '$lib/stores/theme';
-	import { getTimeFormat } from '$lib/stores/settings';
 	import { formatBytes } from '$lib/utils/format';
+	import { getTimeFormat } from '$lib/stores/settings';
 
 	// Font size scaling for header
 	let fontSize = $state<FontSize>('normal');

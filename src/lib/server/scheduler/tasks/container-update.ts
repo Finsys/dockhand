@@ -32,8 +32,10 @@ import {
 	tagImage,
 	connectContainerToNetwork,
 	disconnectContainerFromNetwork,
-	recreateContainerFromInspect
+	recreateContainerFromInspect,
+	inspectImage
 } from '../../docker';
+import type { ImageEnvLabels } from '../../container-env-merge';
 import { getScannerSettings, scanImage, type ScanResult, type VulnerabilitySeverity } from '../../scanner';
 import { sendEventNotification } from '../../notifications';
 import { parseImageNameAndTag, combineScanSummaries, isSystemContainer, isPodmanInfraContainer } from './update-utils';
@@ -384,6 +386,16 @@ export async function runContainerUpdate(
 		// Get the actual image ID from inspect data
 		const currentImageId = inspectData.Image;
 
+		// Capture the OLD image's Env/Labels BEFORE the pull — the old digest may
+		// be untagged/GC'd afterward. Forwarded to the env/label rebase (#1226, #1256).
+		let oldImageConfig: ImageEnvLabels | null = null;
+		try {
+			const oldImg = await inspectImage(currentImageId, envId) as any;
+			oldImageConfig = { Env: oldImg?.Config?.Env, Labels: oldImg?.Config?.Labels };
+		} catch {
+			// Best-effort; rebase falls back if unavailable.
+		}
+
 		log(`Container is using image: ${imageNameFromConfig}`);
 		log(`Current image ID: ${currentImageId?.substring(0, 19)}`);
 
@@ -569,7 +581,11 @@ export async function runContainerUpdate(
 		// =============================================================================
 
 		log(`Recreating container with full config passthrough...`);
-		const result = await recreateContainer(containerName, envId, log, imageNameFromConfig);
+		const result = await recreateContainer(containerName, envId, {
+			log,
+			imageNameOverride: imageNameFromConfig,
+			oldImageConfig
+		});
 
 		if (result.success) {
 			await updateAutoUpdateLastUpdated(containerName, envId);
@@ -623,12 +639,25 @@ export async function runContainerUpdate(
  * Passes inspect data directly to Docker API create, only changing the image.
  * No manual field mapping — zero settings loss.
  */
+export interface RecreateContainerOptions {
+	/** Progress logger. */
+	log?: (msg: string) => void;
+	/** New image to recreate with (defaults to the container's current image). */
+	imageNameOverride?: string;
+	/**
+	 * OLD image Config (Env/Labels) captured BEFORE the new image was pulled —
+	 * forwarded to the env/label rebase (#1226, #1256), since the old image may
+	 * no longer be inspectable after the pull repoints the tag.
+	 */
+	oldImageConfig?: ImageEnvLabels | null;
+}
+
 export async function recreateContainer(
 	containerName: string,
 	envId?: number,
-	log?: (msg: string) => void,
-	imageNameOverride?: string
+	options: RecreateContainerOptions = {}
 ): Promise<{ success: boolean; error?: string }> {
+	const { log, imageNameOverride, oldImageConfig } = options;
 	try {
 		const containers = await listContainers(true, envId);
 		const container = containers.find(c => c.name === containerName);
@@ -643,7 +672,7 @@ export async function recreateContainer(
 
 		log?.(`Recreating container: ${containerName} (image: ${imageName})`);
 
-		await recreateContainerFromInspect(inspectData, imageName, envId, log);
+		await recreateContainerFromInspect(inspectData, imageName, envId, log, oldImageConfig);
 		return { success: true };
 	} catch (error: any) {
 		log?.(`Failed to recreate container: ${error.message}`);

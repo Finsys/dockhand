@@ -8,7 +8,7 @@
 	import { TogglePill, ToggleSwitch } from '$lib/components/ui/toggle-pill';
 	import CronEditor from '$lib/components/cron-editor.svelte';
 	import TimezoneSelector from '$lib/components/TimezoneSelector.svelte';
-	import { Eye, Bell, Database, Calendar, ShieldCheck, FileText, AlertTriangle, HelpCircle, Globe, Activity, Clock, Info, Save, RotateCcw, LayoutDashboard, Tags, ChevronRight, ChevronDown } from 'lucide-svelte';
+	import { Eye, Bell, Database, Calendar, ShieldCheck, FileText, AlertTriangle, HelpCircle, Globe, Activity, Clock, Info, Save, RotateCcw, LayoutDashboard, Tags, Archive, ChevronRight, ChevronDown } from 'lucide-svelte';
 	import CodeEditor from '$lib/components/CodeEditor.svelte';
 	import { appSettings, type DateFormat, type DownloadFormat, type EventCollectionMode, type LabelFilterMode } from '$lib/stores/settings';
 	import { canAccess, authStore } from '$lib/stores/auth';
@@ -91,6 +91,7 @@ services:
 	let eventCollectionMode = $derived($appSettings.eventCollectionMode);
 	let eventPollInterval = $derived($appSettings.eventPollInterval);
 	let metricsCollectionInterval = $derived($appSettings.metricsCollectionInterval);
+	let defaultBackupImage = $derived($appSettings.defaultBackupImage);
 
 	let clearingCache = $state(false);
 
@@ -267,6 +268,14 @@ services:
 		if (selected?.value) {
 			appSettings.setMetricsCollectionInterval(selected.value);
 			toast.success(`Metrics interval: ${selected.value / 1000}s`);
+		}
+	}
+
+	function handleBackupImageBlur(e: Event) {
+		const value = (e.target as HTMLInputElement).value.trim();
+		if (value && value !== defaultBackupImage) {
+			appSettings.setDefaultBackupImage(value);
+			toast.success('Backup image updated');
 		}
 	}
 </script>
@@ -970,15 +979,17 @@ services:
 								onchange={handleScannerCleanupEnabledChange}
 								disabled={!$canAccess('settings', 'edit')}
 							/>
-							<div class="ml-auto">
+						</div>
+						<p class="text-xs text-muted-foreground">Remove cached vulnerability databases to reclaim disk space</p>
+						{#if scannerCleanupEnabled}
+							<div class="mt-2">
 								<CronEditor
 									value={scannerCleanupCron}
 									onchange={handleScannerCleanupCronChange}
-									disabled={!$canAccess('settings', 'edit') || !scannerCleanupEnabled}
+									disabled={!$canAccess('settings', 'edit')}
 								/>
 							</div>
-						</div>
-						<p class="text-xs text-muted-foreground">Remove cached vulnerability databases to reclaim disk space</p>
+						{/if}
 					</div>
 					<div class="space-y-1 pt-2 border-t">
 						<div class="flex items-center gap-3">

@@ -26,8 +26,8 @@ RUN gcc -shared -fPIC -O2 -o /tmp/libgetrandom-shim.so /tmp/getrandom-shim.c
 
 # Copy package files and install dependencies (--ignore-scripts blocks malicious postinstall hooks)
 COPY package.json package-lock.json ./
-RUN npm ci --ignore-scripts \
-    && npm rebuild better-sqlite3 argon2
+RUN MAKEFLAGS="-j$(nproc)" npm ci --ignore-scripts \
+    && MAKEFLAGS="-j$(nproc)" npm rebuild better-sqlite3 argon2
 
 # Copy source code and build
 COPY . .
@@ -44,7 +44,7 @@ RUN cp -r node_modules/better-sqlite3/build /tmp/better-sqlite3-build \
 # -----------------------------------------------------------------------------
 # Stage 2: Go Collector Builder
 # -----------------------------------------------------------------------------
-FROM golang:1.25.11 AS go-builder
+FROM golang:1.25.12 AS go-builder
 WORKDIR /app
 COPY collector/ ./collector/
 RUN cd collector && CGO_ENABLED=0 go build -o /app/bin/collection-worker .
@@ -90,7 +90,8 @@ ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
     HOME=/home/dockhand \
     PUID=1001 \
     PGID=1001 \
-    LD_PRELOAD=/usr/lib/libgetrandom-shim.so
+    LD_PRELOAD=/usr/lib/libgetrandom-shim.so \
+    DOCKHAND_VARIANT=baseline
 
 # Copy application files with correct ownership
 COPY --from=app-builder --chown=dockhand:dockhand /app/node_modules ./node_modules
@@ -122,6 +123,15 @@ RUN chmod +x ./scripts/*.sh ./scripts/**/*.sh 2>/dev/null || true
 # Create data directories
 RUN mkdir -p /home/dockhand/.dockhand/stacks /app/data \
     && chown dockhand:dockhand /app/data /home/dockhand /home/dockhand/.dockhand /home/dockhand/.dockhand/stacks
+
+# OCI image annotations (#1217) — lets tooling map this image back to its
+# source repo (image registry name differs from GitHub repo name).
+LABEL org.opencontainers.image.source="https://github.com/Finsys/dockhand" \
+      org.opencontainers.image.url="https://dockhand.pro" \
+      org.opencontainers.image.title="Dockhand" \
+      org.opencontainers.image.description="Docker management" \
+      org.opencontainers.image.vendor="Finsys" \
+      org.opencontainers.image.licenses="BUSL-1.1"
 
 EXPOSE 3000
 

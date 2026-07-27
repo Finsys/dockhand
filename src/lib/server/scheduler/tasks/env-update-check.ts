@@ -27,7 +27,9 @@ import {
 	getImageIdByTag,
 	removeTempImage,
 	tagImage,
+	inspectImage,
 } from '../../docker';
+import type { ImageEnvLabels } from '../../container-env-merge';
 import { sendEventNotification } from '../../notifications';
 import { getScannerSettings, scanImage, type VulnerabilitySeverity } from '../../scanner';
 import { parseImageNameAndTag, combineScanSummaries, isSystemContainer, isPodmanInfraContainer } from './update-utils';
@@ -42,6 +44,8 @@ interface UpdateInfo {
 	currentImageId: string;
 	currentDigest?: string;
 	newDigest?: string;
+	// OLD image Env/Labels captured before any pull — for the rebase (#1226, #1256).
+	oldImageConfig?: ImageEnvLabels | null;
 }
 
 // Track running update checks to prevent concurrent execution
@@ -160,13 +164,23 @@ export async function runEnvUpdateCheckJob(
 				}
 
 				if (result.hasUpdate) {
+					// Capture the OLD image's Env/Labels now, before any pull, for the
+					// env/label rebase (#1226, #1256).
+					let oldImageConfig: ImageEnvLabels | null = null;
+					try {
+						const oldImg = await inspectImage(currentImageId, environmentId) as any;
+						oldImageConfig = { Env: oldImg?.Config?.Env, Labels: oldImg?.Config?.Labels };
+					} catch {
+						// Best-effort; rebase falls back if unavailable.
+					}
 					updatesAvailable.push({
 						containerId: container.id,
 						containerName: container.name,
 						imageName,
 						currentImageId,
 						currentDigest: result.currentDigest,
-						newDigest: result.registryDigest
+						newDigest: result.registryDigest,
+						oldImageConfig
 					});
 					// Add to pending table immediately - will be removed on successful update
 					await addPendingContainerUpdate(environmentId, container.id, container.name, imageName);
@@ -374,8 +388,10 @@ export async function runEnvUpdateCheckJob(
 
 					// Recreate container with full config passthrough
 					await log(`  Recreating container...`);
-					const result = await recreateContainer(update.containerName, environmentId,
-						(msg) => { log(`  ${msg}`); });
+					const result = await recreateContainer(update.containerName, environmentId, {
+						log: (msg) => { log(`  ${msg}`); },
+						oldImageConfig: update.oldImageConfig
+					});
 					if (!result.success) throw new Error(result.error || 'Container recreation failed');
 
 					await log(`  Updated successfully`);

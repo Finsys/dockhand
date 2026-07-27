@@ -458,7 +458,7 @@ export const scheduleExecutions = sqliteTable('schedule_executions', {
 	completedAt: text('completed_at'),
 	duration: integer('duration'), // milliseconds
 	// Result
-	status: text('status').notNull(), // 'queued' | 'running' | 'success' | 'failed' | 'skipped'
+	status: text('status').notNull(), // 'queued' | 'running' | 'success' | 'warning' | 'failed' | 'skipped'
 	errorMessage: text('error_message'),
 	// Details
 	details: text('details'), // JSON with execution details
@@ -483,6 +483,50 @@ export const pendingContainerUpdates = sqliteTable('pending_container_updates', 
 }, (table) => ({
 	envContainerUnique: unique().on(table.environmentId, table.containerId)
 }));
+
+// =============================================================================
+// BACKUP DESTINATIONS TABLE
+// =============================================================================
+
+export const backupDestinations = sqliteTable('backup_destinations', {
+	id: integer('id').primaryKey({ autoIncrement: true }),
+	name: text('name').notNull().unique(),
+	repository: text('repository').notNull(),        // restic repo URL/path
+	password: text('password').notNull(),            // AES-256-GCM encrypted
+	envVars: text('env_vars'),                       // JSON: { key: value } — values encrypted
+	flags: text('flags'),                            // extra restic CLI flags
+	hostPath: text('host_path'),                     // bind-mount source for local repos
+	policies: text('policies'),                      // JSON: { pruneSchedule, checkSchedule, autoUnlock, maxUnused }
+	lastTestAt: text('last_test_at'),
+	lastTestStatus: text('last_test_status'),        // 'success' | 'failed'
+	lastTestError: text('last_test_error'),
+	createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+	updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`)
+});
+
+// =============================================================================
+// BACKUP CONFIGS TABLE
+// =============================================================================
+
+export const backupConfigs = sqliteTable('backup_configs', {
+	id: integer('id').primaryKey({ autoIncrement: true }),
+	type: text('type').notNull().default('container'),  // 'container' | 'stack'
+	targetName: text('target_name').notNull(),
+	environmentId: integer('environment_id').references(() => environments.id, { onDelete: 'cascade' }),
+	destinationId: integer('destination_id').notNull().references(() => backupDestinations.id, { onDelete: 'cascade' }),
+	enabled: integer('enabled', { mode: 'boolean' }).default(true),
+	allVolumes: integer('all_volumes', { mode: 'boolean' }).default(true),
+	selectedVolumes: text('selected_volumes'),       // JSON array of volume names
+	stopBeforeBackup: integer('stop_before_backup', { mode: 'boolean' }).default(false),
+	schedule: text('schedule'),                      // cron expression
+	retention: text('retention'),                    // JSON: { keepLast?, keepDaily?, keepWeekly?, keepMonthly?, keepYearly? }
+	options: text('options'),                        // JSON: { compression?, limitUpload?, limitDownload?, excludePatterns?, webhookSuccess?, webhookFailure? }
+	tags: text('tags'),                              // JSON array of strings
+	lastBackupAt: text('last_backup_at'),
+	lastBackupStatus: text('last_backup_status'),    // 'success' | 'failed'
+	createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+	updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`)
+});
 
 // =============================================================================
 // API TOKENS TABLE
@@ -625,3 +669,9 @@ export type NewPendingContainerUpdate = typeof pendingContainerUpdates.$inferIns
 
 export type ApiToken = typeof apiTokens.$inferSelect;
 export type NewApiToken = typeof apiTokens.$inferInsert;
+
+export type BackupDestination = typeof backupDestinations.$inferSelect;
+export type NewBackupDestination = typeof backupDestinations.$inferInsert;
+
+export type BackupConfig = typeof backupConfigs.$inferSelect;
+export type NewBackupConfig = typeof backupConfigs.$inferInsert;

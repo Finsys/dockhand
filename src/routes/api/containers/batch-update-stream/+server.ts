@@ -9,7 +9,8 @@ import {
 	isDigestBasedImage,
 	getImageIdByTag,
 	removeTempImage,
-	tagImage
+	tagImage,
+	inspectImage
 } from '$lib/server/docker';
 import { auditContainer } from '$lib/server/audit';
 import { getScannerSettings, scanImage } from '$lib/server/scanner';
@@ -156,6 +157,17 @@ export const POST: RequestHandler = async (event) => {
 				const config = inspectData.Config;
 				const imageName = config.Image;
 				const currentImageId = inspectData.Image;
+
+				// Capture the OLD image's Env/Labels BEFORE pulling — once the tag is
+				// repointed the old digest may be untagged/GC'd and un-inspectable.
+				// Used by the env/label rebase in recreateContainer (#1226, #1256).
+				let oldImageConfig: { Env?: string[]; Labels?: Record<string, string> } | null = null;
+				try {
+					const oldImg = await inspectImage(currentImageId, envIdNum) as any;
+					oldImageConfig = { Env: oldImg?.Config?.Env, Labels: oldImg?.Config?.Labels };
+				} catch {
+					// Best-effort; rebase will fall back if unavailable.
+				}
 
 				// Skip system containers (Dockhand, Hawser)
 				const systemType = isSystemContainer(imageName);
@@ -459,7 +471,11 @@ export const POST: RequestHandler = async (event) => {
 					message: `Recreating ${containerName}...`
 				});
 
-				const recreateResult = await recreateContainer(containerName, envIdNum, logProgress, imageName);
+				const recreateResult = await recreateContainer(containerName, envIdNum, {
+					log: logProgress,
+					imageNameOverride: imageName,
+					oldImageConfig
+				});
 				if (recreateResult.success) {
 					const updatedContainers = await listContainers(true, envIdNum);
 					const updatedContainer = updatedContainers.find(c => c.name === containerName);

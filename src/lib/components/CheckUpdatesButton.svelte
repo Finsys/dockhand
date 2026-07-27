@@ -13,6 +13,7 @@
 	}
 
 	export interface FailedCheckItem {
+		containerId: string;
 		containerName: string;
 		imageName: string;
 		error: string;
@@ -117,7 +118,7 @@
 				.map((r: any) => ({ containerId: r.containerId, containerName: r.containerName, imageName: r.imageName }));
 			const failed: FailedCheckItem[] = data.results
 				.filter((r: any) => r.error && !r.hasUpdate)
-				.map((r: any) => ({ containerName: r.containerName, imageName: r.imageName, error: r.error }));
+				.map((r: any) => ({ containerId: r.containerId, containerName: r.containerName, imageName: r.imageName, error: r.error }));
 
 			if (withUpdates.length === 0) {
 				// Keep the "Latest" status until re-check / env-switch — don't auto-revert (#1019)

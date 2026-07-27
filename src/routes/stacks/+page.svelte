@@ -13,7 +13,6 @@
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import * as Popover from '$lib/components/ui/popover';
-	import { formatBytes } from '$lib/utils/format';
 	import MultiSelectFilter from '$lib/components/MultiSelectFilter.svelte';
 	import { Play, Square, Trash2, Plus, ArrowBigDown, Search, Pencil, ExternalLink, GitBranch, RefreshCw, Loader2, FileCode, FileText, FileOutput, Box, RotateCcw, ScrollText, Terminal, Eye, Network, HardDrive, Heart, HeartPulse, HeartOff, ChevronsUpDown, ChevronsDownUp, Rocket, AlertTriangle, X, Layers, Pause, CircleDashed, Skull, FolderOpen, Variable, Clock, RotateCw, Import, Ship, Cable, LayoutPanelLeft, Rows3, GripVertical, Globe, CircleArrowUp, NotepadText } from 'lucide-svelte';
 	import { formatPorts } from '$lib/utils/port-format';
@@ -45,11 +44,16 @@
 	import type { DataGridSortState } from '$lib/components/data-grid/types';
 	import { ErrorDialog } from '$lib/components/ui/error-dialog';
 	import { formatHostPortUrl } from '$lib/utils/url';
+	import { formatBytes, formatBytesCompact } from '$lib/utils/format';
 
 	type SortField = 'name' | 'containers' | 'status' | 'cpu' | 'memory';
 	type SortDirection = 'asc' | 'desc';
 
 	let stacks = $state<ComposeStackInfo[]>([]);
+	// Container IDs whose last update check failed this session (e.g. registry
+	// rate-limited), with the error text for the tooltip — session-only (#1255).
+	let failedUpdateCheckIds = $state<Set<string>>(new Set());
+	let failedUpdateCheckErrors = $state<Map<string, string>>(new Map());
 	let stackSources = $state<Record<string, { sourceType: string; composePath?: string | null; repository?: any; gitStack?: any }>>({});
 	let stackEnvVarCounts = $state<Record<string, number>>({});
 	let gitStacks = $state<any[]>([]);
@@ -751,6 +755,30 @@
 		}
 	});
 
+	// True when any stack container shows an update-available (amber) or
+	// check-failed (red) indicator — gates the "dismiss indicators" button.
+	const hasUpdateIndicators = $derived(
+		stacks.some((s) => s.updatesAvailable) || failedUpdateCheckIds.size > 0
+	);
+
+	// Dismiss both the amber "update available" and red "check failed" indicators.
+	// Update-available lives in the shared pending_container_updates table (same
+	// one the containers page clears); failed-check state is session-only.
+	async function dismissStackUpdates() {
+		const id = $currentEnvironment?.id;
+		if (!id) return;
+		try {
+			const response = await fetch(`/api/containers/pending-updates?env=${id}`, { method: 'DELETE' });
+			if (response.ok) {
+				failedUpdateCheckIds = new Set();
+				failedUpdateCheckErrors = new Map();
+				await fetchStacks();
+			}
+		} catch {
+			toast.error('Failed to clear update indicators');
+		}
+	}
+
 	async function fetchStacks() {
 		// Show loading skeleton on initial load or when environment changes, but not on refreshes
 		if (lastLoadedEnvId !== envId) {
@@ -1413,8 +1441,27 @@
 			<CheckUpdatesButton
 				{envId}
 				hasPendingUpdates={stacks.some((s) => s.updatesAvailable)}
-				onComplete={() => fetchStacks()}
+				onComplete={(result) => {
+					// Record failed checks so stack containers show a "check failed" state
+					// instead of masquerading as up to date (#1255). Session-only.
+					const failed = result.failed ?? [];
+					failedUpdateCheckIds = new Set(failed.map((f) => f.containerId));
+					failedUpdateCheckErrors = new Map(failed.map((f) => [f.containerId, f.error]));
+					fetchStacks();
+				}}
 			/>
+			{#if hasUpdateIndicators}
+				<Button
+					size="sm"
+					variant="ghost"
+					onclick={dismissStackUpdates}
+					class="h-8 gap-1 text-muted-foreground hover:text-destructive"
+					title="Dismiss all update indicators"
+				>
+					<X class="w-3.5 h-3.5" />
+					Clear
+				</Button>
+			{/if}
 			<Button
 				size="sm"
 				variant="outline"
@@ -1802,7 +1849,7 @@
 					{@const stats = getStackStats(stack)}
 					<div class="text-right">
 						{#if stats}
-							<span class="text-xs font-mono text-muted-foreground" title="{formatBytes(stats.memoryUsage)} / {formatBytes(stats.memoryLimit)}">{formatBytes(stats.memoryUsage)}<span class="text-muted-foreground/50">/{formatBytes(stats.memoryLimit, 0)}</span></span>
+							<span class="text-xs font-mono text-muted-foreground" title="{formatBytes(stats.memoryUsage)} / {formatBytes(stats.memoryLimit)}">{formatBytesCompact(stats.memoryUsage)}<span class="text-muted-foreground/50">/{formatBytesCompact(stats.memoryLimit, 0)}</span></span>
 						{:else if stack.status === 'running' || stack.status === 'partial' || stack.status === 'restarting'}
 							<span class="text-xs text-muted-foreground/50">...</span>
 						{:else}
@@ -1814,7 +1861,7 @@
 					<div class="text-right whitespace-nowrap">
 						{#if stats}
 							<span class="text-xs font-mono text-muted-foreground" title="↓{formatBytes(stats.networkRx)} received / ↑{formatBytes(stats.networkTx)} sent">
-								<span class="text-2xs text-blue-400">↓</span>{formatBytes(stats.networkRx, 0)} <span class="text-2xs text-orange-400">↑</span>{formatBytes(stats.networkTx, 0)}
+								<span class="text-2xs text-blue-400">↓</span>{formatBytesCompact(stats.networkRx, 0)} <span class="text-2xs text-orange-400">↑</span>{formatBytesCompact(stats.networkTx, 0)}
 							</span>
 						{:else if stack.status === 'running' || stack.status === 'partial' || stack.status === 'restarting'}
 							<span class="text-xs text-muted-foreground/50">...</span>
@@ -1827,7 +1874,7 @@
 					<div class="text-right whitespace-nowrap">
 						{#if stats}
 							<span class="text-xs font-mono text-muted-foreground" title="↓{formatBytes(stats.blockRead)} read / ↑{formatBytes(stats.blockWrite)} written">
-								<span class="text-2xs text-green-400">r</span>{formatBytes(stats.blockRead, 0)} <span class="text-2xs text-yellow-400">w</span>{formatBytes(stats.blockWrite, 0)}
+								<span class="text-2xs text-green-400">r</span>{formatBytesCompact(stats.blockRead, 0)} <span class="text-2xs text-yellow-400">w</span>{formatBytesCompact(stats.blockWrite, 0)}
 							</span>
 						{:else if stack.status === 'running' || stack.status === 'partial' || stack.status === 'restarting'}
 							<span class="text-xs text-muted-foreground/50">...</span>
@@ -2098,6 +2145,22 @@
 													{/if}
 												{/if}
 											</span>
+										{:else if failedUpdateCheckIds.has(container.id)}
+											<Tooltip.Root>
+												<Tooltip.Trigger>
+													<AlertTriangle class="w-3.5 h-3.5 shrink-0 text-red-500 cursor-help" />
+												</Tooltip.Trigger>
+												<Tooltip.Content side="right" class="w-72 p-3">
+													<div class="space-y-1.5">
+														<p class="font-medium text-sm flex items-center gap-1.5 whitespace-nowrap">
+															<AlertTriangle class="w-4 h-4 text-red-500 shrink-0" />
+															Update check failed
+														</p>
+														<p class="text-muted-foreground text-xs break-words">{failedUpdateCheckErrors.get(container.id) ?? 'Could not query registry'}</p>
+														<p class="text-muted-foreground text-xs">Update status unknown — often a Docker Hub rate limit. Try again later.</p>
+													</div>
+												</Tooltip.Content>
+											</Tooltip.Root>
 										{/if}
 										<span class="flex-1"></span>
 										{#if container.health}
@@ -2153,7 +2216,7 @@
 											<div class="space-y-0">
 												<div class="flex justify-between text-2xs">
 													<span class="text-muted-foreground">Mem</span>
-													<span class="font-mono text-muted-foreground">{stats ? formatBytes(stats.memoryUsage) : '-'}</span>
+													<span class="font-mono text-muted-foreground">{stats ? formatBytesCompact(stats.memoryUsage) : '-'}</span>
 												</div>
 												{#if history?.mem && history.mem.length >= 2}
 													<svg class="w-full h-4" viewBox="0 0 60 16" preserveAspectRatio="none">
@@ -2168,7 +2231,7 @@
 											<div class="space-y-0">
 												<div class="flex justify-between text-2xs">
 													<span class="text-muted-foreground">Net</span>
-													<span class="font-mono text-muted-foreground">{stats ? formatBytes(stats.networkRx + stats.networkTx) : '-'}</span>
+													<span class="font-mono text-muted-foreground">{stats ? formatBytesCompact(stats.networkRx + stats.networkTx) : '-'}</span>
 												</div>
 												{#if history?.netRx && history.netRx.length >= 2}
 													<svg class="w-full h-4" viewBox="0 0 60 16" preserveAspectRatio="none">
@@ -2183,7 +2246,7 @@
 											<div class="space-y-0">
 												<div class="flex justify-between text-2xs">
 													<span class="text-muted-foreground">Disk</span>
-													<span class="font-mono text-muted-foreground">{stats ? formatBytes(stats.blockRead + stats.blockWrite) : '-'}</span>
+													<span class="font-mono text-muted-foreground">{stats ? formatBytesCompact(stats.blockRead + stats.blockWrite) : '-'}</span>
 												</div>
 												{#if history?.diskR && history.diskR.length >= 2}
 													<svg class="w-full h-4" viewBox="0 0 60 16" preserveAspectRatio="none">

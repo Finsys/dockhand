@@ -443,3 +443,27 @@ export function rewriteComposeVolumePaths(composeContent: string, workingDir: st
 		changes
 	};
 }
+
+/**
+ * Find relative bind-mount sources (`./X`, `../X`) in a compose file.
+ *
+ * Used to detect the cross-env deployment trap: when DOCKER_HOST points at a
+ * remote daemon, docker compose expands `./X` against the CLIENT cwd (the
+ * Dockhand container's filesystem) and asks the REMOTE daemon to bind that
+ * path. The remote daemon's filesystem doesn't contain Dockhand's
+ * `/app/data/stacks/...`, so the daemon auto-creates an empty directory and
+ * the service starts with NO data. The deploy reports success while
+ * silently losing the bind-mounted contents.
+ *
+ * Returns the matched source paths so the caller can refuse the deploy with
+ * an actionable error message.
+ */
+export function findRelativeBindSources(composeContent: string): string[] {
+	const found: string[] = [];
+	for (const line of composeContent.split('\n')) {
+		// Same regex as rewriteComposeVolumePaths above, plus ../ support.
+		const m = line.match(/^\s*-\s*['"]?(\.{1,2}\/[^'":\s]+)['"]?:/);
+		if (m) found.push(m[1]);
+	}
+	return found;
+}

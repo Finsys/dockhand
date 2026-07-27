@@ -25,6 +25,10 @@ export interface ContainerStoreState {
 	pendingUpdateIds: string[];
 	/** Container names for pending updates, keyed by ID */
 	pendingUpdateNames: Map<string, string>;
+	/** Container IDs whose last update check failed (e.g. registry rate-limited) */
+	failedUpdateIds: string[];
+	/** Update-check error message keyed by container ID (for tooltip) */
+	failedUpdateErrors: Map<string, string>;
 	/** Whether the current environment has vulnerability scanning */
 	envHasScanning: boolean;
 	/** Environment-level vulnerability criteria */
@@ -42,6 +46,8 @@ const INITIAL_STATE: ContainerStoreState = {
 	autoUpdateSettings: new Map(),
 	pendingUpdateIds: [],
 	pendingUpdateNames: new Map(),
+	failedUpdateIds: [],
+	failedUpdateErrors: new Map(),
 	envHasScanning: false,
 	envVulnerabilityCriteria: 'never',
 	loading: true,
@@ -344,6 +350,11 @@ function createContainerStore() {
 		/** Update pending update IDs and names directly (from check-updates action) */
 		setPendingUpdates(ids: string[], names: Map<string, string>) {
 			patch({ pendingUpdateIds: ids, pendingUpdateNames: names });
+		},
+
+		/** Record which containers' last update check failed, with error text (#1255) */
+		setFailedUpdates(ids: string[], errors: Map<string, string>) {
+			patch({ failedUpdateIds: ids, failedUpdateErrors: errors });
 		},
 
 		/** Patch arbitrary fields */

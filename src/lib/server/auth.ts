@@ -68,6 +68,7 @@ const EMPTY_PERMISSIONS: Permissions = {
 	activity: [],
 	schedules: [],
 	secrets: [],
+	backups: []
 };
 
 /**
@@ -363,6 +364,7 @@ export async function getUserPermissionsById(userId: number): Promise<Permission
 		activity: [],
 		schedules: [],
 		secrets: [],
+		backups: []
 	};
 
 	for (const ur of userRoles) {
@@ -445,6 +447,7 @@ export async function getUserPermissionsForEnvironment(userId: number, environme
 		activity: [],
 		schedules: [],
 		secrets: [],
+		backups: []
 	};
 
 	for (const ur of userRoles) {
@@ -1224,7 +1227,20 @@ async function getOidcDiscovery(issuerUrl: string): Promise<OidcDiscoveryDocumen
 		? `${issuerUrl}.well-known/openid-configuration`
 		: `${issuerUrl}/.well-known/openid-configuration`;
 
-	const response = await fetch(wellKnownUrl);
+	let response: Response;
+	try {
+		response = await fetch(wellKnownUrl);
+	} catch (err: any) {
+		// Node/undici surfaces network failures as a bare "fetch failed" TypeError and
+		// hides the real reason in err.cause (ENOTFOUND, EHOSTUNREACH, ECONNREFUSED,
+		// connect timeout, TLS error, …). Surface it so operators can tell a DNS/IPv4
+		// egress problem from a cert problem instead of debugging blind (#1293).
+		const cause = err?.cause?.message || err?.cause?.code || err?.cause;
+		throw new Error(
+			`Failed to reach OIDC issuer at ${wellKnownUrl}: ${err?.message || err}` +
+			(cause ? ` (${cause})` : '')
+		);
+	}
 	if (!response.ok) {
 		throw new Error(`Failed to fetch OIDC discovery document: ${response.statusText}`);
 	}

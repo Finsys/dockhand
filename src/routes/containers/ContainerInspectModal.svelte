@@ -5,7 +5,7 @@
 	import * as Tabs from '$lib/components/ui/tabs';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
-	import { Loader2, Box, Info, Layers, Cpu, MemoryStick, HardDrive, Network, Shield, Settings2, Code, Copy, Check, XCircle, Activity, Wifi, Pencil, RefreshCw, X, FolderOpen, Moon, Tags, ExternalLink, Gpu, Globe, Link, Unlink, Play, Square as SquareIcon, RotateCw, Trash2 } from 'lucide-svelte';
+	import { Loader2, Box, Info, Layers, Cpu, MemoryStick, HardDrive, Network, Shield, Settings2, Code, Copy, Check, XCircle, Activity, Wifi, Pencil, RefreshCw, X, Folder, FolderOpen, Moon, Tags, ExternalLink, Gpu, Globe, Link, Unlink, Play, Square as SquareIcon, RotateCw, Trash2 } from 'lucide-svelte';
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
 	import * as Select from '$lib/components/ui/select';
 	import { toast } from 'svelte-sonner';
@@ -677,7 +677,7 @@
 						<X class="w-3.5 h-3.5 text-muted-foreground hover:text-foreground" />
 					</button>
 				{:else}
-					<span class="text-muted-foreground font-normal">{displayName || containerId.slice(0, 12)}</span>
+					<span class="font-semibold">{displayName || containerId.slice(0, 12)}</span>
 					<button
 						type="button"
 						onclick={startEditing}
@@ -686,6 +686,9 @@
 					>
 						<Pencil class="w-3 h-3 text-muted-foreground hover:text-foreground" />
 					</button>
+				{/if}
+				{#if $currentEnvironment}
+					<span class="font-semibold">on <span class="text-amber-600 dark:text-amber-400">{$currentEnvironment.name}</span></span>
 				{/if}
 				{@const composeStack = containerData?.Config?.Labels?.['com.docker.compose.project']}
 				{#if composeStack && !loading}
@@ -1336,7 +1339,15 @@
 								{#each containerData.Mounts as mount}
 									<div class="p-3 border border-border rounded-lg space-y-2">
 										<div class="flex items-center justify-between">
-											<Badge variant="outline" class="text-xs">{mount.Type}</Badge>
+											<!-- Typed mount chip, consistent with the backup picker/log (amber Folder
+											     for bind, sky HardDrive for volume). -->
+											{#if mount.Type === 'bind'}
+												<span class="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-400"><Folder class="h-3 w-3" />bind</span>
+											{:else if mount.Type === 'volume'}
+												<span class="inline-flex items-center gap-1 rounded-full bg-sky-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-600 dark:text-sky-400"><HardDrive class="h-3 w-3" />volume</span>
+											{:else}
+												<Badge variant="outline" class="text-xs">{mount.Type}</Badge>
+											{/if}
 											<Badge variant={mount.RW ? 'default' : 'secondary'} class="text-xs">
 												{mount.RW ? 'Read/Write' : 'Read-Only'}
 											</Badge>
@@ -1399,7 +1410,7 @@
 								<div class="min-w-0">
 									{containerData.divergence.env.length} env var{containerData.divergence.env.length === 1 ? '' : 's'} differ from the image:
 									<span class="font-mono">{containerData.divergence.env.join(', ')}</span>.
-									Values set by you at create time will stay. To reset to the image's current values, Remove &amp; Deploy.
+									On the next update, image-provided values you haven't overridden are refreshed to the new image; values you set yourself are kept. Use Remove &amp; Deploy to reset everything to the image.
 								</div>
 							</div>
 						{/if}
@@ -1429,7 +1440,7 @@
 								<div class="min-w-0">
 									{containerData.divergence.labels.length} label{containerData.divergence.labels.length === 1 ? '' : 's'} differ from the image:
 									<span class="font-mono">{containerData.divergence.labels.join(', ')}</span>.
-									Values set by you at create time will stay. To reset to the image's current values, Remove &amp; Deploy.
+									On the next update, image-provided values you haven't overridden are refreshed to the new image; values you set yourself are kept. Use Remove &amp; Deploy to reset everything to the image.
 								</div>
 							</div>
 						{/if}

@@ -18,3 +18,14 @@ export function validateDockerIdParam(id: string, resourceType = 'resource'): Re
 	}
 	return null;
 }
+
+/**
+ * Validates a restic snapshot ID (hex string, 8-64 chars).
+ * Returns a 400 Response if invalid, null if valid.
+ */
+export function validateSnapshotId(id: string): Response | null {
+	if (!id || !/^[0-9a-f]{8,64}$/.test(id)) {
+		return json({ error: 'Invalid snapshot ID' }, { status: 400 });
+	}
+	return null;
+}

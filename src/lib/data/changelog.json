@@ -1,28 +1,186 @@
 [
   {
+    "version": "1.0.39",
+    "date": "2026-07-26",
+    "changes": [
+      {
+        "type": "fix",
+        "text": "regression: stacks with relative bind mounts deployment fails (#1310)"
+      },
+      {
+        "type": "fix",
+        "text": "redeploying a stack with pull now clears the dashboard pending-update badge for containers it updated (#1311)"
+      },
+      {
+        "type": "fix",
+        "text": "stack backups no longer fail on deeply nested files whose path exceeds 100 bytes"
+      }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.39"
+  },
+  {
+    "version": "1.0.38",
+    "date": "2026-07-25",
+    "changes": [
+      {
+        "type": "feature",
+        "text": "container/stacks backups (beta), gated with FEAT_BACKUPS_ENABLED"
+      },
+      {
+        "type": "feature",
+        "text": "view a Git stack's compose YAML and dependency graph read-only by clicking its name (PR#1294, @nenad)"
+      },
+      {
+        "type": "fix",
+        "text": "deploy on a plain internal stack no longer 500s when the request has no body (#1271)"
+      },
+      {
+        "type": "fix",
+        "text": "wider Activity event details modal (#1277)"
+      },
+      {
+        "type": "fix",
+        "text": "container updates refresh image-provided env vars and labels, overrides are kept (#1226, #1256)"
+      },
+      {
+        "type": "fix",
+        "text": "private repos with a token credential and no username now authenticate (#1273)"
+      },
+      {
+        "type": "fix",
+        "text": "dashboard CPU history no longer spikes past 100% on busy/churny hosts (#1279)"
+      },
+      {
+        "type": "fix",
+        "text": "failed updates (e.g. Docker Hub limits) show a 'check failed' instead of silently reporting no update (#1255)"
+      },
+      {
+        "type": "fix",
+        "text": "git stacks reject uppercase names upfront instead of leaving an orphaned clone (#1284)"
+      },
+      {
+        "type": "fix",
+        "text": "scan all images now covers untagged digest-pinned images instead of skipping them (#1286)"
+      },
+      {
+        "type": "fix",
+        "text": "registry containers stuck on a moved tag are no longer misread as \"local\" and skipped from updates (#1288)"
+      },
+      {
+        "type": "fix",
+        "text": "bump docker-compose 5.2.0-r0 -> 5.3.1-r1 (CVE-2026-42505)"
+      },
+      {
+        "type": "fix",
+        "text": "bump Go 1.25.11 -> 1.25.12 (patches 4 stdlib CVEs)"
+      },
+      {
+        "type": "fix",
+        "text": "volume prune now removes named unused volumes, keeping scanner caches (#1289)"
+      },
+      {
+        "type": "feature",
+        "text": "DNS_RESULT_ORDER=verbatim enables IPv6 fallback for outbound requests on IPv4-broken hosts (#1293)"
+      },
+      {
+        "type": "fix",
+        "text": "OIDC/network errors now show the underlying cause instead of a bare \"fetch failed\" (#1293)"
+      },
+      {
+        "type": "fix",
+        "text": "ntfy webhook with a trailing slash on the topic no longer fails with a 404 (#1300)"
+      },
+      {
+        "type": "fix",
+        "text": "stack deploy and git sync notifications now actually fire on real deploys (#1295)"
+      }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.38"
+  },
+  {
     "version": "1.0.37",
     "date": "2026-07-11",
     "changes": [
-      { "type": "feature", "text": "Prometheus metrics at /metrics for env state and internals, gated by EXPORT_METRICS (#339)" },
-      { "type": "feature", "text": "export scan results as SARIF 2.1.0, manual export and API for DefectDojo/Dependency-Track/GitHub (#415)" },
-      { "type": "feature", "text": "bump bundled docker-compose to 5.2.0-r0 to clear known CVEs" },
-      { "type": "feature", "text": "Vulnerabilities dashboard: aggregated CVE findings (#1038)" },
-      { "type": "feature", "text": "update container images directly from the Stack view (#1073)" },
-      { "type": "feature", "text": "stacks list shows an update indicator for stacks with image updates (#504)" },
-      { "type": "fix", "text": "copying an image to another registry keeps its tag instead of defaulting to latest (#1243)" },
-      { "type": "fix", "text": "`more-than-current image` re-scans the current image so a stale cached scan doesn't block (#1022)" },
-      { "type": "feature", "text": "application logs now include the log level (INFO/WARN/ERROR) in the prefix (#1166)" },
-      { "type": "feature", "text": "option to suppress the \"What's New\" popup (#1235)" },
-      { "type": "fix", "text": "ntfy notifications now forward the `email` query parameter so ntfy can send email (#1231)" },
-      { "type": "feature", "text": "default scanner images bumped to grype v0.115.0 and trivy 0.71.2 (#1241)" },
-      { "type": "fix", "text": "the \"Latest\" update-check result now stays visible and doesn't revert (#1019)" },
-      { "type": "feature", "text": "a stack with container label `dockhand.adopt=false` excluded from adoption (#998)" },
-      { "type": "fix", "text": "dashboard daemon info shows the real host hostname, not Dockhand's container id (#1265)" },
-      { "type": "feature", "text": "file editor prompts to save/discard unsaved changes before closing (#1264)" },
-      { "type": "fix", "text": "`GET /api/containers/check-updates` now lists pending updates (POST still triggers a check) (#1266)" },
-      { "type": "feature", "text": "sidebar menu customizable (order and visibility of items) (#1252)" },
-      { "type": "fix", "text": "activity and audit date filters respect the configured timezone instead of UTC (#1269)" },
-      { "type": "feature", "text": "git deploy progress shows the changed files before the deploy starts (#1260)" }
+      {
+        "type": "feature",
+        "text": "Prometheus metrics at /metrics for env state and internals, gated by EXPORT_METRICS (#339)"
+      },
+      {
+        "type": "feature",
+        "text": "export scan results as SARIF 2.1.0, manual export and API for DefectDojo/Dependency-Track/GitHub (#415)"
+      },
+      {
+        "type": "feature",
+        "text": "bump bundled docker-compose to 5.2.0-r0 to clear known CVEs"
+      },
+      {
+        "type": "feature",
+        "text": "Vulnerabilities dashboard: aggregated CVE findings (#1038)"
+      },
+      {
+        "type": "feature",
+        "text": "update container images directly from the Stack view (#1073)"
+      },
+      {
+        "type": "feature",
+        "text": "stacks list shows an update indicator for stacks with image updates (#504)"
+      },
+      {
+        "type": "fix",
+        "text": "copying an image to another registry keeps its tag instead of defaulting to latest (#1243)"
+      },
+      {
+        "type": "fix",
+        "text": "`more-than-current image` re-scans the current image so a stale cached scan doesn't block (#1022)"
+      },
+      {
+        "type": "feature",
+        "text": "application logs now include the log level (INFO/WARN/ERROR) in the prefix (#1166)"
+      },
+      {
+        "type": "feature",
+        "text": "option to suppress the \"What's New\" popup (#1235)"
+      },
+      {
+        "type": "fix",
+        "text": "ntfy notifications now forward the `email` query parameter so ntfy can send email (#1231)"
+      },
+      {
+        "type": "feature",
+        "text": "default scanner images bumped to grype v0.115.0 and trivy 0.71.2 (#1241)"
+      },
+      {
+        "type": "fix",
+        "text": "the \"Latest\" update-check result now stays visible and doesn't revert (#1019)"
+      },
+      {
+        "type": "feature",
+        "text": "a stack with container label `dockhand.adopt=false` excluded from adoption (#998)"
+      },
+      {
+        "type": "fix",
+        "text": "dashboard daemon info shows the real host hostname, not Dockhand's container id (#1265)"
+      },
+      {
+        "type": "feature",
+        "text": "file editor prompts to save/discard unsaved changes before closing (#1264)"
+      },
+      {
+        "type": "fix",
+        "text": "`GET /api/containers/check-updates` now lists pending updates (POST still triggers a check) (#1266)"
+      },
+      {
+        "type": "feature",
+        "text": "sidebar menu customizable (order and visibility of items) (#1252)"
+      },
+      {
+        "type": "fix",
+        "text": "activity and audit date filters respect the configured timezone instead of UTC (#1269)"
+      },
+      {
+        "type": "feature",
+        "text": "git deploy progress shows the changed files before the deploy starts (#1260)"
+      }
     ],
     "imageTag": "fnsys/dockhand:v1.0.37"
   },
@@ -30,21 +188,66 @@
     "version": "1.0.36",
     "date": "2026-06-27",
     "changes": [
-      { "type": "feature", "text": "sidebar shows an amber update indicator when a newer Dockhand image is available (#1146)" },
-      { "type": "fix", "text": "Tag image modal too narrow for images identified only by SHA (#1205)" },
-      { "type": "fix", "text": "self-hosted ntfy: accept raw `tk_...` access tokens in `?auth=` (#1209)" },
-      { "type": "fix", "text": "dashboard: a single failed DB stats query no longer poisons the whole environment tile (#1210)" },
-      { "type": "fix", "text": "UI dates and times now honor the configured default timezone instead of the browser's timezone (#1183)" },
-      { "type": "fix", "text": "add missing `reset-mfa.sh` emergency script referenced by the manual (#1214)" },
-      { "type": "fix", "text": "registry browser: copy between registries no longer duplicates the host (#1220)" },
-      { "type": "feature", "text": "published image carries standard OCI annotations (source, url, title, description, vendor, licenses) (#1217)" },
-      { "type": "feature", "text": "scanner: configurable network mode and DNS servers for vulnerability scans (#1219)" },
-      { "type": "feature", "text": "template tiles now show a `Project` link that opens the upstream project page (#1211)" },
-      { "type": "fix", "text": "cron picker: hour shows just `HH` (was `HH:00`), minute granularity bumped from 15 to 5 (#1198)" },
-      { "type": "feature", "text": "grid buttons: configurable size and optional semantic colors (#1072)" },
-      { "type": "fix", "text": "copy buttons (git deploy logs, API tokens) now work over plain HTTP (#1222)" },
-      { "type": "fix", "text": "Podman pod-infra containers no longer trigger update-check warnings (#1221)" },
-      { "type": "fix", "text": "terminal exec works even when the browser sends a cookie with stray `%` characters (#1224)" }
+      {
+        "type": "feature",
+        "text": "sidebar shows an amber update indicator when a newer Dockhand image is available (#1146)"
+      },
+      {
+        "type": "fix",
+        "text": "Tag image modal too narrow for images identified only by SHA (#1205)"
+      },
+      {
+        "type": "fix",
+        "text": "self-hosted ntfy: accept raw `tk_...` access tokens in `?auth=` (#1209)"
+      },
+      {
+        "type": "fix",
+        "text": "dashboard: a single failed DB stats query no longer poisons the whole environment tile (#1210)"
+      },
+      {
+        "type": "fix",
+        "text": "UI dates and times now honor the configured default timezone instead of the browser's timezone (#1183)"
+      },
+      {
+        "type": "fix",
+        "text": "add missing `reset-mfa.sh` emergency script referenced by the manual (#1214)"
+      },
+      {
+        "type": "fix",
+        "text": "registry browser: copy between registries no longer duplicates the host (#1220)"
+      },
+      {
+        "type": "feature",
+        "text": "published image carries standard OCI annotations (source, url, title, description, vendor, licenses) (#1217)"
+      },
+      {
+        "type": "feature",
+        "text": "scanner: configurable network mode and DNS servers for vulnerability scans (#1219)"
+      },
+      {
+        "type": "feature",
+        "text": "template tiles now show a `Project` link that opens the upstream project page (#1211)"
+      },
+      {
+        "type": "fix",
+        "text": "cron picker: hour shows just `HH` (was `HH:00`), minute granularity bumped from 15 to 5 (#1198)"
+      },
+      {
+        "type": "feature",
+        "text": "grid buttons: configurable size and optional semantic colors (#1072)"
+      },
+      {
+        "type": "fix",
+        "text": "copy buttons (git deploy logs, API tokens) now work over plain HTTP (#1222)"
+      },
+      {
+        "type": "fix",
+        "text": "Podman pod-infra containers no longer trigger update-check warnings (#1221)"
+      },
+      {
+        "type": "fix",
+        "text": "terminal exec works even when the browser sends a cookie with stray `%` characters (#1224)"
+      }
     ],
     "imageTag": "fnsys/dockhand:v1.0.36"
   },
@@ -52,12 +255,30 @@
     "version": "1.0.35",
     "date": "2026-06-19",
     "changes": [
-      { "type": "feature", "text": "image prune skips Dockhand's scanner images (grype, trivy), configurable (#625)" },
-      { "type": "fix", "text": "\"No archive\" download format selection not persisted (#1180)" },
-      { "type": "fix", "text": "regression: vulnerability scans on direct-TCP envs (#1195)" },
-      { "type": "fix", "text": "Pangolin labels — recognise the real `public-resources` / `private-resources` namespaces (#2)" },
-      { "type": "fix", "text": "healthcheck uses HTTPS probe when HTTPS_MODE=on (#1191)" },
-      { "type": "fix", "text": "shell detection improved for containers with non-standard PATH or shell locations (#1189)" }
+      {
+        "type": "feature",
+        "text": "image prune skips Dockhand's scanner images (grype, trivy), configurable (#625)"
+      },
+      {
+        "type": "fix",
+        "text": "\"No archive\" download format selection not persisted (#1180)"
+      },
+      {
+        "type": "fix",
+        "text": "regression: vulnerability scans on direct-TCP envs (#1195)"
+      },
+      {
+        "type": "fix",
+        "text": "Pangolin labels \u2014 recognise the real `public-resources` / `private-resources` namespaces (#2)"
+      },
+      {
+        "type": "fix",
+        "text": "healthcheck uses HTTPS probe when HTTPS_MODE=on (#1191)"
+      },
+      {
+        "type": "fix",
+        "text": "shell detection improved for containers with non-standard PATH or shell locations (#1189)"
+      }
     ],
     "imageTag": "fnsys/dockhand:v1.0.35"
   },
@@ -65,18 +286,54 @@
     "version": "1.0.34",
     "date": "2026-06-17",
     "changes": [
-      { "type": "feature", "text": "raw file download — no tar wrapping (#1180)" },
-      { "type": "fix", "text": "update modal stuck after closing mid-pull (#1094)" },
-      { "type": "fix", "text": "vulnerability scans on Podman hosts (direct TCP and Hawser) (#1076)" },
-      { "type": "fix", "text": "crash-looping containers now appear in the logs page list (#227)" },
-      { "type": "feature", "text": "filter containers by \"Update available\" (#1063)" },
-      { "type": "feature", "text": "show hostname / IP of the selected environment in the top header (#962)" },
-      { "type": "feature", "text": "internal auth and validation hardening and dependency bumps" },
-      { "type": "feature", "text": "Traefik and Pangolin integration — surface proxy URLs on container and stack panels (#2)" },
-      { "type": "feature", "text": "release-notes link next to images with updates available (#538)" },
-      { "type": "feature", "text": "lifecycle action buttons in the container details modal (#461)" },
-      { "type": "feature", "text": "template library — browse and deploy compose templates from configurable sources (#48)" },
-      { "type": "fix", "text": "file browser fails on containers with ls in /usr/sbin (#1185)" }
+      {
+        "type": "feature",
+        "text": "raw file download \u2014 no tar wrapping (#1180)"
+      },
+      {
+        "type": "fix",
+        "text": "update modal stuck after closing mid-pull (#1094)"
+      },
+      {
+        "type": "fix",
+        "text": "vulnerability scans on Podman hosts (direct TCP and Hawser) (#1076)"
+      },
+      {
+        "type": "fix",
+        "text": "crash-looping containers now appear in the logs page list (#227)"
+      },
+      {
+        "type": "feature",
+        "text": "filter containers by \"Update available\" (#1063)"
+      },
+      {
+        "type": "feature",
+        "text": "show hostname / IP of the selected environment in the top header (#962)"
+      },
+      {
+        "type": "feature",
+        "text": "internal auth and validation hardening and dependency bumps"
+      },
+      {
+        "type": "feature",
+        "text": "Traefik and Pangolin integration \u2014 surface proxy URLs on container and stack panels (#2)"
+      },
+      {
+        "type": "feature",
+        "text": "release-notes link next to images with updates available (#538)"
+      },
+      {
+        "type": "feature",
+        "text": "lifecycle action buttons in the container details modal (#461)"
+      },
+      {
+        "type": "feature",
+        "text": "template library \u2014 browse and deploy compose templates from configurable sources (#48)"
+      },
+      {
+        "type": "fix",
+        "text": "file browser fails on containers with ls in /usr/sbin (#1185)"
+      }
     ],
     "imageTag": "fnsys/dockhand:v1.0.34"
   },
@@ -84,26 +341,86 @@
     "version": "1.0.33",
     "date": "2026-06-15",
     "changes": [
-      { "type": "feature", "text": "in-place container property updates without restart — restart policy, CPU/memory limits (#1153)" },
-      { "type": "feature", "text": "clickable stack badge in container and volume inspect modals (#1121)" },
-      { "type": "feature", "text": "clickable stack badge in volumes list row (#1122)" },
-      { "type": "feature", "text": "volumes list shows driver_opts type (NFS, CIFS, etc.) with sort and filter (#1123)" },
-      { "type": "feature", "text": "Bark iOS notifications (#1095, PR#1097, @undirectlookable)" },
-      { "type": "feature", "text": "Signal notifications via signal-cli-rest-api (#1099)" },
-      { "type": "feature", "text": "Apprise passthrough — forward to a self-hosted caronc/apprise-api server (#1099)" },
-      { "type": "fix", "text": "env editor flagged Docker/Compose built-ins as MISSING (#141)" },
-      { "type": "fix", "text": "YAML editor indentation was inconsistent when pressing Enter (#1156)" },
-      { "type": "feature", "text": "`dockhand.update=false`, `dockhand.hidden=true` and `localhost/*` images skip registry polling (#1083)" },
-      { "type": "fix", "text": "registry authentication for image pulls (#1105)" },
-      { "type": "feature", "text": "native HTTPS listener, off by default (#1102)" },
-      { "type": "fix", "text": "environments stuck \"Failed\" after VPN/Tailscale tunnel drops until agent restart (#1160)" },
-      { "type": "fix", "text": "health_status events flooding container_events table (#1165)" },
-      { "type": "fix", "text": "git stack sync removes files deleted from the repo (hash-verified) (#966, #1162)" },
-      { "type": "feature", "text": "upload TLS/mTLS certificate files in environment editor (#125)" },
-      { "type": "feature", "text": "syntax highlighting for shell, Dockerfile, TOML, INI/conf and .env files in the file browser viewer (#1055)" },
-      { "type": "feature", "text": "Animated icons now configurable (#1169)" },
-      { "type": "fix", "text": "stack deploys ignored the env's configured socket path (#1172)" },
-      { "type": "fix", "text": "environment names with characters that break path resolution (e.g. `*`) are now rejected (#1179)" }
+      {
+        "type": "feature",
+        "text": "in-place container property updates without restart \u2014 restart policy, CPU/memory limits (#1153)"
+      },
+      {
+        "type": "feature",
+        "text": "clickable stack badge in container and volume inspect modals (#1121)"
+      },
+      {
+        "type": "feature",
+        "text": "clickable stack badge in volumes list row (#1122)"
+      },
+      {
+        "type": "feature",
+        "text": "volumes list shows driver_opts type (NFS, CIFS, etc.) with sort and filter (#1123)"
+      },
+      {
+        "type": "feature",
+        "text": "Bark iOS notifications (#1095, PR#1097, @undirectlookable)"
+      },
+      {
+        "type": "feature",
+        "text": "Signal notifications via signal-cli-rest-api (#1099)"
+      },
+      {
+        "type": "feature",
+        "text": "Apprise passthrough \u2014 forward to a self-hosted caronc/apprise-api server (#1099)"
+      },
+      {
+        "type": "fix",
+        "text": "env editor flagged Docker/Compose built-ins as MISSING (#141)"
+      },
+      {
+        "type": "fix",
+        "text": "YAML editor indentation was inconsistent when pressing Enter (#1156)"
+      },
+      {
+        "type": "feature",
+        "text": "`dockhand.update=false`, `dockhand.hidden=true` and `localhost/*` images skip registry polling (#1083)"
+      },
+      {
+        "type": "fix",
+        "text": "registry authentication for image pulls (#1105)"
+      },
+      {
+        "type": "feature",
+        "text": "native HTTPS listener, off by default (#1102)"
+      },
+      {
+        "type": "fix",
+        "text": "environments stuck \"Failed\" after VPN/Tailscale tunnel drops until agent restart (#1160)"
+      },
+      {
+        "type": "fix",
+        "text": "health_status events flooding container_events table (#1165)"
+      },
+      {
+        "type": "fix",
+        "text": "git stack sync removes files deleted from the repo (hash-verified) (#966, #1162)"
+      },
+      {
+        "type": "feature",
+        "text": "upload TLS/mTLS certificate files in environment editor (#125)"
+      },
+      {
+        "type": "feature",
+        "text": "syntax highlighting for shell, Dockerfile, TOML, INI/conf and .env files in the file browser viewer (#1055)"
+      },
+      {
+        "type": "feature",
+        "text": "Animated icons now configurable (#1169)"
+      },
+      {
+        "type": "fix",
+        "text": "stack deploys ignored the env's configured socket path (#1172)"
+      },
+      {
+        "type": "fix",
+        "text": "environment names with characters that break path resolution (e.g. `*`) are now rejected (#1179)"
+      }
     ],
     "imageTag": "fnsys/dockhand:v1.0.33"
   },
@@ -111,17 +428,50 @@
     "version": "1.0.32",
     "date": "2026-06-06",
     "changes": [
-      { "type": "feature", "text": "container details tweaks: process count, label filter, copy all labels (#812)" },
-      { "type": "feature", "text": "log improvements (#1130)" },
-      { "type": "fix", "text": "cleared Resources fields not persisted on container edit (#1119)" },
-      { "type": "fix", "text": "long container names overflowed in activity event details dialog (#1129)" },
-      { "type": "fix", "text": "git stack recreate and start operations ignored Dockhand-stored env vars (#1132)" },
-      { "type": "fix", "text": "dashboard stopped count reset to 0 after refresh for gracefully stopped containers (#1133)" },
-      { "type": "fix", "text": "auto-update preserves runtime `-e` env and `-l` label overrides (#1135)" },
-      { "type": "fix", "text": "git stack volume binds resolved to wrong host path when compose was in a subdirectory (#1139)" },
-      { "type": "fix", "text": "git stacks: subdir compose files now find their adjacent env files (#1136)" },
-      { "type": "feature", "text": "env editor doesn't flag Docker/Compose built-in variables as unused (#141)" },
-      { "type": "feature", "text": "container network mode: share another container's network namespace (#161)" }
+      {
+        "type": "feature",
+        "text": "container details tweaks: process count, label filter, copy all labels (#812)"
+      },
+      {
+        "type": "feature",
+        "text": "log improvements (#1130)"
+      },
+      {
+        "type": "fix",
+        "text": "cleared Resources fields not persisted on container edit (#1119)"
+      },
+      {
+        "type": "fix",
+        "text": "long container names overflowed in activity event details dialog (#1129)"
+      },
+      {
+        "type": "fix",
+        "text": "git stack recreate and start operations ignored Dockhand-stored env vars (#1132)"
+      },
+      {
+        "type": "fix",
+        "text": "dashboard stopped count reset to 0 after refresh for gracefully stopped containers (#1133)"
+      },
+      {
+        "type": "fix",
+        "text": "auto-update preserves runtime `-e` env and `-l` label overrides (#1135)"
+      },
+      {
+        "type": "fix",
+        "text": "git stack volume binds resolved to wrong host path when compose was in a subdirectory (#1139)"
+      },
+      {
+        "type": "fix",
+        "text": "git stacks: subdir compose files now find their adjacent env files (#1136)"
+      },
+      {
+        "type": "feature",
+        "text": "env editor doesn't flag Docker/Compose built-in variables as unused (#141)"
+      },
+      {
+        "type": "feature",
+        "text": "container network mode: share another container's network namespace (#161)"
+      }
     ],
     "imageTag": "fnsys/dockhand:v1.0.32"
   },
@@ -129,7 +479,10 @@
     "version": "1.0.31",
     "date": "2026-05-30",
     "changes": [
-      { "type": "fix", "text": "502 Bad Gateway behind nginx-based reverse proxies — SvelteKit 2.51+ bloated the Link response header, pinned to 2.50.0 (#1114)" }
+      {
+        "type": "fix",
+        "text": "502 Bad Gateway behind nginx-based reverse proxies \u2014 SvelteKit 2.51+ bloated the Link response header, pinned to 2.50.0 (#1114)"
+      }
     ],
     "imageTag": "fnsys/dockhand:v1.0.31"
   },
@@ -137,23 +490,74 @@
     "version": "1.0.30",
     "date": "2026-05-30",
     "changes": [
-      { "type": "feature", "text": "time range filter for log viewer — filter logs by From/To date and time (#1068)" },
-      { "type": "feature", "text": "configurable tail line count in log viewer — choose from 100 to all lines (#1066)" },
-      { "type": "feature", "text": "toggleable line numbers in log viewer (#1067)" },
-      { "type": "feature", "text": "\"some unused\" image filter — show images with both used and unused tags for selective cleanup (#621)" },
-      { "type": "feature", "text": "IP binding and port ranges in container port mappings (#581)" },
-      { "type": "feature", "text": "remove individual containers directly from stacks page (#576)" },
-      { "type": "fix", "text": "scan cache lookup by tag name never matched — results now resolved via image digest (#1064)" },
-      { "type": "fix", "text": "image-baked env vars not updated during auto-update container recreation (#1061)" },
-      { "type": "fix", "text": "git stack deploy via Hawser fails with \"Invalid string length\" when repo has large files (#1040)" },
-      { "type": "feature", "text": "Gotify notification priority via URL query param — gotify://host/token?priority=5 (#1033)" },
-      { "type": "fix", "text": "consistent action button order across container and stack views (#1079)" },
-      { "type": "feature", "text": "named custom URL labels — dockhand.url=[Name](https://...) markdown syntax (#1065)" },
-      { "type": "fix", "text": "HTTPS git credentials no longer leaked in process arguments (#1081)" },
-      { "type": "feature", "text": "bump Docker Compose to 5.1.4 (GHSA-pmwq-pjrm-6p5r)" },
-      { "type": "feature", "text": "dockhand.order label to control container display order within stacks (#847)" },
-      { "type": "feature", "text": "live network attach/detach for running containers — join or leave Docker networks without restarting (#1051)" },
-      { "type": "fix", "text": "environment variable values with nested quotes progressively corrupted on each save (#1036, #1086)" }
+      {
+        "type": "feature",
+        "text": "time range filter for log viewer \u2014 filter logs by From/To date and time (#1068)"
+      },
+      {
+        "type": "feature",
+        "text": "configurable tail line count in log viewer \u2014 choose from 100 to all lines (#1066)"
+      },
+      {
+        "type": "feature",
+        "text": "toggleable line numbers in log viewer (#1067)"
+      },
+      {
+        "type": "feature",
+        "text": "\"some unused\" image filter \u2014 show images with both used and unused tags for selective cleanup (#621)"
+      },
+      {
+        "type": "feature",
+        "text": "IP binding and port ranges in container port mappings (#581)"
+      },
+      {
+        "type": "feature",
+        "text": "remove individual containers directly from stacks page (#576)"
+      },
+      {
+        "type": "fix",
+        "text": "scan cache lookup by tag name never matched \u2014 results now resolved via image digest (#1064)"
+      },
+      {
+        "type": "fix",
+        "text": "image-baked env vars not updated during auto-update container recreation (#1061)"
+      },
+      {
+        "type": "fix",
+        "text": "git stack deploy via Hawser fails with \"Invalid string length\" when repo has large files (#1040)"
+      },
+      {
+        "type": "feature",
+        "text": "Gotify notification priority via URL query param \u2014 gotify://host/token?priority=5 (#1033)"
+      },
+      {
+        "type": "fix",
+        "text": "consistent action button order across container and stack views (#1079)"
+      },
+      {
+        "type": "feature",
+        "text": "named custom URL labels \u2014 dockhand.url=[Name](https://...) markdown syntax (#1065)"
+      },
+      {
+        "type": "fix",
+        "text": "HTTPS git credentials no longer leaked in process arguments (#1081)"
+      },
+      {
+        "type": "feature",
+        "text": "bump Docker Compose to 5.1.4 (GHSA-pmwq-pjrm-6p5r)"
+      },
+      {
+        "type": "feature",
+        "text": "dockhand.order label to control container display order within stacks (#847)"
+      },
+      {
+        "type": "feature",
+        "text": "live network attach/detach for running containers \u2014 join or leave Docker networks without restarting (#1051)"
+      },
+      {
+        "type": "fix",
+        "text": "environment variable values with nested quotes progressively corrupted on each save (#1036, #1086)"
+      }
     ],
     "imageTag": "fnsys/dockhand:v1.0.30"
   },
@@ -161,23 +565,74 @@
     "version": "1.0.29",
     "date": "2026-05-17",
     "changes": [
-      { "type": "feature", "text": "optionally display internal (exposed) container ports alongside published ports (#193)" },
-      { "type": "feature", "text": "show app version in sidebar with build info tooltip (#209)" },
-      { "type": "feature", "text": "central label management — rename or delete labels across all environments (#661)" },
-      { "type": "feature", "text": "find next available host port when creating or editing containers (#116)" },
-      { "type": "feature", "text": "theme-aware scrollbar styling — scrollbars adapt to dark/light mode and color palettes (#462)" },
-      { "type": "fix", "text": "update buttons (single, selected, and all) now respect the \"confirm dangerous actions\" setting (#638, #751)" },
-      { "type": "feature", "text": "custom URL labels - dockhand.url or dockhand.port.{port}.url to add links alongside container ports (#266)" },
-      { "type": "feature", "text": "generate and copy token for Hawser Standard mode with run command hint (#337)" },
-      { "type": "fix", "text": "environment stack directory not cleaned up when environment is deleted (#1023)" },
-      { "type": "feature", "text": "toggle to hide timestamps and container name prefix in log viewer (#124)" },
-      { "type": "fix", "text": "Podman containers health status not showing (#737)" },
-      { "type": "fix", "text": "containers with exit code 0 (init/migration) no longer cause stack \"partial\" status (#1026)" },
-      { "type": "fix", "text": "stats stream 400 on reconnect by skipping overlapping fetches (#1044)" },
-      { "type": "fix", "text": "env var validation false positive for values containing $ followed by text (#1048)" },
-      { "type": "fix", "text": "git-repos directory not cleaned up when environment is deleted (#1049)" },
-      { "type": "fix", "text": "webhook secret auto-generated when left empty despite hint saying otherwise (#1050)" },
-      { "type": "feature", "text": "scan reports — combined or individual Grype/Trivy (#1056)" }
+      {
+        "type": "feature",
+        "text": "optionally display internal (exposed) container ports alongside published ports (#193)"
+      },
+      {
+        "type": "feature",
+        "text": "show app version in sidebar with build info tooltip (#209)"
+      },
+      {
+        "type": "feature",
+        "text": "central label management \u2014 rename or delete labels across all environments (#661)"
+      },
+      {
+        "type": "feature",
+        "text": "find next available host port when creating or editing containers (#116)"
+      },
+      {
+        "type": "feature",
+        "text": "theme-aware scrollbar styling \u2014 scrollbars adapt to dark/light mode and color palettes (#462)"
+      },
+      {
+        "type": "fix",
+        "text": "update buttons (single, selected, and all) now respect the \"confirm dangerous actions\" setting (#638, #751)"
+      },
+      {
+        "type": "feature",
+        "text": "custom URL labels - dockhand.url or dockhand.port.{port}.url to add links alongside container ports (#266)"
+      },
+      {
+        "type": "feature",
+        "text": "generate and copy token for Hawser Standard mode with run command hint (#337)"
+      },
+      {
+        "type": "fix",
+        "text": "environment stack directory not cleaned up when environment is deleted (#1023)"
+      },
+      {
+        "type": "feature",
+        "text": "toggle to hide timestamps and container name prefix in log viewer (#124)"
+      },
+      {
+        "type": "fix",
+        "text": "Podman containers health status not showing (#737)"
+      },
+      {
+        "type": "fix",
+        "text": "containers with exit code 0 (init/migration) no longer cause stack \"partial\" status (#1026)"
+      },
+      {
+        "type": "fix",
+        "text": "stats stream 400 on reconnect by skipping overlapping fetches (#1044)"
+      },
+      {
+        "type": "fix",
+        "text": "env var validation false positive for values containing $ followed by text (#1048)"
+      },
+      {
+        "type": "fix",
+        "text": "git-repos directory not cleaned up when environment is deleted (#1049)"
+      },
+      {
+        "type": "fix",
+        "text": "webhook secret auto-generated when left empty despite hint saying otherwise (#1050)"
+      },
+      {
+        "type": "feature",
+        "text": "scan reports \u2014 combined or individual Grype/Trivy (#1056)"
+      }
     ],
     "imageTag": "fnsys/dockhand:v1.0.29"
   },
@@ -185,24 +640,78 @@
     "version": "1.0.28",
     "date": "2026-05-09",
     "changes": [
-      { "type": "feature", "text": "context directory for git stacks — reference files from anywhere in the repo (#864)" },
-      { "type": "feature", "text": "no-cache build option for git stacks (#880)" },
-      { "type": "fix", "text": "env vars lost when switching between raw/form view (#964)" },
-      { "type": "fix", "text": "compose name property not respected during stack scan (#922)" },
-      { "type": "feature", "text": "editable schedule for scanner cache cleanup (#979)" },
-      { "type": "fix", "text": "container labels cannot be deleted (#984)" },
-      { "type": "fix", "text": "env var values leaked in deploy logs — now all values are redacted (#985)" },
-      { "type": "fix", "text": "volume export keeps helper container alive, preventing volume prune/deletion (#983)" },
-      { "type": "fix", "text": "ntfy self-hosted notifications fail when using ?auth= query parameter (#840)" },
-      { "type": "fix", "text": "scrollbar appears in dashboard tiles when content overflows (#969)" },
-      { "type": "fix", "text": "case-sensitive environment sort order — lowercase names sorted after uppercase (#975)" },
-      { "type": "fix", "text": "inaccurate dashboard CPU gauge caused by one-shot stats flag (#932)" },
-      { "type": "feature", "text": "ntfy notifications support ?tags=, ?title=, and ?priority= URL query parameters (#689)" },
-      { "type": "fix", "text": "stack .env file wiped when saving from graph view (#988)" },
-      { "type": "feature", "text": "dismiss update available indicators without updating (#853)" },
-      { "type": "feature", "text": "public IP setting available for hawser-edge environments — enables clickable port links (#350)" },
-      { "type": "fix", "text": "git stack creation silently destroys existing stacks with the same name (#1001)" },
-      { "type": "feature", "text": "static IP/MAC address configuration for containers (#297)" }
+      {
+        "type": "feature",
+        "text": "context directory for git stacks \u2014 reference files from anywhere in the repo (#864)"
+      },
+      {
+        "type": "feature",
+        "text": "no-cache build option for git stacks (#880)"
+      },
+      {
+        "type": "fix",
+        "text": "env vars lost when switching between raw/form view (#964)"
+      },
+      {
+        "type": "fix",
+        "text": "compose name property not respected during stack scan (#922)"
+      },
+      {
+        "type": "feature",
+        "text": "editable schedule for scanner cache cleanup (#979)"
+      },
+      {
+        "type": "fix",
+        "text": "container labels cannot be deleted (#984)"
+      },
+      {
+        "type": "fix",
+        "text": "env var values leaked in deploy logs \u2014 now all values are redacted (#985)"
+      },
+      {
+        "type": "fix",
+        "text": "volume export keeps helper container alive, preventing volume prune/deletion (#983)"
+      },
+      {
+        "type": "fix",
+        "text": "ntfy self-hosted notifications fail when using ?auth= query parameter (#840)"
+      },
+      {
+        "type": "fix",
+        "text": "scrollbar appears in dashboard tiles when content overflows (#969)"
+      },
+      {
+        "type": "fix",
+        "text": "case-sensitive environment sort order \u2014 lowercase names sorted after uppercase (#975)"
+      },
+      {
+        "type": "fix",
+        "text": "inaccurate dashboard CPU gauge caused by one-shot stats flag (#932)"
+      },
+      {
+        "type": "feature",
+        "text": "ntfy notifications support ?tags=, ?title=, and ?priority= URL query parameters (#689)"
+      },
+      {
+        "type": "fix",
+        "text": "stack .env file wiped when saving from graph view (#988)"
+      },
+      {
+        "type": "feature",
+        "text": "dismiss update available indicators without updating (#853)"
+      },
+      {
+        "type": "feature",
+        "text": "public IP setting available for hawser-edge environments \u2014 enables clickable port links (#350)"
+      },
+      {
+        "type": "fix",
+        "text": "git stack creation silently destroys existing stacks with the same name (#1001)"
+      },
+      {
+        "type": "feature",
+        "text": "static IP/MAC address configuration for containers (#297)"
+      }
     ],
     "imageTag": "fnsys/dockhand:v1.0.28"
   },
@@ -211,22 +720,70 @@
     "comingSoon": false,
     "date": "2026-04-26",
     "changes": [
-      { "type": "feature", "text": "network graph visualization on networks page (#894, @Penlane)" },
-      { "type": "feature", "text": "customizable compose template for new stacks in settings (#632, @oratory)" },
-      { "type": "feature", "text": "Microsoft Teams notifications via Power Automate Workflows (#355, @slokhorst)" },
-      { "type": "feature", "text": "container label controls: dockhand.update, dockhand.hidden, dockhand.notify (#6, #53, #94, #215)" },
-      { "type": "feature", "text": "configurable label filter matching mode (any/all) for environment dashboard (#607)" },
-      { "type": "feature", "text": "log search filter mode to hide non-matching lines (#916)" },
-      { "type": "feature", "text": "inline terminal on logs page with resizable split layout (#900)" },
-      { "type": "fix", "text": "disable Telegram link preview in notifications (#910, @deenle)" },
-      { "type": "fix", "text": "cron editor rejects 6-field expressions with seconds (#839, @GiulioSavini)" },
-      { "type": "fix", "text": "mirror Dockhand's ExtraHosts into scanner and self-update containers (#836, @YewFence)" },
-      { "type": "fix", "text": "duplicate volume binds during container recreate (#765, @itsDNNS)" },
-      { "type": "fix", "text": "log timestamp formatting not applied on main logs page (#882)" },
-      { "type": "fix", "text": "uploaded files now inherit container user ownership (#732, @ivanjx)" },
-      { "type": "fix", "text": "extraneous backslash in Telegram notification environment name (#955)" },
-      { "type": "fix", "text": "collapse ports into ranges only if 3 or more consecutive ports" },
-      { "type": "fix", "text": "git operations auto-merge system CAs with custom cert (#967)" }
+      {
+        "type": "feature",
+        "text": "network graph visualization on networks page (#894, @Penlane)"
+      },
+      {
+        "type": "feature",
+        "text": "customizable compose template for new stacks in settings (#632, @oratory)"
+      },
+      {
+        "type": "feature",
+        "text": "Microsoft Teams notifications via Power Automate Workflows (#355, @slokhorst)"
+      },
+      {
+        "type": "feature",
+        "text": "container label controls: dockhand.update, dockhand.hidden, dockhand.notify (#6, #53, #94, #215)"
+      },
+      {
+        "type": "feature",
+        "text": "configurable label filter matching mode (any/all) for environment dashboard (#607)"
+      },
+      {
+        "type": "feature",
+        "text": "log search filter mode to hide non-matching lines (#916)"
+      },
+      {
+        "type": "feature",
+        "text": "inline terminal on logs page with resizable split layout (#900)"
+      },
+      {
+        "type": "fix",
+        "text": "disable Telegram link preview in notifications (#910, @deenle)"
+      },
+      {
+        "type": "fix",
+        "text": "cron editor rejects 6-field expressions with seconds (#839, @GiulioSavini)"
+      },
+      {
+        "type": "fix",
+        "text": "mirror Dockhand's ExtraHosts into scanner and self-update containers (#836, @YewFence)"
+      },
+      {
+        "type": "fix",
+        "text": "duplicate volume binds during container recreate (#765, @itsDNNS)"
+      },
+      {
+        "type": "fix",
+        "text": "log timestamp formatting not applied on main logs page (#882)"
+      },
+      {
+        "type": "fix",
+        "text": "uploaded files now inherit container user ownership (#732, @ivanjx)"
+      },
+      {
+        "type": "fix",
+        "text": "extraneous backslash in Telegram notification environment name (#955)"
+      },
+      {
+        "type": "fix",
+        "text": "collapse ports into ranges only if 3 or more consecutive ports"
+      },
+      {
+        "type": "fix",
+        "text": "git operations auto-merge system CAs with custom cert (#967)"
+      }
     ],
     "imageTag": "fnsys/dockhand:v1.0.27"
   },
@@ -234,16 +791,46 @@
     "version": "1.0.26",
     "date": "2026-04-19",
     "changes": [
-      { "type": "feature", "text": "persist sort order across page navigation for all data grids (#861, #912)" },
-      { "type": "feature", "text": "show git repository URL and branch in git stack edit modal (#856)" },
-      { "type": "feature", "text": "show memory limit alongside usage in containers and stacks views (#893)" },
-      { "type": "feature", "text": "option to delete associated volumes when removing a stack (#655)" },
-      { "type": "feature", "text": "collapse consecutive port mappings into ranges in container list (#821)" },
-      { "type": "fix", "text": "bearer token authentication fails with enterprise license active" },
-      { "type": "fix", "text": "clicking stack name toggles stats accordion instead of just opening editor (#628)" },
-      { "type": "fix", "text": "scheduled image prune notifications missing environment name (#770)" },
-      { "type": "fix", "text": "Gotify, ntfy, Pushover, and webhook notifications missing environment name (#943)" },
-      { "type": "fix", "text": "MFA code field not recognized by Bitwarden and other password managers (#566)" }
+      {
+        "type": "feature",
+        "text": "persist sort order across page navigation for all data grids (#861, #912)"
+      },
+      {
+        "type": "feature",
+        "text": "show git repository URL and branch in git stack edit modal (#856)"
+      },
+      {
+        "type": "feature",
+        "text": "show memory limit alongside usage in containers and stacks views (#893)"
+      },
+      {
+        "type": "feature",
+        "text": "option to delete associated volumes when removing a stack (#655)"
+      },
+      {
+        "type": "feature",
+        "text": "collapse consecutive port mappings into ranges in container list (#821)"
+      },
+      {
+        "type": "fix",
+        "text": "bearer token authentication fails with enterprise license active"
+      },
+      {
+        "type": "fix",
+        "text": "clicking stack name toggles stats accordion instead of just opening editor (#628)"
+      },
+      {
+        "type": "fix",
+        "text": "scheduled image prune notifications missing environment name (#770)"
+      },
+      {
+        "type": "fix",
+        "text": "Gotify, ntfy, Pushover, and webhook notifications missing environment name (#943)"
+      },
+      {
+        "type": "fix",
+        "text": "MFA code field not recognized by Bitwarden and other password managers (#566)"
+      }
     ],
     "imageTag": "fnsys/dockhand:v1.0.26"
   },
@@ -252,19 +839,58 @@
     "date": "2026-04-18",
     "comingSoon": false,
     "changes": [
-      { "type": "feature", "text": "API token authentication — Bearer tokens for CI/CD pipelines and scripts" },
-      { "type": "feature", "text": "Telegram topic support — send notifications to supergroup topics (#855)" },
-{ "type": "fix", "text": "allow removing healthcheck, ports, and honor startAfterUpdate=false during container edit (#892)" },
-      { "type": "fix", "text": "validate stack names and prevent broken DB entries on invalid input (#876)" },
-      { "type": "fix", "text": "use per-environment timezone for schedule execution log timestamps (#882)" },
-      { "type": "fix", "text": "\"Pull image before update\" and \"Start after update\" settings ignored (#909)" },
-      { "type": "fix", "text": "image prune timeout on hawser-standard when pruning many images (#905)" },
-      { "type": "fix", "text": "bump Docker Compose to 5.1.3" },
-      { "type": "fix", "text": "mask secret environment variables in container inspect modal (#924)" },
-      { "type": "fix", "text": "viewer role can toggle, delete, and run schedules (#923)" },
-      { "type": "fix", "text": "settings show defaults instead of saved values after login until page refresh (#921)" },
-      { "type": "fix", "text": "settings toggle notifications show wrong state (#931)" },
-      { "type": "fix", "text": "stack memory tooltip shows inflated total on multi-container stacks (#936)" }
+      {
+        "type": "feature",
+        "text": "API token authentication \u2014 Bearer tokens for CI/CD pipelines and scripts"
+      },
+      {
+        "type": "feature",
+        "text": "Telegram topic support \u2014 send notifications to supergroup topics (#855)"
+      },
+      {
+        "type": "fix",
+        "text": "allow removing healthcheck, ports, and honor startAfterUpdate=false during container edit (#892)"
+      },
+      {
+        "type": "fix",
+        "text": "validate stack names and prevent broken DB entries on invalid input (#876)"
+      },
+      {
+        "type": "fix",
+        "text": "use per-environment timezone for schedule execution log timestamps (#882)"
+      },
+      {
+        "type": "fix",
+        "text": "\"Pull image before update\" and \"Start after update\" settings ignored (#909)"
+      },
+      {
+        "type": "fix",
+        "text": "image prune timeout on hawser-standard when pruning many images (#905)"
+      },
+      {
+        "type": "fix",
+        "text": "bump Docker Compose to 5.1.3"
+      },
+      {
+        "type": "fix",
+        "text": "mask secret environment variables in container inspect modal (#924)"
+      },
+      {
+        "type": "fix",
+        "text": "viewer role can toggle, delete, and run schedules (#923)"
+      },
+      {
+        "type": "fix",
+        "text": "settings show defaults instead of saved values after login until page refresh (#921)"
+      },
+      {
+        "type": "fix",
+        "text": "settings toggle notifications show wrong state (#931)"
+      },
+      {
+        "type": "fix",
+        "text": "stack memory tooltip shows inflated total on multi-container stacks (#936)"
+      }
     ],
     "imageTag": "fnsys/dockhand:v1.0.25"
   },
@@ -272,8 +898,14 @@
     "version": "1.0.24",
     "date": "2026-04-03",
     "changes": [
-      { "type": "fix", "text": "browsing HTTP registries fails with SSL error (#868)" },
-      { "type": "fix", "text": "git stack deploy options (build, re-pull, force redeploy) not persisted in edit dialog" }
+      {
+        "type": "fix",
+        "text": "browsing HTTP registries fails with SSL error (#868)"
+      },
+      {
+        "type": "fix",
+        "text": "git stack deploy options (build, re-pull, force redeploy) not persisted in edit dialog"
+      }
     ],
     "imageTag": "fnsys/dockhand:v1.0.24"
   },
@@ -281,19 +913,58 @@
     "version": "1.0.23",
     "date": "2026-04-03",
     "changes": [
-      { "type": "feature", "text": "theme toggle with system option — auto-follows OS light/dark preference (#803)" },
-      { "type": "feature", "text": "custom user option for terminal shell sessions, persisted per container (#830)" },
-      { "type": "feature", "text": "redeploy button for internal stacks with pull/build/force-recreate options (#152)" },
-      { "type": "feature", "text": "build, re-pull images and force redeployment options for git stacks (#792, #472)" },
-      { "type": "fix", "text": "allow underscores in hostname validation (#790)" },
-      { "type": "fix", "text": "HTTPS git repos with self-signed CA certificates fail to clone/pull (#842)" },
-      { "type": "fix", "text": "stack restart fails for containers using network_mode: service:<container> — added recreate option (#844)" },
-      { "type": "fix", "text": "git stack sync deletes data in relative volume paths (#831)" },
-      { "type": "fix", "text": "batch update skips Hawser containers (#485)" },
-      { "type": "fix", "text": "registry delete fails for multi-arch/OCI manifest images" },
-      { "type": "fix", "text": "scanner cache cleanup to prevent volume bloat (#808)" },
-      { "type": "fix", "text": "negotiate Docker API version for scanner/updater sidecar containers (#759)" },
-      { "type": "fix", "text": "scan vulnerability counts mismatch with displayed list (#705)" }
+      {
+        "type": "feature",
+        "text": "theme toggle with system option \u2014 auto-follows OS light/dark preference (#803)"
+      },
+      {
+        "type": "feature",
+        "text": "custom user option for terminal shell sessions, persisted per container (#830)"
+      },
+      {
+        "type": "feature",
+        "text": "redeploy button for internal stacks with pull/build/force-recreate options (#152)"
+      },
+      {
+        "type": "feature",
+        "text": "build, re-pull images and force redeployment options for git stacks (#792, #472)"
+      },
+      {
+        "type": "fix",
+        "text": "allow underscores in hostname validation (#790)"
+      },
+      {
+        "type": "fix",
+        "text": "HTTPS git repos with self-signed CA certificates fail to clone/pull (#842)"
+      },
+      {
+        "type": "fix",
+        "text": "stack restart fails for containers using network_mode: service:<container> \u2014 added recreate option (#844)"
+      },
+      {
+        "type": "fix",
+        "text": "git stack sync deletes data in relative volume paths (#831)"
+      },
+      {
+        "type": "fix",
+        "text": "batch update skips Hawser containers (#485)"
+      },
+      {
+        "type": "fix",
+        "text": "registry delete fails for multi-arch/OCI manifest images"
+      },
+      {
+        "type": "fix",
+        "text": "scanner cache cleanup to prevent volume bloat (#808)"
+      },
+      {
+        "type": "fix",
+        "text": "negotiate Docker API version for scanner/updater sidecar containers (#759)"
+      },
+      {
+        "type": "fix",
+        "text": "scan vulnerability counts mismatch with displayed list (#705)"
+      }
     ],
     "imageTag": "fnsys/dockhand:v1.0.23"
   },
@@ -301,20 +972,62 @@
     "version": "1.0.22",
     "date": "2026-03-21",
     "changes": [
-      { "type": "feature", "text": "dashboard list view with inline search and connection filters (#740)" },
-      { "type": "feature", "text": "custom environment icon (#754)" },
-      { "type": "feature", "text": "show +N indicator for containers with multiple IP addresses (#644)" },
-      { "type": "feature", "text": "bundle all fonts locally for privacy and offline use (#734)" },
-      { "type": "fix", "text": "respect PROXY settings when checking for container updates" },
-      { "type": "fix", "text": "git stacks force-redeploy after a failed sync (#693)" },
-      { "type": "fix", "text": "What's New modal shown before login, exposing version info (#717)" },
-      { "type": "fix", "text": "git repository files not removed from disk on delete (#671)" },
-      { "type": "fix", "text": "recursive chown at startup breaks stack volumes with different ownership (#719)" },
-      { "type": "fix", "text": "missing notification event toggles for container healthy, image prune events (#659)" },
-      { "type": "fix", "text": "container disappears when edit fails (e.g. invalid memory/swap) (#736)" },
-      { "type": "fix", "text": "regression: network container count always shows 0 (#761)" },
-      { "type": "fix", "text": "Grype/Trivy scan containers don't inherit proxy env vars (#780)" },
-      { "type": "fix", "text": "pin vulnerability scanner images to specific versions not :latest" }
+      {
+        "type": "feature",
+        "text": "dashboard list view with inline search and connection filters (#740)"
+      },
+      {
+        "type": "feature",
+        "text": "custom environment icon (#754)"
+      },
+      {
+        "type": "feature",
+        "text": "show +N indicator for containers with multiple IP addresses (#644)"
+      },
+      {
+        "type": "feature",
+        "text": "bundle all fonts locally for privacy and offline use (#734)"
+      },
+      {
+        "type": "fix",
+        "text": "respect PROXY settings when checking for container updates"
+      },
+      {
+        "type": "fix",
+        "text": "git stacks force-redeploy after a failed sync (#693)"
+      },
+      {
+        "type": "fix",
+        "text": "What's New modal shown before login, exposing version info (#717)"
+      },
+      {
+        "type": "fix",
+        "text": "git repository files not removed from disk on delete (#671)"
+      },
+      {
+        "type": "fix",
+        "text": "recursive chown at startup breaks stack volumes with different ownership (#719)"
+      },
+      {
+        "type": "fix",
+        "text": "missing notification event toggles for container healthy, image prune events (#659)"
+      },
+      {
+        "type": "fix",
+        "text": "container disappears when edit fails (e.g. invalid memory/swap) (#736)"
+      },
+      {
+        "type": "fix",
+        "text": "regression: network container count always shows 0 (#761)"
+      },
+      {
+        "type": "fix",
+        "text": "Grype/Trivy scan containers don't inherit proxy env vars (#780)"
+      },
+      {
+        "type": "fix",
+        "text": "pin vulnerability scanner images to specific versions not :latest"
+      }
     ],
     "imageTag": "fnsys/dockhand:v1.0.22"
   },
@@ -322,19 +1035,58 @@
     "version": "1.0.21",
     "date": "2026-03-13",
     "changes": [
-      { "type": "feature", "text": "option to truncate port list (#702)" },
-      { "type": "feature", "text": "log viewer supports ANSII 256 colors (#743)" },
-      { "type": "fix", "text": "IPv6 Problems (#714, #731)" },
-      { "type": "fix", "text": "polling storm & mass disconnect (#733, #741)" },
-      { "type": "fix", "text": "custom cron schedule displayed incorrectly (#727)" },
-      { "type": "fix", "text": "wrong cron schedule (#706)" },
-      { "type": "fix", "text": "file browser does not allow upload over 512 KB (#687)" },
-      { "type": "fix", "text": "can't set memory swappiness when using Podman (#691)" },
-      { "type": "fix", "text": "compose API negotiation fix (#692, #696)" },
-      { "type": "fix", "text": "not deployed git stacks continue to show the Down action (#694)" },
-      { "type": "fix", "text": "display time doesn't reflect time zone (#735)" },
-      { "type": "fix", "text": "prune dangling images counter not working (#718)" },
-      { "type": "fix", "text": "own PORT env not used in HEALTHCHECK (#745)" }
+      {
+        "type": "feature",
+        "text": "option to truncate port list (#702)"
+      },
+      {
+        "type": "feature",
+        "text": "log viewer supports ANSII 256 colors (#743)"
+      },
+      {
+        "type": "fix",
+        "text": "IPv6 Problems (#714, #731)"
+      },
+      {
+        "type": "fix",
+        "text": "polling storm & mass disconnect (#733, #741)"
+      },
+      {
+        "type": "fix",
+        "text": "custom cron schedule displayed incorrectly (#727)"
+      },
+      {
+        "type": "fix",
+        "text": "wrong cron schedule (#706)"
+      },
+      {
+        "type": "fix",
+        "text": "file browser does not allow upload over 512 KB (#687)"
+      },
+      {
+        "type": "fix",
+        "text": "can't set memory swappiness when using Podman (#691)"
+      },
+      {
+        "type": "fix",
+        "text": "compose API negotiation fix (#692, #696)"
+      },
+      {
+        "type": "fix",
+        "text": "not deployed git stacks continue to show the Down action (#694)"
+      },
+      {
+        "type": "fix",
+        "text": "display time doesn't reflect time zone (#735)"
+      },
+      {
+        "type": "fix",
+        "text": "prune dangling images counter not working (#718)"
+      },
+      {
+        "type": "fix",
+        "text": "own PORT env not used in HEALTHCHECK (#745)"
+      }
     ],
     "imageTag": "fnsys/dockhand:v1.0.21"
   },
@@ -342,9 +1094,18 @@
     "version": "1.0.20",
     "date": "2026-03-02",
     "changes": [
-      { "type": "fix", "text": "regression on Synology DSM" },
-      { "type": "fix", "text": "Fix ARM64 regression: Go collector crashing on Raspberry Pi and other ARM devices" },
-      { "type": "fix", "text": "autoupdate hangs on \"waiting for Dockhand\"" }
+      {
+        "type": "fix",
+        "text": "regression on Synology DSM"
+      },
+      {
+        "type": "fix",
+        "text": "Fix ARM64 regression: Go collector crashing on Raspberry Pi and other ARM devices"
+      },
+      {
+        "type": "fix",
+        "text": "autoupdate hangs on \"waiting for Dockhand\""
+      }
     ],
     "imageTag": "fnsys/dockhand:v1.0.20"
   },
@@ -352,18 +1113,54 @@
     "version": "1.0.19",
     "date": "2026-03-01",
     "changes": [
-      { "type": "feature", "text": "Inline logs panel on stacks page — view container logs without leaving the page" },
-      { "type": "feature", "text": "Make ports column sortable in containers grid" },
-      { "type": "feature", "text": "Structured auth logging with client IP (login/logout/MFA/OIDC events)" },
-      { "type": "fix", "text": "Fix memory leak: TLS context accumulation for HTTPS environments (Bun)" },
-      { "type": "fix", "text": "Fix security scanning on Docker with custom logging drivers (Loki, Fluentd, etc.)" },
-      { "type": "fix", "text": "Fix grouped log viewer not auto-scrolling on new entries" },
-      { "type": "fix", "text": "Fix container recreation error messages not surfacing actual Docker errors" },
-      { "type": "fix", "text": "Fix LDAP group-to-role mapping" },
-      { "type": "fix", "text": "Fix container file browser hiding old files" },
-      { "type": "fix", "text": "Fix SSH key permission issues on NAS filesystems" },
-      { "type": "fix", "text": "Fix binary file corruption when syncing stacks to Hawser agents" },
-      { "type": "fix", "text": "Fix UI timeout issues for long running operations" }
+      {
+        "type": "feature",
+        "text": "Inline logs panel on stacks page \u2014 view container logs without leaving the page"
+      },
+      {
+        "type": "feature",
+        "text": "Make ports column sortable in containers grid"
+      },
+      {
+        "type": "feature",
+        "text": "Structured auth logging with client IP (login/logout/MFA/OIDC events)"
+      },
+      {
+        "type": "fix",
+        "text": "Fix memory leak: TLS context accumulation for HTTPS environments (Bun)"
+      },
+      {
+        "type": "fix",
+        "text": "Fix security scanning on Docker with custom logging drivers (Loki, Fluentd, etc.)"
+      },
+      {
+        "type": "fix",
+        "text": "Fix grouped log viewer not auto-scrolling on new entries"
+      },
+      {
+        "type": "fix",
+        "text": "Fix container recreation error messages not surfacing actual Docker errors"
+      },
+      {
+        "type": "fix",
+        "text": "Fix LDAP group-to-role mapping"
+      },
+      {
+        "type": "fix",
+        "text": "Fix container file browser hiding old files"
+      },
+      {
+        "type": "fix",
+        "text": "Fix SSH key permission issues on NAS filesystems"
+      },
+      {
+        "type": "fix",
+        "text": "Fix binary file corruption when syncing stacks to Hawser agents"
+      },
+      {
+        "type": "fix",
+        "text": "Fix UI timeout issues for long running operations"
+      }
     ],
     "imageTag": "fnsys/dockhand:v1.0.19"
   },
@@ -371,20 +1168,62 @@
     "version": "1.0.18",
     "date": "2026-02-16",
     "changes": [
-      { "type": "feature", "text": "Dockhand self-update from the UI" },
-      { "type": "feature", "text": "Show freed disk space after image removal and pruning" },
-      { "type": "feature", "text": "Handle dynamically-spawned child containers in stack stop/down/restart/remove" },
-      { "type": "feature", "text": "Git webhooks are logged to the audit log" },
-      { "type": "feature", "text": "Add Mattermost notification support" },
-      { "type": "feature", "text": "Configurable disk usage warning threshold per environment" },
-      { "type": "fix", "text": "Fix file upload CSRF 403 error on plain HTTP deployments" },
-      { "type": "fix", "text": "Fix scanner container /wait timeout causing empty scan output" },
-      { "type": "fix", "text": "Fix saving adopted external stack failing with 'Stack directory not found'" },
-      { "type": "fix", "text": "Add Bearer token auth support for ntfy notifications" },
-      { "type": "fix", "text": "Fix git SSH failing with 'No user exists for uid' with arbitrary UIDs" },
-      { "type": "fix", "text": "Fix command palette flooding API requests on open" },
-      { "type": "fix", "text": "Normalize stack names when adopting to prevent uppercase rejection" },
-      { "type": "fix", "text": "Fix container update failing for shared network modes (container:<name>, host, none)" }
+      {
+        "type": "feature",
+        "text": "Dockhand self-update from the UI"
+      },
+      {
+        "type": "feature",
+        "text": "Show freed disk space after image removal and pruning"
+      },
+      {
+        "type": "feature",
+        "text": "Handle dynamically-spawned child containers in stack stop/down/restart/remove"
+      },
+      {
+        "type": "feature",
+        "text": "Git webhooks are logged to the audit log"
+      },
+      {
+        "type": "feature",
+        "text": "Add Mattermost notification support"
+      },
+      {
+        "type": "feature",
+        "text": "Configurable disk usage warning threshold per environment"
+      },
+      {
+        "type": "fix",
+        "text": "Fix file upload CSRF 403 error on plain HTTP deployments"
+      },
+      {
+        "type": "fix",
+        "text": "Fix scanner container /wait timeout causing empty scan output"
+      },
+      {
+        "type": "fix",
+        "text": "Fix saving adopted external stack failing with 'Stack directory not found'"
+      },
+      {
+        "type": "fix",
+        "text": "Add Bearer token auth support for ntfy notifications"
+      },
+      {
+        "type": "fix",
+        "text": "Fix git SSH failing with 'No user exists for uid' with arbitrary UIDs"
+      },
+      {
+        "type": "fix",
+        "text": "Fix command palette flooding API requests on open"
+      },
+      {
+        "type": "fix",
+        "text": "Normalize stack names when adopting to prevent uppercase rejection"
+      },
+      {
+        "type": "fix",
+        "text": "Fix container update failing for shared network modes (container:<name>, host, none)"
+      }
     ],
     "imageTag": "fnsys/dockhand:v1.0.18"
   },
@@ -392,9 +1231,18 @@
     "version": "1.0.17",
     "date": "2026-02-09",
     "changes": [
-      { "type": "fix", "text": "Fix scanner failure on rootless Docker" },
-      { "type": "fix", "text": "Increase Hawser compose operation timeout" },
-      { "type": "fix", "text": "Fix regression in stack container updates" }
+      {
+        "type": "fix",
+        "text": "Fix scanner failure on rootless Docker"
+      },
+      {
+        "type": "fix",
+        "text": "Increase Hawser compose operation timeout"
+      },
+      {
+        "type": "fix",
+        "text": "Fix regression in stack container updates"
+      }
     ],
     "imageTag": "fnsys/dockhand:v1.0.17"
   },
@@ -402,11 +1250,26 @@
     "version": "1.0.16",
     "date": "2026-02-09",
     "changes": [
-      { "type": "feature", "text": "Support Docker Compose override files when deploying stacks" },
-      { "type": "fix", "text": "Fix Hawser stack deploy failing when compose file not present on remote host" },
-      { "type": "fix", "text": "Fix Hawser Standard TLS test connection sending HTTP to HTTPS server" },
-      { "type": "fix", "text": "Fix .env variables not applied on save & redeploy" },
-      { "type": "fix", "text": "Fix single Hawser node failure cascading offline state to all environments" }
+      {
+        "type": "feature",
+        "text": "Support Docker Compose override files when deploying stacks"
+      },
+      {
+        "type": "fix",
+        "text": "Fix Hawser stack deploy failing when compose file not present on remote host"
+      },
+      {
+        "type": "fix",
+        "text": "Fix Hawser Standard TLS test connection sending HTTP to HTTPS server"
+      },
+      {
+        "type": "fix",
+        "text": "Fix .env variables not applied on save & redeploy"
+      },
+      {
+        "type": "fix",
+        "text": "Fix single Hawser node failure cascading offline state to all environments"
+      }
     ],
     "imageTag": "fnsys/dockhand:v1.0.16"
   },
@@ -414,32 +1277,110 @@
     "version": "1.0.15",
     "date": "2026-02-08",
     "changes": [
-{ "type": "feature", "text": "Pull before update option: New option to pull latest image before container auto-update" },
-      { "type": "feature", "text": "Usage filter on images page by usage status (used/unused/all)" },
-      { "type": "feature", "text": "Show repository name for untagged images: Better identification of images without tags" },
-      { "type": "fix", "text": "Fix IPv6 address not accepted in environment Public IP field" },
-      { "type": "fix", "text": "Fix IPv6 port link URLs by adding bracket formatting" },
-      { "type": "fix", "text": "Fix custom compose filename not used in SSE deploy" },
-      { "type": "fix", "text": "Fix env var leakage from Dockhand to user stacks" },
-      { "type": "fix", "text": "Fix SMTP notification test returning false success" },
-      { "type": "fix", "text": "Fix custom compose file path ignored for Hawser git stack deployments" },
-      { "type": "fix", "text": "Fix escaped $$ variables (Docker Compose syntax) incorrectly flagged as missing" },
-      { "type": "fix", "text": "Use native compose pull and up when updating stack containers" },
-      { "type": "fix", "text": "Fix vulnerability scans hanging indefinitely or failing with JSON parse errors" },
-      { "type": "fix", "text": "Fix memory leaks in SSE event streams and unconsumed Docker API response bodies" },
-      { "type": "feature", "text": "Sort vulnerability scan results by severity by default" },
-      { "type": "feature", "text": "Copy button for compose file contents in stack modal" },
-      { "type": "feature", "text": "Confirmation dialog before git stack sync" },
-      { "type": "fix", "text": "Fix timezone aliases (e.g. Europe/Kyiv) not saving correctly" },
-      { "type": "fix", "text": "Fix login crash with large session timeout values" },
-      { "type": "fix", "text": "Fix profile display name not persisting due to field name mismatch" },
-      { "type": "fix", "text": "Fix date formatting not respecting user preferences" },
-      { "type": "fix", "text": "Fix static IP not preserved during container auto-update" },
-      { "type": "fix", "text": "Fix stack adoption path conflict across different environments" },
-      { "type": "fix", "text": "Fix container auto-update causing permission denied on bind mounts" },
-      { "type": "fix", "text": "Fix health tab not showing healthcheck configuration" },
-      { "type": "fix", "text": "Fix stack custom paths reset after edit" },
-      { "type": "fix", "text": "Autofocus on login username and MFA code fields" }
+      {
+        "type": "feature",
+        "text": "Pull before update option: New option to pull latest image before container auto-update"
+      },
+      {
+        "type": "feature",
+        "text": "Usage filter on images page by usage status (used/unused/all)"
+      },
+      {
+        "type": "feature",
+        "text": "Show repository name for untagged images: Better identification of images without tags"
+      },
+      {
+        "type": "fix",
+        "text": "Fix IPv6 address not accepted in environment Public IP field"
+      },
+      {
+        "type": "fix",
+        "text": "Fix IPv6 port link URLs by adding bracket formatting"
+      },
+      {
+        "type": "fix",
+        "text": "Fix custom compose filename not used in SSE deploy"
+      },
+      {
+        "type": "fix",
+        "text": "Fix env var leakage from Dockhand to user stacks"
+      },
+      {
+        "type": "fix",
+        "text": "Fix SMTP notification test returning false success"
+      },
+      {
+        "type": "fix",
+        "text": "Fix custom compose file path ignored for Hawser git stack deployments"
+      },
+      {
+        "type": "fix",
+        "text": "Fix escaped $$ variables (Docker Compose syntax) incorrectly flagged as missing"
+      },
+      {
+        "type": "fix",
+        "text": "Use native compose pull and up when updating stack containers"
+      },
+      {
+        "type": "fix",
+        "text": "Fix vulnerability scans hanging indefinitely or failing with JSON parse errors"
+      },
+      {
+        "type": "fix",
+        "text": "Fix memory leaks in SSE event streams and unconsumed Docker API response bodies"
+      },
+      {
+        "type": "feature",
+        "text": "Sort vulnerability scan results by severity by default"
+      },
+      {
+        "type": "feature",
+        "text": "Copy button for compose file contents in stack modal"
+      },
+      {
+        "type": "feature",
+        "text": "Confirmation dialog before git stack sync"
+      },
+      {
+        "type": "fix",
+        "text": "Fix timezone aliases (e.g. Europe/Kyiv) not saving correctly"
+      },
+      {
+        "type": "fix",
+        "text": "Fix login crash with large session timeout values"
+      },
+      {
+        "type": "fix",
+        "text": "Fix profile display name not persisting due to field name mismatch"
+      },
+      {
+        "type": "fix",
+        "text": "Fix date formatting not respecting user preferences"
+      },
+      {
+        "type": "fix",
+        "text": "Fix static IP not preserved during container auto-update"
+      },
+      {
+        "type": "fix",
+        "text": "Fix stack adoption path conflict across different environments"
+      },
+      {
+        "type": "fix",
+        "text": "Fix container auto-update causing permission denied on bind mounts"
+      },
+      {
+        "type": "fix",
+        "text": "Fix health tab not showing healthcheck configuration"
+      },
+      {
+        "type": "fix",
+        "text": "Fix stack custom paths reset after edit"
+      },
+      {
+        "type": "fix",
+        "text": "Autofocus on login username and MFA code fields"
+      }
     ],
     "imageTag": "fnsys/dockhand:v1.0.15"
   },
@@ -447,10 +1388,22 @@
     "version": "1.0.14",
     "date": "2026-01-31",
     "changes": [
-      { "type": "fix", "text": "Fix environment variables in .env not interpolated during remote deployment" },
-      { "type": "fix", "text": "Fix stack variables not re-injected during stack start/stop" },
-      { "type": "fix", "text": "Fix time format 12/24 setting not respected in header clock" },
-      { "type": "fix", "text": "Fix skip TLS verification not saved on new environment" }
+      {
+        "type": "fix",
+        "text": "Fix environment variables in .env not interpolated during remote deployment"
+      },
+      {
+        "type": "fix",
+        "text": "Fix stack variables not re-injected during stack start/stop"
+      },
+      {
+        "type": "fix",
+        "text": "Fix time format 12/24 setting not respected in header clock"
+      },
+      {
+        "type": "fix",
+        "text": "Fix skip TLS verification not saved on new environment"
+      }
     ],
     "imageTag": "fnsys/dockhand:v1.0.14"
   },
@@ -458,25 +1411,82 @@
     "version": "1.0.13",
     "date": "2026-01-23",
     "changes": [
-      { "type": "feature", "text": "Add DISABLE_LOCAL_LOGIN env var to hide local password login when SSO/LDAP is configured" },
-      { "type": "feature", "text": "Add ntfy authentication support (user:pass@host/topic format)" },
-      { "type": "feature", "text": "Sortable health column in containers grid (unhealthy containers first)" },
-      { "type": "feature", "text": "GPU device configuration in container create/edit/inspect" },
-      { "type": "feature", "text": "Editor font setting with expanded monospace font options" },
-      { "type": "feature", "text": "Dedicated NFS/CIFS form fields in create volume modal" },
-      { "type": "feature", "text": "Scheduled image pruning per environment" },
-      { "type": "feature", "text": "Git stack env populate button to preview overridable variables before deploy" },
-      { "type": "fix", "text": "Fix vulnerability scanning failing with rootless Docker" },
-      { "type": "fix", "text": "Honor DATA_DIR env var in hawser SQLite operations" },
-      { "type": "fix", "text": "Show detailed error messages when notification test fails" },
-      { "type": "fix", "text": "Fix compose file browse in create mode showing default path instead of selected file" },
-      { "type": "fix", "text": "Fix custom env file path not preserved in create mode" },
-      { "type": "fix", "text": "Fix git stacks creating duplicate compose.yaml alongside repo file" },
-      { "type": "fix", "text": "Fix env vars not showing after stack create" },
-      { "type": "fix", "text": "Fix stack path defaults accidentally enforced over custom paths" },
-      { "type": "fix", "text": "Fix adopted stack save & restart breaking paths and env vars" },
-      { "type": "fix", "text": "Add more information to container audit logs including diff of changes" },
-      { "type": "fix", "text": "Preserve container settings on restart and auto-update" }
+      {
+        "type": "feature",
+        "text": "Add DISABLE_LOCAL_LOGIN env var to hide local password login when SSO/LDAP is configured"
+      },
+      {
+        "type": "feature",
+        "text": "Add ntfy authentication support (user:pass@host/topic format)"
+      },
+      {
+        "type": "feature",
+        "text": "Sortable health column in containers grid (unhealthy containers first)"
+      },
+      {
+        "type": "feature",
+        "text": "GPU device configuration in container create/edit/inspect"
+      },
+      {
+        "type": "feature",
+        "text": "Editor font setting with expanded monospace font options"
+      },
+      {
+        "type": "feature",
+        "text": "Dedicated NFS/CIFS form fields in create volume modal"
+      },
+      {
+        "type": "feature",
+        "text": "Scheduled image pruning per environment"
+      },
+      {
+        "type": "feature",
+        "text": "Git stack env populate button to preview overridable variables before deploy"
+      },
+      {
+        "type": "fix",
+        "text": "Fix vulnerability scanning failing with rootless Docker"
+      },
+      {
+        "type": "fix",
+        "text": "Honor DATA_DIR env var in hawser SQLite operations"
+      },
+      {
+        "type": "fix",
+        "text": "Show detailed error messages when notification test fails"
+      },
+      {
+        "type": "fix",
+        "text": "Fix compose file browse in create mode showing default path instead of selected file"
+      },
+      {
+        "type": "fix",
+        "text": "Fix custom env file path not preserved in create mode"
+      },
+      {
+        "type": "fix",
+        "text": "Fix git stacks creating duplicate compose.yaml alongside repo file"
+      },
+      {
+        "type": "fix",
+        "text": "Fix env vars not showing after stack create"
+      },
+      {
+        "type": "fix",
+        "text": "Fix stack path defaults accidentally enforced over custom paths"
+      },
+      {
+        "type": "fix",
+        "text": "Fix adopted stack save & restart breaking paths and env vars"
+      },
+      {
+        "type": "fix",
+        "text": "Add more information to container audit logs including diff of changes"
+      },
+      {
+        "type": "fix",
+        "text": "Preserve container settings on restart and auto-update"
+      }
     ],
     "imageTag": "fnsys/dockhand:v1.0.13"
   },
@@ -484,16 +1494,46 @@
     "version": "1.0.12",
     "date": "2026-01-22",
     "changes": [
-      { "type": "feature", "text": "Add SKIP_DF_COLLECTION env var to disable slow disk usage collection on NAS devices" },
-      { "type": "fix", "text": "Fix terminal/shell connections to direct TLS/mTLS and Hawser Standard environments" },
-      { "type": "fix", "text": "Fix crash when Hawser agent is stopped from Dockhand" },
-      { "type": "fix", "text": "Skip auto-update for SHA-pinned images (image@sha256:...)" },
-      { "type": "fix", "text": "Fix pending updates not cleared when containers or stacks are deleted" },
-      { "type": "fix", "text": "Fix adopted stacks using wrong .env path from internal directory instead of original location" },
-      { "type": "fix", "text": "Improve /login audit logs information" },
-      { "type": "fix", "text": "Fix login/logout screen refresh issue" },
-      { "type": "fix", "text": "Fix password change not persisting" },
-      { "type": "fix", "text": "Fix audit log page showing empty values" }
+      {
+        "type": "feature",
+        "text": "Add SKIP_DF_COLLECTION env var to disable slow disk usage collection on NAS devices"
+      },
+      {
+        "type": "fix",
+        "text": "Fix terminal/shell connections to direct TLS/mTLS and Hawser Standard environments"
+      },
+      {
+        "type": "fix",
+        "text": "Fix crash when Hawser agent is stopped from Dockhand"
+      },
+      {
+        "type": "fix",
+        "text": "Skip auto-update for SHA-pinned images (image@sha256:...)"
+      },
+      {
+        "type": "fix",
+        "text": "Fix pending updates not cleared when containers or stacks are deleted"
+      },
+      {
+        "type": "fix",
+        "text": "Fix adopted stacks using wrong .env path from internal directory instead of original location"
+      },
+      {
+        "type": "fix",
+        "text": "Improve /login audit logs information"
+      },
+      {
+        "type": "fix",
+        "text": "Fix login/logout screen refresh issue"
+      },
+      {
+        "type": "fix",
+        "text": "Fix password change not persisting"
+      },
+      {
+        "type": "fix",
+        "text": "Fix audit log page showing empty values"
+      }
     ],
     "imageTag": "fnsys/dockhand:v1.0.12"
   },
@@ -501,11 +1541,26 @@
     "version": "1.0.11",
     "date": "2026-01-20",
     "changes": [
-      { "type": "fix", "text": "Encryption at rest for sensitive credentials (AES-256-GCM)" },
-      { "type": "fix", "text": "Fix registry browsing and image push for registries with organization paths (e.g., registry.example.com/org)" },
-      { "type": "fix", "text": "Fix security scan failing to parse scanner output" },
-      { "type": "fix", "text": "Fix git sync stuck with sync_status set to running if app restarted during stack sync" },
-      { "type": "fix", "text": "Fix updating via containers tab doesn't properly restart the container" }
+      {
+        "type": "fix",
+        "text": "Encryption at rest for sensitive credentials (AES-256-GCM)"
+      },
+      {
+        "type": "fix",
+        "text": "Fix registry browsing and image push for registries with organization paths (e.g., registry.example.com/org)"
+      },
+      {
+        "type": "fix",
+        "text": "Fix security scan failing to parse scanner output"
+      },
+      {
+        "type": "fix",
+        "text": "Fix git sync stuck with sync_status set to running if app restarted during stack sync"
+      },
+      {
+        "type": "fix",
+        "text": "Fix updating via containers tab doesn't properly restart the container"
+      }
     ],
     "imageTag": "fnsys/dockhand:v1.0.11"
   },
@@ -513,10 +1568,22 @@
     "version": "1.0.10",
     "date": "2026-01-18",
     "changes": [
-      { "type": "fix", "text": "Fix docker socket access for custom PUID/PGID" },
-      { "type": "fix", "text": "Fix stack creation with deploy failing when no env vars provided" },
-      { "type": "fix", "text": "Fix env var validation flagging variables in commented lines as missing" },
-      { "type": "fix", "text": "Show stop button for stacks in restart loop" }
+      {
+        "type": "fix",
+        "text": "Fix docker socket access for custom PUID/PGID"
+      },
+      {
+        "type": "fix",
+        "text": "Fix stack creation with deploy failing when no env vars provided"
+      },
+      {
+        "type": "fix",
+        "text": "Fix env var validation flagging variables in commented lines as missing"
+      },
+      {
+        "type": "fix",
+        "text": "Show stop button for stacks in restart loop"
+      }
     ],
     "imageTag": "fnsys/dockhand:v1.0.10"
   },
@@ -524,17 +1591,50 @@
     "version": "1.0.9",
     "date": "2026-01-17",
     "changes": [
-      { "type": "feature", "text": "Shell: detect available shells in container before connecting" },
-      { "type": "fix", "text": "Fix GHCR registry authentication with OAuth2 token flow" },
-      { "type": "fix", "text": "Add page titles for browser tab updates on navigation" },
-      { "type": "fix", "text": "Add stack name conflict warning" },
-      { "type": "feature", "text": "Add docker-buildx plugin to container image" },
-      { "type": "fix", "text": "Fix relative paths not working for adopted/imported stacks" },
-      { "type": "fix", "text": "Fix TLS certificates not passed to docker-compose for direct connections" },
-      { "type": "fix", "text": "Fix registry queries for images with docker.io prefix" },
-      { "type": "fix", "text": "Fix compose editor issues when editing near env var references" },
-      { "type": "fix", "text": "Fix branch switching causing unknown revision error in git stacks" },
-      { "type": "fix", "text": "Fix SSE connection leak" }
+      {
+        "type": "feature",
+        "text": "Shell: detect available shells in container before connecting"
+      },
+      {
+        "type": "fix",
+        "text": "Fix GHCR registry authentication with OAuth2 token flow"
+      },
+      {
+        "type": "fix",
+        "text": "Add page titles for browser tab updates on navigation"
+      },
+      {
+        "type": "fix",
+        "text": "Add stack name conflict warning"
+      },
+      {
+        "type": "feature",
+        "text": "Add docker-buildx plugin to container image"
+      },
+      {
+        "type": "fix",
+        "text": "Fix relative paths not working for adopted/imported stacks"
+      },
+      {
+        "type": "fix",
+        "text": "Fix TLS certificates not passed to docker-compose for direct connections"
+      },
+      {
+        "type": "fix",
+        "text": "Fix registry queries for images with docker.io prefix"
+      },
+      {
+        "type": "fix",
+        "text": "Fix compose editor issues when editing near env var references"
+      },
+      {
+        "type": "fix",
+        "text": "Fix branch switching causing unknown revision error in git stacks"
+      },
+      {
+        "type": "fix",
+        "text": "Fix SSE connection leak"
+      }
     ],
     "imageTag": "fnsys/dockhand:v1.0.9"
   },
@@ -542,13 +1642,34 @@
     "version": "1.0.8",
     "date": "2026-01-13",
     "changes": [
-      { "type": "fix", "text": "Fix imported stack working directory for relative volume paths" },
-      { "type": "fix", "text": "Fix environment refresh after auth login" },
-      { "type": "fix", "text": "Fix single container update clearing up all update badges" },
-      { "type": "fix", "text": "Fix code editor paste issue on Safari on iPad" },
-      { "type": "fix", "text": "Fix registry login failing due to Bun stdin API incompatibility" },
-      { "type": "fix", "text": "Fix env var editor focus issues" },
-      { "type": "fix", "text": "Fix git stack naming issues: validation, rename sync, and delete cleanup" }
+      {
+        "type": "fix",
+        "text": "Fix imported stack working directory for relative volume paths"
+      },
+      {
+        "type": "fix",
+        "text": "Fix environment refresh after auth login"
+      },
+      {
+        "type": "fix",
+        "text": "Fix single container update clearing up all update badges"
+      },
+      {
+        "type": "fix",
+        "text": "Fix code editor paste issue on Safari on iPad"
+      },
+      {
+        "type": "fix",
+        "text": "Fix registry login failing due to Bun stdin API incompatibility"
+      },
+      {
+        "type": "fix",
+        "text": "Fix env var editor focus issues"
+      },
+      {
+        "type": "fix",
+        "text": "Fix git stack naming issues: validation, rename sync, and delete cleanup"
+      }
     ],
     "imageTag": "fnsys/dockhand:v1.0.8"
   },
@@ -557,17 +1678,50 @@
     "date": "2026-01-06",
     "comingSoon": false,
     "changes": [
-      { "type": "feature", "text": "Adopt stacks created outside Dockhand" },
-      { "type": "feature", "text": "Activity event collection mode (Stream/Poll) and metrics interval settings for reduced CPU usage" },
-      { "type": "feature", "text": "Baseline Docker images for CPUs without AVX support" },
-      { "type": "feature", "text": "Show amber \"Unused\" badge for images not used by any container" },
-      { "type": "feature", "text": "Prune unused button to remove all unused images (not just dangling)" },
-      { "type": "fix", "text": "Stack collision on disk - stacks are now saved in environment folders" },
-      { "type": "fix", "text": "Checkbox selection delay in datagrid" },
-      { "type": "fix", "text": "Crypto fallback for old Linux kernels (<3.17) that lack getrandom() syscall" },
-      { "type": "fix", "text": "Dashboard performance with many environments" },
-      { "type": "fix", "text": "Can't use authenticated custom registry"},
-      { "type": "fix", "text": "mTLS connections failing due to Bun TLS caching bug"}
+      {
+        "type": "feature",
+        "text": "Adopt stacks created outside Dockhand"
+      },
+      {
+        "type": "feature",
+        "text": "Activity event collection mode (Stream/Poll) and metrics interval settings for reduced CPU usage"
+      },
+      {
+        "type": "feature",
+        "text": "Baseline Docker images for CPUs without AVX support"
+      },
+      {
+        "type": "feature",
+        "text": "Show amber \"Unused\" badge for images not used by any container"
+      },
+      {
+        "type": "feature",
+        "text": "Prune unused button to remove all unused images (not just dangling)"
+      },
+      {
+        "type": "fix",
+        "text": "Stack collision on disk - stacks are now saved in environment folders"
+      },
+      {
+        "type": "fix",
+        "text": "Checkbox selection delay in datagrid"
+      },
+      {
+        "type": "fix",
+        "text": "Crypto fallback for old Linux kernels (<3.17) that lack getrandom() syscall"
+      },
+      {
+        "type": "fix",
+        "text": "Dashboard performance with many environments"
+      },
+      {
+        "type": "fix",
+        "text": "Can't use authenticated custom registry"
+      },
+      {
+        "type": "fix",
+        "text": "mTLS connections failing due to Bun TLS caching bug"
+      }
     ],
     "imageTag": "fnsys/dockhand:v1.0.7"
   },
@@ -575,9 +1729,18 @@
     "version": "1.0.6",
     "date": "2026-01-03",
     "changes": [
-      { "type": "fix", "text": "Legacy CPU support (Celeron, Atom) - Bun binary now copied from official image instead of Wolfi package" },
-      { "type": "fix", "text": "Stack modal layouts improved with resizable split panels" },
-      { "type": "fix", "text": "Missing column headers in images overview" }
+      {
+        "type": "fix",
+        "text": "Legacy CPU support (Celeron, Atom) - Bun binary now copied from official image instead of Wolfi package"
+      },
+      {
+        "type": "fix",
+        "text": "Stack modal layouts improved with resizable split panels"
+      },
+      {
+        "type": "fix",
+        "text": "Missing column headers in images overview"
+      }
     ],
     "imageTag": "fnsys/dockhand:v1.0.6"
   },
@@ -585,24 +1748,78 @@
     "version": "1.0.5",
     "date": "2026-01-01",
     "changes": [
-      { "type": "feature", "text": "Custom hardened image built from scratch using Wolfi packages, eliminating Alpine vulnerabilities" },
-      { "type": "feature", "text": "Clicking container name opens container details" },
-      { "type": "feature", "text": "Clicking stack name opens stack editor (internal stacks)" },
-      { "type": "feature", "text": "Stack env editor now supports freestyle text entry for pasting env contents" },
-      { "type": "feature", "text": "Stack env vars saved as .env file next to compose, respecting external edits" },
-      { "type": "feature", "text": "Additional container options: ulimits, security options, DNS settings" },
-      { "type": "fix", "text": "DataGrid performance and memory leak on Activity page with thousands of rows" },
-      { "type": "fix", "text": "Webhook endpoints bypass session authentication when auth is enabled" },
-      { "type": "fix", "text": "PUID 1000 conflict with existing dockhand user in container" },
-      { "type": "fix", "text": "Gmail SMTP notification errors" },
-      { "type": "fix", "text": "More detailed error messages when stack fails to start" },
-      { "type": "fix", "text": "Container startup with user: directive in compose" },
-      { "type": "fix", "text": "Stack editor flickering when typing fast" },
-      { "type": "fix", "text": "Container unhealthy notifications not triggering" },
-      { "type": "fix", "text": "tlsSkipVerify not being saved in environment settings" },
-      { "type": "fix", "text": "MFA available to all users without enterprise license" },
-      { "type": "fix", "text": "Socket proxy documentation and examples" },
-      { "type": "fix", "text": "Edit container modal reloading during editing" }
+      {
+        "type": "feature",
+        "text": "Custom hardened image built from scratch using Wolfi packages, eliminating Alpine vulnerabilities"
+      },
+      {
+        "type": "feature",
+        "text": "Clicking container name opens container details"
+      },
+      {
+        "type": "feature",
+        "text": "Clicking stack name opens stack editor (internal stacks)"
+      },
+      {
+        "type": "feature",
+        "text": "Stack env editor now supports freestyle text entry for pasting env contents"
+      },
+      {
+        "type": "feature",
+        "text": "Stack env vars saved as .env file next to compose, respecting external edits"
+      },
+      {
+        "type": "feature",
+        "text": "Additional container options: ulimits, security options, DNS settings"
+      },
+      {
+        "type": "fix",
+        "text": "DataGrid performance and memory leak on Activity page with thousands of rows"
+      },
+      {
+        "type": "fix",
+        "text": "Webhook endpoints bypass session authentication when auth is enabled"
+      },
+      {
+        "type": "fix",
+        "text": "PUID 1000 conflict with existing dockhand user in container"
+      },
+      {
+        "type": "fix",
+        "text": "Gmail SMTP notification errors"
+      },
+      {
+        "type": "fix",
+        "text": "More detailed error messages when stack fails to start"
+      },
+      {
+        "type": "fix",
+        "text": "Container startup with user: directive in compose"
+      },
+      {
+        "type": "fix",
+        "text": "Stack editor flickering when typing fast"
+      },
+      {
+        "type": "fix",
+        "text": "Container unhealthy notifications not triggering"
+      },
+      {
+        "type": "fix",
+        "text": "tlsSkipVerify not being saved in environment settings"
+      },
+      {
+        "type": "fix",
+        "text": "MFA available to all users without enterprise license"
+      },
+      {
+        "type": "fix",
+        "text": "Socket proxy documentation and examples"
+      },
+      {
+        "type": "fix",
+        "text": "Edit container modal reloading during editing"
+      }
     ],
     "imageTag": "fnsys/dockhand:v1.0.5"
   },
@@ -610,24 +1827,78 @@
     "version": "1.0.4",
     "date": "2025-12-28",
     "changes": [
-      { "type": "feature", "text": "Theme system with new light/dark themes and font customization" },
-      { "type": "feature", "text": "Grid font size setting for data tables" },
-      { "type": "feature", "text": "Column visibility, reordering, and resizing (persisted per user or globally)" },
-      { "type": "feature", "text": "Auto-update containers with per-environment checks, batch updates, and vulnerability blocking" },
-      { "type": "feature", "text": "Stack improvements: environment variables management and .env file support for git stacks" },
-      { "type": "feature", "text": "Visual graph editor for Docker Compose stacks" },
-      { "type": "feature", "text": "Timezone support for scheduled tasks" },
-      { "type": "feature", "text": "Improved schedule execution history" },
-      { "type": "fix", "text": "Fix duplicate ports in expanded stack containers (IPv4/IPv6)" },
-      { "type": "fix", "text": "Fix registry seed crash when Docker Hub URL is modified" },
-      { "type": "fix", "text": "Fix null ports crash for Docker Desktop containers" },
-      { "type": "fix", "text": "Fix header layout overlap on small screens" },
-      { "type": "fix", "text": "Fix TLS/mTLS support for remote Docker hosts" },
-      { "type": "fix", "text": "Fix memory leaks (setTimeout cleanup, stream requests)" },
-      { "type": "fix", "text": "Fix Edge mode connection issues" },
-      { "type": "fix", "text": "Fix stack deletion with orphaned records" },
-      { "type": "fix", "text": "Fix container editing breaking Compose stack association" },
-      { "type": "fix", "text": "Many other minor bug fixes and improvements" }
+      {
+        "type": "feature",
+        "text": "Theme system with new light/dark themes and font customization"
+      },
+      {
+        "type": "feature",
+        "text": "Grid font size setting for data tables"
+      },
+      {
+        "type": "feature",
+        "text": "Column visibility, reordering, and resizing (persisted per user or globally)"
+      },
+      {
+        "type": "feature",
+        "text": "Auto-update containers with per-environment checks, batch updates, and vulnerability blocking"
+      },
+      {
+        "type": "feature",
+        "text": "Stack improvements: environment variables management and .env file support for git stacks"
+      },
+      {
+        "type": "feature",
+        "text": "Visual graph editor for Docker Compose stacks"
+      },
+      {
+        "type": "feature",
+        "text": "Timezone support for scheduled tasks"
+      },
+      {
+        "type": "feature",
+        "text": "Improved schedule execution history"
+      },
+      {
+        "type": "fix",
+        "text": "Fix duplicate ports in expanded stack containers (IPv4/IPv6)"
+      },
+      {
+        "type": "fix",
+        "text": "Fix registry seed crash when Docker Hub URL is modified"
+      },
+      {
+        "type": "fix",
+        "text": "Fix null ports crash for Docker Desktop containers"
+      },
+      {
+        "type": "fix",
+        "text": "Fix header layout overlap on small screens"
+      },
+      {
+        "type": "fix",
+        "text": "Fix TLS/mTLS support for remote Docker hosts"
+      },
+      {
+        "type": "fix",
+        "text": "Fix memory leaks (setTimeout cleanup, stream requests)"
+      },
+      {
+        "type": "fix",
+        "text": "Fix Edge mode connection issues"
+      },
+      {
+        "type": "fix",
+        "text": "Fix stack deletion with orphaned records"
+      },
+      {
+        "type": "fix",
+        "text": "Fix container editing breaking Compose stack association"
+      },
+      {
+        "type": "fix",
+        "text": "Many other minor bug fixes and improvements"
+      }
     ],
     "imageTag": "fnsys/dockhand:v1.0.4"
   },
@@ -635,7 +1906,10 @@
     "version": "1.0.3",
     "date": "2025-12-18",
     "changes": [
-      { "type": "fix", "text": "Fix infinite toast loop when environment is offline" }
+      {
+        "type": "fix",
+        "text": "Fix infinite toast loop when environment is offline"
+      }
     ],
     "imageTag": "fnsys/dockhand:v1.0.3"
   },
@@ -643,7 +1917,10 @@
     "version": "1.0.2",
     "date": "2025-12-17",
     "changes": [
-      { "type": "fix", "text": "Fix stack git repository selection" }
+      {
+        "type": "fix",
+        "text": "Fix stack git repository selection"
+      }
     ],
     "imageTag": "fnsys/dockhand:v1.0.2"
   },
@@ -651,13 +1928,34 @@
     "version": "1.0.1",
     "date": "2025-12-17",
     "changes": [
-      { "type": "feature", "text": "Public IP field for environment config (container port clickable links)" },
-      { "type": "feature", "text": "Releases are now also published with 'latest' tag" },
-      { "type": "fix", "text": "Server-side auth enforcement fix" },
-      { "type": "fix", "text": "Docker production build dependencies fix" },
-      { "type": "fix", "text": "Memory metrics calculation for remote Docker hosts" },
-      { "type": "fix", "text": "Dashboard memory calculation (sum all containers memory usage)" },
-      { "type": "fix", "text": "Form validation errors and error messages readability in dark theme" }
+      {
+        "type": "feature",
+        "text": "Public IP field for environment config (container port clickable links)"
+      },
+      {
+        "type": "feature",
+        "text": "Releases are now also published with 'latest' tag"
+      },
+      {
+        "type": "fix",
+        "text": "Server-side auth enforcement fix"
+      },
+      {
+        "type": "fix",
+        "text": "Docker production build dependencies fix"
+      },
+      {
+        "type": "fix",
+        "text": "Memory metrics calculation for remote Docker hosts"
+      },
+      {
+        "type": "fix",
+        "text": "Dashboard memory calculation (sum all containers memory usage)"
+      },
+      {
+        "type": "fix",
+        "text": "Form validation errors and error messages readability in dark theme"
+      }
     ],
     "imageTag": "fnsys/dockhand:v1.0.1"
   },
@@ -665,25 +1963,82 @@
     "version": "1.0.0",
     "date": "2025-12-16",
     "changes": [
-      { "type": "feature", "text": "First public release of Dockhand" },
-      { "type": "feature", "text": "Real-time container management (start, stop, restart, remove)" },
-      { "type": "feature", "text": "Container creation with advanced configuration (ports, volumes, env vars, labels)" },
-      { "type": "feature", "text": "Docker Compose stack management with visual editor" },
-      { "type": "feature", "text": "Git repository integration for stacks with webhooks and auto-sync" },
-      { "type": "feature", "text": "Image management and registry browsing" },
-      { "type": "feature", "text": "Vulnerability scanning with Grype and Trivy" },
-      { "type": "feature", "text": "Container logs viewer with ANSI color rendering and auto-refresh" },
-      { "type": "feature", "text": "Interactive shell terminal with xterm.js" },
-      { "type": "feature", "text": "File browser for containers and volumes" },
-      { "type": "feature", "text": "Multi-environment support (local and remote Docker hosts)" },
-      { "type": "feature", "text": "Hawser agent for remote Docker management (Standard and Edge modes)" },
-      { "type": "feature", "text": "Network and volume management" },
-      { "type": "feature", "text": "Dashboard with real-time metrics and activity tracking" },
-      { "type": "feature", "text": "Authentication with OIDC/SSO and local users" },
-      { "type": "feature", "text": "SQLite and PostgreSQL database support" },
-      { "type": "feature", "text": "Notification channels (SMTP, Apprise webhooks)" },
-      { "type": "feature", "text": "Container auto-update scheduling with vulnerability criteria" },
-      { "type": "feature", "text": "Enterprise edition with LDAP, MFA, and RBAC" }
+      {
+        "type": "feature",
+        "text": "First public release of Dockhand"
+      },
+      {
+        "type": "feature",
+        "text": "Real-time container management (start, stop, restart, remove)"
+      },
+      {
+        "type": "feature",
+        "text": "Container creation with advanced configuration (ports, volumes, env vars, labels)"
+      },
+      {
+        "type": "feature",
+        "text": "Docker Compose stack management with visual editor"
+      },
+      {
+        "type": "feature",
+        "text": "Git repository integration for stacks with webhooks and auto-sync"
+      },
+      {
+        "type": "feature",
+        "text": "Image management and registry browsing"
+      },
+      {
+        "type": "feature",
+        "text": "Vulnerability scanning with Grype and Trivy"
+      },
+      {
+        "type": "feature",
+        "text": "Container logs viewer with ANSI color rendering and auto-refresh"
+      },
+      {
+        "type": "feature",
+        "text": "Interactive shell terminal with xterm.js"
+      },
+      {
+        "type": "feature",
+        "text": "File browser for containers and volumes"
+      },
+      {
+        "type": "feature",
+        "text": "Multi-environment support (local and remote Docker hosts)"
+      },
+      {
+        "type": "feature",
+        "text": "Hawser agent for remote Docker management (Standard and Edge modes)"
+      },
+      {
+        "type": "feature",
+        "text": "Network and volume management"
+      },
+      {
+        "type": "feature",
+        "text": "Dashboard with real-time metrics and activity tracking"
+      },
+      {
+        "type": "feature",
+        "text": "Authentication with OIDC/SSO and local users"
+      },
+      {
+        "type": "feature",
+        "text": "SQLite and PostgreSQL database support"
+      },
+      {
+        "type": "feature",
+        "text": "Notification channels (SMTP, Apprise webhooks)"
+      },
+      {
+        "type": "feature",
+        "text": "Container auto-update scheduling with vulnerability criteria"
+      },
+      {
+        "type": "feature",
+        "text": "Enterprise edition with LDAP, MFA, and RBAC"
+      }
     ],
     "imageTag": "fnsys/dockhand:v1.0.0"
   },
@@ -691,10 +2046,22 @@
     "version": "0.9.2",
     "date": "2025-12-14",
     "changes": [
-      { "type": "feature", "text": "Hawser agent support - manage remote Docker hosts behind NAT/firewall" },
-      { "type": "feature", "text": "Dashboard redesign with flexible tile sizes and real-time charts" },
-      { "type": "feature", "text": "Multi-architecture Docker images (amd64 + arm64)" },
-      { "type": "fix", "text": "Various bug fixes and performance improvements" }
+      {
+        "type": "feature",
+        "text": "Hawser agent support - manage remote Docker hosts behind NAT/firewall"
+      },
+      {
+        "type": "feature",
+        "text": "Dashboard redesign with flexible tile sizes and real-time charts"
+      },
+      {
+        "type": "feature",
+        "text": "Multi-architecture Docker images (amd64 + arm64)"
+      },
+      {
+        "type": "fix",
+        "text": "Various bug fixes and performance improvements"
+      }
     ],
     "imageTag": "fnsys/dockhand:v0.9.2"
   },
@@ -702,10 +2069,22 @@
     "version": "0.9.1",
     "date": "2025-12-10",
     "changes": [
-      { "type": "feature", "text": "Git stack deployment with webhook triggers" },
-      { "type": "feature", "text": "Container auto-update scheduling" },
-      { "type": "fix", "text": "Fixed container logs not streaming on Edge environments" },
-      { "type": "fix", "text": "Fixed memory leak in metrics collection" }
+      {
+        "type": "feature",
+        "text": "Git stack deployment with webhook triggers"
+      },
+      {
+        "type": "feature",
+        "text": "Container auto-update scheduling"
+      },
+      {
+        "type": "fix",
+        "text": "Fixed container logs not streaming on Edge environments"
+      },
+      {
+        "type": "fix",
+        "text": "Fixed memory leak in metrics collection"
+      }
     ],
     "imageTag": "fnsys/dockhand:v0.9.1"
   }

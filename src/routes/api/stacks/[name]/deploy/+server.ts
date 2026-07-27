@@ -22,7 +22,7 @@ export const POST: RequestHandler = async (event) => {
 		return json({ error: 'Access denied to this environment' }, { status: 403 });
 	}
 
-	const body = await request.json();
+	const body = await request.json().catch(() => ({}));
 	const { pull, build, forceRecreate } = body as {
 		pull?: boolean;
 		build?: boolean;

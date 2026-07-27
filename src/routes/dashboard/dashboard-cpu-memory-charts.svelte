@@ -38,17 +38,21 @@
 		return 'bg-emerald-500';
 	}
 
+	// Clamp to the chart's [0,100] yDomain so a transient >100% spike (e.g. a
+	// new container's first stats sample on a churny host) can't render above
+	// the frame and squash the real data (#1279). Mirrors the clamp on the
+	// displayed cpuPercent value above.
 	const cpuChartData = $derived(
 		metricsHistory?.map(m => ({
 			date: new Date(m.timestamp),
-			value: m.cpu_percent
+			value: Math.min(100, Math.max(0, m.cpu_percent))
 		})) ?? []
 	);
 
 	const memoryChartData = $derived(
 		metricsHistory?.map(m => ({
 			date: new Date(m.timestamp),
-			value: m.memory_percent
+			value: Math.min(100, Math.max(0, m.memory_percent))
 		})) ?? []
 	);
 

@@ -52,7 +52,7 @@
 		readonly?: boolean;
 	}
 
-	type BrowserMode = 'container' | 'volume';
+	type BrowserMode = 'container' | 'volume' | 'snapshot';
 	type SortField = 'name' | 'size' | 'modified' | 'type';
 	type SortDirection = 'asc' | 'desc';
 
@@ -75,6 +75,9 @@
 		selectFilter?: RegExp;
 		// Callback when a file is selected (in selectMode)
 		onFileSelect?: (path: string, name: string) => void;
+		// Snapshot browsing mode
+		snapshotId?: string;
+		destinationId?: number;
 	}
 
 	let {
@@ -86,7 +89,9 @@
 		onUsageChange,
 		selectMode = false,
 		selectFilter,
-		onFileSelect
+		onFileSelect,
+		snapshotId,
+		destinationId
 	}: Props = $props();
 
 	// For volume mode, track whether volume is in use (controls editing ability)
@@ -96,12 +101,13 @@
 	let volumeHelperId = $state<string | null>(null);
 
 	// Determine mode based on which prop is provided
-	const mode: BrowserMode = $derived(volumeName ? 'volume' : 'container');
+	const mode: BrowserMode = $derived(snapshotId ? 'snapshot' : volumeName ? 'volume' : 'container');
 	const isVolumeMode = $derived(mode === 'volume');
+	const isSnapshotMode = $derived(mode === 'snapshot');
 
-	// Effective canEdit: for containers, use the prop; for volumes, only allow if not in use
+	// Effective canEdit: snapshots are always read-only; volumes only if not in use
 	const effectiveCanEdit = $derived(
-		isVolumeMode ? (canEdit && !volumeIsInUse) : canEdit
+		isSnapshotMode ? false : isVolumeMode ? (canEdit && !volumeIsInUse) : canEdit
 	);
 
 	// Effective container ID for file operations (use helper container for volume mode)
@@ -145,6 +151,11 @@
 	// Editor/Viewer state
 	let editingFile = $state<{ name: string; path: string; content: string } | null>(null);
 	let viewingFile = $state<{ name: string; path: string; content: string } | null>(null);
+	// Preview-only loading flag (distinct from loadingFile, which also covers
+	// edit/download): drives the "Loading preview…" overlay so a slow restic dump
+	// from a remote repo (B2/S3) shows immediate feedback in-place.
+	let loadingPreview = $state(false);
+	let previewingName = $state('');
 	let editorContent = $state('');
 	let loadingFile = $state(false);
 	// True when the editor buffer differs from the loaded file (unsaved changes).
@@ -368,16 +379,22 @@
 	async function openFileForView(entry: FileEntry) {
 		const filePath = currentPath === '/' ? `/${entry.name}` : `${currentPath}/${entry.name}`;
 		loadingFile = true;
+		loadingPreview = true;
+		previewingName = entry.name;
 
 		try {
-			const params = new URLSearchParams({ path: filePath });
-			if (envId) params.set('env', envId.toString());
-
 			let res: Response;
-			if (isVolumeMode) {
-				res = await fetch(`/api/volumes/${encodeURIComponent(volumeName!)}/browse/content?${params}`);
+			if (isSnapshotMode) {
+				const params = new URLSearchParams({ destinationId: String(destinationId), path: filePath });
+				res = await fetch(`/api/backup/snapshots/${snapshotId}/dump?${params}`);
 			} else {
-				res = await fetch(`/api/containers/${effectiveContainerId}/files/content?${params}`);
+				const params = new URLSearchParams({ path: filePath });
+				if (envId) params.set('env', envId.toString());
+				if (isVolumeMode) {
+					res = await fetch(`/api/volumes/${encodeURIComponent(volumeName!)}/browse/content?${params}`);
+				} else {
+					res = await fetch(`/api/containers/${effectiveContainerId}/files/content?${params}`);
+				}
 			}
 			const data = await res.json();
 
@@ -394,6 +411,7 @@
 			toast.error(err.message || 'Failed to open file');
 		} finally {
 			loadingFile = false;
+			loadingPreview = false;
 		}
 	}
 
@@ -704,7 +722,11 @@
 			let res: Response;
 			let data: any;
 
-			if (isVolumeMode) {
+			if (isSnapshotMode) {
+				const snapshotParams = new URLSearchParams({ destinationId: String(destinationId), path });
+				res = await fetch(`/api/backup/snapshots/${snapshotId}/browse?${snapshotParams}`);
+				data = await res.json();
+			} else if (isVolumeMode) {
 				res = await fetch(`/api/volumes/${encodeURIComponent(volumeName!)}/browse?${params}`);
 				data = await res.json();
 
@@ -738,7 +760,20 @@
 			}
 
 			currentPath = data.path || path;
-			entries = data.entries || [];
+			// Map snapshot entries to match FileEntry interface
+			if (isSnapshotMode) {
+				entries = (data.entries || []).map((e: any) => ({
+					name: e.name,
+					type: e.type === 'dir' ? 'directory' : e.type,
+					size: e.size || 0,
+					permissions: '',
+					owner: '',
+					group: '',
+					modified: e.mtime || ''
+				}));
+			} else {
+				entries = data.entries || [];
+			}
 		} catch (err: any) {
 			error = err.message;
 			entries = [];
@@ -778,17 +813,20 @@
 	function downloadFile(entry: FileEntry) {
 		const filePath =
 			currentPath === '/' ? `/${entry.name}` : `${currentPath}/${entry.name}`;
-		const params = new URLSearchParams({
-			path: filePath,
-			format: $appSettings.downloadFormat
-		});
-		if (envId) params.set('env', envId.toString());
 
 		let url: string;
-		if (isVolumeMode) {
-			url = `/api/volumes/${encodeURIComponent(volumeName!)}/export?${params}`;
+		if (isSnapshotMode) {
+			const params = new URLSearchParams({ destinationId: String(destinationId), path: filePath, download: '1' });
+			if (entry.type === 'directory') params.set('type', 'directory');
+			url = `/api/backup/snapshots/${snapshotId}/dump?${params}`;
 		} else {
-			url = `/api/containers/${effectiveContainerId}/files/download?${params}`;
+			const params = new URLSearchParams({ path: filePath, format: $appSettings.downloadFormat });
+			if (envId) params.set('env', envId.toString());
+			if (isVolumeMode) {
+				url = `/api/volumes/${encodeURIComponent(volumeName!)}/export?${params}`;
+			} else {
+				url = `/api/containers/${effectiveContainerId}/files/download?${params}`;
+			}
 		}
 		window.open(url, '_blank');
 	}
@@ -841,8 +879,24 @@
 		return currentPath.split('/').filter(Boolean);
 	});
 
+	// Track all identity props so the effect re-fires when they change
 	$effect(() => {
-		loadDirectory(initialPath);
+		// Read reactive values to establish dependencies
+		const _mode = mode;
+		const _snap = snapshotId;
+		const _dest = destinationId;
+		const _cont = containerId;
+		const _vol = volumeName;
+		const _path = initialPath;
+
+		// Guard: don't load if required props for the mode are missing
+		if (_mode === 'snapshot' && (!_snap || !_dest)) return;
+		if (_mode === 'container' && !_cont) return;
+
+		currentPath = _path;
+		entries = [];
+		error = null;
+		loadDirectory(_path);
 	});
 </script>
 
@@ -1195,7 +1249,12 @@
 	</Dialog.Root>
 
 	<!-- File Viewer Overlay -->
-	{#if viewingFile}
+	{#if loadingPreview && !viewingFile}
+		<div class="absolute inset-0 bg-background flex flex-col items-center justify-center gap-2 z-10">
+			<Loader2 class="w-6 h-6 animate-spin text-muted-foreground" />
+			<span class="text-sm text-muted-foreground">Loading preview{previewingName ? ` — ${previewingName}` : ''}…</span>
+		</div>
+	{:else if viewingFile}
 		<div class="absolute inset-0 bg-background flex flex-col z-10">
 			<div class="flex items-center justify-between p-2 border-b bg-muted/30">
 				<div class="flex items-center gap-2 text-xs">

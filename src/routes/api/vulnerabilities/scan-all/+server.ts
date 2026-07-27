@@ -6,7 +6,9 @@ import { authorize } from '$lib/server/authorize';
 import { createJobResponse } from '$lib/server/sse';
 
 /**
- * Scan every (tagged) image in the environment for vulnerabilities.
+ * Scan every image in the environment for vulnerabilities. Tagged images scan by
+ * tag; untagged but digest-pinned images (e.g. renovate `@sha256:` pins) scan by
+ * their repo digest so they aren't silently skipped (#1286).
  * Reuses the per-image scan flow, sequentially, reporting N/total progress.
  * A single image failing does not abort the batch.
  */
@@ -26,9 +28,16 @@ export const POST: RequestHandler = async ({ request, url, cookies }) => {
 	return createJobResponse(async (send, isCancelled) => {
 		const images = await listImages(envId);
 
-		// One scan target per image: use the first usable tag, skip dangling/<none>.
+		// One scan target per image: prefer a usable tag; for untagged images
+		// (digest-pinned via renovate etc.) fall back to a repo digest so they
+		// aren't silently skipped (#1286). Truly dangling images — no tag AND no
+		// digest — are left out; they're build cruft, not real scan targets.
 		const targets = images
-			.map((img) => (img.tags || []).find((t) => t && !t.includes('<none>')))
+			.map((img) => {
+				const tag = (img.tags || []).find((t) => t && !t.includes('<none>'));
+				if (tag) return tag;
+				return (img.repoDigests || []).find((d) => d && !d.includes('<none>')) || null;
+			})
 			.filter((t): t is string => !!t);
 		// Dedupe (a repo can appear once per tag; scan each unique tag once)
 		const uniqueTargets = Array.from(new Set(targets));

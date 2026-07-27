@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
+	import { page } from '$app/stores'; // BETA GATE: backups feature flag
+	import { formatBytes } from '$lib/utils/format';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Input } from '$lib/components/ui/input';
@@ -20,6 +22,7 @@
 		CheckCheck,
 		X,
 		AlertCircle,
+		AlertTriangle,
 		Loader2,
 		Search,
 		Server,
@@ -35,7 +38,14 @@
 		PlayCircle,
 		Trash2,
 		Bug,
-		ShieldX
+		ShieldX,
+		Archive,
+		ArchiveX,
+		HardDrive,
+		PackageCheck,
+		FolderCheck,
+		Eraser,
+		ShieldCheck
 	} from 'lucide-svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import { DataGrid } from '$lib/components/data-grid';
@@ -51,6 +61,13 @@
 	import { canAccess } from '$lib/stores/auth';
 
 	const canEditSchedules = $derived($canAccess('schedules', 'edit'));
+
+	function cleanError(msg: string): string {
+		try { const p = JSON.parse(msg); if (p.message) return p.message; } catch {}
+		const m = msg.match(/\{"message":"([^"]+)"\}/);
+		return m ? msg.replace(m[0], m[1]) : msg;
+	}
+
 	const canRunSchedules = $derived($canAccess('schedules', 'run'));
 	import { vulnerabilityCriteriaIcons, vulnerabilityCriteriaLabels } from '$lib/utils/update-steps';
 	import type { VulnerabilityCriteria } from '$lib/server/db';
@@ -146,7 +163,7 @@
 
 	interface ScheduleExecution {
 		id: number;
-		scheduleType: 'container_update' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune';
+		scheduleType: 'container_update' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune' | 'backup' | 'repo_prune' | 'repo_check' | 'repo_verify';
 		scheduleId: number;
 		environmentId: number | null;
 		entityName: string;
@@ -155,7 +172,7 @@
 		startedAt: string | null;
 		completedAt: string | null;
 		duration: number | null;
-		status: 'queued' | 'running' | 'success' | 'failed' | 'skipped';
+		status: 'queued' | 'running' | 'success' | 'warning' | 'failed' | 'skipped';
 		errorMessage: string | null;
 		details: ScheduleExecutionDetails;
 		logs: string | null;
@@ -165,7 +182,7 @@
 	interface Schedule {
 		key: string; // Unique key: type-id
 		id: number;
-		type: 'container_update' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune';
+		type: 'container_update' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune' | 'backup' | 'repo_prune' | 'repo_check' | 'repo_verify';
 		name: string;
 		entityName: string;
 		description?: string;
@@ -183,6 +200,10 @@
 		vulnerabilityCriteria?: string | null;
 		// Env update check specific fields
 		autoUpdate?: boolean;
+		// Repo verify specific fields
+		dataSubset?: string;
+		// Repo prune specific fields
+		maxUnused?: string;
 	}
 
 	// State
@@ -786,6 +807,8 @@
 		switch (status) {
 			case 'success':
 				return { variant: 'default' as const, class: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400', icon: Check };
+			case 'warning':
+				return { variant: 'default' as const, class: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400', icon: AlertTriangle };
 			case 'failed':
 				return { variant: 'default' as const, class: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400', icon: X };
 			case 'running':
@@ -944,6 +967,14 @@
 								Env update checks
 							{:else if filterTypes[0] === 'image_prune'}
 								Image prune
+							{:else if filterTypes[0] === 'backup'}
+								Backups
+							{:else if filterTypes[0] === 'repo_prune'}
+								Repo prune
+							{:else if filterTypes[0] === 'repo_check'}
+								Repo check
+							{:else if filterTypes[0] === 'repo_verify'}
+								Data verify
 							{:else}
 								System jobs
 							{/if}
@@ -978,6 +1009,25 @@
 						<Trash2 class="w-4 h-4 mr-2 inline text-amber-500 drop-shadow-[0_0_3px_rgba(245,158,11,0.4)]" />
 						Image prune
 					</Select.Item>
+					<!-- BETA GATE: backup schedule filters hidden unless FEAT_BACKUPS_ENABLED (see features.ts) -->
+					{#if $page.data.backupsEnabled}
+						<Select.Item value="backup">
+							<Archive class="w-4 h-4 mr-2 inline text-blue-500 drop-shadow-[0_0_3px_rgba(59,130,246,0.4)]" />
+							Backups
+						</Select.Item>
+						<Select.Item value="repo_prune">
+							<ArchiveX class="w-4 h-4 mr-2 inline text-blue-500 drop-shadow-[0_0_3px_rgba(59,130,246,0.4)]" />
+							Repo prune
+						</Select.Item>
+						<Select.Item value="repo_check">
+							<PackageCheck class="w-4 h-4 mr-2 inline text-blue-500 drop-shadow-[0_0_3px_rgba(59,130,246,0.4)]" />
+							Repo check
+						</Select.Item>
+						<Select.Item value="repo_verify">
+							<FolderCheck class="w-4 h-4 mr-2 inline text-blue-500 drop-shadow-[0_0_3px_rgba(59,130,246,0.4)]" />
+							Data verify
+						</Select.Item>
+					{/if}
 					{#if !hideSystemJobs}
 						<Select.Item value="system_cleanup">
 							<Wrench class="w-4 h-4 mr-2 inline text-amber-500 drop-shadow-[0_0_3px_rgba(245,158,11,0.4)]" />
@@ -1029,6 +1079,8 @@
 						{:else if filterStatuses.length === 1}
 							{#if filterStatuses[0] === 'success'}
 								Success
+							{:else if filterStatuses[0] === 'warning'}
+								Warning
 							{:else if filterStatuses[0] === 'failed'}
 								Failed
 							{:else if filterStatuses[0] === 'skipped'}
@@ -1056,6 +1108,10 @@
 					<Select.Item value="success">
 						<Check class="w-4 h-4 mr-2 inline text-green-500" />
 						Success
+					</Select.Item>
+					<Select.Item value="warning">
+						<AlertTriangle class="w-4 h-4 mr-2 inline text-amber-500" />
+						Warning
 					</Select.Item>
 					<Select.Item value="failed">
 						<X class="w-4 h-4 mr-2 inline text-red-500" />
@@ -1159,6 +1215,14 @@
 						{/if}
 					{:else if schedule.type === 'image_prune'}
 						<Trash2 class="w-4 h-4 text-amber-500 glow-amber shrink-0" />
+					{:else if schedule.type === 'backup'}
+						<Archive class="w-4 h-4 text-blue-500 glow-blue shrink-0" />
+					{:else if schedule.type === 'repo_prune'}
+						<ArchiveX class="w-4 h-4 text-blue-500 glow-blue shrink-0" />
+					{:else if schedule.type === 'repo_check'}
+						<PackageCheck class="w-4 h-4 text-blue-500 glow-blue shrink-0" />
+					{:else if schedule.type === 'repo_verify'}
+						<FolderCheck class="w-4 h-4 text-blue-500 glow-blue shrink-0" />
 					{:else}
 						<Wrench class="w-4 h-4 text-amber-500 shrink-0" />
 					{/if}
@@ -1196,6 +1260,30 @@
 								<span class="truncate">{schedule.description || 'Env update check'}</span>
 							{:else if schedule.type === 'image_prune'}
 								<span class="truncate">{schedule.description || 'Prune unused images'}</span>
+							{:else if schedule.type === 'backup'}
+								{@const parts = (schedule.description || '').split(' to ')}
+								{#if parts.length === 2}
+									<span class="truncate">{parts[0]} to</span>
+									<HardDrive class="w-3 h-3 shrink-0 text-muted-foreground" />
+									<span class="truncate">{parts[1]}</span>
+								{:else}
+									<span class="truncate">{schedule.description || 'Scheduled backup'}</span>
+								{/if}
+							{:else if schedule.type === 'repo_prune'}
+								<Eraser class="w-3 h-3 shrink-0 text-muted-foreground" />
+								<span class="truncate">Prune unused data ({schedule.maxUnused ?? '10'}%) from</span>
+								<HardDrive class="w-3 h-3 shrink-0 text-muted-foreground" />
+								<span class="truncate">{schedule.entityName}</span>
+							{:else if schedule.type === 'repo_check'}
+								<PackageCheck class="w-3 h-3 shrink-0 text-muted-foreground" />
+								<span class="truncate">Check integrity of</span>
+								<HardDrive class="w-3 h-3 shrink-0 text-muted-foreground" />
+								<span class="truncate">{schedule.entityName}</span>
+							{:else if schedule.type === 'repo_verify'}
+								<FolderCheck class="w-3 h-3 shrink-0 text-muted-foreground" />
+								<span class="truncate">Verify {schedule.dataSubset || '5%'} of data in</span>
+								<HardDrive class="w-3 h-3 shrink-0 text-muted-foreground" />
+								<span class="truncate">{schedule.entityName}</span>
 							{:else}
 								<span class="truncate">{schedule.description || 'System job'}</span>
 							{/if}
@@ -1424,8 +1512,12 @@
 												</Tooltip.Content>
 											</Tooltip.Root>
 										</td>
-										<td class="px-2 py-1 text-xs text-destructive">
-											{exec.errorMessage || ''}
+										<td class="px-2 py-1 text-xs max-w-[400px] truncate" title={exec.errorMessage || ''}>
+											{#if exec.errorMessage}
+												<span class="text-destructive">{cleanError(exec.errorMessage)}</span>
+											{:else if exec.status === 'success' && exec.details?.dataAdded !== undefined}
+												<span class="text-muted-foreground">{exec.details.filesNew ?? 0} new, {exec.details.filesChanged ?? 0} changed · {formatBytes(exec.details.dataAdded ?? 0)} added</span>
+											{/if}
 										</td>
 										<td class="px-2 py-1">
 											<div class="flex items-center gap-1">
@@ -1512,7 +1604,7 @@
 				Execution details
 				{#if selectedExecution}
 					<span class="text-muted-foreground font-normal">
-						({#if selectedExecution.scheduleType === 'container_update'}Container update{:else if selectedExecution.scheduleType === 'env_update_check'}Environment update{:else if selectedExecution.scheduleType === 'git_stack_sync'}Git stack sync{:else}System job{/if})
+						({#if selectedExecution.scheduleType === 'container_update'}Container update{:else if selectedExecution.scheduleType === 'env_update_check'}Environment update{:else if selectedExecution.scheduleType === 'git_stack_sync'}Git stack sync{:else if selectedExecution.scheduleType === 'backup'}Backup{:else if selectedExecution.scheduleType === 'repo_prune'}Repo prune{:else if selectedExecution.scheduleType === 'repo_check'}Repo check{:else if selectedExecution.scheduleType === 'repo_verify'}Data verify{:else}System job{/if})
 					</span>
 				{/if}
 			</Dialog.Title>
@@ -1644,8 +1736,8 @@
 				{#if selectedExecution.errorMessage}
 					<div class="shrink-0">
 						<div class="text-xs text-muted-foreground mb-1">Error</div>
-						<div class="bg-destructive/10 border border-destructive/20 rounded p-3 text-xs text-destructive">
-							{selectedExecution.errorMessage}
+						<div class="bg-destructive/10 border border-destructive/20 rounded p-3 text-xs text-destructive break-words">
+							{cleanError(selectedExecution.errorMessage)}
 						</div>
 					</div>
 				{/if}

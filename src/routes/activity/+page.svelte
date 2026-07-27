@@ -896,7 +896,7 @@
 
 <!-- Detail Dialog -->
 <Dialog.Root bind:open={showDetailDialog}>
-	<Dialog.Content class="max-w-2xl">
+	<Dialog.Content class="max-w-4xl">
 		<Dialog.Header>
 			<Dialog.Title>Event details</Dialog.Title>
 		</Dialog.Header>
@@ -949,8 +949,8 @@
 								<tbody>
 									{#each Object.entries(selectedEvent.actorAttributes) as [key, value], i}
 										<tr class="{i % 2 === 0 ? 'bg-muted/50' : 'bg-background'}">
-											<td class="px-3 py-1.5 font-mono font-medium text-muted-foreground whitespace-nowrap align-top w-1/3">{key}</td>
-											<td class="px-3 py-1.5 font-mono break-all">{value}</td>
+											<td class="px-3 py-1.5 font-mono font-medium text-muted-foreground align-top break-all w-1/3">{key}</td>
+											<td class="px-3 py-1.5 font-mono break-all align-top">{value}</td>
 										</tr>
 									{/each}
 								</tbody>

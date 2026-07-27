@@ -2,6 +2,7 @@ import type { LayoutServerLoad } from './$types';
 import { redirect } from '@sveltejs/kit';
 import { isAuthEnabled, validateSession } from '$lib/server/auth';
 import { hasAdminUser } from '$lib/server/db';
+import { BACKUPS_ENABLED } from '$lib/server/features';
 
 // Routes that don't require authentication
 const PUBLIC_PATHS = ['/login'];
@@ -18,7 +19,8 @@ export const load: LayoutServerLoad = async ({ cookies, url }) => {
 		return {
 			authEnabled: false,
 			user: null,
-			disableWhatsNew
+			disableWhatsNew,
+			backupsEnabled: BACKUPS_ENABLED
 		};
 	}
 
@@ -37,7 +39,8 @@ export const load: LayoutServerLoad = async ({ cookies, url }) => {
 				authEnabled: true,
 				user: null,
 				setupMode: true,
-				disableWhatsNew
+				disableWhatsNew,
+				backupsEnabled: BACKUPS_ENABLED
 			};
 		}
 
@@ -57,6 +60,7 @@ export const load: LayoutServerLoad = async ({ cookies, url }) => {
 			isAdmin: user.isAdmin,
 			provider: user.provider
 		} : null,
-		disableWhatsNew
+		disableWhatsNew,
+		backupsEnabled: BACKUPS_ENABLED
 	};
 };

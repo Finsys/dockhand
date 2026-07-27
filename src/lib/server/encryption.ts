@@ -144,14 +144,22 @@ function getOrCreateKey(): Buffer {
 	console.log('[Encryption] Generating new encryption key...');
 	cachedKey = randomBytes(KEY_LENGTH);
 
-	// Save key with restricted permissions (0600 = owner read/write only)
+	// Save key with restricted permissions (0600 = owner read/write only).
+	// (audit low #10) A write failure here MUST be fatal. Previously it degraded to
+	// an ephemeral in-memory key that changed on every restart, silently orphaning
+	// anything encrypted this session (e.g. backup destination password/envVars) —
+	// they could never be decrypted again. Fail closed: drop the key and throw so no
+	// secret is ever persisted under a key that wasn't durably written.
 	try {
 		writeFileSync(keyPath, cachedKey, { mode: 0o600 });
 		console.log('[Encryption] Saved new encryption key to', keyPath);
 	} catch (error) {
 		const msg = error instanceof Error ? error.message : String(error);
-		console.error(`[Encryption] Warning: Failed to save encryption key to ${keyPath}: ${msg}`);
-		console.error('[Encryption] Encryption will work for this session but keys will be regenerated on restart');
+		cachedKey = null;
+		console.error(`[Encryption] Failed to persist newly generated encryption key to ${keyPath}: ${msg}`);
+		throw new Error(
+			`Failed to persist encryption key to ${keyPath}; refusing to run with an ephemeral key that would be lost on restart (fix the data directory permissions/space): ${msg}`
+		);
 	}
 
 	return cachedKey;
@@ -175,8 +183,13 @@ export function encrypt(plaintext: string | null | undefined): string | null {
 		return plaintext as string | null;
 	}
 
-	// Don't double-encrypt
-	if (plaintext.startsWith(ENCRYPTED_PREFIX)) {
+	// Don't double-encrypt — but ONLY skip when the value is genuinely OUR
+	// ciphertext (audit #1). Previously any string merely STARTING WITH the
+	// reserved prefix was passed through, so a real user password like
+	// "enc:v1:hunter2" was stored as PLAINTEXT. looksLikeCiphertext() also checks
+	// the base64 payload decodes to a valid length, so a plaintext that just
+	// happens to start with the prefix gets properly encrypted.
+	if (looksLikeCiphertext(plaintext)) {
 		return plaintext;
 	}
 
@@ -259,13 +272,51 @@ export function decrypt(value: string | null | undefined): string | null {
 }
 
 /**
+ * Fail-closed decrypt for CREDENTIAL fields (audit low #55). decrypt() returns
+ * the raw stored value on failure "to avoid data loss", which for a genuine
+ * ciphertext blob means the literal `enc:v1:...` string is forwarded as the live
+ * secret (e.g. as RESTIC_PASSWORD). For credentials that is worse than failing:
+ * so when a value looksLikeCiphertext() but cannot be decrypted (wrong key /
+ * corrupt after a botched key rotation), throw instead of returning ciphertext.
+ * Plain (non-prefixed, backwards-compat) values still pass through unchanged.
+ */
+export function decryptStrict(value: string | null | undefined): string | null {
+	if (value === null || value === undefined || value === '') return value as string | null;
+	if (!looksLikeCiphertext(value)) return decrypt(value); // genuine plaintext / non-blob
+	const result = decrypt(value);
+	// decrypt() returns the ORIGINAL value on any failure; if the input was a real
+	// ciphertext blob and we got it back verbatim, decryption failed → fail closed.
+	if (result === value) {
+		throw new Error('Failed to decrypt a stored credential (wrong or rotated encryption key). Refusing to use the ciphertext as the live secret.');
+	}
+	return result;
+}
+
+/**
  * Check if a value is encrypted (has the encryption prefix).
  *
  * @param value - The value to check
  * @returns true if the value appears to be encrypted
  */
 export function isEncrypted(value: string | null | undefined): boolean {
-	return typeof value === 'string' && value.startsWith(ENCRYPTED_PREFIX);
+	return looksLikeCiphertext(value);
+}
+
+/**
+ * True only when `value` is genuinely one of OUR ciphertext blobs: it carries
+ * the reserved prefix AND its base64 payload decodes to at least a full
+ * iv+authTag+1-byte-ciphertext. A user secret that merely starts with the prefix
+ * (e.g. "enc:v1:hunter2") fails the length check and is treated as plaintext, so
+ * it gets encrypted rather than stored raw (audit #1/#40).
+ */
+export function looksLikeCiphertext(value: string | null | undefined): boolean {
+	if (typeof value !== 'string' || !value.startsWith(ENCRYPTED_PREFIX)) return false;
+	const payload = value.substring(ENCRYPTED_PREFIX.length);
+	// Base64 must be non-empty and use only the base64 alphabet.
+	if (!payload || !/^[A-Za-z0-9+/]+={0,2}$/.test(payload)) return false;
+	let combined: Buffer;
+	try { combined = Buffer.from(payload, 'base64'); } catch { return false; }
+	return combined.length >= IV_LENGTH + AUTH_TAG_LENGTH + 1;
 }
 
 /**
@@ -313,7 +364,8 @@ export async function migrateCredentials(): Promise<void> {
 		oidcConfig,
 		ldapConfig,
 		notificationSettings,
-		stackEnvironmentVariables
+		stackEnvironmentVariables,
+		backupDestinations
 	} = await import('./db/drizzle.js');
 
 	let migrated = 0;
@@ -399,7 +451,17 @@ export async function migrateCredentials(): Promise<void> {
 			}
 		}
 
-		// Decrypt all values with old key
+		const backupDests = await db.select().from(backupDestinations);
+		for (const dest of backupDests) {
+			if (dest.password && isEncrypted(dest.password)) {
+				allEncrypted.push({ table: 'backupDestinations', id: dest.id, field: 'password', value: dest.password });
+			}
+			if (dest.envVars && isEncrypted(dest.envVars)) {
+				allEncrypted.push({ table: 'backupDestinations', id: dest.id, field: 'envVars', value: dest.envVars });
+			}
+		}
+
+		// Decrypt all values with old key (still cached at this point)
 		const decryptedValues: Map<string, string> = new Map();
 		for (const item of allEncrypted) {
 			const decrypted = decrypt(item.value);
@@ -408,40 +470,59 @@ export async function migrateCredentials(): Promise<void> {
 			}
 		}
 
-		// Switch to new key
-		cachedKey = pendingKeyRotation.newKey;
+		// (HIGH #7) Re-encrypt + write every credential inside ONE transaction so a
+		// crash/error mid-rotation rolls back to the all-old-key state (still fully
+		// recoverable with the old key), instead of leaving a mix of old- and
+		// new-key ciphertext that becomes permanently undecryptable once only the
+		// new key remains. cachedKey is a module global read by encrypt(): switch it
+		// to the new key for the re-encryption, and restore the OLD key if the
+		// transaction throws so the in-memory state matches the rolled-back DB.
+		const oldKey = cachedKey;
+		try {
+			await db.transaction(async (tx: typeof db) => {
+				cachedKey = pendingKeyRotation!.newKey;
+				for (const item of allEncrypted) {
+					const decrypted = decryptedValues.get(`${item.table}:${item.id}:${item.field}`);
+					if (!decrypted) continue;
+					const reEncrypted = encrypt(decrypted);
 
-		// Re-encrypt and update all values
-		for (const item of allEncrypted) {
-			const decrypted = decryptedValues.get(`${item.table}:${item.id}:${item.field}`);
-			if (decrypted) {
-				const reEncrypted = encrypt(decrypted);
-
-				// Update database based on table
-				if (item.table === 'registries') {
-					await db.update(registries).set({ [item.field]: reEncrypted }).where(eq(registries.id, item.id));
-				} else if (item.table === 'gitCredentials') {
-					await db.update(gitCredentials).set({ [item.field]: reEncrypted }).where(eq(gitCredentials.id, item.id));
-				} else if (item.table === 'environments') {
-					await db.update(environments).set({ [item.field]: reEncrypted }).where(eq(environments.id, item.id));
-				} else if (item.table === 'oidcConfig') {
-					await db.update(oidcConfig).set({ [item.field]: reEncrypted }).where(eq(oidcConfig.id, item.id));
-				} else if (item.table === 'ldapConfig') {
-					await db.update(ldapConfig).set({ [item.field]: reEncrypted }).where(eq(ldapConfig.id, item.id));
-				} else if (item.table === 'notificationSettings' && item.field === 'config.smtpPassword') {
-					// Need to update the JSON field
-					const notif = notifSettings.find(n => n.id === item.id);
-					if (notif) {
-						const config = JSON.parse(notif.config);
-						config.smtpPassword = reEncrypted;
-						await db.update(notificationSettings).set({ config: JSON.stringify(config) }).where(eq(notificationSettings.id, item.id));
+					// Update database based on table
+					if (item.table === 'registries') {
+						await tx.update(registries).set({ [item.field]: reEncrypted }).where(eq(registries.id, item.id));
+					} else if (item.table === 'gitCredentials') {
+						await tx.update(gitCredentials).set({ [item.field]: reEncrypted }).where(eq(gitCredentials.id, item.id));
+					} else if (item.table === 'environments') {
+						await tx.update(environments).set({ [item.field]: reEncrypted }).where(eq(environments.id, item.id));
+					} else if (item.table === 'oidcConfig') {
+						await tx.update(oidcConfig).set({ [item.field]: reEncrypted }).where(eq(oidcConfig.id, item.id));
+					} else if (item.table === 'ldapConfig') {
+						await tx.update(ldapConfig).set({ [item.field]: reEncrypted }).where(eq(ldapConfig.id, item.id));
+					} else if (item.table === 'notificationSettings' && item.field === 'config.smtpPassword') {
+						// Need to update the JSON field
+						const notif = notifSettings.find((n: typeof notifSettings[number]) => n.id === item.id);
+						if (notif) {
+							const config = JSON.parse(notif.config);
+							config.smtpPassword = reEncrypted;
+							await tx.update(notificationSettings).set({ config: JSON.stringify(config) }).where(eq(notificationSettings.id, item.id));
+						}
+					} else if (item.table === 'stackEnvironmentVariables') {
+						await tx.update(stackEnvironmentVariables).set({ value: reEncrypted }).where(eq(stackEnvironmentVariables.id, item.id));
+					} else if (item.table === 'backupDestinations') {
+						// Both password and envVars are plain encrypted columns.
+						await tx.update(backupDestinations).set({ [item.field]: reEncrypted }).where(eq(backupDestinations.id, item.id));
 					}
-				} else if (item.table === 'stackEnvironmentVariables') {
-					await db.update(stackEnvironmentVariables).set({ value: reEncrypted }).where(eq(stackEnvironmentVariables.id, item.id));
-				}
 
-				migrated++;
-			}
+					migrated++;
+				}
+			});
+		} catch (err) {
+			// Roll back the in-memory key switch to match the rolled-back DB, and
+			// leave pendingKeyRotation set / the key file present so nothing that
+			// depends on the old key becomes unrecoverable. Surface the failure.
+			cachedKey = oldKey;
+			migrated = 0;
+			console.error('[Encryption] Key rotation FAILED and was rolled back — credentials remain under the previous key:', err instanceof Error ? err.message : String(err));
+			throw err;
 		}
 
 		// Delete key file - env var is now the source of truth
@@ -556,6 +637,22 @@ export async function migrateCredentials(): Promise<void> {
 				.set({ value: encrypt(envVar.value) })
 				.where(eq(stackEnvironmentVariables.id, envVar.id));
 			migrated++;
+		}
+	}
+
+	const backupDests = await db.select().from(backupDestinations);
+	for (const dest of backupDests) {
+		const updates: Record<string, string | null> = {};
+		if (dest.password && !isEncrypted(dest.password)) {
+			updates.password = encrypt(dest.password);
+			migrated++;
+		}
+		if (dest.envVars && !isEncrypted(dest.envVars)) {
+			updates.envVars = encrypt(dest.envVars);
+			migrated++;
+		}
+		if (Object.keys(updates).length > 0) {
+			await db.update(backupDestinations).set(updates).where(eq(backupDestinations.id, dest.id));
 		}
 	}
 

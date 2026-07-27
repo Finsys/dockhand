@@ -35,6 +35,12 @@ import { authorize } from '$lib/server/authorize';
 import { refreshSystemJobs } from '$lib/server/scheduler';
 import { sendToEventSubprocess, sendToMetricsSubprocess } from '$lib/server/subprocess-manager';
 import { DEFAULT_GRYPE_IMAGE, DEFAULT_TRIVY_IMAGE } from '$lib/server/scanner';
+import { DEFAULT_HELPER_IMAGE } from '$lib/server/backups/restic';
+
+// The real engine default (version-pinned, `-baseline`-aware). NOT a hardcoded
+// `:latest` — that would advertise a floating tag the backup engine never uses and,
+// if the user saved it, pin them to a helper that never re-pulls (see restic.ts).
+const DEFAULT_BACKUP_IMAGE = DEFAULT_HELPER_IMAGE;
 
 export type TimeFormat = '12h' | '24h';
 export type DateFormat = 'MM/DD/YYYY' | 'DD/MM/YYYY' | 'YYYY-MM-DD' | 'DD.MM.YYYY';
@@ -95,6 +101,8 @@ export interface GeneralSettings {
 	defaultComposeTemplate: string;
 	// Label filter mode
 	labelFilterMode: 'any' | 'all';
+	// Backup image
+	defaultBackupImage: string;
 	// Whether to surface URLs inferred from reverse-proxy labels — currently
 	// Traefik (traefik.http.routers.*) and Pangolin
 	// (pangolin.{public,private}-resources.*).
@@ -170,7 +178,8 @@ services:
 # networks:
 #   default:
 #     driver: bridge
-`
+`,
+	defaultBackupImage: DEFAULT_BACKUP_IMAGE
 };
 
 const VALID_LIGHT_THEMES = ['default', 'catppuccin', 'rose-pine', 'nord', 'solarized', 'gruvbox', 'alucard', 'github', 'material', 'atom-one'];
@@ -251,6 +260,7 @@ export const GET: RequestHandler = async ({ cookies }) => {
 			defaultTrivyImage,
 			defaultComposeTemplate,
 			labelFilterMode,
+			defaultBackupImage,
 			honorProxyLabels,
 			showImageChangelogLinks,
 			showWhatsNew,
@@ -299,6 +309,7 @@ export const GET: RequestHandler = async ({ cookies }) => {
 			getSetting('default_trivy_image'),
 			getSetting('default_compose_template'),
 			getSetting('label_filter_mode'),
+			getSetting('default_backup_image'),
 			getSetting('honor_proxy_labels'),
 			getSetting('show_image_changelog_links'),
 			getSetting('show_whats_new'),
@@ -351,6 +362,7 @@ export const GET: RequestHandler = async ({ cookies }) => {
 			defaultTrivyImage: defaultTrivyImage ?? DEFAULT_TRIVY_IMAGE,
 			defaultComposeTemplate: defaultComposeTemplate ?? DEFAULT_SETTINGS.defaultComposeTemplate,
 			labelFilterMode: labelFilterMode ?? DEFAULT_SETTINGS.labelFilterMode,
+			defaultBackupImage: defaultBackupImage ?? DEFAULT_BACKUP_IMAGE,
 			honorProxyLabels: honorProxyLabels ?? DEFAULT_SETTINGS.honorProxyLabels,
 			showImageChangelogLinks: showImageChangelogLinks ?? DEFAULT_SETTINGS.showImageChangelogLinks,
 			showWhatsNew: showWhatsNew ?? DEFAULT_SETTINGS.showWhatsNew,
@@ -375,7 +387,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 
 	try {
 		const body = await request.json();
-		const { confirmDestructive, showStoppedContainers, highlightUpdates, coloredActionButtons, actionIconSize, timeFormat, dateFormat, downloadFormat, defaultGrypeArgs, defaultTrivyArgs, scheduleRetentionDays, eventRetentionDays, scheduleCleanupCron, eventCleanupCron, scheduleCleanupEnabled, eventCleanupEnabled, scannerCleanupCron, scannerCleanupEnabled, logBufferSizeKb, logMaxLines, defaultTimezone, eventCollectionMode, eventPollInterval, metricsCollectionInterval, lightTheme, darkTheme, font, fontSize, gridFontSize, terminalFont, editorFont, compactPorts, showExposedPorts, formatLogTimestamps, externalStackPaths, primaryStackLocation, defaultGrypeImage, defaultTrivyImage, defaultComposeTemplate, labelFilterMode, honorProxyLabels, showImageChangelogLinks, animateIcons, protectScannerImages, showWhatsNew, defaultScannerNetworkMode, defaultScannerDns } = body;
+		const { confirmDestructive, showStoppedContainers, highlightUpdates, coloredActionButtons, actionIconSize, timeFormat, dateFormat, downloadFormat, defaultGrypeArgs, defaultTrivyArgs, scheduleRetentionDays, eventRetentionDays, scheduleCleanupCron, eventCleanupCron, scheduleCleanupEnabled, eventCleanupEnabled, scannerCleanupCron, scannerCleanupEnabled, logBufferSizeKb, logMaxLines, defaultTimezone, eventCollectionMode, eventPollInterval, metricsCollectionInterval, lightTheme, darkTheme, font, fontSize, gridFontSize, terminalFont, editorFont, compactPorts, showExposedPorts, formatLogTimestamps, externalStackPaths, primaryStackLocation, defaultGrypeImage, defaultTrivyImage, defaultComposeTemplate, labelFilterMode, defaultBackupImage, honorProxyLabels, showImageChangelogLinks, animateIcons, protectScannerImages, showWhatsNew, defaultScannerNetworkMode, defaultScannerDns } = body;
 
 		if (confirmDestructive !== undefined) {
 			await setSetting('confirm_destructive', confirmDestructive);
@@ -521,6 +533,9 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 		if (labelFilterMode !== undefined && (labelFilterMode === 'any' || labelFilterMode === 'all')) {
 			await setSetting('label_filter_mode', labelFilterMode);
 		}
+		if (defaultBackupImage !== undefined && typeof defaultBackupImage === 'string') {
+			await setSetting('default_backup_image', defaultBackupImage);
+		}
 		if (honorProxyLabels !== undefined && typeof honorProxyLabels === 'boolean') {
 			await setSetting('honor_proxy_labels', honorProxyLabels);
 		}
@@ -593,6 +608,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			defaultTrivyImageVal,
 			defaultComposeTemplateVal,
 			labelFilterModeVal,
+			defaultBackupImageVal,
 			honorProxyLabelsVal,
 			showImageChangelogLinksVal,
 			showWhatsNewVal,
@@ -641,6 +657,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			getSetting('default_trivy_image'),
 			getSetting('default_compose_template'),
 			getSetting('label_filter_mode'),
+			getSetting('default_backup_image'),
 			getSetting('honor_proxy_labels'),
 			getSetting('show_image_changelog_links'),
 			getSetting('show_whats_new'),
@@ -693,6 +710,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			defaultTrivyImage: defaultTrivyImageVal ?? DEFAULT_TRIVY_IMAGE,
 			defaultComposeTemplate: defaultComposeTemplateVal ?? DEFAULT_SETTINGS.defaultComposeTemplate,
 			labelFilterMode: labelFilterModeVal ?? DEFAULT_SETTINGS.labelFilterMode,
+			defaultBackupImage: defaultBackupImageVal ?? DEFAULT_BACKUP_IMAGE,
 			honorProxyLabels: honorProxyLabelsVal ?? DEFAULT_SETTINGS.honorProxyLabels,
 			protectScannerImages: protectScannerImagesVal ?? DEFAULT_SETTINGS.protectScannerImages,
 			showImageChangelogLinks: showImageChangelogLinksVal ?? DEFAULT_SETTINGS.showImageChangelogLinks,

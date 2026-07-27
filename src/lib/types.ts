@@ -173,7 +173,7 @@ export interface GitRepository {
 }
 
 // Grid column configuration types
-export type GridId = 'containers' | 'images' | 'imageTags' | 'networks' | 'stacks' | 'volumes' | 'activity' | 'schedules' | 'audit' | 'environments' | 'vulnerabilities';
+export type GridId = 'containers' | 'images' | 'imageTags' | 'networks' | 'stacks' | 'volumes' | 'activity' | 'schedules' | 'audit' | 'environments' | 'backupDestinations' | 'backups' | 'vulnerabilities';
 
 export interface ColumnConfig {
 	id: string;
@@ -187,6 +187,7 @@ export interface ColumnConfig {
 	align?: 'left' | 'center' | 'right';
 	grow?: boolean; // If true, column expands to fill remaining space
 	noTruncate?: boolean; // If true, content won't be truncated with ellipsis
+	hint?: string; // Tooltip on column header
 }
 
 export interface ColumnPreference {

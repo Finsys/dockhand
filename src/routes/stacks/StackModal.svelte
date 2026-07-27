@@ -7,7 +7,10 @@
 	import CodeEditor, { type VariableMarker } from '$lib/components/CodeEditor.svelte';
 	import StackEnvVarsPanel from '$lib/components/StackEnvVarsPanel.svelte';
 	import { type EnvVar, type ValidationResult } from '$lib/components/StackEnvVarsEditor.svelte';
-	import { Layers, Save, Play, Code, GitGraph, Loader2, AlertCircle, X, Sun, Moon, TriangleAlert, GripVertical, FolderOpen, Copy, Check, XCircle, MapPin, ArrowRight, ArrowDown, Info, Box, FolderSync, CircleQuestionMark } from 'lucide-svelte';
+	import { Layers, Save, Play, Code, GitGraph, GitBranch, Loader2, AlertCircle, X, Sun, Moon, TriangleAlert, GripVertical, FolderOpen, Copy, Check, XCircle, MapPin, ArrowRight, ArrowDown, Info, Box, FolderSync, CircleQuestionMark, Archive } from 'lucide-svelte';
+	import BackupPanel from '../containers/BackupPanel.svelte';
+	import { volumesForStack, type VolumeInfo } from '$lib/utils/mounts';
+	import { fetchBackupExecutions } from '$lib/utils/backup';
 	import type { Component } from 'svelte';
 	import FilesystemBrowser from './FilesystemBrowser.svelte';
 	import PathBarItem from './PathBarItem.svelte';
@@ -16,6 +19,7 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { currentEnvironment, appendEnvParam } from '$lib/stores/environment';
 	import { appSettings } from '$lib/stores/settings';
+	import { page } from '$app/stores'; // BETA GATE: backups feature flag
 	import { focusFirstInput } from '$lib/utils';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import * as Alert from '$lib/components/ui/alert';
@@ -57,9 +61,13 @@
 	let loadError = $state<string | null>(null);
 	let errors = $state<{ stackName?: string; compose?: string }>({});
 	let composeContent = $state('');
-	let activeTab = $state<'editor' | 'graph'>('editor');
+	let activeTab = $state<'editor' | 'graph' | 'backups'>('editor');
+	let backupCount = $state(0);
+	let backupTally = $state<{ ok: number; failed: number }>({ ok: 0, failed: 0 });
 	let showConfirmClose = $state(false);
 	let editorTheme = $state<'light' | 'dark'>('dark');
+	// Ref to the embedded backup panel so close can check its inline form for unsaved edits.
+	let backupPanelRef = $state<BackupPanel | undefined>(undefined);
 
 	// Secret providers
 	type SecretProviderOption = { id: number; name: string };
@@ -125,6 +133,8 @@
 
 	// Container info for untracked stacks
 	let stackContainers = $state<{ name: string; state: string; image: string }[]>([]);
+	// Volumes/binds of this stack's containers, for the backup panel picker.
+	let stackVolumes = $state<VolumeInfo[]>([]);
 
 	// Derived: has user customized the compose path from auto-computed default?
 	const isComposePathCustom = $derived(
@@ -744,6 +754,16 @@
 		}
 	}
 
+	// Populate the backup picker's volume/bind list from this stack's containers'
+	// mounts. Runs for BOTH the managed (internal) load path and the
+	// needs-file-location path, so an internal stack's backup panel is never empty.
+	async function loadStackVolumes(envId: number | null) {
+		const contRes = await fetch(appendEnvParam('/api/containers', envId));
+		if (contRes.ok) {
+			stackVolumes = volumesForStack(await contRes.json(), stackName);
+		}
+	}
+
 	async function loadComposeFile() {
 		if (mode !== 'edit' || !stackName) return;
 
@@ -772,6 +792,22 @@
 					loadError = null;
 					loading = false; // Important: stop loading spinner
 
+					// Fetch backup schedule count (BETA GATE: only when backups enabled)
+					if ($page.data.backupsEnabled) try {
+						const bp = new URLSearchParams({ target: stackName, type: 'stack' });
+						if (envId) bp.set('env', String(envId));
+						const bRes = await fetch(`/api/backup/configs?${bp}`);
+						if (bRes.ok) {
+							const bData = await bRes.json();
+							const cfgs = Array.isArray(bData) ? bData : bData?.id ? [bData] : [];
+							backupCount = cfgs.length;
+							if (cfgs.length > 0) {
+								const t = await fetchBackupExecutions(cfgs.map((c: any) => c.id));
+								backupTally = { ok: t.ok, failed: t.failed };
+							}
+						}
+					} catch {}
+
 					// Fetch containers for this stack to show what's running
 					try {
 						const stacksRes = await fetch(appendEnvParam('/api/stacks', envId));
@@ -786,6 +822,10 @@
 								}));
 							}
 						}
+
+						// Volumes/binds for the backup picker — derived from this stack's
+						// containers' mounts (same normalizer used by the other backup surfaces).
+						await loadStackVolumes(envId);
 					} catch (e) {
 						console.error('Failed to fetch stack containers:', e);
 					}
@@ -804,7 +844,6 @@
 
 			// Load secret provider binding
 			try {
-				const envId = $currentEnvironment?.id ?? null;
 				const sourcesRes = await fetch(appendEnvParam('/api/stacks/sources', envId));
 				if (sourcesRes.ok) {
 					const sourceMap = await sourcesRes.json();
@@ -813,6 +852,13 @@
 				}
 			} catch (e) {
 				console.warn('Failed to load stack source for secret provider binding:', e);
+			}
+
+			// Volumes/binds for the backup picker (managed/internal stack path).
+			try {
+				await loadStackVolumes(envId);
+			} catch (e) {
+				console.error('Failed to load stack volumes:', e);
 			}
 
 			// Load both env endpoints in parallel, then process results together
@@ -1200,7 +1246,7 @@
 	}
 
 	function tryClose() {
-		if (isDirty) {
+		if (isDirty || backupPanelRef?.isDirty()) {
 			showConfirmClose = true;
 		} else {
 			handleClose();
@@ -1376,8 +1422,9 @@
 		if (isOpen) {
 			focusFirstInput();
 		} else {
-			// Prevent closing if there are unsaved changes - show confirmation instead
-			if (isDirty) {
+			// Prevent closing if there are unsaved changes (stack edits OR a half-edited
+			// backup schedule in the embedded panel) - show confirmation instead
+			if (isDirty || backupPanelRef?.isDirty()) {
 				// Re-open the dialog and show confirmation
 				open = true;
 				showConfirmClose = true;
@@ -1407,7 +1454,7 @@
 									{stackName}
 								{/if}
 								{#if $currentEnvironment}
-									<span class="font-medium">on <span class="text-amber-600 dark:text-amber-400">{$currentEnvironment.name}</span></span>
+									<span class="font-semibold">on <span class="text-amber-600 dark:text-amber-400">{$currentEnvironment.name}</span></span>
 								{/if}
 							</Dialog.Title>
 							<Dialog.Description class="text-xs text-zinc-500 dark:text-zinc-400">
@@ -1423,50 +1470,50 @@
 					</div>
 				</div>
 
-				<div class="flex items-center gap-2">
-					<!-- View toggle -->
-					<div class="flex items-center gap-0.5 bg-zinc-200 dark:bg-zinc-700 rounded-md p-0.5">
-						<button
-							class="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs transition-colors {activeTab === 'editor' ? 'bg-white dark:bg-zinc-900 text-zinc-800 dark:text-zinc-100 shadow-sm' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200'}"
-							onclick={() => activeTab = 'editor'}
-						>
-							<Code class="w-3.5 h-3.5" />
-							Editor
-						</button>
-						<button
-							class="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs transition-colors {activeTab === 'graph' ? 'bg-white dark:bg-zinc-900 text-zinc-800 dark:text-zinc-100 shadow-sm' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200'}"
-							onclick={() => activeTab = 'graph'}
-						>
-							<GitGraph class="w-3.5 h-3.5" />
-							Graph
-						</button>
-					</div>
-
-					<!-- Theme toggle (only in editor mode) -->
-					{#if activeTab === 'editor'}
-						<button
-							onclick={toggleEditorTheme}
-							class="p-1.5 rounded-md text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
-							title={editorTheme === 'light' ? 'Switch to dark theme' : 'Switch to light theme'}
-						>
-							{#if editorTheme === 'light'}
-								<Moon class="w-4 h-4" />
-							{:else}
-								<Sun class="w-4 h-4" />
-							{/if}
-						</button>
-					{/if}
-
-					<!-- Close button -->
-					<button
-						onclick={tryClose}
-						class="p-1.5 rounded-md text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
-					>
-						<X class="w-4 h-4" />
-					</button>
-				</div>
+				<!-- Close button -->
+				<button
+					onclick={tryClose}
+					class="p-1.5 rounded-md text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+				>
+					<X class="w-4 h-4" />
+				</button>
 			</div>
 		</Dialog.Header>
+
+		<!-- View tabs — left-aligned underline bar under the header, matched to
+		     GitStackModal for a consistent look across the stack modals. -->
+		<div class="flex items-center gap-1 border-b border-zinc-200 px-5 dark:border-zinc-700 flex-shrink-0">
+			<button
+				type="button"
+				class="relative -mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm transition-colors {activeTab === 'editor' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}"
+				onclick={() => activeTab = 'editor'}
+			>
+				<Code class="h-3.5 w-3.5" /> Editor
+			</button>
+			<button
+				type="button"
+				class="relative -mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm transition-colors {activeTab === 'graph' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}"
+				onclick={() => activeTab = 'graph'}
+			>
+				<GitGraph class="h-3.5 w-3.5" /> Graph
+			</button>
+			<!-- BETA GATE: Backups tab hidden unless FEAT_BACKUPS_ENABLED (see features.ts).
+			     Also hidden for UNTRACKED stacks: with no known compose file the backup
+			     would be incomplete (can't redeploy at restore), so the backend refuses
+			     it (assertStackBackupable) — don't offer it in the UI either. -->
+			{#if mode === 'edit' && $page.data.backupsEnabled && !needsFileLocation}
+				<button
+					type="button"
+					class="relative -mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm transition-colors {activeTab === 'backups' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}"
+					onclick={() => activeTab = 'backups'}
+				>
+					<Archive class="h-3.5 w-3.5" /> Backups
+					{#if backupCount > 0}<span class="bg-primary/15 text-primary text-[10px] px-1.5 rounded-full font-medium">{backupCount}</span>{/if}
+					{#if backupTally.ok > 0}<span class="inline-flex items-center gap-0.5 rounded-full bg-emerald-500/15 px-1.5 text-[10px] font-medium text-emerald-500"><Check class="w-2.5 h-2.5" />{backupTally.ok}</span>{/if}
+					{#if backupTally.failed > 0}<span class="inline-flex items-center gap-0.5 rounded-full bg-red-500/15 px-1.5 text-[10px] font-semibold text-red-500"><X class="w-2.5 h-2.5" />{backupTally.failed}</span>{/if}
+				</button>
+			{/if}
+		</div>
 
 		<div class="flex-1 overflow-hidden flex flex-col min-h-0">
 			{#if errors.compose}
@@ -1536,7 +1583,12 @@
 				<div bind:this={containerRef} class="flex-1 min-h-0 flex flex-col {isDraggingSplit ? 'select-none' : ''}">
 					{#if activeTab === 'editor'}
 						<!-- Path bars row -->
-						<div class="flex border-b border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/30">
+						<div class="flex items-center border-b border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/30">
+							{#if readonly}
+								<span class="ml-4 flex shrink-0 items-center gap-1 rounded-full border border-purple-500/30 bg-purple-500/10 px-2 py-0.5 text-2xs font-medium text-purple-600 dark:text-purple-400" title="This is a Git-managed stack — Dockhand shows its compose read-only; edit it in the repository.">
+									<GitBranch class="h-3 w-3" /> Git · read-only
+								</span>
+							{/if}
 							<!-- Compose path -->
 							<div class="flex-shrink-0 px-4 py-2" style="width: {splitRatio}%">
 								<PathBarItem
@@ -1572,6 +1624,20 @@
 										isDirty = true;
 									}}
 								/>
+							</div>
+							<!-- Theme toggle -->
+							<div class="flex items-center px-2 shrink-0">
+								<button
+									onclick={toggleEditorTheme}
+									class="p-1 rounded text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+									title={editorTheme === 'light' ? 'Switch to dark theme' : 'Switch to light theme'}
+								>
+									{#if editorTheme === 'light'}
+										<Moon class="w-3.5 h-3.5" />
+									{:else}
+										<Sun class="w-3.5 h-3.5" />
+									{/if}
+								</button>
 							</div>
 						</div>
 						<!-- Editor panels row -->
@@ -1725,6 +1791,17 @@
 							onContentChange={readonly ? undefined : handleGraphContentChange}
 							{readonly}
 						/>
+					{:else if activeTab === 'backups' && !needsFileLocation}
+						<!-- Backups tab (never for untracked stacks — see the tab gate above) -->
+						<div class="h-full flex-1 overflow-auto p-4">
+							<BackupPanel
+								bind:this={backupPanelRef}
+								containerName={stackName}
+								volumes={stackVolumes}
+								type="stack"
+								onTally={(t) => (backupTally = t)}
+							/>
+						</div>
 					{/if}
 				</div>
 			{/if}

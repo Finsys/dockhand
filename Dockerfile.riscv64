@@ -1,0 +1,163 @@
+# syntax=docker/dockerfile:1.4
+# =============================================================================
+# Dockhand Docker Image - RISC-V 64-bit (Experimental)
+# =============================================================================
+# Experimental riscv64 build. Wolfi has no riscv64 packages, and official
+# node:24-alpine/slim images don't include riscv64 either. Alpine edge repos
+# have nodejs 24 for riscv64, so we use those directly.
+#
+# docker-compose is not packaged for riscv64 in Alpine, so we build it from
+# source using Go (which has full riscv64 support).
+#
+# lightningcss (used by Vite) has no riscv64 prebuilt binary, so we split
+# the build: Vite runs on the build platform (fast, has lightningcss), then
+# native addons are rebuilt on riscv64 (QEMU, slower but necessary).
+#
+# Build:
+#   docker buildx build --platform linux/riscv64 -f Dockerfile.riscv64 \
+#     -t registry.bor6.pl/dockhand:riscv64-test --push .
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Stage 1: Docker Compose Builder (Go - cross-compile from build platform)
+# -----------------------------------------------------------------------------
+# Alpine edge has docker-cli for riscv64 but NOT docker-compose.
+# Build it from source since Go has excellent riscv64 cross-compilation.
+FROM --platform=$BUILDPLATFORM golang:1.25.9-alpine AS compose-builder
+ARG TARGETARCH
+
+RUN apk add --no-cache git
+
+RUN git clone --depth 1 --branch v2.36.1 https://github.com/docker/compose.git /src/compose
+
+WORKDIR /src/compose
+RUN CGO_ENABLED=0 GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /usr/bin/docker-compose ./cmd
+
+# -----------------------------------------------------------------------------
+# Stage 2: JS Builder (runs on build platform - has lightningcss binaries)
+# -----------------------------------------------------------------------------
+# Vite/lightningcss have no riscv64 prebuilt binaries. Since Vite produces
+# plain JS bundles with no arch dependency, we build on the host platform.
+FROM --platform=$BUILDPLATFORM node:24-alpine AS js-builder
+
+WORKDIR /app
+
+RUN apk add --no-cache git curl python3 make g++ gcc musl-dev
+
+COPY package.json package-lock.json ./
+RUN MAKEFLAGS="-j$(nproc)" npm ci --ignore-scripts \
+    && MAKEFLAGS="-j$(nproc)" npm rebuild
+
+COPY . .
+RUN npm run build
+
+# -----------------------------------------------------------------------------
+# Stage 3: Native Addon Builder (runs on riscv64 via QEMU)
+# -----------------------------------------------------------------------------
+# better-sqlite3 and argon2 have C/C++ native addons that must be compiled
+# for the target architecture (riscv64).
+FROM --platform=$TARGETPLATFORM alpine:edge AS addon-builder
+
+RUN apk add --no-cache --repository=https://dl-cdn.alpinelinux.org/alpine/edge/main \
+    --repository=https://dl-cdn.alpinelinux.org/alpine/edge/community \
+    nodejs npm python3 make g++ gcc musl-dev
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN MAKEFLAGS="-j$(nproc)" npm ci --omit=dev --ignore-scripts \
+    && MAKEFLAGS="-j$(nproc)" npm rebuild better-sqlite3 argon2 \
+    && rm -rf node_modules/@types
+
+# -----------------------------------------------------------------------------
+# Stage 4: Go Collector Builder (cross-compile from build platform)
+# -----------------------------------------------------------------------------
+FROM --platform=$BUILDPLATFORM golang:1.25.9 AS go-builder
+ARG TARGETARCH
+WORKDIR /app
+COPY collector/ ./collector/
+RUN cd collector && CGO_ENABLED=0 GOARCH=$TARGETARCH go build -o /app/bin/collection-worker .
+
+# -----------------------------------------------------------------------------
+# Stage 5: Final Image (Alpine edge runtime)
+# -----------------------------------------------------------------------------
+FROM alpine:edge
+
+# Install runtime packages from main + community repos
+RUN apk add --no-cache \
+    --repository=https://dl-cdn.alpinelinux.org/alpine/edge/main \
+    --repository=https://dl-cdn.alpinelinux.org/alpine/edge/community \
+    nodejs \
+    ca-certificates \
+    tzdata \
+    docker-cli \
+    docker-cli-buildx \
+    sqlite \
+    postgresql17-client \
+    git \
+    openssh-client \
+    curl \
+    tini \
+    su-exec \
+    libstdc++
+
+# Copy docker-compose built from source (not available as Alpine package for riscv64)
+COPY --from=compose-builder /usr/bin/docker-compose /usr/bin/docker-compose
+
+# Create docker compose plugin symlink
+RUN mkdir -p /usr/libexec/docker/cli-plugins \
+    && ln -sf /usr/bin/docker-compose /usr/libexec/docker/cli-plugins/docker-compose
+
+# Create dockhand user and group
+RUN addgroup -g 1001 dockhand \
+    && adduser -u 1001 -G dockhand -h /home/dockhand -D dockhand
+
+WORKDIR /app
+
+# Set up environment variables
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
+    NODE_ENV=production \
+    PORT=3000 \
+    HOST=0.0.0.0 \
+    DATA_DIR=/app/data \
+    HOME=/home/dockhand \
+    PUID=1001 \
+    PGID=1001
+
+# Copy node_modules with riscv64 native addons
+COPY --from=addon-builder --chown=dockhand:dockhand /app/node_modules ./node_modules
+
+# Copy built JS app from cross-platform builder
+COPY --from=js-builder --chown=dockhand:dockhand /app/package.json ./
+COPY --from=js-builder --chown=dockhand:dockhand /app/build ./build
+COPY --from=js-builder --chown=dockhand:dockhand /app/server.js ./
+
+# Copy Go collector binary
+COPY --from=go-builder --chown=dockhand:dockhand /app/bin/collection-worker ./bin/collection-worker
+
+# Copy database migrations
+COPY --chown=dockhand:dockhand drizzle/ ./drizzle/
+COPY --chown=dockhand:dockhand drizzle-pg/ ./drizzle-pg/
+
+# Copy legal documents
+COPY --chown=dockhand:dockhand LICENSE.txt PRIVACY.txt ./
+
+# Copy entrypoint script
+COPY docker-entrypoint-node.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# Copy emergency scripts
+COPY --chown=dockhand:dockhand scripts/emergency/ ./scripts/
+RUN chmod +x ./scripts/*.sh ./scripts/**/*.sh 2>/dev/null || true
+
+# Create data directories
+RUN mkdir -p /home/dockhand/.dockhand/stacks /app/data \
+    && chown dockhand:dockhand /app/data /home/dockhand /home/dockhand/.dockhand /home/dockhand/.dockhand/stacks
+
+EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:${PORT:-3000}/ || exit 1
+
+ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/docker-entrypoint.sh"]
+CMD []

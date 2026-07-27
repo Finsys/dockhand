@@ -21,7 +21,7 @@
 
 <button
 	type="button"
-	class="inline-flex items-center justify-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 {checked ? 'bg-green-500/15 text-green-600 hover:bg-green-500/25' : 'bg-muted text-muted-foreground hover:bg-muted/80'} {disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}"
+	class="inline-flex items-center justify-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors min-w-[65px] focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 {checked ? 'bg-green-500/15 text-green-600 hover:bg-green-500/25' : 'bg-muted text-muted-foreground hover:bg-muted/80'} {disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}"
 	onclick={toggle}
 	{disabled}
 >

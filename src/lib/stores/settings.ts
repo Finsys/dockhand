@@ -45,6 +45,7 @@ export interface AppSettings {
 	defaultTrivyImage: string;
 	defaultComposeTemplate: string;
 	labelFilterMode: LabelFilterMode;
+	defaultBackupImage: string;
 	honorProxyLabels: boolean;
 	showImageChangelogLinks: boolean;
 	showWhatsNew: boolean;   // show the "What's New" modal after an upgrade (#1235)
@@ -108,7 +109,10 @@ services:
 # networks:
 #   default:
 #     driver: bridge
-`
+`,
+	// Empty until the API responds with the real version-pinned default — never
+	// flash a hardcoded `:latest` (which the backup engine never actually uses).
+	defaultBackupImage: ''
 };
 
 // Derive logMaxLines from a settings payload — prefers the new field; if absent
@@ -170,13 +174,14 @@ function createSettingsStore() {
 					defaultGrypeImage: settings.defaultGrypeImage ?? DEFAULT_SETTINGS.defaultGrypeImage,
 					defaultTrivyImage: settings.defaultTrivyImage ?? DEFAULT_SETTINGS.defaultTrivyImage,
 					defaultComposeTemplate: settings.defaultComposeTemplate ?? DEFAULT_SETTINGS.defaultComposeTemplate,
-				labelFilterMode: settings.labelFilterMode ?? DEFAULT_SETTINGS.labelFilterMode,
-				honorProxyLabels: settings.honorProxyLabels ?? DEFAULT_SETTINGS.honorProxyLabels,
-				showImageChangelogLinks: settings.showImageChangelogLinks ?? DEFAULT_SETTINGS.showImageChangelogLinks,
-				showWhatsNew: settings.showWhatsNew ?? DEFAULT_SETTINGS.showWhatsNew,
-				protectScannerImages: settings.protectScannerImages ?? DEFAULT_SETTINGS.protectScannerImages,
-				defaultScannerNetworkMode: settings.defaultScannerNetworkMode ?? DEFAULT_SETTINGS.defaultScannerNetworkMode,
-				defaultScannerDns: Array.isArray(settings.defaultScannerDns) ? settings.defaultScannerDns : DEFAULT_SETTINGS.defaultScannerDns
+					labelFilterMode: settings.labelFilterMode ?? DEFAULT_SETTINGS.labelFilterMode,
+					defaultBackupImage: settings.defaultBackupImage ?? DEFAULT_SETTINGS.defaultBackupImage,
+					honorProxyLabels: settings.honorProxyLabels ?? DEFAULT_SETTINGS.honorProxyLabels,
+					showImageChangelogLinks: settings.showImageChangelogLinks ?? DEFAULT_SETTINGS.showImageChangelogLinks,
+					showWhatsNew: settings.showWhatsNew ?? DEFAULT_SETTINGS.showWhatsNew,
+					protectScannerImages: settings.protectScannerImages ?? DEFAULT_SETTINGS.protectScannerImages,
+					defaultScannerNetworkMode: settings.defaultScannerNetworkMode ?? DEFAULT_SETTINGS.defaultScannerNetworkMode,
+					defaultScannerDns: Array.isArray(settings.defaultScannerDns) ? settings.defaultScannerDns : DEFAULT_SETTINGS.defaultScannerDns
 				});
 			}
 		} catch {
@@ -227,13 +232,14 @@ function createSettingsStore() {
 					defaultGrypeImage: updatedSettings.defaultGrypeImage ?? DEFAULT_SETTINGS.defaultGrypeImage,
 					defaultTrivyImage: updatedSettings.defaultTrivyImage ?? DEFAULT_SETTINGS.defaultTrivyImage,
 					defaultComposeTemplate: updatedSettings.defaultComposeTemplate ?? DEFAULT_SETTINGS.defaultComposeTemplate,
-				labelFilterMode: updatedSettings.labelFilterMode ?? DEFAULT_SETTINGS.labelFilterMode,
-				honorProxyLabels: updatedSettings.honorProxyLabels ?? DEFAULT_SETTINGS.honorProxyLabels,
-				showImageChangelogLinks: updatedSettings.showImageChangelogLinks ?? DEFAULT_SETTINGS.showImageChangelogLinks,
-				showWhatsNew: updatedSettings.showWhatsNew ?? DEFAULT_SETTINGS.showWhatsNew,
-				protectScannerImages: updatedSettings.protectScannerImages ?? DEFAULT_SETTINGS.protectScannerImages,
-				defaultScannerNetworkMode: updatedSettings.defaultScannerNetworkMode ?? DEFAULT_SETTINGS.defaultScannerNetworkMode,
-				defaultScannerDns: Array.isArray(updatedSettings.defaultScannerDns) ? updatedSettings.defaultScannerDns : DEFAULT_SETTINGS.defaultScannerDns
+					labelFilterMode: updatedSettings.labelFilterMode ?? DEFAULT_SETTINGS.labelFilterMode,
+					defaultBackupImage: updatedSettings.defaultBackupImage ?? DEFAULT_SETTINGS.defaultBackupImage,
+					honorProxyLabels: updatedSettings.honorProxyLabels ?? DEFAULT_SETTINGS.honorProxyLabels,
+					showImageChangelogLinks: updatedSettings.showImageChangelogLinks ?? DEFAULT_SETTINGS.showImageChangelogLinks,
+					showWhatsNew: updatedSettings.showWhatsNew ?? DEFAULT_SETTINGS.showWhatsNew,
+					protectScannerImages: updatedSettings.protectScannerImages ?? DEFAULT_SETTINGS.protectScannerImages,
+					defaultScannerNetworkMode: updatedSettings.defaultScannerNetworkMode ?? DEFAULT_SETTINGS.defaultScannerNetworkMode,
+					defaultScannerDns: Array.isArray(updatedSettings.defaultScannerDns) ? updatedSettings.defaultScannerDns : DEFAULT_SETTINGS.defaultScannerDns
 				});
 			}
 		} catch (error) {
@@ -488,6 +494,13 @@ function createSettingsStore() {
 			update((current) => {
 				const newSettings = { ...current, labelFilterMode: value };
 				saveSettings({ labelFilterMode: value });
+				return newSettings;
+			});
+		},
+		setDefaultBackupImage: (value: string) => {
+			update((current) => {
+				const newSettings = { ...current, defaultBackupImage: value };
+				saveSettings({ defaultBackupImage: value });
 				return newSettings;
 			});
 		},

@@ -15,6 +15,8 @@ import {
 	type GitStackWithRepo
 } from './db';
 import { deployStack, getStackDir } from './stacks';
+import { sendEventNotification } from './notifications';
+import { buildBasicAuthHeader } from './git-auth';
 import {
 	parseManifest,
 	serializeManifest,
@@ -243,14 +245,12 @@ async function buildGitEnv(credential: GitCredential | null): Promise<GitEnv> {
 	// instead of embedding them in the URL (which leaks via /proc/<pid>/cmdline, #1081).
 	// Uses GIT_CONFIG_COUNT mechanism (git >= 2.31) to set Authorization header.
 	if (credential?.authType === 'password' && (credential.username || credential.password)) {
-		const token = credential.password || '';
-		const username = credential.username || '';
-		// Use Basic auth (base64 of username:password) — works with GitHub PATs,
-		// GitLab tokens, Gitea tokens, and standard username/password combos.
-		const basicAuth = Buffer.from(`${username}:${token}`).toString('base64');
+		// Basic auth (base64 of username:password) — works with GitHub PATs, GitLab
+		// tokens, Gitea tokens, and standard username/password combos. Empty username
+		// is defaulted inside buildBasicAuthHeader (see #1273).
 		env.GIT_CONFIG_COUNT = '1';
 		env.GIT_CONFIG_KEY_0 = 'http.extraHeader';
-		env.GIT_CONFIG_VALUE_0 = `Authorization: Basic ${basicAuth}`;
+		env.GIT_CONFIG_VALUE_0 = buildBasicAuthHeader(credential.username || '', credential.password || '');
 	}
 
 	if (credential?.authType === 'ssh' && credential.sshPrivateKey) {
@@ -1112,6 +1112,37 @@ export async function syncGitStack(stackId: number): Promise<SyncResult> {
 	}
 }
 
+/**
+ * Fire the git_sync_success / git_sync_failed / git_sync_skipped notification for a
+ * git-stack deploy. Called from deployGitStack so EVERY caller notifies — webhook,
+ * manual API deploy, create/update, and the scheduler alike. Previously the dispatch
+ * lived only in the git-stack-sync scheduler task, so webhook/manual deploys were
+ * silent (#1295). Best-effort: never changes the deploy outcome.
+ */
+async function notifyGitSync(stackName: string, envId: number | null | undefined, result: { success: boolean; error?: string; skipped?: boolean }): Promise<void> {
+	try {
+		if (result.success && result.skipped) {
+			await sendEventNotification('git_sync_skipped', {
+				title: 'Git sync skipped',
+				message: `Stack "${stackName}" sync skipped: no changes detected`,
+				type: 'info'
+			}, envId ?? undefined);
+		} else if (result.success) {
+			await sendEventNotification('git_sync_success', {
+				title: 'Git stack deployed',
+				message: `Stack "${stackName}" was synced and deployed successfully`,
+				type: 'success'
+			}, envId ?? undefined);
+		} else {
+			await sendEventNotification('git_sync_failed', {
+				title: 'Git sync failed',
+				message: `Stack "${stackName}" sync failed: ${result.error || 'unknown error'}`,
+				type: 'error'
+			}, envId ?? undefined);
+		}
+	} catch { /* never changes the deploy outcome */ }
+}
+
 export async function deployGitStack(stackId: number, options?: { force?: boolean }): Promise<{ success: boolean; output?: string; error?: string; skipped?: boolean }> {
 	const force = options?.force ?? true; // Default to force for backward compatibility
 
@@ -1132,7 +1163,9 @@ export async function deployGitStack(stackId: number, options?: { force?: boolea
 	const syncResult = await syncGitStack(stackId);
 	if (!syncResult.success) {
 		console.log(`${logPrefix} Sync failed:`, syncResult.error);
-		return { success: false, error: syncResult.error };
+		const failResult = { success: false, error: syncResult.error };
+		await notifyGitSync(gitStack.stackName, gitStack.environmentId, failResult);
+		return failResult;
 	}
 
 	console.log(`${logPrefix} Sync successful`);
@@ -1150,11 +1183,13 @@ export async function deployGitStack(stackId: number, options?: { force?: boolea
 	const shouldDeploy = force || gitStack.forceRedeploy || syncResult.updated;
 	if (!shouldDeploy) {
 		console.log(`${logPrefix} No changes detected and force=false, forceRedeploy=false, skipping redeploy`);
-		return {
+		const skippedResult = {
 			success: true,
 			output: 'No changes detected, skipping redeploy',
 			skipped: true
 		};
+		await notifyGitSync(gitStack.stackName, gitStack.environmentId, skippedResult);
+		return skippedResult;
 	}
 
 	const forceRecreate = syncResult.updated;
@@ -1183,7 +1218,8 @@ export async function deployGitStack(stackId: number, options?: { force?: boolea
 		build: gitStack.buildOnDeploy,
 		noBuildCache: gitStack.noBuildCache,
 		pullPolicy: gitStack.repullImages ? 'always' : undefined,
-		filesToDelete: syncResult.deletionPlan?.toDelete
+		filesToDelete: syncResult.deletionPlan?.toDelete,
+		isGitDeploy: true // suppress stack_* notification; we emit git_sync_* below
 	});
 
 	console.log(`${logPrefix} ----------------------------------------`);
@@ -1225,6 +1261,9 @@ export async function deployGitStack(stackId: number, options?: { force?: boolea
 		});
 	}
 
+	// git_sync_success / git_sync_failed for the actual deploy result. deployStack
+	// suppressed its stack_* notification (isGitDeploy), so this is the single one.
+	await notifyGitSync(gitStack.stackName, gitStack.environmentId, result);
 	return result;
 }
 

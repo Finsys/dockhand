@@ -11,7 +11,6 @@ import {
 	appendScheduleExecutionLog
 } from '../../db';
 import { deployGitStack } from '../../git';
-import { sendEventNotification } from '../../notifications';
 
 /**
  * Execute a git stack sync.
@@ -46,30 +45,16 @@ export async function runGitStackSync(
 	try {
 		log(`Starting sync for stack: ${stackName}`);
 
-		// Deploy the git stack (only if there are changes)
+		// Deploy the git stack (only if there are changes). deployGitStack now emits the
+		// git_sync_success/failed/skipped notification itself, so EVERY caller (webhook,
+		// manual, this scheduler) notifies uniformly — we no longer dispatch here (#1295).
 		const result = await deployGitStack(stackId, { force: false });
-
-		const envId = environmentId ?? undefined;
 
 		if (result.success) {
 			if (result.skipped) {
 				log(`No changes detected for stack: ${stackName}, skipping redeploy`);
-
-				// Send notification for skipped sync
-				await sendEventNotification('git_sync_skipped', {
-					title: 'Git sync skipped',
-					message: `Stack "${stackName}" sync skipped: no changes detected`,
-					type: 'info'
-				}, envId);
 			} else {
 				log(`Successfully deployed stack: ${stackName}`);
-
-				// Send notification for successful sync
-				await sendEventNotification('git_sync_success', {
-					title: 'Git stack deployed',
-					message: `Stack "${stackName}" was synced and deployed successfully`,
-					type: 'success'
-				}, envId);
 			}
 			if (result.output) log(result.output);
 
@@ -90,13 +75,6 @@ export async function runGitStackSync(
 			duration: Date.now() - startTime,
 			errorMessage: error.message
 		});
-
-		// Send notification for failed sync
-		const envId = environmentId ?? undefined;
-		await sendEventNotification('git_sync_failed', {
-			title: 'Git sync failed',
-			message: `Stack "${stackName}" sync failed: ${error.message}`,
-			type: 'error'
-		}, envId);
+		// Notification is emitted by deployGitStack (git_sync_failed); not re-sent here.
 	}
 }

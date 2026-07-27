@@ -461,7 +461,7 @@ export const scheduleExecutions = pgTable('schedule_executions', {
 	completedAt: timestamp('completed_at', { mode: 'string' }),
 	duration: integer('duration'), // milliseconds
 	// Result
-	status: text('status').notNull(), // 'queued' | 'running' | 'success' | 'failed' | 'skipped'
+	status: text('status').notNull(), // 'queued' | 'running' | 'success' | 'warning' | 'failed' | 'skipped'
 	errorMessage: text('error_message'),
 	// Details
 	details: text('details'), // JSON with execution details
@@ -486,6 +486,50 @@ export const pendingContainerUpdates = pgTable('pending_container_updates', {
 }, (table) => ({
 	envContainerUnique: unique().on(table.environmentId, table.containerId)
 }));
+
+// =============================================================================
+// BACKUP DESTINATIONS TABLE
+// =============================================================================
+
+export const backupDestinations = pgTable('backup_destinations', {
+	id: serial('id').primaryKey(),
+	name: text('name').notNull().unique(),
+	repository: text('repository').notNull(),
+	password: text('password').notNull(),
+	envVars: text('env_vars'),
+	flags: text('flags'),
+	hostPath: text('host_path'),
+	policies: text('policies'),
+	lastTestAt: timestamp('last_test_at', { mode: 'string' }),
+	lastTestStatus: text('last_test_status'),
+	lastTestError: text('last_test_error'),
+	createdAt: timestamp('created_at', { mode: 'string' }).defaultNow(),
+	updatedAt: timestamp('updated_at', { mode: 'string' }).defaultNow()
+});
+
+// =============================================================================
+// BACKUP CONFIGS TABLE
+// =============================================================================
+
+export const backupConfigs = pgTable('backup_configs', {
+	id: serial('id').primaryKey(),
+	type: text('type').notNull().default('container'),
+	targetName: text('target_name').notNull(),
+	environmentId: integer('environment_id').references(() => environments.id, { onDelete: 'cascade' }),
+	destinationId: integer('destination_id').notNull().references(() => backupDestinations.id, { onDelete: 'cascade' }),
+	enabled: boolean('enabled').default(true),
+	allVolumes: boolean('all_volumes').default(true),
+	selectedVolumes: text('selected_volumes'),
+	stopBeforeBackup: boolean('stop_before_backup').default(false),
+	schedule: text('schedule'),
+	retention: text('retention'),
+	options: text('options'),
+	tags: text('tags'),
+	lastBackupAt: timestamp('last_backup_at', { mode: 'string' }),
+	lastBackupStatus: text('last_backup_status'),
+	createdAt: timestamp('created_at', { mode: 'string' }).defaultNow(),
+	updatedAt: timestamp('updated_at', { mode: 'string' }).defaultNow()
+});
 
 // =============================================================================
 // API TOKENS TABLE

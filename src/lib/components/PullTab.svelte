@@ -8,8 +8,8 @@
 	import { CheckCircle2, XCircle, Loader2, AlertCircle, Terminal, Sun, Moon, Download } from 'lucide-svelte';
 	import { onMount } from 'svelte';
 	import { appendEnvParam } from '$lib/stores/environment';
-	import { watchJob } from '$lib/utils/sse-fetch';
 	import { formatBytes } from '$lib/utils/format';
+	import { watchJob } from '$lib/utils/sse-fetch';
 
 	interface LayerProgress {
 		id: string;

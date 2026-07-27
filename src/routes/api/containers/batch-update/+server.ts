@@ -1,7 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
-import { listContainers, pullImage, inspectContainer } from '$lib/server/docker';
+import { listContainers, pullImage, inspectContainer, inspectImage } from '$lib/server/docker';
 import { auditContainer } from '$lib/server/audit';
 import { recreateContainer } from '$lib/server/scheduler/tasks/container-update';
 import { isUpdateDisabledByLabel } from '$lib/server/container-labels';
@@ -63,6 +63,16 @@ export const POST: RequestHandler = async (event) => {
 				const imageName = config.Image;
 				const containerName = container.name;
 
+				// Capture the OLD image's Env/Labels BEFORE the pull for the env/label
+				// rebase (#1226, #1256) — the old digest may be GC'd after the pull.
+				let oldImageConfig: { Env?: string[]; Labels?: Record<string, string> } | null = null;
+				try {
+					const oldImg = await inspectImage(inspectData.Image, envIdNum) as any;
+					oldImageConfig = { Env: oldImg?.Config?.Env, Labels: oldImg?.Config?.Labels };
+				} catch {
+					// Best-effort; rebase falls back if unavailable.
+				}
+
 				// Skip containers with dockhand.update=false label
 				if (isUpdateDisabledByLabel(config.Labels)) {
 					results.push({
@@ -89,7 +99,7 @@ export const POST: RequestHandler = async (event) => {
 
 				let newContainerId = containerId;
 
-				const recreateResult = await recreateContainer(containerName, envIdNum);
+				const recreateResult = await recreateContainer(containerName, envIdNum, { oldImageConfig });
 				if (recreateResult.success) {
 					const updatedContainers = await listContainers(true, envIdNum);
 					const updatedContainer = updatedContainers.find(c => c.name === containerName);

@@ -28,20 +28,49 @@ export function resolveQueryAuth(queryAuth: string): string {
 	return `Bearer ${queryAuth}`;
 }
 
+/**
+ * Resolve an Apprise-style ntfy URL to the actual HTTP(S) publish endpoint and any
+ * auth header derived from the path. Pure + exported so the endpoint building —
+ * where the trailing-slash 404 bug lived (#1300) — is unit-testable without fetch.
+ *
+ * Supported forms:
+ *   ntfy://topic                       → https://ntfy.sh/topic   (public)
+ *   ntfy://host/topic                  → http://host/topic
+ *   ntfy://user:pass@host/topic        → http(s), Basic auth
+ *   ntfy://token@host/topic            → http(s), Bearer auth
+ *   ntfys:// variants                  → https
+ * A trailing slash on the topic is stripped: ntfy 404s POST /topic/ (distinct route
+ * from POST /topic), while Apprise tolerates it — so we normalise it away.
+ */
+export function resolveNtfyEndpoint(cleanPath: string, isSecure: boolean): { url: string; authHeader: string | null } {
+	// ntfy treats POST /topic and POST /topic/ as DIFFERENT routes — the latter 404s
+	// with {"code":40401,"http":404,"error":"page not found"} (#1300). Strip it.
+	cleanPath = cleanPath.replace(/\/+$/, '');
+
+	const basicMatch = cleanPath.match(/^([^:]+):([^@]+)@(.+)$/);
+	if (basicMatch) {
+		const [, user, pass, hostAndTopic] = basicMatch;
+		const basic = Buffer.from(`${user}:${pass}`).toString('base64');
+		return { url: `${isSecure ? 'https' : 'http'}://${hostAndTopic}`, authHeader: `Basic ${basic}` };
+	}
+	if (cleanPath.includes('@') && cleanPath.includes('/')) {
+		const tokenMatch = cleanPath.match(/^([^@]+)@(.+)$/);
+		if (tokenMatch) {
+			const [, token, hostAndTopic] = tokenMatch;
+			return { url: `${isSecure ? 'https' : 'http'}://${hostAndTopic}`, authHeader: `Bearer ${token}` };
+		}
+		return { url: `${isSecure ? 'https' : 'http'}://${cleanPath}`, authHeader: null };
+	}
+	if (cleanPath.includes('/')) {
+		return { url: `${isSecure ? 'https' : 'http'}://${cleanPath}`, authHeader: null };
+	}
+	return { url: `https://ntfy.sh/${cleanPath}`, authHeader: null };
+}
+
 export async function sendNtfy(appriseUrl: string, payload: NotificationPayload): Promise<NotificationResult> {
-	// Supported formats:
-	// ntfy://topic (public ntfy.sh)
-	// ntfy://host/topic (custom server, no auth)
-	// ntfy://user:pass@host/topic (custom server with basic auth)
-	// ntfy://token@host/topic (custom server with bearer token)
-	// ntfy://host/topic?auth=TOKEN (raw token, e.g. tk_..., or base64-encoded "Bearer <token>")
-	// Query params: ?tags=ship,whale &title=Custom &priority=5 &email=me@example.com
-	// ntfys:// variants for HTTPS
+	// Query params: ?auth=TOKEN &tags=ship,whale &title=Custom &priority=5 &email=me@example.com
 	const isSecure = appriseUrl.startsWith('ntfys');
 	const path = appriseUrl.replace(/^ntfys?:\/\//, '');
-
-	let url: string;
-	let authHeader: string | null = null;
 
 	let queryAuth: string | null = null;
 	let queryTags: string | null = null;
@@ -60,26 +89,9 @@ export async function sendNtfy(appriseUrl: string, payload: NotificationPayload)
 		cleanPath = path.substring(0, qIndex);
 	}
 
-	const basicMatch = cleanPath.match(/^([^:]+):([^@]+)@(.+)$/);
-	if (basicMatch) {
-		const [, user, pass, hostAndTopic] = basicMatch;
-		const basic = Buffer.from(`${user}:${pass}`).toString('base64');
-		authHeader = `Basic ${basic}`;
-		url = `${isSecure ? 'https' : 'http'}://${hostAndTopic}`;
-	} else if (cleanPath.includes('@') && cleanPath.includes('/')) {
-		const tokenMatch = cleanPath.match(/^([^@]+)@(.+)$/);
-		if (tokenMatch) {
-			const [, token, hostAndTopic] = tokenMatch;
-			authHeader = `Bearer ${token}`;
-			url = `${isSecure ? 'https' : 'http'}://${hostAndTopic}`;
-		} else {
-			url = `${isSecure ? 'https' : 'http'}://${cleanPath}`;
-		}
-	} else if (cleanPath.includes('/')) {
-		url = `${isSecure ? 'https' : 'http'}://${cleanPath}`;
-	} else {
-		url = `https://ntfy.sh/${cleanPath}`;
-	}
+	const endpoint = resolveNtfyEndpoint(cleanPath, isSecure);
+	const url = endpoint.url;
+	let authHeader = endpoint.authHeader;
 
 	if (!authHeader && queryAuth) {
 		authHeader = resolveQueryAuth(queryAuth);

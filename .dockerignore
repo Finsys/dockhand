@@ -1,5 +1,61 @@
-node_modules
-build
-.svelte-kit
-.git
+# Dependencies
+node_modules/
+
+# Build output
+build/
+.svelte-kit/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# CI/CD
+.drone.yml
+deployment/
+
+# Tests
+tests/
+
+# Hawser agent (separate project)
+hawser/
+
+# Updater (separate project)
+updater/
+
+# Test image
+test-image/
+
+# Landing page
+webpage/
+
+# Misc
+.DS_Store
 *.log
+.env
+.env.*
+!.env.example
+
+# Sensitive files
+scripts/keys/
+data/
+*.pem
+*.key
+*.crt
+
+# Documentation
+*.md
+!README.md
+
+# Development files
+docker-compose*.yml
+!docker-compose.yml
+bun.lock
+tsconfig.json
+.prettierrc
+.eslintrc*

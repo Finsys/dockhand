@@ -7,8 +7,12 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { Input } from '$lib/components/ui/input';
 	import { TogglePill } from '$lib/components/ui/toggle-pill';
-	import { Loader2, GitBranch, RefreshCw, Webhook, Rocket, RefreshCcw, Copy, Check, XCircle, FolderGit2, Github, Key, KeyRound, Lock, FileText, CircleQuestionMark, GripVertical, X, Download, Hammer, ArrowDownToLine, Zap, FolderOpen, Ban, TriangleAlert } from 'lucide-svelte';
+	import { Loader2, GitBranch, RefreshCw, Webhook, Rocket, RefreshCcw, Copy, Check, XCircle, FolderGit2, Github, Key, KeyRound, Lock, FileText, CircleQuestionMark, GripVertical, X, Download, Hammer, ArrowDownToLine, Zap, FolderOpen, Ban, TriangleAlert, Settings2, Archive } from 'lucide-svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
+	import { page } from '$app/stores'; // BETA GATE: backups feature flag
+	import BackupPanel from '../containers/BackupPanel.svelte';
+	import { volumesForStack, type VolumeInfo } from '$lib/utils/mounts';
+	import { fetchBackupExecutions } from '$lib/utils/backup';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import CronEditor from '$lib/components/cron-editor.svelte';
 	import StackEnvVarsPanel from '$lib/components/StackEnvVarsPanel.svelte';
@@ -85,6 +89,49 @@
 	let formNewRepoBranch = $state('main');
 	let formNewRepoCredentialId = $state<number | null>(null);
 
+	// Tabs: Settings (the deploy form) and Backups (edit mode + feature flag only).
+	let activeTab = $state<'settings' | 'backups'>('settings');
+	// The stack's volumes, loaded lazily when the Backups tab opens (git stacks
+	// don't otherwise need them). Feeds the backup volume picker.
+	let stackVolumes = $state<VolumeInfo[]>([]);
+	let stackVolumesLoaded = $state(false);
+	// Ok/fail run tally shown on the Backups tab (edit mode only).
+	let backupTally = $state<{ ok: number; failed: number }>({ ok: 0, failed: 0 });
+	let backupTallyLoaded = $state(false);
+	const effectiveEnvId = $derived(gitStack?.environmentId ?? environmentId ?? null);
+
+	async function loadBackupTally() {
+		if (backupTallyLoaded || !gitStack) return;
+		backupTallyLoaded = true;
+		try {
+			const p = new URLSearchParams({ target: formStackName, type: 'stack' });
+			if (effectiveEnvId != null) p.set('env', String(effectiveEnvId));
+			const res = await fetch(`/api/backup/configs?${p}`);
+			if (!res.ok) return;
+			const data = await res.json();
+			const cfgs = Array.isArray(data) ? data : data?.id ? [data] : [];
+			if (cfgs.length > 0) {
+				const t = await fetchBackupExecutions(cfgs.map((c: any) => c.id));
+				backupTally = { ok: t.ok, failed: t.failed };
+			}
+		} catch { /* tally is best-effort */ }
+	}
+
+	async function loadStackVolumes() {
+		if (stackVolumesLoaded) return;
+		stackVolumesLoaded = true;
+		try {
+			const url = effectiveEnvId != null ? `/api/containers?env=${effectiveEnvId}` : '/api/containers';
+			const res = await fetch(url);
+			if (res.ok) stackVolumes = volumesForStack(await res.json(), formStackName);
+		} catch { /* picker just shows "no volumes" — backup still defaults to all */ }
+	}
+
+	// Load volumes the first time the Backups tab is opened.
+	$effect(() => {
+		if (activeTab === 'backups') void loadStackVolumes();
+	});
+
 	// Form state - stack deployment config
 	let formStackName = $state('');
 	let formStackNameUserModified = $state(false);
@@ -104,8 +151,9 @@
 	let showExistsWarning = $state(false);
 	let errors = $state<{ stackName?: string; repository?: string; repoName?: string; repoUrl?: string }>({});
 
-	// Stack name validation: must start with alphanumeric, can contain alphanumeric, hyphens, underscores
-	const STACK_NAME_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/;
+	// Stack name validation: Docker Compose requires lowercase; must start with a
+	// letter or number, and contain only lowercase letters, numbers, hyphens, underscores
+	const STACK_NAME_REGEX = /^[a-z0-9][a-z0-9_-]*$/;
 	let copiedWebhookUrl = $state<'ok' | 'error' | null>(null);
 	let copiedWebhookSecret = $state<'ok' | 'error' | null>(null);
 
@@ -368,6 +416,11 @@
 
 	async function resetForm() {
 		// Clear state BEFORE async loads to avoid race conditions
+		activeTab = 'settings';
+		stackVolumes = [];
+		stackVolumesLoaded = false;
+		backupTally = { ok: 0, failed: 0 };
+		backupTallyLoaded = false;
 		formError = '';
 		errors = {};
 		copiedWebhookUrl = null;
@@ -381,6 +434,7 @@
 			formRepoMode = 'existing';
 			formRepositoryId = gitStack.repositoryId;
 			formStackName = gitStack.stackName;
+			if ($page.data.backupsEnabled) void loadBackupTally();
 			formComposePath = gitStack.composePath;
 			formEnvFilePath = gitStack.envFilePath;
 			formAutoUpdate = gitStack.autoUpdate;
@@ -452,7 +506,7 @@
 			errors.stackName = 'Stack name is required';
 			hasErrors = true;
 		} else if (!STACK_NAME_REGEX.test(trimmedStackName)) {
-			errors.stackName = 'Stack name must start with a letter or number, and contain only letters, numbers, hyphens, and underscores';
+			errors.stackName = 'Stack name must be lowercase, start with a letter or number, and contain only letters, numbers, hyphens, and underscores';
 			hasErrors = true;
 		}
 
@@ -637,6 +691,41 @@
 			</div>
 		</Dialog.Header>
 
+		<!-- Tabs: Settings (deploy form) + Backups. Backups only in edit mode AND when
+		     the backups feature flag is on (BETA GATE) — a git stack must exist before
+		     it can be backed up, and the feature must be enabled. -->
+		{#if gitStack && $page.data.backupsEnabled}
+			<div class="flex items-center gap-1 border-b border-zinc-200 px-5 dark:border-zinc-700 flex-shrink-0">
+				<button
+					type="button"
+					class="relative -mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm transition-colors {activeTab === 'settings' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}"
+					onclick={() => (activeTab = 'settings')}
+				>
+					<Settings2 class="h-3.5 w-3.5" /> Settings
+				</button>
+				<button
+					type="button"
+					class="relative -mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm transition-colors {activeTab === 'backups' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}"
+					onclick={() => (activeTab = 'backups')}
+				>
+					<Archive class="h-3.5 w-3.5" /> Backups
+					{#if backupTally.ok > 0}<span class="inline-flex items-center gap-0.5 rounded-full bg-emerald-500/15 px-1.5 text-[10px] font-medium text-emerald-500"><Check class="w-2.5 h-2.5" />{backupTally.ok}</span>{/if}
+					{#if backupTally.failed > 0}<span class="inline-flex items-center gap-0.5 rounded-full bg-red-500/15 px-1.5 text-[10px] font-semibold text-red-500"><X class="w-2.5 h-2.5" />{backupTally.failed}</span>{/if}
+				</button>
+			</div>
+		{/if}
+
+		{#if activeTab === 'backups' && gitStack && $page.data.backupsEnabled}
+			<div class="min-h-0 flex-1 overflow-auto p-5">
+				<BackupPanel
+					containerName={formStackName}
+					volumes={stackVolumes}
+					type="stack"
+					environmentId={effectiveEnvId ?? undefined}
+					onTally={(t) => (backupTally = t)}
+				/>
+			</div>
+		{:else}
 		<div bind:this={containerRef} class="flex-1 min-h-0 flex {isDraggingSplit ? 'select-none' : ''}">
 			<!-- Left column: Form fields -->
 			<div class="flex-shrink-0 flex flex-col min-w-0 overflow-y-auto" style="width: {splitRatio}%">
@@ -1167,36 +1256,41 @@
 				</StackEnvVarsPanel>
 			</div>
 		</div>
+		{/if}
 
 		<Dialog.Footer class="px-5 py-2.5 border-t border-zinc-200 dark:border-zinc-700 flex-shrink-0">
-			<Button variant="outline" onclick={onClose}>Cancel</Button>
-			{#if gitStack}
-				<Button variant="outline" onclick={() => saveGitStack(true)} disabled={formSaving}>
-					{#if formSaving}
-						<Loader2 class="w-4 h-4 mr-1 animate-spin" />
-						Deploying...
-					{:else}
-						<Rocket class="w-4 h-4" />
-						Save and deploy
-					{/if}
-				</Button>
-				<Button onclick={() => saveGitStack(false)} disabled={formSaving}>
-					{#if formSaving}
-						<Loader2 class="w-4 h-4 mr-1 animate-spin" />
-						Saving...
-					{:else}
-						Save changes
-					{/if}
-				</Button>
-			{:else}
-				<Button onclick={() => saveGitStack(formDeployNow)} disabled={formSaving}>
-					{#if formSaving}
-						<Loader2 class="w-4 h-4 mr-1 animate-spin" />
-						{formDeployNow ? 'Deploying...' : 'Creating...'}
-					{:else}
-						{formDeployNow ? 'Deploy' : 'Create'}
-					{/if}
-				</Button>
+			<Button variant="outline" onclick={onClose}>{activeTab === 'backups' ? 'Close' : 'Cancel'}</Button>
+			<!-- The deploy-form save buttons belong to the Settings tab. On the Backups
+			     tab the backup panel manages its own saving, so only Close is shown. -->
+			{#if activeTab !== 'backups'}
+				{#if gitStack}
+					<Button variant="outline" onclick={() => saveGitStack(true)} disabled={formSaving}>
+						{#if formSaving}
+							<Loader2 class="w-4 h-4 mr-1 animate-spin" />
+							Deploying...
+						{:else}
+							<Rocket class="w-4 h-4" />
+							Save and deploy
+						{/if}
+					</Button>
+					<Button onclick={() => saveGitStack(false)} disabled={formSaving}>
+						{#if formSaving}
+							<Loader2 class="w-4 h-4 mr-1 animate-spin" />
+							Saving...
+						{:else}
+							Save changes
+						{/if}
+					</Button>
+				{:else}
+					<Button onclick={() => saveGitStack(formDeployNow)} disabled={formSaving}>
+						{#if formSaving}
+							<Loader2 class="w-4 h-4 mr-1 animate-spin" />
+							{formDeployNow ? 'Deploying...' : 'Creating...'}
+						{:else}
+							{formDeployNow ? 'Deploy' : 'Create'}
+						{/if}
+					</Button>
+				{/if}
 			{/if}
 		</Dialog.Footer>
 	</Dialog.Content>
