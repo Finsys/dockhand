@@ -126,7 +126,7 @@
 			{#if activeTab === 'git'}<GitTab />{/if}
 		</Tabs.Content>
 
-		<Tabs.Content value="secrets" class="flex-1 min-h-0 overflow-y-auto" pr-3>
+		<Tabs.Content value="secrets" class="flex-1 min-h-0 overflow-y-auto pr-3">
 			{#if activeTab === 'secrets'}<SecretsTab />{/if}
 		</Tabs.Content>
 
