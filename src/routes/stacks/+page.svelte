@@ -1746,13 +1746,35 @@
 					</span>
 				{:else if column.id === 'source'}
 					{#if source.sourceType === 'git'}
-						<span
-							class="inline-flex items-center justify-center gap-1 text-xs px-1.5 py-0.5 rounded-sm bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200 shadow-sm min-w-[5.5rem]"
-							title={source.repository ? `${source.repository.url} (${source.repository.branch})` : 'Deployed from Git repository'}
-						>
-							<GitBranch class="w-3 h-3" />
-							Git
-						</span>
+						{#if source.gitStack?.lastCommit}
+							<Tooltip.Root>
+								<Tooltip.Trigger>
+									<span
+										class="inline-flex items-center justify-center gap-1 text-xs px-1.5 py-0.5 rounded-sm bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200 shadow-sm min-w-[5.5rem]"
+										title={`Commit: ${source.gitStack.lastCommit}${source.repository ? `\n${source.repository.url} (${source.repository.branch})` : ''}`}
+									>
+										<GitBranch class="w-3 h-3" />
+										<span>Git</span>
+										<span class="font-mono text-[10px] opacity-75">{source.gitStack.lastCommit}</span>
+									</span>
+								</Tooltip.Trigger>
+								<Tooltip.Content class="whitespace-nowrap">
+									<code class="text-xs">{source.gitStack.lastCommit}</code>
+									{#if source.repository}
+										<br />
+										<span class="text-xs">{source.repository.url} ({source.repository.branch})</span>
+									{/if}
+								</Tooltip.Content>
+							</Tooltip.Root>
+						{:else}
+							<span
+								class="inline-flex items-center justify-center gap-1 text-xs px-1.5 py-0.5 rounded-sm bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200 shadow-sm min-w-[5.5rem]"
+								title={source.repository ? `${source.repository.url} (${source.repository.branch})` : 'Deployed from Git repository'}
+							>
+								<GitBranch class="w-3 h-3" />
+								Git
+							</span>
+						{/if}
 					{:else if source.sourceType === 'internal'}
 						<span
 							class="inline-flex items-center justify-center gap-1 text-xs px-1.5 py-0.5 rounded-sm bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 shadow-sm min-w-[5.5rem]"
