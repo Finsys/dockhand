@@ -1751,7 +1751,6 @@
 								<Tooltip.Trigger>
 									<span
 										class="inline-flex items-center justify-center gap-1 text-xs px-1.5 py-0.5 rounded-sm bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200 shadow-sm min-w-[5.5rem]"
-										title={`Commit: ${source.gitStack.lastCommit}${source.repository ? `\n${source.repository.url} (${source.repository.branch})` : ''}`}
 									>
 										<GitBranch class="w-3 h-3" />
 										<span>Git</span>
