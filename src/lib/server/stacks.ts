@@ -2212,9 +2212,13 @@ export async function stopStack(
 		return fallback;
 	}
 
+	// Check if this is a git stack - git stacks need useOverrideFile to write .env.dockhand
+	const source = await getStackSource(stackName, envId);
+	const isGitStack = source?.sourceType === 'git';
+
 	const composeResult = await executeComposeCommand(
 		'stop',
-		{ stackName, envId, workingDir: result.stackDir, composePath: result.composePath, envPath: result.envPath },
+		{ stackName, envId, workingDir: result.stackDir, composePath: result.composePath, envPath: result.envPath, useOverrideFile: isGitStack },
 		result.content!,
 		result.nonSecretVars,
 		result.secretVars
@@ -2289,9 +2293,13 @@ export async function downStack(
 		return withContainerFallback(stackName, envId, 'stop');
 	}
 
+	// Check if this is a git stack - git stacks need useOverrideFile to write .env.dockhand
+	const source = await getStackSource(stackName, envId);
+	const isGitStack = source?.sourceType === 'git';
+
 	const composeResult = await executeComposeCommand(
 		'down',
-		{ stackName, envId, removeVolumes, workingDir: result.stackDir, composePath: result.composePath, envPath: result.envPath },
+		{ stackName, envId, removeVolumes, workingDir: result.stackDir, composePath: result.composePath, envPath: result.envPath, useOverrideFile: isGitStack },
 		result.content!,
 		result.nonSecretVars,
 		result.secretVars
