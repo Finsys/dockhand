@@ -7,6 +7,15 @@ import { auditStack } from '$lib/server/audit';
 import { createJobResponse } from '$lib/server/sse';
 import type { RequestHandler } from './$types';
 
+/**
+ * @openapi
+ * summary: List compose stacks (running + database-only entries) for one environment
+ * query: env:integer! Environment id — required, an empty array is returned if omitted
+ * resp-200: array<{name:string!, containers:array<string>!, status:string!, sourceType:string}>
+ * resp-200-example: [{"name":"immich","containers":["immich_server","immich_redis"],"status":"running","sourceType":"git"}]
+ * resp-403: Permission denied, or access denied to this environment (RBAC)
+ * resp-404: Environment not found
+ */
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	const auth = await authorize(cookies);
 
@@ -72,6 +81,18 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 	}
 };
 
+/**
+ * @openapi
+ * summary: Create an internal (non-git) stack; optionally deploy immediately
+ * query: env:integer Environment id to create the stack in
+ * body: {name:string!, compose:string!, start:boolean, envVars:string, rawEnvContent:string, composePath:string, envPath:string}
+ * body-example: {"name":"gitcheck","compose":"services:\n  web:\n    image: nginx:alpine\n","start":true}
+ * resp-200: {success:boolean!, started:boolean!}
+ * resp-200-example: {"success":true,"started":true}
+ * resp-400: Missing/invalid name or compose content
+ * resp-403: Permission denied (RBAC 'stacks:create' missing)
+ * resp-500: Deploy failed (docker compose error) — stack record may still have been created
+ */
 export const POST: RequestHandler = async (event) => {
 	const { request, url, cookies } = event;
 	const auth = await authorize(cookies);

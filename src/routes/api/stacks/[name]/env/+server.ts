@@ -33,6 +33,16 @@ function parseEnvFile(content: string): Record<string, string> {
  * SECURITY: Secrets are returned as '***' (masked) - they are NEVER sent in plain text.
  * Secrets are stored only in the database and injected via shell environment at runtime.
  * The .env file only contains non-secret variables.
+ *
+ * @openapi
+ * summary: Get all environment variables for a stack (secrets masked)
+ * path: name:string! Stack name (as shown in Dockhand, e.g. "gitcheck")
+ * query: env:integer Environment id to scope the lookup; omit for the default/legacy (null) scope
+ * resp-200: {variables:array<{key:string!, value:string!, isSecret:boolean!}>!}
+ * resp-200-desc: Merged non-secret (.env file) + secret (DB, masked) variables for the stack
+ * resp-200-example: {"variables":[{"key":"GITCHECK_PORT","value":"18080","isSecret":false},{"key":"DB_PASSWORD","value":"***","isSecret":true}]}
+ * resp-403: Permission denied or access denied to this environment
+ * resp-500: Unexpected error while loading environment variables
  */
 export const GET: RequestHandler = async ({ params, url, cookies }) => {
 	const auth = await authorize(cookies);
@@ -124,6 +134,19 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
  *
  * If a secret's value is '***' (masked placeholder), the original value
  * from the database is preserved.
+ */
+/**
+ * @openapi
+ * summary: Save environment variables for a stack (secrets go to the DB, non-secrets to .env — see dockhand-stack-env-merge rule)
+ * path: name:string! Stack name
+ * query: env:integer Environment id
+ * body: {variables:array<{key:string!, value:string!, isSecret:boolean}>!}
+ * body-example: {"variables":[{"key":"GITCHECK_MARKER","value":"marker-001","isSecret":false},{"key":"DB_PASSWORD","value":"***","isSecret":true}]}
+ * resp-200: {success:boolean!, count:integer!}
+ * resp-200-example: {"success":true,"count":2}
+ * resp-400: variables missing/not an array, or an entry has an invalid key/value
+ * resp-403: Permission denied or access denied to this environment
+ * resp-500: Unexpected error while saving environment variables
  */
 export const PUT: RequestHandler = async ({ params, url, cookies, request }) => {
 	const auth = await authorize(cookies);

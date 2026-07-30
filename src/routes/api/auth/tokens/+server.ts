@@ -53,6 +53,13 @@ function recordPwFailure(userId: number): void {
 
 /**
  * GET /api/auth/tokens - List the current user's API tokens
+ *
+ * @openapi
+ * summary: List the authenticated user's API tokens (never returns the hash/secret)
+ * resp-200: array<{id:integer!, name:string!, tokenPrefix:string!, lastUsed:string, expiresAt:string, createdAt:string!}>
+ * resp-200-example: [{"id":1,"name":"CI/CD Pipeline","tokenPrefix":"a1b2c3d4","lastUsed":"2027-01-02T08:00:00Z","expiresAt":"2027-01-01T00:00:00Z","createdAt":"2026-06-01T10:00:00Z"}]
+ * resp-400: Authentication is not enabled
+ * resp-401: Not authenticated
  */
 export const GET: RequestHandler = async ({ cookies }) => {
 	const authEnabled = await isAuthEnabled();
@@ -71,6 +78,19 @@ export const GET: RequestHandler = async ({ cookies }) => {
 
 /**
  * POST /api/auth/tokens - Create a new API token
+ *
+ * @openapi
+ * summary: Create a new API token for the authenticated user (requires a session, not a Bearer token)
+ * body: {name:string!, expiresAt:string, password:string}
+ * body-example: {"name":"CI/CD Pipeline","expiresAt":"2027-01-01T00:00:00Z","password":"correct horse battery staple"}
+ * resp-201: {token:string!, id:integer!, tokenPrefix:string!}
+ * resp-201-desc: Token created — the plaintext value is shown ONLY this once and cannot be retrieved again
+ * resp-201-example: {"token":"dh_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx","id":42,"tokenPrefix":"a1b2c3d4"}
+ * resp-400: Invalid body, missing password for local users, or MAX_TOKENS_PER_USER (25) reached
+ * resp-401: Not authenticated
+ * resp-403: Token creation attempted via Bearer auth (session login required) or wrong password
+ * resp-404: User record not found while confirming the password (local provider)
+ * resp-429: Too many failed password confirmation attempts (rate limited)
  */
 export const POST: RequestHandler = async (event) => {
 	const { cookies, request } = event;
