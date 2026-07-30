@@ -1,0 +1,57 @@
+name: OpenAPI spec check
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/routes/**'
+      - 'src/hooks.server.ts'
+      - 'src/routes/+layout.server.ts'
+      - 'scripts/generate-openapi.ts'
+      - 'scripts/openapi/**'
+      - 'package.json'
+  pull_request:
+    paths:
+      - 'src/routes/**'
+      - 'src/hooks.server.ts'
+      - 'src/routes/+layout.server.ts'
+      - 'scripts/generate-openapi.ts'
+      - 'scripts/openapi/**'
+      - 'package.json'
+
+jobs:
+  openapi-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Setup Node (for npx-based validators)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Hard gate: path-param consistency, query/status drift, orphan JSDoc,
+      # and spec validity (@redocly/cli lint) MUST all pass. Coverage (Gate 1)
+      # stays a warning here on purpose — see scripts/generate-openapi.ts and
+      # docs/research/2026-07-30-dockhand-openapi-pr816-refresh.md for the
+      # rationale (un-annotated endpoints must not block the pipeline; they
+      # remain fully functional generic stubs).
+      - name: Generate + validate OpenAPI spec
+        run: npm run generate:openapi:check
+
+      - name: Upload generated spec (debug artifact)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: openapi-spec
+          path: static/openapi.json
+          retention-days: 7
