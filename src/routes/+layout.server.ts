@@ -5,7 +5,7 @@ import { hasAdminUser } from '$lib/server/db';
 import { BACKUPS_ENABLED } from '$lib/server/features';
 
 // Routes that don't require authentication
-const PUBLIC_PATHS = ['/login'];
+const PUBLIC_PATHS = ['/login', '/api/docs'];
 
 export const load: LayoutServerLoad = async ({ cookies, url }) => {
 	const authEnabled = await isAuthEnabled();
