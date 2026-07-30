@@ -17,6 +17,12 @@ import { isEdgeConnected, getAllEdgeConnections } from '$lib/server/hawser';
  * Returns status of the Hawser Edge connection endpoint
  * This is used for health checks and debugging
  */
+/**
+ * @openapi
+ * summary: Report the Hawser Edge WebSocket endpoint status and list currently connected agents
+ * resp-200: {status:string!, message:string!, protocol:string!, activeConnections:integer!, connections:array<{environmentId:integer!, agentId:string, agentName:string, agentVersion:string, dockerVersion:string, hostname:string, capabilities:array<string>, connectedAt:string, lastHeartbeat:string}>!}
+ * resp-200-example: {"status":"ready","message":"Hawser Edge WebSocket endpoint. Connect via WebSocket.","protocol":"wss://<host>/api/hawser/connect","activeConnections":0,"connections":[]}
+ */
 export const GET: RequestHandler = async () => {
 	const connections = getAllEdgeConnections();
 	const connectionList = Array.from(connections.entries()).map(([envId, conn]) => ({
@@ -44,6 +50,12 @@ export const GET: RequestHandler = async () => {
  * POST /api/hawser/connect
  * This is a fallback for non-WebSocket clients.
  * Returns instructions for connecting via WebSocket.
+ */
+/**
+ * @openapi
+ * summary: Fallback for non-WebSocket clients; always advises upgrading to a WebSocket connection
+ * resp-426: This endpoint requires a WebSocket upgrade (ws:// or wss://)
+ * resp-426-example: {"error":"WebSocket required","message":"This endpoint requires a WebSocket connection. Use the ws:// or wss:// protocol.","instructions":["1. Generate a token in Settings","2. Configure the Hawser agent","3. The agent connects automatically"]}
  */
 export const POST: RequestHandler = async () => {
 	return json(

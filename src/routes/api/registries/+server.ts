@@ -5,6 +5,14 @@ import { authorize } from '$lib/server/authorize';
 import { auditRegistry } from '$lib/server/audit';
 import { parseRegistryUrl, DOCKER_HUB_HOSTS } from '$lib/server/docker';
 
+/**
+ * @openapi
+ * summary: List all configured container registries with passwords stripped (only a hasCredentials flag)
+ * resp-200: array<{id:integer!, name:string!, url:string!, isDefault:boolean, hasCredentials:boolean!}>
+ * resp-200-example: [{"id":1,"name":"Docker Hub","url":"https://docker.io","isDefault":true,"hasCredentials":false}]
+ * resp-403: Caller lacks the registries:view permission
+ * resp-500: Failed to read registries
+ */
 export const GET: RequestHandler = async ({ cookies }) => {
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !await auth.can('registries', 'view')) {
@@ -25,6 +33,17 @@ export const GET: RequestHandler = async ({ cookies }) => {
 	}
 };
 
+/**
+ * @openapi
+ * summary: Create a container registry (optionally set it as default); credentials are trimmed and stored encrypted
+ * body: {name:string!, url:string!, username:string, password:string, isDefault:boolean}
+ * body-example: {"name":"GHCR","url":"https://ghcr.io","username":"deploy","password":"***","isDefault":false}
+ * resp-201: {id:integer!, name:string!, url:string!, isDefault:boolean, hasCredentials:boolean!}
+ * resp-201-desc: Registry created
+ * resp-400: Missing name or url, or a duplicate registry name
+ * resp-403: Caller lacks the registries:create permission
+ * resp-500: Failed to create the registry
+ */
 export const POST: RequestHandler = async (event) => {
 	const { request, cookies } = event;
 	const auth = await authorize(cookies);
