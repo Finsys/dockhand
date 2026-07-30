@@ -5,6 +5,14 @@ import { validateSession, isAuthEnabled } from '$lib/server/auth';
 import { lightThemes, darkThemes, fonts, monospaceFonts } from '$lib/themes';
 
 // GET /api/profile/preferences - Get current user's theme preferences
+/**
+ * @openapi
+ * summary: Get the authenticated user's theme preferences
+ * resp-200: {lightTheme:string, darkTheme:string, font:string, fontSize:string, gridFontSize:string, terminalFont:string, editorFont:string}
+ * resp-400: Authentication is not enabled
+ * resp-401: Not authenticated
+ * resp-500: Failed to read the preferences
+ */
 export const GET: RequestHandler = async ({ cookies }) => {
 	if (!(await isAuthEnabled())) {
 		return json({ error: 'Authentication is not enabled' }, { status: 400 });
@@ -25,6 +33,16 @@ export const GET: RequestHandler = async ({ cookies }) => {
 };
 
 // PUT /api/profile/preferences - Update current user's theme preferences
+/**
+ * @openapi
+ * summary: Update the authenticated user's theme preferences (each supplied value is validated against the allowed theme/font/size lists)
+ * body: {lightTheme:string, darkTheme:string, font:string, fontSize:string, gridFontSize:string, terminalFont:string, editorFont:string}
+ * body-example: {"darkTheme":"tokyo-night","font":"inter","fontSize":"normal"}
+ * resp-200: {lightTheme:string, darkTheme:string, font:string, fontSize:string, gridFontSize:string, terminalFont:string, editorFont:string}
+ * resp-400: Authentication is not enabled, or a supplied theme/font/size value is invalid
+ * resp-401: Not authenticated
+ * resp-500: Failed to update the preferences
+ */
 export const PUT: RequestHandler = async ({ request, cookies }) => {
 	if (!(await isAuthEnabled())) {
 		return json({ error: 'Authentication is not enabled' }, { status: 400 });

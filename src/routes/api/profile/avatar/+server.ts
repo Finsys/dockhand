@@ -4,6 +4,16 @@ import { updateUser as dbUpdateUser, getUser } from '$lib/server/db';
 import { validateSession, isAuthEnabled } from '$lib/server/auth';
 
 // POST /api/profile/avatar - Upload avatar (base64 data URL)
+/**
+ * @openapi
+ * summary: Upload the authenticated user's avatar as a base64 image data URL (max ~500KB)
+ * body: {avatar:string!}
+ * body-example: {"avatar":"data:image/png;base64,iVBORw0KGgo..."}
+ * resp-200: {success:boolean!, avatar:string!}
+ * resp-400: Authentication is not enabled, avatar data missing, not an image data URL, or image too large (>500KB)
+ * resp-401: Not authenticated
+ * resp-500: Failed to upload the avatar
+ */
 export const POST: RequestHandler = async ({ request, cookies }) => {
 	if (!(await isAuthEnabled())) {
 		return json({ error: 'Authentication is not enabled' }, { status: 400 });
@@ -45,6 +55,14 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 };
 
 // DELETE /api/profile/avatar - Remove avatar
+/**
+ * @openapi
+ * summary: Remove the authenticated user's avatar
+ * resp-200: {success:boolean!}
+ * resp-400: Authentication is not enabled
+ * resp-401: Not authenticated
+ * resp-500: Failed to remove the avatar
+ */
 export const DELETE: RequestHandler = async ({ cookies }) => {
 	if (!(await isAuthEnabled())) {
 		return json({ error: 'Authentication is not enabled' }, { status: 400 });

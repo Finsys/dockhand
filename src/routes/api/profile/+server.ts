@@ -5,6 +5,15 @@ import { validateSession, hashPassword, isAuthEnabled } from '$lib/server/auth';
 import { invalidateTokenCacheForUser } from '$lib/server/api-tokens';
 
 // GET /api/profile - Get current user's profile
+/**
+ * @openapi
+ * summary: Get the authenticated user's own profile
+ * resp-200: {id:integer!, username:string!, email:string, displayName:string, avatar:string, mfaEnabled:boolean!, isAdmin:boolean!, provider:string!, lastLogin:string, createdAt:string!, updatedAt:string!}
+ * resp-400: Authentication is not enabled
+ * resp-401: Not authenticated
+ * resp-404: User not found
+ * resp-500: Failed to read the profile
+ */
 export const GET: RequestHandler = async ({ cookies }) => {
 	if (!(await isAuthEnabled())) {
 		return json({ error: 'Authentication is not enabled' }, { status: 400 });
@@ -44,6 +53,17 @@ export const GET: RequestHandler = async ({ cookies }) => {
 };
 
 // PUT /api/profile - Update current user's profile
+/**
+ * @openapi
+ * summary: Update the authenticated user's own profile (email/display name, and optionally the password with current-password confirmation)
+ * body: {email:string, displayName:string, currentPassword:string, newPassword:string}
+ * body-example: {"displayName":"Jane Doe","currentPassword":"***","newPassword":"***"}
+ * resp-200: {id:integer!, username:string!, email:string, displayName:string, avatar:string, mfaEnabled:boolean!, isAdmin:boolean!, lastLogin:string, createdAt:string!, updatedAt:string!}
+ * resp-400: Authentication is not enabled, current password missing, new password too short (<8), or current password incorrect
+ * resp-401: Not authenticated
+ * resp-404: User not found
+ * resp-500: Failed to update the profile
+ */
 export const PUT: RequestHandler = async ({ request, cookies }) => {
 	if (!(await isAuthEnabled())) {
 		return json({ error: 'Authentication is not enabled' }, { status: 400 });
