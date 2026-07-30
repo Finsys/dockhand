@@ -4,7 +4,6 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Select from '$lib/components/ui/select';
 	import { Label } from '$lib/components/ui/label';
-	import { Badge } from '$lib/components/ui/badge';
 	import { Input } from '$lib/components/ui/input';
 	import { TogglePill } from '$lib/components/ui/toggle-pill';
 	import { Loader2, GitBranch, RefreshCw, Webhook, Rocket, RefreshCcw, Copy, Check, XCircle, FolderGit2, Github, Key, KeyRound, Lock, FileText, HelpCircle, GripVertical, X, Download, Hammer, ArrowDownToLine, Zap, FolderOpen, Ban, TriangleAlert, Settings2, Archive } from 'lucide-svelte';
@@ -148,6 +147,11 @@
 	let formSaving = $state(false);
 	let showExistsWarning = $state(false);
 	let errors = $state<{ stackName?: string; repository?: string; repoName?: string; repoUrl?: string; webhookSecret?: string }>({});
+
+	// Branch selection
+	let formBranch = $state<string | null>(null);
+	let branches = $state<string[]>([]);
+	let branchesLoading = $state(false);
 
 	// Stack name validation: Docker Compose requires lowercase; must start with a
 	// letter or number, and contain only lowercase letters, numbers, hyphens, underscores
@@ -447,10 +451,11 @@
 			formRepullImages = gitStack.repullImages ?? false;
 			formForceRedeploy = gitStack.forceRedeploy ?? false;
 			formDeployNow = false;
-			formSecretProviderId = null;
-			
-			// Load secret provider binding
-			loadSecretProviderBindingForStack(gitStack.stackName);
+		formSecretProviderId = null;
+		
+		// Load secret provider binding
+		loadSecretProviderBindingForStack(gitStack.stackName);
+		formBranch = selectedRepo?.branch || null;
 
 			// Load env files and overrides SYNCHRONOUSLY to avoid race conditions
 			// Wait for all loads to complete before allowing any other effect to run
@@ -494,6 +499,35 @@
 			formSecretProviderId = source?.secretProviderId ?? null;
 		} catch (e) {
 			console.warn('Failed to load secret provider binding for git stack:', e);
+		}
+	}
+
+	async function fetchBranches() {
+		branchesLoading = true;
+		branches = [];
+		try {
+			const body: Record<string, any> = {};
+			if (formRepoMode === 'existing' && formRepositoryId) {
+				body.repositoryId = formRepositoryId;
+			} else if (formRepoMode === 'new' && formNewRepoUrl) {
+				body.url = formNewRepoUrl;
+				body.credentialId = formNewRepoCredentialId;
+			} else {
+				return;
+			}
+			const response = await fetch('/api/git/branches', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(body)
+			});
+			if (response.ok) {
+				const data = await response.json();
+				branches = data.branches || [];
+			}
+		} catch (e) {
+			console.error('Failed to fetch branches:', e);
+		} finally {
+			branchesLoading = false;
 		}
 	}
 
@@ -615,10 +649,24 @@
 				return;
 			}
 
+			// Update repository branch if changed (when editing existing stack or creating new stack with existing repo)
+			if (selectedRepo && formBranch && formBranch !== selectedRepo.branch) {
+				try {
+					await fetch(`/api/git/repositories/${selectedRepo.id}`, {
+						method: 'PUT',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ name: selectedRepo.name, url: selectedRepo.url, branch: formBranch, credentialId: selectedRepo.credential_id })
+					});
+				} catch (e) {
+					console.error('Failed to update repository branch:', e);
+				}
+			}
+
 			// Check if deployment failed
-			if (data.deployResult && !data.deployResult.success) {
+			const deployResult = data.deployResult as { success?: boolean; error?: string } | undefined;
+			if (deployResult && !deployResult.success) {
 				toast.error('Deployment failed', {
-					description: data.deployResult.error || 'Unknown error'
+					description: deployResult.error || 'Unknown error'
 				});
 				onSaved(); // Still refresh the list to show the new stack
 				onClose(); // Close modal, error shown as toast
@@ -633,6 +681,20 @@
 			formSaving = false;
 		}
 	}
+
+	// Fetch branches when repository selection changes
+	$effect(() => {
+		if (formRepoMode === 'existing' && formRepositoryId) {
+			void fetchBranches();
+			// Set formBranch to the selected repo's default branch
+			const repo = repositories.find(r => r.id === formRepositoryId);
+			if (repo) formBranch = repo.branch;
+		} else if (formRepoMode === 'new' && formNewRepoUrl) {
+			void fetchBranches();
+		} else {
+			branches = [];
+		}
+	});
 
 	// Auto-populate stack name from selected repo and compose path (only if user hasn't manually edited)
 	$effect(() => {
@@ -807,6 +869,34 @@
 								No repositories configured. Click "Add new" to add one.
 							</p>
 						{/if}
+						<!-- Branch selection for existing repository -->
+						{#if formRepoMode === 'existing' && selectedRepo}
+							<div class="space-y-2">
+								<Label for="existing-repo-branch">Branch</Label>
+								<Select.Root type="single" value={formBranch ?? selectedRepo.branch} onValueChange={(v) => { formBranch = v; }}>
+									<Select.Trigger class="w-full">
+										<span class="flex items-center gap-2">
+											<GitBranch class="w-4 h-4 text-muted-foreground" />
+											{#if branchesLoading}
+												<Loader2 class="w-4 h-4 animate-spin" />
+											{:else}
+												{formBranch || selectedRepo.branch}
+											{/if}
+										</span>
+									</Select.Trigger>
+									<Select.Content>
+										{#if branches.length > 0}
+											{#each branches as branch}
+												<Select.Item value={branch}>{branch}</Select.Item>
+											{/each}
+										{:else}
+											<Select.Item value={formBranch || selectedRepo.branch}>{formBranch || selectedRepo.branch}</Select.Item>
+										{/if}
+									</Select.Content>
+								</Select.Root>
+								<p class="text-xs text-muted-foreground">Branch to deploy from</p>
+							</div>
+						{/if}
 					{:else}
 						<div class="space-y-3 p-3 border rounded-md bg-muted/30">
 							<div class="space-y-2">
@@ -838,7 +928,27 @@
 							<div class="grid grid-cols-2 gap-3">
 								<div class="space-y-2">
 									<Label for="new-repo-branch">Branch</Label>
-									<Input id="new-repo-branch" bind:value={formNewRepoBranch} placeholder="main" />
+									<Select.Root type="single" value={formNewRepoBranch || 'main'} onValueChange={(v) => { formNewRepoBranch = v; }}>
+										<Select.Trigger class="w-full">
+											<span class="flex items-center gap-2">
+												<GitBranch class="w-4 h-4 text-muted-foreground" />
+												{#if branchesLoading}
+													<Loader2 class="w-4 h-4 animate-spin" />
+												{:else}
+													{formNewRepoBranch || 'main'}
+												{/if}
+											</span>
+										</Select.Trigger>
+										<Select.Content>
+											{#if branches.length > 0}
+												{#each branches as branch}
+													<Select.Item value={branch}>{branch}</Select.Item>
+												{/each}
+											{:else}
+												<Select.Item value={formNewRepoBranch || 'main'}>{formNewRepoBranch || 'main'}</Select.Item>
+											{/if}
+										</Select.Content>
+									</Select.Root>
 								</div>
 								<div class="space-y-2">
 									<Label for="new-repo-credential">Credential</Label>
@@ -916,10 +1026,35 @@
 					<div class="flex items-center gap-2 text-xs text-muted-foreground bg-muted/50 rounded-md px-3 py-2">
 						<FolderGit2 class="w-3.5 h-3.5 shrink-0" />
 						<span class="truncate" title={selectedRepo.url}>{selectedRepo.url}</span>
-						{#if selectedRepo.branch}
-							<Badge variant="outline" class="text-2xs py-0 px-1.5 shrink-0">{selectedRepo.branch}</Badge>
-						{/if}
 					</div>
+				</div>
+			{/if}
+
+			{#if gitStack && selectedRepo}
+				<div class="space-y-2">
+					<Label for="stack-branch">Branch</Label>
+					<Select.Root type="single" value={formBranch ?? 'main'} onValueChange={(v) => { formBranch = v; }}>
+						<Select.Trigger class="w-full">
+							<span class="flex items-center gap-2">
+								<GitBranch class="w-4 h-4 text-muted-foreground" />
+								{#if branchesLoading}
+									<Loader2 class="w-4 h-4 animate-spin" />
+								{:else}
+									{formBranch || 'main'}
+								{/if}
+							</span>
+						</Select.Trigger>
+						<Select.Content>
+							{#if branches.length > 0}
+								{#each branches as branch}
+									<Select.Item value={branch}>{branch}</Select.Item>
+								{/each}
+							{:else}
+								<Select.Item value={formBranch || 'main'}>{formBranch || 'main'}</Select.Item>
+							{/if}
+						</Select.Content>
+					</Select.Root>
+					<p class="text-xs text-muted-foreground">Branch to deploy from</p>
 				</div>
 			{/if}
 

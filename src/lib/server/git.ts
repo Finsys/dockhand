@@ -225,7 +225,7 @@ async function ensurePasswdEntry(env: GitEnv): Promise<void> {
 	}
 }
 
-async function buildGitEnv(credential: GitCredential | null): Promise<GitEnv> {
+export async function buildGitEnv(credential: GitCredential | null): Promise<GitEnv> {
 	const env: GitEnv = {
 		...process.env as GitEnv,
 		GIT_TERMINAL_PROMPT: '0',
@@ -307,7 +307,7 @@ function cleanupSshKey(credential: GitCredential | null, env?: GitEnv): void {
 	}
 }
 
-function buildRepoUrl(url: string, credential: GitCredential | null): string {
+export function buildRepoUrl(url: string, credential: GitCredential | null): string {
 	assertSafeRepoUrl(url);
 	// Never embed credentials in the URL — they leak via /proc/<pid>/cmdline (see #1081).
 	// HTTPS credentials are injected via GIT_CONFIG_COUNT env vars in buildGitEnv().
@@ -325,7 +325,7 @@ function buildRepoUrl(url: string, credential: GitCredential | null): string {
 	return url;
 }
 
-async function execGit(args: string[], cwd: string, env: GitEnv): Promise<{ stdout: string; stderr: string; code: number }> {
+export async function execGit(args: string[], cwd: string, env: GitEnv): Promise<{ stdout: string; stderr: string; code: number }> {
 	try {
 		const proc = nodeSpawn('git', args, {
 			cwd,
