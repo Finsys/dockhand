@@ -94,8 +94,8 @@ function copySwaggerUiAssets() {
 }
 
 function runGenerate() {
-	const { routes, skipped, publicPaths, isPublicFn, annotationsByPath, version } = loadEverything();
-	const spec = buildSpec({ routes, annotationsByPath, publicPaths, isPublicFn, version });
+	const { routes, skipped, fileContents, publicPaths, isPublicFn, annotationsByPath, version } = loadEverything();
+	const { spec, stats } = buildSpec({ routes, fileContents, annotationsByPath, publicPaths, isPublicFn, version });
 
 	mkdirSync(dirname(OUT_FILE), { recursive: true });
 	writeFileSync(OUT_FILE, JSON.stringify(spec, null, 2));
@@ -112,6 +112,9 @@ function runGenerate() {
 	console.log(`Tags discovered:           ${spec.tags.length}`);
 	console.log(`Public (no-auth) paths:    ${routes.filter((r) => isPublicFn(r.openapiPath)).length}`);
 	console.log(`Annotated handlers:        ${annotatedHandlerCount} of ${totalOperations} (${((annotatedHandlerCount / totalOperations) * 100).toFixed(1)}%)`);
+	console.log(`Operations with parameters (auto+annotated): ${stats.autoParamsCount} of ${totalOperations}`);
+	console.log(`Operations with >1 response (auto+annotated): ${stats.autoMultiResponseCount} of ${totalOperations}`);
+	console.log(`Operations with a requestBody (auto+annotated): ${stats.autoBodyCount} of ${totalOperations}`);
 	console.log(`Skipped files (no method): ${skipped.length}`);
 	for (const s of skipped) console.log(`  - ${relative(ROOT_DIR, s.filePath)}: ${s.reason}`);
 	console.log(`Swagger UI assets copied:  ${assetsCopied ? 'yes (static/swagger-ui/)' : 'SKIPPED (see warning above)'}`);
@@ -124,7 +127,7 @@ function runGenerate() {
 
 function runCheck(): number {
 	const { routes, publicPaths, isPublicFn, annotationsByPath, orphanMarkers, fileContents, version } = loadEverything();
-	const spec = buildSpec({ routes, annotationsByPath, publicPaths, isPublicFn, version });
+	const { spec } = buildSpec({ routes, fileContents, annotationsByPath, publicPaths, isPublicFn, version });
 	const totalOperations = Object.values(spec.paths).reduce((sum, item: any) => sum + Object.keys(item).length, 0);
 	const annotatedHandlerCount = Object.values(annotationsByPath).reduce((sum, m) => sum + Object.keys(m).length, 0);
 
@@ -170,10 +173,10 @@ function runCheck(): number {
 		for (const [method, ann] of Object.entries(perMethod) as [HttpMethod, HandlerAnnotation][]) {
 			const body = bodies[method];
 			if (!body) continue;
-			const analysis = analyzeHandlerBody(body);
+			const analysis = analyzeHandlerBody(body, route.pathParams);
 
 			const docQuery = new Set(Object.keys(ann.query));
-			const codeQuery = new Set(analysis.queryParams);
+			const codeQuery = new Set(analysis.queryParams.map((q) => q.name));
 			for (const q of codeQuery) {
 				if (!docQuery.has(q)) {
 					driftLines.push(`  [Gate 3] ${relative(ROOT_DIR, route.filePath)} ${method} ${route.openapiPath}: query param "${q}" used in code but not documented`);
@@ -271,13 +274,13 @@ function runScaffold() {
 			console.log(`## ${method}: already has an @openapi annotation, skipped\n`);
 			continue;
 		}
-		const analysis = analyzeHandlerBody(body);
+		const analysis = analyzeHandlerBody(body, route?.pathParams ?? []);
 		console.log(`## ${method} ${route?.openapiPath ?? '(path unknown)'}\n`);
 		console.log('/**');
 		console.log(' * @openapi');
 		console.log(' * summary: TODO — one-line description');
 		for (const q of analysis.queryParams) {
-			console.log(` * query: ${q}:string TODO — description (verify required/type)`);
+			console.log(` * query: ${q.name}:${q.type} TODO — description (verify required/type)`);
 		}
 		if (analysis.bodyFields.length > 0) {
 			console.log(` * body: {${analysis.bodyFields.map((f) => `${f}:string`).join(', ')}} # TODO: verify types + required (!) markers`);
