@@ -12,6 +12,17 @@ import { unregisterSchedule } from '$lib/server/scheduler';
 import { validateDockerIdParam } from '$lib/server/docker-validation';
 import type { RequestHandler } from './$types';
 
+/**
+ * GET /api/containers/{id} - Inspect a container
+ *
+ * @openapi
+ * summary: Return the full Docker inspect payload for a single container
+ * path: id:string! Container ID or name
+ * query: env:integer The target environment ID (omit for the local/default Docker host)
+ * resp-200: The raw Docker inspect object for the container
+ * resp-403: Permission denied, or (enterprise) no access to the requested environment
+ * resp-500: Failed to inspect the container (e.g. it no longer exists or the daemon is unreachable)
+ */
 export const GET: RequestHandler = async ({ params, url, cookies }) => {
 	const invalid = validateDockerIdParam(params.id, 'container');
 	if (invalid) return invalid;
@@ -64,6 +75,19 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 	}
 };
 
+/**
+ * DELETE /api/containers/{id} - Remove a container
+ *
+ * @openapi
+ * summary: Remove a container and clean up its auto-update schedule and pending-update record
+ * path: id:string! Container ID or name
+ * query: env:integer The target environment ID (omit for the local/default Docker host)
+ * query: force:boolean Force removal of a running container (Docker force flag)
+ * resp-200: {success:boolean!}
+ * resp-200-example: {"success":true}
+ * resp-403: Permission denied, or (enterprise) no access to the requested environment
+ * resp-500: Failed to remove the container
+ */
 export const DELETE: RequestHandler = async (event) => {
 	const { params, url, cookies } = event;
 	const invalid = validateDockerIdParam(params.id, 'container');

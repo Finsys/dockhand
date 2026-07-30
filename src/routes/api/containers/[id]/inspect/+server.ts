@@ -10,6 +10,17 @@ import {
 	detectImageLabelDivergence
 } from '$lib/server/container-image-divergence';
 
+/**
+ * GET /api/containers/{id}/inspect - Inspect a container
+ *
+ * @openapi
+ * summary: Return the full Docker inspect payload for a container (requires the 'inspect' permission)
+ * path: id:string! Container ID or name
+ * query: env:integer The target environment ID (omit for the local/default Docker host)
+ * resp-200: The raw Docker inspect object for the container
+ * resp-403: Permission denied
+ * resp-500: Failed to inspect the container
+ */
 export const GET: RequestHandler = async ({ params, url, cookies }) => {
 	const invalid = validateDockerIdParam(params.id, 'container');
 	if (invalid) return invalid;

@@ -4,6 +4,18 @@ import { authorize } from '$lib/server/authorize';
 import { validateDockerIdParam } from '$lib/server/docker-validation';
 import type { RequestHandler } from './$types';
 
+/**
+ * GET /api/containers/{id}/logs - Read container logs (non-streaming)
+ *
+ * @openapi
+ * summary: Return the last N lines of a container's combined stdout/stderr logs as a single string
+ * path: id:string! Container ID or name
+ * query: env:integer The target environment ID (omit for the local/default Docker host)
+ * query: tail:integer Number of trailing log lines to return (default 100)
+ * resp-200: {logs:string!}
+ * resp-403: Permission denied
+ * resp-500: Failed to read the container logs
+ */
 export const GET: RequestHandler = async ({ params, url, cookies }) => {
 	const invalid = validateDockerIdParam(params.id, 'container');
 	if (invalid) return invalid;
