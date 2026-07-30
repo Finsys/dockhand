@@ -3,6 +3,13 @@ import { cleanupScannerCache } from '$lib/server/scanner';
 import { authorize } from '$lib/server/authorize';
 import { getEnvironments } from '$lib/server/db';
 
+/**
+ * @openapi
+ * summary: Clear the vulnerability-scanner cache (local volumes/bind-mount dirs plus each remote environment's scanner volume)
+ * resp-200: {success:boolean!, removedVolumes:array<string>!, removedDirs:array<string>!, skippedEnvironments:array<string>!}
+ * resp-403: Permission denied
+ * resp-500: Failed to clear scanner cache
+ */
 export const DELETE: RequestHandler = async ({ cookies }) => {
 	const auth = await authorize(cookies);
 

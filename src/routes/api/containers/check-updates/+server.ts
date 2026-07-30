@@ -68,6 +68,12 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 /**
  * POST = TRIGGER a fresh update check across all containers (job-based).
  * Returns progress events during checking, final result when done.
+ *
+ * @openapi
+ * summary: Trigger a fresh image-update check across all (non-hidden, non-podman-infra) containers in an environment
+ * query: env:integer The target environment ID (omit for the local/default Docker host)
+ * resp-200: text/event-stream job stream ("progress" events with {checked,total}, final "result" event with {total,updatesFound,results}) — or, with "Accept: application/json", the final result as plain JSON
+ * resp-403: Permission denied
  */
 export const POST: RequestHandler = async ({ url, cookies, request }) => {
 	const auth = await authorize(cookies);
