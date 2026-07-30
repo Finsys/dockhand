@@ -20,6 +20,15 @@ import { createJobResponse } from '$lib/server/sse';
 // letter or number, and contain only lowercase letters, numbers, hyphens, underscores
 const STACK_NAME_REGEX = /^[a-z0-9][a-z0-9_-]*$/;
 
+/**
+ * @openapi
+ * summary: List git-backed stacks (optionally scoped to one environment)
+ * query: env:integer Environment id — omitted returns stacks across all environments plus legacy null-scoped ones
+ * resp-200: array<{id:integer!, stackName:string!, environmentId:integer, repositoryId:integer!, composePath:string!, autoUpdate:boolean!, syncStatus:string!}>
+ * resp-200-example: [{"id":1,"stackName":"immich","environmentId":2,"repositoryId":3,"composePath":"compose.yaml","autoUpdate":true,"syncStatus":"synced"}]
+ * resp-403: Permission denied (RBAC 'stacks:view' missing)
+ * resp-500: Unexpected error while loading git stacks
+ */
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	const auth = await authorize(cookies);
 
@@ -41,6 +50,19 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 	}
 };
 
+/**
+ * @openapi
+ * summary: Create a git-backed stack (creating the repository too if url is given instead of repositoryId)
+ * body: {stackName:string!, environmentId:integer, repositoryId:integer, url:string, branch:string, credentialId:integer, composePath:string, envFilePath:string, autoUpdate:boolean, autoUpdateCron:string, webhookEnabled:boolean, envVars:string, deployNow:boolean}
+ * body-example: {"stackName":"immich","environmentId":2,"url":"https://git.example.com/infra/immich.git","branch":"main","composePath":"compose.yaml","deployNow":true,"envVars":[{"key":"TZ","value":"Europe/Berlin","isSecret":false}]}
+ * resp-200: {id:integer!, stackName:string!, environmentId:integer, repositoryId:integer!, syncStatus:string!}
+ * resp-200-desc: With deployNow:true this is the FINAL result of an SSE job stream (includes a nested deployResult); without it, the created record is returned immediately.
+ * resp-200-example: {"id":7,"stackName":"immich","environmentId":2,"repositoryId":3,"syncStatus":"pending"}
+ * resp-400: Invalid stackName/url, duplicate environment-variable keys, or repository/credential not found
+ * resp-403: Permission denied (RBAC 'stacks:create' missing)
+ * resp-409: A stack with this name already exists on this environment
+ * resp-500: Unexpected error while creating the git stack
+ */
 export const POST: RequestHandler = async (event) => {
 	const { request, cookies } = event;
 	const auth = await authorize(cookies);

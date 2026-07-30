@@ -11,6 +11,16 @@ import { createJobResponse } from '$lib/server/sse';
 // Stack name validation: must start with alphanumeric, can contain alphanumeric, hyphens, underscores
 const STACK_NAME_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/;
 
+/**
+ * @openapi
+ * summary: Get a single git stack by its numeric id
+ * path: id:integer! Git stack id
+ * resp-200: {id:integer!, stackName:string!, environmentId:integer, repositoryId:integer!, composePath:string!, syncStatus:string!}
+ * resp-200-example: {"id":7,"stackName":"immich","environmentId":2,"repositoryId":3,"composePath":"compose.yaml","syncStatus":"synced"}
+ * resp-403: Permission denied (RBAC 'stacks:view' missing)
+ * resp-404: Git stack not found
+ * resp-500: Unexpected error while loading the git stack
+ */
 export const GET: RequestHandler = async ({ params, cookies }) => {
 	const auth = await authorize(cookies);
 
@@ -33,6 +43,20 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 	}
 };
 
+/**
+ * @openapi
+ * summary: Update a git stack's configuration; optionally save env-var overrides and/or redeploy
+ * path: id:integer! Git stack id
+ * body: {stackName:string, composePath:string, envFilePath:string, autoUpdate:boolean, autoUpdateCron:string, envVars:string, deployNow:boolean}
+ * body-example: {"autoUpdate":true,"autoUpdateCron":"0 3 * * *","deployNow":false}
+ * resp-200: {id:integer!, stackName:string!, environmentId:integer, syncStatus:string!}
+ * resp-200-desc: With deployNow:true this is the final SSE-job result (includes a nested deployResult).
+ * resp-200-example: {"id":7,"stackName":"immich","environmentId":2,"syncStatus":"synced"}
+ * resp-400: Invalid stackName format, or duplicate environment-variable keys
+ * resp-403: Permission denied (RBAC 'stacks:edit' missing)
+ * resp-404: Git stack not found
+ * resp-500: Unexpected error while updating the git stack
+ */
 export const PUT: RequestHandler = async (event) => {
 	const { params, request, cookies } = event;
 	const auth = await authorize(cookies);
@@ -178,6 +202,16 @@ export const PUT: RequestHandler = async (event) => {
 	}
 };
 
+/**
+ * @openapi
+ * summary: Delete a git stack (removes git files, the stack_sources record, and env var overrides)
+ * path: id:integer! Git stack id
+ * resp-200: {success:boolean!}
+ * resp-200-example: {"success":true}
+ * resp-403: Permission denied (RBAC 'stacks:remove' missing)
+ * resp-404: Git stack not found
+ * resp-500: Unexpected error while deleting the git stack
+ */
 export const DELETE: RequestHandler = async (event) => {
 	const { params, cookies } = event;
 	const auth = await authorize(cookies);

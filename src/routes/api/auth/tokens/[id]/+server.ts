@@ -8,6 +8,16 @@ import { audit } from '$lib/server/audit';
 
 /**
  * DELETE /api/auth/tokens/[id] - Revoke an API token
+ *
+ * @openapi
+ * summary: Revoke (permanently delete) one of the authenticated user's API tokens
+ * path: id:integer! Token id (from GET /api/auth/tokens)
+ * resp-200: {success:boolean!}
+ * resp-200-example: {"success":true}
+ * resp-400: Authentication not enabled, or id is not a valid integer
+ * resp-401: Not authenticated
+ * resp-403: Attempted via Bearer auth (a leaked token cannot revoke other tokens — session required)
+ * resp-404: Token not found, or belongs to a different (non-admin) user
  */
 export const DELETE: RequestHandler = async (event) => {
 	const { cookies, params } = event;
