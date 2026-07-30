@@ -21,6 +21,7 @@ import type { RequestHandler } from './$types';
  * query: env:integer The target environment ID (omit for the local/default Docker host)
  * resp-200: The raw Docker inspect object for the container
  * resp-403: Permission denied, or (enterprise) no access to the requested environment
+ * resp-404: Container not found
  * resp-500: Failed to inspect the container (e.g. it no longer exists or the daemon is unreachable)
  */
 export const GET: RequestHandler = async ({ params, url, cookies }) => {
@@ -86,6 +87,7 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
  * resp-200: {success:boolean!}
  * resp-200-example: {"success":true}
  * resp-403: Permission denied, or (enterprise) no access to the requested environment
+ * resp-404: Container not found
  * resp-500: Failed to remove the container
  */
 export const DELETE: RequestHandler = async (event) => {

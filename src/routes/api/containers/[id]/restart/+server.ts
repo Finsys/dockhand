@@ -15,6 +15,7 @@ import type { RequestHandler } from './$types';
  * resp-200: {success:boolean!}
  * resp-200-example: {"success":true}
  * resp-403: Permission denied, or (enterprise) no access to the requested environment
+ * resp-404: Container not found
  * resp-500: Failed to restart the container
  */
 export const POST: RequestHandler = async (event) => {

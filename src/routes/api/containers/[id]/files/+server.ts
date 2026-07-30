@@ -15,6 +15,7 @@ import type { RequestHandler } from './$types';
  * query: simpleLs:boolean Use a lightweight `ls` listing instead of a full stat of each entry
  * resp-200: Directory listing (entries with name, type, size and permission metadata)
  * resp-403: Permission denied
+ * resp-404: Container not found
  * resp-500: Failed to list the directory
  */
 export const GET: RequestHandler = async ({ params, url, cookies }) => {
