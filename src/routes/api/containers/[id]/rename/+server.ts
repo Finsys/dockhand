@@ -19,6 +19,7 @@ import type { RequestHandler } from './$types';
  * resp-200-example: {"success":true}
  * resp-400: The new name is missing or not a string
  * resp-403: Permission denied
+ * resp-404: Container not found
  * resp-500: Failed to rename the container
  */
 export const POST: RequestHandler = async (event) => {

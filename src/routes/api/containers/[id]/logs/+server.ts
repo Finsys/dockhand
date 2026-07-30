@@ -12,6 +12,8 @@ import type { RequestHandler } from './$types';
  * path: id:string! Container ID or name
  * query: env:integer The target environment ID (omit for the local/default Docker host)
  * query: tail:integer Number of trailing log lines to return (default 100)
+ * query: since:string Only return logs since this time (Unix timestamp or Docker duration, e.g. 10m)
+ * query: until:string Only return logs before this time (Unix timestamp or Docker duration)
  * resp-200: {logs:string!}
  * resp-403: Permission denied
  * resp-500: Failed to read the container logs

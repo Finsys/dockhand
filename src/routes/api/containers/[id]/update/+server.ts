@@ -19,6 +19,7 @@ import type { RequestHandler } from './$types';
  * resp-200: {success:boolean!, id:string!}
  * resp-200-example: {"success":true,"id":"3f4a1c2b9d8e"}
  * resp-403: Permission denied
+ * resp-404: Container not found
  * resp-500: Failed to update the container (e.g. the image pull or recreation failed)
  */
 export const POST: RequestHandler = async (event) => {

@@ -263,6 +263,8 @@ async function handleEdgeLogsStream(containerId: string, tail: string, environme
  * path: id:string! Container ID or name
  * query: env:integer The target environment ID (omit for the local/default Docker host)
  * query: tail:string Number of trailing log lines to prime the stream with (default "100")
+ * query: since:string Only stream logs since this time (Unix timestamp or Docker duration, e.g. 10m)
+ * query: until:string Only stream logs before this time (Unix timestamp or Docker duration)
  * resp-200: Server-Sent Events stream (text/event-stream) of log lines
  * resp-403: Permission denied
  */
