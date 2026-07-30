@@ -11,7 +11,7 @@ import type { RequestHandler } from './$types';
  * @openapi
  * summary: Poll a background job's status and accumulated output lines (no auth — job ids are unguessable UUIDs)
  * path: id:string! Job id (UUID)
- * resp-200: {id:string!, status:string!, lines:array<string>!, result:{}}
+ * resp-200: {id:string!, status:string!, lines:array<{event:string, data:{}}>!, result:{}}
  * resp-404: Job not found
  */
 export const GET: RequestHandler = async ({ params }) => {

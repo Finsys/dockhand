@@ -9,7 +9,7 @@ import type { RequestHandler } from './$types';
  *
  * @openapi
  * summary: List the Docker images of an environment (returns an empty array when no env is given or Docker is unreachable)
- * query: env:integer! ID of the environment whose images to list
+ * query: env:integer ID of the environment whose images to list
  * resp-200: array<{Id:string!, RepoTags:array<string>, Size:integer, Created:integer}>
  * resp-200-desc: Array of images (empty if no env is specified or the Docker connection fails)
  * resp-200-example: [{"Id":"sha256:abc123","RepoTags":["nginx:latest"],"Size":142000000,"Created":1719830400}]

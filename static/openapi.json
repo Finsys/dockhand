@@ -3894,11 +3894,11 @@
           {
             "name": "env",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
               "type": "integer"
             },
-            "description": "Environment id — required, an empty array is returned if omitted"
+            "description": "Environment id — an empty array is returned if omitted"
           }
         ],
         "responses": {
@@ -5097,7 +5097,7 @@
         "tags": [
           "stacks"
         ],
-        "summary": "Save environment variables for a stack (secrets go to the DB, non-secrets to .env — see dockhand-stack-env-merge rule)",
+        "summary": "Save environment variables for a stack (secrets stored encrypted in the DB, non-secrets written to the on-disk .env)",
         "parameters": [
           {
             "name": "name",
@@ -5986,7 +5986,16 @@
                     "lines": {
                       "type": "array",
                       "items": {
-                        "type": "string"
+                        "type": "object",
+                        "properties": {
+                          "event": {
+                            "type": "string"
+                          },
+                          "data": {
+                            "type": "object",
+                            "properties": {}
+                          }
+                        }
                       }
                     },
                     "result": {
@@ -6004,7 +6013,10 @@
                   "id": "string",
                   "status": "string",
                   "lines": [
-                    "string"
+                    {
+                      "event": "string",
+                      "data": {}
+                    }
                   ],
                   "result": {}
                 }
@@ -6917,7 +6929,7 @@
           {
             "name": "env",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
               "type": "integer"
             },
@@ -11243,7 +11255,7 @@
           {
             "name": "env",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
               "type": "integer"
             },
@@ -13882,7 +13894,7 @@
           {
             "name": "env",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
               "type": "integer"
             },
@@ -14892,7 +14904,7 @@
           {
             "name": "env",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
               "type": "integer"
             },
@@ -14953,7 +14965,7 @@
           {
             "name": "env",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
               "type": "integer"
             },
@@ -15032,7 +15044,7 @@
           {
             "name": "env",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
               "type": "integer"
             },
@@ -15119,7 +15131,7 @@
           {
             "name": "env",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
               "type": "integer"
             },
@@ -15234,7 +15246,7 @@
           {
             "name": "env",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
               "type": "integer"
             },
@@ -15337,7 +15349,7 @@
           {
             "name": "env",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
               "type": "integer"
             },
@@ -15415,7 +15427,7 @@
           {
             "name": "env",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
               "type": "integer"
             },
@@ -15509,7 +15521,7 @@
           {
             "name": "env",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
               "type": "integer"
             },
@@ -15593,7 +15605,7 @@
           {
             "name": "env",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
               "type": "integer"
             },
@@ -17620,7 +17632,7 @@
           {
             "name": "env",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
               "type": "integer"
             },
@@ -18081,11 +18093,11 @@
           {
             "name": "env",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
               "type": "integer"
             },
-            "description": "Environment id"
+            "description": "Environment id — an immediate \"done\" event is sent if omitted or no environments are configured"
           }
         ],
         "responses": {

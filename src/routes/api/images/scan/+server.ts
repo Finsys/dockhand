@@ -10,7 +10,7 @@ import { createJobResponse } from '$lib/server/sse';
  *
  * @openapi
  * summary: Start a vulnerability scan of an image and stream scan progress as Server-Sent Events, persisting the results
- * query: env:integer! ID of the environment the image belongs to
+ * query: env:integer ID of the environment the image belongs to
  * body: {imageName:string!, scanner:string}
  * body-example: {"imageName":"nginx:latest","scanner":"grype"}
  * resp-200: A Server-Sent Events stream of scan progress, ending with a "result" event
@@ -75,7 +75,7 @@ export const POST: RequestHandler = async ({ request, url, cookies }) => {
  *
  * @openapi
  * summary: Return the latest cached vulnerability scan for an image, resolving its tag to a SHA256 ID
- * query: env:integer! ID of the environment the image belongs to
+ * query: env:integer ID of the environment the image belongs to
  * query: image:string! Image name or ID to look up cached results for
  * query: scanner:string Restrict the lookup to a specific scanner (e.g. grype or trivy)
  * resp-200: {found:boolean!, result:object}

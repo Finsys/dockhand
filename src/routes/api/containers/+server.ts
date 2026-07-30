@@ -9,7 +9,7 @@ import type { RequestHandler } from './$types';
 /**
  * @openapi
  * summary: List containers for one environment (dockhand.hidden=true label is filtered out)
- * query: env:integer! Environment id — an empty array is returned if omitted
+ * query: env:integer Environment id — an empty array is returned if omitted
  * query: all:boolean Include stopped containers (default true; pass "false" to only show running ones)
  * resp-200: array<{id:string!, name:string!, image:string!, state:string!, status:string!}>
  * resp-200-example: [{"id":"a1b2c3d4e5f6","name":"immich_server","image":"ghcr.io/immich-app/immich-server:latest","state":"running","status":"Up 2 hours (healthy)"}]
