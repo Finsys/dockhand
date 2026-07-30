@@ -24,6 +24,15 @@ export interface UpdateCheckResult {
  * GET = READ the cached result of the last update check (no side effects, does NOT
  * trigger a new check). Returns the containers currently flagged as having a pending
  * image update. Use POST (below) to actually run a fresh check. (issue #1266)
+ *
+ * @openapi
+ * summary: Read the cached pending image-update records for an environment (no fresh check; requires the 'view' permission)
+ * description: Returns the containers currently flagged as having a pending image update from the last check. Does not trigger a new check — use POST to run a fresh check.
+ * query: env:integer The target environment ID (omit for the local/default Docker host)
+ * resp-200: {environmentId:integer!, pendingUpdates:array<{containerId:string!, containerName:string!, currentImage:string!, checkedAt:string}>!}
+ * resp-400: Environment ID required
+ * resp-403: Permission denied
+ * resp-500: Failed to get pending updates
  */
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	const auth = await authorize(cookies);
