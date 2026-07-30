@@ -212,6 +212,13 @@ function parseScannerDnsStorage(raw: string | null | undefined): string[] {
 	return trimmed.split(',').map((s) => s.trim()).filter(Boolean);
 }
 
+/**
+ * @openapi
+ * summary: Get the global general settings (UI preferences, retention/cleanup schedules, monitoring intervals, theme defaults, stack paths)
+ * resp-200: {confirmDestructive:boolean!, showStoppedContainers:boolean!, highlightUpdates:boolean!, timeFormat:string!, dateFormat:string!, downloadFormat:string!, defaultGrypeArgs:string!, defaultTrivyArgs:string!, scheduleRetentionDays:integer!, eventRetentionDays:integer!, scheduleCleanupCron:string!, eventCleanupCron:string!, scheduleCleanupEnabled:boolean!, eventCleanupEnabled:boolean!, logBufferSizeKb:integer!, defaultTimezone:string!, eventCollectionMode:string!, eventPollInterval:integer!, metricsCollectionInterval:integer!, lightTheme:string!, darkTheme:string!, font:string!, fontSize:string!, gridFontSize:string!, terminalFont:string!, editorFont:string!, externalStackPaths:array<string>, primaryStackLocation:string}
+ * resp-401: Authentication required (auth is enabled and the caller is not authenticated)
+ * resp-500: Failed to read the general settings
+ */
 export const GET: RequestHandler = async ({ cookies }) => {
 	const auth = await authorize(cookies);
 	// UI preferences (time format, date format) should be available to all authenticated users
@@ -385,6 +392,15 @@ export const GET: RequestHandler = async ({ cookies }) => {
 	}
 };
 
+/**
+ * @openapi
+ * summary: Update the global general settings (only supplied, valid fields are persisted; returns the full effective settings)
+ * body: {confirmDestructive:boolean, showStoppedContainers:boolean, highlightUpdates:boolean, timeFormat:string, dateFormat:string, downloadFormat:string, defaultGrypeArgs:string, defaultTrivyArgs:string, scheduleRetentionDays:integer, eventRetentionDays:integer, scheduleCleanupCron:string, eventCleanupCron:string, scheduleCleanupEnabled:boolean, eventCleanupEnabled:boolean, logBufferSizeKb:integer, defaultTimezone:string, eventCollectionMode:string, eventPollInterval:integer, metricsCollectionInterval:integer, lightTheme:string, darkTheme:string, font:string, fontSize:string, gridFontSize:string, terminalFont:string, editorFont:string, externalStackPaths:array<string>, primaryStackLocation:string}
+ * body-example: {"confirmDestructive":true,"timeFormat":"24h","dateFormat":"DD.MM.YYYY","eventCollectionMode":"stream","metricsCollectionInterval":30000}
+ * resp-200: {confirmDestructive:boolean!, showStoppedContainers:boolean!, highlightUpdates:boolean!, timeFormat:string!, dateFormat:string!, downloadFormat:string!, defaultGrypeArgs:string!, defaultTrivyArgs:string!, scheduleRetentionDays:integer!, eventRetentionDays:integer!, scheduleCleanupCron:string!, eventCleanupCron:string!, scheduleCleanupEnabled:boolean!, eventCleanupEnabled:boolean!, logBufferSizeKb:integer!, defaultTimezone:string!, eventCollectionMode:string!, eventPollInterval:integer!, metricsCollectionInterval:integer!, lightTheme:string!, darkTheme:string!, font:string!, fontSize:string!, gridFontSize:string!, terminalFont:string!, editorFont:string!, externalStackPaths:array<string>, primaryStackLocation:string}
+ * resp-403: Permission denied (missing settings:edit)
+ * resp-500: Failed to save the general settings
+ */
 export const POST: RequestHandler = async ({ request, cookies }) => {
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !await auth.can('settings', 'edit')) {

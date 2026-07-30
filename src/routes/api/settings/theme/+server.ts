@@ -19,6 +19,12 @@ const DEFAULT_THEME_SETTINGS = {
 	actionIconSize: 'normal'
 };
 
+/**
+ * @openapi
+ * summary: Get the app-level theme settings (public — used by the login page before authentication); defaults are returned on error
+ * resp-200: {lightTheme:string!, darkTheme:string!, font:string!, fontSize:string!, gridFontSize:string!, terminalFont:string!, editorFont:string!}
+ * resp-200-example: {"lightTheme":"default","darkTheme":"default","font":"system","fontSize":"normal","gridFontSize":"normal","terminalFont":"system-mono","editorFont":"system-mono"}
+ */
 export const GET: RequestHandler = async () => {
 	try {
 		const [

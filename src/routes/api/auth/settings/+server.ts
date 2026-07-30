@@ -6,6 +6,15 @@ import { authorize } from '$lib/server/authorize';
 
 // GET /api/auth/settings - Get auth settings
 // Public when auth is disabled, requires authentication when enabled
+/**
+ * @openapi
+ * summary: Get the global authentication settings (whether auth is enabled and the default provider)
+ * resp-200: {authEnabled:boolean!, defaultProvider:string}
+ * resp-200-example: {"authEnabled":true,"defaultProvider":"local"}
+ * resp-401: Authentication required (auth is enabled and the caller is not authenticated)
+ * resp-403: Permission denied (missing settings:view)
+ * resp-500: Failed to read the auth settings
+ */
 export const GET: RequestHandler = async ({ cookies }) => {
 	const auth = await authorize(cookies);
 
@@ -30,6 +39,17 @@ export const GET: RequestHandler = async ({ cookies }) => {
 
 // PUT /api/auth/settings - Update auth settings
 // Requires authentication and settings:edit permission
+/**
+ * @openapi
+ * summary: Update the global authentication settings (enabling auth requires at least one admin/user to exist)
+ * body: {authEnabled:boolean, defaultProvider:string}
+ * body-example: {"authEnabled":true,"defaultProvider":"local"}
+ * resp-200: {authEnabled:boolean!, defaultProvider:string}
+ * resp-400: Cannot enable authentication without an existing user/admin (response includes requiresUser:true)
+ * resp-401: Authentication required (auth is enabled and the caller is not authenticated)
+ * resp-403: Permission denied (missing settings:edit)
+ * resp-500: Failed to update the auth settings
+ */
 export const PUT: RequestHandler = async ({ request, cookies }) => {
 	const auth = await authorize(cookies);
 
