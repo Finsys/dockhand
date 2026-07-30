@@ -4,6 +4,12 @@ import { authorize } from '$lib/server/authorize';
 import { json } from '@sveltejs/kit';
 
 
+/**
+ * @openapi
+ * summary: Stream live container activity and environment-status events over Server-Sent Events
+ * resp-200: Server-Sent Events stream (text/event-stream) emitting connected, heartbeat, activity and env_status events
+ * resp-403: Permission denied (requires the activity:view permission)
+ */
 export const GET: RequestHandler = async ({ cookies }) => {
 	const auth = await authorize(cookies);
 

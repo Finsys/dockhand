@@ -2,6 +2,12 @@ import type { RequestHandler } from './$types';
 import { authorize, enterpriseRequired } from '$lib/server/authorize';
 import { auditEvents, type AuditEventData } from '$lib/server/audit-events';
 
+/**
+ * @openapi
+ * summary: Stream live audit-log events over Server-Sent Events (Enterprise only)
+ * resp-200: Server-Sent Events stream (text/event-stream) emitting connected, heartbeat and audit events
+ * resp-403: Enterprise required, or permission denied
+ */
 export const GET: RequestHandler = async ({ cookies }) => {
 	const auth = await authorize(cookies);
 
