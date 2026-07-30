@@ -6,6 +6,16 @@ import { authorize } from '$lib/server/authorize';
 import { auditGitStack } from '$lib/server/audit';
 import { createJobResponse } from '$lib/server/sse';
 
+/**
+ * @openapi
+ * summary: Deploy a git stack, streaming the deploy log as SSE result events via the job-response channel
+ * path: id:integer! Git stack ID
+ * resp-200: {}
+ * resp-200-desc: An SSE stream whose final `result` event carries {success, error}
+ * resp-403: Caller lacks the stacks:start permission for the stack's environment
+ * resp-404: No git stack exists with that ID
+ * resp-500: Failed to start the deployment
+ */
 export const POST: RequestHandler = async (event) => {
 	const { params, cookies } = event;
 	const auth = await authorize(cookies);
