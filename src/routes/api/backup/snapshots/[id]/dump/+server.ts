@@ -7,6 +7,22 @@ import { dumpSnapshotFile, dumpSnapshotFileBytes, dumpSnapshotArchive } from '$l
 import { guardSnapshotEnvAccess } from '$lib/server/backups/route-guards';
 import { parseSnapshotLayout, redactSnapshotLayout } from '$lib/server/backups/snapshot-layout';
 
+/**
+ * GET /api/backup/snapshots/{id}/dump - Read or download a file/directory from a snapshot
+ *
+ * @openapi
+ * summary: Dump a file or directory from a snapshot — inline JSON preview for text files, or a raw binary download (octet-stream for files, tar for directories) when download=1
+ * description: Paths are restricted to the /volumes and /metadata snapshot roots and rejected if they contain traversal ("..").
+ * path: id:string! Restic snapshot id
+ * query: destinationId:integer! Destination holding the snapshot (required)
+ * query: path:string! Path inside the snapshot to read (must be under /volumes or /metadata)
+ * query: download:string Set to "1" to download raw bytes instead of an inline preview
+ * query: type:string Set to "directory" to download a directory as a tar archive (with download=1)
+ * resp-200: Inline preview returns { content } (JSON); with download=1 the body is the raw file bytes (application/octet-stream) or a tar archive (application/x-tar)
+ * resp-400: Missing/invalid destinationId, missing path, an invalid snapshot id, or a path outside the allowed roots / containing traversal
+ * resp-403: Permission denied — requires "backups:view", or no access to the snapshot's owning environment
+ * resp-500: Failed to read the file/directory from the snapshot (restic error)
+ */
 export const GET: RequestHandler = async ({ params, url, cookies }) => {
 	const auth = await authorize(cookies);
 	const denied = await requireBackups(auth, 'view');

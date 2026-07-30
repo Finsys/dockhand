@@ -7,6 +7,19 @@ import { getSnapshotMetadata } from '$lib/server/backups';
 import { guardSnapshotEnvAccess } from '$lib/server/backups/route-guards';
 import { redactSnapshotLayout } from '$lib/server/backups/snapshot-layout';
 
+/**
+ * GET /api/backup/snapshots/{id}/metadata - Get a snapshot's stored metadata
+ *
+ * @openapi
+ * summary: Fetch the stored metadata for a snapshot, with a server-authoritative environment access gate
+ * path: id:string! Restic snapshot id
+ * query: destinationId:integer! Destination holding the snapshot (required)
+ * resp-200: The snapshot metadata object
+ * resp-400: Missing/invalid destinationId or an invalid snapshot id
+ * resp-403: Permission denied — requires "backups:view", or no access to the snapshot's owning environment
+ * resp-404: No metadata available for this snapshot
+ * resp-500: Failed to read the snapshot metadata (restic error)
+ */
 export const GET: RequestHandler = async ({ params, url, cookies }) => {
 	const auth = await authorize(cookies);
 	const denied = await requireBackups(auth, 'view');

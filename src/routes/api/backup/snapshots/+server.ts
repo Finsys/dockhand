@@ -6,6 +6,21 @@ import { getBackupConfig, getBackupDestinations } from '$lib/server/db';
 import { listSnapshots } from '$lib/server/backups';
 import { filterSnapshotsByEnvAccess } from '$lib/server/backups/route-guards';
 
+/**
+ * GET /api/backup/snapshots - List snapshots for a config or destination
+ *
+ * @openapi
+ * summary: List backup snapshots, either for a specific backup config or across a destination; exactly one of configId or destinationId is required
+ * description: When allDestinations=true (with configId) all destinations are searched and a partial result is signalled via the X-Incomplete-Destinations response header. Enterprise callers only see snapshots for environments they can access.
+ * query: configId:integer List snapshots for this backup configuration (matched by its stable config-id tag)
+ * query: destinationId:integer List all snapshots in this destination (mutually exclusive with configId)
+ * query: allDestinations:boolean When "true" (with configId), search this config's snapshots across every destination
+ * resp-200: Array of snapshot objects
+ * resp-400: Neither configId nor destinationId supplied, or an invalid configId/destinationId
+ * resp-403: Permission denied — requires "backups:view", or no access to the config's environment
+ * resp-404: Backup configuration not found (when configId is supplied)
+ * resp-500: Failed to list snapshots (restic error)
+ */
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	const auth = await authorize(cookies);
 	const denied = await requireBackups(auth, 'view');
