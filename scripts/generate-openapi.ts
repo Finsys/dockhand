@@ -1,0 +1,304 @@
+#!/usr/bin/env bun
+/**
+ * OpenAPI 3.0 generator / CI-checker / annotation-scaffolder for Dockhand.
+ *
+ * Three modes, one engine (scripts/openapi/{lib,build-spec}.ts):
+ *
+ *   bun run scripts/generate-openapi.ts                 -> writes static/openapi.json
+ *   bun run scripts/generate-openapi.ts --check          -> CI gate, exits non-zero on drift
+ *   bun run scripts/generate-openapi.ts --check --strict-coverage
+ *                                                         -> also fails on <100% @openapi coverage
+ *   bun run scripts/generate-openapi.ts --scaffold <file> -> prints a code-grounded JSDoc draft
+ *                                                            for every un-annotated handler in <file>
+ *
+ * Path/method/tag/auth are derived automatically from the SvelteKit route
+ * tree (src/routes/**\/+server.ts, ANY depth — not just src/routes/api,
+ * this also picks up src/routes/metrics and src/routes/audit* for free) and
+ * from hooks.server.ts PUBLIC_PATHS. Adding a new endpoint costs ZERO manual
+ * spec edits for those fields. Request/response schemas + examples come from
+ * an optional, additive `@openapi` JSDoc block — see scripts/openapi/lib.ts
+ * for the full grammar.
+ */
+
+import { execFileSync } from 'node:child_process';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, copyFileSync } from 'node:fs';
+import { dirname, join, relative } from 'node:path';
+import {
+	type HandlerAnnotation,
+	type HttpMethod,
+	analyzeHandlerBody,
+	countRawMarkers,
+	discoverRoutes,
+	extractPublicPaths,
+	isPublic,
+	parseAnnotations,
+	splitMethodBodies
+} from './openapi/lib';
+import { buildSpec } from './openapi/build-spec';
+
+const ROOT_DIR = join(import.meta.dir, '..');
+const ROUTES_ROOT = join(ROOT_DIR, 'src', 'routes');
+const HOOKS_FILE = join(ROOT_DIR, 'src', 'hooks.server.ts');
+const PACKAGE_JSON = join(ROOT_DIR, 'package.json');
+const OUT_FILE = join(ROOT_DIR, 'static', 'openapi.json');
+
+const args = process.argv.slice(2);
+const mode = args.includes('--check') ? 'check' : args.includes('--scaffold') ? 'scaffold' : 'generate';
+const strictCoverage = args.includes('--strict-coverage');
+
+function loadEverything() {
+	const { routes, skipped, fileContents } = discoverRoutes([ROUTES_ROOT], ROUTES_ROOT);
+	const publicPaths = extractPublicPaths(HOOKS_FILE);
+	const isPublicFn = (p: string) => isPublic(p, publicPaths);
+
+	const annotationsByPath: Record<string, Partial<Record<HttpMethod, HandlerAnnotation>>> = {};
+	const orphanMarkers: { filePath: string; rawCount: number; matchedCount: number }[] = [];
+
+	for (const route of routes) {
+		const content = fileContents.get(route.filePath) ?? readFileSync(route.filePath, 'utf-8');
+		const annotations = parseAnnotations(content);
+		if (Object.keys(annotations).length > 0) annotationsByPath[route.openapiPath] = annotations;
+
+		const rawCount = countRawMarkers(content);
+		const matchedCount = Object.keys(annotations).length;
+		if (rawCount !== matchedCount) orphanMarkers.push({ filePath: route.filePath, rawCount, matchedCount });
+	}
+
+	const pkg = JSON.parse(readFileSync(PACKAGE_JSON, 'utf-8'));
+
+	return { routes, skipped, fileContents, publicPaths, isPublicFn, annotationsByPath, orphanMarkers, version: pkg.version ?? '0.0.0' };
+}
+
+// ---------------------------------------------------------------------------
+// generate
+// ---------------------------------------------------------------------------
+
+// Self-hosted Swagger UI assets: copy the handful of static files we actually
+// need out of the swagger-ui-dist package into static/swagger-ui/ so
+// GET /api/docs/ui never depends on a CDN (secret-safe, offline-friendly,
+// works behind an airgapped/internal Dockhand deployment too).
+const SWAGGER_UI_ASSETS = ['swagger-ui-bundle.js', 'swagger-ui-standalone-preset.js', 'swagger-ui.css', 'favicon-32x32.png'];
+
+function copySwaggerUiAssets() {
+	const srcDir = join(ROOT_DIR, 'node_modules', 'swagger-ui-dist');
+	const destDir = join(ROOT_DIR, 'static', 'swagger-ui');
+	if (!existsSync(srcDir)) {
+		console.warn('swagger-ui-dist not found in node_modules — skipping asset copy (run `npm install` first)');
+		return false;
+	}
+	mkdirSync(destDir, { recursive: true });
+	for (const asset of SWAGGER_UI_ASSETS) {
+		copyFileSync(join(srcDir, asset), join(destDir, asset));
+	}
+	return true;
+}
+
+function runGenerate() {
+	const { routes, skipped, publicPaths, isPublicFn, annotationsByPath, version } = loadEverything();
+	const spec = buildSpec({ routes, annotationsByPath, publicPaths, isPublicFn, version });
+
+	mkdirSync(dirname(OUT_FILE), { recursive: true });
+	writeFileSync(OUT_FILE, JSON.stringify(spec, null, 2));
+	const assetsCopied = copySwaggerUiAssets();
+
+	const totalOperations = Object.values(spec.paths).reduce((sum, item: any) => sum + Object.keys(item).length, 0);
+	const annotatedHandlerCount = Object.values(annotationsByPath).reduce((sum, m) => sum + Object.keys(m).length, 0);
+
+	console.log(`\n=== OpenAPI Generator ===`);
+	console.log(`Route files walked:        ${routes.length + skipped.length}`);
+	console.log(`Routes with methods found: ${routes.length}`);
+	console.log(`Unique OpenAPI paths:      ${Object.keys(spec.paths).length}`);
+	console.log(`Total operations:          ${totalOperations}`);
+	console.log(`Tags discovered:           ${spec.tags.length}`);
+	console.log(`Public (no-auth) paths:    ${routes.filter((r) => isPublicFn(r.openapiPath)).length}`);
+	console.log(`Annotated handlers:        ${annotatedHandlerCount} of ${totalOperations} (${((annotatedHandlerCount / totalOperations) * 100).toFixed(1)}%)`);
+	console.log(`Skipped files (no method): ${skipped.length}`);
+	for (const s of skipped) console.log(`  - ${relative(ROOT_DIR, s.filePath)}: ${s.reason}`);
+	console.log(`Swagger UI assets copied:  ${assetsCopied ? 'yes (static/swagger-ui/)' : 'SKIPPED (see warning above)'}`);
+	console.log(`\nOutput written to: ${relative(ROOT_DIR, OUT_FILE)}`);
+}
+
+// ---------------------------------------------------------------------------
+// --check (6 gates)
+// ---------------------------------------------------------------------------
+
+function runCheck(): number {
+	const { routes, publicPaths, isPublicFn, annotationsByPath, orphanMarkers, fileContents, version } = loadEverything();
+	const spec = buildSpec({ routes, annotationsByPath, publicPaths, isPublicFn, version });
+	const totalOperations = Object.values(spec.paths).reduce((sum, item: any) => sum + Object.keys(item).length, 0);
+	const annotatedHandlerCount = Object.values(annotationsByPath).reduce((sum, m) => sum + Object.keys(m).length, 0);
+
+	let hardFailures = 0;
+	const report: string[] = [];
+
+	// Gate 1: coverage (soft by default)
+	const coveragePct = (annotatedHandlerCount / totalOperations) * 100;
+	report.push(`[Gate 1] Coverage: ${annotatedHandlerCount}/${totalOperations} handlers annotated (${coveragePct.toFixed(1)}%)`);
+	if (strictCoverage && coveragePct < 100) {
+		report.push(`  HARD FAIL (--strict-coverage): coverage below 100%`);
+		hardFailures++;
+	} else if (coveragePct < 100) {
+		report.push(`  (warning only — pass --strict-coverage to make this a hard gate)`);
+	}
+
+	// Gate 2: path-param consistency (annotation path: name must exist in route.pathParams)
+	let pathParamIssues = 0;
+	for (const route of routes) {
+		const perMethod = annotationsByPath[route.openapiPath];
+		if (!perMethod) continue;
+		for (const [method, ann] of Object.entries(perMethod)) {
+			for (const name of Object.keys(ann.path)) {
+				if (!route.pathParams.includes(name)) {
+					report.push(`  [Gate 2] ${relative(ROOT_DIR, route.filePath)} ${method} ${route.openapiPath}: annotation "path: ${name}" does not match any {${name}} in the route path`);
+					pathParamIssues++;
+				}
+			}
+		}
+	}
+	report.splice(report.length - pathParamIssues, 0, `[Gate 2] Path-param consistency: ${pathParamIssues} issue(s)`);
+	if (pathParamIssues > 0) hardFailures++;
+
+	// Gates 3+4: query-param drift, status-code drift (only for annotated handlers)
+	let queryDrift = 0;
+	let statusDrift = 0;
+	const driftLines: string[] = [];
+	for (const route of routes) {
+		const perMethod = annotationsByPath[route.openapiPath];
+		if (!perMethod) continue;
+		const content = fileContents.get(route.filePath) ?? readFileSync(route.filePath, 'utf-8');
+		const bodies = splitMethodBodies(content);
+		for (const [method, ann] of Object.entries(perMethod) as [HttpMethod, HandlerAnnotation][]) {
+			const body = bodies[method];
+			if (!body) continue;
+			const analysis = analyzeHandlerBody(body);
+
+			const docQuery = new Set(Object.keys(ann.query));
+			const codeQuery = new Set(analysis.queryParams);
+			for (const q of codeQuery) {
+				if (!docQuery.has(q)) {
+					driftLines.push(`  [Gate 3] ${relative(ROOT_DIR, route.filePath)} ${method} ${route.openapiPath}: query param "${q}" used in code but not documented`);
+					queryDrift++;
+				}
+			}
+			for (const q of docQuery) {
+				if (!codeQuery.has(q)) {
+					driftLines.push(`  [Gate 3] ${relative(ROOT_DIR, route.filePath)} ${method} ${route.openapiPath}: query param "${q}" documented but not found in code (stale?)`);
+					queryDrift++;
+				}
+			}
+
+			const docCodes = new Set(Object.keys(ann.responses));
+			const codeCodes = new Set(analysis.statusCodes.filter((c) => c !== '200'));
+			for (const c of codeCodes) {
+				if (!docCodes.has(c)) {
+					driftLines.push(`  [Gate 4] ${relative(ROOT_DIR, route.filePath)} ${method} ${route.openapiPath}: status ${c} used in code but not documented`);
+					statusDrift++;
+				}
+			}
+			for (const c of docCodes) {
+				if (c !== '200' && !codeCodes.has(c)) {
+					driftLines.push(`  [Gate 4] ${relative(ROOT_DIR, route.filePath)} ${method} ${route.openapiPath}: response ${c} documented but no matching status(${c})/error(${c}) found in code (stale?)`);
+					statusDrift++;
+				}
+			}
+		}
+	}
+	report.push(`[Gate 3] Query-param drift: ${queryDrift} issue(s)`);
+	report.push(`[Gate 4] Status-code drift: ${statusDrift} issue(s)`);
+	report.push(...driftLines);
+	if (queryDrift > 0) hardFailures++;
+	if (statusDrift > 0) hardFailures++;
+
+	// Gate 5: orphan JSDoc (a @openapi marker that didn't attach to an export)
+	report.push(`[Gate 5] Orphan @openapi blocks: ${orphanMarkers.length} file(s)`);
+	for (const o of orphanMarkers) {
+		report.push(`  ${relative(ROOT_DIR, o.filePath)}: ${o.rawCount} @openapi marker(s) found, only ${o.matchedCount} attached to an export`);
+	}
+	if (orphanMarkers.length > 0) hardFailures++;
+
+	// Gate 6: spec validity (write to a temp file, run both validators)
+	mkdirSync(dirname(OUT_FILE), { recursive: true });
+	writeFileSync(OUT_FILE, JSON.stringify(spec, null, 2));
+	let validatorsOk = true;
+	try {
+		execFileSync('npx', ['--yes', '@redocly/cli@2.43.1', 'lint', OUT_FILE, '--format=summary'], {
+			cwd: ROOT_DIR,
+			stdio: 'pipe'
+		});
+	} catch (err: any) {
+		validatorsOk = false;
+		report.push(`[Gate 6] @redocly/cli lint FAILED:\n${err.stdout?.toString().slice(-1000) ?? err.message}`);
+	}
+	report.push(`[Gate 6] Spec validity (@redocly/cli lint): ${validatorsOk ? 'OK' : 'FAILED'}`);
+	if (!validatorsOk) hardFailures++;
+
+	console.log(`\n=== OpenAPI --check Report ===`);
+	for (const line of report) console.log(line);
+	console.log(`\nHard failures: ${hardFailures}`);
+	return hardFailures > 0 ? 1 : 0;
+}
+
+// ---------------------------------------------------------------------------
+// --scaffold <file>
+// ---------------------------------------------------------------------------
+
+function runScaffold() {
+	const idx = args.indexOf('--scaffold');
+	const target = args[idx + 1];
+	if (!target) {
+		console.error('Usage: generate-openapi.ts --scaffold <path/to/+server.ts>');
+		process.exitCode = 1;
+		return;
+	}
+	const filePath = target.startsWith('/') ? target : join(ROOT_DIR, target);
+	if (!existsSync(filePath)) {
+		console.error(`File not found: ${filePath}`);
+		process.exitCode = 1;
+		return;
+	}
+	const content = readFileSync(filePath, 'utf-8');
+	const existing = parseAnnotations(content);
+	const bodies = splitMethodBodies(content);
+
+	const { routes } = discoverRoutes([ROUTES_ROOT], ROUTES_ROOT);
+	const route = routes.find((r) => r.filePath === filePath);
+
+	console.log(`# Scaffold draft for ${relative(ROOT_DIR, filePath)}`);
+	console.log(`# (code-grounded from static analysis — review and refine before committing)\n`);
+
+	for (const [method, body] of Object.entries(bodies)) {
+		if (existing[method as HttpMethod]) {
+			console.log(`## ${method}: already has an @openapi annotation, skipped\n`);
+			continue;
+		}
+		const analysis = analyzeHandlerBody(body);
+		console.log(`## ${method} ${route?.openapiPath ?? '(path unknown)'}\n`);
+		console.log('/**');
+		console.log(' * @openapi');
+		console.log(' * summary: TODO — one-line description');
+		for (const q of analysis.queryParams) {
+			console.log(` * query: ${q}:string TODO — description (verify required/type)`);
+		}
+		if (analysis.bodyFields.length > 0) {
+			console.log(` * body: {${analysis.bodyFields.map((f) => `${f}:string`).join(', ')}} # TODO: verify types + required (!) markers`);
+		}
+		const codes = analysis.statusCodes.length > 0 ? analysis.statusCodes : ['200'];
+		for (const c of codes) {
+			console.log(` * resp-${c}: TODO — description${c === '200' ? ' (or a {field:type} schema)' : ''}`);
+		}
+		console.log(' */');
+		console.log(`export const ${method}: RequestHandler = ...\n`);
+	}
+}
+
+// ---------------------------------------------------------------------------
+// entrypoint
+// ---------------------------------------------------------------------------
+
+if (mode === 'check') {
+	process.exitCode = runCheck();
+} else if (mode === 'scaffold') {
+	runScaffold();
+} else {
+	runGenerate();
+}
