@@ -6,6 +6,18 @@ import { previewSnapshot, previewRestoreTargets } from '$lib/server/backups';
 import { validateSnapshotId } from '$lib/server/docker-validation';
 import { guardSnapshotEnvAccess } from '$lib/server/backups/route-guards';
 
+/**
+ * POST /api/backup/restore/preview - Preview a snapshot's contents before restoring
+ *
+ * @openapi
+ * summary: Preview the contents of a snapshot (volumes, metadata) before running a restore
+ * body: {destinationId:integer!, snapshotId:string!, environmentId:integer}
+ * body-example: {"destinationId":3,"snapshotId":"a1b2c3d4"}
+ * resp-200: The snapshot preview object (contents/metadata used to plan a restore)
+ * resp-400: Invalid input — missing destinationId/snapshotId or an invalid snapshot id
+ * resp-403: Permission denied — requires "backups:manage", or no access to the target or snapshot-owning environment
+ * resp-500: Failed to build the preview (restic error)
+ */
 export const POST: RequestHandler = async ({ request, cookies }) => {
 	const auth = await authorize(cookies);
 	const rbacDenied = await requireBackups(auth, 'manage');

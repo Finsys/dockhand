@@ -11,6 +11,17 @@ import { registerSchedule, isValidCron } from '$lib/server/scheduler';
 import { assertStackBackupable } from '$lib/server/backups';
 import { validateRetention, retentionToStore } from '$lib/server/backups/helpers';
 
+/**
+ * GET /api/backup/configs - List backup configurations
+ *
+ * @openapi
+ * summary: List backup configurations, optionally filtered by type, target and environment (enterprise callers only see configs for environments they can access)
+ * query: type:string Filter by backup config type (e.g. "container", "stack")
+ * query: target:string Filter by the backed-up target name (container or stack name)
+ * query: env:integer Filter by environment id
+ * resp-200: Array of backup configuration objects
+ * resp-403: Permission denied — requires the "backups:view" permission
+ */
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	const auth = await authorize(cookies);
 	const denied = await requireBackups(auth, 'view');
@@ -42,6 +53,18 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 	return json(configs);
 };
 
+/**
+ * POST /api/backup/configs - Create a backup configuration
+ *
+ * @openapi
+ * summary: Create a backup configuration for a container or stack, optionally scheduled, and register its cron schedule when enabled
+ * body: {destinationId:integer!, targetName:string!, type:string, environmentId:integer, enabled:boolean, allVolumes:boolean, selectedVolumes:array<string>, stopBeforeBackup:boolean, schedule:string, retention:{keepLast:integer, keepDaily:integer, keepWeekly:integer, keepMonthly:integer, keepYearly:integer}, options:{}, tags:array<string>}
+ * body-example: {"destinationId":3,"targetName":"nextcloud","type":"container","environmentId":1,"enabled":true,"allVolumes":true,"stopBeforeBackup":false,"schedule":"0 3 * * *","retention":{"keepDaily":7,"keepWeekly":4}}
+ * resp-201: The created backup configuration object
+ * resp-400: Invalid input — missing destinationId/targetName, invalid targetName, invalid cron expression, invalid retention, or a local repository paired with a remote environment / non-backupable stack
+ * resp-403: Permission denied — requires "backups:manage", or no access to the requested environment
+ * resp-500: Failed to create the backup configuration (persistence error)
+ */
 export const POST: RequestHandler = async (event) => {
 	const { request, cookies } = event;
 	const auth = await authorize(cookies);
