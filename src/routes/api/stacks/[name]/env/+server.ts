@@ -137,7 +137,7 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
  */
 /**
  * @openapi
- * summary: Save environment variables for a stack (secrets go to the DB, non-secrets to .env — see dockhand-stack-env-merge rule)
+ * summary: Save environment variables for a stack (secrets stored encrypted in the DB, non-secrets written to the on-disk .env)
  * path: name:string! Stack name
  * query: env:integer Environment id
  * body: {variables:array<{key:string!, value:string!, isSecret:boolean}>!}

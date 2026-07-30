@@ -14,7 +14,7 @@ import { createJobResponse } from '$lib/server/sse';
  *
  * @openapi
  * summary: Scan every image in an environment for vulnerabilities, streaming per-image progress as Server-Sent Events
- * query: env:integer! ID of the environment whose images to scan
+ * query: env:integer ID of the environment whose images to scan
  * resp-200: A Server-Sent Events stream of progress and per-image results, ending with a summary "result" event
  * resp-403: Permission denied, or (enterprise) no access to this environment
  */

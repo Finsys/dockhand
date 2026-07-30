@@ -10,7 +10,7 @@ import type { RequestHandler } from './$types';
 /**
  * @openapi
  * summary: List compose stacks (running + database-only entries) for one environment
- * query: env:integer! Environment id — required, an empty array is returned if omitted
+ * query: env:integer Environment id — an empty array is returned if omitted
  * resp-200: array<{name:string!, containers:array<string>!, status:string!, sourceType:string}>
  * resp-200-example: [{"name":"immich","containers":["immich_server","immich_redis"],"status":"running","sourceType":"git"}]
  * resp-403: Permission denied, or access denied to this environment (RBAC)
