@@ -67,8 +67,16 @@ export interface HandlerAnnotation {
 	raw: string;
 }
 
+export type InferredScalarType = 'string' | 'integer' | 'boolean';
+
+export interface QueryParamAnalysis {
+	name: string;
+	type: InferredScalarType;
+}
+
 export interface StaticAnalysis {
-	queryParams: string[]; // deduped, sorted
+	queryParams: QueryParamAnalysis[]; // deduped, sorted by name, with inferred scalar type
+	pathParamTypes: Record<string, InferredScalarType>; // inferred from parseInt(params.X)/Number(params.X) — string params not in here default to 'string'
 	statusCodes: string[]; // deduped, sorted, as strings ("200", "403", ...)
 	bodyFields: string[]; // deduped, sorted, top-level destructured field names
 }
@@ -405,11 +413,56 @@ function parseDestructuredFields(inner: string): string[] {
 		.filter((f) => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(f));
 }
 
-export function analyzeHandlerBody(body: string): StaticAnalysis {
-	const queryParams = new Set<string>();
+/**
+ * Type inference is deliberately conservative: a query/path param defaults to
+ * 'string' unless the code contains an UNAMBIGUOUS, textually-local signal
+ * (parseInt/Number wrapping the same local variable or the same literal
+ * searchParams key, or a `=== 'true'`/`!== 'false'` boolean comparison).
+ * When in doubt this returns 'string' — never a guessed 'integer'/'boolean'
+ * that isn't backed by an actual pattern match in the source.
+ */
+function inferQueryParamType(body: string, key: string): InferredScalarType {
+	// Direct wrap: parseInt(url.searchParams.get('key')) / Number(url.searchParams.get('key'))
+	const directNumRe = new RegExp(`(?:parseInt|Number)\\(\\s*url\\.searchParams\\.get\\(\\s*['"]${key}['"]\\s*\\)`);
+	if (directNumRe.test(body)) return 'integer';
+
+	// Two-step: const NAME = url.searchParams.get('key'); ... parseInt(NAME) / Number(NAME)
+	const assignRe = new RegExp(`(?:const|let)\\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\\s*=\\s*url\\.searchParams\\.get\\(\\s*['"]${key}['"]\\s*\\)`);
+	const assignMatch = assignRe.exec(body);
+	if (assignMatch) {
+		const varName = assignMatch[1];
+		const numRe = new RegExp(`(?:parseInt|Number)\\(\\s*${varName}\\b`);
+		if (numRe.test(body)) return 'integer';
+		const boolRe = new RegExp(`\\b${varName}\\s*(?:===|!==)\\s*['"](?:true|false)['"]`);
+		if (boolRe.test(body)) return 'boolean';
+	}
+
+	// Direct boolean comparison: url.searchParams.get('key') === 'true' / !== 'false'
+	const directBoolRe = new RegExp(`url\\.searchParams\\.get\\(\\s*['"]${key}['"]\\s*\\)\\s*(?:===|!==)\\s*['"](?:true|false)['"]`);
+	if (directBoolRe.test(body)) return 'boolean';
+
+	return 'string';
+}
+
+function inferPathParamType(body: string, name: string): InferredScalarType {
+	const numRe = new RegExp(`(?:parseInt|Number)\\(\\s*params\\.${name}\\b`);
+	return numRe.test(body) ? 'integer' : 'string';
+}
+
+export function analyzeHandlerBody(body: string, pathParamNames: string[] = []): StaticAnalysis {
+	const queryKeys = new Set<string>();
 	const qRe = /url\.searchParams\.get(?:All)?\(\s*['"]([a-zA-Z0-9_]+)['"]\s*\)/g;
 	let qm;
-	while ((qm = qRe.exec(body)) !== null) queryParams.add(qm[1]);
+	while ((qm = qRe.exec(body)) !== null) queryKeys.add(qm[1]);
+	const queryParams: QueryParamAnalysis[] = [...queryKeys]
+		.sort()
+		.map((name) => ({ name, type: inferQueryParamType(body, name) }));
+
+	const pathParamTypes: Record<string, InferredScalarType> = {};
+	for (const name of pathParamNames) {
+		const type = inferPathParamType(body, name);
+		if (type !== 'string') pathParamTypes[name] = type; // only record non-default to keep the map small
+	}
 
 	const statusCodes = new Set<string>();
 	const statusRe = /\bstatus:\s*(\d{3})\b/g;
@@ -428,7 +481,8 @@ export function analyzeHandlerBody(body: string): StaticAnalysis {
 	}
 
 	return {
-		queryParams: [...queryParams].sort(),
+		queryParams,
+		pathParamTypes,
 		statusCodes: [...statusCodes].sort(),
 		bodyFields: [...bodyFields].sort()
 	};
