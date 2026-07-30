@@ -4,7 +4,19 @@ import { getStackComposeFile, deployStack, saveStackComposeFile } from '$lib/ser
 import { authorize } from '$lib/server/authorize';
 import { createJobResponse } from '$lib/server/sse';
 
-// GET /api/stacks/[name]/compose - Get compose file content
+/**
+ * GET /api/stacks/[name]/compose - Get compose file content
+ *
+ * @openapi
+ * summary: Read the resolved compose file content for a stack, along with the resolved compose/env file paths
+ * path: name:string! Stack name
+ * query: env:integer Environment ID the stack belongs to
+ * resp-200: {content:string!, stackDir:string, composePath:string, envPath:string, suggestedEnvPath:string}
+ * resp-200-example: {"content":"services:\n  web:\n    image: nginx","stackDir":"/opt/stacks/web","composePath":"/opt/stacks/web/compose.yaml","envPath":"/opt/stacks/web/.env","suggestedEnvPath":"/opt/stacks/web/.env"}
+ * resp-403: Permission denied (requires stacks:view)
+ * resp-404: Compose file not found — the response carries needsFileLocation plus the suggested composePath/envPath
+ * resp-500: Failed to get compose file
+ */
 export const GET: RequestHandler = async ({ params, url, cookies }) => {
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !(await auth.can('stacks', 'view'))) {
@@ -41,7 +53,21 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 	}
 };
 
-// PUT /api/stacks/[name]/compose - Update compose file content
+/**
+ * PUT /api/stacks/[name]/compose - Update compose file content
+ *
+ * @openapi
+ * summary: Save the compose file content (with optional custom/moved paths); when restart=true the stack is redeployed with force-recreate and progress streams over SSE
+ * path: name:string! Stack name
+ * query: env:integer Environment ID the stack belongs to
+ * body: {content:string!, restart:boolean, composePath:string, envPath:string, moveFromDir:string, oldComposePath:string, oldEnvPath:string}
+ * body-example: {"content":"services:\n  web:\n    image: nginx","restart":false}
+ * resp-200: {success:boolean!}
+ * resp-200-desc: File saved (restart=false) or a Server-Sent-Events job stream (restart=true) reporting deploy progress and the final result
+ * resp-400: Compose file content is required
+ * resp-403: Permission denied (requires stacks:edit)
+ * resp-500: Failed to save or deploy the compose file
+ */
 export const PUT: RequestHandler = async ({ params, request, url, cookies }) => {
 	const auth = await authorize(cookies);
 

@@ -4,6 +4,14 @@ import { getConfigSets, createConfigSet } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
 import { auditConfigSet } from '$lib/server/audit';
 
+/**
+ * @openapi
+ * summary: List all config sets (reusable bundles of env vars, labels, ports, volumes, and runtime defaults)
+ * resp-200: array<{id:integer!, name:string!, description:string, envVars:array<{key:string!, value:string!}>, labels:array<{key:string!, value:string!}>, ports:array<{hostPort:string!, containerPort:string!, protocol:string!}>, volumes:array<{hostPath:string!, containerPath:string!, mode:string!}>, networkMode:string!, restartPolicy:string!, createdAt:string!, updatedAt:string!}>
+ * resp-200-example: [{"id":1,"name":"web-defaults","description":"Defaults for web stacks","envVars":[{"key":"TZ","value":"UTC"}],"labels":[],"ports":[],"volumes":[],"networkMode":"bridge","restartPolicy":"unless-stopped","createdAt":"2026-06-01T10:00:00Z","updatedAt":"2026-06-01T10:00:00Z"}]
+ * resp-403: Permission denied (requires configsets:view)
+ * resp-500: Failed to fetch config sets
+ */
 export const GET: RequestHandler = async ({ cookies }) => {
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !await auth.can('configsets', 'view')) {
@@ -19,6 +27,18 @@ export const GET: RequestHandler = async ({ cookies }) => {
 	}
 };
 
+/**
+ * @openapi
+ * summary: Create a new config set
+ * body: {name:string!, description:string, envVars:array<{key:string!, value:string!}>, labels:array<{key:string!, value:string!}>, ports:array<{hostPort:string!, containerPort:string!, protocol:string!}>, volumes:array<{hostPath:string!, containerPath:string!, mode:string!}>, networkMode:string, restartPolicy:string}
+ * body-example: {"name":"web-defaults","description":"Defaults for web stacks","envVars":[{"key":"TZ","value":"UTC"}],"networkMode":"bridge","restartPolicy":"unless-stopped"}
+ * resp-201: {id:integer!, name:string!, description:string, envVars:array<{key:string!, value:string!}>, labels:array<{key:string!, value:string!}>, ports:array<{hostPort:string!, containerPort:string!, protocol:string!}>, volumes:array<{hostPath:string!, containerPath:string!, mode:string!}>, networkMode:string!, restartPolicy:string!, createdAt:string!, updatedAt:string!}
+ * resp-201-desc: Config set created
+ * resp-201-example: {"id":1,"name":"web-defaults","description":"Defaults for web stacks","envVars":[{"key":"TZ","value":"UTC"}],"labels":[],"ports":[],"volumes":[],"networkMode":"bridge","restartPolicy":"unless-stopped","createdAt":"2026-06-01T10:00:00Z","updatedAt":"2026-06-01T10:00:00Z"}
+ * resp-400: Name is required, or a config set with this name already exists
+ * resp-403: Permission denied (requires configsets:create)
+ * resp-500: Failed to create config set
+ */
 export const POST: RequestHandler = async (event) => {
 	const { request, cookies } = event;
 	const auth = await authorize(cookies);

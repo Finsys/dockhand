@@ -3,6 +3,15 @@ import type { RequestHandler } from './$types';
 import { getStackSources } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
 
+/**
+ * @openapi
+ * summary: Return a map of stack name to its source metadata (sourceType, composePath, repository) for the given environment
+ * query: env:integer Environment ID to scope the stacks
+ * resp-200: Object keyed by stack name, each value carrying sourceType plus optional composePath and repository
+ * resp-200-example: {"web":{"sourceType":"git","composePath":"/opt/stacks/web/compose.yaml","repository":null}}
+ * resp-403: Permission denied (requires stacks:view)
+ * resp-500: Failed to get stack sources
+ */
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	const auth = await authorize(cookies);
 
