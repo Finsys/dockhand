@@ -479,6 +479,8 @@ export interface GetComposeFileResult {
 	composePath?: string | null;
 	envPath?: string | null;
 	suggestedEnvPath?: string;
+	/** Stack source type (internal/git/external), from the stack_sources lookup already done here */
+	sourceType?: StackSourceType;
 }
 
 /**
@@ -538,7 +540,8 @@ export async function getStackComposeFile(
 				stackDir,
 				composePath: source.composePath,
 				envPath: source.envPath,
-				suggestedEnvPath
+				suggestedEnvPath,
+				sourceType: source.sourceType
 			};
 		} catch (error) {
 			const message = error instanceof Error ? error.message : 'Unknown error';
@@ -572,7 +575,8 @@ export async function getStackComposeFile(
 					stackDir,
 					// Always return the actual resolved paths for display
 					composePath: actualComposePath,
-					envPath: envExists ? envFilePath : null
+					envPath: envExists ? envFilePath : null,
+					sourceType: source.sourceType
 				};
 			}
 		}
@@ -2013,6 +2017,8 @@ export interface RequireComposeResult {
 	composePath?: string;
 	/** Full path to the env file (for --env-file flag) */
 	envPath?: string;
+	/** Stack source type (internal/git/external), plumbed through from getStackComposeFile to avoid a redundant getStackSource lookup in callers */
+	sourceType?: StackSourceType;
 }
 
 /**
@@ -2087,7 +2093,8 @@ export async function requireComposeFile(
 		nonSecretVars,
 		stackDir: composeResult.stackDir,
 		composePath: composeResult.composePath ?? undefined,
-		envPath: envFilePath ?? undefined
+		envPath: envFilePath ?? undefined,
+		sourceType: composeResult.sourceType
 	};
 }
 
@@ -2172,9 +2179,10 @@ export async function startStack(
 		return fallback;
 	}
 
-	// Check if this is a git stack - git stacks need useOverrideFile to write .env.dockhand
-	const source = await getStackSource(stackName, envId);
-	const isGitStack = source?.sourceType === 'git';
+	// Git stacks need useOverrideFile to write .env.dockhand with DB overrides.
+	// sourceType is plumbed through from requireComposeFile (which already looked
+	// it up via getStackComposeFile/getStackSource) to avoid a redundant DB lookup.
+	const isGitStack = result.sourceType === 'git';
 
 	const opts: ComposeCommandOptions = { stackName, envId, workingDir: result.stackDir, composePath: result.composePath, envPath: result.envPath, useOverrideFile: isGitStack };
 
@@ -2212,9 +2220,9 @@ export async function stopStack(
 		return fallback;
 	}
 
-	// Check if this is a git stack - git stacks need useOverrideFile to write .env.dockhand
-	const source = await getStackSource(stackName, envId);
-	const isGitStack = source?.sourceType === 'git';
+	// Git stacks need useOverrideFile to write .env.dockhand with DB overrides.
+	// sourceType is plumbed through from requireComposeFile to avoid a redundant DB lookup.
+	const isGitStack = result.sourceType === 'git';
 
 	const composeResult = await executeComposeCommand(
 		'stop',
@@ -2256,8 +2264,8 @@ export async function restartStack(
 	// Git stacks need useOverrideFile to write .env.dockhand with DB overrides.
 	// Non-git stacks still pass nonSecretVars for legacy support (stacks without
 	// .env files on disk get vars injected via shell env at executeLocalCompose).
-	const source = await getStackSource(stackName, envId);
-	const isGitStack = source?.sourceType === 'git';
+	// sourceType is plumbed through from requireComposeFile to avoid a redundant DB lookup.
+	const isGitStack = result.sourceType === 'git';
 
 	const opts: ComposeCommandOptions = { stackName, envId, workingDir: result.stackDir, composePath: result.composePath, envPath: result.envPath, useOverrideFile: isGitStack };
 
@@ -2293,9 +2301,9 @@ export async function downStack(
 		return withContainerFallback(stackName, envId, 'stop');
 	}
 
-	// Check if this is a git stack - git stacks need useOverrideFile to write .env.dockhand
-	const source = await getStackSource(stackName, envId);
-	const isGitStack = source?.sourceType === 'git';
+	// Git stacks need useOverrideFile to write .env.dockhand with DB overrides.
+	// sourceType is plumbed through from requireComposeFile to avoid a redundant DB lookup.
+	const isGitStack = result.sourceType === 'git';
 
 	const composeResult = await executeComposeCommand(
 		'down',
