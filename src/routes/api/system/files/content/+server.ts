@@ -8,8 +8,15 @@ import { isProtectedPath } from '$lib/server/fs-guard';
  * GET /api/system/files/content
  * Read file content from Dockhand's local filesystem
  *
- * Query params:
- * - path: File path to read
+ * @openapi
+ * summary: Read a text file from Dockhand's local filesystem (max 10MB, protected paths denied)
+ * query: path:string! Absolute path of the file to read
+ * resp-200: {path:string!, content:string!, size:integer!, mtime:string!}
+ * resp-200-example: {"path":"/docker/stacks/myapp/compose.yaml","content":"services:\n  app:\n    image: nginx","size":42,"mtime":"2026-07-01T10:00:00.000Z"}
+ * resp-400: Path is missing, points to a directory, or the file exceeds 10MB
+ * resp-403: Permission denied, or the path is protected
+ * resp-404: File not found
+ * resp-500: Failed to read file
  */
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	const auth = await authorize(cookies);

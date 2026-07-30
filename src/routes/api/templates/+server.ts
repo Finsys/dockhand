@@ -188,6 +188,15 @@ async function fetchSource(source: TemplateSource): Promise<TemplateItem[]> {
 	}
 }
 
+/**
+ * GET /api/templates - Aggregated app templates from enabled sources
+ *
+ * @openapi
+ * summary: Return the normalized app templates aggregated from all enabled template sources (server-side cached for 1 hour)
+ * resp-200: array<{id:string!, type:string!, title:string!, description:string!, logo:string!, categories:array<string>!, source:string!, image:string, projectUrl:string}>
+ * resp-200-example: [{"id":"a1b2c3","type":"container","title":"Nginx","description":"Web server","logo":"https://example.com/nginx.png","categories":["web"],"source":"LinuxServer.io","image":"lscr.io/linuxserver/nginx:latest","projectUrl":"https://github.com/linuxserver/docker-nginx"}]
+ * resp-403: Permission denied
+ */
 export const GET: RequestHandler = async ({ cookies }) => {
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !await auth.can('templates', 'view')) {
