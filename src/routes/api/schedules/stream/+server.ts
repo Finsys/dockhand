@@ -336,6 +336,12 @@ async function getSchedulesData(): Promise<ScheduleInfo[]> {
 	return schedules;
 }
 
+/**
+ * @openapi
+ * summary: Server-Sent Events stream that polls and pushes schedule updates (same shape as GET /api/schedules)
+ * resp-200: text/event-stream response, periodically emitting the current schedule list as SSE "data:" messages
+ * resp-403: Permission denied (RBAC 'schedules:view' missing)
+ */
 export const GET: RequestHandler = async ({ cookies }) => {
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !await auth.can('schedules', 'view')) {

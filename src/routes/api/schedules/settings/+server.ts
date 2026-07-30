@@ -16,6 +16,12 @@ import { authorize } from '$lib/server/authorize';
 const getHideSystemJobsKey = (userId?: number) =>
 	userId ? `user_${userId}_schedules_hide_system_jobs` : 'schedules_hide_system_jobs';
 
+/**
+ * @openapi
+ * summary: Get the schedules-page display preference (hide system jobs), per-user with a global fallback
+ * resp-200: {hideSystemJobs:boolean!}
+ * resp-500: Unexpected error while loading the setting
+ */
 export const GET: RequestHandler = async ({ cookies }) => {
 	try {
 		const auth = await authorize(cookies);
@@ -37,6 +43,15 @@ export const GET: RequestHandler = async ({ cookies }) => {
 	}
 };
 
+/**
+ * @openapi
+ * summary: Update the schedules-page display preference (hide system jobs) for the current user
+ * body: {hideSystemJobs:boolean}
+ * body-example: {"hideSystemJobs":true}
+ * resp-200: {success:boolean!, hideSystemJobs:boolean}
+ * resp-400: hideSystemJobs is not a boolean
+ * resp-500: Unexpected error while saving the setting
+ */
 export const PUT: RequestHandler = async ({ request, cookies }) => {
 	try {
 		const auth = await authorize(cookies);

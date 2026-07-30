@@ -61,6 +61,16 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 	}
 };
 
+/**
+ * @openapi
+ * summary: Create a new container in an environment (auto-pulls the image first if it isn't present locally), optionally starting it right away
+ * query: env:integer Environment id
+ * body: {name:string!, image:string!, ports:{}, volumes:{}, volumeBinds:array<string>, env:array<string>, labels:{}, cmd:array<string>, entrypoint:array<string>, workingDir:string, restartPolicy:string, restartMaxRetries:integer, networkMode:string, additionalNetworks:array<string>, networkAliases:array<string>, networkIpv4Address:string, networkIpv6Address:string, startAfterCreate:boolean}
+ * body-example: {"name":"my-app","image":"nginx:latest","startAfterCreate":true}
+ * resp-200: {success:boolean!, id:string!, imagePulled:boolean}
+ * resp-403: Permission denied, or access denied to this environment
+ * resp-500: Container creation failed, or the image could not be pulled
+ */
 export const POST: RequestHandler = async (event) => {
 	const { request, url, cookies } = event;
 	const auth = await authorize(cookies);

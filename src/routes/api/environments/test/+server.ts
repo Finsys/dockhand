@@ -41,6 +41,14 @@ function buildDockerClientConfig(config: TestConnectionRequest): DockerClientCon
 
 /**
  * Test Docker connection with provided configuration (without saving to database)
+ *
+ * @openapi
+ * summary: Test a Docker/Hawser connection configuration WITHOUT saving it as an environment
+ * body: {connectionType:string!, socketPath:string, host:string, port:integer, protocol:string, tlsCa:string, tlsCert:string, tlsKey:string, tlsSkipVerify:boolean, hawserToken:string}
+ * body-example: {"connectionType":"socket","socketPath":"/var/run/docker.sock"}
+ * resp-200: {success:boolean!, info:{serverVersion:string, containers:integer, images:integer, name:string}, hawser:{}}
+ * resp-200-desc: success:false with a human-readable error message is also returned as HTTP 200 (connection failures are not transport errors)
+ * resp-400: Host is required for direct/hawser-standard connection types
  */
 export const POST: RequestHandler = async ({ request }) => {
 	try {

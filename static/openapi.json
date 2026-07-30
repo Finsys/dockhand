@@ -816,17 +816,65 @@
         "tags": [
           "settings"
         ],
-        "summary": "DELETE /api/settings/scanner/cache (auto-generated — no @openapi annotation yet)",
+        "summary": "Clear the vulnerability-scanner cache (local volumes/bind-mount dirs plus each remote environment's scanner volume)",
         "parameters": [],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "removedVolumes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "removedDirs": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "skippedEnvironments": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "removedVolumes",
+                    "removedDirs",
+                    "skippedEnvironments"
+                  ]
+                },
+                "example": {
+                  "success": true,
+                  "removedVolumes": [
+                    "string"
+                  ],
+                  "removedDirs": [
+                    "string"
+                  ],
+                  "skippedEnvironments": [
+                    "string"
+                  ]
+                }
+              }
+            }
           },
           "403": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Permission denied"
           },
           "500": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Failed to clear scanner cache"
           }
         },
         "security": [
@@ -3570,20 +3618,20 @@
         "tags": [
           "self-update"
         ],
-        "summary": "POST /api/self-update (auto-generated — no @openapi annotation yet)",
+        "summary": "Pull a new Dockhand image and hand off to an updater sidecar that replaces this running container",
         "parameters": [],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "text/event-stream SSE response (steps: pulling_image, building_config, pulling_updater, creating_container, launching_updater, then a \"launched\"/\"error\" event) — or, with \"Accept: application/json\", the final event as plain JSON"
           },
           "400": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "newImage missing, not running in Docker, Docker socket is read-only, or own container has no name"
           },
           "403": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Admin access required"
           },
           "500": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Failed to inspect own container or determine its name before starting the update"
           }
         },
         "security": [
@@ -3593,7 +3641,28 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "newImage": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "newImage"
+                ]
+              },
+              "example": {
+                "newImage": "fnsys/dockhand:v1.0.40"
+              }
+            }
+          }
+        }
       }
     },
     "/api/self-update/progress": {
@@ -3602,30 +3671,57 @@
         "tags": [
           "self-update"
         ],
-        "summary": "GET /api/self-update/progress (auto-generated — no @openapi annotation yet)",
+        "summary": "Poll the self-update sidecar container's logs and exit state for progress tracking",
         "parameters": [
           {
             "name": "id",
             "in": "query",
-            "required": false,
+            "required": true,
             "schema": {
               "type": "string"
             },
-            "description": "Query parameter \"id\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "Updater container id (returned by POST /api/self-update)"
           }
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "logs": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "exitCode": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "logs",
+                    "status"
+                  ]
+                },
+                "example": {
+                  "logs": "string",
+                  "status": "string",
+                  "exitCode": 0
+                }
+              }
+            }
           },
           "400": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Container ID is required"
           },
           "403": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Admin access required"
           },
           "500": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Failed to inspect the updater container, or failed to fetch its progress"
           }
         },
         "security": [
@@ -3644,14 +3740,68 @@
         "tags": [
           "self-update"
         ],
-        "summary": "GET /api/self-update/check (auto-generated — no @openapi annotation yet)",
+        "summary": "Check whether a newer Dockhand image is available (version-tag compare via GitHub changelog, or registry-digest compare for mutable tags like :latest)",
         "parameters": [],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "updateAvailable": {
+                      "type": "boolean"
+                    },
+                    "currentImage": {
+                      "type": "string"
+                    },
+                    "newImage": {
+                      "type": "string"
+                    },
+                    "latestVersion": {
+                      "type": "string"
+                    },
+                    "currentDigest": {
+                      "type": "string"
+                    },
+                    "newDigest": {
+                      "type": "string"
+                    },
+                    "containerName": {
+                      "type": "string"
+                    },
+                    "isComposeManaged": {
+                      "type": "boolean"
+                    },
+                    "isLocalImage": {
+                      "type": "boolean"
+                    },
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "updateAvailable"
+                  ]
+                },
+                "example": {
+                  "updateAvailable": true,
+                  "currentImage": "string",
+                  "newImage": "string",
+                  "latestVersion": "string",
+                  "currentDigest": "string",
+                  "newDigest": "string",
+                  "containerName": "string",
+                  "isComposeManaged": true,
+                  "isLocalImage": true,
+                  "error": "string"
+                }
+              }
+            }
           },
           "403": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Admin access required"
           }
         },
         "security": [
@@ -5807,7 +5957,7 @@
         "tags": [
           "jobs"
         ],
-        "summary": "GET /api/jobs/{id} (auto-generated — no @openapi annotation yet)",
+        "summary": "Poll a background job's status and accumulated output lines (no auth — job ids are unguessable UUIDs)",
         "parameters": [
           {
             "name": "id",
@@ -5816,15 +5966,53 @@
             "schema": {
               "type": "string"
             },
-            "description": "Path parameter \"id\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "Job id (UUID)"
           }
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "lines": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "result": {
+                      "type": "object",
+                      "properties": {}
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "status",
+                    "lines"
+                  ]
+                },
+                "example": {
+                  "id": "string",
+                  "status": "string",
+                  "lines": [
+                    "string"
+                  ],
+                  "result": {}
+                }
+              }
+            }
           },
           "404": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Job not found"
           }
         },
         "security": [
@@ -5841,7 +6029,7 @@
         "tags": [
           "jobs"
         ],
-        "summary": "DELETE /api/jobs/{id} (auto-generated — no @openapi annotation yet)",
+        "summary": "Request cancellation of a running background job (no auth — job ids are unguessable UUIDs)",
         "parameters": [
           {
             "name": "id",
@@ -5850,12 +6038,30 @@
             "schema": {
               "type": "string"
             },
-            "description": "Path parameter \"id\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "Job id (UUID)"
           }
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "cancelled": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "cancelled"
+                  ]
+                },
+                "example": {
+                  "cancelled": true
+                }
+              }
+            }
           }
         },
         "security": [
@@ -5874,43 +6080,16 @@
         "tags": [
           "schedules"
         ],
-        "summary": "GET /api/schedules/executions (auto-generated — no @openapi annotation yet)",
+        "summary": "List schedule execution history, filterable and paginated",
         "parameters": [
           {
-            "name": "environmentId",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            },
-            "description": "Query parameter \"environmentId\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
-          },
-          {
-            "name": "fromDate",
+            "name": "scheduleType",
             "in": "query",
             "required": false,
             "schema": {
               "type": "string"
             },
-            "description": "Query parameter \"fromDate\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            },
-            "description": "Query parameter \"limit\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
-          },
-          {
-            "name": "offset",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            },
-            "description": "Query parameter \"offset\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "Filter by schedule type (container_update, git_stack_sync, ...)"
           },
           {
             "name": "scheduleId",
@@ -5919,16 +6098,16 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Query parameter \"scheduleId\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "Filter by the numeric id of the schedule"
           },
           {
-            "name": "scheduleType",
+            "name": "environmentId",
             "in": "query",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "integer"
             },
-            "description": "Query parameter \"scheduleType\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "Filter by environment id (\"null\" for global/system schedules)"
           },
           {
             "name": "status",
@@ -5937,7 +6116,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Query parameter \"status\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "Filter by execution status (queued/running/success/warning/failed/skipped)"
           },
           {
             "name": "statuses",
@@ -5946,16 +6125,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Query parameter \"statuses\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
-          },
-          {
-            "name": "toDate",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Query parameter \"toDate\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "Comma-separated list of statuses (alternative to status)"
           },
           {
             "name": "triggeredBy",
@@ -5964,15 +6134,114 @@
             "schema": {
               "type": "string"
             },
-            "description": "Query parameter \"triggeredBy\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "Filter by trigger (cron/webhook/manual)"
+          },
+          {
+            "name": "fromDate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "ISO date lower bound"
+          },
+          {
+            "name": "toDate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "ISO date upper bound"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Page size (default 50)"
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Page offset (default 0)"
           }
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "executions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "scheduleType": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string"
+                          },
+                          "startedAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "scheduleType",
+                          "status",
+                          "startedAt"
+                        ]
+                      }
+                    },
+                    "total": {
+                      "type": "integer"
+                    },
+                    "limit": {
+                      "type": "integer"
+                    },
+                    "offset": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "executions",
+                    "total",
+                    "limit",
+                    "offset"
+                  ]
+                },
+                "example": {
+                  "executions": [
+                    {
+                      "id": 0,
+                      "scheduleType": "string",
+                      "status": "string",
+                      "startedAt": "string"
+                    }
+                  ],
+                  "total": 0,
+                  "limit": 0,
+                  "offset": 0
+                }
+              }
+            }
           },
           "500": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Unexpected error while loading execution history"
           }
         },
         "security": [
@@ -5991,7 +6260,7 @@
         "tags": [
           "schedules"
         ],
-        "summary": "GET /api/schedules/executions/{id} (auto-generated — no @openapi annotation yet)",
+        "summary": "Get a single schedule execution, including its logs",
         "parameters": [
           {
             "name": "id",
@@ -6000,21 +6269,58 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Path parameter \"id\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "Execution id"
           }
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    },
+                    "scheduleType": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "startedAt": {
+                      "type": "string"
+                    },
+                    "log": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "scheduleType",
+                    "status",
+                    "startedAt"
+                  ]
+                },
+                "example": {
+                  "id": 0,
+                  "scheduleType": "string",
+                  "status": "string",
+                  "startedAt": "string",
+                  "log": "string"
+                }
+              }
+            }
           },
           "400": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Invalid execution id"
           },
           "404": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Execution not found"
           },
           "500": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Unexpected error while loading the execution"
           }
         },
         "security": [
@@ -6031,7 +6337,7 @@
         "tags": [
           "schedules"
         ],
-        "summary": "DELETE /api/schedules/executions/{id} (auto-generated — no @openapi annotation yet)",
+        "summary": "Delete a single schedule execution record",
         "parameters": [
           {
             "name": "id",
@@ -6040,21 +6346,39 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Path parameter \"id\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "Execution id"
           }
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ]
+                },
+                "example": {
+                  "success": true
+                }
+              }
+            }
           },
           "400": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Invalid execution id"
           },
           "403": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Permission denied (RBAC 'schedules:edit' missing)"
           },
           "500": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Unexpected error while deleting the execution"
           }
         },
         "security": [
@@ -6073,14 +6397,32 @@
         "tags": [
           "schedules"
         ],
-        "summary": "GET /api/schedules/settings (auto-generated — no @openapi annotation yet)",
+        "summary": "Get the schedules-page display preference (hide system jobs), per-user with a global fallback",
         "parameters": [],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "hideSystemJobs": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "hideSystemJobs"
+                  ]
+                },
+                "example": {
+                  "hideSystemJobs": true
+                }
+              }
+            }
           },
           "500": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Unexpected error while loading the setting"
           }
         },
         "security": [
@@ -6097,17 +6439,39 @@
         "tags": [
           "schedules"
         ],
-        "summary": "PUT /api/schedules/settings (auto-generated — no @openapi annotation yet)",
+        "summary": "Update the schedules-page display preference (hide system jobs) for the current user",
         "parameters": [],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "hideSystemJobs": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ]
+                },
+                "example": {
+                  "success": true,
+                  "hideSystemJobs": true
+                }
+              }
+            }
           },
           "400": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "hideSystemJobs is not a boolean"
           },
           "500": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Unexpected error while saving the setting"
           }
         },
         "security": [
@@ -6119,17 +6483,19 @@
           }
         ],
         "requestBody": {
-          "required": false,
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
                 "properties": {
                   "hideSystemJobs": {
-                    "type": "string"
+                    "type": "boolean"
                   }
-                },
-                "description": "Fields auto-detected from the handler’s destructuring of the request body — generic string type, no @openapi annotation for this body yet."
+                }
+              },
+              "example": {
+                "hideSystemJobs": true
               }
             }
           }
@@ -6142,14 +6508,84 @@
         "tags": [
           "schedules"
         ],
-        "summary": "GET /api/schedules (auto-generated — no @openapi annotation yet)",
+        "summary": "List all schedules (container/env auto-updates, git syncs, image-prune, backups, repo maintenance, system jobs)",
         "parameters": [],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "schedules": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "type": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "entityName": {
+                            "type": "string"
+                          },
+                          "environmentId": {
+                            "type": "integer"
+                          },
+                          "enabled": {
+                            "type": "boolean"
+                          },
+                          "cronExpression": {
+                            "type": "string"
+                          },
+                          "nextRun": {
+                            "type": "string"
+                          },
+                          "isSystem": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "type",
+                          "name",
+                          "entityName",
+                          "enabled",
+                          "isSystem"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "schedules"
+                  ]
+                },
+                "example": {
+                  "schedules": [
+                    {
+                      "id": 0,
+                      "type": "string",
+                      "name": "string",
+                      "entityName": "string",
+                      "environmentId": 0,
+                      "enabled": true,
+                      "cronExpression": "string",
+                      "nextRun": "string",
+                      "isSystem": true
+                    }
+                  ]
+                }
+              }
+            }
           },
           "500": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Unexpected error while assembling the schedule list"
           }
         },
         "security": [
@@ -6168,30 +6604,53 @@
         "tags": [
           "schedules"
         ],
-        "summary": "POST /api/schedules/system/{id}/toggle (auto-generated — no @openapi annotation yet)",
+        "summary": "Toggle one of the three built-in system cleanup jobs (schedule/event/scanner cleanup) on or off",
         "parameters": [
           {
             "name": "id",
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "integer"
             },
-            "description": "Path parameter \"id\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "System schedule id (1=schedule cleanup, 2=event cleanup, 4=scanner cleanup)"
           }
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "enabled"
+                  ]
+                },
+                "example": {
+                  "success": true,
+                  "enabled": true
+                }
+              }
+            }
           },
           "400": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Invalid or unknown system schedule id"
           },
           "403": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Permission denied (RBAC 'settings:edit' missing)"
           },
           "500": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Unexpected error while toggling the job"
           }
         },
         "security": [
@@ -6210,7 +6669,7 @@
         "tags": [
           "schedules"
         ],
-        "summary": "DELETE /api/schedules/{type}/{id} (auto-generated — no @openapi annotation yet)",
+        "summary": "Delete (or disable, for policy-driven types) a schedule by type and id",
         "parameters": [
           {
             "name": "type",
@@ -6219,30 +6678,48 @@
             "schema": {
               "type": "string"
             },
-            "description": "Path parameter \"type\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "Schedule type (container_update, git_stack_sync, env_update_check, image_prune, backup, repo_prune, repo_check, repo_verify, system_cleanup)"
           },
           {
             "name": "id",
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "integer"
             },
-            "description": "Path parameter \"id\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "Schedule id (semantics depend on type — container/git-stack/backup-config id, environment id, or a synthetic repo-policy id)"
           }
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ]
+                },
+                "example": {
+                  "success": true
+                }
+              }
+            }
           },
           "400": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Invalid schedule id, invalid/unsupported type, or system_cleanup (cannot be removed)"
           },
           "404": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Schedule (or backup destination, for repo_* types) not found"
           },
           "500": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Unexpected error while deleting the schedule"
           }
         },
         "security": [
@@ -6261,7 +6738,7 @@
         "tags": [
           "schedules"
         ],
-        "summary": "POST /api/schedules/{type}/{id}/toggle (auto-generated — no @openapi annotation yet)",
+        "summary": "Toggle a schedule's enabled/disabled state (registers/unregisters the croner job accordingly)",
         "parameters": [
           {
             "name": "type",
@@ -6270,30 +6747,53 @@
             "schema": {
               "type": "string"
             },
-            "description": "Path parameter \"type\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "Schedule type (container_update, git_stack_sync, env_update_check, image_prune, backup, repo_prune, repo_check, repo_verify, system_cleanup)"
           },
           {
             "name": "id",
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "integer"
             },
-            "description": "Path parameter \"id\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "Schedule id (semantics depend on type)"
           }
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "enabled"
+                  ]
+                },
+                "example": {
+                  "success": true,
+                  "enabled": true
+                }
+              }
+            }
           },
           "400": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Invalid schedule id, unsupported type, or system_cleanup (cannot be paused)"
           },
           "404": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Schedule, backup config, or backup destination not found"
           },
           "500": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Unexpected error while toggling the schedule"
           }
         },
         "security": [
@@ -6312,7 +6812,7 @@
         "tags": [
           "schedules"
         ],
-        "summary": "POST /api/schedules/{type}/{id}/run (auto-generated — no @openapi annotation yet)",
+        "summary": "Manually trigger a single run of a schedule (outside its cron), by type and id",
         "parameters": [
           {
             "name": "type",
@@ -6321,30 +6821,53 @@
             "schema": {
               "type": "string"
             },
-            "description": "Path parameter \"type\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "Schedule type (container_update, git_stack_sync, system_cleanup, env_update_check, image_prune, backup, repo_prune, repo_check, repo_verify)"
           },
           {
             "name": "id",
             "in": "path",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "integer"
             },
-            "description": "Path parameter \"id\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "Schedule id (semantics depend on type)"
           }
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "message"
+                  ]
+                },
+                "example": {
+                  "success": true,
+                  "message": "string"
+                }
+              }
+            }
           },
           "400": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Invalid schedule id/type, or the triggered task itself reported failure"
           },
           "404": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Schedule, backup config, or backup destination not found (or backup feature disabled)"
           },
           "500": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Unexpected error while triggering the schedule"
           }
         },
         "security": [
@@ -6363,14 +6886,14 @@
         "tags": [
           "schedules"
         ],
-        "summary": "GET /api/schedules/stream (auto-generated — no @openapi annotation yet)",
+        "summary": "Server-Sent Events stream that polls and pushes schedule updates (same shape as GET /api/schedules)",
         "parameters": [],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "text/event-stream response, periodically emitting the current schedule list as SSE \"data:\" messages"
           },
           "403": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Permission denied (RBAC 'schedules:view' missing)"
           }
         },
         "security": [
@@ -10099,7 +10622,7 @@
         "tags": [
           "events"
         ],
-        "summary": "GET /api/events (auto-generated — no @openapi annotation yet)",
+        "summary": "Stream live Docker events (container/image/volume/network) for an environment via SSE, with periodic heartbeats",
         "parameters": [
           {
             "name": "env",
@@ -10108,12 +10631,12 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Query parameter \"env\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "Environment id — without it, an \"info\" SSE message is sent and the stream ends"
           }
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "text/event-stream SSE stream (\"connected\", \"heartbeat\" every 5s, \"docker\" events with {type,action,actor,time,timeNano}, or an \"error\"/\"info\" event for edge environments, missing/unknown environment, or a lost Docker connection)"
           }
         },
         "security": [
@@ -17181,7 +17704,7 @@
         "tags": [
           "containers"
         ],
-        "summary": "POST /api/containers (auto-generated — no @openapi annotation yet)",
+        "summary": "Create a new container in an environment (auto-pulls the image first if it isn't present locally), optionally starting it right away",
         "parameters": [
           {
             "name": "env",
@@ -17190,18 +17713,45 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Query parameter \"env\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "Environment id"
           }
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "imagePulled": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "id"
+                  ]
+                },
+                "example": {
+                  "success": true,
+                  "id": "string",
+                  "imagePulled": true
+                }
+              }
+            }
           },
           "403": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Permission denied, or access denied to this environment"
           },
           "500": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Container creation failed, or the image could not be pulled"
           }
         },
         "security": [
@@ -17213,17 +17763,97 @@
           }
         ],
         "requestBody": {
-          "required": false,
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
                 "properties": {
-                  "startAfterCreate": {
+                  "name": {
                     "type": "string"
+                  },
+                  "image": {
+                    "type": "string"
+                  },
+                  "ports": {
+                    "type": "object",
+                    "properties": {}
+                  },
+                  "volumes": {
+                    "type": "object",
+                    "properties": {}
+                  },
+                  "volumeBinds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "env": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "labels": {
+                    "type": "object",
+                    "properties": {}
+                  },
+                  "cmd": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "entrypoint": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "workingDir": {
+                    "type": "string"
+                  },
+                  "restartPolicy": {
+                    "type": "string"
+                  },
+                  "restartMaxRetries": {
+                    "type": "integer"
+                  },
+                  "networkMode": {
+                    "type": "string"
+                  },
+                  "additionalNetworks": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "networkAliases": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "networkIpv4Address": {
+                    "type": "string"
+                  },
+                  "networkIpv6Address": {
+                    "type": "string"
+                  },
+                  "startAfterCreate": {
+                    "type": "boolean"
                   }
                 },
-                "description": "Fields auto-detected from the handler’s destructuring of the request body — generic string type, no @openapi annotation for this body yet."
+                "required": [
+                  "name",
+                  "image"
+                ]
+              },
+              "example": {
+                "name": "my-app",
+                "image": "nginx:latest",
+                "startAfterCreate": true
               }
             }
           }
@@ -17446,24 +18076,24 @@
         "tags": [
           "containers"
         ],
-        "summary": "GET /api/containers/stats/stream (auto-generated — no @openapi annotation yet)",
+        "summary": "Stream live CPU/memory/network/block-IO stats for all running containers in an environment (one snapshot round, then closes)",
         "parameters": [
           {
             "name": "env",
             "in": "query",
-            "required": false,
+            "required": true,
             "schema": {
               "type": "integer"
             },
-            "description": "Query parameter \"env\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "Environment id"
           }
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "text/event-stream SSE stream (\"stat\" events per container with {id,name,cpuPercent,memoryUsage,memoryRaw,memoryCache,memoryLimit,memoryPercent,networkRx,networkTx,blockRead,blockWrite}, an \"error\" event on environment-not-found, then a final \"done\" event)"
           },
           "403": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Permission denied"
           }
         },
         "security": [
@@ -17643,7 +18273,7 @@
         "tags": [
           "containers"
         ],
-        "summary": "POST /api/containers/check-updates (auto-generated — no @openapi annotation yet)",
+        "summary": "Trigger a fresh image-update check across all (non-hidden, non-podman-infra) containers in an environment",
         "parameters": [
           {
             "name": "env",
@@ -17652,15 +18282,15 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Query parameter \"env\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "The target environment ID (omit for the local/default Docker host)"
           }
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "text/event-stream job stream (\"progress\" events with {checked,total}, final \"result\" event with {total,updatesFound,results}) — or, with \"Accept: application/json\", the final result as plain JSON"
           },
           "403": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Permission denied"
           }
         },
         "security": [
@@ -19688,7 +20318,7 @@
         "tags": [
           "containers"
         ],
-        "summary": "POST /api/containers/{id}/update-runtime (auto-generated — no @openapi annotation yet)",
+        "summary": "Update a running container's restart policy and/or CPU/memory/blkio/pids limits in-place (no recreate)",
         "parameters": [
           {
             "name": "id",
@@ -19697,7 +20327,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Path parameter \"id\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "Container id"
           },
           {
             "name": "env",
@@ -19706,24 +20336,51 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Query parameter \"env\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "Environment id"
           }
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "warnings": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ]
+                },
+                "example": {
+                  "success": true,
+                  "warnings": [
+                    "string"
+                  ]
+                }
+              }
+            }
           },
           "400": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Invalid JSON body, or no supported fields were provided"
           },
           "403": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Permission denied"
           },
           "404": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Container not found"
           },
           "500": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Update failed"
           }
         },
         "security": [
@@ -19733,7 +20390,102 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "RestartPolicy": {
+                    "type": "object",
+                    "properties": {}
+                  },
+                  "CpuShares": {
+                    "type": "integer"
+                  },
+                  "CpuPeriod": {
+                    "type": "integer"
+                  },
+                  "CpuQuota": {
+                    "type": "integer"
+                  },
+                  "CpuRealtimePeriod": {
+                    "type": "integer"
+                  },
+                  "CpuRealtimeRuntime": {
+                    "type": "integer"
+                  },
+                  "CpusetCpus": {
+                    "type": "string"
+                  },
+                  "CpusetMems": {
+                    "type": "string"
+                  },
+                  "NanoCpus": {
+                    "type": "integer"
+                  },
+                  "Memory": {
+                    "type": "integer"
+                  },
+                  "MemorySwap": {
+                    "type": "integer"
+                  },
+                  "MemoryReservation": {
+                    "type": "integer"
+                  },
+                  "MemorySwappiness": {
+                    "type": "integer"
+                  },
+                  "KernelMemory": {
+                    "type": "integer"
+                  },
+                  "BlkioWeight": {
+                    "type": "integer"
+                  },
+                  "BlkioWeightDevice": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "BlkioDeviceReadBps": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "BlkioDeviceWriteBps": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "BlkioDeviceReadIOps": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "BlkioDeviceWriteIOps": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "PidsLimit": {
+                    "type": "integer"
+                  }
+                }
+              },
+              "example": {
+                "Memory": 536870912,
+                "PidsLimit": 512
+              }
+            }
+          }
+        }
       }
     },
     "/api/containers/{id}/top": {
@@ -21422,11 +22174,59 @@
         "tags": [
           "environments"
         ],
-        "summary": "GET /api/environments/detect-socket (auto-generated — no @openapi annotation yet)",
+        "summary": "Detect common Docker/Podman socket paths that exist on the Dockhand host",
         "parameters": [],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sockets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "exists": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "path",
+                          "name",
+                          "exists"
+                        ]
+                      }
+                    },
+                    "homedir": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "sockets",
+                    "homedir"
+                  ]
+                },
+                "example": {
+                  "sockets": [
+                    {
+                      "path": "/var/run/docker.sock",
+                      "name": "Docker (default)",
+                      "exists": true
+                    }
+                  ],
+                  "homedir": "/home/dockhand"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -21445,7 +22245,7 @@
         "tags": [
           "environments"
         ],
-        "summary": "GET /api/environments/{id} (auto-generated — no @openapi annotation yet)",
+        "summary": "Get a single environment by id, including its parsed labels and public IP",
         "parameters": [
           {
             "name": "id",
@@ -21454,21 +22254,62 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Path parameter \"id\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "Environment id"
           }
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "connectionType": {
+                      "type": "string"
+                    },
+                    "labels": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "publicIp": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "connectionType"
+                  ]
+                },
+                "example": {
+                  "id": 0,
+                  "name": "string",
+                  "connectionType": "string",
+                  "labels": [
+                    "string"
+                  ],
+                  "publicIp": "string"
+                }
+              }
+            }
           },
           "403": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Permission denied (RBAC 'environments:view' missing)"
           },
           "404": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Environment not found"
           },
           "500": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Unexpected error while loading the environment"
           }
         },
         "security": [
@@ -21485,7 +22326,7 @@
         "tags": [
           "environments"
         ],
-        "summary": "PUT /api/environments/{id} (auto-generated — no @openapi annotation yet)",
+        "summary": "Update an environment; renaming also renames its on-disk stacks/git-repos directories",
         "parameters": [
           {
             "name": "id",
@@ -21494,27 +22335,68 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Path parameter \"id\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "Environment id"
           }
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "connectionType": {
+                      "type": "string"
+                    },
+                    "labels": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "publicIp": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "connectionType"
+                  ]
+                },
+                "example": {
+                  "id": 0,
+                  "name": "string",
+                  "connectionType": "string",
+                  "labels": [
+                    "string"
+                  ],
+                  "publicIp": "string"
+                }
+              }
+            }
           },
           "400": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Invalid new name (rename validation)"
           },
           "403": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Permission denied (RBAC 'environments:edit' missing)"
           },
           "404": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Environment not found"
           },
           "409": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Rename target directory already exists, or the on-disk rename failed (e.g. EXDEV across filesystems)"
           },
           "500": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Unexpected error while updating the environment"
           }
         },
         "security": [
@@ -21524,14 +22406,81 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "host": {
+                    "type": "string"
+                  },
+                  "port": {
+                    "type": "integer"
+                  },
+                  "protocol": {
+                    "type": "string"
+                  },
+                  "tlsCa": {
+                    "type": "string"
+                  },
+                  "tlsCert": {
+                    "type": "string"
+                  },
+                  "tlsKey": {
+                    "type": "string"
+                  },
+                  "tlsSkipVerify": {
+                    "type": "boolean"
+                  },
+                  "icon": {
+                    "type": "string"
+                  },
+                  "socketPath": {
+                    "type": "string"
+                  },
+                  "collectActivity": {
+                    "type": "boolean"
+                  },
+                  "collectMetrics": {
+                    "type": "boolean"
+                  },
+                  "highlightChanges": {
+                    "type": "boolean"
+                  },
+                  "labels": {
+                    "type": "string"
+                  },
+                  "connectionType": {
+                    "type": "string"
+                  },
+                  "hawserToken": {
+                    "type": "string"
+                  },
+                  "publicIp": {
+                    "type": "string"
+                  }
+                }
+              },
+              "example": {
+                "name": "hhdocker03",
+                "collectMetrics": true
+              }
+            }
+          }
+        }
       },
       "delete": {
         "operationId": "delete_api_environments_id",
         "tags": [
           "environments"
         ],
-        "summary": "DELETE /api/environments/{id} (auto-generated — no @openapi annotation yet)",
+        "summary": "Delete an environment and all its associated git stacks, schedules, icons, and on-disk directories",
         "parameters": [
           {
             "name": "id",
@@ -21540,24 +22489,42 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Path parameter \"id\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "Environment id"
           }
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ]
+                },
+                "example": {
+                  "success": true
+                }
+              }
+            }
           },
           "400": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Invalid environment id, or the environment could not be deleted"
           },
           "403": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Permission denied (RBAC 'environments:delete' missing)"
           },
           "404": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Environment not found"
           },
           "500": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Environment name is empty/whitespace (refuses to delete to avoid an unsafe directory cleanup), or an unexpected error"
           }
         },
         "security": [
@@ -21576,7 +22543,7 @@
         "tags": [
           "environments"
         ],
-        "summary": "GET /api/environments/{id}/update-check (auto-generated — no @openapi annotation yet)",
+        "summary": "Get the automatic container-image update-check schedule for an environment",
         "parameters": [
           {
             "name": "id",
@@ -21585,21 +22552,64 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Path parameter \"id\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "Environment id"
           }
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "settings": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "cron": {
+                          "type": "string"
+                        },
+                        "autoUpdate": {
+                          "type": "boolean"
+                        },
+                        "vulnerabilityCriteria": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "cron",
+                        "autoUpdate",
+                        "vulnerabilityCriteria"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "settings"
+                  ]
+                },
+                "example": {
+                  "settings": {
+                    "enabled": false,
+                    "cron": "0 4 * * *",
+                    "autoUpdate": false,
+                    "vulnerabilityCriteria": "never"
+                  }
+                }
+              }
+            }
           },
           "403": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Permission denied (RBAC 'environments:view' missing)"
           },
           "404": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Environment not found"
           },
           "500": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Unexpected error while loading the settings"
           }
         },
         "security": [
@@ -21616,7 +22626,7 @@
         "tags": [
           "environments"
         ],
-        "summary": "POST /api/environments/{id}/update-check (auto-generated — no @openapi annotation yet)",
+        "summary": "Save the automatic image update-check schedule for an environment (registers/unregisters the croner job)",
         "parameters": [
           {
             "name": "id",
@@ -21625,21 +22635,69 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Path parameter \"id\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "Environment id"
           }
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "settings": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "cron": {
+                          "type": "string"
+                        },
+                        "autoUpdate": {
+                          "type": "boolean"
+                        },
+                        "vulnerabilityCriteria": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "cron",
+                        "autoUpdate",
+                        "vulnerabilityCriteria"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "settings"
+                  ]
+                },
+                "example": {
+                  "success": true,
+                  "settings": {
+                    "enabled": true,
+                    "cron": "string",
+                    "autoUpdate": true,
+                    "vulnerabilityCriteria": "string"
+                  }
+                }
+              }
+            }
           },
           "403": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Permission denied (RBAC 'environments:edit' missing)"
           },
           "404": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Environment not found"
           },
           "500": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Unexpected error while saving the settings"
           }
         },
         "security": [
@@ -21649,7 +22707,37 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "cron": {
+                    "type": "string"
+                  },
+                  "autoUpdate": {
+                    "type": "boolean"
+                  },
+                  "vulnerabilityCriteria": {
+                    "type": "string"
+                  }
+                }
+              },
+              "example": {
+                "enabled": true,
+                "cron": "0 4 * * *",
+                "autoUpdate": false,
+                "vulnerabilityCriteria": "never"
+              }
+            }
+          }
+        }
       }
     },
     "/api/environments/{id}/notifications": {
@@ -21658,7 +22746,7 @@
         "tags": [
           "environments"
         ],
-        "summary": "GET /api/environments/{id}/notifications (auto-generated — no @openapi annotation yet)",
+        "summary": "List notification channel configurations attached to an environment",
         "parameters": [
           {
             "name": "id",
@@ -21667,24 +22755,66 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Path parameter \"id\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "Environment id"
           }
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "integer"
+                      },
+                      "notificationId": {
+                        "type": "integer"
+                      },
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "eventTypes": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "notificationId",
+                      "enabled"
+                    ]
+                  }
+                },
+                "example": [
+                  {
+                    "id": 0,
+                    "notificationId": 0,
+                    "enabled": true,
+                    "eventTypes": [
+                      "string"
+                    ]
+                  }
+                ]
+              }
+            }
           },
           "400": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Invalid environment id"
           },
           "403": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Permission denied (RBAC 'notifications:view' missing)"
           },
           "404": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Environment not found"
           },
           "500": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Unexpected error while loading notifications"
           }
         },
         "security": [
@@ -21701,7 +22831,7 @@
         "tags": [
           "environments"
         ],
-        "summary": "POST /api/environments/{id}/notifications (auto-generated — no @openapi annotation yet)",
+        "summary": "Attach a notification channel to an environment",
         "parameters": [
           {
             "name": "id",
@@ -21710,27 +22840,55 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Path parameter \"id\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "Environment id"
           }
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    },
+                    "notificationId": {
+                      "type": "integer"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "notificationId",
+                    "enabled"
+                  ]
+                },
+                "example": {
+                  "id": 0,
+                  "notificationId": 0,
+                  "enabled": true
+                }
+              }
+            }
           },
           "400": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Invalid environment id, or notificationId missing"
           },
           "403": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Permission denied (RBAC 'notifications:edit' missing)"
           },
           "404": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Environment not found"
           },
           "409": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "This notification channel is already configured for this environment"
           },
           "500": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Unexpected error while creating the notification link"
           }
         },
         "security": [
@@ -21742,23 +22900,35 @@
           }
         ],
         "requestBody": {
-          "required": false,
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
                 "properties": {
+                  "notificationId": {
+                    "type": "integer"
+                  },
                   "enabled": {
-                    "type": "string"
+                    "type": "boolean"
                   },
                   "eventTypes": {
-                    "type": "string"
-                  },
-                  "notificationId": {
-                    "type": "string"
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
                   }
                 },
-                "description": "Fields auto-detected from the handler’s destructuring of the request body — generic string type, no @openapi annotation for this body yet."
+                "required": [
+                  "notificationId"
+                ]
+              },
+              "example": {
+                "notificationId": 1,
+                "enabled": true,
+                "eventTypes": [
+                  "stack_deploy_failed"
+                ]
               }
             }
           }
@@ -21771,7 +22941,7 @@
         "tags": [
           "environments"
         ],
-        "summary": "GET /api/environments/{id}/notifications/{notificationId} (auto-generated — no @openapi annotation yet)",
+        "summary": "Get one notification-channel link for an environment",
         "parameters": [
           {
             "name": "id",
@@ -21780,7 +22950,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Path parameter \"id\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "Environment id"
           },
           {
             "name": "notificationId",
@@ -21789,24 +22959,61 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Path parameter \"notificationId\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "Notification channel id"
           }
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    },
+                    "notificationId": {
+                      "type": "integer"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "eventTypes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "notificationId",
+                    "enabled"
+                  ]
+                },
+                "example": {
+                  "id": 0,
+                  "notificationId": 0,
+                  "enabled": true,
+                  "eventTypes": [
+                    "string"
+                  ]
+                }
+              }
+            }
           },
           "400": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Invalid id or notificationId"
           },
           "403": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Permission denied (RBAC 'notifications:view' missing)"
           },
           "404": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Environment not found, or no such notification link for this environment"
           },
           "500": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Unexpected error while loading the notification link"
           }
         },
         "security": [
@@ -21823,7 +23030,7 @@
         "tags": [
           "environments"
         ],
-        "summary": "PUT /api/environments/{id}/notifications/{notificationId} (auto-generated — no @openapi annotation yet)",
+        "summary": "Update a notification-channel link (enabled state and/or event type filter)",
         "parameters": [
           {
             "name": "id",
@@ -21832,7 +23039,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Path parameter \"id\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "Environment id"
           },
           {
             "name": "notificationId",
@@ -21841,24 +23048,61 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Path parameter \"notificationId\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "Notification channel id"
           }
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "integer"
+                    },
+                    "notificationId": {
+                      "type": "integer"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "eventTypes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "notificationId",
+                    "enabled"
+                  ]
+                },
+                "example": {
+                  "id": 0,
+                  "notificationId": 0,
+                  "enabled": true,
+                  "eventTypes": [
+                    "string"
+                  ]
+                }
+              }
+            }
           },
           "400": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Invalid id or notificationId"
           },
           "403": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Permission denied (RBAC 'notifications:edit' missing)"
           },
           "404": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Environment not found, or no such notification link for this environment"
           },
           "500": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Unexpected error while updating the notification link"
           }
         },
         "security": [
@@ -21870,20 +23114,25 @@
           }
         ],
         "requestBody": {
-          "required": false,
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
                 "properties": {
                   "enabled": {
-                    "type": "string"
+                    "type": "boolean"
                   },
                   "eventTypes": {
-                    "type": "string"
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
                   }
-                },
-                "description": "Fields auto-detected from the handler’s destructuring of the request body — generic string type, no @openapi annotation for this body yet."
+                }
+              },
+              "example": {
+                "enabled": false
               }
             }
           }
@@ -21894,7 +23143,7 @@
         "tags": [
           "environments"
         ],
-        "summary": "DELETE /api/environments/{id}/notifications/{notificationId} (auto-generated — no @openapi annotation yet)",
+        "summary": "Remove a notification-channel link from an environment",
         "parameters": [
           {
             "name": "id",
@@ -21903,7 +23152,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Path parameter \"id\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "Environment id"
           },
           {
             "name": "notificationId",
@@ -21912,24 +23161,42 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Path parameter \"notificationId\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "Notification channel id"
           }
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ]
+                },
+                "example": {
+                  "success": true
+                }
+              }
+            }
           },
           "400": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Invalid id or notificationId"
           },
           "403": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Permission denied (RBAC 'notifications:delete' missing)"
           },
           "404": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "No such notification link for this environment"
           },
           "500": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Unexpected error while deleting the notification link"
           }
         },
         "security": [
@@ -21948,7 +23215,7 @@
         "tags": [
           "environments"
         ],
-        "summary": "GET /api/environments/{id}/disk-warning (auto-generated — no @openapi annotation yet)",
+        "summary": "Get the disk-space warning thresholds for an environment",
         "parameters": [
           {
             "name": "id",
@@ -21957,21 +23224,54 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Path parameter \"id\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "Environment id"
           }
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "mode": {
+                      "type": "string"
+                    },
+                    "threshold": {
+                      "type": "integer"
+                    },
+                    "thresholdGb": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "enabled",
+                    "mode",
+                    "threshold",
+                    "thresholdGb"
+                  ]
+                },
+                "example": {
+                  "enabled": true,
+                  "mode": "percentage",
+                  "threshold": 80,
+                  "thresholdGb": 50
+                }
+              }
+            }
           },
           "403": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Permission denied (RBAC 'environments:view' missing)"
           },
           "404": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Environment not found"
           },
           "500": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Unexpected error while loading the settings"
           }
         },
         "security": [
@@ -21988,7 +23288,7 @@
         "tags": [
           "environments"
         ],
-        "summary": "POST /api/environments/{id}/disk-warning (auto-generated — no @openapi annotation yet)",
+        "summary": "Save the disk-space warning thresholds for an environment (each field optional/independent)",
         "parameters": [
           {
             "name": "id",
@@ -21997,21 +23297,39 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Path parameter \"id\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "Environment id"
           }
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ]
+                },
+                "example": {
+                  "success": true
+                }
+              }
+            }
           },
           "403": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Permission denied (RBAC 'environments:edit' missing)"
           },
           "404": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Environment not found"
           },
           "500": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Unexpected error while saving the settings"
           }
         },
         "security": [
@@ -22021,7 +23339,36 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "mode": {
+                    "type": "string"
+                  },
+                  "threshold": {
+                    "type": "integer"
+                  },
+                  "thresholdGb": {
+                    "type": "integer"
+                  }
+                }
+              },
+              "example": {
+                "enabled": true,
+                "mode": "percentage",
+                "threshold": 85
+              }
+            }
+          }
+        }
       }
     },
     "/api/environments/{id}/icon": {
@@ -22030,7 +23377,7 @@
         "tags": [
           "environments"
         ],
-        "summary": "GET /api/environments/{id}/icon (auto-generated — no @openapi annotation yet)",
+        "summary": "Get the custom icon image for an environment (raw image/webp bytes, not JSON)",
         "parameters": [
           {
             "name": "id",
@@ -22039,15 +23386,15 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Path parameter \"id\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "Environment id"
           }
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Binary image/webp response body, Cache-Control public max-age=3600"
           },
           "404": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "No custom icon set for this environment"
           }
         },
         "security": [
@@ -22064,7 +23411,7 @@
         "tags": [
           "environments"
         ],
-        "summary": "POST /api/environments/{id}/icon (auto-generated — no @openapi annotation yet)",
+        "summary": "Upload a custom icon for an environment (base64-encoded image, ~200KB limit)",
         "parameters": [
           {
             "name": "id",
@@ -22073,21 +23420,44 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Path parameter \"id\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "Environment id"
           }
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "icon": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "icon"
+                  ]
+                },
+                "example": {
+                  "success": true,
+                  "icon": "custom:env-3.webp"
+                }
+              }
+            }
           },
           "400": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Missing image data, or image exceeds the ~300000-char base64 size limit"
           },
           "403": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Permission denied (RBAC 'environments:edit' missing)"
           },
           "404": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Environment not found"
           }
         },
         "security": [
@@ -22097,14 +23467,35 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "image": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "image"
+                ]
+              },
+              "example": {
+                "image": "string"
+              }
+            }
+          }
+        }
       },
       "delete": {
         "operationId": "delete_api_environments_id_icon",
         "tags": [
           "environments"
         ],
-        "summary": "DELETE /api/environments/{id}/icon (auto-generated — no @openapi annotation yet)",
+        "summary": "Remove an environment's custom icon and reset it to the default \"globe\" icon",
         "parameters": [
           {
             "name": "id",
@@ -22113,18 +23504,41 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Path parameter \"id\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "Environment id"
           }
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "icon": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "icon"
+                  ]
+                },
+                "example": {
+                  "success": true,
+                  "icon": "globe"
+                }
+              }
+            }
           },
           "403": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Permission denied (RBAC 'environments:edit' missing)"
           },
           "404": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Environment not found"
           }
         },
         "security": [
@@ -22143,7 +23557,7 @@
         "tags": [
           "environments"
         ],
-        "summary": "GET /api/environments/{id}/timezone (auto-generated — no @openapi annotation yet)",
+        "summary": "Get the IANA timezone used for scheduling on an environment",
         "parameters": [
           {
             "name": "id",
@@ -22152,21 +23566,39 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Path parameter \"id\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "Environment id"
           }
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "timezone": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "timezone"
+                  ]
+                },
+                "example": {
+                  "timezone": "Europe/Berlin"
+                }
+              }
+            }
           },
           "403": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Permission denied (RBAC 'environments:view' missing)"
           },
           "404": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Environment not found"
           },
           "500": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Unexpected error while loading the timezone"
           }
         },
         "security": [
@@ -22183,7 +23615,7 @@
         "tags": [
           "environments"
         ],
-        "summary": "POST /api/environments/{id}/timezone (auto-generated — no @openapi annotation yet)",
+        "summary": "Set the IANA timezone for an environment and refresh its schedules to use it",
         "parameters": [
           {
             "name": "id",
@@ -22192,24 +23624,47 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Path parameter \"id\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "Environment id"
           }
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "timezone": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "timezone"
+                  ]
+                },
+                "example": {
+                  "success": true,
+                  "timezone": "string"
+                }
+              }
+            }
           },
           "400": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Not a recognized IANA timezone (Intl.supportedValuesOf('timeZone'))"
           },
           "403": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Permission denied (RBAC 'environments:edit' missing)"
           },
           "404": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Environment not found"
           },
           "500": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Unexpected error while saving the timezone"
           }
         },
         "security": [
@@ -22219,7 +23674,28 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "timezone": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "timezone"
+                ]
+              },
+              "example": {
+                "timezone": "Europe/Berlin"
+              }
+            }
+          }
+        }
       }
     },
     "/api/environments/{id}/test": {
@@ -22228,7 +23704,7 @@
         "tags": [
           "environments"
         ],
-        "summary": "POST /api/environments/{id}/test (auto-generated — no @openapi annotation yet)",
+        "summary": "Test connectivity to a saved environment's Docker/Hawser endpoint",
         "parameters": [
           {
             "name": "id",
@@ -22237,15 +23713,69 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Path parameter \"id\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "Environment id"
           }
         ],
         "responses": {
           "200": {
-            "description": "Successful response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "success:false with a human-readable error message is also returned as HTTP 200 (connection/agent-not-connected states are not transport errors)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "info": {
+                      "type": "object",
+                      "properties": {
+                        "serverVersion": {
+                          "type": "string"
+                        },
+                        "containers": {
+                          "type": "integer"
+                        },
+                        "images": {
+                          "type": "integer"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "engine": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "isEdgeMode": {
+                      "type": "boolean"
+                    },
+                    "hawser": {
+                      "type": "object",
+                      "properties": {}
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ]
+                },
+                "example": {
+                  "success": true,
+                  "info": {
+                    "serverVersion": "string",
+                    "containers": 0,
+                    "images": 0,
+                    "name": "string",
+                    "engine": "string"
+                  },
+                  "isEdgeMode": true,
+                  "hawser": {}
+                }
+              }
+            }
           },
           "404": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Environment not found"
           }
         },
         "security": [
@@ -22264,7 +23794,7 @@
         "tags": [
           "environments"
         ],
-        "summary": "GET /api/environments/{id}/image-prune (auto-generated — no @openapi annotation yet)",
+        "summary": "Get the automatic image-prune schedule settings for an environment",
         "parameters": [
           {
             "name": "id",
@@ -22273,21 +23803,59 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Path parameter \"id\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "Environment id"
           }
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "settings": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "cronExpression": {
+                          "type": "string"
+                        },
+                        "pruneMode": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "cronExpression",
+                        "pruneMode"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "settings"
+                  ]
+                },
+                "example": {
+                  "settings": {
+                    "enabled": false,
+                    "cronExpression": "0 3 * * 0",
+                    "pruneMode": "dangling"
+                  }
+                }
+              }
+            }
           },
           "403": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Permission denied (RBAC 'environments:view' missing)"
           },
           "404": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Environment not found"
           },
           "500": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Unexpected error while loading the settings"
           }
         },
         "security": [
@@ -22304,7 +23872,7 @@
         "tags": [
           "environments"
         ],
-        "summary": "POST /api/environments/{id}/image-prune (auto-generated — no @openapi annotation yet)",
+        "summary": "Save the automatic image-prune schedule for an environment (registers/unregisters the croner job)",
         "parameters": [
           {
             "name": "id",
@@ -22313,21 +23881,64 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Path parameter \"id\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "Environment id"
           }
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "settings": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "cronExpression": {
+                          "type": "string"
+                        },
+                        "pruneMode": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "cronExpression",
+                        "pruneMode"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "settings"
+                  ]
+                },
+                "example": {
+                  "success": true,
+                  "settings": {
+                    "enabled": true,
+                    "cronExpression": "string",
+                    "pruneMode": "string"
+                  }
+                }
+              }
+            }
           },
           "403": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Permission denied (RBAC 'environments:edit' missing)"
           },
           "404": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Environment not found"
           },
           "500": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Unexpected error while saving the settings"
           }
         },
         "security": [
@@ -22337,14 +23948,40 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "cronExpression": {
+                    "type": "string"
+                  },
+                  "pruneMode": {
+                    "type": "string"
+                  }
+                }
+              },
+              "example": {
+                "enabled": true,
+                "cronExpression": "0 3 * * 0",
+                "pruneMode": "dangling"
+              }
+            }
+          }
+        }
       },
       "put": {
         "operationId": "put_api_environments_id_image-prune",
         "tags": [
           "environments"
         ],
-        "summary": "PUT /api/environments/{id}/image-prune (auto-generated — no @openapi annotation yet)",
+        "summary": "Immediately run an image prune for an environment (outside its schedule)",
         "parameters": [
           {
             "name": "id",
@@ -22353,24 +23990,42 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Path parameter \"id\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": "Environment id"
           }
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ]
+                },
+                "example": {
+                  "success": true
+                }
+              }
+            }
           },
           "400": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "The prune operation itself failed (Docker error)"
           },
           "403": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Permission denied (RBAC 'environments:edit' missing)"
           },
           "404": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Environment not found"
           },
           "500": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Unexpected error while triggering the prune"
           }
         },
         "security": [
@@ -22389,14 +24044,60 @@
         "tags": [
           "environments"
         ],
-        "summary": "POST /api/environments/test (auto-generated — no @openapi annotation yet)",
+        "summary": "Test a Docker/Hawser connection configuration WITHOUT saving it as an environment",
         "parameters": [],
         "responses": {
           "200": {
-            "description": "Successful response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "success:false with a human-readable error message is also returned as HTTP 200 (connection failures are not transport errors)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "info": {
+                      "type": "object",
+                      "properties": {
+                        "serverVersion": {
+                          "type": "string"
+                        },
+                        "containers": {
+                          "type": "integer"
+                        },
+                        "images": {
+                          "type": "integer"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "hawser": {
+                      "type": "object",
+                      "properties": {}
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ]
+                },
+                "example": {
+                  "success": true,
+                  "info": {
+                    "serverVersion": "string",
+                    "containers": 0,
+                    "images": 0,
+                    "name": "string"
+                  },
+                  "hawser": {}
+                }
+              }
+            }
           },
           "400": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Host is required for direct/hawser-standard connection types"
           }
         },
         "security": [
@@ -22406,7 +24107,56 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "connectionType": {
+                    "type": "string"
+                  },
+                  "socketPath": {
+                    "type": "string"
+                  },
+                  "host": {
+                    "type": "string"
+                  },
+                  "port": {
+                    "type": "integer"
+                  },
+                  "protocol": {
+                    "type": "string"
+                  },
+                  "tlsCa": {
+                    "type": "string"
+                  },
+                  "tlsCert": {
+                    "type": "string"
+                  },
+                  "tlsKey": {
+                    "type": "string"
+                  },
+                  "tlsSkipVerify": {
+                    "type": "boolean"
+                  },
+                  "hawserToken": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "connectionType"
+                ]
+              },
+              "example": {
+                "connectionType": "socket",
+                "socketPath": "/var/run/docker.sock"
+              }
+            }
+          }
+        }
       }
     },
     "/api/legal/license": {
@@ -26087,20 +27837,20 @@
         "tags": [
           "metrics"
         ],
-        "summary": "GET /metrics (auto-generated — no @openapi annotation yet)",
+        "summary": "Prometheus metrics endpoint (disabled and 404s unless EXPORT_METRICS=true; public if app auth is disabled, otherwise requires a session or bearer token)",
         "parameters": [],
         "responses": {
           "200": {
-            "description": "Successful response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Prometheus text-exposition-format metrics body"
           },
           "401": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Not authenticated (session or bearer token required when app auth is enabled)"
           },
           "404": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Metrics export disabled (EXPORT_METRICS is not true)"
           },
           "500": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Metrics collection failed"
           }
         },
         "security": [
@@ -26119,16 +27869,16 @@
         "tags": [
           "audit"
         ],
-        "summary": "GET /audit (auto-generated — no @openapi annotation yet)",
+        "summary": "List audit log entries with optional filters (Enterprise only)",
         "parameters": [
           {
-            "name": "action",
+            "name": "username",
             "in": "query",
             "required": false,
             "schema": {
               "type": "string"
             },
-            "description": "Query parameter \"action\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": ""
           },
           {
             "name": "entity_type",
@@ -26137,7 +27887,16 @@
             "schema": {
               "type": "string"
             },
-            "description": "Query parameter \"entity_type\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": ""
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": ""
           },
           {
             "name": "environment_id",
@@ -26146,7 +27905,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Query parameter \"environment_id\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": ""
           },
           {
             "name": "from_date",
@@ -26155,25 +27914,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Query parameter \"from_date\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            },
-            "description": "Query parameter \"limit\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
-          },
-          {
-            "name": "offset",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            },
-            "description": "Query parameter \"offset\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": ""
           },
           {
             "name": "to_date",
@@ -26182,27 +27923,137 @@
             "schema": {
               "type": "string"
             },
-            "description": "Query parameter \"to_date\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": ""
           },
           {
-            "name": "username",
+            "name": "limit",
             "in": "query",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "integer"
             },
-            "description": "Query parameter \"username\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+            "description": ""
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": ""
           }
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "logs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "integer"
+                          },
+                          "userId": {
+                            "type": "integer"
+                          },
+                          "username": {
+                            "type": "string"
+                          },
+                          "action": {
+                            "type": "string"
+                          },
+                          "entityType": {
+                            "type": "string"
+                          },
+                          "entityId": {
+                            "type": "string"
+                          },
+                          "entityName": {
+                            "type": "string"
+                          },
+                          "environmentId": {
+                            "type": "integer"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "details": {
+                            "type": "object",
+                            "properties": {}
+                          },
+                          "ipAddress": {
+                            "type": "string"
+                          },
+                          "userAgent": {
+                            "type": "string"
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "username",
+                          "action",
+                          "entityType",
+                          "createdAt"
+                        ]
+                      }
+                    },
+                    "total": {
+                      "type": "integer"
+                    },
+                    "limit": {
+                      "type": "integer"
+                    },
+                    "offset": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "logs",
+                    "total",
+                    "limit",
+                    "offset"
+                  ]
+                },
+                "example": {
+                  "logs": [
+                    {
+                      "id": 0,
+                      "userId": 0,
+                      "username": "string",
+                      "action": "string",
+                      "entityType": "string",
+                      "entityId": "string",
+                      "entityName": "string",
+                      "environmentId": 0,
+                      "description": "string",
+                      "details": {},
+                      "ipAddress": "string",
+                      "userAgent": "string",
+                      "createdAt": "string"
+                    }
+                  ],
+                  "total": 0,
+                  "limit": 0,
+                  "offset": 0
+                }
+              }
+            }
           },
           "403": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Enterprise license required, or permission denied to view the audit log"
           },
           "500": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Failed to fetch audit logs"
           }
         },
         "security": [
@@ -26221,17 +28072,30 @@
         "tags": [
           "audit"
         ],
-        "summary": "GET /audit/users (auto-generated — no @openapi annotation yet)",
+        "summary": "List distinct usernames that appear in the audit log, for use as a filter dropdown (Enterprise only)",
         "parameters": [],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "example": [
+                  "string"
+                ]
+              }
+            }
           },
           "403": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Enterprise license required, or permission denied to view the audit log"
           },
           "500": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "Failed to fetch users"
           }
         },
         "security": [
