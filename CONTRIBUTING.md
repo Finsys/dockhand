@@ -34,6 +34,22 @@ Dockhand welcomes all contributions so thank you for considering contributing!
    ```
 5. Open your browser and navigate to `http://localhost:5173` (or the port specified in the Bun output) to see the application running.
 
+## API documentation
+
+The REST API documentation (`GET /api/docs` for the JSON spec, `GET /api/docs/ui` for the interactive Scalar viewer) is an OpenAPI 3 spec **generated from the route tree** — please don't edit the spec by hand.
+
+- Path, method, tags and security are derived automatically from `src/routes/api/**/+server.ts`. Static analysis also picks up query params, path params, status codes and request-body fields directly from each handler's code.
+- The generator can't infer everything, though — a human-readable `summary`, param descriptions, request/response shapes and examples come from a `@openapi` JSDoc block written directly above the exported handler (`export const GET`/`POST`/etc). Use an existing well-annotated handler as a style reference, e.g. `src/routes/api/auth/tokens/+server.ts`.
+- **When you add or change an endpoint:** add or update its `@openapi` block, then regenerate the spec with:
+  ```bash
+  npm run generate:openapi
+  ```
+- Before opening a PR, run the drift check:
+  ```bash
+  npm run generate:openapi:check
+  ```
+  This is the same check CI runs (`.github/workflows/openapi.yml`) and fails the build on drift — an undocumented endpoint, a stale query/path param, a wrong status code, or an orphaned annotation. It's how the docs stay in sync instead of quietly falling behind the code.
+
 ## CLA Agreement
 
 When contributing to Dockhand, you will be asked to sign a Contributor License Agreement (CLA) to ensure that all contributions are properly licensed. This helps protect both you and the project. The agreement can be found [here](https://cla-assistant.io/Finsys/dockhand).
