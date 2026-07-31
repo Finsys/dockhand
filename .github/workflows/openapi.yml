@@ -32,7 +32,7 @@ jobs:
           node-version: 24
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install --no-audit --no-fund
 
       # Hard gate: path-param consistency, query/status drift, orphan JSDoc,
       # and spec validity (@redocly/cli lint) MUST all pass. Coverage (Gate 1)
