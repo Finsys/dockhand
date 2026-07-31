@@ -14,6 +14,7 @@ import { isHealthTransition } from './subprocess-manager.js';
 import { pushMetric } from './metrics-store.js';
 import { secureGetRandomValues, secureRandomUUID } from './crypto-fallback.js';
 import { hashPassword, verifyPassword } from './auth.js';
+import { validateEdgeAgentDockerUniqueness } from './environment-docker-validation.js';
 
 // Protocol constants
 export const HAWSER_PROTOCOL_VERSION = '1.0';
@@ -397,7 +398,11 @@ export async function revokeHawserToken(tokenId: number): Promise<void> {
  * Close an Edge connection and clean up pending requests.
  * Called when an environment is deleted.
  */
-export function closeEdgeConnection(environmentId: number): void {
+export function closeEdgeConnection(
+	environmentId: number,
+	closeCode = 1000,
+	closeReason = 'Environment deleted'
+): void {
 	const connection = edgeConnections.get(environmentId);
 	if (!connection) {
 		console.log(`[Hawser] No Edge connection to close for environment ${environmentId}`);
@@ -432,7 +437,7 @@ export function closeEdgeConnection(environmentId: number): void {
 
 	// Close the WebSocket
 	try {
-		connection.ws.close(1000, 'Environment deleted');
+		connection.ws.close(closeCode, closeReason);
 	} catch (e) {
 		const errorMsg = e instanceof Error ? e.message : String(e);
 		console.error(`[Hawser] Error closing WebSocket for environment ${environmentId}:`, errorMsg);
@@ -1203,6 +1208,15 @@ async function handleHawserWsMessage(ws: any, msg: any, connId: string, remoteIp
 			// Authenticated — register the connection
 			const connection = handleEdgeConnection(ws, result.environmentId, msg);
 			wsToEnvId.set(ws, result.environmentId);
+
+			const duplicateCheck = await validateEdgeAgentDockerUniqueness(result.environmentId);
+			if (!duplicateCheck.ok) {
+				console.log(`[Hawser WS] Rejecting agent for env ${result.environmentId}: ${duplicateCheck.error}`);
+				ws.send(JSON.stringify({ type: 'error', message: duplicateCheck.error }));
+				closeEdgeConnection(result.environmentId, 1008, 'Duplicate Docker instance');
+				wsToEnvId.delete(ws);
+				return;
+			}
 
 			// Send welcome
 			ws.send(JSON.stringify({

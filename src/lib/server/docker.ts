@@ -6,7 +6,7 @@
  */
 
 import { homedir } from 'node:os';
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import * as http from 'node:http';
 import * as https from 'node:https';
@@ -21,6 +21,9 @@ import { isSystemContainer, classifyEmptyDigestImage } from './scheduler/tasks/u
 import { deepDiff } from '../utils/diff.js';
 import { getInstanceId } from './backups/identity';
 import { isOwnedBackupHelper } from './backups/reap-core';
+import type { EnvironmentConnectionInput } from '$lib/utils/docker-environment-uniqueness';
+import { normalizeSocketPath as normalizeSocketPathPure } from '$lib/utils/docker-environment-uniqueness';
+import { cleanPem } from '$lib/utils/pem';
 
 /**
  * Custom error for when an environment is not found.
@@ -1024,9 +1027,12 @@ export async function dockerJsonRequest<T>(
 export function clearDockerClientCache(envId?: number) {
 	if (envId !== undefined) {
 		envCache.delete(envId);
+		daemonIdCache.delete(envId);
 	} else {
 		envCache.clear();
+		daemonIdCache.clear();
 	}
+	configDaemonIdCache.clear();
 	// Destroy HTTPS agents (TLS config may have changed)
 	for (const [key, cached] of agentCache.entries()) {
 		cached.agent.destroy();
@@ -3953,6 +3959,178 @@ export async function exportImage(id: string, envId?: number | null): Promise<Re
 	}
 
 	return response;
+}
+
+/** Short timeout for duplicate-env /info lookups — reachable daemons answer in ms. */
+export const DOCKER_ID_LOOKUP_TIMEOUT_MS = 3000;
+
+const DAEMON_ID_CACHE_TTL_MS = 5 * 60 * 1000;
+
+interface DaemonIdCacheEntry {
+	id: string | null;
+	expiresAt: number;
+}
+
+const daemonIdCache = new Map<number, DaemonIdCacheEntry>();
+const configDaemonIdCache = new Map<string, DaemonIdCacheEntry>();
+
+function normalizeConnectionSocketPath(socketPath: string): string {
+	return normalizeSocketPathPure(socketPath, existsSync, realpathSync);
+}
+
+function connectionConfigCacheKey(config: EnvironmentConnectionInput): string {
+	const type = config.connectionType || 'socket';
+	if (type === 'socket') {
+		return `socket:${normalizeConnectionSocketPath(config.socketPath || '/var/run/docker.sock')}`;
+	}
+	if (type === 'hawser-edge') {
+		return 'hawser-edge';
+	}
+	const protocol = config.protocol || 'http';
+	const port = config.port ?? (protocol === 'https' ? 2376 : 2375);
+	return [
+		type,
+		config.host || '',
+		String(port),
+		protocol,
+		String(config.tlsSkipVerify ?? false),
+		config.hawserToken || '',
+		cleanPem(config.tlsCa) || '',
+		cleanPem(config.tlsCert) || '',
+		cleanPem(config.tlsKey) || ''
+	].join('\0');
+}
+
+function buildConnectionTlsConfig(config: EnvironmentConnectionInput): DockerClientConfig | null {
+	const protocol = config.protocol || 'http';
+	if (protocol !== 'https') return null;
+
+	return {
+		type: 'https',
+		host: config.host || 'localhost',
+		port: config.port || 2376,
+		ca: cleanPem(config.tlsCa) || undefined,
+		cert: cleanPem(config.tlsCert) || undefined,
+		key: cleanPem(config.tlsKey) || undefined,
+		skipVerify: config.tlsSkipVerify || false
+	};
+}
+
+async function fetchDockerIdFromConfigUncached(config: EnvironmentConnectionInput): Promise<{
+	id: string | null;
+	cacheable: boolean;
+}> {
+	const connectionType = config.connectionType || 'socket';
+	if (connectionType === 'hawser-edge') {
+		return { id: null, cacheable: false };
+	}
+
+	try {
+		let response: Response;
+		const lookupSignal = AbortSignal.timeout(DOCKER_ID_LOOKUP_TIMEOUT_MS);
+
+		if (connectionType === 'socket') {
+			const socketPath = config.socketPath || '/var/run/docker.sock';
+			response = await withDockerLookupTimeout(unixSocketRequest(socketPath, '/info'));
+		} else {
+			const host = config.host;
+			if (!host) return { id: null, cacheable: false };
+
+			const headers: Record<string, string> = {};
+			if (connectionType === 'hawser-standard' && config.hawserToken) {
+				headers['X-Hawser-Token'] = config.hawserToken;
+			}
+
+			const tlsConfig = buildConnectionTlsConfig(config);
+			if (tlsConfig) {
+				response = await withDockerLookupTimeout(
+					httpsAgentRequest(tlsConfig, '/info', { signal: lookupSignal }, false, headers)
+				);
+			} else {
+				const port = config.port || 2375;
+				response = await withDockerLookupTimeout(
+					fetch(`http://${host}:${port}/info`, {
+						headers,
+						signal: lookupSignal,
+						keepalive: false
+					})
+				);
+			}
+		}
+
+		if (!response.ok) return { id: null, cacheable: false };
+
+		const info = await response.json();
+		const id = typeof info?.ID === 'string' && info.ID.length > 0 ? info.ID : null;
+		return { id, cacheable: true };
+	} catch {
+		return { id: null, cacheable: false };
+	}
+}
+
+/**
+ * Docker daemon ID from /info for a not-yet-persisted connection config.
+ * Cached by connection parameters so repeated saves skip redundant /info calls.
+ */
+export async function getDockerDaemonIdFromConfig(
+	config: EnvironmentConnectionInput
+): Promise<string | null> {
+	const connectionType = config.connectionType || 'socket';
+	if (connectionType === 'hawser-edge') {
+		return null;
+	}
+
+	const now = Date.now();
+	const key = connectionConfigCacheKey(config);
+	const cached = configDaemonIdCache.get(key);
+	if (cached && cached.expiresAt > now) {
+		return cached.id;
+	}
+
+	const { id, cacheable } = await fetchDockerIdFromConfigUncached(config);
+	if (cacheable) {
+		configDaemonIdCache.set(key, { id, expiresAt: now + DAEMON_ID_CACHE_TTL_MS });
+	}
+	return id;
+}
+
+function withDockerLookupTimeout<T>(promise: Promise<T>): Promise<T> {
+	return Promise.race([
+		promise,
+		new Promise<T>((_, reject) => {
+			setTimeout(
+				() => reject(new Error('Docker /info lookup timed out')),
+				DOCKER_ID_LOOKUP_TIMEOUT_MS
+			);
+		})
+	]);
+}
+
+/**
+ * Docker daemon ID from /info, with in-memory cache (stable per daemon lifetime).
+ * Used by duplicate-environment validation to avoid N sequential /info round-trips.
+ */
+export async function getDockerDaemonId(envId: number): Promise<string | null> {
+	const now = Date.now();
+	const cached = daemonIdCache.get(envId);
+	if (cached && cached.expiresAt > now) {
+		return cached.id;
+	}
+
+	try {
+		const info = await withDockerLookupTimeout(
+			dockerJsonRequest<{ ID?: string }>(
+				'/info',
+				{ signal: AbortSignal.timeout(DOCKER_ID_LOOKUP_TIMEOUT_MS) },
+				envId
+			)
+		);
+		const id = typeof info?.ID === 'string' && info.ID.length > 0 ? info.ID : null;
+		daemonIdCache.set(envId, { id, expiresAt: now + DAEMON_ID_CACHE_TTL_MS });
+		return id;
+	} catch {
+		return null;
+	}
 }
 
 // System information
