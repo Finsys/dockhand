@@ -1,14 +1,17 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 /**
  * OpenAPI 3.0 generator / CI-checker / annotation-scaffolder for Dockhand.
  *
+ * Runs under plain Node via tsx (no Bun-specific APIs) — see the
+ * "generate:openapi"/"generate:openapi:check" scripts in package.json.
+ *
  * Three modes, one engine (scripts/openapi/{lib,build-spec}.ts):
  *
- *   bun run scripts/generate-openapi.ts                 -> writes static/openapi.json
- *   bun run scripts/generate-openapi.ts --check          -> CI gate, exits non-zero on drift
- *   bun run scripts/generate-openapi.ts --check --strict-coverage
+ *   npx tsx scripts/generate-openapi.ts                 -> writes static/openapi.json
+ *   npx tsx scripts/generate-openapi.ts --check          -> CI gate, exits non-zero on drift
+ *   npx tsx scripts/generate-openapi.ts --check --strict-coverage
  *                                                         -> also fails on <100% @openapi coverage
- *   bun run scripts/generate-openapi.ts --scaffold <file> -> prints a code-grounded JSDoc draft
+ *   npx tsx scripts/generate-openapi.ts --scaffold <file> -> prints a code-grounded JSDoc draft
  *                                                            for every un-annotated handler in <file>
  *
  * Path/method/tag/auth are derived automatically from the SvelteKit route
@@ -23,6 +26,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, copyFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
 	type HandlerAnnotation,
 	type HttpMethod,
@@ -36,11 +40,22 @@ import {
 } from './openapi/lib';
 import { buildSpec } from './openapi/build-spec';
 
-const ROOT_DIR = join(import.meta.dir, '..');
+// `import.meta.dir` is Bun-only; this script runs under plain Node via tsx,
+// so derive the script directory the portable way.
+const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
+const ROOT_DIR = join(SCRIPT_DIR, '..');
 const ROUTES_ROOT = join(ROOT_DIR, 'src', 'routes');
 const HOOKS_FILE = join(ROOT_DIR, 'src', 'hooks.server.ts');
 const PACKAGE_JSON = join(ROOT_DIR, 'package.json');
-const OUT_FILE = join(ROOT_DIR, 'static', 'openapi.json');
+// Bundled as an importable module (src/lib) rather than read from disk at
+// runtime — see src/routes/api/docs/+server.ts. The production Docker image
+// only copies build/, not static/, so a static/-only spec would 404 in the
+// container even though it exists in the repo/build client assets.
+const LIB_OUT_FILE = join(ROOT_DIR, 'src', 'lib', 'openapi.generated.json');
+// Also written to static/ so it's copied into build/client/ verbatim by the
+// SvelteKit build (useful for direct static-asset access / debugging), even
+// though /api/docs no longer reads from this path.
+const STATIC_OUT_FILE = join(ROOT_DIR, 'static', 'openapi.json');
 
 const args = process.argv.slice(2);
 const mode = args.includes('--check') ? 'check' : args.includes('--scaffold') ? 'scaffold' : 'generate';
@@ -93,12 +108,24 @@ function copySwaggerUiAssets() {
 	return true;
 }
 
+// Writes the spec to both the importable src/lib/ location (what
+// /api/docs actually serves — bundled into the built server, works
+// regardless of whether static/ ships in the runtime image) and to
+// static/ (copied verbatim into build/client/ by the SvelteKit build;
+// kept for direct static-asset access / debugging parity with before).
+function writeSpecOutputs(spec: unknown) {
+	const json = JSON.stringify(spec, null, 2);
+	mkdirSync(dirname(LIB_OUT_FILE), { recursive: true });
+	writeFileSync(LIB_OUT_FILE, json);
+	mkdirSync(dirname(STATIC_OUT_FILE), { recursive: true });
+	writeFileSync(STATIC_OUT_FILE, json);
+}
+
 function runGenerate() {
 	const { routes, skipped, fileContents, publicPaths, isPublicFn, annotationsByPath, version } = loadEverything();
 	const { spec, stats } = buildSpec({ routes, fileContents, annotationsByPath, publicPaths, isPublicFn, version });
 
-	mkdirSync(dirname(OUT_FILE), { recursive: true });
-	writeFileSync(OUT_FILE, JSON.stringify(spec, null, 2));
+	writeSpecOutputs(spec);
 	const assetsCopied = copySwaggerUiAssets();
 
 	const totalOperations = Object.values(spec.paths).reduce((sum, item: any) => sum + Object.keys(item).length, 0);
@@ -118,7 +145,7 @@ function runGenerate() {
 	console.log(`Skipped files (no method): ${skipped.length}`);
 	for (const s of skipped) console.log(`  - ${relative(ROOT_DIR, s.filePath)}: ${s.reason}`);
 	console.log(`Swagger UI assets copied:  ${assetsCopied ? 'yes (static/swagger-ui/)' : 'SKIPPED (see warning above)'}`);
-	console.log(`\nOutput written to: ${relative(ROOT_DIR, OUT_FILE)}`);
+	console.log(`\nOutput written to: ${relative(ROOT_DIR, LIB_OUT_FILE)} (served by /api/docs) and ${relative(ROOT_DIR, STATIC_OUT_FILE)} (static asset copy)`);
 }
 
 // ---------------------------------------------------------------------------
@@ -219,12 +246,11 @@ function runCheck(): number {
 	}
 	if (orphanMarkers.length > 0) hardFailures++;
 
-	// Gate 6: spec validity (write to a temp file, run both validators)
-	mkdirSync(dirname(OUT_FILE), { recursive: true });
-	writeFileSync(OUT_FILE, JSON.stringify(spec, null, 2));
+	// Gate 6: spec validity (write both outputs, lint the static copy)
+	writeSpecOutputs(spec);
 	let validatorsOk = true;
 	try {
-		execFileSync('npx', ['--yes', '@redocly/cli@2.43.1', 'lint', OUT_FILE, '--format=summary'], {
+		execFileSync('npx', ['--yes', '@redocly/cli@2.43.1', 'lint', STATIC_OUT_FILE, '--format=summary'], {
 			cwd: ROOT_DIR,
 			stdio: 'pipe'
 		});
