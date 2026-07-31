@@ -471,6 +471,12 @@ export function analyzeHandlerBody(body: string, pathParamNames: string[] = []):
 	const errorRe = /\berror\(\s*(\d{3})/g;
 	let em;
 	while ((em = errorRe.exec(body)) !== null) statusCodes.add(em[1]);
+	// SvelteKit `redirect(3xx, location)` — e.g. `throw redirect(302, '/login')`.
+	// Without this, an annotated resp-3xx on a redirect-only handler is flagged
+	// as stale drift by Gate 4, even though the code genuinely emits it.
+	const redirectRe = /\bredirect\(\s*(\d{3})/g;
+	let rm;
+	while ((rm = redirectRe.exec(body)) !== null) statusCodes.add(rm[1]);
 
 	const bodyFields = new Set<string>();
 	// `const { a, b } = await request.json();` and `const { a, b } = body;`

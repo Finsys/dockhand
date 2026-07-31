@@ -5,7 +5,7 @@
 	"type": "module",
 	"scripts": {
 		"dev": "npx vite dev",
-		"prebuild": "npx license-checker --json --production | jq 'to_entries | map({name: (.key | split(\"@\")[0:-1] | join(\"@\")), version: (.key | split(\"@\")[-1]), license: .value.licenses, repository: .value.repository}) | sort_by(.name)' > src/lib/data/dependencies.json.tmp && mv src/lib/data/dependencies.json.tmp src/lib/data/dependencies.json || true && bun run generate:openapi",
+		"prebuild": "npx license-checker --json --production | jq 'to_entries | map({name: (.key | split(\"@\")[0:-1] | join(\"@\")), version: (.key | split(\"@\")[-1]), license: .value.licenses, repository: .value.repository}) | sort_by(.name)' > src/lib/data/dependencies.json.tmp && mv src/lib/data/dependencies.json.tmp src/lib/data/dependencies.json || true && npm run generate:openapi",
 		"build": "npx vite build",
 		"start": "node ./server.js",
 		"preview": "node ./build/index.js",
@@ -51,8 +51,8 @@
 		"test:integration": "bun test tests/api-smoke.test.ts tests/crud-operations.test.ts tests/scheduling.test.ts tests/hawser-connection.test.ts",
 		"test:e2e": "npx playwright test tests/e2e/",
 		"generate:legal": "node scripts/generate-legal-pages.ts",
-		"generate:openapi": "bun run scripts/generate-openapi.ts",
-		"generate:openapi:check": "bun run scripts/generate-openapi.ts --check"
+		"generate:openapi": "npx tsx scripts/generate-openapi.ts",
+		"generate:openapi:check": "npx tsx scripts/generate-openapi.ts --check"
 	},
 	"dependencies": {
 		"@codemirror/autocomplete": "6.20.0",
@@ -92,7 +92,7 @@
 		"qrcode": "1.5.4",
 		"rollup": "4.60.0",
 		"svelte-sonner": "1.0.7",
-		"swagger-ui-dist": "^5.32.11",
+		"swagger-ui-dist": "5.32.11",
 		"undici": "7.28.0",
 		"ws": "8.21.0"
 	},
@@ -132,6 +132,7 @@
 		"tailwind-merge": "^3.4.0",
 		"tailwind-variants": "^3.2.2",
 		"tailwindcss": "^4.1.18",
+		"tsx": "4.23.1",
 		"tw-animate-css": "^1.4.0",
 		"typescript": "^5.9.3",
 		"vite": "^7.3.1"

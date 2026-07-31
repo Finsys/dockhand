@@ -13,7 +13,7 @@ import { safeRedirectOrRoot } from '$lib/utils/safe-redirect';
  * query: state:string Opaque state value used to correlate the request and carry the post-login redirect
  * query: error:string Error code returned by the IdP when authentication failed
  * query: error_description:string Human-readable error detail returned by the IdP
- * resp-200: On success a session cookie is set and the caller is 302-redirected to the original destination; on any error the caller is 302-redirected to /login with an error query param
+ * resp-302: Always a redirect — on success a session cookie is set and the caller is redirected to the original destination; on any error the caller is redirected to /login with an error query param
  */
 export const GET: RequestHandler = async (event) => {
 	const { url, cookies } = event;

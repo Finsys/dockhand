@@ -10,6 +10,7 @@ import { safeRedirectOrRoot } from '$lib/utils/safe-redirect';
  * summary: Start the OIDC login flow for a provider — on success throws a 302 redirect to the IdP authorization URL
  * path: id:integer! Numeric id of the OIDC provider
  * query: redirect:string Post-login destination path to return to (defaults to /)
+ * resp-302: Redirect to the IdP's authorization URL
  * resp-400: Authentication is not enabled, or the configuration id is invalid
  * resp-404: OIDC provider not found or disabled
  * resp-500: Failed to build the authorization URL / initiate SSO
