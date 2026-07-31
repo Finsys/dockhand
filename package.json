@@ -92,7 +92,6 @@
 		"qrcode": "1.5.4",
 		"rollup": "4.60.0",
 		"svelte-sonner": "1.0.7",
-		"swagger-ui-dist": "5.32.11",
 		"undici": "7.28.0",
 		"ws": "8.21.0"
 	},

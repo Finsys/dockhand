@@ -88,30 +88,11 @@ function loadEverything() {
 // generate
 // ---------------------------------------------------------------------------
 
-// Self-hosted Swagger UI assets: copy the handful of static files we actually
-// need out of the swagger-ui-dist package into static/swagger-ui/ so
-// GET /api/docs/ui never depends on a CDN (secret-safe, offline-friendly,
-// works behind an airgapped/internal Dockhand deployment too).
-const SWAGGER_UI_ASSETS = ['swagger-ui-bundle.js', 'swagger-ui-standalone-preset.js', 'swagger-ui.css', 'favicon-32x32.png'];
-
-function copySwaggerUiAssets() {
-	const srcDir = join(ROOT_DIR, 'node_modules', 'swagger-ui-dist');
-	const destDir = join(ROOT_DIR, 'static', 'swagger-ui');
-	if (!existsSync(srcDir)) {
-		console.warn('swagger-ui-dist not found in node_modules — skipping asset copy (run `npm install` first)');
-		return false;
-	}
-	mkdirSync(destDir, { recursive: true });
-	for (const asset of SWAGGER_UI_ASSETS) {
-		copyFileSync(join(srcDir, asset), join(destDir, asset));
-	}
-	return true;
-}
-
-// Self-hosted Scalar API Reference (additional docs viewer alongside Swagger
-// UI, with built-in multi-language request code samples). Same rationale as
-// the Swagger UI copy above: vendor the standalone browser bundle so
-// GET /api/docs/scalar never depends on a CDN.
+// Self-hosted Scalar API Reference — the interactive docs viewer at
+// GET /api/docs/ui, with built-in multi-language request code samples.
+// Vendor the standalone browser bundle so it never depends on a CDN
+// (secret-safe, offline-friendly, works behind an airgapped/internal
+// Dockhand deployment too).
 const SCALAR_ASSETS = ['standalone.js'];
 
 function copyScalarAssets() {
@@ -146,7 +127,6 @@ function runGenerate() {
 	const { spec, stats } = buildSpec({ routes, fileContents, annotationsByPath, publicPaths, isPublicFn, version });
 
 	writeSpecOutputs(spec);
-	const assetsCopied = copySwaggerUiAssets();
 	const scalarAssetsCopied = copyScalarAssets();
 
 	const totalOperations = Object.values(spec.paths).reduce((sum, item: any) => sum + Object.keys(item).length, 0);
@@ -165,7 +145,6 @@ function runGenerate() {
 	console.log(`Operations with a requestBody (auto+annotated): ${stats.autoBodyCount} of ${totalOperations}`);
 	console.log(`Skipped files (no method): ${skipped.length}`);
 	for (const s of skipped) console.log(`  - ${relative(ROOT_DIR, s.filePath)}: ${s.reason}`);
-	console.log(`Swagger UI assets copied:  ${assetsCopied ? 'yes (static/swagger-ui/)' : 'SKIPPED (see warning above)'}`);
 	console.log(`Scalar assets copied:      ${scalarAssetsCopied ? 'yes (static/scalar/)' : 'SKIPPED (see warning above)'}`);
 	console.log(`\nOutput written to: ${relative(ROOT_DIR, LIB_OUT_FILE)} (served by /api/docs) and ${relative(ROOT_DIR, STATIC_OUT_FILE)} (static asset copy)`);
 }
