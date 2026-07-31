@@ -23,10 +23,10 @@
 
 	// Check if current route is login page (no sidebar needed)
 	const isLoginPage = $derived($page.url.pathname === '/login');
-	// Same for the OpenAPI docs viewer — Swagger UI brings its own full-page chrome.
-	// Matches with or without a trailing slash ('/api/docs/ui' and '/api/docs/ui/').
+	// Same for the OpenAPI docs viewers (Swagger UI and Scalar) — both bring
+	// their own full-page chrome. Matches with or without a trailing slash.
 	const isDocsPage = $derived(
-		$page.url.pathname === '/api/docs/ui' || $page.url.pathname === '/api/docs/ui/'
+		['/api/docs/ui', '/api/docs/scalar'].includes($page.url.pathname.replace(/\/$/, ''))
 	);
 	const noSidebar = $derived(isLoginPage || isDocsPage);
 

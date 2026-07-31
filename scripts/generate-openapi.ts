@@ -108,6 +108,26 @@ function copySwaggerUiAssets() {
 	return true;
 }
 
+// Self-hosted Scalar API Reference (additional docs viewer alongside Swagger
+// UI, with built-in multi-language request code samples). Same rationale as
+// the Swagger UI copy above: vendor the standalone browser bundle so
+// GET /api/docs/scalar never depends on a CDN.
+const SCALAR_ASSETS = ['standalone.js'];
+
+function copyScalarAssets() {
+	const srcDir = join(ROOT_DIR, 'node_modules', '@scalar', 'api-reference', 'dist', 'browser');
+	const destDir = join(ROOT_DIR, 'static', 'scalar');
+	if (!existsSync(srcDir)) {
+		console.warn('@scalar/api-reference not found in node_modules — skipping asset copy (run `npm install` first)');
+		return false;
+	}
+	mkdirSync(destDir, { recursive: true });
+	for (const asset of SCALAR_ASSETS) {
+		copyFileSync(join(srcDir, asset), join(destDir, asset));
+	}
+	return true;
+}
+
 // Writes the spec to both the importable src/lib/ location (what
 // /api/docs actually serves — bundled into the built server, works
 // regardless of whether static/ ships in the runtime image) and to
@@ -127,6 +147,7 @@ function runGenerate() {
 
 	writeSpecOutputs(spec);
 	const assetsCopied = copySwaggerUiAssets();
+	const scalarAssetsCopied = copyScalarAssets();
 
 	const totalOperations = Object.values(spec.paths).reduce((sum, item: any) => sum + Object.keys(item).length, 0);
 	const annotatedHandlerCount = Object.values(annotationsByPath).reduce((sum, m) => sum + Object.keys(m).length, 0);
@@ -145,6 +166,7 @@ function runGenerate() {
 	console.log(`Skipped files (no method): ${skipped.length}`);
 	for (const s of skipped) console.log(`  - ${relative(ROOT_DIR, s.filePath)}: ${s.reason}`);
 	console.log(`Swagger UI assets copied:  ${assetsCopied ? 'yes (static/swagger-ui/)' : 'SKIPPED (see warning above)'}`);
+	console.log(`Scalar assets copied:      ${scalarAssetsCopied ? 'yes (static/scalar/)' : 'SKIPPED (see warning above)'}`);
 	console.log(`\nOutput written to: ${relative(ROOT_DIR, LIB_OUT_FILE)} (served by /api/docs) and ${relative(ROOT_DIR, STATIC_OUT_FILE)} (static asset copy)`);
 }
 

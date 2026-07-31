@@ -101,6 +101,7 @@
 		"@layerstack/tailwind": "^1.0.1",
 		"@lucide/svelte": "^0.562.0",
 		"@playwright/test": "1.57.0",
+		"@scalar/api-reference": "1.64.0",
 		"@sveltejs/adapter-node": "^5.2.0",
 		"@sveltejs/kit": "2.50.0",
 		"@sveltejs/vite-plugin-svelte": "6.2.4",
