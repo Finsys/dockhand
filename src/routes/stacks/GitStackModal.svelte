@@ -84,6 +84,7 @@
 		open: boolean;
 		gitStack?: GitStack | null;
 		convertStackName?: string | null;
+		untrackedStackName?: string | null;
 		environmentId?: number | null;
 		icon?: string | null;
 		repositories: GitRepository[];
@@ -97,6 +98,7 @@
 		open = $bindable(),
 		gitStack = null,
 		convertStackName = null,
+		untrackedStackName = null,
 		environmentId = null,
 		icon = null,
 		repositories,
@@ -283,6 +285,8 @@
 	let lastInitializedStackId = $state<number | null | undefined>(undefined);
 	let isInitializing = $state(false);
 	const isConvertMode = $derived(!!convertStackName && !gitStack);
+	const isUntrackedCreateMode = $derived(!!untrackedStackName && !gitStack);
+	const usesExistingStackName = $derived(isConvertMode || isUntrackedCreateMode);
 
 	$effect(() => {
 		if (open) {
@@ -645,8 +649,8 @@
 			formNewRepoUrl = '';
 			formNewRepoBranch = 'main';
 			formNewRepoCredentialId = null;
-			formStackName = '';
-			formStackNameUserModified = false;
+			formStackName = untrackedStackName || '';
+			formStackNameUserModified = !!untrackedStackName;
 			formComposePath = 'compose.yaml';
 			formEnvFilePath = null;
 			formAutoUpdate = false;
@@ -658,7 +662,7 @@
 			formNoBuildCache = false;
 			formRepullImages = false;
 			formForceRedeploy = false;
-			formDeployNow = false;
+			formDeployNow = !!untrackedStackName;
 			formSecretProviderId = null;
 		}
 	}
@@ -748,8 +752,9 @@
 
 		if (hasErrors) return;
 
-		// Check if stack already exists (only for brand new stacks, excludes conversions as they re-use the same stack name)
-		if (!gitStack && !isConvertMode) {
+		// Check if stack already exists only when a new project name is being created.
+		// Internal conversions and explicit untracked takeovers reuse an existing name.
+		if (!gitStack && !usesExistingStackName) {
 			try {
 				const stacksResponse = await fetch(`/api/stacks?env=${environmentId}`);
 				if (stacksResponse.ok) {
@@ -790,7 +795,7 @@
 				noBuildCache: formNoBuildCache,
 				repullImages: formRepullImages,
 				forceRedeploy: formForceRedeploy,
-				deployNow: deployAfterSave,
+				deployNow: isUntrackedCreateMode || deployAfterSave,
 				secretProviderId: formSecretProviderId,
 				envVars: overrideVars.map(v => ({
 					key: v.key.trim(),
@@ -1246,7 +1251,7 @@
 					bind:value={formStackName}
 					placeholder={m.stacks_git_stack_name_placeholder()}
 					class={errors.stackName ? 'border-destructive focus-visible:ring-destructive' : ''}
-					disabled={isConvertMode}
+					disabled={usesExistingStackName}
 					oninput={() => { errors.stackName = undefined; formStackNameUserModified = true; }}
 				/>
 				{#if errors.stackName}
@@ -1533,7 +1538,7 @@
 								<p class="text-xs text-muted-foreground">{m.stacks_git_deploy_now_hint()}</p>
 							</div>
 						</div>
-						<TogglePill bind:checked={formDeployNow} />
+						<TogglePill bind:checked={formDeployNow} disabled={isUntrackedCreateMode} />
 					</div>
 				</div>
 			{/if}
