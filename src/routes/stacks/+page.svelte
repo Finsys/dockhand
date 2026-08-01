@@ -115,6 +115,7 @@
 	let stackModalGitInfo = $state<{ commit?: string; url?: string; branch?: string } | null>(null);
 	let editingGitStack = $state<any>(null);
 	let convertingStackName = $state<string | null>(null);
+	let untrackedStackName = $state<string | null>(null);
 	let envId = $state<number | null>(null);
 
 	// User-defined tags: assignments (name -> tagId[]) + catalog + filter.
@@ -1135,9 +1136,10 @@
 		return stack.status;
 	}
 
-	async function openGitModal(gitStack?: any, stackName?: string | null) {
+	async function openGitModal(gitStack?: any, stackName?: string | null, isUntracked = false) {
 		editingGitStack = gitStack || null;
-		convertingStackName = stackName || null;
+		convertingStackName = isUntracked ? null : stackName || null;
+		untrackedStackName = isUntracked ? stackName || null : null;
 		// Fetch repositories and credentials before opening modal
 		try {
 			const [reposRes, credsRes] = await Promise.all([
@@ -1184,11 +1186,11 @@
 		}
 	}
 
-	async function convertLocalStackToGit(stackName: string) {
+	async function convertLocalStackToGit(stackName: string, isUntracked: boolean) {
 		operationError = null;
 		showEditModal = false;
 		editingStackName = '';
-		await openGitModal(null, stackName);
+		await openGitModal(null, stackName, isUntracked);
 	}
 
 	async function startStack(name: string) {
@@ -3137,7 +3139,12 @@
 		stackModalGitInfo = null;
 		loadTags(envId);
 	}}
-	onConvertToGit={editingStackName ? () => convertLocalStackToGit(editingStackName) : null}
+	onConvertToGit={editingStackName && (
+		stackSources[editingStackName]?.sourceType === 'internal'
+		|| (!stackSources[editingStackName] && $canAccess('stacks', 'create'))
+	)
+		? (isUntracked) => convertLocalStackToGit(editingStackName, isUntracked)
+		: null}
 	onSuccess={fetchStacks}
 />
 
@@ -3145,6 +3152,7 @@
 	bind:open={showGitModal}
 	gitStack={editingGitStack}
 	convertStackName={convertingStackName}
+	{untrackedStackName}
 	environmentId={envId}
 	icon={editingGitStack ? (stackSources[editingGitStack.stackName]?.icon ?? null) : null}
 	repositories={gitRepositories}
@@ -3154,6 +3162,7 @@
 		editingGitStack = null;
 		loadTags(envId);
 		convertingStackName = null;
+		untrackedStackName = null;
 	}}
 	onConvertToLocal={editingGitStack ? () => convertGitStackToLocal(editingGitStack.stackName, editingGitStack.id) : null}
 	onSaved={fetchStacks}
