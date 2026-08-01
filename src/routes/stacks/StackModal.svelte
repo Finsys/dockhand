@@ -48,7 +48,7 @@
 		readonly?: boolean; // View compose content without allowing local changes
 		gitInfo?: { commit?: string; url?: string; branch?: string } | null; // Git provenance for read-only git stacks
 		onClose: () => void;
-		onConvertToGit?: (() => void) | null;
+		onConvertToGit?: ((isUntracked: boolean) => void) | null;
 		onSuccess: () => void; // Called after create or save
 	}
 
@@ -2208,7 +2208,7 @@
 					{/if}
 				</div>
 				{#if !readonly && mode === 'edit' && onConvertToGit}
-					<Button variant="outline" onclick={onConvertToGit} disabled={saving || loading}>
+					<Button variant="outline" onclick={() => onConvertToGit?.(needsFileLocation)} disabled={saving || loading}>
 						<GitGraph class="w-4 h-4" />
 						Convert to Git
 					</Button>
