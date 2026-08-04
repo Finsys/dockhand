@@ -62,6 +62,14 @@ export const POST: RequestHandler = async (event) => {
 			return json({ error: 'Stack name must be lowercase, start with a letter or number, and contain only letters, numbers, hyphens, and underscores' }, { status: 400 });
 		}
 
+		if (
+			'secretProviderId' in data &&
+			data.secretProviderId !== null &&
+			typeof data.secretProviderId !== 'number'
+		) {
+			return json({ error: 'secretProviderId must be a number or null' }, { status: 400 });
+		}
+
 		// Check for name conflicts with existing stacks (regular/external/git)
 		const existing = await getStackSource(trimmedStackName, data.environmentId || null);
 		if (existing) {
@@ -139,7 +147,8 @@ export const POST: RequestHandler = async (event) => {
 			environmentId: data.environmentId || null,
 			sourceType: 'git',
 			gitRepositoryId: repositoryId,
-			gitStackId: gitStack.id
+			gitStackId: gitStack.id,
+			secretProviderId: data.secretProviderId ?? null
 		});
 
 		// Register schedule with croner if auto-update is enabled

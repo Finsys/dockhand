@@ -36,8 +36,10 @@ import {
 	getPendingContainerUpdates,
 	deleteAutoUpdateSchedule,
 	getAutoUpdateSetting,
-	getStackSourceByComposePath
+	getStackSourceByComposePath,
+	getSecretProviderById
 } from './db';
+import { getProvider } from './secretproviders';
 import { unregisterSchedule } from './scheduler';
 import { sendEventNotification } from './notifications';
 import { deleteGitStackFiles, parseEnvFileContent } from './git';
@@ -608,6 +610,7 @@ export async function saveStackComposeFile(
 		moveFromDir?: string;  // Old directory to move all files from when path changes
 		oldComposePath?: string;  // Old compose file path for renaming
 		oldEnvPath?: string;  // Old env file path for renaming
+		secretProviderId?: number | null;  // secret provider binding (undefined = unchanged)
 	}
 ): Promise<{ success: boolean; error?: string }> {
 	// Validate stack name - Docker Compose requires lowercase alphanumeric, hyphens, underscores
@@ -766,14 +769,22 @@ export async function saveStackComposeFile(
 		}
 	}
 
-	// If a custom composePath is being set (new or update), save it to the database
-	if (options?.composePath || options?.envPath !== undefined) {
+	// If a custom composePath, envPath, or 1Password binding is being set (new or update), save it to the database
+	if (
+		options?.composePath ||
+		options?.envPath !== undefined ||
+		options?.secretProviderId !== undefined
+	) {
 		await upsertStackSource({
 			stackName: name,
 			environmentId: envId ?? null,
 			sourceType: 'internal',
 			composePath: options?.composePath || source?.composePath || null,
-			envPath: options?.envPath !== undefined ? options.envPath : (source?.envPath ?? null)
+			envPath: options?.envPath !== undefined ? options.envPath : (source?.envPath ?? null),
+			secretProviderId:
+				options?.secretProviderId !== undefined
+					? options.secretProviderId
+					: (source?.secretProviderId ?? null),
 		});
 	}
 
@@ -2198,6 +2209,10 @@ export async function startStack(
 	const containers = await getStackContainers(stackName, envId);
 	const operation = containers.length > 0 ? 'start' : 'up';
 
+	if (operation === 'up') {
+		await applyProviderSecretsToComposeResult(result, stackName, envId, `[Stack:${stackName}]`);
+	}
+
 	const startResult = await executeComposeCommand(
 		operation,
 		opts,
@@ -2282,6 +2297,7 @@ export async function restartStack(
 	if (mode === 'recreate') {
 		// Stop first, then bring up with --force-recreate to ensure new container IDs
 		await executeComposeCommand('stop', opts, result.content!, result.nonSecretVars, result.secretVars);
+		await applyProviderSecretsToComposeResult(result, stackName, envId, `[Stack:${stackName}]`);
 		composeResult = await executeComposeCommand('up', { ...opts, forceRecreate: true }, result.content!, result.nonSecretVars, result.secretVars);
 	} else {
 		composeResult = await executeComposeCommand('restart', opts, result.content!, result.nonSecretVars, result.secretVars);
@@ -2744,11 +2760,13 @@ export async function deployStack(options: DeployStackOptions): Promise<StackOpe
 			stackFiles[composeFilename] = compose;
 			console.log(`${logPrefix} Added ${composeFilename} to stackFiles for Hawser (${compose.length} chars)`);
 		}
-		if (actualEnvPath && existsSync(actualEnvPath) && !stackFiles['.env']) {
+
+		let envFileContent: string | undefined = stackFiles['.env'];
+		if (!envFileContent && actualEnvPath && existsSync(actualEnvPath)) {
 			try {
-				const envContent = readFileSync(actualEnvPath, 'utf-8');
-				stackFiles['.env'] = envContent;
-				console.log(`${logPrefix} Added .env to stackFiles for Hawser (${envContent.length} chars)`);
+				envFileContent = readFileSync(actualEnvPath, 'utf-8');
+				stackFiles['.env'] = envFileContent;
+				console.log(`${logPrefix} Added .env to stackFiles for Hawser (${envFileContent.length} chars)`);
 			} catch (err) {
 				console.warn(`${logPrefix} Failed to read .env file at ${actualEnvPath}:`, err);
 			}
@@ -2759,8 +2777,18 @@ export async function deployStack(options: DeployStackOptions): Promise<StackOpe
 		console.log(compose);
 
 		// Fetch overrides and secrets from DB
-		const dbNonSecretVars = await getNonSecretEnvVarsAsRecord(name, envId);
-		const secretVars = await getSecretEnvVarsAsRecord(name, envId);
+		const initialDbNonSecretVars = await getNonSecretEnvVarsAsRecord(name, envId);
+		const initialSecretVars = await getSecretEnvVarsAsRecord(name, envId);
+
+		// Add environment variables from 1Password
+		const source = await getStackSource(name, envId);
+		const { dbNonSecretVars, secretVars } = await resolveProviderEnvVars(
+			initialDbNonSecretVars,
+			initialSecretVars,
+			logPrefix,
+			source?.secretProviderId,
+			envFileContent
+		);
 		console.log(`${logPrefix} DB non-secret override vars:`, Object.keys(dbNonSecretVars).length);
 		console.log(`${logPrefix} DB secret vars:`, Object.keys(secretVars).length);
 
@@ -2919,6 +2947,8 @@ export async function updateStackService(
 		};
 	}
 
+	await applyProviderSecretsToComposeResult(result, stackName, envId, `[Stack:${stackName}]`);
+
 	// Don't use forceRecreate - Docker Compose will detect the image change
 	// naturally since the image was already pulled before this function is called.
 	// Using forceRecreate can cause permission issues on bind mounts.
@@ -3071,6 +3101,187 @@ export async function saveStackEnvVars(
 }
 
 // =============================================================================
+// SECRET PROVIDER INJECTION (deploy-time)
+// =============================================================================
+// Resolves secrets from the stack's bound secret provider at deploy time and
+// merges them into the vars handed to `docker compose`. Two modes, depending on
+// what the provider supports:
+//   - bulk pull: a whole environment / path of secrets, triggered by a selector
+//     variable (OP_ENVIRONMENT_ID for 1Password back-compat, or the generic
+//     DOCKHAND_SECRET_SELECTOR for any bulk-capable provider).
+//   - inline references: values the provider recognises as references (e.g.
+//     1Password op://...), resolved in place.
+// The bound provider decides what a reference is and how to resolve it; nothing
+// here is 1Password-specific. Non-secret behaviour is untouched.
+
+interface EnrichedEnvVars {
+	dbNonSecretVars: Record<string, string>;
+	secretVars: Record<string, string>;
+}
+
+// Variable names that trigger a bulk pull. OP_ENVIRONMENT_ID is retained for
+// backward compatibility with the original 1Password integration.
+const BULK_SELECTOR_VARS = ['DOCKHAND_SECRET_SELECTOR', 'OP_ENVIRONMENT_ID'];
+
+async function resolveProviderEnvVars(
+	dbNonSecretVars: Record<string, string>,
+	secretVars: Record<string, string>,
+	logPrefix: string,
+	secretProviderId?: number | null,
+	stackEnvFileContent?: string
+): Promise<EnrichedEnvVars> {
+	const envFileVars = stackEnvFileContent ? parseEnvFileContent(stackEnvFileContent) : {};
+
+	const providerRow = secretProviderId ? await getSecretProviderById(secretProviderId) : undefined;
+	const provider = providerRow ? getProvider(providerRow.type) : undefined;
+
+	// --- Bulk pull (environment / path) --------------------------------------
+	// Priority: secrets > DB non-secrets > .env file (each overrides the previous)
+	let selector: string | undefined;
+	let selectorVar: string | undefined;
+	for (const name of BULK_SELECTOR_VARS) {
+		const v = secretVars[name] ?? dbNonSecretVars[name] ?? envFileVars[name];
+		if (v) {
+			selector = v;
+			selectorVar = name;
+			break;
+		}
+	}
+	if (selector && selectorVar) {
+		try {
+			if (providerRow && provider?.supportsBulk) {
+				// Strip the selector var from the values passed to the stack
+				delete secretVars[selectorVar];
+				delete dbNonSecretVars[selectorVar];
+
+				console.log(`${logPrefix} Resolving bulk selector via "${providerRow.name}" (${provider.label})`);
+				const bulkVars = await provider.resolveBulk(providerRow.config, selector);
+				console.log(`${logPrefix} ${provider.label} injected ${Object.keys(bulkVars).length} secret(s)`);
+
+				// Bulk values merged underneath, with explicit DB secrets keeping priority
+				secretVars = Object.assign(bulkVars, secretVars);
+			} else if (!providerRow) {
+				console.warn(`${logPrefix} ${selectorVar} is set but no secret provider is bound to this stack`);
+			} else if (!provider) {
+				console.warn(`${logPrefix} ${selectorVar} is set but bound provider type "${providerRow.type}" is not registered`);
+			} else {
+				console.warn(`${logPrefix} ${selectorVar} is set but provider "${providerRow.name}" (${provider.label}) does not support bulk pull`);
+			}
+		} catch (e: unknown) {
+			const msg = e instanceof Error ? e.message : String(e);
+			throw new Error(`Failed to load secrets from provider: ${msg}`);
+		}
+	}
+
+	// --- Inline references ----------------------------------------------------
+	// Only providers that support inline references detect any here.
+	const isRef = (value: unknown): value is string =>
+		provider?.supportsReferences ? provider.isReference(value) : false;
+
+	const envFileRefs = new Map<string, string>();
+	for (const [key, value] of Object.entries(envFileVars)) {
+		if (isRef(value)) {
+			envFileRefs.set(key, value.trim());
+		}
+	}
+
+	const refs = new Set<string>();
+	for (const value of Object.values(dbNonSecretVars)) {
+		if (isRef(value)) refs.add(value.trim());
+	}
+	for (const value of Object.values(secretVars)) {
+		if (isRef(value)) refs.add(value.trim());
+	}
+	for (const ref of envFileRefs.values()) refs.add(ref);
+
+	if (refs.size === 0) {
+		return { dbNonSecretVars, secretVars };
+	}
+
+	if (!providerRow || !provider) {
+		console.warn(`${logPrefix} Found ${refs.size} reference(s) but no usable secret provider is bound to this stack; leaving them as literals`);
+		return { dbNonSecretVars, secretVars };
+	}
+
+	let refMap: Map<string, string>;
+	try {
+		refMap = await provider.resolveSecretReferences(providerRow.config, Array.from(refs), logPrefix);
+	} catch (e: unknown) {
+		const msg = e instanceof Error ? e.message : String(e);
+		throw new Error(`Failed to resolve secret references: ${msg}`);
+	}
+
+	let promotedFromDb = 0;
+	for (const [key, value] of Object.entries(dbNonSecretVars)) {
+		if (isRef(value)) {
+			const resolved = refMap.get(value.trim());
+			if (resolved !== undefined) {
+				delete dbNonSecretVars[key];
+				secretVars[key] = resolved;
+				promotedFromDb++;
+			}
+		}
+	}
+	for (const [key, value] of Object.entries(secretVars)) {
+		if (isRef(value)) {
+			const resolved = refMap.get(value.trim());
+			if (resolved !== undefined) {
+				secretVars[key] = resolved;
+			}
+		}
+	}
+
+	let promotedFromEnvFile = 0;
+	for (const [key, ref] of envFileRefs) {
+		if (key in secretVars || key in dbNonSecretVars) continue;
+		const resolved = refMap.get(ref);
+		if (resolved !== undefined) {
+			secretVars[key] = resolved;
+			promotedFromEnvFile++;
+		}
+	}
+
+	console.log(`${logPrefix} ${provider.label} resolved ${refMap.size}/${refs.size} reference(s) (promoted from DB: ${promotedFromDb}, from .env: ${promotedFromEnvFile})`);
+
+	return { dbNonSecretVars, secretVars };
+}
+
+/**
+ * Resolve the bound provider's secrets for a compose result produced by
+ * requireComposeFile(). Mutates result.secretVars / result.nonSecretVars in
+ * place so callers can pass the result through to executeComposeCommand
+ * without further plumbing.
+ */
+async function applyProviderSecretsToComposeResult(
+	result: RequireComposeResult,
+	stackName: string,
+	envId: number | null | undefined,
+	logPrefix: string
+): Promise<void> {
+	if (!result.success || !result.secretVars || !result.nonSecretVars) return;
+
+	let envFileContent: string | undefined;
+	if (result.envPath && existsSync(result.envPath)) {
+		try {
+			envFileContent = readFileSync(result.envPath, 'utf-8');
+		} catch (err) {
+			console.warn(`${logPrefix} Failed to read .env at ${result.envPath}:`, err);
+		}
+	}
+
+	const source = await getStackSource(stackName, envId ?? undefined);
+	const { dbNonSecretVars, secretVars } = await resolveProviderEnvVars(
+		{ ...result.nonSecretVars },
+		{ ...result.secretVars },
+		logPrefix,
+		source?.secretProviderId,
+		envFileContent
+	);
+	result.nonSecretVars = dbNonSecretVars;
+	result.secretVars = secretVars;
+}
+
+// =============================================================================
 // RE-EXPORTS FOR BACKWARDS COMPATIBILITY
 // =============================================================================
 
@@ -3078,4 +3289,3 @@ export async function saveStackEnvVars(
 // They can be removed once all imports are updated
 
 export type { StackOperationResult as CreateStackResult };
-
