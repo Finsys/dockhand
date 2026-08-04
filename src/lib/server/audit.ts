@@ -336,6 +336,24 @@ export async function auditGitCredential(
 }
 
 /**
+ * Helper for secret provider actions
+ */
+export async function auditSecretProvider(
+	event: RequestEvent,
+	action: AuditAction,
+	providerId: number,
+	providerName: string,
+	details?: any
+): Promise<void> {
+	await audit(event, action, 'secret_provider', {
+		entityId: String(providerId),
+		entityName: providerName,
+		description: `Secret provider ${providerName} ${action}`,
+		details
+	});
+}
+
+/**
  * Helper for config set actions
  */
 export async function auditConfigSet(
