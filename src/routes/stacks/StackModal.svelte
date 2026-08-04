@@ -7,7 +7,7 @@
 	import CodeEditor, { type VariableMarker } from '$lib/components/CodeEditor.svelte';
 	import StackEnvVarsPanel from '$lib/components/StackEnvVarsPanel.svelte';
 	import { type EnvVar, type ValidationResult } from '$lib/components/StackEnvVarsEditor.svelte';
-	import { Layers, Save, Play, Code, GitGraph, GitBranch, GitCommitHorizontal, Github, Loader2, AlertCircle, X, Sun, Moon, TriangleAlert, GripVertical, FolderOpen, Copy, Check, XCircle, MapPin, ArrowRight, ArrowDown, Info, Box, FolderSync, Archive } from 'lucide-svelte';
+	import { Layers, Save, Play, Code, GitGraph, GitBranch, GitCommitHorizontal, Github, Loader2, AlertCircle, X, Sun, Moon, TriangleAlert, GripVertical, FolderOpen, Copy, Check, XCircle, MapPin, ArrowRight, ArrowDown, Info, Box, FolderSync, HelpCircle, Archive } from 'lucide-svelte';
 	import BackupPanel from '../containers/BackupPanel.svelte';
 	import { volumesForStack, type VolumeInfo } from '$lib/utils/mounts';
 	import { fetchBackupExecutions } from '$lib/utils/backup';
@@ -70,11 +70,30 @@
 	// Ref to the embedded backup panel so close can check its inline form for unsaved edits.
 	let backupPanelRef = $state<BackupPanel | undefined>(undefined);
 
+	// Secret providers
+	type SecretProviderOption = { id: number; name: string };
+	let secretProviders = $state<SecretProviderOption[]>([]);
+	let formSecretProviderId = $state<number | null>(null);
+
 	// Environment variables state
 	let envVars = $state<EnvVar[]>([]);
 	let rawEnvContent = $state(''); // Raw .env file content (comments preserved)
 	let envValidation = $state<ValidationResult | null>(null);
 	let validating = $state(false);
+
+	// The bulk-pull selector vars (OP_ENVIRONMENT_ID for 1Password, the generic
+	// DOCKHAND_SECRET_SELECTOR for other providers) are consumed by the secret
+	// provider, not the compose file, so they only count as "used" when a provider
+	// is bound to the stack.
+	const SELECTOR_VARS = ['OP_ENVIRONMENT_ID', 'DOCKHAND_SECRET_SELECTOR'];
+	const effectiveValidation = $derived.by<ValidationResult | null>(() => {
+		if (!envValidation || formSecretProviderId === null) return envValidation;
+		if (!envValidation.unused.some((v) => SELECTOR_VARS.includes(v))) return envValidation;
+		return {
+			...envValidation,
+			unused: envValidation.unused.filter((v) => !SELECTOR_VARS.includes(v))
+		};
+	});
 	let existingSecretKeys = $state<Set<string>>(new Set());
 	let hadExistingDbVars = $state(false); // Track if DB had any vars on load (for proper cleanup)
 
@@ -694,7 +713,20 @@
 		// Add global mouse event listeners for split dragging
 		window.addEventListener('mousemove', handleMouseMove);
 		window.addEventListener('mouseup', handleMouseUp);
+
+		fetchSecretProviders();
 	});
+
+	async function fetchSecretProviders() {
+		try {
+			const response = await fetch('/api/secret-providers');
+			if (!response.ok) return;
+			const data = await response.json();
+			secretProviders = (data ?? []).map((p: any) => ({ id: p.id, name: p.name }));
+		} catch (e) {
+			console.warn('Failed to load secret providers:', e);
+		}
+	}
 
 	onDestroy(() => {
 		window.removeEventListener('mousemove', handleMouseMove);
@@ -810,6 +842,18 @@
 			// Track original paths for detecting changes
 			originalComposePath = data.composePath || null;
 			originalEnvPath = data.envPath || null;
+
+			// Load secret provider binding
+			try {
+				const sourcesRes = await fetch(appendEnvParam('/api/stacks/sources', envId));
+				if (sourcesRes.ok) {
+					const sourceMap = await sourcesRes.json();
+					const source = sourceMap?.[stackName];
+					formSecretProviderId = source?.secretProviderId ?? null;
+				}
+			} catch (e) {
+				console.warn('Failed to load stack source for secret provider binding:', e);
+			}
 
 			// Volumes/binds for the backup picker (managed/internal stack path).
 			try {
@@ -968,6 +1012,8 @@
 				requestBody.envPath = envPathToSave;
 			}
 
+			requestBody.secretProviderId = formSecretProviderId;
+
 			// Create the stack
 			response = await fetch(appendEnvParam('/api/stacks', envId), {
 				method: 'POST',
@@ -1098,6 +1144,8 @@
 			if (moveFromDir) {
 				requestBody.moveFromDir = moveFromDir;
 			}
+
+			requestBody.secretProviderId = formSecretProviderId;
 
 			// Save env files BEFORE compose to ensure deploy reads fresh values
 			// Save raw content to .env file (non-secrets only, comments preserved)
@@ -1710,11 +1758,51 @@
 							</div>
 							<!-- Environment variables panel -->
 							<div class="flex-1 min-w-0 flex flex-col overflow-hidden bg-zinc-50 dark:bg-zinc-800/50">
+								<!-- Secret provider selector -->
+								<div class="px-3 py-2 border-b border-zinc-200 dark:border-zinc-700 bg-zinc-100/60 dark:bg-zinc-800/60 flex items-center gap-2 text-xs">
+									<Label for="secret-provider-select" class="text-xs text-muted-foreground shrink-0">Secret provider</Label>
+									<Select.Root
+										type="single"
+										value={formSecretProviderId !== null ? String(formSecretProviderId) : ''}
+										onValueChange={(v) => {
+											formSecretProviderId = v ? parseInt(v) : null;
+											markDirty();
+										}}
+									>
+										<Select.Trigger id="secret-provider-select" class="h-7 text-xs">
+											{#if formSecretProviderId !== null}
+												{secretProviders.find((p) => p.id === formSecretProviderId)?.name ?? 'Unknown provider'}
+											{:else}
+												<span class="text-muted-foreground">None — disabled</span>
+											{/if}
+										</Select.Trigger>
+										<Select.Content>
+											<Select.Item value="" label="None">
+												<span class="text-muted-foreground">None — disabled</span>
+											</Select.Item>
+											{#each secretProviders as provider (provider.id)}
+												<Select.Item value={String(provider.id)} label={provider.name}>
+													{provider.name}
+												</Select.Item>
+											{/each}
+										</Select.Content>
+									</Select.Root>
+									<Tooltip.Provider delayDuration={150}>
+										<Tooltip.Root>
+											<Tooltip.Trigger>
+												<HelpCircle class="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+											</Tooltip.Trigger>
+											<Tooltip.Content class="max-w-xs text-xs">
+												Inline references (e.g. <code>op://</code> for 1Password) are still resolved. For bulk pull, set <code>OP_ENVIRONMENT_ID</code> (1Password Environment) or the generic <code>DOCKHAND_SECRET_SELECTOR</code> in env vars; the provider's secrets are loaded and injected.
+											</Tooltip.Content>
+										</Tooltip.Root>
+									</Tooltip.Provider>
+								</div>
 								<StackEnvVarsPanel
 									bind:this={envVarsPanelRef}
 									bind:variables={envVars}
 									bind:rawContent={rawEnvContent}
-									validation={envValidation}
+									validation={effectiveValidation}
 									existingSecretKeys={mode === 'edit' ? existingSecretKeys : new Set()}
 									{readonly}
 									onchange={() => { markDirty(); debouncedValidate(); }}

@@ -17,6 +17,7 @@
 		Info,
 		GitBranch,
 		Tags,
+		KeyRound,
 		Archive
 	} from 'lucide-svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
@@ -27,6 +28,7 @@
 	import LabelsTab from './labels/LabelsTab.svelte';
 	import RegistriesTab from './registries/RegistriesTab.svelte';
 	import GitTab from './git/GitTab.svelte';
+	import SecretsTab from './secrets/SecretsTab.svelte';
 	import ConfigSetsTab from './config-sets/ConfigSetsTab.svelte';
 	import NotificationsTab from './notifications/NotificationsTab.svelte';
 	import BackupsTab from './backups/BackupsTab.svelte';
@@ -70,6 +72,10 @@
 			<Tabs.Trigger value="git" class="flex-1 flex items-center justify-center gap-1.5">
 				<GitBranch class="w-4 h-4" />
 				Git
+			</Tabs.Trigger>
+			<Tabs.Trigger value="secrets" class="flex-1 flex items-center justify-center gap-1.5">
+				<KeyRound class="w-4 h-4" />
+				Secrets
 			</Tabs.Trigger>
 			<Tabs.Trigger value="config-sets" class="flex-1 flex items-center justify-center gap-1.5">
 				<Layers class="w-4 h-4" />
@@ -118,6 +124,10 @@
 
 		<Tabs.Content value="git" class="flex-1 min-h-0 overflow-y-auto pr-3">
 			{#if activeTab === 'git'}<GitTab />{/if}
+		</Tabs.Content>
+
+		<Tabs.Content value="secrets" class="flex-1 min-h-0 overflow-y-auto pr-3">
+			{#if activeTab === 'secrets'}<SecretsTab />{/if}
 		</Tabs.Content>
 
 		<Tabs.Content value="config-sets" class="flex-1 min-h-0 overflow-y-auto pr-3">
