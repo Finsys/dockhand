@@ -71,6 +71,13 @@
       "when": 1781620382909,
       "tag": "0009_add_backup_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1783800723008,
+      "tag": "0010_add_secret_providers",
+      "breakpoints": true
     }
   ]
 }

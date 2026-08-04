@@ -1,5 +1,17 @@
 [
   {
+    "name": "@1password/sdk",
+    "version": "0.4.1-beta.1",
+    "license": "MIT",
+    "repository": null
+  },
+  {
+    "name": "@1password/sdk-core",
+    "version": "0.4.1-beta.1",
+    "license": "MIT",
+    "repository": null
+  },
+  {
     "name": "@codemirror/autocomplete",
     "version": "6.20.0",
     "license": "MIT",

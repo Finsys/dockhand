@@ -5,6 +5,7 @@
  * Supports both SQLite and PostgreSQL.
  */
 
+import type { SecretProviderConfig, SecretProviderType } from './secretproviders/shared';
 import {
 	db,
 	isPostgres,
@@ -39,6 +40,7 @@ import {
 	gitCredentials,
 	gitRepositories,
 	gitStacks,
+	secretProviders,
 	stackSources,
 	vulnerabilityScans,
 	auditLogs,
@@ -69,6 +71,7 @@ import {
 	type GitCredential,
 	type GitRepository,
 	type GitStack,
+	type SecretProviderRow,
 	type StackSource,
 	type VulnerabilityScan,
 	type AuditLog,
@@ -102,6 +105,7 @@ export type {
 	GitCredential,
 	GitRepository,
 	GitStack,
+	SecretProviderRow,
 	StackSource,
 	VulnerabilityScan,
 	AuditLog,
@@ -295,6 +299,107 @@ export async function setDefaultRegistry(id: number): Promise<boolean> {
 	await db.update(registries).set({ isDefault: false });
 	await db.update(registries).set({ isDefault: true }).where(eq(registries.id, id));
 	return true;
+}
+
+// =============================================================================
+// SECRET PROVIDER OPERATIONS
+// =============================================================================
+// Pluggable secret providers (1Password, Infisical, HashiCorp Vault, ...). The
+// per-provider `config` object is stored as an encrypted JSON blob; the `token`
+// or `host`/`token` fields live inside it. See src/lib/server/secretproviders.
+
+/** Row without the (secret) config, safe to return to the UI / list views. */
+export interface SecretProviderSummary {
+	id: number;
+	type: string;
+	name: string;
+	createdAt: string | null;
+	updatedAt: string | null;
+}
+
+/** Row with its config decrypted and parsed. Server-side use only. */
+export interface SecretProviderWithConfig extends SecretProviderSummary {
+	config: SecretProviderConfig;
+}
+
+export async function getSecretProviders(): Promise<SecretProviderSummary[]> {
+	const results = await db.select({
+		id: secretProviders.id,
+		type: secretProviders.type,
+		name: secretProviders.name,
+		createdAt: secretProviders.createdAt,
+		updatedAt: secretProviders.updatedAt
+	}).from(secretProviders).orderBy(asc(secretProviders.name));
+	return results;
+}
+
+export async function getSecretProviderById(id: number): Promise<SecretProviderWithConfig | undefined> {
+	const results = await db.select().from(secretProviders).where(eq(secretProviders.id, id));
+	if (!results[0]) return undefined;
+	const row = results[0];
+	const decrypted = decrypt(row.config);
+	const config = decrypted
+		? (JSON.parse(decrypted) as SecretProviderConfig)
+		: ({} as SecretProviderConfig);
+	return {
+		id: row.id,
+		type: row.type,
+		name: row.name,
+		createdAt: row.createdAt,
+		updatedAt: row.updatedAt,
+		config
+	};
+}
+
+export async function createSecretProvider(data: {
+	type: SecretProviderType;
+	name: string;
+	config: SecretProviderConfig;
+}): Promise<SecretProviderSummary> {
+	const encrypted = encrypt(JSON.stringify(data.config));
+	if (!encrypted) throw new Error('Config is required');
+	const result = await db.insert(secretProviders).values({
+		type: data.type,
+		name: data.name,
+		config: encrypted
+	}).returning();
+	const { config: _omit, ...safe } = result[0];
+	return safe;
+}
+
+export async function updateSecretProvider(
+	id: number,
+	data: { name?: string; type?: SecretProviderType; config?: SecretProviderConfig }
+): Promise<SecretProviderSummary | undefined> {
+	const updateData: Record<string, any> = { updatedAt: new Date().toISOString() };
+	if (data.name !== undefined) updateData.name = data.name;
+	if (data.type !== undefined) updateData.type = data.type;
+	if (data.config !== undefined) {
+		const encrypted = encrypt(JSON.stringify(data.config));
+		if (encrypted) updateData.config = encrypted;
+	}
+	await db.update(secretProviders).set(updateData).where(eq(secretProviders.id, id));
+	const results = await db.select({
+		id: secretProviders.id,
+		type: secretProviders.type,
+		name: secretProviders.name,
+		createdAt: secretProviders.createdAt,
+		updatedAt: secretProviders.updatedAt
+	}).from(secretProviders).where(eq(secretProviders.id, id));
+	return results[0];
+}
+
+export async function deleteSecretProvider(id: number): Promise<SecretProviderSummary | null> {
+	const rows = await db.delete(secretProviders)
+		.where(eq(secretProviders.id, id))
+		.returning({
+			id: secretProviders.id,
+			type: secretProviders.type,
+			name: secretProviders.name,
+			createdAt: secretProviders.createdAt,
+			updatedAt: secretProviders.updatedAt
+		});
+	return rows[0] ?? null;
 }
 
 // =============================================================================
@@ -1203,6 +1308,7 @@ export interface Permissions {
 	audit_logs: string[];
 	activity: string[];
 	schedules: string[];
+	secrets: string[];
 	backups: string[];
 }
 
@@ -2797,6 +2903,7 @@ export interface StackSourceData {
 	gitStackId: number | null;
 	composePath: string | null;
 	envPath: string | null;
+	secretProviderId: number | null;
 	createdAt: string;
 	updatedAt: string;
 }
@@ -2904,6 +3011,7 @@ export async function upsertStackSource(data: {
 	gitStackId?: number | null;
 	composePath?: string | null;
 	envPath?: string | null;
+	secretProviderId?: number | null;
 }): Promise<StackSourceData> {
 	const existing = await getStackSource(data.stackName, data.environmentId);
 
@@ -2925,7 +3033,9 @@ export async function upsertStackSource(data: {
 				gitStackId: newStackId,
 				composePath: data.composePath ?? null,
 				envPath: data.envPath ?? null,
-				updatedAt: new Date().toISOString()
+				updatedAt: new Date().toISOString(),
+				// Preserve existing binding when caller (like git) omits it
+				...(data.secretProviderId !== undefined && { secretProviderId: data.secretProviderId })
 			})
 			.where(eq(stackSources.id, existing.id));
 		return getStackSource(data.stackName, data.environmentId) as Promise<StackSourceData>;
@@ -2938,7 +3048,8 @@ export async function upsertStackSource(data: {
 			gitRepositoryId: data.gitRepositoryId || null,
 			gitStackId: data.gitStackId || null,
 			composePath: data.composePath ?? null,
-			envPath: data.envPath ?? null
+			envPath: data.envPath ?? null,
+			secretProviderId: data.secretProviderId ?? null
 		});
 		return getStackSource(data.stackName, data.environmentId) as Promise<StackSourceData>;
 	}
@@ -2947,7 +3058,7 @@ export async function upsertStackSource(data: {
 export async function updateStackSource(
 	stackName: string,
 	environmentId: number | null,
-	updates: { composePath?: string | null; envPath?: string | null }
+	updates: { composePath?: string | null; envPath?: string | null; secretProviderId?: number | null }
 ): Promise<boolean> {
 	const existing = await getStackSource(stackName, environmentId);
 	if (!existing) return false;
@@ -2956,6 +3067,7 @@ export async function updateStackSource(
 		.set({
 			composePath: updates.composePath !== undefined ? updates.composePath : existing.composePath,
 			envPath: updates.envPath !== undefined ? updates.envPath : existing.envPath,
+			secretProviderId: updates.secretProviderId !== undefined ? updates.secretProviderId : existing.secretProviderId,
 			updatedAt: new Date().toISOString()
 		})
 		.where(eq(stackSources.id, existing.id));
@@ -3304,7 +3416,7 @@ export type AuditEntityType =
 	| 'container' | 'image' | 'stack' | 'volume' | 'network'
 	| 'user' | 'role' | 'settings' | 'environment' | 'registry' | 'git_repository' | 'git_credential'
 	| 'config_set' | 'notification' | 'oidc_provider' | 'ldap_config' | 'git_stack' | 'api_token'
-	| 'backup_destination' | 'backup_config';
+	| 'secret_provider' | 'backup_destination' | 'backup_config';
 
 export interface AuditLogData {
 	id: number;

@@ -282,6 +282,19 @@ export const gitCredentials = sqliteTable('git_credentials', {
 	updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`)
 });
 
+// Pluggable secret providers (1Password, Infisical, HashiCorp Vault, ...).
+// `type` selects the backend; `config` is an encrypted JSON blob whose shape is
+// provider-specific (see src/lib/server/secretproviders/shared.ts). Mirrors the
+// notification_settings type+config pattern.
+export const secretProviders = sqliteTable('secret_providers', {
+	id: integer('id').primaryKey({ autoIncrement: true }),
+	type: text('type').notNull(),
+	name: text('name').notNull().unique(),
+	config: text('config').notNull(),
+	createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+	updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`)
+});
+
 export const gitRepositories = sqliteTable('git_repositories', {
 	id: integer('id').primaryKey({ autoIncrement: true }),
 	name: text('name').notNull().unique(),
@@ -340,6 +353,7 @@ export const stackSources = sqliteTable('stack_sources', {
 	gitStackId: integer('git_stack_id').references(() => gitStacks.id, { onDelete: 'set null' }),
 	composePath: text('compose_path'), // Custom path to compose file (for stacks with non-default location)
 	envPath: text('env_path'), // Custom path to .env file (for stacks with non-default location)
+	secretProviderId: integer('secret_provider_id').references(() => secretProviders.id, { onDelete: 'set null' }),
 	createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
 	updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`)
 }, (table) => ({
@@ -610,6 +624,9 @@ export type NewEnvironmentNotification = typeof environmentNotifications.$inferI
 
 export type GitCredential = typeof gitCredentials.$inferSelect;
 export type NewGitCredential = typeof gitCredentials.$inferInsert;
+
+export type SecretProviderRow = typeof secretProviders.$inferSelect;
+export type NewSecretProviderRow = typeof secretProviders.$inferInsert;
 
 export type GitRepository = typeof gitRepositories.$inferSelect;
 export type NewGitRepository = typeof gitRepositories.$inferInsert;

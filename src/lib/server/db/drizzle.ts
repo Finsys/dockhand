@@ -775,7 +775,8 @@ async function seedDatabase(): Promise<void> {
 		audit_logs: ['view'],
 		activity: ['view'],
 		schedules: ['view', 'edit', 'run'],
-		templates: ['view', 'deploy', 'manage']
+		templates: ['view', 'deploy', 'manage'],
+		secrets: ['view', 'create', 'edit', 'delete']
 	});
 
 	const operatorPermissions = JSON.stringify({
@@ -795,7 +796,8 @@ async function seedDatabase(): Promise<void> {
 		audit_logs: [],
 		activity: ['view'],
 		schedules: ['view', 'edit', 'run'],
-		templates: ['view', 'deploy']
+		templates: ['view', 'deploy'],
+		secrets: ['view']
 	});
 
 	const viewerPermissions = JSON.stringify({
@@ -815,7 +817,8 @@ async function seedDatabase(): Promise<void> {
 		audit_logs: [],
 		activity: ['view'],
 		schedules: ['view'],
-		templates: ['view']
+		templates: ['view'],
+		secrets: [],
 	});
 
 	// Seed template sources if table is empty
@@ -920,6 +923,7 @@ export const userRoles = schemaProxy.userRoles;
 export const gitCredentials = schemaProxy.gitCredentials;
 export const gitRepositories = schemaProxy.gitRepositories;
 export const gitStacks = schemaProxy.gitStacks;
+export const secretProviders = schemaProxy.secretProviders;
 export const stackSources = schemaProxy.stackSources;
 export const vulnerabilityScans = schemaProxy.vulnerabilityScans;
 export const auditLogs = schemaProxy.auditLogs;
@@ -968,6 +972,8 @@ export type {
 	NewGitRepository,
 	GitStack,
 	NewGitStack,
+	SecretProviderRow,
+	NewSecretProviderRow,
 	StackSource,
 	NewStackSource,
 	VulnerabilityScan,

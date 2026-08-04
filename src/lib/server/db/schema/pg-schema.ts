@@ -285,6 +285,19 @@ export const gitCredentials = pgTable('git_credentials', {
 	updatedAt: timestamp('updated_at', { mode: 'string' }).defaultNow()
 });
 
+// Pluggable secret providers (1Password, Infisical, HashiCorp Vault, ...).
+// `type` selects the backend; `config` is an encrypted JSON blob whose shape is
+// provider-specific (see src/lib/server/secretproviders/shared.ts). Mirrors the
+// notification_settings type+config pattern.
+export const secretProviders = pgTable('secret_providers', {
+	id: serial('id').primaryKey(),
+	type: text('type').notNull(),
+	name: text('name').notNull().unique(),
+	config: text('config').notNull(),
+	createdAt: timestamp('created_at', { mode: 'string' }).defaultNow(),
+	updatedAt: timestamp('updated_at', { mode: 'string' }).defaultNow()
+});
+
 export const gitRepositories = pgTable('git_repositories', {
 	id: serial('id').primaryKey(),
 	name: text('name').notNull().unique(),
@@ -343,6 +356,7 @@ export const stackSources = pgTable('stack_sources', {
 	gitStackId: integer('git_stack_id').references(() => gitStacks.id, { onDelete: 'set null' }),
 	composePath: text('compose_path'), // Custom path to compose file (for stacks with non-default location)
 	envPath: text('env_path'), // Custom path to .env file (for stacks with non-default location)
+	secretProviderId: integer('secret_provider_id').references(() => secretProviders.id, { onDelete: 'set null' }),
 	createdAt: timestamp('created_at', { mode: 'string' }).defaultNow(),
 	updatedAt: timestamp('updated_at', { mode: 'string' }).defaultNow()
 }, (table) => ({
