@@ -449,11 +449,6 @@
 				</Select.Content>
 			</Select.Root>
 		</div>
-		{:else}
-		<div class="flex items-center gap-2 text-sm text-muted-foreground">
-			<Unplug class="w-4 h-4" />
-			<span>Container main process</span>
-		</div>
 		{/if}
 	</div>
 
