@@ -5,6 +5,8 @@
  */
 export type SystemContainerType = 'dockhand' | 'hawser';
 
+export type TerminalMode = 'exec' | 'attach';
+
 export interface ContainerInfo {
 	id: string;
 	name: string;

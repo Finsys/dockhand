@@ -4428,6 +4428,15 @@ export async function resizeExec(execId: string, cols: number, rows: number, env
 	}
 }
 
+export async function resizeContainer(containerId: string, cols: number, rows: number, envId?: number | null) {
+	try {
+		const response = await dockerFetch(`/containers/${containerId}/resize?h=${rows}&w=${cols}`, { method: 'POST' }, envId);
+		await drainResponse(response);
+	} catch {
+		// Resize may fail if the container is not attached to a TTY, ignore
+	}
+}
+
 /**
  * Get Docker connection info for direct WebSocket connections from the client
  * This is used by the terminal to connect directly to the Docker API
@@ -4467,6 +4476,8 @@ declare global {
 	}>) | undefined;
 	var __terminalCreateExec: ((containerId: string, shell: string, user: string, envId?: number) => Promise<string>) | undefined;
 	var __terminalResizeExec: ((execId: string, cols: number, rows: number, envId?: number) => Promise<void>) | undefined;
+	var __terminalGetContainerTty: ((containerId: string, envId?: number) => Promise<boolean>) | undefined;
+	var __terminalResizeContainer: ((containerId: string, cols: number, rows: number, envId?: number) => Promise<void>) | undefined;
 }
 
 globalThis.__terminalGetTarget = async (envId?: number) => {
@@ -4502,6 +4513,15 @@ globalThis.__terminalCreateExec = async (containerId, shell, user, envId) => {
 
 globalThis.__terminalResizeExec = async (execId, cols, rows, envId) => {
 	await resizeExec(execId, cols, rows, envId);
+};
+
+globalThis.__terminalGetContainerTty = async (containerId, envId) => {
+	const container = await inspectContainer(containerId, envId);
+	return Boolean(container.Config?.Tty);
+};
+
+globalThis.__terminalResizeContainer = async (containerId, cols, rows, envId) => {
+	await resizeContainer(containerId, cols, rows, envId);
 };
 
 // System disk usage

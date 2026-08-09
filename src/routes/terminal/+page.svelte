@@ -11,7 +11,7 @@
 	import * as Select from '$lib/components/ui/select';
 	import { Search, ChevronDown, Terminal as TerminalIcon, Unplug, RefreshCw, Trash2, Copy, Shell, User, Loader2, AlertCircle } from 'lucide-svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
-	import type { ContainerInfo } from '$lib/types';
+	import type { ContainerInfo, TerminalMode } from '$lib/types';
 	import { currentEnvironment, environments, appendEnvParam } from '$lib/stores/environment';
 	import Terminal from './Terminal.svelte';
 	import { NoEnvironment } from '$lib/components/ui/empty-state';
@@ -33,6 +33,7 @@
 	let detectingShells = $state(false);
 
 	// Shell/user options
+	let terminalMode = $state<TerminalMode>('exec');
 	let selectedShell = $state('/bin/bash');
 	let selectedUser = $state('root');
 	let customUserInput = $state('');
@@ -192,7 +193,7 @@
 
 	// Watch for shell/user changes while connected and trigger reconnect
 	$effect(() => {
-		if (selectedContainer && connected && terminalComponent) {
+		if (terminalMode === 'exec' && selectedContainer && connected && terminalComponent) {
 			if (selectedShell !== prevShell || committedUser !== prevUser) {
 				terminalComponent.reconnect();
 			}
@@ -214,6 +215,9 @@
 
 	onMount(async () => {
 		customUsers = getCustomUsers();
+		if ($page.url.searchParams.get('mode') === 'attach') {
+			terminalMode = 'attach';
+		}
 		await fetchContainers();
 
 		// Check for container ID in URL query parameter
@@ -264,6 +268,30 @@
 	<!-- Header with container selector -->
 	<div class="flex items-center gap-4 flex-wrap">
 		<PageHeader icon={TerminalIcon} title="Shell" />
+		<div class="flex items-center gap-2">
+			<Label class="text-sm text-muted-foreground">Mode:</Label>
+			<Select.Root type="single" value={terminalMode} onValueChange={(value) => terminalMode = value as TerminalMode}>
+				<Select.Trigger class="h-9 w-48">
+					{#if terminalMode === 'attach'}
+						<Unplug class="w-4 h-4 mr-2 text-muted-foreground" />
+						<span>Attach to process</span>
+					{:else}
+						<Shell class="w-4 h-4 mr-2 text-muted-foreground" />
+						<span>Shell (exec)</span>
+					{/if}
+				</Select.Trigger>
+				<Select.Content>
+					<Select.Item value="exec" label="Shell (exec)">
+						<Shell class="w-4 h-4 mr-2 text-muted-foreground" />
+						Shell (exec)
+					</Select.Item>
+					<Select.Item value="attach" label="Attach to process">
+						<Unplug class="w-4 h-4 mr-2 text-muted-foreground" />
+						Attach to process
+					</Select.Item>
+				</Select.Content>
+			</Select.Root>
+		</div>
 		<div class="relative flex-1 max-w-md min-w-[200px]">
 			<!-- Search input - always visible, shows selected container or placeholder -->
 			<div class="relative">
@@ -313,7 +341,8 @@
 			</Button>
 		{/if}
 
-		<!-- Shell selector - always visible -->
+		<!-- Shell selector - only used by exec mode -->
+		{#if terminalMode === 'exec'}
 		<div class="flex items-center gap-2">
 			<Label class="text-sm text-muted-foreground">Shell:</Label>
 			{#if detectingShells}
@@ -372,7 +401,7 @@
 			{/if}
 		</div>
 
-		<!-- User selector - always visible -->
+		<!-- User selector - only used by exec mode -->
 		<div class="flex items-center gap-2">
 			<Label class="text-sm text-muted-foreground">User:</Label>
 			<Select.Root type="single" bind:value={selectedUser} onValueChange={onUserSelectChange}>
@@ -420,6 +449,12 @@
 				</Select.Content>
 			</Select.Root>
 		</div>
+		{:else}
+		<div class="flex items-center gap-2 text-sm text-muted-foreground">
+			<Unplug class="w-4 h-4" />
+			<span>Container main process</span>
+		</div>
+		{/if}
 	</div>
 
 	<!-- Shell output - full height -->
@@ -431,14 +466,14 @@
 					<p>Select a container to open shell</p>
 				</div>
 			</div>
-		{:else if detectingShells}
+		{:else if terminalMode === 'exec' && detectingShells}
 			<div class="flex items-center justify-center h-full text-muted-foreground">
 				<div class="text-center">
 					<Loader2 class="w-12 h-12 mx-auto mb-3 opacity-50 animate-spin" />
 					<p>Detecting available shells...</p>
 				</div>
 			</div>
-		{:else if !anyShellAvailable}
+		{:else if terminalMode === 'exec' && !anyShellAvailable}
 			<div class="flex items-center justify-center h-full text-muted-foreground">
 				<div class="text-center">
 					<AlertCircle class="w-12 h-12 mx-auto mb-3 opacity-50 text-amber-500" />
@@ -497,13 +532,14 @@
 				</div>
 			</div>
 			<div class="flex-1 min-h-0 w-full">
-				{#key `${selectedContainer.id}-${selectedShell}-${committedUser}`}
+				{#key `${selectedContainer.id}-${terminalMode}-${terminalMode === 'exec' ? selectedShell : ''}-${terminalMode === 'exec' ? committedUser : ''}`}
 					<Terminal
 						bind:this={terminalComponent}
 						containerId={selectedContainer.id}
 						containerName={selectedContainer.name}
 						shell={selectedShell}
 						user={committedUser}
+						mode={terminalMode}
 						{envId}
 						fontSize={terminalFontSize}
 					/>

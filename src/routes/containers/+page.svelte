@@ -65,7 +65,8 @@
 		Cable,
 		Copy,
 		Loader2,
-		AlertCircle
+		AlertCircle,
+		Unplug
 	} from 'lucide-svelte';
 	import { broom } from '@lucide/lab';
 	import { copyToClipboard } from '$lib/utils/clipboard';
@@ -78,7 +79,7 @@
 	import BatchUpdateModal from './BatchUpdateModal.svelte';
 	import CheckUpdatesButton from '$lib/components/CheckUpdatesButton.svelte';
 	import BatchOperationModal from '$lib/components/BatchOperationModal.svelte';
-	import type { ContainerInfo } from '$lib/types';
+	import type { ContainerInfo, TerminalMode } from '$lib/types';
 	import { EmptyState, NoEnvironment } from '$lib/components/ui/empty-state';
 	import { currentEnvironment, environments, appendEnvParam, clearStaleEnvironment } from '$lib/stores/environment';
 	import { containerStore } from '$lib/stores/containers';
@@ -236,10 +237,12 @@
 		containerName: string;
 		shell: string;
 		user: string;
+		mode: TerminalMode;
 	}
 	let activeTerminals = $state<ActiveTerminal[]>([]);
 	let currentTerminalContainerId = $state<string | null>(null);
 	let terminalPopoverStates = $state<Record<string, boolean>>({});
+	let terminalMode = $state<TerminalMode>('exec');
 	let terminalShell = $state('/bin/bash');
 	let terminalUser = $state('root');
 	let terminalCustomUser = $state('');
@@ -1045,13 +1048,14 @@
 	}
 
 	function startTerminal(container: ContainerInfo) {
-		saveUserForContainer(container.id, terminalUser);
+		if (terminalMode === 'exec') saveUserForContainer(container.id, terminalUser);
 		terminalCustomUsers = getCustomUsers();
 		const terminal: ActiveTerminal = {
 			containerId: container.id,
 			containerName: container.name,
 			shell: terminalShell,
-			user: terminalUser
+			user: terminalUser,
+			mode: terminalMode
 		};
 		activeTerminals = [...activeTerminals, terminal];
 		currentTerminalContainerId = container.id;
@@ -1375,7 +1379,7 @@
 					onkeydown={(e) => e.key === 'Escape' && (searchQuery = '')}
 					class="pl-8 h-8 w-48 text-sm"
 				/>
-			</div>
+																																																				</div>
 			<!-- Status filter (multi-select). The synthetic 'update-available'
 			     entry appears once at least one container has a pending update,
 			     and ANDs with selected real states (#1063). -->
@@ -2057,7 +2061,7 @@
 							{:else}
 								<Popover.Root open={terminalPopoverStates[container.id] ?? false} onOpenChange={(open) => {
 									terminalPopoverStates[container.id] = open;
-									if (open) detectContainerShells(container.id);
+									if (open && terminalMode === 'exec') detectContainerShells(container.id);
 								}}>
 									<Popover.Trigger
 										onclick={(e: MouseEvent) => e.stopPropagation()}
@@ -2072,12 +2076,12 @@
 												<span class="text-xs font-medium truncate" title={container.name}>{container.name}</span>
 											</div>
 										</div>
-										{#if detectingShellsFor === container.id}
+										{#if terminalMode === 'exec' && detectingShellsFor === container.id}
 											<div class="p-4 text-center">
 												<Loader2 class="w-5 h-5 mx-auto mb-2 text-muted-foreground animate-spin" />
 												<p class="text-xs text-muted-foreground">Detecting shells...</p>
 											</div>
-										{:else if !anyShellAvailableFor(container.id)}
+										{:else if terminalMode === 'exec' && !anyShellAvailableFor(container.id)}
 											<div class="p-4 text-center">
 												<AlertCircle class="w-5 h-5 mx-auto mb-2 text-amber-500" />
 												<p class="text-xs font-medium text-amber-500">No shell available</p>
@@ -2086,76 +2090,109 @@
 										{:else}
 											<div class="p-3 space-y-3">
 												<div class="space-y-1.5">
-													<Label class="text-xs">Shell</Label>
-													<Select.Root type="single" bind:value={terminalShell}>
+													<Label class="text-xs">Mode</Label>
+													<Select.Root type="single" value={terminalMode} onValueChange={(value) => {
+														terminalMode = value as TerminalMode;
+														if (terminalMode === 'exec') detectContainerShells(container.id);
+													}}>
 														<Select.Trigger class="w-full h-8 text-xs">
-															<Shell class="w-3 h-3 mr-1.5 text-muted-foreground" />
-															<span>{shellDetectionCache[container.id]?.allShells.find(o => o.path === terminalShell)?.label || 'Select'}</span>
+															{#if terminalMode === 'attach'}
+																<Unplug class="w-3 h-3 mr-1.5 text-muted-foreground" />
+																Attach to process
+															{:else}
+																<Shell class="w-3 h-3 mr-1.5 text-muted-foreground" />
+																Shell (exec)
+															{/if}
 														</Select.Trigger>
 														<Select.Content>
-															{#if shellDetectionCache[container.id]}
-																{#each shellDetectionCache[container.id].allShells as option}
-																	<Select.Item value={option.path} label={option.label} disabled={!option.available}>
-																		<Shell class="w-3 h-3 mr-1.5 {option.available ? 'text-green-500' : 'text-muted-foreground/40'}" />
-																		<span class={option.available ? 'text-foreground' : 'text-muted-foreground/60'}>
-																			{option.label}
-																			{#if !option.available}
-																				<span class="text-xs ml-1">(unavailable)</span>
-																			{/if}
-																		</span>
+															<Select.Item value="exec" label="Shell (exec)">
+																<Shell class="w-3 h-3 mr-1.5 text-muted-foreground" />
+																Shell (exec)
+															</Select.Item>
+															<Select.Item value="attach" label="Attach to process">
+																<Unplug class="w-3 h-3 mr-1.5 text-muted-foreground" />
+																Attach to process
+															</Select.Item>
+														</Select.Content>
+													</Select.Root>
+													</div>
+													{#if terminalMode === 'exec'}
+														<div class="space-y-1.5">
+															<Label class="text-xs">Shell</Label>
+															<Select.Root type="single" bind:value={terminalShell}>
+																<Select.Trigger class="w-full h-8 text-xs">
+																	<Shell class="w-3 h-3 mr-1.5 text-muted-foreground" />
+																	<span>{shellDetectionCache[container.id]?.allShells.find(o => o.path === terminalShell)?.label || 'Select'}</span>
+																</Select.Trigger>
+																<Select.Content>
+																	{#if shellDetectionCache[container.id]}
+																		{#each shellDetectionCache[container.id].allShells as option}
+																			<Select.Item value={option.path} label={option.label} disabled={!option.available}>
+																				<Shell class="w-3 h-3 mr-1.5 {option.available ? 'text-green-500' : 'text-muted-foreground/40'}" />
+																				<span class={option.available ? 'text-foreground' : 'text-muted-foreground/60'}>
+																					{option.label}
+																					{#if !option.available}
+																						<span class="text-xs ml-1">(unavailable)</span>
+																					{/if}
+																				</span>
+																			</Select.Item>
+																		{/each}
+																	{/if}
+																</Select.Content>
+															</Select.Root>
+													</div>
+													<div class="space-y-1.5">
+														<Label class="text-xs">User</Label>
+														<Select.Root type="single" bind:value={terminalUser}>
+															<Select.Trigger class="w-full h-8 text-xs">
+																<User class="w-3 h-3 mr-1.5 text-muted-foreground" />
+																<span>{userOptions.find(o => o.value === terminalUser)?.label || terminalUser || 'Select'}</span>
+															</Select.Trigger>
+															<Select.Content>
+																{#each userOptions as option}
+																	<Select.Item value={option.value} label={option.label}>
+																		<User class="w-3 h-3 mr-1.5 text-muted-foreground" />
+																		{option.label}
 																	</Select.Item>
 																{/each}
-															{/if}
-														</Select.Content>
-													</Select.Root>
-												</div>
-												<div class="space-y-1.5">
-													<Label class="text-xs">User</Label>
-													<Select.Root type="single" bind:value={terminalUser}>
-														<Select.Trigger class="w-full h-8 text-xs">
-															<User class="w-3 h-3 mr-1.5 text-muted-foreground" />
-															<span>{userOptions.find(o => o.value === terminalUser)?.label || terminalUser || 'Select'}</span>
-														</Select.Trigger>
-														<Select.Content>
-															{#each userOptions as option}
-																<Select.Item value={option.value} label={option.label}>
-																	<User class="w-3 h-3 mr-1.5 text-muted-foreground" />
-																	{option.label}
-																</Select.Item>
-															{/each}
-															{#if terminalCustomUsers.length > 0}
+																{#if terminalCustomUsers.length > 0}
+																	<div class="h-px bg-border my-1"></div>
+																	{#each terminalCustomUsers as cu}
+																		<div class="flex items-center group">
+																			<Select.Item value={cu} label={cu} class="flex-1">
+																				<User class="w-3 h-3 mr-1.5 text-muted-foreground" />
+																				{cu}
+																			</Select.Item>
+																			<button
+																				type="button"
+																				class="p-1 mr-1 opacity-0 group-hover:opacity-100 hover:text-destructive transition-opacity"
+																				onclick={(e) => { e.stopPropagation(); e.preventDefault(); removeCustomUser(cu); terminalCustomUsers = getCustomUsers(); if (terminalUser === cu) { terminalUser = 'root'; } }}
+																				title="Remove user"
+																			>
+																				<Trash2 class="w-3 h-3" />
+																			</button>
+																		</div>
+																	{/each}
+																{/if}
 																<div class="h-px bg-border my-1"></div>
-																{#each terminalCustomUsers as cu}
-																	<div class="flex items-center group">
-																		<Select.Item value={cu} label={cu} class="flex-1">
-																			<User class="w-3 h-3 mr-1.5 text-muted-foreground" />
-																			{cu}
-																		</Select.Item>
-																		<button
-																			type="button"
-																			class="p-1 mr-1 opacity-0 group-hover:opacity-100 hover:text-destructive transition-opacity"
-																			onclick={(e) => { e.stopPropagation(); e.preventDefault(); removeCustomUser(cu); terminalCustomUsers = getCustomUsers(); if (terminalUser === cu) { terminalUser = 'root'; } }}
-																			title="Remove user"
-																		>
-																			<Trash2 class="w-3 h-3" />
-																		</button>
-																	</div>
-																{/each}
-															{/if}
-															<div class="h-px bg-border my-1"></div>
-															<div class="px-2 py-1">
-																<Input
-																	class="h-7 text-xs"
-																	placeholder="Add user... (Enter)"
-																	bind:value={terminalCustomUser}
-																	onkeydown={(e) => { e.stopPropagation(); if (e.key === 'Enter' && terminalCustomUser.trim()) { const u = terminalCustomUser.trim(); terminalUser = u; saveUserForContainer(container.id, u); terminalCustomUsers = getCustomUsers(); terminalCustomUser = ''; } }}
-																	onclick={(e) => e.stopPropagation()}
-																/>
-															</div>
-														</Select.Content>
-													</Select.Root>
-												</div>
-												<Button size="sm" class="w-full h-7 text-xs" onclick={() => startTerminal(container)}>
+																<div class="px-2 py-1">
+																	<Input
+																		class="h-7 text-xs"
+																		placeholder="Add user... (Enter)"
+																		bind:value={terminalCustomUser}
+																		onkeydown={(e) => { e.stopPropagation(); if (e.key === 'Enter' && terminalCustomUser.trim()) { const u = terminalCustomUser.trim(); terminalUser = u; saveUserForContainer(container.id, u); terminalCustomUsers = getCustomUsers(); terminalCustomUser = ''; } }}
+																		onclick={(e) => e.stopPropagation()}
+																	/>
+																</div>
+															</Select.Content>
+														</Select.Root>
+													</div>
+												{:else}
+													<div class="rounded-md border border-dashed px-2.5 py-2 text-xs text-muted-foreground">
+														Connect directly to the container's main process.
+													</div>
+												{/if}
+													<Button size="sm" class="w-full h-7 text-xs" onclick={() => startTerminal(container)}>
 													<Terminal class="w-3 h-3" />
 													Connect
 												</Button>
@@ -2330,6 +2367,7 @@
 									containerName={activeTerminal.containerName}
 									shell={activeTerminal.shell}
 									user={activeTerminal.user}
+									mode={activeTerminal.mode}
 									visible={true}
 									envId={envId}
 									fillHeight={true}
@@ -2367,6 +2405,7 @@
 						containerName={activeTerminal.containerName}
 						shell={activeTerminal.shell}
 						user={activeTerminal.user}
+						mode={activeTerminal.mode}
 						visible={true}
 						envId={envId}
 						onClose={() => closeTerminal(activeTerminal.containerId)}
