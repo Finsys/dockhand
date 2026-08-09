@@ -1,7 +1,10 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getRegistry } from '$lib/server/db';
-import { getRegistryAuth, isHarborRegistry, harborSearchRepositories, parseRegistryUrl } from '$lib/server/docker';
+import { getRegistryAuth, isHarborRegistry, harborSearchRepositories, parseRegistryUrl, classifyCatalogFailure, CATALOG_NOT_SUPPORTED_MSG } from '$lib/server/docker';
+
+/** Thrown when the registry refuses catalog listing to a valid token (GitLab/Harbor, #873). */
+class CatalogNotSupportedError extends Error {}
 
 interface SearchResult {
 	name: string;
@@ -165,7 +168,20 @@ async function searchCatalog(registry: any, term: string, limit: number): Promis
 
 		if (!response.ok) {
 			if (response.status === 401 || response.status === 403) {
-				throw new Error('Authentication failed. This registry may not support catalog listing (common with GitLab and Harbor deploy tokens).');
+				// Same GitLab/Harbor catalog case as Browse (#873): a valid token that
+				// isn't allowed to list is NOT an auth failure. Throw a marked error so
+				// searchPrivateRegistry can surface the right message.
+				const hasCreds = !!(registry.username && registry.password);
+				const authState = hasCreds ? (authHeader ? 'authed' : 'rejected') : 'anon';
+				const kind = classifyCatalogFailure(
+					response.status,
+					response.headers.get('WWW-Authenticate'),
+					authState
+				);
+				if (kind === 'not_supported') {
+					throw new CatalogNotSupportedError(CATALOG_NOT_SUPPORTED_MSG);
+				}
+				throw new Error('Authentication failed. Check the registry credentials.');
 			}
 			throw new Error(`Registry returned error: ${response.status}`);
 		}
@@ -234,6 +250,12 @@ export const GET: RequestHandler = async ({ url }) => {
 
 		return json(results);
 	} catch (error: any) {
+		// Registry won't allow catalog listing (GitLab/Harbor, #873) - not an error the
+		// user can fix. Return an empty result with a hint, not a 500 auth failure.
+		if (error instanceof CatalogNotSupportedError) {
+			return json({ results: [], notSupported: true, message: CATALOG_NOT_SUPPORTED_MSG });
+		}
+
 		console.error('Failed to search images:', error);
 
 		if (error.code === 'ECONNREFUSED') {

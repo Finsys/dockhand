@@ -41,6 +41,7 @@ import {
 import { unregisterSchedule } from './scheduler';
 import { sendEventNotification } from './notifications';
 import { deleteGitStackFiles, parseEnvFileContent } from './git';
+import { isDeletableStackDir } from './stack-delete-guard';
 import { cleanPem } from '$lib/utils/pem';
 import { rewriteComposeVolumePaths, getHostDataDir } from './host-path';
 import { getOrderValue } from './container-labels';
@@ -988,7 +989,8 @@ async function executeLocalCompose(
 	serviceName?: string,
 	build?: boolean,
 	noBuildCache?: boolean,
-	pullPolicy?: string
+	pullPolicy?: string,
+	remoteProjectDir?: string
 ): Promise<StackOperationResult> {
 	const logPrefix = `[Stack:${stackName}]`;
 
@@ -1142,6 +1144,15 @@ async function executeLocalCompose(
 	const useStdin = finalComposeContent !== composeContent;
 	const args = ['docker', 'compose', '-p', stackName];
 
+	// For a `direct` remote daemon we can't share Dockhand's filesystem, so relative binds
+	// (./config, ./data) are staged onto the remote host under `remoteProjectDir` and the
+	// compose is pointed there with --project-directory: compose resolves `./x` against that
+	// remote path (which need not exist locally) instead of the client cwd, so the daemon
+	// binds the staged files. undefined = current behavior (no staging, no flag).
+	if (remoteProjectDir) {
+		args.push('--project-directory', remoteProjectDir);
+	}
+
 	// Temp file for path-translated override content (cleaned up in finally block)
 	let tempOverridePath: string | undefined;
 
@@ -1169,6 +1180,12 @@ async function executeLocalCompose(
 			args.push('-f', overrideFile);
 			console.log(`${logPrefix} Including override file: ${basename(overrideFile)}`);
 		}
+	} else if (remoteProjectDir) {
+		// Internal stack + remote staging: --project-directory repoints compose's base to the
+		// remote path, which breaks the usual cwd auto-discovery of compose.yaml (that file is
+		// on Dockhand's host, not under the remote project dir). Point -f at the local file
+		// explicitly so compose reads it locally while resolving ./binds against the remote dir.
+		args.push('-f', composeFile);
 	}
 	// else: internal stack without path translation - no -f needed.
 	// Docker Compose auto-discovers compose.yaml + compose.override.yaml from cwd.
@@ -1683,6 +1700,34 @@ async function executeComposeCommand(
 				skipVerify: env.tlsSkipVerify ?? false
 			} : undefined;
 
+			// A direct daemon shares no filesystem with Dockhand, so relative binds
+			// (./config, ./data) would resolve to a path the remote daemon can't see and
+			// Docker would auto-create empty dirs. When the env has a `remote_stacks_dir`
+			// set AND the compose has relative binds, stage the stack files onto the remote
+			// host under <remoteDir>/<stack> and point compose there with --project-directory.
+			// The plan() decides IF/WHERE (pure, unit-tested); anything it declines takes the
+			// exact current path (remoteProjectDir stays undefined = no flag, no staging).
+			let remoteProjectDir: string | undefined;
+			{
+				const { getEnvSetting } = await import('./db');
+				const { planRemoteStaging } = await import('./remote-staging-plan');
+				const remoteStacksDir = await getEnvSetting('remote_stacks_dir', envId ?? undefined);
+				// Stage the WHOLE local stack dir (compose + relative-bind files like nginx.conf,
+				// ./data). The local stack dir is config-only - runtime data written by the remote
+				// container never comes back here - so this can't clobber live data. The tar is
+				// STREAMED from disk (O(1) RAM), so a large ./data doesn't buffer in memory.
+				const hasLocalDir = !!(operation === 'up' && workingDir && existsSync(workingDir));
+				const plan = planRemoteStaging({
+					operation, remoteStacksDir, stackName, composeContent, hasStackFiles: hasLocalDir,
+				});
+				if (plan.stage && plan.projectDir && workingDir) {
+					const { stageStackDirOnRemote } = await import('./stage-remote-stackfiles');
+					const { staged } = await stageStackDirOnRemote(envId!, plan.projectDir, workingDir);
+					console.log(`[Stack:${stackName}] direct env: staged ${staged} file(s) to ${plan.projectDir} on the remote host (${plan.reason})`);
+					remoteProjectDir = plan.projectDir;
+				}
+			}
+
 			return executeLocalCompose(
 				operation,
 				stackName,
@@ -1701,7 +1746,8 @@ async function executeComposeCommand(
 				serviceName,
 				build,
 				noBuildCache,
-				pullPolicy
+				pullPolicy,
+				remoteProjectDir
 			);
 		}
 
@@ -2331,11 +2377,66 @@ export async function downStack(
  * Remove a stack completely (compose down + delete files + cleanup database)
  * Uses stack locking to prevent concurrent operations.
  */
+/**
+ * Compute exactly which on-disk directories a `removeStack(..., deleteFiles)` would delete,
+ * WITHOUT deleting anything. The delete-preview endpoint uses this so the confirm modal
+ * shows the user the same paths the backend will actually remove — one source of truth, no
+ * frontend/backend drift (the class of bug behind #675). Adopted stacks whose files live
+ * outside DATA_DIR are reported as `null` (Dockhand never deletes those).
+ */
+export async function computeStackDeletionPaths(
+	stackName: string,
+	envId?: number | null
+): Promise<{ stackDir: string | null; gitDir: string | null; sourceType: string | null; namedVolumes: string[] }> {
+	const stackSource = await getStackSource(stackName, envId);
+	const stacksDir = getStacksDir();
+
+	// Named volumes compose created for this stack — exactly what `down --volumes` would
+	// remove (compose-managed, labeled with the project). Best-effort: a docker/API hiccup
+	// just yields an empty list (the delete still works; the modal just won't preview them).
+	let namedVolumes: string[] = [];
+	try {
+		const { listVolumes } = await import('./docker.js');
+		const vols = await listVolumes(envId);
+		namedVolumes = vols
+			.filter((v) => v.labels?.['com.docker.compose.project'] === stackName)
+			.map((v) => v.name)
+			.sort();
+	} catch { /* best-effort */ }
+
+	let stackDir: string | null = null;
+	if (stackSource?.composePath) {
+		const customDir = dirname(stackSource.composePath);
+		// SAME strict guard as removeStack (#675): strict subdir + basename match.
+		if (isDeletableStackDir(customDir, stacksDir, stackName) && existsSync(customDir)) {
+			stackDir = customDir;
+		}
+	}
+	if (!stackDir && !stackSource?.composePath) {
+		const defaultDir = await findStackDir(stackName, envId) || await getStackDir(stackName, envId);
+		if (existsSync(defaultDir)) stackDir = defaultDir;
+	}
+
+	// Git stacks additionally have a cloned repo dir that removeStack deletes.
+	let gitDir: string | null = null;
+	const gitStack = await getGitStackByName(stackName, envId);
+	if (gitStack) {
+		try {
+			const { getStackRepoPath } = await import('./git');
+			const repoPath = await getStackRepoPath(gitStack.id, gitStack.stackName, gitStack.environmentId);
+			if (repoPath && existsSync(repoPath)) gitDir = repoPath;
+		} catch { /* best-effort: no git dir shown if we can't resolve it */ }
+	}
+
+	return { stackDir, gitDir, sourceType: stackSource?.sourceType ?? null, namedVolumes };
+}
+
 export async function removeStack(
 	stackName: string,
 	envId?: number | null,
 	force = false,
-	removeVolumes = false
+	removeVolumes = false,
+	deleteFiles = true
 ): Promise<StackOperationResult> {
 	return withStackLock(stackName, async () => {
 		// Get compose file (may not exist for external stacks)
@@ -2395,6 +2496,23 @@ export async function removeStack(
 
 			// Remove any dynamically-spawned child containers not handled by compose
 			await cleanupOrphanStackContainers(stackName, envId, 'remove');
+
+			// Local stack files ARE deleted below, but only under the DATA_DIR strict guard
+			// (#675) - Dockhand owns that dir. A direct env's REMOTE staged dir has no such
+			// guard: remote_stacks_dir is a user path that can hold co-located user data, and
+			// nothing distinguishes a staged file from the user's own there. So we never delete
+			// it - a stale compose is safe residue; an rm -rf could wipe user data.
+			if (deleteFiles && envId != null) {
+				try {
+					const { getEnvironment, getEnvSetting } = await import('./db');
+					const env = await getEnvironment(envId);
+					if (env?.connectionType === 'direct') {
+						const remoteStacksDir = await getEnvSetting('remote_stacks_dir', envId);
+						const base = typeof remoteStacksDir === 'string' ? remoteStacksDir.trim().replace(/\/+$/, '') : '';
+						if (base) console.log(`[Stack:${stackName}] leaving staged files at ${base}/${stackName} on the remote host (not deleting - may hold user data)`);
+					}
+				} catch { /* log-only, never blocks removal */ }
+			}
 		} else {
 			// External stack - remove containers directly in parallel
 			const { removeContainer } = await import('./docker.js');
@@ -2461,16 +2579,10 @@ export async function removeStack(
 		let stackDir: string | null = null;
 
 		if (stackSource?.composePath) {
-			// Check if the compose path is within Dockhand's stacks directory
+			// Only delete if the compose dir is a STRICT SUBDIR of DATA_DIR/stacks/ whose
+			// basename matches the stack name (#675 guard; see stack-delete-guard.ts).
 			const customDir = dirname(stackSource.composePath);
-			const resolvedCustomDir = resolve(customDir);
-			const resolvedStacksDir = resolve(stacksDir);
-
-			// Only delete if the directory is within DATA_DIR/stacks/ (files we created)
-			// AND the directory basename matches the stack name exactly (for safety)
-			if (resolvedCustomDir.startsWith(resolvedStacksDir) &&
-				basename(resolvedCustomDir) === stackName &&
-				existsSync(customDir)) {
+			if (isDeletableStackDir(customDir, stacksDir, stackName) && existsSync(customDir)) {
 				stackDir = customDir;
 			}
 		}
@@ -2484,8 +2596,10 @@ export async function removeStack(
 			}
 		}
 
-		// Delete the directory if found
-		if (stackDir) {
+		// Delete the directory if found — but ONLY when the caller asked to remove files.
+		// "Remove stack" (deleteFiles=false) leaves the compose/.env/data on disk; "Remove
+		// stack + files" (default) deletes them.
+		if (stackDir && deleteFiles) {
 			try {
 				rmSync(stackDir, { recursive: true, force: true });
 			} catch (err: any) {
@@ -2512,19 +2626,20 @@ export async function removeStack(
 			cleanupErrors.push(`env vars: ${err.message}`);
 		}
 
-		// If git stack, clean up git stack record
+		// If git stack, clean up git stack record. The DB record always goes (the stack is
+		// gone); the cloned repo FILES on disk go only when deleteFiles is set.
 		try {
 			const gitStack = await getGitStackByName(stackName, envId);
 			if (gitStack) {
 				await deleteGitStack(gitStack.id);
-				await deleteGitStackFiles(gitStack.id, gitStack.stackName, gitStack.environmentId);
+				if (deleteFiles) await deleteGitStackFiles(gitStack.id, gitStack.stackName, gitStack.environmentId);
 			}
 			// Also cleanup any orphaned git stacks with NULL environment_id for this stack name
 			if (envId !== undefined && envId !== null) {
 				const orphanedGitStack = await getGitStackByName(stackName, null);
 				if (orphanedGitStack) {
 					await deleteGitStack(orphanedGitStack.id);
-					await deleteGitStackFiles(orphanedGitStack.id, orphanedGitStack.stackName, orphanedGitStack.environmentId);
+					if (deleteFiles) await deleteGitStackFiles(orphanedGitStack.id, orphanedGitStack.stackName, orphanedGitStack.environmentId);
 				}
 			}
 		} catch (err: any) {

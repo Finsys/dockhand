@@ -42,18 +42,8 @@ import { buildBackupScript, buildBackupArgs, type MetadataFile } from './backup-
 import { EXIT_MARKER } from './restic-script';
 import { parseRetention, buildForgetArgs, checkWouldWipe, retentionActive } from './retention';
 import { liveTargetKey } from './locks';
-import { stopIntentKey as stopIntentKeyFor } from './stop-recovery-core';
 import type { DiscoveredVolume } from './discovery-core';
-
-/** What a fresh process needs to restart a target stopped for a consistent
- * backup (or an in-place restore) after a crash between stop and restart. */
-export interface StopIntent {
-	type: BackupTargetType;
-	targetName: string;
-	envId: number | null;
-	/** For a container target: the ids/names that were running and got stopped. */
-	containers: Array<{ id: string; name: string }>;
-}
+import { STACKDIR_VOLUME_KEY } from './stackdir-plan';
 
 /** What the service needs from the outside world. All injected for testability. */
 export interface BackupPorts {
@@ -63,34 +53,45 @@ export interface BackupPorts {
 	/** Discover volumes; MUST throw (fail closed) on any inspect failure. */
 	discoverVolumes(containers: Array<{ id: string; name: string }>, envId: number | null | undefined, selected: string[] | null):
 		Promise<{ volumes: DiscoveredVolume[]; skipped: Array<{ type: string; destination: string; reason: string }> }>;
+	/** Decide how a STACK's directory is captured. Normally: locate the HOST folder and build the
+	 * synthetic __dockhand_stackdir__ volume the helper bind-mounts (`kind: 'candidate'`).
+	 * `kind: 'tar'` is the direct-remote-with-no-remote_stacks_dir case: nothing is staged on the
+	 * host, so the compose/config is tarred from Dockhand's local copy instead (no host bind).
+	 * `composeFileName` feeds the in-helper probe (assert the compose is
+	 * visible under the mount). `kind: 'unknown'` means the stack is not compose-managed (no
+	 * working_dir label) -> the caller HARD-FAILS the backup. Logged inside this port. */
+	planStackDirVolume(targetName: string, envId: number | null | undefined, excludedStackFiles?: string[]):
+		Promise<
+			| { kind: 'unknown'; reason: string }
+			| { kind: 'candidate'; syntheticVolume: DiscoveredVolume; volumeKey: string; composeFileName: string; excludePaths: string[]; bindSources: string[] }
+			| { kind: 'tar'; localStackDir: string; composeFileName: string }
+		>;
 	/** Stop the target for a consistent backup; returns a restart closure. */
 	stopForBackup(type: BackupTargetType, targetName: string, containers: Array<{ id: string; name: string; state: string }>, envId: number | null | undefined):
 		Promise<{ restart: () => Promise<{ failed: Array<{ name: string; error: string }> }> }>;
-	/** Persist a durable "this target was stopped for backup" intent BEFORE the
-	 * stop, so a process death between stop and restart is recoverable on startup.
-	 * Keyed on a stable per-target id (see stopIntentKey). */
-	recordStopIntent(key: string, intent: StopIntent): Promise<void>;
-	/** Clear the durable stop intent once the in-process restart has succeeded. */
-	clearStopIntent(key: string): Promise<void>;
-	/** Run the backup session container; returns the restic run. metadataFiles are
-	 * streamed into /metadata via put-archive (not the Cmd) so large stack files
-	 * don't blow ARG_MAX. */
-	runInHelper(spec: { args?: string[]; script: string; binds: string[]; envId: number | null | undefined; name: string; metadataFiles?: MetadataFile[]; onStderr?: (line: string) => void; onStdout?: (line: string) => void }):
+	/** Run the backup session container; returns the restic run. metadataFiles (metadata.json
+	 * + the light stack-dir listing) are put-archived into /metadata (not the Cmd) so they
+	 * can't blow ARG_MAX. The stack dir's bytes ride a host bind mount, not these files. */
+	runInHelper(spec: { args?: string[]; script: string; binds: string[]; envId: number | null | undefined; name: string; metadataFiles?: MetadataFile[]; stackDirStreamSources?: Array<{ diskPath: string; archivePath: string }>; onStderr?: (line: string) => void; onStdout?: (line: string) => void }):
 		Promise<ResticRun>;
 	/** Run a repo-only restic command on the host (verify / retention). */
 	runLocal(args: string[], tier?: 'interactive' | 'data'): Promise<ResticRun>;
-	/** Collect the restore metadata files (metadata.json + stack files).
-	 * `stackFilesTruncated` is true when a stack dir exceeded the capture cap, so
-	 * the snapshot is an incomplete stack-file capture — the run is downgraded to
-	 * a warning. */
-	collectMetadata(type: BackupTargetType, targetName: string, envId: number | null | undefined, volumes: DiscoveredVolume[]):
-		Promise<{ files: MetadataFile[]; stackFilesTruncated: boolean }>;
+	/** Collect the restore metadata files: metadata.json plus, for a stack, a light file
+	 * listing. The stack dir's bytes normally ride the helper's host bind mount, not these
+	 * files. EXCEPTION - `stackDirTar`: for a direct-remote stack with no remote_stacks_dir
+	 * there is no host bind, so the collector reads localStackDir and tars its files into the
+	 * snapshot at /volumes/__dockhand_stackdir__ (the same path restore reads). */
+	collectMetadata(type: BackupTargetType, targetName: string, envId: number | null | undefined, volumes: DiscoveredVolume[], stackDirTar?: { localStackDir: string; composeFileName: string } | null):
+		Promise<{ files: MetadataFile[]; stackDirStreamSources?: Array<{ diskPath: string; archivePath: string }> }>;
 	/** The Dockhand host name for restic --host. */
 	host(): string;
 	/** This installation's stable instance id. */
 	instanceId(): Promise<string>;
 	/** The live-target mutex: returns a release fn, or null if already held. */
 	acquireLiveTarget(key: string): (() => void) | null;
+	/** True if the user asked to cancel this config's in-flight backup — used to
+	 *  report a killed helper's non-zero exit as "cancelled", not a restic failure. */
+	isCancelling(configId: number): boolean;
 	/** Serialize on a destination; runs fn behind the per-destination queue. */
 	serializeDestination<T>(destinationId: number, fn: () => Promise<T>): Promise<T>;
 	/** Open the operation record; returns handles to update + close it. */
@@ -128,7 +129,7 @@ export interface BackupJob {
 	selectedVolumes: string[] | null;
 	stopBeforeBackup: boolean;
 	retention: string | null | Record<string, unknown>;
-	options: { excludePatterns?: string[]; excludeCaches?: boolean; compression?: string; limitUpload?: number; limitDownload?: number; webhookSuccess?: string; webhookFailure?: string };
+	options: { excludePatterns?: string[]; excludeCaches?: boolean; compression?: string; limitUpload?: number; limitDownload?: number; webhookSuccess?: string; webhookFailure?: string; excludedStackFiles?: string[] };
 	helperName: string;
 }
 
@@ -146,6 +147,17 @@ export class BackupService {
 		// --- discover targets first (need the volume identity for the lock key) ---
 		let containers: Array<{ id: string; name: string; state: string }>;
 		let volumes: DiscoveredVolume[];
+		// The stack dir is captured by the helper's HOST bind mount (a synthetic
+		// __dockhand_stackdir__ volume). `stackDirProbe` carries what the helper needs to
+		// assert that mount is real (test -f the compose) before restic runs. Null for
+		// containers (no stack dir).
+		let stackDirProbe: { volumeKey: string; composeFileName: string; hostPath?: string } | null = null;
+		// restic --exclude paths for compose bind dirs inside the stackdir volume (they are
+		// captured separately as their own /volumes/<key>, honoring volume selection).
+		let stackDirExcludes: string[] = [];
+		// Set (instead of a host bind) for a direct-remote stack with no remote_stacks_dir: the
+		// compose/config is tarred into /metadata from Dockhand's local copy, not the host.
+		let stackDirTar: { localStackDir: string; composeFileName: string } | null = null;
 		try {
 			const t = await this.ports.resolveTargets(job.type, job.targetName, envId);
 			containers = t.containers;
@@ -161,12 +173,37 @@ export class BackupService {
 			// A target with no volumes/binds is fine: metadata.json (the container/stack
 			// config, and for stacks the compose files) is always captured, so the
 			// snapshot is a config-only backup — restorable via recreate/redeploy.
-		} catch (err) {
-			return this.errorResult(err);
-		}
+
+			// For a STACK, always capture the whole stack dir by bind-mounting it from the
+			// TARGET daemon's HOST (__dockhand_stackdir__). The plan locates the host folder
+			// from the compose working_dir label; a stack with no such label is not
+			// compose-managed, so we HARD-FAIL rather than silently skip its files (option A).
+			// The synthetic volume rides the same helper-bind + lock machinery as any volume.
+			if (job.type === 'stack') {
+				const p = await this.ports.planStackDirVolume(job.targetName, envId, job.options.excludedStackFiles);
+				if (p.kind === 'unknown') {
+					return this.earlySkipOrError(job, triggeredBy,
+						`Cannot locate the stack folder on the host for "${job.targetName}" (${p.reason}). ` +
+						`For remote environments, set a Remote stacks directory or use matching paths so the stack files exist on the Docker host. ` +
+						`Refusing to write a backup missing the stack's compose and config.`);
+				} else if (p.kind === 'tar') {
+					// direct-remote, no remote_stacks_dir: no host bind (nothing staged), so the
+					// compose/config is captured from Dockhand's local copy into /metadata via a tar.
+					// No synthetic volume, no probe - the metadata collector reads localStackDir.
+					stackDirTar = { localStackDir: p.localStackDir, composeFileName: p.composeFileName };
+				} else {
+					volumes = [...volumes, p.syntheticVolume];
+					stackDirProbe = { volumeKey: p.volumeKey, composeFileName: p.composeFileName, hostPath: p.syntheticVolume.source ?? undefined };
+					stackDirExcludes = p.excludePaths;
+				}
+			}
+			} catch (err) {
+				return this.errorResult(err);
+			}
 
 		// --- claim the live-target mutex (reject a concurrent op on this data) ---
-		const key = liveTargetKey(envId, volumes.map((v) => v.bind));
+		// fallback identity keeps config-only targets (no volumes) from colliding on ${env}::
+		const key = liveTargetKey(envId, volumes.map((v) => v.bind), `${job.type}:${job.targetName}`);
 		const release = this.ports.acquireLiveTarget(key);
 		if (!release) {
 			return { status: 'skipped', reason: `Another backup or restore is already running for "${job.targetName}".` };
@@ -184,7 +221,7 @@ export class BackupService {
 		try {
 			// --- serialize on the destination (share the repo, one at a time) ---
 			return await this.ports.serializeDestination(job.destinationId, () =>
-				this.runLocked(job, triggeredBy, containers, volumes, startTime, releaseOnce));
+				this.runLocked(job, triggeredBy, containers, volumes, stackDirProbe, stackDirExcludes, stackDirTar, startTime, releaseOnce));
 		} finally {
 			releaseOnce();
 		}
@@ -200,6 +237,9 @@ export class BackupService {
 		triggeredBy: 'cron' | 'manual' | 'webhook',
 		containers: Array<{ id: string; name: string; state: string }>,
 		volumes: DiscoveredVolume[],
+		stackDirProbe: { volumeKey: string; composeFileName: string } | null,
+		stackDirExcludes: string[],
+		stackDirTar: { localStackDir: string; composeFileName: string } | null,
 		startTime: number,
 		releaseLiveTarget: () => void,
 	): Promise<BackupResult> {
@@ -207,26 +247,25 @@ export class BackupService {
 		const op = await this.ports.openOperation(job.targetName, job.configId, envId, triggeredBy);
 		let restart: (() => Promise<{ failed: Array<{ name: string; error: string }> }>) | null = null;
 		let restarted = false;
-		let stopIntentKey: string | null = null;
 
-		// ========================= @BACKUP-DIAG-TEMP =========================
-		// TEMPORARY CI backup-flake diagnostics. Remove this whole block (and the other
-		// `@BACKUP-DIAG-TEMP` markers below) once the flake is fixed:
-		//   grep -rn '@BACKUP-DIAG-TEMP' src/lib/server/backups/backup-service.ts
-		// Every log line is prefixed `[BACKUP-DIAG-TEMP]` for a one-shot log filter.
-		// Gated behind BACKUP_DIAG=1 so it's silent unless CI turns it on.
-		// Emits per-phase timing (backup/verify/restart/retention/close) + a repo
-		// pre-probe (does the repo exist? is it locked?) to settle the "destination
-		// points at a wiped/uninit repo" and "stale lock" hypotheses.
-		const diagOn = process.env.BACKUP_DIAG === '1';
+		// Two log tiers, both stamped with a wall-clock ISO time and the {env,target}
+		// key so any line can be lined up with the shard test log by time and target:
+		//   log()  - always on. The lines an operator wants: started / snapshot created /
+		//            completed / failed. Plain and self-explanatory, no scary internals.
+		//   diag() - behind BACKUP_DIAG=1 (CI turns it on). Deep internals: repo/lock
+		//            pre-probes, instance identity, micro-phase timings. Noise for a user,
+		//            gold for a CI flake.
+		const key = `${job.targetName} env=${envId}`;
 		const t0 = Date.now();
+		const log = (msg: string) => console.log(`[backup] ${new Date().toISOString()} ${key} | ${msg}`);
+		const diagOn = process.env.BACKUP_DIAG === '1';
 		const diag = (phase: string, extra?: string) => {
 			if (!diagOn) return;
-			const ms = Date.now() - t0;
-			console.log(`[BACKUP-DIAG-TEMP] ${job.targetName} cfg=${job.configId} op=${op.id} env=${envId} | ${phase} @${ms}ms${extra ? ' | ' + extra : ''}`);
+			console.log(`[backup] ${new Date().toISOString()} ${key} cfg=${job.configId} op=${op.id} | ${phase} @${Date.now() - t0}ms${extra ? ' | ' + extra : ''}`);
 		};
-		diag('START', `triggeredBy=${triggeredBy} stopBeforeBackup=${job.stopBeforeBackup} retention=${JSON.stringify(job.retention)}`);
+		log(`started (${triggeredBy})`);
 		if (diagOn) {
+			diag('START', `stopBeforeBackup=${job.stopBeforeBackup} retention=${JSON.stringify(job.retention)}`);
 			try {
 				const cfg = await this.ports.runLocal(['cat', 'config', '--no-lock'], 'interactive');
 				diag('REPO_PROBE', `cat-config exit=${cfg.exitCode} (${cfg.exitCode === 10 ? 'NOT-INITIALISED' : cfg.exitCode === 0 ? 'exists' : 'error'})`);
@@ -237,49 +276,47 @@ export class BackupService {
 				diag('LOCK_PROBE', `list-locks exit=${locks.exitCode} heldLocks=${lockLines.length}${lockLines.length ? ' [' + lockLines.join(',').slice(0, 120) + ']' : ''}`);
 			} catch (e) { diag('LOCK_PROBE', `list-locks THREW ${e instanceof Error ? e.message : String(e)}`); }
 		}
-		// ======================= end @BACKUP-DIAG-TEMP =======================
 
 		try {
 			// --- optionally stop the target for a consistent snapshot ---
 			if (job.stopBeforeBackup) {
 				op.progress('stopping', `Stopping ${job.targetName} for a consistent backup...`);
-				// Record a durable stop intent BEFORE the stop, so a process death
-				// between the stop and the restart leaves a row a fresh startup can
-				// replay to bring the target back up (see reconcileOnStartup).
-				const running = containers.filter((c) => c.state === 'running');
-				if (running.length > 0) {
-					stopIntentKey = stopIntentKeyFor(envId, job.type, job.targetName);
-					await this.ports.recordStopIntent(stopIntentKey, {
-						type: job.type, targetName: job.targetName, envId,
-						containers: running.map((c) => ({ id: c.id, name: c.name })),
-					});
-				}
 				const stopped = await this.ports.stopForBackup(job.type, job.targetName, containers, envId);
 				restart = stopped.restart;
 			}
 
 			// --- metadata + backup args + session script ---
 			op.progress('metadata', 'Collecting metadata...');
-			const { files: metadata, stackFilesTruncated } = await this.ports.collectMetadata(job.type, job.targetName, envId, volumes);
+			const { files: metadata, stackDirStreamSources } = await this.ports.collectMetadata(job.type, job.targetName, envId, volumes, stackDirTar);
 			const instanceId = await this.ports.instanceId();
 			const tags = buildSnapshotTags({ instanceId, configId: job.configId, environmentId: envId, targetName: job.targetName, type: job.type });
-			// @BACKUP-DIAG-TEMP: cross-shard identity. If two shards log the SAME
-			// instanceId + configId (they share a cloned DB) AND the same repo, their
-			// snapshots/retention collide. host() + destinationId show which repo this
-			// run targets, so a CI log across shards reveals any overlap.
+			// Cross-shard identity. If two shards log the SAME instanceId + configId
+			// (they share a cloned DB) AND the same repo, their snapshots/retention
+			// collide. host() + destinationId show which repo this run targets, so a
+			// CI log across shards reveals any overlap.
 			diag('IDENTITY', `instanceId=${instanceId} host=${this.ports.host()} destId=${job.destinationId} tags=[${tags.join(',')}]`);
+			// restic must back up /volumes/ when there's anything to capture there: real bind/named
+			// volumes (volumes.length), OR a tar-mode stack whose compose/config was put-archived
+			// into /volumes/__dockhand_stackdir__ (no synthetic volume in `volumes`, so it wouldn't
+			// count otherwise - and /metadata-only would silently drop the tarred stack files).
 			const args = buildBackupArgs({
 				host: this.ports.host(),
 				tags,
-				hasVolumes: volumes.length > 0,
-				excludePatterns: job.options.excludePatterns,
+				hasVolumes: volumes.length > 0 || stackDirTar !== null,
+				// User excludes PLUS the compose bind dirs inside the stackdir volume (those
+				// ride their own /volumes/<key>, so excluding them here avoids a duplicate and
+				// keeps volume DESELECTION meaningful for in-folder binds).
+				excludePatterns: [...(job.options.excludePatterns ?? []), ...stackDirExcludes],
 				excludeCaches: job.options.excludeCaches,
 				compression: job.options.compression,
 				limitUpload: job.options.limitUpload,
 				limitDownload: job.options.limitDownload,
 				swapArtifacts: SWAP_ARTIFACTS,
 			});
-			const script = buildBackupScript(args);
+			const script = buildBackupScript(
+				args,
+				stackDirProbe ? { ...stackDirProbe, label: `env=${envId} target=${job.targetName}` } : undefined
+			);
 			const binds = volumes.map((v) => v.bind);
 
 			// Echo the options actually applied to the restic run, so the execution
@@ -291,8 +328,7 @@ export class BackupService {
 			if (o.excludeCaches !== false) op.log('Exclude caches: yes');
 			if (o.excludePatterns && o.excludePatterns.length) op.log(`Exclude patterns: ${o.excludePatterns.join(', ')}`);
 			// Record WHICH volumes were actually selected (not just the count), so a
-			// regression in the selectedVolumes filter is visible in the execution
-			// log rather than silent (matches the legacy engine's log line).
+			// regression in the selectedVolumes filter is visible in the execution log.
 			op.log(`Volumes to backup: ${volumes.map((v) => v.name).join(', ') || 'none'}`);
 
 			// --- clear any STALE repo lock before backing up ---
@@ -326,18 +362,26 @@ export class BackupService {
 			} else {
 				op.progress('backing-up', `Backing up ${volumes.length} ${volumes.length === 1 ? 'volume' : 'volumes'}:`);
 				for (const v of volumes) {
-					op.progress('backing-up', `  • [${v.type === 'bind' ? 'BIND' : 'VOL'}] ${v.name}`);
+					// A bind's `name` is only its container destination, so two binds to the same
+					// path (e.g. /data) read identically. Show `host-source -> destination` so each
+					// is distinguishable in the log (#1373).
+					const label = v.name === STACKDIR_VOLUME_KEY
+						? 'Stack data'
+						: v.type === 'bind'
+							? `${v.source} → ${v.name}`
+							: v.name;
+					op.progress('backing-up', `  • [${v.type === 'bind' ? 'BIND' : 'VOL'}] ${label}`);
 				}
 			}
 			// Did the LIVE stdout stream deliver anything? restic writes its --json
-			// progress to STDOUT, which we forward via onStdout. But live stdout only
+			// progress to STDOUT (forwarded via onStdout); but live stdout only
 			// works on transports that stream it (local socket/http); if nothing arrives
 			// live, we MUST still emit restic's output post-exit from run.stdout — else
 			// the log shows only our own stage markers and no restic lines at all (a
-			// regression). This flag drives that fallback.
+			// This flag drives that fallback.
 			let liveStdoutSeen = false;
 			const run = await this.ports.runInHelper({
-				script, binds, envId, name: job.helperName, metadataFiles: metadata,
+				script, binds, envId, name: job.helperName, metadataFiles: metadata, stackDirStreamSources,
 				// Stream restic's own output to the UI LIVE: restic writes its --json
 				// progress (per-file %) to STDOUT and its status messages to STDERR. Wire
 				// BOTH so the log fills in as the backup runs, not all at once at the end.
@@ -349,7 +393,7 @@ export class BackupService {
 
 			// Fallback: if live stdout streaming produced nothing (transport didn't
 			// stream it), emit restic's buffered stdout now so the log always shows what
-			// restic actually did — the pre-live-streaming behaviour, kept as a safety net.
+			// restic actually did.
 			if (!liveStdoutSeen) {
 				for (const l of formatResticLines(run.stdout)) {
 					if (!l.includes(EXIT_MARKER)) op.progress('progress', `[restic] ${l}`);
@@ -365,13 +409,14 @@ export class BackupService {
 				// No summary ⇒ unknown outcome ⇒ NOT a success (never record a phantom).
 				throw new BackupError('INTEGRITY', 'backup produced no snapshot summary — treating as failed');
 			}
-			// A partial is either restic's own "couldn't read all files" (exit 3) OR
-			// a stack dir that exceeded the capture cap (snapshot is redeploy-incomplete).
-			const partial = resticPartial(run) || stackFilesTruncated;
+			// A partial is restic's own "couldn't read all files" (exit 3). A stack dir
+			// over the capture cap is no longer a partial — it hard-fails in collectMetadata.
+			const partial = resticPartial(run);
 
 			// --- VERIFY the snapshot is actually readable before declaring success ---
+			log(`snapshot ${summary.snapshotId.slice(0, 8)} created, verifying`);
 			op.progress('verifying', 'Verifying the snapshot is readable...');
-			diag("BEFORE_VERIFY", "snapshot=" + summary.snapshotId); // @BACKUP-DIAG-TEMP
+			diag("BEFORE_VERIFY", "snapshot=" + summary.snapshotId);
 			await this.verifySnapshot(summary.snapshotId, instanceId);
 
 			// --- commit: record success + config status ---
@@ -382,14 +427,14 @@ export class BackupService {
 			// retention, then release the live-target lock: retention is a repo-only
 			// forget/prune (already serialized per-destination) and a concurrent
 			// restore neither reads nor writes the live volume during it.
-			diag("BEFORE_RESTART"); // @BACKUP-DIAG-TEMP
-			await this.restartAndSurface(restart, job, op, stopIntentKey);
+			diag("BEFORE_RESTART");
+			await this.restartAndSurface(restart, job, op);
 			restarted = true;
 			releaseLiveTarget();
 
 			// --- retention: ONLY now, after a confirmed + verified snapshot AND
 			// after the live target is back up + its lock freed ---
-			diag("BEFORE_RETENTION"); // @BACKUP-DIAG-TEMP
+			diag("BEFORE_RETENTION");
 			const retentionOutcome = await this.applyRetention(job, instanceId, op);
 
 			const details = {
@@ -401,21 +446,36 @@ export class BackupService {
 				retention: retentionOutcome,
 			};
 			if (partial) {
-				const warnMsg = stackFilesTruncated
-					? 'Backup completed with warnings: the stack directory exceeded the capture cap, so the snapshot is an incomplete stack-file capture (redeploy may be incomplete).'
-					: 'Backup completed with warnings (some files could not be read).';
-				await op.close({ kind: 'warning', message: warnMsg }, details);
+				log(`completed with warnings (partial read) in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+				await op.close({ kind: 'warning', message: 'Backup completed with warnings (some files could not be read).' }, details);
 				await this.notifySuccess(job, summary, envId, true, op.id, startTime);
-				return { status: 'warning', executionId: op.id, snapshotId: summary.snapshotId, summary, warning: stackFilesTruncated ? 'stack files truncated' : 'partial read', retention: retentionOutcome };
+				return { status: 'warning', executionId: op.id, snapshotId: summary.snapshotId, summary, warning: 'partial read', retention: retentionOutcome };
 			}
-			diag("BEFORE_CLOSE"); // @BACKUP-DIAG-TEMP
+			log(`completed in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+			diag("BEFORE_CLOSE");
 			await op.close({ kind: 'ok' }, details);
 			await this.notifySuccess(job, summary, envId, false, op.id, startTime);
 			return { status: 'success', executionId: op.id, snapshotId: summary.snapshotId, summary, retention: retentionOutcome };
 		} catch (err) {
+			// If the user cancelled THIS backup, its helper was SIGINT/SIGKILL'd — the
+			// resulting non-zero exit (137) is not a real failure. Report it as cancelled
+			// with a clean message instead of the raw restic exit spew.
+			if (this.ports.isCancelling(job.configId)) {
+				log('cancelled by user');
+				if (!restarted) await this.restartAndSurface(restart, job, op);
+				try { await this.ports.runLocal(['unlock']); } catch { /* best-effort */ }
+				try { await this.ports.setConfigStatus(job.configId, 'failed'); } catch { /* non-fatal */ }
+				await op.close({ kind: 'cancelled', message: 'Backup cancelled' });
+				return { status: 'skipped', executionId: op.id, reason: 'Backup cancelled' };
+			}
+			// Log the FULL raw error to the server log (docker logs dockhand) before it's
+			// cleaned for the UI — the raw text (restic JSON spew, exit code, stderr) is
+			// what we actually need to diagnose a failure, and cleanErrorMsg strips it.
+			log(`failed after ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+			console.error(`[backup] ${new Date().toISOString()} ${key} | raw error:`, err instanceof Error ? (err.stack ?? err.message) : String(err));
 			// Always try to restart what we stopped, even on failure — unless the
 			// success path already restarted it (avoid a double start).
-			if (!restarted) await this.restartAndSurface(restart, job, op, stopIntentKey);
+			if (!restarted) await this.restartAndSurface(restart, job, op);
 			// Clean up the repo lock this failed/killed backup may have orphaned, so
 			// the NEXT op to this repo doesn't wait out `--retry-lock` on a dead
 			// owner. Still behind the per-destination serializer here. Best-effort.
@@ -424,7 +484,7 @@ export class BackupService {
 			try { await this.ports.setConfigStatus(job.configId, 'failed'); } catch { /* non-fatal */ }
 			await op.close({ kind: 'error', code, message }, { errorCode: code });
 			try { await this.ports.notify('backup_failed', { target: job.targetName, kind: 'backup', errorCode: code, message }, envId); } catch { /* non-fatal */ }
-			// Per-config failure webhook — same payload shape as the legacy engine.
+			// Per-config failure webhook.
 			if (job.options.webhookFailure) {
 				try {
 					this.ports.fireWebhook(job.options.webhookFailure, {
@@ -472,24 +532,26 @@ export class BackupService {
 		// can see the wait, not just the eventual result.
 		if (dryMs > 5000) op.log(`Retention: dry-run took ${(dryMs / 1000).toFixed(1)}s (waited on the repo lock).`);
 		if (dryRun.exitCode !== 0) {
-			op.progress('warning', `Retention dry-run failed (exit ${dryRun.exitCode}): ${dryRun.stderr.trim() || 'restic failed'} — skipping prune, backup is still safe.`);
+			op.progress('warning', `Retention dry-run failed (exit ${dryRun.exitCode}): ${dryRun.stderr.trim() || 'restic failed'} — skipping retention, backup is still safe.`);
 			return 'failed';
 		}
 		if (checkWouldWipe(dryRun.stdout).wouldWipe) {
-			op.progress('warning', 'Retention would delete every snapshot for this config — skipping prune.');
+			op.progress('warning', 'Retention would delete every snapshot for this config — skipping retention.');
 			return 'skipped-would-wipe';
 		}
+		// forget only removes snapshot references (fast, metadata) — NO --prune here, so a
+		// backup never hangs reclaiming space. The destination's prune schedule reclaims it.
 		op.progress('pruning', 'Applying retention...');
 		const forget = buildForgetArgs(policy, filter)!;
 		const t1 = Date.now();
 		const run = await this.ports.runLocal(forget, 'data');
 		const forgetMs = Date.now() - t1;
 		if (run.exitCode !== 0) {
-			// A prune failure is non-fatal (the backup itself succeeded) but surfaced.
+			// A forget failure is non-fatal (the backup itself succeeded) but surfaced.
 			// The common non-fatal case: --retry-lock elapsed because another op (an
 			// orphaned lock, or a second Dockhand instance sharing this repo) held the
 			// lock — retention just runs next schedule; no snapshot is lost.
-			op.progress('warning', `Retention prune failed after ${(forgetMs / 1000).toFixed(1)}s (exit ${run.exitCode}): ${run.stderr.trim() || 'restic failed'} — backup is safe, retention will retry next run.`);
+			op.progress('warning', `Retention failed after ${(forgetMs / 1000).toFixed(1)}s (exit ${run.exitCode}): ${run.stderr.trim() || 'restic failed'} — backup is safe, retention will retry next run.`);
 			return 'failed';
 		}
 		op.log(`Retention: applied in ${(forgetMs / 1000).toFixed(1)}s.`);
@@ -503,7 +565,6 @@ export class BackupService {
 		restart: (() => Promise<{ failed: Array<{ name: string; error: string }> }>) | null,
 		job: BackupJob,
 		op: OperationHandle,
-		stopIntentKey: string | null,
 	): Promise<void> {
 		if (!restart) return;
 		let failed: Array<{ name: string; error: string }> = [];
@@ -513,14 +574,11 @@ export class BackupService {
 			failed = [{ name: job.targetName, error: err instanceof Error ? err.message : String(err) }];
 		}
 		if (failed.length > 0) {
-			// Restart failed — leave the durable intent for startup retry.
 			const names = failed.map((f) => f.name).join(', ');
 			const msg = `Backup finished but ${names} could not be restarted and is STILL STOPPED — start it manually.`;
 			op.progress('warning', msg);
 			try { await this.ports.notify('backup_failed', { target: job.targetName, kind: 'backup', errorCode: 'STOPPED_RESTART_FAILED', message: msg }, job.environmentId); } catch { /* non-fatal */ }
 		} else {
-			// Restart succeeded — drop the durable intent so no stale row remains.
-			if (stopIntentKey) { try { await this.ports.clearStopIntent(stopIntentKey); } catch { /* non-fatal */ } }
 			op.progress('restarted', `${job.targetName} restarted.`);
 		}
 	}
@@ -539,7 +597,7 @@ export class BackupService {
 				dataAdded: summary.dataAdded, partial,
 			}, envId);
 		} catch { /* notification failure never changes the outcome */ }
-		// Per-config success webhook — same payload shape as the legacy engine.
+		// Per-config success webhook.
 		if (job.options.webhookSuccess) {
 			try {
 				this.ports.fireWebhook(job.options.webhookSuccess, {
@@ -558,11 +616,15 @@ export class BackupService {
 	}
 
 	/** The backup target (container/stack) doesn't exist — record the op and fail
-	 * with a validation error (there is genuinely nothing to back up). */
+	 * with a validation error (there is genuinely nothing to back up). Close the durable
+	 * execution row as a FAILED/VALIDATION error, NOT op.skip() — skip() hardcodes
+	 * CONCURRENCY + skipped:true, which would log a benign-looking "skipped" row while the
+	 * API returns VALIDATION. An operator filtering for failed backups would then never see
+	 * that this config has been backing up nothing (its target is gone). */
 	private async earlySkipOrError(job: BackupJob, triggeredBy: 'cron' | 'manual' | 'webhook', reason: string): Promise<BackupResult> {
 		try {
 			const op = await this.ports.openOperation(job.targetName, job.configId, job.environmentId, triggeredBy);
-			await op.skip(reason);
+			await op.close({ kind: 'error', code: 'VALIDATION', message: reason });
 			return { status: 'error', executionId: op.id, code: 'VALIDATION', error: reason };
 		} catch {
 			return { status: 'error', code: 'VALIDATION', error: reason };

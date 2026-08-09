@@ -17,6 +17,7 @@ import {
 	getDiskUsage
 } from '$lib/server/docker';
 import { listComposeStacks } from '$lib/server/stacks';
+import { countLivePending } from '$lib/server/pending-updates-core';
 import { authorize } from '$lib/server/authorize';
 import { parseLabels } from '$lib/utils/label-colors';
 
@@ -281,7 +282,16 @@ export const GET: RequestHandler = async ({ cookies, url }) => {
 					today: eventStats.today
 				};
 
-				envStats.containers.pendingUpdates = pendingUpdates.length;
+				// Count only pending rows that still map to a live container (#1006):
+				// an out-of-band recreate/removal leaves orphan rows nothing prunes, and
+				// the containers page already live-matches, so the raw count over-reported.
+				// GUARD: only live-match when we actually HAVE the container list. If
+				// listContainers timed out (`containers` is []) while there ARE pending
+				// rows, the list is untrustworthy — fall back to the raw count rather than
+				// hide real updates (over-count is annoying; under-count hides updates).
+				envStats.containers.pendingUpdates = containers.length > 0
+					? countLivePending(pendingUpdates, containers.map((c: any) => c.id))
+					: pendingUpdates.length;
 
 			} catch (error) {
 				// Convert technical error messages to user-friendly ones

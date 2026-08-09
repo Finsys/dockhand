@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
+import { requireBackups } from '$lib/server/backups/route-guards';
 import { auditBackupDestination } from '$lib/server/audit';
 import { getBackupDestination, updateBackupDestinationTestStatus } from '$lib/server/db';
 import { initRepository } from '$lib/server/backups';
@@ -8,9 +9,8 @@ import { initRepository } from '$lib/server/backups';
 export const POST: RequestHandler = async (event) => {
 	const { params, cookies } = event;
 	const auth = await authorize(cookies);
-	if (auth.authEnabled && !await auth.can('backups', 'manage')) {
-		return json({ error: 'Permission denied' }, { status: 403 });
-	}
+	const denied = await requireBackups(auth, 'manage');
+	if (denied) return denied;
 
 	const id = parseInt(params.id);
 	if (isNaN(id)) return json({ error: 'Invalid ID' }, { status: 400 });

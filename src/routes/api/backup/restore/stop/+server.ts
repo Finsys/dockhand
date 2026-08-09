@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
+import { requireBackups } from '$lib/server/backups/route-guards';
 import { auditRestore } from '$lib/server/audit';
 import { cancelRestore } from '$lib/server/backups';
 import { isValidSnapshotId } from '$lib/server/backups/helpers';
@@ -14,9 +15,8 @@ import { isValidSnapshotId } from '$lib/server/backups/helpers';
 export const POST: RequestHandler = async (event) => {
 	const { request, cookies } = event;
 	const auth = await authorize(cookies);
-	if (auth.authEnabled && !await auth.can('backups', 'manage')) {
-		return json({ error: 'Permission denied' }, { status: 403 });
-	}
+	const denied = await requireBackups(auth, 'manage');
+	if (denied) return denied;
 
 	const body = await request.json().catch(() => ({}));
 	const snapshotId: string | undefined = body.snapshotId;

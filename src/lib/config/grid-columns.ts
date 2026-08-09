@@ -166,12 +166,12 @@ export const repoSnapshotColumns: ColumnConfig[] = [
 
 // Backup destination grid columns
 export const backupDestinationColumns: ColumnConfig[] = [
-	{ id: 'type', label: 'Type', width: 80, minWidth: 60, resizable: false },
+	{ id: 'type', label: 'Type', sortable: true, sortField: 'type', width: 130, minWidth: 100, resizable: false },
 	{ id: 'name', label: 'Name', sortable: true, sortField: 'name', width: 180, minWidth: 120, grow: true },
-	{ id: 'repository', label: 'Repository', width: 280, minWidth: 150, grow: true },
+	{ id: 'repository', label: 'Repository', sortable: true, sortField: 'repository', width: 280, minWidth: 150, grow: true },
 	{ id: 'usage', label: 'Usage', width: 100, minWidth: 70 },
 	{ id: 'stats', label: 'Stats', width: 140, minWidth: 100 },
-	{ id: 'status', label: 'Status', width: 110, minWidth: 80 },
+	{ id: 'status', label: 'Status', sortable: true, sortField: 'status', width: 110, minWidth: 80 },
 	{ id: 'actions', label: '', fixed: 'end', width: 300, resizable: false }
 ];
 

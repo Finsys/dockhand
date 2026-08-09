@@ -42,9 +42,11 @@ import {
 	type OidcConfig
 } from './db';
 import { Client as LdapClient } from 'ldapts';
+import { escapeLdapFilterValue } from './ldap-filter';
 import { isEnterprise } from './license';
 import { secureRandomBytes } from './crypto-fallback';
 import { invalidateTokenCacheForUser } from './token-cache';
+import { oidcDiscoveryUrls, fetchOidcDiscovery } from '$lib/utils/oidc-discovery-url';
 
 // Session cookie name
 const SESSION_COOKIE_NAME = 'dockhand_session';
@@ -606,14 +608,6 @@ export async function authenticateLdap(
  * Escape special characters in an LDAP filter value (RFC 4515).
  * Prevents LDAP injection via wildcards or control characters.
  */
-function escapeLdapFilterValue(value: string): string {
-	return value
-		.replace(/\\/g, '\\5c')
-		.replace(/\*/g, '\\2a')
-		.replace(/\(/g, '\\28')
-		.replace(/\)/g, '\\29')
-		.replace(/\0/g, '\\00');
-}
 
 /**
  * Try authentication against a specific LDAP configuration
@@ -817,18 +811,24 @@ async function checkLdapGroupMembership(
 		let searchBase: string;
 		let groupFilter: string;
 
+		// A DN placed in a search FILTER must be escaped per RFC 4515 - an AD DN with an
+		// escaped comma (CN=Surname\, Name,...) otherwise makes ldapts read `\,` as an
+		// invalid `\XX` hex filter-escape and throw ("Invalid escaped hex character").
+		// The searchBase stays the RAW DN (RFC 4514) - only filter VALUES are escaped.
+		const userDnFilterValue = escapeLdapFilterValue(userDn);
+		const groupCnFilterValue = escapeLdapFilterValue(groupDnOrName);
 		if (config.groupFilter) {
 			// User provided custom filter - use group DN directly when it's a full DN
 			// to avoid searching all groups under groupBaseDn
 			searchBase = isFullDn ? groupDnOrName : (config.groupBaseDn || groupDnOrName);
 			groupFilter = config.groupFilter
-				.replace('{{username}}', userDn)
-				.replace('{{user_dn}}', userDn)
-				.replace('{{group}}', groupDnOrName);
+				.replace('{{username}}', userDnFilterValue)
+				.replace('{{user_dn}}', userDnFilterValue)
+				.replace('{{group}}', groupCnFilterValue);
 		} else if (isFullDn) {
 			// Full DN provided - search directly at that DN
 			searchBase = groupDnOrName;
-			groupFilter = `(member=${userDn})`;
+			groupFilter = `(member=${userDnFilterValue})`;
 		} else {
 			// Just a group name - search in groupBaseDn
 			if (!config.groupBaseDn) {
@@ -836,7 +836,7 @@ async function checkLdapGroupMembership(
 				return false;
 			}
 			searchBase = config.groupBaseDn;
-			groupFilter = `(&(cn=${groupDnOrName})(member=${userDn}))`;
+			groupFilter = `(&(cn=${groupCnFilterValue})(member=${userDnFilterValue}))`;
 		}
 
 		const { searchEntries } = await client.search(searchBase, {
@@ -1220,27 +1220,9 @@ async function getOidcDiscovery(issuerUrl: string): Promise<OidcDiscoveryDocumen
 		return cached.document;
 	}
 
-	const wellKnownUrl = issuerUrl.endsWith('/')
-		? `${issuerUrl}.well-known/openid-configuration`
-		: `${issuerUrl}/.well-known/openid-configuration`;
-
-	let response: Response;
-	try {
-		response = await fetch(wellKnownUrl);
-	} catch (err: any) {
-		// Node/undici surfaces network failures as a bare "fetch failed" TypeError and
-		// hides the real reason in err.cause (ENOTFOUND, EHOSTUNREACH, ECONNREFUSED,
-		// connect timeout, TLS error, …). Surface it so operators can tell a DNS/IPv4
-		// egress problem from a cert problem instead of debugging blind (#1293).
-		const cause = err?.cause?.message || err?.cause?.code || err?.cause;
-		throw new Error(
-			`Failed to reach OIDC issuer at ${wellKnownUrl}: ${err?.message || err}` +
-			(cause ? ` (${cause})` : '')
-		);
-	}
-	if (!response.ok) {
-		throw new Error(`Failed to fetch OIDC discovery document: ${response.statusText}`);
-	}
+	// Try the canonical (no trailing slash) discovery URL first, then the trailing-slash
+	// variant some providers require (FortiAuthenticator 404s the canonical one, #1368).
+	const response = await fetchOidcDiscovery(oidcDiscoveryUrls(issuerUrl), (url) => fetch(url));
 
 	const document = await response.json() as OidcDiscoveryDocument;
 

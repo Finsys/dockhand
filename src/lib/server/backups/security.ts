@@ -1,13 +1,11 @@
 /**
- * backups/security.ts — the security surface for the backup/restore rewrite.
+ * backups/security.ts - the security surface for backup/restore.
  *
- * These are the hardened, well-tested primitives that keep restic invocation,
- * credential handling, and restore targets safe (env/flag/cloud allowlists,
- * SSRF guards, at-rest encryption, path containment). We RE-EXPORT them from
- * their existing homes rather than re-deriving them: re-implementing a security
- * allowlist from scratch is exactly where a rewrite reintroduces the bug the
- * allowlist exists to prevent. One import site for the whole domain, so a
- * reviewer sees the security surface in one place.
+ * Hardened, well-tested primitives that keep restic invocation, credential
+ * handling, and restore targets safe (env/flag/cloud allowlists, SSRF guards,
+ * at-rest encryption, path containment). RE-EXPORTED from their existing homes,
+ * not re-derived: one import site for the whole domain, so a reviewer sees the
+ * security surface in one place.
  *
  * Nothing here has app-specific logic — it is a barrel plus two small pure guards
  * the rewrite needs (restore-target containment + a snapshot-path allowlist).
@@ -25,8 +23,10 @@ export {
 	filterCloudEnvVars,
 	/** Split + validate a destination's extra restic flags against an allowlist;
 	 * throws on anything that could read/write arbitrary files or run code
-	 * (`--option`, `--password-command`, `--cacert`, …). */
+	 * (`--option`, `--password-command`, `--cacert`, …). Backup/global vs restore
+	 * (restore adds --exclude-xattr). */
 	sanitizeResticFlags,
+	sanitizeRestoreFlags,
 	/** True iff `id` is a syntactically valid restic snapshot id (hex, 8 or 64).
 	 * The first gate before an id is interpolated into any restic argv. */
 	isValidSnapshotId,
@@ -92,15 +92,13 @@ export function timingSafeStrEqual(a: string, b: string): boolean {
  * that isn't a plain `/volumes/<[A-Za-z0-9._-]+>` before it reaches the script.
  */
 const SAFE_VOLUME_INCLUDE = /^\/volumes\/[A-Za-z0-9._-]+$/;
-// A stack new-location restore also extracts the stored compose files under
-// /metadata/stacks/<name>; allow that path with the same strict name char class.
-const SAFE_STACK_INCLUDE = /^\/metadata\/stacks\/[A-Za-z0-9._-]+$/;
 
 export function isSafeVolumeInclude(inc: string): boolean {
 	// A config-only (metadata-only) snapshot has no volumes; its new-location
 	// restore extracts the whole stored /metadata dir. This is a fixed literal
-	// (never attacker-influenced), so allow it explicitly.
-	return inc === '/metadata' || SAFE_VOLUME_INCLUDE.test(inc) || SAFE_STACK_INCLUDE.test(inc);
+	// (never attacker-influenced), so allow it explicitly. The stack dir now rides
+	// /volumes/__dockhand_stackdir__ (a SAFE_VOLUME_INCLUDE), so no /metadata/stacks path.
+	return inc === '/metadata' || SAFE_VOLUME_INCLUDE.test(inc);
 }
 
 /** Throwing variant — use at the boundary before building a restore script. */
@@ -131,6 +129,41 @@ export function assertTargetWithin(root: string, target: string, label = 'restor
 	if (!isPathWithin(root, target)) {
 		throw new Error(`Refusing: ${label} "${target}" resolves outside the allowed directory "${root}".`);
 	}
+}
+
+/** System paths a new-location restore must NEVER write into. The restore helper runs as
+ * root and bind-mounts targetPath:targetPath:rw, then restic writes `targetPath/volumes/...`,
+ * so an unguarded targetPath is arbitrary host-dir write. A plain new-location restore is a
+ * legitimate "extract wherever the operator picked" feature, so we don't confine it to one
+ * root; we reject absolute-path escapes and well-known sensitive roots instead. */
+const FORBIDDEN_RESTORE_ROOTS = [
+	'/', '/etc', '/root', '/boot', '/dev', '/proc', '/sys', '/run',
+	'/var/run', '/bin', '/sbin', '/lib', '/lib64', '/var/lib/docker',
+];
+
+/** Returns a reason string if `targetPath` is unsafe for a new-location restore, else null.
+ * Uses resolve() so `/etc/../etc`, `/srv/../etc`, trailing slashes all normalize before the
+ * forbidden-root compare — a string-only prefix check would miss those. */
+export function unsafeRestoreTargetReason(targetPath: string): string | null {
+	const raw = (targetPath ?? '').trim();
+	if (!raw) return 'a target path is required';
+	if (!raw.startsWith('/')) return 'target path must be absolute';
+	if (raw.includes('\0')) return 'target path must not contain NUL';
+	const norm = resolvePath(raw); // collapses .. and trailing slashes
+	for (const root of FORBIDDEN_RESTORE_ROOTS) {
+		if (norm === root || norm.startsWith(root === '/' ? '/' : root + pathSep)) {
+			// `/` matches everything by the prefix rule; only flag `/` itself for that root.
+			if (root === '/' && norm !== '/') continue;
+			return `target path "${norm}" is inside a protected system directory (${root})`;
+		}
+	}
+	return null;
+}
+
+/** Throwing variant for the service layer (defense-in-depth behind API validation). */
+export function assertSafeRestoreTarget(targetPath: string): void {
+	const reason = unsafeRestoreTargetReason(targetPath);
+	if (reason) throw new Error(`Refusing new-location restore: ${reason}`);
 }
 
 /**

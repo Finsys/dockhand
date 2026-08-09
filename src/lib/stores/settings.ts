@@ -4,6 +4,7 @@ import {
 	buildFormatters,
 	formatDatePartWith,
 	formatTimePartWith,
+	parseTimestamp,
 	type DateTimeFormatters
 } from '$lib/utils/date-format';
 
@@ -611,7 +612,7 @@ export function formatTime(
 	date: Date | string | number,
 	options: { includeDate?: boolean; includeSeconds?: boolean } = {}
 ): string {
-	const d = date instanceof Date ? date : new Date(date);
+	const d = parseTimestamp(date);
 	const { includeDate = false, includeSeconds = false } = options;
 
 	if (includeDate) {
@@ -633,7 +634,7 @@ export function formatDateTime(date: Date | string | number, includeSeconds = fa
  * Format just the date part according to user's preferences.
  */
 export function formatDate(date: Date | string | number): string {
-	const d = date instanceof Date ? date : new Date(date);
+	const d = parseTimestamp(date);
 	return formatDatePart(d);
 }
 

@@ -22,7 +22,7 @@ export interface Environment {
 
 const STORAGE_KEY = 'dockhand:environment';
 
-// Load initial state from localStorage
+// Load initial state from localStorage (the last-used environment).
 function getInitialEnvironment(): CurrentEnvironment | null {
 	if (browser) {
 		const stored = localStorage.getItem(STORAGE_KEY);
@@ -131,7 +131,11 @@ function createEnvironmentsStore() {
 						name: firstEnv.name
 					});
 				} else {
-					console.log(`[EnvStore] Current env ${currentId} still exists, keeping selection`);
+					// Keep selection; refresh its name from the list (covers a renamed env).
+					const match = data.find((e) => Number(e.id) === currentId);
+					if (match && match.name !== current!.name) {
+						currentEnvironment.set({ id: match.id, name: match.name });
+					}
 				}
 			} else {
 				// Clear environments on permission denied or other errors

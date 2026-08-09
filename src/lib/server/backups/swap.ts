@@ -1,44 +1,35 @@
 /**
  * backups/swap.ts — the shell scripts that make an in-place volume restore safe.
+ * PURE string builders (no I/O), so the commit protocol is unit-testable against a
+ * real temp filesystem.
  *
- * These are PURE string builders (no I/O), so the exact commit protocol can be
- * unit-tested by running the generated shell against a real temp filesystem.
- *
- * THE PROBLEM. An in-place restore must replace the live contents of a volume
- * with a snapshot's contents. The naive "delete the live data, then copy the
- * restored data in" is a silent-data-loss trap: if the copy fails partway (disk
- * full, permission, a mid-copy crash) the original is already gone and the
- * restore reports success over an empty volume.
- *
- * THE DESIGN. Restore ON THE SIDE first, then swap by moving directory entries —
- * never deleting the original until the replacement is committed:
+ * An in-place restore replaces a live volume's contents with a snapshot's. Deleting
+ * live data then copying the restore in is a data-loss trap: a mid-copy failure
+ * leaves an empty volume reported as success. Instead: restore ON THE SIDE first,
+ * then swap by moving directory entries, never deleting the original until the
+ * replacement is committed. Protocol per volume:
  *
  *   phase 0  recover any interrupted PRIOR swap (see recovery script) — never
- *            blindly delete `.dockhand-restore-old`, it may be the only copy of
- *            the original data.
- *   phase 1  restic restores into `<live>/.dockhand-restore-new` — a staging dir
- *            ON THE LIVE VOLUME'S OWN FILESYSTEM. This is the failure-prone step;
- *            if it fails the live data is still completely untouched.
+ *            blindly delete `.dockhand-restore-old`, it may be the only copy.
+ *   phase 1  restic restores into `<live>/.dockhand-restore-new` - a staging dir ON
+ *            THE LIVE VOLUME'S OWN FILESYSTEM. Failure-prone; if it fails, live data
+ *            is untouched.
  *   marker 2 move the live entries aside into `.dockhand-restore-old`
- *            (same-filesystem renames — fast, and reversible).
+ *            (same-filesystem renames - fast and reversible).
  *   marker 3 move the restored entries from `.dockhand-restore-new` up into the
  *            live root (same-filesystem renames).
  *   done     drop the marker and delete `.dockhand-restore-old` — the ONLY point
- *            at which the original data is deleted, and only after the new data
- *            is fully in place.
+ *            at which the original is deleted, and only after the new data is in place.
  *
- * A same-filesystem `mv` of a directory entry is atomic. The move loops operate
- * on TOP-LEVEL entries (not a recursive per-file copy), so the window is a
- * handful of atomic renames rather than a long byte copy.
+ * A same-filesystem `mv` of a directory entry is atomic; the loops move TOP-LEVEL
+ * entries (not a recursive per-file copy), so the window is a handful of renames.
  *
- * THE CRASH CASE (the one thing fail-fast cannot cover). An external SIGKILL
- * (restore timeout, daemon restart, reboot, OOM) can land BETWEEN the marker-2
- * and marker-3 move loops, leaving the live root partly emptied with the
- * originals in `.dockhand-restore-old`. The phase marker file makes that state
- * detectable, and the recovery script rolls it back to the original content.
- * This recovery runs at the start of every restore AND on startup for a restore
- * whose process died — so the half-swapped state is always reconciled before
- * anything else touches the volume.
+ * Crash case fail-fast cannot cover: an external SIGKILL (timeout, daemon restart,
+ * reboot, OOM) can land BETWEEN the marker-2 and marker-3 loops, leaving the live
+ * root partly emptied with originals in `.dockhand-restore-old`. The phase marker
+ * makes that state detectable; the recovery script rolls it back. Recovery runs at
+ * the start of every restore AND on startup for a dead-process restore, so a
+ * half-swapped state is always reconciled before anything else touches the volume.
  */
 
 /** Basenames of the swap artifacts created inside a live volume root. Exported
@@ -101,8 +92,13 @@ function recoverOne(live: string): string {
 	const newQ = sq(`${live}/${SWAP_NEW}`);
 	const oldQ = sq(`${live}/${SWAP_OLD}`);
 	const phaseQ = sq(`${live}/${SWAP_PHASE}`);
+	// Narrate ONLY when a marker is present (an interrupted prior swap is actually
+	// being rolled back), so a normal restore stays quiet but a re-run after a crash
+	// tells the user their volume is being recovered. Streamed to the restore log.
+	const say = (m: string) => `echo ${sq(`[dockhand] ${m}`)} >&2`;
 	return [
 		`if [ -f ${phaseQ} ]; then`,
+		`  ${say(`Recovering ${live}: rolling back an interrupted previous restore`)};`,
 		`  if [ "$(cat ${phaseQ})" = "3" ]; then ${removeEntries(liveQ)}; fi;`,
 		`  if [ -d ${oldQ} ]; then ${moveEntries(oldQ, liveQ)}; fi;`,
 		`  rm -rf ${newQ} ${oldQ}; rm -f ${phaseQ};`,

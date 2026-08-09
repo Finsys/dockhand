@@ -31,9 +31,18 @@
  * different keys, fail to collide, and run concurrently — a torn snapshot
  * reported as success.
  */
-export function liveTargetKey(envId: number | null | undefined, dataPaths: string[]): string {
+export function liveTargetKey(envId: number | null | undefined, dataPaths: string[], fallbackIdentity?: string): string {
 	const env = envId ?? 'local';
 	const sources = dataPaths.map(bindSource).filter(Boolean).sort();
+	// Config-only targets (no named volumes, no binds) have NO data sources, so keying on
+	// sources alone makes every such target on the same env collide (`${env}::`), and the
+	// REJECT lock silently skips all but one - two disjoint config-only backups in one cron
+	// window lose one every run. Fall back to a per-target identity ONLY when there are no
+	// sources, so disjoint config-only targets don't alias. Targets that DO share data still
+	// key on the data identity (a backup:ro and restore:rw of the same volume must collide).
+	if (sources.length === 0 && fallbackIdentity) {
+		return `${env}::config:${fallbackIdentity}`;
+	}
 	return `${env}::${sources.join('|')}`;
 }
 

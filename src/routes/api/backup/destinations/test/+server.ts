@@ -1,9 +1,11 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
+import { requireBackups } from '$lib/server/backups/route-guards';
 import { getBackupDestination, decryptBackupDestination, updateBackupDestinationTestStatus } from '$lib/server/db';
 import { spawn } from 'child_process';
 import { buildResticEnv, cleanErrorMsg, isRepoNotInitializedError, RESTIC_EXIT_REPO_NOT_FOUND, validateRepositoryForSave } from '$lib/server/backups/helpers';
+import { withGcsCredFile } from '$lib/server/backups/restic';
 
 /**
  * Test a backup destination configuration.
@@ -12,9 +14,8 @@ import { buildResticEnv, cleanErrorMsg, isRepoNotInitializedError, RESTIC_EXIT_R
  */
 export const POST: RequestHandler = async ({ request, cookies }) => {
 	const auth = await authorize(cookies);
-	if (auth.authEnabled && !await auth.can('backups', 'manage')) {
-		return json({ error: 'Permission denied' }, { status: 403 });
-	}
+	const denied = await requireBackups(auth, 'manage');
+	if (denied) return denied;
 
 	const body = await request.json();
 
@@ -54,15 +55,15 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 	const env = buildResticEnv(process.env, { repository, password, envVars });
 
 	try {
-		const result = await new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => {
-			const proc = spawn('restic', ['snapshots', '--json', '--no-lock', '--latest', '1'], { env, timeout: 30000 });
+		const result = await withGcsCredFile(env, (runEnv) => new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => {
+			const proc = spawn('restic', ['snapshots', '--json', '--no-lock', '--latest', '1'], { env: runEnv, timeout: 30000 });
 			let stdout = '';
 			let stderr = '';
 			proc.stdout.on('data', (d) => { stdout += d; });
 			proc.stderr.on('data', (d) => { stderr += d; });
 			proc.on('close', (code) => resolve({ code: code ?? 1, stdout, stderr }));
 			proc.on('error', (err) => resolve({ code: 1, stdout: '', stderr: err.message }));
-		});
+		}));
 
 		if (result.code === 0) {
 			if (body.destinationId) await updateBackupDestinationTestStatus(body.destinationId, 'success');

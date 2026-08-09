@@ -25,6 +25,7 @@
 	import BatchOperationModal from '$lib/components/BatchOperationModal.svelte';
 	import type { ComposeStackInfo, ContainerStats } from '$lib/types';
 	import StackModal from './StackModal.svelte';
+	import DeleteStackModal from './DeleteStackModal.svelte';
 	import GitSourceBadge from './GitSourceBadge.svelte';
 	import GitStackModal from './GitStackModal.svelte';
 	import ImportStackModal from './ImportStackModal.svelte';
@@ -477,10 +478,12 @@
 	}
 
 	// Confirmation popover state
-	let confirmDeleteName = $state<string | null>(null);
 	let confirmStopName = $state<string | null>(null);
 	let confirmDownName = $state<string | null>(null);
-	let deleteVolumes = $state(false);
+	// Delete-stack modal state (replaces the old confirm popover — shows the exact dirs
+	// that will be removed and offers "remove stack" vs "remove stack + files").
+	let showDeleteModal = $state(false);
+	let deleteStackName = $state('');
 
 	// Stack operation loading state
 	let stackActionLoading = $state<string | null>(null);
@@ -1063,12 +1066,10 @@
 		}
 	}
 
-	async function removeStack(name: string) {
+	async function removeStack(name: string, opts: { deleteFiles: boolean; deleteVolumes: boolean }) {
 		operationError = null;
-		const withVolumes = deleteVolumes;
-		deleteVolumes = false;
 		try {
-			const params = `force=true${withVolumes ? '&volumes=true' : ''}`;
+			const params = `force=true${opts.deleteVolumes ? '&volumes=true' : ''}${opts.deleteFiles ? '' : '&files=false'}`;
 			const response = await fetch(appendEnvParam(`/api/stacks/${encodeURIComponent(name)}?${params}`, envId), { method: 'DELETE' });
 			if (!response.ok) {
 				const data = await response.json();
@@ -1076,7 +1077,8 @@
 				showErrorDialog(`Failed to remove ${name}`, errorMsg);
 				return;
 			}
-			toast.success(`Removed ${name}${withVolumes ? ' (volumes deleted)' : ''}`);
+			const bits = [opts.deleteFiles ? 'files deleted' : 'files kept', ...(opts.deleteVolumes ? ['volumes deleted'] : [])];
+			toast.success(`Removed ${name} (${bits.join(', ')})`);
 			await fetchStacks();
 		} catch (error) {
 			console.error('Failed to remove stack:', error);
@@ -2126,25 +2128,14 @@
 							</ConfirmPopover>
 						{/if}
 						{#if $canAccess('stacks', 'remove')}
-							<ConfirmPopover
-								open={confirmDeleteName === stack.name}
-								action="Delete"
-								itemType="stack"
-								itemName={stack.name}
+							<button
+								type="button"
 								title="Remove"
-								onConfirm={() => removeStack(stack.name)}
-								onOpenChange={(open) => { confirmDeleteName = open ? stack.name : null; if (!open) deleteVolumes = false; }}
+								onclick={(e) => { e.stopPropagation(); deleteStackName = stack.name; showDeleteModal = true; }}
+								class="p-0.5 rounded hover:bg-muted transition-colors cursor-pointer"
 							>
-								{#snippet extraContent()}
-									<label class="flex items-center gap-1.5 cursor-pointer">
-										<Checkbox bind:checked={deleteVolumes} />
-										<span class="text-xs text-muted-foreground">Also delete volumes</span>
-									</label>
-								{/snippet}
-								{#snippet children({ open })}
-									<Trash2 class="grid-action-icon grid-action-delete {open ? 'text-destructive' : 'text-muted-foreground hover:text-destructive'}" />
-								{/snippet}
-							</ConfirmPopover>
+								<Trash2 class="grid-action-icon grid-action-delete text-muted-foreground hover:text-destructive" />
+							</button>
 						{/if}
 					</div>
 				{/if}
@@ -2660,6 +2651,13 @@
 	bind:open={showImportModal}
 	onClose={() => showImportModal = false}
 	onAdopted={fetchStacks}
+/>
+
+<DeleteStackModal
+	bind:open={showDeleteModal}
+	stackName={deleteStackName}
+	envId={envId ?? null}
+	onConfirm={(opts) => removeStack(deleteStackName, opts)}
 />
 
 <ContainerInspectModal

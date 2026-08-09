@@ -10,6 +10,9 @@ export const DELETE: RequestHandler = async (event) => {
 
 	const force = url.searchParams.get('force') === 'true';
 	const volumes = url.searchParams.get('volumes') === 'true';
+	// files defaults to true (backward-compatible: old callers with no param still delete
+	// files). The delete modal passes files=false for "Remove stack" (keep files on disk).
+	const files = url.searchParams.get('files') !== 'false';
 	const envId = url.searchParams.get('env');
 	const envIdNum = envId ? parseInt(envId) : undefined;
 
@@ -25,10 +28,10 @@ export const DELETE: RequestHandler = async (event) => {
 
 	try {
 		const stackName = decodeURIComponent(params.name);
-		const result = await removeStack(stackName, envIdNum, force, volumes);
+		const result = await removeStack(stackName, envIdNum, force, volumes, files);
 
 		// Audit log
-		await auditStack(event, 'delete', stackName, envIdNum, { force, volumes });
+		await auditStack(event, 'delete', stackName, envIdNum, { force, volumes, files });
 
 		if (!result.success) {
 			return json({ success: false, error: result.error }, { status: 400 });

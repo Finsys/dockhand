@@ -16,6 +16,8 @@
 	import MountTypeBadge from '$lib/components/MountTypeBadge.svelte';
 
 	interface VolumeInfo {
+		/** Restic identity; selection keys on this so two binds sharing a destination don't collide. */
+		key: string;
 		name: string;
 		mountPoint: string;
 		mountType?: 'volume' | 'bind';
@@ -47,11 +49,11 @@
 	const backupable = $derived(volumes.filter((v) => !v.unbackupable));
 	const bindMounts = $derived(backupable.filter((v) => v.mountType === 'bind'));
 
-	function toggleVolume(name: string) {
-		if (selectedVolumes.includes(name)) {
-			selectedVolumes = selectedVolumes.filter((v) => v !== name);
+	function toggleVolume(key: string) {
+		if (selectedVolumes.includes(key)) {
+			selectedVolumes = selectedVolumes.filter((v) => v !== key);
 		} else {
-			selectedVolumes = [...selectedVolumes, name];
+			selectedVolumes = [...selectedVolumes, key];
 		}
 	}
 </script>
@@ -60,7 +62,7 @@
 	<!-- One bordered section: the "all volumes" toggle heads the list it controls,
 	     so the switch clearly belongs to the volumes below it. -->
 	<div class="border rounded-md overflow-hidden">
-		<div class="flex items-center justify-between gap-4 px-3 py-2 bg-muted/30 border-b">
+		<div class="flex items-center gap-3 px-3 py-2 bg-muted/30 border-b">
 			<Label class="text-xs">Backup all volumes ({backupable.length})</Label>
 			<TogglePill bind:checked={allVolumes} onLabel="Yes" offLabel="No" />
 		</div>
@@ -77,12 +79,12 @@
 
 		<!-- List always shown: informational when "all" is on, selectable when off. -->
 		<div class="divide-y max-h-40 overflow-y-auto">
-			{#each volumes as vol}
+			{#each volumes as vol (vol.key)}
 				<label class="flex items-center gap-2 px-3 py-1.5 text-xs" class:cursor-pointer={!allVolumes && !vol.unbackupable} class:opacity-50={vol.unbackupable}>
 					<Checkbox
-						checked={!vol.unbackupable && (allVolumes || selectedVolumes.includes(vol.name))}
+						checked={!vol.unbackupable && (allVolumes || selectedVolumes.includes(vol.key))}
 						disabled={allVolumes || vol.unbackupable}
-						onCheckedChange={() => !vol.unbackupable && toggleVolume(vol.name)}
+						onCheckedChange={() => !vol.unbackupable && toggleVolume(vol.key)}
 						class="h-3.5 w-3.5"
 					/>
 					<MountTypeBadge type={vol.mountType} size="sm" />
