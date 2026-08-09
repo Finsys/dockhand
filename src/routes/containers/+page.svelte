@@ -2187,10 +2187,6 @@
 															</Select.Content>
 														</Select.Root>
 													</div>
-												{:else}
-													<div class="rounded-md border border-dashed px-2.5 py-2 text-xs text-muted-foreground">
-														Connect directly to the container's main process.
-													</div>
 												{/if}
 													<Button size="sm" class="w-full h-7 text-xs" onclick={() => startTerminal(container)}>
 													<Terminal class="w-3 h-3" />

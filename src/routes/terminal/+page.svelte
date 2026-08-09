@@ -268,30 +268,6 @@
 	<!-- Header with container selector -->
 	<div class="flex items-center gap-4 flex-wrap">
 		<PageHeader icon={TerminalIcon} title="Shell" />
-		<div class="flex items-center gap-2">
-			<Label class="text-sm text-muted-foreground">Mode:</Label>
-			<Select.Root type="single" value={terminalMode} onValueChange={(value) => terminalMode = value as TerminalMode}>
-				<Select.Trigger class="h-9 w-48">
-					{#if terminalMode === 'attach'}
-						<Unplug class="w-4 h-4 mr-2 text-muted-foreground" />
-						<span>Attach to process</span>
-					{:else}
-						<Shell class="w-4 h-4 mr-2 text-muted-foreground" />
-						<span>Shell (exec)</span>
-					{/if}
-				</Select.Trigger>
-				<Select.Content>
-					<Select.Item value="exec" label="Shell (exec)">
-						<Shell class="w-4 h-4 mr-2 text-muted-foreground" />
-						Shell (exec)
-					</Select.Item>
-					<Select.Item value="attach" label="Attach to process">
-						<Unplug class="w-4 h-4 mr-2 text-muted-foreground" />
-						Attach to process
-					</Select.Item>
-				</Select.Content>
-			</Select.Root>
-		</div>
 		<div class="relative flex-1 max-w-md min-w-[200px]">
 			<!-- Search input - always visible, shows selected container or placeholder -->
 			<div class="relative">
@@ -332,6 +308,30 @@
 					{/if}
 				</div>
 			{/if}
+		</div>
+		<div class="flex items-center gap-2">
+			<Label class="text-sm text-muted-foreground">Mode:</Label>
+			<Select.Root type="single" value={terminalMode} onValueChange={(value) => terminalMode = value as TerminalMode}>
+				<Select.Trigger class="h-9 w-48">
+					{#if terminalMode === 'attach'}
+						<Unplug class="w-4 h-4 mr-2 text-muted-foreground" />
+						<span>Attach to process</span>
+					{:else}
+						<Shell class="w-4 h-4 mr-2 text-muted-foreground" />
+						<span>Shell (exec)</span>
+					{/if}
+				</Select.Trigger>
+				<Select.Content>
+					<Select.Item value="exec" label="Shell (exec)">
+						<Shell class="w-4 h-4 mr-2 text-muted-foreground" />
+						Shell (exec)
+					</Select.Item>
+					<Select.Item value="attach" label="Attach to process">
+						<Unplug class="w-4 h-4 mr-2 text-muted-foreground" />
+						Attach to process
+					</Select.Item>
+				</Select.Content>
+			</Select.Root>
 		</div>
 
 		{#if selectedContainer}
