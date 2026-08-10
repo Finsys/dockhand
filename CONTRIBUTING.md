@@ -50,6 +50,14 @@ The REST API documentation (`GET /api/docs` for the JSON spec, `GET /api/docs/ui
   ```
   This is the same check CI runs (`.github/workflows/openapi.yml`) and fails the build on drift — an undocumented endpoint, a stale query/path param, a wrong status code, or an orphaned annotation. It's how the docs stay in sync instead of quietly falling behind the code.
 
+### OpenAPI annotations
+
+The `@openapi` JSDoc mini-DSL used above has its own grammar reference, mandatory rules and a
+verbindliche cross-reference convention for IDs that come from another endpoint (e.g. an
+`environmentId` you get from `GET /api/environments`) — see
+[`docs/openapi-annotations.md`](docs/openapi-annotations.md). Read it before writing or changing
+an `@openapi` block.
+
 ## CLA Agreement
 
 When contributing to Dockhand, you will be asked to sign a Contributor License Agreement (CLA) to ensure that all contributions are properly licensed. This helps protect both you and the project. The agreement can be found [here](https://cla-assistant.io/Finsys/dockhand).
