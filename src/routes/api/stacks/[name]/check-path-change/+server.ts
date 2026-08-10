@@ -12,7 +12,7 @@ import { join, dirname } from 'node:path';
  * @openapi
  * summary: Check whether a proposed compose path moves the stack to a different directory and how many files the old directory still holds
  * path: name:string! Stack name
- * query: env:integer Environment ID the stack belongs to
+ * query: env:integer Environment ID the stack belongs to (from GET /api/environments)
  * body: {newComposePath:string!}
  * body-example: {"newComposePath":"/opt/stacks/web/compose.yaml"}
  * resp-200: {hasChanges:boolean!, oldDir:string, newDir:string, fileCount:integer!, currentComposePath:string}

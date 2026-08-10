@@ -53,6 +53,7 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 /**
  * @openapi
  * summary: Assign a role to a user, optionally scoped to an environment (enterprise, admin only)
+ * description: roleId from GET /api/roles. environmentId from GET /api/environments.
  * path: id:integer! Numeric id of the user
  * body: {roleId:integer!, environmentId:integer}
  * body-example: {"roleId":3,"environmentId":1}
@@ -112,6 +113,7 @@ export const POST: RequestHandler = async (event) => {
 /**
  * @openapi
  * summary: Remove a role assignment from a user, optionally scoped to an environment (enterprise, admin only)
+ * description: roleId from GET /api/roles. environmentId from GET /api/environments.
  * path: id:integer! Numeric id of the user
  * body: {roleId:integer!, environmentId:integer}
  * body-example: {"roleId":3,"environmentId":1}

@@ -90,7 +90,7 @@ function formatToMarkdown(logs: AuditLog[]): string {
  * query: username:string Filter by username
  * query: entityType:string Filter by entity type
  * query: action:string Filter by action
- * query: environmentId:integer Filter to a single environment
+ * query: environmentId:integer Filter to a single environment (from GET /api/environments)
  * query: fromDate:string Start of the date range (ISO 8601)
  * query: toDate:string End of the date range (ISO 8601)
  * query: format:string Output format — json (default), csv or md

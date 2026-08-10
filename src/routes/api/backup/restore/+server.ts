@@ -13,7 +13,7 @@ import { guardSnapshotEnvAccess } from '$lib/server/backups/route-guards';
  *
  * @openapi
  * summary: Restore a backup snapshot in-place or to a new location, streaming progress as a Server-Sent Events job
- * description: Returns a text/event-stream that emits `progress` events and a final `result` event. An in-place restore is destructive and requires confirmOverwrite:true. Authorization and snapshot-environment access are checked before the request shape is validated.
+ * description: Returns a text/event-stream that emits `progress` events and a final `result` event. An in-place restore is destructive and requires confirmOverwrite:true. Authorization and snapshot-environment access are checked before the request shape is validated. destinationId from GET /api/backup/destinations. snapshotId from GET /api/backup/snapshots. environmentId from GET /api/environments.
  * body: {destinationId:integer!, snapshotId:string!, mode:string, targetType:string, volumes:array<string>, environmentId:integer, confirmOverwrite:boolean, targetPath:string, targetName:string, postRestore:string, volumeDestinations:array<{}>}
  * body-example: {"destinationId":3,"snapshotId":"a1b2c3d4","mode":"new-location","targetType":"container","targetName":"nextcloud-restored","environmentId":1,"confirmOverwrite":false}
  * resp-200: Server-Sent Events stream of progress and a final result event (status "success" or "error")

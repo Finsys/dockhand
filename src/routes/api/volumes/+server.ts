@@ -8,7 +8,7 @@ import { hasEnvironments } from '$lib/server/db';
 /**
  * @openapi
  * summary: List Docker volumes for an environment; returns an empty array when no environment is specified
- * query: env:integer Environment ID to list volumes for
+ * query: env:integer Environment ID to list volumes for (from GET /api/environments)
  * resp-200: array<{Name:string!, Driver:string!, Mountpoint:string, Scope:string, CreatedAt:string}>
  * resp-200-example: [{"Name":"web_data","Driver":"local","Mountpoint":"/var/lib/docker/volumes/web_data/_data","Scope":"local","CreatedAt":"2026-06-01T10:00:00Z"}]
  * resp-403: Permission denied (requires volumes:view, or environment access denied on enterprise)
@@ -53,7 +53,7 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 /**
  * @openapi
  * summary: Create a Docker volume in an environment
- * query: env:integer Environment ID to create the volume in
+ * query: env:integer Environment ID to create the volume in (from GET /api/environments)
  * body: {name:string!, driver:string, driverOpts:{}, labels:{}}
  * body-example: {"name":"web_data","driver":"local","driverOpts":{},"labels":{"app":"web"}}
  * resp-200: {success:boolean!, name:string!}

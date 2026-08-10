@@ -23,7 +23,7 @@ const MANIFEST_TYPES = [
  * @openapi
  * summary: Delete a tagged image from a registry by resolving its manifest digest, then deleting by digest
  * description: Docker Hub deletion is rejected. Upstream 401 responses during manifest resolution/deletion are proxied back as 401.
- * query: registry:integer! ID of the configured registry
+ * query: registry:integer! ID of the configured registry (from GET /api/registries)
  * query: image:string! Repository/image name (may include an org path)
  * query: tag:string! Tag to delete
  * resp-200: {success:boolean!, message:string}

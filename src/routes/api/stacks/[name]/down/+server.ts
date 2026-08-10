@@ -9,7 +9,7 @@ import type { RequestHandler } from './$types';
  * @openapi
  * summary: Take a stack down (docker compose down — removes containers, keeps files), asynchronously
  * path: name:string! Stack name
- * query: env:integer Environment id
+ * query: env:integer Environment id (from GET /api/environments)
  * body: {removeVolumes:boolean}
  * body-example: {"removeVolumes":false}
  * resp-200: {jobId:string!}

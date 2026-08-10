@@ -12,7 +12,7 @@ import type { RequestHandler } from './$types';
  * query: username:string Legacy single-username filter
  * query: entityType:string Legacy single entity-type filter
  * query: action:string Legacy single-action filter
- * query: environmentId:integer Filter to a single environment
+ * query: environmentId:integer Filter to a single environment (from GET /api/environments)
  * query: labels:string Comma-separated labels to filter by
  * query: fromDate:string Start of the date range (ISO 8601)
  * query: toDate:string End of the date range (ISO 8601)

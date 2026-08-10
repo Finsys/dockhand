@@ -52,6 +52,7 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 /**
  * @openapi
  * summary: Update a custom role (system roles cannot be modified; enterprise, admin required when auth is enabled)
+ * description: environmentIds from GET /api/environments.
  * path: id:integer! Numeric id of the role
  * body: {name:string, description:string, permissions:{}, environmentIds:array<integer>}
  * body-example: {"description":"Updated description","permissions":{"containers":["view"]}}

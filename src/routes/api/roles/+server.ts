@@ -37,6 +37,7 @@ export const GET: RequestHandler = async ({ cookies }) => {
 /**
  * @openapi
  * summary: Create a custom role (enterprise; admin required when auth is enabled)
+ * description: environmentIds from GET /api/environments.
  * body: {name:string!, description:string, permissions:{}!, environmentIds:array<integer>}
  * body-example: {"name":"Operators","description":"Can manage containers","permissions":{"containers":["view","edit"]},"environmentIds":[1,2]}
  * resp-201: The created role

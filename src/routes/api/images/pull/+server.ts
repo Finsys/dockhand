@@ -51,7 +51,7 @@ function buildPullUrl(imageName: string): string {
  *
  * @openapi
  * summary: Pull a Docker image and stream pull (and optional scan-on-pull) progress as Server-Sent Events
- * query: env:integer ID of the environment to pull into
+ * query: env:integer ID of the environment to pull into (from GET /api/environments)
  * body: {image:string!, scanAfterPull:boolean}
  * body-example: {"image":"nginx:latest","scanAfterPull":false}
  * resp-200: A Server-Sent Events stream of pull progress, ending with a "result" event

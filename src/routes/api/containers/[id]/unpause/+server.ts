@@ -11,7 +11,7 @@ import { validateDockerIdParam } from '$lib/server/docker-validation';
  * @openapi
  * summary: Resume all processes in a paused container (requires the container 'start' permission)
  * path: id:string! Container ID or name
- * query: env:integer The target environment ID (omit for the local/default Docker host)
+ * query: env:integer The target environment ID (omit for the local/default Docker host) (from GET /api/environments)
  * resp-200: {success:boolean!}
  * resp-200-example: {"success":true}
  * resp-403: Permission denied

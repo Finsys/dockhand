@@ -17,6 +17,7 @@ import { authorize } from '$lib/server/authorize';
 /**
  * @openapi
  * summary: Test an unsaved repository configuration (url/branch/credentialId) before creating it
+ * description: credentialId from GET /api/git/credentials.
  * body: {url:string!, branch:string, credentialId:integer}
  * body-example: {"url":"https://github.com/example/homelab.git","branch":"main","credentialId":2}
  * resp-200: {success:boolean!, error:string}

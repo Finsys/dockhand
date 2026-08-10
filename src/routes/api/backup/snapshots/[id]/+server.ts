@@ -14,8 +14,8 @@ import { guardSnapshotEnvAccess } from '$lib/server/backups/route-guards';
  * @openapi
  * summary: Forget and prune a single snapshot from a destination (destructive restic forget --prune), with a server-authoritative environment access gate
  * path: id:string! Restic snapshot id to forget
- * query: destinationId:integer! Destination holding the snapshot (required)
- * query: env:integer Optional environment id for an early enterprise access check; the authoritative gate resolves the snapshot's owning environment server-side
+ * query: destinationId:integer! Destination holding the snapshot (required) (from GET /api/backup/destinations)
+ * query: env:integer Optional environment id for an early enterprise access check; the authoritative gate resolves the snapshot's owning environment server-side (from GET /api/environments)
  * resp-200: Returns { success: true } once the snapshot is forgotten and pruned
  * resp-200-example: {"success":true}
  * resp-400: Missing/invalid destinationId or an invalid snapshot id

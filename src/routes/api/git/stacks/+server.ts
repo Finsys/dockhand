@@ -23,7 +23,7 @@ const STACK_NAME_REGEX = /^[a-z0-9][a-z0-9_-]*$/;
 /**
  * @openapi
  * summary: List git-backed stacks (optionally scoped to one environment)
- * query: env:integer Environment id — omitted returns stacks across all environments plus legacy null-scoped ones
+ * query: env:integer Environment id — omitted returns stacks across all environments plus legacy null-scoped ones (from GET /api/environments)
  * resp-200: array<{id:integer!, stackName:string!, environmentId:integer, repositoryId:integer!, composePath:string!, autoUpdate:boolean!, syncStatus:string!}>
  * resp-200-example: [{"id":1,"stackName":"immich","environmentId":2,"repositoryId":3,"composePath":"compose.yaml","autoUpdate":true,"syncStatus":"synced"}]
  * resp-403: Permission denied (RBAC 'stacks:view' missing)
@@ -53,6 +53,7 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 /**
  * @openapi
  * summary: Create a git-backed stack (creating the repository too if url is given instead of repositoryId)
+ * description: environmentId from GET /api/environments. repositoryId from GET /api/git/repositories. credentialId from GET /api/git/credentials.
  * body: {stackName:string!, environmentId:integer, repositoryId:integer, url:string, branch:string, credentialId:integer, composePath:string, envFilePath:string, autoUpdate:boolean, autoUpdateCron:string, webhookEnabled:boolean, envVars:string, deployNow:boolean}
  * body-example: {"stackName":"immich","environmentId":2,"url":"https://git.example.com/infra/immich.git","branch":"main","composePath":"compose.yaml","deployNow":true,"envVars":[{"key":"TZ","value":"Europe/Berlin","isSecret":false}]}
  * resp-200: {id:integer!, stackName:string!, environmentId:integer, repositoryId:integer!, syncStatus:string!}

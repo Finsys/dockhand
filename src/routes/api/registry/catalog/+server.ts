@@ -9,7 +9,7 @@ const PAGE_SIZE = 100;
  * @openapi
  * summary: List repositories in a registry's V2 catalog (with Harbor project-API fallback), paginated
  * description: Docker Hub is rejected (no catalog API). For 401/403/404 from the upstream registry the same status is proxied back to the caller.
- * query: registry:integer! ID of the configured registry to query
+ * query: registry:integer! ID of the configured registry to query (from GET /api/registries)
  * query: last:string Opaque pagination cursor from a previous page's nextLast
  * resp-200: {repositories:array<{name:string!, description:string, star_count:integer, is_official:boolean, is_automated:boolean}>!, pagination:{pageSize:integer!, hasMore:boolean!, nextLast:string}!}
  * resp-200-example: {"repositories":[{"name":"library/nginx","description":"","star_count":0,"is_official":false,"is_automated":false}],"pagination":{"pageSize":100,"hasMore":false,"nextLast":null}}

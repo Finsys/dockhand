@@ -9,7 +9,7 @@ import type { RequestHandler } from './$types';
  * @openapi
  * summary: Start a stack (docker compose start/up), asynchronously
  * path: name:string! Stack name
- * query: env:integer Environment id
+ * query: env:integer Environment id (from GET /api/environments)
  * resp-200: {jobId:string!}
  * resp-200-desc: Fire-and-forget job id — poll GET /api/jobs/{jobId} for the result. Send "Accept: application/json" (without text/event-stream) to instead block and receive the final {success,output|error} synchronously.
  * resp-200-example: {"jobId":"3f9c5b1a-2e4d-4a6f-9b0a-1c7d8e9f0a1b"}

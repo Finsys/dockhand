@@ -91,7 +91,7 @@ function createTarArchive(filename: string, content: Uint8Array): Uint8Array {
  * summary: Upload one or more files into a container directory (requires the 'exec' permission)
  * description: Send `multipart/form-data` with one or more `files` parts; each file is tar-wrapped and written into the target directory. Partial success is reported per file in `uploaded`/`errors`.
  * path: id:string! Container ID or name
- * query: env:integer The target environment ID (omit for the local/default Docker host)
+ * query: env:integer The target environment ID (omit for the local/default Docker host) (from GET /api/environments)
  * query: path:string! Absolute target directory inside the container
  * resp-200: {success:boolean!, uploaded:array<string>!, errors:array<string>}
  * resp-200-example: {"success":true,"uploaded":["app.conf"]}

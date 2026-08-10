@@ -12,8 +12,8 @@ import { filterSnapshotsByEnvAccess } from '$lib/server/backups/route-guards';
  * @openapi
  * summary: List backup snapshots, either for a specific backup config or across a destination; exactly one of configId or destinationId is required
  * description: When allDestinations=true (with configId) all destinations are searched and a partial result is signalled via the X-Incomplete-Destinations response header. Enterprise callers only see snapshots for environments they can access.
- * query: configId:integer List snapshots for this backup configuration (matched by its stable config-id tag)
- * query: destinationId:integer List all snapshots in this destination (mutually exclusive with configId)
+ * query: configId:integer List snapshots for this backup configuration (matched by its stable config-id tag) (from GET /api/backup/configs)
+ * query: destinationId:integer List all snapshots in this destination (mutually exclusive with configId) (from GET /api/backup/destinations)
  * query: allDestinations:boolean When "true" (with configId), search this config's snapshots across every destination
  * resp-200: Array of snapshot objects
  * resp-400: Neither configId nor destinationId supplied, or an invalid configId/destinationId

@@ -15,7 +15,7 @@ export interface FavoriteGroup {
 /**
  * @openapi
  * summary: Get the saved log favorite-groups for an environment
- * query: env:integer! Environment ID
+ * query: env:integer! Environment ID (from GET /api/environments)
  * resp-200: {groups:array<{name:string!, containers:array<string>}>}
  * resp-200-example: {"groups":[{"name":"frontend","containers":["web-1","web-2"]}]}
  * resp-400: Environment ID is required, or invalid (not a number)
@@ -54,6 +54,7 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 /**
  * @openapi
  * summary: Add, remove, update or reorder log favorite-groups for an environment
+ * description: environmentId from GET /api/environments.
  * body: {environmentId:integer!, action:string!, name:string, containers:array<string>, newName:string, groups:array<{name:string!, containers:array<string>}>}
  * body-example: {"environmentId":1,"action":"add","name":"frontend","containers":["web-1","web-2"]}
  * resp-200: {groups:array<{name:string!, containers:array<string>}>}

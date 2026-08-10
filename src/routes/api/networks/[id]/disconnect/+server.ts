@@ -8,8 +8,9 @@ import { validateDockerIdParam } from '$lib/server/docker-validation';
 /**
  * @openapi
  * summary: Disconnect a container from a Docker network (optionally forcing the disconnect)
+ * description: containerId from GET /api/containers.
  * path: id:string! Docker network ID
- * query: env:integer Environment the network belongs to
+ * query: env:integer Environment the network belongs to (from GET /api/environments)
  * body: {containerId:string!, containerName:string, force:boolean}
  * body-example: {"containerId":"a1b2c3d4e5f6","containerName":"web-1","force":false}
  * resp-200: {success:boolean!}

@@ -64,6 +64,7 @@ export const GET: RequestHandler = async ({ cookies }) => {
  *
  * @openapi
  * summary: Perform a bulk label operation on environments — rename, delete, add to environments, or set a custom color — selected via the action field
+ * description: environmentIds from GET /api/environments.
  * body: {action:string!, oldLabel:string, newLabel:string, label:string, environmentIds:array<integer>, color:string}
  * body-example: {"action":"rename","oldLabel":"staging","newLabel":"stg"}
  * resp-200: {success:boolean!, affected:integer}

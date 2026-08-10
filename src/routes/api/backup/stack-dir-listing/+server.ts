@@ -13,7 +13,7 @@ import { probeStackDir } from '$lib/server/backups';
  * @openapi
  * summary: Probe the target host and list the actual contents of a stack's directory, for the backup create/edit dialog's file picker
  * query: target:string! Target stack name
- * query: env:integer Environment ID the stack belongs to
+ * query: env:integer Environment ID the stack belongs to (from GET /api/environments)
  * resp-200: The stack directory probe result — kind "listed"/"tar" with hostPath/localStackDir and entries, or kind "helper-failed"/"unknown" with a reason (never throws for an operational failure)
  * resp-400: target is required
  * resp-403: Permission denied (requires backups:view), or no access to the target's environment (enterprise)

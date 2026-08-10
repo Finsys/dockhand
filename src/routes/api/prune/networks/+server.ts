@@ -9,7 +9,7 @@ import type { RequestHandler } from './$types';
  *
  * @openapi
  * summary: Prune (delete) all unused Docker networks in the target environment
- * query: env:integer Target environment id; scopes both the prune operation and the permission check (defaults to the local environment)
+ * query: env:integer Target environment id; scopes both the prune operation and the permission check (defaults to the local environment) (from GET /api/environments)
  * resp-200: Returns { success: true, result } where result is the Docker network-prune report (deleted network names)
  * resp-200-example: {"success":true,"result":{"NetworksDeleted":["bridge-old","test-net"]}}
  * resp-403: Permission denied — requires the "remove" permission on networks for the target environment

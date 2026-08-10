@@ -8,7 +8,7 @@ import type { RequestHandler } from './$types';
  * @openapi
  * summary: Remove a stack completely (compose down + delete files + database cleanup)
  * path: name:string! Stack name
- * query: env:integer Environment id
+ * query: env:integer Environment id (from GET /api/environments)
  * query: force:boolean Force removal even if the compose down step fails
  * query: volumes:boolean Also remove named volumes (docker compose down --volumes)
  * query: files:boolean Delete the stack's on-disk files/directory too (default true; pass files=false to keep them on disk)

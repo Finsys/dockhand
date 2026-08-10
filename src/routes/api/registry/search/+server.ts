@@ -226,7 +226,7 @@ async function searchCatalog(registry: any, term: string, limit: number): Promis
  * description: With no registry parameter the search runs against Docker Hub; otherwise against the given registry, falling back to Docker Hub search when the registry is a Docker Hub mirror.
  * query: term:string! Search term / image name
  * query: limit:integer Maximum number of results (default 25)
- * query: registry:integer ID of the configured registry to search; omit to search Docker Hub
+ * query: registry:integer ID of the configured registry to search; omit to search Docker Hub (from GET /api/registries)
  * resp-200: array<{name:string!, description:string, star_count:integer, is_official:boolean, is_automated:boolean}>
  * resp-200-example: [{"name":"nginx","description":"Official build of Nginx","star_count":20000,"is_official":true,"is_automated":false}]
  * resp-400: The term query parameter is missing

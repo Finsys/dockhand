@@ -10,7 +10,7 @@ import type { RequestHandler } from './$types';
  * @openapi
  * summary: Change the mode (permissions) of a file or directory inside a container (requires the 'exec' permission)
  * path: id:string! Container ID or name
- * query: env:integer The target environment ID (omit for the local/default Docker host)
+ * query: env:integer The target environment ID (omit for the local/default Docker host) (from GET /api/environments)
  * body: {path:string!, mode:string!, recursive:boolean}
  * body-example: {"path":"/app/entrypoint.sh","mode":"755","recursive":false}
  * resp-200: {success:boolean!, path:string!, mode:string!, recursive:boolean!}

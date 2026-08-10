@@ -13,7 +13,7 @@ const MAX_FILE_SIZE = 1024 * 1024;
  * @openapi
  * summary: Read the content of a single file inside a container (max 1 MB)
  * path: id:string! Container ID or name
- * query: env:integer The target environment ID (omit for the local/default Docker host)
+ * query: env:integer The target environment ID (omit for the local/default Docker host) (from GET /api/environments)
  * query: path:string! Absolute file path inside the container
  * resp-200: {content:string!, path:string!}
  * resp-400: Path is missing, the target is a directory, or the container is not running
@@ -84,7 +84,7 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
  * @openapi
  * summary: Overwrite the content of a file inside a container (max 1 MB, requires the 'exec' permission)
  * path: id:string! Container ID or name
- * query: env:integer The target environment ID (omit for the local/default Docker host)
+ * query: env:integer The target environment ID (omit for the local/default Docker host) (from GET /api/environments)
  * query: path:string! Absolute file path inside the container
  * body: {content:string!}
  * body-example: {"content":"server {\n  listen 80;\n}\n"}

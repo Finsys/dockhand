@@ -13,7 +13,7 @@ import { getRegistry } from '$lib/server/db';
 /**
  * @openapi
  * summary: Test registry connectivity and (if credentials are given) authentication against the V2 endpoint
- * description: Pass either a saved registryId or inline url/username/password. The outcome is always reported in a 200 body via the success/connectivity/authenticated fields, never as an HTTP error.
+ * description: Pass either a saved registryId or inline url/username/password. The outcome is always reported in a 200 body via the success/connectivity/authenticated fields, never as an HTTP error. registryId from GET /api/registries.
  * body: {registryId:integer, url:string, username:string, password:string}
  * body-example: {"url":"https://ghcr.io","username":"deploy","password":"***"}
  * resp-200: {success:boolean!, connectivity:boolean!, authenticated:boolean, message:string!}

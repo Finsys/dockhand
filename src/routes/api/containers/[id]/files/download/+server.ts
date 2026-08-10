@@ -12,7 +12,7 @@ import type { RequestHandler } from './$types';
  * @openapi
  * summary: Download a file or directory from a container as a tar (optionally gzip-compressed) archive attachment
  * path: id:string! Container ID or name
- * query: env:integer The target environment ID (omit for the local/default Docker host)
+ * query: env:integer The target environment ID (omit for the local/default Docker host) (from GET /api/environments)
  * query: path:string! Absolute path inside the container to archive and download
  * query: format:string Archive format, "tar" (default) or "tar.gz"
  * resp-200: Archive stream (application/x-tar or application/gzip) as a file attachment

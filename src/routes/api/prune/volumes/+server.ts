@@ -9,7 +9,7 @@ import type { RequestHandler } from './$types';
  *
  * @openapi
  * summary: Prune (delete) all unused Docker volumes in the target environment
- * query: env:integer Target environment id; scopes both the prune operation and the permission check (defaults to the local environment)
+ * query: env:integer Target environment id; scopes both the prune operation and the permission check (defaults to the local environment) (from GET /api/environments)
  * resp-200: Returns { success: true, result } where result is the Docker volume-prune report (deleted volume names, space reclaimed)
  * resp-200-example: {"success":true,"result":{"VolumesDeleted":["orphan-data"],"SpaceReclaimed":20971520}}
  * resp-403: Permission denied — requires the "remove" permission on volumes for the target environment

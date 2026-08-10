@@ -5,6 +5,7 @@ import { adoptSelectedStacks, type DiscoveredStack } from '$lib/server/stack-sca
 /**
  * @openapi
  * summary: Adopt previously discovered compose stacks into Dockhand for a given environment
+ * description: environmentId from GET /api/environments.
  * body: {stacks:array<{name:string!, composePath:string!}>!, environmentId:integer!}
  * body-example: {"stacks":[{"name":"web","composePath":"/opt/stacks/web/compose.yaml"}],"environmentId":1}
  * resp-200: {adopted:array<string>!, failed:array<{name:string!, error:string!}>!}

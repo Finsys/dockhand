@@ -9,7 +9,7 @@ import type { RequestHandler } from './$types';
  *
  * @openapi
  * summary: Prune (delete) all stopped containers in the target environment
- * query: env:integer Target environment id; scopes both the prune operation and the permission check (defaults to the local environment)
+ * query: env:integer Target environment id; scopes both the prune operation and the permission check (defaults to the local environment) (from GET /api/environments)
  * resp-200: Returns { success: true, result } where result is the Docker container-prune report (deleted container ids, space reclaimed)
  * resp-200-example: {"success":true,"result":{"ContainersDeleted":["abc123","def456"],"SpaceReclaimed":5242880}}
  * resp-403: Permission denied — requires the "remove" permission on containers for the target environment

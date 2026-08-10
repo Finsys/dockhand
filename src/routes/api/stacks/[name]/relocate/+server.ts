@@ -11,7 +11,7 @@ import { join, dirname } from 'node:path';
  * @openapi
  * summary: Move all stack files from the old directory to a new location, update the stored compose/env paths, and return the refreshed compose/env content
  * path: name:string! Stack name
- * query: env:integer Environment ID the stack belongs to
+ * query: env:integer Environment ID the stack belongs to (from GET /api/environments)
  * body: {oldDir:string!, newComposePath:string!, newEnvPath:string}
  * body-example: {"oldDir":"/opt/stacks/old","newComposePath":"/opt/stacks/web/compose.yaml","newEnvPath":"/opt/stacks/web/.env"}
  * resp-200: {success:boolean!, movedFiles:array<string>!, errors:array<string>, composeContent:string!, rawEnvContent:string!, envVars:array<{key:string!, value:string!, isSecret:boolean!}>!}
