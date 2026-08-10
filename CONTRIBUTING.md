@@ -53,7 +53,7 @@ The REST API documentation (`GET /api/docs` for the JSON spec, `GET /api/docs/ui
 ### OpenAPI annotations
 
 The `@openapi` JSDoc mini-DSL used above has its own grammar reference, mandatory rules and a
-verbindliche cross-reference convention for IDs that come from another endpoint (e.g. an
+binding cross-reference convention for IDs that come from another endpoint (e.g. an
 `environmentId` you get from `GET /api/environments`) — see
 [`docs/openapi-annotations.md`](docs/openapi-annotations.md). Read it before writing or changing
 an `@openapi` block.
