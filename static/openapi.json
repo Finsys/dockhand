@@ -3127,9 +3127,6 @@
         "responses": {
           "200": {
             "description": "Array of backup configuration objects"
-          },
-          "403": {
-            "description": "Permission denied — requires the \"backups:view\" permission"
           }
         },
         "security": [
@@ -3156,7 +3153,7 @@
             "description": "Invalid input — missing destinationId/targetName, invalid targetName, invalid cron expression, invalid retention, or a local repository paired with a remote environment / non-backupable stack"
           },
           "403": {
-            "description": "Permission denied — requires \"backups:manage\", or no access to the requested environment"
+            "description": "Access denied to the requested environment (enterprise)"
           },
           "500": {
             "description": "Failed to create the backup configuration (persistence error)"
@@ -3520,9 +3517,6 @@
         "responses": {
           "200": {
             "description": "Array of backup destination objects without secrets (no password, no envVars)"
-          },
-          "403": {
-            "description": "Permission denied — requires the \"backups:view\" permission"
           }
         },
         "security": [
@@ -3547,9 +3541,6 @@
           },
           "400": {
             "description": "Invalid input — missing name/repository/password, unsupported/SSRF-blocked repository, invalid restic flags, or an invalid cron schedule in the policies"
-          },
-          "403": {
-            "description": "Permission denied — requires the \"backups:manage\" permission"
           },
           "409": {
             "description": "A destination with this name already exists"
@@ -3641,9 +3632,6 @@
           "400": {
             "description": "Invalid id (not a number)"
           },
-          "403": {
-            "description": "Permission denied — requires the \"backups:view\" permission"
-          },
           "404": {
             "description": "Destination not found"
           }
@@ -3680,9 +3668,6 @@
           },
           "400": {
             "description": "Invalid input — invalid id, unsupported/SSRF-blocked repository, invalid restic flags, invalid policy cron, or switching to a local repository used by a remote-environment config"
-          },
-          "403": {
-            "description": "Permission denied — requires the \"backups:manage\" permission"
           },
           "404": {
             "description": "Destination not found"
@@ -3765,9 +3750,6 @@
           "400": {
             "description": "Invalid id (not a number)"
           },
-          "403": {
-            "description": "Permission denied — requires the \"backups:manage\" permission"
-          },
           "404": {
             "description": "Destination not found"
           },
@@ -3810,9 +3792,6 @@
           "400": {
             "description": "Invalid id (not a number)"
           },
-          "403": {
-            "description": "Permission denied — requires the \"backups:manage\" permission"
-          },
           "404": {
             "description": "Destination not found"
           },
@@ -3854,9 +3833,6 @@
           },
           "400": {
             "description": "Invalid input — invalid id, missing passwords, or the current password is incorrect"
-          },
-          "403": {
-            "description": "Permission denied — requires the \"backups:manage\" permission"
           },
           "404": {
             "description": "Destination not found"
@@ -3924,19 +3900,16 @@
         ],
         "responses": {
           "200": {
-            "description": "The task result object (returned when the task succeeds)"
+            "description": "The task result object — { success: true, ... } on success, or { success: false, error } when the task itself fails"
           },
           "400": {
             "description": "Invalid input — invalid destination id, or an unknown task name (must be one of unlock, check, prune, stats, repair-index, repair-snapshots)"
           },
           "403": {
-            "description": "Permission denied — requires \"backups:manage\", or no access to an environment whose configs use this destination"
+            "description": "No access to an environment whose configs use this destination (enterprise)"
           },
           "404": {
             "description": "Destination not found"
-          },
-          "500": {
-            "description": "The maintenance task failed; returns { error } or a result with success:false"
           }
         },
         "security": [
@@ -3995,9 +3968,6 @@
           "400": {
             "description": "Invalid id (not a number)"
           },
-          "403": {
-            "description": "Permission denied — requires the \"backups:manage\" permission"
-          },
           "404": {
             "description": "Destination not found"
           }
@@ -4036,9 +4006,6 @@
           },
           "400": {
             "description": "Invalid destination id (not a number)"
-          },
-          "403": {
-            "description": "Permission denied — requires the \"backups:manage\" permission"
           }
         },
         "security": [
@@ -4083,9 +4050,6 @@
           },
           "400": {
             "description": "Invalid input — missing repository/password for an inline test, or an unsupported/SSRF-blocked repository"
-          },
-          "403": {
-            "description": "Permission denied — requires the \"backups:manage\" permission"
           },
           "404": {
             "description": "Destination not found (when testing a saved destinationId)"
@@ -4599,10 +4563,10 @@
             "description": "Missing/invalid destinationId, missing path, an invalid snapshot id, or a path outside the allowed roots / containing traversal"
           },
           "403": {
-            "description": "Permission denied — requires \"backups:view\", or no access to the snapshot's owning environment"
+            "description": "metadata.json cannot be downloaded raw (download=1); use this endpoint without download for the redacted inline preview"
           },
           "404": {
-            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+            "description": "The redacted metadata.json preview could not be parsed"
           },
           "500": {
             "description": "Failed to read the file/directory from the snapshot (restic error)"
@@ -4651,9 +4615,6 @@
           },
           "400": {
             "description": "Missing/invalid destinationId or an invalid snapshot id"
-          },
-          "403": {
-            "description": "Permission denied — requires \"backups:view\", or no access to the snapshot's owning environment"
           },
           "404": {
             "description": "No metadata available for this snapshot"
@@ -4714,9 +4675,6 @@
           },
           "400": {
             "description": "Missing required params (destinationId, snapshotA, snapshotB) or an invalid snapshot id"
-          },
-          "403": {
-            "description": "Permission denied — requires \"backups:view\", or no access to either snapshot's owning environment"
           },
           "500": {
             "description": "Failed to diff the snapshots (restic error)"
@@ -23437,15 +23395,6 @@
             "description": "Stack name"
           },
           {
-            "name": "files",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "boolean"
-            },
-            "description": "Query parameter \"files\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
-          },
-          {
             "name": "env",
             "in": "query",
             "required": false,
@@ -23471,6 +23420,15 @@
               "type": "boolean"
             },
             "description": "Also remove named volumes (docker compose down --volumes)"
+          },
+          {
+            "name": "files",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Delete the stack's on-disk files/directory too (default true; pass files=false to keep them on disk)"
           }
         ],
         "responses": {

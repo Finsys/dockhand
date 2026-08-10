@@ -11,6 +11,7 @@ import type { RequestHandler } from './$types';
  * query: env:integer Environment id
  * query: force:boolean Force removal even if the compose down step fails
  * query: volumes:boolean Also remove named volumes (docker compose down --volumes)
+ * query: files:boolean Delete the stack's on-disk files/directory too (default true; pass files=false to keep them on disk)
  * resp-200: {success:boolean!}
  * resp-200-example: {"success":true}
  * resp-400: Compose down failed and force was not set
