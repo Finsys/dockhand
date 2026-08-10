@@ -11,7 +11,7 @@ import type { RequestHandler } from './$types';
  *
  * @openapi
  * summary: Rename a container and update any associated auto-update schedule (requires the 'create' permission)
- * path: id:string! Container ID or name
+ * path: id:string! Container ID or name (from GET /api/containers)
  * query: env:integer The target environment ID (omit for the local/default Docker host) (from GET /api/environments)
  * body: {name:string!}
  * body-example: {"name":"my-renamed-container"}

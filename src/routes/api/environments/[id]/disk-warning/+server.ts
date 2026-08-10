@@ -6,7 +6,7 @@ import { getEnvironment, getEnvSetting, setEnvSetting } from '$lib/server/db';
 /**
  * @openapi
  * summary: Get the disk-space warning thresholds for an environment
- * path: id:integer! Environment id
+ * path: id:integer! Environment id (from GET /api/environments)
  * resp-200: {enabled:boolean!, mode:string!, threshold:integer!, thresholdGb:integer!}
  * resp-200-example: {"enabled":true,"mode":"percentage","threshold":80,"thresholdGb":50}
  * resp-403: Permission denied (RBAC 'environments:view' missing)
@@ -41,7 +41,7 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 /**
  * @openapi
  * summary: Save the disk-space warning thresholds for an environment (each field optional/independent)
- * path: id:integer! Environment id
+ * path: id:integer! Environment id (from GET /api/environments)
  * body: {enabled:boolean, mode:string, threshold:integer, thresholdGb:integer}
  * body-example: {"enabled":true,"mode":"percentage","threshold":85}
  * resp-200: {success:boolean!}

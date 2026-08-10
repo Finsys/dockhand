@@ -9,7 +9,7 @@ import { parseRegistryUrl, DOCKER_HUB_HOSTS } from '$lib/server/docker';
 /**
  * @openapi
  * summary: Get a single registry by ID with the password stripped (only a hasCredentials flag)
- * path: id:integer! Registry ID
+ * path: id:integer! Registry ID (from GET /api/registries)
  * resp-200: {id:integer!, name:string!, url:string!, isDefault:boolean, hasCredentials:boolean!}
  * resp-400: The id path segment is not a valid integer
  * resp-403: Caller lacks the registries:view permission
@@ -45,7 +45,7 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 /**
  * @openapi
  * summary: Update a registry (optionally set as default); credentials are trimmed and the response strips the password
- * path: id:integer! Registry ID
+ * path: id:integer! Registry ID (from GET /api/registries)
  * body: {name:string, url:string, username:string, password:string, isDefault:boolean}
  * body-example: {"name":"GHCR","url":"https://ghcr.io","username":"deploy","password":"***","isDefault":true}
  * resp-200: {id:integer!, name:string!, url:string!, isDefault:boolean, hasCredentials:boolean!}
@@ -123,7 +123,7 @@ export const PUT: RequestHandler = async (event) => {
 /**
  * @openapi
  * summary: Delete a registry by ID
- * path: id:integer! Registry ID
+ * path: id:integer! Registry ID (from GET /api/registries)
  * resp-200: {success:boolean!}
  * resp-200-example: {"success":true}
  * resp-400: Invalid id, or the registry cannot be deleted

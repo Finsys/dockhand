@@ -64,7 +64,7 @@ function stripDockerLogHeaders(raw: Uint8Array): string {
 /**
  * @openapi
  * summary: Poll the self-update sidecar container's logs and exit state for progress tracking
- * query: id:string! Updater container id (returned by POST /api/self-update)
+ * query: id:string! Updater container id (from POST /api/self-update)
  * resp-200: {logs:string!, status:string!, exitCode:integer}
  * resp-400: Container ID is required
  * resp-403: Admin access required

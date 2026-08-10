@@ -6,7 +6,7 @@ import { validateSession, testOidcConnection, isAuthEnabled } from '$lib/server/
 /**
  * @openapi
  * summary: Test the discovery/connection of a stored OIDC configuration by id
- * path: id:integer! Numeric id of the OIDC configuration to test
+ * path: id:integer! Numeric id of the OIDC configuration to test (from GET /api/auth/oidc)
  * resp-200: Connection test result (success flag plus diagnostic detail from the provider)
  * resp-400: Invalid configuration id (not a number)
  * resp-403: Admin access required (auth is enabled and the caller is not an admin)

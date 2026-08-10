@@ -6,7 +6,7 @@ import { testRepository } from '$lib/server/git';
 /**
  * @openapi
  * summary: Test connectivity/authentication to a saved repository using its stored credential
- * path: id:integer! Git repository ID
+ * path: id:integer! Git repository ID (from GET /api/git/repositories)
  * resp-200: {success:boolean!, error:string}
  * resp-200-example: {"success":true}
  * resp-400: The id path segment is not a valid integer

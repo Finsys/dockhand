@@ -13,7 +13,7 @@ import { registerSchedule, unregisterSchedule } from '$lib/server/scheduler';
  *
  * @openapi
  * summary: Get the automatic container-image update-check schedule for an environment
- * path: id:integer! Environment id
+ * path: id:integer! Environment id (from GET /api/environments)
  * resp-200: {settings:{enabled:boolean!, cron:string!, autoUpdate:boolean!, vulnerabilityCriteria:string!}!}
  * resp-200-example: {"settings":{"enabled":false,"cron":"0 4 * * *","autoUpdate":false,"vulnerabilityCriteria":"never"}}
  * resp-403: Permission denied (RBAC 'environments:view' missing)
@@ -56,7 +56,7 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
  *
  * @openapi
  * summary: Save the automatic image update-check schedule for an environment (registers/unregisters the croner job)
- * path: id:integer! Environment id
+ * path: id:integer! Environment id (from GET /api/environments)
  * body: {enabled:boolean, cron:string, autoUpdate:boolean, vulnerabilityCriteria:string}
  * body-example: {"enabled":true,"cron":"0 4 * * *","autoUpdate":false,"vulnerabilityCriteria":"never"}
  * resp-200: {success:boolean!, settings:{enabled:boolean!, cron:string!, autoUpdate:boolean!, vulnerabilityCriteria:string!}!}

@@ -7,7 +7,7 @@ import { authorize } from '$lib/server/authorize';
 /**
  * @openapi
  * summary: Test a git stack's repository access and compose configuration without deploying
- * path: id:integer! Git stack ID
+ * path: id:integer! Git stack ID (from GET /api/git/stacks)
  * resp-200: {success:boolean!, error:string}
  * resp-200-example: {"success":true}
  * resp-403: Caller lacks the stacks:view permission for the stack's environment

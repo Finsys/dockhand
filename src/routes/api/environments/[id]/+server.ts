@@ -21,7 +21,7 @@ import { deleteEnvironmentIcon } from '$lib/server/env-icons';
 /**
  * @openapi
  * summary: Get a single environment by id, including its parsed labels and public IP
- * path: id:integer! Environment id
+ * path: id:integer! Environment id (from GET /api/environments)
  * resp-200: {id:integer!, name:string!, connectionType:string!, labels:array<string>, publicIp:string}
  * resp-403: Permission denied (RBAC 'environments:view' missing)
  * resp-404: Environment not found
@@ -60,7 +60,7 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 /**
  * @openapi
  * summary: Update an environment; renaming also renames its on-disk stacks/git-repos directories
- * path: id:integer! Environment id
+ * path: id:integer! Environment id (from GET /api/environments)
  * body: {name:string, host:string, port:integer, protocol:string, tlsCa:string, tlsCert:string, tlsKey:string, tlsSkipVerify:boolean, icon:string, socketPath:string, collectActivity:boolean, collectMetrics:boolean, highlightChanges:boolean, labels:string, connectionType:string, hawserToken:string, publicIp:string}
  * body-example: {"name":"hhdocker03","collectMetrics":true}
  * resp-200: {id:integer!, name:string!, connectionType:string!, labels:array<string>, publicIp:string}
@@ -220,7 +220,7 @@ export const PUT: RequestHandler = async (event) => {
 /**
  * @openapi
  * summary: Delete an environment and all its associated git stacks, schedules, icons, and on-disk directories
- * path: id:integer! Environment id
+ * path: id:integer! Environment id (from GET /api/environments)
  * resp-200: {success:boolean!}
  * resp-400: Invalid environment id, or the environment could not be deleted
  * resp-403: Permission denied (RBAC 'environments:delete' missing)

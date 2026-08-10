@@ -7,7 +7,7 @@ import { saveEnvironmentIcon, deleteEnvironmentIcon, getEnvironmentIconBuffer } 
 /**
  * @openapi
  * summary: Get the custom icon image for an environment (raw image/webp bytes, not JSON)
- * path: id:integer! Environment id
+ * path: id:integer! Environment id (from GET /api/environments)
  * resp-200: Binary image/webp response body, Cache-Control public max-age=3600
  * resp-404: No custom icon set for this environment
  */
@@ -30,7 +30,7 @@ export const GET: RequestHandler = async ({ params }) => {
 /**
  * @openapi
  * summary: Upload a custom icon for an environment (base64-encoded image, ~200KB limit)
- * path: id:integer! Environment id
+ * path: id:integer! Environment id (from GET /api/environments)
  * body: {image:string!}
  * resp-200: {success:boolean!, icon:string!}
  * resp-200-example: {"success":true,"icon":"custom:env-3.webp"}
@@ -70,7 +70,7 @@ export const POST: RequestHandler = async ({ params, request, cookies }) => {
 /**
  * @openapi
  * summary: Remove an environment's custom icon and reset it to the default "globe" icon
- * path: id:integer! Environment id
+ * path: id:integer! Environment id (from GET /api/environments)
  * resp-200: {success:boolean!, icon:string!}
  * resp-200-example: {"success":true,"icon":"globe"}
  * resp-403: Permission denied (RBAC 'environments:edit' missing)

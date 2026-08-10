@@ -8,7 +8,7 @@ import { getLdapConfig } from '$lib/server/db';
 /**
  * @openapi
  * summary: Test connectivity of a stored LDAP configuration by id (enterprise only)
- * path: id:integer! Numeric id of the LDAP configuration to test
+ * path: id:integer! Numeric id of the LDAP configuration to test (from GET /api/auth/ldap)
  * resp-200: Connection test result (success flag plus diagnostic detail from the LDAP server)
  * resp-400: Invalid id (not a number)
  * resp-401: Authentication required (auth is enabled and the caller is not an authenticated admin)

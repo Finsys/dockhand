@@ -14,7 +14,7 @@ const STACK_NAME_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/;
 /**
  * @openapi
  * summary: Get a single git stack by its numeric id
- * path: id:integer! Git stack id
+ * path: id:integer! Git stack id (from GET /api/git/stacks)
  * resp-200: {id:integer!, stackName:string!, environmentId:integer, repositoryId:integer!, composePath:string!, syncStatus:string!}
  * resp-200-example: {"id":7,"stackName":"immich","environmentId":2,"repositoryId":3,"composePath":"compose.yaml","syncStatus":"synced"}
  * resp-403: Permission denied (RBAC 'stacks:view' missing)
@@ -46,7 +46,7 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 /**
  * @openapi
  * summary: Update a git stack's configuration; optionally save env-var overrides and/or redeploy
- * path: id:integer! Git stack id
+ * path: id:integer! Git stack id (from GET /api/git/stacks)
  * body: {stackName:string, composePath:string, envFilePath:string, autoUpdate:boolean, autoUpdateCron:string, envVars:string, deployNow:boolean}
  * body-example: {"autoUpdate":true,"autoUpdateCron":"0 3 * * *","deployNow":false}
  * resp-200: {id:integer!, stackName:string!, environmentId:integer, syncStatus:string!}
@@ -205,7 +205,7 @@ export const PUT: RequestHandler = async (event) => {
 /**
  * @openapi
  * summary: Delete a git stack (removes git files, the stack_sources record, and env var overrides)
- * path: id:integer! Git stack id
+ * path: id:integer! Git stack id (from GET /api/git/stacks)
  * resp-200: {success:boolean!}
  * resp-200-example: {"success":true}
  * resp-403: Permission denied (RBAC 'stacks:remove' missing)

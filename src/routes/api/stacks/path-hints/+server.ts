@@ -7,7 +7,7 @@ import { authorize } from '$lib/server/authorize';
  *
  * @openapi
  * summary: Return path hints (working directory and config file paths) extracted from a stack's Docker container labels
- * query: name:string! Stack name
+ * query: name:string! Stack name (from GET /api/stacks)
  * query: env:integer Environment ID the stack belongs to (from GET /api/environments)
  * resp-200: {stackName:string!, workingDir:string, configFiles:array<string>}
  * resp-200-example: {"stackName":"web","workingDir":"/opt/stacks/web","configFiles":["/opt/stacks/web/compose.yaml"]}

@@ -10,7 +10,7 @@ import { validateDockerIdParam } from '$lib/server/docker-validation';
  *
  * @openapi
  * summary: Release the cached helper container used to browse a Docker volume
- * path: name:string! Docker volume name
+ * path: name:string! Docker volume name (from GET /api/volumes)
  * query: env:integer Environment ID the volume belongs to (from GET /api/environments)
  * resp-200: {success:boolean!}
  * resp-200-example: {"success":true}

@@ -13,7 +13,7 @@ import { parseSnapshotLayout, redactSnapshotLayout } from '$lib/server/backups/s
  * @openapi
  * summary: Dump a file or directory from a snapshot — inline JSON preview for text files, or a raw binary download (octet-stream for files, tar for directories) when download=1
  * description: Paths are restricted to the /volumes and /metadata snapshot roots and rejected if they contain traversal (".."). Permission ("backups:view") and environment-access denials are produced by the shared requireBackups/guardSnapshotEnvAccess route guards.
- * path: id:string! Restic snapshot id
+ * path: id:string! Restic snapshot id (from GET /api/backup/snapshots)
  * query: destinationId:integer! Destination holding the snapshot (required) (from GET /api/backup/destinations)
  * query: path:string! Path inside the snapshot to read (must be under /volumes or /metadata)
  * query: download:string Set to "1" to download raw bytes instead of an inline preview

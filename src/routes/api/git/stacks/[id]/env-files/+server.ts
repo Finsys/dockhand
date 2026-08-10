@@ -13,7 +13,7 @@ import { authorize } from '$lib/server/authorize';
  * @openapi
  * summary: List the .env files present in a git stack's cloned repository
  * description: Lists the `.env*` files in the git stack's synced repository checkout (read-only). Use this to discover which file to configure as the stack's `envFilePath`. This endpoint does not write — to choose the env file, PUT /api/git/stacks/{id} with `envFilePath`; to set env values, use the stack env endpoints.
- * path: id:integer! Git stack ID
+ * path: id:integer! Git stack ID (from GET /api/git/stacks)
  * resp-200: {files:array<string>!}
  * resp-200-example: {"files":[".env",".env.prod"]}
  * resp-400: The repository could not be read (e.g. not yet cloned)
@@ -58,7 +58,7 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
  * @openapi
  * summary: Read and parse one .env file from a git stack's repository into a key/value map
  * description: Reads and parses a single `.env` file (by `path`) from the git stack's synced repository checkout into a key/value map (read-only). There is no write counterpart — git-stack env is set via `envFilePath` (PUT /api/git/stacks/{id}) or the stack env endpoints.
- * path: id:integer! Git stack ID
+ * path: id:integer! Git stack ID (from GET /api/git/stacks)
  * body: {path:string!}
  * body-example: {"path":".env.prod"}
  * resp-200: {vars:object!}

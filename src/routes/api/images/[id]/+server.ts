@@ -10,7 +10,7 @@ import type { RequestHandler } from './$types';
  *
  * @openapi
  * summary: Remove a Docker image by ID or name (optionally forced), scoped to an environment
- * path: id:string! Image ID or name to remove
+ * path: id:string! Image ID or name to remove (from GET /api/images)
  * query: env:integer ID of the environment the image belongs to (from GET /api/environments)
  * query: force:boolean Force removal even if the image is tagged or referenced (default false)
  * resp-200: {success:boolean!}

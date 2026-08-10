@@ -11,7 +11,7 @@ import { requireBackups, loadConfigGateEnv } from '$lib/server/backups/route-gua
  * @openapi
  * summary: Cancel the in-flight backup for a configuration
  * description: Permission ("backups:manage") and environment-access denials (403) and not-found (404) are produced by the shared route guards.
- * path: id:integer! Backup configuration id
+ * path: id:integer! Backup configuration id (from GET /api/backup/configs)
  * resp-200: Returns { success: true, stopped } where "stopped" indicates whether a running backup helper was actually killed
  * resp-200-example: {"success":true,"stopped":true}
  * resp-500: Failed to cancel the backup (internal error)

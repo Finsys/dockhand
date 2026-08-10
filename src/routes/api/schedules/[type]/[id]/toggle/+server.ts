@@ -14,7 +14,7 @@ import { auditBackup, auditBackupDestination } from '$lib/server/audit';
  * @openapi
  * summary: Toggle a schedule's enabled/disabled state (registers/unregisters the croner job accordingly)
  * path: type:string! Schedule type (container_update, git_stack_sync, env_update_check, image_prune, backup, repo_prune, repo_check, repo_verify, system_cleanup)
- * path: id:integer! Schedule id (semantics depend on type)
+ * path: id:integer! Schedule id (semantics depend on type) (from GET /api/schedules)
  * resp-200: {success:boolean!, enabled:boolean!}
  * resp-400: Invalid schedule id, unsupported type, or system_cleanup (cannot be paused)
  * resp-404: Schedule, backup config, or backup destination not found

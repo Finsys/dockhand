@@ -23,7 +23,7 @@ import { invalidateTokenCacheForUser } from '$lib/server/api-tokens';
 /**
  * @openapi
  * summary: Get a single user by id (password hash is never returned; isAdmin is derived from role assignment)
- * path: id:integer! Numeric id of the user
+ * path: id:integer! Numeric id of the user (from GET /api/users)
  * resp-200: {id:integer!, username:string!, email:string, displayName:string, mfaEnabled:boolean!, isAdmin:boolean!, isActive:boolean!, lastLogin:string, createdAt:string!, updatedAt:string!}
  * resp-400: User id is required
  * resp-401: Authentication required (auth is enabled and the caller is not authenticated)
@@ -76,7 +76,7 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 /**
  * @openapi
  * summary: Update a user (self-edit is always allowed; admin/active changes require admin; demoting or deactivating the last admin needs confirmDisableAuth)
- * path: id:integer! Numeric id of the user
+ * path: id:integer! Numeric id of the user (from GET /api/users)
  * body: {username:string, email:string, displayName:string, isAdmin:boolean, isActive:boolean, password:string, confirmDisableAuth:boolean}
  * body-example: {"displayName":"Jane Doe","email":"jane@example.com"}
  * resp-200: {id:integer!, username:string!, email:string, displayName:string, mfaEnabled:boolean!, isAdmin:boolean!, isActive:boolean!, lastLogin:string, createdAt:string!, updatedAt:string!}
@@ -279,7 +279,7 @@ export const PUT: RequestHandler = async (event) => {
 /**
  * @openapi
  * summary: Delete a user by id; deleting the last admin while auth is enabled disables authentication and requires confirmDisableAuth
- * path: id:integer! Numeric id of the user
+ * path: id:integer! Numeric id of the user (from GET /api/users)
  * query: confirmDisableAuth:boolean Set to true to confirm deleting the last admin (which disables authentication)
  * resp-200: {success:boolean!, authDisabled:boolean}
  * resp-400: User id is required

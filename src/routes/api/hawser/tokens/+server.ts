@@ -122,7 +122,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 /**
  * @openapi
  * summary: Revoke a Hawser agent token by ID
- * query: id:integer! ID of the token to revoke
+ * query: id:integer! ID of the token to revoke (from GET /api/hawser/tokens)
  * resp-200: {success:boolean!, message:string!}
  * resp-200-example: {"success":true,"message":"Token revoked"}
  * resp-400: The id query parameter is missing

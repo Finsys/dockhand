@@ -15,7 +15,7 @@ import { computeAuditDiff } from '$lib/utils/diff';
 /**
  * @openapi
  * summary: Get a single git repository by ID
- * path: id:integer! Git repository ID
+ * path: id:integer! Git repository ID (from GET /api/git/repositories)
  * resp-200: {id:integer!, name:string!, url:string!, branch:string!, credentialId:integer}
  * resp-400: The id path segment is not a valid integer
  * resp-403: Caller lacks the git:view permission
@@ -50,7 +50,7 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
  * @openapi
  * summary: Update a git repository's basic fields (name/url/branch/credential)
  * description: credentialId from GET /api/git/credentials.
- * path: id:integer! Git repository ID
+ * path: id:integer! Git repository ID (from GET /api/git/repositories)
  * body: {name:string, url:string, branch:string, credentialId:integer}
  * body-example: {"name":"homelab","url":"https://github.com/example/homelab.git","branch":"production","credentialId":2}
  * resp-200: {id:integer!, name:string!, url:string!, branch:string!, credentialId:integer}
@@ -120,7 +120,7 @@ export const PUT: RequestHandler = async (event) => {
 /**
  * @openapi
  * summary: Delete a git repository, first removing the clone directories of every git stack it backs
- * path: id:integer! Git repository ID
+ * path: id:integer! Git repository ID (from GET /api/git/repositories)
  * resp-200: {success:boolean!}
  * resp-200-example: {"success":true}
  * resp-400: The id path segment is not a valid integer

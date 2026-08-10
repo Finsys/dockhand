@@ -8,7 +8,7 @@ import { safeRedirectOrRoot } from '$lib/utils/safe-redirect';
 /**
  * @openapi
  * summary: Start the OIDC login flow for a provider — on success throws a 302 redirect to the IdP authorization URL
- * path: id:integer! Numeric id of the OIDC provider
+ * path: id:integer! Numeric id of the OIDC provider (from GET /api/auth/oidc)
  * query: redirect:string Post-login destination path to return to (defaults to /)
  * resp-302: Redirect to the IdP's authorization URL
  * resp-400: Authentication is not enabled, or the configuration id is invalid
@@ -57,7 +57,7 @@ export const GET: RequestHandler = async ({ params, url }) => {
 /**
  * @openapi
  * summary: Return the OIDC authorization URL for a provider without redirecting (JSON response)
- * path: id:integer! Numeric id of the OIDC provider
+ * path: id:integer! Numeric id of the OIDC provider (from GET /api/auth/oidc)
  * body: {redirect:string}
  * body-example: {"redirect":"/dashboard"}
  * resp-200: {url:string!}

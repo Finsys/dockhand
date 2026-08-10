@@ -36,7 +36,7 @@ function parseEnvFile(content: string): Record<string, string> {
  *
  * @openapi
  * summary: Get all environment variables for a stack (secrets masked)
- * path: name:string! Stack name (as shown in Dockhand, e.g. "gitcheck")
+ * path: name:string! Stack name (as shown in Dockhand, e.g. "gitcheck") (from GET /api/stacks)
  * query: env:integer Environment id to scope the lookup; omit for the default/legacy (null) scope (from GET /api/environments)
  * resp-200: {variables:array<{key:string!, value:string!, isSecret:boolean!}>!}
  * resp-200-desc: Merged non-secret (.env file) + secret (DB, masked) variables for the stack
@@ -138,7 +138,7 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 /**
  * @openapi
  * summary: Save environment variables for a stack (secrets stored encrypted in the DB, non-secrets written to the on-disk .env)
- * path: name:string! Stack name
+ * path: name:string! Stack name (from GET /api/stacks)
  * query: env:integer Environment id (from GET /api/environments)
  * body: {variables:array<{key:string!, value:string!, isSecret:boolean}>!}
  * body-example: {"variables":[{"key":"GITCHECK_MARKER","value":"marker-001","isSecret":false},{"key":"DB_PASSWORD","value":"***","isSecret":true}]}

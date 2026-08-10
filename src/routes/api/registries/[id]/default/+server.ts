@@ -6,7 +6,7 @@ import { authorize } from '$lib/server/authorize';
 /**
  * @openapi
  * summary: Mark a registry as the default registry
- * path: id:integer! Registry ID
+ * path: id:integer! Registry ID (from GET /api/registries)
  * resp-200: {success:boolean!}
  * resp-200-example: {"success":true}
  * resp-400: The id path segment is not a valid integer

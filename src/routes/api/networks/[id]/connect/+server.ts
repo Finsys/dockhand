@@ -9,7 +9,7 @@ import { validateDockerIdParam } from '$lib/server/docker-validation';
  * @openapi
  * summary: Connect a container to a Docker network
  * description: containerId from GET /api/containers.
- * path: id:string! Docker network ID
+ * path: id:string! Docker network ID (from GET /api/networks)
  * query: env:integer Environment the network belongs to (from GET /api/environments)
  * body: {containerId:string!, containerName:string}
  * body-example: {"containerId":"a1b2c3d4e5f6","containerName":"web-1"}

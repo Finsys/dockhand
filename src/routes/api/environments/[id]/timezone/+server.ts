@@ -41,7 +41,7 @@ function normalizeTimezone(tz: string): string {
  *
  * @openapi
  * summary: Get the IANA timezone used for scheduling on an environment
- * path: id:integer! Environment id
+ * path: id:integer! Environment id (from GET /api/environments)
  * resp-200: {timezone:string!}
  * resp-200-example: {"timezone":"Europe/Berlin"}
  * resp-403: Permission denied (RBAC 'environments:view' missing)
@@ -78,7 +78,7 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
  *
  * @openapi
  * summary: Set the IANA timezone for an environment and refresh its schedules to use it
- * path: id:integer! Environment id
+ * path: id:integer! Environment id (from GET /api/environments)
  * body: {timezone:string!}
  * body-example: {"timezone":"Europe/Berlin"}
  * resp-200: {success:boolean!, timezone:string!}

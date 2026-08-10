@@ -10,7 +10,7 @@ const MAX_FILE_SIZE = 1024 * 1024;
 /**
  * @openapi
  * summary: Read the content of a single file inside a Docker volume (files larger than 1MB are rejected)
- * path: name:string! Docker volume name
+ * path: name:string! Docker volume name (from GET /api/volumes)
  * query: path:string! File path inside the volume to read
  * query: env:integer Environment ID the volume belongs to (from GET /api/environments)
  * resp-200: {content:string!, path:string!}

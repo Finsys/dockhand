@@ -11,7 +11,7 @@ import type { RequestHandler } from './$types';
  *
  * @openapi
  * summary: Get the raw .env file content as-is (comments and formatting preserved) for a stack
- * path: name:string! Stack name
+ * path: name:string! Stack name (from GET /api/stacks)
  * query: env:integer Environment ID the stack belongs to (from GET /api/environments)
  * resp-200: {content:string!, noEnvFile:boolean}
  * resp-200-example: {"content":"FOO=bar\n# comment\nBAZ=qux\n"}
@@ -84,7 +84,7 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
  *
  * @openapi
  * summary: Write raw .env file content to disk for a stack; empty content deletes the .env file, and masked "***" placeholders are rejected to avoid corrupting secrets
- * path: name:string! Stack name
+ * path: name:string! Stack name (from GET /api/stacks)
  * query: env:integer Environment ID the stack belongs to (from GET /api/environments)
  * body: {content:string!}
  * body-example: {"content":"FOO=bar\nBAZ=qux\n"}

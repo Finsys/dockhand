@@ -10,7 +10,7 @@ import type { RequestHandler } from './$types';
  *
  * @openapi
  * summary: Start a stopped container
- * path: id:string! Container ID or name
+ * path: id:string! Container ID or name (from GET /api/containers)
  * query: env:integer The target environment ID (omit for the local/default Docker host) (from GET /api/environments)
  * resp-200: {success:boolean!}
  * resp-200-example: {"success":true}

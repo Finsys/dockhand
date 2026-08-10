@@ -15,7 +15,7 @@ function detectSource(request: Request): string {
  * @openapi
  * summary: Webhook trigger (GitHub/GitLab) that deploys a git stack when its signature/token verifies
  * description: Public endpoint authenticated by the stack's webhook secret via `X-Hub-Signature-256` (GitHub) or `X-Gitlab-Token` (GitLab); the raw request body is used for HMAC verification.
- * path: id:integer! Git stack ID
+ * path: id:integer! Git stack ID (from GET /api/git/stacks)
  * resp-200: {success:boolean, skipped:boolean, error:string}
  * resp-200-example: {"success":true,"skipped":false}
  * resp-400: The id path segment is not a valid integer
@@ -80,7 +80,7 @@ export const POST: RequestHandler = async (event) => {
 /**
  * @openapi
  * summary: GET webhook trigger for a git stack, with the secret passed as the `secret` query parameter
- * path: id:integer! Git stack ID
+ * path: id:integer! Git stack ID (from GET /api/git/stacks)
  * query: secret:string Webhook secret; required only if the stack has a webhook secret configured
  * resp-200: {success:boolean, skipped:boolean, error:string}
  * resp-200-example: {"success":true,"skipped":false}
