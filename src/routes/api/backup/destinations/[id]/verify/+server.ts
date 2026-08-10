@@ -13,7 +13,7 @@ import { createJobResponse } from '$lib/server/sse';
  * @openapi
  * summary: Verify the integrity of a destination's backups by reading a data subset, streaming progress as a Server-Sent Events job
  * description: Returns a text/event-stream that emits `progress` events and a final `result` event. Permission denial (403, "backups:manage") is produced by the shared requireBackups route guard.
- * path: id:integer! Backup destination id
+ * path: id:integer! Backup destination id (from GET /api/backup/destinations)
  * body: {dataSubset:string}
  * body-example: {"dataSubset":"5%"}
  * resp-200: Server-Sent Events stream of progress and a final result event ({ success, ... })

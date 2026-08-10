@@ -9,7 +9,7 @@ import type { RequestHandler } from './$types';
  *
  * @openapi
  * summary: Create an empty file or a directory inside a container (requires the 'exec' permission)
- * path: id:string! Container ID or name
+ * path: id:string! Container ID or name (from GET /api/containers)
  * query: env:integer The target environment ID (omit for the local/default Docker host) (from GET /api/environments)
  * body: {path:string!, type:string!}
  * body-example: {"path":"/app/data","type":"directory"}

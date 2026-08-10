@@ -9,7 +9,7 @@ import type { RequestHandler } from './$types';
  *
  * @openapi
  * summary: Return the last N lines of a container's combined stdout/stderr logs as a single string
- * path: id:string! Container ID or name
+ * path: id:string! Container ID or name (from GET /api/containers)
  * query: env:integer The target environment ID (omit for the local/default Docker host) (from GET /api/environments)
  * query: tail:integer Number of trailing log lines to return (default 100)
  * query: since:string Only return logs since this time (Unix timestamp or Docker duration, e.g. 10m)

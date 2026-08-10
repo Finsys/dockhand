@@ -12,7 +12,7 @@ import { rotateDestinationPassword } from '$lib/server/backups';
  * @openapi
  * summary: Rotate the restic repository password for a destination and persist the new password
  * description: Permission denial (403, "backups:manage") is produced by the shared requireBackups route guard.
- * path: id:integer! Backup destination id
+ * path: id:integer! Backup destination id (from GET /api/backup/destinations)
  * body: {currentPassword:string!, newPassword:string!}
  * body-example: {"currentPassword":"***","newPassword":"***"}
  * resp-200: Returns { success: true } once the password is rotated and the database is updated

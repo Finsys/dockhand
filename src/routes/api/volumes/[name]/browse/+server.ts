@@ -7,7 +7,7 @@ import { validateDockerIdParam } from '$lib/server/docker-validation';
 /**
  * @openapi
  * summary: Browse a directory inside a Docker volume via a cached helper container; the volume is mounted read-only when in use by other containers
- * path: name:string! Docker volume name
+ * path: name:string! Docker volume name (from GET /api/volumes)
  * query: env:integer Environment ID the volume belongs to (from GET /api/environments)
  * query: path:string Directory path inside the volume to list (defaults to "/")
  * resp-200: {path:string!, entries:array<{name:string!, type:string!, size:integer!, permissions:string!, owner:string!, group:string!, modified:string!}>!, usage:array<{containerId:string!, containerName:string!, state:string!}>!, isInUse:boolean!, helperId:string!}

@@ -17,7 +17,7 @@ import type { RequestHandler } from './$types';
  *
  * @openapi
  * summary: Return the full Docker inspect payload for a single container
- * path: id:string! Container ID or name
+ * path: id:string! Container ID or name (from GET /api/containers)
  * query: env:integer The target environment ID (omit for the local/default Docker host) (from GET /api/environments)
  * resp-200: The raw Docker inspect object for the container
  * resp-403: Permission denied, or (enterprise) no access to the requested environment
@@ -81,7 +81,7 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
  *
  * @openapi
  * summary: Remove a container and clean up its auto-update schedule and pending-update record
- * path: id:string! Container ID or name
+ * path: id:string! Container ID or name (from GET /api/containers)
  * query: env:integer The target environment ID (omit for the local/default Docker host) (from GET /api/environments)
  * query: force:boolean Force removal of a running container (Docker force flag)
  * resp-200: {success:boolean!}

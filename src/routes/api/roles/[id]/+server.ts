@@ -14,7 +14,7 @@ import { clearTokenCache } from '$lib/server/api-tokens';
 /**
  * @openapi
  * summary: Get a single role by id; available in setup mode or with an enterprise license
- * path: id:integer! Numeric id of the role
+ * path: id:integer! Numeric id of the role (from GET /api/roles)
  * resp-200: {id:integer!, name:string!, description:string, isSystem:boolean!, permissions:{}}
  * resp-400: Role id is required
  * resp-403: Enterprise license required
@@ -53,7 +53,7 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
  * @openapi
  * summary: Update a custom role (system roles cannot be modified; enterprise, admin required when auth is enabled)
  * description: environmentIds from GET /api/environments.
- * path: id:integer! Numeric id of the role
+ * path: id:integer! Numeric id of the role (from GET /api/roles)
  * body: {name:string, description:string, permissions:{}, environmentIds:array<integer>}
  * body-example: {"description":"Updated description","permissions":{"containers":["view"]}}
  * resp-200: The updated role
@@ -123,7 +123,7 @@ export const PUT: RequestHandler = async (event) => {
 /**
  * @openapi
  * summary: Delete a custom role by id (system roles cannot be deleted; enterprise, admin required when auth is enabled)
- * path: id:integer! Numeric id of the role
+ * path: id:integer! Numeric id of the role (from GET /api/roles)
  * resp-200: {success:boolean!}
  * resp-400: Role id is required, or the role is a system role and cannot be deleted
  * resp-403: Enterprise license required, or admin access required

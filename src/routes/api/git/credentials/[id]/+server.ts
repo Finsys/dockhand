@@ -13,7 +13,7 @@ import { computeAuditDiff } from '$lib/utils/diff';
 /**
  * @openapi
  * summary: Get a single git credential by ID with secrets stripped (only hasPassword/hasSshKey flags returned)
- * path: id:integer! Git credential ID
+ * path: id:integer! Git credential ID (from GET /api/git/credentials)
  * resp-200: {id:integer!, name:string!, authType:string!, username:string, hasPassword:boolean!, hasSshKey:boolean!, createdAt:string, updatedAt:string}
  * resp-400: The id path segment is not a valid integer
  * resp-403: Caller lacks the git:view permission
@@ -57,7 +57,7 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 /**
  * @openapi
  * summary: Update a git credential and return it with secrets stripped
- * path: id:integer! Git credential ID
+ * path: id:integer! Git credential ID (from GET /api/git/credentials)
  * body: {name:string, authType:string, username:string, password:string, sshPrivateKey:string, sshPassphrase:string}
  * body-example: {"name":"github-deploy","authType":"password","username":"git","password":"***"}
  * resp-200: {id:integer!, name:string!, authType:string!, username:string, hasPassword:boolean!, hasSshKey:boolean!, createdAt:string, updatedAt:string}
@@ -134,7 +134,7 @@ export const PUT: RequestHandler = async (event) => {
 /**
  * @openapi
  * summary: Delete a git credential by ID
- * path: id:integer! Git credential ID
+ * path: id:integer! Git credential ID (from GET /api/git/credentials)
  * resp-200: {success:boolean!}
  * resp-200-example: {"success":true}
  * resp-400: The id path segment is not a valid integer

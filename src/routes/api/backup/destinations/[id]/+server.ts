@@ -43,7 +43,7 @@ function prepareDestination(dest: any, includeSecrets: boolean): any {
  * @openapi
  * summary: Fetch a single backup destination; decrypted cloud-credential env vars are only included for callers who can manage backups, and the password is always stripped
  * description: Permission denial (403, "backups:view") is produced by the shared requireBackups route guard.
- * path: id:integer! Backup destination id
+ * path: id:integer! Backup destination id (from GET /api/backup/destinations)
  * resp-200: The backup destination object (envVars included only for "backups:manage" callers; password always stripped)
  * resp-400: Invalid id (not a number)
  * resp-404: Destination not found
@@ -71,7 +71,7 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
  * @openapi
  * summary: Update a backup destination, re-validating repository and flags when supplied and re-registering maintenance schedules when policies change
  * description: Permission denial (403, "backups:manage") is produced by the shared requireBackups route guard.
- * path: id:integer! Backup destination id
+ * path: id:integer! Backup destination id (from GET /api/backup/destinations)
  * body: {name:string, repository:string, password:string, envVars:{}, flags:string, hostPath:string, policies:string}
  * body-example: {"name":"S3 Offsite (renamed)","policies":"{\"pruneEnabled\":true,\"pruneSchedule\":\"0 0 1 * *\"}"}
  * resp-200: The updated backup destination object (password stripped, envVars echoed back to the managing caller)
@@ -172,7 +172,7 @@ export const PUT: RequestHandler = async (event) => {
  * @openapi
  * summary: Delete a backup destination and unregister all its maintenance and dependent backup-config schedules
  * description: Permission denial (403, "backups:manage") is produced by the shared requireBackups route guard.
- * path: id:integer! Backup destination id
+ * path: id:integer! Backup destination id (from GET /api/backup/destinations)
  * resp-200: Returns { success: true } once the destination is deleted
  * resp-200-example: {"success":true}
  * resp-400: Invalid id (not a number)

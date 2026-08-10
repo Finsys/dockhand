@@ -9,7 +9,7 @@ import type { RequestHandler } from './$types';
  *
  * @openapi
  * summary: Delete a file or directory inside a container (requires the 'exec' permission)
- * path: id:string! Container ID or name
+ * path: id:string! Container ID or name (from GET /api/containers)
  * query: env:integer The target environment ID (omit for the local/default Docker host) (from GET /api/environments)
  * query: path:string! Absolute path inside the container to delete
  * resp-200: {success:boolean!, path:string!}

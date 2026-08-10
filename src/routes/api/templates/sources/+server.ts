@@ -87,7 +87,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
  *
  * @openapi
  * summary: Delete a custom template source by ID
- * query: id:integer! ID of the template source to delete
+ * query: id:integer! ID of the template source to delete (from GET /api/templates/sources)
  * resp-200: {ok:boolean!}
  * resp-200-example: {"ok":true}
  * resp-400: Missing id

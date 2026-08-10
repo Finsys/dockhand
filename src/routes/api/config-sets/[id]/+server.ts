@@ -8,7 +8,7 @@ import { computeAuditDiff } from '$lib/utils/diff';
 /**
  * @openapi
  * summary: Fetch a single config set by its numeric ID
- * path: id:integer! Config set ID
+ * path: id:integer! Config set ID (from GET /api/config-sets)
  * resp-200: {id:integer!, name:string!, description:string, envVars:array<{key:string!, value:string!}>, labels:array<{key:string!, value:string!}>, ports:array<{hostPort:string!, containerPort:string!, protocol:string!}>, volumes:array<{hostPath:string!, containerPath:string!, mode:string!}>, networkMode:string!, restartPolicy:string!, createdAt:string!, updatedAt:string!}
  * resp-200-example: {"id":1,"name":"web-defaults","description":"Defaults for web stacks","envVars":[{"key":"TZ","value":"UTC"}],"labels":[],"ports":[],"volumes":[],"networkMode":"bridge","restartPolicy":"unless-stopped","createdAt":"2026-06-01T10:00:00Z","updatedAt":"2026-06-01T10:00:00Z"}
  * resp-400: Invalid ID
@@ -43,7 +43,7 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 /**
  * @openapi
  * summary: Update an existing config set by ID
- * path: id:integer! Config set ID
+ * path: id:integer! Config set ID (from GET /api/config-sets)
  * body: {name:string, description:string, envVars:array<{key:string!, value:string!}>, labels:array<{key:string!, value:string!}>, ports:array<{hostPort:string!, containerPort:string!, protocol:string!}>, volumes:array<{hostPath:string!, containerPath:string!, mode:string!}>, networkMode:string, restartPolicy:string}
  * body-example: {"name":"web-defaults","networkMode":"host","restartPolicy":"always"}
  * resp-200: {id:integer!, name:string!, description:string, envVars:array<{key:string!, value:string!}>, labels:array<{key:string!, value:string!}>, ports:array<{hostPort:string!, containerPort:string!, protocol:string!}>, volumes:array<{hostPath:string!, containerPath:string!, mode:string!}>, networkMode:string!, restartPolicy:string!, createdAt:string!, updatedAt:string!}
@@ -108,7 +108,7 @@ export const PUT: RequestHandler = async (event) => {
 /**
  * @openapi
  * summary: Delete a config set by ID
- * path: id:integer! Config set ID
+ * path: id:integer! Config set ID (from GET /api/config-sets)
  * resp-200: {success:boolean!}
  * resp-200-example: {"success":true}
  * resp-400: Invalid ID

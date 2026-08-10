@@ -12,7 +12,7 @@ import { getEnvironment, getEnvSetting, setEnvSetting } from '$lib/server/db';
 /**
  * @openapi
  * summary: Get the per-environment remote stacks directory used to stage stack files onto a direct (agentless) daemon
- * path: id:integer! Environment ID
+ * path: id:integer! Environment ID (from GET /api/environments)
  * resp-200: {remoteStacksDir:string}
  * resp-200-example: {"remoteStacksDir":"/mnt/dockhand/stacks"}
  * resp-403: Permission denied (requires environments:view)
@@ -35,7 +35,7 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 /**
  * @openapi
  * summary: Set (or clear) the per-environment remote stacks directory for a direct (agentless) daemon
- * path: id:integer! Environment ID
+ * path: id:integer! Environment ID (from GET /api/environments)
  * body: {remoteStacksDir:string}
  * body-example: {"remoteStacksDir":"/mnt/dockhand/stacks"}
  * resp-200: {success:boolean!, remoteStacksDir:string}

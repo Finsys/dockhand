@@ -94,7 +94,7 @@ function extractComposeVars(yaml: string): { required: string[]; optional: strin
  *
  * @openapi
  * summary: Validate a stack's defined environment variables against the variables required/optional by its compose file (compose content and the defined variable list may be supplied in the body, otherwise loaded from the saved file/DB)
- * path: name:string! Stack name
+ * path: name:string! Stack name (from GET /api/stacks)
  * query: env:integer Environment ID the stack belongs to (from GET /api/environments)
  * body: {compose:string, variables:array<string>}
  * body-example: {"compose":"services:\n  web:\n    image: ${IMAGE}","variables":["IMAGE"]}

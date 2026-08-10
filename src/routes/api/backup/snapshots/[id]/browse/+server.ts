@@ -11,7 +11,7 @@ import { guardSnapshotEnvAccess } from '$lib/server/backups/route-guards';
  *
  * @openapi
  * summary: Browse the files and directories at a path inside a snapshot, with a server-authoritative environment access gate
- * path: id:string! Restic snapshot id to browse
+ * path: id:string! Restic snapshot id to browse (from GET /api/backup/snapshots)
  * query: destinationId:integer! Destination holding the snapshot (required) (from GET /api/backup/destinations)
  * query: path:string Directory path to list inside the snapshot (defaults to "/")
  * query: env:integer Optional environment id for an early enterprise access check; the authoritative gate resolves the snapshot's owning environment server-side (from GET /api/environments)

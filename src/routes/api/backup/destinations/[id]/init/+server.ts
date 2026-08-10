@@ -12,7 +12,7 @@ import { initRepository } from '$lib/server/backups';
  * @openapi
  * summary: Initialize the restic repository for a destination and record the resulting test status
  * description: Permission denial (403, "backups:manage") is produced by the shared requireBackups route guard.
- * path: id:integer! Backup destination id
+ * path: id:integer! Backup destination id (from GET /api/backup/destinations)
  * resp-200: Returns { success: true, message } when the repository is initialized
  * resp-200-example: {"success":true,"message":"Repository initialized"}
  * resp-400: Invalid id (not a number)

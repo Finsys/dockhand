@@ -7,7 +7,7 @@ import { validateDockerIdParam } from '$lib/server/docker-validation';
 /**
  * @openapi
  * summary: Inspect a Docker network by ID (a malformed ID is rejected with 400 by input validation)
- * path: id:string! Docker network ID
+ * path: id:string! Docker network ID (from GET /api/networks)
  * query: env:integer Environment the network belongs to (from GET /api/environments)
  * resp-200: {Id:string!, Name:string!, Driver:string, Scope:string, IPAM:{}, Containers:{}}
  * resp-403: Permission denied

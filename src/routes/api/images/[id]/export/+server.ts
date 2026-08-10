@@ -11,7 +11,7 @@ import type { RequestHandler } from './$types';
  *
  * @openapi
  * summary: Export a Docker image as a downloadable tar (or tar.gz) stream
- * path: id:string! Image ID or name to export
+ * path: id:string! Image ID or name to export (from GET /api/images)
  * query: env:integer ID of the environment the image belongs to (from GET /api/environments)
  * query: compress:boolean Gzip the tar stream and serve it as .tar.gz (default false)
  * resp-200: The image tar (application/x-tar) or gzipped tar (application/gzip) as an attachment

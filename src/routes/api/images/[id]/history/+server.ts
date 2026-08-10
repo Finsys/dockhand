@@ -9,7 +9,7 @@ import { validateDockerIdParam } from '$lib/server/docker-validation';
  *
  * @openapi
  * summary: Return the layer build history of a Docker image
- * path: id:string! Image ID or name whose history to return
+ * path: id:string! Image ID or name whose history to return (from GET /api/images)
  * query: env:integer ID of the environment the image belongs to (from GET /api/environments)
  * resp-200: array<{Id:string, Created:integer, CreatedBy:string, Size:integer, Comment:string}>
  * resp-200-example: [{"Id":"sha256:abc123","Created":1719830400,"CreatedBy":"/bin/sh -c #(nop) CMD","Size":0,"Comment":""}]

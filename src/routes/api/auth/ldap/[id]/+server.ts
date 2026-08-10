@@ -9,7 +9,7 @@ import { computeAuditDiff } from '$lib/utils/diff';
 /**
  * @openapi
  * summary: Get a single LDAP provider configuration by id (enterprise only; bind password is masked)
- * path: id:integer! Numeric id of the LDAP configuration
+ * path: id:integer! Numeric id of the LDAP configuration (from GET /api/auth/ldap)
  * resp-200: {id:integer!, name:string!, enabled:boolean!, serverUrl:string!, baseDn:string!}
  * resp-400: Invalid id (not a number)
  * resp-401: Authentication required (auth is enabled and the caller is not an authenticated admin)
@@ -54,7 +54,7 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 /**
  * @openapi
  * summary: Update an existing LDAP provider configuration (only supplied fields change; a masked bindPassword is ignored)
- * path: id:integer! Numeric id of the LDAP configuration
+ * path: id:integer! Numeric id of the LDAP configuration (from GET /api/auth/ldap)
  * body: {name:string, enabled:boolean, serverUrl:string, bindDn:string, bindPassword:string, baseDn:string, userFilter:string, usernameAttribute:string, emailAttribute:string, displayNameAttribute:string, groupBaseDn:string, groupFilter:string, adminGroup:string, roleMappings:{}, tlsEnabled:boolean, tlsCa:string}
  * body-example: {"enabled":false,"userFilter":"(sAMAccountName={{username}})","bindPassword":"***"}
  * resp-200: {id:integer!, name:string!, enabled:boolean!, serverUrl:string!, baseDn:string!}
@@ -138,7 +138,7 @@ export const PUT: RequestHandler = async (event) => {
 /**
  * @openapi
  * summary: Delete an LDAP provider configuration by id (enterprise only)
- * path: id:integer! Numeric id of the LDAP configuration
+ * path: id:integer! Numeric id of the LDAP configuration (from GET /api/auth/ldap)
  * resp-200: {success:boolean!}
  * resp-400: Invalid id (not a number)
  * resp-401: Authentication required (auth is enabled and the caller is not an authenticated admin)

@@ -17,7 +17,7 @@ import { requireBackups, loadConfigGateEnv } from '$lib/server/backups/route-gua
  * @openapi
  * summary: Fetch a single backup configuration by id, enforcing environment-scoped access
  * description: Permission ("backups:view") and environment-access denials (403) and not-found (404) are produced by the shared route guards.
- * path: id:integer! Backup configuration id
+ * path: id:integer! Backup configuration id (from GET /api/backup/configs)
  * resp-200: The backup configuration object
  */
 export const GET: RequestHandler = async ({ params, cookies }) => {
@@ -39,7 +39,7 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
  * @openapi
  * summary: Update a backup configuration and re-register or remove its cron schedule accordingly
  * description: Permission ("backups:manage") and environment-access denials (403) and not-found (404) are produced by the shared route guards. The environment is fixed at creation and cannot be changed here. destinationId from GET /api/backup/destinations.
- * path: id:integer! Backup configuration id
+ * path: id:integer! Backup configuration id (from GET /api/backup/configs)
  * body: {destinationId:integer, enabled:boolean, allVolumes:boolean, selectedVolumes:array<string>, stopBeforeBackup:boolean, schedule:string, retention:{keepLast:integer, keepDaily:integer, keepWeekly:integer, keepMonthly:integer, keepYearly:integer}, options:{}, tags:array<string>}
  * body-example: {"schedule":"0 4 * * *","enabled":true,"stopBeforeBackup":true,"retention":{"keepDaily":14}}
  * resp-200: The updated backup configuration object
@@ -130,7 +130,7 @@ export const PUT: RequestHandler = async (event) => {
  * @openapi
  * summary: Delete a backup configuration and unregister its schedule
  * description: Permission ("backups:manage") and environment-access denials (403) and not-found (404) are produced by the shared route guards.
- * path: id:integer! Backup configuration id
+ * path: id:integer! Backup configuration id (from GET /api/backup/configs)
  * resp-200: Returns { success: true } once the configuration is deleted
  * resp-200-example: {"success":true}
  * resp-409: A backup is currently running for this config — stop it before deleting

@@ -8,7 +8,7 @@ import type { RequestHandler } from './$types';
 /**
  * @openapi
  * summary: Deploy (docker compose up) a stack, optionally pulling images, building, and force-recreating; progress and the final result stream over Server-Sent Events
- * path: name:string! Stack name
+ * path: name:string! Stack name (from GET /api/stacks)
  * query: env:integer Environment ID the stack belongs to (from GET /api/environments)
  * body: {pull:boolean, build:boolean, forceRecreate:boolean}
  * body-example: {"pull":true,"build":false,"forceRecreate":false}

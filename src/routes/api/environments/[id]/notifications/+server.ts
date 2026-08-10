@@ -13,7 +13,7 @@ import type { RequestHandler } from './$types';
 /**
  * @openapi
  * summary: List notification channel configurations attached to an environment
- * path: id:integer! Environment id
+ * path: id:integer! Environment id (from GET /api/environments)
  * resp-200: array<{id:integer!, notificationId:integer!, enabled:boolean!, eventTypes:array<string>}>
  * resp-400: Invalid environment id
  * resp-403: Permission denied (RBAC 'notifications:view' missing)
@@ -50,7 +50,7 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
  * @openapi
  * summary: Attach a notification channel to an environment
  * description: notificationId from GET /api/notifications.
- * path: id:integer! Environment id
+ * path: id:integer! Environment id (from GET /api/environments)
  * body: {notificationId:integer!, enabled:boolean, eventTypes:array<string>}
  * body-example: {"notificationId":1,"enabled":true,"eventTypes":["stack_deploy_failed"]}
  * resp-200: {id:integer!, notificationId:integer!, enabled:boolean!}

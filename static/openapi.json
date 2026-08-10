@@ -1122,7 +1122,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Numeric id of the LDAP configuration"
+            "description": "Numeric id of the LDAP configuration (from GET /api/auth/ldap)"
           }
         ],
         "responses": {
@@ -1206,7 +1206,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Numeric id of the LDAP configuration"
+            "description": "Numeric id of the LDAP configuration (from GET /api/auth/ldap)"
           }
         ],
         "responses": {
@@ -1356,7 +1356,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Numeric id of the LDAP configuration"
+            "description": "Numeric id of the LDAP configuration (from GET /api/auth/ldap)"
           }
         ],
         "responses": {
@@ -1422,7 +1422,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Numeric id of the LDAP configuration to test"
+            "description": "Numeric id of the LDAP configuration to test (from GET /api/auth/ldap)"
           }
         ],
         "responses": {
@@ -1824,7 +1824,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Numeric id of the OIDC configuration"
+            "description": "Numeric id of the OIDC configuration (from GET /api/auth/oidc)"
           }
         ],
         "responses": {
@@ -1901,7 +1901,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Numeric id of the OIDC configuration"
+            "description": "Numeric id of the OIDC configuration (from GET /api/auth/oidc)"
           }
         ],
         "responses": {
@@ -2038,7 +2038,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Numeric id of the OIDC configuration"
+            "description": "Numeric id of the OIDC configuration (from GET /api/auth/oidc)"
           }
         ],
         "responses": {
@@ -2097,7 +2097,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Numeric id of the OIDC provider"
+            "description": "Numeric id of the OIDC provider (from GET /api/auth/oidc)"
           },
           {
             "name": "redirect",
@@ -2142,7 +2142,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Numeric id of the OIDC provider"
+            "description": "Numeric id of the OIDC provider (from GET /api/auth/oidc)"
           }
         ],
         "responses": {
@@ -2213,7 +2213,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Numeric id of the OIDC configuration to test"
+            "description": "Numeric id of the OIDC configuration to test (from GET /api/auth/oidc)"
           }
         ],
         "responses": {
@@ -3276,7 +3276,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Backup configuration id"
+            "description": "Backup configuration id (from GET /api/backup/configs)"
           }
         ],
         "responses": {
@@ -3308,7 +3308,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Backup configuration id"
+            "description": "Backup configuration id (from GET /api/backup/configs)"
           }
         ],
         "responses": {
@@ -3420,7 +3420,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Backup configuration id"
+            "description": "Backup configuration id (from GET /api/backup/configs)"
           }
         ],
         "responses": {
@@ -3457,7 +3457,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Backup configuration id"
+            "description": "Backup configuration id (from GET /api/backup/configs)"
           }
         ],
         "responses": {
@@ -3491,7 +3491,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Backup configuration id"
+            "description": "Backup configuration id (from GET /api/backup/configs)"
           }
         ],
         "responses": {
@@ -3631,7 +3631,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Backup destination id"
+            "description": "Backup destination id (from GET /api/backup/destinations)"
           }
         ],
         "responses": {
@@ -3669,7 +3669,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Backup destination id"
+            "description": "Backup destination id (from GET /api/backup/destinations)"
           }
         ],
         "responses": {
@@ -3751,7 +3751,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Backup destination id"
+            "description": "Backup destination id (from GET /api/backup/destinations)"
           }
         ],
         "responses": {
@@ -3794,7 +3794,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Backup destination id"
+            "description": "Backup destination id (from GET /api/backup/destinations)"
           }
         ],
         "responses": {
@@ -3837,7 +3837,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Backup destination id"
+            "description": "Backup destination id (from GET /api/backup/destinations)"
           }
         ],
         "responses": {
@@ -3909,7 +3909,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Backup destination id"
+            "description": "Backup destination id (from GET /api/backup/destinations)"
           }
         ],
         "responses": {
@@ -3973,7 +3973,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Backup destination id"
+            "description": "Backup destination id (from GET /api/backup/destinations)"
           }
         ],
         "responses": {
@@ -4013,7 +4013,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Backup destination id"
+            "description": "Backup destination id (from GET /api/backup/destinations)"
           }
         ],
         "responses": {
@@ -4406,7 +4406,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Restic snapshot id to forget"
+            "description": "Restic snapshot id to forget (from GET /api/backup/snapshots)"
           },
           {
             "name": "destinationId",
@@ -4469,7 +4469,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Restic snapshot id to browse"
+            "description": "Restic snapshot id to browse (from GET /api/backup/snapshots)"
           },
           {
             "name": "destinationId",
@@ -4538,7 +4538,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Restic snapshot id"
+            "description": "Restic snapshot id (from GET /api/backup/snapshots)"
           },
           {
             "name": "destinationId",
@@ -4620,7 +4620,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Restic snapshot id"
+            "description": "Restic snapshot id (from GET /api/backup/snapshots)"
           },
           {
             "name": "destinationId",
@@ -5437,7 +5437,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Config set ID"
+            "description": "Config set ID (from GET /api/config-sets)"
           }
         ],
         "responses": {
@@ -5616,7 +5616,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Config set ID"
+            "description": "Config set ID (from GET /api/config-sets)"
           }
         ],
         "responses": {
@@ -5899,7 +5899,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Config set ID"
+            "description": "Config set ID (from GET /api/config-sets)"
           }
         ],
         "responses": {
@@ -6213,7 +6213,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Container ID or name"
+            "description": "Container ID or name (from GET /api/containers)"
           },
           {
             "name": "env",
@@ -6262,7 +6262,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Container ID or name"
+            "description": "Container ID or name (from GET /api/containers)"
           },
           {
             "name": "env",
@@ -6340,7 +6340,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Container ID or name"
+            "description": "Container ID or name (from GET /api/containers)"
           },
           {
             "name": "envId",
@@ -6453,7 +6453,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Container ID or name"
+            "description": "Container ID or name (from GET /api/containers)"
           },
           {
             "name": "env",
@@ -6522,7 +6522,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Container ID or name"
+            "description": "Container ID or name (from GET /api/containers)"
           },
           {
             "name": "env",
@@ -6639,7 +6639,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Container ID or name"
+            "description": "Container ID or name (from GET /api/containers)"
           },
           {
             "name": "env",
@@ -6726,7 +6726,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Container ID or name"
+            "description": "Container ID or name (from GET /api/containers)"
           },
           {
             "name": "env",
@@ -6839,7 +6839,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Container ID or name"
+            "description": "Container ID or name (from GET /api/containers)"
           },
           {
             "name": "env",
@@ -6950,7 +6950,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Container ID or name"
+            "description": "Container ID or name (from GET /api/containers)"
           },
           {
             "name": "env",
@@ -7036,7 +7036,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Container ID or name"
+            "description": "Container ID or name (from GET /api/containers)"
           },
           {
             "name": "env",
@@ -7108,7 +7108,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Container ID or name"
+            "description": "Container ID or name (from GET /api/containers)"
           },
           {
             "name": "env",
@@ -7219,7 +7219,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Container ID or name"
+            "description": "Container ID or name (from GET /api/containers)"
           },
           {
             "name": "env",
@@ -7317,7 +7317,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Container ID or name"
+            "description": "Container ID or name (from GET /api/containers)"
           },
           {
             "name": "env",
@@ -7365,7 +7365,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Container ID or name"
+            "description": "Container ID or name (from GET /api/containers)"
           },
           {
             "name": "env",
@@ -7458,7 +7458,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Container ID or name"
+            "description": "Container ID or name (from GET /api/containers)"
           },
           {
             "name": "env",
@@ -7531,7 +7531,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Container ID or name"
+            "description": "Container ID or name (from GET /api/containers)"
           },
           {
             "name": "env",
@@ -7597,7 +7597,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Container ID or name"
+            "description": "Container ID or name (from GET /api/containers)"
           },
           {
             "name": "env",
@@ -7690,7 +7690,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Container ID or name"
+            "description": "Container ID or name (from GET /api/containers)"
           },
           {
             "name": "env",
@@ -7759,7 +7759,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Container ID or name"
+            "description": "Container ID or name (from GET /api/containers)"
           },
           {
             "name": "env",
@@ -7867,7 +7867,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Container ID or name"
+            "description": "Container ID or name (from GET /api/containers)"
           },
           {
             "name": "env",
@@ -7936,7 +7936,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Container ID or name"
+            "description": "Container ID or name (from GET /api/containers)"
           },
           {
             "name": "env",
@@ -8055,7 +8055,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Container ID or name"
+            "description": "Container ID or name (from GET /api/containers)"
           },
           {
             "name": "env",
@@ -8124,7 +8124,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Container ID or name"
+            "description": "Container ID or name (from GET /api/containers)"
           },
           {
             "name": "env",
@@ -8216,7 +8216,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Container ID or name"
+            "description": "Container ID or name (from GET /api/containers)"
           },
           {
             "name": "env",
@@ -8282,7 +8282,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Container ID or name"
+            "description": "Container ID or name (from GET /api/containers)"
           },
           {
             "name": "env",
@@ -8387,7 +8387,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Container id"
+            "description": "Container id (from GET /api/containers)"
           },
           {
             "name": "env",
@@ -9854,7 +9854,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Environment id"
+            "description": "Environment id (from GET /api/environments)"
           }
         ],
         "responses": {
@@ -9935,7 +9935,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Environment id"
+            "description": "Environment id (from GET /api/environments)"
           }
         ],
         "responses": {
@@ -10089,7 +10089,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Environment id"
+            "description": "Environment id (from GET /api/environments)"
           }
         ],
         "responses": {
@@ -10152,7 +10152,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Environment id"
+            "description": "Environment id (from GET /api/environments)"
           }
         ],
         "responses": {
@@ -10225,7 +10225,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Environment id"
+            "description": "Environment id (from GET /api/environments)"
           }
         ],
         "responses": {
@@ -10314,7 +10314,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Environment id"
+            "description": "Environment id (from GET /api/environments)"
           }
         ],
         "responses": {
@@ -10348,7 +10348,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Environment id"
+            "description": "Environment id (from GET /api/environments)"
           }
         ],
         "responses": {
@@ -10432,7 +10432,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Environment id"
+            "description": "Environment id (from GET /api/environments)"
           }
         ],
         "responses": {
@@ -10494,7 +10494,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Environment id"
+            "description": "Environment id (from GET /api/environments)"
           }
         ],
         "responses": {
@@ -10572,7 +10572,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Environment id"
+            "description": "Environment id (from GET /api/environments)"
           }
         ],
         "responses": {
@@ -10681,7 +10681,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Environment id"
+            "description": "Environment id (from GET /api/environments)"
           }
         ],
         "responses": {
@@ -10744,7 +10744,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Environment id"
+            "description": "Environment id (from GET /api/environments)"
           }
         ],
         "responses": {
@@ -10829,7 +10829,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Environment id"
+            "description": "Environment id (from GET /api/environments)"
           }
         ],
         "responses": {
@@ -10940,7 +10940,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Environment id"
+            "description": "Environment id (from GET /api/environments)"
           },
           {
             "name": "notificationId",
@@ -11029,7 +11029,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Environment id"
+            "description": "Environment id (from GET /api/environments)"
           },
           {
             "name": "notificationId",
@@ -11142,7 +11142,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Environment id"
+            "description": "Environment id (from GET /api/environments)"
           },
           {
             "name": "notificationId",
@@ -11214,7 +11214,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Environment ID"
+            "description": "Environment ID (from GET /api/environments)"
           }
         ],
         "responses": {
@@ -11266,7 +11266,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Environment ID"
+            "description": "Environment ID (from GET /api/environments)"
           }
         ],
         "responses": {
@@ -11348,7 +11348,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Environment id"
+            "description": "Environment id (from GET /api/environments)"
           }
         ],
         "responses": {
@@ -11438,7 +11438,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Environment id"
+            "description": "Environment id (from GET /api/environments)"
           }
         ],
         "responses": {
@@ -11496,7 +11496,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Environment id"
+            "description": "Environment id (from GET /api/environments)"
           }
         ],
         "responses": {
@@ -11585,7 +11585,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Environment id"
+            "description": "Environment id (from GET /api/environments)"
           }
         ],
         "responses": {
@@ -11668,7 +11668,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Environment id"
+            "description": "Environment id (from GET /api/environments)"
           }
         ],
         "responses": {
@@ -12217,7 +12217,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Git credential ID"
+            "description": "Git credential ID (from GET /api/git/credentials)"
           }
         ],
         "responses": {
@@ -12310,7 +12310,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Git credential ID"
+            "description": "Git credential ID (from GET /api/git/credentials)"
           }
         ],
         "responses": {
@@ -12439,7 +12439,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Git credential ID"
+            "description": "Git credential ID (from GET /api/git/credentials)"
           }
         ],
         "responses": {
@@ -12772,7 +12772,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Git repository ID"
+            "description": "Git repository ID (from GET /api/git/repositories)"
           }
         ],
         "responses": {
@@ -12852,7 +12852,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Git repository ID"
+            "description": "Git repository ID (from GET /api/git/repositories)"
           }
         ],
         "responses": {
@@ -12963,7 +12963,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Git repository ID"
+            "description": "Git repository ID (from GET /api/git/repositories)"
           }
         ],
         "responses": {
@@ -13026,7 +13026,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Git repository ID"
+            "description": "Git repository ID (from GET /api/git/repositories)"
           }
         ],
         "responses": {
@@ -13089,7 +13089,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Git repository ID"
+            "description": "Git repository ID (from GET /api/git/repositories)"
           }
         ],
         "responses": {
@@ -13150,7 +13150,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Git repository ID"
+            "description": "Git repository ID (from GET /api/git/repositories)"
           }
         ],
         "responses": {
@@ -13213,7 +13213,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Git repository ID"
+            "description": "Git repository ID (from GET /api/git/repositories)"
           }
         ],
         "responses": {
@@ -13590,7 +13590,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Git stack id"
+            "description": "Git stack id (from GET /api/git/stacks)"
           }
         ],
         "responses": {
@@ -13672,7 +13672,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Git stack id"
+            "description": "Git stack id (from GET /api/git/stacks)"
           }
         ],
         "responses": {
@@ -13785,7 +13785,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Git stack id"
+            "description": "Git stack id (from GET /api/git/stacks)"
           }
         ],
         "responses": {
@@ -13845,7 +13845,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Git stack ID"
+            "description": "Git stack ID (from GET /api/git/stacks)"
           }
         ],
         "responses": {
@@ -13896,7 +13896,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Git stack ID"
+            "description": "Git stack ID (from GET /api/git/stacks)"
           }
         ],
         "responses": {
@@ -13951,7 +13951,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Git stack ID"
+            "description": "Git stack ID (from GET /api/git/stacks)"
           }
         ],
         "responses": {
@@ -14019,7 +14019,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Git stack ID"
+            "description": "Git stack ID (from GET /api/git/stacks)"
           }
         ],
         "responses": {
@@ -14106,7 +14106,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Git stack ID"
+            "description": "Git stack ID (from GET /api/git/stacks)"
           }
         ],
         "responses": {
@@ -14169,7 +14169,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Git stack ID"
+            "description": "Git stack ID (from GET /api/git/stacks)"
           }
         ],
         "responses": {
@@ -14232,7 +14232,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Git stack ID"
+            "description": "Git stack ID (from GET /api/git/stacks)"
           },
           {
             "name": "secret",
@@ -14302,7 +14302,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Git stack ID"
+            "description": "Git stack ID (from GET /api/git/stacks)"
           }
         ],
         "responses": {
@@ -14366,7 +14366,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Git repository ID"
+            "description": "Git repository ID (from GET /api/git/repositories)"
           },
           {
             "name": "secret",
@@ -14432,7 +14432,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Git repository ID"
+            "description": "Git repository ID (from GET /api/git/repositories)"
           }
         ],
         "responses": {
@@ -14796,7 +14796,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "ID of the token to revoke"
+            "description": "ID of the token to revoke (from GET /api/hawser/tokens)"
           }
         ],
         "responses": {
@@ -15169,7 +15169,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Image ID or name to remove"
+            "description": "Image ID or name to remove (from GET /api/images)"
           },
           {
             "name": "env",
@@ -15247,7 +15247,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Image ID or name to export"
+            "description": "Image ID or name to export (from GET /api/images)"
           },
           {
             "name": "env",
@@ -15304,7 +15304,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Image ID or name whose history to return"
+            "description": "Image ID or name whose history to return (from GET /api/images)"
           },
           {
             "name": "env",
@@ -15388,7 +15388,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Image ID or name to tag"
+            "description": "Image ID or name to tag (from GET /api/images)"
           },
           {
             "name": "env",
@@ -16704,7 +16704,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Docker network ID"
+            "description": "Docker network ID (from GET /api/networks)"
           },
           {
             "name": "env",
@@ -16791,7 +16791,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Docker network ID"
+            "description": "Docker network ID (from GET /api/networks)"
           },
           {
             "name": "env",
@@ -16857,7 +16857,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Docker network ID"
+            "description": "Docker network ID (from GET /api/networks)"
           },
           {
             "name": "env",
@@ -16952,7 +16952,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Docker network ID"
+            "description": "Docker network ID (from GET /api/networks)"
           },
           {
             "name": "env",
@@ -17051,7 +17051,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Docker network ID"
+            "description": "Docker network ID (from GET /api/networks)"
           },
           {
             "name": "env",
@@ -17427,7 +17427,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Notification setting ID"
+            "description": "Notification setting ID (from GET /api/notifications)"
           }
         ],
         "responses": {
@@ -17553,7 +17553,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Notification setting ID"
+            "description": "Notification setting ID (from GET /api/notifications)"
           }
         ],
         "responses": {
@@ -17728,7 +17728,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Notification setting ID"
+            "description": "Notification setting ID (from GET /api/notifications)"
           }
         ],
         "responses": {
@@ -17791,7 +17791,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Notification setting ID"
+            "description": "Notification setting ID (from GET /api/notifications)"
           }
         ],
         "responses": {
@@ -19885,7 +19885,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Registry ID"
+            "description": "Registry ID (from GET /api/registries)"
           }
         ],
         "responses": {
@@ -19965,7 +19965,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Registry ID"
+            "description": "Registry ID (from GET /api/registries)"
           }
         ],
         "responses": {
@@ -20079,7 +20079,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Registry ID"
+            "description": "Registry ID (from GET /api/registries)"
           }
         ],
         "responses": {
@@ -20142,7 +20142,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Registry ID"
+            "description": "Registry ID (from GET /api/registries)"
           }
         ],
         "responses": {
@@ -20996,7 +20996,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Numeric id of the role"
+            "description": "Numeric id of the role (from GET /api/roles)"
           }
         ],
         "responses": {
@@ -21076,7 +21076,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Numeric id of the role"
+            "description": "Numeric id of the role (from GET /api/roles)"
           }
         ],
         "responses": {
@@ -21159,7 +21159,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Numeric id of the role"
+            "description": "Numeric id of the role (from GET /api/roles)"
           }
         ],
         "responses": {
@@ -21327,7 +21327,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Schedule id (semantics depend on type — container/git-stack/backup-config id, environment id, or a synthetic repo-policy id)"
+            "description": "Schedule id (semantics depend on type — container/git-stack/backup-config id, environment id, or a synthetic repo-policy id) (from GET /api/schedules)"
           }
         ],
         "responses": {
@@ -21396,7 +21396,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Schedule id (semantics depend on type)"
+            "description": "Schedule id (semantics depend on type) (from GET /api/schedules)"
           }
         ],
         "responses": {
@@ -21470,7 +21470,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Schedule id (semantics depend on type)"
+            "description": "Schedule id (semantics depend on type) (from GET /api/schedules)"
           }
         ],
         "responses": {
@@ -21715,7 +21715,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Execution id"
+            "description": "Execution id (from GET /api/schedules/executions)"
           }
         ],
         "responses": {
@@ -21792,7 +21792,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Execution id"
+            "description": "Execution id (from GET /api/schedules/executions)"
           }
         ],
         "responses": {
@@ -21989,7 +21989,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "System schedule id (1=schedule cleanup, 2=event cleanup, 4=scanner cleanup)"
+            "description": "System schedule id (1=schedule cleanup, 2=event cleanup, 4=scanner cleanup) (from GET /api/schedules)"
           }
         ],
         "responses": {
@@ -22187,7 +22187,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Updater container id (returned by POST /api/self-update)"
+            "description": "Updater container id (from POST /api/self-update)"
           }
         ],
         "responses": {
@@ -23456,7 +23456,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Stack name"
+            "description": "Stack name (from GET /api/stacks)"
           },
           {
             "name": "env",
@@ -23555,7 +23555,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Stack name"
+            "description": "Stack name (from GET /api/stacks)"
           },
           {
             "name": "env",
@@ -23659,7 +23659,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Stack name"
+            "description": "Stack name (from GET /api/stacks)"
           },
           {
             "name": "env",
@@ -23742,7 +23742,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Stack name"
+            "description": "Stack name (from GET /api/stacks)"
           },
           {
             "name": "env",
@@ -23851,7 +23851,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Stack name"
+            "description": "Stack name (from GET /api/stacks)"
           },
           {
             "name": "env",
@@ -23944,7 +23944,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Stack name"
+            "description": "Stack name (from GET /api/stacks)"
           },
           {
             "name": "env",
@@ -24015,7 +24015,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Stack name"
+            "description": "Stack name (from GET /api/stacks)"
           },
           {
             "name": "env",
@@ -24096,7 +24096,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Stack name (as shown in Dockhand, e.g. \"gitcheck\")"
+            "description": "Stack name (as shown in Dockhand, e.g. \"gitcheck\") (from GET /api/stacks)"
           },
           {
             "name": "env",
@@ -24190,7 +24190,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Stack name"
+            "description": "Stack name (from GET /api/stacks)"
           },
           {
             "name": "env",
@@ -24314,7 +24314,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Stack name"
+            "description": "Stack name (from GET /api/stacks)"
           },
           {
             "name": "env",
@@ -24381,7 +24381,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Stack name"
+            "description": "Stack name (from GET /api/stacks)"
           },
           {
             "name": "env",
@@ -24477,7 +24477,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Stack name"
+            "description": "Stack name (from GET /api/stacks)"
           },
           {
             "name": "env",
@@ -24617,7 +24617,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Stack name"
+            "description": "Stack name (from GET /api/stacks)"
           },
           {
             "name": "env",
@@ -24773,7 +24773,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Stack name"
+            "description": "Stack name (from GET /api/stacks)"
           },
           {
             "name": "env",
@@ -24827,7 +24827,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Stack name"
+            "description": "Stack name (from GET /api/stacks)"
           },
           {
             "name": "env",
@@ -24890,7 +24890,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Stack name"
+            "description": "Stack name (from GET /api/stacks)"
           },
           {
             "name": "env",
@@ -25203,7 +25203,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Stack name"
+            "description": "Stack name (from GET /api/stacks)"
           },
           {
             "name": "env",
@@ -26350,7 +26350,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "ID of the template source to delete"
+            "description": "ID of the template source to delete (from GET /api/templates/sources)"
           }
         ],
         "responses": {
@@ -26591,7 +26591,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Numeric id of the user"
+            "description": "Numeric id of the user (from GET /api/users)"
           }
         ],
         "responses": {
@@ -26694,7 +26694,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Numeric id of the user"
+            "description": "Numeric id of the user (from GET /api/users)"
           }
         ],
         "responses": {
@@ -26837,7 +26837,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Numeric id of the user"
+            "description": "Numeric id of the user (from GET /api/users)"
           },
           {
             "name": "confirmDisableAuth",
@@ -26916,7 +26916,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Numeric id of the user"
+            "description": "Numeric id of the user (from GET /api/users)"
           }
         ],
         "responses": {
@@ -27017,7 +27017,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Numeric id of the user"
+            "description": "Numeric id of the user (from GET /api/users)"
           }
         ],
         "responses": {
@@ -27085,7 +27085,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Numeric id of the user"
+            "description": "Numeric id of the user (from GET /api/users)"
           }
         ],
         "responses": {
@@ -27160,7 +27160,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Numeric id of the user"
+            "description": "Numeric id of the user (from GET /api/users)"
           }
         ],
         "responses": {
@@ -27229,7 +27229,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Numeric id of the user"
+            "description": "Numeric id of the user (from GET /api/users)"
           }
         ],
         "responses": {
@@ -27500,7 +27500,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Docker volume name"
+            "description": "Docker volume name (from GET /api/volumes)"
           },
           {
             "name": "env",
@@ -27589,7 +27589,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Docker volume name"
+            "description": "Docker volume name (from GET /api/volumes)"
           },
           {
             "name": "env",
@@ -27661,7 +27661,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Docker volume name"
+            "description": "Docker volume name (from GET /api/volumes)"
           },
           {
             "name": "env",
@@ -27823,7 +27823,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Docker volume name"
+            "description": "Docker volume name (from GET /api/volumes)"
           },
           {
             "name": "path",
@@ -27912,7 +27912,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Docker volume name"
+            "description": "Docker volume name (from GET /api/volumes)"
           },
           {
             "name": "env",
@@ -27978,7 +27978,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Source Docker volume name"
+            "description": "Source Docker volume name (from GET /api/volumes)"
           },
           {
             "name": "env",
@@ -28073,7 +28073,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Docker volume name"
+            "description": "Docker volume name (from GET /api/volumes)"
           },
           {
             "name": "env",
@@ -28142,7 +28142,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Docker volume name"
+            "description": "Docker volume name (from GET /api/volumes)"
           },
           {
             "name": "env",

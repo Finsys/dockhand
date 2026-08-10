@@ -13,7 +13,7 @@ import { computeAuditDiff } from '$lib/utils/diff';
 /**
  * @openapi
  * summary: Get a single OIDC provider configuration by id (client secret is masked)
- * path: id:integer! Numeric id of the OIDC configuration
+ * path: id:integer! Numeric id of the OIDC configuration (from GET /api/auth/oidc)
  * resp-200: {id:integer!, name:string!, enabled:boolean!, issuerUrl:string!, clientId:string!}
  * resp-400: Invalid configuration id (not a number)
  * resp-401: Authentication required (auth is enabled and the caller is not authenticated)
@@ -59,7 +59,7 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 /**
  * @openapi
  * summary: Update an existing OIDC provider configuration (only supplied fields change; a masked clientSecret is ignored)
- * path: id:integer! Numeric id of the OIDC configuration
+ * path: id:integer! Numeric id of the OIDC configuration (from GET /api/auth/oidc)
  * body: {name:string, enabled:boolean, issuerUrl:string, clientId:string, clientSecret:string, redirectUri:string, scopes:string, usernameClaim:string, emailClaim:string, displayNameClaim:string, adminClaim:string, adminValue:string, roleMappingsClaim:string, roleMappings:{}}
  * body-example: {"enabled":true,"scopes":"openid profile email groups","clientSecret":"***"}
  * resp-200: {id:integer!, name:string!, enabled:boolean!, issuerUrl:string!, clientId:string!}
@@ -142,7 +142,7 @@ export const PUT: RequestHandler = async (event) => {
 /**
  * @openapi
  * summary: Delete an OIDC provider configuration by id
- * path: id:integer! Numeric id of the OIDC configuration
+ * path: id:integer! Numeric id of the OIDC configuration (from GET /api/auth/oidc)
  * resp-200: {success:boolean!}
  * resp-400: Invalid configuration id (not a number)
  * resp-401: Authentication required (auth is enabled and the caller is not authenticated)

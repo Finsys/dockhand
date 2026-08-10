@@ -16,7 +16,7 @@ import { invalidateTokenCacheForUser } from '$lib/server/api-tokens';
 /**
  * @openapi
  * summary: List the roles assigned to a user (enterprise only)
- * path: id:integer! Numeric id of the user
+ * path: id:integer! Numeric id of the user (from GET /api/users)
  * resp-200: array<{roleId:integer!, name:string!, environmentId:integer}>
  * resp-400: User id is required
  * resp-403: Enterprise license required
@@ -54,7 +54,7 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
  * @openapi
  * summary: Assign a role to a user, optionally scoped to an environment (enterprise, admin only)
  * description: roleId from GET /api/roles. environmentId from GET /api/environments.
- * path: id:integer! Numeric id of the user
+ * path: id:integer! Numeric id of the user (from GET /api/users)
  * body: {roleId:integer!, environmentId:integer}
  * body-example: {"roleId":3,"environmentId":1}
  * resp-201: The created user-role assignment
@@ -114,7 +114,7 @@ export const POST: RequestHandler = async (event) => {
  * @openapi
  * summary: Remove a role assignment from a user, optionally scoped to an environment (enterprise, admin only)
  * description: roleId from GET /api/roles. environmentId from GET /api/environments.
- * path: id:integer! Numeric id of the user
+ * path: id:integer! Numeric id of the user (from GET /api/users)
  * body: {roleId:integer!, environmentId:integer}
  * body-example: {"roleId":3,"environmentId":1}
  * resp-200: {success:boolean!}

@@ -8,7 +8,7 @@ import { daemonIsPodman } from '$lib/server/scanner-socket-detect';
 /**
  * @openapi
  * summary: Test connectivity to a saved environment's Docker/Hawser endpoint
- * path: id:integer! Environment id
+ * path: id:integer! Environment id (from GET /api/environments)
  * resp-200: {success:boolean!, info:{serverVersion:string, containers:integer, images:integer, name:string, engine:string}, isEdgeMode:boolean, hawser:{}}
  * resp-200-desc: success:false with a human-readable error message is also returned as HTTP 200 (connection/agent-not-connected states are not transport errors)
  * resp-404: Environment not found
