@@ -12,11 +12,11 @@ import { redactSnapshotLayout } from '$lib/server/backups/snapshot-layout';
  *
  * @openapi
  * summary: Fetch the stored metadata for a snapshot, with a server-authoritative environment access gate
+ * description: Permission ("backups:view") and environment-access denials (403) are produced by the shared requireBackups/guardSnapshotEnvAccess route guards; the owning environment is resolved server-side from the snapshot's own tag, not a caller-supplied param.
  * path: id:string! Restic snapshot id
  * query: destinationId:integer! Destination holding the snapshot (required)
  * resp-200: The snapshot metadata object
  * resp-400: Missing/invalid destinationId or an invalid snapshot id
- * resp-403: Permission denied — requires "backups:view", or no access to the snapshot's owning environment
  * resp-404: No metadata available for this snapshot
  * resp-500: Failed to read the snapshot metadata (restic error)
  */

@@ -12,14 +12,14 @@ import { createJobResponse } from '$lib/server/sse';
  *
  * @openapi
  * summary: Run a restic repository maintenance task (unlock, check, prune, stats, repair-index or repair-snapshots) against a destination
+ * description: Permission denial (403, "backups:manage") is produced by the shared requireBackups route guard. Streamed via createJobResponse — a task failure never surfaces as an HTTP 500; it comes back as a 200 with a failed job result (JSON-preferring callers) or a job/SSE 'result' event with success:false (streaming callers).
  * path: id:integer! Backup destination id
  * body: {task:string!}
  * body-example: {"task":"check"}
- * resp-200: The task result object (returned when the task succeeds)
+ * resp-200: The task result object — { success: true, ... } on success, or { success: false, error } when the task itself fails
  * resp-400: Invalid input — invalid destination id, or an unknown task name (must be one of unlock, check, prune, stats, repair-index, repair-snapshots)
- * resp-403: Permission denied — requires "backups:manage", or no access to an environment whose configs use this destination
+ * resp-403: No access to an environment whose configs use this destination (enterprise)
  * resp-404: Destination not found
- * resp-500: The maintenance task failed; returns { error } or a result with success:false
  */
 export const POST: RequestHandler = async (event) => {
 	const { params, request, cookies } = event;

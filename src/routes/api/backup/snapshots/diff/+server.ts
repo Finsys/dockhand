@@ -11,12 +11,12 @@ import { validateSnapshotId } from '$lib/server/docker-validation';
  *
  * @openapi
  * summary: Compute the file-level difference between two snapshots in the same destination, gating access on both snapshots' owning environments
+ * description: Permission ("backups:view") and environment-access denials (403) are produced by the shared requireBackups/guardSnapshotEnvAccess route guards.
  * query: destinationId:integer! Destination holding both snapshots (required)
  * query: snapshotA:string! First (base) restic snapshot id (required)
  * query: snapshotB:string! Second (compared) restic snapshot id (required)
  * resp-200: The diff result object (added/removed/changed entries between the two snapshots)
  * resp-400: Missing required params (destinationId, snapshotA, snapshotB) or an invalid snapshot id
- * resp-403: Permission denied — requires "backups:view", or no access to either snapshot's owning environment
  * resp-500: Failed to diff the snapshots (restic error)
  */
 export const GET: RequestHandler = async ({ url, cookies }) => {
