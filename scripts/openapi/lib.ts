@@ -300,8 +300,19 @@ export function synthesizeExample(schema: MiniSchema): unknown {
 	}
 }
 
+// Both halves use a negated-lookahead scan `(?:(?!\*\/)[\s\S])*?` instead of
+// plain `[\s\S]*?` so the match can never cross a `*/` — i.e. it can only ever
+// consume characters that belong to ONE comment block. Without this guard, a
+// handler preceded by an earlier, unrelated `/** file-header */` JSDoc comment
+// (with no `@openapi` of its own) makes the lazy quantifier skip past that
+// comment's own `*/` and swallow every line of CODE in between as if it were
+// part of the annotation body — including any `key: value,` object-literal
+// line (e.g. `description: sys.description,`) that happens to match a
+// recognized annotation key. Real `/** ... */` comments can never contain a
+// literal `*/` (that would end the comment in valid JS/TS), so this
+// restriction never rejects a legitimate block.
 const ANNOTATION_BLOCK_RE =
-	/\/\*\*([\s\S]*?@openapi\b[\s\S]*?)\*\/\s*export const (GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD)\s*:/g;
+	/\/\*\*((?:(?!\*\/)[\s\S])*?@openapi\b(?:(?!\*\/)[\s\S])*?)\*\/\s*export const (GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD)\s*:/g;
 
 /** Every `@openapi` marker found in a file, regardless of whether it could be
  *  matched to a following `export const METHOD:` — used by --check's

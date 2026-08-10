@@ -21953,8 +21953,7 @@
           {
             "bearerAuth": []
           }
-        ],
-        "description": "sys.description,"
+        ]
       }
     },
     "/api/schedules/system/{id}/toggle": {
