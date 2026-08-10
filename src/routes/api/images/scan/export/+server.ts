@@ -25,7 +25,7 @@ function toCSV(findings: Finding[]): string {
  *
  * @openapi
  * summary: Export the cached vulnerability findings for a single image as json, csv, or sarif
- * query: imageId:string! Image SHA/ID to export (falls back to the "image" param when omitted)
+ * query: imageId:string! Image SHA/ID to export (falls back to the "image" param when omitted) (from GET /api/images)
  * query: image:string Image name/ID used as a fallback when imageId is not given
  * query: format:string Output format — json (default), csv, or sarif
  * resp-200: The findings as a downloadable json, csv, or sarif attachment

@@ -8,7 +8,7 @@ import { getPendingContainerUpdates, removePendingContainerUpdate, clearPendingC
  *
  * @openapi
  * summary: List the containers in an environment that have a pending image update recorded (requires the 'view' permission)
- * query: env:integer! The target environment ID (required)
+ * query: env:integer! The target environment ID (required) (from GET /api/environments)
  * resp-200: {environmentId:integer!, pendingUpdates:array<{containerId:string!, containerName:string!, currentImage:string!, checkedAt:string!}>!}
  * resp-400: Environment ID is required
  * resp-403: Permission denied
@@ -51,8 +51,8 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
  *
  * @openapi
  * summary: Clear the pending-update record for a single container (requires the 'manage' permission)
- * query: env:integer! The target environment ID (required)
- * query: containerId:string! The container ID whose pending update should be cleared (required)
+ * query: env:integer! The target environment ID (required) (from GET /api/environments)
+ * query: containerId:string! The container ID whose pending update should be cleared (required) (from GET /api/containers)
  * resp-200: {success:boolean!}
  * resp-200-example: {"success":true}
  * resp-400: Environment ID and container ID are both required

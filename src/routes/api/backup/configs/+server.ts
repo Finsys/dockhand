@@ -19,7 +19,7 @@ import { validateRetention, retentionToStore } from '$lib/server/backups/helpers
  * description: Permission denial (403, "backups:view") is produced by the shared requireBackups route guard.
  * query: type:string Filter by backup config type (e.g. "container", "stack")
  * query: target:string Filter by the backed-up target name (container or stack name)
- * query: env:integer Filter by environment id
+ * query: env:integer Filter by environment id (from GET /api/environments)
  * resp-200: Array of backup configuration objects
  */
 export const GET: RequestHandler = async ({ url, cookies }) => {
@@ -58,7 +58,7 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
  *
  * @openapi
  * summary: Create a backup configuration for a container or stack, optionally scheduled, and register its cron schedule when enabled
- * description: Permission denial (403, "backups:manage") is produced by the shared requireBackups route guard. A requested environmentId the caller can't access also 403s (enterprise).
+ * description: Permission denial (403, "backups:manage") is produced by the shared requireBackups route guard. A requested environmentId the caller can't access also 403s (enterprise). destinationId from GET /api/backup/destinations. environmentId from GET /api/environments.
  * body: {destinationId:integer!, targetName:string!, type:string, environmentId:integer, enabled:boolean, allVolumes:boolean, selectedVolumes:array<string>, stopBeforeBackup:boolean, schedule:string, retention:{keepLast:integer, keepDaily:integer, keepWeekly:integer, keepMonthly:integer, keepYearly:integer}, options:{}, tags:array<string>}
  * body-example: {"destinationId":3,"targetName":"nextcloud","type":"container","environmentId":1,"enabled":true,"allVolumes":true,"stopBeforeBackup":false,"schedule":"0 3 * * *","retention":{"keepDaily":7,"keepWeekly":4}}
  * resp-201: The created backup configuration object

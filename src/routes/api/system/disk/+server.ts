@@ -13,7 +13,7 @@ const DISK_USAGE_TIMEOUT = 15000; // 15 second timeout
  *
  * @openapi
  * summary: Return Docker disk usage (df) for an environment, or null when collection is disabled, times out, or fails
- * query: env:integer! ID of the environment to query disk usage for
+ * query: env:integer! ID of the environment to query disk usage for (from GET /api/environments)
  * resp-200: {diskUsage:object}
  * resp-200-desc: diskUsage is null when SKIP_DF_COLLECTION is set, or the query times out or errors
  * resp-200-example: {"diskUsage":{"LayersSize":1420000000,"Images":[],"Containers":[],"Volumes":[]}}

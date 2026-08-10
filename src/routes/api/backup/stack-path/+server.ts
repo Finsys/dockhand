@@ -12,7 +12,7 @@ import { previewStackBackupPath } from '$lib/server/backups';
  * @openapi
  * summary: Preview where a stack's directory will be captured from on the host, without running a backup
  * query: target:string! Target stack name
- * query: env:integer Environment ID the stack belongs to
+ * query: env:integer Environment ID the stack belongs to (from GET /api/environments)
  * resp-200: The resolved capture path preview — kind "candidate" with hostPath, kind "tar" with composeFile only, or kind "unknown" with a reason
  * resp-400: target is required
  * resp-403: Permission denied (requires backups:view), or no access to the target's environment (enterprise)

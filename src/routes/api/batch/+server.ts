@@ -131,7 +131,7 @@ async function processWithConcurrency<T>(
  *
  * @openapi
  * summary: Run a bulk operation (start/stop/restart/pause/unpause/remove/down, depending on entity type) across many containers, images, volumes, networks, or stacks; clients that send Accept application/json get a synchronous summary, others get a jobId and progress over Server-Sent Events
- * query: env:integer Environment ID the entities belong to
+ * query: env:integer Environment ID the entities belong to (from GET /api/environments)
  * body: {operation:string!, entityType:string!, items:array<{id:string!, name:string!}>!, options:{force:boolean, removeVolumes:boolean}}
  * body-example: {"operation":"restart","entityType":"containers","items":[{"id":"abc123","name":"web"}],"options":{"force":false}}
  * resp-200: Either a synchronous completion summary ({type:"complete", summary:{total, success, failed}}) or an async job handle ({jobId}) whose progress streams over SSE

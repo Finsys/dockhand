@@ -6,8 +6,8 @@ import type { RequestHandler } from './$types';
 /**
  * @openapi
  * summary: Query container activity events with filters and pagination
- * query: environmentId:integer Filter to a single environment
- * query: containerId:string Filter by container ID
+ * query: environmentId:integer Filter to a single environment (from GET /api/environments)
+ * query: containerId:string Filter by container ID (from GET /api/containers)
  * query: containerName:string Filter by container name
  * query: actions:string Comma-separated event actions to filter by
  * query: labels:string Comma-separated labels to filter by

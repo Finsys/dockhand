@@ -11,6 +11,7 @@ import { guardSnapshotEnvAccess } from '$lib/server/backups/route-guards';
  *
  * @openapi
  * summary: Preview the contents of a snapshot (volumes, metadata) before running a restore
+ * description: destinationId from GET /api/backup/destinations. snapshotId from GET /api/backup/snapshots. environmentId from GET /api/environments.
  * body: {destinationId:integer!, snapshotId:string!, environmentId:integer}
  * body-example: {"destinationId":3,"snapshotId":"a1b2c3d4"}
  * resp-200: The snapshot preview object (contents/metadata used to plan a restore)

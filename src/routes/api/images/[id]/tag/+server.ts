@@ -10,7 +10,7 @@ import type { RequestHandler } from './$types';
  * @openapi
  * summary: Tag a Docker image into a repository (defaults the tag to "latest")
  * path: id:string! Image ID or name to tag
- * query: env:integer ID of the environment the image belongs to
+ * query: env:integer ID of the environment the image belongs to (from GET /api/environments)
  * body: {repo:string!, tag:string}
  * body-example: {"repo":"registry.example.com/myapp","tag":"v1.2.3"}
  * resp-200: {success:boolean!}

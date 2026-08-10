@@ -13,7 +13,7 @@ import type { RequestHandler } from './$types';
  * summary: Recreate a container with updated create-options (optionally re-pulling the image first), preserving its configuration (requires the 'create' permission)
  * description: The body carries the container create-options (image, name, env, ports, volumes, …) alongside the two control flags below; `repullImage` pulls the image before recreation and `startAfterUpdate` starts the new container once created.
  * path: id:string! Container ID or name
- * query: env:integer The target environment ID (omit for the local/default Docker host)
+ * query: env:integer The target environment ID (omit for the local/default Docker host) (from GET /api/environments)
  * body: {image:string, name:string, repullImage:boolean, startAfterUpdate:boolean}
  * body-example: {"image":"nginx:latest","name":"web","repullImage":true,"startAfterUpdate":true}
  * resp-200: {success:boolean!, id:string!}

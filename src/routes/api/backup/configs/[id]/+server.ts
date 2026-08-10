@@ -38,7 +38,7 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
  *
  * @openapi
  * summary: Update a backup configuration and re-register or remove its cron schedule accordingly
- * description: Permission ("backups:manage") and environment-access denials (403) and not-found (404) are produced by the shared route guards. The environment is fixed at creation and cannot be changed here.
+ * description: Permission ("backups:manage") and environment-access denials (403) and not-found (404) are produced by the shared route guards. The environment is fixed at creation and cannot be changed here. destinationId from GET /api/backup/destinations.
  * path: id:integer! Backup configuration id
  * body: {destinationId:integer, enabled:boolean, allVolumes:boolean, selectedVolumes:array<string>, stopBeforeBackup:boolean, schedule:string, retention:{keepLast:integer, keepDaily:integer, keepWeekly:integer, keepMonthly:integer, keepYearly:integer}, options:{}, tags:array<string>}
  * body-example: {"schedule":"0 4 * * *","enabled":true,"stopBeforeBackup":true,"retention":{"keepDaily":14}}

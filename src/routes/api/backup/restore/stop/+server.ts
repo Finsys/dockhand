@@ -14,6 +14,7 @@ import { isValidSnapshotId } from '$lib/server/backups/helpers';
  *
  * @openapi
  * summary: Cancel a running restore — kills the restore helper for a given snapshotId, or all restore helpers when snapshotId is omitted
+ * description: snapshotId from GET /api/backup/snapshots. environmentId from GET /api/environments.
  * body: {snapshotId:string, environmentId:integer}
  * body-example: {"snapshotId":"a1b2c3d4"}
  * resp-200: Returns { success: true, stopped } where "stopped" indicates whether a running restore helper was actually killed

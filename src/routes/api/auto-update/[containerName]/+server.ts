@@ -13,7 +13,7 @@ import { authorize } from '$lib/server/authorize';
  * @openapi
  * summary: Get the auto-update setting for a container (returns sensible defaults when none is stored)
  * path: containerName:string! Container name (URL-encoded)
- * query: env:integer Environment the container belongs to
+ * query: env:integer Environment the container belongs to (from GET /api/environments)
  * resp-200: {enabled:boolean!, scheduleType:string!, cronExpression:string, vulnerabilityCriteria:string!}
  * resp-200-example: {"enabled":false,"scheduleType":"daily","cronExpression":"0 3 * * *","vulnerabilityCriteria":"never"}
  * resp-500: Failed to get auto-update setting
@@ -60,7 +60,7 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
  * @openapi
  * summary: Create or update a container's auto-update setting; enabled=false deletes it and its schedule
  * path: containerName:string! Container name (URL-encoded)
- * query: env:integer Environment the container belongs to
+ * query: env:integer Environment the container belongs to (from GET /api/environments)
  * body: {enabled:boolean, cronExpression:string, cron_expression:string, vulnerabilityCriteria:string, vulnerability_criteria:string}
  * body-example: {"enabled":true,"cronExpression":"0 3 * * *","vulnerabilityCriteria":"never"}
  * resp-200: {id:integer!, enabled:boolean!, scheduleType:string!, cronExpression:string, vulnerabilityCriteria:string!, deleted:boolean, success:boolean}
@@ -142,7 +142,7 @@ export const POST: RequestHandler = async ({ params, url, request, cookies }) =>
  * @openapi
  * summary: Delete a container's auto-update setting and unregister its schedule
  * path: containerName:string! Container name (URL-encoded)
- * query: env:integer Environment the container belongs to
+ * query: env:integer Environment the container belongs to (from GET /api/environments)
  * resp-200: {success:boolean!}
  * resp-200-example: {"success":true}
  * resp-500: Failed to delete auto-update setting

@@ -10,7 +10,7 @@ import type { RequestHandler } from './$types';
  * @openapi
  * summary: Rename or move a file or directory inside a container (requires the 'exec' permission)
  * path: id:string! Container ID or name
- * query: env:integer The target environment ID (omit for the local/default Docker host)
+ * query: env:integer The target environment ID (omit for the local/default Docker host) (from GET /api/environments)
  * body: {oldPath:string!, newPath:string!}
  * body-example: {"oldPath":"/app/config.yaml","newPath":"/app/config.old.yaml"}
  * resp-200: {success:boolean!, oldPath:string!, newPath:string!}

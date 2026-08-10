@@ -49,6 +49,7 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 /**
  * @openapi
  * summary: Attach a notification channel to an environment
+ * description: notificationId from GET /api/notifications.
  * path: id:integer! Environment id
  * body: {notificationId:integer!, enabled:boolean, eventTypes:array<string>}
  * body-example: {"notificationId":1,"enabled":true,"eventTypes":["stack_deploy_failed"]}

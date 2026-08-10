@@ -9,7 +9,7 @@ import { validateDockerIdParam } from '$lib/server/docker-validation';
  * @openapi
  * summary: Inspect a single Docker volume by name (the name is validated as a Docker identifier)
  * path: name:string! Docker volume name
- * query: env:integer Environment ID the volume belongs to
+ * query: env:integer Environment ID the volume belongs to (from GET /api/environments)
  * resp-200: {Name:string!, Driver:string!, Mountpoint:string!, Scope:string, Labels:{}, Options:{}, CreatedAt:string}
  * resp-200-example: {"Name":"web_data","Driver":"local","Mountpoint":"/var/lib/docker/volumes/web_data/_data","Scope":"local","Labels":{},"Options":{},"CreatedAt":"2026-06-01T10:00:00Z"}
  * resp-403: Permission denied (requires volumes:inspect, or environment access denied on enterprise)
@@ -48,7 +48,7 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
  * @openapi
  * summary: Remove a Docker volume by name, optionally forcing removal
  * path: name:string! Docker volume name
- * query: env:integer Environment ID the volume belongs to
+ * query: env:integer Environment ID the volume belongs to (from GET /api/environments)
  * query: force:boolean Force removal of the volume
  * resp-200: {success:boolean!}
  * resp-200-example: {"success":true}

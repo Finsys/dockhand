@@ -10,7 +10,7 @@ import type { RequestHandler } from './$types';
  * @openapi
  * summary: List the contents of a directory inside a container's filesystem
  * path: id:string! Container ID or name
- * query: env:integer The target environment ID (omit for the local/default Docker host)
+ * query: env:integer The target environment ID (omit for the local/default Docker host) (from GET /api/environments)
  * query: path:string Absolute directory path inside the container (default "/")
  * query: simpleLs:boolean Use a lightweight `ls` listing instead of a full stat of each entry
  * resp-200: Directory listing (entries with name, type, size and permission metadata)

@@ -9,7 +9,7 @@ import { validateDockerIdParam } from '$lib/server/docker-validation';
  * @openapi
  * summary: Clone a Docker volume into a new named volume, copying the data with a temporary helper container and preserving driver/options/labels
  * path: name:string! Source Docker volume name
- * query: env:integer Environment ID the volume belongs to
+ * query: env:integer Environment ID the volume belongs to (from GET /api/environments)
  * body: {name:string!}
  * body-example: {"name":"web_data_copy"}
  * resp-200: {success:boolean!, name:string!}

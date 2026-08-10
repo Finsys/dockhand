@@ -9,7 +9,7 @@ import type { RequestHandler } from './$types';
  *
  * @openapi
  * summary: Prune all unused Docker resources (containers, images, volumes and networks) in a single operation
- * query: env:integer Target environment id; scopes both the prune operation and the permission check (defaults to the local environment)
+ * query: env:integer Target environment id; scopes both the prune operation and the permission check (defaults to the local environment) (from GET /api/environments)
  * resp-200: Returns { success: true, result } where result is the aggregated Docker prune report (space reclaimed, items deleted)
  * resp-200-example: {"success":true,"result":{"ContainersDeleted":["abc123"],"ImagesDeleted":[],"VolumesDeleted":[],"NetworksDeleted":[],"SpaceReclaimed":10485760}}
  * resp-403: Permission denied — requires the "remove" permission on containers, images, volumes AND networks for the target environment

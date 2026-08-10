@@ -8,7 +8,7 @@ import { authorize } from '$lib/server/authorize';
  *
  * @openapi
  * summary: List all containers in an environment together with their writable-layer and root-filesystem sizes (requires the 'view' permission)
- * query: env:integer The target environment ID (omit for the local/default Docker host)
+ * query: env:integer The target environment ID (omit for the local/default Docker host) (from GET /api/environments)
  * resp-200: Array of containers with size metadata (SizeRw / SizeRootFs)
  * resp-403: Permission denied
  * resp-500: Failed to get container sizes (returns an empty object)

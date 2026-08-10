@@ -14,7 +14,7 @@ import type { RequestHandler } from './$types';
  * @openapi
  * summary: Get one notification-channel link for an environment
  * path: id:integer! Environment id
- * path: notificationId:integer! Notification channel id
+ * path: notificationId:integer! Notification channel id (from GET /api/notifications)
  * resp-200: {id:integer!, notificationId:integer!, enabled:boolean!, eventTypes:array<string>}
  * resp-400: Invalid id or notificationId
  * resp-403: Permission denied (RBAC 'notifications:view' missing)
@@ -55,7 +55,7 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
  * @openapi
  * summary: Update a notification-channel link (enabled state and/or event type filter)
  * path: id:integer! Environment id
- * path: notificationId:integer! Notification channel id
+ * path: notificationId:integer! Notification channel id (from GET /api/notifications)
  * body: {enabled:boolean, eventTypes:array<string>}
  * body-example: {"enabled":false}
  * resp-200: {id:integer!, notificationId:integer!, enabled:boolean!, eventTypes:array<string>}
@@ -106,7 +106,7 @@ export const PUT: RequestHandler = async ({ params, request, cookies }) => {
  * @openapi
  * summary: Remove a notification-channel link from an environment
  * path: id:integer! Environment id
- * path: notificationId:integer! Notification channel id
+ * path: notificationId:integer! Notification channel id (from GET /api/notifications)
  * resp-200: {success:boolean!}
  * resp-400: Invalid id or notificationId
  * resp-403: Permission denied (RBAC 'notifications:delete' missing)

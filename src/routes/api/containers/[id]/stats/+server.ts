@@ -76,7 +76,7 @@ function calculateMemoryUsage(memoryStats: any): { usage: number; raw: number; c
  * @openapi
  * summary: Return a one-shot CPU/memory/network/block-IO stats snapshot for a container (Docker-CLI-equivalent memory accounting)
  * path: id:string! Container ID or name
- * query: env:integer The target environment ID (omit for the local/default Docker host)
+ * query: env:integer The target environment ID (omit for the local/default Docker host) (from GET /api/environments)
  * resp-200: {cpuPercent:number!, memoryUsage:integer!, memoryRaw:integer!, memoryCache:integer!, memoryLimit:integer!, memoryPercent:number!, networkRx:integer!, networkTx:integer!, blockRead:integer!, blockWrite:integer!, timestamp:integer!}
  * resp-403: Permission denied
  * resp-404: No environment configured, the environment was not found, or the container was not found

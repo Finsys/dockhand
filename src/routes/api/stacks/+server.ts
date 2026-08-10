@@ -10,7 +10,7 @@ import type { RequestHandler } from './$types';
 /**
  * @openapi
  * summary: List compose stacks (running + database-only entries) for one environment
- * query: env:integer Environment id — an empty array is returned if omitted
+ * query: env:integer Environment id — an empty array is returned if omitted (from GET /api/environments)
  * resp-200: array<{name:string!, containers:array<string>!, status:string!, sourceType:string}>
  * resp-200-example: [{"name":"immich","containers":["immich_server","immich_redis"],"status":"running","sourceType":"git"}]
  * resp-403: Permission denied, or access denied to this environment (RBAC)
@@ -84,7 +84,7 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 /**
  * @openapi
  * summary: Create an internal (non-git) stack; optionally deploy immediately
- * query: env:integer Environment id to create the stack in
+ * query: env:integer Environment id to create the stack in (from GET /api/environments)
  * body: {name:string!, compose:string!, start:boolean, envVars:string, rawEnvContent:string, composePath:string, envPath:string}
  * body-example: {"name":"gitcheck","compose":"services:\n  web:\n    image: nginx:alpine\n","start":true}
  * resp-200: {success:boolean!, started:boolean!}

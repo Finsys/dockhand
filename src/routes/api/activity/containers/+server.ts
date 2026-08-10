@@ -6,7 +6,7 @@ import type { RequestHandler } from './$types';
 /**
  * @openapi
  * summary: List distinct container names that appear in the activity log, for filter dropdowns
- * query: environment_id:integer Filter to a single environment
+ * query: environment_id:integer Filter to a single environment (from GET /api/environments)
  * resp-200: array<string>
  * resp-200-example: ["web-1","db-1","cache-1"]
  * resp-403: Permission denied (requires the activity:view permission)

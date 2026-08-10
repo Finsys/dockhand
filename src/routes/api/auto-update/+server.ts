@@ -8,7 +8,7 @@ import { getAutoUpdateSettings } from '$lib/server/db';
  *
  * @openapi
  * summary: Get all enabled auto-update settings for an environment, keyed by container name
- * query: env:integer Environment ID to read settings for
+ * query: env:integer Environment ID to read settings for (from GET /api/environments)
  * resp-200: {}
  * resp-200-example: {"web-1":{"enabled":true,"scheduleType":"daily","cronExpression":"0 3 * * *","vulnerabilityCriteria":"never"}}
  * resp-500: Failed to get auto-update settings

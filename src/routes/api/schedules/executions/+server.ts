@@ -28,8 +28,8 @@ import {
  * @openapi
  * summary: List schedule execution history, filterable and paginated
  * query: scheduleType:string Filter by schedule type (container_update, git_stack_sync, ...)
- * query: scheduleId:integer Filter by the numeric id of the schedule
- * query: environmentId:integer Filter by environment id ("null" for global/system schedules)
+ * query: scheduleId:integer Filter by the numeric id of the schedule (from GET /api/schedules)
+ * query: environmentId:integer Filter by environment id ("null" for global/system schedules) (from GET /api/environments)
  * query: status:string Filter by execution status (queued/running/success/warning/failed/skipped)
  * query: statuses:string Comma-separated list of statuses (alternative to status)
  * query: triggeredBy:string Filter by trigger (cron/webhook/manual)

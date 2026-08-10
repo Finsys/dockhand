@@ -10,7 +10,7 @@ import { createJobResponse } from '$lib/server/sse';
  * @openapi
  * summary: Read the resolved compose file content for a stack, along with the resolved compose/env file paths
  * path: name:string! Stack name
- * query: env:integer Environment ID the stack belongs to
+ * query: env:integer Environment ID the stack belongs to (from GET /api/environments)
  * resp-200: {content:string!, stackDir:string, composePath:string, envPath:string, suggestedEnvPath:string}
  * resp-200-example: {"content":"services:\n  web:\n    image: nginx","stackDir":"/opt/stacks/web","composePath":"/opt/stacks/web/compose.yaml","envPath":"/opt/stacks/web/.env","suggestedEnvPath":"/opt/stacks/web/.env"}
  * resp-403: Permission denied (requires stacks:view)
@@ -59,7 +59,7 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
  * @openapi
  * summary: Save the compose file content (with optional custom/moved paths); when restart=true the stack is redeployed with force-recreate and progress streams over SSE
  * path: name:string! Stack name
- * query: env:integer Environment ID the stack belongs to
+ * query: env:integer Environment ID the stack belongs to (from GET /api/environments)
  * body: {content:string!, restart:boolean, composePath:string, envPath:string, moveFromDir:string, oldComposePath:string, oldEnvPath:string}
  * body-example: {"content":"services:\n  web:\n    image: nginx","restart":false}
  * resp-200: {success:boolean!}

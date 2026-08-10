@@ -28,7 +28,8 @@ async function isEdgeMode(envId?: number): Promise<{ isEdge: boolean; environmen
  *
  * @openapi
  * summary: Tag a local image and push it to a configured registry (streams progress, or runs synchronously for Accept: application/json)
- * query: env:integer ID of the environment the source image belongs to
+ * query: env:integer ID of the environment the source image belongs to (from GET /api/environments)
+ * description: imageId from GET /api/images. registryId from GET /api/registries.
  * body: {imageId:string!, registryId:integer!, imageName:string, newTag:string}
  * body-example: {"imageId":"sha256:abc123","registryId":2,"imageName":"myapp:latest","newTag":"myapp:v1.2.3"}
  * resp-200: {jobId:string} when streaming, or the final push result for Accept: application/json clients

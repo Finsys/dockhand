@@ -29,6 +29,7 @@ import { authorize } from '$lib/server/authorize';
 /**
  * @openapi
  * summary: Clone a repo to a temp dir and preview its merged env-file variables for the git-stack env editor
+ * description: repositoryId from GET /api/git/repositories. credentialId from GET /api/git/credentials.
  * body: {repositoryId:integer, url:string, branch:string, credentialId:integer, composePath:string!, envFilePath:string}
  * body-example: {"repositoryId":3,"composePath":"docker-compose.yml","envFilePath":".env.prod"}
  * resp-200: {vars:object!, sources:object!}

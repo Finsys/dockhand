@@ -10,7 +10,7 @@ const LOGS_FAVORITES_KEY = 'logs_favorites';
 /**
  * @openapi
  * summary: Get the saved log favorites (container names) for an environment
- * query: env:integer! Environment ID
+ * query: env:integer! Environment ID (from GET /api/environments)
  * resp-200: {favorites:array<string>}
  * resp-200-example: {"favorites":["web-1","db-1"]}
  * resp-400: Environment ID is required, or invalid (not a number)
@@ -49,6 +49,7 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 /**
  * @openapi
  * summary: Add, remove or reorder log favorites (container names) for an environment
+ * description: environmentId from GET /api/environments.
  * body: {environmentId:integer!, action:string!, containerName:string, favorites:array<string>}
  * body-example: {"environmentId":1,"action":"add","containerName":"web-1"}
  * resp-200: {favorites:array<string>}

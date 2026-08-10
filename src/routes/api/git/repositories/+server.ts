@@ -36,6 +36,7 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 /**
  * @openapi
  * summary: Create a git repository (branch defaults to main); deployment config lives on git stacks, not here
+ * description: credentialId from GET /api/git/credentials.
  * body: {name:string!, url:string!, branch:string, credentialId:integer}
  * body-example: {"name":"homelab","url":"https://github.com/example/homelab.git","branch":"main","credentialId":2}
  * resp-200: {id:integer!, name:string!, url:string!, branch:string!, credentialId:integer}

@@ -21,7 +21,7 @@ import { inspectContainer, updateContainerRuntime, IN_PLACE_UPDATE_FIELDS, type 
  * @openapi
  * summary: Update a running container's restart policy and/or CPU/memory/blkio/pids limits in-place (no recreate)
  * path: id:string! Container id
- * query: env:integer Environment id
+ * query: env:integer Environment id (from GET /api/environments)
  * body: {RestartPolicy:{}, CpuShares:integer, CpuPeriod:integer, CpuQuota:integer, CpuRealtimePeriod:integer, CpuRealtimeRuntime:integer, CpusetCpus:string, CpusetMems:string, NanoCpus:integer, Memory:integer, MemorySwap:integer, MemoryReservation:integer, MemorySwappiness:integer, KernelMemory:integer, BlkioWeight:integer, BlkioWeightDevice:array<string>, BlkioDeviceReadBps:array<string>, BlkioDeviceWriteBps:array<string>, BlkioDeviceReadIOps:array<string>, BlkioDeviceWriteIOps:array<string>, PidsLimit:integer} (unsupported fields are silently dropped)
  * body-example: {"Memory":536870912,"PidsLimit":512}
  * resp-200: {success:boolean!, warnings:array<string>}

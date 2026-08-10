@@ -49,6 +49,7 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 /**
  * @openapi
  * summary: Update a git repository's basic fields (name/url/branch/credential)
+ * description: credentialId from GET /api/git/credentials.
  * path: id:integer! Git repository ID
  * body: {name:string, url:string, branch:string, credentialId:integer}
  * body-example: {"name":"homelab","url":"https://github.com/example/homelab.git","branch":"production","credentialId":2}

@@ -8,6 +8,7 @@ import { NOTIFICATION_EVENT_TYPES, type NotificationEventType } from '$lib/serve
  *
  * @openapi
  * summary: Trigger a real notification for a given event type (development/testing helper)
+ * description: environmentId from GET /api/environments.
  * body: {eventType:string!, environmentId:integer, payload:{title:string!, message:string!, type:string}}
  * body-example: {"eventType":"container_unhealthy","environmentId":1,"payload":{"title":"Container unhealthy","message":"web-1 is unhealthy","type":"warning"}}
  * resp-200: {success:boolean!, sent:integer, eventType:string!, environmentId:integer}

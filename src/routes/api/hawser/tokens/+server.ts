@@ -66,6 +66,7 @@ export const GET: RequestHandler = async ({ cookies }) => {
 /**
  * @openapi
  * summary: Generate a new Hawser agent token for an environment (the plaintext token is returned only once)
+ * description: environmentId from GET /api/environments.
  * body: {name:string!, environmentId:integer!, expiresAt:string, rawToken:string}
  * body-example: {"name":"edge-01","environmentId":1,"expiresAt":"2027-01-01T00:00:00Z"}
  * resp-200: {token:string!, tokenId:integer!, message:string!}
