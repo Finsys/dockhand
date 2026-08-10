@@ -166,6 +166,7 @@ export function buildSpec({ routes, fileContents, annotationsByPath, isPublicFn,
 				responses,
 				security
 			};
+			if (annotation?.description) operation.description = annotation.description;
 			if (requestBody) operation.requestBody = requestBody;
 
 			pathItem[method.toLowerCase()] = operation;
