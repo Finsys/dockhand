@@ -58,6 +58,10 @@ export interface ResponseAnnotation {
 
 export interface HandlerAnnotation {
 	summary?: string;
+	/** Optional long-form explanation (OpenAPI operation.description) — use for
+	 *  context the one-line summary can't carry: purpose, read-only/write
+	 *  semantics, or where a related write operation lives. Markdown-safe. */
+	description?: string;
 	query: Record<string, ParamAnnotation>;
 	path: Record<string, ParamAnnotation>;
 	body?: MiniSchema;
@@ -186,6 +190,10 @@ export function discoverRoutes(rootDirs: string[], routesRoot: string): { routes
 //   /**
 //    * @openapi
 //    * summary: <text>
+//    * description: <text>                        (optional; longer explanation
+//    *                                              than summary — purpose,
+//    *                                              read-only/write semantics,
+//    *                                              pointer to a related endpoint)
 //    * query: <name>:<type>[!] <description>     (repeatable)
 //    * path:  <name>:<type>[!] <description>      (repeatable; enriches an
 //    *                                             auto-detected {name} segment)
@@ -325,6 +333,10 @@ export function parseAnnotations(content: string): Partial<Record<HttpMethod, Ha
 
 			if (key === 'summary') {
 				annotation.summary = rawValue;
+				continue;
+			}
+			if (key === 'description') {
+				annotation.description = rawValue;
 				continue;
 			}
 			if (key === 'query' || key === 'path') {

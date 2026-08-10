@@ -3136,7 +3136,8 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "description": "Permission denial (403, \"backups:view\") is produced by the shared requireBackups route guard."
       },
       "post": {
         "operationId": "post_api_backup_configs",
@@ -3167,6 +3168,7 @@
             "bearerAuth": []
           }
         ],
+        "description": "Permission denial (403, \"backups:manage\") is produced by the shared requireBackups route guard. A requested environmentId the caller can't access also 403s (enterprise).",
         "requestBody": {
           "required": true,
           "content": {
@@ -3289,7 +3291,8 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "description": "Permission (\"backups:view\") and environment-access denials (403) and not-found (404) are produced by the shared route guards."
       },
       "put": {
         "operationId": "put_api_backup_configs_id",
@@ -3330,6 +3333,7 @@
             "bearerAuth": []
           }
         ],
+        "description": "Permission (\"backups:manage\") and environment-access denials (403) and not-found (404) are produced by the shared route guards. The environment is fixed at creation and cannot be changed here.",
         "requestBody": {
           "required": true,
           "content": {
@@ -3434,7 +3438,8 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "description": "Permission (\"backups:manage\") and environment-access denials (403) and not-found (404) are produced by the shared route guards."
       }
     },
     "/api/backup/configs/{id}/run": {
@@ -3467,7 +3472,8 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "description": "Returns a text/event-stream that emits `progress` events during the run and a final `result` event. Permission (\"backups:manage\") and environment-access denials (403) and not-found (404) are produced by the shared route guards."
       }
     },
     "/api/backup/configs/{id}/stop": {
@@ -3503,7 +3509,8 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "description": "Permission (\"backups:manage\") and environment-access denials (403) and not-found (404) are produced by the shared route guards."
       }
     },
     "/api/backup/destinations": {
@@ -3526,7 +3533,8 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "description": "Permission denial (403, \"backups:view\") is produced by the shared requireBackups route guard."
       },
       "post": {
         "operationId": "post_api_backup_destinations",
@@ -3557,6 +3565,7 @@
             "bearerAuth": []
           }
         ],
+        "description": "Permission denial (403, \"backups:manage\") is produced by the shared requireBackups route guard.",
         "requestBody": {
           "required": true,
           "content": {
@@ -3643,7 +3652,8 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "description": "Permission denial (403, \"backups:view\") is produced by the shared requireBackups route guard."
       },
       "put": {
         "operationId": "put_api_backup_destinations_id",
@@ -3687,6 +3697,7 @@
             "bearerAuth": []
           }
         ],
+        "description": "Permission denial (403, \"backups:manage\") is produced by the shared requireBackups route guard.",
         "requestBody": {
           "required": true,
           "content": {
@@ -3764,7 +3775,8 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "description": "Permission denial (403, \"backups:manage\") is produced by the shared requireBackups route guard."
       }
     },
     "/api/backup/destinations/{id}/init": {
@@ -3806,7 +3818,8 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "description": "Permission denial (403, \"backups:manage\") is produced by the shared requireBackups route guard."
       }
     },
     "/api/backup/destinations/{id}/rotate-key": {
@@ -3852,6 +3865,7 @@
             "bearerAuth": []
           }
         ],
+        "description": "Permission denial (403, \"backups:manage\") is produced by the shared requireBackups route guard.",
         "requestBody": {
           "required": true,
           "content": {
@@ -3920,6 +3934,7 @@
             "bearerAuth": []
           }
         ],
+        "description": "Permission denial (403, \"backups:manage\") is produced by the shared requireBackups route guard. Streamed via createJobResponse — a task failure never surfaces as an HTTP 500; it comes back as a 200 with a failed job result (JSON-preferring callers) or a job/SSE 'result' event with success:false (streaming callers).",
         "requestBody": {
           "required": true,
           "content": {
@@ -3979,7 +3994,8 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "description": "Permission denial (403, \"backups:manage\") is produced by the shared requireBackups route guard."
       }
     },
     "/api/backup/destinations/{id}/verify": {
@@ -4016,6 +4032,7 @@
             "bearerAuth": []
           }
         ],
+        "description": "Returns a text/event-stream that emits `progress` events and a final `result` event. Permission denial (403, \"backups:manage\") is produced by the shared requireBackups route guard.",
         "requestBody": {
           "required": true,
           "content": {
@@ -4063,6 +4080,7 @@
             "bearerAuth": []
           }
         ],
+        "description": "Provide `destinationId` to test a saved destination using its stored credentials, or omit it and supply `repository`/`password`/`envVars` to test before saving. Permission denial (403, \"backups:manage\") is produced by the shared requireBackups route guard.",
         "requestBody": {
           "required": true,
           "content": {
@@ -4125,6 +4143,7 @@
             "bearerAuth": []
           }
         ],
+        "description": "Returns a text/event-stream that emits `progress` events and a final `result` event. An in-place restore is destructive and requires confirmOverwrite:true. Authorization and snapshot-environment access are checked before the request shape is validated.",
         "requestBody": {
           "required": true,
           "content": {
@@ -4366,7 +4385,8 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "description": "When allDestinations=true (with configId) all destinations are searched and a partial result is signalled via the X-Incomplete-Destinations response header. Enterprise callers only see snapshots for environments they can access."
       }
     },
     "/api/backup/snapshots/{id}": {
@@ -4579,7 +4599,8 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "description": "Paths are restricted to the /volumes and /metadata snapshot roots and rejected if they contain traversal (\"..\"). Permission (\"backups:view\") and environment-access denials are produced by the shared requireBackups/guardSnapshotEnvAccess route guards."
       }
     },
     "/api/backup/snapshots/{id}/metadata": {
@@ -4630,7 +4651,8 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "description": "Permission (\"backups:view\") and environment-access denials (403) are produced by the shared requireBackups/guardSnapshotEnvAccess route guards; the owning environment is resolved server-side from the snapshot's own tag, not a caller-supplied param."
       }
     },
     "/api/backup/snapshots/diff": {
@@ -4687,7 +4709,8 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "description": "Permission (\"backups:view\") and environment-access denials (403) are produced by the shared requireBackups/guardSnapshotEnvAccess route guards."
       }
     },
     "/api/backup/stack-dir-listing": {
@@ -7273,7 +7296,8 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "description": "Send `multipart/form-data` with one or more `files` parts; each file is tar-wrapped and written into the target directory. Partial success is reported per file in `uploaded`/`errors`."
       }
     },
     "/api/containers/{id}/inspect": {
@@ -7486,7 +7510,8 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "description": "Returns a `text/event-stream`. For Hawser Edge environments whose agent is not connected the stream body carries an error event. Docker stdout/stderr frames are demultiplexed server-side; TTY containers stream raw text."
       }
     },
     "/api/containers/{id}/pause": {
@@ -7821,7 +7846,8 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "description": "On probe failure the endpoint still returns 200 with empty results rather than an error, so callers always get a usable shell list."
       }
     },
     "/api/containers/{id}/start": {
@@ -8169,7 +8195,8 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "description": "Uses the container 'inspect' permission. The `source` field indicates whether the result came from an in-container `ps` (`\"ps\"`) or the Docker top API fallback (`\"top\"`)."
       }
     },
     "/api/containers/{id}/unpause": {
@@ -8310,6 +8337,7 @@
             "bearerAuth": []
           }
         ],
+        "description": "The body carries the container create-options (image, name, env, ports, volumes, …) alongside the two control flags below; `repullImage` pulls the image before recreation and `startAfterUpdate` starts the new container once created.",
         "requestBody": {
           "required": true,
           "content": {
@@ -8635,6 +8663,7 @@
             "bearerAuth": []
           }
         ],
+        "description": "Containers are processed sequentially; the response reports per-container success/failure plus a summary. Use the streaming variant for live progress.",
         "requestBody": {
           "required": true,
           "content": {
@@ -8701,6 +8730,7 @@
             "bearerAuth": []
           }
         ],
+        "description": "Returns a `text/event-stream` reporting per-container progress. `vulnerabilityCriteria` (default \"never\") can block an update when a container's image scan exceeds the configured severity threshold.",
         "requestBody": {
           "required": true,
           "content": {
@@ -8824,7 +8854,8 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "description": "Returns the containers currently flagged as having a pending image update from the last check. Does not trigger a new check — use POST to run a fresh check."
       },
       "post": {
         "operationId": "post_api_containers_check-updates",
@@ -9107,7 +9138,8 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "description": "Returns an empty array when no environment is configured or specified. With `debug=<name>` it returns the raw memory_stats for a single container instead. On internal error it returns an empty array with status 200."
       }
     },
     "/api/containers/stats/stream": {
@@ -9395,7 +9427,8 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "description": "Returns an array of per-environment stats. When env is supplied and matches, a single object is returned instead of an array. An empty array is returned on a fresh install with no environments."
       }
     },
     "/api/dashboard/stats/stream": {
@@ -9421,7 +9454,8 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "description": "Emits environments, partial, complete, error and done events as each environment's stats resolve. When the client sends Accept application/json, the stream is collected and returned as a single JSON payload instead."
       }
     },
     "/api/debug/memory": {
@@ -13890,7 +13924,8 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "description": "Clients sending `Accept: application/json` get a synchronous, buffered SSE-as-JSON result; otherwise a jobId is returned immediately and progress is delivered out-of-band."
       }
     },
     "/api/git/stacks/{id}/env-files": {
@@ -13959,7 +13994,8 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "description": "Lists the `.env*` files in the git stack's synced repository checkout (read-only). Use this to discover which file to configure as the stack's `envFilePath`. This endpoint does not write — to choose the env file, PUT /api/git/stacks/{id} with `envFilePath`; to set env values, use the stack env endpoints."
       },
       "post": {
         "operationId": "post_api_git_stacks_id_env-files",
@@ -14023,6 +14059,7 @@
             "bearerAuth": []
           }
         ],
+        "description": "Reads and parses a single `.env` file (by `path`) from the git stack's synced repository checkout into a key/value map (read-only). There is no write counterpart — git-stack env is set via `envFilePath` (PUT /api/git/stacks/{id}) or the stack env endpoints.",
         "requestBody": {
           "required": true,
           "content": {
@@ -14302,7 +14339,8 @@
             "description": "The deployment triggered by the webhook failed"
           }
         },
-        "security": []
+        "security": [],
+        "description": "Public endpoint authenticated by the stack's webhook secret via `X-Hub-Signature-256` (GitHub) or `X-Gitlab-Token` (GitLab); the raw request body is used for HMAC verification."
       }
     },
     "/api/git/webhook/{id}": {
@@ -14427,7 +14465,8 @@
             "description": "The deployment triggered by the webhook failed"
           }
         },
-        "security": []
+        "security": [],
+        "description": "Public endpoint authenticated by the repository's webhook secret via `X-Hub-Signature-256` (GitHub) or `X-Gitlab-Token` (GitLab); the raw request body is used for HMAC verification."
       }
     },
     "/api/hawser/connect": {
@@ -14904,7 +14943,8 @@
             "description": "Unexpected error while checking database health"
           }
         },
-        "security": []
+        "security": [],
+        "description": "Returns HTTP 200 when healthy and 503 when unhealthy (schema drift or table loss); 500 on an unexpected error. Connection details and the migration tag are only included for authenticated callers with settings:view."
       }
     },
     "/api/host": {
@@ -19556,7 +19596,8 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "description": "Returns a text/event-stream. On completion a `result` event carries { success, result } on success or { success:false, error } on failure — the operation itself never returns a non-200 HTTP status once the permission check passes."
       }
     },
     "/api/prune/networks": {
@@ -20195,6 +20236,7 @@
             "bearerAuth": []
           }
         ],
+        "description": "Pass either a saved registryId or inline url/username/password. The outcome is always reported in a 200 body via the success/connectivity/authenticated fields, never as an HTTP error.",
         "requestBody": {
           "required": true,
           "content": {
@@ -20350,7 +20392,8 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "description": "Docker Hub is rejected (no catalog API). For 401/403/404 from the upstream registry the same status is proxied back to the caller."
       }
     },
     "/api/registry/image": {
@@ -20444,7 +20487,8 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "description": "Docker Hub deletion is rejected. Upstream 401 responses during manifest resolution/deletion are proxied back as 401."
       }
     },
     "/api/registry/search": {
@@ -20546,7 +20590,8 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "description": "With no registry parameter the search runs against Docker Hub; otherwise against the given registry, falling back to Docker Hub search when the registry is a Docker Hub mirror."
       }
     },
     "/api/registry/tag-info": {
@@ -20765,7 +20810,8 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "description": "With no registry parameter, Docker Hub is queried; V2 registries return all tags in one page. Upstream Docker Hub error status codes are proxied back."
       }
     },
     "/api/roles": {
@@ -21907,7 +21953,8 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "description": "sys.description,"
       }
     },
     "/api/schedules/system/{id}/toggle": {
@@ -28207,7 +28254,8 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "description": "Accepts limit, offset, q, severity, image, container, stack, sort and dir query params (parsed centrally). Returns an empty page when no environment resolves."
       }
     },
     "/api/vulnerabilities/count": {
