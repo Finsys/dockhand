@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Dockhand API",
-    "version": "1.0.39",
+    "version": "1.0.41",
     "description": "Auto-generated from src/routes/**/+server.ts by scripts/generate-openapi.ts. Path, HTTP method, tag, and auth requirement are derived automatically from the route tree and hooks.server.ts PUBLIC_PATHS. Parameters, response status codes, and request body fields are additionally auto-detected from each handler’s own source (query params via url.searchParams, status codes via status:/error(), body fields via destructuring) — adding a new endpoint therefore requires ZERO manual spec edits to show up with real params/responses. An optional, additive `@openapi` JSDoc annotation on a handler replaces the generic auto-descriptions with hand-written summaries, exact types, and examples."
   },
   "servers": [
@@ -4601,6 +4601,9 @@
           "403": {
             "description": "Permission denied — requires \"backups:view\", or no access to the snapshot's owning environment"
           },
+          "404": {
+            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+          },
           "500": {
             "description": "Failed to read the file/directory from the snapshot (restic error)"
           }
@@ -4717,6 +4720,102 @@
           },
           "500": {
             "description": "Failed to diff the snapshots (restic error)"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/backup/stack-dir-listing": {
+      "get": {
+        "operationId": "get_api_backup_stack-dir-listing",
+        "tags": [
+          "backup"
+        ],
+        "summary": "Probe the target host and list the actual contents of a stack's directory, for the backup create/edit dialog's file picker",
+        "parameters": [
+          {
+            "name": "target",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Target stack name"
+          },
+          {
+            "name": "env",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Environment ID the stack belongs to"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The stack directory probe result — kind \"listed\"/\"tar\" with hostPath/localStackDir and entries, or kind \"helper-failed\"/\"unknown\" with a reason (never throws for an operational failure)"
+          },
+          "400": {
+            "description": "target is required"
+          },
+          "403": {
+            "description": "Permission denied (requires backups:view), or no access to the target's environment (enterprise)"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/backup/stack-path": {
+      "get": {
+        "operationId": "get_api_backup_stack-path",
+        "tags": [
+          "backup"
+        ],
+        "summary": "Preview where a stack's directory will be captured from on the host, without running a backup",
+        "parameters": [
+          {
+            "name": "target",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Target stack name"
+          },
+          {
+            "name": "env",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Environment ID the stack belongs to"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The resolved capture path preview — kind \"candidate\" with hostPath, kind \"tar\" with composeFile only, or kind \"unknown\" with a reason"
+          },
+          "400": {
+            "description": "target is required"
+          },
+          "403": {
+            "description": "Permission denied (requires backups:view), or no access to the target's environment (enterprise)"
           }
         },
         "security": [
@@ -11103,6 +11202,140 @@
             "bearerAuth": []
           }
         ]
+      }
+    },
+    "/api/environments/{id}/remote-stacks-dir": {
+      "get": {
+        "operationId": "get_api_environments_id_remote-stacks-dir",
+        "tags": [
+          "environments"
+        ],
+        "summary": "Get the per-environment remote stacks directory used to stage stack files onto a direct (agentless) daemon",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Environment ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "remoteStacksDir": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "example": {
+                  "remoteStacksDir": "/mnt/dockhand/stacks"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied (requires environments:view)"
+          },
+          "404": {
+            "description": "Environment not found"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "operationId": "post_api_environments_id_remote-stacks-dir",
+        "tags": [
+          "environments"
+        ],
+        "summary": "Set (or clear) the per-environment remote stacks directory for a direct (agentless) daemon",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Environment ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "remoteStacksDir": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ]
+                },
+                "example": {
+                  "success": true,
+                  "remoteStacksDir": "/mnt/dockhand/stacks"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input — remoteStacksDir must be a string or null, or must be an absolute path with no \"..\""
+          },
+          "403": {
+            "description": "Permission denied (requires environments:edit)"
+          },
+          "404": {
+            "description": "Environment not found"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "remoteStacksDir": {
+                    "type": "string"
+                  }
+                }
+              },
+              "example": {
+                "remoteStacksDir": "/mnt/dockhand/stacks"
+              }
+            }
+          }
+        }
       }
     },
     "/api/environments/{id}/test": {
@@ -20358,6 +20591,85 @@
         ]
       }
     },
+    "/api/registry/tag-info": {
+      "get": {
+        "operationId": "get_api_registry_tag-info",
+        "tags": [
+          "registry"
+        ],
+        "summary": "Resolve the compressed size and creation date of a single registry tag from its manifest (lazy per-tag fetch for the registry browser)",
+        "parameters": [
+          {
+            "name": "registry",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Registry ID; omitted or Docker Hub registries return a graceful \"not supported\" result instead of a manifest fetch"
+          },
+          {
+            "name": "image",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Image repository/name"
+          },
+          {
+            "name": "tag",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Tag name or digest"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "size": {
+                      "type": "number"
+                    },
+                    "lastUpdated": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "example": {
+                  "size": 104857600,
+                  "lastUpdated": "2026-06-01T12:00:00Z"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "image and tag are required"
+          },
+          "404": {
+            "description": "Registry not found"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/registry/tags": {
       "get": {
         "operationId": "get_api_registry_tags",
@@ -22381,6 +22693,148 @@
         }
       }
     },
+    "/api/settings/navigation": {
+      "get": {
+        "operationId": "get_api_settings_navigation",
+        "tags": [
+          "settings"
+        ],
+        "summary": "Get the effective navigation preferences (landing page, env-click target) plus the raw global and per-user values",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "effective": {
+                      "type": "object",
+                      "properties": {
+                        "landingPage": {
+                          "type": "string"
+                        },
+                        "envClickPage": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "landingPage",
+                        "envClickPage"
+                      ]
+                    },
+                    "global": {
+                      "type": "object",
+                      "properties": {
+                        "landingPage": {
+                          "type": "string"
+                        },
+                        "envClickPage": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "user": {
+                      "type": "object",
+                      "properties": {
+                        "landingPage": {
+                          "type": "string"
+                        },
+                        "envClickPage": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                },
+                "example": {
+                  "effective": {
+                    "landingPage": "dashboard",
+                    "envClickPage": "containers"
+                  },
+                  "global": {
+                    "landingPage": null,
+                    "envClickPage": null
+                  },
+                  "user": null
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "operationId": "put_api_settings_navigation",
+        "tags": [
+          "settings"
+        ],
+        "summary": "Update navigation preferences (landing page, env-click target) at global or per-user scope",
+        "parameters": [
+          {
+            "name": "scope",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Preference scope to update — \"global\" (default) or \"user\""
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The updated preferences ({success:true, global:{...}} for scope=global, or {success:true, user:{...}} for scope=user)"
+          },
+          "400": {
+            "description": "Invalid input — invalid landingPage/envClickPage value, or scope=user requested while authentication is disabled"
+          },
+          "401": {
+            "description": "Not authenticated (scope=user, authentication is enabled but no valid session)"
+          },
+          "403": {
+            "description": "Permission denied (scope=global, requires settings:edit)"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "landingPage": {
+                    "type": "string"
+                  },
+                  "envClickPage": {
+                    "type": "string"
+                  }
+                }
+              },
+              "example": {
+                "landingPage": "containers",
+                "envClickPage": "logs"
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/settings/scanner": {
       "get": {
         "operationId": "get_api_settings_scanner",
@@ -22983,6 +23437,15 @@
             "description": "Stack name"
           },
           {
+            "name": "files",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Query parameter \"files\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+          },
+          {
             "name": "env",
             "in": "query",
             "required": false,
@@ -23349,6 +23812,99 @@
             }
           }
         }
+      }
+    },
+    "/api/stacks/{name}/delete-preview": {
+      "get": {
+        "operationId": "get_api_stacks_name_delete-preview",
+        "tags": [
+          "stacks"
+        ],
+        "summary": "Preview the on-disk directories and named volumes a delete-with-files would remove for a stack",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Stack name"
+          },
+          {
+            "name": "env",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Environment ID the stack belongs to"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "stackName": {
+                      "type": "string"
+                    },
+                    "sourceType": {
+                      "type": "string"
+                    },
+                    "stackDir": {
+                      "type": "string"
+                    },
+                    "gitDir": {
+                      "type": "string"
+                    },
+                    "namedVolumes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "canDeleteFiles": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "stackName",
+                    "namedVolumes",
+                    "canDeleteFiles"
+                  ]
+                },
+                "example": {
+                  "stackName": "web",
+                  "sourceType": "internal",
+                  "stackDir": "/opt/stacks/web",
+                  "gitDir": null,
+                  "namedVolumes": [
+                    "web_data"
+                  ],
+                  "canDeleteFiles": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied (requires stacks:remove)"
+          },
+          "500": {
+            "description": "Failed to compute the deletion preview"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/stacks/{name}/deploy": {
