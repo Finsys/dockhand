@@ -15,12 +15,7 @@ export interface HostInfo {
 	cpus: number;
 	totalMemory: number;
 	freeMemory: number;
-	// Disk stats are for the root filesystem ('/') of the machine Dockhand itself
-	// runs on — not the Docker daemon's host. For a local socket connection those
-	// are the same machine, so this covers the common case (issue #976, e.g. an
-	// LXC running Dockhand). For remote/Hawser-connected environments they'd
-	// diverge (and `/var/lib/docker` can itself be a different filesystem than
-	// `/` on either side), so these are omitted rather than shown misleadingly.
+	// null for remote/Hawser environments — see getHostDiskInfo().
 	diskTotal: number | null;
 	diskFree: number | null;
 	diskAvailable: number | null;
