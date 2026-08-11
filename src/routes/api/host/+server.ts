@@ -4,8 +4,8 @@ import { getDockerInfo, getHawserInfo } from '$lib/server/docker';
 import { getEnvironment } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
 import { getEdgeConnectionInfo } from '$lib/server/hawser';
+import { getHostDiskInfo } from '$lib/server/host-disk-core';
 import os from 'node:os';
-import { statfs } from 'node:fs/promises';
 
 export interface HostInfo {
 	hostname: string;
@@ -15,7 +15,9 @@ export interface HostInfo {
 	cpus: number;
 	totalMemory: number;
 	freeMemory: number;
-	// null for remote/Hawser environments — see getHostDiskInfo().
+	// Disk stats for the Docker daemon's data-root (DockerRootDir), not
+	// necessarily '/'. Null for remote/Hawser environments — see
+	// getHostDiskInfo() in host-disk-core.ts.
 	diskTotal: number | null;
 	diskFree: number | null;
 	diskAvailable: number | null;
@@ -33,28 +35,6 @@ export interface HostInfo {
 		hawserVersion?: string;
 		highlightChanges?: boolean;
 	};
-}
-
-/**
- * Disk space of the root filesystem Dockhand itself is running on, via
- * Node's `fs.statfs` (available since Node 18.15). Returns null if the stat
- * fails (e.g. platform without statfs support) rather than throwing, since
- * this is a supplementary field on an otherwise-successful response.
- */
-async function getHostDiskInfo(): Promise<{ diskTotal: number; diskFree: number; diskAvailable: number } | null> {
-	try {
-		const stats = await statfs('/');
-		return {
-			diskTotal: stats.blocks * stats.bsize,
-			diskFree: stats.bfree * stats.bsize,
-			// bavail excludes blocks reserved for the superuser - what's actually
-			// usable, and what `df`'s "Avail" column shows.
-			diskAvailable: stats.bavail * stats.bsize
-		};
-	} catch (error) {
-		console.warn('[Host] Failed to read disk stats:', error instanceof Error ? error.message : error);
-		return null;
-	}
 }
 
 function getLocalIpAddress(): string {
@@ -79,7 +59,7 @@ function getLocalIpAddress(): string {
  * summary: Return host info (hostname, IP, CPU, memory, disk, uptime, Docker counts) for the daemon behind an environment
  * query: env:integer ID of the environment to describe (basic local info is returned when omitted) (from GET /api/environments)
  * resp-200: {hostname:string!, ipAddress:string!, platform:string!, arch:string!, cpus:integer!, totalMemory:integer!, freeMemory:integer!, diskTotal:integer, diskFree:integer, diskAvailable:integer, uptime:integer!, dockerVersion:string, dockerContainers:integer!, dockerContainersRunning:integer!, dockerImages:integer!, environment:object}
- * resp-200-desc: diskTotal/diskFree/diskAvailable are null unless env resolves to a local socket connection (see the getHostDiskInfo() doc comment)
+ * resp-200-desc: diskTotal/diskFree/diskAvailable are null unless env resolves to a local socket connection; measured against the Docker data-root (DockerRootDir from /info), not necessarily '/' (see the getHostDiskInfo() doc comment in host-disk-core.ts)
  * resp-200-example: {"hostname":"docker-host","ipAddress":"192.168.1.10","platform":"linux","arch":"x64","cpus":8,"totalMemory":16777216000,"freeMemory":8388608000,"diskTotal":107374182400,"diskFree":53687091200,"diskAvailable":50000000000,"uptime":123456,"dockerVersion":"27.0.3","dockerContainers":10,"dockerContainersRunning":8,"dockerImages":25,"environment":{"id":1,"name":"local","connectionType":"socket"}}
  * resp-403: Permission denied, or (enterprise) no access to this environment
  * resp-500: Failed to get host info
@@ -107,7 +87,10 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 		}
 
 		if (!env) {
-			// No environment specified - return basic local info
+			// No environment specified - return basic local info. There's no envId
+			// here, so we can't call Docker's /info for DockerRootDir (getDockerConfig()
+			// throws without an envId) — fall back to measuring '/' instead of the
+			// actual Docker data-root.
 			const diskInfo = await getHostDiskInfo();
 			return json({
 				hostname: os.hostname(),
@@ -132,10 +115,6 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 		// Determine if this is a truly local connection (socket without remote host)
 		const isSocketType = env.connectionType === 'socket' || !env.connectionType;
 		const isLocalConnection = isSocketType && (!env.host || env.host === 'localhost' || env.host === '127.0.0.1');
-
-		// Disk stats are only meaningful for a local connection - see the
-		// getHostDiskInfo() doc comment for why remote/Hawser hosts are skipped.
-		const diskInfoPromise = isLocalConnection ? getHostDiskInfo() : Promise.resolve(null);
 
 		// Fetch Docker info and Hawser info in parallel for hawser-standard mode
 		let dockerInfo: any;
@@ -171,7 +150,13 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 			// For 'direct' connections without Hawser, uptime remains 0 (not available)
 		}
 
-		const diskInfo = await diskInfoPromise;
+		// Disk stats are only meaningful for a local connection - see the
+		// getHostDiskInfo() doc comment in host-disk-core.ts for why remote/Hawser
+		// hosts are skipped. Measured against Docker's own data-root (DockerRootDir
+		// from /info) rather than '/' — the two can differ when `data-root` in
+		// daemon.json points at a separate disk/mount (#976). This needs dockerInfo,
+		// so it runs after the fetch above instead of in parallel with it.
+		const diskInfo = isLocalConnection ? await getHostDiskInfo(dockerInfo?.DockerRootDir) : null;
 
 		const hostInfo: HostInfo = {
 			// Hostname/IP describe the Docker DAEMON's host, NOT Dockhand's own
