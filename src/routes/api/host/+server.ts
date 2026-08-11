@@ -5,6 +5,7 @@ import { getEnvironment } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
 import { getEdgeConnectionInfo } from '$lib/server/hawser';
 import os from 'node:os';
+import { statfs } from 'node:fs/promises';
 
 export interface HostInfo {
 	hostname: string;
@@ -14,6 +15,15 @@ export interface HostInfo {
 	cpus: number;
 	totalMemory: number;
 	freeMemory: number;
+	// Disk stats are for the root filesystem ('/') of the machine Dockhand itself
+	// runs on — not the Docker daemon's host. For a local socket connection those
+	// are the same machine, so this covers the common case (issue #976, e.g. an
+	// LXC running Dockhand). For remote/Hawser-connected environments they'd
+	// diverge (and `/var/lib/docker` can itself be a different filesystem than
+	// `/` on either side), so these are omitted rather than shown misleadingly.
+	diskTotal: number | null;
+	diskFree: number | null;
+	diskAvailable: number | null;
 	uptime: number;
 	dockerVersion: string;
 	dockerContainers: number;
@@ -28,6 +38,28 @@ export interface HostInfo {
 		hawserVersion?: string;
 		highlightChanges?: boolean;
 	};
+}
+
+/**
+ * Disk space of the root filesystem Dockhand itself is running on, via
+ * Node's `fs.statfs` (available since Node 18.15). Returns null if the stat
+ * fails (e.g. platform without statfs support) rather than throwing, since
+ * this is a supplementary field on an otherwise-successful response.
+ */
+async function getHostDiskInfo(): Promise<{ diskTotal: number; diskFree: number; diskAvailable: number } | null> {
+	try {
+		const stats = await statfs('/');
+		return {
+			diskTotal: stats.blocks * stats.bsize,
+			diskFree: stats.bfree * stats.bsize,
+			// bavail excludes blocks reserved for the superuser - what's actually
+			// usable, and what `df`'s "Avail" column shows.
+			diskAvailable: stats.bavail * stats.bsize
+		};
+	} catch (error) {
+		console.warn('[Host] Failed to read disk stats:', error instanceof Error ? error.message : error);
+		return null;
+	}
 }
 
 function getLocalIpAddress(): string {
@@ -69,6 +101,7 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 
 		if (!env) {
 			// No environment specified - return basic local info
+			const diskInfo = await getHostDiskInfo();
 			return json({
 				hostname: os.hostname(),
 				ipAddress: getLocalIpAddress(),
@@ -77,6 +110,9 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 				cpus: os.cpus().length,
 				totalMemory: os.totalmem(),
 				freeMemory: os.freemem(),
+				diskTotal: diskInfo?.diskTotal ?? null,
+				diskFree: diskInfo?.diskFree ?? null,
+				diskAvailable: diskInfo?.diskAvailable ?? null,
 				uptime: os.uptime(),
 				dockerVersion: null,
 				dockerContainers: 0,
@@ -89,6 +125,10 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 		// Determine if this is a truly local connection (socket without remote host)
 		const isSocketType = env.connectionType === 'socket' || !env.connectionType;
 		const isLocalConnection = isSocketType && (!env.host || env.host === 'localhost' || env.host === '127.0.0.1');
+
+		// Disk stats are only meaningful for a local connection - see the
+		// getHostDiskInfo() doc comment for why remote/Hawser hosts are skipped.
+		const diskInfoPromise = isLocalConnection ? getHostDiskInfo() : Promise.resolve(null);
 
 		// Fetch Docker info and Hawser info in parallel for hawser-standard mode
 		let dockerInfo: any;
@@ -124,6 +164,8 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 			// For 'direct' connections without Hawser, uptime remains 0 (not available)
 		}
 
+		const diskInfo = await diskInfoPromise;
+
 		const hostInfo: HostInfo = {
 			// Hostname/IP describe the Docker DAEMON's host, NOT Dockhand's own
 			// container. `os.hostname()` / getLocalIpAddress() run INSIDE this
@@ -144,6 +186,9 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 			cpus: isLocalConnection ? os.cpus().length : (dockerInfo.NCPU || 0),
 			totalMemory: isLocalConnection ? os.totalmem() : (dockerInfo.MemTotal || 0),
 			freeMemory: isLocalConnection ? os.freemem() : 0, // Not available from Docker API
+			diskTotal: diskInfo?.diskTotal ?? null,
+			diskFree: diskInfo?.diskFree ?? null,
+			diskAvailable: diskInfo?.diskAvailable ?? null,
 			uptime,
 			dockerVersion: dockerInfo.ServerVersion || 'unknown',
 			dockerContainers: dockerInfo.Containers || 0,
