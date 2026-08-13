@@ -838,7 +838,7 @@ export function deleteRepositoryFiles(repoId: number): void {
 
 // === Git Stack Functions ===
 
-async function getStackRepoPath(stackId: number, stackName?: string, environmentId?: number | null): Promise<string> {
+export async function getStackRepoPath(stackId: number, stackName?: string, environmentId?: number | null): Promise<string> {
 	if (stackName && environmentId) {
 		// Use old path if it already exists (backward compat), otherwise use name-based path
 		const oldPath = join(GIT_REPOS_DIR, `stack-${stackId}`);

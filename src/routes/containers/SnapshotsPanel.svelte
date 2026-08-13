@@ -41,6 +41,10 @@
 	}
 
 	let loading = $state(true);
+	// Progress of the per-destination snapshot sweep (X of N repos) - a slow/unreachable
+	// repo can take up to the backend restic timeout (5 min), so show it advancing.
+	let loadDone = $state(0);
+	let loadTotal = $state(0);
 	let snapshots = $state<Snapshot[]>([]);
 	let deletingSnapshot = $state<string | null>(null);
 	let confirmDeleteSnapshot = $state<string | null>(null);
@@ -55,6 +59,8 @@
 	let showRestore = $state(false);
 	let restoreDestId = $state(0);
 	let restoreSnapshotId = $state('');
+	let restoreDestName = $state('');
+	let restoreDestRepo = $state('');
 	// Diff (click one to select, another to compare)
 	let showDiff = $state(false);
 	let diffDestId = $state(0);
@@ -97,22 +103,29 @@
 			const destinations: { id: number; name: string; repository: string }[] = destRes.ok ? await destRes.json() : [];
 			const nameTag = `dockhand:name=${targetName}`;
 			const all: Snapshot[] = [];
-			// Query every destination and keep only THIS target's snapshots (by tag).
+			loadDone = 0;
+			loadTotal = destinations.length;
+			snapshots = [];
+			// Query every destination and keep only THIS target's snapshots (by tag). Show each
+			// repo's results the moment it returns instead of blocking on the slowest repo - with
+			// many (or one unreachable) repos the list fills in live rather than after a long wait.
 			await Promise.all(destinations.map(async (dest) => {
 				try {
 					const res = await fetch(`/api/backup/snapshots?destinationId=${dest.id}`);
 					if (!res.ok) return;
 					const data = await res.json();
 					const snaps: any[] = data.snapshots ?? data;
-					for (const s of snaps) {
-						if ((s.tags || []).some((t: string) => t === nameTag)) {
-							all.push({ ...s, _destinationId: dest.id, _destinationName: dest.name, _destinationRepository: dest.repository });
-						}
+					const mine = snaps
+						.filter((s) => (s.tags || []).some((t: string) => t === nameTag))
+						.map((s) => ({ ...s, _destinationId: dest.id, _destinationName: dest.name, _destinationRepository: dest.repository }));
+					if (mine.length) {
+						all.push(...mine);
+						all.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
+						snapshots = [...all];
+						onCount?.(all.length);
 					}
-				} catch { /* skip an unreachable destination */ }
+				} catch { /* skip an unreachable destination */ } finally { loadDone += 1; }
 			}));
-			all.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
-			snapshots = all;
 			onCount?.(all.length);
 
 			// Per-snapshot stats from schedule executions (recorded at backup time).
@@ -151,6 +164,8 @@
 	function openRestore(s: Snapshot) {
 		restoreDestId = s._destinationId;
 		restoreSnapshotId = s.id;
+		restoreDestName = s._destinationName;
+		restoreDestRepo = s._destinationRepository;
 		showRestore = true;
 	}
 	function toggleDiff(s: Snapshot) {
@@ -226,7 +241,7 @@
 	<!-- First load only: a quiet spinner, no skeleton. On a refresh where rows already
 	     exist we fall through and keep the real table visible (the header refresh icon
 	     already signals progress). Matches the History tab's empty/loading treatment. -->
-	<LoadingState class="min-h-[50vh]" label="Loading snapshots..." />
+	<LoadingState class="min-h-[50vh]" label={loadTotal > 1 ? `Loading snapshots… ${loadDone} of ${loadTotal} repos` : 'Loading snapshots…'} />
 {:else if snapshots.length === 0}
 	<div class="flex min-h-[60vh] flex-col items-center justify-center py-10 text-center">
 		<Archive class="mb-3 h-10 w-10 text-muted-foreground/40" />
@@ -333,6 +348,8 @@
 	destinationId={restoreDestId}
 	snapshotId={restoreSnapshotId}
 	containerName={targetName}
+	destinationName={restoreDestName}
+	destinationRepository={restoreDestRepo}
 	{environmentId}
 	onDone={loadSnapshots}
 />

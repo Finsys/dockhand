@@ -2,14 +2,15 @@ import { json } from '@sveltejs/kit';
 import { validateSnapshotId } from '$lib/server/docker-validation';
 import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
+import { requireBackups } from '$lib/server/backups/route-guards';
 import { dumpSnapshotFile, dumpSnapshotFileBytes, dumpSnapshotArchive } from '$lib/server/backups';
 import { guardSnapshotEnvAccess } from '$lib/server/backups/route-guards';
+import { parseSnapshotLayout, redactSnapshotLayout } from '$lib/server/backups/snapshot-layout';
 
 export const GET: RequestHandler = async ({ params, url, cookies }) => {
 	const auth = await authorize(cookies);
-	if (auth.authEnabled && !await auth.can('backups', 'view')) {
-		return json({ error: 'Permission denied' }, { status: 403 });
-	}
+	const denied = await requireBackups(auth, 'view');
+	if (denied) return denied;
 
 	const snapshotId = params.id;
 	const invalidSnap = validateSnapshotId(snapshotId);
@@ -46,6 +47,26 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 		!path.startsWith('/volumes/') && !path.startsWith('/metadata/')
 	) {
 		return json({ error: 'Invalid path' }, { status: 400 });
+	}
+
+	// metadata.json carries secrets (stack.secrets ciphertext + container Config.Env
+	// plaintext). It must ONLY leave the process through the redacting path — never as a
+	// raw file/byte/archive dump, which would bypass redaction. Serve a redacted inline
+	// preview; refuse raw downloads and reject a /metadata archive dump that would embed it.
+	const isMetadataFile = path === '/metadata/metadata.json';
+	if (isMetadataFile || (isDir && download && (path === '/metadata' || path === '/metadata/'))) {
+		if (download) {
+			return json({ error: 'metadata.json cannot be downloaded raw; use the snapshot metadata endpoint (secrets are redacted there)' }, { status: 403 });
+		}
+		try {
+			const raw = await dumpSnapshotFile(destinationId, snapshotId, '/metadata/metadata.json');
+			const layout = parseSnapshotLayout(raw);
+			if (!layout) return json({ error: 'metadata unreadable' }, { status: 404 });
+			return json({ content: JSON.stringify(redactSnapshotLayout(layout), null, 2) });
+		} catch (error) {
+			const errorMsg = error instanceof Error ? error.message : String(error);
+			return json({ error: errorMsg }, { status: 500 });
+		}
 	}
 
 	// Sanitize filename for Content-Disposition (strip quotes, backslashes, control chars)

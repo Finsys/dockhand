@@ -29,8 +29,7 @@ export type OperationStatus =
 	| 'success'
 	| 'warning'
 	| 'error'
-	| 'cancelled'
-	| 'stale';
+	| 'cancelled';
 
 /**
  * Closed error taxonomy. The UI shows a human message; automation branches on
@@ -226,6 +225,7 @@ export function parseSnapshots(stdout: string): Snapshot[] {
 	return out;
 }
 
+
 // =============================================================================
 // Snapshot tags — STABLE IDs, never normalized names
 // =============================================================================
@@ -235,10 +235,9 @@ export function parseSnapshots(stdout: string): Snapshot[] {
  * ownership, env-access) use ONLY the stable-id tags; the name/type tags are
  * decoration for humans browsing with the restic CLI.
  *
- * Why stable ids: the old code tagged `dockhand:config=<name>-<type>-<env>`
- * built from a NORMALIZED env name, which collides when two env names normalize
- * to the same string — causing retention to cross-prune and env-access to
- * resolve to the wrong environment. Ids never collide.
+ * Why stable ids, not names: a normalized env name collides when two env names normalize to the
+ * same string, which would cross-prune retention and resolve env-access to the wrong environment.
+ * Ids never collide.
  */
 export type BackupTargetType = 'container' | 'stack';
 
@@ -308,3 +307,12 @@ export const TIMEOUTS = {
 } as const;
 
 export type TimeoutTier = keyof typeof TIMEOUTS;
+
+/** The SINGLE definition of "this restic repository is a local filesystem path" (vs a
+ * rest:/s3:/... scheme URL). Local = an ABSOLUTE path, the only form the save gate
+ * (isAllowedRepository) accepts. Every site that binds/guards/chowns the local repo MUST
+ * use this so they can't diverge - a `./`-vs-`/` mismatch would guard a path the helper
+ * never mounts, hard-failing a valid repo with a misleading "repository not found". */
+export function isLocalRepo(repository: string): boolean {
+	return repository.startsWith('/');
+}

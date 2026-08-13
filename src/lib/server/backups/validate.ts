@@ -9,7 +9,7 @@
  * what's wrong with the request/config itself.
  */
 import { isValidCron } from '../scheduler/cron-utils';
-import { isValidSnapshotId, isSafePathSegment } from './security';
+import { isValidSnapshotId, isSafePathSegment, unsafeRestoreTargetReason } from './security';
 import { parseRetention } from './retention';
 
 /** A single validation problem: which field, and what's wrong. */
@@ -138,6 +138,13 @@ export function validateRestoreRequest(input: RestoreRequestInput): ValidationRe
 	if (input.mode === 'new-location' && !isClone && (!input.targetPath || !input.targetPath.trim())) {
 		issues.push({ field: 'targetPath', message: 'a target path is required for a new-location restore' });
 	}
+	// Containment: whenever a targetPath is supplied for a new-location restore it must not
+	// point at a protected system dir (the helper mounts it rw as root and restic writes into
+	// it). This is the guarantee validate.ts documents ("validated for containment by the service").
+	if (input.mode === 'new-location' && input.targetPath && input.targetPath.trim()) {
+		const reason = unsafeRestoreTargetReason(input.targetPath);
+		if (reason) issues.push({ field: 'targetPath', message: reason });
+	}
 	if (isClone) {
 		const mappedVols = new Set((input.volumeDestinations ?? []).map((d) => d.volume));
 		const looseCount = (input.volumes ?? []).filter((v) => !mappedVols.has(v)).length;
@@ -160,6 +167,11 @@ export function validateRestoreRequest(input: RestoreRequestInput): ValidationRe
 			if (d.kind === 'path') {
 				if (typeof d.target !== 'string' || !d.target.startsWith('/') || d.target.includes('..')) {
 					issues.push({ field: 'volumeDestinations', message: `path destination for "${d.volume}" must be an absolute path (no "..")` });
+				} else {
+					// Same protected-root guard as targetPath: the helper mounts this path rw as root
+					// and restic writes into it, so a clone must never target /etc, /var/run, etc.
+					const reason = unsafeRestoreTargetReason(d.target);
+					if (reason) issues.push({ field: 'volumeDestinations', message: `path destination for "${d.volume}": ${reason}` });
 				}
 			} else if (d.kind === 'volume') {
 				if (typeof d.target !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(d.target)) {

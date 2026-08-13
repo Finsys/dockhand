@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
+import { requireBackups } from '$lib/server/backups/route-guards';
 import { auditBackup } from '$lib/server/audit';
 import {
 	getBackupConfigs,
@@ -12,9 +13,8 @@ import { validateRetention, retentionToStore } from '$lib/server/backups/helpers
 
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	const auth = await authorize(cookies);
-	if (auth.authEnabled && !await auth.can('backups', 'view')) {
-		return json({ error: 'Permission denied' }, { status: 403 });
-	}
+	const denied = await requireBackups(auth, 'view');
+	if (denied) return denied;
 
 	const type = url.searchParams.get('type') ?? undefined;
 	const targetName = url.searchParams.get('target') ?? undefined;
@@ -45,9 +45,8 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 export const POST: RequestHandler = async (event) => {
 	const { request, cookies } = event;
 	const auth = await authorize(cookies);
-	if (auth.authEnabled && !await auth.can('backups', 'manage')) {
-		return json({ error: 'Permission denied' }, { status: 403 });
-	}
+	const denied = await requireBackups(auth, 'manage');
+	if (denied) return denied;
 
 	const body = await request.json();
 

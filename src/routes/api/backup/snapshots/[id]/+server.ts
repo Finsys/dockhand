@@ -2,6 +2,7 @@ import { json } from '@sveltejs/kit';
 import { validateSnapshotId } from '$lib/server/docker-validation';
 import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
+import { requireBackups } from '$lib/server/backups/route-guards';
 import { auditBackup } from '$lib/server/audit';
 import { getBackupDestination } from '$lib/server/db';
 import { forgetSnapshot } from '$lib/server/backups';
@@ -10,9 +11,8 @@ import { guardSnapshotEnvAccess } from '$lib/server/backups/route-guards';
 export const DELETE: RequestHandler = async (event) => {
 	const { params, url, cookies } = event;
 	const auth = await authorize(cookies);
-	if (auth.authEnabled && !await auth.can('backups', 'manage')) {
-		return json({ error: 'Permission denied' }, { status: 403 });
-	}
+	const rbacDenied = await requireBackups(auth, 'manage');
+	if (rbacDenied) return rbacDenied;
 
 	const snapshotId = params.id;
 	const invalidSnap = validateSnapshotId(snapshotId);

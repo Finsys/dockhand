@@ -1,12 +1,12 @@
 /**
- * backups/snapshots.ts — the READ side: list snapshots and read their contents,
+ * backups/snapshots.ts - the READ side: list snapshots and read their contents,
  * with the ownership guards that keep one installation (or one environment) from
  * reading another's backups on a shared repository.
  *
  * TWO ownership checks, both enforced HERE so no read path can forget them:
  *   - INSTANCE ownership: every content read (browse/dump/diff/metadata) first
  *     asks restic for the snapshot filtered by THIS install's instance tag. If
- *     restic returns nothing, the snapshot isn't ours — we refuse. Without this,
+ *     restic returns nothing, the snapshot isn't ours - we refuse. Without this,
  *     anyone who knows a snapshot id could read another install's volume data
  *     from a shared repo.
  *   - ENVIRONMENT ownership (enterprise): the snapshot's owning environment is
@@ -42,21 +42,28 @@ export async function assertInstanceOwned(
 	destination: any,
 	instanceId: string,
 	snapshotId: string,
+	enterprise = false,
 ): Promise<string[]> {
 	if (!isValidSnapshotId(snapshotId)) {
 		throw new BackupError('VALIDATION', 'invalid snapshot id');
 	}
+	// ENTERPRISE keeps the strict per-instance check: env-scoped RBAC installs enforce env
+	// boundaries and don't copy repositories between instances, so a snapshot must be THIS
+	// instance's. NON-ENTERPRISE looks up WITHOUT the instance filter, so a snapshot written
+	// by another Dockhand instance (a physically-copied or shared repo) is a restorable orphan
+	// (#1351, promised by the manual). Either way we confirm the id exists and is a Dockhand
+	// snapshot (has a dockhand:instance= tag), so a foreign app's snapshot can't be targeted.
+	const filterArgs = enterprise ? ['--tag', instanceTagFilter(instanceId)] : [];
 	const run = await restic.runLocal(destination, [
-		'snapshots', '--json', '--no-lock', '--tag', instanceTagFilter(instanceId), snapshotId,
+		'snapshots', '--json', '--no-lock', ...filterArgs, snapshotId,
 	]);
 	if (run.exitCode !== 0) {
 		throw new BackupError('RESTIC', `could not verify snapshot ownership: ${run.stderr.trim() || 'restic failed'}`);
 	}
 	const snaps = parseSnapshots(run.stdout);
 	const match = snaps.find((s) => s.id === snapshotId || s.shortId === snapshotId);
-	if (!match) {
-		// Not found under our instance tag → not ours. Report as not-found so we
-		// don't reveal that the id exists under another instance.
+	if (!match || !(match.tags || []).some((t) => t.startsWith('dockhand:instance='))) {
+		// Not a Dockhand snapshot in this repo (or, for enterprise, not this instance's) -> refuse.
 		throw new BackupError('VALIDATION', 'snapshot not found for this installation', { snapshotId });
 	}
 	return match.tags;
@@ -64,8 +71,8 @@ export async function assertInstanceOwned(
 
 /**
  * Assert the caller may access the snapshot's owning ENVIRONMENT (enterprise
- * only). Resolves the env from the snapshot's own `dockhand:envid` tag — never a
- * caller-supplied env — and fails closed if it can't be resolved. `tags` is the
+ * only). Resolves the env from the snapshot's own `dockhand:envid` tag - never a
+ * caller-supplied env - and fails closed if it can't be resolved. `tags` is the
  * snapshot's tag list (from assertInstanceOwned, so we don't re-query).
  */
 export async function assertEnvAccess(access: AccessContext, tags: string[]): Promise<void> {
@@ -91,13 +98,13 @@ export async function guardSnapshotAccess(
 	snapshotId: string,
 	access: AccessContext,
 ): Promise<void> {
-	const tags = await assertInstanceOwned(restic, destination, instanceId, snapshotId);
+	const tags = await assertInstanceOwned(restic, destination, instanceId, snapshotId, access.isEnterprise);
 	await assertEnvAccess(access, tags);
 }
 
 /**
  * Resolve a snapshot's owning ENVIRONMENT from its own stable-id tag
- * (`dockhand:envid=<n>`), read server-side — never from a caller-supplied value.
+ * (`dockhand:envid=<n>`), read server-side - never from a caller-supplied value.
  * Used by the route-level env gate. The lookup is instance-scoped (restic filters
  * by this install's instance tag), so a snapshot that isn't ours resolves to
  * "unresolved" and the caller fails closed.
@@ -105,7 +112,7 @@ export async function guardSnapshotAccess(
  * Returns:
  *   - { envId }        the numeric owning environment id
  *   - { envId: null }  a 'local' / unscoped snapshot (nothing to gate on)
- *   - { envId: undefined, resolved: false } when the env can't be resolved —
+ *   - { envId: undefined, resolved: false } when the env can't be resolved -
  *     callers MUST deny on this to fail closed.
  */
 export async function resolveSnapshotEnvId(
@@ -123,7 +130,7 @@ export async function resolveSnapshotEnvId(
 	const match = snaps.find((s) => s.id === snapshotId || s.shortId === snapshotId);
 	if (!match) return { envId: undefined, resolved: false };
 	const envId = readEnvIdFromTags(match.tags);
-	if (envId === null) return { envId: undefined, resolved: false }; // tag absent/malformed → fail closed
+	if (envId === null) return { envId: undefined, resolved: false }; // tag absent/malformed -> fail closed
 	if (envId === 'local') return { envId: null, resolved: true };    // unscoped snapshot
 	return { envId, resolved: true };
 }
@@ -145,7 +152,7 @@ export async function filterSnapshotsByAccessibleEnv<T extends { tags: string[] 
 	for (const snap of snapshots) {
 		const envId = readEnvIdFromTags(snap.tags);
 		if (envId === 'local') { kept.push(snap); continue; }
-		if (envId === null) continue; // unresolvable env → fail closed
+		if (envId === null) continue; // unresolvable env -> fail closed
 		if (!decided.has(envId)) decided.set(envId, await canAccess(envId));
 		if (decided.get(envId)) kept.push(snap);
 	}
@@ -163,22 +170,34 @@ export async function listSnapshots(
 	access: AccessContext,
 	configId?: number,
 ): Promise<ReturnType<typeof parseSnapshots>> {
-	const tag = configId != null
-		? `${instanceTagFilter(instanceId)},dockhand:configid=${configId}`
-		: instanceTagFilter(instanceId);
-	const run = await restic.runLocal(destination, ['snapshots', '--json', '--no-lock', '--tag', tag]);
+	// Per-config listing (a config row's own snapshots) stays instance-scoped - a config is
+	// this install's, and its configid collides across instances (a fresh install reuses
+	// 1,2,3...), so scoping by instance+configid is what keeps it correct. The FULL repo
+	// listing (no configId - feeds orphan detection) must NOT be instance-scoped, or foreign
+	// Dockhand snapshots (a physically-copied or shared repo) never surface as orphans (#1351).
+	const args = ['snapshots', '--json', '--no-lock'];
+	if (configId != null) args.push('--tag', `${instanceTagFilter(instanceId)},dockhand:configid=${configId}`);
+	const run = await restic.runLocal(destination, args);
 	if (run.exitCode !== 0) {
 		// An empty repo (not initialised) and a real error look different; surface
 		// the stderr so the caller can classify. Return [] only on a clean exit.
 		throw new BackupError('RESTIC', run.stderr.trim() || 'could not list snapshots');
 	}
-	const snaps = parseSnapshots(run.stdout);
+	// restic --tag can't match "has ANY dockhand:instance= tag" (exact-match only), so filter
+	// here: keep only snapshots this repo received FROM DOCKHAND (any instance), never those a
+	// different app wrote to a shared repo. Per-config results already carry the tag.
+	const snaps = parseSnapshots(run.stdout).filter((s) =>
+		configId != null || (s.tags || []).some((t) => t.startsWith('dockhand:instance=')));
 	if (!access.isEnterprise) return snaps;
-	// Filter to snapshots whose env the caller can access (unscoped = visible).
+	// Filter to snapshots whose env the caller can access. `local` is unscoped -> visible;
+	// a null envId (tag absent/malformed) is UNRESOLVABLE -> fail CLOSED (drop), matching
+	// readEnvIdFromTags's contract and the sibling filterSnapshotsByAccessibleEnv. Treating
+	// null as visible would leak scoped snapshots whose env tag is missing/garbled.
 	const visible = [];
 	for (const s of snaps) {
 		const envId = readEnvIdFromTags(s.tags);
-		if (envId === null || envId === 'local') { visible.push(s); continue; }
+		if (envId === 'local') { visible.push(s); continue; }
+		if (envId === null) continue; // unresolvable env -> fail closed
 		if (await access.canAccessEnvironment(envId)) visible.push(s);
 	}
 	return visible;

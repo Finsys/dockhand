@@ -12,10 +12,12 @@ import * as http from 'node:http';
 import * as https from 'node:https';
 import * as tls from 'node:tls';
 import { createHash } from 'node:crypto';
+import { pumpWebStreamToWritable } from './stream-pump';
+import { computeRequestTimeoutMs } from './backups/request-timeout';
 import type { Environment } from './db';
 import { getSetting } from './db';
-import { getAdditionalVolumeBinds } from './mount-dedupe';
-import { rebaseEnvOntoImage, rebaseLabelsOntoImage, describeEnvRebase, describeLabelRebase, type ImageEnvLabels } from './container-env-merge';
+import { getAdditionalVolumeBinds, dedupeVolumesForRecreate } from './mount-dedupe';
+import { rebaseEnvOntoImage, rebaseLabelsOntoImage, rebaseCommand, describeEnvRebase, describeLabelRebase, type ImageEnvLabels } from './container-env-merge';
 import { encodeRegistryAuth } from './registry-auth';
 import { isSystemContainer, classifyEmptyDigestImage } from './scheduler/tasks/update-utils';
 import { deepDiff } from '../utils/diff.js';
@@ -417,12 +419,16 @@ export function httpsAgentRequest(
 			headers: reqHeaders,
 		};
 
-		if (!streaming) {
-			const isComposeOperation = path === '/_hawser/compose';
-			const composeTimeoutMs = parseInt(process.env.COMPOSE_TIMEOUT || '900') * 1000;
-			const isPrune = path.endsWith('/prune');
-			reqOptions.timeout = isComposeOperation ? composeTimeoutMs : isPrune ? 300000 : 30000;
-		}
+		// A stream request BODY (a large tar PUT) must not get the small-request idle timeout
+		// even though the RESPONSE isn't streamed - computeRequestTimeoutMs decides on both.
+		const streamingBody = typeof (options.body as ReadableStream | undefined)?.getReader === 'function';
+		const timeoutMs = computeRequestTimeoutMs({
+			path,
+			streamingBody,
+			streamingResponse: streaming,
+			composeTimeoutSecs: parseInt(process.env.COMPOSE_TIMEOUT || '900'),
+		});
+		if (timeoutMs !== null) reqOptions.timeout = timeoutMs;
 
 		// Honor AbortSignal from caller (e.g., AbortSignal.timeout(5000) for ping)
 		const signal = options.signal as AbortSignal | undefined;
@@ -493,19 +499,10 @@ export function httpsAgentRequest(
 			} else if (body instanceof Blob) {
 				body.arrayBuffer().then(ab => req.end(Buffer.from(ab)), reject);
 			} else if (typeof (body as ReadableStream).getReader === 'function') {
+				// Stream the body with backpressure (O(1) RAM). Without awaiting 'drain' this
+				// piled the whole tar into RAM on a slow mTLS peer - see stream-pump.ts.
 				const reader = (body as ReadableStream<Uint8Array>).getReader();
-				(async () => {
-					try {
-						while (true) {
-							const { done, value } = await reader.read();
-							if (done) break;
-							req.write(value);
-						}
-						req.end();
-					} catch (err) {
-						req.destroy(err as Error);
-					}
-				})();
+				pumpWebStreamToWritable(reader, req).catch(() => { /* req.destroy already called */ });
 			} else {
 				req.end();
 			}
@@ -574,7 +571,7 @@ function buildConfigFromEnv(env: Environment): DockerClientConfig {
 /**
  * Get Docker client configuration for an environment
  */
-async function getDockerConfig(envId?: number | null): Promise<DockerClientConfig> {
+export async function getDockerConfig(envId?: number | null): Promise<DockerClientConfig> {
 	if (!envId) {
 		throw new Error('No environment specified');
 	}
@@ -2016,7 +2013,12 @@ export async function recreateContainerFromInspect(
 		let oldImg = oldImageConfig ?? null;
 		if (!oldImg) {
 			const oldInspect = await inspectImage(inspectData.Image || config.Image, envId);
-			oldImg = { Env: (oldInspect as any)?.Config?.Env, Labels: (oldInspect as any)?.Config?.Labels };
+			oldImg = {
+				Env: (oldInspect as any)?.Config?.Env,
+				Labels: (oldInspect as any)?.Config?.Labels,
+				Cmd: (oldInspect as any)?.Config?.Cmd ?? null,
+				Entrypoint: (oldInspect as any)?.Config?.Entrypoint ?? null,
+			};
 		}
 		const newImg = await inspectImage(newImage, envId);
 		const oldEnv = oldImg?.Env || [];
@@ -2025,6 +2027,18 @@ export async function recreateContainerFromInspect(
 		const newLabels = (newImg as any)?.Config?.Labels || {};
 		createConfig.Env = rebaseEnvOntoImage(config.Env || [], oldEnv, newEnv);
 		createConfig.Labels = rebaseLabelsOntoImage(config.Labels || {}, oldLabels, newLabels);
+
+		// 4b. Rebase Cmd/Entrypoint the same way (#1371): a container's Config.Cmd is flattened at
+		// create time, so the OLD image's baked CMD is indistinguishable from a user `command:`
+		// override and would be frozen onto the new image - a container can then start with a
+		// command the new image no longer provides (missing script -> exit 127 -> restart loop).
+		// oldImg?.Cmd == null (caller didn't capture it / inspect failed) -> keep verbatim.
+		const cmdR = rebaseCommand(config.Cmd, oldImg?.Cmd, (newImg as any)?.Config?.Cmd);
+		const entR = rebaseCommand(config.Entrypoint, oldImg?.Entrypoint, (newImg as any)?.Config?.Entrypoint);
+		createConfig.Cmd = cmdR.value;
+		createConfig.Entrypoint = entR.value;
+		if (cmdR.adopted) log?.(`Cmd — adopted from new image: ${JSON.stringify(cmdR.value)} (was ${JSON.stringify(config.Cmd)})`);
+		if (entR.adopted) log?.(`Entrypoint — adopted from new image: ${JSON.stringify(entR.value)} (was ${JSON.stringify(config.Entrypoint)})`);
 
 		const envSummary = describeEnvRebase(config.Env || [], oldEnv, newEnv);
 		const labelSummary = describeLabelRebase(config.Labels || {}, oldLabels, newLabels);
@@ -2094,39 +2108,20 @@ export async function recreateContainerFromInspect(
 		}
 	}
 
-	// Deduplicate: remove Config.Volumes entries that conflict with HostConfig.Tmpfs or Binds.
-	// Read-only containers get tmpfs at paths like /tmp that may also be declared as image volumes.
-	// Docker rejects duplicate mount points, so the tmpfs/bind mount wins over the volume declaration.
-	if (createConfig.Volumes && hostConfig) {
-		const mountedPaths = new Set<string>();
-		if (hostConfig.Tmpfs) {
-			for (const p of Object.keys(hostConfig.Tmpfs)) {
-				mountedPaths.add(p);
-			}
-		}
-		if (hostConfig.Binds) {
-			for (const b of hostConfig.Binds) {
-				const parts = b.split(':');
-				if (parts.length >= 2) mountedPaths.add(parts[1].split(':')[0]);
-			}
-		}
-		if (mountedPaths.size > 0) {
-			for (const volPath of Object.keys(createConfig.Volumes)) {
-				if (mountedPaths.has(volPath)) {
-					delete createConfig.Volumes[volPath];
-				}
-			}
-			if (Object.keys(createConfig.Volumes).length === 0) {
-				delete createConfig.Volumes;
-			}
-		}
+	// Deduplicate Config.Volumes against every mount point that will exist on the new container
+	// (Tmpfs, existing binds, the binds we re-add below, and inspect.Mounts). Docker rejects
+	// duplicate mount points; the tmpfs/bind/volume mount wins over the bare image-VOLUME
+	// declaration. Compute additionalBinds first so the dedup sees them (#1088 / #1363).
+	const additionalBinds = getAdditionalVolumeBinds(hostConfig || {}, inspectData.Mounts || []);
+	if (hostConfig) {
+		const kept = dedupeVolumesForRecreate(createConfig.Volumes, hostConfig, inspectData.Mounts || [], additionalBinds);
+		if (kept) createConfig.Volumes = kept;
+		else delete createConfig.Volumes;
 	}
-
-	const additionalBinds = getAdditionalVolumeBinds(hostConfig, inspectData.Mounts || []);
 	if (additionalBinds.length > 0) {
 		createConfig.HostConfig = {
 			...hostConfig,
-			Binds: [...(hostConfig.Binds || []), ...additionalBinds]
+			Binds: [...(hostConfig?.Binds || []), ...additionalBinds]
 		};
 	}
 
@@ -2298,32 +2293,18 @@ export async function createContainerFromMetadata(
 		}
 	}
 
-	// Volume/Tmpfs deduplication
-	if (createConfig.Volumes && hostConfig) {
-		const mountedPaths = new Set<string>();
-		if (hostConfig.Tmpfs) {
-			for (const p of Object.keys(hostConfig.Tmpfs)) mountedPaths.add(p);
-		}
-		if (hostConfig.Binds) {
-			for (const b of hostConfig.Binds) {
-				const parts = b.split(':');
-				if (parts.length >= 2) mountedPaths.add(parts[1].split(':')[0]);
-			}
-		}
-		if (mountedPaths.size > 0) {
-			for (const volPath of Object.keys(createConfig.Volumes)) {
-				if (mountedPaths.has(volPath)) delete createConfig.Volumes[volPath];
-			}
-			if (Object.keys(createConfig.Volumes).length === 0) delete createConfig.Volumes;
-		}
+	// Preserve anonymous volumes, then dedup Config.Volumes against every resulting mount point
+	// (incl. these added binds + metadata.mounts) so recreate never sends a duplicate (#1088 / #1363).
+	const additionalBinds = getAdditionalVolumeBinds(hostConfig || {}, metadata.mounts || []);
+	if (hostConfig) {
+		const kept = dedupeVolumesForRecreate(createConfig.Volumes, hostConfig, metadata.mounts || [], additionalBinds);
+		if (kept) createConfig.Volumes = kept;
+		else delete createConfig.Volumes;
 	}
-
-	// Preserve anonymous volumes
-	const additionalBinds = getAdditionalVolumeBinds(hostConfig, metadata.mounts || []);
 	if (additionalBinds.length > 0) {
 		createConfig.HostConfig = {
 			...hostConfig,
-			Binds: [...(hostConfig.Binds || []), ...additionalBinds]
+			Binds: [...(hostConfig?.Binds || []), ...additionalBinds]
 		};
 	}
 
@@ -3398,6 +3379,10 @@ export async function getRegistryAuth(
 
 	return { baseUrl, orgPath: parsed.path, authHeader };
 }
+
+// Catalog-failure classification lives in an import-light module so it's unit-testable
+// without pulling this file's better-sqlite3 imports into the test process (#873).
+export { classifyCatalogFailure, CATALOG_NOT_SUPPORTED_MSG } from './registry-catalog.js';
 
 // --- Harbor fallback for catalog and image search ---
 // Harbor denies access to the V2 _catalog endpoint for robot accounts.
@@ -4538,11 +4523,16 @@ export async function pruneImages(dangling = true, envId?: number | null) {
 	}
 
 	const { DEFAULT_GRYPE_IMAGE, DEFAULT_TRIVY_IMAGE } = await import('./scanner');
+	const { DEFAULT_HELPER_IMAGE } = await import('./backups/restic');
 	const grypeImg = (await getSetting('default_grype_image')) ?? DEFAULT_GRYPE_IMAGE;
 	const trivyImg = (await getSetting('default_trivy_image')) ?? DEFAULT_TRIVY_IMAGE;
+	// The backup/restore helper image is pulled once and reused for every backup; shield it from
+	// prune too (same holder-container trick), so an unused-image prune between backups doesn't
+	// force a slow re-pull (and a fail on an air-tight/offline host).
+	const helperImg = (await getSetting('default_backup_image')) || DEFAULT_HELPER_IMAGE;
 
 	const holderIds: string[] = [];
-	for (const image of [grypeImg, trivyImg]) {
+	for (const image of [grypeImg, trivyImg, helperImg]) {
 		try {
 			const safeName = `dockhand-prune-keep-${image.replace(/[^a-z0-9]/gi, '-')}-${Date.now()}`;
 			const created = await dockerJsonRequest<{ Id: string }>(
@@ -4861,6 +4851,40 @@ export async function runContainer(options: {
 }
 
 // Run a container with attached streams (for scanners that need real-time output)
+/**
+ * DIAGNOSTIC (issue #1344): when a helper's exit code can't be determined, pull the
+ * recent `docker events` for that container so the log shows WHAT acted on it (a
+ * `die` with exitCode, a `kill` with the signal, a `destroy`/`remove` and its actor).
+ * `docker events` carries `Actor.Attributes` incl. the signal and, on some daemons, the
+ * execID/name of who issued it. Bounded, non-streaming (since..until), best-effort.
+ */
+async function logRecentContainerEvents(containerId: string, name: string, sinceISO: string | undefined, envId: number | null | undefined): Promise<void> {
+	try {
+		const sinceSec = sinceISO ? Math.floor(new Date(sinceISO).getTime() / 1000) - 2 : Math.floor(Date.now() / 1000) - 120;
+		const untilSec = Math.floor(Date.now() / 1000) + 1;
+		const filters = encodeURIComponent(JSON.stringify({ container: [containerId] }));
+		const resp = await dockerFetch(`/events?since=${sinceSec}&until=${untilSec}&filters=${filters}`, {}, envId);
+		if (!resp.ok) { console.warn(`[runContainerWithStreaming] events fetch for ${name}: HTTP ${resp.status}`); return; }
+		const body = await resp.text();
+		// The events endpoint returns newline-delimited JSON objects.
+		const lines = body.split('\n').map((l) => l.trim()).filter(Boolean);
+		if (lines.length === 0) { console.warn(`[runContainerWithStreaming] no docker events for ${name} in the window (nothing recorded who touched it)`); return; }
+		for (const line of lines) {
+			try {
+				const ev = JSON.parse(line) as { status?: string; Action?: string; Actor?: { Attributes?: Record<string, string> }; time?: number };
+				const action = ev.Action ?? ev.status ?? '(unknown)';
+				const attrs = ev.Actor?.Attributes ?? {};
+				const sig = attrs.signal ? ` signal=${attrs.signal}` : '';
+				const code = attrs.exitCode ? ` exitCode=${attrs.exitCode}` : '';
+				const exec = attrs.execID ? ` execID=${attrs.execID}` : '';
+				console.warn(`[runContainerWithStreaming] EVENT ${name}: ${action}${sig}${code}${exec}`);
+			} catch { /* skip a non-JSON line */ }
+		}
+	} catch (err) {
+		console.warn(`[runContainerWithStreaming] events fetch failed for ${name}: ${(err as Error).message}`);
+	}
+}
+
 export async function runContainerWithStreaming(options: {
 	image: string;
 	cmd: string[];
@@ -4890,7 +4914,11 @@ export async function runContainerWithStreaming(options: {
 		Image: options.image,
 		Cmd: options.cmd,
 		Env: options.env || [],
-		Labels: options.labels || {},
+		// Every helper spawned here (backup/restore/probe, image scanner) is ephemeral and exits
+		// on purpose, so it must NOT fire a "Container died/exited" notification like a user's
+		// container would. dockhand.notify=false makes the event handler skip it
+		// (isNotifyDisabledByLabel). Caller labels win if they set notify explicitly.
+		Labels: { 'dockhand.notify': 'false', ...(options.labels || {}) },
 		Tty: false,
 		HostConfig: {
 			Binds: options.binds || [],
@@ -4938,6 +4966,12 @@ export async function runContainerWithStreaming(options: {
 			// Start container
 			await drainResponse(await dockerFetch(`/containers/${containerId}/start`, { method: 'POST' }, options.envId));
 
+			// DIAGNOSTIC (issue #1344): one line confirming the helper actually started,
+			// with the config that could explain an early death (bind count, network,
+			// user). Pairs with the "exited with code" / "EXIT-CODE INDETERMINATE" lines
+			// so a user's log shows the full lifecycle of a helper that dies mid-run.
+			console.log(`[runContainerWithStreaming] Started ${containerName} (binds=${(options.binds || []).length}, netMode=${options.networkMode ?? 'default'}, user=${options.user ?? 'default'})`);
+
 			// Create abort controller to cancel stderr stream when container exits
 			// On some Docker hosts (e.g. Synology NAS with older kernels), follow=true
 			// streams don't close when the container exits, causing indefinite hangs.
@@ -4960,33 +4994,99 @@ export async function runContainerWithStreaming(options: {
 			// Bounded-retry the wait; if it still can't be determined, fall back to
 			// inspecting the container's final State, and if that's also unavailable
 			// leave exitCode undefined — the guard below fails closed on undefined.
+			// HELPERS_WAIT_MODE (default 'wait'): the exit signal below is a single
+			// streaming `POST /wait`, held open with no bytes for the whole run. A
+			// socket-proxy / reverse-proxy / tcp DOCKER_HOST with a short idle timeout can
+			// sever it mid-run, leaving the exit code unreadable even though the helper is
+			// fine (#1344). Set HELPERS_WAIT_MODE=poll to POLL short inspect calls instead
+			// (nothing stays open for a proxy to cut). Applies to every helper this function
+			// runs — backup/restore AND the image scanner.
 			let exitCode: number | undefined;
-			for (let attempt = 0; attempt < 3 && exitCode === undefined; attempt++) {
-				try {
-					const waitResult = await dockerFetch(`/containers/${containerId}/wait`, { method: 'POST', streaming: true }, options.envId);
-					if (!waitResult.ok) await throwDockerError(waitResult);
-					const waitData = await waitResult.json() as { StatusCode?: number };
-					exitCode = waitData.StatusCode;
-					console.log(`[runContainerWithStreaming] Container exited with code: ${exitCode}`);
-				} catch (err) {
-					console.warn(`[runContainerWithStreaming] Wait attempt ${attempt + 1} failed: ${(err as Error).message}`);
+			if (process.env.HELPERS_WAIT_MODE === 'poll') {
+				// Bound by the caller's timeout (backup passes a long 'data' tier, the
+				// scanner passes 600_000). Fall back to 1h so poll mode never hangs.
+				// One line so the log confirms which exit-signal mode is active (helps
+				// diagnose whether HELPERS_WAIT_MODE=poll actually took effect - #1344).
+				console.log(`[runContainerWithStreaming] Awaiting exit of ${options.name ?? containerId.slice(0, 12)} via POLL mode`);
+				const deadline = Date.now() + (options.timeout && options.timeout > 0 ? options.timeout : 3_600_000);
+				while (exitCode === undefined && Date.now() < deadline) {
+					try {
+						const insp = await dockerFetch(`/containers/${containerId}/json`, {}, options.envId);
+						if (insp.ok) {
+							const data = await insp.json() as { State?: { Status?: string; Running?: boolean; Dead?: boolean; ExitCode?: number } };
+							const st = data.State;
+							if (st && st.Running === false && st.Status === 'exited' && typeof st.ExitCode === 'number') {
+								exitCode = st.ExitCode;
+								console.log(`[runContainerWithStreaming] Container exited with code: ${exitCode} (poll mode)`);
+								break;
+							}
+							if (st?.Dead || st?.Status === 'removing') break; // gone -> fail-closed diagnostics below
+						} else if (insp.status === 404) {
+							console.warn(`[runContainerWithStreaming] Poll: ${options.name ?? containerId.slice(0, 12)} not found (404) — container removed`);
+							break;
+						}
+					} catch (err) {
+						// A dropped short inspect is cheap to retry — keep polling to the deadline
+						// rather than bailing (unlike the streaming /wait path).
+						console.warn(`[runContainerWithStreaming] Poll inspect failed for ${options.name ?? containerId.slice(0, 12)}: ${(err as Error).message}`);
+					}
+					if (exitCode === undefined) await new Promise((r) => setTimeout(r, 1500));
+				}
+			} else {
+				for (let attempt = 0; attempt < 3 && exitCode === undefined; attempt++) {
+					try {
+						const waitResult = await dockerFetch(`/containers/${containerId}/wait`, { method: 'POST', streaming: true }, options.envId);
+						if (!waitResult.ok) await throwDockerError(waitResult);
+						const waitData = await waitResult.json() as { StatusCode?: number };
+						exitCode = waitData.StatusCode;
+						console.log(`[runContainerWithStreaming] Container exited with code: ${exitCode}`);
+					} catch (err) {
+						// DIAGNOSTIC (issue #1344): include the attempt count so a user whose
+						// helper's exit can't be read can tell us whether /wait failed once
+						// (transient) or all 3 times (the container vanished / daemon churn).
+						console.warn(`[runContainerWithStreaming] Wait attempt ${attempt + 1}/3 failed for ${options.name ?? containerId.slice(0, 12)}: ${(err as Error).message}`);
+					}
 				}
 			}
 			if (exitCode === undefined) {
 				// Fallback: inspect the container. Only trust a definitively-exited
 				// state; a still-running/restarting/unknown state stays undefined.
+				let containerStartedAt: string | undefined;
 				try {
 					const insp = await dockerFetch(`/containers/${containerId}/json`, {}, options.envId);
 					if (insp.ok) {
-						const data = await insp.json() as { State?: { Status?: string; Running?: boolean; ExitCode?: number } };
+						const data = await insp.json() as { State?: { Status?: string; Running?: boolean; Restarting?: boolean; Dead?: boolean; Paused?: boolean; ExitCode?: number; OOMKilled?: boolean; Error?: string; StartedAt?: string; FinishedAt?: string; Pid?: number } };
 						const st = data.State;
+						containerStartedAt = st?.StartedAt;
+						// DIAGNOSTIC (issue #1344): /wait gave no code and the fallback is
+						// about to leave exitCode undefined -> the user sees "could not
+						// determine container exit status". Log the FULL final State so a
+						// user hitting this can tell us WHY (OOMKilled, Dead, removed by an
+						// external reaper, still Running = /wait raced, or a daemon Error).
+						console.warn(
+							`[runContainerWithStreaming] EXIT-CODE INDETERMINATE for ${options.name ?? containerId.slice(0, 12)} ` +
+							`State=${JSON.stringify({
+								Status: st?.Status, Running: st?.Running, Restarting: st?.Restarting,
+								Dead: st?.Dead, Paused: st?.Paused, ExitCode: st?.ExitCode,
+								OOMKilled: st?.OOMKilled, Error: st?.Error,
+								StartedAt: st?.StartedAt, FinishedAt: st?.FinishedAt, Pid: st?.Pid,
+							})}`
+						);
 						if (st && st.Running === false && st.Status === 'exited' && typeof st.ExitCode === 'number') {
 							exitCode = st.ExitCode;
 							console.log(`[runContainerWithStreaming] Resolved exit code via inspect: ${exitCode}`);
 						}
+					} else {
+						console.warn(`[runContainerWithStreaming] EXIT-CODE INDETERMINATE for ${options.name ?? containerId.slice(0, 12)}: inspect returned HTTP ${insp.status} (container may already be gone/removed)`);
 					}
 				} catch (err) {
 					console.warn(`[runContainerWithStreaming] Inspect fallback failed: ${(err as Error).message}`);
+				}
+				// Still indeterminate -> pull docker events so the log shows WHO/WHAT
+				// acted on the container (die/kill/destroy + actor). Missing piece when
+				// something external removes the helper mid-run (#1344).
+				if (exitCode === undefined) {
+					await logRecentContainerEvents(containerId, options.name ?? containerId.slice(0, 12), containerStartedAt, options.envId);
 				}
 			}
 

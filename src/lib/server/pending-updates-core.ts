@@ -58,3 +58,25 @@ export function pendingRowsToClear(
 
 	return toClear;
 }
+
+/**
+ * Count pending rows that still map to a LIVE container (#1006). The dashboard tile
+ * used to show the raw row count, but a row is keyed on containerId, so a container
+ * recreated/removed OUT-OF-BAND (compose CLI, docker directly, Watchtower, image retag)
+ * leaves an orphan row nothing prunes between checks. The containers page already
+ * live-matches (a row shows only if its containerId exists), so the tile over-counted
+ * and disagreed with the list. Counting only rows whose containerId is a currently
+ * live container makes the tile agree with the list — no schema change, and it never
+ * hides a real update (a live container with a pending row is still counted).
+ */
+export function countLivePending(
+	pending: Array<{ containerId: string }>,
+	liveContainerIds: Iterable<string>
+): number {
+	const live = liveContainerIds instanceof Set ? liveContainerIds : new Set(liveContainerIds);
+	let n = 0;
+	for (const row of pending ?? []) {
+		if (row?.containerId && live.has(row.containerId)) n++;
+	}
+	return n;
+}

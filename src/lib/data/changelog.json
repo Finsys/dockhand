@@ -1,5 +1,92 @@
 [
   {
+    "version": "1.0.41",
+    "date": "2026-08-09",
+    "changes": [
+      {
+        "type": "feature",
+        "text": "configurable default homepage (#1354)"
+      },
+      {
+        "type": "feature",
+        "text": "direct remote environments - remote stacks dir configurable, for putting the whole stack onto the remote"
+      },
+      {
+        "type": "feature",
+        "text": "S3 backup destinations take an AWS region with a region quick-pick"
+      },
+      {
+        "type": "feature",
+        "text": "registry browser shows tag size and date for self-hosted registries, loaded on expand (#876)"
+      },
+      {
+        "type": "fix",
+        "text": "activity log times now honor the configured timezone (#1183)"
+      },
+      {
+        "type": "fix",
+        "text": "container updates respect the new image's command/entrypoint (#1371)"
+      },
+      {
+        "type": "fix",
+        "text": "deleting a stack shows which folders will be removed, with a choice to keep/delete folders (#675)"
+      },
+      {
+        "type": "fix",
+        "text": "fixed an LDAP filter parsing issue that could break group-based role assignment with some AD DNs"
+      },
+      {
+        "type": "fix",
+        "text": "child containers using network_mode: service/container reconnect when their parent is updated (#570)"
+      },
+      {
+        "type": "fix",
+        "text": "dashboard pending-update count now matches the containers list (#1006)"
+      },
+      {
+        "type": "fix",
+        "text": "more room between settings/editor content and the scrollbar (#1171)"
+      },
+      {
+        "type": "fix",
+        "text": "GitLab and Harbor registries no longer report a misleading auth error when browsing (#873)"
+      },
+      {
+        "type": "fix",
+        "text": "backup volume picker shows every bind mount when two containers share a container path (#1373)"
+      },
+      {
+        "type": "fix",
+        "text": "Google Cloud backup destinations now use a service-account JSON key"
+      },
+      {
+        "type": "fix",
+        "text": "backup and restore helper containers no longer emit a \"container died\" notification when they finish"
+      },
+      {
+        "type": "fix",
+        "text": "snapshots from another Dockhand instance sharing the repo now appear as restorable orphans (#1351)"
+      },
+      {
+        "type": "fix",
+        "text": "a stack restored to new locations always keeps its compose file and stays internal (#1351)"
+      },
+      {
+        "type": "fix",
+        "text": "improved restic repository operations log (prune, check, repair index etc.)"
+      },
+      {
+        "type": "fix",
+        "text": "Azure Blob destinations no longer fail with 'invalid format' on init"
+      },
+      {
+        "type": "fix",
+        "text": "backup destinations now have separate extra backup and restore flags (#1349)"
+      }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.41"
+  },
+  {
     "version": "1.0.40",
     "date": "2026-07-31",
     "changes": [
@@ -332,7 +419,7 @@
       },
       {
         "type": "fix",
-        "text": "Pangolin labels \u2014 recognise the real `public-resources` / `private-resources` namespaces (#2)"
+        "text": "Pangolin labels — recognise the real `public-resources` / `private-resources` namespaces (#2)"
       },
       {
         "type": "fix",
@@ -351,7 +438,7 @@
     "changes": [
       {
         "type": "feature",
-        "text": "raw file download \u2014 no tar wrapping (#1180)"
+        "text": "raw file download — no tar wrapping (#1180)"
       },
       {
         "type": "fix",
@@ -379,7 +466,7 @@
       },
       {
         "type": "feature",
-        "text": "Traefik and Pangolin integration \u2014 surface proxy URLs on container and stack panels (#2)"
+        "text": "Traefik and Pangolin integration — surface proxy URLs on container and stack panels (#2)"
       },
       {
         "type": "feature",
@@ -391,7 +478,7 @@
       },
       {
         "type": "feature",
-        "text": "template library \u2014 browse and deploy compose templates from configurable sources (#48)"
+        "text": "template library — browse and deploy compose templates from configurable sources (#48)"
       },
       {
         "type": "fix",
@@ -406,7 +493,7 @@
     "changes": [
       {
         "type": "feature",
-        "text": "in-place container property updates without restart \u2014 restart policy, CPU/memory limits (#1153)"
+        "text": "in-place container property updates without restart — restart policy, CPU/memory limits (#1153)"
       },
       {
         "type": "feature",
@@ -430,7 +517,7 @@
       },
       {
         "type": "feature",
-        "text": "Apprise passthrough \u2014 forward to a self-hosted caronc/apprise-api server (#1099)"
+        "text": "Apprise passthrough — forward to a self-hosted caronc/apprise-api server (#1099)"
       },
       {
         "type": "fix",
@@ -544,7 +631,7 @@
     "changes": [
       {
         "type": "fix",
-        "text": "502 Bad Gateway behind nginx-based reverse proxies \u2014 SvelteKit 2.51+ bloated the Link response header, pinned to 2.50.0 (#1114)"
+        "text": "502 Bad Gateway behind nginx-based reverse proxies — SvelteKit 2.51+ bloated the Link response header, pinned to 2.50.0 (#1114)"
       }
     ],
     "imageTag": "fnsys/dockhand:v1.0.31"
@@ -555,11 +642,11 @@
     "changes": [
       {
         "type": "feature",
-        "text": "time range filter for log viewer \u2014 filter logs by From/To date and time (#1068)"
+        "text": "time range filter for log viewer — filter logs by From/To date and time (#1068)"
       },
       {
         "type": "feature",
-        "text": "configurable tail line count in log viewer \u2014 choose from 100 to all lines (#1066)"
+        "text": "configurable tail line count in log viewer — choose from 100 to all lines (#1066)"
       },
       {
         "type": "feature",
@@ -567,7 +654,7 @@
       },
       {
         "type": "feature",
-        "text": "\"some unused\" image filter \u2014 show images with both used and unused tags for selective cleanup (#621)"
+        "text": "\"some unused\" image filter — show images with both used and unused tags for selective cleanup (#621)"
       },
       {
         "type": "feature",
@@ -579,7 +666,7 @@
       },
       {
         "type": "fix",
-        "text": "scan cache lookup by tag name never matched \u2014 results now resolved via image digest (#1064)"
+        "text": "scan cache lookup by tag name never matched — results now resolved via image digest (#1064)"
       },
       {
         "type": "fix",
@@ -591,7 +678,7 @@
       },
       {
         "type": "feature",
-        "text": "Gotify notification priority via URL query param \u2014 gotify://host/token?priority=5 (#1033)"
+        "text": "Gotify notification priority via URL query param — gotify://host/token?priority=5 (#1033)"
       },
       {
         "type": "fix",
@@ -599,7 +686,7 @@
       },
       {
         "type": "feature",
-        "text": "named custom URL labels \u2014 dockhand.url=[Name](https://...) markdown syntax (#1065)"
+        "text": "named custom URL labels — dockhand.url=[Name](https://...) markdown syntax (#1065)"
       },
       {
         "type": "fix",
@@ -615,7 +702,7 @@
       },
       {
         "type": "feature",
-        "text": "live network attach/detach for running containers \u2014 join or leave Docker networks without restarting (#1051)"
+        "text": "live network attach/detach for running containers — join or leave Docker networks without restarting (#1051)"
       },
       {
         "type": "fix",
@@ -638,7 +725,7 @@
       },
       {
         "type": "feature",
-        "text": "central label management \u2014 rename or delete labels across all environments (#661)"
+        "text": "central label management — rename or delete labels across all environments (#661)"
       },
       {
         "type": "feature",
@@ -646,7 +733,7 @@
       },
       {
         "type": "feature",
-        "text": "theme-aware scrollbar styling \u2014 scrollbars adapt to dark/light mode and color palettes (#462)"
+        "text": "theme-aware scrollbar styling — scrollbars adapt to dark/light mode and color palettes (#462)"
       },
       {
         "type": "fix",
@@ -694,7 +781,7 @@
       },
       {
         "type": "feature",
-        "text": "scan reports \u2014 combined or individual Grype/Trivy (#1056)"
+        "text": "scan reports — combined or individual Grype/Trivy (#1056)"
       }
     ],
     "imageTag": "fnsys/dockhand:v1.0.29"
@@ -705,7 +792,7 @@
     "changes": [
       {
         "type": "feature",
-        "text": "context directory for git stacks \u2014 reference files from anywhere in the repo (#864)"
+        "text": "context directory for git stacks — reference files from anywhere in the repo (#864)"
       },
       {
         "type": "feature",
@@ -729,7 +816,7 @@
       },
       {
         "type": "fix",
-        "text": "env var values leaked in deploy logs \u2014 now all values are redacted (#985)"
+        "text": "env var values leaked in deploy logs — now all values are redacted (#985)"
       },
       {
         "type": "fix",
@@ -745,7 +832,7 @@
       },
       {
         "type": "fix",
-        "text": "case-sensitive environment sort order \u2014 lowercase names sorted after uppercase (#975)"
+        "text": "case-sensitive environment sort order — lowercase names sorted after uppercase (#975)"
       },
       {
         "type": "fix",
@@ -765,7 +852,7 @@
       },
       {
         "type": "feature",
-        "text": "public IP setting available for hawser-edge environments \u2014 enables clickable port links (#350)"
+        "text": "public IP setting available for hawser-edge environments — enables clickable port links (#350)"
       },
       {
         "type": "fix",
@@ -904,11 +991,11 @@
     "changes": [
       {
         "type": "feature",
-        "text": "API token authentication \u2014 Bearer tokens for CI/CD pipelines and scripts"
+        "text": "API token authentication — Bearer tokens for CI/CD pipelines and scripts"
       },
       {
         "type": "feature",
-        "text": "Telegram topic support \u2014 send notifications to supergroup topics (#855)"
+        "text": "Telegram topic support — send notifications to supergroup topics (#855)"
       },
       {
         "type": "fix",
@@ -978,7 +1065,7 @@
     "changes": [
       {
         "type": "feature",
-        "text": "theme toggle with system option \u2014 auto-follows OS light/dark preference (#803)"
+        "text": "theme toggle with system option — auto-follows OS light/dark preference (#803)"
       },
       {
         "type": "feature",
@@ -1002,7 +1089,7 @@
       },
       {
         "type": "fix",
-        "text": "stack restart fails for containers using network_mode: service:<container> \u2014 added recreate option (#844)"
+        "text": "stack restart fails for containers using network_mode: service:<container> — added recreate option (#844)"
       },
       {
         "type": "fix",
@@ -1178,7 +1265,7 @@
     "changes": [
       {
         "type": "feature",
-        "text": "Inline logs panel on stacks page \u2014 view container logs without leaving the page"
+        "text": "Inline logs panel on stacks page — view container logs without leaving the page"
       },
       {
         "type": "feature",

@@ -71,8 +71,10 @@
 	const sidebar = useSidebar();
 
 	function isActive(path: string): boolean {
-		if (path === '/') return currentPath === '/';
-		return currentPath === path || currentPath.startsWith(`${path}/`);
+		// The Dashboard link carries a ?home marker; compare on the path only.
+		const p = path.split('?')[0];
+		if (p === '/') return currentPath === '/';
+		return currentPath === p || currentPath.startsWith(`${p}/`);
 	}
 
 	async function handleLogout() {
@@ -121,7 +123,7 @@
 	}
 
 	const menuItems: readonly MenuItem[] = [
-		{ href: '/', Icon: LayoutDashboard, label: 'Dashboard', permission: 'always' },
+		{ href: '/?home', Icon: LayoutDashboard, label: 'Dashboard', permission: 'always' },
 		{ href: '/containers', Icon: Box, label: 'Containers', permission: 'containers' },
 		{ href: '/logs', Icon: ScrollText, label: 'Logs', permission: 'containers' },
 		{ href: '/terminal', Icon: Terminal, label: 'Shell', permission: 'containers' },
@@ -241,7 +243,7 @@
 	<Sidebar.Header class="overflow-visible flex items-center justify-center p-0">
 		<!-- Expanded state: logo + collapse button -->
 		<div class="relative flex items-center justify-center w-full group-data-[state=collapsed]:hidden">
-			<a href="/" class="flex justify-center relative">
+			<a href="/?home" class="flex justify-center relative">
 				<img src="/logo-light.webp" alt="Dockhand Logo" class="h-[52px] w-auto object-contain mt-2 mb-1 dark:hidden" style="filter: drop-shadow(1px 1px 2px rgba(0,0,0,0.3)) drop-shadow(-1px -1px 1px rgba(255,255,255,0.9));" />
 				<img src="/logo-dark.webp" alt="Dockhand Logo" class="h-[52px] w-auto object-contain mt-2 mb-1 hidden dark:block" style="filter: drop-shadow(2px 2px 3px rgba(0,0,0,0.6)) drop-shadow(-1px -1px 1px rgba(255,255,255,0.2));" />
 				{#if $licenseStore.isEnterprise}

@@ -164,18 +164,6 @@ export async function startScheduler(): Promise<void> {
 			console.warn(`[Scheduler] Orphan helper reap failed: ${err instanceof Error ? err.message : String(err)}`);
 		}
 
-		// New backup/restore engine: roll back any restore swap it left interrupted,
-		// then scrub operations left `running` by a dead process. Runs after the orphan
-		// helper reap above; it recovers swaps recorded by the engine's journal.
-		try {
-			const { reconcileOnStartup } = await import('../backups');
-			const { swapsRolledBack, containersRestarted, opsScrubbed } = await reconcileOnStartup();
-			if (swapsRolledBack > 0) console.log(`[Scheduler] Rolled back ${swapsRolledBack} interrupted restore swap(s)`);
-			if (containersRestarted > 0) console.log(`[Scheduler] Restarted ${containersRestarted} target(s) left stopped for backup/restore`);
-			if (opsScrubbed > 0) console.log(`[Scheduler] Scrubbed ${opsScrubbed} interrupted operation(s)`);
-		} catch (err) {
-			console.warn(`[Scheduler] Backup engine startup reconciliation failed: ${err instanceof Error ? err.message : String(err)}`);
-		}
 	}
 
 	// Get cron expressions and default timezone from database

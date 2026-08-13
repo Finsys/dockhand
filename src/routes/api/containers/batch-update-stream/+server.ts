@@ -161,10 +161,10 @@ export const POST: RequestHandler = async (event) => {
 				// Capture the OLD image's Env/Labels BEFORE pulling — once the tag is
 				// repointed the old digest may be untagged/GC'd and un-inspectable.
 				// Used by the env/label rebase in recreateContainer (#1226, #1256).
-				let oldImageConfig: { Env?: string[]; Labels?: Record<string, string> } | null = null;
+				let oldImageConfig: { Env?: string[]; Labels?: Record<string, string>; Cmd?: string[] | null; Entrypoint?: string[] | null } | null = null;
 				try {
 					const oldImg = await inspectImage(currentImageId, envIdNum) as any;
-					oldImageConfig = { Env: oldImg?.Config?.Env, Labels: oldImg?.Config?.Labels };
+					oldImageConfig = { Env: oldImg?.Config?.Env, Labels: oldImg?.Config?.Labels, Cmd: oldImg?.Config?.Cmd ?? null, Entrypoint: oldImg?.Config?.Entrypoint ?? null };
 				} catch {
 					// Best-effort; rebase will fall back if unavailable.
 				}

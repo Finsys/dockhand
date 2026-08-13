@@ -10,15 +10,13 @@
  *                 then a phase-marked swap commits it — never deleting the
  *                 original until the replacement is in place.
  *
- * Safety properties enforced here (each has a behavioural test):
+ * Safety properties enforced here:
  *   - the caller must OWN the snapshot (instance + environment) before any read;
- *   - an in-place restore requires explicit confirmation (the validator already
- *     rejects an unconfirmed one; the service refuses again, defence in depth);
+ *   - an in-place restore requires explicit confirmation (validator + service, defence in depth);
  *   - the requested volumes must exist in the snapshot before anything live is
  *     touched (so a typo can't wipe a volume for a restore that then fails);
- *   - a failed/interrupted swap leaves live data intact (proven in swap tests);
- *   - two operations on the same live target are rejected; ops on one repo
- *     serialize;
+ *   - a failed/interrupted swap leaves live data intact;
+ *   - two operations on the same live target are rejected; ops on one repo serialize;
  *   - the restore never records success on an unknown outcome (undefined exit).
  */
 import {
@@ -29,11 +27,11 @@ import {
 	type ResticRun,
 } from './models';
 import { buildInPlaceRestore, buildNewLocationRestore, buildCloneRestore } from './restore-script';
-import { assertSafeVolumeInclude } from './security';
+import { assertSafeVolumeInclude, assertSafeRestoreTarget } from './security';
 import { liveTargetKey } from './locks';
 import { cleanErrorMsg } from './helpers';
-import { stopIntentKey as stopIntentKeyFor } from './stop-recovery-core';
-import type { OperationHandle, StopIntent } from './backup-service';
+import type { SnapshotLayout } from './snapshot-layout';
+import type { OperationHandle } from './backup-service';
 import { formatResticLines } from './backup-service';
 import { EXIT_MARKER } from './restic-script';
 
@@ -60,22 +58,21 @@ export interface RestorePorts {
 	/** Run the restore session container. */
 	runInHelper(spec: { script?: string; args?: string[]; binds: string[]; envId: number | null | undefined; name: string; onStderr?: (line: string) => void }):
 		Promise<ResticRun>;
-	/** Resolve the live bind for a volume by its name (name → `<src>:/volumes/<key>:rw`). */
-	resolveVolumeBind(destinationId: number, snapshotId: string, envId: number | null | undefined, volumeName: string):
+	/** Resolve the live bind for a volume from ALREADY-READ metadata (name → `<src>:/volumes/<key>:rw`).
+	 * Takes the metadata the caller already loaded so the swap resolves from one read - no second
+	 * dump that could transiently fail and slug-bind a bind into an orphan volume. */
+	resolveVolumeBind(metadata: SnapshotLayout | null, envId: number | null | undefined, volumeName: string):
 		Promise<{ bind: string; include: string }>;
+	/** Resolve clone destinations through the shared resolver (the SAME one the dialog preview
+	 * uses), so the previewed path and the populated path are one computation. Returns per-volume
+	 * bind material; the caller still does the side effects (volumeExists / createTargetVolume). */
+	resolveCloneTargets(job: RestoreJob, volumes: string[]):
+		Promise<Array<{ key: string; type: 'bind' | 'volume'; target: string; include: string; bind: string }>>;
 	acquireLiveTarget(key: string): (() => void) | null;
 	serializeDestination<T>(destinationId: number, fn: () => Promise<T>): Promise<T>;
 	openOperation(entityName: string, environmentId: number | null, triggeredBy: 'manual' | 'cron', onProgress?: (s: string, m: string) => void):
 		Promise<OperationHandle>;
 	notify(event: 'restore_success' | 'restore_failed', payload: Record<string, unknown>, envId: number | null | undefined): Promise<void>;
-	/** Record a durable swap intent before the swap, cleared after. */
-	recordSwapIntent(key: string, data: { snapshotId: string; includes: string[]; binds: string[]; envId: number | null }): Promise<void>;
-	clearSwapIntent(key: string): Promise<void>;
-	/** Record a durable "this container was stopped for restore" intent BEFORE the
-	 * stop, so a process death before the restart leaves a row a fresh startup can
-	 * replay to bring the container back up. Cleared once the restart succeeds. */
-	recordStopIntent(key: string, intent: StopIntent): Promise<void>;
-	clearStopIntent(key: string): Promise<void>;
 	helperName(snapshotId: string): string;
 
 	// --- post-restore actions (in-place only) ------------------------------------
@@ -94,13 +91,17 @@ export interface RestorePorts {
 	 *  restoreSecrets (opt-in, default on): write the stack's secrets carried in the
 	 *  snapshot into the target env's DB before redeploy so the stack comes up complete. */
 	redeployStack(name: string, envId: number | null | undefined, destinationId: number, snapshotId: string, restoreSecrets?: boolean): Promise<void>;
-	/** Read the snapshot's stored restore metadata (metadata.json), or null. */
-	readSnapshotMetadata(destinationId: number, snapshotId: string): Promise<any | null>;
-	/** Write the snapshot's captured stack files (/metadata/stacks/<name>/stackfiles/)
-	 * into Dockhand's LOCAL data dir at stacks/<envName>/<stackName>/ so Dockhand can
+	/** Read the snapshot's stored restore metadata (typed SnapshotLayout), or null. */
+	readSnapshotMetadata(destinationId: number, snapshotId: string): Promise<SnapshotLayout | null>;
+	/** Write the snapshot's captured stack files (/volumes/__dockhand_stackdir__) into
+	 * Dockhand's LOCAL data dir at stacks/<envName>/<stackName>/ so Dockhand can
 	 * manage/redeploy the restored stack, even when the volume data restored to a
-	 * remote env. No-op (returns false) if the snapshot has no stackfiles/. */
-	writeLocalStackFiles(destinationId: number, snapshotId: string, stackName: string, targetPath: string, overwrite: boolean): Promise<boolean>;
+	 * remote env. No-op (returns false) if the snapshot has no stack files. */
+	writeLocalStackFiles(destinationId: number, snapshotId: string, stackName: string, targetPath: string, overwrite: boolean, envId?: number | null): Promise<boolean>;
+	/** Resolve the canonical LOCAL managed stack dir (stacks/<envName>/<stackName>/) for a
+	 * target - where a clone's compose/.env is materialised so the restored stack is a normal
+	 * managed (internal) stack the UI can edit + redeploy. */
+	stackDirFor(stackName: string, envId: number | null | undefined): Promise<string>;
 
 	// --- clone (cross-env restore) -----------------------------------------------
 	/** Does a NAMED VOLUME with this name already exist on the target env? Used by
@@ -153,6 +154,12 @@ export interface RestoreJob {
 	 * false = bring the stack up without secrets (the operator re-enters them). Only
 	 * meaningful for a stack redeploy. */
 	restoreSecrets?: boolean;
+	/** New-location STACK restore only. When true, the snapshot's captured stack dir
+	 * (/volumes/__dockhand_stackdir__: compose/.env/config) is NOT restored - only the
+	 * volume data lands at targetPath. A data-only restore for when the operator already
+	 * has the compose and just wants the data back. Default false (stack files included and
+	 * materialised into Dockhand's managed stack dir). */
+	skipStackFiles?: boolean;
 }
 
 export class RestoreService {
@@ -174,6 +181,19 @@ export class RestoreService {
 
 	async run(job: RestoreJob, triggeredBy: 'manual' | 'cron' = 'manual'): Promise<RestoreResult> {
 		const envId = job.environmentId;
+		// Two tiers, both stamped with wall-clock + {env,target,snapshot} so a line lines up
+		// with the shard test log by time and target. log() is always on (started/failed);
+		// diag() carries the internal mode/type micro-trace behind BACKUP_DIAG=1 (CI-only).
+		const key = `${job.targetName ?? job.targetPath ?? '?'} snap=${job.snapshotId.slice(0, 8)} env=${envId}`;
+		const t0 = Date.now();
+		const log = (msg: string) => console.log(`[restore] ${new Date().toISOString()} ${key} | ${msg}`);
+		const diagOn = process.env.BACKUP_DIAG === '1';
+		const diag = (phase: string, extra?: string) => {
+			if (!diagOn) return;
+			console.log(`[restore] ${new Date().toISOString()} ${key} | ${phase} @${Date.now() - t0}ms${extra ? ' | ' + extra : ''}`);
+		};
+		log(`started (${job.mode}, ${job.targetType})`);
+		diag('START', `post=${job.postRestore ?? 'none'}`);
 		try {
 			// --- ownership: caller must own the snapshot (instance + env) ---
 			await this.ports.guardSnapshotAccess(job.destinationId, job.snapshotId);
@@ -246,6 +266,7 @@ export class RestoreService {
 				: await this.runInPlaceContainer(job, triggeredBy, requested);
 		} catch (err) {
 			const { code, message } = errorInfo(err);
+			log(`failed after ${((Date.now() - t0) / 1000).toFixed(1)}s: ${code} ${message}`);
 			return { status: 'error', code, error: message };
 		}
 	}
@@ -259,31 +280,35 @@ export class RestoreService {
 		return this.runNewLocationTo(job, triggeredBy, volumes, includes);
 	}
 
-	/** Non-destructive STACK restore into a fresh directory: the volume data PLUS
-	 * the snapshot's stored compose/.env files (under /metadata/stacks/<name>), so
-	 * the operator gets a complete, redeployable stack directory. Additionally, the
-	 * captured stack files are written to Dockhand's LOCAL data dir so Dockhand can
-	 * manage the restored stack even when the volume data restores to a remote env. */
+	/** Non-destructive STACK restore into a fresh directory. Restores the volume data and,
+	 * unless skipStackFiles is set, the snapshot's stored compose/.env (under
+	 * /volumes/__dockhand_stackdir__). Dockhand ALWAYS materialises the stack files into its own
+	 * managed stack dir and registers the stack, so it can manage/redeploy it - this is
+	 * load-bearing: for a REMOTE env the compose exists only on the remote host otherwise, so
+	 * Dockhand would have nothing to manage. `skipStackFiles` opts out entirely (data-only). */
 	private async runNewLocationStack(job: RestoreJob, triggeredBy: 'manual' | 'cron', volumes: string[]): Promise<RestoreResult> {
 		const includes = volumes.map((v) => `/volumes/${v}`);
-		if (job.targetName) includes.push(`/metadata/stacks/${job.targetName}`);
+		const includeStackFiles = job.targetName && !job.skipStackFiles;
+		if (includeStackFiles) {
+			// The captured stack dir is always at /volumes/__dockhand_stackdir__
+			// (listSnapshotVolumes filters it out of `volumes`, so add it explicitly here so
+			// the new-location restore also lands the compose/.env for a redeployable dir).
+			const { STACKDIR_VOLUME_KEY } = await import('./stackdir-plan');
+			includes.push(`/volumes/${STACKDIR_VOLUME_KEY}`);
+		}
 		const result = await this.runNewLocationTo(job, triggeredBy, volumes, includes);
-		// After the volume restore, materialise the stack files on Dockhand itself at
-		// the same targetPath, so Dockhand can manage/redeploy the restored stack.
-		if (result.status !== 'error' && job.targetName && job.targetPath) {
+		// Materialise the stack files into the CANONICAL managed stack dir on Dockhand
+		// (stackDirFor -> $DATA_DIR/stacks/<env>/<name>, NOT job.targetPath which is the host path
+		// where the volume DATA landed), and register the stack as managed. Always (unless
+		// skipStackFiles): Dockhand needs the compose locally to edit/redeploy, especially for a
+		// remote env. Best-effort - the volume restore already succeeded.
+		if (result.status !== 'error' && includeStackFiles && job.targetName) {
 			try {
-				// Materialising stack files reproduces the snapshot's point-in-time
-				// stack dir, so it always REPLACES (clears stale files). This is NOT
-				// keyed on confirmOverwrite — that flag is the destructive-intent guard
-				// for overwriting live VOLUME data (in-place), a different concept from
-				// how the managed compose/.env dir is rewritten. `mergeStackFiles: true`
-				// on the job is the explicit opt-out (kept for parity with the old
-				// engine's overwriteExisting=false), otherwise we replace.
 				const overwrite = job.mergeStackFiles !== true;
-				await this.ports.writeLocalStackFiles(job.destinationId, job.snapshotId, job.targetName, job.targetPath, overwrite);
+				const stackTargetPath = await this.ports.stackDirFor(job.targetName, job.environmentId);
+				await this.ports.writeLocalStackFiles(job.destinationId, job.snapshotId, job.targetName, stackTargetPath, overwrite, job.environmentId);
 			} catch (e) {
-				// the volume restore already succeeded; local stack files are best-effort
-				console.log(`[Restore] writeLocalStackFiles threw for "${job.targetName}": ${e instanceof Error ? e.message : String(e)}`);
+				console.log(`[restore] ${new Date().toISOString()} materialise stack files threw for "${job.targetName}": ${e instanceof Error ? e.message : String(e)}`);
 			}
 		}
 		return result;
@@ -293,6 +318,10 @@ export class RestoreService {
 	private async runNewLocationTo(job: RestoreJob, triggeredBy: 'manual' | 'cron', volumes: string[], includes: string[]): Promise<RestoreResult> {
 		const op = await this.ports.openOperation(`Restore ${job.snapshotId.slice(0, 8)} → ${job.targetPath}`, job.environmentId, triggeredBy);
 		try {
+			// Defense-in-depth: the helper bind-mounts targetPath rw as root. Refuse a protected
+			// system dir here even if the request bypassed API validation. (validate.ts blocks it
+			// at the edge; this guarantees the contract at the last point before the mount.)
+			assertSafeRestoreTarget(job.targetPath!);
 			includes.forEach(assertSafeVolumeInclude);
 			const args = buildNewLocationRestore(job.snapshotId, job.targetPath!, includes, job.restoreFlags ?? []);
 			op.progress('restoring', `Restoring ${volumes.length} volume(s) to ${job.targetPath}...`);
@@ -320,11 +349,31 @@ export class RestoreService {
 			(op) => this.applyPostRestore(job.postRestore ?? 'recreate', job, op));
 	}
 
-	/** CLONE a STACK to the target env: populate the mapped destinations, then
-	 * redeploy from the snapshot's stored compose files. */
+	/** CLONE a STACK to the target env: populate the mapped destinations, then either
+	 * redeploy from the snapshot's stored compose files, or (postRestore 'none') just
+	 * materialise the compose/.env dir locally so the user has a stack to edit + redeploy
+	 * by hand. Redeploy materialises the dir itself (redeployStack); 'none' would otherwise
+	 * leave NO compose dir at all - the UI says "update the compose file... then redeploy",
+	 * so the dir must exist. */
 	private runCloneStack(job: RestoreJob, triggeredBy: 'manual' | 'cron', volumes: string[]): Promise<RestoreResult> {
-		return this.runClonePopulate(job, triggeredBy, volumes,
-			(op) => this.applyPostRestore(job.postRestore === 'none' ? 'none' : 'redeploy', job, op));
+		return this.runClonePopulate(job, triggeredBy, volumes, async (op) => {
+			if (job.postRestore === 'none') {
+				// Bring nothing up, but materialise the managed stack dir so it's editable +
+				// redeployable. Best-effort (matches runNewLocationStack): the volume clone
+				// already succeeded, so a stackfile write failure must not fail the restore.
+				if (job.targetName) {
+					try {
+						const overwrite = job.mergeStackFiles !== true;
+						const stackTargetPath = await this.ports.stackDirFor(job.targetName, job.environmentId);
+						await this.ports.writeLocalStackFiles(job.destinationId, job.snapshotId, job.targetName, stackTargetPath, overwrite, job.environmentId);
+					} catch (e) {
+						console.log(`[restore] ${new Date().toISOString()} clone 'none' writeLocalStackFiles threw for "${job.targetName}": ${e instanceof Error ? e.message : String(e)}`);
+					}
+				}
+				return this.applyPostRestore('none', job, op);
+			}
+			return this.applyPostRestore('redeploy', job, op);
+		});
 	}
 
 	/**
@@ -362,20 +411,28 @@ export class RestoreService {
 				if (mapped.length > 0) {
 					const binds: string[] = [];
 					const mountRoots: string[] = [];
+					// The target PATHS + bind strings come from the shared resolver (same as the dialog
+					// preview), so preview and restore can't diverge. The loop only does the SIDE
+					// EFFECTS (collision check / volume creation), not bind construction.
+					const resolved = await this.ports.resolveCloneTargets(job, mapped);
+					const byKey = new Map(resolved.map((r) => [r.key, r]));
 					for (const v of mapped) {
-						const d = destMap.get(v)!;
-						const include = `/volumes/${v}`;
-						assertSafeVolumeInclude(include);
-						if (d.kind === 'volume') {
-							if (await this.ports.volumeExists(d.target, env)) {
+						const r = byKey.get(v)!;
+						assertSafeVolumeInclude(r.include);
+						// Last line of defense (independent of validate.ts): a host-path clone target
+						// is bind-mounted rw as root, so refuse a protected system dir even if a
+						// crafted request reached the service directly.
+						if (r.type === 'bind') assertSafeRestoreTarget(r.target);
+						if (r.type === 'volume') {
+							if (await this.ports.volumeExists(r.target, env)) {
 								throw new BackupError('VALIDATION',
-									`volume "${d.target}" already exists on the target environment; remove it or choose another destination before cloning`);
+									`volume "${r.target}" already exists on the target environment; remove it or choose another destination before cloning`);
 							}
-							await this.ports.createTargetVolume(d.target, env);
+							await this.ports.createTargetVolume(r.target, env);
 						}
 						// named volume (now created) or absolute host path — bind rw into the helper.
-						binds.push(`${d.target}:${include}:rw`);
-						mountRoots.push(include);
+						binds.push(r.bind);
+						mountRoots.push(r.include);
 					}
 					const script = buildCloneRestore(job.snapshotId, mountRoots, job.restoreFlags ?? []);
 					op.progress('restoring', `Populating ${mapped.length} volume(s) on the target environment...`);
@@ -387,6 +444,14 @@ export class RestoreService {
 				}
 
 				// --- loose-files fallback for any un-mapped volumes (extract to targetPath) ---
+				// FAIL-CLOSED: un-mapped volumes need a targetPath to land in. Without one they
+				// would be silently dropped while the restore still reports success and the
+				// redeploy brings the target up with EMPTY volumes (data loss). Refuse instead.
+				if (loose.length > 0 && !job.targetPath) {
+					throw new BackupError('VALIDATION',
+						`Clone restore has ${loose.length} volume(s) with no destination mapping and no targetPath ` +
+						`to extract them to (${loose.join(', ')}). Map every volume or provide a targetPath.`);
+				}
 				if (loose.length > 0 && job.targetPath) {
 					const includes = loose.map((v) => `/volumes/${v}`);
 					includes.forEach(assertSafeVolumeInclude);
@@ -428,18 +493,13 @@ export class RestoreService {
 		return this.runInPlaceSwap(job, triggeredBy, volumes, {
 			// Stop the one container (a stop FAILURE aborts before any volume is touched).
 			stop: async (op) => {
-				if (!job.targetName) return { intentKey: null, restart: null };
+				if (!job.targetName) return { restart: null };
 				const { containers } = await this.ports.resolveTargets(job.targetName, job.environmentId);
 				const running = containers.filter((c) => c.state === 'running');
-				if (running.length === 0) return { intentKey: null, restart: null };
+				if (running.length === 0) return { restart: null };
 				op.progress('stopping', `Stopping ${job.targetName}...`);
-				const intentKey = stopIntentKeyFor(job.environmentId, 'container', job.targetName);
-				await this.ports.recordStopIntent(intentKey, {
-					type: 'container', targetName: job.targetName, envId: job.environmentId,
-					containers: running.map((c) => ({ id: c.id, name: c.name })),
-				});
 				const { restart } = await this.ports.stopBeforeRestore(running, job.environmentId);
-				return { intentKey, restart };
+				return { restart };
 			},
 			// After the swap, run the caller's post-restore action (start/recreate/none).
 			postAction: (op) => this.applyPostRestore(job.postRestore ?? 'start', job, op),
@@ -454,18 +514,13 @@ export class RestoreService {
 			// Stop the whole stack via native compose stop; a stop FAILURE aborts
 			// before any volume is touched.
 			stop: async (op) => {
-				if (!job.targetName) return { intentKey: null, restart: null };
+				if (!job.targetName) return { restart: null };
 				const { containers } = await this.ports.resolveTargets(job.targetName, job.environmentId, 'stack');
 				const running = containers.filter((c) => c.state === 'running');
-				if (running.length === 0) return { intentKey: null, restart: null };
+				if (running.length === 0) return { restart: null };
 				op.progress('stopping', `Stopping stack ${job.targetName}...`);
-				const intentKey = stopIntentKeyFor(job.environmentId, 'stack', job.targetName);
-				await this.ports.recordStopIntent(intentKey, {
-					type: 'stack', targetName: job.targetName, envId: job.environmentId,
-					containers: running.map((c) => ({ id: c.id, name: c.name })),
-				});
 				const { restart } = await this.ports.stopStackBeforeRestore(job.targetName, job.environmentId);
-				return { intentKey, restart };
+				return { restart };
 			},
 			// A stack is brought back by redeploying from its stored compose files.
 			postAction: (op) => this.applyPostRestore('redeploy', job, op),
@@ -485,7 +540,7 @@ export class RestoreService {
 		triggeredBy: 'manual' | 'cron',
 		volumes: string[],
 		opts: {
-			stop: (op: OperationHandle) => Promise<{ intentKey: string | null; restart: (() => Promise<void>) | null }>;
+			stop: (op: OperationHandle) => Promise<{ restart: (() => Promise<void>) | null }>;
 			postAction: (op: OperationHandle) => Promise<PostRestoreOutcome>;
 		},
 	): Promise<RestoreResult> {
@@ -494,18 +549,57 @@ export class RestoreService {
 		}
 		const env = job.environmentId;
 
+		// DATA-SAFETY: a BIND volume's live bind is the SOURCE env's absolute host path
+		// (resolveBindFromMetadata returns entry.source, e.g. /srv/appA/data). An in-place
+		// swap writes to that exact path on `env`'s daemon. If `env` is NOT the snapshot's
+		// source env, we'd destructively swap into an unrelated /srv/appA/data on the WRONG
+		// host. Named volumes are safe (they resolve to a name on the local daemon), so only
+		// bind volumes are gated. Cross-env restores must go through the clone path.
+		// Detect binds from the metadata directly (fail-closed: if metadata is unreadable we
+		// can't prove the swap is safe, so we refuse rather than trust an empty volumeTypes).
+		// Read the metadata ONCE here and reuse it to resolve the binds below. A second per-volume
+		// read opens a TOCTOU window: a transient dump failure returns null and slug-binds a bind
+		// into an orphan named volume (data loss).
+		const meta = await this.ports.readSnapshotMetadata(job.destinationId, job.snapshotId).catch(() => null);
+		{
+			const requested = new Set(volumes);
+			const bindVols = (meta?.volumes ?? [])
+				.filter((v) => v.type === 'bind' && requested.has(v.key ?? v.name))
+				.map((v) => v.key ?? v.name);
+			// If we requested volumes but couldn't read metadata to classify them, we cannot
+			// prove none are binds -> fail-closed.
+			const metaUnreadable = volumes.length > 0 && meta === null;
+			if (bindVols.length > 0 || metaUnreadable) {
+				const sourceEnv = meta?.environmentId;
+				const targetIsSource = meta !== null && (sourceEnv ?? null) === (env ?? null);
+				if (!targetIsSource) {
+					const which = bindVols.length > 0 ? ` (${bindVols.join(', ')})` : '';
+					return {
+						status: 'error',
+						code: 'VALIDATION',
+						error: `in-place restore of a bind-mounted volume${which} is only allowed on the snapshot's source environment; use "restore to new location" to move it across environments`,
+					};
+				}
+			}
+		}
+		// Past the gate, `meta` is proven non-null whenever we requested volumes (metaUnreadable
+		// would have returned above), so the resolver never sees null for a real bind -> no
+		// slug-bind. Resolve every volume from this ONE metadata read.
+
 		// Resolve each volume's live bind + include (rw — the swap writes to it).
 		const binds: string[] = [];
 		const liveRoots: string[] = [];
 		for (const v of volumes) {
-			const { bind, include } = await this.ports.resolveVolumeBind(job.destinationId, job.snapshotId, env, v);
+			const { bind, include } = await this.ports.resolveVolumeBind(meta, env, v);
 			assertSafeVolumeInclude(include);
 			binds.push(bind);
 			liveRoots.push(include);
 		}
 
-		// Lock the live targets (reject a concurrent op on this data).
-		const key = liveTargetKey(env, binds);
+		// Lock the live targets (reject a concurrent op on this data). The fallback identity
+		// matches backup-service's `${type}:${targetName}` so a backup and a restore of the
+		// SAME config-only target still collide, while disjoint config-only targets don't.
+		const key = liveTargetKey(env, binds, `${job.targetType ?? 'container'}:${job.targetName}`);
 		const release = this.ports.acquireLiveTarget(key);
 		if (!release) return { status: 'skipped', reason: `Another backup or restore is already running for "${job.targetName ?? key}".` };
 
@@ -513,19 +607,17 @@ export class RestoreService {
 			return await this.ports.serializeDestination(job.destinationId, async () => {
 				const op = await this.ports.openOperation(`Restore ${job.snapshotId.slice(0, 8)} → ${job.targetName ?? 'volumes'}`, env, triggeredBy);
 				let restart: (() => Promise<void>) | null = null;
-				let stopIntentKey: string | null = null;
-				const swapKey = `swap:${env ?? 'local'}:${job.snapshotId}:${job.targetName ?? key}`;
 				try {
 					// Stop the target first; a stop FAILURE aborts before any volume is touched.
-					({ intentKey: stopIntentKey, restart } = await opts.stop(op));
+					({ restart } = await opts.stop(op));
 
 					// Metadata-only snapshot (no volumes): there's nothing to swap — go
 					// straight to the post-restore action (recreate/redeploy from the
-					// stored config). Otherwise run the phase-marked volume swap.
+					// stored config). Otherwise run the phase-marked volume swap. The swap
+					// is atomic per volume (staging + rename) and self-recovers on the next
+					// restore via the on-disk phase marker, so a crash mid-swap leaves the
+					// live data either fully-old or fully-new, never half-swapped.
 					if (liveRoots.length > 0) {
-						// Durable swap intent BEFORE the swap, so a process death mid-swap is recoverable.
-						await this.ports.recordSwapIntent(swapKey, { snapshotId: job.snapshotId, includes: liveRoots, binds, envId: env });
-
 						const script = buildInPlaceRestore(job.snapshotId, liveRoots, job.restoreFlags ?? []);
 						op.progress('restoring', `Restoring ${volumes.length} volume(s) in place...`);
 						this.emitVolumeList(op, volumes);
@@ -533,8 +625,6 @@ export class RestoreService {
 							onStderr: (line) => { for (const l of formatResticLines(line)) op.progress('progress', l.startsWith('[dockhand]') ? l : `[restic] ${l}`); } });
 							this.emitResticStdout(op, run.stdout);
 						if (!resticOk(run)) throw new BackupError('RESTIC', run.stderr.trim() || 'restore failed', { exitCode: run.exitCode });
-
-						await this.ports.clearSwapIntent(swapKey);
 					} else {
 						op.progress('restoring', `Config-only snapshot — no volume data to restore for ${job.targetName ?? 'target'}.`);
 					}
@@ -545,8 +635,6 @@ export class RestoreService {
 					const outcome = await opts.postAction(op);
 
 					if (outcome.ok) {
-						// The post-restore action resolved the target's state — drop the intent.
-						if (stopIntentKey) { try { await this.ports.clearStopIntent(stopIntentKey); } catch { /* non-fatal */ } }
 						await op.close({ kind: 'ok' }, { snapshotId: job.snapshotId, volumes, postRestore: outcome });
 						await this.notifyOk(job, volumes);
 						return { status: 'success', executionId: op.id, restoredVolumes: volumes, postRestore: outcome };
@@ -557,12 +645,17 @@ export class RestoreService {
 					await this.notifyOk(job, volumes);
 					return { status: 'warning', executionId: op.id, restoredVolumes: volumes, postRestore: outcome };
 				} catch (err) {
-					// Restart what we stopped; the swap-intent stays for startup recovery if the swap was interrupted.
-					// On a clean restart, drop the durable stop intent; if the restart itself
-					// throws, KEEP it so a later startup retries the restart.
+					// Restart whatever we stopped for the restore. If the restart itself
+					// fails, SURFACE it: there is no boot-time recovery, so the operator
+					// must know the target is still stopped and start it themselves.
 					if (restart) {
-						try { await restart(); if (stopIntentKey) await this.ports.clearStopIntent(stopIntentKey).catch(() => {}); }
-						catch { /* restart failed — leave the stop intent for startup retry */ }
+						try {
+							await restart();
+						} catch {
+							const msg = `Restore failed and ${job.targetName ?? 'the target'} could not be restarted — it is STILL STOPPED. Start it manually.`;
+							op.progress('warning', msg);
+							try { await this.ports.notify('restore_failed', { snapshotId: job.snapshotId, kind: 'restore', errorCode: 'STOPPED_RESTART_FAILED', message: msg }, job.environmentId); } catch { /* non-fatal */ }
+						}
 					}
 					return await this.failOp(op, job, err);
 				}
@@ -619,7 +712,7 @@ export class RestoreService {
 
 				case 'redeploy': {
 					const meta = await this.ports.readSnapshotMetadata(job.destinationId, job.snapshotId);
-					if (!meta || meta.hasStackFiles !== true) {
+					if (!meta || meta.stack === undefined) {
 						return { action, ok: false, error: 'no stack files stored in this snapshot; cannot redeploy' };
 					}
 					op.progress('redeploying', `Redeploying stack ${name}...`);

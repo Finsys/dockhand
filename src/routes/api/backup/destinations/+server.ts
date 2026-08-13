@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
+import { requireBackups } from '$lib/server/backups/route-guards';
 import { auditBackupDestination } from '$lib/server/audit';
 import {
 	getBackupDestinations,
@@ -11,7 +12,7 @@ import {
 } from '$lib/server/db';
 import { initRepository, testRepository } from '$lib/server/backups';
 import { registerSchedule } from '$lib/server/scheduler';
-import { validateRepositoryForSave, validateFlags, validatePolicySchedules } from '$lib/server/backups/helpers';
+import { validateRepositoryForSave, validateAndSerializeFlags, validatePolicySchedules } from '$lib/server/backups/helpers';
 
 /**
  * Prepare destination for API response — strip password, parse env vars.
@@ -37,9 +38,8 @@ function prepareDestination(dest: any, opts: { includeEnvVars: boolean }): any {
 
 export const GET: RequestHandler = async ({ cookies }) => {
 	const auth = await authorize(cookies);
-	if (auth.authEnabled && !await auth.can('backups', 'view')) {
-		return json({ error: 'Permission denied' }, { status: 403 });
-	}
+	const denied = await requireBackups(auth, 'view');
+	if (denied) return denied;
 
 	const destinations = await getBackupDestinations();
 	// LIST: strip envVars (cloud creds). Modal re-fetches single destination to edit.
@@ -49,9 +49,8 @@ export const GET: RequestHandler = async ({ cookies }) => {
 export const POST: RequestHandler = async (event) => {
 	const { request, cookies } = event;
 	const auth = await authorize(cookies);
-	if (auth.authEnabled && !await auth.can('backups', 'manage')) {
-		return json({ error: 'Permission denied' }, { status: 403 });
-	}
+	const denied = await requireBackups(auth, 'manage');
+	if (denied) return denied;
 
 	const body = await request.json();
 
@@ -63,8 +62,16 @@ export const POST: RequestHandler = async (event) => {
 	// BEFORE persisting, so nothing is saved on bad input.
 	const repoError = validateRepositoryForSave(body.repository);
 	if (repoError) return json({ error: repoError }, { status: 400 });
-	const flagError = validateFlags(body.flags);
-	if (flagError) return json({ error: flagError }, { status: 400 });
+	// Flags: prefer the split shape (backupFlags/restoreFlags); fall back to a legacy `flags`
+	// string (treated as backup flags). Validate+serialize to the JSON stored in `flags`.
+	let flagsColumn: string | null = null;
+	try {
+		flagsColumn = (body.backupFlags !== undefined || body.restoreFlags !== undefined)
+			? validateAndSerializeFlags(body.backupFlags, body.restoreFlags)
+			: validateAndSerializeFlags(body.flags, '');
+	} catch (e) {
+		return json({ error: e instanceof Error ? e.message : 'Invalid restic flags' }, { status: 400 });
+	}
 
 	// Validate any cron schedules in the supplied policies (audit #7)
 	const policyCronError = validatePolicySchedules(body.policies);
@@ -85,7 +92,7 @@ export const POST: RequestHandler = async (event) => {
 			repository: body.repository,
 			password: body.password,
 			envVars: body.envVars ? JSON.stringify(body.envVars) : null,
-			flags: body.flags ?? null,
+			flags: flagsColumn,
 			hostPath: body.hostPath ?? null,
 			policies: body.policies ?? defaultPolicies
 		});

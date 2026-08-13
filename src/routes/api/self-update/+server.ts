@@ -1,6 +1,6 @@
 import { json } from '@sveltejs/kit';
 import { authorize } from '$lib/server/authorize';
-import { getAdditionalVolumeBinds } from '$lib/server/mount-dedupe';
+import { getAdditionalVolumeBinds, dedupeVolumesForRecreate } from '$lib/server/mount-dedupe';
 import {
 	getOwnContainerId,
 	getHostDockerSocket,
@@ -169,6 +169,11 @@ function buildCreateConfig(inspectData: any, newImage: string): any {
 	delete createConfig.Hostname;
 
 	const additionalBinds = getAdditionalVolumeBinds(hostConfig, inspectData.Mounts || []);
+	// Drop image-VOLUME entries that collide with a bind/tmpfs/inspect mount, so create never
+	// sends a duplicate mount point (#1088 / #1363).
+	const kept = dedupeVolumesForRecreate(createConfig.Volumes, hostConfig, inspectData.Mounts || [], additionalBinds);
+	if (kept) createConfig.Volumes = kept;
+	else delete createConfig.Volumes;
 	if (additionalBinds.length > 0) {
 		createConfig.HostConfig = {
 			...createConfig.HostConfig,

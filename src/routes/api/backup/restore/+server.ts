@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
+import { requireBackups } from '$lib/server/backups/route-guards';
 import { runRestore } from '$lib/server/backups';
 import { validateRestoreRequest, type RestoreMode } from '$lib/server/backups/validate';
 import { createJobResponse } from '$lib/server/sse';
@@ -10,9 +11,8 @@ import { guardSnapshotEnvAccess } from '$lib/server/backups/route-guards';
 export const POST: RequestHandler = async (event) => {
 	const { request, cookies } = event;
 	const auth = await authorize(cookies);
-	if (auth.authEnabled && !await auth.can('backups', 'manage')) {
-		return json({ error: 'Permission denied' }, { status: 403 });
-	}
+	const rbacDenied = await requireBackups(auth, 'manage');
+	if (rbacDenied) return rbacDenied;
 
 	const body = await request.json();
 	const mode: RestoreMode = body.mode === 'in-place' ? 'in-place' : 'new-location';
@@ -25,6 +25,9 @@ export const POST: RequestHandler = async (event) => {
 	// The client sends false to bring the stack up without them. Only a stack redeploy
 	// consumes this; container restores ignore it.
 	const restoreSecrets = body.restoreSecrets !== false;
+	// New-location STACK restore: skip the captured compose/.env (data-only restore),
+	// and/or ADOPT the restored stack into Dockhand afterwards (opt-in). Both default off.
+	const skipStackFiles = body.skipStackFiles === true;
 
 	// Authorization gates run BEFORE request validation, so an unauthorized caller
 	// never learns anything about the request shape.
@@ -76,6 +79,7 @@ export const POST: RequestHandler = async (event) => {
 				postRestore,
 				volumeDestinations,
 				restoreSecrets,
+				skipStackFiles,
 			},
 			access,
 			// Stream progress to the client (the restore modal's log). Without this the

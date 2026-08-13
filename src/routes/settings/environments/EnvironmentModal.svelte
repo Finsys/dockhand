@@ -275,6 +275,9 @@
 	let formHost = $state('');
 	let formPort = $state(2375); // Default for direct Docker connection
 	let formProtocol = $state('http');
+	// direct-only: where Dockhand stages compose + relative-bind files on the remote host,
+	// so `./config`/`./data` binds resolve. Empty = current behavior (relative binds unsupported).
+	let formRemoteStacksDir = $state('');
 	let formTlsCa = $state('');
 	let formTlsCert = $state('');
 	let formTlsKey = $state('');
@@ -294,6 +297,11 @@
 	let formDiskWarningThreshold = $state(80);
 	let formDiskWarningThresholdGb = $state(50);
 	let formConnectionType = $state<ConnectionType>('socket');
+	// Envs that keep stack files on a REMOTE host, so backup needs a declared stack path:
+	// direct (Dockhand stages there, drives deploy + backup) and hawser (the agent keeps files
+	// at its STACKS_DIR; the path is backup-only, does not steer deploy).
+	const usesStackPath = (ct: ConnectionType) => ct === 'direct' || ct === 'hawser-standard' || ct === 'hawser-edge';
+	const isHawserConn = (ct: ConnectionType) => ct === 'hawser-standard' || ct === 'hawser-edge';
 	let formHawserToken = $state('');
 	let formLabels = $state<string[]>([]);
 	let newLabelInput = $state('');
@@ -598,6 +606,7 @@
 			loadImagePruneSettings(environment.id);
 			loadTimezone(environment.id);
 			loadDiskWarningSettings(environment.id);
+			if (usesStackPath(formConnectionType)) loadRemoteStacksDir(environment.id);
 			// Load Hawser token if edge mode
 			if (formConnectionType === 'hawser-edge') {
 				loadHawserToken(environment.id);
@@ -607,6 +616,7 @@
 			formHost = '';
 			formPort = 2375;
 			formProtocol = 'http';
+			formRemoteStacksDir = '';
 			formTlsCa = '';
 			formTlsCert = '';
 			formTlsKey = '';
@@ -883,6 +893,7 @@
 				if (newEnv?.id) {
 					await saveTimezone(newEnv.id);
 					await saveDiskWarningSettings(newEnv.id);
+					if (usesStackPath(formConnectionType)) await saveRemoteStacksDir(newEnv.id);
 				}
 				onSaved();
 				onClose();
@@ -1019,6 +1030,7 @@
 				await saveImagePruneSettings(environment.id);
 				await saveTimezone(environment.id);
 				await saveDiskWarningSettings(environment.id);
+				if (usesStackPath(formConnectionType)) await saveRemoteStacksDir(environment.id);
 				toast.success(`Updated environment: ${formName}`);
 				onSaved();
 				onClose();
@@ -1046,6 +1058,30 @@
 			}
 		} catch (error) {
 			console.error('Failed to load disk warning settings:', error);
+		}
+	}
+
+	async function loadRemoteStacksDir(envId: number) {
+		try {
+			const response = await fetch(`/api/environments/${envId}/remote-stacks-dir`);
+			if (response.ok) {
+				const data = await response.json();
+				formRemoteStacksDir = data.remoteStacksDir ?? '';
+			}
+		} catch (error) {
+			console.error('Failed to load remote stacks dir:', error);
+		}
+	}
+
+	async function saveRemoteStacksDir(envId: number) {
+		try {
+			await fetch(`/api/environments/${envId}/remote-stacks-dir`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ remoteStacksDir: formRemoteStacksDir.trim() || null })
+			});
+		} catch (error) {
+			console.error('Failed to save remote stacks dir:', error);
 		}
 	}
 
@@ -1607,7 +1643,7 @@
 				</Tabs.Trigger>
 			</Tabs.List>
 
-			<div class="overflow-y-auto py-4 h-[520px] [scrollbar-gutter:stable] pr-3">
+			<div class="overflow-y-auto py-4 h-[520px] [scrollbar-gutter:stable] pr-5">
 				<!-- General Tab (Connection Settings) -->
 					<Tabs.Content value="general" class="space-y-4 mt-0 h-full">
 						<!-- Name field -->
@@ -1907,6 +1943,75 @@
 								</div>
 								<p class="text-xs text-muted-foreground">
 									Click <Pipette class="w-3 h-3 inline" /> to auto-detect available Docker sockets
+								</p>
+							</div>
+						{/if}
+
+						<!-- Stack path for backup (direct = also drives deploy; hawser = backup-only) -->
+						{#if usesStackPath(formConnectionType)}
+							<div class="space-y-2">
+								<div class="flex items-center gap-1.5">
+									<Label for="edit-env-remote-stacks-dir">
+										{isHawserConn(formConnectionType) ? 'Remote stack path (for backup)' : 'Remote stacks directory'}
+										<span class="text-muted-foreground font-normal">(optional)</span>
+									</Label>
+									<Tooltip.Root>
+										<Tooltip.Trigger type="button" class="text-muted-foreground hover:text-foreground">
+											<HelpCircle class="w-3.5 h-3.5" />
+										</Tooltip.Trigger>
+										<Tooltip.Content class="w-80 z-[200]" side="right">
+											{#if isHawserConn(formConnectionType)}
+												<div class="space-y-2">
+													<p class="font-medium">Where the agent keeps stack files</p>
+													<p class="text-muted-foreground">
+														The Hawser agent stores each stack's folder at
+														<code class="bg-muted px-1 rounded">&lt;this path&gt;/&lt;stack&gt;</code>
+														on <span class="font-medium text-foreground">its own host</span>. Backup reads
+														the compose and config from there. This does <span class="font-medium text-foreground">not</span>
+														change where deploy or restore write - the agent always uses its own
+														<code class="bg-muted px-1 rounded">STACKS_DIR</code>; this only tells backup where to look.
+													</p>
+													<p class="text-muted-foreground">
+														So set it to MATCH the agent's <code class="bg-muted px-1 rounded">STACKS_DIR</code>
+														(default <code class="bg-muted px-1 rounded">/data/stacks</code>). Leave empty for
+														the default; set it only if the agent runs with a custom one.
+													</p>
+												</div>
+											{:else}
+												<div class="space-y-2">
+													<p class="font-medium">How this path is used</p>
+													<p class="text-muted-foreground">
+														A direct daemon shares no filesystem with Dockhand. When set, Dockhand
+														materialises each stack's whole folder - compose, <code class="bg-muted px-1 rounded">.env</code>,
+														and relative-bind files (<code class="bg-muted px-1 rounded">./config</code>,
+														<code class="bg-muted px-1 rounded">./data</code>) - into
+														<code class="bg-muted px-1 rounded">&lt;this path&gt;/&lt;stack&gt;</code>
+														<span class="font-medium text-foreground">on the remote host</span>, and runs compose there
+														via <code class="bg-muted px-1 rounded">--project-directory</code>.
+													</p>
+													<p class="text-muted-foreground">
+														This applies to normal stacks and git sync alike, so relative binds resolve
+														and every stack is backupable. Leave empty to use only named volumes or
+														absolute paths.
+													</p>
+												</div>
+											{/if}
+										</Tooltip.Content>
+									</Tooltip.Root>
+								</div>
+								<Input
+									id="edit-env-remote-stacks-dir"
+									bind:value={formRemoteStacksDir}
+									placeholder={isHawserConn(formConnectionType) ? '/data/stacks' : '/opt/dockhand/stacks'}
+								/>
+								<p class="text-xs text-muted-foreground">
+									{#if isHawserConn(formConnectionType)}
+										Absolute path on the agent's host where it keeps stack folders. Used only to back up
+										each stack's compose and config. Leave empty for the default <code class="bg-muted px-1 rounded">/data/stacks</code>.
+									{:else}
+										Absolute path on the remote host where Dockhand stages each stack's files before deploying.
+										Set it for stacks with relative binds, or to keep stacks backupable on a remote direct daemon.
+									{/if}
 								</p>
 							</div>
 						{/if}

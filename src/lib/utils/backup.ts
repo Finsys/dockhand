@@ -95,6 +95,9 @@ export interface BackupOptions {
 	excludeCaches?: boolean;
 	webhookSuccess?: string;
 	webhookFailure?: string;
+	/** Stack-dir entries the user DEselected in the "Stack files on the host" picker; excluded
+	 * from the stack-dir capture (never load-bearing compose/.env - the server re-guards). */
+	excludedStackFiles?: string[];
 }
 
 export function parseRetention(retention: string | RetentionPolicy | null | undefined): RetentionPolicy {

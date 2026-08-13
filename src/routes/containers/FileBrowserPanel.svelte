@@ -106,6 +106,21 @@
 	const isVolumeMode = $derived(mode === 'volume');
 	const isSnapshotMode = $derived(mode === 'snapshot');
 
+	// In a snapshot, the stack dir rides a reserved volume key; show it by what it holds,
+	// not the raw internal key. Navigation still uses the real name.
+	function displayEntryName(name: string): string {
+		if (isSnapshotMode && name === '__dockhand_stackdir__') return 'Stack files (compose, config)';
+		return name;
+	}
+
+	// A raw download of the snapshot's metadata.json is refused server-side (403) — it carries
+	// secrets and must only leave through the redacting metadata endpoint. So don't offer a
+	// download button that would always fail; the file is still previewable (redacted).
+	function canDownloadEntry(entry: FileEntry): boolean {
+		if (!isSnapshotMode) return true;
+		return !(entry.name === 'metadata.json' && (currentPath === '/metadata' || currentPath === '/metadata/'));
+	}
+
 	// Effective canEdit: snapshots are always read-only; volumes only if not in use
 	const effectiveCanEdit = $derived(
 		isSnapshotMode ? false : isVolumeMode ? (canEdit && !volumeIsInUse) : canEdit
@@ -934,7 +949,7 @@
 					title={segment}
 					onclick={() => navigateTo('/' + pathSegments().slice(0, i + 1).join('/'))}
 				>
-					{segment}
+					{displayEntryName(segment)}
 				</button>
 			{/each}
 		</div>
@@ -1076,14 +1091,16 @@
 									onclick={() => handleEntryClick(entry)}
 								>
 									<Icon
-										class="w-3.5 h-3.5 shrink-0 {entry.type === 'directory'
-											? 'text-blue-500'
-											: entry.type === 'symlink'
-												? 'text-purple-500'
-												: 'text-muted-foreground'}"
+										class="w-3.5 h-3.5 shrink-0 {isSnapshotMode && entry.name === '__dockhand_stackdir__'
+											? 'text-amber-500'
+											: entry.type === 'directory'
+												? 'text-blue-500'
+												: entry.type === 'symlink'
+													? 'text-purple-500'
+													: 'text-muted-foreground'}"
 									/>
 									<span class="truncate" title={entry.name}>
-										{entry.name}
+										{displayEntryName(entry.name)}
 										{#if entry.type === 'symlink' && entry.linkTarget}
 											<span class="text-muted-foreground ml-1">
 												→ {entry.linkTarget}
@@ -1188,15 +1205,17 @@
 											{/snippet}
 										</ConfirmPopover>
 									{/if}
-									<Button
-										variant="ghost"
-										size="icon"
-										class="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
-										onclick={(e: MouseEvent) => { e.stopPropagation(); downloadFile(entry); }}
-										title="Download"
-									>
-										<Download class="w-3 h-3" />
-									</Button>
+									{#if canDownloadEntry(entry)}
+										<Button
+											variant="ghost"
+											size="icon"
+											class="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+											onclick={(e: MouseEvent) => { e.stopPropagation(); downloadFile(entry); }}
+											title="Download"
+										>
+											<Download class="w-3 h-3" />
+										</Button>
+									{/if}
 								</div>
 							</Table.Cell>
 						</Table.Row>

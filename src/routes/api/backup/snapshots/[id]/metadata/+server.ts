@@ -2,14 +2,15 @@ import { json } from '@sveltejs/kit';
 import { validateSnapshotId } from '$lib/server/docker-validation';
 import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
+import { requireBackups } from '$lib/server/backups/route-guards';
 import { getSnapshotMetadata } from '$lib/server/backups';
 import { guardSnapshotEnvAccess } from '$lib/server/backups/route-guards';
+import { redactSnapshotLayout } from '$lib/server/backups/snapshot-layout';
 
 export const GET: RequestHandler = async ({ params, url, cookies }) => {
 	const auth = await authorize(cookies);
-	if (auth.authEnabled && !await auth.can('backups', 'view')) {
-		return json({ error: 'Permission denied' }, { status: 403 });
-	}
+	const denied = await requireBackups(auth, 'view');
+	if (denied) return denied;
 
 	const snapshotId = params.id;
 	const invalidSnap = validateSnapshotId(snapshotId);
@@ -28,15 +29,9 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 	try {
 		const metadata = await getSnapshotMetadata(destinationId, snapshotId);
 		if (!metadata) return json({ error: 'No metadata available' }, { status: 404 });
-		// Never expose the stored secret VALUES (ciphertext) to the client — replace the
-		// `secrets` array with `secretKeys` (names only) so the UI can list them.
-		const { secrets, ...safe } = metadata as Record<string, unknown>;
-		if (Array.isArray(secrets)) {
-			(safe as Record<string, unknown>).secretKeys = secrets
-				.map((s: any) => s?.key)
-				.filter((k: unknown): k is string => typeof k === 'string');
-		}
-		return json(safe);
+		// Single redaction point: strips stack.secrets values AND container inspect
+		// Config.Env/Labels (plaintext secrets) before anything reaches the client.
+		return json(redactSnapshotLayout(metadata));
 	} catch (error) {
 		const msg = error instanceof Error ? error.message : String(error);
 		return json({ error: msg }, { status: 500 });

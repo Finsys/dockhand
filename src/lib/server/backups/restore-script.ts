@@ -17,18 +17,11 @@ import { shellQuote } from './restic-script';
 import { buildInPlaceRestoreScript, SWAP_NEW } from './swap';
 
 /**
- * Build the in-place restore script. For each live volume root, restic restores
- * that include into `<live>/.dockhand-restore-new` (staging), then the swap
- * commits. `liveRoots` are the `/volumes/<name>` bind destinations being
- * restored, already validated as safe paths.
- *
- * We run one restic per volume so each lands in its own staging dir. restic's
- * `--target <live>` plus `--include /volumes/<name>` writes to
- * `<live>/volumes/<name>`, so we first restore to a scratch target then move the
- * restored subtree into `.dockhand-restore-new` — but simpler and equivalent:
- * restore with `--target <live>/.dockhand-restore-new` and strip the leading
- * `/volumes/<name>` via restic's path handling. To keep the shell simple and
- * robust we restore into the staging dir and let the swap move top-level entries.
+ * Build the in-place restore script. One restic per volume so each lands in its
+ * own staging dir `<live>/.dockhand-restore-new`, then the swap commits.
+ * `liveRoots` are the `/volumes/<name>` bind destinations being restored, already
+ * validated as safe paths. restic restores into the staging dir and the swap moves
+ * top-level entries into place.
  */
 export function buildInPlaceRestore(
 	snapshotId: string,
@@ -39,41 +32,67 @@ export function buildInPlaceRestore(
 	// subshell per restore so a non-zero restic aborts the whole script (set -e in
 	// buildInPlaceRestoreScript) before any swap runs.
 	const restores = liveRoots.map((live) => {
+		const include = live; // e.g. /volumes/data (a dir) or /volumes/etc_app_cfg.yaml (a FILE bind)
+		const say = (m: string) => `echo ${shellQuote(`[dockhand] ${m}`)} >&2`;
+
+		// A single-FILE bind (`./cfg.yaml:/x`) mounts file-on-file, so `<live>` is a FILE,
+		// not a dir. The dir path below mkdir's a staging dir INSIDE <live> — impossible for
+		// a file (`mkdir <file>/...: not a directory`). So branch at RUNTIME (file vs dir is
+		// only known in the helper): a file swaps atomically via a sibling temp + rename; a
+		// dir uses the staging-dir swap. include is always `/volumes/<name>`, so its parent
+		// is always `/volumes` and the sibling temp lives there (never inside the file).
+		const parts = include.replace(/^\/+/, '').split('/'); // ['volumes', '<name>']
+		const parent = '/' + parts.slice(0, -1).join('/');     // '/volumes'
+		const baseName = parts[parts.length - 1];              // '<name>'
+		const fileStagingDir = `${parent}/.dockhand-restore-file-${baseName}`;
+		const liveQ = shellQuote(live);
+		// restic restores the file include as <target><include> = <fileStagingDir>/volumes/<name>.
+		const fileNested = shellQuote(`${fileStagingDir}${include}`);
+		const fileStaging = shellQuote(fileStagingDir);
+		const fileRestic = `restic ${['restore', '--json', snapshotId, '--target', fileStagingDir, '--include', include, ...flags].map(shellQuote).join(' ')}`;
+
+		// --- DIR path (unchanged): staging dir inside <live>, flatten, then swapOne commits.
 		const staging = `${live}/${SWAP_NEW}`;
-		const include = live; // e.g. /volumes/data
-		const args = [
-			'restore', '--json', snapshotId,
-			'--target', staging,
-			'--include', include,
-			...flags,
-		];
-		// restic writes <staging><include> (it recreates the include's full path
-		// under the target). Flatten so the swap sees the volume contents directly
-		// at the staging root: move <staging><include>/* up to <staging>/, then
-		// remove the recreated scaffold (the first path component under staging).
-		const restic = `restic ${args.map(shellQuote).join(' ')}`;
-		const nested = shellQuote(`${staging}${include}`);
 		const stagingQ = shellQuote(staging);
-		// include is always `/volumes/<name>`, so the scaffold under staging is its
-		// first path component, e.g. `volumes`.
+		const dirRestic = `restic ${['restore', '--json', snapshotId, '--target', staging, '--include', include, ...flags].map(shellQuote).join(' ')}`;
+		const nested = shellQuote(`${staging}${include}`);
 		const firstComponent = include.replace(/^\/+/, '').split('/')[0];
 		const scaffold = shellQuote(`${staging}/${firstComponent}`);
-		const flatten =
+		const dirFlatten =
 			`( if [ -d ${nested} ]; then cd ${nested}; ` +
 			`for e in * .[!.]* ..?*; do [ -e "$e" ] || [ -L "$e" ] || continue; mv -- "$e" ${stagingQ}/; done; ` +
 			`fi )`;
-		// Narrate FS operations to stderr (streamed live to the restore log).
-		const say = (m: string) => `echo ${shellQuote(`[dockhand] ${m}`)} >&2`;
-		// SAFE: `scaffold` = <live>/.dockhand-restore-new/volumes — the `volumes`
-		// rung INSIDE our own staging dir, NEVER <live>/volumes. So this rm can't
-		// touch a user's own `volumes/` directory at the live root (that's the bug
-		// the CLONE path had before it moved to a staging dir — see buildCloneRestore).
+
 		return [
-			`${say(`Restoring ${include} into staging dir ${SWAP_NEW}`)}`,
-			restic,
-			flatten,
-			`rm -rf ${scaffold}`,
-		].join('; ');
+			`if [ -d ${liveQ} ]; then`,
+			// directory volume: existing staging-dir restore; swapOne (below) commits it.
+			// Clear the staging dir FIRST (like the file/clone paths) so a marker-less leftover from
+			// a previously-killed restore can't merge stale files into this one. Safe: recovery has
+			// already rolled back any real (marker-bearing) interrupted swap; a marker-less staging
+			// dir is always disposable partial junk. restic restore has no --delete, so without this
+			// wipe a retry would keep files that aren't in this snapshot and commit them as "restored".
+			`  ${say(`Restoring ${include} into staging dir ${SWAP_NEW}`)};`,
+			`  rm -rf ${stagingQ};`,
+			`  ${dirRestic};`,
+			`  ${dirFlatten};`,
+			`  rm -rf ${scaffold};`,
+			`else`,
+			// single-file bind: `<live>` is a FILE bind-mount (file-on-file), so it is an
+			// active mount point — it can be WRITTEN THROUGH but NOT renamed/replaced
+			// (`mv` over it -> "Device or resource busy"). So restore into a sibling temp
+			// dir, then overwrite the live file's CONTENT in place via `cat` (writes through
+			// the mount). Not atomic like a rename, but the only option for a file mount.
+			`  ${say(`Restoring file ${include} (overwriting through the mount)`)};`,
+			`  rm -rf ${fileStaging};`,
+			`  ${fileRestic};`,
+			// GUARD before the redirect: `cat X > live` truncates `live` BEFORE cat runs, so a
+			// missing/empty restored file (restic exit 0 but nothing extracted) would zero the
+			// live user file and then fail - destroying data. Only overwrite once the restored
+			// file is confirmed present; otherwise abort with the live file untouched.
+			`  if [ -f ${fileNested} ]; then cat ${fileNested} > ${liveQ}; else echo "restore: extracted file ${fileNested} missing - refusing to truncate live file" >&2; rm -rf ${fileStaging}; exit 1; fi;`,
+			`  rm -rf ${fileStaging};`,
+			`fi`,
+		].join(' ');
 	}).join('; ');
 
 	return buildInPlaceRestoreScript(liveRoots, restores);
@@ -108,14 +127,13 @@ export function buildCloneRestore(
 	const restores = mountRoots.map((root) => {
 		const include = root; // e.g. /volumes/data — mounted at the helper root
 		// DATA SAFETY: restic recreates the include path under `--target`, so we must
-		// flatten `.../volumes/<name>/*` up to the mount root. We do that via an
-		// ISOLATED staging dir INSIDE the mount (mirroring the in-place path), NOT by
-		// writing straight into the mount and `rm -rf`-ing a `volumes` scaffold there.
-		// The old approach did `rm -rf <mount>/volumes`, which would delete a user's
-		// OWN `volumes/` sub-directory if the bind destination happened to contain one.
-		// Restic runs WITHOUT --delete, so files already at the mount are preserved;
-		// the restored files are moved in ON TOP (overwriting only name collisions),
-		// then the staging dir — created by us, never the user — is removed.
+		// flatten `.../volumes/<name>/*` up to the mount root. Do that via an ISOLATED
+		// staging dir INSIDE the mount (mirroring the in-place path), NOT by writing
+		// straight into the mount and `rm -rf`-ing a `volumes` scaffold there - that
+		// would delete a user's OWN `volumes/` sub-directory if the bind destination
+		// happened to contain one. Restic runs WITHOUT --delete, so files already at
+		// the mount are preserved; the restored files are moved in ON TOP (overwriting
+		// only name collisions), then the staging dir - ours, never the user's - is removed.
 		const staging = `${root}/${staging_name}`;
 		const args = [
 			'restore', '--json', snapshotId,

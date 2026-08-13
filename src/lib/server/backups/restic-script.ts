@@ -5,6 +5,8 @@
  * exits 0 so docker doesn't treat a restic non-zero as a crash.
  */
 
+import { isLocalRepo } from './models';
+
 /** The marker line the helper prints carrying restic's real exit code. */
 export const EXIT_MARKER = 'DOCKHAND_RESTIC_EXIT=';
 
@@ -28,13 +30,30 @@ export function finishScript(command: string): string {
 	return `${command}; __rc=$?; echo "${EXIT_MARKER}\${__rc}"`;
 }
 
+/** Where the helper writes the GCS service-account JSON before restic reads it. */
+export const GCS_CRED_FILE = '/tmp/dockhand-gcs-sa.json';
+
+/**
+ * restic's GCS backend authenticates with a service-account JSON file whose path
+ * is in GOOGLE_APPLICATION_CREDENTIALS (it auto-refreshes the token). We pass the
+ * JSON CONTENT as the GOOGLE_APPLICATION_CREDENTIALS_JSON env var; this preamble
+ * (prepended to the helper's `sh -c` script, in the SAME shell as restic) writes
+ * it to a 0600 file and exports GOOGLE_APPLICATION_CREDENTIALS at that path.
+ *
+ * A no-op when the var is empty/unset, so S3/B2/Azure/local repos are untouched.
+ * `printf %s` avoids the JSON being mangled by echo's escape handling.
+ */
+export function gcsCredentialPreamble(): string {
+	return `if [ -n "\${GOOGLE_APPLICATION_CREDENTIALS_JSON:-}" ]; then umask 077; printf '%s' "$GOOGLE_APPLICATION_CREDENTIALS_JSON" > ${GCS_CRED_FILE}; export GOOGLE_APPLICATION_CREDENTIALS=${GCS_CRED_FILE}; fi; `;
+}
+
 /**
  * Fail loud if a bind-mounted local repo isn't visible on the target daemon's
  * host: Docker would auto-create the missing path empty, silently backing up to
  * the wrong host. '' for non-local repos (they never bind a path).
  */
 export function localRepoGuard(repository: string): string {
-	if (!(repository.startsWith('/') || repository.startsWith('./'))) return '';
+	if (!isLocalRepo(repository)) return '';
 	const msg = `restic repository not found at $RESTIC_REPOSITORY on this environment's Docker host. A local-path repository only works when the environment's Docker daemon runs on the same host as Dockhand (e.g. a co-located socket-proxy). For a remote host, use an S3 or REST destination.`;
 	return `test -f "$RESTIC_REPOSITORY/config" || { echo ${shellQuote(msg)} >&2; exit 1; }; `;
 }
@@ -52,7 +71,7 @@ export function localRepoGuard(repository: string): string {
  */
 export function localRepoChown(repository: string, ownerSpec: string): string {
 	if (!ownerSpec) return '';
-	if (!(repository.startsWith('/') || repository.startsWith('./'))) return '';
+	if (!isLocalRepo(repository)) return '';
 	return `; chown -R ${ownerSpec} "$RESTIC_REPOSITORY" 2>/dev/null || true`;
 }
 
@@ -134,7 +153,7 @@ export function buildHelperBinds(
 	resolveLocalRepoHostPath: (repoPath: string) => string
 ): string[] {
 	const binds = [...volumeBinds];
-	if (repository.startsWith('/')) {
+	if (isLocalRepo(repository)) {
 		binds.push(`${resolveLocalRepoHostPath(repository)}:${repository}`);
 	}
 	return binds;

@@ -5,13 +5,17 @@
  */
 
 import { isUnbackupableBindSource } from './unbackupable-mounts';
+import { volumeDedupKey, volumeStorageKey } from './volume-identity';
 
 export interface VolumeInfo {
+	/** The volume's identity: the restic `/volumes/<key>` key, computed the same way capture does
+	 *  (utils/volume-identity). Selection and dedup key on this, not on `name` - two binds sharing
+	 *  a container destination have the same `name` but different `key` (#1373). */
+	key: string;
 	name: string;
 	mountPoint: string;
 	mountType: 'volume' | 'bind';
-	/** Bind mounts only: the host source path, for display (name is the container
-	 *  destination so it matches the backup engine's filter). */
+	/** Bind mounts only: the host source path, shown as the picker's disambiguator. */
 	source?: string;
 	/** Bind mounts only: true when the host source is a socket or host system path
 	 *  the backup engine refuses to capture. Shown in the picker but not selectable,
@@ -41,13 +45,21 @@ export function mountTypeFromHostPath(hostPath: string): 'volume' | 'bind' {
 }
 
 /**
- * A parsed bind entry (`hostPath:containerPath`) -> pickable VolumeInfo. `name` MUST
- * match what the backup engine discovers (named volume -> its name/hostPath, bind ->
- * its container destination), else the selectedVolumes filter drops it silently.
+ * A parsed bind entry (`hostPath:containerPath`) -> pickable VolumeInfo. `name` is the display
+ * value (container destination for a bind); `key` is the restic identity from volume-identity.
+ * `taken` threads the key allocator so a caller merging several sources can't hand out a
+ * duplicate key.
  */
-export function volumeInfoFromBind(bind: { hostPath: string; containerPath: string }): VolumeInfo {
+export function volumeInfoFromBind(bind: { hostPath: string; containerPath: string }, taken: Set<string> = new Set()): VolumeInfo {
 	const mountType = mountTypeFromHostPath(bind.hostPath);
+	const key = volumeStorageKey(
+		mountType === 'bind'
+			? { type: 'bind', source: bind.hostPath, destination: bind.containerPath }
+			: { type: 'volume', source: bind.hostPath, destination: bind.containerPath, name: bind.hostPath },
+		taken
+	);
 	return {
+		key,
 		name: mountType === 'bind' ? bind.containerPath : bind.hostPath,
 		mountPoint: bind.containerPath,
 		mountType,
@@ -57,13 +69,12 @@ export function volumeInfoFromBind(bind: { hostPath: string; containerPath: stri
 }
 
 /**
- * Normalize a container's raw Docker mounts into the pickable volume list.
- * Keeps only `volume` and `bind` mounts (skips tmpfs/npipe/etc.). `name` MUST
- * equal what the backup engine discovers (named volume -> its name, bind -> its
- * container destination), else the selectedVolumes filter drops it silently; the
- * host source is kept separately in `source` for display only.
+ * Normalize a container's raw Docker mounts into the pickable volume list. Keeps only `volume`
+ * and `bind` mounts (skips tmpfs/npipe/etc.). `key` is the restic identity (volume-identity),
+ * allocated against `taken` so a stack merge across containers can share one allocator; `name`
+ * is display only (bind destination). Pass a shared `taken` when merging multiple containers.
  */
-export function normalizeMounts(mounts: RawMount[] | null | undefined): VolumeInfo[] {
+export function normalizeMounts(mounts: RawMount[] | null | undefined, taken: Set<string> = new Set()): VolumeInfo[] {
 	if (!Array.isArray(mounts)) return [];
 	const out: VolumeInfo[] = [];
 	for (const m of mounts) {
@@ -72,31 +83,59 @@ export function normalizeMounts(mounts: RawMount[] | null | undefined): VolumeIn
 		const destination = m.destination || m.Destination || '';
 		const source = m.source || m.Source || '';
 		if (type === 'bind') {
-			out.push({ name: destination || source, mountPoint: destination, mountType: 'bind', source: source || undefined, unbackupable: isUnbackupableBindSource(source) || undefined });
+			const key = volumeStorageKey({ type: 'bind', source, destination }, taken);
+			out.push({ key, name: destination || source, mountPoint: destination, mountType: 'bind', source: source || undefined, unbackupable: isUnbackupableBindSource(source) || undefined });
 		} else {
 			const name = m.name || m.Name || source || destination || '';
-			out.push({ name, mountPoint: destination, mountType: 'volume' });
+			const key = volumeStorageKey({ type: 'volume', source: name, destination, name }, taken);
+			out.push({ key, name, mountPoint: destination, mountType: 'volume' });
 		}
 	}
 	return out;
 }
 
 /**
- * Merge the mounts of every container in a compose project into one deduped
- * volume list (by display name). Used for stack-level backup pickers.
+ * Merge the mounts of every container in a compose project into one volume list, deduped by
+ * volume IDENTITY (not display name) so two containers binding different host paths to the same
+ * container path both survive (#1373). Keys are allocated in ONE pass with a shared `taken` set,
+ * mirroring the backend discoverVolumesFromMounts so the two can't hand out divergent keys.
  */
 export function normalizeStackMounts(
 	containers: Array<{ mounts?: RawMount[]; Mounts?: RawMount[] }>
 ): VolumeInfo[] {
 	const seen = new Set<string>();
+	const taken = new Set<string>();
 	const out: VolumeInfo[] = [];
 	for (const c of containers) {
-		for (const v of normalizeMounts(c.mounts || c.Mounts)) {
-			if (v.name && !seen.has(v.name)) {
-				seen.add(v.name);
-				out.push(v);
-			}
+		for (const m of c.mounts || c.Mounts || []) {
+			const type = m.type || m.Type;
+			if (type !== 'volume' && type !== 'bind') continue;
+			const destination = m.destination || m.Destination || '';
+			const source = m.source || m.Source || '';
+			const name = type === 'volume' ? (m.name || m.Name || source || destination || '') : (destination || source);
+			const dedup = volumeDedupKey(type === 'volume' ? { type, source: name, destination, name } : { type: 'bind', source, destination });
+			if (seen.has(dedup)) continue;
+			seen.add(dedup);
+			const [v] = normalizeMounts([m], taken);
+			if (v) out.push(v);
 		}
+	}
+	return out;
+}
+
+/**
+ * Map a saved config's stored selection to the current volume list's keys, so the picker checks
+ * the right boxes. A stored entry may be a key or a name; match by key first, then by unique name.
+ * A name matching several volumes (two binds sharing a destination) is ambiguous and dropped - the
+ * user re-picks it. (#1373)
+ */
+export function reconcileSelectedVolumeKeys(volumes: Array<{ key: string; name: string }>, stored: string[]): string[] {
+	const byKey = new Set(volumes.map((v) => v.key));
+	const out: string[] = [];
+	for (const sel of stored) {
+		if (byKey.has(sel)) { out.push(sel); continue; }
+		const named = volumes.filter((v) => v.name === sel);
+		if (named.length === 1) out.push(named[0].key);
 	}
 	return out;
 }

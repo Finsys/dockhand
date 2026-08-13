@@ -1,15 +1,15 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
+import { requireBackups } from '$lib/server/backups/route-guards';
 import { getBackupConfig, getBackupDestinations } from '$lib/server/db';
 import { listSnapshots } from '$lib/server/backups';
 import { filterSnapshotsByEnvAccess } from '$lib/server/backups/route-guards';
 
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	const auth = await authorize(cookies);
-	if (auth.authEnabled && !await auth.can('backups', 'view')) {
-		return json({ error: 'Permission denied' }, { status: 403 });
-	}
+	const denied = await requireBackups(auth, 'view');
+	if (denied) return denied;
 
 	const configIdParam = url.searchParams.get('configId');
 	const destIdParam = url.searchParams.get('destinationId');
@@ -94,16 +94,22 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 		if (isNaN(destinationId)) return json({ error: 'Invalid destinationId' }, { status: 400 });
 
 		try {
-			// No target filter — return all snapshots in this destination.
+			// No target filter — return all snapshots in this destination (incl. snapshots
+			// from OTHER Dockhand instances sharing/copied into the repo). The response carries
+			// this install's instance id so the client can tell own snapshots from foreign
+			// orphans without relying on configid (which collides across instances - #1351).
+			const { getInstanceId } = await import('$lib/server/backups/identity');
+			const thisInstanceId = await getInstanceId();
 			const snapshots = await listSnapshots(destinationId);
 			// (HIGH #8) On enterprise, a non-admin must not see snapshots belonging to
 			// environments they can't access — the ids/paths alone are disclosure. Drop
 			// any snapshot whose owning env (from its dockhand:env tag) isn't accessible.
+			const headers = { 'X-Dockhand-Instance': thisInstanceId };
 			if (auth.isEnterprise) {
 				const filtered = await filterSnapshotsByEnvAccess(auth, snapshots);
-				return json(filtered);
+				return json(filtered, { headers });
 			}
-			return json(snapshots);
+			return json(snapshots, { headers });
 		} catch (error) {
 			const errorMsg = error instanceof Error ? error.message : String(error);
 			return json({ error: errorMsg }, { status: 500 });

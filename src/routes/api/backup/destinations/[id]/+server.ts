@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
+import { requireBackups } from '$lib/server/backups/route-guards';
 import { auditBackupDestination } from '$lib/server/audit';
 import {
 	getBackupDestination,
@@ -10,7 +11,7 @@ import {
 	getBackupConfigs
 } from '$lib/server/db';
 import { registerSchedule, unregisterSchedule } from '$lib/server/scheduler';
-import { validatePolicySchedules, validateRepositoryForSave, validateFlags } from '$lib/server/backups/helpers';
+import { validatePolicySchedules, validateRepositoryForSave, validateAndSerializeFlags, parseBackupFlags } from '$lib/server/backups/helpers';
 import { destinationHasRunningBackup } from '$lib/server/backups';
 
 /**
@@ -28,14 +29,18 @@ function prepareDestination(dest: any, includeSecrets: boolean): any {
 	} else {
 		delete result.envVars;
 	}
+	// Split the stored `flags` JSON into separate fields the edit form binds to (legacy
+	// bare strings surface as backupFlags), so the UI never parses the string-vs-JSON column.
+	const { backup, restore } = parseBackupFlags(dest.flags);
+	result.backupFlags = backup;
+	result.restoreFlags = restore;
 	return result;
 }
 
 export const GET: RequestHandler = async ({ params, cookies }) => {
 	const auth = await authorize(cookies);
-	if (auth.authEnabled && !await auth.can('backups', 'view')) {
-		return json({ error: 'Permission denied' }, { status: 403 });
-	}
+	const denied = await requireBackups(auth, 'view');
+	if (denied) return denied;
 
 	const id = parseInt(params.id);
 	if (isNaN(id)) return json({ error: 'Invalid ID' }, { status: 400 });
@@ -52,9 +57,8 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 export const PUT: RequestHandler = async (event) => {
 	const { params, request, cookies } = event;
 	const auth = await authorize(cookies);
-	if (auth.authEnabled && !await auth.can('backups', 'manage')) {
-		return json({ error: 'Permission denied' }, { status: 403 });
-	}
+	const denied = await requireBackups(auth, 'manage');
+	if (denied) return denied;
 
 	const id = parseInt(params.id);
 	if (isNaN(id)) return json({ error: 'Invalid ID' }, { status: 400 });
@@ -82,8 +86,16 @@ export const PUT: RequestHandler = async (event) => {
 		const repoError = validateRepositoryForSave(body.repository);
 		if (repoError) return json({ error: repoError }, { status: 400 });
 	}
-	const flagError = validateFlags(body.flags);
-	if (flagError) return json({ error: flagError }, { status: 400 });
+	// Flags: prefer the split shape; fall back to a legacy `flags` string. undefined for ALL
+	// three means "don't touch flags". Validate+serialize to the JSON stored in `flags`.
+	let flagsColumn: string | null | undefined = undefined;
+	if (body.backupFlags !== undefined || body.restoreFlags !== undefined) {
+		try { flagsColumn = validateAndSerializeFlags(body.backupFlags, body.restoreFlags); }
+		catch (e) { return json({ error: e instanceof Error ? e.message : 'Invalid restic flags' }, { status: 400 }); }
+	} else if (body.flags !== undefined) {
+		try { flagsColumn = validateAndSerializeFlags(body.flags, ''); }
+		catch (e) { return json({ error: e instanceof Error ? e.message : 'Invalid restic flags' }, { status: 400 }); }
+	}
 
 	// A local-path repo is allowed on any env; a wrong-host mount fails loud via
 	// the helper's localRepoGuard at backup/restore time.
@@ -94,7 +106,7 @@ export const PUT: RequestHandler = async (event) => {
 			repository: body.repository,
 			password: body.password,
 			envVars: body.envVars !== undefined ? JSON.stringify(body.envVars) : undefined,
-			flags: body.flags,
+			flags: flagsColumn,
 			hostPath: body.hostPath,
 			policies: body.policies
 		});
@@ -131,9 +143,8 @@ export const PUT: RequestHandler = async (event) => {
 export const DELETE: RequestHandler = async (event) => {
 	const { params, cookies } = event;
 	const auth = await authorize(cookies);
-	if (auth.authEnabled && !await auth.can('backups', 'manage')) {
-		return json({ error: 'Permission denied' }, { status: 403 });
-	}
+	const denied = await requireBackups(auth, 'manage');
+	if (denied) return denied;
 
 	const id = parseInt(params.id);
 	if (isNaN(id)) return json({ error: 'Invalid ID' }, { status: 400 });

@@ -61,6 +61,9 @@
 	let locked = $state(false);
 	let viewMode = $state<'grid' | 'list'>('grid');
 
+	// Where a tile click navigates (nav preference; default containers). Loaded in onMount.
+	let envClickPage = $state('containers');
+
 	// List view filter state
 	let listSearchQuery = $state('');
 	let listConnectionFilter = $state<string[]>([]);
@@ -658,12 +661,12 @@
 		return tiles.find(t => t.id === id);
 	}
 
-	// Handle tile click - select environment and navigate to containers
+	// Handle tile click - select environment and navigate to the env-click target page
 	function handleTileClick(envId: number) {
 		const tile = getTileById(envId);
 		if (tile?.stats) {
 			currentEnvironment.set({ id: envId, name: tile.stats.name });
-			goto('/containers');
+			goto(`/${envClickPage}`);
 		}
 	}
 
@@ -938,6 +941,16 @@
 		document.addEventListener('visibilitychange', handleVisibilityChange);
 		// Chrome 77+ Page Lifecycle API - fires when frozen tab is resumed
 		document.addEventListener('resume', handleVisibilityChange);
+
+		// Env-click target for the tiles. The landing redirect itself lives in +page.ts (runs before
+		// this component mounts), so reaching here means we're staying on the dashboard.
+		try {
+			const res = await fetch('/api/settings/navigation');
+			if (res.ok) {
+				const nav = (await res.json())?.effective;
+				if (nav?.envClickPage) envClickPage = nav.envClickPage;
+			}
+		} catch { /* default env-click */ }
 
 		// Load label filter and custom label colors
 		loadLabelFilter();
