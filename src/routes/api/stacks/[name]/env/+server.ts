@@ -1,5 +1,5 @@
 import { json } from '@sveltejs/kit';
-import { getStackEnvVars, setStackEnvVars, getStackSource } from '$lib/server/db';
+import { getStackEnvVars, setStackEnvVars, getStackSource, getStackInjectedSecretKeys, getSecretProviderById } from '$lib/server/db';
 import { findStackDir } from '$lib/server/stacks';
 import { authorize } from '$lib/server/authorize';
 import { existsSync, readFileSync } from 'node:fs';
@@ -107,7 +107,16 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 			}
 		}
 
-		return json({ variables });
+		// Provider-injected key NAMES from the last deploy (no values) + the bound
+		// provider's type/name, so the UI can show "these were loaded from <provider>".
+		const injectedSecretKeys = [...await getStackInjectedSecretKeys(stackName, envIdNum ?? undefined)];
+		let secretProvider: { type: string; name: string } | null = null;
+		if (source?.secretProviderId) {
+			const p = await getSecretProviderById(source.secretProviderId);
+			if (p) secretProvider = { type: p.type, name: p.name };
+		}
+
+		return json({ variables, injectedSecretKeys, secretProvider });
 	} catch (error) {
 		console.error('Error getting stack env vars:', error);
 		return json({ error: 'Failed to get environment variables' }, { status: 500 });

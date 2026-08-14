@@ -16,6 +16,7 @@
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import CronEditor from '$lib/components/cron-editor.svelte';
 	import StackEnvVarsPanel from '$lib/components/StackEnvVarsPanel.svelte';
+	import SecretProviderPicker from '$lib/components/SecretProviderPicker.svelte';
 	import { type EnvVar, type ValidationResult } from '$lib/components/StackEnvVarsEditor.svelte';
 	import { toast } from 'svelte-sonner';
 	import { focusFirstInput } from '$lib/utils';
@@ -157,9 +158,10 @@
 	let copiedWebhookSecret = $state<'ok' | 'error' | null>(null);
 
 	// Secret providers
-	type SecretProviderOption = { id: number; name: string };
+	type SecretProviderOption = { id: number; name: string; type: string };
 	let secretProviders = $state<SecretProviderOption[]>([]);
 	let formSecretProviderId = $state<number | null>(null);
+	let injectedSecretKeys = $state<string[]>([]);
 
 	// Environment variables state
 	let formEnvFilePath = $state<string | null>(null);
@@ -221,7 +223,7 @@
 			const response = await fetch('/api/secret-providers');
 			if (!response.ok) return;
 			const data = await response.json();
-			secretProviders = (data ?? []).map((p: any) => ({ id: p.id, name: p.name }));
+			secretProviders = (data ?? []).map((p: any) => ({ id: p.id, name: p.name, type: p.type }));
 		} catch (e) {
 			console.warn('Failed to load secret providers:', e);
 		}
@@ -334,6 +336,7 @@
 				);
 				// Set envVars - the panel's $effect will auto-sync rawContent for text view
 				envVars = loadedVars;
+				injectedSecretKeys = data.injectedSecretKeys ?? [];
 			}
 		} catch (e) {
 			console.error('Failed to load env var overrides:', e);
@@ -1203,46 +1206,16 @@
 
 			<!-- Right column: Environment Variables -->
 			<div class="flex-1 min-w-0 flex flex-col overflow-hidden bg-zinc-50 dark:bg-zinc-800/50">
-				<!-- Secret provider selector - hidden when no external provider is configured
-				     (still shown if this stack already has one bound, so it can be cleared). -->
-				{#if secretProviders.length > 0 || formSecretProviderId !== null}
-				<div class="px-3 py-2 border-b border-zinc-200 dark:border-zinc-700 bg-zinc-100/60 dark:bg-zinc-800/60 flex items-center gap-2 text-xs">
-					<Label for="secret-provider-select-git" class="text-xs text-muted-foreground shrink-0">Secret provider</Label>
-					<Select.Root
-						type="single"
-						value={formSecretProviderId !== null ? String(formSecretProviderId) : ''}
-						onValueChange={(v) => { formSecretProviderId = v ? parseInt(v) : null; }}
-					>
-						<Select.Trigger id="secret-provider-select-git" class="h-7 text-xs">
-							{#if formSecretProviderId !== null}
-								{secretProviders.find((p) => p.id === formSecretProviderId)?.name ?? 'Unknown provider'}
-							{:else}
-								<span class="text-muted-foreground">None — disabled</span>
-							{/if}
-						</Select.Trigger>
-						<Select.Content>
-							<Select.Item value="" label="None">
-								<span class="text-muted-foreground">None — disabled</span>
-							</Select.Item>
-							{#each secretProviders as provider (provider.id)}
-								<Select.Item value={String(provider.id)} label={provider.name}>
-									{provider.name}
-								</Select.Item>
-							{/each}
-						</Select.Content>
-					</Select.Root>
-					<Tooltip.Root>
-						<Tooltip.Trigger>
-							<HelpCircle class="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-						</Tooltip.Trigger>
-						<Tooltip.Content class="max-w-xs text-xs">
-							Inline references (e.g. <code>op://</code> for 1Password) are still resolved. For bulk pull, set <code>OP_ENVIRONMENT_ID</code> (1Password Environment) or the generic <code>DOCKHAND_SECRET_SELECTOR</code> in env vars; the provider's secrets are loaded and injected.
-						</Tooltip.Content>
-					</Tooltip.Root>
-				</div>
-				{/if}
+				<SecretProviderPicker
+					bind:secretProviderId={formSecretProviderId}
+					bind:envVars
+					providers={secretProviders}
+				/>
 				<StackEnvVarsPanel
 					bind:variables={envVars}
+					injectedSecretKeys={gitStack !== null ? injectedSecretKeys : []}
+					providerType={secretProviders.find((p) => p.id === formSecretProviderId)?.type ?? null}
+					providerName={secretProviders.find((p) => p.id === formSecretProviderId)?.name ?? null}
 					placeholder={{ key: 'MY_VAR', value: 'value' }}
 					infoText="Override variables from your repository env files. Non-secrets are saved to <code class='bg-muted px-1 rounded'>.env.dockhand</code> in the stack directory. Secrets are stored in the database and injected via shell environment at deploy time.<br/><br/>Variables are available for <strong>compose file interpolation</strong> using <code class='bg-muted px-1 rounded'>${'{VAR_NAME}'}</code> syntax. They are not automatically injected into containers — use <code class='bg-muted px-1 rounded'>environment:</code> or reference <code class='bg-muted px-1 rounded'>.env.dockhand</code> in <code class='bg-muted px-1 rounded'>env_file:</code> to pass them through."
 					existingSecretKeys={gitStack !== null ? existingSecretKeys : new Set()}

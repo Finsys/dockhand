@@ -30,35 +30,58 @@
 	// secretproviders/shared.ts. Non-required fields are optional overrides.
 	export const PROVIDER_FIELDS: Record<string, ProviderField[]> = {
 		'op-service-account': [
-			{ key: 'token', label: 'Service account token', type: 'password', required: true, placeholder: 'ops_eyJ...' },
+			{ key: 'token', label: 'Service account token', type: 'password', required: true, placeholder: 'ops_eyJ...', hint: 'A 1Password service account token (starts with ops_).' },
 		],
 		'op-connect': [
-			{ key: 'host', label: 'Connect host URL', type: 'text', required: true, placeholder: 'https://connect.example.com' },
-			{ key: 'token', label: 'Connect token', type: 'password', required: true, placeholder: 'eyJ...' },
+			{ key: 'host', label: 'Connect host URL', type: 'text', required: true, placeholder: 'https://connect.example.com', hint: 'URL of your 1Password Connect server.' },
+			{ key: 'token', label: 'Connect token', type: 'password', required: true, placeholder: 'eyJ...', hint: 'A Connect access token with read access to the vault.' },
 		],
 		infisical: [
-			{ key: 'host', label: 'API host', type: 'text', required: true, placeholder: 'https://app.infisical.com' },
-			{ key: 'token', label: 'Access token', type: 'password', required: true, placeholder: 'st...' },
-			{ key: 'projectId', label: 'Project ID', type: 'text', required: true, placeholder: 'workspace / project id' },
-			{ key: 'environment', label: 'Environment', type: 'text', required: true, placeholder: 'prod' },
-			{ key: 'path', label: 'Secret path', type: 'text', required: false, placeholder: '/' },
+			{ key: 'host', label: 'API host', type: 'text', required: true, placeholder: 'https://app.infisical.com', hint: 'Infisical Cloud or your self-hosted URL.' },
+			{ key: 'token', label: 'Access token', type: 'password', required: true, placeholder: 'st...', hint: 'A service token or machine-identity access token.' },
+			{ key: 'projectId', label: 'Project ID', type: 'text', required: true, placeholder: 'workspace / project id', hint: 'The workspace/project the secrets live in.' },
+			{ key: 'environment', label: 'Environment', type: 'text', required: true, placeholder: 'prod', hint: 'Environment slug, e.g. prod / staging.' },
+			{ key: 'path', label: 'Secret path', type: 'text', required: false, placeholder: '/', hint: 'Folder path within the project. Defaults to /.' },
 		],
 		vault: [
-			{ key: 'address', label: 'Vault address', type: 'text', required: true, placeholder: 'https://vault.example.com' },
-			{ key: 'token', label: 'Vault token', type: 'password', required: true, placeholder: 'hvs...' },
-			{ key: 'namespace', label: 'Namespace', type: 'text', required: false, placeholder: 'admin (Enterprise / HCP)' },
-			{ key: 'mount', label: 'KV mount', type: 'text', required: false, placeholder: 'secret' },
+			{ key: 'address', label: 'Vault address', type: 'text', required: true, placeholder: 'https://vault.example.com', hint: 'Base URL of your Vault server.' },
+			{ key: 'token', label: 'Vault token', type: 'password', required: true, placeholder: 'hvs...', hint: 'A token with read access to the KV path.' },
+			{ key: 'namespace', label: 'Namespace', type: 'text', required: false, placeholder: 'admin (Enterprise / HCP)', hint: 'Vault Enterprise / HCP only.' },
+			{ key: 'mount', label: 'KV mount', type: 'text', required: false, placeholder: 'secret', hint: 'KV v2 mount path. Defaults to "secret".' },
 		],
 		doppler: [
 			{ key: 'token', label: 'Token', type: 'password', required: true, placeholder: 'dp.st.... or dp.pt....', hint: 'A service token (dp.st.) already targets one config. A personal token (dp.pt.) also needs the project and config below.' },
-			{ key: 'project', label: 'Project', type: 'text', required: false, placeholder: 'only for a personal token (dp.pt.)' },
-			{ key: 'config', label: 'Config', type: 'text', required: false, placeholder: 'e.g. prd' },
+			{ key: 'project', label: 'Project', type: 'text', required: false, placeholder: 'only for a personal token (dp.pt.)', hint: 'Doppler project slug. Only needed with a personal token.' },
+			{ key: 'config', label: 'Config', type: 'text', required: false, placeholder: 'e.g. prd', hint: 'Config within the project. Only needed with a personal token.' },
 		],
 	};
 
 	export function providerTypeLabel(type: string): string {
 		return PROVIDER_TYPES.find((t) => t.value === type)?.label ?? type;
 	}
+
+	// Per-stack bulk-selector field metadata (UI-only, like PROVIDER_FIELDS above).
+	// A provider type with no entry shows no selector field: doppler ignores the
+	// selector, connect has no bulk pull. The field's value is written to the stack
+	// env as DOCKHAND_SECRET_SELECTOR (consumed by resolveProviderEnvVars).
+	export type BulkSelectorField = { label: string; placeholder?: string; hint?: string };
+	export const BULK_SELECTOR_FIELDS: Record<string, BulkSelectorField> = {
+		'op-service-account': {
+			label: 'Environment',
+			placeholder: '1Password Environment id',
+			hint: 'Bulk-load every secret from this 1Password Environment. Leave blank to inject only inline op:// references.'
+		},
+		'vault': {
+			label: 'KV v2 path',
+			placeholder: 'path/to/secret',
+			hint: 'Bulk-load every key at this KV v2 path (under the configured mount).'
+		},
+		'infisical': {
+			label: 'Secret path',
+			placeholder: '/',
+			hint: 'Bulk-load every secret at this path (project and environment come from the provider config).'
+		}
+	};
 </script>
 
 <script lang='ts'>
@@ -102,6 +125,11 @@
 	let testOkTimer: ReturnType<typeof setTimeout> | undefined;
 
 	const fields = $derived(PROVIDER_FIELDS[formType] ?? []);
+	// Providers whose config fields read better stacked one per row rather than in the
+	// 2-column grid (per-field hints, or fields long enough to want full width).
+	const stackConfigFields = $derived(
+		formType === 'op-connect' || formType === 'doppler'
+	);
 
 	function resetConfig() {
 		formConfig = {};
@@ -299,7 +327,7 @@
 		}
 	}}
 >
-	<Dialog.Content class="sm:max-w-lg">
+	<Dialog.Content class="sm:max-w-2xl">
 		<Dialog.Header>
 			<Dialog.Title class="flex items-center gap-2">
 				<KeyRound class="w-5 h-5 text-muted-foreground" />
@@ -320,7 +348,7 @@
 					placeholder="Production secrets"
 				/>
 			</div>
-			<div class="space-y-2 sm:w-[calc(50%-0.5rem)]">
+			<div class="space-y-2">
 				<FieldLabel label="Provider" forId="provider-type" required showOptional={false} />
 				<Select.Root
 					type="single"
@@ -328,10 +356,12 @@
 					onValueChange={onTypeChange}
 					disabled={isEditing}
 				>
-					<Select.Trigger id="provider-type" class="flex w-full items-center gap-2">
+					<Select.Trigger id="provider-type" class="w-full justify-between gap-2">
 						{@const TriggerIcon = getProviderIcon(formType)}
-						<TriggerIcon class="w-4 h-4 shrink-0 text-muted-foreground" />
-						{providerTypeLabel(formType)}
+						<span class="flex items-center gap-2 min-w-0">
+							<TriggerIcon class="w-4 h-4 shrink-0 text-muted-foreground" />
+							<span class="truncate">{providerTypeLabel(formType)}</span>
+						</span>
 					</Select.Trigger>
 					<Select.Content>
 						{#each PROVIDER_TYPES as t (t.value)}
@@ -346,12 +376,12 @@
 					</Select.Content>
 				</Select.Root>
 			</div>
-			<!-- Provider config fields in a 2-column grid. min-height fits the tallest
-			     provider (5 fields = 3 rows) so the modal keeps a fixed height and does
-			     not jump when switching providers. -->
-			<div class="grid grid-cols-2 gap-x-4 gap-y-3" style="min-height: 13.5rem;">
+			<!-- Provider config fields: a 2-column grid, or one per row for providers whose
+			     fields read better stacked (Vault, Connect, Doppler). min-height +
+			     content-start keep the dialog a stable height while laying rows top-aligned. -->
+			<div class="grid {stackConfigFields ? 'grid-cols-1' : 'grid-cols-2'} gap-x-4 gap-y-3 content-start" style="min-height: 21rem;">
 				{#each fields as field (field.key)}
-					<div class="space-y-2">
+					<div class="space-y-1.5 self-start {fields.length === 1 ? 'col-span-full' : ''}">
 						<FieldLabel label={field.label} forId={`provider-${field.key}`} required={field.required} />
 						<Input
 							id={`provider-${field.key}`}

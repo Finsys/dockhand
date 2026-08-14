@@ -202,7 +202,7 @@
 
 	export interface VariableMarker {
 		name: string;
-		type: 'required' | 'optional' | 'missing';
+		type: 'required' | 'optional' | 'missing' | 'invault';
 		value?: string; // The value provided in env vars editor
 		isSecret?: boolean; // Whether to mask the value
 		defaultValue?: string; // The default value from compose syntax (e.g., ${VAR:-default})
@@ -239,10 +239,10 @@
 
 	// Variable marker gutter icons
 	class VariableGutterMarker extends GutterMarker {
-		type: 'required' | 'optional' | 'missing';
+		type: 'required' | 'optional' | 'missing' | 'invault';
 		hasValue: boolean;
 
-		constructor(type: 'required' | 'optional' | 'missing', hasValue: boolean = false) {
+		constructor(type: 'required' | 'optional' | 'missing' | 'invault', hasValue: boolean = false) {
 			super();
 			this.type = type;
 			this.hasValue = hasValue;
@@ -256,6 +256,7 @@
 			const dot = document.createElement('span');
 			dot.className = `var-marker var-marker-${this.type}`;
 			dot.title = this.type === 'missing' ? 'Missing required variable'
+				: this.type === 'invault' ? 'Present in the bound secret provider'
 				: this.type === 'required' ? 'Required variable (defined)'
 				: 'Optional variable (has default)';
 			wrapper.appendChild(dot);
@@ -278,9 +279,9 @@
 	class VariableValueWidget extends WidgetType {
 		value: string;
 		isSecret: boolean;
-		variant: 'provided' | 'default' | 'missing';
+		variant: 'provided' | 'default' | 'missing' | 'invault';
 
-		constructor(value: string, isSecret: boolean = false, variant: 'provided' | 'default' | 'missing' = 'provided') {
+		constructor(value: string, isSecret: boolean = false, variant: 'provided' | 'default' | 'missing' | 'invault' = 'provided') {
 			super();
 			this.value = value;
 			this.isSecret = isSecret;
@@ -295,6 +296,11 @@
 				// Red MISSING badge with icon
 				span.innerHTML = '⚠ MISSING';
 				span.title = 'Required variable not defined';
+			} else if (this.variant === 'invault') {
+				// Green IN VAULT badge - the key currently exists in the bound secret
+				// provider (live probe). Inline lucide KeyRound SVG, currentColor.
+				span.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:0.85em;height:0.85em;display:inline-block;vertical-align:-0.12em;margin-right:3px"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/></svg>IN VAULT';
+				span.title = 'Present in the bound secret provider';
 			} else {
 				span.textContent = this.isSecret ? '••••••' : this.value;
 				span.title = this.isSecret ? 'Secret value' : this.value;
@@ -351,6 +357,9 @@
 					} else if (marker.defaultValue) {
 						// Has default value from marker -> BLUE
 						widget = new VariableValueWidget(marker.defaultValue, false, 'default');
+					} else if (marker.type === 'invault') {
+						// Present in the bound secret provider (live) -> GREEN
+						widget = new VariableValueWidget('', false, 'invault');
 					} else if (marker.type === 'missing') {
 						// Missing required variable -> RED
 						widget = new VariableValueWidget('', false, 'missing');
@@ -930,6 +939,11 @@
 		box-shadow: 0 0 4px #ef4444;
 	}
 
+	div :global(.var-marker-invault) {
+		background-color: #10b981; /* emerald-500 */
+		box-shadow: 0 0 4px #10b981;
+	}
+
 	/* Variable value overlay widget - base styles */
 	div :global(.var-value-overlay) {
 		display: inline-block;
@@ -965,6 +979,13 @@
 		background-color: rgba(239, 68, 68, 0.15);
 		color: #ef4444;
 		border: 1px solid rgba(239, 68, 68, 0.3);
+		font-weight: 600;
+	}
+
+	div :global(.var-value-invault) {
+		background-color: rgba(16, 185, 129, 0.15);
+		color: #10b981;
+		border: 1px solid rgba(16, 185, 129, 0.3);
 		font-weight: 600;
 	}
 

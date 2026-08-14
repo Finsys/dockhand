@@ -21,7 +21,7 @@ import { getAdditionalVolumeBinds, dedupeVolumesForRecreate } from './mount-dedu
 import { resolveNanoCpusConflict } from './hostconfig-recreate';
 import { rebaseEnvOntoImage, rebaseLabelsOntoImage, rebaseCommand, describeEnvRebase, describeLabelRebase, type ImageEnvLabels } from './container-env-merge';
 import { encodeRegistryAuth } from './registry-auth';
-import { isSystemContainer, classifyEmptyDigestImage } from './scheduler/tasks/update-utils';
+import { isSystemContainer, classifyEmptyDigestImage, localDigestIsIndexChild } from './scheduler/tasks/update-utils';
 import { deepDiff } from '../utils/diff.js';
 import { getInstanceId } from './backups/identity';
 import { isOwnedBackupHelper } from './backups/reap-core';
@@ -3704,6 +3704,52 @@ export async function getRegistryManifestDigest(imageName: string): Promise<stri
 	}
 }
 
+/**
+ * A multi-arch tag is a manifest list / OCI image index: the list has one digest,
+ * and each per-architecture child manifest has its own. `docker pull` usually records
+ * the INDEX digest in RepoDigests, but some pulls leave only the PER-ARCH child digest.
+ * getRegistryManifestDigest() (a HEAD) always returns the index digest, so a local
+ * per-arch digest never matches it -> phantom "update available" (#1367).
+ *
+ * Fetches the index body and returns true if any local digest is one of its per-arch
+ * child digests (same image, just recorded per-arch). Best-effort: ANY failure
+ * (network, timeout, non-index body, unauthenticated) returns false so the caller
+ * keeps its existing "update available" verdict. NEVER throws, own short timeout, and
+ * runs ONLY on the already-flagged-as-update path - it can't slow or break the common
+ * case. A false "update available" is acceptable; breaking the check is not.
+ */
+async function localDigestMatchesRegistryChild(
+	imageName: string,
+	localDigests: string[]
+): Promise<boolean> {
+	try {
+		const { registry, repo, tag } = parseImageReference(imageName);
+		const token = await getRegistryBearerToken(registry, repo);
+		const headers: Record<string, string> = {
+			'User-Agent': 'Dockhand/1.0',
+			'Accept': [
+				'application/vnd.docker.distribution.manifest.list.v2+json',
+				'application/vnd.oci.image.index.v1+json'
+			].join(', ')
+		};
+		if (token) headers['Authorization'] = token;
+
+		const response = await fetch(`https://${registry}/v2/${repo}/manifests/${tag}`, {
+			method: 'GET',
+			headers,
+			signal: AbortSignal.timeout(8000)
+		});
+		if (!response.ok) {
+			await drainResponse(response);
+			return false;
+		}
+		const body: unknown = await response.json();
+		return localDigestIsIndexChild(localDigests, body);
+	} catch {
+		return false;
+	}
+}
+
 export interface ImageUpdateCheckResult {
 	hasUpdate: boolean;
 	currentDigest?: string;
@@ -3802,13 +3848,22 @@ export async function checkImageUpdateAvailable(
 		}
 
 		// Check if registry digest matches ANY of the local digests
-		const matchesLocal = localDigests.includes(registryDigest);
-		const hasUpdate = !matchesLocal;
+		if (localDigests.includes(registryDigest)) {
+			return { hasUpdate: false, currentDigest: currentRepoDigests[0] };
+		}
+
+		// The HEAD digest (always the manifest-list/index digest) didn't match. Before
+		// declaring an update, rule out the multi-arch false positive: a local per-arch
+		// child digest won't equal the index digest even when the image is current
+		// (#1367). Best-effort GET of the index; on any failure hasUpdate stays true.
+		if (await localDigestMatchesRegistryChild(imageName, localDigests)) {
+			return { hasUpdate: false, currentDigest: currentRepoDigests[0] };
+		}
 
 		return {
-			hasUpdate,
+			hasUpdate: true,
 			currentDigest: currentRepoDigests[0],
-			registryDigest: hasUpdate ? registryDigest : undefined
+			registryDigest
 		};
 	} catch (e: any) {
 		return { hasUpdate: false, error: e.message };
