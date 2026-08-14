@@ -39,6 +39,10 @@
       {
         "type": "fix",
         "text": "start, stop or restart on Hawser updates its files on the remote host, not only on redeploy (#1240)"
+      },
+      {
+        "type": "feature",
+        "text": "sync from git can start only the services that were already running, leaving stopped services stopped (#1246)"
       }
     ],
     "imageTag": "fnsys/dockhand:v1.0.42"

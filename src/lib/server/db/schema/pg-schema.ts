@@ -336,6 +336,8 @@ export const gitStacks = pgTable('git_stacks', {
 	noBuildCache: boolean('no_build_cache').default(false),
 	repullImages: boolean('repull_images').default(false),
 	forceRedeploy: boolean('force_redeploy').default(false),
+	// Sync/deploy only the services that were running before the sync (#1246)
+	onlyRunningServices: boolean('only_running_services').default(false),
 	lastSync: timestamp('last_sync', { mode: 'string' }),
 	lastCommit: text('last_commit'),
 	syncStatus: text('sync_status').default('pending'),

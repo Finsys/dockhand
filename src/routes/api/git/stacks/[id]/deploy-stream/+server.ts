@@ -27,6 +27,12 @@ export const POST: RequestHandler = async ({ params, cookies, request }) => {
 		});
 	}
 
+	// Per-run override for "only start services that were already running" (#1246).
+	// Omitted (or no body at all) means: use the git stack's saved setting.
+	const body = await request.json().catch(() => ({}));
+	const { onlyRunningServices } = body as { onlyRunningServices?: boolean };
+	const deployOptions = { onlyRunningServices };
+
 	// Backward compat: API clients sending Accept: application/json get synchronous SSE result
 	if (prefersJSON(request)) {
 		const encoder = new TextEncoder();
@@ -36,7 +42,7 @@ export const POST: RequestHandler = async ({ params, cookies, request }) => {
 					controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
 				};
 				try {
-					await deployGitStackWithProgress(id, sendEvent);
+					await deployGitStackWithProgress(id, sendEvent, deployOptions);
 				} catch (error: any) {
 					sendEvent({ status: 'error', error: error.message || 'Unknown error' });
 				} finally {
@@ -55,7 +61,7 @@ export const POST: RequestHandler = async ({ params, cookies, request }) => {
 
 	deployGitStackWithProgress(id, (data: unknown) => {
 		appendLine(job, { data });
-	})
+	}, deployOptions)
 		.then(() => {
 			const lastLine = job.lines[job.lines.length - 1];
 			const lastData = lastLine?.data as any;

@@ -4,6 +4,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Progress } from '$lib/components/ui/progress';
+	import { Checkbox } from '$lib/components/ui/checkbox';
 	import {
 		Rocket,
 		CheckCircle2,
@@ -29,10 +30,22 @@
 		stackId: number;
 		stackName: string;
 		onComplete?: () => void;
+		/** Show the "only start services that were already running" checkbox (#1246).
+		 * Off for stacks that have no containers yet - there is nothing to preserve. */
+		canLimitServices?: boolean;
+		/** Saved default for that checkbox, from the git stack's deploy options */
+		onlyRunningServicesDefault?: boolean;
 		children: Snippet;
 	}
 
-	let { stackId, stackName, onComplete, children }: Props = $props();
+	let {
+		stackId,
+		stackName,
+		onComplete,
+		canLimitServices = false,
+		onlyRunningServicesDefault = false,
+		children
+	}: Props = $props();
 
 	interface StepProgress {
 		status: 'connecting' | 'cloning' | 'fetching' | 'reading' | 'env' | 'secrets' | 'deploying' | 'complete' | 'error';
@@ -48,6 +61,9 @@
 	let steps = $state<StepProgress[]>([]);
 	let errorMessage = $state('');
 	let copied = $state(false);
+	// Per-run override of the git stack's saved setting; seeded from it every time
+	// the dialog opens, so an edit to the stack is picked up without a remount.
+	let onlyRunningServices = $state(false);
 
 	const confirmDestructive = $derived($appSettings.confirmDestructive);
 
@@ -82,7 +98,9 @@
 		try {
 			const response = await fetch(`/api/git/stacks/${stackId}/deploy-stream`, {
 				method: 'POST',
-				headers: { 'Content-Type': 'application/json' }
+				headers: { 'Content-Type': 'application/json' },
+				// Per-run override of the git stack's saved setting (#1246)
+				body: JSON.stringify({ onlyRunningServices: canLimitServices ? onlyRunningServices : undefined })
 			});
 
 			if (!response.ok) {
@@ -127,6 +145,7 @@
 
 	function handleTriggerClick() {
 		if (overallStatus !== 'idle') return;
+		onlyRunningServices = onlyRunningServicesDefault;
 		if (confirmDestructive) {
 			overallStatus = 'confirming';
 		} else {
@@ -232,6 +251,17 @@
 						</p>
 					</div>
 				</div>
+				{#if canLimitServices}
+					<label class="flex items-start gap-3 py-2 px-2 mt-1 rounded-md hover:bg-muted/40 transition-colors cursor-pointer">
+						<Checkbox bind:checked={onlyRunningServices} class="mt-0.5" />
+						<span class="space-y-1">
+							<span class="block text-sm">Only start services that were already running</span>
+							<span class="block text-xs text-muted-foreground">
+								Services that are currently stopped stay stopped instead of being started by the sync.
+							</span>
+						</span>
+					</label>
+				{/if}
 			{:else if steps.length === 0 && isDeploying}
 				<div class="flex items-center gap-3 text-muted-foreground py-2 px-2">
 					<Loader2 class="w-4 h-4 animate-spin shrink-0" />

@@ -7,7 +7,7 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { Input } from '$lib/components/ui/input';
 	import { TogglePill } from '$lib/components/ui/toggle-pill';
-	import { Loader2, GitBranch, RefreshCw, Webhook, Rocket, RefreshCcw, Copy, Check, XCircle, FolderGit2, Github, Key, KeyRound, Lock, FileText, HelpCircle, GripVertical, X, Download, Hammer, ArrowDownToLine, Zap, FolderOpen, Ban, TriangleAlert, Settings2, Archive } from 'lucide-svelte';
+	import { Loader2, GitBranch, RefreshCw, Webhook, Rocket, RefreshCcw, Copy, Check, XCircle, FolderGit2, Github, Key, KeyRound, Lock, FileText, HelpCircle, GripVertical, X, Download, Hammer, ArrowDownToLine, Zap, FolderOpen, Ban, TriangleAlert, Settings2, Archive, Filter } from 'lucide-svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { page } from '$app/stores'; // BETA GATE: backups feature flag
 	import BackupPanel from '../containers/BackupPanel.svelte';
@@ -64,6 +64,7 @@
 		noBuildCache: boolean;
 		repullImages: boolean;
 		forceRedeploy: boolean;
+		onlyRunningServices: boolean;
 	}
 
 	interface Props {
@@ -142,6 +143,7 @@
 	let formNoBuildCache = $state(false);
 	let formRepullImages = $state(false);
 	let formForceRedeploy = $state(false);
+	let formOnlyRunningServices = $state(false);
 	let formDeployNow = $state(false);
 	let formError = $state('');
 	let formSaving = $state(false);
@@ -443,6 +445,7 @@
 			formNoBuildCache = gitStack.noBuildCache ?? false;
 			formRepullImages = gitStack.repullImages ?? false;
 			formForceRedeploy = gitStack.forceRedeploy ?? false;
+			formOnlyRunningServices = gitStack.onlyRunningServices ?? false;
 			formDeployNow = false;
 			formSecretProviderId = null;
 			
@@ -476,6 +479,7 @@
 			formNoBuildCache = false;
 			formRepullImages = false;
 			formForceRedeploy = false;
+			formOnlyRunningServices = false;
 			formDeployNow = false;
 			formSecretProviderId = null;
 		}
@@ -575,6 +579,7 @@
 				noBuildCache: formNoBuildCache,
 				repullImages: formRepullImages,
 				forceRedeploy: formForceRedeploy,
+				onlyRunningServices: formOnlyRunningServices,
 				deployNow: deployAfterSave,
 				secretProviderId: formSecretProviderId,
 				envVars: overrideVars.map(v => ({
@@ -1148,6 +1153,16 @@
 				</div>
 				<p class="text-xs text-muted-foreground">
 					Always redeploy the stack on webhook or scheduled sync, even if no git changes are detected.
+				</p>
+				<div class="flex items-center gap-3">
+					<div class="flex items-center gap-2 flex-1">
+						<Filter class="w-4 h-4 text-muted-foreground" />
+						<Label class="text-sm font-normal">Only start running services</Label>
+					</div>
+					<TogglePill bind:checked={formOnlyRunningServices} />
+				</div>
+				<p class="text-xs text-muted-foreground">
+					Bring up only the services that already had a running container. Services you stopped stay stopped instead of being started by the sync. If the stack has no containers yet, all services are deployed.
 				</p>
 			</div>
 

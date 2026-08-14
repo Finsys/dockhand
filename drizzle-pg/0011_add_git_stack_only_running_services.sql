@@ -1,0 +1,1 @@
+ALTER TABLE "git_stacks" ADD COLUMN "only_running_services" boolean DEFAULT false;

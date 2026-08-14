@@ -333,6 +333,8 @@ export const gitStacks = sqliteTable('git_stacks', {
 	noBuildCache: integer('no_build_cache', { mode: 'boolean' }).default(false),
 	repullImages: integer('repull_images', { mode: 'boolean' }).default(false),
 	forceRedeploy: integer('force_redeploy', { mode: 'boolean' }).default(false),
+	// Sync/deploy only the services that were running before the sync (#1246)
+	onlyRunningServices: integer('only_running_services', { mode: 'boolean' }).default(false),
 	lastSync: text('last_sync'),
 	lastCommit: text('last_commit'),
 	syncStatus: text('sync_status').default('pending'),

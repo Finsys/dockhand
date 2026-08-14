@@ -149,7 +149,8 @@ export const POST: RequestHandler = async (event) => {
 			buildOnDeploy: data.buildOnDeploy ?? false,
 			noBuildCache: data.noBuildCache ?? false,
 			repullImages: data.repullImages ?? false,
-			forceRedeploy: data.forceRedeploy ?? false
+			forceRedeploy: data.forceRedeploy ?? false,
+			onlyRunningServices: data.onlyRunningServices ?? false
 		});
 
 		// Create stack_sources entry so the stack appears in the list immediately
