@@ -44,7 +44,7 @@
 		name: string;
 		url: string;
 		branch: string;
-		credential_id: number | null;
+		credentialId: number | null;
 	}
 
 	interface GitStack {
@@ -451,11 +451,11 @@
 			formRepullImages = gitStack.repullImages ?? false;
 			formForceRedeploy = gitStack.forceRedeploy ?? false;
 			formDeployNow = false;
-		formSecretProviderId = null;
-		
-		// Load secret provider binding
-		loadSecretProviderBindingForStack(gitStack.stackName);
-		formBranch = selectedRepo?.branch || null;
+			formSecretProviderId = null;
+
+			// Load secret provider binding
+			loadSecretProviderBindingForStack(gitStack.stackName);
+			formBranch = selectedRepo?.branch || null;
 
 			// Load env files and overrides SYNCHRONOUSLY to avoid race conditions
 			// Wait for all loads to complete before allowing any other effect to run
@@ -655,7 +655,7 @@
 					await fetch(`/api/git/repositories/${selectedRepo.id}`, {
 						method: 'PUT',
 						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify({ name: selectedRepo.name, url: selectedRepo.url, branch: formBranch, credentialId: selectedRepo.credential_id })
+						body: JSON.stringify({ name: selectedRepo.name, url: selectedRepo.url, branch: formBranch, credentialId: selectedRepo.credentialId })
 					});
 				} catch (e) {
 					console.error('Failed to update repository branch:', e);

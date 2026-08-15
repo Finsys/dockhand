@@ -225,7 +225,7 @@ async function ensurePasswdEntry(env: GitEnv): Promise<void> {
 	}
 }
 
-export async function buildGitEnv(credential: GitCredential | null): Promise<GitEnv> {
+async function buildGitEnv(credential: GitCredential | null): Promise<GitEnv> {
 	const env: GitEnv = {
 		...process.env as GitEnv,
 		GIT_TERMINAL_PROMPT: '0',
@@ -307,7 +307,7 @@ function cleanupSshKey(credential: GitCredential | null, env?: GitEnv): void {
 	}
 }
 
-export function buildRepoUrl(url: string, credential: GitCredential | null): string {
+function buildRepoUrl(url: string, credential: GitCredential | null): string {
 	assertSafeRepoUrl(url);
 	// Never embed credentials in the URL — they leak via /proc/<pid>/cmdline (see #1081).
 	// HTTPS credentials are injected via GIT_CONFIG_COUNT env vars in buildGitEnv().
@@ -325,7 +325,7 @@ export function buildRepoUrl(url: string, credential: GitCredential | null): str
 	return url;
 }
 
-export async function execGit(args: string[], cwd: string, env: GitEnv): Promise<{ stdout: string; stderr: string; code: number }> {
+async function execGit(args: string[], cwd: string, env: GitEnv): Promise<{ stdout: string; stderr: string; code: number }> {
 	try {
 		const proc = nodeSpawn('git', args, {
 			cwd,
@@ -652,6 +652,49 @@ export async function testRepositoryConfig(options: {
 		branch: branch || 'main',
 		credential
 	});
+}
+
+/**
+ * List remote branches for a repository URL using git ls-remote.
+ * Resolves credentials from the database if a credentialId is provided.
+ */
+export async function listRemoteBranches(options: {
+	url: string;
+	credentialId?: number | null;
+}): Promise<{ branches: string[]; error?: string }> {
+	const { url, credentialId } = options;
+
+	// Fetch credential from database if credentialId is provided
+	const credential = credentialId ? await getGitCredential(credentialId) : null;
+
+	const env = await buildGitEnv(credential);
+	const repoUrl = buildRepoUrl(url, credential);
+
+	try {
+		const result = await execGit(
+			['ls-remote', '--heads', '--refs', repoUrl],
+			process.cwd(),
+			env
+		);
+
+		if (result.code !== 0) {
+			return { branches: [], error: cleanGitError(result.stderr) };
+		}
+
+		const branches = result.stdout.split('\n')
+			.filter(l => l.trim())
+			.map(l => {
+				const m = l.match(/refs\/heads\/(.+)$/);
+				return m ? m[1] : null;
+			})
+			.filter(Boolean) as string[];
+
+		return { branches };
+	} catch (error: any) {
+		return { branches: [], error: error.message };
+	} finally {
+		cleanupSshKey(credential);
+	}
 }
 
 export async function syncRepository(repoId: number): Promise<SyncResult> {

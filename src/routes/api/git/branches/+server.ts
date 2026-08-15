@@ -1,12 +1,12 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getGitRepository, getGitCredentials, type GitCredential } from '$lib/server/db';
+import { getGitRepository } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
-import { buildGitEnv, buildRepoUrl, execGit } from '$lib/server/git';
+import { listRemoteBranches } from '$lib/server/git';
 
 export const POST: RequestHandler = async ({ request, cookies }) => {
 	const auth = await authorize(cookies);
-	if (auth.authEnabled && !await auth.can('git', 'view')) {
+	if (auth.authEnabled && !await auth.can('git', 'edit')) {
 		return json({ error: 'Permission denied' }, { status: 403 });
 	}
 
@@ -19,7 +19,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 		};
 
 		let repoUrl: string;
-		let credential: GitCredential | null = null;
+		let credId: number | undefined;
 
 		if (repositoryId) {
 			const repo = await getGitRepository(repositoryId);
@@ -27,43 +27,21 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 				return json({ error: 'Repository not found' }, { status: 404 });
 			}
 			repoUrl = repo.url;
-			if (repo.credentialId) {
-				const creds = await getGitCredentials();
-				credential = (creds.find(c => c.id === repo.credentialId) || null) as GitCredential | null;
-			}
+			credId = repo.credentialId ?? undefined;
 		} else if (url) {
 			repoUrl = url;
-			if (credentialId) {
-				const creds = await getGitCredentials();
-				credential = (creds.find(c => c.id === credentialId) || null) as GitCredential | null;
-			}
+			credId = credentialId ?? undefined;
 		} else {
 			return json({ error: 'repositoryId or url is required' }, { status: 400 });
 		}
 
-		const env = await buildGitEnv(credential);
-		const authenticatedUrl = buildRepoUrl(repoUrl, credential);
+		const result = await listRemoteBranches({ url: repoUrl, credentialId: credId });
 
-		// Use git ls-remote to list all branches
-		const result = await execGit(
-			['ls-remote', '--heads', '--refs', authenticatedUrl],
-			process.cwd(),
-			env
-		);
-
-		if (result.code !== 0) {
-			return json({ error: 'Failed to fetch branches: ' + result.stderr }, { status: 500 });
+		if (result.error) {
+			return json({ error: 'Failed to fetch branches: ' + result.error }, { status: 500 });
 		}
 
-		const branches = result.stdout.split('\n')
-			.filter(l => l.trim())
-			.map(l => {
-				const m = l.match(/refs\/heads\/(.+)$/);
-				return m ? m[1] : null;
-			})
-			.filter(Boolean);
-
-		return json({ branches });
+		return json({ branches: result.branches });
 	} catch (error: any) {
 		console.error('Failed to fetch branches:', error);
 		return json({ error: 'Failed to fetch branches' }, { status: 500 });
