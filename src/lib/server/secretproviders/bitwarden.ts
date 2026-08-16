@@ -3,8 +3,8 @@
  *
  * This is deliberately only an adapter around an operator-provided official
  * `bws` executable. Dockhand does not distribute the client and does not
- * implement Bitwarden's API or cryptography. The provider is cloud-only and
- * bulk-loads one Project selected by UUID.
+ * implement Bitwarden's API or cryptography. The provider bulk-loads one
+ * Project selected by UUID and optionally targets an EU or self-hosted server.
  */
 
 import { spawn } from 'node:child_process';
@@ -12,7 +12,7 @@ import { chmod, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import type { BitwardenConfig, SecretProvider, TestConnectionResult } from './shared';
-import { UnsupportedOperationError } from './shared';
+import { UnsupportedOperationError, assertSafeProviderHost } from './shared';
 
 const DEFAULT_BWS_PATH = '/usr/local/bin/bws';
 const VERSION_TIMEOUT_MS = 5_000;
@@ -50,6 +50,7 @@ interface CommandLimits {
 	stdoutBytes: number;
 	stderrBytes: number;
 	accessToken?: string;
+	serverUrl?: string;
 }
 
 function executablePath(): string {
@@ -81,17 +82,12 @@ function spawnFailure(error: unknown): BwsAdapterError {
 	return new BwsAdapterError('Bitwarden bws executable could not be started');
 }
 
-/** Execute bws without a shell while bounding its lifetime and captured output. */
-async function runBws(args: string[], limits: CommandLimits): Promise<Buffer> {
-	let stateDir: string | undefined;
-	try {
-		stateDir = await mkdtemp(join(tmpdir(), 'dockhand-bws-'));
-		await chmod(stateDir, 0o700);
-	} catch {
-		if (stateDir) await rm(stateDir, { recursive: true, force: true }).catch(() => undefined);
-		throw new BwsAdapterError('Bitwarden bws temporary state could not be created');
-	}
-
+/** Execute one bws process without a shell while bounding its lifetime and output. */
+async function executeBws(
+	stateDir: string,
+	args: string[],
+	limits: CommandLimits
+): Promise<Buffer> {
 	const stdoutChunks: Buffer[] = [];
 	try {
 		return await new Promise<Buffer>((resolve, reject) => {
@@ -177,6 +173,35 @@ async function runBws(args: string[], limits: CommandLimits): Promise<Buffer> {
 		});
 	} finally {
 		for (const chunk of stdoutChunks) chunk.fill(0);
+	}
+}
+
+/** Execute bws in an isolated profile, configuring a non-default server when requested. */
+async function runBws(args: string[], limits: CommandLimits): Promise<Buffer> {
+	let stateDir: string | undefined;
+	try {
+		stateDir = await mkdtemp(join(tmpdir(), 'dockhand-bws-'));
+		await chmod(stateDir, 0o700);
+	} catch {
+		if (stateDir) await rm(stateDir, { recursive: true, force: true }).catch(() => undefined);
+		throw new BwsAdapterError('Bitwarden bws temporary state could not be created');
+	}
+
+	try {
+		if (limits.serverUrl) {
+			const configOutput = await executeBws(
+				stateDir,
+				['config', 'server-base', limits.serverUrl],
+				{
+					timeoutMs: VERSION_TIMEOUT_MS,
+					stdoutBytes: VERSION_OUTPUT_LIMIT,
+					stderrBytes: STDERR_OUTPUT_LIMIT
+				}
+			);
+			configOutput.fill(0);
+		}
+		return await executeBws(stateDir, args, limits);
+	} finally {
 		try {
 			await rm(stateDir, { recursive: true, force: true });
 		} catch {
@@ -230,6 +255,19 @@ function accessToken(config: BitwardenConfig): string {
 	const token = typeof config?.token === 'string' ? config.token.trim() : '';
 	if (!token) throw new BwsAdapterError('Bitwarden Machine Account access token is empty');
 	return token;
+}
+
+function serverUrl(config: BitwardenConfig): string | undefined {
+	const url = typeof config?.serverUrl === 'string' ? config.serverUrl.trim() : '';
+	if (!url) return undefined;
+	try {
+		assertSafeProviderHost(url, 'Bitwarden Secrets Manager');
+	} catch (error: unknown) {
+		throw new BwsAdapterError(
+			error instanceof Error ? error.message : 'Bitwarden Secrets Manager: host not allowed'
+		);
+	}
+	return url.replace(/\/+$/, '');
 }
 
 function projectId(selector: string): string {
@@ -287,12 +325,14 @@ export const bitwardenProvider: SecretProvider<BitwardenConfig> = {
 	async testConnection(config: BitwardenConfig): Promise<TestConnectionResult> {
 		try {
 			const token = accessToken(config);
+			const server = serverUrl(config);
 			await assertSupportedVersion();
 			await runJsonArray(['project', 'list', '--output', 'json', '--color', 'no'], {
 				timeoutMs: COMMAND_TIMEOUT_MS,
 				stdoutBytes: TEST_OUTPUT_LIMIT,
 				stderrBytes: STDERR_OUTPUT_LIMIT,
-				accessToken: token
+				accessToken: token,
+				serverUrl: server
 			});
 			return { ok: true };
 		} catch (error: unknown) {
@@ -310,13 +350,15 @@ export const bitwardenProvider: SecretProvider<BitwardenConfig> = {
 		try {
 			const token = accessToken(config);
 			const project = projectId(selector);
+			const server = serverUrl(config);
 			const payload = await runJsonArray(
 				['secret', 'list', project, '--output', 'json', '--color', 'no'],
 				{
 					timeoutMs: COMMAND_TIMEOUT_MS,
 					stdoutBytes: SECRET_OUTPUT_LIMIT,
 					stderrBytes: STDERR_OUTPUT_LIMIT,
-					accessToken: token
+					accessToken: token,
+					serverUrl: server
 				}
 			);
 			return secretRecord(payload);

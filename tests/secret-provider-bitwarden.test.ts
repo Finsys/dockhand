@@ -104,6 +104,59 @@ if (args.length === 1 && args[0] === '--version') {
 		expect(calls.every((call) => !existsSync(call.home))).toBe(true);
 	});
 
+	test('configures a safe self-hosted server in the isolated profile before authentication', async () => {
+		const logPath = join(testDir, 'self-hosted-calls.jsonl');
+		await installFakeBws(`
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({
+  args,
+  hasToken: Boolean(process.env.BWS_ACCESS_TOKEN),
+  home: process.env.HOME
+}) + '\\n');
+if (args.length === 1 && args[0] === '--version') {
+  console.log('bws 2.1.0');
+} else if (JSON.stringify(args) === JSON.stringify(['config', 'server-base', 'https://bitwarden.example.com'])) {
+  if (process.env.BWS_ACCESS_TOKEN) process.exit(54);
+} else if (JSON.stringify(args) === JSON.stringify(['project', 'list', '--output', 'json', '--color', 'no'])) {
+  if (process.env.BWS_ACCESS_TOKEN !== '${TOKEN}') process.exit(55);
+  console.log('[]');
+} else {
+  process.exit(56);
+}
+`);
+
+		expect(
+			await bitwardenProvider.testConnection({
+				token: TOKEN,
+				serverUrl: '  https://bitwarden.example.com/  '
+			})
+		).toEqual({ ok: true });
+		const calls = (await readFile(logPath, 'utf8'))
+			.trim()
+			.split('\n')
+			.map((line) => JSON.parse(line));
+		expect(calls.map((call) => call.args)).toEqual([
+			['--version'],
+			['config', 'server-base', 'https://bitwarden.example.com'],
+			['project', 'list', '--output', 'json', '--color', 'no']
+		]);
+		expect(calls.map((call) => call.hasToken)).toEqual([false, false, true]);
+		expect(calls[1].home).toBe(calls[2].home);
+		expect(calls.every((call) => !existsSync(call.home))).toBe(true);
+	});
+
+	test('rejects an unsafe self-hosted server before executing bws', async () => {
+		process.env.DOCKHAND_BWS_PATH = join(testDir, 'missing-bws');
+		expect(
+			await bitwardenProvider.testConnection({ token: TOKEN, serverUrl: 'http://127.0.0.1' })
+		).toEqual({
+			ok: false,
+			error:
+				'Bitwarden Secrets Manager: host not allowed (loopback address (127.0.0.1) blocked)'
+		});
+	});
+
 	test('rejects missing, relative-path, and incompatible clients with sanitized errors', async () => {
 		process.env.DOCKHAND_BWS_PATH = join(testDir, 'missing-bws');
 		expect(await bitwardenProvider.testConnection({ token: TOKEN })).toEqual({

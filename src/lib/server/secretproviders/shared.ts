@@ -173,6 +173,8 @@ export interface DopplerConfig {
 /** Bitwarden Secrets Manager: a Machine Account access token. */
 export interface BitwardenConfig {
 	token: string;
+	/** Optional Bitwarden server base URL for EU or self-hosted instances. */
+	serverUrl?: string;
 }
 
 /** Persisted (encrypted) config, discriminated by the provider `type`. */

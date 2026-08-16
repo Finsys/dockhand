@@ -46,6 +46,10 @@ with another absolute path.
 Configure the Machine Account access token in Dockhand's secret-provider settings and set the
 stack's `DOCKHAND_SECRET_SELECTOR` to the Bitwarden Project UUID.
 
+For Bitwarden EU or a self-hosted instance, also configure the optional server URL. Dockhand
+applies its provider URL-safety checks and uses `bws config server-base` in an isolated
+temporary profile.
+
 For the official Dockhand container, mount the operator-managed executable read-only:
 
 ```yaml

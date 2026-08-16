@@ -57,6 +57,7 @@
 		],
 		bitwarden: [
 			{ key: 'token', label: 'Machine Account access token', type: 'password', required: true, placeholder: 'Machine Account access token', hint: 'A Bitwarden Secrets Manager Machine Account token with read access to the Project.' },
+			{ key: 'serverUrl', label: 'Server URL', type: 'text', required: false, placeholder: 'https://vault.bitwarden.com', hint: 'Optional for EU or self-hosted Bitwarden. Leave blank for Bitwarden US cloud.' },
 		],
 	};
 
