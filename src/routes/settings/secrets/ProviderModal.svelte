@@ -24,6 +24,7 @@
 		{ value: 'infisical', label: 'Infisical' },
 		{ value: 'vault', label: 'HashiCorp Vault' },
 		{ value: 'doppler', label: 'Doppler' },
+		{ value: 'bitwarden', label: 'Bitwarden Secrets Manager' },
 	];
 
 	// Config fields per provider type, matching the config shapes in
@@ -54,6 +55,9 @@
 			{ key: 'project', label: 'Project', type: 'text', required: false, placeholder: 'only for a personal token (dp.pt.)', hint: 'Doppler project slug. Only needed with a personal token.' },
 			{ key: 'config', label: 'Config', type: 'text', required: false, placeholder: 'e.g. prd', hint: 'Config within the project. Only needed with a personal token.' },
 		],
+		bitwarden: [
+			{ key: 'token', label: 'Machine Account access token', type: 'password', required: true, placeholder: 'Machine Account access token', hint: 'A Bitwarden Secrets Manager Machine Account token with read access to the Project.' },
+		],
 	};
 
 	export function providerTypeLabel(type: string): string {
@@ -80,6 +84,11 @@
 			label: 'Secret path',
 			placeholder: '/',
 			hint: 'Bulk-load every secret at this path (project and environment come from the provider config).'
+		},
+		'bitwarden': {
+			label: 'Project',
+			placeholder: 'Bitwarden Project UUID',
+			hint: 'Bulk-load every secret from this Bitwarden Secrets Manager Project.'
 		}
 	};
 </script>
@@ -398,6 +407,13 @@
 					</div>
 				{/each}
 			</div>
+			{#if formType === 'bitwarden'}
+				<p class="text-xs text-muted-foreground">
+					Bitwarden Secrets Manager requires an externally installed or mounted official
+					<code>bws</code> client at <code>/usr/local/bin/bws</code> (or an absolute
+					<code>DOCKHAND_BWS_PATH</code> process override).
+				</p>
+			{/if}
 			<p class="text-xs text-muted-foreground">
 				Configuration is stored encrypted.{#if isEditing}
 					Leave secret fields blank to keep the existing values.{/if}

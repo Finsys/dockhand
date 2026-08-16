@@ -31,6 +31,7 @@ export type SecretProviderType =
 	| 'infisical'
 	| 'vault'
 	| 'doppler'
+	| 'bitwarden'
 	// eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents
 	| (string & {});
 
@@ -169,13 +170,19 @@ export interface DopplerConfig {
 	config?: string;
 }
 
+/** Bitwarden Secrets Manager: a Machine Account access token. */
+export interface BitwardenConfig {
+	token: string;
+}
+
 /** Persisted (encrypted) config, discriminated by the provider `type`. */
 export type SecretProviderConfig =
 	| ServiceAccountConfig
 	| ConnectConfig
 	| InfisicalConfig
 	| VaultConfig
-	| DopplerConfig;
+	| DopplerConfig
+	| BitwardenConfig;
 
 /**
  * Config keys that hold a SECRET across every provider type. Only these are stripped

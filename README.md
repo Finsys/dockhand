@@ -36,6 +36,25 @@ Dockhand is a modern, efficient Docker management application providing real-tim
 - **Database**: SQLite or PostgreSQL via Drizzle ORM
 - **Docker**: direct docker API calls.
 
+## Bitwarden Secrets Manager
+
+The Bitwarden Secrets Manager provider requires an official `bws` client supplied by the
+operator. Dockhand does not include, download, or redistribute `bws`. By default the provider
+executes `/usr/local/bin/bws`; the process-level `DOCKHAND_BWS_PATH` setting may override this
+with another absolute path.
+
+Configure the Machine Account access token in Dockhand's secret-provider settings and set the
+stack's `DOCKHAND_SECRET_SELECTOR` to the Bitwarden Project UUID.
+
+For the official Dockhand container, mount the operator-managed executable read-only:
+
+```yaml
+volumes:
+  - /opt/dockhand-tools/bws:/usr/local/bin/bws:ro
+```
+
+Obtaining, verifying, updating, and licensing `bws` remains the operator's responsibility.
+
 ## Screenshots
 
 <table>
