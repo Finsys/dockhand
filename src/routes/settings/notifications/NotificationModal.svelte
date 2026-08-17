@@ -455,12 +455,18 @@ bark://host/bark_key
 barks://host/bark_key
 signal://host:8080/+sender/+recipient
 apprise://host:8000/your-key
-jsons://hostname/webhook/path"
+jsons://hostname/webhook/path
+zabbix://hostname/api_jsonrpc.php?token=TOKEN&amp;host=HOST&amp;key=ITEM_KEY
+zabbixs://hostname/api_jsonrpc.php?token=TOKEN&amp;host=HOST&amp;key=ITEM_KEY"
 						class="flex min-h-[220px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
 					></textarea>
 					<p class="text-xs text-muted-foreground">
-						Supports Discord, Slack, Mattermost, Telegram, ntfy, Gotify, Pushover, Bark, Signal (via signal-cli-rest-api), Microsoft Teams (via Workflows), and generic JSON. Or use <code>apprise://</code> to forward to a self-hosted <a href="https://github.com/caronc/apprise-api" target="_blank" rel="noopener">caronc/apprise-api</a> server for any provider Apprise upstream supports.
-						</p>
+						Supports Discord, Slack, Mattermost, Telegram, ntfy, Gotify, Pushover, Bark, Signal (via signal-cli-rest-api), Microsoft Teams (via Workflows), Zabbix (via history.push), and generic JSON. Or use <code>apprise://</code> to forward to a self-hosted <a href="https://github.com/caronc/apprise-api" target="_blank" rel="noopener">caronc/apprise-api</a> server for any provider Apprise upstream supports.
+					</p>
+					<p class="text-xs text-muted-foreground">
+						Zabbix 7.x:
+						<code>zabbixs://hostname/api_jsonrpc.php?token=TOKEN&amp;host=HOST&amp;key=ITEM_KEY</code>
+					</p>
 					</div>
 				</div>
 			{/if}

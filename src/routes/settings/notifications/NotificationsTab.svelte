@@ -133,7 +133,7 @@
 				<div>
 					<p class="text-sm font-medium">Notification channels</p>
 					<p class="text-xs text-muted-foreground mt-1">
-						Configure notification channels to receive alerts about Docker events. Supports SMTP email and webhook URLs (Discord, Slack, Telegram, ntfy, Bark, Signal, Apprise, and more).
+						Configure notification channels to receive alerts about Docker events. Supports SMTP email and webhook URLs (Discord, Slack, Telegram, ntfy, Bark, Signal, Zabbix, Apprise, and more).
 					</p>
 					<p class="text-xs text-amber-600 dark:text-amber-500 mt-2 flex items-center gap-1">
 						<Info class="w-3 h-3" />
