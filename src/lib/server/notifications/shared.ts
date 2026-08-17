@@ -15,11 +15,27 @@ export interface NotificationPayload {
 	environmentId?: number;
 	environmentName?: string;
 	eventType?: string;
+	stack?: string | null;
+	container?: string;
+	containerId?: string;
 }
 
 export interface NotificationResult {
 	success: boolean;
 	error?: string;
+}
+
+
+export function containerNotificationContext(
+	containerId: string,
+	containerName?: string,
+	actorAttributes: Record<string, string> = {}
+): Pick<NotificationPayload, 'stack' | 'container' | 'containerId'> {
+	return {
+		stack: actorAttributes['com.docker.compose.project'] || null,
+		container: containerName || containerId.substring(0, 12),
+		containerId
+	};
 }
 
 /**
