@@ -111,6 +111,10 @@ export const PUT: RequestHandler = async (event) => {
 		const oldStackName = existing.stackName;
 		const updated = await updateGitStack(id, {
 			stackName: data.stackName,
+			// Per-stack branch override. Partial semantics like the other fields:
+			// only applied when present in the body. null or empty string clears
+			// the override so the stack falls back to the repository default.
+			branch: 'branch' in data ? (typeof data.branch === 'string' && data.branch.trim() ? data.branch.trim() : null) : undefined,
 			composePath: data.composePath,
 			envFilePath: data.envFilePath,
 			autoUpdate: data.autoUpdate,

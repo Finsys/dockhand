@@ -64,7 +64,9 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 				return json({ error: 'Repository not found' }, { status: 404 });
 			}
 			repoUrl = repo.url;
-			branch = repo.branch;
+			// An explicit branch (e.g. a per-stack override being previewed) wins
+			// over the repository default.
+			branch = typeof data.branch === 'string' && data.branch.trim() ? data.branch.trim() : repo.branch;
 			credentialId = repo.credentialId;
 		} else if (data.url) {
 			// New repository details

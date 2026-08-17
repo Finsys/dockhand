@@ -76,7 +76,7 @@
 	let showImportModal = $state(false);
 	let editingStackName = $state('');
 	let stackModalReadonly = $state(false);
-	let stackModalGitInfo = $state<{ commit?: string; url?: string; branch?: string } | null>(null);
+	let stackModalGitInfo = $state<{ commit?: string; url?: string; branch?: string; perStackBranch?: string | null } | null>(null);
 	let editingGitStack = $state<any>(null);
 	let envId = $state<number | null>(null);
 
@@ -1114,10 +1114,13 @@
 		editingStackName = name;
 		stackModalReadonly = true;
 		const src = getStackSource(name);
+		const perStackBranch = src?.gitStack?.branch ?? null;
 		stackModalGitInfo = {
 			commit: src?.gitStack?.lastCommit || undefined,
 			url: src?.repository?.url || undefined,
-			branch: src?.repository?.branch || undefined
+			// Effective branch: per-stack override wins, else repository default
+			branch: perStackBranch || (src?.repository?.branch || undefined),
+			perStackBranch: perStackBranch || null
 		};
 		showEditModal = true;
 	}

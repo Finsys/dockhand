@@ -154,6 +154,12 @@ export const POST: RequestHandler = async (event) => {
 			stackName: trimmedStackName,
 			environmentId: data.environmentId || null,
 			repositoryId: repositoryId,
+			// Per-stack branch override — only when targeting an existing repository.
+			// In new-repo mode data.branch becomes the repository's default instead;
+			// the stack inherits it (branch stays null).
+			...(data.repositoryId && typeof data.branch === 'string' && data.branch.trim()
+				? { branch: data.branch.trim() }
+				: {}),
 			composePath: data.composePath || 'compose.yaml',
 			envFilePath: data.envFilePath || null,
 			autoUpdate: data.autoUpdate || false,

@@ -915,6 +915,19 @@ async function getPreviousCommit(repoPath: string, env: GitEnv): Promise<string 
 	}
 }
 
+/**
+ * Resolve the effective branch a git stack deploys from.
+ * A per-stack branch override (git_stacks.branch) wins; when it is unset,
+ * empty, or whitespace-only, the repository's default branch is used.
+ */
+export function resolveStackBranch(
+	gitStack: { branch: string | null } | null | undefined,
+	repository: { branch: string }
+): string {
+	const override = gitStack?.branch?.trim();
+	return override || repository.branch;
+}
+
 export async function syncGitStack(stackId: number): Promise<SyncResult> {
 	const gitStack = await getGitStack(stackId);
 	if (!gitStack) {
@@ -944,8 +957,14 @@ export async function syncGitStack(stackId: number): Promise<SyncResult> {
 		return { success: false, error: 'Repository not found' };
 	}
 
+	// Per-stack branch override wins; unset means the repository default
+	const effectiveBranch = resolveStackBranch(gitStack, repo);
+
 	console.log(`${logPrefix} Repository URL:`, repo.url);
 	console.log(`${logPrefix} Repository branch:`, repo.branch);
+	if (effectiveBranch !== repo.branch) {
+		console.log(`${logPrefix} Stack branch override:`, effectiveBranch);
+	}
 
 	const credential = repo.credentialId ? await getGitCredential(repo.credentialId) : null;
 	const repoPath = await getStackRepoPath(stackId, gitStack.stackName, gitStack.environmentId);
@@ -971,11 +990,11 @@ export async function syncGitStack(stackId: number): Promise<SyncResult> {
 		}
 
 		console.log(`${logPrefix} Cloning repository...`);
-		assertSafeGitRef(repo.branch);
+		assertSafeGitRef(effectiveBranch);
 		const repoUrl = buildRepoUrl(repo.url, credential);
 
 		const result = await execGit(
-			['clone', '--filter=blob:none', '--branch', repo.branch, repoUrl, repoPath],
+			['clone', '--filter=blob:none', '--branch', effectiveBranch, repoUrl, repoPath],
 			process.cwd(),
 			env
 		);
@@ -1326,15 +1345,18 @@ export async function testGitStack(stackId: number): Promise<TestResult> {
 		return { success: false, error: 'Repository not found' };
 	}
 
+	// Per-stack branch override wins; unset means the repository default
+	const effectiveBranch = resolveStackBranch(gitStack, repo);
+
 	const credential = repo.credentialId ? await getGitCredential(repo.credentialId) : null;
 	const env = await buildGitEnv(credential);
-	assertSafeGitRef(repo.branch);
+	assertSafeGitRef(effectiveBranch);
 	const repoUrl = buildRepoUrl(repo.url, credential);
 
 	try {
 		// Use git ls-remote to test connection and get branch info
 		const result = await execGit(
-			['ls-remote', '--heads', '--refs', repoUrl, repo.branch],
+			['ls-remote', '--heads', '--refs', repoUrl, effectiveBranch],
 			process.cwd(),
 			env
 		);
@@ -1348,12 +1370,12 @@ export async function testGitStack(stackId: number): Promise<TestResult> {
 		// Parse the output to get commit hash
 		const lines = result.stdout.split('\n').filter(l => l.trim());
 		if (lines.length === 0) {
-			return { success: false, error: `Branch '${repo.branch}' not found in repository` };
+			return { success: false, error: `Branch '${effectiveBranch}' not found in repository` };
 		}
 
 		const match = lines[0].match(/^([a-f0-9]+)\s+refs\/heads\/(.+)$/);
 		const lastCommit = match ? match[1].substring(0, 7) : undefined;
-		const branch = match ? match[2] : repo.branch;
+		const branch = match ? match[2] : effectiveBranch;
 
 		cleanupSshKey(credential, env);
 
@@ -1411,6 +1433,9 @@ export async function deployGitStackWithProgress(
 		return { success: false, error: 'Repository not found' };
 	}
 
+	// Per-stack branch override wins; unset means the repository default
+	const effectiveBranch = resolveStackBranch(gitStack, repo);
+
 	const credential = repo.credentialId ? await getGitCredential(repo.credentialId) : null;
 	const repoPath = await getStackRepoPath(stackId, gitStack.stackName, gitStack.environmentId);
 	const env = await buildGitEnv(credential);
@@ -1437,13 +1462,13 @@ export async function deployGitStackWithProgress(
 			rmSync(repoPath, { recursive: true, force: true });
 		}
 
-		assertSafeGitRef(repo.branch);
+		assertSafeGitRef(effectiveBranch);
 		const repoUrl = buildRepoUrl(repo.url, credential);
 
 		// Step 3: Fetching (blobless clone - fetches all commits but blobs on-demand)
-		onProgress({ status: 'fetching', message: `Fetching branch ${repo.branch}...`, step: 3, totalSteps });
+		onProgress({ status: 'fetching', message: `Fetching branch ${effectiveBranch}...`, step: 3, totalSteps });
 		const cloneResult = await execGit(
-			['clone', '--filter=blob:none', '--branch', repo.branch, repoUrl, repoPath],
+			['clone', '--filter=blob:none', '--branch', effectiveBranch, repoUrl, repoPath],
 			process.cwd(),
 			env
 		);

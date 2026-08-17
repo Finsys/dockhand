@@ -321,6 +321,7 @@ export const gitStacks = sqliteTable('git_stacks', {
 	stackName: text('stack_name').notNull(),
 	environmentId: integer('environment_id').references(() => environments.id, { onDelete: 'cascade' }),
 	repositoryId: integer('repository_id').notNull().references(() => gitRepositories.id, { onDelete: 'cascade' }),
+	branch: text('branch'), // Per-stack branch override; null = use repository default
 	composePath: text('compose_path').default('docker-compose.yml'), // Reverted to original value (#1110)
 	envFilePath: text('env_file_path'), // Path to .env file in repository (e.g., ".env", "config/.env.prod")
 	autoUpdate: integer('auto_update', { mode: 'boolean' }).default(false),

@@ -51,6 +51,7 @@
 		id: number;
 		stackName: string;
 		repositoryId: number;
+		branch?: string | null; // Per-stack branch override; null = use repository default
 		environmentId: number | null;
 		composePath: string;
 		envFilePath: string | null;
@@ -152,6 +153,11 @@
 	let formBranch = $state<string | null>(null);
 	let branches = $state<string[]>([]);
 	let branchesLoading = $state(false);
+
+	// Sentinel select value meaning "no per-stack override — use the repository's
+	// default branch". Contains ':' which is invalid in git refs, so it can never
+	// collide with a real branch name.
+	const REPO_DEFAULT_BRANCH_VALUE = ':repository-default:';
 
 	// Stack name validation: Docker Compose requires lowercase; must start with a
 	// letter or number, and contain only lowercase letters, numbers, hyphens, underscores
@@ -365,6 +371,8 @@
 
 			if (formRepoMode === 'existing') {
 				body.repositoryId = formRepositoryId;
+				// Send the selected branch so env files are previewed from it (per-stack override)
+				body.branch = formBranch || undefined;
 			} else {
 				body.url = formNewRepoUrl;
 				body.branch = formNewRepoBranch || 'main';
@@ -455,7 +463,8 @@
 
 			// Load secret provider binding
 			loadSecretProviderBindingForStack(gitStack.stackName);
-			formBranch = selectedRepo?.branch || null;
+			// Per-stack branch override; null means "use the repository default"
+			formBranch = gitStack.branch ?? null;
 
 			// Load env files and overrides SYNCHRONOUSLY to avoid race conditions
 			// Wait for all loads to complete before allowing any other effect to run
@@ -623,6 +632,9 @@
 
 			if (formRepoMode === 'existing') {
 				body.repositoryId = formRepositoryId;
+				// Per-stack branch override — sent on both create and update so the
+				// stack payload is the single source of truth (null = inherit repo default)
+				body.branch = formBranch || null;
 			} else {
 				// Create new repo inline
 				body.repoName = formNewRepoName;
@@ -649,19 +661,6 @@
 				return;
 			}
 
-			// Update repository branch if changed (when editing existing stack or creating new stack with existing repo)
-			if (selectedRepo && formBranch && formBranch !== selectedRepo.branch) {
-				try {
-					await fetch(`/api/git/repositories/${selectedRepo.id}`, {
-						method: 'PUT',
-						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify({ name: selectedRepo.name, url: selectedRepo.url, branch: formBranch, credentialId: selectedRepo.credentialId })
-					});
-				} catch (e) {
-					console.error('Failed to update repository branch:', e);
-				}
-			}
-
 			// Check if deployment failed
 			const deployResult = data.deployResult as { success?: boolean; error?: string } | undefined;
 			if (deployResult && !deployResult.success) {
@@ -686,9 +685,10 @@
 	$effect(() => {
 		if (formRepoMode === 'existing' && formRepositoryId) {
 			void fetchBranches();
-			// Set formBranch to the selected repo's default branch
-			const repo = repositories.find(r => r.id === formRepositoryId);
-			if (repo) formBranch = repo.branch;
+			// A fresh stack inherits the repository's default until a branch is
+			// picked. When editing, the stored per-stack override (set in
+			// resetForm) must be preserved — null means repository default.
+			if (!gitStack) formBranch = null;
 		} else if (formRepoMode === 'new' && formNewRepoUrl) {
 			void fetchBranches();
 		} else {
@@ -873,28 +873,36 @@
 						{#if formRepoMode === 'existing' && selectedRepo}
 							<div class="space-y-2">
 								<Label for="existing-repo-branch">Branch</Label>
-								<Select.Root type="single" value={formBranch ?? selectedRepo.branch} onValueChange={(v) => { formBranch = v; }}>
+								<Select.Root type="single" value={formBranch || REPO_DEFAULT_BRANCH_VALUE} onValueChange={(v) => { formBranch = v === REPO_DEFAULT_BRANCH_VALUE ? null : v; }}>
 									<Select.Trigger class="w-full">
 										<span class="flex items-center gap-2">
 											<GitBranch class="w-4 h-4 text-muted-foreground" />
 											{#if branchesLoading}
 												<Loader2 class="w-4 h-4 animate-spin" />
+											{:else if formBranch}
+												{formBranch}
 											{:else}
-												{formBranch || selectedRepo.branch}
+												<span class="text-muted-foreground">Repository default ({selectedRepo.branch})</span>
 											{/if}
 										</span>
 									</Select.Trigger>
 									<Select.Content>
+										<Select.Item value={REPO_DEFAULT_BRANCH_VALUE}>
+											<span class="flex items-center gap-2">
+												<GitBranch class="w-4 h-4 text-muted-foreground" />
+												Repository default ({selectedRepo.branch})
+											</span>
+										</Select.Item>
 										{#if branches.length > 0}
 											{#each branches as branch}
-												<Select.Item value={branch}>{branch}</Select.Item>
+												{#if branch !== selectedRepo.branch}
+													<Select.Item value={branch}>{branch}</Select.Item>
+												{/if}
 											{/each}
-										{:else}
-											<Select.Item value={formBranch || selectedRepo.branch}>{formBranch || selectedRepo.branch}</Select.Item>
 										{/if}
 									</Select.Content>
 								</Select.Root>
-								<p class="text-xs text-muted-foreground">Branch to deploy from</p>
+								<p class="text-xs text-muted-foreground">Branch this stack deploys from. "Repository default" follows the branch configured on the repository.</p>
 							</div>
 						{/if}
 					{:else}
@@ -1033,28 +1041,36 @@
 			{#if gitStack && selectedRepo}
 				<div class="space-y-2">
 					<Label for="stack-branch">Branch</Label>
-					<Select.Root type="single" value={formBranch ?? 'main'} onValueChange={(v) => { formBranch = v; }}>
+					<Select.Root type="single" value={formBranch || REPO_DEFAULT_BRANCH_VALUE} onValueChange={(v) => { formBranch = v === REPO_DEFAULT_BRANCH_VALUE ? null : v; }}>
 						<Select.Trigger class="w-full">
 							<span class="flex items-center gap-2">
 								<GitBranch class="w-4 h-4 text-muted-foreground" />
 								{#if branchesLoading}
 									<Loader2 class="w-4 h-4 animate-spin" />
+								{:else if formBranch}
+									{formBranch}
 								{:else}
-									{formBranch || 'main'}
+									<span class="text-muted-foreground">Repository default ({selectedRepo.branch})</span>
 								{/if}
 							</span>
 						</Select.Trigger>
 						<Select.Content>
+							<Select.Item value={REPO_DEFAULT_BRANCH_VALUE}>
+								<span class="flex items-center gap-2">
+									<GitBranch class="w-4 h-4 text-muted-foreground" />
+									Repository default ({selectedRepo.branch})
+								</span>
+							</Select.Item>
 							{#if branches.length > 0}
 								{#each branches as branch}
-									<Select.Item value={branch}>{branch}</Select.Item>
+									{#if branch !== selectedRepo.branch}
+										<Select.Item value={branch}>{branch}</Select.Item>
+									{/if}
 								{/each}
-							{:else}
-								<Select.Item value={formBranch || 'main'}>{formBranch || 'main'}</Select.Item>
 							{/if}
 						</Select.Content>
 					</Select.Root>
-					<p class="text-xs text-muted-foreground">Branch to deploy from</p>
+					<p class="text-xs text-muted-foreground">Branch this stack deploys from. "Repository default" follows the branch configured on the repository.</p>
 				</div>
 			{/if}
 

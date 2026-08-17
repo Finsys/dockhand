@@ -2295,6 +2295,7 @@ export interface GitStackData {
 	environmentId: number | null;
 	repositoryId: number;
 	composePath: string;
+	branch: string | null; // Per-stack branch override; null = use repository default
 	envFilePath: string | null;
 	autoUpdate: boolean;
 	autoUpdateSchedule: 'daily' | 'weekly' | 'custom';
@@ -2333,6 +2334,7 @@ export async function getGitStacks(environmentId?: number): Promise<GitStackWith
 			stackName: gitStacks.stackName,
 			environmentId: gitStacks.environmentId,
 			repositoryId: gitStacks.repositoryId,
+			branch: gitStacks.branch,
 			composePath: gitStacks.composePath,
 			envFilePath: gitStacks.envFilePath,
 			autoUpdate: gitStacks.autoUpdate,
@@ -2366,6 +2368,7 @@ export async function getGitStacks(environmentId?: number): Promise<GitStackWith
 			stackName: gitStacks.stackName,
 			environmentId: gitStacks.environmentId,
 			repositoryId: gitStacks.repositoryId,
+			branch: gitStacks.branch,
 			composePath: gitStacks.composePath,
 			envFilePath: gitStacks.envFilePath,
 			autoUpdate: gitStacks.autoUpdate,
@@ -2399,6 +2402,7 @@ export async function getGitStacks(environmentId?: number): Promise<GitStackWith
 		stackName: row.stackName,
 		environmentId: row.environmentId,
 		repositoryId: row.repositoryId,
+		branch: row.branch ?? null,
 		composePath: row.composePath,
 		envFilePath: row.envFilePath,
 		autoUpdate: row.autoUpdate,
@@ -2434,6 +2438,7 @@ export async function getGitStacksForEnvironmentOnly(environmentId: number): Pro
 		stackName: gitStacks.stackName,
 		environmentId: gitStacks.environmentId,
 		repositoryId: gitStacks.repositoryId,
+		branch: gitStacks.branch,
 		composePath: gitStacks.composePath,
 		envFilePath: gitStacks.envFilePath,
 		autoUpdate: gitStacks.autoUpdate,
@@ -2467,6 +2472,7 @@ export async function getGitStacksForEnvironmentOnly(environmentId: number): Pro
 		stackName: row.stackName,
 		environmentId: row.environmentId,
 		repositoryId: row.repositoryId,
+		branch: row.branch ?? null,
 		composePath: row.composePath,
 		envFilePath: row.envFilePath,
 		autoUpdate: row.autoUpdate,
@@ -2501,6 +2507,7 @@ export async function getGitStack(id: number): Promise<GitStackWithRepo | null> 
 		stackName: gitStacks.stackName,
 		environmentId: gitStacks.environmentId,
 		repositoryId: gitStacks.repositoryId,
+		branch: gitStacks.branch,
 		composePath: gitStacks.composePath,
 		envFilePath: gitStacks.envFilePath,
 		autoUpdate: gitStacks.autoUpdate,
@@ -2536,6 +2543,7 @@ export async function getGitStack(id: number): Promise<GitStackWithRepo | null> 
 		stackName: row.stackName,
 		environmentId: row.environmentId,
 		repositoryId: row.repositoryId,
+		branch: row.branch ?? null,
 		composePath: row.composePath,
 		envFilePath: row.envFilePath,
 		autoUpdate: row.autoUpdate,
@@ -2571,6 +2579,7 @@ export async function getGitStackByName(stackName: string, environmentId?: numbe
 		stackName: gitStacks.stackName,
 		environmentId: gitStacks.environmentId,
 		repositoryId: gitStacks.repositoryId,
+		branch: gitStacks.branch,
 		composePath: gitStacks.composePath,
 		envFilePath: gitStacks.envFilePath,
 		autoUpdate: gitStacks.autoUpdate,
@@ -2610,6 +2619,7 @@ export async function getGitStackByName(stackName: string, environmentId?: numbe
 		stackName: row.stackName,
 		environmentId: row.environmentId,
 		repositoryId: row.repositoryId,
+		branch: row.branch ?? null,
 		composePath: row.composePath,
 		envFilePath: row.envFilePath,
 		autoUpdate: row.autoUpdate,
@@ -2644,6 +2654,7 @@ export async function getGitStackByWebhookSecret(secret: string): Promise<GitSta
 		stackName: gitStacks.stackName,
 		environmentId: gitStacks.environmentId,
 		repositoryId: gitStacks.repositoryId,
+		branch: gitStacks.branch,
 		composePath: gitStacks.composePath,
 		envFilePath: gitStacks.envFilePath,
 		autoUpdate: gitStacks.autoUpdate,
@@ -2678,6 +2689,7 @@ export async function getGitStackByWebhookSecret(secret: string): Promise<GitSta
 		stackName: row.stackName,
 		environmentId: row.environmentId,
 		repositoryId: row.repositoryId,
+		branch: row.branch ?? null,
 		composePath: row.composePath,
 		envFilePath: row.envFilePath,
 		autoUpdate: row.autoUpdate,
@@ -2710,6 +2722,7 @@ export async function createGitStack(data: {
 	stackName: string;
 	environmentId?: number | null;
 	repositoryId: number;
+	branch?: string | null;
 	composePath?: string;
 	envFilePath?: string | null;
 	autoUpdate?: boolean;
@@ -2727,6 +2740,7 @@ export async function createGitStack(data: {
 		stackName: data.stackName,
 		environmentId: data.environmentId ?? null,
 		repositoryId: data.repositoryId,
+		branch: data.branch || null,
 		composePath: data.composePath || 'compose.yaml',
 		envFilePath: data.envFilePath || null,
 		contextDir: data.contextDir || null,
@@ -2749,6 +2763,7 @@ export async function updateGitStack(id: number, data: Partial<GitStackData>): P
 	if (data.stackName !== undefined) updateData.stackName = data.stackName;
 	if (data.repositoryId !== undefined) updateData.repositoryId = data.repositoryId;
 	if (data.composePath !== undefined) updateData.composePath = data.composePath;
+	if (data.branch !== undefined) updateData.branch = data.branch || null;
 	if (data.envFilePath !== undefined) updateData.envFilePath = data.envFilePath;
 	if (data.autoUpdate !== undefined) updateData.autoUpdate = data.autoUpdate;
 	if (data.autoUpdateSchedule !== undefined) updateData.autoUpdateSchedule = data.autoUpdateSchedule;
@@ -2821,6 +2836,7 @@ export async function getEnabledAutoUpdateGitStacks(): Promise<GitStackWithRepo[
 		stackName: row.stackName,
 		environmentId: row.environmentId,
 		repositoryId: row.repositoryId,
+		branch: row.branch ?? null,
 		composePath: row.composePath,
 		envFilePath: row.envFilePath,
 		autoUpdate: row.autoUpdate,
@@ -2886,6 +2902,7 @@ export async function getAllAutoUpdateGitStacks(): Promise<GitStackWithRepo[]> {
 		stackName: row.stackName,
 		environmentId: row.environmentId,
 		repositoryId: row.repositoryId,
+		branch: row.branch ?? null,
 		composePath: row.composePath,
 		autoUpdate: row.autoUpdate,
 		autoUpdateSchedule: row.autoUpdateSchedule,
