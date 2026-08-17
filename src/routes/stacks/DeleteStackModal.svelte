@@ -5,6 +5,7 @@
 	import { Trash2, Folder, Database, Loader2, ArrowRight } from 'lucide-svelte';
 	import GitGenericIcon from '$lib/components/icons/GitGenericIcon.svelte';
 	import { appendEnvParam } from '$lib/stores/environment';
+	import { DEFAULT_STACK_REMOVAL_OPTIONS } from '$lib/utils/stack-removal';
 
 	// The parent owns the fetch; onConfirm receives what the user chose to remove.
 	let {
@@ -32,10 +33,10 @@
 	let busy = $state(false);
 
 	// What to remove — the user ticks each. Containers are ALWAYS removed (the point of the
-	// operation), so they aren't a checkbox. Files default ON (the common intent), volumes
-	// default OFF (destructive, unrecoverable).
-	let removeFiles = $state(true);
-	let removeVolumes = $state(false);
+	// operation), so they aren't a checkbox. Destructive file and volume deletion both
+	// require explicit user intent.
+	let removeFiles = $state(DEFAULT_STACK_REMOVAL_OPTIONS.deleteFiles);
+	let removeVolumes = $state(DEFAULT_STACK_REMOVAL_OPTIONS.deleteVolumes);
 
 	const hasFiles = $derived(!!(preview?.stackDir || preview?.gitDir));
 	const hasVolumes = $derived((preview?.namedVolumes?.length ?? 0) > 0);
@@ -44,8 +45,8 @@
 		if (open && stackName) {
 			loading = true;
 			preview = null;
-			removeFiles = true;
-			removeVolumes = false;
+			removeFiles = DEFAULT_STACK_REMOVAL_OPTIONS.deleteFiles;
+			removeVolumes = DEFAULT_STACK_REMOVAL_OPTIONS.deleteVolumes;
 			fetch(appendEnvParam(`/api/stacks/${encodeURIComponent(stackName)}/delete-preview`, envId))
 				.then((r) => (r.ok ? r.json() : null))
 				.then((d) => { preview = d; })
@@ -63,8 +64,8 @@
 		];
 		if (hasFiles) {
 			lines.push(removeFiles
-				? { delete: true, kind: 'files', text: 'Delete the stack files on disk' }
-				: { delete: false, kind: 'files', text: 'Keep the stack files on disk' });
+				? { delete: true, kind: 'files', text: 'Delete Compose / environment files from disk' }
+				: { delete: false, kind: 'files', text: 'Keep Compose / environment files on disk' });
 		}
 		if (hasVolumes) {
 			const n = preview!.namedVolumes.length;
@@ -109,7 +110,7 @@
 						<Checkbox bind:checked={removeFiles} class="mt-0.5" />
 						<Folder class="w-4 h-4 shrink-0 translate-y-0.5 text-amber-500" />
 						<div class="min-w-0">
-							<div class="text-sm">Delete files on disk</div>
+							<div class="text-sm">Delete Compose / environment files from disk</div>
 							{#if preview.stackDir}
 								<code class="block break-all text-xs text-muted-foreground">{preview.stackDir}</code>
 							{/if}
