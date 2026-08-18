@@ -108,7 +108,7 @@ export const POST: RequestHandler = async (event) => {
 
 	try {
 		const body = await request.json();
-		const { name, compose, start, envVars, rawEnvContent, composePath, envPath, secretProviderId } = body;
+		const { name, compose, composeContents, start, envVars, rawEnvContent, composePath, composePaths, envPath, secretProviderId } = body;
 
 		if (!name || typeof name !== 'string') {
 			return json({ error: 'Stack name is required' }, { status: 400 });
@@ -141,6 +141,8 @@ export const POST: RequestHandler = async (event) => {
 		if (start === false) {
 			const result = await saveStackComposeFile(name, compose, true, envIdNum, {
 				composePath: composePath || undefined,
+				composePaths: composePaths || undefined,
+				composeContents: composeContents || undefined,
 				envPath: envPath || undefined
 			});
 			if (!result.success) {
@@ -170,8 +172,9 @@ export const POST: RequestHandler = async (event) => {
 				environmentId: envIdNum,
 				sourceType: 'internal',
 				composePath: composePath || undefined,
+				composePaths: composePaths || undefined,
 				envPath: envPath || undefined,
-				secretProviderId,
+				secretProviderId
 			});
 
 			// Audit log
@@ -183,6 +186,7 @@ export const POST: RequestHandler = async (event) => {
 		// ALWAYS save compose file first - deployStack expects it to exist
 		const saveResult = await saveStackComposeFile(name, compose, true, envIdNum, {
 			composePath: composePath || undefined,
+			composeContents: composeContents || undefined,
 			envPath: envPath || undefined
 		});
 		if (!saveResult.success) {
@@ -212,6 +216,7 @@ export const POST: RequestHandler = async (event) => {
 			environmentId: envIdNum,
 			sourceType: 'internal',
 			composePath: composePath || undefined,
+			composePaths: composePaths || undefined,
 			envPath: envPath || undefined,
 			secretProviderId
 		});
@@ -224,6 +229,7 @@ export const POST: RequestHandler = async (event) => {
 					compose,
 					envId: envIdNum,
 					composePath: composePath || undefined,
+					composePaths: composePaths || undefined,
 					envPath: envPath || undefined
 				});
 

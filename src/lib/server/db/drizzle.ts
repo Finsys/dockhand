@@ -22,10 +22,19 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { createHash } from 'node:crypto';
+import { building } from '$app/environment';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+// vite build evaluates every server module — in the main build (`building` is false
+// there, but we're running under the vite CLI) and in the post-build analysis fork
+// (`building` is true). Opening the SQLite connection in either process leaves
+// better-sqlite3 statements alive at exit, which aborts Node 24 (SIGABRT).
+const isBuildTime =
+	building ||
+	(process.env.NODE_ENV === 'production' && (process.argv[1] ?? '').includes('vite'));
 
 // =============================================================================
 // CONFIGURATION
@@ -630,9 +639,21 @@ async function initializeDatabase() {
 
 		// Run migrations
 		const migrationsFolder = './drizzle-pg';
+		const preRunPending = (await getMigrationState(rawClient, true, migrationsFolder)).pendingMigrations;
 		const result = await runMigrations(db, rawClient, true, migrationsFolder);
 		if (!result.success && result.error) {
 			handleMigrationFailure(result.error, true);
+		}
+		// Backfill when 0012 just applied, or retry when it was already applied but
+		// a previous backfill never completed (sentinel absent).
+		if (preRunPending.includes('0012_centralized_git') && result.applied > 0) {
+			// 0012 (re)applied this boot: the column default 'stack' backfilled any
+			// pre-existing rows, so re-run even if a sentinel from a previous install
+			// survived a downgrade.
+			await db.delete(schema.settings).where(eq(schema.settings.key, 'git_stack_model_backfilled'));
+			await backfillGitStackModel();
+		} else if (result.applied === 0 && !preRunPending.includes('0012_centralized_git')) {
+			await backfillGitStackModel();
 		}
 	} else {
 		// SQLite via better-sqlite3
@@ -672,13 +693,71 @@ async function initializeDatabase() {
 
 		// Run migrations
 		const migrationsFolder = './drizzle';
+		const preRunPending = (await getMigrationState(rawClient, false, migrationsFolder)).pendingMigrations;
 		const result = await runMigrations(db, rawClient, false, migrationsFolder);
 		if (!result.success && result.error) {
 			handleMigrationFailure(result.error, false);
 		}
+		// Backfill when 0012 just applied, or retry when it was already applied but
+		// a previous backfill never completed (sentinel absent).
+		if (preRunPending.includes('0012_centralized_git') && result.applied > 0) {
+			// 0012 (re)applied this boot: the column default 'stack' backfilled any
+			// pre-existing rows, so re-run even if a sentinel from a previous install
+			// survived a downgrade.
+			await db.delete(schema.settings).where(eq(schema.settings.key, 'git_stack_model_backfilled'));
+			await backfillGitStackModel();
+		} else if (result.applied === 0 && !preRunPending.includes('0012_centralized_git')) {
+			await backfillGitStackModel();
+		}
 	}
 
 	initialized = true;
+}
+
+/**
+ * One-time backfill of git_stacks.engine from the effective
+ * git_repository_mode setting.
+ *
+ * Runs exactly-once per successful backfill: the git_stack_model_backfilled
+ * sentinel setting is written only on success, so a FAILED backfill is retried
+ * on the next boot (otherwise an already-centralized install would stay on the
+ * 'stack' column default forever). The sentinel also guarantees the backfill
+ * never re-runs over later per-stack migrate results. settings.value is
+ * JSON-encoded by setSetting(), so parse it; missing/invalid falls back to
+ * 'stack'. The raw table access avoids a circular import of db.ts's
+ * getSetting().
+ */
+async function backfillGitStackModel(): Promise<void> {
+	try {
+		const sentinel = await db
+			.select({ key: schema.settings.key })
+			.from(schema.settings)
+			.where(eq(schema.settings.key, 'git_stack_model_backfilled'));
+		if (sentinel[0]) return;
+
+		const rows = await db
+			.select({ value: schema.settings.value })
+			.from(schema.settings)
+			.where(eq(schema.settings.key, 'git_repository_mode'));
+		let mode = 'stack';
+		if (rows[0]?.value != null) {
+			try {
+				const parsed: unknown = JSON.parse(rows[0].value);
+				if (parsed === 'stack' || parsed === 'centralized') mode = parsed;
+			} catch {
+				const raw = rows[0].value;
+				if (raw === 'stack' || raw === 'centralized') mode = raw;
+			}
+		}
+		const result = await db
+			.update(schema.gitStacks)
+			.set({ engine: mode })
+			.where(sql`1 = 1`);
+		await db.insert(schema.settings).values({ key: 'git_stack_model_backfilled', value: JSON.stringify('done') });
+		logStep(`Backfilled git_stacks.engine to "${mode}" (${result.changes ?? result.rowCount ?? 0} row(s))`);
+	} catch (error) {
+		logWarning(`git_stacks.engine backfill failed (will retry next boot): ${error instanceof Error ? error.message : String(error)}`);
+	}
 }
 
 // =============================================================================
@@ -872,17 +951,22 @@ async function seedDatabase(): Promise<void> {
 // STARTUP
 // =============================================================================
 
-// Seed the database on startup
-await seedDatabase();
+// Seed the database on startup. Skipped during `vite build`: SvelteKit imports every
+// server module at build time, which would open a live SQLite connection and crash
+// better-sqlite3's native teardown at process exit on Node 24 (SIGABRT).
+if (!isBuildTime) await seedDatabase();
 
 // =============================================================================
 // EXPORTS
 // =============================================================================
 
-// Create proxy to ensure database is initialized before access
+// Create proxy to ensure database is initialized before access.
+// During `vite build` the module is evaluated (SvelteKit build/analysis) with
+// seeding skipped, so return a no-op stub instead of throwing.
 const dbProxy = new Proxy({} as any, {
 	get(_target, prop) {
 		if (!initialized) {
+			if (isBuildTime) return undefined;
 			throw new Error('Database not initialized. This should not happen.');
 		}
 		return db[prop];
@@ -896,6 +980,7 @@ export { dbProxy as db, rawClient };
 const schemaProxy = new Proxy({} as any, {
 	get(_target, prop) {
 		if (!initialized || !schema) {
+			if (isBuildTime) return undefined;
 			throw new Error('Database not initialized. This should not happen.');
 		}
 		return schema[prop];
@@ -907,6 +992,7 @@ export const environments = schemaProxy.environments;
 export const hawserTokens = schemaProxy.hawserTokens;
 export const registries = schemaProxy.registries;
 export const settings = schemaProxy.settings;
+export const gitMigrationState = schemaProxy.gitMigrationState;
 export const stackEvents = schemaProxy.stackEvents;
 export const hostMetrics = schemaProxy.hostMetrics;
 export const configSets = schemaProxy.configSets;
@@ -946,6 +1032,8 @@ export type {
 	NewHawserToken,
 	Setting,
 	NewSetting,
+	GitMigrationState,
+	NewGitMigrationState,
 	User,
 	NewUser,
 	Session,

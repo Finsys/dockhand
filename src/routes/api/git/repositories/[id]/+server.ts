@@ -5,12 +5,17 @@ import {
 	updateGitRepository,
 	deleteGitRepository,
 	getGitCredentials,
-	getGitStacksByRepositoryId
+	getGitStacksByRepositoryId,
+	repositoryHasCentralizedStack
 } from '$lib/server/db';
-import { deleteRepositoryFiles, deleteGitStackFiles } from '$lib/server/git';
+import { deleteRepositoryFiles, deleteGitStackFiles, renameRepositoryFiles, syncRepositoryExclusive, findRepoNameSanitizationCollision } from '$lib/server/git';
+import { assertNotMigrating } from '$lib/server/git-migration-guard';
+import { createJob, completeJob, failJob } from '$lib/server/jobs';
 import { authorize } from '$lib/server/authorize';
 import { auditGitRepository } from '$lib/server/audit';
 import { computeAuditDiff } from '$lib/utils/diff';
+import { registerSchedule, unregisterSchedule } from '$lib/server/scheduler';
+import { WEBHOOK_SECRET_REQUIRED_ERROR } from '$lib/utils/webhook-secret';
 
 /**
  * @openapi
@@ -79,6 +84,12 @@ export const PUT: RequestHandler = async (event) => {
 
 		const data = await request.json();
 
+		// Block only when THIS repository is being provisioned by a migration (narrow lock).
+		const locked = await assertNotMigrating([], [id]);
+		if (locked) return locked;
+
+		const hasCentralized = await repositoryHasCentralizedStack(id);
+
 		// Validate credential if provided
 		if (data.credentialId) {
 			const credentials = await getGitCredentials();
@@ -88,14 +99,52 @@ export const PUT: RequestHandler = async (event) => {
 			}
 		}
 
-		// Update only the basic repository fields
-		// Deployment-specific config (composePath, autoUpdate, webhook) now belongs to git_stacks
-		const repository = await updateGitRepository(id, {
-			name: data.name,
-			url: data.url,
-			branch: data.branch,
-			credentialId: data.credentialId
-		});
+		if (typeof data.name === 'string' && data.name !== existing.name) {
+			const nameCollision = await findRepoNameSanitizationCollision(data.name, id);
+			if (nameCollision) {
+				return json({
+					error: `Repository name conflicts with existing repository "${nameCollision}" after filesystem sanitization. Choose a more distinct name.`
+				}, { status: 400 });
+			}
+		}
+
+		// A secret is mandatory when the webhook is enabled (centralized only).
+		// Evaluate the effective post-update state (PUT is partial).
+		const effWebhookEnabled = data.webhookEnabled !== undefined ? data.webhookEnabled : existing.webhookEnabled;
+		const effWebhookSecret = data.webhookSecret !== undefined ? data.webhookSecret : existing.webhookSecret;
+		if (hasCentralized && effWebhookEnabled && !effWebhookSecret?.trim()) {
+			return json({ error: WEBHOOK_SECRET_REQUIRED_ERROR }, { status: 400 });
+		}
+
+		const effAutoUpdate = hasCentralized ? (data.autoUpdate ?? existing.autoUpdate) : undefined;
+		const effAutoUpdateSchedule = effAutoUpdate
+			? (data.autoUpdateSchedule ?? existing.autoUpdateSchedule ?? null)
+			: null;
+		const effAutoUpdateCron = effAutoUpdate
+			? (data.autoUpdateCron ?? existing.autoUpdateCron ?? null)
+			: null;
+
+		// Update repository fields. Repos with no centralized stacks update only
+		// identity fields — repo-level schedule/webhook are centralized concepts.
+		const repository = await updateGitRepository(id, hasCentralized
+			? {
+				name: data.name,
+				url: data.url,
+				branch: data.branch,
+				credentialId: data.credentialId,
+				autoUpdate: data.autoUpdate,
+				autoUpdateSchedule: effAutoUpdateSchedule,
+				autoUpdateCron: effAutoUpdateCron,
+				webhookEnabled: data.webhookEnabled,
+				webhookSecret: data.webhookSecret
+			}
+			: {
+				name: data.name,
+				url: data.url,
+				branch: data.branch,
+				credentialId: data.credentialId
+			}
+		);
 
 		if (!repository) {
 			return json({ error: 'Failed to update repository' }, { status: 500 });
@@ -107,7 +156,45 @@ export const PUT: RequestHandler = async (event) => {
 		// Audit log
 		await auditGitRepository(event, 'update', repository.id, repository.name, diff);
 
-		return json(repository);
+		if (!hasCentralized) {
+			// No shared clone, no repo-level schedule, no resync — thin record.
+			return json(repository);
+		}
+
+		// Manage schedule if auto-update settings changed
+		if (repository.autoUpdate) {
+			await registerSchedule(repository.id, 'git_repository_sync', null);
+		} else {
+			unregisterSchedule(repository.id, 'git_repository_sync');
+		}
+
+		// Rename on-disk clone if the display name changed (path is name-based)
+		if (existing.name !== repository.name) {
+			renameRepositoryFiles(existing.name, repository.name);
+		}
+
+		// Only re-sync when clone identity changes (URL, branch, or credentials)
+		const needsResync =
+			existing.url !== repository.url ||
+			existing.branch !== repository.branch ||
+			existing.credentialId !== repository.credentialId;
+
+		if (!needsResync) {
+			return json(repository);
+		}
+
+		const job = createJob();
+		syncRepositoryExclusive(id).then((result) => {
+			if (result.success) {
+				completeJob(job, { success: true, commit: result.commit });
+			} else {
+				failJob(job, result.error ?? 'Clone failed');
+			}
+		}).catch((err: unknown) => {
+			failJob(job, err instanceof Error ? err.message : String(err));
+		});
+
+		return json({ ...repository, jobId: job.id });
 	} catch (error: any) {
 		console.error('Failed to update git repository:', error);
 		if (error.message?.includes('UNIQUE constraint failed')) {
@@ -147,15 +234,29 @@ export const DELETE: RequestHandler = async (event) => {
 			return json({ error: 'Repository not found' }, { status: 404 });
 		}
 
+		// Block only when THIS repository is being provisioned by a migration (narrow lock).
+		const locked = await assertNotMigrating([], [id]);
+		if (locked) return locked;
+
 		// Delete git stack clone directories before cascade deletes the DB rows
 		const stacks = await getGitStacksByRepositoryId(id);
 		console.log(`[GitStack] Repository "${repository.name}" (id=${id}) deletion affects ${stacks.length} stacks: ${stacks.map(s => s.stackName).join(', ')}`);
+		const hasCentralized = stacks.some((s) => s.engine === 'centralized');
 		for (const stack of stacks) {
+			// Stack-model stacks also drop their per-stack git_stack_sync schedule.
+			if (stack.engine === 'stack') {
+				unregisterSchedule(stack.id, 'git_stack_sync');
+			}
 			await deleteGitStackFiles(stack.id, stack.stackName, stack.environmentId);
 		}
 
-		// Delete repository clone directory
-		deleteRepositoryFiles(id);
+		if (hasCentralized) {
+			// Delete repository clone directory
+			deleteRepositoryFiles(repository.name, id);
+		}
+
+		// Unregister repo-level schedule (centralized stacks only).
+		unregisterSchedule(id, 'git_repository_sync');
 
 		const deleted = await deleteGitRepository(id);
 		if (!deleted) {

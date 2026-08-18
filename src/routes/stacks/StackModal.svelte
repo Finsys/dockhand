@@ -11,14 +11,14 @@
 	import { SELECTOR_VARS } from '$lib/utils/bulk-selector';
 	import { classifyMarker, resolvedRefVarNames } from '$lib/utils/invault-markers';
 	import { applyQuickFix, findingKey } from '$lib/utils/compose-quick-fix';
-	import { Layers, Save, Play, Code, GitGraph, GitBranch, GitCommitHorizontal, Github, Loader2, AlertCircle, X, Sun, Moon, TriangleAlert, GripVertical, FolderOpen, Copy, Check, XCircle, MapPin, ArrowRight, ArrowDown, Info, Box, FolderSync, Archive, ListChecks } from 'lucide-svelte';
+	import { Layers, Save, Play, Code, GitGraph, GitBranch, GitCommitHorizontal, Github, Loader2, AlertCircle, X, Sun, Moon, TriangleAlert, GripVertical, FolderOpen, Copy, Check, XCircle, MapPin, ArrowRight, ArrowUp, ArrowDown, Info, Box, FolderSync, Archive, Lock, FileText, FileCode, ExternalLink, ListChecks } from 'lucide-svelte';
 	import ComposeValidatePanel from './ComposeValidatePanel.svelte';
+	import GitSourceBadge from './GitSourceBadge.svelte';
 	import BackupPanel from '../containers/BackupPanel.svelte';
 	import { volumesForStack, type VolumeInfo } from '$lib/utils/mounts';
 	import { fetchBackupExecutions } from '$lib/utils/backup';
 	import type { Component } from 'svelte';
 	import FilesystemBrowser from './FilesystemBrowser.svelte';
-	import PathBarItem from './PathBarItem.svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { Badge } from '$lib/components/ui/badge';
 	import { currentEnvironment, appendEnvParam } from '$lib/stores/environment';
@@ -44,14 +44,14 @@
 		initialStackName?: string; // Pre-fill stack name (for library deploy)
 		readonly?: boolean; // View compose content without allowing local changes
 		gitInfo?: { commit?: string; url?: string; branch?: string } | null; // Git provenance for read-only git stacks
+		stackSource?: { sourceType: string; repository?: { url?: string; branch?: string } | null; gitStack?: { lastCommit?: string | null } | null } | null;
 		onClose: () => void;
 		onSuccess: () => void; // Called after create or save
 	}
 
-	let { open = $bindable(), mode: propMode, stackName: propStackName = '', initialCompose, initialStackName, readonly = false, gitInfo = null, onClose, onSuccess }: Props = $props();
+	let { open = $bindable(), mode: propMode, stackName: propStackName = '', initialCompose, initialStackName, readonly = false, gitInfo = null, stackSource = null, onClose, onSuccess }: Props = $props();
 
 	let gitCommitCopied = $state<'ok' | 'error' | null>(null);
-	let gitUrlCopied = $state<'ok' | 'error' | null>(null);
 
 	// Local effective state - can transition from create → edit after failed deploy
 	let mode = $state(propMode);
@@ -66,6 +66,8 @@
 	let loadError = $state<string | null>(null);
 	let errors = $state<{ stackName?: string; compose?: string }>({});
 	let composeContent = $state('');
+	let composeContents = $state<Record<string, string>>({});   // path → content map for multi-file
+	let activeComposePath = $state('');                           // currently viewed file path
 	let activeTab = $state<'editor' | 'graph' | 'backups'>('editor');
 	let backupCount = $state(0);
 	let backupTally = $state<{ ok: number; failed: number }>({ ok: 0, failed: 0 });
@@ -129,6 +131,12 @@
 	let workingComposePath = $state('');
 	let workingEnvPath = $state('');
 
+	// Multi compose paths (ordered list)
+	let workingComposePaths = $state<string[]>([]);
+
+	// Drag-and-drop state for compose paths reordering
+	let dragIndex = $state<number | null>(null);
+
 	// Original paths: loaded from server (for dirty/change detection in edit mode)
 	let originalComposePath = $state<string | null>(null);
 	let originalEnvPath = $state<string | null>(null);
@@ -142,9 +150,13 @@
 	// Base directory when user browsed to a directory (without stack name yet)
 	let browsedBaseDirectory = $state<string | null>(null);
 
+	// True once the user types a stack name (vs auto-derived from compose file selection)
+	let stackNameUserEdited = $state(false);
+
 
 	// UI state
 	let composePathCopied = $state<'ok' | 'error' | null>(null);
+	let composePathCopiedIndex = $state<number | null>(null);
 	let envPathCopied = $state<'ok' | 'error' | null>(null);
 	let composeContentCopied = $state<'ok' | 'error' | null>(null);
 
@@ -355,6 +367,8 @@
 		selectFilter?: RegExp;
 		selectMode: 'file' | 'directory' | 'file_or_directory';
 		onSelect: (path: string, name: string) => void;
+		multiSelect?: boolean;
+		onSelectMany?: (entries: { path: string; name: string }[]) => void;
 	}>({
 		title: '',
 		icon: undefined,
@@ -363,9 +377,26 @@
 		onSelect: () => {}
 	});
 
+	function deriveStackNameFromComposePath(path: string): string {
+		const parts = path.split('/');
+		if (parts.length < 2) return '';
+		const parentDir = parts[parts.length - 2];
+		return parentDir
+			.toLowerCase()
+			.replace(/[\s_]+/g, '-')
+			.replace(/[^a-z0-9-]/g, '')
+			.replace(/-+/g, '-')
+			.replace(/^-|-$/g, '');
+	}
+
+	function maybeDeriveStackNameFromCompose(path: string) {
+		if (!stackNameUserEdited) {
+			const derived = deriveStackNameFromComposePath(path);
+			if (derived) newStackName = derived;
+		}
+	}
+
 	function openComposeBrowser() {
-		// For untracked stacks (needsFileLocation), only allow selecting files
-		// For tracked stacks, allow both files and directories
 		const isUntracked = needsFileLocation;
 		fileBrowserConfig = {
 			title: isUntracked ? 'Select compose file' : 'Select compose file or directory',
@@ -374,6 +405,92 @@
 			onSelect: handleComposeSelect
 		};
 		showFileBrowser = true;
+	}
+
+	let browsingRowIndex = $state<number | null>(null);
+
+	function browseForRow(index: number) {
+		browsingRowIndex = index;
+		fileBrowserConfig = {
+			title: 'Select compose file',
+			selectFilter: /\.ya?ml$/,
+			selectMode: 'file',
+			onSelect: (path: string) => {
+				const newPaths = [...workingComposePaths];
+				newPaths[index] = path;
+				workingComposePaths = newPaths;
+				if (index === 0) workingComposePath = path;
+				showFileBrowser = false;
+				browsingRowIndex = null;
+				isDirty = true;
+				if (index === 0 && mode === 'create') {
+					maybeDeriveStackNameFromCompose(path);
+				}
+			},
+		};
+		showFileBrowser = true;
+	}
+
+	function addComposePath() {
+		workingComposePaths = [...workingComposePaths, ''];
+		isDirty = true;
+	}
+
+	function removeComposePath(index: number) {
+		if (workingComposePaths.length <= 1) return;
+		const newPaths = workingComposePaths.filter((_, i) => i !== index);
+		workingComposePaths = newPaths;
+		if (index === 0) {
+			workingComposePath = newPaths[0] || '';
+		}
+		isDirty = true;
+	}
+
+	function movePathUp(index: number) {
+		if (index <= 0) return;
+		const newPaths = [...workingComposePaths];
+		[newPaths[index - 1], newPaths[index]] = [newPaths[index], newPaths[index - 1]];
+		workingComposePaths = newPaths;
+		if (index === 0 || index - 1 === 0) workingComposePath = newPaths[0];
+		isDirty = true;
+	}
+
+	function movePathDown(index: number) {
+		if (index >= workingComposePaths.length - 1) return;
+		const newPaths = [...workingComposePaths];
+		[newPaths[index], newPaths[index + 1]] = [newPaths[index + 1], newPaths[index]];
+		workingComposePaths = newPaths;
+		if (index === 0) workingComposePath = newPaths[0];
+		isDirty = true;
+	}
+
+	function dragStart(e: DragEvent, index: number) {
+		dragIndex = index;
+		if (e.dataTransfer) {
+			e.dataTransfer.effectAllowed = 'move';
+			e.dataTransfer.setData('text/plain', String(index));
+		}
+	}
+
+	function dragOver(e: DragEvent, index: number) {
+		e.preventDefault();
+		if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+		if (dragIndex === null || dragIndex === index) return;
+		const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+		const before = e.clientY < rect.top + rect.height / 2;
+		const targetIndex = before ? index : index + 1;
+		const newPaths = [...workingComposePaths];
+		const [moved] = newPaths.splice(dragIndex, 1);
+		const insertAt = dragIndex < targetIndex ? targetIndex - 1 : targetIndex;
+		newPaths.splice(insertAt, 0, moved);
+		workingComposePaths = newPaths;
+		dragIndex = insertAt;
+		if (insertAt === 0) workingComposePath = newPaths[0];
+		isDirty = true;
+	}
+
+	function dragEnd() {
+		dragIndex = null;
 	}
 
 	function openEnvBrowser() {
@@ -536,6 +653,17 @@
 		}
 	}
 
+	async function copyComposePathAtIndex(path: string, index: number) {
+		if (!path) return;
+		const ok = await copyToClipboard(path);
+		composePathCopied = ok ? 'ok' : 'error';
+		composePathCopiedIndex = index;
+		setTimeout(() => {
+			composePathCopied = null;
+			composePathCopiedIndex = null;
+		}, 2000);
+	}
+
 	// Parse env vars from raw content
 	function parseEnvVarsFromRaw(content: string) {
 		const vars: EnvVar[] = [];
@@ -613,10 +741,14 @@
 				await loadFilesFromLocalFilesystem(finalPath, potentialEnvPath);
 				// Use the selected file's path directly
 				workingComposePath = finalPath;
+				if (!workingComposePaths.includes(finalPath)) {
+					workingComposePaths = [finalPath, ...workingComposePaths];
+				}
 				workingEnvPath = `${dir}/.env`;
 				browsedBaseDirectory = null;
 				// 'custom' prevents the path effect from overriding (it only acts on 'browsed')
 				pathSource = 'custom';
+				maybeDeriveStackNameFromCompose(finalPath);
 			} else {
 				pathSource = 'browsed';
 			}
@@ -626,6 +758,9 @@
 
 		// EDIT mode - store the selected path
 		workingComposePath = finalPath;
+		if (!workingComposePaths.includes(finalPath)) {
+			workingComposePaths = [finalPath, ...workingComposePaths];
+		}
 		pathSource = 'browsed';
 		showFileBrowser = false;
 
@@ -706,6 +841,7 @@
 			if (composeResponse.ok) {
 				const composeData = await composeResponse.json();
 				composeContent = composeData.content || '';
+				loadError = null;
 				// Only set workingComposePath in EDIT mode - CREATE mode uses internal defaults
 				if (mode !== 'create') {
 					workingComposePath = composeFilePath;
@@ -825,8 +961,21 @@
 	// Stable callback for compose content changes - avoids stale closure issues
 	function handleComposeChange(value: string) {
 		composeContent = value;
+		if (activeComposePath) {
+			composeContents = { ...composeContents, [activeComposePath]: value };
+		}
 		isDirty = true;
 		debouncedValidate();
+	}
+
+	function switchComposeFile(path: string) {
+		if (path === activeComposePath) return;
+		// Save current content before switching
+		if (activeComposePath) {
+			composeContents = { ...composeContents, [activeComposePath]: composeContent };
+		}
+		activeComposePath = path;
+		composeContent = composeContents[path] || '';
 	}
 
 	// Debounced validation to avoid too many API calls while typing. The live
@@ -916,6 +1065,17 @@
 
 	// Display title
 	const displayName = $derived(mode === 'edit' ? stackName : (newStackName || 'New stack'));
+
+	const composePathsLocked = $derived(readonly || (mode === 'edit' && !needsFileLocation));
+	const activeComposeDisplayPath = $derived(activeComposePath || workingComposePaths[0] || workingComposePath || '');
+
+	function shortGitUrl(url: string): string {
+		return url.replace(/^https?:\/\/(www\.)?github\.com\//, '').replace(/\.git$/, '');
+	}
+
+	function composeFileName(path: string): string {
+		return path.split('/').pop() || path;
+	}
 
 	onMount(() => {
 		// Load saved editor theme, or fall back to app theme / system preference
@@ -1046,6 +1206,8 @@
 					workingEnvPath = data.envPath || '';
 					// Show empty editors - user can browse for files
 					composeContent = '';
+					composeContents = {};
+					activeComposePath = workingComposePath || '';
 					rawEnvContent = '';
 					loadError = null;
 					loading = false; // Important: stop loading spinner
@@ -1092,10 +1254,28 @@
 				throw new Error((typeof data.error === 'string' ? data.error : data.message) || 'Failed to load compose file');
 			}
 
-			composeContent = data.content;
+			composeContent = data.content || '';
+			activeComposePath = data.composePath || '';
+			// Populate multi-file content map
+			if (data.composeContents) {
+				composeContents = data.composeContents;
+			} else {
+				composeContents = activeComposePath ? { [activeComposePath]: composeContent } : {};
+			}
 			// Set working paths
 			workingComposePath = data.composePath || '';
 			workingEnvPath = data.envPath || '';
+			// The compose endpoint returns resolved paths as an array; retain support
+			// for the persisted JSON string used by older responses.
+			if (Array.isArray(data.composePaths)) {
+				workingComposePaths = data.composePaths;
+			} else {
+				try {
+					workingComposePaths = data.composePaths ? JSON.parse(data.composePaths) : (workingComposePath ? [workingComposePath] : []);
+				} catch {
+					workingComposePaths = workingComposePath ? [workingComposePath] : [];
+				}
+			}
 			// Track original paths for detecting changes
 			originalComposePath = data.composePath || null;
 			originalEnvPath = data.envPath || null;
@@ -1265,6 +1445,9 @@
 			if (workingComposePath.trim()) {
 				requestBody.composePath = workingComposePath.trim();
 			}
+			if (workingComposePaths.length > 0) {
+				requestBody.composePaths = workingComposePaths;
+			}
 			// Use working env path or suggested path
 			const envPathToSave = workingEnvPath.trim() || suggestedEnvPath || '';
 			if (envPathToSave) {
@@ -1272,6 +1455,22 @@
 			}
 
 			requestBody.secretProviderId = formSecretProviderId;
+
+			// Include multi-file compose contents if present
+			if (Object.keys(composeContents).length > 0) {
+				// Ensure current editor content is reflected before saving
+				const contentsToSave = { ...composeContents };
+				if (activeComposePath) {
+					contentsToSave[activeComposePath] = composeContent;
+				}
+				requestBody.composeContents = contentsToSave;
+
+				// Prevent data loss: explicitly set primary compose content
+				const primaryPath = workingComposePath || (workingComposePaths && workingComposePaths.length > 0 ? workingComposePaths[0] : activeComposePath);
+				if (primaryPath && contentsToSave[primaryPath]) {
+					requestBody.compose = contentsToSave[primaryPath];
+				}
+			}
 
 			// Create the stack
 			response = await fetch(appendEnvParam('/api/stacks', envId), {
@@ -1385,6 +1584,9 @@
 			if (workingComposePath.trim()) {
 				requestBody.composePath = workingComposePath.trim();
 			}
+			if (workingComposePaths.length > 0) {
+				requestBody.composePaths = workingComposePaths;
+			}
 
 			// Include env path - empty string means "no env file", null/undefined means "use default"
 			if (envPathToSave) {
@@ -1405,6 +1607,22 @@
 			}
 
 			requestBody.secretProviderId = formSecretProviderId;
+
+			// Include multi-file compose contents if present
+			if (Object.keys(composeContents).length > 0) {
+				// Ensure current editor content is reflected before saving
+				const contentsToSave = { ...composeContents };
+				if (activeComposePath) {
+					contentsToSave[activeComposePath] = composeContent;
+				}
+				requestBody.composeContents = contentsToSave;
+
+				// Prevent data loss: explicitly set primary compose content
+				const primaryPath = workingComposePath || (workingComposePaths && workingComposePaths.length > 0 ? workingComposePaths[0] : activeComposePath);
+				if (primaryPath && contentsToSave[primaryPath]) {
+					requestBody.content = contentsToSave[primaryPath];
+				}
+			}
 
 			// Save env files BEFORE compose to ensure deploy reads fresh values
 			// Save raw content to .env file (non-secrets only, comments preserved)
@@ -1529,6 +1747,8 @@
 		rawEnvContent = '';
 		errors = {};
 		composeContent = '';
+		composeContents = {};
+		activeComposePath = '';
 		envVars = [];
 		envValidation = null;
 		isDirty = false;
@@ -1540,12 +1760,14 @@
 		operationError = null;
 		// Reset path state
 		workingComposePath = '';
+		workingComposePaths = [];
 		workingEnvPath = '';
 		originalComposePath = null;
 		originalEnvPath = null;
 		autoComputedComposePath = '';
 		pathSource = null;
 		browsedBaseDirectory = null;
+		stackNameUserEdited = false;
 		needsFileLocation = false;
 		stackContainers = [];
 		showFileBrowser = false;
@@ -1593,6 +1815,7 @@
 				composeContent = initialCompose || defaultCompose;
 				if (initialStackName) {
 					newStackName = initialStackName;
+					stackNameUserEdited = true;
 				}
 				isDirty = false; // Reset dirty flag for new modal
 				loading = false;
@@ -1660,6 +1883,7 @@
 		// No name entered yet - clear paths but preserve browsed state
 		if (!name) {
 			workingComposePath = '';
+			workingComposePaths = [];
 			workingEnvPath = '';
 			autoComputedComposePath = '';
 			if (!browsedBaseDirectory) {
@@ -1671,6 +1895,7 @@
 		// User browsed and selected a directory - build path from that base
 		if (browsedBaseDirectory) {
 			workingComposePath = `${browsedBaseDirectory}/${name}/compose.yaml`;
+			workingComposePaths = [workingComposePath];
 			workingEnvPath = `${browsedBaseDirectory}/${name}/.env`;
 			pathSource = 'browsed';
 			return;
@@ -1681,6 +1906,7 @@
 			const dir = `${defaultStackDir}/${name}`;
 			autoComputedComposePath = `${dir}/compose.yaml`;
 			workingComposePath = `${dir}/compose.yaml`;
+			workingComposePaths = [workingComposePath];
 			workingEnvPath = `${dir}/.env`;
 			pathSource = 'default';
 		}
@@ -1710,44 +1936,104 @@
 		class="max-w-none w-[calc(100vw-4rem)] h-[95vh] flex flex-col p-0 gap-0 shadow-xl border-zinc-200 dark:border-zinc-700"
 		showCloseButton={false}
 	>
-		<Dialog.Header class="px-5 py-3 border-b border-zinc-200 dark:border-zinc-700 flex-shrink-0">
-			<div class="flex items-center justify-between">
-				<div class="flex items-center gap-3">
-					<div class="flex items-center gap-2">
-						<div class="p-1.5 rounded-md bg-zinc-200 dark:bg-zinc-700">
-							<Layers class="w-4 h-4 text-zinc-600 dark:text-zinc-300" />
-						</div>
-						<div>
-							<Dialog.Title class="text-sm font-semibold text-zinc-800 dark:text-zinc-100">
-								{#if mode === 'create'}
-									Create compose stack
+		<Dialog.Header class="px-8 py-5 border-b border-zinc-200 dark:border-zinc-700 flex-shrink-0">
+			<div class="flex items-start justify-between gap-4">
+				<div class="flex items-start gap-3.5 min-w-0">
+					<div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-zinc-300 bg-zinc-100 text-primary dark:border-zinc-600 dark:bg-zinc-800">
+						<Layers class="h-5 w-5" />
+					</div>
+					<div class="min-w-0">
+						<Dialog.Title class="flex flex-wrap items-center gap-2 text-base font-semibold text-zinc-800 dark:text-zinc-100">
+							{displayName}
+							{#if mode === 'edit' && stackSource}
+								{#if stackSource.sourceType === 'git'}
+									<GitSourceBadge source={stackSource} showTooltip={false} />
+								{:else if stackSource.sourceType === 'internal'}
+									<span class="inline-flex items-center gap-1 rounded-sm bg-blue-100 px-1.5 py-0.5 text-[11px] font-medium text-blue-800 shadow-sm dark:bg-blue-900 dark:text-blue-200">
+										<FileCode class="h-3 w-3" />
+										Internal
+									</span>
 								{:else}
-									{stackName}
+									<span class="inline-flex items-center gap-1 rounded-sm bg-gray-100 px-1.5 py-0.5 text-[11px] font-medium text-gray-800 shadow-sm dark:bg-gray-800 dark:text-gray-200">
+										<ExternalLink class="h-3 w-3" />
+										Untracked
+									</span>
 								{/if}
-								{#if $currentEnvironment}
-									<span class="font-semibold">on <span class="text-amber-600 dark:text-amber-400">{$currentEnvironment.name}</span></span>
+							{/if}
+						</Dialog.Title>
+						<Dialog.Description class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+							{#if mode === 'create'}
+								Create a new Docker Compose stack
+							{:else if readonly}
+								Compose file and dependency graph
+							{:else}
+								Edit compose file and environment variables
+							{/if}
+						</Dialog.Description>
+						{#if readonly && gitInfo && (gitInfo.commit || gitInfo.url || gitInfo.branch)}
+							<div class="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-zinc-500 dark:text-zinc-400">
+								{#if gitInfo.commit}
+									<span class="group flex items-center gap-1.5 font-mono">
+										<GitCommitHorizontal class="h-3.5 w-3.5 shrink-0 opacity-70" />
+										<code>{gitInfo.commit}</code>
+										<button
+											type="button"
+											class="rounded p-0.5 opacity-0 transition-opacity hover:bg-zinc-200 group-hover:opacity-100 dark:hover:bg-zinc-700"
+											title="Copy commit hash"
+											onclick={() => copyText(gitInfo.commit ?? null, (v) => gitCommitCopied = v)}
+										>
+											{#if gitCommitCopied === 'ok'}<Check class="h-3 w-3 text-green-500" />{:else}<Copy class="h-3 w-3" />{/if}
+										</button>
+									</span>
 								{/if}
-							</Dialog.Title>
-							<Dialog.Description class="text-xs text-zinc-500 dark:text-zinc-400">
-								{#if mode === 'create'}
-									Create a new Docker Compose stack
-								{:else if readonly}
-									View compose file and dependency graph
-								{:else}
-									Edit compose file and environment variables
+								{#if gitInfo.url}
+									<span class="flex min-w-0 items-center gap-1.5">
+										<Github class="h-3.5 w-3.5 shrink-0 opacity-70" />
+										<a
+											href={gitInfo.url}
+											target="_blank"
+											rel="noopener noreferrer"
+											class="truncate hover:text-primary"
+										>
+											{shortGitUrl(gitInfo.url)}
+										</a>
+									</span>
 								{/if}
-							</Dialog.Description>
-						</div>
+								{#if gitInfo.branch}
+									<span class="flex items-center gap-1.5">
+										<GitBranch class="h-3.5 w-3.5 shrink-0 opacity-70" />
+										{gitInfo.branch}
+									</span>
+								{/if}
+							</div>
+						{/if}
 					</div>
 				</div>
 
-				<!-- Close button -->
-				<button
-					onclick={tryClose}
-					class="p-1.5 rounded-md text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
-				>
-					<X class="w-4 h-4" />
-				</button>
+				<div class="flex shrink-0 items-center gap-2">
+					{#if activeTab === 'editor'}
+						<button
+							type="button"
+							onclick={toggleEditorTheme}
+							class="flex h-8 w-8 items-center justify-center rounded-md border border-zinc-200 bg-zinc-50 text-zinc-500 transition-colors hover:border-zinc-300 hover:text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:hover:text-zinc-300"
+							title={editorTheme === 'light' ? 'Switch to dark theme' : 'Switch to light theme'}
+						>
+							{#if editorTheme === 'light'}
+								<Moon class="h-4 w-4" />
+							{:else}
+								<Sun class="h-4 w-4" />
+							{/if}
+						</button>
+					{/if}
+					<button
+						type="button"
+						onclick={tryClose}
+						class="flex h-8 w-8 items-center justify-center rounded-md border border-zinc-200 bg-zinc-50 text-zinc-500 transition-colors hover:border-zinc-300 hover:text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:hover:text-zinc-300"
+						title="Close"
+					>
+						<X class="h-4 w-4" />
+					</button>
+				</div>
 			</div>
 		</Dialog.Header>
 
@@ -1813,7 +2099,10 @@
 									bind:value={newStackName}
 									placeholder="my-stack"
 									class={errors.stackName ? 'border-destructive focus-visible:ring-destructive' : ''}
-									oninput={() => errors.stackName = undefined}
+									oninput={() => {
+										stackNameUserEdited = true;
+										errors.stackName = undefined;
+									}}
 								/>
 								{#if errors.stackName}
 									<p class="text-xs text-destructive">{errors.stackName}</p>
@@ -1853,166 +2142,183 @@
 				<!-- Content area -->
 				<div bind:this={containerRef} class="flex-1 min-h-0 flex flex-col {isDraggingSplit ? 'select-none' : ''}">
 					{#if activeTab === 'editor'}
-						<!-- Path bars row -->
-						<div class="flex items-center border-b border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/30">
-							{#if readonly}
-								<span class="ml-4 flex shrink-0 items-center gap-1 rounded-full border border-purple-500/30 bg-purple-500/10 px-2 py-0.5 text-2xs font-medium text-purple-600 dark:text-purple-400" title="This is a Git-managed stack — Dockhand shows its compose read-only; edit it in the repository.">
-									<GitBranch class="h-3 w-3" /> Git · read-only
-								</span>
-								{#if gitInfo && (gitInfo.commit || gitInfo.url || gitInfo.branch)}
-									<div class="ml-3 flex min-w-0 items-center gap-3 text-2xs text-muted-foreground">
-										{#if gitInfo.commit}
-											<span class="flex shrink-0 items-center gap-1">
-												<GitCommitHorizontal class="h-3.5 w-3.5 shrink-0 opacity-70" />
-												<code class="font-mono">{gitInfo.commit}</code>
-												<button type="button" class="rounded p-0.5 hover:bg-muted transition-colors" title="Copy commit hash" onclick={() => copyText(gitInfo.commit ?? null, (v) => gitCommitCopied = v)}>
-													{#if gitCommitCopied === 'ok'}<Check class="h-3 w-3 text-green-500" />{:else}<Copy class="h-3 w-3" />{/if}
-												</button>
-											</span>
-										{/if}
-										{#if gitInfo.url}
-											<span class="flex min-w-0 items-center gap-1">
-												<Github class="h-3.5 w-3.5 shrink-0 opacity-70" />
-												<span class="truncate">{gitInfo.url}</span>
-												<button type="button" class="rounded p-0.5 hover:bg-muted transition-colors shrink-0" title="Copy repository URL" onclick={() => copyText(gitInfo.url ?? null, (v) => gitUrlCopied = v)}>
-													{#if gitUrlCopied === 'ok'}<Check class="h-3 w-3 text-green-500" />{:else}<Copy class="h-3 w-3" />{/if}
-												</button>
-											</span>
-										{/if}
-										{#if gitInfo.branch}
-											<span class="flex shrink-0 items-center gap-1">
-												<GitBranch class="h-3.5 w-3.5 shrink-0 opacity-70" />
-												<span>{gitInfo.branch}</span>
-											</span>
-										{/if}
-									</div>
-								{/if}
-							{/if}
-							<!-- Compose path -->
-							<div class="flex-shrink-0 px-4 py-2" style="width: {splitRatio}%">
-								<PathBarItem
-									label="Compose file"
-									path={workingComposePath || null}
-									placeholder="/path/to/compose.yaml"
-									copied={composePathCopied}
-									onCopy={() => copyText(workingComposePath, (v) => composePathCopied = v)}
-									onBrowse={readonly ? undefined : openComposeBrowser}
-									onChangeLocation={mode === 'edit' && !needsFileLocation && !readonly ? openChangeLocationBrowser : undefined}
-									defaultText={mode === 'create' ? 'Enter stack name above' : 'Not specified'}
-									sourceHint={pathSourceHint}
-								/>
-							</div>
-							<!-- Divider spacer -->
-							<div class="w-1 flex-shrink-0"></div>
-							<!-- Env path -->
-							<div class="flex-1 min-w-0 px-4 py-2 bg-zinc-100/50 dark:bg-zinc-800/50">
-								<PathBarItem
-									label="Env file"
-									path={displayEnvPath || null}
-									selectedPath={workingEnvPath || suggestedEnvPath || ''}
-									placeholder="/path/to/.env (optional)"
-									copied={envPathCopied}
-									onCopy={() => copyText(displayEnvPath, (v) => envPathCopied = v)}
-									onBrowse={readonly ? undefined : openEnvBrowser}
-									isEditable={!readonly}
-									isCustom={!!workingEnvPath}
-									defaultText={mode === 'create' ? 'Enter stack name above' : 'Not specified'}
-									isSuggested={isEnvPathSuggested}
-									onPathChange={(value) => {
-										workingEnvPath = value;
-										isDirty = true;
-									}}
-								/>
-							</div>
-							<!-- Theme toggle -->
-							<div class="flex items-center px-2 shrink-0">
-								<button
-									onclick={toggleEditorTheme}
-									class="p-1 rounded text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
-									title={editorTheme === 'light' ? 'Switch to dark theme' : 'Switch to light theme'}
-								>
-									{#if editorTheme === 'light'}
-										<Moon class="w-3.5 h-3.5" />
-									{:else}
-										<Sun class="w-3.5 h-3.5" />
+						<div class="flex flex-1 min-h-0">
+							<!-- Compose panel -->
+							<div class="flex min-h-0 min-w-0 flex-shrink-0 flex-col" style="width: {splitRatio}%">
+								<div class="flex min-h-0 flex-1 flex-col px-8 py-6">
+									<div class="mb-3.5 flex flex-wrap items-center justify-between gap-3">
+										<div class="flex items-center gap-2 text-sm font-semibold text-zinc-800 dark:text-zinc-100">
+											<Code class="h-4 w-4 text-muted-foreground" />
+											Compose files
+											{#if workingComposePaths.length > 0}
+												<span class="text-xs font-normal text-muted-foreground">({workingComposePaths.length})</span>
+											{/if}
+										</div>
+									{#if mode === 'edit' && !readonly && !needsFileLocation}
+										<button type="button" class="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground" onclick={openChangeLocationBrowser}>
+											<FolderSync class="h-3.5 w-3.5" /> Relocate
+										</button>
 									{/if}
-								</button>
-							</div>
-						</div>
-						<!-- Editor panels row -->
-						<div class="flex-1 min-h-0 flex">
-							<!-- Compose editor panel -->
-							<div class="flex-shrink-0 flex flex-col min-w-0" style="width: {splitRatio}%">
-								{#if open}
-									<div class="flex-1 p-3 min-h-0">
-										{#if readonly && needsFileLocation && !composeContent}
-											<div class="h-full rounded-md border border-dashed border-zinc-300 dark:border-zinc-600 bg-zinc-50 dark:bg-zinc-800/30 flex flex-col items-center justify-center text-center px-8">
-												<GitGraph class="w-12 h-12 text-zinc-300 dark:text-zinc-600 mb-4" />
-												<h3 class="text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">Compose file not available</h3>
-												<p class="text-xs text-zinc-500 dark:text-zinc-400 max-w-sm">
-													Deploy or sync this Git stack first so Dockhand has a local copy of its compose file.
-												</p>
-											</div>
-										{:else if needsFileLocation && !composeContent}
-											<!-- Empty state for untracked stacks -->
-											<div class="h-full rounded-md border border-dashed border-zinc-300 dark:border-zinc-600 bg-zinc-50 dark:bg-zinc-800/30 flex flex-col items-center justify-center text-center px-8">
-												<FolderOpen class="w-12 h-12 text-zinc-300 dark:text-zinc-600 mb-4" />
-												<h3 class="text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">No compose file selected</h3>
-												<p class="text-xs text-zinc-500 dark:text-zinc-400 mb-4 max-w-sm">
-													Browse to locate the compose file for this stack. The editor will load the file contents once selected.
-												</p>
-												<Button variant="outline" size="sm" onclick={openComposeBrowser}>
-													<FolderOpen class="w-4 h-4" />
-													Browse for compose file
-												</Button>
-												<!-- Info box explaining what happens -->
-												<div class="mt-6 max-w-md flex items-start gap-2.5 text-xs bg-zinc-100 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-md px-3 py-2.5 text-left">
-													<Info class="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
-													<span><span class="font-medium text-amber-600 dark:text-amber-400">What happens when you select a file:</span> <span class="text-zinc-600 dark:text-zinc-400">Dockhand will track this compose file, letting you edit, start, and stop the stack from the UI. Your files stay in their current location.</span></span>
+									</div>
+
+									{#if !composePathsLocked}
+										<div class="mb-3 space-y-1.5 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-700 dark:bg-zinc-800/40">
+											{#each workingComposePaths as path, i}
+												{@const total = workingComposePaths.length}
+												{@const isDragging = dragIndex === i}
+												<div
+													class="flex min-w-0 items-center gap-1 overflow-hidden {isDragging ? 'opacity-40' : ''}"
+													draggable={mode === 'create' || needsFileLocation}
+													ondragstart={(e) => dragStart(e, i)}
+													ondragover={(e) => dragOver(e, i)}
+													ondrop={(e) => e.preventDefault()}
+													ondragend={dragEnd}
+												>
+													{#if total > 1}
+														<div class="flex shrink-0 flex-col -space-y-0.5">
+															<button type="button" title="Move up" disabled={i === 0} onclick={() => movePathUp(i)} class="p-0 hover:text-muted-foreground disabled:cursor-default disabled:opacity-30">
+																<ArrowUp class="h-3 w-3" />
+															</button>
+															<button type="button" title="Move down" disabled={i === total - 1} onclick={() => movePathDown(i)} class="p-0 hover:text-muted-foreground disabled:cursor-default disabled:opacity-30">
+																<ArrowDown class="h-3 w-3" />
+															</button>
+														</div>
+														<GripVertical class="h-3.5 w-3.5 shrink-0 cursor-grab text-muted-foreground/40" />
+													{/if}
+													<input
+														type="text"
+														bind:value={workingComposePaths[i]}
+														placeholder={i === 0 ? '/path/to/compose.yaml' : 'compose.override.yaml'}
+														class="min-w-0 flex-1 rounded border bg-background px-2 py-1 text-xs"
+														oninput={() => { if (i === 0) { workingComposePath = workingComposePaths[i]; } isDirty = true; }}
+													/>
+													<button type="button" onclick={() => browseForRow(i)} class="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted" title="Browse for file">
+														<FolderOpen class="h-3.5 w-3.5" />
+													</button>
+													{#if total > 1}
+														<button type="button" onclick={() => removeComposePath(i)} class="shrink-0 rounded p-1 text-muted-foreground hover:bg-red-100 hover:text-red-500 dark:hover:bg-red-900/30" title="Remove">
+															<X class="h-3.5 w-3.5" />
+														</button>
+													{/if}
 												</div>
-											</div>
-										{:else}
-											<div class="h-full flex flex-col">
-												<!-- Copy + Validate button row -->
-												<div class="flex justify-end items-center gap-1 mb-1">
-													<Button
-														variant="ghost"
-														size="sm"
-														class="h-6 px-2 text-xs text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
-														onclick={runComposeValidate}
-														disabled={!composeContent}
-														title="Check this compose for problems before deploy"
+											{:else}
+												<div class="flex items-center gap-1">
+													<input type="text" readonly placeholder={mode === 'create' ? 'Enter stack name above' : 'Not specified'} class="min-w-0 flex-1 rounded border bg-muted/50 px-2 py-1 text-xs text-muted-foreground" />
+													<button type="button" onclick={openComposeBrowser} class="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted" title="Browse for file">
+														<FolderOpen class="h-3.5 w-3.5" />
+													</button>
+												</div>
+											{/each}
+											{#if workingComposePaths.length > 0}
+												<button type="button" onclick={() => addComposePath()} class="inline-flex items-center gap-1 rounded border bg-muted px-2 py-0.5 text-xs text-muted-foreground hover:bg-muted/80">
+													+ Add compose file
+												</button>
+											{/if}
+										</div>
+									{/if}
+
+									{#if workingComposePaths.length > 0}
+										<div class="flex gap-0.5 overflow-x-auto border-b border-zinc-200 dark:border-zinc-700" role="tablist" aria-label="Compose files">
+											{#each workingComposePaths as path, i}
+												<div
+													role="tab"
+													tabindex={path === (activeComposePath || workingComposePaths[0]) ? 0 : -1}
+													aria-selected={path === (activeComposePath || workingComposePaths[0])}
+													onclick={() => switchComposeFile(path)}
+													onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); switchComposeFile(path); } }}
+													class="group flex shrink-0 cursor-pointer items-center gap-2 rounded-t-md border-b-2 px-3.5 py-2.5 font-mono text-xs transition-colors {path === (activeComposePath || workingComposePaths[0]) ? 'border-primary bg-zinc-50 text-foreground dark:bg-zinc-800/50' : 'border-transparent text-muted-foreground hover:bg-zinc-50 hover:text-foreground dark:hover:bg-zinc-800/30'}"
+												>
+													{composeFileName(path)}
+													<button
+														type="button"
+														class="rounded p-0.5 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100 {path === (activeComposePath || workingComposePaths[0]) ? 'opacity-100' : ''}"
+														title="Copy path"
+														onclick={(e) => { e.stopPropagation(); copyComposePathAtIndex(path, i); }}
 													>
-														{#if validateLoading}
-															<Loader2 class="w-3 h-3 animate-spin" />
+														{#if composePathCopied === 'ok' && composePathCopiedIndex === i}
+															<Check class="h-3 w-3 text-green-500" />
 														{:else}
-															<ListChecks class="w-3 h-3" />
+															<Copy class="h-3 w-3" />
 														{/if}
-														Validate
+													</button>
+												</div>
+											{/each}
+										</div>
+									{/if}
+
+									<div class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-zinc-200 bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900/40 {workingComposePaths.length > 0 ? 'rounded-t-none border-t-0' : ''}">
+										{#if open}
+											{#if loadError}
+												<div class="flex h-full flex-col items-center justify-center px-8 text-center">
+													<TriangleAlert class="mb-4 h-12 w-12 text-red-400" />
+													<h3 class="mb-2 text-sm font-medium text-red-700 dark:text-red-300">Failed to load compose file</h3>
+													<p class="max-w-sm break-all text-xs text-red-600 dark:text-red-400">{loadError}</p>
+												</div>
+											{:else if readonly && needsFileLocation && !composeContent}
+												<div class="flex h-full flex-col items-center justify-center px-8 text-center">
+													<GitGraph class="mb-4 h-12 w-12 text-zinc-300 dark:text-zinc-600" />
+													<h3 class="mb-2 text-sm font-medium text-zinc-700 dark:text-zinc-300">Compose file not available</h3>
+													<p class="max-w-sm text-xs text-zinc-500 dark:text-zinc-400">
+														Deploy or sync this Git stack first so Dockhand has a local copy of its compose file.
+													</p>
+												</div>
+											{:else if needsFileLocation && !composeContent}
+												<div class="flex h-full flex-col items-center justify-center px-8 text-center">
+													<FolderOpen class="mb-4 h-12 w-12 text-zinc-300 dark:text-zinc-600" />
+													<h3 class="mb-2 text-sm font-medium text-zinc-700 dark:text-zinc-300">No compose file selected</h3>
+													<p class="mb-4 max-w-sm text-xs text-zinc-500 dark:text-zinc-400">
+														Browse to locate the compose file for this stack.
+													</p>
+													<Button variant="outline" size="sm" onclick={openComposeBrowser}>
+														<FolderOpen class="h-4 w-4" />
+														Browse for compose file
 													</Button>
-													<Button
-														variant="ghost"
-														size="sm"
-														class="h-6 px-2 text-xs text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
-														onclick={() => copyText(composeContent, (v) => composeContentCopied = v)}
-														disabled={!composeContent}
-													>
-														{#if composeContentCopied === 'error'}
-															<Tooltip.Root open>
-																<Tooltip.Trigger>
-																	<XCircle class="w-3 h-3 text-red-500" />
-																</Tooltip.Trigger>
-																<Tooltip.Content>Copy requires HTTPS</Tooltip.Content>
-															</Tooltip.Root>
-															Failed
-														{:else if composeContentCopied === 'ok'}
-															<Check class="w-3 h-3 text-green-500" />
-															Copied
-														{:else}
-															<Copy class="w-3 h-3" />
-															Copy
-														{/if}
-													</Button>
+												</div>
+											{:else}
+												<div class="flex items-center justify-between gap-3 border-b border-zinc-200 bg-zinc-100/80 px-3.5 py-2 dark:border-zinc-700 dark:bg-zinc-800/60">
+													<span class="min-w-0 truncate font-mono text-[11px] text-muted-foreground" title={activeComposeDisplayPath}>
+														{activeComposeDisplayPath || 'No file selected'}
+													</span>
+													<div class="flex items-center gap-1">
+														<Button
+															variant="ghost"
+															size="sm"
+															class="h-7 shrink-0 px-2 text-xs text-muted-foreground"
+															onclick={runComposeValidate}
+															disabled={!composeContent}
+															title="Check this compose for problems before deploy"
+														>
+															{#if validateLoading}
+																<Loader2 class="w-3 h-3 animate-spin" />
+															{:else}
+																<ListChecks class="w-3 h-3" />
+															{/if}
+															Validate
+														</Button>
+														<Button
+															variant="ghost"
+															size="sm"
+															class="h-7 shrink-0 px-2 text-xs text-muted-foreground"
+															onclick={() => copyText(composeContent, (v) => composeContentCopied = v)}
+															disabled={!composeContent}
+														>
+															{#if composeContentCopied === 'error'}
+																<Tooltip.Root open>
+																	<Tooltip.Trigger>
+																		<XCircle class="w-3 h-3 text-red-500" />
+																	</Tooltip.Trigger>
+																	<Tooltip.Content>Copy requires HTTPS</Tooltip.Content>
+																</Tooltip.Root>
+																Failed
+															{:else if composeContentCopied === 'ok'}
+																<Check class="w-3 h-3 text-green-500" />
+																Copied
+															{:else}
+																<Copy class="w-3 h-3" />
+																Copy
+															{/if}
+														</Button>
+													</div>
 												</div>
 												<div bind:this={editorRowRef} class="flex-1 min-h-0 flex">
 													<CodeEditor
@@ -2025,7 +2331,7 @@
 														variableMarkers={variableMarkers}
 														lintMarkers={validateMarkers}
 														onLintClick={openValidateAtLine}
-														class="flex-1 min-w-0 rounded-md overflow-hidden border border-zinc-200 dark:border-zinc-700"
+														class="min-h-0 flex-1 overflow-hidden"
 													/>
 													{#if validatePanelOpen}
 														<!-- Resize handle -->
@@ -2055,11 +2361,12 @@
 														</div>
 													{/if}
 												</div>
-											</div>
+											{/if}
 										{/if}
 									</div>
-								{/if}
+								</div>
 							</div>
+
 							<!-- Resizable divider -->
 							<div
 								class="w-1 flex-shrink-0 bg-zinc-200 dark:bg-zinc-700 hover:bg-blue-400 dark:hover:bg-blue-500 cursor-col-resize transition-colors flex items-center justify-center group {isDraggingSplit ? 'bg-blue-500 dark:bg-blue-400' : ''}"
@@ -2068,34 +2375,75 @@
 								aria-orientation="vertical"
 								tabindex="0"
 							>
-								<div class="w-4 h-8 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity {isDraggingSplit ? 'opacity-100' : ''}">
-									<GripVertical class="w-3 h-3 text-white" />
+								<div class="flex h-8 w-4 items-center justify-center opacity-0 transition-opacity group-hover:opacity-100 {isDraggingSplit ? 'opacity-100' : ''}">
+									<GripVertical class="h-3 w-3 text-white" />
 								</div>
 							</div>
+
 							<!-- Environment variables panel -->
-							<div class="flex-1 min-w-0 flex flex-col overflow-hidden bg-zinc-50 dark:bg-zinc-800/50">
-								<SecretProviderPicker
-									bind:secretProviderId={formSecretProviderId}
-									bind:envVars
-									providers={secretProviders}
-									onchange={() => { markDirty(); debouncedValidate(); }}
-								/>
-								<StackEnvVarsPanel
-									bind:this={envVarsPanelRef}
-									bind:variables={envVars}
-									bind:rawContent={rawEnvContent}
-									validation={effectiveValidation}
-									existingSecretKeys={mode === 'edit' ? existingSecretKeys : new Set()}
-									injectedSecretKeys={mode === 'edit' ? injectedSecretKeys : []}
-									providerType={selectedProviderType}
-									providerName={selectedProviderName}
-									{probeError}
-									{providerKeySet}
-									{readonly}
-									onchange={() => { markDirty(); debouncedValidate(); }}
-									theme={editorTheme}
-									infoText="These variables will be written to a .env file in the stack directory and passed to the compose command."
-								/>
+							<div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+								<div class="flex min-h-0 flex-1 flex-col px-8 py-6">
+									<div class="mb-3.5 flex items-center justify-between gap-3">
+										<div class="flex items-center gap-2 text-sm font-semibold text-zinc-800 dark:text-zinc-100">
+											<FileText class="h-4 w-4 text-muted-foreground" />
+											Environment variables
+										</div>
+									</div>
+
+									<SecretProviderPicker
+										bind:secretProviderId={formSecretProviderId}
+										bind:envVars
+										providers={secretProviders}
+										onchange={() => { markDirty(); debouncedValidate(); }}
+									/>
+
+									<div class="mb-5 flex items-center gap-3 rounded-lg border border-zinc-200 bg-zinc-50 px-3.5 py-3 dark:border-zinc-700 dark:bg-zinc-800/40">
+										<FileText class="h-4 w-4 shrink-0 text-muted-foreground" />
+										<div class="min-w-0 flex-1">
+											<div class="text-[11px] text-muted-foreground">Env file</div>
+											<div class="truncate font-mono text-xs text-zinc-600 dark:text-zinc-300" title={displayEnvPath}>
+												{displayEnvPath || (mode === 'create' ? 'Enter stack name above' : 'Not specified')}
+											</div>
+										</div>
+										{#if !readonly}
+											<button type="button" onclick={openEnvBrowser} class="shrink-0 rounded p-1.5 text-muted-foreground hover:bg-zinc-200 dark:hover:bg-zinc-700" title="Browse for env file">
+												<FolderOpen class="h-3.5 w-3.5" />
+											</button>
+										{/if}
+										<button
+											type="button"
+											onclick={() => copyText(displayEnvPath, (v) => envPathCopied = v)}
+											class="shrink-0 rounded p-1.5 text-muted-foreground hover:bg-zinc-200 dark:hover:bg-zinc-700 {!displayEnvPath ? 'cursor-not-allowed opacity-40' : ''}"
+											title="Copy path"
+											disabled={!displayEnvPath}
+										>
+											{#if envPathCopied === 'ok'}
+												<Check class="h-3.5 w-3.5 text-green-500" />
+											{:else}
+												<Copy class="h-3.5 w-3.5" />
+											{/if}
+										</button>
+									</div>
+
+									<StackEnvVarsPanel
+										bind:this={envVarsPanelRef}
+										bind:variables={envVars}
+										bind:rawContent={rawEnvContent}
+										validation={effectiveValidation}
+										existingSecretKeys={mode === 'edit' ? existingSecretKeys : new Set()}
+										injectedSecretKeys={mode === 'edit' ? injectedSecretKeys : []}
+										providerType={selectedProviderType}
+										providerName={selectedProviderName}
+										{probeError}
+										{providerKeySet}
+										{readonly}
+										hideHeader
+										onchange={() => { markDirty(); debouncedValidate(); }}
+										theme={editorTheme}
+										infoText="These variables will be written to a .env file in the stack directory and passed to the compose command."
+										class="min-h-0 flex-1"
+									/>
+								</div>
 							</div>
 						</div>
 					{:else if activeTab === 'graph'}
@@ -2124,10 +2472,11 @@
 		</div>
 
 		<!-- Footer -->
-		<div class="px-5 py-2.5 border-t border-zinc-200 dark:border-zinc-700 flex items-center justify-between flex-shrink-0">
-			<div class="text-xs text-zinc-500 dark:text-zinc-400">
+		<div class="flex flex-shrink-0 items-center justify-between border-t border-zinc-200 px-8 py-3 dark:border-zinc-700">
+			<div class="flex min-w-0 items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
 				{#if readonly}
-					Read-only
+					<Lock class="h-3.5 w-3.5 shrink-0" />
+					<span>All files are synced from Git and read-only. Edit the compose files in your repository and redeploy to apply changes.</span>
 				{:else if isDirty}
 					<span class="text-amber-600 dark:text-amber-500">Unsaved changes</span>
 				{:else}
@@ -2366,5 +2715,7 @@
 	selectFilter={fileBrowserConfig.selectFilter}
 	selectMode={fileBrowserConfig.selectMode}
 	onSelect={fileBrowserConfig.onSelect}
+	multiSelect={fileBrowserConfig.multiSelect ?? false}
+	onSelectMany={fileBrowserConfig.onSelectMany}
 	onClose={() => showFileBrowser = false}
 />

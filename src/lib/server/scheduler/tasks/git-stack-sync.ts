@@ -11,6 +11,7 @@ import {
 	appendScheduleExecutionLog
 } from '../../db';
 import { deployGitStack } from '../../git';
+import { isStackMigrating } from '../../git-migration-guard';
 
 /**
  * Execute a git stack sync.
@@ -22,6 +23,16 @@ export async function runGitStackSync(
 	triggeredBy: ScheduleTrigger
 ): Promise<void> {
 	const startTime = Date.now();
+
+	// A per-stack migration is draining/provisioning this stack's clone and will
+	// rm -rf git-repos/stack-<id> at cutover: skip system-triggered syncs so a
+	// cron tick cannot re-clone the directory out from under the job. The
+	// migration drain has already waited for anything that was in flight before
+	// it started. Checked BEFORE the execution record is created.
+	if (await isStackMigrating(stackId)) {
+		console.log(`[Git-sync] Skipping stack "${stackName}": a git stack migration is in progress for it`);
+		return;
+	}
 
 	// Create execution record
 	const execution = await createScheduleExecution({

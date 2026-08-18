@@ -13201,6 +13201,60 @@
         ]
       }
     },
+    "/api/git/repositories/{id}/browse": {
+      "get": {
+        "operationId": "get_api_git_repositories_id_browse",
+        "tags": [
+          "git"
+        ],
+        "summary": "GET /api/git/repositories/{id}/browse (auto-generated — no @openapi annotation yet)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Path parameter \"id\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Query parameter \"path\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "400": {
+            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+          },
+          "403": {
+            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+          },
+          "404": {
+            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+          },
+          "500": {
+            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/git/repositories/{id}/deploy": {
       "post": {
         "operationId": "post_api_git_repositories_id_deploy",
@@ -13246,6 +13300,9 @@
           },
           "400": {
             "description": "The id path segment is not a valid integer"
+          },
+          "403": {
+            "description": "Caller lacks git:edit, or cannot deploy any of the repository's stacks' environments"
           },
           "404": {
             "description": "No repository exists with that ID"
@@ -13310,6 +13367,9 @@
           "400": {
             "description": "The id path segment is not a valid integer"
           },
+          "403": {
+            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+          },
           "404": {
             "description": "No repository exists with that ID"
           },
@@ -13370,6 +13430,9 @@
           },
           "400": {
             "description": "The id path segment is not a valid integer"
+          },
+          "403": {
+            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
           },
           "404": {
             "description": "No repository exists with that ID"
@@ -13433,6 +13496,9 @@
           },
           "400": {
             "description": "The id path segment is not a valid integer"
+          },
+          "403": {
+            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
           },
           "404": {
             "description": "No repository exists with that ID"
@@ -13839,6 +13905,9 @@
           "404": {
             "description": "No git stack exists with that ID"
           },
+          "409": {
+            "description": "This stack is currently being migrated to centralized mode"
+          },
           "500": {
             "description": "Failed to start the deployment"
           }
@@ -13895,6 +13964,9 @@
           },
           "404": {
             "description": "No git stack exists with that ID"
+          },
+          "409": {
+            "description": "This stack is currently being migrated to centralized mode"
           }
         },
         "security": [
@@ -14063,6 +14135,73 @@
         }
       }
     },
+    "/api/git/stacks/{id}/migrate": {
+      "post": {
+        "operationId": "post_api_git_stacks_id_migrate",
+        "tags": [
+          "git"
+        ],
+        "summary": "Migrate a single stack-model git stack to the centralized model",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "The git stack id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "started": {
+                      "type": "boolean"
+                    }
+                  }
+                },
+                "example": {
+                  "success": true,
+                  "started": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+          },
+          "403": {
+            "description": "Permission denied (needs stacks:edit)"
+          },
+          "404": {
+            "description": "Git stack not found"
+          },
+          "409": {
+            "description": "The stack is already centralized, is currently syncing, or a migration job is already running"
+          },
+          "500": {
+            "description": "Failed to start the migration"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/git/stacks/{id}/sync": {
       "post": {
         "operationId": "post_api_git_stacks_id_sync",
@@ -14111,6 +14250,9 @@
           },
           "404": {
             "description": "No git stack exists with that ID"
+          },
+          "409": {
+            "description": "This stack is currently being migrated to centralized mode"
           },
           "500": {
             "description": "The sync failed"
@@ -14255,7 +14397,7 @@
             "description": "No git stack exists with that ID"
           },
           "500": {
-            "description": "The deployment triggered by the webhook failed"
+            "description": "An unexpected server error occurred (not a failed deploy — that returns 200)"
           }
         },
         "security": []
@@ -14316,11 +14458,87 @@
             "description": "No git stack exists with that ID"
           },
           "500": {
-            "description": "The deployment triggered by the webhook failed"
+            "description": "An unexpected server error occurred (not a failed deploy — that returns 200)"
           }
         },
         "security": [],
-        "description": "Public endpoint authenticated by the stack's webhook secret via `X-Hub-Signature-256` (GitHub) or `X-Gitlab-Token` (GitLab); the raw request body is used for HMAC verification."
+        "description": "Public endpoint authenticated by the stack's webhook secret via `X-Hub-Signature-256` (GitHub) or `X-Gitlab-Token` (GitLab); the raw request body is used for HMAC verification. Stack-model deploys are synchronous: the deploy result is returned with HTTP 200 even on failure/skip (a 5xx would make the provider redeliver a skipped deploy in a loop)."
+      }
+    },
+    "/api/git/stacks/migrate-batch": {
+      "post": {
+        "operationId": "post_api_git_stacks_migrate-batch",
+        "tags": [
+          "git"
+        ],
+        "summary": "Migrate a set of stack-model git stacks to the centralized model in one job",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "started": {
+                      "type": "boolean"
+                    },
+                    "count": {
+                      "type": "integer"
+                    }
+                  }
+                },
+                "example": {
+                  "success": true,
+                  "started": true,
+                  "count": 0
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "stackIds is empty or not an array of numbers"
+          },
+          "403": {
+            "description": "Permission denied (needs stacks:edit)"
+          },
+          "409": {
+            "description": "A migration job is already running"
+          },
+          "500": {
+            "description": "Failed to start the migration"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "stackIds": {
+                    "type": "number"
+                  }
+                }
+              },
+              "example": {
+                "stackIds": 0
+              }
+            }
+          }
+        }
       }
     },
     "/api/git/webhook/{id}": {
@@ -22930,6 +23148,9 @@
           "200": {
             "description": "Successful response"
           },
+          "400": {
+            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+          },
           "403": {
             "description": "Permission denied (needs settings:edit)"
           },
@@ -25445,7 +25666,17 @@
           "stacks"
         ],
         "summary": "Return the default Dockhand stacks directory ($DATA_DIR/stacks/) where new stacks are stored by default",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "env",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Query parameter \"env\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful response",

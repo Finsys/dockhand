@@ -105,14 +105,14 @@
 
 <div class="space-y-3">
 	<!-- Variables List -->
-	<div class="space-y-3">
+	<div class="space-y-4">
 		{#each variables as variable, index (index)}
 			{@const source = getSource(variable.key)}
 			{@const isVarRequired = isRequired(variable.key)}
 			{@const isVarOptional = isOptional(variable.key)}
 			{@const isVarMissing = isMissing(variable.key)}
 			{@const isVarUnused = isUnused(variable.key)}
-			<div class="flex gap-2 items-center">
+			<div class="flex gap-2 items-center pt-1">
 				<!-- Source indicator (for git stacks) - always reserve space if showSource -->
 				{#if showSource}
 					<div class="flex items-center h-9 w-5 justify-center shrink-0">
@@ -181,24 +181,24 @@
 
 				<!-- Key Input with floating label -->
 				<div class="flex-1 relative">
-					<span class="absolute -top-2 left-2 text-2xs text-muted-foreground bg-background px-1">Name</span>
+					<span class="pointer-events-none absolute -top-2 left-2 z-10 bg-background px-1 text-2xs text-muted-foreground">Name</span>
 					<Input
 						bind:value={variable.key}
 						disabled={readonly}
 						oninput={() => onchange?.()}
-						class="h-9 font-mono text-xs"
+						class="h-9 pt-3 font-mono text-xs"
 					/>
 				</div>
 
 				<!-- Value Input with floating label -->
 				<div class="flex-1 relative">
-					<span class="absolute -top-2 left-2 text-2xs text-muted-foreground bg-background px-1">Value</span>
+					<span class="pointer-events-none absolute -top-2 left-2 z-10 bg-background px-1 text-2xs text-muted-foreground">Value</span>
 					<Input
 						bind:value={variable.value}
 						type={variable.isSecret ? 'password' : 'text'}
 						disabled={readonly}
 						oninput={() => onchange?.()}
-						class="h-9 font-mono text-xs"
+						class="h-9 pt-3 font-mono text-xs"
 					/>
 				</div>
 

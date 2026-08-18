@@ -1,6 +1,6 @@
 import { json } from '@sveltejs/kit';
 import { join } from 'path';
-import { getStackDir } from '$lib/server/stacks';
+import { getStackDir, isHawserConnection } from '$lib/server/stacks';
 import { getEnvironment } from '$lib/server/db';
 import type { RequestHandler } from './$types';
 
@@ -17,6 +17,15 @@ import type { RequestHandler } from './$types';
  * resp-200: {stackDir:string!, composePath:string!, envPath:string!, source:string!}
  * resp-200-example: {"stackDir":"/data/stacks/prod/web","composePath":"/data/stacks/prod/web/compose.yaml","envPath":"/data/stacks/prod/web/.env","source":"default"}
  * resp-400: Stack name is required
+ *
+ * Query params:
+ * - name: Stack name (required)
+ * - env: Environment ID (optional)
+ * - location: Custom base location path (optional)
+ *
+ * If location is provided, path will be: {location}/{envName}/{stackName}/
+ * Otherwise uses Dockhand's default via getStackDir (flat STACKS_DIR/<stackName>/
+ * for local envs when STACKS_DIR is set, else $DATA_DIR/stacks/<envName>/<stackName>/).
  */
 export const GET: RequestHandler = async ({ url }) => {
 	const stackName = url.searchParams.get('name');
@@ -29,6 +38,7 @@ export const GET: RequestHandler = async ({ url }) => {
 	}
 
 	let stackDir: string;
+	let source = 'default';
 
 	if (location) {
 		// Custom location: {location}/{envName}/{stackName}/
@@ -44,13 +54,23 @@ export const GET: RequestHandler = async ({ url }) => {
 		}
 	} else {
 		// Dockhand default location
-		stackDir = await getStackDir(stackName, envIdNum);
+		if (envIdNum) {
+			const env = await getEnvironment(envIdNum);
+			if (env && isHawserConnection(env) && env.hawserStacksDir) {
+				stackDir = join(env.hawserStacksDir, stackName);
+				source = 'hawser';
+			} else {
+				stackDir = await getStackDir(stackName, envIdNum);
+			}
+		} else {
+			stackDir = await getStackDir(stackName, envIdNum);
+		}
 	}
 
 	return json({
 		stackDir,
 		composePath: `${stackDir}/compose.yaml`,
 		envPath: `${stackDir}/.env`,
-		source: 'default'
+		source
 	});
 };

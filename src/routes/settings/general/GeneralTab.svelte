@@ -8,7 +8,7 @@
 	import { TogglePill, ToggleSwitch } from '$lib/components/ui/toggle-pill';
 	import CronEditor from '$lib/components/cron-editor.svelte';
 	import TimezoneSelector from '$lib/components/TimezoneSelector.svelte';
-	import { Eye, Bell, Database, Calendar, ShieldCheck, FileText, AlertTriangle, HelpCircle, Globe, Activity, Clock, Info, Save, RotateCcw, LayoutDashboard, Tags, Archive, ChevronRight, ChevronDown, Compass } from 'lucide-svelte';
+	import { Eye, Bell, Database, Calendar, ShieldCheck, FileText, AlertTriangle, HelpCircle, Globe, Activity, Clock, Info, Save, RotateCcw, LayoutDashboard, Tags, Archive, ChevronRight, ChevronDown, Compass, GitFork } from 'lucide-svelte';
 	import CodeEditor from '$lib/components/CodeEditor.svelte';
 	import { appSettings, type DateFormat, type DownloadFormat, type EventCollectionMode, type LabelFilterMode } from '$lib/stores/settings';
 	import { canAccess, authStore } from '$lib/stores/auth';
@@ -21,6 +21,7 @@
 	import SemverCheckConfig from '$lib/components/SemverCheckConfig.svelte';
 	import { onMount } from 'svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
+	import GitMigrationCard from './GitMigrationCard.svelte';
 
 	// General settings state - these derive from the store
 	let confirmDestructive = $derived($appSettings.confirmDestructive);
@@ -33,6 +34,24 @@
 	let showImageChangelogLinks = $derived($appSettings.showImageChangelogLinks);
 	let showWhatsNew = $derived($appSettings.showWhatsNew);
 	let timeFormat = $derived($appSettings.timeFormat);
+	let gitModeDesired = $derived($appSettings.gitRepositoryDesiredMode);
+	let gitModeForcedByEnv = $derived($appSettings.gitRepositoryModeForcedByEnv);
+	let gitModeSaving = $state(false);
+
+	// The global setting is a DEFAULT for NEW Git stacks — no fleet cutover, no
+	// destructive confirm. Existing stacks keep their model until migrated.
+	async function saveGitRepositoryDefault(mode: 'stack' | 'centralized'): Promise<void> {
+		gitModeSaving = true;
+		const res = await appSettings.saveGitRepositoryMode(mode);
+		gitModeSaving = false;
+		if (res.ok) {
+			toast.success(`Default for new Git stacks set to ${mode === 'centralized' ? 'centralized (shared clone)' : 'per-stack clones'}`);
+		} else if (res.status === 409) {
+			toast.error('A git migration is already in progress');
+		} else {
+			toast.error(res.error || 'Failed to change Git stack default');
+		}
+	}
 	let dateFormat = $derived($appSettings.dateFormat);
 	let downloadFormat = $derived($appSettings.downloadFormat);
 	let defaultGrypeArgs = $derived($appSettings.defaultGrypeArgs);
@@ -751,6 +770,46 @@ services:
 					{/if}
 				</Card.Content>
 			</Card.Root>
+
+			<Card.Root>
+				<Card.Header>
+					<Card.Title class="text-sm font-medium flex items-center gap-2">
+						<GitFork class="w-4 h-4" />
+						Git repositories
+					</Card.Title>
+					<p class="text-xs text-muted-foreground">Choose the Git model used for NEW stacks. Existing stacks keep their current model until you migrate them individually.</p>
+				</Card.Header>
+				<Card.Content class="space-y-3">
+					<div class="space-y-1">
+						<div class="flex items-center gap-3">
+							<Label>Centralized Git mode</Label>
+							<ToggleSwitch
+								value={gitModeDesired}
+								leftValue="stack"
+								rightValue="centralized"
+								leftLabel="Per-stack clone"
+								rightLabel="Centralized (shared clone)"
+								onchange={(value) => {
+									if (value === 'stack' || value === 'centralized') {
+										saveGitRepositoryDefault(value);
+									}
+								}}
+								disabled={!$canAccess('settings', 'edit') || gitModeForcedByEnv || gitModeSaving}
+							/>
+						</div>
+						<p class="text-xs text-muted-foreground">
+							New Git stacks will use a shared repository clone (centralized) or per-stack clones (stack). Existing stacks are unchanged until you migrate them, use the migrate action on a stack or the Git settings page.
+						</p>
+						{#if gitModeForcedByEnv}
+							<p class="text-xs text-amber-600">
+								This option is locked because the <code class="bg-muted px-1 rounded">DOCKHAND_GIT_CENTRALIZED_MODE</code> environment variable is set. It only sets the DEFAULT for new Git stacks, it does not migrate existing stacks (migrate them individually). To control the default from the UI, remove the <code class="bg-muted px-1 rounded">DOCKHAND_GIT_CENTRALIZED_MODE</code> variable and restart.
+							</p>
+						{/if}
+					</div>
+				</Card.Content>
+			</Card.Root>
+
+			<GitMigrationCard />
 
 		</div>
 

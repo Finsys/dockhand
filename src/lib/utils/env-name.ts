@@ -20,6 +20,17 @@
 // array-form spawn(), never in a shell-interpolated string.
 export const ENV_NAME_RE = /^(?! )[A-Za-z0-9_.\-()' +@](?:[A-Za-z0-9_.\-()' +@]{0,62}[A-Za-z0-9_\-)'+@])?$/;
 
+// Names reserved by the git-repos layout (git-paths.ts):
+//  - "shared" — the centralized namespace (git-repos/shared/<repo>). A stack
+//    clone for an env named "shared" would land in git-repos/shared/<stack>,
+//    mixing per-stack clones with shared clones, and cleanupStackCloneTrees
+//    skips the shared/ dir so those trees are never cleaned.
+//  - "stack-<n>" — the per-stack fallback layout (git-repos/stack-<id>);
+//    cleanupStackCloneTrees deletes any /^stack-\d+$/ entry, which would wipe
+//    this env's clone trees on the next enter-centralized cutover.
+export const RESERVED_ENV_NAMES = new Set(['shared']);
+export const RESERVED_ENV_NAME_RE = /^stack-\d+$/;
+
 export const ENV_NAME_MAX_LENGTH = 64;
 
 export interface ValidationResult {
@@ -42,6 +53,12 @@ export function validateEnvName(name: unknown): ValidationResult {
 			ok: false,
 			reason:
 				'Name can\'t contain slashes, wildcards, or other shell-special characters, and can\'t start with whitespace or end with whitespace or a dot'
+		};
+	}
+	if (RESERVED_ENV_NAMES.has(name) || RESERVED_ENV_NAME_RE.test(name)) {
+		return {
+			ok: false,
+			reason: 'This name is reserved for the git repository layout — pick a different one'
 		};
 	}
 	return { ok: true };

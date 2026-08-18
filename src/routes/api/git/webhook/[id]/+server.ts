@@ -1,14 +1,32 @@
-import { json, text } from '@sveltejs/kit';
+import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getGitRepository } from '$lib/server/db';
-import { deployFromRepository } from '$lib/server/git';
+import { getGitRepository, repositoryHasCentralizedStack, type GitRepository } from '$lib/server/db';
+import { triggerGitRepositorySyncFromWebhook } from '$lib/server/scheduler';
 import { auditGitRepository } from '$lib/server/audit';
-import { verifyWebhookSignature } from '$lib/server/webhook-signature';
+import { handleGitWebhookRequest, type GitWebhookHandlerOptions } from '$lib/server/git-webhook-handler';
+import { assertNotMigrating } from '$lib/server/git-migration-guard';
 
-function detectSource(request: Request): string {
-	if (request.headers.get('x-hub-signature-256')) return 'github';
-	if (request.headers.get('x-gitlab-token')) return 'gitlab';
-	return 'unknown';
+const options: GitWebhookHandlerOptions<GitRepository> = {
+	load: (id) => getGitRepository(id),
+	audit: async (event, id, repository, meta) => {
+		await auditGitRepository(event, 'webhook', id, repository.name, meta);
+	},
+	trigger: (id) => triggerGitRepositorySyncFromWebhook(id),
+	invalidIdMessage: 'Invalid repository ID',
+	notFoundMessage: 'Repository not found',
+	webhookDisabledMessage: 'Webhook is not enabled for this repository',
+	secretNotConfiguredMessage: 'Webhook secret is not configured for this repository',
+	successMessage: 'Repository sync triggered'
+};
+
+/** Repository-level webhooks are a centralized concept: only repos with at
+ * least one centralized-model stack have one (stack-model stacks use per-stack
+ * webhook URLs). */
+async function noCentralizedMembers(id: number): Promise<Response | null> {
+	if (!(await repositoryHasCentralizedStack(id))) {
+		return json({ error: 'Repository has no centralized stacks; webhooks are configured per stack' }, { status: 404 });
+	}
+	return null;
 }
 
 /**
@@ -23,59 +41,17 @@ function detectSource(request: Request): string {
  * resp-403: Webhooks are not enabled for this repository
  * resp-404: No repository exists with that ID
  * resp-500: The deployment triggered by the webhook failed
+ *
+ * Repository-level git webhook. See git-webhook-handler.ts for the shared flow.
  */
 export const POST: RequestHandler = async (event) => {
-	const { params, request } = event;
 	try {
-		const id = parseInt(params.id);
-		if (isNaN(id)) {
-			return json({ error: 'Invalid repository ID' }, { status: 400 });
-		}
-
-		const repository = await getGitRepository(id);
-		if (!repository) {
-			return json({ error: 'Repository not found' }, { status: 404 });
-		}
-
-		if (!repository.webhookEnabled) {
-			return json({ error: 'Webhook is not enabled for this repository' }, { status: 403 });
-		}
-
-		const source = detectSource(request);
-
-		// A secret is mandatory: reject if none is configured.
-		if (!repository.webhookSecret) {
-			await auditGitRepository(event, 'webhook', id, repository.name, {
-				method: 'POST', source, error: 'no_secret_configured'
-			});
-			return json({ error: 'Webhook secret is not configured for this repository' }, { status: 401 });
-		}
-
-		const payload = await request.text();
-		const githubSignature = request.headers.get('x-hub-signature-256');
-		const gitlabToken = request.headers.get('x-gitlab-token');
-
-		const signature = githubSignature || gitlabToken;
-
-		if (!verifyWebhookSignature(payload, signature, repository.webhookSecret)) {
-			await auditGitRepository(event, 'webhook', id, repository.name, {
-				method: 'POST', source, error: 'invalid_signature'
-			});
-			return json({ error: 'Invalid webhook signature' }, { status: 401 });
-		}
-
-		// Optionally check which branch was pushed (for GitHub)
-		// const body = await request.json();
-		// if (body.ref && body.ref !== `refs/heads/${repository.branch}`) {
-		//   return json({ message: 'Push was not to tracked branch, skipping' });
-		// }
-
-		// Deploy from repository
-		const result = await deployFromRepository(id);
-		await auditGitRepository(event, 'webhook', id, repository.name, {
-			method: 'POST', source, result: result.success ? 'deployed' : 'failed'
-		});
-		return json(result);
+		const id = parseInt(event.params.id ?? '');
+		const disabled = isNaN(id) ? null : await noCentralizedMembers(id);
+		if (disabled) return disabled;
+		const locked = isNaN(id) ? null : await assertNotMigrating([], [id]);
+		if (locked) return locked;
+		return await handleGitWebhookRequest(event, options);
 	} catch (error: any) {
 		console.error('Webhook error:', error);
 		return json({ success: false, error: error.message }, { status: 500 });
@@ -95,47 +71,18 @@ export const POST: RequestHandler = async (event) => {
  * resp-403: Webhooks are not enabled for this repository
  * resp-404: No repository exists with that ID
  * resp-500: The deployment triggered by the webhook failed
+ * 
+ * GET is kept for simple polling/manual triggers, verified by the webhook
+ * secret passed as the ?secret= query parameter.
  */
 export const GET: RequestHandler = async (event) => {
-	const { params, url } = event;
 	try {
-		const id = parseInt(params.id);
-		if (isNaN(id)) {
-			return json({ error: 'Invalid repository ID' }, { status: 400 });
-		}
-
-		const repository = await getGitRepository(id);
-		if (!repository) {
-			return json({ error: 'Repository not found' }, { status: 404 });
-		}
-
-		if (!repository.webhookEnabled) {
-			return json({ error: 'Webhook is not enabled for this repository' }, { status: 403 });
-		}
-
-		// A secret is mandatory (see POST handler). Reject if none is configured.
-		if (!repository.webhookSecret) {
-			await auditGitRepository(event, 'webhook', id, repository.name, {
-				method: 'GET', source: 'get', error: 'no_secret_configured'
-			});
-			return json({ error: 'Webhook secret is not configured for this repository' }, { status: 401 });
-		}
-
-		// Verify secret via query parameter for GET requests
-		const secret = url.searchParams.get('secret');
-		if (secret !== repository.webhookSecret) {
-			await auditGitRepository(event, 'webhook', id, repository.name, {
-				method: 'GET', source: 'get', error: 'invalid_secret'
-			});
-			return json({ error: 'Invalid webhook secret' }, { status: 401 });
-		}
-
-		// Deploy from repository
-		const result = await deployFromRepository(id);
-		await auditGitRepository(event, 'webhook', id, repository.name, {
-			method: 'GET', source: 'get', result: result.success ? 'deployed' : 'failed'
-		});
-		return json(result);
+		const id = parseInt(event.params.id ?? '');
+		const disabled = isNaN(id) ? null : await noCentralizedMembers(id);
+		if (disabled) return disabled;
+		const locked = isNaN(id) ? null : await assertNotMigrating([], [id]);
+		if (locked) return locked;
+		return await handleGitWebhookRequest(event, options);
 	} catch (error: any) {
 		console.error('Webhook GET error:', error);
 		return json({ success: false, error: error.message }, { status: 500 });

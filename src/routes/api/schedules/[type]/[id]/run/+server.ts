@@ -4,18 +4,18 @@
  * POST /api/schedules/[type]/[id]/run - Trigger a manual execution
  *
  * Path params:
- *   - type: 'container_update' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune'
+ *   - type: 'container_update' | 'git_repository_sync' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune' | 'backup' | 'repo_prune' | 'repo_check' | 'repo_verify'
  *   - id: schedule ID
  */
 
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { triggerContainerUpdate, triggerGitStackSync, triggerSystemJob, triggerEnvUpdateCheck, triggerImagePrune } from '$lib/server/scheduler';
-import { getBackupConfig, getBackupDestination } from '$lib/server/db';
+import { triggerContainerUpdate, triggerGitRepositorySync, triggerGitStackSync, triggerSystemJob, triggerEnvUpdateCheck, triggerImagePrune } from '$lib/server/scheduler';
+import { getBackupConfig, getBackupDestination, getAutoUpdateSettingById } from '$lib/server/db';
 import { runScheduledBackup } from '$lib/server/scheduler/tasks/backup';
 import { runRepoPrune, runRepoCheck, runRepoVerify } from '$lib/server/scheduler/tasks/repo-maintenance';
 import { authorize } from '$lib/server/authorize';
-import { getAutoUpdateSettingById, getGitStack } from '$lib/server/db';
+import { resolveGitScheduleTarget, isGitScheduleType } from '$lib/server/git-schedule-target';
 import { BACKUPS_ENABLED } from '$lib/server/features';
 
 /**
@@ -42,6 +42,16 @@ export const POST: RequestHandler = async ({ params, cookies }) => {
 			return json({ error: 'Invalid schedule ID' }, { status: 400 });
 		}
 
+		// Resolve git schedule targets by the target's own model (F12). For a
+		// deprecated git_stack_sync on a centralized-model stack the target is the
+		// repository; otherwise it is the stack row.
+		const gitTarget = isGitScheduleType(type)
+			? await resolveGitScheduleTarget(type, scheduleId)
+			: null;
+		if (isGitScheduleType(type) && !gitTarget) {
+			return json({ error: 'Schedule not found' }, { status: 404 });
+		}
+
 		// BETA GATE: backup-type schedules are unreachable unless FEAT_BACKUPS_ENABLED (see features.ts).
 		if (!BACKUPS_ENABLED && (type === 'backup' || type === 'repo_prune' || type === 'repo_check' || type === 'repo_verify')) {
 			return new Response('Not found', { status: 404 });
@@ -57,7 +67,7 @@ export const POST: RequestHandler = async ({ params, cookies }) => {
 		const destId = REPO_ID_OFFSET[type] ? scheduleId - REPO_ID_OFFSET[type] : scheduleId;
 
 		// Resolve schedule → environmentId so we can enforce per-env access
-		// before triggering. System schedules (env null) are gated only by
+		// before triggering. System/global schedules (env null) are gated only by
 		// the global schedules:run check above.
 		let scheduleEnvId: number | null = null;
 		switch (type) {
@@ -67,10 +77,14 @@ export const POST: RequestHandler = async ({ params, cookies }) => {
 				scheduleEnvId = setting.environmentId;
 				break;
 			}
+			case 'git_repository_sync': {
+				scheduleEnvId = null;
+				break;
+			}
 			case 'git_stack_sync': {
-				const stack = await getGitStack(scheduleId);
-				if (!stack) return json({ error: 'Schedule not found' }, { status: 404 });
-				scheduleEnvId = stack.environmentId;
+				// Stack-model: the stack-level task IS the schedule target.
+				// Centralized-model: deprecated alias — resolves to the repository.
+				scheduleEnvId = gitTarget?.kind === 'stack' ? gitTarget.entity.environmentId : null;
 				break;
 			}
 			case 'env_update_check':
@@ -111,9 +125,18 @@ export const POST: RequestHandler = async ({ params, cookies }) => {
 			case 'container_update':
 				result = await triggerContainerUpdate(scheduleId);
 				break;
-			case 'git_stack_sync':
-				result = await triggerGitStackSync(scheduleId);
+			case 'git_repository_sync':
+				result = await triggerGitRepositorySync(scheduleId);
 				break;
+			case 'git_stack_sync': {
+				if (!gitTarget) return json({ error: 'Schedule not found' }, { status: 404 });
+				if (gitTarget.kind === 'repository') {
+					result = await triggerGitRepositorySync(gitTarget.id);
+				} else {
+					result = await triggerGitStackSync(gitTarget.id);
+				}
+				break;
+			}
 			case 'system_cleanup':
 				result = await triggerSystemJob(id);
 				break;
@@ -155,7 +178,6 @@ export const POST: RequestHandler = async ({ params, cookies }) => {
 				break;
 			}
 			default:
-				// Unreachable — validated in the resolution switch above.
 				return json({ error: 'Invalid schedule type' }, { status: 400 });
 		}
 
@@ -163,7 +185,11 @@ export const POST: RequestHandler = async ({ params, cookies }) => {
 			return json({ error: result.error }, { status: 400 });
 		}
 
-		return json({ success: true, message: 'Schedule triggered successfully' });
+		return json({
+			success: true,
+			message: 'Schedule triggered successfully',
+			deprecated: type === 'git_stack_sync' && gitTarget?.kind === 'repository'
+		});
 	} catch (error: any) {
 		console.error('Failed to trigger schedule:', error);
 		return json({ error: error.message }, { status: 500 });

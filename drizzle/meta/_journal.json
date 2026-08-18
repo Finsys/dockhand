@@ -85,6 +85,13 @@
       "when": 1786892843482,
       "tag": "0011_pending_updates_semver",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1787030006975,
+      "tag": "0012_centralized_git",
+      "breakpoints": true
     }
   ]
 }

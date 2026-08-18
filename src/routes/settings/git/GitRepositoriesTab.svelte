@@ -4,6 +4,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import * as Card from '$lib/components/ui/card';
 	import { Badge } from '$lib/components/ui/badge';
+	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { Plus, Trash2, Pencil, GitBranch, FolderGit2, Plug, CheckCircle, XCircle, Loader2, Lock, Globe } from 'lucide-svelte';
 	import { forgeIcon } from '$lib/utils/git-forge';
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
@@ -24,6 +25,10 @@
 		branch: string;
 		credentialId: number | null;
 		credentialName?: string;
+		autoUpdate: boolean;
+		autoUpdateCron: string;
+		webhookEnabled: boolean;
+		webhookSecret: string | null;
 		createdAt: string;
 	}
 

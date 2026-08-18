@@ -4,7 +4,7 @@
  * GET /api/schedules/executions - Returns paginated execution history
  *
  * Query params:
- *   - scheduleType: 'container_update' | 'git_stack_sync'
+ *   - scheduleType: ScheduleType filter (e.g. 'container_update', 'git_repository_sync', 'git_stack_sync', 'backup', ...)
  *   - scheduleId: number
  *   - environmentId: number
  *   - status: 'queued' | 'running' | 'success' | 'warning' | 'failed' | 'skipped'

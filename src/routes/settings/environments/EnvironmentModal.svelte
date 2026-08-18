@@ -945,9 +945,9 @@
 		// - socket/direct: the deploy staging dir AND the in-app editor source
 		//   (containers' compose project labels point here, so redeploy is
 		//   required after rename or next restart fails)
-		// - hawser-standard/edge: the in-app editor source for ALL stacks
-		//   PLUS the git-repos clones for git stacks (the agent's deployed
-		//   dir lives on the remote host and is not affected)
+		// - hawser-standard/edge: the in-app editor staging source for stacks
+		//   (the agent's deployed dir lives on the remote host and is not affected)
+		// Git repository clones are shared per-repo under git-repos/<repoName>/.
 		// → fire the warning whenever the name changes.
 		const newName = formName.trim();
 		const willRenameOnDisk = newName !== environment.name;
@@ -3127,8 +3127,11 @@
 	</Dialog.Content>
 </Dialog.Root>
 
-<!-- Env-rename confirmation: only fires for socket/direct envs where the
-     server actually moves $DATA_DIR/stacks/<oldName> → <newName>. -->
+<!-- Env-rename confirmation: fires when the name changes. The server renames
+     env-scoped staging under $DATA_DIR/stacks/<oldName>. When STACKS_DIR is set
+     for local envs, deployed stack files stay at STACKS_DIR/<stackName>/ and are
+     not moved by an env rename. Shared git clones under git-repos/<repoName>/
+     are unaffected. -->
 <Dialog.Root bind:open={showRenameConfirm}>
 	<Dialog.Content class="max-w-2xl">
 		<Dialog.Header>
@@ -3137,17 +3140,13 @@
 				Rename environment?
 			</Dialog.Title>
 			<Dialog.Description class="pt-2 space-y-3 text-sm">
-				<p>The following directories will be moved on the Dockhand host:</p>
+				<p>The following staging directories will be moved on the Dockhand host (local deployed stacks under <code class="text-xs">STACKS_DIR</code>, when configured, are not renamed):</p>
 				<div class="space-y-1 text-xs font-mono bg-muted/40 rounded-md p-3 border overflow-x-auto">
 					<div class="flex items-center gap-2 whitespace-nowrap">
 						<code class="whitespace-nowrap">$DATA_DIR/stacks/{renameConfirmFrom}/</code>
 						<ArrowRight class="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
 						<code class="whitespace-nowrap">$DATA_DIR/stacks/{renameConfirmTo}/</code>
-					</div>
-					<div class="flex items-center gap-2 whitespace-nowrap">
-						<code class="whitespace-nowrap">$DATA_DIR/git-repos/{renameConfirmFrom}/</code>
-						<ArrowRight class="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
-						<code class="whitespace-nowrap">$DATA_DIR/git-repos/{renameConfirmTo}/</code>
+						<span class="text-muted-foreground shrink-0">(staging)</span>
 					</div>
 				</div>
 				{#if renameCountsUnknown}
@@ -3197,7 +3196,7 @@
 					<p>
 						Their containers run on the Hawser agent host, where the deploy
 						directory doesn't include the env name — those keep working without
-						a redeploy. Only the local editor source and git clone caches move.
+						a redeploy. Only the local editor staging directory is renamed.
 					</p>
 				{/if}
 			</Dialog.Description>

@@ -706,18 +706,20 @@
 					<p>
 						The environment
 						<code class="text-xs bg-muted px-1 py-0.5 rounded">{deleteEnvTarget.name}</code>
-						and the following directories will be permanently removed from the Dockhand host:
+						and the following directories will be permanently removed from the Dockhand host
+						(managed local stacks under <code class="text-xs">STACKS_DIR</code>, when configured, are removed per stack name):
 					</p>
 					<div class="space-y-1 text-xs font-mono bg-muted/40 rounded-md p-3 border overflow-x-auto">
 						<div class="flex items-center gap-2 whitespace-nowrap">
 							<Trash2 class="w-3.5 h-3.5 shrink-0 text-destructive" />
 							<code class="whitespace-nowrap">$DATA_DIR/stacks/{deleteEnvTarget.name}/</code>
-						</div>
-						<div class="flex items-center gap-2 whitespace-nowrap">
-							<Trash2 class="w-3.5 h-3.5 shrink-0 text-destructive" />
-							<code class="whitespace-nowrap">$DATA_DIR/git-repos/{deleteEnvTarget.name}/</code>
+							<span class="text-muted-foreground shrink-0">(staging)</span>
 						</div>
 					</div>
+					<p class="text-muted-foreground text-xs">
+						Shared git repository clones under <code class="text-xs">$DATA_DIR/git-repos/&lt;repoName&gt;/</code>
+						are not removed when an environment is deleted.
+					</p>
 					{#if deleteCountsLoading}
 						<p class="flex items-center gap-2">
 							<RefreshCw class="w-3.5 h-3.5 animate-spin" />

@@ -12,6 +12,8 @@ import { initCryptoFallback } from '$lib/server/crypto-fallback';
 import { detectHostDataDir } from '$lib/server/host-path';
 import { listContainers, removeContainer } from '$lib/server/docker';
 import { migrateCredentials } from '$lib/server/encryption';
+import { validateStacksDirAtStartup, migrateLocalStacksToStacksDir } from '$lib/server/stacks';
+import { ensureGitMigrationsResolved } from '$lib/server/git-stack-migrate';
 import { gzipSync } from 'node:zlib';
 import { rmSync, readdirSync, existsSync } from 'fs';
 import { join } from 'path';
@@ -143,7 +145,31 @@ if (!initialized) {
 		}
 
 		setServerStartTime(); // Track when server started
-		initDatabase();
+		try {
+			initDatabase();
+		} catch (error) {
+			console.error('Failed to initialize database:', error);
+			if (process.env.STACKS_DIR?.trim()) {
+				process.exit(1);
+			}
+		}
+
+		try {
+			validateStacksDirAtStartup();
+		} catch (error) {
+			console.error('Failed to initialize STACKS_DIR:', error);
+			process.exit(1);
+		}
+		const stacksDirReady = migrateLocalStacksToStacksDir().catch((err) => {
+			console.error('[StacksDir] Migration failed:', err);
+			process.exit(1);
+		});
+
+		// Resume an interrupted PER-STACK migration job only (never migrates
+		// stacks that were not selected).
+		const migrationReady = ensureGitMigrationsResolved().catch((err) => {
+			console.error('[GitStackMigrate] Boot migration resume failed:', err);
+		});
 
 		// Migrate plain text credentials to encrypted storage.
 		// This also handles key rotation if ENCRYPTION_KEY env var differs from the
@@ -175,9 +201,10 @@ if (!initialized) {
 			console.error('Failed to cleanup orphaned scanner containers:', err);
 		});
 		// Start background subprocesses and the scheduler only AFTER credential
-		// migration/rotation has settled, so a scheduled backup can't decrypt a
-		// destination password mid-rotation (new key against old-key ciphertext).
-		credentialsReady.then(() => {
+		// migration/rotation and git-mode resolution have settled, so a
+		// scheduled backup can't decrypt a destination password mid-rotation (new
+		// key against old-key ciphertext) or a sync hit mid-migration state.
+		Promise.all([credentialsReady, stacksDirReady, migrationReady]).then(() => {
 			startSubprocesses().catch(err => {
 				console.error('Failed to start background subprocesses:', err);
 			});
@@ -209,7 +236,10 @@ if (!initialized) {
 
 		initialized = true;
 	} catch (error) {
-		console.error('Failed to initialize database:', error);
+		console.error('Startup initialization failed:', error);
+		if (process.env.STACKS_DIR?.trim()) {
+			process.exit(1);
+		}
 	}
 }
 

@@ -5,8 +5,22 @@
 
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getAutoUpdateSettingById, updateAutoUpdateSettingById, getGitStack, updateGitStack, getEnvUpdateCheckSettings, setEnvUpdateCheckSettings, getImagePruneSettings, setImagePruneSettings, getBackupConfig, updateBackupConfig, getBackupDestination, updateBackupDestination } from '$lib/server/db';
+import {
+	getAutoUpdateSettingById,
+	updateAutoUpdateSettingById,
+	updateGitRepository,
+	updateGitStack,
+	getEnvUpdateCheckSettings,
+	setEnvUpdateCheckSettings,
+	getImagePruneSettings,
+	setImagePruneSettings,
+	getBackupConfig,
+	updateBackupConfig,
+	getBackupDestination,
+	updateBackupDestination
+} from '$lib/server/db';
 import { registerSchedule, unregisterSchedule } from '$lib/server/scheduler';
+import { resolveGitScheduleTarget, isGitScheduleType } from '$lib/server/git-schedule-target';
 import { authorize } from '$lib/server/authorize';
 import { auditBackup, auditBackupDestination } from '$lib/server/audit';
 
@@ -48,7 +62,6 @@ export const POST: RequestHandler = async (event) => {
 				enabled: newEnabled
 			});
 
-			// Register or unregister schedule with croner
 			if (newEnabled && setting.cronExpression) {
 				await registerSchedule(scheduleId, 'container_update', setting.environmentId);
 			} else {
@@ -56,29 +69,56 @@ export const POST: RequestHandler = async (event) => {
 			}
 
 			return json({ success: true, enabled: newEnabled });
-		} else if (type === 'git_stack_sync') {
-			const stack = await getGitStack(scheduleId);
-			if (!stack) {
+		} else if (isGitScheduleType(type)) {
+			// Git schedules resolve by the target's own model (F12):
+			// stack-model → per-stack git_stack_sync; centralized-model → per-repo
+			// git_repository_sync (git_stack_sync stays as a deprecated alias).
+			const target = await resolveGitScheduleTarget(type, scheduleId);
+			if (!target) {
 				return json({ error: 'Schedule not found' }, { status: 404 });
 			}
-			const envDenied = await auth.requireEnvAccess(stack.environmentId);
-			if (envDenied) return envDenied;
 
-			const newEnabled = !stack.autoUpdate;
-			await updateGitStack(scheduleId, {
-				autoUpdate: newEnabled
-			});
+			if (target.kind === 'stack') {
+				const envDenied = await auth.requireEnvAccess(target.entity.environmentId);
+				if (envDenied) return envDenied;
 
-			// Register or unregister schedule with croner
-			if (newEnabled && stack.autoUpdateCron) {
-				await registerSchedule(scheduleId, 'git_stack_sync', stack.environmentId);
-			} else {
-				unregisterSchedule(scheduleId, 'git_stack_sync');
+				const newEnabled = !target.entity.autoUpdate;
+				await updateGitStack(target.id, {
+					autoUpdate: newEnabled,
+					// Ensure autoUpdateSchedule is set so the schedule stays visible
+					// on the /schedules page even when paused (filtered by IS NOT NULL).
+					autoUpdateSchedule: target.entity.autoUpdateSchedule || 'custom'
+				});
+
+				if (newEnabled && target.entity.autoUpdateCron) {
+					await registerSchedule(target.id, 'git_stack_sync', target.entity.environmentId);
+				} else {
+					unregisterSchedule(target.id, 'git_stack_sync');
+				}
+
+				return json({ success: true, enabled: newEnabled });
 			}
 
-			return json({ success: true, enabled: newEnabled });
+			const newEnabled = !target.entity.autoUpdate;
+			await updateGitRepository(target.id, {
+				autoUpdate: newEnabled,
+				// Ensure autoUpdateSchedule is set so the schedule stays visible
+				// on the /schedules page even when paused (filtered by IS NOT NULL).
+				autoUpdateSchedule: target.entity.autoUpdateSchedule || 'custom'
+			});
+
+			if (newEnabled && target.entity.autoUpdateCron) {
+				await registerSchedule(target.id, 'git_repository_sync', null);
+			} else {
+				unregisterSchedule(target.id, 'git_repository_sync');
+			}
+
+			return json({
+				success: true,
+				enabled: newEnabled,
+				...(type === 'git_stack_sync' ? { deprecated: true, repositoryId: target.id } : {})
+			});
 		} else if (type === 'env_update_check') {
-			// scheduleId is environmentId for env update check
 			const envDenied = await auth.requireEnvAccess(scheduleId);
 			if (envDenied) return envDenied;
 			const config = await getEnvUpdateCheckSettings(scheduleId);
@@ -92,7 +132,6 @@ export const POST: RequestHandler = async (event) => {
 				enabled: newEnabled
 			});
 
-			// Register or unregister schedule with croner
 			if (newEnabled && config.cron) {
 				await registerSchedule(scheduleId, 'env_update_check', scheduleId);
 			} else {
@@ -101,7 +140,6 @@ export const POST: RequestHandler = async (event) => {
 
 			return json({ success: true, enabled: newEnabled });
 		} else if (type === 'image_prune') {
-			// scheduleId is environmentId for image prune
 			const envDenied = await auth.requireEnvAccess(scheduleId);
 			if (envDenied) return envDenied;
 			const config = await getImagePruneSettings(scheduleId);
@@ -115,7 +153,6 @@ export const POST: RequestHandler = async (event) => {
 				enabled: newEnabled
 			});
 
-			// Register or unregister schedule with croner
 			if (newEnabled && config.cronExpression) {
 				await registerSchedule(scheduleId, 'image_prune', scheduleId);
 			} else {

@@ -142,9 +142,10 @@
 		scanResult?: ScanResult;
 	}
 
-	// Details for git_stack_sync schedule type
+	// Details for git_stack_sync / git_repository_sync schedule types
 	interface GitStackSyncDetails {
 		output?: string;
+		stacks?: Array<{ id?: number; name?: string; status: string; error?: string }>;
 	}
 
 	// Details for system_cleanup schedule type
@@ -163,7 +164,7 @@
 
 	interface ScheduleExecution {
 		id: number;
-		scheduleType: 'container_update' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune' | 'backup' | 'repo_prune' | 'repo_check' | 'repo_verify';
+		scheduleType: 'container_update' | 'git_stack_sync' | 'git_repository_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune' | 'backup' | 'repo_prune' | 'repo_check' | 'repo_verify';
 		scheduleId: number;
 		environmentId: number | null;
 		entityName: string;
@@ -182,7 +183,7 @@
 	interface Schedule {
 		key: string; // Unique key: type-id
 		id: number;
-		type: 'container_update' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune' | 'backup' | 'repo_prune' | 'repo_check' | 'repo_verify';
+		type: 'container_update' | 'git_stack_sync' | 'git_repository_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune' | 'backup' | 'repo_prune' | 'repo_check' | 'repo_verify';
 		name: string;
 		entityName: string;
 		description?: string;
@@ -961,8 +962,8 @@
 						{:else if filterTypes.length === 1}
 							{#if filterTypes[0] === 'container_update'}
 								Container updates
-							{:else if filterTypes[0] === 'git_stack_sync'}
-								Git stack syncs
+							{:else if filterTypes[0] === 'git_repository_sync' || filterTypes[0] === 'git_stack_sync'}
+								Git repository syncs
 							{:else if filterTypes[0] === 'env_update_check'}
 								Env update checks
 							{:else if filterTypes[0] === 'image_prune'}
@@ -997,9 +998,9 @@
 						<CircleArrowUp class="w-4 h-4 mr-2 inline text-green-500 drop-shadow-[0_0_3px_rgba(34,197,94,0.4)]" />
 						Container updates
 					</Select.Item>
-					<Select.Item value="git_stack_sync">
+					<Select.Item value="git_repository_sync">
 						<GitBranch class="w-4 h-4 mr-2 inline text-purple-500 drop-shadow-[0_0_3px_rgba(168,85,247,0.4)]" />
-						Git stack syncs
+						Git repository syncs
 					</Select.Item>
 					<Select.Item value="env_update_check">
 						<CircleFadingArrowUp class="w-4 h-4 mr-2 inline text-green-500/50 drop-shadow-[0_0_3px_rgba(34,197,94,0.3)]" />
@@ -1205,7 +1206,7 @@
 				<div class="flex flex-wrap items-center gap-2">
 					{#if schedule.type === 'container_update'}
 						<CircleArrowUp class="w-4 h-4 text-green-500 glow-green shrink-0" />
-					{:else if schedule.type === 'git_stack_sync'}
+					{:else if schedule.type === 'git_repository_sync'}
 						<GitBranch class="w-4 h-4 text-emerald-500 shrink-0" />
 					{:else if schedule.type === 'env_update_check'}
 						{#if schedule.autoUpdate}
@@ -1246,8 +1247,8 @@
 								{:else}
 									Check & auto-update
 								{/if}
-							{:else if schedule.type === 'git_stack_sync'}
-								Git sync
+							{:else if schedule.type === 'git_repository_sync'}
+								Git repository sync
 							{:else if schedule.type === 'env_update_check'}
 								{#if schedule.autoUpdate && schedule.envHasScanning && schedule.vulnerabilityCriteria}
 									{@const criteria = schedule.vulnerabilityCriteria as VulnerabilityCriteria}
@@ -1577,7 +1578,7 @@
 			<div class="flex flex-col items-center justify-center py-16 text-muted-foreground gap-2">
 				<Calendar class="w-12 h-12" />
 				<p>No schedules found</p>
-				<p class="text-xs">Enable auto-update on containers or auto-sync on git stacks to see them here</p>
+				<p class="text-xs">Enable auto-update on containers or auto-sync on git repositories to see them here</p>
 			</div>
 		{/snippet}
 	</DataGrid>
@@ -1590,7 +1591,7 @@
 			<Dialog.Title class="flex items-center gap-2">
 				{#if selectedExecution?.scheduleType === 'container_update'}
 					<CircleArrowUp class="w-5 h-5 text-green-500 glow-green" />
-				{:else if selectedExecution?.scheduleType === 'git_stack_sync'}
+				{:else if selectedExecution?.scheduleType === 'git_repository_sync' || selectedExecution?.scheduleType === 'git_stack_sync'}
 					<GitBranch class="w-5 h-5 text-emerald-500" />
 				{:else if selectedExecution?.scheduleType === 'env_update_check'}
 					{#if selectedExecution?.details?.autoUpdate}
@@ -1604,7 +1605,7 @@
 				Execution details
 				{#if selectedExecution}
 					<span class="text-muted-foreground font-normal">
-						({#if selectedExecution.scheduleType === 'container_update'}Container update{:else if selectedExecution.scheduleType === 'env_update_check'}Environment update{:else if selectedExecution.scheduleType === 'git_stack_sync'}Git stack sync{:else if selectedExecution.scheduleType === 'backup'}Backup{:else if selectedExecution.scheduleType === 'repo_prune'}Repo prune{:else if selectedExecution.scheduleType === 'repo_check'}Repo check{:else if selectedExecution.scheduleType === 'repo_verify'}Data verify{:else}System job{/if})
+					({#if selectedExecution.scheduleType === 'container_update'}Container update{:else if selectedExecution.scheduleType === 'env_update_check'}Environment update{:else if selectedExecution.scheduleType === 'git_repository_sync' || selectedExecution.scheduleType === 'git_stack_sync'}Git repository sync{:else if selectedExecution.scheduleType === 'backup'}Backup{:else if selectedExecution.scheduleType === 'repo_prune'}Repo prune{:else if selectedExecution.scheduleType === 'repo_check'}Repo check{:else if selectedExecution.scheduleType === 'repo_verify'}Data verify{:else}System job{/if})
 					</span>
 				{/if}
 			</Dialog.Title>
@@ -1629,6 +1630,37 @@
 						blocked={selectedExecution.details.blocked ?? 0}
 						failed={selectedExecution.details.failed ?? 0}
 					/></div>
+				{/if}
+
+				<!-- Stack summary for git_repository_sync -->
+				{#if selectedExecution.scheduleType === 'git_repository_sync' && ((selectedExecution.details as GitStackSyncDetails | null)?.stacks?.length ?? 0) > 0}
+					<div class="shrink-0">
+						<div class="text-xs text-muted-foreground mb-1.5">Stack sync results</div>
+						<div class="bg-muted/50 border border-border/50 rounded-lg max-h-48 overflow-auto">
+							<div class="divide-y divide-border/50">
+								{#each (selectedExecution.details as GitStackSyncDetails | null)?.stacks ?? [] as stack}
+									<div class="flex items-center justify-between gap-3 p-2.5 text-xs">
+										<div class="flex items-center gap-2 min-w-0">
+											{#if stack.status === 'deployed'}
+												<Check class="w-3.5 h-3.5 text-green-500 shrink-0" />
+											{:else if stack.status === 'failed'}
+												<X class="w-3.5 h-3.5 text-destructive shrink-0" />
+											{:else}
+												<Minus class="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+											{/if}
+											<span class="font-medium truncate">{stack.name || stack.id}</span>
+											{#if stack.error}
+												<span class="text-destructive truncate shrink-0 ml-2">- {stack.error}</span>
+											{/if}
+										</div>
+										<Badge variant={stack.status === 'deployed' ? 'default' : stack.status === 'failed' ? 'destructive' : 'secondary'} class="capitalize shrink-0">
+											{stack.status}
+										</Badge>
+									</div>
+								{/each}
+							</div>
+						</div>
+					</div>
 				{/if}
 
 				<!-- Blocked containers list (scrollable) -->

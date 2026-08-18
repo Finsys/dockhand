@@ -25,6 +25,7 @@ const SENSITIVE_FIELDS = new Set([
 	'hawserToken',
 	'token',
 	'secret',
+	'webhookSecret',
 	'apiKey'
 ]);
 
@@ -39,6 +40,7 @@ const MASKED_FIELDS = new Set([
 	'hawserToken',
 	'token',
 	'secret',
+	'webhookSecret',
 	'apiKey'
 ]);
 

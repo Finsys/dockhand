@@ -43,6 +43,7 @@ import {
 	gitStacks,
 	secretProviders,
 	stackSources,
+	gitMigrationState,
 	vulnerabilityScans,
 	auditLogs,
 	containerEvents,
@@ -89,6 +90,7 @@ import { encrypt, decrypt, decryptStrict, isEncrypted } from './encryption.js';
 import { parseEnvInterpolation } from './env-interpolation';
 import { parseInjectedSecretKeys, serializeInjectedSecretKeys } from './stack-secret-keys';
 import { invalidateVulnerabilitiesCache } from './vulnerabilities-cache';
+import { filterStackModel, filterReposWithCentralizedMember } from '../utils/git-model-routing';
 
 // Re-export for backwards compatibility
 export { db, isPostgres, isSqlite };
@@ -489,6 +491,73 @@ export async function listSettingsByPrefix(prefix: string): Promise<Array<{ key:
 		try { value = JSON.parse(r.value); } catch { value = r.value; }
 		return { key: r.key, value };
 	});
+}
+
+// =============================================================================
+// GIT STACK MIGRATION STATE (per-stack, single-row table)
+// =============================================================================
+
+// Terminal outcome is `idle` (with `error` set on failure) — the migrate job
+// never emits `failed`, so the 409 lock can never wedge on a stale state.
+export type GitMigrationPhase = 'idle' | 'draining' | 'provisioning' | 'cutting_over';
+
+export interface GitMigrationStateRow {
+	state: GitMigrationPhase;
+	jobId: string | null;
+	stackIds: string | null; // JSON array of migrating stack ids
+	snapshot: string | null;
+	error: string | null;
+	startedAt: string | null;
+	finishedAt: string | null;
+}
+
+/**
+ * Read the single-row per-stack migration job state. Returns null when the
+ * table is empty (equivalent to an idle job).
+ */
+export async function getGitMigrationState(): Promise<GitMigrationStateRow | null> {
+	const rows = await db.select().from(gitMigrationState).limit(1);
+	if (!rows[0]) return null;
+	const row = rows[0];
+	return {
+		state: (row.state as GitMigrationPhase) ?? 'idle',
+		jobId: row.jobId,
+		stackIds: row.stackIds,
+		snapshot: row.snapshot,
+		error: row.error,
+		startedAt: row.startedAt,
+		finishedAt: row.finishedAt
+	};
+}
+
+/**
+ * Insert-or-update the single-row per-stack migration job. Only non-undefined
+ * fields are written, so callers can update a subset.
+ */
+export async function updateGitMigrationState(data: {
+	state?: GitMigrationPhase;
+	jobId?: string | null;
+	stackIds?: string | null;
+	snapshot?: string | null;
+	error?: string | null;
+	startedAt?: string | null;
+	finishedAt?: string | null;
+}): Promise<void> {
+	const existing = await db.select().from(gitMigrationState).limit(1);
+	const updates: Record<string, any> = { updatedAt: new Date().toISOString() };
+	if (data.state !== undefined) updates.state = data.state;
+	if (data.jobId !== undefined) updates.jobId = data.jobId;
+	if (data.stackIds !== undefined) updates.stackIds = data.stackIds;
+	if (data.snapshot !== undefined) updates.snapshot = data.snapshot;
+	if (data.error !== undefined) updates.error = data.error;
+	if (data.startedAt !== undefined) updates.startedAt = data.startedAt;
+	if (data.finishedAt !== undefined) updates.finishedAt = data.finishedAt;
+
+	if (existing[0]) {
+		await db.update(gitMigrationState).set(updates).where(eq(gitMigrationState.id, existing[0].id));
+	} else {
+		await db.insert(gitMigrationState).values(updates);
+	}
 }
 
 export async function getEnvSetting(key: string, envId?: number): Promise<any> {
@@ -2156,8 +2225,8 @@ export interface GitRepositoryData {
 	credentialId: number | null;
 	environmentId: number | null;
 	autoUpdate: boolean;
-	autoUpdateSchedule: 'daily' | 'weekly' | 'custom';
-	autoUpdateCron: string;
+	autoUpdateSchedule: 'daily' | 'weekly' | 'custom' | null;
+	autoUpdateCron: string | null;
 	webhookEnabled: boolean;
 	webhookSecret: string | null;
 	lastSync: string | null;
@@ -2240,8 +2309,8 @@ export async function createGitRepository(data: {
 		credentialId: data.credentialId || null,
 		environmentId: data.environmentId || null,
 		autoUpdate: data.autoUpdate || false,
-		autoUpdateSchedule: data.autoUpdateSchedule || 'daily',
-		autoUpdateCron: data.autoUpdateCron || '0 3 * * *',
+		autoUpdateSchedule: data.autoUpdate ? (data.autoUpdateSchedule || 'daily') : null,
+		autoUpdateCron: data.autoUpdate ? (data.autoUpdateCron || '0 3 * * *') : null,
 		webhookEnabled: data.webhookEnabled || false,
 		webhookSecret: data.webhookSecret || null
 	}).returning();
@@ -2261,7 +2330,14 @@ export async function updateGitRepository(id: number, data: Partial<GitRepositor
 	if (data.autoUpdateSchedule !== undefined) updateData.autoUpdateSchedule = data.autoUpdateSchedule;
 	if (data.autoUpdateCron !== undefined) updateData.autoUpdateCron = data.autoUpdateCron;
 	if (data.webhookEnabled !== undefined) updateData.webhookEnabled = data.webhookEnabled;
-	if (data.webhookSecret !== undefined) updateData.webhookSecret = data.webhookSecret;
+	// Disabling the webhook clears the stored secret (defense in depth — the
+	// UI also sends null, but an API client disabling with only the flag
+	// should not leave a stale secret behind for a later re-enable).
+	if (data.webhookEnabled === false) {
+		updateData.webhookSecret = null;
+	} else if (data.webhookSecret !== undefined) {
+		updateData.webhookSecret = data.webhookSecret;
+	}
 	if (data.lastSync !== undefined) updateData.lastSync = data.lastSync;
 	if (data.lastCommit !== undefined) updateData.lastCommit = data.lastCommit;
 	if (data.syncStatus !== undefined) updateData.syncStatus = data.syncStatus;
@@ -2271,11 +2347,12 @@ export async function updateGitRepository(id: number, data: Partial<GitRepositor
 	return getGitRepository(id);
 }
 
-export async function getGitStacksByRepositoryId(repositoryId: number): Promise<Array<{ id: number; stackName: string; environmentId: number | null }>> {
+export async function getGitStacksByRepositoryId(repositoryId: number): Promise<Array<{ id: number; stackName: string; environmentId: number | null; engine: 'stack' | 'centralized' }>> {
 	return db.select({
 		id: gitStacks.id,
 		stackName: gitStacks.stackName,
-		environmentId: gitStacks.environmentId
+		environmentId: gitStacks.environmentId,
+		engine: gitStacks.engine
 	}).from(gitStacks).where(eq(gitStacks.repositoryId, repositoryId));
 }
 
@@ -2295,22 +2372,27 @@ export interface GitStackData {
 	environmentId: number | null;
 	repositoryId: number;
 	composePath: string;
+	composePaths: string | null;
 	envFilePath: string | null;
-	autoUpdate: boolean;
-	autoUpdateSchedule: 'daily' | 'weekly' | 'custom';
-	autoUpdateCron: string;
-	webhookEnabled: boolean;
-	webhookSecret: string | null;
 	contextDir: string | null;
 	buildOnDeploy: boolean;
 	noBuildCache: boolean;
 	repullImages: boolean;
 	forceRedeploy: boolean;
+	webhookEnabled: boolean;
+	webhookSecret: string | null;
+	engine: 'stack' | 'centralized';
+	// Stack-level scheduled sync — deprecated (repo-level in centralized mode)
+	// but the columns are preserved for downgrade compatibility and used by the
+	// stack git engine.
+	autoUpdate?: boolean;
+	autoUpdateSchedule?: string | null;
+	autoUpdateCron?: string | null;
 	lastSync: string | null;
 	lastCommit: string | null;
 	syncStatus: GitSyncStatus;
 	syncError: string | null;
-	syncedFiles?: string | null; // JSON manifest { commit, files: { relPath: sha256 } } from last successful deploy
+	syncedFiles?: string | null;
 	createdAt: string;
 	updatedAt: string;
 }
@@ -2325,6 +2407,20 @@ export interface GitStackWithRepo extends GitStackData {
 	};
 }
 
+/** Returns all git stacks using the given model ('stack' | 'centralized'). */
+export async function getGitStacksByModel(model: 'stack' | 'centralized'): Promise<GitStackWithRepo[]> {
+	return (await getGitStacks()).filter((s) => s.engine === model);
+}
+
+/** True when the repository has at least one centralized-model git stack. */
+export async function repositoryHasCentralizedStack(repositoryId: number): Promise<boolean> {
+	const rows = await db.select({ id: gitStacks.id })
+		.from(gitStacks)
+		.where(and(eq(gitStacks.repositoryId, repositoryId), eq(gitStacks.engine, 'centralized')))
+		.limit(1);
+	return rows.length > 0;
+}
+
 export async function getGitStacks(environmentId?: number): Promise<GitStackWithRepo[]> {
 	let rows;
 	if (environmentId !== undefined) {
@@ -2334,17 +2430,19 @@ export async function getGitStacks(environmentId?: number): Promise<GitStackWith
 			environmentId: gitStacks.environmentId,
 			repositoryId: gitStacks.repositoryId,
 			composePath: gitStacks.composePath,
+			composePaths: gitStacks.composePaths,
 			envFilePath: gitStacks.envFilePath,
-			autoUpdate: gitStacks.autoUpdate,
-			autoUpdateSchedule: gitStacks.autoUpdateSchedule,
-			autoUpdateCron: gitStacks.autoUpdateCron,
-			webhookEnabled: gitStacks.webhookEnabled,
-			webhookSecret: gitStacks.webhookSecret,
 			contextDir: gitStacks.contextDir,
 			buildOnDeploy: gitStacks.buildOnDeploy,
 			noBuildCache: gitStacks.noBuildCache,
 			repullImages: gitStacks.repullImages,
 			forceRedeploy: gitStacks.forceRedeploy,
+			webhookEnabled: gitStacks.webhookEnabled,
+			webhookSecret: gitStacks.webhookSecret,
+			engine: gitStacks.engine,
+			autoUpdate: gitStacks.autoUpdate,
+			autoUpdateSchedule: gitStacks.autoUpdateSchedule,
+			autoUpdateCron: gitStacks.autoUpdateCron,
 			lastSync: gitStacks.lastSync,
 			lastCommit: gitStacks.lastCommit,
 			syncStatus: gitStacks.syncStatus,
@@ -2367,17 +2465,19 @@ export async function getGitStacks(environmentId?: number): Promise<GitStackWith
 			environmentId: gitStacks.environmentId,
 			repositoryId: gitStacks.repositoryId,
 			composePath: gitStacks.composePath,
+			composePaths: gitStacks.composePaths,
 			envFilePath: gitStacks.envFilePath,
-			autoUpdate: gitStacks.autoUpdate,
-			autoUpdateSchedule: gitStacks.autoUpdateSchedule,
-			autoUpdateCron: gitStacks.autoUpdateCron,
-			webhookEnabled: gitStacks.webhookEnabled,
-			webhookSecret: gitStacks.webhookSecret,
 			contextDir: gitStacks.contextDir,
 			buildOnDeploy: gitStacks.buildOnDeploy,
 			noBuildCache: gitStacks.noBuildCache,
 			repullImages: gitStacks.repullImages,
 			forceRedeploy: gitStacks.forceRedeploy,
+			webhookEnabled: gitStacks.webhookEnabled,
+			webhookSecret: gitStacks.webhookSecret,
+			engine: gitStacks.engine,
+			autoUpdate: gitStacks.autoUpdate,
+			autoUpdateSchedule: gitStacks.autoUpdateSchedule,
+			autoUpdateCron: gitStacks.autoUpdateCron,
 			lastSync: gitStacks.lastSync,
 			lastCommit: gitStacks.lastCommit,
 			syncStatus: gitStacks.syncStatus,
@@ -2400,17 +2500,19 @@ export async function getGitStacks(environmentId?: number): Promise<GitStackWith
 		environmentId: row.environmentId,
 		repositoryId: row.repositoryId,
 		composePath: row.composePath,
+		composePaths: row.composePaths ?? null,
 		envFilePath: row.envFilePath,
-		autoUpdate: row.autoUpdate,
-		autoUpdateSchedule: row.autoUpdateSchedule,
-		autoUpdateCron: row.autoUpdateCron,
-		webhookEnabled: row.webhookEnabled,
-		webhookSecret: row.webhookSecret,
 		contextDir: row.contextDir ?? null,
 		buildOnDeploy: row.buildOnDeploy ?? false,
 		noBuildCache: row.noBuildCache ?? false,
 		repullImages: row.repullImages ?? false,
 		forceRedeploy: row.forceRedeploy ?? false,
+		webhookEnabled: row.webhookEnabled ?? false,
+		webhookSecret: row.webhookSecret ?? null,
+		engine: row.engine ?? 'stack',
+		autoUpdate: row.autoUpdate ?? false,
+		autoUpdateSchedule: row.autoUpdateSchedule ?? null,
+		autoUpdateCron: row.autoUpdateCron ?? null,
 		lastSync: row.lastSync,
 		lastCommit: row.lastCommit,
 		syncStatus: row.syncStatus,
@@ -2427,6 +2529,88 @@ export async function getGitStacks(environmentId?: number): Promise<GitStackWith
 	})) as GitStackWithRepo[];
 }
 
+// =============================================================================
+// STACK-LEVEL AUTO-SYNC & WEBHOOK QUERY FUNCTIONS (stack mode)
+// =============================================================================
+
+/**
+ * Returns all git stacks with stack-level autoUpdate=true AND engine='stack'.
+ * Centralized-model stacks sync at the repository level (git_repository_sync),
+ * so they must never re-register git_stack_sync (fleet backfill does not clear
+ * the stack-level column). The model filter is the pure filterStackModel.
+ */
+export async function getEnabledAutoUpdateGitStacks(): Promise<GitStackWithRepo[]> {
+	const rows = await db.select({
+		id: gitStacks.id,
+		stackName: gitStacks.stackName,
+		environmentId: gitStacks.environmentId,
+		repositoryId: gitStacks.repositoryId,
+		composePath: gitStacks.composePath,
+		composePaths: gitStacks.composePaths,
+		envFilePath: gitStacks.envFilePath,
+		contextDir: gitStacks.contextDir,
+		buildOnDeploy: gitStacks.buildOnDeploy,
+		noBuildCache: gitStacks.noBuildCache,
+		repullImages: gitStacks.repullImages,
+		forceRedeploy: gitStacks.forceRedeploy,
+		webhookEnabled: gitStacks.webhookEnabled,
+		webhookSecret: gitStacks.webhookSecret,
+		engine: gitStacks.engine,
+		lastSync: gitStacks.lastSync,
+		lastCommit: gitStacks.lastCommit,
+		syncStatus: gitStacks.syncStatus,
+		syncError: gitStacks.syncError,
+		createdAt: gitStacks.createdAt,
+		updatedAt: gitStacks.updatedAt,
+		repoName: gitRepositories.name,
+		repoUrl: gitRepositories.url,
+		repoBranch: gitRepositories.branch,
+		repoCredentialId: gitRepositories.credentialId
+	})
+		.from(gitStacks)
+		.innerJoin(gitRepositories, eq(gitStacks.repositoryId, gitRepositories.id))
+		.where(eq(gitStacks.autoUpdate, true));
+
+	return filterStackModel(rows.map((row: any) => ({
+		id: row.id,
+		stackName: row.stackName,
+		environmentId: row.environmentId,
+		repositoryId: row.repositoryId,
+		composePath: row.composePath,
+		composePaths: row.composePaths ?? null,
+		envFilePath: row.envFilePath,
+		contextDir: row.contextDir ?? null,
+		buildOnDeploy: row.buildOnDeploy ?? false,
+		noBuildCache: row.noBuildCache ?? false,
+		repullImages: row.repullImages ?? false,
+		forceRedeploy: row.forceRedeploy ?? false,
+		webhookEnabled: row.webhookEnabled ?? false,
+		webhookSecret: row.webhookSecret ?? null,
+		engine: row.engine ?? 'stack',
+		lastSync: row.lastSync,
+		lastCommit: row.lastCommit,
+		syncStatus: row.syncStatus,
+		syncError: row.syncError,
+		createdAt: row.createdAt,
+		updatedAt: row.updatedAt,
+		repository: {
+			id: row.repositoryId,
+			name: row.repoName,
+			url: row.repoUrl,
+			branch: row.repoBranch,
+			credentialId: row.repoCredentialId
+		}
+	})) as GitStackWithRepo[]);
+}
+
+/**
+ * Returns all git stacks with stack-level autoUpdate=true AND engine='stack'
+ * (no filters beyond the model — an alias of getEnabledAutoUpdateGitStacks).
+ */
+export async function getAllAutoUpdateGitStacks(): Promise<GitStackWithRepo[]> {
+	return getEnabledAutoUpdateGitStacks();
+}
+
 // Get git stacks for a specific environment only (excludes stacks with null environment)
 export async function getGitStacksForEnvironmentOnly(environmentId: number): Promise<GitStackWithRepo[]> {
 	const rows = await db.select({
@@ -2435,17 +2619,19 @@ export async function getGitStacksForEnvironmentOnly(environmentId: number): Pro
 		environmentId: gitStacks.environmentId,
 		repositoryId: gitStacks.repositoryId,
 		composePath: gitStacks.composePath,
+		composePaths: gitStacks.composePaths,
 		envFilePath: gitStacks.envFilePath,
-		autoUpdate: gitStacks.autoUpdate,
-		autoUpdateSchedule: gitStacks.autoUpdateSchedule,
-		autoUpdateCron: gitStacks.autoUpdateCron,
-		webhookEnabled: gitStacks.webhookEnabled,
-		webhookSecret: gitStacks.webhookSecret,
 		contextDir: gitStacks.contextDir,
 		buildOnDeploy: gitStacks.buildOnDeploy,
 		noBuildCache: gitStacks.noBuildCache,
 		repullImages: gitStacks.repullImages,
 		forceRedeploy: gitStacks.forceRedeploy,
+		webhookEnabled: gitStacks.webhookEnabled,
+		webhookSecret: gitStacks.webhookSecret,
+		engine: gitStacks.engine,
+		autoUpdate: gitStacks.autoUpdate,
+		autoUpdateSchedule: gitStacks.autoUpdateSchedule,
+		autoUpdateCron: gitStacks.autoUpdateCron,
 		lastSync: gitStacks.lastSync,
 		lastCommit: gitStacks.lastCommit,
 		syncStatus: gitStacks.syncStatus,
@@ -2468,17 +2654,19 @@ export async function getGitStacksForEnvironmentOnly(environmentId: number): Pro
 		environmentId: row.environmentId,
 		repositoryId: row.repositoryId,
 		composePath: row.composePath,
+		composePaths: row.composePaths ?? null,
 		envFilePath: row.envFilePath,
-		autoUpdate: row.autoUpdate,
-		autoUpdateSchedule: row.autoUpdateSchedule,
-		autoUpdateCron: row.autoUpdateCron,
-		webhookEnabled: row.webhookEnabled,
-		webhookSecret: row.webhookSecret,
 		contextDir: row.contextDir ?? null,
 		buildOnDeploy: row.buildOnDeploy ?? false,
 		noBuildCache: row.noBuildCache ?? false,
 		repullImages: row.repullImages ?? false,
 		forceRedeploy: row.forceRedeploy ?? false,
+		webhookEnabled: row.webhookEnabled ?? false,
+		webhookSecret: row.webhookSecret ?? null,
+		engine: row.engine ?? 'stack',
+		autoUpdate: row.autoUpdate ?? false,
+		autoUpdateSchedule: row.autoUpdateSchedule ?? null,
+		autoUpdateCron: row.autoUpdateCron ?? null,
 		lastSync: row.lastSync,
 		lastCommit: row.lastCommit,
 		syncStatus: row.syncStatus,
@@ -2502,17 +2690,19 @@ export async function getGitStack(id: number): Promise<GitStackWithRepo | null> 
 		environmentId: gitStacks.environmentId,
 		repositoryId: gitStacks.repositoryId,
 		composePath: gitStacks.composePath,
+		composePaths: gitStacks.composePaths,
 		envFilePath: gitStacks.envFilePath,
-		autoUpdate: gitStacks.autoUpdate,
-		autoUpdateSchedule: gitStacks.autoUpdateSchedule,
-		autoUpdateCron: gitStacks.autoUpdateCron,
-		webhookEnabled: gitStacks.webhookEnabled,
-		webhookSecret: gitStacks.webhookSecret,
 		contextDir: gitStacks.contextDir,
 		buildOnDeploy: gitStacks.buildOnDeploy,
 		noBuildCache: gitStacks.noBuildCache,
 		repullImages: gitStacks.repullImages,
 		forceRedeploy: gitStacks.forceRedeploy,
+		webhookEnabled: gitStacks.webhookEnabled,
+		webhookSecret: gitStacks.webhookSecret,
+		engine: gitStacks.engine,
+		autoUpdate: gitStacks.autoUpdate,
+		autoUpdateSchedule: gitStacks.autoUpdateSchedule,
+		autoUpdateCron: gitStacks.autoUpdateCron,
 		lastSync: gitStacks.lastSync,
 		lastCommit: gitStacks.lastCommit,
 		syncStatus: gitStacks.syncStatus,
@@ -2537,17 +2727,19 @@ export async function getGitStack(id: number): Promise<GitStackWithRepo | null> 
 		environmentId: row.environmentId,
 		repositoryId: row.repositoryId,
 		composePath: row.composePath,
+		composePaths: row.composePaths ?? null,
 		envFilePath: row.envFilePath,
-		autoUpdate: row.autoUpdate,
-		autoUpdateSchedule: row.autoUpdateSchedule,
-		autoUpdateCron: row.autoUpdateCron,
-		webhookEnabled: row.webhookEnabled,
-		webhookSecret: row.webhookSecret,
 		contextDir: row.contextDir ?? null,
 		buildOnDeploy: row.buildOnDeploy ?? false,
 		noBuildCache: row.noBuildCache ?? false,
 		repullImages: row.repullImages ?? false,
 		forceRedeploy: row.forceRedeploy ?? false,
+		webhookEnabled: row.webhookEnabled ?? false,
+		webhookSecret: row.webhookSecret ?? null,
+		engine: row.engine ?? 'stack',
+		autoUpdate: row.autoUpdate ?? false,
+		autoUpdateSchedule: row.autoUpdateSchedule ?? null,
+		autoUpdateCron: row.autoUpdateCron ?? null,
 		lastSync: row.lastSync,
 		lastCommit: row.lastCommit,
 		syncStatus: row.syncStatus,
@@ -2572,17 +2764,16 @@ export async function getGitStackByName(stackName: string, environmentId?: numbe
 		environmentId: gitStacks.environmentId,
 		repositoryId: gitStacks.repositoryId,
 		composePath: gitStacks.composePath,
+		composePaths: gitStacks.composePaths,
 		envFilePath: gitStacks.envFilePath,
-		autoUpdate: gitStacks.autoUpdate,
-		autoUpdateSchedule: gitStacks.autoUpdateSchedule,
-		autoUpdateCron: gitStacks.autoUpdateCron,
-		webhookEnabled: gitStacks.webhookEnabled,
-		webhookSecret: gitStacks.webhookSecret,
 		contextDir: gitStacks.contextDir,
 		buildOnDeploy: gitStacks.buildOnDeploy,
 		noBuildCache: gitStacks.noBuildCache,
 		repullImages: gitStacks.repullImages,
 		forceRedeploy: gitStacks.forceRedeploy,
+		webhookEnabled: gitStacks.webhookEnabled,
+		webhookSecret: gitStacks.webhookSecret,
+		engine: gitStacks.engine,
 		lastSync: gitStacks.lastSync,
 		lastCommit: gitStacks.lastCommit,
 		syncStatus: gitStacks.syncStatus,
@@ -2611,17 +2802,16 @@ export async function getGitStackByName(stackName: string, environmentId?: numbe
 		environmentId: row.environmentId,
 		repositoryId: row.repositoryId,
 		composePath: row.composePath,
+		composePaths: row.composePaths ?? null,
 		envFilePath: row.envFilePath,
-		autoUpdate: row.autoUpdate,
-		autoUpdateSchedule: row.autoUpdateSchedule,
-		autoUpdateCron: row.autoUpdateCron,
-		webhookEnabled: row.webhookEnabled,
-		webhookSecret: row.webhookSecret,
 		contextDir: row.contextDir ?? null,
 		buildOnDeploy: row.buildOnDeploy ?? false,
 		noBuildCache: row.noBuildCache ?? false,
 		repullImages: row.repullImages ?? false,
 		forceRedeploy: row.forceRedeploy ?? false,
+		webhookEnabled: row.webhookEnabled ?? false,
+		webhookSecret: row.webhookSecret ?? null,
+		engine: row.engine ?? 'stack',
 		lastSync: row.lastSync,
 		lastCommit: row.lastCommit,
 		syncStatus: row.syncStatus,
@@ -2638,128 +2828,78 @@ export async function getGitStackByName(stackName: string, environmentId?: numbe
 	} as GitStackWithRepo;
 }
 
-export async function getGitStackByWebhookSecret(secret: string): Promise<GitStackWithRepo | null> {
-	const rows = await db.select({
-		id: gitStacks.id,
-		stackName: gitStacks.stackName,
-		environmentId: gitStacks.environmentId,
-		repositoryId: gitStacks.repositoryId,
-		composePath: gitStacks.composePath,
-		envFilePath: gitStacks.envFilePath,
-		autoUpdate: gitStacks.autoUpdate,
-		autoUpdateSchedule: gitStacks.autoUpdateSchedule,
-		autoUpdateCron: gitStacks.autoUpdateCron,
-		webhookEnabled: gitStacks.webhookEnabled,
-		webhookSecret: gitStacks.webhookSecret,
-		contextDir: gitStacks.contextDir,
-		buildOnDeploy: gitStacks.buildOnDeploy,
-		noBuildCache: gitStacks.noBuildCache,
-		repullImages: gitStacks.repullImages,
-		forceRedeploy: gitStacks.forceRedeploy,
-		lastSync: gitStacks.lastSync,
-		lastCommit: gitStacks.lastCommit,
-		syncStatus: gitStacks.syncStatus,
-		syncError: gitStacks.syncError,
-		createdAt: gitStacks.createdAt,
-		updatedAt: gitStacks.updatedAt,
-		repoName: gitRepositories.name,
-		repoUrl: gitRepositories.url,
-		repoBranch: gitRepositories.branch,
-		repoCredentialId: gitRepositories.credentialId
-	})
-		.from(gitStacks)
-		.innerJoin(gitRepositories, eq(gitStacks.repositoryId, gitRepositories.id))
-		.where(and(eq(gitStacks.webhookSecret, secret), eq(gitStacks.webhookEnabled, true)));
-
-	if (!rows[0]) return null;
-	const row = rows[0];
-	return {
-		id: row.id,
-		stackName: row.stackName,
-		environmentId: row.environmentId,
-		repositoryId: row.repositoryId,
-		composePath: row.composePath,
-		envFilePath: row.envFilePath,
-		autoUpdate: row.autoUpdate,
-		autoUpdateSchedule: row.autoUpdateSchedule,
-		autoUpdateCron: row.autoUpdateCron,
-		webhookEnabled: row.webhookEnabled,
-		webhookSecret: row.webhookSecret,
-		contextDir: row.contextDir ?? null,
-		buildOnDeploy: row.buildOnDeploy ?? false,
-		noBuildCache: row.noBuildCache ?? false,
-		repullImages: row.repullImages ?? false,
-		forceRedeploy: row.forceRedeploy ?? false,
-		lastSync: row.lastSync,
-		lastCommit: row.lastCommit,
-		syncStatus: row.syncStatus,
-		syncError: row.syncError,
-		createdAt: row.createdAt,
-		updatedAt: row.updatedAt,
-		repository: {
-			id: row.repositoryId,
-			name: row.repoName,
-			url: row.repoUrl,
-			branch: row.repoBranch,
-			credentialId: row.repoCredentialId
-		}
-	} as GitStackWithRepo;
-}
 
 export async function createGitStack(data: {
 	stackName: string;
 	environmentId?: number | null;
 	repositoryId: number;
 	composePath?: string;
+	composePaths?: string[] | null;
 	envFilePath?: string | null;
-	autoUpdate?: boolean;
-	autoUpdateSchedule?: 'daily' | 'weekly' | 'custom';
-	autoUpdateCron?: string;
-	webhookEnabled?: boolean;
-	webhookSecret?: string | null;
 	contextDir?: string | null;
 	buildOnDeploy?: boolean;
 	noBuildCache?: boolean;
 	repullImages?: boolean;
 	forceRedeploy?: boolean;
+	webhookEnabled?: boolean;
+	webhookSecret?: string | null;
+	engine?: 'stack' | 'centralized';
+	autoUpdate?: boolean;
+	autoUpdateSchedule?: string;
+	autoUpdateCron?: string;
 }): Promise<GitStackWithRepo> {
+	const primaryPath = data.composePaths?.length ? data.composePaths[0] : (data.composePath || 'compose.yaml');
+	const pathsJson = data.composePaths?.length ? JSON.stringify(data.composePaths) : null;
+
 	const result = await db.insert(gitStacks).values({
 		stackName: data.stackName,
 		environmentId: data.environmentId ?? null,
 		repositoryId: data.repositoryId,
-		composePath: data.composePath || 'compose.yaml',
+		composePath: primaryPath,
+		composePaths: pathsJson,
 		envFilePath: data.envFilePath || null,
 		contextDir: data.contextDir || null,
-		autoUpdate: data.autoUpdate || false,
-		autoUpdateSchedule: data.autoUpdateSchedule || 'daily',
-		autoUpdateCron: data.autoUpdateCron || '0 3 * * *',
-		webhookEnabled: data.webhookEnabled || false,
-		webhookSecret: data.webhookSecret || null,
 		buildOnDeploy: data.buildOnDeploy ?? false,
 		noBuildCache: data.noBuildCache ?? false,
 		repullImages: data.repullImages ?? false,
-		forceRedeploy: data.forceRedeploy ?? false
+		forceRedeploy: data.forceRedeploy ?? false,
+		webhookEnabled: data.webhookEnabled ?? false,
+		webhookSecret: data.webhookEnabled ? (data.webhookSecret ?? null) : null,
+		engine: data.engine ?? 'stack',
+		autoUpdate: data.autoUpdate ?? false,
+		autoUpdateSchedule: data.autoUpdate ? (data.autoUpdateSchedule ?? 'daily') : undefined,
+		autoUpdateCron: data.autoUpdate ? (data.autoUpdateCron ?? '0 3 * * *') : undefined
 	}).returning();
 	return getGitStack(result[0].id) as Promise<GitStackWithRepo>;
 }
 
-export async function updateGitStack(id: number, data: Partial<GitStackData>): Promise<GitStackWithRepo | null> {
+export async function updateGitStack(id: number, data: Partial<GitStackData> & { composePaths?: string[] | null }): Promise<GitStackWithRepo | null> {
 	const updateData: Record<string, any> = { updatedAt: new Date().toISOString() };
 
 	if (data.stackName !== undefined) updateData.stackName = data.stackName;
 	if (data.repositoryId !== undefined) updateData.repositoryId = data.repositoryId;
 	if (data.composePath !== undefined) updateData.composePath = data.composePath;
+	if (data.composePaths !== undefined) {
+		updateData.composePaths = data.composePaths && data.composePaths.length > 0 ? JSON.stringify(data.composePaths) : null;
+		// Keep the singular column in sync with the multi-file list (it is
+		// denormalized from composePaths[0]); a client that only sends
+		// composePaths must not leave the two diverged.
+		if (data.composePath === undefined && data.composePaths && data.composePaths.length > 0) {
+			updateData.composePath = data.composePaths[0];
+		}
+	}
 	if (data.envFilePath !== undefined) updateData.envFilePath = data.envFilePath;
-	if (data.autoUpdate !== undefined) updateData.autoUpdate = data.autoUpdate;
-	if (data.autoUpdateSchedule !== undefined) updateData.autoUpdateSchedule = data.autoUpdateSchedule;
-	if (data.autoUpdateCron !== undefined) updateData.autoUpdateCron = data.autoUpdateCron;
-	if (data.webhookEnabled !== undefined) updateData.webhookEnabled = data.webhookEnabled;
-	if (data.webhookSecret !== undefined) updateData.webhookSecret = data.webhookSecret;
 	if (data.contextDir !== undefined) updateData.contextDir = data.contextDir;
 	if (data.buildOnDeploy !== undefined) updateData.buildOnDeploy = data.buildOnDeploy;
 	if (data.noBuildCache !== undefined) updateData.noBuildCache = data.noBuildCache;
 	if (data.repullImages !== undefined) updateData.repullImages = data.repullImages;
 	if (data.forceRedeploy !== undefined) updateData.forceRedeploy = data.forceRedeploy;
+	if (data.webhookEnabled !== undefined) updateData.webhookEnabled = data.webhookEnabled;
+	if (data.webhookSecret !== undefined) updateData.webhookSecret = data.webhookEnabled ? data.webhookSecret : null;
+	if (data.engine !== undefined) updateData.engine = data.engine;
+	if (data.autoUpdate !== undefined) updateData.autoUpdate = data.autoUpdate;
+	if (data.autoUpdateSchedule !== undefined) updateData.autoUpdateSchedule = data.autoUpdateSchedule;
+	if (data.autoUpdateCron !== undefined) updateData.autoUpdateCron = data.autoUpdateCron;
 	if (data.lastSync !== undefined) updateData.lastSync = data.lastSync;
 	if (data.lastCommit !== undefined) updateData.lastCommit = data.lastCommit;
 	if (data.syncStatus !== undefined) updateData.syncStatus = data.syncStatus;
@@ -2783,93 +2923,69 @@ export async function renameGitStack(id: number, newName: string): Promise<boole
 	return true;
 }
 
-export async function getEnabledAutoUpdateGitStacks(): Promise<GitStackWithRepo[]> {
-	const rows = await db.select({
-		id: gitStacks.id,
-		stackName: gitStacks.stackName,
-		environmentId: gitStacks.environmentId,
-		repositoryId: gitStacks.repositoryId,
-		composePath: gitStacks.composePath,
-		envFilePath: gitStacks.envFilePath,
-		autoUpdate: gitStacks.autoUpdate,
-		autoUpdateSchedule: gitStacks.autoUpdateSchedule,
-		autoUpdateCron: gitStacks.autoUpdateCron,
-		webhookEnabled: gitStacks.webhookEnabled,
-		webhookSecret: gitStacks.webhookSecret,
-		contextDir: gitStacks.contextDir,
-		buildOnDeploy: gitStacks.buildOnDeploy,
-		noBuildCache: gitStacks.noBuildCache,
-		repullImages: gitStacks.repullImages,
-		forceRedeploy: gitStacks.forceRedeploy,
-		lastSync: gitStacks.lastSync,
-		lastCommit: gitStacks.lastCommit,
-		syncStatus: gitStacks.syncStatus,
-		syncError: gitStacks.syncError,
-		createdAt: gitStacks.createdAt,
-		updatedAt: gitStacks.updatedAt,
-		repoName: gitRepositories.name,
-		repoUrl: gitRepositories.url,
-		repoBranch: gitRepositories.branch,
-		repoCredentialId: gitRepositories.credentialId
-	})
-		.from(gitStacks)
-		.innerJoin(gitRepositories, eq(gitStacks.repositoryId, gitRepositories.id))
-		.where(eq(gitStacks.autoUpdate, true));
+// =============================================================================
+// REPOSITORY-LEVEL AUTO-SYNC & WEBHOOK QUERY FUNCTIONS
+// =============================================================================
 
-	return rows.map(row => ({
-		id: row.id,
-		stackName: row.stackName,
-		environmentId: row.environmentId,
-		repositoryId: row.repositoryId,
-		composePath: row.composePath,
-		envFilePath: row.envFilePath,
-		autoUpdate: row.autoUpdate,
-		autoUpdateSchedule: row.autoUpdateSchedule,
-		autoUpdateCron: row.autoUpdateCron,
-		webhookEnabled: row.webhookEnabled,
-		webhookSecret: row.webhookSecret,
-		contextDir: row.contextDir ?? null,
-		buildOnDeploy: row.buildOnDeploy ?? false,
-		noBuildCache: row.noBuildCache ?? false,
-		repullImages: row.repullImages ?? false,
-		forceRedeploy: row.forceRedeploy ?? false,
-		lastSync: row.lastSync,
-		lastCommit: row.lastCommit,
-		syncStatus: row.syncStatus,
-		syncError: row.syncError,
-		createdAt: row.createdAt,
-		updatedAt: row.updatedAt,
-		repository: {
-			id: row.repositoryId,
-			name: row.repoName,
-			url: row.repoUrl,
-			branch: row.repoBranch,
-			credentialId: row.repoCredentialId
-		}
-	})) as GitStackWithRepo[];
+/**
+ * Returns all repositories with autoUpdate=true that have at least one
+ * centralized-model stack (used by the scheduler at startup). Repos whose stacks
+ * are all stack-model keep per-stack sync and must not register a repo-level
+ * sync. The membership filter is the pure filterReposWithCentralizedMember.
+ */
+export async function getEnabledAutoUpdateRepositories(): Promise<GitRepositoryData[]> {
+	const results = await db
+		.select()
+		.from(gitRepositories)
+		.where(eq(gitRepositories.autoUpdate, true));
+	const stacks = await getGitStacks();
+	return filterReposWithCentralizedMember(results as GitRepositoryData[], stacks);
 }
 
-export async function getAllAutoUpdateGitStacks(): Promise<GitStackWithRepo[]> {
+/**
+ * Returns repositories configured for scheduled sync (for schedules page).
+ * Includes both enabled and paused repos so the UI can show disabled schedules.
+ * Excludes repos where auto-update was fully removed (autoUpdateSchedule=null).
+ */
+export async function getAllAutoUpdateRepositories(): Promise<GitRepositoryData[]> {
+	const results = await db
+		.select()
+		.from(gitRepositories)
+		.where(isNotNull(gitRepositories.autoUpdateSchedule))
+		.orderBy(asc(gitRepositories.name));
+	return results as GitRepositoryData[];
+}
+
+/**
+ * Look up a repository by its webhook secret (for repository-level webhooks).
+ */
+
+/**
+ * Returns all git stacks linked to a repository with full stack data
+ * (composePath, contextDir, etc.) for per-stack diffing in fan-out deploys.
+ */
+export async function getFullGitStacksByRepositoryId(repositoryId: number): Promise<GitStackWithRepo[]> {
 	const rows = await db.select({
 		id: gitStacks.id,
 		stackName: gitStacks.stackName,
 		environmentId: gitStacks.environmentId,
 		repositoryId: gitStacks.repositoryId,
 		composePath: gitStacks.composePath,
-		autoUpdate: gitStacks.autoUpdate,
-		autoUpdateSchedule: gitStacks.autoUpdateSchedule,
-		autoUpdateCron: gitStacks.autoUpdateCron,
-		webhookEnabled: gitStacks.webhookEnabled,
-		webhookSecret: gitStacks.webhookSecret,
+		composePaths: gitStacks.composePaths,
+		envFilePath: gitStacks.envFilePath,
 		contextDir: gitStacks.contextDir,
 		buildOnDeploy: gitStacks.buildOnDeploy,
 		noBuildCache: gitStacks.noBuildCache,
 		repullImages: gitStacks.repullImages,
 		forceRedeploy: gitStacks.forceRedeploy,
+		webhookEnabled: gitStacks.webhookEnabled,
+		webhookSecret: gitStacks.webhookSecret,
+		engine: gitStacks.engine,
 		lastSync: gitStacks.lastSync,
 		lastCommit: gitStacks.lastCommit,
 		syncStatus: gitStacks.syncStatus,
 		syncError: gitStacks.syncError,
+		syncedFiles: gitStacks.syncedFiles,
 		createdAt: gitStacks.createdAt,
 		updatedAt: gitStacks.updatedAt,
 		repoName: gitRepositories.name,
@@ -2879,7 +2995,8 @@ export async function getAllAutoUpdateGitStacks(): Promise<GitStackWithRepo[]> {
 	})
 		.from(gitStacks)
 		.innerJoin(gitRepositories, eq(gitStacks.repositoryId, gitRepositories.id))
-		.where(eq(gitStacks.autoUpdate, true));
+		.where(eq(gitStacks.repositoryId, repositoryId))
+		.orderBy(asc(gitStacks.stackName));
 
 	return rows.map(row => ({
 		id: row.id,
@@ -2887,20 +3004,21 @@ export async function getAllAutoUpdateGitStacks(): Promise<GitStackWithRepo[]> {
 		environmentId: row.environmentId,
 		repositoryId: row.repositoryId,
 		composePath: row.composePath,
-		autoUpdate: row.autoUpdate,
-		autoUpdateSchedule: row.autoUpdateSchedule,
-		autoUpdateCron: row.autoUpdateCron,
-		webhookEnabled: row.webhookEnabled,
-		webhookSecret: row.webhookSecret,
+		composePaths: row.composePaths ?? null,
+		envFilePath: row.envFilePath,
 		contextDir: row.contextDir ?? null,
 		buildOnDeploy: row.buildOnDeploy ?? false,
 		noBuildCache: row.noBuildCache ?? false,
 		repullImages: row.repullImages ?? false,
 		forceRedeploy: row.forceRedeploy ?? false,
+		webhookEnabled: row.webhookEnabled ?? false,
+		webhookSecret: row.webhookSecret ?? null,
+		engine: row.engine ?? 'stack',
 		lastSync: row.lastSync,
 		lastCommit: row.lastCommit,
 		syncStatus: row.syncStatus,
 		syncError: row.syncError,
+		syncedFiles: row.syncedFiles ?? null,
 		createdAt: row.createdAt,
 		updatedAt: row.updatedAt,
 		repository: {
@@ -2927,6 +3045,7 @@ export interface StackSourceData {
 	gitRepositoryId: number | null;
 	gitStackId: number | null;
 	composePath: string | null;
+	composePaths: string | null;
 	envPath: string | null;
 	secretProviderId: number | null;
 	createdAt: string;
@@ -2965,6 +3084,21 @@ export async function getStackSource(stackName: string, environmentId?: number |
 		repository,
 		gitStack: gitStackData
 	} as StackSourceWithRepo;
+}
+
+/**
+ * Resolve compose paths for a stack source.
+ * Returns composePaths array if set, otherwise falls back to single composePath.
+ */
+export function getStackComposePaths(source: { composePaths?: string | null; composePath?: string | null }): string[] {
+	if (source.composePaths) {
+		try {
+			const parsed = JSON.parse(source.composePaths);
+			if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+		} catch {}
+	}
+	if (source.composePath) return [source.composePath];
+	return [];
 }
 
 export async function getStackSourceByComposePath(composePath: string, environmentId?: number | null): Promise<StackSourceWithRepo | null> {
@@ -3035,10 +3169,16 @@ export async function upsertStackSource(data: {
 	gitRepositoryId?: number | null;
 	gitStackId?: number | null;
 	composePath?: string | null;
+	composePaths?: string[] | null;
 	envPath?: string | null;
 	secretProviderId?: number | null;
 }): Promise<StackSourceData> {
 	const existing = await getStackSource(data.stackName, data.environmentId);
+
+	// composePath is the resolved on-disk path used by stack details and .env
+	// resolution. composePaths may deliberately contain repo-relative Git paths.
+	const primaryPath = data.composePath ?? data.composePaths?.[0] ?? null;
+	const pathsJson = data.composePaths ? JSON.stringify(data.composePaths) : null;
 
 	if (existing) {
 		const newRepoId = data.gitRepositoryId || null;
@@ -3056,7 +3196,8 @@ export async function upsertStackSource(data: {
 				sourceType: data.sourceType,
 				gitRepositoryId: newRepoId,
 				gitStackId: newStackId,
-				composePath: data.composePath ?? null,
+				composePath: primaryPath,
+				composePaths: pathsJson,
 				envPath: data.envPath ?? null,
 				updatedAt: new Date().toISOString(),
 				// Preserve existing binding when caller (like git) omits it
@@ -3072,7 +3213,8 @@ export async function upsertStackSource(data: {
 			sourceType: data.sourceType,
 			gitRepositoryId: data.gitRepositoryId || null,
 			gitStackId: data.gitStackId || null,
-			composePath: data.composePath ?? null,
+			composePath: primaryPath,
+			composePaths: pathsJson,
 			envPath: data.envPath ?? null,
 			secretProviderId: data.secretProviderId ?? null
 		});
@@ -3083,14 +3225,20 @@ export async function upsertStackSource(data: {
 export async function updateStackSource(
 	stackName: string,
 	environmentId: number | null,
-	updates: { composePath?: string | null; envPath?: string | null; secretProviderId?: number | null }
+	updates: { composePath?: string | null; composePaths?: string[] | null; envPath?: string | null; secretProviderId?: number | null }
 ): Promise<boolean> {
 	const existing = await getStackSource(stackName, environmentId);
 	if (!existing) return false;
 
+	const primaryPath = updates.composePath !== undefined
+		? updates.composePath
+		: (updates.composePaths?.[0] ?? existing.composePath);
+	const pathsJson = updates.composePaths !== undefined ? (updates.composePaths ? JSON.stringify(updates.composePaths) : null) : existing.composePaths;
+
 	await db.update(stackSources)
 		.set({
-			composePath: updates.composePath !== undefined ? updates.composePath : existing.composePath,
+			composePath: primaryPath,
+			composePaths: pathsJson,
 			envPath: updates.envPath !== undefined ? updates.envPath : existing.envPath,
 			secretProviderId: updates.secretProviderId !== undefined ? updates.secretProviderId : existing.secretProviderId,
 			updatedAt: new Date().toISOString()
@@ -3468,7 +3616,7 @@ export async function deleteOldScans(keepDays = 30): Promise<number> {
 export type AuditAction =
 	| 'create' | 'update' | 'delete' | 'start' | 'stop' | 'restart' | 'down'
 	| 'pause' | 'unpause' | 'pull' | 'push' | 'prune' | 'login'
-	| 'logout' | 'view' | 'exec' | 'connect' | 'disconnect' | 'deploy' | 'sync' | 'rename' | 'webhook'
+	| 'logout' | 'view' | 'exec' | 'connect' | 'disconnect' | 'deploy' | 'sync' | 'rename' | 'webhook' | 'migrate'
 	| 'backup' | 'restore' | 'verify';
 
 export type AuditEntityType =
@@ -4178,7 +4326,7 @@ export async function saveDashboardPreferences(data: {
 // SCHEDULE EXECUTION OPERATIONS
 // =============================================================================
 
-export type ScheduleType = 'container_update' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune' | 'backup' | 'restore';
+export type ScheduleType = 'container_update' | 'git_stack_sync' | 'git_repository_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune' | 'backup' | 'restore' | 'repo_prune' | 'repo_check' | 'repo_verify';
 export type ScheduleTrigger = 'cron' | 'webhook' | 'manual' | 'startup';
 export type ScheduleStatus =
 	| 'queued'

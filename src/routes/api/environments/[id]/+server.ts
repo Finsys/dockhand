@@ -1,11 +1,11 @@
 import { json } from '@sveltejs/kit';
-import { join } from 'path';
+import { join, resolve, basename } from 'path';
 import { existsSync, rmSync, renameSync } from 'fs';
 import type { RequestHandler } from './$types';
-import { getEnvironment, updateEnvironment, deleteEnvironment, getEnvironmentPublicIps, setEnvironmentPublicIp, deleteEnvironmentPublicIp, deleteEnvUpdateCheckSettings, deleteImagePruneSettings, getGitStacksForEnvironmentOnly, deleteGitStack, getBackupConfigs } from '$lib/server/db';
+import { getEnvironment, updateEnvironment, deleteEnvironment, getEnvironmentPublicIps, setEnvironmentPublicIp, deleteEnvironmentPublicIp, deleteEnvUpdateCheckSettings, deleteImagePruneSettings, getGitStacksForEnvironmentOnly, deleteGitStack, getBackupConfigs, getStackSources } from '$lib/server/db';
 import { clearDockerClientCache } from '$lib/server/docker';
-import { deleteGitStackFiles, getGitReposDir } from '$lib/server/git';
-import { getStacksDir } from '$lib/server/stacks';
+import { deleteGitStackFiles, cleanupEnvGitReposDir } from '$lib/server/git';
+import { getDefaultStacksDir, getLocalStacksDir, isLocalConnection, isStacksDirEnvSet } from '$lib/server/stacks';
 import { authorize } from '$lib/server/authorize';
 import { auditEnvironment } from '$lib/server/audit';
 import { refreshSubprocessEnvironments } from '$lib/server/subprocess-manager';
@@ -13,7 +13,7 @@ import { resetHostDetection, detectHostDataDir } from '$lib/server/host-path';
 import { serializeLabels, parseLabels, MAX_LABELS } from '$lib/utils/label-colors';
 import { cleanPem } from '$lib/utils/pem';
 import { validateEnvName } from '$lib/utils/env-name';
-import { unregisterSchedule } from '$lib/server/scheduler';
+import { unregisterSchedule, unregisterScheduleByFamily } from '$lib/server/scheduler';
 import { closeEdgeConnection } from '$lib/server/hawser';
 import { computeAuditDiff } from '$lib/utils/diff';
 import { deleteEnvironmentIcon } from '$lib/server/env-icons';
@@ -108,16 +108,12 @@ export const PUT: RequestHandler = async (event) => {
 		// (see client warning). For Hawser envs the agent owns the deployed
 		// dir on the remote host and isn't affected, but Dockhand still keeps
 		// a local staging copy under stacks/<envName>/<stackName>/ (for the
-		// in-app editor) and ALL git stacks clone to git-repos/<envName>/
-		// regardless of where they ultimately deploy — so the rename matters
-		// locally for every env type.
+		// in-app editor). Git repository clones live at git-repos/<repoName>/
+		// and are shared across environments — they are not renamed here.
 		if (isRename) {
-			const stacksDir = getStacksDir();
-			const gitReposDir = getGitReposDir();
+			const stacksDir = getDefaultStacksDir();
 			const oldStacks = join(stacksDir, oldEnv.name);
 			const newStacks = join(stacksDir, data.name);
-			const oldRepos = join(gitReposDir, oldEnv.name);
-			const newRepos = join(gitReposDir, data.name);
 
 			// Refuse to overwrite a target dir that already holds someone
 			// else's data.
@@ -126,25 +122,20 @@ export const PUT: RequestHandler = async (event) => {
 					error: `Cannot rename: ${newStacks} already exists. Pick a different name or move that directory out of the way.`
 				}, { status: 409 });
 			}
-			if (existsSync(oldRepos) && existsSync(newRepos)) {
-				return json({
-					error: `Cannot rename: ${newRepos} already exists. Pick a different name or move that directory out of the way.`
-				}, { status: 409 });
-			}
 
 			try {
 				if (existsSync(oldStacks)) renameSync(oldStacks, newStacks);
-				if (existsSync(oldRepos)) renameSync(oldRepos, newRepos);
 			} catch (err: any) {
-				// Best-effort rollback if the second rename failed after the first
-				// succeeded. Avoids leaving the filesystem in a split state.
+				// Best-effort rollback if the rename failed partway through.
 				try { if (existsSync(newStacks) && !existsSync(oldStacks)) renameSync(newStacks, oldStacks); } catch {}
-				try { if (existsSync(newRepos) && !existsSync(oldRepos)) renameSync(newRepos, oldRepos); } catch {}
 				const code = err?.code === 'EXDEV'
 					? 'EXDEV: stacks dir is on a different filesystem from the rename target. Move it back to the same filesystem to rename this environment.'
 					: (err?.message || 'Rename failed');
 				return json({ error: code }, { status: 409 });
 			}
+
+			// Drop any leftover per-environment git-repos dir from the old layout.
+			cleanupEnvGitReposDir(oldEnv.name);
 		}
 
 		// Clear cached Docker client before updating
@@ -261,14 +252,12 @@ export const DELETE: RequestHandler = async (event) => {
 		// Clean up git stacks for this environment
 		const gitStacks = await getGitStacksForEnvironmentOnly(id);
 		for (const stack of gitStacks) {
-			// Unregister schedule if auto-update was enabled
-			if (stack.autoUpdate) {
-				unregisterSchedule(stack.id, 'git_stack_sync');
-			}
 			// Delete git stack files from filesystem
 			await deleteGitStackFiles(stack.id, stack.stackName, stack.environmentId);
 			// Delete git stack from database
 			await deleteGitStack(stack.id);
+			// Unregister any lingering git_stack_sync schedule (no-op if absent)
+			unregisterScheduleByFamily(stack.id);
 		}
 
 		const success = await deleteEnvironment(id);
@@ -303,10 +292,10 @@ export const DELETE: RequestHandler = async (event) => {
 			console.error(`Failed to unregister backup schedules for environment "${env.name}":`, err);
 		}
 
-		// Clean up stack directory for this environment
+		// Clean up stack directory for this environment (Hawser staging / env-scoped layout)
 		// Safety: only delete subdirectory named after the env, never the parent
 		try {
-			const stacksDir = getStacksDir();
+			const stacksDir = getDefaultStacksDir();
 			const envStackDir = join(stacksDir, env.name);
 			if (envStackDir !== stacksDir && envStackDir.startsWith(stacksDir) && existsSync(envStackDir)) {
 				rmSync(envStackDir, { recursive: true, force: true });
@@ -315,15 +304,33 @@ export const DELETE: RequestHandler = async (event) => {
 			console.error(`Failed to clean up stack directory for environment "${env.name}":`, err);
 		}
 
-		// Clean up git-repos directory for this environment
-		try {
-			const gitReposDir = getGitReposDir();
-			const envGitDir = join(gitReposDir, env.name);
-			if (envGitDir !== gitReposDir && envGitDir.startsWith(gitReposDir) && existsSync(envGitDir)) {
-				rmSync(envGitDir, { recursive: true, force: true });
+		// Flat STACKS_DIR layout: remove per-stack managed dirs for this local environment
+		if (isStacksDirEnvSet() && isLocalConnection(env)) {
+			try {
+				const localStacksDir = getLocalStacksDir();
+				const resolvedLocalRoot = resolve(localStacksDir);
+				const stackSources = await getStackSources(id);
+				for (const source of stackSources) {
+					const stackDir = join(localStacksDir, source.stackName);
+					const resolvedStackDir = resolve(stackDir);
+					if (
+						resolvedStackDir.startsWith(resolvedLocalRoot + '/') &&
+						basename(resolvedStackDir) === source.stackName &&
+						existsSync(stackDir)
+					) {
+						rmSync(stackDir, { recursive: true, force: true });
+					}
+				}
+			} catch (err) {
+				console.error(`Failed to clean up flat STACKS_DIR stacks for environment "${env.name}":`, err);
 			}
+		}
+
+		// Remove any leftover per-environment git-repos dir from the old layout.
+		try {
+			cleanupEnvGitReposDir(env.name);
 		} catch (err) {
-			console.error(`Failed to clean up git-repos directory for environment "${env.name}":`, err);
+			console.error(`Failed to clean up env-scoped git-repos directory for environment "${env.name}":`, err);
 		}
 
 		// Notify event collectors to stop collecting from deleted environment

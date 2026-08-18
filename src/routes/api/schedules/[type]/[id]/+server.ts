@@ -8,7 +8,7 @@ import type { RequestHandler } from './$types';
 import {
 	getAutoUpdateSettingById,
 	deleteAutoUpdateSchedule,
-	getGitStack,
+	updateGitRepository,
 	updateGitStack,
 	deleteEnvUpdateCheckSettings,
 	deleteImagePruneSettings,
@@ -18,6 +18,7 @@ import {
 	updateBackupDestination
 } from '$lib/server/db';
 import { unregisterSchedule } from '$lib/server/scheduler';
+import { resolveGitScheduleTarget, isGitScheduleType } from '$lib/server/git-schedule-target';
 import { authorize } from '$lib/server/authorize';
 
 /**
@@ -45,36 +46,46 @@ export const DELETE: RequestHandler = async ({ params, cookies }) => {
 		}
 
 		if (type === 'container_update') {
-			// Hard delete container schedule
 			const schedule = await getAutoUpdateSettingById(scheduleId);
 			if (schedule) {
 				const envDenied = await auth.requireEnvAccess(schedule.environmentId);
 				if (envDenied) return envDenied;
 				await deleteAutoUpdateSchedule(schedule.containerName, schedule.environmentId ?? undefined);
-				// Unregister from croner
 				unregisterSchedule(scheduleId, 'container_update');
 			}
 			return json({ success: true });
 
-		} else if (type === 'git_stack_sync') {
-			const stack = await getGitStack(scheduleId);
-			if (!stack) {
+		} else if (isGitScheduleType(type)) {
+			// Git schedules resolve through the per-model target resolver (F12).
+			const target = await resolveGitScheduleTarget(type, scheduleId);
+			if (!target) {
 				return json({ error: 'Schedule not found' }, { status: 404 });
 			}
-			const envDenied = await auth.requireEnvAccess(stack.environmentId);
-			if (envDenied) return envDenied;
-			// Disable auto-update for git stack (don't delete the stack itself)
-			await updateGitStack(scheduleId, {
+
+			if (target.kind === 'stack') {
+				const envDenied = await auth.requireEnvAccess(target.entity.environmentId);
+				if (envDenied) return envDenied;
+				await updateGitStack(target.id, {
+					autoUpdate: false,
+					autoUpdateSchedule: null,
+					autoUpdateCron: null
+				});
+				unregisterSchedule(target.id, 'git_stack_sync');
+				return json({ success: true });
+			}
+
+			await updateGitRepository(target.id, {
 				autoUpdate: false,
 				autoUpdateSchedule: null,
 				autoUpdateCron: null
 			});
-			// Unregister from croner
-			unregisterSchedule(scheduleId, 'git_stack_sync');
-			return json({ success: true });
+			unregisterSchedule(target.id, 'git_repository_sync');
 
+			return json({
+				success: true,
+				...(type === 'git_stack_sync' ? { deprecated: true, repositoryId: target.id } : {})
+			});
 		} else if (type === 'env_update_check') {
-			// Delete env update check settings (scheduleId is environmentId)
 			const envDenied = await auth.requireEnvAccess(scheduleId);
 			if (envDenied) return envDenied;
 			await deleteEnvUpdateCheckSettings(scheduleId);
@@ -82,7 +93,6 @@ export const DELETE: RequestHandler = async ({ params, cookies }) => {
 			return json({ success: true });
 
 		} else if (type === 'image_prune') {
-			// Delete image prune settings (scheduleId is environmentId)
 			const envDenied = await auth.requireEnvAccess(scheduleId);
 			if (envDenied) return envDenied;
 			await deleteImagePruneSettings(scheduleId);

@@ -698,7 +698,7 @@ async function materialiseStackFiles(destination: any, snapId: string, stackName
 	const { tmpdir } = await import('os');
 	const { join, dirname, resolve, sep } = await import('path');
 	const { randomUUID } = await import('crypto');
-	const { getStacksDir } = await import('../stacks');
+	const { getDefaultStacksDir, getLocalStacksDir, isStacksDirEnvSet } = await import('../stacks');
 	const { stackDirSource } = await import('./stackdir-plan');
 	// The stack dir is ALWAYS at /volumes/__dockhand_stackdir__ in the snapshot (local bind
 	// and remote tar both write there), so restore reads ONE deterministic path via
@@ -730,9 +730,15 @@ async function materialiseStackFiles(destination: any, snapId: string, stackName
 
 		// Path-traversal guard: the resolved target MUST stay under the stacks root.
 		const resolvedTarget = resolve(targetPath);
-		const stacksRoot = resolve(getStacksDir());
-		if (resolvedTarget !== stacksRoot && !resolvedTarget.startsWith(stacksRoot + sep)) {
-			console.log(`[Backup] materialiseStackFiles: refusing target "${resolvedTarget}" outside the stacks root "${stacksRoot}"`);
+		const allowedRoots = [resolve(getDefaultStacksDir())];
+		if (isStacksDirEnvSet()) {
+			allowedRoots.push(resolve(getLocalStacksDir()));
+		}
+		const underAllowedRoot = allowedRoots.some(
+			(root) => resolvedTarget === root || resolvedTarget.startsWith(root + sep)
+		);
+		if (!underAllowedRoot) {
+			console.log(`[Backup] materialiseStackFiles: refusing target "${resolvedTarget}" outside allowed stacks roots (${allowedRoots.join(', ')})`);
 			return false;
 		}
 

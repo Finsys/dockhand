@@ -1,8 +1,24 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getStackComposeFile, deployStack, saveStackComposeFile } from '$lib/server/stacks';
+import { dirname } from 'node:path';
+import { getStackComposeFile, deployStack, saveStackComposeFile, remapHawserStagingDisplayPaths, remapHawserStagingDisplayComposeContents, unmapHawserDisplayComposeOptionsToStaging } from '$lib/server/stacks';
+import { updateStackSource, getStackSource } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
 import { createJobResponse } from '$lib/server/sse';
+import { parseComposePathsColumn } from '$lib/server/compose-files';
+
+async function remapDisplayPath(
+	name: string,
+	envId: number | undefined,
+	path: string | null | undefined
+): Promise<string | null | undefined> {
+	if (!path) return path;
+	const remapped = await remapHawserStagingDisplayPaths(name, envId, {
+		composePath: path,
+		composePaths: []
+	});
+	return remapped.composePath ?? path;
+}
 
 // GET /api/stacks/[name]/compose - Get compose file content
 /**
@@ -26,23 +42,41 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 
 	try {
 		const result = await getStackComposeFile(name, envIdNum);
+		const source = await getStackSource(name, envIdNum);
 
 		if (!result.success) {
 			// Return info about what's needed - unified response for all missing compose files
 			return json({
 				error: result.error,
 				needsFileLocation: result.needsFileLocation || false,
-				composePath: result.composePath,
-				envPath: result.envPath
+				composePath: await remapDisplayPath(name, envIdNum, result.composePath),
+				envPath: await remapDisplayPath(name, envIdNum, result.envPath)
 			}, { status: 404 });
+		}
+
+		const composePathsList = result.composePaths ?? parseComposePathsColumn(source?.composePaths);
+		const displayPaths = await remapHawserStagingDisplayPaths(name, envIdNum, {
+			composePath: result.composePath ?? null,
+			composePaths: Array.isArray(composePathsList) ? composePathsList : []
+		});
+		const displayComposeContents = await remapHawserStagingDisplayComposeContents(
+			name,
+			envIdNum,
+			result.composeContents ?? null
+		);
+		let displayStackDir = result.stackDir;
+		if (displayPaths.composePath) {
+			displayStackDir = dirname(displayPaths.composePath);
 		}
 
 		return json({
 			content: result.content,
-			stackDir: result.stackDir,
-			composePath: result.composePath,
-			envPath: result.envPath,
-			suggestedEnvPath: result.suggestedEnvPath
+			composeContents: displayComposeContents ?? null,
+			stackDir: displayStackDir,
+			composePath: displayPaths.composePath,
+			composePaths: displayPaths.composePaths.length > 0 ? displayPaths.composePaths : null,
+			envPath: await remapDisplayPath(name, envIdNum, result.envPath),
+			suggestedEnvPath: await remapDisplayPath(name, envIdNum, result.suggestedEnvPath)
 		});
 	} catch (error: any) {
 		console.error(`Error getting compose file for stack ${name}:`, error);
@@ -76,7 +110,7 @@ export const PUT: RequestHandler = async ({ params, request, url, cookies }) => 
 
 	try {
 		const body = await request.json();
-		const { content, restart = false, composePath, envPath, moveFromDir, oldComposePath, oldEnvPath, secretProviderId } = body;
+		const { content, composeContents, restart = false, composePath, composePaths, envPath, moveFromDir, oldComposePath, oldEnvPath, secretProviderId } = body;
 
 		if (!content || typeof content !== 'string') {
 			return json({ error: 'Compose file content is required' }, { status: 400 });
@@ -101,17 +135,24 @@ export const PUT: RequestHandler = async ({ params, request, url, cookies }) => 
 			return json({ error: 'Permission denied: binding a secret provider requires the secrets permission' }, { status: 403 });
 		}
 
-		// Build options object for custom paths, move operation, file renames, and secret provider binding
-		const pathOptions = (composePath || envPath !== undefined || moveFromDir || oldComposePath || oldEnvPath || secretProviderId !== undefined)
-			? { composePath, envPath, moveFromDir, oldComposePath, oldEnvPath, secretProviderId }
-			: undefined;
+		// Build options object for custom paths, move operation, and file renames
+		let pathOptions: Parameters<typeof unmapHawserDisplayComposeOptionsToStaging>[2] | undefined =
+			(composePath || composePaths || envPath !== undefined || moveFromDir || oldComposePath || oldEnvPath || composeContents)
+				? { composePath, composePaths, composeContents, envPath, moveFromDir, oldComposePath, oldEnvPath }
+				: undefined;
+		if (pathOptions) {
+			pathOptions = await unmapHawserDisplayComposeOptionsToStaging(name, envIdNum, pathOptions);
+		}
 
 		// Persist the submitted content on EVERY accepted PUT, whether or not path fields came
 		// along. Gating this on pathOptions left Dockhand's stored copy stale while restart:true
 		// deployed the new content - a later GET then served the old copy, silently reverting the
 		// change on the next read/edit/deploy round-trip (#1383). saveStackComposeFile handles a
 		// possibly-undefined pathOptions fine (the non-restart branch already relied on that).
-		const saveResult = await saveStackComposeFile(name, content, false, envIdNum, pathOptions);
+		const saveResult = await saveStackComposeFile(name, content, false, envIdNum, {
+			...pathOptions,
+			...(secretProviderId !== undefined ? { secretProviderId } : {})
+		});
 		if (!saveResult.success) {
 			return json({ error: saveResult.error }, { status: 500 });
 		}
@@ -119,8 +160,16 @@ export const PUT: RequestHandler = async ({ params, request, url, cookies }) => 
 		if (restart) {
 			// Deploy with docker compose up -d --force-recreate.
 			// Force recreate ensures env var changes are applied.
-			// Get authoritative paths from DB/filesystem for deploy (now reflects the saved content).
+			// Update DB with multi-file paths if provided (unmapped to staging paths)
+			if (composePaths !== undefined) {
+				await updateStackSource(name, envIdNum ?? null, {
+					composePaths: pathOptions?.composePaths ?? undefined
+				});
+			}
+			// Get authoritative paths from DB/filesystem for deploy
 			const composeInfo = await getStackComposeFile(name, envIdNum);
+			const deploySource = await getStackSource(name, envIdNum);
+			const deployComposePaths = parseComposePathsColumn(deploySource?.composePaths);
 
 			// Deploy via SSE to keep connection alive during long operations
 			return createJobResponse(async (send) => {
@@ -131,6 +180,7 @@ export const PUT: RequestHandler = async ({ params, request, url, cookies }) => 
 						envId: envIdNum,
 						forceRecreate: true,
 						composePath: composeInfo.composePath || undefined,
+						composePaths: deployComposePaths,
 						envPath: composeInfo.envPath || undefined
 					});
 
@@ -147,6 +197,13 @@ export const PUT: RequestHandler = async ({ params, request, url, cookies }) => 
 		}
 
 		// No restart: the content is already persisted above.
+		// Preserve multi-file paths after save (mirrors restart path)
+		if (composePaths !== undefined) {
+			await updateStackSource(name, envIdNum ?? null, {
+				composePaths: pathOptions?.composePaths ?? undefined
+			});
+		}
+
 		return json({ success: true });
 	} catch (error: any) {
 		console.error(`Error updating compose file for stack ${name}:`, error);

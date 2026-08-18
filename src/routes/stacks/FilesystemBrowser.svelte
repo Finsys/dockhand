@@ -3,8 +3,8 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Input } from '$lib/components/ui/input';
-	import { Loader2, FolderOpen, File, FileText, ChevronRight, ArrowUp, AlertCircle, FolderPlus, Search, Import, Check, X } from 'lucide-svelte';
-	import type { Component } from 'svelte';
+	import { Loader2, FolderOpen, File, FileText, ChevronRight, ArrowUp, AlertCircle, FolderPlus, Search, Import, Check, X, Square as CheckboxOff, CheckSquare as CheckboxOn } from 'lucide-svelte';
+	import type { Component, ComponentType } from 'svelte';
 	import RecentLocationsPanel from './RecentLocationsPanel.svelte';
 
 	export interface FileEntry {
@@ -20,7 +20,7 @@
 		open: boolean;
 		title?: string;
 		/** Optional icon component to display before the title */
-		icon?: Component<{ class?: string }>;
+		icon?: Component<{ class?: string }> | ComponentType;
 		description?: string;
 		initialPath?: string;
 		selectFilter?: RegExp;
@@ -33,8 +33,32 @@
 		onScanDirectory?: (path: string) => void;
 		/** For adopt mode: show loading state on scan button */
 		scanning?: boolean;
+		/**
+		 * If set, directory-listing requests are sent to this URL instead of /api/system/files.
+		 * The endpoint must accept a `?path=` query parameter and return the same
+		 * { path, entries: FileEntry[], parent } shape, with all paths RELATIVE
+		 * to the browse root ('' = root).
+		 * Used for browsing git repository clones without exposing the full host filesystem.
+		 */
+		apiUrl?: string;
+		/**
+		 * If set, the browser will not navigate above this path (i.e. "Go up" is
+		 * disabled when currentPath === rootPath). Used together with apiUrl to
+		 * confine navigation to a git repository clone directory.
+		 */
+		rootPath?: string;
+		/**
+		 * When set to a non-empty string, a fullscreen spinner overlay is shown
+		 * over the dialog content with this message. Used to indicate that the
+		 * repository is being cloned before the first listing is available.
+		 */
+		cloningMessage?: string;
 		onSelect: (path: string, name: string) => void;
 		onClose: () => void;
+		/** Enable multi-select mode: checkboxes + "Select N files" button */
+		multiSelect?: boolean;
+		/** Called with selected entries when user confirms multi-select */
+		onSelectMany?: (entries: { path: string; name: string }[]) => void;
 	}
 
 	let {
@@ -49,8 +73,13 @@
 		onFilePreview,
 		onScanDirectory,
 		scanning = false,
+		apiUrl,
+		rootPath = $bindable(undefined),
+		cloningMessage = $bindable(undefined),
 		onSelect,
-		onClose
+		onClose,
+		multiSelect = false,
+		onSelectMany
 	}: Props = $props();
 
 	let currentPath = $state<string | null>(null);
@@ -58,9 +87,16 @@
 	let loading = $state(false);
 	let error = $state<string | null>(null);
 
+	// Filter query for quickly narrowing down the file list
+	let filterQuery = $state('');
+
 	// Track selected file
 	let selectedPath = $state<string | null>(null);
 	let selectedName = $state<string | null>(null);
+
+	// Multi-select tracking
+	let multiSelectedPaths = $state(new Set<string>());
+	let multiSelectedNames = $state(new Map<string, string>());
 
 	// New folder creation
 	let creatingFolder = $state(false);
@@ -83,11 +119,16 @@
 	// Load directory when dialog opens
 	$effect(() => {
 		if (open && !currentPath) {
-			// Wait a tick for the panel to load, then use first location or initialPath
-			setTimeout(() => {
-				const firstLocation = recentLocationsPanel?.getFirstLocation();
-				loadDirectory(firstLocation || initialPath);
-			}, 50);
+			if (apiUrl) {
+				// Git-repo browse mode: start at the repo root (no recent-locations panel)
+				loadDirectory(rootPath || '/');
+			} else {
+				// Wait a tick for the panel to load, then use first location or initialPath
+				setTimeout(() => {
+					const firstLocation = recentLocationsPanel?.getFirstLocation();
+					loadDirectory(firstLocation || initialPath);
+				}, 50);
+			}
 		}
 	});
 
@@ -98,9 +139,14 @@
 	async function loadDirectory(path: string) {
 		loading = true;
 		error = null;
+		filterQuery = ''; // Clear filter when navigating
 
 		try {
-			const res = await fetch(`/api/system/files?path=${encodeURIComponent(path)}`);
+			// Use custom apiUrl (git repo browse) or default host filesystem API
+			const endpoint = apiUrl
+				? `${apiUrl}?path=${encodeURIComponent(path)}`
+				: `/api/system/files?path=${encodeURIComponent(path)}`;
+			const res = await fetch(endpoint);
 			const data = await res.json();
 
 			if (!res.ok) {
@@ -110,6 +156,15 @@
 
 			currentPath = data.path;
 			entries = data.entries;
+
+			// The git browse API returns paths RELATIVE to the repository root
+			// ('' = root), so the host filesystem layout is never exposed.
+			// Navigation and selection use these relative paths directly.
+
+			// Clear the cloning spinner on first successful listing
+			if (cloningMessage) {
+				cloningMessage = undefined;
+			}
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load directory';
 		} finally {
@@ -119,7 +174,6 @@
 
 	function handleEntryClick(entry: FileEntry, doubleClick: boolean = false) {
 		if (selectMode === 'adopt') {
-			// Adopt mode: click on directory navigates, click on highlighted file triggers preview
 			if (entry.type === 'directory') {
 				loadDirectory(entry.path);
 			} else if (highlightFilter?.test(entry.name) && onFilePreview) {
@@ -128,19 +182,31 @@
 			return;
 		}
 
+		if (multiSelect && entry.type !== 'directory') {
+			const newSet = new Set(multiSelectedPaths);
+			const newNames = new Map(multiSelectedNames);
+			if (newSet.has(entry.path)) {
+				newSet.delete(entry.path);
+				newNames.delete(entry.path);
+			} else {
+				newSet.add(entry.path);
+				newNames.set(entry.path, entry.name);
+			}
+			multiSelectedPaths = newSet;
+			multiSelectedNames = newNames;
+			return;
+		}
+
 		if (entry.type === 'directory') {
 			if (selectMode === 'file_or_directory' && !doubleClick) {
-				// Single click on directory in file_or_directory mode - select it
 				selectedPath = entry.path;
 				selectedName = entry.name;
 			} else {
-				// Double click or other modes - navigate into directory
 				selectedPath = null;
 				selectedName = null;
 				loadDirectory(entry.path);
 			}
 		} else if (selectMode === 'file' || selectMode === 'file_or_directory') {
-			// Select file
 			selectedPath = entry.path;
 			selectedName = entry.name;
 		}
@@ -156,6 +222,16 @@
 	}
 
 	function handleConfirm() {
+		if (multiSelect && onSelectMany && multiSelectedPaths.size > 0) {
+			const entries = Array.from(multiSelectedPaths).map(path => ({
+				path,
+				name: multiSelectedNames.get(path) || ''
+			}));
+			onSelectMany(entries);
+			handleClose();
+			return;
+		}
+
 		if (selectMode === 'directory' && currentPath) {
 			// In directory mode, select the current directory
 			const name = currentPath === '/' ? '/' : currentPath.split('/').pop() || '';
@@ -178,6 +254,8 @@
 		entries = [];
 		selectedPath = null;
 		selectedName = null;
+		multiSelectedPaths = new Set();
+		multiSelectedNames = new Map();
 		error = null;
 		open = false;
 		onClose();
@@ -273,20 +351,38 @@
 		return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 	}
 
-	const canGoUp = $derived(currentPath && currentPath !== '/');
-
-	// In directory mode, only show directories; otherwise show all
-	const filteredEntries = $derived(
-		selectMode === 'directory'
-			? entries.filter(e => e.type === 'directory')
-			: entries
+	// In git-repo browse mode, don't allow navigating above the repo root
+	const canGoUp = $derived(
+		currentPath &&
+		currentPath !== '/' &&
+		!(rootPath && currentPath === rootPath)
 	);
+
+	// In directory mode, only show directories; otherwise show all.
+	// Also apply the user's filter query (case-insensitive name match).
+	const filteredEntries = $derived.by(() => {
+		let result = selectMode === 'directory'
+			? entries.filter(e => e.type === 'directory')
+			: entries;
+		if (filterQuery.trim()) {
+			const q = filterQuery.trim().toLowerCase();
+			result = result.filter(e => e.name.toLowerCase().includes(q));
+		}
+		return result;
+	});
 
 	const isAdoptMode = $derived(selectMode === 'adopt');
 </script>
 
 <Dialog.Root bind:open onOpenChange={(isOpen) => { if (!isOpen) handleClose(); }}>
 	<Dialog.Content class="max-w-4xl h-[80vh] flex flex-col {isAdoptMode ? 'p-0 gap-0' : ''}">
+		<!-- Cloning overlay: shown while a repository is being cloned before first listing -->
+		{#if cloningMessage}
+			<div class="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-background/90 rounded-lg">
+				<Loader2 class="w-8 h-8 animate-spin text-primary" />
+				<p class="text-sm text-muted-foreground">{cloningMessage}</p>
+			</div>
+		{/if}
 		<Dialog.Header class={isAdoptMode ? 'px-6 py-4 border-b shrink-0' : ''}>
 			<Dialog.Title class="flex items-center gap-2">
 				{#if icon}
@@ -320,7 +416,18 @@
 					>
 						<ArrowUp class="w-4 h-4" />
 					</button>
-					<code class="text-xs bg-muted px-2 py-1 rounded truncate flex-1 min-w-0">{currentPath || '/'}</code>
+				<code class="text-xs bg-muted px-2 py-1 rounded truncate min-w-0" style="flex: 1 1 0; max-width: 50%">{currentPath || '/'}</code>
+					<!-- Filter input -->
+					<div class="relative flex items-center flex-1 min-w-0 max-w-52">
+						<Search class="absolute left-2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+						<input
+							type="text"
+							bind:value={filterQuery}
+							placeholder="Filter…"
+							class="w-full pl-7 pr-2 py-1 text-xs rounded border bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+						/>
+					</div>
+					{#if !apiUrl}
 					{#if creatingFolder}
 						<div class="flex items-center gap-1">
 							<Input
@@ -361,6 +468,7 @@
 							<FolderPlus class="w-4 h-4" />
 						</button>
 					{/if}
+				{/if}
 					{#if isAdoptMode}
 						<Button
 							variant="default"
@@ -393,30 +501,43 @@
 						</div>
 						<p class="text-red-600 dark:text-red-400 font-medium">Unable to browse files</p>
 						<p class="text-sm text-muted-foreground mt-1">{error}</p>
-						<Button variant="outline" size="sm" class="mt-4" onclick={() => currentPath && loadDirectory(currentPath)}>
+						<Button variant="outline" size="sm" class="mt-4" onclick={() => loadDirectory(currentPath || (apiUrl ? '/' : initialPath))}>
 							Retry
 						</Button>
 					</div>
 				{:else if filteredEntries.length === 0}
-					<div class="flex flex-col items-center justify-center py-12 text-muted-foreground">
-						<FolderOpen class="w-12 h-12 mb-3 opacity-50" />
+				<div class="flex flex-col items-center justify-center py-12 text-muted-foreground">
+					<FolderOpen class="w-12 h-12 mb-3 opacity-50" />
+					{#if filterQuery.trim() && entries.length > 0}
+						<p>No matches for "<span class="font-medium">{filterQuery}</span>"</p>
+						<button type="button" class="mt-2 text-xs text-primary hover:underline" onclick={() => filterQuery = ''}>Clear filter</button>
+					{:else}
 						<p>{selectMode === 'directory' ? 'No subdirectories' : 'Directory is empty'}</p>
-					</div>
+					{/if}
+				</div>
 				{:else}
 					<div class="divide-y">
 						{#each filteredEntries as entry}
 							{@const selectable = isSelectable(entry)}
 							{@const highlighted = isHighlighted(entry)}
+							{@const multiSelected = multiSelect && multiSelectedPaths.has(entry.path)}
 							<button
 								type="button"
 								class="w-full flex items-center gap-3 px-4 {isAdoptMode ? 'py-1.5' : 'py-2'} hover:bg-muted/50 text-left transition-colors
 									{entry.type === 'directory' ? 'cursor-pointer' : (selectable || highlighted) ? 'cursor-pointer' : 'opacity-50 cursor-not-allowed'}
-									{selectedPath === entry.path ? 'bg-blue-50 dark:bg-blue-900/20' : ''}"
+									{selectedPath === entry.path && !multiSelect ? 'bg-blue-50 dark:bg-blue-900/20' : ''}
+									{multiSelected ? 'bg-blue-50 dark:bg-blue-900/20' : ''}"
 								onclick={() => (entry.type === 'directory' || selectable || highlighted) && handleEntryClick(entry, false)}
 								ondblclick={() => entry.type === 'directory' && handleEntryClick(entry, true)}
 								disabled={entry.type !== 'directory' && !selectable && !highlighted}
 							>
-								{#if entry.type === 'directory'}
+								{#if multiSelect && entry.type !== 'directory' && selectable}
+									{#if multiSelected}
+										<CheckboxOn class="w-4 h-4 text-blue-500 shrink-0" />
+									{:else}
+										<CheckboxOff class="w-4 h-4 text-muted-foreground shrink-0" />
+									{/if}
+								{:else if entry.type === 'directory'}
 									<FolderOpen class="w-4 h-4 text-blue-500 shrink-0" />
 								{:else if highlighted}
 									<FileText class="w-4 h-4 text-green-500 shrink-0" />
@@ -444,7 +565,22 @@
 
 		{#if !isAdoptMode}
 			<Dialog.Footer class="border-t pt-4">
-				{#if selectMode === 'directory'}
+				{#if multiSelect}
+					<div class="flex-1 flex items-center gap-2 min-w-0">
+						<span class="text-xs text-muted-foreground">
+							{multiSelectedPaths.size} file{multiSelectedPaths.size !== 1 ? 's' : ''} selected
+						</span>
+					</div>
+					<Button variant="outline" onclick={handleClose}>
+						Cancel
+					</Button>
+					<Button
+						disabled={multiSelectedPaths.size === 0}
+						onclick={handleConfirm}
+					>
+						Select {multiSelectedPaths.size > 0 ? multiSelectedPaths.size : ''} file{multiSelectedPaths.size !== 1 ? 's' : ''}
+					</Button>
+				{:else if selectMode === 'directory'}
 					<div class="flex-1 flex items-center gap-2 min-w-0">
 						<span class="text-xs text-muted-foreground shrink-0">Selected:</span>
 						<code class="text-xs font-mono bg-muted px-2 py-1 rounded truncate" title={currentPath || '/'}>{currentPath || '/'}</code>
@@ -468,25 +604,27 @@
 						Click a file to select it
 					</div>
 				{/if}
-				<Button variant="outline" onclick={handleClose}>
-					Cancel
-				</Button>
-				{#if selectMode === 'directory'}
-					<Button onclick={handleConfirm}>
-						<FolderPlus class="w-4 h-4" />
-						Select
+				{#if !multiSelect}
+					<Button variant="outline" onclick={handleClose}>
+						Cancel
 					</Button>
-				{:else if selectMode === 'file_or_directory'}
-					<Button onclick={handleConfirm}>
-						Select
-					</Button>
-				{:else}
-					<Button
-						disabled={!selectedPath}
-						onclick={handleConfirm}
-					>
-						Select
-					</Button>
+					{#if selectMode === 'directory'}
+						<Button onclick={handleConfirm}>
+							<FolderPlus class="w-4 h-4" />
+							Select
+						</Button>
+					{:else if selectMode === 'file_or_directory'}
+						<Button onclick={handleConfirm}>
+							Select
+						</Button>
+					{:else}
+						<Button
+							disabled={!selectedPath}
+							onclick={handleConfirm}
+						>
+							Select
+						</Button>
+					{/if}
 				{/if}
 			</Dialog.Footer>
 		{/if}
