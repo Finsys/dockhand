@@ -1165,7 +1165,7 @@
 					<TogglePill bind:checked={formOnlyRunningServices} />
 				</div>
 				<p class="text-xs text-muted-foreground">
-					Bring up only the services that already had a running container. Services you stopped stay stopped instead of being started by the sync. If the stack has no containers yet, all services are deployed.
+					Bring up only the services that already had a running container. Services you stopped stay stopped, but are still recreated with the new configuration so they run the latest version once you start them. If the stack has no containers yet, all services are deployed.
 				</p>
 			</div>
 

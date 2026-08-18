@@ -42,7 +42,7 @@
       },
       {
         "type": "feature",
-        "text": "sync from git can start only the services that were already running, leaving stopped services stopped (#1246)"
+        "text": "sync from git can start only the services that were already running; stopped services are updated but not started (#1246)"
       },
       {
         "type": "fix",

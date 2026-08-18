@@ -257,7 +257,7 @@
 						<span class="space-y-1">
 							<span class="block text-sm">Only start services that were already running</span>
 							<span class="block text-xs text-muted-foreground">
-								Services that are currently stopped stay stopped instead of being started by the sync.
+								Stopped services stay stopped. They are still updated to the new configuration, so they run the latest version when you start them.
 							</span>
 						</span>
 					</label>

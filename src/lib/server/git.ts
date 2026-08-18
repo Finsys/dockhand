@@ -1538,7 +1538,7 @@ export async function deployGitStackWithProgress(
 		// Tell the user up front which services this deploy will touch (#1246).
 		// deployStack resolves the list itself; this is only for the progress log.
 		if (onlyRunningServices) {
-			const { services, hasContainers, dropped } = await resolveServicesToStart(
+			const { services, hasContainers, dropped, stopped } = await resolveServicesToStart(
 				gitStack.stackName,
 				gitStack.environmentId,
 				composeContent
@@ -1549,6 +1549,14 @@ export async function deployGitStackWithProgress(
 					? 'No services were running - nothing will be started'
 					: 'Stack has no containers yet - starting all services';
 			onProgress({ status: 'deploying', message, step: 5, totalSteps });
+			if (stopped.length > 0) {
+				onProgress({
+					status: 'deploying',
+					message: `Updating ${stopped.join(', ')} without starting them`,
+					step: 5,
+					totalSteps
+				});
+			}
 			if (dropped.length > 0) {
 				onProgress({
 					status: 'deploying',
