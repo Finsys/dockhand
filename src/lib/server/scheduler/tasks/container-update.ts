@@ -693,6 +693,21 @@ export async function recreateContainer(
 		} catch (e: any) {
 			log?.(`WARNING: dependent-child reconnect step errored (parent update stands): ${e?.message}`);
 		}
+
+		// recreateContainer is only ever called to UPDATE a container's image (scheduled
+		// auto-update AND the manual batch-update UI), so a successful recreate is a
+		// container_updated event. This is what the UI's "container updated" toggle
+		// promises; auto_update_success is raised separately by the scheduler path. (#1424)
+		try {
+			await sendEventNotification('container_updated', {
+				title: 'Container updated',
+				message: `Container "${containerName}" was updated to a new image (${imageName})`,
+				type: 'success'
+			}, envId);
+		} catch (e: any) {
+			log?.(`WARNING: container_updated notification failed (update stands): ${e?.message}`);
+		}
+
 		return { success: true };
 	} catch (error: any) {
 		log?.(`Failed to recreate container: ${error.message}`);

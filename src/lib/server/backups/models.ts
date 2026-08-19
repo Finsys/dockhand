@@ -304,12 +304,14 @@ export function readConfigIdFromTags(tags: string[]): number | null {
  * cap killed healthy work mid-run (#1382). A stuck op is handled by manual cancel (the
  * helper is a named container killed by cancelBackup, and every run shows as `running` in
  * the execution log) and the helper reaper — the same model backrest/zerobyte use (neither
- * times out a backup). The two tiers remain so callers can still opt into a cap via env:
- * `RESTIC_TIMEOUT` (interactive: list/ls/init) and `RESTIC_MAINTENANCE_TIMEOUT`
- * (data: backup/restore/prune). Both default to 0 (off). */
+ * times out a backup). ONE env caps everything: `RESTIC_TIMEOUT` (milliseconds, 0 = off)
+ * applies to every restic operation - the host `restic` spawn AND the helper container.
+ * The tiers stay in the call API only as a log label; they no longer carry separate
+ * limits (previously RESTIC_MAINTENANCE_TIMEOUT set the data tier; folded into one). */
+const RESTIC_TIMEOUT_MS = Number(process.env.RESTIC_TIMEOUT ?? 0);
 export const TIMEOUTS = {
-	interactive: Number(process.env.RESTIC_TIMEOUT ?? 0),
-	data: Number(process.env.RESTIC_MAINTENANCE_TIMEOUT ?? 0),
+	interactive: RESTIC_TIMEOUT_MS,
+	data: RESTIC_TIMEOUT_MS,
 } as const;
 
 export type TimeoutTier = keyof typeof TIMEOUTS;

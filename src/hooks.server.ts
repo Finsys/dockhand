@@ -19,7 +19,7 @@ import type { HandleServerError, Handle } from '@sveltejs/kit';
 import { redirect } from '@sveltejs/kit';
 import { startRssTracker, stopRssTracker, rssBeforeOp, rssAfterOp } from '$lib/server/rss-tracker';
 import { getClientIp } from '$lib/server/client-ip';
-import { BACKUPS_ENABLED } from '$lib/server/features';
+import { BACKUPS_ENABLED, API_DOCS_ENABLED } from '$lib/server/features';
 // Side-effect import: installs globalThis.__authenticateWsUpgrade and
 // globalThis.__canAccessEnvForUser used by the raw WS upgrade handlers in
 // server.js / vite.config.ts to authenticate /api/containers/*/exec.
@@ -268,7 +268,8 @@ const PUBLIC_PATHS = [
 	'/api/changelog',
 	'/api/dependencies',
 	'/api/health',
-	'/api/settings/theme'
+	'/api/settings/theme',
+	'/api/docs'
 ];
 
 // Check if path is public
@@ -306,6 +307,17 @@ export const handle: Handle = async ({ event, resolve }) => {
 	if (!BACKUPS_ENABLED) {
 		const p = event.url.pathname;
 		if (p === '/backups' || p.startsWith('/backups/') || p.startsWith('/api/backup/')) {
+			return new Response('Not found', { status: 404 });
+		}
+	}
+
+	// API docs gate (see $lib/server/features.ts). Enforced HERE, not in the
+	// docs +page.server load, because the app runs ssr=false so a page load
+	// never fires on a cold server render. Single chokepoint covers the spec
+	// endpoint and the Scalar viewer.
+	if (!API_DOCS_ENABLED) {
+		const p = event.url.pathname.replace(/\/$/, '');
+		if (p === '/api/docs' || p === '/api/docs/ui') {
 			return new Response('Not found', { status: 404 });
 		}
 	}

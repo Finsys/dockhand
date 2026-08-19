@@ -10,6 +10,16 @@ import { authorize } from '$lib/server/authorize';
 import type { RequestHandler } from './$types';
 
 // GET /api/environments/[id]/notifications - List all notification configurations for an environment
+/**
+ * @openapi
+ * summary: List notification channel configurations attached to an environment
+ * path: id:integer! Environment id (from GET /api/environments)
+ * resp-200: array<{id:integer!, notificationId:integer!, enabled:boolean!, eventTypes:array<string>}>
+ * resp-400: Invalid environment id
+ * resp-403: Permission denied (RBAC 'notifications:view' missing)
+ * resp-404: Environment not found
+ * resp-500: Unexpected error while loading notifications
+ */
 export const GET: RequestHandler = async ({ params, cookies }) => {
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !await auth.can('notifications', 'view')) {
@@ -36,6 +46,20 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 };
 
 // POST /api/environments/[id]/notifications - Add a notification channel to an environment
+/**
+ * @openapi
+ * summary: Attach a notification channel to an environment
+ * description: notificationId from GET /api/notifications.
+ * path: id:integer! Environment id (from GET /api/environments)
+ * body: {notificationId:integer!, enabled:boolean, eventTypes:array<string>}
+ * body-example: {"notificationId":1,"enabled":true,"eventTypes":["stack_deploy_failed"]}
+ * resp-200: {id:integer!, notificationId:integer!, enabled:boolean!}
+ * resp-400: Invalid environment id, or notificationId missing
+ * resp-403: Permission denied (RBAC 'notifications:edit' missing)
+ * resp-404: Environment not found
+ * resp-409: This notification channel is already configured for this environment
+ * resp-500: Unexpected error while creating the notification link
+ */
 export const POST: RequestHandler = async ({ params, request, cookies }) => {
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !await auth.can('notifications', 'edit')) {

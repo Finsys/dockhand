@@ -91,9 +91,18 @@ function extractComposeVars(yaml: string): { required: string[]; optional: strin
 
 /**
  * POST /api/stacks/[name]/env/validate?env=X
- * Validate stack environment variables against compose file requirements.
- * Can use saved compose file or accept compose content in body.
- * Body (optional): { compose: "yaml content..." }
+ *
+ * @openapi
+ * summary: Validate a stack's defined environment variables against the variables required/optional by its compose file (compose content and the defined variable list may be supplied in the body, otherwise loaded from the saved file/DB)
+ * path: name:string! Stack name (from GET /api/stacks)
+ * query: env:integer Environment ID the stack belongs to (from GET /api/environments)
+ * body: {compose:string, variables:array<string>}
+ * body-example: {"compose":"services:\n  web:\n    image: ${IMAGE}","variables":["IMAGE"]}
+ * resp-200: {valid:boolean!, required:array<string>!, optional:array<string>!, defined:array<string>!, missing:array<string>!, unused:array<string>!}
+ * resp-200-example: {"valid":false,"required":["IMAGE"],"optional":[],"defined":[],"missing":["IMAGE"],"unused":[]}
+ * resp-400: No compose content provided and no saved compose file found
+ * resp-403: Permission denied (requires stacks:view, or environment access denied on enterprise)
+ * resp-500: Failed to validate environment variables
  */
 export const POST: RequestHandler = async ({ params, url, cookies, request }) => {
 	const auth = await authorize(cookies);
@@ -134,7 +143,9 @@ export const POST: RequestHandler = async ({ params, url, cookies, request }) =>
 
 		// If no compose in body, try to load from saved file
 		if (!composeContent) {
-			const savedCompose = await getStackComposeFile(stackName);
+			// Pass the env id so an environment-scoped stack_sources row is found - without
+			// it getStackSource scopes to environment_id IS NULL and the fallback misses (#1423).
+			const savedCompose = await getStackComposeFile(stackName, envIdNum);
 			if (savedCompose.success && savedCompose.content) {
 				composeContent = savedCompose.content;
 			}

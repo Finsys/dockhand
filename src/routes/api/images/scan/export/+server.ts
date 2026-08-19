@@ -20,6 +20,17 @@ function toCSV(findings: Finding[]): string {
 	return rowsToCSV(headers, rows);
 }
 
+/**
+ * GET /api/images/scan/export - Export one image's cached findings (json|csv|sarif)
+ *
+ * @openapi
+ * summary: Export the cached vulnerability findings for a single image as json, csv, or sarif
+ * query: imageId:string! Image SHA/ID to export (falls back to the "image" param when omitted) (from GET /api/images)
+ * query: image:string Image name/ID used as a fallback when imageId is not given
+ * query: format:string Output format — json (default), csv, or sarif
+ * resp-200: The findings as a downloadable json, csv, or sarif attachment
+ * resp-200-desc: A 400 is returned when imageId is missing or (auth enabled) env is not specified, and 500 on failure
+ */
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	const imageId = url.searchParams.get('imageId') || url.searchParams.get('image');
 	if (!imageId) return jsonError('imageId is required', 400);

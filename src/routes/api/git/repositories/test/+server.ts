@@ -14,6 +14,18 @@ import { authorize } from '$lib/server/authorize';
  *   credentialId?: number; // Optional credential ID from database
  * }
  */
+/**
+ * @openapi
+ * summary: Test an unsaved repository configuration (url/branch/credentialId) before creating it
+ * description: credentialId from GET /api/git/credentials.
+ * body: {url:string!, branch:string, credentialId:integer}
+ * body-example: {"url":"https://github.com/example/homelab.git","branch":"main","credentialId":2}
+ * resp-200: {success:boolean!, error:string}
+ * resp-200-example: {"success":true}
+ * resp-400: The url field is missing
+ * resp-403: Caller lacks the settings:manage permission
+ * resp-500: The connectivity test failed
+ */
 export const POST: RequestHandler = async ({ request, cookies }) => {
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !await auth.can('settings', 'manage')) {

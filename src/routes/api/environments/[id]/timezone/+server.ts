@@ -38,6 +38,15 @@ function normalizeTimezone(tz: string): string {
 
 /**
  * Get timezone for an environment.
+ *
+ * @openapi
+ * summary: Get the IANA timezone used for scheduling on an environment
+ * path: id:integer! Environment id (from GET /api/environments)
+ * resp-200: {timezone:string!}
+ * resp-200-example: {"timezone":"Europe/Berlin"}
+ * resp-403: Permission denied (RBAC 'environments:view' missing)
+ * resp-404: Environment not found
+ * resp-500: Unexpected error while loading the timezone
  */
 export const GET: RequestHandler = async ({ params, cookies }) => {
 	const auth = await authorize(cookies);
@@ -66,6 +75,17 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 
 /**
  * Set timezone for an environment.
+ *
+ * @openapi
+ * summary: Set the IANA timezone for an environment and refresh its schedules to use it
+ * path: id:integer! Environment id (from GET /api/environments)
+ * body: {timezone:string!}
+ * body-example: {"timezone":"Europe/Berlin"}
+ * resp-200: {success:boolean!, timezone:string!}
+ * resp-400: Not a recognized IANA timezone (Intl.supportedValuesOf('timeZone'))
+ * resp-403: Permission denied (RBAC 'environments:edit' missing)
+ * resp-404: Environment not found
+ * resp-500: Unexpected error while saving the timezone
  */
 export const POST: RequestHandler = async ({ params, request, cookies }) => {
 	const auth = await authorize(cookies);

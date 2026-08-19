@@ -220,6 +220,20 @@ async function searchCatalog(registry: any, term: string, limit: number): Promis
 	return results;
 }
 
+/**
+ * @openapi
+ * summary: Search for images by name in Docker Hub or a configured private registry (direct + catalog fallback)
+ * description: With no registry parameter the search runs against Docker Hub; otherwise against the given registry, falling back to Docker Hub search when the registry is a Docker Hub mirror.
+ * query: term:string! Search term / image name
+ * query: limit:integer Maximum number of results (default 25)
+ * query: registry:integer ID of the configured registry to search; omit to search Docker Hub (from GET /api/registries)
+ * resp-200: array<{name:string!, description:string, star_count:integer, is_official:boolean, is_automated:boolean}>
+ * resp-200-example: [{"name":"nginx","description":"Official build of Nginx","star_count":20000,"is_official":true,"is_automated":false}]
+ * resp-400: The term query parameter is missing
+ * resp-404: The referenced registry does not exist
+ * resp-500: Failed to search images
+ * resp-503: Could not connect to the registry (connection refused or host not found)
+ */
 export const GET: RequestHandler = async ({ url }) => {
 	const term = url.searchParams.get('term');
 	const limit = parseInt(url.searchParams.get('limit') || '25', 10);

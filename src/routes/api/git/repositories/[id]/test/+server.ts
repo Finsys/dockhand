@@ -3,6 +3,16 @@ import type { RequestHandler } from './$types';
 import { getGitRepository } from '$lib/server/db';
 import { testRepository } from '$lib/server/git';
 
+/**
+ * @openapi
+ * summary: Test connectivity/authentication to a saved repository using its stored credential
+ * path: id:integer! Git repository ID (from GET /api/git/repositories)
+ * resp-200: {success:boolean!, error:string}
+ * resp-200-example: {"success":true}
+ * resp-400: The id path segment is not a valid integer
+ * resp-404: No repository exists with that ID
+ * resp-500: The connectivity test failed
+ */
 export const POST: RequestHandler = async ({ params }) => {
 	try {
 		const id = parseInt(params.id);

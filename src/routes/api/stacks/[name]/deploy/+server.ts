@@ -5,6 +5,16 @@ import { auditStack } from '$lib/server/audit';
 import { createJobResponse } from '$lib/server/sse';
 import type { RequestHandler } from './$types';
 
+/**
+ * @openapi
+ * summary: Deploy (docker compose up) a stack, optionally pulling images, building, and force-recreating; progress and the final result stream over Server-Sent Events
+ * path: name:string! Stack name (from GET /api/stacks)
+ * query: env:integer Environment ID the stack belongs to (from GET /api/environments)
+ * body: {pull:boolean, build:boolean, forceRecreate:boolean}
+ * body-example: {"pull":true,"build":false,"forceRecreate":false}
+ * resp-200: Server-Sent-Events job stream with progress events and a final result event ({success, output})
+ * resp-403: Permission denied (requires stacks:start, or environment access denied on enterprise)
+ */
 export const POST: RequestHandler = async (event) => {
 	const { params, url, cookies, request } = event;
 	const auth = await authorize(cookies);

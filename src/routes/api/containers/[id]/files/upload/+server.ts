@@ -84,6 +84,23 @@ function createTarArchive(filename: string, content: Uint8Array): Uint8Array {
 	return tar;
 }
 
+/**
+ * POST /api/containers/{id}/files/upload - Upload files into a container
+ *
+ * @openapi
+ * summary: Upload one or more files into a container directory (requires the 'exec' permission)
+ * description: Send `multipart/form-data` with one or more `files` parts; each file is tar-wrapped and written into the target directory. Partial success is reported per file in `uploaded`/`errors`.
+ * body-multipart: files:binary[]! One or more files to write into the target directory
+ * path: id:string! Container ID or name (from GET /api/containers)
+ * query: env:integer The target environment ID (omit for the local/default Docker host) (from GET /api/environments)
+ * query: path:string! Absolute target directory inside the container
+ * resp-200: {success:boolean!, uploaded:array<string>!, errors:array<string>}
+ * resp-200-example: {"success":true,"uploaded":["app.conf"]}
+ * resp-400: Target path missing, or no files provided
+ * resp-403: Permission denied to write to the path
+ * resp-404: Target directory not found
+ * resp-500: Failed to upload the files
+ */
 export const POST: RequestHandler = async ({ params, url, request, cookies }) => {
 	const invalid = validateDockerIdParam(params.id, 'container');
 	if (invalid) return invalid;

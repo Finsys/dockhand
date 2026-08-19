@@ -13,3 +13,54 @@ export function encodeRegistryAuth(authConfig: object): string {
 	const unpadded = Buffer.from(JSON.stringify(authConfig)).toString('base64url');
 	return unpadded + '='.repeat((4 - (unpadded.length % 4)) % 4);
 }
+
+/**
+ * Whether Basic credentials may be re-attached when a registry token request
+ * redirects. True only when the host is unchanged. A Harbor behind a
+ * TLS-terminating proxy advertises an `http://` realm that 301s to `https://`
+ * on the SAME host; undici strips Authorization across that origin change,
+ * turning a valid login into an anonymous 401. Re-attaching on a same-host
+ * scheme/port change matches docker/curl. A host CHANGE must never re-send
+ * creds (leak risk), so those are refused. (#1428)
+ */
+export function canReattachAuthOnRedirect(from: string, to: string): boolean {
+	try {
+		return new URL(from).hostname === new URL(to).hostname;
+	} catch {
+		return false;
+	}
+}
+
+/** Injectable fetch, so the redirect-follow loop is unit-testable without a network. */
+export type FetchLike = (url: string, init?: { headers?: Record<string, string>; redirect?: 'manual' }) => Promise<Response>;
+
+/**
+ * Fetch a registry token URL, manually following up to a few same-host redirects
+ * with the Authorization header re-attached. `authHeader` is the full header value
+ * (e.g. `Basic abc...`) or null for anonymous. Cross-host redirects drop the header
+ * (see canReattachAuthOnRedirect). Manual redirect handling is what fixes #1428:
+ * undici's automatic follow strips Authorization across an http->https origin change.
+ */
+export async function fetchRegistryToken(
+	tokenUrl: string,
+	authHeader: string | null,
+	fetchImpl: FetchLike = fetch as unknown as FetchLike
+): Promise<Response> {
+	let url = tokenUrl;
+	for (let hop = 0; hop < 4; hop++) {
+		const headers: Record<string, string> = { 'User-Agent': 'Dockhand/1.0' };
+		if (authHeader) headers['Authorization'] = authHeader;
+		const res = await fetchImpl(url, { headers, redirect: 'manual' });
+		const location = res.status >= 300 && res.status < 400 ? res.headers.get('location') : null;
+		if (!location) return res;
+		await res.body?.cancel().catch(() => {});
+		const next = new URL(location, url).toString();
+		// Drop credentials if the redirect leaves the original host.
+		if (!canReattachAuthOnRedirect(url, next)) authHeader = null;
+		url = next;
+	}
+	// Too many hops: one final attempt so the caller sees a real status.
+	const headers: Record<string, string> = { 'User-Agent': 'Dockhand/1.0' };
+	if (authHeader) headers['Authorization'] = authHeader;
+	return fetchImpl(url, { headers });
+}

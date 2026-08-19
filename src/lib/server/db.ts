@@ -6,7 +6,7 @@
  */
 
 import type { SecretProviderConfig, SecretProviderType } from './secretproviders/shared';
-import { SECRET_CONFIG_KEYS } from './secretproviders/shared';
+import { mergeProviderConfigForWrite } from './secretproviders/shared';
 import {
 	db,
 	isPostgres,
@@ -386,13 +386,10 @@ export async function updateSecretProvider(
 		if (typeUnchanged) {
 			const existing = await getSecretProviderById(id);
 			if (existing) {
-				for (const key of SECRET_CONFIG_KEYS) {
-					const incoming = (data.config as Record<string, unknown>)[key];
-					if (incoming === undefined || incoming === '') {
-						const stored = (existing.config as Record<string, unknown>)[key];
-						if (stored !== undefined) merged[key] = stored;
-					}
-				}
+				merged = mergeProviderConfigForWrite(
+					data.config as Record<string, unknown>,
+					existing.config as Record<string, unknown>
+				);
 			}
 		}
 		const encrypted = encrypt(JSON.stringify(merged));
@@ -539,8 +536,9 @@ export async function getUserThemePreferences(userId: number): Promise<{
 	animateIcons: boolean;
 	coloredActionButtons: boolean;
 	actionIconSize: string;
+	editorIndentGuides: boolean;
 }> {
-	const [lightTheme, darkTheme, font, fontSize, gridFontSize, terminalFont, editorFont, animateIcons, coloredActionButtons, actionIconSize] = await Promise.all([
+	const [lightTheme, darkTheme, font, fontSize, gridFontSize, terminalFont, editorFont, animateIcons, coloredActionButtons, actionIconSize, editorIndentGuides] = await Promise.all([
 		getUserSetting(userId, 'light_theme'),
 		getUserSetting(userId, 'dark_theme'),
 		getUserSetting(userId, 'font'),
@@ -550,7 +548,8 @@ export async function getUserThemePreferences(userId: number): Promise<{
 		getUserSetting(userId, 'editor_font'),
 		getUserSetting(userId, 'animate_icons'),
 		getUserSetting(userId, 'colored_action_buttons'),
-		getUserSetting(userId, 'action_icon_size')
+		getUserSetting(userId, 'action_icon_size'),
+		getUserSetting(userId, 'editor_indent_guides')
 	]);
 	return {
 		lightTheme: lightTheme || 'default',
@@ -564,13 +563,15 @@ export async function getUserThemePreferences(userId: number): Promise<{
 		animateIcons: animateIcons === 'false' ? false : true,
 		// Default OFF — only true when explicitly stored
 		coloredActionButtons: coloredActionButtons === 'true',
-		actionIconSize: actionIconSize || 'normal'
+		actionIconSize: actionIconSize || 'normal',
+		// Default OFF — only true when explicitly stored (#1410)
+		editorIndentGuides: editorIndentGuides === 'true'
 	};
 }
 
 export async function setUserThemePreferences(
 	userId: number,
-	prefs: { lightTheme?: string; darkTheme?: string; font?: string; fontSize?: string; gridFontSize?: string; terminalFont?: string; editorFont?: string; animateIcons?: boolean; coloredActionButtons?: boolean; actionIconSize?: string }
+	prefs: { lightTheme?: string; darkTheme?: string; font?: string; fontSize?: string; gridFontSize?: string; terminalFont?: string; editorFont?: string; animateIcons?: boolean; coloredActionButtons?: boolean; actionIconSize?: string; editorIndentGuides?: boolean }
 ): Promise<void> {
 	const updates: Promise<void>[] = [];
 	if (prefs.lightTheme !== undefined) {
@@ -602,6 +603,9 @@ export async function setUserThemePreferences(
 	}
 	if (prefs.actionIconSize !== undefined) {
 		updates.push(setUserSetting(userId, 'action_icon_size', prefs.actionIconSize));
+	}
+	if (prefs.editorIndentGuides !== undefined) {
+		updates.push(setUserSetting(userId, 'editor_indent_guides', prefs.editorIndentGuides ? 'true' : 'false'));
 	}
 	await Promise.all(updates);
 }
@@ -969,6 +973,7 @@ export const NOTIFICATION_EVENT_TYPES = [
 	{ id: 'auto_update_failed', label: 'Auto-update failed', description: 'Container auto-update failed (pull error, start error)', group: 'auto_update', scope: 'environment' },
 	{ id: 'auto_update_blocked', label: 'Auto-update blocked', description: 'Update blocked due to vulnerability criteria', group: 'auto_update', scope: 'environment' },
 	{ id: 'updates_detected', label: 'Updates detected', description: 'Container image updates are available (scheduled check)', group: 'auto_update', scope: 'environment' },
+	{ id: 'newer_version_available', label: 'Newer version tag', description: 'A newer version tag is published for a pinned image (semver, advisory)', group: 'auto_update', scope: 'environment' },
 	{ id: 'batch_update_success', label: 'Batch update completed', description: 'Scheduled container updates completed successfully', group: 'auto_update', scope: 'environment' },
 
 	// Git stack events (environment-scoped)
@@ -4885,6 +4890,48 @@ export interface EnvUpdateCheckSettings {
 	vulnerabilityCriteria: VulnerabilityCriteria;
 }
 
+/**
+ * Global newer-version-tag (semver) detection config. Per-env settings decide
+ * WHEN/whether to check on a schedule; this decides HOW versions are read, and
+ * applies to every check - scheduled and manual alike.
+ */
+export interface GlobalSemverConfig {
+	enabled: boolean;
+	maxBump: 'patch' | 'minor' | 'major';
+	matchFlavor: boolean;
+	includePrerelease: boolean;
+}
+
+const GLOBAL_SEMVER_KEY = 'global_semver_check';
+const DEFAULT_SEMVER_CONFIG: GlobalSemverConfig = {
+	enabled: false,
+	maxBump: 'major',
+	matchFlavor: true,
+	includePrerelease: false
+};
+
+export async function getGlobalSemverConfig(): Promise<GlobalSemverConfig> {
+	const result = await db.select().from(settings).where(eq(settings.key, GLOBAL_SEMVER_KEY));
+	if (!result[0]) return { ...DEFAULT_SEMVER_CONFIG };
+	try {
+		return { ...DEFAULT_SEMVER_CONFIG, ...JSON.parse(result[0].value) };
+	} catch {
+		return { ...DEFAULT_SEMVER_CONFIG };
+	}
+}
+
+export async function setGlobalSemverConfig(config: GlobalSemverConfig): Promise<void> {
+	const value = JSON.stringify(config);
+	const existing = await db.select().from(settings).where(eq(settings.key, GLOBAL_SEMVER_KEY));
+	if (existing.length > 0) {
+		await db.update(settings)
+			.set({ value, updatedAt: new Date().toISOString() })
+			.where(eq(settings.key, GLOBAL_SEMVER_KEY));
+	} else {
+		await db.insert(settings).values({ key: GLOBAL_SEMVER_KEY, value });
+	}
+}
+
 export async function getEnvUpdateCheckSettings(envId: number): Promise<EnvUpdateCheckSettings | null> {
 	const key = `env_${envId}_update_check`;
 	const result = await db.select().from(settings).where(eq(settings.key, key));
@@ -5459,8 +5506,15 @@ export async function addPendingContainerUpdate(
 	environmentId: number,
 	containerId: string,
 	containerName: string,
-	currentImage: string
+	currentImage: string,
+	// A row can exist for a digest update, a newer-version-tag (semver) suggestion,
+	// or both. Both flags default to the classic "digest update only" shape so
+	// existing callers keep working unchanged.
+	options: { hasImageUpdate?: boolean; newerVersion?: unknown | null } = {}
 ): Promise<void> {
+	const hasImageUpdate = options.hasImageUpdate ?? true;
+	const newerVersion = options.newerVersion != null ? JSON.stringify(options.newerVersion) : null;
+	const now = new Date().toISOString();
 	// Use insert with onConflictDoUpdate for upsert behavior
 	await db.insert(pendingContainerUpdates)
 		.values({
@@ -5468,14 +5522,18 @@ export async function addPendingContainerUpdate(
 			containerId,
 			containerName,
 			currentImage,
-			checkedAt: new Date().toISOString()
+			hasImageUpdate,
+			newerVersion,
+			checkedAt: now
 		})
 		.onConflictDoUpdate({
 			target: [pendingContainerUpdates.environmentId, pendingContainerUpdates.containerId],
 			set: {
 				containerName,
 				currentImage,
-				checkedAt: new Date().toISOString()
+				hasImageUpdate,
+				newerVersion,
+				checkedAt: now
 			}
 		});
 }

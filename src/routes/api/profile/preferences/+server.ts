@@ -5,6 +5,13 @@ import { validateSession, isAuthEnabled } from '$lib/server/auth';
 import { lightThemes, darkThemes, fonts, monospaceFonts } from '$lib/themes';
 
 // GET /api/profile/preferences - Get current user's theme preferences
+/**
+ * @openapi
+ * summary: Get the current user's UI preferences (theme, fonts, editor options)
+ * resp-400: Not authenticated / no user in context
+ * resp-401: Not authenticated
+ * resp-500: Failed to load preferences
+ */
 export const GET: RequestHandler = async ({ cookies }) => {
 	if (!(await isAuthEnabled())) {
 		return json({ error: 'Authentication is not enabled' }, { status: 400 });
@@ -25,6 +32,14 @@ export const GET: RequestHandler = async ({ cookies }) => {
 };
 
 // PUT /api/profile/preferences - Update current user's theme preferences
+/**
+ * @openapi
+ * summary: Update the current user's UI preferences (each field is optional)
+ * body: {lightTheme:string, darkTheme:string, font:string, fontSize:string, gridFontSize:string, terminalFont:string, editorFont:string, animateIcons:boolean, coloredActionButtons:boolean, actionIconSize:string, editorIndentGuides:boolean}
+ * resp-400: A supplied field has the wrong type (e.g. editorIndentGuides not a boolean)
+ * resp-401: Not authenticated
+ * resp-500: Failed to save preferences
+ */
 export const PUT: RequestHandler = async ({ request, cookies }) => {
 	if (!(await isAuthEnabled())) {
 		return json({ error: 'Authentication is not enabled' }, { status: 400 });
@@ -47,7 +62,7 @@ export const PUT: RequestHandler = async ({ request, cookies }) => {
 
 		const validActionIconSizes = ['small', 'normal', 'large', 'xlarge'];
 
-		const updates: { lightTheme?: string; darkTheme?: string; font?: string; fontSize?: string; gridFontSize?: string; terminalFont?: string; editorFont?: string; animateIcons?: boolean; coloredActionButtons?: boolean; actionIconSize?: string } = {};
+		const updates: { lightTheme?: string; darkTheme?: string; font?: string; fontSize?: string; gridFontSize?: string; terminalFont?: string; editorFont?: string; animateIcons?: boolean; coloredActionButtons?: boolean; actionIconSize?: string; editorIndentGuides?: boolean } = {};
 
 		if (data.lightTheme !== undefined) {
 			if (!validLightThemeIds.includes(data.lightTheme)) {
@@ -103,6 +118,13 @@ export const PUT: RequestHandler = async ({ request, cookies }) => {
 				return json({ error: 'Invalid animateIcons' }, { status: 400 });
 			}
 			updates.animateIcons = data.animateIcons;
+		}
+
+		if (data.editorIndentGuides !== undefined) {
+			if (typeof data.editorIndentGuides !== 'boolean') {
+				return json({ error: 'Invalid editorIndentGuides' }, { status: 400 });
+			}
+			updates.editorIndentGuides = data.editorIndentGuides;
 		}
 
 		if (data.coloredActionButtons !== undefined) {

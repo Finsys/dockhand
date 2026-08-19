@@ -8,6 +8,14 @@ import {
 import { authorize } from '$lib/server/authorize';
 import { auditGitRepository } from '$lib/server/audit';
 
+/**
+ * @openapi
+ * summary: List all git repositories (repositories are global, not scoped to an environment)
+ * resp-200: array<{id:integer!, name:string!, url:string!, branch:string!, credentialId:integer}>
+ * resp-200-example: [{"id":1,"name":"homelab","url":"https://github.com/example/homelab.git","branch":"main","credentialId":2}]
+ * resp-403: Caller lacks the git:view permission
+ * resp-500: Failed to read git repositories
+ */
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !await auth.can('git', 'view')) {
@@ -25,6 +33,17 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 	}
 };
 
+/**
+ * @openapi
+ * summary: Create a git repository (branch defaults to main); deployment config lives on git stacks, not here
+ * description: credentialId from GET /api/git/credentials.
+ * body: {name:string!, url:string!, branch:string, credentialId:integer}
+ * body-example: {"name":"homelab","url":"https://github.com/example/homelab.git","branch":"main","credentialId":2}
+ * resp-200: {id:integer!, name:string!, url:string!, branch:string!, credentialId:integer}
+ * resp-400: Missing name/url, an invalid credentialId, or a duplicate repository name
+ * resp-403: Caller lacks the git:create permission
+ * resp-500: Failed to create the git repository
+ */
 export const POST: RequestHandler = async (event) => {
 	const { request, cookies } = event;
 	const auth = await authorize(cookies);

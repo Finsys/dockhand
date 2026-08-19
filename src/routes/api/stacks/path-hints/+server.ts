@@ -4,7 +4,16 @@ import { authorize } from '$lib/server/authorize';
 
 /**
  * GET /api/stacks/path-hints?name=stackName&env=envId
- * Returns path hints extracted from Docker container labels for a stack.
+ *
+ * @openapi
+ * summary: Return path hints (working directory and config file paths) extracted from a stack's Docker container labels
+ * query: name:string! Stack name (from GET /api/stacks)
+ * query: env:integer Environment ID the stack belongs to (from GET /api/environments)
+ * resp-200: {stackName:string!, workingDir:string, configFiles:array<string>}
+ * resp-200-example: {"stackName":"web","workingDir":"/opt/stacks/web","configFiles":["/opt/stacks/web/compose.yaml"]}
+ * resp-400: Stack name is required
+ * resp-401: Unauthorized
+ * resp-500: Failed to get path hints
  */
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	const auth = await authorize(cookies);

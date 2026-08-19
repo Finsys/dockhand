@@ -84,6 +84,20 @@ function formatToMarkdown(logs: AuditLog[]): string {
 	return lines.join('\n');
 }
 
+/**
+ * @openapi
+ * summary: Export the audit log as a downloadable file in JSON, CSV or Markdown (Enterprise only)
+ * query: username:string Filter by username
+ * query: entityType:string Filter by entity type
+ * query: action:string Filter by action
+ * query: environmentId:integer Filter to a single environment (from GET /api/environments)
+ * query: fromDate:string Start of the date range (ISO 8601)
+ * query: toDate:string End of the date range (ISO 8601)
+ * query: format:string Output format — json (default), csv or md
+ * resp-200: Downloadable audit-log export (Content-Disposition attachment; JSON, CSV or Markdown)
+ * resp-403: Enterprise required, or permission denied
+ * resp-500: Failed to export audit logs
+ */
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	const auth = await authorize(cookies);
 

@@ -9,6 +9,9 @@
 	import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 	import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap, type CompletionContext, type CompletionResult } from '@codemirror/autocomplete';
 	import { oneDarkHighlightStyle } from '@codemirror/theme-one-dark';
+	import { indentationMarkers } from '@replit/codemirror-indentation-markers';
+	import { themeStore } from '$lib/stores/theme';
+	import { get } from 'svelte/store';
 	import { shell } from '@codemirror/legacy-modes/mode/shell';
 	import { dockerFile } from '@codemirror/legacy-modes/mode/dockerfile';
 	import { toml } from '@codemirror/legacy-modes/mode/toml';
@@ -208,6 +211,14 @@
 		defaultValue?: string; // The default value from compose syntax (e.g., ${VAR:-default})
 	}
 
+	/** A Compose Validate finding placed on a source line (IDE-style lint marker). */
+	export interface LintMarker {
+		line: number; // 1-based
+		severity: 'error' | 'warn' | 'info';
+		ruleId: string;
+		message: string;
+	}
+
 	interface Props {
 		value: string;
 		language?: string;
@@ -216,12 +227,17 @@
 		onchange?: (value: string) => void;
 		class?: string;
 		variableMarkers?: VariableMarker[];
+		/** Compose Validate findings rendered as line underlines + gutter icons. */
+		lintMarkers?: LintMarker[];
+		/** Fired when a lint gutter icon / underlined line is clicked (for the mini-modal). */
+		onLintClick?: (line: number) => void;
 	}
 
-	let { value = '', language = 'yaml', readonly = false, theme = 'dark', onchange, class: className = '', variableMarkers: variableMarkersProp = [] }: Props = $props();
+	let { value = '', language = 'yaml', readonly = false, theme = 'dark', onchange, class: className = '', variableMarkers: variableMarkersProp = [], lintMarkers: lintMarkersProp = [], onLintClick }: Props = $props();
 
 	// Keep markers reactive - destructured props with defaults lose reactivity
 	const variableMarkers = $derived(variableMarkersProp);
+	const lintMarkers = $derived(lintMarkersProp);
 
 	let container: HTMLDivElement;
 	let view: EditorView | null = null;
@@ -509,6 +525,126 @@
 		initialSpacer: () => new VariableGutterMarker('required')
 	});
 
+	// --- Compose Validate lint markers (line underline + clickable gutter icon) -------
+	// Callback ref so the click handler updates without recreating the editor.
+	let onLintClickRef: ((line: number) => void) | undefined = onLintClick;
+	$effect(() => { onLintClickRef = onLintClick; });
+
+	// Inner SVG paths for the lucide icons used on the gutter (circle-x / triangle-alert
+	// / info). Rendered inline because a CodeMirror GutterMarker can't mount a Svelte
+	// component; currentColor follows the severity class colour.
+	const LINT_ICON_SVG = {
+		error: '<circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/>',
+		warn: '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+		info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>'
+	} as const;
+
+	class LintGutterMarker extends GutterMarker {
+		severity: 'error' | 'warn' | 'info';
+		line: number;
+		tooltip: string;
+		constructor(severity: 'error' | 'warn' | 'info', line: number, tooltip: string) {
+			super();
+			this.severity = severity;
+			this.line = line;
+			this.tooltip = tooltip;
+		}
+		// Let CodeMirror reuse the DOM when the marker is unchanged, so an unrelated
+		// keystroke doesn't rebuild the gutter icons.
+		eq(other: LintGutterMarker) {
+			return (
+				this.severity === other.severity && this.line === other.line && this.tooltip === other.tooltip
+			);
+		}
+		toDOM() {
+			const el = document.createElement('span');
+			el.className = `cm-lint-marker cm-lint-${this.severity}`;
+			// The native title shows the actual finding(s) on hover (click for full details).
+			el.title = this.tooltip;
+			el.setAttribute('role', 'button');
+			el.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round">${LINT_ICON_SVG[this.severity]}</svg>`;
+			el.addEventListener('mousedown', (e) => {
+				e.preventDefault();
+				e.stopPropagation();
+				onLintClickRef?.(this.line);
+			});
+			return el;
+		}
+	}
+
+	const updateLintEffect = StateEffect.define<LintMarker[]>();
+	const currentLintField = StateField.define<LintMarker[]>({
+		create: () => lintMarkers,
+		update(v, tr) {
+			for (const e of tr.effects) if (e.is(updateLintEffect)) return e.value;
+			return v;
+		}
+	});
+
+	// Highest severity per line drives both the gutter icon and the underline colour.
+	function worstBySeverityPerLine(markers: LintMarker[]): Map<number, 'error' | 'warn' | 'info'> {
+		const rank = { error: 0, warn: 1, info: 2 } as const;
+		const m = new Map<number, 'error' | 'warn' | 'info'>();
+		for (const f of markers) {
+			const prev = m.get(f.line);
+			if (!prev || rank[f.severity] < rank[prev]) m.set(f.line, f.severity);
+		}
+		return m;
+	}
+
+	// All finding messages on a line, for the hover tooltip.
+	function messagesForLine(markers: LintMarker[], line: number): string {
+		const msgs = markers.filter((m) => m.line === line).map((m) => m.message);
+		return msgs.join('\n');
+	}
+
+	function buildLintGutter(doc: any, markers: LintMarker[]): RangeSet<GutterMarker> {
+		const worst = worstBySeverityPerLine(markers);
+		const builder: { from: number; marker: GutterMarker }[] = [];
+		for (const [line, sev] of worst) {
+			if (line < 1 || line > doc.lines) continue;
+			builder.push({ from: doc.line(line).from, marker: new LintGutterMarker(sev, line, messagesForLine(markers, line)) });
+		}
+		builder.sort((a, b) => a.from - b.from);
+		return RangeSet.of(builder.map((b) => b.marker.range(b.from)), true);
+	}
+
+	function buildLintDecorations(doc: any, markers: LintMarker[]): DecorationSet {
+		const worst = worstBySeverityPerLine(markers);
+		const decos: { from: number; deco: Decoration }[] = [];
+		for (const [line, sev] of worst) {
+			if (line < 1 || line > doc.lines) continue;
+			decos.push({
+				from: doc.line(line).from,
+				deco: Decoration.line({ class: `cm-lint-line cm-lint-line-${sev}` })
+			});
+		}
+		decos.sort((a, b) => a.from - b.from);
+		return Decoration.set(decos.map((d) => d.deco.range(d.from)), true);
+	}
+
+	const lintGutterField = StateField.define<RangeSet<GutterMarker>>({
+		create: (state) => buildLintGutter(state.doc, lintMarkers),
+		update(v, tr) {
+			for (const e of tr.effects) if (e.is(updateLintEffect)) return buildLintGutter(tr.state.doc, e.value);
+			return tr.docChanged ? buildLintGutter(tr.state.doc, tr.state.field(currentLintField)) : v;
+		}
+	});
+
+	const lintDecorationsField = StateField.define<DecorationSet>({
+		create: (state) => buildLintDecorations(state.doc, lintMarkers),
+		update(v, tr) {
+			for (const e of tr.effects) if (e.is(updateLintEffect)) return buildLintDecorations(tr.state.doc, e.value);
+			return tr.docChanged ? buildLintDecorations(tr.state.doc, tr.state.field(currentLintField)) : v;
+		},
+		provide: (f) => EditorView.decorations.from(f)
+	});
+
+	const lintGutter = gutter({
+		class: 'cm-lint-gutter',
+		markers: (view) => view.state.field(lintGutterField)
+	});
+
 	// YAML Enter handler: after a key-only line ending with ":", indent one level
 	// deeper than what the default indent service returns (it can't predict child
 	// indent when no child content exists yet).
@@ -707,6 +843,19 @@
 			EditorView.lineWrapping,
 			EditorState.tabSize.of(2),
 			getLanguageExtension(language),
+			// Vertical indentation guides, opt-in per user (#1410). Subtle tones for both themes.
+			...(get(themeStore).editorIndentGuides
+				? [indentationMarkers({
+						highlightActiveBlock: true,
+						hideFirstIndent: true,
+						colors: {
+							light: '#e2e8f0',
+							dark: '#3a3f4b',
+							activeLight: '#94a3b8',
+							activeDark: '#5b6472'
+						}
+					})]
+				: []),
 			...(language === 'yaml' ? [Prec.high(keymap.of([{ key: 'Enter', run: yamlNewlineAndIndent }]))] : [])
 		].flat();
 
@@ -716,6 +865,12 @@
 
 		// Always add variable markers gutter and value decorations (can be updated dynamically)
 		extensions.push(currentMarkersField, variableMarkersField, variableGutter, valueDecorationsField);
+		// Lint gutter/decorations only when this editor is a lint consumer (Compose
+		// validate wires onLintClick, or passes markers up front). Otherwise every other
+		// CodeEditor would render an empty 18px lint gutter column.
+		if (onLintClickRef || lintMarkers.length > 0) {
+			extensions.push(currentLintField, lintGutterField, lintDecorationsField, lintGutter);
+		}
 
 		const state = EditorState.create({
 			doc: value,
@@ -748,13 +903,21 @@
 			dispatchTransactions
 		});
 
-		// Push initial markers if provided
+		// Push initial variable markers if provided. Lint markers need no initial
+		// dispatch: currentLintField/gutter are created from lintMarkers, and the reactive
+		// $effect below fires once on mount - dispatching here too would double it.
 		if (variableMarkers.length > 0) {
 			view.dispatch({
 				effects: updateMarkersEffect.of(variableMarkers)
 			});
 		}
 	}
+
+	// Re-dispatch lint markers whenever the prop changes (reactive).
+	$effect(() => {
+		const markers = lintMarkers;
+		if (view) view.dispatch({ effects: updateLintEffect.of(markers) });
+	});
 
 	function destroyEditor() {
 		if (markerUpdateTimer) {
@@ -790,6 +953,19 @@
 	// Focus the editor
 	export function focus() {
 		view?.focus();
+	}
+
+	/** Scroll a 1-based line into view and place the cursor on it (used by validate jump-to). */
+	export function scrollToLine(line: number) {
+		if (!view) return;
+		const doc = view.state.doc;
+		if (line < 1 || line > doc.lines) return;
+		const pos = doc.line(line).from;
+		view.dispatch({
+			selection: { anchor: pos },
+			effects: EditorView.scrollIntoView(pos, { y: 'center' })
+		});
+		view.focus();
 	}
 
 	// Update variable markers - this is the key method for parent to call
@@ -836,16 +1012,18 @@
 	// Track previous values for comparison
 	let prevLanguage = $state(language);
 	let prevTheme = $state(theme);
+	let prevIndentGuides = $state($themeStore.editorIndentGuides);
 
-	// Recreate editor if language or theme changes
+	// Recreate editor if language, theme, or the indent-guides preference changes
 	$effect(() => {
 		const currentLanguage = language;
 		const currentTheme = theme;
+		const currentIndentGuides = $themeStore.editorIndentGuides;
 
-		// Only recreate if language or theme actually changed
-		if (view && (currentLanguage !== prevLanguage || currentTheme !== prevTheme)) {
+		if (view && (currentLanguage !== prevLanguage || currentTheme !== prevTheme || currentIndentGuides !== prevIndentGuides)) {
 			prevLanguage = currentLanguage;
 			prevTheme = currentTheme;
+			prevIndentGuides = currentIndentGuides;
 			const currentContent = view.state.doc.toString();
 			destroyEditor();
 			value = currentContent; // Preserve content
@@ -942,6 +1120,38 @@
 	div :global(.var-marker-invault) {
 		background-color: #10b981; /* emerald-500 */
 		box-shadow: 0 0 4px #10b981;
+	}
+
+	/* --- Compose Validate lint markers ------------------------------------------- */
+	div :global(.cm-lint-gutter) {
+		width: 18px;
+	}
+	div :global(.cm-lint-marker) {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 14px;
+		height: 14px;
+		margin: 3px 2px;
+		cursor: pointer;
+		opacity: 0.9;
+		transition: opacity 0.12s ease, transform 0.08s ease;
+	}
+	div :global(.cm-lint-marker svg) { width: 13px; height: 13px; }
+	div :global(.cm-lint-marker:hover) { opacity: 1; transform: scale(1.15); }
+	div :global(.cm-lint-error) { color: #ef4444; }
+	div :global(.cm-lint-warn) { color: #f59e0b; }
+	div :global(.cm-lint-info) { color: #3b82f6; }
+
+	/* Line highlight: a faint tint by severity (no gutter bar). */
+	div :global(.cm-lint-line-error) {
+		background-color: rgba(239, 68, 68, 0.08);
+	}
+	div :global(.cm-lint-line-warn) {
+		background-color: rgba(245, 158, 11, 0.08);
+	}
+	div :global(.cm-lint-line-info) {
+		background-color: rgba(59, 130, 246, 0.06);
 	}
 
 	/* Variable value overlay widget - base styles */

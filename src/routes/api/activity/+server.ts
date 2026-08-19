@@ -3,6 +3,22 @@ import { getContainerEvents, getContainerEventContainers, getContainerEventActio
 import { authorize } from '$lib/server/authorize';
 import type { RequestHandler } from './$types';
 
+/**
+ * @openapi
+ * summary: Query container activity events with filters and pagination
+ * query: environmentId:integer Filter to a single environment (from GET /api/environments)
+ * query: containerId:string Filter by container ID (from GET /api/containers)
+ * query: containerName:string Filter by container name
+ * query: actions:string Comma-separated event actions to filter by
+ * query: labels:string Comma-separated labels to filter by
+ * query: fromDate:string Start of the date range (ISO 8601)
+ * query: toDate:string End of the date range (ISO 8601)
+ * query: limit:integer Maximum number of events to return
+ * query: offset:integer Number of events to skip (pagination)
+ * resp-200: {events:array<{id:integer!, containerName:string, action:string, timestamp:string}>, total:integer!, limit:integer!, offset:integer!}
+ * resp-403: Permission denied (requires the activity:view permission)
+ * resp-500: Failed to fetch container events
+ */
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	const auth = await authorize(cookies);
 
@@ -69,6 +85,14 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 	}
 };
 
+/**
+ * @openapi
+ * summary: Clear all stored container activity events
+ * resp-200: {success:boolean!}
+ * resp-200-example: {"success":true}
+ * resp-403: Permission denied (requires the activity:delete permission)
+ * resp-500: Failed to clear container events
+ */
 export const DELETE: RequestHandler = async ({ cookies }) => {
 	const auth = await authorize(cookies);
 

@@ -8,7 +8,7 @@
  * git@host:path) passes unchanged, so this is fully backward-compatible.
  */
 
-import { resolve, isAbsolute, sep } from 'node:path';
+import { resolve, sep } from 'node:path';
 
 export function assertSafeRepoUrl(url: string): void {
 	const u = (url || '').trim();
@@ -34,15 +34,18 @@ export function assertSafeGitRef(ref: string | null | undefined): void {
 }
 
 /**
- * Resolve a user-supplied relative path (composePath / envFilePath) INSIDE the clone
- * dir, throwing if it would ESCAPE the clone. Uses resolve-then-containment (like a plain
- * `join` + escape check): an in-repo `..` (e.g. `stacks/../compose.yml`) or a leading `./`
- * still resolve, only a path that escapes the clone is refused. `label` names the field
- * for the error message.
+ * Resolve a user-supplied path (composePath / envFilePath) INSIDE the clone dir,
+ * throwing if it would ESCAPE the clone. Uses resolve-then-containment (like a plain
+ * `join` + escape check): an in-repo `..` (e.g. `stacks/../compose.yml`) or a leading
+ * `./` still resolve, only a path that escapes the clone is refused. A leading `/` is
+ * treated as repo-root-relative (`/qbittorrent/compose.yaml` -> `qbittorrent/compose.yaml`)
+ * since the clone is the root the user reasons about; the containment check below still
+ * blocks any real escape (`/../x` -> `../x` -> refused). `label` names the field for the
+ * error message.
  */
 export function repoFilePath(repoPath: string, userRel: string, label: string): string {
-	if (isAbsolute(userRel)) throw new Error(`${label} must be a relative path (got "${userRel}")`);
-	const abs = resolve(repoPath, userRel);
+	const rel = userRel.replace(/^\/+/, '');
+	const abs = resolve(repoPath, rel);
 	if (abs !== repoPath && !abs.startsWith(repoPath + sep)) {
 		throw new Error(`${label} must be a path inside the repository (got "${userRel}")`);
 	}

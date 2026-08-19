@@ -10,6 +10,15 @@ import { registerSchedule, unregisterSchedule, triggerImagePrune } from '$lib/se
 
 /**
  * Get image prune settings for an environment.
+ *
+ * @openapi
+ * summary: Get the automatic image-prune schedule settings for an environment
+ * path: id:integer! Environment id (from GET /api/environments)
+ * resp-200: {settings:{enabled:boolean!, cronExpression:string!, pruneMode:string!}!}
+ * resp-200-example: {"settings":{"enabled":false,"cronExpression":"0 3 * * 0","pruneMode":"dangling"}}
+ * resp-403: Permission denied (RBAC 'environments:view' missing)
+ * resp-404: Environment not found
+ * resp-500: Unexpected error while loading the settings
  */
 export const GET: RequestHandler = async ({ params, cookies }) => {
 	const auth = await authorize(cookies);
@@ -43,6 +52,16 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 
 /**
  * Save image prune settings for an environment.
+ *
+ * @openapi
+ * summary: Save the automatic image-prune schedule for an environment (registers/unregisters the croner job)
+ * path: id:integer! Environment id (from GET /api/environments)
+ * body: {enabled:boolean, cronExpression:string, pruneMode:string}
+ * body-example: {"enabled":true,"cronExpression":"0 3 * * 0","pruneMode":"dangling"}
+ * resp-200: {success:boolean!, settings:{enabled:boolean!, cronExpression:string!, pruneMode:string!}!}
+ * resp-403: Permission denied (RBAC 'environments:edit' missing)
+ * resp-404: Environment not found
+ * resp-500: Unexpected error while saving the settings
  */
 export const POST: RequestHandler = async ({ params, request, cookies }) => {
 	const auth = await authorize(cookies);
@@ -91,6 +110,15 @@ export const POST: RequestHandler = async ({ params, request, cookies }) => {
 
 /**
  * Manually trigger image prune for an environment.
+ *
+ * @openapi
+ * summary: Immediately run an image prune for an environment (outside its schedule)
+ * path: id:integer! Environment id (from GET /api/environments)
+ * resp-200: {success:boolean!}
+ * resp-400: The prune operation itself failed (Docker error)
+ * resp-403: Permission denied (RBAC 'environments:edit' missing)
+ * resp-404: Environment not found
+ * resp-500: Unexpected error while triggering the prune
  */
 export const PUT: RequestHandler = async ({ params, cookies }) => {
 	const auth = await authorize(cookies);

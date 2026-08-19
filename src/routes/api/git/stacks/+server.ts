@@ -20,6 +20,13 @@ import { createJobResponse } from '$lib/server/sse';
 // letter or number, and contain only lowercase letters, numbers, hyphens, underscores
 const STACK_NAME_REGEX = /^[a-z0-9][a-z0-9_-]*$/;
 
+/**
+ * @openapi
+ * summary: List git-deployed stacks (optionally scoped to one environment)
+ * query: env:integer Filter to a single environment id
+ * resp-403: Permission denied (needs stacks:view)
+ * resp-500: Failed to list git stacks
+ */
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	const auth = await authorize(cookies);
 
@@ -41,6 +48,15 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 	}
 };
 
+/**
+ * @openapi
+ * summary: Create a git-deployed stack (from an existing repo or new repo url/branch)
+ * body: {stackName:string!, environmentId:integer, repositoryId:integer, secretProviderId:integer, webhookEnabled:boolean, webhookSecret:string}
+ * resp-400: Invalid stack name, or secretProviderId is not a number/null
+ * resp-403: Permission denied (needs stacks:create; binding a secret provider also needs secrets:view)
+ * resp-409: A git stack with this name already exists in the environment
+ * resp-500: Failed to create the git stack
+ */
 export const POST: RequestHandler = async (event) => {
 	const { request, cookies } = event;
 	const auth = await authorize(cookies);

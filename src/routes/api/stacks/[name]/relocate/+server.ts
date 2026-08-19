@@ -8,8 +8,17 @@ import { join, dirname } from 'node:path';
 /**
  * POST /api/stacks/[name]/relocate
  *
- * Move all stack files from old directory to new location.
- * Updates the database with new paths and returns refreshed content.
+ * @openapi
+ * summary: Move all stack files from the old directory to a new location, update the stored compose/env paths, and return the refreshed compose/env content
+ * path: name:string! Stack name (from GET /api/stacks)
+ * query: env:integer Environment ID the stack belongs to (from GET /api/environments)
+ * body: {oldDir:string!, newComposePath:string!, newEnvPath:string}
+ * body-example: {"oldDir":"/opt/stacks/old","newComposePath":"/opt/stacks/web/compose.yaml","newEnvPath":"/opt/stacks/web/.env"}
+ * resp-200: {success:boolean!, movedFiles:array<string>!, errors:array<string>, composeContent:string!, rawEnvContent:string!, envVars:array<{key:string!, value:string!, isSecret:boolean!}>!}
+ * resp-200-example: {"success":true,"movedFiles":["compose.yaml",".env"],"composeContent":"services: {}","rawEnvContent":"FOO=bar\n","envVars":[{"key":"FOO","value":"bar","isSecret":false}]}
+ * resp-400: oldDir and newComposePath are required, or the source directory does not exist
+ * resp-403: Permission denied (requires stacks:edit)
+ * resp-500: Failed to relocate stack
  */
 export const POST: RequestHandler = async ({ params, request, url, cookies }) => {
 	const auth = await authorize(cookies);

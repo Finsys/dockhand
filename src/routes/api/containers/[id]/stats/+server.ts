@@ -70,6 +70,18 @@ function calculateMemoryUsage(memoryStats: any): { usage: number; raw: number; c
 	return { usage, raw, cache };
 }
 
+/**
+ * GET /api/containers/{id}/stats - Get a single container's resource stats
+ *
+ * @openapi
+ * summary: Return a one-shot CPU/memory/network/block-IO stats snapshot for a container (Docker-CLI-equivalent memory accounting)
+ * path: id:string! Container ID or name (from GET /api/containers)
+ * query: env:integer The target environment ID (omit for the local/default Docker host) (from GET /api/environments)
+ * resp-200: {cpuPercent:number!, memoryUsage:integer!, memoryRaw:integer!, memoryCache:integer!, memoryLimit:integer!, memoryPercent:number!, networkRx:integer!, networkTx:integer!, blockRead:integer!, blockWrite:integer!, timestamp:integer!}
+ * resp-403: Permission denied
+ * resp-404: No environment configured, the environment was not found, or the container was not found
+ * resp-500: Failed to read the container stats
+ */
 export const GET: RequestHandler = async ({ params, url, cookies }) => {
 	const invalid = validateDockerIdParam(params.id, 'container');
 	if (invalid) return invalid;

@@ -26,6 +26,9 @@ import {
 
 import type { NotificationPayload, NotificationResult } from './shared';
 export type { NotificationPayload, NotificationResult } from './shared';
+// The pure docker-action -> event-type map lives in events-core (unit-testable).
+import { mapActionToEventType } from './events-core';
+export { mapActionToEventType } from './events-core';
 
 import { sendSmtpNotification } from './smtp';
 import { sendDiscord } from './discord';
@@ -40,6 +43,7 @@ import { sendApprise } from './apprise';
 import { sendPushover } from './pushover';
 import { sendGenericWebhook } from './generic-webhook';
 import { sendWorkflows } from './workflows';
+import { sendZabbix } from './zabbix';
 
 // Send to every URL in an Apprise channel. Errors are aggregated so a single
 // bad URL doesn't silently mask a healthy one.
@@ -110,6 +114,9 @@ async function sendToAppriseUrl(url: string, payload: NotificationPayload): Prom
 				return await sendGenericWebhook(url, payload);
 			case 'workflows':
 				return await sendWorkflows(url, payload);
+			case 'zabbix':
+			case 'zabbixs':
+				return await sendZabbix(url, payload);
 			default:
 				return { success: false, error: `Unsupported Apprise protocol: ${protocol}` };
 		}
@@ -149,7 +156,8 @@ export async function testNotification(setting: NotificationSettingData): Promis
 	const payload: NotificationPayload = {
 		title: 'Dockhand Test Notification',
 		message: 'This is a test notification from Dockhand. If you receive this, your notification settings are configured correctly.',
-		type: 'info'
+		type: 'info',
+		eventType: 'test'
 	};
 
 	if (setting.type === 'smtp') {
@@ -161,21 +169,6 @@ export async function testNotification(setting: NotificationSettingData): Promis
 	return { success: false, error: 'Unknown notification type' };
 }
 
-// Map Docker action to notification event type
-function mapActionToEventType(action: string): NotificationEventType | null {
-	const mapping: Record<string, NotificationEventType> = {
-		'start': 'container_started',
-		'stop': 'container_stopped',
-		'restart': 'container_restarted',
-		'die': 'container_exited',
-		'kill': 'container_exited',
-		'oom': 'container_oom',
-		'health_status: unhealthy': 'container_unhealthy',
-		'health_status: healthy': 'container_healthy',
-		'pull': 'image_pulled'
-	};
-	return mapping[action] || null;
-}
 
 // Scanner image patterns to exclude from notifications
 const SCANNER_IMAGE_PATTERNS = [
@@ -214,6 +207,7 @@ export async function sendEnvironmentNotification(
 
 	const enrichedPayload: NotificationPayload = {
 		...payload,
+		eventType,
 		environmentId,
 		environmentName: env.name
 	};
@@ -251,7 +245,7 @@ export async function sendEventNotification(
 	payload: NotificationPayload,
 	environmentId?: number
 ): Promise<{ success: boolean; sent: number }> {
-	let enrichedPayload = { ...payload };
+	let enrichedPayload: NotificationPayload = { ...payload, eventType };
 	if (environmentId) {
 		const env = await getEnvironment(environmentId);
 		if (env) {

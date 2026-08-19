@@ -23,6 +23,22 @@ async function isEdgeMode(envId?: number): Promise<{ isEdge: boolean; environmen
 	return { isEdge: false };
 }
 
+/**
+ * POST /api/images/push - Tag and push an image to a registry
+ *
+ * @openapi
+ * summary: Tag a local image and push it to a configured registry (streams progress, or runs synchronously for Accept: application/json)
+ * query: env:integer ID of the environment the source image belongs to (from GET /api/environments)
+ * description: imageId from GET /api/images. registryId from GET /api/registries.
+ * body: {imageId:string!, registryId:integer!, imageName:string, newTag:string}
+ * body-example: {"imageId":"sha256:abc123","registryId":2,"imageName":"myapp:latest","newTag":"myapp:v1.2.3"}
+ * resp-200: {jobId:string} when streaming, or the final push result for Accept: application/json clients
+ * resp-200-example: {"jobId":"a1b2c3d4"}
+ * resp-400: Image ID or registry ID missing, or the image has no usable tag
+ * resp-403: Permission denied
+ * resp-404: Registry not found
+ * resp-500: Failed to push image
+ */
 export const POST: RequestHandler = async (event) => {
 	const { request, url, cookies } = event;
 	const auth = await authorize(cookies);

@@ -6,6 +6,15 @@ import { getClientIp } from '$lib/server/client-ip';
 import { safeRedirectOrRoot } from '$lib/utils/safe-redirect';
 
 // GET /api/auth/oidc/callback - Handle OIDC callback from IdP
+/**
+ * @openapi
+ * summary: Handle the OIDC redirect callback from the IdP — always responds with a 302 redirect (to the original destination on success, or to /login with an error query param on failure)
+ * query: code:string Authorization code returned by the IdP
+ * query: state:string Opaque state value used to correlate the request and carry the post-login redirect
+ * query: error:string Error code returned by the IdP when authentication failed
+ * query: error_description:string Human-readable error detail returned by the IdP
+ * resp-302: Always a redirect — on success a session cookie is set and the caller is redirected to the original destination; on any error the caller is redirected to /login with an error query param
+ */
 export const GET: RequestHandler = async (event) => {
 	const { url, cookies } = event;
 	// Check if auth is enabled

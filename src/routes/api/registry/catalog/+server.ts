@@ -5,6 +5,19 @@ import { getRegistryAuth, isHarborRegistry, harborListRepositories, parseRegistr
 
 const PAGE_SIZE = 100;
 
+/**
+ * @openapi
+ * summary: List repositories in a registry's V2 catalog (with Harbor project-API fallback), paginated
+ * description: Docker Hub is rejected (no catalog API). For 401/403/404 from the upstream registry the same status is proxied back to the caller.
+ * query: registry:integer! ID of the configured registry to query (from GET /api/registries)
+ * query: last:string Opaque pagination cursor from a previous page's nextLast
+ * resp-200: {repositories:array<{name:string!, description:string, star_count:integer, is_official:boolean, is_automated:boolean}>!, pagination:{pageSize:integer!, hasMore:boolean!, nextLast:string}!}
+ * resp-200-example: {"repositories":[{"name":"library/nginx","description":"","star_count":0,"is_official":false,"is_automated":false}],"pagination":{"pageSize":100,"hasMore":false,"nextLast":null}}
+ * resp-400: Missing registry parameter, or Docker Hub was targeted (catalog listing unsupported)
+ * resp-404: Registry not found, or the registry does not implement the V2 catalog API
+ * resp-500: Failed to fetch the catalog
+ * resp-503: Could not connect to the registry (connection refused, host not found, or a TLS error)
+ */
 export const GET: RequestHandler = async ({ url }) => {
 	try {
 		const registryId = url.searchParams.get('registry');

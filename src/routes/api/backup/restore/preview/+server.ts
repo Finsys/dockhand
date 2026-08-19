@@ -7,6 +7,16 @@ import { validateSnapshotId } from '$lib/server/docker-validation';
 import { guardSnapshotEnvAccess } from '$lib/server/backups/route-guards';
 import { jobResult } from '$lib/server/sse';
 
+/**
+ * @openapi
+ * summary: Preview what a restore would write (resolved targets + volume/stack contents)
+ * description: With includeTargets it also resolves the concrete restore targets (host paths / volumes); without it, returns the metadata-only preview the initial modal load relies on.
+ * body: {destinationId:integer!, snapshotId:string!, includeTargets:boolean, targetEnvId:integer}
+ * resp-200: object
+ * resp-200-desc: The snapshot preview, optionally with a resolved targets list
+ * resp-400: Missing required fields (destinationId, snapshotId)
+ * resp-403: Permission denied (needs backups:view) or access denied to the target environment
+ */
 export const POST: RequestHandler = async ({ request, cookies }) => {
 	const auth = await authorize(cookies);
 	const rbacDenied = await requireBackups(auth, 'manage');

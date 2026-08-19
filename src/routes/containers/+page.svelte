@@ -65,7 +65,8 @@
 		Cable,
 		Copy,
 		Loader2,
-		AlertCircle
+		AlertCircle,
+		Tag
 	} from 'lucide-svelte';
 	import { broom } from '@lucide/lab';
 	import { copyToClipboard } from '$lib/utils/clipboard';
@@ -77,7 +78,10 @@
 	import FileBrowserModal from './FileBrowserModal.svelte';
 	import BatchUpdateModal from './BatchUpdateModal.svelte';
 	import CheckUpdatesButton from '$lib/components/CheckUpdatesButton.svelte';
+	import DismissUpdatesButton from '$lib/components/DismissUpdatesButton.svelte';
 	import BatchOperationModal from '$lib/components/BatchOperationModal.svelte';
+	import VersionUpdateBadge from '$lib/components/VersionUpdateBadge.svelte';
+	import VersionUpdateModal from '$lib/components/VersionUpdateModal.svelte';
 	import type { ContainerInfo } from '$lib/types';
 	import { EmptyState, NoEnvironment } from '$lib/components/ui/empty-state';
 	import { currentEnvironment, environments, appendEnvParam, clearStaleEnvironment } from '$lib/stores/environment';
@@ -128,6 +132,7 @@
 	// pseudo-status (#1063), which ANDs with actual Docker states.
 	const STATUS_FILTER_STORAGE_KEY = 'dockhand-containers-status-filter';
 	const UPDATE_AVAILABLE_FILTER_VALUE = 'update-available';
+	const NEWER_VERSION_FILTER_VALUE = 'newer-version';
 	let statusFilter = $state<string[]>([]);
 
 	// Status types with icons for filter and table
@@ -274,6 +279,14 @@
 	const batchUpdateContainerIds = $derived($containerStore.pendingUpdateIds);
 	const batchUpdateContainerNames = $derived($containerStore.pendingUpdateNames);
 
+	// Version-update (semver) release-notes modal — opened from the Tag badge.
+	let versionModalContainer = $state<ContainerInfo | null>(null);
+	let versionModalNewer = $state<import('$lib/server/semver/find-newer').NewerVersion | null>(null);
+	function openVersionModal(container: ContainerInfo, newer: import('$lib/server/semver/find-newer').NewerVersion) {
+		versionModalContainer = container;
+		versionModalNewer = newer;
+	}
+
 	// Single container update mode (doesn't overwrite batch list)
 	let singleUpdateContainerId = $state<string | null>(null);
 	let singleUpdateContainerName = $state<string | null>(null);
@@ -307,26 +320,46 @@
 	// Set of container IDs with updates available (for O(1) lookup)
 	const containersWithUpdatesSet = $derived(new Set(batchUpdateContainerIds));
 
+	// Whether any semver badges are showing (may be true with zero digest updates).
+	const hasNewerVersions = $derived($containerStore.newerVersions.size > 0);
+
 	// Container IDs whose last update check failed (e.g. registry rate-limited) — #1255
 	const containersWithFailedCheckSet = $derived(new Set($containerStore.failedUpdateIds));
 	const failedUpdateErrors = $derived($containerStore.failedUpdateErrors);
 
+	// Any update indicator on the page - digest updates, newer-version tags, or failed
+	// checks. Drives the compact "dismiss all" (×) button.
+	const hasUpdateIndicators = $derived(
+		$containerStore.pendingUpdateIds.length > 0 ||
+		hasNewerVersions ||
+		$containerStore.failedUpdateIds.length > 0
+	);
+
+	// Newer-version-tag (semver) suggestions from the last check, keyed by container ID.
+	const newerVersionsMap = $derived($containerStore.newerVersions);
+
 	// Filter dropdown entries: real statuses plus the synthetic
 	// "update-available" entry, only offered once we know about a pending
 	// update — picking it on an empty set would just empty the list (#1063).
-	const filterOptions = $derived(
-		containersWithUpdatesSet.size > 0
-			? [
-					...statusTypes,
-					{
-						value: UPDATE_AVAILABLE_FILTER_VALUE,
-						label: 'Update available',
-						icon: CircleArrowUp,
-						color: 'text-amber-500'
-					}
-				]
-			: statusTypes
-	);
+	const filterOptions = $derived([
+		...statusTypes,
+		...(containersWithUpdatesSet.size > 0
+			? [{
+					value: UPDATE_AVAILABLE_FILTER_VALUE,
+					label: 'Update available',
+					icon: CircleArrowUp,
+					color: 'text-amber-500'
+				}]
+			: []),
+		...(hasNewerVersions
+			? [{
+					value: NEWER_VERSION_FILTER_VALUE,
+					label: 'Newer version',
+					icon: Tag,
+					color: 'text-amber-500'
+				}]
+			: [])
+	]);
 
 	// Drop the 'update-available' filter when no pending updates remain —
 	// otherwise the user has no way to deselect it (dropdown hides the
@@ -337,6 +370,11 @@
 			containersWithUpdatesSet.size === 0
 		) {
 			statusFilter = statusFilter.filter((v) => v !== UPDATE_AVAILABLE_FILTER_VALUE);
+		}
+		// Same guard for the newer-version filter: drop it once no container has a
+		// newer version, or the dropdown hides the entry and the list stays empty.
+		if (statusFilter.includes(NEWER_VERSION_FILTER_VALUE) && !hasNewerVersions) {
+			statusFilter = statusFilter.filter((v) => v !== NEWER_VERSION_FILTER_VALUE);
 		}
 	});
 
@@ -466,6 +504,7 @@
 	function handleUpdateCheckComplete(result: {
 		withUpdates: Array<{ containerId: string; containerName: string }>;
 		failed?: Array<{ containerId: string; error: string }>;
+		newerVersions?: Array<{ containerId: string; newerVersion: import('$lib/server/semver/find-newer').NewerVersion }>;
 	}) {
 		if (result.withUpdates.length === 0) {
 			containerStore.setPendingUpdates([], new Map());
@@ -483,6 +522,9 @@
 			failed.map((f) => f.containerId),
 			new Map(failed.map((f) => [f.containerId, f.error]))
 		);
+		// Newer-version-tag (semver) suggestions — advisory badge, session-only.
+		const newer = result.newerVersions ?? [];
+		containerStore.setNewerVersions(new Map(newer.map((n) => [n.containerId, n.newerVersion])));
 	}
 
 	// Load pending updates from database (persisted from check-updates or scheduled jobs)
@@ -521,6 +563,8 @@
 				// Failed-check state is session-only — clear it here too so "Clear"
 				// dismisses the red "check failed" icons alongside the amber ones.
 				containerStore.setFailedUpdates([], new Map());
+				// Newer-version (semver) badges are session-only too — dismiss them alongside.
+				containerStore.setNewerVersions(new Map());
 			}
 		} catch {
 			toast.error('Failed to clear update indicators');
@@ -722,13 +766,19 @@
 		// Filter by status. The synthetic 'update-available' value (#1063)
 		// is split off so it ANDs with real-state selections instead of
 		// being treated like another Docker state.
-		const stateValues = statusFilter.filter((v) => v !== UPDATE_AVAILABLE_FILTER_VALUE);
+		const stateValues = statusFilter.filter(
+			(v) => v !== UPDATE_AVAILABLE_FILTER_VALUE && v !== NEWER_VERSION_FILTER_VALUE
+		);
 		const updatesOnly = statusFilter.includes(UPDATE_AVAILABLE_FILTER_VALUE);
+		const newerVersionOnly = statusFilter.includes(NEWER_VERSION_FILTER_VALUE);
 		if (stateValues.length > 0) {
 			result = result.filter((c) => stateValues.includes(c.state.toLowerCase()));
 		}
 		if (updatesOnly) {
 			result = result.filter((c) => containersWithUpdatesSet.has(c.id));
+		}
+		if (newerVersionOnly) {
+			result = result.filter((c) => newerVersionsMap.has(c.id));
 		}
 
 		// Filter by search query
@@ -1422,16 +1472,16 @@
 						>
 							<CircleArrowUp class="w-3.5 h-3.5" />
 							Update all ({updatableContainersCount})
-							<button
-								type="button"
-								onclick={(e) => { e.stopPropagation(); dismissPendingUpdates(); }}
-								class="-mr-1 text-[12px] leading-none rounded-full hover:bg-destructive/20 hover:text-destructive transition-colors opacity-40 hover:opacity-100"
-								title="Dismiss all update indicators"
-							>×</button>
 						</Button>
 					{/snippet}
 				</ConfirmPopover>
 				{/if}
+				<DismissUpdatesButton
+					show={hasUpdateIndicators}
+					digestCount={updatableContainersCount}
+					newerVersionCount={$containerStore.newerVersions.size}
+					onDismiss={dismissPendingUpdates}
+				/>
 				{#if $canAccess('containers', 'remove')}
 				<ConfirmPopover
 					open={confirmPrune}
@@ -1778,6 +1828,13 @@
 										</div>
 									</Tooltip.Content>
 								</Tooltip.Root>
+							{/if}
+							{#if newerVersionsMap.has(container.id)}
+								<VersionUpdateBadge
+									newerVersion={newerVersionsMap.get(container.id)!}
+									variant="pill"
+									onclick={() => openVersionModal(container, newerVersionsMap.get(container.id)!)}
+								/>
 							{/if}
 							<span class="text-xs text-muted-foreground truncate" title={container.image}>{container.image}</span>
 						</div>
@@ -2440,6 +2497,12 @@
 	vulnerabilityCriteria={envHasScanning ? envVulnerabilityCriteria : 'never'}
 	onClose={handleBatchUpdateClose}
 	onComplete={handleBatchUpdateComplete}
+/>
+
+<VersionUpdateModal
+	bind:container={versionModalContainer}
+	newerVersion={versionModalNewer}
+	{envId}
 />
 
 <BatchOperationModal

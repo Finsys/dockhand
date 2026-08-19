@@ -11,6 +11,14 @@ import { createJobResponse } from '$lib/server/sse';
 // Stack name validation: must start with alphanumeric, can contain alphanumeric, hyphens, underscores
 const STACK_NAME_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/;
 
+/**
+ * @openapi
+ * summary: Get one git stack
+ * path: id:integer The git stack id
+ * resp-403: Permission denied (needs stacks:view)
+ * resp-404: Git stack not found
+ * resp-500: Failed to load the git stack
+ */
 export const GET: RequestHandler = async ({ params, cookies }) => {
 	const auth = await authorize(cookies);
 
@@ -33,6 +41,16 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 	}
 };
 
+/**
+ * @openapi
+ * summary: Update a git stack (rename, schedule, webhook, secret-provider binding)
+ * path: id:integer The git stack id
+ * body: {stackName:string, secretProviderId:integer, webhookEnabled:boolean, webhookSecret:string}
+ * resp-400: Invalid stack name, or secretProviderId is not a number/null
+ * resp-403: Permission denied (needs stacks:edit; binding a secret provider also needs secrets:view)
+ * resp-404: Git stack not found
+ * resp-500: Failed to update the git stack
+ */
 export const PUT: RequestHandler = async (event) => {
 	const { params, request, cookies } = event;
 	const auth = await authorize(cookies);
@@ -205,6 +223,14 @@ export const PUT: RequestHandler = async (event) => {
 	}
 };
 
+/**
+ * @openapi
+ * summary: Delete a git stack (removes its deploy files and stack source)
+ * path: id:integer The git stack id
+ * resp-403: Permission denied (needs stacks:delete)
+ * resp-404: Git stack not found
+ * resp-500: Failed to delete the git stack
+ */
 export const DELETE: RequestHandler = async (event) => {
 	const { params, cookies } = event;
 	const auth = await authorize(cookies);

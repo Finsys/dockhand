@@ -14,7 +14,7 @@
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import * as Popover from '$lib/components/ui/popover';
 	import MultiSelectFilter from '$lib/components/MultiSelectFilter.svelte';
-	import { Play, Square, Trash2, Plus, ArrowBigDown, Search, Pencil, ExternalLink, GitBranch, RefreshCw, Loader2, FileCode, FileText, FileOutput, Box, RotateCcw, ScrollText, Terminal, Eye, Network, HardDrive, Heart, HeartPulse, HeartOff, ChevronsUpDown, ChevronsDownUp, Rocket, AlertTriangle, X, Layers, Pause, CircleDashed, Skull, FolderOpen, Variable, Clock, RotateCw, Import, Ship, Cable, LayoutPanelLeft, Rows3, GripVertical, Globe, CircleArrowUp, NotepadText } from 'lucide-svelte';
+	import { Play, Square, Trash2, Plus, ArrowBigDown, Search, Pencil, ExternalLink, GitBranch, RefreshCw, Loader2, FileCode, FileText, FileOutput, Box, RotateCcw, ScrollText, Terminal, Eye, Network, HardDrive, Heart, HeartPulse, HeartOff, ChevronsUpDown, ChevronsDownUp, Rocket, AlertTriangle, X, Layers, Pause, CircleDashed, Skull, FolderOpen, Variable, Clock, RotateCw, Import, Ship, Cable, LayoutPanelLeft, Rows3, GripVertical, Globe, CircleArrowUp, NotepadText, Tag } from 'lucide-svelte';
 	import { formatPorts } from '$lib/utils/port-format';
 	import { parseCustomUrl } from '$lib/utils/custom-url';
 	import { extractTraefikUrls } from '$lib/utils/traefik-urls';
@@ -24,7 +24,7 @@
 	import { appSettings } from '$lib/stores/settings';
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
 	import BatchOperationModal from '$lib/components/BatchOperationModal.svelte';
-	import type { ComposeStackInfo, ContainerStats } from '$lib/types';
+	import type { ComposeStackInfo, ContainerStats, StackContainer } from '$lib/types';
 	import StackModal from './StackModal.svelte';
 	import DeleteStackModal from './DeleteStackModal.svelte';
 	import GitSourceBadge from './GitSourceBadge.svelte';
@@ -36,6 +36,9 @@
 	import FileBrowserModal from '../containers/FileBrowserModal.svelte';
 	import BatchUpdateModal from '../containers/BatchUpdateModal.svelte';
 	import CheckUpdatesButton from '$lib/components/CheckUpdatesButton.svelte';
+	import DismissUpdatesButton from '$lib/components/DismissUpdatesButton.svelte';
+	import VersionUpdateBadge from '$lib/components/VersionUpdateBadge.svelte';
+	import VersionUpdateModal from '$lib/components/VersionUpdateModal.svelte';
 	import LogsPanel from '../logs/LogsPanel.svelte';
 	import { currentEnvironment, environments, appendEnvParam, clearStaleEnvironment } from '$lib/stores/environment';
 	import { onDockerEvent, isContainerListChange } from '$lib/stores/events';
@@ -81,6 +84,12 @@
 	let showBatchUpdateModal = $state(false);
 	let singleUpdateContainerId = $state<string | null>(null);
 	let singleUpdateContainerName = $state<string | null>(null);
+
+	// Version-update (semver) release-notes modal — opened from a container's Tag badge.
+	let versionModalContainer = $state<StackContainer | null>(null);
+	function openVersionModal(container: StackContainer) {
+		versionModalContainer = container;
+	}
 	let envHasScanning = $state(false);
 	let envVulnerabilityCriteria = $state<'never' | 'any' | 'critical_high' | 'critical' | 'more_than_current'>('never');
 
@@ -772,7 +781,14 @@
 	// True when any stack container shows an update-available (amber) or
 	// check-failed (red) indicator — gates the "dismiss indicators" button.
 	const hasUpdateIndicators = $derived(
-		stacks.some((s) => s.updatesAvailable) || failedUpdateCheckIds.size > 0
+		stacks.some((s) => s.updatesAvailable || (s.newerVersionCount ?? 0) > 0) ||
+			failedUpdateCheckIds.size > 0
+	);
+	// Counts for the compact dismiss: stacks with a digest update, and total containers
+	// with a newer version tag - each shown with its icon, mirroring the containers page.
+	const stackDigestCount = $derived(stacks.filter((s) => s.updatesAvailable).length);
+	const stackNewerVersionCount = $derived(
+		stacks.reduce((sum, s) => sum + (s.newerVersionCount ?? 0), 0)
 	);
 
 	// Dismiss both the amber "update available" and red "check failed" indicators.
@@ -1473,18 +1489,12 @@
 					fetchStacks();
 				}}
 			/>
-			{#if hasUpdateIndicators}
-				<Button
-					size="sm"
-					variant="ghost"
-					onclick={dismissStackUpdates}
-					class="h-8 gap-1 text-muted-foreground hover:text-destructive"
-					title="Dismiss all update indicators"
-				>
-					<X class="w-3.5 h-3.5" />
-					Clear
-				</Button>
-			{/if}
+			<DismissUpdatesButton
+				show={hasUpdateIndicators}
+				digestCount={stackDigestCount}
+				newerVersionCount={stackNewerVersionCount}
+				onDismiss={dismissStackUpdates}
+			/>
 			<Button
 				size="sm"
 				variant="outline"
@@ -1767,6 +1777,17 @@
 								</Tooltip.Content>
 							</Tooltip.Root>
 						{/if}
+					{/if}
+					{#if (stack.newerVersionCount ?? 0) > 0}
+						<Tooltip.Root>
+							<Tooltip.Trigger class="inline-flex items-center gap-0.5 self-center shrink-0 text-amber-500">
+								<Tag class="w-3.5 h-3.5" />
+								<span class="text-2xs font-medium leading-none">{stack.newerVersionCount}</span>
+							</Tooltip.Trigger>
+							<Tooltip.Content>
+								{stack.newerVersionCount} container{(stack.newerVersionCount ?? 0) > 1 ? 's have' : ' has'} a newer version tag.
+							</Tooltip.Content>
+						</Tooltip.Root>
 					{/if}
 					</span>
 				{:else if column.id === 'source'}
@@ -2206,6 +2227,13 @@
 													</div>
 												</Tooltip.Content>
 											</Tooltip.Root>
+										{/if}
+										{#if container.newerVersion}
+											<VersionUpdateBadge
+												newerVersion={container.newerVersion}
+												variant="pill"
+												onclick={() => openVersionModal(container)}
+											/>
 										{/if}
 										<span class="flex-1"></span>
 										{#if container.health}
@@ -2703,6 +2731,12 @@
 	vulnerabilityCriteria={envHasScanning ? envVulnerabilityCriteria : 'never'}
 	onClose={() => { showBatchUpdateModal = false; singleUpdateContainerId = null; singleUpdateContainerName = null; }}
 	onComplete={handleSingleUpdateComplete}
+/>
+
+<VersionUpdateModal
+	bind:container={versionModalContainer}
+	newerVersion={versionModalContainer?.newerVersion ?? null}
+	{envId}
 />
 
 <BatchOperationModal

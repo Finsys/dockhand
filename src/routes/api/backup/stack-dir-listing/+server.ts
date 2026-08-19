@@ -9,6 +9,15 @@ import { probeStackDir } from '$lib/server/backups';
 // create/edit backup dialog can show the resolved host path + let the user pick which
 // stack-dir entries to back up. Returns { kind:'listed', hostPath, entries } or
 // { kind:'unknown', reason } (never throws for an operational failure).
+/**
+ * @openapi
+ * summary: Probe the target host and list the actual contents of a stack's directory, for the backup create/edit dialog's file picker
+ * query: target:string! Target stack name
+ * query: env:integer Environment ID the stack belongs to (from GET /api/environments)
+ * resp-200: The stack directory probe result — kind "listed"/"tar" with hostPath/localStackDir and entries, or kind "helper-failed"/"unknown" with a reason (never throws for an operational failure)
+ * resp-400: target is required
+ * resp-403: Permission denied (requires backups:view), or no access to the target's environment (enterprise)
+ */
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	const auth = await authorize(cookies);
 	const denied = await requireBackups(auth, 'view');

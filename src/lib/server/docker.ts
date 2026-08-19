@@ -15,12 +15,16 @@ import * as tls from 'node:tls';
 import { createHash } from 'node:crypto';
 import { pumpWebStreamToWritable } from './stream-pump';
 import { computeRequestTimeoutMs } from './backups/request-timeout';
+import { helperWaitDeadline } from './helper-wait-core';
 import type { Environment } from './db';
 import { getSetting } from './db';
 import { getAdditionalVolumeBinds, dedupeVolumesForRecreate } from './mount-dedupe';
-import { resolveNanoCpusConflict } from './hostconfig-recreate';
+import { resolveNanoCpusConflict, resolvePodmanUsernsMode } from './hostconfig-recreate';
+// Import-light image parsing shared with the semver layer; re-exported below for callers.
+import { parseImageReference } from './registry/image-ref';
+export { parseImageReference } from './registry/image-ref';
 import { rebaseEnvOntoImage, rebaseLabelsOntoImage, rebaseCommand, describeEnvRebase, describeLabelRebase, type ImageEnvLabels } from './container-env-merge';
-import { encodeRegistryAuth } from './registry-auth';
+import { encodeRegistryAuth, fetchRegistryToken } from './registry-auth';
 import { isSystemContainer, classifyEmptyDigestImage, localDigestIsIndexChild } from './scheduler/tasks/update-utils';
 import { deepDiff } from '../utils/diff.js';
 import { getInstanceId } from './backups/identity';
@@ -2093,6 +2097,20 @@ export async function recreateContainerFromInspect(
 		log?.('Dropped CpuPeriod/CpuQuota — they conflict with NanoCpus at create time (kept NanoCpus)');
 	}
 
+	// Podman lowers `--userns keep-id` to UsernsMode:"private" in inspect, which create then
+	// rejects without inline mappings (#1409). Restore the original intent from the annotation
+	// so keep-id survives the recreate; Docker (UsernsMode != "private") is untouched.
+	const usernsFix = resolvePodmanUsernsMode(createConfig.HostConfig?.UsernsMode, config.Annotations);
+	if (usernsFix && createConfig.HostConfig) {
+		if ('mode' in usernsFix) {
+			createConfig.HostConfig.UsernsMode = usernsFix.mode;
+			log?.(`Restored UsernsMode "${usernsFix.mode}" from Podman annotation (was "private")`);
+		} else {
+			delete createConfig.HostConfig.UsernsMode;
+			log?.('Dropped UsernsMode "private" — Podman rejects it without inline UID/GID mappings');
+		}
+	}
+
 	// container:<name> mode shares the network namespace — Docker rejects
 	// networking-related fields on the dependent container since they're
 	// owned by the network provider container
@@ -2303,6 +2321,14 @@ export async function createContainerFromMetadata(
 	const swappiness = createConfig.HostConfig?.MemorySwappiness;
 	if (swappiness == null || swappiness === -1 || swappiness === 0) {
 		delete createConfig.HostConfig.MemorySwappiness;
+	}
+
+	// Podman keep-id -> UsernsMode:"private" in inspect, rejected on create (#1409).
+	// Restore the intent from the annotation; Docker (UsernsMode != "private") untouched.
+	const usernsFix = resolvePodmanUsernsMode(createConfig.HostConfig?.UsernsMode, config.Annotations);
+	if (usernsFix && createConfig.HostConfig) {
+		if ('mode' in usernsFix) createConfig.HostConfig.UsernsMode = usernsFix.mode;
+		else delete createConfig.HostConfig.UsernsMode;
 	}
 
 	// container:<name> mode: clean up conflicting network fields
@@ -3001,60 +3027,6 @@ export async function inspectImage(id: string, envId?: number | null) {
 	return dockerJsonRequest(`/images/${encodeURIComponent(id)}/json`, {}, envId);
 }
 
-/**
- * Parse an image reference into registry, repository, and tag components.
- * Follows Docker's reference parsing rules.
- * Examples:
- *   nginx:latest -> { registry: 'index.docker.io', repo: 'library/nginx', tag: 'latest' }
- *   ghcr.io/user/image:v1 -> { registry: 'ghcr.io', repo: 'user/image', tag: 'v1' }
- *   registry.example.com:5000/repo:tag -> { registry: 'registry.example.com:5000', repo: 'repo', tag: 'tag' }
- */
-function parseImageReference(imageName: string): { registry: string; repo: string; tag: string } {
-	let registry = 'index.docker.io';  // Docker Hub's actual host
-	let repo = imageName;
-	let tag = 'latest';
-
-	// Handle digest references (remove digest part for manifest lookup)
-	if (repo.includes('@')) {
-		const [repoWithoutDigest] = repo.split('@');
-		repo = repoWithoutDigest;
-	}
-
-	// Extract tag
-	const lastColon = repo.lastIndexOf(':');
-	if (lastColon > -1) {
-		const potentialTag = repo.substring(lastColon + 1);
-		// Make sure it's not a port number (no slashes in tags)
-		if (!potentialTag.includes('/')) {
-			tag = potentialTag;
-			repo = repo.substring(0, lastColon);
-		}
-	}
-
-	// Extract registry if present
-	const firstSlash = repo.indexOf('/');
-	if (firstSlash > -1) {
-		const firstPart = repo.substring(0, firstSlash);
-		// If the first part contains a dot, colon, or is "localhost", it's a registry
-		if (firstPart.includes('.') || firstPart.includes(':') || firstPart === 'localhost') {
-			registry = firstPart;
-			repo = repo.substring(firstSlash + 1);
-		}
-	}
-
-	// Normalize docker.io to index.docker.io (Docker Hub's actual registry host)
-	// docker.io redirects to www.docker.com, while index.docker.io is the real API
-	if (registry === 'docker.io') {
-		registry = 'index.docker.io';
-	}
-
-	// Docker Hub requires library/ prefix for official images
-	if (registry === 'index.docker.io' && !repo.includes('/')) {
-		repo = `library/${repo}`;
-	}
-
-	return { registry, repo, tag };
-}
 
 /**
  * Parse a registry URL into host and path components.
@@ -3091,7 +3063,7 @@ export function parseRegistryUrl(url: string): { host: string; path: string; ful
  * - Host-only stored: stored 'registry.example.com' matches requested 'registry.example.com/org'
  *   (allows a single credential entry to work for all org paths)
  */
-async function findRegistryCredentials(registryHost: string): Promise<{ username: string; password: string } | null> {
+export async function findRegistryCredentials(registryHost: string): Promise<{ username: string; password: string } | null> {
 	try {
 		// Import here to avoid circular dependency
 		const { getRegistries } = await import('./db.js');
@@ -3226,21 +3198,25 @@ async function getRegistryBearerToken(registry: string, repo: string): Promise<s
 		if (service) tokenUrl.searchParams.set('service', service);
 		if (scope) tokenUrl.searchParams.set('scope', scope);
 
-		const tokenHeaders: Record<string, string> = { 'User-Agent': 'Dockhand/1.0' };
-
-		// Add Basic auth header if we have credentials
-		if (credentials) {
-			const basicAuth = Buffer.from(`${credentials.username}:${credentials.password}`).toString('base64');
-			tokenHeaders['Authorization'] = `Basic ${basicAuth}`;
-		}
-
-		const tokenResponse = await fetch(tokenUrl.toString(), {
-			headers: tokenHeaders
-		});
+		const authHeader = credentials
+			? `Basic ${Buffer.from(`${credentials.username}:${credentials.password}`).toString('base64')}`
+			: null;
+		const tokenResponse = await fetchRegistryToken(tokenUrl.toString(), authHeader);
 
 		if (!tokenResponse.ok) {
-			await tokenResponse.text(); // Consume body to release socket
-			console.error(`Token request failed: ${tokenResponse.status}`);
+			// Surface enough to diagnose without leaking the secret: the response
+			// body (truncated), the final URL, and the identity (username only).
+			const errBody = (await tokenResponse.text()).slice(0, 300).replace(/\s+/g, ' ').trim();
+			const finalNote = tokenResponse.url && tokenResponse.url !== tokenUrl.toString()
+				? ` (final ${new URL(tokenResponse.url).origin})`
+				: '';
+			const identity = credentials
+				? ` as ${credentials.username.slice(0, 4)}...(len=${credentials.username.length})`
+				: ' anonymously';
+			console.error(
+				`[Registry] Token request failed: ${tokenResponse.status} at ${tokenUrl.origin}${finalNote}, sent${identity}` +
+					(errBody ? ` - response: ${errBody}` : '')
+			);
 			return null;
 		}
 
@@ -3347,21 +3323,20 @@ export async function getRegistryAuthHeader(
 		if (service) tokenUrl.searchParams.set('service', service);
 		if (scope) tokenUrl.searchParams.set('scope', scope);
 
-		const tokenHeaders: Record<string, string> = { 'User-Agent': 'Dockhand/1.0' };
-
-		// Add Basic auth header if we have credentials
-		if (credentials) {
-			const basicAuth = Buffer.from(`${credentials.username}:${credentials.password}`).toString('base64');
-			tokenHeaders['Authorization'] = `Basic ${basicAuth}`;
-		}
-
-		const tokenResponse = await fetch(tokenUrl.toString(), {
-			headers: tokenHeaders
-		});
+		const authHeader = credentials
+			? `Basic ${Buffer.from(`${credentials.username}:${credentials.password}`).toString('base64')}`
+			: null;
+		const tokenResponse = await fetchRegistryToken(tokenUrl.toString(), authHeader);
 
 		if (!tokenResponse.ok) {
-			const errorBody = await tokenResponse.text().catch(() => '');
-			console.error(`Token request failed: ${tokenResponse.status} - ${errorBody}`);
+			const errorBody = (await tokenResponse.text().catch(() => '')).slice(0, 300).replace(/\s+/g, ' ').trim();
+			const finalNote = tokenResponse.url && tokenResponse.url !== tokenUrl.toString()
+				? ` (final ${new URL(tokenResponse.url).origin})`
+				: '';
+			const identity = credentials
+				? ` as ${credentials.username.slice(0, 4)}...(len=${credentials.username.length})`
+				: ' anonymously';
+			console.error(`[Registry] Token request failed: ${tokenResponse.status} at ${tokenUrl.origin}${finalNote}, sent${identity}${errorBody ? ` - response: ${errorBody}` : ''}`);
 			return null;
 		}
 
@@ -5085,11 +5060,13 @@ export async function runContainerWithStreaming(options: {
 			// Applies to every helper this function runs — backup/restore AND the image scanner.
 			let exitCode: number | undefined;
 			if (process.env.HELPERS_WAIT_MODE !== 'wait') {
-				// Bound by the caller's timeout (backup passes a long 'data' tier, the
-				// scanner passes 600_000). Fall back to 1h so poll mode never hangs.
-				// One line so the log confirms which exit-signal mode is active (#1344).
+				// Bounded by the caller's timeout (scanner passes 600_000, probes 60_000);
+				// the backup helper passes 0 = unbounded. One line so the log confirms which
+				// exit-signal mode is active (#1344).
 				console.log(`[runContainerWithStreaming] Awaiting exit of ${options.name ?? containerId.slice(0, 12)} via POLL mode`);
-				const deadline = Date.now() + (options.timeout && options.timeout > 0 ? options.timeout : 3_600_000);
+				// A positive timeout caps the wait; 0/omitted is UNBOUNDED (see helper-wait-core:
+				// the backup helper passes 0 on purpose, bounded by cancel + the reaper - #1382).
+				const deadline = helperWaitDeadline(options.timeout, Date.now());
 				while (exitCode === undefined && Date.now() < deadline) {
 					try {
 						const insp = await dockerFetch(`/containers/${containerId}/json`, {}, options.envId);

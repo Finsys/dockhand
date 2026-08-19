@@ -43,6 +43,7 @@ import { EXIT_MARKER } from './restic-script';
 import { parseRetention, buildForgetArgs, checkWouldWipe, retentionActive } from './retention';
 import { liveTargetKey } from './locks';
 import type { DiscoveredVolume } from './discovery-core';
+import { formatBytes } from '../../utils/format';
 import { STACKDIR_VOLUME_KEY, type StackDirProbeHint } from './stackdir-plan';
 
 /** What the service needs from the outside world. All injected for testability. */
@@ -467,7 +468,7 @@ export class BackupService {
 			const { code, message } = errorInfo(err);
 			try { await this.ports.setConfigStatus(job.configId, 'failed'); } catch { /* non-fatal */ }
 			await op.close({ kind: 'error', code, message }, { errorCode: code });
-			try { await this.ports.notify('backup_failed', { target: job.targetName, kind: 'backup', errorCode: code, message }, envId); } catch { /* non-fatal */ }
+			try { await this.ports.notify('backup_failed', { title: 'Backup failed', message: `Backup of "${job.targetName}" failed: ${message} (${code})`, type: 'error', target: job.targetName, kind: 'backup', errorCode: code, message }, envId); } catch { /* non-fatal */ }
 			// Per-config failure webhook.
 			if (job.options.webhookFailure) {
 				try {
@@ -561,7 +562,7 @@ export class BackupService {
 			const names = failed.map((f) => f.name).join(', ');
 			const msg = `Backup finished but ${names} could not be restarted and is STILL STOPPED — start it manually.`;
 			op.progress('warning', msg);
-			try { await this.ports.notify('backup_failed', { target: job.targetName, kind: 'backup', errorCode: 'STOPPED_RESTART_FAILED', message: msg }, job.environmentId); } catch { /* non-fatal */ }
+			try { await this.ports.notify('backup_failed', { title: 'Backup: container not restarted', message: msg, type: 'error', target: job.targetName, kind: 'backup', errorCode: 'STOPPED_RESTART_FAILED' }, job.environmentId); } catch { /* non-fatal */ }
 		} else {
 			op.progress('restarted', `${job.targetName} restarted.`);
 		}
@@ -577,6 +578,9 @@ export class BackupService {
 	): Promise<void> {
 		try {
 			await this.ports.notify('backup_success', {
+				title: partial ? 'Backup completed (partial)' : 'Backup completed',
+				message: `Backup of "${job.targetName}" ${partial ? 'completed with warnings' : 'completed successfully'} (snapshot ${summary.snapshotId}, +${formatBytes(summary.dataAdded)})`,
+				type: partial ? 'warning' : 'success',
 				target: job.targetName, kind: 'backup', snapshotId: summary.snapshotId,
 				dataAdded: summary.dataAdded, partial,
 			}, envId);

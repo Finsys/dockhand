@@ -5,6 +5,13 @@
  */
 export type SystemContainerType = 'dockhand' | 'hawser';
 
+/** A newer VERSION tag (semver) suggestion. Mirrors the server's find-newer result. */
+export interface NewerVersion {
+	tag: string;
+	bump: 'major' | 'minor' | 'patch';
+	skipped: string[];
+}
+
 export interface ContainerInfo {
 	id: string;
 	name: string;
@@ -135,6 +142,8 @@ export interface StackContainer {
 	created: number;
 	labels: Record<string, string>;
 	updateAvailable?: boolean;
+	/** A newer VERSION tag (semver) for this pinned image, or null. Advisory. */
+	newerVersion?: NewerVersion | null;
 }
 
 export interface ComposeStackInfo {
@@ -144,6 +153,8 @@ export interface ComposeStackInfo {
 	status: string;
 	updatesAvailable?: boolean;
 	updateCount?: number;
+	/** How many containers in this stack have a newer version tag (semver). */
+	newerVersionCount?: number;
 	sourceType?: 'external' | 'internal' | 'git';
 	repository?: {
 		id: number;

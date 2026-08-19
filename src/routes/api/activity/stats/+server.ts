@@ -3,6 +3,15 @@ import { getContainerEventStats } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
 import type { RequestHandler } from './$types';
 
+/**
+ * @openapi
+ * summary: Get aggregate container activity statistics (totals and counts by action)
+ * query: environment_id:integer Filter to a single environment (from GET /api/environments)
+ * resp-200: {total:integer!, today:integer!, byAction:{}}
+ * resp-200-example: {"total":128,"today":7,"byAction":{"start":40,"stop":30}}
+ * resp-403: Permission denied (requires the activity:view permission)
+ * resp-500: Failed to fetch stats
+ */
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	const auth = await authorize(cookies);
 

@@ -2,6 +2,7 @@
 	import { Label } from '$lib/components/ui/label';
 	import { Input } from '$lib/components/ui/input';
 	import * as Select from '$lib/components/ui/select';
+	import { getProviderIcon } from '$lib/components/provider-icons';
 	import { BULK_SELECTOR_FIELDS } from '../../routes/settings/secrets/ProviderModal.svelte';
 	import { SELECTOR_VARS, BULK_SELECTOR_VAR } from '$lib/utils/bulk-selector';
 	import type { EnvVar } from '$lib/components/StackEnvVarsEditor.svelte';
@@ -58,7 +59,12 @@
 			>
 				<Select.Trigger id="secret-provider-select{idSuffix}" class="h-7 text-xs flex-1 min-w-0 max-w-xs overflow-hidden">
 					{#if secretProviderId !== null}
-						<span class="truncate min-w-0">{providers.find((p) => p.id === secretProviderId)?.name ?? 'Unknown provider'}</span>
+						{@const sel = providers.find((p) => p.id === secretProviderId)}
+						{@const SelIcon = sel ? getProviderIcon(sel.type) : null}
+						<span class="flex items-center gap-2 min-w-0">
+							{#if SelIcon}<SelIcon class="h-4 w-4 shrink-0 text-muted-foreground" />{/if}
+							<span class="truncate min-w-0">{sel?.name ?? 'Unknown provider'}</span>
+						</span>
 					{:else}
 						<span class="text-muted-foreground truncate">None — disabled</span>
 					{/if}
@@ -68,8 +74,12 @@
 						<span class="text-muted-foreground">None — disabled</span>
 					</Select.Item>
 					{#each providers as provider (provider.id)}
+						{@const ProviderIcon = getProviderIcon(provider.type)}
 						<Select.Item value={String(provider.id)} label={provider.name}>
-							{provider.name}
+							<span class="flex items-center gap-2 min-w-0">
+								{#if ProviderIcon}<ProviderIcon class="h-4 w-4 shrink-0 text-muted-foreground" />{/if}
+								<span class="truncate">{provider.name}</span>
+							</span>
 						</Select.Item>
 					{/each}
 				</Select.Content>

@@ -6,6 +6,16 @@ import { auditRegistry } from '$lib/server/audit';
 import { computeAuditDiff } from '$lib/utils/diff';
 import { parseRegistryUrl, DOCKER_HUB_HOSTS } from '$lib/server/docker';
 
+/**
+ * @openapi
+ * summary: Get a single registry by ID with the password stripped (only a hasCredentials flag)
+ * path: id:integer! Registry ID (from GET /api/registries)
+ * resp-200: {id:integer!, name:string!, url:string!, isDefault:boolean, hasCredentials:boolean!}
+ * resp-400: The id path segment is not a valid integer
+ * resp-403: Caller lacks the registries:view permission
+ * resp-404: No registry exists with that ID
+ * resp-500: Failed to read the registry
+ */
 export const GET: RequestHandler = async ({ params, cookies }) => {
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !await auth.can('registries', 'view')) {
@@ -32,6 +42,18 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 	}
 };
 
+/**
+ * @openapi
+ * summary: Update a registry (optionally set as default); credentials are trimmed and the response strips the password
+ * path: id:integer! Registry ID (from GET /api/registries)
+ * body: {name:string, url:string, username:string, password:string, isDefault:boolean}
+ * body-example: {"name":"GHCR","url":"https://ghcr.io","username":"deploy","password":"***","isDefault":true}
+ * resp-200: {id:integer!, name:string!, url:string!, isDefault:boolean, hasCredentials:boolean!}
+ * resp-400: Invalid id, or a duplicate registry name
+ * resp-403: Caller lacks the registries:edit permission
+ * resp-404: No registry exists with that ID
+ * resp-500: The update failed
+ */
 export const PUT: RequestHandler = async (event) => {
 	const { params, request, cookies } = event;
 	const auth = await authorize(cookies);
@@ -98,6 +120,17 @@ export const PUT: RequestHandler = async (event) => {
 	}
 };
 
+/**
+ * @openapi
+ * summary: Delete a registry by ID
+ * path: id:integer! Registry ID (from GET /api/registries)
+ * resp-200: {success:boolean!}
+ * resp-200-example: {"success":true}
+ * resp-400: Invalid id, or the registry cannot be deleted
+ * resp-403: Caller lacks the registries:delete permission
+ * resp-404: No registry exists with that ID
+ * resp-500: The deletion failed
+ */
 export const DELETE: RequestHandler = async (event) => {
 	const { params, cookies } = event;
 	const auth = await authorize(cookies);

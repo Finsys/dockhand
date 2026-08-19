@@ -19,6 +19,16 @@ export interface ScannerSettings {
 	trivyImage: string;
 }
 
+/**
+ * @openapi
+ * summary: Get the vulnerability-scanner settings for an environment, plus (unless settingsOnly) scanner availability, versions and optional update info
+ * query: env:integer Environment id to read scanner settings for (falls back to global defaults) (from GET /api/environments)
+ * query: checkUpdates:boolean When true, also check the scanner images for available updates (slower)
+ * query: settingsOnly:boolean When true, return only settings + defaults and skip the Docker availability/version checks
+ * resp-200: Scanner settings and (unless settingsOnly) availability, versions, updates and defaults
+ * resp-403: Permission denied (missing settings:view for the environment)
+ * resp-500: Failed to read the scanner settings
+ */
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	const auth = await authorize(cookies);
 
@@ -79,6 +89,16 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 	}
 };
 
+/**
+ * @openapi
+ * summary: Save the vulnerability-scanner settings for an environment
+ * body: {scanner:string, grypeArgs:string, trivyArgs:string, envId:integer}
+ * body-example: {"scanner":"grype","grypeArgs":"-o json -v {image}","trivyArgs":"image --format json {image}","envId":1}
+ * resp-200: {success:boolean!, settings:{scanner:string!, grypeArgs:string!, trivyArgs:string!}}
+ * resp-400: Invalid scanner type (must be none, grype, trivy or both)
+ * resp-403: Permission denied (missing settings:edit for the environment)
+ * resp-500: Failed to save the scanner settings
+ */
 export const POST: RequestHandler = async ({ request, url, cookies }) => {
 	const auth = await authorize(cookies);
 
@@ -134,6 +154,18 @@ export const POST: RequestHandler = async ({ request, url, cookies }) => {
 	}
 };
 
+/**
+ * @openapi
+ * summary: Remove the scanner images (grype/trivy) and clean up scanner database volumes for an environment
+ * query: removeImages:boolean Must be true to actually perform the removal (required)
+ * query: scanner:string Which scanner image to remove (grype or trivy); omit to remove both
+ * query: env:integer Environment id whose scanner images should be removed (required) (from GET /api/environments)
+ * resp-200: {success:boolean!, removed:array<string>, errors:array<string>}
+ * resp-400: The removeImages parameter is required, or the environment id is missing
+ * resp-403: Permission denied (missing settings:edit for the environment)
+ * resp-404: Environment not found
+ * resp-500: Failed to remove the scanner images
+ */
 export const DELETE: RequestHandler = async ({ url, cookies }) => {
 	const auth = await authorize(cookies);
 

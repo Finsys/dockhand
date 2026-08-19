@@ -185,6 +185,7 @@
 				{ id: 'auto_update_failed', label: 'Update failed', description: 'Container auto-update failed' },
 				{ id: 'auto_update_blocked', label: 'Update blocked by vulns', description: 'Update blocked due to vulnerability criteria' },
 				{ id: 'updates_detected', label: 'Updates detected', description: 'Container image updates are available (scheduled check)' },
+				{ id: 'newer_version_available', label: 'Newer version tag', description: 'A newer version tag is published for a pinned image (semver, advisory)' },
 				{ id: 'batch_update_success', label: 'Batch update completed', description: 'Scheduled container updates completed successfully' }
 			]
 		},

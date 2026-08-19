@@ -3,6 +3,13 @@ import { authorize, enterpriseRequired } from '$lib/server/authorize';
 import { getAuditLogUsers } from '$lib/server/db';
 import type { RequestHandler } from './$types';
 
+/**
+ * @openapi
+ * summary: List distinct usernames that appear in the audit log, for use as a filter dropdown (Enterprise only)
+ * resp-200: array<string>
+ * resp-403: Enterprise license required, or permission denied to view the audit log
+ * resp-500: Failed to fetch users
+ */
 export const GET: RequestHandler = async ({ cookies }) => {
 	const auth = await authorize(cookies);
 

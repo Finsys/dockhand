@@ -11,6 +11,12 @@ import { createJobResponse } from '$lib/server/sse';
  * their repo digest so they aren't silently skipped (#1286).
  * Reuses the per-image scan flow, sequentially, reporting N/total progress.
  * A single image failing does not abort the batch.
+ *
+ * @openapi
+ * summary: Scan every image in an environment for vulnerabilities, streaming per-image progress as Server-Sent Events
+ * query: env:integer ID of the environment whose images to scan (from GET /api/environments)
+ * resp-200: A Server-Sent Events stream of progress and per-image results, ending with a summary "result" event
+ * resp-403: Permission denied, or (enterprise) no access to this environment
  */
 export const POST: RequestHandler = async ({ request, url, cookies }) => {
 	const auth = await authorize(cookies);

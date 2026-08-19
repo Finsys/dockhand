@@ -16,6 +16,14 @@ import { auditUser } from '$lib/server/audit';
 
 // GET /api/users - List all users
 // Free for all - local users are needed for basic auth
+/**
+ * @openapi
+ * summary: List all local/SSO users (any authenticated user may view — only mutations are RBAC-gated)
+ * resp-200: array<{id:integer!, username:string!, email:string, displayName:string, isAdmin:boolean!, isActive:boolean!, isSso:boolean!, authProvider:string!}>
+ * resp-200-example: [{"id":1,"username":"admin","email":"admin@example.com","displayName":"Admin","isAdmin":true,"isActive":true,"isSso":false,"authProvider":"local"}]
+ * resp-401: Not authenticated
+ * resp-500: Unexpected error while loading users
+ */
 export const GET: RequestHandler = async ({ cookies }) => {
 	const auth = await authorize(cookies);
 
@@ -65,6 +73,19 @@ export const GET: RequestHandler = async ({ cookies }) => {
 
 // POST /api/users - Create a new user
 // Free for all - local users are needed for basic auth
+/**
+ * @openapi
+ * summary: Create a local user (allowed without auth only during initial setup, before any admin exists)
+ * body: {username:string!, email:string, password:string!, displayName:string}
+ * body-example: {"username":"jdoe","email":"jdoe@example.com","password":"correct horse battery staple","displayName":"Jane Doe"}
+ * resp-201: {id:integer!, username:string!, email:string, isAdmin:boolean!}
+ * resp-201-desc: The first user ever created (or every user in Free edition) automatically gets the Admin role
+ * resp-201-example: {"id":1,"username":"jdoe","email":"jdoe@example.com","isAdmin":true}
+ * resp-400: Missing username/password, or password shorter than 8 characters
+ * resp-403: Permission denied (RBAC 'users:create' missing — only applies once an admin already exists)
+ * resp-409: Username already exists
+ * resp-500: Unexpected error while creating the user
+ */
 export const POST: RequestHandler = async (event) => {
 	const { request, cookies } = event;
 	const auth = await authorize(cookies);

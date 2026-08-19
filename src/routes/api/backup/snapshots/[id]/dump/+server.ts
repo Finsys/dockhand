@@ -8,6 +8,19 @@ import { guardSnapshotEnvAccess } from '$lib/server/backups/route-guards';
 import { parseSnapshotLayout, redactSnapshotLayout } from '$lib/server/backups/snapshot-layout';
 import { jobResult } from '$lib/server/sse';
 
+/**
+ * @openapi
+ * summary: Read a single file (or archive) out of a snapshot (job-polled restic dump)
+ * description: Job-polled so a proxy can't abort the restic dump at ~15s. type selects the payload (inline preview vs archive); download requests a raw file/directory tar. A raw metadata.json download is refused (403) - it would bypass redaction.
+ * path: id:string The restic snapshot id
+ * query: destinationId:integer Destination the snapshot lives in
+ * query: path:string Path inside the snapshot (must resolve under /volumes or /metadata)
+ * query: type:string Payload kind (e.g. inline preview vs archive)
+ * query: download:string When set, stream the file/directory as a tar
+ * resp-400: Missing/invalid destinationId or path
+ * resp-403: Permission denied (needs backups:view), or a raw metadata.json download was refused
+ * resp-500: The restic dump failed
+ */
 export const GET: RequestHandler = async ({ params, url, cookies, request }) => {
 	const auth = await authorize(cookies);
 	const denied = await requireBackups(auth, 'view');

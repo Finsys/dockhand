@@ -6,6 +6,18 @@ import { Readable } from 'stream';
 import { validateDockerIdParam } from '$lib/server/docker-validation';
 import type { RequestHandler } from './$types';
 
+/**
+ * GET /api/images/{id}/export - Download an image as a tar (optionally gzipped)
+ *
+ * @openapi
+ * summary: Export a Docker image as a downloadable tar (or tar.gz) stream
+ * path: id:string! Image ID or name to export (from GET /api/images)
+ * query: env:integer ID of the environment the image belongs to (from GET /api/environments)
+ * query: compress:boolean Gzip the tar stream and serve it as .tar.gz (default false)
+ * resp-200: The image tar (application/x-tar) or gzipped tar (application/gzip) as an attachment
+ * resp-403: Permission denied
+ * resp-500: Docker returned no response body, or the export failed
+ */
 export const GET: RequestHandler = async ({ params, url, cookies }) => {
 	const invalid = validateDockerIdParam(params.id, 'image');
 	if (invalid) return invalid;

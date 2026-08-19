@@ -117,6 +117,16 @@ export interface EnvironmentStats {
 	loading?: LoadingStates;
 }
 
+/**
+ * @openapi
+ * summary: Get aggregated dashboard statistics per environment (containers, images, volumes, stacks, metrics)
+ * description: Returns an array of per-environment stats. When env is supplied and matches, a single object is returned instead of an array. An empty array is returned on a fresh install with no environments.
+ * query: env:integer Restrict the stats to a single environment (returns one object) (from GET /api/environments)
+ * resp-200: array<{id:integer!, name:string!, online:boolean, containers:{}, images:{}, volumes:{}, networks:{}, stacks:{}, metrics:{}, events:{}}>
+ * resp-403: Permission denied (requires the environments:view permission)
+ * resp-404: Environment not found (when env is supplied)
+ * resp-500: Failed to get dashboard stats
+ */
 export const GET: RequestHandler = async ({ cookies, url }) => {
 	const auth = await authorize(cookies);
 

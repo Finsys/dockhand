@@ -3,6 +3,14 @@ import type { RequestHandler } from './$types';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+/**
+ * @openapi
+ * summary: Return the bundled PRIVACY.txt — as JSON by default, or as raw text/plain when format=text
+ * query: format:string Set to "text" to return the raw privacy policy as text/plain instead of JSON
+ * resp-200: {content:string!}
+ * resp-200-desc: The privacy policy text (as {content} JSON, or raw text/plain when format=text)
+ * resp-404: PRIVACY.txt could not be found/read
+ */
 export const GET: RequestHandler = async ({ url }) => {
 	try {
 		const privacyPath = join(process.cwd(), 'PRIVACY.txt');

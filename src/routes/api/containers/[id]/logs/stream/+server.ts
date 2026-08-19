@@ -254,6 +254,20 @@ async function handleEdgeLogsStream(containerId: string, tail: string, environme
 	});
 }
 
+/**
+ * GET /api/containers/{id}/logs/stream - Stream container logs (Server-Sent Events)
+ *
+ * @openapi
+ * summary: Stream a container's logs live as Server-Sent Events (connected/log/end/error events, with keepalive heartbeats)
+ * description: Returns a `text/event-stream`. For Hawser Edge environments whose agent is not connected the stream body carries an error event. Docker stdout/stderr frames are demultiplexed server-side; TTY containers stream raw text.
+ * path: id:string! Container ID or name (from GET /api/containers)
+ * query: env:integer The target environment ID (omit for the local/default Docker host) (from GET /api/environments)
+ * query: tail:string Number of trailing log lines to prime the stream with (default "100")
+ * query: since:string Only stream logs since this time (Unix timestamp or Docker duration, e.g. 10m)
+ * query: until:string Only stream logs before this time (Unix timestamp or Docker duration)
+ * resp-200: Server-Sent Events stream (text/event-stream) of log lines
+ * resp-403: Permission denied
+ */
 export const GET: RequestHandler = async ({ params, url, cookies }) => {
 	const invalid = validateDockerIdParam(params.id, 'container');
 	if (invalid) return invalid;

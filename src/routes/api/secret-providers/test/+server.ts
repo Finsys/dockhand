@@ -3,7 +3,18 @@ import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
 import { hasProvider, testProviderConnection } from '$lib/server/secretproviders';
 
-/** Test a provider config before it's persisted to the database. */
+/**
+ * Test a provider config before it's persisted to the database.
+ *
+ * @openapi
+ * summary: Test an unsaved provider config (before creating the provider)
+ * body: {type:string!, config:object!}
+ * body-example: {"type":"vault","config":{"host":"https://vault.example.com","mount":"secret","token":"hvs...."}}
+ * resp-200: {ok:boolean!, error:string}
+ * resp-200-desc: ok=false carries the reason (invalid type, missing config, or a connection error) - still 200 so the form shows it inline
+ * resp-400: Invalid request body
+ * resp-403: Permission denied (needs secrets:create)
+ */
 export const POST: RequestHandler = async ({ request, cookies }) => {
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !(await auth.can('secrets', 'create'))) {

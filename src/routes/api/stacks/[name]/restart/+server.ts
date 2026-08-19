@@ -5,6 +5,15 @@ import { auditStack } from '$lib/server/audit';
 import { createJobResponse } from '$lib/server/sse';
 import type { RequestHandler } from './$types';
 
+/**
+ * @openapi
+ * summary: Restart a stack (mode=restart) or recreate its containers (mode=recreate); progress and the final result stream over Server-Sent Events
+ * path: name:string! Stack name (from GET /api/stacks)
+ * query: env:integer Environment ID the stack belongs to (from GET /api/environments)
+ * query: mode:string Restart mode — "recreate" recreates containers, anything else performs a plain restart
+ * resp-200: Server-Sent-Events job stream with a final result event ({success, output})
+ * resp-403: Permission denied (requires stacks:restart, or environment access denied on enterprise)
+ */
 export const POST: RequestHandler = async (event) => {
 	const { params, url, cookies } = event;
 	const auth = await authorize(cookies);

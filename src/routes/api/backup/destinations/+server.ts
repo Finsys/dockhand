@@ -36,6 +36,14 @@ function prepareDestination(dest: any, opts: { includeEnvVars: boolean }): any {
 	return result;
 }
 
+/**
+ * GET /api/backup/destinations - List backup destinations
+ *
+ * @openapi
+ * summary: List all backup destinations (restic repositories); the password is stripped and cloud-credential env vars are omitted from the list view
+ * description: Permission denial (403, "backups:view") is produced by the shared requireBackups route guard.
+ * resp-200: Array of backup destination objects without secrets (no password, no envVars)
+ */
 export const GET: RequestHandler = async ({ cookies }) => {
 	const auth = await authorize(cookies);
 	const denied = await requireBackups(auth, 'view');
@@ -46,6 +54,19 @@ export const GET: RequestHandler = async ({ cookies }) => {
 	return json(destinations.map(d => prepareDestination(d, { includeEnvVars: false })));
 };
 
+/**
+ * POST /api/backup/destinations - Create a backup destination
+ *
+ * @openapi
+ * summary: Create a restic backup destination, auto-initialize and test the repository, and register its default maintenance schedules
+ * description: Permission denial (403, "backups:manage") is produced by the shared requireBackups route guard.
+ * body: {name:string!, repository:string!, password:string!, envVars:{}, flags:string, hostPath:string, policies:string}
+ * body-example: {"name":"S3 Offsite","repository":"s3:s3.amazonaws.com/my-bucket/restic","password":"***","envVars":{"AWS_ACCESS_KEY_ID":"***","AWS_SECRET_ACCESS_KEY":"***"}}
+ * resp-201: The created backup destination object (includes decrypted envVars since the caller just supplied them; password is stripped)
+ * resp-400: Invalid input — missing name/repository/password, unsupported/SSRF-blocked repository, invalid restic flags, or an invalid cron schedule in the policies
+ * resp-409: A destination with this name already exists
+ * resp-500: Failed to create the destination (persistence error)
+ */
 export const POST: RequestHandler = async (event) => {
 	const { request, cookies } = event;
 	const auth = await authorize(cookies);

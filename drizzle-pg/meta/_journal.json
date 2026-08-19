@@ -82,8 +82,15 @@
     {
       "idx": 11,
       "version": "7",
-      "when": 1786579201000,
-      "tag": "0011_add_git_stack_only_running_services",
+      "when": 1786892847678,
+      "tag": "0011_pending_updates_semver",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1786924801000,
+      "tag": "0012_add_git_stack_only_running_services",
       "breakpoints": true
     }
   ]

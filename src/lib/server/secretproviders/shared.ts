@@ -31,6 +31,8 @@ export type SecretProviderType =
 	| 'infisical'
 	| 'vault'
 	| 'doppler'
+	| 'bitwarden'
+	| 'proton'
 	// eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents
 	| (string & {});
 
@@ -102,6 +104,22 @@ export function parseProviderError(rawBody: string | undefined | null): string |
 	return pick(obj.errors) ?? pick(obj.messages) ?? pick(obj.message) ?? null;
 }
 
+/**
+ * True when `body` parses as a JSON object or array. A 2xx status alone does not prove a
+ * host is the expected backend - a parked domain / captive portal / reverse proxy answers
+ * 200 with an HTML page. Every provider backend answers JSON, so testConnection requires
+ * this before reporting success. Rejects empty bodies and bare scalars (`5`, `true`).
+ */
+export function isJsonResponse(body: string | undefined | null): boolean {
+	if (!body || !body.trim()) return false;
+	try {
+		const v = JSON.parse(body);
+		return typeof v === 'object' && v !== null;
+	} catch {
+		return false;
+	}
+}
+
 /** 1Password service account: a single bearer token. */
 export interface ServiceAccountConfig {
 	token: string;
@@ -120,8 +138,15 @@ export interface ConnectConfig {
  */
 export interface InfisicalConfig {
 	host: string;
-	token: string;
-	projectId: string;
+	/** Static service/access token. Supply this OR clientId+clientSecret (Universal Auth). */
+	token?: string;
+	/** Universal Auth (Machine Identity) client ID. Paired with clientSecret. */
+	clientId?: string;
+	/** Universal Auth (Machine Identity) client secret. Paired with clientId. */
+	clientSecret?: string;
+	/** Required for Universal Auth / static non-`st.` tokens; optional for a service
+	 *  token (`st.*`), which carries its own project. */
+	projectId?: string;
 	environment?: string;
 	path?: string;
 }
@@ -153,13 +178,31 @@ export interface DopplerConfig {
 	config?: string;
 }
 
+/** Bitwarden Secrets Manager: a Machine Account access token. */
+export interface BitwardenConfig {
+	token: string;
+	/** Optional Bitwarden server base URL for EU or self-hosted instances. */
+	serverUrl?: string;
+}
+
+/**
+ * Proton Pass: a Personal Access Token (`pst_...::...`) authenticates an
+ * operator-installed pass-cli client. Bulk pulls one vault (selected by name);
+ * inline `pass://SHARE_ID/ITEM_ID[/FIELD]` references resolve a single field.
+ */
+export interface ProtonConfig {
+	token: string;
+}
+
 /** Persisted (encrypted) config, discriminated by the provider `type`. */
 export type SecretProviderConfig =
 	| ServiceAccountConfig
 	| ConnectConfig
 	| InfisicalConfig
 	| VaultConfig
-	| DopplerConfig;
+	| DopplerConfig
+	| BitwardenConfig
+	| ProtonConfig;
 
 /**
  * Config keys that hold a SECRET across every provider type. Only these are stripped
@@ -168,7 +211,29 @@ export type SecretProviderConfig =
  * a non-secret coordinate the user needs to see and edit. Keep in sync with the
  * `type: 'password'` fields in ProviderModal.svelte's PROVIDER_FIELDS.
  */
-export const SECRET_CONFIG_KEYS = new Set(['token']);
+export const SECRET_CONFIG_KEYS = new Set(['token', 'clientSecret']);
+
+/**
+ * Merges an incoming (edit-form) config OVER the stored one for a write/test: the incoming
+ * non-secret coordinates win, but any SECRET_CONFIG_KEY (the token) that is blank/absent in
+ * the incoming falls back to the STORED value - because the edit form leaves the token blank
+ * to mean "keep the stored secret". Used by BOTH the update (persist) and the edit-mode Test
+ * so a Test validates exactly what a Save would persist. Keep them on this one helper so they
+ * can never diverge.
+ */
+export function mergeProviderConfigForWrite(
+	incoming: Record<string, unknown>,
+	stored: Record<string, unknown>
+): Record<string, unknown> {
+	const merged: Record<string, unknown> = { ...incoming };
+	for (const key of SECRET_CONFIG_KEYS) {
+		const v = incoming[key];
+		if (v === undefined || v === '') {
+			if (stored[key] !== undefined) merged[key] = stored[key];
+		}
+	}
+	return merged;
+}
 
 /**
  * Returns a copy of a provider config with secret values removed, so the edit form

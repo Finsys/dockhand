@@ -32,3 +32,29 @@ export function resolveNanoCpusConflict(hostConfig: CpuHostConfig | null | undef
 	delete hostConfig.CpuQuota;
 	return true;
 }
+
+const PODMAN_USERNS_ANNOTATION = 'io.podman.annotations.userns';
+
+/**
+ * Podman lowers `--userns keep-id`/`auto`/`nomap` to `UsernsMode: "private"` plus generated
+ * `IDMappings` in inspect, losing the original intent. Replaying `UsernsMode: "private"` to
+ * create WITHOUT inline mappings is rejected ("must provide at least one UID or GID mapping
+ * to configure a user namespace", #1409). Podman keeps the real intent in the
+ * `io.podman.annotations.userns` annotation, and `create --userns keep-id` regenerates the
+ * mappings - so restore the annotation value to keep keep-id working across a recreate.
+ *
+ * Returns the corrected UsernsMode: the annotation value ("keep-id", "auto",
+ * "keep-id:uid=1000,gid=1000", ...) when present, `undefined` to STRIP a bare "private" with
+ * no recorded intent, or `null` for "leave UsernsMode untouched". Only the lowered "private"
+ * form is ever changed, so Docker (UsernsMode "", "host", "container:x", ...) is never
+ * touched - no Docker regression.
+ */
+export function resolvePodmanUsernsMode(
+	usernsMode: string | undefined | null,
+	annotations: Record<string, string> | undefined | null
+): { mode: string } | { strip: true } | null {
+	if (usernsMode !== 'private') return null;
+	const intent = annotations?.[PODMAN_USERNS_ANNOTATION]?.trim();
+	if (intent) return { mode: intent };
+	return { strip: true };
+}

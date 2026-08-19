@@ -5,8 +5,17 @@ import { authorize } from '$lib/server/authorize';
 import { validateDockerIdParam } from '$lib/server/docker-validation';
 
 /**
- * Release the cached volume helper container when done browsing.
- * This is called when the volume browser modal is closed.
+ * Release the cached volume helper container when done browsing (called when the
+ * volume browser modal is closed).
+ *
+ * @openapi
+ * summary: Release the cached helper container used to browse a Docker volume
+ * path: name:string! Docker volume name (from GET /api/volumes)
+ * query: env:integer Environment ID the volume belongs to (from GET /api/environments)
+ * resp-200: {success:boolean!}
+ * resp-200-example: {"success":true}
+ * resp-403: Permission denied (requires volumes:inspect)
+ * resp-500: Failed to release volume helper
  */
 export const POST: RequestHandler = async ({ params, url, cookies }) => {
 	const invalid = validateDockerIdParam(params.name, 'volume');

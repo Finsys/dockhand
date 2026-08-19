@@ -8,6 +8,13 @@ import { authorize } from '$lib/server/authorize';
 import { auditRole } from '$lib/server/audit';
 
 // GET /api/roles - List all roles
+/**
+ * @openapi
+ * summary: List all roles (built-in and custom); available in setup mode or with an enterprise license
+ * resp-200: array<{id:integer!, name:string!, description:string, isSystem:boolean!, permissions:{}}>
+ * resp-403: Enterprise license required
+ * resp-500: Failed to read the roles
+ */
 export const GET: RequestHandler = async ({ cookies }) => {
 	const auth = await authorize(cookies);
 
@@ -27,6 +34,18 @@ export const GET: RequestHandler = async ({ cookies }) => {
 };
 
 // POST /api/roles - Create a new role
+/**
+ * @openapi
+ * summary: Create a custom role (enterprise; admin required when auth is enabled)
+ * description: environmentIds from GET /api/environments.
+ * body: {name:string!, description:string, permissions:{}!, environmentIds:array<integer>}
+ * body-example: {"name":"Operators","description":"Can manage containers","permissions":{"containers":["view","edit"]},"environmentIds":[1,2]}
+ * resp-201: The created role
+ * resp-400: Name and permissions are required
+ * resp-403: Enterprise license required, or admin access required
+ * resp-409: A role with this name already exists
+ * resp-500: Failed to create the role
+ */
 export const POST: RequestHandler = async (event) => {
 	const { request, cookies } = event;
 	const auth = await authorize(cookies);

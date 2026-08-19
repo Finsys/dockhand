@@ -1,9 +1,84 @@
 [
   {
-    "version": "1.0.42",
+    "version": "1.0.43",
     "date": "",
     "comingSoon": true,
     "changes": [
+      {
+        "type": "fix",
+        "text": "registry auth no longer fails when the token realm redirects http to https behind a TLS-terminating proxy (#1428)"
+      },
+      {
+        "type": "fix",
+        "text": "security: update Go to 1.25.13 (8 HIGH stdlib CVEs) and update docker-compose to 5.5.0"
+      },
+      {
+        "type": "feature",
+        "text": "Compose validate - a preflight linter & validator for compose files"
+      },
+      {
+        "type": "feature",
+        "text": "Bitwarden Secrets Manager as a secret provider via an operator-installed bws client (PR#1416, @StefanSa)"
+      },
+      {
+        "type": "feature",
+        "text": "Proton Pass as a secret provider via an operator-installed pass-cli client"
+      },
+      {
+        "type": "feature",
+        "text": "Infisical: Universal Auth (Machine Identity) as well as a static token (#1398, @strausmann)"
+      },
+      {
+        "type": "feature",
+        "text": "detect newer version tags for pinned images and show them as a badge with release notes (#1176)"
+      },
+      {
+        "type": "feature",
+        "text": "OpenAPI spec at /api/docs with a Scalar viewer, opt-in via FEAT_API_DOCS (#814, PR#1342, @strausmann)"
+      },
+      {
+        "type": "feature",
+        "text": "Zabbix notification channel via the history.push API (PR#1419, @snesterkov)"
+      },
+      {
+        "type": "fix",
+        "text": "concurrent git syncs sharing an SSH credential no longer fail on a missing temp key (#1413, PR#1143, @HoroTW)"
+      },
+      {
+        "type": "fix",
+        "text": "backup notifications show a real title and message instead of \"undefined\" (#1414)"
+      },
+      {
+        "type": "fix",
+        "text": "git stacks accept a compose/env path with a leading slash (#1355)"
+      },
+      {
+        "type": "fix",
+        "text": "container update notifications now fire properly (#1424)"
+      },
+      {
+        "type": "fix",
+        "text": "Infisical: the project ID is optional when using a service token - it's taken from the token (#1398)"
+      },
+      {
+        "type": "fix",
+        "text": "API: adopting a stack rejects a compose path not on Dockhand's filesystem (#1375)"
+      },
+      {
+        "type": "fix",
+        "text": "API: validating a stack's env vars no longer drops the environment id (#1423)"
+      }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.43"
+  },
+  {
+    "version": "1.0.42",
+    "date": "2026-08-16",
+    "changes": [
+      {
+        "type": "feature",
+        "text": "optional indentation guides in the compose/YAML editor (#1410)"
+      },
       {
         "type": "feature",
         "text": "support caddy-docker-proxy labels (#1390)"
@@ -31,6 +106,10 @@
       {
         "type": "fix",
         "text": "container update no longer fails on Podman when CPU limits are set (#1381)"
+      },
+      {
+        "type": "fix",
+        "text": "container update no longer fails on Podman for containers using userns_mode: keep-id (#1409)"
       },
       {
         "type": "fix",

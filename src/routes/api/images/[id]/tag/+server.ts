@@ -4,6 +4,21 @@ import { authorize } from '$lib/server/authorize';
 import { validateDockerIdParam } from '$lib/server/docker-validation';
 import type { RequestHandler } from './$types';
 
+/**
+ * POST /api/images/{id}/tag - Add a repository tag to an image
+ *
+ * @openapi
+ * summary: Tag a Docker image into a repository (defaults the tag to "latest")
+ * path: id:string! Image ID or name to tag (from GET /api/images)
+ * query: env:integer ID of the environment the image belongs to (from GET /api/environments)
+ * body: {repo:string!, tag:string}
+ * body-example: {"repo":"registry.example.com/myapp","tag":"v1.2.3"}
+ * resp-200: {success:boolean!}
+ * resp-200-example: {"success":true}
+ * resp-400: Repository name is missing or not a string
+ * resp-403: Permission denied
+ * resp-500: Failed to tag image
+ */
 export const POST: RequestHandler = async ({ params, request, url, cookies }) => {
 	const invalid = validateDockerIdParam(params.id, 'image');
 	if (invalid) return invalid;

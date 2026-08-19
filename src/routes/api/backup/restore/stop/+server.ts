@@ -11,6 +11,17 @@ import { isValidSnapshotId } from '$lib/server/backups/helpers';
  * the helper container was never targeted by any stop path. Kills the restore
  * helper for the given snapshotId (or all restore helpers if omitted) so restic
  * exits and runRestore's failure/cleanup path runs.
+ *
+ * @openapi
+ * summary: Cancel a running restore — kills the restore helper for a given snapshotId, or all restore helpers when snapshotId is omitted
+ * description: snapshotId from GET /api/backup/snapshots. environmentId from GET /api/environments.
+ * body: {snapshotId:string, environmentId:integer}
+ * body-example: {"snapshotId":"a1b2c3d4"}
+ * resp-200: Returns { success: true, stopped } where "stopped" indicates whether a running restore helper was actually killed
+ * resp-200-example: {"success":true,"stopped":true}
+ * resp-400: Invalid snapshotId
+ * resp-403: Permission denied — requires "backups:manage", or no access to the targeted environment
+ * resp-500: Failed to cancel the restore (internal error)
  */
 export const POST: RequestHandler = async (event) => {
 	const { request, cookies } = event;

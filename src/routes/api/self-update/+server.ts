@@ -237,6 +237,16 @@ function buildNetworkEnvVars(inspectData: any): string[] {
  * SSE stream endpoint for self-update.
  * Pulls image, creates new container, then launches minimal sidecar.
  */
+/**
+ * @openapi
+ * summary: Pull a new Dockhand image and hand off to an updater sidecar that replaces this running container
+ * body: {newImage:string!}
+ * body-example: {"newImage":"fnsys/dockhand:v1.0.40"}
+ * resp-200: text/event-stream SSE response (steps: pulling_image, building_config, pulling_updater, creating_container, launching_updater, then a "launched"/"error" event) — or, with "Accept: application/json", the final event as plain JSON
+ * resp-400: newImage missing, not running in Docker, or the Docker socket is read-only
+ * resp-403: Admin access required
+ * resp-500: Failed to inspect own container or determine its name before starting the update
+ */
 export const POST: RequestHandler = async ({ request, cookies }) => {
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !auth.isAdmin) {

@@ -8,6 +8,18 @@ const SKIP_DF_COLLECTION = process.env.SKIP_DF_COLLECTION === 'true' || process.
 
 const DISK_USAGE_TIMEOUT = 15000; // 15 second timeout
 
+/**
+ * GET /api/system/disk - Docker disk usage for an environment
+ *
+ * @openapi
+ * summary: Return Docker disk usage (df) for an environment, or null when collection is disabled, times out, or fails
+ * query: env:integer! ID of the environment to query disk usage for (from GET /api/environments)
+ * resp-200: {diskUsage:object}
+ * resp-200-desc: diskUsage is null when SKIP_DF_COLLECTION is set, or the query times out or errors
+ * resp-200-example: {"diskUsage":{"LayersSize":1420000000,"Images":[],"Containers":[],"Volumes":[]}}
+ * resp-400: Environment ID is required
+ * resp-403: Permission denied, or (enterprise) no access to this environment
+ */
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	const auth = await authorize(cookies);
 

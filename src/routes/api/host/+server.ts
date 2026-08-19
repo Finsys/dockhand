@@ -45,6 +45,17 @@ function getLocalIpAddress(): string {
 	return '127.0.0.1';
 }
 
+/**
+ * GET /api/host - Host and environment info for the Docker daemon
+ *
+ * @openapi
+ * summary: Return host info (hostname, IP, CPU, memory, uptime, Docker counts) for the daemon behind an environment
+ * query: env:integer ID of the environment to describe (basic local info is returned when omitted) (from GET /api/environments)
+ * resp-200: {hostname:string!, ipAddress:string!, platform:string!, arch:string!, cpus:integer!, totalMemory:integer!, freeMemory:integer!, uptime:integer!, dockerVersion:string, dockerContainers:integer!, dockerContainersRunning:integer!, dockerImages:integer!, environment:object}
+ * resp-200-example: {"hostname":"docker-host","ipAddress":"192.168.1.10","platform":"linux","arch":"x64","cpus":8,"totalMemory":16777216000,"freeMemory":8388608000,"uptime":123456,"dockerVersion":"27.0.3","dockerContainers":10,"dockerContainersRunning":8,"dockerImages":25,"environment":{"id":1,"name":"local","connectionType":"socket"}}
+ * resp-403: Permission denied, or (enterprise) no access to this environment
+ * resp-500: Failed to get host info
+ */
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	const auth = await authorize(cookies);
 

@@ -6,6 +6,22 @@ import { auditContainer } from '$lib/server/audit';
 import { validateDockerIdParam } from '$lib/server/docker-validation';
 import type { RequestHandler } from './$types';
 
+/**
+ * POST /api/containers/{id}/rename - Rename a container
+ *
+ * @openapi
+ * summary: Rename a container and update any associated auto-update schedule (requires the 'create' permission)
+ * path: id:string! Container ID or name (from GET /api/containers)
+ * query: env:integer The target environment ID (omit for the local/default Docker host) (from GET /api/environments)
+ * body: {name:string!}
+ * body-example: {"name":"my-renamed-container"}
+ * resp-200: {success:boolean!}
+ * resp-200-example: {"success":true}
+ * resp-400: The new name is missing or not a string
+ * resp-403: Permission denied
+ * resp-404: Container not found
+ * resp-500: Failed to rename the container
+ */
 export const POST: RequestHandler = async (event) => {
 	const { params, request, url, cookies } = event;
 	const invalid = validateDockerIdParam(params.id, 'container');

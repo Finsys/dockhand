@@ -61,6 +61,15 @@ function stripDockerLogHeaders(raw: Uint8Array): string {
 /**
  * Poll updater container logs and status for progress tracking.
  */
+/**
+ * @openapi
+ * summary: Poll the self-update sidecar container's logs and exit state for progress tracking
+ * query: id:string! Updater container id (from POST /api/self-update)
+ * resp-200: {logs:string!, status:string!, exitCode:integer}
+ * resp-400: Container ID is required
+ * resp-403: Admin access required
+ * resp-500: Failed to inspect the updater container, or failed to fetch its progress
+ */
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !auth.isAdmin) {

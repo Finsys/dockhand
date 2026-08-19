@@ -72,7 +72,7 @@ RUN MAKEFLAGS="-j$(nproc)" npm ci --omit=dev --ignore-scripts \
 # -----------------------------------------------------------------------------
 # Stage 4: Go Collector Builder (cross-compile from build platform)
 # -----------------------------------------------------------------------------
-FROM --platform=$BUILDPLATFORM golang:1.25.9 AS go-builder
+FROM --platform=$BUILDPLATFORM golang:1.25.13 AS go-builder
 ARG TARGETARCH
 WORKDIR /app
 COPY collector/ ./collector/

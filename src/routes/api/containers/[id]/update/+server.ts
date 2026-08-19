@@ -6,6 +6,22 @@ import { removePendingContainerUpdate } from '$lib/server/db';
 import { validateDockerIdParam } from '$lib/server/docker-validation';
 import type { RequestHandler } from './$types';
 
+/**
+ * POST /api/containers/{id}/update - Recreate a container with new settings/image
+ *
+ * @openapi
+ * summary: Recreate a container with updated create-options (optionally re-pulling the image first), preserving its configuration (requires the 'create' permission)
+ * description: The body carries the container create-options (image, name, env, ports, volumes, …) alongside the two control flags below; `repullImage` pulls the image before recreation and `startAfterUpdate` starts the new container once created.
+ * path: id:string! Container ID or name (from GET /api/containers)
+ * query: env:integer The target environment ID (omit for the local/default Docker host) (from GET /api/environments)
+ * body: {image:string, name:string, repullImage:boolean, startAfterUpdate:boolean}
+ * body-example: {"image":"nginx:latest","name":"web","repullImage":true,"startAfterUpdate":true}
+ * resp-200: {success:boolean!, id:string!}
+ * resp-200-example: {"success":true,"id":"3f4a1c2b9d8e"}
+ * resp-403: Permission denied
+ * resp-404: Container not found
+ * resp-500: Failed to update the container (e.g. the image pull or recreation failed)
+ */
 export const POST: RequestHandler = async (event) => {
 	const { params, request, url, cookies } = event;
 	const invalid = validateDockerIdParam(params.id, 'container');

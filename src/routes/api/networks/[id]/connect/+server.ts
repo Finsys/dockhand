@@ -5,6 +5,20 @@ import { authorize } from '$lib/server/authorize';
 import { auditNetwork } from '$lib/server/audit';
 import { validateDockerIdParam } from '$lib/server/docker-validation';
 
+/**
+ * @openapi
+ * summary: Connect a container to a Docker network
+ * description: containerId from GET /api/containers.
+ * path: id:string! Docker network ID (from GET /api/networks)
+ * query: env:integer Environment the network belongs to (from GET /api/environments)
+ * body: {containerId:string!, containerName:string}
+ * body-example: {"containerId":"a1b2c3d4e5f6","containerName":"web-1"}
+ * resp-200: {success:boolean!}
+ * resp-200-example: {"success":true}
+ * resp-400: Container ID is required
+ * resp-403: Permission denied
+ * resp-500: Failed to connect container to network
+ */
 export const POST: RequestHandler = async (event) => {
 	const { params, url, request, cookies } = event;
 	const invalid = validateDockerIdParam(params.id, 'network');

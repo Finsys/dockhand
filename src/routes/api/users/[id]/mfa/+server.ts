@@ -10,6 +10,17 @@ import { auditUser } from '$lib/server/audit';
 import { getUser } from '$lib/server/db';
 
 // POST /api/users/[id]/mfa - Setup MFA (generate QR code)
+/**
+ * @openapi
+ * summary: Set up or verify MFA for a user (action=setup regenerates a secret; action=verify confirms a code)
+ * path: id:integer The user id
+ * body: {action:string!, token:string}
+ * resp-400: Missing user id, missing/invalid MFA token, or an unknown action
+ * resp-403: Permission denied
+ * resp-404: User not found
+ * resp-409: MFA is already enabled (disable it before setting up again)
+ * resp-500: Failed to set up MFA
+ */
 export const POST: RequestHandler = async (event) => {
 	const { params, request, cookies } = event;
 	const currentUser = await validateSession(cookies);
@@ -85,6 +96,15 @@ export const POST: RequestHandler = async (event) => {
 };
 
 // DELETE /api/users/[id]/mfa - Disable MFA
+/**
+ * @openapi
+ * summary: Disable MFA for a user
+ * path: id:integer The user id
+ * resp-400: Missing user id
+ * resp-403: Permission denied
+ * resp-404: User not found
+ * resp-500: Failed to disable MFA
+ */
 export const DELETE: RequestHandler = async (event) => {
 	const { params, cookies } = event;
 	const currentUser = await validateSession(cookies);

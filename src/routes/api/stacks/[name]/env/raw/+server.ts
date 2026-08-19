@@ -8,7 +8,15 @@ import type { RequestHandler } from './$types';
 
 /**
  * GET /api/stacks/[name]/env/raw?env=X
- * Get the raw .env file content as-is (with comments, formatting, etc.)
+ *
+ * @openapi
+ * summary: Get the raw .env file content as-is (comments and formatting preserved) for a stack
+ * path: name:string! Stack name (from GET /api/stacks)
+ * query: env:integer Environment ID the stack belongs to (from GET /api/environments)
+ * resp-200: {content:string!, noEnvFile:boolean}
+ * resp-200-example: {"content":"FOO=bar\n# comment\nBAZ=qux\n"}
+ * resp-403: Permission denied (requires stacks:view, or environment access denied on enterprise)
+ * resp-500: Failed to get environment file
  */
 export const GET: RequestHandler = async ({ params, url, cookies }) => {
 	const auth = await authorize(cookies);
@@ -73,8 +81,18 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 
 /**
  * PUT /api/stacks/[name]/env/raw?env=X
- * Save raw .env file content directly to disk.
- * Body: { content: string }
+ *
+ * @openapi
+ * summary: Write raw .env file content to disk for a stack; empty content deletes the .env file, and masked "***" placeholders are rejected to avoid corrupting secrets
+ * path: name:string! Stack name (from GET /api/stacks)
+ * query: env:integer Environment ID the stack belongs to (from GET /api/environments)
+ * body: {content:string!}
+ * body-example: {"content":"FOO=bar\nBAZ=qux\n"}
+ * resp-200: {success:boolean!, noEnvFile:boolean, deleted:boolean}
+ * resp-200-example: {"success":true}
+ * resp-400: Invalid body (content string required) or refusal to write a masked "***" placeholder
+ * resp-403: Permission denied (requires stacks:edit, or environment access denied on enterprise)
+ * resp-500: Failed to save environment file
  */
 export const PUT: RequestHandler = async ({ params, url, cookies, request }) => {
 	const auth = await authorize(cookies);

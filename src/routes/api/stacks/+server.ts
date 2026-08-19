@@ -7,6 +7,13 @@ import { auditStack } from '$lib/server/audit';
 import { createJobResponse } from '$lib/server/sse';
 import type { RequestHandler } from './$types';
 
+/**
+ * @openapi
+ * summary: List compose stacks for one environment (internal, external, and git)
+ * query: env:integer Environment id
+ * resp-403: Permission denied (needs stacks:view)
+ * resp-404: Environment not found
+ */
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	const auth = await authorize(cookies);
 
@@ -72,6 +79,16 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 	}
 };
 
+/**
+ * @openapi
+ * summary: Create and (optionally) deploy a compose stack
+ * description: Writes the compose + .env to the stack dir, stores secrets in the DB, and with start deploys it. Can bind a secret provider.
+ * query: env:integer Target environment id
+ * body: {name:string!, compose:string!, composePath:string, envPath:string, envVars:array<object>, rawEnvContent:string, secretProviderId:integer, start:boolean}
+ * resp-400: Invalid request (e.g. missing name/compose, or secretProviderId wrong type)
+ * resp-403: Permission denied (needs stacks:create; binding a secret provider also needs secrets:view)
+ * resp-500: Failed to create or deploy the stack
+ */
 export const POST: RequestHandler = async (event) => {
 	const { request, url, cookies } = event;
 	const auth = await authorize(cookies);

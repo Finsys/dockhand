@@ -10,6 +10,15 @@ import { serializeLabels, parseLabels, MAX_LABELS } from '$lib/utils/label-color
 import { cleanPem } from '$lib/utils/pem';
 import { validateEnvName } from '$lib/utils/env-name';
 
+/**
+ * @openapi
+ * summary: List all Docker environments (hosts) known to Dockhand
+ * resp-200: array<{id:integer!, name:string!, connectionType:string!, host:string, port:integer, protocol:string, icon:string, publicIp:string, timezone:string}>
+ * resp-200-desc: Environments accessible to the caller (filtered by RBAC in Enterprise mode; all environments in Free edition)
+ * resp-200-example: [{"id":1,"name":"hhdocker01","connectionType":"socket","host":null,"port":2375,"protocol":"http","icon":"server","publicIp":"203.0.113.10","timezone":"Europe/Berlin"},{"id":2,"name":"hhdocker02","connectionType":"hawser-edge","host":null,"port":2375,"protocol":"http","icon":"server","publicIp":null,"timezone":"Europe/Berlin"}]
+ * resp-403: Permission denied (RBAC 'environments:view' missing)
+ * resp-500: Unexpected error while loading environments
+ */
 export const GET: RequestHandler = async ({ cookies }) => {
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !await auth.can('environments', 'view')) {
@@ -63,6 +72,18 @@ export const GET: RequestHandler = async ({ cookies }) => {
 	}
 };
 
+/**
+ * @openapi
+ * summary: Register a new Docker environment (host)
+ * body: {name:string!, connectionType:string, host:string, port:integer, protocol:string, socketPath:string, icon:string, publicIp:string, labels:string}
+ * body-example: {"name":"hhdocker03","connectionType":"socket","socketPath":"/var/run/docker.sock","icon":"server"}
+ * resp-200: {id:integer!, name:string!, connectionType:string!}
+ * resp-200-example: {"id":3,"name":"hhdocker03","connectionType":"socket"}
+ * resp-400: Invalid name, invalid connectionType, or host missing for direct/hawser-standard
+ * resp-403: Permission denied (RBAC 'environments:create' missing)
+ * resp-409: An environment with this name already exists
+ * resp-500: Unexpected error while creating the environment
+ */
 export const POST: RequestHandler = async (event) => {
 	const { request, cookies } = event;
 	const auth = await authorize(cookies);

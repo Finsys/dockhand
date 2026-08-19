@@ -563,6 +563,13 @@ async function getEnvironmentStatsProgressive(
 	return envStats;
 }
 
+/**
+ * @openapi
+ * summary: Stream per-environment dashboard stats progressively over Server-Sent Events
+ * description: Emits environments, partial, complete, error and done events as each environment's stats resolve. When the client sends Accept application/json, the stream is collected and returned as a single JSON payload instead.
+ * resp-200: Server-Sent Events stream (text/event-stream), or a JSON payload when Accept application/json is requested
+ * resp-403: Permission denied (requires the environments:view permission)
+ */
 export const GET: RequestHandler = async ({ request, cookies }) => {
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !await auth.can('environments', 'view')) {

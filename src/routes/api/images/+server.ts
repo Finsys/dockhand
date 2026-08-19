@@ -4,6 +4,18 @@ import { authorize } from '$lib/server/authorize';
 import { hasEnvironments } from '$lib/server/db';
 import type { RequestHandler } from './$types';
 
+/**
+ * GET /api/images - List Docker images for an environment
+ *
+ * @openapi
+ * summary: List the Docker images of an environment (returns an empty array when no env is given or Docker is unreachable)
+ * query: env:integer ID of the environment whose images to list (from GET /api/environments)
+ * resp-200: array<{Id:string!, RepoTags:array<string>, Size:integer, Created:integer}>
+ * resp-200-desc: Array of images (empty if no env is specified or the Docker connection fails)
+ * resp-200-example: [{"Id":"sha256:abc123","RepoTags":["nginx:latest"],"Size":142000000,"Created":1719830400}]
+ * resp-403: Permission denied, or (enterprise) no access to this environment
+ * resp-404: Environment not found
+ */
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	const auth = await authorize(cookies);
 

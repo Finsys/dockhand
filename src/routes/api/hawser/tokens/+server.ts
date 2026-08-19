@@ -14,6 +14,15 @@ import { generateHawserToken, revokeHawserToken } from '$lib/server/hawser';
  * GET /api/hawser/tokens
  * List all Hawser tokens (without revealing full token values)
  */
+/**
+ * @openapi
+ * summary: List all Hawser agent tokens (only the prefix is returned, never the full token)
+ * resp-200: array<{id:integer!, tokenPrefix:string!, name:string!, environmentId:integer!, isActive:boolean!, lastUsed:string, createdAt:string!, expiresAt:string}>
+ * resp-200-example: [{"id":1,"tokenPrefix":"hw_abc123","name":"edge-01","environmentId":1,"isActive":true,"lastUsed":null,"createdAt":"2026-06-01T10:00:00Z","expiresAt":null}]
+ * resp-401: Not authenticated
+ * resp-403: Admin access required
+ * resp-500: Failed to read the tokens
+ */
 export const GET: RequestHandler = async ({ cookies }) => {
 	const auth = await authorize(cookies);
 
@@ -53,6 +62,20 @@ export const GET: RequestHandler = async ({ cookies }) => {
  *
  * Body: { name: string, environmentId: number, expiresAt?: string }
  * Returns: { token: string, tokenId: number } - token is only shown ONCE
+ */
+/**
+ * @openapi
+ * summary: Generate a new Hawser agent token for an environment (the plaintext token is returned only once)
+ * description: environmentId from GET /api/environments.
+ * body: {name:string!, environmentId:integer!, expiresAt:string, rawToken:string}
+ * body-example: {"name":"edge-01","environmentId":1,"expiresAt":"2027-01-01T00:00:00Z"}
+ * resp-200: {token:string!, tokenId:integer!, message:string!}
+ * resp-200-desc: Token generated — the plaintext token is shown only once and cannot be retrieved again
+ * resp-200-example: {"token":"***","tokenId":42,"message":"Token generated successfully. Save this token - it will not be shown again."}
+ * resp-400: The name or environmentId field is missing or of the wrong type
+ * resp-401: Not authenticated
+ * resp-403: Admin access required
+ * resp-500: Failed to generate the token
  */
 export const POST: RequestHandler = async ({ request, cookies }) => {
 	const auth = await authorize(cookies);
@@ -95,6 +118,17 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
  * Delete (revoke) a token by ID
  *
  * Query: ?id=<token_id>
+ */
+/**
+ * @openapi
+ * summary: Revoke a Hawser agent token by ID
+ * query: id:integer! ID of the token to revoke (from GET /api/hawser/tokens)
+ * resp-200: {success:boolean!, message:string!}
+ * resp-200-example: {"success":true,"message":"Token revoked"}
+ * resp-400: The id query parameter is missing
+ * resp-401: Not authenticated
+ * resp-403: Admin access required
+ * resp-500: Failed to revoke the token
  */
 export const DELETE: RequestHandler = async ({ url, cookies }) => {
 	const auth = await authorize(cookies);

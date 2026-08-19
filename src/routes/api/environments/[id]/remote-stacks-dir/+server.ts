@@ -9,6 +9,15 @@ import { getEnvironment, getEnvSetting, setEnvSetting } from '$lib/server/db';
 // remote host under this dir before `docker compose up`. Empty/unset = current behavior.
 // Stored via the generic per-env settings store (no schema column).
 
+/**
+ * @openapi
+ * summary: Get the per-environment remote stacks directory used to stage stack files onto a direct (agentless) daemon
+ * path: id:integer! Environment ID (from GET /api/environments)
+ * resp-200: {remoteStacksDir:string}
+ * resp-200-example: {"remoteStacksDir":"/mnt/dockhand/stacks"}
+ * resp-403: Permission denied (requires environments:view)
+ * resp-404: Environment not found
+ */
 export const GET: RequestHandler = async ({ params, cookies }) => {
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !(await auth.can('environments', 'view'))) {
@@ -23,6 +32,18 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 	return json({ remoteStacksDir });
 };
 
+/**
+ * @openapi
+ * summary: Set (or clear) the per-environment remote stacks directory for a direct (agentless) daemon
+ * path: id:integer! Environment ID (from GET /api/environments)
+ * body: {remoteStacksDir:string}
+ * body-example: {"remoteStacksDir":"/mnt/dockhand/stacks"}
+ * resp-200: {success:boolean!, remoteStacksDir:string}
+ * resp-200-example: {"success":true,"remoteStacksDir":"/mnt/dockhand/stacks"}
+ * resp-400: Invalid input — remoteStacksDir must be a string or null, or must be an absolute path with no ".."
+ * resp-403: Permission denied (requires environments:edit)
+ * resp-404: Environment not found
+ */
 export const POST: RequestHandler = async ({ params, request, cookies }) => {
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !(await auth.can('environments', 'edit'))) {

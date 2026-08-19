@@ -79,6 +79,19 @@ async function fetchStackCompose(repository: { url: string; stackfile: string })
 	return await response.text();
 }
 
+/**
+ * POST /api/templates/compose - Generate/fetch a compose file for a template
+ *
+ * @openapi
+ * summary: Return the compose YAML for a template — generated for container templates, fetched from the repository for stack templates
+ * body: {template:{id:string, type:string, title:string, image:string, repository:{url:string, stackfile:string}}!}
+ * body-example: {"template":{"id":"a1b2c3","type":"container","title":"Nginx","image":"nginx:latest"}}
+ * resp-200: {compose:string!}
+ * resp-200-example: {"compose":"services:\n  nginx:\n    image: nginx:latest\n    restart: unless-stopped\n"}
+ * resp-400: Template is missing from the request body
+ * resp-403: Permission denied
+ * resp-500: Failed to generate or fetch the compose file
+ */
 export const POST: RequestHandler = async ({ request, cookies }) => {
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !await auth.can('templates', 'deploy')) {

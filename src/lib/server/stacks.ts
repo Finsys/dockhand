@@ -1887,13 +1887,27 @@ export async function listComposeStacks(envId?: number | null): Promise<ComposeS
 	const containers = await listContainers(true, envId);
 	const stacks = new Map<string, Set<string>>();
 
-	// Container IDs with pending image updates (populated by manual/scheduled update checks).
-	// Used to flag stacks that contain at least one outdated container.
+	// Container IDs with a pending DIGEST image update (the classic amber icon).
+	// A persisted row can also be a pure newer-version-tag (semver) suggestion with
+	// no digest update - those must NOT count as an "update available", so filter
+	// on hasImageUpdate. `newerVersionIds` drives the separate semver stack badge.
 	const pendingUpdateIds = new Set<string>();
+	const newerVersionIds = new Set<string>();
+	const newerVersionById = new Map<string, unknown>();
 	if (typeof envId === 'number') {
 		try {
 			const pending = await getPendingContainerUpdates(envId);
-			pending.forEach((p) => pendingUpdateIds.add(p.containerId));
+			pending.forEach((p) => {
+				if (p.hasImageUpdate) pendingUpdateIds.add(p.containerId);
+				if (p.newerVersion) {
+					newerVersionIds.add(p.containerId);
+					try {
+						newerVersionById.set(p.containerId, JSON.parse(p.newerVersion));
+					} catch {
+						// malformed row - skip the badge for this one
+					}
+				}
+			});
 		} catch {
 			// Non-fatal: stacks just won't show update markers
 		}
@@ -1956,7 +1970,8 @@ export async function listComposeStacks(envId?: number | null): Promise<ComposeS
 					exitCode: c.exitCode,
 					created: c.created,
 					labels: c.labels || {},
-					updateAvailable: pendingUpdateIds.has(c.id)
+					updateAvailable: pendingUpdateIds.has(c.id),
+					newerVersion: newerVersionById.get(c.id) ?? null
 				};
 			})
 			.sort((a, b) => {
@@ -1972,6 +1987,8 @@ export async function listComposeStacks(envId?: number | null): Promise<ComposeS
 			containerDetails,
 			updatesAvailable: stackContainers.some((c) => pendingUpdateIds.has(c.id)),
 			updateCount: stackContainers.filter((c) => pendingUpdateIds.has(c.id)).length,
+			// Newer-version-tag (semver) suggestions in this stack - drives the Tag badge.
+			newerVersionCount: stackContainers.filter((c) => newerVersionIds.has(c.id)).length,
 			status:
 				activeTotal === 0
 					? 'stopped'

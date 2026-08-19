@@ -10,6 +10,13 @@ import { authorize } from '$lib/server/authorize';
 import { auditNotification } from '$lib/server/audit';
 import type { RequestHandler } from './$types';
 
+/**
+ * @openapi
+ * summary: List all notification settings (SMTP and Apprise) with SMTP passwords masked
+ * resp-200: array<{id:integer!, type:string!, name:string!, enabled:boolean!, config:{host:string, port:integer, from_email:string, to_emails:array<string>, urls:array<string>, password:string}, eventTypes:array<string>}>
+ * resp-403: Permission denied (requires the notifications:view permission when auth is enabled)
+ * resp-500: Failed to fetch notification settings
+ */
 export const GET: RequestHandler = async ({ cookies }) => {
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !await auth.can('notifications', 'view')) {
@@ -33,6 +40,16 @@ export const GET: RequestHandler = async ({ cookies }) => {
 	}
 };
 
+/**
+ * @openapi
+ * summary: Create a notification setting (SMTP or Apprise); the response masks any SMTP password
+ * body: {type:string!, name:string!, enabled:boolean, config:{host:string, port:integer, secure:boolean, username:string, password:string, from_email:string, from_name:string, to_emails:array<string>, urls:array<string>}, eventTypes:array<string>, event_types:array<string>}
+ * body-example: {"type":"smtp","name":"Ops Alerts","enabled":true,"config":{"host":"smtp.example.com","port":587,"secure":false,"from_email":"dockhand@example.com","to_emails":["ops@example.com"],"password":"***"},"eventTypes":["container_unhealthy"]}
+ * resp-200: {id:integer!, type:string!, name:string!, enabled:boolean!, config:{}, eventTypes:array<string>}
+ * resp-400: Missing or invalid fields — type/name/config required, type must be smtp or apprise, SMTP needs host/port/from_email/to_emails, Apprise needs at least one URL
+ * resp-403: Permission denied (requires the notifications:create permission)
+ * resp-500: Failed to create notification setting
+ */
 export const POST: RequestHandler = async (event) => {
 	const { request, cookies } = event;
 	const auth = await authorize(cookies);

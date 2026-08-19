@@ -10,6 +10,17 @@ import { auditOidcProvider } from '$lib/server/audit';
 import { computeAuditDiff } from '$lib/utils/diff';
 
 // GET /api/auth/oidc/[id] - Get specific OIDC configuration
+/**
+ * @openapi
+ * summary: Get a single OIDC provider configuration by id (client secret is masked)
+ * path: id:integer! Numeric id of the OIDC configuration (from GET /api/auth/oidc)
+ * resp-200: {id:integer!, name:string!, enabled:boolean!, issuerUrl:string!, clientId:string!}
+ * resp-400: Invalid configuration id (not a number)
+ * resp-401: Authentication required (auth is enabled and the caller is not authenticated)
+ * resp-403: Permission denied (missing settings:view)
+ * resp-404: OIDC configuration not found
+ * resp-500: Failed to read the OIDC configuration
+ */
 export const GET: RequestHandler = async ({ params, cookies }) => {
 	const auth = await authorize(cookies);
 
@@ -45,6 +56,19 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 };
 
 // PUT /api/auth/oidc/[id] - Update OIDC configuration
+/**
+ * @openapi
+ * summary: Update an existing OIDC provider configuration (only supplied fields change; a masked clientSecret is ignored)
+ * path: id:integer! Numeric id of the OIDC configuration (from GET /api/auth/oidc)
+ * body: {name:string, enabled:boolean, issuerUrl:string, clientId:string, clientSecret:string, redirectUri:string, scopes:string, usernameClaim:string, emailClaim:string, displayNameClaim:string, adminClaim:string, adminValue:string, roleMappingsClaim:string, roleMappings:{}}
+ * body-example: {"enabled":true,"scopes":"openid profile email groups","clientSecret":"***"}
+ * resp-200: {id:integer!, name:string!, enabled:boolean!, issuerUrl:string!, clientId:string!}
+ * resp-400: Invalid configuration id (not a number)
+ * resp-401: Authentication required (auth is enabled and the caller is not authenticated)
+ * resp-403: Permission denied (missing settings:edit)
+ * resp-404: OIDC configuration not found
+ * resp-500: Failed to update the OIDC configuration
+ */
 export const PUT: RequestHandler = async (event) => {
 	const { params, request, cookies } = event;
 	const auth = await authorize(cookies);
@@ -115,6 +139,17 @@ export const PUT: RequestHandler = async (event) => {
 };
 
 // DELETE /api/auth/oidc/[id] - Delete OIDC configuration
+/**
+ * @openapi
+ * summary: Delete an OIDC provider configuration by id
+ * path: id:integer! Numeric id of the OIDC configuration (from GET /api/auth/oidc)
+ * resp-200: {success:boolean!}
+ * resp-400: Invalid configuration id (not a number)
+ * resp-401: Authentication required (auth is enabled and the caller is not authenticated)
+ * resp-403: Permission denied (missing settings:edit)
+ * resp-404: OIDC configuration not found
+ * resp-500: Failed to delete the OIDC configuration
+ */
 export const DELETE: RequestHandler = async (event) => {
 	const { params, cookies } = event;
 	const auth = await authorize(cookies);

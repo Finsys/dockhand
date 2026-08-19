@@ -3,6 +3,25 @@ import { authorize, enterpriseRequired } from '$lib/server/authorize';
 import { getAuditLogs, getAuditLogUsers, type AuditLogFilters, type AuditEntityType, type AuditAction } from '$lib/server/db';
 import type { RequestHandler } from './$types';
 
+/**
+ * @openapi
+ * summary: Query the audit log with filters and pagination (Enterprise only)
+ * query: usernames:string Comma-separated usernames to filter by
+ * query: entityTypes:string Comma-separated entity types to filter by
+ * query: actions:string Comma-separated actions to filter by
+ * query: username:string Legacy single-username filter
+ * query: entityType:string Legacy single entity-type filter
+ * query: action:string Legacy single-action filter
+ * query: environmentId:integer Filter to a single environment (from GET /api/environments)
+ * query: labels:string Comma-separated labels to filter by
+ * query: fromDate:string Start of the date range (ISO 8601)
+ * query: toDate:string End of the date range (ISO 8601)
+ * query: limit:integer Maximum number of entries to return
+ * query: offset:integer Number of entries to skip (pagination)
+ * resp-200: {logs:array<{id:integer!, username:string, action:string, entityType:string, entityName:string, createdAt:string}>, total:integer}
+ * resp-403: Enterprise required, or permission denied
+ * resp-500: Failed to fetch audit logs
+ */
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	const auth = await authorize(cookies);
 

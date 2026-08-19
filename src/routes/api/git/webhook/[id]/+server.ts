@@ -11,6 +11,19 @@ function detectSource(request: Request): string {
 	return 'unknown';
 }
 
+/**
+ * @openapi
+ * summary: Webhook trigger (GitHub/GitLab) that deploys from a git repository when its signature/token verifies
+ * description: Public endpoint authenticated by the repository's webhook secret via `X-Hub-Signature-256` (GitHub) or `X-Gitlab-Token` (GitLab); the raw request body is used for HMAC verification.
+ * path: id:integer! Git repository ID (from GET /api/git/repositories)
+ * resp-200: {success:boolean, error:string}
+ * resp-200-example: {"success":true}
+ * resp-400: The id path segment is not a valid integer
+ * resp-401: The webhook signature or token did not verify
+ * resp-403: Webhooks are not enabled for this repository
+ * resp-404: No repository exists with that ID
+ * resp-500: The deployment triggered by the webhook failed
+ */
 export const POST: RequestHandler = async (event) => {
 	const { params, request } = event;
 	try {
@@ -70,6 +83,19 @@ export const POST: RequestHandler = async (event) => {
 };
 
 // Also support GET for simple polling/manual triggers
+/**
+ * @openapi
+ * summary: GET webhook trigger for a git repository, with the secret passed as the `secret` query parameter
+ * path: id:integer! Git repository ID (from GET /api/git/repositories)
+ * query: secret:string Webhook secret; required only if the repository has a webhook secret configured
+ * resp-200: {success:boolean, error:string}
+ * resp-200-example: {"success":true}
+ * resp-400: The id path segment is not a valid integer
+ * resp-401: The provided secret did not match the repository's webhook secret
+ * resp-403: Webhooks are not enabled for this repository
+ * resp-404: No repository exists with that ID
+ * resp-500: The deployment triggered by the webhook failed
+ */
 export const GET: RequestHandler = async (event) => {
 	const { params, url } = event;
 	try {

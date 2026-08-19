@@ -15,7 +15,7 @@
 
 import { request } from 'undici';
 import type { ConnectConfig, SecretProvider, TestConnectionResult } from './shared';
-import { assertSafeProviderHost } from './shared';
+import { assertSafeProviderHost, parseProviderError, isJsonResponse } from './shared';
 import { UnsupportedOperationError } from './shared';
 
 /** A vault as returned by GET /v1/vaults. */
@@ -251,6 +251,9 @@ export const connectProvider: SecretProvider<ConnectConfig> = {
 			});
 			const text = await body.text();
 			if (statusCode >= 200 && statusCode < 300) {
+				if (!isJsonResponse(text)) {
+					return { ok: false, error: '1Password Connect did not return a JSON response - the host may not be a Connect server' };
+				}
 				return { ok: true };
 			}
 			if (statusCode === 401 || statusCode === 403) {

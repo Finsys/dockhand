@@ -5,6 +5,20 @@ import { auditImage } from '$lib/server/audit';
 import { validateDockerIdParam } from '$lib/server/docker-validation';
 import type { RequestHandler } from './$types';
 
+/**
+ * DELETE /api/images/{id} - Remove a Docker image
+ *
+ * @openapi
+ * summary: Remove a Docker image by ID or name (optionally forced), scoped to an environment
+ * path: id:string! Image ID or name to remove (from GET /api/images)
+ * query: env:integer ID of the environment the image belongs to (from GET /api/environments)
+ * query: force:boolean Force removal even if the image is tagged or referenced (default false)
+ * resp-200: {success:boolean!}
+ * resp-200-example: {"success":true}
+ * resp-403: Permission denied, or (enterprise) no access to this environment
+ * resp-409: Image is in use by a running container or has dependent child images
+ * resp-500: Failed to remove image
+ */
 export const DELETE: RequestHandler = async (event) => {
 	const { params, url, cookies } = event;
 	const invalid = validateDockerIdParam(params.id, 'image');

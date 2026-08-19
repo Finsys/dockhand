@@ -46,7 +46,7 @@ RUN cp -r node_modules/better-sqlite3/build /tmp/better-sqlite3-build \
 # -----------------------------------------------------------------------------
 # Stage 2: Go Collector Builder
 # -----------------------------------------------------------------------------
-FROM golang:1.25.12 AS go-builder
+FROM golang:1.25.13 AS go-builder
 WORKDIR /app
 COPY collector/ ./collector/
 RUN cd collector && CGO_ENABLED=0 go build -o /app/bin/collection-worker .

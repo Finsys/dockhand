@@ -3,6 +3,16 @@ import type { RequestHandler } from './$types';
 import { getGitRepository } from '$lib/server/db';
 import { syncRepository, checkForUpdates } from '$lib/server/git';
 
+/**
+ * @openapi
+ * summary: Sync (git pull) the local clone of a repository to the latest commit on its tracked branch
+ * path: id:integer! Git repository ID (from GET /api/git/repositories)
+ * resp-200: {success:boolean!, error:string}
+ * resp-200-example: {"success":true}
+ * resp-400: The id path segment is not a valid integer
+ * resp-404: No repository exists with that ID
+ * resp-500: The sync failed
+ */
 export const POST: RequestHandler = async ({ params }) => {
 	try {
 		const id = parseInt(params.id);
@@ -23,6 +33,16 @@ export const POST: RequestHandler = async ({ params }) => {
 	}
 };
 
+/**
+ * @openapi
+ * summary: Check whether the tracked branch has new commits upstream without pulling them
+ * path: id:integer! Git repository ID (from GET /api/git/repositories)
+ * resp-200: {hasUpdates:boolean!, error:string}
+ * resp-200-example: {"hasUpdates":false}
+ * resp-400: The id path segment is not a valid integer
+ * resp-404: No repository exists with that ID
+ * resp-500: The update check failed
+ */
 export const GET: RequestHandler = async ({ params }) => {
 	// Check for updates without syncing
 	try {

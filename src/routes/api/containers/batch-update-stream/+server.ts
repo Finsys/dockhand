@@ -73,6 +73,16 @@ export interface UpdateProgress {
 /**
  * Batch update containers with streaming progress.
  * Expects JSON body: { containerIds: string[], vulnerabilityCriteria?: VulnerabilityCriteria }
+ *
+ * @openapi
+ * summary: Recreate a set of containers with live streaming progress (Server-Sent Events), optionally blocking on vulnerability criteria (requires the 'create' permission)
+ * description: Returns a `text/event-stream` reporting per-container progress. `vulnerabilityCriteria` (default "never") can block an update when a container's image scan exceeds the configured severity threshold. containerIds from GET /api/containers.
+ * query: env:integer The target environment ID (omit for the local/default Docker host) (from GET /api/environments)
+ * body: {containerIds:array<string>!, vulnerabilityCriteria:string}
+ * body-example: {"containerIds":["3f4a1c2b9d8e"],"vulnerabilityCriteria":"never"}
+ * resp-200: Server-Sent Events stream (text/event-stream) of per-container update progress
+ * resp-400: Invalid JSON body, or the containerIds array is missing or empty
+ * resp-403: Permission denied
  */
 export const POST: RequestHandler = async (event) => {
 	const { url, cookies, request } = event;

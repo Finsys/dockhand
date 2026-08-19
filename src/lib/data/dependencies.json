@@ -12,6 +12,24 @@
     "repository": null
   },
   {
+    "name": "@asamuzakjp/css-color",
+    "version": "6.0.7",
+    "license": "MIT",
+    "repository": "https://github.com/asamuzaK/cssColor"
+  },
+  {
+    "name": "@asamuzakjp/dom-selector",
+    "version": "8.3.2",
+    "license": "MIT",
+    "repository": "https://github.com/asamuzaK/domSelector"
+  },
+  {
+    "name": "@bramus/specificity",
+    "version": "2.4.2",
+    "license": "MIT",
+    "repository": "https://github.com/bramus/specificity"
+  },
+  {
     "name": "@codemirror/autocomplete",
     "version": "6.20.0",
     "license": "MIT",
@@ -118,6 +136,48 @@
     "version": "6.39.11",
     "license": "MIT",
     "repository": "https://github.com/codemirror/view"
+  },
+  {
+    "name": "@csstools/color-helpers",
+    "version": "6.1.1",
+    "license": "MIT-0",
+    "repository": "https://github.com/csstools/postcss-plugins"
+  },
+  {
+    "name": "@csstools/css-calc",
+    "version": "3.3.0",
+    "license": "MIT",
+    "repository": "https://github.com/csstools/postcss-plugins"
+  },
+  {
+    "name": "@csstools/css-color-parser",
+    "version": "4.2.0",
+    "license": "MIT",
+    "repository": "https://github.com/csstools/postcss-plugins"
+  },
+  {
+    "name": "@csstools/css-parser-algorithms",
+    "version": "4.0.0",
+    "license": "MIT",
+    "repository": "https://github.com/csstools/postcss-plugins"
+  },
+  {
+    "name": "@csstools/css-syntax-patches-for-csstree",
+    "version": "1.1.8",
+    "license": "MIT-0",
+    "repository": "https://github.com/csstools/postcss-plugins"
+  },
+  {
+    "name": "@csstools/css-tokenizer",
+    "version": "4.0.0",
+    "license": "MIT",
+    "repository": "https://github.com/csstools/postcss-plugins"
+  },
+  {
+    "name": "@exodus/bytes",
+    "version": "1.15.1",
+    "license": "MIT",
+    "repository": "https://github.com/ExodusOSS/bytes"
   },
   {
     "name": "@jridgewell/gen-mapping",
@@ -252,6 +312,12 @@
     "repository": "https://github.com/simonepri/phc-format"
   },
   {
+    "name": "@replit/codemirror-indentation-markers",
+    "version": "6.5.3",
+    "license": "MIT",
+    "repository": "https://github.com/replit/codemirror-indentation-markers"
+  },
+  {
     "name": "@rollup/rollup-darwin-arm64",
     "version": "4.60.0",
     "license": "MIT",
@@ -354,6 +420,12 @@
     "repository": "https://github.com/WiseLibs/better-sqlite3"
   },
   {
+    "name": "bidi-js",
+    "version": "1.0.3",
+    "license": "MIT",
+    "repository": "https://github.com/lojjic/bidi-js"
+  },
+  {
     "name": "bindings",
     "version": "1.5.0",
     "license": "MIT",
@@ -432,10 +504,28 @@
     "repository": "https://github.com/bradymholt/cronstrue"
   },
   {
+    "name": "css-tree",
+    "version": "3.2.1",
+    "license": "MIT",
+    "repository": "https://github.com/csstree/csstree"
+  },
+  {
+    "name": "data-urls",
+    "version": "7.0.0",
+    "license": "MIT",
+    "repository": "https://github.com/jsdom/data-urls"
+  },
+  {
     "name": "decamelize",
     "version": "1.2.0",
     "license": "MIT",
     "repository": "https://github.com/sindresorhus/decamelize"
+  },
+  {
+    "name": "decimal.js",
+    "version": "10.6.0",
+    "license": "MIT",
+    "repository": "https://github.com/MikeMcl/decimal.js"
   },
   {
     "name": "decompress-response",
@@ -474,6 +564,12 @@
     "repository": null
   },
   {
+    "name": "dompurify",
+    "version": "3.4.13",
+    "license": "(MPL-2.0 OR Apache-2.0)",
+    "repository": "https://github.com/cure53/DOMPurify"
+  },
+  {
     "name": "drizzle-orm",
     "version": "0.45.2",
     "license": "Apache-2.0",
@@ -490,6 +586,12 @@
     "version": "1.4.5",
     "license": "MIT",
     "repository": "https://github.com/mafintosh/end-of-stream"
+  },
+  {
+    "name": "entities",
+    "version": "8.0.0",
+    "license": "BSD-2-Clause",
+    "repository": "https://github.com/fb55/entities"
   },
   {
     "name": "esm-env",
@@ -558,6 +660,12 @@
     "repository": "https://github.com/substack/github-from-package"
   },
   {
+    "name": "html-encoding-sniffer",
+    "version": "6.0.0",
+    "license": "MIT",
+    "repository": "https://github.com/jsdom/html-encoding-sniffer"
+  },
+  {
     "name": "ieee754",
     "version": "1.2.1",
     "license": "BSD-3-Clause",
@@ -582,16 +690,34 @@
     "repository": "https://github.com/sindresorhus/is-fullwidth-code-point"
   },
   {
+    "name": "is-potential-custom-element-name",
+    "version": "1.0.1",
+    "license": "MIT",
+    "repository": "https://github.com/mathiasbynens/is-potential-custom-element-name"
+  },
+  {
     "name": "is-reference",
     "version": "3.0.3",
     "license": "MIT",
     "repository": "https://github.com/Rich-Harris/is-reference"
   },
   {
+    "name": "isomorphic-dompurify",
+    "version": "3.22.0",
+    "license": "MIT",
+    "repository": "https://github.com/kkomelin/isomorphic-dompurify"
+  },
+  {
     "name": "js-yaml",
     "version": "4.3.1",
     "license": "MIT",
     "repository": "https://github.com/nodeca/js-yaml"
+  },
+  {
+    "name": "jsdom",
+    "version": "30.0.1",
+    "license": "MIT",
+    "repository": "https://github.com/jsdom/jsdom"
   },
   {
     "name": "ldapts",
@@ -612,10 +738,28 @@
     "repository": "https://github.com/sindresorhus/locate-path"
   },
   {
+    "name": "lru-cache",
+    "version": "11.5.2",
+    "license": "BlueOak-1.0.0",
+    "repository": "https://github.com/isaacs/node-lru-cache"
+  },
+  {
     "name": "magic-string",
     "version": "0.30.21",
     "license": "MIT",
     "repository": "https://github.com/Rich-Harris/magic-string"
+  },
+  {
+    "name": "marked",
+    "version": "18.0.9",
+    "license": "MIT",
+    "repository": "https://github.com/markedjs/marked"
+  },
+  {
+    "name": "mdn-data",
+    "version": "2.27.1",
+    "license": "CC0-1.0",
+    "repository": "https://github.com/mdn/data"
   },
   {
     "name": "mimic-response",
@@ -702,6 +846,12 @@
     "repository": "https://github.com/sindresorhus/p-try"
   },
   {
+    "name": "parse5",
+    "version": "8.0.1",
+    "license": "MIT",
+    "repository": "https://github.com/inikulin/parse5"
+  },
+  {
     "name": "path-exists",
     "version": "4.0.0",
     "license": "MIT",
@@ -774,6 +924,12 @@
     "repository": "https://github.com/troygoode/node-require-directory"
   },
   {
+    "name": "require-from-string",
+    "version": "2.0.2",
+    "license": "MIT",
+    "repository": "https://github.com/floatdrop/require-from-string"
+  },
+  {
     "name": "require-main-filename",
     "version": "2.0.0",
     "license": "ISC",
@@ -798,6 +954,12 @@
     "repository": "https://github.com/feross/safe-buffer"
   },
   {
+    "name": "saxes",
+    "version": "6.0.0",
+    "license": "ISC",
+    "repository": "https://github.com/lddubeau/saxes"
+  },
+  {
     "name": "semver",
     "version": "7.7.4",
     "license": "ISC",
@@ -820,6 +982,12 @@
     "version": "4.0.1",
     "license": "MIT",
     "repository": "https://github.com/feross/simple-get"
+  },
+  {
+    "name": "source-map-js",
+    "version": "1.2.1",
+    "license": "BSD-3-Clause",
+    "repository": "https://github.com/7rulnik/source-map-js"
   },
   {
     "name": "strict-event-emitter-types",
@@ -876,6 +1044,12 @@
     "repository": "https://github.com/wobsoriano/svelte-sonner"
   },
   {
+    "name": "symbol-tree",
+    "version": "3.2.4",
+    "license": "MIT",
+    "repository": "https://github.com/jsdom/js-symbol-tree"
+  },
+  {
     "name": "tar-fs",
     "version": "2.1.4",
     "license": "MIT",
@@ -894,6 +1068,24 @@
     "repository": "https://github.com/welch/tdigest"
   },
   {
+    "name": "tldts",
+    "version": "7.4.10",
+    "license": "MIT",
+    "repository": "https://github.com/remusao/tldts"
+  },
+  {
+    "name": "tldts-core",
+    "version": "7.4.10",
+    "license": "MIT",
+    "repository": "https://github.com/remusao/tldts"
+  },
+  {
+    "name": "tough-cookie",
+    "version": "6.0.2",
+    "license": "BSD-3-Clause",
+    "repository": "https://github.com/salesforce/tough-cookie"
+  },
+  {
     "name": "tr46",
     "version": "6.0.0",
     "license": "MIT",
@@ -908,6 +1100,12 @@
   {
     "name": "undici",
     "version": "7.29.0",
+    "license": "MIT",
+    "repository": "https://github.com/nodejs/undici"
+  },
+  {
+    "name": "undici",
+    "version": "8.10.0",
     "license": "MIT",
     "repository": "https://github.com/nodejs/undici"
   },
@@ -930,14 +1128,38 @@
     "repository": "https://github.com/marijnh/w3c-keyname"
   },
   {
+    "name": "w3c-xmlserializer",
+    "version": "5.0.0",
+    "license": "MIT",
+    "repository": "https://github.com/jsdom/w3c-xmlserializer"
+  },
+  {
     "name": "webidl-conversions",
     "version": "8.0.1",
     "license": "BSD-2-Clause",
     "repository": "https://github.com/jsdom/webidl-conversions"
   },
   {
+    "name": "whatwg-mimetype",
+    "version": "5.0.0",
+    "license": "MIT",
+    "repository": "https://github.com/jsdom/whatwg-mimetype"
+  },
+  {
     "name": "whatwg-url",
     "version": "15.1.0",
+    "license": "MIT",
+    "repository": "https://github.com/jsdom/whatwg-url"
+  },
+  {
+    "name": "whatwg-url",
+    "version": "16.0.1",
+    "license": "MIT",
+    "repository": "https://github.com/jsdom/whatwg-url"
+  },
+  {
+    "name": "whatwg-url",
+    "version": "17.1.0",
     "license": "MIT",
     "repository": "https://github.com/jsdom/whatwg-url"
   },
@@ -966,10 +1188,22 @@
     "repository": "https://github.com/websockets/ws"
   },
   {
+    "name": "xml-name-validator",
+    "version": "5.0.0",
+    "license": "Apache-2.0",
+    "repository": "https://github.com/jsdom/xml-name-validator"
+  },
+  {
     "name": "xml-naming",
     "version": "0.1.0",
     "license": "MIT",
     "repository": "https://github.com/NaturalIntelligence/xml-naming"
+  },
+  {
+    "name": "xmlchars",
+    "version": "2.2.0",
+    "license": "MIT",
+    "repository": "https://github.com/lddubeau/xmlchars"
   },
   {
     "name": "y18n",

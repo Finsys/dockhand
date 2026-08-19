@@ -5,6 +5,15 @@ import { authorize } from '$lib/server/authorize';
 import { createJobResponse } from '$lib/server/sse';
 
 // GET /api/stacks/[name]/compose - Get compose file content
+/**
+ * @openapi
+ * summary: Get a stack's compose file content plus its resolved compose/env paths
+ * path: name:string The stack name
+ * query: env:integer Environment id the stack belongs to
+ * resp-403: Permission denied (needs stacks:view)
+ * resp-404: Stack or compose file not found
+ * resp-500: Failed to read the compose file
+ */
 export const GET: RequestHandler = async ({ params, url, cookies }) => {
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !(await auth.can('stacks', 'view'))) {
@@ -42,6 +51,17 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 };
 
 // PUT /api/stacks/[name]/compose - Update compose file content
+/**
+ * @openapi
+ * summary: Save a stack's compose file (and optionally relocate it, bind a secret provider, and redeploy)
+ * description: Every accepted PUT persists the compose content; with restart it also redeploys. Supports moving the compose/env to a new path and binding a secret provider.
+ * path: name:string The stack name
+ * query: env:integer Environment id the stack belongs to
+ * body: {content:string!, composePath:string, envPath:string, oldComposePath:string, oldEnvPath:string, moveFromDir:string, restart:boolean, secretProviderId:integer}
+ * resp-400: Invalid request (e.g. missing content, or secretProviderId wrong type)
+ * resp-403: Permission denied (needs stacks:edit; binding a secret provider also needs secrets:view)
+ * resp-500: Failed to save or deploy the compose file
+ */
 export const PUT: RequestHandler = async ({ params, request, url, cookies }) => {
 	const auth = await authorize(cookies);
 

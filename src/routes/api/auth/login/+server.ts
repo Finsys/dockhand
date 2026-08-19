@@ -15,7 +15,20 @@ import { getUser, getUserByUsername } from '$lib/server/db';
 import { auditAuth } from '$lib/server/audit';
 import { getClientIp } from '$lib/server/client-ip';
 
-// POST /api/auth/login - Authenticate user
+/**
+ * @openapi
+ * summary: Authenticate with username/password (local or LDAP) and set the session cookie
+ * body: {username:string!, password:string!, mfaToken:string, provider:string}
+ * body-example: {"username":"admin","password":"correct horse battery staple","provider":"local"}
+ * resp-200: {success:boolean!, user:{id:integer!, username:string!, email:string, displayName:string, isAdmin:boolean!}}
+ * resp-200-desc: Login succeeded and dockhand_session cookie was set — OR requiresMfa:true if a second factor is needed first
+ * resp-200-example: {"success":true,"user":{"id":1,"username":"admin","email":"admin@example.com","displayName":"Admin","isAdmin":true}}
+ * resp-400: Authentication disabled, or username/password missing
+ * resp-401: Invalid credentials or invalid MFA code
+ * resp-403: Local login disabled via DISABLE_LOCAL_LOGIN
+ * resp-429: Rate-limited (too many attempts for this IP+username)
+ * resp-500: Unexpected error during authentication
+ */
 export const POST: RequestHandler = async (event) => {
 	const { request, cookies } = event;
 	// Check if auth is enabled

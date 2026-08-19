@@ -8,6 +8,15 @@ import { previewStackBackupPath } from '$lib/server/backups';
 // Preview WHERE a stack's directory will be captured from on the host (the resolved host
 // bind path), or `unknown` with a reason - so the create-schedule dialog can show it up front
 // and warn before scheduling a backup that would hard-fail the stack-dir probe.
+/**
+ * @openapi
+ * summary: Preview where a stack's directory will be captured from on the host, without running a backup
+ * query: target:string! Target stack name
+ * query: env:integer Environment ID the stack belongs to (from GET /api/environments)
+ * resp-200: The resolved capture path preview — kind "candidate" with hostPath, kind "tar" with composeFile only, or kind "unknown" with a reason
+ * resp-400: target is required
+ * resp-403: Permission denied (requires backups:view), or no access to the target's environment (enterprise)
+ */
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	const auth = await authorize(cookies);
 	const denied = await requireBackups(auth, 'view');

@@ -28,6 +28,18 @@ function parsePsOutput(output: string): { Titles: string[]; Processes: string[][
 	return { Titles: headers, Processes: processes };
 }
 
+/**
+ * GET /api/containers/{id}/top - List processes running in a container
+ *
+ * @openapi
+ * summary: List the processes running inside a container (via `ps` in the container, falling back to the Docker top API)
+ * description: Uses the container 'inspect' permission. The `source` field indicates whether the result came from an in-container `ps` (`"ps"`) or the Docker top API fallback (`"top"`).
+ * path: id:string! Container ID or name (from GET /api/containers)
+ * query: env:integer The target environment ID (omit for the local/default Docker host) (from GET /api/environments)
+ * resp-200: {Titles:array<string>!, Processes:array<array<string>>!, source:string!}
+ * resp-403: Permission denied
+ * resp-500: Failed to read the container process list
+ */
 export const GET: RequestHandler = async ({ params, url, cookies }) => {
 	const invalid = validateDockerIdParam(params.id, 'container');
 	if (invalid) return invalid;

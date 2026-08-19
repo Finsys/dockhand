@@ -483,6 +483,12 @@ export const pendingContainerUpdates = sqliteTable('pending_container_updates', 
 	containerId: text('container_id').notNull(),
 	containerName: text('container_name').notNull(),
 	currentImage: text('current_image').notNull(),
+	// True when a digest image update is pending (the classic amber icon). Defaults
+	// true so pre-existing rows keep behaving exactly as before.
+	hasImageUpdate: integer('has_image_update', { mode: 'boolean' }).notNull().default(true),
+	// A newer VERSION tag (semver) for a pinned image, as JSON {tag,bump,skipped}.
+	// Null when there's no semver suggestion. Advisory - never auto-applied.
+	newerVersion: text('newer_version'),
 	checkedAt: text('checked_at').default(sql`CURRENT_TIMESTAMP`),
 	createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`)
 }, (table) => ({

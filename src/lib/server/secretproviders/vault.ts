@@ -18,7 +18,7 @@
  */
 
 import { request } from 'undici';
-import { UnsupportedOperationError, assertSafeProviderHost, sanitizeSelectorPath, parseProviderError } from './shared';
+import { UnsupportedOperationError, assertSafeProviderHost, sanitizeSelectorPath, parseProviderError, isJsonResponse } from './shared';
 import type { SecretProvider, TestConnectionResult, VaultConfig } from './shared';
 
 /** Undici response body handle, derived so we don't import undici's types. */
@@ -93,19 +93,26 @@ export const vaultProvider: SecretProvider<VaultConfig> = {
 			return { ok: false, error: 'Token is empty' };
 		}
 		try {
-			const { statusCode, body } = await request(`${apiBase(config)}/auth/token/lookup-self`, {
+			// Read the KV v2 mount config: validates host + token + the configured mount
+			// in one authenticated call - the same properties deploy (resolveBulk) uses. A
+			// wrong mount 404s and a bad token 403s, so both fail Test instead of passing.
+			const mount = encodeURIComponent(config.mount || 'secret');
+			const { statusCode, body } = await request(`${apiBase(config)}/${mount}/config`, {
 				method: 'GET',
 				headers: authHeaders(config)
 			});
+			const rawBody = await body.text().catch(() => '');
 			if (statusCode >= 200 && statusCode < 300) {
-				await body.text().catch(() => '');
+				// A 2xx alone isn't proof: a parked domain / proxy can answer 200 with HTML.
+				if (!isJsonResponse(rawBody)) {
+					return { ok: false, error: 'Vault did not return a JSON response - the host may not be a Vault server' };
+				}
 				return { ok: true };
 			}
-			const rawBody = await body.text().catch(() => '');
 			// Log the full upstream body server-side; show the client only a message
 			// parsed from Vault's own {errors:[...]} shape (a non-Vault host probed via
 			// SSRF returns other text that won't parse, so nothing leaks).
-			if (rawBody) console.warn(`[HashiCorp Vault] token lookup ${statusCode}: ${rawBody}`);
+			if (rawBody) console.warn(`[HashiCorp Vault] mount config ${mount} ${statusCode}: ${rawBody}`);
 			const safe = parseProviderError(rawBody);
 			return {
 				ok: false,
@@ -143,7 +150,9 @@ export const vaultProvider: SecretProvider<VaultConfig> = {
 		if (statusCode < 200 || statusCode >= 300) {
 			const detail = await readErrorDetail(body);
 			if (detail) console.warn(`[HashiCorp Vault] read ${mount}/${path} ${statusCode}: ${detail}`);
-			throw new Error(`HashiCorp Vault: read failed for ${mount}/${path} (status ${statusCode})`);
+			throw new Error(
+				`HashiCorp Vault: read failed for ${mount}/${path} (status ${statusCode})${detail ? `: ${detail}` : ''}`
+			);
 		}
 
 		const payload = (await body.json()) as KvV2ReadResponse;

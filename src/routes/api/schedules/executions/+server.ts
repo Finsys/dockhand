@@ -24,6 +24,22 @@ import {
 	type ScheduleStatus
 } from '$lib/server/db';
 
+/**
+ * @openapi
+ * summary: List schedule execution history, filterable and paginated
+ * query: scheduleType:string Filter by schedule type (container_update, git_stack_sync, ...)
+ * query: scheduleId:integer Filter by the numeric id of the schedule (from GET /api/schedules)
+ * query: environmentId:integer Filter by environment id ("null" for global/system schedules) (from GET /api/environments)
+ * query: status:string Filter by execution status (queued/running/success/warning/failed/skipped)
+ * query: statuses:string Comma-separated list of statuses (alternative to status)
+ * query: triggeredBy:string Filter by trigger (cron/webhook/manual)
+ * query: fromDate:string ISO date lower bound
+ * query: toDate:string ISO date upper bound
+ * query: limit:integer Page size (default 50)
+ * query: offset:integer Page offset (default 0)
+ * resp-200: {executions:array<{id:integer!, scheduleType:string!, status:string!, startedAt:string!}>!, total:integer!, limit:integer!, offset:integer!}
+ * resp-500: Unexpected error while loading execution history
+ */
 export const GET: RequestHandler = async ({ url }) => {
 	try {
 		const scheduleType = url.searchParams.get('scheduleType') as ScheduleType | null;

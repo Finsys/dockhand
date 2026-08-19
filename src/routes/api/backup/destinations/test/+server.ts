@@ -11,6 +11,16 @@ import { withGcsCredFile } from '$lib/server/backups/restic';
  * Test a backup destination configuration.
  * - With `destinationId`: uses saved credentials from DB
  * - Without: uses inline credentials from request body (for testing before save)
+ *
+ * @openapi
+ * summary: Test a backup repository — either a saved destination (by destinationId) or inline credentials supplied for a not-yet-saved destination
+ * description: Provide `destinationId` to test a saved destination using its stored credentials, or omit it and supply `repository`/`password`/`envVars` to test before saving. Permission denial (403, "backups:manage") is produced by the shared requireBackups route guard. destinationId from GET /api/backup/destinations.
+ * body: {destinationId:integer, repository:string, password:string, envVars:{}}
+ * body-example: {"repository":"s3:s3.amazonaws.com/my-bucket/restic","password":"***","envVars":{"AWS_ACCESS_KEY_ID":"***","AWS_SECRET_ACCESS_KEY":"***"}}
+ * resp-200: Test result — { success: true } when the repository is reachable, or { success: false, needsInit?, error } otherwise
+ * resp-200-example: {"success":true}
+ * resp-400: Invalid input — missing repository/password for an inline test, or an unsupported/SSRF-blocked repository
+ * resp-404: Destination not found (when testing a saved destinationId)
  */
 export const POST: RequestHandler = async ({ request, cookies }) => {
 	const auth = await authorize(cookies);

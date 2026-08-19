@@ -9,10 +9,14 @@
  * - dockhand.port.<hostPort>.url=<url> — Override the click URL for a specific published port
  * - dockhand.order=<int>  — Controls display order within a stack (lower = first, default 0)
  * - dockhand.adopt=false  — Prevent this stack from being adopted (any container in the stack)
+ * - dockhand.version.pattern=regex:... — Override how the newer-version check reads
+ *     this image's tags, for non-standard tag schemes (named groups major/minor/patch)
  *
  * All label values are case-insensitive and accept: true/yes/1 and false/no/0.
  * The opt-out model means labels override DB settings (label wins).
  */
+
+import { compileVersionPattern } from './semver/tag-parser';
 
 /** Recognized Dockhand label keys */
 export const DOCKHAND_LABELS = {
@@ -22,6 +26,7 @@ export const DOCKHAND_LABELS = {
 	URL: 'dockhand.url',
 	ORDER: 'dockhand.order',
 	ADOPT: 'dockhand.adopt',
+	VERSION_PATTERN: 'dockhand.version.pattern',
 } as const;
 
 const TRUTHY_VALUES = new Set(['true', 'yes', '1']);
@@ -67,6 +72,17 @@ export function isUpdateDisabledByLabel(labels: Record<string, string> | undefin
 export function isHiddenByLabel(labels: Record<string, string> | undefined | null): boolean {
 	const value = parseLabelBool(getLabel(labels, DOCKHAND_LABELS.HIDDEN));
 	return value === true; // explicitly hidden
+}
+
+/**
+ * Compile this container's `dockhand.version.pattern` label into a RegExp for the
+ * newer-version check's override, or null when absent/invalid. A bad pattern
+ * degrades to null (default parser), so a typo never breaks the update check.
+ */
+export function getVersionPatternOverride(
+	labels: Record<string, string> | undefined | null
+): RegExp | null {
+	return compileVersionPattern(getLabel(labels, DOCKHAND_LABELS.VERSION_PATTERN));
 }
 
 /**

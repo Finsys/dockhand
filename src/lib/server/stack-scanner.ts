@@ -228,6 +228,17 @@ export async function adoptStack(
 		return { success: false, error: 'Already adopted' };
 	}
 
+	// The compose file must live on Dockhand's own filesystem - it is the source of truth
+	// Dockhand reads on view/edit and pushes to the remote on deploy. The GUI file browser
+	// can only pick a local path, but a direct API call can pass any string, including a
+	// remote agent's STACKS_DIR path that Dockhand can't read (#1375). Reject it here.
+	if (stack.composePath && !existsSync(stack.composePath)) {
+		return {
+			success: false,
+			error: `Compose file not found on Dockhand's filesystem: ${stack.composePath}. Adopt a path local to Dockhand, not a remote agent path.`
+		};
+	}
+
 	// If the compose file has a top-level `name:` property, prefer it over the passed name.
 	// This ensures Docker's project name (from the label) matches Dockhand's stack name.
 	let stackNameSource = stack.name;

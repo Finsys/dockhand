@@ -106,6 +106,17 @@ async function resolveTagInfo(registry: any, image: string, tag: string): Promis
 	return result;
 }
 
+/**
+ * @openapi
+ * summary: Resolve the compressed size and creation date of a single registry tag from its manifest (lazy per-tag fetch for the registry browser)
+ * query: registry:integer Registry ID; omitted or Docker Hub registries return a graceful "not supported" result instead of a manifest fetch (from GET /api/registries)
+ * query: image:string! Image repository/name
+ * query: tag:string! Tag name or digest
+ * resp-200: {size:number, lastUpdated:string, reason:string}
+ * resp-200-example: {"size":104857600,"lastUpdated":"2026-06-01T12:00:00Z"}
+ * resp-400: image and tag are required
+ * resp-404: Registry not found
+ */
 export const GET: RequestHandler = async ({ url }) => {
 	const registryId = url.searchParams.get('registry');
 	const image = url.searchParams.get('image');

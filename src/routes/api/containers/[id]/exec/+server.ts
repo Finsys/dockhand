@@ -11,6 +11,20 @@ import { createExec, getDockerConnectionInfo } from '$lib/server/docker';
 import { authorize } from '$lib/server/authorize';
 import { validateDockerIdParam } from '$lib/server/docker-validation';
 
+/**
+ * POST /api/containers/{id}/exec - Create an exec instance for terminal attachment
+ *
+ * @openapi
+ * summary: Create a Docker exec instance in a container and return its ID plus the Docker connection info for a terminal WebSocket
+ * path: id:string! Container ID or name (from GET /api/containers)
+ * query: envId:integer The target environment ID (omit for the local/default Docker host) (from GET /api/environments)
+ * body: {shell:string, user:string}
+ * body-example: {"shell":"/bin/sh","user":"root"}
+ * resp-200: {execId:string!, connectionInfo:{type:string!, host:string, port:integer}}
+ * resp-401: Not authenticated
+ * resp-403: Permission denied
+ * resp-500: Failed to create the exec instance
+ */
 export const POST: RequestHandler = async ({ params, request, cookies, url }) => {
 	const invalid = validateDockerIdParam(params.id, 'container');
 	if (invalid) return invalid;

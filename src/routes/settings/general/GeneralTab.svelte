@@ -16,7 +16,10 @@
 	import ThemeSelector from '$lib/components/ThemeSelector.svelte';
 	import NavigationSelector from '$lib/components/NavigationSelector.svelte';
 	import AnimateIconsToggle from '$lib/components/AnimateIconsToggle.svelte';
+	import IndentGuidesToggle from '$lib/components/IndentGuidesToggle.svelte';
 	import ColoredActionsToggle from '$lib/components/ColoredActionsToggle.svelte';
+	import SemverCheckConfig from '$lib/components/SemverCheckConfig.svelte';
+	import { onMount } from 'svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 
 	// General settings state - these derive from the store
@@ -280,6 +283,51 @@ services:
 			toast.success('Backup image updated');
 		}
 	}
+
+	// Global newer-version-tag (semver) detection - one setting every update check
+	// (scheduled and manual) reads.
+	let semverEnabled = $state(false);
+	let semverMaxBump = $state<'patch' | 'minor' | 'major'>('major');
+	let semverMatchFlavor = $state(true);
+	let semverIncludePrerelease = $state(false);
+	let semverLoaded = $state(false);
+
+	onMount(async () => {
+		try {
+			const res = await fetch('/api/settings/semver');
+			if (res.ok) {
+				const c = await res.json();
+				semverEnabled = c.enabled ?? false;
+				semverMaxBump = c.maxBump ?? 'major';
+				semverMatchFlavor = c.matchFlavor ?? true;
+				semverIncludePrerelease = c.includePrerelease ?? false;
+			}
+		} catch { /* keep defaults */ }
+		semverLoaded = true;
+	});
+
+	async function saveSemverConfig() {
+		try {
+			await fetch('/api/settings/semver', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					enabled: semverEnabled,
+					maxBump: semverMaxBump,
+					matchFlavor: semverMatchFlavor,
+					includePrerelease: semverIncludePrerelease
+				})
+			});
+		} catch {
+			toast.error('Failed to save version-check settings');
+		}
+	}
+
+	// Persist on any change once the initial load is done (skip the load itself).
+	$effect(() => {
+		semverEnabled; semverMaxBump; semverMatchFlavor; semverIncludePrerelease;
+		if (semverLoaded) saveSemverConfig();
+	});
 </script>
 
 <div class="flex-1 min-h-0 overflow-y-auto">
@@ -511,6 +559,7 @@ services:
 							<ThemeSelector />
 							<ColoredActionsToggle />
 							<AnimateIconsToggle />
+							<IndentGuidesToggle />
 							{#if $authStore.authEnabled}
 								<div class="text-xs text-muted-foreground flex items-start gap-1.5 mt-2 p-2 bg-muted/50 rounded-md">
 									<HelpCircle class="w-3.5 h-3.5 shrink-0 mt-0.5" />
@@ -824,6 +873,28 @@ services:
 							</Button>
 						</div>
 					</div>
+				</Card.Content>
+			</Card.Root>
+
+			<Card.Root>
+				<Card.Header>
+					<Card.Title class="text-sm font-medium flex items-center gap-2">
+						<Tags class="w-4 h-4" />
+						Newer version tags
+					</Card.Title>
+					<Card.Description>
+						How the update check looks for newer version tags on pinned images. Applies to every
+						check - scheduled and manual. Per-environment settings decide whether to check on a
+						schedule; this decides how versions are compared.
+					</Card.Description>
+				</Card.Header>
+				<Card.Content>
+					<SemverCheckConfig
+						bind:enabled={semverEnabled}
+						bind:maxBump={semverMaxBump}
+						bind:matchFlavor={semverMatchFlavor}
+						bind:includePrerelease={semverIncludePrerelease}
+					/>
 				</Card.Content>
 			</Card.Root>
 

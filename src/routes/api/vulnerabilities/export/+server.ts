@@ -30,6 +30,12 @@ function toCSV(findings: Finding[]): string {
 /**
  * Export the aggregated vulnerability findings as json | csv.
  * Server-side rendering so the download matches the grid data exactly.
+ *
+ * @openapi
+ * summary: Export an environment's aggregated vulnerability findings as json or csv, matching the grid's filters and sort
+ * query: format:string Output format — json (default) or csv
+ * resp-200: The findings as a downloadable json or csv attachment
+ * resp-200-desc: A permission failure returns the status from the access check; 500 is returned on an export error
  */
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	const { envIdNum, denied } = await authorizeVulnAccess(cookies, url);

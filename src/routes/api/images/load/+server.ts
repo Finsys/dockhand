@@ -17,6 +17,17 @@ import type { RequestHandler } from './$types';
  * to the daemon while the request is still open, then return the result.
  *
  * Local/socket and direct TCP only (loadImage rejects Hawser).
+ *
+ * @openapi
+ * summary: Load a Docker image from an uploaded tar (docker load) for air-gapped hosts
+ * description: The request body is the raw image tar (Content-Type application/x-tar), streamed straight to the daemon without buffering. Local/socket or direct TCP only; Hawser is rejected.
+ * body-raw: application/x-tar The raw image tar, streamed to the daemon (docker load)
+ * query: env:integer Target environment id
+ * resp-200: {success:boolean!, loaded:string}
+ * resp-200-desc: loaded echoes the daemon's final line, e.g. "Loaded image: alpine:3.20"
+ * resp-400: Request body (an image tar) is required
+ * resp-403: Permission denied (needs images:load), or access denied to this environment
+ * resp-500: The daemon rejected the tar or the load failed
  */
 export const POST: RequestHandler = async (event) => {
 	const { request, url, cookies } = event;

@@ -7,6 +7,17 @@ import { listSnapshots } from '$lib/server/backups';
 import { filterSnapshotsByEnvAccess } from '$lib/server/backups/route-guards';
 import { jobResult } from '$lib/server/sse';
 
+/**
+ * @openapi
+ * summary: List restic snapshots for a backup config or a single destination (job-polled)
+ * description: Pass configId to list across the config's destinations, or destinationId for one. Job-polled so a reverse proxy can't abort the sync restic snapshots read at ~15s; match each snapshot's instance tag against GET /api/backup/instance to tell own snapshots from foreign orphans.
+ * query: configId:integer Backup config id (mutually exclusive with destinationId)
+ * query: destinationId:integer Single destination id (mutually exclusive with configId)
+ * query: allDestinations:boolean With configId, include every destination of the config
+ * resp-400: Invalid or missing configId/destinationId
+ * resp-403: Permission denied (needs backups:view) or environment access denied
+ * resp-404: Backup config not found
+ */
 export const GET: RequestHandler = async ({ url, cookies, request }) => {
 	const auth = await authorize(cookies);
 	const denied = await requireBackups(auth, 'view');

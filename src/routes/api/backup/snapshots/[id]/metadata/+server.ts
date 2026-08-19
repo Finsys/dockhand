@@ -8,6 +8,14 @@ import { guardSnapshotEnvAccess } from '$lib/server/backups/route-guards';
 import { redactSnapshotLayout } from '$lib/server/backups/snapshot-layout';
 import { jobResult } from '$lib/server/sse';
 
+/**
+ * @openapi
+ * summary: The snapshot's redacted metadata layout (job-polled restic dump)
+ * description: Job-polled so a proxy can't abort the restic dump at ~15s. The layout is redacted (stack secrets and container Config.Env/Labels stripped) before it leaves the server.
+ * path: id:string The restic snapshot id
+ * query: destinationId:integer Destination the snapshot lives in
+ * resp-400: Missing/invalid destinationId
+ */
 export const GET: RequestHandler = async ({ params, url, cookies, request }) => {
 	const auth = await authorize(cookies);
 	const denied = await requireBackups(auth, 'view');

@@ -11,6 +11,17 @@ import { probeBulkKeysCached } from '$lib/server/secretproviders/probe-cache';
  * references, return which KEY NAMES currently exist in the provider. Only names
  * are returned - secret values never leave the server. Powers the editor's live
  * "IN VAULT" marker.
+ *
+ * @openapi
+ * summary: Live-probe which key NAMES exist in a stored provider (names only, values never leave the server)
+ * path: id:integer The secret provider id
+ * body: {selector:string, refs:array<string>}
+ * body-example: {"selector":"prod","refs":["op://vault/db/password"]}
+ * resp-200: {ok:boolean!, bulkKeys:array<string>, resolvedRefs:array<string>, error:string}
+ * resp-200-desc: ok=true returns the key names found via the bulk selector and the resolved op:// refs; ok=false folds a provider error in (still 200) so a slow or auth-gated provider never breaks the editor
+ * resp-400: Invalid ID or unknown provider type
+ * resp-403: Permission denied (needs secrets:view)
+ * resp-404: Secret provider not found
  */
 export const POST: RequestHandler = async ({ params, cookies, request }) => {
 	const auth = await authorize(cookies);

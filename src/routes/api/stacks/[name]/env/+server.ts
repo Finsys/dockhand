@@ -34,6 +34,15 @@ function parseEnvFile(content: string): Record<string, string> {
  * Secrets are stored only in the database and injected via shell environment at runtime.
  * The .env file only contains non-secret variables.
  */
+/**
+ * @openapi
+ * summary: Get a stack's env vars (non-secrets from file, secrets masked from DB) plus injected provider keys
+ * path: name:string The stack name
+ * query: env:integer Environment id the stack belongs to
+ * resp-200: {variables:array<object>!, injectedSecretKeys:array<string>, secretProvider:object}
+ * resp-403: Permission denied (needs stacks:view)
+ * resp-500: Failed to read env vars
+ */
 export const GET: RequestHandler = async ({ params, url, cookies }) => {
 	const auth = await authorize(cookies);
 	const envId = url.searchParams.get('env');
@@ -133,6 +142,16 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
  *
  * If a secret's value is '***' (masked placeholder), the original value
  * from the database is preserved.
+ */
+/**
+ * @openapi
+ * summary: Save a stack's secret env vars to the DB (secrets never hit disk)
+ * path: name:string The stack name
+ * query: env:integer Environment id the stack belongs to
+ * body: {variables:array<object>!}
+ * resp-400: Invalid variables payload
+ * resp-403: Permission denied (needs stacks:edit)
+ * resp-500: Failed to save env vars
  */
 export const PUT: RequestHandler = async ({ params, url, cookies, request }) => {
 	const auth = await authorize(cookies);

@@ -41,6 +41,7 @@
 	import ThemeSelector from '$lib/components/ThemeSelector.svelte';
 	import NavigationSelector from '$lib/components/NavigationSelector.svelte';
 	import AnimateIconsToggle from '$lib/components/AnimateIconsToggle.svelte';
+	import IndentGuidesToggle from '$lib/components/IndentGuidesToggle.svelte';
 	import ColoredActionsToggle from '$lib/components/ColoredActionsToggle.svelte';
 	import { themeStore } from '$lib/stores/theme';
 	import PageHeader from '$lib/components/PageHeader.svelte';
@@ -731,6 +732,7 @@
 					<ThemeSelector userId={profile.id} />
 					<ColoredActionsToggle userId={profile.id} />
 					<AnimateIconsToggle userId={profile.id} />
+				<IndentGuidesToggle userId={profile.id} />
 				</Card.Content>
 			</Card.Root>
 

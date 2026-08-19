@@ -13,3 +13,10 @@
  *   5. Drop the BACKUPS_ENABLED guards in src/lib/server/scheduler/index.ts.
  */
 export const BACKUPS_ENABLED = process.env.FEAT_BACKUPS_ENABLED === 'true';
+
+/**
+ * API docs (OpenAPI spec + Scalar viewer at /api/docs and /api/docs/ui).
+ * Off by default: the docs routes are unauthenticated, so exposing the full
+ * API surface is opt-in per instance with FEAT_API_DOCS=true. Read once at boot.
+ */
+export const API_DOCS_ENABLED = process.env.FEAT_API_DOCS === 'true';

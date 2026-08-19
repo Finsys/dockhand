@@ -5,6 +5,13 @@ import { hasProvider } from '$lib/server/secretproviders';
 import { authorize } from '$lib/server/authorize';
 import { auditSecretProvider } from '$lib/server/audit';
 
+/**
+ * @openapi
+ * summary: List configured secret providers (summaries never include the decrypted config)
+ * resp-200: array<{id:integer!, name:string!, type:string!}>
+ * resp-403: Permission denied (needs secrets:view)
+ * resp-500: Failed to fetch secret providers
+ */
 export const GET: RequestHandler = async ({ cookies }) => {
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !(await auth.can('secrets', 'view'))) {
@@ -21,6 +28,15 @@ export const GET: RequestHandler = async ({ cookies }) => {
 	}
 };
 
+/**
+ * @openapi
+ * summary: Create a secret provider (Vault, Infisical, Doppler, 1Password Connect)
+ * body: {name:string!, type:string!, config:object!}
+ * resp-201: {id:integer!, name:string!, type:string!}
+ * resp-400: Name and type are required, unknown provider type, config missing, or a provider with this name already exists
+ * resp-403: Permission denied (needs secrets:create)
+ * resp-500: Failed to create secret provider
+ */
 export const POST: RequestHandler = async (event) => {
 	const { request, cookies } = event;
 	const auth = await authorize(cookies);
@@ -44,15 +60,17 @@ export const POST: RequestHandler = async (event) => {
 			return json({ error: 'Config is required' }, { status: 400 });
 		}
 
+		const existing = await getSecretProviders();
+		if (existing.some((p) => p.name.trim() === name)) {
+			return json({ error: 'A secret provider with this name already exists' }, { status: 400 });
+		}
+
 		const provider = await createSecretProvider({ type, name, config });
 		await auditSecretProvider(event, 'create', provider.id, provider.name, { type });
 		// Never return the decrypted config.
 		return json(provider, { status: 201 });
 	} catch (error: any) {
 		console.error('Error creating secret provider:', error);
-		if (error.message?.includes('UNIQUE') || error.message?.includes('unique')) {
-			return json({ error: 'A secret provider with this name already exists' }, { status: 400 });
-		}
 		return json({ error: 'Failed to create secret provider' }, { status: 500 });
 	}
 };

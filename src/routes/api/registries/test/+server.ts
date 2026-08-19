@@ -10,6 +10,18 @@ import { getRegistry } from '$lib/server/db';
  * Accepts either inline credentials (from the modal form) or a registry ID
  * (to test an already-saved registry using stored credentials).
  */
+/**
+ * @openapi
+ * summary: Test registry connectivity and (if credentials are given) authentication against the V2 endpoint
+ * description: Pass either a saved registryId or inline url/username/password. The outcome is always reported in a 200 body via the success/connectivity/authenticated fields, never as an HTTP error. registryId from GET /api/registries.
+ * body: {registryId:integer, url:string, username:string, password:string}
+ * body-example: {"url":"https://ghcr.io","username":"deploy","password":"***"}
+ * resp-200: {success:boolean!, connectivity:boolean!, authenticated:boolean, message:string!}
+ * resp-200-example: {"success":true,"connectivity":true,"authenticated":true,"message":"Connected and authenticated as deploy"}
+ * resp-400: The url field is missing (and no registryId was supplied)
+ * resp-403: Caller lacks the registries:view permission
+ * resp-404: The referenced registryId does not exist
+ */
 export const POST: RequestHandler = async ({ request, cookies }) => {
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !await auth.can('registries', 'view')) {

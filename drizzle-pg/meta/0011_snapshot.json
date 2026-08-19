@@ -1,5 +1,5 @@
 {
-  "id": "e658d433-b474-4e2f-a470-79e95e29f4f6",
+  "id": "5f9fe4e6-7799-406c-a232-c72726c6db27",
   "prevId": "670ff7d7-5e55-4d96-a6d8-c9d2e3c765b4",
   "version": "7",
   "dialect": "postgresql",
@@ -1490,13 +1490,6 @@
           "notNull": false,
           "default": false
         },
-        "only_running_services": {
-          "name": "only_running_services",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": false,
-          "default": false
-        },
         "last_sync": {
           "name": "last_sync",
           "type": "timestamp",
@@ -2125,6 +2118,19 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "has_image_update": {
+          "name": "has_image_update",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "newer_version": {
+          "name": "newer_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "checked_at": {
           "name": "checked_at",

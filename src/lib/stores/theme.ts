@@ -34,6 +34,7 @@ export interface ThemePreferences {
 	animateIcons: boolean;
 	coloredActionButtons: boolean;
 	actionIconSize: ActionIconSize;
+	editorIndentGuides: boolean;
 }
 
 const STORAGE_KEY = 'dockhand-theme';
@@ -48,7 +49,8 @@ const defaultPrefs: ThemePreferences = {
 	editorFont: 'system-mono',
 	animateIcons: true,
 	coloredActionButtons: false,
-	actionIconSize: 'normal'
+	actionIconSize: 'normal',
+	editorIndentGuides: false
 };
 
 // Font size scale mapping
@@ -125,7 +127,9 @@ function createThemeStore() {
 								: !!(data.animateIcons ?? data.animate_icons),
 						// Default OFF (#1072)
 						coloredActionButtons: !!(data.coloredActionButtons ?? data.colored_action_buttons ?? false),
-						actionIconSize: (data.actionIconSize || data.action_icon_size || 'normal') as ActionIconSize
+						actionIconSize: (data.actionIconSize || data.action_icon_size || 'normal') as ActionIconSize,
+						// Default OFF (#1410)
+						editorIndentGuides: !!(data.editorIndentGuides ?? data.editor_indent_guides ?? false)
 					};
 					set(prefs);
 					saveToStorage(prefs);

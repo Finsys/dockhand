@@ -3,6 +3,12 @@ import { getDockerEvents, EnvironmentNotFoundError } from '$lib/server/docker';
 import { getEnvironment } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
 
+/**
+ * @openapi
+ * summary: Stream live Docker events (container/image/volume/network) for an environment via SSE, with periodic heartbeats
+ * query: env:integer Environment id — without it, an "info" SSE message is sent and the stream ends (from GET /api/environments)
+ * resp-200: text/event-stream SSE stream ("connected", "heartbeat" every 5s, "docker" events with {type,action,actor,time,timeNano}, or an "error"/"info" event for edge environments, missing/unknown environment, or a lost Docker connection)
+ */
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	const auth = await authorize(cookies);
 

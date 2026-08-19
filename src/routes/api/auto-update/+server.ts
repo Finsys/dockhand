@@ -5,6 +5,13 @@ import { getAutoUpdateSettings } from '$lib/server/db';
 /**
  * Batch endpoint to get all auto-update settings for an environment.
  * Returns a map of containerName -> settings for efficient lookup.
+ *
+ * @openapi
+ * summary: Get all enabled auto-update settings for an environment, keyed by container name
+ * query: env:integer Environment ID to read settings for (from GET /api/environments)
+ * resp-200: {}
+ * resp-200-example: {"web-1":{"enabled":true,"scheduleType":"daily","cronExpression":"0 3 * * *","vulnerabilityCriteria":"never"}}
+ * resp-500: Failed to get auto-update settings
  */
 export const GET: RequestHandler = async ({ url }) => {
 	try {

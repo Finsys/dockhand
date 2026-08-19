@@ -5,6 +5,15 @@ import { getLdapConfigs, createLdapConfig } from '$lib/server/db';
 import { auditLdapConfig } from '$lib/server/audit';
 
 // GET /api/auth/ldap - List all LDAP configurations
+/**
+ * @openapi
+ * summary: List all configured LDAP providers (enterprise only; bind passwords are masked)
+ * resp-200: array<{id:integer!, name:string!, enabled:boolean!, serverUrl:string!, baseDn:string!}>
+ * resp-200-example: [{"id":1,"name":"Corporate LDAP","enabled":true,"serverUrl":"ldaps://ldap.example.com:636","baseDn":"dc=example,dc=com"}]
+ * resp-401: Authentication required (auth is enabled and the caller is not an authenticated admin)
+ * resp-403: Enterprise license required
+ * resp-500: Failed to read the LDAP configurations
+ */
 export const GET: RequestHandler = async ({ cookies }) => {
 	const auth = await authorize(cookies);
 
@@ -32,6 +41,18 @@ export const GET: RequestHandler = async ({ cookies }) => {
 };
 
 // POST /api/auth/ldap - Create a new LDAP configuration
+/**
+ * @openapi
+ * summary: Create a new LDAP provider configuration (enterprise only)
+ * body: {name:string!, serverUrl:string!, baseDn:string!, enabled:boolean, bindDn:string, bindPassword:string, userFilter:string, usernameAttribute:string, emailAttribute:string, displayNameAttribute:string, groupBaseDn:string, groupFilter:string, adminGroup:string, roleMappings:{}, tlsEnabled:boolean, tlsCa:string}
+ * body-example: {"name":"Corporate LDAP","serverUrl":"ldaps://ldap.example.com:636","baseDn":"dc=example,dc=com","bindDn":"cn=admin,dc=example,dc=com","bindPassword":"***","enabled":true,"tlsEnabled":true}
+ * resp-201: {id:integer!, name:string!, enabled:boolean!, serverUrl:string!, baseDn:string!}
+ * resp-201-desc: LDAP configuration created (bindPassword is masked in the response)
+ * resp-400: Name, server URL, and base DN are required
+ * resp-401: Authentication required (auth is enabled and the caller is not an authenticated admin)
+ * resp-403: Enterprise license required
+ * resp-500: Failed to create the LDAP configuration
+ */
 export const POST: RequestHandler = async (event) => {
 	const { request, cookies } = event;
 	const auth = await authorize(cookies);

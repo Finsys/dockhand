@@ -3,6 +3,13 @@ import type { RequestHandler } from './$types';
 import { getStackSources } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
 
+/**
+ * @openapi
+ * summary: List stack source records (their stored compose/env paths and source type)
+ * query: env:integer Filter to a single environment id
+ * resp-403: Permission denied (needs stacks:view)
+ * resp-500: Failed to list stack sources
+ */
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	const auth = await authorize(cookies);
 

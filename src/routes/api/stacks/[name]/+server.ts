@@ -4,6 +4,21 @@ import { authorize } from '$lib/server/authorize';
 import { auditStack } from '$lib/server/audit';
 import type { RequestHandler } from './$types';
 
+/**
+ * @openapi
+ * summary: Remove a stack completely (compose down + delete files + database cleanup)
+ * path: name:string! Stack name (from GET /api/stacks)
+ * query: env:integer Environment id (from GET /api/environments)
+ * query: force:boolean Force removal even if the compose down step fails
+ * query: volumes:boolean Also remove named volumes (docker compose down --volumes)
+ * query: files:boolean Delete the stack's on-disk files/directory too (default true; pass files=false to keep them on disk)
+ * resp-200: {success:boolean!}
+ * resp-200-example: {"success":true}
+ * resp-400: Compose down failed and force was not set
+ * resp-403: Permission denied, or access denied to this environment
+ * resp-404: Compose file not found for this stack
+ * resp-500: Unexpected error while removing the stack
+ */
 export const DELETE: RequestHandler = async (event) => {
 	const { params, url, cookies } = event;
 	const auth = await authorize(cookies);

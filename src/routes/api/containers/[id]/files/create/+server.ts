@@ -4,6 +4,23 @@ import { authorize } from '$lib/server/authorize';
 import { validateDockerIdParam } from '$lib/server/docker-validation';
 import type { RequestHandler } from './$types';
 
+/**
+ * POST /api/containers/{id}/files/create - Create a file or directory in a container
+ *
+ * @openapi
+ * summary: Create an empty file or a directory inside a container (requires the 'exec' permission)
+ * path: id:string! Container ID or name (from GET /api/containers)
+ * query: env:integer The target environment ID (omit for the local/default Docker host) (from GET /api/environments)
+ * body: {path:string!, type:string!}
+ * body-example: {"path":"/app/data","type":"directory"}
+ * resp-200: {success:boolean!, path:string!, type:string!}
+ * resp-200-example: {"success":true,"path":"/app/data","type":"directory"}
+ * resp-400: Path missing, type not "file" or "directory", or the container is not running
+ * resp-403: Permission denied
+ * resp-404: Parent directory not found
+ * resp-409: Path already exists
+ * resp-500: Failed to create the path
+ */
 export const POST: RequestHandler = async ({ params, url, cookies, request }) => {
 	const invalid = validateDockerIdParam(params.id, 'container');
 	if (invalid) return invalid;

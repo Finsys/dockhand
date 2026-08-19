@@ -10,6 +10,16 @@ import { authorize } from '$lib/server/authorize';
 import { auditGitCredential } from '$lib/server/audit';
 import { computeAuditDiff } from '$lib/utils/diff';
 
+/**
+ * @openapi
+ * summary: Get a single git credential by ID with secrets stripped (only hasPassword/hasSshKey flags returned)
+ * path: id:integer! Git credential ID (from GET /api/git/credentials)
+ * resp-200: {id:integer!, name:string!, authType:string!, username:string, hasPassword:boolean!, hasSshKey:boolean!, createdAt:string, updatedAt:string}
+ * resp-400: The id path segment is not a valid integer
+ * resp-403: Caller lacks the git:view permission
+ * resp-404: No credential exists with that ID
+ * resp-500: Failed to read the git credential
+ */
 export const GET: RequestHandler = async ({ params, cookies }) => {
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !await auth.can('git', 'view')) {
@@ -44,6 +54,18 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 	}
 };
 
+/**
+ * @openapi
+ * summary: Update a git credential and return it with secrets stripped
+ * path: id:integer! Git credential ID (from GET /api/git/credentials)
+ * body: {name:string, authType:string, username:string, password:string, sshPrivateKey:string, sshPassphrase:string}
+ * body-example: {"name":"github-deploy","authType":"password","username":"git","password":"***"}
+ * resp-200: {id:integer!, name:string!, authType:string!, username:string, hasPassword:boolean!, hasSshKey:boolean!, createdAt:string, updatedAt:string}
+ * resp-400: Invalid id, invalid authType, or a duplicate credential name
+ * resp-403: Caller lacks the git:edit permission
+ * resp-404: No credential exists with that ID
+ * resp-500: The update failed or the credential could not be persisted
+ */
 export const PUT: RequestHandler = async (event) => {
 	const { params, request, cookies } = event;
 	const auth = await authorize(cookies);
@@ -109,6 +131,17 @@ export const PUT: RequestHandler = async (event) => {
 	}
 };
 
+/**
+ * @openapi
+ * summary: Delete a git credential by ID
+ * path: id:integer! Git credential ID (from GET /api/git/credentials)
+ * resp-200: {success:boolean!}
+ * resp-200-example: {"success":true}
+ * resp-400: The id path segment is not a valid integer
+ * resp-403: Caller lacks the git:delete permission
+ * resp-404: No credential exists with that ID
+ * resp-500: The deletion failed
+ */
 export const DELETE: RequestHandler = async (event) => {
 	const { params, cookies } = event;
 	const auth = await authorize(cookies);

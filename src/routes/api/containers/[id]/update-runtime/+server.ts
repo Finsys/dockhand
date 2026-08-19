@@ -17,6 +17,19 @@ import { auditContainer } from '$lib/server/audit';
 import { validateDockerIdParam } from '$lib/server/docker-validation';
 import { inspectContainer, updateContainerRuntime, IN_PLACE_UPDATE_FIELDS, type InPlaceUpdateField } from '$lib/server/docker';
 
+/**
+ * @openapi
+ * summary: Update a running container's restart policy and/or CPU/memory/blkio/pids limits in-place (no recreate)
+ * path: id:string! Container id (from GET /api/containers)
+ * query: env:integer Environment id (from GET /api/environments)
+ * body: {RestartPolicy:{}, CpuShares:integer, CpuPeriod:integer, CpuQuota:integer, CpuRealtimePeriod:integer, CpuRealtimeRuntime:integer, CpusetCpus:string, CpusetMems:string, NanoCpus:integer, Memory:integer, MemorySwap:integer, MemoryReservation:integer, MemorySwappiness:integer, KernelMemory:integer, BlkioWeight:integer, BlkioWeightDevice:array<string>, BlkioDeviceReadBps:array<string>, BlkioDeviceWriteBps:array<string>, BlkioDeviceReadIOps:array<string>, BlkioDeviceWriteIOps:array<string>, PidsLimit:integer} (unsupported fields are silently dropped)
+ * body-example: {"Memory":536870912,"PidsLimit":512}
+ * resp-200: {success:boolean!, warnings:array<string>}
+ * resp-400: Invalid JSON body, or no supported fields were provided
+ * resp-403: Permission denied
+ * resp-404: Container not found
+ * resp-500: Update failed
+ */
 export const POST: RequestHandler = async (event) => {
 	const { params, request, url, cookies } = event;
 	const invalid = validateDockerIdParam(params.id, 'container');

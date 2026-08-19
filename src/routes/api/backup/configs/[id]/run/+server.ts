@@ -6,6 +6,15 @@ import { createJobResponse } from '$lib/server/sse';
 import { auditBackup } from '$lib/server/audit';
 import { requireBackups, loadConfigGateEnv } from '$lib/server/backups/route-guards';
 
+/**
+ * POST /api/backup/configs/{id}/run - Run a backup now (streamed job)
+ *
+ * @openapi
+ * summary: Trigger a manual backup run for a configuration, streaming progress as a Server-Sent Events job
+ * description: Returns a text/event-stream that emits `progress` events during the run and a final `result` event. Permission ("backups:manage") and environment-access denials (403) and not-found (404) are produced by the shared route guards.
+ * path: id:integer! Backup configuration id (from GET /api/backup/configs)
+ * resp-200: Server-Sent Events stream of progress and a final result event (status "success", "warning", "skipped" or "error")
+ */
 export const POST: RequestHandler = async (event) => {
 	const { params, request, cookies } = event;
 	const auth = await authorize(cookies);

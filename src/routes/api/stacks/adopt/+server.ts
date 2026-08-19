@@ -2,6 +2,18 @@ import { json, type RequestHandler } from '@sveltejs/kit';
 import { authorize } from '$lib/server/authorize';
 import { adoptSelectedStacks, type DiscoveredStack } from '$lib/server/stack-scanner';
 
+/**
+ * @openapi
+ * summary: Adopt previously discovered compose stacks into Dockhand for a given environment
+ * description: environmentId from GET /api/environments.
+ * body: {stacks:array<{name:string!, composePath:string!}>!, environmentId:integer!}
+ * body-example: {"stacks":[{"name":"web","composePath":"/opt/stacks/web/compose.yaml"}],"environmentId":1}
+ * resp-200: {adopted:array<string>!, failed:array<{name:string!, error:string!}>!}
+ * resp-200-example: {"adopted":["web"],"failed":[]}
+ * resp-400: No stacks provided, missing environmentId, or a stack is missing name/composePath
+ * resp-403: Permission denied (requires stacks:create)
+ * resp-500: Unexpected error while adopting stacks
+ */
 export const POST: RequestHandler = async ({ request, cookies }) => {
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !await auth.can('stacks', 'create')) {

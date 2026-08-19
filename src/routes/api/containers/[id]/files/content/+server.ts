@@ -7,6 +7,21 @@ import type { RequestHandler } from './$types';
 // Max file size for reading (1MB)
 const MAX_FILE_SIZE = 1024 * 1024;
 
+/**
+ * GET /api/containers/{id}/files/content - Read a file's content from a container
+ *
+ * @openapi
+ * summary: Read the content of a single file inside a container (max 1 MB)
+ * path: id:string! Container ID or name (from GET /api/containers)
+ * query: env:integer The target environment ID (omit for the local/default Docker host) (from GET /api/environments)
+ * query: path:string! Absolute file path inside the container
+ * resp-200: {content:string!, path:string!}
+ * resp-400: Path is missing, the target is a directory, or the container is not running
+ * resp-403: Permission denied to read the file
+ * resp-404: File not found
+ * resp-413: File is larger than the 1 MB read limit
+ * resp-500: Failed to read the file
+ */
 export const GET: RequestHandler = async ({ params, url, cookies }) => {
 	const invalid = validateDockerIdParam(params.id, 'container');
 	if (invalid) return invalid;
@@ -63,6 +78,25 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 	}
 };
 
+/**
+ * PUT /api/containers/{id}/files/content - Write a file's content in a container
+ *
+ * @openapi
+ * summary: Overwrite the content of a file inside a container (max 1 MB, requires the 'exec' permission)
+ * path: id:string! Container ID or name (from GET /api/containers)
+ * query: env:integer The target environment ID (omit for the local/default Docker host) (from GET /api/environments)
+ * query: path:string! Absolute file path inside the container
+ * body: {content:string!}
+ * body-example: {"content":"server {\n  listen 80;\n}\n"}
+ * resp-200: {success:boolean!, path:string!}
+ * resp-200-example: {"success":true,"path":"/etc/nginx/nginx.conf"}
+ * resp-400: Path is missing, content is missing/not a string, or the container is not running
+ * resp-403: Permission denied, or the target file system is read-only
+ * resp-404: Target directory not found
+ * resp-413: Content is larger than the 1 MB write limit
+ * resp-500: Failed to write the file
+ * resp-507: No space left on device
+ */
 export const PUT: RequestHandler = async ({ params, url, cookies, request }) => {
 	const invalid = validateDockerIdParam(params.id, 'container');
 	if (invalid) return invalid;

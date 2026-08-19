@@ -9,8 +9,16 @@ import { join, dirname } from 'node:path';
 /**
  * POST /api/stacks/[name]/check-path-change
  *
- * Check if the proposed compose path differs from current and if old directory has files.
- * Returns information about what would need to be moved if location changes.
+ * @openapi
+ * summary: Check whether a proposed compose path moves the stack to a different directory and how many files the old directory still holds
+ * path: name:string! Stack name (from GET /api/stacks)
+ * query: env:integer Environment ID the stack belongs to (from GET /api/environments)
+ * body: {newComposePath:string!}
+ * body-example: {"newComposePath":"/opt/stacks/web/compose.yaml"}
+ * resp-200: {hasChanges:boolean!, oldDir:string, newDir:string, fileCount:integer!, currentComposePath:string}
+ * resp-200-example: {"hasChanges":true,"oldDir":"/opt/stacks/old","newDir":"/opt/stacks/web","fileCount":3,"currentComposePath":"/opt/stacks/old/compose.yaml"}
+ * resp-403: Permission denied (requires stacks:edit)
+ * resp-500: Failed to check path changes
  */
 export const POST: RequestHandler = async ({ params, request, url, cookies }) => {
 	const auth = await authorize(cookies);

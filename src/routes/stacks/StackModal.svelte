@@ -10,7 +10,9 @@
 	import SecretProviderPicker from '$lib/components/SecretProviderPicker.svelte';
 	import { SELECTOR_VARS } from '$lib/utils/bulk-selector';
 	import { classifyMarker, resolvedRefVarNames } from '$lib/utils/invault-markers';
-	import { Layers, Save, Play, Code, GitGraph, GitBranch, GitCommitHorizontal, Github, Loader2, AlertCircle, X, Sun, Moon, TriangleAlert, GripVertical, FolderOpen, Copy, Check, XCircle, MapPin, ArrowRight, ArrowDown, Info, Box, FolderSync, Archive } from 'lucide-svelte';
+	import { applyQuickFix, findingKey } from '$lib/utils/compose-quick-fix';
+	import { Layers, Save, Play, Code, GitGraph, GitBranch, GitCommitHorizontal, Github, Loader2, AlertCircle, X, Sun, Moon, TriangleAlert, GripVertical, FolderOpen, Copy, Check, XCircle, MapPin, ArrowRight, ArrowDown, Info, Box, FolderSync, Archive, ListChecks } from 'lucide-svelte';
+	import ComposeValidatePanel from './ComposeValidatePanel.svelte';
 	import BackupPanel from '../containers/BackupPanel.svelte';
 	import { volumesForStack, type VolumeInfo } from '$lib/utils/mounts';
 	import { fetchBackupExecutions } from '$lib/utils/backup';
@@ -145,6 +147,151 @@
 	let composePathCopied = $state<'ok' | 'error' | null>(null);
 	let envPathCopied = $state<'ok' | 'error' | null>(null);
 	let composeContentCopied = $state<'ok' | 'error' | null>(null);
+
+	// --- Compose Validate (side panel) ------------------------------------------
+	let validatePanelOpen = $state(false);
+	let validateLoading = $state(false);
+	let validateError = $state<string | null>(null);
+	let validateActiveLine = $state<number | null>(null);
+	let validateReport = $state<import('./ComposeValidatePanel.svelte').ValidateReport | null>(null);
+	// Monotonic token: only the newest validate response is allowed to write the report,
+	// so a slow silent re-validate can't overwrite a newer one (fix-spam race).
+	let validateSeq = 0;
+	// Findings mapped to editor lint markers (only those with a line).
+	const validateMarkers = $derived(
+		(validateReport?.findings ?? [])
+			.filter((f) => typeof f.line === 'number')
+			.map((f) => ({ line: f.line!, severity: f.severity, ruleId: f.ruleId, message: f.message }))
+	);
+
+	async function runComposeValidate(opts: { silent?: boolean } = {}) {
+		if (!composeContent.trim()) return;
+		// Silent re-validate (after a quick fix) keeps the current list visible so the
+		// panel doesn't collapse to a spinner and lose the scroll position.
+		if (!opts.silent) validateLoading = true;
+		validateError = null;
+		validatePanelOpen = true;
+		const seq = ++validateSeq;
+		try {
+			const envId = $currentEnvironment?.id ?? null;
+			const name = (mode === 'edit' ? stackName : newStackName) || 'stack';
+			// Send the editor's current env vars (incl. secrets) so `docker compose config`
+			// resolves ${VAR} the same way a deploy will, instead of flagging "VAR not set".
+			const validateEnvVars: Record<string, string> = {};
+			for (const v of envVars) {
+				const k = v.key.trim();
+				if (k) validateEnvVars[k] = v.value ?? '';
+			}
+			const res = await fetch(
+				appendEnvParam(`/api/stacks/${encodeURIComponent(name)}/validate`, envId),
+				{
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+							compose: composeContent,
+							envVars: validateEnvVars,
+							// Only an EDIT of an existing stack has "own" containers to exclude from
+							// collision checks. A NEW stack with a name that clashes with a running
+							// stack must still be flagged, so never self-exclude in create mode.
+							existing: mode === 'edit'
+						})
+				}
+			);
+			if (!res.ok) {
+				const body = await res.json().catch(() => ({}));
+				throw new Error(body.error || `Validation failed (${res.status})`);
+			}
+			const fresh = await res.json();
+			// Stale response (a newer validate started meanwhile): drop it entirely.
+			if (seq !== validateSeq) return;
+			// On a silent re-validate, only swap the report if the finding set actually
+			// changed. When a fix succeeded the optimistic list already matches the fresh
+			// one, so keeping the same object avoids re-rendering (and the flash) of the
+			// surviving boxes.
+			if (opts.silent && validateReport && sameFindingSet(validateReport.findings, fresh.findings)) {
+				// no-op: current (optimistic) report is already correct
+			} else {
+				validateReport = fresh;
+			}
+		} catch (e) {
+			if (seq !== validateSeq) return; // superseded - don't clobber a newer report
+			validateError = e instanceof Error ? e.message : 'Validation failed';
+			validateReport = null;
+		} finally {
+			if (seq === validateSeq) validateLoading = false;
+		}
+	}
+
+	// Two finding lists are "the same" set (order-independent) by their stable keys.
+	function sameFindingSet(
+		a: { ruleId: string; line?: number; message: string }[],
+		b: { ruleId: string; line?: number; message: string }[]
+	): boolean {
+		if (a.length !== b.length) return false;
+		const bag = new Map<string, number>();
+		for (const f of a) bag.set(findingKey(f), (bag.get(findingKey(f)) ?? 0) + 1);
+		for (const f of b) {
+			const k = findingKey(f);
+			const n = bag.get(k);
+			if (!n) return false;
+			bag.set(k, n - 1);
+		}
+		return true;
+	}
+
+	// Remove a finding from the current report immediately (optimistic), so its box
+	// animates out without waiting for the round-trip.
+	function dropFinding(target: { ruleId: string; line?: number; message: string }) {
+		if (!validateReport) return;
+		const targetKey = findingKey(target);
+		const remaining = validateReport.findings.filter((f) => findingKey(f) !== targetKey);
+		const counts = { error: 0, warn: 0, info: 0 };
+		for (const f of remaining) counts[f.severity]++;
+		validateReport = { findings: remaining, counts };
+	}
+
+	// Closing the panel clears the findings so the editor markers disappear too
+	// (validateMarkers is derived from validateReport).
+	function closeValidatePanel() {
+		validatePanelOpen = false;
+		validateReport = null;
+		validateError = null;
+		validateActiveLine = null;
+	}
+
+	// Clicking a gutter marker opens the panel, highlights that line's finding, and
+	// scrolls the panel to it (the editor->panel direction).
+	function openValidateAtLine(line: number) {
+		if (validateReport) validatePanelOpen = true;
+		validateActiveLine = line;
+		validatePanelRef?.scrollToFinding?.(line);
+	}
+
+	// Clicking a finding in the panel jumps the editor to its line (panel stays open).
+	function jumpToComposeLine(line: number) {
+		codeEditorRef?.scrollToLine?.(line);
+		validateActiveLine = line;
+	}
+
+	// Apply a quick fix from the panel: rewrite the compose in place, drop the fixed
+	// finding's box immediately (it animates out), then re-validate silently so the list
+	// stays put - no spinner, no scroll reset.
+	function applyValidateFix(finding: {
+		ruleId: string;
+		line?: number;
+		message: string;
+		fix?: import('$lib/utils/compose-quick-fix').QuickFix;
+	}) {
+		if (!finding.fix) return;
+		const next = applyQuickFix(composeContent, finding.fix);
+		if (next === composeContent) return; // stale fix (text moved) - re-validate re-anchors
+		composeContent = next;
+		// The reactive editor sync suppresses onchange, so mark dirty ourselves.
+		isDirty = true;
+		validateActiveLine = null;
+		dropFinding(finding); // optimistic: the box animates out now
+		runComposeValidate({ silent: true }); // reconcile against the daemon without a flash
+	}
 	let needsFileLocation = $state(false);
 
 	// Container info for untracked stacks
@@ -597,6 +744,7 @@
 
 	// CodeEditor reference for explicit marker updates
 	let codeEditorRef: CodeEditor | null = $state(null);
+	let validatePanelRef: ComposeValidatePanel | null = $state(null);
 
 	// ComposeGraphViewer reference for resize on panel toggle
 	let graphViewerRef: ComposeGraphViewer | null = $state(null);
@@ -822,11 +970,33 @@
 		isDraggingSplit = true;
 	}
 
+	// Validate side-panel width (px), drag-resizable, persisted.
+	const STORAGE_KEY_VALIDATE_W = 'dockhand-validate-panel-width';
+	let validatePanelWidth = $state(
+		typeof localStorage !== 'undefined'
+			? Math.max(320, Number(localStorage.getItem(STORAGE_KEY_VALIDATE_W)) || 320)
+			: 320
+	);
+	let isDraggingValidate = $state(false);
+	let editorRowRef = $state<HTMLDivElement | null>(null);
+	function startValidateDrag(e: MouseEvent) {
+		e.preventDefault();
+		isDraggingValidate = true;
+	}
+
 	function handleMouseMove(e: MouseEvent) {
 		if (isDraggingSplit && containerRef) {
 			const rect = containerRef.getBoundingClientRect();
 			const newRatio = ((e.clientX - rect.left) / rect.width) * 100;
 			splitRatio = Math.max(30, Math.min(80, newRatio));
+		}
+		if (isDraggingValidate && editorRowRef) {
+			const rect = editorRowRef.getBoundingClientRect();
+			// panel is on the right: width = distance from cursor to the row's right edge.
+			const w = rect.right - e.clientX;
+			// Floor at 320px: below that the header's title + count chips + re-check button
+			// no longer fit on one line and start clipping.
+			validatePanelWidth = Math.max(320, Math.min(560, w));
 		}
 	}
 
@@ -835,6 +1005,10 @@
 			isDraggingSplit = false;
 			// Save split ratio
 			localStorage.setItem(STORAGE_KEY_SPLIT, splitRatio.toString());
+		}
+		if (isDraggingValidate) {
+			isDraggingValidate = false;
+			localStorage.setItem(STORAGE_KEY_VALIDATE_W, String(validatePanelWidth));
 		}
 	}
 
@@ -1791,8 +1965,23 @@
 											</div>
 										{:else}
 											<div class="h-full flex flex-col">
-												<!-- Copy button row -->
-												<div class="flex justify-end mb-1">
+												<!-- Copy + Validate button row -->
+												<div class="flex justify-end items-center gap-1 mb-1">
+													<Button
+														variant="ghost"
+														size="sm"
+														class="h-6 px-2 text-xs text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+														onclick={runComposeValidate}
+														disabled={!composeContent}
+														title="Check this compose for problems before deploy"
+													>
+														{#if validateLoading}
+															<Loader2 class="w-3 h-3 animate-spin" />
+														{:else}
+															<ListChecks class="w-3 h-3" />
+														{/if}
+														Validate
+													</Button>
 													<Button
 														variant="ghost"
 														size="sm"
@@ -1817,16 +2006,47 @@
 														{/if}
 													</Button>
 												</div>
-												<CodeEditor
-													bind:this={codeEditorRef}
-													value={composeContent}
-													language="yaml"
-													{readonly}
-													theme={editorTheme}
-													onchange={readonly ? undefined : handleComposeChange}
-													variableMarkers={variableMarkers}
-													class="flex-1 rounded-md overflow-hidden border border-zinc-200 dark:border-zinc-700"
-												/>
+												<div bind:this={editorRowRef} class="flex-1 min-h-0 flex">
+													<CodeEditor
+														bind:this={codeEditorRef}
+														value={composeContent}
+														language="yaml"
+														{readonly}
+														theme={editorTheme}
+														onchange={readonly ? undefined : handleComposeChange}
+														variableMarkers={variableMarkers}
+														lintMarkers={validateMarkers}
+														onLintClick={openValidateAtLine}
+														class="flex-1 min-w-0 rounded-md overflow-hidden border border-zinc-200 dark:border-zinc-700"
+													/>
+													{#if validatePanelOpen}
+														<!-- Resize handle -->
+														<div
+															class="w-1 mx-1 flex-shrink-0 rounded bg-zinc-200 dark:bg-zinc-700 hover:bg-blue-400 dark:hover:bg-blue-500 cursor-col-resize transition-colors flex items-center justify-center group {isDraggingValidate ? 'bg-blue-500 dark:bg-blue-400' : ''}"
+															onmousedown={startValidateDrag}
+															role="separator"
+															aria-orientation="vertical"
+															tabindex="0"
+														>
+															<div class="w-4 h-8 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity {isDraggingValidate ? 'opacity-100' : ''}">
+																<GripVertical class="w-3 h-3 text-white" />
+															</div>
+														</div>
+														<div class="shrink-0 min-h-0" style="width: {validatePanelWidth}px">
+															<ComposeValidatePanel
+																bind:this={validatePanelRef}
+																report={validateReport}
+																loading={validateLoading}
+																error={validateError}
+																activeLine={validateActiveLine}
+																onClose={closeValidatePanel}
+																onJumpToLine={jumpToComposeLine}
+																onRevalidate={runComposeValidate}
+																onApplyFix={applyValidateFix}
+															/>
+														</div>
+													{/if}
+												</div>
 											</div>
 										{/if}
 									</div>

@@ -20,7 +20,7 @@
 
 import { request } from 'undici';
 import type { DopplerConfig, SecretProvider, TestConnectionResult } from './shared';
-import { assertSafeProviderHost, parseProviderError } from './shared';
+import { assertSafeProviderHost, parseProviderError, isJsonResponse } from './shared';
 import { UnsupportedOperationError } from './shared';
 
 const DEFAULT_HOST = 'https://api.doppler.com';
@@ -77,6 +77,9 @@ export const dopplerProvider: SecretProvider<DopplerConfig> = {
 			// message parsed from Doppler's own {messages:[...]} shape.
 			const rawBody = await body.text().catch(() => '');
 			if (statusCode >= 200 && statusCode < 300) {
+				if (!isJsonResponse(rawBody)) {
+					return { ok: false, error: 'Doppler did not return a JSON response - the host may not be a Doppler server' };
+				}
 				return { ok: true };
 			}
 			if (rawBody) console.warn(`[Doppler] testConnection ${statusCode}: ${rawBody}`);

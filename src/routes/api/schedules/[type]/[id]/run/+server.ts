@@ -18,6 +18,16 @@ import { authorize } from '$lib/server/authorize';
 import { getAutoUpdateSettingById, getGitStack } from '$lib/server/db';
 import { BACKUPS_ENABLED } from '$lib/server/features';
 
+/**
+ * @openapi
+ * summary: Manually trigger a single run of a schedule (outside its cron), by type and id
+ * path: type:string! Schedule type (container_update, git_stack_sync, system_cleanup, env_update_check, image_prune, backup, repo_prune, repo_check, repo_verify)
+ * path: id:integer! Schedule id (semantics depend on type) (from GET /api/schedules)
+ * resp-200: {success:boolean!, message:string!}
+ * resp-400: Invalid schedule id/type, or the triggered task itself reported failure
+ * resp-404: Schedule, backup config, or backup destination not found (or backup feature disabled)
+ * resp-500: Unexpected error while triggering the schedule
+ */
 export const POST: RequestHandler = async ({ params, cookies }) => {
 	const auth = await authorize(cookies);
 

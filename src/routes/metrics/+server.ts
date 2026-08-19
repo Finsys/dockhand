@@ -13,6 +13,14 @@ import { authorize } from '$lib/server/authorize';
 import { METRICS_ENABLED, renderMetrics, metricsContentType } from '$lib/server/metrics';
 import type { RequestHandler } from './$types';
 
+/**
+ * @openapi
+ * summary: Prometheus metrics endpoint (disabled and 404s unless EXPORT_METRICS=true; public if app auth is disabled, otherwise requires a session or bearer token)
+ * resp-200: Prometheus text-exposition-format metrics body
+ * resp-401: Not authenticated (session or bearer token required when app auth is enabled)
+ * resp-404: Metrics export disabled (EXPORT_METRICS is not true)
+ * resp-500: Metrics collection failed
+ */
 export const GET: RequestHandler = async ({ cookies }) => {
 	if (!METRICS_ENABLED) {
 		return new Response('Not found', { status: 404 });

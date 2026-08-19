@@ -7,6 +7,15 @@ import { guardSnapshotEnvAccess } from '$lib/server/backups/route-guards';
 import { validateSnapshotId } from '$lib/server/docker-validation';
 import { jobResult } from '$lib/server/sse';
 
+/**
+ * @openapi
+ * summary: Diff two snapshots' file trees (added/changed/removed) - job-polled
+ * description: Job-polled so a proxy can't abort the restic read at ~15s.
+ * query: destinationId:integer Destination both snapshots live in
+ * query: snapshotA:string The baseline snapshot id
+ * query: snapshotB:string The snapshot to compare against the baseline
+ * resp-400: Missing destinationId, snapshotA, or snapshotB
+ */
 export const GET: RequestHandler = async ({ url, cookies, request }) => {
 	const auth = await authorize(cookies);
 	const denied = await requireBackups(auth, 'view');

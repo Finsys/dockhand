@@ -4,6 +4,13 @@ import { getEnvironment, updateEnvironment } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
 import { saveEnvironmentIcon, deleteEnvironmentIcon, getEnvironmentIconBuffer } from '$lib/server/env-icons';
 
+/**
+ * @openapi
+ * summary: Get the custom icon image for an environment (raw image/webp bytes, not JSON)
+ * path: id:integer! Environment id (from GET /api/environments)
+ * resp-200: Binary image/webp response body, Cache-Control public max-age=3600
+ * resp-404: No custom icon set for this environment
+ */
 export const GET: RequestHandler = async ({ params }) => {
 	const id = parseInt(params.id);
 	const buffer = getEnvironmentIconBuffer(id);
@@ -20,6 +27,17 @@ export const GET: RequestHandler = async ({ params }) => {
 	});
 };
 
+/**
+ * @openapi
+ * summary: Upload a custom icon for an environment (base64-encoded image, ~200KB limit)
+ * path: id:integer! Environment id (from GET /api/environments)
+ * body: {image:string!}
+ * resp-200: {success:boolean!, icon:string!}
+ * resp-200-example: {"success":true,"icon":"custom:env-3.webp"}
+ * resp-400: Missing image data, or image exceeds the ~300000-char base64 size limit
+ * resp-403: Permission denied (RBAC 'environments:edit' missing)
+ * resp-404: Environment not found
+ */
 export const POST: RequestHandler = async ({ params, request, cookies }) => {
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !await auth.can('environments', 'edit')) {
@@ -49,6 +67,15 @@ export const POST: RequestHandler = async ({ params, request, cookies }) => {
 	return json({ success: true, icon: iconValue });
 };
 
+/**
+ * @openapi
+ * summary: Remove an environment's custom icon and reset it to the default "globe" icon
+ * path: id:integer! Environment id (from GET /api/environments)
+ * resp-200: {success:boolean!, icon:string!}
+ * resp-200-example: {"success":true,"icon":"globe"}
+ * resp-403: Permission denied (RBAC 'environments:edit' missing)
+ * resp-404: Environment not found
+ */
 export const DELETE: RequestHandler = async ({ params, cookies }) => {
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !await auth.can('environments', 'edit')) {

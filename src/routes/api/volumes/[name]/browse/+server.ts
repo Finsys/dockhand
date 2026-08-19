@@ -4,6 +4,18 @@ import { listVolumeDirectory, getVolumeUsage } from '$lib/server/docker';
 import { authorize } from '$lib/server/authorize';
 import { validateDockerIdParam } from '$lib/server/docker-validation';
 
+/**
+ * @openapi
+ * summary: Browse a directory inside a Docker volume via a cached helper container; the volume is mounted read-only when in use by other containers
+ * path: name:string! Docker volume name (from GET /api/volumes)
+ * query: env:integer Environment ID the volume belongs to (from GET /api/environments)
+ * query: path:string Directory path inside the volume to list (defaults to "/")
+ * resp-200: {path:string!, entries:array<{name:string!, type:string!, size:integer!, permissions:string!, owner:string!, group:string!, modified:string!}>!, usage:array<{containerId:string!, containerName:string!, state:string!}>!, isInUse:boolean!, helperId:string!}
+ * resp-200-example: {"path":"/","entries":[{"name":"data","type":"directory","size":4096,"permissions":"drwxr-xr-x","owner":"root","group":"root","modified":"2026-06-01 10:00"}],"usage":[],"isInUse":false,"helperId":"abc123"}
+ * resp-403: Permission denied (requires volumes:inspect) or permission denied accessing the path
+ * resp-404: Directory not found
+ * resp-500: Failed to browse volume
+ */
 export const GET: RequestHandler = async ({ params, url, cookies }) => {
 	const invalid = validateDockerIdParam(params.name, 'volume');
 	if (invalid) return invalid;

@@ -6,6 +6,19 @@ import { auditBackupDestination } from '$lib/server/audit';
 import { getBackupDestination, updateBackupDestinationTestStatus } from '$lib/server/db';
 import { initRepository } from '$lib/server/backups';
 
+/**
+ * POST /api/backup/destinations/{id}/init - Initialize the restic repository
+ *
+ * @openapi
+ * summary: Initialize the restic repository for a destination and record the resulting test status
+ * description: Permission denial (403, "backups:manage") is produced by the shared requireBackups route guard.
+ * path: id:integer! Backup destination id (from GET /api/backup/destinations)
+ * resp-200: Returns { success: true, message } when the repository is initialized
+ * resp-200-example: {"success":true,"message":"Repository initialized"}
+ * resp-400: Invalid id (not a number)
+ * resp-404: Destination not found
+ * resp-500: Repository initialization failed; returns { success: false, error }
+ */
 export const POST: RequestHandler = async (event) => {
 	const { params, cookies } = event;
 	const auth = await authorize(cookies);

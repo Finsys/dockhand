@@ -2,10 +2,11 @@ import type { LayoutServerLoad } from './$types';
 import { redirect } from '@sveltejs/kit';
 import { isAuthEnabled, validateSession } from '$lib/server/auth';
 import { hasAdminUser } from '$lib/server/db';
-import { BACKUPS_ENABLED } from '$lib/server/features';
+import { BACKUPS_ENABLED, API_DOCS_ENABLED } from '$lib/server/features';
 
-// Routes that don't require authentication
-const PUBLIC_PATHS = ['/login'];
+// Routes that don't require authentication. The API docs viewer is public only
+// when opt-in via FEAT_API_DOCS (the route 404s otherwise; see features.ts).
+const PUBLIC_PATHS = ['/login', ...(API_DOCS_ENABLED ? ['/api/docs'] : [])];
 
 export const load: LayoutServerLoad = async ({ cookies, url }) => {
 	const authEnabled = await isAuthEnabled();

@@ -4,6 +4,23 @@ import { authorize } from '$lib/server/authorize';
 import { validateDockerIdParam } from '$lib/server/docker-validation';
 import type { RequestHandler } from './$types';
 
+/**
+ * POST /api/containers/{id}/files/rename - Rename/move a path in a container
+ *
+ * @openapi
+ * summary: Rename or move a file or directory inside a container (requires the 'exec' permission)
+ * path: id:string! Container ID or name (from GET /api/containers)
+ * query: env:integer The target environment ID (omit for the local/default Docker host) (from GET /api/environments)
+ * body: {oldPath:string!, newPath:string!}
+ * body-example: {"oldPath":"/app/config.yaml","newPath":"/app/config.old.yaml"}
+ * resp-200: {success:boolean!, oldPath:string!, newPath:string!}
+ * resp-200-example: {"success":true,"oldPath":"/app/config.yaml","newPath":"/app/config.old.yaml"}
+ * resp-400: oldPath or newPath missing, or the container is not running
+ * resp-403: Permission denied, or read-only file system
+ * resp-404: Source path not found
+ * resp-409: Destination already exists
+ * resp-500: Failed to rename the path
+ */
 export const POST: RequestHandler = async ({ params, url, cookies, request }) => {
 	const invalid = validateDockerIdParam(params.id, 'container');
 	if (invalid) return invalid;
