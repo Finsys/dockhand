@@ -15,6 +15,7 @@ import {
 	bigint,
 	timestamp,
 	unique,
+	uniqueIndex,
 	index
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
@@ -190,6 +191,23 @@ export const users = pgTable('users', {
 	createdAt: timestamp('created_at', { mode: 'string' }).defaultNow(),
 	updatedAt: timestamp('updated_at', { mode: 'string' }).defaultNow()
 });
+
+export const passkeyCredentials = pgTable('passkey_credentials', {
+	id: serial('id').primaryKey(),
+	userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+	credentialId: text('credential_id').notNull().unique(),
+	webauthnUserId: text('webauthn_user_id').notNull(),
+	publicKey: text('public_key').notNull(),
+	counter: bigint('counter', { mode: 'number' }).notNull().default(0),
+	deviceType: text('device_type').notNull(),
+	backedUp: boolean('backed_up').notNull().default(false),
+	transports: text('transports'),
+	name: text('name'),
+	createdAt: timestamp('created_at', { mode: 'string' }).notNull().defaultNow()
+}, (table) => ({
+	userIdIdx: index('passkey_credentials_user_id_idx').on(table.userId),
+	userNameUnique: uniqueIndex('passkey_credentials_user_name_unique').on(table.userId, sql`lower(${table.name})`)
+}));
 
 export const sessions = pgTable('sessions', {
 	id: text('id').primaryKey(),

@@ -915,6 +915,7 @@ export const notificationSettings = schemaProxy.notificationSettings;
 export const environmentNotifications = schemaProxy.environmentNotifications;
 export const authSettings = schemaProxy.authSettings;
 export const users = schemaProxy.users;
+export const passkeyCredentials = schemaProxy.passkeyCredentials;
 export const sessions = schemaProxy.sessions;
 export const ldapConfig = schemaProxy.ldapConfig;
 export const oidcConfig = schemaProxy.oidcConfig;
@@ -948,6 +949,8 @@ export type {
 	NewSetting,
 	User,
 	NewUser,
+	PasskeyCredential,
+	NewPasskeyCredential,
 	Session,
 	NewSession,
 	Role,

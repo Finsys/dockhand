@@ -33,6 +33,7 @@ import {
 	environmentNotifications,
 	authSettings,
 	users,
+	passkeyCredentials,
 	sessions,
 	roles,
 	userRoles,
@@ -1508,6 +1509,78 @@ export async function updateUser(id: number, data: Partial<UserData>): Promise<U
 export async function deleteUser(id: number): Promise<boolean> {
 	await db.delete(users).where(eq(users.id, id));
 	return true;
+}
+
+// =============================================================================
+// PASSKEY CREDENTIAL OPERATIONS
+// =============================================================================
+
+export interface PasskeyCredentialData {
+	id: number;
+	userId: number;
+	credentialId: string;
+	webauthnUserId: string;
+	publicKey: string;
+	counter: number;
+	deviceType: string;
+	backedUp: boolean;
+	transports: string | null;
+	name: string | null;
+	createdAt: string;
+}
+
+export async function createPasskeyCredential(
+	data: Omit<PasskeyCredentialData, 'id' | 'createdAt'>
+): Promise<PasskeyCredentialData> {
+	const rows = await db.insert(passkeyCredentials).values(data).returning();
+	return rows[0] as PasskeyCredentialData;
+}
+
+export async function getPasskeyCredentialByCredentialId(credentialId: string): Promise<PasskeyCredentialData | null> {
+	const rows = await db.select().from(passkeyCredentials).where(eq(passkeyCredentials.credentialId, credentialId)).limit(1);
+	return rows[0] as PasskeyCredentialData || null;
+}
+
+export async function getPasskeyCredentialsForUser(userId: number): Promise<PasskeyCredentialData[]> {
+	return await db.select().from(passkeyCredentials)
+		.where(eq(passkeyCredentials.userId, userId))
+		.orderBy(asc(passkeyCredentials.createdAt)) as PasskeyCredentialData[];
+}
+
+export async function getPasskeyCredentialByNameForUser(
+	userId: number,
+	name: string
+): Promise<PasskeyCredentialData | null> {
+	const rows = await db.select().from(passkeyCredentials)
+		.where(and(
+			eq(passkeyCredentials.userId, userId),
+			sql`lower(${passkeyCredentials.name}) = lower(${name})`
+		))
+		.limit(1);
+	return rows[0] as PasskeyCredentialData || null;
+}
+
+export async function deletePasskeyCredentialForUser(id: number, userId: number): Promise<boolean> {
+	const rows = await db.delete(passkeyCredentials)
+		.where(and(eq(passkeyCredentials.id, id), eq(passkeyCredentials.userId, userId)))
+		.returning({ id: passkeyCredentials.id });
+	return rows.length === 1;
+}
+
+export async function updatePasskeyCounter(
+	id: number,
+	previousCounter: number,
+	newCounter: number
+): Promise<boolean> {
+	// Multi-device passkeys commonly keep a zero counter. The one-time challenge still
+	// prevents replay, so no write is necessary in the valid zero-counter case.
+	if (previousCounter === 0 && newCounter === 0) return true;
+
+	const rows = await db.update(passkeyCredentials)
+		.set({ counter: newCounter })
+		.where(and(eq(passkeyCredentials.id, id), eq(passkeyCredentials.counter, previousCounter)))
+		.returning({ id: passkeyCredentials.id });
+	return rows.length === 1;
 }
 
 // =============================================================================

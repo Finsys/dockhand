@@ -89,7 +89,7 @@ export interface AuthenticatedUser {
 	displayName?: string;
 	avatar?: string;
 	isAdmin: boolean;
-	provider: 'local' | 'ldap' | 'oidc';
+	provider: 'local' | 'ldap' | 'oidc' | 'passkey';
 	permissions: Permissions;
 }
 
@@ -278,7 +278,7 @@ export async function validateSessionById(sessionId: string): Promise<Authentica
 	const user = await getUser(session.userId);
 	if (!user || !user.isActive) return null;
 
-	return await buildAuthenticatedUser(user, session.provider as 'local' | 'ldap' | 'oidc');
+	return await buildAuthenticatedUser(user, session.provider as 'local' | 'ldap' | 'oidc' | 'passkey');
 }
 
 /**
@@ -310,7 +310,7 @@ export async function destroySession(cookies: Cookies): Promise<void> {
  */
 async function buildAuthenticatedUser(
 	user: User,
-	provider: 'local' | 'ldap' | 'oidc'
+	provider: 'local' | 'ldap' | 'oidc' | 'passkey'
 ): Promise<AuthenticatedUser> {
 	const permissions = await getUserPermissionsById(user.id);
 

@@ -12,6 +12,7 @@ import {
 	real,
 	primaryKey,
 	unique,
+	uniqueIndex,
 	index
 } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
@@ -187,6 +188,23 @@ export const users = sqliteTable('users', {
 	createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
 	updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`)
 });
+
+export const passkeyCredentials = sqliteTable('passkey_credentials', {
+	id: integer('id').primaryKey({ autoIncrement: true }),
+	userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+	credentialId: text('credential_id').notNull().unique(),
+	webauthnUserId: text('webauthn_user_id').notNull(),
+	publicKey: text('public_key').notNull(),
+	counter: integer('counter').notNull().default(0),
+	deviceType: text('device_type').notNull(),
+	backedUp: integer('backed_up', { mode: 'boolean' }).notNull().default(false),
+	transports: text('transports'),
+	name: text('name'),
+	createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`)
+}, (table) => ({
+	userIdIdx: index('passkey_credentials_user_id_idx').on(table.userId),
+	userNameUnique: uniqueIndex('passkey_credentials_user_name_unique').on(table.userId, sql`lower(${table.name})`)
+}));
 
 export const sessions = sqliteTable('sessions', {
 	id: text('id').primaryKey(),
@@ -603,6 +621,9 @@ export type NewSetting = typeof settings.$inferInsert;
 
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
+
+export type PasskeyCredential = typeof passkeyCredentials.$inferSelect;
+export type NewPasskeyCredential = typeof passkeyCredentials.$inferInsert;
 
 export type Session = typeof sessions.$inferSelect;
 export type NewSession = typeof sessions.$inferInsert;

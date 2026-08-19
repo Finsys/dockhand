@@ -2292,6 +2292,135 @@
         "security": []
       }
     },
+    "/api/auth/passkeys/login/options": {
+      "post": {
+        "operationId": "post_api_auth_passkeys_login_options",
+        "tags": [
+          "auth"
+        ],
+        "summary": "POST /api/auth/passkeys/login/options (auto-generated — no @openapi annotation yet)",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "400": {
+            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+          },
+          "403": {
+            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+          },
+          "503": {
+            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+          }
+        },
+        "security": []
+      }
+    },
+    "/api/auth/passkeys/login/verify": {
+      "post": {
+        "operationId": "post_api_auth_passkeys_login_verify",
+        "tags": [
+          "auth"
+        ],
+        "summary": "POST /api/auth/passkeys/login/verify (auto-generated — no @openapi annotation yet)",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "400": {
+            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+          },
+          "401": {
+            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+          },
+          "403": {
+            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+          },
+          "503": {
+            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+          }
+        },
+        "security": []
+      }
+    },
+    "/api/auth/passkeys/register/options": {
+      "post": {
+        "operationId": "post_api_auth_passkeys_register_options",
+        "tags": [
+          "auth"
+        ],
+        "summary": "POST /api/auth/passkeys/register/options (auto-generated — no @openapi annotation yet)",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "400": {
+            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+          },
+          "401": {
+            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+          },
+          "403": {
+            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+          },
+          "409": {
+            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+          },
+          "503": {
+            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/auth/passkeys/register/verify": {
+      "post": {
+        "operationId": "post_api_auth_passkeys_register_verify",
+        "tags": [
+          "auth"
+        ],
+        "summary": "POST /api/auth/passkeys/register/verify (auto-generated — no @openapi annotation yet)",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "400": {
+            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+          },
+          "401": {
+            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+          },
+          "403": {
+            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+          },
+          "409": {
+            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+          },
+          "503": {
+            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/auth/providers": {
       "get": {
         "operationId": "get_api_auth_providers",
@@ -19364,6 +19493,74 @@
           },
           "500": {
             "description": "Failed to remove the avatar"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/profile/passkeys": {
+      "get": {
+        "operationId": "get_api_profile_passkeys",
+        "tags": [
+          "profile"
+        ],
+        "summary": "GET /api/profile/passkeys (auto-generated — no @openapi annotation yet)",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "400": {
+            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+          },
+          "401": {
+            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/profile/passkeys/{id}": {
+      "delete": {
+        "operationId": "delete_api_profile_passkeys_id",
+        "tags": [
+          "profile"
+        ],
+        "summary": "DELETE /api/profile/passkeys/{id} (auto-generated — no @openapi annotation yet)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Path parameter \"id\" (auto-detected from the handler's source — no @openapi annotation for this parameter yet)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "400": {
+            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+          },
+          "404": {
+            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
           }
         },
         "security": [
