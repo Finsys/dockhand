@@ -1,11 +1,11 @@
 /**
- * Git stack deletion sync (#966, #1162).
+ * Git stack deletion sync (#966, #1162) and adopted/internal Hawser dir sync.
  *
- * Propagates upstream file deletions to the stack deploy directory using the
- * per-stack manifest: a file is deleted ONLY when the manifest of files
- * Dockhand wrote on the previous sync lists it, the new clone no longer
- * contains it, AND the bytes on disk still match what Dockhand wrote
- * (nobody modified it locally).
+ * Propagates file deletions to the stack deploy directory using a per-stack
+ * manifest: a file is deleted ONLY when the manifest of files Dockhand wrote
+ * on the previous sync lists it, the new payload/clone no longer contains it,
+ * AND the bytes on disk still match what Dockhand wrote (nobody modified it
+ * locally).
  *
  * Every failure mode degrades to "delete less" — never to user-data loss:
  * - user-created files (volume data) → never in the manifest → untouchable
@@ -162,6 +162,24 @@ export function serializeManifest(manifest: SyncManifest): string {
 
 export function hashContent(content: Buffer | string): string {
 	return createHash('sha256').update(content).digest('hex');
+}
+
+/**
+ * Hash a Hawser `files` payload the same way the agent writes it to disk:
+ * `base64:` values hash over their decoded bytes; everything else hashes over
+ * the UTF-8 bytes of the string content the agent writes. Used by
+ * adopted/internal stack dir sync so deletion hashes match remote bytes.
+ */
+export function hashShippedFiles(files: Record<string, string>): Record<string, string> {
+	const result: Record<string, string> = {};
+	for (const [path, content] of Object.entries(files)) {
+		if (content.startsWith('base64:')) {
+			result[path] = hashContent(Buffer.from(content.slice('base64:'.length), 'base64'));
+		} else {
+			result[path] = hashContent(content);
+		}
+	}
+	return result;
 }
 
 /**
