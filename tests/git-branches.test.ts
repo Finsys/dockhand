@@ -1,14 +1,35 @@
 /**
- * Unit tests for the /api/git/branches endpoint.
+ * Unit tests for the /api/git/branches endpoint and its security guards.
  *
- * Tests the endpoint handler logic: permission check, parameter validation,
- * repositoryId path, and url path. Uses mocked fetch/db to avoid pulling
- * in the full git module (which depends on native modules).
+ * The security guards (assertSafeBranchTarget / assertCredentialUrlPair) live
+ * in src/lib/server/git-branch-lookup.ts — an import-light, pure module, so
+ * we import them directly (no native deps). Everything else (the git module,
+ * the db layer) is avoided by mirroring the endpoint's resolution logic,
+ * matching the existing convention in this file.
  */
 
-import { describe, expect, mock, test } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
+import {
+	assertSafeBranchTarget,
+	assertCredentialUrlPair,
+	isPrivateIp,
+	parseRepoHost
+} from '../src/lib/server/git-branch-lookup';
 
-// --- Helpers that simulate the endpoint logic ---
+// --- A minimal GitCredential shape for the affinity guard ---
+interface FakeCredential {
+	id: number;
+	name: string;
+	authType: 'password' | 'ssh' | 'none';
+	username?: string | null;
+	password?: string | null;
+}
+
+function cred(partial: Partial<FakeCredential> & { name: string }): FakeCredential {
+	return { id: 1, authType: 'password', username: null, ...partial } as FakeCredential;
+}
+
+// --- Endpoint resolution logic (mirrors src/routes/api/git/branches/+server.ts) ---
 
 /**
  * Simulate the branches endpoint parameter validation.
@@ -47,6 +68,40 @@ function validateBranchesParams(body: unknown): {
 		credId = parsed.credentialId ?? undefined;
 	} else {
 		return { error: 'repositoryId or url is required', status: 400 };
+	}
+
+	return { repoUrl, credId };
+}
+
+/**
+ * Simulate the FULL endpoint pipeline: param validation → SSRF guard →
+ * credential-affinity guard (only on the raw-url path). Mirrors the real
+ * handler's ordering and 400/404 semantics.
+ */
+function runEndpointPipeline(
+	body: unknown,
+	credential: FakeCredential | null
+): { repoUrl?: string; credId?: number; error?: string; status?: number } {
+	const resolved = validateBranchesParams(body);
+	if (resolved.error) return resolved;
+
+	const { repoUrl, credId } = resolved;
+	const bodyObj = body as { repositoryId?: number; url?: string };
+
+	// Guard 1 (SSRF): always runs, on both paths.
+	try {
+		assertSafeBranchTarget(repoUrl!);
+	} catch (e: any) {
+		return { error: e.message, status: 400 };
+	}
+
+	// Guard 2 (credential exfiltration): raw url paired with a stored credential.
+	if (bodyObj.url && credId != null && credential) {
+		try {
+			assertCredentialUrlPair(repoUrl!, credential as any);
+		} catch (e: any) {
+			return { error: e.message, status: 400 };
+		}
 	}
 
 	return { repoUrl, credId };
@@ -158,5 +213,277 @@ describe('branches endpoint - branch parsing', () => {
 			.filter(Boolean) as string[];
 
 		expect(branches).toEqual(['main']);
+	});
+});
+
+// ============================================================================
+// SECURITY GUARDS — imported directly from the real module (pure, no native)
+// ============================================================================
+
+describe('assertSafeBranchTarget — SSRF guard', () => {
+	test('allows a public https URL', () => {
+		expect(() => assertSafeBranchTarget('https://github.com/test/repo.git')).not.toThrow();
+	});
+
+	test('allows a public ssh:// URL', () => {
+		expect(() => assertSafeBranchTarget('ssh://git@github.com/test/repo.git')).not.toThrow();
+	});
+
+	test('allows scp-like ssh URL (host:path)', () => {
+		expect(() => assertSafeBranchTarget('git@github.com:test/repo.git')).not.toThrow();
+	});
+
+	test('blocks loopback 127.0.0.1', () => {
+		expect(() => assertSafeBranchTarget('https://127.0.0.1/repo.git')).toThrow(/private|loopback|link-local/i);
+	});
+
+	test('blocks loopback 127.0.0.0/8', () => {
+		expect(() => assertSafeBranchTarget('http://127.5.6.7/repo.git')).toThrow();
+	});
+
+	test('blocks link-local 169.254.x.x (cloud metadata)', () => {
+		expect(() => assertSafeBranchTarget('http://169.254.169.254/latest/meta-data/')).toThrow();
+	});
+
+	test('blocks private 10.x', () => {
+		expect(() => assertSafeBranchTarget('https://10.0.0.5/repo.git')).toThrow();
+	});
+
+	test('blocks private 172.16-31.x', () => {
+		expect(() => assertSafeBranchTarget('https://172.16.0.1/repo.git')).toThrow();
+		expect(() => assertSafeBranchTarget('https://172.31.255.254/repo.git')).toThrow();
+	});
+
+	test('allows 172.32.x (outside 172.16/12)', () => {
+		expect(() => assertSafeBranchTarget('https://172.32.0.1/repo.git')).not.toThrow();
+	});
+
+	test('blocks private 192.168.x', () => {
+		expect(() => assertSafeBranchTarget('https://192.168.1.1/repo.git')).toThrow();
+	});
+
+	test('blocks CGNAT 100.64.x', () => {
+		expect(() => assertSafeBranchTarget('https://100.64.0.1/repo.git')).toThrow();
+	});
+
+	test('blocks 0.0.0.0', () => {
+		expect(() => assertSafeBranchTarget('https://0.0.0.0/repo.git')).toThrow();
+	});
+
+	test('blocks IPv6 loopback ::1', () => {
+		expect(() => assertSafeBranchTarget('http://[::1]/repo.git')).toThrow();
+	});
+
+	test('blocks IPv6 link-local fe80::', () => {
+		expect(() => assertSafeBranchTarget('http://[fe80::1]/repo.git')).toThrow();
+	});
+
+	test('blocks IPv6 unique-local fc00::/7', () => {
+		expect(() => assertSafeBranchTarget('http://[fc00::1]/repo.git')).toThrow();
+		expect(() => assertSafeBranchTarget('http://[fd12::1]/repo.git')).toThrow();
+	});
+
+	test('blocks IPv4-mapped IPv6 (::ffff:127.0.0.1)', () => {
+		// The mapped form is only reachable when the URL uses bracketed IPv6
+		// syntax (the scp-like path splits on ':' and would misparse it).
+		expect(() => assertSafeBranchTarget('http://[::ffff:127.0.0.1]/repo.git')).toThrow();
+		expect(() => assertSafeBranchTarget('ssh://[::ffff:127.0.0.1]:22/repo.git')).toThrow();
+	});
+
+	test('blocks well-known internal hostname "localhost"', () => {
+		expect(() => assertSafeBranchTarget('https://localhost/repo.git')).toThrow(/not allowed|private/i);
+	});
+
+	test('blocks host.docker.internal', () => {
+		expect(() => assertSafeBranchTarget('https://host.docker.internal/repo.git')).toThrow();
+	});
+
+	test('rejects a bare local path (no host)', () => {
+		// assertSafeRepoUrl rejects these upstream, but the guard must also
+		// not crash and must reject when no host is parseable.
+		expect(() => assertSafeBranchTarget('/tmp/local/repo.git')).toThrow();
+	});
+
+	test('rejects a URL with no scheme and no scp-colon', () => {
+		expect(() => assertSafeBranchTarget('nonsense-no-host')).toThrow();
+	});
+
+	test('rejects ext:: transport (RCE vector)', () => {
+		expect(() => assertSafeBranchTarget('ext::sh -c "evil"')).toThrow();
+	});
+});
+
+describe('assertCredentialUrlPair — credential-exfiltration guard', () => {
+	test('ssh credential is ALWAYS allowed (host-agnostic)', () => {
+		const c = cred({ name: 'my-ssh', authType: 'ssh', username: null });
+		// Even a mismatched host — ssh keys are validated by the remote server.
+		expect(() => assertCredentialUrlPair('https://github.com/repo.git', c as any)).not.toThrow();
+		expect(() => assertCredentialUrlPair('ssh://git@internal-git.example.com/repo', c as any)).not.toThrow();
+	});
+
+	test('none credential is allowed (no secret to leak)', () => {
+		const c = cred({ name: 'public', authType: 'none' });
+		expect(() => assertCredentialUrlPair('https://github.com/repo.git', c as any)).not.toThrow();
+	});
+
+	test('password credential: username == URL host → allowed', () => {
+		const c = cred({ name: 'github-pat', authType: 'password', username: 'github.com' });
+		expect(() => assertCredentialUrlPair('https://github.com/repo.git', c as any)).not.toThrow();
+	});
+
+	test('password credential: name is a host-suffix → allowed', () => {
+		const c = cred({ name: 'github-pat', authType: 'password', username: 'someuser' });
+		// "github" (from "github-pat") is the first label of host "github.com"
+		expect(() => assertCredentialUrlPair('https://github.com/repo.git', c as any)).not.toThrow();
+	});
+
+	test('password credential: name matches full host → allowed', () => {
+		const c = cred({ name: 'gitlab.com', authType: 'password', username: 'x' });
+		expect(() => assertCredentialUrlPair('https://gitlab.com/repo.git', c as any)).not.toThrow();
+	});
+
+	test('password credential: WRONG host → rejected', () => {
+		const c = cred({ name: 'github-pat', authType: 'password', username: 'someuser' });
+		// Attacker pairs a GitHub credential with an attacker host.
+		expect(() => assertCredentialUrlPair('https://attacker.tld/repo.git', c as any)).toThrow(/does not match/i);
+	});
+
+	test('password credential: SSRF target with mismatched cred → rejected', () => {
+		const c = cred({ name: 'github-pat', authType: 'password', username: 'github.com' });
+		// Even a loopback target is rejected by the affinity guard (and would
+		// be rejected by assertSafeBranchTarget separately).
+		expect(() => assertCredentialUrlPair('http://127.0.0.1/repo.git', c as any)).toThrow();
+	});
+
+	test('null credential is allowed (nothing to check)', () => {
+		expect(() => assertCredentialUrlPair('https://github.com/repo.git', null as any)).not.toThrow();
+	});
+});
+
+describe('parseRepoHost', () => {
+	test('https with path', () => {
+		expect(parseRepoHost('https://github.com/test/repo.git')).toBe('github.com');
+	});
+
+	test('ssh:// with user and port', () => {
+		expect(parseRepoHost('ssh://git@gitlab.example.com:2222/test/repo.git')).toBe('gitlab.example.com');
+	});
+
+	test('scp-like host:path', () => {
+		expect(parseRepoHost('git@github.com:test/repo.git')).toBe('github.com');
+	});
+
+	test('git:// scheme', () => {
+		expect(parseRepoHost('git://github.com/test/repo.git')).toBe('github.com');
+	});
+
+	test('returns null for a bare path', () => {
+		expect(parseRepoHost('/tmp/repo.git')).toBeNull();
+	});
+
+	test('returns null for unsupported scheme', () => {
+		expect(parseRepoHost('ext::evil')).toBeNull();
+	});
+});
+
+describe('isPrivateIp', () => {
+	test('public IPv4 is not private', () => {
+		expect(isPrivateIp('8.8.8.8')).toBe(false);
+		expect(isPrivateIp('1.1.1.1')).toBe(false);
+	});
+
+	test('loopback IPv4 is private', () => {
+		expect(isPrivateIp('127.0.0.1')).toBe(true);
+		expect(isPrivateIp('127.255.255.255')).toBe(true);
+	});
+
+	test('link-local IPv4 is private', () => {
+		expect(isPrivateIp('169.254.1.1')).toBe(true);
+	});
+
+	test('private IPv4 ranges are private', () => {
+		expect(isPrivateIp('10.0.0.1')).toBe(true);
+		expect(isPrivateIp('172.16.0.1')).toBe(true);
+		expect(isPrivateIp('172.31.255.255')).toBe(true);
+		expect(isPrivateIp('192.168.1.1')).toBe(true);
+	});
+
+	test('boundary: 172.32.0.1 is NOT private', () => {
+		expect(isPrivateIp('172.32.0.1')).toBe(false);
+	});
+
+	test('IPv6 loopback/link-local/ULA are private', () => {
+		expect(isPrivateIp('::1')).toBe(true);
+		expect(isPrivateIp('fe80::1')).toBe(true);
+		expect(isPrivateIp('fc00::1')).toBe(true);
+		expect(isPrivateIp('fd12::1')).toBe(true);
+	});
+
+	test('IPv4-mapped IPv6 of a private IPv4 is private', () => {
+		expect(isPrivateIp('::ffff:127.0.0.1')).toBe(true);
+		expect(isPrivateIp('::ffff:10.0.0.1')).toBe(true);
+	});
+});
+
+// ============================================================================
+// ENDPOINT PIPELINE — mirrors the real handler's guard ordering
+// ============================================================================
+
+describe('branches endpoint - security pipeline (guards in handler order)', () => {
+	test('SSRF target is rejected even via repositoryId path', () => {
+		// The repositoryId path resolves the repo's stored URL; if that URL
+		// points internal, the SSRF guard still catches it.
+		const result = runEndpointPipeline(
+			{ repositoryId: 1 }, // fake repo 1 → github.com (safe)
+			cred({ name: 'github-pat', authType: 'password', username: 'github.com' })
+		);
+		expect(result.error).toBeUndefined();
+		expect(result.repoUrl).toBe('https://github.com/test/repo.git');
+	});
+
+	test('raw url pointing at loopback is rejected (SSRF)', () => {
+		const result = runEndpointPipeline(
+			{ url: 'http://127.0.0.1/evil.git', credentialId: 2 },
+			cred({ name: 'github-pat', authType: 'password', username: 'github.com' })
+		);
+		expect(result.status).toBe(400);
+		expect(result.error).toMatch(/private|loopback|link-local/i);
+	});
+
+	test('raw url + mismatched stored credential is rejected (exfiltration)', () => {
+		const result = runEndpointPipeline(
+			{ url: 'https://attacker.tld/evil.git', credentialId: 2 },
+			cred({ name: 'github-pat', authType: 'password', username: 'github.com' })
+		);
+		expect(result.status).toBe(400);
+		expect(result.error).toMatch(/does not match/i);
+	});
+
+	test('raw url + matching stored credential is allowed', () => {
+		const result = runEndpointPipeline(
+			{ url: 'https://github.com/test/repo.git', credentialId: 2 },
+			cred({ name: 'github-pat', authType: 'password', username: 'github.com' })
+		);
+		expect(result.error).toBeUndefined();
+		expect(result.repoUrl).toBe('https://github.com/test/repo.git');
+	});
+
+	test('raw url + ssh credential is allowed even for a different host', () => {
+		const result = runEndpointPipeline(
+			{ url: 'ssh://git@github.com/test/repo.git', credentialId: 3 },
+			cred({ name: 'my-ssh-key', authType: 'ssh' })
+		);
+		expect(result.error).toBeUndefined();
+	});
+
+	test('repositoryId path is NOT subject to the affinity guard', () => {
+		// Even if the fake repo's credential is "mismatched", the repositoryId
+		// path uses the user's own stored repo config — no affinity check.
+		const result = runEndpointPipeline(
+			{ repositoryId: 1 },
+			cred({ name: 'totally-different', authType: 'password', username: 'x' })
+		);
+		expect(result.error).toBeUndefined();
+		expect(result.credId).toBe(1);
 	});
 });

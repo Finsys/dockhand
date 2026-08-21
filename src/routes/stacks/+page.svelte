@@ -937,7 +937,7 @@
 		return stack.status;
 	}
 
-	async function openGitModal(gitStack?: any) {
+	async function openGitModal(gitStack: any = undefined) {
 		editingGitStack = gitStack || null;
 		// Fetch repositories and credentials before opening modal
 		try {

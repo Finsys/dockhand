@@ -325,20 +325,66 @@ function buildRepoUrl(url: string, credential: GitCredential | null): string {
 	return url;
 }
 
-async function execGit(args: string[], cwd: string, env: GitEnv): Promise<{ stdout: string; stderr: string; code: number }> {
-	try {
+/** Default hard timeout (ms) for a single git subprocess. Prevents a
+ *  hanging remote (dead host, firewall black-hole, slow mirror) from
+ *  stalling the request forever — the branches endpoint in particular can
+ *  be driven by an attacker-chosen URL, so an unbounded git subprocess is
+ *  a resource-exhaustion vector. */
+export const GIT_TIMEOUT_MS = Number(process.env.GIT_TIMEOUT_MS) || 20000;
+
+function execGit(
+	args: string[],
+	cwd: string,
+	env: GitEnv,
+	timeoutMs: number = GIT_TIMEOUT_MS
+): Promise<{ stdout: string; stderr: string; code: number; timedOut?: boolean }> {
+	return new Promise((resolve) => {
+		let settled = false;
+		const stdoutChunks: Buffer[] = [];
+		const stderrChunks: Buffer[] = [];
+
 		const proc = nodeSpawn('git', args, {
 			cwd,
 			env,
 			stdio: ['pipe', 'pipe', 'pipe']
 		});
 
-		const result = await collectProcess(proc);
+		const finish = (
+			partial: { stdout: string; stderr: string; code: number; timedOut?: boolean }
+		) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			if (partial.timedOut) {
+				// The process is still running — kill it so the git subprocess
+				// (and any child ssh) cannot keep running after we give up.
+				proc.kill('SIGKILL');
+			}
+			resolve(partial);
+		};
 
-		return { stdout: result.stdout.trim(), stderr: result.stderr.trim(), code: result.exitCode };
-	} catch (err: any) {
-		return { stdout: '', stderr: err.message, code: 1 };
-	}
+		const timer = setTimeout(() => {
+			finish({
+				stdout: Buffer.concat(stdoutChunks).toString(),
+				stderr: Buffer.concat(stderrChunks).toString(),
+				code: 124,
+				timedOut: true
+			});
+		}, timeoutMs);
+
+		proc.stdout?.on('data', (chunk: Buffer) => stdoutChunks.push(chunk));
+		proc.stderr?.on('data', (chunk: Buffer) => stderrChunks.push(chunk));
+		proc.on('error', (err: any) => {
+			finish({ stdout: '', stderr: err.message, code: 1 });
+		});
+		proc.on('close', (code) => {
+			finish({
+				stdout: Buffer.concat(stdoutChunks).toString(),
+				stderr: Buffer.concat(stderrChunks).toString(),
+				code: code ?? 1
+			});
+		});
+	});
 }
 
 /**
@@ -657,12 +703,15 @@ export async function testRepositoryConfig(options: {
 /**
  * List remote branches for a repository URL using git ls-remote.
  * Resolves credentials from the database if a credentialId is provided.
+ * Bounded by a hard timeout (GIT_TIMEOUT_MS, default 20s) so a dead or
+ * black-holed host cannot stall the request — see execGit.
  */
 export async function listRemoteBranches(options: {
 	url: string;
 	credentialId?: number | null;
+	timeoutMs?: number;
 }): Promise<{ branches: string[]; error?: string }> {
-	const { url, credentialId } = options;
+	const { url, credentialId, timeoutMs } = options;
 
 	// Fetch credential from database if credentialId is provided
 	const credential = credentialId ? await getGitCredential(credentialId) : null;
@@ -674,8 +723,13 @@ export async function listRemoteBranches(options: {
 		const result = await execGit(
 			['ls-remote', '--heads', '--refs', repoUrl],
 			process.cwd(),
-			env
+			env,
+			timeoutMs
 		);
+
+		if (result.timedOut) {
+			return { branches: [], error: `git ls-remote timed out after ${Math.round((timeoutMs ?? GIT_TIMEOUT_MS) / 1000)}s` };
+		}
 
 		if (result.code !== 0) {
 			return { branches: [], error: cleanGitError(result.stderr) };
