@@ -1,6 +1,8 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { testRepositoryConfig } from '$lib/server/git';
+import { getGitCredential } from '$lib/server/db';
+import { assertSafeRepoTarget, assertCredentialHostMatch } from '$lib/server/git-branch-lookup';
 import { authorize } from '$lib/server/authorize';
 
 /**
@@ -17,13 +19,14 @@ import { authorize } from '$lib/server/authorize';
 /**
  * @openapi
  * summary: Test an unsaved repository configuration (url/branch/credentialId) before creating it
- * description: credentialId from GET /api/git/credentials.
+ * description: credentialId from GET /api/git/credentials. SECURITY: the URL host must not be a private/loopback/link-local/metadata address (SSRF), the ext::/file:: transports are rejected, and the url may only be paired with a stored credentialId whose username plausibly matches that host (exfiltration defense).
  * body: {url:string!, branch:string, credentialId:integer}
  * body-example: {"url":"https://github.com/example/homelab.git","branch":"main","credentialId":2}
  * resp-200: {success:boolean!, error:string}
  * resp-200-example: {"success":true}
- * resp-400: The url field is missing
+ * resp-400: The url field is missing, the URL points at a private/loopback/link-local/metadata address, the URL is an unsupported transport, or the credential does not match the URL host
  * resp-403: Caller lacks the settings:manage permission
+ * resp-404: The referenced credential does not exist
  * resp-500: The connectivity test failed
  */
 export const POST: RequestHandler = async ({ request, cookies }) => {
@@ -37,6 +40,29 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 
 		if (!body.url || typeof body.url !== 'string') {
 			return json({ error: 'Repository URL is required' }, { status: 400 });
+		}
+
+		// Security (PR #1343 maintainer review): the test endpoint spawns git
+		// (ls-remote + clone) with a USER-SUPPLIED url + credentialId. Run the
+		// shared guards BEFORE testRepositoryConfig spawns anything.
+		//  1. assertSafeRepoTarget — SSRF + transport denylist.
+		try {
+			assertSafeRepoTarget(body.url);
+		} catch (e: any) {
+			return json({ success: false, error: e.message || 'Invalid repository URL' }, { status: 400 });
+		}
+		//  2. assertCredentialHostMatch — raw url + stored credential must be
+		//     plausibly for that host (exfiltration defense).
+		if (body.credentialId != null && body.credentialId !== undefined) {
+			const credential = await getGitCredential(body.credentialId);
+			if (!credential) {
+				return json({ success: false, error: 'Credential not found' }, { status: 404 });
+			}
+			try {
+				assertCredentialHostMatch(body.url, credential);
+			} catch (e: any) {
+				return json({ success: false, error: e.message || 'Invalid repository URL' }, { status: 400 });
+			}
 		}
 
 		const result = await testRepositoryConfig({

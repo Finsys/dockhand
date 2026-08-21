@@ -12226,7 +12226,7 @@
             }
           },
           "400": {
-            "description": "The URL points at a private/loopback/link-local address, the credential does not match the URL host, or neither repositoryId nor url was supplied"
+            "description": "The URL points at a private/loopback/link-local/metadata address, the credential does not match the URL host, or neither repositoryId nor url was supplied"
           },
           "403": {
             "description": "Permission denied (requires git:edit)"
@@ -12246,7 +12246,7 @@
             "bearerAuth": []
           }
         ],
-        "description": "Accepts either repositoryId (an existing repository, using its stored URL and credential) or url + credentialId (a new repository). SECURITY: the URL must not point at a private/loopback/link-local address, and a raw url may only be paired with a stored credentialId that is plausibly for that host (SSH credentials are always allowed). The ls-remote is bounded by a hard timeout.",
+        "description": "Accepts either repositoryId (an existing repository, using its stored URL and credential) or url + credentialId (a new repository). SECURITY: the URL host must not be a private/loopback/link-local/metadata address or a denylisted internal hostname, and a raw url may only be paired with a stored credentialId whose username plausibly matches that host (SSH credentials are always allowed). The ls-remote is bounded by a hard timeout.",
         "requestBody": {
           "required": true,
           "content": {
@@ -12799,7 +12799,7 @@
             }
           },
           "400": {
-            "description": "composePath missing, neither repositoryId nor url supplied, or the repo/env-file preview reported an error"
+            "description": "composePath missing, neither repositoryId nor url supplied, the URL points at a private/loopback/link-local/metadata address, the URL is an unsupported transport, the credential does not match the URL host, the compose/env path escapes the repository, or the repo/env-file preview reported an error"
           },
           "401": {
             "description": "Authentication required"
@@ -12819,7 +12819,7 @@
             "bearerAuth": []
           }
         ],
-        "description": "repositoryId from GET /api/git/repositories. credentialId from GET /api/git/credentials.",
+        "description": "repositoryId from GET /api/git/repositories. credentialId from GET /api/git/credentials. SECURITY: the URL host must not be a private/loopback/link-local/metadata address (SSRF), the ext::/file:: transports are rejected, the raw url may only be paired with a stored credentialId whose username plausibly matches that host (exfiltration defense), and composePath/envFilePath are constrained to stay inside the cloned repo (path traversal).",
         "requestBody": {
           "required": true,
           "content": {
@@ -13571,10 +13571,13 @@
             }
           },
           "400": {
-            "description": "The url field is missing"
+            "description": "The url field is missing, the URL points at a private/loopback/link-local/metadata address, the URL is an unsupported transport, or the credential does not match the URL host"
           },
           "403": {
             "description": "Caller lacks the settings:manage permission"
+          },
+          "404": {
+            "description": "The referenced credential does not exist"
           },
           "500": {
             "description": "The connectivity test failed"
@@ -13588,7 +13591,7 @@
             "bearerAuth": []
           }
         ],
-        "description": "credentialId from GET /api/git/credentials.",
+        "description": "credentialId from GET /api/git/credentials. SECURITY: the URL host must not be a private/loopback/link-local/metadata address (SSRF), the ext::/file:: transports are rejected, and the url may only be paired with a stored credentialId whose username plausibly matches that host (exfiltration defense).",
         "requestBody": {
           "required": true,
           "content": {

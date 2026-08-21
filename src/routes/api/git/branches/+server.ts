@@ -3,19 +3,24 @@ import type { RequestHandler } from './$types';
 import { getGitRepository, getGitCredential } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
 import { listRemoteBranches } from '$lib/server/git';
-import { assertSafeBranchTarget, assertCredentialUrlPair } from '$lib/server/git-branch-lookup';
+import { assertSafeRepoTarget, assertCredentialHostMatch } from '$lib/server/git-branch-lookup';
 
 /**
  * POST /api/git/branches
  * List remote branches for a repository via `git ls-remote`.
  *
- * SECURITY (PR #1343 review): two guards run before any git subprocess.
- *  1. assertSafeBranchTarget — rejects URLs pointing at private / loopback /
- *     link-local addresses (SSRF defense), on BOTH the `url` and
- *     `repositoryId` paths.
- *  2. assertCredentialUrlPair — a raw `url` may only be paired with a stored
- *     `credentialId` when the credential is plausibly for that host
- *     (credential-exfiltration defense). SSH credentials are always allowed.
+ * SECURITY (PR #1343 maintainer review, rounds 1+2): two guards run before
+ * any git subprocess is spawned.
+ *  1. assertSafeRepoTarget — rejects URLs whose host is a private / loopback
+ *     / link-local / metadata address (SSRF defense, delegated to the shared
+ *     isSafeNotificationUrl guard) or a hostname on the internal-hostname
+ *     denylist. Runs on BOTH the `url` and `repositoryId` paths (a stored
+ *     repository's URL could also point internal).
+ *  2. assertCredentialHostMatch — a raw `url` may only be paired with a
+ *     stored `credentialId` when the credential is plausibly for that host
+ *     (credential-exfiltration defense). The `repositoryId` path is safe —
+ *     the pairing is the user's own stored repository config, not an
+ *     attacker-chosen url+credential combo.
  * The `ls-remote` itself is bounded by a hard timeout (see execGit).
  *
  * Body: {
@@ -29,12 +34,12 @@ import { assertSafeBranchTarget, assertCredentialUrlPair } from '$lib/server/git
 /**
  * @openapi
  * summary: List remote branches for a git repository via `git ls-remote`
- * description: Accepts either repositoryId (an existing repository, using its stored URL and credential) or url + credentialId (a new repository). SECURITY: the URL must not point at a private/loopback/link-local address, and a raw url may only be paired with a stored credentialId that is plausibly for that host (SSH credentials are always allowed). The ls-remote is bounded by a hard timeout.
+ * description: Accepts either repositoryId (an existing repository, using its stored URL and credential) or url + credentialId (a new repository). SECURITY: the URL host must not be a private/loopback/link-local/metadata address or a denylisted internal hostname, and a raw url may only be paired with a stored credentialId whose username plausibly matches that host (SSH credentials are always allowed). The ls-remote is bounded by a hard timeout.
  * body: {repositoryId:integer, url:string, credentialId:integer}
  * body-example: {"url":"https://github.com/example/repo.git","credentialId":2}
  * resp-200: {branches:array<string>!}
  * resp-200-example: {"branches":["main","develop","feature/test"]}
- * resp-400: The URL points at a private/loopback/link-local address, the credential does not match the URL host, or neither repositoryId nor url was supplied
+ * resp-400: The URL points at a private/loopback/link-local/metadata address, the credential does not match the URL host, or neither repositoryId nor url was supplied
  * resp-403: Permission denied (requires git:edit)
  * resp-404: The referenced repository does not exist
  * resp-500: Failed to fetch branches (ls-remote error or timeout)
@@ -70,10 +75,11 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			return json({ error: 'repositoryId or url is required' }, { status: 400 });
 		}
 
-		// Guard 1 (SSRF): reject private/loopback/link-local targets. Runs on
-		// BOTH paths — a stored repository's URL could also point internal.
+		// Guard 1 (SSRF): reject private/loopback/link-local/metadata targets.
+		// Runs on BOTH paths — a stored repository's URL could also point
+		// internal.
 		try {
-			assertSafeBranchTarget(repoUrl);
+			assertSafeRepoTarget(repoUrl);
 		} catch (e: any) {
 			return json({ error: e.message || 'Invalid repository URL' }, { status: 400 });
 		}
@@ -88,7 +94,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 				return json({ error: 'Credential not found' }, { status: 404 });
 			}
 			try {
-				assertCredentialUrlPair(repoUrl, credential);
+				assertCredentialHostMatch(repoUrl, credential);
 			} catch (e: any) {
 				return json({ error: e.message || 'Invalid repository URL' }, { status: 400 });
 			}

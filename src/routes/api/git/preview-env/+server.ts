@@ -2,6 +2,7 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getGitRepository, getGitCredential } from '$lib/server/db';
 import { previewRepoEnvFiles } from '$lib/server/git';
+import { assertSafeRepoTarget, assertCredentialHostMatch } from '$lib/server/git-branch-lookup';
 import { authorize } from '$lib/server/authorize';
 
 /**
@@ -29,11 +30,11 @@ import { authorize } from '$lib/server/authorize';
 /**
  * @openapi
  * summary: Clone a repo to a temp dir and preview its merged env-file variables for the git-stack env editor
- * description: repositoryId from GET /api/git/repositories. credentialId from GET /api/git/credentials.
+ * description: repositoryId from GET /api/git/repositories. credentialId from GET /api/git/credentials. SECURITY: the URL host must not be a private/loopback/link-local/metadata address (SSRF), the ext::/file:: transports are rejected, the raw url may only be paired with a stored credentialId whose username plausibly matches that host (exfiltration defense), and composePath/envFilePath are constrained to stay inside the cloned repo (path traversal).
  * body: {repositoryId:integer, url:string, branch:string, credentialId:integer, composePath:string!, envFilePath:string}
  * body-example: {"repositoryId":3,"composePath":"docker-compose.yml","envFilePath":".env.prod"}
  * resp-200: {vars:object!, sources:object!}
- * resp-400: composePath missing, neither repositoryId nor url supplied, or the repo/env-file preview reported an error
+ * resp-400: composePath missing, neither repositoryId nor url supplied, the URL points at a private/loopback/link-local/metadata address, the URL is an unsupported transport, the credential does not match the URL host, the compose/env path escapes the repository, or the repo/env-file preview reported an error
  * resp-401: Authentication required
  * resp-404: The referenced repository does not exist
  * resp-500: Failed to preview the env files (clone or read error)
@@ -81,6 +82,26 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 		let credential = null;
 		if (credentialId) {
 			credential = await getGitCredential(credentialId);
+		}
+
+		// Security (PR #1343 maintainer review): the preview endpoint clones a
+		// USER-SUPPLIED URL and reads env files from it. Run the shared guards
+		// BEFORE previewRepoEnvFiles spawns git / reads files.
+		//  1. assertSafeRepoTarget — SSRF + transport denylist.
+		try {
+			assertSafeRepoTarget(repoUrl);
+		} catch (e: any) {
+			return json({ error: e.message || 'Invalid repository URL' }, { status: 400 });
+		}
+		//  2. assertCredentialHostMatch — a raw url may only be paired with a
+		//     stored credential plausibly for that host (exfiltration defense).
+		//     The repositoryId path is safe (user's own stored config).
+		if (data.url && credentialId && credential) {
+			try {
+				assertCredentialHostMatch(repoUrl, credential);
+			} catch (e: any) {
+				return json({ error: e.message || 'Invalid repository URL' }, { status: 400 });
+			}
 		}
 
 		const result = await previewRepoEnvFiles({

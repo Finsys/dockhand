@@ -19,6 +19,7 @@ import { deployStack, getStackDir } from './stacks';
 import { sendEventNotification } from './notifications';
 import { buildBasicAuthHeader } from './git-auth';
 import { assertSafeRepoUrl, assertSafeGitRef, repoFilePath } from './git-url-safety';
+import { assertSafeRepoTarget } from './git-branch-lookup';
 import {
 	parseManifest,
 	serializeManifest,
@@ -687,6 +688,11 @@ export async function testRepositoryConfig(options: {
 		return { success: false, error: 'Repository URL is required' };
 	}
 
+	// Transport denylist (ext::/fd::/file::/local paths) — applied here so the
+	// denylist holds on every path into a git subprocess, not only via
+	// buildRepoUrl (same pattern as listRemoteBranches).
+	assertSafeRepoUrl(url);
+
 	// Fetch credential from database if credentialId is provided
 	const credential = credentialId ? await getGitCredential(credentialId) : null;
 	if (credentialId && !credential) {
@@ -705,6 +711,10 @@ export async function testRepositoryConfig(options: {
  * Resolves credentials from the database if a credentialId is provided.
  * Bounded by a hard timeout (GIT_TIMEOUT_MS, default 20s) so a dead or
  * black-holed host cannot stall the request — see execGit.
+ *
+ * The transport denylist (ext::/fd::/file::/local paths) is applied HERE,
+ * explicitly, rather than only via buildRepoUrl — a future parser change in
+ * buildRepoUrl must not be able to reopen command execution on this path.
  */
 export async function listRemoteBranches(options: {
 	url: string;
@@ -712,6 +722,10 @@ export async function listRemoteBranches(options: {
 	timeoutMs?: number;
 }): Promise<{ branches: string[]; error?: string }> {
 	const { url, credentialId, timeoutMs } = options;
+
+	// Transport denylist — the same check buildRepoUrl applies, applied
+	// explicitly here so the denylist holds even if buildRepoUrl changes.
+	assertSafeRepoUrl(url);
 
 	// Fetch credential from database if credentialId is provided
 	const credential = credentialId ? await getGitCredential(credentialId) : null;
@@ -1923,6 +1937,19 @@ export async function previewRepoEnvFiles(options: PreviewEnvOptions): Promise<P
 		// Build git environment with credentials
 		// Cast credential to GitCredential type (only uses id, authType, sshPrivateKey)
 		env = await buildGitEnv(credential as GitCredential | null);
+
+		// Security (PR #1343 maintainer review): the preview endpoint clones a
+		// USER-SUPPLIED URL and reads env files from it — the same SSRF / RCE /
+		// path-traversal surface as the branches endpoint. Apply the shared guards
+		// BEFORE any git subprocess or file read:
+		//  1. assertSafeRepoTarget — blocks private/loopback/metadata/encoded-IP
+		//     hosts (SSRF) and the ext::/file:: transport denylist (RCE).
+		//  2. repoFilePath — keeps composePath/envFilePath INSIDE the temp dir
+		//     (path traversal). Without this, `envFilePath: '../../secrets/x'`
+		//     reads a file outside the clone.
+		assertSafeRepoTarget(repoUrl);
+		const safeComposePath = repoFilePath(tempDir, composePath, 'Compose path');
+		const safeEnvFilePath = envFilePath ? repoFilePath(tempDir, envFilePath, 'Env file path') : null;
 		assertSafeGitRef(branch);
 		const authenticatedUrl = buildRepoUrl(repoUrl, credential as GitCredential | null);
 
@@ -1947,8 +1974,9 @@ export async function previewRepoEnvFiles(options: PreviewEnvOptions): Promise<P
 
 		console.log(`${logPrefix} Clone successful`);
 
-		// Determine the compose directory (where .env file should be)
-		const composeDir = dirname(composePath);
+		// Determine the compose directory (where .env file should be) — uses the
+		// VALIDATED path (already checked to be inside the temp dir).
+		const composeDir = dirname(safeComposePath);
 		const baseEnvPath = join(tempDir, composeDir, '.env');
 
 		const vars: Record<string, string> = {};
@@ -1968,9 +1996,10 @@ export async function previewRepoEnvFiles(options: PreviewEnvOptions): Promise<P
 			console.log(`${logPrefix} No .env file at ${baseEnvPath}`);
 		}
 
-		// Read additional env file if specified
-		if (envFilePath) {
-			const additionalEnvPath = join(tempDir, envFilePath);
+		// Read additional env file if specified — uses the VALIDATED path
+		// (already checked to be inside the temp dir).
+		if (safeEnvFilePath) {
+			const additionalEnvPath = safeEnvFilePath;
 			if (existsSync(additionalEnvPath)) {
 				console.log(`${logPrefix} Reading additional env file: ${additionalEnvPath}`);
 				const content = readFileSync(additionalEnvPath, 'utf-8');
