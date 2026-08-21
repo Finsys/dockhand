@@ -14,6 +14,7 @@ import { Readable } from 'node:stream';
 import * as tls from 'node:tls';
 import { createHash } from 'node:crypto';
 import { pumpWebStreamToWritable } from './stream-pump';
+import { toWebReadableStream } from './node-readable-stream';
 import { computeRequestTimeoutMs } from './backups/request-timeout';
 import { helperWaitDeadline } from './helper-wait-core';
 import type { Environment } from './db';
@@ -466,14 +467,7 @@ export function httpsAgentRequest(
 			}
 
 			if (streaming) {
-				const readable = new ReadableStream({
-					start(controller) {
-						res.on('data', (chunk: Buffer) => controller.enqueue(new Uint8Array(chunk)));
-						res.on('end', () => controller.close());
-						res.on('error', (err) => controller.error(err));
-					},
-					cancel() { res.destroy(); }
-				});
+				const readable = toWebReadableStream(res);
 				resolve(new Response(readable, { status, statusText, headers }));
 			} else {
 				const chunks: Buffer[] = [];
@@ -791,22 +785,7 @@ export function unixSocketStreamRequest(
 				}
 			}
 
-			const readable = new ReadableStream({
-				start(controller) {
-					res.on('data', (chunk: Buffer) => {
-						controller.enqueue(new Uint8Array(chunk));
-					});
-					res.on('end', () => {
-						controller.close();
-					});
-					res.on('error', (err) => {
-						controller.error(err);
-					});
-				},
-				cancel() {
-					res.destroy();
-				}
-			});
+			const readable = toWebReadableStream(res);
 
 			resolve(new Response(readable, {
 				status: res.statusCode || 200,
