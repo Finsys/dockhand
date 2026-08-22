@@ -1,150 +1,134 @@
 /**
- * Unit tests for per-stack branch resolution (git_stacks.branch).
+ * Regression tests for per-stack branch selection (git_stacks.branch).
  *
- * `resolveStackBranch` in src/lib/server/git.ts is a pure resolver:
- *   per-stack override wins when non-blank, else fall back to repo.branch.
- * Importing git.ts pulls native deps (better-sqlite3/argon2), so — matching
- * the convention in tests/git-branches.test.ts — we mirror the exact
- * implementation here and test that, plus the API partial-update semantics
- * for the branch field on PUT /api/git/stacks/:id.
+ * The pure production helpers live in src/lib/git-stack-branch.ts (import-
+ * light: no native deps like better-sqlite3 / argon2), so these tests import
+ * and exercise the EXACT functions that production code uses:
+ *   - resolveStackBranch   -> src/lib/server/git.ts (deploy/sync)
+ *   - effectiveStackBranch -> src/routes/stacks/+page.svelte & GitSourceBadge
+ *                            (the effective branch shown in the stacks UI)
+ *   - normalizeStackBranchUpdate -> PUT /api/git/stacks/:id (+server.ts)
+ * No mirrored copies of the implementation exist here — if the production
+ * behaviour changes, these tests break.
  */
 
 import { describe, expect, test } from 'bun:test';
+import {
+	resolveStackBranch,
+	effectiveStackBranch,
+	normalizeStackBranchUpdate
+} from '../src/lib/git-stack-branch';
 
-/** Mirror of resolveStackBranch (src/lib/server/git.ts). Keep in sync. */
-function resolveStackBranch(
-	gitStack: { branch: string | null } | null | undefined,
-	repository: { branch: string }
-): string {
-	const override = gitStack?.branch?.trim();
-	return override || repository.branch;
-}
-
-/**
- * Mirror of the PUT /api/git/stacks/:id partial-update semantics for branch:
- * only apply when the key is present in the body; explicit null clears the
- * override back to "inherit repo default"; blank strings are also treated as
- * clear-on-save (trimmed away by the resolver anyway).
- */
-function applyBranchUpdate(
-	current: string | null,
-	body: Record<string, unknown>
-): { next: string | null; changed: boolean } {
-	if (!('branch' in body)) return { next: current, changed: false };
-	const value = body.branch;
-	return { next: value === null ? null : (value as string), changed: true };
-}
-
-describe('resolveStackBranch', () => {
-	test('per-stack override wins over repo default', () => {
-		expect(
-			resolveStackBranch({ branch: 'develop' }, { branch: 'main' })
-		).toBe('develop');
-	});
-
-	test('null stack branch falls back to repo default', () => {
-		expect(
-			resolveStackBranch({ branch: null }, { branch: 'main' })
-		).toBe('main');
-	});
-
-	test('missing gitStack (undefined) falls back to repo default', () => {
-		expect(resolveStackBranch(undefined, { branch: 'release/1.2' })).toBe(
-			'release/1.2'
+describe('resolveStackBranch (production: src/lib/server/git.ts)', () => {
+	test('per-stack override wins over repository default', () => {
+		expect(resolveStackBranch({ branch: 'develop' }, { branch: 'main' })).toBe(
+			'develop'
 		);
 	});
 
-	test('whitespace-only override is treated as blank → repo default', () => {
-		expect(
-			resolveStackBranch({ branch: '   ' }, { branch: 'main' })
-		).toBe('main');
+	test('null override inherits the repository default', () => {
+		expect(resolveStackBranch({ branch: null }, { branch: 'main' })).toBe('main');
 	});
 
-	test('surrounding whitespace on a real override is trimmed', () => {
-		expect(
-			resolveStackBranch({ branch: '  feature/x  ' }, { branch: 'main' })
-		).toBe('feature/x');
+	test('blank override inherits the repository default', () => {
+		expect(resolveStackBranch({ branch: '' }, { branch: 'main' })).toBe('main');
 	});
 
-	test('empty-string override falls back to repo default', () => {
-		expect(resolveStackBranch({ branch: '' }, { branch: 'main' })).toBe(
-			'main'
+	test('whitespace-only override is treated as blank → repository default', () => {
+		expect(resolveStackBranch({ branch: '   ' }, { branch: 'main' })).toBe('main');
+	});
+
+	test('whitespace around a real override is trimmed consistently', () => {
+		expect(resolveStackBranch({ branch: '  feature/x  ' }, { branch: 'main' })).toBe(
+			'feature/x'
 		);
 	});
 
-	test('works with branch names that are not git refs either (arbitrary strings)', () => {
-		expect(
-			resolveStackBranch({ branch: 'a/b-c_d' }, { branch: 'zzz' })
-		).toBe('a/b-c_d');
+	test('repository default is used when no override exists (no stack / undefined)', () => {
+		expect(resolveStackBranch(undefined, { branch: 'release/1.2' })).toBe('release/1.2');
+	});
+
+	test('accepts arbitrary branch strings (not validated as git refs)', () => {
+		expect(resolveStackBranch({ branch: 'a/b-c_d' }, { branch: 'zzz' })).toBe('a/b-c_d');
 	});
 });
 
-describe('PUT /api/git/stacks/:id partial branch semantics', () => {
-	test('branch key absent → stored value untouched', () => {
-		const r = applyBranchUpdate('develop', { stackName: 'x' });
+describe(
+	'effectiveStackBranch (production UI: +page.svelte viewGitStack & GitSourceBadge)',
+	() => {
+		test('a per-stack override is shown and flagged as per-stack', () => {
+			const r = effectiveStackBranch({ branch: 'develop' }, { branch: 'main' });
+			expect(r.branch).toBe('develop');
+			expect(r.perStack).toBe(true);
+		});
+
+		test('no override → repository default, perStack is null', () => {
+			const r = effectiveStackBranch({ branch: null }, { branch: 'main' });
+			expect(r.branch).toBe('main');
+			expect(r.perStack).toBeNull();
+		});
+
+		test('blank / whitespace-only override is NOT a per-stack branch (falls back to repo default)', () => {
+			// Consistent with resolveStackBranch: a blank stored override is not a
+			// per-stack branch — it falls back to the repository default.
+			const r = effectiveStackBranch({ branch: '  ' }, { branch: 'main' });
+			expect(r.branch).toBe('main');
+			expect(r.perStack).toBeNull();
+		});
+
+		test('no stack / no repo → undefined, perStack null', () => {
+			const r = effectiveStackBranch(undefined, undefined);
+			expect(r.branch).toBeUndefined();
+			expect(r.perStack).toBeNull();
+		});
+
+		test('stack present but no repository → shows the override', () => {
+			const r = effectiveStackBranch({ branch: 'hotfix' }, undefined);
+			expect(r.branch).toBe('hotfix');
+			expect(r.perStack).toBe(true);
+		});
+	});
+
+describe('normalizeStackBranchUpdate (production: PUT /api/git/stacks/:id)', () => {
+	test('branch key absent → current override left untouched (no change)', () => {
+		const r = normalizeStackBranchUpdate('develop', { stackName: 'x' });
 		expect(r.next).toBe('develop');
 		expect(r.changed).toBe(false);
 	});
 
-	test('explicit null clears the override (inherit repo default)', () => {
-		const r = applyBranchUpdate('develop', { branch: null });
+	test('explicit null clears the override (inherit repository default)', () => {
+		const r = normalizeStackBranchUpdate('develop', { branch: null });
 		expect(r.next).toBeNull();
 		expect(r.changed).toBe(true);
 	});
 
-	test('null on a stack that already inherits is a no-op value-wise but still an applied write', () => {
-		const r = applyBranchUpdate(null, { branch: null });
+	test('null on a stack that already inherits is still an applied write', () => {
+		const r = normalizeStackBranchUpdate(null, { branch: null });
 		expect(r.next).toBeNull();
 		expect(r.changed).toBe(true);
 	});
 
-	test('string sets the per-stack override', () => {
-		const r = applyBranchUpdate(null, { branch: 'hotfix/42' });
+	test('non-blank string sets the per-stack override', () => {
+		const r = normalizeStackBranchUpdate(null, { branch: 'hotfix/42' });
 		expect(r.next).toBe('hotfix/42');
 		expect(r.changed).toBe(true);
 	});
 
-	test('co-located fields (stackName etc.) do not touch branch', () => {
-		const r = applyBranchUpdate(null, { composePath: 'docker-compose.prod.yml' });
+	test('surrounding whitespace is trimmed on a non-blank value', () => {
+		const r = normalizeStackBranchUpdate(null, { branch: '  hotfix/42  ' });
+		expect(r.next).toBe('hotfix/42');
+		expect(r.changed).toBe(true);
+	});
+
+	test('blank / whitespace-only branch is normalised to clear (inherit default)', () => {
+		const r = normalizeStackBranchUpdate('develop', { branch: '   ' });
+		expect(r.next).toBeNull();
+		expect(r.changed).toBe(true);
+	});
+
+	test('co-located fields (stackName etc.) do not touch the branch', () => {
+		const r = normalizeStackBranchUpdate(null, { composePath: 'docker-compose.prod.yml' });
 		expect(r.next).toBeNull();
 		expect(r.changed).toBe(false);
-	});
-});
-
-describe('effective-branch UI semantics (viewGitStack / badge)', () => {
-	/** Mirror of +page.svelte viewGitStack effective branch computation. */
-	function effectiveBranchDisplay(
-		gitStack: { branch: string | null } | null | undefined,
-		repository: { branch: string } | null | undefined
-	): { branch: string | undefined; perStack: boolean | null } {
-		const perStackBranch = gitStack?.branch ?? null;
-		return {
-			branch: perStackBranch || (repository?.branch || undefined),
-			perStack: perStackBranch ? true : null
-		};
-	}
-
-	test('override shows per-stack branch, flagged as per-stack', () => {
-		const r = effectiveBranchDisplay(
-			{ branch: 'develop' },
-			{ branch: 'main' }
-		);
-		expect(r.branch).toBe('develop');
-		expect(r.perStack).toBe(true);
-	});
-
-	test('no override → repo default, perStack null', () => {
-		const r = effectiveBranchDisplay(
-			{ branch: null },
-			{ branch: 'main' }
-		);
-		expect(r.branch).toBe('main');
-		expect(r.perStack).toBeNull();
-	});
-
-	test('no stack, no repo → undefined', () => {
-		const r = effectiveBranchDisplay(undefined, undefined);
-		expect(r.branch).toBeUndefined();
-		expect(r.perStack).toBeNull();
 	});
 });

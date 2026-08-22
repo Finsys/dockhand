@@ -19,12 +19,12 @@ import { authorize } from '$lib/server/authorize';
 /**
  * @openapi
  * summary: Test an unsaved repository configuration (url/branch/credentialId) before creating it
- * description: credentialId from GET /api/git/credentials. SECURITY: the URL host must not be a private/loopback/link-local/metadata address (SSRF), the ext::/file:: transports are rejected, and the url may only be paired with a stored credentialId whose username plausibly matches that host (exfiltration defense).
+ * description: credentialId from GET /api/git/credentials. SECURITY: the repository target is checked against the shared SSRF policy — loopback, link-local/cloud-metadata and other reserved dangerous targets are rejected, while ordinary private-LAN addresses are intentionally allowed so self-hosted Git servers remain supported. The ext::/file:: transports and local paths are rejected; the raw url may only be paired with a stored credentialId whose username plausibly matches that host (exfiltration defense).
  * body: {url:string!, branch:string, credentialId:integer}
  * body-example: {"url":"https://github.com/example/homelab.git","branch":"main","credentialId":2}
  * resp-200: {success:boolean!, error:string}
  * resp-200-example: {"success":true}
- * resp-400: The url field is missing, the URL points at a private/loopback/link-local/metadata address, the URL is an unsupported transport, or the credential does not match the URL host
+ * resp-400: The url field is missing, the URL points at a loopback/link-local/metadata/reserved target, the URL is an unsupported transport, or the credential does not match the URL host
  * resp-403: Caller lacks the settings:manage permission
  * resp-404: The referenced credential does not exist
  * resp-500: The connectivity test failed

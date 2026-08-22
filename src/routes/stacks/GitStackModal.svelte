@@ -16,6 +16,7 @@
 	import CronEditor from '$lib/components/cron-editor.svelte';
 	import StackEnvVarsPanel from '$lib/components/StackEnvVarsPanel.svelte';
 	import SecretProviderPicker from '$lib/components/SecretProviderPicker.svelte';
+	import BranchCombobox from './BranchCombobox.svelte';
 	import { type EnvVar, type ValidationResult } from '$lib/components/StackEnvVarsEditor.svelte';
 	import { toast } from 'svelte-sonner';
 	import { focusFirstInput } from '$lib/utils';
@@ -153,6 +154,11 @@
 	let formBranch = $state<string | null>(null);
 	let branches = $state<string[]>([]);
 	let branchesLoading = $state(false);
+	// Monotonic token that guards against a stale branch-enumeration response
+	// overwriting `branches` for a newer repository URL (the $effect below can
+	// fire multiple times as the repo selection changes; a slow response for
+	// repo A must not clobber the branch list belonging to repo B).
+	let branchesFetchSeq = 0;
 
 	// Sentinel select value meaning "no per-stack override — use the repository's
 	// default branch". Contains ':' which is invalid in git refs, so it can never
@@ -512,6 +518,7 @@
 	}
 
 	async function fetchBranches() {
+		const seq = ++branchesFetchSeq;
 		branchesLoading = true;
 		branches = [];
 		try {
@@ -529,14 +536,19 @@
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify(body)
 			});
+			// A newer fetch (or a repo change) superseded this one — drop the
+			// stale response so it cannot overwrite the new repo's branch list.
+			if (seq !== branchesFetchSeq) return;
 			if (response.ok) {
 				const data = await response.json();
+				if (seq !== branchesFetchSeq) return;
 				branches = data.branches || [];
 			}
 		} catch (e) {
+			if (seq !== branchesFetchSeq) return;
 			console.error('Failed to fetch branches:', e);
 		} finally {
-			branchesLoading = false;
+			if (seq === branchesFetchSeq) branchesLoading = false;
 		}
 	}
 
@@ -936,27 +948,21 @@
 							<div class="grid grid-cols-2 gap-3">
 								<div class="space-y-2">
 									<Label for="new-repo-branch">Branch</Label>
-									<Select.Root type="single" value={formNewRepoBranch || 'main'} onValueChange={(v) => { formNewRepoBranch = v; }}>
-										<Select.Trigger class="w-full">
-											<span class="flex items-center gap-2">
-												<GitBranch class="w-4 h-4 text-muted-foreground" />
-												{#if branchesLoading}
-													<Loader2 class="w-4 h-4 animate-spin" />
-												{:else}
-													{formNewRepoBranch || 'main'}
-												{/if}
-											</span>
-										</Select.Trigger>
-										<Select.Content>
-											{#if branches.length > 0}
-												{#each branches as branch}
-													<Select.Item value={branch}>{branch}</Select.Item>
-												{/each}
-											{:else}
-												<Select.Item value={formNewRepoBranch || 'main'}>{formNewRepoBranch || 'main'}</Select.Item>
-											{/if}
-										</Select.Content>
-									</Select.Root>
+									<!-- Free-text, searchable branch picker. Supports both discovered
+									     branches and arbitrary typed names (maintainer review: a new/
+									     private repository whose branch enumeration fails must not force the
+									     user onto "main" — they can type the known branch name instead). The
+									     "main" default is preserved when no branch has been chosen, and a
+									     value not returned by enumeration is never silently reset. Server-side
+									     Git ref validation remains authoritative. -->
+									<BranchCombobox
+										id="new-repo-branch"
+										value={formNewRepoBranch}
+										branches={branches}
+										loading={branchesLoading}
+										placeholder="main"
+									/>
+									<p class="text-xs text-muted-foreground">Branch to deploy. Type a name (e.g. "main") or pick from the list.</p>
 								</div>
 								<div class="space-y-2">
 									<Label for="new-repo-credential">Credential</Label>

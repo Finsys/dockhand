@@ -5,13 +5,4 @@ node_modules/
 bun.lock
 data/db
 data/.encryption_key
-
-# Local tooling / agent state — never commit
 .hermes/
-tmp/
-build/
-local-data/
-cookies.txt
-package-lock.json
-static/scalar/
-fix-svelte-optional-params.sh

@@ -2,6 +2,7 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getGitStack, updateGitStack, deleteGitStack, deleteStackSource, updateStackSourceName, updateStackEnvVarsName, setStackEnvVars, getStackEnvVars, deleteStackEnvVars, updateStackSource } from '$lib/server/db';
 import { deleteGitStackFiles, deployGitStack } from '$lib/server/git';
+import { normalizeStackBranchUpdate } from '$lib/git-stack-branch';
 import { authorize } from '$lib/server/authorize';
 import { registerSchedule, unregisterSchedule } from '$lib/server/scheduler';
 import { auditGitStack } from '$lib/server/audit';
@@ -109,12 +110,24 @@ export const PUT: RequestHandler = async (event) => {
 		}
 
 		const oldStackName = existing.stackName;
+
+		// Per-stack branch override is a partial update. The shared normalizer
+		// (normalizeStackBranchUpdate, src/lib/git-stack-branch.ts) encodes the
+		// API contract:
+		//   - `branch` key ABSENT  -> leave the stored value untouched;
+		//   - explicit null         -> clear the override (inherit repo default);
+		//   - blank / whitespace    -> normalised to clear;
+		//   - non-blank string      -> set the override (stored trimmed).
+		// updateGitStack writes the column only when the key is defined
+		// (`data.branch !== undefined`), so we pass `undefined` for the
+		// "absent" case to leave the stored value untouched.
+		const branchNext = normalizeStackBranchUpdate(existing.branch, data);
+		const branchValue: string | null | undefined =
+			'branch' in data ? branchNext.next : undefined;
+
 		const updated = await updateGitStack(id, {
 			stackName: data.stackName,
-			// Per-stack branch override. Partial semantics like the other fields:
-			// only applied when present in the body. null or empty string clears
-			// the override so the stack falls back to the repository default.
-			branch: 'branch' in data ? (typeof data.branch === 'string' && data.branch.trim() ? data.branch.trim() : null) : undefined,
+			branch: branchValue,
 			composePath: data.composePath,
 			envFilePath: data.envFilePath,
 			autoUpdate: data.autoUpdate,

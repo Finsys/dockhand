@@ -101,15 +101,24 @@ function assertHostSafeFromParse(parsedHost: string): void {
 	const check = isSafeNotificationUrl(`https://${host}/`);
 	if (!check.ok) {
 		throw new Error(
-			`Repository URL points to a private, loopback, or link-local address: ${check.reason}`
+			`Repository URL host is not allowed (loopback, cloud-metadata or other reserved/dangerous target): ${check.reason}`
 		);
 	}
 }
 
 /**
- * Guard 1: reject a git repository URL whose host is a private / loopback /
- * link-local / metadata address (SSRF defense), or a hostname that resolves
- * to internal infrastructure.
+ * Guard 1: reject a git repository URL that points at a dangerous target
+ * (SSRF defense), or a hostname that resolves to internal infrastructure.
+ *
+ * Policy (shared isSafeNotificationUrl / dangerousHostReason, src/lib/server/
+ * url-safety.ts): loopback (127.x/::1), cloud-metadata / link-local
+ * (169.254.169.254), multicast/reserved and localhost are REJECTED.
+ * Ordinary private-LAN ranges (10.x / 192.168.x / 172.16-31.x) are INTENTIONALLY
+ * ALLOWED so self-hosted Git servers on the RFC1918 LAN keep working — this
+ * is Dockhand's self-hosted-service policy (same as the notification
+ * receivers and backup repos). Do NOT "fix" this into the strict
+ * isSafeWebhookUrl / privateIpReason policy (that blocks all private) —
+ * doing so would break self-hosted Git on a LAN.
  *
  * Every scheme is judged on the CANONICALIZED host through
  * isSafeNotificationUrl (see assertHostSafeFromParse): http(s) via the

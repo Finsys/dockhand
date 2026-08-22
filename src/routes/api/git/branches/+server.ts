@@ -11,17 +11,21 @@ import { assertSafeRepoTarget, assertCredentialHostMatch } from '$lib/server/git
  *
  * SECURITY (PR #1343 maintainer review, rounds 1+2): two guards run before
  * any git subprocess is spawned.
- *  1. assertSafeRepoTarget — rejects URLs whose host is a private / loopback
- *     / link-local / metadata address (SSRF defense, delegated to the shared
- *     isSafeNotificationUrl guard) or a hostname on the internal-hostname
- *     denylist. Runs on BOTH the `url` and `repositoryId` paths (a stored
- *     repository's URL could also point internal).
+ *  1. assertSafeRepoTarget — the shared SSRF policy (delegated to
+ *     isSafeNotificationUrl, src/lib/server/url-safety.ts): loopback,
+ *     link-local / cloud-metadata and other reserved/dangerous targets are
+ *     rejected, while ordinary private-LAN addresses are INTENTIONALLY
+ *     ALLOWED so self-hosted Git servers on RFC1918 ranges (10.x /
+ *     192.168.x / 172.16-31.x) keep working. Runs on BOTH the `url` and
+ *     `repositoryId` paths (a stored repository's URL could also point
+ *     internal).
  *  2. assertCredentialHostMatch — a raw `url` may only be paired with a
  *     stored `credentialId` when the credential is plausibly for that host
  *     (credential-exfiltration defense). The `repositoryId` path is safe —
  *     the pairing is the user's own stored repository config, not an
  *     attacker-chosen url+credential combo.
- * The `ls-remote` itself is bounded by a hard timeout (see execGit).
+ * The `ls-remote` itself is bounded by a hard timeout (see listRemoteBranches
+ * in src/lib/server/git.ts) — clone/pull/fetch stay unbounded.
  *
  * Body: {
  *   repositoryId?: number,     // Existing repository (uses its url + credential)
@@ -34,12 +38,12 @@ import { assertSafeRepoTarget, assertCredentialHostMatch } from '$lib/server/git
 /**
  * @openapi
  * summary: List remote branches for a git repository via `git ls-remote`
- * description: Accepts either repositoryId (an existing repository, using its stored URL and credential) or url + credentialId (a new repository). SECURITY: the URL host must not be a private/loopback/link-local/metadata address or a denylisted internal hostname, and a raw url may only be paired with a stored credentialId whose username plausibly matches that host (SSH credentials are always allowed). The ls-remote is bounded by a hard timeout.
+ * description: Accepts either repositoryId (an existing repository, using its stored URL and credential) or url + credentialId (a new repository). SECURITY: the repository target is checked against the shared SSRF policy — loopback, link-local/cloud-metadata and other reserved dangerous targets are rejected, while ordinary private-LAN addresses are intentionally allowed so self-hosted Git servers remain supported. A raw url may only be paired with a stored credentialId whose username plausibly matches that host (SSH credentials are always allowed). The ls-remote is bounded by a hard timeout.
  * body: {repositoryId:integer, url:string, credentialId:integer}
  * body-example: {"url":"https://github.com/example/repo.git","credentialId":2}
  * resp-200: {branches:array<string>!}
  * resp-200-example: {"branches":["main","develop","feature/test"]}
- * resp-400: The URL points at a private/loopback/link-local/metadata address, the credential does not match the URL host, or neither repositoryId nor url was supplied
+ * resp-400: The URL points at a loopback/link-local/metadata/reserved target, the credential does not match the URL host, or neither repositoryId nor url was supplied
  * resp-403: Permission denied (requires git:edit)
  * resp-404: The referenced repository does not exist
  * resp-500: Failed to fetch branches (ls-remote error or timeout)
@@ -75,7 +79,9 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			return json({ error: 'repositoryId or url is required' }, { status: 400 });
 		}
 
-		// Guard 1 (SSRF): reject private/loopback/link-local/metadata targets.
+		// Guard 1 (SSRF): the shared SSRF policy rejects loopback /
+		// link-local / cloud-metadata / reserved targets; ordinary
+		// private-LAN addresses are intentionally allowed (self-hosted Git).
 		// Runs on BOTH paths — a stored repository's URL could also point
 		// internal.
 		try {

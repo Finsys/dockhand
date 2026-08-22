@@ -20,6 +20,7 @@ import { sendEventNotification } from './notifications';
 import { buildBasicAuthHeader } from './git-auth';
 import { assertSafeRepoUrl, assertSafeGitRef, repoFilePath } from './git-url-safety';
 import { assertSafeRepoTarget } from './git-branch-lookup';
+import { resolveStackBranch } from '../git-stack-branch';
 import {
 	parseManifest,
 	serializeManifest,
@@ -326,18 +327,34 @@ function buildRepoUrl(url: string, credential: GitCredential | null): string {
 	return url;
 }
 
-/** Default hard timeout (ms) for a single git subprocess. Prevents a
- *  hanging remote (dead host, firewall black-hole, slow mirror) from
- *  stalling the request forever — the branches endpoint in particular can
- *  be driven by an attacker-chosen URL, so an unbounded git subprocess is
- *  a resource-exhaustion vector. */
+/**
+ * Hard timeout (ms) for the remote-branch lookup (git ls-remote) ONLY.
+ * The lookup is the single git call whose target URL can be driven by an
+ * attacker-chosen URL (POST /api/git/branches, the new-repository branch
+ * picker), so an unbounded ls-remote is a resource-exhaustion vector.
+ * NOTE: this constant is deliberately NOT applied to ordinary deploy/sync
+ * operations (clone / pull / fetch / rev-parse) — those target the
+ * operator's own repository over a controlled URL, and a legitimate
+ * large-repo clone or slow WAN fetch can exceed this limit, so they stay
+ * UNBOUNDED (execGit without an explicit timeout). */
 export const GIT_TIMEOUT_MS = Number(process.env.GIT_TIMEOUT_MS) || 20000;
 
+/**
+ * Run a git command.
+ *
+ * Timeouts are OPT-IN: the default is UNBOUNDED. Ordinary deploy/sync
+ * operations (clone, pull, fetch, rev-parse) are unbounded because their
+ * target is the operator's own repository and a slow network or large repo
+ * is a legitimate outcome — they must not be killed mid-flight. Callers
+ * that need a bounded operation (the remote-branch lookup, whose target
+ * URL is attacker-influenced) pass `timeoutMs` explicitly (see
+ * listRemoteBranches).
+ */
 function execGit(
 	args: string[],
 	cwd: string,
 	env: GitEnv,
-	timeoutMs: number = GIT_TIMEOUT_MS
+	timeoutMs?: number
 ): Promise<{ stdout: string; stderr: string; code: number; timedOut?: boolean }> {
 	return new Promise((resolve) => {
 		let settled = false;
@@ -355,7 +372,9 @@ function execGit(
 		) => {
 			if (settled) return;
 			settled = true;
-			clearTimeout(timer);
+			// Only clear a timer if one was actually created — the default
+			// (no timeout) never creates one.
+			if (timer) clearTimeout(timer);
 			if (partial.timedOut) {
 				// The process is still running — kill it so the git subprocess
 				// (and any child ssh) cannot keep running after we give up.
@@ -364,14 +383,19 @@ function execGit(
 			resolve(partial);
 		};
 
-		const timer = setTimeout(() => {
-			finish({
-				stdout: Buffer.concat(stdoutChunks).toString(),
-				stderr: Buffer.concat(stderrChunks).toString(),
-				code: 124,
-				timedOut: true
-			});
-		}, timeoutMs);
+		// Only arm a timer when a valid timeout was explicitly provided —
+		// undefined (or non-finite / non-positive) means "run unbounded".
+		const timer: ReturnType<typeof setTimeout> | undefined =
+			timeoutMs !== undefined && Number.isFinite(timeoutMs) && timeoutMs > 0
+				? setTimeout(() => {
+						finish({
+							stdout: Buffer.concat(stdoutChunks).toString(),
+							stderr: Buffer.concat(stderrChunks).toString(),
+							code: 124,
+							timedOut: true
+						});
+					}, timeoutMs)
+				: undefined;
 
 		proc.stdout?.on('data', (chunk: Buffer) => stdoutChunks.push(chunk));
 		proc.stderr?.on('data', (chunk: Buffer) => stderrChunks.push(chunk));
@@ -709,8 +733,11 @@ export async function testRepositoryConfig(options: {
 /**
  * List remote branches for a repository URL using git ls-remote.
  * Resolves credentials from the database if a credentialId is provided.
- * Bounded by a hard timeout (GIT_TIMEOUT_MS, default 20s) so a dead or
- * black-holed host cannot stall the request — see execGit.
+ * Bounded by a hard timeout (default GIT_TIMEOUT_MS, 20s) so a dead or
+ * black-holed host cannot stall the request — see execGit. This is the
+ * only git operation with a timeout: its target URL is the one that can be
+ * attacker-influenced, so an unbounded ls-remote would be a resource-
+ * exhaustion vector.
  *
  * The transport denylist (ext::/fd::/file::/local paths) is applied HERE,
  * explicitly, rather than only via buildRepoUrl — a future parser change in
@@ -722,6 +749,12 @@ export async function listRemoteBranches(options: {
 	timeoutMs?: number;
 }): Promise<{ branches: string[]; error?: string }> {
 	const { url, credentialId, timeoutMs } = options;
+
+	// The effective branch-lookup timeout: an explicitly provided (valid)
+	// override wins; otherwise the default GIT_TIMEOUT_MS. This is the ONLY
+	// bounded git operation — see execGit for why deploy/sync operations are
+	// left unbounded.
+	const effectiveTimeoutMs = timeoutMs ?? GIT_TIMEOUT_MS;
 
 	// Transport denylist — the same check buildRepoUrl applies, applied
 	// explicitly here so the denylist holds even if buildRepoUrl changes.
@@ -738,11 +771,11 @@ export async function listRemoteBranches(options: {
 			['ls-remote', '--heads', '--refs', repoUrl],
 			process.cwd(),
 			env,
-			timeoutMs
+			effectiveTimeoutMs
 		);
 
 		if (result.timedOut) {
-			return { branches: [], error: `git ls-remote timed out after ${Math.round((timeoutMs ?? GIT_TIMEOUT_MS) / 1000)}s` };
+			return { branches: [], error: `git ls-remote timed out after ${Math.round(effectiveTimeoutMs / 1000)}s` };
 		}
 
 		if (result.code !== 0) {
@@ -984,17 +1017,11 @@ async function getPreviousCommit(repoPath: string, env: GitEnv): Promise<string 
 }
 
 /**
- * Resolve the effective branch a git stack deploys from.
- * A per-stack branch override (git_stacks.branch) wins; when it is unset,
- * empty, or whitespace-only, the repository's default branch is used.
+ * The effective branch a git stack deploys from is resolved by
+ * resolveStackBranch() (src/lib/git-stack-branch.ts) — a per-stack branch
+ * override (git_stacks.branch) wins; when it is unset, empty, or
+ * whitespace-only, the repository's default branch is used.
  */
-export function resolveStackBranch(
-	gitStack: { branch: string | null } | null | undefined,
-	repository: { branch: string }
-): string {
-	const override = gitStack?.branch?.trim();
-	return override || repository.branch;
-}
 
 export async function syncGitStack(stackId: number): Promise<SyncResult> {
 	const gitStack = await getGitStack(stackId);
@@ -1942,8 +1969,9 @@ export async function previewRepoEnvFiles(options: PreviewEnvOptions): Promise<P
 		// USER-SUPPLIED URL and reads env files from it — the same SSRF / RCE /
 		// path-traversal surface as the branches endpoint. Apply the shared guards
 		// BEFORE any git subprocess or file read:
-		//  1. assertSafeRepoTarget — blocks private/loopback/metadata/encoded-IP
-		//     hosts (SSRF) and the ext::/file:: transport denylist (RCE).
+		//  1. assertSafeRepoTarget — blocks loopback/link-local/metadata/reserved
+		//     hosts (SSRF) and the ext::/file:: transport denylist (RCE). Ordinary
+		//     private-LAN addresses are intentionally allowed (self-hosted Git).
 		//  2. repoFilePath — keeps composePath/envFilePath INSIDE the temp dir
 		//     (path traversal). Without this, `envFilePath: '../../secrets/x'`
 		//     reads a file outside the clone.
