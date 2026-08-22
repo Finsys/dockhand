@@ -76,6 +76,8 @@
 		"@lezer/highlight": "1.2.3",
 		"@lucide/lab": "0.1.2",
 		"@replit/codemirror-indentation-markers": "6.5.3",
+		"@simplewebauthn/browser": "13.3.0",
+		"@simplewebauthn/server": "13.3.2",
 		"ansi_up": "6.0.6",
 		"argon2": "0.41.1",
 		"better-sqlite3": "11.7.0",

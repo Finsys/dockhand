@@ -85,6 +85,20 @@
       "when": 1786892843482,
       "tag": "0011_pending_updates_semver",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1787122042239,
+      "tag": "0012_add_passkey_credentials",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1787132375514,
+      "tag": "0013_passkey_names",
+      "breakpoints": true
     }
   ]
 }

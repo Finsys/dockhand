@@ -263,6 +263,7 @@ const PUBLIC_PATHS = [
 	'/api/auth/session',
 	'/api/auth/settings',
 	'/api/auth/providers',
+	'/api/auth/passkeys/login',
 	'/api/auth/oidc',
 	'/api/license',
 	'/api/changelog',
