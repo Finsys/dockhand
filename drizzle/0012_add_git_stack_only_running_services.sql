@@ -1,0 +1,1 @@
+ALTER TABLE `git_stacks` ADD `only_running_services` integer DEFAULT false;

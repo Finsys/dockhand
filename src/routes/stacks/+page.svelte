@@ -1729,6 +1729,8 @@
 								stackId={source.gitStack.id}
 								stackName={stack.name}
 								onComplete={fetchStacks}
+								canLimitServices={(stack.containers?.length ?? 0) > 0}
+								onlyRunningServicesDefault={source.gitStack.onlyRunningServices ?? false}
 							>
 								{#snippet children()}
 									<button
@@ -1993,6 +1995,7 @@
 								stackId={source.gitStack.id}
 								stackName={stack.name}
 								onComplete={fetchStacks}
+								onlyRunningServicesDefault={source.gitStack.onlyRunningServices ?? false}
 							>
 								{#snippet children()}
 									<button
@@ -2010,6 +2013,8 @@
 									stackId={source.gitStack.id}
 									stackName={stack.name}
 									onComplete={fetchStacks}
+									canLimitServices={(stack.containers?.length ?? 0) > 0}
+									onlyRunningServicesDefault={source.gitStack.onlyRunningServices ?? false}
 								>
 									{#snippet children()}
 										<button

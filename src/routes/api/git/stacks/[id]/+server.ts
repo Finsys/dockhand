@@ -122,7 +122,8 @@ export const PUT: RequestHandler = async (event) => {
 			buildOnDeploy: data.buildOnDeploy,
 			noBuildCache: data.noBuildCache,
 			repullImages: data.repullImages,
-			forceRedeploy: data.forceRedeploy
+			forceRedeploy: data.forceRedeploy,
+			onlyRunningServices: data.onlyRunningServices
 		});
 
 		// If stack name changed, update related records

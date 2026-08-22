@@ -17,7 +17,7 @@ import { createJobResponse } from '$lib/server/sse';
  * resp-500: Failed to start the deployment
  */
 export const POST: RequestHandler = async (event) => {
-	const { params, cookies } = event;
+	const { params, cookies, request } = event;
 	const auth = await authorize(cookies);
 
 	try {
@@ -32,9 +32,14 @@ export const POST: RequestHandler = async (event) => {
 			return json({ error: 'Permission denied' }, { status: 403 });
 		}
 
+		// Per-run override for "only start services that were already running" (#1246).
+		// Omitted (or no body at all) means: use the git stack's saved setting.
+		const body = await request.json().catch(() => ({}));
+		const { onlyRunningServices } = body as { onlyRunningServices?: boolean };
+
 		return createJobResponse(async (send) => {
 			try {
-				const result = await deployGitStack(id);
+				const result = await deployGitStack(id, { onlyRunningServices });
 
 				// Audit log
 				await auditGitStack(event, 'deploy', id, gitStack.stackName, gitStack.environmentId);

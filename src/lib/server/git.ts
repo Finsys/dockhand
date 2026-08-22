@@ -15,7 +15,7 @@ import {
 	type GitCredential,
 	type GitStackWithRepo
 } from './db';
-import { deployStack, getStackDir } from './stacks';
+import { deployStack, getStackDir, resolveServicesToStart } from './stacks';
 import { sendEventNotification } from './notifications';
 import { buildBasicAuthHeader } from './git-auth';
 import { assertSafeRepoUrl, assertSafeGitRef, repoFilePath } from './git-url-safety';
@@ -1148,13 +1148,19 @@ async function notifyGitSync(stackName: string, envId: number | null | undefined
 	} catch { /* never changes the deploy outcome */ }
 }
 
-export async function deployGitStack(stackId: number, options?: { force?: boolean }): Promise<{ success: boolean; output?: string; error?: string; skipped?: boolean }> {
+export async function deployGitStack(
+	stackId: number,
+	options?: { force?: boolean; onlyRunningServices?: boolean }
+): Promise<{ success: boolean; output?: string; error?: string; skipped?: boolean }> {
 	const force = options?.force ?? true; // Default to force for backward compatibility
 
 	const gitStack = await getGitStack(stackId);
 	if (!gitStack) {
 		return { success: false, error: 'Git stack not found' };
 	}
+
+	// Per-run override (sync dialog checkbox) wins over the stack's saved default (#1246)
+	const onlyRunningServices = options?.onlyRunningServices ?? gitStack.onlyRunningServices ?? false;
 
 	const logPrefix = `[Stack:${gitStack.stackName}]`;
 	console.log(`${logPrefix} ========================================`);
@@ -1202,6 +1208,7 @@ export async function deployGitStack(stackId: number, options?: { force?: boolea
 	console.log(`${logPrefix} Build on deploy:`, gitStack.buildOnDeploy);
 	console.log(`${logPrefix} Re-pull images:`, gitStack.repullImages);
 	console.log(`${logPrefix} Force redeploy setting:`, gitStack.forceRedeploy);
+	console.log(`${logPrefix} Only running services:`, onlyRunningServices);
 
 	// Deploy using unified function - handles both new and existing stacks
 	// Uses `docker compose up -d --remove-orphans` which only recreates changed services
@@ -1224,6 +1231,7 @@ export async function deployGitStack(stackId: number, options?: { force?: boolea
 		noBuildCache: gitStack.noBuildCache,
 		pullPolicy: gitStack.repullImages ? 'always' : undefined,
 		filesToDelete: syncResult.deletionPlan?.toDelete,
+		onlyRunningServices,
 		isGitDeploy: true // suppress stack_* notification; we emit git_sync_* below
 	});
 
@@ -1348,13 +1356,17 @@ type ProgressCallback = (data: {
 
 export async function deployGitStackWithProgress(
 	stackId: number,
-	onProgress: ProgressCallback
+	onProgress: ProgressCallback,
+	options?: { onlyRunningServices?: boolean }
 ): Promise<{ success: boolean; output?: string; error?: string }> {
 	const gitStack = await getGitStack(stackId);
 	if (!gitStack) {
 		onProgress({ status: 'error', error: 'Git stack not found' });
 		return { success: false, error: 'Git stack not found' };
 	}
+
+	// Per-run override (sync dialog checkbox) wins over the stack's saved default (#1246)
+	const onlyRunningServices = options?.onlyRunningServices ?? gitStack.onlyRunningServices ?? false;
 
 	// Check if sync is already in progress
 	if (gitStack.syncStatus === 'syncing') {
@@ -1522,6 +1534,38 @@ export async function deployGitStackWithProgress(
 		// Step 5: Deploying stack
 		// Uses `docker compose up -d --remove-orphans` which only recreates changed services
 		onProgress({ status: 'deploying', message: `Deploying ${gitStack.stackName}...`, step: 5, totalSteps });
+
+		// Tell the user up front which services this deploy will touch (#1246).
+		// deployStack resolves the list itself; this is only for the progress log.
+		if (onlyRunningServices) {
+			const { services, hasContainers, dropped, stopped } = await resolveServicesToStart(
+				gitStack.stackName,
+				gitStack.environmentId,
+				composeContent
+			);
+			const message = services.length > 0
+				? `Only starting services that were already running: ${services.join(', ')}`
+				: hasContainers
+					? 'No services were running - nothing will be started'
+					: 'Stack has no containers yet - starting all services';
+			onProgress({ status: 'deploying', message, step: 5, totalSteps });
+			if (stopped.length > 0) {
+				onProgress({
+					status: 'deploying',
+					message: `Updating ${stopped.join(', ')} without starting them`,
+					step: 5,
+					totalSteps
+				});
+			}
+			if (dropped.length > 0) {
+				onProgress({
+					status: 'deploying',
+					message: `Skipping ${dropped.join(', ')} - no longer in the compose file`,
+					step: 5,
+					totalSteps
+				});
+			}
+		}
 		if (deletionData.plan.toDelete.length > 0) {
 			onProgress({
 				status: 'deploying',
@@ -1550,7 +1594,8 @@ export async function deployGitStackWithProgress(
 			build: gitStack.buildOnDeploy,
 			noBuildCache: gitStack.noBuildCache,
 			pullPolicy: gitStack.repullImages ? 'always' : undefined,
-			filesToDelete: deletionData.plan.toDelete
+			filesToDelete: deletionData.plan.toDelete,
+			onlyRunningServices
 		});
 
 		if (result.success) {

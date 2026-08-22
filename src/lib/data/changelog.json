@@ -123,6 +123,10 @@
         "text": "start, stop or restart on Hawser updates its files on the remote host, not only on redeploy (#1240)"
       },
       {
+        "type": "feature",
+        "text": "sync from git can start only the services that were already running; stopped services are updated but not started (#1246)"
+      },
+      {
         "type": "fix",
         "text": "grouped container logs now show one merged timeline sorted by time (#1406)"
       },

@@ -9,6 +9,7 @@ import { existsSync, mkdirSync, rmSync, readdirSync, cpSync, statSync, unlinkSyn
 import { join, resolve, dirname, basename, normalize as pathNormalize, sep as pathSep } from 'node:path';
 import { spawn as nodeSpawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
+import yaml from 'js-yaml';
 import {
 	applyFileDeletions,
 	hashDirFiles,
@@ -133,6 +134,11 @@ export interface DeployStackOptions {
 	envFileName?: string; // Env filename relative to compose dir (e.g., ".env") for git stacks
 	/** Git deletion sync (#966): files confirmed safe to delete from the stack dir */
 	filesToDelete?: FileToDelete[];
+	/** Only bring up the services that already had a running container (#1246).
+	 * Services that were stopped are recreated but not started, so they follow the
+	 * compose file without coming up. Ignored when the stack has no containers
+	 * yet — a first deploy brings up everything. */
+	onlyRunningServices?: boolean;
 	/** Set by deployGitStack: this deploy is a git sync, so deployStack must NOT emit
 	 * the stack_deployed/stack_deploy_failed notification — the caller emits the more
 	 * specific git_sync_success/git_sync_failed instead, avoiding a double notification
@@ -957,6 +963,10 @@ interface ComposeCommandOptions {
 	useOverrideFile?: boolean;
 	/** Target specific service only (with --no-deps) for single-service updates */
 	serviceName?: string;
+	/** Limit the operation to these services (#1246). Ignored when serviceName is set.
+	 * An empty/undefined list means "all services", so callers must never pass [] to
+	 * mean "nothing" — they skip the command instead. */
+	serviceNames?: string[];
 	/** Compose filename for Hawser (e.g., "docker-compose.prod.yml") - extracted from composePath */
 	composeFileName?: string;
 	/** Git deletion sync (#966): files to delete on the Hawser agent's stack dir */
@@ -1005,7 +1015,7 @@ function findComposeOverrideFile(stackDir: string, composeFileName: string): str
  * @param customComposePath - Optional path to existing compose file (for imported stacks, skips writing)
  */
 async function executeLocalCompose(
-	operation: 'up' | 'down' | 'stop' | 'start' | 'restart' | 'pull',
+	operation: 'up' | 'down' | 'stop' | 'start' | 'restart' | 'pull' | 'create',
 	stackName: string,
 	composeContent: string,
 	dockerHost?: string,
@@ -1026,7 +1036,9 @@ async function executeLocalCompose(
 	// direct-remote only: when the stack folder was staged to <remoteStackHostDir> on the target
 	// host, rewrite the compose's same-dir relative binds (`./x`) to <remoteStackHostDir>/x so the
 	// remote daemon binds the staged files. undefined = no staging, compose unchanged.
-	remoteStackHostDir?: string
+	remoteStackHostDir?: string,
+	// Limit `up` to these services (#1246). Ignored when serviceName is set.
+	serviceNames?: string[]
 ): Promise<StackOperationResult> {
 	const logPrefix = `[Stack:${stackName}]`;
 
@@ -1274,6 +1286,11 @@ async function executeLocalCompose(
 			// If targeting a specific service, only update that service
 			if (serviceName) {
 				args.push(serviceName);
+			} else if (serviceNames && serviceNames.length > 0) {
+				// Only the listed services are brought up; services defined in the
+				// compose file but not listed stay untouched (#1246). They are not
+				// orphans either, so --remove-orphans leaves them alone.
+				args.push(...serviceNames);
 			}
 			break;
 		case 'down':
@@ -1296,6 +1313,19 @@ async function executeLocalCompose(
 				args.push(serviceName);
 			}
 			break;
+		case 'create':
+			// Recreate containers without starting them (#1246): a service that was
+			// stopped at sync time still picks up the new compose config and image,
+			// and stays stopped until the user starts it. Compose only recreates
+			// what actually changed, so unchanged services are left alone. No
+			// --remove-orphans here: the up above already handled orphans.
+			args.push('create');
+			if (build) args.push('--build');
+			if (pullPolicy) args.push('--pull', pullPolicy);
+			if (serviceNames && serviceNames.length > 0) {
+				args.push(...serviceNames);
+			}
+			break;
 	}
 
 	const commandStr = args.join(' ');
@@ -1312,13 +1342,14 @@ async function executeLocalCompose(
 	console.log(`${logPrefix} Force recreate:`, forceRecreate ?? false);
 	console.log(`${logPrefix} Remove volumes:`, removeVolumes ?? false);
 	console.log(`${logPrefix} Service name:`, serviceName ?? '(all services)');
+	console.log(`${logPrefix} Limited to services:`, serviceNames?.length ? serviceNames.join(', ') : '(all services)');
 	console.log(`${logPrefix} Env vars count:`, envVars ? Object.keys(envVars).length : 0);
 	if (envVars && Object.keys(envVars).length > 0) {
 		console.log(`${logPrefix} Env vars being injected (masked):`, JSON.stringify(redactEnvVarsForLog(envVars), null, 2));
 	}
 
 	// Login to registries before pulling images
-	if (operation === 'up' || operation === 'pull') {
+	if (operation === 'up' || operation === 'pull' || operation === 'create') {
 		await loginToRegistries(dockerHost, logPrefix, spawnEnv.DOCKER_API_VERSION);
 	}
 
@@ -1434,7 +1465,7 @@ async function executeLocalCompose(
  * @param secretVars - Secret environment variables (injected via shell env on Hawser, NEVER in .env)
  */
 async function executeComposeViaHawser(
-	operation: 'up' | 'down' | 'stop' | 'start' | 'restart' | 'pull',
+	operation: 'up' | 'down' | 'stop' | 'start' | 'restart' | 'pull' | 'create',
 	stackName: string,
 	composeContent: string,
 	envId: number,
@@ -1449,7 +1480,8 @@ async function executeComposeViaHawser(
 	noBuildCache?: boolean,
 	pullPolicy?: string,
 	filesToDelete?: FileToDelete[],
-	removeFiles?: boolean
+	removeFiles?: boolean,
+	serviceNames?: string[]
 ): Promise<StackOperationResult> {
 	const logPrefix = `[Stack:${stackName}]`;
 	// Import dockerFetch dynamically to avoid circular dependency
@@ -1468,6 +1500,7 @@ async function executeComposeViaHawser(
 	console.log(`${logPrefix} Force recreate:`, forceRecreate ?? false);
 	console.log(`${logPrefix} Remove volumes:`, removeVolumes ?? false);
 	console.log(`${logPrefix} Service name:`, serviceName ?? '(all services)');
+	console.log(`${logPrefix} Limited to services:`, serviceNames?.length ? serviceNames.join(', ') : '(all services)');
 	console.log(`${logPrefix} Compose filename:`, composeFileName ?? '(auto-detect)');
 	console.log(`${logPrefix} Non-secret env vars count:`, envVars ? Object.keys(envVars).length : 0);
 	console.log(`${logPrefix} Secret env vars count:`, secretCount);
@@ -1527,6 +1560,9 @@ async function executeComposeViaHawser(
 			pullPolicy: pullPolicy || '',
 			registries, // Registry credentials for docker login
 			serviceName, // Target specific service only (with --no-deps)
+			// Limit `up` to the services that were already running (#1246). Agents that
+			// predate this field ignore it and bring the whole stack up, as before.
+			serviceNames: serviceNames && serviceNames.length > 0 ? serviceNames : undefined,
 			// Git deletion sync (#966): agent re-verifies containment + content
 			// hash per file before deleting. Old agents ignore this field.
 			filesToDelete: filesToDelete && filesToDelete.length > 0
@@ -1632,13 +1668,13 @@ async function executeComposeViaHawser(
  * @param secretVars - Secret environment variables (from DB, injected via shell env)
  */
 async function executeComposeCommand(
-	operation: 'up' | 'down' | 'stop' | 'start' | 'restart' | 'pull',
+	operation: 'up' | 'down' | 'stop' | 'start' | 'restart' | 'pull' | 'create',
 	options: ComposeCommandOptions,
 	composeContent: string,
 	envVars?: Record<string, string>,
 	secretVars?: Record<string, string>
 ): Promise<StackOperationResult> {
-	const { stackName, envId, forceRecreate, build, noBuildCache, pullPolicy, removeVolumes, stackFiles, workingDir, composePath, envPath, useOverrideFile, serviceName, composeFileName, filesToDelete, removeFiles } = options;
+	const { stackName, envId, forceRecreate, build, noBuildCache, pullPolicy, removeVolumes, stackFiles, workingDir, composePath, envPath, useOverrideFile, serviceName, serviceNames, composeFileName, filesToDelete, removeFiles } = options;
 
 	// Get environment configuration
 	const env = envId ? await getEnvironment(envId) : null;
@@ -1663,7 +1699,9 @@ async function executeComposeCommand(
 			serviceName,
 			build,
 			noBuildCache,
-			pullPolicy
+			pullPolicy,
+			undefined,    // remoteStackHostDir
+			serviceNames
 		);
 	}
 
@@ -1730,7 +1768,8 @@ async function executeComposeCommand(
 				noBuildCache,
 				pullPolicy,
 				filesToDelete,
-				removeFiles
+				removeFiles,
+				serviceNames
 			);
 		}
 
@@ -1793,7 +1832,8 @@ async function executeComposeCommand(
 				build,
 				noBuildCache,
 				pullPolicy,
-				remoteStackHostDir
+				remoteStackHostDir,
+				serviceNames
 			);
 		}
 
@@ -1825,7 +1865,9 @@ async function executeComposeCommand(
 				serviceName,
 				build,
 				noBuildCache,
-				pullPolicy
+				pullPolicy,
+				undefined,    // remoteStackHostDir
+				serviceNames
 			);
 		}
 	}
@@ -1968,6 +2010,86 @@ async function getStackContainers(stackName: string, envId?: number | null): Pro
 	const { listContainers } = await import('./docker.js');
 	const containers = await listContainers(true, envId);
 	return containers.filter((c) => c.labels['com.docker.compose.project'] === stackName);
+}
+
+/**
+ * 'restarting' and 'paused' count as running: those services are up, so a sync
+ * treats them the way it does today. Only 'exited'/'created'/'dead' are stopped.
+ */
+const RUNNING_CONTAINER_STATES = new Set(['running', 'restarting', 'paused']);
+
+/**
+ * Top-level service names declared in a compose file, or null when the content
+ * can't be parsed (invalid YAML, or services provided only through `include:`).
+ * Null means "unknown", never "none".
+ */
+function parseComposeServiceNames(composeContent: string): string[] | null {
+	try {
+		const doc = yaml.load(composeContent) as Record<string, unknown> | null;
+		const services = doc?.services;
+		if (!services || typeof services !== 'object') return null;
+		const names = Object.keys(services as Record<string, unknown>);
+		return names.length > 0 ? names : null;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Which services a deploy should bring up when "only start services that were
+ * already running" is on (#1246).
+ *
+ * - services.length > 0 -> bring up exactly those services
+ * - none, but the stack has containers -> it was deliberately stopped, so
+ *   nothing is started
+ * - none and no containers -> never deployed (or taken down), nothing to
+ *   preserve, so the whole stack is deployed
+ *
+ * `stopped` lists the services that already have a container but are not up.
+ * They are recreated (not started) so their definition stays in sync with the
+ * repo instead of going stale until the next full deploy.
+ *
+ * Services that were running but are no longer declared in the compose file
+ * (renamed or deleted in git) are dropped: compose would fail with "no such
+ * service". When the declared list can't be determined the running list is
+ * used as-is.
+ */
+export async function resolveServicesToStart(
+	stackName: string,
+	envId: number | null | undefined,
+	composeContent: string
+): Promise<{ services: string[]; hasContainers: boolean; dropped: string[]; stopped: string[] }> {
+	const containers = await getStackContainers(stackName, envId);
+	const running = new Set<string>();
+	const existing = new Set<string>();
+
+	for (const container of containers) {
+		const service = container.labels?.['com.docker.compose.service'];
+		if (!service) continue;
+		existing.add(service);
+		if (RUNNING_CONTAINER_STATES.has(container.state)) running.add(service);
+	}
+
+	const runningServices = Array.from(running).sort();
+	const declared = parseComposeServiceNames(composeContent);
+	const services = declared
+		? runningServices.filter((s) => declared.includes(s))
+		: runningServices;
+
+	// Only services that already exist as a container: a service that was never
+	// deployed is not "stopped", and creating it would add a container the user
+	// never had.
+	const stopped = Array.from(existing)
+		.filter((s) => !running.has(s))
+		.filter((s) => (declared ? declared.includes(s) : true))
+		.sort();
+
+	return {
+		services,
+		hasContainers: containers.length > 0,
+		stopped,
+		dropped: runningServices.filter((s) => !services.includes(s))
+	};
 }
 
 /**
@@ -2800,7 +2922,7 @@ async function reconcileStackPendingUpdates(stackName: string, envId: number): P
  * Uses stack locking to prevent concurrent deployments.
  */
 export async function deployStack(options: DeployStackOptions): Promise<StackOperationResult> {
-	const { name, compose, envId, sourceDir, forceRecreate, build, noBuildCache, pullPolicy, composePath, envPath, composeFileName, envFileName, filesToDelete, isGitDeploy } = options;
+	const { name, compose, envId, sourceDir, forceRecreate, build, noBuildCache, pullPolicy, composePath, envPath, composeFileName, envFileName, filesToDelete, isGitDeploy, onlyRunningServices } = options;
 	const logPrefix = `[Stack:${name}]`;
 
 	console.log(`${logPrefix} ========================================`);
@@ -2813,6 +2935,7 @@ export async function deployStack(options: DeployStackOptions): Promise<StackOpe
 	console.log(`${logPrefix} Custom env path:`, envPath ?? '(none)');
 	console.log(`${logPrefix} Compose filename:`, composeFileName ?? '(none)');
 	console.log(`${logPrefix} Env filename:`, envFileName ?? '(none)');
+	console.log(`${logPrefix} Only running services:`, onlyRunningServices ?? false);
 
 	// Validate stack name - Docker Compose requires lowercase alphanumeric, hyphens, underscores
 	// Must also start with a letter or number
@@ -2971,29 +3094,88 @@ export async function deployStack(options: DeployStackOptions): Promise<StackOpe
 		// so no override file is needed - only pass secrets for shell injection.
 		const isGitStack = !!sourceDir;
 
-		console.log(`${logPrefix} Calling executeComposeCommand...`);
-		const result = await executeComposeCommand(
-			'up',
-			{
-				stackName: name,
-				envId,
-				forceRecreate,
-				build,
-				noBuildCache,
-				pullPolicy,
-				stackFiles,
-				workingDir,
-				composePath: actualComposePath,
-				envPath: actualEnvPath,
-				useOverrideFile: isGitStack,
-				// Pass compose filename for Hawser (extracted from path or provided explicitly)
-				composeFileName: composeFileName || (actualComposePath ? basename(actualComposePath) : undefined),
-				filesToDelete
-			},
-			compose,
-			isGitStack ? dbNonSecretVars : undefined,
-			secretVars
-		);
+		// "Only start services that were already running" (#1246). The file sync above
+		// has already landed on disk; from here we decide WHICH services compose brings
+		// up, and which are only recreated. A stack that is fully stopped stays fully
+		// stopped — starting it would be exactly what this option exists to prevent —
+		// but its containers are still refreshed by the `create` pass below.
+		let serviceNames: string[] | undefined;
+		let stoppedServices: string[] = [];
+		let nothingToStart = false;
+		if (onlyRunningServices) {
+			const { services, hasContainers, dropped, stopped } = await resolveServicesToStart(name, envId, compose);
+			stoppedServices = stopped;
+			if (dropped.length > 0) {
+				console.log(`${logPrefix} Running services no longer in the compose file:`, dropped.join(', '));
+			}
+
+			if (services.length > 0) {
+				serviceNames = services;
+				console.log(`${logPrefix} Limiting deploy to running services:`, services.join(', '));
+			} else if (hasContainers) {
+				console.log(`${logPrefix} No running services and onlyRunningServices is set - nothing to start`);
+				nothingToStart = true;
+			} else {
+				console.log(`${logPrefix} Stack has no containers yet - deploying all services`);
+			}
+		}
+
+		const composeOptions: ComposeCommandOptions = {
+			stackName: name,
+			envId,
+			build,
+			noBuildCache,
+			pullPolicy,
+			stackFiles,
+			workingDir,
+			composePath: actualComposePath,
+			envPath: actualEnvPath,
+			useOverrideFile: isGitStack,
+			// Pass compose filename for Hawser (extracted from path or provided explicitly)
+			composeFileName: composeFileName || (actualComposePath ? basename(actualComposePath) : undefined)
+		};
+
+		let result: StackOperationResult;
+		if (nothingToStart) {
+			result = { success: true, output: 'No services were running, so nothing was started.' };
+		} else {
+			console.log(`${logPrefix} Calling executeComposeCommand...`);
+			result = await executeComposeCommand(
+				'up',
+				{ ...composeOptions, forceRecreate, filesToDelete, serviceNames },
+				compose,
+				isGitStack ? dbNonSecretVars : undefined,
+				secretVars
+			);
+		}
+
+		// Services that were stopped at sync time are recreated but NOT started, so
+		// their definition follows the repo instead of going stale until the next
+		// full deploy (#1246). Compose only recreates what actually changed.
+		if (result.success && stoppedServices.length > 0) {
+			console.log(`${logPrefix} Refreshing stopped services without starting them:`, stoppedServices.join(', '));
+			const createResult = await executeComposeCommand(
+				'create',
+				{
+					...composeOptions,
+					serviceNames: stoppedServices,
+					// When the `up` was skipped this is the only command that runs, so it
+					// has to carry the deletion list a Hawser agent applies.
+					filesToDelete: nothingToStart ? filesToDelete : undefined
+				},
+				compose,
+				isGitStack ? dbNonSecretVars : undefined,
+				secretVars
+			);
+			if (createResult.success) {
+				result.output = [result.output, createResult.output].filter(Boolean).join('\n');
+			} else {
+				// Never fail an otherwise successful deploy over this: Hawser agents that
+				// predate the `create` operation reject it, and the running services are
+				// already up to date either way.
+				console.warn(`${logPrefix} Could not refresh stopped services: ${createResult.error}`);
+			}
+		}
 		console.log(`${logPrefix} ========================================`);
 		console.log(`${logPrefix} DEPLOY STACK RESULT`);
 		console.log(`${logPrefix} ========================================`);

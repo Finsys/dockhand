@@ -2306,6 +2306,8 @@ export interface GitStackData {
 	noBuildCache: boolean;
 	repullImages: boolean;
 	forceRedeploy: boolean;
+	/** Sync/deploy only the services that were running before the sync (#1246) */
+	onlyRunningServices: boolean;
 	lastSync: string | null;
 	lastCommit: string | null;
 	syncStatus: GitSyncStatus;
@@ -2345,6 +2347,7 @@ export async function getGitStacks(environmentId?: number): Promise<GitStackWith
 			noBuildCache: gitStacks.noBuildCache,
 			repullImages: gitStacks.repullImages,
 			forceRedeploy: gitStacks.forceRedeploy,
+			onlyRunningServices: gitStacks.onlyRunningServices,
 			lastSync: gitStacks.lastSync,
 			lastCommit: gitStacks.lastCommit,
 			syncStatus: gitStacks.syncStatus,
@@ -2378,6 +2381,7 @@ export async function getGitStacks(environmentId?: number): Promise<GitStackWith
 			noBuildCache: gitStacks.noBuildCache,
 			repullImages: gitStacks.repullImages,
 			forceRedeploy: gitStacks.forceRedeploy,
+			onlyRunningServices: gitStacks.onlyRunningServices,
 			lastSync: gitStacks.lastSync,
 			lastCommit: gitStacks.lastCommit,
 			syncStatus: gitStacks.syncStatus,
@@ -2411,6 +2415,7 @@ export async function getGitStacks(environmentId?: number): Promise<GitStackWith
 		noBuildCache: row.noBuildCache ?? false,
 		repullImages: row.repullImages ?? false,
 		forceRedeploy: row.forceRedeploy ?? false,
+		onlyRunningServices: row.onlyRunningServices ?? false,
 		lastSync: row.lastSync,
 		lastCommit: row.lastCommit,
 		syncStatus: row.syncStatus,
@@ -2446,6 +2451,7 @@ export async function getGitStacksForEnvironmentOnly(environmentId: number): Pro
 		noBuildCache: gitStacks.noBuildCache,
 		repullImages: gitStacks.repullImages,
 		forceRedeploy: gitStacks.forceRedeploy,
+		onlyRunningServices: gitStacks.onlyRunningServices,
 		lastSync: gitStacks.lastSync,
 		lastCommit: gitStacks.lastCommit,
 		syncStatus: gitStacks.syncStatus,
@@ -2479,6 +2485,7 @@ export async function getGitStacksForEnvironmentOnly(environmentId: number): Pro
 		noBuildCache: row.noBuildCache ?? false,
 		repullImages: row.repullImages ?? false,
 		forceRedeploy: row.forceRedeploy ?? false,
+		onlyRunningServices: row.onlyRunningServices ?? false,
 		lastSync: row.lastSync,
 		lastCommit: row.lastCommit,
 		syncStatus: row.syncStatus,
@@ -2513,6 +2520,7 @@ export async function getGitStack(id: number): Promise<GitStackWithRepo | null> 
 		noBuildCache: gitStacks.noBuildCache,
 		repullImages: gitStacks.repullImages,
 		forceRedeploy: gitStacks.forceRedeploy,
+		onlyRunningServices: gitStacks.onlyRunningServices,
 		lastSync: gitStacks.lastSync,
 		lastCommit: gitStacks.lastCommit,
 		syncStatus: gitStacks.syncStatus,
@@ -2548,6 +2556,7 @@ export async function getGitStack(id: number): Promise<GitStackWithRepo | null> 
 		noBuildCache: row.noBuildCache ?? false,
 		repullImages: row.repullImages ?? false,
 		forceRedeploy: row.forceRedeploy ?? false,
+		onlyRunningServices: row.onlyRunningServices ?? false,
 		lastSync: row.lastSync,
 		lastCommit: row.lastCommit,
 		syncStatus: row.syncStatus,
@@ -2583,6 +2592,7 @@ export async function getGitStackByName(stackName: string, environmentId?: numbe
 		noBuildCache: gitStacks.noBuildCache,
 		repullImages: gitStacks.repullImages,
 		forceRedeploy: gitStacks.forceRedeploy,
+		onlyRunningServices: gitStacks.onlyRunningServices,
 		lastSync: gitStacks.lastSync,
 		lastCommit: gitStacks.lastCommit,
 		syncStatus: gitStacks.syncStatus,
@@ -2622,6 +2632,7 @@ export async function getGitStackByName(stackName: string, environmentId?: numbe
 		noBuildCache: row.noBuildCache ?? false,
 		repullImages: row.repullImages ?? false,
 		forceRedeploy: row.forceRedeploy ?? false,
+		onlyRunningServices: row.onlyRunningServices ?? false,
 		lastSync: row.lastSync,
 		lastCommit: row.lastCommit,
 		syncStatus: row.syncStatus,
@@ -2656,6 +2667,7 @@ export async function getGitStackByWebhookSecret(secret: string): Promise<GitSta
 		noBuildCache: gitStacks.noBuildCache,
 		repullImages: gitStacks.repullImages,
 		forceRedeploy: gitStacks.forceRedeploy,
+		onlyRunningServices: gitStacks.onlyRunningServices,
 		lastSync: gitStacks.lastSync,
 		lastCommit: gitStacks.lastCommit,
 		syncStatus: gitStacks.syncStatus,
@@ -2690,6 +2702,7 @@ export async function getGitStackByWebhookSecret(secret: string): Promise<GitSta
 		noBuildCache: row.noBuildCache ?? false,
 		repullImages: row.repullImages ?? false,
 		forceRedeploy: row.forceRedeploy ?? false,
+		onlyRunningServices: row.onlyRunningServices ?? false,
 		lastSync: row.lastSync,
 		lastCommit: row.lastCommit,
 		syncStatus: row.syncStatus,
@@ -2722,6 +2735,7 @@ export async function createGitStack(data: {
 	noBuildCache?: boolean;
 	repullImages?: boolean;
 	forceRedeploy?: boolean;
+	onlyRunningServices?: boolean;
 }): Promise<GitStackWithRepo> {
 	const result = await db.insert(gitStacks).values({
 		stackName: data.stackName,
@@ -2738,7 +2752,8 @@ export async function createGitStack(data: {
 		buildOnDeploy: data.buildOnDeploy ?? false,
 		noBuildCache: data.noBuildCache ?? false,
 		repullImages: data.repullImages ?? false,
-		forceRedeploy: data.forceRedeploy ?? false
+		forceRedeploy: data.forceRedeploy ?? false,
+		onlyRunningServices: data.onlyRunningServices ?? false
 	}).returning();
 	return getGitStack(result[0].id) as Promise<GitStackWithRepo>;
 }
@@ -2760,6 +2775,7 @@ export async function updateGitStack(id: number, data: Partial<GitStackData>): P
 	if (data.noBuildCache !== undefined) updateData.noBuildCache = data.noBuildCache;
 	if (data.repullImages !== undefined) updateData.repullImages = data.repullImages;
 	if (data.forceRedeploy !== undefined) updateData.forceRedeploy = data.forceRedeploy;
+	if (data.onlyRunningServices !== undefined) updateData.onlyRunningServices = data.onlyRunningServices;
 	if (data.lastSync !== undefined) updateData.lastSync = data.lastSync;
 	if (data.lastCommit !== undefined) updateData.lastCommit = data.lastCommit;
 	if (data.syncStatus !== undefined) updateData.syncStatus = data.syncStatus;
@@ -2801,6 +2817,7 @@ export async function getEnabledAutoUpdateGitStacks(): Promise<GitStackWithRepo[
 		noBuildCache: gitStacks.noBuildCache,
 		repullImages: gitStacks.repullImages,
 		forceRedeploy: gitStacks.forceRedeploy,
+		onlyRunningServices: gitStacks.onlyRunningServices,
 		lastSync: gitStacks.lastSync,
 		lastCommit: gitStacks.lastCommit,
 		syncStatus: gitStacks.syncStatus,
@@ -2833,6 +2850,7 @@ export async function getEnabledAutoUpdateGitStacks(): Promise<GitStackWithRepo[
 		noBuildCache: row.noBuildCache ?? false,
 		repullImages: row.repullImages ?? false,
 		forceRedeploy: row.forceRedeploy ?? false,
+		onlyRunningServices: row.onlyRunningServices ?? false,
 		lastSync: row.lastSync,
 		lastCommit: row.lastCommit,
 		syncStatus: row.syncStatus,
@@ -2866,6 +2884,7 @@ export async function getAllAutoUpdateGitStacks(): Promise<GitStackWithRepo[]> {
 		noBuildCache: gitStacks.noBuildCache,
 		repullImages: gitStacks.repullImages,
 		forceRedeploy: gitStacks.forceRedeploy,
+		onlyRunningServices: gitStacks.onlyRunningServices,
 		lastSync: gitStacks.lastSync,
 		lastCommit: gitStacks.lastCommit,
 		syncStatus: gitStacks.syncStatus,
@@ -2897,6 +2916,7 @@ export async function getAllAutoUpdateGitStacks(): Promise<GitStackWithRepo[]> {
 		noBuildCache: row.noBuildCache ?? false,
 		repullImages: row.repullImages ?? false,
 		forceRedeploy: row.forceRedeploy ?? false,
+		onlyRunningServices: row.onlyRunningServices ?? false,
 		lastSync: row.lastSync,
 		lastCommit: row.lastCommit,
 		syncStatus: row.syncStatus,
