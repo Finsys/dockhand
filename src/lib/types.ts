@@ -103,7 +103,7 @@ export interface NetworkInfo {
 export interface StackInfo {
 	name: string;
 	services: string[];
-	status: 'running' | 'partial' | 'stopped';
+	status: 'running' | 'partial' | 'restarting' | 'stopped';
 	containers: Array<{
 		id: string;
 		name: string;

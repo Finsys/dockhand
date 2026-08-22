@@ -1,5 +1,45 @@
 [
   {
+    "version": "1.0.44",
+    "date": "",
+    "comingSoon": true,
+    "changes": [
+      {
+        "type": "feature",
+        "text": "Azure Key Vault as a secret provider (bulk pull or inline azurekv:// references)"
+      },
+      {
+        "type": "fix",
+        "text": "the version-update dialog no longer duplicates the old tag when the running image is digest-pinned (#1437)"
+      },
+      {
+        "type": "fix",
+        "text": "a compose stack with a restarting container now shows a Stop action instead of Start (#1438)"
+      },
+      {
+        "type": "fix",
+        "text": "optimize 1Password API calls on deploy (#1436)"
+      },
+      {
+        "type": "fix",
+        "text": "direct-remote staging pulls the alpine helper image instead of failing when it's missing (#1442)"
+      },
+      {
+        "type": "fix",
+        "text": "Proton Pass secrets now resolve on headless hosts with no system keyring (#1440)"
+      },
+      {
+        "type": "fix",
+        "text": "fix switching an Infisical provider back to a static token (#1448)"
+      },
+      {
+        "type": "fix",
+        "text": "fix backpressure in Docker streaming responses (PR#1445, @StefanSa)"
+      }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.44"
+  },
+  {
     "version": "1.0.43",
     "date": "2026-08-20",
     "changes": [

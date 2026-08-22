@@ -19,6 +19,7 @@ import {
 	type DeletionSkipReason
 } from './git-deletions';
 import { isAllowedStackFilename } from './stack-filename';
+import { deriveStackStatus } from './stack-status';
 import {
 	getEnvironment,
 	getSecretEnvVarsAsRecord,
@@ -110,7 +111,7 @@ export interface ComposeStackInfo {
 	name: string;
 	containers: string[];
 	containerDetails: ContainerDetail[];
-	status: 'running' | 'stopped' | 'partial' | 'created';
+	status: 'running' | 'stopped' | 'partial' | 'restarting' | 'created';
 	sourceType?: StackSourceType;
 	hasComposeFile?: boolean;
 }
@@ -1884,12 +1885,14 @@ export async function listComposeStacks(envId?: number | null): Promise<ComposeS
 	const result: ComposeStackInfo[] = Array.from(stacks.entries()).map(([name, containerIds]) => {
 		const stackContainers = containers.filter((c) => containerIds.has(c.id));
 		const runningCount = stackContainers.filter((c) => c.state === 'running').length;
+		// A container in a restart loop is 'restarting' - it is NOT stopped (it is actively
+		// trying to come up), so the stack must expose Stop, not Start (#1438).
+		const restartingCount = stackContainers.filter((c) => c.state === 'restarting').length;
 		// Containers that exited with code 0 are "completed" (e.g., init/migration containers)
 		// and should not count against stack health
 		const completedCount = stackContainers.filter((c) =>
 			c.state === 'exited' && c.exitCode === 0
 		).length;
-		const activeTotal = stackContainers.length - completedCount;
 
 		const containerDetails: ContainerDetail[] = stackContainers
 			.map((c) => {
@@ -1947,14 +1950,12 @@ export async function listComposeStacks(envId?: number | null): Promise<ComposeS
 			updateCount: stackContainers.filter((c) => pendingUpdateIds.has(c.id)).length,
 			// Newer-version-tag (semver) suggestions in this stack - drives the Tag badge.
 			newerVersionCount: stackContainers.filter((c) => newerVersionIds.has(c.id)).length,
-			status:
-				activeTotal === 0
-					? 'stopped'
-					: runningCount >= activeTotal
-						? 'running'
-						: runningCount === 0
-							? 'stopped'
-							: 'partial'
+			status: deriveStackStatus({
+				total: stackContainers.length,
+				running: runningCount,
+				restarting: restartingCount,
+				completed: completedCount
+			})
 		};
 	});
 

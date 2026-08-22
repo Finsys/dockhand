@@ -20,6 +20,7 @@ import { vaultProvider } from './vault';
 import { dopplerProvider } from './doppler';
 import { bitwardenProvider } from './bitwarden';
 import { protonProvider } from './proton';
+import { azureKvProvider } from './azure-kv';
 
 // Registered providers. Adding a new backend means dropping a file in this
 // directory and registering it here; each implements the SecretProvider
@@ -31,7 +32,8 @@ const providers: Record<string, SecretProvider> = {
 	[vaultProvider.type]: vaultProvider as SecretProvider,
 	[dopplerProvider.type]: dopplerProvider as SecretProvider,
 	[bitwardenProvider.type]: bitwardenProvider as SecretProvider,
-	[protonProvider.type]: protonProvider as SecretProvider
+	[protonProvider.type]: protonProvider as SecretProvider,
+	[azureKvProvider.type]: azureKvProvider as SecretProvider
 };
 
 /** Returns the provider for a stored type, or undefined if unknown. */

@@ -363,6 +363,7 @@
 	const stackStatusTypes = [
 		{ value: 'running', label: 'Running', icon: Play, color: 'text-emerald-500' },
 		{ value: 'partial', label: 'Partial', icon: CircleDashed, color: 'text-amber-500' },
+		{ value: 'restarting', label: 'Restarting', icon: RotateCw, color: 'text-orange-500' },
 		{ value: 'stopped', label: 'Stopped', icon: Square, color: 'text-rose-500' },
 		{ value: 'created', label: 'Created', icon: CircleDashed, color: 'text-slate-500' },
 		{ value: 'not deployed', label: 'Not deployed', icon: Rocket, color: 'text-violet-500' }
@@ -1135,6 +1136,8 @@
 				return `${base} bg-red-200 dark:bg-red-800 text-red-900 dark:text-red-100`;
 			case 'partial':
 				return `${base} bg-amber-200 dark:bg-amber-800 text-amber-900 dark:text-amber-100`;
+			case 'restarting':
+				return `${base} bg-orange-200 dark:bg-orange-800 text-orange-900 dark:text-orange-100`;
 			case 'created':
 				return `${base} bg-slate-200 dark:bg-slate-700 text-slate-900 dark:text-slate-100`;
 			case 'not deployed':

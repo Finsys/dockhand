@@ -17,10 +17,31 @@ build/
 
 # CI/CD
 .drone.yml
+.gitea/
 deployment/
+buildkitd.toml
+.build-trigger
+.gitleaks.toml
+.gitleaksignore
+.snyk
+.mcp.json
+.gitmodules
 
-# Tests
+# Sync-to-GitHub + test/dev tooling (not needed to build the image)
+sync-gh.sh
+sync-plan.py
+sync-whitelist.sh
+test-env-vars.sh
+playwright.config.ts
+
+# Ops/infra + vendored demo submodule (not app runtime)
+infra/
+support/
+
+# Tests (unit) + integration tests + one-off debug scripts - none belong in the image
 tests/
+integration/
+debug/
 
 # Hawser agent (separate project)
 hawser/
@@ -33,6 +54,12 @@ test-image/
 
 # Landing page
 webpage/
+
+# Source design assets (README/marketing) - runtime favicons live in static/
+screenshots/
+logo/
+favicon_io/
+*.pxd
 
 # Misc
 .DS_Store

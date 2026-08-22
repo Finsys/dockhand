@@ -14,6 +14,7 @@ import { Readable } from 'node:stream';
 import * as tls from 'node:tls';
 import { createHash } from 'node:crypto';
 import { pumpWebStreamToWritable } from './stream-pump';
+import { toWebReadableStream } from './node-readable-stream';
 import { computeRequestTimeoutMs } from './backups/request-timeout';
 import { helperWaitDeadline } from './helper-wait-core';
 import type { Environment } from './db';
@@ -467,14 +468,7 @@ export function httpsAgentRequest(
 			}
 
 			if (streaming) {
-				const readable = new ReadableStream({
-					start(controller) {
-						res.on('data', (chunk: Buffer) => controller.enqueue(new Uint8Array(chunk)));
-						res.on('end', () => controller.close());
-						res.on('error', (err) => controller.error(err));
-					},
-					cancel() { res.destroy(); }
-				});
+				const readable = toWebReadableStream(res);
 				resolve(new Response(readable, { status, statusText, headers }));
 			} else {
 				const chunks: Buffer[] = [];
@@ -792,22 +786,7 @@ export function unixSocketStreamRequest(
 				}
 			}
 
-			const readable = new ReadableStream({
-				start(controller) {
-					res.on('data', (chunk: Buffer) => {
-						controller.enqueue(new Uint8Array(chunk));
-					});
-					res.on('end', () => {
-						controller.close();
-					});
-					res.on('error', (err) => {
-						controller.error(err);
-					});
-				},
-				cancel() {
-					res.destroy();
-				}
-			});
+			const readable = toWebReadableStream(res);
 
 			resolve(new Response(readable, {
 				status: res.statusCode || 200,
@@ -5069,6 +5048,11 @@ export async function runContainerWithStreaming(options: {
 	if (options.dns && options.dns.length > 0) {
 		containerConfig.HostConfig.Dns = options.dns;
 	}
+
+	// A remote daemon may not have the helper image (e.g. alpine:latest on a fresh
+	// direct-remote host), and /containers/create does NOT auto-pull - it 404s with
+	// "No such image". Pull it first so the stager/helper works out of the box (#1442).
+	await ensureImagePresent(options.image, options.envId);
 
 	const createResult = await dockerJsonRequest<{ Id: string }>(
 		`/containers/create?name=${encodeURIComponent(containerName)}`,

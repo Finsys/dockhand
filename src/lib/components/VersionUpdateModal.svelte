@@ -7,6 +7,7 @@
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import { renderMarkdown } from '$lib/utils/markdown';
 	import { formatDate } from '$lib/stores/settings';
+	import { repoBaseOf } from '$lib/utils/pinned-ref';
 	import type { NewerVersion } from '$lib/types';
 
 	// Minimal shape shared by ContainerInfo and StackContainer - all the modal needs.
@@ -93,11 +94,10 @@
 		}
 	}
 
-	// Repo without the tag, e.g. `ghcr.io/owner/app` from `ghcr.io/owner/app:1.2`.
-	const repoBase = $derived.by(() => {
-		const img = container?.image ?? '';
-		return img.slice(0, img.lastIndexOf(':') > img.lastIndexOf('/') ? img.lastIndexOf(':') : img.length);
-	});
+	// Repo without the tag OR digest, e.g. `ghcr.io/owner/app` from
+	// `ghcr.io/owner/app:1.2@sha256:...` - a running image is often digest-pinned,
+	// whose `@sha256:` colon must not be mistaken for the tag separator (#1437).
+	const repoBase = $derived(repoBaseOf(container?.image ?? ''));
 
 	async function copyTag() {
 		if (!container || !newerVersion) return;

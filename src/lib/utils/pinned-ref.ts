@@ -11,13 +11,31 @@
  */
 
 /** Split `repo:tag` (or a bare `repo`) into its repo and tag parts. A colon that
- *  is part of a registry `host:port` is not a tag separator. */
+ *  is part of a registry `host:port` is not a tag separator. A digest suffix
+ *  (`@sha256:...`) is stripped first so its colon is never mistaken for the tag. */
 function splitRepoTag(fullRef: string): { repo: string; tag: string | null } {
-	const lastColon = fullRef.lastIndexOf(':');
-	if (lastColon === -1) return { repo: fullRef, tag: null };
+	const ref = stripDigest(fullRef);
+	const lastColon = ref.lastIndexOf(':');
+	if (lastColon === -1) return { repo: ref, tag: null };
 	// A tag never contains a slash; `host:port/repo` has the slash AFTER the colon.
-	if (fullRef.slice(lastColon + 1).includes('/')) return { repo: fullRef, tag: null };
-	return { repo: fullRef.slice(0, lastColon), tag: fullRef.slice(lastColon + 1) };
+	if (ref.slice(lastColon + 1).includes('/')) return { repo: ref, tag: null };
+	return { repo: ref.slice(0, lastColon), tag: ref.slice(lastColon + 1) };
+}
+
+/** Drop a `@sha256:...` (or any `@digest`) suffix from an image reference. */
+function stripDigest(ref: string): string {
+	const at = ref.indexOf('@');
+	return at === -1 ? ref : ref.slice(0, at);
+}
+
+/**
+ * The repo part of a running image reference, WITHOUT its tag or digest.
+ * `ghcr.io/o/app:1.2@sha256:abc` -> `ghcr.io/o/app`, `nginx:1.25` -> `nginx`.
+ * A digest-pinned running image is why the naive "cut at the last colon"
+ * approach breaks: that colon lives inside `@sha256:` (#1437).
+ */
+export function repoBaseOf(image: string): string {
+	return splitRepoTag(image).repo;
 }
 
 /** The `sha256:...` part of a `repo@sha256:...` digest, or null. */

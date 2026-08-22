@@ -33,6 +33,7 @@ export type SecretProviderType =
 	| 'doppler'
 	| 'bitwarden'
 	| 'proton'
+	| 'azure-kv'
 	// eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents
 	| (string & {});
 
@@ -194,6 +195,23 @@ export interface ProtonConfig {
 	token: string;
 }
 
+/**
+ * Azure Key Vault: authenticates a service principal (app registration) via
+ * OAuth2 client-credentials, then reads secrets over the Key Vault REST API.
+ * Bulk pulls every secret in the vault; inline `azurekv://<secret-name>`
+ * references resolve a single secret.
+ */
+export interface AzureKvConfig {
+	/** Vault URI, e.g. `https://my-vault.vault.azure.net`. */
+	vaultUri: string;
+	/** Azure AD tenant (directory) ID. */
+	tenantId: string;
+	/** Service-principal (app registration) client ID. */
+	clientId: string;
+	/** Service-principal client secret. */
+	clientSecret: string;
+}
+
 /** Persisted (encrypted) config, discriminated by the provider `type`. */
 export type SecretProviderConfig =
 	| ServiceAccountConfig
@@ -202,7 +220,8 @@ export type SecretProviderConfig =
 	| VaultConfig
 	| DopplerConfig
 	| BitwardenConfig
-	| ProtonConfig;
+	| ProtonConfig
+	| AzureKvConfig;
 
 /**
  * Config keys that hold a SECRET across every provider type. Only these are stripped
@@ -214,12 +233,27 @@ export type SecretProviderConfig =
 export const SECRET_CONFIG_KEYS = new Set(['token', 'clientSecret']);
 
 /**
+ * A masked secret key that only makes sense alongside a non-secret partner field, as a
+ * pair the user chooses or abandons together. When the user CLEARS the partner in the edit
+ * form (an explicit, visible field), keeping the stored secret would strand it - a secret
+ * with no partner - and wedge validation. So clearing the partner drops the orphaned secret
+ * instead of merging it back. Today the only such pair is Infisical Universal Auth
+ * (clientSecret needs clientId); the mechanism is generic so any future paired secret
+ * behaves the same.
+ */
+const PAIRED_SECRET_PARTNERS: Record<string, string> = { clientSecret: 'clientId' };
+
+/**
  * Merges an incoming (edit-form) config OVER the stored one for a write/test: the incoming
  * non-secret coordinates win, but any SECRET_CONFIG_KEY (the token) that is blank/absent in
  * the incoming falls back to the STORED value - because the edit form leaves the token blank
  * to mean "keep the stored secret". Used by BOTH the update (persist) and the edit-mode Test
  * so a Test validates exactly what a Save would persist. Keep them on this one helper so they
  * can never diverge.
+ *
+ * Exception: a paired secret (see PAIRED_SECRET_PARTNERS) is NOT carried over when the user
+ * explicitly clears its partner field, so switching auth shapes (e.g. Infisical Universal
+ * Auth -> static token) actually drops the old secret instead of stranding it.
  */
 export function mergeProviderConfigForWrite(
 	incoming: Record<string, unknown>,
@@ -229,6 +263,21 @@ export function mergeProviderConfigForWrite(
 	for (const key of SECRET_CONFIG_KEYS) {
 		const v = incoming[key];
 		if (v === undefined || v === '') {
+			// If this secret is paired with a partner field the user explicitly cleared,
+			// the pair was abandoned - don't resurrect the stored secret.
+			const partner = PAIRED_SECRET_PARTNERS[key];
+			if (partner !== undefined) {
+				const partnerVal = incoming[partner];
+				const partnerCleared =
+					partner in incoming &&
+					(partnerVal === undefined ||
+						partnerVal === null ||
+						(typeof partnerVal === 'string' && partnerVal.trim() === ''));
+				if (partnerCleared) {
+					delete merged[key];
+					continue;
+				}
+			}
 			if (stored[key] !== undefined) merged[key] = stored[key];
 		}
 	}

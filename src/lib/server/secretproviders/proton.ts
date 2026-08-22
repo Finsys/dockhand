@@ -87,7 +87,12 @@ function childEnvironment(sessionDir: string, accessToken?: string): NodeJS.Proc
 		HOME: sessionDir,
 		XDG_CONFIG_HOME: sessionDir,
 		PROTON_PASS_SESSION_DIR: sessionDir,
-		PROTON_PASS_NO_UPDATE_CHECK: '1'
+		PROTON_PASS_NO_UPDATE_CHECK: '1',
+		// Dockhand runs headless in a container with no system keyring / D-Bus, where
+		// pass-cli's default key provider fails with NoStorageAccess before any auth.
+		// The filesystem provider stores the key under our isolated sessionDir instead.
+		// An operator with a real keyring can override via the container env (#1440).
+		PROTON_PASS_KEY_PROVIDER: process.env.PROTON_PASS_KEY_PROVIDER?.trim() || 'fs'
 	};
 	for (const key of CHILD_ENV_ALLOWLIST) {
 		const value = process.env[key];
