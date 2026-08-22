@@ -46,6 +46,7 @@ import { unregisterSchedule } from './scheduler';
 import { sendEventNotification } from './notifications';
 import { deleteGitStackFiles, parseEnvFileContent } from './git';
 import { isDeletableStackDir } from './stack-delete-guard';
+import { getRemoteStackRemovalFiles, removeStackDirectory } from './stack-removal';
 import { cleanPem } from '$lib/utils/pem';
 import { rewriteComposeVolumePaths, getHostDataDir } from './host-path';
 import { getOrderValue } from './container-labels';
@@ -2523,7 +2524,8 @@ export async function removeStack(
 			const envVars = await getNonSecretEnvVarsAsRecord(stackName, envId);
 			const secretVars = await getSecretEnvVarsAsRecord(stackName, envId);
 
-			// Stack removal cleanup (#1162): the agent deletes ONLY what Dockhand
+			// Stack removal cleanup (#1162): when file deletion is requested, the agent
+			// deletes ONLY what Dockhand
 			// explicitly lists. The list is the local staging dir contents — exactly
 			// the files Dockhand ever wrote for this stack (compose, .env,
 			// .env.dockhand, git files), never user volume data (that exists only on
@@ -2531,7 +2533,7 @@ export async function removeStack(
 			// stack dir is removed only if nothing else remains in it.
 			// Only built for Dockhand-managed staging dirs (inside DATA_DIR/stacks).
 			let removalFiles: FileToDelete[] | undefined;
-			if (composeResult.stackDir) {
+			if (deleteFiles && composeResult.stackDir) {
 				const resolvedStaging = resolve(composeResult.stackDir);
 				if (resolvedStaging.startsWith(resolve(getStacksDir()) + '/')) {
 					removalFiles = Object.entries(hashDirFiles(resolvedStaging)).map(
@@ -2540,6 +2542,7 @@ export async function removeStack(
 				}
 			}
 
+			const remoteFileRemoval = getRemoteStackRemovalFiles(deleteFiles, removalFiles);
 			const downResult = await executeComposeCommand(
 				'down',
 				{
@@ -2550,9 +2553,9 @@ export async function removeStack(
 					composePath: composeResult.composePath ?? undefined,
 					envPath: composeResult.envPath ?? undefined,
 					useOverrideFile: isGitStack,
-					// Full stack removal: the Hawser agent cleans its stack dir (#1162)
-					removeFiles: true,
-					filesToDelete: removalFiles
+					// Keep/delete the Hawser agent's staged stack files using the same choice.
+					removeFiles: remoteFileRemoval.removeFiles,
+					filesToDelete: remoteFileRemoval.filesToDelete
 				},
 				composeResult.content!,
 				envVars,
@@ -2667,20 +2670,11 @@ export async function removeStack(
 
 		// Delete the directory if found — but ONLY when the caller asked to remove files.
 		// "Remove stack" (deleteFiles=false) leaves the compose/.env/data on disk; "Remove
-		// stack + files" (default) deletes them.
-		if (stackDir && deleteFiles) {
-			try {
-				rmSync(stackDir, { recursive: true, force: true });
-			} catch (err: any) {
-				console.error(`Failed to delete stack directory: ${err.message}`);
-				cleanupErrors.push(`directory: ${err.message}`);
-			}
-			// Verify deletion succeeded (rmSync with force:true may not throw on some failures)
-			if (existsSync(stackDir)) {
-				const verifyErr = 'Directory still exists after deletion attempt';
-				console.error(`Failed to delete stack directory: ${verifyErr}`);
-				cleanupErrors.push(`directory: ${verifyErr}`);
-			}
+		// stack + files" deletes them (and remains the API default for compatibility).
+		const directoryCleanupError = removeStackDirectory(stackDir, deleteFiles);
+		if (directoryCleanupError) {
+			console.error(`Failed to delete stack directory: ${directoryCleanupError}`);
+			cleanupErrors.push(`directory: ${directoryCleanupError}`);
 		}
 
 		try {

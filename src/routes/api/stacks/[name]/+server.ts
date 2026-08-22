@@ -2,6 +2,7 @@ import { json } from '@sveltejs/kit';
 import { removeStack, ComposeFileNotFoundError } from '$lib/server/stacks';
 import { authorize } from '$lib/server/authorize';
 import { auditStack } from '$lib/server/audit';
+import { parseStackRemovalSearchParams } from '$lib/utils/stack-removal';
 import type { RequestHandler } from './$types';
 
 /**
@@ -23,11 +24,7 @@ export const DELETE: RequestHandler = async (event) => {
 	const { params, url, cookies } = event;
 	const auth = await authorize(cookies);
 
-	const force = url.searchParams.get('force') === 'true';
-	const volumes = url.searchParams.get('volumes') === 'true';
-	// files defaults to true (backward-compatible: old callers with no param still delete
-	// files). The delete modal passes files=false for "Remove stack" (keep files on disk).
-	const files = url.searchParams.get('files') !== 'false';
+	const { force, removeVolumes: volumes, deleteFiles: files } = parseStackRemovalSearchParams(url.searchParams);
 	const envId = url.searchParams.get('env');
 	const envIdNum = envId ? parseInt(envId) : undefined;
 

@@ -51,6 +51,7 @@
 	import { ErrorDialog } from '$lib/components/ui/error-dialog';
 	import { formatHostPortUrl } from '$lib/utils/url';
 	import { formatBytes, formatBytesCompact } from '$lib/utils/format';
+	import { buildStackRemovalSearchParams } from '$lib/utils/stack-removal';
 
 	type SortField = 'name' | 'containers' | 'status' | 'cpu' | 'memory';
 	type SortDirection = 'asc' | 'desc';
@@ -1086,7 +1087,7 @@
 	async function removeStack(name: string, opts: { deleteFiles: boolean; deleteVolumes: boolean }) {
 		operationError = null;
 		try {
-			const params = `force=true${opts.deleteVolumes ? '&volumes=true' : ''}${opts.deleteFiles ? '' : '&files=false'}`;
+			const params = buildStackRemovalSearchParams(opts);
 			const response = await fetch(appendEnvParam(`/api/stacks/${encodeURIComponent(name)}?${params}`, envId), { method: 'DELETE' });
 			if (!response.ok) {
 				const data = await response.json();
