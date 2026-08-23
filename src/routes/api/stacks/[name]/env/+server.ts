@@ -36,10 +36,11 @@ function parseEnvFile(content: string): Record<string, string> {
  */
 /**
  * @openapi
- * summary: Get a stack's env vars (non-secrets from file, secrets masked from DB) plus injected provider keys
+ * summary: Get a stack's env vars plus injected provider keys
+ * description: Behavior depends on the stack source. For git stacks, ALL vars (overrides and secrets) come from the DB via this endpoint. For internal/adopted stacks, non-secrets come from the .env file and secrets from the DB (masked as '***'). Each variable is an object with key, value and isSecret.
  * path: name:string The stack name
  * query: env:integer Environment id the stack belongs to
- * resp-200: {variables:array<object>!, injectedSecretKeys:array<string>, secretProvider:object}
+ * resp-200: {variables:array<{key:string!, value:string!, isSecret:boolean!}>!, injectedSecretKeys:array<string>, secretProvider:object}
  * resp-403: Permission denied (needs stacks:view)
  * resp-500: Failed to read env vars
  */
@@ -145,10 +146,12 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
  */
 /**
  * @openapi
- * summary: Save a stack's secret env vars to the DB (secrets never hit disk)
+ * summary: Save a stack's env vars to the DB
+ * description: Stores the received variables in the DB via this endpoint. For git stacks the DB is the canonical store for ALL vars (overrides and secrets) that the UI and deploys read. For internal/adopted stacks, non-secrets live in the .env file (written via PUT /env/raw) and secrets are stored here. A secret whose value is '***' keeps its existing DB value.
  * path: name:string The stack name
  * query: env:integer Environment id the stack belongs to
- * body: {variables:array<object>!}
+ * body: {variables:array<{key:string!, value:string!, isSecret:boolean}>!}
+ * body-example: {"variables":[{"key":"FOO","value":"bar","isSecret":false},{"key":"TOKEN","value":"s3cr3t","isSecret":true}]}
  * resp-400: Invalid variables payload
  * resp-403: Permission denied (needs stacks:edit)
  * resp-500: Failed to save env vars

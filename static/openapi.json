@@ -24441,7 +24441,7 @@
         "tags": [
           "stacks"
         ],
-        "summary": "Get a stack's env vars (non-secrets from file, secrets masked from DB) plus injected provider keys",
+        "summary": "Get a stack's env vars plus injected provider keys",
         "parameters": [
           {
             "name": "name",
@@ -24473,7 +24473,23 @@
                     "variables": {
                       "type": "array",
                       "items": {
-                        "type": "string"
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "value": {
+                            "type": "string"
+                          },
+                          "isSecret": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "value",
+                          "isSecret"
+                        ]
                       }
                     },
                     "injectedSecretKeys": {
@@ -24492,7 +24508,11 @@
                 },
                 "example": {
                   "variables": [
-                    "string"
+                    {
+                      "key": "string",
+                      "value": "string",
+                      "isSecret": true
+                    }
                   ],
                   "injectedSecretKeys": [
                     "string"
@@ -24516,14 +24536,15 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "description": "Behavior depends on the stack source. For git stacks, ALL vars (overrides and secrets) come from the DB via this endpoint. For internal/adopted stacks, non-secrets come from the .env file and secrets from the DB (masked as '***'). Each variable is an object with key, value and isSecret."
       },
       "put": {
         "operationId": "put_api_stacks_name_env",
         "tags": [
           "stacks"
         ],
-        "summary": "Save a stack's secret env vars to the DB (secrets never hit disk)",
+        "summary": "Save a stack's env vars to the DB",
         "parameters": [
           {
             "name": "name",
@@ -24566,6 +24587,7 @@
             "bearerAuth": []
           }
         ],
+        "description": "Stores the received variables in the DB via this endpoint. For git stacks the DB is the canonical store for ALL vars (overrides and secrets) that the UI and deploys read. For internal/adopted stacks, non-secrets live in the .env file (written via PUT /env/raw) and secrets are stored here. A secret whose value is '***' keeps its existing DB value.",
         "requestBody": {
           "required": true,
           "content": {
@@ -24576,7 +24598,22 @@
                   "variables": {
                     "type": "array",
                     "items": {
-                      "type": "string"
+                      "type": "object",
+                      "properties": {
+                        "key": {
+                          "type": "string"
+                        },
+                        "value": {
+                          "type": "string"
+                        },
+                        "isSecret": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "key",
+                        "value"
+                      ]
                     }
                   }
                 },
@@ -24586,7 +24623,16 @@
               },
               "example": {
                 "variables": [
-                  "string"
+                  {
+                    "key": "FOO",
+                    "value": "bar",
+                    "isSecret": false
+                  },
+                  {
+                    "key": "TOKEN",
+                    "value": "s3cr3t",
+                    "isSecret": true
+                  }
                 ]
               }
             }

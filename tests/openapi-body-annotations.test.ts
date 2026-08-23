@@ -118,4 +118,30 @@ describe('buildSpec: emits requestBody for non-JSON bodies', () => {
 		expect(mp.schema.properties.files.items.format).toBe('binary');
 		expect(mp.schema.required).toEqual(['files']);
 	});
+
+	// Regression for #1454: `PUT /api/stacks/{name}/env` documented its body as
+	// `array<object>` (-> items:{type:string}), which contradicts the handler
+	// requiring objects `{key, value, isSecret}` and 400ing otherwise. The body
+	// mini-schema must emit a nested-object array so clients target the right store.
+	test('array<{...}> body -> requestBody with a typed nested-object array', () => {
+		const spec = specFor(
+			'/z/+server.ts',
+			'/api/stacks/{name}/env',
+			'PUT',
+			' * @openapi\n * summary: Save env vars\n * body: {variables:array<{key:string!, value:string!, isSecret:boolean}>!}'
+		);
+		const rb: any = spec.paths['/api/stacks/{name}/env'].put.requestBody;
+		expect(rb.required).toBe(true);
+		const schema = rb.content['application/json'].schema;
+		expect(schema.type).toBe('object');
+		expect(schema.required).toEqual(['variables']);
+		const items = schema.properties.variables.items;
+		// The bug produced items:{type:'string'}; a valid spec has an object here.
+		expect(schema.properties.variables.type).toBe('array');
+		expect(items.type).toBe('object');
+		expect(items.properties.key.type).toBe('string');
+		expect(items.properties.value.type).toBe('string');
+		expect(items.properties.isSecret.type).toBe('boolean');
+		expect(items.required).toEqual(['key', 'value']);
+	});
 });
