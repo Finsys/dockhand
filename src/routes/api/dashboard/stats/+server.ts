@@ -18,6 +18,7 @@ import {
 } from '$lib/server/docker';
 import { listComposeStacks } from '$lib/server/stacks';
 import { countLivePending } from '$lib/server/pending-updates-core';
+import { getImageDiskUsageTotalSize } from '$lib/server/docker-disk-usage-core';
 import { authorize } from '$lib/server/authorize';
 import { parseLabels } from '$lib/utils/label-colors';
 
@@ -239,9 +240,9 @@ export const GET: RequestHandler = async ({ cookies, url }) => {
 
 				// Process disk usage from /system/df for accurate size data
 				if (diskUsage) {
-					// Images: use Size from /system/df
+					// Images: use Docker's aggregate size so shared layers are counted once
 					envStats.images.total = diskUsage.Images?.length || images.length;
-					envStats.images.totalSize = diskUsage.Images?.reduce((sum: number, img: any) => sum + getValidSize(img.Size), 0) || 0;
+					envStats.images.totalSize = getImageDiskUsageTotalSize(diskUsage) ?? 0;
 
 					// Volumes: use UsageData.Size from /system/df
 					envStats.volumes.total = diskUsage.Volumes?.length || volumes.length;
@@ -253,9 +254,10 @@ export const GET: RequestHandler = async ({ cookies, url }) => {
 					// Build cache: total size
 					envStats.buildCacheSize = diskUsage.BuildCache?.reduce((sum: number, bc: any) => sum + getValidSize(bc.Size), 0) || 0;
 				} else {
-					// Fallback to original method if /system/df failed
+					// Image list sizes are virtual and cannot be summed without double-counting
+					// shared layers. Keep disk usage unavailable when /system/df fails.
 					envStats.images.total = images.length;
-					envStats.images.totalSize = images.reduce((sum: number, img: any) => sum + getValidSize(img.size), 0);
+					envStats.images.totalSize = 0;
 					envStats.volumes.total = volumes.length;
 					envStats.volumes.totalSize = 0;
 				}
