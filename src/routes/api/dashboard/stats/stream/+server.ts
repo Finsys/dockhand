@@ -361,8 +361,7 @@ async function getEnvironmentStatsProgressive(
 		const imagesPromise = withTimeout(listImages(env.id).catch(() => []), 10000, [])
 			.then((images) => {
 				envStats.images.total = images.length;
-				// Per-image sizes include shared layers. Wait for /system/df before
-				// publishing aggregate disk usage instead of showing an inflated total.
+				envStats.images.totalSize = images.reduce((sum: number, img: any) => sum + getValidSize(img.size), 0);
 				envStats.loading!.images = false;
 
 				onPartialUpdate({
@@ -438,7 +437,9 @@ async function getEnvironmentStatsProgressive(
 					if (diskUsage) {
 						// Update images with Docker's deduplicated aggregate size
 						envStats.images.total = diskUsage.Images?.length || envStats.images.total;
-						envStats.images.totalSize = getImageDiskUsageTotalSize(diskUsage) ?? 0;
+						envStats.images.totalSize = getImageDiskUsageTotalSize(diskUsage)
+							?? diskUsage.Images?.reduce((sum: number, img: any) => sum + getValidSize(img.Size), 0)
+							?? envStats.images.totalSize;
 
 						// Volumes from disk usage
 						envStats.volumes.total = diskUsage.Volumes?.length || 0;

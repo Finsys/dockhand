@@ -242,7 +242,9 @@ export const GET: RequestHandler = async ({ cookies, url }) => {
 				if (diskUsage) {
 					// Images: use Docker's aggregate size so shared layers are counted once
 					envStats.images.total = diskUsage.Images?.length || images.length;
-					envStats.images.totalSize = getImageDiskUsageTotalSize(diskUsage) ?? 0;
+					envStats.images.totalSize = getImageDiskUsageTotalSize(diskUsage)
+						?? diskUsage.Images?.reduce((sum: number, img: any) => sum + getValidSize(img.Size), 0)
+						?? 0;
 
 					// Volumes: use UsageData.Size from /system/df
 					envStats.volumes.total = diskUsage.Volumes?.length || volumes.length;
@@ -254,10 +256,9 @@ export const GET: RequestHandler = async ({ cookies, url }) => {
 					// Build cache: total size
 					envStats.buildCacheSize = diskUsage.BuildCache?.reduce((sum: number, bc: any) => sum + getValidSize(bc.Size), 0) || 0;
 				} else {
-					// Image list sizes are virtual and cannot be summed without double-counting
-					// shared layers. Keep disk usage unavailable when /system/df fails.
+					// Fallback to original method if /system/df failed
 					envStats.images.total = images.length;
-					envStats.images.totalSize = 0;
+					envStats.images.totalSize = images.reduce((sum: number, img: any) => sum + getValidSize(img.size), 0);
 					envStats.volumes.total = volumes.length;
 					envStats.volumes.totalSize = 0;
 				}
