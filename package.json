@@ -97,7 +97,7 @@
 		"lucide-svelte": "0.562.0",
 		"mode-watcher": "^1.1.0",
 		"postcss": "^8.5.6",
-		"svelte": "5.55.7",
+		"svelte": "5.56.10",
 		"svelte-check": "^4.3.5",
 		"svelte-easy-crop": "^5.0.0",
 		"tailwind-merge": "^3.4.0",
