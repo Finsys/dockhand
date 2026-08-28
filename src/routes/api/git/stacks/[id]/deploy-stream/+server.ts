@@ -17,7 +17,8 @@ import { prefersJSON, sseToJSON } from '$lib/server/sse';
  * resp-403: Caller lacks the stacks:start permission for the stack's environment
  * resp-404: No git stack exists with that ID
  */
-export const POST: RequestHandler = async ({ params, cookies, request }) => {
+export const POST: RequestHandler = async (event) => {
+	const { params, cookies, request } = event;
 	const auth = await authorize(cookies);
 
 	const id = parseInt(params.id);
