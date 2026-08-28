@@ -15,6 +15,7 @@
 		rawContent?: string; // Bindable - raw .env file content (comments preserved, no secrets)
 		validation?: ValidationResult | null;
 		readonly?: boolean;
+		hideHeader?: boolean;
 		showSource?: boolean;
 		sources?: Record<string, 'file' | 'override'>;
 		fileValues?: Record<string, string>;
@@ -43,6 +44,7 @@
 		rawContent = $bindable(''),
 		validation = null,
 		readonly = false,
+		hideHeader = false,
 		showSource = false,
 		sources = {},
 		fileValues = {},
@@ -337,6 +339,7 @@
 </script>
 
 <div class="flex flex-col h-full {className}">
+	{#if !hideHeader}
 	<!-- Header -->
 	<div class="px-4 py-2.5 border-b border-zinc-200 dark:border-zinc-700 flex flex-col gap-1.5">
 		<!-- Header row: title + info + view toggle + validation pills + actions -->
@@ -578,8 +581,64 @@
 			</div>
 		{/if}
 	</div>
+	{:else}
+	<div class="mb-3 flex flex-col gap-2">
+		<div class="flex items-center justify-between gap-2">
+			<div class="flex flex-wrap items-center gap-2 min-w-0">
+				<div class="flex items-center gap-0.5 rounded bg-zinc-100 p-0.5 dark:bg-zinc-800">
+					<button type="button" class="flex items-center gap-1 rounded px-1.5 py-0.5 text-2xs transition-colors {viewMode === 'form' ? 'bg-white text-zinc-800 shadow-sm dark:bg-zinc-700 dark:text-zinc-100' : 'text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200'}" onclick={() => handleViewModeChange('form')} title="Form view">
+						<List class="h-3 w-3" />
+					</button>
+					<button type="button" class="flex items-center gap-1 rounded px-1.5 py-0.5 text-2xs transition-colors {viewMode === 'text' ? 'bg-white text-zinc-800 shadow-sm dark:bg-zinc-700 dark:text-zinc-100' : 'text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200'}" onclick={() => handleViewModeChange('text')} title="Text view">
+						<FileText class="h-3 w-3" />
+					</button>
+				</div>
+				{#if effectiveValidation}
+					<div class="flex flex-wrap gap-1">
+						{#if effectiveValidation.missing.length > 0}
+							<span class="inline-flex items-center rounded bg-red-100 px-1.5 py-0.5 text-2xs font-medium text-red-700 dark:bg-red-900/30 dark:text-red-300">{effectiveValidation.missing.length} missing</span>
+						{/if}
+						{#if effectiveValidation.required.length > 0}
+							<span class="inline-flex items-center rounded bg-green-100 px-1.5 py-0.5 text-2xs font-medium text-green-700 dark:bg-green-900/30 dark:text-green-300">{effectiveValidation.required.length - effectiveValidation.missing.length} defined</span>
+						{/if}
+					</div>
+				{/if}
+			</div>
+			<div class="flex items-center gap-1 shrink-0">
+				<Tooltip.Root>
+					<Tooltip.Trigger>
+						<button type="button" class="flex h-7 w-7 items-center justify-center rounded-md border border-zinc-200 text-muted-foreground hover:text-foreground dark:border-zinc-700" aria-label="Show syntax legend">
+							<HelpCircle class="h-3.5 w-3.5" />
+						</button>
+					</Tooltip.Trigger>
+					<Tooltip.Content class="max-w-xs">
+						<div class="space-y-1.5 text-xs">
+							<p><code>${'{VAR}'}</code> — required</p>
+							<p><code>${'{VAR:-default}'}</code> — optional</p>
+							<p><code>${'{VAR:?error}'}</code> — required w/ error</p>
+						</div>
+					</Tooltip.Content>
+				</Tooltip.Root>
+				{#if !readonly}
+					<Button type="button" size="sm" variant="ghost" onclick={addEnvVariable} class="h-7 px-2 text-xs">
+						<Plus class="h-3.5 w-3.5" />
+						Add
+					</Button>
+				{/if}
+			</div>
+		</div>
+		{#if viewMode === 'form' && effectiveValidation && effectiveValidation.missing.length > 0 && !readonly}
+			<div class="flex flex-wrap items-center gap-1">
+				<span class="mr-1 text-xs text-muted-foreground">Add missing:</span>
+				{#each effectiveValidation.missing as missing}
+					<button type="button" onclick={() => addMissingVariable(missing)} class="rounded bg-red-100 px-1.5 py-0.5 text-xs text-red-700 transition-colors hover:bg-red-200 dark:bg-red-900/30 dark:text-red-300 dark:hover:bg-red-900/50">{missing}</button>
+				{/each}
+			</div>
+		{/if}
+	</div>
+	{/if}
 	<!-- Content area -->
-	<div bind:this={contentAreaRef} class="flex-1 overflow-auto px-4 py-3">
+	<div bind:this={contentAreaRef} class="flex-1 overflow-auto {hideHeader ? 'pt-2.5' : 'px-4 py-3'}">
 		{#if viewMode === 'form'}
 			<StackEnvVarsEditor
 				bind:variables

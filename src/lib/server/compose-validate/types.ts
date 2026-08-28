@@ -24,6 +24,8 @@ export interface Finding {
 	hint?: string;
 	/** Service the finding belongs to, when service-scoped. */
 	service?: string;
+	/** Compose source file that produced the finding, when validating multiple files. */
+	source?: string;
 	/** 1-based line in the ORIGINAL source for the editor marker. Absent => file-level. */
 	line?: number;
 	/** A one-click deterministic fix, when the rule can offer one unambiguously. */

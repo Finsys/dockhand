@@ -64,7 +64,7 @@
 	// rate-limited), with the error text for the tooltip — session-only (#1255).
 	let failedUpdateCheckIds = $state<Set<string>>(new Set());
 	let failedUpdateCheckErrors = $state<Map<string, string>>(new Map());
-	let stackSources = $state<Record<string, { sourceType: string; composePath?: string | null; repository?: any; gitStack?: any; icon?: string | null }>>({});
+	let stackSources = $state<Record<string, { sourceType: string; composePath?: string | null; composePaths?: string | null; repository?: any; gitStack?: any; icon?: string | null }>>({});
 	let stackEnvVarCounts = $state<Record<string, number>>({});
 	let gitStacks = $state<any[]>([]);
 	let copiedWebhookStackId = $state<number | null>(null);
@@ -1861,14 +1861,23 @@
 				{:else if column.id === 'location'}
 					{#if source.composePath}
 						{@const dirPath = source.composePath.replace(/\/[^/]+$/, '')}
+						{@const paths = source.composePaths ? (() => { try { return JSON.parse(source.composePaths); } catch { return [source.composePath]; } })() : [source.composePath]}
+						{@const extraCount = paths.length - 1}
 						<Tooltip.Root>
-							<Tooltip.Trigger class="w-full text-left">
-								<span class="text-xs text-muted-foreground block truncate">
+							<Tooltip.Trigger class="block max-w-full overflow-hidden text-left">
+								<span class="text-xs text-muted-foreground truncate block">
 									{dirPath}
+									{#if extraCount > 0}
+										<span class="text-blue-500 ml-1">+{extraCount} more</span>
+									{/if}
 								</span>
 							</Tooltip.Trigger>
-							<Tooltip.Content class="max-w-md">
-								<code class="text-xs">{source.composePath}</code>
+							<Tooltip.Content class="max-w-none p-2">
+								<div class="space-y-1">
+									{#each paths as path}
+										<p class="font-mono text-xs leading-snug whitespace-nowrap">{path}</p>
+									{/each}
+								</div>
 							</Tooltip.Content>
 						</Tooltip.Root>
 					{:else}

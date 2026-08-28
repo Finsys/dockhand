@@ -2,6 +2,7 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getGitStack, updateGitStack, deleteGitStack, deleteStackSource, updateStackSourceName, updateStackEnvVarsName, setStackEnvVars, getStackEnvVars, deleteStackEnvVars, updateStackSource } from '$lib/server/db';
 import { deleteGitStackFiles, deployGitStack } from '$lib/server/git';
+import { parseComposePathsColumn, validateComposePathsInput } from '$lib/server/compose-files';
 import { normalizeStackBranchUpdate } from '$lib/git-stack-branch';
 import { authorize } from '$lib/server/authorize';
 import { registerSchedule, unregisterSchedule } from '$lib/server/scheduler';
@@ -110,6 +111,22 @@ export const PUT: RequestHandler = async (event) => {
 			return json({ error: 'A webhook secret is required when the webhook is enabled' }, { status: 400 });
 		}
 
+		const composePathsError = validateComposePathsInput(data.composePaths);
+		if (composePathsError) return json({ error: composePathsError }, { status: 400 });
+
+		// composePaths[0] is the primary compose file (stored denormalized in
+		// composePath). Keep them in sync when the array is updated. The update
+		// route only sends composePath (no array) — remap its first entry so the
+		// stale stored array doesn't stay authoritative for sync/deploy.
+		const existingComposePaths = parseComposePathsColumn(existing.composePaths);
+		if (data.composePaths === undefined && data.composePath !== undefined &&
+			existingComposePaths.length > 0 && existingComposePaths[0] !== data.composePath) {
+			data.composePaths = [data.composePath, ...existingComposePaths.slice(1)];
+		}
+		if (Array.isArray(data.composePaths) && data.composePaths.length > 0) {
+			data.composePath = data.composePaths[0];
+		}
+
 		const oldStackName = existing.stackName;
 
 		// Per-stack branch override is a partial update. The shared normalizer
@@ -130,6 +147,7 @@ export const PUT: RequestHandler = async (event) => {
 			stackName: data.stackName,
 			branch: branchValue,
 			composePath: data.composePath,
+			composePaths: data.composePaths,
 			envFilePath: data.envFilePath,
 			autoUpdate: data.autoUpdate,
 			autoUpdateSchedule: data.autoUpdateSchedule,

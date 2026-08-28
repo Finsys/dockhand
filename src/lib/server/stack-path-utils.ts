@@ -1,5 +1,34 @@
 import { readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative, resolve, sep as pathSep } from 'node:path';
+
+/** True when childPath is rootPath or one of its descendants. */
+export function isPathUnderRoot(childPath: string, rootPath: string): boolean {
+	const child = resolve(childPath);
+	const root = resolve(rootPath);
+	return child === root || child.startsWith(root + pathSep);
+}
+
+/** Remap a path from one stack dir root to its mirror under another root. Paths outside fromDir pass through. */
+export function remapPathBetweenDirs(fromDir: string, toDir: string, path: string): string {
+	const resolvedPath = resolve(path);
+	return isPathUnderRoot(resolvedPath, fromDir)
+		? join(resolve(toDir), relative(resolve(fromDir), resolvedPath))
+		: path;
+}
+
+export function remapPathsBetweenDirs(fromDir: string, toDir: string, paths: string[]): string[] {
+	return paths.map((path) => remapPathBetweenDirs(fromDir, toDir, path));
+}
+
+export function remapContentsBetweenDirs(
+	fromDir: string,
+	toDir: string,
+	contents: Record<string, string>
+): Record<string, string> {
+	return Object.fromEntries(
+		Object.entries(contents).map(([path, content]) => [remapPathBetweenDirs(fromDir, toDir, path), content])
+	);
+}
 
 export function resolveStackDirForLayout(
 	defaultRoot: string,

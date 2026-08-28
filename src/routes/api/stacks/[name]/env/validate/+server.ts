@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import { getStackEnvVars } from '$lib/server/db';
 import { getStackComposeFile } from '$lib/server/stacks';
+import { pickAdditionalComposeContents } from '$lib/server/compose-files';
 import { authorize } from '$lib/server/authorize';
 import type { RequestHandler } from './$types';
 
@@ -123,6 +124,9 @@ export const POST: RequestHandler = async ({ params, url, cookies, request }) =>
 		const stackName = decodeURIComponent(params.name);
 		let composeContent: string | null = null;
 		let providedVariables: string[] | null = null;
+		// Additional compose files (ordered set primary first) — an override can
+		// define or consume variables the primary never mentions.
+		let additionalSources: string[] = [];
 
 		// Check if compose content and/or variables are provided in body
 		const contentType = request.headers.get('content-type');
@@ -132,6 +136,9 @@ export const POST: RequestHandler = async ({ params, url, cookies, request }) =>
 				if (body.compose && typeof body.compose === 'string') {
 					composeContent = body.compose;
 				}
+				// Additional compose files (ordered set primary first) — an override
+				// can define or consume variables the primary never mentions.
+				additionalSources = pickAdditionalComposeContents(body.composePaths, body.composeContents);
 				// Accept variables from UI for validation (overrides DB lookup)
 				if (Array.isArray(body.variables)) {
 					providedVariables = body.variables.filter((v: unknown) => typeof v === 'string');
@@ -148,6 +155,11 @@ export const POST: RequestHandler = async ({ params, url, cookies, request }) =>
 			const savedCompose = await getStackComposeFile(stackName, envIdNum);
 			if (savedCompose.success && savedCompose.content) {
 				composeContent = savedCompose.content;
+				if (savedCompose.composeContents) {
+					additionalSources = Object.entries(savedCompose.composeContents)
+						.filter(([p, c]) => p !== savedCompose.composePath && typeof c === 'string' && c.trim())
+						.map(([, c]) => c as string);
+				}
 			}
 		}
 
@@ -155,8 +167,24 @@ export const POST: RequestHandler = async ({ params, url, cookies, request }) =>
 			return json({ error: 'No compose content provided and no saved compose file found' }, { status: 400 });
 		}
 
-		// Extract variables from compose
-		const { required, optional } = extractComposeVars(composeContent);
+		// Extract variables from every compose file in the ordered set (merged:
+		// a ${VAR} with a default in any file is optional unless another file
+		// requires it).
+		let required: string[] = [];
+		let optional: string[] = [];
+		for (const source of [composeContent, ...additionalSources]) {
+			const vars = extractComposeVars(source);
+			for (const v of vars.required) {
+				const optIdx = optional.indexOf(v);
+				if (optIdx !== -1) optional.splice(optIdx, 1);
+				if (!required.includes(v)) required.push(v);
+			}
+			for (const v of vars.optional) {
+				if (!required.includes(v) && !optional.includes(v)) optional.push(v);
+			}
+		}
+		required = required.sort();
+		optional = optional.sort();
 
 		// Get defined variables - either from request body or database
 		let defined: string[];

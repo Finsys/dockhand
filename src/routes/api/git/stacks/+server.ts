@@ -11,6 +11,7 @@ import {
 	getStackSource
 } from '$lib/server/db';
 import { deployGitStack } from '$lib/server/git';
+import { validateComposePathsInput } from '$lib/server/compose-files';
 import { authorize } from '$lib/server/authorize';
 import { registerSchedule } from '$lib/server/scheduler';
 import { auditGitStack } from '$lib/server/audit';
@@ -109,6 +110,14 @@ export const POST: RequestHandler = async (event) => {
 			return json({ error: 'A webhook secret is required when the webhook is enabled' }, { status: 400 });
 		}
 
+		const composePathsError = validateComposePathsInput(data.composePaths);
+		if (composePathsError) return json({ error: composePathsError }, { status: 400 });
+
+		// composePaths[0] is the primary compose file; normalize composePath
+		// from it so the denormalized column can't diverge from the array.
+		const composePaths = data.composePaths ?? null;
+		const composePath = composePaths?.length ? composePaths[0] : (data.composePath || 'compose.yaml');
+
 		// Either repositoryId or new repo details (url, branch) must be provided
 		let repositoryId = data.repositoryId;
 
@@ -161,7 +170,8 @@ export const POST: RequestHandler = async (event) => {
 			...(data.repositoryId && typeof data.branch === 'string' && data.branch.trim()
 				? { branch: data.branch.trim() }
 				: {}),
-			composePath: data.composePath || 'compose.yaml',
+			composePath: composePath,
+			composePaths: composePaths,
 			envFilePath: data.envFilePath || null,
 			autoUpdate: data.autoUpdate || false,
 			autoUpdateSchedule: data.autoUpdateSchedule || 'daily',

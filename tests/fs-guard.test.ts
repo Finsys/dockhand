@@ -3,11 +3,20 @@ import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync, rmSync } from 'node
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-// Pin DATA_DIR before importing so the guard computes /app/data paths.
-beforeAll(() => { process.env.DATA_DIR = '/app/data'; });
-process.env.DATA_DIR = '/app/data';
+const { isProtectedPath: checkProtectedPath } = await import('../src/lib/server/fs-guard');
 
-const { isProtectedPath } = await import('../src/lib/server/fs-guard');
+// Keep DATA_DIR local to each synchronous guard call. Other Bun test files share
+// the process environment when isolation is disabled.
+function isProtectedPath(requestedPath: string, dataDir = '/app/data'): boolean {
+	const previous = process.env.DATA_DIR;
+	process.env.DATA_DIR = dataDir;
+	try {
+		return checkProtectedPath(requestedPath);
+	} finally {
+		if (previous === undefined) delete process.env.DATA_DIR;
+		else process.env.DATA_DIR = previous;
+	}
+}
 
 describe('isProtectedPath (file-browser secret guard, H1)', () => {
 	test('blocks the database directory and its contents', () => {
@@ -117,13 +126,7 @@ describe('isProtectedPath symlink resolution (the reason safeResolve exists)', (
 		mkdirSync(join(dataDir, 'real-secrets'), { recursive: true });
 		writeFileSync(join(dataDir, 'real-secrets', 'key'), 'master');
 		symlinkSync(join(dataDir, 'real-secrets', 'key'), join(dataDir, '.encryption_key'));
-		const prev = process.env.DATA_DIR;
-		process.env.DATA_DIR = dataDir;
-		try {
-			expect(isProtectedPath(join(dataDir, '.encryption_key'))).toBe(true);
-		} finally {
-			process.env.DATA_DIR = prev;
-			rmSync(dataDir, { recursive: true, force: true });
-		}
+		expect(isProtectedPath(join(dataDir, '.encryption_key'), dataDir)).toBe(true);
+		rmSync(dataDir, { recursive: true, force: true });
 	});
 });

@@ -1,8 +1,10 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getStackSources } from '$lib/server/db';
+import { getStackSources, getEnvironment } from '$lib/server/db';
 import { countStackEnvVars } from '$lib/server/stacks';
 import { authorize } from '$lib/server/authorize';
+import { listContainers } from '$lib/server/docker';
+import { resolveStackSourceDisplayPathsForEnv, buildStackPathHintsMap } from '$lib/server/stacks';
 
 /**
  * @openapi
@@ -25,18 +27,19 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 	try {
 		const sources = await getStackSources(envIdNum);
 
-		// Convert to a map for easier lookup in the frontend
-		const sourceMap: Record<
-			string,
-			{
-				sourceType: string;
-				composePath?: string | null;
-				repository?: any;
-				secretProviderId?: number | null;
-				icon?: string | null;
-				envVarCount?: number;
-			}
-		> = {};
+		// Batch-fetch environments and container path hints once per env, so
+		// per-stack Hawser remapping doesn't trigger a DB lookup and a full
+		// container listing for every source (N+1).
+		const envIds = [...new Set(sources.map((s) => s.environmentId ?? null))];
+		const perEnv = await Promise.all(
+			envIds.map(async (id) => ({
+				id,
+				env: id != null ? (await getEnvironment(id)) ?? null : null,
+				hints: buildStackPathHintsMap(await listContainers(true, id).catch(() => []))
+			}))
+		);
+		const byEnv = new Map(perEnv.map((e) => [e.id, e]));
+
 		// Count env vars server-side (one local read per stack) so the list badge does
 		// not need a /env fetch per stack. GET /env resolves its env param as
 		// `envId ? parseInt : null`, so pass the SAME null-when-absent value (not
@@ -50,16 +53,37 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 					: Promise.resolve(0)
 			)
 		);
-		sources.forEach((source, i) => {
+		// Convert to a map for easier lookup in the frontend.
+		// Resolve compose paths to absolute on-disk paths (git stacks store repo-relative paths).
+		const sourceMap: Record<
+			string,
+			{
+				sourceType: string;
+				composePath?: string | null;
+				composePaths?: string | null;
+				repository?: any;
+				secretProviderId?: number | null;
+				icon?: string | null;
+				envVarCount?: number;
+			}
+		> = {};
+		for (const [i, source] of sources.entries()) {
+			const entry = byEnv.get(source.environmentId ?? null);
+			const resolved = await resolveStackSourceDisplayPathsForEnv(
+				source,
+				entry?.env ?? null,
+				entry?.hints.get(source.stackName) ?? null
+			);
 			sourceMap[source.stackName] = {
 				sourceType: source.sourceType,
-				composePath: source.composePath,
+				composePath: resolved.composePath,
+				composePaths: resolved.composePaths.length > 0 ? JSON.stringify(resolved.composePaths) : null,
 				repository: source.repository,
 				secretProviderId: source.secretProviderId,
 				icon: source.icon ?? null,
-				envVarCount: counts[i],
+				envVarCount: counts[i]
 			};
-		});
+		}
 
 		return json(sourceMap);
 	} catch (error) {
