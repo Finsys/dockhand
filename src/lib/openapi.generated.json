@@ -26306,7 +26306,17 @@
           "stacks"
         ],
         "summary": "Return the default Dockhand stacks directory ($DATA_DIR/stacks/) where new stacks are stored by default",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "env",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Environment ID used to select the local or environment-scoped stacks root"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful response",

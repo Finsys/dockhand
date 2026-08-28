@@ -1,8 +1,9 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getStackSources } from '$lib/server/db';
-import { countStackEnvVars } from '$lib/server/stacks';
+import { getStackSources, getEnvironment } from '$lib/server/db';
+import { countStackEnvVars, resolveStackSourceDisplayPathsForEnv, buildStackPathHintsMap } from '$lib/server/stacks';
 import { authorize } from '$lib/server/authorize';
+import { listContainers } from '$lib/server/docker';
 
 /**
  * @openapi
@@ -25,7 +26,19 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 	try {
 		const sources = await getStackSources(envIdNum);
 
-		// Convert to a map for easier lookup in the frontend
+		const envIds = [...new Set(sources.map((s) => s.environmentId).filter((id): id is number => id != null))];
+		const envs = await Promise.all(envIds.map((id) => getEnvironment(id)));
+		const envMap = new Map(envs.filter((e) => e !== undefined).map((e) => [e.id, e]));
+
+		const hintEnvIds = [...new Set(sources.map((s) => s.environmentId ?? null))];
+		const hintMaps = await Promise.all(
+			hintEnvIds.map(async (id) => {
+				const containers = await listContainers(true, id).catch(() => []);
+				return { id, map: buildStackPathHintsMap(containers) };
+			})
+		);
+		const hintsByEnv = new Map(hintMaps.map((h) => [String(h.id ?? 'null'), h.map]));
+
 		const sourceMap: Record<
 			string,
 			{
@@ -37,11 +50,6 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 				envVarCount?: number;
 			}
 		> = {};
-		// Count env vars server-side (one local read per stack) so the list badge does
-		// not need a /env fetch per stack. GET /env resolves its env param as
-		// `envId ? parseInt : null`, so pass the SAME null-when-absent value (not
-		// undefined - getStackEnvVars scopes differently for null vs undefined) so the
-		// count matches that endpoint's variable list exactly.
 		const countEnvId = envIdNum ?? null;
 		const counts = await Promise.all(
 			sources.map((s) =>
@@ -50,16 +58,21 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 					: Promise.resolve(0)
 			)
 		);
-		sources.forEach((source, i) => {
+		for (const [i, source] of sources.entries()) {
+			const resolved = await resolveStackSourceDisplayPathsForEnv(
+				source,
+				source.environmentId != null ? envMap.get(source.environmentId) ?? null : null,
+				hintsByEnv.get(String(source.environmentId ?? 'null'))?.get(source.stackName) ?? null
+			);
 			sourceMap[source.stackName] = {
 				sourceType: source.sourceType,
-				composePath: source.composePath,
+				composePath: resolved.composePath,
 				repository: source.repository,
 				secretProviderId: source.secretProviderId,
 				icon: source.icon ?? null,
 				envVarCount: counts[i],
 			};
-		});
+		}
 
 		return json(sourceMap);
 	} catch (error) {

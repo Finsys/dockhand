@@ -42,6 +42,8 @@ export interface EdgeConnection {
 	dockerVersion: string;
 	hostname: string;
 	capabilities: string[];
+	/** Remote agent STACKS_DIR (from hello message) */
+	stacksDir?: string;
 	connectedAt: Date;
 	lastHeartbeat: number;
 	pendingRequests: Map<string, PendingRequest>;
@@ -496,6 +498,7 @@ export function handleEdgeConnection(
 		dockerVersion: hello.dockerVersion,
 		hostname: hello.hostname,
 		capabilities: hello.capabilities,
+		stacksDir: hello.stacksDir,
 		connectedAt: new Date(),
 		lastHeartbeat: Date.now(),
 		pendingRequests: new Map(),
@@ -522,32 +525,40 @@ export function handleEdgeConnection(
 }
 
 /**
- * Update environment status in database
+ * Update environment status in database. Best-effort: called from connection
+ * setup, teardown and heartbeat-timeout paths where a DB failure must not
+ * take down the connection handling.
  */
 async function updateEnvironmentStatus(
 	environmentId: number,
 	connection: EdgeConnection | null
 ): Promise<void> {
-	if (connection) {
-		await db
-			.update(environments)
-			.set({
-				hawserLastSeen: new Date().toISOString(),
-				hawserAgentId: connection.agentId,
-				hawserAgentName: connection.agentName,
-				hawserVersion: connection.agentVersion,
-				hawserCapabilities: JSON.stringify(connection.capabilities),
-				updatedAt: new Date().toISOString()
-			})
-			.where(eq(environments.id, environmentId));
-	} else {
-		await db
-			.update(environments)
-			.set({
-				hawserLastSeen: new Date().toISOString(),
-				updatedAt: new Date().toISOString()
-			})
-			.where(eq(environments.id, environmentId));
+	try {
+		if (connection) {
+			await db
+				.update(environments)
+				.set({
+					hawserLastSeen: new Date().toISOString(),
+					hawserAgentId: connection.agentId,
+					hawserAgentName: connection.agentName,
+					hawserVersion: connection.agentVersion,
+					hawserCapabilities: JSON.stringify(connection.capabilities),
+					hawserStacksDir: connection.stacksDir ?? null,
+					updatedAt: new Date().toISOString()
+				})
+				.where(eq(environments.id, environmentId));
+		} else {
+			await db
+				.update(environments)
+				.set({
+					hawserLastSeen: new Date().toISOString(),
+					updatedAt: new Date().toISOString()
+				})
+				.where(eq(environments.id, environmentId));
+		}
+	} catch (error) {
+		const msg = error instanceof Error ? error.message : String(error);
+		console.warn(`[Hawser] Failed to update environment status for env ${environmentId}: ${msg}`);
 	}
 }
 
@@ -930,6 +941,8 @@ export interface HelloMessage {
 	dockerVersion: string;
 	hostname: string;
 	capabilities: string[];
+	/** Remote agent STACKS_DIR — host path where compose stacks are written */
+	stacksDir?: string;
 }
 
 export interface WelcomeMessage {

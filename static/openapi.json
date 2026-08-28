@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Dockhand API",
-    "version": "1.0.43",
+    "version": "1.0.45",
     "description": "Auto-generated from src/routes/**/+server.ts by scripts/generate-openapi.ts. Path, HTTP method, tag, and auth requirement are derived automatically from the route tree and hooks.server.ts PUBLIC_PATHS. Parameters, response status codes, and request body fields are additionally auto-detected from each handler’s own source (query params via url.searchParams, status codes via status:/error(), body fields via destructuring) — adding a new endpoint therefore requires ZERO manual spec edits to show up with real params/responses. An optional, additive `@openapi` JSDoc annotation on a handler replaces the generic auto-descriptions with hand-written summaries, exact types, and examples."
   },
   "servers": [
@@ -36,6 +36,9 @@
       "name": "config-sets"
     },
     {
+      "name": "container-icons"
+    },
+    {
       "name": "containers"
     },
     {
@@ -67,6 +70,9 @@
     },
     {
       "name": "host"
+    },
+    {
+      "name": "icons"
     },
     {
       "name": "images"
@@ -2531,6 +2537,7 @@
           }
         },
         "security": [],
+        "description": "sessionTimeout is in seconds (clamped 3600..604800); 0 disables expiry so sessions never time out.",
         "requestBody": {
           "required": true,
           "content": {
@@ -2543,12 +2550,16 @@
                   },
                   "defaultProvider": {
                     "type": "string"
+                  },
+                  "sessionTimeout": {
+                    "type": "integer"
                   }
                 }
               },
               "example": {
                 "authEnabled": true,
-                "defaultProvider": "local"
+                "defaultProvider": "local",
+                "sessionTimeout": 86400
               }
             }
           }
@@ -3595,6 +3606,12 @@
                   "hostPath": {
                     "type": "string"
                   },
+                  "cacert": {
+                    "type": "string"
+                  },
+                  "tlsClientCert": {
+                    "type": "string"
+                  },
                   "policies": {
                     "type": "string"
                   }
@@ -3725,6 +3742,12 @@
                     "type": "string"
                   },
                   "hostPath": {
+                    "type": "string"
+                  },
+                  "cacert": {
+                    "type": "string"
+                  },
+                  "tlsClientCert": {
                     "type": "string"
                   },
                   "policies": {
@@ -4103,6 +4126,12 @@
                   "envVars": {
                     "type": "object",
                     "properties": {}
+                  },
+                  "cacert": {
+                    "type": "string"
+                  },
+                  "tlsClientCert": {
+                    "type": "string"
                   }
                 }
               },
@@ -5977,6 +6006,244 @@
         ]
       }
     },
+    "/api/container-icons": {
+      "get": {
+        "operationId": "get_api_container-icons",
+        "tags": [
+          "container-icons"
+        ],
+        "summary": "List all container icon overrides for an environment as a name -> icon map",
+        "parameters": [
+          {
+            "name": "env",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Environment id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A JSON object mapping container name to its icon value (lucide name, `selfhst:<ref>`, or `custom:container`)"
+          },
+          "403": {
+            "description": "Permission denied (needs containers:view)"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Returns every container that has a user-set icon override in the given environment, so the containers list can render them in one request instead of one lookup per row."
+      }
+    },
+    "/api/container-icons/{name}": {
+      "get": {
+        "operationId": "get_api_container-icons_name",
+        "tags": [
+          "container-icons"
+        ],
+        "summary": "Get a container's uploaded custom icon (raw image/webp bytes, not JSON)",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Container name"
+          },
+          {
+            "name": "env",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Environment id the container belongs to"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Binary image/webp response body, Cache-Control public max-age=3600"
+          },
+          "403": {
+            "description": "Permission denied (needs containers:view)"
+          },
+          "404": {
+            "description": "No custom icon set for this container"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "operationId": "post_api_container-icons_name",
+        "tags": [
+          "container-icons"
+        ],
+        "summary": "Set a container's icon override - either a name reference or an uploaded image",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Container name"
+          },
+          {
+            "name": "env",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Environment id the container belongs to"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "icon": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "icon"
+                  ]
+                },
+                "example": {
+                  "success": true,
+                  "icon": "selfhst:plex"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Neither icon nor image supplied, or image exceeds the size limit"
+          },
+          "403": {
+            "description": "Permission denied (needs containers:edit)"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Body carries EITHER `icon` (a lucide name or `selfhst:<ref>`) to set a referenced icon, OR `image` (a base64-encoded data URL, ~300KB limit) to upload a custom one (stored as `custom:container`). One of the two is required. The override is keyed by container name + environment, so it survives container recreation.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "icon": {
+                    "type": "string"
+                  },
+                  "image": {
+                    "type": "string"
+                  }
+                }
+              },
+              "example": {
+                "icon": "string",
+                "image": "string"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_api_container-icons_name",
+        "tags": [
+          "container-icons"
+        ],
+        "summary": "Remove a container's icon override (fall back to automatic matching)",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Container name"
+          },
+          {
+            "name": "env",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Environment id the container belongs to"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ]
+                },
+                "example": {
+                  "success": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied (needs containers:edit)"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/containers": {
       "get": {
         "operationId": "get_api_containers",
@@ -6343,6 +6610,81 @@
           },
           "500": {
             "description": "Failed to remove the container"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/containers/{id}/compose": {
+      "get": {
+        "operationId": "get_api_containers_id_compose",
+        "tags": [
+          "containers"
+        ],
+        "summary": "Generate a docker-compose service definition from a running container's inspect (requires the 'view' permission)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Container ID or name (from GET /api/containers)"
+          },
+          {
+            "name": "env",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "The target environment ID (omit for the local/default Docker host) (from GET /api/environments)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "compose keeps only user-set env; composeFullEnv keeps every env var (incl. image-inherited); stackProject is the compose project the container already belongs to, or null",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "compose": {
+                      "type": "string"
+                    },
+                    "composeFullEnv": {
+                      "type": "string"
+                    },
+                    "serviceName": {
+                      "type": "string"
+                    },
+                    "stackProject": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "example": {
+                  "compose": "string",
+                  "composeFullEnv": "string",
+                  "serviceName": "string",
+                  "stackProject": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied"
+          },
+          "500": {
+            "description": "Failed to inspect the container"
           }
         },
         "security": [
@@ -9833,7 +10175,7 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": "Environments accessible to the caller (filtered by RBAC in Enterprise mode; all environments in Free edition)",
+            "description": "Environments accessible to the caller (filtered by RBAC in Enterprise mode; all environments in Free edition). The tlsKey (private TLS client key) and hawserToken secrets are NEVER returned; hasTlsKey / hasHawserToken indicate whether one is stored.",
             "content": {
               "application/json": {
                 "schema": {
@@ -9867,6 +10209,12 @@
                       },
                       "timezone": {
                         "type": "string"
+                      },
+                      "hasTlsKey": {
+                        "type": "boolean"
+                      },
+                      "hasHawserToken": {
+                        "type": "boolean"
                       }
                     },
                     "required": [
@@ -9886,7 +10234,9 @@
                     "protocol": "http",
                     "icon": "server",
                     "publicIp": "203.0.113.10",
-                    "timezone": "Europe/Berlin"
+                    "timezone": "Europe/Berlin",
+                    "hasTlsKey": false,
+                    "hasHawserToken": false
                   },
                   {
                     "id": 2,
@@ -9897,7 +10247,9 @@
                     "protocol": "http",
                     "icon": "server",
                     "publicIp": null,
-                    "timezone": "Europe/Berlin"
+                    "timezone": "Europe/Berlin",
+                    "hasTlsKey": false,
+                    "hasHawserToken": true
                   }
                 ]
               }
@@ -10049,7 +10401,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Successful response",
+            "description": "The tlsKey (private TLS client key) and hawserToken secrets are NEVER returned; hasTlsKey / hasHawserToken indicate whether one is stored.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10072,6 +10424,12 @@
                     },
                     "publicIp": {
                       "type": "string"
+                    },
+                    "hasTlsKey": {
+                      "type": "boolean"
+                    },
+                    "hasHawserToken": {
+                      "type": "boolean"
                     }
                   },
                   "required": [
@@ -10087,7 +10445,9 @@
                   "labels": [
                     "string"
                   ],
-                  "publicIp": "string"
+                  "publicIp": "string",
+                  "hasTlsKey": true,
+                  "hasHawserToken": true
                 }
               }
             }
@@ -10130,7 +10490,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Successful response",
+            "description": "The tlsKey/hawserToken secrets are NEVER returned; hasTlsKey / hasHawserToken indicate whether one is stored.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10153,6 +10513,12 @@
                     },
                     "publicIp": {
                       "type": "string"
+                    },
+                    "hasTlsKey": {
+                      "type": "boolean"
+                    },
+                    "hasHawserToken": {
+                      "type": "boolean"
                     }
                   },
                   "required": [
@@ -10168,7 +10534,9 @@
                   "labels": [
                     "string"
                   ],
-                  "publicIp": "string"
+                  "publicIp": "string",
+                  "hasTlsKey": true,
+                  "hasHawserToken": true
                 }
               }
             }
@@ -12217,16 +12585,21 @@
                 },
                 "example": {
                   "branches": [
-                    "main",
-                    "develop",
-                    "feature/test"
+                    {
+                      "name": "main",
+                      "sha": "a1b2c3d"
+                    },
+                    {
+                      "name": "develop",
+                      "sha": "e4f5a6b"
+                    }
                   ]
                 }
               }
             }
           },
           "400": {
-            "description": "The URL points at a loopback/link-local/metadata/reserved target, the credential does not match the URL host, or neither repositoryId nor url was supplied"
+            "description": "The URL points at a loopback/link-local/metadata/reserved target, or neither repositoryId nor url was supplied"
           },
           "403": {
             "description": "Permission denied (requires git:edit)"
@@ -12246,7 +12619,7 @@
             "bearerAuth": []
           }
         ],
-        "description": "Accepts either repositoryId (an existing repository, using its stored URL and credential) or url + credentialId (a new repository). SECURITY: the repository target is checked against the shared SSRF policy — loopback, link-local/cloud-metadata and other reserved dangerous targets are rejected, while ordinary private-LAN addresses are intentionally allowed so self-hosted Git servers remain supported. A raw url may only be paired with a stored credentialId whose username plausibly matches that host (SSH credentials are always allowed). The ls-remote is bounded by a hard timeout.",
+        "description": "Accepts either repositoryId (an existing repository, using its stored URL and credential) or url + credentialId (a new repository). Each branch carries its short commit SHA. SECURITY: the repository target is checked against the shared SSRF policy — loopback, link-local/cloud-metadata and other reserved dangerous targets are rejected, while ordinary private-LAN addresses are intentionally allowed so self-hosted Git servers remain supported. The ls-remote is bounded by a hard timeout.",
         "requestBody": {
           "required": true,
           "content": {
@@ -12799,7 +13172,7 @@
             }
           },
           "400": {
-            "description": "composePath missing, neither repositoryId nor url supplied, the URL points at a loopback/link-local/metadata/reserved target, the URL is an unsupported transport (ext::/file::), the credential does not match the URL host, the compose/env path escapes the repository, or the repo/env-file preview reported an error"
+            "description": "composePath missing, neither repositoryId nor url supplied, the URL points at a loopback/link-local/metadata/reserved target, the URL is an unsupported transport (ext::/file::), the compose/env path escapes the repository, or the repo/env-file preview reported an error"
           },
           "403": {
             "description": "Permission denied (requires the git:edit permission — same model as /api/git/branches; an unauthenticated or read-only user is denied here rather than via a separate 401)"
@@ -12819,7 +13192,7 @@
             "bearerAuth": []
           }
         ],
-        "description": "repositoryId from GET /api/git/repositories. credentialId from GET /api/git/credentials. SECURITY: requires the git:edit permission when authentication is enabled (403 otherwise). The repository target is checked against the shared SSRF policy — loopback, link-local/cloud-metadata and other reserved dangerous targets are rejected, while ordinary private-LAN addresses are intentionally allowed so self-hosted Git servers remain supported. The ext::/file:: transports and local paths are rejected; the raw url may only be paired with a stored credentialId whose username plausibly matches that host (exfiltration defense); and composePath/envFilePath are constrained to stay inside the cloned repository (path traversal).",
+        "description": "repositoryId from GET /api/git/repositories. credentialId from GET /api/git/credentials. SECURITY: requires the git:edit permission when authentication is enabled (403 otherwise). The repository target is checked against the shared SSRF policy — loopback, link-local/cloud-metadata and other reserved dangerous targets are rejected, while ordinary private-LAN addresses are intentionally allowed so self-hosted Git servers remain supported. The ext::/file:: transports and local paths are rejected; and composePath/envFilePath are constrained to stay inside the cloned repository (path traversal).",
         "requestBody": {
           "required": true,
           "content": {
@@ -13333,6 +13706,9 @@
           "400": {
             "description": "The id path segment is not a valid integer"
           },
+          "403": {
+            "description": "Caller lacks the git:edit permission"
+          },
           "404": {
             "description": "No repository exists with that ID"
           },
@@ -13396,6 +13772,9 @@
           "400": {
             "description": "The id path segment is not a valid integer"
           },
+          "403": {
+            "description": "Caller lacks the git:view permission"
+          },
           "404": {
             "description": "No repository exists with that ID"
           },
@@ -13456,6 +13835,9 @@
           },
           "400": {
             "description": "The id path segment is not a valid integer"
+          },
+          "403": {
+            "description": "Caller lacks the git:edit permission"
           },
           "404": {
             "description": "No repository exists with that ID"
@@ -13520,6 +13902,9 @@
           "400": {
             "description": "The id path segment is not a valid integer"
           },
+          "403": {
+            "description": "Caller lacks the git:edit permission"
+          },
           "404": {
             "description": "No repository exists with that ID"
           },
@@ -13571,7 +13956,7 @@
             }
           },
           "400": {
-            "description": "The url field is missing, the URL points at a loopback/link-local/metadata/reserved target, the URL is an unsupported transport, or the credential does not match the URL host"
+            "description": "The url field is missing, the URL points at a loopback/link-local/metadata/reserved target, the URL is an unsupported transport."
           },
           "403": {
             "description": "Caller lacks the settings:manage permission"
@@ -13591,7 +13976,7 @@
             "bearerAuth": []
           }
         ],
-        "description": "credentialId from GET /api/git/credentials. SECURITY: the repository target is checked against the shared SSRF policy — loopback, link-local/cloud-metadata and other reserved dangerous targets are rejected, while ordinary private-LAN addresses are intentionally allowed so self-hosted Git servers remain supported. The ext::/file:: transports and local paths are rejected; the raw url may only be paired with a stored credentialId whose username plausibly matches that host (exfiltration defense).",
+        "description": "credentialId from GET /api/git/credentials. SECURITY: the repository target is checked against the shared SSRF policy — loopback, link-local/cloud-metadata and other reserved dangerous targets are rejected, while ordinary private-LAN addresses are intentionally allowed so self-hosted Git servers remain supported. The ext::/file:: transports and local paths are rejected.",
         "requestBody": {
           "required": true,
           "content": {
@@ -14477,7 +14862,8 @@
             "description": "The deployment triggered by the webhook failed"
           }
         },
-        "security": []
+        "security": [],
+        "description": "A secret is required by default; set ALLOW_WEBHOOKS_WITHOUT_SECRET=true to accept a secret-less trigger on an isolated network."
       },
       "post": {
         "operationId": "post_api_git_webhook_id",
@@ -14535,7 +14921,7 @@
           }
         },
         "security": [],
-        "description": "Public endpoint authenticated by the repository's webhook secret via `X-Hub-Signature-256` (GitHub) or `X-Gitlab-Token` (GitLab); the raw request body is used for HMAC verification."
+        "description": "Public endpoint authenticated by the repository's webhook secret via `X-Hub-Signature-256` (GitHub) or `X-Gitlab-Token` (GitLab); the raw request body is used for HMAC verification. A secret is required by default; set ALLOW_WEBHOOKS_WITHOUT_SECRET=true to accept a secret-less trigger on an isolated network."
       }
     },
     "/api/hawser/connect": {
@@ -15134,6 +15520,145 @@
             "bearerAuth": []
           }
         ]
+      }
+    },
+    "/api/icons/selfhst/{ref}": {
+      "get": {
+        "operationId": "get_api_icons_selfhst_ref",
+        "tags": [
+          "icons"
+        ],
+        "summary": "Get a selfh.st app icon (raw SVG), fetched once from the CDN and cached on disk",
+        "parameters": [
+          {
+            "name": "ref",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "selfh.st icon Reference (lowercase letters, digits, hyphens), e.g. \"plex\""
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Raw image/svg+xml body (the icon, or a neutral placeholder if it can't be resolved), Cache-Control public max-age=604800"
+          },
+          "400": {
+            "description": "The ref is not a valid selfh.st reference"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Proxies an icon from the selfh.st collection so the browser never contacts an external CDN directly. The first request for a given ref fetches the SVG from jsdelivr and caches it under DATA_DIR; later requests are served locally. Icons are CC BY 4.0 (selfh.st). When the icon can't be resolved it returns a neutral placeholder SVG (200) rather than a 404, so a grid of icons doesn't read as probing to a WAF."
+      }
+    },
+    "/api/icons/selfhst/batch": {
+      "post": {
+        "operationId": "post_api_icons_selfhst_batch",
+        "tags": [
+          "icons"
+        ],
+        "summary": "Resolve multiple selfh.st app icons in one request (avoids per-icon requests a WAF flags as crawling)",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "icons maps each resolved reference to a data:image/svg+xml base64 URI; unresolvable refs are omitted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "icons": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "icons"
+                  ]
+                },
+                "example": {
+                  "icons": {
+                    "plex": "data:image/svg+xml;base64,PHN2Zy4uLg=="
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request body is missing a refs array"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Takes a list of selfh.st icon references and returns each resolved icon as a data:image/svg+xml URI, keyed by reference. Unresolvable or invalid refs are omitted rather than returned as errors. Each icon is fetched from the CDN once and cached on disk, same as the single-icon endpoint.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "refs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "refs"
+                ]
+              },
+              "example": {
+                "refs": [
+                  "plex",
+                  "gitea",
+                  "grafana"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/icons/selfhst-manifest": {
+      "get": {
+        "operationId": "get_api_icons_selfhst-manifest",
+        "tags": [
+          "icons"
+        ],
+        "summary": "Get the selfh.st icon manifest (index.json), cached on disk with a 7-day TTL",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "The raw selfh.st index.json array (application/json)"
+          },
+          "503": {
+            "description": "The manifest is unavailable (never cached and the upstream fetch failed)"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Returns the selfh.st collection manifest (~2880 entries with Name, Reference, format flags, Category, Tags) so the icon picker can search it. Fetched once from the CDN and cached under DATA_DIR. Returns 503 only if it has never been fetched and the fetch fails."
       }
     },
     "/api/images": {
@@ -24441,7 +24966,7 @@
         "tags": [
           "stacks"
         ],
-        "summary": "Get a stack's env vars (non-secrets from file, secrets masked from DB) plus injected provider keys",
+        "summary": "Get a stack's env vars plus injected provider keys",
         "parameters": [
           {
             "name": "name",
@@ -24473,7 +24998,23 @@
                     "variables": {
                       "type": "array",
                       "items": {
-                        "type": "string"
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string"
+                          },
+                          "value": {
+                            "type": "string"
+                          },
+                          "isSecret": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "value",
+                          "isSecret"
+                        ]
                       }
                     },
                     "injectedSecretKeys": {
@@ -24492,7 +25033,11 @@
                 },
                 "example": {
                   "variables": [
-                    "string"
+                    {
+                      "key": "string",
+                      "value": "string",
+                      "isSecret": true
+                    }
                   ],
                   "injectedSecretKeys": [
                     "string"
@@ -24516,14 +25061,15 @@
           {
             "bearerAuth": []
           }
-        ]
+        ],
+        "description": "The source of `variables` depends on the stack type. For a GIT stack, ALL variables (secret and non-secret) come from the database via this endpoint - the DB is the canonical store the UI, `POST /env/validate`, and deploys read. For an INTERNAL/adopted stack, non-secrets come from the on-disk `.env` file (written via `PUT /env/raw`) and only secrets come from the DB. Secret values are masked as `***` and never returned in plaintext. Each variable is `{ key, value, isSecret }`."
       },
       "put": {
         "operationId": "put_api_stacks_name_env",
         "tags": [
           "stacks"
         ],
-        "summary": "Save a stack's secret env vars to the DB (secrets never hit disk)",
+        "summary": "Save a stack's env vars to the DB",
         "parameters": [
           {
             "name": "name",
@@ -24566,6 +25112,7 @@
             "bearerAuth": []
           }
         ],
+        "description": "Persists EVERY variable in the body to the database (secrets and non-secrets alike). For a GIT stack this is the canonical store - non-secret overrides and secrets both belong here, NOT in the `.env` file. For an INTERNAL/adopted stack the DB is used for secrets while non-secrets are expected in the `.env` file (written via `PUT /env/raw`); posting a non-secret here still saves it but the file remains the source the UI reads for that type. A masked secret value of `***` is left unchanged (the stored value is preserved). Each item is `{ key, value, isSecret? }`; a request whose `variables` are not such objects is rejected with 400.",
         "requestBody": {
           "required": true,
           "content": {
@@ -24576,7 +25123,22 @@
                   "variables": {
                     "type": "array",
                     "items": {
-                      "type": "string"
+                      "type": "object",
+                      "properties": {
+                        "key": {
+                          "type": "string"
+                        },
+                        "value": {
+                          "type": "string"
+                        },
+                        "isSecret": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "key",
+                        "value"
+                      ]
                     }
                   }
                 },
@@ -24586,7 +25148,16 @@
               },
               "example": {
                 "variables": [
-                  "string"
+                  {
+                    "key": "DB_HOST",
+                    "value": "db",
+                    "isSecret": false
+                  },
+                  {
+                    "key": "DB_PASSWORD",
+                    "value": "s3cret",
+                    "isSecret": true
+                  }
                 ]
               }
             }
@@ -24897,6 +25468,207 @@
         }
       }
     },
+    "/api/stacks/{name}/icon": {
+      "get": {
+        "operationId": "get_api_stacks_name_icon",
+        "tags": [
+          "stacks"
+        ],
+        "summary": "Get a stack's uploaded custom icon (raw image/webp bytes, not JSON)",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Stack name"
+          },
+          {
+            "name": "env",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Environment id the stack belongs to"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Binary image/webp response body, Cache-Control public max-age=3600"
+          },
+          "403": {
+            "description": "Permission denied (needs stacks:view)"
+          },
+          "404": {
+            "description": "No custom icon set for this stack"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "operationId": "post_api_stacks_name_icon",
+        "tags": [
+          "stacks"
+        ],
+        "summary": "Set a stack's icon - either a name reference or an uploaded image",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Stack name"
+          },
+          {
+            "name": "env",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Environment id the stack belongs to"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "icon": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "icon"
+                  ]
+                },
+                "example": {
+                  "success": true,
+                  "icon": "selfhst:plex"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Neither icon nor image supplied, or image exceeds the size limit"
+          },
+          "403": {
+            "description": "Permission denied (needs stacks:edit)"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Body carries EITHER `icon` (a lucide name or `selfhst:<ref>`) to set a referenced icon, OR `image` (a base64-encoded data URL, ~300KB limit) to upload a custom one (stored as `custom:stack`). One of the two is required.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "icon": {
+                    "type": "string"
+                  },
+                  "image": {
+                    "type": "string"
+                  }
+                }
+              },
+              "example": {
+                "icon": "string",
+                "image": "string"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_api_stacks_name_icon",
+        "tags": [
+          "stacks"
+        ],
+        "summary": "Remove a stack's custom icon",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Stack name"
+          },
+          {
+            "name": "env",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Environment id the stack belongs to"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ]
+                },
+                "example": {
+                  "success": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied (needs stacks:edit)"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/stacks/{name}/relocate": {
       "post": {
         "operationId": "post_api_stacks_name_relocate",
@@ -25059,7 +25831,7 @@
         "tags": [
           "stacks"
         ],
-        "summary": "Restart a stack (mode=restart) or recreate its containers (mode=recreate); progress and the final result stream over Server-Sent Events",
+        "summary": "Restart a stack (mode=restart|ordered|recreate); progress and the final result stream over Server-Sent Events",
         "parameters": [
           {
             "name": "name",
@@ -25086,7 +25858,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Restart mode — \"recreate\" recreates containers, anything else performs a plain restart"
+            "description": "Restart mode — \"recreate\" recreates containers (new IDs, re-pull), \"ordered\" does a stop+start honoring depends_on ordering (same IDs), anything else is a plain in-place restart"
           }
         ],
         "responses": {
@@ -25534,7 +26306,17 @@
           "stacks"
         ],
         "summary": "Return the default Dockhand stacks directory ($DATA_DIR/stacks/) where new stacks are stored by default",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "env",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Environment ID used to select the local or environment-scoped stacks root"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful response",
@@ -25859,7 +26641,7 @@
         "tags": [
           "stacks"
         ],
-        "summary": "List stack source records (their stored compose/env paths and source type)",
+        "summary": "List stack source records (their stored compose/env paths and source type, plus an env-var count)",
         "parameters": [
           {
             "name": "env",
@@ -26432,6 +27214,9 @@
                       },
                       "projectUrl": {
                         "type": "string"
+                      },
+                      "detailsUrl": {
+                        "type": "string"
                       }
                     },
                     "required": [
@@ -26989,6 +27774,9 @@
           "400": {
             "description": "Missing username/password, or password shorter than 8 characters"
           },
+          "401": {
+            "description": "Authentication required (auth is enabled and the caller is not authenticated; the first admin during initial setup is exempt)"
+          },
           "403": {
             "description": "Permission denied (RBAC 'users:create' missing — only applies once an admin already exists)"
           },
@@ -27231,6 +28019,9 @@
           "400": {
             "description": "User id is required, or the new password is shorter than 8 characters"
           },
+          "401": {
+            "description": "Authentication required (auth is enabled and the caller is not authenticated)"
+          },
           "403": {
             "description": "Permission denied (editing another user without users:edit)"
           },
@@ -27344,6 +28135,9 @@
           },
           "400": {
             "description": "User id is required"
+          },
+          "401": {
+            "description": "Authentication required (auth is enabled and the caller is not authenticated)"
           },
           "403": {
             "description": "Permission denied (missing users:remove)"

@@ -1,8 +1,22 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getStackComposeFile, deployStack, saveStackComposeFile } from '$lib/server/stacks';
+import { dirname } from 'node:path';
+import { getStackComposeFile, deployStack, saveStackComposeFile, remapHawserStagingDisplayPaths, unmapHawserDisplayComposeOptionsToStaging } from '$lib/server/stacks';
 import { authorize } from '$lib/server/authorize';
 import { createJobResponse } from '$lib/server/sse';
+
+async function remapDisplayPath(
+	name: string,
+	envId: number | undefined,
+	path: string | null | undefined
+): Promise<string | null | undefined> {
+	if (!path) return path;
+	const remapped = await remapHawserStagingDisplayPaths(name, envId, {
+		composePath: path,
+		composePaths: []
+	});
+	return remapped.composePath ?? path;
+}
 
 // GET /api/stacks/[name]/compose - Get compose file content
 /**
@@ -32,17 +46,26 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 			return json({
 				error: result.error,
 				needsFileLocation: result.needsFileLocation || false,
-				composePath: result.composePath,
-				envPath: result.envPath
+				composePath: await remapDisplayPath(name, envIdNum, result.composePath),
+				envPath: await remapDisplayPath(name, envIdNum, result.envPath)
 			}, { status: 404 });
+		}
+
+		const displayPaths = await remapHawserStagingDisplayPaths(name, envIdNum, {
+			composePath: result.composePath ?? null,
+			composePaths: []
+		});
+		let displayStackDir = result.stackDir;
+		if (displayPaths.composePath) {
+			displayStackDir = dirname(displayPaths.composePath);
 		}
 
 		return json({
 			content: result.content,
-			stackDir: result.stackDir,
-			composePath: result.composePath,
-			envPath: result.envPath,
-			suggestedEnvPath: result.suggestedEnvPath
+			stackDir: displayStackDir,
+			composePath: displayPaths.composePath,
+			envPath: await remapDisplayPath(name, envIdNum, result.envPath),
+			suggestedEnvPath: await remapDisplayPath(name, envIdNum, result.suggestedEnvPath)
 		});
 	} catch (error: any) {
 		console.error(`Error getting compose file for stack ${name}:`, error);
@@ -101,17 +124,25 @@ export const PUT: RequestHandler = async ({ params, request, url, cookies }) => 
 			return json({ error: 'Permission denied: binding a secret provider requires the secrets permission' }, { status: 403 });
 		}
 
-		// Build options object for custom paths, move operation, file renames, and secret provider binding
-		const pathOptions = (composePath || envPath !== undefined || moveFromDir || oldComposePath || oldEnvPath || secretProviderId !== undefined)
-			? { composePath, envPath, moveFromDir, oldComposePath, oldEnvPath, secretProviderId }
-			: undefined;
+		// Convert Hawser display paths from the UI back to Dockhand staging paths
+		// before writing. secretProviderId is not a path and is merged after unmap.
+		let pathOptions: Parameters<typeof unmapHawserDisplayComposeOptionsToStaging>[2] | undefined =
+			(composePath || envPath !== undefined || moveFromDir || oldComposePath || oldEnvPath)
+				? { composePath, envPath, moveFromDir, oldComposePath, oldEnvPath }
+				: undefined;
+		if (pathOptions) {
+			pathOptions = await unmapHawserDisplayComposeOptionsToStaging(name, envIdNum, pathOptions);
+		}
 
 		// Persist the submitted content on EVERY accepted PUT, whether or not path fields came
 		// along. Gating this on pathOptions left Dockhand's stored copy stale while restart:true
 		// deployed the new content - a later GET then served the old copy, silently reverting the
 		// change on the next read/edit/deploy round-trip (#1383). saveStackComposeFile handles a
 		// possibly-undefined pathOptions fine (the non-restart branch already relied on that).
-		const saveResult = await saveStackComposeFile(name, content, false, envIdNum, pathOptions);
+		const saveResult = await saveStackComposeFile(name, content, false, envIdNum, {
+			...pathOptions,
+			...(secretProviderId !== undefined ? { secretProviderId } : {})
+		});
 		if (!saveResult.success) {
 			return json({ error: saveResult.error }, { status: 500 });
 		}

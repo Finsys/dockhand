@@ -44,6 +44,7 @@ export const environments = sqliteTable('environments', {
 	hawserAgentName: text('hawser_agent_name'),
 	hawserVersion: text('hawser_version'),
 	hawserCapabilities: text('hawser_capabilities'), // JSON array: ["compose", "exec", "metrics"]
+	hawserStacksDir: text('hawser_stacks_dir'), // Remote STACKS_DIR reported by agent
 	createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
 	updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`)
 });

@@ -12,6 +12,7 @@ import { initCryptoFallback } from '$lib/server/crypto-fallback';
 import { detectHostDataDir } from '$lib/server/host-path';
 import { listContainers, removeContainer } from '$lib/server/docker';
 import { migrateCredentials } from '$lib/server/encryption';
+import { validateStacksDirAtStartup } from '$lib/server/stacks';
 import { gzipSync } from 'node:zlib';
 import { rmSync, readdirSync, existsSync } from 'fs';
 import { join } from 'path';
@@ -144,6 +145,7 @@ if (!initialized) {
 
 		setServerStartTime(); // Track when server started
 		initDatabase();
+		validateStacksDirAtStartup();
 
 		// Migrate plain text credentials to encrypted storage.
 		// This also handles key rotation if ENCRYPTION_KEY env var differs from the
