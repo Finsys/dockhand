@@ -14,7 +14,8 @@ import { authorize } from '$lib/server/authorize';
  * resp-404: No git stack exists with that ID
  * resp-500: The sync failed
  */
-export const POST: RequestHandler = async ({ params, cookies }) => {
+export const POST: RequestHandler = async (event) => {
+	const { params, cookies } = event;
 	const auth = await authorize(cookies);
 
 	try {

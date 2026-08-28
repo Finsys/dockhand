@@ -4,7 +4,7 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { Input } from '$lib/components/ui/input';
 	import { Loader2, FolderOpen, File, FileText, ChevronRight, ArrowUp, AlertCircle, FolderPlus, Search, Import, Check, X } from 'lucide-svelte';
-	import type { Component } from 'svelte';
+	import type { Component, ComponentType } from 'svelte';
 	import RecentLocationsPanel from './RecentLocationsPanel.svelte';
 
 	export interface FileEntry {
@@ -20,7 +20,7 @@
 		open: boolean;
 		title?: string;
 		/** Optional icon component to display before the title */
-		icon?: Component<{ class?: string }>;
+		icon?: Component<{ class?: string }> | ComponentType;
 		description?: string;
 		initialPath?: string;
 		selectFilter?: RegExp;
@@ -33,6 +33,12 @@
 		onScanDirectory?: (path: string) => void;
 		/** For adopt mode: show loading state on scan button */
 		scanning?: boolean;
+		/** Directory-listing endpoint. Defaults to the host filesystem API. */
+		apiUrl?: string;
+		rootPath?: string;
+		cloningMessage?: string;
+		multiSelect?: boolean;
+		onSelectMany?: (entries: { path: string; name: string }[]) => void;
 		onSelect: (path: string, name: string) => void;
 		onClose: () => void;
 	}
@@ -49,18 +55,28 @@
 		onFilePreview,
 		onScanDirectory,
 		scanning = false,
+		apiUrl = '/api/system/files',
+		rootPath = $bindable(''),
+		cloningMessage = $bindable(undefined),
+		multiSelect = false,
+		onSelectMany,
 		onSelect,
 		onClose
 	}: Props = $props();
 
 	let currentPath = $state<string | null>(null);
+	let parentPath = $state<string | null>(null);
 	let entries = $state<FileEntry[]>([]);
 	let loading = $state(false);
 	let error = $state<string | null>(null);
 
+	// Filter query for quickly narrowing down the file list
+	let filterQuery = $state('');
+
 	// Track selected file
 	let selectedPath = $state<string | null>(null);
 	let selectedName = $state<string | null>(null);
+	let selectedEntries = $state<FileEntry[]>([]);
 
 	// New folder creation
 	let creatingFolder = $state(false);
@@ -82,10 +98,10 @@
 
 	// Load directory when dialog opens
 	$effect(() => {
-		if (open && !currentPath) {
+		if (open && currentPath === null) {
 			// Wait a tick for the panel to load, then use first location or initialPath
 			setTimeout(() => {
-				const firstLocation = recentLocationsPanel?.getFirstLocation();
+				const firstLocation = apiUrl === '/api/system/files' ? recentLocationsPanel?.getFirstLocation() : null;
 				loadDirectory(firstLocation || initialPath);
 			}, 50);
 		}
@@ -98,9 +114,11 @@
 	async function loadDirectory(path: string) {
 		loading = true;
 		error = null;
+		filterQuery = ''; // Clear filter when navigating
 
 		try {
-			const res = await fetch(`/api/system/files?path=${encodeURIComponent(path)}`);
+			const separator = apiUrl.includes('?') ? '&' : '?';
+			const res = await fetch(`${apiUrl}${separator}path=${encodeURIComponent(path)}`);
 			const data = await res.json();
 
 			if (!res.ok) {
@@ -109,7 +127,9 @@
 			}
 
 			currentPath = data.path;
+			parentPath = data.parent ?? null;
 			entries = data.entries;
+			if (typeof data.rootPath === 'string') rootPath = data.rootPath;
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load directory';
 		} finally {
@@ -119,7 +139,6 @@
 
 	function handleEntryClick(entry: FileEntry, doubleClick: boolean = false) {
 		if (selectMode === 'adopt') {
-			// Adopt mode: click on directory navigates, click on highlighted file triggers preview
 			if (entry.type === 'directory') {
 				loadDirectory(entry.path);
 			} else if (highlightFilter?.test(entry.name) && onFilePreview) {
@@ -130,33 +149,38 @@
 
 		if (entry.type === 'directory') {
 			if (selectMode === 'file_or_directory' && !doubleClick) {
-				// Single click on directory in file_or_directory mode - select it
 				selectedPath = entry.path;
 				selectedName = entry.name;
 			} else {
-				// Double click or other modes - navigate into directory
 				selectedPath = null;
 				selectedName = null;
 				loadDirectory(entry.path);
 			}
 		} else if (selectMode === 'file' || selectMode === 'file_or_directory') {
-			// Select file
+			if (multiSelect) {
+				selectedEntries = selectedEntries.some((item) => item.path === entry.path)
+					? selectedEntries.filter((item) => item.path !== entry.path)
+					: [...selectedEntries, entry];
+				return;
+			}
 			selectedPath = entry.path;
 			selectedName = entry.name;
 		}
 	}
 
 	function handleGoUp() {
-		if (!currentPath || currentPath === '/') return;
+		if (!currentPath || currentPath === '/' || currentPath === rootPath) return;
 
-		const parent = currentPath.replace(/\/[^/]+$/, '') || '/';
 		selectedPath = null;
 		selectedName = null;
-		loadDirectory(parent);
+		loadDirectory(parentPath ?? rootPath ?? '/');
 	}
 
 	function handleConfirm() {
-		if (selectMode === 'directory' && currentPath) {
+		if (multiSelect && selectedEntries.length && onSelectMany) {
+			onSelectMany(selectedEntries.map(({ path, name }) => ({ path, name })));
+			handleClose();
+		} else if (selectMode === 'directory' && currentPath) {
 			// In directory mode, select the current directory
 			const name = currentPath === '/' ? '/' : currentPath.split('/').pop() || '';
 			onSelect(currentPath, name);
@@ -178,6 +202,7 @@
 		entries = [];
 		selectedPath = null;
 		selectedName = null;
+		selectedEntries = [];
 		error = null;
 		open = false;
 		onClose();
@@ -273,14 +298,24 @@
 		return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 	}
 
-	const canGoUp = $derived(currentPath && currentPath !== '/');
-
-	// In directory mode, only show directories; otherwise show all
-	const filteredEntries = $derived(
-		selectMode === 'directory'
-			? entries.filter(e => e.type === 'directory')
-			: entries
+	const canGoUp = $derived(
+		currentPath &&
+		currentPath !== '/' &&
+		currentPath !== rootPath
 	);
+
+	// In directory mode, only show directories; otherwise show all.
+	// Also apply the user's filter query (case-insensitive name match).
+	const filteredEntries = $derived.by(() => {
+		let result = selectMode === 'directory'
+			? entries.filter(e => e.type === 'directory')
+			: entries;
+		if (filterQuery.trim()) {
+			const q = filterQuery.trim().toLowerCase();
+			result = result.filter(e => e.name.toLowerCase().includes(q));
+		}
+		return result;
+	});
 
 	const isAdoptMode = $derived(selectMode === 'adopt');
 </script>
@@ -301,11 +336,13 @@
 
 		<div class="flex-1 overflow-hidden flex {isAdoptMode ? 'min-h-0' : ''}">
 			<!-- Recent locations sidebar -->
-			<RecentLocationsPanel
-				bind:this={recentLocationsPanel}
-				{currentPath}
-				onSelect={handleRecentSelect}
-			/>
+			{#if apiUrl === '/api/system/files'}
+				<RecentLocationsPanel
+					bind:this={recentLocationsPanel}
+					{currentPath}
+					onSelect={handleRecentSelect}
+				/>
+			{/if}
 
 			<!-- Main browser area -->
 			<div class="flex-1 flex flex-col min-h-0">
@@ -320,9 +357,19 @@
 					>
 						<ArrowUp class="w-4 h-4" />
 					</button>
-					<code class="text-xs bg-muted px-2 py-1 rounded truncate flex-1 min-w-0">{currentPath || '/'}</code>
-					{#if creatingFolder}
-						<div class="flex items-center gap-1">
+				<code class="text-xs bg-muted px-2 py-1 rounded truncate min-w-0" style="flex: 1 1 0; max-width: 50%">{currentPath || '/'}</code>
+					<!-- Filter input -->
+					<div class="relative flex items-center flex-1 min-w-0 max-w-52">
+						<Search class="absolute left-2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+						<input
+							type="text"
+							bind:value={filterQuery}
+							placeholder="Filter…"
+							class="w-full pl-7 pr-2 py-1 text-xs rounded border bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+						/>
+					</div>
+					{#if apiUrl === '/api/system/files' && creatingFolder}
+					<div class="flex items-center gap-1">
 							<Input
 								bind:ref={folderInputEl}
 								bind:value={newFolderName}
@@ -351,7 +398,7 @@
 								<span class="text-xs text-red-500 truncate max-w-48" title={createError}>{createError}</span>
 							{/if}
 						</div>
-					{:else}
+					{:else if apiUrl === '/api/system/files'}
 						<button
 							type="button"
 							class="p-1 rounded hover:bg-muted text-muted-foreground"
@@ -384,7 +431,10 @@
 				<div class="flex-1 overflow-auto">
 				{#if loading}
 					<div class="flex items-center justify-center py-12">
-						<Loader2 class="w-6 h-6 animate-spin text-muted-foreground" />
+						<div class="flex flex-col items-center gap-2 text-muted-foreground">
+							<Loader2 class="w-6 h-6 animate-spin" />
+							{#if cloningMessage}<p class="text-sm">{cloningMessage}</p>{/if}
+						</div>
 					</div>
 				{:else if error}
 					<div class="flex flex-col items-center justify-center py-12 px-4 text-center">
@@ -393,15 +443,20 @@
 						</div>
 						<p class="text-red-600 dark:text-red-400 font-medium">Unable to browse files</p>
 						<p class="text-sm text-muted-foreground mt-1">{error}</p>
-						<Button variant="outline" size="sm" class="mt-4" onclick={() => currentPath && loadDirectory(currentPath)}>
+						<Button variant="outline" size="sm" class="mt-4" onclick={() => loadDirectory(currentPath || initialPath)}>
 							Retry
 						</Button>
 					</div>
 				{:else if filteredEntries.length === 0}
-					<div class="flex flex-col items-center justify-center py-12 text-muted-foreground">
-						<FolderOpen class="w-12 h-12 mb-3 opacity-50" />
+				<div class="flex flex-col items-center justify-center py-12 text-muted-foreground">
+					<FolderOpen class="w-12 h-12 mb-3 opacity-50" />
+					{#if filterQuery.trim() && entries.length > 0}
+						<p>No matches for "<span class="font-medium">{filterQuery}</span>"</p>
+						<button type="button" class="mt-2 text-xs text-primary hover:underline" onclick={() => filterQuery = ''}>Clear filter</button>
+					{:else}
 						<p>{selectMode === 'directory' ? 'No subdirectories' : 'Directory is empty'}</p>
-					</div>
+					{/if}
+				</div>
 				{:else}
 					<div class="divide-y">
 						{#each filteredEntries as entry}
@@ -411,7 +466,7 @@
 								type="button"
 								class="w-full flex items-center gap-3 px-4 {isAdoptMode ? 'py-1.5' : 'py-2'} hover:bg-muted/50 text-left transition-colors
 									{entry.type === 'directory' ? 'cursor-pointer' : (selectable || highlighted) ? 'cursor-pointer' : 'opacity-50 cursor-not-allowed'}
-									{selectedPath === entry.path ? 'bg-blue-50 dark:bg-blue-900/20' : ''}"
+									{selectedPath === entry.path || selectedEntries.some((item) => item.path === entry.path) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}"
 								onclick={() => (entry.type === 'directory' || selectable || highlighted) && handleEntryClick(entry, false)}
 								ondblclick={() => entry.type === 'directory' && handleEntryClick(entry, true)}
 								disabled={entry.type !== 'directory' && !selectable && !highlighted}
@@ -458,6 +513,10 @@
 							<span class="text-xs text-muted-foreground">Click to select file or folder, double-click to enter folder</span>
 						{/if}
 					</div>
+				{:else if multiSelect}
+					<div class="flex-1 text-xs text-muted-foreground">
+						{selectedEntries.length ? `${selectedEntries.length} file${selectedEntries.length === 1 ? '' : 's'} selected` : 'Select one or more files'}
+					</div>
 				{:else if selectedPath}
 					<div class="flex-1 flex items-center gap-2 min-w-0">
 						<span class="text-xs text-muted-foreground shrink-0">Selected:</span>
@@ -482,7 +541,7 @@
 					</Button>
 				{:else}
 					<Button
-						disabled={!selectedPath}
+						disabled={multiSelect ? selectedEntries.length === 0 : !selectedPath}
 						onclick={handleConfirm}
 					>
 						Select
