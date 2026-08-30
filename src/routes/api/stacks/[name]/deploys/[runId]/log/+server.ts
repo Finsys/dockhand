@@ -35,6 +35,8 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 	if (auth.authEnabled && !auth.isAuthenticated) {
 		return json({ error: 'Authentication required' }, { status: 401 });
 	}
+	// Coarse gate -- see the identical comment in
+	// .../deploys/[runId]/+server.ts's GET handler.
 	if (auth.authEnabled && !(await auth.can('stacks', 'view'))) {
 		return json({ error: 'Permission denied' }, { status: 403 });
 	}
@@ -44,6 +46,17 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 	if ('response' in loaded) return loaded.response;
 
 	const { run } = loaded;
+
+	// Scoped to the RUN's OWN environment -- see the identical comment in
+	// .../deploys/[runId]/+server.ts's GET handler for why this runs in
+	// addition to, and after, the coarse gate above. This is the MOST
+	// sensitive of the three routes (it is the one that can carry secrets
+	// that survived redaction, see the module doc comment below), so this
+	// check runs BEFORE readRunLog() ever touches the file.
+	if (auth.authEnabled && !(await auth.can('stacks', 'view', run.environmentId ?? undefined))) {
+		return json({ error: 'Permission denied' }, { status: 403 });
+	}
+
 	const log = await readRunLog(String(run.id));
 	if (log === null) {
 		return json({ error: 'Log not found' }, { status: 404 });

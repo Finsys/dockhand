@@ -35,11 +35,20 @@ let authState: {
 	isAuthenticated: boolean;
 	isEnterprise: boolean;
 	can: boolean;
+	// H1 regression coverage needs `can()` to answer DIFFERENTLY depending on
+	// which environmentId it's asked about (a caller can have stacks:view for
+	// environment 1 but not environment 9) -- a single flat boolean can't
+	// express that. Left undefined, `can` (the flat boolean below) is the
+	// answer for every environmentId, unchanged from before -- every
+	// pre-existing test in this file that never touches canByEnv keeps its
+	// original behavior. Set only by the tests that specifically exercise
+	// per-environment scoping.
+	canByEnv?: (environmentId: number | undefined) => boolean;
 	accessibleEnvs: number[] | 'all';
 };
 
 function resetAuthState() {
-	authState = { authEnabled: true, isAuthenticated: true, isEnterprise: false, can: true, accessibleEnvs: 'all' };
+	authState = { authEnabled: true, isAuthenticated: true, isEnterprise: false, can: true, canByEnv: undefined, accessibleEnvs: 'all' };
 }
 resetAuthState();
 
@@ -47,7 +56,8 @@ registerAuthorizeFake(async () => ({
 	authEnabled: authState.authEnabled,
 	isAuthenticated: authState.isAuthenticated,
 	isEnterprise: authState.isEnterprise,
-	can: async () => authState.can,
+	can: async (_resource: string, _action: string, environmentId?: number) =>
+		authState.canByEnv ? authState.canByEnv(environmentId) : authState.can,
 	canAccessEnvironment: async (id: number) =>
 		authState.accessibleEnvs === 'all' || authState.accessibleEnvs.includes(id)
 }));
@@ -365,3 +375,89 @@ describe('GET /api/stacks/[name]/deploys/[runId]/log', () => {
 	});
 });
 
+
+// =============================================================================
+// H1 regression: env-scoped permission on the three single-run routes
+//
+// Reproduces the branch-review scenario: a caller has stacks:view/edit for
+// SOME environment (which alone is enough to pass the coarse, un-scoped
+// `can('stacks', 'view'|'edit')` gate every route still runs first -- see
+// "authenticated but lacking permission -> 403" above) but NOT for the
+// environment the run under test actually belongs to. Before the fix, none
+// of the three routes checked permission against run.environmentId at all,
+// so the coarse gate's global OR-across-roles merge was the only check --
+// a caller scoped to environment 1 could read/delete a run that belongs to
+// environment 9.
+// =============================================================================
+
+describe('H1: permission is scoped to the RUN\'s own environment, not the global merge', () => {
+	beforeEach(() => {
+		authState.isEnterprise = true;
+		authState.accessibleEnvs = 'all'; // isolate this from the SEPARATE canAccessEnvironment check (already correct, see "kein Befund")
+	});
+
+	test('GET single run: caller has stacks:view broadly (passes the coarse gate) but NOT for env 9, and the run belongs to env 9 -> 403, not the 200 the pre-fix global merge produced', async () => {
+		authState.canByEnv = (envId) => envId !== 9; // granted everywhere EXCEPT env 9 -- still passes the coarse can('stacks','view') gate (called with environmentId=undefined), so this isolates the NEW scoped check
+		execStore.set(1, { ...RUN, environmentId: 9 });
+		const res = await runRoute.GET(makeEvent());
+		expect(res.status).toBe(403);
+		expect((await res.json()).error).toBe('Permission denied');
+	});
+
+	test('GET single run: caller has stacks:view for the run\'s OWN env -> 200', async () => {
+		authState.canByEnv = (envId) => envId === undefined || envId === 9; // undefined: satisfies the coarse gate; 9: satisfies the scoped check
+		execStore.set(1, { ...RUN, environmentId: 9 });
+		const res = await runRoute.GET(makeEvent());
+		expect(res.status).toBe(200);
+		expect((await res.json()).id).toBe(1);
+	});
+
+	test('DELETE: caller has stacks:edit broadly but NOT for env 9, and the run belongs to env 9 -> 403, nothing deleted', async () => {
+		authState.canByEnv = (envId) => envId !== 9;
+		execStore.set(1, { ...RUN, environmentId: 9 });
+		const res = await runRoute.DELETE(makeEvent());
+		expect(res.status).toBe(403);
+		expect(deletedIds).toEqual([]);
+		expect(execStore.has(1)).toBe(true);
+	});
+
+	test('DELETE: caller has stacks:edit for the run\'s OWN env -> 200, both halves deleted', async () => {
+		authState.canByEnv = (envId) => envId === undefined || envId === 9;
+		execStore.set(1, { ...RUN, environmentId: 9 });
+		await appendRunLog('1', 'output');
+		const res = await runRoute.DELETE(makeEvent());
+		expect(res.status).toBe(200);
+		expect(deletedIds).toEqual([1]);
+		expect(await readRunLog('1')).toBeNull();
+	});
+
+	test('GET log: caller has stacks:view broadly but NOT for env 9, and the run belongs to env 9 -> 403, log file never read', async () => {
+		authState.canByEnv = (envId) => envId !== 9;
+		execStore.set(1, { ...RUN, environmentId: 9 });
+		await appendRunLog('1', 'env-9-only secret output');
+		const res = await logRoute.GET(makeEvent());
+		expect(res.status).toBe(403);
+	});
+
+	test('GET log: caller has stacks:view for the run\'s OWN env -> 200 with the log text', async () => {
+		authState.canByEnv = (envId) => envId === undefined || envId === 9;
+		execStore.set(1, { ...RUN, environmentId: 9 });
+		await appendRunLog('1', 'env-9 output');
+		const res = await logRoute.GET(makeEvent());
+		expect(res.status).toBe(200);
+		expect(await res.text()).toBe('env-9 output');
+	});
+
+	test('a run with NO environment (local install, environmentId null) checks against the global merge, not against a specific env', async () => {
+		// null run.environmentId maps to `can(..., undefined)` (the `?? undefined`
+		// in the fix) -- there is no per-environment role to scope against for a
+		// run that was never attributed to one. canByEnv(undefined) is the same
+		// check the coarse gate above already performs, so this is really
+		// confirming the scoped check does not ITSELF reject a local run once the
+		// coarse gate already let it through.
+		authState.canByEnv = (envId) => envId === undefined;
+		execStore.set(1, { ...RUN, environmentId: null });
+		const res = await runRoute.GET(makeEvent());
+		expect(res.status).toBe(200);
+	});
+});

@@ -29,6 +29,10 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 	if (auth.authEnabled && !auth.isAuthenticated) {
 		return json({ error: 'Authentication required' }, { status: 401 });
 	}
+	// Coarse gate: reject a caller who lacks stacks:view EVERYWHERE, before
+	// even touching the database. This does not by itself scope to the run's
+	// environment (see the check below) -- it only screens out someone with
+	// no stacks:view grant on any role at all.
 	if (auth.authEnabled && !(await auth.can('stacks', 'view'))) {
 		return json({ error: 'Permission denied' }, { status: 403 });
 	}
@@ -38,6 +42,24 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 	if ('response' in loaded) return loaded.response;
 
 	const { run } = loaded;
+
+	// Scoped to the RUN's OWN environment, checked ADDITIONALLY and AFTER the
+	// coarse gate above -- it needs run.environmentId, which only exists once
+	// loadOwnedDeployRun has resolved it. Without this, a caller with
+	// stacks:view for SOME environment (which already satisfied the coarse
+	// gate above via the global OR-across-roles merge) but not for THIS run's
+	// environment could read a run from an environment they have no
+	// stacks:view grant on at all. Same idea the sibling list route
+	// (deploys/+server.ts) already documents for itself, and the same pattern
+	// api/git/stacks/[id]/+server.ts and env-files/+server.ts use: derive the
+	// environment from the loaded entity, then check permission against THAT.
+	// `?? undefined` maps a local run (NULL environmentId) to the same
+	// "no environment context" global-permission check those routes use for
+	// their own nullable environmentId (`gitStack.environmentId || undefined`).
+	if (auth.authEnabled && !(await auth.can('stacks', 'view', run.environmentId ?? undefined))) {
+		return json({ error: 'Permission denied' }, { status: 403 });
+	}
+
 	return json({
 		id: run.id,
 		environmentId: run.environmentId,
@@ -80,6 +102,7 @@ export const DELETE: RequestHandler = async ({ params, cookies }) => {
 	if (auth.authEnabled && !auth.isAuthenticated) {
 		return json({ error: 'Authentication required' }, { status: 401 });
 	}
+	// Coarse gate -- see the identical comment on GET above.
 	if (auth.authEnabled && !(await auth.can('stacks', 'edit'))) {
 		return json({ error: 'Permission denied' }, { status: 403 });
 	}
@@ -89,6 +112,15 @@ export const DELETE: RequestHandler = async ({ params, cookies }) => {
 	if ('response' in loaded) return loaded.response;
 
 	const { run } = loaded;
+
+	// Scoped to the RUN's OWN environment -- see the identical comment on GET
+	// above for why this is checked in addition to, and after, the coarse
+	// gate. Checked before either delete happens: neither the log file nor
+	// the database record is touched if this denies.
+	if (auth.authEnabled && !(await auth.can('stacks', 'edit', run.environmentId ?? undefined))) {
+		return json({ error: 'Permission denied' }, { status: 403 });
+	}
+
 	await deleteRunLog(String(run.id));
 	await deleteScheduleExecution(run.id);
 
