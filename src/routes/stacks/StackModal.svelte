@@ -32,6 +32,9 @@
 	import * as Alert from '$lib/components/ui/alert';
 	import { ErrorDialog } from '$lib/components/ui/error-dialog';
 	import { readJobResponse } from '$lib/utils/sse-fetch';
+	import { shouldCloseAfterSave } from '$lib/utils/save-close-policy';
+	import LogViewer from '../logs/LogViewer.svelte';
+	import { formatRunStatus } from '$lib/utils/run-status';
 	import { toast } from 'svelte-sonner';
 	import ComposeGraphViewer from './ComposeGraphViewer.svelte';
 
@@ -49,15 +52,9 @@
 		gitInfo?: { commit?: string; url?: string; branch?: string } | null; // Git provenance for read-only git stacks
 		onClose: () => void;
 		onSuccess: () => void; // Called after create or save
-		// Live compose output, forwarded to the page for deploying operations
-		// (Create & Start, Save & redeploy). The modal keeps no output state of its
-		// own so closing it cannot tear down a running deploy.
-		onOutputStart?: (title: string) => void;
-		onOutputLine?: (line: string) => void;
-		onOutputFinish?: (output: string | undefined, ok: boolean, exitCode?: number) => void;
 	}
 
-	let { open = $bindable(), mode: propMode, stackName: propStackName = '', initialCompose, initialStackName, readonly = false, gitInfo = null, onClose, onSuccess, onOutputStart, onOutputLine, onOutputFinish }: Props = $props();
+	let { open = $bindable(), mode: propMode, stackName: propStackName = '', initialCompose, initialStackName, readonly = false, gitInfo = null, onClose, onSuccess }: Props = $props();
 
 	let gitCommitCopied = $state<'ok' | 'error' | null>(null);
 	let gitUrlCopied = $state<'ok' | 'error' | null>(null);
@@ -174,6 +171,46 @@
 
 	// Error dialog state
 	let operationError = $state<{ title: string; message: string; details?: string } | null>(null);
+
+	// Live compose output for deploying operations (Create & Start, Save & redeploy),
+	// rendered inline below the editor instead of in a separate window -- the modal
+	// stays open while it runs (see shouldCloseAfterSave) so the output stays visible
+	// where the error it might explain also lives.
+	let outputTitle = $state('');
+	let outputLines = $state<string[]>([]);
+	let outputRunning = $state(false);
+	let outputOk = $state<boolean | undefined>(undefined);
+	let outputMs = $state<number | undefined>(undefined);
+	let outputExitCode = $state<number | undefined>(undefined);
+	let outputStartedAt = 0;
+
+	function startOutput(title: string) {
+		outputTitle = title;
+		outputLines = [];
+		outputRunning = true;
+		outputStartedAt = Date.now();
+		outputOk = undefined;
+		outputMs = undefined;
+		outputExitCode = undefined;
+	}
+
+	function appendOutputLine(line: string) {
+		outputLines = [...outputLines, line];
+	}
+
+	function finishOutput(output: string | undefined, ok: boolean, exitCode?: number) {
+		outputRunning = false;
+		outputOk = ok;
+		outputMs = Date.now() - outputStartedAt;
+		outputExitCode = exitCode;
+		if (outputLines.length === 0 && output) {
+			outputLines = output.split('\n');
+		}
+	}
+
+	const outputStatusLine = $derived(
+		formatRunStatus({ running: outputRunning, ok: outputOk, ms: outputMs, exitCode: outputExitCode })
+	);
 
 	// Stack exists warning dialog state
 	let showExistsWarning = $state(false);
@@ -1329,7 +1366,7 @@
 
 			requestBody.secretProviderId = formSecretProviderId;
 
-			if (start) onOutputStart?.(`Starting ${newStackName.trim()}`);
+			if (start) startOutput(`Starting ${newStackName.trim()}`);
 
 			// Create the stack
 			response = await fetch(appendEnvParam('/api/stacks', envId), {
@@ -1340,9 +1377,9 @@
 
 			// When start=true, response is a job or JSON; when start=false, it's plain JSON
 			const data = start
-				? await readJobResponse(response, (line) => onOutputLine?.(line))
+				? await readJobResponse(response, (line) => appendOutputLine(line))
 				: await response.json();
-			if (start) onOutputFinish?.(
+			if (start) finishOutput(
 				typeof data.output === 'string' ? data.output : undefined,
 				Boolean(data.success),
 				typeof data.exitCode === 'number' ? data.exitCode : undefined
@@ -1359,9 +1396,14 @@
 
 			toast.success(`Created stack "${newStackName.trim()}"`);
 			onSuccess();
-			handleClose();
+			if (shouldCloseAfterSave(start)) handleClose();
 		} catch (e: any) {
-			if (start) onOutputFinish?.(undefined, false);
+			// The success path above already calls finishOutput with the server's real
+			// ok/exitCode before it throws (a deploy that ran but reported failure).
+			// Only mark the run failed here if it never got that far -- overwriting a
+			// real exit code with `undefined` would erase the very thing the docked
+			// output panel exists to show.
+			if (start && outputRunning) finishOutput(undefined, false);
 			operationError = {
 				title: 'Failed to create stack',
 				message: e.message || 'An error occurred while creating the stack',
@@ -1519,7 +1561,7 @@
 				);
 			}
 
-			if (restart) onOutputStart?.(`Redeploying ${stackName}`);
+			if (restart) startOutput(`Redeploying ${stackName}`);
 
 			// Save compose file (with optional paths) - after env so deploy reads fresh .env
 			const response = await fetch(
@@ -1533,9 +1575,9 @@
 
 			// When restart=true, response is a job or JSON; when restart=false, it's plain JSON
 			const data = restart
-				? await readJobResponse(response, (line) => onOutputLine?.(line))
+				? await readJobResponse(response, (line) => appendOutputLine(line))
 				: await response.json();
-			if (restart) onOutputFinish?.(
+			if (restart) finishOutput(
 				typeof data.output === 'string' ? data.output : undefined,
 				Boolean(data.success),
 				typeof data.exitCode === 'number' ? data.exitCode : undefined
@@ -1552,14 +1594,15 @@
 			toast.success(restart ? 'Stack applied' : 'Stack saved');
 			onSuccess();
 
-			if (!restart) {
-				// Show success briefly then close
+			if (shouldCloseAfterSave(restart)) {
+				// Show success briefly then close. A redeploy stays open instead so the
+				// compose output rendered below the editor stays visible.
 				setTimeout(() => handleClose(), 500);
-			} else {
-				handleClose();
 			}
 		} catch (e: any) {
-			if (restart) onOutputFinish?.(undefined, false);
+			// Same reasoning as handleCreate's catch block: don't clobber a real
+			// ok/exitCode that finishOutput already recorded before this throw.
+			if (restart && outputRunning) finishOutput(undefined, false);
 			operationError = {
 				title: restart ? 'Failed to apply stack' : 'Failed to save stack',
 				message: e.message || (restart ? 'An error occurred while applying the stack' : 'An error occurred while saving the stack'),
@@ -2219,6 +2262,27 @@
 				</div>
 			{/if}
 		</div>
+
+		<!-- Live output for Create & Start / Save & redeploy, rendered below the editor so the
+		     dialog can stay open (see shouldCloseAfterSave) instead of handing the user off to a
+		     separate window. Only takes up space once there is something to show. -->
+		{#if outputRunning || outputLines.length > 0}
+			<div class="h-64 shrink-0 border-t border-zinc-200 dark:border-zinc-700 flex flex-col min-h-0">
+				<div class="px-5 py-1.5 text-xs text-zinc-500 dark:text-zinc-400 flex items-center gap-2 flex-shrink-0">
+					{#if outputRunning}
+						<Loader2 class="w-3 h-3 animate-spin" />
+					{/if}
+					{outputTitle} — {outputStatusLine}
+				</div>
+				<LogViewer
+					logs={outputLines.join('\n')}
+					title={outputTitle}
+					autoRefresh={false}
+					autoScroll={outputRunning}
+					class="flex-1 min-h-0"
+				/>
+			</div>
+		{/if}
 
 		<!-- Footer -->
 		<div class="px-5 py-2.5 border-t border-zinc-200 dark:border-zinc-700 flex items-center justify-between flex-shrink-0">
