@@ -33,7 +33,7 @@
 	import { ErrorDialog } from '$lib/components/ui/error-dialog';
 	import { readJobResponse } from '$lib/utils/sse-fetch';
 	import { saveCloseTiming } from '$lib/utils/save-close-policy';
-	import { clampSplitRatio } from '$lib/utils/split-ratio';
+	import { clampNumber } from '$lib/utils/clamp-number';
 	import LogViewer from '../logs/LogViewer.svelte';
 	import { formatRunStatus } from '$lib/utils/run-status';
 	import { toast } from 'svelte-sonner';
@@ -1119,7 +1119,7 @@
 		if (isDraggingSplit && containerRef) {
 			const rect = containerRef.getBoundingClientRect();
 			const newRatio = ((e.clientX - rect.left) / rect.width) * 100;
-			splitRatio = clampSplitRatio(newRatio, 30, 80);
+			splitRatio = clampNumber(newRatio, 30, 80);
 		}
 		if (isDraggingValidate && editorRowRef) {
 			const rect = editorRowRef.getBoundingClientRect();
@@ -1127,14 +1127,14 @@
 			const w = rect.right - e.clientX;
 			// Floor at 320px: below that the header's title + count chips + re-check button
 			// no longer fit on one line and start clipping.
-			validatePanelWidth = Math.max(320, Math.min(560, w));
+			validatePanelWidth = clampNumber(w, 320, 560);
 		}
 		if (isDraggingOutputSplit && outputAreaRef) {
 			const rect = outputAreaRef.getBoundingClientRect();
 			// output panel is on the bottom: its height = distance from cursor to the
 			// area's bottom edge, as a percentage of the whole editor+output area.
 			const newRatio = ((rect.bottom - e.clientY) / rect.height) * 100;
-			outputSplitRatio = clampSplitRatio(newRatio, OUTPUT_SPLIT_MIN, OUTPUT_SPLIT_MAX);
+			outputSplitRatio = clampNumber(newRatio, OUTPUT_SPLIT_MIN, OUTPUT_SPLIT_MAX);
 		}
 	}
 
