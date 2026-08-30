@@ -1,8 +1,10 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getStackComposeFile, deployStack, saveStackComposeFile } from '$lib/server/stacks';
+import { getStackComposeFile, deployStack, saveStackComposeFile, requireComposeFile } from '$lib/server/stacks';
 import { authorize } from '$lib/server/authorize';
 import { createJobResponse } from '$lib/server/sse';
+import { createRunRecorder } from '$lib/server/deploy-run-record';
+import { hashComposeContent, hashEnvFingerprint } from '$lib/server/deploy-run-record-core';
 
 // GET /api/stacks/[name]/compose - Get compose file content
 /**
@@ -119,8 +121,45 @@ export const PUT: RequestHandler = async ({ params, request, url, cookies }) => 
 		if (restart) {
 			// Deploy with docker compose up -d --force-recreate.
 			// Force recreate ensures env var changes are applied.
-			// Get authoritative paths from DB/filesystem for deploy (now reflects the saved content).
-			const composeInfo = await getStackComposeFile(name, envIdNum);
+			// Get authoritative paths AND effective env vars from DB/filesystem for deploy
+			// (now reflects the saved content). requireComposeFile() wraps
+			// getStackComposeFile() and additionally resolves secretVars/nonSecretVars --
+			// the same DB-sourced values deployStack itself resolves again internally
+			// at deploy time (stacks.ts), and the same shape deploy/+server.ts already
+			// merges for ITS run record below.
+			const composeInfo = await requireComposeFile(name, envIdNum);
+
+			// Same run record as the dedicated deploy endpoint (deploy/+server.ts:75) --
+			// built up front since createJobResponse takes the recorder as an
+			// already-resolved value, not something it can await for itself.
+			//
+			// composeHash is hashed off the just-submitted `content`, NOT
+			// composeInfo.content: saveStackComposeFile() above wrote this exact string
+			// verbatim (no reformatting, see stacks.ts), and it's the same string handed
+			// to the deployStack call below -- hashing it directly ties the recorded hash to
+			// precisely what gets deployed, instead of a redundant re-read off disk that
+			// could only ever produce the same bytes anyway.
+			//
+			// Skipped entirely when composeInfo.success is false (the compose file is
+			// unexpectedly unreadable right here, immediately after we just wrote it) --
+			// the deploy below proceeds unchanged either way (composePath/envPath already
+			// tolerate this via `|| undefined`), but recording a run without secretVars
+			// would mean the recorder's end() redacts against an empty secrets list,
+			// risking a leaked secret value in the stored error text.
+			let recorder: Awaited<ReturnType<typeof createRunRecorder>> | undefined;
+			if (composeInfo.success) {
+				const effectiveEnvVars = { ...(composeInfo.nonSecretVars ?? {}), ...(composeInfo.secretVars ?? {}) };
+				recorder = await createRunRecorder({
+					stackName: name,
+					envId: envIdNum ?? null,
+					userId: auth.user?.id,
+					triggeredBy: 'manual',
+					options: { pull: false, build: false, forceRecreate: true },
+					composeHash: hashComposeContent(content),
+					envHash: hashEnvFingerprint(effectiveEnvVars),
+					secrets: Object.values(effectiveEnvVars)
+				});
+			}
 
 			// Deploy via SSE to keep connection alive during long operations
 			return createJobResponse(async (send) => {
@@ -144,7 +183,7 @@ export const PUT: RequestHandler = async ({ params, request, url, cookies }) => 
 					console.error(`Error deploying stack ${name}:`, error);
 					send('result', { success: false, error: error.message || 'Failed to deploy stack' });
 				}
-			}, request);
+			}, request, recorder);
 		}
 
 		// No restart: the content is already persisted above.
