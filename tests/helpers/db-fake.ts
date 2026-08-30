@@ -57,7 +57,16 @@ const KNOWN_EXPORTS = [
 	'getScheduleExecutionIdsByType',
 	'createScheduleExecution',
 	'updateScheduleExecution',
-	'appendScheduleExecutionLog'
+	'appendScheduleExecutionLog',
+	'getGitStack',
+	'getGitRepository',
+	'getGitCredential',
+	'updateGitRepository',
+	'updateGitStack',
+	'upsertStackSource',
+	'getEnvironment',
+	'getSecretEnvVarsAsRecord',
+	'getNonSecretEnvVarsAsRecord'
 ] as const;
 
 const impls: Record<string, AnyFn> = {};

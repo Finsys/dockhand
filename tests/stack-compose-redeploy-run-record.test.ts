@@ -24,13 +24,13 @@
  * this process (mock.module() replaces a module's exports WHOLESALE for the entire
  * test run, and Bun freezes the exported shape at first resolution).
  *
- * $lib/server/stacks is mocked WHOLESALE here with a single direct mock.module() call.
- * No other test file in the suite imports it (transitively or otherwise) as of this
- * writing -- like db.ts it pulls in better-sqlite3 (ERR_DLOPEN_FAILED under Bun) -- so
- * there is currently no collision risk in doing this directly, unlike db/authorize
- * above. If a second file ever needs to fake $lib/server/stacks, this call must move
- * into a shared tests/helpers/stacks-fake.ts first, the same way db-fake.ts and
- * authorize-fake.ts already solve this for their specifiers.
+ * $lib/server/stacks is faked via tests/helpers/stacks-fake.ts, the same shared,
+ * collision-safe registration point db-fake.ts/authorize-fake.ts already use for
+ * their specifiers -- like db.ts it pulls in better-sqlite3 (ERR_DLOPEN_FAILED under
+ * Bun), so it can't be imported for real here either. This used to be a direct
+ * mock.module() call in this file; it moved into the shared helper once a second
+ * file (tests/git-stack-deploy-run-record.test.ts) needed to fake $lib/server/stacks
+ * too -- exactly the situation this doc comment originally predicted.
  *
  * The dedicated deploy endpoint (deploy/+server.ts) is deliberately NOT imported here
  * to double-check its own recording: it additionally pulls in $lib/server/audit ->
@@ -41,13 +41,14 @@
  * file -- deploy/+server.ts is untouched by this task's diff, so a source-level guard
  * is sufficient evidence, not a shortcut.
  */
-import { describe, test, expect, mock, beforeAll, beforeEach, afterAll } from 'bun:test';
+import { describe, test, expect, beforeAll, beforeEach, afterAll } from 'bun:test';
 import { mkdtemp, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { registerDbFake } from './helpers/db-fake';
 import { registerAuthorizeFake } from './helpers/authorize-fake';
+import { registerStacksFake } from './helpers/stacks-fake';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -152,21 +153,19 @@ function resetStacksState() {
 }
 resetStacksState();
 
-mock.module('$lib/server/stacks', () => ({
-	getStackComposeFile: async () => {
-		throw new Error('getStackComposeFile: not exercised here -- only the GET handler uses it, this suite only calls PUT');
-	},
-	saveStackComposeFile: async (name: string, content: string, _create: boolean, envId?: number | null) => {
-		saveCalls.push({ name, content, envId });
-		return { success: true };
-	},
-	requireComposeFile: async (_name: string, _envId?: number | null) => requireComposeResult,
-	deployStack: async (options: { onLine?: (line: string) => void }) => {
-		deployStackCalls.push(options);
-		for (const line of deployStackOnLines) options.onLine?.(line);
-		return deployStackResult;
-	}
-}));
+registerStacksFake('getStackComposeFile', async () => {
+	throw new Error('getStackComposeFile: not exercised here -- only the GET handler uses it, this suite only calls PUT');
+});
+registerStacksFake('saveStackComposeFile', async (name: string, content: string, _create: boolean, envId?: number | null) => {
+	saveCalls.push({ name, content, envId });
+	return { success: true };
+});
+registerStacksFake('requireComposeFile', async (_name: string, _envId?: number | null) => requireComposeResult);
+registerStacksFake('deployStack', async (options: { onLine?: (line: string) => void }) => {
+	deployStackCalls.push(options);
+	for (const line of deployStackOnLines) options.onLine?.(line);
+	return deployStackResult;
+});
 
 // -- Route under test, imported AFTER all the fakes above are registered ----
 

@@ -11,11 +11,16 @@ import {
 	updateGitStack,
 	upsertStackSource,
 	getEnvironment,
+	getSecretEnvVarsAsRecord,
+	getNonSecretEnvVarsAsRecord,
 	type GitRepository,
 	type GitCredential,
-	type GitStackWithRepo
+	type GitStackWithRepo,
+	type ScheduleTrigger
 } from './db';
 import { deployStack, getStackDir } from './stacks';
+import { createRunRecorder } from './deploy-run-record';
+import { hashComposeContent, hashEnvFingerprint } from './deploy-run-record-core';
 import { sendEventNotification } from './notifications';
 import { buildBasicAuthHeader } from './git-auth';
 import { assertSafeRepoUrl, assertSafeGitRef, repoFilePath } from './git-url-safety';
@@ -1312,8 +1317,38 @@ async function notifyGitSync(stackName: string, envId: number | null | undefined
 	} catch { /* never changes the deploy outcome */ }
 }
 
-export async function deployGitStack(stackId: number, options?: { force?: boolean }): Promise<{ success: boolean; output?: string; error?: string; skipped?: boolean }> {
+/**
+ * The single function EVERY git-stack deploy trigger funnels through -- the manual
+ * "Deploy" button, a config-update-then-redeploy, both webhook methods, create-and-
+ * deploy, and (via runGitStackSync) the cron scheduler and the schedules page's "run
+ * now". That is why the stack_deploy run recorder is wired in HERE and not at each of
+ * those call sites: wiring it at the route level only (the way compose/+server.ts and
+ * the non-git deploy/+server.ts do it) would leave every OTHER caller -- crucially the
+ * cron- and webhook-triggered ones, the truly unattended runs the design doc's
+ * Meilenstein 5 is about -- unrecorded. Duplicating the composeHash/envHash/secrets
+ * setup at six-plus call sites would also drift out of sync with each other over time;
+ * one implementation, reached from everywhere, cannot.
+ */
+export async function deployGitStack(
+	stackId: number,
+	options?: {
+		force?: boolean;
+		/** Who/what triggered this deploy, for the stack_deploy run record. Defaults to
+		 *  'manual' for backward compatibility with existing callers/tests that predate
+		 *  this parameter -- every REAL call site below passes its own explicit value. */
+		triggeredBy?: ScheduleTrigger;
+		/** Best-effort only, like every other stack_deploy record (design doc §10.5):
+		 *  webhook/cron callers have no user and simply omit this. */
+		userId?: number;
+		/** Forwarded to deployStack() alongside the recorder's own line() call, so an
+		 *  HTTP caller (the manual deploy route, the deployNow routes) can still stream
+		 *  progress over SSE exactly as before -- recording never depends on whether
+		 *  anyone is listening. */
+		onLine?: (line: string) => void;
+	}
+): Promise<{ success: boolean; output?: string; error?: string; skipped?: boolean }> {
 	const force = options?.force ?? true; // Default to force for backward compatibility
+	const triggeredBy: ScheduleTrigger = options?.triggeredBy ?? 'manual';
 
 	const gitStack = await getGitStack(stackId);
 	if (!gitStack) {
@@ -1376,20 +1411,72 @@ export async function deployGitStack(stackId: number, options?: { force?: boolea
 	console.log(`${logPrefix} Compose filename:`, syncResult.composeFileName);
 	console.log(`${logPrefix} Env filename:`, syncResult.envFileName ?? '(none)');
 
-	const result = await deployStack({
-		name: gitStack.stackName,
-		compose: syncResult.composeContent!,
-		envId: gitStack.environmentId,
-		sourceDir: syncResult.composeDir, // Copy entire directory from git repo
-		composeFileName: syncResult.composeFileName, // Use original compose filename from repo
-		envFileName: syncResult.envFileName, // Env file relative to compose dir (for --env-file flag, optional)
-		forceRecreate,
-		build: gitStack.buildOnDeploy,
-		noBuildCache: gitStack.noBuildCache,
-		pullPolicy: gitStack.repullImages ? 'always' : undefined,
-		filesToDelete: syncResult.deletionPlan?.toDelete,
-		isGitDeploy: true // suppress stack_* notification; we emit git_sync_* below
+	// Same stack_deploy run record shape the non-git routes build (compose PUT,
+	// dedicated deploy endpoint) -- see deploy-run-record.ts. composeHash is taken
+	// from syncResult.composeContent, the EXACT string handed to deployStack right
+	// below, not a redundant re-read off disk.
+	//
+	// envHash/secrets mirror the same (deliberately approximate) resolution the
+	// non-git routes already use: getNonSecretEnvVarsAsRecord/getSecretEnvVarsAsRecord
+	// keyed by stackName+envId -- the same DB-sourced values deployStack itself
+	// resolves again internally at deploy time (stacks.ts). This does NOT include
+	// secret-provider-injected vars or the git repo's own .env file content; that's
+	// fine for the redaction list because deployStack's onLine output is
+	// independently redacted against ITS OWN, more complete secrets set
+	// (makeLineForwarder in stacks.ts) -- a leaked value in the log is still caught
+	// even if it isn't one of the vars hashed here.
+	const nonSecretVars = await getNonSecretEnvVarsAsRecord(gitStack.stackName, gitStack.environmentId);
+	const secretVars = await getSecretEnvVarsAsRecord(gitStack.stackName, gitStack.environmentId);
+	const effectiveEnvVars = { ...nonSecretVars, ...secretVars };
+
+	const recorder = await createRunRecorder({
+		stackName: gitStack.stackName,
+		envId: gitStack.environmentId ?? null,
+		userId: options?.userId,
+		triggeredBy,
+		options: { pull: !!gitStack.repullImages, build: !!gitStack.buildOnDeploy, forceRecreate },
+		composeHash: hashComposeContent(syncResult.composeContent!),
+		envHash: hashEnvFingerprint(effectiveEnvVars),
+		secrets: Object.values(effectiveEnvVars)
 	});
+
+	// Mirrors every redacted output line into the run record's log file, in addition
+	// to (not instead of) forwarding it to the caller's own onLine (SSE progress) --
+	// see the recorder doc comment above for why this can't be "record OR stream".
+	const onLine = (line: string) => {
+		recorder.line(line);
+		options?.onLine?.(line);
+	};
+
+	let result: Awaited<ReturnType<typeof deployStack>>;
+	try {
+		result = await deployStack({
+			name: gitStack.stackName,
+			compose: syncResult.composeContent!,
+			envId: gitStack.environmentId,
+			sourceDir: syncResult.composeDir, // Copy entire directory from git repo
+			composeFileName: syncResult.composeFileName, // Use original compose filename from repo
+			envFileName: syncResult.envFileName, // Env file relative to compose dir (for --env-file flag, optional)
+			forceRecreate,
+			build: gitStack.buildOnDeploy,
+			noBuildCache: gitStack.noBuildCache,
+			pullPolicy: gitStack.repullImages ? 'always' : undefined,
+			filesToDelete: syncResult.deletionPlan?.toDelete,
+			isGitDeploy: true, // suppress stack_* notification; we emit git_sync_* below
+			onLine
+		});
+	} catch (error) {
+		// deployStack has never been observed to throw here (every existing caller of
+		// deployGitStack calls it without a try/catch around this point), but the
+		// record must not be left "running" forever on the day that changes.
+		await recorder.end(false, undefined, error instanceof Error ? error.message : String(error));
+		throw error;
+	}
+
+	// Closed right after the result is known, before the post-success bookkeeping
+	// below (deletion sync, upsertStackSource) -- those never fail the deploy itself,
+	// so the recorded duration reflects the deploy, not the bookkeeping around it.
+	await recorder.end(result.success, undefined, result.success ? undefined : result.error);
 
 	console.log(`${logPrefix} ----------------------------------------`);
 	console.log(`${logPrefix} DEPLOY GIT STACK RESULT`);
