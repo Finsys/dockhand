@@ -9,6 +9,7 @@ import { existsSync, mkdirSync, rmSync, readdirSync, cpSync, statSync, unlinkSyn
 import { join, resolve, dirname, basename, normalize as pathNormalize, sep as pathSep } from 'node:path';
 import { spawn as nodeSpawn } from 'node:child_process';
 import { collectProcess } from './process-output-core';
+import { makeLineForwarder } from './secret-redaction';
 import {
 	applyFileDeletions,
 	hashDirFiles,
@@ -141,6 +142,8 @@ export interface DeployStackOptions {
 	 * (Stack events and Git sync are separate user-facing groups). stack_events is
 	 * still recorded regardless. (#1295) */
 	isGitDeploy?: boolean;
+	/** Optional callback invoked per redacted output line as the compose command runs. */
+	onLine?: (line: string) => void;
 }
 
 // =============================================================================
@@ -1040,6 +1043,8 @@ function findComposeOverrideFile(stackDir: string, composeFileName: string): str
  * @param secretVars - Secret environment variables (injected via shell env, NEVER written to disk)
  * @param workingDir - Optional working directory for compose execution (for imported stacks)
  * @param customComposePath - Optional path to existing compose file (for imported stacks, skips writing)
+ * @param onLine - Optional callback invoked per output line, redacted against envVars/secretVars
+ *   (NOT spawnEnv — that also carries PATH/HOME/DOCKER_CONFIG and would over-redact)
  */
 async function executeLocalCompose(
 	operation: 'up' | 'down' | 'stop' | 'start' | 'restart' | 'pull',
@@ -1063,7 +1068,8 @@ async function executeLocalCompose(
 	// direct-remote only: when the stack folder was staged to <remoteStackHostDir> on the target
 	// host, rewrite the compose's same-dir relative binds (`./x`) to <remoteStackHostDir>/x so the
 	// remote daemon binds the staged files. undefined = no staging, compose unchanged.
-	remoteStackHostDir?: string
+	remoteStackHostDir?: string,
+	onLine?: (line: string) => void
 ): Promise<StackOperationResult> {
 	const logPrefix = `[Stack:${stackName}]`;
 
@@ -1391,7 +1397,15 @@ async function executeLocalCompose(
 		}, COMPOSE_TIMEOUT_MS);
 
 		try {
-			const { exitCode: code, stdout, stderr } = await collectProcess(proc);
+			// Do NOT use spawnEnv! It also carries PATH, HOME, DOCKER_CONFIG, DOCKER_API_VERSION.
+			// HOME typically falls back to "/root" -- 5 characters, below MIN_REPLACEABLE_LENGTH.
+			// Under our own rule, that would withhold EVERY line containing "/root".
+			const secrets = [...Object.values(envVars ?? {}), ...Object.values(secretVars ?? {})]
+				.filter((v): v is string => typeof v === 'string');
+			const { exitCode: code, stdout, stderr } = await collectProcess(
+				proc,
+				onLine ? makeLineForwarder(onLine, secrets) : undefined
+			);
 
 			console.log(`${logPrefix} ----------------------------------------`);
 			console.log(`${logPrefix} COMPOSE PROCESS COMPLETE`);
@@ -1469,6 +1483,9 @@ async function executeLocalCompose(
  *
  * @param envVars - Non-secret environment variables (from .env file)
  * @param secretVars - Secret environment variables (injected via shell env on Hawser, NEVER in .env)
+ * @param onLine - Accepted for signature parity with the local execution path. Hawser's
+ *   `/_hawser/compose` call is a single request/response, not a stream, so this path
+ *   cannot report lines as they happen yet — that lands in a follow-up task. Unused here.
  */
 async function executeComposeViaHawser(
 	operation: 'up' | 'down' | 'stop' | 'start' | 'restart' | 'pull',
@@ -1486,7 +1503,9 @@ async function executeComposeViaHawser(
 	noBuildCache?: boolean,
 	pullPolicy?: string,
 	filesToDelete?: FileToDelete[],
-	removeFiles?: boolean
+	removeFiles?: boolean,
+	// eslint-disable-next-line @typescript-eslint/no-unused-vars -- see doc comment above
+	onLine?: (line: string) => void
 ): Promise<StackOperationResult> {
 	const logPrefix = `[Stack:${stackName}]`;
 	// Import dockerFetch dynamically to avoid circular dependency
@@ -1667,13 +1686,16 @@ async function executeComposeViaHawser(
  *
  * @param envVars - Non-secret environment variables (from .env file)
  * @param secretVars - Secret environment variables (from DB, injected via shell env)
+ * @param onLine - Optional callback invoked per redacted output line as the command runs.
+ *   Forwarded to whichever execution path is chosen (local socket, direct, or Hawser).
  */
 async function executeComposeCommand(
 	operation: 'up' | 'down' | 'stop' | 'start' | 'restart' | 'pull',
 	options: ComposeCommandOptions,
 	composeContent: string,
 	envVars?: Record<string, string>,
-	secretVars?: Record<string, string>
+	secretVars?: Record<string, string>,
+	onLine?: (line: string) => void
 ): Promise<StackOperationResult> {
 	const { stackName, envId, forceRecreate, build, noBuildCache, pullPolicy, removeVolumes, stackFiles, workingDir, composePath, envPath, useOverrideFile, serviceName, composeFileName, filesToDelete, removeFiles } = options;
 
@@ -1700,7 +1722,9 @@ async function executeComposeCommand(
 			serviceName,
 			build,
 			noBuildCache,
-			pullPolicy
+			pullPolicy,
+			undefined,    // remoteStackHostDir
+			onLine
 		);
 	}
 
@@ -1766,7 +1790,8 @@ async function executeComposeCommand(
 				noBuildCache,
 				pullPolicy,
 				filesToDelete,
-				removeFiles
+				removeFiles,
+				onLine
 			);
 		}
 
@@ -1829,7 +1854,8 @@ async function executeComposeCommand(
 				build,
 				noBuildCache,
 				pullPolicy,
-				remoteStackHostDir
+				remoteStackHostDir,
+				onLine
 			);
 		}
 
@@ -1861,7 +1887,9 @@ async function executeComposeCommand(
 				serviceName,
 				build,
 				noBuildCache,
-				pullPolicy
+				pullPolicy,
+				undefined,    // remoteStackHostDir
+				onLine
 			);
 		}
 	}
@@ -2319,7 +2347,8 @@ async function notifyStackLifecycle(stackName: string, envId: number | null | un
 
 export async function startStack(
 	stackName: string,
-	envId?: number | null
+	envId?: number | null,
+	onLine?: (line: string) => void
 ): Promise<StackOperationResult> {
 	const result = await requireComposeFile(stackName, envId);
 
@@ -2352,7 +2381,8 @@ export async function startStack(
 		opts,
 		result.content!,
 		result.nonSecretVars,
-		result.secretVars
+		result.secretVars,
+		onLine
 	);
 	await notifyStackLifecycle(stackName, envId, 'stack_started', startResult);
 	return startResult;
@@ -2364,7 +2394,8 @@ export async function startStack(
  */
 export async function stopStack(
 	stackName: string,
-	envId?: number | null
+	envId?: number | null,
+	onLine?: (line: string) => void
 ): Promise<StackOperationResult> {
 	const result = await requireComposeFile(stackName, envId);
 
@@ -2386,7 +2417,8 @@ export async function stopStack(
 		{ stackName, envId, workingDir: result.stackDir, composePath: result.composePath, envPath: result.envPath, useOverrideFile: isGitStack, stackFiles: await lifecycleStackFiles(result.stackDir) },
 		result.content!,
 		result.nonSecretVars,
-		result.secretVars
+		result.secretVars,
+		onLine
 	);
 
 	// Stop any dynamically-spawned child containers not in the compose file
@@ -2412,7 +2444,8 @@ export async function stopStack(
 export async function restartStack(
 	stackName: string,
 	envId?: number | null,
-	mode: 'restart' | 'ordered' | 'recreate' = 'restart'
+	mode: 'restart' | 'ordered' | 'recreate' = 'restart',
+	onLine?: (line: string) => void
 ): Promise<StackOperationResult> {
 	const result = await requireComposeFile(stackName, envId);
 
@@ -2433,16 +2466,16 @@ export async function restartStack(
 
 	if (mode === 'recreate') {
 		// Stop first, then bring up with --force-recreate to ensure new container IDs
-		await executeComposeCommand('stop', opts, result.content!, result.nonSecretVars, result.secretVars);
+		await executeComposeCommand('stop', opts, result.content!, result.nonSecretVars, result.secretVars, onLine);
 		await applyProviderSecretsToComposeResult(result, stackName, envId, `[Stack:${stackName}]`);
-		composeResult = await executeComposeCommand('up', { ...opts, forceRecreate: true }, result.content!, result.nonSecretVars, result.secretVars);
+		composeResult = await executeComposeCommand('up', { ...opts, forceRecreate: true }, result.content!, result.nonSecretVars, result.secretVars, onLine);
 	} else if (mode === 'ordered') {
 		// Stop everything, then start in depends_on order (compose start honors the
 		// dependency graph). Same container IDs, no recreate, no re-pull.
-		await executeComposeCommand('stop', opts, result.content!, result.nonSecretVars, result.secretVars);
-		composeResult = await executeComposeCommand('start', opts, result.content!, result.nonSecretVars, result.secretVars);
+		await executeComposeCommand('stop', opts, result.content!, result.nonSecretVars, result.secretVars, onLine);
+		composeResult = await executeComposeCommand('start', opts, result.content!, result.nonSecretVars, result.secretVars, onLine);
 	} else {
-		composeResult = await executeComposeCommand('restart', opts, result.content!, result.nonSecretVars, result.secretVars);
+		composeResult = await executeComposeCommand('restart', opts, result.content!, result.nonSecretVars, result.secretVars, onLine);
 	}
 
 	// Restart any dynamically-spawned child containers not in the compose file
@@ -2458,7 +2491,8 @@ export async function restartStack(
 export async function downStack(
 	stackName: string,
 	envId?: number | null,
-	removeVolumes = false
+	removeVolumes = false,
+	onLine?: (line: string) => void
 ): Promise<StackOperationResult> {
 	const result = await requireComposeFile(stackName, envId);
 
@@ -2476,7 +2510,8 @@ export async function downStack(
 		{ stackName, envId, removeVolumes, workingDir: result.stackDir, composePath: result.composePath, envPath: result.envPath, useOverrideFile: isGitStack, stackFiles: await lifecycleStackFiles(result.stackDir) },
 		result.content!,
 		result.nonSecretVars,
-		result.secretVars
+		result.secretVars,
+		onLine
 	);
 
 	// Remove any dynamically-spawned child containers not in the compose file
@@ -2844,7 +2879,7 @@ async function reconcileStackPendingUpdates(stackName: string, envId: number): P
  * Uses stack locking to prevent concurrent deployments.
  */
 export async function deployStack(options: DeployStackOptions): Promise<StackOperationResult> {
-	const { name, compose, envId, sourceDir, forceRecreate, build, noBuildCache, pullPolicy, composePath, envPath, composeFileName, envFileName, filesToDelete, isGitDeploy } = options;
+	const { name, compose, envId, sourceDir, forceRecreate, build, noBuildCache, pullPolicy, composePath, envPath, composeFileName, envFileName, filesToDelete, isGitDeploy, onLine } = options;
 	const logPrefix = `[Stack:${name}]`;
 
 	console.log(`${logPrefix} ========================================`);
@@ -3036,7 +3071,8 @@ export async function deployStack(options: DeployStackOptions): Promise<StackOpe
 			},
 			compose,
 			isGitStack ? dbNonSecretVars : undefined,
-			secretVars
+			secretVars,
+			onLine
 		);
 		console.log(`${logPrefix} ========================================`);
 		console.log(`${logPrefix} DEPLOY STACK RESULT`);
