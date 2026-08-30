@@ -3,7 +3,7 @@ import {
 	updateScheduleExecution,
 	type ScheduleTrigger
 } from './db';
-import { appendRunLog, runLogFileName, budgetExceeded } from './deploy-log-store';
+import { appendRunLog, runLogFileName, SizeBudgetTracker } from './deploy-log-store';
 import { summarize } from './deploy-summary-core';
 import { buildRunDetails, type DeployRunOptions } from './deploy-run-record-core';
 import { redactLine } from './secret-redaction';
@@ -28,7 +28,7 @@ const ERROR_WITHHELD_MESSAGE = 'Deploy failed (error message withheld: contained
 
 const TRUNCATION_NOTICE = '\n[deploy log truncated: size budget exceeded]\n';
 
-class DeployRunRecorder implements RunRecorder {
+export class DeployRunRecorder implements RunRecorder {
 	private readonly executionId: number;
 	private readonly runId: string;
 	private readonly startedAtMs: number;
@@ -41,6 +41,9 @@ class DeployRunRecorder implements RunRecorder {
 	/** Chain of queued appends -- see line()'s doc comment for why this exists. */
 	private tail: Promise<void> = Promise.resolve();
 	private truncated = false;
+	/** Tracks the deploy-logs/ size budget without a full directory re-scan on every
+	 *  appended line -- see SizeBudgetTracker's doc comment (deploy-log-store.ts). */
+	private readonly sizeBudget: SizeBudgetTracker;
 
 	constructor(
 		executionId: number,
@@ -51,7 +54,12 @@ class DeployRunRecorder implements RunRecorder {
 			envHash: string;
 			userId?: number;
 			secrets: string[];
-		}
+		},
+		/** Test-only seam: lets tests exercise the truncation path with a tiny budget
+		 *  instead of writing gigabytes of real log data. createRunRecorder() never
+		 *  passes this, so production always gets SizeBudgetTracker's real default
+		 *  (BUDGET_BYTES, deploy-log-store.ts). */
+		sizeBudget?: SizeBudgetTracker
 	) {
 		this.executionId = executionId;
 		this.runId = String(executionId);
@@ -61,6 +69,7 @@ class DeployRunRecorder implements RunRecorder {
 		this.envHash = input.envHash;
 		this.userId = input.userId;
 		this.secrets = input.secrets;
+		this.sizeBudget = sizeBudget ?? new SizeBudgetTracker(this.runId);
 	}
 
 	/**
@@ -82,13 +91,17 @@ class DeployRunRecorder implements RunRecorder {
 			// file: a line that gets skipped because truncation already kicked in
 			// isn't counted as if it had been written.
 			this.lines.push(line);
-			await appendRunLog(this.runId, line + '\n');
+			const chunk = line + '\n';
+			await appendRunLog(this.runId, chunk);
 			// Checked AFTER writing, not before: a budget check ahead of the write
 			// would either reject a legitimate line on stale size info, or need a
 			// second read straight after anyway. Checking once, right after the
 			// write that just happened, is both simpler and exactly what "abort at
 			// the end of writing, not truncate mid-line" (design doc §5) asks for.
-			if (await budgetExceeded()) {
+			// recordAppend() itself only re-scans the directory occasionally (see
+			// SizeBudgetTracker) -- it does NOT re-stat the whole deploy-logs/
+			// directory on every call, unlike the budgetExceeded() this replaced.
+			if (await this.sizeBudget.recordAppend(Buffer.byteLength(chunk, 'utf8'))) {
 				this.truncated = true;
 				await appendRunLog(this.runId, TRUNCATION_NOTICE);
 			}
