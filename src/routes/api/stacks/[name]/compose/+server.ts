@@ -183,7 +183,7 @@ export const PUT: RequestHandler = async ({ params, request, url, cookies }) => 
 						// pullPolicy undefined (pull unchecked) means deployStack's post-deploy
 						// reconcileStackPendingUpdates() call is skipped too -- a stale "update
 						// available" badge on this stack won't clear until the next pull. Accepted
-						// tradeoff (see design doc 8.4), not a bug.
+						// tradeoff, not a bug.
 						pullPolicy: pullOpt ? 'always' : undefined,
 						composePath: composeInfo.composePath || undefined,
 						envPath: composeInfo.envPath || undefined,

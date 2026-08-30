@@ -1,8 +1,7 @@
 /**
- * M4 (design doc 8.4): before this task, POST /api/stacks (Create & Start) ALWAYS
- * deployed with build:false and no pullPolicy, regardless of what the caller sent --
- * a stack whose compose declares a `build:` section silently never built on its
- * first start.
+ * Before this fix, POST /api/stacks (Create & Start) ALWAYS deployed with
+ * build:false and no pullPolicy, regardless of what the caller sent -- a stack whose
+ * compose declares a `build:` section silently never built on its first start.
  *
  * This is a SOURCE-LEVEL check, not a route-level one, for the same reason
  * tests/stack-compose-redeploy-run-record.test.ts's own doc comment gives for NOT
@@ -18,10 +17,10 @@
  *
  * What IS covered by a real route-level test: the identical pull/build/forceRecreate
  * plumbing in PUT /api/stacks/[name]/compose (Save & redeploy), which has no such
- * import chain -- see the "restart:true build/pull/forceRecreate options (M4)"
- * describe block in stack-compose-redeploy-run-record.test.ts. Both routes were
- * changed together, from the same requestBody shape RedeployPopover.svelte now sends;
- * this file's job is only to catch this route's copy of that change regressing
+ * import chain -- see the "restart:true build/pull/forceRecreate options" describe
+ * block in stack-compose-redeploy-run-record.test.ts. Both routes were changed
+ * together, from the same requestBody shape RedeployPopover.svelte now sends; this
+ * file's job is only to catch this route's copy of that change regressing
  * independently of the other.
  */
 import { describe, test, expect } from 'bun:test';
@@ -36,7 +35,7 @@ async function readRoute(): Promise<string> {
 	return readFile(routePath, 'utf8');
 }
 
-describe('POST /api/stacks -- build/pull/forceRecreate options (M4, source-level)', () => {
+describe('POST /api/stacks -- build/pull/forceRecreate options (source-level)', () => {
 	test('the request body destructuring includes pull, build, and forceRecreate', async () => {
 		const source = await readRoute();
 		// Single destructuring statement for the whole POST body -- match it as one

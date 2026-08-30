@@ -270,7 +270,7 @@ export const POST: RequestHandler = async (event) => {
 					forceRecreate: forceRecreateOpt,
 					build: buildOpt,
 					// pullPolicy undefined (pull unchecked) also skips deployStack's post-deploy
-					// reconcileStackPendingUpdates() call -- accepted tradeoff, see design doc 8.4.
+					// reconcileStackPendingUpdates() call -- accepted tradeoff, not a bug.
 					pullPolicy: pullOpt ? 'always' : undefined,
 					composePath: composePath || undefined,
 					envPath: envPath || undefined,
