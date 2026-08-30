@@ -88,6 +88,44 @@ describe('createJobResponse RunRecorder hook', () => {
 		expect(end.error).toBe('boom');
 	});
 
+	test('streaming path: end() reports ok=false with the error message on a failed result that RESOLVES (no throw) -- this is the path every browser call takes, since neither +page.svelte nor StackModal.svelte set an Accept header', async () => {
+		const { recorder, ended } = createFakeRecorder();
+		const request = new Request('http://x'); // no Accept header -> fire-and-forget path
+
+		createJobResponse(
+			async (send) => {
+				// A failed docker compose up does NOT throw -- it sends a failed result and
+				// returns normally. That lands this in the .then() branch below, never .catch().
+				send('result', { success: false, error: 'compose up failed: exit 1' });
+			},
+			request,
+			recorder
+		);
+
+		const end = await ended;
+		expect(end.ok).toBe(false);
+		expect(end.error).toBe('compose up failed: exit 1');
+	});
+
+	// Companion to the test above: a resolving (non-throwing) SUCCESS must still end up
+	// ok=true on the streaming path, so the fix doesn't flip the polarity for the common case.
+	test('streaming path: end() reports ok=true on a successful result that resolves (no throw)', async () => {
+		const { recorder, ended } = createFakeRecorder();
+		const request = new Request('http://x');
+
+		createJobResponse(
+			async (send) => {
+				send('result', { success: true, output: 'done' });
+			},
+			request,
+			recorder
+		);
+
+		const end = await ended;
+		expect(end.ok).toBe(true);
+		expect(end.error).toBeUndefined();
+	});
+
 	test('JSON path: end() reports ok=false with the error message on a failed result', async () => {
 		const { recorder, ended } = createFakeRecorder();
 		const request = new Request('http://x', { headers: { Accept: 'application/json' } });

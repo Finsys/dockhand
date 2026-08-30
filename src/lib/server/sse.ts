@@ -117,11 +117,21 @@ export function createJobResponse(
 	operation(send, () => job.cancelRequested === true)
 		.then(async () => {
 			const resultLine = job.lines.findLast((l) => l.event === 'result');
-			completeJob(job, resultLine?.data ?? { success: true });
+			const resultData = resultLine?.data ?? { success: true };
+			completeJob(job, resultData);
 			// Nothing on this path awaits createJobResponse's return value (it already
 			// returned { jobId } below), so this runs after the response has gone out.
 			// The record is still closed reliably -- just not before the client sees it.
-			if (recorder) await recorder.end(true);
+			//
+			// A failed compose run does not throw: it sends `result: {success:false,
+			// error}` and returns normally, landing HERE, not in .catch() below. This is
+			// the path every browser call takes (neither +page.svelte nor StackModal.svelte
+			// send an Accept header) -- reuse the JSON path's endFromResult() instead of
+			// hardcoding end(true), or every such run was recorded as a success.
+			if (recorder) {
+				const { ok, error } = endFromResult(resultData);
+				await recorder.end(ok, undefined, error);
+			}
 		})
 		.catch(async (err: unknown) => {
 			const message = err instanceof Error ? err.message : String(err);
