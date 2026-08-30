@@ -92,6 +92,16 @@ export interface StackOperationResult {
 	 * (deploy-run-record.ts) fall back to a value consistent with success/failure.
 	 */
 	exitCode?: number;
+	/**
+	 * Set by deployStack() only: every secret value (DB AND provider-resolved --
+	 * Bitwarden/1Password/etc. bulk pulls or inline refs, resolveProviderEnvVars) that
+	 * actually reached the container for THIS run. Provider resolution happens inside
+	 * deployStack(), after any caller-built stack_deploy run recorder was already
+	 * constructed from DB-only vars -- callers MUST feed this into the recorder via
+	 * RunRecorder.addSecrets() before closing it, or a provider-resolved secret that
+	 * surfaces in compose's raw error text is stored unredacted (see deploy-run-record.ts).
+	 */
+	resolvedSecrets?: string[];
 }
 
 /**
@@ -3098,6 +3108,14 @@ export async function deployStack(options: DeployStackOptions): Promise<StackOpe
 			secretVars,
 			onLine
 		);
+		// F4 fix: `secretVars` here is POST-resolveProviderEnvVars (line ~3059 above) --
+		// the same set executeComposeCommand just redacted streamed lines against. This
+		// is the single call site inside deployStack(), so setting it here covers both
+		// the local/direct compose path and the Hawser path uniformly. Callers (routes,
+		// deployGitStack) feed this into their stack_deploy run recorder via
+		// RunRecorder.addSecrets() before closing it -- see StackOperationResult's doc
+		// comment and deploy-run-record.ts.
+		result.resolvedSecrets = Object.values(secretVars);
 		console.log(`${logPrefix} ========================================`);
 		console.log(`${logPrefix} DEPLOY STACK RESULT`);
 		console.log(`${logPrefix} ========================================`);

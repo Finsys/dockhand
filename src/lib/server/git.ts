@@ -1473,6 +1473,15 @@ export async function deployGitStack(
 		throw error;
 	}
 
+	// F4 fix: deployStack() resolves the bound secret provider's values internally,
+	// AFTER `recorder` above was already built from the DB-only nonSecretVars/
+	// secretVars this function read before calling it. Feed the provider-resolved
+	// values in now, before recorder.end() below -- otherwise a provider secret
+	// leaking into result.error (a real possibility: cron/webhook-triggered git
+	// deploys are exactly the unattended runs most likely to use a bound provider)
+	// would bypass end()'s redaction entirely. See deploy-run-record.ts.
+	recorder.addSecrets(result.resolvedSecrets ?? []);
+
 	// Closed right after the result is known, before the post-success bookkeeping
 	// below (deletion sync, upsertStackSource) -- those never fail the deploy itself,
 	// so the recorded duration reflects the deploy, not the bookkeeping around it.

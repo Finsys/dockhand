@@ -277,6 +277,12 @@ export const POST: RequestHandler = async (event) => {
 					onLine: (line) => send('progress', { type: 'line', line })
 				});
 
+				// F4 fix: deployStack resolves the bound secret provider's values
+				// internally, AFTER `recorder` above was already built from the DB-only
+				// `effectiveEnvVars`. Feed the provider-resolved values in now, before
+				// createJobResponse calls recorder.end() below -- see deploy-run-record.ts.
+				recorder.addSecrets(result.resolvedSecrets ?? []);
+
 				if (!result.success) {
 					send('result', { success: false, error: result.error, output: result.output });
 					return;

@@ -18,6 +18,15 @@ export { prefersJSON, sseToJSON } from '$lib/server/sse-parser';
 export interface RunRecorder {
 	/** Called for every send() whose (event, data) passes shouldRecord -- never raw. */
 	line(line: string): void;
+	/**
+	 * Extends the redaction secret list with values that were not yet known when the
+	 * recorder was constructed -- e.g. provider-resolved secrets (Bitwarden/1Password/
+	 * etc. bulk pulls or inline refs) that deployStack() only resolves internally,
+	 * strictly AFTER the caller built this recorder from the DB-only vars it had at the
+	 * time. Callers MUST call this (if they have anything to add) before end(), which is
+	 * the only method that reads the accumulated secret list -- see deploy-run-record.ts.
+	 */
+	addSecrets(values: string[]): void;
 	/** Called exactly once, on every path out of the operation (success, failure, or throw). */
 	end(ok: boolean, exitCode?: number, error?: string): Promise<void>;
 }

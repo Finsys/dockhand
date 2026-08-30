@@ -117,7 +117,7 @@ registerDbFake('upsertStackSource', async (data: Record<string, unknown>) => {
 // -- boundary (deployGitStack, syncGitStack) runs for real.
 
 let deployStackCalls: Array<{ onLine?: (line: string) => void }>;
-let deployStackResult: { success: boolean; output?: string; error?: string };
+let deployStackResult: { success: boolean; output?: string; error?: string; resolvedSecrets?: string[] };
 let deployStackOnLines: string[];
 
 function resetStacksState() {
@@ -346,6 +346,31 @@ describe('deployGitStack -- stack_deploy run record (git-triggered deploys)', ()
 		const update = endUpdate();
 		expect(update?.status).toBe('failed');
 		expect(String(update?.errorMessage)).not.toContain('s3cr3t-value');
+	});
+
+	// F4 fix: deployStack() resolves a bound secret provider's values INTERNALLY,
+	// after deployGitStack()'s `recorder` above was already built from the DB-only
+	// nonSecretVars/secretVars this suite's fixture returns. A provider-resolved
+	// secret (never in that DB-only set) is simulated via the fake's
+	// resolvedSecrets -- exactly StackOperationResult's real shape -- and must still
+	// be redacted from the stored error, via recorder.addSecrets(). This is the
+	// unattended (cron/webhook) path deployGitStack's own doc comment calls out --
+	// exactly where a bound secret provider is most likely to be in play unattended.
+	test('F4 regression: a provider-resolved secret (unknown at recorder construction) is redacted before it is stored', async () => {
+		const PROVIDER_SECRET = 'zzz-bulk-provider-9000';
+		deployStackResult = {
+			success: false,
+			error: `compose up failed: PROVIDER_TOKEN=${PROVIDER_SECRET} rejected`,
+			resolvedSecrets: [PROVIDER_SECRET]
+		};
+		deployStackOnLines = [];
+
+		const result = await deployGitStack(gitStackId, { triggeredBy: 'cron', force: true });
+
+		expect(result.success).toBe(false);
+		const update = endUpdate();
+		expect(update?.status).toBe('failed');
+		expect(String(update?.errorMessage)).not.toContain(PROVIDER_SECRET);
 	});
 
 	test('a second, unchanged sync (force=false, nothing to deploy) creates NO additional stack_deploy row', async () => {

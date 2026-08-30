@@ -36,7 +36,8 @@ export class DeployRunRecorder implements RunRecorder {
 	private readonly composeHash: string;
 	private readonly envHash: string;
 	private readonly userId?: number;
-	private readonly secrets: string[];
+	/** Not readonly: addSecrets() extends this after construction -- see its doc comment. */
+	private secrets: string[];
 	private readonly lines: string[] = [];
 	/** Chain of queued appends -- see line()'s doc comment for why this exists. */
 	private tail: Promise<void> = Promise.resolve();
@@ -106,6 +107,23 @@ export class DeployRunRecorder implements RunRecorder {
 				await appendRunLog(this.runId, TRUNCATION_NOTICE);
 			}
 		});
+	}
+
+	/**
+	 * F4 fix: the caller (a route or deployGitStack) builds this recorder from the
+	 * DB-only vars it has BEFORE calling deployStack(), which then resolves the bound
+	 * secret provider's bulk/inline-ref values internally (resolveProviderEnvVars,
+	 * stacks.ts) -- entirely new values the caller never saw. Without this, a
+	 * provider-resolved secret that ends up in compose's raw stderr passes straight
+	 * through end()'s redaction (it redacts against `this.secrets` only) and into
+	 * errorMessage, which GET /api/schedules/executions returns to every authenticated
+	 * user. Callers pass deployStack()'s result.resolvedSecrets here, after the call
+	 * returns and before end() is invoked -- see stacks.ts's StackOperationResult.
+	 */
+	addSecrets(values: string[]): void {
+		for (const value of values) {
+			if (!this.secrets.includes(value)) this.secrets.push(value);
+		}
 	}
 
 	/**

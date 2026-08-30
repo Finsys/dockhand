@@ -190,6 +190,14 @@ export const PUT: RequestHandler = async ({ params, request, url, cookies }) => 
 						onLine: (line) => send('progress', { type: 'line', line })
 					});
 
+					// F4 fix: deployStack resolves the bound secret provider's values
+					// internally, AFTER `recorder` above was already built from
+					// composeInfo's DB-only vars. Feed the provider-resolved values in
+					// now, before createJobResponse calls recorder.end() below -- see
+					// deploy-run-record.ts. recorder may be undefined (composeInfo
+					// wasn't readable), matching its optional-recorder construction above.
+					recorder?.addSecrets(result.resolvedSecrets ?? []);
+
 					if (!result.success) {
 						send('result', { success: false, error: result.error });
 						return;
