@@ -7,10 +7,13 @@
  * tests/deploy-endpoints.test.ts -- NOT via a separate mock.module('$lib/server/db', ...)
  * call here, see that helper's doc comment for why a second direct call collides.
  *
- * $lib/server/deploy-log-store IS mocked directly here (no other test file claims it, so
- * no collision) rather than exercised against real files: these tests need to force a
- * specific element to fail while its neighbours succeed, which a real filesystem can't
- * do deterministically without fragile permission tricks.
+ * The two deploy-log-store calls are INJECTED (runDeployLogReconcileJob's `deps` param)
+ * rather than mock.module()'d. An earlier version did mock the module, reasoning that no
+ * other test file claimed it -- but the collision that matters is with SOURCE modules, not
+ * test files: mock.module() freezes the export shape process-wide, and deploy-run-record.ts
+ * imports appendRunLog/runLogFileName/SizeBudgetTracker from the same specifier. Whether it
+ * blew up depended on the order bun walks tests/, so it was green locally and red in CI.
+ * Injection has no process-wide effect at all.
  */
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import { registerDbFake } from './helpers/db-fake';
@@ -62,13 +65,13 @@ function resetFsState() {
 }
 resetFsState();
 
-mock.module('$lib/server/deploy-log-store', () => ({
+const storeDeps = {
 	listRunLogIds: async () => fileIds,
 	deleteRunLog: async (fileId: string) => {
 		if (throwOnDelete.has(fileId)) throw new Error(`delete failed for ${fileId}`);
 		deletedFiles.push(fileId);
 	}
-}));
+};
 
 // runDeployLogReconcileJob is imported AFTER both mocks are registered above, so its own
 // import of '../../db' / '../../deploy-log-store' resolves to the faked module records.
@@ -90,7 +93,7 @@ describe('runDeployLogReconcileJob', () => {
 		fileIds = ['a', 'b', 'c'];
 		throwOnDelete = new Set(['b']);
 
-		await runDeployLogReconcileJob('manual');
+		await runDeployLogReconcileJob('manual', storeDeps);
 
 		// The one AFTER the failing element must still have been reached.
 		expect(deletedFiles).toEqual(['a', 'c']);
@@ -114,7 +117,7 @@ describe('runDeployLogReconcileJob', () => {
 		for (const r of stackDeployRecords) executions.set(r.id, { ...r });
 		throwOnUpdate = new Set([11]);
 
-		await runDeployLogReconcileJob('manual');
+		await runDeployLogReconcileJob('manual', storeDeps);
 
 		expect(executions.get(10).details.logMissing).toBe(true);
 		expect(executions.get(12).details.logMissing).toBe(true);
@@ -132,7 +135,7 @@ describe('runDeployLogReconcileJob', () => {
 		stackDeployRecords = [{ id: 20, status: 'success', details: null }];
 		executions.set(20, { id: 20, status: 'success', details: null });
 
-		await runDeployLogReconcileJob('manual');
+		await runDeployLogReconcileJob('manual', storeDeps);
 
 		const exec = ownExecution();
 		expect(exec.status).toBe('success');
