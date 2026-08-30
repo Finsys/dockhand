@@ -52,7 +52,12 @@ const KNOWN_EXPORTS = [
 	'getBackupConfig',
 	'getScheduleExecution',
 	'deleteScheduleExecution',
-	'getScheduleExecutions'
+	'getScheduleExecutions',
+	'getDeployLogReconcileEnabled',
+	'getScheduleExecutionIdsByType',
+	'createScheduleExecution',
+	'updateScheduleExecution',
+	'appendScheduleExecutionLog'
 ] as const;
 
 const impls: Record<string, AnyFn> = {};
