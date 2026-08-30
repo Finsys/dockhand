@@ -3,6 +3,7 @@
 	import { wrapHtmlLines } from '$lib/utils/log-lines';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import { downloadFileName, stripAnsi } from '$lib/utils/log-download-name';
+	import { isScrolledToBottom } from '$lib/utils/scroll-position';
 	import * as Select from '$lib/components/ui/select';
 	import { appSettings, formatLogTimestamps } from '$lib/stores/settings';
 	import { themeStore } from '$lib/stores/theme';
@@ -44,6 +45,14 @@
 
 	// RAF-based auto-scroll
 	let scrollRafPending = false;
+	// True once the user has scrolled up to read earlier output. Cleared again once
+	// they scroll back within range of the end, at which point auto-scroll resumes.
+	let userScrolledUp = $state(false);
+	// Set for the duration of our own programmatic scrollTop write, so the 'scroll'
+	// event it triggers isn't mistaken for the user scrolling. Without this, a fast
+	// enough stream of new lines can grow scrollHeight again between the write and
+	// the event firing, leaving a gap wide enough to look like the user scrolled up.
+	let isAutoScrolling = false;
 
 	// Search state
 	let logSearchActive = $state(false);
@@ -61,18 +70,33 @@
 		return fontMeta?.family || 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
 	});
 
-	// Auto-scroll when logs change
+	// Auto-scroll when logs change, unless the user scrolled up to read earlier output.
 	$effect(() => {
-		if (autoScroll && logsRef && logs) {
+		if (autoScroll && !userScrolledUp && logsRef && logs) {
 			if (!scrollRafPending) {
 				scrollRafPending = true;
 				requestAnimationFrame(() => {
-					if (logsRef) logsRef.scrollTop = logsRef.scrollHeight;
+					if (logsRef) {
+						isAutoScrolling = true;
+						logsRef.scrollTop = logsRef.scrollHeight;
+						// Let the 'scroll' event this write triggers reach handleLogScroll (and be
+						// ignored there) before treating further events as user-initiated again.
+						requestAnimationFrame(() => {
+							isAutoScrolling = false;
+						});
+					}
 					scrollRafPending = false;
 				});
 			}
 		}
 	});
+
+	// Pause auto-scroll once the user scrolls up, resume once they scroll back down.
+	function handleLogScroll() {
+		if (isAutoScrolling || !logsRef) return;
+		const { scrollTop, scrollHeight, clientHeight } = logsRef;
+		userScrolledUp = !isScrolledToBottom(scrollTop, scrollHeight, clientHeight);
+	}
 
 	// Copy logs to clipboard
 	async function copyLogs() {
@@ -323,26 +347,30 @@
 				<Download class="w-3 h-3 text-zinc-500 hover:text-zinc-300" />
 			</button>
 			<!-- Clear -->
-			<button
-				onclick={() => onClear?.()}
-				class="p-1 rounded hover:bg-zinc-800 transition-colors"
-				title="Clear logs"
-			>
-				<Eraser class="w-3 h-3 text-zinc-500 hover:text-zinc-300" />
-			</button>
+			{#if onClear}
+				<button
+					onclick={() => onClear?.()}
+					class="p-1 rounded hover:bg-zinc-800 transition-colors"
+					title="Clear logs"
+				>
+					<Eraser class="w-3 h-3 text-zinc-500 hover:text-zinc-300" />
+				</button>
+			{/if}
 			<!-- Refresh -->
-			<button
-				onclick={() => onRefresh?.()}
-				class="p-1 rounded hover:bg-zinc-800 transition-colors"
-				title="Refresh logs"
-			>
-				<RefreshCw class="w-3 h-3 text-zinc-500 hover:text-zinc-300" />
-			</button>
+			{#if onRefresh}
+				<button
+					onclick={() => onRefresh?.()}
+					class="p-1 rounded hover:bg-zinc-800 transition-colors"
+					title="Refresh logs"
+				>
+					<RefreshCw class="w-3 h-3 text-zinc-500 hover:text-zinc-300" />
+				</button>
+			{/if}
 		</div>
 	</div>
 
 	<!-- Logs content -->
-	<div bind:this={logsRef} class="flex-1 overflow-auto p-4">
+	<div bind:this={logsRef} onscroll={handleLogScroll} class="flex-1 overflow-auto p-4">
 		{#if logs}
 			<pre class="text-zinc-50 {wordWrap ? 'whitespace-pre-wrap' : 'whitespace-pre'} {showLineNumbers ? 'show-line-numbers' : ''}" style="font-size: {fontSize}px; font-family: {terminalFontFamily()};">{@html wrapHtmlLines(highlightedLogs())}</pre>
 		{:else if loading}
