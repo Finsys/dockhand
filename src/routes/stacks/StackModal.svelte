@@ -39,6 +39,8 @@
 	import { formatRunStatus } from '$lib/utils/run-status';
 	import { toast } from 'svelte-sonner';
 	import ComposeGraphViewer from './ComposeGraphViewer.svelte';
+	import RedeployPopover from './RedeployPopover.svelte';
+	import { hasBuildSection as detectBuildSection } from '$lib/utils/compose-build-detect';
 
 
 	// localStorage key for persisted split ratio
@@ -53,6 +55,11 @@
 	// (operator decision, 30.08.2026 -- see save-close-policy.ts). The plain-save flash-
 	// then-close delay (500ms, below) predates this and is left as it was.
 	const DEPLOY_SUCCESS_CLOSE_DELAY_MS = 1500;
+
+	// Options picked in the RedeployPopover next to "Save & redeploy" / "Create & Start"
+	// (see the pull/build/forceRecreate contract RedeployPopover.svelte already uses for
+	// the stack-grid redeploy actions).
+	type DeployOptions = { pull: boolean; build: boolean; forceRecreate: boolean };
 
 	interface Props {
 		open: boolean;
@@ -130,6 +137,11 @@
 	let loadError = $state<string | null>(null);
 	let errors = $state<{ stackName?: string; compose?: string }>({});
 	let composeContent = $state('');
+	// Whether the current compose content declares a build: section for any service --
+	// pre-checks "Build images" in the Save & redeploy / Create & Start popover
+	// (RedeployPopover's defaultBuild). Logic lives in compose-build-detect.ts, not
+	// inline, so it has its own unit test independent of mounting this component.
+	let hasBuildSection = $derived(detectBuildSection(composeContent));
 	let activeTab = $state<'editor' | 'graph' | 'backups' | 'deploys'>('editor');
 	let backupCount = $state(0);
 	let backupTally = $state<{ ok: number; failed: number }>({ ok: 0, failed: 0 });
@@ -451,6 +463,11 @@
 	let pathChangeOldDir = $state<string | null>(null); // Old directory to move files from
 	let pathChangeFileCount = $state(0); // Number of files in old directory
 	let pendingSaveRestart = $state(false); // Whether user clicked "Save & restart" vs "Save"
+	// Pull/build/forceRecreate chosen in the "Save & redeploy" RedeployPopover (see
+	// handleSave below) -- carried across the path-change confirmation dialog the same
+	// way pendingSaveRestart is, so re-entering handleSave() after the user confirms a
+	// path move still deploys with the options they actually picked.
+	let pendingSaveOptions = $state<DeployOptions | undefined>(undefined);
 
 	// Browse confirmation dialog state (when selecting different file would replace content)
 	let showBrowseConfirm = $state(false);
@@ -1427,7 +1444,7 @@
 		composeContent = newContent;
 	}
 
-	async function handleCreate(start: boolean = false, persistenceAcked = false) {
+	async function handleCreate(start: boolean = false, persistenceAcked = false, deployOptions?: DeployOptions) {
 		errors = {};
 		let hasErrors = false;
 
@@ -1449,7 +1466,7 @@
 
 		// Warn if the chosen compose path won't survive a recreate (#1524) - before creating.
 		if (!persistenceAcked && workingComposePath.trim()) {
-			return guardComposePersistence(workingComposePath.trim(), () => handleCreate(start, true));
+			return guardComposePersistence(workingComposePath.trim(), () => handleCreate(start, true, deployOptions));
 		}
 
 		const envId = $currentEnvironment?.id ?? null;
@@ -1507,6 +1524,14 @@
 			}
 
 			requestBody.secretProviderId = formSecretProviderId;
+
+			// Only meaningful when start is true -- deployOptions is undefined for the
+			// plain "Create" button, which never reaches deployStack server-side anyway.
+			if (start && deployOptions) {
+				requestBody.pull = deployOptions.pull;
+				requestBody.build = deployOptions.build;
+				requestBody.forceRecreate = deployOptions.forceRecreate;
+			}
 
 			if (start) startOutput(`Starting ${newStackName.trim()}`);
 
@@ -1578,7 +1603,7 @@
 		}
 	}
 
-	async function handleSave(restart = false, moveFromDir: string | null | undefined = undefined, persistenceAcked = false) {
+	async function handleSave(restart = false, moveFromDir: string | null | undefined = undefined, persistenceAcked = false, deployOptions?: DeployOptions) {
 		errors = {};
 
 		// Validate compose content (unless file location is needed and we have a path)
@@ -1616,7 +1641,7 @@
 						// Non-persisted path is the more serious warning - surface it first (#1524).
 						if (checkData.persistenceWarning && !persistenceAcked) {
 							persistenceWarnText = checkData.persistenceWarning;
-							persistenceWarnProceed = () => handleSave(restart, moveFromDir, true);
+							persistenceWarnProceed = () => handleSave(restart, moveFromDir, true, deployOptions);
 							showPersistenceWarn = true;
 							return;
 						}
@@ -1625,6 +1650,7 @@
 							pathChangeOldDir = checkData.oldDir;
 							pathChangeFileCount = checkData.fileCount;
 							pendingSaveRestart = restart;
+							pendingSaveOptions = deployOptions;
 							showPathChangeConfirm = true;
 							return;
 						}
@@ -1678,6 +1704,14 @@
 			}
 
 			requestBody.secretProviderId = formSecretProviderId;
+
+			// Only meaningful when restart is true -- deployOptions is undefined for the
+			// plain "Save" button, which never reaches deployStack server-side anyway.
+			if (restart && deployOptions) {
+				requestBody.pull = deployOptions.pull;
+				requestBody.build = deployOptions.build;
+				requestBody.forceRecreate = deployOptions.forceRecreate;
+			}
 
 			// Save env files BEFORE compose to ensure deploy reads fresh values
 			// Save raw content to .env file (non-secrets only, comments preserved)
@@ -1790,14 +1824,14 @@
 	// Handle path change confirmation - move files to new location and proceed
 	function confirmPathChangeAndMove() {
 		showPathChangeConfirm = false;
-		handleSave(pendingSaveRestart, pathChangeOldDir);
+		handleSave(pendingSaveRestart, pathChangeOldDir, false, pendingSaveOptions);
 	}
 
 	// Handle path change - keep old files and proceed (just save without moving)
 	function confirmPathChangeKeepFiles() {
 		showPathChangeConfirm = false;
 		// Pass empty string to skip move check (undefined means "not checked yet")
-		handleSave(pendingSaveRestart, '');
+		handleSave(pendingSaveRestart, '', false, pendingSaveOptions);
 	}
 
 	function tryClose() {
@@ -1851,6 +1885,7 @@
 		pathChangeOldDir = null;
 		pathChangeFileCount = 0;
 		pendingSaveRestart = false;
+		pendingSaveOptions = undefined;
 		// Reset browse confirmation state
 		showBrowseConfirm = false;
 		pendingBrowsePath = null;
@@ -2548,15 +2583,27 @@
 							Create
 						{/if}
 					</Button>
-					<Button onclick={() => handleCreate(true)} disabled={saving}>
-						{#if saving}
-							<Loader2 class="w-4 h-4 animate-spin" />
-							Starting...
-						{:else}
-							<Play class="w-4 h-4" />
-							Create & Start
-						{/if}
-					</Button>
+					<RedeployPopover
+						stackName={newStackName}
+						envId={$currentEnvironment?.id ?? null}
+						disabled={saving}
+						triggerVariant="button"
+						defaultPull={false}
+						defaultBuild={hasBuildSection}
+						defaultForceRecreate={false}
+						reason={hasBuildSection ? 'Auto-checked: this compose file has a build: section' : undefined}
+						onDeploy={(options) => handleCreate(true, false, options)}
+					>
+						{#snippet children()}
+							{#if saving}
+								<Loader2 class="w-4 h-4 animate-spin" />
+								Starting...
+							{:else}
+								<Play class="w-4 h-4" />
+								Create & Start
+							{/if}
+						{/snippet}
+					</RedeployPopover>
 				{:else if !readonly}
 					<!-- Edit mode buttons -->
 					<Button variant="outline" class="w-24" onclick={() => handleSave(false)} disabled={saving || loading || (needsFileLocation && !workingComposePath.trim())}>
@@ -2568,15 +2615,28 @@
 							Save
 						{/if}
 					</Button>
-					<Button class="w-36" onclick={() => handleSave(true)} disabled={saving || loading || (needsFileLocation && !workingComposePath.trim())}>
-						{#if saving && savingWithRestart}
-							<Loader2 class="w-4 h-4 animate-spin" />
-							Deploying...
-						{:else}
-							<Play class="w-4 h-4" />
-							Save & redeploy
-						{/if}
-					</Button>
+					<RedeployPopover
+						{stackName}
+						envId={$currentEnvironment?.id ?? null}
+						disabled={saving || loading || (needsFileLocation && !workingComposePath.trim())}
+						triggerVariant="button"
+						triggerClass="w-36"
+						defaultPull={false}
+						defaultBuild={hasBuildSection}
+						defaultForceRecreate={true}
+						reason={hasBuildSection ? 'Auto-checked: this compose file has a build: section' : undefined}
+						onDeploy={(options) => handleSave(true, undefined, false, options)}
+					>
+						{#snippet children()}
+							{#if saving && savingWithRestart}
+								<Loader2 class="w-4 h-4 animate-spin" />
+								Deploying...
+							{:else}
+								<Play class="w-4 h-4" />
+								Save & redeploy
+							{/if}
+						{/snippet}
+					</RedeployPopover>
 				{/if}
 			</div>
 		</div>
