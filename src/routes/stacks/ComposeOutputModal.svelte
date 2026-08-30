@@ -3,18 +3,25 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Loader2 } from 'lucide-svelte';
 	import LogViewer from '../logs/LogViewer.svelte';
+	import { formatRunStatus } from '$lib/utils/run-status';
 
 	// A plain display window for compose output. It owns none of the polling —
 	// the parent pushes lines in as they arrive via readJobResponse's onLine callback
-	// and flips `running` to false once the job settles.
+	// and flips `running` to false once the job settles, at which point it also
+	// supplies `ok`/`ms`/`exitCode` for the status line below.
 	interface Props {
 		open: boolean;
 		title: string;
 		lines: string[];
 		running: boolean;
+		ok?: boolean;
+		ms?: number;
+		exitCode?: number;
 	}
 
-	let { open = $bindable(false), title, lines, running }: Props = $props();
+	let { open = $bindable(false), title, lines, running, ok, ms, exitCode }: Props = $props();
+
+	let statusLine = $derived(formatRunStatus({ running, ok, ms, exitCode }));
 
 	function handleClose() {
 		// Closing only hides this window. The operation it is watching keeps running
@@ -34,7 +41,7 @@
 				{title}
 			</Dialog.Title>
 			<Dialog.Description>
-				{running ? 'Running…' : 'Finished — output stays here to read.'}
+				{statusLine}
 			</Dialog.Description>
 		</Dialog.Header>
 

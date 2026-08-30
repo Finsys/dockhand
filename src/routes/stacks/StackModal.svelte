@@ -54,7 +54,7 @@
 		// own so closing it cannot tear down a running deploy.
 		onOutputStart?: (title: string) => void;
 		onOutputLine?: (line: string) => void;
-		onOutputFinish?: (output?: string) => void;
+		onOutputFinish?: (output: string | undefined, ok: boolean, exitCode?: number) => void;
 	}
 
 	let { open = $bindable(), mode: propMode, stackName: propStackName = '', initialCompose, initialStackName, readonly = false, gitInfo = null, onClose, onSuccess, onOutputStart, onOutputLine, onOutputFinish }: Props = $props();
@@ -1342,7 +1342,11 @@
 			const data = start
 				? await readJobResponse(response, (line) => onOutputLine?.(line))
 				: await response.json();
-			if (start) onOutputFinish?.(typeof data.output === 'string' ? data.output : undefined);
+			if (start) onOutputFinish?.(
+				typeof data.output === 'string' ? data.output : undefined,
+				Boolean(data.success),
+				typeof data.exitCode === 'number' ? data.exitCode : undefined
+			);
 
 			if (!response.ok && !data.success) {
 				throw new Error((typeof data.error === 'string' ? data.error : data.message) || 'Failed to create stack');
@@ -1357,7 +1361,7 @@
 			onSuccess();
 			handleClose();
 		} catch (e: any) {
-			if (start) onOutputFinish?.();
+			if (start) onOutputFinish?.(undefined, false);
 			operationError = {
 				title: 'Failed to create stack',
 				message: e.message || 'An error occurred while creating the stack',
@@ -1531,7 +1535,11 @@
 			const data = restart
 				? await readJobResponse(response, (line) => onOutputLine?.(line))
 				: await response.json();
-			if (restart) onOutputFinish?.(typeof data.output === 'string' ? data.output : undefined);
+			if (restart) onOutputFinish?.(
+				typeof data.output === 'string' ? data.output : undefined,
+				Boolean(data.success),
+				typeof data.exitCode === 'number' ? data.exitCode : undefined
+			);
 
 			if (!response.ok && !data.success) {
 				throw new Error((typeof data.error === 'string' ? data.error : data.message) || 'Failed to save compose file');
@@ -1551,7 +1559,7 @@
 				handleClose();
 			}
 		} catch (e: any) {
-			if (restart) onOutputFinish?.();
+			if (restart) onOutputFinish?.(undefined, false);
 			operationError = {
 				title: restart ? 'Failed to apply stack' : 'Failed to save stack',
 				message: e.message || (restart ? 'An error occurred while applying the stack' : 'An error occurred while saving the stack'),
