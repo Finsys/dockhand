@@ -3,25 +3,25 @@ import { makeLineForwarder } from '../src/lib/server/secret-redaction';
 
 describe('line forwarding with redaction', () => {
 	test('forwards lines redacted, not raw', async () => {
-		const gesehen: string[] = [];
-		const geheim = 'sup3rgeheim-passwort-42';
+		const seen: string[] = [];
+		const secret = 'sup3rsecret-password-42';
 
 		// makeLineForwarder is the small bridge between collectProcess and send()
-		const forward = makeLineForwarder(gesehen.push.bind(gesehen), [geheim]);
-		forward(`Error: password=${geheim} rejected`);
+		const forward = makeLineForwarder(seen.push.bind(seen), [secret]);
+		forward(`Error: password=${secret} rejected`);
 		forward('Container app-1  Started');
 
-		expect(gesehen).toEqual([
+		expect(seen).toEqual([
 			'Error: password=*** rejected',
 			'Container app-1  Started'
 		]);
-		expect(gesehen.join('\n')).not.toContain(geheim);
+		expect(seen.join('\n')).not.toContain(secret);
 	});
 
 	test('drops a withheld line entirely', () => {
-		const gesehen: string[] = [];
-		const forward = makeLineForwarder(gesehen.push.bind(gesehen), ['test']);
+		const seen: string[] = [];
+		const forward = makeLineForwarder(seen.push.bind(seen), ['test']);
 		forward('Pulling alpine:latest');
-		expect(gesehen).toEqual([]);
+		expect(seen).toEqual([]);
 	});
 });
