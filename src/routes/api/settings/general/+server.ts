@@ -18,6 +18,10 @@ import {
 	setScannerCleanupCron,
 	getScannerCleanupEnabled,
 	setScannerCleanupEnabled,
+	getDeployLogReconcileCron,
+	setDeployLogReconcileCron,
+	getDeployLogReconcileEnabled,
+	setDeployLogReconcileEnabled,
 	getDefaultTimezone,
 	setDefaultTimezone,
 	getEventCollectionMode,
@@ -69,6 +73,8 @@ export interface GeneralSettings {
 	eventCleanupEnabled: boolean;
 	scannerCleanupCron: string;
 	scannerCleanupEnabled: boolean;
+	deployLogReconcileCron: string;
+	deployLogReconcileEnabled: boolean;
 	logBufferSizeKb: number;  // legacy
 	logMaxLines: number;       // line-count cap for log buffer
 	defaultTimezone: string;
@@ -128,7 +134,7 @@ export interface GeneralSettings {
 	defaultScannerDns: string[];
 }
 
-const DEFAULT_SETTINGS: Omit<GeneralSettings, 'scheduleRetentionDays' | 'eventRetentionDays' | 'scheduleCleanupCron' | 'eventCleanupCron' | 'scheduleCleanupEnabled' | 'eventCleanupEnabled' | 'scannerCleanupCron' | 'scannerCleanupEnabled'> = {
+const DEFAULT_SETTINGS: Omit<GeneralSettings, 'scheduleRetentionDays' | 'eventRetentionDays' | 'scheduleCleanupCron' | 'eventCleanupCron' | 'scheduleCleanupEnabled' | 'eventCleanupEnabled' | 'scannerCleanupCron' | 'scannerCleanupEnabled' | 'deployLogReconcileCron' | 'deployLogReconcileEnabled'> = {
 	confirmDestructive: true,
 	showStoppedContainers: true,
 	highlightUpdates: true,
@@ -253,6 +259,8 @@ export const GET: RequestHandler = async ({ cookies }) => {
 			eventCleanupEnabled,
 			scannerCleanupCron,
 			scannerCleanupEnabled,
+			deployLogReconcileCron,
+			deployLogReconcileEnabled,
 			logBufferSizeKb,
 			logMaxLines,
 			defaultTimezone,
@@ -305,6 +313,8 @@ export const GET: RequestHandler = async ({ cookies }) => {
 			getEventCleanupEnabled(),
 			getScannerCleanupCron(),
 			getScannerCleanupEnabled(),
+			getDeployLogReconcileCron(),
+			getDeployLogReconcileEnabled(),
 			getSetting('log_buffer_size_kb'),
 			getSetting('log_max_lines'),
 			getDefaultTimezone(),
@@ -359,6 +369,8 @@ export const GET: RequestHandler = async ({ cookies }) => {
 			eventCleanupEnabled,
 			scannerCleanupCron,
 			scannerCleanupEnabled,
+			deployLogReconcileCron,
+			deployLogReconcileEnabled,
 			logBufferSizeKb: logBufferSizeKb ?? DEFAULT_SETTINGS.logBufferSizeKb,
 			logMaxLines: (typeof logMaxLines === 'number' && logMaxLines > 0)
 				? Math.min(2000, Math.max(100, logMaxLines))
@@ -419,7 +431,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 
 	try {
 		const body = await request.json();
-		const { confirmDestructive, showStoppedContainers, highlightUpdates, coloredActionButtons, actionIconSize, timeFormat, dateFormat, downloadFormat, defaultGrypeArgs, defaultTrivyArgs, scheduleRetentionDays, eventRetentionDays, scheduleCleanupCron, eventCleanupCron, scheduleCleanupEnabled, eventCleanupEnabled, scannerCleanupCron, scannerCleanupEnabled, logBufferSizeKb, logMaxLines, defaultTimezone, eventCollectionMode, eventPollInterval, metricsCollectionInterval, lightTheme, darkTheme, font, fontSize, gridFontSize, terminalFont, editorFont, compactPorts, showExposedPorts, showGitCommitHash, formatLogTimestamps, externalStackPaths, primaryStackLocation, defaultGrypeImage, defaultTrivyImage, defaultComposeTemplate, labelFilterMode, defaultBackupImage, honorProxyLabels, showImageChangelogLinks, useSelfhstIcons, animateIcons, editorIndentGuides, protectScannerImages, showWhatsNew, defaultScannerNetworkMode, defaultScannerDns } = body;
+		const { confirmDestructive, showStoppedContainers, highlightUpdates, coloredActionButtons, actionIconSize, timeFormat, dateFormat, downloadFormat, defaultGrypeArgs, defaultTrivyArgs, scheduleRetentionDays, eventRetentionDays, scheduleCleanupCron, eventCleanupCron, scheduleCleanupEnabled, eventCleanupEnabled, scannerCleanupCron, scannerCleanupEnabled, deployLogReconcileCron, deployLogReconcileEnabled, logBufferSizeKb, logMaxLines, defaultTimezone, eventCollectionMode, eventPollInterval, metricsCollectionInterval, lightTheme, darkTheme, font, fontSize, gridFontSize, terminalFont, editorFont, compactPorts, showExposedPorts, showGitCommitHash, formatLogTimestamps, externalStackPaths, primaryStackLocation, defaultGrypeImage, defaultTrivyImage, defaultComposeTemplate, labelFilterMode, defaultBackupImage, honorProxyLabels, showImageChangelogLinks, useSelfhstIcons, animateIcons, editorIndentGuides, protectScannerImages, showWhatsNew, defaultScannerNetworkMode, defaultScannerDns } = body;
 
 		if (confirmDestructive !== undefined) {
 			await setSetting('confirm_destructive', confirmDestructive);
@@ -475,6 +487,14 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 		}
 		if (scannerCleanupEnabled !== undefined && typeof scannerCleanupEnabled === 'boolean') {
 			await setScannerCleanupEnabled(scannerCleanupEnabled);
+			await refreshSystemJobs();
+		}
+		if (deployLogReconcileCron !== undefined && typeof deployLogReconcileCron === 'string') {
+			await setDeployLogReconcileCron(deployLogReconcileCron);
+			await refreshSystemJobs();
+		}
+		if (deployLogReconcileEnabled !== undefined && typeof deployLogReconcileEnabled === 'boolean') {
+			await setDeployLogReconcileEnabled(deployLogReconcileEnabled);
 			await refreshSystemJobs();
 		}
 		if (logBufferSizeKb !== undefined && typeof logBufferSizeKb === 'number') {
