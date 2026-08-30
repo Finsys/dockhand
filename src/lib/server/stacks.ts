@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, rmSync, readdirSync, cpSync, statSync, unlinkSyn
 import { join, resolve, dirname, basename, normalize as pathNormalize, sep as pathSep } from 'node:path';
 import { spawn as nodeSpawn } from 'node:child_process';
 import { collectProcess } from './process-output-core';
-import { makeLineForwarder } from './secret-redaction';
+import { makeLineForwarder, surfaceBlockIfNoLines } from './secret-redaction';
 import {
 	applyFileDeletions,
 	hashDirFiles,
@@ -1483,9 +1483,11 @@ async function executeLocalCompose(
  *
  * @param envVars - Non-secret environment variables (from .env file)
  * @param secretVars - Secret environment variables (injected via shell env on Hawser, NEVER in .env)
- * @param onLine - Accepted for signature parity with the local execution path. Hawser's
- *   `/_hawser/compose` call is a single request/response, not a stream, so this path
- *   cannot report lines as they happen yet — that lands in a follow-up task. Unused here.
+ * @param onLine - Hawser's `/_hawser/compose` call is a single request/response, not a
+ *   stream, so this path cannot report lines as they happen (that lands in a follow-up
+ *   task). Instead, once the response arrives, its `output` block is surfaced as a
+ *   single line -- but only when no line was reported during the run, so an agent that
+ *   does stream lines never gets the block duplicated on top of them.
  */
 async function executeComposeViaHawser(
 	operation: 'up' | 'down' | 'stop' | 'start' | 'restart' | 'pull',
@@ -1504,7 +1506,6 @@ async function executeComposeViaHawser(
 	pullPolicy?: string,
 	filesToDelete?: FileToDelete[],
 	removeFiles?: boolean,
-	// eslint-disable-next-line @typescript-eslint/no-unused-vars -- see doc comment above
 	onLine?: (line: string) => void
 ): Promise<StackOperationResult> {
 	const logPrefix = `[Stack:${stackName}]`;
@@ -1621,6 +1622,13 @@ async function executeComposeViaHawser(
 		if (result.error) {
 			console.log(`${logPrefix} Error:`, result.error);
 		}
+
+		// This REST call never streams individual lines (see doc comment above) --
+		// lineCount stays 0 for now. A future streaming path through this function
+		// would increment it as lines arrive, which would then suppress the block below.
+		const lineCount = 0;
+		const secrets = Object.values(allEnvVars).filter((v): v is string => typeof v === 'string');
+		surfaceBlockIfNoLines(onLine, lineCount, result.output, secrets);
 
 		// Git deletion sync: interpret the agent's report. An agent that supports
 		// the feature always returns deletedFiles/skippedFiles (possibly empty

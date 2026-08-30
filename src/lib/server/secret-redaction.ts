@@ -51,3 +51,22 @@ export function makeLineForwarder(
 		if (safe !== null) consume(safe);
 	};
 }
+
+/**
+ * Surfaces a final output block as a single redacted line, but ONLY when no line was
+ * forwarded during the run (lineCount === 0). Some execution paths (e.g. Hawser's REST
+ * call) report only a block, never individual lines -- without this, the operator sees
+ * nothing while the run is in progress. A path that already forwarded its own lines
+ * (or a future streaming path) must not get the block appended on top: that would show
+ * the same text twice.
+ */
+export function surfaceBlockIfNoLines(
+	onLine: ((line: string) => void) | undefined,
+	lineCount: number,
+	block: string | undefined,
+	secrets: string[]
+): void {
+	if (onLine && lineCount === 0 && block) {
+		makeLineForwarder(onLine, secrets)(block);
+	}
+}
