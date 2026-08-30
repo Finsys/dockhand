@@ -11,7 +11,7 @@
 	import { SELECTOR_VARS } from '$lib/utils/bulk-selector';
 	import { classifyMarker, resolvedRefVarNames } from '$lib/utils/invault-markers';
 	import { applyQuickFix, findingKey } from '$lib/utils/compose-quick-fix';
-	import { Layers, Save, Play, Code, GitGraph, GitBranch, GitCommitHorizontal, Github, Loader2, AlertCircle, X, Sun, Moon, TriangleAlert, GripVertical, FolderOpen, Copy, Check, XCircle, MapPin, ArrowRight, ArrowDown, Info, Box, FolderSync, Archive, ListChecks } from 'lucide-svelte';
+	import { Layers, Save, Play, Code, GitGraph, GitBranch, GitCommitHorizontal, Github, Loader2, AlertCircle, X, Sun, Moon, TriangleAlert, GripVertical, GripHorizontal, FolderOpen, Copy, Check, XCircle, MapPin, ArrowRight, ArrowDown, Info, Box, FolderSync, Archive, ListChecks } from 'lucide-svelte';
 	import ComposeValidatePanel from './ComposeValidatePanel.svelte';
 	import BackupPanel from '../containers/BackupPanel.svelte';
 	import { volumesForStack, type VolumeInfo } from '$lib/utils/mounts';
@@ -33,6 +33,7 @@
 	import { ErrorDialog } from '$lib/components/ui/error-dialog';
 	import { readJobResponse } from '$lib/utils/sse-fetch';
 	import { saveCloseTiming } from '$lib/utils/save-close-policy';
+	import { clampSplitRatio } from '$lib/utils/split-ratio';
 	import LogViewer from '../logs/LogViewer.svelte';
 	import { formatRunStatus } from '$lib/utils/run-status';
 	import { toast } from 'svelte-sonner';
@@ -41,6 +42,10 @@
 
 	// localStorage key for persisted split ratio
 	const STORAGE_KEY_SPLIT = 'dockhand-stack-modal-split';
+	// Own key: this ratio has nothing to do with the compose/env split ratio above --
+	// reusing STORAGE_KEY_SPLIT would mean resizing the editor/env divider also resizes
+	// the unrelated output panel on the next load.
+	const STORAGE_KEY_OUTPUT_SPLIT = 'dockhand-stack-modal-output-split';
 
 	// How long a successful deploy leaves the modal open before auto-closing, so the
 	// operator still glimpses the success and the compose output before it goes away
@@ -856,6 +861,18 @@
 	let isDraggingSplit = $state(false);
 	let containerRef: HTMLDivElement | null = $state(null);
 
+	// Resizable output-panel split state -- height (not width) of the live output
+	// panel below the editor, as a percentage of the combined editor+output area.
+	// Bounds (15/70, default 30): the editor must stay usable even at the output
+	// panel's largest size (30% left for the editor is several lines, not one), and
+	// the output panel must stay usable even at its smallest (15% is enough for the
+	// status line plus a handful of log lines).
+	const OUTPUT_SPLIT_MIN = 15;
+	const OUTPUT_SPLIT_MAX = 70;
+	let outputSplitRatio = $state(30); // percentage of the editor+output area given to output
+	let isDraggingOutputSplit = $state(false);
+	let outputAreaRef: HTMLDivElement | null = $state(null);
+
 	// Debounce timer for validation
 	let validateTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -1040,6 +1057,15 @@
 			}
 		}
 
+		// Load saved output-panel split ratio
+		const savedOutputSplit = localStorage.getItem(STORAGE_KEY_OUTPUT_SPLIT);
+		if (savedOutputSplit) {
+			const ratio = parseFloat(savedOutputSplit);
+			if (!isNaN(ratio) && ratio >= OUTPUT_SPLIT_MIN && ratio <= OUTPUT_SPLIT_MAX) {
+				outputSplitRatio = ratio;
+			}
+		}
+
 		// Add global mouse event listeners for split dragging
 		window.addEventListener('mousemove', handleMouseMove);
 		window.addEventListener('mouseup', handleMouseUp);
@@ -1069,6 +1095,12 @@
 		isDraggingSplit = true;
 	}
 
+	// Output-panel split drag handler (vertical drag -- resizes height, not width).
+	function startOutputSplitDrag(e: MouseEvent) {
+		e.preventDefault();
+		isDraggingOutputSplit = true;
+	}
+
 	// Validate side-panel width (px), drag-resizable, persisted.
 	const STORAGE_KEY_VALIDATE_W = 'dockhand-validate-panel-width';
 	let validatePanelWidth = $state(
@@ -1087,7 +1119,7 @@
 		if (isDraggingSplit && containerRef) {
 			const rect = containerRef.getBoundingClientRect();
 			const newRatio = ((e.clientX - rect.left) / rect.width) * 100;
-			splitRatio = Math.max(30, Math.min(80, newRatio));
+			splitRatio = clampSplitRatio(newRatio, 30, 80);
 		}
 		if (isDraggingValidate && editorRowRef) {
 			const rect = editorRowRef.getBoundingClientRect();
@@ -1096,6 +1128,13 @@
 			// Floor at 320px: below that the header's title + count chips + re-check button
 			// no longer fit on one line and start clipping.
 			validatePanelWidth = Math.max(320, Math.min(560, w));
+		}
+		if (isDraggingOutputSplit && outputAreaRef) {
+			const rect = outputAreaRef.getBoundingClientRect();
+			// output panel is on the bottom: its height = distance from cursor to the
+			// area's bottom edge, as a percentage of the whole editor+output area.
+			const newRatio = ((rect.bottom - e.clientY) / rect.height) * 100;
+			outputSplitRatio = clampSplitRatio(newRatio, OUTPUT_SPLIT_MIN, OUTPUT_SPLIT_MAX);
 		}
 	}
 
@@ -1108,6 +1147,10 @@
 		if (isDraggingValidate) {
 			isDraggingValidate = false;
 			localStorage.setItem(STORAGE_KEY_VALIDATE_W, String(validatePanelWidth));
+		}
+		if (isDraggingOutputSplit) {
+			isDraggingOutputSplit = false;
+			localStorage.setItem(STORAGE_KEY_OUTPUT_SPLIT, outputSplitRatio.toString());
 		}
 	}
 
@@ -1975,6 +2018,13 @@
 			{/if}
 		</div>
 
+		<!-- Wrapper spanning the editor area + the live output panel below it, so the
+		     output panel's height can be a percentage of THIS combined space rather than
+		     of the whole dialog (which also includes the fixed header/tabs/footer). -->
+		<div
+			bind:this={outputAreaRef}
+			class="flex-1 min-h-0 flex flex-col {isDraggingOutputSplit ? 'select-none' : ''}"
+		>
 		<div class="flex-1 overflow-hidden flex flex-col min-h-0">
 			{#if errors.compose}
 				<Alert.Root variant="destructive" class="mx-6 mt-4">
@@ -2314,9 +2364,23 @@
 
 		<!-- Live output for Create & Start / Save & redeploy, rendered below the editor instead
 		     of handing the user off to a separate window (see save-close-policy.ts for how long
-		     the dialog then stays open). Only takes up space once there is something to show. -->
+		     the dialog then stays open). Only takes up space once there is something to show,
+		     and only then does its resize divider exist -- a handle that drags nothing is worse
+		     than no handle. -->
 		{#if outputRunning || outputLines.length > 0}
-			<div class="h-64 shrink-0 border-t border-zinc-200 dark:border-zinc-700 flex flex-col min-h-0">
+			<!-- Resizable divider (height, not width -- drag up/down to resize the output panel) -->
+			<div
+				class="h-1 shrink-0 bg-zinc-200 dark:bg-zinc-700 hover:bg-blue-400 dark:hover:bg-blue-500 cursor-row-resize transition-colors flex items-center justify-center group {isDraggingOutputSplit ? 'bg-blue-500 dark:bg-blue-400' : ''}"
+				onmousedown={startOutputSplitDrag}
+				role="separator"
+				aria-orientation="horizontal"
+				tabindex="0"
+			>
+				<div class="w-8 h-4 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity {isDraggingOutputSplit ? 'opacity-100' : ''}">
+					<GripHorizontal class="w-3 h-3 text-white" />
+				</div>
+			</div>
+			<div class="shrink-0 flex flex-col min-h-0" style="height: {outputSplitRatio}%">
 				<div class="px-5 py-1.5 text-xs text-zinc-500 dark:text-zinc-400 flex items-center gap-2 flex-shrink-0">
 					{#if outputRunning}
 						<Loader2 class="w-3 h-3 animate-spin" />
@@ -2332,6 +2396,7 @@
 				/>
 			</div>
 		{/if}
+		</div>
 
 		<!-- Footer -->
 		<div class="px-5 py-2.5 border-t border-zinc-200 dark:border-zinc-700 flex items-center justify-between flex-shrink-0">
