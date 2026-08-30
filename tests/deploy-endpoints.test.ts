@@ -15,16 +15,18 @@
  * of the two files registers last wins for BOTH, deterministically, and the
  * loser's import throws "Export named 'X' not found").
  *
- * $lib/server/authorize is mocked directly here (no existing file mocks it,
- * so no collision), driven by a per-test `authState`. $lib/server/deploy-log-store
- * is NOT mocked: it only touches node:fs/promises, so real file operations
- * against a throwaway DATA_DIR exercise the actual read/delete paths.
+ * $lib/server/authorize is faked via tests/helpers/authorize-fake.ts (same
+ * collision reason as the db fake above -- see that helper's doc comment), driven
+ * by a per-test `authState`. $lib/server/deploy-log-store is NOT mocked: it only
+ * touches node:fs/promises, so real file operations against a throwaway DATA_DIR
+ * exercise the actual read/delete paths.
  */
-import { describe, test, expect, mock, beforeAll, beforeEach, afterAll } from 'bun:test';
+import { describe, test, expect, beforeAll, beforeEach, afterAll } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { registerDbFake } from './helpers/db-fake';
+import { registerAuthorizeFake } from './helpers/authorize-fake';
 
 // -- $lib/server/authorize: fully replaced, driven by `authState` ----------
 
@@ -41,15 +43,13 @@ function resetAuthState() {
 }
 resetAuthState();
 
-mock.module('$lib/server/authorize', () => ({
-	authorize: async () => ({
-		authEnabled: authState.authEnabled,
-		isAuthenticated: authState.isAuthenticated,
-		isEnterprise: authState.isEnterprise,
-		can: async () => authState.can,
-		canAccessEnvironment: async (id: number) =>
-			authState.accessibleEnvs === 'all' || authState.accessibleEnvs.includes(id)
-	})
+registerAuthorizeFake(async () => ({
+	authEnabled: authState.authEnabled,
+	isAuthenticated: authState.isAuthenticated,
+	isEnterprise: authState.isEnterprise,
+	can: async () => authState.can,
+	canAccessEnvironment: async (id: number) =>
+		authState.accessibleEnvs === 'all' || authState.accessibleEnvs.includes(id)
 }));
 
 // -- $lib/server/db: an in-memory schedule_executions fake -----------------
