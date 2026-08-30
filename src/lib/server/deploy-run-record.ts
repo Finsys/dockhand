@@ -54,9 +54,16 @@ class DeployRunRecorder implements RunRecorder {
 	 */
 	line(line: string): void {
 		if (this.truncated) return;
-		this.lines.push(line);
 		this.tail = this.tail.then(async () => {
 			if (this.truncated) return;
+			// Pushed for the summary in the SAME guarded step as the file write, not
+			// synchronously up in line() -- line() can be called many times before
+			// the chain gets to run any of them, and truncation only actually takes
+			// effect partway through that queue. Pushing here keeps `this.lines`
+			// (what summarize() sees) exactly in sync with what really landed in the
+			// file: a line that gets skipped because truncation already kicked in
+			// isn't counted as if it had been written.
+			this.lines.push(line);
 			await appendRunLog(this.runId, line + '\n');
 			// Checked AFTER writing, not before: a budget check ahead of the write
 			// would either reject a legitimate line on stale size info, or need a
