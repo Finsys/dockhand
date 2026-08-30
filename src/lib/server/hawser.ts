@@ -14,6 +14,11 @@ import { isHealthTransition } from './subprocess-manager.js';
 import { pushMetric } from './metrics-store.js';
 import { secureGetRandomValues, secureRandomUUID } from './crypto-fallback.js';
 import { hashPassword, verifyPassword } from './auth.js';
+// The 'stream' message routing logic lives in a db-free core module so it stays unit-testable
+// (importing this file pulls in db/drizzle -> better-sqlite3, which bun's test runner can't
+// load). Re-exported so callers get it from one import site.
+import { dispatchStreamMessage } from './hawser-core.js';
+export { dispatchStreamMessage };
 
 // Protocol constants
 export const HAWSER_PROTOCOL_VERSION = '1.0';
@@ -46,6 +51,10 @@ export interface EdgeConnection {
 	lastHeartbeat: number;
 	pendingRequests: Map<string, PendingRequest>;
 	pendingStreamRequests: Map<string, PendingStreamRequest>;
+	// Line callbacks for non-streaming requests (e.g. compose) that still want to observe
+	// 'stream' messages as they arrive. Separate from pendingStreamRequests, which belongs
+	// to requests sent with streaming: true (see sendEdgeStreamRequest).
+	lineHandlers?: Map<string, (line: string) => void>;
 	pingInterval?: ReturnType<typeof setInterval>;
 	lastMetrics?: {
 		uptime?: number;
@@ -499,7 +508,8 @@ export function handleEdgeConnection(
 		connectedAt: new Date(),
 		lastHeartbeat: Date.now(),
 		pendingRequests: new Map(),
-		pendingStreamRequests: new Map()
+		pendingStreamRequests: new Map(),
+		lineHandlers: new Map()
 	};
 
 	edgeConnections.set(environmentId, connection);
@@ -1246,6 +1256,10 @@ async function handleHawserWsMessage(ws: any, msg: any, connId: string, remoteIp
 			if (pending) {
 				clearTimeout(pending.timeout);
 				connection.pendingRequests.delete(msg.requestId);
+				// A non-streaming request that registered a line handler (compose, Task 9) is
+				// done once its response arrives -- without this the map grows unbounded for
+				// the lifetime of the process.
+				connection.lineHandlers?.delete(msg.requestId);
 				pending.resolve({
 					statusCode: msg.statusCode,
 					headers: msg.headers || {},
@@ -1257,10 +1271,7 @@ async function handleHawserWsMessage(ws: any, msg: any, connId: string, remoteIp
 		}
 
 		case 'stream': {
-			const streamPending = connection.pendingStreamRequests.get(msg.requestId);
-			if (streamPending) {
-				streamPending.onData?.(msg.data);
-			}
+			dispatchStreamMessage(connection, msg);
 			break;
 		}
 
