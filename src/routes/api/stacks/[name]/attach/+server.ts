@@ -46,6 +46,27 @@ export const POST: RequestHandler = async (event) => {
 
 		const data = await request.json();
 
+		if (
+			'secretProviderId' in data &&
+			data.secretProviderId !== null &&
+			typeof data.secretProviderId !== 'number'
+		) {
+			return json({ error: 'secretProviderId must be a number or null' }, { status: 400 });
+		}
+
+		const existingProviderId = source.secretProviderId ?? null;
+		const providerChanged =
+			'secretProviderId' in data && data.secretProviderId !== existingProviderId;
+
+		if (
+			providerChanged &&
+			typeof data.secretProviderId === 'number' &&
+			auth.authEnabled &&
+			!(await auth.can('secrets', 'view', envIdNum))
+		) {
+			return json({ error: 'Permission denied: binding a secret provider requires the secrets permission' }, { status: 403 });
+		}
+
 		if (data.stackName && data.stackName.trim() !== stackName) {
 			return json({ error: 'Stack name cannot be changed during conversion' }, { status: 400 });
 		}
@@ -99,13 +120,21 @@ export const POST: RequestHandler = async (event) => {
 			stackName,
 			environmentId: envIdNum ?? null,
 			repositoryId,
+			...(data.repositoryId && typeof data.branch === 'string' && data.branch.trim()
+				? { branch: data.branch.trim() }
+				: {}),
 			composePath: data.composePath || 'compose.yaml',
 			envFilePath: data.envFilePath || null,
 			autoUpdate: data.autoUpdate || false,
 			autoUpdateSchedule: data.autoUpdateSchedule || 'daily',
 			autoUpdateCron: data.autoUpdateCron || '0 3 * * *',
 			webhookEnabled: data.webhookEnabled || false,
-			webhookSecret
+			webhookSecret,
+			contextDir: data.contextDir || null,
+			buildOnDeploy: data.buildOnDeploy ?? false,
+			noBuildCache: data.noBuildCache ?? false,
+			repullImages: data.repullImages ?? false,
+			forceRedeploy: data.forceRedeploy ?? false
 		});
 
 		await upsertStackSource({
@@ -115,14 +144,15 @@ export const POST: RequestHandler = async (event) => {
 			gitRepositoryId: repositoryId,
 			gitStackId: gitStack.id,
 			composePath: source.composePath ?? null,
-			envPath: source.envPath ?? null
+			envPath: source.envPath ?? null,
+			...(providerChanged ? { secretProviderId: data.secretProviderId ?? null } : {})
 		});
 
 		if (gitStack.autoUpdate && gitStack.autoUpdateCron) {
 			await registerSchedule(gitStack.id, 'git_stack_sync', gitStack.environmentId);
 		}
 
-		// reload env file on disk right before converting to avoid edge case where the file is modified on disk before the conversion happens. 
+		// reload env file on disk right before converting to avoid edge case where the file is modified on disk before the conversion happens.
 		// this only loads new variables, it does not overwrite them. the user using the interface should be the authoritative source of truth for
 		// the actual value
 		const composeResult = await getStackComposeFile(stackName, envIdNum ?? null);
