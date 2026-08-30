@@ -37,6 +37,10 @@ export interface DeployRunDetails {
 	summary?: DeployRunSummary;
 	/** Set when the run's output hit deploy-log-store's size budget and was cut off. */
 	truncated?: boolean;
+	/** Set by deploy-log-reconcile once it confirms the on-disk log file is gone
+	 *  (see deploy-log-reconcile.ts) -- never cleared, and never set for a run
+	 *  that is still in progress (the reconcile job skips those). */
+	logMissing?: boolean;
 }
 
 export interface DeployRun {
@@ -174,6 +178,40 @@ export function lastErrorLine(errorMessage: string | null | undefined, maxLen = 
 	if (last.length === 0) return null;
 	if (last.length <= maxLen) return last;
 	return `${last.slice(0, maxLen - 1)}…`;
+}
+
+/**
+ * What the Deploys tab's expanded row shows for a run's LOG PANEL specifically --
+ * a separate, narrower question from buildDeployRunView's "how does the row
+ * summarize" above it. Three independent facts, each driving its own piece of
+ * UI (see the component): whether the log is worth fetching at all, whether a
+ * truncation notice belongs above it, and whether a delete action makes sense
+ * for a run that might still be writing to that very file.
+ *
+ * logMissing short-circuits the fetch entirely -- a run already marked missing
+ * by deploy-log-reconcile will 404 on GET .../log every time, so there is no
+ * reason to make that round trip just to learn what the record already says.
+ */
+export interface DeployLogPanelState {
+	/** True when the record already knows the log file is gone (details.logMissing).
+	 *  The panel shows "log no longer available" and never fires a GET for it. */
+	logMissing: boolean;
+	/** True when the stored log was cut off at deploy-log-store's size budget --
+	 *  same underlying flag DeployRunView.truncated surfaces for the collapsed
+	 *  row, repeated here so the log panel doesn't need the raw run for it too. */
+	truncated: boolean;
+	/** False for a run still in progress. Its log file may still be growing on
+	 *  disk, and deleting the record out from under an active write would race
+	 *  the writer -- so no delete action is offered until the run has settled. */
+	deletable: boolean;
+}
+
+export function buildDeployLogPanelState(run: DeployRun): DeployLogPanelState {
+	return {
+		logMissing: run.details?.logMissing === true,
+		truncated: run.details?.truncated === true,
+		deletable: run.status !== 'running'
+	};
 }
 
 export function buildDeployRunView(run: DeployRun): DeployRunView {

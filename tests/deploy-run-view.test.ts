@@ -15,6 +15,7 @@ import {
 	formatOptionChips,
 	lastErrorLine,
 	buildDeployRunView,
+	buildDeployLogPanelState,
 	type DeployRun,
 	type DeployRunSummary
 } from '../src/lib/utils/deploy-run-view';
@@ -247,5 +248,44 @@ describe('buildDeployRunView', () => {
 		expect(view.optionChips).toEqual(['Pull', 'Build']);
 		expect(view.imagesBuilt).toEqual(['app:1']);
 		expect(view.imagesPulled).toEqual(['redis:7']);
+	});
+});
+
+describe('buildDeployLogPanelState', () => {
+	test('a normal completed run: log fetchable, not truncated, deletable', () => {
+		const state = buildDeployLogPanelState(run({ status: 'success' }));
+		expect(state).toEqual({ logMissing: false, truncated: false, deletable: true });
+	});
+
+	test('a run reconciled as logMissing short-circuits to logMissing -- regardless of truncated', () => {
+		const state = buildDeployLogPanelState(
+			run({ status: 'success', details: { logMissing: true, truncated: true } })
+		);
+		expect(state.logMissing).toBe(true);
+	});
+
+	test('a truncated run surfaces truncated independently of logMissing', () => {
+		const state = buildDeployLogPanelState(run({ status: 'failed', details: { truncated: true } }));
+		expect(state.logMissing).toBe(false);
+		expect(state.truncated).toBe(true);
+	});
+
+	test('a running run is never deletable, even though its log is not missing', () => {
+		const state = buildDeployLogPanelState(run({ status: 'running', details: undefined }));
+		expect(state.deletable).toBe(false);
+		expect(state.logMissing).toBe(false);
+	});
+
+	test('mutating the run to running after it was deletable flips deletable back off', () => {
+		// Regression guard for a hand-rolled `run.status !== "running"` check drifting
+		// out of sync with this function if someone inlines the condition again later.
+		const base = run({ status: 'success' });
+		expect(buildDeployLogPanelState(base).deletable).toBe(true);
+		expect(buildDeployLogPanelState({ ...base, status: 'running' }).deletable).toBe(false);
+	});
+
+	test('a run with no details at all reads as available, not truncated, deletable', () => {
+		const state = buildDeployLogPanelState(run({ status: 'success', details: null }));
+		expect(state).toEqual({ logMissing: false, truncated: false, deletable: true });
 	});
 });
