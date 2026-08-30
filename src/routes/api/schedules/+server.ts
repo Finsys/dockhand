@@ -29,7 +29,7 @@ import { authorize } from '$lib/server/authorize';
 
 export interface ScheduleInfo {
 	id: number;
-	type: 'container_update' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune' | 'backup' | 'repo_prune' | 'repo_check' | 'repo_verify';
+	type: 'container_update' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune' | 'backup' | 'repo_prune' | 'repo_check' | 'repo_verify' | 'stack_deploy' | 'deploy_log_reconcile';
 	name: string;
 	entityName: string;
 	description?: string;

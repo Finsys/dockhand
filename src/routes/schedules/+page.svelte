@@ -163,7 +163,7 @@
 
 	interface ScheduleExecution {
 		id: number;
-		scheduleType: 'container_update' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune' | 'backup' | 'repo_prune' | 'repo_check' | 'repo_verify';
+		scheduleType: 'container_update' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune' | 'backup' | 'repo_prune' | 'repo_check' | 'repo_verify' | 'stack_deploy' | 'deploy_log_reconcile';
 		scheduleId: number;
 		environmentId: number | null;
 		entityName: string;
@@ -182,7 +182,7 @@
 	interface Schedule {
 		key: string; // Unique key: type-id
 		id: number;
-		type: 'container_update' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune' | 'backup' | 'repo_prune' | 'repo_check' | 'repo_verify';
+		type: 'container_update' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune' | 'backup' | 'repo_prune' | 'repo_check' | 'repo_verify' | 'stack_deploy' | 'deploy_log_reconcile';
 		name: string;
 		entityName: string;
 		description?: string;
@@ -508,9 +508,10 @@
 
 	async function toggleHideSystemJobs() {
 		hideSystemJobs = !hideSystemJobs;
-		// Remove system_cleanup from filter if hiding system jobs
-		if (hideSystemJobs && filterTypes.includes('system_cleanup')) {
-			filterTypes = filterTypes.filter(t => t !== 'system_cleanup');
+		// Remove system_cleanup and deploy_log_reconcile from filter if hiding system jobs
+		// (both are system schedules -- isSystem: true -- so they're gone from the list too)
+		if (hideSystemJobs && (filterTypes.includes('system_cleanup') || filterTypes.includes('deploy_log_reconcile'))) {
+			filterTypes = filterTypes.filter(t => t !== 'system_cleanup' && t !== 'deploy_log_reconcile');
 		}
 		// Save preference in background
 		try {
@@ -975,6 +976,10 @@
 								Repo check
 							{:else if filterTypes[0] === 'repo_verify'}
 								Data verify
+							{:else if filterTypes[0] === 'stack_deploy'}
+								Stack deploy
+							{:else if filterTypes[0] === 'deploy_log_reconcile'}
+								Deploy log reconcile
 							{:else}
 								System jobs
 							{/if}
@@ -1009,6 +1014,10 @@
 						<Trash2 class="w-4 h-4 mr-2 inline text-amber-500 drop-shadow-[0_0_3px_rgba(245,158,11,0.4)]" />
 						Image prune
 					</Select.Item>
+					<Select.Item value="stack_deploy">
+						<Server class="w-4 h-4 mr-2 inline text-indigo-500 drop-shadow-[0_0_3px_rgba(99,102,241,0.4)]" />
+						Stack deploy
+					</Select.Item>
 					<!-- BETA GATE: backup schedule filters hidden unless FEAT_BACKUPS_ENABLED (see features.ts) -->
 					{#if $page.data.backupsEnabled}
 						<Select.Item value="backup">
@@ -1032,6 +1041,10 @@
 						<Select.Item value="system_cleanup">
 							<Wrench class="w-4 h-4 mr-2 inline text-amber-500 drop-shadow-[0_0_3px_rgba(245,158,11,0.4)]" />
 							System jobs
+						</Select.Item>
+						<Select.Item value="deploy_log_reconcile">
+							<FileText class="w-4 h-4 mr-2 inline text-amber-500 drop-shadow-[0_0_3px_rgba(245,158,11,0.4)]" />
+							Deploy log reconcile
 						</Select.Item>
 					{/if}
 				</Select.Content>
@@ -1604,7 +1617,7 @@
 				Execution details
 				{#if selectedExecution}
 					<span class="text-muted-foreground font-normal">
-						({#if selectedExecution.scheduleType === 'container_update'}Container update{:else if selectedExecution.scheduleType === 'env_update_check'}Environment update{:else if selectedExecution.scheduleType === 'git_stack_sync'}Git stack sync{:else if selectedExecution.scheduleType === 'backup'}Backup{:else if selectedExecution.scheduleType === 'repo_prune'}Repo prune{:else if selectedExecution.scheduleType === 'repo_check'}Repo check{:else if selectedExecution.scheduleType === 'repo_verify'}Data verify{:else}System job{/if})
+						({#if selectedExecution.scheduleType === 'container_update'}Container update{:else if selectedExecution.scheduleType === 'env_update_check'}Environment update{:else if selectedExecution.scheduleType === 'git_stack_sync'}Git stack sync{:else if selectedExecution.scheduleType === 'backup'}Backup{:else if selectedExecution.scheduleType === 'repo_prune'}Repo prune{:else if selectedExecution.scheduleType === 'repo_check'}Repo check{:else if selectedExecution.scheduleType === 'repo_verify'}Data verify{:else if selectedExecution.scheduleType === 'stack_deploy'}Stack deploy{:else if selectedExecution.scheduleType === 'deploy_log_reconcile'}Deploy log reconcile{:else}System job{/if})
 					</span>
 				{/if}
 			</Dialog.Title>

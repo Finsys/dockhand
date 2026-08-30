@@ -13,10 +13,10 @@ import { auditBackup, auditBackupDestination } from '$lib/server/audit';
 /**
  * @openapi
  * summary: Toggle a schedule's enabled/disabled state (registers/unregisters the croner job accordingly)
- * path: type:string! Schedule type (container_update, git_stack_sync, env_update_check, image_prune, backup, repo_prune, repo_check, repo_verify, system_cleanup)
+ * path: type:string! Schedule type (container_update, git_stack_sync, env_update_check, image_prune, backup, repo_prune, repo_check, repo_verify, system_cleanup, deploy_log_reconcile)
  * path: id:integer! Schedule id (semantics depend on type) (from GET /api/schedules)
  * resp-200: {success:boolean!, enabled:boolean!}
- * resp-400: Invalid schedule id, unsupported type, or system_cleanup (cannot be paused)
+ * resp-400: Invalid schedule id, unsupported type, or system_cleanup/deploy_log_reconcile (cannot be paused)
  * resp-404: Schedule, backup config, or backup destination not found
  * resp-500: Unexpected error while toggling the schedule
  */
@@ -173,7 +173,11 @@ export const POST: RequestHandler = async (event) => {
 			await auditBackupDestination(event, 'update', destId, dest.name, { policy: enabledKey, enabled: newEnabled });
 
 			return json({ success: true, enabled: newEnabled });
-		} else if (type === 'system_cleanup') {
+		} else if (type === 'system_cleanup' || type === 'deploy_log_reconcile') {
+			// Both are global, settings-driven system schedules (own enabled flag +
+			// cron, configured on the schedule settings page) -- not a per-item
+			// cron the way container_update/git_stack_sync are. stack_deploy never
+			// reaches here: it has no schedule to toggle (no cron, no settings row).
 			return json({ error: 'System schedules cannot be paused' }, { status: 400 });
 		} else {
 			return json({ error: 'Invalid schedule type' }, { status: 400 });
