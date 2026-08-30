@@ -1,7 +1,7 @@
 <script lang="ts">
 	/**
-	 * Deploys tab: the recorded history of deploy runs for this stack (Task 16's
-	 * GET /api/stacks/{name}/deploys). Each run is a collapsed row by default --
+	 * Deploys tab: the recorded history of deploy runs for this stack (GET
+	 * /api/stacks/{name}/deploys). Each run is a collapsed row by default --
 	 * status, relative time, duration, and a one-line summary -- expandable for the
 	 * full picture (containers, build/cache, images, options, a truncated notice,
 	 * and on failure the shortened last error line). All of that text composition
@@ -19,6 +19,17 @@
 	 * should even attempt: a run already known to be missing its log file
 	 * (reconciled by deploy-log-reconcile) never triggers the request at all,
 	 * since it would just 404.
+	 *
+	 * `envId === null` is NOT "nothing to ask for" -- it is the LOCAL
+	 * environment (see the list route's own doc comment, `.../deploys/+server.ts`):
+	 * appendEnvParam() only appends `env` when envId is truthy, so a
+	 * single-environment install's own "deploy" calls never send one either,
+	 * and every one of ITS runs is recorded with environmentId === null. The
+	 * route now resolves an omitted `env` to exactly that filter. onMount
+	 * below fetches unconditionally for that reason -- there is no longer a
+	 * distinct "no environment selected" state to guard against here; the
+	 * type this component receives (number | null) has no third value that
+	 * could mean anything else.
 	 */
 	import { onMount } from 'svelte';
 	import { toast } from 'svelte-sonner';
@@ -143,15 +154,6 @@
 	}
 
 	onMount(async () => {
-		// GET .../deploys requires `env` (a bare stack name is not unique across
-		// environments -- see the route's own doc comment). Without a known
-		// environment there is nothing valid to ask for, so show that state
-		// instead of firing a request the endpoint would 400 anyway.
-		if (envId === null) {
-			loading = false;
-			loadError = 'No environment selected.';
-			return;
-		}
 		try {
 			const res = await fetch(appendEnvParam(`/api/stacks/${encodeURIComponent(stackName)}/deploys`, envId));
 			if (!res.ok) {
