@@ -114,6 +114,13 @@ export function createJobResponse(
 		appendLine(job, { event, data });
 	};
 
+	// Guards RunRecorder.end()'s "called exactly once" contract: if the .then()
+	// branch below reaches its recorder.end() call and that call itself throws,
+	// the rejection lands in .catch(), which must not call end() a second time.
+	// Set right before invoking end() (not after it resolves), so a throwing
+	// end() is still counted as "attempted" and never retried.
+	let recorderEnded = false;
+
 	operation(send, () => job.cancelRequested === true)
 		.then(async () => {
 			const resultLine = job.lines.findLast((l) => l.event === 'result');
@@ -129,6 +136,7 @@ export function createJobResponse(
 			// send an Accept header) -- reuse the JSON path's endFromResult() instead of
 			// hardcoding end(true), or every such run was recorded as a success.
 			if (recorder) {
+				recorderEnded = true;
 				const { ok, error } = endFromResult(resultData);
 				await recorder.end(ok, undefined, error);
 			}
@@ -136,7 +144,7 @@ export function createJobResponse(
 		.catch(async (err: unknown) => {
 			const message = err instanceof Error ? err.message : String(err);
 			failJob(job, message);
-			if (recorder) await recorder.end(false, undefined, message);
+			if (recorder && !recorderEnded) await recorder.end(false, undefined, message);
 		});
 
 	return json({ jobId: job.id });

@@ -144,6 +144,35 @@ describe('createJobResponse RunRecorder hook', () => {
 		expect(end.error).toBe('compose failed');
 	});
 
+	test('streaming path: a recorder.end() that itself throws is never called twice', async () => {
+		// Guards RunRecorder's "end() is called exactly once" contract from sse.ts's own
+		// side: if the .then() branch's recorder.end() call throws, that rejection must
+		// not cause .catch() to invoke end() again.
+		let calls = 0;
+		const recorder: RunRecorder = {
+			line() {},
+			async end() {
+				calls++;
+				throw new Error('recorder failure');
+			}
+		};
+		const request = new Request('http://x'); // no Accept header -> fire-and-forget path
+
+		createJobResponse(
+			async (send) => {
+				send('result', { success: true, output: 'done' });
+			},
+			request,
+			recorder
+		);
+
+		// Let the .then()/.catch() microtasks (including the rejected recorder.end() call
+		// and its handling) settle before asserting.
+		await new Promise((resolve) => setTimeout(resolve, 20));
+
+		expect(calls).toBe(1);
+	});
+
 	test('omitting the recorder changes nothing (backward compat)', async () => {
 		const request = new Request('http://x', { headers: { Accept: 'application/json' } });
 		const response = createJobResponse(runOperation, request);
