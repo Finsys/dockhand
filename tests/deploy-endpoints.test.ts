@@ -162,17 +162,41 @@ describe('GET /api/stacks/[name]/deploys (list)', () => {
 		expect((await res.json()).error).toBe('Authentication required');
 	});
 
+	test('missing env -> 400 (a stack name alone does not identify one environment)', async () => {
+		const res = await listRoute.GET(makeEvent());
+		expect(res.status).toBe(400);
+		expect((await res.json()).error).toBe('env query parameter is required');
+	});
+
+	test('non-numeric env -> the SAME 400 as missing env', async () => {
+		const res = await listRoute.GET(makeEvent({ url: 'http://x/?env=abc' }));
+		expect(res.status).toBe(400);
+		expect((await res.json()).error).toBe('env query parameter is required');
+	});
+
+	test('cross-environment leak: omitting env must NOT surface a run from an environment the caller cannot access', async () => {
+		authState.isEnterprise = true;
+		authState.accessibleEnvs = [1]; // caller can access env 1 only
+		execStore.set(1, { ...RUN, environmentId: 1 });
+		execStore.set(2, { ...RUN, id: 2, environmentId: 9 }); // foreign env, same stack name
+		const res = await listRoute.GET(makeEvent()); // no ?env=
+		expect(res.status).toBe(400);
+		const body = await res.json();
+		expect(body).not.toHaveProperty('runs');
+		expect(JSON.stringify(body)).not.toContain('"environmentId":9');
+	});
+
 	test('authenticated but lacking permission -> 403', async () => {
 		authState.can = false;
-		const res = await listRoute.GET(makeEvent());
+		const res = await listRoute.GET(makeEvent({ url: 'http://x/?env=1' }));
 		expect(res.status).toBe(403);
 		expect((await res.json()).error).toBe('Permission denied');
 	});
 
 	test('lists only runs for THIS stack, without log text', async () => {
-		execStore.set(1, RUN);
-		execStore.set(2, { ...RUN, id: 2, entityName: 'other-stack' });
-		const res = await listRoute.GET(makeEvent());
+		execStore.set(1, { ...RUN, environmentId: 1 });
+		execStore.set(2, { ...RUN, id: 2, environmentId: 1, entityName: 'other-stack' });
+		const res = await listRoute.GET(makeEvent({ url: 'http://x/?env=1' }));
 		expect(res.status).toBe(200);
 		const body = await res.json();
 		expect(body.runs).toHaveLength(1);
@@ -180,11 +204,12 @@ describe('GET /api/stacks/[name]/deploys (list)', () => {
 		expect(body.runs[0]).not.toHaveProperty('logs');
 		expect(lastListFilters.scheduleType).toBe('stack_deploy');
 		expect(lastListFilters.entityName).toBe(STACK);
+		expect(lastListFilters.environmentId).toBe(1);
 	});
 
 	test('skips a non-deploy schedule execution that happens to share the entity name', async () => {
-		execStore.set(1, { ...RUN, scheduleType: 'backup' });
-		const res = await listRoute.GET(makeEvent());
+		execStore.set(1, { ...RUN, environmentId: 1, scheduleType: 'backup' });
+		const res = await listRoute.GET(makeEvent({ url: 'http://x/?env=1' }));
 		const body = await res.json();
 		expect(body.runs).toHaveLength(0);
 	});
