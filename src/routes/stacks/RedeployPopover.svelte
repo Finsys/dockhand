@@ -14,18 +14,26 @@
 		side?: 'top' | 'bottom';
 		align?: 'start' | 'center' | 'end';
 		/**
-		 * 'icon' (default): small icon-only trigger, as used in the stack grid rows.
-		 * 'button': a full labeled trigger styled like the shadcn Button component, as
-		 * used next to "Save & redeploy" / "Create & Start" in StackModal.
+		 * 'icon' (default): small icon-only trigger, as used standalone in the stack
+		 * grid rows -- the icon itself IS the action, there is no separate main button.
+		 * 'chevron': a small square trigger meant to sit flush against a separate,
+		 * directly-clickable main button (a split button), as used next to
+		 * "Save & redeploy" / "Create & Start" in StackModal. The main button is NOT
+		 * part of this component -- the caller renders it, wraps both in one flex
+		 * container, and gives the main button `rounded-r-none` / this trigger
+		 * `rounded-l-none` so they read as one control with two separate, independently
+		 * reachable click/focus targets (never one element that does different things
+		 * depending on where exactly it's clicked).
 		 */
-		triggerVariant?: 'icon' | 'button';
-		/** Extra classes merged onto the trigger (mainly useful with triggerVariant="button", e.g. a fixed width). */
+		triggerVariant?: 'icon' | 'chevron';
+		/** Extra classes merged onto the trigger. */
 		triggerClass?: string;
 		/**
-		 * Initial state of the "Pull images" / "Build images" checkboxes each time the
-		 * popover opens. Re-read on every open (not just at mount) so a caller whose
-		 * default is derived from live content (e.g. "does the compose have a build:
-		 * section right now") stays correct across repeated opens.
+		 * Initial state of the "Pull images" / "Build images" / "Force recreate"
+		 * checkboxes each time the popover opens. Re-read on every open (not just once
+		 * at mount) so a caller whose default is derived from live content (e.g. "does
+		 * the compose have a build: section right now") stays correct across repeated
+		 * opens.
 		 */
 		defaultPull?: boolean;
 		defaultBuild?: boolean;
@@ -88,12 +96,12 @@
 		{#snippet child({ props })}
 			<button
 				type="button"
-				title={triggerVariant === 'icon' ? 'Redeploy' : undefined}
+				title={triggerVariant === 'icon' ? 'Redeploy' : 'More deploy options'}
 				{...props}
 				onclick={handleTriggerClick}
 				{disabled}
-				class={triggerVariant === 'button'
-					? cn(buttonVariants({ variant: 'default' }), triggerClass)
+				class={triggerVariant === 'chevron'
+					? cn(buttonVariants({ variant: 'default', size: 'icon' }), 'rounded-l-none border-l border-primary-foreground/20', triggerClass)
 					: cn(
 							'p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer inline-flex items-center',
 							triggerClass
