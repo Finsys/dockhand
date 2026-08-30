@@ -2762,6 +2762,9 @@
 	mode="create"
 	onClose={() => showCreateModal = false}
 	onSuccess={fetchStacks}
+	onOutputStart={startComposeOutput}
+	onOutputLine={appendComposeOutputLine}
+	onOutputFinish={finishComposeOutput}
 />
 
 <!-- Edit Stack Modal -->
@@ -2778,6 +2781,9 @@
 		stackModalGitInfo = null;
 	}}
 	onSuccess={fetchStacks}
+	onOutputStart={startComposeOutput}
+	onOutputLine={appendComposeOutputLine}
+	onOutputFinish={finishComposeOutput}
 />
 
 <GitStackModal

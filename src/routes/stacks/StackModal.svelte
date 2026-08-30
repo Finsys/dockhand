@@ -49,9 +49,15 @@
 		gitInfo?: { commit?: string; url?: string; branch?: string } | null; // Git provenance for read-only git stacks
 		onClose: () => void;
 		onSuccess: () => void; // Called after create or save
+		// Live compose output, forwarded to the page for deploying operations
+		// (Create & Start, Save & redeploy). The modal keeps no output state of its
+		// own so closing it cannot tear down a running deploy.
+		onOutputStart?: (title: string) => void;
+		onOutputLine?: (line: string) => void;
+		onOutputFinish?: (output?: string) => void;
 	}
 
-	let { open = $bindable(), mode: propMode, stackName: propStackName = '', initialCompose, initialStackName, readonly = false, gitInfo = null, onClose, onSuccess }: Props = $props();
+	let { open = $bindable(), mode: propMode, stackName: propStackName = '', initialCompose, initialStackName, readonly = false, gitInfo = null, onClose, onSuccess, onOutputStart, onOutputLine, onOutputFinish }: Props = $props();
 
 	let gitCommitCopied = $state<'ok' | 'error' | null>(null);
 	let gitUrlCopied = $state<'ok' | 'error' | null>(null);
@@ -1323,6 +1329,8 @@
 
 			requestBody.secretProviderId = formSecretProviderId;
 
+			if (start) onOutputStart?.(`Starting ${newStackName.trim()}`);
+
 			// Create the stack
 			response = await fetch(appendEnvParam('/api/stacks', envId), {
 				method: 'POST',
@@ -1331,7 +1339,10 @@
 			});
 
 			// When start=true, response is a job or JSON; when start=false, it's plain JSON
-			const data = start ? await readJobResponse(response) : await response.json();
+			const data = start
+				? await readJobResponse(response, (line) => onOutputLine?.(line))
+				: await response.json();
+			if (start) onOutputFinish?.(typeof data.output === 'string' ? data.output : undefined);
 
 			if (!response.ok && !data.success) {
 				throw new Error((typeof data.error === 'string' ? data.error : data.message) || 'Failed to create stack');
@@ -1346,6 +1357,7 @@
 			onSuccess();
 			handleClose();
 		} catch (e: any) {
+			if (start) onOutputFinish?.();
 			operationError = {
 				title: 'Failed to create stack',
 				message: e.message || 'An error occurred while creating the stack',
@@ -1503,6 +1515,8 @@
 				);
 			}
 
+			if (restart) onOutputStart?.(`Redeploying ${stackName}`);
+
 			// Save compose file (with optional paths) - after env so deploy reads fresh .env
 			const response = await fetch(
 				appendEnvParam(`/api/stacks/${encodeURIComponent(stackName)}/compose`, envId),
@@ -1514,7 +1528,10 @@
 			);
 
 			// When restart=true, response is a job or JSON; when restart=false, it's plain JSON
-			const data = restart ? await readJobResponse(response) : await response.json();
+			const data = restart
+				? await readJobResponse(response, (line) => onOutputLine?.(line))
+				: await response.json();
+			if (restart) onOutputFinish?.(typeof data.output === 'string' ? data.output : undefined);
 
 			if (!response.ok && !data.success) {
 				throw new Error((typeof data.error === 'string' ? data.error : data.message) || 'Failed to save compose file');
@@ -1534,6 +1551,7 @@
 				handleClose();
 			}
 		} catch (e: any) {
+			if (restart) onOutputFinish?.();
 			operationError = {
 				title: restart ? 'Failed to apply stack' : 'Failed to save stack',
 				message: e.message || (restart ? 'An error occurred while applying the stack' : 'An error occurred while saving the stack'),
