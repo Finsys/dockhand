@@ -598,6 +598,12 @@ export async function getDockerConfig(envId?: number | null): Promise<DockerClie
 interface DockerFetchOptions extends RequestInit {
 	/** Set to true for long-lived streaming connections */
 	streaming?: boolean;
+	/**
+	 * Called per output line while the request runs. Only the Hawser Edge (WebSocket) path
+	 * can deliver these: the agent sends 'stream' messages alongside a non-streaming request.
+	 * Every other transport is plain request/response and simply never calls it.
+	 */
+	onLine?: (line: string) => void;
 }
 
 /**
@@ -828,7 +834,7 @@ export async function dockerFetch(
 
 	const startTime = Date.now();
 	const config = await getDockerConfig(envId);
-	const { streaming, ...fetchOptions } = options;
+	const { streaming, onLine, ...fetchOptions } = options;
 	const method = (options.method || 'GET').toUpperCase();
 
 	// Hawser Edge mode - route through WebSocket connection
@@ -888,7 +894,8 @@ export async function dockerFetch(
 				streaming || false,
 				(streaming || path === '/_hawser/compose' || path.endsWith('/prune')) ? 300000 : 30000, // 5 min for streaming/compose/prune, 30s for normal
 				isBinary,
-				fetchOptions.signal ?? undefined
+				fetchOptions.signal ?? undefined,
+				onLine
 			);
 			const elapsed = Date.now() - startTime;
 			// Only warn for slow requests, but skip /stats which is expected to be slow (5-10s)

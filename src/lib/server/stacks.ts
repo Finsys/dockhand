@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, rmSync, readdirSync, cpSync, statSync, unlinkSyn
 import { join, resolve, dirname, basename, normalize as pathNormalize, sep as pathSep } from 'node:path';
 import { spawn as nodeSpawn } from 'node:child_process';
 import { collectProcess } from './process-output-core';
-import { makeLineForwarder, surfaceBlockIfNoLines } from './secret-redaction';
+import { makeLineForwarder, makeRedactedLineSink } from './secret-redaction';
 import {
 	applyFileDeletions,
 	hashDirFiles,
@@ -1483,11 +1483,12 @@ async function executeLocalCompose(
  *
  * @param envVars - Non-secret environment variables (from .env file)
  * @param secretVars - Secret environment variables (injected via shell env on Hawser, NEVER in .env)
- * @param onLine - Hawser's `/_hawser/compose` call is a single request/response, not a
- *   stream, so this path cannot report lines as they happen (that lands in a follow-up
- *   task). Instead, once the response arrives, its `output` block is surfaced as a
- *   single line -- but only when no line was reported during the run, so an agent that
- *   does stream lines never gets the block duplicated on top of them.
+ * @param onLine - Called per redacted output line while the command runs. Hawser's
+ *   `/_hawser/compose` call is a single request/response, but an agent that understands
+ *   `streamOutput` sends its output alongside it as 'stream' messages, which the Edge
+ *   connection routes back here by requestId. An older agent sends none; for it the
+ *   response's `output` block is surfaced as one line instead. Never both -- see
+ *   makeRedactedLineSink.
  */
 async function executeComposeViaHawser(
 	operation: 'up' | 'down' | 'stop' | 'start' | 'restart' | 'pull',
@@ -1516,6 +1517,10 @@ async function executeComposeViaHawser(
 	// Hawser will inject ALL these as shell environment variables (secrets are NOT written to .env)
 	const allEnvVars = { ...(envVars || {}), ...(secretVars || {}) };
 	const secretCount = secretVars ? Object.keys(secretVars).length : 0;
+	// Unlike spawnEnv on the local path, allEnvVars is genuinely just the stack's own
+	// variables -- no PATH/HOME/DOCKER_CONFIG that would withhold half the output.
+	const secrets = Object.values(allEnvVars).filter((v): v is string => typeof v === 'string');
+	const lines = makeRedactedLineSink(onLine, secrets);
 
 	console.log(`${logPrefix} ----------------------------------------`);
 	console.log(`${logPrefix} EXECUTE COMPOSE VIA HAWSER`);
@@ -1590,7 +1595,10 @@ async function executeComposeViaHawser(
 				? filesToDelete.map(f => ({ path: f.path, sha256: f.hash }))
 				: undefined,
 			// Stack deletion (#1162): remove the agent-side stack dir on down
-			removeFiles: removeFiles || false
+			removeFiles: removeFiles || false,
+			// Ask the agent to also send its output line by line while the command runs.
+			// Old agents ignore the field and just return the block as before.
+			streamOutput: !!onLine
 		});
 
 		console.log(`${logPrefix} Sending request to Hawser agent...`);
@@ -1599,7 +1607,8 @@ async function executeComposeViaHawser(
 			{
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body
+				body,
+				onLine: lines.forward
 			},
 			envId
 		);
@@ -1623,12 +1632,9 @@ async function executeComposeViaHawser(
 			console.log(`${logPrefix} Error:`, result.error);
 		}
 
-		// This REST call never streams individual lines (see doc comment above) --
-		// lineCount stays 0 for now. A future streaming path through this function
-		// would increment it as lines arrive, which would then suppress the block below.
-		const lineCount = 0;
-		const secrets = Object.values(allEnvVars).filter((v): v is string => typeof v === 'string');
-		surfaceBlockIfNoLines(onLine, lineCount, result.output, secrets);
+		// Only reaches the operator when the agent streamed nothing -- otherwise they would
+		// see the whole run a second time, appended to the lines they already watched.
+		lines.surfaceBlock(result.output);
 
 		// Git deletion sync: interpret the agent's report. An agent that supports
 		// the feature always returns deletedFiles/skippedFiles (possibly empty

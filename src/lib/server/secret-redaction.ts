@@ -70,3 +70,36 @@ export function surfaceBlockIfNoLines(
 		makeLineForwarder(onLine, secrets)(block);
 	}
 }
+
+/**
+ * A redacting line sink for callers that must also decide, once the run is over, whether to
+ * surface the final output block.
+ *
+ * The two halves belong together because surfaceBlockIfNoLines needs the number of lines that
+ * were actually forwarded, and only the sink knows it. Counting what the sender emitted would
+ * be wrong: a line withheld by redaction never reached the operator, so for them the block is
+ * still the only thing there is to see.
+ *
+ * `forward` is undefined when there is no consumer, so callers can pass it straight into an
+ * optional callback parameter.
+ */
+export function makeRedactedLineSink(
+	onLine: ((line: string) => void) | undefined,
+	secrets: string[]
+): {
+	forward: ((line: string) => void) | undefined;
+	surfaceBlock: (block: string | undefined) => void;
+} {
+	let forwarded = 0;
+	const forward = onLine
+		? makeLineForwarder((line) => {
+				forwarded++;
+				onLine(line);
+			}, secrets)
+		: undefined;
+
+	return {
+		forward,
+		surfaceBlock: (block) => surfaceBlockIfNoLines(onLine, forwarded, block, secrets)
+	};
+}
