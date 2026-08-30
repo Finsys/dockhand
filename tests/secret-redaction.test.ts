@@ -2,30 +2,30 @@ import { describe, test, expect } from 'bun:test';
 import { redactLine } from '../src/lib/server/secret-redaction';
 
 describe('redactLine', () => {
-	test('ersetzt einen bekannten Wert exakt', () => {
+	test('replaces a known value exactly', () => {
 		const line = 'Error: connection to postgres://user:sup3rgeheim-passwort-42@db failed';
 		expect(redactLine(line, ['sup3rgeheim-passwort-42'])).toBe(
 			'Error: connection to postgres://user:***@db failed'
 		);
 	});
 
-	test('ersetzt jedes Vorkommen, nicht nur das erste', () => {
+	test('replaces every occurrence, not just the first', () => {
 		expect(redactLine('a=tokenwert-lang-genug b=tokenwert-lang-genug', ['tokenwert-lang-genug'])).toBe(
 			'a=*** b=***'
 		);
 	});
 
-	test('haelt die ganze Zeile zurueck, wenn ein Geheimnis zu kurz zum sicheren Ersetzen ist', () => {
-		// "test" wuerde in "latest", "testing", "attest" zutreffen -- Ersetzen waere Unsinn
+	test('withholds the whole line when a secret is too short to replace safely', () => {
+		// "test" would match inside "latest", "testing", "attest" -- replacing would be nonsense
 		expect(redactLine('Pulling image alpine:latest', ['test'])).toBeNull();
 	});
 
-	test('laesst eine Zeile ohne Geheimnis unveraendert', () => {
+	test('leaves a line without any secret unchanged', () => {
 		const line = 'Container app-1  Started';
 		expect(redactLine(line, ['sup3rgeheim-passwort-42'])).toBe(line);
 	});
 
-	test('ignoriert leere und undefinierte Geheimnisse', () => {
+	test('ignores empty and blank secrets', () => {
 		const line = 'Container app-1  Started';
 		expect(redactLine(line, ['', '  '])).toBe(line);
 	});
