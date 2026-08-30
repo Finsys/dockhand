@@ -172,28 +172,56 @@ describe('GET /api/stacks/[name]/deploys (list)', () => {
 		expect((await res.json()).error).toBe('Authentication required');
 	});
 
-	test('missing env -> 400 (a stack name alone does not identify one environment)', async () => {
-		const res = await listRoute.GET(makeEvent());
-		expect(res.status).toBe(400);
-		expect((await res.json()).error).toBe('env query parameter is required');
+	// H3 regression: on a single (local-only) environment install, EVERY
+	// recorded run had environmentId === NULL and was completely unreachable
+	// through this route -- `env` was hard-required, and there was no value a
+	// caller could pass that matched a NULL row (env=0 included; environment
+	// ids are never 0). See the module doc comment for the full chain.
+	test('H3: omitted env -> 200, treated as the LOCAL environment (environmentId null), not a 400', async () => {
+		execStore.set(1, { ...RUN, environmentId: null });
+		const res = await listRoute.GET(makeEvent()); // no ?env=
+		expect(res.status).toBe(200);
+		const body = await res.json();
+		expect(body.runs).toHaveLength(1);
+		expect(body.runs[0].id).toBe(1);
+		expect(lastListFilters.environmentId).toBe(null);
 	});
 
-	test('non-numeric env -> the SAME 400 as missing env', async () => {
+	test('H3: env=null (the literal string) -> the SAME local-environment result as omitting env', async () => {
+		execStore.set(1, { ...RUN, environmentId: null });
+		const res = await listRoute.GET(makeEvent({ url: 'http://x/?env=null' }));
+		expect(res.status).toBe(200);
+		const body = await res.json();
+		expect(body.runs).toHaveLength(1);
+		expect(lastListFilters.environmentId).toBe(null);
+	});
+
+	test('non-numeric, non-"null" env -> 400 (still not a value getScheduleExecutions can filter on)', async () => {
 		const res = await listRoute.GET(makeEvent({ url: 'http://x/?env=abc' }));
 		expect(res.status).toBe(400);
-		expect((await res.json()).error).toBe('env query parameter is required');
+		expect((await res.json()).error).toBe(
+			'env query parameter must be an integer, or omitted/"null" for the local environment'
+		);
 	});
 
-	test('cross-environment leak: omitting env must NOT surface a run from an environment the caller cannot access', async () => {
+	test('cross-environment leak: omitting env must NOT surface a run from a DIFFERENT (non-null) environment', async () => {
 		authState.isEnterprise = true;
-		authState.accessibleEnvs = [1]; // caller can access env 1 only
-		execStore.set(1, { ...RUN, environmentId: 1 });
-		execStore.set(2, { ...RUN, id: 2, environmentId: 9 }); // foreign env, same stack name
+		authState.accessibleEnvs = 'all'; // access is not the point of this test -- the null filter itself is
+		execStore.set(1, { ...RUN, environmentId: null }); // local run, matches the omitted-env filter
+		execStore.set(2, { ...RUN, id: 2, environmentId: 9 }); // foreign, non-null env, same stack name
 		const res = await listRoute.GET(makeEvent()); // no ?env=
-		expect(res.status).toBe(400);
+		expect(res.status).toBe(200);
 		const body = await res.json();
-		expect(body).not.toHaveProperty('runs');
+		expect(body.runs).toHaveLength(1);
+		expect(body.runs[0].id).toBe(1);
 		expect(JSON.stringify(body)).not.toContain('"environmentId":9');
+	});
+
+	test('caller lacking stacks:view for the local environment (global merge) -> 403, even though env is omitted', async () => {
+		authState.can = false;
+		const res = await listRoute.GET(makeEvent());
+		expect(res.status).toBe(403);
+		expect((await res.json()).error).toBe('Permission denied');
 	});
 
 	test('authenticated but lacking permission -> 403', async () => {
