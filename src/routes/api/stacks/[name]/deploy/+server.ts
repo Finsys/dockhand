@@ -3,6 +3,8 @@ import { deployStack, requireComposeFile, ComposeFileNotFoundError } from '$lib/
 import { authorize } from '$lib/server/authorize';
 import { auditStack } from '$lib/server/audit';
 import { createJobResponse } from '$lib/server/sse';
+import { createRunRecorder } from '$lib/server/deploy-run-record';
+import { hashComposeContent, hashEnvFingerprint } from '$lib/server/deploy-run-record-core';
 import type { RequestHandler } from './$types';
 
 /**
@@ -39,23 +41,45 @@ export const POST: RequestHandler = async (event) => {
 		forceRecreate?: boolean;
 	};
 
+	const stackName = decodeURIComponent(params.name);
+
+	// Read up-front (not inside createJobResponse's callback, as before): the run
+	// record needs a compose/env hash and a schedule_executions row BEFORE the job
+	// stream opens, since createJobResponse takes the recorder as a plain (already
+	// resolved) argument, not something it can await for itself.
+	let composeResult: Awaited<ReturnType<typeof requireComposeFile>>;
+	try {
+		composeResult = await requireComposeFile(stackName, envIdNum);
+	} catch (error) {
+		const message = error instanceof ComposeFileNotFoundError
+			? error.message
+			: 'Failed to deploy compose stack';
+		return createJobResponse(async (send) => {
+			send('result', { success: false, error: message });
+		}, event.request);
+	}
+
+	if (!composeResult.success) {
+		const message = composeResult.needsFileLocation
+			? 'Stack compose file location not configured'
+			: composeResult.error || 'Compose file not found';
+		return createJobResponse(async (send) => {
+			send('result', { success: false, error: message });
+		}, event.request);
+	}
+
+	const recorder = await createRunRecorder({
+		stackName,
+		envId: envIdNum ?? null,
+		userId: auth.user?.id,
+		triggeredBy: 'manual',
+		options: { pull: !!pull, build: !!build, forceRecreate: !!forceRecreate },
+		composeHash: hashComposeContent(composeResult.content!),
+		envHash: hashEnvFingerprint({ ...(composeResult.nonSecretVars ?? {}), ...(composeResult.secretVars ?? {}) })
+	});
+
 	return createJobResponse(async (send) => {
 		try {
-			const stackName = decodeURIComponent(params.name);
-
-			send('progress', { status: 'Reading compose file...' });
-			const composeResult = await requireComposeFile(stackName, envIdNum);
-
-			if (!composeResult.success) {
-				send('result', {
-					success: false,
-					error: composeResult.needsFileLocation
-						? 'Stack compose file location not configured'
-						: composeResult.error || 'Compose file not found'
-				});
-				return;
-			}
-
 			send('progress', { status: 'Deploying stack...' });
 			const result = await deployStack({
 				name: stackName,
@@ -87,5 +111,5 @@ export const POST: RequestHandler = async (event) => {
 			console.error('Error deploying compose stack:', error);
 			send('result', { success: false, error: 'Failed to deploy compose stack' });
 		}
-	}, event.request);
+	}, event.request, recorder);
 };

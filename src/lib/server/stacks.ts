@@ -91,6 +91,14 @@ export interface StackOperationResult {
 	command?: string;
 	/** Result of applying git deletion sync (files removed / kept, with reasons) */
 	deletion?: DeletionApplyResult;
+	/**
+	 * The process's real exit code, when one exists to report -- the local/direct
+	 * compose path runs the command itself and knows it. Left unset on a timeout
+	 * (the process was killed, not exited) and on the Hawser path (the agent
+	 * protocol doesn't return one). Callers needing an exit code regardless
+	 * (deploy-run-record.ts) fall back to a value consistent with success/failure.
+	 */
+	exitCode?: number;
 }
 
 /**
@@ -1511,7 +1519,8 @@ async function executeLocalCompose(
 				return {
 					success: true,
 					output: stdout || stderr || `Stack "${stackName}" ${operation} completed successfully`,
-					command: commandStr
+					command: commandStr,
+					exitCode: code
 				};
 			} else {
 				// stderr can echo an interpolated secret value (e.g. a failing
@@ -1521,7 +1530,8 @@ async function executeLocalCompose(
 					success: false,
 					output: redactSecretVars(stdout, secretVars),
 					error: redactSecretVars(stderr, secretVars) || `docker compose ${operation} exited with code ${code}`,
-					command: commandStr
+					command: commandStr,
+					exitCode: code
 				};
 			}
 		} finally {
