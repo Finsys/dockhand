@@ -1,0 +1,1 @@
+CREATE INDEX `schedule_executions_entity_env_idx` ON `schedule_executions` (`entity_name`,`environment_id`);
