@@ -89,7 +89,7 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
  * summary: Create and (optionally) deploy a compose stack
  * description: Writes the compose + .env to the stack dir, stores secrets in the DB, and with start deploys it. Can bind a secret provider. Target environment comes from the env query param, or from envId/environmentId in the body when the query is absent.
  * query: env:integer Target environment id (takes precedence over envId/environmentId in the body)
- * body: {name:string!, compose:string!, composePath:string, envPath:string, envVars:array<object>, rawEnvContent:string, secretProviderId:integer, start:boolean, envId:integer, environmentId:integer}
+ * body: {name:string!, compose:string!, composePath:string, envPath:string, envVars:array<object>, rawEnvContent:string, secretProviderId:integer, start:boolean, envId:integer, environmentId:integer, pull:boolean, build:boolean, forceRecreate:boolean}
  * resp-400: Invalid request (e.g. missing name/compose, or secretProviderId wrong type)
  * resp-403: Permission denied (needs stacks:create; binding a secret provider also needs secrets:view)
  * resp-500: Failed to create or deploy the stack
@@ -123,7 +123,7 @@ export const POST: RequestHandler = async (event) => {
 	}
 
 	try {
-		const { name, compose, start, envVars, rawEnvContent, composePath, envPath, secretProviderId } = body;
+		const { name, compose, start, envVars, rawEnvContent, composePath, envPath, secretProviderId, pull, build, forceRecreate } = body;
 
 		if (!name || typeof name !== 'string') {
 			return json({ error: 'Stack name is required' }, { status: 400 });
@@ -256,12 +256,20 @@ export const POST: RequestHandler = async (event) => {
 			}
 		}
 
+		// Build/pull/forceRecreate come from the caller (StackModal's "Create & Start"
+		// popover, see RedeployPopover) -- previously this endpoint always deployed with
+		// build:false and no pullPolicy regardless of what the compose file needed, so a
+		// service with a `build:` section silently never built on first start.
+		const pullOpt = !!pull;
+		const buildOpt = !!build;
+		const forceRecreateOpt = !!forceRecreate;
+
 		const recorder = await createRunRecorder({
 			stackName: name,
 			envId: envIdNum ?? null,
 			userId: auth.user?.id,
 			triggeredBy: 'manual',
-			options: { pull: false, build: false, forceRecreate: false },
+			options: { pull: pullOpt, build: buildOpt, forceRecreate: forceRecreateOpt },
 			composeHash: hashComposeContent(compose),
 			envHash: hashEnvFingerprint(effectiveEnvVars),
 			// Same merged set passed to envHash above -- also the redaction list end()
@@ -277,6 +285,11 @@ export const POST: RequestHandler = async (event) => {
 					name,
 					compose,
 					envId: envIdNum,
+					forceRecreate: forceRecreateOpt,
+					build: buildOpt,
+					// pullPolicy undefined (pull unchecked) also skips deployStack's post-deploy
+					// reconcileStackPendingUpdates() call -- accepted tradeoff, see design doc 8.4.
+					pullPolicy: pullOpt ? 'always' : undefined,
 					composePath: composePath || undefined,
 					envPath: envPath || undefined,
 					onLine: (line) => send('progress', { type: 'line', line })
@@ -288,7 +301,9 @@ export const POST: RequestHandler = async (event) => {
 				}
 
 				// Audit log (create + deploy in one action)
-				await auditStack(event, 'deploy', name, envIdNum);
+				await auditStack(event, 'deploy', name, envIdNum, {
+					pull: pullOpt, build: buildOpt, forceRecreate: forceRecreateOpt
+				});
 
 				send('result', { success: true, started: true, output: result.output });
 			} catch (error: any) {
