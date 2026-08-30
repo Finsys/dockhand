@@ -32,6 +32,12 @@
  * file (tests/git-stack-deploy-run-record.test.ts) needed to fake $lib/server/stacks
  * too -- exactly the situation this doc comment originally predicted.
  *
+ * (M4 considered adding a second consumer -- POST /api/stacks/+server.ts -- but that
+ * route also drags in $lib/server/docker -> hawser.ts -> ./db/drizzle.js, a SEPARATE
+ * specifier from $lib/server/db that touches better-sqlite3 directly and can't be
+ * faked the same way. M4's build/pull/forceRecreate coverage for that route is a
+ * source-level check instead, see stack-create-start-build-options.test.ts.)
+ *
  * The dedicated deploy endpoint (deploy/+server.ts) is deliberately NOT imported here
  * to double-check its own recording: it additionally pulls in $lib/server/audit ->
  * $lib/server/license -> $lib/server/notifications/index.ts, none of which this task
@@ -131,7 +137,7 @@ const { hashComposeContent, hashEnvFingerprint } = await import('../src/lib/serv
 
 let saveCalls: Array<{ name: string; content: string; envId: number | null | undefined }>;
 let requireComposeResult: Record<string, unknown>;
-let deployStackCalls: Array<{ onLine?: (line: string) => void }>;
+let deployStackCalls: Array<{ onLine?: (line: string) => void; build?: boolean; pullPolicy?: string; forceRecreate?: boolean }>;
 let deployStackResult: { success: boolean; output?: string; error?: string };
 let deployStackOnLines: string[];
 
@@ -161,7 +167,7 @@ registerStacksFake('saveStackComposeFile', async (name: string, content: string,
 	return { success: true };
 });
 registerStacksFake('requireComposeFile', async (_name: string, _envId?: number | null) => requireComposeResult);
-registerStacksFake('deployStack', async (options: { onLine?: (line: string) => void }) => {
+registerStacksFake('deployStack', async (options: { onLine?: (line: string) => void; build?: boolean; pullPolicy?: string; forceRecreate?: boolean }) => {
 	deployStackCalls.push(options);
 	for (const line of deployStackOnLines) options.onLine?.(line);
 	return deployStackResult;
@@ -273,6 +279,62 @@ describe('PUT /api/stacks/[name]/compose -- restart:true (Save & redeploy)', () 
 		expect(created).toHaveLength(1);
 		const update = endUpdate();
 		expect(update?.status).toBe('failed');
+	});
+});
+
+/**
+ * M4 (design doc 8.4): before this task, restart:true ALWAYS deployed with
+ * build:false and no pullPolicy, regardless of what the caller sent -- a stack whose
+ * compose declares a `build:` section silently never rebuilt on "Save & redeploy",
+ * the saved compose change just ran against the stale local image. These assertions
+ * are made at the deployStack() CALL, not the HTTP response's success flag: a
+ * response can be {success:true} even when build/pull were dropped on the floor
+ * (that IS the bug this task fixes), so status:200 alone proves nothing here.
+ */
+describe('PUT /api/stacks/[name]/compose -- restart:true build/pull/forceRecreate options (M4)', () => {
+	test('build:true in the request body reaches deployStack({build:true})', async () => {
+		await (await composeRoute.PUT(makeComposeEvent({ content: 'x', restart: true, build: true }))).json();
+
+		expect(deployStackCalls).toHaveLength(1);
+		expect(deployStackCalls[0].build).toBe(true);
+	});
+
+	test('omitting build deploys with build:false -- an explicit opt-out, not a broken default', async () => {
+		await (await composeRoute.PUT(makeComposeEvent({ content: 'x', restart: true }))).json();
+
+		expect(deployStackCalls[0].build).toBe(false);
+	});
+
+	test('pull:true is translated to pullPolicy:"always" -- deployStack has no separate pull flag, only pullPolicy', async () => {
+		await (await composeRoute.PUT(makeComposeEvent({ content: 'x', restart: true, pull: true }))).json();
+
+		expect(deployStackCalls[0].pullPolicy).toBe('always');
+	});
+
+	test('pull:false leaves pullPolicy undefined (not "never" or "missing") -- deployStack treats a missing pullPolicy as "do not pull", which is also why it skips its own post-deploy pending-update badge reconciliation in that case (stacks.ts, untouched by this task)', async () => {
+		await (await composeRoute.PUT(makeComposeEvent({ content: 'x', restart: true, pull: false }))).json();
+
+		expect(deployStackCalls[0].pullPolicy).toBeUndefined();
+	});
+
+	test('forceRecreate:false is honored -- previously this branch hardcoded true unconditionally, so opting out was impossible', async () => {
+		await (await composeRoute.PUT(makeComposeEvent({ content: 'x', restart: true, forceRecreate: false }))).json();
+
+		expect(deployStackCalls[0].forceRecreate).toBe(false);
+	});
+
+	test('omitting forceRecreate entirely still force-recreates -- preserves the prior hardcoded behavior for a caller that has not been updated to send it explicitly (env var changes need --force-recreate to take effect)', async () => {
+		await (await composeRoute.PUT(makeComposeEvent({ content: 'x', restart: true }))).json();
+
+		expect(deployStackCalls[0].forceRecreate).toBe(true);
+	});
+
+	test('all three options are recorded on the run (details.options), matching what deployStack actually ran with -- not just passed through in memory', async () => {
+		await (await composeRoute.PUT(makeComposeEvent({ content: 'x', restart: true, pull: true, build: true, forceRecreate: false }))).json();
+
+		const update = endUpdate();
+		const details = update?.details as { options?: { pull: boolean; build: boolean; forceRecreate: boolean } } | undefined;
+		expect(details?.options).toEqual({ pull: true, build: true, forceRecreate: false });
 	});
 });
 

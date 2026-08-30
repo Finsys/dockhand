@@ -24338,6 +24338,15 @@
                   },
                   "start": {
                     "type": "boolean"
+                  },
+                  "pull": {
+                    "type": "boolean"
+                  },
+                  "build": {
+                    "type": "boolean"
+                  },
+                  "forceRecreate": {
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -24355,7 +24364,10 @@
                 ],
                 "rawEnvContent": "string",
                 "secretProviderId": 0,
-                "start": true
+                "start": true,
+                "pull": true,
+                "build": true,
+                "forceRecreate": true
               }
             }
           }
@@ -24694,6 +24706,15 @@
                   },
                   "secretProviderId": {
                     "type": "integer"
+                  },
+                  "pull": {
+                    "type": "boolean"
+                  },
+                  "build": {
+                    "type": "boolean"
+                  },
+                  "forceRecreate": {
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -24708,7 +24729,10 @@
                 "oldEnvPath": "string",
                 "moveFromDir": "string",
                 "restart": true,
-                "secretProviderId": 0
+                "secretProviderId": 0,
+                "pull": true,
+                "build": true,
+                "forceRecreate": true
               }
             }
           }
