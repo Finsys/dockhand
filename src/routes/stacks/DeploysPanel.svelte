@@ -276,8 +276,14 @@
 							</div>
 						{/if}
 						{#if view.errorSummary}
-							<div class="mt-2 rounded-md border border-l-[3px] border-destructive/40 border-l-destructive bg-destructive/5 p-2">
-								<pre class="whitespace-pre-wrap break-all font-mono text-[11px] text-destructive/90">{run.errorMessage}</pre>
+							<!-- The task-17 spec called for the shortened last error line here (same
+							     text the collapsed row already truncates to) -- not the raw errorMessage,
+							     which is compose's full stderr and, for a failed run, duplicates almost
+							     everything the log panel below shows. One line of "what went wrong" is a
+							     useful recap next to the run's other details; the full text belongs in
+							     exactly one place, the LogViewer beneath it. -->
+							<div class="mt-2 rounded-md border border-l-[3px] border-destructive/40 border-l-destructive bg-destructive/5 px-2 py-1.5">
+								<span class="font-mono text-[11px] text-destructive/90">{view.errorSummary}</span>
 							</div>
 						{/if}
 						<div class="mt-3">
