@@ -3,7 +3,7 @@
 	import { wrapHtmlLines } from '$lib/utils/log-lines';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import { downloadFileName, stripAnsi } from '$lib/utils/log-download-name';
-	import { isScrolledToBottom } from '$lib/utils/scroll-position';
+	import { isScrolledToBottom, shouldResetScrollPause } from '$lib/utils/scroll-position';
 	import * as Select from '$lib/components/ui/select';
 	import { appSettings, formatLogTimestamps } from '$lib/stores/settings';
 	import { themeStore } from '$lib/stores/theme';
@@ -53,6 +53,10 @@
 	// enough stream of new lines can grow scrollHeight again between the write and
 	// the event firing, leaving a gap wide enough to look like the user scrolled up.
 	let isAutoScrolling = false;
+	// Tracks the previous value of the autoScroll prop, purely so the effect below can
+	// tell a false -> true edge (a fresh run starting) apart from autoScroll simply
+	// staying true across renders.
+	let previousAutoScroll = autoScroll;
 
 	// Search state
 	let logSearchActive = $state(false);
@@ -68,6 +72,17 @@
 	let terminalFontFamily = $derived(() => {
 		const fontMeta = getMonospaceFont($themeStore.terminalFont);
 		return fontMeta?.family || 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
+	});
+
+	// A fresh run starting (autoScroll going false -> true) lifts a scroll-up pause left
+	// over from an earlier run -- otherwise scrolling up once during a deploy pauses
+	// auto-scroll for every later run of the same page session, since nothing else ever
+	// clears userScrolledUp.
+	$effect(() => {
+		if (shouldResetScrollPause(previousAutoScroll, autoScroll)) {
+			userScrolledUp = false;
+		}
+		previousAutoScroll = autoScroll;
 	});
 
 	// Auto-scroll when logs change, unless the user scrolled up to read earlier output.
