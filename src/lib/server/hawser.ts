@@ -588,7 +588,8 @@ export async function sendEdgeRequest(
 	streaming = false,
 	timeout = 30000,
 	isBinary = false,
-	signal?: AbortSignal
+	signal?: AbortSignal,
+	onLine?: (line: string) => void
 ): Promise<EdgeResponse> {
 	const connection = edgeConnections.get(environmentId);
 	if (!connection) {
@@ -597,9 +598,18 @@ export async function sendEdgeRequest(
 
 	const requestId = secureRandomUUID();
 
+	// A non-streaming request (compose) that wants to observe output as it happens. The agent
+	// sends it as 'stream' messages, which dispatchStreamMessage routes here by requestId.
+	// Registered before the message goes out, so no early line can miss the handler.
+	if (onLine) {
+		connection.lineHandlers ??= new Map();
+		connection.lineHandlers.set(requestId, onLine);
+	}
+
 	return new Promise((resolve, reject) => {
 		const timeoutHandle = setTimeout(() => {
 			connection.pendingRequests.delete(requestId);
+			connection.lineHandlers?.delete(requestId);
 			if (streaming) {
 				connection.pendingStreamRequests.delete(requestId);
 			}
@@ -617,6 +627,7 @@ export async function sendEdgeRequest(
 				'abort',
 				() => {
 					connection.pendingRequests.delete(requestId);
+					connection.lineHandlers?.delete(requestId);
 					if (streaming) {
 						connection.pendingStreamRequests.delete(requestId);
 					}
@@ -710,6 +721,7 @@ export async function sendEdgeRequest(
 			const sent = globalThis.__hawserSendMessage(environmentId, messageStr);
 			if (!sent) {
 				connection.pendingRequests.delete(requestId);
+				connection.lineHandlers?.delete(requestId);
 				if (streaming) {
 					connection.pendingStreamRequests.delete(requestId);
 				}
@@ -723,6 +735,7 @@ export async function sendEdgeRequest(
 				const errorMsg = sendError instanceof Error ? sendError.message : String(sendError);
 				console.error(`[Hawser Edge] Error sending message:`, errorMsg);
 				connection.pendingRequests.delete(requestId);
+				connection.lineHandlers?.delete(requestId);
 				if (streaming) {
 					connection.pendingStreamRequests.delete(requestId);
 				}
