@@ -1444,7 +1444,7 @@ export async function deployGitStack(
 		envId: gitStack.environmentId ?? null,
 		userId: options?.userId,
 		triggeredBy,
-		options: { pull: !!gitStack.repullImages, build: !!gitStack.buildOnDeploy, forceRecreate },
+		options: { pull: !!gitStack.repullImages, build: !!gitStack.buildOnDeploy, forceRecreate: !!forceRecreate },
 		composeHash: hashComposeContent(syncResult.composeContent!),
 		envHash: hashEnvFingerprint(effectiveEnvVars),
 		secrets: Object.values(effectiveEnvVars)
