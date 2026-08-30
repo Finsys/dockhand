@@ -55,8 +55,11 @@
 	interface Props {
 		stackName: string;
 		envId: number | null;
+		// Forwarded to LogViewer so an expanded run's log follows the caller's editor
+		// theme toggle instead of LogViewer's own 'dark' default.
+		theme?: 'light' | 'dark';
 	}
-	let { stackName, envId }: Props = $props();
+	let { stackName, envId, theme = 'dark' }: Props = $props();
 
 	let runs = $state<DeployRun[]>([]);
 	let loading = $state(true);
@@ -340,6 +343,7 @@
 									autoRefresh={false}
 									autoScroll={false}
 									class="h-64"
+									{theme}
 								/>
 							{/if}
 						</div>

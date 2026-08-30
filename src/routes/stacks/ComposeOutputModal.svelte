@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import { Loader2 } from 'lucide-svelte';
@@ -22,6 +23,25 @@
 	let { open = $bindable(false), title, lines, running, ok, ms, exitCode }: Props = $props();
 
 	let statusLine = $derived(formatRunStatus({ running, ok, ms, exitCode }));
+
+	// This modal is opened straight from the stack list, with no editor in scope to
+	// borrow a theme from (unlike the docked panel and Deploys tab inside StackModal,
+	// which both follow `dockhand-editor-theme`). Its Dialog.Content already tracks
+	// the app-wide light/dark switch via bg-background, so the log viewer inside
+	// follows the same switch instead of introducing a third, unrelated toggle.
+	// Same read-once-on-mount + system-preference-fallback pattern as
+	// ComposeGraphViewer's graphTheme -- this component is mounted once at the page
+	// root and toggled via `open`, so onMount runs once per page load.
+	let outputTheme = $state<'light' | 'dark'>('dark');
+
+	onMount(() => {
+		const appTheme = localStorage.getItem('theme');
+		if (appTheme === 'dark' || appTheme === 'light') {
+			outputTheme = appTheme;
+		} else {
+			outputTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+		}
+	});
 
 	function handleClose() {
 		// Closing only hides this window. The operation it is watching keeps running
@@ -55,6 +75,7 @@
 			autoRefresh={false}
 			autoScroll={running}
 			class="flex-1 min-h-0"
+			theme={outputTheme}
 		/>
 
 		<Dialog.Footer class="shrink-0">

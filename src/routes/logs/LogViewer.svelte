@@ -23,6 +23,11 @@
 		onAutoRefreshChange?: (value: boolean) => void;
 		onAutoScrollChange?: (value: boolean) => void;
 		class?: string;
+		// Follows the caller's own light/dark switch, independent of the app-wide
+		// theme -- e.g. the editor theme toggle in StackModal (`dockhand-editor-theme`).
+		// Defaults to 'dark' so every existing caller that doesn't pass it renders
+		// exactly as before.
+		theme?: 'light' | 'dark';
 	}
 
 	let {
@@ -35,8 +40,11 @@
 		onClear,
 		onAutoRefreshChange,
 		onAutoScrollChange,
-		class: className = ''
+		class: className = '',
+		theme = 'dark'
 	}: Props = $props();
+
+	let dark = $derived(theme === 'dark');
 
 	let logsRef: HTMLDivElement;
 	let wordWrap = $state(true);
@@ -250,19 +258,19 @@
 	});
 </script>
 
-<div class="flex flex-col bg-zinc-950 rounded-lg border border-zinc-800 overflow-hidden {className}">
+<div class="flex flex-col rounded-lg border overflow-hidden {dark ? 'log-viewer-dark bg-zinc-950 border-zinc-800' : 'log-viewer-light bg-gray-50 border-gray-300'} {className}">
 	<!-- Header bar -->
-	<div class="flex items-center justify-between px-3 py-1.5 border-b border-zinc-800 bg-zinc-900/50 shrink-0">
+	<div class="flex items-center justify-between px-3 py-1.5 border-b shrink-0 {dark ? 'border-zinc-800 bg-zinc-900/50' : 'border-gray-300 bg-gray-100'}">
 		<div class="flex items-center gap-2">
 			{#if loading}
-				<RefreshCw class="w-3 h-3 text-zinc-500 animate-spin" />
+				<RefreshCw class="w-3 h-3 animate-spin {dark ? 'text-zinc-500' : 'text-gray-400'}" />
 			{/if}
 		</div>
 		<div class="flex items-center gap-2">
 			<!-- Auto-refresh button -->
 			<button
 				onclick={() => onAutoRefreshChange?.(!autoRefresh)}
-				class="flex items-center gap-1 px-1.5 py-0.5 rounded text-xs transition-colors {autoRefresh ? 'bg-amber-500/20 ring-1 ring-amber-500/50 text-amber-400' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'}"
+				class="flex items-center gap-1 px-1.5 py-0.5 rounded text-xs transition-colors {autoRefresh ? (dark ? 'bg-amber-500/20 ring-1 ring-amber-500/50 text-amber-400' : 'bg-amber-500/30 ring-1 ring-amber-600/50 text-amber-700') : dark ? 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-300'}"
 				title="Toggle auto-refresh"
 			>
 				<RefreshCw class="w-3 h-3" />
@@ -270,15 +278,15 @@
 			<!-- Auto-scroll button -->
 			<button
 				onclick={() => onAutoScrollChange?.(!autoScroll)}
-				class="flex items-center gap-1 px-1.5 py-0.5 rounded text-xs transition-colors {autoScroll ? 'bg-amber-500/20 ring-1 ring-amber-500/50 text-amber-400' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800'}"
+				class="flex items-center gap-1 px-1.5 py-0.5 rounded text-xs transition-colors {autoScroll ? (dark ? 'bg-amber-500/20 ring-1 ring-amber-500/50 text-amber-400' : 'bg-amber-500/30 ring-1 ring-amber-600/50 text-amber-700') : dark ? 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-300'}"
 				title="Toggle auto-scroll"
 			>
 				<ArrowDownToLine class="w-3 h-3" />
 			</button>
 			<!-- Font size -->
 			<Select.Root type="single" value={String(fontSize)} onValueChange={(v) => fontSize = Number(v)}>
-				<Select.Trigger class="h-6 w-16 bg-zinc-800 border-zinc-700 text-xs text-zinc-300 px-1.5">
-					<Type class="w-3 h-3 mr-1 text-zinc-400" />
+				<Select.Trigger class="h-6 w-16 text-xs px-1.5 {dark ? 'bg-zinc-800 border-zinc-700 text-zinc-300' : 'bg-white border-gray-300 text-gray-700'}">
+					<Type class="w-3 h-3 mr-1 {dark ? 'text-zinc-400' : 'text-gray-400'}" />
 					<span>{fontSize}px</span>
 				</Select.Trigger>
 				<Select.Content>
@@ -293,96 +301,96 @@
 			<!-- Word wrap -->
 			<button
 				onclick={() => wordWrap = !wordWrap}
-				class="p-1 rounded hover:bg-zinc-800 transition-colors {wordWrap ? 'bg-amber-500/20 ring-1 ring-amber-500/50' : ''}"
+				class="p-1 rounded transition-colors {wordWrap ? (dark ? 'bg-amber-500/20 ring-1 ring-amber-500/50' : 'bg-amber-500/30 ring-1 ring-amber-600/50') : ''} {dark ? 'hover:bg-zinc-800' : 'hover:bg-gray-300'}"
 				title="Toggle word wrap"
 			>
-				<WrapText class="w-3 h-3 transition-colors {wordWrap ? 'text-amber-400' : 'text-zinc-500 hover:text-zinc-300'}" />
+				<WrapText class="w-3 h-3 transition-colors {wordWrap ? (dark ? 'text-amber-400' : 'text-amber-700') : dark ? 'text-zinc-500 hover:text-zinc-300' : 'text-gray-500 hover:text-gray-700'}" />
 			</button>
 			<!-- Line numbers -->
 			<button
 				onclick={() => { showLineNumbers = !showLineNumbers; localStorage.setItem('dockhand-log-line-numbers', String(showLineNumbers)); }}
-				class="p-1 rounded hover:bg-zinc-800 transition-colors {showLineNumbers ? 'bg-amber-500/20 ring-1 ring-amber-500/50' : ''}"
+				class="p-1 rounded transition-colors {showLineNumbers ? (dark ? 'bg-amber-500/20 ring-1 ring-amber-500/50' : 'bg-amber-500/30 ring-1 ring-amber-600/50') : ''} {dark ? 'hover:bg-zinc-800' : 'hover:bg-gray-300'}"
 				title={showLineNumbers ? 'Hide line numbers' : 'Show line numbers'}
 			>
-				<Hash class="w-3 h-3 transition-colors {showLineNumbers ? 'text-amber-400' : 'text-zinc-500 hover:text-zinc-300'}" />
+				<Hash class="w-3 h-3 transition-colors {showLineNumbers ? (dark ? 'text-amber-400' : 'text-amber-700') : dark ? 'text-zinc-500 hover:text-zinc-300' : 'text-gray-500 hover:text-gray-700'}" />
 			</button>
 			<!-- Search -->
 			{#if logSearchActive}
-				<div class="flex items-center gap-1 bg-zinc-800 rounded px-1.5 py-0.5">
-					<Search class="w-3 h-3 text-amber-400" />
+				<div class="flex items-center gap-1 rounded px-1.5 py-0.5 {dark ? 'bg-zinc-800' : 'bg-gray-200'}">
+					<Search class="w-3 h-3 {dark ? 'text-amber-400' : 'text-amber-700'}" />
 					<input
 						bind:this={logSearchInputRef}
 						type="text"
 						placeholder="Search..."
 						bind:value={logSearchQuery}
 						onkeydown={handleLogSearchKeydown}
-						class="bg-transparent border-none outline-none text-xs text-zinc-200 w-20 placeholder:text-zinc-500"
+						class="bg-transparent border-none outline-none text-xs w-20 {dark ? 'text-zinc-200 placeholder:text-zinc-500' : 'text-gray-800 placeholder:text-gray-400'}"
 					/>
 					<button
 						onclick={toggleSearchFilterMode}
-						class="p-0.5 rounded transition-colors {logSearchFilterMode ? 'bg-amber-500/20 ring-1 ring-amber-500/50' : 'hover:bg-zinc-700'}"
+						class="p-0.5 rounded transition-colors {logSearchFilterMode ? (dark ? 'bg-amber-500/20 ring-1 ring-amber-500/50' : 'bg-amber-500/30 ring-1 ring-amber-600/50') : dark ? 'hover:bg-zinc-700' : 'hover:bg-gray-300'}"
 						title={logSearchFilterMode ? 'Show all lines (filter mode active)' : 'Hide non-matching lines'}
 					>
-						<Filter class="w-3 h-3 transition-colors {logSearchFilterMode ? 'text-amber-400' : 'text-zinc-400'}" />
+						<Filter class="w-3 h-3 transition-colors {logSearchFilterMode ? (dark ? 'text-amber-400' : 'text-amber-700') : dark ? 'text-zinc-400' : 'text-gray-500'}" />
 					</button>
 					{#if matchCount > 0}
-						<span class="text-xs text-zinc-400">{currentMatchIndex + 1}/{matchCount}</span>
+						<span class="text-xs {dark ? 'text-zinc-400' : 'text-gray-500'}">{currentMatchIndex + 1}/{matchCount}</span>
 					{:else if logSearchQuery}
-						<span class="text-xs text-zinc-500">0/0</span>
+						<span class="text-xs {dark ? 'text-zinc-500' : 'text-gray-400'}">0/0</span>
 					{/if}
-					<button onclick={() => navigateMatch('prev')} class="p-0.5 rounded hover:bg-zinc-700" title="Previous">
-						<ChevronUp class="w-3 h-3 text-zinc-400" />
+					<button onclick={() => navigateMatch('prev')} class="p-0.5 rounded {dark ? 'hover:bg-zinc-700' : 'hover:bg-gray-300'}" title="Previous">
+						<ChevronUp class="w-3 h-3 {dark ? 'text-zinc-400' : 'text-gray-500'}" />
 					</button>
-					<button onclick={() => navigateMatch('next')} class="p-0.5 rounded hover:bg-zinc-700" title="Next">
-						<ChevronDown class="w-3 h-3 text-zinc-400" />
+					<button onclick={() => navigateMatch('next')} class="p-0.5 rounded {dark ? 'hover:bg-zinc-700' : 'hover:bg-gray-300'}" title="Next">
+						<ChevronDown class="w-3 h-3 {dark ? 'text-zinc-400' : 'text-gray-500'}" />
 					</button>
-					<button onclick={closeLogSearch} class="p-0.5 rounded hover:bg-zinc-700" title="Close">
-						<X class="w-3 h-3 text-zinc-400" />
+					<button onclick={closeLogSearch} class="p-0.5 rounded {dark ? 'hover:bg-zinc-700' : 'hover:bg-gray-300'}" title="Close">
+						<X class="w-3 h-3 {dark ? 'text-zinc-400' : 'text-gray-500'}" />
 					</button>
 				</div>
 			{:else}
 				<button
 					onclick={toggleLogSearch}
-					class="p-1 rounded hover:bg-zinc-800 transition-colors"
+					class="p-1 rounded transition-colors {dark ? 'hover:bg-zinc-800' : 'hover:bg-gray-300'}"
 					title="Search logs"
 				>
-					<Search class="w-3 h-3 text-zinc-500 hover:text-zinc-300" />
+					<Search class="w-3 h-3 {dark ? 'text-zinc-500 hover:text-zinc-300' : 'text-gray-500 hover:text-gray-700'}" />
 				</button>
 			{/if}
 			<!-- Copy -->
 			<button
 				onclick={copyLogs}
-				class="p-1 rounded hover:bg-zinc-800 transition-colors"
+				class="p-1 rounded transition-colors {dark ? 'hover:bg-zinc-800' : 'hover:bg-gray-300'}"
 				title="Copy logs"
 			>
-				<Copy class="w-3 h-3 text-zinc-500 hover:text-zinc-300" />
+				<Copy class="w-3 h-3 {dark ? 'text-zinc-500 hover:text-zinc-300' : 'text-gray-500 hover:text-gray-700'}" />
 			</button>
 			<!-- Download -->
 			<button
 				onclick={downloadLogs}
-				class="p-1 rounded hover:bg-zinc-800 transition-colors"
+				class="p-1 rounded transition-colors {dark ? 'hover:bg-zinc-800' : 'hover:bg-gray-300'}"
 				title="Download logs"
 			>
-				<Download class="w-3 h-3 text-zinc-500 hover:text-zinc-300" />
+				<Download class="w-3 h-3 {dark ? 'text-zinc-500 hover:text-zinc-300' : 'text-gray-500 hover:text-gray-700'}" />
 			</button>
 			<!-- Clear -->
 			{#if onClear}
 				<button
 					onclick={() => onClear?.()}
-					class="p-1 rounded hover:bg-zinc-800 transition-colors"
+					class="p-1 rounded transition-colors {dark ? 'hover:bg-zinc-800' : 'hover:bg-gray-300'}"
 					title="Clear logs"
 				>
-					<Eraser class="w-3 h-3 text-zinc-500 hover:text-zinc-300" />
+					<Eraser class="w-3 h-3 {dark ? 'text-zinc-500 hover:text-zinc-300' : 'text-gray-500 hover:text-gray-700'}" />
 				</button>
 			{/if}
 			<!-- Refresh -->
 			{#if onRefresh}
 				<button
 					onclick={() => onRefresh?.()}
-					class="p-1 rounded hover:bg-zinc-800 transition-colors"
+					class="p-1 rounded transition-colors {dark ? 'hover:bg-zinc-800' : 'hover:bg-gray-300'}"
 					title="Refresh logs"
 				>
-					<RefreshCw class="w-3 h-3 text-zinc-500 hover:text-zinc-300" />
+					<RefreshCw class="w-3 h-3 {dark ? 'text-zinc-500 hover:text-zinc-300' : 'text-gray-500 hover:text-gray-700'}" />
 				</button>
 			{/if}
 		</div>
@@ -391,14 +399,14 @@
 	<!-- Logs content -->
 	<div bind:this={logsRef} onscroll={handleLogScroll} class="flex-1 overflow-auto p-4">
 		{#if logs}
-			<pre class="text-zinc-50 {wordWrap ? 'whitespace-pre-wrap' : 'whitespace-pre'} {showLineNumbers ? 'show-line-numbers' : ''}" style="font-size: {fontSize}px; font-family: {terminalFontFamily()};">{@html wrapHtmlLines(highlightedLogs())}</pre>
+			<pre class="{dark ? 'text-zinc-50' : 'text-gray-900'} {wordWrap ? 'whitespace-pre-wrap' : 'whitespace-pre'} {showLineNumbers ? 'show-line-numbers' : ''}" style="font-size: {fontSize}px; font-family: {terminalFontFamily()};">{@html wrapHtmlLines(highlightedLogs())}</pre>
 		{:else if loading}
-			<div class="flex items-center justify-center h-full text-muted-foreground">
+			<div class="flex items-center justify-center h-full {dark ? 'text-zinc-500' : 'text-gray-500'}">
 				<RefreshCw class="w-5 h-5 animate-spin mr-2" />
 				Loading logs...
 			</div>
 		{:else}
-			<p class="text-zinc-500 text-sm">No logs available</p>
+			<p class="text-sm {dark ? 'text-zinc-500' : 'text-gray-500'}">No logs available</p>
 		{/if}
 	</div>
 </div>
@@ -419,4 +427,18 @@
 		outline: 2px solid rgb(250, 204, 21);
 	}
 
+	/* The base .search-match rule above pairs a pale amber background with
+	   near-white text (#fef3c7) -- fine against the dark log background this
+	   component defaults to, but low-contrast once the panel switches to its
+	   own light theme (see the `theme` prop). Scoped to .log-viewer-light so it
+	   never touches the dark styling above or other components sharing the
+	   (unscoped) .search-match class, such as LogsPanel. Higher specificity than
+	   the base rule -- (0,2,0) vs (0,1,0) -- so it wins regardless of source order.
+	   .current-match is left alone: its 0.8 background alpha already composites to
+	   a near-solid amber against either page background, so the dark (#1a1a1a) text
+	   it uses stays legible without a light-mode override. */
+	:global(.log-viewer-light .search-match) {
+		color: #78350f;
+		box-shadow: 0 0 4px rgba(217, 119, 6, 0.35);
+	}
 </style>
