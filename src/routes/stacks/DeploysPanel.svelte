@@ -49,7 +49,7 @@
 	import { formatRelativeTime, formatDateTime } from '$lib/stores/settings';
 	import { appendEnvParam } from '$lib/stores/environment';
 	import { buildDeployRunView, buildDeployLogPanelState, type DeployRun } from '$lib/utils/deploy-run-view';
-	import LogViewer from '../logs/LogViewer.svelte';
+	import LogViewer from '$lib/components/LogViewer.svelte';
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
 
 	interface Props {

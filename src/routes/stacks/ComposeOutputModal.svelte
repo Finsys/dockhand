@@ -3,7 +3,7 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import { Loader2 } from 'lucide-svelte';
-	import LogViewer from '../logs/LogViewer.svelte';
+	import LogViewer from '$lib/components/LogViewer.svelte';
 	import { formatRunStatus } from '$lib/utils/run-status';
 
 	// A plain display window for compose output. It owns none of the polling —
