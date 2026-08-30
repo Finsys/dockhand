@@ -1705,6 +1705,23 @@
 			validateLoading = false;
 			validateActiveLine = null;
 			validateSeq++;
+			// Same reasoning for the docked deploy output: without this, reopening the
+			// modal for a *different* stack would still show the previous stack's title,
+			// lines and status ("Redeploying A" / "Succeeded" while looking at stack B).
+			// A reopen of the *same* stack while its own deploy is still running loses the
+			// lines accumulated so far, but only until the next line arrives (the poll loop
+			// in sse-fetch.ts keeps running regardless of this modal's open state, same as
+			// ComposeOutputModal) or the job finishes -- finishOutput's `outputLines.length
+			// === 0 && output` fallback then refills the whole transcript from the job's
+			// final output. That brief, self-correcting gap is preferable to a stale result
+			// silently misattributed to the wrong stack.
+			outputTitle = '';
+			outputLines = [];
+			outputRunning = false;
+			outputOk = undefined;
+			outputMs = undefined;
+			outputExitCode = undefined;
+			outputStartedAt = 0;
 			if (mode === 'edit' && stackName) {
 				loadComposeFile().then(() => {
 					// Auto-validate after loading
