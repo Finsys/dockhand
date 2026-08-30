@@ -32,7 +32,7 @@
  * deletion either way.
  */
 
-import type { ScheduleTrigger, ScheduleStatus } from '../../db';
+import type { ScheduleTrigger } from '../../db';
 import {
 	getDeployLogReconcileEnabled,
 	getScheduleExecutionIdsByType,
@@ -41,13 +41,10 @@ import {
 	appendScheduleExecutionLog
 } from '../../db';
 import { listRunLogIds, deleteRunLog } from '../../deploy-log-store';
-import { planReconcile } from '../../deploy-log-reconcile-core';
+import { planReconcile, isEligibleForMissingMark } from '../../deploy-log-reconcile-core';
 
 // System job ID (own scheduleType, so this never collides with system-cleanup.ts's ids)
 export const DEPLOY_LOG_RECONCILE_ID = 1;
-
-/** Records in these states may not have written their log file yet -- see module doc comment. */
-const NON_TERMINAL_STATUSES: ScheduleStatus[] = ['queued', 'running'];
 
 /**
  * Execute the deploy-log reconcile job.
@@ -102,7 +99,7 @@ export async function runDeployLogReconcileJob(triggeredBy: ScheduleTrigger = 'c
 			// Still running/queued: it may simply not have written its first line yet
 			// (see module doc comment). Leave it alone -- a later reconcile run will
 			// catch it correctly once the run has actually finished.
-			if (record && NON_TERMINAL_STATUSES.includes(record.status)) {
+			if (record && !isEligibleForMissingMark(record.status)) {
 				skippedInProgress++;
 				continue;
 			}

@@ -37,3 +37,18 @@ export function planReconcile(input: ReconcileInput): ReconcilePlan {
 		markMissing: input.recordIds.filter((id) => !fileIdSet.has(id))
 	};
 }
+
+/**
+ * Whether a record in this status may be judged "missing its log file".
+ *
+ * A still in-progress run ('queued'/'running') may simply not have written its first
+ * log line yet -- the schedule_executions row for a stack_deploy run is created before
+ * the deploy has produced any output, and the log file itself only comes into existence
+ * on the first line written (see deploy-log-reconcile.ts's module doc comment for the
+ * verified timing this guards against). Marking it here would be wrong, and nothing
+ * downstream ever re-checks or clears the flag once the file does appear -- so the
+ * record would carry a false "log missing" permanently.
+ */
+export function isEligibleForMissingMark(status: string): boolean {
+	return status !== 'queued' && status !== 'running';
+}
