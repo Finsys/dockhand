@@ -4322,6 +4322,10 @@ export interface ScheduleExecutionFilters {
 	scheduleType?: ScheduleType;
 	scheduleId?: number;
 	environmentId?: number | null;
+	// Powers "runs for this stack" lookups (schedule_executions_entity_env_idx) --
+	// paired with environmentId, an exact match on the (entity_name, environment_id)
+	// index this filter was added for.
+	entityName?: string;
 	status?: ScheduleStatus;
 	statuses?: ScheduleStatus[];
 	triggeredBy?: ScheduleTrigger;
@@ -4450,6 +4454,9 @@ export async function getScheduleExecutions(filters: ScheduleExecutionFilters = 
 		} else {
 			conditions.push(eq(scheduleExecutions.environmentId, filters.environmentId));
 		}
+	}
+	if (filters.entityName !== undefined) {
+		conditions.push(eq(scheduleExecutions.entityName, filters.entityName));
 	}
 	if (filters.status) {
 		conditions.push(eq(scheduleExecutions.status, filters.status));
