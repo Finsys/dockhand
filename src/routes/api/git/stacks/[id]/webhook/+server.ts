@@ -65,7 +65,7 @@ export const POST: RequestHandler = async (event) => {
 		}
 
 		// Deploy the git stack (syncs and deploys only if there are changes)
-		const result = await deployGitStack(id, { force: false });
+		const result = await deployGitStack(id, { force: false, triggeredBy: 'webhook' });
 		await auditGitStack(event, 'webhook', id, gitStack.stackName, gitStack.environmentId, {
 			method: 'POST', source, result: result.skipped ? 'skipped' : result.success ? 'deployed' : 'failed'
 		});
@@ -125,7 +125,7 @@ export const GET: RequestHandler = async (event) => {
 		}
 
 		// Deploy the git stack (syncs and deploys only if there are changes)
-		const result = await deployGitStack(id, { force: false });
+		const result = await deployGitStack(id, { force: false, triggeredBy: 'webhook' });
 		await auditGitStack(event, 'webhook', id, gitStack.stackName, gitStack.environmentId, {
 			method: 'GET', source: 'get', result: result.skipped ? 'skipped' : result.success ? 'deployed' : 'failed'
 		});

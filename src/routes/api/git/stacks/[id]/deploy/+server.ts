@@ -34,7 +34,11 @@ export const POST: RequestHandler = async (event) => {
 
 		return createJobResponse(async (send) => {
 			try {
-				const result = await deployGitStack(id);
+				const result = await deployGitStack(id, {
+					triggeredBy: 'manual',
+					userId: auth.user?.id,
+					onLine: (line) => send('progress', { type: 'line', line })
+				});
 
 				// Audit log
 				await auditGitStack(event, 'deploy', id, gitStack.stackName, gitStack.environmentId);

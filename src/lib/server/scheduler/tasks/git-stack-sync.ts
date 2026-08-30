@@ -48,7 +48,13 @@ export async function runGitStackSync(
 		// Deploy the git stack (only if there are changes). deployGitStack now emits the
 		// git_sync_success/failed/skipped notification itself, so EVERY caller (webhook,
 		// manual, this scheduler) notifies uniformly — we no longer dispatch here (#1295).
-		const result = await deployGitStack(stackId, { force: false });
+		//
+		// triggeredBy is forwarded, not hardcoded: this function is itself called with
+		// 'cron' (the nightly scheduler), 'manual' (the schedules page's "run now"), and
+		// 'webhook' (scheduler/index.ts's triggerGitStackSyncFromWebhook) — passing the
+		// value straight through gives the stack_deploy run record the same accurate
+		// trigger this execution's own git_stack_sync record already gets above.
+		const result = await deployGitStack(stackId, { force: false, triggeredBy });
 
 		if (result.success) {
 			if (result.skipped) {
