@@ -55,8 +55,12 @@
 	let isAutoScrolling = false;
 	// Tracks the previous value of the autoScroll prop, purely so the effect below can
 	// tell a false -> true edge (a fresh run starting) apart from autoScroll simply
-	// staying true across renders.
-	let previousAutoScroll = autoScroll;
+	// staying true across renders. Left unset here rather than seeded from `autoScroll`
+	// directly -- reading a prop in a plain top-level initializer only captures its
+	// value at that one point in time, which svelte-check flags (state_referenced_locally)
+	// because it usually signals a bug. The effect below seeds it on its first run instead,
+	// where reading `autoScroll` is tracked.
+	let previousAutoScroll: boolean | undefined;
 
 	// Search state
 	let logSearchActive = $state(false);
@@ -79,7 +83,7 @@
 	// auto-scroll for every later run of the same page session, since nothing else ever
 	// clears userScrolledUp.
 	$effect(() => {
-		if (shouldResetScrollPause(previousAutoScroll, autoScroll)) {
+		if (previousAutoScroll !== undefined && shouldResetScrollPause(previousAutoScroll, autoScroll)) {
 			userScrolledUp = false;
 		}
 		previousAutoScroll = autoScroll;
