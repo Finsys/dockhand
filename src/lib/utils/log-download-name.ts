@@ -8,8 +8,14 @@ export function downloadFileName(title: string | undefined): string {
 	return safe ? `${safe}-logs.txt` : 'logs.txt';
 }
 
+// A CSI sequence is ESC [ , then parameter bytes (0x30-0x3F, which includes '?' for
+// private modes), then intermediate bytes (0x20-0x2F), then one final byte (0x40-0x7E).
+// Matching the full grammar rather than just digits and semicolons matters here: compose's
+// progress display hides and shows the cursor with ESC[?25l / ESC[?25h on every redraw, and
+// '?' is a parameter byte. A pattern that misses those leaves them in the very output this
+// viewer exists to show.
 // eslint-disable-next-line no-control-regex
-const ANSI_PATTERN = /\u001b\[[0-9;]*[a-zA-Z]/g;
+const ANSI_PATTERN = /\u001b\[[0-?]*[ -\/]*[@-~]/g;
 
 /**
  * Strips ANSI escape sequences (color codes, cursor movement, etc.) from log text.
