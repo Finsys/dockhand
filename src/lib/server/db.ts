@@ -4531,14 +4531,19 @@ export async function getScheduleExecutions(filters: ScheduleExecutionFilters = 
  */
 export async function getScheduleExecutionIdsByType(
 	scheduleType: ScheduleType
-): Promise<Array<{ id: number; details: any | null }>> {
+): Promise<Array<{ id: number; status: ScheduleStatus; details: any | null }>> {
 	const rows = await db
-		.select({ id: scheduleExecutions.id, details: scheduleExecutions.details })
+		.select({
+			id: scheduleExecutions.id,
+			status: scheduleExecutions.status,
+			details: scheduleExecutions.details
+		})
 		.from(scheduleExecutions)
 		.where(eq(scheduleExecutions.scheduleType, scheduleType));
 
-	return rows.map((row: { id: number; details: string | null }) => ({
+	return rows.map((row: { id: number; status: string; details: string | null }) => ({
 		id: row.id,
+		status: row.status as ScheduleStatus,
 		details: row.details ? JSON.parse(row.details) : null
 	}));
 }

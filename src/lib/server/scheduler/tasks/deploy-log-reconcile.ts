@@ -7,19 +7,32 @@
  * details.logMissing -- never deleted, since the metadata (when, who, what was built,
  * which digest) stays valuable even once the log text is gone. See
  * deploy-log-reconcile-core.ts for the decision itself; this file only gathers the two
- * id sets and carries out the resulting plan.
+ * id sets, guards the one case planReconcile can't know about (see below), and carries
+ * out the resulting plan.
  *
- * ASSUMPTION, not yet verified against a real write path: this reads run records via
- * scheduleType 'stack_deploy' and treats String(schedule_executions.id) as the run id
- * used for the deploy-log filename (runLogFileName()/runLogPath() in
- * deploy-log-store.ts). Nothing in this branch currently creates such a row --
- * that is Task 10's createRunRecorder, which had not landed at the time this file was
- * written. If Task 10 links the log file to a run by a different id, this file's
- * getScheduleExecutionIdsByType('stack_deploy') call and the String(id) conversion
- * below need to be revisited together.
+ * Record source, verified against Task 10's actual code (deploy-run-record.ts, read
+ * directly from a sibling clone -- Task 10 had not landed on this branch at the time
+ * this file was written, so it could not be imported here): createRunRecorder() creates
+ * a schedule_executions row with scheduleType 'stack_deploy', scheduleId 0 (there is no
+ * schedule, only individual runs), and DeployRunRecorder sets `this.runId =
+ * String(executionId)` -- exactly the id this file reads via
+ * getScheduleExecutionIdsByType('stack_deploy') and converts with String(r.id). Confirmed
+ * correct, not assumed.
+ *
+ * That same reading surfaced a real race this job has to guard against: the row is
+ * created with status 'running' BEFORE the deploy has produced a single line, and the
+ * log file itself only comes into existence on the first DeployRunRecorder.line() call
+ * (appendRunLog() -- deploy-log-store.ts). So there is a real, if narrow, window where a
+ * 'running' record legitimately has no file yet. A naive reconcile firing in that window
+ * would mark a deploy that is actively in progress as logMissing -- and nothing in this
+ * job ever re-checks or clears that flag once the file does show up, so the record would
+ * carry a false "log missing" forever. Records still in a non-terminal state ('queued'/
+ * 'running') are therefore excluded from markMissing candidacy below, while still
+ * counting toward recordIds so an already-existing file for them is protected from
+ * deletion either way.
  */
 
-import type { ScheduleTrigger } from '../../db';
+import type { ScheduleTrigger, ScheduleStatus } from '../../db';
 import {
 	getDeployLogReconcileEnabled,
 	getScheduleExecutionIdsByType,
@@ -32,6 +45,9 @@ import { planReconcile } from '../../deploy-log-reconcile-core';
 
 // System job ID (own scheduleType, so this never collides with system-cleanup.ts's ids)
 export const DEPLOY_LOG_RECONCILE_ID = 1;
+
+/** Records in these states may not have written their log file yet -- see module doc comment. */
+const NON_TERMINAL_STATUSES: ScheduleStatus[] = ['queued', 'running'];
 
 /**
  * Execute the deploy-log reconcile job.
@@ -79,17 +95,26 @@ export async function runDeployLogReconcileJob(triggeredBy: ScheduleTrigger = 'c
 			await deleteRunLog(fileId);
 		}
 
-		const detailsById = new Map(records.map((r) => [String(r.id), r.details]));
+		const byId = new Map(records.map((r) => [String(r.id), r]));
+		let skippedInProgress = 0;
 		for (const recordId of plan.markMissing) {
-			const id = Number(recordId);
-			const existingDetails = detailsById.get(recordId) ?? null;
-			await updateScheduleExecution(id, {
-				details: { ...(existingDetails ?? {}), logMissing: true }
+			const record = byId.get(recordId);
+			// Still running/queued: it may simply not have written its first line yet
+			// (see module doc comment). Leave it alone -- a later reconcile run will
+			// catch it correctly once the run has actually finished.
+			if (record && NON_TERMINAL_STATUSES.includes(record.status)) {
+				skippedInProgress++;
+				continue;
+			}
+			await updateScheduleExecution(Number(recordId), {
+				details: { ...(record?.details ?? {}), logMissing: true }
 			});
 		}
+		const markedCount = plan.markMissing.length - skippedInProgress;
 
 		await log(
-			`Reconcile complete: ${plan.deleteFiles.length} orphan file(s) deleted, ${plan.markMissing.length} record(s) marked logMissing`
+			`Reconcile complete: ${plan.deleteFiles.length} orphan file(s) deleted, ${markedCount} record(s) marked logMissing` +
+				(skippedInProgress > 0 ? `, ${skippedInProgress} still-running record(s) skipped` : '')
 		);
 		await updateScheduleExecution(execution.id, {
 			status: 'success',
@@ -99,7 +124,8 @@ export async function runDeployLogReconcileJob(triggeredBy: ScheduleTrigger = 'c
 				filesFound: fileIds.length,
 				recordsFound: recordIds.length,
 				deletedFiles: plan.deleteFiles.length,
-				markedRecords: plan.markMissing.length
+				markedRecords: markedCount,
+				skippedInProgress
 			}
 		});
 	} catch (error: any) {
