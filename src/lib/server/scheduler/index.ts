@@ -928,7 +928,7 @@ export async function getSystemSchedules(): Promise<SystemScheduleInfo[]> {
 
 export interface SystemScheduleInfo {
 	id: number;
-	type: 'system_cleanup';
+	type: 'system_cleanup' | 'deploy_log_reconcile';
 	name: string;
 	description: string;
 	cronExpression: string;
