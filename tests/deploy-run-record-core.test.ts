@@ -14,7 +14,7 @@ describe('buildRunDetails', () => {
 			logFile: '01J8-abc.log'
 		});
 		expect(d.options.build).toBe(true);
-		expect(d.summary.containersStarted).toBe(2);
+		expect(d.summary?.containersStarted).toBe(2);
 		expect(d.logFile).toBe('01J8-abc.log');
 		expect(d.exitCode).toBe(0);
 	});
