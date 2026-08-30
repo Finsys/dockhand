@@ -35,7 +35,7 @@
 	import { readJobResponse } from '$lib/utils/sse-fetch';
 	import { saveCloseTiming } from '$lib/utils/save-close-policy';
 	import { clampNumber } from '$lib/utils/clamp-number';
-	import LogViewer from '../logs/LogViewer.svelte';
+	import LogViewer from '$lib/components/LogViewer.svelte';
 	import { formatRunStatus } from '$lib/utils/run-status';
 	import { toast } from 'svelte-sonner';
 	import ComposeGraphViewer from './ComposeGraphViewer.svelte';
