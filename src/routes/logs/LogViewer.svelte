@@ -2,6 +2,7 @@
 	import { RefreshCw, Copy, Download, WrapText, ArrowDownToLine, Search, ChevronUp, ChevronDown, X, Type, Eraser, Filter, Hash } from 'lucide-svelte';
 	import { wrapHtmlLines } from '$lib/utils/log-lines';
 	import { copyToClipboard } from '$lib/utils/clipboard';
+	import { downloadFileName, stripAnsi } from '$lib/utils/log-download-name';
 	import * as Select from '$lib/components/ui/select';
 	import { appSettings, formatLogTimestamps } from '$lib/stores/settings';
 	import { themeStore } from '$lib/stores/theme';
@@ -12,7 +13,7 @@
 
 	interface Props {
 		logs: string;
-		containerName: string;
+		title?: string;
 		loading?: boolean;
 		autoRefresh?: boolean;
 		autoScroll?: boolean;
@@ -25,7 +26,7 @@
 
 	let {
 		logs,
-		containerName,
+		title,
 		loading = false,
 		autoRefresh = true,
 		autoScroll = true,
@@ -76,18 +77,18 @@
 	// Copy logs to clipboard
 	async function copyLogs() {
 		if (logs) {
-			await copyToClipboard(logs);
+			await copyToClipboard(stripAnsi(logs));
 		}
 	}
 
 	// Download logs as txt file
 	function downloadLogs() {
-		if (logs && containerName) {
-			const blob = new Blob([logs], { type: 'text/plain' });
+		if (logs) {
+			const blob = new Blob([stripAnsi(logs)], { type: 'text/plain' });
 			const url = URL.createObjectURL(blob);
 			const a = document.createElement('a');
 			a.href = url;
-			a.download = `${containerName}-logs.txt`;
+			a.download = downloadFileName(title);
 			document.body.appendChild(a);
 			a.click();
 			document.body.removeChild(a);
