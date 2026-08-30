@@ -131,7 +131,7 @@ describe('formatTrigger', () => {
 		['cron', 'Scheduled'],
 		['webhook', 'Webhook'],
 		['startup', 'Startup']
-	])('%s -> %s', (input, expected) => {
+	])('%s -> %s', (input: string, expected: string) => {
 		expect(formatTrigger(input)).toBe(expected);
 	});
 
@@ -145,7 +145,7 @@ describe('formatStatusLabel', () => {
 		['success', 'Success'],
 		['failed', 'Failed'],
 		['running', 'Running']
-	])('%s -> %s', (input, expected) => {
+	])('%s -> %s', (input: string, expected: string) => {
 		expect(formatStatusLabel(input)).toBe(expected);
 	});
 
