@@ -6,7 +6,17 @@ import {
 import { appendRunLog, runLogFileName, budgetExceeded } from './deploy-log-store';
 import { summarize } from './deploy-summary-core';
 import { buildRunDetails, type DeployRunOptions } from './deploy-run-record-core';
+import { redactLine } from './secret-redaction';
 import type { RunRecorder } from './sse';
+
+/**
+ * Stored instead of the raw error text when redactLine() had to withhold the whole
+ * line (a too-short secret value matched, and redacting only that substring would
+ * risk hitting an unrelated coincidence -- see secret-redaction.ts). A run without an
+ * error message is unfortunate; a run with a leaked secret in a widely-readable field
+ * is a security incident, so the row still closes "failed", just without the text.
+ */
+const ERROR_WITHHELD_MESSAGE = 'Deploy failed (error message withheld: contained a secret value)';
 
 /**
  * The database-touching half of the stack_deploy run record. Split from
@@ -26,6 +36,7 @@ class DeployRunRecorder implements RunRecorder {
 	private readonly composeHash: string;
 	private readonly envHash: string;
 	private readonly userId?: number;
+	private readonly secrets: string[];
 	private readonly lines: string[] = [];
 	/** Chain of queued appends -- see line()'s doc comment for why this exists. */
 	private tail: Promise<void> = Promise.resolve();
@@ -34,7 +45,13 @@ class DeployRunRecorder implements RunRecorder {
 	constructor(
 		executionId: number,
 		startedAtMs: number,
-		input: { options: DeployRunOptions; composeHash: string; envHash: string; userId?: number }
+		input: {
+			options: DeployRunOptions;
+			composeHash: string;
+			envHash: string;
+			userId?: number;
+			secrets: string[];
+		}
 	) {
 		this.executionId = executionId;
 		this.runId = String(executionId);
@@ -43,6 +60,7 @@ class DeployRunRecorder implements RunRecorder {
 		this.composeHash = input.composeHash;
 		this.envHash = input.envHash;
 		this.userId = input.userId;
+		this.secrets = input.secrets;
 	}
 
 	/**
@@ -106,11 +124,21 @@ class DeployRunRecorder implements RunRecorder {
 		// pure, tested shape and merged in here instead.
 		const detailsWithUser = this.userId !== undefined ? { ...details, userId: this.userId } : details;
 
+		// error is compose's raw, unredacted stdout/stderr (deploy-recorder.ts's
+		// shouldRecord() deliberately excludes the 'result' event from the log file for
+		// exactly this reason: it never passes through redactLine). This value goes into
+		// errorMessage on schedule_executions, which GET /api/schedules/executions returns
+		// to every authenticated user regardless of stack/environment permission -- so it
+		// gets the same redaction the streamed lines already got before it's stored.
+		const errorMessage = ok
+			? null
+			: (redactLine(error ?? 'Deploy failed', this.secrets) ?? ERROR_WITHHELD_MESSAGE);
+
 		await updateScheduleExecution(this.executionId, {
 			status: ok ? 'success' : 'failed',
 			completedAt: new Date().toISOString(),
 			duration: Date.now() - this.startedAtMs,
-			errorMessage: ok ? null : (error ?? 'Deploy failed'),
+			errorMessage,
 			details: detailsWithUser
 		});
 	}
@@ -129,6 +157,10 @@ export async function createRunRecorder(input: {
 	options: DeployRunOptions;
 	composeHash: string;
 	envHash: string;
+	/** Every value (secret AND non-secret) that reaches the container -- same set the
+	 *  caller already merged for envHash. Used to redact error/summary text on end(),
+	 *  same secrets list stacks.ts uses for makeLineForwarder()/makeRedactedLineSink(). */
+	secrets: string[];
 }): Promise<RunRecorder> {
 	const execution = await createScheduleExecution({
 		scheduleType: 'stack_deploy',
@@ -151,6 +183,7 @@ export async function createRunRecorder(input: {
 		options: input.options,
 		composeHash: input.composeHash,
 		envHash: input.envHash,
-		userId: input.userId
+		userId: input.userId,
+		secrets: input.secrets
 	});
 }
