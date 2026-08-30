@@ -65,7 +65,8 @@ export const POST: RequestHandler = async (event) => {
 				build,
 				forceRecreate,
 				composePath: composeResult.composePath,
-				envPath: composeResult.envPath
+				envPath: composeResult.envPath,
+				onLine: (line) => send('progress', { type: 'line', line })
 			});
 
 			// Audit log

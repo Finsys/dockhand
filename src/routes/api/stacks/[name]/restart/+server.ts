@@ -37,7 +37,7 @@ export const POST: RequestHandler = async (event) => {
 	return createJobResponse(async (send) => {
 		try {
 			const stackName = decodeURIComponent(params.name);
-			const result = await restartStack(stackName, envIdNum, mode);
+			const result = await restartStack(stackName, envIdNum, mode, (line) => send('progress', { type: 'line', line }));
 
 			// Audit log
 			await auditStack(event, 'restart', stackName, envIdNum);
