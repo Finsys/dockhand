@@ -5,6 +5,9 @@ import { upsertStackSource, getStackSources } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
 import { auditStack } from '$lib/server/audit';
 import { createJobResponse } from '$lib/server/sse';
+import { createRunRecorder } from '$lib/server/deploy-run-record';
+import { hashComposeContent, hashEnvFingerprint } from '$lib/server/deploy-run-record-core';
+import { parseEnvFileContent } from '$lib/server/git';
 import type { RequestHandler } from './$types';
 
 /**
@@ -218,6 +221,33 @@ export const POST: RequestHandler = async (event) => {
 			secretProviderId
 		});
 
+		// This endpoint has no requireComposeFile() call to hash the way the
+		// dedicated deploy endpoint does -- compose and the effective env are
+		// already sitting in the request body. rawEnvContent, when given, is the
+		// authoritative non-secret source (see the persistence logic above); the
+		// envVars array's secrets always layer on top of it.
+		const effectiveEnvVars: Record<string, string> = {};
+		if (rawEnvContent) {
+			Object.assign(effectiveEnvVars, parseEnvFileContent(rawEnvContent, name));
+		}
+		if (Array.isArray(envVars)) {
+			for (const v of envVars) {
+				if (v && typeof v.key === 'string' && typeof v.value === 'string' && (!rawEnvContent || v.isSecret)) {
+					effectiveEnvVars[v.key] = v.value;
+				}
+			}
+		}
+
+		const recorder = await createRunRecorder({
+			stackName: name,
+			envId: envIdNum ?? null,
+			userId: auth.user?.id,
+			triggeredBy: 'manual',
+			options: { pull: false, build: false, forceRecreate: false },
+			composeHash: hashComposeContent(compose),
+			envHash: hashEnvFingerprint(effectiveEnvVars)
+		});
+
 		// Deploy via SSE to keep connection alive during long operations
 		return createJobResponse(async (send) => {
 			try {
@@ -243,7 +273,7 @@ export const POST: RequestHandler = async (event) => {
 				console.error('Error deploying compose stack:', error);
 				send('result', { success: false, error: error.message || 'Failed to deploy stack' });
 			}
-		}, request);
+		}, request, recorder);
 	} catch (error: any) {
 		console.error('Error creating compose stack:', error);
 		return json({ error: error.message || 'Failed to create stack' }, { status: 500 });
