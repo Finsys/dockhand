@@ -36,3 +36,18 @@ export function redactLine(line: string, secrets: string[]): string | null {
 
 	return result;
 }
+
+/**
+ * Bridges a raw line callback to a consumer, applying redaction on the way.
+ * Withheld lines (redactLine returning null) are dropped silently — by design:
+ * a suppressed line is cheaper than a leaked one.
+ */
+export function makeLineForwarder(
+	consume: (line: string) => void,
+	secrets: string[]
+): (line: string) => void {
+	return (line: string) => {
+		const safe = redactLine(line, secrets);
+		if (safe !== null) consume(safe);
+	};
+}
