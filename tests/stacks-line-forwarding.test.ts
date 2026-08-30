@@ -1,12 +1,12 @@
 import { describe, test, expect } from 'bun:test';
 import { makeLineForwarder } from '../src/lib/server/secret-redaction';
 
-describe('Zeilen-Weiterleitung mit Bereinigung', () => {
-	test('reicht Zeilen bereinigt weiter, nicht roh', async () => {
+describe('line forwarding with redaction', () => {
+	test('forwards lines redacted, not raw', async () => {
 		const gesehen: string[] = [];
 		const geheim = 'sup3rgeheim-passwort-42';
 
-		// forwardLine ist die kleine Bruecke zwischen collectProcess und send()
+		// makeLineForwarder is the small bridge between collectProcess and send()
 		const forward = makeLineForwarder(gesehen.push.bind(gesehen), [geheim]);
 		forward(`Error: password=${geheim} rejected`);
 		forward('Container app-1  Started');
@@ -18,7 +18,7 @@ describe('Zeilen-Weiterleitung mit Bereinigung', () => {
 		expect(gesehen.join('\n')).not.toContain(geheim);
 	});
 
-	test('unterdrueckt eine zurueckgehaltene Zeile vollstaendig', () => {
+	test('drops a withheld line entirely', () => {
 		const gesehen: string[] = [];
 		const forward = makeLineForwarder(gesehen.push.bind(gesehen), ['test']);
 		forward('Pulling alpine:latest');
