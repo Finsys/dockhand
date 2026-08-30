@@ -11,7 +11,7 @@
 	import { SELECTOR_VARS } from '$lib/utils/bulk-selector';
 	import { classifyMarker, resolvedRefVarNames } from '$lib/utils/invault-markers';
 	import { applyQuickFix, findingKey } from '$lib/utils/compose-quick-fix';
-	import { Layers, Save, Play, Code, GitGraph, GitBranch, GitCommitHorizontal, Github, Loader2, AlertCircle, X, Sun, Moon, TriangleAlert, GripVertical, GripHorizontal, FolderOpen, Copy, Check, XCircle, MapPin, ArrowRight, ArrowDown, Info, Box, FolderSync, Archive, ListChecks, History } from 'lucide-svelte';
+	import { Layers, Save, Play, Code, GitGraph, GitBranch, GitCommitHorizontal, Github, Loader2, AlertCircle, X, Sun, Moon, TriangleAlert, GripVertical, GripHorizontal, FolderOpen, Copy, Check, XCircle, MapPin, ArrowRight, ArrowDown, Info, Box, FolderSync, Archive, ListChecks, History, ChevronDown } from 'lucide-svelte';
 	import ComposeValidatePanel from './ComposeValidatePanel.svelte';
 	import BackupPanel from '../containers/BackupPanel.svelte';
 	import DeploysPanel from './DeploysPanel.svelte';
@@ -142,6 +142,23 @@
 	// (RedeployPopover's defaultBuild). Logic lives in compose-build-detect.ts, not
 	// inline, so it has its own unit test independent of mounting this component.
 	let hasBuildSection = $derived(detectBuildSection(composeContent));
+	// Single source of truth for "what does a direct click on the main button do",
+	// shared between the button's own onclick AND the split-button popover's
+	// defaultPull/defaultBuild/defaultForceRecreate props next to it -- so the two
+	// paths (one-click vs pick-then-Deploy) can never drift into deploying with
+	// different options for what looks like the same defaults.
+	//
+	// pull is always false on both: Save/Create already run against whatever images
+	// are already local, pulling is an explicit extra step the operator reaches for
+	// via the popover, not something either main button does silently.
+	//
+	// forceRecreate differs: Save & redeploy defaults to true, preserving the
+	// endpoint's prior always-on behavior (env var changes need --force-recreate to
+	// take effect) now that it's a real choice instead of hardcoded. Create & Start
+	// defaults to false -- there is nothing to recreate on a stack that doesn't exist
+	// yet.
+	let saveRedeployDefaults = $derived<DeployOptions>({ pull: false, build: hasBuildSection, forceRecreate: true });
+	let createStartDefaults = $derived<DeployOptions>({ pull: false, build: hasBuildSection, forceRecreate: false });
 	let activeTab = $state<'editor' | 'graph' | 'backups' | 'deploys'>('editor');
 	let backupCount = $state(0);
 	let backupTally = $state<{ ok: number; failed: number }>({ ok: 0, failed: 0 });
@@ -2484,18 +2501,17 @@
 							Create
 						{/if}
 					</Button>
-					<RedeployPopover
-						stackName={newStackName}
-						envId={$currentEnvironment?.id ?? null}
-						disabled={saving}
-						triggerVariant="button"
-						defaultPull={false}
-						defaultBuild={hasBuildSection}
-						defaultForceRecreate={false}
-						reason={hasBuildSection ? 'Auto-checked: this compose file has a build: section' : undefined}
-						onDeploy={(options) => handleCreate(true, options)}
-					>
-						{#snippet children()}
+					<!-- Split button: the label itself stays a direct, one-click action (the
+					     common case) with the current defaults baked in; the chevron opens a
+					     popover to override pull/build/forceRecreate before deploying. Two
+					     separate <button> elements, both independently reachable by keyboard --
+					     never one element whose behavior depends on click position. -->
+					<div class="inline-flex">
+						<Button
+							class="rounded-r-none"
+							onclick={() => handleCreate(true, createStartDefaults)}
+							disabled={saving}
+						>
 							{#if saving}
 								<Loader2 class="w-4 h-4 animate-spin" />
 								Starting...
@@ -2503,8 +2519,23 @@
 								<Play class="w-4 h-4" />
 								Create & Start
 							{/if}
-						{/snippet}
-					</RedeployPopover>
+						</Button>
+						<RedeployPopover
+							stackName={newStackName}
+							envId={$currentEnvironment?.id ?? null}
+							disabled={saving}
+							triggerVariant="chevron"
+							defaultPull={createStartDefaults.pull}
+							defaultBuild={createStartDefaults.build}
+							defaultForceRecreate={createStartDefaults.forceRecreate}
+							reason={hasBuildSection ? 'Auto-checked: this compose file has a build: section' : undefined}
+							onDeploy={(options) => handleCreate(true, options)}
+						>
+							{#snippet children()}
+								<ChevronDown class="w-4 h-4" />
+							{/snippet}
+						</RedeployPopover>
+					</div>
 				{:else if !readonly}
 					<!-- Edit mode buttons -->
 					<Button variant="outline" class="w-24" onclick={() => handleSave(false)} disabled={saving || loading || (needsFileLocation && !workingComposePath.trim())}>
@@ -2516,19 +2547,13 @@
 							Save
 						{/if}
 					</Button>
-					<RedeployPopover
-						{stackName}
-						envId={$currentEnvironment?.id ?? null}
-						disabled={saving || loading || (needsFileLocation && !workingComposePath.trim())}
-						triggerVariant="button"
-						triggerClass="w-36"
-						defaultPull={false}
-						defaultBuild={hasBuildSection}
-						defaultForceRecreate={true}
-						reason={hasBuildSection ? 'Auto-checked: this compose file has a build: section' : undefined}
-						onDeploy={(options) => handleSave(true, undefined, options)}
-					>
-						{#snippet children()}
+					<!-- Same split-button shape as Create & Start above. -->
+					<div class="inline-flex">
+						<Button
+							class="w-36 rounded-r-none"
+							onclick={() => handleSave(true, undefined, saveRedeployDefaults)}
+							disabled={saving || loading || (needsFileLocation && !workingComposePath.trim())}
+						>
 							{#if saving && savingWithRestart}
 								<Loader2 class="w-4 h-4 animate-spin" />
 								Deploying...
@@ -2536,8 +2561,23 @@
 								<Play class="w-4 h-4" />
 								Save & redeploy
 							{/if}
-						{/snippet}
-					</RedeployPopover>
+						</Button>
+						<RedeployPopover
+							{stackName}
+							envId={$currentEnvironment?.id ?? null}
+							disabled={saving || loading || (needsFileLocation && !workingComposePath.trim())}
+							triggerVariant="chevron"
+							defaultPull={saveRedeployDefaults.pull}
+							defaultBuild={saveRedeployDefaults.build}
+							defaultForceRecreate={saveRedeployDefaults.forceRecreate}
+							reason={hasBuildSection ? 'Auto-checked: this compose file has a build: section' : undefined}
+							onDeploy={(options) => handleSave(true, undefined, options)}
+						>
+							{#snippet children()}
+								<ChevronDown class="w-4 h-4" />
+							{/snippet}
+						</RedeployPopover>
+					</div>
 				{/if}
 			</div>
 		</div>
