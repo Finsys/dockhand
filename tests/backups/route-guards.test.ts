@@ -4,10 +4,15 @@
  * #14). Security-critical + fail-closed, so every deny branch is pinned here.
  *
  * The module transitively imports the DB/engine via ./index, so we mock.module()
- * ./index and ../../db BEFORE importing it — the guard LOGIC under test is pure
- * (decisions over an injected AuthorizationContext + the two resolver results).
+ * ./index and register a getBackupConfig fake via ../helpers/db-fake (see that
+ * file for why: mock.module() replaces $lib/server/db WHOLESALE for the entire
+ * process, so this file no longer registers its own separate mock.module() for
+ * it — that used to collide with any other file doing the same) — the guard
+ * LOGIC under test is pure (decisions over an injected AuthorizationContext +
+ * the two resolver results).
  */
 import { describe, it, expect, mock, beforeAll } from 'bun:test';
+import { registerDbFake } from '../helpers/db-fake';
 
 // Controllable fakes for the heavy imports, set per-test.
 let resolveResult: { envId: number | null | undefined; resolved: boolean } | (() => never) = { envId: 5, resolved: true };
@@ -30,9 +35,7 @@ mock.module('../../src/lib/server/backups/index', () => ({
 		return out;
 	},
 }));
-mock.module('../../src/lib/server/db', () => ({
-	getBackupConfig: async (id: number) => configById(id),
-}));
+registerDbFake('getBackupConfig', async (id: number) => configById(id));
 
 let rg: typeof import('../../src/lib/server/backups/route-guards');
 beforeAll(async () => { rg = await import('../../src/lib/server/backups/route-guards'); });
