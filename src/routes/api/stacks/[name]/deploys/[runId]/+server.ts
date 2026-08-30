@@ -13,13 +13,12 @@ import type { RequestHandler } from './$types';
 /**
  * @openapi
  * summary: Get a single deploy run's metadata (no log text -- see GET .../{runId}/log)
+ * description: 400 ("Invalid run id") and 404 ("Deploy run not found", also returned for a run that belongs to a different stack) are produced by the shared loadOwnedDeployRun() helper (deploy-run-access.ts), not literally in this handler's body -- the openapi generator's static scanner cannot see status()/error() calls in a different file, hence the prose here instead of resp-400/resp-404 lines (same pattern as POST /api/backup/destinations/{id}/task's description).
  * path: name:string! Stack name (from GET /api/stacks)
  * path: runId:integer! Run id (from GET /api/stacks/{name}/deploys)
  * resp-200: {id:integer!, environmentId:integer, triggeredBy:string!, triggeredAt:string!, startedAt:string, completedAt:string, duration:integer, status:string!, errorMessage:string, details:{}}
- * resp-400: Invalid run id
  * resp-401: Authentication required
- * resp-403: Permission denied (needs stacks:view), or access denied to this environment
- * resp-404: Deploy run not found (also returned for a run that belongs to a different stack)
+ * resp-403: Permission denied (needs stacks:view for the run's own environment), or access denied to this environment
  */
 export const GET: RequestHandler = async ({ params, cookies }) => {
 	const auth = await authorize(cookies);
@@ -88,13 +87,12 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 /**
  * @openapi
  * summary: Delete a deploy run's database record and its on-disk log file
+ * description: 400 ("Invalid run id") and 404 ("Deploy run not found", also returned for a run that belongs to a different stack) are produced by the shared loadOwnedDeployRun() helper (deploy-run-access.ts), not literally in this handler's body -- see GET .../{runId}'s description for why that means prose here instead of resp-400/resp-404 lines.
  * path: name:string! Stack name (from GET /api/stacks)
  * path: runId:integer! Run id (from GET /api/stacks/{name}/deploys)
  * resp-200: {success:boolean!}
- * resp-400: Invalid run id
  * resp-401: Authentication required
- * resp-403: Permission denied (needs stacks:edit), or access denied to this environment
- * resp-404: Deploy run not found (also returned for a run that belongs to a different stack)
+ * resp-403: Permission denied (needs stacks:edit for the run's own environment), or access denied to this environment
  */
 export const DELETE: RequestHandler = async ({ params, cookies }) => {
 	const auth = await authorize(cookies);

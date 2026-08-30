@@ -21,12 +21,12 @@ import type { RequestHandler } from './$types';
 /**
  * @openapi
  * summary: Get a deploy run's log text (text/plain, from the on-disk file)
+ * description: 400 ("Invalid run id") is produced by the shared loadOwnedDeployRun() helper (deploy-run-access.ts), not literally in this handler's body -- the openapi generator's static scanner cannot see status()/error() calls in a different file, hence the prose here instead of a resp-400 line (same pattern as POST /api/backup/destinations/{id}/task's description). The 404 below covers BOTH loadOwnedDeployRun's "run not found / belongs to a different stack" AND this handler's own "log file missing" -- the latter IS literal in this file's body, which is why it can stay a resp-404 line.
  * path: name:string! Stack name (from GET /api/stacks)
  * path: runId:integer! Run id (from GET /api/stacks/{name}/deploys)
  * resp-200: Plain-text log content
- * resp-400: Invalid run id
  * resp-401: Authentication required
- * resp-403: Permission denied (needs stacks:view), or access denied to this environment
+ * resp-403: Permission denied (needs stacks:view for the run's own environment), or access denied to this environment
  * resp-404: Deploy run not found (also returned for a run that belongs to a different stack), or log file missing
  */
 export const GET: RequestHandler = async ({ params, cookies }) => {
