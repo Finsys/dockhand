@@ -1,3 +1,5 @@
+import { parseTimestamp } from './date-format';
+
 /**
  * Format a byte count into a human-readable string.
  */
@@ -36,9 +38,16 @@ export function formatErrorLines(msg: string | null | undefined): string {
  * Compact relative time like "just now", "5m ago", "2d ago", "3mo ago". Returns ''
  * for an unparseable/NaN date and "in the future" for a timestamp ahead of now.
  * Kept in this import-light module so it is unit-testable; stores/settings re-exports it.
+ *
+ * Uses parseTimestamp so a naive server timestamp (PG `timestamp without time
+ * zone`, e.g. "2026-08-30 20:36:11.534") is read as UTC instead of the
+ * browser's local zone - see date-format.ts and #1183. Every caller of this
+ * function passes exactly that kind of raw server value alongside
+ * formatDateTime(), which already goes through parseTimestamp(); this kept
+ * the two out of sync until now.
  */
 export function formatRelativeTime(date: Date | string | number): string {
-	const d = date instanceof Date ? date : new Date(date);
+	const d = parseTimestamp(date);
 	const ms = d.getTime();
 	if (isNaN(ms)) return '';
 	const sec = Math.round((Date.now() - ms) / 1000);
