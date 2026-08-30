@@ -245,7 +245,11 @@ export const POST: RequestHandler = async (event) => {
 			triggeredBy: 'manual',
 			options: { pull: false, build: false, forceRecreate: false },
 			composeHash: hashComposeContent(compose),
-			envHash: hashEnvFingerprint(effectiveEnvVars)
+			envHash: hashEnvFingerprint(effectiveEnvVars),
+			// Same merged set passed to envHash above -- also the redaction list end()
+			// applies to the stored error text, so a leaked env value never reaches
+			// errorMessage on schedule_executions.
+			secrets: Object.values(effectiveEnvVars)
 		});
 
 		// Deploy via SSE to keep connection alive during long operations

@@ -68,6 +68,10 @@ export const POST: RequestHandler = async (event) => {
 		}, event.request);
 	}
 
+	// Same merged set used for envHash below -- also the redaction list end() applies
+	// to the stored error text, so a leaked env value never reaches errorMessage.
+	const effectiveEnvVars = { ...(composeResult.nonSecretVars ?? {}), ...(composeResult.secretVars ?? {}) };
+
 	const recorder = await createRunRecorder({
 		stackName,
 		envId: envIdNum ?? null,
@@ -75,7 +79,8 @@ export const POST: RequestHandler = async (event) => {
 		triggeredBy: 'manual',
 		options: { pull: !!pull, build: !!build, forceRecreate: !!forceRecreate },
 		composeHash: hashComposeContent(composeResult.content!),
-		envHash: hashEnvFingerprint({ ...(composeResult.nonSecretVars ?? {}), ...(composeResult.secretVars ?? {}) })
+		envHash: hashEnvFingerprint(effectiveEnvVars),
+		secrets: Object.values(effectiveEnvVars)
 	});
 
 	return createJobResponse(async (send) => {
