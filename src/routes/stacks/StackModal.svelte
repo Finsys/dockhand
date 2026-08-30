@@ -2426,7 +2426,7 @@
 					{:else if activeTab === 'deploys' && !needsFileLocation}
 						<!-- Deploys tab (never for untracked stacks — same reasoning as Backups above) -->
 						<div class="h-full flex-1 overflow-auto p-4">
-							<DeploysPanel {stackName} envId={$currentEnvironment?.id ?? null} />
+							<DeploysPanel {stackName} envId={$currentEnvironment?.id ?? null} {editorTheme} />
 						</div>
 					{/if}
 				</div>
@@ -2464,6 +2464,7 @@
 					autoRefresh={false}
 					autoScroll={outputRunning}
 					class="flex-1 min-h-0"
+					theme={editorTheme}
 				/>
 			</div>
 		{/if}
