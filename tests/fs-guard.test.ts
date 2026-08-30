@@ -1,7 +1,16 @@
-import { describe, test, expect, beforeAll } from 'bun:test';
+import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
 
-// Pin DATA_DIR before importing so the guard computes /app/data paths.
+// Pin DATA_DIR before importing so the guard computes /app/data paths -- and put it back
+// afterwards. Bun runs every test file in one process, so leaving it set leaks into unrelated
+// suites: selfhst-icons reads DATA_DIR and mkdirSync's a cache directory under it, which fails
+// with EACCES on a machine that has no /app. That pairing already fails today when the two
+// files run together; it only stays green in the full suite because of file ordering.
+const previousDataDir = process.env.DATA_DIR;
 beforeAll(() => { process.env.DATA_DIR = '/app/data'; });
+afterAll(() => {
+	if (previousDataDir === undefined) delete process.env.DATA_DIR;
+	else process.env.DATA_DIR = previousDataDir;
+});
 process.env.DATA_DIR = '/app/data';
 
 const { isProtectedPath } = await import('../src/lib/server/fs-guard');
