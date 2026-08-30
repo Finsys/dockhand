@@ -55,9 +55,26 @@ import { planReconcile, isEligibleForMissingMark } from '../../deploy-log-reconc
 export const DEPLOY_LOG_RECONCILE_ID = 1;
 
 /**
+ * The two filesystem calls this job makes, injectable so a test can force one element to
+ * fail while its neighbours succeed.
+ *
+ * They are parameters rather than a mock.module() of '../../deploy-log-store' because that
+ * call freezes the module's export shape for the WHOLE test process: deploy-run-record.ts
+ * imports appendRunLog/runLogFileName/SizeBudgetTracker from the same specifier, and a
+ * partial factory left those missing for every module that resolved it afterwards.
+ */
+export interface DeployLogReconcileDeps {
+	listRunLogIds: () => Promise<string[]>;
+	deleteRunLog: (runId: string) => Promise<void>;
+}
+
+/**
  * Execute the deploy-log reconcile job.
  */
-export async function runDeployLogReconcileJob(triggeredBy: ScheduleTrigger = 'cron'): Promise<void> {
+export async function runDeployLogReconcileJob(
+	triggeredBy: ScheduleTrigger = 'cron',
+	deps: DeployLogReconcileDeps = { listRunLogIds, deleteRunLog }
+): Promise<void> {
 	// Check if reconcile is enabled (skip check if manually triggered)
 	if (triggeredBy === 'cron') {
 		const enabled = await getDeployLogReconcileEnabled();
@@ -88,7 +105,7 @@ export async function runDeployLogReconcileJob(triggeredBy: ScheduleTrigger = 'c
 	};
 
 	try {
-		const fileIds = await listRunLogIds();
+		const fileIds = await deps.listRunLogIds();
 		const records = await getScheduleExecutionIdsByType('stack_deploy');
 		const recordIds = records.map((r) => String(r.id));
 
@@ -105,7 +122,7 @@ export async function runDeployLogReconcileJob(triggeredBy: ScheduleTrigger = 'c
 
 		for (const fileId of plan.deleteFiles) {
 			try {
-				await deleteRunLog(fileId);
+				await deps.deleteRunLog(fileId);
 				deletedCount++;
 			} catch (error: any) {
 				failedCount++;
