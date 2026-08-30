@@ -8,7 +8,7 @@
 import { existsSync, mkdirSync, rmSync, readdirSync, cpSync, statSync, unlinkSync, renameSync, readFileSync, writeFileSync, realpathSync } from 'node:fs';
 import { join, resolve, dirname, basename, normalize as pathNormalize, sep as pathSep } from 'node:path';
 import { spawn as nodeSpawn } from 'node:child_process';
-import type { ChildProcess } from 'node:child_process';
+import { collectProcess } from './process-output-core';
 import {
 	applyFileDeletions,
 	hashDirFiles,
@@ -235,54 +235,11 @@ function isBinaryContent(bytes: Uint8Array): boolean {
 	}
 }
 
-type LineCallback = (line: string) => void;
-
-/**
- * Collect stdout/stderr from a child process and wait for it to exit.
- * When `onLine` is provided, it is called for each complete line (split on '\n')
- * seen on either stdout or stderr, in arrival order, as the process runs — plus
- * once more for a trailing partial line (no terminating '\n') once the process closes.
- * Without `onLine`, behavior is unchanged.
- */
-export function collectProcess(
-	proc: ChildProcess,
-	onLine?: LineCallback
-): Promise<{ exitCode: number; stdout: string; stderr: string }> {
-	return new Promise((resolve, reject) => {
-		const stdoutChunks: Buffer[] = [];
-		const stderrChunks: Buffer[] = [];
-		let lineBuffer = '';
-
-		const emitLines = (chunk: string) => {
-			if (!onLine) return;
-			lineBuffer += chunk;
-			const parts = lineBuffer.split('\n');
-			lineBuffer = parts.pop() ?? ''; // last part may be incomplete
-			for (const line of parts) onLine(line);
-		};
-
-		proc.stdout?.on('data', (chunk: Buffer) => {
-			stdoutChunks.push(chunk);
-			emitLines(chunk.toString());
-		});
-		proc.stderr?.on('data', (chunk: Buffer) => {
-			stderrChunks.push(chunk);
-			emitLines(chunk.toString());
-		});
-		proc.on('error', reject);
-		proc.on('close', (code) => {
-			if (onLine && lineBuffer.length > 0) {
-				onLine(lineBuffer);
-				lineBuffer = '';
-			}
-			resolve({
-				exitCode: code ?? 1,
-				stdout: Buffer.concat(stdoutChunks).toString(),
-				stderr: Buffer.concat(stderrChunks).toString()
-			});
-		});
-	});
-}
+// collectProcess lives in ./process-output-core (imported above) -- pure,
+// dependency-free, so it stays unit-testable without dragging in the DB
+// module chain. Re-exported here so existing call sites (loginToRegistries,
+// executeLocalCompose) are unaffected.
+export { collectProcess };
 
 /**
  * Read all files from a directory as a map of relative path -> content.
