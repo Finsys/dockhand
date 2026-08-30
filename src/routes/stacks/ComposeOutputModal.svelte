@@ -32,7 +32,11 @@
 </script>
 
 <Dialog.Root bind:open>
-	<Dialog.Content class="max-w-3xl h-[60vh] overflow-hidden flex flex-col">
+	<!-- Build output is line-oriented and often wide (BuildKit step lines, image digests).
+	     A narrow window forces wrapping or horizontal scrolling on every other line, so this
+	     one is sized generously -- but clamped to the viewport so it never overflows on a
+	     laptop screen: min() picks the smaller of the two, and the 4rem keeps a margin. -->
+	<Dialog.Content class="max-w-[min(90rem,calc(100vw-4rem))] h-[85vh] overflow-hidden flex flex-col">
 		<Dialog.Header class="shrink-0">
 			<Dialog.Title class="flex items-center gap-2">
 				{#if running}
