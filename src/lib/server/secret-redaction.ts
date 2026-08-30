@@ -1,0 +1,38 @@
+/**
+ * Minimum length for a secret to be replaced in place. Below it, a value like "test"
+ * would match inside unrelated words ("latest", "testing"), so the whole line is
+ * withheld instead — we cannot safely tell signal from coincidence.
+ */
+const MIN_REPLACEABLE_LENGTH = 8;
+
+/** Placeholder written in place of a secret value. */
+const PLACEHOLDER = '***';
+
+/**
+ * Removes known secret values from a single output line.
+ *
+ * This does NOT pattern-match "things that look like secrets" — that approach fails for
+ * every field nobody thought of. It replaces the exact values we injected ourselves and
+ * therefore know.
+ *
+ * Returns the redacted line, or null when the line must be withheld entirely.
+ */
+export function redactLine(line: string, secrets: string[]): string | null {
+	let result = line;
+
+	for (const secret of secrets) {
+		const value = secret?.trim();
+		if (!value) continue;
+
+		if (value.length < MIN_REPLACEABLE_LENGTH) {
+			// Too short to replace without hitting unrelated substrings. If it appears at all,
+			// withhold the line: a false positive costs one hidden line, a false negative leaks.
+			if (line.includes(value)) return null;
+			continue;
+		}
+
+		result = result.split(value).join(PLACEHOLDER);
+	}
+
+	return result;
+}
