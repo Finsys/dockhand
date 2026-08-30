@@ -166,6 +166,85 @@ describe('DeployRunRecorder.end() -- secret redaction of the stored error text',
 	});
 });
 
+// F4 fix: deployStack() resolves a bound secret provider's values (Bitwarden/
+// 1Password/etc. bulk pulls or inline refs) INTERNALLY, strictly after a caller
+// (a route, or deployGitStack in git.ts) already built its recorder from the
+// DB-only vars it had at construction time. addSecrets() is how the caller feeds
+// those later-known values in before end() redacts the stored error text.
+describe('DeployRunRecorder.addSecrets() -- provider-resolved secrets added AFTER construction', () => {
+	const LATE_SECRET = 'zzz-spaetzuendung-9000';
+
+	test('a secret added via addSecrets() after construction (with an EMPTY construction-time list) is still redacted from the stored error', async () => {
+		resetDbState();
+		const recorder = await createRunRecorder({
+			stackName: 'demo',
+			envId: null,
+			triggeredBy: 'manual',
+			options: { pull: false, build: false, forceRecreate: false },
+			composeHash: 'aaa',
+			envHash: 'bbb',
+			// Mirrors the route's construction-time list BEFORE deployStack() resolves
+			// provider secrets -- this is the F4 bug's exact starting condition.
+			secrets: []
+		});
+
+		recorder.addSecrets([LATE_SECRET]);
+
+		await recorder.end(false, undefined, `compose up failed: PROVIDER_TOKEN=${LATE_SECRET} rejected`);
+
+		const update = endUpdate();
+		expect(update?.status).toBe('failed');
+		expect(String(update?.errorMessage)).not.toContain(LATE_SECRET);
+		expect(String(update?.errorMessage)).toContain('***');
+	});
+
+	test('addSecrets() ADDS to, rather than replaces, secrets already known at construction', async () => {
+		resetDbState();
+		const CONSTRUCTION_SECRET = 'yyy-bekannt-von-anfang-an';
+		const recorder = await createRunRecorder({
+			stackName: 'demo',
+			envId: null,
+			triggeredBy: 'manual',
+			options: { pull: false, build: false, forceRecreate: false },
+			composeHash: 'aaa',
+			envHash: 'bbb',
+			secrets: [CONSTRUCTION_SECRET]
+		});
+
+		recorder.addSecrets([LATE_SECRET]);
+
+		await recorder.end(
+			false,
+			undefined,
+			`compose up failed: A=${CONSTRUCTION_SECRET} B=${LATE_SECRET} rejected`
+		);
+
+		const update = endUpdate();
+		expect(String(update?.errorMessage)).not.toContain(CONSTRUCTION_SECRET);
+		expect(String(update?.errorMessage)).not.toContain(LATE_SECRET);
+	});
+
+	test('calling addSecrets() with an empty array changes nothing (the common case: deployStack() failed before resolving any provider secrets)', async () => {
+		resetDbState();
+		const recorder = await createRunRecorder({
+			stackName: 'demo',
+			envId: null,
+			triggeredBy: 'manual',
+			options: { pull: false, build: false, forceRecreate: false },
+			composeHash: 'aaa',
+			envHash: 'bbb',
+			secrets: []
+		});
+
+		recorder.addSecrets([]);
+
+		await recorder.end(false, undefined, 'exit code 1');
+
+		const update = endUpdate();
+		expect(update?.errorMessage).toBe('exit code 1');
+	});
+});
+
 // ---------------------------------------------------------------------------
 // DeployRunRecorder.line() -- the size-budget path (SizeBudgetTracker,
 // deploy-log-store.ts). Unlike every test above, THIS block deliberately DOES

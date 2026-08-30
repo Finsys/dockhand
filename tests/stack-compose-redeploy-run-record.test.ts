@@ -138,7 +138,7 @@ const { hashComposeContent, hashEnvFingerprint } = await import('../src/lib/serv
 let saveCalls: Array<{ name: string; content: string; envId: number | null | undefined }>;
 let requireComposeResult: Record<string, unknown>;
 let deployStackCalls: Array<{ onLine?: (line: string) => void; build?: boolean; pullPolicy?: string; forceRecreate?: boolean }>;
-let deployStackResult: { success: boolean; output?: string; error?: string };
+let deployStackResult: { success: boolean; output?: string; error?: string; resolvedSecrets?: string[] };
 let deployStackOnLines: string[];
 
 function resetStacksState() {
@@ -270,6 +270,27 @@ describe('PUT /api/stacks/[name]/compose -- restart:true (Save & redeploy)', () 
 		expect(String(update?.errorMessage)).not.toContain('s3cr3t-value');
 	});
 
+	// F4 fix: deployStack() resolves a bound secret provider's values INTERNALLY, after
+	// the route's `recorder` above was already built from requireComposeResult's DB-only
+	// secretVars/nonSecretVars. A provider-resolved secret (never in that DB-only set) is
+	// simulated via the fake's resolvedSecrets -- exactly StackOperationResult's shape --
+	// and must still be redacted from the stored error, via recorder.addSecrets().
+	test('F4 regression: a provider-resolved secret (unknown at recorder construction) is redacted before it is stored', async () => {
+		const PROVIDER_SECRET = 'zzz-bulk-provider-7000';
+		deployStackResult = {
+			success: false,
+			error: `compose up failed: PROVIDER_TOKEN=${PROVIDER_SECRET} rejected`,
+			resolvedSecrets: [PROVIDER_SECRET]
+		};
+		deployStackOnLines = [];
+
+		await (await composeRoute.PUT(makeComposeEvent({ content: 'x', restart: true }))).json();
+
+		const update = endUpdate();
+		expect(update?.status).toBe('failed');
+		expect(String(update?.errorMessage)).not.toContain(PROVIDER_SECRET);
+	});
+
 	test('a failed deploy still closes the row as "failed", never left "running"', async () => {
 		deployStackResult = { success: false, error: 'exit code 1' };
 		deployStackOnLines = [];
@@ -366,5 +387,37 @@ describe('src/routes/api/stacks/[name]/deploy/+server.ts -- untouched by this ta
 		);
 		const matches = source.match(/createRunRecorder\(/g) ?? [];
 		expect(matches).toHaveLength(1);
+	});
+});
+
+/**
+ * F4 fix source-level guards. deploy/+server.ts and POST /api/stacks/+server.ts are
+ * not exercised as real integration tests in this file (see this file's top doc
+ * comment for why: the former pulls in $lib/server/audit -> ...license ->
+ * ...notifications, the latter pulls in $lib/server/docker -> hawser.ts ->
+ * ./db/drizzle.js -- neither faked here). A source-level guard cannot prove the wiring
+ * REDACTS correctly (that's what the real integration test above proves, for
+ * compose/+server.ts, which shares the exact same pattern) -- it only proves the call
+ * exists exactly once, so a future refactor can't silently drop it back out. It cannot
+ * distinguish a real call from the same text inside a comment or string; the call
+ * itself deliberately never appears verbatim in comments in either file, to keep this
+ * guard meaningful.
+ */
+describe('F4 fix -- recorder.addSecrets() wiring exists on the routes not covered by a real integration test here', () => {
+	test('deploy/+server.ts calls recorder.addSecrets(result.resolvedSecrets ?? []) exactly once, before recorder.end()', async () => {
+		const source = await readFile(
+			join(here, '..', 'src', 'routes', 'api', 'stacks', '[name]', 'deploy', '+server.ts'),
+			'utf8'
+		);
+		const matches = source.match(/recorder\.addSecrets\(/g) ?? [];
+		expect(matches).toHaveLength(1);
+		expect(source.indexOf('recorder.addSecrets(')).toBeLessThan(source.indexOf('}, event.request, recorder)'));
+	});
+
+	test('POST /api/stacks/+server.ts calls recorder.addSecrets(result.resolvedSecrets ?? []) exactly once, before recorder.end()', async () => {
+		const source = await readFile(join(here, '..', 'src', 'routes', 'api', 'stacks', '+server.ts'), 'utf8');
+		const matches = source.match(/recorder\.addSecrets\(/g) ?? [];
+		expect(matches).toHaveLength(1);
+		expect(source.indexOf('recorder.addSecrets(')).toBeLessThan(source.indexOf('}, request, recorder)'));
 	});
 });

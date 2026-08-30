@@ -13,6 +13,11 @@ function createFakeRecorder() {
 		line(line: string) {
 			lines.push(line);
 		},
+		addSecrets() {
+			// Not exercised by this file's tests -- they cover createJobResponse's own
+			// line()/end() plumbing, not the F4 addSecrets() wiring (see
+			// deploy-run-record.test.ts and the route-level regression tests for that).
+		},
 		async end(ok: boolean, exitCode?: number, error?: string) {
 			resolveEnded({ ok, exitCode, error });
 		}
@@ -151,6 +156,7 @@ describe('createJobResponse RunRecorder hook', () => {
 		let calls = 0;
 		const recorder: RunRecorder = {
 			line() {},
+			addSecrets() {},
 			async end() {
 				calls++;
 				throw new Error('recorder failure');
