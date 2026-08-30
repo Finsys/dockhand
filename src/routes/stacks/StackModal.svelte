@@ -32,7 +32,7 @@
 	import * as Alert from '$lib/components/ui/alert';
 	import { ErrorDialog } from '$lib/components/ui/error-dialog';
 	import { readJobResponse } from '$lib/utils/sse-fetch';
-	import { shouldCloseAfterSave } from '$lib/utils/save-close-policy';
+	import { saveCloseTiming } from '$lib/utils/save-close-policy';
 	import LogViewer from '../logs/LogViewer.svelte';
 	import { formatRunStatus } from '$lib/utils/run-status';
 	import { toast } from 'svelte-sonner';
@@ -41,6 +41,12 @@
 
 	// localStorage key for persisted split ratio
 	const STORAGE_KEY_SPLIT = 'dockhand-stack-modal-split';
+
+	// How long a successful deploy leaves the modal open before auto-closing, so the
+	// operator still glimpses the success and the compose output before it goes away
+	// (operator decision, 30.08.2026 -- see save-close-policy.ts). The plain-save flash-
+	// then-close delay (500ms, below) predates this and is left as it was.
+	const DEPLOY_SUCCESS_CLOSE_DELAY_MS = 1500;
 
 	interface Props {
 		open: boolean;
@@ -174,8 +180,9 @@
 
 	// Live compose output for deploying operations (Create & Start, Save & redeploy),
 	// rendered inline below the editor instead of in a separate window -- the modal
-	// stays open while it runs (see shouldCloseAfterSave) so the output stays visible
-	// where the error it might explain also lives.
+	// stays open while it runs, and afterwards for exactly as long as saveCloseTiming
+	// (see save-close-policy.ts) says it should, so the output stays visible where the
+	// result or the error it might explain also lives.
 	let outputTitle = $state('');
 	let outputLines = $state<string[]>([]);
 	let outputRunning = $state(false);
@@ -1396,7 +1403,21 @@
 
 			toast.success(`Created stack "${newStackName.trim()}"`);
 			onSuccess();
-			if (shouldCloseAfterSave(start)) handleClose();
+			switch (saveCloseTiming(start, Boolean(data.success))) {
+				case 'close':
+					handleClose();
+					break;
+				case 'close-delayed':
+					setTimeout(() => handleClose(), DEPLOY_SUCCESS_CLOSE_DELAY_MS);
+					break;
+				case 'stay-open':
+					// Reachable only if a future change to the create/deploy endpoint ever
+					// resolves without throwing on failure -- today both throw checks above
+					// always catch a failed deploy first, so this case is currently dead code
+					// at this exact call site. Kept so the switch stays exhaustive and this
+					// call site doesn't silently start closing on failure if that changes.
+					break;
+			}
 		} catch (e: any) {
 			// The success path above already calls finishOutput with the server's real
 			// ok/exitCode before it throws (a deploy that ran but reported failure).
@@ -1594,10 +1615,21 @@
 			toast.success(restart ? 'Stack applied' : 'Stack saved');
 			onSuccess();
 
-			if (shouldCloseAfterSave(restart)) {
-				// Show success briefly then close. A redeploy stays open instead so the
-				// compose output rendered below the editor stays visible.
-				setTimeout(() => handleClose(), 500);
+			switch (saveCloseTiming(restart, Boolean(data.success))) {
+				case 'close':
+					// Show success briefly then close.
+					setTimeout(() => handleClose(), 500);
+					break;
+				case 'close-delayed':
+					setTimeout(() => handleClose(), DEPLOY_SUCCESS_CLOSE_DELAY_MS);
+					break;
+				case 'stay-open':
+					// Reachable only if a future change to the compose/deploy endpoint ever
+					// resolves without throwing on failure -- today both throw checks above
+					// always catch a failed deploy first, so this case is currently dead code
+					// at this exact call site. Kept so the switch stays exhaustive and this
+					// call site doesn't silently start closing on failure if that changes.
+					break;
 			}
 		} catch (e: any) {
 			// Same reasoning as handleCreate's catch block: don't clobber a real
@@ -2280,9 +2312,9 @@
 			{/if}
 		</div>
 
-		<!-- Live output for Create & Start / Save & redeploy, rendered below the editor so the
-		     dialog can stay open (see shouldCloseAfterSave) instead of handing the user off to a
-		     separate window. Only takes up space once there is something to show. -->
+		<!-- Live output for Create & Start / Save & redeploy, rendered below the editor instead
+		     of handing the user off to a separate window (see save-close-policy.ts for how long
+		     the dialog then stays open). Only takes up space once there is something to show. -->
 		{#if outputRunning || outputLines.length > 0}
 			<div class="h-64 shrink-0 border-t border-zinc-200 dark:border-zinc-700 flex flex-col min-h-0">
 				<div class="px-5 py-1.5 text-xs text-zinc-500 dark:text-zinc-400 flex items-center gap-2 flex-shrink-0">
