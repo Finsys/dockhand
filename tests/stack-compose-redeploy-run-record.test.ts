@@ -32,10 +32,10 @@
  * file (tests/git-stack-deploy-run-record.test.ts) needed to fake $lib/server/stacks
  * too -- exactly the situation this doc comment originally predicted.
  *
- * (M4 considered adding a second consumer -- POST /api/stacks/+server.ts -- but that
- * route also drags in $lib/server/docker -> hawser.ts -> ./db/drizzle.js, a SEPARATE
- * specifier from $lib/server/db that touches better-sqlite3 directly and can't be
- * faked the same way. M4's build/pull/forceRecreate coverage for that route is a
+ * (A second consumer for this fake was considered -- POST /api/stacks/+server.ts --
+ * but that route also drags in $lib/server/docker -> hawser.ts -> ./db/drizzle.js, a
+ * SEPARATE specifier from $lib/server/db that touches better-sqlite3 directly and
+ * can't be faked the same way. That route's build/pull/forceRecreate coverage is a
  * source-level check instead, see stack-create-start-build-options.test.ts.)
  *
  * The dedicated deploy endpoint (deploy/+server.ts) is deliberately NOT imported here
@@ -283,15 +283,15 @@ describe('PUT /api/stacks/[name]/compose -- restart:true (Save & redeploy)', () 
 });
 
 /**
- * M4 (design doc 8.4): before this task, restart:true ALWAYS deployed with
- * build:false and no pullPolicy, regardless of what the caller sent -- a stack whose
- * compose declares a `build:` section silently never rebuilt on "Save & redeploy",
- * the saved compose change just ran against the stale local image. These assertions
- * are made at the deployStack() CALL, not the HTTP response's success flag: a
- * response can be {success:true} even when build/pull were dropped on the floor
- * (that IS the bug this task fixes), so status:200 alone proves nothing here.
+ * Before this fix, restart:true ALWAYS deployed with build:false and no pullPolicy,
+ * regardless of what the caller sent -- a stack whose compose declares a `build:`
+ * section silently never rebuilt on "Save & redeploy", the saved compose change just
+ * ran against the stale local image. These assertions are made at the deployStack()
+ * CALL, not the HTTP response's success flag: a response can be {success:true} even
+ * when build/pull were dropped on the floor (that IS the bug this fixes), so
+ * status:200 alone proves nothing here.
  */
-describe('PUT /api/stacks/[name]/compose -- restart:true build/pull/forceRecreate options (M4)', () => {
+describe('PUT /api/stacks/[name]/compose -- restart:true build/pull/forceRecreate options', () => {
 	test('build:true in the request body reaches deployStack({build:true})', async () => {
 		await (await composeRoute.PUT(makeComposeEvent({ content: 'x', restart: true, build: true }))).json();
 

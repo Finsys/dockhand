@@ -3,7 +3,7 @@ import yaml from 'js-yaml';
 /**
  * Whether a compose file declares a `build:` section for any service -- used to
  * pre-check "Build images" in the Save & redeploy / Create & Start popover
- * (RedeployPopover's defaultBuild), see design doc 8.4.
+ * (RedeployPopover's defaultBuild).
  *
  * `build:` can be a bare string (`build: ./dir`) or an object
  * (`build: {context: ., dockerfile: ...}`) -- this checks truthiness, the same way
