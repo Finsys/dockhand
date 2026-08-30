@@ -11,6 +11,9 @@
  *     DATABASE_URL (Postgres credentials) and ENCRYPTION_KEY. The whole tree is
  *     blocked because /proc/self, /proc/1, etc. all leak the same secrets and
  *     nothing legitimate is browsed there.
+ *   - the deploy-log directory ($DATA_DIR/deploy-logs, see deploy-log-store.ts) —
+ *     deploy logs may carry secrets that survived redaction, and the file
+ *     browser is open by design, so this directory has to be named here too.
  *
  * isProtectedPath resolves symlinks (via the nearest existing ancestor) so a
  * symlink pointing into a protected location can't be used to bypass the check.
@@ -26,11 +29,14 @@ function getDataDir(): string {
 }
 
 /** Absolute paths Dockhand must never expose through the file browser. */
-function protectedPaths(): { dbDir: string; keyFile: string } {
+function protectedPaths(): { dbDir: string; keyFile: string; deployLogsDir: string } {
 	const dataDir = resolve(getDataDir());
 	return {
 		dbDir: join(dataDir, 'db'),
-		keyFile: join(dataDir, KEY_FILE_NAME)
+		keyFile: join(dataDir, KEY_FILE_NAME),
+		// deploy logs may contain secrets that survived redaction; the file browser is open by
+		// design, so this directory is named here (see deploy-log-store.ts).
+		deployLogsDir: join(dataDir, 'deploy-logs')
 	};
 }
 
@@ -65,11 +71,17 @@ function isInside(child: string, parent: string): boolean {
 
 /**
  * Returns true if `requestedPath` resolves to Dockhand's DB directory, the
- * encryption-key file, or anywhere under /proc (process env / cmdline leak
- * credentials). Such paths must be hidden from the file browser.
+ * encryption-key file, the deploy-log directory, or anywhere under /proc
+ * (process env / cmdline leak credentials). Such paths must be hidden from
+ * the file browser.
  */
 export function isProtectedPath(requestedPath: string): boolean {
-	const { dbDir, keyFile } = protectedPaths();
+	const { dbDir, keyFile, deployLogsDir } = protectedPaths();
 	const resolved = safeResolve(requestedPath);
-	return isInside(resolved, dbDir) || resolved === keyFile || isInside(resolved, '/proc');
+	return (
+		isInside(resolved, dbDir) ||
+		resolved === keyFile ||
+		isInside(resolved, deployLogsDir) ||
+		isInside(resolved, '/proc')
+	);
 }
