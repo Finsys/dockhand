@@ -11,9 +11,10 @@
 	import { SELECTOR_VARS } from '$lib/utils/bulk-selector';
 	import { classifyMarker, resolvedRefVarNames } from '$lib/utils/invault-markers';
 	import { applyQuickFix, findingKey } from '$lib/utils/compose-quick-fix';
-	import { Layers, Save, Play, Code, GitGraph, GitBranch, GitCommitHorizontal, Github, Loader2, AlertCircle, X, Sun, Moon, TriangleAlert, GripVertical, GripHorizontal, FolderOpen, Copy, Check, XCircle, MapPin, ArrowRight, ArrowDown, Info, Box, FolderSync, Archive, ListChecks } from 'lucide-svelte';
+	import { Layers, Save, Play, Code, GitGraph, GitBranch, GitCommitHorizontal, Github, Loader2, AlertCircle, X, Sun, Moon, TriangleAlert, GripVertical, GripHorizontal, FolderOpen, Copy, Check, XCircle, MapPin, ArrowRight, ArrowDown, Info, Box, FolderSync, Archive, ListChecks, History } from 'lucide-svelte';
 	import ComposeValidatePanel from './ComposeValidatePanel.svelte';
 	import BackupPanel from '../containers/BackupPanel.svelte';
+	import DeploysPanel from './DeploysPanel.svelte';
 	import { volumesForStack, type VolumeInfo } from '$lib/utils/mounts';
 	import { fetchBackupExecutions } from '$lib/utils/backup';
 	import type { Component } from 'svelte';
@@ -129,7 +130,7 @@
 	let loadError = $state<string | null>(null);
 	let errors = $state<{ stackName?: string; compose?: string }>({});
 	let composeContent = $state('');
-	let activeTab = $state<'editor' | 'graph' | 'backups'>('editor');
+	let activeTab = $state<'editor' | 'graph' | 'backups' | 'deploys'>('editor');
 	let backupCount = $state(0);
 	let backupTally = $state<{ ok: number; failed: number }>({ ok: 0, failed: 0 });
 	let showConfirmClose = $state(false);
@@ -2016,6 +2017,19 @@
 					{#if backupTally.failed > 0}<span class="inline-flex items-center gap-0.5 rounded-full bg-red-500/15 px-1.5 text-[10px] font-semibold text-red-500"><X class="w-2.5 h-2.5" />{backupTally.failed}</span>{/if}
 				</button>
 			{/if}
+			<!-- Deploys tab: recorded run history for this stack (Task 17). Same gate
+			     shape as Backups above minus the beta flag -- hidden for untracked
+			     stacks (no compose file means no deploy history either) and only in
+			     edit mode, where stackName/envId are actually known. -->
+			{#if mode === 'edit' && !needsFileLocation}
+				<button
+					type="button"
+					class="relative -mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm transition-colors {activeTab === 'deploys' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}"
+					onclick={() => activeTab = 'deploys'}
+				>
+					<History class="h-3.5 w-3.5" /> Deploys
+				</button>
+			{/if}
 		</div>
 
 		<!-- Wrapper spanning the editor area + the live output panel below it, so the
@@ -2356,6 +2370,11 @@
 								type="stack"
 								onTally={(t) => (backupTally = t)}
 							/>
+						</div>
+					{:else if activeTab === 'deploys' && !needsFileLocation}
+						<!-- Deploys tab (never for untracked stacks — same reasoning as Backups above) -->
+						<div class="h-full flex-1 overflow-auto p-4">
+							<DeploysPanel {stackName} envId={$currentEnvironment?.id ?? null} />
 						</div>
 					{/if}
 				</div>
