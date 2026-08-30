@@ -4521,6 +4521,29 @@ export async function getScheduleExecutions(filters: ScheduleExecutionFilters = 
 }
 
 /**
+ * ALL execution ids (+ parsed details) for a given schedule type, unpaginated.
+ *
+ * Deliberately bypasses getScheduleExecutions()'s default 50-row page: a caller that
+ * needs to reconcile every record against something else (deploy-log-reconcile.ts,
+ * against files on disk) cannot afford to only see the most recent page -- an older
+ * record just outside the window would look exactly like an orphan file with no
+ * record, and the file behind it would be deleted even though a record exists.
+ */
+export async function getScheduleExecutionIdsByType(
+	scheduleType: ScheduleType
+): Promise<Array<{ id: number; details: any | null }>> {
+	const rows = await db
+		.select({ id: scheduleExecutions.id, details: scheduleExecutions.details })
+		.from(scheduleExecutions)
+		.where(eq(scheduleExecutions.scheduleType, scheduleType));
+
+	return rows.map((row: { id: number; details: string | null }) => ({
+		id: row.id,
+		details: row.details ? JSON.parse(row.details) : null
+	}));
+}
+
+/**
  * Scheduled-task health for the metrics endpoint: execution counts by
  * (scheduleType, status), and per-type age (seconds) of the last run and last
  * SUCCESSFUL run. The last-run age detects a scheduler that stopped firing; the
@@ -4692,9 +4715,12 @@ const SCHEDULE_CLEANUP_ENABLED_KEY = 'schedule_cleanup_enabled';
 const EVENT_CLEANUP_ENABLED_KEY = 'event_cleanup_enabled';
 const SCANNER_CLEANUP_CRON_KEY = 'scanner_cleanup_cron';
 const SCANNER_CLEANUP_ENABLED_KEY = 'scanner_cleanup_enabled';
+const DEPLOY_LOG_RECONCILE_CRON_KEY = 'deploy_log_reconcile_cron';
+const DEPLOY_LOG_RECONCILE_ENABLED_KEY = 'deploy_log_reconcile_enabled';
 const DEFAULT_SCHEDULE_CLEANUP_CRON = '0 3 * * *'; // Daily at 3 AM
 const DEFAULT_EVENT_CLEANUP_CRON = '30 3 * * *'; // Daily at 3:30 AM
 const DEFAULT_SCANNER_CLEANUP_CRON = '0 3 * * 0'; // Weekly Sunday at 3 AM
+const DEFAULT_DEPLOY_LOG_RECONCILE_CRON = '0 4 * * *'; // Daily at 4 AM
 
 export async function getScheduleRetentionDays(): Promise<number> {
 	const result = await db.select().from(settings).where(eq(settings.key, SCHEDULE_RETENTION_KEY));
@@ -4867,6 +4893,50 @@ export async function setScannerCleanupEnabled(enabled: boolean): Promise<void> 
 	} else {
 		await db.insert(settings).values({
 			key: SCANNER_CLEANUP_ENABLED_KEY,
+			value: enabled ? 'true' : 'false'
+		});
+	}
+}
+
+export async function getDeployLogReconcileCron(): Promise<string> {
+	const result = await db.select().from(settings).where(eq(settings.key, DEPLOY_LOG_RECONCILE_CRON_KEY));
+	if (result[0]) {
+		return result[0].value || DEFAULT_DEPLOY_LOG_RECONCILE_CRON;
+	}
+	return DEFAULT_DEPLOY_LOG_RECONCILE_CRON;
+}
+
+export async function setDeployLogReconcileCron(cron: string): Promise<void> {
+	const existing = await db.select().from(settings).where(eq(settings.key, DEPLOY_LOG_RECONCILE_CRON_KEY));
+	if (existing.length > 0) {
+		await db.update(settings)
+			.set({ value: cron, updatedAt: new Date().toISOString() })
+			.where(eq(settings.key, DEPLOY_LOG_RECONCILE_CRON_KEY));
+	} else {
+		await db.insert(settings).values({
+			key: DEPLOY_LOG_RECONCILE_CRON_KEY,
+			value: cron
+		});
+	}
+}
+
+export async function getDeployLogReconcileEnabled(): Promise<boolean> {
+	const result = await db.select().from(settings).where(eq(settings.key, DEPLOY_LOG_RECONCILE_ENABLED_KEY));
+	if (result[0]) {
+		return result[0].value === 'true';
+	}
+	return true; // Enabled by default
+}
+
+export async function setDeployLogReconcileEnabled(enabled: boolean): Promise<void> {
+	const existing = await db.select().from(settings).where(eq(settings.key, DEPLOY_LOG_RECONCILE_ENABLED_KEY));
+	if (existing.length > 0) {
+		await db.update(settings)
+			.set({ value: enabled ? 'true' : 'false', updatedAt: new Date().toISOString() })
+			.where(eq(settings.key, DEPLOY_LOG_RECONCILE_ENABLED_KEY));
+	} else {
+		await db.insert(settings).values({
+			key: DEPLOY_LOG_RECONCILE_ENABLED_KEY,
 			value: enabled ? 'true' : 'false'
 		});
 	}
