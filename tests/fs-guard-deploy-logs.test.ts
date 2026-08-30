@@ -1,11 +1,20 @@
-import { describe, expect, test } from 'bun:test';
+// @ts-expect-error -- bun:test is a runtime built-in with no types installed
+import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
+import { isProtectedPath } from '../src/lib/server/fs-guard';
 
-// protectedPaths() derives every path from resolve(process.env.DATA_DIR || './data') at
-// call time, so DATA_DIR has to be set BEFORE the module is loaded -- hence the dynamic
-// import. tests/fs-guard.test.ts does the same thing for the same reason. With a static
-// import the '/app/data/db' assertion below is red no matter how correct the change is.
-process.env.DATA_DIR = '/app/data';
-const { isProtectedPath } = await import('../src/lib/server/fs-guard');
+// protectedPaths() reads process.env.DATA_DIR on every call, not at import time, so a plain
+// import is enough -- but the variable has to be set while these assertions run, and put back
+// afterwards. Bun runs every test file in ONE process: a stray DATA_DIR leaks into unrelated
+// suites, and selfhst-icons creates its cache directory under DATA_DIR, which fails when that
+// points somewhere this machine does not have.
+const previousDataDir = process.env.DATA_DIR;
+beforeAll(() => {
+	process.env.DATA_DIR = '/app/data';
+});
+afterAll(() => {
+	if (previousDataDir === undefined) delete process.env.DATA_DIR;
+	else process.env.DATA_DIR = previousDataDir;
+});
 
 describe('isProtectedPath', () => {
 	test('protects the deploy log directory', () => {
