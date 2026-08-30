@@ -30,6 +30,14 @@
  * 'running') are therefore excluded from markMissing candidacy below, while still
  * counting toward recordIds so an already-existing file for them is protected from
  * deletion either way.
+ *
+ * Each element in both loops below is wrapped in its own try/catch. Without that, one
+ * throwing deleteRunLog/updateScheduleExecution call would abort the whole run -- and
+ * since the failing file/record is never removed/marked, every LATER run would fail at
+ * the exact same element again, permanently. Reported and reproduced independently: a
+ * harmless orphan file ordered before a failing one was still removed, everything after
+ * it was not, and the failed run's own `details` came back `null` -- no record of what
+ * had actually happened. Per-element isolation plus real counts (see below) fixes both.
  */
 
 import type { ScheduleTrigger } from '../../db';
@@ -88,12 +96,24 @@ export async function runDeployLogReconcileJob(triggeredBy: ScheduleTrigger = 'c
 
 		const plan = planReconcile({ fileIds, recordIds });
 
+		// Actually-performed counts, not the plan's sizes -- a failing element must not
+		// be counted as done, and must not stop the elements after it from being tried.
+		let deletedCount = 0;
+		let markedCount = 0;
+		let skippedInProgress = 0;
+		let failedCount = 0;
+
 		for (const fileId of plan.deleteFiles) {
-			await deleteRunLog(fileId);
+			try {
+				await deleteRunLog(fileId);
+				deletedCount++;
+			} catch (error: any) {
+				failedCount++;
+				await log(`Failed to delete orphan file for run ${fileId}: ${error.message}`);
+			}
 		}
 
 		const byId = new Map(records.map((r) => [String(r.id), r]));
-		let skippedInProgress = 0;
 		for (const recordId of plan.markMissing) {
 			const record = byId.get(recordId);
 			// Still running/queued: it may simply not have written its first line yet
@@ -103,26 +123,38 @@ export async function runDeployLogReconcileJob(triggeredBy: ScheduleTrigger = 'c
 				skippedInProgress++;
 				continue;
 			}
-			await updateScheduleExecution(Number(recordId), {
-				details: { ...(record?.details ?? {}), logMissing: true }
-			});
+			try {
+				await updateScheduleExecution(Number(recordId), {
+					details: { ...(record?.details ?? {}), logMissing: true }
+				});
+				markedCount++;
+			} catch (error: any) {
+				failedCount++;
+				await log(`Failed to mark record ${recordId} as logMissing: ${error.message}`);
+			}
 		}
-		const markedCount = plan.markMissing.length - skippedInProgress;
 
 		await log(
-			`Reconcile complete: ${plan.deleteFiles.length} orphan file(s) deleted, ${markedCount} record(s) marked logMissing` +
-				(skippedInProgress > 0 ? `, ${skippedInProgress} still-running record(s) skipped` : '')
+			`Reconcile complete: ${deletedCount} orphan file(s) deleted, ${markedCount} record(s) marked logMissing` +
+				(skippedInProgress > 0 ? `, ${skippedInProgress} still-running record(s) skipped` : '') +
+				(failedCount > 0 ? `, ${failedCount} element(s) failed` : '')
 		);
 		await updateScheduleExecution(execution.id, {
-			status: 'success',
+			// A run that hit per-element failures did complete, but not cleanly -- it
+			// should not read as indistinguishable from one that had nothing go wrong.
+			// 'warning' is exactly this repo's convention for "completed with a caveat"
+			// (see the ScheduleStatus doc comment in db.ts), as opposed to 'failed',
+			// which here is reserved for the run itself throwing (the outer catch below).
+			status: failedCount > 0 ? 'warning' : 'success',
 			completedAt: new Date().toISOString(),
 			duration: Date.now() - startTime,
 			details: {
 				filesFound: fileIds.length,
 				recordsFound: recordIds.length,
-				deletedFiles: plan.deleteFiles.length,
+				deletedFiles: deletedCount,
 				markedRecords: markedCount,
-				skippedInProgress
+				skippedInProgress,
+				failed: failedCount
 			}
 		});
 	} catch (error: any) {
