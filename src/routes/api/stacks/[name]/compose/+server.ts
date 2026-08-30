@@ -131,7 +131,8 @@ export const PUT: RequestHandler = async ({ params, request, url, cookies }) => 
 						envId: envIdNum,
 						forceRecreate: true,
 						composePath: composeInfo.composePath || undefined,
-						envPath: composeInfo.envPath || undefined
+						envPath: composeInfo.envPath || undefined,
+						onLine: (line) => send('progress', { type: 'line', line })
 					});
 
 					if (!result.success) {

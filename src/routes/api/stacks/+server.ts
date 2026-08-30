@@ -226,7 +226,8 @@ export const POST: RequestHandler = async (event) => {
 					compose,
 					envId: envIdNum,
 					composePath: composePath || undefined,
-					envPath: envPath || undefined
+					envPath: envPath || undefined,
+					onLine: (line) => send('progress', { type: 'line', line })
 				});
 
 				if (!result.success) {
