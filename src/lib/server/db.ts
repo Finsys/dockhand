@@ -4528,23 +4528,33 @@ export async function getScheduleExecutions(filters: ScheduleExecutionFilters = 
  * against files on disk) cannot afford to only see the most recent page -- an older
  * record just outside the window would look exactly like an orphan file with no
  * record, and the file behind it would be deleted even though a record exists.
+ *
+ * `environmentId` is included (F5 fix) so the caller can scope its reconciliation
+ * PER ENVIRONMENT -- deploy-log-store.ts now keeps one log directory per environment
+ * (see envDirName()), so a record's file can only ever be found in, or be deleted
+ * from, ITS OWN environment's directory. Without environmentId here,
+ * deploy-log-reconcile.ts would have to either reconcile everything as one flat pool
+ * again (reintroducing the cross-environment mixing the size-budget fix closes) or
+ * guess which environment a record belongs to.
  */
 export async function getScheduleExecutionIdsByType(
 	scheduleType: ScheduleType
-): Promise<Array<{ id: number; status: ScheduleStatus; details: any | null }>> {
+): Promise<Array<{ id: number; status: ScheduleStatus; details: any | null; environmentId: number | null }>> {
 	const rows = await db
 		.select({
 			id: scheduleExecutions.id,
 			status: scheduleExecutions.status,
-			details: scheduleExecutions.details
+			details: scheduleExecutions.details,
+			environmentId: scheduleExecutions.environmentId
 		})
 		.from(scheduleExecutions)
 		.where(eq(scheduleExecutions.scheduleType, scheduleType));
 
-	return rows.map((row: { id: number; status: string; details: string | null }) => ({
+	return rows.map((row: { id: number; status: string; details: string | null; environmentId: number | null }) => ({
 		id: row.id,
 		status: row.status as ScheduleStatus,
-		details: row.details ? JSON.parse(row.details) : null
+		details: row.details ? JSON.parse(row.details) : null,
+		environmentId: row.environmentId
 	}));
 }
 

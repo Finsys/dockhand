@@ -24,6 +24,16 @@ const ERROR_WITHHELD_MESSAGE = 'Deploy failed (error message withheld: contained
  * pulls in better-sqlite3), which is not importable under Bun (ERR_DLOPEN_FAILED). Keeping
  * that import out of the pure -core module is what lets deploy-run-record-core.test.ts run
  * at all, and keeps it from dragging down unrelated test files sharing the same process.
+ *
+ * F5 fix: the caller-supplied `envId` (the environment the run belongs to, or null for a
+ * run not attributed to one) is threaded through to appendRunLog()/SizeBudgetTracker
+ * (deploy-log-store.ts) for every filesystem operation this class performs. Before this,
+ * `envId` was accepted by createRunRecorder()'s input and stored on the schedule_executions
+ * row (environmentId), but never reached the log file's PATH or its size budget -- every
+ * environment's deploy output landed in the SAME deploy-logs/ directory and counted against
+ * the SAME 2 GiB total (deploy-log-store.ts's BUDGET_BYTES), so a noisy deploy in one
+ * environment could silently truncate another environment's deploy logs. See
+ * deploy-log-store.ts's SizeBudgetTracker doc comment for the full explanation.
  */
 
 const TRUNCATION_NOTICE = '\n[deploy log truncated: size budget exceeded]\n';
@@ -36,6 +46,12 @@ export class DeployRunRecorder implements RunRecorder {
 	private readonly composeHash: string;
 	private readonly envHash: string;
 	private readonly userId?: number;
+	/** F5 fix: which environment this run belongs to (or null) -- determines the ON-DISK
+	 *  directory its log file lives in and which environment's size budget it counts
+	 *  against (deploy-log-store.ts's logDir()/SizeBudgetTracker). Never used for anything
+	 *  else here -- environmentId on the schedule_executions row itself is set separately,
+	 *  by createRunRecorder()'s createScheduleExecution() call. */
+	private readonly envId: number | null;
 	/** Not readonly: addSecrets() extends this after construction -- see its doc comment. */
 	private secrets: string[];
 	private readonly lines: string[] = [];
@@ -55,6 +71,8 @@ export class DeployRunRecorder implements RunRecorder {
 			envHash: string;
 			userId?: number;
 			secrets: string[];
+			/** F5 fix: see the envId field's doc comment above. */
+			envId: number | null;
 		},
 		/** Test-only seam: lets tests exercise the truncation path with a tiny budget
 		 *  instead of writing gigabytes of real log data. createRunRecorder() never
@@ -70,7 +88,8 @@ export class DeployRunRecorder implements RunRecorder {
 		this.envHash = input.envHash;
 		this.userId = input.userId;
 		this.secrets = input.secrets;
-		this.sizeBudget = sizeBudget ?? new SizeBudgetTracker(this.runId);
+		this.envId = input.envId;
+		this.sizeBudget = sizeBudget ?? new SizeBudgetTracker(this.envId, this.runId);
 	}
 
 	/**
@@ -93,7 +112,7 @@ export class DeployRunRecorder implements RunRecorder {
 			// isn't counted as if it had been written.
 			this.lines.push(line);
 			const chunk = line + '\n';
-			await appendRunLog(this.runId, chunk);
+			await appendRunLog(this.envId, this.runId, chunk);
 			// Checked AFTER writing, not before: a budget check ahead of the write
 			// would either reject a legitimate line on stale size info, or need a
 			// second read straight after anyway. Checking once, right after the
@@ -104,7 +123,7 @@ export class DeployRunRecorder implements RunRecorder {
 			// directory on every call, unlike the budgetExceeded() this replaced.
 			if (await this.sizeBudget.recordAppend(Buffer.byteLength(chunk, 'utf8'))) {
 				this.truncated = true;
-				await appendRunLog(this.runId, TRUNCATION_NOTICE);
+				await appendRunLog(this.envId, this.runId, TRUNCATION_NOTICE);
 			}
 		});
 	}
@@ -215,6 +234,11 @@ export async function createRunRecorder(input: {
 		composeHash: input.composeHash,
 		envHash: input.envHash,
 		userId: input.userId,
-		secrets: input.secrets
+		secrets: input.secrets,
+		// F5 fix: same envId already stored on the schedule_executions row above
+		// (environmentId: input.envId) -- also threaded to the recorder so its log
+		// file lands in, and counts against the budget of, THIS run's own
+		// environment directory. See DeployRunRecorder's envId field doc comment.
+		envId: input.envId
 	});
 }

@@ -156,8 +156,13 @@ beforeEach(async () => {
 	resetAuthState();
 	resetDbState();
 	// Every test defaults to runId '1' -- clear its log file so tests don't
-	// leak content into each other via the shared DATA_DIR.
-	await deleteRunLog('1');
+	// leak content into each other via the shared DATA_DIR. F5 fix: the log
+	// file now lives under its OWN environment's directory, and this file's
+	// tests use both RUN's default (environmentId: null) and an overridden
+	// environmentId: 9 -- clear both so leftovers from either can't leak
+	// between tests.
+	await deleteRunLog(null, '1');
+	await deleteRunLog(9, '1');
 });
 
 // =============================================================================
@@ -337,16 +342,16 @@ describe('DELETE /api/stacks/[name]/deploys/[runId]', () => {
 	});
 
 	test('deletes the DB record AND the log file', async () => {
-		execStore.set(1, RUN);
-		await appendRunLog('1', 'some deploy output');
-		expect(await readRunLog('1')).toBe('some deploy output');
+		execStore.set(1, RUN); // RUN.environmentId is null
+		await appendRunLog(null, '1', 'some deploy output');
+		expect(await readRunLog(null, '1')).toBe('some deploy output');
 
 		const res = await runRoute.DELETE(makeEvent());
 		expect(res.status).toBe(200);
 		expect((await res.json()).success).toBe(true);
 		expect(deletedIds).toEqual([1]);
 		expect(execStore.has(1)).toBe(false);
-		expect(await readRunLog('1')).toBeNull();
+		expect(await readRunLog(null, '1')).toBeNull();
 	});
 });
 
@@ -370,8 +375,8 @@ describe('GET /api/stacks/[name]/deploys/[runId]/log', () => {
 	});
 
 	test('run belonging to a DIFFERENT stack -> 404, log file never touched', async () => {
-		execStore.set(1, { ...RUN, entityName: 'other-stack' });
-		await appendRunLog('1', 'secret content for the other stack');
+		execStore.set(1, { ...RUN, entityName: 'other-stack' }); // still environmentId: null
+		await appendRunLog(null, '1', 'secret content for the other stack');
 		const res = await logRoute.GET(makeEvent());
 		expect(res.status).toBe(404);
 		expect((await res.json()).error).toBe('Deploy run not found');
@@ -388,14 +393,14 @@ describe('GET /api/stacks/[name]/deploys/[runId]/log', () => {
 		authState.isEnterprise = true;
 		authState.accessibleEnvs = [1];
 		execStore.set(1, { ...RUN, environmentId: 9 });
-		await appendRunLog('1', 'should not be reachable');
+		await appendRunLog(9, '1', 'should not be reachable');
 		const res = await logRoute.GET(makeEvent());
 		expect(res.status).toBe(403);
 	});
 
 	test('returns the log text as text/plain', async () => {
-		execStore.set(1, RUN);
-		await appendRunLog('1', 'line one\nline two');
+		execStore.set(1, RUN); // RUN.environmentId is null
+		await appendRunLog(null, '1', 'line one\nline two');
 		const res = await logRoute.GET(makeEvent());
 		expect(res.status).toBe(200);
 		expect(res.headers.get('content-type')).toContain('text/plain');
@@ -452,17 +457,17 @@ describe('H1: permission is scoped to the RUN\'s own environment, not the global
 	test('DELETE: caller has stacks:edit for the run\'s OWN env -> 200, both halves deleted', async () => {
 		authState.canByEnv = (envId) => envId === undefined || envId === 9;
 		execStore.set(1, { ...RUN, environmentId: 9 });
-		await appendRunLog('1', 'output');
+		await appendRunLog(9, '1', 'output');
 		const res = await runRoute.DELETE(makeEvent());
 		expect(res.status).toBe(200);
 		expect(deletedIds).toEqual([1]);
-		expect(await readRunLog('1')).toBeNull();
+		expect(await readRunLog(9, '1')).toBeNull();
 	});
 
 	test('GET log: caller has stacks:view broadly but NOT for env 9, and the run belongs to env 9 -> 403, log file never read', async () => {
 		authState.canByEnv = (envId) => envId !== 9;
 		execStore.set(1, { ...RUN, environmentId: 9 });
-		await appendRunLog('1', 'env-9-only secret output');
+		await appendRunLog(9, '1', 'env-9-only secret output');
 		const res = await logRoute.GET(makeEvent());
 		expect(res.status).toBe(403);
 	});
@@ -470,7 +475,7 @@ describe('H1: permission is scoped to the RUN\'s own environment, not the global
 	test('GET log: caller has stacks:view for the run\'s OWN env -> 200 with the log text', async () => {
 		authState.canByEnv = (envId) => envId === undefined || envId === 9;
 		execStore.set(1, { ...RUN, environmentId: 9 });
-		await appendRunLog('1', 'env-9 output');
+		await appendRunLog(9, '1', 'env-9 output');
 		const res = await logRoute.GET(makeEvent());
 		expect(res.status).toBe(200);
 		expect(await res.text()).toBe('env-9 output');
