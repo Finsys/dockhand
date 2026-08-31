@@ -353,6 +353,79 @@ describe('DELETE /api/stacks/[name]/deploys/[runId]', () => {
 		expect(execStore.has(1)).toBe(false);
 		expect(await readRunLog(null, '1')).toBeNull();
 	});
+
+	test('a terminal, non-success status (failed) is still deletable', async () => {
+		execStore.set(1, { ...RUN, status: 'failed' });
+		await appendRunLog(null, '1', 'compose exploded');
+
+		const res = await runRoute.DELETE(makeEvent());
+		expect(res.status).toBe(200);
+		expect((await res.json()).success).toBe(true);
+		expect(deletedIds).toEqual([1]);
+		expect(execStore.has(1)).toBe(false);
+		expect(await readRunLog(null, '1')).toBeNull();
+	});
+
+	// Finding B: DELETE had no status check at all -- a caller could delete
+	// their OWN still-running deploy's record. The background deploy process
+	// keeps writing to the log file after the record is gone (appendRunLog
+	// recreates it), updateScheduleExecution() on end() becomes a silent
+	// no-op (UPDATE WHERE id=x, 0 rows), and the default-enabled reconcile
+	// job then purges the recreated file as an orphan -- erasing every trace
+	// of a deploy that actually ran and had real host side effects.
+	test('Finding B: a RUNNING run cannot be deleted -> 409, nothing touched', async () => {
+		execStore.set(1, { ...RUN, status: 'running' });
+		await appendRunLog(null, '1', 'still going...');
+
+		const res = await runRoute.DELETE(makeEvent());
+		expect(res.status).toBe(409);
+		expect((await res.json()).error).toBe('Cannot delete a running deploy run');
+		expect(deletedIds).toEqual([]);
+		expect(execStore.has(1)).toBe(true);
+		expect(await readRunLog(null, '1')).toBe('still going...');
+	});
+
+	test('Finding B: a QUEUED run cannot be deleted -> 409, nothing touched', async () => {
+		execStore.set(1, { ...RUN, status: 'queued' });
+
+		const res = await runRoute.DELETE(makeEvent());
+		expect(res.status).toBe(409);
+		expect(deletedIds).toEqual([]);
+		expect(execStore.has(1)).toBe(true);
+	});
+
+	// Fail-safe direction: a status this repo's ScheduleStatus type doesn't
+	// even list (never actually produced by this code, but the column is
+	// free text -- see db.ts's ScheduleStatus comment) must NOT be treated as
+	// terminal just because it isn't 'queued'/'running'. Guessing "finished"
+	// for an unrecognized status is exactly the kind of assumption that lets
+	// a genuinely in-progress run slip through under a status this code
+	// hasn't been taught about yet.
+	test('Finding B: an unrecognized status is treated as NOT terminal (fail safe) -> 409', async () => {
+		execStore.set(1, { ...RUN, status: 'some-future-status' });
+
+		const res = await runRoute.DELETE(makeEvent());
+		expect(res.status).toBe(409);
+		expect(deletedIds).toEqual([]);
+		expect(execStore.has(1)).toBe(true);
+	});
+
+	test('Finding B: the 404 (wrong stack) still wins over the running-run 409 -- ownership is checked first', async () => {
+		execStore.set(1, { ...RUN, status: 'running', entityName: 'other-stack' });
+
+		const res = await runRoute.DELETE(makeEvent());
+		expect(res.status).toBe(404);
+		expect((await res.json()).error).toBe('Deploy run not found');
+	});
+
+	test('Finding B: the 403 (permission denied) still wins over the running-run 409', async () => {
+		authState.can = false;
+		execStore.set(1, { ...RUN, status: 'running' });
+
+		const res = await runRoute.DELETE(makeEvent());
+		expect(res.status).toBe(403);
+		expect((await res.json()).error).toBe('Permission denied');
+	});
 });
 
 // =============================================================================
