@@ -119,7 +119,8 @@ export const DELETE: RequestHandler = async ({ params, cookies }) => {
 		return json({ error: 'Permission denied' }, { status: 403 });
 	}
 
-	await deleteRunLog(String(run.id));
+	// F5 fix: scoped to the run's OWN environment directory (deploy-log-store.ts).
+	await deleteRunLog(run.environmentId, String(run.id));
 	await deleteScheduleExecution(run.id);
 
 	return json({ success: true });

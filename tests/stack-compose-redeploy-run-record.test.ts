@@ -206,7 +206,7 @@ beforeEach(async () => {
 	// nextId always restarts at 1 above, so every test's (at most one) row reuses
 	// runId '1' -- clear its log file so tests don't leak content into each other via
 	// the shared DATA_DIR (same precaution tests/deploy-endpoints.test.ts documents).
-	await deleteRunLog('1');
+	await deleteRunLog(null, '1');
 });
 
 describe('PUT /api/stacks/[name]/compose -- restart:true (Save & redeploy)', () => {
@@ -228,7 +228,7 @@ describe('PUT /api/stacks/[name]/compose -- restart:true (Save & redeploy)', () 
 		expect(update?.errorMessage).toBeNull();
 
 		const runId = String(created[0].id);
-		const log = await readRunLog(runId);
+		const log = await readRunLog(null, runId);
 		expect(log).toContain('Container demo-stack-app-1  Started');
 	});
 

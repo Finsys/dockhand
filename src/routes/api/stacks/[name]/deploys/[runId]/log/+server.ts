@@ -57,7 +57,9 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 		return json({ error: 'Permission denied' }, { status: 403 });
 	}
 
-	const log = await readRunLog(String(run.id));
+	// F5 fix: scoped to the run's OWN environment directory (deploy-log-store.ts) --
+	// readRunLog() only reaches a file another environment's run wrote.
+	const log = await readRunLog(run.environmentId, String(run.id));
 	if (log === null) {
 		return json({ error: 'Log not found' }, { status: 404 });
 	}
