@@ -2,7 +2,7 @@ import { json } from '@sveltejs/kit';
 import { deleteScheduleExecution } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
 import { deleteRunLog } from '$lib/server/deploy-log-store';
-import { loadOwnedDeployRun } from '$lib/server/deploy-run-access';
+import { loadOwnedDeployRun, isTerminalRunStatus } from '$lib/server/deploy-run-access';
 import type { RequestHandler } from './$types';
 
 /**
@@ -93,6 +93,10 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
  * resp-200: {success:boolean!}
  * resp-401: Authentication required
  * resp-403: Permission denied (needs stacks:edit for the run's own environment), or access denied to this environment
+ * resp-409: The run has not finished yet (status is not a terminal one) -- deleting a
+ *   still-running run would let its background deploy process keep writing to a log
+ *   file with no record behind it, which the deploy-log reconcile job then purges as an
+ *   orphan, erasing every trace that the deploy ever happened. Retry once it finishes.
  */
 export const DELETE: RequestHandler = async ({ params, cookies }) => {
 	const auth = await authorize(cookies);
@@ -117,6 +121,16 @@ export const DELETE: RequestHandler = async ({ params, cookies }) => {
 	// the database record is touched if this denies.
 	if (auth.authEnabled && !(await auth.can('stacks', 'edit', run.environmentId ?? undefined))) {
 		return json({ error: 'Permission denied' }, { status: 403 });
+	}
+
+	// Finding B fix: refuse to delete a run that has not finished yet. Checked AFTER
+	// the ownership/permission checks above (a caller who is not allowed to see this
+	// run at all must not learn its status via a 409 either -- 404/403 still win), and
+	// BEFORE either delete happens below, same as the permission check it follows. See
+	// isTerminalRunStatus()'s doc comment (deploy-run-access.ts) for why an unrecognized
+	// status is treated as NOT finished rather than assumed safe to delete.
+	if (!isTerminalRunStatus(run.status)) {
+		return json({ error: 'Cannot delete a running deploy run' }, { status: 409 });
 	}
 
 	// F5 fix: scoped to the run's OWN environment directory (deploy-log-store.ts).

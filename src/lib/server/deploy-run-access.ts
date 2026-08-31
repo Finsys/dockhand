@@ -30,6 +30,38 @@ import type { AuthorizationContext } from './authorize';
  * this helper -- each route checks that on its own, inline, before calling
  * this (see the three +server.ts files).
  */
+/**
+ * Statuses a stack_deploy run can be permanently closed under -- i.e. the deploy has
+ * actually stopped running and nothing will update this row again on its own. Kept as
+ * an explicit allow-list (not "everything except queued/running") on purpose: the
+ * status column is free text (db.ts's ScheduleStatus comment), and a status this code
+ * doesn't recognize must NOT be assumed finished just because it isn't literally
+ * 'queued' or 'running' -- see isTerminalRunStatus()'s doc comment for what that
+ * assumption would cost.
+ *
+ * This is deliberately its OWN small set, not deploy-log-reconcile-core.ts's
+ * isEligibleForMissingMark() (which answers "queued"/"running" vs. everything else,
+ * fail-open for an unrecognized status because marking logMissing is reversible and
+ * merely metadata). Deleting a run is NOT reversible, so unlike that check, an
+ * unrecognized status here must fail CLOSED (treated as still in progress), not open.
+ */
+const TERMINAL_RUN_STATUSES = new Set(['success', 'failed', 'skipped', 'warning', 'error', 'cancelled', 'stale']);
+
+/**
+ * Whether a stack_deploy run's status means the deploy is over and its record/log file
+ * may safely be deleted.
+ *
+ * Fails CLOSED for anything not explicitly listed in TERMINAL_RUN_STATUSES -- including
+ * 'queued', 'running', and any status this code has never been taught about (the status
+ * column is free text). The alternative (terminal = "not queued/running") would let a
+ * status this code doesn't recognize be deleted on the assumption that it must be
+ * finished; there is no way to confirm that, and a wrong guess here is irreversible (see
+ * loadOwnedDeployRun's DELETE caller in .../deploys/[runId]/+server.ts).
+ */
+export function isTerminalRunStatus(status: string): boolean {
+	return TERMINAL_RUN_STATUSES.has(status);
+}
+
 export async function loadOwnedDeployRun(
 	stackName: string,
 	runIdParam: string,
