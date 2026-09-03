@@ -42,7 +42,9 @@ export const DELETE: RequestHandler = async (event) => {
 	}
 
 	try {
-		const stackName = decodeURIComponent(params.name);
+		// SvelteKit already URL-decodes params.name once; a second decode here turned
+		// %252e%252e into ".." (a path-traversal name). Use the param as-is.
+		const stackName = params.name;
 		const result = await removeStack(stackName, envIdNum, force, volumes, files);
 
 		// Audit log

@@ -8,6 +8,7 @@ import { registerSchedule, unregisterSchedule } from '$lib/server/scheduler';
 import { auditGitStack } from '$lib/server/audit';
 import { computeAuditDiff } from '$lib/utils/diff';
 import { createJobResponse } from '$lib/server/sse';
+import { allowSecretlessWebhook, webhookConfigRequiresSecret } from '$lib/server/webhook-secret-policy';
 
 // Stack name validation: must start with alphanumeric, can contain alphanumeric, hyphens, underscores
 const STACK_NAME_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/;
@@ -105,7 +106,7 @@ export const PUT: RequestHandler = async (event) => {
 		// Evaluate the effective post-update state (PUT is partial).
 		const effWebhookEnabled = data.webhookEnabled !== undefined ? data.webhookEnabled : existing.webhookEnabled;
 		const effWebhookSecret = data.webhookSecret !== undefined ? data.webhookSecret : existing.webhookSecret;
-		if (effWebhookEnabled && !effWebhookSecret?.trim()) {
+		if (webhookConfigRequiresSecret(!!effWebhookEnabled, !!effWebhookSecret?.trim(), allowSecretlessWebhook())) {
 			return json({ error: 'A webhook secret is required when the webhook is enabled' }, { status: 400 });
 		}
 

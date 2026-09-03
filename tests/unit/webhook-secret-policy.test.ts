@@ -1,6 +1,6 @@
 // @ts-expect-error -- bun:test is a runtime built-in with no types installed
 import { describe, test, expect, afterEach } from 'bun:test';
-import { decideWebhookSecretPolicy, allowSecretlessWebhook } from '../../src/lib/server/webhook-secret-policy';
+import { decideWebhookSecretPolicy, allowSecretlessWebhook, webhookConfigRequiresSecret } from '../../src/lib/server/webhook-secret-policy';
 
 // This proves the pure policy (all 4 combinations) + the env-flag parsing. The webhook
 // handler is a thin wiring of decideWebhookSecretPolicy; the deploy-unverified branch
@@ -23,6 +23,23 @@ describe('decideWebhookSecretPolicy', () => {
 
 	test('no secret with the opt-out on deploys unverified', () => {
 		expect(decideWebhookSecretPolicy(false, true)).toEqual({ action: 'deploy-unverified' });
+	});
+});
+
+describe('webhookConfigRequiresSecret (create/update gate)', () => {
+	test('enabled + no secret + no opt-out -> must reject (secure default)', () => {
+		expect(webhookConfigRequiresSecret(true, false, false)).toBe(true);
+	});
+	test('enabled + no secret + opt-out on -> allowed (the escape hatch that was unreachable)', () => {
+		expect(webhookConfigRequiresSecret(true, false, true)).toBe(false);
+	});
+	test('enabled + secret present -> allowed regardless of opt-out', () => {
+		expect(webhookConfigRequiresSecret(true, true, false)).toBe(false);
+		expect(webhookConfigRequiresSecret(true, true, true)).toBe(false);
+	});
+	test('webhook disabled -> never requires a secret', () => {
+		expect(webhookConfigRequiresSecret(false, false, false)).toBe(false);
+		expect(webhookConfigRequiresSecret(false, false, true)).toBe(false);
 	});
 });
 

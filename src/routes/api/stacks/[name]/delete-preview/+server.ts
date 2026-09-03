@@ -23,6 +23,8 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 	if (auth.authEnabled && !(await auth.can('stacks', 'remove', envIdNum))) {
 		return json({ error: 'Permission denied' }, { status: 403 });
 	}
+	const envAccessDenied = await auth.requireEnvAccess(envIdNum ?? null);
+	if (envAccessDenied) return envAccessDenied;
 
 	const { name } = params;
 	try {

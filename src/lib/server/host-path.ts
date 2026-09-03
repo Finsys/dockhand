@@ -418,6 +418,15 @@ export function translateContainerPathViaMount(containerPath: string): string | 
 }
 
 /**
+ * The container mounts cached at startup (empty when Dockhand runs on bare metal,
+ * or before detectHostDataDir has run). Callers use this to tell "Dockhand is
+ * containerized and this path is not under any bind" from "no mount info at all".
+ */
+export function getCachedContainerMounts(): Array<{ source: string; destination: string }> {
+	return cachedMounts ? [...cachedMounts] : [];
+}
+
+/**
  * Get the host path for the Docker socket mount.
  * This is needed for sibling containers (e.g., scanners) that need socket access.
  *

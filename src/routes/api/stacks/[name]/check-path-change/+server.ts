@@ -22,13 +22,14 @@ import { join, dirname } from 'node:path';
  */
 export const POST: RequestHandler = async ({ params, request, url, cookies }) => {
 	const auth = await authorize(cookies);
-	if (auth.authEnabled && !(await auth.can('stacks', 'edit'))) {
-		return json({ error: 'Permission denied' }, { status: 403 });
-	}
-
 	const { name } = params;
 	const envId = url.searchParams.get('env');
 	const envIdNum = envId ? parseInt(envId) : undefined;
+	if (auth.authEnabled && !(await auth.can('stacks', 'edit', envIdNum))) {
+		return json({ error: 'Permission denied' }, { status: 403 });
+	}
+	const envAccessDenied = await auth.requireEnvAccess(envIdNum ?? null);
+	if (envAccessDenied) return envAccessDenied;
 
 	try {
 		const body = await request.json();

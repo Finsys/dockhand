@@ -20,6 +20,7 @@ import { initRepository as initRepoCore, testRepository as testRepoCore, checkRe
 import { parseRetention, buildForgetArgs, checkWouldWipe } from './retention';
 import { buildSnapshotLayout, serializeLayout, parseSnapshotLayout, type SnapshotLayout, type SnapshotStack, type SnapshotSecret } from './snapshot-layout';
 import { instanceTagFilter, parseSnapshots, retentionTagFilter, BackupError } from './models';
+import { localRepoIssueFor } from './local-repo-path';
 import { parseOptionsJson, buildJobOptions, parseSelectedVolumes, parseBackupFlags, sanitizeRestoreFlags, fireWebhook, parseResticDiff, type SnapshotDiff } from './helpers';
 import { getHostname } from '../license';
 import { getBackupConfig, getBackupConfigs, getBackupDestination, updateBackupConfig, updateBackupDestination, decryptBackupDestination } from '../db';
@@ -698,7 +699,7 @@ async function materialiseStackFiles(destination: any, snapId: string, stackName
 	const { tmpdir } = await import('os');
 	const { join, dirname, resolve, sep } = await import('path');
 	const { randomUUID } = await import('crypto');
-	const { getStacksDir } = await import('../stacks');
+	const { getDefaultStacksDir, getLocalStacksDir, isStacksDirEnvSet } = await import('../stacks');
 	const { stackDirSource } = await import('./stackdir-plan');
 	// The stack dir is ALWAYS at /volumes/__dockhand_stackdir__ in the snapshot (local bind
 	// and remote tar both write there), so restore reads ONE deterministic path via
@@ -730,9 +731,15 @@ async function materialiseStackFiles(destination: any, snapId: string, stackName
 
 		// Path-traversal guard: the resolved target MUST stay under the stacks root.
 		const resolvedTarget = resolve(targetPath);
-		const stacksRoot = resolve(getStacksDir());
-		if (resolvedTarget !== stacksRoot && !resolvedTarget.startsWith(stacksRoot + sep)) {
-			console.log(`[Backup] materialiseStackFiles: refusing target "${resolvedTarget}" outside the stacks root "${stacksRoot}"`);
+		const allowedRoots = [resolve(getDefaultStacksDir())];
+		if (isStacksDirEnvSet()) {
+			allowedRoots.push(resolve(getLocalStacksDir()));
+		}
+		const underAllowedRoot = allowedRoots.some(
+			(root) => resolvedTarget === root || resolvedTarget.startsWith(root + sep)
+		);
+		if (!underAllowedRoot) {
+			console.log(`[Backup] materialiseStackFiles: refusing target "${resolvedTarget}" outside allowed stacks roots (${allowedRoots.join(', ')})`);
 			return false;
 		}
 
@@ -1321,8 +1328,25 @@ export async function forgetSnapshot(destinationId: number, snapshotId: string):
 
 // --- repository maintenance ---
 
+/**
+ * Reject a local-path repo whose path isn't under any Dockhand bind mount (#1506):
+ * restic would write it into the container's ephemeral filesystem while the helper
+ * looks for it on the host, so both "succeed" yet never share one repo. Returns an
+ * error string to surface, or null when the path is fine (bare-metal, or under a bind).
+ */
+async function localRepoPathIssue(destination: { repository: string }): Promise<string | null> {
+	const { isLocalRepo } = await import('./models');
+	const { getCachedContainerMounts } = await import('../host-path');
+	return localRepoIssueFor(destination.repository, isLocalRepo(destination.repository), getCachedContainerMounts());
+}
+
 export async function initRepository(destinationId: number): Promise<void> {
 	const destination = await loadDest(destinationId);
+	const pathIssue = await localRepoPathIssue(destination);
+	if (pathIssue) {
+		logRepoOp(destination.name, 'init', false, { error: pathIssue });
+		throw new Error(pathIssue);
+	}
 	const r = await initRepoCore(reader(), destination);
 	logRepoOp(destination.name, 'init', r.ok, r.ok ? { output: r.output } : { error: r.error });
 	if (!r.ok) throw new Error(r.error);
@@ -1330,6 +1354,11 @@ export async function initRepository(destinationId: number): Promise<void> {
 
 export async function testRepository(destinationId: number): Promise<{ ok: boolean; needsInit?: boolean; error?: string }> {
 	const destination = await loadDest(destinationId);
+	const pathIssue = await localRepoPathIssue(destination);
+	if (pathIssue) {
+		logRepoOp(destination.name, 'test', false, { error: pathIssue });
+		return { ok: false, error: pathIssue };
+	}
 	const r = await testRepoCore(reader(), destination);
 	logRepoOp(destination.name, 'test', r.ok, r.ok ? undefined : { error: r.error });
 	if (r.ok) return { ok: true };

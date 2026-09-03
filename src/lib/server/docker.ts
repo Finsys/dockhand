@@ -5034,9 +5034,15 @@ export async function runContainerWithStreaming(options: {
 		HostConfig: {
 			Binds: options.binds || [],
 			AutoRemove: false,
+			// No log rotation: a helper's stdout IS its result, read via /logs after it
+			// exits. An empty Config inherits the daemon's default rotation (Synology sets
+			// max-size=10m,max-file=3), and a scanner writing a large JSON report line by
+			// line blows past the window - the head rotates away and /logs returns a
+			// truncated, mid-document buffer (#1496). One big file, no rotation; the log
+			// dies with the ephemeral container so it never accumulates on disk.
 			LogConfig: {
 				Type: 'json-file',
-				Config: {}
+				Config: { 'max-file': '1', 'max-size': '1g' }
 			}
 		}
 	};

@@ -1325,7 +1325,7 @@
 		// Parse strings like "2 hours", "3 days", "About a minute", "Less than a second"
 		const str = timeStr.toLowerCase();
 
-		if (str.includes('second')) return 1;
+		if (str.includes('less than a second')) return 1;
 		if (str.includes('less than a minute') || str.includes('about a minute')) return 60;
 
 		const match = str.match(/(\d+)\s*(second|minute|hour|day|week|month|year)/);

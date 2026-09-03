@@ -3,6 +3,7 @@ import { join, resolve, dirname, basename, relative } from 'node:path';
 import { spawn as nodeSpawn, spawnSync } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { GIT_SSH_KEY_PATH_ENV, makeSshKeyPath, removeSshKey } from './git-ssh-key';
+import { permissionDeniedMessage } from './git-error';
 import {
 	getGitRepository,
 	getGitCredential,
@@ -23,7 +24,7 @@ import { createRunRecorder } from './deploy-run-record';
 import { hashComposeContent, hashEnvFingerprint } from './deploy-run-record-core';
 import { sendEventNotification } from './notifications';
 import { buildBasicAuthHeader } from './git-auth';
-import { assertSafeRepoUrl, assertSafeGitRef, repoFilePath } from './git-url-safety';
+import { assertSafeRepoUrl, assertSafeGitRef, repoFilePath, repoBaseEnvPath } from './git-url-safety';
 import { assertSafeRepoTarget } from './git-branch-lookup';
 import { resolveStackBranch } from '../git-stack-branch';
 import {
@@ -569,9 +570,10 @@ export interface TestResult {
 }
 
 /**
- * Clean up git/SSH error messages for user display
+ * Clean up git/SSH error messages for user display. `ctx` tailors the permission-denied
+ * message to the credential's auth type and URL (#1509); omit it for a generic message.
  */
-function cleanGitError(stderr: string): string {
+function cleanGitError(stderr: string, ctx?: { authType?: string | null; url?: string | null }): string {
 	// Remove SSH warnings and noise
 	const lines = stderr.split('\n').filter(line => {
 		const l = line.trim().toLowerCase();
@@ -590,7 +592,7 @@ function cleanGitError(stderr: string): string {
 
 	// Return cleaner message
 	if (permissionLine) {
-		return 'Permission denied. Check your SSH credentials.';
+		return permissionDeniedMessage(ctx?.authType, ctx?.url);
 	}
 	if (fatalLine) {
 		// Clean up common fatal messages
@@ -633,7 +635,7 @@ async function testRepositoryConnection(options: {
 
 		if (result.code !== 0) {
 			console.error('[Git] Connection test failed:', result.stderr);
-			return { success: false, error: cleanGitError(result.stderr) };
+			return { success: false, error: cleanGitError(result.stderr, { authType: credential?.authType, url }) };
 		}
 
 		// Parse the output to get commit hash
@@ -647,7 +649,7 @@ async function testRepositoryConnection(options: {
 			);
 
 			if (allBranchesResult.code !== 0) {
-				return { success: false, error: cleanGitError(allBranchesResult.stderr) };
+				return { success: false, error: cleanGitError(allBranchesResult.stderr, { authType: credential?.authType, url }) };
 			}
 
 			const allBranches = allBranchesResult.stdout.split('\n')
@@ -790,7 +792,7 @@ export async function listRemoteBranches(options: {
 		}
 
 		if (result.code !== 0) {
-			return { branches: [], error: cleanGitError(result.stderr) };
+			return { branches: [], error: cleanGitError(result.stderr, { authType: credential?.authType, url }) };
 		}
 
 		// Each line: "<sha>\trefs/heads/<name>". Keep the SHA (short) so the
@@ -2079,7 +2081,9 @@ export async function previewRepoEnvFiles(options: PreviewEnvOptions): Promise<P
 		//     (path traversal). Without this, `envFilePath: '../../secrets/x'`
 		//     reads a file outside the clone.
 		assertSafeRepoTarget(repoUrl);
-		const safeComposePath = repoFilePath(tempDir, composePath, 'Compose path');
+		// Validate containment now (throws on traversal) before any read; the base .env
+		// path itself is derived via repoBaseEnvPath below.
+		repoFilePath(tempDir, composePath, 'Compose path');
 		const safeEnvFilePath = envFilePath ? repoFilePath(tempDir, envFilePath, 'Env file path') : null;
 		assertSafeGitRef(branch);
 		const authenticatedUrl = buildRepoUrl(repoUrl, credential as GitCredential | null);
@@ -2105,10 +2109,9 @@ export async function previewRepoEnvFiles(options: PreviewEnvOptions): Promise<P
 
 		console.log(`${logPrefix} Clone successful`);
 
-		// Determine the compose directory (where .env file should be) — uses the
-		// VALIDATED path (already checked to be inside the temp dir).
-		const composeDir = dirname(safeComposePath);
-		const baseEnvPath = join(tempDir, composeDir, '.env');
+		// The base .env sits beside the compose file (repoBaseEnvPath keeps it inside the
+		// temp dir without doubling the prefix, #1495).
+		const baseEnvPath = repoBaseEnvPath(tempDir, composePath);
 
 		const vars: Record<string, string> = {};
 		const sources: Record<string, '.env' | 'envFile'> = {};

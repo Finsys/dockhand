@@ -34,9 +34,11 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 	if (auth.authEnabled && !await auth.can('environments', 'view')) {
 		return json({ error: 'Permission denied' }, { status: 403 });
 	}
+	const id = parseInt(params.id);
+	const envAccessDenied = await auth.requireEnvAccess(id);
+	if (envAccessDenied) return envAccessDenied;
 
 	try {
-		const id = parseInt(params.id);
 		const env = await getEnvironment(id);
 
 		if (!env) {
@@ -80,10 +82,11 @@ export const PUT: RequestHandler = async (event) => {
 	if (auth.authEnabled && !await auth.can('environments', 'edit')) {
 		return json({ error: 'Permission denied' }, { status: 403 });
 	}
+	const id = parseInt(params.id);
+	const envAccessDenied = await auth.requireEnvAccess(id);
+	if (envAccessDenied) return envAccessDenied;
 
 	try {
-		const id = parseInt(params.id);
-
 		// Get old values before update for diff
 		const oldEnv = await getEnvironment(id);
 		if (!oldEnv) {
@@ -241,6 +244,12 @@ export const PUT: RequestHandler = async (event) => {
 export const DELETE: RequestHandler = async (event) => {
 	const { params, cookies } = event;
 	const auth = await authorize(cookies);
+	// Deleting an environment cascades a filesystem cleanup of its stack dirs, git
+	// files, and schedules - an instance-level action, not an env-scoped one. Require
+	// admin under RBAC so an env-scoped role can't remove environments it doesn't own.
+	if (auth.authEnabled && auth.isEnterprise && !auth.isAdmin) {
+		return json({ error: 'Permission denied' }, { status: 403 });
+	}
 	if (auth.authEnabled && !await auth.can('environments', 'delete')) {
 		return json({ error: 'Permission denied' }, { status: 403 });
 	}

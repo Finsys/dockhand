@@ -8,7 +8,7 @@
  * git@host:path) passes unchanged, so this is fully backward-compatible.
  */
 
-import { resolve, sep } from 'node:path';
+import { resolve, sep, join, dirname } from 'node:path';
 
 export function assertSafeRepoUrl(url: string): void {
 	const u = (url || '').trim();
@@ -50,4 +50,15 @@ export function repoFilePath(repoPath: string, userRel: string, label: string): 
 		throw new Error(`${label} must be a path inside the repository (got "${userRel}")`);
 	}
 	return abs;
+}
+
+/**
+ * Absolute path of the base `.env` that sits beside a compose file inside a clone. The
+ * compose path is resolved through repoFilePath (containment-checked, ABSOLUTE), so the
+ * `.env` is just its sibling - NOT re-joined onto repoPath, which would double the prefix
+ * (#1495).
+ */
+export function repoBaseEnvPath(repoPath: string, composeUserPath: string): string {
+	const safeComposePath = repoFilePath(repoPath, composeUserPath, 'Compose path');
+	return join(dirname(safeComposePath), '.env');
 }

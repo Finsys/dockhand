@@ -602,7 +602,9 @@
 			hasErrors = true;
 		}
 
-		if (formWebhookEnabled && !formWebhookSecret.trim()) {
+		// A secret is required unless the instance opted into secret-less webhooks
+		// (ALLOW_WEBHOOKS_WITHOUT_SECRET, for isolated networks) - mirror the server.
+		if (formWebhookEnabled && !formWebhookSecret.trim() && !$page.data.allowSecretlessWebhook) {
 			errors.webhookSecret = 'A webhook secret is required when the webhook is enabled';
 			hasErrors = true;
 		}

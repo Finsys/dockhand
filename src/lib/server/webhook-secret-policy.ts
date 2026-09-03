@@ -26,3 +26,18 @@ export function decideWebhookSecretPolicy(
 export function allowSecretlessWebhook(): boolean {
 	return process.env.ALLOW_WEBHOOKS_WITHOUT_SECRET === 'true';
 }
+
+/**
+ * Whether creating/updating a git stack must REJECT for a missing webhook secret. True only
+ * when the webhook is enabled, no secret is set, and the operator did NOT opt into secret-less
+ * webhooks. This is the config-time mirror of decideWebhookSecretPolicy's reject-no-secret;
+ * without the opt-out check the ALLOW_WEBHOOKS_WITHOUT_SECRET escape hatch is unreachable
+ * because the stack can never be saved without a secret in the first place.
+ */
+export function webhookConfigRequiresSecret(
+	webhookEnabled: boolean,
+	hasSecret: boolean,
+	allowSecretless: boolean
+): boolean {
+	return webhookEnabled && !hasSecret && !allowSecretless;
+}

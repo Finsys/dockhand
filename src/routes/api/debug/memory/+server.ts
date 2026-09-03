@@ -14,6 +14,7 @@ import v8 from 'node:v8';
 import os from 'node:os';
 import { formatBytes } from '$lib/utils/format';
 import { getRssStats, dumpHeapSnapshot, listHeapSnapshots } from '$lib/server/rss-tracker';
+import { authorize } from '$lib/server/authorize';
 
 // Track startup time and initial RSS for growth rate calculation
 const startupTime = Date.now();
@@ -28,9 +29,16 @@ const startupRss = process.memoryUsage().rss;
  * resp-200: {timestamp:string!, uptime:object!, gcForced:boolean!, gcAvailable:boolean!, process:object!, growth:object!, v8Heap:object!, system:object!, rssTracker:object}
  * resp-200-desc: With ?snapshot returns {snapshot}, with ?snapshots returns {snapshots}; otherwise the full memory report
  * resp-200-example: {"timestamp":"2026-07-01T10:00:00.000Z","uptime":{"ms":3600000,"hours":1,"human":"1h 0m"},"gcForced":false,"gcAvailable":false,"process":{"rss":"180 MB"},"growth":{"rssPerHour":"2 MB"},"v8Heap":{"usedHeapSize":"90 MB"},"system":{"cpus":8,"platform":"linux"}}
- * resp-403: Memory monitor not enabled (set MEMORY_MONITOR=true)
+ * resp-403: Memory monitor not enabled (set MEMORY_MONITOR=true), or the caller is not an admin
  */
-export const GET: RequestHandler = async ({ url }) => {
+export const GET: RequestHandler = async ({ url, cookies }) => {
+	// Admin-only: this exposes V8 heap internals and can write a heap-dump file - operator
+	// diagnostics, not something any authenticated RBAC user should reach.
+	const auth = await authorize(cookies);
+	if (auth.authEnabled && !auth.isAdmin) {
+		return json({ error: 'Permission denied' }, { status: 403 });
+	}
+
 	if (process.env.MEMORY_MONITOR !== 'true') {
 		return json({ error: 'Memory monitor not enabled. Set MEMORY_MONITOR=true.' }, { status: 403 });
 	}

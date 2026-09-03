@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import { getNotificationSetting } from '$lib/server/db';
 import { testNotification } from '$lib/server/notifications';
+import { authorize } from '$lib/server/authorize';
 import type { RequestHandler } from './$types';
 
 /**
@@ -10,11 +11,17 @@ import type { RequestHandler } from './$types';
  * resp-200: {success:boolean!, message:string, error:string}
  * resp-200-example: {"success":true,"message":"Test notification sent successfully"}
  * resp-400: Invalid ID (not a number)
+ * resp-403: Permission denied (needs notifications:edit)
  * resp-404: Notification setting not found
  * resp-500: Failed to test notification
  */
-export const POST: RequestHandler = async ({ params }) => {
+export const POST: RequestHandler = async ({ params, cookies }) => {
 	try {
+		const auth = await authorize(cookies);
+		if (auth.authEnabled && !await auth.can('notifications', 'edit')) {
+			return json({ error: 'Permission denied' }, { status: 403 });
+		}
+
 		const id = parseInt(params.id);
 		if (isNaN(id)) {
 			return json({ error: 'Invalid ID' }, { status: 400 });

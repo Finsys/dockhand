@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getRegistry } from '$lib/server/db';
+import { authorize } from '$lib/server/authorize';
 import { getRegistryAuth } from '$lib/server/docker';
 
 function isDockerHub(rawUrl: string): boolean {
@@ -115,9 +116,15 @@ async function resolveTagInfo(registry: any, image: string, tag: string): Promis
  * resp-200: {size:number, lastUpdated:string, reason:string}
  * resp-200-example: {"size":104857600,"lastUpdated":"2026-06-01T12:00:00Z"}
  * resp-400: image and tag are required
+ * resp-403: Permission denied (requires registries:view)
  * resp-404: Registry not found
  */
-export const GET: RequestHandler = async ({ url }) => {
+export const GET: RequestHandler = async ({ url, cookies }) => {
+	const auth = await authorize(cookies);
+	if (auth.authEnabled && !await auth.can('registries', 'view')) {
+		return json({ error: 'Permission denied' }, { status: 403 });
+	}
+
 	const registryId = url.searchParams.get('registry');
 	const image = url.searchParams.get('image');
 	const tag = url.searchParams.get('tag');

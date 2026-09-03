@@ -30,6 +30,8 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 	if (isNaN(envId)) {
 		return json({ error: 'Invalid environment ID' }, { status: 400 });
 	}
+	const envAccessDenied = await auth.requireEnvAccess(envId);
+	if (envAccessDenied) return envAccessDenied;
 
 	const env = await getEnvironment(envId);
 	if (!env) {
@@ -70,6 +72,8 @@ export const POST: RequestHandler = async ({ params, request, cookies }) => {
 	if (isNaN(envId)) {
 		return json({ error: 'Invalid environment ID' }, { status: 400 });
 	}
+	const envAccessDenied = await auth.requireEnvAccess(envId);
+	if (envAccessDenied) return envAccessDenied;
 
 	const env = await getEnvironment(envId);
 	if (!env) {

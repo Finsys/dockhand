@@ -49,37 +49,43 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 	const envId = url.searchParams.get('env');
 	const envIdNum = envId ? parseInt(envId) : undefined;
 
-	// Permission check with environment context (process list uses inspect permission)
+	// Baseline: seeing the process list needs at least inspect.
 	if (auth.authEnabled && !await auth.can('containers', 'inspect', envIdNum)) {
 		return json({ error: 'Permission denied' }, { status: 403 });
 	}
 
+	// The richer `ps` path runs a real exec inside the container, so only attempt it for a
+	// caller who also holds exec; an inspect-only user gets the native `docker top` result,
+	// which needs no exec. This keeps exec-tier work behind the exec permission.
+	const canExec = !auth.authEnabled || await auth.can('containers', 'exec', envIdNum);
+
 	try {
+		if (canExec) {
+			// Try different ps commands in order of preference
+			const psCommands = [
+				['ps', 'aux', '--sort=-pcpu'],  // GNU ps with CPU sort
+				['ps', 'aux'],                   // GNU ps without sort
+				['ps', '-ef'],                   // POSIX ps
+			];
 
-		// Try different ps commands in order of preference
-		const psCommands = [
-			['ps', 'aux', '--sort=-pcpu'],  // GNU ps with CPU sort
-			['ps', 'aux'],                   // GNU ps without sort
-			['ps', '-ef'],                   // POSIX ps
-		];
-
-		for (const cmd of psCommands) {
-			try {
-				const output = await execInContainer(params.id, cmd, envIdNum);
-				// Check if output looks like an error message (BusyBox error, etc.)
-				if (output.includes('unrecognized option') || output.includes('Usage:') || output.includes('BusyBox')) {
-					continue;
+			for (const cmd of psCommands) {
+				try {
+					const output = await execInContainer(params.id, cmd, envIdNum);
+					// Check if output looks like an error message (BusyBox error, etc.)
+					if (output.includes('unrecognized option') || output.includes('Usage:') || output.includes('BusyBox')) {
+						continue;
+					}
+					const result = parsePsOutput(output);
+					if (result && result.Processes.length > 0) {
+						return json({ ...result, source: 'ps' });
+					}
+				} catch {
+					// Try next command
 				}
-				const result = parsePsOutput(output);
-				if (result && result.Processes.length > 0) {
-					return json({ ...result, source: 'ps' });
-				}
-			} catch {
-				// Try next command
 			}
 		}
 
-		// Fallback to docker top API
+		// Native docker top API - no exec, available to an inspect-only caller.
 		const top = await getContainerTop(params.id, envIdNum);
 		return json({ ...top, source: 'top' });
 	} catch (error: any) {

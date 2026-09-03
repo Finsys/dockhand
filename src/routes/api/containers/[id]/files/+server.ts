@@ -14,7 +14,7 @@ import type { RequestHandler } from './$types';
  * query: path:string Absolute directory path inside the container (default "/")
  * query: simpleLs:boolean Use a lightweight `ls` listing instead of a full stat of each entry
  * resp-200: Directory listing (entries with name, type, size and permission metadata)
- * resp-403: Permission denied
+ * resp-403: Permission denied (needs containers:exec)
  * resp-404: Container not found
  * resp-500: Failed to list the directory
  */
@@ -29,8 +29,10 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 	const envIdNum = envId ? parseInt(envId) : undefined;
 	const simpleLs = url.searchParams.get('simpleLs') === 'true';
 
-	// Permission check with environment context
-	if (auth.authEnabled && !await auth.can('containers', 'view', envIdNum)) {
+	// Listing a container dir runs a real exec (`ls` inside the container), which can read
+	// filesystem contents a metadata-only `view` grant must not - gate it as exec, like the
+	// file write/create/delete siblings and the terminal, not as plain view.
+	if (auth.authEnabled && !await auth.can('containers', 'exec', envIdNum)) {
 		return json({ error: 'Permission denied' }, { status: 403 });
 	}
 

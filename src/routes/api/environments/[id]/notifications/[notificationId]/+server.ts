@@ -32,6 +32,8 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 	if (isNaN(envId) || isNaN(notifId)) {
 		return json({ error: 'Invalid ID' }, { status: 400 });
 	}
+	const envAccessDenied = await auth.requireEnvAccess(envId);
+	if (envAccessDenied) return envAccessDenied;
 
 	const env = await getEnvironment(envId);
 	if (!env) {
@@ -75,6 +77,8 @@ export const PUT: RequestHandler = async ({ params, request, cookies }) => {
 	if (isNaN(envId) || isNaN(notifId)) {
 		return json({ error: 'Invalid ID' }, { status: 400 });
 	}
+	const envAccessDenied = await auth.requireEnvAccess(envId);
+	if (envAccessDenied) return envAccessDenied;
 
 	const env = await getEnvironment(envId);
 	if (!env) {
@@ -124,6 +128,8 @@ export const DELETE: RequestHandler = async ({ params, cookies }) => {
 	if (isNaN(envId) || isNaN(notifId)) {
 		return json({ error: 'Invalid ID' }, { status: 400 });
 	}
+	const envAccessDenied = await auth.requireEnvAccess(envId);
+	if (envAccessDenied) return envAccessDenied;
 
 	try {
 		const deleted = await deleteEnvironmentNotification(envId, notifId);

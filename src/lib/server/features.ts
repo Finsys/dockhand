@@ -20,3 +20,11 @@ export const BACKUPS_ENABLED = process.env.FEAT_BACKUPS_ENABLED === 'true';
  * API surface is opt-in per instance with FEAT_API_DOCS=true. Read once at boot.
  */
 export const API_DOCS_ENABLED = process.env.FEAT_API_DOCS === 'true';
+
+/**
+ * Whether git webhooks may be enabled WITHOUT a secret (isolated-network escape hatch).
+ * Surfaced to the client so the git-stack form can relax its "secret required" validation
+ * to match the server, which gates the same rule via allowSecretlessWebhook(). Read once at
+ * boot. Default false: a secret is required.
+ */
+export const ALLOW_WEBHOOKS_WITHOUT_SECRET = process.env.ALLOW_WEBHOOKS_WITHOUT_SECRET === 'true';

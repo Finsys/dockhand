@@ -21,6 +21,8 @@ import { isProtectedPath } from '$lib/server/fs-guard';
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	const auth = await authorize(cookies);
 
+	// Loading a stack's own compose/.env for editing needs stacks:edit; host and
+	// Dockhand secrets are kept unreadable regardless via isProtectedPath below.
 	if (auth.authEnabled && !await auth.can('stacks', 'edit')) {
 		return json({ error: 'Permission denied' }, { status: 403 });
 	}

@@ -63,6 +63,40 @@ describe('isPathWithin (restore-target containment)', () => {
 	});
 });
 
+describe('unsafeRestoreTargetReason: /usr and .ssh takeover targets', () => {
+	it('blocks anywhere under /usr (PATH hijack, systemd units) - it holds no user data', () => {
+		for (const p of [
+			'/usr/local/bin/docker-entrypoint',
+			'/usr/lib/systemd/system/evil.service',
+			'/usr/local/share/app',
+			'/usr',
+		]) {
+			expect(unsafeRestoreTargetReason(p)).not.toBeNull();
+		}
+	});
+
+	it('blocks any .ssh directory segment (SSH-key takeover under any home)', () => {
+		for (const p of [
+			'/home/user/.ssh/authorized_keys',
+			'/root/.ssh/authorized_keys',
+			'/data/.ssh/keys',
+		]) {
+			expect(unsafeRestoreTargetReason(p)).not.toBeNull();
+		}
+	});
+
+	it('still allows a user-home data path and an .ssh-lookalike segment', () => {
+		expect(unsafeRestoreTargetReason('/home/user/backup')).toBeNull();
+		expect(unsafeRestoreTargetReason('/home/user/data/.sshconfig')).toBeNull();
+		expect(unsafeRestoreTargetReason('/mnt/.ssh-backups/x')).toBeNull();
+	});
+
+	it('boundary-safe: a sibling that merely shares a forbidden prefix is allowed', () => {
+		expect(unsafeRestoreTargetReason('/usr-data/x')).toBeNull();
+		expect(unsafeRestoreTargetReason('/home2/restore')).toBeNull();
+	});
+});
+
 describe('isSafePathSegment (name traversal guard)', () => {
 	it('accepts a plain name', () => {
 		expect(isSafePathSegment('web')).toBe(true);
@@ -141,7 +175,8 @@ describe('re-exported hardened primitives still reject dangerous inputs', () => 
 
 describe('unsafeRestoreTargetReason (new-location targetPath containment)', () => {
 	it('accepts legitimate operator-chosen restore locations', () => {
-		for (const p of ['/mnt/restore', '/srv/appA/data', '/home/user/backup', '/opt/data', '/data/x', '/usr/local/share/app']) {
+		// /usr/local/share is NOT here: /usr is blocked wholesale (host-takeover surface).
+		for (const p of ['/mnt/restore', '/srv/appA/data', '/home/user/backup', '/opt/data', '/data/x']) {
 			expect(unsafeRestoreTargetReason(p)).toBeNull();
 		}
 	});

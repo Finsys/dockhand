@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getRegistry } from '$lib/server/db';
+import { authorize } from '$lib/server/authorize';
 import { getRegistryAuth, isHarborRegistry, harborSearchRepositories, parseRegistryUrl, classifyCatalogFailure, CATALOG_NOT_SUPPORTED_MSG } from '$lib/server/docker';
 
 /** Thrown when the registry refuses catalog listing to a valid token (GitLab/Harbor, #873). */
@@ -230,11 +231,17 @@ async function searchCatalog(registry: any, term: string, limit: number): Promis
  * resp-200: array<{name:string!, description:string, star_count:integer, is_official:boolean, is_automated:boolean}>
  * resp-200-example: [{"name":"nginx","description":"Official build of Nginx","star_count":20000,"is_official":true,"is_automated":false}]
  * resp-400: The term query parameter is missing
+ * resp-403: Permission denied (requires registries:view)
  * resp-404: The referenced registry does not exist
  * resp-500: Failed to search images
  * resp-503: Could not connect to the registry (connection refused or host not found)
  */
-export const GET: RequestHandler = async ({ url }) => {
+export const GET: RequestHandler = async ({ url, cookies }) => {
+	const auth = await authorize(cookies);
+	if (auth.authEnabled && !await auth.can('registries', 'view')) {
+		return json({ error: 'Permission denied' }, { status: 403 });
+	}
+
 	const term = url.searchParams.get('term');
 	const limit = parseInt(url.searchParams.get('limit') || '25', 10);
 	const registryId = url.searchParams.get('registry');

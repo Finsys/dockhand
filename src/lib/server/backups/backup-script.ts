@@ -114,7 +114,12 @@ export function buildBackupArgs(input: {
 	swapArtifacts: readonly string[];
 }): string[] {
 	const paths = input.hasVolumes ? ['/volumes/', '/metadata/'] : ['/metadata/'];
-	const args = ['backup', '--json', '--retry-lock', '5m', '--host', input.host, ...paths];
+	// Every stack backs up from the SAME host + paths (/volumes/, /metadata/), so restic's
+	// default parent selection (host,paths) picks the newest snapshot of ANY stack in the
+	// repo as the parent - making a stack look entirely new whenever another stack was
+	// backed up in between, forcing a full re-hash of its source (#1494). Group by the
+	// dockhand tags too so a stack's parent is its OWN previous snapshot.
+	const args = ['backup', '--json', '--retry-lock', '5m', '--group-by', 'host,paths,tags', '--host', input.host, ...paths];
 	for (const t of input.tags) args.push('--tag', t);
 	for (const a of input.swapArtifacts) args.push('--exclude', a);
 	for (const p of input.excludePatterns ?? []) if (p.trim()) args.push('--exclude', p.trim());

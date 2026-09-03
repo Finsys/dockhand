@@ -139,7 +139,16 @@ export function assertTargetWithin(root: string, target: string, label = 'restor
 const FORBIDDEN_RESTORE_ROOTS = [
 	'/', '/etc', '/root', '/boot', '/dev', '/proc', '/sys', '/run',
 	'/var/run', '/bin', '/sbin', '/lib', '/lib64', '/var/lib/docker',
+	// A root-writing restore under /usr is a host-takeover primitive: /usr/local/bin
+	// (PATH hijack) and /usr/lib/systemd (unit drop). /usr holds no user data, so
+	// blocking it wholesale costs no legitimate restore.
+	'/usr',
 ];
+
+// Blocked as a path SEGMENT anywhere (not a root prefix): an .ssh directory is an
+// SSH-key takeover target under any user's home (/home/<user>/.ssh, /root/.ssh),
+// while /home/<user>/<data> stays a legitimate restore location.
+const FORBIDDEN_PATH_SEGMENTS = ['.ssh'];
 
 /** Returns a reason string if `targetPath` is unsafe for a new-location restore, else null.
  * Uses resolve() so `/etc/../etc`, `/srv/../etc`, trailing slashes all normalize before the
@@ -155,6 +164,12 @@ export function unsafeRestoreTargetReason(targetPath: string): string | null {
 			// `/` matches everything by the prefix rule; only flag `/` itself for that root.
 			if (root === '/' && norm !== '/') continue;
 			return `target path "${norm}" is inside a protected system directory (${root})`;
+		}
+	}
+	const segments = norm.split(pathSep).filter(Boolean);
+	for (const seg of FORBIDDEN_PATH_SEGMENTS) {
+		if (segments.includes(seg)) {
+			return `target path "${norm}" contains a protected directory segment ("${seg}")`;
 		}
 	}
 	return null;

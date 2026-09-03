@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import { authorize } from '$lib/server/authorize';
 import { getEnvironment, updateEnvironment } from '$lib/server/db';
 import { getDockerInfo, getHawserInfo } from '$lib/server/docker';
 import { edgeConnections, isEdgeConnected } from '$lib/server/hawser';
@@ -11,11 +12,19 @@ import { daemonIsPodman } from '$lib/server/scanner-socket-detect';
  * path: id:integer! Environment id (from GET /api/environments)
  * resp-200: {success:boolean!, info:{serverVersion:string, containers:integer, images:integer, name:string, engine:string}, isEdgeMode:boolean, hawser:{}}
  * resp-200-desc: success:false with a human-readable error message is also returned as HTTP 200 (connection/agent-not-connected states are not transport errors)
+ * resp-403: Permission denied
  * resp-404: Environment not found
  */
-export const POST: RequestHandler = async ({ params }) => {
+export const POST: RequestHandler = async ({ params, cookies }) => {
+	const auth = await authorize(cookies);
+	if (auth.authEnabled && !await auth.can('environments', 'view')) {
+		return json({ error: 'Permission denied' }, { status: 403 });
+	}
+	const id = parseInt(params.id);
+	const envAccessDenied = await auth.requireEnvAccess(id);
+	if (envAccessDenied) return envAccessDenied;
+
 	try {
-		const id = parseInt(params.id);
 		const env = await getEnvironment(id);
 
 		if (!env) {

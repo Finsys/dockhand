@@ -17,7 +17,7 @@ const MAX_FILE_SIZE = 1024 * 1024;
  * query: path:string! Absolute file path inside the container
  * resp-200: {content:string!, path:string!}
  * resp-400: Path is missing, the target is a directory, or the container is not running
- * resp-403: Permission denied to read the file
+ * resp-403: Permission denied to read the file (needs containers:exec)
  * resp-404: File not found
  * resp-413: File is larger than the 1 MB read limit
  * resp-500: Failed to read the file
@@ -32,8 +32,10 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 	const envId = url.searchParams.get('env');
 	const envIdNum = envId ? parseInt(envId) : undefined;
 
-	// Permission check with environment context
-	if (auth.authEnabled && !await auth.can('containers', 'view', envIdNum)) {
+	// Reading a container file runs a real exec (`cat` inside the container), so it can read
+	// secrets a metadata-only `view` grant must not (/etc/shadow, mounted credentials). Gate it
+	// as exec, matching the PUT write path below and the other file-browser routes.
+	if (auth.authEnabled && !await auth.can('containers', 'exec', envIdNum)) {
 		return json({ error: 'Permission denied' }, { status: 403 });
 	}
 

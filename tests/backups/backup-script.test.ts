@@ -12,9 +12,19 @@ describe('buildBackupArgs', () => {
 
 	it('builds the core backup argv over /volumes and /metadata', () => {
 		const a = buildBackupArgs(base);
-		expect(a.slice(0, 6)).toEqual(['backup', '--json', '--retry-lock', '5m', '--host', 'dockhand.local']);
+		expect(a.slice(0, 4)).toEqual(['backup', '--json', '--retry-lock', '5m']);
+		const hostIdx = a.indexOf('--host');
+		expect(a[hostIdx + 1]).toBe('dockhand.local');
 		expect(a).toContain('/volumes/');
 		expect(a).toContain('/metadata/');
+	});
+	it('groups parent selection by the dockhand tags so a stack parents its own snapshot (#1494)', () => {
+		// Without this, every stack shares host+paths (/volumes/, /metadata/), so restic picks
+		// the newest snapshot of ANY stack as the parent and re-hashes the whole source.
+		const a = buildBackupArgs(base);
+		const i = a.indexOf('--group-by');
+		expect(i).toBeGreaterThanOrEqual(0);
+		expect(a[i + 1]).toBe('host,paths,tags');
 	});
 	it('backs up ONLY /metadata when the target has no volumes (config-only snapshot)', () => {
 		const a = buildBackupArgs({ ...base, hasVolumes: false });

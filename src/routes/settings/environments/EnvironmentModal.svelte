@@ -743,7 +743,10 @@
 					tlsCert: cleanCertificate(formTlsCert),
 					tlsKey: cleanCertificate(formTlsKey),
 					tlsSkipVerify: formTlsSkipVerify,
-					hawserToken: formHawserToken || pendingToken
+					hawserToken: formHawserToken || pendingToken,
+					// When editing, let the server fall back to the stored token/key for any
+					// secret the form left blank (secrets are never sent back to the client) (#1483).
+					environmentId: isEditing && environment ? environment.id : undefined
 				})
 			});
 

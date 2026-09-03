@@ -19,10 +19,12 @@
  */
 
 import { spawn } from 'node:child_process';
-import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { resolveComposeDockerHost, buildComposeBaseArgs } from '../compose-docker-args';
+import { parseCompose } from './parse';
+import { extractMaterializableEnvFiles } from './env-file-paths';
 import type { Finding } from './types';
 
 const CONFIG_TIMEOUT_MS = 20_000;
@@ -57,6 +59,22 @@ export async function renderEffectiveCompose(
 		await chmod(dir, 0o700);
 		const file = join(dir, 'docker-compose.yml');
 		await writeFile(file, composeContent, 'utf8');
+
+		// Pre-create referenced env_file(s) as empty files so `docker compose config` resolves
+		// them. The user's real env file lives in their stack dir, not this scratch dir, so
+		// without this a valid `env_file: - .env` is falsely reported "env file ... not found".
+		// Only temp-dir-safe relative paths are materialized; interpolation values still come
+		// from envVars (passed as process env), so empty files don't skew other findings.
+		try {
+			const parsed = parseCompose(composeContent);
+			for (const rel of extractMaterializableEnvFiles(parsed.doc)) {
+				const target = join(dir, rel);
+				await mkdir(dirname(target), { recursive: true });
+				await writeFile(target, '', { flag: 'wx' }).catch(() => undefined); // don't overwrite
+			}
+		} catch {
+			// A compose that won't parse is handled by the local parser; config will report it too.
+		}
 
 		const composeDockerHost = resolveComposeDockerHost(dockerHost, undefined);
 		const base = buildComposeBaseArgs(stackName, composeDockerHost); // ['docker', ('-H' host)?, 'compose', '-p', name]

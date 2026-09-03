@@ -5,11 +5,12 @@
  * All lifecycle operations use docker compose commands.
  */
 
-import { existsSync, mkdirSync, rmSync, readdirSync, cpSync, statSync, unlinkSync, renameSync, readFileSync, writeFileSync, realpathSync } from 'node:fs';
-import { join, resolve, dirname, basename, normalize as pathNormalize, sep as pathSep } from 'node:path';
+import { existsSync, mkdirSync, rmSync, readdirSync, cpSync, statSync, unlinkSync, renameSync, readFileSync, writeFileSync, realpathSync, accessSync, constants as fsConstants } from 'node:fs';
+import { join, resolve, dirname, basename, isAbsolute, normalize as pathNormalize, sep as pathSep } from 'node:path';
 import { spawn as nodeSpawn } from 'node:child_process';
 import { collectProcess } from './process-output-core';
 import { makeLineForwarder, makeRedactedLineSink } from './secret-redaction';
+import { redactSecretVars } from './secret-redact';
 import {
 	applyFileDeletions,
 	hashDirFiles,
@@ -19,7 +20,11 @@ import {
 	type DeletionApplyResult,
 	type DeletionSkipReason
 } from './git-deletions';
+import { buildComposeOperationArgs, shouldRunSeparateBuildStep } from './compose-args';
+import { findStackNameCollision, moveStackFilePathCrossDevice, resolveStackDirForLayout } from './stack-path-utils';
+import { db, environments, eq } from './db/drizzle.js';
 import { isAllowedStackFilename } from './stack-filename';
+
 import { deriveStackStatus } from './stack-status';
 import {
 	getEnvironment,
@@ -28,11 +33,11 @@ import {
 	getStackEnvVars,
 	setStackEnvVars,
 	getStackSource,
+	getStackSources,
 	upsertStackSource,
 	deleteStackSource,
 	getGitStackByName,
 	deleteGitStack,
-	getStackSources,
 	deleteStackEnvVars,
 	removePendingContainerUpdate,
 	getPendingContainerUpdates,
@@ -189,7 +194,8 @@ export class ComposeFileNotFoundError extends Error {
 // =============================================================================
 
 // Cache stacks directory
-let _stacksDir: string | null = null;
+let _defaultStacksDir: string | null = null;
+let _localStacksDir: string | null = null;
 
 // Per-stack locking mechanism to prevent race conditions during concurrent operations
 const stackLocks = new Map<string, Promise<void>>();
@@ -359,37 +365,101 @@ function redactEnvVarsForLog(vars: Record<string, string>): Record<string, strin
 // UTILITIES
 // =============================================================================
 
+function getDataDir(): string {
+	return process.env.DATA_DIR || './data';
+}
+
+/** True when the Dockhand-managed flat local root env var is set (non-empty). */
+export function isStacksDirEnvSet(): boolean {
+	return !!process.env.STACKS_DIR?.trim();
+}
+
 /**
- * Get the compose stacks directory (always returns absolute path)
+ * Hawser staging root: always $DATA_DIR/stacks (env-scoped leaves).
+ * Creates the directory if missing.
+ */
+export function getDefaultStacksDir(): string {
+	if (_defaultStacksDir) return _defaultStacksDir;
+	_defaultStacksDir = resolve(join(getDataDir(), 'stacks'));
+	if (!existsSync(_defaultStacksDir)) {
+		mkdirSync(_defaultStacksDir, { recursive: true });
+	}
+	return _defaultStacksDir;
+}
+
+/**
+ * Local managed stacks root: STACKS_DIR when set, otherwise the default staging root.
+ * Does not mkdir when STACKS_DIR is set — startup validation requires an existing writable dir.
+ */
+export function getLocalStacksDir(): string {
+	if (!isStacksDirEnvSet()) {
+		return getDefaultStacksDir();
+	}
+	if (_localStacksDir) return _localStacksDir;
+	_localStacksDir = resolve(process.env.STACKS_DIR!);
+	return _localStacksDir;
+}
+
+/**
+ * @deprecated Prefer getDefaultStacksDir() for Hawser staging or getLocalStacksDir() for local managed paths.
  */
 export function getStacksDir(): string {
-	if (_stacksDir) return _stacksDir;
-	const dataDir = process.env.DATA_DIR || './data';
-	// Resolve to absolute path to avoid issues with relative paths in docker compose
-	_stacksDir = resolve(join(dataDir, 'stacks'));
-	if (!existsSync(_stacksDir)) {
-		mkdirSync(_stacksDir, { recursive: true });
+	return getDefaultStacksDir();
+}
+
+export function isHawserConnection(env: { connectionType?: string | null } | null | undefined): boolean {
+	return env?.connectionType === 'hawser-standard' || env?.connectionType === 'hawser-edge';
+}
+
+export function isLocalConnection(env: { connectionType?: string | null } | null | undefined): boolean {
+	if (!env) return true;
+	const ct = env.connectionType;
+	return ct === 'socket' || ct === 'direct' || !ct;
+}
+
+/** Flat STACKS_DIR/<stackName>/ layout applies to socket/direct (and no-env) when STACKS_DIR is set. */
+export async function usesFlatLocalStacksDir(envId?: number | null): Promise<boolean> {
+	if (!isStacksDirEnvSet()) return false;
+	if (envId === undefined || envId === null) return true;
+	const env = await getEnvironment(envId);
+	return isLocalConnection(env);
+}
+
+/** Base path shown to the UI for stack file placement for the given environment. */
+export async function getStacksBasePathForEnv(envId?: number | null): Promise<string> {
+	if (await usesFlatLocalStacksDir(envId)) {
+		return getLocalStacksDir();
 	}
-	return _stacksDir;
+	return getDefaultStacksDir();
+}
+
+/** True when dirPath is under the Hawser staging root ($DATA_DIR/stacks). */
+export function isManagedStagingDir(dirPath: string): boolean {
+	const resolved = resolve(dirPath);
+	const stagingRoot = resolve(getDefaultStacksDir());
+	return resolved === stagingRoot || resolved.startsWith(stagingRoot + pathSep);
+}
+
+/** True when dirPath is under either managed root (staging or flat local STACKS_DIR). */
+export function isManagedStackDir(dirPath: string): boolean {
+	const resolved = resolve(dirPath);
+	if (isManagedStagingDir(resolved)) return true;
+	if (isStacksDirEnvSet()) {
+		const localRoot = resolve(getLocalStacksDir());
+		return resolved === localRoot || resolved.startsWith(localRoot + pathSep);
+	}
+	return false;
 }
 
 /**
  * Get stack directory path for a specific environment.
- * New stacks use: $DATA_DIR/stacks/<envName>/<stackName>/
- * Legacy stacks (no env): $DATA_DIR/stacks/<stackName>/
- *
- * Automatically looks up environment name from database.
+ * When STACKS_DIR is set for local envs: STACKS_DIR/<stackName>/ (flat).
+ * Otherwise: $DATA_DIR/stacks/<envName>/<stackName>/ (or legacy flat).
  */
 export async function getStackDir(stackName: string, envId?: number | null): Promise<string> {
-	const stacksDir = getStacksDir();
-	if (envId) {
-		const env = await getEnvironment(envId);
-		if (env) {
-			return join(stacksDir, env.name, stackName);
-		}
-	}
-	// Legacy path for stacks without environment
-	return join(stacksDir, stackName);
+	const flatLocal = await usesFlatLocalStacksDir(envId);
+	const env = !flatLocal && envId ? await getEnvironment(envId) : undefined;
+	return resolveStackDirForLayout(getDefaultStacksDir(), getLocalStacksDir(), stackName, env?.name, flatLocal);
 }
 
 /**
@@ -467,7 +537,36 @@ export async function findStackDir(stackName: string, envId?: number | null): Pr
 		}
 	}
 
-	const stacksDir = getStacksDir();
+	const flatLocal = await usesFlatLocalStacksDir(envId);
+
+	if (flatLocal) {
+		const flatPath = join(getLocalStacksDir(), stackName);
+		if (existsSync(flatPath)) {
+			return flatPath;
+		}
+		// Safety net: pre-migration paths under $DATA_DIR/stacks
+		const defaultStacksDir = getDefaultStacksDir();
+		if (envId) {
+			const env = await getEnvironment(envId);
+			if (env) {
+				const namePath = join(defaultStacksDir, env.name, stackName);
+				if (existsSync(namePath)) {
+					return namePath;
+				}
+			}
+			const idPath = join(defaultStacksDir, String(envId), stackName);
+			if (existsSync(idPath)) {
+				return idPath;
+			}
+		}
+		const legacyPath = join(defaultStacksDir, stackName);
+		if (existsSync(legacyPath)) {
+			return legacyPath;
+		}
+		return null;
+	}
+
+	const stacksDir = getDefaultStacksDir();
 
 	// Look up environment name if we have an ID
 	if (envId) {
@@ -544,6 +643,24 @@ export async function countStackEnvVars(stackName: string, envId?: number | null
 	} catch {
 		return 0;
 	}
+}
+
+/** Fall back to the default layout when STACKS_DIR cannot safely be used. */
+export function validateStacksDirAtStartup(): void {
+	const raw = process.env.STACKS_DIR?.trim();
+	if (!raw) return;
+
+	const resolved = resolve(raw);
+	try {
+		if (!statSync(resolved).isDirectory()) throw new Error('not a directory');
+		accessSync(resolved, fsConstants.W_OK);
+	} catch {
+		console.warn(`[StacksDir] STACKS_DIR="${raw}" (resolved: ${resolved}) is missing, not a directory, or not writable; falling back to $DATA_DIR/stacks.`);
+		delete process.env.STACKS_DIR;
+		return;
+	}
+
+	console.log(`[StacksDir] Using STACKS_DIR=${resolved}`);
 }
 
 // =============================================================================
@@ -735,25 +852,7 @@ export async function saveStackComposeFile(
 			}
 		}
 
-		// Move/rename the compose file to new location
-		try {
-			renameSync(options.oldComposePath, options.composePath);
-			console.log(`[Stack] Moved compose file: ${options.oldComposePath} -> ${options.composePath}`);
-		} catch (renameErr: any) {
-			// If rename fails (e.g., cross-filesystem), try copy+delete
-			if (renameErr.code === 'EXDEV') {
-				try {
-					const data = readFileSync(options.oldComposePath);
-					writeFileSync(options.composePath, data);
-					unlinkSync(options.oldComposePath);
-					console.log(`[Stack] Copied compose file (cross-fs): ${options.oldComposePath} -> ${options.composePath}`);
-				} catch (err: any) {
-					console.warn(`[Stack] Failed to copy compose file: ${err.message}`);
-				}
-			} else {
-				console.warn(`[Stack] Failed to move compose file: ${renameErr.message}`);
-			}
-		}
+		moveStackFilePathCrossDevice(options.oldComposePath, options.composePath, 'compose file');
 	}
 
 	// Handle env file move/rename when path changes
@@ -771,25 +870,7 @@ export async function saveStackComposeFile(
 			}
 		}
 
-		// Move/rename the env file to new location
-		try {
-			renameSync(options.oldEnvPath, options.envPath);
-			console.log(`[Stack] Moved env file: ${options.oldEnvPath} -> ${options.envPath}`);
-		} catch (renameErr: any) {
-			// If rename fails (e.g., cross-filesystem), try copy+delete
-			if (renameErr.code === 'EXDEV') {
-				try {
-					const data = readFileSync(options.oldEnvPath);
-					writeFileSync(options.envPath, data);
-					unlinkSync(options.oldEnvPath);
-					console.log(`[Stack] Copied env file (cross-fs): ${options.oldEnvPath} -> ${options.envPath}`);
-				} catch (err: any) {
-					console.warn(`[Stack] Failed to copy env file: ${err.message}`);
-				}
-			} else {
-				console.warn(`[Stack] Failed to move env file: ${renameErr.message}`);
-			}
-		}
+		moveStackFilePathCrossDevice(options.oldEnvPath, options.envPath, 'env file');
 	}
 
 	// Move all files from old directory to new directory when path changes
@@ -891,6 +972,12 @@ export async function saveStackComposeFile(
 	// For creates, use new path; for updates, find existing path first
 	let stackDir: string;
 	if (create) {
+		if (await usesFlatLocalStacksDir(envId)) {
+			const collisionError = await checkFlatLocalStackNameCollision(name, envId);
+			if (collisionError) {
+				return { success: false, error: collisionError };
+			}
+		}
 		stackDir = await getStackDir(name, envId);
 	} else {
 		const existingDir = await findStackDir(name, envId);
@@ -926,6 +1013,23 @@ export async function saveStackComposeFile(
 	} catch (err: any) {
 		return { success: false, error: `Failed to ${create ? 'create' : 'save'} compose file: ${err.message}` };
 	}
+}
+
+async function checkFlatLocalStackNameCollision(stackName: string, envId?: number | null): Promise<string | null> {
+	const allSources = await getStackSources();
+	const conflict = findStackNameCollision(allSources, stackName, envId);
+	if (conflict) {
+		const conflictEnv = conflict.environmentId ? await getEnvironment(conflict.environmentId) : undefined;
+		return `Stack name "${stackName}" is already used by environment "${conflictEnv?.name ?? conflict.environmentId}". With STACKS_DIR set, local stack names must be unique across environments.`;
+	}
+	const flatDir = join(getLocalStacksDir(), stackName);
+	if (existsSync(flatDir)) {
+		const existing = await getStackSource(stackName, envId);
+		if (!existing) {
+			return `Stack directory "${flatDir}" already exists. With STACKS_DIR set, local stack names must be unique across environments.`;
+		}
+	}
+	return null;
 }
 
 // =============================================================================
@@ -1065,7 +1169,7 @@ function findComposeOverrideFile(stackDir: string, composeFileName: string): str
  *   (NOT spawnEnv — that also carries PATH/HOME/DOCKER_CONFIG and would over-redact)
  */
 async function executeLocalCompose(
-	operation: 'up' | 'down' | 'stop' | 'start' | 'restart' | 'pull',
+	operation: 'up' | 'down' | 'stop' | 'start' | 'restart' | 'pull' | 'build',
 	stackName: string,
 	composeContent: string,
 	dockerHost?: string,
@@ -1325,39 +1429,7 @@ async function executeLocalCompose(
 		console.log(`${logPrefix} [HostPath] Using stdin for compose content (paths translated)`);
 	}
 
-	switch (operation) {
-		case 'up':
-			args.push('up', '-d', '--remove-orphans');
-			if (forceRecreate) args.push('--force-recreate');
-			if (build) args.push('--build');
-			if (build && noBuildCache) args.push('--no-cache');
-			if (pullPolicy) args.push('--pull', pullPolicy);
-			// If targeting a specific service, only update that service
-			if (serviceName) {
-				args.push(serviceName);
-			}
-			break;
-		case 'down':
-			args.push('down', '--remove-orphans');
-			if (removeVolumes) args.push('--volumes');
-			break;
-		case 'stop':
-			args.push('stop');
-			break;
-		case 'start':
-			args.push('start');
-			break;
-		case 'restart':
-			args.push('restart');
-			break;
-		case 'pull':
-			args.push('pull');
-			// If targeting a specific service, pull only that service
-			if (serviceName) {
-				args.push(serviceName);
-			}
-			break;
-	}
+	args.push(...buildComposeOperationArgs(operation, { forceRecreate, removeVolumes, build, noBuildCache, pullPolicy, serviceName }));
 
 	const commandStr = args.join(' ');
 
@@ -1456,10 +1528,13 @@ async function executeLocalCompose(
 					exitCode: code
 				};
 			} else {
+				// stderr can echo an interpolated secret value (e.g. a failing
+				// command containing ${DB_PASSWORD}); redact before it can reach a
+				// notification channel, the DB errorMessage, or the client.
 				return {
 					success: false,
-					output: stdout,
-					error: stderr || `docker compose ${operation} exited with code ${code}`,
+					output: redactSecretVars(stdout, secretVars),
+					error: redactSecretVars(stderr, secretVars) || `docker compose ${operation} exited with code ${code}`,
 					command: commandStr,
 					exitCode: code
 				};
@@ -1472,7 +1547,7 @@ async function executeLocalCompose(
 		return {
 			success: false,
 			output: '',
-			error: `Failed to run docker compose ${operation}: ${err.message}`,
+			error: redactSecretVars(`Failed to run docker compose ${operation}: ${err.message}`, secretVars),
 			command: commandStr
 		};
 	} finally {
@@ -1511,7 +1586,7 @@ async function executeLocalCompose(
  *   makeRedactedLineSink.
  */
 async function executeComposeViaHawser(
-	operation: 'up' | 'down' | 'stop' | 'start' | 'restart' | 'pull',
+	operation: 'up' | 'down' | 'stop' | 'start' | 'restart' | 'pull' | 'build',
 	stackName: string,
 	composeContent: string,
 	envId: number,
@@ -1695,10 +1770,12 @@ async function executeComposeViaHawser(
 				deletion
 			};
 		} else {
+			// The agent's stderr can echo an interpolated secret value; redact before
+			// it reaches a notification channel, the DB errorMessage, or the client.
 			return {
 				success: false,
-				output: result.output || '',
-				error: result.error || `Compose ${operation} failed`,
+				output: redactSecretVars(result.output || '', secretVars),
+				error: redactSecretVars(result.error || `Compose ${operation} failed`, secretVars),
 				deletion
 			};
 		}
@@ -1710,7 +1787,7 @@ async function executeComposeViaHawser(
 			output: '',
 			error: isStringLength
 				? `Stack files too large to send via Hawser. The repository may contain large binary files. Consider using a .dockerignore or moving large files out of the compose directory.`
-				: `Failed to ${operation} via Hawser: ${err.message}`
+				: redactSecretVars(`Failed to ${operation} via Hawser: ${err.message}`, secretVars)
 		};
 	}
 }
@@ -1724,7 +1801,7 @@ async function executeComposeViaHawser(
  *   Forwarded to whichever execution path is chosen (local socket, direct, or Hawser).
  */
 async function executeComposeCommand(
-	operation: 'up' | 'down' | 'stop' | 'start' | 'restart' | 'pull',
+	operation: 'up' | 'down' | 'stop' | 'start' | 'restart' | 'pull' | 'build',
 	options: ComposeCommandOptions,
 	composeContent: string,
 	envVars?: Record<string, string>,
@@ -2570,7 +2647,6 @@ export async function computeStackDeletionPaths(
 	envId?: number | null
 ): Promise<{ stackDir: string | null; gitDir: string | null; sourceType: string | null; namedVolumes: string[] }> {
 	const stackSource = await getStackSource(stackName, envId);
-	const stacksDir = getStacksDir();
 
 	// Named volumes compose created for this stack — exactly what `down --volumes` would
 	// remove (compose-managed, labeled with the project). Best-effort: a docker/API hiccup
@@ -2589,7 +2665,8 @@ export async function computeStackDeletionPaths(
 	if (stackSource?.composePath) {
 		const customDir = dirname(stackSource.composePath);
 		// SAME strict guard as removeStack (#675): strict subdir + basename match.
-		if (isDeletableStackDir(customDir, stacksDir, stackName) && existsSync(customDir)) {
+		const deletableRoots = [getDefaultStacksDir(), ...(isStacksDirEnvSet() ? [getLocalStacksDir()] : [])];
+		if (deletableRoots.some((root) => isDeletableStackDir(customDir, root, stackName)) && existsSync(customDir)) {
 			stackDir = customDir;
 		}
 	}
@@ -2619,6 +2696,12 @@ export async function removeStack(
 	removeVolumes = false,
 	deleteFiles = true
 ): Promise<StackOperationResult> {
+	// Reject a name that isn't a plain stack name BEFORE any path construction. A
+	// traversal name (e.g. "..") would make getStackDir resolve to DATA_DIR's parent and
+	// rmSync it; the create/deploy paths already enforce this same shape.
+	if (!/^[a-z0-9][a-z0-9_-]*$/.test(stackName)) {
+		return { success: false, error: 'Invalid stack name' };
+	}
 	return withStackLock(stackName, async () => {
 		// Get compose file (may not exist for external stacks)
 		const composeResult = await getStackComposeFile(stackName, envId);
@@ -2646,7 +2729,7 @@ export async function removeStack(
 			let removalFiles: FileToDelete[] | undefined;
 			if (composeResult.stackDir) {
 				const resolvedStaging = resolve(composeResult.stackDir);
-				if (resolvedStaging.startsWith(resolve(getStacksDir()) + '/')) {
+				if (isManagedStackDir(resolvedStaging)) {
 					removalFiles = Object.entries(hashDirFiles(resolvedStaging)).map(
 						([path, hash]) => ({ path, hash })
 					);
@@ -2755,16 +2838,14 @@ export async function removeStack(
 		// Only delete files that are within Dockhand's data directory (stacks we created)
 		// Adopted/imported stacks have files outside DATA_DIR and should be preserved
 		const stackSource = await getStackSource(stackName, envId);
-		const stacksDir = getStacksDir();
 
 		// Determine what directory to delete (if any)
 		let stackDir: string | null = null;
 
 		if (stackSource?.composePath) {
-			// Only delete if the compose dir is a STRICT SUBDIR of DATA_DIR/stacks/ whose
-			// basename matches the stack name (#675 guard; see stack-delete-guard.ts).
 			const customDir = dirname(stackSource.composePath);
-			if (isDeletableStackDir(customDir, stacksDir, stackName) && existsSync(customDir)) {
+			const deletableRoots = [getDefaultStacksDir(), ...(isStacksDirEnvSet() ? [getLocalStacksDir()] : [])];
+			if (deletableRoots.some((root) => isDeletableStackDir(customDir, root, stackName)) && existsSync(customDir)) {
 				stackDir = customDir;
 			}
 		}
@@ -2773,7 +2854,10 @@ export async function removeStack(
 		// (Don't delete default-path files when an adopted stack has custom path outside DATA_DIR)
 		if (!stackDir && !stackSource?.composePath) {
 			const defaultDir = await findStackDir(stackName, envId) || await getStackDir(stackName, envId);
-			if (existsSync(defaultDir)) {
+			// Same #675 guard as the composePath branch: only a strict subdir of a managed
+			// stacks root whose basename is the stack name is deletable. Never DATA_DIR or a parent.
+			const deletableRoots = [getDefaultStacksDir(), ...(isStacksDirEnvSet() ? [getLocalStacksDir()] : [])];
+			if (deletableRoots.some((root) => isDeletableStackDir(defaultDir, root, stackName)) && existsSync(defaultDir)) {
 				stackDir = defaultDir;
 			}
 		}
@@ -2955,7 +3039,14 @@ export async function deployStack(options: DeployStackOptions): Promise<StackOpe
 			actualComposePath = composePath;
 			console.log(`${logPrefix} Using custom compose path, workingDir:`, workingDir);
 		} else if (sourceDir && existsSync(sourceDir)) {
-			// Git stack: copy entire source directory to internal stack directory
+			// Git stack: copy entire source directory to internal stack directory.
+			const existingGitSource = await getStackSource(name, envId);
+			if (!existingGitSource && await usesFlatLocalStacksDir(envId)) {
+				const collisionError = await checkFlatLocalStackNameCollision(name, envId);
+				if (collisionError) {
+					return { success: false, output: '', error: collisionError };
+				}
+			}
 			workingDir = await getStackDir(name, envId);
 
 			// Set actualComposePath using the provided compose filename from git stack config
@@ -3025,6 +3116,15 @@ export async function deployStack(options: DeployStackOptions): Promise<StackOpe
 				console.log(`${logPrefix} Using custom path from DB:`, workingDir);
 			} else {
 				// Default: compose file should already exist (written by saveStackComposeFile)
+				if (await usesFlatLocalStacksDir(envId)) {
+					const existing = await getStackSource(name, envId);
+					if (!existing) {
+						const collisionError = await checkFlatLocalStackNameCollision(name, envId);
+						if (collisionError) {
+							return { success: false, output: '', error: collisionError };
+						}
+					}
+				}
 				workingDir = await getStackDir(name, envId);
 				// Point at the default .env in the stack dir so its content (e.g. a
 				// bulk secret selector) reaches resolveProviderEnvVars below.
@@ -3084,27 +3184,41 @@ export async function deployStack(options: DeployStackOptions): Promise<StackOpe
 		// so no override file is needed - only pass secrets for shell injection.
 		const isGitStack = !!sourceDir;
 
+		const cmdOptions: ComposeCommandOptions = {
+			stackName: name,
+			envId,
+			forceRecreate,
+			build,
+			noBuildCache,
+			pullPolicy,
+			stackFiles,
+			workingDir,
+			composePath: actualComposePath,
+			envPath: actualEnvPath,
+			useOverrideFile: isGitStack,
+			// Pass compose filename for Hawser (extracted from path or provided explicitly)
+			composeFileName: composeFileName || (actualComposePath ? basename(actualComposePath) : undefined),
+			filesToDelete
+		};
+		const composeEnvVars = isGitStack ? dbNonSecretVars : undefined;
+
+		// `--no-cache` is a `build` flag, not an `up` flag (#1479). When a no-cache
+		// rebuild is requested, run a separate `docker compose build --no-cache` first,
+		// then a plain `up`. Skipped on Hawser (its agent has no build op) - the up below
+		// then omits --build for a no-cache request, so nothing crashes there.
+		const deployEnv = envId ? await getEnvironment(envId) : null;
+		if (shouldRunSeparateBuildStep(build, noBuildCache, deployEnv?.connectionType)) {
+			console.log(`${logPrefix} Running separate 'build --no-cache' step before up...`);
+			const buildResult = await executeComposeCommand('build', cmdOptions, compose, composeEnvVars, secretVars);
+			if (!buildResult.success) return buildResult;
+		}
+
 		console.log(`${logPrefix} Calling executeComposeCommand...`);
 		const result = await executeComposeCommand(
 			'up',
-			{
-				stackName: name,
-				envId,
-				forceRecreate,
-				build,
-				noBuildCache,
-				pullPolicy,
-				stackFiles,
-				workingDir,
-				composePath: actualComposePath,
-				envPath: actualEnvPath,
-				useOverrideFile: isGitStack,
-				// Pass compose filename for Hawser (extracted from path or provided explicitly)
-				composeFileName: composeFileName || (actualComposePath ? basename(actualComposePath) : undefined),
-				filesToDelete
-			},
+			cmdOptions,
 			compose,
-			isGitStack ? dbNonSecretVars : undefined,
+			composeEnvVars,
 			secretVars,
 			onLine
 		);

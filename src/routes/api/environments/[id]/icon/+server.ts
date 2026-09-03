@@ -45,6 +45,8 @@ export const POST: RequestHandler = async ({ params, request, cookies }) => {
 	}
 
 	const id = parseInt(params.id);
+	const envAccessDenied = await auth.requireEnvAccess(id);
+	if (envAccessDenied) return envAccessDenied;
 	const env = await getEnvironment(id);
 	if (!env) {
 		return json({ error: 'Environment not found' }, { status: 404 });
@@ -83,6 +85,8 @@ export const DELETE: RequestHandler = async ({ params, cookies }) => {
 	}
 
 	const id = parseInt(params.id);
+	const envAccessDenied = await auth.requireEnvAccess(id);
+	if (envAccessDenied) return envAccessDenied;
 	const env = await getEnvironment(id);
 	if (!env) {
 		return json({ error: 'Environment not found' }, { status: 404 });

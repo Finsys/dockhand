@@ -1,13 +1,26 @@
 [
   {
     "version": "1.0.46",
-    "date": "",
-    "comingSoon": true,
+    "date": "2026-09-02",
     "changes": [
-      { "type": "feature", "text": "restart a stack in depends_on order (#1480)" },
-      { "type": "fix", "text": "cache app icons so the containers and stacks pages load faster" },
+      { "type": "feature", "text": "restart a stack in depends_on order, keeping the same containers (#1480)" },
+      { "type": "feature", "text": "allow secret-less git webhooks via the ALLOW_WEBHOOKS_WITHOUT_SECRET env var" },
+      { "type": "feature", "text": "optional STACKS_DIR flat layout for local stacks (#514, #778, PR#1482, @xd003)" },
+      { "type": "fix", "text": "faster incremental backups when multiple stacks share one repository (#1494)" },
+      { "type": "fix", "text": "\"disable build cache\" no longer errors on deploy (#1479, PR#1020, @He-Is-HaZaRdOuS)" },
+      { "type": "fix", "text": "test connection on a saved environment without re-entering the token (#1483)" },
+      { "type": "fix", "text": "populate environment variables again finds the repo's .env file (#1495)" },
+      { "type": "fix", "text": "POST /api/stacks honors the target environment in the body (#1491)" },
+      { "type": "fix", "text": "large image scans no longer fail when the scanner log rotates (#1496)" },
+      { "type": "fix", "text": "Compose Validate no longer false-flags a valid env_file (#1497)" },
+      { "type": "fix", "text": "cache app icons in one request so the containers and stacks pages load faster" },
       { "type": "fix", "text": "upgrade svelte to 5.56.10 (#1476, PR#1477, @ThanatosDi)" },
-      { "type": "fix", "text": "refresh the bundled docker-compose (5.5.0-r2)" }
+      { "type": "fix", "text": "refresh the bundled docker-compose (5.5.0-r2)" },
+      { "type": "fix", "text": "stricter per-environment access and permission checks across the API" },
+      { "type": "fix", "text": "redact secret values from compose command output and restrict backup restore targets" },
+      { "type": "fix", "text": "local-path backup destinations now reject a host path that isn't a Dockhand bind mount (#1506)" },
+      { "type": "fix", "text": "escape $ in env values when generating a compose file from a container (#1507)" },
+      { "type": "fix", "text": "clearer git permission errors that match the credential type (token vs SSH key) (#1509)" }
     ],
     "imageTag": "fnsys/dockhand:v1.0.46"
   },

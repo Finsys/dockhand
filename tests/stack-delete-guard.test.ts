@@ -43,4 +43,14 @@ describe('isDeletableStackDir', () => {
 	it('a "../" escape resolves out and is NOT deletable', () => {
 		expect(isDeletableStackDir('/data/stacks/../evil', STACKS, 'evil')).toBe(false);
 	});
+
+	it('traversal name "..": getStackDir("..") resolves to DATA_DIR and is NOT deletable', () => {
+		// join(STACKS, '..') = '/data' (DATA_DIR). basename '/data' = 'data' != '..' AND not a
+		// strict subdir of /data/stacks -> blocked. Guards the removeStack fallback branch.
+		expect(isDeletableStackDir('/data', STACKS, '..')).toBe(false);
+	});
+
+	it('traversal name "../..": resolves above DATA_DIR and is NOT deletable', () => {
+		expect(isDeletableStackDir('/', STACKS, '../..')).toBe(false);
+	});
 });

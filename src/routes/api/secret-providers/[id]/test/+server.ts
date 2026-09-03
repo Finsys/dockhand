@@ -3,15 +3,18 @@ import type { RequestHandler } from './$types';
 import { getSecretProviderById } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
 import { testProviderConnection } from '$lib/server/secretproviders';
-import { mergeProviderConfigForWrite } from '$lib/server/secretproviders/shared';
+import { mergeProviderConfigForWrite, destinationOverridesStored, SECRET_CONFIG_KEYS } from '$lib/server/secretproviders/shared';
 import type { SecretProviderConfig } from '$lib/server/secretproviders/shared';
 
 /**
  * Test a stored provider. With no body it tests the persisted config. With an optional
- * `{ config }` override (the edit form's typed non-secret fields) it tests exactly what a
- * Save would persist: the incoming config merged over the stored one, with a blank token
- * falling back to the stored secret. The secret is NEVER supplied by the client - it comes
- * from storage server-side - so this stays a `secrets:view` operation.
+ * `{ config }` override (the edit form's typed non-secret fields) a blank secret falls back to
+ * the stored one - BUT ONLY when the override keeps the same destination (host/address).
+ *
+ * If the override points at a DIFFERENT host/address, the request is tested with the client's
+ * config as-is and NO stored secret is reattached, so a `secrets:view` user cannot make the
+ * server send the stored credential to a caller-chosen host. (A blank secret then just makes the
+ * connection fail; the caller can supply the secret for the new host themselves.)
  *
  * @openapi
  * summary: Test a stored provider's connectivity, optionally against typed override fields the edit form would save
@@ -44,10 +47,33 @@ export const POST: RequestHandler = async ({ params, cookies, request }) => {
 	try {
 		const body = await request.json();
 		if (body && typeof body.config === 'object' && body.config !== null) {
-			configToTest = mergeProviderConfigForWrite(
-				body.config as Record<string, unknown>,
-				provider.config as unknown as Record<string, unknown>
-			) as unknown as SecretProviderConfig;
+			const incoming = body.config as Record<string, unknown>;
+			const stored = provider.config as unknown as Record<string, unknown>;
+
+			if (destinationOverridesStored(incoming, stored)) {
+				// Override targets a DIFFERENT server - test it with exactly what the client
+				// sent, with NO stored-secret fallback, so the stored credential is never
+				// delivered to a caller-chosen host.
+				const hasSecret = [...SECRET_CONFIG_KEYS].some((k) => {
+					const v = incoming[k];
+					return typeof v === 'string' && v.trim() !== '';
+				});
+				if (!hasSecret) {
+					// Friendlier than a raw auth failure: the stored credential is deliberately
+					// not reused for a new host, so the caller must supply one for it.
+					return json({
+						ok: false,
+						error: 'You changed the host or address, so enter its credential to test - the saved one is not reused for a different server.'
+					}, { status: 200 });
+				}
+				configToTest = incoming as unknown as SecretProviderConfig;
+			} else {
+				// Same destination: normal edit-form flow (a blank secret keeps the stored one).
+				configToTest = mergeProviderConfigForWrite(
+					incoming,
+					stored
+				) as unknown as SecretProviderConfig;
+			}
 		}
 	} catch {
 		// No/invalid body: test the stored config as-is.

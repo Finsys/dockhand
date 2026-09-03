@@ -16,9 +16,6 @@ import { adoptSelectedStacks, type DiscoveredStack } from '$lib/server/stack-sca
  */
 export const POST: RequestHandler = async ({ request, cookies }) => {
 	const auth = await authorize(cookies);
-	if (auth.authEnabled && !await auth.can('stacks', 'create')) {
-		return json({ error: 'Permission denied' }, { status: 403 });
-	}
 
 	try {
 		const body = await request.json();
@@ -32,6 +29,14 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 		if (!environmentId || typeof environmentId !== 'number') {
 			return json({ error: 'Environment ID is required' }, { status: 400 });
 		}
+
+		// Scope the permission and access check to the target environment (from the
+		// body) so a role scoped to other environments can't adopt into this one.
+		if (auth.authEnabled && !await auth.can('stacks', 'create', environmentId)) {
+			return json({ error: 'Permission denied' }, { status: 403 });
+		}
+		const envAccessDenied = await auth.requireEnvAccess(environmentId);
+		if (envAccessDenied) return envAccessDenied;
 
 		// Validate each stack has required fields
 		for (const stack of stacks) {

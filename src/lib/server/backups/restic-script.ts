@@ -76,7 +76,7 @@ export function tlsCertPreamble(): string {
  */
 export function localRepoGuard(repository: string): string {
 	if (!isLocalRepo(repository)) return '';
-	const msg = `restic repository not found at $RESTIC_REPOSITORY on this environment's Docker host. A local-path repository only works when the environment's Docker daemon runs on the same host as Dockhand (e.g. a co-located socket-proxy). For a remote host, use an S3 or REST destination.`;
+	const msg = `restic repository not found at $RESTIC_REPOSITORY on this environment's Docker host. The repo directory is empty or missing there. Two common causes: (1) the destination Path is the host path instead of the path Dockhand sees inside its container - enter the container-side path of your backup volume mount, then re-init; (2) the environment's Docker daemon is on a different host than Dockhand - a local path can't reach it, so use an S3 or REST destination instead.`;
 	return `test -f "$RESTIC_REPOSITORY/config" || { echo ${shellQuote(msg)} >&2; exit 1; }; `;
 }
 

@@ -24,6 +24,8 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 		return json({ error: 'Permission denied' }, { status: 403 });
 	}
 	const id = parseInt(params.id);
+	const envAccessDenied = await auth.requireEnvAccess(id);
+	if (envAccessDenied) return envAccessDenied;
 	const env = await getEnvironment(id);
 	if (!env) return json({ error: 'Environment not found' }, { status: 404 });
 
@@ -50,6 +52,8 @@ export const POST: RequestHandler = async ({ params, request, cookies }) => {
 		return json({ error: 'Permission denied' }, { status: 403 });
 	}
 	const id = parseInt(params.id);
+	const envAccessDenied = await auth.requireEnvAccess(id);
+	if (envAccessDenied) return envAccessDenied;
 	const env = await getEnvironment(id);
 	if (!env) return json({ error: 'Environment not found' }, { status: 404 });
 

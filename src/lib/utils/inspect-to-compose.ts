@@ -184,6 +184,21 @@ function portSpec(containerPort: string, bindings: Array<{ HostIp?: string; Host
 	});
 }
 
+/**
+ * Escape `$` -> `$$` in the VALUE half of a `KEY=VALUE` env entry so `docker compose`
+ * does not interpolate it (#1507). Inspect values are already resolved literals (the
+ * daemon expanded any real variable), so every `$` must survive verbatim - e.g. a
+ * bcrypt hash `$2a$12$...` would otherwise be read as variable references and mangled.
+ * Only the value is escaped; the key never contains `$`.
+ */
+function escapeEnvEntryForCompose(entry: string): string {
+	const eq = entry.indexOf('=');
+	if (eq < 0) return entry;
+	const key = entry.slice(0, eq);
+	const value = entry.slice(eq + 1);
+	return `${key}=${value.replace(/\$/g, '$$$$')}`;
+}
+
 /** Convert a nanosecond duration (Docker healthcheck) to a compose `30s` string. */
 function nsToDuration(ns: number | undefined): string | undefined {
 	if (!ns || ns <= 0) return undefined;
@@ -225,7 +240,7 @@ export function inspectToComposeService(
 	// Environment: drop image-baked vars when the image env is provided.
 	if (Array.isArray(config.Env) && config.Env.length > 0) {
 		const imageEnv = new Set(options.imageEnv ?? []);
-		const env = config.Env.filter((e) => !imageEnv.has(e));
+		const env = config.Env.filter((e) => !imageEnv.has(e)).map(escapeEnvEntryForCompose);
 		if (env.length > 0) service.environment = env;
 	}
 

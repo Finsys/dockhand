@@ -18,13 +18,14 @@ import { hashComposeContent, hashEnvFingerprint } from '$lib/server/deploy-run-r
  */
 export const GET: RequestHandler = async ({ params, url, cookies }) => {
 	const auth = await authorize(cookies);
-	if (auth.authEnabled && !(await auth.can('stacks', 'view'))) {
-		return json({ error: 'Permission denied' }, { status: 403 });
-	}
-
 	const { name } = params;
 	const envId = url.searchParams.get('env');
 	const envIdNum = envId ? parseInt(envId) : undefined;
+	if (auth.authEnabled && !(await auth.can('stacks', 'view', envIdNum))) {
+		return json({ error: 'Permission denied' }, { status: 403 });
+	}
+	const envAccessDenied = await auth.requireEnvAccess(envIdNum ?? null);
+	if (envAccessDenied) return envAccessDenied;
 
 	try {
 		const result = await getStackComposeFile(name, envIdNum);
@@ -75,6 +76,8 @@ export const PUT: RequestHandler = async ({ params, request, url, cookies }) => 
 	if (auth.authEnabled && !(await auth.can('stacks', 'edit', envIdNum))) {
 		return json({ error: 'Permission denied' }, { status: 403 });
 	}
+	const envAccessDenied = await auth.requireEnvAccess(envIdNum ?? null);
+	if (envAccessDenied) return envAccessDenied;
 
 	try {
 		const body = await request.json();

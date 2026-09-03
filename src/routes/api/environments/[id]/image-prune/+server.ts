@@ -25,10 +25,11 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 	if (auth.authEnabled && !await auth.can('environments', 'view')) {
 		return json({ error: 'Permission denied' }, { status: 403 });
 	}
+	const id = parseInt(params.id);
+	const envAccessDenied = await auth.requireEnvAccess(id);
+	if (envAccessDenied) return envAccessDenied;
 
 	try {
-		const id = parseInt(params.id);
-
 		// Verify environment exists
 		const env = await getEnvironment(id);
 		if (!env) {
@@ -68,10 +69,11 @@ export const POST: RequestHandler = async ({ params, request, cookies }) => {
 	if (auth.authEnabled && !await auth.can('environments', 'edit')) {
 		return json({ error: 'Permission denied' }, { status: 403 });
 	}
+	const id = parseInt(params.id);
+	const envAccessDenied = await auth.requireEnvAccess(id);
+	if (envAccessDenied) return envAccessDenied;
 
 	try {
-		const id = parseInt(params.id);
-
 		// Verify environment exists
 		const env = await getEnvironment(id);
 		if (!env) {
@@ -125,10 +127,11 @@ export const PUT: RequestHandler = async ({ params, cookies }) => {
 	if (auth.authEnabled && !await auth.can('environments', 'edit')) {
 		return json({ error: 'Permission denied' }, { status: 403 });
 	}
+	const id = parseInt(params.id);
+	const envAccessDenied = await auth.requireEnvAccess(id);
+	if (envAccessDenied) return envAccessDenied;
 
 	try {
-		const id = parseInt(params.id);
-
 		// Verify environment exists
 		const env = await getEnvironment(id);
 		if (!env) {

@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Dockhand API",
-    "version": "1.0.45",
+    "version": "1.0.46",
     "description": "Auto-generated from src/routes/**/+server.ts by scripts/generate-openapi.ts. Path, HTTP method, tag, and auth requirement are derived automatically from the route tree and hooks.server.ts PUBLIC_PATHS. Parameters, response status codes, and request body fields are additionally auto-detected from each handler’s own source (query params via url.searchParams, status codes via status:/error(), body fields via destructuring) — adding a new endpoint therefore requires ZERO manual spec edits to show up with real params/responses. An optional, additive `@openapi` JSDoc annotation on a handler replaces the generic auto-descriptions with hand-written summaries, exact types, and examples."
   },
   "servers": [
@@ -6860,7 +6860,7 @@
             "description": "Directory listing (entries with name, type, size and permission metadata)"
           },
           "403": {
-            "description": "Permission denied"
+            "description": "Permission denied (needs containers:exec)"
           },
           "404": {
             "description": "Container not found"
@@ -7063,7 +7063,7 @@
             "description": "Path is missing, the target is a directory, or the container is not running"
           },
           "403": {
-            "description": "Permission denied to read the file"
+            "description": "Permission denied to read the file (needs containers:exec)"
           },
           "404": {
             "description": "File not found"
@@ -10078,7 +10078,7 @@
             }
           },
           "403": {
-            "description": "Memory monitor not enabled (set MEMORY_MONITOR=true)"
+            "description": "Memory monitor not enabled (set MEMORY_MONITOR=true), or the caller is not an admin"
           }
         },
         "security": [
@@ -11967,6 +11967,9 @@
               }
             }
           },
+          "403": {
+            "description": "Permission denied"
+          },
           "404": {
             "description": "Environment not found"
           }
@@ -12462,6 +12465,9 @@
           },
           "400": {
             "description": "Host is required for direct/hawser-standard connection types"
+          },
+          "403": {
+            "description": "The caller cannot access the environment named by environmentId"
           }
         },
         "security": [
@@ -12472,6 +12478,7 @@
             "bearerAuth": []
           }
         ],
+        "description": "Pass environmentId to fall back to that saved environment's stored secrets (hawserToken, tlsKey) for any secret field left blank in the body, so Test connection works when editing without re-entering the token.",
         "requestBody": {
           "required": true,
           "content": {
@@ -12508,6 +12515,9 @@
                   },
                   "hawserToken": {
                     "type": "string"
+                  },
+                  "environmentId": {
+                    "type": "integer"
                   }
                 },
                 "required": [
@@ -18489,6 +18499,9 @@
           "400": {
             "description": "Invalid ID (not a number)"
           },
+          "403": {
+            "description": "Permission denied (needs notifications:edit)"
+          },
           "404": {
             "description": "Notification setting not found"
           },
@@ -20996,6 +21009,9 @@
           "400": {
             "description": "Missing registry parameter, or Docker Hub was targeted (catalog listing unsupported)"
           },
+          "403": {
+            "description": "Permission denied (requires registries:view)"
+          },
           "404": {
             "description": "Registry not found, or the registry does not implement the V2 catalog API"
           },
@@ -21194,6 +21210,9 @@
           "400": {
             "description": "The term query parameter is missing"
           },
+          "403": {
+            "description": "Permission denied (requires registries:view)"
+          },
           "404": {
             "description": "The referenced registry does not exist"
           },
@@ -21279,6 +21298,9 @@
           },
           "400": {
             "description": "image and tag are required"
+          },
+          "403": {
+            "description": "Permission denied (requires registries:view)"
           },
           "404": {
             "description": "Registry not found"
@@ -21413,6 +21435,9 @@
           },
           "400": {
             "description": "The image query parameter is missing"
+          },
+          "403": {
+            "description": "Permission denied (requires registries:view)"
           },
           "404": {
             "description": "The referenced registry does not exist"
@@ -24279,7 +24304,7 @@
             "schema": {
               "type": "integer"
             },
-            "description": "Target environment id"
+            "description": "Target environment id (takes precedence over envId/environmentId in the body)"
           }
         ],
         "responses": {
@@ -24304,7 +24329,7 @@
             "bearerAuth": []
           }
         ],
-        "description": "Writes the compose + .env to the stack dir, stores secrets in the DB, and with start deploys it. Can bind a secret provider.",
+        "description": "Writes the compose + .env to the stack dir, stores secrets in the DB, and with start deploys it. Can bind a secret provider. Target environment comes from the env query param, or from envId/environmentId in the body when the query is absent.",
         "requestBody": {
           "required": true,
           "content": {
@@ -24347,6 +24372,12 @@
                   },
                   "forceRecreate": {
                     "type": "boolean"
+                  },
+                  "envId": {
+                    "type": "integer"
+                  },
+                  "environmentId": {
+                    "type": "integer"
                   }
                 },
                 "required": [
@@ -24367,7 +24398,9 @@
                 "start": true,
                 "pull": true,
                 "build": true,
-                "forceRecreate": true
+                "forceRecreate": true,
+                "envId": 0,
+                "environmentId": 0
               }
             }
           }
@@ -25186,6 +25219,9 @@
           },
           "403": {
             "description": "Permission denied (needs stacks:edit for the run's own environment), or access denied to this environment"
+          },
+          "409": {
+            "description": "The run has not finished yet (status is not a terminal one) -- deleting a"
           }
         },
         "security": [
@@ -26151,7 +26187,10 @@
             "description": "oldDir and newComposePath are required, or the source directory does not exist"
           },
           "403": {
-            "description": "Permission denied (requires stacks:edit)"
+            "description": "Permission denied (requires stacks:edit), or a supplied path is not allowed"
+          },
+          "404": {
+            "description": "No stack source row for this name and environment"
           },
           "500": {
             "description": "Failed to relocate stack"
@@ -26678,7 +26717,17 @@
           "stacks"
         ],
         "summary": "Return the default Dockhand stacks directory ($DATA_DIR/stacks/) where new stacks are stored by default",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "env",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Environment ID used to select the local or environment-scoped stacks root"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful response",

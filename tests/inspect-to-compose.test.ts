@@ -249,6 +249,53 @@ describe('inspectToCompose - default-noise filtering', () => {
 	});
 });
 
+describe('inspectToCompose - env value $ escaping (#1507)', () => {
+	// docker compose interpolates $ in env values; an inspect value is already a resolved
+	// literal, so every $ must be escaped to $$ or compose eats it (a bcrypt hash
+	// $2a$12$... becomes $2a$12.<tail>, silently corrupting the password).
+	test('a bcrypt hash keeps every $ as $$ so compose interpolation leaves it intact', () => {
+		const inspect: DockerInspect = {
+			Name: '/wg-easy',
+			Config: {
+				Image: 'ghcr.io/wg-easy/wg-easy:latest',
+				Env: ['PASSWORD_HASH=$2a$12$r68XHj7T7304UoWeYJc1BOSwjmyeBj.gzk7PnLOKv5AED8C5NNj5C']
+			},
+			HostConfig: {},
+			NetworkSettings: { Networks: {} }
+		};
+		const svc = parseCompose(inspect).doc.services['wg-easy'];
+		const entry = svc.environment.find((e: string) => e.startsWith('PASSWORD_HASH='));
+		expect(entry).toBe('PASSWORD_HASH=$$2a$$12$$r68XHj7T7304UoWeYJc1BOSwjmyeBj.gzk7PnLOKv5AED8C5NNj5C');
+		// After compose collapses $$ -> $, the original hash is recovered verbatim.
+		const value = entry.slice('PASSWORD_HASH='.length).replaceAll('$$', '$');
+		expect(value).toBe('$2a$12$r68XHj7T7304UoWeYJc1BOSwjmyeBj.gzk7PnLOKv5AED8C5NNj5C');
+	});
+
+	test('a value with no $ is left untouched', () => {
+		const inspect: DockerInspect = {
+			Name: '/app',
+			Config: { Image: 'x', Env: ['WG_HOST=example.me', 'PORT=51820'] },
+			HostConfig: {},
+			NetworkSettings: { Networks: {} }
+		};
+		const svc = parseCompose(inspect).doc.services['app'];
+		expect(svc.environment).toContain('WG_HOST=example.me');
+		expect(svc.environment).toContain('PORT=51820');
+	});
+
+	test('a literal ${VAR}-looking value is escaped so compose does not expand it', () => {
+		const inspect: DockerInspect = {
+			Name: '/app',
+			Config: { Image: 'x', Env: ['TEMPLATE=${NOT_A_VAR}-literal'] },
+			HostConfig: {},
+			NetworkSettings: { Networks: {} }
+		};
+		const svc = parseCompose(inspect).doc.services['app'];
+		const entry = svc.environment.find((e: string) => e.startsWith('TEMPLATE='));
+		expect(entry).toBe('TEMPLATE=$${NOT_A_VAR}-literal');
+	});
+});
+
 describe('inspectToCompose - full network model (static IP, aliases, MAC)', () => {
 	test('static IPv4/IPv6, user aliases and MAC render as a per-network map', () => {
 		const inspect: DockerInspect = {

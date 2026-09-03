@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'bun:test';
 import { collectProviderFormConfig } from '../src/lib/utils/provider-form-config';
-import { mergeProviderConfigForWrite } from '../src/lib/server/secretproviders/shared';
+import { mergeProviderConfigForWrite, destinationOverridesStored } from '../src/lib/server/secretproviders/shared';
 
 // Field shape (key + isSecret) per provider, mirroring PROVIDER_FIELDS in
 // routes/settings/secrets/ProviderModal.svelte. Only the shape matters for what the edit
@@ -179,5 +179,45 @@ describe('#1448 full chain: form output -> server merge', () => {
 		const merged = mergeProviderConfigForWrite(emitted, stored);
 		expect(merged.token).toBe('hvs.stored');
 		expect(merged.mount).toBe(''); // server reads '' as the default mount
+	});
+});
+
+// The test endpoint must not send a stored credential to a caller-chosen host. It decides via
+// destinationOverridesStored: if the override changes host/address, the stored secret is NOT
+// reattached and the caller needs secrets:edit.
+describe('destinationOverridesStored (credential-exfil guard)', () => {
+	test('Vault: changed address is a redirect', () => {
+		const stored = { address: 'https://vault.internal:8200', token: 'hvs.REAL' };
+		expect(destinationOverridesStored({ address: 'http://attacker.example:8902' }, stored)).toBe(true);
+	});
+
+	test('same address (edit form keeps host, blank token) is NOT a redirect', () => {
+		const stored = { address: 'https://vault.internal:8200', token: 'hvs.REAL' };
+		expect(destinationOverridesStored({ address: 'https://vault.internal:8200', mount: 'kv2' }, stored)).toBe(false);
+	});
+
+	test('1Password Connect / Infisical: changed host is a redirect', () => {
+		const stored = { host: 'https://connect.internal', token: 'ey.REAL' };
+		expect(destinationOverridesStored({ host: 'https://evil.example' }, stored)).toBe(true);
+	});
+
+	test('Bitwarden: changed serverUrl is a redirect (full stored-token leak vector)', () => {
+		const stored = { serverUrl: 'https://vault.bitwarden.eu', token: 'bws.REAL' };
+		expect(destinationOverridesStored({ serverUrl: 'http://attacker.example:8902' }, stored)).toBe(true);
+	});
+
+	test('Azure Key Vault: changed vaultUri is a redirect', () => {
+		const stored = { vaultUri: 'https://kv.vault.azure.net', clientSecret: 'REAL' };
+		expect(destinationOverridesStored({ vaultUri: 'https://evil.example' }, stored)).toBe(true);
+	});
+
+	test('override that omits the destination entirely is NOT a redirect', () => {
+		const stored = { address: 'https://vault.internal:8200', token: 'hvs.REAL' };
+		expect(destinationOverridesStored({ mount: 'kv2' }, stored)).toBe(false);
+	});
+
+	test('a cleared (blank) destination is not treated as a redirect', () => {
+		const stored = { host: 'https://connect.internal', token: 'ey.REAL' };
+		expect(destinationOverridesStored({ host: '   ' }, stored)).toBe(false);
 	});
 });

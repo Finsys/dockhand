@@ -1,6 +1,8 @@
 import { json } from '@sveltejs/kit';
 import { unixSocketRequest, httpsAgentRequest } from '$lib/server/docker';
 import type { DockerClientConfig } from '$lib/server/docker';
+import { getEnvironment } from '$lib/server/db';
+import { authorize } from '$lib/server/authorize';
 import { isSafeNotificationUrl } from '$lib/server/url-safety';
 import type { RequestHandler } from './$types';
 
@@ -15,6 +17,14 @@ interface TestConnectionRequest {
 	tlsKey?: string;
 	tlsSkipVerify?: boolean;
 	hawserToken?: string;
+	/**
+	 * When editing an existing environment, secrets (hawserToken, tlsKey) are never sent
+	 * back to the client, so an unchanged token comes through empty. Passing the env id lets
+	 * the server fall back to the STORED secret for any secret field the body left blank, so
+	 * "Test connection" works without re-typing the token (#1483). Non-secret fields still
+	 * come from the body, so the test reflects the edited form.
+	 */
+	environmentId?: number;
 }
 
 function cleanPem(pem: string): string {
@@ -45,15 +55,35 @@ function buildDockerClientConfig(config: TestConnectionRequest): DockerClientCon
  *
  * @openapi
  * summary: Test a Docker/Hawser connection configuration WITHOUT saving it as an environment
- * body: {connectionType:string!, socketPath:string, host:string, port:integer, protocol:string, tlsCa:string, tlsCert:string, tlsKey:string, tlsSkipVerify:boolean, hawserToken:string}
+ * description: Pass environmentId to fall back to that saved environment's stored secrets (hawserToken, tlsKey) for any secret field left blank in the body, so Test connection works when editing without re-entering the token.
+ * body: {connectionType:string!, socketPath:string, host:string, port:integer, protocol:string, tlsCa:string, tlsCert:string, tlsKey:string, tlsSkipVerify:boolean, hawserToken:string, environmentId:integer}
  * body-example: {"connectionType":"socket","socketPath":"/var/run/docker.sock"}
  * resp-200: {success:boolean!, info:{serverVersion:string, containers:integer, images:integer, name:string}, hawser:{}}
  * resp-200-desc: success:false with a human-readable error message is also returned as HTTP 200 (connection failures are not transport errors)
  * resp-400: Host is required for direct/hawser-standard connection types
+ * resp-403: The caller cannot access the environment named by environmentId
  */
-export const POST: RequestHandler = async ({ request }) => {
+export const POST: RequestHandler = async ({ request, cookies }) => {
 	try {
 		const config: TestConnectionRequest = await request.json();
+
+		// Fill unchanged secrets from the stored environment when editing (#1483): the client
+		// never receives hawserToken / tlsKey, so an untouched field arrives empty. Only fall
+		// back for a BLANK field, so a freshly typed token/key still wins.
+		if (config.environmentId) {
+			// Gate the id: without this, any authenticated user could name another
+			// environment's id and have its stored token sent to a body-supplied host,
+			// exfiltrating a secret they may have no access to (env-scoped RBAC).
+			const auth = await authorize(cookies);
+			if (!(await auth.canAccessEnvironment(config.environmentId))) {
+				return json({ success: false, error: 'Access denied' }, { status: 403 });
+			}
+			const stored = await getEnvironment(config.environmentId);
+			if (stored) {
+				if (!config.hawserToken) config.hawserToken = stored.hawserToken || undefined;
+				if (!config.tlsKey) config.tlsKey = stored.tlsKey || undefined;
+			}
+		}
 
 		// Build fetch options based on connection type
 		let response: Response;

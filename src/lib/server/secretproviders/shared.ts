@@ -244,6 +244,39 @@ export type SecretProviderConfig =
 export const SECRET_CONFIG_KEYS = new Set(['token', 'clientSecret', 'password']);
 
 /**
+ * Every user-overridable connection-destination field across all provider types. If a
+ * client-supplied override changes one of these, the request targets a DIFFERENT server than
+ * the stored config, so a stored secret must NOT be reattached (that would send the real
+ * credential to a caller-chosen host). Must list EVERY provider's destination field:
+ *   - `address`  Vault
+ *   - `host`     1Password Connect, Infisical
+ *   - `serverUrl` Bitwarden Secrets Manager (EU / self-hosted)
+ *   - `vaultUri` Azure Key Vault
+ * (KeePass `databasePath` is a LOCAL file, not a network destination, so it's out of scope.
+ * When you add a provider with an overridable server URL, add its field here.)
+ */
+export const PROVIDER_DESTINATION_KEYS = ['host', 'address', 'serverUrl', 'vaultUri'] as const;
+
+/**
+ * True when the incoming override changes the connection destination (host/address) from the
+ * stored value. Used to decide whether a stored secret may follow the request (#secret-exfil):
+ * a test whose destination the client changed must not carry the stored credential.
+ */
+export function destinationOverridesStored(
+	incoming: Record<string, unknown>,
+	stored: Record<string, unknown>
+): boolean {
+	for (const key of PROVIDER_DESTINATION_KEYS) {
+		if (!(key in incoming)) continue;
+		const inVal = incoming[key];
+		if (typeof inVal !== 'string') continue;
+		if (inVal.trim() === '') continue; // a cleared field isn't a redirect
+		if (inVal !== stored[key]) return true;
+	}
+	return false;
+}
+
+/**
  * A masked secret key that only makes sense alongside a non-secret partner field, as a
  * pair the user chooses or abandons together. When the user CLEARS the partner in the edit
  * form (an explicit, visible field), keeping the stored secret would strand it - a secret

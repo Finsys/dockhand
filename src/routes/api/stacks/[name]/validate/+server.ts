@@ -52,6 +52,8 @@ export const POST: RequestHandler = async ({ cookies, url, params, request }) =>
 	if (auth.authEnabled && !(await auth.can('stacks', 'view', envIdNum))) {
 		return json({ error: 'Permission denied' }, { status: 403 });
 	}
+	const envAccessDenied = await auth.requireEnvAccess(envIdNum ?? null);
+	if (envAccessDenied) return envAccessDenied;
 
 	const body = (await request.json().catch(() => ({}))) as {
 		compose?: string;

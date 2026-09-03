@@ -87,9 +87,9 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 /**
  * @openapi
  * summary: Create and (optionally) deploy a compose stack
- * description: Writes the compose + .env to the stack dir, stores secrets in the DB, and with start deploys it. Can bind a secret provider.
- * query: env:integer Target environment id
- * body: {name:string!, compose:string!, composePath:string, envPath:string, envVars:array<object>, rawEnvContent:string, secretProviderId:integer, start:boolean, pull:boolean, build:boolean, forceRecreate:boolean}
+ * description: Writes the compose + .env to the stack dir, stores secrets in the DB, and with start deploys it. Can bind a secret provider. Target environment comes from the env query param, or from envId/environmentId in the body when the query is absent.
+ * query: env:integer Target environment id (takes precedence over envId/environmentId in the body)
+ * body: {name:string!, compose:string!, composePath:string, envPath:string, envVars:array<object>, rawEnvContent:string, secretProviderId:integer, start:boolean, pull:boolean, build:boolean, forceRecreate:boolean, envId:integer, environmentId:integer}
  * resp-400: Invalid request (e.g. missing name/compose, or secretProviderId wrong type)
  * resp-403: Permission denied (needs stacks:create; binding a secret provider also needs secrets:view)
  * resp-500: Failed to create or deploy the stack
@@ -98,8 +98,19 @@ export const POST: RequestHandler = async (event) => {
 	const { request, url, cookies } = event;
 	const auth = await authorize(cookies);
 
-	const envId = url.searchParams.get('env');
-	const envIdNum = envId ? parseInt(envId) : undefined;
+	let body: any;
+	try {
+		body = await request.json();
+	} catch {
+		return json({ error: 'Invalid JSON body' }, { status: 400 });
+	}
+
+	// Target env: the ?env= query wins (the UI uses it), else fall back to envId /
+	// environmentId in the body so an API caller can target a remote env that way too
+	// (#1491). Resolve BEFORE the permission checks so they scope to the real target.
+	const queryEnv = url.searchParams.get('env');
+	const bodyEnv = body?.envId ?? body?.environmentId;
+	const envIdNum = queryEnv ? parseInt(queryEnv) : (typeof bodyEnv === 'number' ? bodyEnv : undefined);
 
 	// Permission check with environment context
 	if (auth.authEnabled && !(await auth.can('stacks', 'create', envIdNum))) {
@@ -112,7 +123,6 @@ export const POST: RequestHandler = async (event) => {
 	}
 
 	try {
-		const body = await request.json();
 		const { name, compose, start, envVars, rawEnvContent, composePath, envPath, secretProviderId, pull, build, forceRecreate } = body;
 
 		if (!name || typeof name !== 'string') {

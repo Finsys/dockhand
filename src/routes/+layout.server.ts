@@ -2,7 +2,7 @@ import type { LayoutServerLoad } from './$types';
 import { redirect } from '@sveltejs/kit';
 import { isAuthEnabled, validateSession } from '$lib/server/auth';
 import { hasAdminUser } from '$lib/server/db';
-import { BACKUPS_ENABLED, API_DOCS_ENABLED } from '$lib/server/features';
+import { BACKUPS_ENABLED, API_DOCS_ENABLED, ALLOW_WEBHOOKS_WITHOUT_SECRET } from '$lib/server/features';
 
 // Routes that don't require authentication. The API docs viewer is public only
 // when opt-in via FEAT_API_DOCS (the route 404s otherwise; see features.ts).
@@ -21,7 +21,8 @@ export const load: LayoutServerLoad = async ({ cookies, url }) => {
 			authEnabled: false,
 			user: null,
 			disableWhatsNew,
-			backupsEnabled: BACKUPS_ENABLED
+			backupsEnabled: BACKUPS_ENABLED,
+			allowSecretlessWebhook: ALLOW_WEBHOOKS_WITHOUT_SECRET
 		};
 	}
 
@@ -41,7 +42,8 @@ export const load: LayoutServerLoad = async ({ cookies, url }) => {
 				user: null,
 				setupMode: true,
 				disableWhatsNew,
-				backupsEnabled: BACKUPS_ENABLED
+				backupsEnabled: BACKUPS_ENABLED,
+				allowSecretlessWebhook: ALLOW_WEBHOOKS_WITHOUT_SECRET
 			};
 		}
 
@@ -62,6 +64,7 @@ export const load: LayoutServerLoad = async ({ cookies, url }) => {
 			provider: user.provider
 		} : null,
 		disableWhatsNew,
-		backupsEnabled: BACKUPS_ENABLED
+		backupsEnabled: BACKUPS_ENABLED,
+		allowSecretlessWebhook: ALLOW_WEBHOOKS_WITHOUT_SECRET
 	};
 };
