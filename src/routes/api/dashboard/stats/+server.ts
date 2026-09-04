@@ -18,6 +18,7 @@ import {
 } from '$lib/server/docker';
 import { listComposeStacks } from '$lib/server/stacks';
 import { countLivePending } from '$lib/server/pending-updates-core';
+import { getImageDiskUsageTotalSize } from '$lib/server/docker-disk-usage-core';
 import { authorize } from '$lib/server/authorize';
 import { parseLabels } from '$lib/utils/label-colors';
 
@@ -239,9 +240,11 @@ export const GET: RequestHandler = async ({ cookies, url }) => {
 
 				// Process disk usage from /system/df for accurate size data
 				if (diskUsage) {
-					// Images: use Size from /system/df
+					// Images: use Docker's aggregate size so shared layers are counted once
 					envStats.images.total = diskUsage.Images?.length || images.length;
-					envStats.images.totalSize = diskUsage.Images?.reduce((sum: number, img: any) => sum + getValidSize(img.Size), 0) || 0;
+					envStats.images.totalSize = getImageDiskUsageTotalSize(diskUsage)
+						?? diskUsage.Images?.reduce((sum: number, img: any) => sum + getValidSize(img.Size), 0)
+						?? 0;
 
 					// Volumes: use UsageData.Size from /system/df
 					envStats.volumes.total = diskUsage.Volumes?.length || volumes.length;
