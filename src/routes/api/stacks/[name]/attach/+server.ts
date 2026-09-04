@@ -1,0 +1,247 @@
+import { json } from '@sveltejs/kit';
+import type { RequestHandler } from './$types';
+import { authorize } from '$lib/server/authorize';
+import {
+	createGitRepository,
+	createGitStack,
+	getGitCredentials,
+	getGitRepository,
+	getStackEnvVars,
+	getStackSource,
+	setStackEnvVars,
+	upsertStackSource
+} from '$lib/server/db';
+import { secureRandomBytes } from '$lib/server/crypto-fallback';
+import { registerSchedule } from '$lib/server/scheduler';
+import { auditGitStack, auditStack } from '$lib/server/audit';
+import { createJobResponse } from '$lib/server/sse';
+import { deployGitStack } from '$lib/server/git';
+import { getStackComposeFile } from '$lib/server/stacks';
+import { parseEnvVars } from '$lib/server/env-parser';
+import { existsSync, readFileSync } from 'node:fs';
+
+const STACK_NAME_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/;
+
+export const POST: RequestHandler = async (event) => {
+	const { params, request, url, cookies } = event;
+	const auth = await authorize(cookies);
+
+	const envId = url.searchParams.get('env');
+	const envIdNum = envId ? parseInt(envId, 10) : undefined;
+	const stackName = decodeURIComponent(params.name);
+
+	try {
+		if (auth.authEnabled && !(await auth.can('stacks', 'edit', envIdNum))) {
+			return json({ error: 'Permission denied' }, { status: 403 });
+		}
+
+		const source = await getStackSource(stackName, envIdNum);
+		if (!source) {
+			return json({ error: 'Stack not found' }, { status: 404 });
+		}
+
+		if (source.sourceType !== 'internal') {
+			return json({ error: 'Only local stacks can be converted to Git management' }, { status: 400 });
+		}
+
+		const data = await request.json();
+
+		if (
+			'secretProviderId' in data &&
+			data.secretProviderId !== null &&
+			typeof data.secretProviderId !== 'number'
+		) {
+			return json({ error: 'secretProviderId must be a number or null' }, { status: 400 });
+		}
+
+		const existingProviderId = source.secretProviderId ?? null;
+		const providerChanged =
+			'secretProviderId' in data && data.secretProviderId !== existingProviderId;
+
+		if (
+			providerChanged &&
+			typeof data.secretProviderId === 'number' &&
+			auth.authEnabled &&
+			!(await auth.can('secrets', 'view', envIdNum))
+		) {
+			return json({ error: 'Permission denied: binding a secret provider requires the secrets permission' }, { status: 403 });
+		}
+
+		if (data.stackName && data.stackName.trim() !== stackName) {
+			return json({ error: 'Stack name cannot be changed during conversion' }, { status: 400 });
+		}
+
+		if (!STACK_NAME_REGEX.test(stackName)) {
+			return json({ error: 'Invalid stack name' }, { status: 400 });
+		}
+
+		let repositoryId = data.repositoryId;
+
+		if (!repositoryId) {
+			if (!data.url || typeof data.url !== 'string') {
+				return json({ error: 'Repository URL or existing repository ID is required' }, { status: 400 });
+			}
+
+			if (data.credentialId) {
+				const credentials = await getGitCredentials();
+				const credential = credentials.find((c) => c.id === data.credentialId);
+				if (!credential) {
+					return json({ error: 'Invalid credential ID' }, { status: 400 });
+				}
+			}
+
+			try {
+				const repo = await createGitRepository({
+					name: data.repoName || stackName,
+					url: data.url,
+					branch: data.branch || 'main',
+					credentialId: data.credentialId || null
+				});
+				repositoryId = repo.id;
+			} catch (error: any) {
+				if (error.message?.includes('UNIQUE constraint failed')) {
+					return json({ error: 'A repository with this name already exists' }, { status: 400 });
+				}
+				throw error;
+			}
+		} else {
+			const repo = await getGitRepository(repositoryId);
+			if (!repo) {
+				return json({ error: 'Repository not found' }, { status: 400 });
+			}
+		}
+
+		let webhookSecret = data.webhookSecret;
+		if (data.webhookEnabled && !webhookSecret) {
+			webhookSecret = secureRandomBytes(32).toString('hex');
+		}
+
+		const gitStack = await createGitStack({
+			stackName,
+			environmentId: envIdNum ?? null,
+			repositoryId,
+			...(data.repositoryId && typeof data.branch === 'string' && data.branch.trim()
+				? { branch: data.branch.trim() }
+				: {}),
+			composePath: data.composePath || 'compose.yaml',
+			envFilePath: data.envFilePath || null,
+			autoUpdate: data.autoUpdate || false,
+			autoUpdateSchedule: data.autoUpdateSchedule || 'daily',
+			autoUpdateCron: data.autoUpdateCron || '0 3 * * *',
+			webhookEnabled: data.webhookEnabled || false,
+			webhookSecret,
+			contextDir: data.contextDir || null,
+			buildOnDeploy: data.buildOnDeploy ?? false,
+			noBuildCache: data.noBuildCache ?? false,
+			repullImages: data.repullImages ?? false,
+			forceRedeploy: data.forceRedeploy ?? false
+		});
+
+		await upsertStackSource({
+			stackName,
+			environmentId: envIdNum ?? null,
+			sourceType: 'git',
+			gitRepositoryId: repositoryId,
+			gitStackId: gitStack.id,
+			composePath: source.composePath ?? null,
+			envPath: source.envPath ?? null,
+			...(providerChanged ? { secretProviderId: data.secretProviderId ?? null } : {})
+		});
+
+		if (gitStack.autoUpdate && gitStack.autoUpdateCron) {
+			await registerSchedule(gitStack.id, 'git_stack_sync', gitStack.environmentId);
+		}
+
+		// reload env file on disk right before converting to avoid edge case where the file is modified on disk before the conversion happens.
+		// this only loads new variables, it does not overwrite them. the user using the interface should be the authoritative source of truth for
+		// the actual value
+		const composeResult = await getStackComposeFile(stackName, envIdNum ?? null);
+		const envFilePath = source.envPath === ''
+			? null
+			: source.envPath ?? composeResult.envPath ?? composeResult.suggestedEnvPath ?? null;
+		const fileVars = envFilePath && existsSync(envFilePath)
+			? parseEnvVars(readFileSync(envFilePath, 'utf-8'))
+			: null;
+		const dbVars = Array.isArray(data.envVars) ? data.envVars : null;
+
+		if (fileVars || dbVars) {
+			const existingVars = await getStackEnvVars(stackName, envIdNum ?? null, false);
+			const existingByKey = new Map(existingVars.map((variable) => [variable.key, variable]));
+			const varsToSave = new Map<string, { key: string; value: string; isSecret: boolean }>();
+
+			for (const [key, value] of Object.entries(fileVars ?? {})) {
+				varsToSave.set(key, { key, value, isSecret: false });
+			}
+
+			if (dbVars) {
+				for (const variable of dbVars) {
+					const key = variable.key?.trim();
+					if (!key) continue;
+
+					if (variable.isSecret && variable.value === '***') {
+						const existingVar = existingByKey.get(key);
+						if (existingVar?.isSecret) {
+							varsToSave.set(key, { key, value: existingVar.value, isSecret: true });
+						}
+						continue;
+					}
+
+					varsToSave.set(key, {
+						key,
+						value: variable.value ?? '',
+						isSecret: variable.isSecret ?? false
+					});
+				}
+			} else {
+				for (const variable of existingVars) {
+					if (variable.isSecret) {
+						varsToSave.set(variable.key, {
+							key: variable.key,
+							value: variable.value,
+							isSecret: true
+						});
+					}
+				}
+			}
+
+			await setStackEnvVars(stackName, envIdNum ?? null, Array.from(varsToSave.values()));
+		}
+
+		await auditStack(event, 'update', stackName, envIdNum ?? null, {
+			action: 'convert_to_git'
+		});
+		await auditGitStack(event, 'create', gitStack.id, gitStack.stackName, gitStack.environmentId, {
+			action: 'convert_from_internal'
+		});
+
+		if (data.deployNow) {
+			return createJobResponse(async (send) => {
+				try {
+					const deployResult = await deployGitStack(gitStack.id);
+					await auditGitStack(event, 'deploy', gitStack.id, gitStack.stackName, gitStack.environmentId);
+					send('result', {
+						...gitStack,
+						deployResult
+					});
+				} catch (error) {
+					console.error('Failed to deploy git stack:', error);
+					send('result', {
+						...gitStack,
+						deployResult: { success: false, error: 'Failed to deploy git stack' }
+					});
+				}
+			}, request);
+		}
+
+		return json(gitStack);
+	} catch (error: any) {
+		console.error('Failed to convert local stack to git:', error);
+		if (error.message?.includes('UNIQUE constraint failed')) {
+			if (error.message?.includes('stack_environment_variables')) {
+				return json({ error: 'Duplicate environment variable keys detected' }, { status: 400 });
+			}
+			return json({ error: 'A git stack with this name already exists for this environment' }, { status: 400 });
+		}
+		return json({ error: 'Failed to convert stack to Git management' }, { status: 500 });
+	}
+};

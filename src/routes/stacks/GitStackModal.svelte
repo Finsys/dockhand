@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { Button } from '$lib/components/ui/button';
+	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Select from '$lib/components/ui/select';
 	import { Label } from '$lib/components/ui/label';
@@ -75,15 +76,30 @@
 	interface Props {
 		open: boolean;
 		gitStack?: GitStack | null;
+		convertStackName?: string | null;
+		untrackedStackName?: string | null;
 		environmentId?: number | null;
 		icon?: string | null;
 		repositories: GitRepository[];
 		credentials: GitCredential[];
 		onClose: () => void;
+		onConvertToLocal?: (() => void) | null;
 		onSaved: () => void;
 	}
 
-	let { open = $bindable(), gitStack = null, environmentId = null, icon = null, repositories, credentials, onClose, onSaved }: Props = $props();
+	let {
+		open = $bindable(),
+		gitStack = null,
+		convertStackName = null,
+		untrackedStackName = null,
+		environmentId = null,
+		icon = null,
+		repositories,
+		credentials,
+		onClose,
+		onConvertToLocal = null,
+		onSaved
+	}: Props = $props();
 
 	// Per-stack icon override (same name-based /icon endpoint as internal stacks, #1473).
 	let formIcon = $state<string | null>(icon);
@@ -197,6 +213,8 @@
 	type SecretProviderOption = { id: number; name: string; type: string };
 	let secretProviders = $state<SecretProviderOption[]>([]);
 	let formSecretProviderId = $state<number | null>(null);
+	let secretProviderBindingLoaded = $state(false);
+	let secretProviderChanged = $state(false);
 	let injectedSecretKeys = $state<string[]>([]);
 
 	// Environment variables state
@@ -207,7 +225,9 @@
 	let fileEnvVars = $state<Record<string, string>>({});
 	let loadingFileVars = $state(false);
 	let existingSecretKeys = $state<Set<string>>(new Set());
+	let localStackEnvVarsLoaded = $state(false);
 	let populatingEnvVars = $state(false);
+	let confirmConvertToLocal = $state(false);
 
 	// Resizable split panel state
 	let splitRatio = $state(60); // percentage for form panel
@@ -218,6 +238,12 @@
 	// Track which gitStack was initialized to avoid repeated resets
 	let lastInitializedStackId = $state<number | null | undefined>(undefined);
 	let isInitializing = $state(false);
+	const isConvertMode = $derived(!!convertStackName && !gitStack);
+	const isUntrackedCreateMode = $derived(!!untrackedStackName && !gitStack);
+	const usesExistingStackName = $derived(isConvertMode || isUntrackedCreateMode);
+	const conversionDataReady = $derived(
+		!isConvertMode || (localStackEnvVarsLoaded && secretProviderBindingLoaded)
+	);
 
 	$effect(() => {
 		if (open) {
@@ -231,6 +257,10 @@
 			}
 		} else {
 			lastInitializedStackId = undefined;
+			confirmConvertToLocal = false;
+			localStackEnvVarsLoaded = false;
+			secretProviderBindingLoaded = false;
+			secretProviderChanged = false;
 		}
 	});
 
@@ -300,6 +330,10 @@
 
 	function getWebhookUrl(stackId: number): string {
 		return `${window.location.origin}/api/git/stacks/${stackId}/webhook`;
+	}
+
+	function withEnv(url: string): string {
+		return environmentId ? `${url}${url.includes('?') ? '&' : '?'}env=${environmentId}` : url;
 	}
 
 	async function copyWebhookField(text: string, type: 'url' | 'secret') {
@@ -376,6 +410,26 @@
 			}
 		} catch (e) {
 			console.error('Failed to load env var overrides:', e);
+		}
+	}
+
+	async function loadLocalStackEnvVars() {
+		if (!convertStackName) return;
+
+		try {
+			const response = await fetch(withEnv(`/api/stacks/${encodeURIComponent(convertStackName)}/env`));
+			if (response.ok) {
+				const data = await response.json();
+				const loadedVars = data.variables || [];
+				existingSecretKeys = new Set(
+					loadedVars.filter((v: EnvVar) => v.isSecret && v.key.trim()).map((v: EnvVar) => v.key.trim())
+				);
+				envVars = loadedVars;
+				injectedSecretKeys = data.injectedSecretKeys ?? [];
+				localStackEnvVarsLoaded = true;
+			}
+		} catch (e) {
+			console.error('Failed to load local stack env vars:', e);
 		}
 	}
 
@@ -469,6 +523,10 @@
 		envVars = [];
 		fileEnvVars = {};
 		existingSecretKeys = new Set();
+		injectedSecretKeys = [];
+		localStackEnvVarsLoaded = false;
+		secretProviderBindingLoaded = false;
+		secretProviderChanged = false;
 
 		if (gitStack) {
 			formRepoMode = 'existing';
@@ -488,9 +546,8 @@
 			formForceRedeploy = gitStack.forceRedeploy ?? false;
 			formDeployNow = false;
 			formSecretProviderId = null;
+			void loadSecretProviderBindingForStack(gitStack.stackName);
 
-			// Load secret provider binding
-			loadSecretProviderBindingForStack(gitStack.stackName);
 			// Per-stack branch override; null means "use the repository default"
 			formBranch = gitStack.branch ?? null;
 
@@ -501,15 +558,15 @@
 				loadEnvVarsOverrides(),
 				gitStack.envFilePath ? loadEnvFileContents(gitStack.envFilePath) : Promise.resolve()
 			]);
-		} else {
+		} else if (convertStackName) {
 			formRepoMode = repositories.length > 0 ? 'existing' : 'new';
 			formRepositoryId = null;
 			formNewRepoName = '';
 			formNewRepoUrl = '';
 			formNewRepoBranch = 'main';
 			formNewRepoCredentialId = null;
-			formStackName = '';
-			formStackNameUserModified = false;
+			formStackName = convertStackName;
+			formStackNameUserModified = true;
 			formComposePath = 'compose.yaml';
 			formEnvFilePath = null;
 			formAutoUpdate = false;
@@ -523,6 +580,37 @@
 			formForceRedeploy = false;
 			formDeployNow = false;
 			formSecretProviderId = null;
+			formBranch = null;
+
+			await Promise.all([
+				loadLocalStackEnvVars(),
+				loadSecretProviderBindingForStack(convertStackName)
+			]);
+			if (!localStackEnvVarsLoaded || !secretProviderBindingLoaded) {
+				formError = 'Failed to load the current stack settings. Close and reopen this dialog to retry.';
+			}
+		} else {
+			formRepoMode = repositories.length > 0 ? 'existing' : 'new';
+			formRepositoryId = null;
+			formNewRepoName = '';
+			formNewRepoUrl = '';
+			formNewRepoBranch = 'main';
+			formNewRepoCredentialId = null;
+			formStackName = untrackedStackName || '';
+			formStackNameUserModified = !!untrackedStackName;
+			formComposePath = 'compose.yaml';
+			formEnvFilePath = null;
+			formAutoUpdate = false;
+			formAutoUpdateCron = '0 3 * * *';
+			formWebhookEnabled = false;
+			formWebhookSecret = '';
+			formContextDir = null;
+			formBuildOnDeploy = false;
+			formNoBuildCache = false;
+			formRepullImages = false;
+			formForceRedeploy = false;
+			formDeployNow = !!untrackedStackName;
+			formSecretProviderId = null;
 		}
 	}
 
@@ -533,7 +621,11 @@
 			if (!response.ok) return;
 			const sourceMap = await response.json();
 			const source = sourceMap?.[stackName];
-			formSecretProviderId = source?.secretProviderId ?? null;
+			if (!source) return;
+			if (!secretProviderChanged) {
+				formSecretProviderId = source.secretProviderId ?? null;
+			}
+			secretProviderBindingLoaded = true;
 		} catch (e) {
 			console.warn('Failed to load secret provider binding for git stack:', e);
 		}
@@ -575,6 +667,8 @@
 	}
 
 	async function saveGitStack(deployAfterSave: boolean = false) {
+		if (isInitializing || !conversionDataReady) return;
+
 		errors = {};
 		let hasErrors = false;
 
@@ -611,8 +705,9 @@
 
 		if (hasErrors) return;
 
-		// Check if stack already exists (only for new stacks)
-		if (!gitStack) {
+		// Check if stack already exists only when a new project name is being created.
+		// Internal conversions and explicit untracked takeovers reuse an existing name.
+		if (!gitStack && !usesExistingStackName) {
 			try {
 				const stacksResponse = await fetch(`/api/stacks?env=${environmentId}`);
 				if (stacksResponse.ok) {
@@ -657,13 +752,20 @@
 				noBuildCache: formNoBuildCache,
 				repullImages: formRepullImages,
 				forceRedeploy: formForceRedeploy,
-				deployNow: deployAfterSave,
-				secretProviderId: formSecretProviderId,
-				envVars: overrideVars.map(v => ({
-					key: v.key.trim(),
-					value: v.value,
-					isSecret: v.isSecret
-				}))
+				deployNow: isUntrackedCreateMode || deployAfterSave,
+				...((isConvertMode && !secretProviderBindingLoaded) ||
+					(gitStack && !secretProviderBindingLoaded && !secretProviderChanged)
+					? {}
+					: { secretProviderId: formSecretProviderId }),
+				...(isConvertMode && !localStackEnvVarsLoaded
+					? {}
+					: {
+						envVars: overrideVars.map(v => ({
+							key: v.key.trim(),
+							value: v.value,
+							isSecret: v.isSecret
+						}))
+					})
 			};
 
 			if (formRepoMode === 'existing') {
@@ -681,7 +783,9 @@
 
 			const url = gitStack
 				? `/api/git/stacks/${gitStack.id}`
-				: '/api/git/stacks';
+				: convertStackName
+					? withEnv(`/api/stacks/${encodeURIComponent(convertStackName)}/attach`)
+					: '/api/git/stacks';
 			const method = gitStack ? 'PUT' : 'POST';
 
 			const response = await fetch(url, {
@@ -690,10 +794,10 @@
 				body: JSON.stringify(body)
 			});
 
-			const data = await readJobResponse(response);
+			const data: any = await readJobResponse(response);
 
 			if (!response.ok) {
-				formError = data.error || 'Failed to save git stack';
+				formError = data.error || (convertStackName ? 'Failed to convert stack to Git management' : 'Failed to save git stack');
 				return;
 			}
 
@@ -791,10 +895,10 @@
 					{/if}
 					<div>
 						<Dialog.Title class="text-sm font-semibold text-zinc-800 dark:text-zinc-100">
-							{gitStack ? 'Edit git stack' : 'Deploy from Git'}
+							{gitStack ? 'Edit git stack' : isConvertMode ? 'Convert to Git' : 'Deploy from Git'}
 						</Dialog.Title>
 						<Dialog.Description class="text-xs text-zinc-500 dark:text-zinc-400">
-							{gitStack ? 'Update git stack settings' : 'Deploy a compose stack from a Git repository'}
+							{gitStack ? 'Update git stack settings' : isConvertMode ? 'Attach this local stack to a Git repository' : 'Deploy a compose stack from a Git repository'}
 						</Dialog.Description>
 					</div>
 				</div>
@@ -1050,6 +1154,7 @@
 					bind:value={formStackName}
 					placeholder="e.g., my-app"
 					class={errors.stackName ? 'border-destructive focus-visible:ring-destructive' : ''}
+					disabled={usesExistingStackName}
 					oninput={() => { errors.stackName = undefined; formStackNameUserModified = true; }}
 				/>
 				{#if errors.stackName}
@@ -1329,7 +1434,7 @@
 								<p class="text-xs text-muted-foreground">Clone and deploy the stack immediately</p>
 							</div>
 						</div>
-						<TogglePill bind:checked={formDeployNow} />
+						<TogglePill bind:checked={formDeployNow} disabled={isUntrackedCreateMode} />
 					</div>
 				</div>
 			{/if}
@@ -1359,15 +1464,16 @@
 					bind:secretProviderId={formSecretProviderId}
 					bind:envVars
 					providers={secretProviders}
+					onchange={() => (secretProviderChanged = true)}
 				/>
 				<StackEnvVarsPanel
 					bind:variables={envVars}
-					injectedSecretKeys={gitStack !== null ? injectedSecretKeys : []}
+					injectedSecretKeys={gitStack !== null || isConvertMode ? injectedSecretKeys : []}
 					providerType={secretProviders.find((p) => p.id === formSecretProviderId)?.type ?? null}
 					providerName={secretProviders.find((p) => p.id === formSecretProviderId)?.name ?? null}
 					placeholder={{ key: 'MY_VAR', value: 'value' }}
 					infoText="Override variables from your repository env files. Non-secrets are saved to <code class='bg-muted px-1 rounded'>.env.dockhand</code> in the stack directory. Secrets are stored in the database and injected via shell environment at deploy time.<br/><br/>Variables are available for <strong>compose file interpolation</strong> using <code class='bg-muted px-1 rounded'>${'{VAR_NAME}'}</code> syntax. They are not automatically injected into containers — use <code class='bg-muted px-1 rounded'>environment:</code> or reference <code class='bg-muted px-1 rounded'>.env.dockhand</code> in <code class='bg-muted px-1 rounded'>env_file:</code> to pass them through."
-					existingSecretKeys={gitStack !== null ? existingSecretKeys : new Set()}
+					existingSecretKeys={gitStack !== null || isConvertMode ? existingSecretKeys : new Set()}
 					showInterpolationHint={true}
 				>
 					{#snippet headerActions()}
@@ -1408,39 +1514,63 @@
 		{/if}
 
 		<Dialog.Footer class="px-5 py-2.5 border-t border-zinc-200 dark:border-zinc-700 flex-shrink-0">
-			<Button variant="outline" onclick={onClose}>{activeTab === 'backups' ? 'Close' : 'Cancel'}</Button>
-			<!-- The deploy-form save buttons belong to the Settings tab. On the Backups
-			     tab the backup panel manages its own saving, so only Close is shown. -->
-			{#if activeTab !== 'backups'}
-				{#if gitStack}
-					<Button variant="outline" onclick={() => saveGitStack(true)} disabled={formSaving}>
-						{#if formSaving}
-							<Loader2 class="w-4 h-4 mr-1 animate-spin" />
-							Deploying...
+			<div class="flex items-center justify-between w-full gap-2">
+				<div class="flex items-center gap-2">
+					{#if activeTab !== 'backups' && gitStack && onConvertToLocal}
+						<ConfirmPopover
+							open={confirmConvertToLocal}
+							action="Convert"
+							itemType="stack"
+							itemName={gitStack.stackName}
+							title="Convert to local source"
+							onConfirm={onConvertToLocal}
+							onOpenChange={(open) => (confirmConvertToLocal = open)}
+						>
+							{#snippet children()}
+								<Button variant="outline" disabled={formSaving}>
+									<FileText class="w-4 h-4" />
+									Convert to local
+								</Button>
+							{/snippet}
+						</ConfirmPopover>
+					{/if}
+				</div>
+				<div class="flex items-center gap-2">
+					<Button variant="outline" onclick={onClose}>{activeTab === 'backups' ? 'Close' : 'Cancel'}</Button>
+					<!-- The deploy-form save buttons belong to the Settings tab. On the Backups
+					     tab the backup panel manages its own saving, so only Close is shown. -->
+					{#if activeTab !== 'backups'}
+						{#if gitStack}
+							<Button variant="outline" onclick={() => saveGitStack(true)} disabled={formSaving || isInitializing || !conversionDataReady}>
+								{#if formSaving}
+									<Loader2 class="w-4 h-4 mr-1 animate-spin" />
+									Deploying...
+								{:else}
+									<Rocket class="w-4 h-4" />
+									Save and deploy
+								{/if}
+							</Button>
+							<Button onclick={() => saveGitStack(false)} disabled={formSaving || isInitializing || !conversionDataReady}>
+								{#if formSaving}
+									<Loader2 class="w-4 h-4 mr-1 animate-spin" />
+									Saving...
+								{:else}
+									Save changes
+								{/if}
+							</Button>
 						{:else}
-							<Rocket class="w-4 h-4" />
-							Save and deploy
+							<Button onclick={() => saveGitStack(formDeployNow)} disabled={formSaving || isInitializing || !conversionDataReady}>
+								{#if formSaving}
+									<Loader2 class="w-4 h-4 mr-1 animate-spin" />
+									{formDeployNow ? 'Deploying...' : isConvertMode ? 'Converting...' : 'Creating...'}
+								{:else}
+									{formDeployNow ? 'Deploy' : isConvertMode ? 'Convert' : 'Create'}
+								{/if}
+							</Button>
 						{/if}
-					</Button>
-					<Button onclick={() => saveGitStack(false)} disabled={formSaving}>
-						{#if formSaving}
-							<Loader2 class="w-4 h-4 mr-1 animate-spin" />
-							Saving...
-						{:else}
-							Save changes
-						{/if}
-					</Button>
-				{:else}
-					<Button onclick={() => saveGitStack(formDeployNow)} disabled={formSaving}>
-						{#if formSaving}
-							<Loader2 class="w-4 h-4 mr-1 animate-spin" />
-							{formDeployNow ? 'Deploying...' : 'Creating...'}
-						{:else}
-							{formDeployNow ? 'Deploy' : 'Create'}
-						{/if}
-					</Button>
-				{/if}
-			{/if}
+					{/if}
+				</div>
+			</div>
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>
