@@ -488,7 +488,9 @@ export const scheduleExecutions = sqliteTable('schedule_executions', {
 	logs: text('logs'), // Execution logs/output
 	createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`)
 }, (table) => ({
-	typeIdIdx: index('schedule_executions_type_id_idx').on(table.scheduleType, table.scheduleId)
+	typeIdIdx: index('schedule_executions_type_id_idx').on(table.scheduleType, table.scheduleId),
+	// Powers "runs for this stack/container" lookups without a full table scan.
+	entityEnvIdx: index('schedule_executions_entity_env_idx').on(table.entityName, table.environmentId)
 }));
 
 // =============================================================================

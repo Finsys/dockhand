@@ -29,6 +29,7 @@
 	import type { ComposeStackInfo, ContainerStats, StackContainer } from '$lib/types';
 	import StackModal from './StackModal.svelte';
 	import DeleteStackModal from './DeleteStackModal.svelte';
+	import ComposeOutputModal from './ComposeOutputModal.svelte';
 	import GitSourceBadge from './GitSourceBadge.svelte';
 	import GitStackModal from './GitStackModal.svelte';
 	import ImportStackModal from './ImportStackModal.svelte';
@@ -520,6 +521,52 @@
 	let restartPopoverOpen = $state<Record<string, boolean>>({});
 	let stackDownLoading = $state<string | null>(null);
 
+	// Live compose output window: shown while a stack action (start/stop/restart/
+	// redeploy/down) runs, fed line-by-line via readJobResponse's onLine callback.
+	let composeOutputOpen = $state(false);
+	let composeOutputTitle = $state('');
+	let composeOutputLines = $state<string[]>([]);
+	let composeOutputRunning = $state(false);
+	// Status-line inputs, measured here in the browser (wall-clock incl. the round
+	// trip through fetch/polling) — NOT the server-side execution time recorded
+	// separately for the deploy-history dataset (Task 10). Different path, different
+	// number; don't conflate the two.
+	let composeOutputStartedAt = 0;
+	let composeOutputOk = $state<boolean | undefined>(undefined);
+	let composeOutputMs = $state<number | undefined>(undefined);
+	let composeOutputExitCode = $state<number | undefined>(undefined);
+
+	function startComposeOutput(title: string) {
+		composeOutputTitle = title;
+		composeOutputLines = [];
+		composeOutputRunning = true;
+		composeOutputOpen = true;
+		composeOutputStartedAt = Date.now();
+		composeOutputOk = undefined;
+		composeOutputMs = undefined;
+		composeOutputExitCode = undefined;
+	}
+
+	function appendComposeOutputLine(line: string) {
+		composeOutputLines = [...composeOutputLines, line];
+	}
+
+	// Called once the job settles. Older agent versions (pre line-streaming, see Task 5)
+	// only return a batched `output` string — show it if nothing arrived incrementally.
+	// `ok`/`exitCode` come from the job result (or `false`/undefined on a thrown
+	// network error, from the catch blocks below) — the payload does not carry an
+	// exit code today (StackOperationResult has no such field, see stacks.ts), so
+	// `exitCode` stays undefined in practice until the server starts sending one.
+	function finishComposeOutput(output: string | undefined, ok: boolean, exitCode?: number) {
+		composeOutputRunning = false;
+		composeOutputOk = ok;
+		composeOutputMs = Date.now() - composeOutputStartedAt;
+		composeOutputExitCode = exitCode;
+		if (composeOutputLines.length === 0 && output) {
+			composeOutputLines = output.split('\n');
+		}
+	}
+
 	// Container-level confirmation popover state
 	let confirmStopContainerId = $state<string | null>(null);
 	let confirmRestartContainerId = $state<string | null>(null);
@@ -965,9 +1012,15 @@
 	async function startStack(name: string) {
 		operationError = null;
 		stackActionLoading = name;
+		startComposeOutput(`Starting ${name}`);
 		try {
 			const response = await fetch(appendEnvParam(`/api/stacks/${encodeURIComponent(name)}/start`, envId), { method: 'POST' });
-			const data = await readJobResponse(response);
+			const data = await readJobResponse(response, appendComposeOutputLine);
+			finishComposeOutput(
+				typeof data.output === 'string' ? data.output : undefined,
+				Boolean(data.success),
+				typeof data.exitCode === 'number' ? data.exitCode : undefined
+			);
 			if (!data.success) {
 				showErrorDialog(`Failed to start ${name}`, data.error || 'Failed to start stack');
 				return;
@@ -975,6 +1028,7 @@
 			toast.success(`Started ${name}`);
 			await fetchStacks();
 		} catch (error) {
+			finishComposeOutput(undefined, false);
 			console.error('Failed to start stack:', error);
 			const errorMsg = error instanceof Error ? error.message : 'Failed to start stack';
 			showErrorDialog(`Failed to start ${name}`, errorMsg);
@@ -986,9 +1040,15 @@
 	async function stopStack(name: string) {
 		operationError = null;
 		stackActionLoading = name;
+		startComposeOutput(`Stopping ${name}`);
 		try {
 			const response = await fetch(appendEnvParam(`/api/stacks/${encodeURIComponent(name)}/stop`, envId), { method: 'POST' });
-			const data = await readJobResponse(response);
+			const data = await readJobResponse(response, appendComposeOutputLine);
+			finishComposeOutput(
+				typeof data.output === 'string' ? data.output : undefined,
+				Boolean(data.success),
+				typeof data.exitCode === 'number' ? data.exitCode : undefined
+			);
 			if (!data.success) {
 				showErrorDialog(`Failed to stop ${name}`, data.error || 'Failed to stop stack');
 				return;
@@ -996,6 +1056,7 @@
 			toast.success(`Stopped ${name}`);
 			await fetchStacks();
 		} catch (error) {
+			finishComposeOutput(undefined, false);
 			console.error('Failed to stop stack:', error);
 			const errorMsg = error instanceof Error ? error.message : 'Failed to stop stack';
 			showErrorDialog(`Failed to stop ${name}`, errorMsg);
@@ -1007,13 +1068,19 @@
 	async function restartStack(name: string, mode: 'restart' | 'ordered' | 'recreate' = 'restart') {
 		operationError = null;
 		stackActionLoading = name;
+		startComposeOutput(mode === 'recreate' ? `Recreating ${name}` : `Restarting ${name}`);
 		try {
 			let url = appendEnvParam(`/api/stacks/${encodeURIComponent(name)}/restart`, envId);
 			if (mode === 'recreate' || mode === 'ordered') {
 				url += (url.includes('?') ? '&' : '?') + `mode=${mode}`;
 			}
 			const response = await fetch(url, { method: 'POST' });
-			const data = await readJobResponse(response);
+			const data = await readJobResponse(response, appendComposeOutputLine);
+			finishComposeOutput(
+				typeof data.output === 'string' ? data.output : undefined,
+				Boolean(data.success),
+				typeof data.exitCode === 'number' ? data.exitCode : undefined
+			);
 			if (!data.success) {
 				showErrorDialog(`Failed to restart ${name}`, data.error || 'Failed to restart stack');
 				return;
@@ -1021,6 +1088,7 @@
 			toast.success(mode === 'recreate' ? `Recreated ${name}` : `Restarted ${name}`);
 			await fetchStacks();
 		} catch (error) {
+			finishComposeOutput(undefined, false);
 			console.error('Failed to restart stack:', error);
 			const errorMsg = error instanceof Error ? error.message : 'Failed to restart stack';
 			showErrorDialog(`Failed to restart ${name}`, errorMsg);
@@ -1032,13 +1100,19 @@
 	async function redeployStack(name: string, options: { pull: boolean; build: boolean; forceRecreate: boolean }) {
 		operationError = null;
 		stackActionLoading = name;
+		startComposeOutput(`Redeploying ${name}`);
 		try {
 			const response = await fetch(appendEnvParam(`/api/stacks/${encodeURIComponent(name)}/deploy`, envId), {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify(options)
 			});
-			const data = await readJobResponse(response);
+			const data = await readJobResponse(response, appendComposeOutputLine);
+			finishComposeOutput(
+				typeof data.output === 'string' ? data.output : undefined,
+				Boolean(data.success),
+				typeof data.exitCode === 'number' ? data.exitCode : undefined
+			);
 			if (!data.success) {
 				showErrorDialog(`Failed to redeploy ${name}`, data.error || 'Failed to redeploy stack');
 				return;
@@ -1046,6 +1120,7 @@
 			toast.success(`Redeployed ${name}`);
 			await fetchStacks();
 		} catch (error) {
+			finishComposeOutput(undefined, false);
 			console.error('Failed to redeploy stack:', error);
 			const errorMsg = error instanceof Error ? error.message : 'Failed to redeploy stack';
 			showErrorDialog(`Failed to redeploy ${name}`, errorMsg);
@@ -1058,9 +1133,15 @@
 		operationError = null;
 		stackActionLoading = name;
 		stackDownLoading = name;
+		startComposeOutput(`Bringing down ${name}`);
 		try {
 			const response = await fetch(appendEnvParam(`/api/stacks/${encodeURIComponent(name)}/down`, envId), { method: 'POST' });
-			const data = await readJobResponse(response);
+			const data = await readJobResponse(response, appendComposeOutputLine);
+			finishComposeOutput(
+				typeof data.output === 'string' ? data.output : undefined,
+				Boolean(data.success),
+				typeof data.exitCode === 'number' ? data.exitCode : undefined
+			);
 			if (!data.success) {
 				showErrorDialog(`Failed to bring down ${name}`, data.error || 'Failed to bring down stack');
 				return;
@@ -1068,6 +1149,7 @@
 			toast.success(`Brought down ${name}`);
 			await fetchStacks();
 		} catch (error) {
+			finishComposeOutput(undefined, false);
 			console.error('Failed to bring down stack:', error);
 			const errorMsg = error instanceof Error ? error.message : 'Failed to bring down stack';
 			showErrorDialog(`Failed to bring down ${name}`, errorMsg);
@@ -2762,6 +2844,16 @@
 	stackName={deleteStackName}
 	envId={envId ?? null}
 	onConfirm={(opts) => removeStack(deleteStackName, opts)}
+/>
+
+<ComposeOutputModal
+	bind:open={composeOutputOpen}
+	title={composeOutputTitle}
+	lines={composeOutputLines}
+	running={composeOutputRunning}
+	ok={composeOutputOk}
+	ms={composeOutputMs}
+	exitCode={composeOutputExitCode}
 />
 
 <ContainerInspectModal

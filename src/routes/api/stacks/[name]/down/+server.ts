@@ -46,7 +46,7 @@ export const POST: RequestHandler = async (event) => {
 	return createJobResponse(async (send) => {
 		try {
 			const stackName = decodeURIComponent(params.name);
-			const result = await downStack(stackName, envIdNum, removeVolumes);
+			const result = await downStack(stackName, envIdNum, removeVolumes, (line) => send('progress', { type: 'line', line }));
 
 			// Audit log
 			await auditStack(event, 'down', stackName, envIdNum, { removeVolumes });

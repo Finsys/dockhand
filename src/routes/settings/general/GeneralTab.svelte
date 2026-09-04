@@ -91,6 +91,8 @@ services:
 	let eventCleanupEnabled = $derived($appSettings.eventCleanupEnabled);
 	let scannerCleanupCron = $derived($appSettings.scannerCleanupCron);
 	let scannerCleanupEnabled = $derived($appSettings.scannerCleanupEnabled);
+	let deployLogReconcileCron = $derived($appSettings.deployLogReconcileCron);
+	let deployLogReconcileEnabled = $derived($appSettings.deployLogReconcileEnabled);
 	let logMaxLines = $derived($appSettings.logMaxLines);
 	let formatLogTimestamps = $derived($appSettings.formatLogTimestamps);
 	let defaultTimezone = $derived($appSettings.defaultTimezone);
@@ -185,6 +187,17 @@ services:
 		const newState = !scannerCleanupEnabled;
 		appSettings.setScannerCleanupEnabled(newState);
 		toast.success(newState ? 'Scanner cleanup enabled' : 'Scanner cleanup disabled');
+	}
+
+	function handleDeployLogReconcileCronChange(cron: string) {
+		appSettings.setDeployLogReconcileCron(cron);
+		toast.success('Deploy log reconcile cron updated');
+	}
+
+	function handleDeployLogReconcileEnabledChange() {
+		const newState = !deployLogReconcileEnabled;
+		appSettings.setDeployLogReconcileEnabled(newState);
+		toast.success(newState ? 'Deploy log reconcile enabled' : 'Deploy log reconcile disabled');
 	}
 
 	function handleGrypeImageBlur(e: Event) {
@@ -1116,6 +1129,26 @@ services:
 								<CronEditor
 									value={scannerCleanupCron}
 									onchange={handleScannerCleanupCronChange}
+									disabled={!$canAccess('settings', 'edit')}
+								/>
+							</div>
+						{/if}
+					</div>
+					<div class="space-y-1 pt-2 border-t">
+						<div class="flex items-center gap-3">
+							<Label>Deploy log reconcile</Label>
+							<TogglePill
+								checked={deployLogReconcileEnabled}
+								onchange={handleDeployLogReconcileEnabledChange}
+								disabled={!$canAccess('settings', 'edit')}
+							/>
+						</div>
+						<p class="text-xs text-muted-foreground">Delete deploy-log files that no longer have a matching deploy record; deploy records that lost their log file are only flagged, never deleted</p>
+						{#if deployLogReconcileEnabled}
+							<div class="mt-2">
+								<CronEditor
+									value={deployLogReconcileCron}
+									onchange={handleDeployLogReconcileCronChange}
 									disabled={!$canAccess('settings', 'edit')}
 								/>
 							</div>

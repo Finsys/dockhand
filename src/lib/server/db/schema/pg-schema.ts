@@ -490,7 +490,9 @@ export const scheduleExecutions = pgTable('schedule_executions', {
 	logs: text('logs'), // Execution logs/output
 	createdAt: timestamp('created_at', { mode: 'string' }).defaultNow()
 }, (table) => ({
-	typeIdIdx: index('schedule_executions_type_id_idx').on(table.scheduleType, table.scheduleId)
+	typeIdIdx: index('schedule_executions_type_id_idx').on(table.scheduleType, table.scheduleId),
+	// Powers "runs for this stack/container" lookups without a full table scan.
+	entityEnvIdx: index('schedule_executions_entity_env_idx').on(table.entityName, table.environmentId)
 }));
 
 // =============================================================================

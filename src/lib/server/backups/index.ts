@@ -962,6 +962,12 @@ function restorePorts(destination: any, access: { isEnterprise: boolean; canAcce
 					log(`registered: composePath=${composePath} envPath=${envPath ?? '(none)'}`);
 				},
 				deploy: async () => {
+					// Deliberately does NOT create a stack_deploy run record: this call goes
+					// straight to redeployStackFromDir (stacks.ts), not through the
+					// deployGitStack()/compose-route path that createRunRecorder is wired
+					// into. A backup restore's redeploy could get its own recorder the same
+					// way -- there is nothing structural stopping it -- it just hasn't been
+					// done yet.
 					const r = await redeployStackFromDir(name, stackDir, composeFileName, envId ?? undefined);
 					if (!r.success) throw new Error(r.error || 'docker compose up failed');
 				}

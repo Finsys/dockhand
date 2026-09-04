@@ -32,6 +32,8 @@ export interface AppSettings {
 	eventCleanupEnabled: boolean;
 	scannerCleanupCron: string;
 	scannerCleanupEnabled: boolean;
+	deployLogReconcileCron: string;
+	deployLogReconcileEnabled: boolean;
 	logBufferSizeKb: number;  // legacy, retained for migration — UI uses logMaxLines
 	logMaxLines: number;       // line-count cap for the log buffer (replaces KB-based limit)
 	defaultTimezone: string;
@@ -77,6 +79,8 @@ const DEFAULT_SETTINGS: AppSettings = {
 	eventCleanupEnabled: true,
 	scannerCleanupCron: '0 3 * * 0',
 	scannerCleanupEnabled: true,
+	deployLogReconcileCron: '0 4 * * *',
+	deployLogReconcileEnabled: true,
 	logBufferSizeKb: 500,
 	logMaxLines: 2000,
 	defaultTimezone: 'UTC',
@@ -167,6 +171,8 @@ function createSettingsStore() {
 					eventCleanupEnabled: settings.eventCleanupEnabled ?? DEFAULT_SETTINGS.eventCleanupEnabled,
 					scannerCleanupCron: settings.scannerCleanupCron ?? DEFAULT_SETTINGS.scannerCleanupCron,
 					scannerCleanupEnabled: settings.scannerCleanupEnabled ?? DEFAULT_SETTINGS.scannerCleanupEnabled,
+					deployLogReconcileCron: settings.deployLogReconcileCron ?? DEFAULT_SETTINGS.deployLogReconcileCron,
+					deployLogReconcileEnabled: settings.deployLogReconcileEnabled ?? DEFAULT_SETTINGS.deployLogReconcileEnabled,
 					logBufferSizeKb: settings.logBufferSizeKb ?? DEFAULT_SETTINGS.logBufferSizeKb,
 					logMaxLines: deriveLogMaxLines(settings),
 					defaultTimezone: settings.defaultTimezone ?? DEFAULT_SETTINGS.defaultTimezone,
@@ -227,6 +233,8 @@ function createSettingsStore() {
 					eventCleanupEnabled: updatedSettings.eventCleanupEnabled ?? DEFAULT_SETTINGS.eventCleanupEnabled,
 					scannerCleanupCron: updatedSettings.scannerCleanupCron ?? DEFAULT_SETTINGS.scannerCleanupCron,
 					scannerCleanupEnabled: updatedSettings.scannerCleanupEnabled ?? DEFAULT_SETTINGS.scannerCleanupEnabled,
+					deployLogReconcileCron: updatedSettings.deployLogReconcileCron ?? DEFAULT_SETTINGS.deployLogReconcileCron,
+					deployLogReconcileEnabled: updatedSettings.deployLogReconcileEnabled ?? DEFAULT_SETTINGS.deployLogReconcileEnabled,
 					logBufferSizeKb: updatedSettings.logBufferSizeKb ?? DEFAULT_SETTINGS.logBufferSizeKb,
 					logMaxLines: deriveLogMaxLines(updatedSettings),
 					defaultTimezone: updatedSettings.defaultTimezone ?? DEFAULT_SETTINGS.defaultTimezone,
@@ -413,6 +421,20 @@ function createSettingsStore() {
 			update((current) => {
 				const newSettings = { ...current, scannerCleanupEnabled: value };
 				saveSettings({ scannerCleanupEnabled: value });
+				return newSettings;
+			});
+		},
+		setDeployLogReconcileCron: (value: string) => {
+			update((current) => {
+				const newSettings = { ...current, deployLogReconcileCron: value };
+				saveSettings({ deployLogReconcileCron: value });
+				return newSettings;
+			});
+		},
+		setDeployLogReconcileEnabled: (value: boolean) => {
+			update((current) => {
+				const newSettings = { ...current, deployLogReconcileEnabled: value };
+				saveSettings({ deployLogReconcileEnabled: value });
 				return newSettings;
 			});
 		},

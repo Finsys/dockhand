@@ -11,9 +11,10 @@
 	import { SELECTOR_VARS } from '$lib/utils/bulk-selector';
 	import { classifyMarker, resolvedRefVarNames } from '$lib/utils/invault-markers';
 	import { applyQuickFix, findingKey } from '$lib/utils/compose-quick-fix';
-	import { Layers, Save, Play, Code, GitGraph, GitBranch, GitCommitHorizontal, Github, Loader2, AlertCircle, X, Sun, Moon, TriangleAlert, GripVertical, FolderOpen, Copy, Check, XCircle, MapPin, ArrowRight, ArrowDown, Info, Box, FolderSync, Archive, ListChecks } from 'lucide-svelte';
+	import { Layers, Save, Play, Code, GitGraph, GitBranch, GitCommitHorizontal, Github, Loader2, AlertCircle, X, Sun, Moon, TriangleAlert, GripVertical, GripHorizontal, FolderOpen, Copy, Check, XCircle, MapPin, ArrowRight, ArrowDown, Info, Box, FolderSync, Archive, ListChecks, History, ChevronDown } from 'lucide-svelte';
 	import ComposeValidatePanel from './ComposeValidatePanel.svelte';
 	import BackupPanel from '../containers/BackupPanel.svelte';
+	import DeploysPanel from './DeploysPanel.svelte';
 	import { volumesForStack, type VolumeInfo } from '$lib/utils/mounts';
 	import { fetchBackupExecutions } from '$lib/utils/backup';
 	import type { Component } from 'svelte';
@@ -32,12 +33,33 @@
 	import * as Alert from '$lib/components/ui/alert';
 	import { ErrorDialog } from '$lib/components/ui/error-dialog';
 	import { readJobResponse } from '$lib/utils/sse-fetch';
+	import { saveCloseTiming } from '$lib/utils/save-close-policy';
+	import { clampNumber } from '$lib/utils/clamp-number';
+	import LogViewer from '$lib/components/LogViewer.svelte';
+	import { formatRunStatus } from '$lib/utils/run-status';
 	import { toast } from 'svelte-sonner';
 	import ComposeGraphViewer from './ComposeGraphViewer.svelte';
+	import RedeployPopover from './RedeployPopover.svelte';
+	import { hasBuildSection as detectBuildSection } from '$lib/utils/compose-build-detect';
 
 
 	// localStorage key for persisted split ratio
 	const STORAGE_KEY_SPLIT = 'dockhand-stack-modal-split';
+	// Own key: this ratio has nothing to do with the compose/env split ratio above --
+	// reusing STORAGE_KEY_SPLIT would mean resizing the editor/env divider also resizes
+	// the unrelated output panel on the next load.
+	const STORAGE_KEY_OUTPUT_SPLIT = 'dockhand-stack-modal-output-split';
+
+	// How long a successful deploy leaves the modal open before auto-closing, so the
+	// operator still glimpses the success and the compose output before it goes away
+	// (operator decision, 30.08.2026 -- see save-close-policy.ts). The plain-save flash-
+	// then-close delay (500ms, below) predates this and is left as it was.
+	const DEPLOY_SUCCESS_CLOSE_DELAY_MS = 1500;
+
+	// Options picked in the RedeployPopover next to "Save & redeploy" / "Create & Start"
+	// (see the pull/build/forceRecreate contract RedeployPopover.svelte already uses for
+	// the stack-grid redeploy actions).
+	type DeployOptions = { pull: boolean; build: boolean; forceRecreate: boolean };
 
 	interface Props {
 		open: boolean;
@@ -115,7 +137,29 @@
 	let loadError = $state<string | null>(null);
 	let errors = $state<{ stackName?: string; compose?: string }>({});
 	let composeContent = $state('');
-	let activeTab = $state<'editor' | 'graph' | 'backups'>('editor');
+	// Whether the current compose content declares a build: section for any service --
+	// pre-checks "Build images" in the Save & redeploy / Create & Start popover
+	// (RedeployPopover's defaultBuild). Logic lives in compose-build-detect.ts, not
+	// inline, so it has its own unit test independent of mounting this component.
+	let hasBuildSection = $derived(detectBuildSection(composeContent));
+	// Single source of truth for "what does a direct click on the main button do",
+	// shared between the button's own onclick AND the split-button popover's
+	// defaultPull/defaultBuild/defaultForceRecreate props next to it -- so the two
+	// paths (one-click vs pick-then-Deploy) can never drift into deploying with
+	// different options for what looks like the same defaults.
+	//
+	// pull is always false on both: Save/Create already run against whatever images
+	// are already local, pulling is an explicit extra step the operator reaches for
+	// via the popover, not something either main button does silently.
+	//
+	// forceRecreate differs: Save & redeploy defaults to true, preserving the
+	// endpoint's prior always-on behavior (env var changes need --force-recreate to
+	// take effect) now that it's a real choice instead of hardcoded. Create & Start
+	// defaults to false -- there is nothing to recreate on a stack that doesn't exist
+	// yet.
+	let saveRedeployDefaults = $derived<DeployOptions>({ pull: false, build: hasBuildSection, forceRecreate: true });
+	let createStartDefaults = $derived<DeployOptions>({ pull: false, build: hasBuildSection, forceRecreate: false });
+	let activeTab = $state<'editor' | 'graph' | 'backups' | 'deploys'>('editor');
 	let backupCount = $state(0);
 	let backupTally = $state<{ ok: number; failed: number }>({ ok: 0, failed: 0 });
 	let showConfirmClose = $state(false);
@@ -168,6 +212,47 @@
 
 	// Error dialog state
 	let operationError = $state<{ title: string; message: string; details?: string } | null>(null);
+
+	// Live compose output for deploying operations (Create & Start, Save & redeploy),
+	// rendered inline below the editor instead of in a separate window -- the modal
+	// stays open while it runs, and afterwards for exactly as long as saveCloseTiming
+	// (see save-close-policy.ts) says it should, so the output stays visible where the
+	// result or the error it might explain also lives.
+	let outputTitle = $state('');
+	let outputLines = $state<string[]>([]);
+	let outputRunning = $state(false);
+	let outputOk = $state<boolean | undefined>(undefined);
+	let outputMs = $state<number | undefined>(undefined);
+	let outputExitCode = $state<number | undefined>(undefined);
+	let outputStartedAt = 0;
+
+	function startOutput(title: string) {
+		outputTitle = title;
+		outputLines = [];
+		outputRunning = true;
+		outputStartedAt = Date.now();
+		outputOk = undefined;
+		outputMs = undefined;
+		outputExitCode = undefined;
+	}
+
+	function appendOutputLine(line: string) {
+		outputLines = [...outputLines, line];
+	}
+
+	function finishOutput(output: string | undefined, ok: boolean, exitCode?: number) {
+		outputRunning = false;
+		outputOk = ok;
+		outputMs = Date.now() - outputStartedAt;
+		outputExitCode = exitCode;
+		if (outputLines.length === 0 && output) {
+			outputLines = output.split('\n');
+		}
+	}
+
+	const outputStatusLine = $derived(
+		formatRunStatus({ running: outputRunning, ok: outputOk, ms: outputMs, exitCode: outputExitCode })
+	);
 
 	// Stack exists warning dialog state
 	let showExistsWarning = $state(false);
@@ -390,6 +475,11 @@
 	let pathChangeOldDir = $state<string | null>(null); // Old directory to move files from
 	let pathChangeFileCount = $state(0); // Number of files in old directory
 	let pendingSaveRestart = $state(false); // Whether user clicked "Save & restart" vs "Save"
+	// Pull/build/forceRecreate chosen in the "Save & redeploy" RedeployPopover (see
+	// handleSave below) -- carried across the path-change confirmation dialog the same
+	// way pendingSaveRestart is, so re-entering handleSave() after the user confirms a
+	// path move still deploys with the options they actually picked.
+	let pendingSaveOptions = $state<DeployOptions | undefined>(undefined);
 
 	// Browse confirmation dialog state (when selecting different file would replace content)
 	let showBrowseConfirm = $state(false);
@@ -806,6 +896,18 @@
 	let isDraggingSplit = $state(false);
 	let containerRef: HTMLDivElement | null = $state(null);
 
+	// Resizable output-panel split state -- height (not width) of the live output
+	// panel below the editor, as a percentage of the combined editor+output area.
+	// Bounds (15/70, default 30): the editor must stay usable even at the output
+	// panel's largest size (30% left for the editor is several lines, not one), and
+	// the output panel must stay usable even at its smallest (15% is enough for the
+	// status line plus a handful of log lines).
+	const OUTPUT_SPLIT_MIN = 15;
+	const OUTPUT_SPLIT_MAX = 70;
+	let outputSplitRatio = $state(30); // percentage of the editor+output area given to output
+	let isDraggingOutputSplit = $state(false);
+	let outputAreaRef: HTMLDivElement | null = $state(null);
+
 	// Debounce timer for validation
 	let validateTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -990,6 +1092,15 @@
 			}
 		}
 
+		// Load saved output-panel split ratio
+		const savedOutputSplit = localStorage.getItem(STORAGE_KEY_OUTPUT_SPLIT);
+		if (savedOutputSplit) {
+			const ratio = parseFloat(savedOutputSplit);
+			if (!isNaN(ratio) && ratio >= OUTPUT_SPLIT_MIN && ratio <= OUTPUT_SPLIT_MAX) {
+				outputSplitRatio = ratio;
+			}
+		}
+
 		// Add global mouse event listeners for split dragging
 		window.addEventListener('mousemove', handleMouseMove);
 		window.addEventListener('mouseup', handleMouseUp);
@@ -1019,6 +1130,12 @@
 		isDraggingSplit = true;
 	}
 
+	// Output-panel split drag handler (vertical drag -- resizes height, not width).
+	function startOutputSplitDrag(e: MouseEvent) {
+		e.preventDefault();
+		isDraggingOutputSplit = true;
+	}
+
 	// Validate side-panel width (px), drag-resizable, persisted.
 	const STORAGE_KEY_VALIDATE_W = 'dockhand-validate-panel-width';
 	let validatePanelWidth = $state(
@@ -1037,7 +1154,7 @@
 		if (isDraggingSplit && containerRef) {
 			const rect = containerRef.getBoundingClientRect();
 			const newRatio = ((e.clientX - rect.left) / rect.width) * 100;
-			splitRatio = Math.max(30, Math.min(80, newRatio));
+			splitRatio = clampNumber(newRatio, 30, 80);
 		}
 		if (isDraggingValidate && editorRowRef) {
 			const rect = editorRowRef.getBoundingClientRect();
@@ -1045,7 +1162,14 @@
 			const w = rect.right - e.clientX;
 			// Floor at 320px: below that the header's title + count chips + re-check button
 			// no longer fit on one line and start clipping.
-			validatePanelWidth = Math.max(320, Math.min(560, w));
+			validatePanelWidth = clampNumber(w, 320, 560);
+		}
+		if (isDraggingOutputSplit && outputAreaRef) {
+			const rect = outputAreaRef.getBoundingClientRect();
+			// output panel is on the bottom: its height = distance from cursor to the
+			// area's bottom edge, as a percentage of the whole editor+output area.
+			const newRatio = ((rect.bottom - e.clientY) / rect.height) * 100;
+			outputSplitRatio = clampNumber(newRatio, OUTPUT_SPLIT_MIN, OUTPUT_SPLIT_MAX);
 		}
 	}
 
@@ -1058,6 +1182,10 @@
 		if (isDraggingValidate) {
 			isDraggingValidate = false;
 			localStorage.setItem(STORAGE_KEY_VALIDATE_W, String(validatePanelWidth));
+		}
+		if (isDraggingOutputSplit) {
+			isDraggingOutputSplit = false;
+			localStorage.setItem(STORAGE_KEY_OUTPUT_SPLIT, outputSplitRatio.toString());
 		}
 	}
 
@@ -1247,7 +1375,7 @@
 		composeContent = newContent;
 	}
 
-	async function handleCreate(start: boolean = false) {
+	async function handleCreate(start: boolean = false, deployOptions?: DeployOptions) {
 		errors = {};
 		let hasErrors = false;
 
@@ -1323,6 +1451,16 @@
 
 			requestBody.secretProviderId = formSecretProviderId;
 
+			// Only meaningful when start is true -- deployOptions is undefined for the
+			// plain "Create" button, which never reaches deployStack server-side anyway.
+			if (start && deployOptions) {
+				requestBody.pull = deployOptions.pull;
+				requestBody.build = deployOptions.build;
+				requestBody.forceRecreate = deployOptions.forceRecreate;
+			}
+
+			if (start) startOutput(`Starting ${newStackName.trim()}`);
+
 			// Create the stack
 			response = await fetch(appendEnvParam('/api/stacks', envId), {
 				method: 'POST',
@@ -1331,7 +1469,14 @@
 			});
 
 			// When start=true, response is a job or JSON; when start=false, it's plain JSON
-			const data = start ? await readJobResponse(response) : await response.json();
+			const data = start
+				? await readJobResponse(response, (line) => appendOutputLine(line))
+				: await response.json();
+			if (start) finishOutput(
+				typeof data.output === 'string' ? data.output : undefined,
+				Boolean(data.success),
+				typeof data.exitCode === 'number' ? data.exitCode : undefined
+			);
 
 			if (!response.ok && !data.success) {
 				throw new Error((typeof data.error === 'string' ? data.error : data.message) || 'Failed to create stack');
@@ -1344,8 +1489,28 @@
 
 			toast.success(`Created stack "${newStackName.trim()}"`);
 			onSuccess();
-			handleClose();
+			switch (saveCloseTiming(start, Boolean(data.success))) {
+				case 'close':
+					handleClose();
+					break;
+				case 'close-delayed':
+					setTimeout(() => handleClose(), DEPLOY_SUCCESS_CLOSE_DELAY_MS);
+					break;
+				case 'stay-open':
+					// Reachable only if a future change to the create/deploy endpoint ever
+					// resolves without throwing on failure -- today both throw checks above
+					// always catch a failed deploy first, so this case is currently dead code
+					// at this exact call site. Kept so the switch stays exhaustive and this
+					// call site doesn't silently start closing on failure if that changes.
+					break;
+			}
 		} catch (e: any) {
+			// The success path above already calls finishOutput with the server's real
+			// ok/exitCode before it throws (a deploy that ran but reported failure).
+			// Only mark the run failed here if it never got that far -- overwriting a
+			// real exit code with `undefined` would erase the very thing the docked
+			// output panel exists to show.
+			if (start && outputRunning) finishOutput(undefined, false);
 			operationError = {
 				title: 'Failed to create stack',
 				message: e.message || 'An error occurred while creating the stack',
@@ -1364,7 +1529,7 @@
 		}
 	}
 
-	async function handleSave(restart = false, moveFromDir: string | null | undefined = undefined) {
+	async function handleSave(restart = false, moveFromDir: string | null | undefined = undefined, deployOptions?: DeployOptions) {
 		errors = {};
 
 		// Validate compose content (unless file location is needed and we have a path)
@@ -1404,6 +1569,7 @@
 							pathChangeOldDir = checkData.oldDir;
 							pathChangeFileCount = checkData.fileCount;
 							pendingSaveRestart = restart;
+							pendingSaveOptions = deployOptions;
 							showPathChangeConfirm = true;
 							return;
 						}
@@ -1458,6 +1624,14 @@
 
 			requestBody.secretProviderId = formSecretProviderId;
 
+			// Only meaningful when restart is true -- deployOptions is undefined for the
+			// plain "Save" button, which never reaches deployStack server-side anyway.
+			if (restart && deployOptions) {
+				requestBody.pull = deployOptions.pull;
+				requestBody.build = deployOptions.build;
+				requestBody.forceRecreate = deployOptions.forceRecreate;
+			}
+
 			// Save env files BEFORE compose to ensure deploy reads fresh values
 			// Save raw content to .env file (non-secrets only, comments preserved)
 			const rawEnvResponse = await fetch(
@@ -1503,6 +1677,8 @@
 				);
 			}
 
+			if (restart) startOutput(`Redeploying ${stackName}`);
+
 			// Save compose file (with optional paths) - after env so deploy reads fresh .env
 			const response = await fetch(
 				appendEnvParam(`/api/stacks/${encodeURIComponent(stackName)}/compose`, envId),
@@ -1514,7 +1690,14 @@
 			);
 
 			// When restart=true, response is a job or JSON; when restart=false, it's plain JSON
-			const data = restart ? await readJobResponse(response) : await response.json();
+			const data = restart
+				? await readJobResponse(response, (line) => appendOutputLine(line))
+				: await response.json();
+			if (restart) finishOutput(
+				typeof data.output === 'string' ? data.output : undefined,
+				Boolean(data.success),
+				typeof data.exitCode === 'number' ? data.exitCode : undefined
+			);
 
 			if (!response.ok && !data.success) {
 				throw new Error((typeof data.error === 'string' ? data.error : data.message) || 'Failed to save compose file');
@@ -1527,13 +1710,26 @@
 			toast.success(restart ? 'Stack applied' : 'Stack saved');
 			onSuccess();
 
-			if (!restart) {
-				// Show success briefly then close
-				setTimeout(() => handleClose(), 500);
-			} else {
-				handleClose();
+			switch (saveCloseTiming(restart, Boolean(data.success))) {
+				case 'close':
+					// Show success briefly then close.
+					setTimeout(() => handleClose(), 500);
+					break;
+				case 'close-delayed':
+					setTimeout(() => handleClose(), DEPLOY_SUCCESS_CLOSE_DELAY_MS);
+					break;
+				case 'stay-open':
+					// Reachable only if a future change to the compose/deploy endpoint ever
+					// resolves without throwing on failure -- today both throw checks above
+					// always catch a failed deploy first, so this case is currently dead code
+					// at this exact call site. Kept so the switch stays exhaustive and this
+					// call site doesn't silently start closing on failure if that changes.
+					break;
 			}
 		} catch (e: any) {
+			// Same reasoning as handleCreate's catch block: don't clobber a real
+			// ok/exitCode that finishOutput already recorded before this throw.
+			if (restart && outputRunning) finishOutput(undefined, false);
 			operationError = {
 				title: restart ? 'Failed to apply stack' : 'Failed to save stack',
 				message: e.message || (restart ? 'An error occurred while applying the stack' : 'An error occurred while saving the stack'),
@@ -1547,14 +1743,14 @@
 	// Handle path change confirmation - move files to new location and proceed
 	function confirmPathChangeAndMove() {
 		showPathChangeConfirm = false;
-		handleSave(pendingSaveRestart, pathChangeOldDir);
+		handleSave(pendingSaveRestart, pathChangeOldDir, pendingSaveOptions);
 	}
 
 	// Handle path change - keep old files and proceed (just save without moving)
 	function confirmPathChangeKeepFiles() {
 		showPathChangeConfirm = false;
 		// Pass empty string to skip move check (undefined means "not checked yet")
-		handleSave(pendingSaveRestart, '');
+		handleSave(pendingSaveRestart, '', pendingSaveOptions);
 	}
 
 	function tryClose() {
@@ -1608,6 +1804,7 @@
 		pathChangeOldDir = null;
 		pathChangeFileCount = 0;
 		pendingSaveRestart = false;
+		pendingSaveOptions = undefined;
 		// Reset browse confirmation state
 		showBrowseConfirm = false;
 		pendingBrowsePath = null;
@@ -1636,6 +1833,23 @@
 			validateLoading = false;
 			validateActiveLine = null;
 			validateSeq++;
+			// Same reasoning for the docked deploy output: without this, reopening the
+			// modal for a *different* stack would still show the previous stack's title,
+			// lines and status ("Redeploying A" / "Succeeded" while looking at stack B).
+			// A reopen of the *same* stack while its own deploy is still running loses the
+			// lines accumulated so far, but only until the next line arrives (the poll loop
+			// in sse-fetch.ts keeps running regardless of this modal's open state, same as
+			// ComposeOutputModal) or the job finishes -- finishOutput's `outputLines.length
+			// === 0 && output` fallback then refills the whole transcript from the job's
+			// final output. That brief, self-correcting gap is preferable to a stale result
+			// silently misattributed to the wrong stack.
+			outputTitle = '';
+			outputLines = [];
+			outputRunning = false;
+			outputOk = undefined;
+			outputMs = undefined;
+			outputExitCode = undefined;
+			outputStartedAt = 0;
 			if (mode === 'edit' && stackName) {
 				loadComposeFile().then(() => {
 					// Auto-validate after loading
@@ -1855,8 +2069,28 @@
 					{#if backupTally.failed > 0}<span class="inline-flex items-center gap-0.5 rounded-full bg-red-500/15 px-1.5 text-[10px] font-semibold text-red-500"><X class="w-2.5 h-2.5" />{backupTally.failed}</span>{/if}
 				</button>
 			{/if}
+			<!-- Deploys tab: recorded run history for this stack (Task 17). Same gate
+			     shape as Backups above minus the beta flag -- hidden for untracked
+			     stacks (no compose file means no deploy history either) and only in
+			     edit mode, where stackName/envId are actually known. -->
+			{#if mode === 'edit' && !needsFileLocation}
+				<button
+					type="button"
+					class="relative -mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm transition-colors {activeTab === 'deploys' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}"
+					onclick={() => activeTab = 'deploys'}
+				>
+					<History class="h-3.5 w-3.5" /> Deploys
+				</button>
+			{/if}
 		</div>
 
+		<!-- Wrapper spanning the editor area + the live output panel below it, so the
+		     output panel's height can be a percentage of THIS combined space rather than
+		     of the whole dialog (which also includes the fixed header/tabs/footer). -->
+		<div
+			bind:this={outputAreaRef}
+			class="flex-1 min-h-0 flex flex-col {isDraggingOutputSplit ? 'select-none' : ''}"
+		>
 		<div class="flex-1 overflow-hidden flex flex-col min-h-0">
 			{#if errors.compose}
 				<Alert.Root variant="destructive" class="mx-6 mt-4">
@@ -2189,9 +2423,51 @@
 								onTally={(t) => (backupTally = t)}
 							/>
 						</div>
+					{:else if activeTab === 'deploys' && !needsFileLocation}
+						<!-- Deploys tab (never for untracked stacks — same reasoning as Backups above) -->
+						<div class="h-full flex-1 overflow-auto p-4">
+							<DeploysPanel {stackName} envId={$currentEnvironment?.id ?? null} theme={editorTheme} />
+						</div>
 					{/if}
 				</div>
 			{/if}
+		</div>
+
+		<!-- Live output for Create & Start / Save & redeploy, rendered below the editor instead
+		     of handing the user off to a separate window (see save-close-policy.ts for how long
+		     the dialog then stays open). Only takes up space once there is something to show,
+		     and only then does its resize divider exist -- a handle that drags nothing is worse
+		     than no handle. -->
+		{#if outputRunning || outputLines.length > 0}
+			<!-- Resizable divider (height, not width -- drag up/down to resize the output panel) -->
+			<div
+				class="h-1 shrink-0 bg-zinc-200 dark:bg-zinc-700 hover:bg-blue-400 dark:hover:bg-blue-500 cursor-row-resize transition-colors flex items-center justify-center group {isDraggingOutputSplit ? 'bg-blue-500 dark:bg-blue-400' : ''}"
+				onmousedown={startOutputSplitDrag}
+				role="separator"
+				aria-orientation="horizontal"
+				tabindex="0"
+			>
+				<div class="w-8 h-4 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity {isDraggingOutputSplit ? 'opacity-100' : ''}">
+					<GripHorizontal class="w-3 h-3 text-white" />
+				</div>
+			</div>
+			<div class="shrink-0 flex flex-col min-h-0" style="height: {outputSplitRatio}%">
+				<div class="px-5 py-1.5 text-xs text-zinc-500 dark:text-zinc-400 flex items-center gap-2 flex-shrink-0">
+					{#if outputRunning}
+						<Loader2 class="w-3 h-3 animate-spin" />
+					{/if}
+					{outputTitle} — {outputStatusLine}
+				</div>
+				<LogViewer
+					logs={outputLines.join('\n')}
+					title={outputTitle}
+					autoRefresh={false}
+					autoScroll={outputRunning}
+					class="flex-1 min-h-0"
+					theme={editorTheme}
+				/>
+			</div>
+		{/if}
 		</div>
 
 		<!-- Footer -->
@@ -2226,15 +2502,41 @@
 							Create
 						{/if}
 					</Button>
-					<Button onclick={() => handleCreate(true)} disabled={saving}>
-						{#if saving}
-							<Loader2 class="w-4 h-4 animate-spin" />
-							Starting...
-						{:else}
-							<Play class="w-4 h-4" />
-							Create & Start
-						{/if}
-					</Button>
+					<!-- Split button: the label itself stays a direct, one-click action (the
+					     common case) with the current defaults baked in; the chevron opens a
+					     popover to override pull/build/forceRecreate before deploying. Two
+					     separate <button> elements, both independently reachable by keyboard --
+					     never one element whose behavior depends on click position. -->
+					<div class="inline-flex">
+						<Button
+							class="rounded-r-none"
+							onclick={() => handleCreate(true, createStartDefaults)}
+							disabled={saving}
+						>
+							{#if saving}
+								<Loader2 class="w-4 h-4 animate-spin" />
+								Starting...
+							{:else}
+								<Play class="w-4 h-4" />
+								Create & Start
+							{/if}
+						</Button>
+						<RedeployPopover
+							stackName={newStackName}
+							envId={$currentEnvironment?.id ?? null}
+							disabled={saving}
+							triggerVariant="chevron"
+							defaultPull={createStartDefaults.pull}
+							defaultBuild={createStartDefaults.build}
+							defaultForceRecreate={createStartDefaults.forceRecreate}
+							reason={hasBuildSection ? 'Auto-checked: this compose file has a build: section' : undefined}
+							onDeploy={(options) => handleCreate(true, options)}
+						>
+							{#snippet children()}
+								<ChevronDown class="w-4 h-4" />
+							{/snippet}
+						</RedeployPopover>
+					</div>
 				{:else if !readonly}
 					<!-- Edit mode buttons -->
 					<Button variant="outline" class="w-24" onclick={() => handleSave(false)} disabled={saving || loading || (needsFileLocation && !workingComposePath.trim())}>
@@ -2246,15 +2548,37 @@
 							Save
 						{/if}
 					</Button>
-					<Button class="w-36" onclick={() => handleSave(true)} disabled={saving || loading || (needsFileLocation && !workingComposePath.trim())}>
-						{#if saving && savingWithRestart}
-							<Loader2 class="w-4 h-4 animate-spin" />
-							Deploying...
-						{:else}
-							<Play class="w-4 h-4" />
-							Save & redeploy
-						{/if}
-					</Button>
+					<!-- Same split-button shape as Create & Start above. -->
+					<div class="inline-flex">
+						<Button
+							class="w-36 rounded-r-none"
+							onclick={() => handleSave(true, undefined, saveRedeployDefaults)}
+							disabled={saving || loading || (needsFileLocation && !workingComposePath.trim())}
+						>
+							{#if saving && savingWithRestart}
+								<Loader2 class="w-4 h-4 animate-spin" />
+								Deploying...
+							{:else}
+								<Play class="w-4 h-4" />
+								Save & redeploy
+							{/if}
+						</Button>
+						<RedeployPopover
+							{stackName}
+							envId={$currentEnvironment?.id ?? null}
+							disabled={saving || loading || (needsFileLocation && !workingComposePath.trim())}
+							triggerVariant="chevron"
+							defaultPull={saveRedeployDefaults.pull}
+							defaultBuild={saveRedeployDefaults.build}
+							defaultForceRecreate={saveRedeployDefaults.forceRecreate}
+							reason={hasBuildSection ? 'Auto-checked: this compose file has a build: section' : undefined}
+							onDeploy={(options) => handleSave(true, undefined, options)}
+						>
+							{#snippet children()}
+								<ChevronDown class="w-4 h-4" />
+							{/snippet}
+						</RedeployPopover>
+					</div>
 				{/if}
 			</div>
 		</div>
