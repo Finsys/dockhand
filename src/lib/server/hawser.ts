@@ -935,6 +935,15 @@ export function getAllEdgeConnections(): Map<number, EdgeConnection> {
 	return edgeConnections;
 }
 
+/**
+ * Capabilities advertised by the connected edge agent for an environment.
+ * Empty when no agent is connected — callers must treat "unknown" as
+ * "unsupported" for anything a legacy agent would silently mishandle.
+ */
+export function getEdgeAgentCapabilities(environmentId: number): string[] {
+	return edgeConnections.get(environmentId)?.capabilities ?? [];
+}
+
 // Message type definitions
 export interface HelloMessage {
 	type: 'hello';

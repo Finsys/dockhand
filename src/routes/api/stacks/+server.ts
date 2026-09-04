@@ -2,6 +2,7 @@ import { json } from '@sveltejs/kit';
 import { listComposeStacks, deployStack, saveStackComposeFile, writeStackEnvFile, writeRawStackEnvFile, saveStackEnvVarsToDb } from '$lib/server/stacks';
 import { EnvironmentNotFoundError, DockerConnectionError } from '$lib/server/docker';
 import { upsertStackSource, getStackSources } from '$lib/server/db';
+import { validateComposePathsInput, validateComposeContentsInput } from '$lib/server/compose-files';
 import { authorize } from '$lib/server/authorize';
 import { auditStack } from '$lib/server/audit';
 import { createJobResponse } from '$lib/server/sse';
@@ -120,7 +121,7 @@ export const POST: RequestHandler = async (event) => {
 	}
 
 	try {
-		const { name, compose, start, envVars, rawEnvContent, composePath, envPath, secretProviderId } = body;
+		const { name, compose, composeContents, start, envVars, rawEnvContent, composePath, composePaths, envPath, secretProviderId } = body;
 
 		if (!name || typeof name !== 'string') {
 			return json({ error: 'Stack name is required' }, { status: 400 });
@@ -129,6 +130,21 @@ export const POST: RequestHandler = async (event) => {
 		if (!compose || typeof compose !== 'string') {
 			return json({ error: 'Compose file content is required' }, { status: 400 });
 		}
+
+		const composePathsError = validateComposePathsInput(composePaths);
+		if (composePathsError) return json({ error: composePathsError }, { status: 400 });
+
+		const composeContentsError = validateComposeContentsInput(composeContents);
+		if (composeContentsError) return json({ error: composeContentsError }, { status: 400 });
+
+		// composePaths[0] is the primary compose file. When the client sends
+		// both, they must agree; when only composePaths is sent, normalize the
+		// primary from it so persisted state can't diverge.
+		const primaryFromPaths = Array.isArray(composePaths) && composePaths.length > 0 ? composePaths[0] : undefined;
+		if (composePath && primaryFromPaths && composePath !== primaryFromPaths) {
+			return json({ error: 'composePath must match composePaths[0] (the primary compose file)' }, { status: 400 });
+		}
+		const effectiveComposePath = composePath || primaryFromPaths;
 
 		if (
 			'secretProviderId' in body &&
@@ -152,7 +168,9 @@ export const POST: RequestHandler = async (event) => {
 		// If start is false, only create the compose file without deploying
 		if (start === false) {
 			const result = await saveStackComposeFile(name, compose, true, envIdNum, {
-				composePath: composePath || undefined,
+				composePath: effectiveComposePath || undefined,
+				composePaths: composePaths || undefined,
+				composeContents: composeContents || undefined,
 				envPath: envPath || undefined
 			});
 			if (!result.success) {
@@ -181,9 +199,10 @@ export const POST: RequestHandler = async (event) => {
 				stackName: name,
 				environmentId: envIdNum,
 				sourceType: 'internal',
-				composePath: composePath || undefined,
+				composePath: effectiveComposePath || undefined,
+				composePaths: composePaths || undefined,
 				envPath: envPath || undefined,
-				secretProviderId,
+				secretProviderId
 			});
 
 			// Audit log
@@ -194,7 +213,8 @@ export const POST: RequestHandler = async (event) => {
 
 		// ALWAYS save compose file first - deployStack expects it to exist
 		const saveResult = await saveStackComposeFile(name, compose, true, envIdNum, {
-			composePath: composePath || undefined,
+			composePath: effectiveComposePath || undefined,
+			composeContents: composeContents || undefined,
 			envPath: envPath || undefined
 		});
 		if (!saveResult.success) {
@@ -223,7 +243,8 @@ export const POST: RequestHandler = async (event) => {
 			stackName: name,
 			environmentId: envIdNum,
 			sourceType: 'internal',
-			composePath: composePath || undefined,
+			composePath: effectiveComposePath || undefined,
+			composePaths: composePaths || undefined,
 			envPath: envPath || undefined,
 			secretProviderId
 		});
@@ -235,7 +256,8 @@ export const POST: RequestHandler = async (event) => {
 					name,
 					compose,
 					envId: envIdNum,
-					composePath: composePath || undefined,
+					composePath: effectiveComposePath || undefined,
+					composePaths: composePaths || undefined,
 					envPath: envPath || undefined
 				});
 

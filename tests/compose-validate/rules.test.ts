@@ -45,6 +45,15 @@ describe('parse + line tracking', () => {
 		const r = runValidate('services:\n  web:\n    image: a\n    image: b\n');
 		expect(r.findings.some((f) => f.ruleId === 'YAML_PARSE_ERROR')).toBe(true);
 	});
+
+	test('rules inspect ordered additional compose sources and honor later scalar overrides', () => {
+		const primary = `services:\n  web:\n    image: nginx:latest\n`;
+		const override = `services:\n  web:\n    image: nginx:1.27\n    privileged: true\n`;
+		const report = runValidate(primary, {}, {}, [override], ['compose.yaml', 'compose.override.yml']);
+		expect(report.findings.some((f) => f.ruleId === 'LATEST_TAG')).toBe(false);
+		const privileged = report.findings.find((f) => f.ruleId === 'PRIVILEGED_CONTAINER');
+		expect(privileged?.source).toBe('compose.override.yml');
+	});
 });
 
 describe('port rules', () => {

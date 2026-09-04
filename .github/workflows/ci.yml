@@ -25,4 +25,4 @@ jobs:
         run: bun install
 
       - name: Run unit tests
-        run: bun test tests/
+        run: bun test --isolate tests/

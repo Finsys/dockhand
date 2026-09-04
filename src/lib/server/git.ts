@@ -1,7 +1,6 @@
 import { existsSync, mkdirSync, rmSync, chmodSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve, dirname, basename, relative } from 'node:path';
 import { spawn as nodeSpawn, spawnSync } from 'node:child_process';
-import type { ChildProcess } from 'node:child_process';
 import { GIT_SSH_KEY_PATH_ENV, makeSshKeyPath, removeSshKey } from './git-ssh-key';
 import { permissionDeniedMessage } from './git-error';
 import {
@@ -17,6 +16,9 @@ import {
 	type GitStackWithRepo
 } from './db';
 import { deployStack, getStackDir } from './stacks';
+import { parseComposePathsColumn } from './compose-files';
+import { collectProcess } from './process-utils';
+import { redactEnvVarsForLog } from './log-utils';
 import { sendEventNotification } from './notifications';
 import { buildBasicAuthHeader } from './git-auth';
 import { assertSafeRepoUrl, assertSafeGitRef, repoFilePath, repoBaseEnvPath } from './git-url-safety';
@@ -102,26 +104,6 @@ function getMergedCaBundlePath(): string {
 	return MERGED_CA_BUNDLE_PATH;
 }
 
-/**
- * Collect stdout, stderr and exit code from a spawned process.
- */
-function collectProcess(proc: ChildProcess): Promise<{ exitCode: number; stdout: string; stderr: string }> {
-	return new Promise((resolve, reject) => {
-		const stdoutChunks: Buffer[] = [];
-		const stderrChunks: Buffer[] = [];
-		proc.stdout?.on('data', (chunk: Buffer) => stdoutChunks.push(chunk));
-		proc.stderr?.on('data', (chunk: Buffer) => stderrChunks.push(chunk));
-		proc.on('error', reject);
-		proc.on('close', (code) => {
-			resolve({
-				exitCode: code ?? 1,
-				stdout: Buffer.concat(stdoutChunks).toString(),
-				stderr: Buffer.concat(stderrChunks).toString()
-			});
-		});
-	});
-}
-
 // Directory for storing cloned repositories
 const dataDir = process.env.DATA_DIR || './data';
 const GIT_REPOS_DIR = resolve(process.env.GIT_REPOS_DIR || join(dataDir, 'git-repos'));
@@ -133,17 +115,6 @@ if (!existsSync(GIT_REPOS_DIR)) {
 
 export function getGitReposDir(): string {
 	return GIT_REPOS_DIR;
-}
-
-/**
- * Redact all env var values for safe logging. Only key names are preserved.
- */
-function redactEnvVarsForLog(vars: Record<string, string>): Record<string, string> {
-	const redacted: Record<string, string> = {};
-	for (const key of Object.keys(vars)) {
-		redacted[key] = '***';
-	}
-	return redacted;
 }
 
 function getRepoPath(repoId: number): string {
@@ -1385,6 +1356,7 @@ export async function deployGitStack(stackId: number, options?: { force?: boolea
 		sourceDir: syncResult.composeDir, // Copy entire directory from git repo
 		composeFileName: syncResult.composeFileName, // Use original compose filename from repo
 		envFileName: syncResult.envFileName, // Env file relative to compose dir (for --env-file flag, optional)
+		composePaths: gitStack.composePaths ? parseComposePathsColumn(gitStack.composePaths) : undefined,
 		forceRecreate,
 		build: gitStack.buildOnDeploy,
 		noBuildCache: gitStack.noBuildCache,
@@ -1428,7 +1400,8 @@ export async function deployGitStack(stackId: number, options?: { force?: boolea
 			sourceType: 'git',
 			gitRepositoryId: gitStack.repositoryId,
 			gitStackId: stackId,
-			composePath: resolvedComposePath
+			composePath: resolvedComposePath,
+			composePaths: gitStack.composePaths ? parseComposePathsColumn(gitStack.composePaths) : null
 		});
 	}
 
@@ -1719,6 +1692,7 @@ export async function deployGitStackWithProgress(
 			sourceDir: composeDir, // Copy entire directory from git repo
 			composeFileName: progressComposeFileName, // Compose filename relative to source dir
 			envFileName, // Env file relative to compose dir (for --env-file flag, optional)
+			composePaths: gitStack.composePaths ? parseComposePathsColumn(gitStack.composePaths) : undefined,
 			build: gitStack.buildOnDeploy,
 			noBuildCache: gitStack.noBuildCache,
 			pullPolicy: gitStack.repullImages ? 'always' : undefined,
@@ -1759,7 +1733,8 @@ export async function deployGitStackWithProgress(
 				sourceType: 'git',
 				gitRepositoryId: gitStack.repositoryId,
 				gitStackId: stackId,
-				composePath: resolvedComposePath
+				composePath: resolvedComposePath,
+				composePaths: gitStack.composePaths ? parseComposePathsColumn(gitStack.composePaths) : null
 			});
 
 			onProgress({ status: 'complete', message: `Successfully deployed ${gitStack.stackName}` });

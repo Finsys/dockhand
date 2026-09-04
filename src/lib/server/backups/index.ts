@@ -591,6 +591,19 @@ async function collectMetadata(
 			// this walk over Dockhand's local mirror only records the listing (lstat, no content
 			// read), skipping compose bind dirs that are captured as their own /volumes/<key>.
 			const { STACKDIR_VOLUME_KEY } = await import('./stackdir-plan');
+			// Ordered multi-file set (primary first), relative to the captured
+			// stack dir, so restore can re-register and redeploy the FULL set
+			// instead of only the primary compose file. A file outside the stack
+			// dir can't be captured 1:1 — reject the backup instead of silently
+			// downgrading restore to a materially different single-file stack.
+			if (compose.composePaths && compose.composePaths.length > 1) {
+				const captureDir = dirname(compose.composePath);
+				const relPaths = compose.composePaths.map((p) => relative(captureDir, p));
+				if (!relPaths.every((p) => p && !p.startsWith('..'))) {
+					throw new Error(`stack "${targetName}" uses Compose files outside the stack directory (${compose.composePaths.join(', ')}); multi-file backup requires every configured file inside the stack dir`);
+				}
+				stackInfo.composePaths = relPaths;
+			}
 			{
 				try {
 					const { relativeBindDirsFromCompose, isUnderRelDir, isLoadBearingStackFile } = await import('./stackfile-filter');
@@ -922,6 +935,9 @@ function restorePorts(destination: any, access: { isEnterprise: boolean; canAcce
 			if (!composeFileName) {
 				throw new Error('snapshot has no recorded compose filename; cannot redeploy this stack');
 			}
+			// Ordered additional compose files captured with the snapshot (relative
+			// to the stack dir, primary first). Absent on older snapshots.
+			const relComposePaths = meta?.stack?.composePaths ?? [];
 
 			const stackDir = await getStackDir(name, envId ?? undefined);
 			const destination = await loadDest(destId);
@@ -958,11 +974,20 @@ function restorePorts(destination: any, access: { isEnterprise: boolean; canAcce
 				},
 				register: async () => {
 					const envPath = existsSync(join(stackDir, '.env')) ? join(stackDir, '.env') : null;
-					await upsertStackSource({ stackName: name, environmentId: envId ?? null, sourceType: 'internal', composePath, envPath });
-					log(`registered: composePath=${composePath} envPath=${envPath ?? '(none)'}`);
+					// Defense in depth: the metadata parser rejects traversing paths,
+					// but the metadata is untrusted input — re-check before anything
+					// gets registered and executed outside the stack dir.
+					const { firstComposePathOutsideDir } = await import('../compose-files');
+					const escaping = firstComposePathOutsideDir(relComposePaths, '');
+					if (escaping) {
+						throw new Error(`snapshot composePaths entry "${escaping}" escapes the stack dir; refusing to register`);
+					}
+					const absComposePaths = relComposePaths.length > 0 ? relComposePaths.map((rel) => join(stackDir, rel)) : undefined;
+					await upsertStackSource({ stackName: name, environmentId: envId ?? null, sourceType: 'internal', composePath: composePath, composePaths: absComposePaths, envPath });
+					log(`registered: composePath=${composePath} composePaths=${absComposePaths?.length ?? 1} envPath=${envPath ?? '(none)'}`);
 				},
 				deploy: async () => {
-					const r = await redeployStackFromDir(name, stackDir, composeFileName, envId ?? undefined);
+					const r = await redeployStackFromDir(name, stackDir, composeFileName, envId ?? undefined, relComposePaths);
 					if (!r.success) throw new Error(r.error || 'docker compose up failed');
 				}
 			});
@@ -984,10 +1009,13 @@ function restorePorts(destination: any, access: { isEnterprise: boolean; canAcce
 					const { join } = await import('path');
 					const { existsSync } = await import('fs');
 					const { upsertStackSource } = await import('../db');
-					const composeFileName = (await getSnapshotMetadata(destId, snapId))?.stack?.composeFileName;
+					const meta = await getSnapshotMetadata(destId, snapId);
+					const composeFileName = meta?.stack?.composeFileName;
+					const relComposePaths = meta?.stack?.composePaths ?? [];
 					if (composeFileName && existsSync(join(targetPath, composeFileName))) {
 						const envPath = existsSync(join(targetPath, '.env')) ? join(targetPath, '.env') : null;
-						await upsertStackSource({ stackName, environmentId: envId ?? null, sourceType: 'internal', composePath: join(targetPath, composeFileName), envPath });
+						const absComposePaths = relComposePaths.length > 0 ? relComposePaths.map((rel) => join(targetPath, rel)) : undefined;
+						await upsertStackSource({ stackName, environmentId: envId ?? null, sourceType: 'internal', composePath: join(targetPath, composeFileName), composePaths: absComposePaths, envPath });
 					}
 				} catch (e) {
 					console.log(`[Restore] register-managed failed for "${stackName}": ${e instanceof Error ? e.message : String(e)}`);

@@ -88,6 +88,7 @@ import {
 import type { AllGridPreferences, GridId, GridColumnPreferences } from '$lib/types';
 import { encrypt, decrypt, decryptStrict, isEncrypted } from './encryption.js';
 import { parseEnvInterpolation } from './env-interpolation';
+import { parseComposePathsColumn } from './compose-files';
 import { parseInjectedSecretKeys, serializeInjectedSecretKeys } from './stack-secret-keys';
 import { invalidateVulnerabilitiesCache } from './vulnerabilities-cache';
 
@@ -2309,6 +2310,7 @@ export interface GitStackData {
 	environmentId: number | null;
 	repositoryId: number;
 	composePath: string;
+	composePaths: string | null;
 	branch: string | null; // Per-stack branch override; null = use repository default
 	envFilePath: string | null;
 	autoUpdate: boolean;
@@ -2350,6 +2352,7 @@ export async function getGitStacks(environmentId?: number): Promise<GitStackWith
 			repositoryId: gitStacks.repositoryId,
 			branch: gitStacks.branch,
 			composePath: gitStacks.composePath,
+			composePaths: gitStacks.composePaths,
 			envFilePath: gitStacks.envFilePath,
 			autoUpdate: gitStacks.autoUpdate,
 			autoUpdateSchedule: gitStacks.autoUpdateSchedule,
@@ -2384,6 +2387,7 @@ export async function getGitStacks(environmentId?: number): Promise<GitStackWith
 			repositoryId: gitStacks.repositoryId,
 			branch: gitStacks.branch,
 			composePath: gitStacks.composePath,
+			composePaths: gitStacks.composePaths,
 			envFilePath: gitStacks.envFilePath,
 			autoUpdate: gitStacks.autoUpdate,
 			autoUpdateSchedule: gitStacks.autoUpdateSchedule,
@@ -2418,6 +2422,7 @@ export async function getGitStacks(environmentId?: number): Promise<GitStackWith
 		repositoryId: row.repositoryId,
 		branch: row.branch ?? null,
 		composePath: row.composePath,
+		composePaths: row.composePaths ?? null,
 		envFilePath: row.envFilePath,
 		autoUpdate: row.autoUpdate,
 		autoUpdateSchedule: row.autoUpdateSchedule,
@@ -2454,6 +2459,7 @@ export async function getGitStacksForEnvironmentOnly(environmentId: number): Pro
 		repositoryId: gitStacks.repositoryId,
 		branch: gitStacks.branch,
 		composePath: gitStacks.composePath,
+		composePaths: gitStacks.composePaths,
 		envFilePath: gitStacks.envFilePath,
 		autoUpdate: gitStacks.autoUpdate,
 		autoUpdateSchedule: gitStacks.autoUpdateSchedule,
@@ -2488,6 +2494,7 @@ export async function getGitStacksForEnvironmentOnly(environmentId: number): Pro
 		repositoryId: row.repositoryId,
 		branch: row.branch ?? null,
 		composePath: row.composePath,
+		composePaths: row.composePaths ?? null,
 		envFilePath: row.envFilePath,
 		autoUpdate: row.autoUpdate,
 		autoUpdateSchedule: row.autoUpdateSchedule,
@@ -2523,6 +2530,7 @@ export async function getGitStack(id: number): Promise<GitStackWithRepo | null> 
 		repositoryId: gitStacks.repositoryId,
 		branch: gitStacks.branch,
 		composePath: gitStacks.composePath,
+		composePaths: gitStacks.composePaths,
 		envFilePath: gitStacks.envFilePath,
 		autoUpdate: gitStacks.autoUpdate,
 		autoUpdateSchedule: gitStacks.autoUpdateSchedule,
@@ -2559,6 +2567,7 @@ export async function getGitStack(id: number): Promise<GitStackWithRepo | null> 
 		repositoryId: row.repositoryId,
 		branch: row.branch ?? null,
 		composePath: row.composePath,
+		composePaths: row.composePaths ?? null,
 		envFilePath: row.envFilePath,
 		autoUpdate: row.autoUpdate,
 		autoUpdateSchedule: row.autoUpdateSchedule,
@@ -2595,6 +2604,7 @@ export async function getGitStackByName(stackName: string, environmentId?: numbe
 		repositoryId: gitStacks.repositoryId,
 		branch: gitStacks.branch,
 		composePath: gitStacks.composePath,
+		composePaths: gitStacks.composePaths,
 		envFilePath: gitStacks.envFilePath,
 		autoUpdate: gitStacks.autoUpdate,
 		autoUpdateSchedule: gitStacks.autoUpdateSchedule,
@@ -2635,6 +2645,7 @@ export async function getGitStackByName(stackName: string, environmentId?: numbe
 		repositoryId: row.repositoryId,
 		branch: row.branch ?? null,
 		composePath: row.composePath,
+		composePaths: row.composePaths ?? null,
 		envFilePath: row.envFilePath,
 		autoUpdate: row.autoUpdate,
 		autoUpdateSchedule: row.autoUpdateSchedule,
@@ -2670,6 +2681,7 @@ export async function getGitStackByWebhookSecret(secret: string): Promise<GitSta
 		repositoryId: gitStacks.repositoryId,
 		branch: gitStacks.branch,
 		composePath: gitStacks.composePath,
+		composePaths: gitStacks.composePaths,
 		envFilePath: gitStacks.envFilePath,
 		autoUpdate: gitStacks.autoUpdate,
 		autoUpdateSchedule: gitStacks.autoUpdateSchedule,
@@ -2705,6 +2717,7 @@ export async function getGitStackByWebhookSecret(secret: string): Promise<GitSta
 		repositoryId: row.repositoryId,
 		branch: row.branch ?? null,
 		composePath: row.composePath,
+		composePaths: row.composePaths ?? null,
 		envFilePath: row.envFilePath,
 		autoUpdate: row.autoUpdate,
 		autoUpdateSchedule: row.autoUpdateSchedule,
@@ -2738,6 +2751,7 @@ export async function createGitStack(data: {
 	repositoryId: number;
 	branch?: string | null;
 	composePath?: string;
+	composePaths?: string[] | null;
 	envFilePath?: string | null;
 	autoUpdate?: boolean;
 	autoUpdateSchedule?: 'daily' | 'weekly' | 'custom';
@@ -2755,7 +2769,8 @@ export async function createGitStack(data: {
 		environmentId: data.environmentId ?? null,
 		repositoryId: data.repositoryId,
 		branch: data.branch || null,
-		composePath: data.composePath || 'compose.yaml',
+		composePath: data.composePaths?.[0] ?? data.composePath ?? 'compose.yaml',
+		composePaths: serializeComposePaths(data.composePaths),
 		envFilePath: data.envFilePath || null,
 		contextDir: data.contextDir || null,
 		autoUpdate: data.autoUpdate || false,
@@ -2771,12 +2786,18 @@ export async function createGitStack(data: {
 	return getGitStack(result[0].id) as Promise<GitStackWithRepo>;
 }
 
-export async function updateGitStack(id: number, data: Partial<GitStackData>): Promise<GitStackWithRepo | null> {
+export async function updateGitStack(id: number, data: Partial<GitStackData> & { composePaths?: string[] | null }): Promise<GitStackWithRepo | null> {
 	const updateData: Record<string, any> = { updatedAt: new Date().toISOString() };
 
 	if (data.stackName !== undefined) updateData.stackName = data.stackName;
 	if (data.repositoryId !== undefined) updateData.repositoryId = data.repositoryId;
 	if (data.composePath !== undefined) updateData.composePath = data.composePath;
+	if (data.composePaths !== undefined) {
+		updateData.composePaths = serializeComposePaths(data.composePaths);
+		if (data.composePath === undefined && data.composePaths?.length) {
+			updateData.composePath = data.composePaths[0];
+		}
+	}
 	if (data.branch !== undefined) updateData.branch = data.branch || null;
 	if (data.envFilePath !== undefined) updateData.envFilePath = data.envFilePath;
 	if (data.autoUpdate !== undefined) updateData.autoUpdate = data.autoUpdate;
@@ -2819,6 +2840,7 @@ export async function getEnabledAutoUpdateGitStacks(): Promise<GitStackWithRepo[
 		environmentId: gitStacks.environmentId,
 		repositoryId: gitStacks.repositoryId,
 		composePath: gitStacks.composePath,
+		composePaths: gitStacks.composePaths,
 		envFilePath: gitStacks.envFilePath,
 		autoUpdate: gitStacks.autoUpdate,
 		autoUpdateSchedule: gitStacks.autoUpdateSchedule,
@@ -2852,6 +2874,7 @@ export async function getEnabledAutoUpdateGitStacks(): Promise<GitStackWithRepo[
 		repositoryId: row.repositoryId,
 		branch: row.branch ?? null,
 		composePath: row.composePath,
+		composePaths: row.composePaths ?? null,
 		envFilePath: row.envFilePath,
 		autoUpdate: row.autoUpdate,
 		autoUpdateSchedule: row.autoUpdateSchedule,
@@ -2886,6 +2909,7 @@ export async function getAllAutoUpdateGitStacks(): Promise<GitStackWithRepo[]> {
 		environmentId: gitStacks.environmentId,
 		repositoryId: gitStacks.repositoryId,
 		composePath: gitStacks.composePath,
+		composePaths: gitStacks.composePaths,
 		autoUpdate: gitStacks.autoUpdate,
 		autoUpdateSchedule: gitStacks.autoUpdateSchedule,
 		autoUpdateCron: gitStacks.autoUpdateCron,
@@ -2918,6 +2942,7 @@ export async function getAllAutoUpdateGitStacks(): Promise<GitStackWithRepo[]> {
 		repositoryId: row.repositoryId,
 		branch: row.branch ?? null,
 		composePath: row.composePath,
+		composePaths: row.composePaths ?? null,
 		autoUpdate: row.autoUpdate,
 		autoUpdateSchedule: row.autoUpdateSchedule,
 		autoUpdateCron: row.autoUpdateCron,
@@ -2958,6 +2983,7 @@ export interface StackSourceData {
 	gitRepositoryId: number | null;
 	gitStackId: number | null;
 	composePath: string | null;
+	composePaths: string | null;
 	envPath: string | null;
 	secretProviderId: number | null;
 	icon: string | null;
@@ -2997,6 +3023,26 @@ export async function getStackSource(stackName: string, environmentId?: number |
 		repository,
 		gitStack: gitStackData
 	} as StackSourceWithRepo;
+}
+
+
+/**
+ * Serialize an ordered compose paths array for the compose_paths JSON column.
+ * Empty/absent arrays store NULL.
+ */
+function serializeComposePaths(paths?: string[] | null): string | null {
+	return paths && paths.length > 0 ? JSON.stringify(paths) : null;
+}
+
+/**
+ * Resolve compose paths for a stack source.
+ * Returns composePaths array if set, otherwise falls back to single composePath.
+ */
+export function getStackComposePaths(source: { composePaths?: string | null; composePath?: string | null }): string[] {
+	const parsed = source.composePaths ? parseComposePathsColumn(source.composePaths) : [];
+	if (parsed.length > 0) return parsed;
+	if (source.composePath) return [source.composePath];
+	return [];
 }
 
 export async function getStackSourceByComposePath(composePath: string, environmentId?: number | null): Promise<StackSourceWithRepo | null> {
@@ -3067,11 +3113,14 @@ export async function upsertStackSource(data: {
 	gitRepositoryId?: number | null;
 	gitStackId?: number | null;
 	composePath?: string | null;
+	composePaths?: string[] | null;
 	envPath?: string | null;
 	secretProviderId?: number | null;
 	icon?: string | null;
 }): Promise<StackSourceData> {
 	const existing = await getStackSource(data.stackName, data.environmentId);
+	const primaryPath = data.composePath ?? data.composePaths?.[0] ?? null;
+	const pathsJson = serializeComposePaths(data.composePaths);
 
 	if (existing) {
 		const newRepoId = data.gitRepositoryId || null;
@@ -3089,7 +3138,8 @@ export async function upsertStackSource(data: {
 				sourceType: data.sourceType,
 				gitRepositoryId: newRepoId,
 				gitStackId: newStackId,
-				composePath: data.composePath ?? null,
+				composePath: primaryPath,
+				composePaths: pathsJson,
 				envPath: data.envPath ?? null,
 				updatedAt: new Date().toISOString(),
 				// Preserve existing binding when caller (like git) omits it
@@ -3107,7 +3157,8 @@ export async function upsertStackSource(data: {
 			sourceType: data.sourceType,
 			gitRepositoryId: data.gitRepositoryId || null,
 			gitStackId: data.gitStackId || null,
-			composePath: data.composePath ?? null,
+			composePath: primaryPath,
+			composePaths: pathsJson,
 			envPath: data.envPath ?? null,
 			secretProviderId: data.secretProviderId ?? null,
 			icon: data.icon ?? null
@@ -3119,14 +3170,15 @@ export async function upsertStackSource(data: {
 export async function updateStackSource(
 	stackName: string,
 	environmentId: number | null,
-	updates: { composePath?: string | null; envPath?: string | null; secretProviderId?: number | null; icon?: string | null }
+	updates: { composePath?: string | null; composePaths?: string[] | null; envPath?: string | null; secretProviderId?: number | null; icon?: string | null }
 ): Promise<boolean> {
 	const existing = await getStackSource(stackName, environmentId);
 	if (!existing) return false;
 
 	await db.update(stackSources)
 		.set({
-			composePath: updates.composePath !== undefined ? updates.composePath : existing.composePath,
+			composePath: updates.composePath !== undefined ? updates.composePath : (updates.composePaths?.[0] ?? existing.composePath),
+			composePaths: updates.composePaths !== undefined ? serializeComposePaths(updates.composePaths) : existing.composePaths,
 			envPath: updates.envPath !== undefined ? updates.envPath : existing.envPath,
 			secretProviderId: updates.secretProviderId !== undefined ? updates.secretProviderId : existing.secretProviderId,
 			icon: updates.icon !== undefined ? updates.icon : existing.icon,

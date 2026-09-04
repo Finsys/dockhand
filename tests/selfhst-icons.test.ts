@@ -92,12 +92,15 @@ describe('looksLikeImage (upload magic-byte check)', () => {
 // and returns null - that null still proves the bad file was NOT served.
 describe('getSelfhstIcon cache-hit handling', () => {
 	let dir: string;
+	let previousDataDir: string | undefined;
 	beforeAll(() => {
+		previousDataDir = process.env.DATA_DIR;
 		dir = mkdtempSync(join(tmpdir(), 'selfhst-cache-'));
 		process.env.DATA_DIR = dir;
 	});
 	afterAll(() => {
-		delete process.env.DATA_DIR;
+		if (previousDataDir === undefined) delete process.env.DATA_DIR;
+		else process.env.DATA_DIR = previousDataDir;
 		rmSync(dir, { recursive: true, force: true });
 	});
 

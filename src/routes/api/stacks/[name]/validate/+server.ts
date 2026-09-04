@@ -2,6 +2,7 @@ import { json } from '@sveltejs/kit';
 import { authorize } from '$lib/server/authorize';
 import { runValidateWithConfig } from '$lib/server/compose-validate';
 import { buildValidateContext } from '$lib/server/compose-validate/context';
+import { pickAdditionalComposeContents } from '$lib/server/compose-files';
 import { getEnvironment } from '$lib/server/db';
 import type { ValidateConfig } from '$lib/server/compose-validate/types';
 import type { RequestHandler } from './$types';
@@ -57,6 +58,11 @@ export const POST: RequestHandler = async ({ cookies, url, params, request }) =>
 
 	const body = (await request.json().catch(() => ({}))) as {
 		compose?: string;
+		// Ordered multi-file set (primary first). `compose` is the primary
+		// content; composePaths[1..] pick additional files out of composeContents
+		// so validation merges exactly what deploy will.
+		composePaths?: unknown;
+		composeContents?: unknown;
 		config?: ValidateConfig;
 		envVars?: Record<string, string>;
 		existing?: boolean;
@@ -65,6 +71,18 @@ export const POST: RequestHandler = async ({ cookies, url, params, request }) =>
 	if (!compose.trim()) {
 		return json({ error: 'compose content is required' }, { status: 400 });
 	}
+
+	// Resolve the additional files (in order, primary first) from the submitted set.
+	const additionalSources = pickAdditionalComposeContents(body.composePaths, body.composeContents);
+	const submittedContents = typeof body.composeContents === 'object' && body.composeContents !== null
+		? body.composeContents as Record<string, unknown>
+		: {};
+	const sourceNames = Array.isArray(body.composePaths)
+		? body.composePaths.filter((p, index): p is string =>
+			typeof p === 'string' && p.trim().length > 0 &&
+			(index === 0 || (typeof submittedContents[p] === 'string' && (submittedContents[p] as string).trim().length > 0))
+		)
+		: [];
 
 	// The editor's current env vars (incl. secrets) so `docker compose config` resolves
 	// `${VAR}` the same way a deploy will, instead of reporting a spurious "VAR not set".
@@ -89,6 +107,6 @@ export const POST: RequestHandler = async ({ cookies, url, params, request }) =>
 	// rule catalog adds the context-aware checks config can't do. Config degrades to a
 	// pure local lint if the daemon/CLI is unreachable, so this never blocks.
 	const dockerHost = await resolveDockerHostForConfig(envIdNum);
-	const report = await runValidateWithConfig(stackName, compose, ctx, dockerHost, body.config ?? {}, envVars);
+	const report = await runValidateWithConfig(stackName, compose, ctx, dockerHost, body.config ?? {}, envVars, additionalSources, sourceNames);
 	return json(report);
 };
