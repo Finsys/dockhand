@@ -41,6 +41,20 @@ describe('parseMiniSchema: always terminates + bracket arrays', () => {
 	test('array<T> long form still works (no regression)', () => {
 		expect(parseMiniSchema('array<string>')).toEqual({ kind: 'array', items: { kind: 'string' } });
 	});
+
+	test('bare `object` parses as an opaque object, not the string fallback', () => {
+		expect(parseMiniSchema('object')).toEqual({ kind: 'object', properties: {}, required: [] });
+	});
+
+	test('nested object with a bare `object` property (the exact string from #1530 — was silently "string")', () => {
+		// This is the real `body:` annotation on POST /api/stacks/{name}/validate.
+		// Before the fix, `severity` and `envVars` both fell through to
+		// `{ kind: 'string' }` because `parseType()` only recognized
+		// integer/number/boolean/string as bare words.
+		const s = parseMiniSchema('{compose:string!, config:{disabled:[string], severity:object}, envVars:object}');
+		expect((s as any).properties.config.properties.severity).toEqual({ kind: 'object', properties: {}, required: [] });
+		expect((s as any).properties.envVars).toEqual({ kind: 'object', properties: {}, required: [] });
+	});
 });
 
 describe('parseAnnotations: non-JSON request bodies', () => {

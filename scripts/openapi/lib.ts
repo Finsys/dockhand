@@ -209,7 +209,8 @@ export function discoverRoutes(rootDirs: string[], routesRoot: string): { routes
 //    * resp-<code>-example: <json>
 //    */
 //
-// mini-schema := 'string'|'integer'|'number'|'boolean' | '{' (name':'type'!'?','?)* '}' | 'array<' type '>'
+// mini-schema := 'string'|'integer'|'number'|'boolean'|'object' | '{' (name':'type'!'?','?)* '}' | 'array<' type '>'
+// (bare 'object' = an opaque object with no declared properties; use '{...}' for a documented shape)
 
 export function parseMiniSchema(str: string): MiniSchema {
 	let i = 0;
@@ -244,6 +245,15 @@ export function parseMiniSchema(str: string): MiniSchema {
 		if (i === start) i++;
 		const word = s.slice(start, i) || 'string';
 		if (word === 'integer' || word === 'number' || word === 'boolean' || word === 'string') return { kind: word };
+		// Bare `object` (no `{...}` shape given) — an opaque/untyped object, used
+		// throughout the codebase for fields whose internal shape isn't part of
+		// the documented contract (e.g. `severity:object`, `envVars:object`,
+		// `config:object`). Without this branch it silently fell through to the
+		// generic `string` fallback below, so every one of these fields was
+		// documented in static/openapi.json as `{ "type": "string" }` instead of
+		// `{ "type": "object" }` — wrong for any client generated strictly from
+		// the spec (a typed SDK, an MCP server mirroring the schema, ...).
+		if (word === 'object') return { kind: 'object', properties: {}, required: [] };
 		return { kind: 'string' };
 	}
 
