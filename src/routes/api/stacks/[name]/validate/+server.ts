@@ -35,9 +35,10 @@ async function resolveDockerHostForConfig(envIdNum: number | undefined): Promise
  *
  * @openapi
  * summary: Run the Compose Validate preflight linter on a compose file and return findings with severities and line numbers (requires the 'view' permission)
+ * description: Set existing:true when validating an already-deployed stack, so the stack's own running containers/ports are excluded from the cross-stack collision checks; omit it (or false) for a brand-new stack, where a name/port clash with a running stack of the same name must still be reported.
  * path: name:string! Stack name (used to exclude the stack's own containers from cross-stack collision checks)
  * query: env:integer Environment ID for the context-aware checks (from GET /api/environments)
- * body: {compose:string!, config:{disabled:[string], severity:object}, envVars:object}
+ * body: {compose:string!, existing:boolean, config:{disabled:[string], severity:object}, envVars:object}
  * body-example: {"compose":"services:\n  web:\n    image: nginx:latest\n    ports: [\"8080:80\"]\n"}
  * resp-200: {findings:[{ruleId:string!, severity:string!, message:string!, hint:string, service:string, line:integer, fix:object, fixDescription:string}]!, counts:{error:integer!, warn:integer!, info:integer!}!}
  * resp-200-example: {"findings":[{"ruleId":"LATEST_TAG","severity":"warn","message":"\"web\" uses `:latest` (nginx:latest)","hint":"Pin a version tag for reproducible deploys and to enable newer-version detection.","service":"web","line":3}],"counts":{"error":0,"warn":1,"info":0}}

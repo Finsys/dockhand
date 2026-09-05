@@ -46,14 +46,19 @@ describe('parseMiniSchema: always terminates + bracket arrays', () => {
 		expect(parseMiniSchema('object')).toEqual({ kind: 'object', properties: {}, required: [] });
 	});
 
-	test('nested object with a bare `object` property (the exact string from #1530 — was silently "string")', () => {
-		// This is the real `body:` annotation on POST /api/stacks/{name}/validate.
-		// Before the fix, `severity` and `envVars` both fell through to
+	test('nested object with a bare `object` property (the real body: annotation on POST /api/stacks/{name}/validate — was silently "string")', () => {
+		// Before this fix, `severity` and `envVars` both fell through to
 		// `{ kind: 'string' }` because `parseType()` only recognized
-		// integer/number/boolean/string as bare words.
-		const s = parseMiniSchema('{compose:string!, config:{disabled:[string], severity:object}, envVars:object}');
+		// integer/number/boolean/string as bare words. `existing` (added for
+		// #1530) is a plain `boolean` and was never affected by this bug —
+		// included here only to keep this literal in sync with the real
+		// annotation.
+		const s = parseMiniSchema(
+			'{compose:string!, existing:boolean, config:{disabled:[string], severity:object}, envVars:object}'
+		);
 		expect((s as any).properties.config.properties.severity).toEqual({ kind: 'object', properties: {}, required: [] });
 		expect((s as any).properties.envVars).toEqual({ kind: 'object', properties: {}, required: [] });
+		expect((s as any).properties.existing).toEqual({ kind: 'boolean' });
 	});
 });
 
