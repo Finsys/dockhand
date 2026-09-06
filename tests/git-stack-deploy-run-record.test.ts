@@ -1,13 +1,21 @@
 /**
  * Wires the stack_deploy run recorder into `deployGitStack()` (git.ts) itself, not
- * into any single HTTP route. deployGitStack is the one function EVERY git-stack
- * deploy trigger funnels through -- the manual "Deploy" button, a config-update-
- * then-redeploy, both webhook methods, create-and-deploy, and (via
- * runGitStackSync) the cron scheduler and the schedules page's "run now". Wiring
- * the recorder at a single route (the way compose/+server.ts does it for non-git
- * stacks) would leave every OTHER caller unrecorded -- crucially the cron- and
- * webhook-triggered ones, the truly unattended runs the design doc's Meilenstein 5
- * is about.
+ * into any single HTTP route. deployGitStack is the function every git-stack deploy
+ * trigger EXCEPT ONE funnels through -- a config-update-then-redeploy, both webhook
+ * methods, create-and-deploy, and (via runGitStackSync) the cron scheduler and the
+ * schedules page's "run now". Wiring the recorder at a single route (the way
+ * compose/+server.ts does it for non-git stacks) would leave every OTHER caller
+ * unrecorded -- crucially the cron- and webhook-triggered ones, the truly unattended
+ * runs the design doc's Meilenstein 5 is about.
+ *
+ * The one exception is the UI's own "Deploy" button, which streams live progress via
+ * deployGitStackWithProgress() -- a SEPARATE clone/read/deploy pipeline (it does not
+ * call deployGitStack at all) that therefore needed, and was missing, its OWN copy of
+ * this same recorder wiring. Reported by a reviewer and confirmed by reading both
+ * functions side by side: deployGitStack's recorder wiring never touches it. See the
+ * second describe block below for its coverage, and the Gegenprobe block at the
+ * bottom for why the guard there now expects TWO createRunRecorder call sites, not
+ * one.
  *
  * `syncGitStack()` (also in git.ts) is a private collaborator of deployGitStack,
  * called as a plain in-module function reference, not through an imported
@@ -217,7 +225,7 @@ afterAll(async () => {
 // -- Route/function under test, imported AFTER DATA_DIR is set and all fakes are ---
 // -- registered (git.ts reads DATA_DIR at module-load time for GIT_REPOS_DIR).
 
-const { deployGitStack } = await import('../src/lib/server/git');
+const { deployGitStack, deployGitStackWithProgress } = await import('../src/lib/server/git');
 const { readRunLog, deleteRunLog } = await import('../src/lib/server/deploy-log-store');
 const { hashComposeContent } = await import('../src/lib/server/deploy-run-record-core');
 
@@ -398,14 +406,124 @@ describe('deployGitStack -- stack_deploy run record (git-triggered deploys)', ()
 	});
 });
 
-describe('deployGitStack -- Gegenprobe: removing the recorder wiring turns every test above red', () => {
-	test('source-level guard: deployGitStack calls createRunRecorder exactly once', async () => {
+describe("deployGitStackWithProgress -- stack_deploy run record (the UI 'Deploy' button)", () => {
+	// deployGitStackWithProgress runs its OWN clone/read/deploy pipeline (it does not
+	// call deployGitStack), reporting 5 discrete stages via onProgress rather than
+	// deployGitStack's onLine -- see its doc comment in git.ts. It was, until this
+	// fix, the one caller of deployStack() that never went through createRunRecorder
+	// at all: every test below is red without the fix (verified by reverting it and
+	// re-running this file), because no stack_deploy row is created in the first
+	// place.
+
+	test('a manual UI deploy creates exactly one stack_deploy row, closed as success, with a readable log', async () => {
+		const progressEvents: Array<{ status: string; message?: string }> = [];
+		const result = await deployGitStackWithProgress(gitStackId, (data) => progressEvents.push(data));
+
+		expect(result.success).toBe(true);
+		expect(deployStackCalls).toHaveLength(1); // the clone->deploy path really ran
+
+		const rows = stackDeployRows();
+		expect(rows).toHaveLength(1);
+		expect(rows[0].entityName).toBe(STACK);
+		expect(rows[0].triggeredBy).toBe('manual');
+		expect(rows[0].scheduleId).toBe(0);
+
+		const update = endUpdate();
+		expect(update?.status).toBe('success');
+		expect(update?.errorMessage).toBeNull();
+
+		const runId = String(rows[0].id);
+		const log = await readRunLog(null, runId);
+		expect(log).toContain('Container demo-stack-app-1  Started');
+
+		// onLine mirrors deploy output into the run record's log file WITHOUT being
+		// forwarded to onProgress -- that callback's own contract is the 5 discrete
+		// stage messages this function sends itself, not raw compose output lines.
+		expect(progressEvents.some((e) => e.message?.includes('Container demo-stack-app-1'))).toBe(false);
+		expect(progressEvents.some((e) => e.status === 'complete')).toBe(true);
+	});
+
+	test('composeHash matches the content actually read from the cloned repository', async () => {
+		await deployGitStackWithProgress(gitStackId, () => {});
+
+		const update = endUpdate();
+		const details = update?.details as { composeHash: string };
+		expect(details.composeHash).toBe(hashComposeContent('services:\n  app:\n    image: demo:1\n'));
+	});
+
+	test('a secret value in the deploy error text is redacted before it is stored', async () => {
+		deployStackResult = { success: false, error: 'compose up failed: DB_PASSWORD=s3cr3t-value rejected' };
+		deployStackOnLines = [];
+
+		const result = await deployGitStackWithProgress(gitStackId, () => {});
+
+		expect(result.success).toBe(false);
+		const update = endUpdate();
+		expect(update?.status).toBe('failed');
+		expect(String(update?.errorMessage)).not.toContain('s3cr3t-value');
+	});
+
+	// F4 fix, same rationale as deployGitStack's own regression test above: a
+	// provider-resolved secret is only known AFTER deployStack() returns, so it must
+	// be fed into the recorder via addSecrets() before end() closes the row, or it
+	// bypasses redaction entirely.
+	test('F4 regression: a provider-resolved secret (unknown at recorder construction) is redacted before it is stored', async () => {
+		const PROVIDER_SECRET = 'zzz-bulk-provider-9000';
+		deployStackResult = {
+			success: false,
+			error: `compose up failed: PROVIDER_TOKEN=${PROVIDER_SECRET} rejected`,
+			resolvedSecrets: [PROVIDER_SECRET]
+		};
+		deployStackOnLines = [];
+
+		const result = await deployGitStackWithProgress(gitStackId, () => {});
+
+		expect(result.success).toBe(false);
+		const update = endUpdate();
+		expect(update?.status).toBe('failed');
+		expect(String(update?.errorMessage)).not.toContain(PROVIDER_SECRET);
+	});
+});
+
+describe('deployGitStack / deployGitStackWithProgress -- Gegenprobe: removing either recorder wiring turns its own describe block above red', () => {
+	async function readGitTsSource(): Promise<string> {
 		const { readFile } = await import('node:fs/promises');
 		const { dirname } = await import('node:path');
 		const { fileURLToPath } = await import('node:url');
 		const here = dirname(fileURLToPath(import.meta.url));
-		const source = await readFile(join(here, '..', 'src', 'lib', 'server', 'git.ts'), 'utf8');
-		const matches = source.match(/createRunRecorder\(/g) ?? [];
-		expect(matches).toHaveLength(1);
+		return readFile(join(here, '..', 'src', 'lib', 'server', 'git.ts'), 'utf8');
+	}
+
+	/**
+	 * Isolates one exported function's own body: from its exact `export async
+	 * function NAME(` signature up to (not including) the next top-level `export `.
+	 * Good enough for these two specific, non-nested, sequentially-declared
+	 * functions in this one file -- NOT a general-purpose brace matcher, and this
+	 * guard cannot tell WHICH call site broke if the slicing itself were ever wrong.
+	 * The behavioral tests in both describe blocks above are what actually prove
+	 * each function records a run; this is a second, cheap line of defense on top
+	 * of them, not a replacement for them.
+	 */
+	function functionBody(source: string, name: string): string {
+		const signature = `export async function ${name}(`;
+		const start = source.indexOf(signature);
+		if (start === -1) throw new Error(`function ${name} not found in git.ts`);
+		const nextExport = source.indexOf('\nexport ', start + signature.length);
+		return nextExport === -1 ? source.slice(start) : source.slice(start, nextExport);
+	}
+
+	test('deployGitStack calls createRunRecorder', async () => {
+		const body = functionBody(await readGitTsSource(), 'deployGitStack');
+		expect(body.match(/createRunRecorder\(/g) ?? []).toHaveLength(1);
+	});
+
+	test('deployGitStackWithProgress ALSO calls createRunRecorder -- this is the exact gap Finding 2 closes', async () => {
+		const body = functionBody(await readGitTsSource(), 'deployGitStackWithProgress');
+		expect(body.match(/createRunRecorder\(/g) ?? []).toHaveLength(1);
+	});
+
+	test('exactly two createRunRecorder call sites in the whole file, one per function', async () => {
+		const matches = (await readGitTsSource()).match(/createRunRecorder\(/g) ?? [];
+		expect(matches).toHaveLength(2);
 	});
 });
