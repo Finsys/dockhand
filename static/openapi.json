@@ -23777,6 +23777,12 @@
                   "defaultTrivyImage": {
                     "type": "string"
                   },
+                  "deployLogReconcileCron": {
+                    "type": "string"
+                  },
+                  "deployLogReconcileEnabled": {
+                    "type": "boolean"
+                  },
                   "downloadFormat": {
                     "type": "string"
                   },
@@ -23895,6 +23901,8 @@
                 "defaultScannerNetworkMode": "string",
                 "defaultTrivyArgs": "string",
                 "defaultTrivyImage": "string",
+                "deployLogReconcileCron": "string",
+                "deployLogReconcileEnabled": true,
                 "downloadFormat": "string",
                 "editorFont": "string",
                 "eventCleanupCron": "string",
@@ -24675,6 +24683,15 @@
                   },
                   "environmentId": {
                     "type": "integer"
+                  },
+                  "pull": {
+                    "type": "boolean"
+                  },
+                  "build": {
+                    "type": "boolean"
+                  },
+                  "forceRecreate": {
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -24694,7 +24711,10 @@
                 "secretProviderId": 0,
                 "start": true,
                 "envId": 0,
-                "environmentId": 0
+                "environmentId": 0,
+                "pull": true,
+                "build": true,
+                "forceRecreate": true
               }
             }
           }
@@ -25036,6 +25056,15 @@
                   },
                   "secretProviderId": {
                     "type": "integer"
+                  },
+                  "pull": {
+                    "type": "boolean"
+                  },
+                  "build": {
+                    "type": "boolean"
+                  },
+                  "forceRecreate": {
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -25050,7 +25079,10 @@
                 "oldEnvPath": "string",
                 "moveFromDir": "string",
                 "restart": true,
-                "secretProviderId": 0
+                "secretProviderId": 0,
+                "pull": true,
+                "build": true,
+                "forceRecreate": true
               }
             }
           }
@@ -25504,6 +25536,9 @@
           },
           "403": {
             "description": "Permission denied (needs stacks:edit for the run's own environment), or access denied to this environment"
+          },
+          "409": {
+            "description": "The run has not finished yet (status is not a terminal one) -- deleting a"
           }
         },
         "security": [

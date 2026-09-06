@@ -23777,6 +23777,12 @@
                   "defaultTrivyImage": {
                     "type": "string"
                   },
+                  "deployLogReconcileCron": {
+                    "type": "string"
+                  },
+                  "deployLogReconcileEnabled": {
+                    "type": "boolean"
+                  },
                   "downloadFormat": {
                     "type": "string"
                   },
@@ -23895,6 +23901,8 @@
                 "defaultScannerNetworkMode": "string",
                 "defaultTrivyArgs": "string",
                 "defaultTrivyImage": "string",
+                "deployLogReconcileCron": "string",
+                "deployLogReconcileEnabled": true,
                 "downloadFormat": "string",
                 "editorFont": "string",
                 "eventCleanupCron": "string",
