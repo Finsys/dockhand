@@ -65,7 +65,7 @@ export const GET: RequestHandler = async ({ cookies }) => {
  * @openapi
  * summary: Create a restic backup destination, auto-initialize and test the repository, and register its default maintenance schedules
  * description: Permission denial (403, "backups:manage") is produced by the shared requireBackups route guard.
- * body: {name:string!, repository:string!, password:string!, envVars:{}, flags:string, hostPath:string, cacert:string, tlsClientCert:string, policies:string}
+ * body: {name:string!, repository:string!, password:string!, envVars:{}, flags:string, backupFlags:string, restoreFlags:string, hostPath:string, cacert:string, tlsClientCert:string, policies:string}
  * body-example: {"name":"S3 Offsite","repository":"s3:s3.amazonaws.com/my-bucket/restic","password":"***","envVars":{"AWS_ACCESS_KEY_ID":"***","AWS_SECRET_ACCESS_KEY":"***"}}
  * resp-201: The created backup destination object (includes decrypted envVars since the caller just supplied them; password is stripped)
  * resp-400: Invalid input — missing name/repository/password, unsupported/SSRF-blocked repository, invalid restic flags, or an invalid cron schedule in the policies

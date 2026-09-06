@@ -3603,6 +3603,12 @@
                   "flags": {
                     "type": "string"
                   },
+                  "backupFlags": {
+                    "type": "string"
+                  },
+                  "restoreFlags": {
+                    "type": "string"
+                  },
                   "hostPath": {
                     "type": "string"
                   },
@@ -3739,6 +3745,12 @@
                     "properties": {}
                   },
                   "flags": {
+                    "type": "string"
+                  },
+                  "backupFlags": {
+                    "type": "string"
+                  },
+                  "restoreFlags": {
                     "type": "string"
                   },
                   "hostPath": {

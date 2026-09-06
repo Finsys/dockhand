@@ -79,7 +79,7 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
  * summary: Update a backup destination, re-validating repository and flags when supplied and re-registering maintenance schedules when policies change
  * description: Permission denial (403, "backups:manage") is produced by the shared requireBackups route guard.
  * path: id:integer! Backup destination id (from GET /api/backup/destinations)
- * body: {name:string, repository:string, password:string, envVars:{}, flags:string, hostPath:string, cacert:string, tlsClientCert:string, policies:string}
+ * body: {name:string, repository:string, password:string, envVars:{}, flags:string, backupFlags:string, restoreFlags:string, hostPath:string, cacert:string, tlsClientCert:string, policies:string}
  * body-example: {"name":"S3 Offsite (renamed)","policies":"{\"pruneEnabled\":true,\"pruneSchedule\":\"0 0 1 * *\"}"}
  * resp-200: The updated backup destination object (password stripped, envVars echoed back to the managing caller)
  * resp-400: Invalid input — invalid id, unsupported/SSRF-blocked repository, invalid restic flags, invalid policy cron, or switching to a local repository used by a remote-environment config
