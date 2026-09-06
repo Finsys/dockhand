@@ -65,7 +65,11 @@ registerAuthorizeFake(async () => ({
 	isAuthenticated: true,
 	isEnterprise: false,
 	can: async () => true,
-	canAccessEnvironment: async () => true
+	canAccessEnvironment: async () => true,
+	// upstream/main added this gate (requireEnvAccess) to compose/+server.ts after this
+	// fake was written; authEnabled is false here, so the real implementation would be a
+	// no-op (see src/lib/server/authorize.ts) -- mirror that instead of leaving it undefined.
+	requireEnvAccess: async () => null
 }));
 
 // -- $lib/server/db: an in-memory schedule_executions fake -------------------
