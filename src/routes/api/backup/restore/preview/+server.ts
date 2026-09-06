@@ -15,7 +15,7 @@ import { jobResult } from '$lib/server/sse';
  * resp-200: object
  * resp-200-desc: The snapshot preview, optionally with a resolved targets list
  * resp-400: Missing required fields (destinationId, snapshotId)
- * resp-403: Permission denied (needs backups:view) or access denied to the target environment
+ * resp-403: Permission denied (needs backups:manage) or access denied to the target environment
  */
 export const POST: RequestHandler = async ({ request, cookies }) => {
 	const auth = await authorize(cookies);

@@ -4301,7 +4301,7 @@
             "description": "Missing required fields (destinationId, snapshotId)"
           },
           "403": {
-            "description": "Permission denied (needs backups:view) or access denied to the target environment"
+            "description": "Permission denied (needs backups:manage) or access denied to the target environment"
           }
         },
         "security": [
