@@ -12,6 +12,9 @@ function detectSource(request: Request): string {
 }
 
 /**
+ * Stack-level git webhook. See git-webhook-handler.ts for the shared flow.
+ */
+/**
  * @openapi
  * summary: Webhook trigger (GitHub/GitLab) that deploys a git stack when its signature/token verifies
  * description: Public endpoint authenticated by the stack's webhook secret via `X-Hub-Signature-256` (GitHub) or `X-Gitlab-Token` (GitLab); the raw request body is used for HMAC verification.
@@ -42,8 +45,6 @@ export const POST: RequestHandler = async (event) => {
 		}
 
 		const source = detectSource(request);
-
-		// A secret is mandatory: reject if none is configured.
 		if (!gitStack.webhookSecret) {
 			await auditGitStack(event, 'webhook', id, gitStack.stackName, gitStack.environmentId, {
 				method: 'POST', source, error: 'no_secret_configured'
@@ -52,11 +53,7 @@ export const POST: RequestHandler = async (event) => {
 		}
 
 		const payload = await request.text();
-		const githubSignature = request.headers.get('x-hub-signature-256');
-		const gitlabToken = request.headers.get('x-gitlab-token');
-
-		const signature = githubSignature || gitlabToken;
-
+		const signature = request.headers.get('x-hub-signature-256') || request.headers.get('x-gitlab-token');
 		if (!verifyWebhookSignature(payload, signature, gitStack.webhookSecret)) {
 			await auditGitStack(event, 'webhook', id, gitStack.stackName, gitStack.environmentId, {
 				method: 'POST', source, error: 'invalid_signature'
@@ -64,7 +61,6 @@ export const POST: RequestHandler = async (event) => {
 			return json({ error: 'Invalid webhook signature' }, { status: 401 });
 		}
 
-		// Deploy the git stack (syncs and deploys only if there are changes)
 		const result = await deployGitStack(id, { force: false });
 		await auditGitStack(event, 'webhook', id, gitStack.stackName, gitStack.environmentId, {
 			method: 'POST', source, result: result.skipped ? 'skipped' : result.success ? 'deployed' : 'failed'
@@ -107,7 +103,6 @@ export const GET: RequestHandler = async (event) => {
 			return json({ error: 'Webhook is not enabled for this stack' }, { status: 403 });
 		}
 
-		// A secret is mandatory (see POST handler). Reject if none is configured.
 		if (!gitStack.webhookSecret) {
 			await auditGitStack(event, 'webhook', id, gitStack.stackName, gitStack.environmentId, {
 				method: 'GET', source: 'get', error: 'no_secret_configured'
@@ -115,7 +110,6 @@ export const GET: RequestHandler = async (event) => {
 			return json({ error: 'Webhook secret is not configured for this stack' }, { status: 401 });
 		}
 
-		// Verify secret via query parameter for GET requests
 		const secret = url.searchParams.get('secret');
 		if (secret !== gitStack.webhookSecret) {
 			await auditGitStack(event, 'webhook', id, gitStack.stackName, gitStack.environmentId, {
@@ -124,7 +118,6 @@ export const GET: RequestHandler = async (event) => {
 			return json({ error: 'Invalid webhook secret' }, { status: 401 });
 		}
 
-		// Deploy the git stack (syncs and deploys only if there are changes)
 		const result = await deployGitStack(id, { force: false });
 		await auditGitStack(event, 'webhook', id, gitStack.stackName, gitStack.environmentId, {
 			method: 'GET', source: 'get', result: result.skipped ? 'skipped' : result.success ? 'deployed' : 'failed'

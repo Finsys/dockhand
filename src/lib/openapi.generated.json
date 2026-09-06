@@ -13740,6 +13740,78 @@
         ]
       }
     },
+    "/api/git/repositories/{id}/browse": {
+      "get": {
+        "operationId": "get_api_git_repositories_id_browse",
+        "tags": [
+          "git"
+        ],
+        "summary": "GET /api/git/repositories/{id}/browse (auto-generated — no @openapi annotation yet)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Path parameter \"id\" (auto-detected from the handler's source - no @openapi annotation for this parameter yet)"
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Query parameter \"path\" (auto-detected from the handler's source - no @openapi annotation for this parameter yet)"
+          },
+          {
+            "name": "pending",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Query parameter \"pending\" (auto-detected from the handler's source - no @openapi annotation for this parameter yet)"
+          },
+          {
+            "name": "stackId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Query parameter \"stackId\" (auto-detected from the handler's source - no @openapi annotation for this parameter yet)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "400": {
+            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+          },
+          "403": {
+            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+          },
+          "404": {
+            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+          },
+          "500": {
+            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/git/repositories/{id}/deploy": {
       "post": {
         "operationId": "post_api_git_repositories_id_deploy",
@@ -13934,6 +14006,67 @@
             "bearerAuth": []
           }
         ]
+      }
+    },
+    "/api/git/repositories/{id}/temporary-clone": {
+      "post": {
+        "operationId": "post_api_git_repositories_id_temporary-clone",
+        "tags": [
+          "git"
+        ],
+        "summary": "POST /api/git/repositories/{id}/temporary-clone (auto-generated — no @openapi annotation yet)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Path parameter \"id\" (auto-detected from the handler's source - no @openapi annotation for this parameter yet)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "400": {
+            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+          },
+          "403": {
+            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+          },
+          "404": {
+            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+          },
+          "500": {
+            "description": "Error response (auto-detected status code — no @openapi annotation for this response yet)"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "branch": {
+                    "type": "string"
+                  }
+                },
+                "description": "Fields auto-detected from the handler's destructuring of the request body - generic string type, no @openapi annotation for this body yet."
+              }
+            }
+          }
+        }
       }
     },
     "/api/git/repositories/{id}/test": {
@@ -24651,6 +24784,16 @@
                   "composePath": {
                     "type": "string"
                   },
+                  "composePaths": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "composeContents": {
+                    "type": "object",
+                    "properties": {}
+                  },
                   "envPath": {
                     "type": "string"
                   },
@@ -24686,6 +24829,10 @@
                 "name": "string",
                 "compose": "string",
                 "composePath": "string",
+                "composePaths": [
+                  "string"
+                ],
+                "composeContents": {},
                 "envPath": "string",
                 "envVars": [
                   {}
@@ -25019,6 +25166,16 @@
                   "composePath": {
                     "type": "string"
                   },
+                  "composePaths": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "composeContents": {
+                    "type": "object",
+                    "properties": {}
+                  },
                   "envPath": {
                     "type": "string"
                   },
@@ -25045,6 +25202,10 @@
               "example": {
                 "content": "string",
                 "composePath": "string",
+                "composePaths": [
+                  "string"
+                ],
+                "composeContents": {},
                 "envPath": "string",
                 "oldComposePath": "string",
                 "oldEnvPath": "string",
@@ -25792,6 +25953,16 @@
                   "compose": {
                     "type": "string"
                   },
+                  "composePaths": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "composeContents": {
+                    "type": "object",
+                    "properties": {}
+                  },
                   "variables": {
                     "type": "array",
                     "items": {
@@ -26494,6 +26665,16 @@
                 "properties": {
                   "compose": {
                     "type": "string"
+                  },
+                  "composePaths": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "composeContents": {
+                    "type": "object",
+                    "properties": {}
                   },
                   "existing": {
                     "type": "boolean"
