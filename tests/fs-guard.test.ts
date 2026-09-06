@@ -3,11 +3,19 @@ import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync, rmSync } from 'node
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-// Pin DATA_DIR before importing so the guard computes /app/data paths.
-beforeAll(() => { process.env.DATA_DIR = '/app/data'; });
+// Pin DATA_DIR before the import below so the guard computes /app/data paths. This runs
+// at module load (Bun runs all test files in one process), so it must be RESTORED after
+// this file or it leaks /app/data into every later file - e.g. selfhst-icons then does
+// mkdirSync('/app/data/...') and fails EACCES on CI (#1535).
+const __prevDataDir = process.env.DATA_DIR;
 process.env.DATA_DIR = '/app/data';
 
 const { isProtectedPath } = await import('../src/lib/server/fs-guard');
+
+afterAll(() => {
+	if (__prevDataDir === undefined) delete process.env.DATA_DIR;
+	else process.env.DATA_DIR = __prevDataDir;
+});
 
 describe('isProtectedPath (file-browser secret guard, H1)', () => {
 	test('blocks the database directory and its contents', () => {
