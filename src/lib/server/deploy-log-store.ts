@@ -156,6 +156,24 @@ export async function listRunLogIds(envId: number | null): Promise<string[]> {
 }
 
 /**
+ * Last-modified time (ms since epoch) of a run's log file, or null if it does not
+ * exist. Used by the reconcile job (deploy-log-reconcile.ts) as a TOCTOU guard: the
+ * set of stack_deploy records it compares files against is a single point-in-time
+ * snapshot taken at the start of the job, while appendRunLog() keeps writing to (and
+ * therefore keeps bumping the mtime of) a live deploy's file for as long as it runs.
+ * A deploy that starts AFTER that snapshot has no record in it yet, but its file can
+ * already exist by the time this environment's files are listed -- a file this fresh
+ * is exactly what that race looks like, not an abandoned orphan.
+ */
+export async function getRunLogMtimeMs(envId: number | null, runId: string): Promise<number | null> {
+	try {
+		return (await stat(runLogPath(envId, runId))).mtimeMs;
+	} catch {
+		return null;
+	}
+}
+
+/**
  * Every environment directory name currently present under deploy-logs/. Used by the
  * reconcile job (deploy-log-reconcile.ts) to discover which environments have ANY
  * files on disk, without first needing to already know the full set of environment

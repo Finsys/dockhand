@@ -68,11 +68,18 @@ registerDbFake('appendScheduleExecutionLog', async () => {});
 let filesByEnvKey: Map<string, string[]>;
 let deletedFiles: Array<{ envId: number | null; id: string }>;
 let throwOnDeleteKeys: Set<string>; // `${envDirName(envId)}:${fileId}`
+// mtime (ms since epoch) per delete candidate, keyed the same way as throwOnDeleteKeys.
+// Defaults (see getRunLogMtimeMs below) to something WELL outside the reconcile job's
+// grace period, so every existing "orphan gets deleted" assertion in this file keeps
+// meaning exactly what it always did -- only a test that explicitly seeds a RECENT
+// mtime here is exercising the TOCTOU guard at all.
+let mtimeMsByKey: Map<string, number>;
 
 function resetFsState() {
 	filesByEnvKey = new Map();
 	deletedFiles = [];
 	throwOnDeleteKeys = new Set();
+	mtimeMsByKey = new Map();
 }
 resetFsState();
 
@@ -83,6 +90,10 @@ const storeDeps = {
 		const key = `${envDirName(envId)}:${fileId}`;
 		if (throwOnDeleteKeys.has(key)) throw new Error(`delete failed for ${key}`);
 		deletedFiles.push({ envId, id: fileId });
+	},
+	getRunLogMtimeMs: async (envId: number | null, fileId: string) => {
+		const key = `${envDirName(envId)}:${fileId}`;
+		return mtimeMsByKey.get(key) ?? Date.now() - 24 * 60 * 60 * 1000; // default: a day old
 	}
 };
 
@@ -252,5 +263,55 @@ describe('runDeployLogReconcileJob', () => {
 		await runDeployLogReconcileJob('manual', storeDeps);
 
 		expect(executions.get(99).details.logMissing).toBe(true);
+	});
+
+	// -------------------------------------------------------------------------
+	// TOCTOU guard: `records` is a single snapshot taken at the start of the job
+	// (getScheduleExecutionIdsByType), while a NEW deploy's file can appear on disk
+	// (listRunLogIds) moments later, for a run whose own record simply postdates
+	// that snapshot -- indistinguishable from a genuine orphan by id alone. See the
+	// module doc comment for the full race.
+	// -------------------------------------------------------------------------
+
+	test("a file with no matching record but a RECENT mtime is left alone -- it may belong to a deploy that started after the records snapshot", async () => {
+		filesByEnvKey.set(envDirName(null), ['fresh']);
+		// No record for 'fresh' in `stackDeployRecords` at all -- exactly what an
+		// in-flight deploy whose row postdates the snapshot looks like.
+		mtimeMsByKey.set(`${envDirName(null)}:fresh`, Date.now() - 1000); // 1s old
+
+		await runDeployLogReconcileJob('manual', storeDeps);
+
+		expect(deletedFiles).toEqual([]);
+		const exec = ownExecution();
+		expect(exec.details.skippedRecent).toBe(1);
+		expect(exec.details.deletedFiles).toBe(0);
+		// A recency skip is not a failure -- the run still reports success.
+		expect(exec.status).toBe('success');
+	});
+
+	test('a genuinely old orphan file (no record, no recent write) is still deleted -- the grace period does not protect real orphans forever', async () => {
+		filesByEnvKey.set(envDirName(null), ['stale']);
+		mtimeMsByKey.set(`${envDirName(null)}:stale`, Date.now() - 60 * 60 * 1000); // 1h old
+
+		await runDeployLogReconcileJob('manual', storeDeps);
+
+		expect(deletedFiles).toEqual([{ envId: null, id: 'stale' }]);
+		const exec = ownExecution();
+		expect(exec.details.skippedRecent).toBe(0);
+		expect(exec.details.deletedFiles).toBe(1);
+	});
+
+	test('a recency skip in one environment does not stop a genuinely old orphan in ANOTHER environment from being deleted', async () => {
+		filesByEnvKey.set(envDirName(1), ['fresh-in-env-1']);
+		mtimeMsByKey.set(`${envDirName(1)}:fresh-in-env-1`, Date.now());
+		filesByEnvKey.set(envDirName(2), ['stale-in-env-2']);
+		mtimeMsByKey.set(`${envDirName(2)}:stale-in-env-2`, Date.now() - 60 * 60 * 1000);
+
+		await runDeployLogReconcileJob('manual', storeDeps);
+
+		expect(deletedFiles).toEqual([{ envId: 2, id: 'stale-in-env-2' }]);
+		const exec = ownExecution();
+		expect(exec.details.skippedRecent).toBe(1);
+		expect(exec.details.deletedFiles).toBe(1);
 	});
 });

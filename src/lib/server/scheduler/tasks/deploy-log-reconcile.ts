@@ -55,6 +55,32 @@
  * counting toward recordIds (within their own environment's set) so an already-existing
  * file for them is protected from deletion either way.
  *
+ * TOCTOU guard on the delete side: `records` (below) is read ONCE, at the very start
+ * of this job, via a single getScheduleExecutionIdsByType() call -- a point-in-time
+ * snapshot, not a live view. A deploy whose createRunRecorder() call happens AFTER
+ * that snapshot has no row in `records` at all, yet its log file can already exist by
+ * the time THIS environment's fileIds are listed a moment later (appendRunLog() writes
+ * the file on the very first streamed line, which can arrive within the same tick).
+ * Nothing in planReconcile() can tell that file apart from a genuine orphan -- both
+ * simply have no matching id in `records`. Deleting it would tear a live deploy's log
+ * out from under it while it is still being written to.
+ *
+ * Reported independently and confirmed by re-reading this exact snapshot-then-list
+ * ordering: fixed by treating a delete candidate's file mtime as a second signal
+ * alongside `records`, not by trying to make the DB read and the directory listing
+ * atomic with each other (they are two different data sources; no single query spans
+ * both). ORPHAN_DELETE_GRACE_MS below is deliberately generous compared to how long
+ * this job actually takes to walk from its `records` snapshot to any one
+ * environment's listRunLogIds() call (well under a second in the ordinary case) --
+ * appendRunLog() keeps bumping a live deploy's file mtime for as long as it keeps
+ * writing, so the grace period does not need to outlast the whole deploy, only the
+ * gap between the snapshot and this environment being reached. A file newer than the
+ * grace period is left alone THIS run; the NEXT scheduled run will see its by-then-
+ * created record and correctly never consider it for deletion again -- nothing is
+ * lost, the file is just given one more cycle to prove itself real, exactly the same
+ * shape of trade-off isEligibleForMissingMark() already makes on the other side of
+ * this same race (see above).
+ *
  * Each element in both loops below is wrapped in its own try/catch. Without that, one
  * throwing deleteRunLog/updateScheduleExecution call would abort the whole run -- and
  * since the failing file/record is never removed/marked, every LATER run would fail at
@@ -74,14 +100,32 @@ import {
 	updateScheduleExecution,
 	appendScheduleExecutionLog
 } from '../../db';
-import { listEnvDirNames, listRunLogIds, deleteRunLog, envDirName, parseEnvDirName } from '../../deploy-log-store';
+import {
+	listEnvDirNames,
+	listRunLogIds,
+	deleteRunLog,
+	envDirName,
+	parseEnvDirName,
+	getRunLogMtimeMs
+} from '../../deploy-log-store';
 import { planReconcile, isEligibleForMissingMark } from '../../deploy-log-reconcile-core';
 
 // System job ID (own scheduleType, so this never collides with system-cleanup.ts's ids)
 export const DEPLOY_LOG_RECONCILE_ID = 1;
 
 /**
- * The three filesystem calls this job makes, injectable so a test can force one element
+ * How much younger than "now" a delete candidate's file mtime may be before this job
+ * still deletes it. See the TOCTOU guard in the module doc comment above: this only
+ * needs to outlast the gap between the `records` snapshot and this environment's
+ * listRunLogIds() call (ordinarily well under a second), never the whole deploy --
+ * appendRunLog() keeps re-bumping a live deploy's mtime for as long as it keeps
+ * writing. Generous on purpose; a false skip just costs one more reconcile cycle,
+ * while a false delete destroys a live deploy's log outright.
+ */
+const ORPHAN_DELETE_GRACE_MS = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * The filesystem calls this job makes, injectable so a test can force one element
  * to fail while its neighbours succeed, and so a test can populate a fake per-environment
  * file layout without touching the real filesystem.
  *
@@ -94,9 +138,16 @@ export interface DeployLogReconcileDeps {
 	listEnvDirNames: () => Promise<string[]>;
 	listRunLogIds: (envId: number | null) => Promise<string[]>;
 	deleteRunLog: (envId: number | null, runId: string) => Promise<void>;
+	/** mtime (ms since epoch) of a delete candidate's file, or null if it is already gone. */
+	getRunLogMtimeMs: (envId: number | null, runId: string) => Promise<number | null>;
 }
 
-const defaultDeps: DeployLogReconcileDeps = { listEnvDirNames, listRunLogIds, deleteRunLog };
+const defaultDeps: DeployLogReconcileDeps = {
+	listEnvDirNames,
+	listRunLogIds,
+	deleteRunLog,
+	getRunLogMtimeMs
+};
 
 /**
  * Execute the deploy-log reconcile job.
@@ -165,6 +216,7 @@ export async function runDeployLogReconcileJob(
 		let deletedCount = 0;
 		let markedCount = 0;
 		let skippedInProgress = 0;
+		let skippedRecent = 0;
 		let failedCount = 0;
 
 		for (const envKey of envKeys) {
@@ -189,6 +241,16 @@ export async function runDeployLogReconcileJob(
 
 			for (const fileId of plan.deleteFiles) {
 				try {
+					// TOCTOU guard (see module doc comment): `records` was snapshotted
+					// once, before this loop started. A file this fresh may belong to a
+					// deploy whose record was created AFTER that snapshot -- not to an
+					// abandoned orphan. Leave it for a later run, which will see its
+					// by-then-existing record and correctly never touch it again.
+					const mtimeMs = await deps.getRunLogMtimeMs(envId, fileId);
+					if (mtimeMs !== null && Date.now() - mtimeMs < ORPHAN_DELETE_GRACE_MS) {
+						skippedRecent++;
+						continue;
+					}
 					await deps.deleteRunLog(envId, fileId);
 					deletedCount++;
 				} catch (error: any) {
@@ -225,6 +287,7 @@ export async function runDeployLogReconcileJob(
 		await log(
 			`Reconcile complete: ${deletedCount} orphan file(s) deleted, ${markedCount} record(s) marked logMissing` +
 				(skippedInProgress > 0 ? `, ${skippedInProgress} still-running record(s) skipped` : '') +
+				(skippedRecent > 0 ? `, ${skippedRecent} recently-modified file(s) skipped (possible in-flight deploy)` : '') +
 				(failedCount > 0 ? `, ${failedCount} element(s) failed` : '')
 		);
 		await updateScheduleExecution(execution.id, {
@@ -242,6 +305,7 @@ export async function runDeployLogReconcileJob(
 				deletedFiles: deletedCount,
 				markedRecords: markedCount,
 				skippedInProgress,
+				skippedRecent,
 				failed: failedCount
 			}
 		});
