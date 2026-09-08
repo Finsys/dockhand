@@ -1,6 +1,8 @@
 import { json } from '@sveltejs/kit';
-import { findStackDir, getStackDir } from '$lib/server/stacks';
-import { getStackSource } from '$lib/server/db';
+import { findStackDir, getStackDir, withStackLock } from '$lib/server/stacks';
+import { getStackSource, getStackInjectedSecretKeys } from '$lib/server/db';
+import { saveStackVersion } from '$lib/server/stack-version-wiring';
+import { readStackSourcePointer, upsertStackSourcePointer } from '$lib/server/stack-source-pointers';
 import { authorize } from '$lib/server/authorize';
 import { existsSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -173,6 +175,34 @@ export const PUT: RequestHandler = async ({ params, url, cookies, request }) => 
 		}
 
 		writeFileSync(envFilePath, content);
+
+		// S05: for internal/adopted stacks, record a secret-free env version so the
+		// env history + revert surface works for plain raw-file saves too (same
+		// mechanism as writeRawStackEnvFile). GIT stacks record env versions via
+		// PUT /env instead - the DB is their live env source. Best-effort: a
+		// version-record failure must NOT fail the env save that already succeeded.
+		if (source?.sourceType !== 'git') {
+			try {
+				const stackDir =
+					(await findStackDir(stackName, envIdNum)) ||
+					(await getStackDir(stackName, envIdNum));
+				const secretKeys = [...await getStackInjectedSecretKeys(stackName, envIdNum)];
+				const pointer = await readStackSourcePointer(stackName, envIdNum);
+				await withStackLock(stackName, async () => {
+					await saveStackVersion({
+						stackDir,
+						livePath: envFilePath,
+						type: 'env',
+						content,
+						secretKeys,
+						lastDeployedAt: pointer?.lastDeployedAt ?? null,
+						advancePointer: (values) => upsertStackSourcePointer(stackName, envIdNum, values)
+					});
+				});
+			} catch (err) {
+				console.warn(`[env/raw] Failed to record env version:`, err);
+			}
+		}
 
 		return json({ success: true });
 	} catch (error) {

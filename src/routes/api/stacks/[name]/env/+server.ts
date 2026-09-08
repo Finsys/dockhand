@@ -1,6 +1,8 @@
 import { json } from '@sveltejs/kit';
-import { getStackEnvVars, setStackEnvVars, getStackSource, getStackInjectedSecretKeys, getSecretProviderById } from '$lib/server/db';
-import { findStackDir } from '$lib/server/stacks';
+import { getStackEnvVars, setStackEnvVars, getStackSource, getStackInjectedSecretKeys, getSecretProviderById, getNonSecretEnvVarsAsRecord } from '$lib/server/db';
+import { findStackDir, getStackDir } from '$lib/server/stacks';
+import { saveStackVersion, serializeEnvVars } from '$lib/server/stack-version-wiring';
+import { upsertStackSourcePointer, readStackSourcePointer } from '$lib/server/stack-source-pointers';
 import { authorize } from '$lib/server/authorize';
 import { existsSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -217,6 +219,35 @@ export const PUT: RequestHandler = async ({ params, url, cookies, request }) => 
 
 		// Save secrets to database (non-secrets live in the .env file)
 		await setStackEnvVars(stackName, envIdNum, variablesToSave);
+
+		// S03: For a GIT stack the DB is the live source (no on-disk .env), so record a
+		// non-secret env version here (the internal env version is instead recorded by
+		// writeRawStackEnvFile). This is best-effort: a version-record failure must NOT
+		// fail the env save that already succeeded. The safe-pointer (lastDeployedAt)
+		// ensures the deployed version is never pruned.
+		const source = await getStackSource(stackName, envIdNum);
+		if (source?.sourceType === 'git') {
+			try {
+				const stackDir = await getStackDir(stackName, envIdNum ?? null);
+				const secretKeys = [...await getStackInjectedSecretKeys(stackName, envIdNum)];
+				const pointer = await readStackSourcePointer(stackName, envIdNum ?? null);
+				const nonSecret = await getNonSecretEnvVarsAsRecord(stackName, envIdNum);
+				await saveStackVersion({
+					stackDir,
+					type: 'env',
+					// Serialize the non-secret key->value record back to KEY=VALUE content.
+					// The DB is the live source for a GIT stack, so no livePath is set.
+					content: serializeEnvVars(nonSecret),
+					secretKeys,
+					lastDeployedAt: pointer?.lastDeployedAt ?? null,
+					advancePointer: (values) => upsertStackSourcePointer(stackName, envIdNum ?? null, values),
+				});
+			} catch (err) {
+				// Best-effort: the env save already succeeded; a version-record failure
+				// is logged but must not fail the request.
+				console.warn('[env] Failed to record env version:', err);
+			}
+		}
 
 		return json({ success: true, count: variablesToSave.length });
 	} catch (error) {

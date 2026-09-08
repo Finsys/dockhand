@@ -26212,6 +26212,230 @@
         }
       }
     },
+    "/api/stacks/{name}/history": {
+      "get": {
+        "operationId": "get_api_stacks_name_history",
+        "tags": [
+          "stacks"
+        ],
+        "summary": "List a stack's saved versions (compose or env) with saved/deployed pointers",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The stack name"
+          },
+          {
+            "name": "env",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Environment id the stack belongs to"
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Version kind to list (compose or env); defaults to compose"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "versions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "timestamp": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "timestamp"
+                        ]
+                      }
+                    },
+                    "lastSavedAt": {
+                      "type": "string"
+                    },
+                    "lastDeployedAt": {
+                      "type": "string"
+                    },
+                    "currentVersionId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "versions"
+                  ]
+                },
+                "example": {
+                  "type": "string",
+                  "versions": [
+                    {
+                      "id": "string",
+                      "timestamp": "string"
+                    }
+                  ],
+                  "lastSavedAt": "string",
+                  "lastDeployedAt": "string",
+                  "currentVersionId": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid type (must be compose or env)"
+          },
+          "403": {
+            "description": "Permission denied (needs stacks:view)"
+          },
+          "500": {
+            "description": "Failed to read versions"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Returns the bounded, secret-free version list for `type` (compose or env, defaults to compose) newest-first, plus the stack_sources last_saved_at / last_deployed_at pointers so a client can show a saved-vs-deployed indicator. versions are {id, timestamp}; the pointers are ISO-8601 strings or null (never saved / never deployed)."
+      },
+      "post": {
+        "operationId": "post_api_stacks_name_history",
+        "tags": [
+          "stacks"
+        ],
+        "summary": "Save a new stack version or revert to a past version",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The stack name"
+          },
+          {
+            "name": "env",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Environment id the stack belongs to"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "timestamp": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ]
+                },
+                "example": {
+                  "success": true,
+                  "timestamp": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid action, type, or missing content/versionId"
+          },
+          "403": {
+            "description": "Permission denied (needs stacks:edit)"
+          },
+          "404": {
+            "description": "Revert target version not found"
+          },
+          "500": {
+            "description": "Failed to save or revert"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "action=save persists `content` (compose YAML for type=compose; KEY=VALUE .env text for type=env) as a new bounded secret-free version and advances last_saved_at; action=revert restores the version with `versionId` to the live source (internal compose.yaml, or the env .env file for internal stacks / the DB non-secret subset for GIT stacks with existing secrets preserved) and advances last_saved_at. Secrets are never written to a version.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "type": "string"
+                  },
+                  "type": {
+                    "type": "string"
+                  },
+                  "content": {
+                    "type": "string"
+                  },
+                  "versionId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "action",
+                  "type"
+                ]
+              },
+              "example": {
+                "action": "revert",
+                "type": "compose",
+                "versionId": "abc123"
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/stacks/{name}/icon": {
       "get": {
         "operationId": "get_api_stacks_name_icon",
