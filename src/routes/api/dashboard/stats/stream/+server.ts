@@ -26,6 +26,7 @@ import { prefersJSON, sseToJSON } from '$lib/server/sse';
 import type { EnvironmentStats } from '../+server';
 import { parseLabels } from '$lib/utils/label-colors';
 import { isEdgeConnected } from '$lib/server/hawser';
+import { getImageDiskUsageTotalSize } from '$lib/server/docker-disk-usage-core';
 
 
 // Skip disk usage collection (Synology NAS performance fix)
@@ -434,9 +435,11 @@ async function getEnvironmentStatsProgressive(
 			: getCachedDiskUsage(env.id)
 				.then((diskUsage) => {
 					if (diskUsage) {
-						// Update images with disk usage data (more accurate)
+						// Update images with Docker's deduplicated aggregate size
 						envStats.images.total = diskUsage.Images?.length || envStats.images.total;
-						envStats.images.totalSize = diskUsage.Images?.reduce((sum: number, img: any) => sum + getValidSize(img.Size), 0) || envStats.images.totalSize;
+						envStats.images.totalSize = getImageDiskUsageTotalSize(diskUsage)
+							?? diskUsage.Images?.reduce((sum: number, img: any) => sum + getValidSize(img.Size), 0)
+							?? envStats.images.totalSize;
 
 						// Volumes from disk usage
 						envStats.volumes.total = diskUsage.Volumes?.length || 0;
