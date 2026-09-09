@@ -81,3 +81,71 @@ describe('historyStatus', () => {
 		).toEqual({ state: 'in-sync', deployedVersionId: 'v1', undeployedCount: 0 });
 	});
 });
+
+describe('historyStatus - external-deploy detection (deployStartedAt runtime reference)', () => {
+	it('infers the deployed version from deployStartedAt when the pointer is null', () => {
+		// Stack deployed outside Dockhand: versions v1 (01-01) and v2 (01-02) saved,
+		// containers created at 01-03 -> v2 was live when deployed.
+		expect(
+			historyStatus(
+				[v('v2', '2026-01-02T00:00:00Z'), v('v1', '2026-01-01T00:00:00Z')],
+				'2026-01-02T00:00:00Z',
+				null,
+				'2026-01-03T00:00:00Z'
+			)
+		).toEqual({ state: 'in-sync', deployedVersionId: 'v2', undeployedCount: 0 });
+	});
+
+	it('counts versions saved after the external deploy as undeployed', () => {
+		expect(
+			historyStatus(
+				[v('v3', '2026-01-04T00:00:00Z'), v('v2', '2026-01-02T00:00:00Z')],
+				'2026-01-04T00:00:00Z',
+				null,
+				'2026-01-03T00:00:00Z'
+			)
+		).toEqual({ state: 'undeployed', deployedVersionId: 'v2', undeployedCount: 1 });
+	});
+
+	it('is running-unsaved when every saved version post-dates the external deploy', () => {
+		// The running content was never saved as a version.
+		expect(
+			historyStatus(
+				[v('v2', '2026-01-04T00:00:00Z'), v('v1', '2026-01-03T12:00:00Z')],
+				'2026-01-04T00:00:00Z',
+				null,
+				'2026-01-03T00:00:00Z'
+			)
+		).toEqual({ state: 'running-unsaved', deployedVersionId: null, undeployedCount: 2 });
+	});
+
+	it('the lastDeployedAt pointer wins over deployStartedAt when both are set', () => {
+		expect(
+			historyStatus(
+				[v('v2', '2026-01-02T00:00:00Z'), v('v1', '2026-01-01T00:00:00Z')],
+				'2026-01-02T00:00:00Z',
+				'2026-01-02T12:00:00Z',
+				'2026-01-05T00:00:00Z'
+			)
+		).toEqual({ state: 'in-sync', deployedVersionId: 'v2', undeployedCount: 0 });
+	});
+
+	it('is never-deployed when neither pointer nor runtime reference exists', () => {
+		expect(
+			historyStatus(
+				[v('v1', '2026-01-01T00:00:00Z')],
+				'2026-01-01T00:00:00Z',
+				null,
+				null
+			)
+		).toEqual({ state: 'never-deployed', deployedVersionId: null, undeployedCount: 1 });
+	});
+
+	it('deployStartedAt defaults to null (back-compat 3-arg call)', () => {
+		expect(historyStatus([v('v1', '2026-01-01T00:00:00Z')], '2026-01-01T00:00:00Z', null)).toEqual({
+			state: 'never-deployed',
+			deployedVersionId: null,
+			undeployedCount: 1
+		});
+	});
+});

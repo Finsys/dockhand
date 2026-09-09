@@ -18,17 +18,17 @@ export interface StackVersionRef {
 	timestamp: string;
 }
 
-export type HistoryState = 'empty' | 'never-deployed' | 'in-sync' | 'undeployed';
+export type HistoryState = 'empty' | 'never-deployed' | 'in-sync' | 'undeployed' | 'running-unsaved';
 
 export interface HistoryStatus {
 	state: HistoryState;
 	/**
-	 * The newest saved version whose timestamp <= lastDeployedAt (the live/deployed
-	 * one), or null when there is no such version (never deployed, or every saved
-	 * version post-dates the last deploy).
+	 * The newest saved version whose timestamp <= the effective deploy reference
+	 * (lastDeployedAt when set, else deployStartedAt), or null when there is no
+	 * such version (never deployed, or every saved version post-dates the reference).
 	 */
 	deployedVersionId: string | null;
-	/** Number of versions saved strictly after lastDeployedAt. */
+	/** Number of versions saved strictly after the effective deploy reference. */
 	undeployedCount: number;
 }
 
@@ -41,28 +41,43 @@ function toTime(ts: string | null): number | null {
 /**
  * Compute the saved-vs-deployed status for a version list.
  *
+ * The effective deploy reference is `lastDeployedAt` when set (the authoritative
+ * record of a Dockhand-performed deploy), else `deployStartedAt` — the runtime
+ * fallback for stacks deployed OUTSIDE Dockhand (docker CLI, `docker compose up`):
+ * the oldest running container's creation time, i.e. when the stack's live content
+ * became running. The deployed version is the newest saved version at-or-before
+ * that reference.
+ *
  * @param versions  Bounded version refs (newest-first, as returned by the S04 API).
  * @param lastSavedAt  Most recent save time. Accepted for API-shape parity; the
  *   indicator keys off `versions` + `lastDeployedAt`, so this is intentionally
  *   unused (the newest version's timestamp already carries the latest save time).
- * @param lastDeployedAt  Most recent deploy time (null = never deployed).
+ * @param lastDeployedAt  Most recent deploy time (null = never deployed by Dockhand).
+ * @param deployStartedAt  Runtime reference when the stack was deployed outside
+ *   Dockhand (oldest running container's creation time; null = not running or
+ *   unknown). Used only when `lastDeployedAt` is null. Defaults to null.
  */
 export function historyStatus(
 	versions: StackVersionRef[],
 	lastSavedAt: string | null,
-	lastDeployedAt: string | null
+	lastDeployedAt: string | null,
+	deployStartedAt: string | null = null
 ): HistoryStatus {
 	// Accepted for API-shape parity (the panel passes the S04 field through); the
-	// status is derived from the version list + lastDeployedAt, not lastSavedAt.
+	// status is derived from the version list + the effective deploy reference,
+	// not lastSavedAt.
 	void lastSavedAt;
 
 	if (versions.length === 0) {
 		return { state: 'empty', deployedVersionId: null, undeployedCount: 0 };
 	}
 
-	const deployedTime = toTime(lastDeployedAt);
+	// The pointer wins when present; the runtime reference is the external-deploy
+	// fallback (read-only inference, no pointer writes).
+	const reference = lastDeployedAt ?? deployStartedAt;
+	const deployedTime = toTime(reference);
 	if (deployedTime === null) {
-		// Never deployed: every saved version is undeployed.
+		// Never deployed (no pointer, not running): every saved version is undeployed.
 		return { state: 'never-deployed', deployedVersionId: null, undeployedCount: versions.length };
 	}
 
@@ -85,5 +100,13 @@ export function historyStatus(
 		}
 	}
 
-	return { state: undeployedCount === 0 ? 'in-sync' : 'undeployed', deployedVersionId, undeployedCount };
+	if (deployedVersionId !== null) {
+		return { state: undeployedCount === 0 ? 'in-sync' : 'undeployed', deployedVersionId, undeployedCount };
+	}
+
+	// No saved version at-or-before the reference. With the runtime reference that
+	// means the running content was never saved as a version: running-unsaved.
+	// (With the pointer reference this same shape keeps the historical 'undeployed'.)
+	const state: HistoryState = lastDeployedAt === null && deployStartedAt !== null ? 'running-unsaved' : 'undeployed';
+	return { state, deployedVersionId: null, undeployedCount: versions.length };
 }

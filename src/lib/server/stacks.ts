@@ -2194,7 +2194,7 @@ export async function listComposeStacks(envId?: number | null): Promise<ComposeS
 /**
  * Get containers for a specific stack by label
  */
-async function getStackContainers(stackName: string, envId?: number | null): Promise<any[]> {
+export async function getStackContainers(stackName: string, envId?: number | null): Promise<any[]> {
 	const { listContainers } = await import('./docker.js');
 	const containers = await listContainers(true, envId);
 	return containers.filter((c) => c.labels['com.docker.compose.project'] === stackName);

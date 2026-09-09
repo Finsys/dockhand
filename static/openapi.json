@@ -26285,6 +26285,9 @@
                     },
                     "currentVersionId": {
                       "type": "string"
+                    },
+                    "deployStartedAt": {
+                      "type": "string"
                     }
                   },
                   "required": [
@@ -26302,7 +26305,8 @@
                   ],
                   "lastSavedAt": "string",
                   "lastDeployedAt": "string",
-                  "currentVersionId": "string"
+                  "currentVersionId": "string",
+                  "deployStartedAt": "string"
                 }
               }
             }

@@ -71,9 +71,10 @@
 	let lastSavedAt = $state<string | null>(null);
 	let lastDeployedAt = $state<string | null>(null);
 	let currentVersionId = $state<string | null>(null);
+	let deployStartedAt = $state<string | null>(null);
 	let revertingId = $state<string | null>(null);
 
-	const status = $derived<HistoryStatus>(historyStatus(versions, lastSavedAt, lastDeployedAt));
+	const status = $derived<HistoryStatus>(historyStatus(versions, lastSavedAt, lastDeployedAt, deployStartedAt));
 
 	// Fetch fresh data each time the popover opens (a cheap single GET).
 	$effect(() => {
@@ -86,7 +87,7 @@
 		try {
 			const target = appendEnvParam(`/api/stacks/${encodeURIComponent(stackName)}/history?type=${type}`, envId);
 			const res = await fetch(target);
-			const data: { error?: string; versions?: StackVersionRef[]; lastSavedAt?: string | null; lastDeployedAt?: string | null; currentVersionId?: string | null } =
+			const data: { error?: string; versions?: StackVersionRef[]; lastSavedAt?: string | null; lastDeployedAt?: string | null; currentVersionId?: string | null; deployStartedAt?: string | null } =
 				await res.json();
 			if (!res.ok) {
 				throw new Error(typeof data.error === 'string' ? data.error : `Failed to load ${type} history (HTTP ${res.status})`);
@@ -95,6 +96,7 @@
 			lastSavedAt = data.lastSavedAt ?? null;
 			lastDeployedAt = data.lastDeployedAt ?? null;
 			currentVersionId = data.currentVersionId ?? null;
+			deployStartedAt = data.deployStartedAt ?? null;
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load history';
 			console.error('Error loading stack history:', e);
@@ -128,8 +130,11 @@
 	}
 
 	function isUndeployed(v: StackVersionRef): boolean {
-		if (lastDeployedAt === null) return false;
-		const d = new Date(lastDeployedAt).getTime();
+		// Effective deploy reference: the pointer when set, else the runtime
+		// external-deploy reference (oldest running container's creation time).
+		const ref = lastDeployedAt ?? deployStartedAt;
+		if (ref === null) return false;
+		const d = new Date(ref).getTime();
 		const t = new Date(v.timestamp).getTime();
 		return !Number.isNaN(t) && !Number.isNaN(d) && t > d;
 	}
@@ -162,6 +167,12 @@
 				};
 			case 'never-deployed':
 				return { cls: 'text-zinc-500 dark:text-zinc-400', icon: Circle, label: 'Not yet deployed' };
+			case 'running-unsaved':
+				return {
+					cls: 'text-amber-600 dark:text-amber-400',
+					icon: AlertCircle,
+					label: 'Running - deployed content never saved'
+				};
 			case 'empty':
 				return { cls: 'text-zinc-400 dark:text-zinc-500', icon: Circle, label: 'No versions' };
 			default:
@@ -224,13 +235,23 @@
 					{#if dirty}
 						<Badge variant="outline" class="border-amber-500/40 text-amber-600 dark:text-amber-400 text-[10px] px-1.5 py-0">unsaved changes</Badge>
 				{/if}
-					{#if lastSavedAt || lastDeployedAt}
+					{#if lastSavedAt || lastDeployedAt || deployStartedAt}
 						<span>
 							Saved: {lastSavedAt ? formatRelativeTime(lastSavedAt) : 'never'}
 						</span>
-						<span>
-							Deployed: {lastDeployedAt ? formatRelativeTime(lastDeployedAt) : 'never'}
-						</span>
+						{#if lastDeployedAt}
+							<span>
+								Deployed: {formatRelativeTime(lastDeployedAt)}
+							</span>
+						{:else if deployStartedAt}
+							<span title="Deployed outside Dockhand (docker CLI / compose up) - detected from the running container, not a Dockhand deploy record.">
+								Deployed: {formatRelativeTime(deployStartedAt)} (external)
+							</span>
+						{:else}
+							<span>
+								Deployed: never
+							</span>
+						{/if}
 					{/if}
 				</div>
 			{/if}

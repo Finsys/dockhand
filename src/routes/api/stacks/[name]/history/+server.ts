@@ -4,7 +4,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { authorize } from '$lib/server/authorize';
 import { getStackEnvVars, setStackEnvVars, getStackSource, getStackInjectedSecretKeys } from '$lib/server/db';
-import { getStackDir, revertStackVersion, saveStackComposeFile, writeRawStackEnvFile } from '$lib/server/stacks';
+import { getStackDir, getStackContainers, revertStackVersion, saveStackComposeFile, writeRawStackEnvFile } from '$lib/server/stacks';
 import { saveStackVersion, computeRevertedEnvVars, serializeEnvVars, parseEnvVars } from '$lib/server/stack-version-wiring';
 import { upsertStackSourcePointer, readStackSourcePointer } from '$lib/server/stack-source-pointers';
 import { listVersions, versionContentEquals, filterSecretVars } from '$lib/server/stack-versions';
@@ -69,7 +69,7 @@ async function readLiveContentForType(
  * path: name:string The stack name
  * query: env:integer Environment id the stack belongs to
  * query: type:string Version kind to list (compose or env); defaults to compose
- * resp-200: {type:string!, versions:array<{id:string!, timestamp:string!}>!, lastSavedAt:string, lastDeployedAt:string, currentVersionId:string}
+ * resp-200: {type:string!, versions:array<{id:string!, timestamp:string!}>!, lastSavedAt:string, lastDeployedAt:string, currentVersionId:string, deployStartedAt:string}
  * resp-400: Invalid type (must be compose or env)
  * resp-403: Permission denied (needs stacks:view)
  * resp-500: Failed to read versions
@@ -101,6 +101,22 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 		const versions = listVersions(stackDir, type);
 		const pointer = await readStackSourcePointer(stackName, envIdNum ?? null);
 
+		// External-deploy detection (read-only): when the stack has running containers,
+		// report the OLDEST running container's creation time as `deployStartedAt`.
+		// The panel uses it as the deployed-version reference when the
+		// last_deployed_at pointer is null (the stack was deployed outside Dockhand —
+		// docker CLI, `docker compose up` — so no pointer exists). `created` is epoch
+		// seconds; restarts preserve it (content = deploy-time content), re-creates
+		// update it. Null when no container is running.
+		let deployStartedAt: string | null = null;
+		const runningContainers = (await getStackContainers(stackName, envIdNum ?? null)).filter(
+			(c) => c.state === 'running'
+		);
+		if (runningContainers.length > 0) {
+			const oldest = Math.min(...runningContainers.map((c) => c.created));
+			deployStartedAt = new Date(oldest * 1000).toISOString();
+		}
+
 		// The version whose content is live right now (secret-free basis): match the
 		// live content against the versions (newest-first -> .find yields the NEWEST
 		// match, the single representative after cross-list dedup). A missing live
@@ -118,7 +134,8 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 			versions: versions.map((v) => ({ id: v.id, timestamp: v.timestamp })),
 			lastSavedAt: pointer?.lastSavedAt ?? null,
 			lastDeployedAt: pointer?.lastDeployedAt ?? null,
-			currentVersionId
+			currentVersionId,
+			deployStartedAt
 		});
 	} catch (error) {
 		console.error('Error reading stack versions:', error);
