@@ -1124,6 +1124,8 @@ interface ComposeCommandOptions {
 	useOverrideFile?: boolean;
 	/** Target specific service only (with --no-deps) for single-service updates */
 	serviceName?: string;
+	/** Target multiple services in one compose command (#1539 cascade updates) */
+	serviceNames?: string[];
 	/** Compose filename for Hawser (e.g., "docker-compose.prod.yml") - extracted from composePath */
 	composeFileName?: string;
 	/** Git deletion sync (#966): files to delete on the Hawser agent's stack dir */
@@ -1189,6 +1191,7 @@ async function executeLocalCompose(
 	customEnvPath?: string,
 	useOverrideFile?: boolean,
 	serviceName?: string,
+	serviceNames?: string[],
 	build?: boolean,
 	noBuildCache?: boolean,
 	pullPolicy?: string,
@@ -1434,7 +1437,7 @@ async function executeLocalCompose(
 		console.log(`${logPrefix} [HostPath] Using stdin for compose content (paths translated)`);
 	}
 
-	args.push(...buildComposeOperationArgs(operation, { forceRecreate, removeVolumes, build, noBuildCache, pullPolicy, serviceName }));
+	args.push(...buildComposeOperationArgs(operation, { forceRecreate, removeVolumes, build, noBuildCache, pullPolicy, serviceName, serviceNames }));
 
 	const commandStr = args.join(' ');
 
@@ -1601,6 +1604,7 @@ async function executeComposeViaHawser(
 	removeVolumes?: boolean,
 	stackFiles?: Record<string, string>,
 	serviceName?: string,
+	serviceNames?: string[],
 	composeFileName?: string,
 	build?: boolean,
 	noBuildCache?: boolean,
@@ -1630,6 +1634,9 @@ async function executeComposeViaHawser(
 	console.log(`${logPrefix} Force recreate:`, forceRecreate ?? false);
 	console.log(`${logPrefix} Remove volumes:`, removeVolumes ?? false);
 	console.log(`${logPrefix} Service name:`, serviceName ?? '(all services)');
+	if (serviceNames && serviceNames.length > 0) {
+		console.log(`${logPrefix} Target services (#1539):`, serviceNames.join(', '));
+	}
 	console.log(`${logPrefix} Compose filename:`, composeFileName ?? '(auto-detect)');
 	console.log(`${logPrefix} Non-secret env vars count:`, envVars ? Object.keys(envVars).length : 0);
 	console.log(`${logPrefix} Secret env vars count:`, secretCount);
@@ -1689,6 +1696,7 @@ async function executeComposeViaHawser(
 			pullPolicy: pullPolicy || '',
 			registries, // Registry credentials for docker login
 			serviceName, // Target specific service only (with --no-deps)
+			serviceNames, // Multi-service cascade targets (#1539); old agents ignore the field
 			// Git deletion sync (#966): agent re-verifies containment + content
 			// hash per file before deleting. Old agents ignore this field.
 			filesToDelete: filesToDelete && filesToDelete.length > 0
@@ -1813,7 +1821,7 @@ async function executeComposeCommand(
 	secretVars?: Record<string, string>,
 	onLine?: (line: string) => void
 ): Promise<StackOperationResult> {
-	const { stackName, envId, forceRecreate, build, noBuildCache, pullPolicy, removeVolumes, stackFiles, workingDir, composePath, envPath, useOverrideFile, serviceName, composeFileName, filesToDelete, removeFiles } = options;
+	const { stackName, envId, forceRecreate, build, noBuildCache, pullPolicy, removeVolumes, stackFiles, workingDir, composePath, envPath, useOverrideFile, serviceName, serviceNames, composeFileName, filesToDelete, removeFiles } = options;
 
 	// Get environment configuration
 	const env = envId ? await getEnvironment(envId) : null;
@@ -1836,6 +1844,7 @@ async function executeComposeCommand(
 			envPath,
 			useOverrideFile,
 			serviceName,
+			serviceNames,
 			build,
 			noBuildCache,
 			pullPolicy,
@@ -1901,6 +1910,7 @@ async function executeComposeCommand(
 				removeVolumes,
 				hawserStackFiles,
 				serviceName,
+				serviceNames,
 				composeFileName,
 				build,
 				noBuildCache,
@@ -1967,6 +1977,7 @@ async function executeComposeCommand(
 				envPath,
 				useOverrideFile,
 				serviceName,
+				serviceNames,
 				build,
 				noBuildCache,
 				pullPolicy,
@@ -2001,6 +2012,7 @@ async function executeComposeCommand(
 				envPath,
 				useOverrideFile,
 				serviceName,
+				serviceNames,
 				build,
 				noBuildCache,
 				pullPolicy,
@@ -3353,13 +3365,30 @@ export async function pullStackService(
  * @param stackName - The compose project name
  * @param serviceName - The service name to update
  * @param envId - Optional environment ID
+ * @param options - Optional cascade/build options (#1539 stack update policy)
  * @returns Operation result
  */
+export interface UpdateStackServiceOptions {
+	/** Additional services to redeploy in the same compose invocation (cascade targets, #1539). */
+	serviceNames?: string[];
+	/** Pass `--build` so services with a build context are rebuilt before the `up` (#1539 mode: build/rebuild). */
+	build?: boolean;
+	/** Pass `--no-cache` to a separate build step (#1539 no-cache: true). */
+	noBuildCache?: boolean;
+	/**
+	 * Force-recreate the targeted services. Needed for a genuine whole-stack/cascade
+	 * redeploy: plain `up -d` only recreates services whose config/image actually
+	 * changed, so a cascaded service sharing no image would otherwise be left alone.
+	 */
+	forceRecreate?: boolean;
+}
+
 export async function updateStackService(
 	stackName: string,
 	serviceName: string,
 	envId?: number | null,
-	composeConfigPath?: string
+	composeConfigPath?: string,
+	options?: UpdateStackServiceOptions
 ): Promise<StackOperationResult> {
 	const result = await requireComposeFile(stackName, envId, composeConfigPath);
 
@@ -3376,16 +3405,38 @@ export async function updateStackService(
 	// naturally since the image was already pulled before this function is called.
 	// Using forceRecreate can cause permission issues on bind mounts.
 	// This matches the behavior of: docker compose pull && docker compose up -d
+	const cmdOptions: ComposeCommandOptions = {
+		stackName,
+		envId,
+		workingDir: result.stackDir,
+		composePath: result.composePath,
+		envPath: result.envPath,
+		serviceName,
+		serviceNames: options?.serviceNames,
+		build: options?.build,
+		noBuildCache: options?.noBuildCache,
+		forceRecreate: options?.forceRecreate
+	};
+
+	// `--no-cache` is a `build` flag, not an `up` flag (#1479): run a separate
+	// `docker compose build --no-cache` first, then a plain `up`. Skipped on Hawser
+	// (its agent has no build op).
+	const env = envId ? await getEnvironment(envId) : null;
+	if (shouldRunSeparateBuildStep(options?.build, options?.noBuildCache, env?.connectionType)) {
+		console.log(`[Stack:${stackName}] Running separate 'build --no-cache' step before up (#1539)...`);
+		const buildResult = await executeComposeCommand(
+			'build',
+			{ ...cmdOptions, serviceName: undefined, serviceNames: undefined, forceRecreate: false },
+			result.content!,
+			result.nonSecretVars,
+			result.secretVars
+		);
+		if (!buildResult.success) return buildResult;
+	}
+
 	return executeComposeCommand(
 		'up',
-		{
-			stackName,
-			envId,
-			workingDir: result.stackDir,
-			composePath: result.composePath,
-			envPath: result.envPath,
-			serviceName
-		},
+		cmdOptions,
 		result.content!,
 		result.nonSecretVars,
 		result.secretVars
