@@ -9,6 +9,8 @@ import { db, hawserTokens, environments, eq, and } from './db/drizzle.js';
 import { logContainerEvent, type ContainerEventAction } from './db.js';
 import { containerEventEmitter } from './event-collector.js';
 import { sendEnvironmentNotification } from './notifications/index.js';
+import { containerNotificationContext } from './notifications/shared.js';
+import { createContainerNotificationTracker } from './notifications/container-events.js';
 import { isNotifyDisabledByLabel } from './container-labels.js';
 import { isHealthTransition } from './subprocess-manager.js';
 import { pushMetric } from './metrics-store.js';
@@ -19,6 +21,8 @@ import { hashPassword, verifyPassword } from './auth.js';
 // load). Re-exported so callers get it from one import site.
 import { dispatchStreamMessage } from './hawser-core.js';
 export { dispatchStreamMessage };
+
+const containerNotificationTracker = createContainerNotificationTracker();
 
 // Protocol constants
 export const HAWSER_PROTOCOL_VERSION = '1.0';
@@ -224,11 +228,28 @@ export async function handleEdgeContainerEvent(
 							? 'success'
 							: 'info';
 
-			await sendEnvironmentNotification(environmentId, event.action as ContainerEventAction, {
-				title: `Container ${actionLabel}`,
-				message: `Container "${containerLabel}" ${event.action}${event.image ? ` (${event.image})` : ''}`,
-				type: notificationType as 'success' | 'error' | 'warning' | 'info'
-			}, event.image);
+			containerNotificationTracker.dispatch(
+				environmentId,
+				event.containerId,
+				event.action,
+				() => {
+					sendEnvironmentNotification(
+						environmentId,
+						event.action as ContainerEventAction,
+						{
+							title: `Container ${actionLabel}`,
+							message: `Container "${containerLabel}" ${event.action}${event.image ? ` (${event.image})` : ''}`,
+							type: notificationType as 'success' | 'error' | 'warning' | 'info',
+							...containerNotificationContext(
+								event.containerId,
+								event.containerName,
+								event.actorAttributes
+							)
+						},
+						event.image
+					).catch(() => {});
+				}
+			);
 		}
 	} catch (error) {
 		const errorMsg = error instanceof Error ? error.message : String(error);

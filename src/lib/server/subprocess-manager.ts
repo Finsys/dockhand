@@ -24,9 +24,13 @@ import {
 	type ContainerEventAction
 } from './db';
 import { sendEnvironmentNotification, sendEventNotification } from './notifications';
+import { containerNotificationContext } from './notifications/shared';
+import { createContainerNotificationTracker } from './notifications/container-events';
 import { isNotifyDisabledByLabel } from './container-labels';
 import { rssBeforeOp, rssAfterOp } from './rss-tracker';
 import { pushMetric } from './metrics-store';
+
+const containerNotificationTracker = createContainerNotificationTracker();
 
 // ---------------------------------------------------------------------------
 // Types
@@ -337,11 +341,23 @@ async function handleContainerEvent(msg: GoMessage): Promise<void> {
 						? 'success'
 						: 'info';
 
-		sendEnvironmentNotification(msg.envId, action, {
-			title: `Container ${actionLabel}`,
-			message: `Container "${containerLabel}" ${action}${image ? ` (${image})` : ''}`,
-			type: notificationType
-		}, image).catch(() => {});
+		containerNotificationTracker.dispatch(
+			msg.envId,
+			containerId,
+			action,
+			() => {
+				sendEnvironmentNotification(msg.envId, action, {
+					title: `Container ${actionLabel}`,
+					message: `Container "${containerLabel}" ${action}${image ? ` (${image})` : ''}`,
+					type: notificationType,
+					...containerNotificationContext(
+						containerId,
+						containerName,
+						event.Actor?.Attributes
+					)
+				}, image).catch(() => {});
+			}
+		);
 	}
 	rssAfterOp('events_notif', notifBefore);
 	rssAfterOp('events', before);
