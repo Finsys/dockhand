@@ -15,14 +15,27 @@ export interface ComposeOperationArgOptions {
 	noBuildCache?: boolean;
 	pullPolicy?: string;
 	serviceName?: string;
+	/**
+	 * Multiple target services (#1539 cascade updates). Appended after
+	 * `serviceName` so a caller can pass either. Compose accepts a space-separated
+	 * service list for `up`/`pull`/`build`.
+	 */
+	serviceNames?: string[];
 }
 
 export function buildComposeOperationArgs(
 	operation: 'up' | 'down' | 'stop' | 'start' | 'restart' | 'pull' | 'build',
 	options: ComposeOperationArgOptions = {}
 ): string[] {
-	const { forceRecreate, removeVolumes, build, noBuildCache, pullPolicy, serviceName } = options;
+	const { forceRecreate, removeVolumes, build, noBuildCache, pullPolicy, serviceName, serviceNames } = options;
 	const args: string[] = [];
+	// One service arg list for every operation: the legacy single `serviceName` plus
+	// any explicit list (#1539). De-duplicated, order preserved (changed service first).
+	const targets: string[] = [];
+	if (serviceName) targets.push(serviceName);
+	for (const name of serviceNames ?? []) {
+		if (name && !targets.includes(name)) targets.push(name);
+	}
 
 	switch (operation) {
 		case 'up':
@@ -32,7 +45,7 @@ export function buildComposeOperationArgs(
 			// also carry --build (and never --no-cache, which up doesn't accept).
 			if (build && !noBuildCache) args.push('--build');
 			if (pullPolicy) args.push('--pull', pullPolicy);
-			if (serviceName) args.push(serviceName);
+			args.push(...targets);
 			break;
 		case 'down':
 			args.push('down', '--remove-orphans');
@@ -49,12 +62,12 @@ export function buildComposeOperationArgs(
 			break;
 		case 'pull':
 			args.push('pull');
-			if (serviceName) args.push(serviceName);
+			args.push(...targets);
 			break;
 		case 'build':
 			args.push('build');
 			if (noBuildCache) args.push('--no-cache');
-			if (serviceName) args.push(serviceName);
+			args.push(...targets);
 			break;
 	}
 
