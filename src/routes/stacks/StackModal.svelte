@@ -6,6 +6,7 @@
 	import { Label } from '$lib/components/ui/label';
 	import CodeEditor, { type VariableMarker } from '$lib/components/CodeEditor.svelte';
 	import StackEnvVarsPanel from '$lib/components/StackEnvVarsPanel.svelte';
+	import StackHistoryPanel from '$lib/components/StackHistoryPanel.svelte';
 	import { type EnvVar, type ValidationResult } from '$lib/components/StackEnvVarsEditor.svelte';
 	import SecretProviderPicker from '$lib/components/SecretProviderPicker.svelte';
 	import { SELECTOR_VARS } from '$lib/utils/bulk-selector';
@@ -83,6 +84,8 @@
 	// Local effective state - can transition from create → edit after failed deploy
 	let mode = $state(propMode);
 	let stackName = $state(propStackName);
+	// Reactive env id for template use (e.g. the History panel's env-scoped fetch).
+	const envId = $derived($currentEnvironment?.id ?? null);
 	let formIcon = $state<string | null>(null);
 	let showIconPicker = $state(false);
 	// Create mode has no stack to POST to yet - stash the pending upload data URL and
@@ -1121,6 +1124,63 @@
 
 		return markers;
 	});
+
+	/**
+	 * On-the-fly revert support: after the history panel successfully reverts a saved
+	 * version (the API already restored the live file + advanced last_saved_at), re-read
+	 * the reverted content into the editor so the change is visible without reopening
+	 * the modal. Unsaved in-editor edits are intentionally overwritten - the user
+	 * explicitly chose to revert.
+	 */
+	async function handleHistoryReverted(type: 'compose' | 'env') {
+		try {
+			if (type === 'compose') {
+				const res = await fetch(
+					appendEnvParam(`/api/stacks/${encodeURIComponent(stackName)}/compose`, envId)
+				);
+				const data = await res.json();
+				if (!res.ok || typeof data.content !== 'string') {
+					console.warn('Failed to re-read reverted compose content:', res.status, data.error);
+					return;
+				}
+				composeContent = data.content;
+				workingComposePath = data.composePath || workingComposePath;
+				isDirty = false;
+				debouncedValidate();
+			} else {
+				// Re-read the MERGED env view (internal stacks: live .env file at request
+				// time + DB secrets; git stacks: DB). It must be the SINGLE source of
+				// truth for the panel sync - re-using the modal's pre-revert envVars
+				// would resurrect vars the revert dropped (syncAfterLoad preserves
+				// loaded-var keys absent from the raw file as "added before first
+				// save", which is exactly the wrong semantics for a revert).
+				const res = await fetch(
+					appendEnvParam(`/api/stacks/${encodeURIComponent(stackName)}/env`, envId)
+				);
+				const data = await res.json();
+				if (!res.ok) {
+					console.warn('Failed to re-read reverted env variables:', res.status, data.error);
+				return;
+				}
+				const newVars: EnvVar[] = (Array.isArray(data.variables) ? data.variables : []).map(
+					(v: { key?: unknown; value?: unknown; isSecret?: unknown }) => ({
+						key: String(v.key ?? ''),
+						value: String(v.value ?? ''),
+						isSecret: !!v.isSecret
+					})
+				);
+				envVars = newVars;
+				await tick();
+				// rawContent intentionally '' - variables are the source of truth after a
+				// revert (the revert API already rewrote the live file/DB); the panel's
+				// text view regenerates from variables.
+				envVarsPanelRef?.syncAfterLoad(newVars, '');
+				isDirty = false;
+			}
+		} catch (e) {
+			console.error('Failed to apply reverted content in editor:', e);
+		}
+	}
 
 	// Stable callback for compose content changes - avoids stale closure issues
 	function handleComposeChange(value: string) {
@@ -2379,10 +2439,11 @@
 									</div>
 								{/if}
 							{/if}
-							<!-- Compose path -->
-							<div class="flex-shrink-0 px-4 py-2" style="width: {splitRatio}%">
-								<PathBarItem
-									label="Compose file"
+							<!-- Compose path (history trigger right after the copy-path button) -->
+							<div class="flex items-center flex-shrink-0 px-4 py-2" style="width: {splitRatio}%">
+								<div class="flex-1 min-w-0">
+									<PathBarItem
+										label="Compose file"
 									path={workingComposePath || null}
 									placeholder="/path/to/compose.yaml"
 									copied={composePathCopied}
@@ -2392,13 +2453,20 @@
 									defaultText={mode === 'create' ? 'Enter stack name above' : 'Not specified'}
 									sourceHint={pathSourceHint}
 								/>
+								</div>
+								{#if mode === 'edit' && !needsFileLocation}
+									<div class="ml-2 flex items-center shrink-0">
+										<StackHistoryPanel stackName={stackName} envId={envId} type="compose" {readonly} dirty={isDirty} side="bottom" align="end" muted onreverted={handleHistoryReverted} />
+									</div>
+								{/if}
 							</div>
 							<!-- Divider spacer -->
 							<div class="w-1 flex-shrink-0"></div>
-							<!-- Env path -->
-							<div class="flex-1 min-w-0 px-4 py-2 bg-zinc-100/50 dark:bg-zinc-800/50">
-								<PathBarItem
-									label="Env file"
+							<!-- Env path (history trigger in the same group as the env item's action buttons) -->
+							<div class="flex items-center flex-1 min-w-0 px-4 py-2 bg-zinc-100/50 dark:bg-zinc-800/50">
+								<div class="flex-1 min-w-0">
+									<PathBarItem
+										label="Env file"
 									path={displayEnvPath || null}
 									selectedPath={workingEnvPath || suggestedEnvPath || ''}
 									placeholder="/path/to/.env (optional)"
@@ -2414,6 +2482,12 @@
 										isDirty = true;
 									}}
 								/>
+								</div>
+								{#if mode === 'edit' && !needsFileLocation}
+									<div class="ml-2 flex items-center shrink-0">
+										<StackHistoryPanel stackName={stackName} envId={envId} type="env" {readonly} dirty={isDirty} side="bottom" align="end" muted onreverted={handleHistoryReverted} />
+									</div>
+								{/if}
 							</div>
 							<!-- Theme toggle -->
 							<div class="flex items-center px-2 shrink-0">
@@ -2503,7 +2577,10 @@
 															<Copy class="w-3 h-3" />
 															Copy
 														{/if}
-													</Button>
+																									</Button>
+													{#if mode === 'edit' && !needsFileLocation}
+														<StackHistoryPanel stackName={stackName} envId={envId} type="compose" {readonly} dirty={isDirty} side="bottom" align="end" label="History" toneClass="text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200" onreverted={handleHistoryReverted} />
+													{/if}
 												</div>
 												<div bind:this={editorRowRef} class="flex-1 min-h-0 flex">
 													<CodeEditor
@@ -2587,7 +2664,14 @@
 									onchange={() => { markDirty(); debouncedValidate(); }}
 									theme={editorTheme}
 									infoText="These variables will be written to a .env file in the stack directory and passed to the compose command."
-								/>
+								>
+									{#snippet headerActions()}
+										<!-- Option B: env History copy at the far right of the env header -->
+										{#if mode === 'edit' && !needsFileLocation}
+											<StackHistoryPanel stackName={stackName} envId={envId} type="env" {readonly} dirty={isDirty} side="bottom" align="end" label="History" onreverted={handleHistoryReverted} />
+										{/if}
+									{/snippet}
+								</StackEnvVarsPanel>
 							</div>
 						</div>
 					{:else if activeTab === 'graph'}
