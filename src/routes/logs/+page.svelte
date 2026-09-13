@@ -20,8 +20,9 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 	import type { ContainerInfo } from '$lib/types';
 	import { currentEnvironment, environments, appendEnvParam } from '$lib/stores/environment';
 	import { appSettings, formatLogTimestamps } from '$lib/stores/settings';
+	import ContainerIcon from '$lib/components/ContainerIcon.svelte';
 	import { NoEnvironment } from '$lib/components/ui/empty-state';
-	import { parseLines, renderLineHtml, type LogEntry } from '$lib/utils/log-entry';
+	import { parseLines, renderLineHtml, sortByTimestampStable, type LogEntry } from '$lib/utils/log-entry';
 
 	function renderTimestamp(ts: string | undefined): string {
 		if (!ts) return '';
@@ -165,14 +166,19 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 		queueMicrotask(flushGroupedLogs);
 	}
 
-	function flushGroupedLogs() {
+	// initial=true is the tail flush: sort the whole buffer by timestamp so the
+	// history reads as one timeline regardless of per-container arrival order
+	// (#1406). Live flushes append in arrival order (already chronological) to
+	// avoid new lines jumping into the middle of the view.
+	function flushGroupedLogs(initial = false) {
 		groupedFlushScheduled = false;
 		if (pendingGroupedEntries.length === 0) return;
 		const maxLines = getMaxLines();
 		const incoming = pendingGroupedEntries.length > maxLines
 			? pendingGroupedEntries.slice(pendingGroupedEntries.length - maxLines)
 			: pendingGroupedEntries;
-		mergedLogs = compact([...mergedLogs, ...incoming], maxLines);
+		const combined = [...mergedLogs, ...incoming];
+		mergedLogs = compact(initial ? sortByTimestampStable(combined) : combined, maxLines);
 		pendingGroupedEntries = [];
 		scrollToBottom();
 	}
@@ -999,7 +1005,10 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 
 				if (data.logs) {
 					const { entries } = parseLines(data.logs, '', { containerId, containerName, color });
-					mergedLogs = compact([...mergedLogs, ...entries], getMaxLines());
+					// Stopped logs are historical: sort the merged buffer by timestamp so
+					// each container's block interleaves into one timeline instead of being
+					// appended as a separate per-container chunk (#1406).
+					mergedLogs = compact(sortByTimestampStable([...mergedLogs, ...entries]), getMaxLines());
 				}
 			} catch (error) {
 				console.error(`Failed to fetch logs for stopped container ${containerId}:`, error);
@@ -1097,7 +1106,7 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 					initialBuffering = false;
 					initialBufferTimeout = null;
 					loading = false;
-					flushGroupedLogs();
+					flushGroupedLogs(true);
 				}, INITIAL_BUFFER_DELAY);
 			});
 
@@ -1153,7 +1162,7 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 						initialBufferTimeout = null;
 					}
 					loading = false;
-					flushGroupedLogs();
+					flushGroupedLogs(true);
 				}
 			});
 
@@ -1636,7 +1645,7 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 									onclick={() => selectContainer(container)}
 									class="w-full px-3 py-2 text-left text-sm hover:bg-muted transition-colors flex items-center gap-2 {isCurrentSelection ? 'bg-muted' : ''}"
 								>
-									<Box class="w-3.5 h-3.5 shrink-0 {container.state === 'running' ? 'text-green-500' : 'text-muted-foreground'}" />
+									<ContainerIcon image={container.image} name={container.name} class="w-3.5 h-3.5" fallbackClass={container.state === 'running' ? 'text-green-500' : 'text-muted-foreground'} showFallbackWhenOff />
 									<span class="font-medium truncate">{container.name}</span>
 									<span class="text-muted-foreground text-xs truncate">({container.image})</span>
 									{#if isCurrentSelection}
@@ -1772,7 +1781,7 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 											{/if}
 										</button>
 										<GripVertical class="w-3 h-3 shrink-0 text-muted-foreground/50 cursor-grab active:cursor-grabbing" />
-										<Box class="w-3 h-3 shrink-0 {container.state === 'running' ? 'text-green-500' : 'text-muted-foreground'}" />
+										<ContainerIcon image={container.image} name={container.name} class="w-3 h-3" fallbackClass={container.state === 'running' ? 'text-green-500' : 'text-muted-foreground'} showFallbackWhenOff />
 										<div class="flex-1 min-w-0">
 											<div class="font-medium truncate text-xs leading-tight">{container.name}</div>
 											<div class="text-2xs text-muted-foreground truncate leading-tight">{container.image}</div>
@@ -1815,7 +1824,7 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 												<div class="w-3.5 h-3.5 rounded border-2 border-muted-foreground/30"></div>
 											{/if}
 										</div>
-										<Box class="w-3 h-3 shrink-0 {container.state === 'running' ? 'text-green-500' : 'text-muted-foreground'}" />
+										<ContainerIcon image={container.image} name={container.name} class="w-3 h-3" fallbackClass={container.state === 'running' ? 'text-green-500' : 'text-muted-foreground'} showFallbackWhenOff />
 										<div class="flex-1 min-w-0">
 											<div class="font-medium truncate text-xs leading-tight">{container.name}</div>
 											<div class="text-2xs text-muted-foreground truncate leading-tight">{container.image}</div>
@@ -1877,7 +1886,7 @@ import type { FavoriteGroup } from '../api/preferences/favorite-groups/+server';
 											{/if}
 										</button>
 									{/if}
-									<Box class="w-3 h-3 shrink-0 {container.state === 'running' ? 'text-green-500' : 'text-muted-foreground'}" />
+									<ContainerIcon image={container.image} name={container.name} class="w-3 h-3" fallbackClass={container.state === 'running' ? 'text-green-500' : 'text-muted-foreground'} showFallbackWhenOff />
 									<div class="flex-1 min-w-0">
 										<div class="font-medium truncate text-xs leading-tight">{container.name}</div>
 										<div class="text-2xs text-muted-foreground truncate leading-tight">{container.image}</div>

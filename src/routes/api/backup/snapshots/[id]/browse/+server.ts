@@ -2,14 +2,26 @@ import { json } from '@sveltejs/kit';
 import { validateSnapshotId } from '$lib/server/docker-validation';
 import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
+import { requireBackups } from '$lib/server/backups/route-guards';
 import { browseSnapshot } from '$lib/server/backups';
 import { guardSnapshotEnvAccess } from '$lib/server/backups/route-guards';
+import { jobResult } from '$lib/server/sse';
 
-export const GET: RequestHandler = async ({ params, url, cookies }) => {
+/**
+ * @openapi
+ * summary: List directory entries at a path inside a snapshot (job-polled)
+ * description: Job-polled so a proxy can't abort the restic read at ~15s.
+ * path: id:string The restic snapshot id
+ * query: destinationId:integer Destination the snapshot lives in
+ * query: path:string Directory path inside the snapshot to list
+ * query: env:integer Environment context for access checks
+ * resp-400: Missing/invalid destinationId
+ * resp-403: Permission denied (needs backups:view) or environment access denied
+ */
+export const GET: RequestHandler = async ({ params, url, cookies, request }) => {
 	const auth = await authorize(cookies);
-	if (auth.authEnabled && !await auth.can('backups', 'view')) {
-		return json({ error: 'Permission denied' }, { status: 403 });
-	}
+	const denied = await requireBackups(auth, 'view');
+	if (denied) return denied;
 
 	const snapshotId = params.id;
 	const invalidSnap = validateSnapshotId(snapshotId);
@@ -38,11 +50,10 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 		return json({ error: 'Environment access denied' }, { status: 403 });
 	}
 
-	try {
+	// Job-polling: `restic ls` behind a reverse proxy would abort at ~15s and SIGTERM restic
+	// (surfacing a misleading "wrong password / signal terminated"). Return {jobId} at once.
+	return jobResult(request, async () => {
 		const entries = await browseSnapshot(destinationId, snapshotId, path);
-		return json({ entries, path });
-	} catch (error) {
-		const errorMsg = error instanceof Error ? error.message : String(error);
-		return json({ error: errorMsg }, { status: 500 });
-	}
+		return { entries, path };
+	});
 };

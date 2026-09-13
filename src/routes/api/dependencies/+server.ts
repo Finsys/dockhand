@@ -23,6 +23,14 @@ const externalTools = [
 	}
 ];
 
+/**
+ * GET /api/dependencies - Dependency and external-tool inventory
+ *
+ * @openapi
+ * summary: Return the combined list of npm dependencies and external tool images (grype, trivy), sorted by name, excluding Dockhand itself
+ * resp-200: array<{name:string!, version:string!, license:string, repository:string}>
+ * resp-200-example: [{"name":"anchore/grype","version":"v0.110.0","license":"Apache-2.0","repository":"https://github.com/anchore/grype"}]
+ */
 export const GET: RequestHandler = async () => {
 	// Combine npm dependencies with external tools, exclude dockhand itself
 	const allDependencies = [...dependencies, ...externalTools]

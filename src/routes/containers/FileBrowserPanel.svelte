@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
+	import { readJobResponse } from '$lib/utils/sse-fetch';
 	import { Button } from '$lib/components/ui/button';
 	import * as Table from '$lib/components/ui/table';
 	import * as Dialog from '$lib/components/ui/dialog';
@@ -105,6 +106,21 @@
 	const mode: BrowserMode = $derived(snapshotId ? 'snapshot' : volumeName ? 'volume' : 'container');
 	const isVolumeMode = $derived(mode === 'volume');
 	const isSnapshotMode = $derived(mode === 'snapshot');
+
+	// In a snapshot, the stack dir rides a reserved volume key; show it by what it holds,
+	// not the raw internal key. Navigation still uses the real name.
+	function displayEntryName(name: string): string {
+		if (isSnapshotMode && name === '__dockhand_stackdir__') return 'Stack files (compose, config)';
+		return name;
+	}
+
+	// A raw download of the snapshot's metadata.json is refused server-side (403) — it carries
+	// secrets and must only leave through the redacting metadata endpoint. So don't offer a
+	// download button that would always fail; the file is still previewable (redacted).
+	function canDownloadEntry(entry: FileEntry): boolean {
+		if (!isSnapshotMode) return true;
+		return !(entry.name === 'metadata.json' && (currentPath === '/metadata' || currentPath === '/metadata/'));
+	}
 
 	// Effective canEdit: snapshots are always read-only; volumes only if not in use
 	const effectiveCanEdit = $derived(
@@ -385,9 +401,15 @@
 
 		try {
 			let res: Response;
+			let data: any;
 			if (isSnapshotMode) {
 				const params = new URLSearchParams({ destinationId: String(destinationId), path: filePath });
-				res = await fetch(`/api/backup/snapshots/${snapshotId}/dump?${params}`);
+				// Job-polling (readJobResponse) so a slow `restic dump` behind a proxy isn't aborted at ~15s.
+				res = await fetch(`/api/backup/snapshots/${snapshotId}/dump?${params}`, {
+					headers: { Accept: 'text/event-stream' }
+				});
+				data = await readJobResponse(res);
+				if (data?.error) throw new Error(data.error);
 			} else {
 				const params = new URLSearchParams({ path: filePath });
 				if (envId) params.set('env', envId.toString());
@@ -396,11 +418,10 @@
 				} else {
 					res = await fetch(`/api/containers/${effectiveContainerId}/files/content?${params}`);
 				}
-			}
-			const data = await res.json();
-
-			if (!res.ok) {
-				throw new Error(data.error || 'Failed to read file');
+				data = await res.json();
+				if (!res.ok) {
+					throw new Error(data.error || 'Failed to read file');
+				}
 			}
 
 			viewingFile = {
@@ -725,8 +746,12 @@
 
 			if (isSnapshotMode) {
 				const snapshotParams = new URLSearchParams({ destinationId: String(destinationId), path });
-				res = await fetch(`/api/backup/snapshots/${snapshotId}/browse?${snapshotParams}`);
-				data = await res.json();
+				// Job-polling (readJobResponse) so a slow `restic ls` behind a proxy isn't aborted at ~15s.
+				res = await fetch(`/api/backup/snapshots/${snapshotId}/browse?${snapshotParams}`, { headers: { Accept: 'text/event-stream' } });
+				data = await readJobResponse(res);
+				// A jobified error comes back as { error } with HTTP 200, so surface it explicitly
+				// (the shared `if (!res.ok)` gate below can't see it).
+				if (data?.error) throw new Error(data.error);
 			} else if (isVolumeMode) {
 				res = await fetch(`/api/volumes/${encodeURIComponent(volumeName!)}/browse?${params}`);
 				data = await res.json();
@@ -934,7 +959,7 @@
 					title={segment}
 					onclick={() => navigateTo('/' + pathSegments().slice(0, i + 1).join('/'))}
 				>
-					{segment}
+					{displayEntryName(segment)}
 				</button>
 			{/each}
 		</div>
@@ -1076,14 +1101,16 @@
 									onclick={() => handleEntryClick(entry)}
 								>
 									<Icon
-										class="w-3.5 h-3.5 shrink-0 {entry.type === 'directory'
-											? 'text-blue-500'
-											: entry.type === 'symlink'
-												? 'text-purple-500'
-												: 'text-muted-foreground'}"
+										class="w-3.5 h-3.5 shrink-0 {isSnapshotMode && entry.name === '__dockhand_stackdir__'
+											? 'text-amber-500'
+											: entry.type === 'directory'
+												? 'text-blue-500'
+												: entry.type === 'symlink'
+													? 'text-purple-500'
+													: 'text-muted-foreground'}"
 									/>
 									<span class="truncate" title={entry.name}>
-										{entry.name}
+										{displayEntryName(entry.name)}
 										{#if entry.type === 'symlink' && entry.linkTarget}
 											<span class="text-muted-foreground ml-1">
 												→ {entry.linkTarget}
@@ -1188,15 +1215,17 @@
 											{/snippet}
 										</ConfirmPopover>
 									{/if}
-									<Button
-										variant="ghost"
-										size="icon"
-										class="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
-										onclick={(e: MouseEvent) => { e.stopPropagation(); downloadFile(entry); }}
-										title="Download"
-									>
-										<Download class="w-3 h-3" />
-									</Button>
+									{#if canDownloadEntry(entry)}
+										<Button
+											variant="ghost"
+											size="icon"
+											class="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+											onclick={(e: MouseEvent) => { e.stopPropagation(); downloadFile(entry); }}
+											title="Download"
+										>
+											<Download class="w-3 h-3" />
+										</Button>
+									{/if}
 								</div>
 							</Table.Cell>
 						</Table.Row>

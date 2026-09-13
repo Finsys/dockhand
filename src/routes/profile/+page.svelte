@@ -24,7 +24,8 @@
 		Trash2,
 		TriangleAlert,
 		Palette,
-		Plus
+		Plus,
+		Compass
 	} from 'lucide-svelte';
 	import { authStore } from '$lib/stores/auth';
 	import { formatDateTime } from '$lib/stores/settings';
@@ -38,7 +39,9 @@
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
 	import * as Table from '$lib/components/ui/table';
 	import ThemeSelector from '$lib/components/ThemeSelector.svelte';
+	import NavigationSelector from '$lib/components/NavigationSelector.svelte';
 	import AnimateIconsToggle from '$lib/components/AnimateIconsToggle.svelte';
+	import IndentGuidesToggle from '$lib/components/IndentGuidesToggle.svelte';
 	import ColoredActionsToggle from '$lib/components/ColoredActionsToggle.svelte';
 	import { themeStore } from '$lib/stores/theme';
 	import PageHeader from '$lib/components/PageHeader.svelte';
@@ -729,6 +732,21 @@
 					<ThemeSelector userId={profile.id} />
 					<ColoredActionsToggle userId={profile.id} />
 					<AnimateIconsToggle userId={profile.id} />
+				<IndentGuidesToggle userId={profile.id} />
+				</Card.Content>
+			</Card.Root>
+
+			<!-- Navigation card (per-user overrides) -->
+			<Card.Root>
+				<Card.Header>
+					<Card.Title class="flex items-center gap-2">
+						<Compass class="w-5 h-5" />
+						Navigation
+					</Card.Title>
+					<Card.Description>Your landing page and environment-click target. Leave on "Use global default" to follow the workspace setting.</Card.Description>
+				</Card.Header>
+				<Card.Content>
+					<NavigationSelector scope="user" />
 				</Card.Content>
 			</Card.Root>
 

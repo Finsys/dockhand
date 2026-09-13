@@ -3,6 +3,7 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
 	import { Plus, Minus, FileEdit, FileCheck, Loader2, ArrowRight, FolderOpen, Container, Info } from 'lucide-svelte';
+	import { readJobResponse } from '$lib/utils/sse-fetch';
 	import { formatDateTime } from '$lib/stores/settings';
 
 	interface Props {
@@ -43,13 +44,11 @@
 		metaA = null;
 		metaB = null;
 		try {
-			const res = await fetch(`/api/backup/snapshots/diff?destinationId=${destinationId}&snapshotA=${snapshotA.id}&snapshotB=${snapshotB.id}`);
-			if (!res.ok) {
-				const data = await res.json();
-				error = data.error || `HTTP ${res.status}`;
-				return;
-			}
-			diff = await res.json();
+			// Job-polling so the two `restic diff` reads behind a proxy aren't aborted at ~15s.
+			const res = await fetch(`/api/backup/snapshots/diff?destinationId=${destinationId}&snapshotA=${snapshotA.id}&snapshotB=${snapshotB.id}`, { headers: { Accept: 'text/event-stream' } });
+			const data = await readJobResponse(res);
+			if (data?.error) { error = data.error; return; }
+			diff = data;
 		} catch (err) {
 			error = err instanceof Error ? err.message : String(err);
 		} finally {
@@ -61,12 +60,13 @@
 		if (metaA && metaB) return;
 		metaLoading = true;
 		try {
-			const [resA, resB] = await Promise.all([
-				fetch(`/api/backup/snapshots/${snapshotA.id}/metadata?destinationId=${destinationId}`),
-				fetch(`/api/backup/snapshots/${snapshotB.id}/metadata?destinationId=${destinationId}`)
+			// Job-polling for both metadata dumps (slow `restic dump` behind a proxy).
+			const [dataA, dataB] = await Promise.all([
+				fetch(`/api/backup/snapshots/${snapshotA.id}/metadata?destinationId=${destinationId}`, { headers: { Accept: 'text/event-stream' } }).then(readJobResponse),
+				fetch(`/api/backup/snapshots/${snapshotB.id}/metadata?destinationId=${destinationId}`, { headers: { Accept: 'text/event-stream' } }).then(readJobResponse)
 			]);
-			metaA = resA.ok ? await resA.json() : null;
-			metaB = resB.ok ? await resB.json() : null;
+			metaA = dataA?.error ? null : dataA;
+			metaB = dataB?.error ? null : dataB;
 		} catch {}
 		metaLoading = false;
 	}

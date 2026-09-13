@@ -5,16 +5,18 @@ import { getEnvironment } from '$lib/server/db';
 import type { RequestHandler } from './$types';
 
 /**
- * Get the default path for a new stack
- * Used by the UI to show where files will be created
+ * Get the default path for a new stack — used by the UI to show where files will be created.
+ * With location set the path is {location}/{envName}/{stackName}/, otherwise Dockhand's
+ * default $DATA_DIR/stacks/{envName}/{stackName}/.
  *
- * Query params:
- * - name: Stack name (required)
- * - env: Environment ID (optional)
- * - location: Custom base location path (optional)
- *
- * If location is provided, path will be: {location}/{envName}/{stackName}/
- * Otherwise uses Dockhand's default: $DATA_DIR/stacks/{envName}/{stackName}/
+ * @openapi
+ * summary: Compute the default compose/env file paths for a new stack, either under a custom base location or under Dockhand's default stacks directory
+ * query: name:string! Stack name
+ * query: env:integer Environment ID (scopes the path under the environment name) (from GET /api/environments)
+ * query: location:string Custom base location path
+ * resp-200: {stackDir:string!, composePath:string!, envPath:string!, source:string!}
+ * resp-200-example: {"stackDir":"/data/stacks/prod/web","composePath":"/data/stacks/prod/web/compose.yaml","envPath":"/data/stacks/prod/web/.env","source":"default"}
+ * resp-400: Stack name is required
  */
 export const GET: RequestHandler = async ({ url }) => {
 	const stackName = url.searchParams.get('name');

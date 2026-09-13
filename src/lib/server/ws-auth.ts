@@ -1,8 +1,9 @@
-import { validateSessionById, isAuthEnabled, SESSION_COOKIE } from './auth';
+import { validateSessionById, isAuthEnabled, SESSION_COOKIE, getUserPermissionsForEnvironment } from './auth';
 import { validateApiToken } from './api-tokens';
 import { isEnterprise } from './license';
 import { userHasAdminRole, userCanAccessEnvironment } from './db';
 import { parseCookieHeader } from '$lib/utils/cookie-parse';
+import { canExecDecision } from './ws-exec-core';
 
 export interface WsUpgradeAuth {
 	userId: number;
@@ -68,6 +69,21 @@ export async function canAccessEnvForUser(
 	return userCanAccessEnvironment(auth.userId, environmentId);
 }
 
+/**
+ * Whether the WS user may open a container exec/terminal session. Mirrors the
+ * REST gate `auth.can('containers','exec',envId)`. Pure logic lives in
+ * ws-exec-core; this binds the real enterprise + permission deps.
+ */
+export async function canExecForUser(
+	auth: WsUpgradeAuth,
+	environmentId: number | undefined | null
+): Promise<boolean> {
+	return canExecDecision(auth, environmentId, {
+		isEnterprise,
+		getPerms: getUserPermissionsForEnvironment
+	});
+}
+
 declare global {
 	// eslint-disable-next-line no-var
 	var __authenticateWsUpgrade:
@@ -77,7 +93,12 @@ declare global {
 	var __canAccessEnvForUser:
 		| ((auth: WsUpgradeAuth, envId: number | undefined | null) => Promise<boolean>)
 		| undefined;
+	// eslint-disable-next-line no-var
+	var __canExecForUser:
+		| ((auth: WsUpgradeAuth, envId: number | undefined | null) => Promise<boolean>)
+		| undefined;
 }
 
 globalThis.__authenticateWsUpgrade = authenticateWsUpgrade;
 globalThis.__canAccessEnvForUser = canAccessEnvForUser;
+globalThis.__canExecForUser = canExecForUser;

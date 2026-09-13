@@ -6,6 +6,21 @@ import { extractFirstFileFromTar } from '$lib/server/tar-extract';
 import { attachmentContentDisposition } from '$lib/server/content-disposition';
 import type { RequestHandler } from './$types';
 
+/**
+ * GET /api/containers/{id}/files/download - Download a path from a container as an archive
+ *
+ * @openapi
+ * summary: Download a file or directory from a container as a tar (optionally gzip-compressed) archive attachment
+ * path: id:string! Container ID or name (from GET /api/containers)
+ * query: env:integer The target environment ID (omit for the local/default Docker host) (from GET /api/environments)
+ * query: path:string! Absolute path inside the container to archive and download
+ * query: format:string Archive format, "tar" (default) or "tar.gz"
+ * resp-200: Archive stream (application/x-tar or application/gzip) as a file attachment
+ * resp-400: Path is missing
+ * resp-403: Permission denied to access the path
+ * resp-404: File not found
+ * resp-500: Failed to download the file
+ */
 export const GET: RequestHandler = async ({ params, url, cookies }) => {
 	const invalid = validateDockerIdParam(params.id, 'container');
 	if (invalid) return invalid;

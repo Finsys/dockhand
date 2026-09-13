@@ -3,24 +3,37 @@ import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
 import { getStackSource } from '$lib/server/db';
 import { findStackDir } from '$lib/server/stacks';
+import { getCachedContainerMounts, unpersistedComposePathWarning } from '$lib/server/host-path';
 import { existsSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 
 /**
  * POST /api/stacks/[name]/check-path-change
  *
- * Check if the proposed compose path differs from current and if old directory has files.
- * Returns information about what would need to be moved if location changes.
+ * @openapi
+ * summary: Check whether a proposed compose path moves the stack to a different directory and how many files the old directory still holds
+ * path: name:string! Stack name (from GET /api/stacks)
+ * query: env:integer Environment ID the stack belongs to (from GET /api/environments)
+ * body: {newComposePath:string!}
+ * body-example: {"newComposePath":"/opt/stacks/web/compose.yaml"}
+ * resp-200: {hasChanges:boolean!, oldDir:string, newDir:string, fileCount:integer!, currentComposePath:string, persistenceWarning:string}
+ * resp-200-example: {"hasChanges":true,"oldDir":"/opt/stacks/old","newDir":"/opt/stacks/web","fileCount":3,"currentComposePath":"/opt/stacks/old/compose.yaml"}
+ * resp-403: Permission denied (requires stacks:edit)
+ * resp-500: Failed to check path changes
  */
 export const POST: RequestHandler = async ({ params, request, url, cookies }) => {
 	const auth = await authorize(cookies);
-	if (auth.authEnabled && !(await auth.can('stacks', 'edit'))) {
-		return json({ error: 'Permission denied' }, { status: 403 });
-	}
-
 	const { name } = params;
 	const envId = url.searchParams.get('env');
 	const envIdNum = envId ? parseInt(envId) : undefined;
+	// edit OR create: this pre-flight (files-to-move + persistence warning) is used by both
+	// the relocate/save flows (edit) and the create flow (a not-yet-existing stack), and it
+	// reveals nothing beyond the caller's own proposed path + Dockhand's mount layout.
+	if (auth.authEnabled && !(await auth.can('stacks', 'edit', envIdNum)) && !(await auth.can('stacks', 'create', envIdNum))) {
+		return json({ error: 'Permission denied' }, { status: 403 });
+	}
+	const envAccessDenied = await auth.requireEnvAccess(envIdNum ?? null);
+	if (envAccessDenied) return envAccessDenied;
 
 	try {
 		const body = await request.json();
@@ -69,12 +82,17 @@ export const POST: RequestHandler = async ({ params, request, url, cookies }) =>
 			}
 		}
 
+		// Warn if the chosen path won't survive a Dockhand recreate because it is not
+		// under any of Dockhand's mounted volumes (#1524).
+		const persistenceWarning = unpersistedComposePathWarning(newComposePath, getCachedContainerMounts());
+
 		return json({
 			hasChanges,
 			oldDir: currentDir,
 			newDir,
 			fileCount,
-			currentComposePath
+			currentComposePath,
+			persistenceWarning
 		});
 	} catch (error: any) {
 		console.error(`Error checking path change for stack ${name}:`, error);

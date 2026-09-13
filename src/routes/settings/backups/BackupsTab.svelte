@@ -4,6 +4,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Input } from '$lib/components/ui/input';
+	import * as Select from '$lib/components/ui/select';
 	import { DataGrid } from '$lib/components/data-grid';
 	import { Plus, Trash2, Pencil, HardDrive, Server, CheckCircle, XCircle, AlertCircle, Wifi, Database, RefreshCw, Search, FolderSync, Archive, Loader2, Save, CircleHelp, Unlock, PackageCheck, Eraser, BarChart3, Wrench, FolderCheck, KeyRound } from 'lucide-svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
@@ -18,12 +19,14 @@
 	import { LoadingState } from '$lib/components/ui/loading-state';
 	import { getRepoTypeIcon, getRepoTypeLabel } from '$lib/utils/backup';
 	import { shouldSaveBackupImage } from '$lib/utils/backup-image';
+	import { summarizeTestResults, formatTestSummary, type TestOutcome } from '$lib/utils/backup-test-summary';
 	import SnapshotBrowser from '../../containers/SnapshotBrowser.svelte';
 	import type { Component } from 'svelte';
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
 	import { canAccess } from '$lib/stores/auth';
 	import DestinationModal from './DestinationModal.svelte';
-	import VerifyModal from './VerifyModal.svelte';
+	import BackupLogModal from '../../backups/BackupLogModal.svelte';
+	import { watchJob, readJobResponse } from '$lib/utils/sse-fetch';
 	import RotatePasswordModal from './RotatePasswordModal.svelte';
 	import { EmptyState } from '$lib/components/ui/empty-state';
 
@@ -56,12 +59,21 @@
 	let confirmDeleteId = $state<number | null>(null);
 	let confirmAction = $state<{ destId: number; task: string } | null>(null);
 	let searchQuery = $state('');
+	// Sort + status filter for the destinations grid.
+	let destSort = $state<{ field: string; direction: 'asc' | 'desc' }>({ field: 'name', direction: 'asc' });
+	let statusFilter = $state<'all' | 'success' | 'needs_init' | 'failed'>('all');
 	let testingId = $state<number | null>(null);
 
 	let testingAll = $state(false);
-	let verifyModalOpen = $state(false);
-	let verifyDestId = $state(0);
-	let verifyDestName = $state('');
+	// Shared live-log modal for every restic maintenance action (verify/check/prune/
+	// repair/unlock) — the same BackupLogModal used by backup/restore, so all
+	// destination actions share one elegant log UI instead of a raw toast dump.
+	let actionLogOpen = $state(false);
+	let actionLogTitle = $state('');
+	let actionLogIcon = $state<any>(undefined);
+	let actionLogStatus = $state<'running' | 'success' | 'error'>('running');
+	let actionLogLogs = $state<string[]>([]);
+	let actionLogError = $state('');
 	let rotateModalOpen = $state(false);
 	let rotateDestId = $state(0);
 	let rotateDestName = $state('');
@@ -97,8 +109,6 @@
 
 	async function testAllDestinations() {
 		testingAll = true;
-		let passed = 0;
-		let failed = 0;
 
 		// Clear statuses so UI shows spinners
 		for (const dest of destinations) {
@@ -107,32 +117,33 @@
 		destinations = [...destinations];
 		repoStats = new Map();
 
-		// Run all tests + stats in parallel, update UI incrementally
-		await Promise.allSettled(destinations.map(async (dest) => {
+		// Run all tests + stats in parallel, update UI incrementally. Collect the
+		// three-way outcome per destination; a needs-init repo is NOT a failure.
+		const outcomes = await Promise.all(destinations.map(async (dest): Promise<TestOutcome> => {
 			try {
 				const res = await fetch(`/api/backup/destinations/${dest.id}/test`, { method: 'POST' });
 				const data = await res.json();
 				if (data.success) {
-					passed++;
 					dest.lastTestStatus = 'success';
 					destinations = [...destinations];
 					await fetchRepoStats(dest.id);
-				} else {
-					failed++;
-					dest.lastTestStatus = data.status === 'needs_init' ? 'needs_init' : 'failed';
-					dest.lastTestError = data.error || null;
-					destinations = [...destinations];
+					return 'success';
 				}
+				const status: TestOutcome = data.status === 'needs_init' ? 'needs_init' : 'failed';
+				dest.lastTestStatus = status;
+				dest.lastTestError = data.error || null;
+				destinations = [...destinations];
+				return status;
 			} catch {
-				failed++;
 				dest.lastTestStatus = 'failed';
 				destinations = [...destinations];
+				return 'failed';
 			}
 		}));
 
 		testingAll = false;
-		if (failed === 0) toast.success(`All ${passed} destinations tested & stats collected`);
-		else toast.error(`${failed} failed, ${passed} passed`);
+		const summary = formatTestSummary(summarizeTestResults(outcomes));
+		toast[summary.severity](summary.text);
 	}
 
 	// Backup helper image setting
@@ -173,29 +184,90 @@
 	let initializingId = $state<number | null>(null);
 	let runningTask = $state<{ destId: number; task: string } | null>(null);
 
+	const REPO_TASK_TITLES: Record<string, string> = {
+		unlock: 'Unlock repository',
+		prune: 'Prune unused data',
+		check: 'Check integrity',
+		'repair-index': 'Repair index',
+		'repair-snapshots': 'Repair snapshots'
+	};
+
 	async function runRepoTask(destId: number, task: string) {
 		runningTask = { destId, task };
-		try {
-			const res = await fetch(`/api/backup/destinations/${destId}/task`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ task })
-			});
-			const data = await res.json();
-			if (data.success) {
-				if (task === 'stats' && data.stats) {
+		// `stats` is a silent read that only populates the cells — no log modal.
+		if (task === 'stats') {
+			try {
+				const res = await fetch(`/api/backup/destinations/${destId}/task`, {
+					method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ task })
+				});
+				const data = await res.json();
+				if (data.success && data.stats) {
 					const m = new Map(repoStats);
 					m.set(destId, data.stats);
 					repoStats = m;
+				} else if (!data.success) {
+					toast.error(data.error || 'Stats failed');
 				}
-				toast.success(data.output || `${task} completed`);
+			} catch (err: any) {
+				toast.error(err.message || 'Stats failed');
+			} finally {
+				runningTask = null;
+			}
+			return;
+		}
+
+		const dest = destinations.find((d) => d.id === destId);
+		await streamRepoAction(
+			`${REPO_TASK_TITLES[task] || task}${dest ? ` - ${dest.name}` : ''}`,
+			`/api/backup/destinations/${destId}/task`,
+			{ task },
+			dest?.repository
+		);
+		runningTask = null;
+	}
+
+	function verifyDestination(dest: any) {
+		streamRepoAction(`Verify data integrity - ${dest.name}`, `/api/backup/destinations/${dest.id}/verify`, {}, dest.repository);
+	}
+
+	/** Run a restic maintenance action, streaming its output live into the shared
+	 *  BackupLogModal (identical UX to backup/restore logs). */
+	async function streamRepoAction(title: string, url: string, body: Record<string, unknown>, repository?: string) {
+		actionLogTitle = title;
+		actionLogIcon = repository ? getRepoTypeIcon(repository) : undefined;
+		actionLogStatus = 'running';
+		actionLogLogs = [];
+		actionLogError = '';
+		actionLogOpen = true;
+		try {
+			const res = await fetch(url, {
+				method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+			});
+			const data = await res.json();
+			if (data.jobId) {
+				const result = await watchJob(data.jobId, (line) => {
+					const d = line.data as any;
+					if (line.event === 'progress' && d?.message) {
+						actionLogLogs = [...actionLogLogs, d.message];
+					}
+				}) as any;
+				if (result?.success === false) {
+					actionLogStatus = 'error';
+					actionLogError = result.error || 'Action failed';
+				} else {
+					actionLogStatus = 'success';
+				}
+			} else if (data.error) {
+				actionLogStatus = 'error';
+				actionLogError = data.error;
 			} else {
-				toast.error(data.error || `${task} failed`);
+				// Backward-compat JSON path (Accept negotiated to one-shot): show result.
+				actionLogStatus = data.success ? 'success' : 'error';
+				if (!data.success) actionLogError = data.error || 'Action failed';
 			}
 		} catch (err: any) {
-			toast.error(err.message || `${task} failed`);
-		} finally {
-			runningTask = null;
+			actionLogStatus = 'error';
+			actionLogError = err.message || 'Action failed';
 		}
 	}
 
@@ -298,13 +370,17 @@
 		browseOpen = true;
 		browseLoading = true;
 		try {
-			// List all snapshots in this destination (no configId filter)
-			const res = await fetch(`/api/backup/snapshots?destinationId=${dest.id}`);
-			if (res.ok) { const d = await res.json(); browseSnapshots = d.snapshots ?? d; }
-			else {
-				const data = await res.json();
-				const errMsg = data.error || 'Failed to list snapshots';
+			// List all snapshots in this destination (no configId filter). Job-polling so a
+			// slow `restic snapshots` behind a proxy isn't aborted at ~15s.
+			const res = await fetch(`/api/backup/snapshots?destinationId=${dest.id}`, {
+				headers: { Accept: 'text/event-stream' }
+			});
+			const d = await readJobResponse(res);
+			if (d?.error) {
+				const errMsg = d.error || 'Failed to list snapshots';
 				try { const p = JSON.parse(errMsg); toast.error(p.message || errMsg); } catch { toast.error(errMsg); }
+			} else {
+				browseSnapshots = d.snapshots ?? d;
 			}
 		} catch { toast.error('Failed to list snapshots'); }
 		finally { browseLoading = false; }
@@ -321,15 +397,31 @@
 		};
 	}
 
-	const filteredDestinations = $derived(
-		searchQuery.trim()
-			? destinations.filter(d =>
-				d.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-				d.repository.toLowerCase().includes(searchQuery.toLowerCase()) ||
-				getTypeLabel(d.repository).toLowerCase().includes(searchQuery.toLowerCase())
-			)
-			: destinations
-	);
+	const filteredDestinations = $derived.by(() => {
+		const q = searchQuery.trim().toLowerCase();
+		let rows = destinations.filter(d => {
+			if (q && !(
+				d.name.toLowerCase().includes(q) ||
+				d.repository.toLowerCase().includes(q) ||
+				getTypeLabel(d.repository).toLowerCase().includes(q)
+			)) return false;
+			if (statusFilter !== 'all' && (d.lastTestStatus ?? '') !== statusFilter) return false;
+			return true;
+		});
+		// Sort key per column. 'status' orders by a fixed rank so like statuses group.
+		const statusRank: Record<string, number> = { success: 0, needs_init: 1, failed: 2, '': 3 };
+		const key = (d: Destination) =>
+			destSort.field === 'type' ? getTypeLabel(d.repository) :
+			destSort.field === 'repository' ? d.repository :
+			destSort.field === 'status' ? String(statusRank[d.lastTestStatus ?? ''] ?? 3) :
+			d.name;
+		rows = [...rows].sort((a, b) => {
+			const ka = key(a).toLowerCase(), kb = key(b).toLowerCase();
+			const cmp = ka < kb ? -1 : ka > kb ? 1 : 0;
+			return destSort.direction === 'asc' ? cmp : -cmp;
+		});
+		return rows;
+	});
 
 	async function fetchData() {
 		loading = true;
@@ -449,6 +541,17 @@
 					class="pl-9 h-8 w-64 text-sm"
 				/>
 			</div>
+			<Select.Root type="single" value={statusFilter} onValueChange={(v) => statusFilter = (v as typeof statusFilter) ?? 'all'}>
+				<Select.Trigger class="h-8 w-40 text-sm">
+					{statusFilter === 'success' ? 'Initialized' : statusFilter === 'needs_init' ? 'Needs init' : statusFilter === 'failed' ? 'Failed' : 'All statuses'}
+				</Select.Trigger>
+				<Select.Content>
+					<Select.Item value="all">All statuses</Select.Item>
+					<Select.Item value="success"><CheckCircle class="w-3.5 h-3.5 text-green-500 mr-1.5 inline" />Initialized</Select.Item>
+					<Select.Item value="needs_init"><AlertCircle class="w-3.5 h-3.5 text-amber-500 mr-1.5 inline" />Needs init</Select.Item>
+					<Select.Item value="failed"><XCircle class="w-3.5 h-3.5 text-destructive mr-1.5 inline" />Failed</Select.Item>
+				</Select.Content>
+			</Select.Root>
 			<Badge variant="secondary" class="text-xs">{destinations.length} destination{destinations.length !== 1 ? 's' : ''}</Badge>
 		</div>
 		<div class="flex gap-2">
@@ -483,15 +586,16 @@
 			gridId="backupDestinations"
 			loading={loading}
 			onRowClick={(dest) => openModal(dest)}
+			onSortChange={(s) => destSort = { field: s.field, direction: s.direction }}
 			class="border-none"
 			wrapperClass="border rounded-lg"
 		>
 			{#snippet cell(column, dest)}
 				{#if column.id === 'type'}
 					{@const TypeIcon = getTypeIcon(dest.repository)}
-					<div class="flex items-center gap-1.5" title={getTypeLabel(dest.repository)}>
-						<TypeIcon class="w-4 h-4 text-muted-foreground" />
-						<span class="text-xs text-muted-foreground">{getTypeLabel(dest.repository)}</span>
+					<div class="flex items-center gap-1.5 min-w-0" title={getTypeLabel(dest.repository)}>
+						<TypeIcon class="w-4 h-4 shrink-0 text-muted-foreground" />
+						<span class="text-xs text-muted-foreground truncate">{getTypeLabel(dest.repository)}</span>
 					</div>
 				{:else if column.id === 'name'}
 					<span class="font-medium text-sm">{dest.name}</span>
@@ -575,12 +679,12 @@
 							<button type="button" class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100" onclick={() => runRepoTask(dest.id, 'check')} disabled={runningTask?.destId === dest.id} title="Check integrity">
 								{#if runningTask?.destId === dest.id && runningTask.task === 'check'}<Loader2 class="grid-action-icon text-muted-foreground animate-spin" />{:else}<PackageCheck class="grid-action-icon grid-action-info text-muted-foreground" />{/if}
 							</button>
-							<button type="button" class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100" onclick={() => { verifyDestId = dest.id; verifyDestName = dest.name; verifyModalOpen = true; }} title="Verify data integrity">
+							<button type="button" class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100" onclick={() => verifyDestination(dest)} title="Verify data integrity">
 								<FolderCheck class="grid-action-icon grid-action-info text-muted-foreground" />
 							</button>
 							<ConfirmPopover
 								open={confirmAction?.destId === dest.id && confirmAction.task === 'unlock'}
-								action="Unlock" itemType="repository" itemName={dest.name} confirmText="Unlock" position="left"
+								action="Unlock" itemType="repository" itemName={dest.name} confirmText="Unlock" position="left" title="Unlock repository"
 								onConfirm={() => { confirmAction = null; runRepoTask(dest.id, 'unlock'); }}
 								onOpenChange={(o) => confirmAction = o ? { destId: dest.id, task: 'unlock' } : null}
 							>
@@ -590,7 +694,7 @@
 							</ConfirmPopover>
 							<ConfirmPopover
 								open={confirmAction?.destId === dest.id && confirmAction.task === 'prune'}
-								action="Prune" itemType="unused data from" itemName={dest.name} confirmText="Prune" variant="destructive" position="left"
+								action="Prune" itemType="unused data from" itemName={dest.name} confirmText="Prune" variant="destructive" position="left" title="Prune unused data"
 								onConfirm={() => { confirmAction = null; runRepoTask(dest.id, 'prune'); }}
 								onOpenChange={(o) => confirmAction = o ? { destId: dest.id, task: 'prune' } : null}
 							>
@@ -600,7 +704,7 @@
 							</ConfirmPopover>
 							<ConfirmPopover
 								open={confirmAction?.destId === dest.id && confirmAction.task === 'repair'}
-								action="Repair" itemType="index for" itemName={dest.name} confirmText="Repair" variant="destructive" position="left"
+								action="Repair" itemType="index for" itemName={dest.name} confirmText="Repair" variant="destructive" position="left" title="Repair index"
 								onConfirm={() => { confirmAction = null; runRepoTask(dest.id, 'repair-index'); }}
 								onOpenChange={(o) => confirmAction = o ? { destId: dest.id, task: 'repair' } : null}
 							>
@@ -775,10 +879,13 @@
 	targetName={snapshotBrowseName}
 />
 
-<VerifyModal
-	bind:open={verifyModalOpen}
-	destinationId={verifyDestId}
-	destinationName={verifyDestName}
+<BackupLogModal
+	bind:open={actionLogOpen}
+	title={actionLogTitle}
+	icon={actionLogIcon}
+	status={actionLogStatus}
+	logs={actionLogLogs}
+	error={actionLogError}
 />
 
 <RotatePasswordModal

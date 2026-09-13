@@ -16,17 +16,16 @@
  * true source for a bind key, we FAIL LOUD rather than fall back to the slug.
  */
 import { BackupError } from './models';
-import { safeKey } from './discovery-core';
+import { safeKey, volumeInclude, volumeBind } from './discovery-core';
+import type { SnapshotLayout, SnapshotVolume } from './snapshot-layout';
 
-/** One volume entry as stored in a snapshot's metadata.json (post-enrichment). */
-export interface StoredVolume {
-	key: string;
-	name: string;
-	source: string;
-	type: 'volume' | 'bind';
-}
+export { volumeInclude, volumeBind };
 
-/** A docker mount as recorded in metadata.container (docker inspect Mounts[]). */
+/** One volume entry as stored in a snapshot (the typed contract, not a parallel copy - so
+ * a SnapshotVolume field rename is a compile error here too, not a silent undefined). */
+export type StoredVolume = SnapshotVolume;
+
+/** A docker mount as recorded in a snapshot's container inspect (Mounts[]). */
 interface StoredMount {
 	Type?: string;
 	Name?: string;
@@ -34,10 +33,14 @@ interface StoredMount {
 	Destination?: string;
 }
 
-/** The snapshot metadata shape we read (only the fields this mapping needs). */
+/** The snapshot metadata this mapping reads. `volumes` is intentionally `unknown`: this is
+ * the boundary that reads BOTH the typed SnapshotVolume[] (current) AND legacy string[]
+ * name/destination entries (pre-enrichment snapshots), narrowing each defensively. A
+ * SnapshotLayout is assignable here (its volumes: SnapshotVolume[] widens to unknown).
+ * `container` stays unknown (opaque inspect JSON); mountSource narrows it. */
 export interface SnapshotMetadata {
 	volumes?: unknown;
-	container?: { Mounts?: StoredMount[] } | null;
+	container?: unknown;
 }
 
 /** A `<source>:/volumes/<key>:rw` bind + its `/volumes/<key>` include. `type` and
@@ -52,7 +55,7 @@ export interface VolumeBind {
 
 /** Build the rw bind for a resolved source + key. */
 function bindFor(source: string, key: string, type: 'volume' | 'bind'): VolumeBind {
-	return { bind: `${source}:/volumes/${key}:rw`, include: `/volumes/${key}`, source, type };
+	return { bind: volumeBind(source, key, 'rw'), include: volumeInclude(key), source, type };
 }
 
 /**
@@ -111,7 +114,8 @@ function enrichedVolume(metadata: SnapshotMetadata | null, key: string): StoredV
 
 /** Recover a source from the stored docker inspect Mounts for a key. */
 function mountSource(metadata: SnapshotMetadata | null, key: string): { source: string; type: 'bind' | 'volume' } | null {
-	const mounts = metadata?.container?.Mounts;
+	const c = metadata?.container as { Mounts?: StoredMount[] } | null | undefined;
+	const mounts = c?.Mounts;
 	if (!Array.isArray(mounts)) return null;
 	for (const m of mounts) {
 		if (m?.Type === 'volume' && m.Name && m.Name === key) return { source: m.Name, type: 'volume' };
@@ -143,7 +147,8 @@ function keyIsKnownBind(metadata: SnapshotMetadata | null, key: string): boolean
 			if (v && typeof v === 'object' && sv.key === key && sv.type === 'bind') return true;
 		}
 	}
-	const mounts = metadata?.container?.Mounts;
+	const c = metadata?.container as { Mounts?: StoredMount[] } | null | undefined;
+	const mounts = c?.Mounts;
 	if (Array.isArray(mounts)) {
 		for (const m of mounts) {
 			if (m?.Type === 'bind' && m.Destination && safeKey(m.Destination) === key) return true;

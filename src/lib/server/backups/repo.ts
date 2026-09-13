@@ -1,5 +1,5 @@
 /**
- * backups/repo.ts — repository lifecycle operations that talk only to the restic
+ * backups/repo.ts - repository lifecycle operations that talk only to the restic
  * repo (no container volumes): initialise, check integrity, prune, unlock, and a
  * reachability test. Each is a thin, explicit wrapper over the injected Restic
  * runner that turns restic's exit code + output into a structured result.
@@ -14,7 +14,26 @@ import { cleanErrorMsg, timingSafeStrEqual } from './security';
 
 /** The restic surface repo.ts needs (injected). */
 export interface ResticLocal {
-	runLocal(destination: any, args: string[], tier?: 'interactive' | 'data'): Promise<ResticRun>;
+	runLocal(
+		destination: any,
+		args: string[],
+		tier?: 'interactive' | 'data',
+		stream?: { onStdout?: (chunk: string) => void; onStderr?: (chunk: string) => void }
+	): Promise<ResticRun>;
+}
+
+/** Live-output callback for a repo op: each restic line as it arrives. Optional -
+ *  omit it and the op runs with buffered output only. */
+export type OnProgress = (line: string) => void;
+
+/** Split a raw restic chunk into lines and forward each. Kept local so repo.ts stays
+ *  dependency-free; mirrors formatResticLines' line-splitting for the maintenance ops. */
+function forwardChunk(onProgress: OnProgress | undefined, chunk: string): void {
+	if (!onProgress) return;
+	for (const line of chunk.split(/\r?\n/)) {
+		const t = line.trim();
+		if (t) onProgress(t);
+	}
 }
 
 /** A repo operation result: ok + human output, or a classified failure. */
@@ -69,39 +88,42 @@ export async function testRepository(restic: ResticLocal, destination: any): Pro
 /** Integrity check. `readDataSubset` (e.g. '5%') re-reads pack data to prove
  * restorability; omit for a structure-only check. Runs on the long timeout tier
  * because a data check on a large cloud repo far exceeds the interactive limit. */
-export async function checkRepository(restic: ResticLocal, destination: any, readDataSubset?: string): Promise<RepoResult> {
+export async function checkRepository(restic: ResticLocal, destination: any, readDataSubset?: string, onProgress?: OnProgress): Promise<RepoResult> {
 	const args = ['check', '--no-lock'];
 	if (readDataSubset) args.push('--read-data-subset', readDataSubset);
-	const run = await restic.runLocal(destination, args, 'data');
+	const stream = onProgress && { onStdout: (c: string) => forwardChunk(onProgress, c), onStderr: (c: string) => forwardChunk(onProgress, c) };
+	const run = await restic.runLocal(destination, args, 'data', stream || undefined);
 	return toResult(run);
 }
 
 /** Prune the repository (reclaim unreferenced data). Long timeout tier. */
-export async function pruneRepository(restic: ResticLocal, destination: any, maxUnused?: string): Promise<RepoResult> {
+export async function pruneRepository(restic: ResticLocal, destination: any, maxUnused?: string, onProgress?: OnProgress): Promise<RepoResult> {
 	const args = ['prune', '--retry-lock', '5m'];
 	if (maxUnused) args.push('--max-unused', maxUnused);
-	const run = await restic.runLocal(destination, args, 'data');
+	const stream = onProgress && { onStdout: (c: string) => forwardChunk(onProgress, c), onStderr: (c: string) => forwardChunk(onProgress, c) };
+	const run = await restic.runLocal(destination, args, 'data', stream || undefined);
 	return toResult(run);
 }
 
 /**
  * Remove repository locks left by a crashed operation.
  *
- * `removeAll` (default true) uses `restic unlock --remove-all` — clears EVERY lock,
+ * `removeAll` (default true) uses `restic unlock --remove-all` - clears EVERY lock,
  * including one it cannot prove stale (an orphan whose helper-container hostname restic
  * won't age out for 30 min). That is what the EXPLICIT user "Unlock" button needs, and
- * it is safe only when no other op runs against the repo — the operator's call.
+ * it is safe only when no other op runs against the repo - the operator's call.
  *
  * `removeAll = false` is a plain `restic unlock`: it reaps ONLY locks restic can prove
  * stale and LEAVES a live foreign lock intact. AUTOMATIC callers (scheduled maintenance
- * auto-unlock) MUST use this — the per-repo serializer is per-instance and cannot see a
+ * auto-unlock) MUST use this - the per-repo serializer is per-instance and cannot see a
  * separate instance's live lock on a shared repo, so a blind --remove-all there would
- * silently wipe another instance's in-flight backup lock (same hazard backup-service
- * deliberately avoids). #1313-adjacent shared-repo data-safety fix.
+ * silently wipe another instance's in-flight backup lock. #1313-adjacent shared-repo
+ * data-safety fix.
  */
-export async function unlockRepository(restic: ResticLocal, destination: any, removeAll = true): Promise<RepoResult> {
+export async function unlockRepository(restic: ResticLocal, destination: any, removeAll = true, onProgress?: OnProgress): Promise<RepoResult> {
 	const args = removeAll ? ['unlock', '--remove-all'] : ['unlock'];
-	const run = await restic.runLocal(destination, args);
+	const stream = onProgress && { onStdout: (c: string) => forwardChunk(onProgress, c), onStderr: (c: string) => forwardChunk(onProgress, c) };
+	const run = await restic.runLocal(destination, args, 'interactive', stream || undefined);
 	return toResult(run);
 }
 
@@ -122,7 +144,7 @@ export type RotateResult =
 	| { ok: true }
 	| { ok: false; error: string; dbOutOfSync?: boolean };
 
-/** A decrypted destination — carries the plaintext current password for the
+/** A decrypted destination - carries the plaintext current password for the
  * constant-time pre-check. */
 interface DecryptedDestination {
 	id: number;
@@ -149,12 +171,12 @@ export interface RotatePorts {
  *  1. Reject a weak or unchanged new password before doing anything.
  *  2. Constant-time compare the supplied current password against the stored one,
  *     so response timing can't leak how much of a guess is right.
- *  3. Run `restic key passwd` with the new password in a 0600 tmpfile — never on
+ *  3. Run `restic key passwd` with the new password in a 0600 tmpfile - never on
  *     argv, which leaks via /proc/<pid>/cmdline. The tmpfile is shredded on every
  *     exit path. The key change is serialized on the destination.
  *  4. Persist the new password. If restic already swapped the key (step 3
  *     succeeded) but this write fails, the repo expects the new password and the
- *     DB still holds the old one — a critical out-of-sync state we flag distinctly
+ *     DB still holds the old one - a critical out-of-sync state we flag distinctly
  *     so the caller can prompt the operator to fix it.
  */
 export async function rotateDestinationPassword(
@@ -197,7 +219,7 @@ export async function rotateDestinationPassword(
 	}
 
 	// restic accepted the new password and removed the old key. From now on the
-	// repo only accepts newPassword — persist it immediately.
+	// repo only accepts newPassword - persist it immediately.
 	try {
 		await ports.updatePassword(destinationId, newPassword);
 	} catch (err) {

@@ -5,9 +5,10 @@
  * no globals, no DB. Safe to call in any context and to unit-test in isolation.
  */
 
+import { join } from 'node:path';
 import { isValidCron } from '../scheduler/cron-utils';
 import { privateIpReason, dangerousHostReason, isSafeWebhookUrl, isSafeNotificationUrl } from '../url-safety';
-import { BackupError } from './models';
+import { BackupError, isLocalRepo } from './models';
 export { privateIpReason };
 
 // Restic exits 10 when the repo isn't initialized.
@@ -30,11 +31,98 @@ export function parseOptionsJson(options: string | null | undefined): Record<str
 	}
 }
 
+/** The job.options shape a backup run consumes (subset of what's persisted on a config). */
+export interface JobOptions {
+	excludePatterns?: string[];
+	excludeCaches?: boolean;
+	compression?: string;
+	limitUpload?: number;
+	limitDownload?: number;
+	webhookSuccess?: string;
+	webhookFailure?: string;
+	excludedStackFiles?: string[];
+}
+
+/**
+ * Map a config's stored options (from parseOptionsJson) into the job.options a backup run uses.
+ * Pure so a SAVED backup (scheduled or "run now") gets EXACTLY the same options as an in-request
+ * run. Every persisted field must be forwarded here, or it silently vanishes on the config-driven path.
+ */
+export function buildJobOptions(opts: Record<string, any>): JobOptions {
+	return {
+		excludePatterns: typeof opts.excludePatterns === 'string'
+			? opts.excludePatterns.split(',').map((s: string) => s.trim()).filter(Boolean)
+			: undefined,
+		excludeCaches: opts.excludeCaches,
+		compression: opts.compression,
+		limitUpload: opts.limitUpload,
+		limitDownload: opts.limitDownload,
+		webhookSuccess: typeof opts.webhookSuccess === 'string' ? opts.webhookSuccess : undefined,
+		webhookFailure: typeof opts.webhookFailure === 'string' ? opts.webhookFailure : undefined,
+		excludedStackFiles: Array.isArray(opts.excludedStackFiles) ? opts.excludedStackFiles : undefined,
+	};
+}
+
+/** A destination's extra restic flags, split by scope. `backup` applies to backup + repo
+ * ops; `restore` applies only to `restic restore`. */
+export interface BackupFlags {
+	backup: string;
+	restore: string;
+}
+
+/**
+ * Parse the stored `flags` column into typed {backup, restore}. The column is a JSON
+ * object `{"backup":"...","restore":"..."}`. A LEGACY value (a bare flag string like
+ * `--limit-upload 5120`, or malformed JSON) is treated as BACKUP flags with an empty
+ * restore string. SINGLE place that string-vs-JSON is decided, so the ambiguity can't
+ * leak elsewhere.
+ */
+export function parseBackupFlags(flags: string | null | undefined): BackupFlags {
+	if (!flags || !flags.trim()) return { backup: '', restore: '' };
+	const trimmed = flags.trim();
+	// Only a JSON OBJECT counts as the new shape; anything else is a legacy flag string.
+	if (trimmed.startsWith('{')) {
+		try {
+			const o = JSON.parse(trimmed);
+			if (o && typeof o === 'object' && !Array.isArray(o)) {
+				return {
+					backup: typeof o.backup === 'string' ? o.backup : '',
+					restore: typeof o.restore === 'string' ? o.restore : '',
+				};
+			}
+		} catch { /* fall through to legacy */ }
+	}
+	return { backup: trimmed, restore: '' };   // legacy bare string = backup flags
+}
+
+/** Serialize typed {backup, restore} back into the JSON stored in the `flags` column.
+ * Returns null when both are empty (keeps the column NULL rather than storing `{}`). */
+export function serializeBackupFlags(f: BackupFlags): string | null {
+	const backup = (f.backup ?? '').trim();
+	const restore = (f.restore ?? '').trim();
+	if (!backup && !restore) return null;
+	return JSON.stringify({ backup, restore });
+}
+
+/**
+ * Parse a stored `selected_volumes` JSON blob into a `string[]` or null. Guards the SHAPE,
+ * not just the JSON: a corrupt/legacy row holding a string (or other non-array) must NOT
+ * flow into `new Set(...)` as an iterable-of-chars, which would match no volume key and
+ * silently filter EVERY volume out (a metadata-only snapshot reported as success). Any
+ * non-array parses to null = "all volumes" (the safe default).
+ */
+export function parseSelectedVolumes(raw: string | null | undefined): string[] | null {
+	if (!raw) return null;
+	let parsed: unknown;
+	try { parsed = JSON.parse(raw); } catch { return null; }
+	if (!Array.isArray(parsed)) return null;
+	return parsed.filter((x): x is string => typeof x === 'string');
+}
+
 /**
  * Parse a stored destination `policies` JSON blob. Bad/missing JSON → empty
  * object, logging ONCE so a corrupt policies field is diagnosable rather than
- * silently disabling autoUnlock/prune/check/verify. This is the single source of
- * truth for the previously-duplicated inline IIFEs.
+ * silently disabling autoUnlock/prune/check/verify.
  */
 export function parsePoliciesJson(policies: string | null | undefined): Record<string, any> {
 	if (!policies) return {};
@@ -87,7 +175,7 @@ export const ALLOWED_REPO_SCHEMES = ['rest:', 's3:', 'b2:', 'azure:', 'gs:'] as 
 export function isAllowedRepository(repository: string | null | undefined): boolean {
 	if (!repository || typeof repository !== 'string') return false;
 	const repo = repository.trim();
-	if (repo.startsWith('/')) return true; // local absolute path
+	if (isLocalRepo(repo)) return true;
 	return ALLOWED_REPO_SCHEMES.some((s) => repo.startsWith(s));
 }
 
@@ -114,8 +202,7 @@ export function sanitizeWebhookUrlForLog(raw: string): string {
 
 /**
  * Fire a per-config backup webhook with a JSON payload. Best-effort and
- * fire-and-forget: a webhook never changes the backup outcome. Ported from the
- * legacy engine, keeping its three hardening layers:
+ * fire-and-forget: a webhook never changes the backup outcome. Three hardening layers:
  *   - SSRF literal-host guard (isSafeWebhookUrl): block loopback/private/metadata.
  *   - DNS-rebinding guard: resolve the hostname and re-check EVERY resolved IP
  *     against the private/metadata ranges before connecting, so a public-looking
@@ -211,7 +298,12 @@ export function isRepoNotInitializedError(error: unknown): boolean {
 export function classifyBackupError(error: unknown): string {
 	if (isRepoNotInitializedError(error)) return 'REPO_NOT_INIT';
 	const raw = (error instanceof Error ? error.message : String(error ?? '')).toLowerCase();
-	if (raw.includes('sigterm') || raw.includes('sigkill') || raw.includes('timed out') || raw.includes('timeout')) return 'RESTIC_TIMEOUT';
+	// A killed/cancelled restic (slow remote backend, watchdog timeout) reports its
+	// OWN exit as `signal terminated` / `context canceled`, and restic then prints a
+	// MISLEADING `code:12 wrong password or no key found` because it was interrupted
+	// mid key-load. Catch the termination markers FIRST so a timeout is never
+	// mis-surfaced to the user as a bad password.
+	if (raw.includes('sigterm') || raw.includes('sigkill') || raw.includes('signal terminated') || raw.includes('signal killed') || raw.includes('context canceled') || raw.includes('context cancelled') || raw.includes('timed out') || raw.includes('timeout')) return 'RESTIC_TIMEOUT';
 	if (raw.includes('wrong password') || raw.includes('invalid password') || raw.includes('no key found')) return 'WRONG_PASSWORD';
 	if (raw.includes('already locked') || raw.includes('unable to create lock') || raw.includes('repository is already locked')) return 'REPO_LOCKED';
 	if (raw.includes('no volumes') || raw.includes('nothing to backup')) return 'NO_VOLUMES';
@@ -234,75 +326,14 @@ export function isValidSnapshotId(id: string): boolean {
  * the human message, with the surrounding prefix preserved. Also strips ANSI
  * colour escapes that restic sometimes emits when stderr is a TTY (the helper
  * container's stderr looks like a TTY to restic). */
-export function cleanErrorMsg(msg: string): string {
-	// Strip ANSI escape codes
-	const clean = msg.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
-	// Try parsing the whole string as JSON
-	try { const p = JSON.parse(clean); if (p.message) return p.message; } catch { /* not pure JSON */ }
-	// Try extracting embedded JSON — replace real newlines so JSON.parse works
-	const jsonStart = clean.indexOf('{');
-	const jsonEnd = clean.lastIndexOf('}');
-	if (jsonStart >= 0 && jsonEnd > jsonStart) {
-		try {
-			const jsonStr = clean.slice(jsonStart, jsonEnd + 1).replace(/\n/g, '\\n');
-			const parsed = JSON.parse(jsonStr);
-			if (parsed.message) {
-				const prefix = clean.slice(0, jsonStart).trim();
-				const message = parsed.message.replace(/\\n/g, ' ').trim();
-				return prefix ? `${prefix} ${message}` : message;
-			}
-			if (parsed.message_type) {
-				// A killed helper appends restic's last --json PROGRESS line
-				// (message_type, no `message`) to the exit-code detail — no error
-				// text; drop it, keep just the readable prefix.
-				const p2 = clean.slice(0, jsonStart).trim().replace(/:\s*$/, '');
-				if (p2) return p2;
-			}
-		} catch { /* not embedded JSON */ }
-	}
-	return clean;
-}
+// cleanErrorMsg lives in error-message.ts; re-exported so importers of helpers.ts keep working.
+export { cleanErrorMsg } from './error-message';
 
 /**
- * Inspect `restic forget --dry-run --json` output and decide whether running
- * the real `forget --prune` would delete every snapshot in the targeted group.
- *
- * Restic's JSON shape for `forget` is an array of "forget groups", each with
- * `keep`, `remove`, and `reasons`. Snapshots are objects with an `id` field;
- * we count list lengths rather than poking at fields. When the policy keeps
- * zero and removes everything, that's the dangerous case we want to block.
- *
- * Empty/unparseable stdout → `{ wouldWipe: false, ... zeros }`. Restic emits
- * an empty array when the repo holds no snapshots, which is also "not a
- * wipe-out worth blocking" because there's nothing to lose.
- *
- * Pure function, no I/O — the caller runs it after running restic; tests can
- * pass canned stdout.
+ * The delete-everything guard for `restic forget --dry-run --json`. Re-exported from retention.ts
+ * (`checkWouldWipe`) so this data-loss guard lives in exactly one place - a second copy could drift.
  */
-export function wouldDeleteAllSnapshots(stdout: string): {
-	wouldWipe: boolean;
-	keep: number;
-	remove: number;
-	total: number;
-} {
-	let keep = 0;
-	let remove = 0;
-	// Restic forget --json emits a single JSON document (array of groups).
-	// Parse the whole stdout once; ignore trailing whitespace.
-	const trimmed = stdout.trim();
-	if (!trimmed) return { wouldWipe: false, keep: 0, remove: 0, total: 0 };
-	let parsed: unknown;
-	try { parsed = JSON.parse(trimmed); } catch { return { wouldWipe: false, keep: 0, remove: 0, total: 0 }; }
-	if (!Array.isArray(parsed)) return { wouldWipe: false, keep: 0, remove: 0, total: 0 };
-	for (const group of parsed) {
-		if (!group || typeof group !== 'object') continue;
-		const g = group as { keep?: unknown[]; remove?: unknown[] };
-		if (Array.isArray(g.keep)) keep += g.keep.length;
-		if (Array.isArray(g.remove)) remove += g.remove.length;
-	}
-	const total = keep + remove;
-	return { wouldWipe: total > 0 && keep === 0 && remove > 0, keep, remove, total };
-}
+export { checkWouldWipe as wouldDeleteAllSnapshots } from './retention';
 
 // -----------------------------------------------------------------------------
 // restic subprocess hardening
@@ -356,10 +387,8 @@ export function filterCloudEnvVars(envVars: Record<string, string>): Record<stri
 	return out;
 }
 
-// SSRF URL-safety primitives now live in the neutral $lib/server/url-safety
-// module so subsystems (backups, notifications) import DOWN into a shared home
-// rather than the notification router importing UP from the backup engine.
-// Re-exported here so existing backup-side importers keep resolving unchanged.
+// SSRF URL-safety primitives live in the neutral $lib/server/url-safety module
+// (shared by backups + notifications). Re-exported here so backup-side importers keep resolving.
 export { isSafeWebhookUrl };
 
 /**
@@ -376,6 +405,16 @@ export function buildResticEnv(
 	for (const [k, v] of Object.entries(procEnv)) {
 		if (v !== undefined && RESTIC_BASE_ENV_ALLOW.has(k)) env[k] = v;
 	}
+	// Persist restic's cache under DATA_DIR (a durable volume) instead of the default
+	// $HOME/.cache/restic on the container's ephemeral RW layer, which is wiped on every
+	// redeploy. A cold cache re-fetches the repo index from the remote backend (backblaze/
+	// S3) on the first ls/snapshots/dump after a redeploy - ~3x slower and enough to trip a
+	// reverse proxy's idle timeout. Only for the host-side restic (this fn feeds runLocal +
+	// destination test); the helper container builds its env separately (buildHelperEnv). An
+	// operator-set RESTIC_CACHE_DIR (copied in above) wins.
+	if (!env.RESTIC_CACHE_DIR) {
+		env.RESTIC_CACHE_DIR = join(procEnv.DATA_DIR || '/app/data', '.restic-cache');
+	}
 	env.RESTIC_REPOSITORY = opts.repository;
 	env.RESTIC_PASSWORD = opts.password;
 	for (const [k, v] of Object.entries(opts.envVars || {})) {
@@ -384,54 +423,65 @@ export function buildResticEnv(
 	return env;
 }
 
-// restic global/backup/restore flags that are safe for an operator to append
-// per destination. Anything that can read/write arbitrary files or run code
-// (--option, --password-command, --cacert to an arbitrary path, etc.) is
-// rejected. Flags may be `--flag` or `--flag=value`.
-const RESTIC_FLAG_ALLOW = new Set([
+// Restic flags a destination operator may append. Backup/global flags apply to backup +
+// repo ops; restore flags apply ONLY to `restic restore` (which has its own flags like
+// --exclude-xattr, #1349). The two are stored SEPARATELY (see BackupFlags), so a
+// restore-only flag can never leak into `restic backup`. Anything that can read/write
+// arbitrary files or run code (--option, --password-command, --cacert to an arbitrary
+// path) is rejected. Flags may be `--flag` or `--flag=value`.
+const RESTIC_BACKUP_FLAG_ALLOW = new Set([
 	'--limit-upload', '--limit-download', '--no-cache', '--cleanup-cache',
 	'--pack-size', '--compression', '--no-lock', '--json', '--quiet', '--verbose',
 	'--tls-client-cert', '--retry-lock', '--insecure-tls'
 ]);
+
+// Restore adds --exclude-xattr (restore-only in restic; #1349 SELinux xattr the
+// unprivileged helper can't remove on a cross-distro restore).
+const RESTIC_RESTORE_FLAG_ALLOW = new Set([...RESTIC_BACKUP_FLAG_ALLOW, '--exclude-xattr']);
 
 // Allowlisted flags that take a VALUE. Written joined (`--retry-lock=10m`) or
 // space-separated (`--retry-lock 10m`); in the space-separated form the FOLLOWING
 // token is that value, not a flag, so it legitimately doesn't start with `--`.
 const RESTIC_FLAG_TAKES_VALUE = new Set([
 	'--limit-upload', '--limit-download', '--pack-size', '--compression',
-	'--tls-client-cert', '--retry-lock'
+	'--tls-client-cert', '--retry-lock', '--exclude-xattr'
 ]);
 
-/**
- * Split and validate a destination's extra restic CLI flags against an
- * allowlist. Returns the accepted flag tokens; throws on any flag not in the
- * allowlist so we never forward attacker-controlled options like `--option`,
- * `--password-command`, or a bare non-flag argument. A value that follows a
- * space-separated value-taking flag (e.g. the `10m` in `--retry-lock 10m`) is
- * accepted as that flag's argument rather than treated as a flag itself.
- */
-export function sanitizeResticFlags(flags: string | null | undefined): string[] {
+/** Core allowlist validator, parameterized by which allowlist applies. */
+function sanitizeAgainst(flags: string | null | undefined, allow: Set<string>): string[] {
 	if (!flags || !flags.trim()) return [];
 	const tokens = flags.trim().split(/\s+/);
 	const out: string[] = [];
 	let expectValue = false;
 	for (const tok of tokens) {
 		if (expectValue) {
-			// This token is the value of the previous value-taking flag.
-			out.push(tok);
+			out.push(tok);       // value of the previous space-separated value-taking flag
 			expectValue = false;
 			continue;
 		}
 		const name = tok.startsWith('--') ? tok.split('=')[0] : tok;
-		if (!name.startsWith('--') || !RESTIC_FLAG_ALLOW.has(name)) {
+		if (!name.startsWith('--') || !allow.has(name)) {
 			throw new Error(`Disallowed restic flag: ${tok}`);
 		}
 		out.push(tok);
-		// A space-separated value-taking flag (no `=value`) consumes the next token.
 		if (RESTIC_FLAG_TAKES_VALUE.has(name) && !tok.includes('=')) expectValue = true;
 	}
 	if (expectValue) throw new Error('Restic flag is missing its value');
 	return out;
+}
+
+/**
+ * Split and validate a destination's BACKUP/global extra restic flags against the backup
+ * allowlist. Throws on any flag not allowed (never forwards --option/--password-command/etc).
+ */
+export function sanitizeResticFlags(flags: string | null | undefined): string[] {
+	return sanitizeAgainst(flags, RESTIC_BACKUP_FLAG_ALLOW);
+}
+
+/** Split and validate a destination's RESTORE extra restic flags (backup allowlist plus
+ * restore-only flags like --exclude-xattr). */
+export function sanitizeRestoreFlags(flags: string | null | undefined): string[] {
+	return sanitizeAgainst(flags, RESTIC_RESTORE_FLAG_ALLOW);
 }
 
 /**
@@ -454,21 +504,30 @@ export function retentionToStore(retention: any, schedule: unknown): string | nu
 }
 
 /**
- * Decide the `enabled` flag when a backup config is updated, auto-enabling a config
- * that gains a schedule.
- *
- * The motivating flow: a "run once" backup persists a MANUAL, paused config
- * (schedule=null, enabled=false) — correct on its own. But when the user later edits
- * that config to ADD a cron schedule, they expect it to actually run; leaving it
- * paused (because the run-once config was created disabled and the UI's Enabled
- * toggle still reflected that) is a surprise that forces a manual un-pause on the
- * Schedules page. So: a transition from manual (no schedule) to scheduled (a real
- * cron) auto-enables the config.
- *
- * This deliberately does NOT touch a config that was ALREADY scheduled — a user who
- * paused a scheduled backup on purpose keeps it paused across edits. Same rationale
- * as retentionToStore: adding a schedule should leave the config in a sane, working
- * state. Applies identically to container and stack backups (both go through PUT).
+ * Resolve the retention value to persist on a PARTIAL config update. `undefined` means
+ * "leave the stored retention untouched" (the caller must skip the field). A minimal PUT
+ * that only flips `enabled` (pause/resume) omits `retention`, so re-applying the scheduled
+ * default here would silently wipe the user's policy (#1462). The default is applied ONLY
+ * when the retention is actually provided, or when the schedule is being added/changed -
+ * the transition the default exists to cover.
+ */
+export function resolveRetentionForUpdate(
+	retention: unknown,
+	newSchedule: unknown,
+	existingSchedule: unknown
+): string | null | undefined {
+	const retentionProvided = retention !== undefined;
+	const scheduleChanged = newSchedule !== undefined && newSchedule !== existingSchedule;
+	if (!retentionProvided && !scheduleChanged) return undefined; // leave stored value as-is
+	return retentionToStore(retention, newSchedule ?? existingSchedule);
+}
+
+/**
+ * Decide the `enabled` flag when a backup config is updated. A "run once" backup persists a
+ * MANUAL, paused config (schedule=null, enabled=false); adding a cron schedule later should make
+ * it actually run, so a manual -> scheduled transition auto-enables it. A config that was ALREADY
+ * scheduled is left alone, so a deliberately-paused scheduled backup stays paused across edits.
+ * Applies to container and stack backups alike (both go through PUT).
  */
 export function resolveEnabledOnScheduleChange(input: {
 	requestedEnabled: unknown;
@@ -512,8 +571,24 @@ export function validateRepositoryForSave(repository: string): string | null {
  * throws on a disallowed flag; surface that as an error string, or null if ok. */
 export function validateFlags(flags: unknown): string | null {
 	if (flags === undefined || flags === null) return null;
-	try { sanitizeResticFlags(flags as string); return null; }
-	catch (e) { return e instanceof Error ? e.message : 'Invalid restic flags'; }
+	// The route may send either the split shape ({ backup, restore }) or a legacy bare
+	// string. Validate each scope against its own allowlist (restore permits --exclude-xattr).
+	const { backup, restore } = parseBackupFlags(typeof flags === 'string' ? flags : serializeBackupFlags(flags as BackupFlags) ?? '');
+	try {
+		sanitizeResticFlags(backup);
+		sanitizeRestoreFlags(restore);
+		return null;
+	} catch (e) { return e instanceof Error ? e.message : 'Invalid restic flags'; }
+}
+
+/** Validate a raw {backup, restore} pair from the API and return the serialized flags
+ * column value (JSON, or null when both empty), or throw with the allowlist error. */
+export function validateAndSerializeFlags(backup: unknown, restore: unknown): string | null {
+	const b = typeof backup === 'string' ? backup : '';
+	const r = typeof restore === 'string' ? restore : '';
+	sanitizeResticFlags(b);      // throws on a disallowed backup flag
+	sanitizeRestoreFlags(r);     // throws on a disallowed restore flag
+	return serializeBackupFlags({ backup: b, restore: r });
 }
 
 /**

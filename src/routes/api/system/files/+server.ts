@@ -18,7 +18,16 @@ export interface FileEntry {
  * POST /api/system/files
  * Create a directory
  *
- * Body: { path: string }
+ * @openapi
+ * summary: Create a directory on Dockhand's local filesystem (absolute path, no traversal, non-protected)
+ * body: {path:string!}
+ * body-example: {"path":"/docker/stacks/myapp"}
+ * resp-200: {success:boolean!, path:string!}
+ * resp-200-example: {"success":true,"path":"/docker/stacks/myapp"}
+ * resp-400: Path is missing, not absolute, or contains ".."
+ * resp-403: Permission denied, or the path is protected
+ * resp-409: Path already exists
+ * resp-500: Failed to create directory
  */
 export const POST: RequestHandler = async ({ request, cookies }) => {
 	const auth = await authorize(cookies);
@@ -65,8 +74,15 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
  * GET /api/system/files
  * Browse Dockhand's local filesystem (for mount browsing)
  *
- * Query params:
- * - path: Directory path to list
+ * @openapi
+ * summary: List the entries of a directory on Dockhand's local filesystem (protected paths are hidden)
+ * query: path:string Absolute directory path to list (defaults to "/")
+ * resp-200: {path:string!, parent:string, entries:array<{name:string!, path:string!, type:string!, size:integer!, mtime:string!, mode:string!}>!}
+ * resp-200-example: {"path":"/docker","parent":"/","entries":[{"name":"stacks","path":"/docker/stacks","type":"directory","size":4096,"mtime":"2026-07-01T10:00:00.000Z","mode":"755"}]}
+ * resp-400: The path exists but is not a directory
+ * resp-403: Permission denied, or the path is protected
+ * resp-404: Path not found
+ * resp-500: Failed to list directory
  */
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	const auth = await authorize(cookies);

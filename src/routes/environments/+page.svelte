@@ -121,7 +121,9 @@
 		formProtocol = env.protocol;
 		formTlsCa = env.tlsCa || '';
 		formTlsCert = env.tlsCert || '';
-		formTlsKey = env.tlsKey || '';
+		// The API never returns the tlsKey secret; leave blank on edit (a blank submit
+		// keeps the stored key via `tlsKey: formTlsKey || undefined` below).
+		formTlsKey = '';
 		formError = '';
 		formSaving = false;
 		showEditModal = true;

@@ -9,6 +9,15 @@ import {
 import { auditOidcProvider } from '$lib/server/audit';
 
 // GET /api/auth/oidc - List all OIDC configurations
+/**
+ * @openapi
+ * summary: List all configured OIDC providers (client secrets are masked)
+ * resp-200: array<{id:integer!, name:string!, enabled:boolean!, issuerUrl:string!, clientId:string!}>
+ * resp-200-example: [{"id":1,"name":"Authentik","enabled":true,"issuerUrl":"https://auth.example.com/application/o/dockhand/","clientId":"dockhand"}]
+ * resp-401: Authentication required (auth is enabled and the caller is not authenticated)
+ * resp-403: Permission denied (missing settings:view)
+ * resp-500: Failed to read the OIDC configurations
+ */
 export const GET: RequestHandler = async ({ cookies }) => {
 	const auth = await authorize(cookies);
 
@@ -37,6 +46,18 @@ export const GET: RequestHandler = async ({ cookies }) => {
 };
 
 // POST /api/auth/oidc - Create new OIDC configuration
+/**
+ * @openapi
+ * summary: Create a new OIDC provider configuration
+ * body: {name:string!, issuerUrl:string!, clientId:string!, clientSecret:string!, redirectUri:string!, enabled:boolean, scopes:string, usernameClaim:string, emailClaim:string, displayNameClaim:string, adminClaim:string, adminValue:string, roleMappingsClaim:string, roleMappings:{}}
+ * body-example: {"name":"Authentik","issuerUrl":"https://auth.example.com/application/o/dockhand/","clientId":"dockhand","clientSecret":"***","redirectUri":"https://dockhand.example.com/api/auth/oidc/callback","enabled":true,"scopes":"openid profile email"}
+ * resp-201: {id:integer!, name:string!, enabled:boolean!, issuerUrl:string!, clientId:string!}
+ * resp-201-desc: OIDC configuration created (clientSecret is masked in the response)
+ * resp-400: A required field is missing (name, issuerUrl, clientId, clientSecret, redirectUri)
+ * resp-401: Authentication required (auth is enabled and the caller is not authenticated)
+ * resp-403: Permission denied (missing settings:edit)
+ * resp-500: Failed to create the OIDC configuration
+ */
 export const POST: RequestHandler = async (event) => {
 	const { request, cookies } = event;
 	const auth = await authorize(cookies);

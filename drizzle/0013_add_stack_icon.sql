@@ -1,0 +1,1 @@
+ALTER TABLE `stack_sources` ADD `icon` text;

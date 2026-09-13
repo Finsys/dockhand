@@ -365,7 +365,8 @@ export async function migrateCredentials(): Promise<void> {
 		ldapConfig,
 		notificationSettings,
 		stackEnvironmentVariables,
-		backupDestinations
+		backupDestinations,
+		secretProviders
 	} = await import('./db/drizzle.js');
 
 	let migrated = 0;
@@ -461,6 +462,13 @@ export async function migrateCredentials(): Promise<void> {
 			}
 		}
 
+		const providers = await db.select().from(secretProviders);
+		for (const p of providers) {
+			if (p.config && isEncrypted(p.config)) {
+				allEncrypted.push({ table: 'secretProviders', id: p.id, field: 'config', value: p.config });
+			}
+		}
+
 		// Decrypt all values with old key (still cached at this point)
 		const decryptedValues: Map<string, string> = new Map();
 		for (const item of allEncrypted) {
@@ -510,6 +518,8 @@ export async function migrateCredentials(): Promise<void> {
 					} else if (item.table === 'backupDestinations') {
 						// Both password and envVars are plain encrypted columns.
 						await tx.update(backupDestinations).set({ [item.field]: reEncrypted }).where(eq(backupDestinations.id, item.id));
+					} else if (item.table === 'secretProviders') {
+						await tx.update(secretProviders).set({ config: reEncrypted }).where(eq(secretProviders.id, item.id));
 					}
 
 					migrated++;

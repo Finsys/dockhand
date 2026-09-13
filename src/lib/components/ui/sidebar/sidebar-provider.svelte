@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { onMount } from "svelte";
 	import * as Tooltip from "$lib/components/ui/tooltip/index.js";
 	import { cn, type WithElementRef } from "$lib/utils.js";
 	import type { HTMLAttributes } from "svelte/elements";
@@ -11,9 +10,18 @@
 
 	const SIDEBAR_STORAGE_KEY = "sidebar:state";
 
+	// Read the persisted open/collapsed state SYNCHRONOUSLY (before first paint) so a
+	// collapsed sidebar doesn't flash open on every load. onMount ran too late — the
+	// initial render showed the default-open sidebar until localStorage was read.
+	function initialOpen(): boolean {
+		if (typeof localStorage === 'undefined') return true;
+		const stored = localStorage.getItem(SIDEBAR_STORAGE_KEY);
+		return stored === null ? true : stored === 'true';
+	}
+
 	let {
 		ref = $bindable(null),
-		open = $bindable(true),
+		open = $bindable(initialOpen()),
 		onOpenChange = () => {},
 		class: className,
 		style,
@@ -37,13 +45,6 @@
 		},
 	});
 
-	// Load state from localStorage on mount
-	onMount(() => {
-		const stored = localStorage.getItem(SIDEBAR_STORAGE_KEY);
-		if (stored !== null) {
-			open = stored === 'true';
-		}
-	});
 </script>
 
 <svelte:window onkeydown={sidebar.handleShortcutKeydown} />

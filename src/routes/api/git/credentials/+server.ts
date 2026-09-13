@@ -8,6 +8,14 @@ import {
 import { authorize } from '$lib/server/authorize';
 import { auditGitCredential } from '$lib/server/audit';
 
+/**
+ * @openapi
+ * summary: List all stored git credentials with secrets stripped (only hasPassword/hasSshKey flags returned)
+ * resp-200: array<{id:integer!, name:string!, authType:string!, username:string, hasPassword:boolean!, hasSshKey:boolean!, createdAt:string, updatedAt:string}>
+ * resp-200-example: [{"id":1,"name":"github-deploy","authType":"ssh","username":"git","hasPassword":false,"hasSshKey":true,"createdAt":"2026-06-01T10:00:00Z","updatedAt":"2026-06-01T10:00:00Z"}]
+ * resp-403: Caller lacks the git:view permission
+ * resp-500: Failed to read git credentials from the database
+ */
 export const GET: RequestHandler = async ({ cookies }) => {
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !await auth.can('git', 'view')) {
@@ -34,6 +42,16 @@ export const GET: RequestHandler = async ({ cookies }) => {
 	}
 };
 
+/**
+ * @openapi
+ * summary: Create a new git credential (none/password/ssh auth) and return it with secrets stripped
+ * body: {name:string!, authType:string, username:string, password:string, sshPrivateKey:string, sshPassphrase:string}
+ * body-example: {"name":"github-deploy","authType":"ssh","username":"git","sshPrivateKey":"***","sshPassphrase":"***"}
+ * resp-200: {id:integer!, name:string!, authType:string!, username:string, hasPassword:boolean!, hasSshKey:boolean!, createdAt:string, updatedAt:string}
+ * resp-400: Missing name, invalid authType, a missing secret for the chosen authType, or a duplicate credential name
+ * resp-403: Caller lacks the git:create permission
+ * resp-500: Failed to create the git credential
+ */
 export const POST: RequestHandler = async (event) => {
 	const { request, cookies } = event;
 	const auth = await authorize(cookies);

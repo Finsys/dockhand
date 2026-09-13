@@ -17,6 +17,7 @@
 		Info,
 		GitBranch,
 		Tags,
+		KeyRound,
 		Archive
 	} from 'lucide-svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
@@ -27,6 +28,7 @@
 	import LabelsTab from './labels/LabelsTab.svelte';
 	import RegistriesTab from './registries/RegistriesTab.svelte';
 	import GitTab from './git/GitTab.svelte';
+	import SecretsTab from './secrets/SecretsTab.svelte';
 	import ConfigSetsTab from './config-sets/ConfigSetsTab.svelte';
 	import NotificationsTab from './notifications/NotificationsTab.svelte';
 	import BackupsTab from './backups/BackupsTab.svelte';
@@ -71,6 +73,10 @@
 				<GitBranch class="w-4 h-4" />
 				Git
 			</Tabs.Trigger>
+			<Tabs.Trigger value="secrets" class="flex-1 flex items-center justify-center gap-1.5">
+				<KeyRound class="w-4 h-4" />
+				Secrets
+			</Tabs.Trigger>
 			<Tabs.Trigger value="config-sets" class="flex-1 flex items-center justify-center gap-1.5">
 				<Layers class="w-4 h-4" />
 				Config sets
@@ -100,31 +106,35 @@
 			</Tabs.Trigger>
 		</Tabs.List>
 
-		<Tabs.Content value="general" class="flex-1 min-h-0 overflow-y-auto pr-3">
+		<Tabs.Content value="general" class="flex-1 min-h-0 overflow-y-auto pr-5">
 			{#if activeTab === 'general'}<GeneralTab />{/if}
 		</Tabs.Content>
 
-		<Tabs.Content value="environments" class="flex-1 min-h-0 overflow-y-auto pr-3">
+		<Tabs.Content value="environments" class="flex-1 min-h-0 overflow-y-auto pr-5">
 			{#if activeTab === 'environments'}<EnvironmentsTab {editEnvId} {newEnv} />{/if}
 		</Tabs.Content>
 
-		<Tabs.Content value="labels" class="flex-1 min-h-0 overflow-y-auto pr-3">
+		<Tabs.Content value="labels" class="flex-1 min-h-0 overflow-y-auto pr-5">
 			{#if activeTab === 'labels'}<LabelsTab />{/if}
 		</Tabs.Content>
 
-		<Tabs.Content value="registries" class="flex-1 min-h-0 overflow-y-auto pr-3">
+		<Tabs.Content value="registries" class="flex-1 min-h-0 overflow-y-auto pr-5">
 			{#if activeTab === 'registries'}<RegistriesTab />{/if}
 		</Tabs.Content>
 
-		<Tabs.Content value="git" class="flex-1 min-h-0 overflow-y-auto pr-3">
+		<Tabs.Content value="git" class="flex-1 min-h-0 overflow-y-auto pr-5">
 			{#if activeTab === 'git'}<GitTab />{/if}
 		</Tabs.Content>
 
-		<Tabs.Content value="config-sets" class="flex-1 min-h-0 overflow-y-auto pr-3">
+		<Tabs.Content value="secrets" class="flex-1 min-h-0 overflow-y-auto pr-5">
+			{#if activeTab === 'secrets'}<SecretsTab />{/if}
+		</Tabs.Content>
+
+		<Tabs.Content value="config-sets" class="flex-1 min-h-0 overflow-y-auto pr-5">
 			{#if activeTab === 'config-sets'}<ConfigSetsTab />{/if}
 		</Tabs.Content>
 
-		<Tabs.Content value="notifications" class="flex-1 min-h-0 overflow-y-auto pr-3">
+		<Tabs.Content value="notifications" class="flex-1 min-h-0 overflow-y-auto pr-5">
 			{#if activeTab === 'notifications'}<NotificationsTab />{/if}
 		</Tabs.Content>
 
@@ -136,11 +146,11 @@
 			{#if activeTab === 'auth'}<AuthTab onTabChange={handleTabChange} />{/if}
 		</Tabs.Content>
 
-		<Tabs.Content value="license" class="flex-1 min-h-0 overflow-y-auto pr-3">
+		<Tabs.Content value="license" class="flex-1 min-h-0 overflow-y-auto pr-5">
 			{#if activeTab === 'license'}<LicenseTab />{/if}
 		</Tabs.Content>
 
-		<Tabs.Content value="about" class="flex-1 min-h-0 overflow-y-auto pr-3">
+		<Tabs.Content value="about" class="flex-1 min-h-0 overflow-y-auto pr-5">
 			{#if activeTab === 'about'}<AboutTab />{/if}
 		</Tabs.Content>
 	</Tabs.Root>

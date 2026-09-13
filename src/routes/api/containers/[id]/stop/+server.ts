@@ -5,6 +5,19 @@ import { auditContainer } from '$lib/server/audit';
 import { validateDockerIdParam } from '$lib/server/docker-validation';
 import type { RequestHandler } from './$types';
 
+/**
+ * POST /api/containers/{id}/stop - Stop a container
+ *
+ * @openapi
+ * summary: Stop a running container
+ * path: id:string! Container ID or name (from GET /api/containers)
+ * query: env:integer The target environment ID (omit for the local/default Docker host) (from GET /api/environments)
+ * resp-200: {success:boolean!}
+ * resp-200-example: {"success":true}
+ * resp-403: Permission denied, or (enterprise) no access to the requested environment
+ * resp-404: Container not found
+ * resp-500: Failed to stop the container
+ */
 export const POST: RequestHandler = async (event) => {
 	const { params, url, cookies } = event;
 	const invalid = validateDockerIdParam(params.id, 'container');

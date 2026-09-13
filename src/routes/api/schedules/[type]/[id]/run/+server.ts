@@ -4,13 +4,13 @@
  * POST /api/schedules/[type]/[id]/run - Trigger a manual execution
  *
  * Path params:
- *   - type: 'container_update' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune'
+ *   - type: 'container_update' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune' | 'deploy_log_reconcile'
  *   - id: schedule ID
  */
 
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { triggerContainerUpdate, triggerGitStackSync, triggerSystemJob, triggerEnvUpdateCheck, triggerImagePrune } from '$lib/server/scheduler';
+import { triggerContainerUpdate, triggerGitStackSync, triggerSystemJob, triggerEnvUpdateCheck, triggerImagePrune, triggerDeployLogReconcile } from '$lib/server/scheduler';
 import { getBackupConfig, getBackupDestination } from '$lib/server/db';
 import { runScheduledBackup } from '$lib/server/scheduler/tasks/backup';
 import { runRepoPrune, runRepoCheck, runRepoVerify } from '$lib/server/scheduler/tasks/repo-maintenance';
@@ -18,6 +18,16 @@ import { authorize } from '$lib/server/authorize';
 import { getAutoUpdateSettingById, getGitStack } from '$lib/server/db';
 import { BACKUPS_ENABLED } from '$lib/server/features';
 
+/**
+ * @openapi
+ * summary: Manually trigger a single run of a schedule (outside its cron), by type and id
+ * path: type:string! Schedule type (container_update, git_stack_sync, system_cleanup, env_update_check, image_prune, backup, repo_prune, repo_check, repo_verify, deploy_log_reconcile)
+ * path: id:integer! Schedule id (semantics depend on type) (from GET /api/schedules)
+ * resp-200: {success:boolean!, message:string!}
+ * resp-400: Invalid schedule id/type, or the triggered task itself reported failure
+ * resp-404: Schedule, backup config, or backup destination not found (or backup feature disabled)
+ * resp-500: Unexpected error while triggering the schedule
+ */
 export const POST: RequestHandler = async ({ params, cookies }) => {
 	const auth = await authorize(cookies);
 
@@ -68,6 +78,7 @@ export const POST: RequestHandler = async ({ params, cookies }) => {
 				scheduleEnvId = scheduleId;
 				break;
 			case 'system_cleanup':
+			case 'deploy_log_reconcile':
 				scheduleEnvId = null;
 				break;
 			case 'backup': {
@@ -106,6 +117,9 @@ export const POST: RequestHandler = async ({ params, cookies }) => {
 				break;
 			case 'system_cleanup':
 				result = await triggerSystemJob(id);
+				break;
+			case 'deploy_log_reconcile':
+				result = await triggerDeployLogReconcile();
 				break;
 			case 'env_update_check':
 				result = await triggerEnvUpdateCheck(scheduleId);

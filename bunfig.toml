@@ -8,6 +8,8 @@ exact = true
 # Enable source maps for better error messages
 sourcemap = "external"
 
-[test]
-# Disable auth before any integration test runs
-preload = ["./tests/helpers/preload.ts"]
+# NOTE: no global [test] preload. The auth-disable preload is integration-only
+# (it hits the test server + SSH; it is a no-op for pure unit tests). The shard
+# runner injects it explicitly via `--preload integration-tests/helpers/preload.ts`
+# (see scripts/run-tests-shard.sh). Unit runs (`bun test tests/unit/`) get no
+# preload, which is correct - they have no server to talk to.

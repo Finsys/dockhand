@@ -18,6 +18,10 @@ import {
 	setScannerCleanupCron,
 	getScannerCleanupEnabled,
 	setScannerCleanupEnabled,
+	getDeployLogReconcileCron,
+	setDeployLogReconcileCron,
+	getDeployLogReconcileEnabled,
+	setDeployLogReconcileEnabled,
 	getDefaultTimezone,
 	setDefaultTimezone,
 	getEventCollectionMode,
@@ -69,6 +73,8 @@ export interface GeneralSettings {
 	eventCleanupEnabled: boolean;
 	scannerCleanupCron: string;
 	scannerCleanupEnabled: boolean;
+	deployLogReconcileCron: string;
+	deployLogReconcileEnabled: boolean;
 	logBufferSizeKb: number;  // legacy
 	logMaxLines: number;       // line-count cap for log buffer
 	defaultTimezone: string;
@@ -113,10 +119,14 @@ export interface GeneralSettings {
 	// Whether to surface a "view changelog" link next to the update badge.
 	// Resolved client-side from OCI labels / GHCR image names; no server hit.
 	showImageChangelogLinks: boolean;
+	// Show selfh.st app logos as container icons (opt-in; off by default).
+	useSelfhstIcons: boolean;
 	// Show the "What's New" modal after an upgrade (#1235)
 	showWhatsNew: boolean;
 	// Whether spinning icons (animate-spin etc.) are animated (#1169)
 	animateIcons: boolean;
+	// Vertical indentation guides in the code editor (#1410)
+	editorIndentGuides: boolean;
 	// Skip Dockhand's scanner images (grype, trivy) during 'prune all unused' (#625)
 	protectScannerImages: boolean;
 	// Scanner Advanced settings (#1219). Empty = use auto-detection.
@@ -124,7 +134,7 @@ export interface GeneralSettings {
 	defaultScannerDns: string[];
 }
 
-const DEFAULT_SETTINGS: Omit<GeneralSettings, 'scheduleRetentionDays' | 'eventRetentionDays' | 'scheduleCleanupCron' | 'eventCleanupCron' | 'scheduleCleanupEnabled' | 'eventCleanupEnabled' | 'scannerCleanupCron' | 'scannerCleanupEnabled'> = {
+const DEFAULT_SETTINGS: Omit<GeneralSettings, 'scheduleRetentionDays' | 'eventRetentionDays' | 'scheduleCleanupCron' | 'eventCleanupCron' | 'scheduleCleanupEnabled' | 'eventCleanupEnabled' | 'scannerCleanupCron' | 'scannerCleanupEnabled' | 'deployLogReconcileCron' | 'deployLogReconcileEnabled'> = {
 	confirmDestructive: true,
 	showStoppedContainers: true,
 	highlightUpdates: true,
@@ -159,8 +169,10 @@ const DEFAULT_SETTINGS: Omit<GeneralSettings, 'scheduleRetentionDays' | 'eventRe
 	labelFilterMode: 'any' as const,
 	honorProxyLabels: true,
 	showImageChangelogLinks: true,
+	useSelfhstIcons: false,
 	showWhatsNew: true,
 	animateIcons: true,
+	editorIndentGuides: false,
 	protectScannerImages: true,
 	defaultScannerNetworkMode: '',
 	defaultScannerDns: [],
@@ -212,6 +224,12 @@ function parseScannerDnsStorage(raw: string | null | undefined): string[] {
 	return trimmed.split(',').map((s) => s.trim()).filter(Boolean);
 }
 
+/**
+ * @openapi
+ * summary: Get global (instance-wide) general settings
+ * resp-401: Not authenticated
+ * resp-500: Failed to load settings
+ */
 export const GET: RequestHandler = async ({ cookies }) => {
 	const auth = await authorize(cookies);
 	// UI preferences (time format, date format) should be available to all authenticated users
@@ -241,6 +259,8 @@ export const GET: RequestHandler = async ({ cookies }) => {
 			eventCleanupEnabled,
 			scannerCleanupCron,
 			scannerCleanupEnabled,
+			deployLogReconcileCron,
+			deployLogReconcileEnabled,
 			logBufferSizeKb,
 			logMaxLines,
 			defaultTimezone,
@@ -267,8 +287,10 @@ export const GET: RequestHandler = async ({ cookies }) => {
 			defaultBackupImage,
 			honorProxyLabels,
 			showImageChangelogLinks,
+			useSelfhstIcons,
 			showWhatsNew,
 			animateIcons,
+			editorIndentGuides,
 			protectScannerImages,
 			defaultScannerNetworkMode,
 			defaultScannerDnsRaw
@@ -291,6 +313,8 @@ export const GET: RequestHandler = async ({ cookies }) => {
 			getEventCleanupEnabled(),
 			getScannerCleanupCron(),
 			getScannerCleanupEnabled(),
+			getDeployLogReconcileCron(),
+			getDeployLogReconcileEnabled(),
 			getSetting('log_buffer_size_kb'),
 			getSetting('log_max_lines'),
 			getDefaultTimezone(),
@@ -317,8 +341,10 @@ export const GET: RequestHandler = async ({ cookies }) => {
 			getSetting('default_backup_image'),
 			getSetting('honor_proxy_labels'),
 			getSetting('show_image_changelog_links'),
+			getSetting('use_selfhst_icons'),
 			getSetting('show_whats_new'),
 			getSetting('animate_icons'),
+			getSetting('editor_indent_guides'),
 			getSetting('protect_scanner_images'),
 			getSetting('default_scanner_network_mode'),
 			getSetting('default_scanner_dns')
@@ -343,6 +369,8 @@ export const GET: RequestHandler = async ({ cookies }) => {
 			eventCleanupEnabled,
 			scannerCleanupCron,
 			scannerCleanupEnabled,
+			deployLogReconcileCron,
+			deployLogReconcileEnabled,
 			logBufferSizeKb: logBufferSizeKb ?? DEFAULT_SETTINGS.logBufferSizeKb,
 			logMaxLines: (typeof logMaxLines === 'number' && logMaxLines > 0)
 				? Math.min(2000, Math.max(100, logMaxLines))
@@ -371,8 +399,10 @@ export const GET: RequestHandler = async ({ cookies }) => {
 			defaultBackupImage: defaultBackupImage ?? DEFAULT_BACKUP_IMAGE,
 			honorProxyLabels: honorProxyLabels ?? DEFAULT_SETTINGS.honorProxyLabels,
 			showImageChangelogLinks: showImageChangelogLinks ?? DEFAULT_SETTINGS.showImageChangelogLinks,
+			useSelfhstIcons: useSelfhstIcons ?? DEFAULT_SETTINGS.useSelfhstIcons,
 			showWhatsNew: showWhatsNew ?? DEFAULT_SETTINGS.showWhatsNew,
 			animateIcons: animateIcons ?? DEFAULT_SETTINGS.animateIcons,
+			editorIndentGuides: editorIndentGuides ?? DEFAULT_SETTINGS.editorIndentGuides,
 			protectScannerImages: protectScannerImages ?? DEFAULT_SETTINGS.protectScannerImages,
 			defaultScannerNetworkMode: defaultScannerNetworkMode ?? DEFAULT_SETTINGS.defaultScannerNetworkMode,
 			defaultScannerDns: parseScannerDnsStorage(defaultScannerDnsRaw)
@@ -385,6 +415,14 @@ export const GET: RequestHandler = async ({ cookies }) => {
 	}
 };
 
+/**
+ * @openapi
+ * summary: Update global general settings (all fields optional; only supplied keys are written)
+ * description: A large flat settings bag - theme/fonts, scanner defaults, cleanup schedules, event/metrics collection, editor options (e.g. editorIndentGuides), and more.
+ * body: {animateIcons:boolean, editorIndentGuides:boolean, coloredActionButtons:boolean, lightTheme:string, darkTheme:string, defaultTimezone:string, logBufferSizeKb:integer, externalStackPaths:string, actionIconSize:string, compactPorts:boolean, confirmDestructive:boolean, dateFormat:string, defaultBackupImage:string, defaultComposeTemplate:string, defaultGrypeArgs:string, defaultGrypeImage:string, defaultScannerDns:array<string>, defaultScannerNetworkMode:string, defaultTrivyArgs:string, defaultTrivyImage:string, deployLogReconcileCron:string, deployLogReconcileEnabled:boolean, downloadFormat:string, editorFont:string, eventCleanupCron:string, eventCleanupEnabled:boolean, eventCollectionMode:string, eventPollInterval:integer, eventRetentionDays:integer, font:string, fontSize:string, formatLogTimestamps:boolean, gridFontSize:string, highlightUpdates:boolean, honorProxyLabels:boolean, labelFilterMode:string, logMaxLines:integer, metricsCollectionInterval:integer, primaryStackLocation:string, protectScannerImages:boolean, scannerCleanupCron:string, scannerCleanupEnabled:boolean, scheduleCleanupCron:string, scheduleCleanupEnabled:boolean, scheduleRetentionDays:integer, showExposedPorts:boolean, showGitCommitHash:boolean, showImageChangelogLinks:boolean, showStoppedContainers:boolean, showWhatsNew:boolean, terminalFont:string, timeFormat:string, useSelfhstIcons:boolean}
+ * resp-403: Permission denied (needs settings:edit)
+ * resp-500: Failed to save settings
+ */
 export const POST: RequestHandler = async ({ request, cookies }) => {
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !await auth.can('settings', 'edit')) {
@@ -393,7 +431,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 
 	try {
 		const body = await request.json();
-		const { confirmDestructive, showStoppedContainers, highlightUpdates, coloredActionButtons, actionIconSize, timeFormat, dateFormat, downloadFormat, defaultGrypeArgs, defaultTrivyArgs, scheduleRetentionDays, eventRetentionDays, scheduleCleanupCron, eventCleanupCron, scheduleCleanupEnabled, eventCleanupEnabled, scannerCleanupCron, scannerCleanupEnabled, logBufferSizeKb, logMaxLines, defaultTimezone, eventCollectionMode, eventPollInterval, metricsCollectionInterval, lightTheme, darkTheme, font, fontSize, gridFontSize, terminalFont, editorFont, compactPorts, showExposedPorts, showGitCommitHash, formatLogTimestamps, externalStackPaths, primaryStackLocation, defaultGrypeImage, defaultTrivyImage, defaultComposeTemplate, labelFilterMode, defaultBackupImage, honorProxyLabels, showImageChangelogLinks, animateIcons, protectScannerImages, showWhatsNew, defaultScannerNetworkMode, defaultScannerDns } = body;
+		const { confirmDestructive, showStoppedContainers, highlightUpdates, coloredActionButtons, actionIconSize, timeFormat, dateFormat, downloadFormat, defaultGrypeArgs, defaultTrivyArgs, scheduleRetentionDays, eventRetentionDays, scheduleCleanupCron, eventCleanupCron, scheduleCleanupEnabled, eventCleanupEnabled, scannerCleanupCron, scannerCleanupEnabled, deployLogReconcileCron, deployLogReconcileEnabled, logBufferSizeKb, logMaxLines, defaultTimezone, eventCollectionMode, eventPollInterval, metricsCollectionInterval, lightTheme, darkTheme, font, fontSize, gridFontSize, terminalFont, editorFont, compactPorts, showExposedPorts, showGitCommitHash, formatLogTimestamps, externalStackPaths, primaryStackLocation, defaultGrypeImage, defaultTrivyImage, defaultComposeTemplate, labelFilterMode, defaultBackupImage, honorProxyLabels, showImageChangelogLinks, useSelfhstIcons, animateIcons, editorIndentGuides, protectScannerImages, showWhatsNew, defaultScannerNetworkMode, defaultScannerDns } = body;
 
 		if (confirmDestructive !== undefined) {
 			await setSetting('confirm_destructive', confirmDestructive);
@@ -449,6 +487,14 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 		}
 		if (scannerCleanupEnabled !== undefined && typeof scannerCleanupEnabled === 'boolean') {
 			await setScannerCleanupEnabled(scannerCleanupEnabled);
+			await refreshSystemJobs();
+		}
+		if (deployLogReconcileCron !== undefined && typeof deployLogReconcileCron === 'string') {
+			await setDeployLogReconcileCron(deployLogReconcileCron);
+			await refreshSystemJobs();
+		}
+		if (deployLogReconcileEnabled !== undefined && typeof deployLogReconcileEnabled === 'boolean') {
+			await setDeployLogReconcileEnabled(deployLogReconcileEnabled);
 			await refreshSystemJobs();
 		}
 		if (logBufferSizeKb !== undefined && typeof logBufferSizeKb === 'number') {
@@ -551,11 +597,17 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 		if (showImageChangelogLinks !== undefined && typeof showImageChangelogLinks === 'boolean') {
 			await setSetting('show_image_changelog_links', showImageChangelogLinks);
 		}
+		if (useSelfhstIcons !== undefined && typeof useSelfhstIcons === 'boolean') {
+			await setSetting('use_selfhst_icons', useSelfhstIcons);
+		}
 		if (showWhatsNew !== undefined && typeof showWhatsNew === 'boolean') {
 			await setSetting('show_whats_new', showWhatsNew);
 		}
 		if (animateIcons !== undefined && typeof animateIcons === 'boolean') {
 			await setSetting('animate_icons', animateIcons);
+		}
+		if (editorIndentGuides !== undefined && typeof editorIndentGuides === 'boolean') {
+			await setSetting('editor_indent_guides', editorIndentGuides);
 		}
 		if (protectScannerImages !== undefined && typeof protectScannerImages === 'boolean') {
 			await setSetting('protect_scanner_images', protectScannerImages);
@@ -621,8 +673,10 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			defaultBackupImageVal,
 			honorProxyLabelsVal,
 			showImageChangelogLinksVal,
+			useSelfhstIconsVal,
 			showWhatsNewVal,
 			animateIconsVal,
+			editorIndentGuidesVal,
 			protectScannerImagesVal,
 			defaultScannerNetworkModeVal,
 			defaultScannerDnsRawVal
@@ -671,8 +725,10 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			getSetting('default_backup_image'),
 			getSetting('honor_proxy_labels'),
 			getSetting('show_image_changelog_links'),
+			getSetting('use_selfhst_icons'),
 			getSetting('show_whats_new'),
 			getSetting('animate_icons'),
+			getSetting('editor_indent_guides'),
 			getSetting('protect_scanner_images'),
 			getSetting('default_scanner_network_mode'),
 			getSetting('default_scanner_dns')
@@ -726,8 +782,10 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			honorProxyLabels: honorProxyLabelsVal ?? DEFAULT_SETTINGS.honorProxyLabels,
 			protectScannerImages: protectScannerImagesVal ?? DEFAULT_SETTINGS.protectScannerImages,
 			showImageChangelogLinks: showImageChangelogLinksVal ?? DEFAULT_SETTINGS.showImageChangelogLinks,
+			useSelfhstIcons: useSelfhstIconsVal ?? DEFAULT_SETTINGS.useSelfhstIcons,
 			showWhatsNew: showWhatsNewVal ?? DEFAULT_SETTINGS.showWhatsNew,
 			animateIcons: animateIconsVal ?? DEFAULT_SETTINGS.animateIcons,
+			editorIndentGuides: editorIndentGuidesVal ?? DEFAULT_SETTINGS.editorIndentGuides,
 			defaultScannerNetworkMode: defaultScannerNetworkModeVal ?? DEFAULT_SETTINGS.defaultScannerNetworkMode,
 			defaultScannerDns: parseScannerDnsStorage(defaultScannerDnsRawVal)
 		};

@@ -24,7 +24,7 @@
 	import { EmptyState, NoEnvironment } from '$lib/components/ui/empty-state';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import { DataGrid } from '$lib/components/data-grid';
-	import { ipToNumber } from '$lib/utils/ip';
+	import { compareIps } from '$lib/utils/ip';
 	import NetworkGraphModal from './NetworkGraphModal.svelte';
 
 	type SortField = 'name' | 'driver' | 'containers' | 'subnet' | 'gateway';
@@ -226,10 +226,10 @@
 					cmp = Object.keys(a.containers || {}).length - Object.keys(b.containers || {}).length;
 					break;
 				case 'subnet':
-					cmp = ipToNumber(getNetworkSubnet(a)) - ipToNumber(getNetworkSubnet(b));
+					cmp = compareIps(getNetworkSubnet(a), getNetworkSubnet(b));
 					break;
 				case 'gateway':
-					cmp = ipToNumber(getNetworkGateway(a)) - ipToNumber(getNetworkGateway(b));
+					cmp = compareIps(getNetworkGateway(a), getNetworkGateway(b));
 					break;
 			}
 			// Secondary sort by name for stability when primary values are equal

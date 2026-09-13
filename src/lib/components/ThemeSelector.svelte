@@ -50,6 +50,12 @@
 	let selectedTerminalFont = $state('system-mono');
 	let selectedEditorFont = $state('system-mono');
 
+	// The global-scope values are fetched on mount; render waits on this so the selects
+	// don't briefly show the hardcoded defaults before the global settings arrive. Only
+	// the global editor (no userId) fetches; the user scope reads the store synchronously.
+	let valuesLoaded = $state(false);
+	const awaitingGlobal = $derived(!userId && !valuesLoaded);
+
 	onMount(async () => {
 		// Load bundled monospace fonts for dropdown previews
 		const fontsToLoad = monospaceFonts.filter(f => f.googleFont);
@@ -96,6 +102,7 @@
 				// Use defaults on error
 			}
 		}
+		valuesLoaded = true;
 	});
 
 	// Sync with themeStore changes only when editing user profile
@@ -163,6 +170,11 @@
 </script>
 
 <div class="space-y-4">
+	{#if awaitingGlobal}
+		<!-- Editing the global defaults: wait for the fetch so the selects don't flash the
+		     hardcoded defaults before the real global values arrive. -->
+		<div class="h-10 animate-pulse rounded-md bg-muted/50"></div>
+	{:else}
 	<!-- Light Theme -->
 	<div class="flex items-center justify-between">
 		<div class="flex items-center gap-2">
@@ -378,4 +390,5 @@
 			</Select.Content>
 		</Select.Root>
 	</div>
+	{/if}
 </div>

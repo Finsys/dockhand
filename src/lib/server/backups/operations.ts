@@ -7,18 +7,17 @@
  * A record opens as `running`, streams throttled progress + log lines, and
  * closes exactly once with a terminal status DERIVED IN ONE PLACE (see
  * ./operations-core). The startup scrub rewrites any row left `running` by a
- * dead process to `stale`, so an interrupted operation is always resolvable
+ * dead process to `failed`, so an interrupted operation is always resolvable
  * without a transaction — "running at boot" is unambiguously not-completed.
  *
- * The pure decision logic (terminal-status derivation, progress throttle, scrub
- * rule) lives in ./operations-core and is unit-tested there; this module is the
- * thin DB-bound wrapper.
+ * The pure decision logic (terminal-status derivation, progress throttle) lives
+ * in ./operations-core and is unit-tested there; this module is the thin
+ * DB-bound wrapper.
  */
 import {
 	createScheduleExecution,
 	updateScheduleExecution,
 	appendScheduleExecutionLog,
-	failStaleRunningExecutions,
 } from '../db';
 import type { OperationKind } from './models';
 import {
@@ -91,7 +90,7 @@ export class Operation {
 	 * metadata/verifying/pruning, the volume list, errors/warnings) and is ALWAYS
 	 * persisted — otherwise those lines drop out of the execution log
 	 * non-deterministically when they land in a throttle window occupied by restic
-	 * spam. (That was a real bug: stage markers vanished from the log under load.)
+	 * spam.
 	 */
 	progress(status: string, message: string, detail?: unknown): void {
 		if (this.onProgressCb) this.onProgressCb(status, message, detail);
@@ -137,15 +136,4 @@ export class Operation {
 /** Open a new operation record. */
 export function openOperation(opts: OpenOptions, onProgress?: (status: string, message: string, detail?: unknown) => void): Promise<Operation> {
 	return Operation.open(opts, onProgress);
-}
-
-/**
- * Startup scrub: mark any operation left `running`/`queued` by a dead process as
- * a terminal failure so it can't linger forever and inflate "in progress"
- * metrics. Delegates to the shared DB sweep (which sets them failed) — a
- * follow-up may split `stale` from `failed` at the DB layer, but the invariant
- * (no row stays `running` across a restart) holds today.
- */
-export async function scrubInterruptedOperations(): Promise<number> {
-	return failStaleRunningExecutions();
 }

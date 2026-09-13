@@ -12,6 +12,16 @@ import { auditNotification } from '$lib/server/audit';
 import { computeAuditDiff } from '$lib/utils/diff';
 import type { RequestHandler } from './$types';
 
+/**
+ * @openapi
+ * summary: Get a single notification setting by ID, with any SMTP password masked
+ * path: id:integer! Notification setting ID (from GET /api/notifications)
+ * resp-200: {id:integer!, type:string!, name:string!, enabled:boolean!, config:{host:string, port:integer, from_email:string, to_emails:array<string>, urls:array<string>, password:string}, eventTypes:array<string>}
+ * resp-400: Invalid ID (not a number)
+ * resp-403: Permission denied (requires the notifications:view permission)
+ * resp-404: Notification setting not found
+ * resp-500: Failed to fetch notification setting
+ */
 export const GET: RequestHandler = async ({ params, cookies }) => {
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !await auth.can('notifications', 'view')) {
@@ -45,6 +55,18 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 	}
 };
 
+/**
+ * @openapi
+ * summary: Update a notification setting; a masked SMTP password ("********") keeps the stored value
+ * path: id:integer! Notification setting ID (from GET /api/notifications)
+ * body: {name:string, enabled:boolean, config:{host:string, port:integer, secure:boolean, username:string, password:string, from_email:string, from_name:string, to_emails:array<string>, urls:array<string>}, eventTypes:array<string>, event_types:array<string>}
+ * body-example: {"name":"Ops Alerts","enabled":false,"config":{"host":"smtp.example.com","port":587,"from_email":"dockhand@example.com","to_emails":["ops@example.com"],"password":"********"},"eventTypes":["container_unhealthy","container_oom"]}
+ * resp-200: {id:integer!, type:string!, name:string!, enabled:boolean!, config:{}, eventTypes:array<string>}
+ * resp-400: Invalid ID, or config validation failed (SMTP needs host/port/from_email/to_emails, Apprise needs at least one URL)
+ * resp-403: Permission denied (requires the notifications:edit permission)
+ * resp-404: Notification setting not found
+ * resp-500: Failed to update notification setting
+ */
 export const PUT: RequestHandler = async (event) => {
 	const { params, request, cookies } = event;
 	const auth = await authorize(cookies);
@@ -122,6 +144,17 @@ export const PUT: RequestHandler = async (event) => {
 	}
 };
 
+/**
+ * @openapi
+ * summary: Delete a notification setting by ID
+ * path: id:integer! Notification setting ID (from GET /api/notifications)
+ * resp-200: {success:boolean!}
+ * resp-200-example: {"success":true}
+ * resp-400: Invalid ID (not a number)
+ * resp-403: Permission denied (requires the notifications:delete permission)
+ * resp-404: Notification setting not found
+ * resp-500: Failed to delete notification setting
+ */
 export const DELETE: RequestHandler = async (event) => {
 	const { params, cookies } = event;
 	const auth = await authorize(cookies);

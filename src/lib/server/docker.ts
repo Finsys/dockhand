@@ -10,14 +10,25 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import * as http from 'node:http';
 import * as https from 'node:https';
+import { Readable } from 'node:stream';
 import * as tls from 'node:tls';
 import { createHash } from 'node:crypto';
+import { pumpWebStreamToWritable } from './stream-pump';
+import { toWebReadableStream } from './node-readable-stream';
+import { buildImagePruneFilters } from './image-prune-core';
+import { computeRequestTimeoutMs } from './backups/request-timeout';
+import { helperWaitDeadline, helperExitFromState } from './helper-wait-core';
 import type { Environment } from './db';
 import { getSetting } from './db';
-import { getAdditionalVolumeBinds } from './mount-dedupe';
-import { rebaseEnvOntoImage, rebaseLabelsOntoImage, describeEnvRebase, describeLabelRebase, type ImageEnvLabels } from './container-env-merge';
-import { encodeRegistryAuth } from './registry-auth';
-import { isSystemContainer, classifyEmptyDigestImage } from './scheduler/tasks/update-utils';
+import { getAdditionalVolumeBinds, dedupeVolumesForRecreate } from './mount-dedupe';
+import { resolveNanoCpusConflict, resolvePodmanUsernsMode } from './hostconfig-recreate';
+// Import-light image parsing shared with the semver layer; re-exported below for callers.
+import { parseImageReference } from './registry/image-ref';
+export { parseImageReference } from './registry/image-ref';
+import { rebaseEnvOntoImage, rebaseLabelsOntoImage, rebaseCommand, describeEnvRebase, describeLabelRebase, type ImageEnvLabels } from './container-env-merge';
+import { encodeRegistryAuth, fetchRegistryToken, isSafeRegistryHost } from './registry-auth';
+import { classifyManifest, type ArtifactKind } from './semver/manifest-artifact';
+import { isSystemContainer, classifyEmptyDigestImage, localDigestIsIndexChild } from './scheduler/tasks/update-utils';
 import { deepDiff } from '../utils/diff.js';
 import { getInstanceId } from './backups/identity';
 import { isOwnedBackupHelper } from './backups/reap-core';
@@ -417,12 +428,16 @@ export function httpsAgentRequest(
 			headers: reqHeaders,
 		};
 
-		if (!streaming) {
-			const isComposeOperation = path === '/_hawser/compose';
-			const composeTimeoutMs = parseInt(process.env.COMPOSE_TIMEOUT || '900') * 1000;
-			const isPrune = path.endsWith('/prune');
-			reqOptions.timeout = isComposeOperation ? composeTimeoutMs : isPrune ? 300000 : 30000;
-		}
+		// A stream request BODY (a large tar PUT) must not get the small-request idle timeout
+		// even though the RESPONSE isn't streamed - computeRequestTimeoutMs decides on both.
+		const streamingBody = typeof (options.body as ReadableStream | undefined)?.getReader === 'function';
+		const timeoutMs = computeRequestTimeoutMs({
+			path,
+			streamingBody,
+			streamingResponse: streaming,
+			composeTimeoutSecs: parseInt(process.env.COMPOSE_TIMEOUT || '900'),
+		});
+		if (timeoutMs !== null) reqOptions.timeout = timeoutMs;
 
 		// Honor AbortSignal from caller (e.g., AbortSignal.timeout(5000) for ping)
 		const signal = options.signal as AbortSignal | undefined;
@@ -454,14 +469,7 @@ export function httpsAgentRequest(
 			}
 
 			if (streaming) {
-				const readable = new ReadableStream({
-					start(controller) {
-						res.on('data', (chunk: Buffer) => controller.enqueue(new Uint8Array(chunk)));
-						res.on('end', () => controller.close());
-						res.on('error', (err) => controller.error(err));
-					},
-					cancel() { res.destroy(); }
-				});
+				const readable = toWebReadableStream(res);
 				resolve(new Response(readable, { status, statusText, headers }));
 			} else {
 				const chunks: Buffer[] = [];
@@ -493,19 +501,10 @@ export function httpsAgentRequest(
 			} else if (body instanceof Blob) {
 				body.arrayBuffer().then(ab => req.end(Buffer.from(ab)), reject);
 			} else if (typeof (body as ReadableStream).getReader === 'function') {
+				// Stream the body with backpressure (O(1) RAM). Without awaiting 'drain' this
+				// piled the whole tar into RAM on a slow mTLS peer - see stream-pump.ts.
 				const reader = (body as ReadableStream<Uint8Array>).getReader();
-				(async () => {
-					try {
-						while (true) {
-							const { done, value } = await reader.read();
-							if (done) break;
-							req.write(value);
-						}
-						req.end();
-					} catch (err) {
-						req.destroy(err as Error);
-					}
-				})();
+				pumpWebStreamToWritable(reader, req).catch(() => { /* req.destroy already called */ });
 			} else {
 				req.end();
 			}
@@ -574,7 +573,7 @@ function buildConfigFromEnv(env: Environment): DockerClientConfig {
 /**
  * Get Docker client configuration for an environment
  */
-async function getDockerConfig(envId?: number | null): Promise<DockerClientConfig> {
+export async function getDockerConfig(envId?: number | null): Promise<DockerClientConfig> {
 	if (!envId) {
 		throw new Error('No environment specified');
 	}
@@ -599,6 +598,12 @@ async function getDockerConfig(envId?: number | null): Promise<DockerClientConfi
 interface DockerFetchOptions extends RequestInit {
 	/** Set to true for long-lived streaming connections */
 	streaming?: boolean;
+	/**
+	 * Called per output line while the request runs. Only the Hawser Edge (WebSocket) path
+	 * can deliver these: the agent sends 'stream' messages alongside a non-streaming request.
+	 * Every other transport is plain request/response and simply never calls it.
+	 */
+	onLine?: (line: string) => void;
 }
 
 /**
@@ -729,15 +734,21 @@ export function unixSocketRequest(
 
 		req.on('error', reject);
 
-		if (options.body) {
-			if (typeof options.body === 'string') {
-				req.write(options.body);
-			} else if (options.body instanceof Uint8Array || Buffer.isBuffer(options.body)) {
-				req.write(options.body);
+		if (options.body instanceof ReadableStream) {
+			// Stream a web ReadableStream (e.g. a large tar for /images/load) straight
+			// to the socket without buffering it in memory. Readable.fromWeb bridges
+			// web -> Node stream; pipe() ends the request when the source finishes.
+			Readable.fromWeb(options.body as any).on('error', reject).pipe(req);
+		} else {
+			if (options.body) {
+				if (typeof options.body === 'string') {
+					req.write(options.body);
+				} else if (options.body instanceof Uint8Array || Buffer.isBuffer(options.body)) {
+					req.write(options.body);
+				}
 			}
+			req.end();
 		}
-
-		req.end();
 	});
 }
 
@@ -782,22 +793,7 @@ export function unixSocketStreamRequest(
 				}
 			}
 
-			const readable = new ReadableStream({
-				start(controller) {
-					res.on('data', (chunk: Buffer) => {
-						controller.enqueue(new Uint8Array(chunk));
-					});
-					res.on('end', () => {
-						controller.close();
-					});
-					res.on('error', (err) => {
-						controller.error(err);
-					});
-				},
-				cancel() {
-					res.destroy();
-				}
-			});
+			const readable = toWebReadableStream(res);
 
 			resolve(new Response(readable, {
 				status: res.statusCode || 200,
@@ -808,15 +804,21 @@ export function unixSocketStreamRequest(
 
 		req.on('error', reject);
 
-		if (options.body) {
-			if (typeof options.body === 'string') {
-				req.write(options.body);
-			} else if (options.body instanceof Uint8Array || Buffer.isBuffer(options.body)) {
-				req.write(options.body);
+		if (options.body instanceof ReadableStream) {
+			// Stream a web ReadableStream (e.g. a large tar for /images/load) straight
+			// to the socket without buffering it in memory. Readable.fromWeb bridges
+			// web -> Node stream; pipe() ends the request when the source finishes.
+			Readable.fromWeb(options.body as any).on('error', reject).pipe(req);
+		} else {
+			if (options.body) {
+				if (typeof options.body === 'string') {
+					req.write(options.body);
+				} else if (options.body instanceof Uint8Array || Buffer.isBuffer(options.body)) {
+					req.write(options.body);
+				}
 			}
+			req.end();
 		}
-
-		req.end();
 	});
 }
 
@@ -832,7 +834,7 @@ export async function dockerFetch(
 
 	const startTime = Date.now();
 	const config = await getDockerConfig(envId);
-	const { streaming, ...fetchOptions } = options;
+	const { streaming, onLine, ...fetchOptions } = options;
 	const method = (options.method || 'GET').toUpperCase();
 
 	// Hawser Edge mode - route through WebSocket connection
@@ -892,7 +894,8 @@ export async function dockerFetch(
 				streaming || false,
 				(streaming || path === '/_hawser/compose' || path.endsWith('/prune')) ? 300000 : 30000, // 5 min for streaming/compose/prune, 30s for normal
 				isBinary,
-				fetchOptions.signal ?? undefined
+				fetchOptions.signal ?? undefined,
+				onLine
 			);
 			const elapsed = Date.now() - startTime;
 			// Only warn for slow requests, but skip /stats which is expected to be slow (5-10s)
@@ -968,6 +971,12 @@ export async function dockerFetch(
 			const composeTimeoutMs = parseInt(process.env.COMPOSE_TIMEOUT || '900') * 1000;
 			const isPrune = path.endsWith('/prune');
 			finalOptions.signal = AbortSignal.timeout(isComposeOperation ? composeTimeoutMs : isPrune ? 300000 : 30000);
+		}
+
+		// A ReadableStream request body (e.g. a large tar for /images/load) requires
+		// duplex:'half' under Node's fetch, else it throws before sending.
+		if (typeof (finalOptions.body as ReadableStream | undefined)?.getReader === 'function') {
+			(finalOptions as RequestInit & { duplex?: string }).duplex = 'half';
 		}
 
 		try {
@@ -2016,7 +2025,12 @@ export async function recreateContainerFromInspect(
 		let oldImg = oldImageConfig ?? null;
 		if (!oldImg) {
 			const oldInspect = await inspectImage(inspectData.Image || config.Image, envId);
-			oldImg = { Env: (oldInspect as any)?.Config?.Env, Labels: (oldInspect as any)?.Config?.Labels };
+			oldImg = {
+				Env: (oldInspect as any)?.Config?.Env,
+				Labels: (oldInspect as any)?.Config?.Labels,
+				Cmd: (oldInspect as any)?.Config?.Cmd ?? null,
+				Entrypoint: (oldInspect as any)?.Config?.Entrypoint ?? null,
+			};
 		}
 		const newImg = await inspectImage(newImage, envId);
 		const oldEnv = oldImg?.Env || [];
@@ -2025,6 +2039,18 @@ export async function recreateContainerFromInspect(
 		const newLabels = (newImg as any)?.Config?.Labels || {};
 		createConfig.Env = rebaseEnvOntoImage(config.Env || [], oldEnv, newEnv);
 		createConfig.Labels = rebaseLabelsOntoImage(config.Labels || {}, oldLabels, newLabels);
+
+		// 4b. Rebase Cmd/Entrypoint the same way (#1371): a container's Config.Cmd is flattened at
+		// create time, so the OLD image's baked CMD is indistinguishable from a user `command:`
+		// override and would be frozen onto the new image - a container can then start with a
+		// command the new image no longer provides (missing script -> exit 127 -> restart loop).
+		// oldImg?.Cmd == null (caller didn't capture it / inspect failed) -> keep verbatim.
+		const cmdR = rebaseCommand(config.Cmd, oldImg?.Cmd, (newImg as any)?.Config?.Cmd);
+		const entR = rebaseCommand(config.Entrypoint, oldImg?.Entrypoint, (newImg as any)?.Config?.Entrypoint);
+		createConfig.Cmd = cmdR.value;
+		createConfig.Entrypoint = entR.value;
+		if (cmdR.adopted) log?.(`Cmd — adopted from new image: ${JSON.stringify(cmdR.value)} (was ${JSON.stringify(config.Cmd)})`);
+		if (entR.adopted) log?.(`Entrypoint — adopted from new image: ${JSON.stringify(entR.value)} (was ${JSON.stringify(config.Entrypoint)})`);
 
 		const envSummary = describeEnvRebase(config.Env || [], oldEnv, newEnv);
 		const labelSummary = describeLabelRebase(config.Labels || {}, oldLabels, newLabels);
@@ -2050,6 +2076,27 @@ export async function recreateContainerFromInspect(
 	const swappiness = createConfig.HostConfig?.MemorySwappiness;
 	if (swappiness == null || swappiness === -1 || swappiness === 0) {
 		delete createConfig.HostConfig.MemorySwappiness;
+	}
+
+	// NanoCpus and CpuPeriod/CpuQuota are two ways to express the same CPU limit and are
+	// mutually exclusive at create time. Podman's inspect reports BOTH, so passing the whole
+	// HostConfig back trips its "NanoCpus conflicts with CpuPeriod and CpuQuota" (#1381).
+	if (resolveNanoCpusConflict(createConfig.HostConfig)) {
+		log?.('Dropped CpuPeriod/CpuQuota — they conflict with NanoCpus at create time (kept NanoCpus)');
+	}
+
+	// Podman lowers `--userns keep-id` to UsernsMode:"private" in inspect, which create then
+	// rejects without inline mappings (#1409). Restore the original intent from the annotation
+	// so keep-id survives the recreate; Docker (UsernsMode != "private") is untouched.
+	const usernsFix = resolvePodmanUsernsMode(createConfig.HostConfig?.UsernsMode, config.Annotations);
+	if (usernsFix && createConfig.HostConfig) {
+		if ('mode' in usernsFix) {
+			createConfig.HostConfig.UsernsMode = usernsFix.mode;
+			log?.(`Restored UsernsMode "${usernsFix.mode}" from Podman annotation (was "private")`);
+		} else {
+			delete createConfig.HostConfig.UsernsMode;
+			log?.('Dropped UsernsMode "private" — Podman rejects it without inline UID/GID mappings');
+		}
 	}
 
 	// container:<name> mode shares the network namespace — Docker rejects
@@ -2094,39 +2141,20 @@ export async function recreateContainerFromInspect(
 		}
 	}
 
-	// Deduplicate: remove Config.Volumes entries that conflict with HostConfig.Tmpfs or Binds.
-	// Read-only containers get tmpfs at paths like /tmp that may also be declared as image volumes.
-	// Docker rejects duplicate mount points, so the tmpfs/bind mount wins over the volume declaration.
-	if (createConfig.Volumes && hostConfig) {
-		const mountedPaths = new Set<string>();
-		if (hostConfig.Tmpfs) {
-			for (const p of Object.keys(hostConfig.Tmpfs)) {
-				mountedPaths.add(p);
-			}
-		}
-		if (hostConfig.Binds) {
-			for (const b of hostConfig.Binds) {
-				const parts = b.split(':');
-				if (parts.length >= 2) mountedPaths.add(parts[1].split(':')[0]);
-			}
-		}
-		if (mountedPaths.size > 0) {
-			for (const volPath of Object.keys(createConfig.Volumes)) {
-				if (mountedPaths.has(volPath)) {
-					delete createConfig.Volumes[volPath];
-				}
-			}
-			if (Object.keys(createConfig.Volumes).length === 0) {
-				delete createConfig.Volumes;
-			}
-		}
+	// Deduplicate Config.Volumes against every mount point that will exist on the new container
+	// (Tmpfs, existing binds, the binds we re-add below, and inspect.Mounts). Docker rejects
+	// duplicate mount points; the tmpfs/bind/volume mount wins over the bare image-VOLUME
+	// declaration. Compute additionalBinds first so the dedup sees them (#1088 / #1363).
+	const additionalBinds = getAdditionalVolumeBinds(hostConfig || {}, inspectData.Mounts || []);
+	if (hostConfig) {
+		const kept = dedupeVolumesForRecreate(createConfig.Volumes, hostConfig, inspectData.Mounts || [], additionalBinds);
+		if (kept) createConfig.Volumes = kept;
+		else delete createConfig.Volumes;
 	}
-
-	const additionalBinds = getAdditionalVolumeBinds(hostConfig, inspectData.Mounts || []);
 	if (additionalBinds.length > 0) {
 		createConfig.HostConfig = {
 			...hostConfig,
-			Binds: [...(hostConfig.Binds || []), ...additionalBinds]
+			Binds: [...(hostConfig?.Binds || []), ...additionalBinds]
 		};
 	}
 
@@ -2283,6 +2311,14 @@ export async function createContainerFromMetadata(
 		delete createConfig.HostConfig.MemorySwappiness;
 	}
 
+	// Podman keep-id -> UsernsMode:"private" in inspect, rejected on create (#1409).
+	// Restore the intent from the annotation; Docker (UsernsMode != "private") untouched.
+	const usernsFix = resolvePodmanUsernsMode(createConfig.HostConfig?.UsernsMode, config.Annotations);
+	if (usernsFix && createConfig.HostConfig) {
+		if ('mode' in usernsFix) createConfig.HostConfig.UsernsMode = usernsFix.mode;
+		else delete createConfig.HostConfig.UsernsMode;
+	}
+
 	// container:<name> mode: clean up conflicting network fields
 	if (networkMode.startsWith('container:')) {
 		delete createConfig.Hostname;
@@ -2298,32 +2334,18 @@ export async function createContainerFromMetadata(
 		}
 	}
 
-	// Volume/Tmpfs deduplication
-	if (createConfig.Volumes && hostConfig) {
-		const mountedPaths = new Set<string>();
-		if (hostConfig.Tmpfs) {
-			for (const p of Object.keys(hostConfig.Tmpfs)) mountedPaths.add(p);
-		}
-		if (hostConfig.Binds) {
-			for (const b of hostConfig.Binds) {
-				const parts = b.split(':');
-				if (parts.length >= 2) mountedPaths.add(parts[1].split(':')[0]);
-			}
-		}
-		if (mountedPaths.size > 0) {
-			for (const volPath of Object.keys(createConfig.Volumes)) {
-				if (mountedPaths.has(volPath)) delete createConfig.Volumes[volPath];
-			}
-			if (Object.keys(createConfig.Volumes).length === 0) delete createConfig.Volumes;
-		}
+	// Preserve anonymous volumes, then dedup Config.Volumes against every resulting mount point
+	// (incl. these added binds + metadata.mounts) so recreate never sends a duplicate (#1088 / #1363).
+	const additionalBinds = getAdditionalVolumeBinds(hostConfig || {}, metadata.mounts || []);
+	if (hostConfig) {
+		const kept = dedupeVolumesForRecreate(createConfig.Volumes, hostConfig, metadata.mounts || [], additionalBinds);
+		if (kept) createConfig.Volumes = kept;
+		else delete createConfig.Volumes;
 	}
-
-	// Preserve anonymous volumes
-	const additionalBinds = getAdditionalVolumeBinds(hostConfig, metadata.mounts || []);
 	if (additionalBinds.length > 0) {
 		createConfig.HostConfig = {
 			...hostConfig,
-			Binds: [...(hostConfig.Binds || []), ...additionalBinds]
+			Binds: [...(hostConfig?.Binds || []), ...additionalBinds]
 		};
 	}
 
@@ -2993,60 +3015,6 @@ export async function inspectImage(id: string, envId?: number | null) {
 	return dockerJsonRequest(`/images/${encodeURIComponent(id)}/json`, {}, envId);
 }
 
-/**
- * Parse an image reference into registry, repository, and tag components.
- * Follows Docker's reference parsing rules.
- * Examples:
- *   nginx:latest -> { registry: 'index.docker.io', repo: 'library/nginx', tag: 'latest' }
- *   ghcr.io/user/image:v1 -> { registry: 'ghcr.io', repo: 'user/image', tag: 'v1' }
- *   registry.example.com:5000/repo:tag -> { registry: 'registry.example.com:5000', repo: 'repo', tag: 'tag' }
- */
-function parseImageReference(imageName: string): { registry: string; repo: string; tag: string } {
-	let registry = 'index.docker.io';  // Docker Hub's actual host
-	let repo = imageName;
-	let tag = 'latest';
-
-	// Handle digest references (remove digest part for manifest lookup)
-	if (repo.includes('@')) {
-		const [repoWithoutDigest] = repo.split('@');
-		repo = repoWithoutDigest;
-	}
-
-	// Extract tag
-	const lastColon = repo.lastIndexOf(':');
-	if (lastColon > -1) {
-		const potentialTag = repo.substring(lastColon + 1);
-		// Make sure it's not a port number (no slashes in tags)
-		if (!potentialTag.includes('/')) {
-			tag = potentialTag;
-			repo = repo.substring(0, lastColon);
-		}
-	}
-
-	// Extract registry if present
-	const firstSlash = repo.indexOf('/');
-	if (firstSlash > -1) {
-		const firstPart = repo.substring(0, firstSlash);
-		// If the first part contains a dot, colon, or is "localhost", it's a registry
-		if (firstPart.includes('.') || firstPart.includes(':') || firstPart === 'localhost') {
-			registry = firstPart;
-			repo = repo.substring(firstSlash + 1);
-		}
-	}
-
-	// Normalize docker.io to index.docker.io (Docker Hub's actual registry host)
-	// docker.io redirects to www.docker.com, while index.docker.io is the real API
-	if (registry === 'docker.io') {
-		registry = 'index.docker.io';
-	}
-
-	// Docker Hub requires library/ prefix for official images
-	if (registry === 'index.docker.io' && !repo.includes('/')) {
-		repo = `library/${repo}`;
-	}
-
-	return { registry, repo, tag };
-}
 
 /**
  * Parse a registry URL into host and path components.
@@ -3083,7 +3051,7 @@ export function parseRegistryUrl(url: string): { host: string; path: string; ful
  * - Host-only stored: stored 'registry.example.com' matches requested 'registry.example.com/org'
  *   (allows a single credential entry to work for all org paths)
  */
-async function findRegistryCredentials(registryHost: string): Promise<{ username: string; password: string } | null> {
+export async function findRegistryCredentials(registryHost: string): Promise<{ username: string; password: string } | null> {
 	try {
 		// Import here to avoid circular dependency
 		const { getRegistries } = await import('./db.js');
@@ -3149,15 +3117,22 @@ async function findRegistryCredentials(registryHost: string): Promise<{ username
  */
 async function getRegistryBearerToken(registry: string, repo: string): Promise<string | null> {
 	try {
+		const hostSafety = isSafeRegistryHost(registry);
+		if (!hostSafety.ok) {
+			console.error(`[Registry] Refusing token request for ${registry}: ${hostSafety.reason}`);
+			return null;
+		}
 		const registryUrl = `https://${registry}`;
 
 		// Look up stored credentials for this registry
 		const credentials = await findRegistryCredentials(registry);
 
 		// Step 1: Challenge request to /v2/
+		// Do not follow redirects on the challenge; a 3xx is treated as a non-401 below.
 		const challengeResponse = await fetch(`${registryUrl}/v2/`, {
 			method: 'GET',
-			headers: { 'User-Agent': 'Dockhand/1.0' }
+			headers: { 'User-Agent': 'Dockhand/1.0' },
+			redirect: 'manual'
 		});
 
 		// If 200, no auth needed
@@ -3218,21 +3193,25 @@ async function getRegistryBearerToken(registry: string, repo: string): Promise<s
 		if (service) tokenUrl.searchParams.set('service', service);
 		if (scope) tokenUrl.searchParams.set('scope', scope);
 
-		const tokenHeaders: Record<string, string> = { 'User-Agent': 'Dockhand/1.0' };
-
-		// Add Basic auth header if we have credentials
-		if (credentials) {
-			const basicAuth = Buffer.from(`${credentials.username}:${credentials.password}`).toString('base64');
-			tokenHeaders['Authorization'] = `Basic ${basicAuth}`;
-		}
-
-		const tokenResponse = await fetch(tokenUrl.toString(), {
-			headers: tokenHeaders
-		});
+		const authHeader = credentials
+			? `Basic ${Buffer.from(`${credentials.username}:${credentials.password}`).toString('base64')}`
+			: null;
+		const tokenResponse = await fetchRegistryToken(tokenUrl.toString(), authHeader);
 
 		if (!tokenResponse.ok) {
-			await tokenResponse.text(); // Consume body to release socket
-			console.error(`Token request failed: ${tokenResponse.status}`);
+			// Surface enough to diagnose without leaking the secret: the response
+			// body (truncated), the final URL, and the identity (username only).
+			const errBody = (await tokenResponse.text()).slice(0, 300).replace(/\s+/g, ' ').trim();
+			const finalNote = tokenResponse.url && tokenResponse.url !== tokenUrl.toString()
+				? ` (final ${new URL(tokenResponse.url).origin})`
+				: '';
+			const identity = credentials
+				? ` as ${credentials.username.slice(0, 4)}...(len=${credentials.username.length})`
+				: ' anonymously';
+			console.error(
+				`[Registry] Token request failed: ${tokenResponse.status} at ${tokenUrl.origin}${finalNote}, sent${identity}` +
+					(errBody ? ` - response: ${errBody}` : '')
+			);
 			return null;
 		}
 
@@ -3274,12 +3253,19 @@ export async function getRegistryAuthHeader(
 	try {
 		// Parse URL to extract host (V2 API is always at the host root)
 		const parsed = parseRegistryUrl(registryUrl);
+		const hostSafety = isSafeRegistryHost(parsed.host);
+		if (!hostSafety.ok) {
+			console.error(`[Registry] Refusing auth challenge for ${parsed.host}: ${hostSafety.reason}`);
+			return null;
+		}
 		const apiBaseUrl = `${parsed.protocol}://${parsed.host}`;
 
-		// Step 1: Challenge request to /v2/ (always at registry root, not under org path)
+		// Step 1: Challenge request to /v2/ (always at registry root, not under org path).
+		// Do not follow redirects; a 3xx is treated as a non-401 below.
 		const challengeResponse = await fetch(`${apiBaseUrl}/v2/`, {
 			method: 'GET',
-			headers: { 'User-Agent': 'Dockhand/1.0' }
+			headers: { 'User-Agent': 'Dockhand/1.0' },
+			redirect: 'manual'
 		});
 
 		// If 200, no auth needed
@@ -3339,21 +3325,20 @@ export async function getRegistryAuthHeader(
 		if (service) tokenUrl.searchParams.set('service', service);
 		if (scope) tokenUrl.searchParams.set('scope', scope);
 
-		const tokenHeaders: Record<string, string> = { 'User-Agent': 'Dockhand/1.0' };
-
-		// Add Basic auth header if we have credentials
-		if (credentials) {
-			const basicAuth = Buffer.from(`${credentials.username}:${credentials.password}`).toString('base64');
-			tokenHeaders['Authorization'] = `Basic ${basicAuth}`;
-		}
-
-		const tokenResponse = await fetch(tokenUrl.toString(), {
-			headers: tokenHeaders
-		});
+		const authHeader = credentials
+			? `Basic ${Buffer.from(`${credentials.username}:${credentials.password}`).toString('base64')}`
+			: null;
+		const tokenResponse = await fetchRegistryToken(tokenUrl.toString(), authHeader);
 
 		if (!tokenResponse.ok) {
-			const errorBody = await tokenResponse.text().catch(() => '');
-			console.error(`Token request failed: ${tokenResponse.status} - ${errorBody}`);
+			const errorBody = (await tokenResponse.text().catch(() => '')).slice(0, 300).replace(/\s+/g, ' ').trim();
+			const finalNote = tokenResponse.url && tokenResponse.url !== tokenUrl.toString()
+				? ` (final ${new URL(tokenResponse.url).origin})`
+				: '';
+			const identity = credentials
+				? ` as ${credentials.username.slice(0, 4)}...(len=${credentials.username.length})`
+				: ' anonymously';
+			console.error(`[Registry] Token request failed: ${tokenResponse.status} at ${tokenUrl.origin}${finalNote}, sent${identity}${errorBody ? ` - response: ${errorBody}` : ''}`);
 			return null;
 		}
 
@@ -3398,6 +3383,10 @@ export async function getRegistryAuth(
 
 	return { baseUrl, orgPath: parsed.path, authHeader };
 }
+
+// Catalog-failure classification lives in an import-light module so it's unit-testable
+// without pulling this file's better-sqlite3 imports into the test process (#873).
+export { classifyCatalogFailure, CATALOG_NOT_SUPPORTED_MSG } from './registry-catalog.js';
 
 // --- Harbor fallback for catalog and image search ---
 // Harbor denies access to the V2 _catalog endpoint for robot accounts.
@@ -3651,6 +3640,7 @@ export async function harborSearchRepositories(
 export async function getRegistryManifestDigest(imageName: string): Promise<string | null> {
 	try {
 		const { registry, repo, tag } = parseImageReference(imageName);
+		if (!isSafeRegistryHost(registry).ok) return null;
 		const token = await getRegistryBearerToken(registry, repo);
 		const manifestUrl = `https://${registry}/v2/${repo}/manifests/${tag}`;
 
@@ -3689,6 +3679,101 @@ export async function getRegistryManifestDigest(imageName: string): Promise<stri
 			console.error(`[Registry] ${imageName}: ${e}`);
 		}
 		return null;
+	}
+}
+
+/**
+ * Classify what a `registry/repo:tag` actually is (image vs Helm chart vs other
+ * OCI artifact) by GET-ing its manifest, and return its manifest digest from the
+ * same response. Used by the semver check so a Helm chart tag isn't offered as a
+ * newer version, and so the offered image tag can be shown/copied digest-pinned
+ * without a second request. Returns kind:'image' on any failure (fail-open - never
+ * hide a real update because a probe failed); digest is null when unavailable.
+ * One request per call; the caller probes only the candidate tag.
+ */
+export async function getTagArtifactKind(
+	registry: string,
+	repo: string,
+	tag: string
+): Promise<{ kind: ArtifactKind; digest: string | null }> {
+	try {
+		if (!isSafeRegistryHost(registry).ok) return { kind: 'image', digest: null };
+		const token = await getRegistryBearerToken(registry, repo);
+		const headers: Record<string, string> = {
+			'User-Agent': 'Dockhand/1.0',
+			'Accept': [
+				'application/vnd.oci.image.index.v1+json',
+				'application/vnd.docker.distribution.manifest.list.v2+json',
+				'application/vnd.oci.image.manifest.v1+json',
+				'application/vnd.docker.distribution.manifest.v2+json'
+			].join(', ')
+		};
+		if (token) headers['Authorization'] = token;
+
+		const res = await fetch(`https://${registry}/v2/${repo}/manifests/${tag}`, {
+			method: 'GET',
+			headers,
+			signal: AbortSignal.timeout(8000)
+		});
+		if (!res.ok) {
+			await drainResponse(res);
+			return { kind: 'image', digest: null };
+		}
+		const digest = res.headers.get('Docker-Content-Digest');
+		const topMediaType = res.headers.get('Content-Type');
+		const body = (await res.json().catch(() => null)) as
+			| { mediaType?: string; config?: { mediaType?: string }; manifests?: unknown[] }
+			| null;
+		return { kind: classifyManifest(body, topMediaType), digest };
+	} catch {
+		return { kind: 'image', digest: null };
+	}
+}
+
+/**
+ * A multi-arch tag is a manifest list / OCI image index: the list has one digest,
+ * and each per-architecture child manifest has its own. `docker pull` usually records
+ * the INDEX digest in RepoDigests, but some pulls leave only the PER-ARCH child digest.
+ * getRegistryManifestDigest() (a HEAD) always returns the index digest, so a local
+ * per-arch digest never matches it -> phantom "update available" (#1367).
+ *
+ * Fetches the index body and returns true if any local digest is one of its per-arch
+ * child digests (same image, just recorded per-arch). Best-effort: ANY failure
+ * (network, timeout, non-index body, unauthenticated) returns false so the caller
+ * keeps its existing "update available" verdict. NEVER throws, own short timeout, and
+ * runs ONLY on the already-flagged-as-update path - it can't slow or break the common
+ * case. A false "update available" is acceptable; breaking the check is not.
+ */
+async function localDigestMatchesRegistryChild(
+	imageName: string,
+	localDigests: string[]
+): Promise<boolean> {
+	try {
+		const { registry, repo, tag } = parseImageReference(imageName);
+		if (!isSafeRegistryHost(registry).ok) return false;
+		const token = await getRegistryBearerToken(registry, repo);
+		const headers: Record<string, string> = {
+			'User-Agent': 'Dockhand/1.0',
+			'Accept': [
+				'application/vnd.docker.distribution.manifest.list.v2+json',
+				'application/vnd.oci.image.index.v1+json'
+			].join(', ')
+		};
+		if (token) headers['Authorization'] = token;
+
+		const response = await fetch(`https://${registry}/v2/${repo}/manifests/${tag}`, {
+			method: 'GET',
+			headers,
+			signal: AbortSignal.timeout(8000)
+		});
+		if (!response.ok) {
+			await drainResponse(response);
+			return false;
+		}
+		const body: unknown = await response.json();
+		return localDigestIsIndexChild(localDigests, body);
+	} catch {
+		return false;
 	}
 }
 
@@ -3790,13 +3875,22 @@ export async function checkImageUpdateAvailable(
 		}
 
 		// Check if registry digest matches ANY of the local digests
-		const matchesLocal = localDigests.includes(registryDigest);
-		const hasUpdate = !matchesLocal;
+		if (localDigests.includes(registryDigest)) {
+			return { hasUpdate: false, currentDigest: currentRepoDigests[0] };
+		}
+
+		// The HEAD digest (always the manifest-list/index digest) didn't match. Before
+		// declaring an update, rule out the multi-arch false positive: a local per-arch
+		// child digest won't equal the index digest even when the image is current
+		// (#1367). Best-effort GET of the index; on any failure hasUpdate stays true.
+		if (await localDigestMatchesRegistryChild(imageName, localDigests)) {
+			return { hasUpdate: false, currentDigest: currentRepoDigests[0] };
+		}
 
 		return {
-			hasUpdate,
+			hasUpdate: true,
 			currentDigest: currentRepoDigests[0],
-			registryDigest: hasUpdate ? registryDigest : undefined
+			registryDigest
 		};
 	} catch (e: any) {
 		return { hasUpdate: false, error: e.message };
@@ -4539,30 +4633,37 @@ export async function pruneImages(dangling = true, envId?: number | null) {
 	// scanner images are always tagged so they can't be dangling anyway.
 	if (dangling) {
 		return dockerJsonRequest(
-			`/images/prune?filters=${encodeURIComponent('{"dangling":["true"]}')}`,
+			`/images/prune?filters=${buildImagePruneFilters(true)}`,
 			{ method: 'POST' },
 			envId
 		);
 	}
 
-	// dangling=false: "prune all unused." When the scanner-protection setting
-	// is on, shield grype + trivy with stopped holder containers (Docker's
-	// "in use" check keeps them) then tear them down in a finally (#625).
+	// dangling=false: "prune all unused." The label filter makes Docker skip any
+	// image tagged dockhand.prune=false (#1391). When the scanner-protection
+	// setting is on, ALSO shield grype + trivy + backup helper with stopped
+	// holder containers (Docker's "in use" check keeps them) then tear them down
+	// in a finally (#625). Scanner images are third-party so we can't label them.
 	const protect = (await getSetting('protect_scanner_images')) !== false;
 	if (!protect) {
 		return dockerJsonRequest(
-			`/images/prune?filters=${encodeURIComponent('{"dangling":["false"]}')}`,
+			`/images/prune?filters=${buildImagePruneFilters(false)}`,
 			{ method: 'POST' },
 			envId
 		);
 	}
 
 	const { DEFAULT_GRYPE_IMAGE, DEFAULT_TRIVY_IMAGE } = await import('./scanner');
+	const { DEFAULT_HELPER_IMAGE } = await import('./backups/restic');
 	const grypeImg = (await getSetting('default_grype_image')) ?? DEFAULT_GRYPE_IMAGE;
 	const trivyImg = (await getSetting('default_trivy_image')) ?? DEFAULT_TRIVY_IMAGE;
+	// The backup/restore helper image is pulled once and reused for every backup; shield it from
+	// prune too (same holder-container trick), so an unused-image prune between backups doesn't
+	// force a slow re-pull (and a fail on an air-tight/offline host).
+	const helperImg = (await getSetting('default_backup_image')) || DEFAULT_HELPER_IMAGE;
 
 	const holderIds: string[] = [];
-	for (const image of [grypeImg, trivyImg]) {
+	for (const image of [grypeImg, trivyImg, helperImg]) {
 		try {
 			const safeName = `dockhand-prune-keep-${image.replace(/[^a-z0-9]/gi, '-')}-${Date.now()}`;
 			const created = await dockerJsonRequest<{ Id: string }>(
@@ -4581,7 +4682,7 @@ export async function pruneImages(dangling = true, envId?: number | null) {
 
 	try {
 		return await dockerJsonRequest(
-			`/images/prune?filters=${encodeURIComponent('{"dangling":["false"]}')}`,
+			`/images/prune?filters=${buildImagePruneFilters(false)}`,
 			{ method: 'POST' },
 			envId
 		);
@@ -4881,6 +4982,40 @@ export async function runContainer(options: {
 }
 
 // Run a container with attached streams (for scanners that need real-time output)
+/**
+ * DIAGNOSTIC (issue #1344): when a helper's exit code can't be determined, pull the
+ * recent `docker events` for that container so the log shows WHAT acted on it (a
+ * `die` with exitCode, a `kill` with the signal, a `destroy`/`remove` and its actor).
+ * `docker events` carries `Actor.Attributes` incl. the signal and, on some daemons, the
+ * execID/name of who issued it. Bounded, non-streaming (since..until), best-effort.
+ */
+async function logRecentContainerEvents(containerId: string, name: string, sinceISO: string | undefined, envId: number | null | undefined): Promise<void> {
+	try {
+		const sinceSec = sinceISO ? Math.floor(new Date(sinceISO).getTime() / 1000) - 2 : Math.floor(Date.now() / 1000) - 120;
+		const untilSec = Math.floor(Date.now() / 1000) + 1;
+		const filters = encodeURIComponent(JSON.stringify({ container: [containerId] }));
+		const resp = await dockerFetch(`/events?since=${sinceSec}&until=${untilSec}&filters=${filters}`, {}, envId);
+		if (!resp.ok) { console.warn(`[runContainerWithStreaming] events fetch for ${name}: HTTP ${resp.status}`); return; }
+		const body = await resp.text();
+		// The events endpoint returns newline-delimited JSON objects.
+		const lines = body.split('\n').map((l) => l.trim()).filter(Boolean);
+		if (lines.length === 0) { console.warn(`[runContainerWithStreaming] no docker events for ${name} in the window (nothing recorded who touched it)`); return; }
+		for (const line of lines) {
+			try {
+				const ev = JSON.parse(line) as { status?: string; Action?: string; Actor?: { Attributes?: Record<string, string> }; time?: number };
+				const action = ev.Action ?? ev.status ?? '(unknown)';
+				const attrs = ev.Actor?.Attributes ?? {};
+				const sig = attrs.signal ? ` signal=${attrs.signal}` : '';
+				const code = attrs.exitCode ? ` exitCode=${attrs.exitCode}` : '';
+				const exec = attrs.execID ? ` execID=${attrs.execID}` : '';
+				console.warn(`[runContainerWithStreaming] EVENT ${name}: ${action}${sig}${code}${exec}`);
+			} catch { /* skip a non-JSON line */ }
+		}
+	} catch (err) {
+		console.warn(`[runContainerWithStreaming] events fetch failed for ${name}: ${(err as Error).message}`);
+	}
+}
+
 export async function runContainerWithStreaming(options: {
 	image: string;
 	cmd: string[];
@@ -4910,14 +5045,24 @@ export async function runContainerWithStreaming(options: {
 		Image: options.image,
 		Cmd: options.cmd,
 		Env: options.env || [],
-		Labels: options.labels || {},
+		// Every helper spawned here (backup/restore/probe, image scanner) is ephemeral and exits
+		// on purpose, so it must NOT fire a "Container died/exited" notification like a user's
+		// container would. dockhand.notify=false makes the event handler skip it
+		// (isNotifyDisabledByLabel). Caller labels win if they set notify explicitly.
+		Labels: { 'dockhand.notify': 'false', ...(options.labels || {}) },
 		Tty: false,
 		HostConfig: {
 			Binds: options.binds || [],
 			AutoRemove: false,
+			// No log rotation: a helper's stdout IS its result, read via /logs after it
+			// exits. An empty Config inherits the daemon's default rotation (Synology sets
+			// max-size=10m,max-file=3), and a scanner writing a large JSON report line by
+			// line blows past the window - the head rotates away and /logs returns a
+			// truncated, mid-document buffer (#1496). One big file, no rotation; the log
+			// dies with the ephemeral container so it never accumulates on disk.
 			LogConfig: {
 				Type: 'json-file',
-				Config: {}
+				Config: { 'max-file': '1', 'max-size': '1g' }
 			}
 		}
 	};
@@ -4940,6 +5085,11 @@ export async function runContainerWithStreaming(options: {
 		containerConfig.HostConfig.Dns = options.dns;
 	}
 
+	// A remote daemon may not have the helper image (e.g. alpine:latest on a fresh
+	// direct-remote host), and /containers/create does NOT auto-pull - it 404s with
+	// "No such image". Pull it first so the stager/helper works out of the box (#1442).
+	await ensureImagePresent(options.image, options.envId);
+
 	const createResult = await dockerJsonRequest<{ Id: string }>(
 		`/containers/create?name=${encodeURIComponent(containerName)}`,
 		{ method: 'POST', body: JSON.stringify(containerConfig) },
@@ -4957,6 +5107,12 @@ export async function runContainerWithStreaming(options: {
 
 			// Start container
 			await drainResponse(await dockerFetch(`/containers/${containerId}/start`, { method: 'POST' }, options.envId));
+
+			// DIAGNOSTIC (issue #1344): one line confirming the helper actually started,
+			// with the config that could explain an early death (bind count, network,
+			// user). Pairs with the "exited with code" / "EXIT-CODE INDETERMINATE" lines
+			// so a user's log shows the full lifecycle of a helper that dies mid-run.
+			console.log(`[runContainerWithStreaming] Started ${containerName} (binds=${(options.binds || []).length}, netMode=${options.networkMode ?? 'default'}, user=${options.user ?? 'default'})`);
 
 			// Create abort controller to cancel stderr stream when container exits
 			// On some Docker hosts (e.g. Synology NAS with older kernels), follow=true
@@ -4980,33 +5136,109 @@ export async function runContainerWithStreaming(options: {
 			// Bounded-retry the wait; if it still can't be determined, fall back to
 			// inspecting the container's final State, and if that's also unavailable
 			// leave exitCode undefined — the guard below fails closed on undefined.
+			// HELPERS_WAIT_MODE (default 'poll'): the exit signal is read by POLLING short
+			// inspect calls - nothing stays open for a proxy to cut. The alternative, a single
+			// streaming `POST /wait` held open with no bytes for the whole run, gets severed
+			// mid-run by a socket-proxy / reverse-proxy / tcp DOCKER_HOST with a short idle
+			// timeout, leaving the exit code unreadable even though the helper is fine (#1344).
+			// Poll is the safe default; set HELPERS_WAIT_MODE=wait to force the streaming /wait.
+			// Applies to every helper this function runs — backup/restore AND the image scanner.
 			let exitCode: number | undefined;
-			for (let attempt = 0; attempt < 3 && exitCode === undefined; attempt++) {
-				try {
-					const waitResult = await dockerFetch(`/containers/${containerId}/wait`, { method: 'POST', streaming: true }, options.envId);
-					if (!waitResult.ok) await throwDockerError(waitResult);
-					const waitData = await waitResult.json() as { StatusCode?: number };
-					exitCode = waitData.StatusCode;
-					console.log(`[runContainerWithStreaming] Container exited with code: ${exitCode}`);
-				} catch (err) {
-					console.warn(`[runContainerWithStreaming] Wait attempt ${attempt + 1} failed: ${(err as Error).message}`);
+			if (process.env.HELPERS_WAIT_MODE !== 'wait') {
+				// Bounded by the caller's timeout (scanner passes 600_000, probes 60_000);
+				// the backup helper passes 0 = unbounded. One line so the log confirms which
+				// exit-signal mode is active (#1344).
+				console.log(`[runContainerWithStreaming] Awaiting exit of ${options.name ?? containerId.slice(0, 12)} via POLL mode`);
+				// A positive timeout caps the wait; 0/omitted is UNBOUNDED (see helper-wait-core:
+				// the backup helper passes 0 on purpose, bounded by cancel + the reaper - #1382).
+				const deadline = helperWaitDeadline(options.timeout, Date.now());
+				while (exitCode === undefined && Date.now() < deadline) {
+					try {
+						const insp = await dockerFetch(`/containers/${containerId}/json`, {}, options.envId);
+						if (insp.ok) {
+							const data = await insp.json() as { State?: { Status?: string; Running?: boolean; Dead?: boolean; ExitCode?: number; Error?: string } };
+							const st = data.State;
+							// Resolves for a normal `exited` AND for a container the daemon left
+							// terminally `created`/`dead` after a start failure (e.g. Docker 29.x
+							// exit 128 "failed to mount overlay: device or resource busy", #1487) -
+							// otherwise the unbounded poll waits forever for an `exited` that never comes.
+							const resolved = helperExitFromState(st);
+							if (resolved !== undefined) {
+								exitCode = resolved;
+								console.log(`[runContainerWithStreaming] Container exited with code: ${exitCode} (poll mode, status=${st?.Status})`);
+								break;
+							}
+							// A `dead`/`removing` container that helperExitFromState didn't resolve
+							// (e.g. dead with a 0 exit and no Error) is still terminal - break to the
+							// fail-closed diagnostics rather than polling it to the deadline.
+							if (st?.Dead || st?.Status === 'removing') break;
+						} else if (insp.status === 404) {
+							console.warn(`[runContainerWithStreaming] Poll: ${options.name ?? containerId.slice(0, 12)} not found (404) — container removed`);
+							break;
+						}
+					} catch (err) {
+						// A dropped short inspect is cheap to retry — keep polling to the deadline
+						// rather than bailing (unlike the streaming /wait path).
+						console.warn(`[runContainerWithStreaming] Poll inspect failed for ${options.name ?? containerId.slice(0, 12)}: ${(err as Error).message}`);
+					}
+					if (exitCode === undefined) await new Promise((r) => setTimeout(r, 1500));
+				}
+			} else {
+				for (let attempt = 0; attempt < 3 && exitCode === undefined; attempt++) {
+					try {
+						const waitResult = await dockerFetch(`/containers/${containerId}/wait`, { method: 'POST', streaming: true }, options.envId);
+						if (!waitResult.ok) await throwDockerError(waitResult);
+						const waitData = await waitResult.json() as { StatusCode?: number };
+						exitCode = waitData.StatusCode;
+						console.log(`[runContainerWithStreaming] Container exited with code: ${exitCode}`);
+					} catch (err) {
+						// DIAGNOSTIC (issue #1344): include the attempt count so a user whose
+						// helper's exit can't be read can tell us whether /wait failed once
+						// (transient) or all 3 times (the container vanished / daemon churn).
+						console.warn(`[runContainerWithStreaming] Wait attempt ${attempt + 1}/3 failed for ${options.name ?? containerId.slice(0, 12)}: ${(err as Error).message}`);
+					}
 				}
 			}
 			if (exitCode === undefined) {
 				// Fallback: inspect the container. Only trust a definitively-exited
 				// state; a still-running/restarting/unknown state stays undefined.
+				let containerStartedAt: string | undefined;
 				try {
 					const insp = await dockerFetch(`/containers/${containerId}/json`, {}, options.envId);
 					if (insp.ok) {
-						const data = await insp.json() as { State?: { Status?: string; Running?: boolean; ExitCode?: number } };
+						const data = await insp.json() as { State?: { Status?: string; Running?: boolean; Restarting?: boolean; Dead?: boolean; Paused?: boolean; ExitCode?: number; OOMKilled?: boolean; Error?: string; StartedAt?: string; FinishedAt?: string; Pid?: number } };
 						const st = data.State;
-						if (st && st.Running === false && st.Status === 'exited' && typeof st.ExitCode === 'number') {
-							exitCode = st.ExitCode;
-							console.log(`[runContainerWithStreaming] Resolved exit code via inspect: ${exitCode}`);
+						containerStartedAt = st?.StartedAt;
+						// DIAGNOSTIC (issue #1344): /wait gave no code and the fallback is
+						// about to leave exitCode undefined -> the user sees "could not
+						// determine container exit status". Log the FULL final State so a
+						// user hitting this can tell us WHY (OOMKilled, Dead, removed by an
+						// external reaper, still Running = /wait raced, or a daemon Error).
+						console.warn(
+							`[runContainerWithStreaming] EXIT-CODE INDETERMINATE for ${options.name ?? containerId.slice(0, 12)} ` +
+							`State=${JSON.stringify({
+								Status: st?.Status, Running: st?.Running, Restarting: st?.Restarting,
+								Dead: st?.Dead, Paused: st?.Paused, ExitCode: st?.ExitCode,
+								OOMKilled: st?.OOMKilled, Error: st?.Error,
+								StartedAt: st?.StartedAt, FinishedAt: st?.FinishedAt, Pid: st?.Pid,
+							})}`
+						);
+						const resolved = helperExitFromState(st);
+						if (resolved !== undefined) {
+							exitCode = resolved;
+							console.log(`[runContainerWithStreaming] Resolved exit code via inspect: ${exitCode} (status=${st?.Status})`);
 						}
+					} else {
+						console.warn(`[runContainerWithStreaming] EXIT-CODE INDETERMINATE for ${options.name ?? containerId.slice(0, 12)}: inspect returned HTTP ${insp.status} (container may already be gone/removed)`);
 					}
 				} catch (err) {
 					console.warn(`[runContainerWithStreaming] Inspect fallback failed: ${(err as Error).message}`);
+				}
+				// Still indeterminate -> pull docker events so the log shows WHO/WHAT
+				// acted on the container (die/kill/destroy + actor). Missing piece when
+				// something external removes the helper mid-run (#1344).
+				if (exitCode === undefined) {
+					await logRecentContainerEvents(containerId, options.name ?? containerId.slice(0, 12), containerStartedAt, options.envId);
 				}
 			}
 

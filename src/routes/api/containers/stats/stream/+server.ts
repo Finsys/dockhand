@@ -65,6 +65,13 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T
 	});
 }
 
+/**
+ * @openapi
+ * summary: Stream live CPU/memory/network/block-IO stats for all running containers in an environment (one snapshot round, then closes)
+ * query: env:integer Environment id — an immediate "done" event is sent if omitted or no environments are configured (from GET /api/environments)
+ * resp-200: text/event-stream SSE stream ("stat" events per container with {id,name,cpuPercent,memoryUsage,memoryRaw,memoryCache,memoryLimit,memoryPercent,networkRx,networkTx,blockRead,blockWrite}, an "error" event on environment-not-found, then a final "done" event)
+ * resp-403: Permission denied
+ */
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	const auth = await authorize(cookies);
 

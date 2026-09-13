@@ -5,7 +5,13 @@ import { authorize } from '$lib/server/authorize';
 import { auditAuth } from '$lib/server/audit';
 import { getClientIp } from '$lib/server/client-ip';
 
-// POST /api/auth/logout - End session
+/**
+ * @openapi
+ * summary: Destroy the current session (clears the dockhand_session cookie)
+ * resp-200: {success:boolean!}
+ * resp-200-example: {"success":true}
+ * resp-500: Unexpected error while destroying the session
+ */
 export const POST: RequestHandler = async (event) => {
 	const { cookies } = event;
 	try {

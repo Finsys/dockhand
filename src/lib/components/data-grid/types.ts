@@ -101,7 +101,7 @@ export interface DataGridContext<T = unknown> {
 
 	// Sort helpers
 	sortState: DataGridSortState | undefined;
-	toggleSort: (field: string) => void;
+	toggleSort: (colId: string) => void;
 
 	// Resize helpers
 	handleResize: (colId: string, width: number) => void;

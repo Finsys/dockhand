@@ -1,6 +1,6 @@
 import { json } from '@sveltejs/kit';
 import { authorize } from '$lib/server/authorize';
-import { getAdditionalVolumeBinds } from '$lib/server/mount-dedupe';
+import { getAdditionalVolumeBinds, dedupeVolumesForRecreate } from '$lib/server/mount-dedupe';
 import {
 	getOwnContainerId,
 	getHostDockerSocket,
@@ -12,8 +12,12 @@ import {
 import { buildRegistryAuthHeader, unixSocketRequest, unixSocketStreamRequest } from '$lib/server/docker';
 import type { RequestHandler } from './$types';
 import { prefersJSON, sseToJSON } from '$lib/server/sse';
+import { updaterImageForVariant } from '$lib/server/updater-image-core';
 
-const UPDATER_IMAGE = 'fnsys/dockhand-updater:latest';
+// Baseline Dockhand (old x86_64 without v2) needs the Alpine/musl updater; the Wolfi
+// default can't exec there (exit 127 at "Launching updater"). Mirrors the backup
+// helper's variant split.
+const UPDATER_IMAGE = updaterImageForVariant(process.env.DOCKHAND_VARIANT);
 const UPDATER_LABEL = 'dockhand.updater';
 
 /** Get TCP Docker host if configured, null otherwise. */
@@ -169,6 +173,11 @@ function buildCreateConfig(inspectData: any, newImage: string): any {
 	delete createConfig.Hostname;
 
 	const additionalBinds = getAdditionalVolumeBinds(hostConfig, inspectData.Mounts || []);
+	// Drop image-VOLUME entries that collide with a bind/tmpfs/inspect mount, so create never
+	// sends a duplicate mount point (#1088 / #1363).
+	const kept = dedupeVolumesForRecreate(createConfig.Volumes, hostConfig, inspectData.Mounts || [], additionalBinds);
+	if (kept) createConfig.Volumes = kept;
+	else delete createConfig.Volumes;
 	if (additionalBinds.length > 0) {
 		createConfig.HostConfig = {
 			...createConfig.HostConfig,
@@ -231,6 +240,16 @@ function buildNetworkEnvVars(inspectData: any): string[] {
 /**
  * SSE stream endpoint for self-update.
  * Pulls image, creates new container, then launches minimal sidecar.
+ */
+/**
+ * @openapi
+ * summary: Pull a new Dockhand image and hand off to an updater sidecar that replaces this running container
+ * body: {newImage:string!}
+ * body-example: {"newImage":"fnsys/dockhand:v1.0.40"}
+ * resp-200: text/event-stream SSE response (steps: pulling_image, building_config, pulling_updater, creating_container, launching_updater, then a "launched"/"error" event) — or, with "Accept: application/json", the final event as plain JSON
+ * resp-400: newImage missing, not running in Docker, or the Docker socket is read-only
+ * resp-403: Admin access required
+ * resp-500: Failed to inspect own container or determine its name before starting the update
  */
 export const POST: RequestHandler = async ({ request, cookies }) => {
 	const auth = await authorize(cookies);

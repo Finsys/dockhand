@@ -5,6 +5,9 @@
 	import { currentEnvironment, appendEnvParam } from '$lib/stores/environment';
 	import { page } from '$app/stores'; // BETA GATE: backups feature flag
 	import { focusFirstInput } from '$lib/utils';
+	import ContainerIcon from '$lib/components/ContainerIcon.svelte';
+	import IconPickerModal from '../stacks/IconPickerModal.svelte';
+	import { Box } from 'lucide-svelte';
 	import ContainerSettingsTab from './ContainerSettingsTab.svelte';
 	import BackupPanel from './BackupPanel.svelte';
 	import { volumeInfoFromBind } from '$lib/utils/mounts';
@@ -63,9 +66,11 @@
 		containerId: string;
 		onClose: () => void;
 		onSuccess: () => void;
+		/** Fired after the icon override changes, so the list can refresh its icons. */
+		onIconChanged?: () => void;
 	}
 
-	let { open = $bindable(), containerId, onClose, onSuccess }: Props = $props();
+	let { open = $bindable(), containerId, onClose, onSuccess, onIconChanged }: Props = $props();
 
 	// Config sets
 	let configSets = $state<ConfigSet[]>([]);
@@ -88,6 +93,42 @@
 	// Form state - Basic
 	let name = $state('');
 	let image = $state('');
+
+	// Per-container icon override (lucide / selfhst:<ref> / custom:container). Persisted
+	// immediately via the name-keyed /api/container-icons endpoint, keyed by name + env.
+	let iconOverride = $state<string | null>(null);
+	let showIconPicker = $state(false);
+
+	async function loadIconOverride(containerName: string) {
+		try {
+			const res = await fetch(appendEnvParam('/api/container-icons', currentEnvId));
+			iconOverride = res.ok ? ((await res.json())[containerName] ?? null) : null;
+		} catch {
+			iconOverride = null;
+		}
+	}
+
+	// Picker emits '' (clear), 'upload:<dataUrl>' (custom upload), or a lucide/selfhst value.
+	async function onIconSelect(value: string) {
+		const target = appendEnvParam(`/api/container-icons/${encodeURIComponent(name)}`, currentEnvId);
+		try {
+			if (!value) {
+				await fetch(target, { method: 'DELETE' });
+				iconOverride = null;
+			} else if (value.startsWith('upload:')) {
+				const image = value.slice('upload:'.length);
+				const res = await fetch(target, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image }) });
+				if (res.ok) iconOverride = (await res.json()).icon;
+			} else {
+				const res = await fetch(target, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ icon: value }) });
+				if (res.ok) iconOverride = (await res.json()).icon;
+			}
+			// Let the list refresh so the row icon reflects the change without an env switch.
+			onIconChanged?.();
+		} catch (e) {
+			console.error('Failed to set container icon:', e);
+		}
+	}
 	let command = $state('');
 	let restartPolicy = $state('no');
 	let restartMaxRetries = $state<number | ''>('');
@@ -347,6 +388,7 @@
 			// Parse basic container data
 			name = data.Name.replace(/^\//, '');
 			image = data.Config.Image;
+			loadIconOverride(name);
 			command = data.Config.Cmd ? data.Config.Cmd.map((arg: string) =>
 				arg.includes(' ') ? `"${arg}"` : arg
 			).join(' ') : '';
@@ -1114,6 +1156,15 @@
 	<Dialog.Content class="max-w-4xl w-[calc(100%-2rem)] h-[85vh] p-0 flex flex-col overflow-hidden">
 		<Dialog.Header class="px-5 py-4 border-b bg-muted/30 shrink-0 sticky top-0 z-10">
 			<Dialog.Title class="text-base font-semibold flex items-center gap-1">
+				<button
+					type="button"
+					onclick={() => (showIconPicker = true)}
+					title="Change icon"
+					class="mr-1 rounded p-0.5 hover:bg-muted transition-colors cursor-pointer"
+					aria-label="Change container icon"
+				>
+					<ContainerIcon {image} name={name} override={iconOverride} envId={currentEnvId} class="w-4 h-4" fallbackIcon={Box} showFallbackWhenOff />
+				</button>
 				Edit container
 				{#if isEditingTitle}
 					<span class="ml-1">-</span>
@@ -1198,7 +1249,7 @@
 					<BackupPanel
 						bind:this={backupPanelRef}
 						containerName={name}
-						volumes={volumeMappings.filter(v => v.hostPath && v.containerPath).map(volumeInfoFromBind)}
+						volumes={volumeMappings.filter(v => v.hostPath && v.containerPath).map((v) => volumeInfoFromBind(v))}
 						type="container"
 						onTally={(t) => (backupTally = t)}
 					/>
@@ -1323,3 +1374,5 @@
 		</div>
 	</Dialog.Content>
 </Dialog.Root>
+
+<IconPickerModal bind:open={showIconPicker} value={iconOverride} onselect={onIconSelect} title="Choose a container icon" />

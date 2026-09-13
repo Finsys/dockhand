@@ -8,14 +8,18 @@
 	import { TogglePill, ToggleSwitch } from '$lib/components/ui/toggle-pill';
 	import CronEditor from '$lib/components/cron-editor.svelte';
 	import TimezoneSelector from '$lib/components/TimezoneSelector.svelte';
-	import { Eye, Bell, Database, Calendar, ShieldCheck, FileText, AlertTriangle, HelpCircle, Globe, Activity, Clock, Info, Save, RotateCcw, LayoutDashboard, Tags, Archive, ChevronRight, ChevronDown } from 'lucide-svelte';
+	import { Eye, Bell, Database, Calendar, ShieldCheck, FileText, AlertTriangle, HelpCircle, Globe, Activity, Clock, Info, Save, RotateCcw, LayoutDashboard, Tags, Archive, ChevronRight, ChevronDown, Compass } from 'lucide-svelte';
 	import CodeEditor from '$lib/components/CodeEditor.svelte';
 	import { appSettings, type DateFormat, type DownloadFormat, type EventCollectionMode, type LabelFilterMode } from '$lib/stores/settings';
 	import { canAccess, authStore } from '$lib/stores/auth';
 	import { toast } from 'svelte-sonner';
 	import ThemeSelector from '$lib/components/ThemeSelector.svelte';
+	import NavigationSelector from '$lib/components/NavigationSelector.svelte';
 	import AnimateIconsToggle from '$lib/components/AnimateIconsToggle.svelte';
+	import IndentGuidesToggle from '$lib/components/IndentGuidesToggle.svelte';
 	import ColoredActionsToggle from '$lib/components/ColoredActionsToggle.svelte';
+	import SemverCheckConfig from '$lib/components/SemverCheckConfig.svelte';
+	import { onMount } from 'svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 
 	// General settings state - these derive from the store
@@ -27,6 +31,7 @@
 	let showGitCommitHash = $derived($appSettings.showGitCommitHash);
 	let honorProxyLabels = $derived($appSettings.honorProxyLabels);
 	let showImageChangelogLinks = $derived($appSettings.showImageChangelogLinks);
+	let useSelfhstIcons = $derived($appSettings.useSelfhstIcons);
 	let showWhatsNew = $derived($appSettings.showWhatsNew);
 	let timeFormat = $derived($appSettings.timeFormat);
 	let dateFormat = $derived($appSettings.dateFormat);
@@ -86,6 +91,8 @@ services:
 	let eventCleanupEnabled = $derived($appSettings.eventCleanupEnabled);
 	let scannerCleanupCron = $derived($appSettings.scannerCleanupCron);
 	let scannerCleanupEnabled = $derived($appSettings.scannerCleanupEnabled);
+	let deployLogReconcileCron = $derived($appSettings.deployLogReconcileCron);
+	let deployLogReconcileEnabled = $derived($appSettings.deployLogReconcileEnabled);
 	let logMaxLines = $derived($appSettings.logMaxLines);
 	let formatLogTimestamps = $derived($appSettings.formatLogTimestamps);
 	let defaultTimezone = $derived($appSettings.defaultTimezone);
@@ -180,6 +187,17 @@ services:
 		const newState = !scannerCleanupEnabled;
 		appSettings.setScannerCleanupEnabled(newState);
 		toast.success(newState ? 'Scanner cleanup enabled' : 'Scanner cleanup disabled');
+	}
+
+	function handleDeployLogReconcileCronChange(cron: string) {
+		appSettings.setDeployLogReconcileCron(cron);
+		toast.success('Deploy log reconcile cron updated');
+	}
+
+	function handleDeployLogReconcileEnabledChange() {
+		const newState = !deployLogReconcileEnabled;
+		appSettings.setDeployLogReconcileEnabled(newState);
+		toast.success(newState ? 'Deploy log reconcile enabled' : 'Deploy log reconcile disabled');
 	}
 
 	function handleGrypeImageBlur(e: Event) {
@@ -279,6 +297,71 @@ services:
 			toast.success('Backup image updated');
 		}
 	}
+
+	// Global newer-version-tag (semver) detection - one setting every update check
+	// (scheduled and manual) reads.
+	let semverEnabled = $state(false);
+	let semverMaxBump = $state<'patch' | 'minor' | 'major'>('major');
+	let semverMatchFlavor = $state(true);
+	let semverIncludePrerelease = $state(false);
+	let semverLoaded = $state(false);
+
+	// The global theme defaults (what a new user starts with). With auth on the theme
+	// toggles here edit these, not the admin's own profile. Rendering waits on
+	// globalThemeLoaded: until the fetch fills these, a toggle handed globalValue=undefined
+	// would fall back to the admin's personal store value and show it.
+	let globalColoredActions = $state<boolean | undefined>(undefined);
+	let globalAnimateIcons = $state<boolean | undefined>(undefined);
+	let globalIndentGuides = $state<boolean | undefined>(undefined);
+	let globalThemeLoaded = $state(false);
+
+	onMount(async () => {
+		try {
+			const res = await fetch('/api/settings/semver');
+			if (res.ok) {
+				const c = await res.json();
+				semverEnabled = c.enabled ?? false;
+				semverMaxBump = c.maxBump ?? 'major';
+				semverMatchFlavor = c.matchFlavor ?? true;
+				semverIncludePrerelease = c.includePrerelease ?? false;
+			}
+		} catch { /* keep defaults */ }
+		semverLoaded = true;
+
+		try {
+			const res = await fetch('/api/settings/general');
+			if (res.ok) {
+				const g = await res.json();
+				globalColoredActions = !!g.coloredActionButtons;
+				globalAnimateIcons = g.animateIcons ?? true;
+				globalIndentGuides = !!g.editorIndentGuides;
+			}
+		} catch { /* toggles fall back to store when global value is unknown */ }
+		globalThemeLoaded = true;
+	});
+
+	async function saveSemverConfig() {
+		try {
+			await fetch('/api/settings/semver', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					enabled: semverEnabled,
+					maxBump: semverMaxBump,
+					matchFlavor: semverMatchFlavor,
+					includePrerelease: semverIncludePrerelease
+				})
+			});
+		} catch {
+			toast.error('Failed to save version-check settings');
+		}
+	}
+
+	// Persist on any change once the initial load is done (skip the load itself).
+	$effect(() => {
+		semverEnabled; semverMaxBump; semverMatchFlavor; semverIncludePrerelease;
+		if (semverLoaded) saveSemverConfig();
+	});
 </script>
 
 <div class="flex-1 min-h-0 overflow-y-auto">
@@ -364,6 +447,28 @@ services:
 							</div>
 							<div class="space-y-1">
 								<div class="flex items-center gap-3">
+									<Label>Use selfh.st icons</Label>
+									<Tooltip.Root>
+										<Tooltip.Trigger>
+											<HelpCircle class="w-3.5 h-3.5 text-muted-foreground" />
+										</Tooltip.Trigger>
+										<Tooltip.Content side="top" class="w-96 max-w-[90vw]">
+											<p>Show app logos from <a href="https://selfh.st" target="_blank" rel="noopener" class="underline">selfh.st</a> as container icons, matched automatically from the image name. Logos are fetched once and cached locally, so your browser never contacts an external CDN. Off by default. Logos are CC BY 4.0; product names and trademarks are the property of their respective owners and are shown for identification only, without implying endorsement.</p>
+										</Tooltip.Content>
+									</Tooltip.Root>
+									<TogglePill
+										checked={useSelfhstIcons}
+										onchange={(checked) => {
+											appSettings.setUseSelfhstIcons(checked);
+											toast.success(checked ? 'selfh.st icons enabled' : 'selfh.st icons disabled');
+										}}
+										disabled={!$canAccess('settings', 'edit')}
+									/>
+								</div>
+								<p class="text-xs text-muted-foreground">Auto app logos on containers, fetched from selfh.st and cached locally</p>
+							</div>
+							<div class="space-y-1">
+								<div class="flex items-center gap-3">
 									<Label>Show "What's New"</Label>
 									<TogglePill
 										checked={showWhatsNew}
@@ -436,13 +541,13 @@ services:
 							</div>
 							<div class="space-y-1">
 								<div class="flex items-center gap-3">
-									<Label>Honor Traefik/Pangolin labels</Label>
+									<Label>Honor Traefik/Pangolin/Caddy labels</Label>
 									<Tooltip.Root>
 										<Tooltip.Trigger>
 											<HelpCircle class="w-3.5 h-3.5 text-muted-foreground" />
 										</Tooltip.Trigger>
 										<Tooltip.Content side="top" class="w-96 max-w-[90vw]">
-											<p>Parse <code>traefik.http.routers.&lt;name&gt;.rule</code>, <code>pangolin.public-resources.&lt;name&gt;.full-domain</code>, and <code>pangolin.private-resources.&lt;name&gt;.full-domain</code> labels and surface the resulting URLs as clickable pills next to ports. When off, only explicit <code>dockhand.url</code> labels are shown.</p>
+											<p>Parse <code>traefik.http.routers.&lt;name&gt;.rule</code>, <code>pangolin.public-resources.&lt;name&gt;.full-domain</code>, <code>pangolin.private-resources.&lt;name&gt;.full-domain</code>, and caddy-docker-proxy <code>caddy</code>/<code>caddy_&lt;n&gt;</code> site-address labels, and surface the resulting URLs as clickable pills next to ports. When off, only explicit <code>dockhand.url</code> labels are shown.</p>
 										</Tooltip.Content>
 									</Tooltip.Root>
 									<TogglePill
@@ -508,18 +613,37 @@ services:
 						<!-- Right column: Theme settings (always shown, with hint when auth enabled) -->
 						<div class="space-y-4">
 							<ThemeSelector />
-							<ColoredActionsToggle />
-							<AnimateIconsToggle />
+							<!-- With auth on the toggles edit the GLOBAL defaults, so they wait for
+							     those to load; binding globalValue=undefined first would show the
+							     admin's own profile value. With auth off the store IS the global
+							     value, so they render immediately. -->
+							{#if !$authStore.authEnabled || globalThemeLoaded}
+								<ColoredActionsToggle globalValue={$authStore.authEnabled ? globalColoredActions : undefined} />
+								<AnimateIconsToggle globalValue={$authStore.authEnabled ? globalAnimateIcons : undefined} />
+								<IndentGuidesToggle globalValue={$authStore.authEnabled ? globalIndentGuides : undefined} />
+							{/if}
 							{#if $authStore.authEnabled}
 								<div class="text-xs text-muted-foreground flex items-start gap-1.5 mt-2 p-2 bg-muted/50 rounded-md">
 									<HelpCircle class="w-3.5 h-3.5 shrink-0 mt-0.5" />
 									<div>
-										<p>Personal theme preferences can be configured in your <a href="/profile" class="text-primary hover:underline">profile</a>.</p>
+										<p>These are the <strong>defaults for new users</strong> - they don't change your own view. To customise how <em>you</em> see the app, use the theme settings in your <a href="/profile" class="text-primary hover:underline">profile</a>.</p>
 									</div>
 								</div>
 							{/if}
 						</div>
 					</div>
+				</Card.Content>
+			</Card.Root>
+
+			<Card.Root>
+				<Card.Header>
+					<Card.Title class="text-sm font-medium flex items-center gap-2">
+						<Compass class="w-4 h-4" />
+						Navigation
+					</Card.Title>
+				</Card.Header>
+				<Card.Content>
+					<NavigationSelector />
 				</Card.Content>
 			</Card.Root>
 
@@ -817,6 +941,28 @@ services:
 			<Card.Root>
 				<Card.Header>
 					<Card.Title class="text-sm font-medium flex items-center gap-2">
+						<Tags class="w-4 h-4" />
+						Newer version tags
+					</Card.Title>
+					<Card.Description>
+						How the update check looks for newer version tags on pinned images. Applies to every
+						check - scheduled and manual. Per-environment settings decide whether to check on a
+						schedule; this decides how versions are compared.
+					</Card.Description>
+				</Card.Header>
+				<Card.Content>
+					<SemverCheckConfig
+						bind:enabled={semverEnabled}
+						bind:maxBump={semverMaxBump}
+						bind:matchFlavor={semverMatchFlavor}
+						bind:includePrerelease={semverIncludePrerelease}
+					/>
+				</Card.Content>
+			</Card.Root>
+
+			<Card.Root>
+				<Card.Header>
+					<Card.Title class="text-sm font-medium flex items-center gap-2">
 						<Database class="w-4 h-4" />
 						System jobs
 					</Card.Title>
@@ -1009,6 +1155,42 @@ services:
 								<CronEditor
 									value={scannerCleanupCron}
 									onchange={handleScannerCleanupCronChange}
+									disabled={!$canAccess('settings', 'edit')}
+								/>
+							</div>
+						{/if}
+					</div>
+					<div class="space-y-1 pt-2 border-t">
+						<div class="flex items-center gap-3">
+							<Label>Deploy log reconcile</Label>
+							<Tooltip.Provider delayDuration={100}>
+								<Tooltip.Root>
+									<Tooltip.Trigger>
+										<HelpCircle class="w-4 h-4 text-muted-foreground cursor-help" />
+									</Tooltip.Trigger>
+									<Tooltip.Portal>
+										<Tooltip.Content side="right" sideOffset={8} class="!w-80">
+											Every deploy from Dockhand keeps a log file on disk, linked to its run in the
+											Deploys tab. This job runs on a schedule to keep the two in sync: it deletes
+											orphaned log files whose deploy run was already removed, and marks a run whose
+											log file has gone missing (so the Deploys tab shows "log unavailable" instead
+											of a blank). It never deletes a deploy run itself.
+										</Tooltip.Content>
+									</Tooltip.Portal>
+								</Tooltip.Root>
+							</Tooltip.Provider>
+							<TogglePill
+								checked={deployLogReconcileEnabled}
+								onchange={handleDeployLogReconcileEnabledChange}
+								disabled={!$canAccess('settings', 'edit')}
+							/>
+						</div>
+						<p class="text-xs text-muted-foreground">Keeps deploy-log files in sync with their deploy records: removes logs whose run is gone, and flags runs whose log went missing (never deletes a run).</p>
+						{#if deployLogReconcileEnabled}
+							<div class="mt-2">
+								<CronEditor
+									value={deployLogReconcileCron}
+									onchange={handleDeployLogReconcileCronChange}
 									disabled={!$canAccess('settings', 'edit')}
 								/>
 							</div>

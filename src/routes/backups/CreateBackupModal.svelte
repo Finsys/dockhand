@@ -13,6 +13,7 @@
 	import { getRepoTypeIcon, formatCron, runBackupAction, type BackupFormState } from '$lib/utils/backup';
 	import { toast } from 'svelte-sonner';
 	import VolumePicker from '$lib/components/backup/VolumePicker.svelte';
+	import StackFilesPicker from '$lib/components/backup/StackFilesPicker.svelte';
 	import DestinationPicker from '$lib/components/backup/DestinationPicker.svelte';
 	import { normalizeMounts, volumesForStack, type VolumeInfo } from '$lib/utils/mounts';
 
@@ -46,6 +47,44 @@
 	let stopBeforeBackup = $state(false);
 	let allVolumes = $state(true);
 	let selectedVolumes = $state<string[]>([]);
+
+	// Stack files on the host (probe listing) — stack targets only.
+	type StackListing =
+		| { kind: 'listed'; hostPath: string; entries: { name: string; type: 'dir' | 'file'; size: number; capturedAs?: 'bind' | 'volume' }[] }
+		| { kind: 'helper-failed'; reason: string }
+		| { kind: 'unknown'; reason: string }
+		| null;
+	let stackListing = $state<StackListing>(null);
+	// The probe helper couldn't run on the target - a backup can't run either, so block Save.
+	const stackHelperFailed = $derived(stackListing?.kind === 'helper-failed');
+	let loadingStackListing = $state(false);
+	let excludedStackFiles = $state<string[]>([]);
+	// The user-set "Remote stack path (for backup)" for direct/hawser envs, shown in the picker
+	// tooltip so the user sees THEIR configured path (empty when not set / socket env).
+	let stackRemoteDir = $state<string>('');
+
+	async function fetchStackListing(item: ContainerItem) {
+		if (item.type !== 'stack') { stackListing = null; return; }
+		loadingStackListing = true;
+		stackListing = null;
+		excludedStackFiles = [];
+		stackRemoteDir = '';
+		if (item.envId != null) {
+			fetch(`/api/environments/${item.envId}/remote-stacks-dir`)
+				.then((r) => (r.ok ? r.json() : null))
+				.then((d) => { stackRemoteDir = d?.remoteStacksDir ?? ''; })
+				.catch(() => { /* non-fatal - tooltip just omits the configured path */ });
+		}
+		try {
+			const envQ = item.envId != null ? `&env=${item.envId}` : '';
+			const res = await fetch(`/api/backup/stack-dir-listing?target=${encodeURIComponent(item.name)}${envQ}`);
+			stackListing = await res.json();
+		} catch (e) {
+			stackListing = { kind: 'unknown', reason: e instanceof Error ? e.message : 'probe failed' };
+		} finally {
+			loadingStackListing = false;
+		}
+	}
 
 	// Step 3: Schedule & Run
 	let saveSchedule = $state(false);
@@ -126,6 +165,7 @@
 	function selectSource(item: ContainerItem) {
 		selectedItem = item;
 		step = 2;
+		fetchStackListing(item);
 	}
 
 	// Save the config, then (when run=true) hand it off to the parent's shared
@@ -141,7 +181,8 @@
 			destinationId: selectedDestId,
 			stopBeforeBackup,
 			allVolumes,
-			selectedVolumes
+			selectedVolumes,
+			options: excludedStackFiles.length > 0 ? { excludedStackFiles } : undefined
 		};
 		try {
 			const result = await runBackupAction({
@@ -182,7 +223,7 @@
 </script>
 
 <Dialog.Root bind:open onOpenChange={(isOpen) => { if (!isOpen && saving) return; open = isOpen; }}>
-	<Dialog.Content class="max-w-3xl h-[70vh] flex flex-col">
+	<Dialog.Content class="max-w-5xl h-[85vh] flex flex-col">
 		<Dialog.Header class="pb-0">
 			<Dialog.Title class="flex items-center gap-2 text-base">
 				<Package class="w-4 h-4" />Create backup
@@ -316,6 +357,19 @@
 						</div>
 					</div>
 
+					{#if selectedItem?.type === 'stack'}
+						<StackFilesPicker
+							listing={stackListing}
+							loading={loadingStackListing}
+							connectionType={selectedEnv?.connectionType}
+							envName={selectedEnv?.name}
+							envIcon={selectedEnv?.icon}
+							envId={selectedEnv?.id}
+							configuredStackPath={stackRemoteDir}
+							bind:excludedStackFiles
+						/>
+					{/if}
+
 					{#if selectedItem}
 						<VolumePicker
 							volumes={selectedItem.volumes}
@@ -367,12 +421,12 @@
 						<Button variant="outline" size="sm" onclick={() => step = 2} disabled={saving}>Back</Button>
 						<div class="flex-1"></div>
 						{#if saveSchedule}
-							<Button variant="outline" size="sm" onclick={() => saveAndMaybeRun(false)} disabled={saving || scheduleInvalid}>
+							<Button variant="outline" size="sm" onclick={() => saveAndMaybeRun(false)} disabled={saving || scheduleInvalid || stackHelperFailed}>
 								{#if saving}<Loader2 class="w-3.5 h-3.5 mr-1.5 animate-spin" />{:else}<CheckCircle2 class="w-3.5 h-3.5 mr-1.5" />{/if}
 								Save schedule only
 							</Button>
 						{/if}
-						<Button size="sm" onclick={() => saveAndMaybeRun(true)} disabled={saving || (saveSchedule && scheduleInvalid)}>
+						<Button size="sm" onclick={() => saveAndMaybeRun(true)} disabled={saving || (saveSchedule && scheduleInvalid) || stackHelperFailed}>
 							{#if saving}<Loader2 class="w-3.5 h-3.5 mr-1.5 animate-spin" />{:else}<Play class="w-3.5 h-3.5 mr-1.5" />{/if}
 							{saveSchedule ? 'Run & save schedule' : 'Run backup now'}
 						</Button>

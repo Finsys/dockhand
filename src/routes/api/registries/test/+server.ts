@@ -3,12 +3,25 @@ import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
 import { parseRegistryUrl, getRegistryAuthHeader, DOCKER_HUB_HOSTS } from '$lib/server/docker';
 import { getRegistry } from '$lib/server/db';
+import { isSafeNotificationUrl } from '$lib/server/url-safety';
 
 /**
  * Test registry connectivity and credentials.
  *
  * Accepts either inline credentials (from the modal form) or a registry ID
  * (to test an already-saved registry using stored credentials).
+ */
+/**
+ * @openapi
+ * summary: Test registry connectivity and (if credentials are given) authentication against the V2 endpoint
+ * description: Pass either a saved registryId or inline url/username/password. The outcome is always reported in a 200 body via the success/connectivity/authenticated fields, never as an HTTP error. registryId from GET /api/registries.
+ * body: {registryId:integer, url:string, username:string, password:string}
+ * body-example: {"url":"https://ghcr.io","username":"deploy","password":"***"}
+ * resp-200: {success:boolean!, connectivity:boolean!, authenticated:boolean, message:string!}
+ * resp-200-example: {"success":true,"connectivity":true,"authenticated":true,"message":"Connected and authenticated as deploy"}
+ * resp-400: The url field is missing (and no registryId was supplied)
+ * resp-403: Caller lacks the registries:view permission
+ * resp-404: The referenced registryId does not exist
  */
 export const POST: RequestHandler = async ({ request, cookies }) => {
 	const auth = await authorize(cookies);
@@ -36,6 +49,18 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 
 	if (!url) {
 		return json({ error: 'URL is required' }, { status: 400 });
+	}
+
+	// SSRF guard on the inline-url path only: a saved registryId is admin-configured,
+	// but an inline url is caller-supplied. A registry legitimately lives on a LAN
+	// (self-hosted Harbor/registry:5000), so allow private ranges but block loopback
+	// + cloud metadata + reserved so this tester can't probe the control plane / IMDS.
+	if (!data.registryId) {
+		const withScheme = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+		const safety = isSafeNotificationUrl(withScheme);
+		if (!safety.ok) {
+			return json({ success: false, connectivity: false, message: `Registry host not allowed: ${safety.reason}` });
+		}
 	}
 
 	const parsed = parseRegistryUrl(url);

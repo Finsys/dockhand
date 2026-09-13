@@ -10,7 +10,14 @@ async function getLabelColors(): Promise<Record<string, string>> {
 }
 
 /**
- * GET /api/labels — returns all unique labels with usage counts, environment details, and custom colors
+ * GET /api/labels
+ *
+ * @openapi
+ * summary: List all unique environment labels with their usage counts, the environments carrying each label, and any custom color
+ * resp-200: {labels:array<{label:string!, environments:array<{envId:integer!, envName:string!}>!, count:integer!, color:string}>!, colors:{}}
+ * resp-200-example: {"labels":[{"label":"prod","environments":[{"envId":1,"envName":"Production"}],"count":1,"color":"#ff0000"}],"colors":{"prod":"#ff0000"}}
+ * resp-403: Permission denied (requires environments:view)
+ * resp-500: Failed to get labels
  */
 export const GET: RequestHandler = async ({ cookies }) => {
 	const auth = await authorize(cookies);
@@ -51,11 +58,20 @@ export const GET: RequestHandler = async ({ cookies }) => {
 };
 
 /**
- * POST /api/labels — bulk label operations
- * Body: { action: 'rename', oldLabel: string, newLabel: string }
- *     | { action: 'delete', label: string }
- *     | { action: 'add', label: string, environmentIds: number[] }
- *     | { action: 'set-color', label: string, color: string | null }
+ * POST /api/labels — bulk label operations.
+ * The action field selects the operation: rename (oldLabel + newLabel),
+ * delete (label), add (label + environmentIds), or set-color (label + color).
+ *
+ * @openapi
+ * summary: Perform a bulk label operation on environments — rename, delete, add to environments, or set a custom color — selected via the action field
+ * description: environmentIds from GET /api/environments.
+ * body: {action:string!, oldLabel:string, newLabel:string, label:string, environmentIds:array<integer>, color:string}
+ * body-example: {"action":"rename","oldLabel":"staging","newLabel":"stg"}
+ * resp-200: {success:boolean!, affected:integer}
+ * resp-200-example: {"success":true,"affected":2}
+ * resp-400: Invalid action or missing/empty required fields for the chosen action
+ * resp-403: Permission denied (requires environments:edit)
+ * resp-500: Failed to manage labels
  */
 export const POST: RequestHandler = async ({ request, cookies }) => {
 	const auth = await authorize(cookies);

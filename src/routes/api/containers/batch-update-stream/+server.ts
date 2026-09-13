@@ -73,6 +73,16 @@ export interface UpdateProgress {
 /**
  * Batch update containers with streaming progress.
  * Expects JSON body: { containerIds: string[], vulnerabilityCriteria?: VulnerabilityCriteria }
+ *
+ * @openapi
+ * summary: Recreate a set of containers with live streaming progress (Server-Sent Events), optionally blocking on vulnerability criteria (requires the 'create' permission)
+ * description: Returns a `text/event-stream` reporting per-container progress. `vulnerabilityCriteria` (default "never") can block an update when a container's image scan exceeds the configured severity threshold. containerIds from GET /api/containers.
+ * query: env:integer The target environment ID (omit for the local/default Docker host) (from GET /api/environments)
+ * body: {containerIds:array<string>!, vulnerabilityCriteria:string}
+ * body-example: {"containerIds":["3f4a1c2b9d8e"],"vulnerabilityCriteria":"never"}
+ * resp-200: Server-Sent Events stream (text/event-stream) of per-container update progress
+ * resp-400: Invalid JSON body, or the containerIds array is missing or empty
+ * resp-403: Permission denied
  */
 export const POST: RequestHandler = async (event) => {
 	const { url, cookies, request } = event;
@@ -161,10 +171,10 @@ export const POST: RequestHandler = async (event) => {
 				// Capture the OLD image's Env/Labels BEFORE pulling — once the tag is
 				// repointed the old digest may be untagged/GC'd and un-inspectable.
 				// Used by the env/label rebase in recreateContainer (#1226, #1256).
-				let oldImageConfig: { Env?: string[]; Labels?: Record<string, string> } | null = null;
+				let oldImageConfig: { Env?: string[]; Labels?: Record<string, string>; Cmd?: string[] | null; Entrypoint?: string[] | null } | null = null;
 				try {
 					const oldImg = await inspectImage(currentImageId, envIdNum) as any;
-					oldImageConfig = { Env: oldImg?.Config?.Env, Labels: oldImg?.Config?.Labels };
+					oldImageConfig = { Env: oldImg?.Config?.Env, Labels: oldImg?.Config?.Labels, Cmd: oldImg?.Config?.Cmd ?? null, Entrypoint: oldImg?.Config?.Entrypoint ?? null };
 				} catch {
 					// Best-effort; rebase will fall back if unavailable.
 				}

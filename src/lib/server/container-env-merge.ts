@@ -33,6 +33,39 @@
 export interface ImageEnvLabels {
 	Env?: string[];
 	Labels?: Record<string, string>;
+	/** The image's baked CMD / ENTRYPOINT, for the same value-aware rebase (#1371). */
+	Cmd?: string[] | null;
+	Entrypoint?: string[] | null;
+}
+
+/**
+ * Rebase a container's Cmd/Entrypoint onto the new image (#1371). Same flattening problem
+ * as Env/Labels: a container's Config.Cmd is set at create time whether it came from the
+ * image's CMD or a user `command:` override - spreading it verbatim onto a new image freezes
+ * the OLD image's command, so a container can start with a command the NEW image no longer
+ * provides (missing entrypoint script -> exit 127 -> restart loop).
+ *
+ * The recoverable signal is the same VALUE comparison:
+ *   container == oldImage  -> came from the old image, user never overrode it -> adopt newImage
+ *   container != oldImage  -> a real user/Compose override                    -> keep container
+ * Cmd/Entrypoint are ordered arrays, so equality is order-sensitive (JSON compare). When the
+ * old image value is unknown (null/undefined - caller couldn't inspect it) we KEEP the
+ * container's value (verbatim fallback), exactly as the env/label rebase does.
+ */
+export function rebaseCommand(
+	containerValue: string[] | null | undefined,
+	oldImageValue: string[] | null | undefined,
+	newImageValue: string[] | null | undefined
+): { value: string[] | null | undefined; adopted: boolean } {
+	// Old image not inspectable -> can't tell image-default from user override -> keep verbatim.
+	if (oldImageValue == null) return { value: containerValue, adopted: false };
+	const eq = (a: string[] | null | undefined, b: string[] | null | undefined) =>
+		JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+	// User overrode it (differs from the old image's baked value) -> keep the override.
+	if (!eq(containerValue, oldImageValue)) return { value: containerValue, adopted: false };
+	// Image-baked and untouched -> follow the new image. (Same value -> no-op, adopted:false.)
+	if (eq(newImageValue, oldImageValue)) return { value: containerValue, adopted: false };
+	return { value: newImageValue, adopted: true };
 }
 
 /**

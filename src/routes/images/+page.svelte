@@ -25,6 +25,7 @@
 	import { formatBytes } from '$lib/utils/format';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { copyToClipboard } from '$lib/utils/clipboard';
+	import { buildPinnedRef, shortDigest } from '$lib/utils/pinned-ref';
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
 	import BatchOperationModal from '$lib/components/BatchOperationModal.svelte';
 	import ImageHistoryModal from './ImageHistoryModal.svelte';
@@ -63,6 +64,10 @@
 			tag: string;
 			fullRef: string;
 			imageId: string;
+			/** `repo:tag@sha256:...` for the "copy pinned reference" action, or null if the image has no digest. */
+			pinnedRef: string | null;
+			/** Shortened `sha256:...` shown next to the tag, or null. */
+			digestShort: string | null;
 			size: number;
 			created: number;
 			containers: number;
@@ -98,6 +103,39 @@
 
 	// Pull modal state
 	let showPullModal = $state(false);
+
+	// Load-from-tar state
+	let loadFileInput = $state<HTMLInputElement | null>(null);
+	let loadingImage = $state(false);
+
+	async function handleLoadTar(e: Event) {
+		const input = e.currentTarget as HTMLInputElement;
+		const file = input.files?.[0];
+		input.value = ''; // reset so re-selecting the same file fires change again
+		if (!file) return;
+
+		loadingImage = true;
+		const t = toast.loading(`Loading ${file.name}...`);
+		try {
+			// Stream the file body straight to the endpoint (no in-memory copy).
+			const response = await fetch(appendEnvParam('/api/images/load', envId), {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/x-tar' },
+				body: file
+			});
+			const data = await response.json();
+			if (data?.success) {
+				toast.success(data.loaded || `Loaded image from ${file.name}`, { id: t });
+				await fetchImages();
+			} else {
+				toast.error(data?.error || 'Failed to load image', { id: t });
+			}
+		} catch (err) {
+			toast.error(err instanceof Error ? err.message : 'Failed to load image', { id: t });
+		} finally {
+			loadingImage = false;
+		}
+	}
 
 	// Run modal state
 	let showRunModal = $state(false);
@@ -321,6 +359,16 @@
 		}
 	}
 
+	// Copy digest-pinned reference (repo:tag@sha256:...).
+	let copiedPinned = $state<string | null>(null);
+	async function copyPinnedRef(pinnedRef: string) {
+		const ok = await copyToClipboard(pinnedRef);
+		if (ok) {
+			copiedPinned = pinnedRef;
+			pendingTimeouts.push(setTimeout(() => copiedPinned = null, 2000));
+		}
+	}
+
 	// Export state
 	let exportingId = $state<string | null>(null);
 
@@ -381,6 +429,8 @@
 					tag: repoName === '<none>' ? image.id.slice(7, 19) : '<none>',
 					fullRef: image.id,
 					imageId: image.id,
+					pinnedRef: buildPinnedRef(repoName, image.repoDigests),
+					digestShort: shortDigest(repoName, image.repoDigests),
 					size: image.size,
 					created: image.created,
 					containers: image.containers
@@ -413,6 +463,8 @@
 							tag: tagPart,
 							fullRef: fullTag,
 							imageId: image.id,
+							pinnedRef: buildPinnedRef(fullTag, image.repoDigests),
+							digestShort: shortDigest(fullTag, image.repoDigests),
 							size: image.size,
 							created: image.created,
 							containers: image.containers
@@ -1032,6 +1084,19 @@
 				Pull
 			</Button>
 			{/if}
+			{#if $canAccess('images', 'load')}
+			<Button size="sm" variant="outline" onclick={() => loadFileInput?.click()} disabled={loadingImage}>
+				<Upload class="w-3.5 h-3.5 mr-1.5" />
+				{loadingImage ? 'Loading...' : 'Load from tar'}
+			</Button>
+			<input
+				bind:this={loadFileInput}
+				type="file"
+				accept=".tar,application/x-tar"
+				class="hidden"
+				onchange={handleLoadTar}
+			/>
+			{/if}
 			<Button size="sm" variant="outline" onclick={fetchImages}>Refresh</Button>
 		</div>
 		{/if}
@@ -1342,6 +1407,22 @@
 								<div class="flex items-center gap-1.5">
 									<Tag class="w-3 h-3 text-muted-foreground shrink-0" />
 									<span class="{tagInfo.tag === 'latest' ? 'text-blue-600 dark:text-blue-400' : ''}">{tagInfo.tag}</span>
+									{#if tagInfo.digestShort && tagInfo.pinnedRef}
+										<button
+											type="button"
+											onclick={() => copyPinnedRef(tagInfo.pinnedRef!)}
+											class="inline-flex items-center gap-1 hover:bg-muted px-1 py-0.5 rounded transition-colors cursor-pointer text-muted-foreground hover:text-foreground"
+											title={copiedPinned === tagInfo.pinnedRef ? 'Copied!' : 'Copy digest-pinned reference (tag@sha256)'}
+										>
+											<ShieldCheck class="w-3 h-3 text-emerald-600 dark:text-emerald-400 shrink-0" />
+											<code class="text-2xs">{tagInfo.digestShort}</code>
+											{#if copiedPinned === tagInfo.pinnedRef}
+												<Check class="w-3 h-3 text-green-500" />
+											{:else}
+												<Copy class="w-3 h-3" />
+											{/if}
+										</button>
+									{/if}
 								</div>
 							{:else if column.id === 'id'}
 								<button

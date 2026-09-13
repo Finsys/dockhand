@@ -14,6 +14,7 @@ export interface NotificationPayload {
 	type?: 'info' | 'success' | 'warning' | 'error';
 	environmentId?: number;
 	environmentName?: string;
+	eventType?: string;
 }
 
 export interface NotificationResult {

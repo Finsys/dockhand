@@ -82,6 +82,9 @@
 	let searchInputRef = $state<HTMLInputElement | null>(null);
 	let currentEnvId = $state<number | null>(null);
 	let lastUpdated = $state<Date>(new Date());
+	// Live wall clock: ticks every second so the menubar time stays current between
+	// data refreshes (lastUpdated only moves when data is fetched) (#1182).
+	let now = $state<Date>(new Date());
 	let isConnected = $state(false);
 	let initializedFromStore = false;
 	let switchingEnvId = $state<number | null>(null); // Track which env is being switched to
@@ -341,7 +344,7 @@
 		|| getDefaultTimezone()
 	);
 
-	function formatLastUpdated(date: Date, timezone: string): string {
+	function formatClock(date: Date, timezone: string): string {
 		return new Intl.DateTimeFormat('en-GB', {
 			timeZone: timezone,
 			hour: '2-digit',
@@ -365,8 +368,10 @@
 		fetchDiskUsage();
 		// No polling - only fetch on mount and environment switch
 		document.addEventListener('click', handleClickOutside);
+		const clockTimer = setInterval(() => { now = new Date(); }, 1000);
 		return () => {
 			abortPendingRequests(); // Abort on destroy
+			clearInterval(clockTimer);
 			document.removeEventListener('click', handleClickOutside);
 		};
 	});
@@ -541,7 +546,10 @@
 			class="flex items-center gap-2 {isConnected ? 'text-emerald-500' : 'text-muted-foreground'}"
 			title={isConnected ? 'Live updates connected' : 'Live updates disconnected'}
 		>
-			<span class="text-muted-foreground" title={currentTimezone}>{formatLastUpdated(lastUpdated, currentTimezone)}</span>
+			<span
+				class="text-muted-foreground tabular-nums"
+				title={`${currentTimezone} - data refreshed at ${formatClock(lastUpdated, currentTimezone)}`}
+			>{formatClock(now, currentTimezone)}</span>
 			{#if isConnected}
 				<Wifi class="{iconSizeLargeClass()}" />
 				<span class="font-medium">Live</span>

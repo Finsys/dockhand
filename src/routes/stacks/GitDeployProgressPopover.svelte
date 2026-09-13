@@ -2,80 +2,92 @@
 	import { formatErrorLines } from '$lib/utils/format';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
-	import { Badge } from '$lib/components/ui/badge';
-	import { Progress } from '$lib/components/ui/progress';
 	import {
 		Rocket,
-		CheckCircle2,
-		XCircle,
 		Loader2,
 		AlertCircle,
-		GitBranch,
-		FileCode,
-		Server,
-		Link,
-		AlertTriangle,
-		Copy,
-		Check,
-		Database,
-		KeyRound
+		AlertTriangle
 	} from 'lucide-svelte';
 	import type { Snippet } from 'svelte';
 	import { appSettings } from '$lib/stores/settings';
 	import { watchJob } from '$lib/utils/sse-fetch';
-	import { copyToClipboard } from '$lib/utils/clipboard';
+	import LogViewer from '$lib/components/LogViewer.svelte';
+	import DeployOutputHeader from './DeployOutputHeader.svelte';
+	import { GIT_LINE_MARKER } from '$lib/utils/log-lines';
 
 	interface Props {
 		stackId: number;
 		stackName: string;
+		// Stack icon value (lucide/selfhst/custom) + env, so the header shows the stack's
+		// own icon and the target environment -- matching the compose output modal.
+		stackIcon?: string | null;
+		envId?: number | null;
+		// Called when the dialog closes after a deploy ran, not when the deploy completes:
+		// this component is embedded in a table row, so refreshing the list mid-deploy
+		// would remount it and drop its open dialog.
 		onComplete?: () => void;
 		children: Snippet;
 	}
 
-	let { stackId, stackName, onComplete, children }: Props = $props();
+	let { stackId, stackName, stackIcon = null, envId = null, onComplete, children }: Props = $props();
 
+	let deployFinished = $state(false);
+
+	// The deploy-stream job emits these fields; the UI reads status/message/error/logLine
+	// (step/totalSteps are still sent by the server but no longer rendered as steps).
 	interface StepProgress {
 		status: 'connecting' | 'cloning' | 'fetching' | 'reading' | 'env' | 'secrets' | 'deploying' | 'complete' | 'error';
 		message?: string;
-		step?: number;
-		totalSteps?: number;
 		error?: string;
+		// A raw (already redacted) compose output line.
+		logLine?: string;
 	}
 
 	let open = $state(false);
 	let overallStatus = $state<'idle' | 'confirming' | 'deploying' | 'complete' | 'error'>('idle');
-	let currentStep = $state<StepProgress | null>(null);
-	let steps = $state<StepProgress[]>([]);
+	// Everything the deploy emits -- git stage messages AND compose output -- lands in
+	// one log stream (matching the compose output modal), so there is no separate step
+	// list. Git stage lines carry the GIT_LINE_MARKER so LogViewer draws a git glyph.
+	let logLines = $state<string[]>([]);
 	let errorMessage = $state('');
-	let copied = $state(false);
 
 	const confirmDestructive = $derived($appSettings.confirmDestructive);
 
-	function getStepIcon(status: string) {
-		switch (status) {
-			case 'connecting': return Link;
-			case 'cloning':    return GitBranch;
-			case 'fetching':   return GitBranch;
-			case 'reading':    return FileCode;
-			case 'env':        return Database;
-			case 'secrets':    return KeyRound;
-			case 'deploying':  return Server;
-			case 'complete':   return CheckCircle2;
-			case 'error':      return XCircle;
-			default:           return Loader2;
-		}
-	}
+	// Close the log with a colored status line once the deploy settles, matching the
+	// compose output modal. LogViewer colors via ansi_to_html; the ESC byte is built
+	// from its code point to keep the source ASCII.
+	const ANSI = {
+		green: String.fromCharCode(27) + '[32m',
+		red: String.fromCharCode(27) + '[31m',
+		reset: String.fromCharCode(27) + '[0m'
+	};
+	let logText = $derived.by(() => {
+		const base = logLines.join('\n');
+		if (overallStatus !== 'complete' && overallStatus !== 'error') return base;
+		// Match the closing line's indent to the log's own lines (compose prefixes a
+		// space, other producers don't) so it lines up with the text, not the edge.
+		const lastReal = [...logLines].reverse().find((l) => l.trim().length > 0);
+		const indent = lastReal ? (lastReal.match(/^\s*/)?.[0] ?? '') : '';
+		const [color, label] = overallStatus === 'complete' ? [ANSI.green, 'Succeeded'] : [ANSI.red, 'Failed'];
+		return base + (base ? '\n' : '') + indent + color + label + ANSI.reset;
+	});
 
-	function getStepColor(status: string, isCurrentStep: boolean): string {
-		if (status === 'complete') return 'text-green-600 dark:text-green-400';
-		if (status === 'error')    return 'text-red-600 dark:text-red-400';
-		if (isCurrentStep)         return 'text-violet-600 dark:text-violet-400';
-		return 'text-muted-foreground';
+	// The log viewer follows the app-wide light/dark switch (source of truth: the `.dark`
+	// class on <html>). Read it each time the dialog opens so it tracks the current theme,
+	// not whatever it was when this page-root component first mounted.
+	let logTheme = $state<'light' | 'dark'>('dark');
+	function currentAppTheme(): 'light' | 'dark' {
+		if (typeof document !== 'undefined') {
+			return document.documentElement.classList.contains('dark') ? 'dark' : 'light';
+		}
+		return 'dark';
 	}
+	$effect(() => {
+		if (open) logTheme = currentAppTheme();
+	});
 
 	async function startDeploy() {
-		steps = [];
-		currentStep = null;
+		logLines = [];
 		overallStatus = 'deploying';
 		errorMessage = '';
 
@@ -95,19 +107,33 @@
 			await watchJob(jobId, (line) => {
 				try {
 					const data = line.data as StepProgress;
+					// Compose output line: append verbatim.
+					if (typeof data.logLine === 'string') {
+						logLines = [...logLines, data.logLine];
+						return;
+					}
 					if (data.status === 'complete') {
+						// Keep the final "Successfully deployed ..." line -- no git icon, it's
+						// a compose-side boundary, not a git operation.
+						if (typeof data.message === 'string') {
+							logLines = [...logLines, data.message];
+						}
 						overallStatus = 'complete';
-						currentStep = data;
-						steps = [...steps, data];
-						onComplete?.();
+						deployFinished = true;
 					} else if (data.status === 'error') {
 						overallStatus = 'error';
 						errorMessage = data.error || 'Unknown error occurred';
-						currentStep = data;
-						steps = [...steps, data];
-					} else {
-						currentStep = data;
-						steps = [...steps, data];
+						// Put the reason in the log too (as plain, uniconed lines) so a
+						// failure that happens mid-stream shows WHY, not just "Failed".
+						for (const l of errorMessage.split('\n')) {
+							if (l.trim()) logLines = [...logLines, l];
+						}
+						deployFinished = true;
+					} else if (typeof data.message === 'string') {
+						// Only the actual git stages (clone/fetch/read) get the git glyph; the
+						// "Deploying <stack>..." boundary is compose-side, so it stays plain.
+						const isGitStage = ['connecting', 'cloning', 'fetching', 'reading'].includes(data.status);
+						logLines = [...logLines, (isGitStage ? GIT_LINE_MARKER : '') + data.message];
 					}
 				} catch (e) {
 					console.error('Failed to process job line:', e);
@@ -116,12 +142,13 @@
 
 			if (overallStatus === 'deploying') {
 				overallStatus = 'complete';
-				onComplete?.();
+				deployFinished = true;
 			}
 		} catch (error: any) {
 			console.error('Failed to deploy git stack:', error);
 			overallStatus = 'error';
 			errorMessage = error.message || 'Failed to deploy';
+			deployFinished = true;
 		}
 	}
 
@@ -148,28 +175,39 @@
 		if (overallStatus === 'deploying') return;
 		open = false;
 		overallStatus = 'idle';
-		steps = [];
-		currentStep = null;
+		logLines = [];
 		errorMessage = '';
-		copied = false;
+		// Refresh the list on close, not on complete (see onComplete's doc).
+		if (deployFinished) {
+			deployFinished = false;
+			onComplete?.();
+		}
 	}
-
-	async function copyLogs() {
-		const lines = steps.map(s => s.message || s.status);
-		if (errorMessage) lines.push(`Error: ${errorMessage}`);
-		const ok = await copyToClipboard(lines.join('\n'));
-		if (!ok) return;
-		copied = true;
-		setTimeout(() => { copied = false; }, 2000);
-	}
-
-	const progressPercentage = $derived(
-		currentStep?.step && currentStep?.totalSteps
-			? Math.round((currentStep.step / currentStep.totalSteps) * 100)
-			: 0
-	);
 
 	const isDeploying = $derived(overallStatus === 'deploying');
+
+	// Map the popover's status to the shared header's state + status text.
+	const headerState = $derived<'idle' | 'running' | 'complete' | 'error'>(
+		overallStatus === 'complete' ? 'complete'
+			: overallStatus === 'error' ? 'error'
+			: isDeploying ? 'running'
+			: 'idle'
+	);
+	const headerStatusLine = $derived(
+		overallStatus === 'complete' ? 'Succeeded'
+			: overallStatus === 'error' ? 'Failed'
+			: isDeploying ? 'Deploying...'
+			: ''
+	);
+
+	// Compact while confirming (just a prompt); wide + tall once a deploy runs and the
+	// full log needs room. Matches the compose output modal's size in the deploy state.
+	const isConfirming = $derived(overallStatus === 'confirming');
+	const contentSizeClass = $derived(
+		isConfirming
+			? 'max-w-lg'
+			: 'max-w-[min(90rem,calc(100vw-4rem))] h-[85vh]'
+	);
 </script>
 
 <!-- Trigger wrapper: intercepts click to open the dialog -->
@@ -179,48 +217,25 @@
 
 <Dialog.Root bind:open onOpenChange={(isOpen) => { if (!isOpen) handleClose(); }}>
 	<Dialog.Content
-		class="max-w-2xl flex flex-col gap-0 p-0 overflow-hidden"
+		class="{contentSizeClass} flex flex-col gap-0 p-0 overflow-hidden"
 		showCloseButton={false}
 		interactOutsideBehavior={isDeploying ? 'ignore' : 'close'}
 		escapeKeydownBehavior={isDeploying ? 'ignore' : 'close'}
 	>
 		<!-- Header -->
 		<div class="px-6 py-4 border-b shrink-0">
-			<div class="flex items-center gap-2 min-w-0">
-				{#if overallStatus === 'complete'}
-					<CheckCircle2 class="w-5 h-5 text-green-500 shrink-0" />
-				{:else if overallStatus === 'error'}
-					<XCircle class="w-5 h-5 text-red-500 shrink-0" />
-				{:else if isDeploying}
-					<Loader2 class="w-5 h-5 text-violet-500 animate-spin shrink-0" />
-				{:else}
-					<Rocket class="w-5 h-5 text-violet-500 shrink-0" />
-				{/if}
-				<span class="text-base font-semibold">Git deploy</span>
-				<code class="text-sm font-normal bg-muted px-1.5 py-0.5 rounded ml-1 truncate">{stackName}</code>
-				{#if overallStatus === 'complete'}
-					<Badge variant="outline" class="ml-auto shrink-0 text-green-600 border-green-600/30">Complete</Badge>
-				{:else if overallStatus === 'error'}
-					<Badge variant="outline" class="ml-auto shrink-0 text-red-600 border-red-600/30">Failed</Badge>
-				{:else if isDeploying}
-					<Badge variant="secondary" class="ml-auto shrink-0 tabular-nums text-xs">
-						{#if currentStep?.step && currentStep?.totalSteps}
-							{currentStep.step}/{currentStep.totalSteps}
-						{:else}
-							Deploying...
-						{/if}
-					</Badge>
-				{/if}
-			</div>
-			{#if isDeploying && currentStep?.totalSteps}
-				<div class="mt-3">
-					<Progress value={progressPercentage} class="h-1.5 [&>[data-progress]]:bg-violet-600" />
-				</div>
-			{/if}
+			<DeployOutputHeader
+				verb="Git deploy"
+				{stackName}
+				{stackIcon}
+				{envId}
+				state={headerState}
+				statusLine={headerStatusLine}
+			/>
 		</div>
 
-		<!-- Body: steps log -->
-		<div class="overflow-y-auto px-4 py-3" style="max-height: 55vh; min-height: 12rem;">
+		<!-- Body: one log stream (git stages + compose output), filling the dialog -->
+		<div class="flex-1 min-h-0 flex flex-col px-4 py-3">
 			{#if overallStatus === 'confirming'}
 				<div class="flex items-start gap-3 py-2 px-2">
 					<AlertTriangle class="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
@@ -232,29 +247,29 @@
 						</p>
 					</div>
 				</div>
-			{:else if steps.length === 0 && isDeploying}
+			{:else if logLines.length === 0 && isDeploying}
 				<div class="flex items-center gap-3 text-muted-foreground py-2 px-2">
 					<Loader2 class="w-4 h-4 animate-spin shrink-0" />
 					<span class="text-sm">Initializing...</span>
 				</div>
-			{:else}
-				<div class="space-y-0.5">
-					{#each steps as step, index (index)}
-						{@const StepIcon = getStepIcon(step.status)}
-						{@const isCurrentStep = index === steps.length - 1 && isDeploying}
-						<div class="flex items-center gap-3 py-1.5 px-2 rounded-md text-sm hover:bg-muted/40 transition-colors">
-							<StepIcon
-								class="w-4 h-4 shrink-0 {getStepColor(step.status, isCurrentStep)} {isCurrentStep && step.status !== 'complete' && step.status !== 'error' ? 'animate-spin' : ''}"
-							/>
-							<span class="{getStepColor(step.status, isCurrentStep)}">
-								{step.message || step.status}
-							</span>
-						</div>
-					{/each}
+			{/if}
+
+			{#if logLines.length > 0}
+				<div class="flex-1 min-h-0">
+					<LogViewer
+						logs={logText}
+						title={`${stackName}-git-deploy`}
+						autoRefresh={false}
+						autoScroll={isDeploying}
+						class="h-full"
+						theme={logTheme}
+					/>
 				</div>
 			{/if}
 
-			{#if errorMessage}
+			{#if errorMessage && logLines.length === 0}
+				<!-- Only when the log itself doesn't already carry the reason (e.g. a throw
+				     before any compose output) -- otherwise this box just duplicates it. -->
 				<div class="mt-3 mx-2 p-3 rounded-md bg-destructive/10 border border-destructive/20">
 					<div class="flex items-start gap-2 text-sm text-destructive">
 						<AlertCircle class="w-4 h-4 shrink-0 mt-0.5" />
@@ -266,20 +281,10 @@
 
 		<!-- Footer -->
 		<div class="px-6 py-4 border-t shrink-0 flex items-center justify-between gap-2">
-			<!-- Left: copy / cancel -->
+			<!-- Left: cancel (confirm step only). The log has its own copy button. -->
 			<div>
 				{#if overallStatus === 'confirming'}
 					<Button variant="outline" onclick={handleCancelConfirm}>Cancel</Button>
-				{:else if steps.length > 0}
-					<Button variant="outline" size="sm" onclick={copyLogs} class="gap-1.5">
-						{#if copied}
-							<Check class="w-3.5 h-3.5" />
-							Copied!
-						{:else}
-							<Copy class="w-3.5 h-3.5" />
-							Copy logs
-						{/if}
-					</Button>
 				{/if}
 			</div>
 

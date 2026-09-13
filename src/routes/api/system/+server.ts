@@ -120,6 +120,17 @@ async function getOwnContainerInfo(containerId: string | undefined): Promise<any
 	return null;
 }
 
+/**
+ * GET /api/system - Aggregated system, Docker, runtime and database info
+ *
+ * @openapi
+ * summary: Return aggregated system info — Docker daemon, host, Node.js runtime, database, and object counts for an environment
+ * query: env:integer ID of the environment to collect Docker info for (Docker fields are null when omitted or unreachable) (from GET /api/environments)
+ * resp-200: {docker:object, host:object, runtime:object!, database:object!, stats:object!}
+ * resp-200-example: {"docker":{"version":"27.0.3","apiVersion":"1.46"},"host":{"name":"docker-host","cpus":8,"memory":16777216000},"runtime":{"runtimeName":"Node.js","platform":"linux"},"database":{"type":"SQLite","schemaVersion":42},"stats":{"containers":{"total":10,"running":8,"stopped":2},"images":25,"volumes":5,"networks":4,"stacks":3}}
+ * resp-403: Permission denied, or (enterprise) no access to this environment
+ * resp-500: Failed to fetch system info
+ */
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	const auth = await authorize(cookies);
 

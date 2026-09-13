@@ -4,6 +4,7 @@ import { getGitRepository } from '$lib/server/db';
 import { deployFromRepository } from '$lib/server/git';
 import { auditGitRepository } from '$lib/server/audit';
 import { verifyWebhookSignature } from '$lib/server/webhook-signature';
+import { decideWebhookSecretPolicy, allowSecretlessWebhook } from '$lib/server/webhook-secret-policy';
 
 function detectSource(request: Request): string {
 	if (request.headers.get('x-hub-signature-256')) return 'github';
@@ -11,6 +12,19 @@ function detectSource(request: Request): string {
 	return 'unknown';
 }
 
+/**
+ * @openapi
+ * summary: Webhook trigger (GitHub/GitLab) that deploys from a git repository when its signature/token verifies
+ * description: Public endpoint authenticated by the repository's webhook secret via `X-Hub-Signature-256` (GitHub) or `X-Gitlab-Token` (GitLab); the raw request body is used for HMAC verification. A secret is required by default; set ALLOW_WEBHOOKS_WITHOUT_SECRET=true to accept a secret-less trigger on an isolated network.
+ * path: id:integer! Git repository ID (from GET /api/git/repositories)
+ * resp-200: {success:boolean, error:string}
+ * resp-200-example: {"success":true}
+ * resp-400: The id path segment is not a valid integer
+ * resp-401: The webhook signature or token did not verify
+ * resp-403: Webhooks are not enabled for this repository
+ * resp-404: No repository exists with that ID
+ * resp-500: The deployment triggered by the webhook failed
+ */
 export const POST: RequestHandler = async (event) => {
 	const { params, request } = event;
 	try {
@@ -30,21 +44,32 @@ export const POST: RequestHandler = async (event) => {
 
 		const source = detectSource(request);
 
-		// A secret is mandatory: reject if none is configured.
-		if (!repository.webhookSecret) {
+		const policy = decideWebhookSecretPolicy(!!repository.webhookSecret, allowSecretlessWebhook());
+		if (policy.action === 'reject-no-secret') {
 			await auditGitRepository(event, 'webhook', id, repository.name, {
 				method: 'POST', source, error: 'no_secret_configured'
 			});
 			return json({ error: 'Webhook secret is not configured for this repository' }, { status: 401 });
 		}
+		if (policy.action === 'deploy-unverified') {
+			// ALLOW_WEBHOOKS_WITHOUT_SECRET opt-in (isolated network): deploy without
+			// verification, but record the unverified trigger in the audit trail.
+			const result = await deployFromRepository(id);
+			await auditGitRepository(event, 'webhook', id, repository.name, {
+				method: 'POST', source, verification: 'skipped_no_secret', result: result.success ? 'deployed' : 'failed'
+			});
+			return json(result);
+		}
 
+		// Reaching here means action === 'verify', i.e. a secret is configured.
+		const webhookSecret = repository.webhookSecret as string;
 		const payload = await request.text();
 		const githubSignature = request.headers.get('x-hub-signature-256');
 		const gitlabToken = request.headers.get('x-gitlab-token');
 
 		const signature = githubSignature || gitlabToken;
 
-		if (!verifyWebhookSignature(payload, signature, repository.webhookSecret)) {
+		if (!verifyWebhookSignature(payload, signature, webhookSecret)) {
 			await auditGitRepository(event, 'webhook', id, repository.name, {
 				method: 'POST', source, error: 'invalid_signature'
 			});
@@ -70,6 +95,20 @@ export const POST: RequestHandler = async (event) => {
 };
 
 // Also support GET for simple polling/manual triggers
+/**
+ * @openapi
+ * summary: GET webhook trigger for a git repository, with the secret passed as the `secret` query parameter
+ * description: A secret is required by default; set ALLOW_WEBHOOKS_WITHOUT_SECRET=true to accept a secret-less trigger on an isolated network.
+ * path: id:integer! Git repository ID (from GET /api/git/repositories)
+ * query: secret:string Webhook secret; required only if the repository has a webhook secret configured
+ * resp-200: {success:boolean, error:string}
+ * resp-200-example: {"success":true}
+ * resp-400: The id path segment is not a valid integer
+ * resp-401: The provided secret did not match the repository's webhook secret
+ * resp-403: Webhooks are not enabled for this repository
+ * resp-404: No repository exists with that ID
+ * resp-500: The deployment triggered by the webhook failed
+ */
 export const GET: RequestHandler = async (event) => {
 	const { params, url } = event;
 	try {
@@ -87,12 +126,19 @@ export const GET: RequestHandler = async (event) => {
 			return json({ error: 'Webhook is not enabled for this repository' }, { status: 403 });
 		}
 
-		// A secret is mandatory (see POST handler). Reject if none is configured.
-		if (!repository.webhookSecret) {
+		const policy = decideWebhookSecretPolicy(!!repository.webhookSecret, allowSecretlessWebhook());
+		if (policy.action === 'reject-no-secret') {
 			await auditGitRepository(event, 'webhook', id, repository.name, {
 				method: 'GET', source: 'get', error: 'no_secret_configured'
 			});
 			return json({ error: 'Webhook secret is not configured for this repository' }, { status: 401 });
+		}
+		if (policy.action === 'deploy-unverified') {
+			const result = await deployFromRepository(id);
+			await auditGitRepository(event, 'webhook', id, repository.name, {
+				method: 'GET', source: 'get', verification: 'skipped_no_secret', result: result.success ? 'deployed' : 'failed'
+			});
+			return json(result);
 		}
 
 		// Verify secret via query parameter for GET requests

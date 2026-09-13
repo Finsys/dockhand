@@ -4,6 +4,7 @@
 	import { AlertCircle, Copy, Check, XCircle, AlertTriangle, CheckCircle2 } from 'lucide-svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { copyToClipboard } from '$lib/utils/clipboard';
+	import { parseDockerOutput } from './error-dialog-core';
 
 	interface Props {
 		open: boolean;
@@ -15,75 +16,6 @@
 
 	let { open = $bindable(), title, message, details, onClose }: Props = $props();
 	let copied = $state<'ok' | 'error' | null>(null);
-
-	interface ParsedOutput {
-		warnings: string[];
-		steps: { action: string; status: 'creating' | 'created' | 'starting' | 'started' | 'error' }[];
-		error: string | null;
-		raw: string;
-		parsed: boolean;
-	}
-
-	// Parse docker compose output into structured format
-	function parseDockerOutput(text: string): ParsedOutput {
-		const result: ParsedOutput = {
-			warnings: [],
-			steps: [],
-			error: null,
-			raw: text,
-			parsed: false
-		};
-
-		try {
-			const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-
-			for (const line of lines) {
-				// Parse time="..." level=warning msg="..."
-				const warningMatch = line.match(/time="[^"]*"\s+level=warning\s+msg="([^"]+)"/);
-				if (warningMatch) {
-					result.warnings.push(warningMatch[1]);
-					result.parsed = true;
-					continue;
-				}
-
-				// Parse container/network steps: "Network foo Creating" or "Container foo-1 Created"
-				const stepMatch = line.match(/^\s*(Network|Container|Volume)\s+(\S+)\s+(Creating|Created|Starting|Started|Stopping|Stopped|Removing|Removed)\s*$/i);
-				if (stepMatch) {
-					const [, type, name, status] = stepMatch;
-					const normalizedStatus = status.toLowerCase() as any;
-					result.steps.push({
-						action: `${type} ${name}`,
-						status: normalizedStatus
-					});
-					result.parsed = true;
-					continue;
-				}
-
-				// Parse error lines
-				if (line.startsWith('Error') || line.includes('error') || line.includes('failed')) {
-					result.error = result.error ? `${result.error}\n${line}` : line;
-					result.parsed = true;
-					continue;
-				}
-			}
-
-			// If we parsed something but have no clear error, check for remaining unparsed content
-			if (result.parsed && !result.error) {
-				const unparsed = lines.filter(line => {
-					if (line.match(/time="[^"]*"\s+level=warning/)) return false;
-					if (line.match(/^\s*(Network|Container|Volume)\s+\S+\s+(Creating|Created|Starting|Started|Stopping|Stopped|Removing|Removed)\s*$/i)) return false;
-					return true;
-				});
-				if (unparsed.length > 0) {
-					result.error = unparsed.join('\n');
-				}
-			}
-		} catch {
-			// Parsing failed, will show raw message
-		}
-
-		return result;
-	}
 
 	const parsed = $derived(parseDockerOutput(message));
 

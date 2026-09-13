@@ -14,6 +14,22 @@
  */
 
 import { isUnbackupableBindSource } from '../../utils/unbackupable-mounts';
+import { safeKey, volumeDedupKey, volumeStorageKey } from '../../utils/volume-identity';
+
+// Capture and the UI picker share ONE key allocator (utils/volume-identity) so they can't drift.
+// Re-exported so server callers (restore-core.ts) import safeKey from here.
+export { safeKey };
+
+/** The `/volumes/<key>` mount point a captured/restored volume rides on. ONE definition of the
+ * mount-point contract so backup capture (ro), restore (rw), and the preview can't drift on it. */
+export function volumeInclude(key: string): string {
+	return `/volumes/${key}`;
+}
+
+/** The `<source>:/volumes/<key>:<mode>` helper bind string. Backup capture uses `ro`, restore `rw`. */
+export function volumeBind(source: string, key: string, mode: 'ro' | 'rw'): string {
+	return `${source}:${volumeInclude(key)}:${mode}`;
+}
 
 /** A single mount as returned by a container inspect (the fields we use). */
 export interface Mount {
@@ -54,19 +70,6 @@ export interface DiscoveryResult {
 
 const SUPPORTED = new Set(['volume', 'bind']);
 
-/** Make a bind Source/Destination into a safe `/volumes/` key. Non-safe chars
- * become `_`; a collision gets a short numeric suffix so two mounts never map to
- * the same key (which would make restic overwrite one with the other). */
-export function safeKey(base: string, taken: Set<string> = new Set()): string {
-	let key = base.replace(/^\//, '').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 100) || 'bind';
-	if (!taken.has(key)) { taken.add(key); return key; }
-	let i = 2;
-	while (taken.has(`${key}_${i}`)) i++;
-	const out = `${key}_${i}`;
-	taken.add(out);
-	return out;
-}
-
 /**
  * Turn a list of containers' mounts into the volumes to back up. Named volumes
  * key on their volume name (stable, restore knows it); binds key on a
@@ -77,9 +80,8 @@ export function safeKey(base: string, taken: Set<string> = new Set()): string {
 export function discoverVolumesFromMounts(containers: Array<{ name: string; mounts: Mount[] }>): DiscoveryResult {
 	const volumes: DiscoveredVolume[] = [];
 	const skipped: SkippedMount[] = [];
-	const seenVolumeNames = new Set<string>();
-	const seenBindPairs = new Set<string>();
-	const takenKeys = new Set<string>();
+	const seen = new Set<string>();      // a volume shared across containers is captured once
+	const takenKeys = new Set<string>(); // no two captures share a /volumes/<key>
 
 	for (const container of containers) {
 		for (const mount of container.mounts) {
@@ -93,12 +95,15 @@ export function discoverVolumesFromMounts(containers: Array<{ name: string; moun
 			}
 
 			if (mount.Type === 'volume' && mount.Name) {
-				if (seenVolumeNames.has(mount.Name)) continue;
-				seenVolumeNames.add(mount.Name);
-				takenKeys.add(mount.Name);
+				const dedup = volumeDedupKey({ type: 'volume', source: mount.Name, destination: mount.Destination ?? '', name: mount.Name });
+				if (seen.has(dedup)) continue;
+				seen.add(dedup);
+				// Named volumes key on their name; volumeStorageKey routes it through the shared
+				// allocator so it can't collide with a bind whose slug equals the volume name.
+				const key = volumeStorageKey({ type: 'volume', source: mount.Name, destination: mount.Destination ?? '', name: mount.Name }, takenKeys);
 				volumes.push({
-					key: mount.Name,
-					bind: `${mount.Name}:/volumes/${mount.Name}:ro`,
+					key,
+					bind: volumeBind(mount.Name, key, 'ro'),
 					name: mount.Name,
 					type: 'volume',
 					source: mount.Name,
@@ -112,13 +117,15 @@ export function discoverVolumesFromMounts(containers: Array<{ name: string; moun
 					});
 					continue;
 				}
-				const pairKey = `${mount.Source}\n${mount.Destination}`;
-				if (seenBindPairs.has(pairKey)) continue;
-				seenBindPairs.add(pairKey);
-				const key = safeKey(mount.Destination, takenKeys);
+				// Two binds to the same destination from DIFFERENT sources are different volumes
+				// and both survive (#1373); only an identical (source,destination) is deduped.
+				const dedup = volumeDedupKey({ type: 'bind', source: mount.Source, destination: mount.Destination });
+				if (seen.has(dedup)) continue;
+				seen.add(dedup);
+				const key = volumeStorageKey({ type: 'bind', source: mount.Source, destination: mount.Destination }, takenKeys);
 				volumes.push({
 					key,
-					bind: `${mount.Source}:/volumes/${key}:ro`,
+					bind: volumeBind(mount.Source, key, 'ro'),
 					name: mount.Destination,
 					type: 'bind',
 					source: mount.Source,

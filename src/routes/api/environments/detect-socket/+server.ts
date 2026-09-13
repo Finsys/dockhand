@@ -11,6 +11,11 @@ interface DetectedSocket {
 
 /**
  * Detect available Docker sockets on the system
+ *
+ * @openapi
+ * summary: Detect common Docker/Podman socket paths that exist on the Dockhand host
+ * resp-200: {sockets:array<{path:string!, name:string!, exists:boolean!}>!, homedir:string!}
+ * resp-200-example: {"sockets":[{"path":"/var/run/docker.sock","name":"Docker (default)","exists":true}],"homedir":"/home/dockhand"}
  */
 export const GET: RequestHandler = async () => {
 	const home = homedir();

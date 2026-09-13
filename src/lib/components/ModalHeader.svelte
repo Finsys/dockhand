@@ -12,18 +12,26 @@
 	// inherits the title's colour/weight, only the env name is amber. Anything
 	// else — a rename pencil, a status badge — goes in the `extra` snippet,
 	// rendered inline after the env suffix.
+	import ContainerIcon from '$lib/components/ContainerIcon.svelte';
+
 	let {
 		icon,
 		title,
 		name = undefined,
 		envName = undefined,
-		extra = undefined
+		extra = undefined,
+		iconImage = undefined,
+		iconName = undefined
 	}: {
 		icon: Component;
 		title: string;
 		name?: string;
 		envName?: string;
 		extra?: Snippet;
+		// When this header describes a container, pass its image (+ name) to show the
+		// matched app logo in place of the lucide icon; falls back to `icon` with no match.
+		iconImage?: string;
+		iconName?: string;
 	} = $props();
 
 	const Icon = $derived(icon);
@@ -31,7 +39,11 @@
 </script>
 
 <Dialog.Title class="flex items-center gap-2 min-w-0">
-	<Icon class="w-5 h-5 shrink-0" />
+	{#if iconImage !== undefined}
+		<ContainerIcon image={iconImage} name={iconName ?? ''} class="w-5 h-5" fallbackIcon={icon} showFallbackWhenOff />
+	{:else}
+		<Icon class="w-5 h-5 shrink-0" />
+	{/if}
 	<span class="shrink-0">{title}</span>
 	{#if name}
 		<Tooltip.Root delayDuration={200} ignoreNonKeyboardFocus>

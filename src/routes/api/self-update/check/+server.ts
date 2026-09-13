@@ -86,6 +86,12 @@ async function localDockerFetch(path: string, options: RequestInit = {}): Promis
  * Uses localDockerFetch exclusively to avoid environment routing issues
  * when the image comes from a private registry.
  */
+/**
+ * @openapi
+ * summary: Check whether a newer Dockhand image is available (version-tag compare via GitHub changelog, or registry-digest compare for mutable tags like :latest)
+ * resp-200: {updateAvailable:boolean!, currentImage:string, newImage:string, latestVersion:string, currentDigest:string, newDigest:string, containerName:string, isComposeManaged:boolean, isLocalImage:boolean, error:string} (also used for "not running in Docker" / inspection / changelog / registry failures — reported as updateAvailable:false + error, not an HTTP error status)
+ * resp-403: Admin access required
+ */
 export const GET: RequestHandler = async ({ cookies }) => {
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !auth.isAdmin) {

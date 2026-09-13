@@ -6,12 +6,15 @@ import { NOTIFICATION_EVENT_TYPES, type NotificationEventType } from '$lib/serve
  * Test endpoint to trigger notifications for any event type.
  * This is intended for development/testing purposes only.
  *
- * POST /api/notifications/trigger-test
- * Body: {
- *   eventType: string,
- *   environmentId?: number,
- *   payload: { title: string, message: string, type?: string }
- * }
+ * @openapi
+ * summary: Trigger a real notification for a given event type (development/testing helper)
+ * description: environmentId from GET /api/environments.
+ * body: {eventType:string!, environmentId:integer, payload:{title:string!, message:string!, type:string}}
+ * body-example: {"eventType":"container_unhealthy","environmentId":1,"payload":{"title":"Container unhealthy","message":"web-1 is unhealthy","type":"warning"}}
+ * resp-200: {success:boolean!, sent:integer, eventType:string!, environmentId:integer}
+ * resp-200-example: {"success":true,"sent":1,"eventType":"container_unhealthy","environmentId":1}
+ * resp-400: eventType required, payload with title and message required, unknown event type, or environmentId missing for a non-system event
+ * resp-500: Unknown error while sending the notification
  */
 export const POST: RequestHandler = async ({ request }) => {
 	try {
@@ -83,6 +86,10 @@ export const POST: RequestHandler = async ({ request }) => {
 
 /**
  * GET endpoint to list all available event types
+ *
+ * @openapi
+ * summary: List all available notification event types, grouped into categories
+ * resp-200: {eventTypes:array<{id:string!, label:string}>, categories:{container:array<string>, autoUpdate:array<string>, gitStack:array<string>, stack:array<string>, security:array<string>, system:array<string>}}
  */
 export const GET: RequestHandler = async () => {
 	return json({

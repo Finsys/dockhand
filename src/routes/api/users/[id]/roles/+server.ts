@@ -13,6 +13,16 @@ import { auditUser } from '$lib/server/audit';
 import { invalidateTokenCacheForUser } from '$lib/server/api-tokens';
 
 // GET /api/users/[id]/roles - Get roles assigned to a user
+/**
+ * @openapi
+ * summary: List the roles assigned to a user (enterprise only)
+ * path: id:integer! Numeric id of the user (from GET /api/users)
+ * resp-200: array<{roleId:integer!, name:string!, environmentId:integer}>
+ * resp-400: User id is required
+ * resp-403: Enterprise license required
+ * resp-404: User not found
+ * resp-500: Failed to read the user roles
+ */
 export const GET: RequestHandler = async ({ params, cookies }) => {
 	// Check enterprise license
 	if (!(await isEnterprise())) {
@@ -40,6 +50,19 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 };
 
 // POST /api/users/[id]/roles - Assign a role to a user
+/**
+ * @openapi
+ * summary: Assign a role to a user, optionally scoped to an environment (enterprise, admin only)
+ * description: roleId from GET /api/roles. environmentId from GET /api/environments.
+ * path: id:integer! Numeric id of the user (from GET /api/users)
+ * body: {roleId:integer!, environmentId:integer}
+ * body-example: {"roleId":3,"environmentId":1}
+ * resp-201: The created user-role assignment
+ * resp-400: User id or role id is required
+ * resp-403: Enterprise license required, or admin access required
+ * resp-404: User not found
+ * resp-500: Failed to assign the role
+ */
 export const POST: RequestHandler = async (event) => {
 	const { params, request, cookies } = event;
 	// Check enterprise license
@@ -87,6 +110,19 @@ export const POST: RequestHandler = async (event) => {
 };
 
 // DELETE /api/users/[id]/roles - Remove a role from a user
+/**
+ * @openapi
+ * summary: Remove a role assignment from a user, optionally scoped to an environment (enterprise, admin only)
+ * description: roleId from GET /api/roles. environmentId from GET /api/environments.
+ * path: id:integer! Numeric id of the user (from GET /api/users)
+ * body: {roleId:integer!, environmentId:integer}
+ * body-example: {"roleId":3,"environmentId":1}
+ * resp-200: {success:boolean!}
+ * resp-400: User id or role id is required
+ * resp-403: Enterprise license required, or admin access required
+ * resp-404: Role assignment not found
+ * resp-500: Failed to remove the role
+ */
 export const DELETE: RequestHandler = async (event) => {
 	const { params, request, cookies } = event;
 	// Check enterprise license

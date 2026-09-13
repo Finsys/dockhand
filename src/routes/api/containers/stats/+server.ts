@@ -78,6 +78,18 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T
 	]);
 }
 
+/**
+ * GET /api/containers/stats - Get resource stats for all running containers
+ *
+ * @openapi
+ * summary: Return a CPU/memory/network/block-IO stats snapshot for every running container in an environment (requires the 'view' permission)
+ * description: Returns an empty array when no environment is configured or specified. With `debug=<name>` it returns the raw memory_stats for a single container instead. On internal error it returns an empty array with status 200.
+ * query: env:integer The target environment ID (omit for the local/default Docker host) (from GET /api/environments)
+ * query: debug:string Return raw Docker stats for the single container with this name instead of the aggregate list
+ * resp-200: Array of per-container stats snapshots (or, with `debug`, the raw stats for one container)
+ * resp-403: Permission denied
+ * resp-404: The requested debug container was not found
+ */
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	const auth = await authorize(cookies);
 

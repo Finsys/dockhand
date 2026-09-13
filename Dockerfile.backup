@@ -9,6 +9,7 @@
 # (remote ARM login: pipe password over stdin, no quoted interpolation)
 # (use write-capable dockerhub token so the Docker Hub push authorizes)
 # (revert rclone — the rclone: backend is unfinished/removed; see vault rclone.md)
+# (rebuild: registry GC orphaned a helper-image blob; force a clean multi-arch republish)
 FROM alpine:3.21 AS os-builder
 
 ARG TARGETARCH

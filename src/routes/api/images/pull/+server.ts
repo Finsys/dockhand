@@ -46,6 +46,17 @@ function buildPullUrl(imageName: string): string {
 		: `/images/create?fromImage=${encodeURIComponent(fromImage)}`;
 }
 
+/**
+ * POST /api/images/pull - Pull an image, streaming progress (SSE)
+ *
+ * @openapi
+ * summary: Pull a Docker image and stream pull (and optional scan-on-pull) progress as Server-Sent Events
+ * query: env:integer ID of the environment to pull into (from GET /api/environments)
+ * body: {image:string!, scanAfterPull:boolean}
+ * body-example: {"image":"nginx:latest","scanAfterPull":false}
+ * resp-200: A Server-Sent Events stream of pull progress, ending with a "result" event
+ * resp-403: Permission denied, or (enterprise) no access to this environment
+ */
 export const POST: RequestHandler = async (event) => {
 	const { request, url, cookies } = event;
 	const auth = await authorize(cookies);

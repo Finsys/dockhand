@@ -17,6 +17,18 @@ import type { RequestHandler } from './$types';
 import { checkSchemaHealth } from '$lib/server/db/drizzle';
 import { authorize } from '$lib/server/authorize';
 
+/**
+ * GET /api/health/database - Database schema health check
+ *
+ * @openapi
+ * summary: Public database health check reporting schema/migration/table status; authenticated settings:view callers also get connection details
+ * description: Returns HTTP 200 when healthy and 503 when unhealthy (schema drift or table loss); 500 on an unexpected error. Connection details and the migration tag are only included for authenticated callers with settings:view.
+ * resp-200: {healthy:boolean!, database:string!, migrationsTable:boolean!, appliedMigrations:integer!, pendingMigrations:integer!, tables:integer!, timestamp:string!}
+ * resp-200-desc: Schema health; an unhealthy database returns the same shape with HTTP 503
+ * resp-200-example: {"healthy":true,"database":"sqlite","migrationsTable":true,"appliedMigrations":42,"pendingMigrations":0,"tables":25,"timestamp":"2026-07-01T10:00:00.000Z"}
+ * resp-500: Unexpected error while checking database health
+ * resp-500-example: {"healthy":false,"error":"connection refused","timestamp":"2026-07-01T10:00:00.000Z"}
+ */
 export const GET: RequestHandler = async ({ cookies }) => {
 	try {
 		const health = await checkSchemaHealth();

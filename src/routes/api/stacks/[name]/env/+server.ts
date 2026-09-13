@@ -1,5 +1,5 @@
 import { json } from '@sveltejs/kit';
-import { getStackEnvVars, setStackEnvVars, getStackSource } from '$lib/server/db';
+import { getStackEnvVars, setStackEnvVars, getStackSource, getStackInjectedSecretKeys, getSecretProviderById } from '$lib/server/db';
 import { findStackDir } from '$lib/server/stacks';
 import { authorize } from '$lib/server/authorize';
 import { existsSync, readFileSync } from 'node:fs';
@@ -33,6 +33,16 @@ function parseEnvFile(content: string): Record<string, string> {
  * SECURITY: Secrets are returned as '***' (masked) - they are NEVER sent in plain text.
  * Secrets are stored only in the database and injected via shell environment at runtime.
  * The .env file only contains non-secret variables.
+ */
+/**
+ * @openapi
+ * summary: Get a stack's env vars plus injected provider keys
+ * description: The source of `variables` depends on the stack type. For a GIT stack, ALL variables (secret and non-secret) come from the database via this endpoint - the DB is the canonical store the UI, `POST /env/validate`, and deploys read. For an INTERNAL/adopted stack, non-secrets come from the on-disk `.env` file (written via `PUT /env/raw`) and only secrets come from the DB. Secret values are masked as `***` and never returned in plaintext. Each variable is `{ key, value, isSecret }`.
+ * path: name:string The stack name
+ * query: env:integer Environment id the stack belongs to
+ * resp-200: {variables:array<{key:string!, value:string!, isSecret:boolean!}>!, injectedSecretKeys:array<string>, secretProvider:object}
+ * resp-403: Permission denied (needs stacks:view)
+ * resp-500: Failed to read env vars
  */
 export const GET: RequestHandler = async ({ params, url, cookies }) => {
 	const auth = await authorize(cookies);
@@ -107,7 +117,16 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 			}
 		}
 
-		return json({ variables });
+		// Provider-injected key NAMES from the last deploy (no values) + the bound
+		// provider's type/name, so the UI can show "these were loaded from <provider>".
+		const injectedSecretKeys = [...await getStackInjectedSecretKeys(stackName, envIdNum ?? undefined)];
+		let secretProvider: { type: string; name: string } | null = null;
+		if (source?.secretProviderId) {
+			const p = await getSecretProviderById(source.secretProviderId);
+			if (p) secretProvider = { type: p.type, name: p.name };
+		}
+
+		return json({ variables, injectedSecretKeys, secretProvider });
 	} catch (error) {
 		console.error('Error getting stack env vars:', error);
 		return json({ error: 'Failed to get environment variables' }, { status: 500 });
@@ -116,14 +135,26 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 
 /**
  * PUT /api/stacks/[name]/env?env=X
- * Save secret environment variables for a stack.
- * Body: { variables: [{ key, value, isSecret }] }
+ * Save environment variables for a stack. Body: { variables: [{ key, value, isSecret }] }.
  *
- * Only secrets are stored in the database. Non-secret variables live in the
- * .env file (written by PUT /env/raw) and are read directly by Docker Compose.
+ * Every variable in the body is written to the database. For a git stack the DB is the
+ * canonical store for both overrides and secrets; for an internal/adopted stack the DB
+ * holds secrets while non-secrets normally live in the .env file (written by PUT /env/raw).
  *
- * If a secret's value is '***' (masked placeholder), the original value
- * from the database is preserved.
+ * If a secret's value is '***' (masked placeholder), the original value from the database
+ * is preserved.
+ */
+/**
+ * @openapi
+ * summary: Save a stack's env vars to the DB
+ * description: Persists EVERY variable in the body to the database (secrets and non-secrets alike). For a GIT stack this is the canonical store - non-secret overrides and secrets both belong here, NOT in the `.env` file. For an INTERNAL/adopted stack the DB is used for secrets while non-secrets are expected in the `.env` file (written via `PUT /env/raw`); posting a non-secret here still saves it but the file remains the source the UI reads for that type. A masked secret value of `***` is left unchanged (the stored value is preserved). Each item is `{ key, value, isSecret? }`; a request whose `variables` are not such objects is rejected with 400.
+ * path: name:string The stack name
+ * query: env:integer Environment id the stack belongs to
+ * body: {variables:array<{key:string!, value:string!, isSecret:boolean}>!}
+ * body-example: {"variables":[{"key":"DB_HOST","value":"db","isSecret":false},{"key":"DB_PASSWORD","value":"s3cret","isSecret":true}]}
+ * resp-400: Invalid variables payload
+ * resp-403: Permission denied (needs stacks:edit)
+ * resp-500: Failed to save env vars
  */
 export const PUT: RequestHandler = async ({ params, url, cookies, request }) => {
 	const auth = await authorize(cookies);

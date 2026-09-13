@@ -323,7 +323,7 @@
 				</Tabs.Trigger>
 			</Tabs.List>
 
-			<div class="overflow-y-auto pb-4 h-[520px]">
+			<div class="overflow-y-auto pb-4 pr-2 h-[530px]">
 				<Tabs.Content value="channel" class="space-y-4 mt-0">
 			<div class="grid grid-cols-2 gap-4">
 				<div class="space-y-2">
@@ -449,18 +449,28 @@ ntfy://my-topic
 ntfy://host/topic?auth=base64token&priority=3
 ntfys://host/topic?auth=base64token
 pushover://user_key/api_token
+pushover://user_key/api_token/device1/device2
+pover://user_key@api_token/device1/device2
+mqtt://user:pass@broker-host:1883/dockhand/events?qos=1&amp;retain=true
+mqtts://broker-host:8883/dockhand/events
 workflows://hostname/workflow/signature
 bark://bark_key
 bark://host/bark_key
 barks://host/bark_key
 signal://host:8080/+sender/+recipient
 apprise://host:8000/your-key
-jsons://hostname/webhook/path"
+jsons://hostname/webhook/path
+zabbix://hostname/api_jsonrpc.php?token=TOKEN&amp;host=HOST&amp;key=ITEM_KEY
+zabbixs://hostname/api_jsonrpc.php?token=TOKEN&amp;host=HOST&amp;key=ITEM_KEY"
 						class="flex min-h-[220px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
 					></textarea>
 					<p class="text-xs text-muted-foreground">
-						Supports Discord, Slack, Mattermost, Telegram, ntfy, Gotify, Pushover, Bark, Signal (via signal-cli-rest-api), Microsoft Teams (via Workflows), and generic JSON. Or use <code>apprise://</code> to forward to a self-hosted <a href="https://github.com/caronc/apprise-api" target="_blank" rel="noopener">caronc/apprise-api</a> server for any provider Apprise upstream supports.
-						</p>
+						Built-in channels: Discord, Slack, Mattermost, Telegram, ntfy, Gotify, Pushover, MQTT, Bark, Signal (via signal-cli-rest-api), Microsoft Teams (via Workflows), Zabbix (via history.push), and generic JSON.
+					</p>
+					<p class="flex gap-1.5 text-xs text-muted-foreground">
+						<HelpCircle class="w-3.5 h-3.5 shrink-0 mt-0.5 text-amber-500" />
+						<span>Need a provider that is not in the list (Matrix, Nextcloud, Pushbullet, Home Assistant, ...)? Run a <a href="https://github.com/caronc/apprise-api" target="_blank" rel="noopener">caronc/apprise-api</a> server, configure the provider there, and point Dockhand at it with <code>apprise://host/key</code> (or <code>apprises://</code> for TLS). Every provider Apprise supports is then reachable.</span>
+					</p>
 					</div>
 				</div>
 			{/if}

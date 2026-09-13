@@ -68,7 +68,6 @@
 	} from 'lucide-svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import * as Alert from '$lib/components/ui/alert';
-	import * as Popover from '$lib/components/ui/popover';
 	import IconPicker from '$lib/components/icon-picker.svelte';
 	import AvatarCropper from '$lib/components/AvatarCropper.svelte';
 	import { isCustomIcon } from '$lib/utils/icons';
@@ -87,6 +86,7 @@
 	import { licenseStore } from '$lib/stores/license';
 	import { formatDateTime, formatDate } from '$lib/stores/settings';
 	import { getLabelColor, getLabelBgColor, parseLabels, MAX_LABELS } from '$lib/utils/label-colors';
+	import { MEMORY_SUPPORT_DOC_URL } from '$lib/utils/memory-support';
 	import { labelColorOverrides } from '$lib/stores/label-colors';
 	import EventTypesEditor from './EventTypesEditor.svelte';
 	import UpdatesTab from './tabs/UpdatesTab.svelte';
@@ -110,7 +110,10 @@
 		protocol: string;
 		tlsCa?: string;
 		tlsCert?: string;
-		tlsKey?: string;
+		// tlsKey / hawserToken are never returned by the API (write-only secrets); the
+		// has* flags say whether one is stored.
+		hasTlsKey?: boolean;
+		hasHawserToken?: boolean;
 		tlsSkipVerify?: boolean;
 		icon?: string;
 		socketPath?: string;
@@ -123,6 +126,7 @@
 		hawserAgentName?: string;
 		hawserVersion?: string;
 		hawserCapabilities?: string;
+		labels?: string;
 		publicIp?: string;
 		createdAt: string;
 		updatedAt: string;
@@ -186,6 +190,7 @@
 				{ id: 'auto_update_failed', label: 'Update failed', description: 'Container auto-update failed' },
 				{ id: 'auto_update_blocked', label: 'Update blocked by vulns', description: 'Update blocked due to vulnerability criteria' },
 				{ id: 'updates_detected', label: 'Updates detected', description: 'Container image updates are available (scheduled check)' },
+				{ id: 'newer_version_available', label: 'Newer version tag', description: 'A newer version tag is published for a pinned image (semver, advisory)' },
 				{ id: 'batch_update_success', label: 'Batch update completed', description: 'Scheduled container updates completed successfully' }
 			]
 		},
@@ -275,9 +280,15 @@
 	let formHost = $state('');
 	let formPort = $state(2375); // Default for direct Docker connection
 	let formProtocol = $state('http');
+	// direct-only: where Dockhand stages compose + relative-bind files on the remote host,
+	// so `./config`/`./data` binds resolve. Empty = current behavior (relative binds unsupported).
+	let formRemoteStacksDir = $state('');
 	let formTlsCa = $state('');
 	let formTlsCert = $state('');
 	let formTlsKey = $state('');
+	// Whether the environment already has a stored tlsKey (the value itself is never
+	// returned by the API). Drives the "leave blank to keep" hint on the field.
+	let hasStoredTlsKey = $state(false);
 	let formTlsSkipVerify = $state(false);
 	let formIcon = $state('globe');
 	let pendingIconData = $state<string | null>(null);
@@ -294,7 +305,14 @@
 	let formDiskWarningThreshold = $state(80);
 	let formDiskWarningThresholdGb = $state(50);
 	let formConnectionType = $state<ConnectionType>('socket');
+	// Envs that keep stack files on a REMOTE host, so backup needs a declared stack path.
+	// For hawser it is backup-only (the agent owns its STACKS_DIR). For direct it also drives
+	// deploy: Dockhand copies the folder there and rewrites relative binds to that host path.
+	const usesStackPath = (ct: ConnectionType) => ct === 'direct' || ct === 'hawser-standard' || ct === 'hawser-edge';
+	const isHawserConn = (ct: ConnectionType) => ct === 'hawser-standard' || ct === 'hawser-edge';
 	let formHawserToken = $state('');
+	// Whether a hawser token is already stored (value never returned by the API).
+	let hasStoredHawserToken = $state(false);
 	let formLabels = $state<string[]>([]);
 	let newLabelInput = $state('');
 	let showLabelDropdown = $state(false);
@@ -477,6 +495,9 @@
 	// Test connection state
 	let testingConnection = $state(false);
 	let testResult = $state<{ success: boolean; info?: any; error?: string; isEdgeMode?: boolean } | null>(null);
+	// Shown when a successful Test connection reveals the daemon's kernel has cgroup
+	// memory accounting disabled (per-container memory shows 0 - common on Raspberry Pi).
+	let memWarnOpen = $state(false);
 
 	// Socket detection state
 	let detectingSockets = $state(false);
@@ -570,7 +591,11 @@
 			formProtocol = environment.protocol;
 			formTlsCa = environment.tlsCa || '';
 			formTlsCert = environment.tlsCert || '';
-			formTlsKey = environment.tlsKey || '';
+			// The API never returns the tlsKey / hawserToken secrets (they're stripped
+			// server-side). Start blank and remember whether one is stored so the field
+			// can say "leave blank to keep"; a blank submit keeps the existing secret.
+			formTlsKey = '';
+			hasStoredTlsKey = !!environment.hasTlsKey;
 			formTlsSkipVerify = environment.tlsSkipVerify ?? false;
 			formIcon = environment.icon || 'globe';
 			formSocketPath = environment.socketPath || '/var/run/docker.sock';
@@ -578,7 +603,8 @@
 			formCollectMetrics = environment.collectMetrics ?? true;
 			formHighlightChanges = environment.highlightChanges ?? true;
 			formConnectionType = (environment.connectionType as ConnectionType) || 'socket';
-			formHawserToken = environment.hawserToken || '';
+			formHawserToken = '';
+			hasStoredHawserToken = !!environment.hasHawserToken;
 			formLabels = parseLabels(environment.labels);
 			newLabelInput = '';
 			formPublicIp = environment.publicIp || '';
@@ -598,6 +624,7 @@
 			loadImagePruneSettings(environment.id);
 			loadTimezone(environment.id);
 			loadDiskWarningSettings(environment.id);
+			if (usesStackPath(formConnectionType)) loadRemoteStacksDir(environment.id);
 			// Load Hawser token if edge mode
 			if (formConnectionType === 'hawser-edge') {
 				loadHawserToken(environment.id);
@@ -607,9 +634,11 @@
 			formHost = '';
 			formPort = 2375;
 			formProtocol = 'http';
+			formRemoteStacksDir = '';
 			formTlsCa = '';
 			formTlsCert = '';
 			formTlsKey = '';
+			hasStoredTlsKey = false;
 			formTlsSkipVerify = false;
 			formIcon = 'globe';
 			pendingIconData = null;
@@ -623,6 +652,7 @@
 			formDiskWarningThresholdGb = 50;
 			formConnectionType = 'socket';
 			formHawserToken = '';
+			hasStoredHawserToken = false;
 			formLabels = [];
 			newLabelInput = '';
 			formPublicIp = '';
@@ -717,7 +747,10 @@
 					tlsCert: cleanCertificate(formTlsCert),
 					tlsKey: cleanCertificate(formTlsKey),
 					tlsSkipVerify: formTlsSkipVerify,
-					hawserToken: formHawserToken || pendingToken
+					hawserToken: formHawserToken || pendingToken,
+					// When editing, let the server fall back to the stored token/key for any
+					// secret the form left blank (secrets are never sent back to the client) (#1483).
+					environmentId: isEditing && environment ? environment.id : undefined
 				})
 			});
 
@@ -729,6 +762,9 @@
 					toast.info('Edge mode - connection will be tested when agent connects');
 				} else {
 					toast.success(`Connected! Docker ${result.info.serverVersion} - ${result.info.containers} containers`);
+					// Docker reports the kernel's cgroup memory controller is off -> container
+					// memory will show 0. Surface it now so the user isn't left guessing.
+					if (result.info.memoryLimitSupported === false) memWarnOpen = true;
 				}
 			} else {
 				toast.error(result.error || 'Connection failed');
@@ -883,6 +919,7 @@
 				if (newEnv?.id) {
 					await saveTimezone(newEnv.id);
 					await saveDiskWarningSettings(newEnv.id);
+					if (usesStackPath(formConnectionType)) await saveRemoteStacksDir(newEnv.id);
 				}
 				onSaved();
 				onClose();
@@ -1019,6 +1056,7 @@
 				await saveImagePruneSettings(environment.id);
 				await saveTimezone(environment.id);
 				await saveDiskWarningSettings(environment.id);
+				if (usesStackPath(formConnectionType)) await saveRemoteStacksDir(environment.id);
 				toast.success(`Updated environment: ${formName}`);
 				onSaved();
 				onClose();
@@ -1046,6 +1084,30 @@
 			}
 		} catch (error) {
 			console.error('Failed to load disk warning settings:', error);
+		}
+	}
+
+	async function loadRemoteStacksDir(envId: number) {
+		try {
+			const response = await fetch(`/api/environments/${envId}/remote-stacks-dir`);
+			if (response.ok) {
+				const data = await response.json();
+				formRemoteStacksDir = data.remoteStacksDir ?? '';
+			}
+		} catch (error) {
+			console.error('Failed to load remote stacks dir:', error);
+		}
+	}
+
+	async function saveRemoteStacksDir(envId: number) {
+		try {
+			await fetch(`/api/environments/${envId}/remote-stacks-dir`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ remoteStacksDir: formRemoteStacksDir.trim() || null })
+			});
+		} catch (error) {
+			console.error('Failed to save remote stacks dir:', error);
 		}
 	}
 
@@ -1607,7 +1669,7 @@
 				</Tabs.Trigger>
 			</Tabs.List>
 
-			<div class="overflow-y-auto py-4 h-[520px] [scrollbar-gutter:stable] pr-3">
+			<div class="overflow-y-auto py-4 h-[520px] [scrollbar-gutter:stable] pr-5">
 				<!-- General Tab (Connection Settings) -->
 					<Tabs.Content value="general" class="space-y-4 mt-0 h-full">
 						<!-- Name field -->
@@ -1746,13 +1808,11 @@
 						<div class="space-y-2">
 							<div class="flex items-center gap-1.5">
 								<Label for="edit-env-connection-type">Connection type</Label>
-								<Popover.Root>
-									<Popover.Trigger>
-										<button type="button" class="text-muted-foreground hover:text-foreground">
-											<HelpCircle class="w-3.5 h-3.5" />
-										</button>
-									</Popover.Trigger>
-									<Popover.Content class="w-80 text-sm z-[200]" side="right">
+								<Tooltip.Root>
+									<Tooltip.Trigger type="button" class="text-muted-foreground hover:text-foreground">
+										<HelpCircle class="w-3.5 h-3.5" />
+									</Tooltip.Trigger>
+									<Tooltip.Content class="w-80 text-sm z-[200]" side="right">
 										<div class="space-y-3">
 											<div class="flex items-start gap-2">
 												<Unplug class="w-4 h-4 mt-0.5 text-cyan-500 shrink-0" />
@@ -1787,8 +1847,8 @@
 												Learn more about Hawser
 											</a>
 										</div>
-									</Popover.Content>
-								</Popover.Root>
+									</Tooltip.Content>
+								</Tooltip.Root>
 							</div>
 							<Select.Root type="single" value={formConnectionType} onValueChange={(v) => {
 								formConnectionType = v as ConnectionType;
@@ -1911,6 +1971,84 @@
 							</div>
 						{/if}
 
+						<!-- Stack path: hawser = backup-only; direct = backup + relative-bind rewrite on deploy -->
+						{#if usesStackPath(formConnectionType)}
+							<div class="space-y-2">
+								<div class="flex items-center gap-1.5">
+									<Label for="edit-env-remote-stacks-dir">
+										Remote stack path (for backup)
+										<span class="text-muted-foreground font-normal">(optional)</span>
+									</Label>
+									<Tooltip.Root>
+										<Tooltip.Trigger type="button" class="text-muted-foreground hover:text-foreground">
+											<HelpCircle class="w-3.5 h-3.5" />
+										</Tooltip.Trigger>
+										<Tooltip.Content class="w-80 z-[200]" side="right">
+											{#if isHawserConn(formConnectionType)}
+												<div class="space-y-2">
+													<p class="font-medium">Where the agent keeps stack files</p>
+													<p class="text-muted-foreground">
+														The Hawser agent stores each stack's folder at
+														<code class="bg-muted px-1 rounded">&lt;this path&gt;/&lt;stack&gt;</code>
+														on <span class="font-medium text-foreground">its own host</span>. Backup reads
+														the compose and config from there. This does <span class="font-medium text-foreground">not</span>
+														change where deploy or restore write - the agent always uses its own
+														<code class="bg-muted px-1 rounded">STACKS_DIR</code>; this only tells backup where to look.
+													</p>
+													<p class="text-muted-foreground">
+														So set it to MATCH the agent's <code class="bg-muted px-1 rounded">STACKS_DIR</code>
+														(default <code class="bg-muted px-1 rounded">/data/stacks</code>). Leave empty for
+														the default; set it only if the agent runs with a custom one.
+													</p>
+													<p class="text-muted-foreground">
+														This must be a <span class="font-medium text-foreground">real path on the agent's host</span>
+														where the stack files actually live.
+													</p>
+												</div>
+											{:else}
+												<div class="space-y-2">
+													<p class="font-medium">Where this stack's files live on the host</p>
+													<p class="text-muted-foreground">
+														A direct daemon shares no filesystem with Dockhand. When set, Dockhand copies each
+														stack's folder to
+														<code class="bg-muted px-1 rounded">&lt;this path&gt;/&lt;stack&gt;</code>
+														<span class="font-medium text-foreground">on the remote host</span>
+														<span class="font-medium text-foreground">on each deploy</span> so the backup
+														helper can read the compose and config, and rewrites relative binds
+														(<code class="bg-muted px-1 rounded">./data</code>) to that host path so they resolve
+														on the remote daemon. After setting this, redeploy a stack once so its files are staged there.
+													</p>
+													<p class="text-muted-foreground">
+														Leave empty to skip this: the stack won't be backupable and a relative bind resolves
+														to a path only Dockhand can see. Use
+														<span class="font-medium text-foreground">absolute paths</span> or
+														<span class="font-medium text-foreground">named volumes</span> instead.
+													</p>
+												</div>
+											{/if}
+										</Tooltip.Content>
+									</Tooltip.Root>
+								</div>
+								<Input
+									id="edit-env-remote-stacks-dir"
+									bind:value={formRemoteStacksDir}
+									placeholder={isHawserConn(formConnectionType) ? '/data/stacks' : '/opt/dockhand/stacks'}
+								/>
+								<p class="text-xs text-muted-foreground">
+									{#if isHawserConn(formConnectionType)}
+										Absolute path on the agent's host where it keeps stack folders. Used only to back up
+										each stack's compose and config. Leave empty for the default <code class="bg-muted px-1 rounded">/data/stacks</code>.
+									{:else}
+										Absolute path on the remote host where Dockhand keeps this stack's files, so its compose
+										and config are backupable and relative binds resolve on the remote daemon. Leave empty to
+										use only absolute paths or named volumes.
+										<span class="text-foreground font-medium">Takes effect on the next deploy</span> - after
+										setting this, redeploy each stack so Dockhand stages its files there.
+									{/if}
+								</p>
+							</div>
+						{/if}
+
 						<!-- Direct connection settings -->
 						{#if formConnectionType === 'direct'}
 							<div class="grid grid-cols-2 gap-4">
@@ -2028,7 +2166,7 @@
 										<textarea
 											id="edit-env-tls_key"
 											bind:value={formTlsKey}
-											placeholder="-----BEGIN PRIVATE KEY-----"
+											placeholder={hasStoredTlsKey ? 'Configured - leave blank to keep, or paste a new key to replace it' : '-----BEGIN PRIVATE KEY-----'}
 											class="flex min-h-[60px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
 										></textarea>
 									</div>
@@ -2136,7 +2274,7 @@
 										</Button>
 									{/if}
 								</div>
-								<Input id="edit-env-hawser-token" type="password" bind:value={formHawserToken} placeholder="Token for agent authentication" oninput={() => generatedStandardToken = null} />
+								<Input id="edit-env-hawser-token" type="password" bind:value={formHawserToken} placeholder={hasStoredHawserToken ? 'Configured - leave blank to keep, or enter a new token to replace it' : 'Token for agent authentication'} oninput={() => generatedStandardToken = null} />
 								{#if generatedStandardToken}
 									<div class="p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-700 rounded-md space-y-2">
 										<p class="text-xs font-medium text-amber-700 dark:text-amber-400 flex items-center gap-1">
@@ -3015,6 +3153,36 @@
 			onCancel={() => showIconCropper = false}
 			onSave={handleIconCropSave}
 		/>
+	</Dialog.Content>
+</Dialog.Root>
+
+<!-- Kernel cgroup memory accounting is disabled on this daemon (container memory shows 0). -->
+<Dialog.Root bind:open={memWarnOpen}>
+	<Dialog.Content class="max-w-md">
+		<Dialog.Header>
+			<Dialog.Title class="flex items-center gap-2 text-amber-600 dark:text-amber-400">
+				<AlertTriangle class="w-5 h-5" />
+				Container memory won't be shown
+			</Dialog.Title>
+		</Dialog.Header>
+		<div class="text-sm text-muted-foreground space-y-3">
+			<p>
+				This host's kernel has cgroup memory accounting disabled, so Docker can't report
+				per-container memory - it will show <span class="font-medium text-foreground whitespace-nowrap">0&nbsp;B</span>
+				for every container. This is common on Raspberry Pi and some ARM boards.
+			</p>
+			<p>
+				It's fixed in the kernel boot config, not in Dockhand. See the guide:
+				<a href={MEMORY_SUPPORT_DOC_URL} target="_blank" rel="noopener noreferrer"
+					class="text-primary hover:underline inline-flex items-center gap-1">
+					enabling container memory accounting
+					<ExternalLink class="w-3 h-3" />
+				</a>
+			</p>
+		</div>
+		<Dialog.Footer>
+			<Button onclick={() => (memWarnOpen = false)}>OK</Button>
+		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>
 

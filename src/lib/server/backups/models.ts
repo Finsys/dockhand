@@ -29,8 +29,7 @@ export type OperationStatus =
 	| 'success'
 	| 'warning'
 	| 'error'
-	| 'cancelled'
-	| 'stale';
+	| 'cancelled';
 
 /**
  * Closed error taxonomy. The UI shows a human message; automation branches on
@@ -226,6 +225,7 @@ export function parseSnapshots(stdout: string): Snapshot[] {
 	return out;
 }
 
+
 // =============================================================================
 // Snapshot tags — STABLE IDs, never normalized names
 // =============================================================================
@@ -235,10 +235,9 @@ export function parseSnapshots(stdout: string): Snapshot[] {
  * ownership, env-access) use ONLY the stable-id tags; the name/type tags are
  * decoration for humans browsing with the restic CLI.
  *
- * Why stable ids: the old code tagged `dockhand:config=<name>-<type>-<env>`
- * built from a NORMALIZED env name, which collides when two env names normalize
- * to the same string — causing retention to cross-prune and env-access to
- * resolve to the wrong environment. Ids never collide.
+ * Why stable ids, not names: a normalized env name collides when two env names normalize to the
+ * same string, which would cross-prune retention and resolve env-access to the wrong environment.
+ * Ids never collide.
  */
 export type BackupTargetType = 'container' | 'stack';
 
@@ -297,14 +296,31 @@ export function readConfigIdFromTags(tags: string[]): number | null {
 }
 
 // =============================================================================
-// Timeout tiers — two named tiers, not a per-operation multiplier ladder
+// Timeout tiers
 // =============================================================================
 
-/** Two timeout tiers, in ms. `interactive` for quick repo ops (list/ls/init);
- * `data` for streaming ops that move real bytes (backup/restore/check/prune). */
+/** Restic operations are UNBOUNDED by default (0 = no timeout). A large backup or a
+ * slow listing on a big/remote repo legitimately runs for a long time; a fixed wall-clock
+ * cap killed healthy work mid-run (#1382). A stuck op is handled by manual cancel (the
+ * helper is a named container killed by cancelBackup, and every run shows as `running` in
+ * the execution log) and the helper reaper — the same model backrest/zerobyte use (neither
+ * times out a backup). ONE env caps everything: `RESTIC_TIMEOUT` (milliseconds, 0 = off)
+ * applies to every restic operation - the host `restic` spawn AND the helper container.
+ * The tiers stay in the call API only as a log label; they no longer carry separate
+ * limits (previously RESTIC_MAINTENANCE_TIMEOUT set the data tier; folded into one). */
+const RESTIC_TIMEOUT_MS = Number(process.env.RESTIC_TIMEOUT ?? 0);
 export const TIMEOUTS = {
-	interactive: Number(process.env.RESTIC_TIMEOUT ?? 300_000),        // 5 min
-	data: Number(process.env.RESTIC_MAINTENANCE_TIMEOUT ?? 6 * 60 * 60 * 1000), // 6 h
+	interactive: RESTIC_TIMEOUT_MS,
+	data: RESTIC_TIMEOUT_MS,
 } as const;
 
 export type TimeoutTier = keyof typeof TIMEOUTS;
+
+/** The SINGLE definition of "this restic repository is a local filesystem path" (vs a
+ * rest:/s3:/... scheme URL). Local = an ABSOLUTE path, the only form the save gate
+ * (isAllowedRepository) accepts. Every site that binds/guards/chowns the local repo MUST
+ * use this so they can't diverge - a `./`-vs-`/` mismatch would guard a path the helper
+ * never mounts, hard-failing a valid repo with a misleading "repository not found". */
+export function isLocalRepo(repository: string): boolean {
+	return repository.startsWith('/');
+}

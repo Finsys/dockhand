@@ -12,6 +12,16 @@ import { authorize } from '$lib/server/authorize';
 import { auditGitRepository } from '$lib/server/audit';
 import { computeAuditDiff } from '$lib/utils/diff';
 
+/**
+ * @openapi
+ * summary: Get a single git repository by ID
+ * path: id:integer! Git repository ID (from GET /api/git/repositories)
+ * resp-200: {id:integer!, name:string!, url:string!, branch:string!, credentialId:integer}
+ * resp-400: The id path segment is not a valid integer
+ * resp-403: Caller lacks the git:view permission
+ * resp-404: No repository exists with that ID
+ * resp-500: Failed to read the git repository
+ */
 export const GET: RequestHandler = async ({ params, cookies }) => {
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !await auth.can('git', 'view')) {
@@ -36,6 +46,19 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 	}
 };
 
+/**
+ * @openapi
+ * summary: Update a git repository's basic fields (name/url/branch/credential)
+ * description: credentialId from GET /api/git/credentials.
+ * path: id:integer! Git repository ID (from GET /api/git/repositories)
+ * body: {name:string, url:string, branch:string, credentialId:integer}
+ * body-example: {"name":"homelab","url":"https://github.com/example/homelab.git","branch":"production","credentialId":2}
+ * resp-200: {id:integer!, name:string!, url:string!, branch:string!, credentialId:integer}
+ * resp-400: Invalid id, an invalid credentialId, or a duplicate repository name
+ * resp-403: Caller lacks the git:edit permission
+ * resp-404: No repository exists with that ID
+ * resp-500: The update failed or the repository could not be persisted
+ */
 export const PUT: RequestHandler = async (event) => {
 	const { params, request, cookies } = event;
 	const auth = await authorize(cookies);
@@ -94,6 +117,17 @@ export const PUT: RequestHandler = async (event) => {
 	}
 };
 
+/**
+ * @openapi
+ * summary: Delete a git repository, first removing the clone directories of every git stack it backs
+ * path: id:integer! Git repository ID (from GET /api/git/repositories)
+ * resp-200: {success:boolean!}
+ * resp-200-example: {"success":true}
+ * resp-400: The id path segment is not a valid integer
+ * resp-403: Caller lacks the git:delete permission
+ * resp-404: No repository exists with that ID
+ * resp-500: The deletion failed
+ */
 export const DELETE: RequestHandler = async (event) => {
 	const { params, cookies } = event;
 	const auth = await authorize(cookies);

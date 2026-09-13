@@ -14,6 +14,11 @@ import { isHealthTransition } from './subprocess-manager.js';
 import { pushMetric } from './metrics-store.js';
 import { secureGetRandomValues, secureRandomUUID } from './crypto-fallback.js';
 import { hashPassword, verifyPassword } from './auth.js';
+// The 'stream' message routing logic lives in a db-free core module so it stays unit-testable
+// (importing this file pulls in db/drizzle -> better-sqlite3, which bun's test runner can't
+// load). Re-exported so callers get it from one import site.
+import { dispatchStreamMessage } from './hawser-core.js';
+export { dispatchStreamMessage };
 
 // Protocol constants
 export const HAWSER_PROTOCOL_VERSION = '1.0';
@@ -36,6 +41,8 @@ export const MessageType = {
 export interface EdgeConnection {
 	ws: WebSocket;
 	environmentId: number;
+	/** The hawser token id this connection authenticated with; revoking that token closes it. */
+	tokenId?: number;
 	agentId: string;
 	agentName: string;
 	agentVersion: string;
@@ -46,6 +53,10 @@ export interface EdgeConnection {
 	lastHeartbeat: number;
 	pendingRequests: Map<string, PendingRequest>;
 	pendingStreamRequests: Map<string, PendingStreamRequest>;
+	// Line callbacks for non-streaming requests (e.g. compose) that still want to observe
+	// 'stream' messages as they arrive. Separate from pendingStreamRequests, which belongs
+	// to requests sent with streaming: true (see sendEdgeStreamRequest).
+	lineHandlers?: Map<string, (line: string) => void>;
 	pingInterval?: ReturnType<typeof setInterval>;
 	lastMetrics?: {
 		uptime?: number;
@@ -391,6 +402,17 @@ export async function generateHawserToken(
  */
 export async function revokeHawserToken(tokenId: number): Promise<void> {
 	await db.update(hawserTokens).set({ isActive: false }).where(eq(hawserTokens.id, tokenId));
+
+	// A revoke is an incident-response action: cut the agent off NOW. isActive is only
+	// checked at the hello handshake, so an already-open edge connection would otherwise
+	// keep serving. Close the connection this token authenticated (matched by tokenId, so
+	// revoking a DIFFERENT token for the same env doesn't disconnect a still-valid agent).
+	for (const connection of edgeConnections.values()) {
+		if (connection.tokenId === tokenId) {
+			console.log(`[Hawser] Closing edge connection for env ${connection.environmentId} - its token (${tokenId}) was revoked`);
+			closeEdgeConnection(connection.environmentId);
+		}
+	}
 }
 
 /**
@@ -448,7 +470,8 @@ export function closeEdgeConnection(environmentId: number): void {
 export function handleEdgeConnection(
 	ws: WebSocket,
 	environmentId: number,
-	hello: HelloMessage
+	hello: HelloMessage,
+	tokenId?: number
 ): EdgeConnection {
 	// Check if there's already a connection for this environment
 	const existing = edgeConnections.get(environmentId);
@@ -490,6 +513,7 @@ export function handleEdgeConnection(
 	const connection: EdgeConnection = {
 		ws,
 		environmentId,
+		tokenId,
 		agentId: hello.agentId,
 		agentName: hello.agentName,
 		agentVersion: hello.version,
@@ -499,7 +523,8 @@ export function handleEdgeConnection(
 		connectedAt: new Date(),
 		lastHeartbeat: Date.now(),
 		pendingRequests: new Map(),
-		pendingStreamRequests: new Map()
+		pendingStreamRequests: new Map(),
+		lineHandlers: new Map()
 	};
 
 	edgeConnections.set(environmentId, connection);
@@ -563,7 +588,8 @@ export async function sendEdgeRequest(
 	streaming = false,
 	timeout = 30000,
 	isBinary = false,
-	signal?: AbortSignal
+	signal?: AbortSignal,
+	onLine?: (line: string) => void
 ): Promise<EdgeResponse> {
 	const connection = edgeConnections.get(environmentId);
 	if (!connection) {
@@ -572,9 +598,18 @@ export async function sendEdgeRequest(
 
 	const requestId = secureRandomUUID();
 
+	// A non-streaming request (compose) that wants to observe output as it happens. The agent
+	// sends it as 'stream' messages, which dispatchStreamMessage routes here by requestId.
+	// Registered before the message goes out, so no early line can miss the handler.
+	if (onLine) {
+		connection.lineHandlers ??= new Map();
+		connection.lineHandlers.set(requestId, onLine);
+	}
+
 	return new Promise((resolve, reject) => {
 		const timeoutHandle = setTimeout(() => {
 			connection.pendingRequests.delete(requestId);
+			connection.lineHandlers?.delete(requestId);
 			if (streaming) {
 				connection.pendingStreamRequests.delete(requestId);
 			}
@@ -592,6 +627,7 @@ export async function sendEdgeRequest(
 				'abort',
 				() => {
 					connection.pendingRequests.delete(requestId);
+					connection.lineHandlers?.delete(requestId);
 					if (streaming) {
 						connection.pendingStreamRequests.delete(requestId);
 					}
@@ -685,6 +721,7 @@ export async function sendEdgeRequest(
 			const sent = globalThis.__hawserSendMessage(environmentId, messageStr);
 			if (!sent) {
 				connection.pendingRequests.delete(requestId);
+				connection.lineHandlers?.delete(requestId);
 				if (streaming) {
 					connection.pendingStreamRequests.delete(requestId);
 				}
@@ -698,6 +735,7 @@ export async function sendEdgeRequest(
 				const errorMsg = sendError instanceof Error ? sendError.message : String(sendError);
 				console.error(`[Hawser Edge] Error sending message:`, errorMsg);
 				connection.pendingRequests.delete(requestId);
+				connection.lineHandlers?.delete(requestId);
 				if (streaming) {
 					connection.pendingStreamRequests.delete(requestId);
 				}
@@ -1201,7 +1239,7 @@ async function handleHawserWsMessage(ws: any, msg: any, connId: string, remoteIp
 			}
 
 			// Authenticated — register the connection
-			const connection = handleEdgeConnection(ws, result.environmentId, msg);
+			const connection = handleEdgeConnection(ws, result.environmentId, msg, result.tokenId);
 			wsToEnvId.set(ws, result.environmentId);
 
 			// Send welcome
@@ -1246,6 +1284,10 @@ async function handleHawserWsMessage(ws: any, msg: any, connId: string, remoteIp
 			if (pending) {
 				clearTimeout(pending.timeout);
 				connection.pendingRequests.delete(msg.requestId);
+				// A non-streaming request that registered a line handler (compose, Task 9) is
+				// done once its response arrives -- without this the map grows unbounded for
+				// the lifetime of the process.
+				connection.lineHandlers?.delete(msg.requestId);
 				pending.resolve({
 					statusCode: msg.statusCode,
 					headers: msg.headers || {},
@@ -1257,10 +1299,7 @@ async function handleHawserWsMessage(ws: any, msg: any, connId: string, remoteIp
 		}
 
 		case 'stream': {
-			const streamPending = connection.pendingStreamRequests.get(msg.requestId);
-			if (streamPending) {
-				streamPending.onData?.(msg.data);
-			}
+			dispatchStreamMessage(connection, msg);
 			break;
 		}
 

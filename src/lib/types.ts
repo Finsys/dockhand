@@ -5,6 +5,16 @@
  */
 export type SystemContainerType = 'dockhand' | 'hawser';
 
+/** A newer VERSION tag (semver) suggestion. Mirrors the server's find-newer result. */
+export interface NewerVersion {
+	tag: string;
+	bump: 'major' | 'minor' | 'patch';
+	skipped: string[];
+	/** The target tag's manifest digest (`sha256:...`), when known. Lets the UI copy the new tag digest-pinned. */
+	digest?: string;
+}
+
+/** Terminal connection mode: an interactive `docker exec` shell, or `docker attach` to PID 1. */
 export type TerminalMode = 'exec' | 'attach';
 
 export interface ContainerInfo {
@@ -96,7 +106,7 @@ export interface NetworkInfo {
 export interface StackInfo {
 	name: string;
 	services: string[];
-	status: 'running' | 'partial' | 'stopped';
+	status: 'running' | 'partial' | 'restarting' | 'stopped';
 	containers: Array<{
 		id: string;
 		name: string;
@@ -137,6 +147,8 @@ export interface StackContainer {
 	created: number;
 	labels: Record<string, string>;
 	updateAvailable?: boolean;
+	/** A newer VERSION tag (semver) for this pinned image, or null. Advisory. */
+	newerVersion?: NewerVersion | null;
 }
 
 export interface ComposeStackInfo {
@@ -146,6 +158,8 @@ export interface ComposeStackInfo {
 	status: string;
 	updatesAvailable?: boolean;
 	updateCount?: number;
+	/** How many containers in this stack have a newer version tag (semver). */
+	newerVersionCount?: number;
 	sourceType?: 'external' | 'internal' | 'git';
 	repository?: {
 		id: number;
@@ -175,7 +189,7 @@ export interface GitRepository {
 }
 
 // Grid column configuration types
-export type GridId = 'containers' | 'images' | 'imageTags' | 'networks' | 'stacks' | 'volumes' | 'activity' | 'schedules' | 'audit' | 'environments' | 'backupDestinations' | 'backups' | 'repoSnapshots' | 'vulnerabilities';
+export type GridId = 'containers' | 'images' | 'imageTags' | 'networks' | 'stacks' | 'volumes' | 'activity' | 'schedules' | 'audit' | 'environments' | 'backupDestinations' | 'backups' | 'repoSnapshots' | 'vulnerabilities' | 'deploys';
 
 export interface ColumnConfig {
 	id: string;
@@ -190,6 +204,10 @@ export interface ColumnConfig {
 	grow?: boolean; // If true, column expands to fill remaining space
 	noTruncate?: boolean; // If true, content won't be truncated with ellipsis
 	hint?: string; // Tooltip on column header
+	defaultVisible?: boolean; // If false, column is hidden by default (user can enable it in preferences)
+	// A column holding two metrics (e.g. Disk I/O = read/write) cycles a header click
+	// through these (sortField, direction) states instead of a plain asc/desc toggle (#1111).
+	sortCycle?: { field: string; direction: 'asc' | 'desc' }[];
 }
 
 export interface ColumnPreference {

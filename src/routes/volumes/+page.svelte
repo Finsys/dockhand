@@ -19,6 +19,7 @@
 	import CloneVolumeModal from './CloneVolumeModal.svelte';
 	import ContainerInspectModal from '../containers/ContainerInspectModal.svelte';
 	import { appSettings } from '$lib/stores/settings';
+	import ContainerIcon from '$lib/components/ContainerIcon.svelte';
 	import type { VolumeInfo } from '$lib/types';
 	import { currentEnvironment, environments, appendEnvParam, clearStaleEnvironment } from '$lib/stores/environment';
 	import MultiSelectFilter from '$lib/components/MultiSelectFilter.svelte';
@@ -575,10 +576,11 @@
 								<button
 									type="button"
 									onclick={() => openContainerInspect(container.containerId, container.containerName)}
-									class="text-xs text-primary hover:underline cursor-pointer truncate max-w-[100px]"
+									class="text-xs text-primary hover:underline cursor-pointer truncate max-w-[110px] inline-flex items-center gap-1"
 									title={container.containerName}
 								>
-									{container.containerName}
+									<ContainerIcon image="" name={container.containerName} class="w-3 h-3" hideWhenNoMatch />
+									<span class="truncate">{container.containerName}</span>
 								</button>
 							{/each}
 							{#if volume.usedBy.length > 3}

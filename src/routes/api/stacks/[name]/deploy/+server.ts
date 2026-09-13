@@ -3,8 +3,20 @@ import { deployStack, requireComposeFile, ComposeFileNotFoundError } from '$lib/
 import { authorize } from '$lib/server/authorize';
 import { auditStack } from '$lib/server/audit';
 import { createJobResponse } from '$lib/server/sse';
+import { createRunRecorder } from '$lib/server/deploy-run-record';
+import { hashComposeContent, hashEnvFingerprint } from '$lib/server/deploy-run-record-core';
 import type { RequestHandler } from './$types';
 
+/**
+ * @openapi
+ * summary: Deploy (docker compose up) a stack, optionally pulling images, building, and force-recreating; progress and the final result stream over Server-Sent Events
+ * path: name:string! Stack name (from GET /api/stacks)
+ * query: env:integer Environment ID the stack belongs to (from GET /api/environments)
+ * body: {pull:boolean, build:boolean, forceRecreate:boolean}
+ * body-example: {"pull":true,"build":false,"forceRecreate":false}
+ * resp-200: Server-Sent-Events job stream with progress events and a final result event ({success, output})
+ * resp-403: Permission denied (requires stacks:start, or environment access denied on enterprise)
+ */
 export const POST: RequestHandler = async (event) => {
 	const { params, url, cookies, request } = event;
 	const auth = await authorize(cookies);
@@ -29,23 +41,50 @@ export const POST: RequestHandler = async (event) => {
 		forceRecreate?: boolean;
 	};
 
+	const stackName = decodeURIComponent(params.name);
+
+	// Read up-front (not inside createJobResponse's callback, as before): the run
+	// record needs a compose/env hash and a schedule_executions row BEFORE the job
+	// stream opens, since createJobResponse takes the recorder as a plain (already
+	// resolved) argument, not something it can await for itself.
+	let composeResult: Awaited<ReturnType<typeof requireComposeFile>>;
+	try {
+		composeResult = await requireComposeFile(stackName, envIdNum);
+	} catch (error) {
+		const message = error instanceof ComposeFileNotFoundError
+			? error.message
+			: 'Failed to deploy compose stack';
+		return createJobResponse(async (send) => {
+			send('result', { success: false, error: message });
+		}, event.request);
+	}
+
+	if (!composeResult.success) {
+		const message = composeResult.needsFileLocation
+			? 'Stack compose file location not configured'
+			: composeResult.error || 'Compose file not found';
+		return createJobResponse(async (send) => {
+			send('result', { success: false, error: message });
+		}, event.request);
+	}
+
+	// Same merged set used for envHash below -- also the redaction list end() applies
+	// to the stored error text, so a leaked env value never reaches errorMessage.
+	const effectiveEnvVars = { ...(composeResult.nonSecretVars ?? {}), ...(composeResult.secretVars ?? {}) };
+
+	const recorder = await createRunRecorder({
+		stackName,
+		envId: envIdNum ?? null,
+		userId: auth.user?.id,
+		triggeredBy: 'manual',
+		options: { pull: !!pull, build: !!build, forceRecreate: !!forceRecreate },
+		composeHash: hashComposeContent(composeResult.content!),
+		envHash: hashEnvFingerprint(effectiveEnvVars),
+		secrets: Object.values(effectiveEnvVars)
+	});
+
 	return createJobResponse(async (send) => {
 		try {
-			const stackName = decodeURIComponent(params.name);
-
-			send('progress', { status: 'Reading compose file...' });
-			const composeResult = await requireComposeFile(stackName, envIdNum);
-
-			if (!composeResult.success) {
-				send('result', {
-					success: false,
-					error: composeResult.needsFileLocation
-						? 'Stack compose file location not configured'
-						: composeResult.error || 'Compose file not found'
-				});
-				return;
-			}
-
 			send('progress', { status: 'Deploying stack...' });
 			const result = await deployStack({
 				name: stackName,
@@ -55,8 +94,17 @@ export const POST: RequestHandler = async (event) => {
 				build,
 				forceRecreate,
 				composePath: composeResult.composePath,
-				envPath: composeResult.envPath
+				envPath: composeResult.envPath,
+				onLine: (line) => send('progress', { type: 'line', line })
 			});
+
+			// F4 fix: deployStack resolves the bound secret provider's values
+			// internally, AFTER `recorder` above was already built from the DB-only
+			// `effectiveEnvVars`. Feed the provider-resolved values in now, before
+			// createJobResponse calls recorder.end() below (on both the JSON and the
+			// streaming path) -- otherwise a provider secret leaking into result.error
+			// would bypass end()'s redaction entirely. See deploy-run-record.ts.
+			recorder.addSecrets(result.resolvedSecrets ?? []);
 
 			// Audit log
 			await auditStack(event, 'deploy', stackName, envIdNum, {
@@ -76,5 +124,5 @@ export const POST: RequestHandler = async (event) => {
 			console.error('Error deploying compose stack:', error);
 			send('result', { success: false, error: 'Failed to deploy compose stack' });
 		}
-	}, event.request);
+	}, event.request, recorder);
 };

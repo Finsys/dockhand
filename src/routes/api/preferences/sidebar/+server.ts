@@ -4,6 +4,13 @@ import { authorize } from '$lib/server/authorize';
 import type { SidebarPreferences } from '$lib/server/db';
 
 // GET - retrieve sidebar menu preferences
+/**
+ * @openapi
+ * summary: Retrieve the saved sidebar menu preferences (order and hidden items)
+ * resp-200: {preferences:{order:array<string>, hidden:array<string>}}
+ * resp-200-example: {"preferences":{"order":["dashboard","containers"],"hidden":["volumes"]}}
+ * resp-500: Failed to get sidebar preferences
+ */
 export const GET: RequestHandler = async ({ cookies }) => {
 	const auth = await authorize(cookies);
 
@@ -20,6 +27,15 @@ export const GET: RequestHandler = async ({ cookies }) => {
 };
 
 // POST - update sidebar menu preferences
+/**
+ * @openapi
+ * summary: Save the sidebar menu preferences (order and hidden items)
+ * body: {order:array<string>!, hidden:array<string>!}
+ * body-example: {"order":["dashboard","containers","stacks"],"hidden":["volumes"]}
+ * resp-200: {preferences:{order:array<string>, hidden:array<string>}}
+ * resp-400: order must be an array of strings, or hidden must be an array of strings
+ * resp-500: Failed to save sidebar preferences
+ */
 export const POST: RequestHandler = async ({ request, cookies }) => {
 	const auth = await authorize(cookies);
 
@@ -50,6 +66,12 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 };
 
 // DELETE - reset sidebar menu preferences to default
+/**
+ * @openapi
+ * summary: Reset the sidebar menu preferences to their default order/visibility
+ * resp-200: {preferences:{order:array<string>, hidden:array<string>}}
+ * resp-500: Failed to reset sidebar preferences
+ */
 export const DELETE: RequestHandler = async ({ cookies }) => {
 	const auth = await authorize(cookies);
 

@@ -27,9 +27,9 @@ export interface MetadataFile {
  * The metadata files (metadata.json, and for stacks the compose/.env and the
  * whole stackfiles/ tree) are NOT written by this script — they are streamed into
  * the container's /metadata directory via the Docker put-archive API BEFORE the
- * container starts (see restic.ts runInHelper). Embedding their base64 inline in
- * the Cmd used to blow the kernel ARG_MAX for large stack files ("argument list
- * too long"); put-archive has no such limit.
+ * container starts (see restic.ts runInHelper). Inlining their base64 in the Cmd
+ * would hit the kernel ARG_MAX for large stack files ("argument list too long");
+ * put-archive has no such limit.
  *
  * So the script only:
  *   1. ensures /metadata exists (put-archive already created it, but be defensive
@@ -41,7 +41,9 @@ export interface MetadataFile {
  * @param resticArgs the full restic argv (starting with 'backup') — already
  *                   tag/exclude/flag-assembled by the caller.
  */
-export function buildBackupScript(resticArgs: string[]): string {
+import { stackDirProbeFixHint, type StackDirProbeHint } from './stackdir-plan';
+
+export function buildBackupScript(resticArgs: string[], stackDirProbe?: { volumeKey: string; composeFileName: string; label?: string; hostPath?: string; hint?: StackDirProbeHint }): string {
 	// restic runs backgrounded so the SIGINT-forwarding trap can reach it on cancel
 	// (SIGINT lets restic release its repo lock; a SIGKILL orphans it and hangs the
 	// next backup on --retry-lock). The kill-0 re-wait loop only fires when a signal
@@ -49,7 +51,39 @@ export function buildBackupScript(resticArgs: string[]): string {
 	// real code (0/3) for the marker.
 	const restic = `restic ${resticArgs.map(shellQuote).join(' ')}`;
 	const step = `${restic} & __rpid=$!; trap 'kill -INT $__rpid 2>/dev/null' INT TERM; wait $__rpid; __rc=$?; while kill -0 $__rpid 2>/dev/null; do wait $__rpid; __rc=$?; done; ( exit $__rc )`;
-	return `mkdir -p /metadata; set +e; ${finishScript(step)}`;
+
+	// STACK-DIR VOLUME PROBE (100% runtime guard for the 'volume' capture mode). The plan
+	// decided the target daemon is local and bind-mounted the stack dir at
+	// /volumes/<volumeKey>. If that mount is a phantom (a remote daemon Docker
+	// auto-created an EMPTY dir for), the compose file will be MISSING under it — backing
+	// that up would be a silent-empty snapshot. So before restic runs, assert the compose
+	// is visible; if not, exit non-zero (the finishScript marker turns this into a hard
+	// backup failure), never a silent success.
+	let probe = '';
+	if (stackDirProbe) {
+		const composePath = shellQuote(`/volumes/${stackDirProbe.volumeKey}/${stackDirProbe.composeFileName}`);
+		const label = stackDirProbe.label ? ` ${stackDirProbe.label}` : '';
+		// The compose is missing under the host dir we bind-mounted. The fix depends on WHY
+		// (path wrong vs not-deployed-there-yet vs local) - stackDirProbeFixHint decides.
+		const hint = stackDirProbe.hint;
+		const remote = hint?.kind === 'hawser-defaulted' || hint?.kind === 'user-set';
+		const where = remote ? hint.hostPath : stackDirProbe.hostPath;
+		// "on <env>" when we know the environment name, else a plain "on the host".
+		const on = remote && hint.envName ? ` on ${hint.envName}` : ` on the host`;
+		const fix = stackDirProbeFixHint(hint, where);
+		const at = where ? ` in ${where}` : '';
+		// Build the whole message as ONE string and shell-quote it so the operator-facing text
+		// (which contains quotes, parens, and `>` - e.g. `"Remote stack path (for backup)"` and
+		// `Settings > Environments > <env>`) can never break the `sh` syntax. The timestamp stays
+		// a live $(date ...) OUTSIDE the quoted literal, concatenated in.
+		const msg = `${label} STACKDIR PROBE FAILED: compose ${stackDirProbe.composeFileName} not found${at}${on}.${fix}`;
+		probe =
+			`if [ ! -f ${composePath} ]; then ` +
+			`echo "[backup] $(date -u +%Y-%m-%dT%H:%M:%SZ)"${shellQuote(msg)} 1>&2; ` +
+			`exit 1; fi; `;
+	}
+
+	return `mkdir -p /metadata; set +e; ${probe}${finishScript(step)}`;
 }
 
 /**
@@ -75,7 +109,12 @@ export function buildBackupArgs(input: {
 	swapArtifacts: readonly string[];
 }): string[] {
 	const paths = input.hasVolumes ? ['/volumes/', '/metadata/'] : ['/metadata/'];
-	const args = ['backup', '--json', '--retry-lock', '5m', '--host', input.host, ...paths];
+	// Every stack backs up from the SAME host + paths (/volumes/, /metadata/), so restic's
+	// default parent selection (host,paths) picks the newest snapshot of ANY stack in the
+	// repo as the parent - making a stack look entirely new whenever another stack was
+	// backed up in between, forcing a full re-hash of its source (#1494). Group by the
+	// dockhand tags too so a stack's parent is its OWN previous snapshot.
+	const args = ['backup', '--json', '--retry-lock', '5m', '--group-by', 'host,paths,tags', '--host', input.host, ...paths];
 	for (const t of input.tags) args.push('--tag', t);
 	for (const a of input.swapArtifacts) args.push('--exclude', a);
 	for (const p of input.excludePatterns ?? []) if (p.trim()) args.push('--exclude', p.trim());

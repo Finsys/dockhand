@@ -23,6 +23,10 @@
 
 	// Check if current route is login page (no sidebar needed)
 	const isLoginPage = $derived($page.url.pathname === '/login');
+	// Same for the OpenAPI docs viewer (Scalar) — it brings its own
+	// full-page chrome. Matches with or without a trailing slash.
+	const isDocsPage = $derived($page.url.pathname.replace(/\/$/, '') === '/api/docs/ui');
+	const noSidebar = $derived(isLoginPage || isDocsPage);
 
 	let { children, data } = $props();
 	let envId = $state<number | null>(null);
@@ -130,8 +134,8 @@
 	<title>Dockhand - Docker Management</title>
 </svelte:head>
 
-{#if isLoginPage}
-	<!-- Login page: no sidebar, no header -->
+{#if noSidebar}
+	<!-- Login page / OpenAPI docs viewer: no sidebar, no header -->
 	{@render children?.()}
 	<Toaster richColors position="bottom-right" />
 {:else}

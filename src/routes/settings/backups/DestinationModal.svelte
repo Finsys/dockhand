@@ -6,15 +6,19 @@
 	import { TogglePill } from '$lib/components/ui/toggle-pill';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { Input } from '$lib/components/ui/input';
-	import { Plus, Check, RefreshCw, Wifi, Database, HardDrive, Dices, Copy, BarChart3, Loader2, Clock, PackageCheck, FolderCheck, Unlock, CircleHelp, AlertTriangle } from 'lucide-svelte';
+	import { Textarea } from '$lib/components/ui/textarea';
+	import { Plus, Check, RefreshCw, Wifi, Database, HardDrive, Dices, Copy, BarChart3, Loader2, Clock, PackageCheck, FolderCheck, Unlock, CircleHelp, AlertTriangle, Upload } from 'lucide-svelte';
+	import { AWS_REGIONS, regionalEndpoint, extractS3Region } from '$lib/utils/s3-region';
 	import cronstrue from 'cronstrue';
 	import { formatBytes } from '$lib/utils/format';
 	import CronEditor from '$lib/components/cron-editor.svelte';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import * as Popover from '$lib/components/ui/popover';
 	import { AmazonS3Icon, BackblazeIcon, AzureBlobIcon, GoogleCloudIcon, RestServerIcon } from '$lib/components/cloud-icons';
+	import { FieldLabel } from '$lib/components/ui/field-label';
 	import { toast } from 'svelte-sonner';
 	import { focusFirstInput } from '$lib/utils';
+	import { backendSupportsTls } from '$lib/shared/repo-predicates';
 
 	interface Destination {
 		id: number;
@@ -22,7 +26,11 @@
 		repository: string;
 		hostPath?: string | null;
 		envVars?: Record<string, string>;
+		hasCacert?: boolean;         // a CA cert is stored (the PEM itself is never sent back)
+		hasTlsClientCert?: boolean;  // a client cert is stored
 		flags?: string;
+		backupFlags?: string;   // split from the GET endpoint (legacy strings surface here)
+		restoreFlags?: string;
 		policies?: string | null;
 		lastTestStatus?: string | null;
 		createdAt: string;
@@ -70,6 +78,9 @@
 		placeholder: string;
 		secret?: boolean;
 		envKey?: string; // if set, stored as env var instead of part of repo URL
+		optional?: boolean; // no red asterisk; not required for Test/Create
+		multiline?: boolean; // render a textarea (e.g. a pasted JSON credential)
+		hint?: string; // small helper text under the field
 	}
 
 	interface BackendType {
@@ -85,7 +96,7 @@
 		{
 			value: 'local', label: 'Local path', icon: HardDrive,
 			fields: [
-				{ key: 'path', label: 'Path', placeholder: '/mnt/backups/dockhand' }
+				{ key: 'path', label: 'Path', placeholder: '/app/local-backups/myrepo', optional: true }
 			],
 			buildRepo: (f) => f.path || '',
 			parseRepo: (repo) => ({ path: repo })
@@ -93,9 +104,10 @@
 		{
 			value: 's3', label: 'Amazon S3', icon: AmazonS3Icon,
 			fields: [
+				{ key: 'region', label: 'AWS region', placeholder: '', optional: true },
 				{ key: 'endpoint', label: 'Endpoint', placeholder: 's3.amazonaws.com (or http://minio:9000)' },
 				{ key: 'bucket', label: 'Bucket', placeholder: 'my-backup-bucket' },
-				{ key: 'path', label: 'Path (optional)', placeholder: 'dockhand' },
+				{ key: 'path', label: 'Path', placeholder: 'dockhand', optional: true },
 				{ key: 'accessKey', label: 'Access key ID', placeholder: '', envKey: 'AWS_ACCESS_KEY_ID' },
 				{ key: 'secretKey', label: 'Secret access key', placeholder: '', secret: true, envKey: 'AWS_SECRET_ACCESS_KEY' }
 			],
@@ -113,9 +125,12 @@
 					const bucket = parts[0] || '';
 					const path = parts.slice(1).join('/');
 					const endpoint = after.startsWith('http') ? `${url.protocol}//${url.host}` : url.host;
-					return { endpoint, bucket, path };
+					// Recover the region from an AWS regional endpoint so the picker shows it
+					// on edit. Non-AWS hosts leave it blank (treated as custom).
+					const region = extractS3Region(url.host);
+					return { endpoint, bucket, path, region };
 				} catch {
-					return { endpoint: '', bucket: '', path: '' };
+					return { endpoint: '', bucket: '', path: '', region: '' };
 				}
 			}
 		},
@@ -123,7 +138,7 @@
 			value: 'b2', label: 'Backblaze B2', icon: BackblazeIcon,
 			fields: [
 				{ key: 'bucket', label: 'Bucket', placeholder: 'my-backup-bucket' },
-				{ key: 'path', label: 'Path (optional)', placeholder: 'dockhand' },
+				{ key: 'path', label: 'Path', placeholder: 'dockhand', optional: true },
 				{ key: 'accountId', label: 'Key ID', placeholder: '', envKey: 'B2_ACCOUNT_ID' },
 				{ key: 'accountKey', label: 'Application key', placeholder: '', secret: true, envKey: 'B2_ACCOUNT_KEY' }
 			],
@@ -138,11 +153,13 @@
 			value: 'azure', label: 'Azure Blob', icon: AzureBlobIcon,
 			fields: [
 				{ key: 'container', label: 'Container', placeholder: 'my-backup-container' },
-				{ key: 'path', label: 'Path (optional)', placeholder: 'dockhand' },
+				{ key: 'path', label: 'Path', placeholder: 'dockhand', optional: true },
 				{ key: 'accountName', label: 'Account name', placeholder: '', envKey: 'AZURE_ACCOUNT_NAME' },
 				{ key: 'accountKey', label: 'Account key', placeholder: '', secret: true, envKey: 'AZURE_ACCOUNT_KEY' }
 			],
-			buildRepo: (f) => `azure:${f.container}:${f.path || ''}`.replace(/:$/, ''),
+			// Keep the trailing colon: restic's azure parser needs `azure:container:`
+			// (it splits on ':' and rejects a repo with no second colon). B2/GS differ.
+			buildRepo: (f) => `azure:${f.container}:${f.path || ''}`,
 			parseRepo: (repo) => {
 				const after = repo.replace(/^azure:/, '');
 				const [container, ...rest] = after.split(':');
@@ -153,8 +170,9 @@
 			value: 'gs', label: 'Google Cloud', icon: GoogleCloudIcon,
 			fields: [
 				{ key: 'bucket', label: 'Bucket', placeholder: 'my-backup-bucket' },
-				{ key: 'path', label: 'Path (optional)', placeholder: '/dockhand' },
-				{ key: 'accessToken', label: 'Access token', placeholder: '', secret: true, envKey: 'GOOGLE_ACCESS_TOKEN' }
+				{ key: 'path', label: 'Path', placeholder: '/dockhand', optional: true },
+				{ key: 'projectId', label: 'Project ID', placeholder: 'my-gcp-project', envKey: 'GOOGLE_PROJECT_ID' },
+				{ key: 'saJson', label: 'Service account JSON', placeholder: '{ "type": "service_account", ... }', secret: true, multiline: true, envKey: 'GOOGLE_APPLICATION_CREDENTIALS_JSON', hint: 'Paste or upload a service-account key JSON. It auto-refreshes, so scheduled backups keep working.' }
 			],
 			buildRepo: (f) => `gs:${f.bucket}:${f.path || '/'}`,
 			parseRepo: (repo) => {
@@ -176,8 +194,48 @@
 	let formName = $state('');
 	let formBackendType = $state('local');
 	let formFields = $state<Record<string, string>>({});
+	// Hidden file-input refs per multiline field, for the "Upload file" button.
+	let fileInputs = $state<Record<string, HTMLInputElement | null>>({});
+
+	// Read a selected file into the field (e.g. a service-account JSON). Kept lenient:
+	// we accept any text; restic validates the JSON when the destination is tested.
+	async function uploadJsonToField(key: string, e: Event) {
+		const input = e.target as HTMLInputElement;
+		const file = input.files?.[0];
+		if (!file) return;
+		try {
+			formFields[key] = await file.text();
+		} catch {
+			toast.error('Could not read the selected file');
+		}
+		input.value = ''; // let the same file be re-picked
+	}
+
+	// TLS certs (PEM). Sent as content to the server, which stores them encrypted and
+	// NEVER sends the PEM back (only hasCacert/hasTlsClientCert booleans). So on edit
+	// these start blank = "keep the stored cert"; an explicit clear zeroes them out.
+	let formCacert = $state('');
+	let formTlsClientCert = $state('');
+	let hadCacert = $state(false);        // a cert was already stored when the modal opened
+	let hadTlsClientCert = $state(false);
+	let caFileInput = $state<HTMLInputElement | null>(null);
+	let clientCertFileInput = $state<HTMLInputElement | null>(null);
+
+	async function uploadPem(which: 'ca' | 'client', e: Event) {
+		const input = e.target as HTMLInputElement;
+		const file = input.files?.[0];
+		if (!file) return;
+		try {
+			const text = await file.text();
+			if (which === 'ca') formCacert = text; else formTlsClientCert = text;
+		} catch {
+			toast.error('Could not read the selected file');
+		}
+		input.value = '';
+	}
 	let formPassword = $state('');
-	let formFlags = $state('');
+	let formBackupFlags = $state('');
+	let formRestoreFlags = $state('');
 	let formError = $state('');
 	let formSaving = $state(false);
 
@@ -198,10 +256,53 @@
 	// can save + init in one click. Reset whenever the repo fields change (a stale
 	// verdict must not drive the button after the user edits the target).
 	let needsInit = $state(false);
+	// Inline verdict shown next to the Test button after a test. `needs_init` is
+	// NOT an error (connectivity works, the repo just isn't initialised yet), so it
+	// reads green, not red. Cleared when the repo fields change (stale verdict).
+	let testStatus = $state<null | 'ok' | 'needs_init' | 'error'>(null);
+	let testStatusMsg = $state('');
 
 	const selectedBackend = $derived(backendTypes.find(b => b.value === formBackendType) ?? backendTypes[0]);
 	const repoFields = $derived(selectedBackend.fields.filter(f => !f.envKey));
 	const credentialFields = $derived(selectedBackend.fields.filter(f => f.envKey));
+
+	// TLS certs only apply to backends self-hostable over HTTPS with a private CA
+	// (S3/REST); hidden for local/B2/Azure/Google Cloud. See backendSupportsTls.
+	const showTlsSection = $derived(
+		backendSupportsTls(formBackendType, { isEditing, hasStoredCert: hadCacert || hadTlsClientCert })
+	);
+
+	// A field is mandatory unless it opts out (optional) or is a toggle (skipHostKey).
+	function fieldRequired(f: FormField): boolean {
+		return !f.optional && f.key !== 'skipHostKey';
+	}
+	// All mandatory fields present? Drives the disabled state of Test/Create. On edit
+	// the credentials + password are already stored (secrets show blank = "keep
+	// current"), so credential fields aren't required there - only repo fields are.
+	const requiredFieldsFilled = $derived(
+		selectedBackend.fields
+			.filter(f => fieldRequired(f) && !(isEditing && f.envKey))
+			.every(f => (formFields[f.key] ?? '').trim().length > 0)
+	);
+	const formValid = $derived(
+		formName.trim().length > 0
+		&& requiredFieldsFilled
+		&& (isEditing || formPassword.trim().length > 0)
+	);
+
+	// Collect the destination's env vars from the fields that declare an envKey, plus
+	// the S3 region (AWS_DEFAULT_REGION) when set. Passing the region lets restic reach
+	// a bucket even against the generic s3.amazonaws.com endpoint, and is required by
+	// some S3 providers regardless of endpoint.
+	function collectEnvVars(): Record<string, string> {
+		const envVars: Record<string, string> = {};
+		for (const field of selectedBackend.fields) {
+			if (field.envKey && formFields[field.key]?.trim()) envVars[field.envKey] = formFields[field.key];
+		}
+		const region = formFields.region?.trim();
+		if (region) envVars['AWS_DEFAULT_REGION'] = region;
+		return envVars;
+	}
 
 	function detectBackendType(repo: string): string {
 		for (const prefix of ['s3:', 'b2:', 'azure:', 'gs:', 'rest:']) {
@@ -212,7 +313,8 @@
 
 	function resetForm() {
 		formName = ''; formBackendType = 'local'; formFields = {}; formPassword = '';
-		formFlags = ''; formError = '';
+		formBackupFlags = ''; formRestoreFlags = ''; formError = '';
+		formCacert = ''; formTlsClientCert = ''; hadCacert = false; hadTlsClientCert = false;
 		formSaving = false;
 		policyPruneEnabled = true; policyPruneSchedule = '0 0 1 * *'; policyPruneMaxUnused = '10';
 		policyCheckEnabled = true; policyCheckSchedule = '0 0 1 * *';
@@ -234,10 +336,24 @@
 						const field = backend?.fields.find(f => f.envKey === key);
 						if (field) fields[field.key] = value as string;
 					}
+					// The S3 region is stored as AWS_DEFAULT_REGION (no envKey field), so
+					// map it back explicitly. It wins over any region recovered from the
+					// endpoint by parseRepo — the saved env var is authoritative.
+					if (destination.envVars['AWS_DEFAULT_REGION']) {
+						fields.region = destination.envVars['AWS_DEFAULT_REGION'];
+					}
 				}
 				formFields = fields;
 				formPassword = '';
-				formFlags = destination.flags || '';
+				// The GET endpoint splits the stored flags JSON into backupFlags/restoreFlags
+				// (legacy bare strings surface as backupFlags), so the form binds them directly.
+				formBackupFlags = destination.backupFlags ?? '';
+				formRestoreFlags = destination.restoreFlags ?? '';
+				// PEMs are never returned; start blank and remember one is stored so the
+				// UI can say "leave blank to keep" and offer a Clear button.
+				formCacert = ''; formTlsClientCert = '';
+				hadCacert = !!destination.hasCacert;
+				hadTlsClientCert = !!destination.hasTlsClientCert;
 				formError = '';
 				// Load policies
 				const pol = destination.policies ? (() => { try { return JSON.parse(destination.policies); } catch { return {}; } })() : {};
@@ -277,10 +393,14 @@
 		setTimeout(() => { generatedOk = false; }, 1500);
 	}
 
-	function copyPassword() {
-		copyToClipboard(formPassword);
-		copiedOk = true;
-		setTimeout(() => { copiedOk = false; }, 1500);
+	async function copyPassword() {
+		const ok = await copyToClipboard(formPassword);
+		if (ok) {
+			copiedOk = true;
+			setTimeout(() => { copiedOk = false; }, 1500);
+		} else {
+			toast.error('Could not copy to clipboard. Copy it manually, or use HTTPS to enable one-click copy.');
+		}
 	}
 
 	function handleBackendChange(value: string) {
@@ -296,14 +416,19 @@
 				// Use saved credentials from DB
 				payload = { destinationId: destination!.id };
 			} else {
+				// Test is disabled until formValid (all mandatory fields incl. credentials),
+				// so empty creds can't reach restic here - which matters because without
+				// them restic falls back to ambient auth (Azure ManagedIdentity, AWS
+				// instance role) that hangs on a retry loop instead of failing fast.
 				const repository = selectedBackend.buildRepo(formFields);
-				if (!repository.trim()) { toast.error('Fill in repository fields before testing'); testing = false; return; }
-				if (!formPassword.trim()) { toast.error('Enter encryption password before testing'); testing = false; return; }
-				const envVars: Record<string, string> = {};
-				for (const field of selectedBackend.fields) {
-					if (field.envKey && formFields[field.key]?.trim()) envVars[field.envKey] = formFields[field.key];
-				}
-				payload = { repository, password: formPassword, envVars: Object.keys(envVars).length > 0 ? envVars : undefined };
+				const envVars = collectEnvVars();
+				payload = {
+					repository, password: formPassword,
+					envVars: Object.keys(envVars).length > 0 ? envVars : undefined,
+					// Carry the TLS PEMs so a pre-save test of a private-CA backend can validate.
+					cacert: formCacert.trim() || undefined,
+					tlsClientCert: formTlsClientCert.trim() || undefined
+				};
 			}
 			const res = await fetch('/api/backup/destinations/test', {
 				method: 'POST',
@@ -311,16 +436,25 @@
 				body: JSON.stringify(payload)
 			});
 			const data = await res.json();
-			if (data.success && data.needsInit) {
+			// needsInit means restic REACHED the repo but it isn't initialised yet —
+			// connectivity + credentials are fine, so this is NOT an error. The backend
+			// returns success:false here, so check needsInit on its own.
+			if (data.needsInit) {
 				// Only the create flow gets the "Save and init" button; editing an
 				// existing destination already has its own "Init repo" action.
 				needsInit = !isEditing;
-				toast.info(data.message || 'Connection works, but repository needs initialization');
+				testStatus = 'needs_init';
+				testStatusMsg = 'Connectivity OK, repository needs init';
+			} else if (res.ok && data.success) {
+				needsInit = false;
+				testStatus = 'ok';
+				testStatusMsg = 'Connection successful';
 			} else {
 				needsInit = false;
-				toast[res.ok && data.success ? 'success' : 'error'](data.success ? 'Connection test successful' : (data.error || 'Connection test failed'));
+				testStatus = 'error';
+				testStatusMsg = data.error || 'Connection test failed';
 			}
-		} catch { toast.error('Connection test failed'); } finally { testing = false; }
+		} catch { testStatus = 'error'; testStatusMsg = 'Connection test failed'; } finally { testing = false; }
 	}
 
 	async function initRepo() {
@@ -358,6 +492,7 @@
 	$effect(() => {
 		currentRepo; formFields; formPassword; // track
 		needsInit = false;
+		testStatus = null;
 	});
 
 	async function save() {
@@ -379,12 +514,7 @@
 
 		formSaving = true; formError = '';
 		try {
-			const envVars: Record<string, string> = {};
-			for (const field of selectedBackend.fields) {
-				if (field.envKey && formFields[field.key]?.trim()) {
-					envVars[field.envKey] = formFields[field.key];
-				}
-			}
+			const envVars = collectEnvVars();
 			const policies = {
 				pruneEnabled: policyPruneEnabled,
 				pruneSchedule: policyPruneSchedule,
@@ -399,10 +529,20 @@
 			const body: Record<string, unknown> = {
 				name: formName.trim(), repository,
 				envVars: Object.keys(envVars).length > 0 ? envVars : undefined,
-				flags: formFlags.trim() || undefined,
+				backupFlags: formBackupFlags.trim(),
+				restoreFlags: formRestoreFlags.trim(),
 				policies: JSON.stringify(policies)
 			};
 			if (formPassword || !isEditing) body.password = formPassword || undefined;
+			// TLS certs, with keep/clear semantics on edit:
+			//   typed value  -> send it (set/replace)
+			//   blank + one stored -> omit (server keeps the existing cert)
+			//   explicitly cleared (blank + none was stored, or user hit Clear) -> send ''
+			// On create, blank just means "no cert" so an empty string is fine to omit.
+			if (formCacert.trim()) body.cacert = formCacert;
+			else if (isEditing && !hadCacert) body.cacert = '';
+			if (formTlsClientCert.trim()) body.tlsClientCert = formTlsClientCert;
+			else if (isEditing && !hadTlsClientCert) body.tlsClientCert = '';
 			const res = await fetch(isEditing ? `/api/backup/destinations/${destination!.id}` : '/api/backup/destinations', {
 				method: isEditing ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
 			});
@@ -428,14 +568,14 @@
 		{#if selectedBackend.value === 'local'}
 			<div class="flex items-start gap-2 p-2.5 mt-4 rounded-md bg-amber-500/10 border border-amber-500/20 text-xs text-amber-600 dark:text-amber-400">
 				<HardDrive class="w-3.5 h-3.5 shrink-0 mt-0.5" />
-				<span>Local path repositories work on the local Docker host, or a co-located socket-proxy on that same host. For remote hosts, use S3, REST, or another remote backend.</span>
+				<span>Enter the path as Dockhand sees it inside its own container (the container side of your backup volume mount, e.g. <code>/app/local-backups/...</code>), not the host path. Local path repositories work on the local Docker host, or a co-located socket-proxy on that same host. For remote hosts, use S3, REST, or another remote backend.</span>
 			</div>
 		{/if}
 		<div class="grid grid-cols-2 gap-6 py-4">
 			<!-- Left column: connection -->
 			<div class="space-y-4">
 				<div class="space-y-2">
-					<Label for="dest-name">Name</Label>
+					<FieldLabel label="Name" forId="dest-name" required />
 					<Input id="dest-name" bind:value={formName} />
 				</div>
 
@@ -462,15 +602,49 @@
 				</div>
 
 				{#each repoFields as field}
-					<div class="space-y-1">
-						<Label for="field-{field.key}">{field.label}</Label>
-						<Input
-							id="field-{field.key}"
-							value={formFields[field.key] ?? ''}
-							oninput={(e: Event) => { formFields[field.key] = (e.target as HTMLInputElement).value; }}
-							placeholder={field.placeholder}
-						/>
-					</div>
+					{#if field.key === 'region'}
+						<div class="space-y-1">
+							<FieldLabel label={field.label} forId="field-region" required={fieldRequired(field)} />
+							<div class="flex gap-1.5">
+								<!-- Free-text region: any provider (AWS, Wasabi, R2, ...). Always
+								     passed to restic as AWS_DEFAULT_REGION. -->
+								<Input
+									id="field-region"
+									value={formFields.region ?? ''}
+									oninput={(e: Event) => { formFields.region = (e.target as HTMLInputElement).value; }}
+									placeholder="e.g. eu-north-1"
+									class="flex-1"
+								/>
+								<!-- Quick-pick of AWS regions: fills the region AND the regional
+								     endpoint so AWS users don't have to know the URL. -->
+								<Select.Root type="single" value={formFields.region ?? ''} onValueChange={(v) => {
+									if (!v) return;
+									formFields.region = v;
+									formFields.endpoint = regionalEndpoint(v);
+								}}>
+									<Select.Trigger class="w-36 shrink-0" aria-label="AWS regions quick pick">AWS regions</Select.Trigger>
+									<Select.Content class="max-h-64">
+										{#each AWS_REGIONS as r}
+											<Select.Item value={r}>{r}</Select.Item>
+										{/each}
+									</Select.Content>
+								</Select.Root>
+							</div>
+							<p class="text-xs text-muted-foreground">
+								Passed to restic as <code class="font-mono">AWS_DEFAULT_REGION</code>.
+							</p>
+						</div>
+					{:else}
+						<div class="space-y-1">
+							<FieldLabel label={field.label} forId="field-{field.key}" required={fieldRequired(field)} />
+							<Input
+								id="field-{field.key}"
+								value={formFields[field.key] ?? ''}
+								oninput={(e: Event) => { formFields[field.key] = (e.target as HTMLInputElement).value; }}
+								placeholder={field.placeholder}
+							/>
+						</div>
+					{/if}
 				{/each}
 			</div>
 
@@ -484,20 +658,45 @@
 						</div>
 					{:else}
 						<div class="space-y-1">
-							<Label for="field-{field.key}">{field.label}</Label>
-							<Input
-								id="field-{field.key}"
-								type={field.secret ? 'password' : 'text'}
-								value={formFields[field.key] ?? ''}
-								oninput={(e: Event) => { formFields[field.key] = (e.target as HTMLInputElement).value; }}
-								placeholder={isEditing && field.secret ? '(leave blank to keep current)' : field.placeholder}
-							/>
+							{#if field.multiline}
+								<div class="flex items-center justify-between">
+									<FieldLabel label={field.label} forId="field-{field.key}" required={fieldRequired(field)} />
+									<Button variant="outline" size="sm" class="h-7 px-2 text-xs" onclick={() => fileInputs[field.key]?.click()}>
+										<Upload class="mr-1 h-3 w-3" />Upload file
+									</Button>
+								</div>
+								<input
+									type="file"
+									accept="application/json,.json"
+									class="hidden"
+									bind:this={fileInputs[field.key]}
+									onchange={(e) => uploadJsonToField(field.key, e)}
+								/>
+								<Textarea
+									id="field-{field.key}"
+									rows={5}
+									value={formFields[field.key] ?? ''}
+									oninput={(e: Event) => { formFields[field.key] = (e.target as HTMLTextAreaElement).value; }}
+									placeholder={isEditing && field.secret ? '(leave blank to keep current)' : field.placeholder}
+									class="field-sizing-fixed max-h-40 resize-y overflow-auto font-mono text-xs"
+								/>
+							{:else}
+								<FieldLabel label={field.label} forId="field-{field.key}" required={fieldRequired(field)} />
+								<Input
+									id="field-{field.key}"
+									type={field.secret ? 'password' : 'text'}
+									value={formFields[field.key] ?? ''}
+									oninput={(e: Event) => { formFields[field.key] = (e.target as HTMLInputElement).value; }}
+									placeholder={isEditing && field.secret ? '(leave blank to keep current)' : field.placeholder}
+								/>
+							{/if}
+							{#if field.hint}<p class="text-xs text-muted-foreground">{field.hint}</p>{/if}
 						</div>
 					{/if}
 				{/each}
 
 				<div class="space-y-2">
-					<Label for="dest-password">Encryption password</Label>
+					<FieldLabel label="Encryption password" forId="dest-password" required={!isEditing} />
 					<div class="flex gap-1.5">
 						<Input id="dest-password" type="password" bind:value={formPassword} placeholder={isEditing ? '(leave blank to keep current)' : ''} class="flex-1" />
 						<Button variant="outline" size="sm" class="h-9 px-2 shrink-0" onclick={generatePassword} title="Generate strong password">
@@ -513,20 +712,90 @@
 				</div>
 
 				<div class="space-y-2">
-					<Label for="dest-flags">Extra restic flags</Label>
-					<Input id="dest-flags" bind:value={formFlags} />
-					<div class="text-[10px] text-muted-foreground space-y-0.5">
-						<p>Common flags:</p>
+					<Label for="dest-backup-flags">Extra backup flags</Label>
+					<Input id="dest-backup-flags" bind:value={formBackupFlags} />
+					<div class="text-xs text-muted-foreground space-y-0.5">
+						<p>Applied to backups. Common flags:</p>
 						<div class="flex flex-wrap gap-x-3 gap-y-0.5 font-mono">
-							<span class="cursor-pointer hover:text-foreground" onclick={() => { formFlags = (formFlags + ' --limit-upload 5120').trim(); }} title="Limit upload speed to 5 MB/s">--limit-upload</span>
-							<span class="cursor-pointer hover:text-foreground" onclick={() => { formFlags = (formFlags + ' --limit-download 10240').trim(); }} title="Limit download speed to 10 MB/s">--limit-download</span>
-							<span class="cursor-pointer hover:text-foreground" onclick={() => { formFlags = (formFlags + ' --verbose').trim(); }} title="Verbose output">--verbose</span>
-							<span class="cursor-pointer hover:text-foreground" onclick={() => { formFlags = (formFlags + ' --compression max').trim(); }} title="Maximum compression">--compression max</span>
+							<span class="cursor-pointer hover:text-foreground" onclick={() => { formBackupFlags = (formBackupFlags + ' --limit-upload 5120').trim(); }} title="Limit upload speed to 5 MB/s">--limit-upload</span>
+							<span class="cursor-pointer hover:text-foreground" onclick={() => { formBackupFlags = (formBackupFlags + ' --limit-download 10240').trim(); }} title="Limit download speed to 10 MB/s">--limit-download</span>
+							<span class="cursor-pointer hover:text-foreground" onclick={() => { formBackupFlags = (formBackupFlags + ' --verbose').trim(); }} title="Verbose output">--verbose</span>
+							<span class="cursor-pointer hover:text-foreground" onclick={() => { formBackupFlags = (formBackupFlags + ' --compression max').trim(); }} title="Maximum compression">--compression max</span>
+						</div>
+					</div>
+				</div>
+
+				<div class="space-y-2">
+					<Label for="dest-restore-flags">Extra restore flags</Label>
+					<Input id="dest-restore-flags" bind:value={formRestoreFlags} />
+					<div class="text-xs text-muted-foreground space-y-0.5">
+						<p>Applied only to restores. Common flags:</p>
+						<div class="flex flex-wrap gap-x-3 gap-y-0.5 font-mono">
+							<span class="cursor-pointer hover:text-foreground" onclick={() => { formRestoreFlags = (formRestoreFlags + ' --exclude-xattr security.selinux').trim(); }} title="Skip the SELinux xattr the helper can't remove on a cross-distro restore (e.g. Ubuntu -> Fedora)">--exclude-xattr security.selinux</span>
 						</div>
 					</div>
 				</div>
 			</div>
 		</div>
+
+		<!-- TLS certificates: only for backends that can be self-hosted over HTTPS with a
+		     private CA - S3 (MinIO/Ceph) and a REST server. A local path has no network, and
+		     B2/Azure/Google Cloud are managed clouds with public CAs, so the section is hidden
+		     there. Optional; blank = use the system trust store. PEM content, uploaded or pasted. -->
+		{#if showTlsSection}
+		<div class="border-t pt-3 mt-2 space-y-3">
+			<span class="text-xs font-medium text-muted-foreground uppercase tracking-wide">TLS certificates (optional)</span>
+			<p class="text-xs text-muted-foreground -mt-1">
+				For a backend served over HTTPS with a private/self-signed CA. Leave blank to use the system trust store.
+			</p>
+			<div class="grid grid-cols-2 gap-6">
+				<div class="space-y-1">
+					<div class="flex items-center justify-between">
+						<Label for="dest-cacert">CA certificate</Label>
+						<div class="flex gap-1">
+							{#if isEditing && hadCacert && !formCacert}
+								<Button variant="outline" size="sm" class="h-7 px-2 text-xs text-destructive" onclick={() => { hadCacert = false; }}>Clear</Button>
+							{/if}
+							<Button variant="outline" size="sm" class="h-7 px-2 text-xs" onclick={() => caFileInput?.click()}>
+								<Upload class="mr-1 h-3 w-3" />Upload
+							</Button>
+						</div>
+					</div>
+					<input type="file" accept=".pem,.crt,.cer,.ca,application/x-pem-file,text/plain" class="hidden" bind:this={caFileInput} onchange={(e) => uploadPem('ca', e)} />
+					<Textarea
+						id="dest-cacert"
+						rows={4}
+						bind:value={formCacert}
+						placeholder={isEditing && hadCacert ? '(a CA certificate is stored - leave blank to keep it)' : '-----BEGIN CERTIFICATE-----'}
+						class="field-sizing-fixed max-h-40 resize-y overflow-auto font-mono text-xs"
+					/>
+					<p class="text-xs text-muted-foreground">Verifies the backend's TLS certificate (restic <code class="font-mono">RESTIC_CACERT</code>).</p>
+				</div>
+				<div class="space-y-1">
+					<div class="flex items-center justify-between">
+						<Label for="dest-client-cert">Client certificate (mTLS)</Label>
+						<div class="flex gap-1">
+							{#if isEditing && hadTlsClientCert && !formTlsClientCert}
+								<Button variant="outline" size="sm" class="h-7 px-2 text-xs text-destructive" onclick={() => { hadTlsClientCert = false; }}>Clear</Button>
+							{/if}
+							<Button variant="outline" size="sm" class="h-7 px-2 text-xs" onclick={() => clientCertFileInput?.click()}>
+								<Upload class="mr-1 h-3 w-3" />Upload
+							</Button>
+						</div>
+					</div>
+					<input type="file" accept=".pem,.crt,.cer,.key,application/x-pem-file,text/plain" class="hidden" bind:this={clientCertFileInput} onchange={(e) => uploadPem('client', e)} />
+					<Textarea
+						id="dest-client-cert"
+						rows={4}
+						bind:value={formTlsClientCert}
+						placeholder={isEditing && hadTlsClientCert ? '(a client certificate is stored - leave blank to keep it)' : 'certificate + private key in one PEM'}
+						class="field-sizing-fixed max-h-40 resize-y overflow-auto font-mono text-xs"
+					/>
+					<p class="text-xs text-muted-foreground">Certificate + key in one PEM for mutual TLS (restic <code class="font-mono">RESTIC_TLS_CLIENT_CERT</code>).</p>
+				</div>
+			</div>
+		</div>
+		{/if}
 
 
 		<!-- Policies section -->
@@ -535,7 +804,7 @@
 
 			<!-- Prune policy -->
 			<div class="space-y-1.5">
-				<div class="flex items-center justify-between">
+				<div class="flex items-center gap-3">
 					<div class="flex items-center gap-1.5">
 						<Clock class="w-3.5 h-3.5 text-muted-foreground" />
 						<Label class="text-sm">Scheduled prune</Label>
@@ -551,7 +820,7 @@
 					<div class="pl-5 space-y-2">
 						<CronEditor value={policyPruneSchedule} onchange={(v) => policyPruneSchedule = v} />
 						<div class="flex items-center gap-2">
-							<label class="text-[10px] text-muted-foreground">Max unused %</label>
+							<label class="text-xs text-muted-foreground">Max unused %</label>
 							<Input bind:value={policyPruneMaxUnused} type="number" min="0" max="100" class="h-8 text-xs w-20" />
 						</div>
 					</div>
@@ -560,7 +829,7 @@
 
 			<!-- Check policy -->
 			<div class="space-y-1.5">
-				<div class="flex items-center justify-between">
+				<div class="flex items-center gap-3">
 					<div class="flex items-center gap-1.5">
 						<PackageCheck class="w-3.5 h-3.5 text-muted-foreground" />
 						<Label class="text-sm">Scheduled integrity check</Label>
@@ -581,7 +850,7 @@
 
 			<!-- Data verification policy -->
 			<div class="space-y-1.5">
-				<div class="flex items-center justify-between">
+				<div class="flex items-center gap-3">
 					<div class="flex items-center gap-1.5">
 						<FolderCheck class="w-3.5 h-3.5 text-muted-foreground" />
 						<Label class="text-sm">Scheduled data verification</Label>
@@ -597,7 +866,7 @@
 					<div class="pl-5 space-y-2">
 						<CronEditor value={policyVerifySchedule} onchange={(v) => policyVerifySchedule = v} />
 						<div class="flex items-center gap-2">
-							<label class="text-[10px] text-muted-foreground">Data %</label>
+							<label class="text-xs text-muted-foreground">Data %</label>
 							<Select.Root type="single" value={policyVerifyDataSubset} onValueChange={(v) => policyVerifyDataSubset = v}>
 								<Select.Trigger class="h-8 w-20 text-xs">{policyVerifyDataSubset}</Select.Trigger>
 								<Select.Content>
@@ -614,7 +883,7 @@
 			</div>
 
 			<!-- Auto-unlock -->
-			<div class="flex items-center justify-between">
+			<div class="flex items-center gap-3">
 				<div class="flex items-center gap-1.5">
 					<Unlock class="w-3.5 h-3.5 text-muted-foreground" />
 					<Label class="text-sm">Auto-unlock stale locks</Label>
@@ -678,23 +947,31 @@
 			</div>
 		{/if}
 		<Dialog.Footer class="flex-shrink-0 border-t mt-auto pt-4">
-			<div class="flex items-center gap-2 mr-auto">
-				<Button variant="outline" size="sm" onclick={testConnection} disabled={testing}>
-					{#if testing}<RefreshCw class="w-4 h-4 mr-1 animate-spin" />{:else}<Wifi class="w-4 h-4 mr-1" />{/if}
+			<div class="flex items-center gap-2 mr-auto min-w-0">
+				<Button variant="outline" size="sm" onclick={testConnection} disabled={testing || !formValid} title={!formValid ? 'Fill in all required fields first' : undefined}>
+					{#if testing}<Loader2 class="w-4 h-4 mr-1 animate-spin" />{:else}<Wifi class="w-4 h-4 mr-1" />{/if}
 					Test
 				</Button>
 				{#if isEditing}
 					<Button variant="outline" size="sm" class="{destination?.lastTestStatus === 'success' ? 'opacity-30' : ''}" onclick={initRepo} disabled={initializing} title={destination?.lastTestStatus === 'success' ? 'Already initialized' : 'Initialize repository'}>
-						{#if initializing}<RefreshCw class="w-4 h-4 mr-1 animate-spin" />{:else}<Database class="w-4 h-4 mr-1" />{/if}
+						{#if initializing}<Loader2 class="w-4 h-4 mr-1 animate-spin" />{:else}<Database class="w-4 h-4 mr-1" />{/if}
 						Init repo
 					</Button>
-				{:else if needsInit}
-					<span class="text-xs text-muted-foreground">Connection OK — repository will be initialized on save.</span>
+				{/if}
+				{#if testStatus === 'ok'}
+					<span class="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400"><Check class="w-3.5 h-3.5 shrink-0" />{testStatusMsg}</span>
+				{:else if testStatus === 'needs_init'}
+					<span class="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400"><Check class="w-3.5 h-3.5 shrink-0" />{testStatusMsg}{#if !isEditing} - done on save{/if}</span>
+				{:else if testStatus === 'error'}
+					<span class="flex items-center gap-1.5 min-w-0 text-xs text-destructive" title={testStatusMsg}>
+						<AlertTriangle class="w-3.5 h-3.5 shrink-0" />
+						<span class="truncate">{testStatusMsg}</span>
+					</span>
 				{/if}
 			</div>
 			<Button variant="outline" onclick={() => { open = false; onClose(); }}>Cancel</Button>
-			<Button onclick={save} disabled={formSaving} variant={repoConflictName ? 'destructive' : 'default'}>
-				{#if formSaving}<RefreshCw class="w-4 h-4 mr-1 animate-spin" />{:else if repoConflictName}<AlertTriangle class="w-4 h-4 mr-1" />{:else if needsInit && !isEditing}<Database class="w-4 h-4 mr-1" />{:else if isEditing}<Check class="w-4 h-4" />{:else}<Plus class="w-4 h-4" />{/if}
+			<Button onclick={save} disabled={formSaving || !formValid} variant={repoConflictName ? 'destructive' : 'default'} title={!formValid ? 'Fill in all required fields first' : undefined}>
+				{#if formSaving}<Loader2 class="w-4 h-4 mr-1 animate-spin" />{:else if repoConflictName}<AlertTriangle class="w-4 h-4 mr-1" />{:else if isEditing}<Check class="w-4 h-4 mr-1" />{:else}<Plus class="w-4 h-4 mr-1" />{/if}
 				{repoConflictName ? 'Save anyway' : needsInit && !isEditing ? 'Create and init' : isEditing ? 'Save' : 'Create'}
 			</Button>
 		</Dialog.Footer>

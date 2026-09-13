@@ -1,6 +1,6 @@
 // v1.0.12
 import '$lib/server/dns-dispatcher.js';
-import { initDatabase, hasAdminUser } from '$lib/server/db';
+import { initDatabase, hasAnyUser } from '$lib/server/db';
 import { startSubprocesses, stopSubprocesses } from '$lib/server/subprocess-manager';
 import { startScheduler } from '$lib/server/scheduler';
 import { isAuthEnabled, validateSession } from '$lib/server/auth';
@@ -12,6 +12,7 @@ import { initCryptoFallback } from '$lib/server/crypto-fallback';
 import { detectHostDataDir } from '$lib/server/host-path';
 import { listContainers, removeContainer } from '$lib/server/docker';
 import { migrateCredentials } from '$lib/server/encryption';
+import { validateStacksDirAtStartup } from '$lib/server/stacks';
 import { gzipSync } from 'node:zlib';
 import { rmSync, readdirSync, existsSync } from 'fs';
 import { join } from 'path';
@@ -19,7 +20,7 @@ import type { HandleServerError, Handle } from '@sveltejs/kit';
 import { redirect } from '@sveltejs/kit';
 import { startRssTracker, stopRssTracker, rssBeforeOp, rssAfterOp } from '$lib/server/rss-tracker';
 import { getClientIp } from '$lib/server/client-ip';
-import { BACKUPS_ENABLED } from '$lib/server/features';
+import { BACKUPS_ENABLED, API_DOCS_ENABLED } from '$lib/server/features';
 // Side-effect import: installs globalThis.__authenticateWsUpgrade and
 // globalThis.__canAccessEnvForUser used by the raw WS upgrade handlers in
 // server.js / vite.config.ts to authenticate /api/containers/*/exec.
@@ -144,6 +145,7 @@ if (!initialized) {
 
 		setServerStartTime(); // Track when server started
 		initDatabase();
+		validateStacksDirAtStartup();
 
 		// Migrate plain text credentials to encrypted storage.
 		// This also handles key rotation if ENCRYPTION_KEY env var differs from the
@@ -268,7 +270,8 @@ const PUBLIC_PATHS = [
 	'/api/changelog',
 	'/api/dependencies',
 	'/api/health',
-	'/api/settings/theme'
+	'/api/settings/theme',
+	'/api/docs'
 ];
 
 // Check if path is public
@@ -280,8 +283,11 @@ function isPublicPath(pathname: string): boolean {
 	return PUBLIC_PATHS.some(path => pathname === path || pathname.startsWith(path + '/'));
 }
 
-// Check if path is a static asset
+// True only for real static files. API routes are never static, even when a path
+// ends in an asset-like extension (a route parameter can), so they always go through
+// the normal request handling below.
 function isStaticAsset(pathname: string): boolean {
+	if (pathname.startsWith('/api/')) return false;
 	return pathname.startsWith('/_app/') ||
 		pathname.startsWith('/favicon') ||
 		pathname.endsWith('.webp') ||
@@ -306,6 +312,17 @@ export const handle: Handle = async ({ event, resolve }) => {
 	if (!BACKUPS_ENABLED) {
 		const p = event.url.pathname;
 		if (p === '/backups' || p.startsWith('/backups/') || p.startsWith('/api/backup/')) {
+			return new Response('Not found', { status: 404 });
+		}
+	}
+
+	// API docs gate (see $lib/server/features.ts). Enforced HERE, not in the
+	// docs +page.server load, because the app runs ssr=false so a page load
+	// never fires on a cold server render. Single chokepoint covers the spec
+	// endpoint and the Scalar viewer.
+	if (!API_DOCS_ENABLED) {
+		const p = event.url.pathname.replace(/\/$/, '');
+		if (p === '/api/docs' || p === '/api/docs/ui') {
 			return new Response('Not found', { status: 404 });
 		}
 	}
@@ -365,10 +382,12 @@ export const handle: Handle = async ({ event, resolve }) => {
 
 		// If not authenticated
 		if (!user) {
-			// Special case: allow user creation when auth is enabled but no admin exists yet
-			// This enables the first admin user to be created during initial setup
-			const noAdminSetupMode = !(await hasAdminUser());
-			if (noAdminSetupMode && event.url.pathname === '/api/users' && event.request.method === 'POST') {
+			// Initial setup only: allow creating the very first account when NO user exists
+			// yet (there is no one to authenticate as). Once any account exists, creation
+			// goes through the normal authenticated path. Bounding this on any-user (not the
+			// Admin role) keeps it from reopening when accounts exist but no admin does.
+			const firstRunSetup = !(await hasAnyUser());
+			if (firstRunSetup && event.url.pathname === '/api/users' && event.request.method === 'POST') {
 				return requestContext.run(ctx, async () => compressResponse(event.request, await resolve(event)));
 			}
 

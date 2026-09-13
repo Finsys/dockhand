@@ -1,5 +1,6 @@
 <script lang="ts">
 	import * as Dialog from '$lib/components/ui/dialog';
+	import { readJobResponse } from '$lib/utils/sse-fetch';
 	import { Badge } from '$lib/components/ui/badge';
 	import {
 		FolderOpen, Box, Layers, Network, HardDrive, Tag, Variable,
@@ -12,6 +13,7 @@
 	import { formatDateTime, formatRelativeTime } from '$lib/stores/settings';
 	import { environments } from '$lib/stores/environment';
 	import EnvironmentIcon from '$lib/components/EnvironmentIcon.svelte';
+	import SnapshotHeader from '$lib/components/backup/SnapshotHeader.svelte';
 	import FileBrowserPanel from './FileBrowserPanel.svelte';
 
 	interface Props {
@@ -67,9 +69,12 @@
 				destinationRepo = dest.repository || '';
 			}
 			// Get snapshot time + owning environment from the snapshot's tags.
-			const snapRes = await fetch(`/api/backup/snapshots?destinationId=${destinationId}`);
-			if (snapRes.ok) {
-				const d = await snapRes.json();
+			// Job-polling so a slow `restic snapshots` behind a proxy isn't aborted at ~15s.
+			const snapRes = await fetch(`/api/backup/snapshots?destinationId=${destinationId}`, {
+				headers: { Accept: 'text/event-stream' }
+			});
+			const d = await readJobResponse(snapRes);
+			if (d && !d.error) {
 				const snaps = d.snapshots ?? d;
 				const snap = (Array.isArray(snaps) ? snaps : []).find((s: any) => s.id === snapshotId || s.shortId === snapshotId?.slice(0, 8));
 				if (snap) {
@@ -90,13 +95,11 @@
 		metadataLoading = true;
 		metadataError = '';
 		try {
-			const res = await fetch(`/api/backup/snapshots/${snapshotId}/metadata?destinationId=${destinationId}`);
-			if (res.ok) {
-				metadata = await res.json();
-			} else {
-				try { metadataError = (await res.json()).error || 'No metadata available'; }
-				catch { metadataError = 'No metadata available'; }
-			}
+			// Job-polling so a slow `restic dump` behind a proxy isn't aborted at ~15s.
+			const res = await fetch(`/api/backup/snapshots/${snapshotId}/metadata?destinationId=${destinationId}`, { headers: { Accept: 'text/event-stream' } });
+			const data = await readJobResponse(res);
+			if (data?.error) metadataError = data.error || 'No metadata available';
+			else metadata = data;
 		} catch { metadataError = 'Failed to load metadata'; }
 		finally { metadataLoading = false; }
 	}
@@ -105,33 +108,21 @@
 <Dialog.Root bind:open>
 	<Dialog.Content class="max-w-6xl h-[90vh] sm:h-[85vh] flex flex-col overflow-hidden">
 		<Dialog.Header>
-			<Dialog.Title class="flex items-center gap-2 flex-wrap">
-				<FolderOpen class="w-5 h-5" />
-				Browse snapshot
-				{#if snapshotEnvName}
-					<span class="text-muted-foreground font-normal">from</span>
-					<EnvironmentIcon icon={snapshotEnvIcon} envId={snapshotEnvId} class="w-4 h-4 text-amber-600 dark:text-amber-400" />
-					<span class="font-normal text-amber-600 dark:text-amber-400">{snapshotEnvName}</span>
-				{/if}
-				{#if displayName}
-					<span class="text-muted-foreground font-normal">—</span>
-					{#if (targetType || metadata?.type) === 'stack'}
-						<Layers class="w-4 h-4 text-purple-500" />
-					{:else}
-						<Box class="w-4 h-4 text-blue-500" />
-					{/if}
-					<span class="font-normal">{displayName}</span>
-				{/if}
-				{#if destinationName}
-					<span class="text-muted-foreground font-normal">on</span>
-					<svelte:component this={getRepoTypeIcon(destinationRepo)} class="w-4 h-4" />
-					<span class="font-normal">{destinationName}</span>
-				{/if}
+			<Dialog.Title>
+				<SnapshotHeader
+					icon={FolderOpen}
+					verb="Browse snapshot"
+					name={displayName}
+					nameType={(targetType || metadata?.type) === 'stack' ? 'stack' : 'container'}
+					{destinationName}
+					destinationRepository={destinationRepo}
+					sourceEnv={{ id: snapshotEnvId, icon: snapshotEnvIcon }}
+					sourceEnvName={snapshotEnvName}
+					snapshotId={snapshotId ? String(snapshotId) : undefined}
+					{snapshotTime}
+				/>
 			</Dialog.Title>
-			<Dialog.Description class="flex items-center gap-2 text-xs text-muted-foreground">
-				{#if snapshotId}<Badge variant="outline" class="font-mono text-[10px]">{String(snapshotId).slice(0, 8)}</Badge>{/if}
-				{#if snapshotTime}{formatDateTime(snapshotTime)} <span class="opacity-60">({formatRelativeTime(snapshotTime)})</span>{/if}
-			</Dialog.Description>
+			<Dialog.Description class="sr-only">Browse files in snapshot {snapshotId ? String(snapshotId).slice(0, 8) : ''}.</Dialog.Description>
 		</Dialog.Header>
 
 		<!-- Tabs -->
@@ -192,12 +183,12 @@
 								<dt class="text-muted-foreground">Volumes</dt>
 								<dd>{metadata.volumes?.length ?? 0}</dd>
 								{#if metadata.type === 'stack'}
-									{#if metadata.composeFileName}
+									{#if metadata.stack?.composeFileName}
 										<dt class="text-muted-foreground">Compose file</dt>
-										<dd class="font-mono">{metadata.composeFileName}</dd>
+										<dd class="font-mono">{metadata.stack.composeFileName}</dd>
 									{/if}
 									<dt class="text-muted-foreground">Stack files</dt>
-									<dd>{metadata.hasStackFiles ? (metadata.stackFilesTruncated ? 'captured (truncated)' : 'captured') : 'not captured'}</dd>
+									<dd>{metadata.hasStackFiles ? 'captured' : 'not captured'}</dd>
 								{/if}
 							</dl>
 						</section>
@@ -229,34 +220,31 @@
 						<!-- Stack files (captured under stackfiles/). The list is recorded in
 						     metadata.json at backup time so we can enumerate the exact files
 						     without a browse roundtrip. -->
-						{#if metadata.type === 'stack' && metadata.stackFilesList?.length}
+						{#if metadata.type === 'stack' && metadata.stack?.fileList?.length}
 							<section class="space-y-2 border-t pt-4">
-								<h4 class="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5"><FileText class="w-3.5 h-3.5" />Stack files ({metadata.stackFilesList.length}{metadata.stackFilesListTruncated ? '+' : ''})</h4>
+								<h4 class="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5"><FileText class="w-3.5 h-3.5" />Stack files ({metadata.stack.fileList.length})</h4>
 								<div class="space-y-1">
-									{#each metadata.stackFilesList as file}
+									{#each metadata.stack.fileList as file}
 										<div class="flex items-center gap-2 text-sm bg-muted/30 rounded px-2 py-1.5">
-											<span class="font-mono truncate flex-1" class:font-medium={file.path === metadata.composeFileName}>{file.path}</span>
-											{#if file.path === metadata.composeFileName}
+											<span class="font-mono truncate flex-1" class:font-medium={file.path === metadata.stack.composeFileName}>{file.path}</span>
+											{#if file.path === metadata.stack.composeFileName}
 												<Badge variant="outline" class="text-[10px] shrink-0">compose</Badge>
 											{/if}
 											<span class="text-muted-foreground text-xs shrink-0 tabular-nums">{formatBytes(file.bytes)}</span>
 										</div>
 									{/each}
 								</div>
-								{#if metadata.stackFilesListTruncated}
-									<p class="text-xs text-muted-foreground">Only the first {metadata.stackFilesList.length} files are listed. Browse the snapshot to see the full tree.</p>
-								{/if}
 							</section>
 						{/if}
 
 						<!-- Secrets carried in the snapshot (KEY NAMES only — the values are
 						     stored encrypted and never exposed here). Restored to the target
 						     DB on restore unless the user opts out. -->
-						{#if metadata.type === 'stack' && metadata.secretKeys?.length}
+						{#if metadata.type === 'stack' && metadata.stack?.secretKeys?.length}
 							<section class="space-y-2 border-t pt-4">
-								<h4 class="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5"><KeyRound class="w-3.5 h-3.5" />Secrets ({metadata.secretKeys.length})</h4>
+								<h4 class="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5"><KeyRound class="w-3.5 h-3.5" />Secrets ({metadata.stack.secretKeys.length})</h4>
 								<div class="flex flex-wrap gap-1">
-									{#each metadata.secretKeys as key}
+									{#each metadata.stack.secretKeys as key}
 										<code class="rounded bg-muted px-1.5 py-0.5 text-xs">{key}</code>
 									{/each}
 								</div>

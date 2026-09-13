@@ -7,6 +7,18 @@ import { validateDockerIdParam } from '$lib/server/docker-validation';
 import { extractFirstFileFromTar } from '$lib/server/tar-extract';
 import { attachmentContentDisposition } from '$lib/server/content-disposition';
 
+/**
+ * @openapi
+ * summary: Export a Docker volume (or a sub-path) as a downloadable archive — streaming tar, gzip-compressed tar.gz, or raw single-file bytes
+ * path: name:string! Docker volume name (from GET /api/volumes)
+ * query: env:integer Environment ID the volume belongs to (from GET /api/environments)
+ * query: path:string Sub-path inside the volume to export (defaults to "/")
+ * query: format:string Archive format: "tar" (default), "tar.gz", or "raw" (single file)
+ * resp-200: Binary archive stream (Content-Disposition attachment); Content-Type is application/x-tar, application/gzip, or application/octet-stream depending on format
+ * resp-403: Permission denied (requires volumes:inspect)
+ * resp-404: Path not found
+ * resp-500: Failed to export volume
+ */
 export const GET: RequestHandler = async ({ params, url, cookies }) => {
 	const invalid = validateDockerIdParam(params.name, 'volume');
 	if (invalid) return invalid;

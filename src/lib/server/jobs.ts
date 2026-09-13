@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import { getRequestContext } from './request-context';
 
 export interface JobLine {
 	event?: string; // 'result', 'progress', etc. — undefined for bare data lines
@@ -14,6 +15,8 @@ export interface Job {
 	updatedAt: number;
 	/** Set when a client requests cancellation; long-running jobs should poll this. */
 	cancelRequested?: boolean;
+	/** User id that created the job, captured from the request context. null when auth is disabled. */
+	ownerId: number | null;
 }
 
 const jobs = new Map<string, Job>();
@@ -24,10 +27,25 @@ export function createJob(): Job {
 		status: 'running',
 		lines: [],
 		createdAt: Date.now(),
-		updatedAt: Date.now()
+		updatedAt: Date.now(),
+		ownerId: getRequestContext()?.user?.id ?? null
 	};
 	jobs.set(job.id, job);
 	return job;
+}
+
+/**
+ * Whether the current request may read/cancel this job. Owner or admin only.
+ * When auth is disabled (or the job has no owner) access is open, matching the
+ * rest of the app's initial-setup behavior.
+ */
+export function canAccessJob(job: Job): boolean {
+	const ctx = getRequestContext();
+	if (!ctx || !ctx.authEnabled) return true;
+	if (job.ownerId === null) return true;
+	const user = ctx.user;
+	if (!user) return false;
+	return user.isAdmin || user.id === job.ownerId;
 }
 
 export function getJob(id: string): Job | undefined {

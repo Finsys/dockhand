@@ -13,6 +13,22 @@ export function isLocalRepo(repository: string): boolean {
 	return repository.startsWith('/') || repository.startsWith('./');
 }
 
+/**
+ * Whether a backup destination's TLS-certificate fields (CA / client cert) are
+ * meaningful for a given backend type. Only backends that can be self-hosted over
+ * HTTPS with a private/self-signed CA qualify: `s3` (MinIO/Ceph) and `rest`. A
+ * local path has no network, and `b2`/`azure`/`gs` are managed clouds served from
+ * public CAs, so the TLS fields are noise there. When editing a destination that
+ * already has a cert stored, return true regardless so its data is never hidden.
+ */
+export function backendSupportsTls(
+	backendType: string,
+	opts?: { isEditing?: boolean; hasStoredCert?: boolean }
+): boolean {
+	if (backendType === 's3' || backendType === 'rest') return true;
+	return !!(opts?.isEditing && opts?.hasStoredCert);
+}
+
 /** An environment reachable over the network (hawser or direct-with-host). */
 export function isRemoteEnvironment(env?: { connectionType?: string | null; host?: string | null } | null): boolean {
 	if (!env) return false;

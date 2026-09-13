@@ -10,6 +10,7 @@ import { authorize } from '$lib/server/authorize';
 import { auditEnvironment } from '$lib/server/audit';
 import { refreshSubprocessEnvironments } from '$lib/server/subprocess-manager';
 import { resetHostDetection, detectHostDataDir } from '$lib/server/host-path';
+import { redactEnvironment } from '$lib/server/environment-redact';
 import { serializeLabels, parseLabels, MAX_LABELS } from '$lib/utils/label-colors';
 import { cleanPem } from '$lib/utils/pem';
 import { validateEnvName } from '$lib/utils/env-name';
@@ -18,14 +19,26 @@ import { closeEdgeConnection } from '$lib/server/hawser';
 import { computeAuditDiff } from '$lib/utils/diff';
 import { deleteEnvironmentIcon } from '$lib/server/env-icons';
 
+/**
+ * @openapi
+ * summary: Get a single environment by id, including its parsed labels and public IP
+ * path: id:integer! Environment id (from GET /api/environments)
+ * resp-200: {id:integer!, name:string!, connectionType:string!, labels:array<string>, publicIp:string, hasTlsKey:boolean, hasHawserToken:boolean}
+ * resp-200-desc: The tlsKey (private TLS client key) and hawserToken secrets are NEVER returned; hasTlsKey / hasHawserToken indicate whether one is stored.
+ * resp-403: Permission denied (RBAC 'environments:view' missing)
+ * resp-404: Environment not found
+ * resp-500: Unexpected error while loading the environment
+ */
 export const GET: RequestHandler = async ({ params, cookies }) => {
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !await auth.can('environments', 'view')) {
 		return json({ error: 'Permission denied' }, { status: 403 });
 	}
+	const id = parseInt(params.id);
+	const envAccessDenied = await auth.requireEnvAccess(id);
+	if (envAccessDenied) return envAccessDenied;
 
 	try {
-		const id = parseInt(params.id);
 		const env = await getEnvironment(id);
 
 		if (!env) {
@@ -38,7 +51,7 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 
 		// Parse labels from JSON string to array
 		return json({
-			...env,
+			...redactEnvironment(env),
 			labels: parseLabels(env.labels as string | null),
 			publicIp
 		});
@@ -48,16 +61,32 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 	}
 };
 
+/**
+ * @openapi
+ * summary: Update an environment; renaming also renames its on-disk stacks/git-repos directories
+ * path: id:integer! Environment id (from GET /api/environments)
+ * body: {name:string, host:string, port:integer, protocol:string, tlsCa:string, tlsCert:string, tlsKey:string, tlsSkipVerify:boolean, icon:string, socketPath:string, collectActivity:boolean, collectMetrics:boolean, highlightChanges:boolean, labels:string, connectionType:string, hawserToken:string, publicIp:string}
+ * body-desc: tlsKey/hawserToken are write-only - a blank value keeps the stored secret; a non-blank value replaces it.
+ * body-example: {"name":"hhdocker03","collectMetrics":true}
+ * resp-200: {id:integer!, name:string!, connectionType:string!, labels:array<string>, publicIp:string, hasTlsKey:boolean, hasHawserToken:boolean}
+ * resp-200-desc: The tlsKey/hawserToken secrets are NEVER returned; hasTlsKey / hasHawserToken indicate whether one is stored.
+ * resp-400: Invalid new name (rename validation)
+ * resp-403: Permission denied (RBAC 'environments:edit' missing)
+ * resp-404: Environment not found
+ * resp-409: Rename target directory already exists, or the on-disk rename failed (e.g. EXDEV across filesystems)
+ * resp-500: Unexpected error while updating the environment
+ */
 export const PUT: RequestHandler = async (event) => {
 	const { params, request, cookies } = event;
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !await auth.can('environments', 'edit')) {
 		return json({ error: 'Permission denied' }, { status: 403 });
 	}
+	const id = parseInt(params.id);
+	const envAccessDenied = await auth.requireEnvAccess(id);
+	if (envAccessDenied) return envAccessDenied;
 
 	try {
-		const id = parseInt(params.id);
-
 		// Get old values before update for diff
 		const oldEnv = await getEnvironment(id);
 		if (!oldEnv) {
@@ -133,6 +162,13 @@ export const PUT: RequestHandler = async (event) => {
 			? serializeLabels(Array.isArray(data.labels) ? data.labels.slice(0, MAX_LABELS) : [])
 			: undefined;
 
+		// The GET/list responses never return the tlsKey / hawserToken secrets, so the
+		// edit form can't round-trip them. A blank value therefore means "keep the stored
+		// secret" (pass undefined so updateEnvironment leaves the column untouched); a
+		// non-blank value replaces it. Same "leave blank to keep" pattern as registries /
+		// git credentials. (Removing a secret entirely is done by deleting the env.)
+		const cleanedTlsKey = cleanPem(data.tlsKey);
+		const trimmedToken = typeof data.hawserToken === 'string' ? data.hawserToken.trim() : data.hawserToken;
 		const env = await updateEnvironment(id, {
 			name: data.name,
 			host: data.host,
@@ -140,7 +176,7 @@ export const PUT: RequestHandler = async (event) => {
 			protocol: data.protocol,
 			tlsCa: cleanPem(data.tlsCa),
 			tlsCert: cleanPem(data.tlsCert),
-			tlsKey: cleanPem(data.tlsKey),
+			tlsKey: cleanedTlsKey || undefined,
 			tlsSkipVerify: data.tlsSkipVerify,
 			icon: data.icon,
 			socketPath: data.socketPath,
@@ -149,7 +185,7 @@ export const PUT: RequestHandler = async (event) => {
 			highlightChanges: data.highlightChanges,
 			labels: labels,
 			connectionType: data.connectionType,
-			hawserToken: data.hawserToken
+			hawserToken: trimmedToken || undefined
 		});
 
 		if (!env) {
@@ -185,7 +221,7 @@ export const PUT: RequestHandler = async (event) => {
 
 		// Parse labels from JSON string to array
 		return json({
-			...env,
+			...redactEnvironment(env),
 			labels: parseLabels(env.labels as string | null),
 			publicIp
 		});
@@ -195,9 +231,25 @@ export const PUT: RequestHandler = async (event) => {
 	}
 };
 
+/**
+ * @openapi
+ * summary: Delete an environment and all its associated git stacks, schedules, icons, and on-disk directories
+ * path: id:integer! Environment id (from GET /api/environments)
+ * resp-200: {success:boolean!}
+ * resp-400: Invalid environment id, or the environment could not be deleted
+ * resp-403: Permission denied (RBAC 'environments:delete' missing)
+ * resp-404: Environment not found
+ * resp-500: Environment name is empty/whitespace (refuses to delete to avoid an unsafe directory cleanup), or an unexpected error
+ */
 export const DELETE: RequestHandler = async (event) => {
 	const { params, cookies } = event;
 	const auth = await authorize(cookies);
+	// Deleting an environment cascades a filesystem cleanup of its stack dirs, git
+	// files, and schedules - an instance-level action, not an env-scoped one. Require
+	// admin under RBAC so an env-scoped role can't remove environments it doesn't own.
+	if (auth.authEnabled && auth.isEnterprise && !auth.isAdmin) {
+		return json({ error: 'Permission denied' }, { status: 403 });
+	}
 	if (auth.authEnabled && !await auth.can('environments', 'delete')) {
 		return json({ error: 'Permission denied' }, { status: 403 });
 	}

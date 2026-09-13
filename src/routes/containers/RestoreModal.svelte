@@ -6,15 +6,16 @@
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { Label } from '$lib/components/ui/label';
 	import { Badge } from '$lib/components/ui/badge';
-	import { RotateCcw, AlertTriangle, Loader2, HardDrive, Folder, Clock, Play, CheckCircle2, XCircle, Server, PackagePlus, Ban, Rocket, Box, Layers, HelpCircle, Info, KeyRound } from 'lucide-svelte';
+	import { RotateCcw, AlertTriangle, Loader2, HardDrive, Folder, Clock, Play, CheckCircle2, XCircle, Server, PackagePlus, Ban, Rocket, Box, Layers, HelpCircle, Info, KeyRound, FileX } from 'lucide-svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { toast } from 'svelte-sonner';
-	import { watchJob } from '$lib/utils/sse-fetch';
+	import { watchJob, readJobResponse } from '$lib/utils/sse-fetch';
 	import { environments } from '$lib/stores/environment';
 	import { formatDateTime } from '$lib/stores/settings';
 	import EnvironmentIcon from '$lib/components/EnvironmentIcon.svelte';
+	import SnapshotHeader from '$lib/components/backup/SnapshotHeader.svelte';
 	import LogConsole from '$lib/components/LogConsole.svelte';
-	import { tagLogLine, classifyJobResult } from '$lib/utils/backup';
+	import { tagLogLine, classifyJobResult, getRepoTypeIcon } from '$lib/utils/backup';
 
 	interface Props {
 		open: boolean;
@@ -22,12 +23,17 @@
 		snapshotId: string;
 		containerName: string;
 		environmentId?: number;
+		/** Source repository (name + repo URL) this snapshot is being restored FROM.
+		 *  Shown in the header as "from <icon> <name>" so it's clear which destination
+		 *  the restore reads. Optional: the header just omits it when not supplied. */
+		destinationName?: string;
+		destinationRepository?: string;
 		/** Refresh callback fired once the restore succeeds — the caller reloads its
 		 *  snapshot list. This modal is ALWAYS self-contained (form → log → result in
 		 *  one dialog); it never delegates its progress UI to a parent. */
 		onDone?: () => void;
 	}
-	let { open = $bindable(), destinationId, snapshotId, containerName, environmentId, onDone }: Props = $props();
+	let { open = $bindable(), destinationId, snapshotId, containerName, environmentId, destinationName, destinationRepository, onDone }: Props = $props();
 
 	// The two restore modes, framed by DESTINATION intent (not safe-vs-destructive):
 	//  - 'new-location' ("Restore to environment"): pick a target env and, per
@@ -95,6 +101,10 @@
 	// reproduce a working stack. Off = bring it up without secrets (re-enter by hand).
 	let sourceSecretKeys = $state<string[]>([]);
 	let restoreSecrets = $state(true);
+	// New-location STACK restore option. skipStackFiles: restore only the volume DATA, not the
+	// captured compose/.env (the operator already has the compose). When NOT set, the stack files
+	// are restored AND materialised into Dockhand's managed stack dir so it can edit/redeploy.
+	let skipStackFiles = $state(false);
 	// Volume names that already exist on the chosen target env (for conflict marks).
 	let existingTargetVolumes = $state<string[]>([]);
 	// Target-NAME collision: a container/stack of the restore's name already exists
@@ -130,6 +140,41 @@
 	const stepRingClass = 'relative z-10 border-primary/40 bg-background text-primary';
 	const stepLineClass = 'bg-primary/25';
 
+	// --- Exact target-path preview + host-data probe -----------------------------------------
+	// The EXACT on-disk targets the restore will write, resolved server-side by the SAME function
+	// the real restore uses (never client-side path math), plus whether each already holds data on
+	// the target host. Re-fetched (debounced) whenever the destination or target env changes.
+	type ProbeKind = 'has-data' | 'empty' | 'missing' | 'helper-failed';
+	interface TargetPreview {
+		volumes: Array<{ key: string; type: 'bind' | 'volume'; target: string; origin: string; hasData: ProbeKind }>;
+		stackFiles: { targetDir: string; willWrite: boolean; hasData: ProbeKind } | null;
+		unresolved: Array<{ key: string; reason: string }>;
+		helperOk: boolean;
+		helperError?: string;
+	}
+	let targetPreview = $state<TargetPreview | null>(null);
+	let targetPreviewLoading = $state(false);
+	// Set when the preview request itself fails (non-ok / thrown) so we surface a visible
+	// error instead of a silent empty section - a failed probe used to render as nothing.
+	let targetPreviewError = $state('');
+	// The user's acknowledgement that existing data at the resolved targets will be overwritten.
+	let overwriteAck = $state(false);
+	// Monotonic request id so a slow response for an old form state can't overwrite a newer one.
+	let targetPreviewSeq = 0;
+	let targetPreviewTimer: ReturnType<typeof setTimeout> | null = null;
+
+	// A resolved target already holds data on the host (in-place is always destructive to it;
+	// a clone path/volume may be pre-populated). Drives the overwrite acknowledgement gate.
+	const targetsWithData = $derived(
+		(targetPreview?.volumes ?? []).filter((v) => v.hasData === 'has-data').length +
+		(targetPreview?.stackFiles?.hasData === 'has-data' ? 1 : 0)
+	);
+	const helperError = $derived(targetPreview && targetPreview.helperOk === false ? (targetPreview.helperError || 'the backup helper container could not run on the target environment') : '');
+	// Probe result per volume key (has-data / empty / missing), for the per-row badges in the
+	// "What will happen" recap. Null while the probe hasn't returned for that row yet -> the row
+	// shows its own spinner.
+	const probeByKey = $derived(new Map((targetPreview?.volumes ?? []).map((v) => [v.key, v.hasData])));
+
 	const selectedRows = $derived(volumes.filter((v) => v.selected));
 	// A selected volume redirected to a NEW name or type (vs the snapshot's original).
 	// The recreate/redeploy uses the STORED config/compose, which still references the
@@ -149,9 +194,24 @@
 	const canRun = $derived(
 		// A target environment MUST be chosen.
 		effectiveEnvId != null &&
+		// Don't let a restore fire while the target-path probe is still running: it may come back
+		// with "has data" (an overwrite the user must acknowledge first), so running now would
+		// bypass that gate. Wait for the preview to resolve.
+		!targetPreviewLoading &&
+		!targetPreviewError &&
+		// The probe helper must be able to run on the target - if it can't, neither the probe
+		// nor the restore can, so block up front rather than fail mid-restore.
+		!helperError &&
 		(mode === 'in-place'
+			// In-place: confirmOverwrite IS the overwrite acknowledgement (its copy says
+			// "replaces the live volume data"). The new-location-only overwriteAck checkbox
+			// is never rendered here, so DON'T gate on it — that deadlocked the button whenever
+			// the live target already held data (targetsWithData > 0), i.e. every real in-place.
 			? confirmOverwrite
 			: (
+				// New-location: when any resolved target already holds data, the user must
+				// tick the separate overwrite acknowledgement.
+				(targetsWithData === 0 || overwriteAck) &&
 				// Every selected volume needs a non-empty destination; none may have a
 				// blocking issue (collision / invalid host path).
 				selectedRows.every((v) => v.dest.trim().length > 0) &&
@@ -178,10 +238,13 @@
 			// Reset stack-ness so a stale value from the previous open can't flash the
 			// wrong type icon while the new snapshot is still being read.
 			hasStackFiles = false;
+			skipStackFiles = false;
 			restoreStatus = 'idle';
 			restoreLogs = [];
 			restoreWarning = '';
 			error = '';
+			targetPreview = null;
+			overwriteAck = false;
 			if (envList.length === 0) environments.refresh();
 			void loadPreview();
 		}
@@ -283,16 +346,18 @@
 		loading = true;
 		error = '';
 		try {
+			// Job-polling (server returns {jobId}; readJobResponse polls to the result) so a slow
+			// restic verify/read behind a reverse proxy can't be aborted at ~15s.
 			const res = await fetch('/api/backup/restore/preview', {
 				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
+				headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
 				body: JSON.stringify({ destinationId, snapshotId, environmentId })
 			});
-			if (!res.ok) {
-				error = (await res.json()).error || 'Failed to read the snapshot';
+			const data = await readJobResponse(res);
+			if (data?.error) {
+				error = data.error || 'Failed to read the snapshot';
 				return;
 			}
-			const data = await res.json();
 			const types: Record<string, 'volume' | 'bind'> = data.volumeTypes || {};
 			const sources: Record<string, string> = data.volumeSources || {};
 			// Pre-fill each destination 1:1 from the snapshot's original location: a
@@ -325,6 +390,64 @@
 			loading = false;
 		}
 	}
+
+	async function loadTargetPreview() {
+		const envId = effectiveEnvId;
+		if (!open || !snapshotId || envId == null) { targetPreview = null; return; }
+		const seq = ++targetPreviewSeq;
+		targetPreviewLoading = true;
+		try {
+			const volumeDestinations = mode === 'new-location'
+				? selectedRows.map((v) => ({ volume: v.name, kind: v.destKind, target: v.dest.trim() }))
+				: undefined;
+			// Job-polling: the target probe runs a helper container per volume on the target host
+			// (slowest read path) - a sync request would abort at the proxy's ~15s.
+			const res = await fetch('/api/backup/restore/preview', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+				body: JSON.stringify({
+					destinationId, snapshotId, mode, environmentId: envId,
+					targetType: targetIsStack ? 'stack' : 'container',
+					targetName: containerName, targetPath,
+					volumeDestinations, skipStackFiles,
+					volumes: selectedRows.map((v) => v.name),
+				})
+			});
+			const data = await readJobResponse(res);
+			if (seq !== targetPreviewSeq) return; // a newer request superseded this one (checked AFTER the poll)
+			if (data?.error) {
+				targetPreview = null;
+				targetPreviewError = data.error || 'Could not check the target paths on the environment.';
+				return;
+			}
+			targetPreview = data.targets ?? null;
+		} catch {
+			if (seq === targetPreviewSeq) { targetPreview = null; targetPreviewError = 'Could not reach the server to check the target paths.'; }
+		} finally {
+			if (seq === targetPreviewSeq) targetPreviewLoading = false;
+		}
+	}
+
+	// Debounced re-probe on any change that moves where the restore lands. Reading these makes the
+	// effect track them; the 350ms debounce collapses a burst of keystrokes into one request.
+	$effect(() => {
+		// touch the reactive inputs so the effect re-runs when they change
+		void [mode, effectiveEnvId, skipStackFiles, targetIsStack,
+			selectedRows.map((v) => `${v.name}:${v.selected}:${v.destKind}:${v.dest}`).join('|')];
+		if (!open || !snapshotId) return;
+		// Clear the stale preview IMMEDIATELY (bump seq so any in-flight probe for the old target is
+		// discarded on return) so a warning/path for the previous env can't linger while the new
+		// probe runs - especially when the old env's helper was timing out (a slow pull).
+		targetPreviewSeq++;
+		targetPreview = null;
+		targetPreviewError = '';
+		if (targetPreviewTimer) clearTimeout(targetPreviewTimer);
+		// No target env picked yet (new-location before you choose one) -> nothing to probe. Clear
+		// the loading state and don't schedule a probe that has nowhere to mount.
+		if (effectiveEnvId == null) { targetPreviewLoading = false; return; }
+		targetPreviewLoading = true;
+		targetPreviewTimer = setTimeout(() => { void loadTargetPreview(); }, 350);
+	});
 
 	async function executeRestore() {
 		if (!canRun) return;
@@ -360,7 +483,9 @@
 					// postRestore is sent for BOTH modes now (clone brings the target up).
 					postRestore,
 					targetPath: mode === 'new-location' ? targetPath.trim() : undefined,
-					volumeDestinations
+					// New-location STACK restore options (server ignores them otherwise).
+					skipStackFiles: mode === 'new-location' && hasStackFiles ? skipStackFiles : undefined,
+						volumeDestinations
 				})
 			});
 			if (!res.ok) {
@@ -430,16 +555,26 @@
 	     box sits glued to the top of the screen. -->
 	<Dialog.Content class="max-w-5xl flex flex-col overflow-hidden {restoreStatus === 'idle' ? 'top-[4vh] translate-y-0 h-[88vh]' : 'top-[6vh] translate-y-0 h-[85vh]'}">
 		<Dialog.Header class="shrink-0">
-			<Dialog.Title class="flex flex-wrap items-center gap-x-2 gap-y-1">
-				<RotateCcw class="h-4 w-4" /> Restore
-				{#if !loading}{#if targetIsStack}<Layers class="h-4 w-4 text-muted-foreground" />{:else}<Box class="h-4 w-4 text-muted-foreground" />{/if}{/if}
-				<span>{containerName}</span>
-				{#if targetEnv}
-					<span class="text-muted-foreground">{mode === 'in-place' ? 'on' : 'to'}</span>
-					<span class="flex items-center gap-1 font-medium text-amber-500"><EnvironmentIcon icon={targetEnv.icon || 'globe'} envId={targetEnv.id} class="h-3.5 w-3.5" />{targetEnvName}</span>
-				{/if}
-				<Badge variant="outline" class="font-mono text-[10px]">{snapshotId.slice(0, 8)}</Badge>
-				{#if backupTime}<span class="flex items-center gap-1 text-xs font-normal text-muted-foreground"><Clock class="h-3 w-3" />{formatDateTime(backupTime)}</span>{/if}
+			<Dialog.Title>
+				<SnapshotHeader
+					icon={RotateCcw}
+					verb="Restore"
+					name={containerName}
+					nameType={targetIsStack ? 'stack' : 'container'}
+					{destinationName}
+					{destinationRepository}
+					{sourceEnv}
+					{sourceEnvName}
+					{snapshotId}
+					snapshotTime={backupTime}
+				>
+					{#snippet trailing()}
+						{#if targetEnv}
+							<span class="text-muted-foreground">{mode === 'in-place' ? 'on' : 'to'}</span>
+							<span class="flex items-center gap-1 font-medium text-foreground"><EnvironmentIcon icon={targetEnv.icon || 'globe'} envId={targetEnv.id} class="h-4 w-4" />{targetEnvName}</span>
+						{/if}
+					{/snippet}
+				</SnapshotHeader>
 			</Dialog.Title>
 			<Dialog.Description class="sr-only">Restore snapshot {snapshotId.slice(0, 8)} for {containerName}.</Dialog.Description>
 		</Dialog.Header>
@@ -552,8 +687,8 @@
 						</div>
 					{#if volumes.length === 0}
 						<p class="text-sm text-muted-foreground">This snapshot has no volumes — restore recreates the {targetIsStack ? 'stack' : 'container'} from its saved config.</p>
-						{#if showSecretRestore}
-							<div class="rounded border p-2">{@render secretRestoreBlock()}</div>
+						{#if showSecretRestore || (mode === 'new-location' && targetIsStack && hasStackFiles)}
+							<div class="rounded border p-2">{@render secretRestoreBlock()}{@render stackRestoreOptions()}</div>
 						{/if}
 					{:else if mode === 'new-location'}
 						<!-- Clone mode: each selected volume maps to an editable DESTINATION on
@@ -599,25 +734,35 @@
 								</div>
 							{/each}
 							{@render secretRestoreBlock()}
+							{@render stackRestoreOptions()}
 						</div>
 					{:else}
 						<div class="space-y-1.5 rounded border p-2">
 							{#each volumes as vol}
-								<label class="flex cursor-pointer items-center gap-2 text-sm">
-									<Checkbox bind:checked={vol.selected} />
+								<label class="flex cursor-pointer items-start gap-2 text-sm">
+									<Checkbox bind:checked={vol.selected} class="mt-0.5" />
 									{#if vol.type === 'bind'}
-										<Folder class="h-3.5 w-3.5 shrink-0 text-amber-500" />
-										<span class="w-11 shrink-0 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-center text-[10px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-400">bind</span>
+										<Folder class="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" />
+										<span class="mt-0.5 w-11 shrink-0 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-center text-[10px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-400">bind</span>
 									{:else}
-										<HardDrive class="h-3.5 w-3.5 shrink-0 text-sky-500" />
-										<span class="w-11 shrink-0 rounded-full bg-sky-500/15 px-1.5 py-0.5 text-center text-[10px] font-semibold uppercase tracking-wide text-sky-600 dark:text-sky-400">vol</span>
+										<HardDrive class="mt-0.5 h-3.5 w-3.5 shrink-0 text-sky-500" />
+										<span class="mt-0.5 w-11 shrink-0 rounded-full bg-sky-500/15 px-1.5 py-0.5 text-center text-[10px] font-semibold uppercase tracking-wide text-sky-600 dark:text-sky-400">vol</span>
 									{/if}
-									<span class="truncate font-mono">{vol.name}</span>
+									<span class="min-w-0">
+										<span class="block truncate font-mono">{vol.name}</span>
+										{#if vol.type === 'bind' && vol.origDest && vol.origDest !== vol.name}
+											<!-- The real host path that gets overwritten in place. -->
+											<span class="block break-all font-mono text-xs text-muted-foreground">{vol.origDest}</span>
+										{/if}
+									</span>
 								</label>
 							{/each}
 							{@render secretRestoreBlock()}
+							{@render stackRestoreOptions()}
 						</div>
 					{/if}
+
+					{@render hostTargetsBlock()}
 					</div>
 				</div>
 
@@ -680,10 +825,66 @@
 					</div>
 				</div>
 
-				<!-- What will happen: a live prose recap driven by the form. Env names amber,
+				<!-- What will happen: a live prose recap driven by the form. Env names use
+				     the foreground colour (amber is reserved for warnings/destructive here),
 				     each prefixed by the env's icon (same as the modal header). -->
+				<!-- The EXACT host targets the restore writes to, resolved server-side by the same
+				     function the restore uses, plus whether each already holds data. Gives the user
+				     certainty about what lands where before committing. -->
+				{#snippet hostDataBadge(kind: ProbeKind)}
+					{#if kind === 'has-data'}
+						<span class="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-400"><AlertTriangle class="h-3 w-3" />has data</span>
+					{:else if kind === 'empty'}
+						<span class="shrink-0 rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-400">empty</span>
+					{:else if kind === 'missing'}
+						<span class="shrink-0 rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-400">new</span>
+					{/if}
+				{/snippet}
+				<!-- VOL / BIND kind pill + icon, used on BOTH sides of "<source> -> <target>" so a
+				     volume-to-volume (or path-to-path) restore reads consistently, not "VOL -> named volume". -->
+				{#snippet kindBadge(kind: 'volume' | 'bind')}
+					{#if kind === 'bind'}
+						<Folder class="h-3 w-3 shrink-0 text-amber-500" />
+						<span class="w-9 shrink-0 rounded-full bg-amber-500/15 px-1 py-0.5 text-center text-[9px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-400">bind</span>
+					{:else}
+						<HardDrive class="h-3 w-3 shrink-0 text-sky-500" />
+						<span class="w-9 shrink-0 rounded-full bg-sky-500/15 px-1 py-0.5 text-center text-[9px] font-semibold uppercase tracking-wide text-sky-600 dark:text-sky-400">vol</span>
+					{/if}
+				{/snippet}
+				<!-- Only the FAILURE states live here now (they block the restore and must be seen even
+				     when the "What will happen" recap can't render). The per-target paths + has-data
+				     badges + overwrite ack moved INTO the recap so there's one place, not two. -->
+				{#snippet hostTargetsBlock()}
+					{#if helperError}
+						<div class="flex items-start gap-2 rounded-md border border-destructive/50 bg-destructive/10 p-2.5 text-xs">
+							<AlertTriangle class="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+							<div class="min-w-0">
+								<div class="font-medium text-destructive">The backup helper can't run on {targetEnvName || 'this environment'}</div>
+								<div class="mt-0.5 break-all text-muted-foreground">{helperError}</div>
+								<div class="mt-1 text-muted-foreground">A restore can't run until this is fixed - the same helper writes the restored data.</div>
+							</div>
+						</div>
+					{:else if targetPreviewError && !targetPreviewLoading}
+						<div class="flex items-start gap-2 rounded-md border border-destructive/50 bg-destructive/10 p-2.5 text-xs">
+							<AlertTriangle class="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+							<div class="min-w-0">
+								<div class="font-medium text-destructive">Couldn't check the target paths</div>
+								<div class="mt-0.5 break-all text-muted-foreground">{targetPreviewError}</div>
+							</div>
+						</div>
+					{:else if targetPreview && targetPreview.unresolved.length > 0}
+						<div class="space-y-1 rounded-md border border-destructive/50 bg-destructive/10 p-2.5 text-xs">
+							{#each targetPreview.unresolved as u}
+								<div class="flex items-start gap-2 text-destructive">
+									<Ban class="mt-0.5 h-3.5 w-3.5 shrink-0" />
+									<span class="min-w-0"><span class="font-mono">{u.key}</span> - {u.reason}</span>
+								</div>
+							{/each}
+						</div>
+					{/if}
+				{/snippet}
 				{#snippet envChip(env: { id: number; icon?: string | null } | undefined, name: string)}
-					<span class="inline-flex items-center gap-1 align-middle font-medium text-amber-500">{#if env}<EnvironmentIcon icon={env.icon || 'globe'} envId={env.id} class="h-3.5 w-3.5" />{/if}{name || '…'}</span>
+					<span class="inline-flex -translate-y-[0.12em] items-center gap-1 align-middle font-medium text-foreground">{#if env}<EnvironmentIcon icon={env.icon || 'globe'} envId={env.id} class="h-3 w-3" />{/if}{name || '…'}</span>
 				{/snippet}
 				<!-- Secrets restored from the snapshot — rendered INSIDE the "what gets
 				     restored" volume box so it reads as one coherent list. Ciphertext is
@@ -721,6 +922,27 @@
 						</div>
 					{/if}
 				{/snippet}
+				<!-- New-location STACK restore options: skip the captured compose/.env (data
+				     only), and/or adopt the restored stack into Dockhand afterwards. Stack +
+				     new-location only. -->
+				{#snippet stackRestoreOptions()}
+					{#if mode === 'new-location' && targetIsStack && hasStackFiles}
+						<!-- Top border/padding only when something (the secret block) sits above it;
+						     otherwise this is the first content in the box and needs no divider. -->
+						<div class="space-y-2 {showSecretRestore ? 'border-t pt-2 mt-1.5' : ''}">
+							<label class="flex cursor-pointer items-start gap-2 text-sm">
+								<Checkbox bind:checked={skipStackFiles} class="mt-0.5" />
+								<FileX class="h-4 w-4 shrink-0 translate-y-0.5 text-muted-foreground" />
+								<span>
+									Restore volume data only (skip stack files)
+									<span class="block text-xs text-muted-foreground">
+										Leave out the captured compose and config - restore just the volume data. Otherwise the stack files are restored and registered in Dockhand so you can edit and redeploy the stack.
+									</span>
+								</span>
+							</label>
+						</div>
+					{/if}
+				{/snippet}
 				<div class="mt-3 rounded-md border border-l-[3px] p-3 text-sm {mode === 'in-place' ? 'border-l-destructive bg-destructive/5' : 'border-l-primary bg-primary/5'}">
 					<div class="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
 						{#if mode === 'in-place'}<AlertTriangle class="h-3.5 w-3.5 text-destructive" />{:else}<Info class="h-3.5 w-3.5 text-primary" />{/if}
@@ -733,11 +955,17 @@
 						{#if selectedRows.length > 0}
 							<ul class="mt-1.5 space-y-1">
 								{#each selectedRows as v}
+									{@const t = targetPreview?.volumes.find((x) => x.key === v.name)}
 									<li class="flex items-center gap-2 text-xs">
 										{#if v.type === 'bind'}<Folder class="h-3 w-3 shrink-0 text-amber-500" />{:else}<HardDrive class="h-3 w-3 shrink-0 text-sky-500" />{/if}
 										{#if v.type === 'bind'}<span class="w-9 shrink-0 rounded-full bg-amber-500/15 px-1 py-0.5 text-center text-[9px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-400">bind</span>{:else}<span class="w-9 shrink-0 rounded-full bg-sky-500/15 px-1 py-0.5 text-center text-[9px] font-semibold uppercase tracking-wide text-sky-600 dark:text-sky-400">vol</span>{/if}
 										<span class="font-mono">{v.name}</span>
-										<span class="text-muted-foreground">wiped &amp; replaced</span>
+										{#if v.type === 'bind' && (t?.target ?? v.origDest)}
+											<span class="text-muted-foreground">&rarr; host path</span>
+											<span class="min-w-0 break-all font-mono text-muted-foreground">{t?.target ?? v.origDest}</span>
+										{:else}
+											<span class="text-muted-foreground">wiped &amp; replaced</span>
+										{/if}
 									</li>
 								{/each}
 							</ul>
@@ -754,15 +982,27 @@
 						{#if selectedRows.length > 0}
 							<ul class="mt-1.5 space-y-1">
 								{#each selectedRows as v}
+									{@const probe = probeByKey.get(v.name)}
 									<li class="flex items-center gap-2 text-xs">
-										{#if v.type === 'bind'}<Folder class="h-3 w-3 shrink-0 text-amber-500" />{:else}<HardDrive class="h-3 w-3 shrink-0 text-sky-500" />{/if}
-										{#if v.type === 'bind'}<span class="w-9 shrink-0 rounded-full bg-amber-500/15 px-1 py-0.5 text-center text-[9px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-400">bind</span>{:else}<span class="w-9 shrink-0 rounded-full bg-sky-500/15 px-1 py-0.5 text-center text-[9px] font-semibold uppercase tracking-wide text-sky-600 dark:text-sky-400">vol</span>{/if}
+										{@render kindBadge(v.type)}
 										<span class="font-mono">{v.name}</span>
-										<span class="text-muted-foreground">→ {v.destKind === 'path' ? 'host path' : 'named volume'}</span>
+										<span class="shrink-0 text-muted-foreground">&rarr;</span>
+										{@render kindBadge(v.destKind === 'path' ? 'bind' : 'volume')}
 										<span class="font-mono {(v.conflict || v.pathInvalid) ? 'text-destructive' : ''}">{v.dest.trim() || '…'}</span>
+										<!-- Per-row data probe: a small spinner pill while checking, then a badge. -->
+										{#if v.dest.trim()}
+											{#if probe}{@render hostDataBadge(probe)}
+											{:else if targetPreviewLoading}<span class="inline-flex shrink-0 items-center gap-1 rounded-full border border-border bg-background px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"><Loader2 class="h-2.5 w-2.5 animate-spin" />checking on{#if targetEnv}<EnvironmentIcon icon={targetEnv.icon || 'globe'} envId={targetEnv.id} class="h-3 w-3" />{/if}{targetEnvName || 'host'}</span>{/if}
+										{/if}
 									</li>
 								{/each}
 							</ul>
+							{#if targetsWithData > 0}
+								<label class="mt-2 flex cursor-pointer items-start gap-2 text-xs text-amber-600 dark:text-amber-400">
+									<Checkbox bind:checked={overwriteAck} class="mt-0.5" />
+									<span>I understand existing data at {targetsWithData === 1 ? 'this location' : `these ${targetsWithData} locations`} will be overwritten.</span>
+								</label>
+							{/if}
 						{/if}
 						{#if postRestore !== 'none'}
 							<p class="mt-1.5 leading-relaxed">Then Dockhand will <b>{postRestoreLabel.toLowerCase()}</b> on {@render envChip(targetEnv, targetEnvName)}{#if sourceEnvName && sourceEnvName !== targetEnvName}. Nothing on {@render envChip(sourceEnv, sourceEnvName)} is touched{/if}.</p>
@@ -810,8 +1050,12 @@
 						disabled={!canRun || restoring}
 						variant={mode === 'in-place' ? 'destructive' : 'default'}
 					>
-						{#if restoring}<Loader2 class="mr-1.5 h-4 w-4 animate-spin" />{:else}<Play class="mr-1.5 h-4 w-4" />{/if}
-						{mode === 'in-place' ? 'Overwrite & restore' : (postRestore !== 'none' ? 'Restore & start' : 'Restore')}
+						{#if restoring}<Loader2 class="mr-1.5 h-4 w-4 animate-spin" />{:else if targetPreviewLoading}<Loader2 class="mr-1.5 h-4 w-4 animate-spin" />{:else}<Play class="mr-1.5 h-4 w-4" />{/if}
+						{#if targetPreviewLoading && !restoring}
+							Checking target&hellip;
+						{:else}
+							{mode === 'in-place' ? 'Overwrite & restore' : (postRestore !== 'none' ? 'Restore & start' : 'Restore')}
+						{/if}
 					</Button>
 				{/if}
 			{/if}

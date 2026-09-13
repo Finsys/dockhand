@@ -11,6 +11,7 @@
 	import * as Select from '$lib/components/ui/select';
 	import { Search, ChevronDown, Terminal as TerminalIcon, Unplug, RefreshCw, Trash2, Copy, Shell, User, Loader2, AlertCircle } from 'lucide-svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
+	import ContainerIcon from '$lib/components/ContainerIcon.svelte';
 	import type { ContainerInfo, TerminalMode } from '$lib/types';
 	import { currentEnvironment, environments, appendEnvParam } from '$lib/stores/environment';
 	import Terminal from './Terminal.svelte';
@@ -298,6 +299,7 @@
 								onclick={() => selectContainer(container)}
 								class="w-full px-3 py-2 text-left text-sm hover:bg-muted transition-colors flex items-center gap-2 {selectedContainer?.id === container.id ? 'bg-muted' : ''}"
 							>
+								<ContainerIcon image={container.image} name={container.name} class="w-3.5 h-3.5" fallbackClass="text-green-500" showFallbackWhenOff />
 								<span class="font-medium truncate">{container.name}</span>
 								<span class="text-muted-foreground text-xs truncate">({container.image})</span>
 								{#if selectedContainer?.id === container.id}

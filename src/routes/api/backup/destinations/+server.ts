@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
+import { requireBackups } from '$lib/server/backups/route-guards';
 import { auditBackupDestination } from '$lib/server/audit';
 import {
 	getBackupDestinations,
@@ -11,7 +12,7 @@ import {
 } from '$lib/server/db';
 import { initRepository, testRepository } from '$lib/server/backups';
 import { registerSchedule } from '$lib/server/scheduler';
-import { validateRepositoryForSave, validateFlags, validatePolicySchedules } from '$lib/server/backups/helpers';
+import { validateRepositoryForSave, validateAndSerializeFlags, validatePolicySchedules } from '$lib/server/backups/helpers';
 
 /**
  * Prepare destination for API response — strip password, parse env vars.
@@ -32,26 +33,50 @@ function prepareDestination(dest: any, opts: { includeEnvVars: boolean }): any {
 	} else {
 		delete result.envVars;
 	}
+	// TLS cert PEMs never reach the client; expose only whether each is set.
+	result.hasCacert = !!dest.cacert;
+	result.hasTlsClientCert = !!dest.tlsClientCert;
+	delete result.cacert;
+	delete result.tlsClientCert;
 	return result;
 }
 
+/**
+ * GET /api/backup/destinations - List backup destinations
+ *
+ * @openapi
+ * summary: List all backup destinations (restic repositories); the password is stripped and cloud-credential env vars are omitted from the list view
+ * description: Permission denial (403, "backups:view") is produced by the shared requireBackups route guard.
+ * resp-200: Array of backup destination objects without secrets (no password, no envVars)
+ */
 export const GET: RequestHandler = async ({ cookies }) => {
 	const auth = await authorize(cookies);
-	if (auth.authEnabled && !await auth.can('backups', 'view')) {
-		return json({ error: 'Permission denied' }, { status: 403 });
-	}
+	const denied = await requireBackups(auth, 'view');
+	if (denied) return denied;
 
 	const destinations = await getBackupDestinations();
 	// LIST: strip envVars (cloud creds). Modal re-fetches single destination to edit.
 	return json(destinations.map(d => prepareDestination(d, { includeEnvVars: false })));
 };
 
+/**
+ * POST /api/backup/destinations - Create a backup destination
+ *
+ * @openapi
+ * summary: Create a restic backup destination, auto-initialize and test the repository, and register its default maintenance schedules
+ * description: Permission denial (403, "backups:manage") is produced by the shared requireBackups route guard.
+ * body: {name:string!, repository:string!, password:string!, envVars:{}, flags:string, backupFlags:string, restoreFlags:string, hostPath:string, cacert:string, tlsClientCert:string, policies:string}
+ * body-example: {"name":"S3 Offsite","repository":"s3:s3.amazonaws.com/my-bucket/restic","password":"***","envVars":{"AWS_ACCESS_KEY_ID":"***","AWS_SECRET_ACCESS_KEY":"***"}}
+ * resp-201: The created backup destination object (includes decrypted envVars since the caller just supplied them; password is stripped)
+ * resp-400: Invalid input — missing name/repository/password, unsupported/SSRF-blocked repository, invalid restic flags, or an invalid cron schedule in the policies
+ * resp-409: A destination with this name already exists
+ * resp-500: Failed to create the destination (persistence error)
+ */
 export const POST: RequestHandler = async (event) => {
 	const { request, cookies } = event;
 	const auth = await authorize(cookies);
-	if (auth.authEnabled && !await auth.can('backups', 'manage')) {
-		return json({ error: 'Permission denied' }, { status: 403 });
-	}
+	const denied = await requireBackups(auth, 'manage');
+	if (denied) return denied;
 
 	const body = await request.json();
 
@@ -63,8 +88,16 @@ export const POST: RequestHandler = async (event) => {
 	// BEFORE persisting, so nothing is saved on bad input.
 	const repoError = validateRepositoryForSave(body.repository);
 	if (repoError) return json({ error: repoError }, { status: 400 });
-	const flagError = validateFlags(body.flags);
-	if (flagError) return json({ error: flagError }, { status: 400 });
+	// Flags: prefer the split shape (backupFlags/restoreFlags); fall back to a legacy `flags`
+	// string (treated as backup flags). Validate+serialize to the JSON stored in `flags`.
+	let flagsColumn: string | null = null;
+	try {
+		flagsColumn = (body.backupFlags !== undefined || body.restoreFlags !== undefined)
+			? validateAndSerializeFlags(body.backupFlags, body.restoreFlags)
+			: validateAndSerializeFlags(body.flags, '');
+	} catch (e) {
+		return json({ error: e instanceof Error ? e.message : 'Invalid restic flags' }, { status: 400 });
+	}
 
 	// Validate any cron schedules in the supplied policies (audit #7)
 	const policyCronError = validatePolicySchedules(body.policies);
@@ -85,8 +118,10 @@ export const POST: RequestHandler = async (event) => {
 			repository: body.repository,
 			password: body.password,
 			envVars: body.envVars ? JSON.stringify(body.envVars) : null,
-			flags: body.flags ?? null,
+			flags: flagsColumn,
 			hostPath: body.hostPath ?? null,
+			cacert: body.cacert || null,
+			tlsClientCert: body.tlsClientCert || null,
 			policies: body.policies ?? defaultPolicies
 		});
 

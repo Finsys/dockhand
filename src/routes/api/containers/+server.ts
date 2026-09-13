@@ -6,6 +6,16 @@ import { hasEnvironments } from '$lib/server/db';
 import { isHiddenByLabel } from '$lib/server/container-labels';
 import type { RequestHandler } from './$types';
 
+/**
+ * @openapi
+ * summary: List containers for one environment (dockhand.hidden=true label is filtered out)
+ * query: env:integer Environment id — an empty array is returned if omitted (from GET /api/environments)
+ * query: all:boolean Include stopped containers (default true; pass "false" to only show running ones)
+ * resp-200: array<{id:string!, name:string!, image:string!, state:string!, status:string!}>
+ * resp-200-example: [{"id":"a1b2c3d4e5f6","name":"immich_server","image":"ghcr.io/immich-app/immich-server:latest","state":"running","status":"Up 2 hours (healthy)"}]
+ * resp-403: Permission denied, or access denied to this environment
+ * resp-404: Environment not found
+ */
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	const auth = await authorize(cookies);
 
@@ -51,6 +61,16 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 	}
 };
 
+/**
+ * @openapi
+ * summary: Create a new container in an environment (auto-pulls the image first if it isn't present locally), optionally starting it right away
+ * query: env:integer Environment id (from GET /api/environments)
+ * body: {name:string!, image:string!, ports:{}, volumes:{}, volumeBinds:array<string>, env:array<string>, labels:{}, cmd:array<string>, entrypoint:array<string>, workingDir:string, restartPolicy:string, restartMaxRetries:integer, networkMode:string, additionalNetworks:array<string>, networkAliases:array<string>, networkIpv4Address:string, networkIpv6Address:string, startAfterCreate:boolean}
+ * body-example: {"name":"my-app","image":"nginx:latest","startAfterCreate":true}
+ * resp-200: {success:boolean!, id:string!, imagePulled:boolean}
+ * resp-403: Permission denied, or access denied to this environment
+ * resp-500: Container creation failed, or the image could not be pulled
+ */
 export const POST: RequestHandler = async (event) => {
 	const { request, url, cookies } = event;
 	const auth = await authorize(cookies);

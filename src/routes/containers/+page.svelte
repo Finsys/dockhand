@@ -12,6 +12,7 @@
 	import * as Select from '$lib/components/ui/select';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
+	import ContainerIcon from '$lib/components/ContainerIcon.svelte';
 	import { formatPorts, formatExposedPorts } from '$lib/utils/port-format';
 	import { formatBytes, formatBytesCompact } from '$lib/utils/format';
 	import MultiSelectFilter from '$lib/components/MultiSelectFilter.svelte';
@@ -66,6 +67,7 @@
 		Copy,
 		Loader2,
 		AlertCircle,
+		Tag,
 		Unplug
 	} from 'lucide-svelte';
 	import { broom } from '@lucide/lab';
@@ -78,7 +80,10 @@
 	import FileBrowserModal from './FileBrowserModal.svelte';
 	import BatchUpdateModal from './BatchUpdateModal.svelte';
 	import CheckUpdatesButton from '$lib/components/CheckUpdatesButton.svelte';
+	import DismissUpdatesButton from '$lib/components/DismissUpdatesButton.svelte';
 	import BatchOperationModal from '$lib/components/BatchOperationModal.svelte';
+	import VersionUpdateBadge from '$lib/components/VersionUpdateBadge.svelte';
+	import VersionUpdateModal from '$lib/components/VersionUpdateModal.svelte';
 	import type { ContainerInfo, TerminalMode } from '$lib/types';
 	import { EmptyState, NoEnvironment } from '$lib/components/ui/empty-state';
 	import { currentEnvironment, environments, appendEnvParam, clearStaleEnvironment } from '$lib/stores/environment';
@@ -87,11 +92,13 @@
 	import { appSettings } from '$lib/stores/settings';
 	import { canAccess } from '$lib/stores/auth';
 	import { vulnerabilityCriteriaIcons } from '$lib/utils/update-steps';
-	import { ipToNumber } from '$lib/utils/ip';
+	import { compareIps } from '$lib/utils/ip';
+	import { parseTimeStringToSeconds } from '$lib/utils/parse-uptime';
 	import { formatHostPortUrl } from '$lib/utils/url';
 	import { parseCustomUrl } from '$lib/utils/custom-url';
 	import { extractTraefikUrls } from '$lib/utils/traefik-urls';
 	import { extractPangolinUrls } from '$lib/utils/pangolin-urls';
+	import { extractCaddyUrls } from '$lib/utils/caddy-urls';
 	import { resolveChangelogUrl } from '$lib/utils/changelog-url';
 	import { detectShells, getBestShell, hasAvailableShell, USER_OPTIONS, getSavedUser, saveUserForContainer, getCustomUsers, removeCustomUser, type ShellDetectionResult } from '$lib/utils/shell-detection';
 	import { DataGrid } from '$lib/components/data-grid';
@@ -101,11 +108,22 @@
 	// Track change detection for stat highlighting (UI-only, stays in component)
 	let changedFields = $state<Map<string, Set<string>>>(new Map());
 
-	type SortField = 'name' | 'image' | 'state' | 'health' | 'uptime' | 'stack' | 'ip' | 'cpu' | 'memory' | 'ports';
+	type SortField = 'name' | 'image' | 'state' | 'health' | 'uptime' | 'stack' | 'ip' | 'cpu' | 'memory' | 'ports' | 'diskRead' | 'diskWrite' | 'netRx' | 'netTx';
 	type SortDirection = 'asc' | 'desc';
+
 
 	// Data from persistent store (survives page navigation)
 	const containers = $derived($containerStore.data);
+	// User-set per-container icon overrides for the current env (name -> icon), batch-loaded.
+	let iconOverrides = $state<Record<string, string>>({});
+	async function loadIconOverrides(forEnvId: number | null) {
+		try {
+			const res = await fetch(appendEnvParam('/api/container-icons', forEnvId));
+			iconOverrides = res.ok ? await res.json() : {};
+		} catch {
+			iconOverrides = {};
+		}
+	}
 	const containerStats = $derived($containerStore.stats);
 	const autoUpdateSettings = $derived($containerStore.autoUpdateSettings);
 	const envHasScanning = $derived($containerStore.envHasScanning);
@@ -128,6 +146,7 @@
 	// pseudo-status (#1063), which ANDs with actual Docker states.
 	const STATUS_FILTER_STORAGE_KEY = 'dockhand-containers-status-filter';
 	const UPDATE_AVAILABLE_FILTER_VALUE = 'update-available';
+	const NEWER_VERSION_FILTER_VALUE = 'newer-version';
 	let statusFilter = $state<string[]>([]);
 
 	// Status types with icons for filter and table
@@ -210,11 +229,13 @@
 			}
 			// Refresh data (store handles loading state internally)
 			containerStore.refresh(newEnvId);
+			loadIconOverrides(newEnvId);
 		} else if (!env) {
 			// No environment - clear data and stop loading
 			envId = null;
 			shellDetectionCache = {};
 			containerStore.clear();
+			iconOverrides = {};
 		}
 	});
 	let showCreateModal = $state(false);
@@ -230,6 +251,7 @@
 	let showFileBrowserModal = $state(false);
 	let fileBrowserContainerId = $state('');
 	let fileBrowserContainerName = $state('');
+	let fileBrowserContainerImage = $state('');
 
 	// Terminal state - track active terminals per container
 	interface ActiveTerminal {
@@ -268,6 +290,9 @@
 	// Update confirmation
 	let confirmUpdateAll = $state(false);
 	let confirmUpdateId = $state<string | null>(null);
+	// Separate open-state for the update icon in the image column so it does not
+	// share a popover with the identical icon in the actions column (#1435).
+	let confirmImageUpdateId = $state<string | null>(null);
 	let confirmUpdateSelected = $state(false);
 
 	// Update check state
@@ -275,6 +300,14 @@
 	let showBatchUpdateModal = $state(false);
 	const batchUpdateContainerIds = $derived($containerStore.pendingUpdateIds);
 	const batchUpdateContainerNames = $derived($containerStore.pendingUpdateNames);
+
+	// Version-update (semver) release-notes modal — opened from the Tag badge.
+	let versionModalContainer = $state<ContainerInfo | null>(null);
+	let versionModalNewer = $state<import('$lib/server/semver/find-newer').NewerVersion | null>(null);
+	function openVersionModal(container: ContainerInfo, newer: import('$lib/server/semver/find-newer').NewerVersion) {
+		versionModalContainer = container;
+		versionModalNewer = newer;
+	}
 
 	// Single container update mode (doesn't overwrite batch list)
 	let singleUpdateContainerId = $state<string | null>(null);
@@ -309,26 +342,46 @@
 	// Set of container IDs with updates available (for O(1) lookup)
 	const containersWithUpdatesSet = $derived(new Set(batchUpdateContainerIds));
 
+	// Whether any semver badges are showing (may be true with zero digest updates).
+	const hasNewerVersions = $derived($containerStore.newerVersions.size > 0);
+
 	// Container IDs whose last update check failed (e.g. registry rate-limited) — #1255
 	const containersWithFailedCheckSet = $derived(new Set($containerStore.failedUpdateIds));
 	const failedUpdateErrors = $derived($containerStore.failedUpdateErrors);
 
+	// Any update indicator on the page - digest updates, newer-version tags, or failed
+	// checks. Drives the compact "dismiss all" (×) button.
+	const hasUpdateIndicators = $derived(
+		$containerStore.pendingUpdateIds.length > 0 ||
+		hasNewerVersions ||
+		$containerStore.failedUpdateIds.length > 0
+	);
+
+	// Newer-version-tag (semver) suggestions from the last check, keyed by container ID.
+	const newerVersionsMap = $derived($containerStore.newerVersions);
+
 	// Filter dropdown entries: real statuses plus the synthetic
 	// "update-available" entry, only offered once we know about a pending
 	// update — picking it on an empty set would just empty the list (#1063).
-	const filterOptions = $derived(
-		containersWithUpdatesSet.size > 0
-			? [
-					...statusTypes,
-					{
-						value: UPDATE_AVAILABLE_FILTER_VALUE,
-						label: 'Update available',
-						icon: CircleArrowUp,
-						color: 'text-amber-500'
-					}
-				]
-			: statusTypes
-	);
+	const filterOptions = $derived([
+		...statusTypes,
+		...(containersWithUpdatesSet.size > 0
+			? [{
+					value: UPDATE_AVAILABLE_FILTER_VALUE,
+					label: 'Update available',
+					icon: CircleArrowUp,
+					color: 'text-amber-500'
+				}]
+			: []),
+		...(hasNewerVersions
+			? [{
+					value: NEWER_VERSION_FILTER_VALUE,
+					label: 'Newer version',
+					icon: Tag,
+					color: 'text-amber-500'
+				}]
+			: [])
+	]);
 
 	// Drop the 'update-available' filter when no pending updates remain —
 	// otherwise the user has no way to deselect it (dropdown hides the
@@ -339,6 +392,11 @@
 			containersWithUpdatesSet.size === 0
 		) {
 			statusFilter = statusFilter.filter((v) => v !== UPDATE_AVAILABLE_FILTER_VALUE);
+		}
+		// Same guard for the newer-version filter: drop it once no container has a
+		// newer version, or the dropdown hides the entry and the list stays empty.
+		if (statusFilter.includes(NEWER_VERSION_FILTER_VALUE) && !hasNewerVersions) {
+			statusFilter = statusFilter.filter((v) => v !== NEWER_VERSION_FILTER_VALUE);
 		}
 	});
 
@@ -468,6 +526,7 @@
 	function handleUpdateCheckComplete(result: {
 		withUpdates: Array<{ containerId: string; containerName: string }>;
 		failed?: Array<{ containerId: string; error: string }>;
+		newerVersions?: Array<{ containerId: string; newerVersion: import('$lib/server/semver/find-newer').NewerVersion }>;
 	}) {
 		if (result.withUpdates.length === 0) {
 			containerStore.setPendingUpdates([], new Map());
@@ -485,6 +544,9 @@
 			failed.map((f) => f.containerId),
 			new Map(failed.map((f) => [f.containerId, f.error]))
 		);
+		// Newer-version-tag (semver) suggestions — advisory badge, session-only.
+		const newer = result.newerVersions ?? [];
+		containerStore.setNewerVersions(new Map(newer.map((n) => [n.containerId, n.newerVersion])));
 	}
 
 	// Load pending updates from database (persisted from check-updates or scheduled jobs)
@@ -523,6 +585,8 @@
 				// Failed-check state is session-only — clear it here too so "Clear"
 				// dismisses the red "check failed" icons alongside the amber ones.
 				containerStore.setFailedUpdates([], new Map());
+				// Newer-version (semver) badges are session-only too — dismiss them alongside.
+				containerStore.setNewerVersions(new Map());
 			}
 		} catch {
 			toast.error('Failed to clear update indicators');
@@ -724,13 +788,19 @@
 		// Filter by status. The synthetic 'update-available' value (#1063)
 		// is split off so it ANDs with real-state selections instead of
 		// being treated like another Docker state.
-		const stateValues = statusFilter.filter((v) => v !== UPDATE_AVAILABLE_FILTER_VALUE);
+		const stateValues = statusFilter.filter(
+			(v) => v !== UPDATE_AVAILABLE_FILTER_VALUE && v !== NEWER_VERSION_FILTER_VALUE
+		);
 		const updatesOnly = statusFilter.includes(UPDATE_AVAILABLE_FILTER_VALUE);
+		const newerVersionOnly = statusFilter.includes(NEWER_VERSION_FILTER_VALUE);
 		if (stateValues.length > 0) {
 			result = result.filter((c) => stateValues.includes(c.state.toLowerCase()));
 		}
 		if (updatesOnly) {
 			result = result.filter((c) => containersWithUpdatesSet.has(c.id));
+		}
+		if (newerVersionOnly) {
+			result = result.filter((c) => newerVersionsMap.has(c.id));
 		}
 
 		// Filter by search query
@@ -785,7 +855,7 @@
 				case 'ip':
 					const ipA = getContainerIp(a.networks);
 					const ipB = getContainerIp(b.networks);
-					cmp = ipToNumber(ipA) - ipToNumber(ipB);
+					cmp = compareIps(ipA, ipB);
 					break;
 				case 'cpu':
 					const cpuA = containerStats.get(a.id)?.cpuPercent ?? -1;
@@ -796,6 +866,18 @@
 					const memA = containerStats.get(a.id)?.memoryUsage ?? -1;
 					const memB = containerStats.get(b.id)?.memoryUsage ?? -1;
 					cmp = memA - memB;
+					break;
+				case 'diskRead':
+					cmp = (containerStats.get(a.id)?.blockRead ?? -1) - (containerStats.get(b.id)?.blockRead ?? -1);
+					break;
+				case 'diskWrite':
+					cmp = (containerStats.get(a.id)?.blockWrite ?? -1) - (containerStats.get(b.id)?.blockWrite ?? -1);
+					break;
+				case 'netRx':
+					cmp = (containerStats.get(a.id)?.networkRx ?? -1) - (containerStats.get(b.id)?.networkRx ?? -1);
+					break;
+				case 'netTx':
+					cmp = (containerStats.get(a.id)?.networkTx ?? -1) - (containerStats.get(b.id)?.networkTx ?? -1);
 					break;
 			}
 			// Secondary sort by name for stability when primary values are equal
@@ -1124,6 +1206,7 @@
 	function browseFiles(container: ContainerInfo) {
 		fileBrowserContainerId = container.id;
 		fileBrowserContainerName = container.name;
+		fileBrowserContainerImage = container.image;
 		showFileBrowserModal = true;
 	}
 
@@ -1243,31 +1326,6 @@
 		return -Infinity;
 	}
 
-	function parseTimeStringToSeconds(timeStr: string): number {
-		// Parse strings like "2 hours", "3 days", "About a minute", "Less than a second"
-		const str = timeStr.toLowerCase();
-
-		if (str.includes('second')) return 1;
-		if (str.includes('less than a minute') || str.includes('about a minute')) return 60;
-
-		const match = str.match(/(\d+)\s*(second|minute|hour|day|week|month|year)/);
-		if (!match) return 0;
-
-		const value = parseInt(match[1], 10);
-		const unit = match[2];
-
-		switch (unit) {
-			case 'second': return value;
-			case 'minute': return value * 60;
-			case 'hour': return value * 3600;
-			case 'day': return value * 86400;
-			case 'week': return value * 604800;
-			case 'month': return value * 2592000;
-			case 'year': return value * 31536000;
-			default: return 0;
-		}
-	}
-
 	function getHealthVariant(health?: string): 'default' | 'destructive' | 'secondary' | 'outline' {
 		switch (health) {
 			case 'healthy':
@@ -1301,6 +1359,7 @@
 			sortDirection = field === 'state' ? 'asc' : 'asc';
 		}
 	}
+
 
 
 	// Handle tab visibility changes (e.g., user switches back from another tab)
@@ -1425,16 +1484,16 @@
 						>
 							<CircleArrowUp class="w-3.5 h-3.5" />
 							Update all ({updatableContainersCount})
-							<button
-								type="button"
-								onclick={(e) => { e.stopPropagation(); dismissPendingUpdates(); }}
-								class="-mr-1 text-[12px] leading-none rounded-full hover:bg-destructive/20 hover:text-destructive transition-colors opacity-40 hover:opacity-100"
-								title="Dismiss all update indicators"
-							>×</button>
 						</Button>
 					{/snippet}
 				</ConfirmPopover>
 				{/if}
+				<DismissUpdatesButton
+					show={hasUpdateIndicators}
+					digestCount={updatableContainersCount}
+					newerVersionCount={$containerStore.newerVersions.size}
+					onDismiss={dismissPendingUpdates}
+				/>
 				{#if $canAccess('containers', 'remove')}
 				<ConfirmPopover
 					open={confirmPrune}
@@ -1676,6 +1735,7 @@
 					{@const stack = getComposeProject(container.labels)}
 					{#if column.id === 'name'}
 						<div class="flex items-center gap-1.5 min-w-0">
+							<ContainerIcon image={container.image} name={container.name} override={iconOverrides[container.name]} {envId} class="w-4 h-4" />
 							<button
 								type="button"
 								class="text-xs font-medium truncate text-left hover:text-primary hover:underline cursor-pointer"
@@ -1747,9 +1807,29 @@
 					{:else if column.id === 'image'}
 						<div class="flex items-center gap-1.5 {$appSettings.highlightUpdates && containersWithUpdatesSet.has(container.id) ? 'update-border' : ''}">
 							{#if containersWithUpdatesSet.has(container.id)}
-								<span title="Update available">
-									<CircleArrowUp class="w-3 h-3 text-amber-500 {$appSettings.highlightUpdates ? 'glow-amber' : ''} shrink-0" />
-								</span>
+								{#if container.systemContainer}
+									<!-- System containers cannot be updated from the UI - show the
+									     indicator but leave it non-clickable (matches the actions column). -->
+									<span title="Update available">
+										<CircleArrowUp class="w-3 h-3 text-amber-500 {$appSettings.highlightUpdates ? 'glow-amber' : ''} shrink-0" />
+									</span>
+								{:else}
+									<ConfirmPopover
+										open={confirmImageUpdateId === container.id}
+										action="Update"
+										itemType="container"
+										itemName={container.name}
+										title="Update available - click to update"
+										onConfirm={() => updateSingleContainer(container.id, container.name)}
+										onOpenChange={(open) => confirmImageUpdateId = open ? container.id : null}
+									>
+										{#snippet children({ open })}
+											<span title="Update available" class="cursor-pointer">
+												<CircleArrowUp class="w-3 h-3 text-amber-500 hover:text-amber-400 transition-colors {$appSettings.highlightUpdates ? 'glow-amber' : ''} shrink-0" />
+											</span>
+										{/snippet}
+									</ConfirmPopover>
+								{/if}
 								{#if $appSettings.showImageChangelogLinks}
 									{@const changelogUrl = resolveChangelogUrl(container.image, container.labels)}
 									{#if changelogUrl}
@@ -1781,6 +1861,13 @@
 										</div>
 									</Tooltip.Content>
 								</Tooltip.Root>
+							{/if}
+							{#if newerVersionsMap.has(container.id)}
+								<VersionUpdateBadge
+									newerVersion={newerVersionsMap.get(container.id)!}
+									variant="pill"
+									onclick={() => openVersionModal(container, newerVersionsMap.get(container.id)!)}
+								/>
 							{/if}
 							<span class="text-xs text-muted-foreground truncate" title={container.image}>{container.image}</span>
 						</div>
@@ -1890,7 +1977,8 @@
 						{@const parsedUrl = parseCustomUrl(container.labels?.['dockhand.url'])}
 						{@const traefikUrls = (parsedUrl || !$appSettings.honorProxyLabels) ? [] : extractTraefikUrls(container.labels)}
 						{@const pangolinUrls = (parsedUrl || !$appSettings.honorProxyLabels) ? [] : extractPangolinUrls(container.labels)}
-						{#if ports.length > 0 || exposedPorts.length > 0 || parsedUrl || traefikUrls.length > 0 || pangolinUrls.length > 0}
+						{@const caddyUrls = (parsedUrl || !$appSettings.honorProxyLabels) ? [] : extractCaddyUrls(container.labels)}
+						{#if ports.length > 0 || exposedPorts.length > 0 || parsedUrl || traefikUrls.length > 0 || pangolinUrls.length > 0 || caddyUrls.length > 0}
 							{@const compactPorts = $appSettings.compactPorts}
 							{@const displayPorts = compactPorts && ports.length > 1 ? [ports[0]] : ports}
 							{@const remainingCount = ports.length - 1}
@@ -1939,6 +2027,21 @@
 										<ExternalLink class="w-2.5 h-2.5 opacity-60" />
 									</a>
 								{/each}
+									<!-- caddy-docker-proxy fallback URLs (#1390). dockhand.url suppresses these. -->
+									{#each caddyUrls as c}
+										<a
+											href={c.url}
+											target="_blank"
+											rel="noopener noreferrer"
+											onclick={(e) => e.stopPropagation()}
+											class="inline-flex items-center gap-0.5 text-xs bg-primary/10 hover:bg-primary/20 text-primary px-1 py-0.5 rounded transition-colors shrink-0"
+											title="Caddy {c.group}: {c.url}"
+										>
+											<Globe class="w-2.5 h-2.5" />
+											<span class="max-w-[120px] truncate">{c.url.replace(/^https?:\/\//, '')}</span>
+											<ExternalLink class="w-2.5 h-2.5 opacity-60" />
+										</a>
+									{/each}
 								{#each displayPorts as port}
 									{@const portParsed = parseCustomUrl(container.labels?.[`dockhand.port.${port.publicPort}.url`])}
 									{@const portUrl = portParsed?.url || null}
@@ -2353,25 +2456,27 @@
 						{/if}
 					{/if}
 
-					<!-- Current Terminal Panel -->
-					{#if currentTerminalContainerId}
-						{@const activeTerminal = activeTerminals.find(t => t.containerId === currentTerminalContainerId)}
-						{#if activeTerminal}
-							<div class="flex-1 min-h-0">
-								<TerminalPanel
-									containerId={activeTerminal.containerId}
-									containerName={activeTerminal.containerName}
-									shell={activeTerminal.shell}
-									user={activeTerminal.user}
-									mode={activeTerminal.mode}
-									visible={true}
-									envId={envId}
-									fillHeight={true}
-									onClose={() => closeTerminal(activeTerminal.containerId)}
-								/>
-							</div>
-						{/if}
-					{/if}
+					<!-- Terminal panels: render EVERY open session so each keeps its own
+					     live WebSocket/xterm; only the current one is visible. Switching
+					     just toggles visibility, so a running process (e.g. top) in a
+					     backgrounded session stays alive and its shell stays its own. -->
+					{#each activeTerminals as t (t.containerId)}
+						<!-- Do NOT display:none a backgrounded panel; TerminalPanel hides
+						     itself off-screen while keeping its size so xterm can fit. -->
+						<div class="min-h-0" class:flex-1={t.containerId === currentTerminalContainerId}>
+							<TerminalPanel
+								containerId={t.containerId}
+								containerName={t.containerName}
+								shell={t.shell}
+								user={t.user}
+								mode={t.mode}
+								visible={t.containerId === currentTerminalContainerId}
+								envId={envId}
+								fillHeight={true}
+								onClose={() => closeTerminal(t.containerId)}
+							/>
+						</div>
+					{/each}
 				</div>
 			{/if}
 		</div>
@@ -2392,22 +2497,22 @@
 				{/if}
 			{/if}
 
-			<!-- Show current terminal panel -->
-			{#if currentTerminalContainerId}
-				{@const activeTerminal = activeTerminals.find(t => t.containerId === currentTerminalContainerId)}
-				{#if activeTerminal}
-					<TerminalPanel
-						containerId={activeTerminal.containerId}
-						containerName={activeTerminal.containerName}
-						shell={activeTerminal.shell}
-						user={activeTerminal.user}
-						mode={activeTerminal.mode}
-						visible={true}
-						envId={envId}
-						onClose={() => closeTerminal(activeTerminal.containerId)}
-					/>
-				{/if}
-			{/if}
+			<!-- Terminal panels: render every open session (each keeps its own live
+			     WebSocket/xterm); only the current one is visible. -->
+			{#each activeTerminals as t (t.containerId)}
+				<!-- TerminalPanel hides a backgrounded session off-screen (keeps size for
+				     xterm fit); do not display:none it or a background xterm gets 0x0. -->
+				<TerminalPanel
+					containerId={t.containerId}
+					containerName={t.containerName}
+					shell={t.shell}
+					user={t.user}
+					mode={t.mode}
+					visible={t.containerId === currentTerminalContainerId}
+					envId={envId}
+					onClose={() => closeTerminal(t.containerId)}
+				/>
+			{/each}
 		{/if}
 	{/if}
 </div>
@@ -2423,6 +2528,7 @@
 	containerId={editContainerId}
 	onClose={() => (showEditModal = false)}
 	onSuccess={fetchContainers}
+	onIconChanged={() => loadIconOverrides(envId)}
 />
 
 <ContainerInspectModal
@@ -2446,6 +2552,7 @@
 	bind:open={showFileBrowserModal}
 	containerId={fileBrowserContainerId}
 	containerName={fileBrowserContainerName}
+	containerImage={fileBrowserContainerImage}
 	envId={envId ?? undefined}
 	onclose={() => showFileBrowserModal = false}
 />
@@ -2458,6 +2565,12 @@
 	vulnerabilityCriteria={envHasScanning ? envVulnerabilityCriteria : 'never'}
 	onClose={handleBatchUpdateClose}
 	onComplete={handleBatchUpdateComplete}
+/>
+
+<VersionUpdateModal
+	bind:container={versionModalContainer}
+	newerVersion={versionModalNewer}
+	{envId}
 />
 
 <BatchOperationModal

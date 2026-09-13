@@ -12,6 +12,18 @@ const SHELLS_TO_CHECK = [
 	{ path: '/bin/ash', label: 'Ash (Alpine)' }
 ];
 
+/**
+ * GET /api/containers/{id}/shells - Detect available shells in a container
+ *
+ * @openapi
+ * summary: Probe a container for available shells (bash/sh/zsh/ash) and report the preferred default (requires the 'exec' permission)
+ * description: On probe failure the endpoint still returns 200 with empty results rather than an error, so callers always get a usable shell list.
+ * path: id:string! Container ID or name (from GET /api/containers)
+ * query: env:integer The target environment ID (omit for the local/default Docker host) (from GET /api/environments)
+ * resp-200: {shells:array<string>!, defaultShell:string, allShells:array<{path:string!, label:string!, available:boolean!}>!}
+ * resp-200-example: {"shells":["/bin/sh"],"defaultShell":"/bin/sh","allShells":[{"path":"/bin/bash","label":"Bash","available":false},{"path":"/bin/sh","label":"Shell (sh)","available":true}]}
+ * resp-403: Permission denied, or (enterprise) no access to the requested environment
+ */
 export const GET: RequestHandler = async ({ params, url, cookies }) => {
 	const invalid = validateDockerIdParam(params.id, 'container');
 	if (invalid) return invalid;

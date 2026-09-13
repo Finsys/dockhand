@@ -1,14 +1,12 @@
 /** Microsoft Power Automate Workflows (e.g. Microsoft Teams). workflows://. */
-import { parseWorkflowsUrl, buildWorkflowsHttpUrl } from '$lib/utils/notification-parsers';
+import { resolveWorkflowsHttpUrl } from '$lib/utils/notification-parsers';
 import { notificationFetch, drainResponse, type NotificationPayload, type NotificationResult } from './shared';
 
 export async function sendWorkflows(appriseUrl: string, payload: NotificationPayload): Promise<NotificationResult> {
-	const parsed = parseWorkflowsUrl(appriseUrl);
-	if (!parsed) {
-		return { success: false, error: 'Invalid Workflows URL format. Expected: workflows://hostname/workflow/signature' };
+	const url = resolveWorkflowsHttpUrl(appriseUrl);
+	if (!url) {
+		return { success: false, error: 'Invalid Workflows URL format. Expected the full https:// webhook URL with the scheme changed to workflows://, or workflows://hostname/workflow/signature' };
 	}
-
-	const url = buildWorkflowsHttpUrl(parsed.hostname, parsed.workflow, parsed.signature);
 	const titleWithEnv = payload.environmentName ? `${payload.title} [${payload.environmentName}]` : payload.title;
 
 	try {

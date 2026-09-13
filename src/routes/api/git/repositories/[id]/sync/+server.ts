@@ -2,8 +2,25 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getGitRepository } from '$lib/server/db';
 import { syncRepository, checkForUpdates } from '$lib/server/git';
+import { authorize } from '$lib/server/authorize';
 
-export const POST: RequestHandler = async ({ params }) => {
+/**
+ * @openapi
+ * summary: Sync (git pull) the local clone of a repository to the latest commit on its tracked branch
+ * path: id:integer! Git repository ID (from GET /api/git/repositories)
+ * resp-200: {success:boolean!, error:string}
+ * resp-200-example: {"success":true}
+ * resp-400: The id path segment is not a valid integer
+ * resp-403: Caller lacks the git:edit permission
+ * resp-404: No repository exists with that ID
+ * resp-500: The sync failed
+ */
+export const POST: RequestHandler = async ({ params, cookies }) => {
+	const auth = await authorize(cookies);
+	if (auth.authEnabled && !await auth.can('git', 'edit')) {
+		return json({ error: 'Permission denied' }, { status: 403 });
+	}
+
 	try {
 		const id = parseInt(params.id);
 		if (isNaN(id)) {
@@ -23,7 +40,23 @@ export const POST: RequestHandler = async ({ params }) => {
 	}
 };
 
-export const GET: RequestHandler = async ({ params }) => {
+/**
+ * @openapi
+ * summary: Check whether the tracked branch has new commits upstream without pulling them
+ * path: id:integer! Git repository ID (from GET /api/git/repositories)
+ * resp-200: {hasUpdates:boolean!, error:string}
+ * resp-200-example: {"hasUpdates":false}
+ * resp-400: The id path segment is not a valid integer
+ * resp-403: Caller lacks the git:view permission
+ * resp-404: No repository exists with that ID
+ * resp-500: The update check failed
+ */
+export const GET: RequestHandler = async ({ params, cookies }) => {
+	const auth = await authorize(cookies);
+	if (auth.authEnabled && !await auth.can('git', 'view')) {
+		return json({ error: 'Permission denied' }, { status: 403 });
+	}
+
 	// Check for updates without syncing
 	try {
 		const id = parseInt(params.id);

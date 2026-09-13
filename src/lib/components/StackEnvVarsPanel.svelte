@@ -4,8 +4,11 @@
 	import StackEnvVarsEditor, { type EnvVar, type ValidationResult } from '$lib/components/StackEnvVarsEditor.svelte';
 	import CodeEditor from '$lib/components/CodeEditor.svelte';
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
-	import { Plus, Upload, Trash2, List, FileText, AlertTriangle, ShieldAlert, HelpCircle, Info } from 'lucide-svelte';
+	import { Plus, Upload, Trash2, List, FileText, AlertTriangle, ShieldAlert, HelpCircle, Info, Check, KeyRound } from 'lucide-svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
+	import { getProviderIcon } from '$lib/components/provider-icons';
+	import { providerTypeLabel } from '../../routes/settings/secrets/ProviderModal.svelte';
+	import { effectiveMissing } from '$lib/utils/invault-markers';
 
 	interface Props {
 		variables: EnvVar[]; // Bindable - ALL variables (secrets + non-secrets)
@@ -18,6 +21,23 @@
 		placeholder?: { key: string; value: string };
 		infoText?: string;
 		existingSecretKeys?: Set<string>;
+		/** Provider-injected key NAMES from the last deploy (banner). */
+		injectedSecretKeys?: string[];
+		/** Bound provider type/name, for the injected banner + pills. */
+		providerType?: string | null;
+		providerName?: string | null;
+		/**
+		 * Whether a secret provider is CURRENTLY bound to this stack. When false but
+		 * injectedSecretKeys is non-empty, the keys are historical (from the last deploy)
+		 * and the next deploy will drop them - the banner says so instead of implying they
+		 * are still active (#1522).
+		 */
+		providerBound?: boolean;
+		/** Set when the live provider probe failed - shown as an amber line. */
+		probeError?: string | null;
+		/** Key NAMES the live probe found in the bound provider (present RIGHT NOW).
+		 *  These are not "missing" even without a local value. Empty on probe failure. */
+		providerKeySet?: Set<string>;
 		showInterpolationHint?: boolean;
 		theme?: 'light' | 'dark';
 		class?: string;
@@ -36,12 +56,32 @@
 		placeholder = { key: 'VARIABLE_NAME', value: 'value' },
 		infoText,
 		existingSecretKeys = new Set<string>(),
+		injectedSecretKeys = [],
+		providerType = null,
+		providerName = null,
+		providerBound = true,
+		probeError = null,
+		providerKeySet = new Set<string>(),
 		showInterpolationHint = false,
 		theme = 'dark',
 		class: className = '',
 		onchange,
 		headerActions
 	}: Props = $props();
+
+
+	// A ${VAR} the bound provider currently supplies (LIVE probe) is NOT "missing" even
+	// without a local value. Drop those from the panel's missing count / "Add missing"
+	// list so the panel matches the editor's IN VAULT markers - same source, one truth.
+	// This is purely live: the last-deploy injected names drive only the banner, never
+	// this set. A failed probe leaves providerKeySet empty, so those keys stay missing.
+	const effectiveValidation = $derived.by<ValidationResult | null>(() => {
+		if (!validation || providerKeySet.size === 0) return validation;
+		return {
+			...validation,
+			missing: effectiveMissing(validation.missing, providerKeySet)
+		};
+	});
 
 	const STORAGE_KEY_VIEW_MODE = 'dockhand-env-vars-view-mode';
 
@@ -55,6 +95,16 @@
 
 	// Count of secrets (for display in hint)
 	const secretCount = $derived(variables.filter(v => v.isSecret && v.key.trim()).length);
+
+	// True when any variable's VALUE is a provider reference (op:// / pass://).
+	// Such a reference is resolved only here (stack env), never when written
+	// straight into a compose environment: block - so we surface a hint.
+	const hasProviderReference = $derived(
+		variables.some((v) => {
+			const val = (v.value ?? '').trim();
+			return val.startsWith('op://') || val.startsWith('pass://');
+		})
+	);
 
 	// Generate text representation from variables (non-secrets only)
 	// This is used for text view display
@@ -333,21 +383,21 @@
 				</button>
 			</div>
 			<!-- Validation status pills -->
-			{#if validation}
+			{#if effectiveValidation}
 				<div class="flex gap-1 flex-wrap">
-					{#if validation.missing.length > 0}
+					{#if effectiveValidation.missing.length > 0}
 						<span class="inline-flex items-center px-1.5 py-0.5 rounded text-2xs font-medium bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300">
-							{validation.missing.length} missing
+							{effectiveValidation.missing.length} missing
 						</span>
 					{/if}
-					{#if validation.required.length > 0}
+					{#if effectiveValidation.required.length > 0}
 						<span class="inline-flex items-center px-1.5 py-0.5 rounded text-2xs font-medium bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300">
-							{validation.required.length - validation.missing.length} defined
+							{effectiveValidation.required.length - effectiveValidation.missing.length} defined
 						</span>
 					{/if}
-					{#if validation.optional.length > 0}
+					{#if effectiveValidation.optional.length > 0}
 						<span class="inline-flex items-center px-1.5 py-0.5 rounded text-2xs font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
-							{validation.optional.length} optional
+							{effectiveValidation.optional.length} optional
 						</span>
 					{/if}
 				</div>
@@ -454,6 +504,15 @@
 				</div>
 			</div>
 		{/if}
+		<!-- Provider-reference placement hint: op:// / pass:// only resolve here, not in compose environment: -->
+		{#if hasProviderReference}
+			<div class="flex items-start gap-2 px-2.5 py-2 rounded bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50">
+				<Info class="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+				<p class="text-xs text-amber-700 dark:text-amber-300">
+					A <code class="bg-amber-100 dark:bg-amber-800/40 px-1 rounded">op://</code> / <code class="bg-amber-100 dark:bg-amber-800/40 px-1 rounded">pass://</code> reference is resolved <strong>here</strong>, in the stack's environment. It is <strong>not</strong> resolved when written directly in a compose <code class="bg-amber-100 dark:bg-amber-800/40 px-1 rounded">environment:</code> block - reference the variable there with <code class="bg-amber-100 dark:bg-amber-800/40 px-1 rounded">${'{VAR}'}</code> instead.
+				</p>
+			</div>
+		{/if}
 		<!-- Parse warnings (form mode only) -->
 		{#if viewMode === 'form' && parseWarnings.length > 0}
 			<div class="flex items-start gap-2 px-2 py-1.5 rounded bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50">
@@ -472,11 +531,68 @@
 				</div>
 			</div>
 		{/if}
+		<!-- Provider-injected secrets loaded at the last deploy -->
+		{#if injectedSecretKeys.length > 0 && providerBound}
+			<div class="flex items-start gap-2 px-2.5 py-2 rounded bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800/50">
+				<Check class="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+				<div class="text-xs text-emerald-700 dark:text-emerald-300 min-w-0">
+					<div class="flex items-center gap-1.5 flex-wrap">
+						<span class="font-semibold">{injectedSecretKeys.length} secret{injectedSecretKeys.length === 1 ? '' : 's'} loaded</span>
+						<span class="text-emerald-600/70 dark:text-emerald-400/70">from</span>
+						{#if providerType}
+							{@const ProviderIcon = getProviderIcon(providerType)}
+							<span class="inline-flex items-center gap-1 font-medium">
+								<ProviderIcon class="w-3.5 h-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+								{providerTypeLabel(providerType)}
+							</span>
+							{#if providerName}<span class="text-emerald-600/70 dark:text-emerald-400/70">&middot; {providerName}</span>{/if}
+						{:else}
+							<span class="font-medium">the provider</span>
+						{/if}
+					</div>
+					<p class="text-emerald-600 dark:text-emerald-400 mt-0.5">Injected into the container at last deploy &mdash; never written to <code>.env</code>.</p>
+					<div class="flex flex-wrap gap-1.5 mt-1.5">
+						{#each injectedSecretKeys as key}
+							<span class="inline-flex items-center gap-1 font-mono text-2xs font-semibold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-800/40 border border-emerald-300 dark:border-emerald-700">
+								<KeyRound class="w-2.5 h-2.5" />{key}
+							</span>
+						{/each}
+					</div>
+				</div>
+			</div>
+		{:else if injectedSecretKeys.length > 0 && !providerBound}
+			<!-- Historical: keys were injected on a previous deploy but no provider is bound now (#1522). -->
+			<div class="flex items-start gap-2 px-2.5 py-2 rounded bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50">
+				<AlertTriangle class="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+				<div class="text-xs text-amber-700 dark:text-amber-300 min-w-0">
+					<div class="font-semibold">No secret provider is bound</div>
+					<p class="text-amber-600 dark:text-amber-400 mt-0.5">
+						These {injectedSecretKeys.length} secret{injectedSecretKeys.length === 1 ? ' was' : 's were'} injected on the last deploy but the stack is no longer bound to a provider. The next deploy will drop {injectedSecretKeys.length === 1 ? 'it' : 'them'}. Reselect a provider to keep them.
+					</p>
+					<div class="flex flex-wrap gap-1.5 mt-1.5">
+						{#each injectedSecretKeys as key}
+							<span class="inline-flex items-center gap-1 font-mono text-2xs font-semibold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-800/40 border border-amber-300 dark:border-amber-700 line-through decoration-amber-500/60">
+								<KeyRound class="w-2.5 h-2.5" />{key}
+							</span>
+						{/each}
+					</div>
+				</div>
+			</div>
+		{/if}
+		<!-- Live provider probe couldn't reach the provider: keys fall back to MISSING -->
+		{#if probeError}
+			<div class="flex items-start gap-2 px-2.5 py-2 rounded bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50">
+				<AlertTriangle class="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+				<div class="text-xs text-amber-700 dark:text-amber-300 min-w-0">
+					Couldn't check {providerName ?? 'the secret provider'}: {probeError}
+				</div>
+			</div>
+		{/if}
 		<!-- Add missing variables (form mode only) -->
-		{#if viewMode === 'form' && validation && validation.missing.length > 0 && !readonly}
+		{#if viewMode === 'form' && effectiveValidation && effectiveValidation.missing.length > 0 && !readonly}
 			<div class="flex flex-wrap gap-1 items-center">
 				<span class="text-xs text-muted-foreground mr-1">Add missing:</span>
-				{#each validation.missing as missing}
+				{#each effectiveValidation.missing as missing}
 					<button
 						type="button"
 						onclick={() => addMissingVariable(missing)}
@@ -493,7 +609,7 @@
 		{#if viewMode === 'form'}
 			<StackEnvVarsEditor
 				bind:variables
-				{validation}
+				validation={effectiveValidation}
 				{readonly}
 				{showSource}
 				{sources}

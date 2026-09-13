@@ -158,14 +158,9 @@
 		<Card.Header class="space-y-1 text-center">
 			<div class="flex justify-center mb-4">
 				<img
-					src="/logo-light.webp"
+					src="/logo.svg"
 					alt="Dockhand Logo"
-					class="h-16 w-auto object-contain dark:hidden"
-				/>
-				<img
-					src="/logo-dark.webp"
-					alt="Dockhand Logo"
-					class="h-16 w-auto object-contain hidden dark:block"
+					class="h-16 w-auto object-contain"
 				/>
 			</div>
 			<Card.Title class="text-2xl font-bold">Welcome back</Card.Title>

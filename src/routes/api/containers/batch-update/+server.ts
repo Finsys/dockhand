@@ -18,6 +18,17 @@ export interface BatchUpdateResult {
  * Preserves ALL container settings including health checks, resource limits,
  * capabilities, DNS, security options, ulimits, and network connections.
  * Expects JSON body: { containerIds: string[] }
+ *
+ * @openapi
+ * summary: Recreate a set of containers with their latest images, preserving all settings (requires the 'create' permission)
+ * description: Containers are processed sequentially; the response reports per-container success/failure plus a summary. Use the streaming variant for live progress. containerIds from GET /api/containers.
+ * query: env:integer The target environment ID (omit for the local/default Docker host) (from GET /api/environments)
+ * body: {containerIds:array<string>!}
+ * body-example: {"containerIds":["3f4a1c2b9d8e","a1b2c3d4e5f6"]}
+ * resp-200: {success:boolean!, results:array<{containerId:string!, containerName:string!, success:boolean!, error:string}>!, summary:{total:integer!, success:integer!, failed:integer!}!}
+ * resp-400: The containerIds array is missing or empty
+ * resp-403: Permission denied
+ * resp-500: Failed to run the batch update
  */
 export const POST: RequestHandler = async (event) => {
 	const { url, cookies, request } = event;

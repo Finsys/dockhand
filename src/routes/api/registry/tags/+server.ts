@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getRegistry } from '$lib/server/db';
+import { authorize } from '$lib/server/authorize';
 import { getRegistryAuth } from '$lib/server/docker';
 
 interface TagInfo {
@@ -116,7 +117,28 @@ async function fetchRegistryTags(registry: any, imageName: string): Promise<TagI
 	}));
 }
 
-export const GET: RequestHandler = async ({ url }) => {
+/**
+ * @openapi
+ * summary: List the tags of an image from Docker Hub or a configured registry (paginated for Docker Hub)
+ * description: With no registry parameter, Docker Hub is queried; V2 registries return all tags in one page. Upstream Docker Hub error status codes are proxied back.
+ * query: registry:integer ID of the configured registry; omit to query Docker Hub (from GET /api/registries)
+ * query: image:string! Repository/image name
+ * query: page:integer Page number for Docker Hub pagination (default 1)
+ * query: pageSize:integer Page size for Docker Hub pagination (default 20)
+ * resp-200: {tags:array<{name:string!, size:integer, lastUpdated:string, digest:string}>!, total:integer!, page:integer!, pageSize:integer!, hasNext:boolean!, hasPrev:boolean!}
+ * resp-200-example: {"tags":[{"name":"1.27","lastUpdated":"2026-06-01T00:00:00Z"}],"total":1,"page":1,"pageSize":20,"hasNext":false,"hasPrev":false}
+ * resp-400: The image query parameter is missing
+ * resp-403: Permission denied (requires registries:view)
+ * resp-404: The referenced registry does not exist
+ * resp-500: Failed to fetch tags
+ * resp-503: Could not connect to the registry (connection refused or host not found)
+ */
+export const GET: RequestHandler = async ({ url, cookies }) => {
+	const auth = await authorize(cookies);
+	if (auth.authEnabled && !await auth.can('registries', 'view')) {
+		return json({ error: 'Permission denied' }, { status: 403 });
+	}
+
 	try {
 		const registryId = url.searchParams.get('registry');
 		const imageName = url.searchParams.get('image');

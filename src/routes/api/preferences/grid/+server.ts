@@ -4,6 +4,13 @@ import { authorize } from '$lib/server/authorize';
 import type { GridColumnPreferences } from '$lib/types';
 
 // GET - retrieve all grid preferences
+/**
+ * @openapi
+ * summary: Retrieve all saved data-grid column preferences (per-user when auth is enabled)
+ * resp-200: {preferences:{}}
+ * resp-200-example: {"preferences":{"containers":{"columns":[{"id":"name","visible":true}]}}}
+ * resp-500: Failed to get grid preferences
+ */
 export const GET: RequestHandler = async ({ cookies }) => {
 	const auth = await authorize(cookies);
 
@@ -20,6 +27,15 @@ export const GET: RequestHandler = async ({ cookies }) => {
 };
 
 // POST - update grid preferences for a specific grid
+/**
+ * @openapi
+ * summary: Save column preferences for one data grid and return all grid preferences
+ * body: {gridId:string!, columns:array<{id:string!, visible:boolean!}>}
+ * body-example: {"gridId":"containers","columns":[{"id":"name","visible":true},{"id":"image","visible":false}]}
+ * resp-200: {preferences:{}}
+ * resp-400: gridId is required, columns array is required, or a column is missing id (string) / visible (boolean)
+ * resp-500: Failed to save grid preferences
+ */
 export const POST: RequestHandler = async ({ request, cookies }) => {
 	const auth = await authorize(cookies);
 
@@ -58,6 +74,13 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 };
 
 // DELETE - reset grid preferences (single grid or all)
+/**
+ * @openapi
+ * summary: Reset grid preferences — a single grid when gridId is given, otherwise all grids
+ * query: gridId:string Grid ID to reset; omit to reset every grid
+ * resp-200: {preferences:{}}
+ * resp-500: Failed to reset grid preferences
+ */
 export const DELETE: RequestHandler = async ({ url, cookies }) => {
 	const auth = await authorize(cookies);
 

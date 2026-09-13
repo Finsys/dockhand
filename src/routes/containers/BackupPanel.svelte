@@ -7,9 +7,10 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { TogglePill } from '$lib/components/ui/toggle-pill';
 	import CronEditor from '$lib/components/cron-editor.svelte';
-	import { Save, Play, Pause, RefreshCw, CheckCircle, XCircle, ChevronDown, Loader2, Plus, Trash2, Pencil, X, Check, HardDrive, Box, Layers, FileText } from 'lucide-svelte';
+	import { Save, Play, Pause, RefreshCw, CheckCircle, XCircle, ChevronDown, Loader2, Plus, Trash2, Pencil, X, Check, HardDrive, Box, Layers, FileText, FolderOpen, AlertTriangle } from 'lucide-svelte';
 	import RotateCwFadingClock from '$lib/components/icons/RotateCwFadingClock.svelte';
 	import VolumePicker from '$lib/components/backup/VolumePicker.svelte';
+	import StackFilesPicker from '$lib/components/backup/StackFilesPicker.svelte';
 	import DestinationPicker from '$lib/components/backup/DestinationPicker.svelte';
 	import LogConsole from '$lib/components/LogConsole.svelte';
 	import SnapshotsPanel from './SnapshotsPanel.svelte';
@@ -23,10 +24,11 @@
 	import { watchJob } from '$lib/utils/sse-fetch';
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
 	import { getRepoTypeIcon, parseRetention, parseOptions, retentionSummary as getRetentionSummary, formatCron, runBackupAction, classifyJobResult, tagLogLine, fetchBackupExecutions, type BackupAction, type BackupFormState } from '$lib/utils/backup';
+	import { reconcileSelectedVolumeKeys } from '$lib/utils/mounts';
 
 	interface Props {
 		containerName: string;
-		volumes: { name: string; mountPoint: string; mountType?: 'volume' | 'bind' }[];
+		volumes: { key: string; name: string; mountPoint: string; mountType?: 'volume' | 'bind' }[];
 		type?: 'container' | 'stack';
 		environmentId?: number;
 		onConfigSaved?: () => void;
@@ -238,9 +240,12 @@
 		editLimitDownload = opts.limitDownload || '';
 		editWebhookSuccess = opts.webhookSuccess || '';
 		editWebhookFailure = opts.webhookFailure || '';
+		excludedStackFiles = Array.isArray(opts.excludedStackFiles) ? opts.excludedStackFiles : [];
 		editStopBefore = cfg.stopBeforeBackup;
 		editAllVolumes = cfg.selectedVolumes === null;
-		editSelectedVolumes = cfg.selectedVolumes ? (typeof cfg.selectedVolumes === 'string' ? JSON.parse(cfg.selectedVolumes) : cfg.selectedVolumes) : [];
+		const storedSel = cfg.selectedVolumes ? (typeof cfg.selectedVolumes === 'string' ? JSON.parse(cfg.selectedVolumes) : cfg.selectedVolumes) : [];
+		// Reconcile a stored selection (may hold legacy names) to the current volume keys.
+		editSelectedVolumes = reconcileSelectedVolumeKeys(volumes, storedSel);
 		showAdvanced = false;
 	}
 
@@ -283,9 +288,11 @@
 		if (editWebhookFailure !== (opts.webhookFailure || '')) return true;
 		if (editStopBefore !== cfg.stopBeforeBackup) return true;
 		if (editAllVolumes !== (cfg.selectedVolumes === null)) return true;
-		const origVolumes = cfg.selectedVolumes
+		const storedSel = cfg.selectedVolumes
 			? (typeof cfg.selectedVolumes === 'string' ? JSON.parse(cfg.selectedVolumes) : cfg.selectedVolumes)
 			: [];
+		// Reconcile the baseline to keys too, so a name->key format shift alone isn't seen as dirty.
+		const origVolumes = reconcileSelectedVolumeKeys(volumes, storedSel);
 		if (JSON.stringify([...editSelectedVolumes].sort()) !== JSON.stringify([...origVolumes].sort())) return true;
 		return false;
 	}
@@ -314,7 +321,8 @@
 				limitUpload: editLimitUpload || undefined,
 				limitDownload: editLimitDownload || undefined,
 				webhookSuccess: editWebhookSuccess || undefined,
-				webhookFailure: editWebhookFailure || undefined
+				webhookFailure: editWebhookFailure || undefined,
+				excludedStackFiles: excludedStackFiles.length > 0 ? excludedStackFiles : undefined
 			}
 		};
 	}
@@ -468,7 +476,52 @@
 		return `${sel.length} of ${volumes.length} volumes`;
 	}
 
+	// Resolved host stack-dir path (stacks only): WHERE the helper will read the stack folder
+	// from on the target host. Shown in the create form so the user sees what gets captured -
+	// and a clear warning up front when it can't be located (would hard-fail the backup).
+	let stackPath = $state<{ kind: 'candidate'; hostPath: string; composeFile: string } | { kind: 'unknown'; reason: string } | null>(null);
+	async function fetchStackPath() {
+		if (type !== 'stack') return;
+		try {
+			const params = new URLSearchParams({ target: containerName });
+			// Use the derived envId (prop OR the currently selected environment), the SAME
+			// value the rest of the panel uses for save/run - the bare `environmentId` prop is
+			// often undefined (the modal doesn't pass it), which made the server report
+			// "No environment specified".
+			if (envId != null) params.set('env', String(envId));
+			const res = await fetch(`/api/backup/stack-path?${params}`);
+			if (res.ok) stackPath = await res.json();
+		} catch { /* non-fatal: the path preview is informational */ }
+	}
+
+	// Stack files on the host (probe listing) — supersedes the plain stackPath callout for the
+	// picker, but stackPath is still fetched for the compose-file name shown elsewhere.
+	type StackListing =
+		| { kind: 'listed'; hostPath: string; entries: { name: string; type: 'dir' | 'file'; size: number; capturedAs?: 'bind' | 'volume' }[] }
+		| { kind: 'unknown'; reason: string }
+		| null;
+	let stackListing = $state<StackListing>(null);
+	let loadingStackListing = $state(false);
+	let excludedStackFiles = $state<string[]>([]);
+	async function fetchStackListing() {
+		if (type !== 'stack') { stackListing = null; return; }
+		loadingStackListing = true;
+		try {
+			const params = new URLSearchParams({ target: containerName });
+			if (envId != null) params.set('env', String(envId));
+			const res = await fetch(`/api/backup/stack-dir-listing?${params}`);
+			stackListing = await res.json();
+		} catch (e) {
+			stackListing = { kind: 'unknown', reason: e instanceof Error ? e.message : 'probe failed' };
+		} finally {
+			loadingStackListing = false;
+		}
+	}
+
 	onMount(() => { fetchDestinations(); fetchConfigs(); });
+	// Resolve the stack path once envId is known (it's derived from $currentEnvironment, which
+	// may not be ready at mount). Re-runs if the environment changes.
+	$effect(() => { if (type === 'stack' && envId != null) { void fetchStackPath(); void fetchStackListing(); } });
 </script>
 
 <!-- Sub-tabs: Schedules (cheap) vs Snapshots. SnapshotsPanel is mounted as soon as
@@ -610,6 +663,20 @@
 					<TogglePill bind:checked={editStopBefore} />
 					<Label class="text-xs">Stop {type} during backup</Label>
 				</div>
+				<!-- Stack files on the host: probe the host, show the resolved dir + let the user
+				     pick which entries to back up. Shown BEFORE the volume list. -->
+				{#if type === 'stack'}
+					<StackFilesPicker
+						listing={stackListing}
+						loading={loadingStackListing}
+						connectionType={fullEnv?.connectionType}
+						envName={fullEnv?.name}
+						envIcon={fullEnv?.icon}
+						envId={fullEnv?.id}
+						bind:excludedStackFiles
+					/>
+				{/if}
+
 				<!-- Volume picker (all-or-subset toggle + per-volume checkboxes) -->
 				<VolumePicker
 					volumes={volumes}

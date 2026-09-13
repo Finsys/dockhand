@@ -1,12 +1,22 @@
 import { json } from '@sveltejs/kit';
 import { listComposeStacks, deployStack, saveStackComposeFile, writeStackEnvFile, writeRawStackEnvFile, saveStackEnvVarsToDb } from '$lib/server/stacks';
 import { EnvironmentNotFoundError, DockerConnectionError } from '$lib/server/docker';
-import { upsertStackSource, getStackSources } from '$lib/server/db';
+import { upsertStackSource, getStackSources, secretProviderExists } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
 import { auditStack } from '$lib/server/audit';
 import { createJobResponse } from '$lib/server/sse';
+import { createRunRecorder } from '$lib/server/deploy-run-record';
+import { hashComposeContent, hashEnvFingerprint } from '$lib/server/deploy-run-record-core';
+import { parseEnvFileContent } from '$lib/server/git';
 import type { RequestHandler } from './$types';
 
+/**
+ * @openapi
+ * summary: List compose stacks for one environment (internal, external, and git)
+ * query: env:integer Environment id
+ * resp-403: Permission denied (needs stacks:view)
+ * resp-404: Environment not found
+ */
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	const auth = await authorize(cookies);
 
@@ -36,11 +46,12 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 		const stackSources = await getStackSources(envIdNum);
 		const existingNames = new Set(stacks.map((s) => s.name));
 
-		// Enrich Docker-discovered stacks with source type from DB
+		// Enrich Docker-discovered stacks with source type + icon from DB
 		for (const stack of stacks) {
 			const source = stackSources.find(s => s.stackName === stack.name);
 			if (source) {
 				(stack as any).sourceType = source.sourceType;
+				(stack as any).icon = source.icon;
 			}
 		}
 
@@ -53,7 +64,8 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 					containers: [],
 					containerDetails: [],
 					status: 'created' as any,
-					sourceType: source.sourceType
+					sourceType: source.sourceType,
+					icon: source.icon
 				} as any);
 			}
 		}
@@ -72,12 +84,33 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 	}
 };
 
+/**
+ * @openapi
+ * summary: Create and (optionally) deploy a compose stack
+ * description: Writes the compose + .env to the stack dir, stores secrets in the DB, and with start deploys it. Can bind a secret provider. Target environment comes from the env query param, or from envId/environmentId in the body when the query is absent.
+ * query: env:integer Target environment id (takes precedence over envId/environmentId in the body)
+ * body: {name:string!, compose:string!, composePath:string, envPath:string, envVars:array<object>, rawEnvContent:string, secretProviderId:integer, start:boolean, envId:integer, environmentId:integer, pull:boolean, build:boolean, forceRecreate:boolean}
+ * resp-400: Invalid request (e.g. missing name/compose, or secretProviderId wrong type)
+ * resp-403: Permission denied (needs stacks:create; binding a secret provider also needs secrets:view)
+ * resp-500: Failed to create or deploy the stack
+ */
 export const POST: RequestHandler = async (event) => {
 	const { request, url, cookies } = event;
 	const auth = await authorize(cookies);
 
-	const envId = url.searchParams.get('env');
-	const envIdNum = envId ? parseInt(envId) : undefined;
+	let body: any;
+	try {
+		body = await request.json();
+	} catch {
+		return json({ error: 'Invalid JSON body' }, { status: 400 });
+	}
+
+	// Target env: the ?env= query wins (the UI uses it), else fall back to envId /
+	// environmentId in the body so an API caller can target a remote env that way too
+	// (#1491). Resolve BEFORE the permission checks so they scope to the real target.
+	const queryEnv = url.searchParams.get('env');
+	const bodyEnv = body?.envId ?? body?.environmentId;
+	const envIdNum = queryEnv ? parseInt(queryEnv) : (typeof bodyEnv === 'number' ? bodyEnv : undefined);
 
 	// Permission check with environment context
 	if (auth.authEnabled && !(await auth.can('stacks', 'create', envIdNum))) {
@@ -90,8 +123,7 @@ export const POST: RequestHandler = async (event) => {
 	}
 
 	try {
-		const body = await request.json();
-		const { name, compose, start, envVars, rawEnvContent, composePath, envPath } = body;
+		const { name, compose, start, envVars, rawEnvContent, composePath, envPath, secretProviderId, pull, build, forceRecreate } = body;
 
 		if (!name || typeof name !== 'string') {
 			return json({ error: 'Stack name is required' }, { status: 400 });
@@ -99,6 +131,31 @@ export const POST: RequestHandler = async (event) => {
 
 		if (!compose || typeof compose !== 'string') {
 			return json({ error: 'Compose file content is required' }, { status: 400 });
+		}
+
+		if (
+			'secretProviderId' in body &&
+			secretProviderId !== null &&
+			typeof secretProviderId !== 'number'
+		) {
+			return json({ error: 'secretProviderId must be a number or null' }, { status: 400 });
+		}
+
+		// Binding a secret provider resolves its secrets into the container at deploy;
+		// require the secrets permission so a stacks-only user can't exfiltrate a
+		// provider's secrets by binding it and reading the container env.
+		if (
+			typeof secretProviderId === 'number' &&
+			auth.authEnabled &&
+			!(await auth.can('secrets', 'view', envIdNum))
+		) {
+			return json({ error: 'Permission denied: binding a secret provider requires the secrets permission' }, { status: 403 });
+		}
+
+		// A stale provider id (provider deleted/recreated while the editor held the old
+		// list) would otherwise hit a raw foreign-key error on save (#1522).
+		if (typeof secretProviderId === 'number' && !(await secretProviderExists(secretProviderId))) {
+			return json({ error: 'The selected secret provider no longer exists. Reopen the stack and pick a current provider.' }, { status: 400 });
 		}
 
 		// If start is false, only create the compose file without deploying
@@ -128,13 +185,15 @@ export const POST: RequestHandler = async (event) => {
 				}
 			}
 
-			// Record the stack as internally created with custom paths if provided
+			// Persist the path the file was actually written to (the default location
+			// when the caller omitted composePath), not null (#1515).
 			await upsertStackSource({
 				stackName: name,
 				environmentId: envIdNum,
 				sourceType: 'internal',
-				composePath: composePath || undefined,
-				envPath: envPath || undefined
+				composePath: composePath || result.composePath || undefined,
+				envPath: envPath || undefined,
+				secretProviderId,
 			});
 
 			// Audit log
@@ -169,13 +228,54 @@ export const POST: RequestHandler = async (event) => {
 			}
 		}
 
-		// Record the stack in DB before deploying - ensures it exists even if deploy fails
+		// Record the stack in DB before deploying - ensures it exists even if deploy fails.
+		// Persist the actual written path (default location when composePath omitted), not null (#1515).
 		await upsertStackSource({
 			stackName: name,
 			environmentId: envIdNum,
 			sourceType: 'internal',
-			composePath: composePath || undefined,
-			envPath: envPath || undefined
+			composePath: composePath || saveResult.composePath || undefined,
+			envPath: envPath || undefined,
+			secretProviderId
+		});
+
+		// This endpoint has no requireComposeFile() call to hash the way the
+		// dedicated deploy endpoint does -- compose and the effective env are
+		// already sitting in the request body. rawEnvContent, when given, is the
+		// authoritative non-secret source (see the persistence logic above); the
+		// envVars array's secrets always layer on top of it.
+		const effectiveEnvVars: Record<string, string> = {};
+		if (rawEnvContent) {
+			Object.assign(effectiveEnvVars, parseEnvFileContent(rawEnvContent, name));
+		}
+		if (Array.isArray(envVars)) {
+			for (const v of envVars) {
+				if (v && typeof v.key === 'string' && typeof v.value === 'string' && (!rawEnvContent || v.isSecret)) {
+					effectiveEnvVars[v.key] = v.value;
+				}
+			}
+		}
+
+		// Build/pull/forceRecreate come from the caller (StackModal's "Create & Start"
+		// popover, see RedeployPopover) -- previously this endpoint always deployed with
+		// build:false and no pullPolicy regardless of what the compose file needed, so a
+		// service with a `build:` section silently never built on first start.
+		const pullOpt = !!pull;
+		const buildOpt = !!build;
+		const forceRecreateOpt = !!forceRecreate;
+
+		const recorder = await createRunRecorder({
+			stackName: name,
+			envId: envIdNum ?? null,
+			userId: auth.user?.id,
+			triggeredBy: 'manual',
+			options: { pull: pullOpt, build: buildOpt, forceRecreate: forceRecreateOpt },
+			composeHash: hashComposeContent(compose),
+			envHash: hashEnvFingerprint(effectiveEnvVars),
+			// Same merged set passed to envHash above -- also the redaction list end()
+			// applies to the stored error text, so a leaked env value never reaches
+			// errorMessage on schedule_executions.
+			secrets: Object.values(effectiveEnvVars)
 		});
 
 		// Deploy via SSE to keep connection alive during long operations
@@ -185,9 +285,21 @@ export const POST: RequestHandler = async (event) => {
 					name,
 					compose,
 					envId: envIdNum,
+					forceRecreate: forceRecreateOpt,
+					build: buildOpt,
+					// pullPolicy undefined (pull unchecked) also skips deployStack's post-deploy
+					// reconcileStackPendingUpdates() call -- accepted tradeoff, not a bug.
+					pullPolicy: pullOpt ? 'always' : undefined,
 					composePath: composePath || undefined,
-					envPath: envPath || undefined
+					envPath: envPath || undefined,
+					onLine: (line) => send('progress', { type: 'line', line })
 				});
+
+				// F4 fix: deployStack resolves the bound secret provider's values
+				// internally, AFTER `recorder` above was already built from the DB-only
+				// `effectiveEnvVars`. Feed the provider-resolved values in now, before
+				// createJobResponse calls recorder.end() below -- see deploy-run-record.ts.
+				recorder.addSecrets(result.resolvedSecrets ?? []);
 
 				if (!result.success) {
 					send('result', { success: false, error: result.error, output: result.output });
@@ -195,14 +307,16 @@ export const POST: RequestHandler = async (event) => {
 				}
 
 				// Audit log (create + deploy in one action)
-				await auditStack(event, 'deploy', name, envIdNum);
+				await auditStack(event, 'deploy', name, envIdNum, {
+					pull: pullOpt, build: buildOpt, forceRecreate: forceRecreateOpt
+				});
 
 				send('result', { success: true, started: true, output: result.output });
 			} catch (error: any) {
 				console.error('Error deploying compose stack:', error);
 				send('result', { success: false, error: error.message || 'Failed to deploy stack' });
 			}
-		}, request);
+		}, request, recorder);
 	} catch (error: any) {
 		console.error('Error creating compose stack:', error);
 		return json({ error: error.message || 'Failed to create stack' }, { status: 500 });

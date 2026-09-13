@@ -2,17 +2,32 @@ import { json } from '@sveltejs/kit';
 import { validateSnapshotId } from '$lib/server/docker-validation';
 import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
+import { requireBackups } from '$lib/server/backups/route-guards';
 import { auditBackup } from '$lib/server/audit';
 import { getBackupDestination } from '$lib/server/db';
 import { forgetSnapshot } from '$lib/server/backups';
 import { guardSnapshotEnvAccess } from '$lib/server/backups/route-guards';
 
+/**
+ * DELETE /api/backup/snapshots/{id} - Forget (delete) a snapshot
+ *
+ * @openapi
+ * summary: Forget and prune a single snapshot from a destination (destructive restic forget --prune), with a server-authoritative environment access gate
+ * path: id:string! Restic snapshot id to forget (from GET /api/backup/snapshots)
+ * query: destinationId:integer! Destination holding the snapshot (required) (from GET /api/backup/destinations)
+ * query: env:integer Optional environment id for an early enterprise access check; the authoritative gate resolves the snapshot's owning environment server-side (from GET /api/environments)
+ * resp-200: Returns { success: true } once the snapshot is forgotten and pruned
+ * resp-200-example: {"success":true}
+ * resp-400: Missing/invalid destinationId or an invalid snapshot id
+ * resp-403: Permission denied — requires "backups:manage", or no access to the snapshot's owning environment
+ * resp-404: Snapshot not found for this installation (not owned)
+ * resp-500: Failed to forget the snapshot (restic error)
+ */
 export const DELETE: RequestHandler = async (event) => {
 	const { params, url, cookies } = event;
 	const auth = await authorize(cookies);
-	if (auth.authEnabled && !await auth.can('backups', 'manage')) {
-		return json({ error: 'Permission denied' }, { status: 403 });
-	}
+	const rbacDenied = await requireBackups(auth, 'manage');
+	if (rbacDenied) return rbacDenied;
 
 	const snapshotId = params.id;
 	const invalidSnap = validateSnapshotId(snapshotId);

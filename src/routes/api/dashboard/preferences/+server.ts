@@ -48,6 +48,13 @@ async function savePrefs(userId: number | null, prefs: StoredDashboardPrefs): Pr
 	);
 }
 
+/**
+ * @openapi
+ * summary: Get the current user's dashboard preferences (grid layout, lock state, view mode)
+ * resp-200: {gridLayout:array<{}>, locked:boolean!, viewMode:string!}
+ * resp-200-example: {"gridLayout":[],"locked":false,"viewMode":"grid"}
+ * resp-500: Failed to get dashboard preferences
+ */
 export const GET: RequestHandler = async ({ cookies }) => {
 	const auth = await authorize(cookies);
 
@@ -61,6 +68,14 @@ export const GET: RequestHandler = async ({ cookies }) => {
 	}
 };
 
+/**
+ * @openapi
+ * summary: Update the current user's dashboard preferences (only provided fields are merged)
+ * body: {gridLayout:array<{}>, locked:boolean, viewMode:string}
+ * body-example: {"locked":true,"viewMode":"list"}
+ * resp-200: {gridLayout:array<{}>, locked:boolean!, viewMode:string!}
+ * resp-500: Failed to save dashboard preferences
+ */
 export const POST: RequestHandler = async ({ request, cookies }) => {
 	const auth = await authorize(cookies);
 

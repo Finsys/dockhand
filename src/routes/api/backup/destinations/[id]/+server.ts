@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
+import { requireBackups } from '$lib/server/backups/route-guards';
 import { auditBackupDestination } from '$lib/server/audit';
 import {
 	getBackupDestination,
@@ -10,7 +11,7 @@ import {
 	getBackupConfigs
 } from '$lib/server/db';
 import { registerSchedule, unregisterSchedule } from '$lib/server/scheduler';
-import { validatePolicySchedules, validateRepositoryForSave, validateFlags } from '$lib/server/backups/helpers';
+import { validatePolicySchedules, validateRepositoryForSave, validateAndSerializeFlags, parseBackupFlags } from '$lib/server/backups/helpers';
 import { destinationHasRunningBackup } from '$lib/server/backups';
 
 /**
@@ -28,14 +29,36 @@ function prepareDestination(dest: any, includeSecrets: boolean): any {
 	} else {
 		delete result.envVars;
 	}
+	// TLS certs (PEM) are never sent to the client - not even the ciphertext, and not even
+	// to a manage caller (like the password). The edit form only needs to know one IS set so
+	// it can show "leave blank to keep", so expose booleans and strip the values.
+	result.hasCacert = !!dest.cacert;
+	result.hasTlsClientCert = !!dest.tlsClientCert;
+	delete result.cacert;
+	delete result.tlsClientCert;
+	// Split the stored `flags` JSON into separate fields the edit form binds to (legacy
+	// bare strings surface as backupFlags), so the UI never parses the string-vs-JSON column.
+	const { backup, restore } = parseBackupFlags(dest.flags);
+	result.backupFlags = backup;
+	result.restoreFlags = restore;
 	return result;
 }
 
+/**
+ * GET /api/backup/destinations/{id} - Get a single backup destination
+ *
+ * @openapi
+ * summary: Fetch a single backup destination; decrypted cloud-credential env vars are only included for callers who can manage backups, and the password is always stripped
+ * description: Permission denial (403, "backups:view") is produced by the shared requireBackups route guard.
+ * path: id:integer! Backup destination id (from GET /api/backup/destinations)
+ * resp-200: The backup destination object (envVars included only for "backups:manage" callers; password always stripped)
+ * resp-400: Invalid id (not a number)
+ * resp-404: Destination not found
+ */
 export const GET: RequestHandler = async ({ params, cookies }) => {
 	const auth = await authorize(cookies);
-	if (auth.authEnabled && !await auth.can('backups', 'view')) {
-		return json({ error: 'Permission denied' }, { status: 403 });
-	}
+	const denied = await requireBackups(auth, 'view');
+	if (denied) return denied;
 
 	const id = parseInt(params.id);
 	if (isNaN(id)) return json({ error: 'Invalid ID' }, { status: 400 });
@@ -49,12 +72,26 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 	return json(prepareDestination(destination, canManage));
 };
 
+/**
+ * PUT /api/backup/destinations/{id} - Update a backup destination
+ *
+ * @openapi
+ * summary: Update a backup destination, re-validating repository and flags when supplied and re-registering maintenance schedules when policies change
+ * description: Permission denial (403, "backups:manage") is produced by the shared requireBackups route guard.
+ * path: id:integer! Backup destination id (from GET /api/backup/destinations)
+ * body: {name:string, repository:string, password:string, envVars:{}, flags:string, backupFlags:string, restoreFlags:string, hostPath:string, cacert:string, tlsClientCert:string, policies:string}
+ * body-example: {"name":"S3 Offsite (renamed)","policies":"{\"pruneEnabled\":true,\"pruneSchedule\":\"0 0 1 * *\"}"}
+ * resp-200: The updated backup destination object (password stripped, envVars echoed back to the managing caller)
+ * resp-400: Invalid input — invalid id, unsupported/SSRF-blocked repository, invalid restic flags, invalid policy cron, or switching to a local repository used by a remote-environment config
+ * resp-404: Destination not found
+ * resp-409: A backup using this destination is currently running, or a destination with the new name already exists
+ * resp-500: Update failed (persistence error)
+ */
 export const PUT: RequestHandler = async (event) => {
 	const { params, request, cookies } = event;
 	const auth = await authorize(cookies);
-	if (auth.authEnabled && !await auth.can('backups', 'manage')) {
-		return json({ error: 'Permission denied' }, { status: 403 });
-	}
+	const denied = await requireBackups(auth, 'manage');
+	if (denied) return denied;
 
 	const id = parseInt(params.id);
 	if (isNaN(id)) return json({ error: 'Invalid ID' }, { status: 400 });
@@ -82,8 +119,16 @@ export const PUT: RequestHandler = async (event) => {
 		const repoError = validateRepositoryForSave(body.repository);
 		if (repoError) return json({ error: repoError }, { status: 400 });
 	}
-	const flagError = validateFlags(body.flags);
-	if (flagError) return json({ error: flagError }, { status: 400 });
+	// Flags: prefer the split shape; fall back to a legacy `flags` string. undefined for ALL
+	// three means "don't touch flags". Validate+serialize to the JSON stored in `flags`.
+	let flagsColumn: string | null | undefined = undefined;
+	if (body.backupFlags !== undefined || body.restoreFlags !== undefined) {
+		try { flagsColumn = validateAndSerializeFlags(body.backupFlags, body.restoreFlags); }
+		catch (e) { return json({ error: e instanceof Error ? e.message : 'Invalid restic flags' }, { status: 400 }); }
+	} else if (body.flags !== undefined) {
+		try { flagsColumn = validateAndSerializeFlags(body.flags, ''); }
+		catch (e) { return json({ error: e instanceof Error ? e.message : 'Invalid restic flags' }, { status: 400 }); }
+	}
 
 	// A local-path repo is allowed on any env; a wrong-host mount fails loud via
 	// the helper's localRepoGuard at backup/restore time.
@@ -94,8 +139,10 @@ export const PUT: RequestHandler = async (event) => {
 			repository: body.repository,
 			password: body.password,
 			envVars: body.envVars !== undefined ? JSON.stringify(body.envVars) : undefined,
-			flags: body.flags,
+			flags: flagsColumn,
 			hostPath: body.hostPath,
+			cacert: body.cacert,
+			tlsClientCert: body.tlsClientCert,
 			policies: body.policies
 		});
 		if (!updated) return json({ error: 'Update failed' }, { status: 500 });
@@ -128,12 +175,24 @@ export const PUT: RequestHandler = async (event) => {
 	}
 };
 
+/**
+ * DELETE /api/backup/destinations/{id} - Delete a backup destination
+ *
+ * @openapi
+ * summary: Delete a backup destination and unregister all its maintenance and dependent backup-config schedules
+ * description: Permission denial (403, "backups:manage") is produced by the shared requireBackups route guard.
+ * path: id:integer! Backup destination id (from GET /api/backup/destinations)
+ * resp-200: Returns { success: true } once the destination is deleted
+ * resp-200-example: {"success":true}
+ * resp-400: Invalid id (not a number)
+ * resp-404: Destination not found
+ * resp-409: A backup using this destination is currently running — try again once it finishes
+ */
 export const DELETE: RequestHandler = async (event) => {
 	const { params, cookies } = event;
 	const auth = await authorize(cookies);
-	if (auth.authEnabled && !await auth.can('backups', 'manage')) {
-		return json({ error: 'Permission denied' }, { status: 403 });
-	}
+	const denied = await requireBackups(auth, 'manage');
+	if (denied) return denied;
 
 	const id = parseInt(params.id);
 	if (isNaN(id)) return json({ error: 'Invalid ID' }, { status: 400 });

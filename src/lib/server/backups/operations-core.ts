@@ -57,7 +57,7 @@ export type ExecutionStatus = 'queued' | 'running' | 'success' | 'warning' | 'fa
  * "failed" filter) speak `failed`. A concurrency reject is flagged by the caller
  * via `skipped` and lands as `skipped`. Keeping this in ONE named, testable place
  * stops a failed backup from being written as `error` — a value the schedules UI
- * doesn't recognise, which made failed backups invisible under its filter.
+ * filter does not recognise.
  */
 export function toExecutionStatus(
 	terminalStatus: TerminalState['status'],
@@ -70,17 +70,6 @@ export function toExecutionStatus(
 		case 'error':
 		case 'cancelled': return 'failed';
 	}
-}
-
-/**
- * The startup scrub: any operation still `running` when the process restarted
- * could not have completed, so it is rewritten to `stale` (distinct from
- * `error` — `error` means it ran and failed, `stale` means the process died and
- * it should just be re-run). Returns the status to write, or null to leave the
- * row untouched.
- */
-export function scrubStatus(current: OperationStatus): OperationStatus | null {
-	return current === 'running' ? 'stale' : null;
 }
 
 /**

@@ -9,11 +9,12 @@
 		open: boolean;
 		containerId: string;
 		containerName: string;
+		containerImage?: string;
 		envId?: number;
 		onclose: () => void;
 	}
 
-	let { open = $bindable(), containerId, containerName, envId, onclose }: Props = $props();
+	let { open = $bindable(), containerId, containerName, containerImage = '', envId, onclose }: Props = $props();
 
 	function handleOpenChange(isOpen: boolean) {
 		if (!isOpen) {
@@ -25,7 +26,7 @@
 <Dialog.Root bind:open onOpenChange={handleOpenChange}>
 	<Dialog.Content class="max-w-4xl h-[90vh] sm:h-[80vh] flex flex-col" onOpenAutoFocus={(e) => e.preventDefault()}>
 		<Dialog.Header>
-			<ModalHeader icon={FolderOpen} title="Browse files" name={containerName} />
+			<ModalHeader icon={FolderOpen} title="Browse files" name={containerName} iconImage={containerImage} iconName={containerName} />
 			<Dialog.Description>
 				Browse, upload, and download files from the container filesystem.
 			</Dialog.Description>

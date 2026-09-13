@@ -1,16 +1,26 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getGitStack, updateGitStack, deleteGitStack, deleteStackSource, updateStackSourceName, updateStackEnvVarsName, setStackEnvVars, getStackEnvVars, deleteStackEnvVars } from '$lib/server/db';
+import { getGitStack, updateGitStack, deleteGitStack, deleteStackSource, updateStackSourceName, updateStackEnvVarsName, setStackEnvVars, getStackEnvVars, deleteStackEnvVars, updateStackSource, secretProviderExists } from '$lib/server/db';
 import { deleteGitStackFiles, deployGitStack } from '$lib/server/git';
+import { normalizeStackBranchUpdate } from '$lib/git-stack-branch';
 import { authorize } from '$lib/server/authorize';
 import { registerSchedule, unregisterSchedule } from '$lib/server/scheduler';
 import { auditGitStack } from '$lib/server/audit';
 import { computeAuditDiff } from '$lib/utils/diff';
 import { createJobResponse } from '$lib/server/sse';
+import { allowSecretlessWebhook, webhookConfigRequiresSecret } from '$lib/server/webhook-secret-policy';
 
 // Stack name validation: must start with alphanumeric, can contain alphanumeric, hyphens, underscores
 const STACK_NAME_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/;
 
+/**
+ * @openapi
+ * summary: Get one git stack
+ * path: id:integer The git stack id
+ * resp-403: Permission denied (needs stacks:view)
+ * resp-404: Git stack not found
+ * resp-500: Failed to load the git stack
+ */
 export const GET: RequestHandler = async ({ params, cookies }) => {
 	const auth = await authorize(cookies);
 
@@ -33,6 +43,16 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 	}
 };
 
+/**
+ * @openapi
+ * summary: Update a git stack (rename, schedule, webhook, secret-provider binding)
+ * path: id:integer The git stack id
+ * body: {stackName:string, secretProviderId:integer, webhookEnabled:boolean, webhookSecret:string}
+ * resp-400: Invalid stack name, or secretProviderId is not a number/null
+ * resp-403: Permission denied (needs stacks:edit; binding a secret provider also needs secrets:view)
+ * resp-404: Git stack not found
+ * resp-500: Failed to update the git stack
+ */
 export const PUT: RequestHandler = async (event) => {
 	const { params, request, cookies } = event;
 	const auth = await authorize(cookies);
@@ -51,6 +71,31 @@ export const PUT: RequestHandler = async (event) => {
 
 		const data = await request.json();
 
+		if (
+			'secretProviderId' in data &&
+			data.secretProviderId !== null &&
+			typeof data.secretProviderId !== 'number'
+		) {
+			return json({ error: 'secretProviderId must be a number or null' }, { status: 400 });
+		}
+
+		// Binding a secret provider resolves its secrets into the container at deploy;
+		// require the secrets permission so a stacks-only user can't exfiltrate a
+		// provider's secrets by binding it and reading the container env.
+		if (
+			typeof data.secretProviderId === 'number' &&
+			auth.authEnabled &&
+			!(await auth.can('secrets', 'view', existing.environmentId || undefined))
+		) {
+			return json({ error: 'Permission denied: binding a secret provider requires the secrets permission' }, { status: 403 });
+		}
+
+		// A stale provider id (provider deleted/recreated while the editor held the old
+		// list) would otherwise hit a raw foreign-key error on save (#1522).
+		if (typeof data.secretProviderId === 'number' && !(await secretProviderExists(data.secretProviderId))) {
+			return json({ error: 'The selected secret provider no longer exists. Reopen the stack and pick a current provider.' }, { status: 400 });
+		}
+
 		// Validate stack name if it's being changed
 		if (data.stackName !== undefined) {
 			const trimmedStackName = data.stackName.trim();
@@ -67,13 +112,29 @@ export const PUT: RequestHandler = async (event) => {
 		// Evaluate the effective post-update state (PUT is partial).
 		const effWebhookEnabled = data.webhookEnabled !== undefined ? data.webhookEnabled : existing.webhookEnabled;
 		const effWebhookSecret = data.webhookSecret !== undefined ? data.webhookSecret : existing.webhookSecret;
-		if (effWebhookEnabled && !effWebhookSecret?.trim()) {
+		if (webhookConfigRequiresSecret(!!effWebhookEnabled, !!effWebhookSecret?.trim(), allowSecretlessWebhook())) {
 			return json({ error: 'A webhook secret is required when the webhook is enabled' }, { status: 400 });
 		}
 
 		const oldStackName = existing.stackName;
+
+		// Per-stack branch override is a partial update. The shared normalizer
+		// (normalizeStackBranchUpdate, src/lib/git-stack-branch.ts) encodes the
+		// API contract:
+		//   - `branch` key ABSENT  -> leave the stored value untouched;
+		//   - explicit null         -> clear the override (inherit repo default);
+		//   - blank / whitespace    -> normalised to clear;
+		//   - non-blank string      -> set the override (stored trimmed).
+		// updateGitStack writes the column only when the key is defined
+		// (`data.branch !== undefined`), so we pass `undefined` for the
+		// "absent" case to leave the stored value untouched.
+		const branchNext = normalizeStackBranchUpdate(existing.branch, data);
+		const branchValue: string | null | undefined =
+			'branch' in data ? branchNext.next : undefined;
+
 		const updated = await updateGitStack(id, {
 			stackName: data.stackName,
+			branch: branchValue,
 			composePath: data.composePath,
 			envFilePath: data.envFilePath,
 			autoUpdate: data.autoUpdate,
@@ -92,6 +153,13 @@ export const PUT: RequestHandler = async (event) => {
 		if (data.stackName && data.stackName !== oldStackName) {
 			await updateStackSourceName(oldStackName, data.stackName, existing.environmentId);
 			await updateStackEnvVarsName(oldStackName, data.stackName, existing.environmentId);
+		}
+
+		// Update secret provider binding
+		if ('secretProviderId' in data) {
+			await updateStackSource(updated.stackName, existing.environmentId, {
+				secretProviderId: data.secretProviderId ?? null
+			});
 		}
 
 		// Register or unregister schedule with croner
@@ -149,7 +217,11 @@ export const PUT: RequestHandler = async (event) => {
 		if (data.deployNow) {
 			return createJobResponse(async (send) => {
 				try {
-					const deployResult = await deployGitStack(id);
+					const deployResult = await deployGitStack(id, {
+						triggeredBy: 'manual',
+						userId: auth.user?.id,
+						onLine: (line) => send('progress', { type: 'line', line })
+					});
 					await auditGitStack(event, 'deploy', updated.id, updated.stackName, updated.environmentId);
 					send('result', {
 						...updated,
@@ -178,6 +250,14 @@ export const PUT: RequestHandler = async (event) => {
 	}
 };
 
+/**
+ * @openapi
+ * summary: Delete a git stack (removes its deploy files and stack source)
+ * path: id:integer The git stack id
+ * resp-403: Permission denied (needs stacks:delete)
+ * resp-404: Git stack not found
+ * resp-500: Failed to delete the git stack
+ */
 export const DELETE: RequestHandler = async (event) => {
 	const { params, cookies } = event;
 	const auth = await authorize(cookies);

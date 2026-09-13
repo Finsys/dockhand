@@ -66,6 +66,30 @@ export function classifyEmptyDigestImage(
 }
 
 /**
+ * Extract the per-architecture child manifest digests from a fetched manifest-list /
+ * OCI image-index body. Returns [] for anything that isn't an index (single-arch
+ * manifest, error body, garbage) - the caller treats "no children" as "no match".
+ * Pure + defensive so it can be unit-tested without touching the network (#1367).
+ */
+export function indexChildDigests(indexBody: unknown): string[] {
+	const manifests = (indexBody as { manifests?: unknown })?.manifests;
+	if (!Array.isArray(manifests)) return [];
+	return manifests
+		.map((m) => (m as { digest?: unknown })?.digest)
+		.filter((d): d is string => typeof d === 'string' && d.length > 0);
+}
+
+/**
+ * True if any of the running image's local digests is one of the index's per-arch
+ * child digests - i.e. the local image IS the current multi-arch tag, just recorded
+ * by its per-arch digest instead of the index digest (#1367).
+ */
+export function localDigestIsIndexChild(localDigests: string[], indexBody: unknown): boolean {
+	const children = indexChildDigests(indexBody);
+	return children.some((d) => localDigests.includes(d));
+}
+
+/**
  * Determine if an update should be blocked based on vulnerability criteria.
  */
 export function shouldBlockUpdate(

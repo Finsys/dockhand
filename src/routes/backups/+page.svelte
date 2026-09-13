@@ -10,6 +10,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Input } from '$lib/components/ui/input';
+	import { SnapshotLoadProgress } from '$lib/components/ui/snapshot-load-progress';
 	import * as Select from '$lib/components/ui/select';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { DataGrid } from '$lib/components/data-grid';
@@ -24,7 +25,7 @@
 	import RotateCwFadingClock from '$lib/components/icons/RotateCwFadingClock.svelte';
 	import { formatDateTime, formatRelativeTime } from '$lib/stores/settings';
 	import { currentEnvironment } from '$lib/stores/environment';
-	import { watchJob } from '$lib/utils/sse-fetch';
+	import { watchJob, readJobResponse } from '$lib/utils/sse-fetch';
 	import { getRepoTypeIcon, formatCron, retentionSummary, classifyJobResult, tagLogLine } from '$lib/utils/backup';
 	import SnapshotBrowser from '../containers/SnapshotBrowser.svelte';
 	import RestoreModal from '../containers/RestoreModal.svelte';
@@ -32,6 +33,7 @@
 	import SnapshotDiffModal from './SnapshotDiffModal.svelte';
 	import CreateBackupModal from './CreateBackupModal.svelte';
 	import EditBackupConfigModal from './EditBackupConfigModal.svelte';
+	import ContainerIcon from '$lib/components/ContainerIcon.svelte';
 
 	interface BackupConfig {
 		key: string;
@@ -106,6 +108,12 @@
 	// Snapshot counts loaded async per destination, keyed by targetName:destId
 	let snapshotCounts = $state<Map<string, number>>(new Map());
 	let snapshotCountsLoading = $state(true);
+	// Progress of the per-destination snapshot count sweep: how many destinations have
+	// responded out of the total. Drives an "X / N" indicator so a slow/unreachable
+	// repo (backend restic timeout is 5 min) shows visible progress instead of an
+	// indeterminate spinner. done === total means the sweep finished.
+	let snapshotCountsDone = $state(0);
+	let snapshotCountsTotal = $state(0);
 	// Orphan targets: found in repos but no config exists
 	interface OrphanTarget { key: string; targetName: string; type: string; destinationId: number; destinationName?: string; destinationRepository?: string; snapshotCount: number; latestSnapshot?: string; }
 	let orphanTargets = $state<OrphanTarget[]>([]);
@@ -169,6 +177,8 @@
 	let restoreSnapshotId = $state('');
 	let restoreContainerName = $state('');
 	let restoreEnvId = $state<number | undefined>(undefined);
+	let restoreDestName = $state('');
+	let restoreDestRepo = $state('');
 
 	// Snapshot diff
 	let showDiff = $state(false);
@@ -313,20 +323,38 @@
 
 	async function loadSnapshotCounts() {
 		snapshotCountsLoading = true;
+		snapshotCountsDone = 0;
+		snapshotCountsTotal = destinations.length;
 		// Live config ids per destination — a snapshot's dockhand:configid tag matching
 		// one of these belongs to a shown config; anything else is orphaned.
 		const liveConfigIds = new Set(configs.map(c => c.id));
+
+		// This install's id, fetched once: a snapshot is a LOCAL config's only when THIS
+		// instance wrote it (configid collides across installs - #1351). Formerly read from
+		// the snapshots list's X-Dockhand-Instance header, which job polling can't carry.
+		const thisInstance = await fetch('/api/backup/instance')
+			.then(r => r.ok ? r.json() : { instanceId: '' })
+			.then(d => d.instanceId || '')
+			.catch(() => '');
 
 		// Query each destination once, then split its snapshots two ways: PER CONFIG
 		// (by dockhand:configid) for the shown rows, and PER NAME for the orphan rows
 		// (snapshots whose config was deleted). The right-column count must match the
 		// expanded per-config list, so it's keyed by config, NOT by target name — two
 		// configs backing the same container to the same repo have DIFFERENT counts.
+		//
+		// Each destination updates snapshotCounts as soon as IT responds, and the
+		// "Loading" indicator clears after the FIRST one finishes - so a single slow or
+		// unreachable repo can't hold the whole list hostage for its 30s timeout. The
+		// rest keep filling in counts progressively behind the scenes.
 		await Promise.allSettled(destinations.map(async (dest) => {
 			try {
-				const res = await fetch(`/api/backup/snapshots?destinationId=${dest.id}`);
-				if (!res.ok) return;
-				const d = await res.json();
+				// Job-polling so a slow `restic snapshots` behind a proxy isn't aborted at ~15s.
+				const res = await fetch(`/api/backup/snapshots?destinationId=${dest.id}`, {
+					headers: { Accept: 'text/event-stream' }
+				});
+				const d = await readJobResponse(res);
+				if (!d || d.error) return;
 				const snaps: any[] = d.snapshots ?? d;
 				if (!Array.isArray(snaps)) return;
 
@@ -338,8 +366,9 @@
 				const perConfig = new Map<number, number>();
 				const orphanByName = new Map<string, any[]>();
 				for (const snap of snaps) {
-					const cid = Number(tagVal(snap, 'dockhand:configid='));
-					if (Number.isInteger(cid) && liveConfigIds.has(cid)) {
+					const cid = Number(tagVal(snap, "dockhand:configid="));
+					const isOwn = tagVal(snap, "dockhand:instance=") === thisInstance;
+					if (isOwn && Number.isInteger(cid) && liveConfigIds.has(cid)) {
 						perConfig.set(cid, (perConfig.get(cid) || 0) + 1);
 					} else {
 						const name = tagVal(snap, 'dockhand:name=') || 'unknown';
@@ -371,9 +400,10 @@
 				}
 				snapshotCounts = newCounts;
 				orphanTargets = newOrphans;
-			} catch {}
+			} catch {} finally { snapshotCountsDone += 1; }
 		}));
 
+		// Backstop: if there were zero destinations, nothing cleared it above.
 		snapshotCountsLoading = false;
 	}
 
@@ -384,16 +414,17 @@
 		loadingSnapshots = newLoading;
 
 		try {
-			// Query snapshots for this config's destination only (not allDestinations)
+			// Query snapshots for this config's destination only (not allDestinations).
+			// Job-polling so a slow `restic snapshots` behind a proxy isn't aborted at ~15s.
 			const snapUrl = config.isOrphan
 				? `/api/backup/snapshots?destinationId=${config.destinationId}`
 				: `/api/backup/snapshots?configId=${config.id}`;
-			const [snapRes, execRes] = await Promise.all([
-				fetch(snapUrl),
+			const [snapJson, execRes] = await Promise.all([
+				fetch(snapUrl, { headers: { Accept: 'text/event-stream' } }).then(readJobResponse),
 				config.isOrphan ? Promise.resolve(new Response('{"executions":[]}')) : fetch(`/api/schedules/executions?scheduleType=backup&scheduleId=${config.id}&limit=50`)
 			]);
-			const snapJson = await snapRes.json();
-			let snapData = snapJson.snapshots ?? snapJson;
+			const snapError = snapJson?.error;
+			let snapData = snapJson?.snapshots ?? snapJson;
 			// For orphans, filter by target name (they can span destinations).
 			if (config.isOrphan && Array.isArray(snapData)) {
 				snapData = snapData.filter((s: any) => (s.tags || []).some((t: string) => t === `dockhand:name=${config.targetName}`));
@@ -411,11 +442,11 @@
 				}));
 			}
 			const newMap = new Map(snapshotsMap);
-			if (snapRes.ok) {
+			if (!snapError) {
 				newMap.set(key, Array.isArray(snapData) ? snapData : []);
 			} else {
 				newMap.set(key, []);
-				toast.error(cleanErrorMessage(snapData.error || 'Failed to load snapshots'));
+				toast.error(cleanErrorMessage(snapError || 'Failed to load snapshots'));
 			}
 			snapshotsMap = newMap;
 
@@ -622,6 +653,8 @@
 		restoreSnapshotId = snapshot.id;
 		restoreContainerName = config.targetName;
 		restoreEnvId = config.environmentId ?? undefined;
+		restoreDestName = snapshot._destinationName ?? config.destinationName ?? '';
+		restoreDestRepo = snapshot._destinationRepository ?? config.destinationRepository ?? '';
 		showRestore = true;
 	}
 
@@ -651,11 +684,13 @@
 <div class="flex-1 min-h-0 flex flex-col gap-3 overflow-hidden">
 	<div class="shrink-0 flex flex-wrap justify-between items-center gap-3 min-h-8">
 		<PageHeader title="Backups" icon={Archive} count={filteredConfigs.length}>
-			{#if loading || snapshotCountsLoading}
+			{#if loading}
 				<span class="flex items-center gap-1.5 text-xs text-muted-foreground">
 					<Loader2 class="w-3.5 h-3.5 animate-spin" />
-					{loading ? 'Loading…' : 'Loading snapshots…'}
+					Loading…
 				</span>
+			{:else if snapshotCountsLoading}
+				<SnapshotLoadProgress done={snapshotCountsDone} total={snapshotCountsTotal} />
 			{/if}
 		</PageHeader>
 		<div class="flex flex-wrap items-center gap-2">
@@ -758,13 +793,17 @@
 			<p class="text-sm text-muted-foreground">Configure backups on individual containers or stacks via their edit modal.</p>
 		</div>
 	{:else}
+		<!-- virtualScroll is OFF here on purpose: it assumes a fixed rowHeight, but an
+		     expanded config renders a variable-height snapshot list, so the fixed-height
+		     spacers mis-size the scroll area (flicker + endless scroll). Backup configs
+		     number in the dozens, so plain rendering - the browser measures real heights -
+		     is correct and fast. -->
 		<DataGrid
 			data={filteredConfigs}
 			keyField="key"
 			gridId="backups"
 			loading={loading}
-			virtualScroll={true}
-			rowHeight={33}
+			virtualScroll={false}
 			sortState={{ field: sortField, direction: sortDirection }}
 			onSortChange={(state) => { sortField = state.field; sortDirection = state.direction; }}
 			bind:expandedKeys={expandedKeys}
@@ -787,7 +826,10 @@
 						{/if}
 					</button>
 				{:else if column.id === 'name'}
-					<span class="text-xs font-medium truncate">{config.targetName}</span>
+					<div class="flex items-center gap-1.5 min-w-0">
+						<ContainerIcon image="" name={config.targetName} class="w-3.5 h-3.5" fallbackIcon={config.type === 'stack' ? Layers : Box} showFallbackWhenOff />
+						<span class="text-xs font-medium truncate">{config.targetName}</span>
+					</div>
 				{:else if column.id === 'type'}
 					<div class="flex justify-center">
 						{#if config.type === 'container'}
@@ -1045,6 +1087,8 @@
 	destinationId={restoreDestId}
 	snapshotId={restoreSnapshotId}
 	containerName={restoreContainerName}
+	destinationName={restoreDestName}
+	destinationRepository={restoreDestRepo}
 	environmentId={restoreEnvId}
 	onDone={fetchData}
 />

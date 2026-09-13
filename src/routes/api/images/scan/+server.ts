@@ -5,7 +5,18 @@ import { inspectImage } from '$lib/server/docker';
 import { authorize } from '$lib/server/authorize';
 import { createJobResponse } from '$lib/server/sse';
 
-// POST - Start a scan (returns { jobId } for progress polling, or synchronous JSON for Accept: application/json)
+/**
+ * POST /api/images/scan - Start a vulnerability scan (SSE progress)
+ *
+ * @openapi
+ * summary: Start a vulnerability scan of an image and stream scan progress as Server-Sent Events, persisting the results
+ * query: env:integer ID of the environment the image belongs to (from GET /api/environments)
+ * body: {imageName:string!, scanner:string}
+ * body-example: {"imageName":"nginx:latest","scanner":"grype"}
+ * resp-200: A Server-Sent Events stream of scan progress, ending with a "result" event
+ * resp-400: Image name is required
+ * resp-403: Permission denied
+ */
 export const POST: RequestHandler = async ({ request, url, cookies }) => {
 	const auth = await authorize(cookies);
 
@@ -59,7 +70,21 @@ export const POST: RequestHandler = async ({ request, url, cookies }) => {
 	}, request);
 };
 
-// GET - Get cached scan results for an image
+/**
+ * GET /api/images/scan - Cached scan results for an image
+ *
+ * @openapi
+ * summary: Return the latest cached vulnerability scan for an image, resolving its tag to a SHA256 ID
+ * query: env:integer ID of the environment the image belongs to (from GET /api/environments)
+ * query: image:string! Image name or ID to look up cached results for
+ * query: scanner:string Restrict the lookup to a specific scanner (e.g. grype or trivy)
+ * resp-200: {found:boolean!, result:object}
+ * resp-200-desc: found=false when no cached scan exists; otherwise result holds the stored scan
+ * resp-200-example: {"found":true,"result":{"imageId":"sha256:abc123","scanner":"grype","summary":{"critical":0,"high":2}}}
+ * resp-400: Image name is required
+ * resp-403: Permission denied
+ * resp-500: Failed to get scan results
+ */
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	const auth = await authorize(cookies);
 

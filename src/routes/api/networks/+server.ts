@@ -5,6 +5,15 @@ import { authorize } from '$lib/server/authorize';
 import { auditNetwork } from '$lib/server/audit';
 import { hasEnvironments } from '$lib/server/db';
 
+/**
+ * @openapi
+ * summary: List Docker networks for an environment (returns an empty array when no env is given)
+ * query: env:integer Environment ID to list networks from (from GET /api/environments)
+ * resp-200: array<{Id:string!, Name:string!, Driver:string, Scope:string, Internal:boolean, Attachable:boolean}>
+ * resp-403: Permission denied, or access denied to the requested environment (enterprise)
+ * resp-404: Environment not found
+ * resp-500: Failed to list networks
+ */
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	const auth = await authorize(cookies);
 
@@ -40,6 +49,18 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 	}
 };
 
+/**
+ * @openapi
+ * summary: Create a Docker network in the given environment
+ * query: env:integer Environment ID to create the network in (from GET /api/environments)
+ * body: {name:string!, driver:string, internal:boolean, attachable:boolean, ingress:boolean, enableIPv6:boolean, options:{}, labels:{}, ipam:{driver:string, config:array<{}>, options:{}}}
+ * body-example: {"name":"app-net","driver":"bridge","attachable":true,"labels":{"project":"dockhand"}}
+ * resp-200: {success:boolean!, id:string!}
+ * resp-200-example: {"success":true,"id":"3f1c...e9"}
+ * resp-400: Network name is required
+ * resp-403: Permission denied, or access denied to the requested environment (enterprise)
+ * resp-500: Failed to create network
+ */
 export const POST: RequestHandler = async (event) => {
 	const { url, request, cookies } = event;
 	const auth = await authorize(cookies);

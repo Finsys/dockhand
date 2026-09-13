@@ -3,6 +3,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Loader2, CheckCircle, XCircle, Archive, Copy, Check, Square } from 'lucide-svelte';
+	import type { Component } from 'svelte';
 	import LogConsole from '$lib/components/LogConsole.svelte';
 
 	// Backup-only progress window: shown for the Play-on-a-config path, which has no
@@ -15,9 +16,14 @@
 		logs: string[];
 		error?: string;
 		onStop?: () => void;
+		// Optional title icon (e.g. the repo-type icon for a destination action).
+		// Defaults to the generic Archive icon when omitted.
+		icon?: Component;
 	}
 
-	let { open = $bindable(), title, status, progress = 0, logs, error, onStop }: Props = $props();
+	let { open = $bindable(), title, status, progress = 0, logs, error, onStop, icon }: Props = $props();
+
+	const TitleIcon = $derived(icon ?? Archive);
 
 	let copied = $state(false);
 
@@ -33,7 +39,7 @@
 	<Dialog.Content class="max-w-4xl h-[60vh] flex flex-col overflow-hidden" onOpenAutoFocus={(e) => e.preventDefault()}>
 		<Dialog.Header>
 			<Dialog.Title class="flex items-center gap-2">
-				<Archive class="w-5 h-5" />
+				<TitleIcon class="w-5 h-5 shrink-0" />
 				{title}
 				{#if status === 'running'}
 					<Badge variant="secondary" class="text-xs gap-1"><Loader2 class="w-3 h-3 animate-spin" />Running</Badge>

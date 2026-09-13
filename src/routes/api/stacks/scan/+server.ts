@@ -2,6 +2,16 @@ import { json, type RequestHandler } from '@sveltejs/kit';
 import { authorize } from '$lib/server/authorize';
 import { scanExternalPaths, scanPaths, detectRunningStacks } from '$lib/server/stack-scanner';
 
+/**
+ * @openapi
+ * summary: Scan a given filesystem path (or all configured external paths when none is given) for compose stacks, flagging which discovered stacks are already running
+ * body: {path:string}
+ * body-example: {"path":"/opt/stacks"}
+ * resp-200: {discovered:array<{name:string!}>!, adopted:array<string>!, skipped:array<string>!, errors:array<{path:string!, error:string!}>!}
+ * resp-200-example: {"discovered":[{"name":"web"}],"adopted":[],"skipped":[],"errors":[]}
+ * resp-403: Permission denied (requires stacks:create)
+ * resp-500: Unexpected error while scanning
+ */
 export const POST: RequestHandler = async ({ request, cookies }) => {
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !await auth.can('stacks', 'create')) {

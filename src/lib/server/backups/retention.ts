@@ -1,5 +1,5 @@
 /**
- * backups/retention.ts — pure retention planning.
+ * backups/retention.ts - pure retention planning.
  *
  * Retention decides which snapshots restic keeps and which it forgets. Two
  * safety properties matter and both live here as pure functions:
@@ -14,7 +14,7 @@
  *     that keeps nothing is always a mistake, not an intent.
  *
  * The policy is a discriminated union so contradictory settings are
- * unrepresentable — you cannot ask for "keep last 5" and "keep 6 monthly" at
+ * unrepresentable - you cannot ask for "keep last 5" and "keep 6 monthly" at
  * once; you pick one mode.
  */
 
@@ -38,10 +38,10 @@ function positiveInt(v: unknown): number | undefined {
 
 /**
  * Parse a stored retention JSON blob into a RetentionPolicy. The stored shape is
- * `{ keepLast?, keepDaily?, keepWeekly?, keepMonthly?, keepYearly? }` (legacy
- * flat form). Absent / all-zero / unparseable → `none` (the safe default), so a
- * broken config never prunes. `keepLast` takes precedence over time buckets if
- * both are somehow present (the UI only sets one).
+ * `{ keepLast?, keepDaily?, keepWeekly?, keepMonthly?, keepYearly? }`. Absent /
+ * all-zero / unparseable resolves to `none` (the safe default), so a broken config
+ * never prunes. `keepLast` takes precedence over time buckets if both are somehow
+ * present (the UI only sets one).
  */
 export function parseRetention(stored: string | null | undefined | Record<string, unknown>): RetentionPolicy {
 	let obj: Record<string, unknown>;
@@ -77,7 +77,13 @@ export function retentionActive(policy: RetentionPolicy): boolean {
  * snapshots by tag. Returns null for `none` (nothing to do). The tag filter uses
  * the STABLE per-config identity so no other config's snapshots enter the pool.
  * `--group-by ''` because helper hostnames are random and would otherwise split
- * the group; `--prune` reclaims space; `dryRun` adds `--dry-run` for the wipe check.
+ * the group; `dryRun` adds `--dry-run` for the wipe check.
+ *
+ * NO `--prune` here: post-backup retention only removes snapshot references (fast,
+ * metadata-only). `--prune` walks and repacks the whole repo (minutes to hours on a
+ * large or slow-backend repo), so it belongs in the destination's own prune schedule
+ * (default monthly), not inline on every backup. Same split as restic front-ends
+ * (backrest, zerobyte).
  *
  * @param configTagFilter e.g. `dockhand:instance=<uuid>,dockhand:configid=<id>`
  */
@@ -91,18 +97,17 @@ export function buildForgetArgs(
 	const args = ['forget'];
 	if (opts.json) args.push('--json');
 	if (opts.dryRun) args.push('--dry-run');
-	else args.push('--prune');
 	// `forget` needs an EXCLUSIVE repo lock; --retry-lock is how long it waits for a
 	// held lock before giving up. This runs inside Dockhand's per-repo serializer, so
-	// no OTHER Dockhand op in THIS instance holds the lock — the only lock that can be
+	// no OTHER Dockhand op in THIS instance holds the lock - the only lock that can be
 	// present is either (a) an ORPHAN from a backup helper that Dockhand force-removed
 	// mid-lock (its hostname is the dead container id, so restic won't age it out as
 	// stale for 30min), or (b) a live lock from a SEPARATE Dockhand instance sharing
-	// the repo. In both cases a LONG wait is wrong: for (a) we'd block ~10min (5m ×
-	// dry-run + 5m × real) on a dead owner — the actual cause of the 300s CI backup
-	// timeouts; for (b) a short wait just means retention is skipped this run (prune
-	// is non-fatal — the backup already succeeded — and it retries next schedule).
-	// So keep it short. A failed/timed-out prune becomes a WARNING, never fails the
+	// the repo. In both cases a LONG wait is wrong: for (a) we'd block ~10min (5m x
+	// dry-run + 5m x real) on a dead owner - the actual cause of the 300s CI backup
+	// timeouts; for (b) a short wait just means retention is skipped this run (forget
+	// is non-fatal - the backup already succeeded - and it retries next schedule).
+	// So keep it short. A failed/timed-out forget becomes a WARNING, never fails the
 	// backup, and never touches another instance's lock. Overridable for slow links.
 	const retryLock = process.env.RESTIC_FORGET_RETRY_LOCK || '1m';
 	args.push('--retry-lock', retryLock, '--group-by', '', '--tag', configTagFilter);

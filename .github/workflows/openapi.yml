@@ -1,0 +1,57 @@
+name: OpenAPI spec check
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/routes/**'
+      - 'src/hooks.server.ts'
+      - 'src/routes/+layout.server.ts'
+      - 'scripts/generate-openapi.ts'
+      - 'scripts/openapi/**'
+      - 'package.json'
+  pull_request:
+    paths:
+      - 'src/routes/**'
+      - 'src/hooks.server.ts'
+      - 'src/routes/+layout.server.ts'
+      - 'scripts/generate-openapi.ts'
+      - 'scripts/openapi/**'
+      - 'package.json'
+
+permissions:
+  contents: read
+
+jobs:
+  openapi-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          # Pin to 24.18.1: better-sqlite3 has no prebuilt binary for 24.19.0 and its
+          # node-gyp source build crashes on the runner (undici h1 assert), so a plain
+          # `node-version: 24` (which resolves to the latest 24.x) breaks npm install.
+          node-version: 24.18.1
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      # Hard gate: path-param consistency, query/status drift, orphan JSDoc,
+      # and spec validity (@redocly/cli lint) must all pass. Coverage stays a
+      # warning on purpose (see scripts/generate-openapi.ts) — un-annotated
+      # endpoints must not block the pipeline; they remain fully functional
+      # generic stubs.
+      - name: Generate + validate OpenAPI spec
+        run: npm run generate:openapi:check
+
+      - name: Upload generated spec (debug artifact)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: openapi-spec
+          path: static/openapi.json
+          retention-days: 7

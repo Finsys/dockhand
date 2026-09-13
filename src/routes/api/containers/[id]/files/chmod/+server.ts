@@ -4,6 +4,22 @@ import { authorize } from '$lib/server/authorize';
 import { validateDockerIdParam } from '$lib/server/docker-validation';
 import type { RequestHandler } from './$types';
 
+/**
+ * POST /api/containers/{id}/files/chmod - Change permissions of a path in a container
+ *
+ * @openapi
+ * summary: Change the mode (permissions) of a file or directory inside a container (requires the 'exec' permission)
+ * path: id:string! Container ID or name (from GET /api/containers)
+ * query: env:integer The target environment ID (omit for the local/default Docker host) (from GET /api/environments)
+ * body: {path:string!, mode:string!, recursive:boolean}
+ * body-example: {"path":"/app/entrypoint.sh","mode":"755","recursive":false}
+ * resp-200: {success:boolean!, path:string!, mode:string!, recursive:boolean!}
+ * resp-200-example: {"success":true,"path":"/app/entrypoint.sh","mode":"755","recursive":false}
+ * resp-400: Path or mode missing, an invalid chmod mode, or the container is not running
+ * resp-403: Permission denied, read-only file system, or operation not permitted
+ * resp-404: Path not found
+ * resp-500: Failed to change permissions
+ */
 export const POST: RequestHandler = async ({ params, url, cookies, request }) => {
 	const invalid = validateDockerIdParam(params.id, 'container');
 	if (invalid) return invalid;

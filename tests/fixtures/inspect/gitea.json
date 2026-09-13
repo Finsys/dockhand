@@ -1,0 +1,248 @@
+[
+    {
+        "Id": "b4aa30f522a96f195c11749d5aecc9fd4a101dceb9677d5c02e8b9eb8b0dd6f8",
+        "Created": "2026-08-16T15:05:55.489652712Z",
+        "Path": "/usr/bin/entrypoint",
+        "Args": [
+            "/bin/s6-svscan",
+            "/etc/s6"
+        ],
+        "State": {
+            "Status": "running",
+            "Running": true,
+            "Paused": false,
+            "Restarting": false,
+            "OOMKilled": false,
+            "Dead": false,
+            "Pid": 442,
+            "ExitCode": 0,
+            "Error": "",
+            "StartedAt": "2026-08-22T16:40:00.901354Z",
+            "FinishedAt": "2026-08-21T08:42:47.411649045Z"
+        },
+        "Image": "sha256:1b34baabfe2a23bc4ac5c1db5c2316c683d0afa6bc600867c9aafc02a5f9c959",
+        "ResolvConfPath": "/var/lib/docker/containers/b4aa30f522a96f195c11749d5aecc9fd4a101dceb9677d5c02e8b9eb8b0dd6f8/resolv.conf",
+        "HostnamePath": "/var/lib/docker/containers/b4aa30f522a96f195c11749d5aecc9fd4a101dceb9677d5c02e8b9eb8b0dd6f8/hostname",
+        "HostsPath": "/var/lib/docker/containers/b4aa30f522a96f195c11749d5aecc9fd4a101dceb9677d5c02e8b9eb8b0dd6f8/hosts",
+        "LogPath": "/var/lib/docker/containers/b4aa30f522a96f195c11749d5aecc9fd4a101dceb9677d5c02e8b9eb8b0dd6f8/b4aa30f522a96f195c11749d5aecc9fd4a101dceb9677d5c02e8b9eb8b0dd6f8-json.log",
+        "Name": "/semver-demo-stack-gitea-1",
+        "RestartCount": 0,
+        "Driver": "overlayfs",
+        "Platform": "linux",
+        "MountLabel": "",
+        "ProcessLabel": "",
+        "AppArmorProfile": "",
+        "ExecIDs": null,
+        "HostConfig": {
+            "Binds": null,
+            "ContainerIDFile": "",
+            "LogConfig": {
+                "Type": "json-file",
+                "Config": {
+                    "max-file": "5",
+                    "max-size": "20m"
+                }
+            },
+            "NetworkMode": "semver-demo-stack_default",
+            "PortBindings": {},
+            "RestartPolicy": {
+                "Name": "unless-stopped",
+                "MaximumRetryCount": 0
+            },
+            "AutoRemove": false,
+            "VolumeDriver": "",
+            "VolumesFrom": null,
+            "ConsoleSize": [
+                0,
+                0
+            ],
+            "CapAdd": null,
+            "CapDrop": null,
+            "CgroupnsMode": "private",
+            "Dns": [],
+            "DnsOptions": [],
+            "DnsSearch": [],
+            "ExtraHosts": [],
+            "GroupAdd": null,
+            "IpcMode": "private",
+            "Cgroup": "",
+            "Links": null,
+            "OomScoreAdj": 0,
+            "PidMode": "",
+            "Privileged": false,
+            "PublishAllPorts": false,
+            "ReadonlyRootfs": false,
+            "SecurityOpt": null,
+            "UTSMode": "",
+            "UsernsMode": "",
+            "ShmSize": 8399093760,
+            "Runtime": "runc",
+            "Isolation": "",
+            "CpuShares": 0,
+            "Memory": 0,
+            "NanoCpus": 0,
+            "CgroupParent": "",
+            "BlkioWeight": 0,
+            "BlkioWeightDevice": null,
+            "BlkioDeviceReadBps": null,
+            "BlkioDeviceWriteBps": null,
+            "BlkioDeviceReadIOps": null,
+            "BlkioDeviceWriteIOps": null,
+            "CpuPeriod": 0,
+            "CpuQuota": 0,
+            "CpuRealtimePeriod": 0,
+            "CpuRealtimeRuntime": 0,
+            "CpusetCpus": "",
+            "CpusetMems": "",
+            "Devices": null,
+            "DeviceCgroupRules": null,
+            "DeviceRequests": null,
+            "MemoryReservation": 0,
+            "MemorySwap": 0,
+            "MemorySwappiness": null,
+            "OomKillDisable": null,
+            "PidsLimit": null,
+            "Ulimits": null,
+            "CpuCount": 0,
+            "CpuPercent": 0,
+            "IOMaximumIOps": 0,
+            "IOMaximumBandwidth": 0,
+            "MaskedPaths": [
+                "/proc/acpi",
+                "/proc/asound",
+                "/proc/interrupts",
+                "/proc/kcore",
+                "/proc/keys",
+                "/proc/latency_stats",
+                "/proc/sched_debug",
+                "/proc/scsi",
+                "/proc/timer_list",
+                "/proc/timer_stats",
+                "/sys/devices/virtual/powercap",
+                "/sys/firmware"
+            ],
+            "ReadonlyPaths": [
+                "/proc/bus",
+                "/proc/fs",
+                "/proc/irq",
+                "/proc/sys",
+                "/proc/sysrq-trigger"
+            ]
+        },
+        "Storage": {
+            "RootFS": {
+                "Snapshot": {
+                    "Name": "overlayfs"
+                }
+            }
+        },
+        "Mounts": [
+            {
+                "Type": "volume",
+                "Name": "b93b00146e83907cc09b13ab2dfa145bfd18e232ba37d1e6e1cd77c5c43cfc4c",
+                "Source": "/var/lib/docker/volumes/b93b00146e83907cc09b13ab2dfa145bfd18e232ba37d1e6e1cd77c5c43cfc4c/_data",
+                "Destination": "/data",
+                "Driver": "local",
+                "Mode": "",
+                "RW": true,
+                "Propagation": ""
+            }
+        ],
+        "Config": {
+            "Hostname": "b4aa30f522a9",
+            "Domainname": "",
+            "User": "",
+            "AttachStdin": false,
+            "AttachStdout": true,
+            "AttachStderr": true,
+            "ExposedPorts": {
+                "22/tcp": {},
+                "3000/tcp": {}
+            },
+            "Tty": false,
+            "OpenStdin": false,
+            "StdinOnce": false,
+            "Env": [
+                "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                "USER=git",
+                "GITEA_CUSTOM=/data/gitea"
+            ],
+            "Cmd": [
+                "/bin/s6-svscan",
+                "/etc/s6"
+            ],
+            "Image": "gitea/gitea:1.21.0",
+            "Volumes": {
+                "/data": {}
+            },
+            "WorkingDir": "",
+            "Entrypoint": [
+                "/usr/bin/entrypoint"
+            ],
+            "Labels": {
+                "com.docker.compose.config-hash": "2ec0758dc4a920276a9710ee9d5867e7ba6f0c0da358b3f4f6474a912b80af4c",
+                "com.docker.compose.container-number": "1",
+                "com.docker.compose.depends_on": "",
+                "com.docker.compose.image": "sha256:1b34baabfe2a23bc4ac5c1db5c2316c683d0afa6bc600867c9aafc02a5f9c959",
+                "com.docker.compose.oneoff": "False",
+                "com.docker.compose.project": "semver-demo-stack",
+                "com.docker.compose.project.config_files": "/home/user/stacks/semver-stack/docker-compose.yml",
+                "com.docker.compose.project.working_dir": "/home/user/stacks/semver-stack",
+                "com.docker.compose.service": "gitea",
+                "com.docker.compose.version": "5.1.2",
+                "maintainer": "maintainers@gitea.io",
+                "org.opencontainers.image.created": "2023-11-14T14:06:39.037Z",
+                "org.opencontainers.image.description": "Git with a cup of tea! Painless self-hosted all-in-one software development service, including Git hosting, code review, team collaboration, package registry and CI/CD",
+                "org.opencontainers.image.licenses": "MIT",
+                "org.opencontainers.image.revision": "bc6477b36b774b0c4616a0ac7af76ba2d56da081",
+                "org.opencontainers.image.source": "https://github.com/go-gitea/gitea",
+                "org.opencontainers.image.title": "gitea",
+                "org.opencontainers.image.url": "https://github.com/go-gitea/gitea",
+                "org.opencontainers.image.version": "1"
+            }
+        },
+        "NetworkSettings": {
+            "SandboxID": "4db52ddc90824185fc7f9774a46919aee72a3c61f4be8afdb4225197e0a4270c",
+            "SandboxKey": "/var/run/docker/netns/4db52ddc9082",
+            "Ports": {
+                "22/tcp": null,
+                "3000/tcp": null
+            },
+            "Networks": {
+                "semver-demo-stack_default": {
+                    "IPAMConfig": null,
+                    "Links": null,
+                    "Aliases": [
+                        "semver-demo-stack-gitea-1",
+                        "gitea"
+                    ],
+                    "DriverOpts": null,
+                    "GwPriority": 0,
+                    "NetworkID": "69f26cd4ead78d2b954f663eb49c08a04b7027fb080e06d2164e56cbb527b7b2",
+                    "EndpointID": "49804adcbc2e0bca9e4b0f4199c3ab3a35e989bbf77508654be6435e22e3f6f5",
+                    "Gateway": "192.168.117.1",
+                    "IPAddress": "192.168.117.3",
+                    "MacAddress": "f6:1f:4a:64:b6:74",
+                    "IPPrefixLen": 24,
+                    "IPv6Gateway": "",
+                    "GlobalIPv6Address": "",
+                    "GlobalIPv6PrefixLen": 0,
+                    "DNSNames": [
+                        "semver-demo-stack-gitea-1",
+                        "gitea",
+                        "b4aa30f522a9"
+                    ]
+                }
+            }
+        },
+        "ImageManifestDescriptor": {
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "digest": "sha256:54dc2aeb69f37251ef9e6674e9c92c1893e0350cbefa3b0628b5dea4fdfae9da",
+            "size": 1625,
+            "platform": {
+                "architecture": "arm64",
+                "os": "linux"
+            }
+        }
+    }
+]

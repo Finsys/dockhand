@@ -4,6 +4,7 @@ import {
 	buildFormatters,
 	formatDatePartWith,
 	formatTimePartWith,
+	parseTimestamp,
 	type DateTimeFormatters
 } from '$lib/utils/date-format';
 
@@ -31,6 +32,8 @@ export interface AppSettings {
 	eventCleanupEnabled: boolean;
 	scannerCleanupCron: string;
 	scannerCleanupEnabled: boolean;
+	deployLogReconcileCron: string;
+	deployLogReconcileEnabled: boolean;
 	logBufferSizeKb: number;  // legacy, retained for migration — UI uses logMaxLines
 	logMaxLines: number;       // line-count cap for the log buffer (replaces KB-based limit)
 	defaultTimezone: string;
@@ -49,6 +52,8 @@ export interface AppSettings {
 	defaultBackupImage: string;
 	honorProxyLabels: boolean;
 	showImageChangelogLinks: boolean;
+	// Fetch app logos from selfh.st for container icons (off by default; opt-in).
+	useSelfhstIcons: boolean;
 	showWhatsNew: boolean;   // show the "What's New" modal after an upgrade (#1235)
 	protectScannerImages: boolean;
 	// Scanner Advanced settings (#1219). Empty values = use auto-detection.
@@ -74,6 +79,8 @@ const DEFAULT_SETTINGS: AppSettings = {
 	eventCleanupEnabled: true,
 	scannerCleanupCron: '0 3 * * 0',
 	scannerCleanupEnabled: true,
+	deployLogReconcileCron: '0 4 * * *',
+	deployLogReconcileEnabled: true,
 	logBufferSizeKb: 500,
 	logMaxLines: 2000,
 	defaultTimezone: 'UTC',
@@ -90,6 +97,7 @@ const DEFAULT_SETTINGS: AppSettings = {
 	labelFilterMode: 'any',
 	honorProxyLabels: true,
 	showImageChangelogLinks: true,
+	useSelfhstIcons: false,
 	showWhatsNew: true,
 	protectScannerImages: true,
 	defaultScannerNetworkMode: '',
@@ -163,6 +171,8 @@ function createSettingsStore() {
 					eventCleanupEnabled: settings.eventCleanupEnabled ?? DEFAULT_SETTINGS.eventCleanupEnabled,
 					scannerCleanupCron: settings.scannerCleanupCron ?? DEFAULT_SETTINGS.scannerCleanupCron,
 					scannerCleanupEnabled: settings.scannerCleanupEnabled ?? DEFAULT_SETTINGS.scannerCleanupEnabled,
+					deployLogReconcileCron: settings.deployLogReconcileCron ?? DEFAULT_SETTINGS.deployLogReconcileCron,
+					deployLogReconcileEnabled: settings.deployLogReconcileEnabled ?? DEFAULT_SETTINGS.deployLogReconcileEnabled,
 					logBufferSizeKb: settings.logBufferSizeKb ?? DEFAULT_SETTINGS.logBufferSizeKb,
 					logMaxLines: deriveLogMaxLines(settings),
 					defaultTimezone: settings.defaultTimezone ?? DEFAULT_SETTINGS.defaultTimezone,
@@ -181,6 +191,7 @@ function createSettingsStore() {
 					defaultBackupImage: settings.defaultBackupImage ?? DEFAULT_SETTINGS.defaultBackupImage,
 					honorProxyLabels: settings.honorProxyLabels ?? DEFAULT_SETTINGS.honorProxyLabels,
 					showImageChangelogLinks: settings.showImageChangelogLinks ?? DEFAULT_SETTINGS.showImageChangelogLinks,
+					useSelfhstIcons: settings.useSelfhstIcons ?? DEFAULT_SETTINGS.useSelfhstIcons,
 					showWhatsNew: settings.showWhatsNew ?? DEFAULT_SETTINGS.showWhatsNew,
 					protectScannerImages: settings.protectScannerImages ?? DEFAULT_SETTINGS.protectScannerImages,
 					defaultScannerNetworkMode: settings.defaultScannerNetworkMode ?? DEFAULT_SETTINGS.defaultScannerNetworkMode,
@@ -222,6 +233,8 @@ function createSettingsStore() {
 					eventCleanupEnabled: updatedSettings.eventCleanupEnabled ?? DEFAULT_SETTINGS.eventCleanupEnabled,
 					scannerCleanupCron: updatedSettings.scannerCleanupCron ?? DEFAULT_SETTINGS.scannerCleanupCron,
 					scannerCleanupEnabled: updatedSettings.scannerCleanupEnabled ?? DEFAULT_SETTINGS.scannerCleanupEnabled,
+					deployLogReconcileCron: updatedSettings.deployLogReconcileCron ?? DEFAULT_SETTINGS.deployLogReconcileCron,
+					deployLogReconcileEnabled: updatedSettings.deployLogReconcileEnabled ?? DEFAULT_SETTINGS.deployLogReconcileEnabled,
 					logBufferSizeKb: updatedSettings.logBufferSizeKb ?? DEFAULT_SETTINGS.logBufferSizeKb,
 					logMaxLines: deriveLogMaxLines(updatedSettings),
 					defaultTimezone: updatedSettings.defaultTimezone ?? DEFAULT_SETTINGS.defaultTimezone,
@@ -240,6 +253,7 @@ function createSettingsStore() {
 					defaultBackupImage: updatedSettings.defaultBackupImage ?? DEFAULT_SETTINGS.defaultBackupImage,
 					honorProxyLabels: updatedSettings.honorProxyLabels ?? DEFAULT_SETTINGS.honorProxyLabels,
 					showImageChangelogLinks: updatedSettings.showImageChangelogLinks ?? DEFAULT_SETTINGS.showImageChangelogLinks,
+					useSelfhstIcons: updatedSettings.useSelfhstIcons ?? DEFAULT_SETTINGS.useSelfhstIcons,
 					showWhatsNew: updatedSettings.showWhatsNew ?? DEFAULT_SETTINGS.showWhatsNew,
 					protectScannerImages: updatedSettings.protectScannerImages ?? DEFAULT_SETTINGS.protectScannerImages,
 					defaultScannerNetworkMode: updatedSettings.defaultScannerNetworkMode ?? DEFAULT_SETTINGS.defaultScannerNetworkMode,
@@ -288,6 +302,13 @@ function createSettingsStore() {
 			update((current) => {
 				const newSettings = { ...current, highlightUpdates: value };
 				saveSettings({ highlightUpdates: value });
+				return newSettings;
+			});
+		},
+		setUseSelfhstIcons: (value: boolean) => {
+			update((current) => {
+				const newSettings = { ...current, useSelfhstIcons: value };
+				saveSettings({ useSelfhstIcons: value });
 				return newSettings;
 			});
 		},
@@ -400,6 +421,20 @@ function createSettingsStore() {
 			update((current) => {
 				const newSettings = { ...current, scannerCleanupEnabled: value };
 				saveSettings({ scannerCleanupEnabled: value });
+				return newSettings;
+			});
+		},
+		setDeployLogReconcileCron: (value: string) => {
+			update((current) => {
+				const newSettings = { ...current, deployLogReconcileCron: value };
+				saveSettings({ deployLogReconcileCron: value });
+				return newSettings;
+			});
+		},
+		setDeployLogReconcileEnabled: (value: boolean) => {
+			update((current) => {
+				const newSettings = { ...current, deployLogReconcileEnabled: value };
+				saveSettings({ deployLogReconcileEnabled: value });
 				return newSettings;
 			});
 		},
@@ -611,7 +646,7 @@ export function formatTime(
 	date: Date | string | number,
 	options: { includeDate?: boolean; includeSeconds?: boolean } = {}
 ): string {
-	const d = date instanceof Date ? date : new Date(date);
+	const d = parseTimestamp(date);
 	const { includeDate = false, includeSeconds = false } = options;
 
 	if (includeDate) {
@@ -633,7 +668,7 @@ export function formatDateTime(date: Date | string | number, includeSeconds = fa
  * Format just the date part according to user's preferences.
  */
 export function formatDate(date: Date | string | number): string {
-	const d = date instanceof Date ? date : new Date(date);
+	const d = parseTimestamp(date);
 	return formatDatePart(d);
 }
 

@@ -16,7 +16,7 @@
 		RefreshCw,
 		Save
 	} from 'lucide-svelte';
-	import { TogglePill } from '$lib/components/ui/toggle-pill';
+	import { TogglePill, ToggleGroup } from '$lib/components/ui/toggle-pill';
 	import { canAccess, authStore } from '$lib/stores/auth';
 	import { licenseStore } from '$lib/stores/license';
 
@@ -48,6 +48,7 @@
 	let authEnabled = $state(false);
 	let authLoading = $state(true);
 	let sessionTimeout = $state(86400);
+	let neverExpire = $state(false);
 	let authSaving = $state(false);
 
 	// Roles state (shared with sub-tabs that need it)
@@ -61,6 +62,8 @@
 			if (response.ok) {
 				const data = await response.json();
 				authEnabled = data.authEnabled;
+				// 0 is the "never expire" sentinel; keep the last real timeout for the input.
+				neverExpire = data.sessionTimeout === 0;
 				sessionTimeout = data.sessionTimeout || 86400;
 			}
 		} catch (error) {
@@ -116,7 +119,7 @@
 			const response = await fetch('/api/auth/settings', {
 				method: 'PUT',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ sessionTimeout: sessionTimeout })
+				body: JSON.stringify({ sessionTimeout: neverExpire ? 0 : sessionTimeout })
 			});
 			if (response.ok) {
 				toast.success('Settings saved');
@@ -256,8 +259,19 @@
 					<div class="space-y-1.5">
 						<Label class="text-sm">Session timeout</Label>
 						<p class="text-xs text-muted-foreground mb-2">
-							How long until inactive sessions expire
+							How long a session stays valid after sign-in
 						</p>
+						<div class="flex items-center gap-2 mb-2">
+							<ToggleGroup
+								value={neverExpire ? 'never' : 'timed'}
+								options={[{ value: 'timed', label: 'Timed' }, { value: 'never', label: 'Never expire' }]}
+								onchange={(v) => neverExpire = v === 'never'}
+								disabled={!$canAccess('settings', 'edit')}
+							/>
+							<span class="text-xs text-muted-foreground">
+								{neverExpire ? 'Sessions stay signed in until logout' : 'Sessions expire after the timeout below'}
+							</span>
+						</div>
 						<div class="flex items-center gap-2">
 							<Input
 								type="number"
@@ -270,7 +284,7 @@
 									e.currentTarget.value = String(sessionTimeout);
 								}}
 								class="w-32"
-								disabled={!$canAccess('settings', 'edit')}
+								disabled={neverExpire || !$canAccess('settings', 'edit')}
 							/>
 							<span class="text-sm text-muted-foreground">seconds</span>
 							<span class="text-xs text-muted-foreground">

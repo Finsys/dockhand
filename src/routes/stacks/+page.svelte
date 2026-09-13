@@ -14,17 +14,22 @@
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import * as Popover from '$lib/components/ui/popover';
 	import MultiSelectFilter from '$lib/components/MultiSelectFilter.svelte';
-	import { Play, Square, Trash2, Plus, ArrowBigDown, Search, Pencil, ExternalLink, GitBranch, RefreshCw, Loader2, FileCode, FileText, FileOutput, Box, RotateCcw, ScrollText, Terminal, Eye, Network, HardDrive, Heart, HeartPulse, HeartOff, ChevronsUpDown, ChevronsDownUp, Rocket, AlertTriangle, X, Layers, Pause, CircleDashed, Skull, FolderOpen, Variable, Clock, RotateCw, Import, Ship, Cable, LayoutPanelLeft, Rows3, GripVertical, Globe, CircleArrowUp, NotepadText } from 'lucide-svelte';
+	import { Play, Square, Trash2, Plus, ArrowBigDown, Search, Pencil, ExternalLink, GitBranch, RefreshCw, Loader2, FileCode, FileText, FileOutput, Box, RotateCcw, ScrollText, Terminal, Eye, Network, HardDrive, Heart, HeartPulse, HeartOff, ChevronsUpDown, ChevronsDownUp, Rocket, AlertTriangle, X, Layers, Pause, CircleDashed, Skull, FolderOpen, Variable, Clock, RotateCw, Import, Ship, Cable, LayoutPanelLeft, Rows3, GripVertical, Globe, CircleArrowUp, NotepadText, Tag, Copy, Check } from 'lucide-svelte';
 	import { formatPorts } from '$lib/utils/port-format';
 	import { parseCustomUrl } from '$lib/utils/custom-url';
 	import { extractTraefikUrls } from '$lib/utils/traefik-urls';
 	import { resolveChangelogUrl } from '$lib/utils/changelog-url';
 	import { extractPangolinUrls } from '$lib/utils/pangolin-urls';
+	import { extractCaddyUrls } from '$lib/utils/caddy-urls';
 	import { appSettings } from '$lib/stores/settings';
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
+	import StackIcon from '$lib/components/StackIcon.svelte';
+	import ContainerIcon from '$lib/components/ContainerIcon.svelte';
 	import BatchOperationModal from '$lib/components/BatchOperationModal.svelte';
-	import type { ComposeStackInfo, ContainerStats } from '$lib/types';
+	import type { ComposeStackInfo, ContainerStats, StackContainer } from '$lib/types';
 	import StackModal from './StackModal.svelte';
+	import DeleteStackModal from './DeleteStackModal.svelte';
+	import ComposeOutputModal from './ComposeOutputModal.svelte';
 	import GitSourceBadge from './GitSourceBadge.svelte';
 	import GitStackModal from './GitStackModal.svelte';
 	import ImportStackModal from './ImportStackModal.svelte';
@@ -34,6 +39,9 @@
 	import FileBrowserModal from '../containers/FileBrowserModal.svelte';
 	import BatchUpdateModal from '../containers/BatchUpdateModal.svelte';
 	import CheckUpdatesButton from '$lib/components/CheckUpdatesButton.svelte';
+	import DismissUpdatesButton from '$lib/components/DismissUpdatesButton.svelte';
+	import VersionUpdateBadge from '$lib/components/VersionUpdateBadge.svelte';
+	import VersionUpdateModal from '$lib/components/VersionUpdateModal.svelte';
 	import LogsPanel from '../logs/LogsPanel.svelte';
 	import { currentEnvironment, environments, appendEnvParam, clearStaleEnvironment } from '$lib/stores/environment';
 	import { onDockerEvent, isContainerListChange } from '$lib/stores/events';
@@ -46,8 +54,10 @@
 	import { ErrorDialog } from '$lib/components/ui/error-dialog';
 	import { formatHostPortUrl } from '$lib/utils/url';
 	import { formatBytes, formatBytesCompact } from '$lib/utils/format';
+	import { copyToClipboard } from '$lib/utils/clipboard';
+	import { effectiveStackBranch } from '$lib/git-stack-branch';
 
-	type SortField = 'name' | 'containers' | 'status' | 'cpu' | 'memory';
+	type SortField = 'name' | 'containers' | 'status' | 'cpu' | 'memory' | 'diskRead' | 'diskWrite' | 'netRx' | 'netTx';
 	type SortDirection = 'asc' | 'desc';
 
 	let stacks = $state<ComposeStackInfo[]>([]);
@@ -55,11 +65,26 @@
 	// rate-limited), with the error text for the tooltip — session-only (#1255).
 	let failedUpdateCheckIds = $state<Set<string>>(new Set());
 	let failedUpdateCheckErrors = $state<Map<string, string>>(new Map());
-	let stackSources = $state<Record<string, { sourceType: string; composePath?: string | null; repository?: any; gitStack?: any }>>({});
+	let stackSources = $state<Record<string, { sourceType: string; composePath?: string | null; repository?: any; gitStack?: any; icon?: string | null }>>({});
 	let stackEnvVarCounts = $state<Record<string, number>>({});
 	let gitStacks = $state<any[]>([]);
+	let copiedWebhookStackId = $state<number | null>(null);
+
+	function copyWebhookUrl(stackId: number) {
+		const url = `${window.location.origin}/api/git/stacks/${stackId}/webhook`;
+		copyToClipboard(url).then((ok) => {
+			if (!ok) return;
+			copiedWebhookStackId = stackId;
+			setTimeout(() => {
+				if (copiedWebhookStackId === stackId) copiedWebhookStackId = null;
+			}, 2000);
+		});
+	}
 	let gitRepositories = $state<any[]>([]);
 	let gitCredentials = $state<any[]>([]);
+	// User-set per-container icon overrides for the current env (name -> icon), so a
+	// stack's expanded container list shows the same custom icons as the containers page (#1471).
+	let iconOverrides = $state<Record<string, string>>({});
 	let containerStats = $state<Map<string, ContainerStats>>(new Map());
 	let containerStatsHistory = $state<Map<string, { cpu: number[]; mem: number[]; netRx: number[]; netTx: number[]; diskR: number[]; diskW: number[] }>>(new Map());
 	let statsUpdateCount = $state(0); // Force reactivity counter
@@ -79,6 +104,12 @@
 	let showBatchUpdateModal = $state(false);
 	let singleUpdateContainerId = $state<string | null>(null);
 	let singleUpdateContainerName = $state<string | null>(null);
+
+	// Version-update (semver) release-notes modal — opened from a container's Tag badge.
+	let versionModalContainer = $state<StackContainer | null>(null);
+	function openVersionModal(container: StackContainer) {
+		versionModalContainer = container;
+	}
 	let envHasScanning = $state(false);
 	let envVulnerabilityCriteria = $state<'never' | 'any' | 'critical_high' | 'critical' | 'more_than_current'>('never');
 
@@ -351,6 +382,7 @@
 	const stackStatusTypes = [
 		{ value: 'running', label: 'Running', icon: Play, color: 'text-emerald-500' },
 		{ value: 'partial', label: 'Partial', icon: CircleDashed, color: 'text-amber-500' },
+		{ value: 'restarting', label: 'Restarting', icon: RotateCw, color: 'text-orange-500' },
 		{ value: 'stopped', label: 'Stopped', icon: Square, color: 'text-rose-500' },
 		{ value: 'created', label: 'Created', icon: CircleDashed, color: 'text-slate-500' },
 		{ value: 'not deployed', label: 'Not deployed', icon: Rocket, color: 'text-violet-500' }
@@ -477,15 +509,75 @@
 	}
 
 	// Confirmation popover state
-	let confirmDeleteName = $state<string | null>(null);
 	let confirmStopName = $state<string | null>(null);
 	let confirmDownName = $state<string | null>(null);
-	let deleteVolumes = $state(false);
+	// Delete-stack modal state (replaces the old confirm popover — shows the exact dirs
+	// that will be removed and offers "remove stack" vs "remove stack + files").
+	let showDeleteModal = $state(false);
+	let deleteStackName = $state('');
 
 	// Stack operation loading state
 	let stackActionLoading = $state<string | null>(null);
 	let restartPopoverOpen = $state<Record<string, boolean>>({});
 	let stackDownLoading = $state<string | null>(null);
+
+	// Live compose output window: shown while a stack action (start/stop/restart/
+	// redeploy/down) runs, fed line-by-line via readJobResponse's onLine callback.
+	let composeOutputOpen = $state(false);
+	let composeOutputTitle = $state('');
+	let composeOutputLines = $state<string[]>([]);
+	let composeOutputRunning = $state(false);
+	// Status-line inputs, measured here in the browser (wall-clock incl. the round
+	// trip through fetch/polling) — NOT the server-side execution time recorded
+	// separately for the deploy-history dataset (Task 10). Different path, different
+	// number; don't conflate the two.
+	let composeOutputStartedAt = 0;
+	let composeOutputOk = $state<boolean | undefined>(undefined);
+	let composeOutputMs = $state<number | undefined>(undefined);
+	let composeOutputExitCode = $state<number | undefined>(undefined);
+
+	let composeOutputStackName = $state<string | undefined>(undefined);
+
+	function startComposeOutput(title: string, stackName?: string) {
+		composeOutputTitle = title;
+		composeOutputStackName = stackName;
+		composeOutputLines = [];
+		composeOutputRunning = true;
+		composeOutputOpen = true;
+		composeOutputStartedAt = Date.now();
+		composeOutputOk = undefined;
+		composeOutputMs = undefined;
+		composeOutputExitCode = undefined;
+	}
+
+	function appendComposeOutputLine(line: string) {
+		composeOutputLines = [...composeOutputLines, line];
+	}
+
+	// Called once the job settles. Older agent versions (pre line-streaming, see Task 5)
+	// only return a batched `output` string — show it if nothing arrived incrementally.
+	// `ok`/`exitCode` come from the job result (or `false`/undefined on a thrown
+	// network error, from the catch blocks below) — the payload does not carry an
+	// exit code today (StackOperationResult has no such field, see stacks.ts), so
+	// `exitCode` stays undefined in practice until the server starts sending one.
+	function finishComposeOutput(output: string | undefined, ok: boolean, exitCode?: number, error?: string) {
+		composeOutputRunning = false;
+		composeOutputOk = ok;
+		composeOutputMs = Date.now() - composeOutputStartedAt;
+		composeOutputExitCode = exitCode;
+		if (composeOutputLines.length === 0 && output) {
+			composeOutputLines = output.split('\n');
+		}
+		// On failure the reason lives in `error` (compose's stderr), which the streamed
+		// log lines don't carry -- append it so the modal shows WHY it failed instead of
+		// ending on a bare "Started" with the cause hidden in a separate dialog.
+		if (!ok && error) {
+			const errLines = error.split('\n').map((l) => l.trimEnd()).filter(Boolean);
+			const already = new Set(composeOutputLines.map((l) => l.trim()));
+			const fresh = errLines.filter((l) => !already.has(l.trim()));
+			if (fresh.length > 0) composeOutputLines = [...composeOutputLines, ...fresh];
+		}
+	}
 
 	// Container-level confirmation popover state
 	let confirmStopContainerId = $state<string | null>(null);
@@ -575,6 +667,18 @@
 					const memA = getStackStats(a)?.memoryUsage ?? -1;
 					const memB = getStackStats(b)?.memoryUsage ?? -1;
 					cmp = memA - memB;
+					break;
+				case 'diskRead':
+					cmp = (getStackStats(a)?.blockRead ?? -1) - (getStackStats(b)?.blockRead ?? -1);
+					break;
+				case 'diskWrite':
+					cmp = (getStackStats(a)?.blockWrite ?? -1) - (getStackStats(b)?.blockWrite ?? -1);
+					break;
+				case 'netRx':
+					cmp = (getStackStats(a)?.networkRx ?? -1) - (getStackStats(b)?.networkRx ?? -1);
+					break;
+				case 'netTx':
+					cmp = (getStackStats(a)?.networkTx ?? -1) - (getStackStats(b)?.networkTx ?? -1);
 					break;
 			}
 			// Secondary sort by name for stability when primary values are equal
@@ -768,7 +872,14 @@
 	// True when any stack container shows an update-available (amber) or
 	// check-failed (red) indicator — gates the "dismiss indicators" button.
 	const hasUpdateIndicators = $derived(
-		stacks.some((s) => s.updatesAvailable) || failedUpdateCheckIds.size > 0
+		stacks.some((s) => s.updatesAvailable || (s.newerVersionCount ?? 0) > 0) ||
+			failedUpdateCheckIds.size > 0
+	);
+	// Counts for the compact dismiss: stacks with a digest update, and total containers
+	// with a newer version tag - each shown with its icon, mirroring the containers page.
+	const stackDigestCount = $derived(stacks.filter((s) => s.updatesAvailable).length);
+	const stackNewerVersionCount = $derived(
+		stacks.reduce((sum, s) => sum + (s.newerVersionCount ?? 0), 0)
 	);
 
 	// Dismiss both the amber "update available" and red "check failed" indicators.
@@ -795,11 +906,13 @@
 			loading = true;
 		}
 		try {
-			const [stacksRes, sourcesRes, gitStacksRes] = await Promise.all([
+			const [stacksRes, sourcesRes, gitStacksRes, iconsRes] = await Promise.all([
 				fetch(appendEnvParam('/api/stacks', envId)),
 				fetch(appendEnvParam('/api/stacks/sources', envId)),
-				fetch(appendEnvParam('/api/git/stacks', envId))
+				fetch(appendEnvParam('/api/git/stacks', envId)),
+				fetch(appendEnvParam('/api/container-icons', envId))
 			]);
+			iconOverrides = iconsRes.ok ? await iconsRes.json() : {};
 
 			// Handle stale environment ID (e.g., after database reset)
 			if (stacksRes.status === 404 && envId) {
@@ -851,9 +964,15 @@
 
 			stacks = dockerStacks;
 
-			// Fetch env var counts for internal and git stacks (in background, don't block UI)
-			const allStackNames = stacks.map(s => s.name);
-			fetchEnvVarCounts(allStackNames, sourcesData);
+			// Env-var counts come from /api/stacks/sources (envVarCount per stack) - no
+			// per-stack /env fetch needed for the list badge.
+			const counts: Record<string, number> = {};
+			for (const [name, src] of Object.entries(sourcesData as Record<string, { envVarCount?: number }>)) {
+				if (src && typeof src.envVarCount === 'number' && src.envVarCount > 0) {
+					counts[name] = src.envVarCount;
+				}
+			}
+			stackEnvVarCounts = counts;
 		} catch (error) {
 			console.error('Failed to fetch stacks:', error);
 			toast.error('Failed to load stacks');
@@ -861,39 +980,6 @@
 			loading = false;
 			lastLoadedEnvId = envId;
 		}
-	}
-
-	async function fetchEnvVarCounts(stackNames: string[], sources: Record<string, any>) {
-		// Only fetch for stacks that can have env vars (internal or git)
-		const stacksToFetch = stackNames.filter(name => {
-			const source = sources[name];
-			return source && (source.sourceType === 'internal' || source.sourceType === 'git');
-		});
-
-		if (stacksToFetch.length === 0) {
-			stackEnvVarCounts = {};
-			return;
-		}
-
-		const counts: Record<string, number> = {};
-
-		// Fetch in parallel with error handling
-		await Promise.all(stacksToFetch.map(async (stackName) => {
-			try {
-				const response = await fetch(appendEnvParam(`/api/stacks/${encodeURIComponent(stackName)}/env`, envId));
-				if (response.ok) {
-					const data = await response.json();
-					const varCount = data.variables?.length || 0;
-					if (varCount > 0) {
-						counts[stackName] = varCount;
-					}
-				}
-			} catch (e) {
-				// Ignore errors for individual stack env var fetches
-			}
-		}));
-
-		stackEnvVarCounts = counts;
 	}
 
 	function getStackSource(stackName: string) {
@@ -917,7 +1003,7 @@
 		return stack.status;
 	}
 
-	async function openGitModal(gitStack?: any) {
+	async function openGitModal(gitStack: any = undefined) {
 		editingGitStack = gitStack || null;
 		// Fetch repositories and credentials before opening modal
 		try {
@@ -938,11 +1024,18 @@
 	async function startStack(name: string) {
 		operationError = null;
 		stackActionLoading = name;
+		startComposeOutput(`Starting ${name}`, name);
 		try {
 			const response = await fetch(appendEnvParam(`/api/stacks/${encodeURIComponent(name)}/start`, envId), { method: 'POST' });
-			const data = await readJobResponse(response);
+			const data = await readJobResponse(response, appendComposeOutputLine);
+			finishComposeOutput(
+				typeof data.output === 'string' ? data.output : undefined,
+				Boolean(data.success),
+				typeof data.exitCode === 'number' ? data.exitCode : undefined,
+				typeof data.error === 'string' ? data.error : undefined
+			);
 			if (!data.success) {
-				showErrorDialog(`Failed to start ${name}`, data.error || 'Failed to start stack');
+				toast.error(`Failed to start ${name}`);
 				return;
 			}
 			toast.success(`Started ${name}`);
@@ -950,7 +1043,8 @@
 		} catch (error) {
 			console.error('Failed to start stack:', error);
 			const errorMsg = error instanceof Error ? error.message : 'Failed to start stack';
-			showErrorDialog(`Failed to start ${name}`, errorMsg);
+			finishComposeOutput(undefined, false, undefined, errorMsg);
+			toast.error(`Failed to start ${name}`);
 		} finally {
 			stackActionLoading = null;
 		}
@@ -959,11 +1053,18 @@
 	async function stopStack(name: string) {
 		operationError = null;
 		stackActionLoading = name;
+		startComposeOutput(`Stopping ${name}`, name);
 		try {
 			const response = await fetch(appendEnvParam(`/api/stacks/${encodeURIComponent(name)}/stop`, envId), { method: 'POST' });
-			const data = await readJobResponse(response);
+			const data = await readJobResponse(response, appendComposeOutputLine);
+			finishComposeOutput(
+				typeof data.output === 'string' ? data.output : undefined,
+				Boolean(data.success),
+				typeof data.exitCode === 'number' ? data.exitCode : undefined,
+				typeof data.error === 'string' ? data.error : undefined
+			);
 			if (!data.success) {
-				showErrorDialog(`Failed to stop ${name}`, data.error || 'Failed to stop stack');
+				toast.error(`Failed to stop ${name}`);
 				return;
 			}
 			toast.success(`Stopped ${name}`);
@@ -971,24 +1072,34 @@
 		} catch (error) {
 			console.error('Failed to stop stack:', error);
 			const errorMsg = error instanceof Error ? error.message : 'Failed to stop stack';
-			showErrorDialog(`Failed to stop ${name}`, errorMsg);
+			finishComposeOutput(undefined, false, undefined, errorMsg);
+			toast.error(`Failed to stop ${name}`);
 		} finally {
 			stackActionLoading = null;
 		}
 	}
 
-	async function restartStack(name: string, mode: 'restart' | 'recreate' = 'restart') {
+	async function restartStack(name: string, mode: 'restart' | 'ordered' | 'recreate' = 'restart') {
 		operationError = null;
 		stackActionLoading = name;
+		startComposeOutput(mode === 'recreate' ? `Recreating ${name}` : `Restarting ${name}`, name);
 		try {
 			let url = appendEnvParam(`/api/stacks/${encodeURIComponent(name)}/restart`, envId);
-			if (mode === 'recreate') {
-				url += (url.includes('?') ? '&' : '?') + 'mode=recreate';
+			if (mode === 'recreate' || mode === 'ordered') {
+				url += (url.includes('?') ? '&' : '?') + `mode=${mode}`;
 			}
 			const response = await fetch(url, { method: 'POST' });
-			const data = await readJobResponse(response);
+			const data = await readJobResponse(response, appendComposeOutputLine);
+			finishComposeOutput(
+				typeof data.output === 'string' ? data.output : undefined,
+				Boolean(data.success),
+				typeof data.exitCode === 'number' ? data.exitCode : undefined,
+				typeof data.error === 'string' ? data.error : undefined
+			);
 			if (!data.success) {
-				showErrorDialog(`Failed to restart ${name}`, data.error || 'Failed to restart stack');
+				// The reason is now in the output modal's log; a toast points the user to it
+				// without a second, redundant error dialog stacked over the same modal.
+				toast.error(`Failed to restart ${name}`);
 				return;
 			}
 			toast.success(mode === 'recreate' ? `Recreated ${name}` : `Restarted ${name}`);
@@ -996,7 +1107,8 @@
 		} catch (error) {
 			console.error('Failed to restart stack:', error);
 			const errorMsg = error instanceof Error ? error.message : 'Failed to restart stack';
-			showErrorDialog(`Failed to restart ${name}`, errorMsg);
+			finishComposeOutput(undefined, false, undefined, errorMsg);
+			toast.error(`Failed to restart ${name}`);
 		} finally {
 			stackActionLoading = null;
 		}
@@ -1005,15 +1117,32 @@
 	async function redeployStack(name: string, options: { pull: boolean; build: boolean; forceRecreate: boolean }) {
 		operationError = null;
 		stackActionLoading = name;
+		startComposeOutput(`Redeploying ${name}`, name);
+		// Record which redeploy options were chosen so the log shows them (they are not
+		// otherwise visible once the popover closes).
+		const chosen = [
+			options.pull && 'pull images',
+			options.build && 'build images',
+			options.forceRecreate && 'force recreate'
+		].filter(Boolean);
+		appendComposeOutputLine(`Options: ${chosen.length ? chosen.join(', ') : 'none'}`);
 		try {
 			const response = await fetch(appendEnvParam(`/api/stacks/${encodeURIComponent(name)}/deploy`, envId), {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify(options)
 			});
-			const data = await readJobResponse(response);
+			const data = await readJobResponse(response, appendComposeOutputLine);
+			finishComposeOutput(
+				typeof data.output === 'string' ? data.output : undefined,
+				Boolean(data.success),
+				typeof data.exitCode === 'number' ? data.exitCode : undefined,
+				typeof data.error === 'string' ? data.error : undefined
+			);
 			if (!data.success) {
-				showErrorDialog(`Failed to redeploy ${name}`, data.error || 'Failed to redeploy stack');
+				// The compose output window carries the full log (incl. the failure reason)
+				// plus the failed status, so a separate error dialog would duplicate it.
+				toast.error(`Failed to redeploy ${name}`);
 				return;
 			}
 			toast.success(`Redeployed ${name}`);
@@ -1021,7 +1150,10 @@
 		} catch (error) {
 			console.error('Failed to redeploy stack:', error);
 			const errorMsg = error instanceof Error ? error.message : 'Failed to redeploy stack';
-			showErrorDialog(`Failed to redeploy ${name}`, errorMsg);
+			// A throw before any output streams would otherwise leave the window with
+			// only the Options line and a red status, so put the error text in it.
+			finishComposeOutput(undefined, false, undefined, errorMsg);
+			toast.error(`Failed to redeploy ${name}`);
 		} finally {
 			stackActionLoading = null;
 		}
@@ -1031,11 +1163,18 @@
 		operationError = null;
 		stackActionLoading = name;
 		stackDownLoading = name;
+		startComposeOutput(`Bringing down ${name}`, name);
 		try {
 			const response = await fetch(appendEnvParam(`/api/stacks/${encodeURIComponent(name)}/down`, envId), { method: 'POST' });
-			const data = await readJobResponse(response);
+			const data = await readJobResponse(response, appendComposeOutputLine);
+			finishComposeOutput(
+				typeof data.output === 'string' ? data.output : undefined,
+				Boolean(data.success),
+				typeof data.exitCode === 'number' ? data.exitCode : undefined,
+				typeof data.error === 'string' ? data.error : undefined
+			);
 			if (!data.success) {
-				showErrorDialog(`Failed to bring down ${name}`, data.error || 'Failed to bring down stack');
+				toast.error(`Failed to bring down ${name}`);
 				return;
 			}
 			toast.success(`Brought down ${name}`);
@@ -1043,7 +1182,8 @@
 		} catch (error) {
 			console.error('Failed to bring down stack:', error);
 			const errorMsg = error instanceof Error ? error.message : 'Failed to bring down stack';
-			showErrorDialog(`Failed to bring down ${name}`, errorMsg);
+			finishComposeOutput(undefined, false, undefined, errorMsg);
+			toast.error(`Failed to bring down ${name}`);
 		} finally {
 			stackActionLoading = null;
 			stackDownLoading = null;
@@ -1063,12 +1203,10 @@
 		}
 	}
 
-	async function removeStack(name: string) {
+	async function removeStack(name: string, opts: { deleteFiles: boolean; deleteVolumes: boolean }) {
 		operationError = null;
-		const withVolumes = deleteVolumes;
-		deleteVolumes = false;
 		try {
-			const params = `force=true${withVolumes ? '&volumes=true' : ''}`;
+			const params = `force=true${opts.deleteVolumes ? '&volumes=true' : ''}${opts.deleteFiles ? '' : '&files=false'}`;
 			const response = await fetch(appendEnvParam(`/api/stacks/${encodeURIComponent(name)}?${params}`, envId), { method: 'DELETE' });
 			if (!response.ok) {
 				const data = await response.json();
@@ -1076,7 +1214,8 @@
 				showErrorDialog(`Failed to remove ${name}`, errorMsg);
 				return;
 			}
-			toast.success(`Removed ${name}${withVolumes ? ' (volumes deleted)' : ''}`);
+			const bits = [opts.deleteFiles ? 'files deleted' : 'files kept', ...(opts.deleteVolumes ? ['volumes deleted'] : [])];
+			toast.success(`Removed ${name} (${bits.join(', ')})`);
 			await fetchStacks();
 		} catch (error) {
 			console.error('Failed to remove stack:', error);
@@ -1095,10 +1234,13 @@
 		editingStackName = name;
 		stackModalReadonly = true;
 		const src = getStackSource(name);
+		// Effective branch: per-stack override wins, else repository default
+		// (shared with the server-side resolver in src/lib/git-stack-branch.ts).
+		const eff = effectiveStackBranch(src?.gitStack ?? null, src?.repository ?? undefined);
 		stackModalGitInfo = {
 			commit: src?.gitStack?.lastCommit || undefined,
 			url: src?.repository?.url || undefined,
-			branch: src?.repository?.branch || undefined
+			branch: eff.branch
 		};
 		showEditModal = true;
 	}
@@ -1112,6 +1254,8 @@
 				return `${base} bg-red-200 dark:bg-red-800 text-red-900 dark:text-red-100`;
 			case 'partial':
 				return `${base} bg-amber-200 dark:bg-amber-800 text-amber-900 dark:text-amber-100`;
+			case 'restarting':
+				return `${base} bg-orange-200 dark:bg-orange-800 text-orange-900 dark:text-orange-100`;
 			case 'created':
 				return `${base} bg-slate-200 dark:bg-slate-700 text-slate-900 dark:text-slate-100`;
 			case 'not deployed':
@@ -1470,18 +1614,12 @@
 					fetchStacks();
 				}}
 			/>
-			{#if hasUpdateIndicators}
-				<Button
-					size="sm"
-					variant="ghost"
-					onclick={dismissStackUpdates}
-					class="h-8 gap-1 text-muted-foreground hover:text-destructive"
-					title="Dismiss all update indicators"
-				>
-					<X class="w-3.5 h-3.5" />
-					Clear
-				</Button>
-			{/if}
+			<DismissUpdatesButton
+				show={hasUpdateIndicators}
+				digestCount={stackDigestCount}
+				newerVersionCount={stackNewerVersionCount}
+				onDismiss={dismissStackUpdates}
+			/>
 			<Button
 				size="sm"
 				variant="outline"
@@ -1667,7 +1805,10 @@
 				{@const source = getStackSource(stack.name)}
 				{#if column.id === 'name'}
 					{@const systemType = getStackSystemType(stack)}
-					<span class="flex items-center gap-1 min-w-0 w-full">
+					<span class="flex items-center gap-1.5 min-w-0 w-full">
+						{#if source.icon}
+							<StackIcon icon={source.icon} stackName={stack.name} envId={$currentEnvironment?.id ?? null} class="w-4 h-4 shrink-0 text-muted-foreground" />
+						{/if}
 						<button
 							type="button"
 							class="font-medium text-xs hover:text-primary hover:underline cursor-pointer text-left truncate min-w-0"
@@ -1715,6 +1856,8 @@
 							<GitDeployProgressPopover
 								stackId={source.gitStack.id}
 								stackName={stack.name}
+								stackIcon={source.icon}
+								envId={$currentEnvironment?.id ?? null}
 								onComplete={fetchStacks}
 							>
 								{#snippet children()}
@@ -1763,6 +1906,17 @@
 							</Tooltip.Root>
 						{/if}
 					{/if}
+					{#if (stack.newerVersionCount ?? 0) > 0}
+						<Tooltip.Root>
+							<Tooltip.Trigger class="inline-flex items-center gap-0.5 self-center shrink-0 text-amber-500">
+								<Tag class="w-3.5 h-3.5" />
+								<span class="text-2xs font-medium leading-none">{stack.newerVersionCount}</span>
+							</Tooltip.Trigger>
+							<Tooltip.Content>
+								{stack.newerVersionCount} container{(stack.newerVersionCount ?? 0) > 1 ? 's have' : ' has'} a newer version tag.
+							</Tooltip.Content>
+						</Tooltip.Root>
+					{/if}
 					</span>
 				{:else if column.id === 'source'}
 					{#if source.sourceType === 'git'}
@@ -1791,6 +1945,31 @@
 							</Tooltip.Trigger>
 							<Tooltip.Content>
 								Compose file location unknown. Click the stack name or edit button to locate it.
+							</Tooltip.Content>
+						</Tooltip.Root>
+					{/if}
+				{:else if column.id === 'webhook'}
+					{#if source.sourceType === 'git' && source.gitStack?.webhookEnabled}
+						{@const stackId = source.gitStack.id}
+						{@const webhookUrl = `${window.location.origin}/api/git/stacks/${stackId}/webhook`}
+						<Tooltip.Root>
+							<Tooltip.Trigger class="w-full text-left">
+								<button
+									type="button"
+									class="inline-flex items-center gap-1 text-xs font-mono text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+									onclick={(e) => { e.stopPropagation(); copyWebhookUrl(stackId); }}
+								>
+									<span>#{stackId}</span>
+									{#if copiedWebhookStackId === stackId}
+										<Check class="w-3 h-3 text-emerald-500" />
+									{:else}
+										<Copy class="w-3 h-3" />
+									{/if}
+								</button>
+							</Tooltip.Trigger>
+							<Tooltip.Content class="max-w-md">
+								<p class="text-xs mb-1">Copy webhook URL</p>
+								<code class="text-2xs text-muted-foreground break-all">{webhookUrl}</code>
 							</Tooltip.Content>
 						</Tooltip.Root>
 					{/if}
@@ -1956,48 +2135,43 @@
 								</button>
 							</div>
 						{/if}
-						{#if (stack.status === 'not deployed' || stack.status === 'created') && source.gitStack}
-							<button
-								type="button"
-								onclick={() => openGitModal(source.gitStack)}
-								title="Edit git stack"
-								class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
-							>
-								<Pencil class="grid-action-icon grid-action-edit text-muted-foreground hover:text-purple-500" />
-							</button>
+						{#if source.sourceType === 'git' && source.gitStack}
+							<!-- One deploy popover for a git stack in ANY state (only the trigger
+							     icon differs by status), so the instance is stable: a status
+							     flip mid-deploy must not remount it and drop its open dialog. -->
+							{#if stack.status === 'not deployed' || stack.status === 'created'}
+								<button
+									type="button"
+									onclick={() => openGitModal(source.gitStack)}
+									title="Edit git stack"
+									class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
+								>
+									<Pencil class="grid-action-icon grid-action-edit text-muted-foreground hover:text-purple-500" />
+								</button>
+							{/if}
 							<GitDeployProgressPopover
 								stackId={source.gitStack.id}
 								stackName={stack.name}
+								stackIcon={source.icon}
+								envId={$currentEnvironment?.id ?? null}
 								onComplete={fetchStacks}
 							>
 								{#snippet children()}
 									<button
 										type="button"
-										title="Deploy"
+										title={(stack.status === 'not deployed' || stack.status === 'created') ? 'Deploy' : 'Sync from Git'}
 										class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
 									>
-										<Rocket class="grid-action-icon grid-action-start text-muted-foreground hover:text-violet-500" />
+										{#if stack.status === 'not deployed' || stack.status === 'created'}
+											<Rocket class="grid-action-icon grid-action-start text-muted-foreground hover:text-violet-500" />
+										{:else}
+											<RefreshCw class="grid-action-icon grid-action-restart text-muted-foreground hover:text-purple-500" />
+										{/if}
 									</button>
 								{/snippet}
 							</GitDeployProgressPopover>
-						{:else}
-							{#if source.sourceType === 'git' && source.gitStack}
-								<GitDeployProgressPopover
-									stackId={source.gitStack.id}
-									stackName={stack.name}
-									onComplete={fetchStacks}
-								>
-									{#snippet children()}
-										<button
-											type="button"
-											title="Sync from Git"
-											class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
-										>
-											<RefreshCw class="grid-action-icon grid-action-restart text-muted-foreground hover:text-purple-500" />
-										</button>
-									{/snippet}
-								</GitDeployProgressPopover>
-							{/if}
+						{/if}
+						{#if stack.status !== 'not deployed' && stack.status !== 'created'}
 							{#if $canAccess('stacks', 'edit')}
 								{#if source.sourceType === 'git' && source.gitStack}
 									<button
@@ -2079,16 +2253,20 @@
 											align="end"
 											sideOffset={8}
 										>
-											<div class="flex flex-col gap-1.5">
+											<div class="flex flex-col gap-2 w-60">
 												<span class="text-xs text-muted-foreground">Restart stack <strong>{stack.name.length > 20 ? stack.name.slice(0, 20) + '...' : stack.name}</strong></span>
-												<div class="flex items-center gap-1.5">
-													<Button size="sm" variant="secondary" class="h-6 px-2 text-xs" onclick={() => { restartPopoverOpen[stack.name] = false; restartStack(stack.name, 'restart'); }}>
-														Restart
-													</Button>
-													<Button size="sm" variant="default" class="h-6 px-2 text-xs" onclick={() => { restartPopoverOpen[stack.name] = false; restartStack(stack.name, 'recreate'); }}>
-														Recreate (stop & up)
-													</Button>
-												</div>
+												<button class="flex flex-col items-start gap-0.5 rounded px-2 py-1.5 text-left hover:bg-muted" onclick={() => { restartPopoverOpen[stack.name] = false; restartStack(stack.name, 'restart'); }}>
+													<span class="text-xs font-medium">Restart</span>
+													<span class="text-[11px] text-muted-foreground">Fast in-place restart. Ignores depends_on ordering.</span>
+												</button>
+												<button class="flex flex-col items-start gap-0.5 rounded px-2 py-1.5 text-left hover:bg-muted" onclick={() => { restartPopoverOpen[stack.name] = false; restartStack(stack.name, 'ordered'); }}>
+													<span class="text-xs font-medium">Restart in order</span>
+													<span class="text-[11px] text-muted-foreground">Stop then start in depends_on order. Same container IDs.</span>
+												</button>
+												<button class="flex flex-col items-start gap-0.5 rounded px-2 py-1.5 text-left hover:bg-muted" onclick={() => { restartPopoverOpen[stack.name] = false; restartStack(stack.name, 'recreate'); }}>
+													<span class="text-xs font-medium">Recreate (stop &amp; up)</span>
+													<span class="text-[11px] text-muted-foreground">Recreate containers in order. New IDs, re-pulls newer images.</span>
+												</button>
 											</div>
 										</Popover.Content>
 									</Popover.Root>
@@ -2126,25 +2304,14 @@
 							</ConfirmPopover>
 						{/if}
 						{#if $canAccess('stacks', 'remove')}
-							<ConfirmPopover
-								open={confirmDeleteName === stack.name}
-								action="Delete"
-								itemType="stack"
-								itemName={stack.name}
+							<button
+								type="button"
 								title="Remove"
-								onConfirm={() => removeStack(stack.name)}
-								onOpenChange={(open) => { confirmDeleteName = open ? stack.name : null; if (!open) deleteVolumes = false; }}
+								onclick={(e) => { e.stopPropagation(); deleteStackName = stack.name; showDeleteModal = true; }}
+								class="p-0.5 rounded hover:bg-muted transition-colors cursor-pointer"
 							>
-								{#snippet extraContent()}
-									<label class="flex items-center gap-1.5 cursor-pointer">
-										<Checkbox bind:checked={deleteVolumes} />
-										<span class="text-xs text-muted-foreground">Also delete volumes</span>
-									</label>
-								{/snippet}
-								{#snippet children({ open })}
-									<Trash2 class="grid-action-icon grid-action-delete {open ? 'text-destructive' : 'text-muted-foreground hover:text-destructive'}" />
-								{/snippet}
-							</ConfirmPopover>
+								<Trash2 class="grid-action-icon grid-action-delete text-muted-foreground hover:text-destructive" />
+							</button>
 						{/if}
 					</div>
 				{/if}
@@ -2158,7 +2325,22 @@
 								{@const isLoading = containerActionLoading === container.id}
 								<div class="p-3 rounded-lg bg-background border text-xs">
 									<div class="flex items-center gap-2 mb-2">
-										<Box class="w-4 h-4 shrink-0 {container.state === 'running' ? 'text-emerald-500' : 'text-muted-foreground'}" />
+										{#if $appSettings.useSelfhstIcons || iconOverrides[container.name]}
+											<!-- override + its custom-icon key use the real container.name; name=
+											     stays the service for better auto-match when there is no override. -->
+											<ContainerIcon
+												image={container.image}
+												name={container.service || container.name}
+												override={iconOverrides[container.name]}
+												overrideKey={container.name}
+												{envId}
+												class="w-4 h-4"
+												fallbackClass={container.state === 'running' ? 'text-emerald-500' : 'text-muted-foreground'}
+												showFallbackWhenOff
+											/>
+										{:else}
+											<Box class="w-4 h-4 shrink-0 {container.state === 'running' ? 'text-emerald-500' : 'text-muted-foreground'}" />
+										{/if}
 										<span class="font-medium truncate" title={container.name}>{container.service}</span>
 										{#if container.updateAvailable && $appSettings.highlightUpdates}
 											<!-- Update arrow + changelog link read as one pair — keep them tight. -->
@@ -2209,6 +2391,13 @@
 													</div>
 												</Tooltip.Content>
 											</Tooltip.Root>
+										{/if}
+										{#if container.newerVersion}
+											<VersionUpdateBadge
+												newerVersion={container.newerVersion}
+												variant="pill"
+												onclick={() => openVersionModal(container)}
+											/>
 										{/if}
 										<span class="flex-1"></span>
 										{#if container.health}
@@ -2355,6 +2544,21 @@
 												>
 													<Globe class="w-2.5 h-2.5" />
 													<span class="max-w-[120px] truncate">{p.displayName ?? p.url.replace(/^https?:\/\//, '')}</span>
+													<ExternalLink class="w-2.5 h-2.5 opacity-60" />
+												</a>
+											{/each}
+											<!-- caddy-docker-proxy fallback URLs (#1390). Same suppression rules. -->
+											{#each ($appSettings.honorProxyLabels ? extractCaddyUrls(container.labels) : []) as c}
+												<a
+													href={c.url}
+													target="_blank"
+													rel="noopener noreferrer"
+													onclick={(e) => e.stopPropagation()}
+													class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+													title="Caddy {c.group}: {c.url}"
+												>
+													<Globe class="w-2.5 h-2.5" />
+													<span class="max-w-[120px] truncate">{c.url.replace(/^https?:\/\//, '')}</span>
 													<ExternalLink class="w-2.5 h-2.5 opacity-60" />
 												</a>
 											{/each}
@@ -2647,6 +2851,7 @@
 	bind:open={showGitModal}
 	gitStack={editingGitStack}
 	environmentId={envId}
+	icon={editingGitStack ? (stackSources[editingGitStack.stackName]?.icon ?? null) : null}
 	repositories={gitRepositories}
 	credentials={gitCredentials}
 	onClose={() => {
@@ -2660,6 +2865,26 @@
 	bind:open={showImportModal}
 	onClose={() => showImportModal = false}
 	onAdopted={fetchStacks}
+/>
+
+<DeleteStackModal
+	bind:open={showDeleteModal}
+	stackName={deleteStackName}
+	envId={envId ?? null}
+	onConfirm={(opts) => removeStack(deleteStackName, opts)}
+/>
+
+<ComposeOutputModal
+	bind:open={composeOutputOpen}
+	title={composeOutputTitle}
+	lines={composeOutputLines}
+	running={composeOutputRunning}
+	ok={composeOutputOk}
+	ms={composeOutputMs}
+	exitCode={composeOutputExitCode}
+	stackName={composeOutputStackName}
+	stackIcon={composeOutputStackName ? stackSources[composeOutputStackName]?.icon ?? null : null}
+	envId={$currentEnvironment?.id ?? null}
 />
 
 <ContainerInspectModal
@@ -2684,6 +2909,12 @@
 	vulnerabilityCriteria={envHasScanning ? envVulnerabilityCriteria : 'never'}
 	onClose={() => { showBatchUpdateModal = false; singleUpdateContainerId = null; singleUpdateContainerName = null; }}
 	onComplete={handleSingleUpdateComplete}
+/>
+
+<VersionUpdateModal
+	bind:container={versionModalContainer}
+	newerVersion={versionModalContainer?.newerVersion ?? null}
+	{envId}
 />
 
 <BatchOperationModal

@@ -1,5 +1,21 @@
 import type { ColumnConfig, GridId } from '$lib/types';
 
+// The Disk I/O and Net I/O columns each hold two metrics; a header click cycles
+// through read/write (or rx/tx) x desc/asc so both hogs are reachable (#1111).
+// "biggest first" (desc) leads because hunting a hog is the common case.
+const DISK_IO_SORT_CYCLE = [
+	{ field: 'diskRead', direction: 'desc' as const },
+	{ field: 'diskRead', direction: 'asc' as const },
+	{ field: 'diskWrite', direction: 'desc' as const },
+	{ field: 'diskWrite', direction: 'asc' as const }
+];
+const NET_IO_SORT_CYCLE = [
+	{ field: 'netRx', direction: 'desc' as const },
+	{ field: 'netRx', direction: 'asc' as const },
+	{ field: 'netTx', direction: 'desc' as const },
+	{ field: 'netTx', direction: 'asc' as const }
+];
+
 // Container grid columns
 export const containerColumns: ColumnConfig[] = [
 	{ id: 'select', label: '', fixed: 'start', width: 32, resizable: false },
@@ -11,8 +27,8 @@ export const containerColumns: ColumnConfig[] = [
 	{ id: 'restartCount', label: 'Restarts', width: 70, minWidth: 50 },
 	{ id: 'cpu', label: 'CPU', sortable: true, sortField: 'cpu', width: 50, minWidth: 40, align: 'right' },
 	{ id: 'memory', label: 'Memory', sortable: true, sortField: 'memory', width: 95, minWidth: 70, align: 'right' },
-	{ id: 'networkIO', label: 'Net I/O', width: 85, minWidth: 70, align: 'right' },
-	{ id: 'diskIO', label: 'Disk I/O', width: 85, minWidth: 70, align: 'right' },
+	{ id: 'networkIO', label: 'Net I/O', width: 85, minWidth: 70, align: 'right', sortable: true, sortCycle: NET_IO_SORT_CYCLE },
+	{ id: 'diskIO', label: 'Disk I/O', width: 85, minWidth: 70, align: 'right', sortable: true, sortCycle: DISK_IO_SORT_CYCLE },
 	{ id: 'ip', label: 'IP', sortable: true, sortField: 'ip', width: 100, minWidth: 80 },
 	{ id: 'ports', label: 'Ports', sortable: true, sortField: 'ports', width: 120, minWidth: 60 },
 	{ id: 'autoUpdate', label: 'Auto-update', width: 95, minWidth: 70 },
@@ -60,12 +76,13 @@ export const stackColumns: ColumnConfig[] = [
 	{ id: 'name', label: 'Name', sortable: true, sortField: 'name', width: 180, minWidth: 100, grow: true },
 	{ id: 'status', label: 'Status', sortable: true, sortField: 'status', width: 120, minWidth: 90 },
 	{ id: 'source', label: 'Source', width: 100, minWidth: 100, noTruncate: true },
+	{ id: 'webhook', label: 'Webhook', width: 90, minWidth: 70, defaultVisible: false, hint: 'Git-stack webhook id and URL (for wiring Gitea/GitHub/GitLab)' },
 	{ id: 'location', label: 'Location', width: 180, minWidth: 100 },
 	{ id: 'containers', label: 'Containers', sortable: true, sortField: 'containers', width: 100, minWidth: 70 },
 	{ id: 'cpu', label: 'CPU', sortable: true, sortField: 'cpu', width: 60, minWidth: 50, align: 'right' },
 	{ id: 'memory', label: 'Memory', sortable: true, sortField: 'memory', width: 70, minWidth: 50, align: 'right' },
-	{ id: 'networkIO', label: 'Net I/O', width: 100, minWidth: 70, align: 'right' },
-	{ id: 'diskIO', label: 'Disk I/O', width: 100, minWidth: 70, align: 'right' },
+	{ id: 'networkIO', label: 'Net I/O', width: 100, minWidth: 70, align: 'right', sortable: true, sortCycle: NET_IO_SORT_CYCLE },
+	{ id: 'diskIO', label: 'Disk I/O', width: 100, minWidth: 70, align: 'right', sortable: true, sortCycle: DISK_IO_SORT_CYCLE },
 	{ id: 'networks', label: 'Networks', width: 80, minWidth: 60 },
 	{ id: 'volumes', label: 'Volumes', width: 80, minWidth: 60 },
 	{ id: 'actions', label: '', fixed: 'end', width: 180, resizable: false }
@@ -166,12 +183,12 @@ export const repoSnapshotColumns: ColumnConfig[] = [
 
 // Backup destination grid columns
 export const backupDestinationColumns: ColumnConfig[] = [
-	{ id: 'type', label: 'Type', width: 80, minWidth: 60, resizable: false },
+	{ id: 'type', label: 'Type', sortable: true, sortField: 'type', width: 130, minWidth: 100, resizable: false },
 	{ id: 'name', label: 'Name', sortable: true, sortField: 'name', width: 180, minWidth: 120, grow: true },
-	{ id: 'repository', label: 'Repository', width: 280, minWidth: 150, grow: true },
+	{ id: 'repository', label: 'Repository', sortable: true, sortField: 'repository', width: 280, minWidth: 150, grow: true },
 	{ id: 'usage', label: 'Usage', width: 100, minWidth: 70 },
 	{ id: 'stats', label: 'Stats', width: 140, minWidth: 100 },
-	{ id: 'status', label: 'Status', width: 110, minWidth: 80 },
+	{ id: 'status', label: 'Status', sortable: true, sortField: 'status', width: 110, minWidth: 80 },
 	{ id: 'actions', label: '', fixed: 'end', width: 300, resizable: false }
 ];
 
@@ -190,6 +207,19 @@ export const vulnerabilityColumns: ColumnConfig[] = [
 	{ id: 'actions', label: '', fixed: 'end', width: 44, resizable: false }
 ];
 
+// Deploy-history grid columns (the "Deploys" panel on a stack). A dense, tabular
+// view of past deploy runs; expanding a row reveals that run's log + details.
+// Merged summary column carries option pills + error text, so it grows.
+export const deployColumns: ColumnConfig[] = [
+	{ id: 'expand', label: '', fixed: 'start', width: 24, resizable: false },
+	{ id: 'status', label: 'Status', width: 120, minWidth: 96, resizable: false, sortable: true, sortField: 'status' },
+	{ id: 'when', label: 'When', width: 230, minWidth: 140, sortable: true, sortField: 'startedAt' },
+	{ id: 'duration', label: 'Duration', width: 90, minWidth: 70, align: 'right', sortable: true, sortField: 'duration' },
+	{ id: 'trigger', label: 'Trigger', width: 120, minWidth: 90, sortable: true, sortField: 'triggeredBy' },
+	{ id: 'summary', label: 'Summary', width: 260, minWidth: 140, grow: true, noTruncate: true },
+	{ id: 'actions', label: '', fixed: 'end', width: 44, resizable: false }
+];
+
 // Map of grid ID to column definitions
 export const gridColumnConfigs: Record<GridId, ColumnConfig[]> = {
 	containers: containerColumns,
@@ -205,7 +235,8 @@ export const gridColumnConfigs: Record<GridId, ColumnConfig[]> = {
 	backupDestinations: backupDestinationColumns,
 	backups: backupColumns,
 	repoSnapshots: repoSnapshotColumns,
-	vulnerabilities: vulnerabilityColumns
+	vulnerabilities: vulnerabilityColumns,
+	deploys: deployColumns
 };
 
 // Get configurable columns (not fixed)
@@ -227,7 +258,7 @@ export function getFixedEndColumns(gridId: GridId): ColumnConfig[] {
 export function getDefaultColumnPreferences(gridId: GridId): { id: string; visible: boolean }[] {
 	return getConfigurableColumns(gridId).map((col) => ({
 		id: col.id,
-		visible: true
+		visible: col.defaultVisible !== false
 	}));
 }
 

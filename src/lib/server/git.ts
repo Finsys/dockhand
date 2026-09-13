@@ -2,6 +2,8 @@ import { existsSync, mkdirSync, rmSync, chmodSync, readFileSync, writeFileSync }
 import { join, resolve, dirname, basename, relative } from 'node:path';
 import { spawn as nodeSpawn, spawnSync } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
+import { GIT_SSH_KEY_PATH_ENV, makeSshKeyPath, removeSshKey } from './git-ssh-key';
+import { permissionDeniedMessage } from './git-error';
 import {
 	getGitRepository,
 	getGitCredential,
@@ -10,14 +12,22 @@ import {
 	updateGitStack,
 	upsertStackSource,
 	getEnvironment,
+	getSecretEnvVarsAsRecord,
+	getNonSecretEnvVarsAsRecord,
 	type GitRepository,
 	type GitCredential,
-	type GitStackWithRepo
+	type GitStackWithRepo,
+	type ScheduleTrigger
 } from './db';
 import { deployStack, getStackDir } from './stacks';
+import { createRunRecorder } from './deploy-run-record';
+import { hashComposeContent, hashEnvFingerprint } from './deploy-run-record-core';
 import { sendEventNotification } from './notifications';
 import { buildBasicAuthHeader } from './git-auth';
-import { assertSafeRepoUrl, assertSafeGitRef, repoFilePath } from './git-url-safety';
+import { assertSafeRepoUrl, assertSafeGitRef, repoFilePath, repoBaseEnvPath } from './git-url-safety';
+import { assertSafeRepoTarget } from './git-branch-lookup';
+import { shouldDeployGitStack, shouldForceRecreateGitStack } from './git-deploy-policy';
+import { resolveStackBranch } from '../git-stack-branch';
 import {
 	parseManifest,
 	serializeManifest,
@@ -258,7 +268,10 @@ async function buildGitEnv(credential: GitCredential | null): Promise<GitEnv> {
 		// Write SSH key to /tmp instead of data volume — some filesystems (TrueNAS ZFS,
 		// NFS, CIFS) silently ignore chmod, leaving the key group-readable (e.g. 0670).
 		// SSH refuses keys that are accessible by others. /tmp is always a proper filesystem.
-		const sshKeyPath = `/tmp/.ssh-key-${credential.id}`;
+		// Unique per operation so concurrent syncs of the SAME credential don't share
+		// one file; otherwise one op's cleanup deletes the key mid-clone of another
+		// (#1413). The path is stashed in env for cleanupSshKey to remove exactly.
+		const sshKeyPath = makeSshKeyPath(credential.id);
 
 		// Ensure SSH key ends with a newline (newer SSH versions are strict about this)
 		let keyContent = credential.sshPrivateKey;
@@ -286,6 +299,7 @@ async function buildGitEnv(credential: GitCredential | null): Promise<GitEnv> {
 
 		// Configure SSH to use ONLY this key (no agent, no default keys)
 		env.GIT_SSH_COMMAND = `ssh -i "${sshKeyPath}" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes`;
+		env[GIT_SSH_KEY_PATH_ENV] = sshKeyPath;
 	} else {
 		// No SSH credential - prevent using any keys (IdentitiesOnly=yes with no -i means no keys)
 		env.GIT_SSH_COMMAND = 'ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o IdentitiesOnly=yes -o PasswordAuthentication=no -o PubkeyAuthentication=no';
@@ -294,16 +308,11 @@ async function buildGitEnv(credential: GitCredential | null): Promise<GitEnv> {
 	return env;
 }
 
-function cleanupSshKey(credential: GitCredential | null): void {
+function cleanupSshKey(credential: GitCredential | null, env?: GitEnv): void {
 	if (credential?.authType === 'ssh') {
-		const sshKeyPath = `/tmp/.ssh-key-${credential.id}`;
-		try {
-			if (existsSync(sshKeyPath)) {
-				rmSync(sshKeyPath);
-			}
-		} catch {
-			// Ignore cleanup errors
-		}
+		// Removes the exact per-operation key this env created; falls back to the old
+		// deterministic path only if no env is available (legacy callers). See #1413.
+		removeSshKey(credential.id, env);
 	}
 }
 
@@ -325,20 +334,89 @@ function buildRepoUrl(url: string, credential: GitCredential | null): string {
 	return url;
 }
 
-async function execGit(args: string[], cwd: string, env: GitEnv): Promise<{ stdout: string; stderr: string; code: number }> {
-	try {
+/**
+ * Hard timeout (ms) for the remote-branch lookup (git ls-remote) ONLY.
+ * The lookup is the single git call whose target URL can be driven by an
+ * attacker-chosen URL (POST /api/git/branches, the new-repository branch
+ * picker), so an unbounded ls-remote is a resource-exhaustion vector.
+ * NOTE: this constant is deliberately NOT applied to ordinary deploy/sync
+ * operations (clone / pull / fetch / rev-parse) — those target the
+ * operator's own repository over a controlled URL, and a legitimate
+ * large-repo clone or slow WAN fetch can exceed this limit, so they stay
+ * UNBOUNDED (execGit without an explicit timeout). */
+export const GIT_TIMEOUT_MS = Number(process.env.GIT_TIMEOUT_MS) || 20000;
+
+/**
+ * Run a git command.
+ *
+ * Timeouts are OPT-IN: the default is UNBOUNDED. Ordinary deploy/sync
+ * operations (clone, pull, fetch, rev-parse) are unbounded because their
+ * target is the operator's own repository and a slow network or large repo
+ * is a legitimate outcome — they must not be killed mid-flight. Callers
+ * that need a bounded operation (the remote-branch lookup, whose target
+ * URL is attacker-influenced) pass `timeoutMs` explicitly (see
+ * listRemoteBranches).
+ */
+function execGit(
+	args: string[],
+	cwd: string,
+	env: GitEnv,
+	timeoutMs?: number
+): Promise<{ stdout: string; stderr: string; code: number; timedOut?: boolean }> {
+	return new Promise((resolve) => {
+		let settled = false;
+		const stdoutChunks: Buffer[] = [];
+		const stderrChunks: Buffer[] = [];
+
 		const proc = nodeSpawn('git', args, {
 			cwd,
 			env,
 			stdio: ['pipe', 'pipe', 'pipe']
 		});
 
-		const result = await collectProcess(proc);
+		const finish = (
+			partial: { stdout: string; stderr: string; code: number; timedOut?: boolean }
+		) => {
+			if (settled) return;
+			settled = true;
+			// Only clear a timer if one was actually created — the default
+			// (no timeout) never creates one.
+			if (timer) clearTimeout(timer);
+			if (partial.timedOut) {
+				// The process is still running — kill it so the git subprocess
+				// (and any child ssh) cannot keep running after we give up.
+				proc.kill('SIGKILL');
+			}
+			resolve(partial);
+		};
 
-		return { stdout: result.stdout.trim(), stderr: result.stderr.trim(), code: result.exitCode };
-	} catch (err: any) {
-		return { stdout: '', stderr: err.message, code: 1 };
-	}
+		// Only arm a timer when a valid timeout was explicitly provided —
+		// undefined (or non-finite / non-positive) means "run unbounded".
+		const timer: ReturnType<typeof setTimeout> | undefined =
+			timeoutMs !== undefined && Number.isFinite(timeoutMs) && timeoutMs > 0
+				? setTimeout(() => {
+						finish({
+							stdout: Buffer.concat(stdoutChunks).toString(),
+							stderr: Buffer.concat(stderrChunks).toString(),
+							code: 124,
+							timedOut: true
+						});
+					}, timeoutMs)
+				: undefined;
+
+		proc.stdout?.on('data', (chunk: Buffer) => stdoutChunks.push(chunk));
+		proc.stderr?.on('data', (chunk: Buffer) => stderrChunks.push(chunk));
+		proc.on('error', (err: any) => {
+			finish({ stdout: '', stderr: err.message, code: 1 });
+		});
+		proc.on('close', (code) => {
+			finish({
+				stdout: Buffer.concat(stdoutChunks).toString(),
+				stderr: Buffer.concat(stderrChunks).toString(),
+				code: code ?? 1
+			});
+		});
+	});
 }
 
 /**
@@ -493,9 +571,10 @@ export interface TestResult {
 }
 
 /**
- * Clean up git/SSH error messages for user display
+ * Clean up git/SSH error messages for user display. `ctx` tailors the permission-denied
+ * message to the credential's auth type and URL (#1509); omit it for a generic message.
  */
-function cleanGitError(stderr: string): string {
+function cleanGitError(stderr: string, ctx?: { authType?: string | null; url?: string | null }): string {
 	// Remove SSH warnings and noise
 	const lines = stderr.split('\n').filter(line => {
 		const l = line.trim().toLowerCase();
@@ -514,7 +593,7 @@ function cleanGitError(stderr: string): string {
 
 	// Return cleaner message
 	if (permissionLine) {
-		return 'Permission denied. Check your SSH credentials.';
+		return permissionDeniedMessage(ctx?.authType, ctx?.url);
 	}
 	if (fatalLine) {
 		// Clean up common fatal messages
@@ -557,7 +636,7 @@ async function testRepositoryConnection(options: {
 
 		if (result.code !== 0) {
 			console.error('[Git] Connection test failed:', result.stderr);
-			return { success: false, error: cleanGitError(result.stderr) };
+			return { success: false, error: cleanGitError(result.stderr, { authType: credential?.authType, url }) };
 		}
 
 		// Parse the output to get commit hash
@@ -571,7 +650,7 @@ async function testRepositoryConnection(options: {
 			);
 
 			if (allBranchesResult.code !== 0) {
-				return { success: false, error: cleanGitError(allBranchesResult.stderr) };
+				return { success: false, error: cleanGitError(allBranchesResult.stderr, { authType: credential?.authType, url }) };
 			}
 
 			const allBranches = allBranchesResult.stdout.split('\n')
@@ -604,7 +683,7 @@ async function testRepositoryConnection(options: {
 	} catch (error: any) {
 		return { success: false, error: error.message };
 	} finally {
-		cleanupSshKey(credential);
+		cleanupSshKey(credential, env);
 	}
 }
 
@@ -641,6 +720,11 @@ export async function testRepositoryConfig(options: {
 		return { success: false, error: 'Repository URL is required' };
 	}
 
+	// Transport denylist (ext::/fd::/file::/local paths) — applied here so the
+	// denylist holds on every path into a git subprocess, not only via
+	// buildRepoUrl (same pattern as listRemoteBranches).
+	assertSafeRepoUrl(url);
+
 	// Fetch credential from database if credentialId is provided
 	const credential = credentialId ? await getGitCredential(credentialId) : null;
 	if (credentialId && !credential) {
@@ -652,6 +736,81 @@ export async function testRepositoryConfig(options: {
 		branch: branch || 'main',
 		credential
 	});
+}
+
+/**
+ * List remote branches for a repository URL using git ls-remote.
+ * Resolves credentials from the database if a credentialId is provided.
+ * Bounded by a hard timeout (default GIT_TIMEOUT_MS, 20s) so a dead or
+ * black-holed host cannot stall the request — see execGit. This is the
+ * only git operation with a timeout: its target URL is the one that can be
+ * attacker-influenced, so an unbounded ls-remote would be a resource-
+ * exhaustion vector.
+ *
+ * The transport denylist (ext::/fd::/file::/local paths) is applied HERE,
+ * explicitly, rather than only via buildRepoUrl — a future parser change in
+ * buildRepoUrl must not be able to reopen command execution on this path.
+ */
+export interface RemoteBranch {
+	name: string;
+	/** Short (7-char) commit SHA the branch points at, from ls-remote. */
+	sha: string;
+}
+
+export async function listRemoteBranches(options: {
+	url: string;
+	credentialId?: number | null;
+	timeoutMs?: number;
+}): Promise<{ branches: RemoteBranch[]; error?: string }> {
+	const { url, credentialId, timeoutMs } = options;
+
+	// The effective branch-lookup timeout: an explicitly provided (valid)
+	// override wins; otherwise the default GIT_TIMEOUT_MS. This is the ONLY
+	// bounded git operation — see execGit for why deploy/sync operations are
+	// left unbounded.
+	const effectiveTimeoutMs = timeoutMs ?? GIT_TIMEOUT_MS;
+
+	// Transport denylist — the same check buildRepoUrl applies, applied
+	// explicitly here so the denylist holds even if buildRepoUrl changes.
+	assertSafeRepoUrl(url);
+
+	// Fetch credential from database if credentialId is provided
+	const credential = credentialId ? await getGitCredential(credentialId) : null;
+
+	const env = await buildGitEnv(credential);
+	const repoUrl = buildRepoUrl(url, credential);
+
+	try {
+		const result = await execGit(
+			['ls-remote', '--heads', '--refs', repoUrl],
+			process.cwd(),
+			env,
+			effectiveTimeoutMs
+		);
+
+		if (result.timedOut) {
+			return { branches: [], error: `git ls-remote timed out after ${Math.round(effectiveTimeoutMs / 1000)}s` };
+		}
+
+		if (result.code !== 0) {
+			return { branches: [], error: cleanGitError(result.stderr, { authType: credential?.authType, url }) };
+		}
+
+		// Each line: "<sha>\trefs/heads/<name>". Keep the SHA (short) so the
+		// picker can show it; it was previously discarded.
+		const branches = result.stdout.split('\n')
+			.map(l => {
+				const m = l.match(/^([0-9a-f]+)\s+refs\/heads\/(.+)$/);
+				return m ? { name: m[2], sha: m[1].slice(0, 7) } : null;
+			})
+			.filter(Boolean) as RemoteBranch[];
+
+		return { branches };
+	} catch (error: any) {
+		return { branches: [], error: error.message };
+	} finally {
+		cleanupSshKey(credential);
+	}
 }
 
 export async function syncRepository(repoId: number): Promise<SyncResult> {
@@ -733,7 +892,7 @@ export async function syncRepository(repoId: number): Promise<SyncResult> {
 			syncError: null
 		});
 
-		cleanupSshKey(credential);
+		cleanupSshKey(credential, env);
 
 		return {
 			success: true,
@@ -742,7 +901,7 @@ export async function syncRepository(repoId: number): Promise<SyncResult> {
 			updated
 		};
 	} catch (error: any) {
-		cleanupSshKey(credential);
+		cleanupSshKey(credential, env);
 		await updateGitRepository(repoId, {
 			syncStatus: 'error',
 			syncError: error.message
@@ -811,7 +970,7 @@ export async function checkForUpdates(repoId: number): Promise<{ hasUpdates: boo
 		const latestResult = await execGit(['rev-parse', `origin/${repo.branch}`], repoPath, env);
 		const latestCommit = latestResult.stdout.substring(0, 7);
 
-		cleanupSshKey(credential);
+		cleanupSshKey(credential, env);
 
 		return {
 			hasUpdates: currentCommit !== latestCommit,
@@ -819,7 +978,7 @@ export async function checkForUpdates(repoId: number): Promise<{ hasUpdates: boo
 			latestCommit
 		};
 	} catch (error: any) {
-		cleanupSshKey(credential);
+		cleanupSshKey(credential, env);
 		return { hasUpdates: false, error: error.message };
 	}
 }
@@ -838,7 +997,7 @@ export function deleteRepositoryFiles(repoId: number): void {
 
 // === Git Stack Functions ===
 
-async function getStackRepoPath(stackId: number, stackName?: string, environmentId?: number | null): Promise<string> {
+export async function getStackRepoPath(stackId: number, stackName?: string, environmentId?: number | null): Promise<string> {
 	if (stackName && environmentId) {
 		// Use old path if it already exists (backward compat), otherwise use name-based path
 		const oldPath = join(GIT_REPOS_DIR, `stack-${stackId}`);
@@ -872,6 +1031,13 @@ async function getPreviousCommit(repoPath: string, env: GitEnv): Promise<string 
 	}
 }
 
+/**
+ * The effective branch a git stack deploys from is resolved by
+ * resolveStackBranch() (src/lib/git-stack-branch.ts) — a per-stack branch
+ * override (git_stacks.branch) wins; when it is unset, empty, or
+ * whitespace-only, the repository's default branch is used.
+ */
+
 export async function syncGitStack(stackId: number): Promise<SyncResult> {
 	const gitStack = await getGitStack(stackId);
 	if (!gitStack) {
@@ -901,8 +1067,14 @@ export async function syncGitStack(stackId: number): Promise<SyncResult> {
 		return { success: false, error: 'Repository not found' };
 	}
 
+	// Per-stack branch override wins; unset means the repository default
+	const effectiveBranch = resolveStackBranch(gitStack, repo);
+
 	console.log(`${logPrefix} Repository URL:`, repo.url);
 	console.log(`${logPrefix} Repository branch:`, repo.branch);
+	if (effectiveBranch !== repo.branch) {
+		console.log(`${logPrefix} Stack branch override:`, effectiveBranch);
+	}
 
 	const credential = repo.credentialId ? await getGitCredential(repo.credentialId) : null;
 	const repoPath = await getStackRepoPath(stackId, gitStack.stackName, gitStack.environmentId);
@@ -928,11 +1100,11 @@ export async function syncGitStack(stackId: number): Promise<SyncResult> {
 		}
 
 		console.log(`${logPrefix} Cloning repository...`);
-		assertSafeGitRef(repo.branch);
+		assertSafeGitRef(effectiveBranch);
 		const repoUrl = buildRepoUrl(repo.url, credential);
 
 		const result = await execGit(
-			['clone', '--filter=blob:none', '--branch', repo.branch, repoUrl, repoPath],
+			['clone', '--filter=blob:none', '--branch', effectiveBranch, repoUrl, repoPath],
 			process.cwd(),
 			env
 		);
@@ -1080,7 +1252,7 @@ export async function syncGitStack(stackId: number): Promise<SyncResult> {
 			syncError: null
 		});
 
-		cleanupSshKey(credential);
+		cleanupSshKey(credential, env);
 
 		console.log(`${logPrefix} ----------------------------------------`);
 		console.log(`${logPrefix} SYNC GIT STACK COMPLETE`);
@@ -1107,7 +1279,7 @@ export async function syncGitStack(stackId: number): Promise<SyncResult> {
 			previousManifest: deletionData.previousManifest
 		};
 	} catch (error: any) {
-		cleanupSshKey(credential);
+		cleanupSshKey(credential, env);
 		await updateGitStack(stackId, {
 			syncStatus: 'error',
 			syncError: error.message
@@ -1148,8 +1320,45 @@ async function notifyGitSync(stackName: string, envId: number | null | undefined
 	} catch { /* never changes the deploy outcome */ }
 }
 
-export async function deployGitStack(stackId: number, options?: { force?: boolean }): Promise<{ success: boolean; output?: string; error?: string; skipped?: boolean }> {
+/**
+ * The function every git-stack deploy trigger funnels through EXCEPT ONE: a
+ * config-update-then-redeploy, both webhook methods, create-and-deploy, and (via
+ * runGitStackSync) the cron scheduler and the schedules page's "run now" all reach
+ * this function. That is why the stack_deploy run recorder is wired in HERE and not
+ * at each of those call sites: wiring it at the route level only (the way
+ * compose/+server.ts does it) would leave every OTHER caller -- crucially the cron-
+ * and webhook-triggered ones, the truly unattended runs the design doc's Meilenstein 5
+ * is about -- unrecorded. Duplicating the composeHash/envHash/secrets setup at
+ * six-plus call sites would also drift out of sync with each other over time; one
+ * implementation, reached from everywhere but one, cannot.
+ *
+ * The one exception is the UI's own "Deploy" button (deploy-stream/+server.ts),
+ * which streams live per-step progress via deployGitStackWithProgress() below --
+ * a separate pipeline (it re-clones and re-reads the compose file itself rather than
+ * calling this function) that carries its OWN, separately-wired copy of the same
+ * recorder setup, right at its own deployStack() call. See that function's doc
+ * comment for why it is a second call site instead of routing through here.
+ */
+export async function deployGitStack(
+	stackId: number,
+	options?: {
+		force?: boolean;
+		/** Who/what triggered this deploy, for the stack_deploy run record. Defaults to
+		 *  'manual' for backward compatibility with existing callers/tests that predate
+		 *  this parameter -- every REAL call site below passes its own explicit value. */
+		triggeredBy?: ScheduleTrigger;
+		/** Best-effort only, like every other stack_deploy record (design doc §10.5):
+		 *  webhook/cron callers have no user and simply omit this. */
+		userId?: number;
+		/** Forwarded to deployStack() alongside the recorder's own line() call, so an
+		 *  HTTP caller (the manual deploy route, the deployNow routes) can still stream
+		 *  progress over SSE exactly as before -- recording never depends on whether
+		 *  anyone is listening. */
+		onLine?: (line: string) => void;
+	}
+): Promise<{ success: boolean; output?: string; error?: string; skipped?: boolean }> {
 	const force = options?.force ?? true; // Default to force for backward compatibility
+	const triggeredBy: ScheduleTrigger = options?.triggeredBy ?? 'manual';
 
 	const gitStack = await getGitStack(stackId);
 	if (!gitStack) {
@@ -1169,6 +1378,29 @@ export async function deployGitStack(stackId: number, options?: { force?: boolea
 	if (!syncResult.success) {
 		console.log(`${logPrefix} Sync failed:`, syncResult.error);
 		const failResult = { success: false, error: syncResult.error };
+		// Record the sync failure as a failed stack_deploy run so it shows in the Deploys
+		// tab (webhook/scheduled/manual all reach here). Best-effort and fully isolated:
+		// a recorder error must never change the notify/return workflow below. Skip the
+		// benign "Sync already in progress" overlap -- it's a concurrency skip, not a
+		// deploy failure, and recording it would clutter history with false failures.
+		if (!(syncResult.error ?? '').includes('Sync already in progress')) {
+			try {
+				const failRecorder = await createRunRecorder({
+					stackName: gitStack.stackName,
+					envId: gitStack.environmentId ?? null,
+					userId: options?.userId,
+					triggeredBy,
+					options: { pull: !!gitStack.repullImages, build: !!gitStack.buildOnDeploy, forceRecreate: !!(options?.force ?? true) },
+					composeHash: '',
+					envHash: '',
+					secrets: []
+				});
+				failRecorder.line(`fatal: ${syncResult.error ?? 'git sync failed'}`);
+				await failRecorder.end(false, undefined, syncResult.error ?? 'git sync failed');
+			} catch (e) {
+				console.error(`${logPrefix} Failed to record git sync failure:`, e);
+			}
+		}
 		await notifyGitSync(gitStack.stackName, gitStack.environmentId, failResult);
 		return failResult;
 	}
@@ -1182,10 +1414,14 @@ export async function deployGitStack(stackId: number, options?: { force?: boolea
 		console.log(`${logPrefix} Env file vars (masked):`, JSON.stringify(redactEnvVarsForLog(syncResult.envFileVars), null, 2));
 	}
 
-	// Check if there are changes - skip redeploy if no changes and not forced
-	// Note: For new stacks (first deploy), syncResult.updated will be true
-	// forceRedeploy setting overrides the skip logic for webhooks/scheduled syncs
-	const shouldDeploy = force || gitStack.forceRedeploy || syncResult.updated;
+	// Check if there are changes - skip redeploy if no changes and not forced.
+	// For new stacks (first deploy), syncResult.updated is true. The forceRedeploy
+	// setting overrides the skip logic for webhooks/scheduled syncs.
+	const shouldDeploy = shouldDeployGitStack({
+		force,
+		forceRedeploy: gitStack.forceRedeploy === true,
+		gitUpdated: syncResult.updated === true
+	});
 	if (!shouldDeploy) {
 		console.log(`${logPrefix} No changes detected and force=false, forceRedeploy=false, skipping redeploy`);
 		const skippedResult = {
@@ -1197,8 +1433,11 @@ export async function deployGitStack(stackId: number, options?: { force?: boolea
 		return skippedResult;
 	}
 
-	const forceRecreate = syncResult.updated;
-	console.log(`${logPrefix} Will force recreate:`, forceRecreate, `(updated=${syncResult.updated})`);
+	const forceRecreate = shouldForceRecreateGitStack({
+		forceRedeploy: gitStack.forceRedeploy === true,
+		gitUpdated: syncResult.updated === true
+	});
+	console.log(`${logPrefix} Will force recreate:`, forceRecreate, `(updated=${syncResult.updated}, forceRedeploy=${gitStack.forceRedeploy})`);
 	console.log(`${logPrefix} Build on deploy:`, gitStack.buildOnDeploy);
 	console.log(`${logPrefix} Re-pull images:`, gitStack.repullImages);
 	console.log(`${logPrefix} Force redeploy setting:`, gitStack.forceRedeploy);
@@ -1212,20 +1451,108 @@ export async function deployGitStack(stackId: number, options?: { force?: boolea
 	console.log(`${logPrefix} Compose filename:`, syncResult.composeFileName);
 	console.log(`${logPrefix} Env filename:`, syncResult.envFileName ?? '(none)');
 
-	const result = await deployStack({
-		name: gitStack.stackName,
-		compose: syncResult.composeContent!,
-		envId: gitStack.environmentId,
-		sourceDir: syncResult.composeDir, // Copy entire directory from git repo
-		composeFileName: syncResult.composeFileName, // Use original compose filename from repo
-		envFileName: syncResult.envFileName, // Env file relative to compose dir (for --env-file flag, optional)
-		forceRecreate,
-		build: gitStack.buildOnDeploy,
-		noBuildCache: gitStack.noBuildCache,
-		pullPolicy: gitStack.repullImages ? 'always' : undefined,
-		filesToDelete: syncResult.deletionPlan?.toDelete,
-		isGitDeploy: true // suppress stack_* notification; we emit git_sync_* below
+	// Same stack_deploy run record shape the non-git routes build (compose PUT,
+	// dedicated deploy endpoint) -- see deploy-run-record.ts. composeHash is taken
+	// from syncResult.composeContent, the EXACT string handed to deployStack right
+	// below, not a redundant re-read off disk.
+	//
+	// envHash/secrets mirror the same resolution the non-git routes use
+	// (getNonSecretEnvVarsAsRecord/getSecretEnvVarsAsRecord keyed by stackName+envId,
+	// the DB-sourced values deployStack resolves again at deploy time in stacks.ts),
+	// PLUS the repo's own .env values below so the redaction set is complete for what
+	// end() stores. Secret-provider-injected vars are still only in deployStack's own
+	// makeLineForwarder set (stacks.ts), which redacts the streamed lines; end()'s
+	// stored errorMessage is the one that also needs the .env values folded in here.
+	// The repo's own .env values are passed to compose via --env-file and never
+	// flow through the DB-sourced var records above, so without this they'd be in
+	// NEITHER redaction set -- a repo-.env-only secret echoed to stderr would land
+	// unredacted in the stored errorMessage (which the executions API returns). Fold
+	// them into the recorder's secrets so recorder.end()'s redactLine catches them.
+	// Best-effort: these reads exist only to seed the recorder, so a decrypt/DB failure
+	// must not abort the deploy -- fall back to whatever we could read.
+	let effectiveEnvVars: Record<string, string> = { ...(syncResult.envFileVars ?? {}) };
+	try {
+		const nonSecretVars = await getNonSecretEnvVarsAsRecord(gitStack.stackName, gitStack.environmentId);
+		const secretVars = await getSecretEnvVarsAsRecord(gitStack.stackName, gitStack.environmentId);
+		effectiveEnvVars = { ...nonSecretVars, ...secretVars, ...(syncResult.envFileVars ?? {}) };
+	} catch (e) {
+		console.error(`${logPrefix} Failed to read env vars for run-record redaction (deploy continues):`, e);
+	}
+
+	// The recorder is a BEST-EFFORT side channel: its DB/FS I/O must never abort the
+	// deploy nor flip its outcome. Swallow a createRunRecorder failure so a record-store
+	// hiccup degrades to "no run record", never a failed or aborted deploy.
+	const recorder = await createRunRecorder({
+		stackName: gitStack.stackName,
+		envId: gitStack.environmentId ?? null,
+		userId: options?.userId,
+		triggeredBy,
+		options: { pull: !!gitStack.repullImages, build: !!gitStack.buildOnDeploy, forceRecreate: !!forceRecreate },
+		composeHash: hashComposeContent(syncResult.composeContent!),
+		envHash: hashEnvFingerprint(effectiveEnvVars),
+		secrets: Object.values(effectiveEnvVars)
+	}).catch((e) => {
+		console.error(`${logPrefix} Failed to create deploy run recorder (continuing without one):`, e);
+		return null;
 	});
+
+	// Mirrors every redacted output line into the run record's log file, in addition
+	// to (not instead of) forwarding it to the caller's own onLine (SSE progress) --
+	// see the recorder doc comment above for why this can't be "record OR stream".
+	const onLine = (line: string) => {
+		recorder?.line(line);
+		options?.onLine?.(line);
+	};
+
+	let result: Awaited<ReturnType<typeof deployStack>>;
+	try {
+		result = await deployStack({
+			name: gitStack.stackName,
+			compose: syncResult.composeContent!,
+			envId: gitStack.environmentId,
+			sourceDir: syncResult.composeDir, // Copy entire directory from git repo
+			composeFileName: syncResult.composeFileName, // Use original compose filename from repo
+			envFileName: syncResult.envFileName, // Env file relative to compose dir (for --env-file flag, optional)
+			forceRecreate,
+			build: gitStack.buildOnDeploy,
+			noBuildCache: gitStack.noBuildCache,
+			pullPolicy: gitStack.repullImages ? 'always' : undefined,
+			filesToDelete: syncResult.deletionPlan?.toDelete,
+			isGitDeploy: true, // suppress stack_* notification; we emit git_sync_* below
+			onLine
+		});
+	} catch (error) {
+		// deployStack has never been observed to throw here (every existing caller of
+		// deployGitStack calls it without a try/catch around this point), but the
+		// record must not be left "running" forever on the day that changes. Best-effort:
+		// a recorder-close failure must not mask the original deploy error we re-throw.
+		try {
+			await recorder?.end(false, undefined, error instanceof Error ? error.message : String(error));
+		} catch (e) {
+			console.error(`${logPrefix} Failed to close run recorder on deploy error (original error preserved):`, e);
+		}
+		throw error;
+	}
+
+	// F4 fix: deployStack() resolves the bound secret provider's values internally,
+	// AFTER `recorder` above was already built from the DB-only nonSecretVars/
+	// secretVars this function read before calling it. Feed the provider-resolved
+	// values in now, before recorder.end() below -- otherwise a provider secret
+	// leaking into result.error (a real possibility: cron/webhook-triggered git
+	// deploys are exactly the unattended runs most likely to use a bound provider)
+	// would bypass end()'s redaction entirely. See deploy-run-record.ts.
+	recorder?.addSecrets(result.resolvedSecrets ?? []);
+
+	// Closed right after the result is known, before the post-success bookkeeping
+	// below (deletion sync, upsertStackSource) -- those never fail the deploy itself,
+	// so the recorded duration reflects the deploy, not the bookkeeping around it.
+	// Best-effort: a close failure (log FS / DB write) must NOT invert the already-known
+	// deploy result -- the deploy succeeded regardless of whether we could record it.
+	try {
+		await recorder?.end(result.success, undefined, result.success ? undefined : result.error);
+	} catch (e) {
+		console.error(`${logPrefix} Failed to close run recorder (deploy outcome unaffected):`, e);
+	}
 
 	console.log(`${logPrefix} ----------------------------------------`);
 	console.log(`${logPrefix} DEPLOY GIT STACK RESULT`);
@@ -1283,20 +1610,23 @@ export async function testGitStack(stackId: number): Promise<TestResult> {
 		return { success: false, error: 'Repository not found' };
 	}
 
+	// Per-stack branch override wins; unset means the repository default
+	const effectiveBranch = resolveStackBranch(gitStack, repo);
+
 	const credential = repo.credentialId ? await getGitCredential(repo.credentialId) : null;
 	const env = await buildGitEnv(credential);
-	assertSafeGitRef(repo.branch);
+	assertSafeGitRef(effectiveBranch);
 	const repoUrl = buildRepoUrl(repo.url, credential);
 
 	try {
 		// Use git ls-remote to test connection and get branch info
 		const result = await execGit(
-			['ls-remote', '--heads', '--refs', repoUrl, repo.branch],
+			['ls-remote', '--heads', '--refs', repoUrl, effectiveBranch],
 			process.cwd(),
 			env
 		);
 
-		cleanupSshKey(credential);
+		cleanupSshKey(credential, env);
 
 		if (result.code !== 0) {
 			return { success: false, error: result.stderr || 'Failed to connect to repository' };
@@ -1305,14 +1635,14 @@ export async function testGitStack(stackId: number): Promise<TestResult> {
 		// Parse the output to get commit hash
 		const lines = result.stdout.split('\n').filter(l => l.trim());
 		if (lines.length === 0) {
-			return { success: false, error: `Branch '${repo.branch}' not found in repository` };
+			return { success: false, error: `Branch '${effectiveBranch}' not found in repository` };
 		}
 
 		const match = lines[0].match(/^([a-f0-9]+)\s+refs\/heads\/(.+)$/);
 		const lastCommit = match ? match[1].substring(0, 7) : undefined;
-		const branch = match ? match[2] : repo.branch;
+		const branch = match ? match[2] : effectiveBranch;
 
-		cleanupSshKey(credential);
+		cleanupSshKey(credential, env);
 
 		return {
 			success: true,
@@ -1320,7 +1650,7 @@ export async function testGitStack(stackId: number): Promise<TestResult> {
 			lastCommit
 		};
 	} catch (error: any) {
-		cleanupSshKey(credential);
+		cleanupSshKey(credential, env);
 		return { success: false, error: error.message };
 	}
 }
@@ -1344,8 +1674,23 @@ type ProgressCallback = (data: {
 	step?: number;
 	totalSteps?: number;
 	error?: string;
+	// A raw (already secret-redacted) compose output line, forwarded alongside the
+	// discrete stages so the UI can show the full log under the step list. Carried on
+	// its own field, not `message`, so a log line is never rendered as a stage.
+	logLine?: string;
 }) => void;
 
+/**
+ * The UI's own "Deploy" button (deploy-stream/+server.ts): runs its own clone/read/
+ * deploy pipeline, reporting 5 discrete stages via onProgress, rather than calling
+ * deployGitStack() -- that function's onLine streams raw compose output lines, a
+ * different contract than the stage messages this one sends. Because of that split,
+ * this is a SECOND call site that reaches deployStack() directly, and it carries its
+ * own copy of the same stack_deploy run-record wiring deployGitStack() has (built
+ * right before its own deployStack() call below) rather than inheriting it -- see
+ * deployGitStack's doc comment for the full picture of which callers go through
+ * which path.
+ */
 export async function deployGitStackWithProgress(
 	stackId: number,
 	onProgress: ProgressCallback
@@ -1368,15 +1713,62 @@ export async function deployGitStackWithProgress(
 		return { success: false, error: 'Repository not found' };
 	}
 
+	// Per-stack branch override wins; unset means the repository default
+	const effectiveBranch = resolveStackBranch(gitStack, repo);
+
 	const credential = repo.credentialId ? await getGitCredential(repo.credentialId) : null;
 	const repoPath = await getStackRepoPath(stackId, gitStack.stackName, gitStack.environmentId);
 	const env = await buildGitEnv(credential);
 
 	const totalSteps = 5;
 
+	// Create the run recorder up front (not at the deploy step) so a failure at ANY
+	// stage -- clone/fetch/read or the deploy -- produces a Deploys-tab record with the
+	// git-stage log lines, instead of leaving no trace. Compose/env hashes start empty
+	// and are irrelevant for a failed pre-compose run; a successful run's real summary is
+	// still derived from the compose output streamed into the recorder below.
+	//
+	// The recorder is a BEST-EFFORT side channel: its DB/FS I/O must never abort the
+	// deploy nor flip its outcome. createRunRecorder does DB writes that can throw --
+	// swallow that here so a record-store hiccup degrades to "no run record", never a
+	// failed or aborted deploy.
+	const recorder = await createRunRecorder({
+		stackName: gitStack.stackName,
+		envId: gitStack.environmentId ?? null,
+		triggeredBy: 'manual',
+		options: { pull: !!gitStack.repullImages, build: !!gitStack.buildOnDeploy, forceRecreate: false },
+		composeHash: '',
+		envHash: '',
+		secrets: []
+	}).catch((e) => {
+		console.error('Failed to create git deploy run recorder (continuing without one):', e);
+		return null;
+	});
+
+	// Mirror every git-stage message into the run log so the record reads like the live
+	// dialog (Connecting / Cloning / Fetching / ...), and forward progress to the caller.
+	const onProgressAndRecord: ProgressCallback = (data) => {
+		if (typeof data.message === 'string') recorder?.line(data.message);
+		onProgress(data);
+	};
+
+	// end() writes the DB row and is not idempotent; guard so the deploy-throw path and
+	// the outer catch don't both close the same record. Best-effort: a close failure is
+	// logged, never propagated -- it must not invert a successful deploy's result.
+	let recorderEnded = false;
+	const endRecorder = async (ok: boolean, error?: string) => {
+		if (recorderEnded || !recorder) return;
+		recorderEnded = true;
+		try {
+			await recorder.end(ok, undefined, error);
+		} catch (e) {
+			console.error('Failed to close git deploy run recorder (deploy outcome unaffected):', e);
+		}
+	};
+
 	try {
 		// Step 1: Connecting
-		onProgress({ status: 'connecting', message: 'Connecting to repository...', step: 1, totalSteps });
+		onProgressAndRecord({ status: 'connecting', message: 'Connecting to repository...', step: 1, totalSteps });
 		await updateGitStack(stackId, { syncStatus: 'syncing', syncError: null });
 
 		let updated = false;
@@ -1388,19 +1780,19 @@ export async function deployGitStackWithProgress(
 		const previousCommit = await getPreviousCommit(repoPath, env) ?? gitStack.lastCommit ?? null;
 
 		// Step 2: Cloning
-		onProgress({ status: 'cloning', message: 'Cloning repository...', step: 2, totalSteps });
+		onProgressAndRecord({ status: 'cloning', message: 'Cloning repository...', step: 2, totalSteps });
 
 		if (existsSync(repoPath)) {
 			rmSync(repoPath, { recursive: true, force: true });
 		}
 
-		assertSafeGitRef(repo.branch);
+		assertSafeGitRef(effectiveBranch);
 		const repoUrl = buildRepoUrl(repo.url, credential);
 
 		// Step 3: Fetching (blobless clone - fetches all commits but blobs on-demand)
-		onProgress({ status: 'fetching', message: `Fetching branch ${repo.branch}...`, step: 3, totalSteps });
+		onProgressAndRecord({ status: 'fetching', message: `Fetching branch ${effectiveBranch}...`, step: 3, totalSteps });
 		const cloneResult = await execGit(
-			['clone', '--filter=blob:none', '--branch', repo.branch, repoUrl, repoPath],
+			['clone', '--filter=blob:none', '--branch', effectiveBranch, repoUrl, repoPath],
 			process.cwd(),
 			env
 		);
@@ -1439,7 +1831,7 @@ export async function deployGitStackWithProgress(
 		currentCommit = commitResult.stdout.substring(0, 7);
 
 		// Step 4: Reading compose file
-		onProgress({ status: 'reading', message: `Reading ${gitStack.composePath}...`, step: 4, totalSteps });
+		onProgressAndRecord({ status: 'reading', message: `Reading ${gitStack.composePath}...`, step: 4, totalSteps });
 		const composePath = repoFilePath(repoPath, gitStack.composePath, "Compose path");
 		if (!existsSync(composePath)) {
 			throw new Error(`Compose file not found: ${gitStack.composePath}`);
@@ -1500,7 +1892,7 @@ export async function deployGitStackWithProgress(
 			syncError: null
 		});
 
-		cleanupSshKey(credential);
+		cleanupSshKey(credential, env);
 
 		// Show the git file changes BEFORE the deploy starts, so the user sees
 		// what changed while the deploy runs and the deploy start/result lines
@@ -1514,14 +1906,14 @@ export async function deployGitStackWithProgress(
 				deletionData.plan.skipped
 			)
 		);
-		onProgress({ status: 'deploying', message: `File changes: ${changeTable[0]}`, step: 5, totalSteps });
+		onProgressAndRecord({ status: 'deploying', message: `File changes: ${changeTable[0]}`, step: 5, totalSteps });
 		for (const line of changeTable.slice(1)) {
-			onProgress({ status: 'deploying', message: line, step: 5, totalSteps });
+			onProgressAndRecord({ status: 'deploying', message: line, step: 5, totalSteps });
 		}
 
 		// Step 5: Deploying stack
 		// Uses `docker compose up -d --remove-orphans` which only recreates changed services
-		onProgress({ status: 'deploying', message: `Deploying ${gitStack.stackName}...`, step: 5, totalSteps });
+		onProgressAndRecord({ status: 'deploying', message: `Deploying ${gitStack.stackName}...`, step: 5, totalSteps });
 		if (deletionData.plan.toDelete.length > 0) {
 			onProgress({
 				status: 'deploying',
@@ -1540,18 +1932,58 @@ export async function deployGitStackWithProgress(
 			}
 		}
 
-		const result = await deployStack({
-			name: gitStack.stackName,
-			compose: composeContent,
-			envId: gitStack.environmentId,
-			sourceDir: composeDir, // Copy entire directory from git repo
-			composeFileName: progressComposeFileName, // Compose filename relative to source dir
-			envFileName, // Env file relative to compose dir (for --env-file flag, optional)
-			build: gitStack.buildOnDeploy,
-			noBuildCache: gitStack.noBuildCache,
-			pullPolicy: gitStack.repullImages ? 'always' : undefined,
-			filesToDelete: deletionData.plan.toDelete
-		});
+		// The recorder was created up front with empty hashes (for failure coverage before
+		// the compose is known); now that we have the compose + env, fill in the real
+		// content hashes and feed the env values in as redaction secrets. All best-effort:
+		// these reads/updates exist only for the recorder, so a decrypt/DB failure must not
+		// abort the deploy -- swallow it and proceed with whatever we could read.
+		try {
+			const nonSecretVars = await getNonSecretEnvVarsAsRecord(gitStack.stackName, gitStack.environmentId);
+			const secretVars = await getSecretEnvVarsAsRecord(gitStack.stackName, gitStack.environmentId);
+			const effectiveEnvVars = { ...nonSecretVars, ...secretVars };
+			recorder?.setContentHashes(hashComposeContent(composeContent), hashEnvFingerprint(effectiveEnvVars));
+			recorder?.addSecrets(Object.values(effectiveEnvVars));
+		} catch (e) {
+			console.error('Failed to read env vars for run-record redaction (deploy continues):', e);
+		}
+
+		let result: Awaited<ReturnType<typeof deployStack>>;
+		try {
+			result = await deployStack({
+				name: gitStack.stackName,
+				compose: composeContent,
+				envId: gitStack.environmentId,
+				sourceDir: composeDir, // Copy entire directory from git repo
+				composeFileName: progressComposeFileName, // Compose filename relative to source dir
+				envFileName, // Env file relative to compose dir (for --env-file flag, optional)
+				build: gitStack.buildOnDeploy,
+				noBuildCache: gitStack.noBuildCache,
+				pullPolicy: gitStack.repullImages ? 'always' : undefined,
+				filesToDelete: deletionData.plan.toDelete,
+				// Each `line` is already secret-redacted by deployStack (makeLineForwarder
+				// in stacks.ts). Mirror it into the run record's log file AND forward it to
+				// onProgress as a logLine so the UI shows the full compose log under the
+				// step list -- the same single redacted stream, two sinks.
+				onLine: (line) => {
+					recorder?.line(line);
+					onProgress({ status: 'deploying', logLine: line, step: 5, totalSteps });
+				}
+			});
+		} catch (error) {
+			// deployStack has never been observed to throw here, but the record must
+			// not be left "running" forever on the day that changes (same posture
+			// deployGitStack takes around its own deployStack call).
+			await endRecorder(false, error instanceof Error ? error.message : String(error));
+			throw error;
+		}
+
+		// F4 fix (see deployGitStack's own addSecrets() call for the full rationale):
+		// deployStack() resolves the bound secret provider's values internally, after
+		// `recorder` above was already built from the DB-only vars read before calling
+		// it. Feed the provider-resolved values in now, before recorder.end(), so a
+		// provider secret leaking into result.error is still redacted.
+		recorder?.addSecrets(result.resolvedSecrets ?? []);
+		await endRecorder(result.success, result.success ? undefined : result.error);
 
 		if (result.success) {
 			// Deletion sync: persist manifest + log per-file change summary.
@@ -1597,11 +2029,20 @@ export async function deployGitStackWithProgress(
 
 		return result;
 	} catch (error: any) {
-		cleanupSshKey(credential);
+		cleanupSshKey(credential, env);
 		await updateGitStack(stackId, {
 			syncStatus: 'error',
 			syncError: error.message
 		});
+		// Close the run record as failed. The recorder exists from the start, so a failure
+		// at ANY stage -- clone/fetch/read or the deploy -- leaves a record with the
+		// git-stage log lines captured above. Only log+close if the record isn't already
+		// closed (the deploy-throw inner catch closes it first); appending after close
+		// would write an orphan line the summarized row never reflects.
+		if (!recorderEnded) {
+			recorder?.line(`fatal: ${error.message}`);
+			await endRecorder(false, error.message);
+		}
 		onProgress({ status: 'error', error: error.message });
 		return { success: false, error: error.message };
 	}
@@ -1789,13 +2230,34 @@ export async function previewRepoEnvFiles(options: PreviewEnvOptions): Promise<P
 	console.log(`${logPrefix} Starting preview for ${repoUrl}`);
 	console.log(`${logPrefix} Temp directory: ${tempDir}`);
 
+	// Declared outside the try so the finally can pass it to cleanupSshKey (#1413):
+	// a block-scoped `const env` inside the try is out of scope in finally, which
+	// throws "env is not defined" before the real result/error is returned.
+	let env: GitEnv | undefined;
+
 	try {
 		// Ensure temp directory exists
 		mkdirSync(tempDir, { recursive: true });
 
 		// Build git environment with credentials
 		// Cast credential to GitCredential type (only uses id, authType, sshPrivateKey)
-		const env = await buildGitEnv(credential as GitCredential | null);
+		env = await buildGitEnv(credential as GitCredential | null);
+
+		// Security: the preview endpoint clones a
+		// USER-SUPPLIED URL and reads env files from it — the same SSRF / RCE /
+		// path-traversal surface as the branches endpoint. Apply the shared guards
+		// BEFORE any git subprocess or file read:
+		//  1. assertSafeRepoTarget — blocks loopback/link-local/metadata/reserved
+		//     hosts (SSRF) and the ext::/file:: transport denylist (RCE). Ordinary
+		//     private-LAN addresses are intentionally allowed (self-hosted Git).
+		//  2. repoFilePath — keeps composePath/envFilePath INSIDE the temp dir
+		//     (path traversal). Without this, `envFilePath: '../../secrets/x'`
+		//     reads a file outside the clone.
+		assertSafeRepoTarget(repoUrl);
+		// Validate containment now (throws on traversal) before any read; the base .env
+		// path itself is derived via repoBaseEnvPath below.
+		repoFilePath(tempDir, composePath, 'Compose path');
+		const safeEnvFilePath = envFilePath ? repoFilePath(tempDir, envFilePath, 'Env file path') : null;
 		assertSafeGitRef(branch);
 		const authenticatedUrl = buildRepoUrl(repoUrl, credential as GitCredential | null);
 
@@ -1820,9 +2282,9 @@ export async function previewRepoEnvFiles(options: PreviewEnvOptions): Promise<P
 
 		console.log(`${logPrefix} Clone successful`);
 
-		// Determine the compose directory (where .env file should be)
-		const composeDir = dirname(composePath);
-		const baseEnvPath = join(tempDir, composeDir, '.env');
+		// The base .env sits beside the compose file (repoBaseEnvPath keeps it inside the
+		// temp dir without doubling the prefix, #1495).
+		const baseEnvPath = repoBaseEnvPath(tempDir, composePath);
 
 		const vars: Record<string, string> = {};
 		const sources: Record<string, '.env' | 'envFile'> = {};
@@ -1841,9 +2303,10 @@ export async function previewRepoEnvFiles(options: PreviewEnvOptions): Promise<P
 			console.log(`${logPrefix} No .env file at ${baseEnvPath}`);
 		}
 
-		// Read additional env file if specified
-		if (envFilePath) {
-			const additionalEnvPath = join(tempDir, envFilePath);
+		// Read additional env file if specified — uses the VALIDATED path
+		// (already checked to be inside the temp dir).
+		if (safeEnvFilePath) {
+			const additionalEnvPath = safeEnvFilePath;
 			if (existsSync(additionalEnvPath)) {
 				console.log(`${logPrefix} Reading additional env file: ${additionalEnvPath}`);
 				const content = readFileSync(additionalEnvPath, 'utf-8');
@@ -1866,7 +2329,7 @@ export async function previewRepoEnvFiles(options: PreviewEnvOptions): Promise<P
 		return { vars: {}, sources: {}, error: error.message };
 	} finally {
 		// Always clean up temp directory
-		cleanupSshKey(credential as GitCredential | null);
+		cleanupSshKey(credential as GitCredential | null, env);
 		try {
 			if (existsSync(tempDir)) {
 				rmSync(tempDir, { recursive: true, force: true });

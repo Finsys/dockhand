@@ -1,5 +1,378 @@
 [
   {
+    "version": "1.0.47",
+    "date": "2026-09-12",
+    "comingSoon": false,
+    "changes": [
+      { "type": "feature", "text": "live compose output during deploys, plus a per-stack deploy history tab (#506, #1292, #1540, PR#1499, @strausmann)" },
+      { "type": "fix", "text": "back up stacks whose folder is bind-mounted over the data volume (#1533)" },
+      { "type": "fix", "text": "backup restore preview now works for view-only roles (#1534)" },
+      { "type": "feature", "text": "warn before saving a stack whose compose file location won't survive a container recreate (#1524)" },
+      { "type": "fix", "text": "OpenAPI spec accuracy fixes (#1531, #1530, PR#1532, @strausmann)" },
+      { "type": "fix", "text": "\"always redeploy\" git stacks now force-recreate so config changes take effect (#1523)" },
+      { "type": "fix", "text": "resolve secret references (op://, keepass://, ...) pasted with surrounding quotes (#1521)" },
+      { "type": "fix", "text": "deleting a secret provider now warns which stacks it unbinds (#1522)" },
+      { "type": "fix", "text": "deploy a 1:1-mounted local stack by file so its compose path label is preserved (#1514)" },
+      { "type": "fix", "text": "store the compose path when a stack is created via the API without one (#1515)" },
+      { "type": "fix", "text": "Microsoft Teams (via Workflows) accepts the new Power Automate webhook URL format (#1512)" },
+      { "type": "fix", "text": "container shell sessions each keep their own live terminal when you switch between them (#1516)" },
+      { "type": "fix", "text": "sort container uptimes under a minute correctly instead of tying them (PR#1395, @wrlee)" },
+      { "type": "fix", "text": "load the web manifest through a Cloudflare tunnel by sending credentials (PR#1513, @Macleykun)" },
+      { "type": "fix", "text": "copy the restic password over plain HTTP (#1488)" },
+      { "type": "fix", "text": "scope stack backup snapshots to their own environment (#1546)" },
+      { "type": "fix", "text": "theme defaults in General settings now save and display correctly when auth is on (#1547)" },
+      { "type": "feature", "text": "warn when a host's kernel has cgroup memory accounting disabled (#1549)" },
+      { "type": "fix", "text": "self-update no longer fails at the updater step on baseline (old x86_64) images (#1500)" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.47"
+  },
+  {
+    "version": "1.0.46",
+    "date": "2026-09-02",
+    "changes": [
+      { "type": "feature", "text": "restart a stack in depends_on order, keeping the same containers (#1480)" },
+      { "type": "feature", "text": "allow secret-less git webhooks via the ALLOW_WEBHOOKS_WITHOUT_SECRET env var" },
+      { "type": "feature", "text": "optional STACKS_DIR flat layout for local stacks (#514, #778, PR#1482, @xd003)" },
+      { "type": "fix", "text": "faster incremental backups when multiple stacks share one repository (#1494)" },
+      { "type": "fix", "text": "\"disable build cache\" no longer errors on deploy (#1479, PR#1020, @He-Is-HaZaRdOuS)" },
+      { "type": "fix", "text": "test connection on a saved environment without re-entering the token (#1483)" },
+      { "type": "fix", "text": "populate environment variables again finds the repo's .env file (#1495)" },
+      { "type": "fix", "text": "POST /api/stacks honors the target environment in the body (#1491)" },
+      { "type": "fix", "text": "large image scans no longer fail when the scanner log rotates (#1496)" },
+      { "type": "fix", "text": "Compose Validate no longer false-flags a valid env_file (#1497)" },
+      { "type": "fix", "text": "cache app icons in one request so the containers and stacks pages load faster" },
+      { "type": "fix", "text": "upgrade svelte to 5.56.10 (#1476, PR#1477, @ThanatosDi)" },
+      { "type": "fix", "text": "refresh the bundled docker-compose (5.5.0-r2)" },
+      { "type": "fix", "text": "stricter per-environment access and permission checks across the API" },
+      { "type": "fix", "text": "redact secret values from compose command output and restrict backup restore targets" },
+      { "type": "fix", "text": "local-path backup destinations now reject a host path that isn't a Dockhand bind mount (#1506)" },
+      { "type": "fix", "text": "escape $ in env values when generating a compose file from a container (#1507)" },
+      { "type": "fix", "text": "clearer git permission errors that match the credential type (token vs SSH key) (#1509)" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.46"
+  },
+  {
+    "version": "1.0.45",
+    "date": "2026-08-27",
+    "changes": [
+      { "type": "fix", "text": "security hardening across the API" },
+      { "type": "feature", "text": "KeePassXC as a secret provider - pull secrets from a .kdbx via keepassxc-cli, bulk or inline refs (#1460)" },
+      { "type": "feature", "text": "compose generated from a container now captures network config and resource limits (#1464)" },
+      { "type": "feature", "text": "compose validate flags a service with no healthcheck and a defined-but-unused named volume" },
+      { "type": "feature", "text": "optional Webhook column on the stacks list with a git stack's webhook id and copy-URL button (#845)" },
+      { "type": "feature", "text": "sort by Disk I/O and Net I/O - the header cycles read/write and down/up (#1111)" },
+      { "type": "feature", "text": "option to disable the session timeout (#1302)" },
+      { "type": "fix", "text": "pausing or resuming a backup schedule no longer clears the retention policy (#1462)" },
+      { "type": "fix", "text": "emergency script to relocate stack paths after moving DATA_DIR (#651, #904)" },
+      { "type": "fix", "text": "git stacks can now set a custom icon (#1473)" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.45"
+  },
+  {
+    "version": "1.0.44",
+    "date": "2026-08-25",
+    "changes": [
+      {
+        "type": "feature",
+        "text": "generate a compose file from any container - save as new or append to existing stack (#489)"
+      },
+      {
+        "type": "feature",
+        "text": "MQTT notification channel - publish events to a broker (#280)"
+      },
+      {
+        "type": "feature",
+        "text": "TLS backup repositories with a private CA and optional mutual TLS (#1451)"
+      },
+      {
+        "type": "feature",
+        "text": "custom stack and container icons, plus automatic container icons (#31)"
+      },
+      {
+        "type": "feature",
+        "text": "Azure Key Vault as a secret provider (bulk pull or inline azurekv:// references)"
+      },
+      {
+        "type": "feature",
+        "text": "Proton Pass inline references accept vault and item names, not just ids (pass://vault/item/field) (#1449)"
+      },
+      {
+        "type": "feature",
+        "text": "branch selector on git stack, with per-stack branch override (#649, PR#1343, @brx19)"
+      },
+      {
+        "type": "feature",
+        "text": "click the update icon in the image column to update a container (#1435)"
+      },
+      {
+        "type": "feature",
+        "text": "Pushover notifications can target specific devices (#1411)"
+      },
+      {
+        "type": "feature",
+        "text": "keep specific images from being pruned with a dockhand.prune=false label (#1391)"
+      },
+      {
+        "type": "fix",
+        "text": "Infisical secret references now resolve to their value instead of the raw reference (#1447)"
+      },
+      {
+        "type": "fix",
+        "text": "the version-update dialog no longer duplicates the old tag when the running image is digest-pinned (#1437)"
+      },
+      {
+        "type": "fix",
+        "text": "a compose stack with a restarting container now shows a Stop action instead of Start (#1438)"
+      },
+      {
+        "type": "fix",
+        "text": "optimize 1Password API calls on deploy (#1436)"
+      },
+      {
+        "type": "fix",
+        "text": "direct-remote staging pulls the alpine helper image instead of failing when it's missing (#1442)"
+      },
+      {
+        "type": "fix",
+        "text": "Proton Pass secrets now resolve on headless hosts with no system keyring (#1440)"
+      },
+      {
+        "type": "fix",
+        "text": "fix switching an Infisical provider back to a static token (#1448)"
+      },
+      {
+        "type": "fix",
+        "text": "fix backpressure in Docker streaming responses (PR#1445, @StefanSa)"
+      },
+      {
+        "type": "fix",
+        "text": "sort IPv6 subnets and addresses numerically instead of randomly (#1453)"
+      }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.44"
+  },
+  {
+    "version": "1.0.43",
+    "date": "2026-08-20",
+    "changes": [
+      {
+        "type": "fix",
+        "text": "registry auth survives an http to https token realm redirect behind a TLS proxy (#1428)"
+      },
+      {
+        "type": "fix",
+        "text": "security: update Go to 1.25.13 (8 HIGH stdlib CVEs) and update docker-compose to 5.5.0"
+      },
+      {
+        "type": "feature",
+        "text": "Compose validate - a preflight linter & validator for compose files"
+      },
+      {
+        "type": "feature",
+        "text": "Bitwarden Secrets Manager as a secret provider via an operator-installed bws client (PR#1416, @StefanSa)"
+      },
+      {
+        "type": "feature",
+        "text": "Proton Pass as a secret provider via an operator-installed pass-cli client"
+      },
+      {
+        "type": "feature",
+        "text": "Infisical: Universal Auth (Machine Identity) as well as a static token (#1398, @strausmann)"
+      },
+      {
+        "type": "feature",
+        "text": "detect newer version tags for pinned images and show them as a badge with release notes (#1176)"
+      },
+      {
+        "type": "feature",
+        "text": "OpenAPI spec at /api/docs with a Scalar viewer, opt-in via FEAT_API_DOCS (#814, PR#1342, @strausmann)"
+      },
+      {
+        "type": "feature",
+        "text": "Zabbix notification channel via the history.push API (PR#1419, @snesterkov)"
+      },
+      {
+        "type": "fix",
+        "text": "concurrent git syncs sharing an SSH credential no longer fail on a missing temp key (#1413, PR#1143, @HoroTW)"
+      },
+      {
+        "type": "fix",
+        "text": "backup notifications show a real title and message instead of \"undefined\" (#1414)"
+      },
+      {
+        "type": "fix",
+        "text": "git stacks accept a compose/env path with a leading slash (#1355)"
+      },
+      {
+        "type": "fix",
+        "text": "container update notifications now fire properly (#1424)"
+      },
+      {
+        "type": "fix",
+        "text": "Infisical: the project ID is optional when using a service token - it's taken from the token (#1398)"
+      },
+      {
+        "type": "fix",
+        "text": "API: adopting a stack rejects a compose path not on Dockhand's filesystem (#1375)"
+      },
+      {
+        "type": "fix",
+        "text": "API: validating a stack's env vars no longer drops the environment id (#1423)"
+      },
+      {
+        "type": "fix",
+        "text": "editing a secret provider no longer wipes its stored token (#1432)"
+      }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.43"
+  },
+  {
+    "version": "1.0.42",
+    "date": "2026-08-16",
+    "changes": [
+      {
+        "type": "feature",
+        "text": "optional indentation guides in the compose/YAML editor (#1410)"
+      },
+      {
+        "type": "feature",
+        "text": "support caddy-docker-proxy labels (#1390)"
+      },
+      {
+        "type": "fix",
+        "text": "updating a compose file over the API now saves it, not just deploys it (#1383)"
+      },
+      {
+        "type": "fix",
+        "text": "reopening the MFA setup screen while MFA is enabled no longer wipes the secret and backup codes (#1399)"
+      },
+      {
+        "type": "feature",
+        "text": "upload a Docker image .tar through the UI (docker load) for air-gapped hosts (#88, #1389)"
+      },
+      {
+        "type": "fix",
+        "text": "stack deploys no longer leak Dockhand's own DOCKER_HOST into services (#1393)"
+      },
+      {
+        "type": "feature",
+        "text": "stack secrets from external providers (1Password, HashiCorp Vault, Infisical and Doppler) (PR#1360, @wintech147, @GooRoo)"
+      },
+      {
+        "type": "fix",
+        "text": "container update no longer fails on Podman when CPU limits are set (#1381)"
+      },
+      {
+        "type": "fix",
+        "text": "container update no longer fails on Podman for containers using userns_mode: keep-id (#1409)"
+      },
+      {
+        "type": "fix",
+        "text": "stack deploy now respects DOCKER_CONFIG when pulling private images (#1376)"
+      },
+      {
+        "type": "fix",
+        "text": "start, stop or restart on Hawser updates its files on the remote host, not only on redeploy (#1240)"
+      },
+      {
+        "type": "fix",
+        "text": "grouped container logs now show one merged timeline sorted by time (#1406)"
+      },
+      {
+        "type": "fix",
+        "text": "multi-arch images no longer show false \"update available\" (#1367)"
+      }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.42"
+  },
+  {
+    "version": "1.0.41",
+    "date": "2026-08-09",
+    "changes": [
+      {
+        "type": "feature",
+        "text": "configurable default homepage (#1354)"
+      },
+      {
+        "type": "feature",
+        "text": "direct remote environments - remote stacks dir configurable, for putting the whole stack onto the remote"
+      },
+      {
+        "type": "feature",
+        "text": "S3 backup destinations take an AWS region with a region quick-pick"
+      },
+      {
+        "type": "feature",
+        "text": "registry browser shows tag size and date for self-hosted registries, loaded on expand (#876)"
+      },
+      {
+        "type": "fix",
+        "text": "activity log times now honor the configured timezone (#1183)"
+      },
+      {
+        "type": "fix",
+        "text": "container updates respect the new image's command/entrypoint (#1371)"
+      },
+      {
+        "type": "fix",
+        "text": "deleting a stack shows which folders will be removed, with a choice to keep/delete folders (#675)"
+      },
+      {
+        "type": "fix",
+        "text": "fixed an LDAP filter parsing issue that could break group-based role assignment with some AD DNs"
+      },
+      {
+        "type": "fix",
+        "text": "child containers using network_mode: service/container reconnect when their parent is updated (#570)"
+      },
+      {
+        "type": "fix",
+        "text": "dashboard pending-update count now matches the containers list (#1006)"
+      },
+      {
+        "type": "fix",
+        "text": "more room between settings/editor content and the scrollbar (#1171)"
+      },
+      {
+        "type": "fix",
+        "text": "GitLab and Harbor registries no longer report a misleading auth error when browsing (#873)"
+      },
+      {
+        "type": "fix",
+        "text": "backup volume picker shows every bind mount when two containers share a container path (#1373)"
+      },
+      {
+        "type": "fix",
+        "text": "Google Cloud backup destinations now use a service-account JSON key"
+      },
+      {
+        "type": "fix",
+        "text": "backup and restore helper containers no longer emit a \"container died\" notification when they finish"
+      },
+      {
+        "type": "fix",
+        "text": "snapshots from another Dockhand instance sharing the repo now appear as restorable orphans (#1351)"
+      },
+      {
+        "type": "fix",
+        "text": "a stack restored to new locations always keeps its compose file and stays internal (#1351)"
+      },
+      {
+        "type": "fix",
+        "text": "improved restic repository operations log (prune, check, repair index etc.)"
+      },
+      {
+        "type": "fix",
+        "text": "Azure Blob destinations no longer fail with 'invalid format' on init"
+      },
+      {
+        "type": "fix",
+        "text": "backup destinations now have separate extra backup and restore flags (#1349)"
+      }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.41"
+  },
+  {
     "version": "1.0.40",
     "date": "2026-07-31",
     "changes": [
@@ -332,7 +705,7 @@
       },
       {
         "type": "fix",
-        "text": "Pangolin labels \u2014 recognise the real `public-resources` / `private-resources` namespaces (#2)"
+        "text": "Pangolin labels — recognise the real `public-resources` / `private-resources` namespaces (#2)"
       },
       {
         "type": "fix",
@@ -351,7 +724,7 @@
     "changes": [
       {
         "type": "feature",
-        "text": "raw file download \u2014 no tar wrapping (#1180)"
+        "text": "raw file download — no tar wrapping (#1180)"
       },
       {
         "type": "fix",
@@ -379,7 +752,7 @@
       },
       {
         "type": "feature",
-        "text": "Traefik and Pangolin integration \u2014 surface proxy URLs on container and stack panels (#2)"
+        "text": "Traefik and Pangolin integration — surface proxy URLs on container and stack panels (#2)"
       },
       {
         "type": "feature",
@@ -391,7 +764,7 @@
       },
       {
         "type": "feature",
-        "text": "template library \u2014 browse and deploy compose templates from configurable sources (#48)"
+        "text": "template library — browse and deploy compose templates from configurable sources (#48)"
       },
       {
         "type": "fix",
@@ -406,7 +779,7 @@
     "changes": [
       {
         "type": "feature",
-        "text": "in-place container property updates without restart \u2014 restart policy, CPU/memory limits (#1153)"
+        "text": "in-place container property updates without restart — restart policy, CPU/memory limits (#1153)"
       },
       {
         "type": "feature",
@@ -430,7 +803,7 @@
       },
       {
         "type": "feature",
-        "text": "Apprise passthrough \u2014 forward to a self-hosted caronc/apprise-api server (#1099)"
+        "text": "Apprise passthrough — forward to a self-hosted caronc/apprise-api server (#1099)"
       },
       {
         "type": "fix",
@@ -544,7 +917,7 @@
     "changes": [
       {
         "type": "fix",
-        "text": "502 Bad Gateway behind nginx-based reverse proxies \u2014 SvelteKit 2.51+ bloated the Link response header, pinned to 2.50.0 (#1114)"
+        "text": "502 Bad Gateway behind nginx-based reverse proxies — SvelteKit 2.51+ bloated the Link response header, pinned to 2.50.0 (#1114)"
       }
     ],
     "imageTag": "fnsys/dockhand:v1.0.31"
@@ -555,11 +928,11 @@
     "changes": [
       {
         "type": "feature",
-        "text": "time range filter for log viewer \u2014 filter logs by From/To date and time (#1068)"
+        "text": "time range filter for log viewer — filter logs by From/To date and time (#1068)"
       },
       {
         "type": "feature",
-        "text": "configurable tail line count in log viewer \u2014 choose from 100 to all lines (#1066)"
+        "text": "configurable tail line count in log viewer — choose from 100 to all lines (#1066)"
       },
       {
         "type": "feature",
@@ -567,7 +940,7 @@
       },
       {
         "type": "feature",
-        "text": "\"some unused\" image filter \u2014 show images with both used and unused tags for selective cleanup (#621)"
+        "text": "\"some unused\" image filter — show images with both used and unused tags for selective cleanup (#621)"
       },
       {
         "type": "feature",
@@ -579,7 +952,7 @@
       },
       {
         "type": "fix",
-        "text": "scan cache lookup by tag name never matched \u2014 results now resolved via image digest (#1064)"
+        "text": "scan cache lookup by tag name never matched — results now resolved via image digest (#1064)"
       },
       {
         "type": "fix",
@@ -591,7 +964,7 @@
       },
       {
         "type": "feature",
-        "text": "Gotify notification priority via URL query param \u2014 gotify://host/token?priority=5 (#1033)"
+        "text": "Gotify notification priority via URL query param — gotify://host/token?priority=5 (#1033)"
       },
       {
         "type": "fix",
@@ -599,7 +972,7 @@
       },
       {
         "type": "feature",
-        "text": "named custom URL labels \u2014 dockhand.url=[Name](https://...) markdown syntax (#1065)"
+        "text": "named custom URL labels — dockhand.url=[Name](https://...) markdown syntax (#1065)"
       },
       {
         "type": "fix",
@@ -615,7 +988,7 @@
       },
       {
         "type": "feature",
-        "text": "live network attach/detach for running containers \u2014 join or leave Docker networks without restarting (#1051)"
+        "text": "live network attach/detach for running containers — join or leave Docker networks without restarting (#1051)"
       },
       {
         "type": "fix",
@@ -638,7 +1011,7 @@
       },
       {
         "type": "feature",
-        "text": "central label management \u2014 rename or delete labels across all environments (#661)"
+        "text": "central label management — rename or delete labels across all environments (#661)"
       },
       {
         "type": "feature",
@@ -646,7 +1019,7 @@
       },
       {
         "type": "feature",
-        "text": "theme-aware scrollbar styling \u2014 scrollbars adapt to dark/light mode and color palettes (#462)"
+        "text": "theme-aware scrollbar styling — scrollbars adapt to dark/light mode and color palettes (#462)"
       },
       {
         "type": "fix",
@@ -694,7 +1067,7 @@
       },
       {
         "type": "feature",
-        "text": "scan reports \u2014 combined or individual Grype/Trivy (#1056)"
+        "text": "scan reports — combined or individual Grype/Trivy (#1056)"
       }
     ],
     "imageTag": "fnsys/dockhand:v1.0.29"
@@ -705,7 +1078,7 @@
     "changes": [
       {
         "type": "feature",
-        "text": "context directory for git stacks \u2014 reference files from anywhere in the repo (#864)"
+        "text": "context directory for git stacks — reference files from anywhere in the repo (#864)"
       },
       {
         "type": "feature",
@@ -729,7 +1102,7 @@
       },
       {
         "type": "fix",
-        "text": "env var values leaked in deploy logs \u2014 now all values are redacted (#985)"
+        "text": "env var values leaked in deploy logs — now all values are redacted (#985)"
       },
       {
         "type": "fix",
@@ -745,7 +1118,7 @@
       },
       {
         "type": "fix",
-        "text": "case-sensitive environment sort order \u2014 lowercase names sorted after uppercase (#975)"
+        "text": "case-sensitive environment sort order — lowercase names sorted after uppercase (#975)"
       },
       {
         "type": "fix",
@@ -765,7 +1138,7 @@
       },
       {
         "type": "feature",
-        "text": "public IP setting available for hawser-edge environments \u2014 enables clickable port links (#350)"
+        "text": "public IP setting available for hawser-edge environments — enables clickable port links (#350)"
       },
       {
         "type": "fix",
@@ -904,11 +1277,11 @@
     "changes": [
       {
         "type": "feature",
-        "text": "API token authentication \u2014 Bearer tokens for CI/CD pipelines and scripts"
+        "text": "API token authentication — Bearer tokens for CI/CD pipelines and scripts"
       },
       {
         "type": "feature",
-        "text": "Telegram topic support \u2014 send notifications to supergroup topics (#855)"
+        "text": "Telegram topic support — send notifications to supergroup topics (#855)"
       },
       {
         "type": "fix",
@@ -978,7 +1351,7 @@
     "changes": [
       {
         "type": "feature",
-        "text": "theme toggle with system option \u2014 auto-follows OS light/dark preference (#803)"
+        "text": "theme toggle with system option — auto-follows OS light/dark preference (#803)"
       },
       {
         "type": "feature",
@@ -1002,7 +1375,7 @@
       },
       {
         "type": "fix",
-        "text": "stack restart fails for containers using network_mode: service:<container> \u2014 added recreate option (#844)"
+        "text": "stack restart fails for containers using network_mode: service:<container> — added recreate option (#844)"
       },
       {
         "type": "fix",
@@ -1178,7 +1551,7 @@
     "changes": [
       {
         "type": "feature",
-        "text": "Inline logs panel on stacks page \u2014 view container logs without leaving the page"
+        "text": "Inline logs panel on stacks page — view container logs without leaving the page"
       },
       {
         "type": "feature",

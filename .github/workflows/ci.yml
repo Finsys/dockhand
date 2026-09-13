@@ -1,0 +1,28 @@
+name: CI
+
+# Runs the unit test suite on pull requests and pushes. Only the unit tests in
+# tests/ live in this public mirror; the integration suite needs private CI
+# infrastructure and is not published here.
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      # No lockfile is published to the mirror, so resolve from package.json.
+      - name: Install dependencies
+        run: bun install
+
+      - name: Run unit tests
+        run: bun test tests/

@@ -17,6 +17,7 @@ import {
 import { getEnvironment, getEnvSetting, getSetting } from './db';
 import { sendEventNotification } from './notifications';
 import { detectRemoteSocketPath } from './scanner-socket-detect';
+import { truncateForLog, classifyUnparseableOutput } from './scanner-output-core';
 import {
 	getHostDockerSocket,
 	getHostDataDir,
@@ -546,11 +547,17 @@ function parseTrivyOutput(output: string): { vulnerabilities: Vulnerability[]; s
 		console.error('[Trivy] Failed to parse output:', errorMsg);
 		console.error('[Trivy] Output length:', output.length);
 		console.error('[Trivy] First 32 bytes (hex):', Buffer.from(output.slice(0, 32)).toString('hex'));
-		console.error('[Trivy] Full output:', output);
-		// Check if output looks like an error message from trivy
-		const firstLine = output.split('\n')[0].trim();
-		if (firstLine && !firstLine.startsWith('{')) {
-			throw new Error(`Scanner output error: ${firstLine}`);
+		// Never dump the whole report: a large truncated report is ~13 MB and this ran
+		// on every failed scan (#1496). Log only a bounded head + tail for diagnosis.
+		console.error('[Trivy] Output (head/tail):', truncateForLog(output));
+
+		const kind = classifyUnparseableOutput(output);
+		if (kind === 'truncated') {
+			// The head of the JSON was lost to container-log rotation the helper now disables (#1496).
+			throw new Error('Scanner output truncated (container log rotation?) - the JSON report was too large to read back in full');
+		}
+		if (kind === 'cli-error') {
+			throw new Error(`Scanner output error: ${output.trimStart().split('\n', 1)[0].trim()}`);
 		}
 		throw new Error('Failed to parse scanner output - ensure CLI args include "--format json"');
 	}

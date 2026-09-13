@@ -13,7 +13,9 @@
 # -----------------------------------------------------------------------------
 # IMPORTANT: Must use alpine builder so native addons (better-sqlite3) are
 # compiled against musl libc, not glibc. Cross-ABI copies would not work.
-FROM node:24-alpine AS app-builder
+# Pinned to 24.18.1 like the main Dockerfile: node 24.19.0 has a napi regression that
+# aborts the vite build with "Assertion failed: (env) != nullptr" (SIGABRT).
+FROM node:24.18.1-alpine AS app-builder
 
 WORKDIR /app
 
@@ -44,7 +46,7 @@ RUN cp -r node_modules/better-sqlite3/build /tmp/better-sqlite3-build \
 # -----------------------------------------------------------------------------
 # Stage 2: Go Collector Builder
 # -----------------------------------------------------------------------------
-FROM golang:1.25.12 AS go-builder
+FROM golang:1.25.13 AS go-builder
 WORKDIR /app
 COPY collector/ ./collector/
 RUN cd collector && CGO_ENABLED=0 go build -o /app/bin/collection-worker .
@@ -52,7 +54,7 @@ RUN cd collector && CGO_ENABLED=0 go build -o /app/bin/collection-worker .
 # -----------------------------------------------------------------------------
 # Stage 3: Final Image (Alpine-based runtime)
 # -----------------------------------------------------------------------------
-FROM node:24-alpine
+FROM node:24.18.1-alpine
 
 # Install runtime packages
 RUN apk add --no-cache \

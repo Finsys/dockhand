@@ -3,14 +3,22 @@
 	import { GitBranch, GitCommitHorizontal } from 'lucide-svelte';
 	import { forgeIcon } from '$lib/utils/git-forge';
 	import { appSettings } from '$lib/stores/settings';
+import { effectiveStackBranch } from '$lib/git-stack-branch';
 
 	interface Props {
-		source: { repository?: { url?: string; branch?: string } | null; gitStack?: { lastCommit?: string | null } | null };
+		source: { repository?: { url?: string; branch?: string } | null; gitStack?: { lastCommit?: string | null; branch?: string | null } | null };
 	}
 	let { source }: Props = $props();
 
 	const ForgeIcon = $derived(forgeIcon(source.repository?.url));
 	const showHash = $derived(!!source.gitStack?.lastCommit && $appSettings.showGitCommitHash);
+	// Effective branch: per-stack override wins, else repository default
+	// (shared with the server-side resolver in src/lib/git-stack-branch.ts).
+	const eff = $derived(
+		effectiveStackBranch(source.gitStack ?? null, source.repository ?? undefined)
+	);
+	const effectiveBranch = eff.branch;
+	const isPerStackBranch = eff.perStack === true;
 	// A tooltip is only worth showing when there's real git info in it.
 	const hasGitInfo = $derived(!!source.gitStack?.lastCommit || !!source.repository);
 </script>
@@ -41,10 +49,13 @@
 					</div>
 				{/if}
 				{#if source.repository}
-					{#if source.repository.branch}
+					{#if effectiveBranch}
 						<div class="flex items-center gap-2">
 							<GitBranch class="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
-							<span class="text-xs">{source.repository.branch}</span>
+							<span class="text-xs">{effectiveBranch}</span>
+							{#if isPerStackBranch}
+								<span class="text-[10px] text-muted-foreground">(per-stack)</span>
+							{/if}
 						</div>
 					{/if}
 					<div class="flex items-center gap-2">

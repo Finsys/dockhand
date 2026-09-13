@@ -1,0 +1,26 @@
+# syntax=docker/dockerfile:1.4
+# Dockhand Updater - BASELINE build (Alpine/musl, amd64 only)
+#
+# The normal updater (updater/Dockerfile) is Wolfi-based; Wolfi compiles its busybox
+# and docker-cli for x86-64-v2 (SSE4.2/POPCNT). On older x86_64 CPUs without those
+# instructions (TrueNAS, old Intel Atom/Celeron - the same hardware that needs the
+# baseline Dockhand image) the Wolfi updater can't exec at all: the entrypoint's shell
+# dies with "CPU does not support x86-64-v2", which Docker reports as exit 127 at the
+# "Launching updater" step, so self-update is completely broken for baseline users.
+#
+# Alpine's musl busybox + docker-cli run on x86-64-v1, so the baseline updater is a
+# plain Alpine image running the same /update.sh. amd64 only - baseline is a workaround
+# for old x86_64 hardware, not an ARM concern.
+#
+# Rebuild trigger: the pipeline is change-gated on updater/, so touching this file
+# forces a rebuild of the -baseline tag.
+FROM alpine:3.21
+
+# docker-cli (the stop/rm/rename/network/start the sidecar does) + busybox is the base
+# Alpine shell, tar and date. That covers everything /update.sh needs.
+RUN apk add --no-cache docker-cli
+
+COPY update.sh /update.sh
+RUN chmod +x /update.sh
+
+ENTRYPOINT ["/update.sh"]

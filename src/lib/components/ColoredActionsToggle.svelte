@@ -3,19 +3,23 @@
 	import { TogglePill } from '$lib/components/ui/toggle-pill';
 	import { themeStore } from '$lib/stores/theme';
 	import { authStore } from '$lib/stores/auth';
+	import { resolveToggleValue, shouldSkipApply } from '$lib/utils/theme-preference';
 	import { toast } from 'svelte-sonner';
 
 	interface Props {
 		userId?: number; // omit for global default (login page / auth-disabled)
+		// When set, the toggle reflects and saves this global default (the General settings
+		// editor) instead of the current user's profile preference. Omit elsewhere.
+		globalValue?: boolean;
 	}
 
-	let { userId }: Props = $props();
+	let { userId, globalValue }: Props = $props();
 
-	const skipApply = $derived($authStore.loading ? true : ($authStore.authEnabled && !userId));
+	const skipApply = $derived(shouldSkipApply($authStore.loading, $authStore.authEnabled, userId));
 
 	let checked = $state(false);
 	$effect(() => {
-		checked = $themeStore.coloredActionButtons;
+		checked = resolveToggleValue(globalValue, $themeStore.coloredActionButtons);
 	});
 
 	function onToggle(value: boolean) {

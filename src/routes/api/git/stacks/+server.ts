@@ -8,18 +8,27 @@ import {
 	createGitRepository,
 	upsertStackSource,
 	setStackEnvVars,
-	getStackSource
+	getStackSource,
+	secretProviderExists
 } from '$lib/server/db';
 import { deployGitStack } from '$lib/server/git';
 import { authorize } from '$lib/server/authorize';
 import { registerSchedule } from '$lib/server/scheduler';
 import { auditGitStack } from '$lib/server/audit';
 import { createJobResponse } from '$lib/server/sse';
+import { allowSecretlessWebhook, webhookConfigRequiresSecret } from '$lib/server/webhook-secret-policy';
 
 // Stack name validation: Docker Compose requires lowercase; must start with a
 // letter or number, and contain only lowercase letters, numbers, hyphens, underscores
 const STACK_NAME_REGEX = /^[a-z0-9][a-z0-9_-]*$/;
 
+/**
+ * @openapi
+ * summary: List git-deployed stacks (optionally scoped to one environment)
+ * query: env:integer Filter to a single environment id
+ * resp-403: Permission denied (needs stacks:view)
+ * resp-500: Failed to list git stacks
+ */
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	const auth = await authorize(cookies);
 
@@ -41,6 +50,15 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 	}
 };
 
+/**
+ * @openapi
+ * summary: Create a git-deployed stack (from an existing repo or new repo url/branch)
+ * body: {stackName:string!, environmentId:integer, repositoryId:integer, secretProviderId:integer, webhookEnabled:boolean, webhookSecret:string}
+ * resp-400: Invalid stack name, or secretProviderId is not a number/null
+ * resp-403: Permission denied (needs stacks:create; binding a secret provider also needs secrets:view)
+ * resp-409: A git stack with this name already exists in the environment
+ * resp-500: Failed to create the git stack
+ */
 export const POST: RequestHandler = async (event) => {
 	const { request, cookies } = event;
 	const auth = await authorize(cookies);
@@ -62,6 +80,32 @@ export const POST: RequestHandler = async (event) => {
 			return json({ error: 'Stack name must be lowercase, start with a letter or number, and contain only letters, numbers, hyphens, and underscores' }, { status: 400 });
 		}
 
+		if (
+			'secretProviderId' in data &&
+			data.secretProviderId !== null &&
+			typeof data.secretProviderId !== 'number'
+		) {
+			return json({ error: 'secretProviderId must be a number or null' }, { status: 400 });
+		}
+
+		// Binding a secret provider resolves its secrets into the container at deploy;
+		// require the secrets permission so a stacks-only user can't exfiltrate a
+		// provider's secrets by binding it and reading the container env.
+		if (
+			typeof data.secretProviderId === 'number' &&
+			auth.authEnabled &&
+			!(await auth.can('secrets', 'view', data.environmentId || undefined))
+		) {
+			return json({ error: 'Permission denied: binding a secret provider requires the secrets permission' }, { status: 403 });
+		}
+
+		// A stale provider id (e.g. the provider was deleted/recreated while the editor
+		// held the old list) would otherwise hit a raw foreign-key error on save. Reject
+		// it cleanly so the user knows to reselect a provider (#1522).
+		if (typeof data.secretProviderId === 'number' && !(await secretProviderExists(data.secretProviderId))) {
+			return json({ error: 'The selected secret provider no longer exists. Reopen the stack and pick a current provider.' }, { status: 400 });
+		}
+
 		// Check for name conflicts with existing stacks (regular/external/git)
 		const existing = await getStackSource(trimmedStackName, data.environmentId || null);
 		if (existing) {
@@ -69,7 +113,7 @@ export const POST: RequestHandler = async (event) => {
 		}
 
 		// A secret is mandatory when the webhook is enabled.
-		if (data.webhookEnabled && !data.webhookSecret?.trim()) {
+		if (webhookConfigRequiresSecret(!!data.webhookEnabled, !!data.webhookSecret?.trim(), allowSecretlessWebhook())) {
 			return json({ error: 'A webhook secret is required when the webhook is enabled' }, { status: 400 });
 		}
 
@@ -119,6 +163,12 @@ export const POST: RequestHandler = async (event) => {
 			stackName: trimmedStackName,
 			environmentId: data.environmentId || null,
 			repositoryId: repositoryId,
+			// Per-stack branch override — only when targeting an existing repository.
+			// In new-repo mode data.branch becomes the repository's default instead;
+			// the stack inherits it (branch stays null).
+			...(data.repositoryId && typeof data.branch === 'string' && data.branch.trim()
+				? { branch: data.branch.trim() }
+				: {}),
 			composePath: data.composePath || 'compose.yaml',
 			envFilePath: data.envFilePath || null,
 			autoUpdate: data.autoUpdate || false,
@@ -139,7 +189,8 @@ export const POST: RequestHandler = async (event) => {
 			environmentId: data.environmentId || null,
 			sourceType: 'git',
 			gitRepositoryId: repositoryId,
-			gitStackId: gitStack.id
+			gitStackId: gitStack.id,
+			secretProviderId: data.secretProviderId ?? null
 		});
 
 		// Register schedule with croner if auto-update is enabled
@@ -172,7 +223,11 @@ export const POST: RequestHandler = async (event) => {
 		if (data.deployNow) {
 			return createJobResponse(async (send) => {
 				try {
-					const deployResult = await deployGitStack(gitStack.id);
+					const deployResult = await deployGitStack(gitStack.id, {
+						triggeredBy: 'manual',
+						userId: auth.user?.id,
+						onLine: (line) => send('progress', { type: 'line', line })
+					});
 					await auditGitStack(event, 'deploy', gitStack.id, gitStack.stackName, gitStack.environmentId);
 					send('result', {
 						...gitStack,

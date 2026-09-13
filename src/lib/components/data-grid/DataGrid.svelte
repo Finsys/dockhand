@@ -5,6 +5,7 @@
 	import { columnResize } from '$lib/actions/column-resize';
 	import { gridPreferencesStore } from '$lib/stores/grid-preferences';
 	import { getAllColumnConfigs } from '$lib/config/grid-columns';
+	import { nextIoSortState } from '$lib/utils/io-sort-cycle';
 	import ColumnSettingsPopover from '$lib/components/ColumnSettingsPopover.svelte';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import type { GridId, ColumnConfig, ColumnPreference } from '$lib/types';
@@ -132,8 +133,8 @@
 	const orderedColumns = $derived.by(() => {
 		const prefs = gridPrefs[gridId];
 		if (!prefs?.columns?.length) {
-			// Default: all configurable columns visible
-			return columnConfigs.filter((c) => !c.fixed).map((c) => c.id);
+			// Default: configurable columns visible (honoring per-column defaultVisible)
+			return columnConfigs.filter((c) => !c.fixed && c.defaultVisible !== false).map((c) => c.id);
 		}
 		// Filter out fixed columns - they're rendered separately via fixedStartCols/fixedEndCols
 		const fixedIds = new Set([...fixedStartCols, ...fixedEndCols]);
@@ -369,9 +370,36 @@
 	});
 
 	// Sort helpers
-	function toggleSort(field: string) {
+	// One-char badge for the active I/O sub-metric next to a sortCycle column's label.
+	// Char + colour mirror the cell glyphs (Disk r=green/w=yellow, Net d=blue/u=orange).
+	const IO_METRIC_LABELS: Record<string, string> = {
+		diskRead: 'r', diskWrite: 'w', netRx: 'd', netTx: 'u'
+	};
+	const IO_METRIC_COLORS: Record<string, string> = {
+		diskRead: 'text-green-400', diskWrite: 'text-yellow-400',
+		netRx: 'text-blue-400', netTx: 'text-orange-400'
+	};
+	function ioMetricLabel(field: string): string {
+		return IO_METRIC_LABELS[field] ?? '';
+	}
+	function ioMetricColor(field: string): string {
+		return IO_METRIC_COLORS[field] ?? 'text-primary';
+	}
+
+	function toggleSort(colId: string) {
 		if (!onSortChange) return;
 
+		const cycle = columnConfigMap.get(colId)?.sortCycle;
+		if (cycle?.length) {
+			// A two-metric column (e.g. Disk I/O) cycles read/write x asc/desc (#1111).
+			onSortChange(nextIoSortState(cycle as any, {
+				field: sortState?.field ?? '',
+				direction: sortState?.direction ?? 'asc'
+			}));
+			return;
+		}
+
+		const field = getSortField(colId);
 		const newState: DataGridSortState = sortState?.field === field
 			? { field, direction: sortState.direction === 'asc' ? 'desc' : 'asc' }
 			: { field, direction: 'asc' };
@@ -769,13 +797,25 @@
 						{#if headerCell}
 							{@render headerCell(colConfig, sortState)}
 						{:else if isSortable(colId)}
+							{@const cycleActive = colConfig.sortCycle?.some((s) => s.field === sortState?.field)}
 							<button
 								type="button"
-								onclick={() => toggleSort(getSortField(colId))}
+								onclick={() => toggleSort(colId)}
 								class="flex items-center gap-1 hover:text-foreground transition-colors w-full {colConfig.align === 'right' ? 'justify-end' : colConfig.align === 'center' ? 'justify-center' : ''}"
 							>
 								{colConfig.label}
-								{#if sortState?.field === getSortField(colId)}
+								{#if colConfig.sortCycle}
+									{#if cycleActive}
+										<span class="text-xs font-semibold {ioMetricColor(sortState!.field)}">{ioMetricLabel(sortState!.field)}</span>
+										{#if sortState!.direction === 'asc'}
+											<ArrowUp class="w-3 h-3" />
+										{:else}
+											<ArrowDown class="w-3 h-3" />
+										{/if}
+									{:else}
+										<ArrowUpDown class="w-3 h-3 opacity-30" />
+									{/if}
+								{:else if sortState?.field === getSortField(colId)}
 									{#if sortState.direction === 'asc'}
 										<ArrowUp class="w-3 h-3" />
 									{:else}

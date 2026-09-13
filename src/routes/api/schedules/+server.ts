@@ -29,7 +29,7 @@ import { authorize } from '$lib/server/authorize';
 
 export interface ScheduleInfo {
 	id: number;
-	type: 'container_update' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune' | 'backup' | 'repo_prune' | 'repo_check' | 'repo_verify';
+	type: 'container_update' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune' | 'backup' | 'repo_prune' | 'repo_check' | 'repo_verify' | 'stack_deploy' | 'deploy_log_reconcile';
 	name: string;
 	entityName: string;
 	description?: string;
@@ -47,6 +47,12 @@ export interface ScheduleInfo {
 	vulnerabilityCriteria?: VulnerabilityCriteria | null;
 }
 
+/**
+ * @openapi
+ * summary: List all schedules (container/env auto-updates, git syncs, image-prune, backups, repo maintenance, system jobs)
+ * resp-200: {schedules:array<{id:integer!, type:string!, name:string!, entityName:string!, environmentId:integer, enabled:boolean!, cronExpression:string, nextRun:string, isSystem:boolean!}>!}
+ * resp-500: Unexpected error while assembling the schedule list
+ */
 export const GET: RequestHandler = async ({ cookies }) => {
 	const auth = await authorize(cookies);
 

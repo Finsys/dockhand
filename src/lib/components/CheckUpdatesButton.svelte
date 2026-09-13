@@ -5,11 +5,18 @@
 	import { toast } from 'svelte-sonner';
 	import { appendEnvParam } from '$lib/stores/environment';
 	import { watchJob } from '$lib/utils/sse-fetch';
+	import type { NewerVersion } from '$lib/types';
 
 	export interface UpdateCheckResultItem {
 		containerId: string;
 		containerName: string;
 		imageName: string;
+	}
+
+	/** A container that has a newer VERSION tag (semver) — independent of digest updates. */
+	export interface NewerVersionItem {
+		containerId: string;
+		newerVersion: NewerVersion;
 	}
 
 	export interface FailedCheckItem {
@@ -24,7 +31,11 @@
 		/** When true and no check is running, the button reflects the "updates found" (green) state — e.g. from persisted pending updates loaded on mount. */
 		hasPendingUpdates?: boolean;
 		/** Called when a check finishes with the containers that have updates and any failures. */
-		onComplete?: (result: { withUpdates: UpdateCheckResultItem[]; failed: FailedCheckItem[] }) => void;
+		onComplete?: (result: {
+			withUpdates: UpdateCheckResultItem[];
+			failed: FailedCheckItem[];
+			newerVersions: NewerVersionItem[];
+		}) => void;
 	}
 
 	let { envId, hasPendingUpdates = false, onComplete }: Props = $props();
@@ -119,8 +130,19 @@
 			const failed: FailedCheckItem[] = data.results
 				.filter((r: any) => r.error && !r.hasUpdate)
 				.map((r: any) => ({ containerId: r.containerId, containerName: r.containerName, imageName: r.imageName, error: r.error }));
+			// Semver suggestions are independent of digest updates: a container can be
+			// digest-current yet run an outdated version tag.
+			const newerVersions: NewerVersionItem[] = data.results
+				.filter((r: any) => r.newerVersion && !r.systemContainer && !r.updateDisabled)
+				.map((r: any) => ({ containerId: r.containerId, newerVersion: r.newerVersion }));
 
-			if (withUpdates.length === 0) {
+			// A newer version tag is a real result even when no digest update exists,
+			// so it counts toward the "found" state and the summary message.
+			const semverNote = newerVersions.length > 0
+				? `${newerVersions.length} newer version tag${newerVersions.length !== 1 ? 's' : ''}`
+				: '';
+
+			if (withUpdates.length === 0 && newerVersions.length === 0) {
 				// Keep the "Latest" status until re-check / env-switch — don't auto-revert (#1019)
 				status = 'none';
 				if (failed.length > 0) {
@@ -130,14 +152,19 @@
 				}
 			} else {
 				status = 'found';
+				const parts = [
+					withUpdates.length > 0 ? `${withUpdates.length} update${withUpdates.length !== 1 ? 's' : ''} available` : '',
+					semverNote
+				].filter(Boolean);
+				const summary = parts.join(', ');
 				if (failed.length > 0) {
-					showFailedChecksToast(failed, `${withUpdates.length} update(s) available`);
+					showFailedChecksToast(failed, summary);
 				} else {
-					toast.info(`${withUpdates.length} update(s) available`);
+					toast.info(summary);
 				}
 			}
 
-			onComplete?.({ withUpdates, failed });
+			onComplete?.({ withUpdates, failed, newerVersions });
 		} catch {
 			failError();
 		}

@@ -465,16 +465,10 @@
 					<!-- svelte-ignore a11y_no_static_element_interactions -->
 					<div class="animate-speedy {isJumping ? (clickCount >= 10 ? 'crazy-jumping' : `jumping-${jumpLevel}`) : ''} {hasClicked && !isJumping ? 'clicked' : ''}" onclick={handleLogoClick}>
 						<img
-							src="/logo-light.webp"
+							src="/logo.svg"
 							alt="Dockhand Logo"
-							class="h-36 w-auto object-contain dark:hidden"
-							style="filter: drop-shadow(1px 1px 2px rgba(0,0,0,0.3)) drop-shadow(-1px -1px 1px rgba(255,255,255,0.9));"
-						/>
-						<img
-							src="/logo-dark.webp"
-							alt="Dockhand Logo"
-							class="h-36 w-auto object-contain hidden dark:block"
-							style="filter: drop-shadow(2px 2px 3px rgba(0,0,0,0.6)) drop-shadow(-1px -1px 1px rgba(255,255,255,0.2));"
+							class="h-36 w-auto object-contain"
+							style="filter: drop-shadow(0 2px 3px rgba(0,0,0,0.22));"
 						/>
 						<!-- Sparkles on DOCKHAND text area (bottom half) -->
 						<span class="sparkle sparkle-1">✦</span>
@@ -851,7 +845,7 @@
 						<div class="text-sm text-destructive">{changelogError}</div>
 					</div>
 				{:else}
-					<div class="space-y-2 max-h-[400px] overflow-y-auto">
+					<div class="space-y-2 max-h-[400px] overflow-y-auto pr-2">
 						{#each changelog as release, index}
 							{@const isExpanded = expandedReleases.has(index)}
 							<div class="border rounded-lg {index === 0 ? 'border-primary/30 bg-primary/5' : ''}">
@@ -935,7 +929,7 @@
 							<div class="w-24 text-center">License</div>
 							<div class="w-8"></div>
 						</div>
-						<div class="max-h-[300px] overflow-y-auto">
+						<div class="max-h-[300px] overflow-y-auto pr-2">
 							{#each filteredDeps as dep}
 								<div class="grid grid-cols-[1fr_auto_auto_auto] gap-2 text-xs px-2 py-1.5 hover:bg-muted/50 rounded items-center">
 									<div class="font-mono text-[11px] truncate" title={dep.name}>{dep.name}</div>

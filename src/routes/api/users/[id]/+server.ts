@@ -20,6 +20,16 @@ import { invalidateTokenCacheForUser } from '$lib/server/api-tokens';
 
 // GET /api/users/[id] - Get a specific user
 // Free for all - local users are needed for basic auth
+/**
+ * @openapi
+ * summary: Get a single user by id (password hash is never returned; isAdmin is derived from role assignment)
+ * path: id:integer! Numeric id of the user (from GET /api/users)
+ * resp-200: {id:integer!, username:string!, email:string, displayName:string, mfaEnabled:boolean!, isAdmin:boolean!, isActive:boolean!, lastLogin:string, createdAt:string!, updatedAt:string!}
+ * resp-400: User id is required
+ * resp-401: Authentication required (auth is enabled and the caller is not authenticated)
+ * resp-404: User not found
+ * resp-500: Failed to read the user
+ */
 export const GET: RequestHandler = async ({ params, cookies }) => {
 	const auth = await authorize(cookies);
 
@@ -63,6 +73,20 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 
 // PUT /api/users/[id] - Update a user
 // Free for all - local users are needed for basic auth
+/**
+ * @openapi
+ * summary: Update a user (self-edit is always allowed; admin/active changes require admin; demoting or deactivating the last admin needs confirmDisableAuth)
+ * path: id:integer! Numeric id of the user (from GET /api/users)
+ * body: {username:string, email:string, displayName:string, isAdmin:boolean, isActive:boolean, password:string, confirmDisableAuth:boolean}
+ * body-example: {"displayName":"Jane Doe","email":"jane@example.com"}
+ * resp-200: {id:integer!, username:string!, email:string, displayName:string, mfaEnabled:boolean!, isAdmin:boolean!, isActive:boolean!, lastLogin:string, createdAt:string!, updatedAt:string!}
+ * resp-400: User id is required, or the new password is shorter than 8 characters
+ * resp-401: Authentication required (auth is enabled and the caller is not authenticated)
+ * resp-403: Permission denied (editing another user without users:edit)
+ * resp-404: User not found
+ * resp-409: This is the last admin user (confirmDisableAuth required), or the username already exists
+ * resp-500: Failed to update the user
+ */
 export const PUT: RequestHandler = async (event) => {
 	const { params, request, cookies } = event;
 	const auth = await authorize(cookies);
@@ -73,10 +97,20 @@ export const PUT: RequestHandler = async (event) => {
 
 	const userId = parseInt(params.id);
 
-	// Allow users to edit their own profile, otherwise check permission
-	// (free edition allows all, enterprise checks RBAC)
-	if (auth.user && auth.user.id !== userId && !await auth.can('users', 'edit')) {
-		return json({ error: 'Permission denied' }, { status: 403 });
+	// Require an authenticated caller when auth is enabled.
+	if (auth.authEnabled && !auth.isAuthenticated) {
+		return json({ error: 'Authentication required' }, { status: 401 });
+	}
+
+	// With auth enabled: allow a user to edit their own profile, otherwise require the
+	// users-edit permission. Written fail-closed - editing another account is denied
+	// unless there is a caller who either is that user or holds the permission - so it
+	// does not depend on the 401 above having run first.
+	if (auth.authEnabled) {
+		const isSelfEdit = auth.user?.id === userId;
+		if (!isSelfEdit && !await auth.can('users', 'edit')) {
+			return json({ error: 'Permission denied' }, { status: 403 });
+		}
 	}
 
 	try {
@@ -253,9 +287,27 @@ export const PUT: RequestHandler = async (event) => {
 
 // DELETE /api/users/[id] - Delete a user
 // Free for all - local users are needed for basic auth
+/**
+ * @openapi
+ * summary: Delete a user by id; deleting the last admin while auth is enabled disables authentication and requires confirmDisableAuth
+ * path: id:integer! Numeric id of the user (from GET /api/users)
+ * query: confirmDisableAuth:boolean Set to true to confirm deleting the last admin (which disables authentication)
+ * resp-200: {success:boolean!, authDisabled:boolean}
+ * resp-400: User id is required
+ * resp-401: Authentication required (auth is enabled and the caller is not authenticated)
+ * resp-403: Permission denied (missing users:remove)
+ * resp-404: User not found
+ * resp-409: This is the last admin user — pass confirmDisableAuth=true to proceed
+ * resp-500: Failed to delete the user
+ */
 export const DELETE: RequestHandler = async (event) => {
 	const { params, url, cookies } = event;
 	const auth = await authorize(cookies);
+
+	// Require an authenticated caller when auth is enabled, before the permission check.
+	if (auth.authEnabled && !auth.isAuthenticated) {
+		return json({ error: 'Authentication required' }, { status: 401 });
+	}
 
 	// When auth is enabled, check permission (free edition allows all, enterprise checks RBAC)
 	if (auth.authEnabled && auth.isAuthenticated && !await auth.can('users', 'remove')) {

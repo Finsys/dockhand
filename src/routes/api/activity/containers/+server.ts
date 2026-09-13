@@ -3,6 +3,15 @@ import { getContainerEventContainers } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
 import type { RequestHandler } from './$types';
 
+/**
+ * @openapi
+ * summary: List distinct container names that appear in the activity log, for filter dropdowns
+ * query: environment_id:integer Filter to a single environment (from GET /api/environments)
+ * resp-200: array<string>
+ * resp-200-example: ["web-1","db-1","cache-1"]
+ * resp-403: Permission denied (requires the activity:view permission)
+ * resp-500: Failed to fetch container names
+ */
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	const auth = await authorize(cookies);
 

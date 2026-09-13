@@ -1,13 +1,14 @@
-/** Pushover. pushover://user_key/api_token. */
+/** Pushover. pushover://user_key/api_token[/device...] or pover://user_key@api_token[/device...]. */
 import { notificationFetch, drainResponse, type NotificationPayload, type NotificationResult } from './shared';
+import { parsePushoverUrl } from '$lib/utils/notification-parsers';
 
 export async function sendPushover(appriseUrl: string, payload: NotificationPayload): Promise<NotificationResult> {
-	const match = appriseUrl.match(/^pushover:\/\/([^/]+)\/(.+)/);
-	if (!match) {
-		return { success: false, error: 'Invalid Pushover URL format. Expected: pushover://user_key/api_token' };
+	const parsed = parsePushoverUrl(appriseUrl);
+	if (!parsed) {
+		return { success: false, error: 'Invalid Pushover URL format. Expected: pushover://user_key/api_token[/device]' };
 	}
 
-	const [, userKey, apiToken] = match;
+	const { userKey, apiToken, device } = parsed;
 	const url = 'https://api.pushover.net/1/messages.json';
 	const titleWithEnv = payload.environmentName ? `${payload.title} [${payload.environmentName}]` : payload.title;
 
@@ -20,7 +21,9 @@ export async function sendPushover(appriseUrl: string, payload: NotificationPayl
 				user: userKey,
 				title: titleWithEnv,
 				message: payload.message,
-				priority: payload.type === 'error' ? 1 : 0
+				priority: payload.type === 'error' ? 1 : 0,
+				// Optional: a comma-separated device list restricts delivery; omit to reach all devices.
+				...(device ? { device } : {})
 			})
 		});
 

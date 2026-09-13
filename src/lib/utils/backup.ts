@@ -95,6 +95,9 @@ export interface BackupOptions {
 	excludeCaches?: boolean;
 	webhookSuccess?: string;
 	webhookFailure?: string;
+	/** Stack-dir entries the user DEselected in the "Stack files on the host" picker; excluded
+	 * from the stack-dir capture (never load-bearing compose/.env - the server re-guards). */
+	excludedStackFiles?: string[];
 }
 
 export function parseRetention(retention: string | RetentionPolicy | null | undefined): RetentionPolicy {
@@ -384,4 +387,50 @@ export async function fetchBackupExecutions(
 		} catch { /* one config's history is best-effort */ }
 	}));
 	return computeExecutionTally(all);
+}
+
+/**
+ * Does a snapshot (by its restic tags) belong to the stack/container Backups view for a
+ * given set of ENV-SCOPED config ids? A same-name stack on another environment writes to
+ * the same shared repo and carries the same `dockhand:name=<target>` tag, so filtering by
+ * name alone mixed snapshots (and "latest") across environments (#1546). `configIds` are
+ * already env-scoped by the caller and `dockhand:configid` uniquely identifies a
+ * (target, env) config, so we match on that. When no config ids are known (should not
+ * happen once a target has any backup config) fall back to the name tag rather than hide
+ * everything. Pure + unit-testable.
+ */
+export function snapshotMatchesConfigScope(
+	tags: string[] | undefined,
+	configIds: number[],
+	targetName: string
+): boolean {
+	const t = tags ?? [];
+	if (configIds.length > 0) {
+		for (const tag of t) {
+			if (tag.startsWith('dockhand:configid=')) {
+				const n = Number(tag.slice('dockhand:configid='.length));
+				if (Number.isInteger(n) && configIds.includes(n)) return true;
+			}
+		}
+		return false;
+	}
+	return t.includes(`dockhand:name=${targetName}`);
+}
+
+/**
+ * Pick THIS target's snapshots from one destination's raw restic list and stamp each with
+ * the destination it came from - the exact filter+map the Backups panel applies per
+ * destination. Extracted so the wired call site (not just snapshotMatchesConfigScope in
+ * isolation) is covered by a test: a regression back to a name-only filter changes this
+ * helper's output and fails the suite (#1546).
+ */
+export function selectOwnSnapshotsFromDestination<S extends { tags?: string[] }>(
+	snaps: S[],
+	dest: { id: number; name: string; repository: string },
+	configIds: number[],
+	targetName: string
+): (S & { _destinationId: number; _destinationName: string; _destinationRepository: string })[] {
+	return snaps
+		.filter((s) => snapshotMatchesConfigScope(s.tags, configIds, targetName))
+		.map((s) => ({ ...s, _destinationId: dest.id, _destinationName: dest.name, _destinationRepository: dest.repository }));
 }

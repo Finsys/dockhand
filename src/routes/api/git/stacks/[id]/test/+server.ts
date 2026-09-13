@@ -4,6 +4,16 @@ import { getGitStack } from '$lib/server/db';
 import { testGitStack } from '$lib/server/git';
 import { authorize } from '$lib/server/authorize';
 
+/**
+ * @openapi
+ * summary: Test a git stack's repository access and compose configuration without deploying
+ * path: id:integer! Git stack ID (from GET /api/git/stacks)
+ * resp-200: {success:boolean!, error:string}
+ * resp-200-example: {"success":true}
+ * resp-403: Caller lacks the stacks:view permission for the stack's environment
+ * resp-404: No git stack exists with that ID
+ * resp-500: The test failed
+ */
 export const POST: RequestHandler = async ({ params, cookies }) => {
 	const auth = await authorize(cookies);
 

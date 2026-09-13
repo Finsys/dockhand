@@ -1,11 +1,31 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getRegistry } from '$lib/server/db';
-import { getRegistryAuth, isHarborRegistry, harborListRepositories, parseRegistryUrl } from '$lib/server/docker';
+import { authorize } from '$lib/server/authorize';
+import { getRegistryAuth, isHarborRegistry, harborListRepositories, parseRegistryUrl, classifyCatalogFailure, CATALOG_NOT_SUPPORTED_MSG } from '$lib/server/docker';
 
 const PAGE_SIZE = 100;
 
-export const GET: RequestHandler = async ({ url }) => {
+/**
+ * @openapi
+ * summary: List repositories in a registry's V2 catalog (with Harbor project-API fallback), paginated
+ * description: Docker Hub is rejected (no catalog API). For 401/403/404 from the upstream registry the same status is proxied back to the caller.
+ * query: registry:integer! ID of the configured registry to query (from GET /api/registries)
+ * query: last:string Opaque pagination cursor from a previous page's nextLast
+ * resp-200: {repositories:array<{name:string!, description:string, star_count:integer, is_official:boolean, is_automated:boolean}>!, pagination:{pageSize:integer!, hasMore:boolean!, nextLast:string}!}
+ * resp-200-example: {"repositories":[{"name":"library/nginx","description":"","star_count":0,"is_official":false,"is_automated":false}],"pagination":{"pageSize":100,"hasMore":false,"nextLast":null}}
+ * resp-400: Missing registry parameter, or Docker Hub was targeted (catalog listing unsupported)
+ * resp-403: Permission denied (requires registries:view)
+ * resp-404: Registry not found, or the registry does not implement the V2 catalog API
+ * resp-500: Failed to fetch the catalog
+ * resp-503: Could not connect to the registry (connection refused, host not found, or a TLS error)
+ */
+export const GET: RequestHandler = async ({ url, cookies }) => {
+	const auth = await authorize(cookies);
+	if (auth.authEnabled && !await auth.can('registries', 'view')) {
+		return json({ error: 'Permission denied' }, { status: 403 });
+	}
+
 	try {
 		const registryId = url.searchParams.get('registry');
 		const lastParam = url.searchParams.get('last'); // For pagination
@@ -53,7 +73,19 @@ export const GET: RequestHandler = async ({ url }) => {
 
 		if (!response.ok) {
 			if (response.status === 401 || response.status === 403) {
-				return json({ error: 'Catalog listing not available. This registry may not support the _catalog endpoint (common with GitLab and Harbor). Try searching for images by name instead.' }, { status: response.status });
+				// GitLab/Harbor refuse catalog to non-admins with a VALID token (#873):
+				// distinguish "listing not permitted" from a real auth failure.
+				const hasCreds = !!(registry.username && registry.password);
+				const authState = hasCreds ? (authHeader ? 'authed' : 'rejected') : 'anon';
+				const kind = classifyCatalogFailure(
+					response.status,
+					response.headers.get('WWW-Authenticate'),
+					authState
+				);
+				if (kind === 'not_supported') {
+					return json({ error: CATALOG_NOT_SUPPORTED_MSG, notSupported: true }, { status: response.status });
+				}
+				return json({ error: 'Authentication failed. Check the registry credentials.' }, { status: response.status });
 			}
 			if (response.status === 404) {
 				return json({ error: 'Registry does not support V2 catalog API' }, { status: 404 });

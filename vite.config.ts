@@ -728,6 +728,18 @@ function webSocketPlugin(): Plugin {
 						}
 					}
 
+					// Opening a shell requires the containers:exec permission, same as the REST exec endpoint.
+					const canExecFn = (globalThis as any).__canExecForUser;
+					if (typeof canExecFn === 'function') {
+						const allowed = await canExecFn(wsAuth, envId);
+						if (!allowed) {
+							console.warn(`[WS] exec denied: user=${wsAuth.username} envId=${envId}`);
+							ws.send(JSON.stringify({ type: 'error', message: 'Permission denied' }));
+							ws.close(1008, 'exec permission denied');
+							return;
+						}
+					}
+
 					const target = getDockerTarget(envId);
 
 					try {

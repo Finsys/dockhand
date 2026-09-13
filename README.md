@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="src/images/logo.webp" alt="Dockhand" width="100">
+  <img src="src/images/logo.svg" alt="Dockhand" width="100">
 </p>
 
 <p align="center">

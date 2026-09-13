@@ -216,6 +216,14 @@ export function resetHostDetection(): void {
 	cachedOwnExtraHosts = null;
 }
 
+/** Test-only: seed the container-mount table so mount-dependent path translation
+ *  (translateContainerPathViaMount / rewriteComposeVolumePaths) can be unit-tested. */
+export function __setCachedMountsForTest(
+	mounts: Array<{ source: string; destination: string }> | null
+): void {
+	cachedMounts = mounts;
+}
+
 /**
  * Get the host path for our DATA_DIR mount by inspecting our own container
  */
@@ -418,6 +426,67 @@ export function translateContainerPathViaMount(containerPath: string): string | 
 }
 
 /**
+ * The container mounts cached at startup (empty when Dockhand runs on bare metal,
+ * or before detectHostDataDir has run). Callers use this to tell "Dockhand is
+ * containerized and this path is not under any bind" from "no mount info at all".
+ */
+export function getCachedContainerMounts(): Array<{ source: string; destination: string }> {
+	return cachedMounts ? [...cachedMounts] : [];
+}
+
+/**
+ * True when a container mount destination STRICTLY DEEPER than DATA_DIR covers
+ * `containerPath` (e.g. DATA_DIR=/app/data with a separate bind at /app/data/stacks).
+ * In that topology translateToHostPath() is WRONG - it resolves the path against
+ * DATA_DIR's host root (the outer volume), but the files physically live under the
+ * more-specific bind. translateContainerPathViaMount() has the right answer, so the
+ * caller must prefer it. Pure over the passed-in mount list for unit testing (#1533).
+ */
+export function pathOverriddenBySubMount(
+	containerPath: string,
+	dataDir: string,
+	mounts: Array<{ source: string; destination: string }>
+): boolean {
+	const norm = (p: string) => p.replace(/\/+$/, '');
+	const dd = norm(dataDir);
+	const cp = norm(containerPath);
+	return mounts.some((m) => {
+		const dest = norm(m.destination);
+		// Deeper than DATA_DIR...
+		if (!(dest.startsWith(dd + '/') && dest.length > dd.length)) return false;
+		// ...and it covers the path.
+		return cp === dest || cp.startsWith(dest + '/');
+	});
+}
+
+/**
+ * Warn when a custom stack compose path won't survive a Dockhand recreate (#1524).
+ * A path Dockhand writes to that is NOT under any of its container mounts lands on the
+ * container's throwaway layer - it looks saved, then vanishes when the container is
+ * recreated (an update/restart), leaving the stack's compose "blank". Returns a
+ * human-readable warning, or null when the path is fine.
+ *
+ * Pure over the passed-in mount list so it unit-tests without a live container. Only
+ * fires when Dockhand is containerized (mounts non-empty) and the path is absolute and
+ * not under any mount destination; bare-metal (no mounts) and default in-DATA_DIR paths
+ * return null.
+ */
+export function unpersistedComposePathWarning(
+	composePath: string | null | undefined,
+	mounts: Array<{ source: string; destination: string }>
+): string | null {
+	if (!composePath || mounts.length === 0) return null;
+	// Only a path Dockhand itself resolves inside its container can be orphaned; a
+	// relative path is resolved against DATA_DIR elsewhere, so only guard absolute paths.
+	if (!composePath.startsWith('/')) return null;
+	const underMount = [...mounts]
+		.sort((a, b) => b.destination.length - a.destination.length)
+		.some((m) => composePath === m.destination || composePath.startsWith(m.destination + '/'));
+	if (underMount) return null;
+	return `The compose file path "${composePath}" is not inside any of Dockhand's mounted volumes, so it is written inside the Dockhand container and will be LOST when the container is recreated (an update or restart). Use a path under a mounted volume (e.g. the default location, or add a bind mount for this path to Dockhand's own compose), then re-save.`;
+}
+
+/**
  * Get the host path for the Docker socket mount.
  * This is needed for sibling containers (e.g., scanners) that need socket access.
  *
@@ -520,14 +589,19 @@ export function rewriteComposeVolumePaths(composeContent: string, workingDir: st
 			const absoluteContainerPath = resolve(workingDir, relativeSrc);
 			const absoluteHostPath = translateContainerPathViaMount(absoluteContainerPath);
 
-			if (absoluteHostPath) {
+			if (absoluteHostPath && absoluteHostPath !== absoluteContainerPath) {
 				const newLine = `${prefix}${absoluteHostPath}${destPart}`;
 				modifiedLines.push(newLine);
 				changes.push(`  ${relativeSrc} -> ${absoluteHostPath}`);
 			} else {
-				// Can't translate — leave line unchanged. Compose will resolve
-				// it relative to its cwd; if that's wrong the deploy fails
-				// loudly, which is better than producing a misleading host path.
+				// Either untranslatable, OR a 1:1 mount where the host path equals the
+				// container path (#1514): rewriting `./x` to the identical absolute path
+				// is pointless and forces stdin deploy (`-f -`), which loses the real
+				// com.docker.compose.project.config_files label. Leave the relative bind
+				// so the deploy can pass the compose file by path; compose resolves `./x`
+				// against the file's dir to the same host location. If it was simply
+				// untranslatable, compose still resolves it against its cwd - a wrong path
+				// there fails the deploy loudly, better than a misleading host path.
 				modifiedLines.push(line);
 			}
 		} else {

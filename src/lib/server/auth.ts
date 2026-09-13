@@ -42,9 +42,12 @@ import {
 	type OidcConfig
 } from './db';
 import { Client as LdapClient } from 'ldapts';
+import { resolveSessionTimeout, cookieMaxAge } from '$lib/utils/session-timeout';
+import { escapeLdapFilterValue } from './ldap-filter';
 import { isEnterprise } from './license';
 import { secureRandomBytes } from './crypto-fallback';
 import { invalidateTokenCacheForUser } from './token-cache';
+import { oidcDiscoveryUrls, fetchOidcDiscovery } from '$lib/utils/oidc-discovery-url';
 
 // Session cookie name
 const SESSION_COOKIE_NAME = 'dockhand_session';
@@ -67,6 +70,7 @@ const EMPTY_PERMISSIONS: Permissions = {
 	audit_logs: [],
 	activity: [],
 	schedules: [],
+	secrets: [],
 	backups: []
 };
 
@@ -202,21 +206,16 @@ export async function createUserSession(
 	// Generate secure token
 	const sessionId = generateSessionToken();
 
-	// Get session timeout from settings
+	// Get session timeout from settings (0 = never expire, see resolveSessionTimeout).
 	const settings = await getAuthSettings();
-	// Safety: ensure sessionTimeout is valid (1 second to 30 days), default to 24h if invalid
-	const MAX_SESSION_TIMEOUT = 2592000; // 30 days in seconds
-	const DEFAULT_SESSION_TIMEOUT = 86400; // 24 hours in seconds
-	const sessionTimeout = (settings?.sessionTimeout > 0 && settings?.sessionTimeout <= MAX_SESSION_TIMEOUT)
-		? settings.sessionTimeout
-		: DEFAULT_SESSION_TIMEOUT;
+	const sessionTimeout = resolveSessionTimeout(settings?.sessionTimeout);
 	const expiresAt = new Date(Date.now() + sessionTimeout * 1000).toISOString();
 
 	// Create session in database
 	const session = await dbCreateSession(sessionId, userId, provider, expiresAt);
 
-	// Set secure cookie
-	setSessionCookie(cookies, sessionId, sessionTimeout, request);
+	// Cookie max-age is capped at the browser's ~400-day limit; the DB session outlives it.
+	setSessionCookie(cookies, sessionId, cookieMaxAge(sessionTimeout), request);
 
 	// Update user's last login time
 	await updateUser(userId, { lastLogin: new Date().toISOString() });
@@ -362,6 +361,7 @@ export async function getUserPermissionsById(userId: number): Promise<Permission
 		audit_logs: [],
 		activity: [],
 		schedules: [],
+		secrets: [],
 		backups: []
 	};
 
@@ -444,6 +444,7 @@ export async function getUserPermissionsForEnvironment(userId: number, environme
 		audit_logs: [],
 		activity: [],
 		schedules: [],
+		secrets: [],
 		backups: []
 	};
 
@@ -606,14 +607,6 @@ export async function authenticateLdap(
  * Escape special characters in an LDAP filter value (RFC 4515).
  * Prevents LDAP injection via wildcards or control characters.
  */
-function escapeLdapFilterValue(value: string): string {
-	return value
-		.replace(/\\/g, '\\5c')
-		.replace(/\*/g, '\\2a')
-		.replace(/\(/g, '\\28')
-		.replace(/\)/g, '\\29')
-		.replace(/\0/g, '\\00');
-}
 
 /**
  * Try authentication against a specific LDAP configuration
@@ -817,18 +810,24 @@ async function checkLdapGroupMembership(
 		let searchBase: string;
 		let groupFilter: string;
 
+		// A DN placed in a search FILTER must be escaped per RFC 4515 - an AD DN with an
+		// escaped comma (CN=Surname\, Name,...) otherwise makes ldapts read `\,` as an
+		// invalid `\XX` hex filter-escape and throw ("Invalid escaped hex character").
+		// The searchBase stays the RAW DN (RFC 4514) - only filter VALUES are escaped.
+		const userDnFilterValue = escapeLdapFilterValue(userDn);
+		const groupCnFilterValue = escapeLdapFilterValue(groupDnOrName);
 		if (config.groupFilter) {
 			// User provided custom filter - use group DN directly when it's a full DN
 			// to avoid searching all groups under groupBaseDn
 			searchBase = isFullDn ? groupDnOrName : (config.groupBaseDn || groupDnOrName);
 			groupFilter = config.groupFilter
-				.replace('{{username}}', userDn)
-				.replace('{{user_dn}}', userDn)
-				.replace('{{group}}', groupDnOrName);
+				.replace('{{username}}', userDnFilterValue)
+				.replace('{{user_dn}}', userDnFilterValue)
+				.replace('{{group}}', groupCnFilterValue);
 		} else if (isFullDn) {
 			// Full DN provided - search directly at that DN
 			searchBase = groupDnOrName;
-			groupFilter = `(member=${userDn})`;
+			groupFilter = `(member=${userDnFilterValue})`;
 		} else {
 			// Just a group name - search in groupBaseDn
 			if (!config.groupBaseDn) {
@@ -836,7 +835,7 @@ async function checkLdapGroupMembership(
 				return false;
 			}
 			searchBase = config.groupBaseDn;
-			groupFilter = `(&(cn=${groupDnOrName})(member=${userDn}))`;
+			groupFilter = `(&(cn=${groupCnFilterValue})(member=${userDnFilterValue}))`;
 		}
 
 		const { searchEntries } = await client.search(searchBase, {
@@ -934,9 +933,15 @@ function parseMfaData(mfaSecret: string | null | undefined): MfaData | null {
 export async function generateMfaSetup(userId: number): Promise<{
 	secret: string;
 	qrDataUrl: string;
-} | null> {
+} | { alreadyEnabled: true } | null> {
 	const user = await getUser(userId);
 	if (!user) return null;
+
+	// Never regenerate over a LIVE enrolment. Overwriting the stored secret + clearing
+	// backupCodes while mfaEnabled stays true locks the account out for good (#1399): the
+	// authenticator holds the old secret, no backup code can match, and login keeps demanding
+	// a code. To re-enrol, the user must disable MFA first (DELETE), then set it up fresh.
+	if (user.mfaEnabled) return { alreadyEnabled: true };
 
 	// Build issuer name with hostname (same as license matching)
 	const hostname = process.env.DOCKHAND_HOSTNAME || os.hostname();
@@ -1220,27 +1225,9 @@ async function getOidcDiscovery(issuerUrl: string): Promise<OidcDiscoveryDocumen
 		return cached.document;
 	}
 
-	const wellKnownUrl = issuerUrl.endsWith('/')
-		? `${issuerUrl}.well-known/openid-configuration`
-		: `${issuerUrl}/.well-known/openid-configuration`;
-
-	let response: Response;
-	try {
-		response = await fetch(wellKnownUrl);
-	} catch (err: any) {
-		// Node/undici surfaces network failures as a bare "fetch failed" TypeError and
-		// hides the real reason in err.cause (ENOTFOUND, EHOSTUNREACH, ECONNREFUSED,
-		// connect timeout, TLS error, …). Surface it so operators can tell a DNS/IPv4
-		// egress problem from a cert problem instead of debugging blind (#1293).
-		const cause = err?.cause?.message || err?.cause?.code || err?.cause;
-		throw new Error(
-			`Failed to reach OIDC issuer at ${wellKnownUrl}: ${err?.message || err}` +
-			(cause ? ` (${cause})` : '')
-		);
-	}
-	if (!response.ok) {
-		throw new Error(`Failed to fetch OIDC discovery document: ${response.statusText}`);
-	}
+	// Try the canonical (no trailing slash) discovery URL first, then the trailing-slash
+	// variant some providers require (FortiAuthenticator 404s the canonical one, #1368).
+	const response = await fetchOidcDiscovery(oidcDiscoveryUrls(issuerUrl), (url) => fetch(url));
 
 	const document = await response.json() as OidcDiscoveryDocument;
 

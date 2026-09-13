@@ -52,6 +52,35 @@ export function parseLines(
 	return { entries, carryover: tail };
 }
 
+// Merge grouped-mode entries into one timeline ordered by Docker's ISO
+// timestamp (oldest first, so the newest lands at the bottom). Used for the
+// initial tail + stopped-container backfill, NOT for live appends (live lines
+// already arrive in order and appending keeps them at the bottom).
+//
+// A continuation line (multi-line log, no timestamp of its own) must stay glued
+// to its parent line from the SAME container, so it inherits the last seen
+// timestamp for that container before sorting. ISO timestamps sort correctly as
+// strings; ties (or missing timestamps) fall back to `id`, which is monotonic
+// with arrival order, giving a stable, deterministic result on every click.
+export function sortByTimestampStable(entries: LogEntry[]): LogEntry[] {
+	const lastTsByContainer = new Map<string, string>();
+	const keyed = entries.map((e) => {
+		const cid = e.containerId ?? '';
+		let ts = e.timestamp;
+		if (ts) {
+			lastTsByContainer.set(cid, ts);
+		} else {
+			ts = lastTsByContainer.get(cid);
+		}
+		return { e, sortTs: ts ?? '' };
+	});
+	keyed.sort((a, b) => {
+		if (a.sortTs !== b.sortTs) return a.sortTs < b.sortTs ? -1 : 1;
+		return a.e.id - b.e.id;
+	});
+	return keyed.map((k) => k.e);
+}
+
 // Per-entry ANSI HTML cache. WeakMap so entries evicted by buffer compaction
 // can be GC'd along with their cached HTML.
 const ansiCache = new WeakMap<LogEntry, string>();

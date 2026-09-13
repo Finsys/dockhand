@@ -66,6 +66,7 @@
 		audit_logs: string[];
 		activity: string[];
 		schedules: string[];
+		secrets: string[];
 		backups: string[];
 	}>({
 		containers: [],
@@ -84,6 +85,7 @@
 		audit_logs: [],
 		activity: [],
 		schedules: [],
+		secrets: [],
 		backups: []
 	});
 
@@ -142,6 +144,12 @@
 			{ key: 'edit', label: 'Edit schedules' },
 			{ key: 'run', label: 'Run schedules' }
 		],
+		secrets: [
+			{ key: 'view', label: 'View secrets' },
+			{ key: 'create', label: 'Create secrets' },
+			{ key: 'edit', label: 'Edit secrets' },
+			{ key: 'delete', label: 'Delete secrets' }
+		],
 		backups: [
 			{ key: 'view', label: 'View backups' },
 			{ key: 'run', label: 'Run backups' },
@@ -168,6 +176,7 @@
 		images: [
 			{ key: 'view', label: 'View images' },
 			{ key: 'pull', label: 'Pull images' },
+			{ key: 'load', label: 'Load images from tar' },
 			{ key: 'push', label: 'Push images' },
 			{ key: 'remove', label: 'Remove images' },
 			{ key: 'build', label: 'Build images' },
@@ -214,6 +223,7 @@
 		audit_logs: ClipboardList,
 		activity: Activity,
 		schedules: Timer,
+		secrets: KeyRound,
 		backups: Archive
 	};
 
@@ -234,6 +244,7 @@
 		audit_logs: 'bg-stone-100 dark:bg-stone-950 text-stone-700 dark:text-stone-400 border-stone-300 dark:border-stone-800',
 		activity: 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400 border-emerald-300 dark:border-emerald-800',
 		schedules: 'bg-sky-100 dark:bg-sky-950 text-sky-700 dark:text-sky-400 border-sky-300 dark:border-sky-800',
+		secrets: 'bg-fuchsia-100 dark:bg-fuchsia-950 text-fuchsia-700 dark:text-fuchsia-400 border-fuchsia-300 dark:border-fuchsia-800',
 		backups: 'bg-lime-100 dark:bg-lime-950 text-lime-700 dark:text-lime-400 border-lime-300 dark:border-lime-800'
 	};
 
@@ -284,6 +295,7 @@
 			audit_logs: [],
 			activity: [],
 			schedules: [],
+			secrets: [],
 			backups: []
 		};
 	}
@@ -315,6 +327,7 @@
 					audit_logs: [...(role.permissions.audit_logs || [])],
 					activity: [...(role.permissions.activity || [])],
 					schedules: [...(role.permissions.schedules || [])],
+					secrets: [...(role.permissions.secrets || [])],
 					backups: [...(role.permissions.backups || [])]
 				};
 				formError = '';
@@ -344,6 +357,7 @@
 					audit_logs: [...(copyFrom.permissions.audit_logs || [])],
 					activity: [...(copyFrom.permissions.activity || [])],
 					schedules: [...(copyFrom.permissions.schedules || [])],
+					secrets: [...(copyFrom.permissions.secrets || [])],
 					backups: [...(copyFrom.permissions.backups || [])]
 				};
 				formError = '';

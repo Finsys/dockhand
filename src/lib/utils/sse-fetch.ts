@@ -5,9 +5,12 @@ import type { JobLine } from '$lib/server/jobs';
  * Drop-in replacement for readSSEResponse when the endpoint has been migrated to jobs.
  *
  * Returns the job's final result (equivalent to the 'result' event data in SSE).
+ * With onLine, each 'progress' line message ({type:'line', line}) is reported as it
+ * arrives — callers that don't need live output can omit it.
  */
 export async function readJobResponse(
-	response: Response
+	response: Response,
+	onLine?: (line: string) => void
 ): Promise<{ success?: boolean; error?: string; [key: string]: unknown }> {
 	// Fall through for non-JSON or error responses
 	if (!response.ok) {
@@ -22,8 +25,10 @@ export async function readJobResponse(
 
 	// If the response is a { jobId } shape, poll the job endpoint
 	if (data && typeof data === 'object' && 'jobId' in data) {
-		const result = await watchJob(data.jobId as string, () => {
-			// readJobResponse callers don't need line-by-line updates
+		const result = await watchJob(data.jobId as string, (msg) => {
+			if (!onLine) return;
+			const payload = msg?.data as { type?: string; line?: string } | undefined;
+			if (payload?.type === 'line' && typeof payload.line === 'string') onLine(payload.line);
 		});
 		return result as { success?: boolean; error?: string; [key: string]: unknown };
 	}

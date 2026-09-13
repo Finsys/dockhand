@@ -72,9 +72,9 @@
 				{/if}
 				{#if vt}
 					{#if vt.kind === 'bind'}
-						<span class="mt-[2px] inline-flex w-12 shrink-0 items-center justify-center gap-1 rounded-full bg-amber-500/15 px-1.5 text-[9px] font-semibold uppercase tracking-wide text-amber-500"><Folder class="h-2.5 w-2.5" />bind</span>
+						<span class="mt-[2px] inline-flex w-14 shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-full bg-amber-500/15 px-1.5 text-[9px] font-semibold uppercase tracking-wide text-amber-500"><Folder class="h-2.5 w-2.5 shrink-0" />bind</span>
 					{:else}
-						<span class="mt-[2px] inline-flex w-12 shrink-0 items-center justify-center gap-1 rounded-full bg-sky-500/15 px-1.5 text-[9px] font-semibold uppercase tracking-wide text-sky-500"><HardDrive class="h-2.5 w-2.5" />vol</span>
+						<span class="mt-[2px] inline-flex w-14 shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-full bg-sky-500/15 px-1.5 text-[9px] font-semibold uppercase tracking-wide text-sky-500"><HardDrive class="h-2.5 w-2.5 shrink-0" />vol</span>
 					{/if}
 					<span class={isError ? 'text-red-400' : ''}>{vt.rest}</span>
 				{:else}

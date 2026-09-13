@@ -5,6 +5,8 @@
  * exits 0 so docker doesn't treat a restic non-zero as a crash.
  */
 
+import { isLocalRepo } from './models';
+
 /** The marker line the helper prints carrying restic's real exit code. */
 export const EXIT_MARKER = 'DOCKHAND_RESTIC_EXIT=';
 
@@ -28,14 +30,53 @@ export function finishScript(command: string): string {
 	return `${command}; __rc=$?; echo "${EXIT_MARKER}\${__rc}"`;
 }
 
+/** Where the helper writes the GCS service-account JSON before restic reads it. */
+export const GCS_CRED_FILE = '/tmp/dockhand-gcs-sa.json';
+
+/**
+ * restic's GCS backend authenticates with a service-account JSON file whose path
+ * is in GOOGLE_APPLICATION_CREDENTIALS (it auto-refreshes the token). We pass the
+ * JSON CONTENT as the GOOGLE_APPLICATION_CREDENTIALS_JSON env var; this preamble
+ * (prepended to the helper's `sh -c` script, in the SAME shell as restic) writes
+ * it to a 0600 file and exports GOOGLE_APPLICATION_CREDENTIALS at that path.
+ *
+ * A no-op when the var is empty/unset, so S3/B2/Azure/local repos are untouched.
+ * `printf %s` avoids the JSON being mangled by echo's escape handling.
+ */
+export function gcsCredentialPreamble(): string {
+	return `if [ -n "\${GOOGLE_APPLICATION_CREDENTIALS_JSON:-}" ]; then umask 077; printf '%s' "$GOOGLE_APPLICATION_CREDENTIALS_JSON" > ${GCS_CRED_FILE}; export GOOGLE_APPLICATION_CREDENTIALS=${GCS_CRED_FILE}; fi; `;
+}
+
+/** Where the helper writes the destination's TLS PEMs before restic reads them. */
+export const CACERT_FILE = '/tmp/dockhand-restic-ca.pem';
+export const TLS_CLIENT_FILE = '/tmp/dockhand-restic-client.pem';
+
+/**
+ * restic verifies a TLS backend (rest-server, self-hosted MinIO/S3, rclone-over-https)
+ * against a CA FILE at RESTIC_CACERT, and does client-cert mTLS from a PEM at
+ * RESTIC_TLS_CLIENT_CERT. The helper container can't bind a file from the Dockhand host
+ * (it runs on the TARGET daemon, possibly a remote/Hawser host), so we pass the PEM
+ * CONTENT as RESTIC_CACERT_PEM / RESTIC_TLS_CLIENT_CERT_PEM env vars; this preamble (same
+ * shell as restic) writes each to a 0600 file and points the real restic var at it.
+ *
+ * A no-op when both vars are empty/unset, so plaintext or public-CA backends are untouched.
+ * `printf %s` avoids the multi-line PEM being mangled by echo's escape handling.
+ */
+export function tlsCertPreamble(): string {
+	return (
+		`if [ -n "\${RESTIC_CACERT_PEM:-}" ]; then umask 077; printf '%s' "$RESTIC_CACERT_PEM" > ${CACERT_FILE}; export RESTIC_CACERT=${CACERT_FILE}; fi; ` +
+		`if [ -n "\${RESTIC_TLS_CLIENT_CERT_PEM:-}" ]; then umask 077; printf '%s' "$RESTIC_TLS_CLIENT_CERT_PEM" > ${TLS_CLIENT_FILE}; export RESTIC_TLS_CLIENT_CERT=${TLS_CLIENT_FILE}; fi; `
+	);
+}
+
 /**
  * Fail loud if a bind-mounted local repo isn't visible on the target daemon's
  * host: Docker would auto-create the missing path empty, silently backing up to
  * the wrong host. '' for non-local repos (they never bind a path).
  */
 export function localRepoGuard(repository: string): string {
-	if (!(repository.startsWith('/') || repository.startsWith('./'))) return '';
-	const msg = `restic repository not found at $RESTIC_REPOSITORY on this environment's Docker host. A local-path repository only works when the environment's Docker daemon runs on the same host as Dockhand (e.g. a co-located socket-proxy). For a remote host, use an S3 or REST destination.`;
+	if (!isLocalRepo(repository)) return '';
+	const msg = `restic repository not found at $RESTIC_REPOSITORY on this environment's Docker host. The repo directory is empty or missing there. Two common causes: (1) the destination Path is the host path instead of the path Dockhand sees inside its container - enter the container-side path of your backup volume mount, then re-init; (2) the environment's Docker daemon is on a different host than Dockhand - a local path can't reach it, so use an S3 or REST destination instead.`;
 	return `test -f "$RESTIC_REPOSITORY/config" || { echo ${shellQuote(msg)} >&2; exit 1; }; `;
 }
 
@@ -52,7 +93,7 @@ export function localRepoGuard(repository: string): string {
  */
 export function localRepoChown(repository: string, ownerSpec: string): string {
 	if (!ownerSpec) return '';
-	if (!(repository.startsWith('/') || repository.startsWith('./'))) return '';
+	if (!isLocalRepo(repository)) return '';
 	return `; chown -R ${ownerSpec} "$RESTIC_REPOSITORY" 2>/dev/null || true`;
 }
 
@@ -112,7 +153,8 @@ export function classifyProcError(
 export function buildHelperEnv(
 	repository: string,
 	password: string,
-	allowedCloudVars: Record<string, string>
+	allowedCloudVars: Record<string, string>,
+	tls?: { cacert?: string | null; clientCert?: string | null }
 ): string[] {
 	const env = [
 		`RESTIC_REPOSITORY=${repository}`,
@@ -120,6 +162,9 @@ export function buildHelperEnv(
 		'RESTIC_PROGRESS_FPS=2',
 	];
 	for (const [k, v] of Object.entries(allowedCloudVars)) env.push(`${k}=${v}`);
+	// PEM CONTENT (not a path) - tlsCertPreamble writes it to a file in the helper.
+	if (tls?.cacert) env.push(`RESTIC_CACERT_PEM=${tls.cacert}`);
+	if (tls?.clientCert) env.push(`RESTIC_TLS_CLIENT_CERT_PEM=${tls.clientCert}`);
 	return env;
 }
 
@@ -134,7 +179,7 @@ export function buildHelperBinds(
 	resolveLocalRepoHostPath: (repoPath: string) => string
 ): string[] {
 	const binds = [...volumeBinds];
-	if (repository.startsWith('/')) {
+	if (isLocalRepo(repository)) {
 		binds.push(`${resolveLocalRepoHostPath(repository)}:${repository}`);
 	}
 	return binds;

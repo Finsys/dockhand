@@ -1,6 +1,7 @@
 import type { RequestHandler } from '@sveltejs/kit';
 import { json } from '@sveltejs/kit';
 import { authorize } from '$lib/server/authorize';
+import { isSafeWebhookUrl } from '$lib/server/url-safety';
 import type { TemplateItem } from '../+server';
 
 function generateContainerCompose(template: TemplateItem): string {
@@ -72,13 +73,40 @@ async function fetchStackCompose(repository: { url: string; stackfile: string })
 			: `${repository.url}/${repository.stackfile}`;
 	}
 
-	const response = await fetch(rawUrl, { signal: AbortSignal.timeout(10000) });
+	// The fallback URL is user-controlled, so guard against SSRF: the server must
+	// not be coerced into fetching loopback/private/link-local/metadata hosts and
+	// returning the body. A compose template always lives on a public host, so the
+	// strict webhook policy (block all private ranges) fits.
+	const safety = isSafeWebhookUrl(rawUrl);
+	if (!safety.ok) {
+		throw new Error(`Refusing to fetch compose file: ${safety.reason}`);
+	}
+
+	// redirect:'manual' - a public URL that 3xx-redirects to a private/metadata
+	// host would bypass the literal-host check above, so refuse to follow it.
+	const response = await fetch(rawUrl, { redirect: 'manual', signal: AbortSignal.timeout(10000) });
+	if (response.status >= 300 && response.status < 400) {
+		throw new Error('Refusing to fetch compose file: server tried to redirect the request');
+	}
 	if (!response.ok) {
 		throw new Error(`Failed to fetch compose file: ${response.status}`);
 	}
 	return await response.text();
 }
 
+/**
+ * POST /api/templates/compose - Generate/fetch a compose file for a template
+ *
+ * @openapi
+ * summary: Return the compose YAML for a template — generated for container templates, fetched from the repository for stack templates
+ * body: {template:{id:string, type:string, title:string, image:string, repository:{url:string, stackfile:string}}!}
+ * body-example: {"template":{"id":"a1b2c3","type":"container","title":"Nginx","image":"nginx:latest"}}
+ * resp-200: {compose:string!}
+ * resp-200-example: {"compose":"services:\n  nginx:\n    image: nginx:latest\n    restart: unless-stopped\n"}
+ * resp-400: Template is missing from the request body
+ * resp-403: Permission denied
+ * resp-500: Failed to generate or fetch the compose file
+ */
 export const POST: RequestHandler = async ({ request, cookies }) => {
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !await auth.can('templates', 'deploy')) {

@@ -18,11 +18,13 @@ import {
 	getScheduleCleanupCron,
 	getEventCleanupCron,
 	getScannerCleanupCron,
+	getDeployLogReconcileCron,
 	getScheduleRetentionDays,
 	getEventRetentionDays,
 	getScheduleCleanupEnabled,
 	getEventCleanupEnabled,
 	getScannerCleanupEnabled,
+	getDeployLogReconcileEnabled,
 	getEnvironments,
 	getEnvUpdateCheckSettings,
 	getAllEnvUpdateCheckSettings,
@@ -61,6 +63,7 @@ import {
 	SYSTEM_VOLUME_HELPER_CLEANUP_ID,
 	SYSTEM_SCANNER_CLEANUP_ID
 } from './tasks/system-cleanup';
+import { runDeployLogReconcileJob, DEPLOY_LOG_RECONCILE_ID } from './tasks/deploy-log-reconcile';
 
 // Store all active cron jobs
 const activeJobs: Map<string, Cron> = new Map();
@@ -70,6 +73,7 @@ let cleanupJob: Cron | null = null;
 let eventCleanupJob: Cron | null = null;
 let volumeHelperCleanupJob: Cron | null = null;
 let scannerCacheCleanupJob: Cron | null = null;
+let deployLogReconcileJob: Cron | null = null;
 
 // Scheduler state
 let isRunning = false;
@@ -164,24 +168,13 @@ export async function startScheduler(): Promise<void> {
 			console.warn(`[Scheduler] Orphan helper reap failed: ${err instanceof Error ? err.message : String(err)}`);
 		}
 
-		// New backup/restore engine: roll back any restore swap it left interrupted,
-		// then scrub operations left `running` by a dead process. Runs after the orphan
-		// helper reap above; it recovers swaps recorded by the engine's journal.
-		try {
-			const { reconcileOnStartup } = await import('../backups');
-			const { swapsRolledBack, containersRestarted, opsScrubbed } = await reconcileOnStartup();
-			if (swapsRolledBack > 0) console.log(`[Scheduler] Rolled back ${swapsRolledBack} interrupted restore swap(s)`);
-			if (containersRestarted > 0) console.log(`[Scheduler] Restarted ${containersRestarted} target(s) left stopped for backup/restore`);
-			if (opsScrubbed > 0) console.log(`[Scheduler] Scrubbed ${opsScrubbed} interrupted operation(s)`);
-		} catch (err) {
-			console.warn(`[Scheduler] Backup engine startup reconciliation failed: ${err instanceof Error ? err.message : String(err)}`);
-		}
 	}
 
 	// Get cron expressions and default timezone from database
 	const scheduleCleanupCron = await getScheduleCleanupCron();
 	const eventCleanupCron = await getEventCleanupCron();
 	const scannerCleanupCron = await getScannerCleanupCron();
+	const deployLogReconcileCron = await getDeployLogReconcileCron();
 	const defaultTimezone = await getDefaultTimezone();
 
 	// Start system cleanup jobs (static schedules with default timezone)
@@ -217,10 +210,19 @@ export async function startScheduler(): Promise<void> {
 		});
 	}
 
+	// Deploy log reconcile: own enabled flag + cron, same pattern as scanner cleanup
+	const deployLogReconcileEnabled = await getDeployLogReconcileEnabled();
+	if (deployLogReconcileEnabled) {
+		deployLogReconcileJob = new Cron(deployLogReconcileCron, { timezone: defaultTimezone, legacyMode: false }, async () => {
+			await runDeployLogReconcileJob('cron');
+		});
+	}
+
 	console.log(`[Scheduler] System schedule cleanup: ${scheduleCleanupCron} [${defaultTimezone}]`);
 	console.log(`[Scheduler] System event cleanup: ${eventCleanupCron} [${defaultTimezone}]`);
 	console.log(`[Scheduler] Volume helper cleanup: every 30 minutes [${defaultTimezone}]`);
 	console.log(`[Scheduler] Scanner cache cleanup: ${scannerCleanupEnabled ? scannerCleanupCron : 'disabled'} [${defaultTimezone}]`);
+	console.log(`[Scheduler] Deploy log reconcile: ${deployLogReconcileEnabled ? deployLogReconcileCron : 'disabled'} [${defaultTimezone}]`);
 
 	// Register all dynamic schedules from database
 	await refreshAllSchedules();
@@ -258,6 +260,10 @@ export function stopScheduler(): void {
 	if (scannerCacheCleanupJob) {
 		scannerCacheCleanupJob.stop();
 		scannerCacheCleanupJob = null;
+	}
+	if (deployLogReconcileJob) {
+		deployLogReconcileJob.stop();
+		deployLogReconcileJob = null;
 	}
 
 	// Stop all dynamic jobs
@@ -680,6 +686,8 @@ export async function refreshSystemJobs(): Promise<void> {
 	const eventCleanupCron = await getEventCleanupCron();
 	const scannerCleanupCron = await getScannerCleanupCron();
 	const scannerCleanupEnabled = await getScannerCleanupEnabled();
+	const deployLogReconcileCron = await getDeployLogReconcileCron();
+	const deployLogReconcileEnabled = await getDeployLogReconcileEnabled();
 	const defaultTimezone = await getDefaultTimezone();
 
 	// Cleanup functions to pass to the job
@@ -705,6 +713,9 @@ export async function refreshSystemJobs(): Promise<void> {
 	if (scannerCacheCleanupJob) {
 		scannerCacheCleanupJob.stop();
 	}
+	if (deployLogReconcileJob) {
+		deployLogReconcileJob.stop();
+	}
 
 	// Re-create with new timezone
 	cleanupJob = new Cron(scheduleCleanupCron, { timezone: defaultTimezone, legacyMode: false }, async () => {
@@ -725,10 +736,17 @@ export async function refreshSystemJobs(): Promise<void> {
 		});
 	}
 
+	if (deployLogReconcileEnabled) {
+		deployLogReconcileJob = new Cron(deployLogReconcileCron, { timezone: defaultTimezone, legacyMode: false }, async () => {
+			await runDeployLogReconcileJob('cron');
+		});
+	}
+
 	console.log(`[Scheduler] System schedule cleanup: ${scheduleCleanupCron} [${defaultTimezone}]`);
 	console.log(`[Scheduler] System event cleanup: ${eventCleanupCron} [${defaultTimezone}]`);
 	console.log(`[Scheduler] Volume helper cleanup: every 30 minutes [${defaultTimezone}]`);
 	console.log(`[Scheduler] Scanner cache cleanup: ${scannerCleanupEnabled ? scannerCleanupCron : 'disabled'} [${defaultTimezone}]`);
+	console.log(`[Scheduler] Deploy log reconcile: ${deployLogReconcileEnabled ? deployLogReconcileCron : 'disabled'} [${defaultTimezone}]`);
 }
 
 // =============================================================================
@@ -873,6 +891,23 @@ export async function triggerSystemJob(jobId: string): Promise<{ success: boolea
 	}
 }
 
+/**
+ * Manually trigger the deploy log reconcile job.
+ *
+ * A dedicated function rather than a jobId branch in triggerSystemJob() above: this job
+ * has its own scheduleType ('deploy_log_reconcile', not 'system_cleanup'), so its
+ * DEPLOY_LOG_RECONCILE_ID (1) would otherwise collide with SYSTEM_SCHEDULE_CLEANUP_ID
+ * (also 1) in that function's flat, type-less jobId dispatch.
+ */
+export async function triggerDeployLogReconcile(): Promise<{ success: boolean; executionId?: number; error?: string }> {
+	try {
+		runDeployLogReconcileJob('manual');
+		return { success: true };
+	} catch (error: any) {
+		return { success: false, error: error.message };
+	}
+}
+
 // =============================================================================
 // UTILITY FUNCTIONS
 // =============================================================================
@@ -893,6 +928,8 @@ export async function getSystemSchedules(): Promise<SystemScheduleInfo[]> {
 	const scheduleCleanupEnabled = await getScheduleCleanupEnabled();
 	const eventCleanupEnabled = await getEventCleanupEnabled();
 	const scannerCleanupEnabled = await getScannerCleanupEnabled();
+	const deployLogReconcileCron = await getDeployLogReconcileCron();
+	const deployLogReconcileEnabled = await getDeployLogReconcileEnabled();
 
 	return [
 		{
@@ -934,13 +971,23 @@ export async function getSystemSchedules(): Promise<SystemScheduleInfo[]> {
 			nextRun: scannerCleanupEnabled ? getNextRun(scannerCleanupCron)?.toISOString() ?? null : null,
 			isSystem: true,
 			enabled: scannerCleanupEnabled
+		},
+		{
+			id: DEPLOY_LOG_RECONCILE_ID,
+			type: 'deploy_log_reconcile' as const,
+			name: 'Deploy log reconcile',
+			description: 'Reconciles deploy-log files on disk against stack_deploy run records',
+			cronExpression: deployLogReconcileCron,
+			nextRun: deployLogReconcileEnabled ? getNextRun(deployLogReconcileCron)?.toISOString() ?? null : null,
+			isSystem: true,
+			enabled: deployLogReconcileEnabled
 		}
 	];
 }
 
 export interface SystemScheduleInfo {
 	id: number;
-	type: 'system_cleanup';
+	type: 'system_cleanup' | 'deploy_log_reconcile';
 	name: string;
 	description: string;
 	cronExpression: string;

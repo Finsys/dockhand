@@ -7,6 +7,7 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { Loader2, Box, Info, Layers, Cpu, MemoryStick, HardDrive, Network, Shield, Settings2, Code, Copy, Check, XCircle, Activity, Wifi, Pencil, RefreshCw, X, Folder, FolderOpen, Moon, Tags, ExternalLink, Gpu, Globe, Link, Unlink, Play, Square as SquareIcon, RotateCw, Trash2 } from 'lucide-svelte';
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
+	import ContainerIcon from '$lib/components/ContainerIcon.svelte';
 	import * as Select from '$lib/components/ui/select';
 	import { toast } from 'svelte-sonner';
 	import * as Tooltip from '$lib/components/ui/tooltip';
@@ -17,6 +18,7 @@
 	import { Label } from '$lib/components/ui/label';
 	import { currentEnvironment, appendEnvParam, environments } from '$lib/stores/environment';
 	import ImageLayersView from '../images/ImageLayersView.svelte';
+	import ContainerComposeTab from './ContainerComposeTab.svelte';
 	import LogsPanel from '../logs/LogsPanel.svelte';
 	import FileBrowserPanel from './FileBrowserPanel.svelte';
 	import { formatDateTime } from '$lib/stores/settings';
@@ -640,7 +642,7 @@
 	<Dialog.Content class="max-w-6xl w-[calc(100%-2rem)] h-[calc(100vh-2rem)] flex flex-col">
 		<Dialog.Header class="shrink-0">
 			<Dialog.Title class="flex items-center gap-2">
-				<Box class="w-5 h-5" />
+				<ContainerIcon image={containerData?.Config?.Image ?? ''} name={displayName} class="w-5 h-5" fallbackIcon={Box} showFallbackWhenOff />
 				Container details:
 				{#if isEditing}
 					<input
@@ -833,6 +835,7 @@
 						<Tabs.Trigger value="security" onclick={() => showLogs = false}>Security</Tabs.Trigger>
 						<Tabs.Trigger value="resources" onclick={() => showLogs = false}>Resources</Tabs.Trigger>
 						<Tabs.Trigger value="health" onclick={() => showLogs = false}>Health</Tabs.Trigger>
+						<Tabs.Trigger value="compose" onclick={() => showLogs = false}>Compose</Tabs.Trigger>
 					</Tabs.List>
 
 					<!-- Overview Tab -->
@@ -1831,6 +1834,17 @@
 							</div>
 						{:else}
 							<p class="text-sm text-muted-foreground">No health check configured</p>
+						{/if}
+					</Tabs.Content>
+
+					<!-- Compose Tab (last) -->
+					<Tabs.Content value="compose" class="flex-1 min-h-0">
+						{#if activeTab === 'compose'}
+							<ContainerComposeTab
+								{containerId}
+								containerName={containerName || containerId.slice(0, 12)}
+								envId={$currentEnvironment?.id ?? null}
+							/>
 						{/if}
 					</Tabs.Content>
 				</Tabs.Root>

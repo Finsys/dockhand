@@ -16,9 +16,16 @@ const DEFAULT_THEME_SETTINGS = {
 	editorFont: 'system-mono',
 	animateIcons: true,
 	coloredActionButtons: false,
-	actionIconSize: 'normal'
+	actionIconSize: 'normal',
+	editorIndentGuides: false
 };
 
+/**
+ * @openapi
+ * summary: Public theme + editor display settings (used by the login page before auth)
+ * resp-200: object
+ * resp-200-desc: Light/dark theme, fonts, and editor display flags (e.g. editorIndentGuides)
+ */
 export const GET: RequestHandler = async () => {
 	try {
 		const [
@@ -31,7 +38,8 @@ export const GET: RequestHandler = async () => {
 			editorFont,
 			animateIcons,
 			coloredActionButtons,
-			actionIconSize
+			actionIconSize,
+			editorIndentGuides
 		] = await Promise.all([
 			getSetting('theme_light'),
 			getSetting('theme_dark'),
@@ -42,7 +50,8 @@ export const GET: RequestHandler = async () => {
 			getSetting('theme_editor_font'),
 			getSetting('animate_icons'),
 			getSetting('colored_action_buttons'),
-			getSetting('action_icon_size')
+			getSetting('action_icon_size'),
+			getSetting('editor_indent_guides')
 		]);
 
 		return json({
@@ -55,7 +64,8 @@ export const GET: RequestHandler = async () => {
 			editorFont: editorFont ?? DEFAULT_THEME_SETTINGS.editorFont,
 			animateIcons: animateIcons ?? DEFAULT_THEME_SETTINGS.animateIcons,
 			coloredActionButtons: coloredActionButtons ?? DEFAULT_THEME_SETTINGS.coloredActionButtons,
-			actionIconSize: actionIconSize ?? DEFAULT_THEME_SETTINGS.actionIconSize
+			actionIconSize: actionIconSize ?? DEFAULT_THEME_SETTINGS.actionIconSize,
+			editorIndentGuides: editorIndentGuides ?? DEFAULT_THEME_SETTINGS.editorIndentGuides
 		});
 	} catch (error) {
 		console.error('Failed to get theme settings:', error);

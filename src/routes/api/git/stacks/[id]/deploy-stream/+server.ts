@@ -6,6 +6,17 @@ import { authorize } from '$lib/server/authorize';
 import { createJob, appendLine, completeJob, failJob } from '$lib/server/jobs';
 import { prefersJSON, sseToJSON } from '$lib/server/sse';
 
+/**
+ * @openapi
+ * summary: Deploy a git stack with live progress; streams SSE, or returns a jobId to poll (Accept negotiated)
+ * description: Clients sending `Accept: application/json` get a synchronous, buffered SSE-as-JSON result; otherwise a jobId is returned immediately and progress is delivered out-of-band.
+ * path: id:integer! Git stack ID (from GET /api/git/stacks)
+ * resp-200: {jobId:string}
+ * resp-200-desc: Deployment started — either a jobId to poll or a streamed SSE deploy log
+ * resp-200-example: {"jobId":"a1b2c3d4"}
+ * resp-403: Caller lacks the stacks:start permission for the stack's environment
+ * resp-404: No git stack exists with that ID
+ */
 export const POST: RequestHandler = async ({ params, cookies, request }) => {
 	const auth = await authorize(cookies);
 

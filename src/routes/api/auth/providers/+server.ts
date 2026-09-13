@@ -5,6 +5,12 @@ import { getAuthSettings } from '$lib/server/db';
 import { isEnterprise } from '$lib/server/license';
 
 // GET /api/auth/providers - Get available authentication providers
+/**
+ * @openapi
+ * summary: List the authentication providers offered on the login page (local, LDAP, OIDC), plus the default provider
+ * resp-200: {providers:array<{id:string!, name:string!, type:string!, initiateUrl:string}>, defaultProvider:string}
+ * resp-200-example: {"providers":[{"id":"local","name":"Local","type":"local"},{"id":"oidc:1","name":"Authentik","type":"oidc","initiateUrl":"/api/auth/oidc/1/initiate"}],"defaultProvider":"local"}
+ */
 export const GET: RequestHandler = async () => {
 	if (!(await isAuthEnabled())) {
 		return json({ providers: [] });

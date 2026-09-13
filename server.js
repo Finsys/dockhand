@@ -391,6 +391,23 @@ async function handleTerminalConnection(ws, url, connId) {
 		}
 	}
 
+	// Opening a shell requires the containers:exec permission, same as the REST exec endpoint.
+	if (ws.__auth && typeof globalThis.__canExecForUser === 'function') {
+		try {
+			const allowed = await globalThis.__canExecForUser(ws.__auth, envId);
+			if (!allowed) {
+				console.warn(`[WS] exec denied: user=${ws.__auth.username} envId=${envId}`);
+				ws.send(JSON.stringify({ type: 'error', message: 'Permission denied' }));
+				ws.close(1008, 'exec permission denied');
+				return;
+			}
+		} catch (err) {
+			console.error('[WS] exec permission check failed:', err);
+			ws.close(1011, 'internal error');
+			return;
+		}
+	}
+
 	try {
 		// Resolve Docker target via SvelteKit app's database
 		let target;

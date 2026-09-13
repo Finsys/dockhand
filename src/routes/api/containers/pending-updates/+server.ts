@@ -3,8 +3,24 @@ import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
 import { getPendingContainerUpdates, removePendingContainerUpdate, clearPendingContainerUpdates } from '$lib/server/db';
 
+function safeParse(json: string): unknown {
+	try {
+		return JSON.parse(json);
+	} catch {
+		return null;
+	}
+}
+
 /**
  * Get pending container updates for an environment.
+ *
+ * @openapi
+ * summary: List the containers in an environment that have a pending image update recorded (requires the 'view' permission)
+ * query: env:integer! The target environment ID (required) (from GET /api/environments)
+ * resp-200: {environmentId:integer!, pendingUpdates:array<{containerId:string!, containerName:string!, currentImage:string!, checkedAt:string!, hasImageUpdate:boolean!, newerVersion:object}>!}
+ * resp-400: Environment ID is required
+ * resp-403: Permission denied
+ * resp-500: Failed to get the pending updates
  */
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	const auth = await authorize(cookies);
@@ -29,7 +45,9 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 				containerId: u.containerId,
 				containerName: u.containerName,
 				currentImage: u.currentImage,
-				checkedAt: u.checkedAt
+				checkedAt: u.checkedAt,
+				hasImageUpdate: u.hasImageUpdate,
+				newerVersion: u.newerVersion ? safeParse(u.newerVersion) : null
 			}))
 		});
 	} catch (error: any) {
@@ -40,6 +58,16 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 
 /**
  * Remove a pending container update (e.g., after manual update).
+ *
+ * @openapi
+ * summary: Clear pending-update records for an environment, or for a single container when containerId is given
+ * query: env:integer! The target environment ID (required) (from GET /api/environments)
+ * query: containerId:string The container to clear; omit to clear ALL pending updates in the environment (from GET /api/containers)
+ * resp-200: {success:boolean!}
+ * resp-200-example: {"success":true}
+ * resp-400: Environment ID is required
+ * resp-403: Permission denied
+ * resp-500: Failed to remove the pending update
  */
 export const DELETE: RequestHandler = async ({ url, cookies }) => {
 	const auth = await authorize(cookies);

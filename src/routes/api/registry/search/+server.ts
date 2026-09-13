@@ -1,7 +1,11 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getRegistry } from '$lib/server/db';
-import { getRegistryAuth, isHarborRegistry, harborSearchRepositories, parseRegistryUrl } from '$lib/server/docker';
+import { authorize } from '$lib/server/authorize';
+import { getRegistryAuth, isHarborRegistry, harborSearchRepositories, parseRegistryUrl, classifyCatalogFailure, CATALOG_NOT_SUPPORTED_MSG } from '$lib/server/docker';
+
+/** Thrown when the registry refuses catalog listing to a valid token (GitLab/Harbor, #873). */
+class CatalogNotSupportedError extends Error {}
 
 interface SearchResult {
 	name: string;
@@ -165,7 +169,20 @@ async function searchCatalog(registry: any, term: string, limit: number): Promis
 
 		if (!response.ok) {
 			if (response.status === 401 || response.status === 403) {
-				throw new Error('Authentication failed. This registry may not support catalog listing (common with GitLab and Harbor deploy tokens).');
+				// Same GitLab/Harbor catalog case as Browse (#873): a valid token that
+				// isn't allowed to list is NOT an auth failure. Throw a marked error so
+				// searchPrivateRegistry can surface the right message.
+				const hasCreds = !!(registry.username && registry.password);
+				const authState = hasCreds ? (authHeader ? 'authed' : 'rejected') : 'anon';
+				const kind = classifyCatalogFailure(
+					response.status,
+					response.headers.get('WWW-Authenticate'),
+					authState
+				);
+				if (kind === 'not_supported') {
+					throw new CatalogNotSupportedError(CATALOG_NOT_SUPPORTED_MSG);
+				}
+				throw new Error('Authentication failed. Check the registry credentials.');
 			}
 			throw new Error(`Registry returned error: ${response.status}`);
 		}
@@ -204,7 +221,27 @@ async function searchCatalog(registry: any, term: string, limit: number): Promis
 	return results;
 }
 
-export const GET: RequestHandler = async ({ url }) => {
+/**
+ * @openapi
+ * summary: Search for images by name in Docker Hub or a configured private registry (direct + catalog fallback)
+ * description: With no registry parameter the search runs against Docker Hub; otherwise against the given registry, falling back to Docker Hub search when the registry is a Docker Hub mirror.
+ * query: term:string! Search term / image name
+ * query: limit:integer Maximum number of results (default 25)
+ * query: registry:integer ID of the configured registry to search; omit to search Docker Hub (from GET /api/registries)
+ * resp-200: array<{name:string!, description:string, star_count:integer, is_official:boolean, is_automated:boolean}>
+ * resp-200-example: [{"name":"nginx","description":"Official build of Nginx","star_count":20000,"is_official":true,"is_automated":false}]
+ * resp-400: The term query parameter is missing
+ * resp-403: Permission denied (requires registries:view)
+ * resp-404: The referenced registry does not exist
+ * resp-500: Failed to search images
+ * resp-503: Could not connect to the registry (connection refused or host not found)
+ */
+export const GET: RequestHandler = async ({ url, cookies }) => {
+	const auth = await authorize(cookies);
+	if (auth.authEnabled && !await auth.can('registries', 'view')) {
+		return json({ error: 'Permission denied' }, { status: 403 });
+	}
+
 	const term = url.searchParams.get('term');
 	const limit = parseInt(url.searchParams.get('limit') || '25', 10);
 	const registryId = url.searchParams.get('registry');
@@ -234,6 +271,12 @@ export const GET: RequestHandler = async ({ url }) => {
 
 		return json(results);
 	} catch (error: any) {
+		// Registry won't allow catalog listing (GitLab/Harbor, #873) - not an error the
+		// user can fix. Return an empty result with a hint, not a 500 auth failure.
+		if (error instanceof CatalogNotSupportedError) {
+			return json({ results: [], notSupported: true, message: CATALOG_NOT_SUPPORTED_MSG });
+		}
+
 		console.error('Failed to search images:', error);
 
 		if (error.code === 'ECONNREFUSED') {

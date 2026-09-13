@@ -20,6 +20,7 @@ export interface Permissions {
 	schedules: string[];
 	backups: string[];
 	templates: string[];
+	secrets: string[];
 }
 
 export interface AuthUser {

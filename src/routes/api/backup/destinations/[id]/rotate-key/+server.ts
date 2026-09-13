@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
+import { requireBackups } from '$lib/server/backups/route-guards';
 import { auditBackupDestination } from '$lib/server/audit';
 import { getBackupDestination } from '$lib/server/db';
 import { rotateDestinationPassword } from '$lib/server/backups';
@@ -8,21 +9,24 @@ import { rotateDestinationPassword } from '$lib/server/backups';
 /**
  * Rotate the restic repository password for a destination.
  *
- * Body: { currentPassword: string, newPassword: string }
- *
- * 200 — rotated, DB updated
- * 400 — input invalid or current password wrong
- * 404 — destination not found
- * 409 — restic rotated but DB write failed (manual recovery needed; details
- *       include dbOutOfSync: true)
- * 500 — restic call failed for an unrelated reason
+ * @openapi
+ * summary: Rotate the restic repository password for a destination and persist the new password
+ * description: Permission denial (403, "backups:manage") is produced by the shared requireBackups route guard.
+ * path: id:integer! Backup destination id (from GET /api/backup/destinations)
+ * body: {currentPassword:string!, newPassword:string!}
+ * body-example: {"currentPassword":"***","newPassword":"***"}
+ * resp-200: Returns { success: true } once the password is rotated and the database is updated
+ * resp-200-example: {"success":true}
+ * resp-400: Invalid input — invalid id, missing passwords, or the current password is incorrect
+ * resp-404: Destination not found
+ * resp-409: restic rotated the key but the database write failed (manual recovery needed; the response includes dbOutOfSync:true)
+ * resp-500: restic call failed for an unrelated reason
  */
 export const POST: RequestHandler = async (event) => {
 	const { params, request, cookies } = event;
 	const auth = await authorize(cookies);
-	if (auth.authEnabled && !await auth.can('backups', 'manage')) {
-		return json({ error: 'Permission denied' }, { status: 403 });
-	}
+	const denied = await requireBackups(auth, 'manage');
+	if (denied) return denied;
 
 	const id = parseInt(params.id);
 	if (isNaN(id)) return json({ error: 'Invalid ID' }, { status: 400 });

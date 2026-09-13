@@ -356,6 +356,18 @@ async function handleEdgeMergedLogs(containerIds: string[], tail: string, enviro
 	});
 }
 
+/**
+ * @openapi
+ * summary: Stream merged, color-tagged logs from multiple containers over Server-Sent Events
+ * query: containers:string! Comma-separated container IDs to merge logs from
+ * query: tail:string Number of lines to tail per container (default 100)
+ * query: since:string Only return logs since this timestamp (Docker since format)
+ * query: until:string Only return logs until this timestamp (Docker until format)
+ * query: env:integer Environment the containers belong to (from GET /api/environments)
+ * resp-200: Server-Sent Events stream (text/event-stream) emitting heartbeat and per-container log events
+ * resp-400: No containers specified
+ * resp-403: Permission denied (requires the containers:logs permission)
+ */
 export const GET: RequestHandler = async ({ url, cookies }) => {
 	const auth = await authorize(cookies);
 

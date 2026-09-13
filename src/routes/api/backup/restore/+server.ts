@@ -1,18 +1,30 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
+import { requireBackups } from '$lib/server/backups/route-guards';
 import { runRestore } from '$lib/server/backups';
 import { validateRestoreRequest, type RestoreMode } from '$lib/server/backups/validate';
 import { createJobResponse } from '$lib/server/sse';
 import { auditRestore } from '$lib/server/audit';
 import { guardSnapshotEnvAccess } from '$lib/server/backups/route-guards';
 
+/**
+ * POST /api/backup/restore - Restore a snapshot (streamed job)
+ *
+ * @openapi
+ * summary: Restore a backup snapshot in-place or to a new location, streaming progress as a Server-Sent Events job
+ * description: Returns a text/event-stream that emits `progress` events and a final `result` event. An in-place restore is destructive and requires confirmOverwrite:true. Authorization and snapshot-environment access are checked before the request shape is validated. destinationId from GET /api/backup/destinations. snapshotId from GET /api/backup/snapshots. environmentId from GET /api/environments.
+ * body: {destinationId:integer!, snapshotId:string!, mode:string, targetType:string, volumes:array<string>, environmentId:integer, confirmOverwrite:boolean, targetPath:string, targetName:string, postRestore:string, volumeDestinations:array<{}>, restoreSecrets:boolean, skipStackFiles:boolean}
+ * body-example: {"destinationId":3,"snapshotId":"a1b2c3d4","mode":"new-location","targetType":"container","targetName":"nextcloud-restored","environmentId":1,"confirmOverwrite":false}
+ * resp-200: Server-Sent Events stream of progress and a final result event (status "success" or "error")
+ * resp-400: Invalid restore request; the response "issues" array lists the validation problems
+ * resp-403: Permission denied — requires "backups:manage", or no access to the target or snapshot-owning environment
+ */
 export const POST: RequestHandler = async (event) => {
 	const { request, cookies } = event;
 	const auth = await authorize(cookies);
-	if (auth.authEnabled && !await auth.can('backups', 'manage')) {
-		return json({ error: 'Permission denied' }, { status: 403 });
-	}
+	const rbacDenied = await requireBackups(auth, 'manage');
+	if (rbacDenied) return rbacDenied;
 
 	const body = await request.json();
 	const mode: RestoreMode = body.mode === 'in-place' ? 'in-place' : 'new-location';
@@ -25,6 +37,9 @@ export const POST: RequestHandler = async (event) => {
 	// The client sends false to bring the stack up without them. Only a stack redeploy
 	// consumes this; container restores ignore it.
 	const restoreSecrets = body.restoreSecrets !== false;
+	// New-location STACK restore: skip the captured compose/.env (data-only restore),
+	// and/or ADOPT the restored stack into Dockhand afterwards (opt-in). Both default off.
+	const skipStackFiles = body.skipStackFiles === true;
 
 	// Authorization gates run BEFORE request validation, so an unauthorized caller
 	// never learns anything about the request shape.
@@ -76,6 +91,7 @@ export const POST: RequestHandler = async (event) => {
 				postRestore,
 				volumeDestinations,
 				restoreSecrets,
+				skipStackFiles,
 			},
 			access,
 			// Stream progress to the client (the restore modal's log). Without this the

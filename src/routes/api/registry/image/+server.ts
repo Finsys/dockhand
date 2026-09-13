@@ -19,6 +19,23 @@ const MANIFEST_TYPES = [
 	'application/vnd.oci.image.index.v1+json'
 ];
 
+/**
+ * @openapi
+ * summary: Delete a tagged image from a registry by resolving its manifest digest, then deleting by digest
+ * description: Docker Hub deletion is rejected. Upstream 401 responses during manifest resolution/deletion are proxied back as 401.
+ * query: registry:integer! ID of the configured registry (from GET /api/registries)
+ * query: image:string! Repository/image name (may include an org path)
+ * query: tag:string! Tag to delete
+ * resp-200: {success:boolean!, message:string}
+ * resp-200-example: {"success":true,"message":"Deleted library/nginx:1.27"}
+ * resp-400: A required query parameter is missing, or Docker Hub was targeted (deletion unsupported)
+ * resp-401: The registry rejected authentication while resolving or deleting the manifest
+ * resp-403: Caller lacks the settings:edit permission
+ * resp-404: Registry not found, or the image/tag/manifest does not exist
+ * resp-405: The registry has manifest deletion disabled (REGISTRY_STORAGE_DELETE_ENABLED)
+ * resp-500: Failed to delete the image
+ * resp-503: Could not connect to the registry (connection refused or host not found)
+ */
 export const DELETE: RequestHandler = async ({ url, cookies }) => {
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !await auth.can('settings', 'edit')) {
