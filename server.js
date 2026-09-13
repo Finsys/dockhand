@@ -239,6 +239,10 @@ wss.on('connection', (ws, req) => {
  * - __terminalResizeContainer(containerId, cols, rows, envId) - resizes an attached TTY
  */
 
+// NOTE: createDockerStreamState/decodeChunkedDockerBody/processDockerStreamChunk below
+// mirror src/lib/server/docker-stream-core.ts (the tested source of truth). server.js
+// runs against ./build and cannot import the TS core at runtime, so the logic is kept
+// inline here; keep the two in sync (vite.config.ts imports the core directly).
 function buildDockerStreamRequest(path, target, body = '') {
 	const host = target.host || 'localhost';
 	const tokenHeader = target.hawserToken ? `X-Hawser-Token: ${target.hawserToken}\r\n` : '';

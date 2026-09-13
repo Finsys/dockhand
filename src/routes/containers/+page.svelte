@@ -1124,6 +1124,9 @@
 			const savedUser = getSavedUser(container.id);
 			terminalUser = savedUser ?? 'root';
 			terminalCustomUsers = getCustomUsers();
+			// Default a fresh session to exec so a prior container's Attach choice
+			// (terminalMode is shared) doesn't carry over to this one.
+			terminalMode = 'exec';
 			// Show popover to configure new terminal
 			terminalPopoverStates[container.id] = true;
 		}
