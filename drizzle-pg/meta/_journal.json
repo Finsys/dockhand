@@ -113,6 +113,13 @@
       "when": 1788099526949,
       "tag": "0015_deploy_run_index",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1788347695433,
+      "tag": "0016_add_stack_versioning",
+      "breakpoints": true
     }
   ]
 }

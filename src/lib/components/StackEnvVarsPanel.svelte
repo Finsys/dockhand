@@ -406,9 +406,6 @@
 			<!-- Actions - right-aligned -->
 			{#if !readonly}
 				<div class="flex items-center gap-1 shrink-0">
-					{#if headerActions}
-						{@render headerActions()}
-					{/if}
 					<Button type="button" size="sm" variant="ghost" onclick={handleLoadFromFile} class="h-6 text-xs px-2">
 						<Upload class="w-3.5 h-3.5" />
 						Load
@@ -441,6 +438,9 @@
 							</Button>
 						{/snippet}
 					</ConfirmPopover>
+					{#if headerActions}
+						{@render headerActions()}
+					{/if}
 				</div>
 				<input
 					bind:this={fileInputRef}
