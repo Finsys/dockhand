@@ -51,7 +51,8 @@ export async function renderEffectiveCompose(
 	stackName: string,
 	composeContent: string,
 	dockerHost?: string | null,
-	envVars?: Record<string, string>
+	envVars?: Record<string, string>,
+	additionalSources?: string[]
 ): Promise<EffectiveComposeResult> {
 	let dir: string | undefined;
 	try {
@@ -75,6 +76,16 @@ export async function renderEffectiveCompose(
 		} catch {
 			// A compose that won't parse is handled by the local parser; config will report it too.
 		}
+		// Multi-file sets: write each additional file and pass it as a later -f so
+		// Compose merges exactly the ordered set the deploy will use.
+		const extraFiles: string[] = [];
+		if (additionalSources && additionalSources.length > 0) {
+			for (let i = 0; i < additionalSources.length; i++) {
+				const extraFile = join(dir, `.compose.${i + 1}.yaml`);
+				await writeFile(extraFile, additionalSources[i], 'utf8');
+				extraFiles.push(extraFile);
+			}
+		}
 
 		const composeDockerHost = resolveComposeDockerHost(dockerHost, undefined);
 		const base = buildComposeBaseArgs(stackName, composeDockerHost); // ['docker', ('-H' host)?, 'compose', '-p', name]
@@ -82,7 +93,12 @@ export async function renderEffectiveCompose(
 		// env_file, profiles, include, extends, overrides all resolved, ports normalized
 		// to long form. This is the authoritative object our context-aware rules reason
 		// about - far better than the raw ${VAR} source.
-		const args = [...base.slice(1), '-f', file, 'config', '--format', 'json'];
+		const args = [
+			...base.slice(1),
+			'-f', file,
+			...extraFiles.flatMap((f) => ['-f', f]),
+			'config', '--format', 'json'
+		];
 
 		const { code, stdout, stderr } = await execDocker(base[0], args, dir, envVars);
 

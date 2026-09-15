@@ -7,6 +7,8 @@
  * Pure and import-light (no db/docker/fs) so it is unit-testable directly.
  */
 
+import { isAbsolute } from 'node:path';
+
 /** Schema version of the metadata.json payload. Bump ONLY on a breaking shape change.
  * Backups are beta -> v1 is the first version. A snapshot written before this contract
  * has NO version field; the parser accepts a missing version as v1 (see parse) so beta
@@ -44,6 +46,10 @@ export interface SnapshotStackFile {
 
 export interface SnapshotStack {
 	composeFileName: string;
+	/** Ordered additional compose file paths RELATIVE to the stack dir, primary
+	 * first (v1.1+). Older snapshots record only composeFileName; restore then
+	 * deploys the single primary file. */
+	composePaths?: string[];
 	fileList: SnapshotStackFile[];
 	excludedBindDirs: string[];
 	secrets: SnapshotSecret[];
@@ -122,8 +128,18 @@ export function parseSnapshotLayout(raw: string): SnapshotLayout | null {
 
 	let stack: SnapshotStack | undefined;
 	if (o.stack && typeof o.stack === 'object' && typeof o.stack.composeFileName === 'string') {
+		// composePaths entries are joined onto the restored stack dir and
+		// registered + executed — reject absolute or traversing values outright
+		// (failing the whole parse) rather than restoring a path-manipulated set.
+		const composePaths = Array.isArray(o.stack.composePaths)
+			? o.stack.composePaths.filter((p: any) => typeof p === 'string' && p.length > 0)
+			: undefined;
+		if (composePaths?.some((p: string) => isAbsolute(p) || p.split(/[\\/]/).includes('..'))) {
+			return null;
+		}
 		stack = {
 			composeFileName: o.stack.composeFileName,
+			composePaths,
 			fileList: Array.isArray(o.stack.fileList)
 				? o.stack.fileList
 					.filter((f: any) => f && typeof f.path === 'string' && typeof f.bytes === 'number')

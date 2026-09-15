@@ -13,6 +13,9 @@ function detectSource(request: Request): string {
 }
 
 /**
+ * Stack-level git webhook. See git-webhook-handler.ts for the shared flow.
+ */
+/**
  * @openapi
  * summary: Webhook trigger (GitHub/GitLab) that deploys a git stack when its signature/token verifies
  * description: Public endpoint authenticated by the stack's webhook secret via `X-Hub-Signature-256` (GitHub) or `X-Gitlab-Token` (GitLab); the raw request body is used for HMAC verification.
@@ -135,7 +138,6 @@ export const GET: RequestHandler = async (event) => {
 			return json(result);
 		}
 
-		// Verify secret via query parameter for GET requests
 		const secret = url.searchParams.get('secret');
 		if (secret !== gitStack.webhookSecret) {
 			await auditGitStack(event, 'webhook', id, gitStack.stackName, gitStack.environmentId, {

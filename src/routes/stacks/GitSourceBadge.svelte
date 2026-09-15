@@ -3,12 +3,13 @@
 	import { GitBranch, GitCommitHorizontal } from 'lucide-svelte';
 	import { forgeIcon } from '$lib/utils/git-forge';
 	import { appSettings } from '$lib/stores/settings';
-import { effectiveStackBranch } from '$lib/git-stack-branch';
+	import { effectiveStackBranch } from '$lib/git-stack-branch';
 
 	interface Props {
 		source: { repository?: { url?: string; branch?: string } | null; gitStack?: { lastCommit?: string | null; branch?: string | null } | null };
+		showTooltip?: boolean;
 	}
-	let { source }: Props = $props();
+	let { source, showTooltip = true }: Props = $props();
 
 	const ForgeIcon = $derived(forgeIcon(source.repository?.url));
 	const showHash = $derived(!!source.gitStack?.lastCommit && $appSettings.showGitCommitHash);
@@ -35,7 +36,7 @@ import { effectiveStackBranch } from '$lib/git-stack-branch';
 	</span>
 {/snippet}
 
-{#if hasGitInfo}
+{#if hasGitInfo && showTooltip}
 	<Tooltip.Root>
 		<Tooltip.Trigger class="block max-w-full overflow-hidden">
 			{@render badge()}
