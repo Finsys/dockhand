@@ -84,7 +84,11 @@ export async function sendZabbix(
 			title: payload.title,
 			message: payload.message,
 			type: payload.type ?? 'info',
+			environment_id: payload.environmentId ?? null,
 			environment: payload.environmentName ?? null,
+			stack: payload.stack ?? null,
+			container: payload.container ?? null,
+			container_id: payload.containerId ?? null,
 			timestamp: new Date().toISOString()
 		};
 
