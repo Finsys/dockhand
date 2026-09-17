@@ -110,9 +110,16 @@
     {
       "idx": 15,
       "version": "6",
-      "when": 1788099517358,
-      "tag": "0015_deploy_run_index",
-      "breakpoints": true
-    }
+		"when": 1788099517358,
+		"tag": "0015_deploy_run_index",
+		"breakpoints": true
+	},
+	{
+		"idx": 16,
+		"version": "6",
+		"when": 1788099527000,
+		"tag": "0016_compose_paths",
+		"breakpoints": true
+	}
   ]
 }

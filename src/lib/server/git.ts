@@ -1,7 +1,6 @@
 import { existsSync, mkdirSync, rmSync, chmodSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve, dirname, basename, relative } from 'node:path';
 import { spawn as nodeSpawn, spawnSync } from 'node:child_process';
-import type { ChildProcess } from 'node:child_process';
 import { GIT_SSH_KEY_PATH_ENV, makeSshKeyPath, removeSshKey } from './git-ssh-key';
 import { permissionDeniedMessage } from './git-error';
 import {
@@ -22,6 +21,9 @@ import {
 import { deployStack, getStackDir } from './stacks';
 import { createRunRecorder } from './deploy-run-record';
 import { hashComposeContent, hashEnvFingerprint } from './deploy-run-record-core';
+import { parseComposePathsColumn } from './compose-files';
+import { collectProcess } from './process-utils';
+import { redactEnvVarsForLog } from './log-utils';
 import { sendEventNotification } from './notifications';
 import { buildBasicAuthHeader } from './git-auth';
 import { assertSafeRepoUrl, assertSafeGitRef, repoFilePath, repoBaseEnvPath } from './git-url-safety';
@@ -109,26 +111,6 @@ function getMergedCaBundlePath(): string {
 	return MERGED_CA_BUNDLE_PATH;
 }
 
-/**
- * Collect stdout, stderr and exit code from a spawned process.
- */
-function collectProcess(proc: ChildProcess): Promise<{ exitCode: number; stdout: string; stderr: string }> {
-	return new Promise((resolve, reject) => {
-		const stdoutChunks: Buffer[] = [];
-		const stderrChunks: Buffer[] = [];
-		proc.stdout?.on('data', (chunk: Buffer) => stdoutChunks.push(chunk));
-		proc.stderr?.on('data', (chunk: Buffer) => stderrChunks.push(chunk));
-		proc.on('error', reject);
-		proc.on('close', (code) => {
-			resolve({
-				exitCode: code ?? 1,
-				stdout: Buffer.concat(stdoutChunks).toString(),
-				stderr: Buffer.concat(stderrChunks).toString()
-			});
-		});
-	});
-}
-
 // Directory for storing cloned repositories
 const dataDir = process.env.DATA_DIR || './data';
 const GIT_REPOS_DIR = resolve(process.env.GIT_REPOS_DIR || join(dataDir, 'git-repos'));
@@ -140,17 +122,6 @@ if (!existsSync(GIT_REPOS_DIR)) {
 
 export function getGitReposDir(): string {
 	return GIT_REPOS_DIR;
-}
-
-/**
- * Redact all env var values for safe logging. Only key names are preserved.
- */
-function redactEnvVarsForLog(vars: Record<string, string>): Record<string, string> {
-	const redacted: Record<string, string> = {};
-	for (const key of Object.keys(vars)) {
-		redacted[key] = '***';
-	}
-	return redacted;
 }
 
 function getRepoPath(repoId: number): string {
@@ -235,7 +206,7 @@ async function ensurePasswdEntry(env: GitEnv): Promise<void> {
 	}
 }
 
-async function buildGitEnv(credential: GitCredential | null): Promise<GitEnv> {
+export async function buildGitEnv(credential: GitCredential | null): Promise<GitEnv> {
 	const env: GitEnv = {
 		...process.env as GitEnv,
 		GIT_TERMINAL_PROMPT: '0',
@@ -309,7 +280,7 @@ async function buildGitEnv(credential: GitCredential | null): Promise<GitEnv> {
 	return env;
 }
 
-function cleanupSshKey(credential: GitCredential | null, env?: GitEnv): void {
+export function cleanupSshKey(credential: GitCredential | null, env?: GitEnv): void {
 	if (credential?.authType === 'ssh') {
 		// Removes the exact per-operation key this env created; falls back to the old
 		// deterministic path only if no env is available (legacy callers). See #1413.
@@ -317,7 +288,7 @@ function cleanupSshKey(credential: GitCredential | null, env?: GitEnv): void {
 	}
 }
 
-function buildRepoUrl(url: string, credential: GitCredential | null): string {
+export function buildRepoUrl(url: string, credential: GitCredential | null): string {
 	assertSafeRepoUrl(url);
 	// Never embed credentials in the URL — they leak via /proc/<pid>/cmdline (see #1081).
 	// HTTPS credentials are injected via GIT_CONFIG_COUNT env vars in buildGitEnv().
@@ -358,7 +329,7 @@ export const GIT_TIMEOUT_MS = Number(process.env.GIT_TIMEOUT_MS) || 20000;
  * URL is attacker-influenced) pass `timeoutMs` explicitly (see
  * listRemoteBranches).
  */
-function execGit(
+export function execGit(
 	args: string[],
 	cwd: string,
 	env: GitEnv,
@@ -424,7 +395,7 @@ function execGit(
  * Get list of files that changed between two commits in a specific directory.
  * Returns array of changed file paths (relative to repo root).
  */
-async function getChangedFilesInDir(
+export async function getChangedFilesInDir(
 	repoPath: string,
 	previousCommit: string,
 	newCommit: string,
@@ -466,7 +437,7 @@ async function getChangedFilesInDir(
  * disk hash. A sanity guard blocks ALL deletions when the clone walk looks
  * broken (empty, or missing the compose file).
  */
-async function computeSyncDeletionPlan(options: {
+export async function computeSyncDeletionPlan(options: {
 	logPrefix: string;
 	composeDir: string; // absolute path inside the clone
 	composeFileName: string | undefined; // compose file relative to composeDir
@@ -531,7 +502,7 @@ async function computeSyncDeletionPlan(options: {
  * instead (#1260); this summary (with real apply results) goes to the
  * server log only.
  */
-async function finalizeDeletionSync(options: {
+export async function finalizeDeletionSync(options: {
 	stackId: number;
 	logPrefix: string;
 	previousManifest: SyncManifest;
@@ -583,6 +554,13 @@ export interface SyncResult {
 	newCommitFull?: string; // Full 40-char commit hash (manifest commit)
 	previousManifest?: SyncManifest; // Manifest from the last successful sync
 }
+
+export type DeployGitStackResult = {
+	success: boolean;
+	output?: string;
+	error?: string;
+	skipped?: boolean;
+};
 
 export interface TestResult {
 	success: boolean;
@@ -930,6 +908,10 @@ export async function syncRepository(repoId: number): Promise<SyncResult> {
 		});
 		return { success: false, error: error.message };
 	}
+}
+
+export async function provisionSharedClone(repoId: number): Promise<SyncResult> {
+	return syncRepository(repoId);
 }
 
 export async function deployFromRepository(repoId: number): Promise<{ success: boolean; output?: string; error?: string }> {
@@ -1323,7 +1305,7 @@ export async function syncGitStack(stackId: number): Promise<SyncResult> {
  * lived only in the git-stack-sync scheduler task, so webhook/manual deploys were
  * silent (#1295). Best-effort: never changes the deploy outcome.
  */
-async function notifyGitSync(stackName: string, envId: number | null | undefined, result: { success: boolean; error?: string; skipped?: boolean }): Promise<void> {
+export async function notifyGitSync(stackName: string, envId: number | null | undefined, result: { success: boolean; error?: string; skipped?: boolean }): Promise<void> {
 	try {
 		if (result.success && result.skipped) {
 			await sendEventNotification('git_sync_skipped', {
@@ -1540,6 +1522,7 @@ export async function deployGitStack(
 			sourceDir: syncResult.composeDir, // Copy entire directory from git repo
 			composeFileName: syncResult.composeFileName, // Use original compose filename from repo
 			envFileName: syncResult.envFileName, // Env file relative to compose dir (for --env-file flag, optional)
+			composePaths: gitStack.composePaths ? parseComposePathsColumn(gitStack.composePaths) : undefined,
 			forceRecreate,
 			build: gitStack.buildOnDeploy,
 			noBuildCache: gitStack.noBuildCache,
@@ -1616,7 +1599,8 @@ export async function deployGitStack(
 			sourceType: 'git',
 			gitRepositoryId: gitStack.repositoryId,
 			gitStackId: stackId,
-			composePath: resolvedComposePath
+			composePath: resolvedComposePath,
+			composePaths: gitStack.composePaths ? parseComposePathsColumn(gitStack.composePaths) : null
 		});
 	}
 
@@ -1695,7 +1679,7 @@ export async function deleteGitStackFiles(stackId: number, stackName?: string, e
 }
 
 // Progress callback type
-type ProgressCallback = (data: {
+export type ProgressCallback = (data: {
 	status: 'connecting' | 'cloning' | 'fetching' | 'reading' | 'deploying' | 'complete' | 'error';
 	message?: string;
 	step?: number;
@@ -1718,6 +1702,16 @@ type ProgressCallback = (data: {
  * deployGitStack's doc comment for the full picture of which callers go through
  * which path.
  */
+export interface GitEngine {
+	syncGitStack(stackId: number, onProgress?: ProgressCallback): Promise<SyncResult>;
+	deployGitStack(stackId: number, options?: { force?: boolean; ignoreForceRedeploy?: boolean }): Promise<DeployGitStackResult>;
+	deployGitStackWithProgress(stackId: number, onProgress: ProgressCallback): Promise<DeployGitStackResult>;
+	deleteGitStackFiles(stackId: number, stackName?: string, environmentId?: number | null): Promise<void>;
+	listGitStackEnvFiles(stackId: number): Promise<{ files: string[]; error?: string }>;
+	readGitStackEnvFile(stackId: number, envFilePath: string): Promise<{ vars: Record<string, string>; error?: string }>;
+}
+
+export { stackRepoPath } from './git-paths';
 export async function deployGitStackWithProgress(
 	stackId: number,
 	onProgress: ProgressCallback
@@ -1987,6 +1981,7 @@ export async function deployGitStackWithProgress(
 				sourceDir: composeDir, // Copy entire directory from git repo
 				composeFileName: progressComposeFileName, // Compose filename relative to source dir
 				envFileName, // Env file relative to compose dir (for --env-file flag, optional)
+				composePaths: gitStack.composePaths ? parseComposePathsColumn(gitStack.composePaths) : undefined,
 				build: gitStack.buildOnDeploy,
 				noBuildCache: gitStack.noBuildCache,
 				pullPolicy: gitStack.repullImages ? 'always' : undefined,
@@ -2050,7 +2045,8 @@ export async function deployGitStackWithProgress(
 				sourceType: 'git',
 				gitRepositoryId: gitStack.repositoryId,
 				gitStackId: stackId,
-				composePath: resolvedComposePath
+				composePath: resolvedComposePath,
+				composePaths: gitStack.composePaths ? parseComposePathsColumn(gitStack.composePaths) : null
 			});
 
 			onProgress({ status: 'complete', message: `Successfully deployed ${gitStack.stackName}` });
