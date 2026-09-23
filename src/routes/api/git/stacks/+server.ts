@@ -1,3 +1,4 @@
+import { dirname } from 'node:path';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import {
@@ -12,6 +13,7 @@ import {
 	secretProviderExists
 } from '$lib/server/db';
 import { deployGitStack } from '$lib/server/git';
+import { firstComposePathOutsideDir, validateComposePathsInput } from '$lib/server/compose-files';
 import { authorize } from '$lib/server/authorize';
 import { registerSchedule } from '$lib/server/scheduler';
 import { auditGitStack } from '$lib/server/audit';
@@ -53,7 +55,7 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 /**
  * @openapi
  * summary: Create a git-deployed stack (from an existing repo or new repo url/branch)
- * body: {stackName:string!, environmentId:integer, repositoryId:integer, secretProviderId:integer, webhookEnabled:boolean, webhookSecret:string}
+ * body: {stackName:string!, environmentId:integer, repositoryId:integer, composePath:string, composePaths:array<string>, secretProviderId:integer, webhookEnabled:boolean, webhookSecret:string}
  * resp-400: Invalid stack name, or secretProviderId is not a number/null
  * resp-403: Permission denied (needs stacks:create; binding a secret provider also needs secrets:view)
  * resp-409: A git stack with this name already exists in the environment
@@ -117,6 +119,22 @@ export const POST: RequestHandler = async (event) => {
 			return json({ error: 'A webhook secret is required when the webhook is enabled' }, { status: 400 });
 		}
 
+		const composePathsError = validateComposePathsInput(data.composePaths);
+		if (composePathsError) return json({ error: composePathsError }, { status: 400 });
+
+		// A default single-file stack leaves composePaths unset, so standard
+		// adjacent override files retain Docker Compose's automatic discovery.
+		const composePaths = Array.isArray(data.composePaths) && data.composePaths.length > 0
+			? data.composePaths
+			: null;
+		const composePath = composePaths?.[0] ?? (data.composePath || 'compose.yaml');
+		// Deploys copy only the context dir (default: the primary's dir), so every
+		// additional file must live inside it.
+		const outsidePath = composePaths && firstComposePathOutsideDir(composePaths, data.contextDir || dirname(composePath));
+		if (outsidePath) {
+			return json({ error: `Compose file "${outsidePath}" must be inside the stack's source directory` }, { status: 400 });
+		}
+
 		// Either repositoryId or new repo details (url, branch) must be provided
 		let repositoryId = data.repositoryId;
 
@@ -169,7 +187,8 @@ export const POST: RequestHandler = async (event) => {
 			...(data.repositoryId && typeof data.branch === 'string' && data.branch.trim()
 				? { branch: data.branch.trim() }
 				: {}),
-			composePath: data.composePath || 'compose.yaml',
+			composePath,
+			composePaths,
 			envFilePath: data.envFilePath || null,
 			autoUpdate: data.autoUpdate || false,
 			autoUpdateSchedule: data.autoUpdateSchedule || 'daily',

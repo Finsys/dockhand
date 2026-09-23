@@ -1,7 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getStackSources } from '$lib/server/db';
-import { countStackEnvVars } from '$lib/server/stacks';
+import { countStackEnvVars, resolveStackSourceDisplayPaths } from '$lib/server/stacks';
 import { authorize } from '$lib/server/authorize';
 
 /**
@@ -31,6 +31,7 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 			{
 				sourceType: string;
 				composePath?: string | null;
+				composePaths?: string[];
 				repository?: any;
 				secretProviderId?: number | null;
 				icon?: string | null;
@@ -51,9 +52,12 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 			)
 		);
 		sources.forEach((source, i) => {
+			// Git stacks store repo-relative compose paths; report on-disk paths.
+			const resolved = resolveStackSourceDisplayPaths(source);
 			sourceMap[source.stackName] = {
 				sourceType: source.sourceType,
-				composePath: source.composePath,
+				composePath: resolved.composePath,
+				composePaths: resolved.composePaths,
 				repository: source.repository,
 				secretProviderId: source.secretProviderId,
 				icon: source.icon ?? null,

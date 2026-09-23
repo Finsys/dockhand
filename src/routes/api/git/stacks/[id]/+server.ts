@@ -1,7 +1,9 @@
+import { dirname } from 'node:path';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getGitStack, updateGitStack, deleteGitStack, deleteStackSource, updateStackSourceName, updateStackEnvVarsName, setStackEnvVars, getStackEnvVars, deleteStackEnvVars, updateStackSource, secretProviderExists } from '$lib/server/db';
 import { deleteGitStackFiles, deployGitStack } from '$lib/server/git';
+import { firstComposePathOutsideDir, parseComposePathsColumn, validateComposePathsInput } from '$lib/server/compose-files';
 import { normalizeStackBranchUpdate } from '$lib/git-stack-branch';
 import { authorize } from '$lib/server/authorize';
 import { registerSchedule, unregisterSchedule } from '$lib/server/scheduler';
@@ -47,7 +49,7 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
  * @openapi
  * summary: Update a git stack (rename, schedule, webhook, secret-provider binding)
  * path: id:integer The git stack id
- * body: {stackName:string, secretProviderId:integer, webhookEnabled:boolean, webhookSecret:string}
+ * body: {stackName:string, composePath:string, composePaths:array<string>, secretProviderId:integer, webhookEnabled:boolean, webhookSecret:string}
  * resp-400: Invalid stack name, or secretProviderId is not a number/null
  * resp-403: Permission denied (needs stacks:edit; binding a secret provider also needs secrets:view)
  * resp-404: Git stack not found
@@ -116,6 +118,29 @@ export const PUT: RequestHandler = async (event) => {
 			return json({ error: 'A webhook secret is required when the webhook is enabled' }, { status: 400 });
 		}
 
+		const composePathsError = validateComposePathsInput(data.composePaths);
+		if (composePathsError) return json({ error: composePathsError }, { status: 400 });
+
+		// composePaths[0] is the primary compose file (stored denormalized in
+		// composePath). Keep them in sync when the array is updated. A client that
+		// sends only composePath gets it remapped onto the stored list so the stale
+		// list doesn't stay authoritative for sync/deploy.
+		const existingComposePaths = parseComposePathsColumn(existing.composePaths);
+		if (data.composePaths === undefined && data.composePath !== undefined &&
+			existingComposePaths.length > 0 && existingComposePaths[0] !== data.composePath) {
+			data.composePaths = [data.composePath, ...existingComposePaths.slice(1)];
+		}
+		if (Array.isArray(data.composePaths) && data.composePaths.length > 0) {
+			data.composePath = data.composePaths[0];
+			// Deploys copy only the context dir (default: the primary's dir), so every
+			// additional file must live inside it.
+			const contextDir = data.contextDir !== undefined ? data.contextDir : existing.contextDir;
+			const outsidePath = firstComposePathOutsideDir(data.composePaths, contextDir || dirname(data.composePath));
+			if (outsidePath) {
+				return json({ error: `Compose file "${outsidePath}" must be inside the stack's source directory` }, { status: 400 });
+			}
+		}
+
 		const oldStackName = existing.stackName;
 
 		// Per-stack branch override is a partial update. The shared normalizer
@@ -136,6 +161,7 @@ export const PUT: RequestHandler = async (event) => {
 			stackName: data.stackName,
 			branch: branchValue,
 			composePath: data.composePath,
+			composePaths: data.composePaths,
 			envFilePath: data.envFilePath,
 			autoUpdate: data.autoUpdate,
 			autoUpdateSchedule: data.autoUpdateSchedule,

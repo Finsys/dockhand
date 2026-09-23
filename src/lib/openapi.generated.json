@@ -14647,6 +14647,146 @@
         ]
       }
     },
+    "/api/git/repositories/{id}/browse": {
+      "get": {
+        "operationId": "get_api_git_repositories_id_browse",
+        "tags": [
+          "git"
+        ],
+        "summary": "List a directory of a repository checkout (a create-flow pending clone, or a Git stack's deployed clone) to pick compose files",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Git repository ID (from GET /api/git/repositories)"
+          },
+          {
+            "name": "pending",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Token returned by POST /api/git/repositories/{id}/temporary-clone"
+          },
+          {
+            "name": "stackId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Git stack ID whose deployed clone to browse (must belong to this repository)"
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Repository-relative directory to list (defaults to the root)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "parent": {
+                      "type": "string"
+                    },
+                    "entries": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "path": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string"
+                          },
+                          "size": {
+                            "type": "integer"
+                          },
+                          "mtime": {
+                            "type": "string"
+                          },
+                          "mode": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "path",
+                          "type",
+                          "size",
+                          "mtime",
+                          "mode"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "entries"
+                  ]
+                },
+                "example": {
+                  "path": "string",
+                  "parent": "string",
+                  "entries": [
+                    {
+                      "name": "string",
+                      "path": "string",
+                      "type": "string",
+                      "size": 0,
+                      "mtime": "string",
+                      "mode": "string"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid repository ID, absolute path, missing pending/stackId, or the path is not a directory"
+          },
+          "403": {
+            "description": "Permission denied (needs git:view; with stackId also stacks:view), or the path escapes the repository"
+          },
+          "404": {
+            "description": "Repository, pending checkout, Git stack, deployed clone or path not found"
+          },
+          "500": {
+            "description": "Failed to list the directory"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Exactly one of pending or stackId selects the checkout. All paths in the response are relative to the repository root, so the host filesystem layout is never exposed. Absolute paths, traversal, symlink escapes and .git are rejected."
+      }
+    },
     "/api/git/repositories/{id}/deploy": {
       "post": {
         "operationId": "post_api_git_repositories_id_deploy",
@@ -14841,6 +14981,92 @@
             "bearerAuth": []
           }
         ]
+      }
+    },
+    "/api/git/repositories/{id}/temporary-clone": {
+      "post": {
+        "operationId": "post_api_git_repositories_id_temporary-clone",
+        "tags": [
+          "git"
+        ],
+        "summary": "Clone a repository into a temporary checkout for the Git stack create flow, so its compose files can be browsed before the stack exists",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Git repository ID (from GET /api/git/repositories)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "token": {
+                      "type": "string"
+                    },
+                    "commit": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "token"
+                  ]
+                },
+                "example": {
+                  "token": "string",
+                  "commit": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The id path segment is not a valid integer"
+          },
+          "403": {
+            "description": "Permission denied (needs git:edit)"
+          },
+          "404": {
+            "description": "No repository exists with that ID"
+          },
+          "500": {
+            "description": "The clone failed"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "The returned token is scoped to this repository and only usable with GET /api/git/repositories/{id}/browse. Checkouts are removed after one hour.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "branch": {
+                    "type": "string"
+                  }
+                }
+              },
+              "example": {
+                "branch": "string"
+              }
+            }
+          }
+        }
       }
     },
     "/api/git/repositories/{id}/test": {
@@ -15081,6 +15307,15 @@
                   "repositoryId": {
                     "type": "integer"
                   },
+                  "composePath": {
+                    "type": "string"
+                  },
+                  "composePaths": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
                   "secretProviderId": {
                     "type": "integer"
                   },
@@ -15099,6 +15334,10 @@
                 "stackName": "string",
                 "environmentId": 0,
                 "repositoryId": 0,
+                "composePath": "string",
+                "composePaths": [
+                  "string"
+                ],
                 "secretProviderId": 0,
                 "webhookEnabled": true,
                 "webhookSecret": "string"
@@ -15201,6 +15440,15 @@
                   "stackName": {
                     "type": "string"
                   },
+                  "composePath": {
+                    "type": "string"
+                  },
+                  "composePaths": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
                   "secretProviderId": {
                     "type": "integer"
                   },
@@ -15214,6 +15462,10 @@
               },
               "example": {
                 "stackName": "string",
+                "composePath": "string",
+                "composePaths": [
+                  "string"
+                ],
                 "secretProviderId": 0,
                 "webhookEnabled": true,
                 "webhookSecret": "string"
@@ -26457,6 +26709,16 @@
                   "composePath": {
                     "type": "string"
                   },
+                  "composePaths": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "composeContents": {
+                    "type": "object",
+                    "properties": {}
+                  },
                   "envPath": {
                     "type": "string"
                   },
@@ -26501,6 +26763,10 @@
                 "name": "string",
                 "compose": "string",
                 "composePath": "string",
+                "composePaths": [
+                  "string"
+                ],
+                "composeContents": {},
                 "envPath": "string",
                 "envVars": [
                   {}
@@ -26837,6 +27103,16 @@
                   "composePath": {
                     "type": "string"
                   },
+                  "composePaths": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "composeContents": {
+                    "type": "object",
+                    "properties": {}
+                  },
                   "envPath": {
                     "type": "string"
                   },
@@ -26872,6 +27148,10 @@
               "example": {
                 "content": "string",
                 "composePath": "string",
+                "composePaths": [
+                  "string"
+                ],
+                "composeContents": {},
                 "envPath": "string",
                 "oldComposePath": "string",
                 "oldEnvPath": "string",
@@ -27973,6 +28253,16 @@
                   "compose": {
                     "type": "string"
                   },
+                  "composePaths": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "composeContents": {
+                    "type": "object",
+                    "properties": {}
+                  },
                   "variables": {
                     "type": "array",
                     "items": {
@@ -28835,6 +29125,16 @@
                 "properties": {
                   "compose": {
                     "type": "string"
+                  },
+                  "composePaths": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "composeContents": {
+                    "type": "object",
+                    "properties": {}
                   },
                   "existing": {
                     "type": "boolean"

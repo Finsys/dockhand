@@ -134,6 +134,13 @@
       "when": 1791134060487,
       "tag": "0018_add_passkey_credentials",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1791200000000,
+      "tag": "0019_compose_paths",
+      "breakpoints": true
     }
   ]
 }

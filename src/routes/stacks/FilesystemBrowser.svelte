@@ -4,7 +4,7 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { Input } from '$lib/components/ui/input';
 	import { Loader2, FolderOpen, File, FileText, ChevronRight, ArrowUp, AlertCircle, FolderPlus, Search, Import, Check, X } from 'lucide-svelte';
-	import type { Component } from 'svelte';
+	import type { Component, ComponentType } from 'svelte';
 	import RecentLocationsPanel from './RecentLocationsPanel.svelte';
 
 	export interface FileEntry {
@@ -20,7 +20,7 @@
 		open: boolean;
 		title?: string;
 		/** Optional icon component to display before the title */
-		icon?: Component<{ class?: string }>;
+		icon?: Component<{ class?: string }> | ComponentType;
 		description?: string;
 		initialPath?: string;
 		selectFilter?: RegExp;
@@ -33,6 +33,8 @@
 		onScanDirectory?: (path: string) => void;
 		/** For adopt mode: show loading state on scan button */
 		scanning?: boolean;
+		/** Directory-listing endpoint. Defaults to the host filesystem API. */
+		apiUrl?: string;
 		onSelect: (path: string, name: string) => void;
 		onClose: () => void;
 	}
@@ -49,11 +51,13 @@
 		onFilePreview,
 		onScanDirectory,
 		scanning = false,
+		apiUrl = '/api/system/files',
 		onSelect,
 		onClose
 	}: Props = $props();
 
 	let currentPath = $state<string | null>(null);
+	let parentPath = $state<string | null>(null);
 	let entries = $state<FileEntry[]>([]);
 	let loading = $state(false);
 	let error = $state<string | null>(null);
@@ -82,10 +86,10 @@
 
 	// Load directory when dialog opens
 	$effect(() => {
-		if (open && !currentPath) {
+		if (open && currentPath === null) {
 			// Wait a tick for the panel to load, then use first location or initialPath
 			setTimeout(() => {
-				const firstLocation = recentLocationsPanel?.getFirstLocation();
+				const firstLocation = apiUrl === '/api/system/files' ? recentLocationsPanel?.getFirstLocation() : null;
 				loadDirectory(firstLocation || initialPath);
 			}, 50);
 		}
@@ -100,7 +104,8 @@
 		error = null;
 
 		try {
-			const res = await fetch(`/api/system/files?path=${encodeURIComponent(path)}`);
+			const separator = apiUrl.includes('?') ? '&' : '?';
+			const res = await fetch(`${apiUrl}${separator}path=${encodeURIComponent(path)}`);
 			const data = await res.json();
 
 			if (!res.ok) {
@@ -109,6 +114,7 @@
 			}
 
 			currentPath = data.path;
+			parentPath = data.parent ?? null;
 			entries = data.entries;
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load directory';
@@ -149,10 +155,9 @@
 	function handleGoUp() {
 		if (!currentPath || currentPath === '/') return;
 
-		const parent = currentPath.replace(/\/[^/]+$/, '') || '/';
 		selectedPath = null;
 		selectedName = null;
-		loadDirectory(parent);
+		loadDirectory(parentPath ?? '/');
 	}
 
 	function handleConfirm() {
@@ -301,11 +306,13 @@
 
 		<div class="flex-1 overflow-hidden flex {isAdoptMode ? 'min-h-0' : ''}">
 			<!-- Recent locations sidebar -->
-			<RecentLocationsPanel
-				bind:this={recentLocationsPanel}
-				{currentPath}
-				onSelect={handleRecentSelect}
-			/>
+			{#if apiUrl === '/api/system/files'}
+				<RecentLocationsPanel
+					bind:this={recentLocationsPanel}
+					{currentPath}
+					onSelect={handleRecentSelect}
+				/>
+			{/if}
 
 			<!-- Main browser area -->
 			<div class="flex-1 flex flex-col min-h-0">
@@ -321,7 +328,7 @@
 						<ArrowUp class="w-4 h-4" />
 					</button>
 					<code class="text-xs bg-muted px-2 py-1 rounded truncate flex-1 min-w-0">{currentPath || '/'}</code>
-					{#if creatingFolder}
+					{#if apiUrl === '/api/system/files' && creatingFolder}
 						<div class="flex items-center gap-1">
 							<Input
 								bind:ref={folderInputEl}
@@ -351,7 +358,7 @@
 								<span class="text-xs text-red-500 truncate max-w-48" title={createError}>{createError}</span>
 							{/if}
 						</div>
-					{:else}
+					{:else if apiUrl === '/api/system/files'}
 						<button
 							type="button"
 							class="p-1 rounded hover:bg-muted text-muted-foreground"
@@ -393,7 +400,7 @@
 						</div>
 						<p class="text-red-600 dark:text-red-400 font-medium">Unable to browse files</p>
 						<p class="text-sm text-muted-foreground mt-1">{error}</p>
-						<Button variant="outline" size="sm" class="mt-4" onclick={() => currentPath && loadDirectory(currentPath)}>
+						<Button variant="outline" size="sm" class="mt-4" onclick={() => loadDirectory(currentPath ?? initialPath)}>
 							Retry
 						</Button>
 					</div>

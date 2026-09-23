@@ -7,7 +7,7 @@
 	import { Label } from '$lib/components/ui/label';
 	import { Input } from '$lib/components/ui/input';
 	import { TogglePill } from '$lib/components/ui/toggle-pill';
-	import { Loader2, GitBranch, RefreshCw, Webhook, Rocket, RefreshCcw, Copy, Check, XCircle, FolderGit2, Github, Key, KeyRound, Lock, FileText, HelpCircle, GripVertical, X, Download, Hammer, ArrowDownToLine, Zap, FolderOpen, Ban, TriangleAlert, Settings2, Archive, History } from 'lucide-svelte';
+	import { Loader2, GitBranch, RefreshCw, Webhook, Rocket, RefreshCcw, Copy, Check, XCircle, FolderGit2, Github, Key, KeyRound, Lock, FileText, HelpCircle, GripVertical, X, Download, Hammer, ArrowDownToLine, Zap, FolderOpen, Ban, TriangleAlert, Settings2, Archive, History, GitFork, ArrowUp, ArrowDown } from 'lucide-svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { page } from '$app/stores'; // BETA GATE: backups feature flag
 	import BackupPanel from '../containers/BackupPanel.svelte';
@@ -31,6 +31,8 @@
 	import { toast } from 'svelte-sonner';
 	import { focusFirstInput } from '$lib/utils';
 	import { readJobResponse } from '$lib/utils/sse-fetch';
+	import FilesystemBrowser from './FilesystemBrowser.svelte';
+	import { fetchDetectedComposeOverridePaths } from '$lib/compose-overrides';
 
 
 	// localStorage key for persisted split ratio
@@ -65,6 +67,7 @@
 		branch?: string | null; // Per-stack branch override; null = use repository default
 		environmentId: number | null;
 		composePath: string;
+		composePaths: string | null;
 		envFilePath: string | null;
 		autoUpdate: boolean;
 		autoUpdateSchedule: 'daily' | 'weekly' | 'custom';
@@ -87,9 +90,11 @@
 		credentials: GitCredential[];
 		onClose: () => void;
 		onSaved: () => void;
+		/** Called when a new repository is created inline (via Browse) so the parent can refresh the repos list */
+		onRepositoryCreated?: () => void;
 	}
 
-	let { open = $bindable(), gitStack = null, environmentId = null, icon = null, repositories, credentials, onClose, onSaved }: Props = $props();
+	let { open = $bindable(), gitStack = null, environmentId = null, icon = null, repositories, credentials, onClose, onSaved, onRepositoryCreated }: Props = $props();
 
 	// Per-stack icon override (same name-based /icon endpoint as internal stacks, #1473).
 	let formIcon = $state<string | null>(icon);
@@ -210,7 +215,168 @@
 	let formAutoUpdateCron = $state('0 3 * * *');
 	let formWebhookEnabled = $state(false);
 	let formWebhookSecret = $state('');
+	let formComposePaths = $state<string[]>([]);
 	let formContextDir = $state<string | null>(null);
+
+	// Blank rows are still being typed. A single file stays implicit so Compose keeps
+	// discovering standard override files next to it.
+	function explicitComposePaths(): string[] | null {
+		const paths = formComposePaths.map((path) => path.trim()).filter(Boolean);
+		return paths.length > 1 ? paths : null;
+	}
+
+	// Drag-and-drop state for compose paths reordering
+	let gitDragIndex = $state<number | null>(null);
+
+	function gitAddComposePath() {
+		formComposePaths = [...formComposePaths, ''];
+	}
+
+	function gitRemoveComposePath(index: number) {
+		if (formComposePaths.length <= 1) return;
+		const newPaths = formComposePaths.filter((_, i) => i !== index);
+		formComposePaths = newPaths;
+		if (index === 0) formComposePath = newPaths[0] || 'compose.yaml';
+	}
+
+	function gitMovePathUp(index: number) {
+		if (index <= 0) return;
+		const newPaths = [...formComposePaths];
+		[newPaths[index - 1], newPaths[index]] = [newPaths[index], newPaths[index - 1]];
+		formComposePaths = newPaths;
+		if (index - 1 === 0) formComposePath = newPaths[0];
+	}
+
+	function gitMovePathDown(index: number) {
+		if (index >= formComposePaths.length - 1) return;
+		const newPaths = [...formComposePaths];
+		[newPaths[index], newPaths[index + 1]] = [newPaths[index + 1], newPaths[index]];
+		formComposePaths = newPaths;
+		if (index === 0) formComposePath = newPaths[0];
+	}
+
+	function gitDragStart(e: DragEvent, index: number) {
+		gitDragIndex = index;
+		if (e.dataTransfer) {
+			e.dataTransfer.effectAllowed = 'move';
+			e.dataTransfer.setData('text/plain', String(index));
+		}
+	}
+
+	function gitDragOver(e: DragEvent, index: number) {
+		e.preventDefault();
+		if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+		if (gitDragIndex === null || gitDragIndex === index) return;
+		const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+		const before = e.clientY < rect.top + rect.height / 2;
+		const targetIndex = before ? index : index + 1;
+		const newPaths = [...formComposePaths];
+		const [moved] = newPaths.splice(gitDragIndex, 1);
+		const insertAt = gitDragIndex < targetIndex ? targetIndex - 1 : targetIndex;
+		newPaths.splice(insertAt, 0, moved);
+		formComposePaths = newPaths;
+		gitDragIndex = insertAt;
+		formComposePath = newPaths[0];
+	}
+
+	function gitDragEnd() {
+		gitDragIndex = null;
+	}
+
+	let gitBrowseForRowIndex = $state<number | null>(null);
+
+	async function gitBrowseForRow(index: number) {
+		gitBrowserError = null;
+		gitBrowseForRowIndex = index;
+		await openGitRepoBrowser();
+	}
+
+	async function gitHandleRowBrowseSelect(relativePath: string) {
+		if (gitBrowseForRowIndex === null) return;
+		const capturedIndex = gitBrowseForRowIndex;
+		const newPaths = [...formComposePaths];
+		newPaths[capturedIndex] = relativePath;
+		formComposePaths = newPaths;
+		if (capturedIndex === 0) {
+			formComposePath = relativePath;
+			// Mark as browsed so the repo-name $effect no longer overrides the stack name
+			formComposePathBrowsed = true;
+			await addDetectedGitComposeOverrides(relativePath);
+		}
+		showGitRepoBrowser = false;
+		gitBrowseForRowIndex = null;
+		// Auto-derive stack name from parent directory if user hasn't typed one
+		if (capturedIndex === 0 && !formStackNameUserModified) {
+			const parts = relativePath.split('/');
+			if (parts.length >= 2) {
+				const parentDir = parts[parts.length - 2];
+				formStackName = parentDir
+					.toLowerCase()
+					.replace(/[\s_]+/g, '-')
+					.replace(/[^a-z0-9-]/g, '')
+					.replace(/-+/g, '-')
+					.replace(/^-|-$/g, '');
+			}
+		}
+	}
+
+	async function addDetectedGitComposeOverrides(relativePath: string) {
+		try {
+			const overrides = await fetchDetectedComposeOverridePaths(gitBrowserApiUrl, relativePath, '');
+			if (overrides.length === 0 || formComposePaths[0] !== relativePath) return;
+			const rest = formComposePaths.slice(1).filter((path) => !overrides.includes(path));
+			formComposePaths = [relativePath, ...overrides, ...rest];
+		} catch (e) {
+			console.warn('Failed to detect Git compose overrides:', e);
+		}
+	}
+
+	function configureGitBrowser() {
+		if (!formRepositoryId) return;
+		const params = new URLSearchParams();
+		if (gitStack && formRepositoryId === gitStack.repositoryId) {
+			params.set('stackId', String(gitStack.id));
+		}
+		else if (temporaryCloneToken) params.set('pending', temporaryCloneToken);
+		const query = params.toString();
+		gitBrowserApiUrl = `/api/git/repositories/${formRepositoryId}/browse${query ? `?${query}` : ''}`;
+	}
+
+	async function prepareTemporaryClone(repositoryId: number, branch?: string | null): Promise<boolean> {
+		const effectiveBranch = branch?.trim() || null;
+		if (
+			temporaryCloneToken &&
+			temporaryCloneRepositoryId === repositoryId &&
+			(effectiveBranch === null || temporaryCloneBranch === effectiveBranch)
+		) {
+			configureGitBrowser();
+			return true;
+		}
+		cloneStatus = 'cloning';
+		cloneError = null;
+		try {
+			const response = await fetch(`/api/git/repositories/${repositoryId}/temporary-clone`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ branch: branch || undefined })
+			});
+			const data = await response.json();
+			if (!response.ok || typeof data.token !== 'string') {
+				throw new Error(data.error || 'Failed to clone repository');
+			}
+			temporaryCloneToken = data.token;
+			temporaryCloneRepositoryId = repositoryId;
+			temporaryCloneBranch = effectiveBranch;
+			configureGitBrowser();
+			cloneStatus = 'idle';
+			return true;
+		} catch (error) {
+			cloneStatus = 'error';
+			cloneError = error instanceof Error ? error.message : 'Failed to clone repository';
+			return false;
+		}
+	}
+
 	let formBuildOnDeploy = $state(false);
 	let formNoBuildCache = $state(false);
 	let formRepullImages = $state(false);
@@ -262,6 +428,34 @@
 	let isDraggingSplit = $state(false);
 	let containerRef: HTMLDivElement | null = $state(null);
 
+
+	// Git repository browse state
+	let showGitRepoBrowser = $state(false);
+	let gitBrowserApiUrl = $state('');
+	let gitBrowserError = $state<string | null>(null);
+	let temporaryCloneToken = $state<string | null>(null);
+	let temporaryCloneRepositoryId = $state<number | null>(null);
+	let temporaryCloneBranch = $state<string | null>(null);
+	/** Tracks whether formComposePath was set by the Browse button (vs. typed manually) */
+	let formComposePathBrowsed = $state(false);
+
+	let cloneStatus = $state<'idle' | 'cloning' | 'error'>('idle');
+	let cloneError = $state<string | null>(null);
+	/** Repository created by this modal session; only it may be deleted after a failed clone. */
+	let createdRepositoryId = $state<number | null>(null);
+	async function deleteRepositoryAndClose() {
+		const targetId = createdRepositoryId;
+		if (!targetId || targetId !== formRepositoryId) return;
+		try {
+			await fetch(`/api/git/repositories/${targetId}`, { method: 'DELETE' });
+			createdRepositoryId = null;
+			formRepositoryId = null;
+			onRepositoryCreated?.(); // Refresh list
+		} catch (e) {
+			// ignore
+		}
+		cloneStatus = 'idle';
+	}
 
 	// Track which gitStack was initialized to avoid repeated resets
 	let lastInitializedStackId = $state<number | null | undefined>(undefined);
@@ -460,6 +654,7 @@
 		try {
 			const body: Record<string, any> = {
 				composePath: formComposePath || 'compose.yaml',
+				composePaths: explicitComposePaths(),
 				envFilePath: formEnvFilePath || null
 			};
 
@@ -541,6 +736,10 @@
 		envVars = [];
 		fileEnvVars = {};
 		existingSecretKeys = new Set();
+		temporaryCloneToken = null;
+		temporaryCloneRepositoryId = null;
+		temporaryCloneBranch = null;
+		createdRepositoryId = null;
 
 		if (gitStack) {
 			formRepoMode = 'existing';
@@ -548,6 +747,10 @@
 			formStackName = gitStack.stackName;
 			if ($page.data.backupsEnabled) void loadBackupTally();
 			formComposePath = gitStack.composePath;
+			try {
+				formComposePaths = gitStack.composePaths ? JSON.parse(gitStack.composePaths) : [];
+				if (formComposePaths.length === 0) formComposePaths = [gitStack.composePath || 'compose.yaml'];
+			} catch { formComposePaths = [gitStack.composePath || 'compose.yaml']; }
 			formEnvFilePath = gitStack.envFilePath;
 			formAutoUpdate = gitStack.autoUpdate;
 			formAutoUpdateCron = gitStack.autoUpdateCron || '0 3 * * *';
@@ -590,6 +793,8 @@
 			formStackName = '';
 			formStackNameUserModified = false;
 			formComposePath = 'compose.yaml';
+			formComposePaths = ['compose.yaml'];
+			formComposePathBrowsed = false;
 			formEnvFilePath = null;
 			formAutoUpdate = false;
 			formAutoUpdateCron = '0 3 * * *';
@@ -721,6 +926,7 @@
 			let body: any = {
 				stackName: formStackName,
 				composePath: formComposePath || 'compose.yaml',
+				composePaths: explicitComposePaths(),
 				envFilePath: formEnvFilePath,
 				environmentId: environmentId,
 				autoUpdate: formAutoUpdate,
@@ -846,9 +1052,10 @@
 		}
 	});
 
-	// Auto-populate stack name from selected repo and compose path (only if user hasn't manually edited)
+	// Auto-populate stack name from selected repo and compose path (only if user hasn't manually edited
+	// AND the path wasn't set via the Browse button — Browse already sets the optimal name from parent dir).
 	$effect(() => {
-		if (formRepoMode === 'existing' && formRepositoryId && !gitStack && !formStackNameUserModified) {
+		if (formRepoMode === 'existing' && formRepositoryId && !gitStack && !formStackNameUserModified && !formComposePathBrowsed) {
 			const repo = repositories.find(r => r.id === formRepositoryId);
 			if (repo) {
 				// Normalize repo name: lowercase, spaces/underscores to hyphens, strip invalid chars
@@ -875,6 +1082,77 @@
 			}
 		}
 	});
+
+	async function openGitRepoBrowser() {
+		gitBrowserError = null;
+
+		if (formRepoMode === 'new') {
+			// Validate required fields before creating the repo
+			const newErrors: typeof errors = {};
+			if (!formNewRepoName.trim()) newErrors.repoName = 'Required before browsing';
+			if (!formNewRepoUrl.trim()) newErrors.repoUrl = 'Required before browsing';
+			if (newErrors.repoName || newErrors.repoUrl) {
+				errors = { ...errors, ...newErrors };
+				return;
+			}
+
+			try {
+				// Check if a repo with this URL+branch already exists to avoid creating duplicates
+				const existingRes = await fetch('/api/git/repositories');
+				const allRepos: GitRepository[] = existingRes.ok ? await existingRes.json() : [];
+				const existingRepo = allRepos.find(
+					r => r.url === formNewRepoUrl.trim() && r.branch === (formNewRepoBranch || 'main')
+				);
+
+				let repoId: number;
+				if (existingRepo) {
+					// Reuse the existing repository — no duplicate created
+					repoId = existingRepo.id;
+					formNewRepoName = existingRepo.name;
+				} else {
+					// Create metadata only. The temporary checkout below backs the browse
+					// dialog and is discarded by the pending-clone age cleanup — the stack
+					// clones the repository itself on first deployment.
+					const res = await fetch('/api/git/repositories', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({
+							name: formNewRepoName.trim(),
+							url: formNewRepoUrl.trim(),
+							branch: formNewRepoBranch || 'main',
+							credentialId: formNewRepoCredentialId
+						})
+					});
+					const data = await res.json();
+					if (!res.ok) {
+						gitBrowserError = data.error || 'Failed to save repository';
+						toast.error('Failed to save repository', { description: gitBrowserError || undefined });
+						return;
+					}
+					repoId = data.id;
+					createdRepositoryId = repoId;
+					onRepositoryCreated?.();
+				}
+
+				formRepositoryId = repoId;
+				formRepoMode = 'existing';
+				if (!(await prepareTemporaryClone(repoId, formNewRepoBranch || 'main'))) return;
+				configureGitBrowser();
+				showGitRepoBrowser = true;
+			} catch (e) {
+				gitBrowserError = 'Failed to save repository';
+				toast.error('Failed to save repository');
+			}
+		} else {
+			if (!formRepositoryId) return;
+			if (!gitStack || gitStack.repositoryId !== formRepositoryId) {
+				if (!(await prepareTemporaryClone(formRepositoryId, formBranch || selectedRepo?.branch))) return;
+			}
+			configureGitBrowser();
+			showGitRepoBrowser = true;
+		}
+	}
+
 </script>
 
 <Dialog.Root bind:open onOpenChange={(isOpen) => { if (isOpen) focusFirstInput(); }}>
@@ -1231,9 +1509,66 @@
 			{/if}
 
 			<div class="space-y-2">
-				<Label for="compose-path">Compose file path</Label>
-				<Input id="compose-path" bind:value={formComposePath} placeholder="compose.yaml" />
-				<p class="text-xs text-muted-foreground">Path to the compose file within the repository</p>
+				<Label>Compose file path{formComposePaths.length > 1 ? 's' : ''}</Label>
+				{#each formComposePaths as path, i}
+					{@const total = formComposePaths.length}
+					{@const isDragging = gitDragIndex === i}
+					<div
+						class="flex items-center gap-1 {isDragging ? 'opacity-40' : ''}"
+						role="listitem"
+						draggable="true"
+						ondragstart={(e) => gitDragStart(e, i)}
+						ondragover={(e) => gitDragOver(e, i)}
+						ondrop={(e) => e.preventDefault()}
+						ondragend={gitDragEnd}
+					>
+						{#if total > 1}
+							<div class="flex flex-col shrink-0 -space-y-0.5">
+								<button type="button" title="Move up" disabled={i === 0}
+									onclick={() => gitMovePathUp(i)} class="p-0 hover:text-muted-foreground disabled:opacity-30 disabled:cursor-default">
+									<ArrowUp class="w-3 h-3" />
+								</button>
+								<button type="button" title="Move down" disabled={i === total - 1}
+									onclick={() => gitMovePathDown(i)} class="p-0 hover:text-muted-foreground disabled:opacity-30 disabled:cursor-default">
+									<ArrowDown class="w-3 h-3" />
+								</button>
+							</div>
+							<GripVertical class="w-3.5 h-3.5 text-muted-foreground/40 shrink-0 cursor-grab" />
+							<span class="text-2xs text-muted-foreground shrink-0 w-4 text-center">{i + 1}</span>
+						{/if}
+						<Input
+							bind:value={formComposePaths[i]}
+							placeholder={i === 0 ? 'compose.yaml' : 'compose.override.yaml'}
+							class="flex-1"
+							oninput={() => { if (i === 0) formComposePath = formComposePaths[i]; }}
+						/>
+						{#if formRepoMode === 'existing' ? !!formRepositoryId : !!formNewRepoUrl.trim()}
+						<Button
+							variant="outline" size="sm"
+							onclick={() => gitBrowseForRow(i)}
+							disabled={formRepoMode === 'existing' ? !formRepositoryId : (!formNewRepoName.trim() || !formNewRepoUrl.trim())}
+							title="Browse repository" class="shrink-0">
+							<FolderOpen class="w-4 h-4" />
+						</Button>
+						{/if}
+						{#if total > 1}
+							<Button variant="outline" size="sm"
+									onclick={() => gitRemoveComposePath(i)}
+									class="shrink-0 text-muted-foreground hover:text-destructive" title="Remove">
+								<X class="w-4 h-4" />
+							</Button>
+						{/if}
+					</div>
+				{/each}
+				<Button type="button" variant="ghost" size="sm" onclick={gitAddComposePath}
+					class="text-xs h-auto py-1">
+					+ Add compose file
+				</Button>
+				{#if gitBrowserError}
+					<p class="text-xs text-destructive">{gitBrowserError}</p>
+				{:else}
+					<p class="text-xs text-muted-foreground">Paths are relative to the repository root. Order matters — files are merged left-to-right.</p>
+				{/if}
 			</div>
 
 			<!-- Additional env file for variable substitution -->
@@ -1622,3 +1957,68 @@
 	stackIcon={formIcon}
 	envId={effectiveEnvId}
 />
+
+<!-- Git repository filesystem browser -->
+<!-- Opens when user clicks Browse next to the compose file path field -->
+<FilesystemBrowser
+	bind:open={showGitRepoBrowser}
+	title="Select compose file"
+	icon={FolderGit2}
+	description="Select a compose file from the repository"
+	selectFilter={/\.ya?ml$/i}
+	selectMode="file"
+	apiUrl={gitBrowserApiUrl}
+	onSelect={gitHandleRowBrowseSelect}
+	onClose={() => {
+		showGitRepoBrowser = false;
+		gitBrowseForRowIndex = null;
+	}}
+/>
+
+<!-- Cloning Progress Dialog for newly added repo inside Stack creation -->
+<Dialog.Root open={cloneStatus === 'cloning' || cloneStatus === 'error'} onOpenChange={(v) => { if (!v) cloneStatus = 'idle'; }}>
+	<Dialog.Content class="max-w-lg">
+		{#if cloneStatus === 'cloning'}
+			<!-- ── Cloning state ── -->
+			<Dialog.Header>
+				<Dialog.Title class="flex items-center gap-2">
+					<GitFork class="w-5 h-5" />
+					Cloning repository…
+				</Dialog.Title>
+				<Dialog.Description>
+					Please wait while the repository is being cloned. This may take a moment.
+				</Dialog.Description>
+			</Dialog.Header>
+			<div class="flex flex-col items-center justify-center gap-4 py-10">
+				<Loader2 class="w-10 h-10 animate-spin text-muted-foreground" />
+				<p class="text-sm text-muted-foreground">Cloning from <span class="font-mono text-foreground">{selectedRepo?.url || formNewRepoUrl}</span>…</p>
+			</div>
+		{:else if cloneStatus === 'error'}
+			<!-- ── Error state ── -->
+			<Dialog.Header>
+				<Dialog.Title class="flex items-center gap-2 text-destructive">
+					<XCircle class="w-5 h-5" />
+					Clone failed
+				</Dialog.Title>
+				<Dialog.Description>
+					The repository could not be cloned. Check the error below.
+				</Dialog.Description>
+			</Dialog.Header>
+			<div class="rounded-md border border-destructive/40 bg-destructive/5 p-4 my-2">
+				<p class="text-sm font-medium text-destructive mb-1">Git error</p>
+				<pre class="text-xs text-destructive/90 whitespace-pre-wrap break-all font-mono">{cloneError}</pre>
+			</div>
+			<p class="text-xs text-muted-foreground">
+				You can fix the URL or credentials to retry{createdRepositoryId !== null && createdRepositoryId === formRepositoryId ? ', or delete it to start over' : ''}.
+			</p>
+			<Dialog.Footer class="gap-2 flex-col sm:flex-row">
+				{#if createdRepositoryId !== null && createdRepositoryId === formRepositoryId}
+					<Button variant="destructive" onclick={deleteRepositoryAndClose}>
+						Delete repository
+					</Button>
+				{/if}
+				<Button variant="outline" onclick={() => { cloneStatus = 'idle'; }}>Close</Button>
+			</Dialog.Footer>
+		{/if}
+	</Dialog.Content>
+</Dialog.Root>
