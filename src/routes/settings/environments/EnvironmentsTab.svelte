@@ -70,6 +70,7 @@
 		imagePruneEnabled?: boolean;
 		timezone?: string;
 		hawserVersion?: string;
+		isActive?: boolean;
 	}
 
 	interface TestResult {
@@ -97,6 +98,7 @@
 
 	// Environment state
 	let environments = $state<Environment[]>([]);
+	let showInactive = $state(false);
 	let envLoading = $state(true);
 	let showEnvModal = $state(false);
 	let editingEnv = $state<Environment | null>(null);
@@ -131,7 +133,7 @@
 	async function fetchEnvironments() {
 		envLoading = true;
 		try {
-			const response = await fetch('/api/environments');
+			const response = await fetch(`/api/environments${showInactive ? '?includeInactive=true' : ''}`);
 			environments = await response.json();
 			// Fetch scanner status for all environments in background
 			fetchAllEnvScannerStatus();
@@ -149,6 +151,11 @@
 		} catch (error) {
 			console.error('Failed to fetch notifications:', error);
 		}
+	}
+
+	function toggleShowInactive() {
+		showInactive = !showInactive;
+		fetchEnvironments();
 	}
 
 	async function openAddEnvModal() {
@@ -385,6 +392,9 @@
 			<Badge variant="secondary" class="text-xs">{environments.length} total</Badge>
 		</div>
 		<div class="flex gap-2">
+			<Button size="sm" variant={showInactive ? 'secondary' : 'outline'} onclick={toggleShowInactive}>
+				{showInactive ? 'Hide inactive' : 'Show inactive'}
+			</Button>
 			{#if $canAccess('environments', 'create')}
 				<Button size="sm" onclick={openAddEnvModal}>
 					<Plus class="w-4 h-4 mr-1" />
@@ -457,6 +467,7 @@
 										</span>
 									{/if}
 									<span class="font-medium truncate">{env.name}</span>
+									{#if env.isActive === false}<Badge variant="outline" class="text-[10px]">Inactive</Badge>{/if}
 								</div>
 							</Table.Cell>
 

@@ -14,13 +14,13 @@ import { redactEnvironment } from '$lib/server/environment-redact';
 /**
  * @openapi
  * summary: List all Docker environments (hosts) known to Dockhand
- * resp-200: array<{id:integer!, name:string!, connectionType:string!, host:string, port:integer, protocol:string, icon:string, publicIp:string, timezone:string, hasTlsKey:boolean, hasHawserToken:boolean}>
+ * resp-200: array<{id:integer!, name:string!, connectionType:string!, host:string, port:integer, protocol:string, icon:string, isActive:boolean, publicIp:string, timezone:string, hasTlsKey:boolean, hasHawserToken:boolean}>
  * resp-200-desc: Environments accessible to the caller (filtered by RBAC in Enterprise mode; all environments in Free edition). The tlsKey (private TLS client key) and hawserToken secrets are NEVER returned; hasTlsKey / hasHawserToken indicate whether one is stored.
  * resp-200-example: [{"id":1,"name":"hhdocker01","connectionType":"socket","host":null,"port":2375,"protocol":"http","icon":"server","publicIp":"203.0.113.10","timezone":"Europe/Berlin","hasTlsKey":false,"hasHawserToken":false},{"id":2,"name":"hhdocker02","connectionType":"hawser-edge","host":null,"port":2375,"protocol":"http","icon":"server","publicIp":null,"timezone":"Europe/Berlin","hasTlsKey":false,"hasHawserToken":true}]
  * resp-403: Permission denied (RBAC 'environments:view' missing)
  * resp-500: Unexpected error while loading environments
  */
-export const GET: RequestHandler = async ({ cookies }) => {
+export const GET: RequestHandler = async ({ cookies, url }) => {
 	const auth = await authorize(cookies);
 	if (auth.authEnabled && !await auth.can('environments', 'view')) {
 		return json({ error: 'Permission denied' }, { status: 403 });
@@ -28,6 +28,9 @@ export const GET: RequestHandler = async ({ cookies }) => {
 
 	try {
 		let environments = await getEnvironments();
+		if (url.searchParams.get('includeInactive') !== 'true') {
+			environments = environments.filter(env => env.isActive !== false);
+		}
 
 		// In enterprise mode, filter environments by user's accessible environments
 		if (auth.authEnabled && auth.isEnterprise && auth.isAuthenticated && !auth.isAdmin) {

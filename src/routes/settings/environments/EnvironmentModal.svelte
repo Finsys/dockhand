@@ -116,6 +116,7 @@
 		hasHawserToken?: boolean;
 		tlsSkipVerify?: boolean;
 		icon?: string;
+		isActive?: boolean;
 		socketPath?: string;
 		collectActivity: boolean;
 		collectMetrics: boolean;
@@ -291,6 +292,7 @@
 	let hasStoredTlsKey = $state(false);
 	let formTlsSkipVerify = $state(false);
 	let formIcon = $state('globe');
+	let formIsActive = $state(true);
 	let pendingIconData = $state<string | null>(null);
 	let iconCropperImageUrl = $state('');
 	let showIconCropper = $state(false);
@@ -598,6 +600,7 @@
 			hasStoredTlsKey = !!environment.hasTlsKey;
 			formTlsSkipVerify = environment.tlsSkipVerify ?? false;
 			formIcon = environment.icon || 'globe';
+			formIsActive = environment.isActive ?? true;
 			formSocketPath = environment.socketPath || '/var/run/docker.sock';
 			formCollectActivity = environment.collectActivity ?? true;
 			formCollectMetrics = environment.collectMetrics ?? true;
@@ -641,6 +644,7 @@
 			hasStoredTlsKey = false;
 			formTlsSkipVerify = false;
 			formIcon = 'globe';
+			formIsActive = true;
 			pendingIconData = null;
 			formSocketPath = '/var/run/docker.sock';
 			formCollectActivity = true;
@@ -858,6 +862,7 @@
 					tlsKey: cleanCertificate(formTlsKey),
 					tlsSkipVerify: formTlsSkipVerify,
 					icon: pendingIconData ? 'globe' : formIcon,
+					isActive: formIsActive,
 					socketPath: formConnectionType === 'socket' ? formSocketPath : undefined,
 					collectActivity: formCollectActivity,
 					collectMetrics: formCollectMetrics,
@@ -1039,6 +1044,7 @@
 					tlsKey: cleanCertificate(formTlsKey),
 					tlsSkipVerify: formTlsSkipVerify,
 					icon: formIcon,
+					isActive: formIsActive,
 					socketPath: formConnectionType === 'socket' ? formSocketPath : undefined,
 					collectActivity: formCollectActivity,
 					collectMetrics: formCollectMetrics,
@@ -2598,6 +2604,16 @@
 								Used for clickable port links on the containers page
 							</p>
 						</div>
+
+						{#if isEditing}
+							<div class="flex items-start gap-3 pt-4 border-t">
+								<div class="flex-1">
+									<Label>Active</Label>
+									<p class="text-xs text-muted-foreground">Inactive environments are hidden from the environment selector and list by default.</p>
+								</div>
+								<TogglePill bind:checked={formIsActive} />
+							</div>
+						{/if}
 					</Tabs.Content>
 
 				<!-- Updates Tab -->

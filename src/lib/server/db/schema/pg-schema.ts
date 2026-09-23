@@ -34,6 +34,7 @@ export const environments = pgTable('environments', {
 	tlsKey: text('tls_key'),
 	tlsSkipVerify: boolean('tls_skip_verify').default(false),
 	icon: text('icon').default('globe'),
+	isActive: boolean('is_active').default(true),
 	collectActivity: boolean('collect_activity').default(true),
 	collectMetrics: boolean('collect_metrics').default(true),
 	highlightChanges: boolean('highlight_changes').default(true),
