@@ -173,6 +173,7 @@ export async function createEnvironment(env: Omit<Environment, 'id' | 'createdAt
 		tlsKey: encrypt(env.tlsKey) || null,
 		tlsSkipVerify: env.tlsSkipVerify ?? false,
 		icon: env.icon || 'globe',
+		isActive: env.isActive ?? true,
 		socketPath: env.socketPath || '/var/run/docker.sock',
 		collectActivity: env.collectActivity !== false,
 		collectMetrics: env.collectMetrics !== false,
@@ -200,6 +201,7 @@ export async function updateEnvironment(id: number, env: Partial<Environment>): 
 	if (env.tlsKey !== undefined) updateData.tlsKey = encrypt(env.tlsKey);
 	if (env.tlsSkipVerify !== undefined) updateData.tlsSkipVerify = env.tlsSkipVerify;
 	if (env.icon !== undefined) updateData.icon = env.icon;
+	if (env.isActive !== undefined) updateData.isActive = env.isActive;
 	if (env.socketPath !== undefined) updateData.socketPath = env.socketPath;
 	if (env.collectActivity !== undefined) updateData.collectActivity = env.collectActivity;
 	if (env.collectMetrics !== undefined) updateData.collectMetrics = env.collectMetrics;

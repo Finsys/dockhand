@@ -1,0 +1,1 @@
+ALTER TABLE `environments` ADD `is_active` integer DEFAULT true;

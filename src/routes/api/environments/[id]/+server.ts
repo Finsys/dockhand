@@ -65,7 +65,7 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
  * @openapi
  * summary: Update an environment; renaming also renames its on-disk stacks/git-repos directories
  * path: id:integer! Environment id (from GET /api/environments)
- * body: {name:string, host:string, port:integer, protocol:string, tlsCa:string, tlsCert:string, tlsKey:string, tlsSkipVerify:boolean, icon:string, socketPath:string, collectActivity:boolean, collectMetrics:boolean, highlightChanges:boolean, labels:string, connectionType:string, hawserToken:string, publicIp:string}
+ * body: {name:string, host:string, port:integer, protocol:string, tlsCa:string, tlsCert:string, tlsKey:string, tlsSkipVerify:boolean, icon:string, isActive:boolean, socketPath:string, collectActivity:boolean, collectMetrics:boolean, highlightChanges:boolean, labels:string, connectionType:string, hawserToken:string, publicIp:string}
  * body-desc: tlsKey/hawserToken are write-only - a blank value keeps the stored secret; a non-blank value replaces it.
  * body-example: {"name":"hhdocker03","collectMetrics":true}
  * resp-200: {id:integer!, name:string!, connectionType:string!, labels:array<string>, publicIp:string, hasTlsKey:boolean, hasHawserToken:boolean}
@@ -179,6 +179,7 @@ export const PUT: RequestHandler = async (event) => {
 			tlsKey: cleanedTlsKey || undefined,
 			tlsSkipVerify: data.tlsSkipVerify,
 			icon: data.icon,
+			isActive: data.isActive,
 			socketPath: data.socketPath,
 			collectActivity: data.collectActivity,
 			collectMetrics: data.collectMetrics,

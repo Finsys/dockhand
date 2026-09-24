@@ -1,0 +1,1 @@
+ALTER TABLE "environments" ADD COLUMN "is_active" boolean DEFAULT true;
