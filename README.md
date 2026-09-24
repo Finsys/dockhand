@@ -28,6 +28,14 @@ Dockhand is a modern, efficient Docker management application providing real-tim
 - **File Browser**: Browse, upload, and download files from containers
 - **Authentication**: SSO via OIDC, local users, and optional RBAC (Enterprise)
 
+## Quick Start
+
+### Easypanel
+
+[Easypanel](https://easypanel.io) is a self-hosted Docker deployment platform. It has a one-click Easypanel template for Dockhand.
+
+[![Deploy on Easypanel](https://easypanel.io/img/deploy-on-easypanel-40.svg)](https://easypanel.io/templates/dockhand)
+
 ## Tech Stack
 
 - **Base**: own OS layer built from scratch using <a href="https://github.com/wolfi-dev/os">Wolfi packages</a> via apko. Every package is explicitly declared in the Dockerfile.
