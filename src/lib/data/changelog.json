@@ -1,8 +1,8 @@
 [
   {
     "version": "1.0.49",
-    "date": "2026-09-22",
-    "comingSoon": true,
+    "date": "2026-09-23",
+    "comingSoon": false,
     "changes": [
       { "type": "fix", "text": "select-all checkbox shows a partial state, not a full tick, for a partial selection (#1605)" },
       { "type": "fix", "text": "a long backup no longer crashes the app when its log stream goes quiet (#1610)" },

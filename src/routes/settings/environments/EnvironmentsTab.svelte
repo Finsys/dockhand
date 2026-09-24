@@ -468,6 +468,16 @@
 									{/if}
 									<span class="font-medium truncate">{env.name}</span>
 									{#if env.isActive === false}<Badge variant="outline" class="text-[10px]">Inactive</Badge>{/if}
+									{#if $canAccess('environments', 'edit')}
+										<button
+											type="button"
+											class="font-medium truncate text-left hover:underline cursor-pointer"
+											title="Edit environment"
+											onclick={() => openEditEnvModal(env)}
+										>{env.name}</button>
+									{:else}
+										<span class="font-medium truncate">{env.name}</span>
+									{/if}
 								</div>
 							</Table.Cell>
 

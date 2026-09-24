@@ -124,6 +124,41 @@ describe('mergePartialStats - skeleton placeholders never blank a populated tile
 	});
 });
 
+describe('mergePartialStats - event-triggered refresh keeps lists the non-stream endpoint omits', () => {
+	// The non-streaming /api/dashboard/stats does not compute topContainers/recentEvents
+	// (only the SSE stream does). An event-triggered refresh must MERGE its response so the
+	// richer lists a tile already got from the stream survive, instead of being blanked.
+	it('undefined topContainers/recentEvents in the refresh keep the stream-provided lists', () => {
+		// existing = what the SSE stream delivered
+		const existing: any = {
+			id: 8,
+			containers: { total: 8, running: 8, stopped: 0 },
+			topContainers: [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }, { id: 'e' }, { id: 'f' }, { id: 'g' }, { id: 'h' }],
+			recentEvents: Array.from({ length: 10 }, (_, i) => ({ action: 'start', container_name: `c${i}` })),
+			events: { today: 400, total: 700 }
+		};
+		// partial = the non-stream refresh: correct counts, no lists (fields omitted)
+		mergePartialStats(existing, {
+			id: 8,
+			containers: { total: 8, running: 8, stopped: 0 },
+			topContainers: undefined,
+			recentEvents: undefined,
+			events: { today: 488, total: 712 }
+		});
+		expect(existing.topContainers.length).toBe(8); // preserved, not blanked
+		expect(existing.recentEvents.length).toBe(10); // preserved, not blanked
+		expect(existing.events).toEqual({ today: 488, total: 712 }); // fresh counts applied
+		expect(existing.containers.running).toBe(8);
+	});
+
+	it('a genuine empty topContainers array (present, no loading flag) DOES replace', () => {
+		// If the endpoint ever explicitly sends [] (real "no running containers"), honour it.
+		const existing: any = { id: 8, topContainers: [{ id: 'a' }] };
+		mergePartialStats(existing, { id: 8, topContainers: [] });
+		expect(existing.topContainers).toEqual([]);
+	});
+});
+
 describe('definedPartialForStore - store payload drops placeholder sections but keeps loading', () => {
 	it('drops a loading section, keeps loading + ready sections', () => {
 		const partial: any = {

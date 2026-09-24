@@ -37,7 +37,7 @@ RUN APKO_ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "aarch64" || echo "x86_64") 
     "    - busybox" \
     "    - tzdata" \
     "    - docker-cli" \
-    "    - docker-compose=5.5.0-r5" \
+    "    - docker-compose=5.5.1-r1" \
     "    - docker-cli-buildx" \
     "    - sqlite" \
     "    - postgresql-client" \

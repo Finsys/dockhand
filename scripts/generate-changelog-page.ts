@@ -311,6 +311,12 @@ export function stripRefs(text: string): string {
 		.trim();
 }
 
+// The version the site advertises as current. A coming-soon entry is not downloadable,
+// so it is never the answer; null means nothing has shipped yet.
+export function latestReleasedVersion(entries: ChangelogEntry[]): string | null {
+	return entries.find((e) => !e.comingSoon)?.version ?? null;
+}
+
 // Build an RSS 2.0 feed from the released changelog entries (coming-soon excluded).
 function generateRssFeed(entries: ChangelogEntry[]): string {
 	const released = entries.filter((e) => !e.comingSoon && e.date);
@@ -375,9 +381,9 @@ if (import.meta.main) {
 
 	indexHtml = indexHtml.replace(changelogRegex, newChangelogSection);
 
-	// Also update softwareVersion in JSON-LD schema
-	if (changelog.length > 0) {
-		const latestVersion = changelog[0].version;
+	// Also update softwareVersion in JSON-LD schema.
+	const latestVersion = latestReleasedVersion(changelog);
+	if (latestVersion) {
 		// Match "softwareVersion": "X.X" or "softwareVersion": "X.X.X"
 		const versionRegex = /"softwareVersion":\s*"[\d.]+"/;
 		if (versionRegex.test(indexHtml)) {

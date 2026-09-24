@@ -165,7 +165,16 @@
 				<div class="flex items-center justify-between py-2 px-3 rounded-md border bg-card hover:bg-muted/50 transition-colors">
 					<div class="flex items-center gap-2 min-w-0 flex-1">
 						<ForgeIcon class="w-4 h-4 shrink-0 text-muted-foreground" />
-						<span class="font-medium text-sm truncate">{repo.name}</span>
+						{#if $canAccess('settings', 'edit')}
+							<button
+								type="button"
+								class="font-medium text-sm truncate text-left hover:underline cursor-pointer"
+								title="Edit repository"
+								onclick={() => openModal(repo)}
+							>{repo.name}</button>
+						{:else}
+							<span class="font-medium text-sm truncate">{repo.name}</span>
+						{/if}
 						<span class="text-xs text-muted-foreground truncate hidden sm:inline">{repo.url}</span>
 					</div>
 					<div class="flex items-center gap-2 shrink-0">

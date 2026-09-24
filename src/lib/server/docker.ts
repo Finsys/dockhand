@@ -5497,12 +5497,13 @@ async function streamLocalStderr(
 	onStdout?: (data: string) => void
 ): Promise<void> {
 	const wantStdout = onStdout ? 'true' : 'false';
-	// Pass the caller's abort signal to the fetch itself, not only to the reader below:
-	// with no body timeout on the streaming dispatcher, a fetch that stalls BEFORE the
-	// response arrives has no other bound, so container-exit must be able to cancel it.
+	// The abort signal cancels the READER on container exit (below), NOT the fetch itself:
+	// aborting the fetch surfaces as a thrown "operation aborted" that a caller without a
+	// .catch (restore redeploy) reads as a real failure. A pre-header stall is already
+	// bounded by undici's default headersTimeout, so the fetch needs no signal.
 	const response = await dockerFetch(
 		`/containers/${containerId}/logs?stdout=${wantStdout}&stderr=true&follow=true`,
-		{ streaming: true, signal },
+		{ streaming: true },
 		envId
 	);
 

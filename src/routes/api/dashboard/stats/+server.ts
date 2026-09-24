@@ -98,7 +98,10 @@ export interface EnvironmentStats {
 		total: number;
 		today: number;
 	};
-	topContainers: Array<{
+	// Optional: this non-streaming endpoint does NOT compute topContainers or recentEvents
+	// (only the SSE stream does). Omitting them lets the dashboard's merge keep the richer
+	// lists it already received from the stream instead of blanking them on an event refresh.
+	topContainers?: Array<{
 		id: string;
 		name: string;
 		cpuPercent: number;
@@ -190,8 +193,8 @@ export const GET: RequestHandler = async ({ cookies, url }) => {
 				networks: { total: 0 },
 				stacks: { total: 0, running: 0, partial: 0, stopped: 0 },
 				metrics: null,
-				events: { total: 0, today: 0 },
-				topContainers: []
+				events: { total: 0, today: 0 }
+				// topContainers / recentEvents intentionally omitted - not computed here.
 			};
 
 			try {
@@ -232,6 +235,15 @@ export const GET: RequestHandler = async ({ cookies, url }) => {
 				envStats.containers.paused = containers.filter((c: any) => c.state === 'paused').length;
 				envStats.containers.restarting = containers.filter((c: any) => c.state === 'restarting').length;
 				envStats.containers.unhealthy = containers.filter((c: any) => c.health === 'unhealthy').length;
+
+				// This endpoint does not compute topContainers (only the SSE stream does), so it
+				// omits the field and the dashboard's merge keeps the stream's list. But when
+				// there are zero running containers the list is genuinely empty, so send [] as an
+				// explicit signal the merge honours - otherwise a just-emptied env would show a
+				// stale "Top containers" list until the next stream cycle.
+				if (envStats.containers.running === 0) {
+					envStats.topContainers = [];
+				}
 
 				// Helper to get valid size (Docker API returns -1 for uncalculated sizes)
 				const getValidSize = (size: number | undefined | null): number => {
