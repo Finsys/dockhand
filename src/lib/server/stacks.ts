@@ -2182,8 +2182,12 @@ export async function getStackPathHints(
 		return { workingDir: null, configFiles: null };
 	}
 
-	// Get labels from first container (all containers in stack have same project labels)
+	// Never suggest one container's path when the project labels disagree.
 	const labels = containers[0].labels || {};
+	const configLabel = 'com.docker.compose.project.config_files';
+	if (containers.some(container => container.labels?.[configLabel] !== labels[configLabel])) {
+		throw new Error('Containers have conflicting Compose file labels. Browse for the file manually.');
+	}
 
 	const workingDir = labels['com.docker.compose.project.working_dir'] || null;
 	const configFilesRaw = labels['com.docker.compose.project.config_files'] || null;

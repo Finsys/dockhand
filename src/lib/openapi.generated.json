@@ -27991,10 +27991,13 @@
             }
           },
           "400": {
-            "description": "Stack name is required"
+            "description": "Stack name is required or environment ID is invalid"
           },
           "401": {
             "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Permission denied (requires stacks:edit and environment access)"
           },
           "500": {
             "description": "Failed to get path hints"
