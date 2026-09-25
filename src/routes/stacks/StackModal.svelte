@@ -21,6 +21,8 @@
 	import { fetchBackupExecutions } from '$lib/utils/backup';
 	import type { Component } from 'svelte';
 	import FilesystemBrowser from './FilesystemBrowser.svelte';
+	import DetectedComposeFile from './DetectedComposeFile.svelte';
+	import { canAccess } from '$lib/stores/auth';
 	import IconPickerModal from './IconPickerModal.svelte';
 	import StackIcon from '$lib/components/StackIcon.svelte';
 	import StackTagsSection from '$lib/components/StackTagsSection.svelte';
@@ -496,6 +498,7 @@
 		runComposeValidate({ silent: true }); // reconcile against the daemon without a flash
 	}
 	let needsFileLocation = $state(false);
+	let pathHintEnvId = $state<number | null>(null);
 
 	// Container info for untracked stacks
 	let stackContainers = $state<{ name: string; state: string; image: string }[]>([]);
@@ -989,6 +992,7 @@
 
 	// Load files from local filesystem (when user selects paths)
 	async function loadFilesFromLocalFilesystem(composeFilePath: string, envFilePath: string) {
+		errors.compose = undefined;
 		try {
 			// Load compose file
 			const composeResponse = await fetch(`/api/system/files/content?path=${encodeURIComponent(composeFilePath)}`);
@@ -1004,7 +1008,8 @@
 				stackContainers = [];
 			} else {
 				const err = await composeResponse.json();
-				console.error('Failed to load compose file:', err.error);
+				errors.compose = err.error || 'Failed to load compose file';
+				return;
 			}
 
 			// Try to load .env file (only set workingEnvPath if it exists AND we're in edit mode)
@@ -1028,6 +1033,7 @@
 			}
 		} catch (e) {
 			console.error('Failed to load files:', e);
+			errors.compose = e instanceof Error ? e.message : 'Failed to load files';
 		}
 	}
 
@@ -2008,6 +2014,7 @@
 			// Reset mode to prop values on each open
 			mode = propMode;
 			stackName = propStackName;
+			pathHintEnvId = $currentEnvironment?.id ?? null;
 			// Clear any compose-validate panel state from a previous open (the modal is
 			// persistently mounted, so $state survives close/reopen - even across envs).
 			validatePanelOpen = false;
@@ -2457,12 +2464,20 @@
 											</div>
 										{:else if needsFileLocation && !composeContent}
 											<!-- Empty state for untracked stacks -->
-											<div class="h-full rounded-md border border-dashed border-zinc-300 dark:border-zinc-600 bg-zinc-50 dark:bg-zinc-800/30 flex flex-col items-center justify-center text-center px-8">
+											<div class="h-full overflow-y-auto rounded-md border border-dashed border-zinc-300 dark:border-zinc-600 bg-zinc-50 dark:bg-zinc-800/30 flex flex-col items-center text-center px-4 py-6 sm:px-8">
 												<FolderOpen class="w-12 h-12 text-zinc-300 dark:text-zinc-600 mb-4" />
 												<h3 class="text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">No compose file selected</h3>
 												<p class="text-xs text-zinc-500 dark:text-zinc-400 mb-4 max-w-sm">
 													Browse to locate the compose file for this stack. The editor will load the file contents once selected.
 												</p>
+												{#if mode === 'edit' && pathHintEnvId && $canAccess('stacks', 'edit')}
+													<DetectedComposeFile
+														{stackName}
+														envId={pathHintEnvId}
+														disabled={loading || saving || pathHintEnvId !== $currentEnvironment?.id}
+														onSelect={handleComposeSelect}
+													/>
+												{/if}
 												<Button variant="outline" size="sm" onclick={openComposeBrowser}>
 													<FolderOpen class="w-4 h-4" />
 													Browse for compose file
