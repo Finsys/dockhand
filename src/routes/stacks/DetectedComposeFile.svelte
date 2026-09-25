@@ -27,6 +27,7 @@
 				if (controller.signal.aborted) { return; }
 				if (!response.ok) { throw new Error(data.error || 'Could not detect a Compose file.'); }
 				const files = data.configFiles;
+				if (files === null) { return; }
 				if (!Array.isArray(files) || files.length != 1 || typeof files[0] != 'string' || !/^\/.*\.ya?ml$/i.test(files[0])) {
 					throw new Error('The labels must specify exactly one absolute path to a YAML file.');
 				}
@@ -64,6 +65,8 @@
 			Use detected file
 		</Button>
 		<p class="text-muted-foreground">Loads the file into the editor, just like Browse. Click Save to keep the assignment.</p>
+	{:else if !error}
+		<p role="status" class="text-muted-foreground">Could not detect a Compose file. You can browse for a file manually.</p>
 	{/if}
 	{#if error}<p role="status" class="break-words text-amber-700 dark:text-amber-400">{error} You can still browse for a file manually.</p>{/if}
 </div>

@@ -71,12 +71,19 @@ test.each([7, undefined])('passes the optional environment through all gates and
 	expect(await response.json()).toEqual({ stackName: 'web', ...hints });
 });
 
-test('surfaces conflicting label errors', async () => {
-	getHints.mockRejectedValue(new Error('Conflicting Compose path labels'));
+test('returns null hints as a successful response when detection is unavailable', async () => {
+	getHints.mockResolvedValue({ workingDir: null, configFiles: null });
+	const response = await request();
+	expect(response.status).toBe(200);
+	expect(await response.json()).toEqual({ stackName: 'web', workingDir: null, configFiles: null });
+});
+
+test('surfaces hint lookup failures as server errors', async () => {
+	getHints.mockRejectedValue(new Error('Docker unavailable'));
 	const log = spyOn(console, 'error').mockImplementation(() => {});
 	try {
 		const response = await request();
 		expect(response.status).toBe(500);
-		expect(await response.json()).toEqual({ error: 'Conflicting Compose path labels' });
+		expect(await response.json()).toEqual({ error: 'Docker unavailable' });
 	} finally { log.mockRestore(); }
 });
