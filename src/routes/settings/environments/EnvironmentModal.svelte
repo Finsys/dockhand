@@ -837,7 +837,7 @@
 	// === Environment CRUD ===
 	async function createEnvironment() {
 		if (minimumReleaseAgeOverride && (!Number.isInteger(minimumReleaseAgeHours) || minimumReleaseAgeHours < 0 || minimumReleaseAgeHours > 720)) {
-			formError = 'Minimum release age must be a whole number from 0 to 720 hours';
+			formError = 'Minimum image age must be a whole number from 0 to 720 hours';
 			return;
 		}
 		// Validation based on connection type
@@ -966,7 +966,7 @@
 	async function updateEnvironment() {
 		if (!environment) return;
 		if (minimumReleaseAgeOverride && (!Number.isInteger(minimumReleaseAgeHours) || minimumReleaseAgeHours < 0 || minimumReleaseAgeHours > 720)) {
-			formError = 'Minimum release age must be a whole number from 0 to 720 hours';
+			formError = 'Minimum image age must be a whole number from 0 to 720 hours';
 			return;
 		}
 

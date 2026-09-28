@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { toast } from 'svelte-sonner';
+	import { trackedImageReference } from '$lib/utils/tracked-image';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import { Pencil, Check, Loader2, X, Layers, Settings, Archive } from 'lucide-svelte';
@@ -404,7 +406,7 @@
 
 			// Parse basic container data
 			name = data.Name.replace(/^\//, '');
-			image = data.Config.Image;
+			image = trackedImageReference(data.Config.Image, data.Config.Labels);
 			loadIconOverride(name);
 			command = data.Config.Cmd ? data.Config.Cmd.map((arg: string) =>
 				arg.includes(' ') ? `"${arg}"` : arg
@@ -1086,6 +1088,9 @@
 				});
 
 				const result = await response.json();
+				for (const warning of result.warnings ?? []) {
+					if (warning.status === 'warning') toast.warning(warning.message);
+				}
 
 				if (!response.ok) {
 					error = result.error || 'Failed to update container';

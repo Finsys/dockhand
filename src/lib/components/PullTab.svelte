@@ -195,6 +195,11 @@
 			return;
 		}
 
+		if (data.status === 'warning') {
+			addOutputLine(`[warning] ${data.message || 'Image update cooldown could not be determined'}`);
+			return;
+		}
+
 		if (data.status === 'complete') {
 			duration = Date.now() - startTime;
 			status = 'complete';

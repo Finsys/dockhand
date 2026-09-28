@@ -129,10 +129,10 @@
 	{/if}
 </div>
 
-<!-- Image release cooldown -->
+<!-- Minimum image age -->
 <div class="space-y-3 pt-4 border-t">
-	<div class="text-sm font-medium">Minimum image release age</div>
-	<p class="text-xs text-muted-foreground">Delay Dockhand-managed service image pulls and updates in this environment. Builds may fetch Dockerfile base images outside this setting. Docker Hub uses the tag's last push time; other registries use when Dockhand first saw the digest.</p>
+	<div class="text-sm font-medium">Minimum image age</div>
+	<p class="text-xs text-muted-foreground">Delay automatic container updates until an image reaches this age, using its creation time from registry metadata. Missing, invalid, or future creation times use when Dockhand first observed the digest. Creation time reflects the build, not publication. Manual pulls warn and proceed; stack deployments, including scheduled Git deployments, are exempt. Systemd-managed containers require manual updates while the cooldown is enabled.</p>
 	<div class="flex items-center justify-between gap-3">
 		<div>
 			<Label>Override global cooldown</Label>

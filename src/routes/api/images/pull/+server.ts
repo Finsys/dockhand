@@ -1,6 +1,5 @@
 import { json } from '@sveltejs/kit';
-import { pullImage, buildRegistryAuthHeader, verifyImageReleaseAge, inspectImage, tagImage } from '$lib/server/docker';
-import { verifiedImagePullPlan } from '$lib/server/minimum-release-age-core';
+import { pullImage, buildRegistryAuthHeader, getImageReleaseAgeWarning } from '$lib/server/docker';
 import type { RequestHandler } from './$types';
 import { getScannerSettings, scanImage } from '$lib/server/scanner';
 import { saveVulnerabilityScan, getEnvironment } from '$lib/server/db';
@@ -151,23 +150,9 @@ export const POST: RequestHandler = async (event) => {
 				return;
 			}
 
-			let pullReference = image;
-			let localTag: { repo: string; tag: string } | null = null;
-			try {
-				const digest = await verifyImageReleaseAge(image, envId);
-				if (digest) {
-					const plan = verifiedImagePullPlan(image, digest);
-					pullReference = plan.reference;
-					localTag = plan.tag;
-				}
-			} catch (error) {
-				const message = error instanceof Error ? error.message : String(error);
-				sendData({ status: 'error', error: message });
-				send('result', { status: 'error', error: message });
-				return;
-			}
-
-			const pullUrl = buildPullUrl(pullReference);
+			const warning = await getImageReleaseAgeWarning(image, envId);
+			if (warning) sendData({ status: 'warning', message: warning });
+			const pullUrl = buildPullUrl(image);
 			const authHeaders = await buildRegistryAuthHeader(image);
 			let streamError: string | null = null;
 			const forwardProgress = (progress: any) => {
@@ -210,10 +195,6 @@ export const POST: RequestHandler = async (event) => {
 								send('result', { status: 'error', error: streamError });
 							} else {
 								try {
-									if (localTag) {
-										const pulledImage = await inspectImage(pullReference, envId) as { Id: string };
-										await tagImage(pulledImage.Id, localTag.repo, localTag.tag, envId);
-									}
 									sendData({ status: 'complete' });
 									await handleScanOnPull();
 									send('result', { status: 'complete' });

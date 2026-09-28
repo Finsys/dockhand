@@ -64,7 +64,7 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
  * body: {enabled:boolean, cron:string, autoUpdate:boolean, vulnerabilityCriteria:string, minimumReleaseAgeHours:number, minimumReleaseAgeOverride:boolean}
  * body-example: {"enabled":true,"cron":"0 4 * * *","autoUpdate":false,"vulnerabilityCriteria":"never"}
  * resp-200: {success:boolean!, settings:{enabled:boolean!, cron:string!, autoUpdate:boolean!, vulnerabilityCriteria:string!, minimumReleaseAgeHours:number!, minimumReleaseAgeOverride:boolean!, minimumReleaseAgeOverridden:boolean!}!}
- * resp-400: Minimum release age must be a whole number from 0 to 720 hours
+ * resp-400: Minimum image age must be a whole number from 0 to 720 hours
  * resp-403: Permission denied (RBAC 'environments:edit' missing)
  * resp-404: Environment not found
  * resp-500: Unexpected error while saving the settings
@@ -90,7 +90,7 @@ export const POST: RequestHandler = async ({ params, request, cookies }) => {
 		const ageHours = data.minimumReleaseAgeOverride === true
 			? parseMinimumReleaseAgeHours(data.minimumReleaseAgeHours)
 			: age.hours;
-		if (ageHours === null) return json({ error: 'Minimum release age must be a whole number from 0 to 720 hours' }, { status: 400 });
+		if (ageHours === null) return json({ error: 'Minimum image age must be a whole number from 0 to 720 hours' }, { status: 400 });
 
 		const settings = {
 			enabled: data.enabled ?? false,

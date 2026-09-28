@@ -1,4 +1,4 @@
-/** Docker Hub reports push time; other registries need a first-observed digest fallback. */
+/** Maximum configured minimum image age. */
 export const MAXIMUM_RELEASE_AGE_HOURS = 24 * 30;
 
 /** Pull the digest that passed the age check, then restore the caller's local tag. */
@@ -21,31 +21,23 @@ export function verifiedImagePullPlan(imageName: string, digest: string): {
 	return { reference: repo + '@' + digest, tag: { repo, tag } };
 }
 
-/** Build images have no registry release date; only Compose service-image pulls are gated. */
-export function composeReleaseAgeDecision(
-	operation: 'up' | 'down' | 'stop' | 'start' | 'restart' | 'pull' | 'build',
-	hours: number,
-	requestedPullPolicy?: string
-): { blockPull: boolean; pullPolicy?: string } {
-	return {
-		blockPull: hours > 0 && operation === 'pull',
-		pullPolicy: hours > 0 && operation === 'up' ? 'never' : requestedPullPolicy
-	};
+export interface ReleaseAgeObservation {
+	source: 'created' | 'first-observed';
+	remainingMs: number;
+	observedAt: string;
 }
 
-/** Hawser first forwarded Compose's --pull policy in v0.2.38. */
-export function hawserSupportsPullPolicy(version: string | null | undefined): boolean {
-	const match = /^v?(\d+)\.(\d+)\.(\d+)(?:$|[-+])/.exec(version ?? '');
-	if (!match) return false;
-	const [major, minor, patch] = match.slice(1).map(Number);
-	return major > 0 || minor > 2 || (minor === 2 && patch >= 38);
-}
-
-/** Explain why Compose cannot start a service when automatic pulls are disabled. */
-export function missingImageCooldownError(message: string): string | null {
-	const image = /No such image:\s*([^\s]+)/i.exec(message)?.[1];
-	if (!image) return null;
-	return `Image ${image} is not present in this environment. Minimum image release age prevents Compose from pulling it automatically. Pull this exact image through Dockhand once its cooldown has elapsed, then deploy again.`;
+/** Explain an active cooldown without preventing a user-requested image pull. */
+export function manualPullAgeWarning(image: string, hours: number, observation: ReleaseAgeObservation | null): string | null {
+	if (hours <= 0) return null;
+	if (!observation) return `Update cooldown for ${image} could not be determined. Pulling it anyway because this was requested manually.`;
+	if (observation.remainingMs <= 0) return null;
+	const elapsedMinutes = Math.max(0, Math.floor((Date.now() - Date.parse(observation.observedAt)) / 60000));
+	const remainingMinutes = Math.ceil(observation.remainingMs / 60000);
+	const basis = observation.source === 'created'
+		? `This image digest of ${image} was created at ${observation.observedAt}`
+		: `Creation time is unavailable. Dockhand first observed this digest of ${image} at ${observation.observedAt}`;
+	return `${basis} (${elapsedMinutes} minutes ago); ${remainingMinutes} minutes remain in the automatic-update cooldown. Pulling it anyway because this was requested manually.`;
 }
 
 export function parseMinimumReleaseAgeHours(value: unknown): number | null {
@@ -78,4 +70,18 @@ export function releaseAgeRemainingMs(firstSeen: string, hours: number, now = Da
 	const observed = Date.parse(firstSeen);
 	if (!Number.isFinite(observed)) return hours * 60 * 60 * 1000;
 	return Math.max(0, observed + hours * 60 * 60 * 1000 - now);
+}
+
+/** OCI creation dates must be RFC 3339 timestamps in the past. In particular,
+ * Date.parse's permissive date-only/numeric forms must not bypass the fallback. */
+export function validImageCreatedAt(value: unknown, now = Date.now()): string | null {
+	if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/i.test(value)) return null;
+	const [hour, minute, second] = value.slice(11, 19).split(':').map(Number);
+	if (hour > 23 || minute > 59 || second > 59) return null;
+	const timestamp = Date.parse(value);
+	if (!Number.isFinite(timestamp) || timestamp <= 0 || timestamp > now) return null;
+	// JavaScript normalizes impossible dates such as February 30; reject them.
+	const [year, month, day] = value.slice(0, 10).split('-').map(Number);
+	if (month < 1 || month > 12 || day < 1 || day > new Date(Date.UTC(year, month, 0)).getUTCDate()) return null;
+	return new Date(timestamp).toISOString();
 }

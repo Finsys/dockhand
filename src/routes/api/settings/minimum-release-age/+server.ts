@@ -5,7 +5,7 @@ import { parseMinimumReleaseAgeHours } from '$lib/server/minimum-release-age-cor
 
 /**
  * @openapi
- * summary: Get the minimum image release age in hours
+ * summary: Get the minimum image age in hours (creation time, with first-observed fallback)
  * resp-200: {hours:number!, overridden:boolean!, inherited:boolean!}
  */
 export const GET: RequestHandler = async ({ cookies }) => {
@@ -15,7 +15,7 @@ export const GET: RequestHandler = async ({ cookies }) => {
 
 /**
  * @openapi
- * summary: Set the minimum image release age in hours
+ * summary: Set the minimum image age in hours (creation time, with first-observed fallback)
  * body: {hours:number!}
  * resp-200: {hours:number!, overridden:boolean!}
  * resp-400: Hours must be a whole number from 0 to 720

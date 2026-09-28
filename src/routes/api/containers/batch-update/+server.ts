@@ -1,3 +1,5 @@
+import { collectPullWarning, type PullWarning } from '$lib/utils/pull-warning';
+import { trackedImageReference } from '$lib/utils/tracked-image';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
@@ -11,6 +13,7 @@ export interface BatchUpdateResult {
 	containerName: string;
 	success: boolean;
 	error?: string;
+	warnings?: PullWarning[];
 }
 
 /**
@@ -25,7 +28,7 @@ export interface BatchUpdateResult {
  * query: env:integer! The target environment ID the container lives in (from GET /api/environments)
  * body: {containerIds:array<string>!}
  * body-example: {"containerIds":["3f4a1c2b9d8e","a1b2c3d4e5f6"]}
- * resp-200: {success:boolean!, results:array<{containerId:string!, containerName:string!, success:boolean!, error:string}>!, summary:{total:integer!, success:integer!, failed:integer!}!}
+ * resp-200: {success:boolean!, results:array<{containerId:string!, containerName:string!, success:boolean!, error:string, warnings:array<{status:string!, message:string!}>}>!, summary:{total:integer!, success:integer!, failed:integer!}!}
  * resp-400: The containerIds array is missing or empty
  * resp-403: Permission denied
  * resp-500: Failed to run the batch update
@@ -54,12 +57,14 @@ export const POST: RequestHandler = async (event) => {
 
 		// Process containers sequentially to avoid resource conflicts
 		for (const containerId of containerIds) {
+			const warnings: PullWarning[] = [];
 			try {
 				const containers = await listContainers(true, envIdNum);
 				const container = containers.find(c => c.id === containerId);
 
 				if (!container) {
 					results.push({
+						warnings,
 						containerId,
 						containerName: 'unknown',
 						success: false,
@@ -71,7 +76,7 @@ export const POST: RequestHandler = async (event) => {
 				// Get full container config
 				const inspectData = await inspectContainer(containerId, envIdNum) as any;
 				const config = inspectData.Config;
-				const imageName = config.Image;
+				const imageName = trackedImageReference(config.Image, config.Labels);
 				const containerName = container.name;
 
 				// Capture the OLD image's Env/Labels BEFORE the pull for the env/label
@@ -87,6 +92,7 @@ export const POST: RequestHandler = async (event) => {
 				// Skip containers with dockhand.update=false label
 				if (isUpdateDisabledByLabel(config.Labels)) {
 					results.push({
+						warnings,
 						containerId,
 						containerName,
 						success: true,
@@ -97,9 +103,10 @@ export const POST: RequestHandler = async (event) => {
 
 				// Pull latest image first
 				try {
-					await pullImage(imageName, undefined, envIdNum);
+					await pullImage(imageName, (data) => collectPullWarning(warnings, data), envIdNum);
 				} catch (pullError: any) {
 					results.push({
+						warnings,
 						containerId,
 						containerName,
 						success: false,
@@ -121,6 +128,7 @@ export const POST: RequestHandler = async (event) => {
 
 				if (!recreateResult.success) {
 					results.push({
+						warnings,
 						containerId,
 						containerName,
 						success: false,
@@ -133,12 +141,14 @@ export const POST: RequestHandler = async (event) => {
 				await auditContainer(event, 'update', newContainerId, containerName, envIdNum, { batchUpdate: true });
 
 				results.push({
+					warnings,
 					containerId: newContainerId,
 					containerName,
 					success: true
 				});
 			} catch (error: any) {
 				results.push({
+					warnings,
 					containerId,
 					containerName: 'unknown',
 					success: false,

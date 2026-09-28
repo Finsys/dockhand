@@ -399,10 +399,10 @@ services:
 				body: JSON.stringify({ hours: releaseAgeHours })
 			});
 			const data = await res.json();
-			if (!res.ok) throw new Error(data.error || 'Failed to save minimum release age');
-			toast.success('Minimum release age updated');
+			if (!res.ok) throw new Error(data.error || 'Failed to save minimum image age');
+			toast.success('Minimum image age updated');
 		} catch (error) {
-			toast.error(error instanceof Error ? error.message : 'Failed to save minimum release age');
+			toast.error(error instanceof Error ? error.message : 'Failed to save minimum image age');
 		} finally { releaseAgeSaving = false; }
 	}
 
@@ -1142,10 +1142,10 @@ services:
 				<Card.Header>
 					<Card.Title class="text-sm font-medium flex items-center gap-2">
 						<Clock class="w-4 h-4" />
-						Minimum image release age
+						Minimum image age
 					</Card.Title>
 					<Card.Description>
-						Default cooldown for Dockhand-managed service image pulls and updates. Builds may fetch Dockerfile base images outside this setting. Environments can override it in their Updates settings.
+						Delay automatic container updates until an image reaches this age, using its creation time from registry metadata. Missing, invalid, or future creation times use when Dockhand first observed the digest. Creation time reflects the build, not publication. Environments can override this setting. Manual pulls warn and proceed; stack deployments, including scheduled Git deployments, are exempt. Systemd-managed containers require manual updates while the cooldown is enabled.
 					</Card.Description>
 				</Card.Header>
 				<Card.Content class="flex items-end gap-3">

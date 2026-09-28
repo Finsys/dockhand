@@ -448,6 +448,9 @@
 			});
 
 			const result = await response.json();
+			for (const warning of result.warnings ?? []) {
+				if (warning.status === 'warning') toast.warning(warning.message);
+			}
 
 			if (!response.ok) {
 				let errorMsg = result.error || 'Failed to create container';
