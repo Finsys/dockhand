@@ -16,6 +16,12 @@ export interface ComposeOperationArgOptions {
 	 * containers that merely drifted from the on-disk compose file. (#1539 review)
 	 */
 	removeOrphans?: boolean;
+	/**
+	 * Add `--no-deps` to `up` so dependencies of the named services are not started.
+	 * An explicit target list is an update, not a cold start: without this, a service
+	 * an operator `exclude`d is still recreated when another target depends on it. (#1539 review)
+	 */
+	noDeps?: boolean;
 	removeVolumes?: boolean;
 	build?: boolean;
 	noBuildCache?: boolean;
@@ -33,7 +39,7 @@ export function buildComposeOperationArgs(
 	operation: 'up' | 'down' | 'stop' | 'start' | 'restart' | 'pull' | 'build',
 	options: ComposeOperationArgOptions = {}
 ): string[] {
-	const { forceRecreate, removeOrphans, removeVolumes, build, noBuildCache, pullPolicy, serviceName, serviceNames } = options;
+	const { forceRecreate, removeOrphans, noDeps, removeVolumes, build, noBuildCache, pullPolicy, serviceName, serviceNames } = options;
 	const args: string[] = [];
 	// One service arg list for every operation: the legacy single `serviceName` plus
 	// any explicit list (#1539). De-duplicated, order preserved (changed service first).
@@ -49,6 +55,8 @@ export function buildComposeOperationArgs(
 			// Opt-out exists for the unattended auto-update path (#1539 review); every
 			// other caller keeps the historical --remove-orphans default.
 			if (removeOrphans !== false) args.push('--remove-orphans');
+			// Keep an excluded service out of the redeploy even when a target depends on it.
+			if (noDeps) args.push('--no-deps');
 			if (forceRecreate) args.push('--force-recreate');
 			// A no-cache rebuild is handled by a separate `build` step, so `up` must not
 			// also carry --build (and never --no-cache, which up doesn't accept).

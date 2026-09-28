@@ -1111,6 +1111,8 @@ interface ComposeCommandOptions {
 	forceRecreate?: boolean;
 	/** Include `--remove-orphans` on `up` (default true; auto-update passes false). */
 	removeOrphans?: boolean;
+	/** Add `--no-deps` on `up` so excluded/dependency services are not started. */
+	noDeps?: boolean;
 	build?: boolean; // Build images before starting (--build)
 	noBuildCache?: boolean; // Disable build cache (--no-cache, requires --build)
 	pullPolicy?: string; // Pull policy: 'always' | 'missing' | 'never'
@@ -1197,6 +1199,7 @@ async function executeLocalCompose(
 	build?: boolean,
 	noBuildCache?: boolean,
 	removeOrphans?: boolean,
+	noDeps?: boolean,
 	pullPolicy?: string,
 	// direct-remote only: when the stack folder was staged to <remoteStackHostDir> on the target
 	// host, rewrite the compose's same-dir relative binds (`./x`) to <remoteStackHostDir>/x so the
@@ -1440,7 +1443,7 @@ async function executeLocalCompose(
 		console.log(`${logPrefix} [HostPath] Using stdin for compose content (paths translated)`);
 	}
 
-	args.push(...buildComposeOperationArgs(operation, { forceRecreate, removeOrphans, removeVolumes, build, noBuildCache, pullPolicy, serviceName, serviceNames }));
+	args.push(...buildComposeOperationArgs(operation, { forceRecreate, removeOrphans, noDeps, removeVolumes, build, noBuildCache, pullPolicy, serviceName, serviceNames }));
 
 	const commandStr = args.join(' ');
 
@@ -1824,7 +1827,7 @@ async function executeComposeCommand(
 	secretVars?: Record<string, string>,
 	onLine?: (line: string) => void
 ): Promise<StackOperationResult> {
-	const { stackName, envId, forceRecreate, build, noBuildCache, removeOrphans, pullPolicy, removeVolumes, stackFiles, workingDir, composePath, envPath, useOverrideFile, serviceName, serviceNames, composeFileName, filesToDelete, removeFiles } = options;
+	const { stackName, envId, forceRecreate, build, noBuildCache, removeOrphans, noDeps, pullPolicy, removeVolumes, stackFiles, workingDir, composePath, envPath, useOverrideFile, serviceName, serviceNames, composeFileName, filesToDelete, removeFiles } = options;
 
 	// Get environment configuration
 	const env = envId ? await getEnvironment(envId) : null;
@@ -1851,6 +1854,7 @@ async function executeComposeCommand(
 			build,
 			noBuildCache,
 			removeOrphans,
+			noDeps,
 			pullPolicy,
 			undefined,    // remoteStackHostDir
 			onLine
@@ -1985,6 +1989,7 @@ async function executeComposeCommand(
 				build,
 				noBuildCache,
 				removeOrphans,
+				noDeps,
 				pullPolicy,
 				remoteStackHostDir,
 				onLine
@@ -2021,6 +2026,7 @@ async function executeComposeCommand(
 				build,
 				noBuildCache,
 				removeOrphans,
+				noDeps,
 				pullPolicy,
 				undefined,    // remoteStackHostDir
 				onLine
@@ -3393,6 +3399,11 @@ export interface UpdateStackServiceOptions {
 	 * that merely drifted from the on-disk compose file. (#1539 review)
 	 */
 	removeOrphans?: boolean;
+	/**
+	 * Add `--no-deps` on `up`. The auto-update caller passes true so a service guarded
+	 * by `exclude` is not recreated as a dependency of a cascade target. (#1539 review)
+	 */
+	noDeps?: boolean;
 }
 
 export async function updateStackService(
@@ -3428,7 +3439,8 @@ export async function updateStackService(
 		build: options?.build,
 		noBuildCache: options?.noBuildCache,
 		forceRecreate: options?.forceRecreate,
-		removeOrphans: options?.removeOrphans
+		removeOrphans: options?.removeOrphans,
+		noDeps: options?.noDeps
 	};
 
 	// `--no-cache` is a `build` flag, not an `up` flag (#1479): run a separate

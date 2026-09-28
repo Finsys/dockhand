@@ -39,6 +39,15 @@ describe('buildComposeOperationArgs', () => {
 		expect(a).not.toContain('--remove-orphans');
 	});
 
+	it('up omits --no-deps by default', () => {
+		expect(buildComposeOperationArgs('up', {})).not.toContain('--no-deps');
+	});
+
+	it('up adds --no-deps when requested (excluded/dependency services stay untouched, #1539 review)', () => {
+		const a = buildComposeOperationArgs('up', { noDeps: true, removeOrphans: false, serviceName: 'web' });
+		expect(a).toEqual(['up', '-d', '--no-deps', 'web']);
+	});
+
 	it('build operation carries --no-cache only when requested', () => {
 		expect(buildComposeOperationArgs('build', { noBuildCache: true })).toEqual(['build', '--no-cache']);
 		expect(buildComposeOperationArgs('build', { noBuildCache: false })).toEqual(['build']);

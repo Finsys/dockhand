@@ -104,6 +104,26 @@ export function buildModeBlockedByVulnerabilityGate(
 	return buildMode && criteria !== 'never';
 }
 
+/**
+ * Apply the `wasRunning` guard to a cascade: the Docker-API path never restarts a
+ * deliberately-stopped container, but `docker compose up --force-recreate` does. Keep
+ * only services that are currently running — plus the changed service, which IS the
+ * update — and report the stopped ones as skipped instead of resurrecting them. (#1539 review)
+ */
+export function filterCascadeTargetsToRunning(
+	targets: string[],
+	changedService: string,
+	running: ReadonlySet<string>
+): { targets: string[]; stopped: string[] } {
+	const kept: string[] = [];
+	const stopped: string[] = [];
+	for (const t of targets) {
+		if (t === changedService || running.has(t)) kept.push(t);
+		else stopped.push(t);
+	}
+	return { targets: kept, stopped };
+}
+
 // =============================================================================
 // PARSING (tolerant: a bad value degrades to the default, never throws)
 // =============================================================================
@@ -141,10 +161,25 @@ function normalizeExclude(value: unknown): string[] | undefined {
 	return value.filter((v): v is string => typeof v === 'string').map((v) => v.trim()).filter(Boolean);
 }
 
+/**
+ * `exclude` is the protective field of the policy: dropping a malformed value while
+ * `cascade` survives would fail OPEN (the cascade runs, the guard is gone). So any
+ * present-but-invalid `exclude` rejects the WHOLE block, falling back to defaults
+ * instead of silently applying a weaker policy. A string list is the only valid form. (#1539 review)
+ */
+function isValidExclude(value: unknown): value is string[] {
+	return Array.isArray(value) && value.every((v) => typeof v === 'string');
+}
+
 /** Read only the recognized keys of one `x-dockhand.update` block. */
 function readUpdateBlock(raw: unknown): Partial<StackUpdatePolicy> {
 	const block = asRecord(raw);
 	if (!block) return {};
+	// A present-but-invalid `exclude` rejects the entire block (fail safe, never open).
+	const excludeRaw = block.exclude;
+	if (excludeRaw !== undefined && excludeRaw !== null && !isValidExclude(excludeRaw)) {
+		return {};
+	}
 	const out: Partial<StackUpdatePolicy> = {};
 	// YAML allows `no-cache`; accept `noCache` too (either spelling).
 	const mode = normalizeMode(block.mode);

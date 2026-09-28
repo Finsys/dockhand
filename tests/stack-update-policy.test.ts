@@ -7,6 +7,7 @@ import {
 	resolveServicePolicy,
 	serviceHasBuildContext,
 	buildModeBlockedByVulnerabilityGate,
+	filterCascadeTargetsToRunning,
 	defaultStackUpdatePolicy
 } from '../src/lib/server/stack-update-policy';
 
@@ -199,5 +200,42 @@ describe('buildModeBlockedByVulnerabilityGate', () => {
 
 	test('recreate is never blocked (it goes through the registry scan flow)', () => {
 		expect(buildModeBlockedByVulnerabilityGate('recreate', 'critical')).toBe(false);
+	});
+});
+
+describe('exclude validation (fail safe, never open)', () => {
+	test('a scalar exclude rejects the WHOLE block instead of silently dropping it', () => {
+		const parsed = parseStackUpdatePolicy(
+			'x-dockhand:\n  update:\n    cascade: all\n    exclude: db\nservices:\n  app:\n    image: a\n  db:\n    image: b\n'
+		);
+		expect(parsed.stack).toEqual(defaultStackUpdatePolicy());
+	});
+
+	test('an exclude list containing a non-string entry also rejects the block', () => {
+		const parsed = parseStackUpdatePolicy(
+			'x-dockhand:\n  update:\n    cascade: all\n    exclude: [db, 3]\nservices:\n  app:\n    image: a\n'
+		);
+		expect(parsed.stack).toEqual(defaultStackUpdatePolicy());
+	});
+
+	test('a valid exclude list still parses normally', () => {
+		const parsed = parseStackUpdatePolicy(
+			'x-dockhand:\n  update:\n    exclude: [db]\nservices:\n  app:\n    image: a\n'
+		);
+		expect(parsed.stack.exclude).toEqual(['db']);
+	});
+});
+
+describe('filterCascadeTargetsToRunning', () => {
+	test('keeps running targets and the changed service, reports stopped ones', () => {
+		const r = filterCascadeTargetsToRunning(['app', 'worker', 'db'], 'app', new Set(['worker']));
+		expect(r.targets).toEqual(['app', 'worker']);
+		expect(r.stopped).toEqual(['db']);
+	});
+
+	test('the changed service is kept even if it is not reported running', () => {
+		const r = filterCascadeTargetsToRunning(['app', 'worker'], 'app', new Set());
+		expect(r.targets).toEqual(['app']);
+		expect(r.stopped).toEqual(['worker']);
 	});
 });

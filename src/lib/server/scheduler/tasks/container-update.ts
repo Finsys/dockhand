@@ -10,6 +10,7 @@
 import type { ScheduleTrigger, VulnerabilityCriteria } from '../../db';
 import {
 	getAutoUpdateSettingById,
+	getEnvironment,
 	updateAutoUpdateLastChecked,
 	updateAutoUpdateLastUpdated,
 	createScheduleExecution,
@@ -46,6 +47,7 @@ import {
 	planStackUpdate,
 	isDefaultStackUpdatePlan,
 	buildModeBlockedByVulnerabilityGate,
+	filterCascadeTargetsToRunning,
 	type StackUpdatePlan
 } from '../../stack-update-policy';
 
@@ -472,6 +474,16 @@ export async function runContainerUpdate(
 				log(`Stack update policy lookup failed (using defaults): ${policyError.message}`);
 			}
 		}
+		// Hawser's remote agent only understands a single ServiceName (compose.go:119), so a
+		// plural target list is silently dropped there - yet the execution record would still
+		// report the whole list as updated. Until the agent learns the field, ignore the
+		// compose policy on Hawser and stay on the pre-#1539 single-container path. (#1539 review)
+		const { isHawserConnection } = await import('../../stacks');
+		const policyEnv = typeof envId === 'number' ? await getEnvironment(envId) : null;
+		if (updatePlan && !isDefaultStackUpdatePlan(updatePlan) && isHawserConnection(policyEnv)) {
+			log(`Stack update policy ignored: multi-service compose updates are not supported over Hawser yet`);
+			updatePlan = null;
+		}
 		const composeApply = !!updatePlan && !isDefaultStackUpdatePlan(updatePlan);
 		// build/rebuild produce the image from the compose build context, so they must
 		// NOT be gated on (or preceded by) a registry image pull. This is exactly the
@@ -713,19 +725,42 @@ export async function runContainerUpdate(
 			log(`Applying stack update policy: mode=${plan.mode} targets=[${plan.targets.join(', ')}]${plan.noCache ? ' no-cache' : ''}`);
 
 			const { updateStackService } = await import('../../stacks');
+
+			// A cascade must not resurrect a service the operator deliberately stopped: the
+			// Docker-API path checks wasRunning, compose with --force-recreate does not. Probe the
+			// stack's live containers, drop stopped cascade targets, and report them as skipped.
+			// (#1539 review)
+			let applyTargets = plan.targets;
+			let stoppedSkipped: { service: string; reason: string }[] = [];
+			if (plan.targets.length > 1) {
+				const stackContainers = await listContainers(true, envId);
+				const running = new Set(
+					stackContainers
+						.filter((c) => c.labels?.['com.docker.compose.project'] === stackProject && c.state === 'running')
+						.map((c) => c.labels?.['com.docker.compose.service'])
+						.filter((s): s is string => !!s)
+				);
+				const filtered = filterCascadeTargetsToRunning(plan.targets, stackService!, running);
+				applyTargets = filtered.targets;
+				stoppedSkipped = filtered.stopped.map((service) => ({ service, reason: 'stopped' }));
+				for (const s of filtered.stopped) log(`  Skipping (stopped): ${s}`);
+			}
+
 			// Build/rebuild rely on `--build` (and Compose's own image-change detection) so
 			// the changed service is recreated; recreating every cascade target would be
 			// heavier than the issue asks for. Recreate-mode cascades get --force-recreate
 			// so the cascaded services genuinely come back instead of `up -d` no-op'ing them.
-			const forceRecreate = !buildFromContext && plan.targets.length > 1;
+			const forceRecreate = !buildFromContext && applyTargets.length > 1;
 			const stackResult = await updateStackService(stackProject!, stackService!, envId, undefined, {
-				serviceNames: plan.targets.slice(1),
+				serviceNames: applyTargets.slice(1),
 				build: plan.mode === 'build' || plan.mode === 'rebuild',
 				noBuildCache: plan.noCache && (plan.mode === 'build' || plan.mode === 'rebuild'),
 				forceRecreate,
 				// An unattended job must not prune containers that drifted from the on-disk
 				// compose file; that is `compose down` semantics nobody asked for. (#1539 review)
-				removeOrphans: false
+				removeOrphans: false,
+				// Keep `exclude`d services out of the redeploy even when a target depends on them.
+				noDeps: true
 			});
 
 			if (!stackResult.success) {
@@ -754,8 +789,8 @@ export async function runContainerUpdate(
 						mode: plan.mode,
 						cascade: updatePlanCascadeLabel(plan),
 						noCache: plan.noCache,
-						rebuilt: plan.targets,
-						skipped: plan.skipped
+						rebuilt: applyTargets,
+						skipped: [...plan.skipped, ...stoppedSkipped]
 					}
 				}
 			});
@@ -765,14 +800,14 @@ export async function runContainerUpdate(
 			// moved, not just the one container that had an update. (#1539)
 			await sendEventNotification('container_updated', {
 				title: 'Container updated (stack redeploy)',
-				message: `Service "${stackService}" of stack "${stackProject}" was updated via compose (mode: ${plan.mode}${plan.targets.length > 1 ? `, redeployed: ${plan.targets.join(', ')}` : ''})`,
+				message: `Service "${stackService}" of stack "${stackProject}" was updated via compose (mode: ${plan.mode}${applyTargets.length > 1 ? `, redeployed: ${applyTargets.join(', ')}` : ''})`,
 				type: 'success'
 			}, envId);
 
-			if (plan.targets.length > 1 || plan.mode !== 'recreate') {
+			if (applyTargets.length > 1 || plan.mode !== 'recreate') {
 				await sendEventNotification('stack_deployed', {
 					title: 'Stack redeployed by auto-update',
-					message: `Stack "${stackProject}" was redeployed by the auto-update of service "${stackService}" (mode: ${plan.mode}, targets: ${plan.targets.join(', ')})`,
+					message: `Stack "${stackProject}" was redeployed by the auto-update of service "${stackService}" (mode: ${plan.mode}, targets: ${applyTargets.join(', ')})`,
 					type: 'success'
 				}, envId);
 			}
