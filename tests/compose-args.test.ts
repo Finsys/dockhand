@@ -28,6 +28,17 @@ describe('buildComposeOperationArgs', () => {
 		expect(a).toEqual(['up', '-d', '--remove-orphans', '--force-recreate', '--pull', 'always', 'web']);
 	});
 
+	it('up includes --remove-orphans by default (back-compat for every existing caller)', () => {
+		expect(buildComposeOperationArgs('up', {})).toContain('--remove-orphans');
+		expect(buildComposeOperationArgs('up', { removeOrphans: true })).toContain('--remove-orphans');
+	});
+
+	it('up omits --remove-orphans when removeOrphans is false (auto-update path, #1539 review)', () => {
+		const a = buildComposeOperationArgs('up', { removeOrphans: false, forceRecreate: true, serviceName: 'web' });
+		expect(a).toEqual(['up', '-d', '--force-recreate', 'web']);
+		expect(a).not.toContain('--remove-orphans');
+	});
+
 	it('build operation carries --no-cache only when requested', () => {
 		expect(buildComposeOperationArgs('build', { noBuildCache: true })).toEqual(['build', '--no-cache']);
 		expect(buildComposeOperationArgs('build', { noBuildCache: false })).toEqual(['build']);

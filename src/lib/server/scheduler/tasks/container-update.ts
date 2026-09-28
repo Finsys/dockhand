@@ -45,6 +45,7 @@ import {
 	parseStackUpdatePolicy,
 	planStackUpdate,
 	isDefaultStackUpdatePlan,
+	buildModeBlockedByVulnerabilityGate,
 	type StackUpdatePlan
 } from '../../stack-update-policy';
 
@@ -477,6 +478,24 @@ export async function runContainerUpdate(
 		// gap that made build:/dockerfile_inline stacks un-updatable.
 		const buildFromContext = composeApply && (updatePlan!.mode === 'build' || updatePlan!.mode === 'rebuild');
 
+		// A build/rebuild plan deploys an image built from the compose build context, which
+		// the temp-tag registry-scan flow below never sees. With a vulnerability gate
+		// configured, refuse rather than deploy unscanned and mis-report the criteria as
+		// satisfied (#1539 review). Recorded as skipped so the history stays truthful.
+		if (buildFromContext && buildModeBlockedByVulnerabilityGate(updatePlan!.mode, vulnerabilityCriteria)) {
+			log(`Refusing build/rebuild update: vulnerabilityCriteria=${vulnerabilityCriteria}, but build modes cannot be scanned`);
+			await updateScheduleExecution(execution.id, {
+				status: 'skipped',
+				completedAt: new Date().toISOString(),
+				duration: Date.now() - startTime,
+				details: {
+					reason: 'Build/rebuild mode is incompatible with the configured vulnerability scan gate',
+					vulnerabilityCriteria
+				}
+			});
+			return;
+		}
+
 		// =============================================================================
 		// CHECK FOR UPDATES
 		// =============================================================================
@@ -703,7 +722,10 @@ export async function runContainerUpdate(
 				serviceNames: plan.targets.slice(1),
 				build: plan.mode === 'build' || plan.mode === 'rebuild',
 				noBuildCache: plan.noCache && (plan.mode === 'build' || plan.mode === 'rebuild'),
-				forceRecreate
+				forceRecreate,
+				// An unattended job must not prune containers that drifted from the on-disk
+				// compose file; that is `compose down` semantics nobody asked for. (#1539 review)
+				removeOrphans: false
 			});
 
 			if (!stackResult.success) {

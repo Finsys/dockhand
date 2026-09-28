@@ -6,6 +6,7 @@ import {
 	normalizeImageRef,
 	resolveServicePolicy,
 	serviceHasBuildContext,
+	buildModeBlockedByVulnerabilityGate,
 	defaultStackUpdatePolicy
 } from '../src/lib/server/stack-update-policy';
 
@@ -182,5 +183,21 @@ describe('planStackUpdate', () => {
 		);
 		const plan = planStackUpdate(parsed, 'app', 'ghcr.io/me/app:1.2');
 		expect(plan.targets).toEqual(['app']);
+	});
+});
+
+describe('buildModeBlockedByVulnerabilityGate', () => {
+	test('build/rebuild is refused when a vulnerability gate is configured', () => {
+		expect(buildModeBlockedByVulnerabilityGate('build', 'critical')).toBe(true);
+		expect(buildModeBlockedByVulnerabilityGate('rebuild', 'low')).toBe(true);
+	});
+
+	test('build/rebuild with criteria never is allowed (no gate to bypass)', () => {
+		expect(buildModeBlockedByVulnerabilityGate('build', 'never')).toBe(false);
+		expect(buildModeBlockedByVulnerabilityGate('rebuild', 'never')).toBe(false);
+	});
+
+	test('recreate is never blocked (it goes through the registry scan flow)', () => {
+		expect(buildModeBlockedByVulnerabilityGate('recreate', 'critical')).toBe(false);
 	});
 });

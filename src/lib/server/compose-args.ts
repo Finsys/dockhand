@@ -10,6 +10,12 @@
  */
 export interface ComposeOperationArgOptions {
 	forceRecreate?: boolean;
+	/**
+	 * Include `--remove-orphans` on `up` (default true, preserving every existing
+	 * caller). The auto-update path passes false: a background job must not delete
+	 * containers that merely drifted from the on-disk compose file. (#1539 review)
+	 */
+	removeOrphans?: boolean;
 	removeVolumes?: boolean;
 	build?: boolean;
 	noBuildCache?: boolean;
@@ -27,7 +33,7 @@ export function buildComposeOperationArgs(
 	operation: 'up' | 'down' | 'stop' | 'start' | 'restart' | 'pull' | 'build',
 	options: ComposeOperationArgOptions = {}
 ): string[] {
-	const { forceRecreate, removeVolumes, build, noBuildCache, pullPolicy, serviceName, serviceNames } = options;
+	const { forceRecreate, removeOrphans, removeVolumes, build, noBuildCache, pullPolicy, serviceName, serviceNames } = options;
 	const args: string[] = [];
 	// One service arg list for every operation: the legacy single `serviceName` plus
 	// any explicit list (#1539). De-duplicated, order preserved (changed service first).
@@ -39,7 +45,10 @@ export function buildComposeOperationArgs(
 
 	switch (operation) {
 		case 'up':
-			args.push('up', '-d', '--remove-orphans');
+			args.push('up', '-d');
+			// Opt-out exists for the unattended auto-update path (#1539 review); every
+			// other caller keeps the historical --remove-orphans default.
+			if (removeOrphans !== false) args.push('--remove-orphans');
 			if (forceRecreate) args.push('--force-recreate');
 			// A no-cache rebuild is handled by a separate `build` step, so `up` must not
 			// also carry --build (and never --no-cache, which up doesn't accept).

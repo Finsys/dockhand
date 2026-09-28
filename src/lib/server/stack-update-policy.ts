@@ -88,6 +88,22 @@ export function isDefaultStackUpdatePlan(plan: StackUpdatePlan): boolean {
 	return plan.mode === 'recreate' && plan.targets.length <= 1;
 }
 
+/**
+ * Build/rebuild modes produce the image from the compose build context and apply
+ * it through `docker compose up`. The auto-update task's temp-tag scan flow only
+ * ever sees images pulled from a registry, so a built image would be deployed with
+ * no vulnerability gating at all. When a gate is configured (`criteria` other than
+ * `never`), the caller must refuse the build/rebuild plan rather than deploy an
+ * unscanned image — and record the run as skipped, never as a satisfied gate. (#1539 review)
+ */
+export function buildModeBlockedByVulnerabilityGate(
+	mode: StackUpdateMode,
+	criteria: string
+): boolean {
+	const buildMode = mode === 'build' || mode === 'rebuild';
+	return buildMode && criteria !== 'never';
+}
+
 // =============================================================================
 // PARSING (tolerant: a bad value degrades to the default, never throws)
 // =============================================================================
