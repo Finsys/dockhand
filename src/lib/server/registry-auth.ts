@@ -29,6 +29,17 @@ export function isSafeRegistryHost(registry: string): { ok: boolean; reason?: st
 	return isSafeNotificationUrl(`https://${registry}`);
 }
 
+/** Docker may inspect its own loopback registry, but Dockhand must not fetch it directly. */
+export function canInspectRegistryViaDaemon(registry: string): boolean {
+	if (isSafeRegistryHost(registry).ok) return true;
+	try {
+		const host = new URL(`https://${registry}`).hostname.toLowerCase().replace(/^\[|\]$/g, '');
+		return host === 'localhost' || host.endsWith('.localhost') || host === '::1' || /^127\.(?:\d{1,3}\.){2}\d{1,3}$/.test(host);
+	} catch {
+		return false;
+	}
+}
+
 /**
  * Whether Basic credentials may be re-attached when a registry token request
  * redirects. True only when the host is unchanged. A Harbor behind a

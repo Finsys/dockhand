@@ -165,9 +165,12 @@
 			}
 
 			const { jobId } = await response.json();
-			await watchJob(jobId, (line) => {
-				handlePullProgress(line.data as any);
-			});
+			const result = await watchJob(jobId, (line) => {
+				if (line.event === 'progress') handlePullProgress(line.data as any);
+			}) as { success?: boolean; status?: string; error?: string } | null;
+			if (status === 'pulling' && (result?.status === 'error' || result?.success === false)) {
+				handlePullProgress({ status: 'error', error: result.error || 'Failed to pull image' });
+			}
 
 			if (status === 'pulling') {
 				duration = Date.now() - startTime;
@@ -179,8 +182,10 @@
 			duration = Date.now() - startTime;
 			status = 'error';
 			errorMessage = error.message || 'Failed to pull image';
-			addOutputLine(`[error] ${errorMessage}`);
-			onError?.(errorMessage);
+			if (!outputLines.some((line) => line === `[error] ${errorMessage}`)) {
+				addOutputLine(`[error] ${errorMessage}`);
+				onError?.(errorMessage);
+			}
 		}
 	}
 

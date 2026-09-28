@@ -439,12 +439,14 @@ export async function runContainerUpdate(
 		}
 
 		if (!registryCheck.hasUpdate) {
-			log(`Already up-to-date: ${containerName} is running the latest version`);
+			log(registryCheck.releaseAgeRemainingHours
+				? `Update deferred: ${registryCheck.releaseAgeRemainingHours} hour(s) remain in minimum release age cooldown`
+				: `Already up-to-date: ${containerName} is running the latest version`);
 			await updateScheduleExecution(execution.id, {
 				status: 'skipped',
 				completedAt: new Date().toISOString(),
 				duration: Date.now() - startTime,
-				details: { reason: 'Already up-to-date' }
+				details: { reason: registryCheck.releaseAgeRemainingHours ? 'Minimum release age cooldown' : 'Already up-to-date' }
 			});
 			return;
 		}

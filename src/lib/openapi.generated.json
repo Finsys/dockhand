@@ -12785,13 +12785,25 @@
                         },
                         "vulnerabilityCriteria": {
                           "type": "string"
+                        },
+                        "minimumReleaseAgeHours": {
+                          "type": "number"
+                        },
+                        "minimumReleaseAgeOverride": {
+                          "type": "boolean"
+                        },
+                        "minimumReleaseAgeOverridden": {
+                          "type": "boolean"
                         }
                       },
                       "required": [
                         "enabled",
                         "cron",
                         "autoUpdate",
-                        "vulnerabilityCriteria"
+                        "vulnerabilityCriteria",
+                        "minimumReleaseAgeHours",
+                        "minimumReleaseAgeOverride",
+                        "minimumReleaseAgeOverridden"
                       ]
                     }
                   },
@@ -12871,13 +12883,25 @@
                         },
                         "vulnerabilityCriteria": {
                           "type": "string"
+                        },
+                        "minimumReleaseAgeHours": {
+                          "type": "number"
+                        },
+                        "minimumReleaseAgeOverride": {
+                          "type": "boolean"
+                        },
+                        "minimumReleaseAgeOverridden": {
+                          "type": "boolean"
                         }
                       },
                       "required": [
                         "enabled",
                         "cron",
                         "autoUpdate",
-                        "vulnerabilityCriteria"
+                        "vulnerabilityCriteria",
+                        "minimumReleaseAgeHours",
+                        "minimumReleaseAgeOverride",
+                        "minimumReleaseAgeOverridden"
                       ]
                     }
                   },
@@ -12892,11 +12916,17 @@
                     "enabled": true,
                     "cron": "string",
                     "autoUpdate": true,
-                    "vulnerabilityCriteria": "string"
+                    "vulnerabilityCriteria": "string",
+                    "minimumReleaseAgeHours": 0,
+                    "minimumReleaseAgeOverride": true,
+                    "minimumReleaseAgeOverridden": true
                   }
                 }
               }
             }
+          },
+          "400": {
+            "description": "Minimum release age must be a whole number from 0 to 720 hours"
           },
           "403": {
             "description": "Permission denied (RBAC 'environments:edit' missing)"
@@ -12934,6 +12964,12 @@
                   },
                   "vulnerabilityCriteria": {
                     "type": "string"
+                  },
+                  "minimumReleaseAgeHours": {
+                    "type": "number"
+                  },
+                  "minimumReleaseAgeOverride": {
+                    "type": "boolean"
                   }
                 }
               },
@@ -25027,6 +25063,131 @@
                 "stackLogOperations": [
                   "string"
                 ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/minimum-release-age": {
+      "get": {
+        "operationId": "get_api_settings_minimum-release-age",
+        "tags": [
+          "settings"
+        ],
+        "summary": "Get the minimum image release age in hours",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "hours": {
+                      "type": "number"
+                    },
+                    "overridden": {
+                      "type": "boolean"
+                    },
+                    "inherited": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "hours",
+                    "overridden",
+                    "inherited"
+                  ]
+                },
+                "example": {
+                  "hours": 0,
+                  "overridden": true,
+                  "inherited": true
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "operationId": "post_api_settings_minimum-release-age",
+        "tags": [
+          "settings"
+        ],
+        "summary": "Set the minimum image release age in hours",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "hours": {
+                      "type": "number"
+                    },
+                    "overridden": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "hours",
+                    "overridden"
+                  ]
+                },
+                "example": {
+                  "hours": 0,
+                  "overridden": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Hours must be a whole number from 0 to 720"
+          },
+          "403": {
+            "description": "Permission denied (needs settings:edit)"
+          },
+          "409": {
+            "description": "MINIMUM_RELEASE_AGE_HOURS overrides this setting"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "hours": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "hours"
+                ]
+              },
+              "example": {
+                "hours": 0
               }
             }
           }

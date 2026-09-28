@@ -153,7 +153,7 @@ describe('fetchRegistryToken redirect follow', () => {
 	});
 });
 
-import { isSafeRegistryHost } from '../src/lib/server/registry-auth';
+import { canInspectRegistryViaDaemon, isSafeRegistryHost } from '../src/lib/server/registry-auth';
 
 describe('isSafeRegistryHost', () => {
 	// Image-derived registry hosts: block the dangerous set, allow public + LAN.
@@ -166,6 +166,21 @@ describe('isSafeRegistryHost', () => {
 	test('allows public registries and LAN self-hosted registries', () => {
 		for (const h of ['ghcr.io', 'registry-1.docker.io', 'registry.example.com', '192.168.1.50:5000', '10.0.0.5:5000', '172.16.4.4']) {
 			expect(isSafeRegistryHost(h).ok).toBe(true);
+		}
+	});
+});
+
+describe('canInspectRegistryViaDaemon', () => {
+	test('permits daemon-local registries without allowing direct fetches', () => {
+		for (const host of ['localhost:5000', 'registry.localhost:5000', '127.0.0.1:5000', '[::1]:5000']) {
+			expect(isSafeRegistryHost(host).ok).toBe(false);
+			expect(canInspectRegistryViaDaemon(host)).toBe(true);
+		}
+	});
+
+	test('continues to reject metadata and reserved hosts', () => {
+		for (const host of ['169.254.169.254', '0.0.0.0', '[::]']) {
+			expect(canInspectRegistryViaDaemon(host)).toBe(false);
 		}
 	});
 });

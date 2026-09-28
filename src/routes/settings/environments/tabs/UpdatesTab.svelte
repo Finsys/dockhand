@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Label } from '$lib/components/ui/label';
+	import { Input } from '$lib/components/ui/input';
 	import * as Select from '$lib/components/ui/select';
 	import { TogglePill } from '$lib/components/ui/toggle-pill';
 	import CronEditor from '$lib/components/cron-editor.svelte';
@@ -16,6 +17,9 @@
 		updateCheckCron: string;
 		updateCheckAutoUpdate: boolean;
 		updateCheckVulnerabilityCriteria: VulnerabilityCriteria;
+		minimumReleaseAgeHours: number;
+		minimumReleaseAgeOverridden: boolean;
+		minimumReleaseAgeOverride: boolean;
 		scannerEnabled: boolean;
 		// Image prune settings
 		imagePruneLoading: boolean;
@@ -34,6 +38,9 @@
 		updateCheckCron = $bindable(),
 		updateCheckAutoUpdate = $bindable(),
 		updateCheckVulnerabilityCriteria = $bindable(),
+		minimumReleaseAgeHours = $bindable(),
+		minimumReleaseAgeOverridden,
+		minimumReleaseAgeOverride = $bindable(),
 		scannerEnabled,
 		imagePruneLoading,
 		imagePruneEnabled = $bindable(),
@@ -119,6 +126,29 @@
 				{/if}
 			</div>
 		{/if}
+	{/if}
+</div>
+
+<!-- Image release cooldown -->
+<div class="space-y-3 pt-4 border-t">
+	<div class="text-sm font-medium">Minimum image release age</div>
+	<p class="text-xs text-muted-foreground">Delay Dockhand-managed service image pulls and updates in this environment. Builds may fetch Dockerfile base images outside this setting. Docker Hub uses the tag's last push time; other registries use when Dockhand first saw the digest.</p>
+	<div class="flex items-center justify-between gap-3">
+		<div>
+			<Label>Override global cooldown</Label>
+			<p class="text-xs text-muted-foreground">When off, this environment uses the global setting.</p>
+		</div>
+		<TogglePill bind:checked={minimumReleaseAgeOverride} disabled={minimumReleaseAgeOverridden} />
+	</div>
+	{#if minimumReleaseAgeOverride}
+		<div class="flex items-center gap-3">
+			<Label for="env-minimum-release-age" class="shrink-0">Hours</Label>
+			<Input id="env-minimum-release-age" type="number" min="0" max="720" step="1" class="w-28" bind:value={minimumReleaseAgeHours} disabled={minimumReleaseAgeOverridden} />
+			<span class="text-xs text-muted-foreground">0 disables the cooldown</span>
+		</div>
+	{/if}
+	{#if minimumReleaseAgeOverridden}
+		<p class="text-xs text-muted-foreground">Set by MINIMUM_RELEASE_AGE_HOURS on the Dockhand server.</p>
 	{/if}
 </div>
 

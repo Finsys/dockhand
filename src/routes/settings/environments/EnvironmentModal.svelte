@@ -555,6 +555,9 @@
 	let updateCheckEnabled = $state(false);
 	let updateCheckCron = $state('0 4 * * *'); // Default: 4 AM daily
 	let updateCheckAutoUpdate = $state(false);
+	let minimumReleaseAgeHours = $state(0);
+	let minimumReleaseAgeOverridden = $state(false);
+	let minimumReleaseAgeOverride = $state(false);
 	let updateCheckVulnerabilityCriteria = $state<VulnerabilityCriteria>('never');
 	let updateCheckLoading = $state(false);
 
@@ -690,6 +693,9 @@
 			updateCheckEnabled = false;
 			updateCheckCron = '0 4 * * *';
 			updateCheckAutoUpdate = false;
+			minimumReleaseAgeHours = 0;
+			minimumReleaseAgeOverridden = false;
+			minimumReleaseAgeOverride = false;
 			// Reset image prune settings
 			imagePruneEnabled = false;
 			imagePruneCron = '0 3 * * 0';
@@ -830,6 +836,10 @@
 
 	// === Environment CRUD ===
 	async function createEnvironment() {
+		if (minimumReleaseAgeOverride && (!Number.isInteger(minimumReleaseAgeHours) || minimumReleaseAgeHours < 0 || minimumReleaseAgeHours > 720)) {
+			formError = 'Minimum release age must be a whole number from 0 to 720 hours';
+			return;
+		}
 		// Validation based on connection type
 		formErrors = {};
 		let hasErrors = false;
@@ -926,8 +936,8 @@
 						})
 					});
 				}
-				// Save update check settings if enabled
-				if (updateCheckEnabled && newEnv?.id) {
+				// Save update check settings and the optional release-age override
+				if (newEnv?.id) {
 					await saveUpdateCheckSettings(newEnv.id);
 				}
 				// Save image prune settings if enabled
@@ -947,7 +957,7 @@
 				formError = data.error || 'Failed to create environment';
 			}
 		} catch (error) {
-			formError = 'Failed to create environment';
+			formError = error instanceof Error ? error.message : 'Failed to create environment';
 		} finally {
 			formSaving = false;
 		}
@@ -955,6 +965,10 @@
 
 	async function updateEnvironment() {
 		if (!environment) return;
+		if (minimumReleaseAgeOverride && (!Number.isInteger(minimumReleaseAgeHours) || minimumReleaseAgeHours < 0 || minimumReleaseAgeHours > 720)) {
+			formError = 'Minimum release age must be a whole number from 0 to 720 hours';
+			return;
+		}
 
 		formErrors = {};
 		let hasErrors = false;
@@ -1084,7 +1098,7 @@
 				formError = data.error || 'Failed to update environment';
 			}
 		} catch (error) {
-			formError = 'Failed to update environment';
+			formError = error instanceof Error ? error.message : 'Failed to update environment';
 		} finally {
 			formSaving = false;
 		}
@@ -1271,12 +1285,18 @@
 					updateCheckCron = data.settings.cron || '0 4 * * *';
 					updateCheckAutoUpdate = data.settings.autoUpdate ?? false;
 					updateCheckVulnerabilityCriteria = data.settings.vulnerabilityCriteria || 'never';
+					minimumReleaseAgeHours = data.settings.minimumReleaseAgeHours ?? 0;
+					minimumReleaseAgeOverridden = data.settings.minimumReleaseAgeOverridden ?? false;
+					minimumReleaseAgeOverride = data.settings.minimumReleaseAgeOverride ?? false;
 				} else {
 					// No settings found - use defaults
 					updateCheckEnabled = false;
 					updateCheckCron = '0 4 * * *';
 					updateCheckAutoUpdate = false;
 					updateCheckVulnerabilityCriteria = 'never';
+					minimumReleaseAgeHours = 0;
+					minimumReleaseAgeOverridden = false;
+					minimumReleaseAgeOverride = false;
 				}
 			}
 		} catch (error) {
@@ -1287,19 +1307,21 @@
 	}
 
 	async function saveUpdateCheckSettings(envId: number) {
-		try {
-			await fetch(`/api/environments/${envId}/update-check`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					enabled: updateCheckEnabled,
-					cron: updateCheckCron,
-					autoUpdate: updateCheckAutoUpdate,
-					vulnerabilityCriteria: updateCheckVulnerabilityCriteria
-				})
-			});
-		} catch (error) {
-			console.error('Failed to save update check settings:', error);
+		const response = await fetch(`/api/environments/${envId}/update-check`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				enabled: updateCheckEnabled,
+				cron: updateCheckCron,
+				autoUpdate: updateCheckAutoUpdate,
+				vulnerabilityCriteria: updateCheckVulnerabilityCriteria,
+				minimumReleaseAgeHours,
+				minimumReleaseAgeOverride
+			})
+		});
+		if (!response.ok) {
+			const data = await response.json().catch(() => ({}));
+			throw new Error(data.error || 'Failed to save update check settings');
 		}
 	}
 
@@ -2680,6 +2702,9 @@
 						bind:updateCheckCron={updateCheckCron}
 						bind:updateCheckAutoUpdate={updateCheckAutoUpdate}
 						bind:updateCheckVulnerabilityCriteria={updateCheckVulnerabilityCriteria}
+						bind:minimumReleaseAgeHours={minimumReleaseAgeHours}
+						minimumReleaseAgeOverridden={minimumReleaseAgeOverridden}
+						bind:minimumReleaseAgeOverride={minimumReleaseAgeOverride}
 						scannerEnabled={scannerEnabled}
 						imagePruneLoading={imagePruneLoading}
 						bind:imagePruneEnabled={imagePruneEnabled}

@@ -25,6 +25,8 @@ import { rescopeForPrimarySwitch } from './primary-network-switch-core';
 import { mapContainerNetworks } from '$lib/utils/network-identity';
 import type { Environment } from './db';
 import { getSetting } from './db';
+import { getMinimumReleaseAgeConfig, imageReleaseAgeRemainingMs } from './minimum-release-age';
+import { verifiedImagePullPlan } from './minimum-release-age-core';
 import { getAdditionalVolumeBinds, dedupeVolumesForRecreate } from './mount-dedupe';
 import { resolveNanoCpusConflict, resolvePodmanUsernsMode } from './hostconfig-recreate';
 import { isUnknownNetworkKeyError, retryEndpointKey } from './podman-network-key';
@@ -34,7 +36,7 @@ import { decideRespawnOutcome, isExactNameMatch } from './systemd-recreate-core'
 import { parseImageReference } from './registry/image-ref';
 export { parseImageReference } from './registry/image-ref';
 import { rebaseEnvOntoImage, rebaseLabelsOntoImage, rebaseCommand, describeEnvRebase, describeLabelRebase, type ImageEnvLabels } from './container-env-merge';
-import { encodeRegistryAuth, fetchRegistryToken, isSafeRegistryHost } from './registry-auth';
+import { encodeRegistryAuth, fetchRegistryToken, isSafeRegistryHost, canInspectRegistryViaDaemon } from './registry-auth';
 import { describeRegistryFailure } from './registry-failure-core';
 import { resolveRegistryScheme, type StoredRegistryScheme } from './registry-scheme-core';
 import { classifyManifest, type ArtifactKind } from './semver/manifest-artifact';
@@ -3014,7 +3016,38 @@ export async function buildRegistryAuthHeader(imageName: string): Promise<Record
 	return headers;
 }
 
+export async function verifyImageReleaseAge(imageName: string, envId?: number | null): Promise<string | null> {
+	const { hours } = await getMinimumReleaseAgeConfig(envId);
+	if (hours > 0) {
+		const digest = await getRegistryManifestDigest(imageName, envId);
+		if (!digest) throw new Error(`Cannot verify the release age of ${imageName}: registry digest unavailable. Check registry access and credentials; pull deferred.`);
+		const remaining = await imageReleaseAgeRemainingMs(imageName, digest, hours);
+		if (remaining > 0) {
+			throw new Error(`${imageName} is in its minimum release age cooldown (${Math.ceil(remaining / 3600000)} hours remaining)`);
+		}
+		return digest;
+	}
+	return null;
+}
+
 export async function pullImage(imageName: string, onProgress?: (data: any) => void, envId?: number | null) {
+	const digest = await verifyImageReleaseAge(imageName, envId);
+	if (!digest) return pullImageFromRegistry(imageName, onProgress, envId);
+
+	const plan = verifiedImagePullPlan(imageName, digest);
+	await pullImageFromRegistry(plan.reference, onProgress, envId);
+	if (plan.tag) {
+		const image = await inspectImage(plan.reference, envId) as { Id: string };
+		await tagImage(image.Id, plan.tag.repo, plan.tag.tag, envId);
+	}
+}
+
+/** Pull an image needed by Dockhand's own scanner or backup helper. */
+export async function pullInternalImage(imageName: string, envId?: number | null) {
+	return pullImageFromRegistry(imageName, undefined, envId);
+}
+
+async function pullImageFromRegistry(imageName: string, onProgress?: (data: any) => void, envId?: number | null) {
 	// Parse image name and tag to avoid pulling all tags
 	// Docker API: if tag is empty, it pulls ALL tags for the image
 	// Format can be: repo:tag, repo@digest, or just repo (defaults to :latest)
@@ -3765,19 +3798,16 @@ export async function harborSearchRepositories(
  * Simple HEAD request to get Docker-Content-Digest header.
  * Docker stores the manifest list digest in RepoDigests, so we compare that directly.
  */
-export async function getRegistryManifestDigest(imageName: string): Promise<string | null> {
-	return (await getRegistryManifestDigestDetailed(imageName)).digest;
-}
-
-/** Like getRegistryManifestDigest, but a null digest carries the specific reason (#1486). */
-export async function getRegistryManifestDigestDetailed(
+/** Direct registry request with upstream diagnostic details. */
+async function getRegistryManifestDigestDirectDetailed(
 	imageName: string
 ): Promise<{ digest: string | null; reason?: string }> {
 	let registry = '';
 	try {
 		const parsed = parseImageReference(imageName);
 		registry = parsed.registry;
-		const { repo, tag } = parsed;
+		const { repo } = parsed;
+		const tag = imageName.includes('@') ? imageName.split('@').pop()! : parsed.tag;
 		if (!isSafeRegistryHost(registry).ok) {
 			return { digest: null, reason: describeRegistryFailure({ kind: 'blocked-host', registry }) };
 		}
@@ -3830,6 +3860,42 @@ export async function getRegistryManifestDigestDetailed(
 			reason: describeRegistryFailure({ kind: 'error', registry: registry || imageName, error: e })
 		};
 	}
+}
+
+/** The target daemon can resolve private registries that Dockhand itself cannot
+ * reach (especially through Hawser). This endpoint reads metadata, not layers. */
+async function getDockerDistributionDigest(imageName: string, envId?: number | null): Promise<string | null> {
+	try {
+		const headers = await buildRegistryAuthHeader(imageName);
+		const response = await dockerFetch(`/distribution/${encodeURIComponent(imageName)}/json`, { headers }, envId);
+		if (!response.ok) {
+			console.warn(`[Registry] Docker distribution inspect for ${imageName} returned HTTP ${response.status}`);
+			await drainResponse(response);
+			return null;
+		}
+		const data = await response.json() as { Descriptor?: { digest?: unknown } };
+		const digest = data.Descriptor?.digest;
+		return typeof digest === 'string' && /^sha256:[a-f0-9]{64}$/i.test(digest) ? digest : null;
+	} catch (error) {
+		console.warn(`[Registry] Docker distribution inspect failed for ${imageName}:`, error);
+		return null;
+	}
+}
+
+/** Resolve the registry digest on the target environment first. Fall back to a
+ * direct registry HEAD for daemons without the distribution inspect endpoint. */
+export async function getRegistryManifestDigest(imageName: string, envId?: number | null): Promise<string | null> {
+	return (await getRegistryManifestDigestDetailed(imageName, envId)).digest;
+}
+
+export async function getRegistryManifestDigestDetailed(imageName: string, envId?: number | null): Promise<{ digest: string | null; reason?: string }> {
+	const { registry } = parseImageReference(imageName);
+	if (!canInspectRegistryViaDaemon(registry)) return { digest: null, reason: describeRegistryFailure({ kind: 'blocked-host', registry }) };
+	const daemonDigest = await getDockerDistributionDigest(imageName, envId);
+	if (daemonDigest) return { digest: daemonDigest };
+	// A daemon-local registry may be reachable from the target host, but Dockhand
+	// must never send its own direct registry request to a loopback address.
+	return getRegistryManifestDigestDirectDetailed(imageName);
 }
 
 /**
@@ -3935,6 +4001,8 @@ export interface ImageUpdateCheckResult {
 	hasUpdate: boolean;
 	currentDigest?: string;
 	registryDigest?: string;
+	/** An image is available but still inside the configured cooldown. */
+	releaseAgeRemainingHours?: number;
 	/** True if this is a local-only image (no registry) */
 	isLocalImage?: boolean;
 	/** Error message if check failed */
@@ -4014,13 +4082,17 @@ export async function checkImageUpdateAvailable(
 		// a digest we don't have, an update is available. If the registry can't
 		// resolve it (404 / unreachable / truly local), THEN treat it as local.
 		if (localDigests.length === 0) {
-			const registryDigest = await getRegistryManifestDigest(imageName);
+			const registryDigest = await getRegistryManifestDigest(imageName, envId);
 			const { hasUpdate, isLocalImage, registryDigest: rd } = classifyEmptyDigestImage(registryDigest);
+			if (hasUpdate && rd) {
+				const remaining = await imageCooldownRemainingMs(imageName, rd, envId);
+				if (remaining > 0) return { hasUpdate: false, currentDigest: currentImageId, registryDigest: rd, releaseAgeRemainingHours: Math.ceil(remaining / 3600000) };
+			}
 			return { hasUpdate, isLocalImage, currentDigest: currentImageId, registryDigest: rd };
 		}
 
 		// Query registry for current manifest digest
-		const { digest: registryDigest, reason: registryFailure } = await getRegistryManifestDigestDetailed(imageName);
+		const { digest: registryDigest, reason: registryFailure } = await getRegistryManifestDigestDetailed(imageName, envId);
 
 		if (!registryDigest) {
 			// Registry unreachable or image not found - can't determine update status.
@@ -4046,6 +4118,10 @@ export async function checkImageUpdateAvailable(
 		if (await localDigestMatchesRegistryChild(imageName, localDigests)) {
 			return { hasUpdate: false, currentDigest: currentRepoDigests[0], localDigests };
 		}
+		const remaining = await imageCooldownRemainingMs(imageName, registryDigest, envId);
+		if (remaining > 0) {
+			return { hasUpdate: false, currentDigest: currentRepoDigests[0], registryDigest, localDigests, releaseAgeRemainingHours: Math.ceil(remaining / 3600000) };
+		}
 
 		return {
 			hasUpdate: true,
@@ -4056,6 +4132,11 @@ export async function checkImageUpdateAvailable(
 	} catch (e: any) {
 		return { hasUpdate: false, error: e.message };
 	}
+}
+
+async function imageCooldownRemainingMs(imageName: string, digest: string, envId?: number): Promise<number> {
+	const { hours } = await getMinimumReleaseAgeConfig(envId);
+	return hours > 0 ? imageReleaseAgeRemainingMs(imageName, digest, hours) : 0;
 }
 
 export async function tagImage(id: string, repo: string, tag: string, envId?: number | null) {

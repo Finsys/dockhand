@@ -219,7 +219,7 @@ export async function runEnvUpdateCheckJob(
 					await log(`      Current: ${result.currentDigest?.substring(0, 24) || 'unknown'}...`);
 					await log(`      New:     ${result.registryDigest?.substring(0, 24) || 'unknown'}...`);
 				} else {
-					await log(`    Up to date`);
+					await log(result.releaseAgeRemainingHours ? `    Update deferred: ${result.releaseAgeRemainingHours} hour(s) remain in minimum release age cooldown` : `    Up to date`);
 				}
 
 				// Newer-version-tag (semver) detection - independent of the digest check.

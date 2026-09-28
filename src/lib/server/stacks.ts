@@ -63,6 +63,8 @@ import { getOrderValue } from './container-labels';
 import { stackLabelTags, type LabelTagSpec } from '$lib/utils/tags-core';
 import { pendingRowsToClear } from './pending-updates-core';
 import { buildDockhandOverrideFile } from './dockhand-override-file';
+import { getMinimumReleaseAgeConfig } from './minimum-release-age';
+import { composeReleaseAgeDecision, hawserSupportsPullPolicy, missingImageCooldownError } from './minimum-release-age-core';
 
 // =============================================================================
 // TYPES
@@ -1841,6 +1843,15 @@ async function executeComposeCommand(
 ): Promise<StackOperationResult> {
 	const { stackName, envId, forceRecreate, build, noBuildCache, pullPolicy, removeVolumes, stackFiles, workingDir, composePath, envPath, useOverrideFile, serviceName, composeFileName, filesToDelete, removeFiles } = options;
 
+	const { hours } = await getMinimumReleaseAgeConfig(envId);
+	// Compose pulls bypass the Docker API guard. Service images must be pre-pulled
+	// through Dockhand; local builds remain available.
+	const releaseAge = composeReleaseAgeDecision(operation, hours, pullPolicy);
+	if (releaseAge.blockPull) {
+		return { success: false, error: 'Minimum image release age is enabled. Pull service images through Dockhand first, then deploy the stack.' };
+	}
+	const effectivePullPolicy = releaseAge.pullPolicy;
+
 	// Get environment configuration
 	const env = envId ? await getEnvironment(envId) : null;
 
@@ -1864,7 +1875,7 @@ async function executeComposeCommand(
 			serviceName,
 			build,
 			noBuildCache,
-			pullPolicy,
+			effectivePullPolicy,
 			undefined,    // remoteStackHostDir
 			onLine
 		);
@@ -1873,6 +1884,15 @@ async function executeComposeCommand(
 	switch (env.connectionType) {
 		case 'hawser-standard':
 		case 'hawser-edge': {
+			if (hours > 0 && operation === 'up') {
+				const version = env.connectionType === 'hawser-edge'
+					? (await import('./hawser.js')).getEdgeConnectionInfo(envId!)?.agentVersion
+					: (await import('./docker.js')).getHawserInfo(envId!).then(info => info?.hawserVersion);
+				const resolvedVersion = await version;
+				if (!hawserSupportsPullPolicy(resolvedVersion)) {
+					return { success: false, error: `Minimum image release age requires Hawser v0.2.38 or newer for stack starts (detected ${resolvedVersion || 'unknown'}). Update the agent first.` };
+				}
+			}
 			// For Hawser deployments, we need to read the .env file and send variables via envVars
 			// because Docker Compose on the remote host may not auto-read the .env file reliably.
 			// Local deployments use --env-file flag, but Hawser needs variables injected via shell env.
@@ -1930,7 +1950,7 @@ async function executeComposeCommand(
 				composeFileName,
 				build,
 				noBuildCache,
-				pullPolicy,
+				effectivePullPolicy,
 				filesToDelete,
 				removeFiles,
 				onLine
@@ -1995,7 +2015,7 @@ async function executeComposeCommand(
 				serviceName,
 				build,
 				noBuildCache,
-				pullPolicy,
+				effectivePullPolicy,
 				remoteStackHostDir,
 				onLine
 			);
@@ -2029,7 +2049,7 @@ async function executeComposeCommand(
 				serviceName,
 				build,
 				noBuildCache,
-				pullPolicy,
+				effectivePullPolicy,
 				undefined,    // remoteStackHostDir
 				onLine
 			);
@@ -3320,6 +3340,9 @@ export async function deployStack(options: DeployStackOptions): Promise<StackOpe
 			secretVars,
 			onLine
 		);
+		if (!result.success && (await getMinimumReleaseAgeConfig(envId)).hours > 0) {
+			result.error = missingImageCooldownError(`${result.error || ''}\n${result.output || ''}`) || result.error;
+		}
 		// F4 fix: `secretVars` here is POST-resolveProviderEnvVars (line ~3059 above) --
 		// the same set executeComposeCommand just redacted streamed lines against. This
 		// is the single call site inside deployStack(), so setting it here covers both

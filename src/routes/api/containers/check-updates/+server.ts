@@ -14,6 +14,7 @@ export interface UpdateCheckResult {
 	containerName: string;
 	imageName: string;
 	hasUpdate: boolean;
+	releaseAgeRemainingHours?: number;
 	currentDigest?: string;
 	newDigest?: string;
 	error?: string;
@@ -170,6 +171,7 @@ export const POST: RequestHandler = async ({ url, cookies, request }) => {
 					containerName: container.name,
 					imageName,
 					hasUpdate: result.hasUpdate,
+				releaseAgeRemainingHours: result.releaseAgeRemainingHours,
 					currentDigest: result.currentDigest,
 					newDigest: result.registryDigest,
 					error: result.error,
