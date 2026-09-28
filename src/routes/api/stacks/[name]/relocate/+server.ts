@@ -4,7 +4,8 @@ import { authorize } from '$lib/server/authorize';
 import { getStackSource, updateStackSource } from '$lib/server/db';
 import { isProtectedPath } from '$lib/server/fs-guard';
 import { existsSync, readdirSync, renameSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, rmSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, relative, isAbsolute } from 'node:path';
+import { parseComposePathsColumn } from '$lib/server/compose-files';
 
 /**
  * POST /api/stacks/[name]/relocate
@@ -56,7 +57,8 @@ export const POST: RequestHandler = async ({ params, request, url, cookies }) =>
 		// Relocate only manages an existing stack's own source row. Reject an unknown
 		// stack name up front so this can't be used as a generic move/read primitive
 		// against an arbitrary route name.
-		if (!(await getStackSource(name, envIdNum ?? null))) {
+		const existingSource = await getStackSource(name, envIdNum ?? null);
+		if (!existingSource) {
 			return json({ error: 'Stack not found' }, { status: 404 });
 		}
 
@@ -110,9 +112,19 @@ export const POST: RequestHandler = async ({ params, request, url, cookies }) =>
 			// Ignore errors when checking/removing old directory
 		}
 
-		// Update database with new paths
+		// A configured Compose list moves with its files; the caller may also have
+		// renamed the primary. An implicit single-file stack stays implicit.
+		const oldPaths = parseComposePathsColumn(existingSource.composePaths);
+		const nextPaths = oldPaths.length > 0
+			? oldPaths.map((path, index) => {
+				if (index === 0) return newComposePath;
+				const rel = relative(oldDir, path);
+				return rel && !rel.startsWith('..') && !isAbsolute(rel) ? join(newDir, rel) : path;
+			})
+			: undefined;
 		await updateStackSource(name, envIdNum ?? null, {
 			composePath: newComposePath,
+			...(nextPaths ? { composePaths: nextPaths } : {}),
 			envPath: newEnvPath || null
 		});
 

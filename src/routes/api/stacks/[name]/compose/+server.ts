@@ -1,8 +1,10 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getStackComposeFile, deployStack, saveStackComposeFile, requireComposeFile } from '$lib/server/stacks';
+import { updateStackSource } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
 import { createJobResponse } from '$lib/server/sse';
+import { validateComposePathsInput, validateComposeContentsInput } from '$lib/server/compose-files';
 import { createRunRecorder } from '$lib/server/deploy-run-record';
 import { hashComposeContent, hashEnvFingerprint } from '$lib/server/deploy-run-record-core';
 
@@ -42,8 +44,11 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 
 		return json({
 			content: result.content,
+			composeContents: result.composeContents ?? null,
 			stackDir: result.stackDir,
 			composePath: result.composePath,
+			composePaths: result.composePaths?.length ? result.composePaths : null,
+			composePathsExplicit: result.composePathsExplicit ?? false,
 			envPath: result.envPath,
 			suggestedEnvPath: result.suggestedEnvPath
 		});
@@ -60,7 +65,7 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
  * description: Every accepted PUT persists the compose content; with restart it also redeploys. Supports moving the compose/env to a new path and binding a secret provider.
  * path: name:string The stack name
  * query: env:integer Environment id the stack belongs to
- * body: {content:string!, composePath:string, envPath:string, oldComposePath:string, oldEnvPath:string, moveFromDir:string, restart:boolean, secretProviderId:integer, pull:boolean, build:boolean, forceRecreate:boolean}
+ * body: {content:string!, composePath:string, composePaths:array<string>, composeContents:object, envPath:string, oldComposePath:string, oldEnvPath:string, moveFromDir:string, restart:boolean, secretProviderId:integer, pull:boolean, build:boolean, forceRecreate:boolean}
  * resp-400: Invalid request (e.g. missing content, or secretProviderId wrong type)
  * resp-403: Permission denied (needs stacks:edit; binding a secret provider also needs secrets:view)
  * resp-500: Failed to save or deploy the compose file
@@ -81,11 +86,26 @@ export const PUT: RequestHandler = async ({ params, request, url, cookies }) => 
 
 	try {
 		const body = await request.json();
-		const { content, restart = false, composePath, envPath, moveFromDir, oldComposePath, oldEnvPath, secretProviderId, pull, build, forceRecreate } = body;
+		const { content, composeContents, restart = false, composePath, composePaths, envPath, moveFromDir, oldComposePath, oldEnvPath, secretProviderId, pull, build, forceRecreate } = body;
 
 		if (!content || typeof content !== 'string') {
 			return json({ error: 'Compose file content is required' }, { status: 400 });
 		}
+
+		const composePathsError = validateComposePathsInput(composePaths, { allowAbsolutePrimary: true });
+		if (composePathsError) return json({ error: composePathsError }, { status: 400 });
+
+		const composeContentsError = validateComposeContentsInput(composeContents);
+		if (composeContentsError) return json({ error: composeContentsError }, { status: 400 });
+
+		// composePaths[0] is the primary compose file. When the client sends
+		// both, they must agree; when only composePaths is sent, normalize the
+		// primary from it so persisted state can't diverge.
+		const primaryFromPaths = Array.isArray(composePaths) && composePaths.length > 0 ? composePaths[0] : undefined;
+		if (composePath && primaryFromPaths && composePath !== primaryFromPaths) {
+			return json({ error: 'composePath must match composePaths[0] (the primary compose file)' }, { status: 400 });
+		}
+		const effectiveComposePath = composePath || primaryFromPaths;
 
 		if (
 			'secretProviderId' in body &&
@@ -106,10 +126,11 @@ export const PUT: RequestHandler = async ({ params, request, url, cookies }) => 
 			return json({ error: 'Permission denied: binding a secret provider requires the secrets permission' }, { status: 403 });
 		}
 
-		// Build options object for custom paths, move operation, file renames, and secret provider binding
-		const pathOptions = (composePath || envPath !== undefined || moveFromDir || oldComposePath || oldEnvPath || secretProviderId !== undefined)
-			? { composePath, envPath, moveFromDir, oldComposePath, oldEnvPath, secretProviderId }
-			: undefined;
+		// Build options object for custom paths, move operation, and file renames
+		const pathOptions =
+			(effectiveComposePath || composePaths || envPath !== undefined || moveFromDir || oldComposePath || oldEnvPath || composeContents || secretProviderId !== undefined)
+				? { composePath: effectiveComposePath, composePaths, composeContents, envPath, moveFromDir, oldComposePath, oldEnvPath, secretProviderId }
+				: undefined;
 
 		// Persist the submitted content on EVERY accepted PUT, whether or not path fields came
 		// along. Gating this on pathOptions left Dockhand's stored copy stale while restart:true
@@ -173,6 +194,15 @@ export const PUT: RequestHandler = async ({ params, request, url, cookies }) => 
 					secrets: Object.values(effectiveEnvVars)
 				});
 			}
+			// Deploy with docker compose up -d --force-recreate.
+			// Force recreate ensures env var changes are applied.
+			// Update DB with multi-file staging paths if provided.
+			if (composePaths !== undefined) {
+				await updateStackSource(name, envIdNum ?? null, {
+					composePaths: pathOptions?.composePaths ?? undefined
+				});
+			}
+			const deployComposePaths = composeInfo.composePaths ?? [];
 
 			// Deploy via SSE to keep connection alive during long operations
 			return createJobResponse(async (send) => {
@@ -189,6 +219,7 @@ export const PUT: RequestHandler = async ({ params, request, url, cookies }) => 
 						// tradeoff, not a bug.
 						pullPolicy: pullOpt ? 'always' : undefined,
 						composePath: composeInfo.composePath || undefined,
+						composePaths: deployComposePaths,
 						envPath: composeInfo.envPath || undefined,
 						onLine: (line) => send('progress', { type: 'line', line })
 					});
@@ -214,6 +245,13 @@ export const PUT: RequestHandler = async ({ params, request, url, cookies }) => 
 		}
 
 		// No restart: the content is already persisted above.
+		// Preserve multi-file paths after save (mirrors restart path)
+		if (composePaths !== undefined) {
+			await updateStackSource(name, envIdNum ?? null, {
+				composePaths: pathOptions?.composePaths ?? undefined
+			});
+		}
+
 		return json({ success: true });
 	} catch (error: any) {
 		console.error(`Error updating compose file for stack ${name}:`, error);
