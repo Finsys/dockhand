@@ -10,6 +10,7 @@
 import type { ScheduleTrigger, VulnerabilityCriteria } from '../../db';
 import {
 	getAutoUpdateSettingById,
+	getEnvironment,
 	updateAutoUpdateLastChecked,
 	updateAutoUpdateLastUpdated,
 	createScheduleExecution,
@@ -41,6 +42,14 @@ import { sendEventNotification } from '../../notifications';
 import { parseImageNameAndTag, combineScanSummaries, isSystemContainer, isPodmanInfraContainer } from './update-utils';
 import { resolveBlockDecision } from './block-decision';
 import { isUpdateDisabledByLabel, isHiddenByLabel } from '../../container-labels';
+import {
+	parseStackUpdatePolicy,
+	planStackUpdate,
+	isDefaultStackUpdatePlan,
+	buildModeBlockedByVulnerabilityGate,
+	decideStackApply,
+	type StackUpdatePlan
+} from '../../stack-update-policy';
 
 // =============================================================================
 // TYPES
@@ -82,6 +91,16 @@ interface ExecutionDetails {
 			unknown: number;
 		}>;
 	}>;
+	/** #1539: the stack update policy that governed this run, when one applied. */
+	stackPolicy?: {
+		stackName: string;
+		serviceName: string;
+		mode: string;
+		cascade: string;
+		noCache: boolean;
+		rebuilt: string[];
+		skipped: { service: string; reason: string }[];
+	};
 	scanResult?: {
 		summary: VulnerabilitySeverity;
 		scanners: string[];
@@ -249,6 +268,17 @@ function buildSuccessDetails(
 	};
 }
 
+/**
+ * Render the effective cascade scope for the execution history (#1539). Before
+ * #1539 nothing was recorded; here the label is read off the plan so the history
+ * shows why extra services moved (or why none did).
+ */
+function updatePlanCascadeLabel(plan: StackUpdatePlan): string {
+	if (plan.wholeStack) return 'all';
+	if (plan.targets.length > 1) return 'same-image';
+	return 'false';
+}
+
 // =============================================================================
 // MAIN UPDATE FUNCTION
 // =============================================================================
@@ -409,47 +439,126 @@ export async function runContainerUpdate(
 		const shouldScan = scannerSettings.scanner !== 'none';
 
 		// =============================================================================
+		// STACK UPDATE POLICY (#1539)
+		// =============================================================================
+		// A container that belongs to a compose stack may carry an x-dockhand update
+		// policy in its compose file. A non-default policy (mode build/rebuild, or a
+		// cascade) changes HOW an update is APPLIED: the stack is redeployed through
+		// `docker compose` (optionally --build) instead of recreating the single
+		// container via the Docker API. No policy, or a policy that resolves to the
+		// defaults, leaves the run byte-identical to the pre-#1539 behavior.
+		// Dynamic import: stacks.ts pulls the scheduler back in (registerSchedule), so
+		// a static import here would create a cycle.
+		const stackProject = inspectData.Config?.Labels?.['com.docker.compose.project'] as string | undefined;
+		const stackService = inspectData.Config?.Labels?.['com.docker.compose.service'] as string | undefined;
+		let updatePlan: StackUpdatePlan | null = null;
+		if (stackProject && stackService) {
+			try {
+				const { requireComposeFile } = await import('../../stacks');
+				const composeResult = await requireComposeFile(stackProject, envId);
+				if (composeResult.success && composeResult.content) {
+					const parsed = parseStackUpdatePolicy(composeResult.content);
+					// Only apply when the changed service is actually declared: an empty or
+					// mismatched `services:` must not let the policy through. (#1539 review)
+					if (parsed.services.some((s) => s.name === stackService)) {
+						updatePlan = planStackUpdate(parsed, stackService, imageNameFromConfig);
+						if (!isDefaultStackUpdatePlan(updatePlan)) {
+							log(`Stack update policy (${stackProject}): mode=${updatePlan.mode} targets=[${updatePlan.targets.join(', ')}]`);
+							for (const skip of updatePlan.skipped) {
+								log(`  Skipping (${skip.reason}): ${skip.service}`);
+							}
+						}
+					}
+				}
+			} catch (policyError: any) {
+				log(`Stack update policy lookup failed (using defaults): ${policyError.message}`);
+			}
+		}
+		// Hawser's remote agent only understands a single ServiceName (compose.go:119), so a
+		// plural target list is silently dropped there - yet the execution record would still
+		// report the whole list as updated. Until the agent learns the field, ignore the
+		// compose policy on Hawser and stay on the pre-#1539 single-container path. (#1539 review)
+		const { isHawserConnection } = await import('../../stacks');
+		const policyEnv = typeof envId === 'number' ? await getEnvironment(envId) : null;
+		if (updatePlan && !isDefaultStackUpdatePlan(updatePlan) && isHawserConnection(policyEnv)) {
+			log(`Stack update policy ignored: multi-service compose updates are not supported over Hawser yet`);
+			updatePlan = null;
+		}
+		if (updatePlan?.modeDegraded) {
+			log(`Stack update policy: mode ${updatePlan.modeDegraded.from} degraded to recreate for "${stackService}" (${updatePlan.modeDegraded.reason})`);
+		}
+		const composeApply = !!updatePlan && !isDefaultStackUpdatePlan(updatePlan);
+		// build/rebuild produce the image from the compose build context, so they must
+		// NOT be gated on (or preceded by) a registry image pull. This is exactly the
+		// gap that made build:/dockerfile_inline stacks un-updatable.
+		const buildFromContext = composeApply && (updatePlan!.mode === 'build' || updatePlan!.mode === 'rebuild');
+
+		// A build/rebuild plan deploys an image built from the compose build context, which
+		// the temp-tag registry-scan flow below never sees. With a vulnerability gate
+		// configured, refuse rather than deploy unscanned and mis-report the criteria as
+		// satisfied (#1539 review). Recorded as skipped so the history stays truthful.
+		if (buildFromContext && buildModeBlockedByVulnerabilityGate(updatePlan!.mode, vulnerabilityCriteria)) {
+			log(`Refusing build/rebuild update: vulnerabilityCriteria=${vulnerabilityCriteria}, but build modes cannot be scanned`);
+			await updateScheduleExecution(execution.id, {
+				status: 'skipped',
+				completedAt: new Date().toISOString(),
+				duration: Date.now() - startTime,
+				details: {
+					reason: 'Build/rebuild mode is incompatible with the configured vulnerability scan gate',
+					vulnerabilityCriteria
+				}
+			});
+			return;
+		}
+
+		// =============================================================================
 		// CHECK FOR UPDATES
 		// =============================================================================
 
-		log(`Checking registry for updates: ${imageNameFromConfig}`);
-		const registryCheck = await checkImageUpdateAvailable(imageNameFromConfig, currentImageId, envId);
+		let newDigest: string | undefined;
 
-		if (registryCheck.isLocalImage) {
-			log(`Local image detected - skipping (auto-update requires registry)`);
-			await updateScheduleExecution(execution.id, {
-				status: 'skipped',
-				completedAt: new Date().toISOString(),
-				duration: Date.now() - startTime,
-				details: { reason: 'Local image - no registry available' }
-			});
-			return;
+		if (!buildFromContext) {
+			log(`Checking registry for updates: ${imageNameFromConfig}`);
+			const registryCheck = await checkImageUpdateAvailable(imageNameFromConfig, currentImageId, envId);
+
+			if (registryCheck.isLocalImage) {
+				log(`Local image detected - skipping (auto-update requires registry)`);
+				await updateScheduleExecution(execution.id, {
+					status: 'skipped',
+					completedAt: new Date().toISOString(),
+					duration: Date.now() - startTime,
+					details: { reason: 'Local image - no registry available' }
+				});
+				return;
+			}
+
+			if (registryCheck.error) {
+				log(`Registry check error: ${registryCheck.error}`);
+				await updateScheduleExecution(execution.id, {
+					status: 'skipped',
+					completedAt: new Date().toISOString(),
+					duration: Date.now() - startTime,
+					details: { reason: `Registry check failed: ${registryCheck.error}` }
+				});
+				return;
+			}
+
+			if (!registryCheck.hasUpdate) {
+				log(`Already up-to-date: ${containerName} is running the latest version`);
+				await updateScheduleExecution(execution.id, {
+					status: 'skipped',
+					completedAt: new Date().toISOString(),
+					duration: Date.now() - startTime,
+					details: { reason: 'Already up-to-date' }
+				});
+				return;
+			}
+
+			log(`Update available! Registry digest: ${registryCheck.registryDigest?.substring(0, 19) || 'unknown'}`);
+			newDigest = registryCheck.registryDigest;
+		} else {
+			log(`Compose build policy (mode: ${updatePlan!.mode}) - building from the build context, no registry pull required`);
 		}
-
-		if (registryCheck.error) {
-			log(`Registry check error: ${registryCheck.error}`);
-			await updateScheduleExecution(execution.id, {
-				status: 'skipped',
-				completedAt: new Date().toISOString(),
-				duration: Date.now() - startTime,
-				details: { reason: `Registry check failed: ${registryCheck.error}` }
-			});
-			return;
-		}
-
-		if (!registryCheck.hasUpdate) {
-			log(`Already up-to-date: ${containerName} is running the latest version`);
-			await updateScheduleExecution(execution.id, {
-				status: 'skipped',
-				completedAt: new Date().toISOString(),
-				duration: Date.now() - startTime,
-				details: { reason: 'Already up-to-date' }
-			});
-			return;
-		}
-
-		log(`Update available! Registry digest: ${registryCheck.registryDigest?.substring(0, 19) || 'unknown'}`);
-		const newDigest = registryCheck.registryDigest;
 
 		// =============================================================================
 		// PULL & SCAN: Temp-tag protection flow
@@ -464,7 +573,7 @@ export async function runContainerUpdate(
 		let newImageId: string | null = null;
 		let scanOutcome: ScanOutcome = { blocked: false };
 
-		if (shouldScan && !isDigestBasedImage(imageNameFromConfig)) {
+		if (!buildFromContext && shouldScan && !isDigestBasedImage(imageNameFromConfig)) {
 			const tempTag = getTempImageTag(imageNameFromConfig);
 			log(`Using temp tag for safe pull: ${tempTag}`);
 
@@ -558,9 +667,7 @@ export async function runContainerUpdate(
 				});
 				return;
 			}
-		} else {
-			// No scanning - simple pull
-			log(`Pulling update (no vulnerability scan)...`);
+		} else if (!buildFromContext) {
 			try {
 				await pullImage(imageNameFromConfig, undefined, envId);
 				log(`Image pulled successfully`);
@@ -577,40 +684,135 @@ export async function runContainerUpdate(
 		}
 
 		// =============================================================================
-		// RECREATE CONTAINER (full config passthrough from inspect data)
+		// APPLY THE UPDATE
 		// =============================================================================
+		// Default path: recreate the single container with full config passthrough
+		// (identical to pre-#1539). Stack policy path: redeploy through docker compose
+		// so rebuild-mode services rebuild and cascade targets move together.
 
-		log(`Recreating container with full config passthrough...`);
-		const result = await recreateContainer(containerName, envId, {
-			log,
-			imageNameOverride: imageNameFromConfig,
-			oldImageConfig
-		});
+		if (!composeApply) {
+			log(`Recreating container with full config passthrough...`);
+			const result = await recreateContainer(containerName, envId, {
+				log,
+				imageNameOverride: imageNameFromConfig,
+				oldImageConfig
+			});
 
-		if (result.success) {
+			if (result.success) {
+				await updateAutoUpdateLastUpdated(containerName, envId);
+				log(`Successfully updated container: ${containerName}`);
+
+				await updateScheduleExecution(execution.id, {
+					status: 'success',
+					completedAt: new Date().toISOString(),
+					duration: Date.now() - startTime,
+					details: buildSuccessDetails(
+						containerName,
+						newDigest,
+						vulnerabilityCriteria,
+						scanOutcome.scanResults,
+						scanOutcome.scanSummary
+					)
+				});
+
+				await sendEventNotification('auto_update_success', {
+					title: 'Container auto-updated',
+					message: `Container "${containerName}" was updated to a new image version`,
+					type: 'success'
+				}, envId);
+			} else {
+				throw new Error(result.error || 'Failed to recreate container');
+			}
+		} else {
+			const plan = updatePlan!;
+			log(`Applying stack update policy: mode=${plan.mode} targets=[${plan.targets.join(', ')}]${plan.noCache ? ' no-cache' : ''}`);
+
+			const { updateStackService } = await import('../../stacks');
+
+			// Probe the stack's live services so a deliberately-stopped cascade target is not
+			// resurrected (the Docker-API path checks wasRunning; compose does not). Only when
+			// there is a cascade to consider, to keep the common single-service case cheap.
+			let running = new Set<string>();
+			if (plan.targets.length > 1) {
+				const stackContainers = await listContainers(true, envId);
+				running = new Set(
+					stackContainers
+						.filter((c) => c.labels?.['com.docker.compose.project'] === stackProject && c.state === 'running')
+						.map((c) => c.labels?.['com.docker.compose.service'])
+						.filter((s): s is string => !!s)
+				);
+			}
+			const decision = decideStackApply({ plan, changedService: stackService!, buildFromContext, running });
+			for (const s of decision.skipped) {
+				if (s.reason === 'stopped') log(`  Skipping (stopped): ${s.service}`);
+			}
+
+			const stackResult = await updateStackService(stackProject!, stackService!, envId, undefined, {
+				serviceNames: decision.serviceNames,
+				build: decision.build,
+				noBuildCache: decision.noBuildCache,
+				forceRecreate: decision.forceRecreate,
+				// An unattended job must not prune containers that drifted from the on-disk
+				// compose file; that is `compose down` semantics nobody asked for. (#1539 review)
+				removeOrphans: false,
+				// Keep `exclude`d services out of the redeploy even when a target depends on them.
+				noDeps: true
+			});
+
+			if (!stackResult.success) {
+				throw new Error(stackResult.error || 'Stack update failed');
+			}
+
+			// A rebuilt service keeps the image TAG, so "last updated" is still meaningful.
 			await updateAutoUpdateLastUpdated(containerName, envId);
-			log(`Successfully updated container: ${containerName}`);
+			log(`Successfully applied the stack update for service: ${stackService}`);
 
 			await updateScheduleExecution(execution.id, {
 				status: 'success',
 				completedAt: new Date().toISOString(),
 				duration: Date.now() - startTime,
-				details: buildSuccessDetails(
-					containerName,
-					newDigest,
-					vulnerabilityCriteria,
-					scanOutcome.scanResults,
-					scanOutcome.scanSummary
-				)
+				details: {
+					...buildSuccessDetails(
+						containerName,
+						newDigest,
+						vulnerabilityCriteria,
+						scanOutcome.scanResults,
+						scanOutcome.scanSummary
+					),
+					stackPolicy: {
+						stackName: stackProject!,
+						serviceName: stackService!,
+						mode: plan.mode,
+						cascade: updatePlanCascadeLabel(plan),
+						noCache: plan.noCache,
+						rebuilt: decision.targets,
+						skipped: decision.skipped
+					}
+				}
 			});
+
+			// A cascade/redeploy moves the whole stack - emit the stack-level event (in
+			// addition to the per-container one) so an operator can tell the whole stack
+			// moved, not just the one container that had an update. (#1539)
+			await sendEventNotification('container_updated', {
+				title: 'Container updated (stack redeploy)',
+				message: `Service "${stackService}" of stack "${stackProject}" was updated via compose (mode: ${plan.mode}${decision.targets.length > 1 ? `, redeployed: ${decision.targets.join(', ')}` : ''})`,
+				type: 'success'
+			}, envId);
+
+			if (decision.targets.length > 1 || plan.mode !== 'recreate') {
+				await sendEventNotification('stack_deployed', {
+					title: 'Stack redeployed by auto-update',
+					message: `Stack "${stackProject}" was redeployed by the auto-update of service "${stackService}" (mode: ${plan.mode}, targets: ${decision.targets.join(', ')})`,
+					type: 'success'
+				}, envId);
+			}
 
 			await sendEventNotification('auto_update_success', {
 				title: 'Container auto-updated',
-				message: `Container "${containerName}" was updated to a new image version`,
+				message: `Container "${containerName}" was updated (stack policy: ${plan.mode})`,
 				type: 'success'
 			}, envId);
-		} else {
-			throw new Error(result.error || 'Failed to recreate container');
 		}
 
 	} catch (error: any) {
