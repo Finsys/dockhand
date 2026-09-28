@@ -35,8 +35,12 @@ export type StackCascadeScope = 'false' | 'same-image' | 'all';
 export interface StackUpdatePolicy {
 	/** What "apply an update" does for the changed service. */
 	mode: StackUpdateMode;
-	/** How far an update propagates beyond the changed service. */
-	cascade: StackCascadeScope;
+	/**
+	 * How far an update propagates beyond the changed service. UNDEFINED when the
+	 * compose block did not specify it: only an unspecified cascade lets `mode: rebuild`
+	 * imply "whole stack", so an explicit `cascade: false` can restrain a rebuild. (#1539 review)
+	 */
+	cascade?: StackCascadeScope;
 	/** Pass `--no-cache` to builds (build/rebuild modes only). */
 	noCache: boolean;
 	/** Services that a cascade must never redeploy. Always wins over the scope. */
@@ -77,10 +81,17 @@ export interface StackUpdatePlan {
 	excludedServices: string[];
 	/** Per-service skips to report in the execution history. */
 	skipped: { service: string; reason: string }[];
+	/**
+	 * Set when the requested mode was degraded because it could not be honoured (e.g.
+	 * `mode: build` on a service with no build context). Reported so the run never
+	 * claims a build/recreate it did not perform. (#1539 review)
+	 */
+	modeDegraded?: { from: StackUpdateMode; reason: string };
 }
 
 export function defaultStackUpdatePolicy(): StackUpdatePolicy {
-	return { mode: 'recreate', cascade: 'false', noCache: false, exclude: [] };
+	// No `cascade` key: undefined means "not specified" (see the interface).
+	return { mode: 'recreate', noCache: false, exclude: [] };
 }
 
 /** True when the plan is the pre-#1539 behavior (no compose-level update work). */
@@ -298,6 +309,20 @@ export function planStackUpdate(
 	const known = parsed.services.map((s) => s.name);
 	const excluded = new Set(policy.exclude);
 
+	// An explicit `cascade` always wins; only an unspecified one lets `mode: rebuild`
+	// imply "whole stack". This is what lets `cascade: false` restrain a rebuild. (#1539 review)
+	const cascadeScope = policy.cascade;
+
+	// build/rebuild only make sense for a service with a build context: otherwise the plan
+	// would report success while `up --build` builds nothing. Degrade to recreate (a real
+	// registry update) and record why. (#1539 review)
+	let mode = policy.mode;
+	let modeDegraded: StackUpdatePlan['modeDegraded'];
+	if ((mode === 'build' || mode === 'rebuild') && !serviceHasBuildContext(parsed, changedService)) {
+		modeDegraded = { from: mode, reason: 'service has no build context' };
+		mode = 'recreate';
+	}
+
 	const sameImage = (name: string): boolean => {
 		const svc = parsed.services.find((s) => s.name === name);
 		const a = normalizeImageRef(svc?.image);
@@ -305,12 +330,12 @@ export function planStackUpdate(
 		return a !== '' && b !== '' && a === b;
 	};
 
-	const wholeStack = policy.mode === 'rebuild' || policy.cascade === 'all';
+	const wholeStack = cascadeScope === 'all' || (mode === 'rebuild' && cascadeScope === undefined);
 
 	let cascadeCandidates: string[] = [];
 	if (wholeStack) {
 		cascadeCandidates = known;
-	} else if (policy.cascade === 'same-image') {
+	} else if (cascadeScope === 'same-image') {
 		cascadeCandidates = known.filter((n) => sameImage(n));
 	}
 
@@ -324,11 +349,53 @@ export function planStackUpdate(
 	].map((service) => ({ service, reason: 'excluded' }));
 
 	return {
-		mode: policy.mode,
+		mode,
 		noCache: policy.noCache,
 		wholeStack,
 		targets,
 		excludedServices: [...new Set(excludedServices)],
-		skipped
+		skipped,
+		...(modeDegraded ? { modeDegraded } : {})
+	};
+}
+
+/**
+ * Turn a plan into the exact compose invocation plus the truthful skip record for the
+ * apply path. Pure, so the apply decision is unit-testable without a daemon (#1539 review):
+ * - stopped cascade targets are dropped so `--force-recreate` cannot resurrect a service
+ *   the operator deliberately stopped (the Docker-API path's `wasRunning` equivalent),
+ * - the auto-update path never removes orphans and never starts dependencies,
+ * - build / no-cache / force-recreate flags are derived once, consistently.
+ */
+export function decideStackApply(input: {
+	plan: StackUpdatePlan;
+	changedService: string;
+	buildFromContext: boolean;
+	running: ReadonlySet<string>;
+}): {
+	apply: boolean;
+	targets: string[];
+	serviceNames: string[];
+	build: boolean;
+	noBuildCache: boolean;
+	forceRecreate: boolean;
+	skipped: { service: string; reason: string }[];
+} {
+	const { plan, changedService, buildFromContext, running } = input;
+	if (isDefaultStackUpdatePlan(plan)) {
+		return { apply: false, targets: [], serviceNames: [], build: false, noBuildCache: false, forceRecreate: false, skipped: [] };
+	}
+	const filtered = plan.targets.length > 1
+		? filterCascadeTargetsToRunning(plan.targets, changedService, running)
+		: { targets: plan.targets, stopped: [] as string[] };
+	const build = plan.mode === 'build' || plan.mode === 'rebuild';
+	return {
+		apply: true,
+		targets: filtered.targets,
+		serviceNames: filtered.targets.slice(1),
+		build,
+		noBuildCache: plan.noCache && build,
+		forceRecreate: !buildFromContext && filtered.targets.length > 1,
+		skipped: [...plan.skipped, ...filtered.stopped.map((service) => ({ service, reason: 'stopped' }))]
 	};
 }

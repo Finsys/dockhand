@@ -8,7 +8,9 @@ import {
 	serviceHasBuildContext,
 	buildModeBlockedByVulnerabilityGate,
 	filterCascadeTargetsToRunning,
-	defaultStackUpdatePolicy
+	decideStackApply,
+	defaultStackUpdatePolicy,
+	type StackUpdatePlan
 } from '../src/lib/server/stack-update-policy';
 
 const BASE = `
@@ -170,7 +172,7 @@ describe('planStackUpdate', () => {
 
 	test('per-service override beats the stack default', () => {
 		const parsed = parseStackUpdatePolicy(
-			'x-dockhand:\n  update:\n    mode: recreate\nservices:\n  worker:\n    image: app\n    x-dockhand:\n      update:\n        mode: rebuild\n  app:\n    image: app\n'
+			'x-dockhand:\n  update:\n    mode: recreate\nservices:\n  worker:\n    build: ./worker\n    image: app\n    x-dockhand:\n      update:\n        mode: rebuild\n  app:\n    image: app\n'
 		);
 		expect(planStackUpdate(parsed, 'worker', 'app').mode).toBe('rebuild');
 		expect(planStackUpdate(parsed, 'app', 'app').mode).toBe('recreate');
@@ -237,5 +239,103 @@ describe('filterCascadeTargetsToRunning', () => {
 		const r = filterCascadeTargetsToRunning(['app', 'worker'], 'app', new Set());
 		expect(r.targets).toEqual(['app']);
 		expect(r.stopped).toEqual(['worker']);
+	});
+});
+
+describe('planStackUpdate - explicit cascade restrains mode: rebuild', () => {
+	test('cascade: false beats mode: rebuild', () => {
+		const parsed = parseStackUpdatePolicy(
+			'x-dockhand:\n  update:\n    mode: rebuild\n    cascade: false\nservices:\n  app:\n    build: .\n  sidecar:\n    build: ./s\n'
+		);
+		const plan = planStackUpdate(parsed, 'app', 'app');
+		expect(plan.wholeStack).toBe(false);
+		expect(plan.targets).toEqual(['app']);
+	});
+
+	test('an unspecified cascade still lets a rebuild mean whole stack', () => {
+		const parsed = parseStackUpdatePolicy(
+			'x-dockhand:\n  update:\n    mode: rebuild\nservices:\n  app:\n    build: .\n  sidecar:\n    build: ./s\n'
+		);
+		expect(planStackUpdate(parsed, 'app', 'app').wholeStack).toBe(true);
+	});
+});
+
+describe('planStackUpdate - buildless degrade', () => {
+	test('mode: build on a service with no build context degrades to recreate', () => {
+		const parsed = parseStackUpdatePolicy(
+			'x-dockhand:\n  update:\n    mode: build\nservices:\n  app:\n    image: nginx\n'
+		);
+		const plan = planStackUpdate(parsed, 'app', 'nginx');
+		expect(plan.mode).toBe('recreate');
+		expect(plan.modeDegraded).toEqual({ from: 'build', reason: 'service has no build context' });
+		expect(isDefaultStackUpdatePlan(plan)).toBe(true);
+	});
+
+	test('mode: rebuild on a buildless service also degrades', () => {
+		const parsed = parseStackUpdatePolicy(
+			'x-dockhand:\n  update:\n    mode: rebuild\nservices:\n  app:\n    image: nginx\n  side:\n    image: redis\n'
+		);
+		const plan = planStackUpdate(parsed, 'app', 'nginx');
+		expect(plan.mode).toBe('recreate');
+		expect(plan.modeDegraded?.from).toBe('rebuild');
+	});
+});
+
+describe('decideStackApply (apply path)', () => {
+	const makePlan = (over: Partial<StackUpdatePlan>): StackUpdatePlan => ({
+		mode: 'recreate',
+		noCache: false,
+		wholeStack: true,
+		targets: ['app', 'worker', 'db'],
+		excludedServices: [],
+		skipped: [],
+		...over
+	});
+
+	test('drops stopped cascade targets, keeps the changed service, force-recreates', () => {
+		const d = decideStackApply({
+			plan: makePlan({}),
+			changedService: 'app',
+			buildFromContext: false,
+			running: new Set(['worker'])
+		});
+		expect(d.apply).toBe(true);
+		expect(d.targets).toEqual(['app', 'worker']);
+		expect(d.serviceNames).toEqual(['worker']);
+		expect(d.forceRecreate).toBe(true);
+		expect(d.skipped).toEqual([{ service: 'db', reason: 'stopped' }]);
+	});
+
+	test('single-target plan: no serviceNames and no force-recreate', () => {
+		const d = decideStackApply({
+			plan: makePlan({ targets: ['app'] }),
+			changedService: 'app',
+			buildFromContext: false,
+			running: new Set()
+		});
+		expect(d.serviceNames).toEqual([]);
+		expect(d.forceRecreate).toBe(false);
+	});
+
+	test('build mode sets build + no-cache; buildFromContext suppresses force-recreate', () => {
+		const d = decideStackApply({
+			plan: makePlan({ mode: 'build', noCache: true, targets: ['app'] }),
+			changedService: 'app',
+			buildFromContext: true,
+			running: new Set()
+		});
+		expect(d.build).toBe(true);
+		expect(d.noBuildCache).toBe(true);
+		expect(d.forceRecreate).toBe(false);
+	});
+
+	test('a default plan is not applied (pre-#1539 path)', () => {
+		const d = decideStackApply({
+			plan: makePlan({ mode: 'recreate', targets: ['app'] }),
+			changedService: 'app',
+			buildFromContext: false,
+			running: new Set()
+		});
+		expect(d.apply).toBe(false);
 	});
 });

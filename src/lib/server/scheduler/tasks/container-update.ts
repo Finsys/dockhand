@@ -47,7 +47,7 @@ import {
 	planStackUpdate,
 	isDefaultStackUpdatePlan,
 	buildModeBlockedByVulnerabilityGate,
-	filterCascadeTargetsToRunning,
+	decideStackApply,
 	type StackUpdatePlan
 } from '../../stack-update-policy';
 
@@ -458,9 +458,9 @@ export async function runContainerUpdate(
 				const composeResult = await requireComposeFile(stackProject, envId);
 				if (composeResult.success && composeResult.content) {
 					const parsed = parseStackUpdatePolicy(composeResult.content);
-					// Unknown service (e.g. a container renamed out of the file) -> ignore the
-					// policy rather than guessing a cascade target list.
-					if (parsed.services.length === 0 || parsed.services.some((s) => s.name === stackService)) {
+					// Only apply when the changed service is actually declared: an empty or
+					// mismatched `services:` must not let the policy through. (#1539 review)
+					if (parsed.services.some((s) => s.name === stackService)) {
 						updatePlan = planStackUpdate(parsed, stackService, imageNameFromConfig);
 						if (!isDefaultStackUpdatePlan(updatePlan)) {
 							log(`Stack update policy (${stackProject}): mode=${updatePlan.mode} targets=[${updatePlan.targets.join(', ')}]`);
@@ -483,6 +483,9 @@ export async function runContainerUpdate(
 		if (updatePlan && !isDefaultStackUpdatePlan(updatePlan) && isHawserConnection(policyEnv)) {
 			log(`Stack update policy ignored: multi-service compose updates are not supported over Hawser yet`);
 			updatePlan = null;
+		}
+		if (updatePlan?.modeDegraded) {
+			log(`Stack update policy: mode ${updatePlan.modeDegraded.from} degraded to recreate for "${stackService}" (${updatePlan.modeDegraded.reason})`);
 		}
 		const composeApply = !!updatePlan && !isDefaultStackUpdatePlan(updatePlan);
 		// build/rebuild produce the image from the compose build context, so they must
@@ -726,36 +729,29 @@ export async function runContainerUpdate(
 
 			const { updateStackService } = await import('../../stacks');
 
-			// A cascade must not resurrect a service the operator deliberately stopped: the
-			// Docker-API path checks wasRunning, compose with --force-recreate does not. Probe the
-			// stack's live containers, drop stopped cascade targets, and report them as skipped.
-			// (#1539 review)
-			let applyTargets = plan.targets;
-			let stoppedSkipped: { service: string; reason: string }[] = [];
+			// Probe the stack's live services so a deliberately-stopped cascade target is not
+			// resurrected (the Docker-API path checks wasRunning; compose does not). Only when
+			// there is a cascade to consider, to keep the common single-service case cheap.
+			let running = new Set<string>();
 			if (plan.targets.length > 1) {
 				const stackContainers = await listContainers(true, envId);
-				const running = new Set(
+				running = new Set(
 					stackContainers
 						.filter((c) => c.labels?.['com.docker.compose.project'] === stackProject && c.state === 'running')
 						.map((c) => c.labels?.['com.docker.compose.service'])
 						.filter((s): s is string => !!s)
 				);
-				const filtered = filterCascadeTargetsToRunning(plan.targets, stackService!, running);
-				applyTargets = filtered.targets;
-				stoppedSkipped = filtered.stopped.map((service) => ({ service, reason: 'stopped' }));
-				for (const s of filtered.stopped) log(`  Skipping (stopped): ${s}`);
+			}
+			const decision = decideStackApply({ plan, changedService: stackService!, buildFromContext, running });
+			for (const s of decision.skipped) {
+				if (s.reason === 'stopped') log(`  Skipping (stopped): ${s.service}`);
 			}
 
-			// Build/rebuild rely on `--build` (and Compose's own image-change detection) so
-			// the changed service is recreated; recreating every cascade target would be
-			// heavier than the issue asks for. Recreate-mode cascades get --force-recreate
-			// so the cascaded services genuinely come back instead of `up -d` no-op'ing them.
-			const forceRecreate = !buildFromContext && applyTargets.length > 1;
 			const stackResult = await updateStackService(stackProject!, stackService!, envId, undefined, {
-				serviceNames: applyTargets.slice(1),
-				build: plan.mode === 'build' || plan.mode === 'rebuild',
-				noBuildCache: plan.noCache && (plan.mode === 'build' || plan.mode === 'rebuild'),
-				forceRecreate,
+				serviceNames: decision.serviceNames,
+				build: decision.build,
+				noBuildCache: decision.noBuildCache,
+				forceRecreate: decision.forceRecreate,
 				// An unattended job must not prune containers that drifted from the on-disk
 				// compose file; that is `compose down` semantics nobody asked for. (#1539 review)
 				removeOrphans: false,
@@ -789,8 +785,8 @@ export async function runContainerUpdate(
 						mode: plan.mode,
 						cascade: updatePlanCascadeLabel(plan),
 						noCache: plan.noCache,
-						rebuilt: applyTargets,
-						skipped: [...plan.skipped, ...stoppedSkipped]
+						rebuilt: decision.targets,
+						skipped: decision.skipped
 					}
 				}
 			});
@@ -800,14 +796,14 @@ export async function runContainerUpdate(
 			// moved, not just the one container that had an update. (#1539)
 			await sendEventNotification('container_updated', {
 				title: 'Container updated (stack redeploy)',
-				message: `Service "${stackService}" of stack "${stackProject}" was updated via compose (mode: ${plan.mode}${applyTargets.length > 1 ? `, redeployed: ${applyTargets.join(', ')}` : ''})`,
+				message: `Service "${stackService}" of stack "${stackProject}" was updated via compose (mode: ${plan.mode}${decision.targets.length > 1 ? `, redeployed: ${decision.targets.join(', ')}` : ''})`,
 				type: 'success'
 			}, envId);
 
-			if (applyTargets.length > 1 || plan.mode !== 'recreate') {
+			if (decision.targets.length > 1 || plan.mode !== 'recreate') {
 				await sendEventNotification('stack_deployed', {
 					title: 'Stack redeployed by auto-update',
-					message: `Stack "${stackProject}" was redeployed by the auto-update of service "${stackService}" (mode: ${plan.mode}, targets: ${applyTargets.join(', ')})`,
+					message: `Stack "${stackProject}" was redeployed by the auto-update of service "${stackService}" (mode: ${plan.mode}, targets: ${decision.targets.join(', ')})`,
 					type: 'success'
 				}, envId);
 			}
