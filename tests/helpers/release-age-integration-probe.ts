@@ -1,21 +1,27 @@
 // Run in a child process: module mocks must never replace the suite's shared DB/engine.
 import assert from 'node:assert/strict';
 import { mock } from 'bun:test';
-import { trackedImageLabels, trackedImageReference } from '../../src/lib/utils/tracked-image';
+import { portableImageReference, trackedImageLabels, trackedImageReference } from '../../src/lib/utils/tracked-image';
 import { releaseAgeAdvisory } from '../../src/lib/server/release-age-advisory';
+import { buildSnapshotLayout, parseSnapshotLayout, serializeLayout } from '../../src/lib/server/backups/snapshot-layout';
+import { inspectToComposeService } from '../../src/lib/utils/inspect-to-compose';
 
 const boundedAdvisory = releaseAgeAdvisory;
 const phase = process.argv[2];
 const scanning = phase.includes('scan');
 const systemd = phase.includes('systemd');
 const root = new URL('../../src/lib/server/', import.meta.url).pathname;
-const image = 'registry.example.com/team/app:latest';
+const image = phase === 'portable-hub' ? 'nginx:latest' : 'registry.example.com/team/app:latest';
 const digest = 'sha256:' + 'a'.repeat(64);
 const approved = 'sha256:' + 'b'.repeat(64);
 const young = 'sha256:' + 'c'.repeat(64);
 const old = 'sha256:' + 'd'.repeat(64);
 const originalId = '1'.repeat(64);
 const createdId = '2'.repeat(64);
+const destinationImageId = 'sha256:' + 'e'.repeat(64);
+let destinationHasImage = false;
+let destinationConfig: any;
+let restoreReference = '';
 let localTag = old;
 let createBody: any;
 let pullReferences: string[] = [];
@@ -30,7 +36,8 @@ let current = {
 const noop = async () => {};
 const environment = { id: 1, name: 'test', connectionType: 'direct', protocol: 'http', host: 'daemon.test', port: 2375 };
 const db = {
-	getSetting: async () => null, setSetting: noop, getEnvironment: async () => environment,
+	getSetting: async () => null, setSetting: noop, getEnvironment: async (id: number) => id === 2 ? { ...environment, id: 2, host: 'destination.test' } : environment,
+	getSecretKeysToMask: async () => new Set(),
 	getRegistries: async () => [], getAutoUpdateSettingById: async () => ({ vulnerabilityCriteria: 'never' }),
 	updateAutoUpdateLastChecked: noop, updateAutoUpdateLastUpdated: noop,
 	createScheduleExecution: async () => ({ id: 1 }), updateScheduleExecution: async (_id: number, data: any) => { executions.push(data); },
@@ -42,7 +49,7 @@ const db = {
 mock.module(root + 'db', () => db);
 mock.module(root + 'hawser', () => ({ sendEdgeRequest: noop, sendEdgeStreamRequest: noop, isEdgeConnected: () => false }));
 mock.module(root + 'minimum-release-age', () => ({
-	getMinimumReleaseAgeConfig: async () => ({ hours: phase.includes('disabled') ? 0 : 24 }),
+	getMinimumReleaseAgeConfig: async (id: number) => ({ hours: id === 2 || phase.includes('disabled') ? 0 : 24 }),
 	imageReleaseAgeRemainingMs: async () => phase === 'young' ? 3600000 : 0,
 	imageReleaseAgeStatus: async () => ({ source: 'first-observed', observedAt: new Date().toISOString(), remainingMs: 86400000 })
 }));
@@ -55,6 +62,7 @@ mock.module(root + 'notifications', () => ({ sendEventNotification: noop }));
 mock.module(root + 'semver/check', () => ({ checkNewerVersion: async () => null }));
 mock.module(root + 'authorize', () => ({ authorize: async () => ({ authEnabled: false }) }));
 mock.module(root + 'audit', () => ({ auditContainer: noop }));
+mock.module(root + 'stacks', () => ({ getStackComposeFile: noop }));
 
 const calls: string[] = [];
 let stalledSignal: AbortSignal | undefined;
@@ -63,6 +71,24 @@ globalThis.fetch = (async (input: string | URL | Request, init: RequestInit = {}
 	const path = decodeURIComponent(url.pathname);
 	const method = init.method ?? 'GET';
 	calls.push(method + ' ' + path);
+	if (url.hostname === 'destination.test') {
+		if (path.startsWith('/images/') && path.endsWith('/json')) {
+			assert.equal(path, '/images/' + restoreReference + '/json', 'Restore must inspect the immutable registry reference');
+			return destinationHasImage ? Response.json({ Id: destinationImageId }) : new Response('{}', { status: 404 });
+		}
+		if (path === '/images/create') {
+			assert.equal(url.searchParams.get('fromImage'), restoreReference, 'Restore must pull the approved manifest, never the mutable tag or local ID');
+			assert.equal(url.searchParams.get('tag'), null);
+			destinationHasImage = true;
+			return new Response('{"status":"Downloaded"}\n');
+		}
+		if (path === '/containers/create') {
+			destinationConfig = JSON.parse(init.body as string);
+			return Response.json({ Id: createdId });
+		}
+		if (path === '/containers/' + createdId + '/start') return new Response(null, { status: 204 });
+		throw new Error('Unexpected destination request ' + method + ' ' + path);
+	}
 	if (url.hostname !== 'daemon.test') {
 		assert.equal(url.hostname, 'registry.example.com', 'Unexpected network access');
 		if ((phase === 'timeout-auth' && path === '/v2/') || (phase === 'timeout-head' && method === 'HEAD')) { stalledSignal = init.signal!; return new Promise(() => {}); }
@@ -83,8 +109,10 @@ globalThis.fetch = (async (input: string | URL | Request, init: RequestInit = {}
 	if (path.startsWith('/containers/') && path.endsWith('/json')) return Response.json(current);
 	if (path.startsWith('/images/') && path.endsWith('/json')) {
 		const ref = path.slice('/images/'.length, -'/json'.length);
+		if (phase === 'portable-unavailable') return new Response('{}', { status: 404 });
 		const id = ref === image ? localTag : ref.includes('@') ? approved : ref;
-		return Response.json({ Id: id, RepoDigests: ['registry.example.com/team/app@' + (id === approved ? digest : old)], Config: { Env: [id === approved ? 'VERSION=approved' : id === old ? 'VERSION=old' : 'VERSION=other'], Labels: {} } });
+		const repo = phase === 'portable-hub' ? 'registry-1.docker.io/library/nginx' : 'registry.example.com/team/app';
+		return Response.json({ Id: id, RepoDigests: ['registry.example.com/unrelated/app@' + young, repo + '@' + (id === approved ? digest : old)], Config: { Env: [id === approved ? 'VERSION=approved' : id === old ? 'VERSION=old' : 'VERSION=other'], Labels: {} } });
 	}
 	if (path === '/images/create') {
 		pullReferences.push(url.searchParams.get('fromImage')!);
@@ -111,7 +139,44 @@ globalThis.fetch = (async (input: string | URL | Request, init: RequestInit = {}
 }) as typeof fetch;
 
 const docker = await import(root + 'docker');
-if (phase.startsWith('timeout-')) {
+async function assertPortableRoundTrip(expectedReference: string) {
+	// Exercise the export endpoint before capture enriches the old tracking label.
+	const { GET } = await import('../../src/routes/api/containers/[id]/compose/+server');
+	const response = await GET({ params: { id: current.Id }, url: new URL('http://dockhand/api/containers/' + current.Id + '/compose?env=1'), cookies: {} } as any);
+	assert.equal(response.status, 200);
+	const exported = await response.json();
+	for (const compose of [exported.compose, exported.composeFullEnv]) {
+		assert.ok(compose.includes(expectedReference), 'Both Compose variants must preserve the approved registry digest');
+		assert.ok(!compose.includes('dockhand.update.source'), 'Do not export local tracking metadata');
+	}
+
+	// Capture on the source, serialize a real snapshot layout, then restore on an
+	// empty destination with a different platform-local ID for the same manifest.
+	const config = await docker.getPortableContainerConfig(current.Config, 1);
+	assert.equal(portableImageReference(config.Image, config.Labels), expectedReference);
+	assert.equal(inspectToComposeService({ Config: config }).service.image, expectedReference);
+	const snapshot = parseSnapshotLayout(serializeLayout(buildSnapshotLayout({
+		type: 'container', targetName: 'app', environmentId: 1, backupTime: new Date().toISOString(), volumes: [],
+		container: { ...current, Config: config }
+	})))!.container as typeof current;
+	restoreReference = expectedReference;
+	await docker.createContainerFromMetadata('restored-app', snapshot.Config.Image, {
+		config: snapshot.Config, hostConfig: snapshot.HostConfig, networkSettings: snapshot.NetworkSettings
+	}, 2);
+	assert.ok(destinationHasImage, 'Restore must pull the missing image');
+	assert.equal(destinationConfig.Image, destinationImageId, 'Recreation must pin the destination image ID');
+	assert.deepEqual(destinationConfig.Env, snapshot.Config.Env);
+	assert.equal(trackedImageReference(destinationConfig.Image, destinationConfig.Labels), image, 'Future updates must still follow the original tag');
+	assert.equal(portableImageReference(destinationConfig.Image, destinationConfig.Labels), expectedReference);
+}
+
+if (phase === 'portable-legacy' || phase === 'portable-hub') {
+	await assertPortableRoundTrip(image.split(':')[0] + '@' + old);
+	assert.equal(portableImageReference(current.Config.Image, current.Config.Labels), old, 'Capture must not mutate the live configuration');
+} else if (phase === 'portable-unavailable') {
+	assert.deepEqual(await docker.getPortableContainerConfig(current.Config, 1), current.Config);
+	assert.equal(pullReferences.length, 0, 'Do not replace an unavailable immutable image with the current tag');
+} else if (phase.startsWith('timeout-')) {
 	const progress: any[] = [];
 	await docker.pullImage(image, (data: any) => progress.push(data), 1);
 	assert.equal(stalledSignal?.aborted, true);
@@ -154,8 +219,10 @@ if (phase.startsWith('timeout-')) {
 		assert.equal(createBody.Env[0], phase.includes('disabled') ? 'VERSION=other' : 'VERSION=approved', 'Rebase must use the verified image too');
 		assert.equal(trackedImageReference(createBody.Image, createBody.Labels), image, 'Future update checks retain the source tag');
 		assert.equal(pullReferences[0], phase.includes('disabled') ? image.split(':')[0] : image.split(':')[0] + '@' + digest);
+		if (!phase.includes('disabled')) assert.equal(portableImageReference(createBody.Image, createBody.Labels), image.split(':')[0] + '@' + digest);
 		if (scanning) assert.deepEqual(scans, [approved], 'Scan the same image that will be created');
 		assert.ok(executions.some(e => e.status === 'success'), JSON.stringify(executions));
+		if (phase.includes('portable')) await assertPortableRoundTrip(image.split(':')[0] + '@' + digest);
 	}
 }
 process.exit(0);

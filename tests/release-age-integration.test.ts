@@ -2,10 +2,10 @@ import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { releaseAgeAdvisory } from '../src/lib/server/release-age-advisory';
-import { trackedImageLabels, trackedImageReference } from '../src/lib/utils/tracked-image';
+import { portableImageReference, trackedImageLabels, trackedImageReference, UPDATE_SOURCE_LABEL } from '../src/lib/utils/tracked-image';
 import { collectPullWarning, pullLogStatus } from '../src/lib/utils/pull-warning';
 
-for (const phase of ['container', 'container-scan', 'env', 'env-scan', 'container-systemd', 'env-systemd', 'container-disabled', 'env-disabled', 'timeout-daemon', 'timeout-auth', 'timeout-head', 'young', 'warning-json', 'warning-stream']) {
+for (const phase of ['container', 'container-scan', 'env', 'env-scan', 'container-systemd', 'env-systemd', 'container-disabled', 'env-disabled', 'timeout-daemon', 'timeout-auth', 'timeout-head', 'young', 'warning-json', 'warning-stream', 'container-portable', 'container-scan-portable', 'env-portable', 'env-scan-portable', 'portable-legacy', 'portable-hub', 'portable-unavailable']) {
 	test(`release age integration: ${phase}`, () => {
 		const result = spawnSync(process.execPath, [fileURLToPath(new URL('./helpers/release-age-integration-probe.ts', import.meta.url)), phase], {
 			cwd: fileURLToPath(new URL('..', import.meta.url)), encoding: 'utf8', timeout: 10000
@@ -39,4 +39,24 @@ test('structured warnings retain their explanation in pull logs', () => {
 	expect(warnings).toEqual([{ status: 'warning', message: 'Too young; pulling anyway' }]);
 	expect(pullLogStatus(warnings[0])).toBe('[warning] Too young; pulling anyway');
 	expect(pullLogStatus({ status: 'Downloading' })).toBe('Downloading');
+});
+
+test('portable references ignore stale tracking and reject malformed or unrelated digests', () => {
+	const id = 'sha256:' + 'a'.repeat(64);
+	const digest = 'sha256:' + 'b'.repeat(64);
+	for (const reference of ['nginx:latest', 'registry.example.com:5000/team/app']) {
+		const repo = reference === 'nginx:latest' ? 'nginx' : reference;
+		const pinned = repo + '@' + digest;
+		const labels = trackedImageLabels({ custom: 'kept' }, reference, id, pinned);
+		expect(portableImageReference(id, labels)).toBe(pinned);
+		expect(trackedImageReference(id, labels)).toBe(reference);
+		for (const image of ['other:latest', 'nginx@' + digest, 'sha256:' + 'c'.repeat(64)]) {
+			expect(portableImageReference(image, labels)).toBe(image);
+		}
+		for (const registryReference of ['other@' + digest, repo + '@invalid', repo + '@' + digest + '/extra']) {
+			expect(() => trackedImageLabels({}, reference, id, registryReference)).toThrow('Invalid verified registry reference');
+			expect(portableImageReference(id, { [UPDATE_SOURCE_LABEL]: JSON.stringify({ reference, imageId: id, registryReference }) })).toBe(id);
+		}
+	}
+	expect(portableImageReference(id, { [UPDATE_SOURCE_LABEL]: 'bad json' })).toBe(id);
 });

@@ -349,6 +349,7 @@ export async function runEnvUpdateCheckJob(
 					await log(`\nUpdating: ${update.containerName}`);
 
 					let verifiedImageId: string | undefined;
+					let verifiedImageReference: string | undefined;
 
 					// SAFE-PULL FLOW
 					if (shouldScan && !isDigestBasedImage(update.imageName)) {
@@ -359,6 +360,7 @@ export async function runEnvUpdateCheckJob(
 						await log(`  Pulling ${update.imageName}...`);
 						const pulled = await pullImage(update.imageName, () => {}, environmentId, true);
 						verifiedImageId = pulled?.imageId;
+						verifiedImageReference = pulled?.reference;
 						if (pulled) update.newDigest = pulled.digest;
 
 						// Step 2: Get new image ID
@@ -479,6 +481,7 @@ export async function runEnvUpdateCheckJob(
 						await log(`  Pulling ${update.imageName}...`);
 						const pulled = await pullImage(update.imageName, () => {}, environmentId, true);
 						verifiedImageId = pulled?.imageId;
+						verifiedImageReference = pulled?.reference;
 						if (pulled) update.newDigest = pulled.digest;
 					}
 
@@ -488,7 +491,8 @@ export async function runEnvUpdateCheckJob(
 						log: (msg) => { log(`  ${msg}`); },
 						oldImageConfig: update.oldImageConfig,
 						imageNameOverride: update.imageName,
-						verifiedImageId
+						verifiedImageId,
+						verifiedImageReference
 					});
 					if (!result.success) throw new Error(result.error || 'Container recreation failed');
 

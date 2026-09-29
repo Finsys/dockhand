@@ -26,7 +26,7 @@ import { mapContainerNetworks } from '$lib/utils/network-identity';
 import type { Environment } from './db';
 import { getSetting } from './db';
 import { releaseAgeAdvisory } from './release-age-advisory';
-import { trackedImageLabels, trackedImageReference } from '../utils/tracked-image';
+import { portableImageReference, trackedImageLabels, trackedImageReference } from '../utils/tracked-image';
 import { getMinimumReleaseAgeConfig, imageReleaseAgeRemainingMs, imageReleaseAgeStatus } from './minimum-release-age';
 import { manualPullAgeWarning, verifiedImagePullPlan } from './minimum-release-age-core';
 import { getAdditionalVolumeBinds, dedupeVolumesForRecreate } from './mount-dedupe';
@@ -2033,7 +2033,8 @@ export async function recreateContainerFromInspect(
 	 * best-effort inspect of the old image id and, failing that, verbatim.
 	 */
 	oldImageConfig?: ImageEnvLabels | null,
-	verifiedImageId?: string
+	verifiedImageId?: string,
+	verifiedImageReference?: string
 ): Promise<{ Id: string }> {
 	const config = inspectData.Config || {};
 	const hostConfig = inspectData.HostConfig || {};
@@ -2053,7 +2054,7 @@ export async function recreateContainerFromInspect(
 	const systemdUnit = config.Labels?.['PODMAN_SYSTEMD_UNIT'];
 	if (verifiedImageId) {
 		// Validate before stopping anything. A systemd unit controls its own image.
-		trackedImageLabels({}, newImage, verifiedImageId);
+		trackedImageLabels({}, newImage, verifiedImageId, verifiedImageReference);
 		if (systemdUnit) throw new Error('Automatic update deferred: image cooldown cannot pin the image selected by a systemd unit');
 	}
 	if (systemdUnit) {
@@ -2221,7 +2222,7 @@ export async function recreateContainerFromInspect(
 	}
 
 	// Keep the tracked tag separately; creation and rebasing use the verified ID.
-	if (verifiedImageId) createConfig.Labels = trackedImageLabels(createConfig.Labels, newImage, verifiedImageId);
+	if (verifiedImageId) createConfig.Labels = trackedImageLabels(createConfig.Labels, newImage, verifiedImageId, verifiedImageReference);
 
 	// Strip default MemorySwappiness — Podman + cgroupv2 rejects it.
 	// Docker returns -1, Podman returns 0 when unset.
@@ -2424,6 +2425,30 @@ async function ensureImagePresent(image: string, envId?: number | null, log?: (m
 	log?.(`Pulled ${image}`);
 }
 
+/** Enrich older cooldown metadata while the source host still has the image.
+ * Never resolve the mutable tag: only RepoDigests of the actual image qualify. */
+export async function getPortableContainerConfig<T extends { Image?: string; Labels?: Record<string, string> | null }>(
+	config: T, envId?: number | null
+): Promise<T> {
+	const image = config.Image;
+	if (!image || trackedImageReference(image, config.Labels) === image || portableImageReference(image, config.Labels) !== image) return config;
+	try {
+		const source = trackedImageReference(image, config.Labels);
+		const { registry, repo } = parseImageReference(source);
+		const imageData = await inspectImage(image, envId) as { RepoDigests?: string[] };
+		for (const candidate of imageData.RepoDigests ?? []) {
+			const digest = candidate.slice(candidate.lastIndexOf('@') + 1);
+			if (!candidate.includes('@') || !/^sha256:[a-f0-9]{64}$/.test(digest)) continue;
+			const parsed = parseImageReference(candidate);
+			const sameRegistry = parsed.registry === registry || (DOCKER_HUB_HOSTS.has(parsed.registry) && DOCKER_HUB_HOSTS.has(registry));
+			if (!sameRegistry || parsed.repo !== repo) continue;
+			const registryReference = verifiedImagePullPlan(source, digest).reference;
+			return { ...config, Labels: trackedImageLabels(config.Labels ?? undefined, source, image, registryReference) };
+		}
+	} catch { /* An unavailable image cannot supply a missing immutable reference. */ }
+	return config;
+}
+
 /**
  * Create a container from inspect-like metadata (for restore).
  * Applies the same edge-case handling as recreateContainerFromInspect
@@ -2442,7 +2467,7 @@ export async function createContainerFromMetadata(
 	envId?: number | null,
 	log?: (msg: string) => void
 ): Promise<{ Id: string }> {
-	const config = { ...metadata.config };
+	const config = await getPortableContainerConfig({ ...metadata.config, Image: image }, envId);
 	const hostConfig = { ...metadata.hostConfig };
 	const networks: Record<string, any> = metadata.networkSettings?.Networks || {};
 
@@ -2524,7 +2549,15 @@ export async function createContainerFromMetadata(
 	// Pull the image first if the target env doesn't have it — a cross-env clone
 	// restore lands on a host that may never have seen this image, and create
 	// (unlike run) won't pull it.
-	await ensureImagePresent(image, envId, log);
+	const registryReference = portableImageReference(image, config.Labels);
+	await ensureImagePresent(registryReference, envId, log);
+	if (registryReference !== image) {
+		// The destination may select another platform from the approved manifest.
+		// Pin its local ID and refresh tracking so future updates still follow the tag.
+		const restoredImage = await inspectImage(registryReference, envId) as { Id: string };
+		createConfig.Labels = trackedImageLabels(config.Labels, trackedImageReference(image, config.Labels), restoredImage.Id, registryReference);
+		createConfig.Image = restoredImage.Id;
+	}
 
 	// Create container
 	log?.(`Creating container ${containerName}...`);
@@ -3063,7 +3096,7 @@ export async function getImageReleaseAgeWarning(imageName: string, envId?: numbe
 }
 
 /** Scheduled pulls enforce the cooldown; explicit pulls only report an advisory. */
-export async function pullImage(imageName: string, onProgress?: (data: any) => void, envId?: number | null, enforceReleaseAge = false): Promise<{ imageId: string; digest: string } | undefined> {
+export async function pullImage(imageName: string, onProgress?: (data: any) => void, envId?: number | null, enforceReleaseAge = false): Promise<{ imageId: string; digest: string; reference: string } | undefined> {
 	if (!enforceReleaseAge) {
 		const warning = await getImageReleaseAgeWarning(imageName, envId);
 		if (warning) {
@@ -3085,7 +3118,7 @@ export async function pullImage(imageName: string, onProgress?: (data: any) => v
 	const image = await inspectImage(plan.reference, envId) as { Id: string };
 	if (!/^sha256:[a-f0-9]{64}$/.test(image.Id)) throw new Error('Invalid verified image ID');
 	if (plan.tag) await tagImage(image.Id, plan.tag.repo, plan.tag.tag, envId);
-	return { imageId: image.Id, digest };
+	return { imageId: image.Id, digest, reference: plan.reference };
 }
 
 /** Pull an image needed by Dockhand's own scanner or backup helper. */

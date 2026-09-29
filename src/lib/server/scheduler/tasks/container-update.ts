@@ -478,6 +478,7 @@ export async function runContainerUpdate(
 
 		let newImageId: string | null = null;
 		let verifiedImageId: string | undefined;
+		let verifiedImageReference: string | undefined;
 		let scanOutcome: ScanOutcome = { blocked: false };
 
 		if (shouldScan && !isDigestBasedImage(imageNameFromConfig)) {
@@ -489,6 +490,7 @@ export async function runContainerUpdate(
 				log(`Pulling new image: ${imageNameFromConfig}`);
 				const pulled = await pullImage(imageNameFromConfig, undefined, envId, true);
 				verifiedImageId = pulled?.imageId;
+				verifiedImageReference = pulled?.reference;
 				if (pulled) newDigest = pulled.digest;
 
 				// Get new image ID
@@ -582,6 +584,7 @@ export async function runContainerUpdate(
 			try {
 				const pulled = await pullImage(imageNameFromConfig, undefined, envId, true);
 				verifiedImageId = pulled?.imageId;
+				verifiedImageReference = pulled?.reference;
 				if (pulled) newDigest = pulled.digest;
 				log(`Image pulled successfully`);
 			} catch (pullError: any) {
@@ -605,6 +608,7 @@ export async function runContainerUpdate(
 			log,
 			imageNameOverride: imageNameFromConfig,
 			verifiedImageId,
+			verifiedImageReference,
 			oldImageConfig
 		});
 
@@ -671,6 +675,8 @@ export async function runContainerUpdate(
 export interface RecreateContainerOptions {
 	/** Immutable image approved by the cooldown; retain imageNameOverride as the update source. */
 	verifiedImageId?: string;
+	/** Pullable manifest reference for portable backup and Compose metadata. */
+	verifiedImageReference?: string;
 	/** Progress logger. */
 	log?: (msg: string) => void;
 	/** New image to recreate with (defaults to the container's current image). */
@@ -688,7 +694,7 @@ export async function recreateContainer(
 	envId?: number,
 	options: RecreateContainerOptions = {}
 ): Promise<{ success: boolean; error?: string }> {
-	const { log, imageNameOverride, oldImageConfig, verifiedImageId } = options;
+	const { log, imageNameOverride, oldImageConfig, verifiedImageId, verifiedImageReference } = options;
 	try {
 		const containers = await listContainers(true, envId);
 		const container = containers.find(c => c.name === containerName);
@@ -709,7 +715,7 @@ export async function recreateContainer(
 
 		log?.(`Recreating container: ${containerName} (image: ${imageName})`);
 
-		await recreateContainerFromInspect(inspectData, imageName, envId, log, oldImageConfig, verifiedImageId);
+		await recreateContainerFromInspect(inspectData, imageName, envId, log, oldImageConfig, verifiedImageId, verifiedImageReference);
 
 		// Parent recreate SUCCEEDED (a failure would have thrown and rolled the parent
 		// back to its original id, leaving children valid). Repoint any dependent
