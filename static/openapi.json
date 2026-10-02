@@ -10726,7 +10726,7 @@
                 "example": [
                   {
                     "name": "anchore/grype",
-                    "version": "v0.110.0",
+                    "version": "v0.119.0",
                     "license": "Apache-2.0",
                     "repository": "https://github.com/anchore/grype"
                   }
@@ -19550,6 +19550,174 @@
         }
       }
     },
+    "/api/preferences/environment-order": {
+      "get": {
+        "operationId": "get_api_preferences_environment-order",
+        "tags": [
+          "preferences"
+        ],
+        "summary": "Retrieve the saved environment order (environment ids, most preferred first)",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "order": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer"
+                      }
+                    }
+                  }
+                },
+                "example": {
+                  "order": [
+                    3,
+                    1,
+                    2
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to get the environment order"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "operationId": "post_api_preferences_environment-order",
+        "tags": [
+          "preferences"
+        ],
+        "summary": "Save the environment order",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "order": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer"
+                      }
+                    }
+                  }
+                },
+                "example": {
+                  "order": [
+                    0
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "order must be an array of environment ids"
+          },
+          "500": {
+            "description": "Failed to save the environment order"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Ids the caller cannot see are simply absent from their list; each user has their own order, so saving never affects anyone else's.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "order": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    }
+                  }
+                },
+                "required": [
+                  "order"
+                ]
+              },
+              "example": {
+                "order": [
+                  3,
+                  1,
+                  2
+                ]
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_api_preferences_environment-order",
+        "tags": [
+          "preferences"
+        ],
+        "summary": "Reset the environment order back to the default (by name)",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "order": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer"
+                      }
+                    }
+                  }
+                },
+                "example": {
+                  "order": [
+                    0
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to reset the environment order"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/preferences/favorite-groups": {
       "get": {
         "operationId": "get_api_preferences_favorite-groups",
@@ -20311,6 +20479,174 @@
           },
           "500": {
             "description": "Failed to reset sidebar preferences"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/preferences/tag-order": {
+      "get": {
+        "operationId": "get_api_preferences_tag-order",
+        "tags": [
+          "preferences"
+        ],
+        "summary": "Retrieve the saved tag order (tag ids, most preferred first)",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "order": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer"
+                      }
+                    }
+                  }
+                },
+                "example": {
+                  "order": [
+                    3,
+                    1,
+                    2
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to get the tag order"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "operationId": "post_api_preferences_tag-order",
+        "tags": [
+          "preferences"
+        ],
+        "summary": "Save the tag order",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "order": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer"
+                      }
+                    }
+                  }
+                },
+                "example": {
+                  "order": [
+                    0
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "order must be an array of tag ids, or it repeats an id"
+          },
+          "500": {
+            "description": "Failed to save the tag order"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "The tag catalogue is shared, but the order is each user's own, so saving never changes anyone else's lists.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "order": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    }
+                  }
+                },
+                "required": [
+                  "order"
+                ]
+              },
+              "example": {
+                "order": [
+                  3,
+                  1,
+                  2
+                ]
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_api_preferences_tag-order",
+        "tags": [
+          "preferences"
+        ],
+        "summary": "Reset the tag order back to the default (by name)",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "order": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer"
+                      }
+                    }
+                  }
+                },
+                "example": {
+                  "order": [
+                    0
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to reset the tag order"
           }
         },
         "security": [
@@ -24568,6 +24904,18 @@
                   "protectScannerImages": {
                     "type": "boolean"
                   },
+                  "scanRetentionCron": {
+                    "type": "string"
+                  },
+                  "scanRetentionEnabled": {
+                    "type": "boolean"
+                  },
+                  "scanRetentionGraceDays": {
+                    "type": "integer"
+                  },
+                  "scanRetentionKeep": {
+                    "type": "integer"
+                  },
                   "scannerCleanupCron": {
                     "type": "string"
                   },
@@ -24659,6 +25007,10 @@
                 "metricsCollectionInterval": 0,
                 "primaryStackLocation": "string",
                 "protectScannerImages": true,
+                "scanRetentionCron": "string",
+                "scanRetentionEnabled": true,
+                "scanRetentionGraceDays": 0,
+                "scanRetentionKeep": 0,
                 "scannerCleanupCron": "string",
                 "scannerCleanupEnabled": true,
                 "scheduleCleanupCron": "string",
@@ -24850,6 +25202,15 @@
             "description": "When true, also check the scanner images for available updates (slower)"
           },
           {
+            "name": "checkNewerVersions",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "When true, also ask the registry whether a newer scanner RELEASE exists (slower)"
+          },
+          {
             "name": "settingsOnly",
             "in": "query",
             "required": false,
@@ -24861,7 +25222,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Scanner settings and (unless settingsOnly) availability, versions, updates and defaults"
+            "description": "Scanner settings and (unless settingsOnly) availability, versions, updates, newerVersions and defaults"
           },
           "403": {
             "description": "Permission denied (missing settings:view for the environment)"
@@ -24936,7 +25297,7 @@
             "description": "Invalid scanner type (must be none, grype, trivy or both)"
           },
           "403": {
-            "description": "Permission denied (missing settings:edit for the environment)"
+            "description": "Permission denied (missing settings:edit for the environment, or not an administrator when changing a scanner image)"
           },
           "500": {
             "description": "Failed to save the scanner settings"
