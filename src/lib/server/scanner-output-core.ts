@@ -42,16 +42,18 @@ function isTempTag(tag: string): boolean {
 }
 
 /**
- * The human-readable name a scan should record and notify with. Scans are driven by whatever
- * ref the caller passed - the auto-update path passes a bare image ID, which then shows in
- * notifications as `Image "sha256:..." has N critical`. When the ref is a bare digest, prefer
- * a real RepoTag from the image inspect; fall back to a Dockhand temp tag, then to the digest
- * itself. A ref that already carries a tag/name is kept as-is.
+ * The human-readable name a scan should record and notify with.
+ *
+ * A scan is driven by whatever ref the caller passed, and the auto-update path passes
+ * either a bare image ID - which would show as `Image "sha256:..." has N critical` - or
+ * the temporary tag it applied while scanning, which outlives the scan in the dashboard
+ * long after the image has been retagged. Both are poor labels, so a real RepoTag from
+ * the inspect wins over either. Any other ref is the caller's own name and is kept.
  */
 export function pickScanDisplayName(imageRef: string, repoTags: string[] | undefined | null): string {
-	if (!isBareDigest(imageRef)) return imageRef; // caller passed a tag/name - trust it
+	if (!isBareDigest(imageRef) && !isTempTag(imageRef)) return imageRef;
 	const tags = (repoTags || []).filter((t) => typeof t === 'string' && t && t !== '<none>:<none>');
-	if (tags.length === 0) return imageRef; // genuinely untagged - the digest is all we have
 	const realTag = tags.find((t) => !isTempTag(t));
-	return realTag ?? tags[0]; // prefer a real tag over a -dockhand-pending temp tag
+	// Nothing better to offer: a genuinely untagged image leaves only what came in.
+	return realTag ?? tags[0] ?? imageRef;
 }
