@@ -1,5 +1,26 @@
 [
   {
+    "version": "1.0.51",
+    "date": "",
+    "comingSoon": true,
+    "changes": [
+      { "type": "feature", "text": "drag to reorder environments (#1638)" },
+      { "type": "feature", "text": "drag to reorder tags, and the grid groups follow that order (#1651)" },
+      { "type": "fix", "text": "compose validate no longer reports a volume path built from a variable as undefined (#1653)" },
+      { "type": "fix", "text": "sorting containers by uptime now orders an hour-old container correctly (#1652)" },
+      { "type": "fix", "text": "the vulnerability scan retention schedule saves and reloads correctly" },
+      { "type": "fix", "text": "the stack editor no longer re-queries the secret provider while it sits idle (#1646)" },
+      { "type": "fix", "text": "keepass:// and azurekv:// references are recognised in the stack editor" },
+      { "type": "fix", "text": "a git stack whose deploy fails is retried on the next sync instead of being marked in sync (#1660)" },
+      { "type": "fix", "text": "the scanner check now finds newer grype and trivy releases, not just a rebuild of the pinned tag (#1658)" },
+      { "type": "fix", "text": "default scanner images bumped to grype v0.119.0 and trivy 0.75.0 (#1658)" },
+      { "type": "feature", "text": "containers can be tagged with a dockhand.tags label, with a colour and icon (#1655)" },
+      { "type": "feature", "text": "containers optionally show the tags their stack carries (#1665)" },
+      { "type": "feature", "text": "drag files onto the file browser to upload them (#1661, PR#1662, @Wardrop)" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.51"
+  },
+  {
     "version": "1.0.50",
     "date": "2026-09-30",
     "changes": [
