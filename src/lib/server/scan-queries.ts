@@ -46,3 +46,26 @@ export async function getAllLatestScans(
 		vulnerabilities: scan.vulnerabilities ? JSON.parse(scan.vulnerabilities as string) : []
 	})) as VulnerabilityScanData[];
 }
+
+/**
+ * The distinct image ids that have a scan in this environment.
+ *
+ * Just the ids: the caller intersects them with the live Docker image list, and
+ * reading the findings documents to learn which images were scanned is what
+ * made that cost hundreds of megabytes.
+ */
+export async function getScannedImageIds(environmentId?: number | null): Promise<string[]> {
+	const envFilter =
+		environmentId === undefined
+			? undefined
+			: environmentId === null
+				? isNull(vulnerabilityScans.environmentId)
+				: eq(vulnerabilityScans.environmentId, environmentId);
+
+	const rows: { imageId: string }[] = await db
+		.selectDistinct({ imageId: vulnerabilityScans.imageId })
+		.from(vulnerabilityScans)
+		.where(envFilter);
+
+	return rows.map((r) => r.imageId);
+}

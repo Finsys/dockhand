@@ -50,6 +50,43 @@ export const aggregateCache = new Map<number, CacheEntry>();
 export const inflight = new Map<number, Promise<AggregatedVulnerabilities>>();
 
 /**
+ * The header's totals and filter options, cached apart from the findings.
+ *
+ * They are counted in the database, so they are cheap to hold and worth keeping
+ * even when nothing has asked for the findings themselves: the metrics exporter
+ * and the count endpoint ask for them repeatedly.
+ */
+export const metaCache = new Map<number, { at: number; meta: VulnerabilitiesMeta }>();
+/** Collapse concurrent cold-start requests into one metadata pass. */
+export const metaInflight = new Map<number, Promise<VulnerabilitiesMeta>>();
+
+/**
+ * Bumped whenever an environment's scans change.
+ *
+ * A build already under way cannot be recalled, so it reads this before it
+ * started and again before it caches: a number that moved means a scan landed
+ * mid-build and the answer is already out of date.
+ */
+const metaEpoch = new Map<number, number>();
+/** Counts invalidations that named no environment, so they reach every one. */
+let globalMetaEpoch = 0;
+
+export function currentMetaEpoch(envIdNum: number): number {
+	return (metaEpoch.get(envIdNum) ?? 0) + globalMetaEpoch;
+}
+
+function bumpMetaEpoch(envIdNum?: number | null): void {
+	// A global invalidation has to move environments this map has never seen -
+	// the retention job clears every environment at once, and a build in flight
+	// for an untouched one would otherwise cache an answer from before the delete.
+	if (envIdNum === undefined || envIdNum === null) {
+		globalMetaEpoch++;
+		return;
+	}
+	metaEpoch.set(envIdNum, (metaEpoch.get(envIdNum) ?? 0) + 1);
+}
+
+/**
  * Drop cached findings. Pass an env id to clear just that environment; pass
  * nothing to clear all (e.g. a broad change where the affected env is unknown).
  */
@@ -62,6 +99,17 @@ export function getVulnerabilitiesCacheStats(): { envs: number; views: number; i
 }
 
 export function invalidateVulnerabilitiesCache(envIdNum?: number | null): void {
+	// The meta cache needs its in-flight map dropped for the same reason as the
+	// findings one below, and the epoch bumped so a build already past that point
+	// discards its now-stale answer instead of installing it with a fresh window.
+	bumpMetaEpoch(envIdNum);
+	if (envIdNum === undefined || envIdNum === null) {
+		metaCache.clear();
+		metaInflight.clear();
+	} else {
+		metaCache.delete(envIdNum);
+		metaInflight.delete(envIdNum);
+	}
 	if (envIdNum === undefined || envIdNum === null) {
 		aggregateCache.clear();
 		// Also drop in-flight aggregations: one racing a scan-save would otherwise
