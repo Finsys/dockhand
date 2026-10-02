@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount, onDestroy, tick } from 'svelte';
+	import { onMount, onDestroy, tick, untrack } from 'svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -9,7 +9,7 @@
 	import { type EnvVar, type ValidationResult } from '$lib/components/StackEnvVarsEditor.svelte';
 	import SecretProviderPicker from '$lib/components/SecretProviderPicker.svelte';
 	import { SELECTOR_VARS } from '$lib/utils/bulk-selector';
-	import { classifyMarker, resolvedRefVarNames } from '$lib/utils/invault-markers';
+	import { classifyMarker, isInlineProviderRef, resolvedRefVarNames } from '$lib/utils/invault-markers';
 	import { applyQuickFix, findingKey } from '$lib/utils/compose-quick-fix';
 	import { Layers, Save, Play, Code, GitGraph, GitBranch, GitCommitHorizontal, Github, Loader2, AlertCircle, X, Sun, Moon, TriangleAlert, GripVertical, GripHorizontal, FolderOpen, Copy, Check, XCircle, MapPin, ArrowRight, ArrowDown, Info, Box, FolderSync, Archive, ListChecks, History, ChevronDown } from 'lucide-svelte';
 	import ComposeValidatePanel from './ComposeValidatePanel.svelte';
@@ -1157,14 +1157,14 @@
 		}, 1000);
 	}
 
-	// op://... inline references in the current env vars, mapped var -> ref, so a
+	// Inline provider references in the current env vars, mapped var -> ref, so a
 	// resolved ref (the provider returns ref STRINGS) maps back to its var name.
 	function inlineRefPairs(): { varName: string; ref: string }[] {
 		const pairs: { varName: string; ref: string }[] = [];
 		for (const v of envVars) {
 			const key = v.key.trim();
 			const val = (v.value ?? '').trim();
-			if (key && val.startsWith('op://')) pairs.push({ varName: key, ref: val });
+			if (key && isInlineProviderRef(val)) pairs.push({ varName: key, ref: val });
 		}
 		return pairs;
 	}
@@ -2104,11 +2104,14 @@
 		}
 	});
 
-	// Re-validate when envVars change (adding/removing variables affects missing/defined status)
+	// Re-validate when the env vars change (a name affects missing/defined status, a
+	// value can be an inline provider ref). The dependency is the key=value shape alone:
+	// validateEnvVars writes envValidation, so reading it reactively here would make
+	// this effect re-trigger itself and probe the provider forever on an idle editor.
 	$effect(() => {
-		// Track envVars changes (this triggers on any modification to envVars array)
-		const vars = envVars;
-		if (!open || !envValidation) return;
+		const shape = envVars.map((v) => `${v.key.trim()}=${(v.value ?? '').trim()}`).join('\u0000');
+		if (!open || !untrack(() => envValidation)) return;
+		void shape;
 
 		// Debounce to avoid too many API calls while typing
 		const timeout = setTimeout(() => {

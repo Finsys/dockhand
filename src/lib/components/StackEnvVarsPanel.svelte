@@ -8,7 +8,7 @@
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { getProviderIcon } from '$lib/components/provider-icons';
 	import { providerTypeLabel } from '../../routes/settings/secrets/ProviderModal.svelte';
-	import { effectiveMissing } from '$lib/utils/invault-markers';
+	import { effectiveMissing, isInlineProviderRef } from '$lib/utils/invault-markers';
 	import { parseRawContent, generateRawContent, keysInRawContent, mergeParsedIntoVariables, textEditorContent as deriveTextEditorContent } from '$lib/utils/env-panel-core';
 
 	interface Props {
@@ -97,14 +97,11 @@
 	// Count of secrets (for display in hint)
 	const secretCount = $derived(variables.filter(v => v.isSecret && v.key.trim()).length);
 
-	// True when any variable's VALUE is a provider reference (op:// / pass://).
-	// Such a reference is resolved only here (stack env), never when written
-	// straight into a compose environment: block - so we surface a hint.
+	// True when any variable's VALUE is a provider reference. Such a reference is
+	// resolved only here (stack env), never when written straight into a compose
+	// environment: block - so we surface a hint.
 	const hasProviderReference = $derived(
-		variables.some((v) => {
-			const val = (v.value ?? '').trim();
-			return val.startsWith('op://') || val.startsWith('pass://');
-		})
+		variables.some((v) => isInlineProviderRef((v.value ?? '').trim()))
 	);
 
 	// What text view shows: the .env file, or the non-secret rows rendered as text when
@@ -469,12 +466,12 @@
 				</div>
 			</div>
 		{/if}
-		<!-- Provider-reference placement hint: op:// / pass:// only resolve here, not in compose environment: -->
+		<!-- Provider-reference placement hint: inline refs only resolve here, not in compose environment: -->
 		{#if hasProviderReference}
 			<div class="flex items-start gap-2 px-2.5 py-2 rounded bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50">
 				<Info class="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
 				<p class="text-xs text-amber-700 dark:text-amber-300">
-					A <code class="bg-amber-100 dark:bg-amber-800/40 px-1 rounded">op://</code> / <code class="bg-amber-100 dark:bg-amber-800/40 px-1 rounded">pass://</code> reference is resolved <strong>here</strong>, in the stack's environment. It is <strong>not</strong> resolved when written directly in a compose <code class="bg-amber-100 dark:bg-amber-800/40 px-1 rounded">environment:</code> block - reference the variable there with <code class="bg-amber-100 dark:bg-amber-800/40 px-1 rounded">${'{VAR}'}</code> instead.
+					A secret-provider reference (<code class="bg-amber-100 dark:bg-amber-800/40 px-1 rounded">op://</code>, <code class="bg-amber-100 dark:bg-amber-800/40 px-1 rounded">keepass://</code>, <code class="bg-amber-100 dark:bg-amber-800/40 px-1 rounded">azurekv://</code>, <code class="bg-amber-100 dark:bg-amber-800/40 px-1 rounded">pass://</code>) is resolved <strong>here</strong>, in the stack's environment. It is <strong>not</strong> resolved when written directly in a compose <code class="bg-amber-100 dark:bg-amber-800/40 px-1 rounded">environment:</code> block - reference the variable there with <code class="bg-amber-100 dark:bg-amber-800/40 px-1 rounded">${'{VAR}'}</code> instead.
 				</p>
 			</div>
 		{/if}
