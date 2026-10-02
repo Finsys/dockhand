@@ -84,7 +84,10 @@
 	import VersionUpdateBadge from '$lib/components/VersionUpdateBadge.svelte';
 	import VersionUpdateModal from '$lib/components/VersionUpdateModal.svelte';
 	import type { ContainerInfo, TerminalMode } from '$lib/types';
-	import { matchesTagFilter, tagGroupDescriptor, type Tag as UserTag, type TagColor } from '$lib/utils/tags-core';
+	import { matchesTagFilter, tagGroupDescriptor, mergeLabelTags, type Tag as UserTag, type TagColor, filterTagList, prunedTagFilter, withStackTags, stackLabelTags, mergeNamedTags } from '$lib/utils/tags-core';
+	import { isKnownIconName } from '$lib/utils/icons';
+	import { tagOrder } from '$lib/stores/tag-order';
+	import { applyOrder } from '$lib/utils/apply-order';
 	import TagChips from '$lib/components/TagChips.svelte';
 	import TagEditPopover from '$lib/components/TagEditPopover.svelte';
 	import TagFilter from '$lib/components/TagFilter.svelte';
@@ -97,7 +100,7 @@
 	import { canAccess, isAdmin } from '$lib/stores/auth';
 	import { vulnerabilityCriteriaIcons } from '$lib/utils/update-steps';
 	import { compareIps } from '$lib/utils/ip';
-	import { parseTimeStringToSeconds } from '$lib/utils/parse-uptime';
+	import { formatUptime, parseUptimeToSeconds } from '$lib/utils/container-status';
 	import { formatHostPortUrl } from '$lib/utils/url';
 	import { parseCustomUrl } from '$lib/utils/custom-url';
 	import { extractTraefikUrls } from '$lib/utils/traefik-urls';
@@ -131,17 +134,40 @@
 
 	// User-defined tags: assignments (name -> tagId[]) + the catalog.
 	let tagsMap = $state<Record<string, number[]>>({});
+	// Stack assignments, so a container can show what its stack carries. Inherited
+	// at read time rather than copied, so nothing has to be kept in sync.
+	let stackTagsMap = $state<Record<string, number[]>>({});
+	const INHERIT_STACK_TAGS_KEY = 'dockhand-containers-inherit-stack-tags';
+	let inheritStackTags = $state(
+		typeof window === 'undefined' || localStorage.getItem(INHERIT_STACK_TAGS_KEY) !== '0'
+	);
+	$effect(() => {
+		const v = inheritStackTags;
+		if (typeof window === 'undefined') return;
+		localStorage.setItem(INHERIT_STACK_TAGS_KEY, v ? '1' : '0');
+	});
 	let tagCatalog = $state<UserTag[]>([]);
+	// The catalogue has actually been fetched. Until then the tag picker is only
+	// half-built, so a saved selection must not be measured against it.
+	let tagsLoaded = $state(false);
 	const tagById = $derived(new Map(tagCatalog.map((t) => [t.id, t])));
 	async function loadTags(forEnvId: number | null) {
 		try {
-			const res = await fetch(appendEnvParam('/api/container-tags', forEnvId));
+			const [res, stackRes] = await Promise.all([
+				fetch(appendEnvParam('/api/container-tags', forEnvId)),
+				fetch(appendEnvParam('/api/stack-tags', forEnvId))
+			]);
 			tagsMap = res.ok ? await res.json() : {};
+			stackTagsMap = stackRes.ok ? await stackRes.json() : {};
 		} catch {
 			tagsMap = {};
+			stackTagsMap = {};
 		}
 	}
 	async function loadTagCatalog() {
+		// The catalogue is global, but the order it is shown and grouped in belongs
+		// to this user, so it is loaded alongside it - and again after a sign-in.
+		tagOrder.init();
 		// The tag catalog is global (not env-scoped); assignments load per env.
 		try {
 			const res = await fetch('/api/tags');
@@ -149,11 +175,9 @@
 		} catch {
 			tagCatalog = [];
 		}
-		// Drop any persisted filter id that no longer exists in the catalog (a
-		// deleted tag, or a wiped DB) - otherwise a stale id filters the whole
-		// list to empty with no visible cause.
-		const valid = new Set(tagCatalog.map((t) => t.id));
-		if (tagFilter.some((id) => !valid.has(id))) tagFilter = tagFilter.filter((id) => valid.has(id));
+		tagsLoaded = true;
+		// Stale filter ids are dropped against filterTags, which knows the label
+		// tags on screen as well as the catalog.
 	}
 	// Tag filter, persisted per browser so it survives a refresh.
 	const TAG_FILTER_KEY = 'dockhand-containers-tag-filter';
@@ -175,9 +199,61 @@
 		localStorage.setItem(TAG_FILTER_KEY, JSON.stringify(f));
 		localStorage.setItem(TAG_FILTER_MODE_KEY, m);
 	});
-	function tagsFor(name: string): UserTag[] {
-		return (tagsMap[name] ?? []).map((id) => tagById.get(id)).filter((t): t is UserTag => !!t);
+	// Tags assigned in Dockhand, plus the ones the container names in its
+	// dockhand.tags label - so a container Dockhand never deployed is tagged too.
+	function tagsFor(container: { name: string; labels?: Record<string, string> }): UserTag[] {
+		const assigned = (tagsMap[container.name] ?? [])
+			.map((id) => tagById.get(id))
+			.filter((t): t is UserTag => !!t);
+		const own = mergeLabelTags(assigned, container.labels, tagCatalog, isKnownIconName);
+		if (!inheritStackTags) return own;
+		const stack = getComposeProject(container.labels);
+		if (!stack) return own;
+		const assignedToStack = (stackTagsMap[stack] ?? [])
+			.map((id) => tagById.get(id))
+			.filter((t): t is UserTag => !!t);
+		// A stack also carries whatever its services name in their labels, which is
+		// what the stacks page shows - inherit that too, or a service with no label
+		// of its own stays untagged under a stack the UI shows as tagged.
+		const fromStack = mergeNamedTags(
+			assignedToStack,
+			stackLabelTagsByProject[stack],
+			tagCatalog,
+			isKnownIconName
+		);
+		return withStackTags(own, fromStack);
 	}
+
+	// The label tags each compose project carries, unioned across its containers -
+	// the same rule listComposeStacks applies server-side, computed here from the
+	// rows already on screen rather than fetching the stacks.
+	const stackLabelTagsByProject = $derived.by(() => {
+		if (!inheritStackTags) return {} as Record<string, ReturnType<typeof stackLabelTags>>;
+		const byProject = new Map<string, Array<Record<string, string> | undefined>>();
+		for (const c of containers) {
+			const p = getComposeProject(c.labels);
+			if (!p) continue;
+			const list = byProject.get(p) ?? [];
+			list.push(c.labels);
+			byProject.set(p, list);
+		}
+		const out: Record<string, ReturnType<typeof stackLabelTags>> = {};
+		for (const [p, labels] of byProject) out[p] = stackLabelTags(labels);
+		return out;
+	});
+
+	// The filter lists the catalogue plus any tag only a label names, so a tag that
+	// lives in a label can still be filtered and grouped by.
+	const filterTags = $derived(filterTagList(tagCatalog, containers.map((c) => tagsFor(c))));
+
+	// Drop a selected tag the picker no longer offers - a deleted catalog tag, or a
+	// label tag whose last container is gone - so a filter can never empty the list
+	// with no visible cause. Waits for both the catalog and the rows: measuring a
+	// selection against a half-built picker would drop every valid id, and the
+	// result is persisted straight away.
+	$effect(() => {
+		tagFilter = prunedTagFilter(tagFilter, filterTags, tagsLoaded && containers.length > 0);
+	});
 
 	// Group-by-tag: partition rows by their unique tag COMBINATION (a container with
 	// prod+infra forms its own group, distinct from just prod). Persisted per browser.
@@ -225,7 +301,12 @@
 		if (typeof window === 'undefined') return;
 		localStorage.setItem(COLLAPSED_GROUPS_KEY, JSON.stringify([...collapsedGroups]));
 	});
-	const containerGroupBy = $derived(groupByTag ? (c: any) => tagGroupDescriptor(tagsFor(c.name)) : undefined);
+	// The order the tag lists actually show, so the groups read the same way:
+	// applyOrder decides where an unarranged tag sits, and this follows it.
+	const resolvedTagOrder = $derived(
+		applyOrder(tagCatalog, $tagOrder, (t) => t.id).map((t) => t.id)
+	);
+	const containerGroupBy = $derived(groupByTag ? (c: any) => tagGroupDescriptor(tagsFor(c), resolvedTagOrder) : undefined);
 	async function createTag(name: string, color: TagColor, icon: string | null): Promise<UserTag | null> {
 		try {
 			const res = await fetch('/api/tags', {
@@ -938,7 +1019,7 @@
 
 		// Filter by user-defined tags.
 		if (tagFilter.length > 0) {
-			result = result.filter((c) => matchesTagFilter(tagsMap[c.name], tagFilter, tagFilterMode));
+			result = result.filter((c) => matchesTagFilter(tagsFor(c).map((t) => t.id), tagFilter, tagFilterMode));
 		}
 
 		// Sort
@@ -1414,16 +1495,6 @@
 		return ip || '-';
 	}
 
-	function formatUptime(status: string): string {
-		// Extract uptime from status like "Up 2 hours" or "Exited (0) 3 days ago"
-		if (!status) return '-';
-		const upMatch = status.match(/Up\s+(.+?)(?:\s+\(|$)/i);
-		if (upMatch) return upMatch[1].trim();
-		const exitMatch = status.match(/Exited.+?(\d+\s+\w+)\s+ago/i);
-		if (exitMatch) return exitMatch[1] + ' ago';
-		return '-';
-	}
-
 	let copiedCommand = $state<string | null>(null);
 	let copyFailed = $state(false);
 
@@ -1437,26 +1508,6 @@
 			copyFailed = true;
 			setTimeout(() => { copyFailed = false; }, 2000);
 		}
-	}
-
-	function parseUptimeToSeconds(status: string): number {
-		// Parse uptime from status to seconds for sorting
-		// Running containers have positive values (higher = longer uptime)
-		// Stopped containers have negative values (sorted after running)
-		if (!status) return -Infinity;
-
-		const upMatch = status.match(/Up\s+(.+?)(?:\s+\(|$)/i);
-		if (upMatch) {
-			return parseTimeStringToSeconds(upMatch[1].trim());
-		}
-
-		// Exited containers - use negative values so they sort after running
-		const exitMatch = status.match(/Exited.+?(\d+\s+\w+)\s+ago/i);
-		if (exitMatch) {
-			return -parseTimeStringToSeconds(exitMatch[1]);
-		}
-
-		return -Infinity;
 	}
 
 	function getHealthVariant(health?: string): 'default' | 'destructive' | 'secondary' | 'outline' {
@@ -1574,7 +1625,7 @@
 				width="w-44"
 				defaultIcon={Box}
 			/>
-			<TagFilter tags={tagCatalog} bind:selected={tagFilter} bind:mode={tagFilterMode} bind:groupBy={groupByTag} bind:showTags={showTags} bind:showBands={showBands} bind:inlineEditing={inlineTagEditing} bind:settingsExpanded={tagSettingsExpanded} />
+			<TagFilter tags={filterTags} bind:selected={tagFilter} bind:mode={tagFilterMode} bind:groupBy={groupByTag} bind:showTags={showTags} bind:showBands={showBands} bind:inlineEditing={inlineTagEditing} bind:inheritStackTags bind:settingsExpanded={tagSettingsExpanded} />
 			<!-- Action buttons: scroll horizontally on narrow screens (mobile) instead of
 			     clipping the overflow. min-w-0 lets the row shrink below its content so
 			     overflow-x can kick in; shrink-0 keeps each button its natural size. -->
@@ -1921,12 +1972,13 @@
 									</Tooltip.Content>
 								</Tooltip.Root>
 							{/if}
-							{#if showTags}<TagChips tags={tagsFor(container.name)} />{/if}
+							{#if showTags}<TagChips tags={tagsFor(container)} />{/if}
 							{#if inlineTagEditing && $canAccess('containers', 'edit')}
 								<span onclick={(e) => e.stopPropagation()} role="presentation">
 									<TagEditPopover
 										catalog={tagCatalog}
 										selected={tagsMap[container.name] ?? []}
+										inherited={tagsFor(container).filter((t) => t.inherited).map((t) => t.id)}
 										onCreate={createTag}
 										onApply={(ids) => applyContainerTags(container.name, ids)}
 										allowCreate={$isAdmin}

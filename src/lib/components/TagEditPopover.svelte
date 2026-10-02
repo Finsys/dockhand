@@ -11,6 +11,9 @@
 		open?: boolean;
 		catalog: Tag[];        // all tags in the env
 		selected: number[];    // currently-assigned tag ids
+		/** Tag ids this item shows because its STACK carries them. Listed but not
+		 *  toggleable: they belong to the stack, not to this item. */
+		inherited?: number[];
 		/** Create a catalog tag; resolves to the created/existing Tag. */
 		onCreate: (name: string, color: TagColor, icon: string | null) => Promise<Tag | null>;
 		/** Persist the new assignment set. */
@@ -18,7 +21,7 @@
 		/** Whether the current user may create catalog tags (admin only). Assigning existing tags is always allowed. */
 		allowCreate?: boolean;
 	}
-	let { open = $bindable(false), catalog, selected, onCreate, onApply, allowCreate = false }: Props = $props();
+	let { open = $bindable(false), catalog, selected, inherited = [], onCreate, onApply, allowCreate = false }: Props = $props();
 
 	// The heavy Popover.Root (bits-ui floating-ui context + portal) is only mounted once
 	// the user actually opens this row's editor. Before that each row renders a plain
@@ -150,15 +153,22 @@
 			{/if}
 			{#each filtered as tag (tag.id)}
 				{@const isSel = selected.includes(tag.id)}
-				<button type="button" onclick={() => toggle(tag.id)}
-					class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted">
+				{@const fromStack = !isSel && inherited.includes(tag.id)}
+				<button type="button" onclick={() => !fromStack && toggle(tag.id)}
+					disabled={fromStack}
+					title={fromStack ? 'Inherited from this container\u0027s stack - remove it from the stack\u0027s tags' : undefined}
+					class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm {fromStack ? 'cursor-default opacity-60' : 'hover:bg-muted'}">
 					{#if tag.icon}
 						<TagLucideIcon name={tag.icon} class="h-3.5 w-3.5 shrink-0" style="color: {tagHex(tag.color)};" />
 					{:else}
 						<span class="h-2 w-2 shrink-0 rounded-full" style="background-color: {tagHex(tag.color)};"></span>
 					{/if}
 					<span class="truncate">{tag.name}</span>
-					{#if isSel}<Check class="ml-auto h-3.5 w-3.5 text-primary shrink-0" />{/if}
+					{#if isSel}
+						<Check class="ml-auto h-3.5 w-3.5 text-primary shrink-0" />
+					{:else if fromStack}
+						<span class="ml-auto text-2xs text-muted-foreground shrink-0">from stack</span>
+					{/if}
 				</button>
 			{/each}
 		</div>

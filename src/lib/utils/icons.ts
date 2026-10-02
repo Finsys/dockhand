@@ -68,6 +68,14 @@ export function getIconComponent(iconName: string): ComponentType {
 	return iconMap[iconName] || Globe;
 }
 
+/**
+ * Whether an icon reference resolves to something drawable, for callers that must
+ * reject an unusable name rather than fall back to a placeholder glyph.
+ */
+export function isKnownIconName(name: string): boolean {
+	return name in iconMap;
+}
+
 export function isCustomIcon(icon: string | null | undefined): boolean {
 	return !!icon && icon.startsWith('custom:');
 }

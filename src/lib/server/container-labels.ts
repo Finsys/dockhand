@@ -9,6 +9,8 @@
  * - dockhand.port.<hostPort>.url=<url> — Override the click URL for a specific published port
  * - dockhand.order=<int>  — Controls display order within a stack (lower = first, default 0)
  * - dockhand.adopt=false  — Prevent this stack from being adopted (any container in the stack)
+ * - dockhand.tags=a,b,c  - Tags to show for this container (read where containers
+ *     and stacks are listed; see tags-core.ts)
  * - dockhand.version.pattern=regex:... — Override how the newer-version check reads
  *     this image's tags, for non-standard tag schemes (named groups major/minor/patch)
  *

@@ -60,6 +60,7 @@ import { cleanPem } from '$lib/utils/pem';
 import { quoteForEnvFile } from '$lib/utils/env-file-values';
 import { rewriteComposeVolumePaths, getHostDataDir } from './host-path';
 import { getOrderValue } from './container-labels';
+import { stackLabelTags, type LabelTagSpec } from '$lib/utils/tags-core';
 import { pendingRowsToClear } from './pending-updates-core';
 import { buildDockhandOverrideFile } from './dockhand-override-file';
 
@@ -143,6 +144,14 @@ export interface ComposeStackInfo {
 	status: 'running' | 'stopped' | 'partial' | 'restarting' | 'created';
 	sourceType?: StackSourceType;
 	hasComposeFile?: boolean;
+	/**
+	 * Tags the stack's containers name in their `dockhand.tags` labels, each with
+	 * the colour and icon it asks for. Derived from what is on the containers, so
+	 * a stack started outside Dockhand carries them too. Compose keeps
+	 * project-level labels off the containers, so a service label is the only one
+	 * that reaches the daemon.
+	 */
+	labelTags?: LabelTagSpec[];
 }
 
 /**
@@ -2142,6 +2151,10 @@ export async function listComposeStacks(envId?: number | null): Promise<ComposeS
 			name,
 			containers: Array.from(containerIds),
 			containerDetails,
+			// The union of what this stack's containers name: compose keeps a
+			// project-level label off the containers, so a service label is the only
+			// one that reaches the daemon.
+			labelTags: stackLabelTags(stackContainers.map((c) => c.labels)),
 			updatesAvailable: stackContainers.some((c) => pendingUpdateIds.has(c.id)),
 			updateCount: stackContainers.filter((c) => pendingUpdateIds.has(c.id)).length,
 			// Newer-version-tag (semver) suggestions in this stack - drives the Tag badge.
