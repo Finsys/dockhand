@@ -25,7 +25,10 @@
 		CircleArrowUp,
 		CircleFadingArrowUp,
 		Clock,
-		AlertTriangle
+		AlertTriangle,
+		GripVertical,
+		RotateCcw,
+		ArrowUpDown
 	} from 'lucide-svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { broom, whale } from '@lucide/lab';
@@ -36,6 +39,11 @@
 	import { labelColorOverrides } from '$lib/stores/label-colors';
 	import EnvironmentModal from './EnvironmentModal.svelte';
 	import { environments as environmentsStore } from '$lib/stores/environment';
+	import { environmentOrder } from '$lib/stores/environment-order';
+	import { applyOrder } from '$lib/utils/apply-order';
+	import { dndzone, type DndEvent } from 'svelte-dnd-action';
+	import { flip } from 'svelte/animate';
+	import { cubicOut } from 'svelte/easing';
 	import { dashboardData } from '$lib/stores/dashboard';
 	import { fetchEnvironmentDeleteCounts } from '$lib/utils/environment-delete';
 
@@ -115,6 +123,31 @@
 
 	// Track which environments have scanner enabled (for shield indicator)
 	let envScannerStatus = $state<{ [id: number]: boolean }>({});
+
+	// --- Reorder ---
+	// dndzone owns the gesture (pointer + touch + keyboard); we own the order.
+	let reorderMode = $state(false);
+	// The list dndzone is currently showing: its own during a drag, ours otherwise.
+	let dragList = $state<Environment[] | null>(null);
+
+	const orderedEnvironments = $derived(
+		dragList ?? applyOrder(environments, $environmentOrder, (env) => env.id)
+	);
+
+	/** While dragging, follow dndzone's list so the row tracks the pointer. */
+	function handleConsider(e: CustomEvent<DndEvent<Environment>>) {
+		dragList = e.detail.items;
+	}
+
+	/** On drop, keep the new order and persist it. */
+	function handleFinalize(e: CustomEvent<DndEvent<Environment>>) {
+		const items = e.detail.items;
+		dragList = null;
+		// An environment added or removed mid-gesture would make this a partial
+		// list; saving it would drop whatever the drag never saw.
+		if (items.length !== environments.length) return;
+		environmentOrder.save(items.map((env) => env.id));
+	}
 
 	// Notification channels for modal
 	let notifications = $state<NotificationSetting[]>([]);
@@ -429,15 +462,42 @@
 						<Table.Head class="w-[180px] text-right">Actions</Table.Head>
 					</Table.Row>
 				</Table.Header>
-				<Table.Body>
-					{#each environments as env (env.id)}
+				<!-- A plain <tbody>, not Table.Body: dndzone is an action and needs the
+				     element. The class is Table.Body's own. -->
+				<tbody
+					class="[&_tr:last-child]:border-0"
+					use:dndzone={{
+						items: orderedEnvironments,
+						dragDisabled: !reorderMode,
+						flipDurationMs: 180,
+						dropTargetStyle: {}
+					}}
+					onconsider={handleConsider}
+					onfinalize={handleFinalize}
+				>
+					{#each orderedEnvironments as env (env.id)}
 						{@const testResult = testResults[env.id]}
 						{@const isTesting = testingEnvs.has(env.id)}
 						{@const hasScannerEnabled = envScannerStatus[env.id]}
-						<Table.Row>
+						<!-- A plain <tr>, not Table.Row: dndzone needs the real element.
+						     The class is Table.Row's own, so the styling is unchanged. -->
+						<tr
+							animate:flip={{ duration: 180, easing: cubicOut }}
+							class="hover:[&,&>svelte-css-wrapper]:[&>th,td]:bg-muted/50 data-[state=selected]:bg-muted border-b transition-colors {reorderMode
+								? 'cursor-grab active:cursor-grabbing'
+								: ''}"
+						>
 							<!-- Name Column -->
 							<Table.Cell>
 								<div class="flex items-center gap-2">
+									{#if reorderMode}
+										<!-- Visual affordance only: dndzone handles the whole row,
+										     pointer and keyboard alike. -->
+										<GripVertical
+											class="w-4 h-4 shrink-0 text-muted-foreground"
+											aria-hidden="true"
+										/>
+									{/if}
 									<EnvironmentIcon icon={env.icon || 'globe'} envId={env.id} class="w-4 h-4 text-muted-foreground shrink-0" />
 									{#if env.connectionType === 'socket' || !env.connectionType}
 										<span title="Unix socket connection" class="shrink-0">
@@ -681,10 +741,46 @@
 									{/if}
 								</div>
 							</Table.Cell>
-						</Table.Row>
+						</tr>
 					{/each}
-				</Table.Body>
+				</tbody>
 			</Table.Root>
+
+			<div class="flex items-center gap-3 px-2 py-1 mt-1 text-xs leading-none">
+				{#if reorderMode}
+					<button
+						type="button"
+						class="flex items-center gap-1 whitespace-nowrap font-medium text-muted-foreground hover:text-foreground transition-colors"
+						title="List environments by name again"
+						onclick={() => {
+							environmentOrder.reset();
+							dragList = null;
+							reorderMode = false;
+						}}
+					>
+						<RotateCcw class="w-3 h-3 shrink-0 text-red-400" />
+						Reset
+					</button>
+					<button
+						type="button"
+						class="flex items-center gap-1 whitespace-nowrap font-medium text-muted-foreground hover:text-foreground transition-colors"
+						onclick={() => (reorderMode = false)}
+					>
+						<Check class="w-3 h-3 shrink-0 text-emerald-500" />
+						Apply
+					</button>
+				{:else}
+					<button
+						type="button"
+						class="flex items-center gap-1 whitespace-nowrap font-medium text-muted-foreground hover:text-foreground transition-colors"
+						title="Drag environments into the order you want them listed in"
+						onclick={() => (reorderMode = true)}
+					>
+						<ArrowUpDown class="w-3 h-3 shrink-0" />
+						Reorder
+					</button>
+				{/if}
+			</div>
 		</div>
 	{/if}
 </div>

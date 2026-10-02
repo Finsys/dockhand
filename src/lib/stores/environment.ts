@@ -1,5 +1,7 @@
-import { writable, get } from 'svelte/store';
+import { writable, get, derived } from 'svelte/store';
 import { browser } from '$app/environment';
+import { applyOrder } from '$lib/utils/apply-order';
+import { environmentOrder } from '$lib/stores/environment-order';
 
 export interface CurrentEnvironment {
 	id: number;
@@ -99,7 +101,13 @@ function createEnvironmentsStore() {
 		try {
 			const response = await fetch('/api/environments');
 			if (response.ok) {
-				const data: Environment[] = await response.json();
+				// Ordered before anything reads it, so the "select the first one" rule
+				// below opens the app on the environment the user put at the top.
+				const data = applyOrder<Environment>(
+					await response.json(),
+					get(environmentOrder),
+					(env) => env.id
+				);
 				set(data);
 				loaded.set(true);
 
@@ -157,14 +165,21 @@ function createEnvironmentsStore() {
 		}
 	}
 
-	// Auto-fetch on browser load
+	// The saved order is loaded before the list, every time: it decides both the
+	// displayed order and which environment "select the first one" picks. A refresh
+	// after a sign-in belongs to a different user, so their order is fetched too.
+	async function loadOrderThenFetch() {
+		await environmentOrder.init().catch(() => undefined);
+		await fetchEnvironments();
+	}
+
 	if (browser) {
-		fetchEnvironments();
+		loadOrderThenFetch();
 	}
 
 	return {
 		subscribe,
-		refresh: fetchEnvironments,
+		refresh: loadOrderThenFetch,
 		set,
 		update,
 		loaded, // Expose the loaded store for consumers to know when first fetch is complete
@@ -182,4 +197,16 @@ function createEnvironmentsStore() {
 	};
 }
 
-export const environments = createEnvironmentsStore();
+const environmentsStore = createEnvironmentsStore();
+
+/**
+ * The environment list in the user's saved order. The order is applied on READ as
+ * well as at fetch time, so reordering moves every list in the app at once rather
+ * than waiting for the next refresh.
+ */
+export const environments = {
+	...environmentsStore,
+	subscribe: derived([environmentsStore, environmentOrder], ([list, order]) =>
+		applyOrder<Environment>(list, order, (env) => env.id)
+	).subscribe
+};

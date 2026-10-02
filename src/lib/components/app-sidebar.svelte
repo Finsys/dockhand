@@ -35,11 +35,18 @@
 		RotateCcw
 	} from 'lucide-svelte';
 	import { flip } from 'svelte/animate';
+	import { dndzone, type DndEvent } from 'svelte-dnd-action';
 	import { licenseStore } from '$lib/stores/license';
 	import { authStore, hasAnyAccess } from '$lib/stores/auth';
 	import { selfUpdate } from '$lib/stores/self-update';
 	import { appSettings } from '$lib/stores/settings';
-	import { sidebarPreferencesStore, orderItems } from '$lib/stores/sidebar-preferences';
+	import {
+		sidebarPreferencesStore,
+		orderItems,
+		mergeVisibleOrder
+	} from '$lib/stores/sidebar-preferences';
+	import { environmentOrder } from '$lib/stores/environment-order';
+	import { tagOrder } from '$lib/stores/tag-order';
 	import * as Avatar from '$lib/components/ui/avatar';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 
@@ -81,6 +88,8 @@
 		sidebar.setOpenMobile(false);
 		// Per-user layout must not leak to the next user on this browser
 		sidebarPreferencesStore.clearLocal();
+		environmentOrder.clearLocal();
+		tagOrder.clearLocal();
 		// The store navigates away itself when the provider has a session to end, and
 		// that destination is already this same login page.
 		const { logoutUrl, next } = await authStore.logout();
@@ -145,9 +154,12 @@
 	// --- Sidebar customization (#1252): reorder + hide/show menu items ---
 
 	let editMode = $state(false);
-	let dragHref = $state<string | null>(null);
-	// Order buffer while dragging - persisted once on drop, not per dragover
+	// Order buffer while dragging - persisted once on drop, not per move
 	let draftOrder = $state<string[] | null>(null);
+	// dndzone keys items by `id`, which the menu does not carry; href is the key.
+	type DndMenuItem = MenuItem & { id: string };
+	// The list dndzone is currently showing: its own mid-drag, ours otherwise.
+	let dragItems = $state<DndMenuItem[] | null>(null);
 
 	// Full menu (incl. permission-hidden items) in the user's saved order,
 	// so reordering never loses positions of items the user can't see.
@@ -155,6 +167,9 @@
 	const hiddenSet = $derived(new Set($sidebarPreferencesStore.hidden));
 	// Permission filter first, then user-hidden filter
 	const editableItems = $derived(orderedItems.filter(canSeeMenuItem));
+	const dndItems: DndMenuItem[] = $derived(
+		dragItems ?? editableItems.map((item) => ({ ...item, id: item.href }))
+	);
 	const visibleItems = $derived(editableItems.filter((item) => !hiddenSet.has(item.href)));
 
 	// Edit mode only makes sense expanded - exit when the sidebar collapses
@@ -179,9 +194,8 @@
 	}
 
 	/**
-	 * Place fromHref before/after toHref in the full order list.
-	 * No-ops when the result wouldn't change, which keeps dragover
-	 * events from thrashing the list while the pointer hovers a row.
+	 * Place fromHref before/after toHref in the full order list. Backs the
+	 * keyboard reorder; pointer drags go through dndzone.
 	 */
 	function moveTo(fromHref: string, toHref: string, before: boolean) {
 		const current = orderedItems.map((i) => i.href);
@@ -195,6 +209,9 @@
 	}
 
 	function moveBy(href: string, delta: -1 | 1) {
+		// While dndzone owns the list its drop writes the order; a keyboard move
+		// here would save one the drop is about to replace.
+		if (dragItems) return;
 		const visible = editableItems.map((i) => i.href);
 		const from = visible.indexOf(href);
 		const to = from + delta;
@@ -206,23 +223,14 @@
 		}
 	}
 
-	function endDrag() {
-		if (draftOrder) {
-			persist(draftOrder);
-			draftOrder = null;
-		}
-		dragHref = null;
+	function handleConsider(e: CustomEvent<DndEvent<DndMenuItem>>) {
+		dragItems = e.detail.items;
 	}
 
-	// Transparent 1x1 drag image: suppresses the browser's ghost snapshot so
-	// the flip animation of the list itself reads as the drag movement.
-	let ghostImg: HTMLImageElement | null = null;
-	function transparentGhost(): HTMLImageElement {
-		if (!ghostImg) {
-			ghostImg = new Image(1, 1);
-			ghostImg.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
-		}
-		return ghostImg;
+	function handleFinalize(e: CustomEvent<DndEvent<DndMenuItem>>) {
+		const visibleOrder = e.detail.items.map((item) => item.href);
+		dragItems = null;
+		persist(mergeVisibleOrder(orderedItems.map((i) => i.href), visibleOrder));
 	}
 </script>
 
@@ -275,37 +283,26 @@
 
 	<Sidebar.Content>
 		<Sidebar.Group>
-			<Sidebar.Menu>
-				{#each editMode ? editableItems : visibleItems as item (item.href)}
-					<li class="group/menu-item relative" animate:flip={{ duration: 200 }}>
-						{#if editMode}
+			{#if editMode}
+				<!-- Own <ul> in edit mode: `use:` cannot be applied to a component,
+				     and dndzone needs the real list element. Same classes as Sidebar.Menu. -->
+				<ul
+					data-sidebar="menu"
+					class="flex w-full min-w-0 flex-col gap-1"
+					use:dndzone={{
+						items: dndItems,
+						flipDurationMs: 200,
+						dropTargetStyle: {}
+					}}
+					onconsider={handleConsider}
+					onfinalize={handleFinalize}
+				>
+					{#each dndItems as item (item.id)}
+						<li class="group/menu-item relative" animate:flip={{ duration: 200 }}>
 							<div
 								role="listitem"
-								class="flex items-center gap-1.5 px-1.5 py-1 rounded-md text-xs select-none transition-opacity
-									{hiddenSet.has(item.href) ? 'opacity-40' : ''}
-									{dragHref === item.href ? 'opacity-30 bg-sidebar-accent' : ''}"
-								draggable="true"
-								ondragstart={(e) => {
-									dragHref = item.href;
-									if (e.dataTransfer) {
-										e.dataTransfer.effectAllowed = 'move';
-										// Safari won't start a drag without data
-										e.dataTransfer.setData('text/plain', item.href);
-										e.dataTransfer.setDragImage(transparentGhost(), 0, 0);
-									}
-								}}
-								ondragover={(e) => {
-									e.preventDefault();
-									if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
-									if (!dragHref || dragHref === item.href) return;
-									// Only reorder when the pointer is past the row midpoint,
-									// so a hover near the boundary doesn't flip back and forth
-									const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-									const before = e.clientY < rect.top + rect.height / 2;
-									moveTo(dragHref, item.href, before);
-								}}
-								ondrop={(e) => e.preventDefault()}
-								ondragend={endDrag}
+								class="flex items-center gap-1.5 px-1.5 py-1 rounded-md text-xs select-none transition-opacity cursor-grab
+									{hiddenSet.has(item.href) ? 'opacity-40' : ''}"
 							>
 								<button
 									type="button"
@@ -313,8 +310,13 @@
 									aria-label="Reorder {item.label}"
 									title="Drag to reorder (or use arrow keys)"
 									onkeydown={(e) => {
-										if (e.key === 'ArrowUp') { e.preventDefault(); moveBy(item.href, -1); }
-										if (e.key === 'ArrowDown') { e.preventDefault(); moveBy(item.href, 1); }
+										// dndzone listens for the same arrows on the row this button
+										// sits in, so the event must not reach it: both would move
+										// the item, and one keypress would shift it twice.
+										if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+										e.preventDefault();
+										e.stopPropagation();
+										moveBy(item.href, e.key === 'ArrowUp' ? -1 : 1);
 									}}
 								>
 									<GripVertical class="w-3 h-3" />
@@ -335,15 +337,21 @@
 									{/if}
 								</button>
 							</div>
-						{:else}
+						</li>
+					{/each}
+				</ul>
+			{:else}
+				<Sidebar.Menu>
+					{#each visibleItems as item (item.href)}
+						<li class="group/menu-item relative" animate:flip={{ duration: 200 }}>
 							<Sidebar.MenuButton href={item.href} isActive={isActive(item.href)} tooltipContent={item.label} onclick={() => sidebar.setOpenMobile(false)}>
 								<item.Icon aria-hidden="true" />
 								<span class="group-data-[state=collapsed]:hidden">{item.label}</span>
 							</Sidebar.MenuButton>
-						{/if}
-					</li>
-				{/each}
-			</Sidebar.Menu>
+						</li>
+					{/each}
+				</Sidebar.Menu>
+			{/if}
 			{#if editMode}
 				<div class="flex items-center justify-between px-2 py-1 mt-1 text-xs leading-none">
 					<button

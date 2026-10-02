@@ -1,10 +1,15 @@
 <script lang="ts">
 	import * as Popover from '$lib/components/ui/popover';
 	import { Button } from '$lib/components/ui/button';
-	import { Tag as TagIcon, Check, ChevronDown, ChevronRight, Rows3, Paintbrush, Pencil, Settings2 } from 'lucide-svelte';
+	import { Tag as TagIcon, Check, ChevronDown, ChevronRight, Rows3, Paintbrush, Pencil, Settings2, GripVertical, RotateCcw, ArrowUpDown, Layers } from 'lucide-svelte';
 	import { TogglePill } from '$lib/components/ui/toggle-pill';
 	import TagLucideIcon from '$lib/components/TagLucideIcon.svelte';
 	import { tagHex } from '$lib/utils/tags-core';
+	import { tagOrder } from '$lib/stores/tag-order';
+	import { applyOrder } from '$lib/utils/apply-order';
+	import { dndzone, type DndEvent } from 'svelte-dnd-action';
+	import { flip } from 'svelte/animate';
+	import { cubicOut } from 'svelte/easing';
 	import { ToggleSwitch } from '$lib/components/ui/toggle-pill';
 	import type { Tag, TagFilterMode } from '$lib/utils/tags-core';
 
@@ -16,15 +21,45 @@
 		showTags?: boolean;       // 'show tag chips on rows' toggle (bindable); omit to hide it
 		showBands?: boolean;      // 'coloured group bands' toggle (bindable); shown only while groupBy is on
 		inlineEditing?: boolean;  // 'show a tag button on each row' toggle (bindable); omit to hide it
+		inheritStackTags?: boolean; // 'show a container its stack's tags' toggle (bindable); omit to hide it
 		settingsExpanded?: boolean; // collapsed state of the settings section (bindable)
 		width?: string;
 	}
-	let { tags, selected = $bindable([]), mode = $bindable('all'), groupBy = $bindable(undefined), showTags = $bindable(undefined), showBands = $bindable(undefined), inlineEditing = $bindable(undefined), settingsExpanded = $bindable(true), width = 'w-44' }: Props = $props();
+	let { tags, selected = $bindable([]), mode = $bindable('all'), groupBy = $bindable(undefined), showTags = $bindable(undefined), showBands = $bindable(undefined), inlineEditing = $bindable(undefined), inheritStackTags = $bindable(undefined), settingsExpanded = $bindable(true), width = 'w-44' }: Props = $props();
 
 	// Whether any of the settings toggles are present, so the section only renders when it has content.
-	const hasSettings = $derived(groupBy !== undefined || showTags !== undefined || inlineEditing !== undefined);
+	const hasSettings = $derived(groupBy !== undefined || showTags !== undefined || inlineEditing !== undefined || inheritStackTags !== undefined);
 
 	let open = $state(false);
+
+	// --- Reorder ---
+	// dndzone owns the gesture; we own the order. The catalogue is shared, but the
+	// arrangement is this user's, and it drives grid grouping as well as this list.
+	let reorderMode = $state(false);
+	let dragList = $state<Tag[] | null>(null);
+
+	const orderedTags = $derived(dragList ?? applyOrder(tags, $tagOrder, (t) => t.id));
+
+	function handleConsider(e: CustomEvent<DndEvent<Tag>>) {
+		dragList = e.detail.items;
+	}
+
+	function handleFinalize(e: CustomEvent<DndEvent<Tag>>) {
+		const items = e.detail.items;
+		dragList = null;
+		// A tag created or deleted mid-gesture would make this a partial list.
+		if (items.length !== tags.length) return;
+		tagOrder.save(items.map((t) => t.id));
+	}
+
+	// Leaving the popover ends reorder mode, so reopening does not swallow the
+	// click meant to select a tag.
+	$effect(() => {
+		if (!open && reorderMode) {
+			reorderMode = false;
+			dragList = null;
+		}
+	});
 
 	function toggle(id: number) {
 		selected = selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id];
@@ -94,6 +129,13 @@
 						<TogglePill bind:checked={inlineEditing} />
 					</div>
 				{/if}
+				{#if inheritStackTags !== undefined}
+					<div class="flex items-center gap-2 px-2 py-1.5">
+						<Layers class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+						<span class="text-xs flex-1 whitespace-nowrap">Show tags from stacks</span>
+						<TogglePill bind:checked={inheritStackTags} />
+					</div>
+				{/if}
 			{/if}
 			<div class="my-1 h-px bg-border"></div>
 		{/if}
@@ -105,14 +147,30 @@
 				<span class="text-2xs text-muted-foreground mr-auto">Match</span>
 				<ToggleSwitch value={mode} leftValue="any" rightValue="all" onchange={(m) => (mode = m as TagFilterMode)} />
 			</div>
-			<div class="max-h-64 overflow-y-auto">
-				{#each tags as tag (tag.id)}
+			<div
+				class="max-h-64 overflow-y-auto"
+				use:dndzone={{
+					items: orderedTags,
+					dragDisabled: !reorderMode,
+					flipDurationMs: 180,
+					dropTargetStyle: {}
+				}}
+				onconsider={handleConsider}
+				onfinalize={handleFinalize}
+			>
+				{#each orderedTags as tag (tag.id)}
 					{@const isSel = selected.includes(tag.id)}
 					<button
 						type="button"
-						class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted"
-						onclick={() => toggle(tag.id)}
+						animate:flip={{ duration: 180, easing: cubicOut }}
+						class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted {reorderMode
+							? 'cursor-grab active:cursor-grabbing'
+							: ''}"
+						onclick={() => { if (!reorderMode) toggle(tag.id); }}
 					>
+						{#if reorderMode}
+							<GripVertical class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+						{/if}
 						{#if tag.icon}
 							<TagLucideIcon name={tag.icon} class="h-3.5 w-3.5 shrink-0" style="color: {tagHex(tag.color)};" />
 						{:else}
@@ -123,10 +181,47 @@
 					</button>
 				{/each}
 			</div>
-			{#if selected.length > 0}
+			{#if selected.length > 0 && !reorderMode}
 				<button type="button" class="mt-1 w-full rounded px-2 py-1 text-2xs text-muted-foreground hover:bg-muted" onclick={() => (selected = [])}>
 					Clear
 				</button>
+			{/if}
+			{#if tags.length > 1}
+				<div class="mt-1 flex items-center gap-3 border-t px-2 pt-1.5 text-2xs leading-none">
+					{#if reorderMode}
+						<button
+							type="button"
+							class="flex items-center gap-1 font-medium text-muted-foreground hover:text-foreground"
+							title="List tags by name again"
+							onclick={() => {
+								tagOrder.reset();
+								dragList = null;
+								reorderMode = false;
+							}}
+						>
+							<RotateCcw class="h-3 w-3 shrink-0 text-red-400" />
+							Reset
+						</button>
+						<button
+							type="button"
+							class="flex items-center gap-1 font-medium text-muted-foreground hover:text-foreground"
+							onclick={() => (reorderMode = false)}
+						>
+							<Check class="h-3 w-3 shrink-0 text-emerald-500" />
+							Apply
+						</button>
+					{:else}
+						<button
+							type="button"
+							class="flex items-center gap-1 font-medium text-muted-foreground hover:text-foreground"
+							title="Drag tags into the order you want them listed and grouped in"
+							onclick={() => (reorderMode = true)}
+						>
+							<ArrowUpDown class="h-3 w-3 shrink-0" />
+							Reorder
+						</button>
+					{/if}
+				</div>
 			{/if}
 		{/if}
 	</Popover.Content>

@@ -1,4 +1,5 @@
 import { describe, test, expect } from 'bun:test';
+import { applyOrder } from '../src/lib/utils/apply-order';
 import { normalizeTag, matchesTagFilter, normalizeColor, tagGroupDescriptor, compareTagNames, tagHex, TAG_COLORS, MAX_TAG_LENGTH, type Tag } from '../src/lib/utils/tags-core';
 
 describe('normalizeTag', () => {
@@ -28,6 +29,73 @@ describe('normalizeTag', () => {
 
 describe('tagGroupDescriptor', () => {
 	const mk = (id: number, name: string, color = 'blue', icon: string | null = null): Tag => ({ id, name, color, icon });
+
+	/** Group order follows the user's arrangement of the tag catalogue. */
+	describe('order weight', () => {
+		const prod = mk(1, 'prod');
+		const test_ = mk(2, 'test');
+		const devel = mk(3, 'devel');
+
+		/** Weights are opaque; what matters is the order they produce. */
+		const rank = (groups: Tag[][], order: number[] = []) =>
+			groups
+				.map((g) => ({ label: tagGroupDescriptor(g, order)!.label, w: tagGroupDescriptor(g, order)!.order }))
+				.sort((a, b) => a.w - b.w || a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }))
+				.map((g) => g.label);
+
+		test('with no arrangement, fewer tags first then alphabetical - unchanged', () => {
+			expect(rank([[test_], [prod, test_], [prod]])).toEqual(['prod', 'test', 'prod + test']);
+		});
+
+		test('a group sits where its highest-placed tag sits', () => {
+			// The user put prod first, then devel, then test.
+			expect(rank([[test_], [devel], [prod]], [1, 3, 2])).toEqual(['prod', 'devel', 'test']);
+		});
+
+		test('pinning prod pulls every group carrying prod forward', () => {
+			expect(rank([[devel], [test_, prod]], [1, 3, 2])).toEqual(['prod + test', 'devel']);
+		});
+
+		test('the plain tag leads the combinations that merely include it', () => {
+			// The tie-break: same best tag, so the smaller group comes first.
+			expect(rank([[prod, test_], [prod], [devel, prod]], [1, 2, 3])).toEqual([
+				'prod',
+				'devel + prod',
+				'prod + test'
+			]);
+		});
+
+		test('a tag the user never arranged ranks after every one they did', () => {
+			expect(rank([[test_], [prod]], [1])).toEqual(['prod', 'test']);
+		});
+
+		test('an id left over from a deleted tag does not drag the group forward', () => {
+			// 99 no longer exists; groups rank by the tags they actually have.
+			expect(rank([[prod], [test_]], [99, 2, 1])).toEqual(['test', 'prod']);
+		});
+
+		test('groups read the same way the tag list does', () => {
+			// The pages resolve the saved order through applyOrder before grouping, so
+			// a tag the user never arranged sits in the same place on both.
+			const catalogue = [mk(3, 'devel'), mk(7, 'pre-prod'), mk(1, 'prod'), mk(2, 'test')];
+			const saved = [1]; // only prod arranged
+			const resolved = applyOrder(catalogue, saved, (t) => t.id).map((t) => t.id);
+			const list = applyOrder(catalogue, saved, (t) => t.id).map((t) => t.name);
+			const groups = catalogue
+				.map((t) => ({ label: t.name, w: tagGroupDescriptor([t], resolved)!.order }))
+				.sort((a, b) => a.w - b.w || a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }))
+				.map((g) => g.label);
+			expect(groups).toEqual(list);
+		});
+
+		test('the arrangement never changes the key, label or colour', () => {
+			const plain = tagGroupDescriptor([prod, test_]);
+			const ordered = tagGroupDescriptor([prod, test_], [2, 1]);
+			expect(ordered!.key).toBe(plain!.key);
+			expect(ordered!.label).toBe(plain!.label);
+			expect(ordered!.color).toBe(plain!.color);
+		});
+	});
 
 	test('untagged -> null (falls into the Untagged bucket)', () => {
 		expect(tagGroupDescriptor([])).toBeNull();

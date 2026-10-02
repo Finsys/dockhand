@@ -7,6 +7,7 @@
  */
 
 import { writable } from 'svelte/store';
+import { applyOrder } from '$lib/utils/apply-order';
 
 export interface SidebarPreferences {
 	order: string[];
@@ -45,31 +46,22 @@ function saveToStorage(prefs: SidebarPreferences) {
 	}
 }
 
-/**
- * Apply a saved order to the default menu item list.
- * Unknown hrefs in the saved order are dropped; items missing from the
- * saved order (e.g. added in a newer release) are inserted right after
- * their nearest preceding default sibling, so new items land where the
- * default layout puts them.
- */
+/** Apply a saved order to the default menu item list, keyed by href. */
 export function orderItems<T extends { href: string }>(items: readonly T[], order: string[]): T[] {
-	const byHref = new Map(items.map((item) => [item.href, item]));
-	const result = order.filter((h) => byHref.has(h)).map((h) => byHref.get(h)!);
+	return applyOrder(items, order, (item) => item.href);
+}
 
-	items.forEach((item, i) => {
-		if (result.includes(item)) return;
-		let at = 0;
-		for (let j = i - 1; j >= 0; j--) {
-			const k = result.indexOf(items[j]);
-			if (k !== -1) {
-				at = k + 1;
-				break;
-			}
-		}
-		result.splice(at, 0, item);
-	});
-
-	return result;
+/**
+ * Splice a reordered visible list back into the full order.
+ *
+ * The drag list only ever holds the items a user may see, so the entries hidden
+ * by permission or licence keep the slots they already occupy; replacing the
+ * full order with the visible one would drop them.
+ */
+export function mergeVisibleOrder(fullOrder: string[], visibleOrder: string[]): string[] {
+	const visible = new Set(visibleOrder);
+	let next = 0;
+	return fullOrder.map((href) => (visible.has(href) ? visibleOrder[next++] : href));
 }
 
 function createSidebarPreferencesStore() {

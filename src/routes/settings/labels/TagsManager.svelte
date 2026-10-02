@@ -4,12 +4,17 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import * as Popover from '$lib/components/ui/popover';
-	import { Tags as TagsIcon, Plus, Trash2, Check, Pencil } from 'lucide-svelte';
+	import { Tags as TagsIcon, Plus, Trash2, Check, Pencil, GripVertical, RotateCcw, ArrowUpDown } from 'lucide-svelte';
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
 	import TagIconPicker from '$lib/components/TagIconPicker.svelte';
 	import TagLucideIcon from '$lib/components/TagLucideIcon.svelte';
 	import { toast } from 'svelte-sonner';
 	import { isAdmin } from '$lib/stores/auth';
+	import { tagOrder } from '$lib/stores/tag-order';
+	import { applyOrder } from '$lib/utils/apply-order';
+	import { dndzone, type DndEvent } from 'svelte-dnd-action';
+	import { flip } from 'svelte/animate';
+	import { cubicOut } from 'svelte/easing';
 	import { TAG_COLORS, tagHex, normalizeTag, type Tag, type TagColor } from '$lib/utils/tags-core';
 	import { Tag as TagIcon } from 'lucide-svelte';
 
@@ -17,6 +22,26 @@
 	let loading = $state(false);
 	// The tag catalog is global and shared; only admins may create/rename/recolour/delete.
 	const canEdit = $derived($isAdmin);
+
+	// --- Reorder ---
+	// Editing the shared catalogue is an admin's job, but the order it reads in is
+	// each user's own, so anyone may rearrange their own view.
+	let reorderMode = $state(false);
+	let dragList = $state<Tag[] | null>(null);
+
+	const orderedTags = $derived(dragList ?? applyOrder(tags, $tagOrder, (t) => t.id));
+
+	function handleConsider(e: CustomEvent<DndEvent<Tag>>) {
+		dragList = e.detail.items;
+	}
+
+	function handleFinalize(e: CustomEvent<DndEvent<Tag>>) {
+		const items = e.detail.items;
+		dragList = null;
+		// A tag created or deleted mid-gesture would make this a partial list.
+		if (items.length !== tags.length) return;
+		tagOrder.save(items.map((t) => t.id));
+	}
 
 	// New-tag form
 	let newName = $state('');
@@ -157,9 +182,27 @@
 		{:else if tags.length === 0}
 			<div class="py-6 text-center text-sm text-muted-foreground">No tags yet</div>
 		{:else}
-			<div class="flex flex-wrap gap-2">
-				{#each tags as tag (tag.id)}
-					<div class="flex items-center gap-1.5 rounded-md border px-2 py-1">
+			<div
+				class="flex flex-wrap gap-2"
+				use:dndzone={{
+					items: orderedTags,
+					dragDisabled: !reorderMode,
+					flipDurationMs: 180,
+					dropTargetStyle: {}
+				}}
+				onconsider={handleConsider}
+				onfinalize={handleFinalize}
+			>
+				{#each orderedTags as tag (tag.id)}
+					<div
+						animate:flip={{ duration: 180, easing: cubicOut }}
+						class="flex items-center gap-1.5 rounded-md border px-2 py-1 {reorderMode
+							? 'cursor-grab active:cursor-grabbing'
+							: ''}"
+					>
+						{#if reorderMode}
+							<GripVertical class="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+						{/if}
 						{#if editId === tag.id}
 							<Input bind:value={editName} bind:ref={editInput} class="h-6 w-32 text-sm"
 								onkeydown={(e: KeyboardEvent) => { if (e.key === 'Enter') saveEdit(tag); if (e.key === 'Escape') editId = null; }} />
@@ -171,7 +214,7 @@
 								{#if tag.icon}<TagLucideIcon name={tag.icon} class="h-2.5 w-2.5" />{:else}<TagIcon class="h-2.5 w-2.5" />{/if}
 								{tag.name}
 							</span>
-							{#if canEdit}
+							{#if canEdit && !reorderMode}
 								<!-- Recolour -->
 								<Popover.Root open={colorPopoverId === tag.id} onOpenChange={(o) => colorPopoverId = o ? tag.id : null}>
 									<Popover.Trigger>
@@ -214,6 +257,43 @@
 					</div>
 				{/each}
 			</div>
+			{#if tags.length > 1}
+				<div class="mt-2 flex items-center gap-3 text-xs leading-none">
+					{#if reorderMode}
+						<button
+							type="button"
+							class="flex items-center gap-1 font-medium text-muted-foreground hover:text-foreground transition-colors"
+							title="List tags by name again"
+							onclick={() => {
+								tagOrder.reset();
+								dragList = null;
+								reorderMode = false;
+							}}
+						>
+							<RotateCcw class="h-3 w-3 shrink-0 text-red-400" />
+							Reset
+						</button>
+						<button
+							type="button"
+							class="flex items-center gap-1 font-medium text-muted-foreground hover:text-foreground transition-colors"
+							onclick={() => (reorderMode = false)}
+						>
+							<Check class="h-3 w-3 shrink-0 text-emerald-500" />
+							Apply
+						</button>
+					{:else}
+						<button
+							type="button"
+							class="flex items-center gap-1 font-medium text-muted-foreground hover:text-foreground transition-colors"
+							title="Drag tags into the order you want them listed and grouped in"
+							onclick={() => (reorderMode = true)}
+						>
+							<ArrowUpDown class="h-3 w-3 shrink-0" />
+							Reorder
+						</button>
+					{/if}
+				</div>
+			{/if}
 		{/if}
 	</Card.Content>
 </Card.Root>
