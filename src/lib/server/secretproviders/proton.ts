@@ -30,16 +30,24 @@ import { isAbsolute, join } from 'node:path';
 import { KeyedSerializer, QueueTimeoutError } from '../keyed-serializer';
 import type { ProtonConfig, SecretProvider, TestConnectionResult } from './shared';
 import { stripSurroundingQuotes } from './shared';
+import { cliTimeoutMs, cliTimeoutMessage, MAX_TIMER_MS } from './cli-timeout-core';
+import { protonTokenFormatError, passCliFailureReason } from './proton-token-core';
 
 const DEFAULT_PASS_CLI_PATH = '/usr/local/bin/pass-cli';
-const LOGIN_TIMEOUT_MS = 30_000;
-const COMMAND_TIMEOUT_MS = 30_000;
+// Read per call rather than at import, so a test (and an operator restarting the
+// process) sees the current value.
+const LOGIN_TIMEOUT_ENV = 'PROTON_LOGIN_TIMEOUT_MS';
+const COMMAND_TIMEOUT_ENV = 'PROTON_COMMAND_TIMEOUT_MS';
+const loginTimeoutMs = () => cliTimeoutMs(process.env[LOGIN_TIMEOUT_ENV], 30_000);
+const commandTimeoutMs = () => cliTimeoutMs(process.env[COMMAND_TIMEOUT_ENV], 30_000);
 const LOGOUT_TIMEOUT_MS = 10_000;
 const KILL_GRACE_MS = 2_000;
 const LIST_OUTPUT_LIMIT = 10 * 1024 * 1024;
 const VIEW_OUTPUT_LIMIT = 1 * 1024 * 1024;
 const LOGIN_OUTPUT_LIMIT = 64 * 1024;
 const STDERR_OUTPUT_LIMIT = 64 * 1024;
+// Enough for pass-cli's "Caused by:" chain, short enough to stay a message.
+const STDERR_TAIL_CHARS = 2048;
 
 // pass://VAULT/ITEM/FIELD. VAULT and ITEM may be an opaque share/item id OR a
 // human-readable name (pass-cli resolves names to ids itself); names can contain
@@ -74,6 +82,9 @@ interface CommandLimits {
 	timeoutMs: number;
 	stdoutBytes: number;
 	stderrBytes: number;
+	/** What hung, and which env var raises its limit, for the timeout message. */
+	phase: string;
+	timeoutEnvVar: string;
 	/** Set only on the `login` call; passed to pass-cli via its own env channel. */
 	accessToken?: string;
 }
@@ -126,6 +137,7 @@ async function executePassCli(
 		return await new Promise<Buffer>((resolve, reject) => {
 			let stdoutBytes = 0;
 			let stderrBytes = 0;
+			let stderrTail = '';
 			let failure: PassCliError | undefined;
 			let settled = false;
 			let killTimer: ReturnType<typeof setTimeout> | undefined;
@@ -156,7 +168,17 @@ async function executePassCli(
 			};
 
 			const timeout = setTimeout(
-				() => terminate(new PassCliError('Proton Pass pass-cli command timed out')),
+				() =>
+					terminate(
+						new PassCliError(
+							cliTimeoutMessage(
+								'Proton Pass',
+								limits.phase,
+								limits.timeoutMs,
+								limits.timeoutEnvVar
+							)
+						)
+					),
 				limits.timeoutMs
 			);
 
@@ -171,13 +193,17 @@ async function executePassCli(
 				stdoutChunks.push(Buffer.from(data));
 			});
 
-			// stderr is deliberately never retained: only its byte count is observed.
+			// Only the tail is kept, and only to name the failure: pass-cli puts the
+			// real cause there ("token is invalid, expired or has been deleted") while
+			// the exit code says nothing. Capped, and stripped before it is shown.
 			child.stderr?.on('data', (chunk: Buffer | string) => {
 				if (failure) return;
 				stderrBytes += Buffer.byteLength(chunk);
 				if (stderrBytes > limits.stderrBytes) {
 					terminate(new PassCliError('Proton Pass pass-cli command exceeded the stderr limit'));
+					return;
 				}
+				stderrTail = (stderrTail + String(chunk)).slice(-STDERR_TAIL_CHARS);
 			});
 
 			child.once('error', (error) => {
@@ -211,7 +237,14 @@ async function executePassCli(
 					return;
 				}
 				if (code !== 0) {
-					reject(new PassCliError('Proton Pass pass-cli command failed'));
+					const reason = passCliFailureReason(stderrTail);
+					reject(
+						new PassCliError(
+							reason
+								? `Proton Pass ${limits.phase} failed: ${reason}`
+								: `Proton Pass ${limits.phase} failed`
+						)
+					);
 					return;
 				}
 				resolve(Buffer.concat(stdoutChunks, stdoutBytes));
@@ -236,13 +269,15 @@ const sessions = new KeyedSerializer();
  * How long a caller waits for the binary before giving up.
  *
  * Derived from the pass-cli timeouts rather than picked, so it cannot drift
- * below them: a session ahead of us is a login, its per-reference lookups and a
- * logout, each already individually bounded, so it always ends on its own. The
- * lookup allowance is generous because a reference-heavy stack legitimately
- * holds the binary for a while, and waiting is what keeps that deploy working.
- * A caller that exceeds even this is behind something wedged, not something slow.
+ * below them even when an operator raises those: a session ahead of us is a
+ * login, its per-reference lookups and a logout, each already individually
+ * bounded, so it always ends on its own. The lookup allowance is generous
+ * because a reference-heavy stack legitimately holds the binary for a while,
+ * and waiting is what keeps that deploy working. A caller that exceeds even
+ * this is behind something wedged, not something slow.
  */
-const SESSION_QUEUE_TIMEOUT_MS = LOGIN_TIMEOUT_MS + 20 * COMMAND_TIMEOUT_MS + LOGOUT_TIMEOUT_MS;
+const sessionQueueTimeoutMs = () =>
+	Math.min(loginTimeoutMs() + 20 * commandTimeoutMs() + LOGOUT_TIMEOUT_MS, MAX_TIMER_MS);
 
 /**
  * Runs `fn` inside a fresh, private pass-cli session: login, then the callback,
@@ -254,7 +289,11 @@ async function withSession<T>(
 	fn: (session: string) => Promise<T>
 ): Promise<T> {
 	try {
-		return await sessions.run(executablePath(), () => runSession(token, fn), SESSION_QUEUE_TIMEOUT_MS);
+		return await sessions.run(
+			executablePath(),
+			() => runSession(token, fn),
+			sessionQueueTimeoutMs()
+		);
 	} catch (error: unknown) {
 		if (error instanceof QueueTimeoutError) {
 			throw new PassCliError(
@@ -280,9 +319,11 @@ async function runSession<T>(
 
 	try {
 		const loginOutput = await executePassCli(sessionDir, ['login'], {
-			timeoutMs: LOGIN_TIMEOUT_MS,
+			timeoutMs: loginTimeoutMs(),
 			stdoutBytes: LOGIN_OUTPUT_LIMIT,
 			stderrBytes: STDERR_OUTPUT_LIMIT,
+			phase: 'login',
+			timeoutEnvVar: LOGIN_TIMEOUT_ENV,
 			accessToken: token
 		});
 		loginOutput.fill(0);
@@ -294,7 +335,9 @@ async function runSession<T>(
 			await executePassCli(sessionDir, ['logout', '--force'], {
 				timeoutMs: LOGOUT_TIMEOUT_MS,
 				stdoutBytes: LOGIN_OUTPUT_LIMIT,
-				stderrBytes: STDERR_OUTPUT_LIMIT
+				stderrBytes: STDERR_OUTPUT_LIMIT,
+				phase: 'logout',
+				timeoutEnvVar: COMMAND_TIMEOUT_ENV
 			}).catch(() => undefined);
 		}
 	} finally {
@@ -304,10 +347,8 @@ async function runSession<T>(
 
 function accessToken(config: ProtonConfig): string {
 	const token = typeof config?.token === 'string' ? config.token.trim() : '';
-	if (!token) throw new PassCliError('Proton Pass access token is empty');
-	if (token.includes('\0') || /\s/.test(token)) {
-		throw new PassCliError('Proton Pass access token is malformed');
-	}
+	const problem = protonTokenFormatError(token);
+	if (problem) throw new PassCliError(problem);
 	return token;
 }
 
@@ -429,9 +470,11 @@ export const protonProvider: SecretProvider<ProtonConfig> = {
 			const token = accessToken(config);
 			await withSession(token, async (session) => {
 				const output = await executePassCli(session, ['info', '--output', 'json'], {
-					timeoutMs: COMMAND_TIMEOUT_MS,
+					timeoutMs: commandTimeoutMs(),
 					stdoutBytes: LOGIN_OUTPUT_LIMIT,
-					stderrBytes: STDERR_OUTPUT_LIMIT
+					stderrBytes: STDERR_OUTPUT_LIMIT,
+					phase: 'account check',
+					timeoutEnvVar: COMMAND_TIMEOUT_ENV
 				});
 				output.fill(0);
 			});
@@ -448,63 +491,99 @@ export const protonProvider: SecretProvider<ProtonConfig> = {
 	): Promise<Map<string, string>> {
 		const token = accessToken(config);
 		const unique = [...new Set(refs)];
-		return withSession(token, async (session) => {
-			const resolved = new Map<string, string>();
-			for (const raw of unique) {
-				let ref: string;
-				try {
-					ref = passReference(raw);
-				} catch {
-					continue; // malformed reference: leave the literal in place
-				}
-				let output: Buffer | undefined;
-				try {
-					// A field-targeted `item view` prints the bare field value on stdout
-					// (no JSON envelope); a trailing newline is the only decoration.
-					output = await executePassCli(session, ['item', 'view', ref], {
-						timeoutMs: COMMAND_TIMEOUT_MS,
-						stdoutBytes: VIEW_OUTPUT_LIMIT,
-						stderrBytes: STDERR_OUTPUT_LIMIT
-					});
-					const value = output.toString('utf8').replace(/\r?\n$/, '');
-					if (value.includes('\0')) throw new PassCliError('field value is not valid text');
-					resolved.set(raw, value);
-				} catch (error: unknown) {
-					// A single lookup failure is logged and skipped; the caller keeps
-					// the literal. Transport-level failures still propagate below.
-					console.warn(`${logPrefix}Proton Pass reference did not resolve: ${sanitizedError(error)}`);
-				} finally {
-					output?.fill(0);
-				}
-			}
-			return resolved;
-		});
+		return withSession(token, (session) => lookupRefsInSession(session, unique, logPrefix));
+	},
+
+	async resolveCombined(
+		config: ProtonConfig,
+		selector: string | undefined,
+		refs: string[],
+		logPrefix = ''
+	): Promise<{ bulk: Record<string, string>; refs: Map<string, string> }> {
+		try {
+			const token = accessToken(config);
+			// The vault name is validated BEFORE the session opens, so a bad selector
+			// fails the same way it does on the bulk-only path instead of after a login.
+			const vault = selector ? vaultName(selector) : undefined;
+			const unique = [...new Set(refs)];
+			return await withSession(token, async (session) => ({
+				bulk: vault ? await listVaultInSession(session, vault) : {},
+				refs: unique.length ? await lookupRefsInSession(session, unique, logPrefix) : new Map()
+			}));
+		} catch (error: unknown) {
+			if (error instanceof PassCliError) throw error;
+			throw new PassCliError(sanitizedError(error));
+		}
 	},
 
 	async resolveBulk(config: ProtonConfig, selector: string): Promise<Record<string, string>> {
 		try {
 			const token = accessToken(config);
 			const vault = vaultName(selector);
-			return await withSession(token, async (session) => {
-				let output: Buffer | undefined;
-				try {
-					output = await executePassCli(
-						session,
-						['item', 'list', '--vault-name', vault, '--output', 'json', '--show-secrets'],
-						{
-							timeoutMs: COMMAND_TIMEOUT_MS,
-							stdoutBytes: LIST_OUTPUT_LIMIT,
-							stderrBytes: STDERR_OUTPUT_LIMIT
-						}
-					);
-					return bulkRecord(parseJson(output));
-				} finally {
-					output?.fill(0);
-				}
-			});
+			return await withSession(token, (session) => listVaultInSession(session, vault));
 		} catch (error: unknown) {
 			if (error instanceof PassCliError) throw error;
 			throw new PassCliError(sanitizedError(error));
 		}
 	}
 };
+
+/** One `item list` inside an already-open session. */
+async function listVaultInSession(session: string, vault: string): Promise<Record<string, string>> {
+	let output: Buffer | undefined;
+	try {
+		output = await executePassCli(
+			session,
+			['item', 'list', '--vault-name', vault, '--output', 'json', '--show-secrets'],
+			{
+				timeoutMs: commandTimeoutMs(),
+				stdoutBytes: LIST_OUTPUT_LIMIT,
+				stderrBytes: STDERR_OUTPUT_LIMIT,
+				phase: 'vault listing',
+				timeoutEnvVar: COMMAND_TIMEOUT_ENV
+			}
+		);
+		return bulkRecord(parseJson(output));
+	} finally {
+		output?.fill(0);
+	}
+}
+
+/** The `item view` batch inside an already-open session. */
+async function lookupRefsInSession(
+	session: string,
+	unique: string[],
+	logPrefix: string
+): Promise<Map<string, string>> {
+	const resolved = new Map<string, string>();
+	for (const raw of unique) {
+		let ref: string;
+		try {
+			ref = passReference(raw);
+		} catch {
+			continue; // malformed reference: leave the literal in place
+		}
+		let output: Buffer | undefined;
+		try {
+			// A field-targeted `item view` prints the bare field value on stdout
+			// (no JSON envelope); a trailing newline is the only decoration.
+			output = await executePassCli(session, ['item', 'view', ref], {
+				timeoutMs: commandTimeoutMs(),
+				stdoutBytes: VIEW_OUTPUT_LIMIT,
+				stderrBytes: STDERR_OUTPUT_LIMIT,
+				phase: 'secret lookup',
+				timeoutEnvVar: COMMAND_TIMEOUT_ENV
+			});
+			const value = output.toString('utf8').replace(/\r?\n$/, '');
+			if (value.includes('\0')) throw new PassCliError('field value is not valid text');
+			resolved.set(raw, value);
+		} catch (error: unknown) {
+			// A single lookup failure is logged and skipped; the caller keeps
+			// the literal. Transport-level failures still propagate below.
+			console.warn(`${logPrefix}Proton Pass reference did not resolve: ${sanitizedError(error)}`);
+		} finally {
+			output?.fill(0);
+		}
+	}
+	return resolved;
+}

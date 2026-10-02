@@ -428,4 +428,18 @@ export interface SecretProvider<C extends SecretProviderConfig = SecretProviderC
 	 * concept throw {@link UnsupportedOperationError}.
 	 */
 	resolveBulk(config: C, selector: string): Promise<Record<string, string>>;
+
+	/**
+	 * Optional: does a bulk pull AND a reference batch against ONE backend
+	 * session. Only worth implementing where opening a session is expensive - a
+	 * CLI provider pays a full login per call, so the editor probe (which needs
+	 * both) otherwise logs in twice for one keystroke. Callers that see it
+	 * absent must fall back to calling the two methods separately.
+	 */
+	resolveCombined?(
+		config: C,
+		selector: string | undefined,
+		refs: string[],
+		logPrefix?: string
+	): Promise<{ bulk: Record<string, string>; refs: Map<string, string> }>;
 }

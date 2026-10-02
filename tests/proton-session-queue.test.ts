@@ -41,7 +41,9 @@ chmodSync(cli, 0o755);
 process.env.DOCKHAND_PASS_CLI_PATH = cli;
 const { protonProvider } = await import('../src/lib/server/secretproviders/proton');
 
-const TOKEN = 'x'.repeat(24);
+// Shape-valid so the provider's own format check passes; the stub CLI never
+// contacts Proton, so the value itself is irrelevant.
+const TOKEN = `pst_${'a'.repeat(64)}::QUJDREVG`;
 
 afterAll(() => {
 	delete process.env.DOCKHAND_PASS_CLI_PATH;
