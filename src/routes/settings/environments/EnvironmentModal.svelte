@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { DEFAULT_GRYPE_IMAGE, DEFAULT_TRIVY_IMAGE, imageRepo } from '$lib/utils/scanner-images';
 	import { toast } from 'svelte-sonner';
 	import { readJobResponse } from '$lib/utils/sse-fetch';
 	import { validateEnvName } from '$lib/utils/env-name';
@@ -519,9 +520,14 @@
 	let selectedScanner = $state<ScannerType>('both');
 	let scannerAvailability = $state<{ grype: boolean; trivy: boolean }>({ grype: false, trivy: false });
 	let scannerVersions = $state<{ grype: string | null; trivy: string | null }>({ grype: null, trivy: null });
+	// A newer upstream RELEASE, when the Check found one. Distinct from a rebuild of
+	// the pinned tag: moving to it changes the configured image, so it is offered,
+	// never applied on its own.
+	let grypeNewerVersion = $state<string | null>(null);
+	let trivyNewerVersion = $state<string | null>(null);
 	let scannerLoading = $state(true);
-	let scannerGrypeImage = $state('anchore/grype:v0.110.0');
-	let scannerTrivyImage = $state('aquasec/trivy:0.69.3');
+	let scannerGrypeImage = $state(DEFAULT_GRYPE_IMAGE);
+	let scannerTrivyImage = $state(DEFAULT_TRIVY_IMAGE);
 	let loadingScannerVersions = $state(false);
 	let removingGrype = $state(false);
 	let removingTrivy = $state(false);
@@ -1385,11 +1391,16 @@
 		grypeUpdateStatus = 'idle';
 		try {
 			const envParam = environment?.id ? `&env=${environment.id}` : '';
-			const response = await fetch(`/api/settings/scanner?checkUpdates=true${envParam}`);
+			// Ask for BOTH: a rebuild of the pinned tag, and a newer release. A pinned
+			// tag is permanently "up to date" on its own digest, so the release check
+			// is the one that answers "is there a newer scanner".
+			const response = await fetch(`/api/settings/scanner?checkUpdates=true&checkNewerVersions=true${envParam}`);
 			const data = await response.json();
+			grypeNewerVersion = data.newerVersions?.grype?.latest ?? null;
 			if (data.updates) {
-				grypeUpdateStatus = data.updates.grype?.hasUpdate ? 'update-available' : 'up-to-date';
-				setTimeout(() => { grypeUpdateStatus = 'idle'; }, 3000);
+				const rebuilt = data.updates.grype?.hasUpdate === true;
+				grypeUpdateStatus = rebuilt || grypeNewerVersion ? 'update-available' : 'up-to-date';
+				if (!grypeNewerVersion) setTimeout(() => { grypeUpdateStatus = 'idle'; }, 3000);
 			}
 		} catch (error) {
 			console.error('Failed to check Grype update:', error);
@@ -1403,11 +1414,16 @@
 		trivyUpdateStatus = 'idle';
 		try {
 			const envParam = environment?.id ? `&env=${environment.id}` : '';
-			const response = await fetch(`/api/settings/scanner?checkUpdates=true${envParam}`);
+			// Ask for BOTH: a rebuild of the pinned tag, and a newer release. A pinned
+			// tag is permanently "up to date" on its own digest, so the release check
+			// is the one that answers "is there a newer scanner".
+			const response = await fetch(`/api/settings/scanner?checkUpdates=true&checkNewerVersions=true${envParam}`);
 			const data = await response.json();
+			trivyNewerVersion = data.newerVersions?.trivy?.latest ?? null;
 			if (data.updates) {
-				trivyUpdateStatus = data.updates.trivy?.hasUpdate ? 'update-available' : 'up-to-date';
-				setTimeout(() => { trivyUpdateStatus = 'idle'; }, 3000);
+				const rebuilt = data.updates.trivy?.hasUpdate === true;
+				trivyUpdateStatus = rebuilt || trivyNewerVersion ? 'update-available' : 'up-to-date';
+				if (!trivyNewerVersion) setTimeout(() => { trivyUpdateStatus = 'idle'; }, 3000);
 			}
 		} catch (error) {
 			console.error('Failed to check Trivy update:', error);
@@ -1421,11 +1437,27 @@
 		pullingGrype = true;
 		grypeUpdateStatus = 'idle';
 		try {
+			// A newer release means a different TAG, so the configured image has to move
+			// first - pulling the old tag again would just re-fetch the same version.
+			let image = scannerGrypeImage;
+			if (grypeNewerVersion) {
+				image = `${imageRepo(image)}:${grypeNewerVersion}`;
+				const saved = await fetch('/api/settings/scanner', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ grypeImage: image })
+				});
+				if (!saved.ok) {
+					const err = await saved.json().catch(() => ({}));
+					throw new Error(err.error || 'Could not change the scanner image');
+				}
+				scannerGrypeImage = image;
+			}
 			const pullUrl = environment?.id ? `/api/images/pull?env=${environment.id}` : '/api/images/pull';
 			const response = await fetch(pullUrl, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ image: scannerGrypeImage })
+				body: JSON.stringify({ image })
 			});
 
 			if (!response.ok) {
@@ -1439,10 +1471,14 @@
 
 			// Refresh scanner status after pull
 			await loadScannerVersionsAsync(environment?.id);
+			grypeNewerVersion = null;
 			grypeUpdateStatus = 'up-to-date';
 			setTimeout(() => { grypeUpdateStatus = 'idle'; }, 3000);
 		} catch (error) {
+			// Surface it: a refused image change (admin only) or a failed pull leaves
+			// the button looking like it did nothing at all.
 			console.error('Failed to pull Grype image:', error);
+			toast.error(error instanceof Error ? error.message : 'Failed to update Grype');
 		} finally {
 			pullingGrype = false;
 		}
@@ -1453,11 +1489,27 @@
 		pullingTrivy = true;
 		trivyUpdateStatus = 'idle';
 		try {
+			// A newer release means a different TAG, so the configured image has to move
+			// first - pulling the old tag again would just re-fetch the same version.
+			let image = scannerTrivyImage;
+			if (trivyNewerVersion) {
+				image = `${imageRepo(image)}:${trivyNewerVersion}`;
+				const saved = await fetch('/api/settings/scanner', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ trivyImage: image })
+				});
+				if (!saved.ok) {
+					const err = await saved.json().catch(() => ({}));
+					throw new Error(err.error || 'Could not change the scanner image');
+				}
+				scannerTrivyImage = image;
+			}
 			const pullUrl = environment?.id ? `/api/images/pull?env=${environment.id}` : '/api/images/pull';
 			const response = await fetch(pullUrl, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ image: scannerTrivyImage })
+				body: JSON.stringify({ image })
 			});
 
 			if (!response.ok) {
@@ -1471,10 +1523,14 @@
 
 			// Refresh scanner status after pull
 			await loadScannerVersionsAsync(environment?.id);
+			trivyNewerVersion = null;
 			trivyUpdateStatus = 'up-to-date';
 			setTimeout(() => { trivyUpdateStatus = 'idle'; }, 3000);
 		} catch (error) {
+			// Surface it: a refused image change (admin only) or a failed pull leaves
+			// the button looking like it did nothing at all.
 			console.error('Failed to pull Trivy image:', error);
+			toast.error(error instanceof Error ? error.message : 'Failed to update Trivy');
 		} finally {
 			pullingTrivy = false;
 		}
@@ -2767,7 +2823,7 @@
 																Pulling
 															{:else}
 																<Download class="w-2.5 h-2.5 mr-0.5" />
-																Update
+																{#if grypeNewerVersion}Update to {grypeNewerVersion}{:else}Update{/if}
 															{/if}
 														</button>
 													{:else}
@@ -2844,7 +2900,7 @@
 																Pulling
 															{:else}
 																<Download class="w-2.5 h-2.5 mr-0.5" />
-																Update
+																{#if trivyNewerVersion}Update to {trivyNewerVersion}{:else}Update{/if}
 															{/if}
 														</button>
 													{:else}

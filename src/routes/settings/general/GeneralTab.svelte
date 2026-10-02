@@ -21,6 +21,7 @@
 	import EditorThemeSelector from '$lib/components/EditorThemeSelector.svelte';
 	import ColoredActionsToggle from '$lib/components/ColoredActionsToggle.svelte';
 	import SemverCheckConfig from '$lib/components/SemverCheckConfig.svelte';
+	import { DEFAULT_GRYPE_IMAGE, DEFAULT_TRIVY_IMAGE, imageRepo } from '$lib/utils/scanner-images';
 	import { onMount } from 'svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 
@@ -99,6 +100,10 @@ services:
 	let eventCleanupCron = $derived($appSettings.eventCleanupCron);
 	let scheduleCleanupEnabled = $derived($appSettings.scheduleCleanupEnabled);
 	let eventCleanupEnabled = $derived($appSettings.eventCleanupEnabled);
+	let scanRetentionCron = $derived($appSettings.scanRetentionCron);
+	let scanRetentionEnabled = $derived($appSettings.scanRetentionEnabled);
+	let scanRetentionKeep = $derived($appSettings.scanRetentionKeep);
+	let scanRetentionGraceDays = $derived($appSettings.scanRetentionGraceDays);
 	let scannerCleanupCron = $derived($appSettings.scannerCleanupCron);
 	let scannerCleanupEnabled = $derived($appSettings.scannerCleanupEnabled);
 	let deployLogReconcileCron = $derived($appSettings.deployLogReconcileCron);
@@ -188,6 +193,31 @@ services:
 		toast.success(newState ? 'Event cleanup enabled' : 'Event cleanup disabled');
 	}
 
+	function handleScanRetentionEnabledChange() {
+		const newState = !scanRetentionEnabled;
+		appSettings.setScanRetentionEnabled(newState);
+		toast.success(newState ? 'Scan retention enabled' : 'Scan retention disabled');
+	}
+
+	function handleScanRetentionCronChange(cron: string) {
+		appSettings.setScanRetentionCron(cron);
+		toast.success('Scan retention schedule updated');
+	}
+
+	function handleScanRetentionKeepChange(event: Event) {
+		const value = parseInt((event.target as HTMLInputElement).value, 10);
+		if (!Number.isFinite(value) || value < 1) return;
+		appSettings.setScanRetentionKeep(value);
+		toast.success('Scan retention updated');
+	}
+
+	function handleScanRetentionGraceChange(event: Event) {
+		const value = parseInt((event.target as HTMLInputElement).value, 10);
+		if (!Number.isFinite(value) || value < 0) return;
+		appSettings.setScanRetentionGraceDays(value);
+		toast.success('Scan retention updated');
+	}
+
 	function handleScannerCleanupCronChange(cron: string) {
 		appSettings.setScannerCleanupCron(cron);
 		toast.success('Scanner cleanup cron updated');
@@ -224,6 +254,48 @@ services:
 			appSettings.setDefaultTrivyImage(value);
 			toast.success('Trivy image updated');
 		}
+	}
+
+	// Newer scanner releases, asked for on demand: the check reaches the registry,
+	// and the image stays pinned until someone applies the suggestion.
+	let checkingScannerVersions = $state(false);
+	let newerScanners = $state<{ grype: string | null; trivy: string | null }>({ grype: null, trivy: null });
+	// Per scanner: the check ran and found nothing newer. Applying a suggestion
+	// does NOT set this - that image has not been re-checked.
+	let scannerUpToDate = $state<{ grype: boolean; trivy: boolean }>({ grype: false, trivy: false });
+
+	async function checkScannerVersions() {
+		checkingScannerVersions = true;
+		try {
+			const res = await fetch('/api/settings/scanner?checkNewerVersions=true');
+			const data = await res.json();
+			newerScanners = {
+				grype: data.newerVersions?.grype?.latest ?? null,
+				trivy: data.newerVersions?.trivy?.latest ?? null
+			};
+			scannerUpToDate = { grype: !newerScanners.grype, trivy: !newerScanners.trivy };
+		} catch {
+			toast.error('Could not reach the registry to check scanner versions');
+		} finally {
+			checkingScannerVersions = false;
+		}
+	}
+
+	function applyScannerVersion(scanner: 'grype' | 'trivy') {
+		const tag = scanner === 'grype' ? newerScanners.grype : newerScanners.trivy;
+		if (!tag) return;
+		const current = scanner === 'grype' ? defaultGrypeImage : defaultTrivyImage;
+		const image = `${imageRepo(current)}:${tag}`;
+		if (scanner === 'grype') {
+			appSettings.setDefaultGrypeImage(image);
+			newerScanners = { ...newerScanners, grype: null };
+			scannerUpToDate = { ...scannerUpToDate, grype: false };
+		} else {
+			appSettings.setDefaultTrivyImage(image);
+			newerScanners = { ...newerScanners, trivy: null };
+			scannerUpToDate = { ...scannerUpToDate, trivy: false };
+		}
+		toast.success(`Scanner image set to ${image} - pull it to start using it`);
 	}
 
 	function handleGrypeArgsBlur(e: Event) {
@@ -890,9 +962,23 @@ services:
 							value={defaultGrypeImage}
 							onblur={handleGrypeImageBlur}
 							disabled={!$canAccess('settings', 'edit')}
-							placeholder={"anchore/grype:v0.110.0"}
+							placeholder={DEFAULT_GRYPE_IMAGE}
 						/>
-						<p class="text-xs text-muted-foreground">Docker image for Grype scanner. Pin to a specific version for supply chain security.</p>
+						<div class="flex items-center gap-2 flex-wrap">
+							<p class="text-xs text-muted-foreground">Docker image for Grype scanner. Pin to a specific version for supply chain security.</p>
+							{#if newerScanners.grype}
+								<button
+									type="button"
+									class="inline-flex items-center gap-1 text-2xs px-1.5 py-0.5 rounded-full border border-green-500/30 bg-green-500/10 text-green-600 hover:bg-green-500/20 transition-colors"
+									onclick={() => applyScannerVersion('grype')}
+									disabled={!$canAccess('settings', 'edit')}
+								>
+									Use {newerScanners.grype}
+								</button>
+							{:else if scannerUpToDate.grype}
+								<span class="text-2xs text-muted-foreground">Up to date</span>
+							{/if}
+						</div>
 					</div>
 					<div class="space-y-2">
 						<Label for="trivy-image">Trivy image</Label>
@@ -901,9 +987,28 @@ services:
 							value={defaultTrivyImage}
 							onblur={handleTrivyImageBlur}
 							disabled={!$canAccess('settings', 'edit')}
-							placeholder={"aquasec/trivy:0.69.3"}
+							placeholder={DEFAULT_TRIVY_IMAGE}
 						/>
-						<p class="text-xs text-muted-foreground">Docker image for Trivy scanner. Pin to a specific version for supply chain security.</p>
+						<div class="flex items-center gap-2 flex-wrap">
+							<p class="text-xs text-muted-foreground">Docker image for Trivy scanner. Pin to a specific version for supply chain security.</p>
+							{#if newerScanners.trivy}
+								<button
+									type="button"
+									class="inline-flex items-center gap-1 text-2xs px-1.5 py-0.5 rounded-full border border-green-500/30 bg-green-500/10 text-green-600 hover:bg-green-500/20 transition-colors"
+									onclick={() => applyScannerVersion('trivy')}
+									disabled={!$canAccess('settings', 'edit')}
+								>
+									Use {newerScanners.trivy}
+								</button>
+							{:else if scannerUpToDate.trivy}
+								<span class="text-2xs text-muted-foreground">Up to date</span>
+							{/if}
+						</div>
+						<div class="pt-1">
+							<Button variant="outline" size="sm" onclick={checkScannerVersions} disabled={checkingScannerVersions}>
+								{checkingScannerVersions ? 'Checking...' : 'Check for newer scanner versions'}
+							</Button>
+						</div>
 					</div>
 					<div class="space-y-2">
 						<Label for="grype-args">Default Grype arguments</Label>
@@ -1197,6 +1302,50 @@ services:
 							</div>
 						</div>
 					</div>
+					<div class="space-y-1">
+						<div class="flex items-center gap-3">
+							<Label for="scan-retention-keep">Vulnerability scan retention</Label>
+							<TogglePill
+								checked={scanRetentionEnabled}
+								onchange={handleScanRetentionEnabledChange}
+								disabled={!$canAccess('settings', 'edit')}
+							/>
+						</div>
+						<p class="text-xs text-muted-foreground">
+							Keep the newest scans per image and drop scans for images the host no longer has
+						</p>
+						<div class="flex items-center gap-2 mt-2">
+							<Input
+								id="scan-retention-keep"
+								type="number"
+								min="1"
+								max="100"
+								value={scanRetentionKeep}
+								onchange={handleScanRetentionKeepChange}
+								disabled={!$canAccess('settings', 'edit') || !scanRetentionEnabled}
+								class="w-20"
+							/>
+							<span class="text-sm text-muted-foreground">newest per image</span>
+							<Input
+								id="scan-retention-grace"
+								type="number"
+								min="0"
+								max="365"
+								value={scanRetentionGraceDays}
+								onchange={handleScanRetentionGraceChange}
+								disabled={!$canAccess('settings', 'edit') || !scanRetentionEnabled}
+								class="w-20 ml-3"
+							/>
+							<span class="text-sm text-muted-foreground">days grace</span>
+							<div class="ml-auto">
+								<CronEditor
+									value={scanRetentionCron}
+									onchange={handleScanRetentionCronChange}
+									disabled={!$canAccess('settings', 'edit') || !scanRetentionEnabled}
+								/>
+							</div>
+						</div>
+					</div>
 					<div class="space-y-1 pt-2 border-t">
 						<div class="flex items-center gap-3">
 							<Label>Volume helper cleanup</Label>
@@ -1265,25 +1414,25 @@ services:
 					</div>
 					<div class="space-y-1 pt-2 border-t">
 						<div class="flex items-center gap-3">
-							<Label>Protect scanner images from prune</Label>
+							<Label>Protect helper images from prune</Label>
 							<Tooltip.Root>
 								<Tooltip.Trigger>
 									<HelpCircle class="w-3.5 h-3.5 text-muted-foreground" />
 								</Tooltip.Trigger>
 								<Tooltip.Content side="top" class="w-96 max-w-[90vw]">
-									<p>When ON, "Prune all unused" skips Dockhand's grype and trivy scanner images so the next scan doesn't have to re-pull them (and re-download the ~100MB vuln database). When OFF, prune behaves like vanilla Docker and may remove them.</p>
+									<p>When ON, "Prune all unused" skips the images Dockhand runs its own jobs from: the grype and trivy scanners, and the backup helper. Each is pulled once and reused, so keeping them saves the next scan re-downloading the ~100MB vulnerability database, and the next backup re-pulling the helper - which on a host without internet access would fail outright. When OFF, prune behaves like vanilla Docker and may remove them.</p>
 								</Tooltip.Content>
 							</Tooltip.Root>
 							<TogglePill
 								checked={$appSettings.protectScannerImages}
 								onchange={(checked) => {
 									appSettings.setProtectScannerImages(checked);
-									toast.success(checked ? 'Scanner images will be skipped during prune' : 'Scanner images will be pruned with everything else');
+									toast.success(checked ? 'Helper images will be skipped during prune' : 'Helper images will be pruned with everything else');
 								}}
 								disabled={!$canAccess('settings', 'edit')}
 							/>
 						</div>
-						<p class="text-xs text-muted-foreground">Skip grype and trivy images during "Prune all unused"</p>
+						<p class="text-xs text-muted-foreground">Skip the grype, trivy and backup-helper images during "Prune all unused"</p>
 					</div>
 				</Card.Content>
 			</Card.Root>

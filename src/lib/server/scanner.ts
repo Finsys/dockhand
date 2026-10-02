@@ -28,6 +28,7 @@ import { getEnvironment, getEnvSetting, getSetting } from './db';
 import { sendEventNotification } from './notifications';
 import { detectRemoteSocketPath } from './scanner-socket-detect';
 import { truncateForLog, classifyUnparseableOutput, pickScanDisplayName } from './scanner-output-core';
+import { checkNewerVersion } from './semver/check';
 import {
 	getHostDockerSocket,
 	getHostDataDir,
@@ -144,8 +145,9 @@ export const DEFAULT_GRYPE_ARGS = '-o json -v {image}';
 export const DEFAULT_TRIVY_ARGS = 'image --format json {image}';
 
 // Pinned scanner images — avoid :latest after the March 2026 Trivy supply chain attack
-export const DEFAULT_GRYPE_IMAGE = 'anchore/grype:v0.115.0';
-export const DEFAULT_TRIVY_IMAGE = 'aquasec/trivy:0.71.2';
+import { DEFAULT_GRYPE_IMAGE, DEFAULT_TRIVY_IMAGE } from '$lib/utils/scanner-images';
+// Re-exported because existing importers take them from here.
+export { DEFAULT_GRYPE_IMAGE, DEFAULT_TRIVY_IMAGE };
 
 export interface VulnerabilitySeverity {
 	critical: number;
@@ -1353,6 +1355,49 @@ export async function checkScannerUpdates(envId?: number): Promise<{
 	}
 
 	return result;
+}
+
+/**
+ * The newest scanner release published upstream, per scanner.
+ *
+ * Distinct from checkScannerUpdates, which compares the digest behind the SAME
+ * tag: on a pinned tag that only notices a rebuild, never that a later release
+ * exists. This reads the repo's tag list, so it answers the question the
+ * settings screen actually asks.
+ *
+ * Suggestion only - the configured image is never changed here. Pinning is what
+ * keeps a scan reproducible, so moving to a new version stays a deliberate act.
+ * Never throws: a registry failure yields null and the UI simply shows nothing.
+ */
+export async function checkScannerNewerVersions(): Promise<{
+	grype: { current: string; latest: string | null };
+	trivy: { current: string; latest: string | null };
+}> {
+	const defaults = await getGlobalScannerDefaults();
+
+	const newest = async (image: string): Promise<string | null> => {
+		try {
+			// matchFlavor pinned ON: grype publishes -debug, -nonroot and per-arch
+			// variants of every release, so ignoring the flavor offers a plain tag a
+			// -debug variant, and vice versa. Passed explicitly rather than relying on
+			// the default, which a change to findNewerVersionTag could flip.
+			const newer = await checkNewerVersion(image, { maxBump: 'major', matchFlavor: true });
+			return newer?.tag ?? null;
+		} catch (e) {
+			console.error('[Scanner] Newer-version check failed for', image, e);
+			return null;
+		}
+	};
+
+	const [grypeLatest, trivyLatest] = await Promise.all([
+		newest(defaults.grypeImage),
+		newest(defaults.trivyImage)
+	]);
+
+	return {
+		grype: { current: defaults.grypeImage, latest: grypeLatest },
+		trivy: { current: defaults.trivyImage, latest: trivyLatest }
+	};
 }
 
 // Clean up scanner database volumes (removes cached vulnerability databases)
