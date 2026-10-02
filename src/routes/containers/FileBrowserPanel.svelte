@@ -930,7 +930,8 @@
 		await uploadFiles(files);
 	}
 
-	async function uploadFiles(files: File[]) {
+	// globalThis.File, not the lucide icon of the same name imported above.
+	async function uploadFiles(files: globalThis.File[]) {
 		if (files.length === 0) return;
 
 		uploading = true;
@@ -973,8 +974,13 @@
 	// Drag-and-drop upload into the current directory
 	let dragging = $state(false);
 
+	// The drop zone is the whole panel, and the editor and viewer render inside it,
+	// so a drop while one of those is open would upload into the directory hidden
+	// behind it - and overwrite the open file if the names match.
+	const dropTargetReady = $derived(effectiveCanEdit && !editingFile && !viewingFile);
+
 	function handleDragOver(e: DragEvent) {
-		if (!effectiveCanEdit || uploading || !e.dataTransfer?.types.includes('Files')) return;
+		if (!dropTargetReady || uploading || !e.dataTransfer?.types.includes('Files')) return;
 		e.preventDefault();
 		dragging = true;
 	}
@@ -987,6 +993,8 @@
 	function handleDrop(e: DragEvent) {
 		e.preventDefault();
 		dragging = false;
+		// A drop arrives whether or not dragover ran, so the same check belongs here.
+		if (!dropTargetReady || uploading) return;
 		const items = Array.from(e.dataTransfer?.items ?? []);
 		if (items.some((item) => item.webkitGetAsEntry()?.isDirectory)) {
 			toast.error('Folder upload is not supported');
