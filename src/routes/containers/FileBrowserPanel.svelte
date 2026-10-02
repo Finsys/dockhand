@@ -925,8 +925,13 @@
 
 	async function handleFileUpload(event: Event) {
 		const input = event.target as HTMLInputElement;
-		const files = input.files;
-		if (!files || files.length === 0) return;
+		const files = input.files ? Array.from(input.files) : [];
+		input.value = '';
+		await uploadFiles(files);
+	}
+
+	async function uploadFiles(files: File[]) {
+		if (files.length === 0) return;
 
 		uploading = true;
 
@@ -962,8 +967,32 @@
 			toast.error(err.message || 'Upload failed');
 		} finally {
 			uploading = false;
-			input.value = '';
 		}
+	}
+
+	// Drag-and-drop upload into the current directory
+	let dragging = $state(false);
+
+	function handleDragOver(e: DragEvent) {
+		if (!effectiveCanEdit || uploading || !e.dataTransfer?.types.includes('Files')) return;
+		e.preventDefault();
+		dragging = true;
+	}
+
+	function handleDragLeave(e: DragEvent) {
+		// dragleave also fires when crossing into a child element; ignore those
+		if (!(e.currentTarget as Node).contains(e.relatedTarget as Node)) dragging = false;
+	}
+
+	function handleDrop(e: DragEvent) {
+		e.preventDefault();
+		dragging = false;
+		const items = Array.from(e.dataTransfer?.items ?? []);
+		if (items.some((item) => item.webkitGetAsEntry()?.isDirectory)) {
+			toast.error('Folder upload is not supported');
+			return;
+		}
+		uploadFiles(Array.from(e.dataTransfer?.files ?? []));
 	}
 
 	const pathSegments = $derived(() => {
@@ -1001,7 +1030,19 @@
 	});
 </script>
 
-<div class="flex flex-col h-full relative">
+<div
+	class="flex flex-col h-full relative"
+	role="region"
+	aria-label="File browser"
+	ondragover={handleDragOver}
+	ondragleave={handleDragLeave}
+	ondrop={handleDrop}
+>
+	{#if dragging}
+		<div class="absolute inset-0 z-20 pointer-events-none flex items-center justify-center gap-2 bg-background/80 border-2 border-dashed border-primary rounded-lg text-sm">
+			<Upload class="w-4 h-4" /> Drop files to upload to {currentPath}
+		</div>
+	{/if}
 	<!-- Header with breadcrumbs and actions -->
 	<div class="flex items-center gap-2 p-2 border-b bg-muted/30">
 		<Button variant="ghost" size="icon" class="h-7 w-7" onclick={goUp} disabled={currentPath === '/'}>
