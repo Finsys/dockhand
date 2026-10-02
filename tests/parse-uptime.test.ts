@@ -14,6 +14,30 @@ describe('parseTimeStringToSeconds (#1395 uptime sorting)', () => {
 		expect(parseTimeStringToSeconds('Less than a second')).toBe(1);
 	});
 
+	test('"About an hour" is an hour, not zero', () => {
+		// HumanDuration emits this for anything rounding to one hour. It carries no
+		// digit, so the numeric match cannot see it and it needs its own literal.
+		expect(parseTimeStringToSeconds('About an hour')).toBe(3600);
+		expect(parseTimeStringToSeconds('about an hour')).toBe(3600);
+	});
+
+	test('every digitless HumanDuration phrasing parses', () => {
+		// The three forms Docker emits with no number in them - the numeric match
+		// cannot see any of them, so each needs its own literal.
+		expect(parseTimeStringToSeconds('Less than a second')).toBe(1);
+		expect(parseTimeStringToSeconds('About a minute')).toBe(60);
+		expect(parseTimeStringToSeconds('About an hour')).toBe(3600);
+	});
+
+	test('uptimes sort in real chronological order across units', () => {
+		// An hour-old container must outrank a seconds-old one.
+		const statuses = ['About an hour', '45 seconds', '3 minutes', '2 hours', 'About a minute'];
+		const sorted = [...statuses].sort(
+			(a, b) => parseTimeStringToSeconds(a) - parseTimeStringToSeconds(b)
+		);
+		expect(sorted).toEqual(['45 seconds', 'About a minute', '3 minutes', 'About an hour', '2 hours']);
+	});
+
 	test('minute phrasings', () => {
 		expect(parseTimeStringToSeconds('Less than a minute')).toBe(60);
 		expect(parseTimeStringToSeconds('About a minute')).toBe(60);
