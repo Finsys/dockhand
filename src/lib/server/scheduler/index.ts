@@ -17,6 +17,10 @@ import {
 	getGitStack,
 	getScheduleCleanupCron,
 	getEventCleanupCron,
+	getScanRetentionCron,
+	getScanRetentionEnabled,
+	getScanRetentionKeep,
+	getScanRetentionGraceDays,
 	getScannerCleanupCron,
 	getDeployLogReconcileCron,
 	getScheduleRetentionDays,
@@ -64,6 +68,7 @@ import {
 	SYSTEM_SCANNER_CLEANUP_ID
 } from './tasks/system-cleanup';
 import { runDeployLogReconcileJob, DEPLOY_LOG_RECONCILE_ID } from './tasks/deploy-log-reconcile';
+import { runScanRetentionJob, SYSTEM_SCAN_RETENTION_ID } from './tasks/scan-retention';
 
 // Store all active cron jobs
 const activeJobs: Map<string, Cron> = new Map();
@@ -71,6 +76,7 @@ const activeJobs: Map<string, Cron> = new Map();
 // System cleanup jobs
 let cleanupJob: Cron | null = null;
 let eventCleanupJob: Cron | null = null;
+let scanRetentionJob: Cron | null = null;
 let volumeHelperCleanupJob: Cron | null = null;
 let scannerCacheCleanupJob: Cron | null = null;
 let deployLogReconcileJob: Cron | null = null;
@@ -175,6 +181,7 @@ export async function startScheduler(): Promise<void> {
 	const eventCleanupCron = await getEventCleanupCron();
 	const scannerCleanupCron = await getScannerCleanupCron();
 	const deployLogReconcileCron = await getDeployLogReconcileCron();
+	const scanRetentionCron = await getScanRetentionCron();
 	const defaultTimezone = await getDefaultTimezone();
 
 	// Start system cleanup jobs (static schedules with default timezone)
@@ -184,6 +191,10 @@ export async function startScheduler(): Promise<void> {
 
 	eventCleanupJob = new Cron(eventCleanupCron, { timezone: defaultTimezone, legacyMode: false }, async () => {
 		await runEventCleanupJob();
+	});
+
+	scanRetentionJob = new Cron(scanRetentionCron, { timezone: defaultTimezone, legacyMode: false }, async () => {
+		await runScanRetentionJob();
 	});
 
 	// Cleanup functions to pass to the job (avoids dynamic import issues in production)
@@ -248,6 +259,10 @@ export function stopScheduler(): void {
 	if (cleanupJob) {
 		cleanupJob.stop();
 		cleanupJob = null;
+	}
+	if (scanRetentionJob) {
+		scanRetentionJob.stop();
+		scanRetentionJob = null;
 	}
 	if (eventCleanupJob) {
 		eventCleanupJob.stop();
@@ -686,6 +701,7 @@ export async function refreshSystemJobs(): Promise<void> {
 	const eventCleanupCron = await getEventCleanupCron();
 	const scannerCleanupCron = await getScannerCleanupCron();
 	const scannerCleanupEnabled = await getScannerCleanupEnabled();
+	const scanRetentionCron = await getScanRetentionCron();
 	const deployLogReconcileCron = await getDeployLogReconcileCron();
 	const deployLogReconcileEnabled = await getDeployLogReconcileEnabled();
 	const defaultTimezone = await getDefaultTimezone();
@@ -703,6 +719,10 @@ export async function refreshSystemJobs(): Promise<void> {
 	// Stop existing system jobs
 	if (cleanupJob) {
 		cleanupJob.stop();
+	}
+	if (scanRetentionJob) {
+		scanRetentionJob.stop();
+		scanRetentionJob = null;
 	}
 	if (eventCleanupJob) {
 		eventCleanupJob.stop();
@@ -724,6 +744,10 @@ export async function refreshSystemJobs(): Promise<void> {
 
 	eventCleanupJob = new Cron(eventCleanupCron, { timezone: defaultTimezone, legacyMode: false }, async () => {
 		await runEventCleanupJob();
+	});
+
+	scanRetentionJob = new Cron(scanRetentionCron, { timezone: defaultTimezone, legacyMode: false }, async () => {
+		await runScanRetentionJob();
 	});
 
 	volumeHelperCleanupJob = new Cron('*/30 * * * *', { timezone: defaultTimezone, legacyMode: false }, async () => {
@@ -869,6 +893,9 @@ export async function triggerSystemJob(jobId: string): Promise<{ success: boolea
 		} else if (jobId === String(SYSTEM_EVENT_CLEANUP_ID) || jobId === 'event-cleanup') {
 			runEventCleanupJob('manual');
 			return { success: true };
+		} else if (jobId === String(SYSTEM_SCAN_RETENTION_ID) || jobId === 'scan-retention') {
+			runScanRetentionJob('manual');
+			return { success: true };
 		} else if (jobId === String(SYSTEM_VOLUME_HELPER_CLEANUP_ID) || jobId === 'volume-helper-cleanup') {
 			// Wrap to pre-fetch environments (avoids dynamic import in production)
 			const wrappedCleanupStale = async () => {
@@ -931,6 +958,10 @@ export async function getSystemSchedules(): Promise<SystemScheduleInfo[]> {
 	const scannerCleanupEnabled = await getScannerCleanupEnabled();
 	const deployLogReconcileCron = await getDeployLogReconcileCron();
 	const deployLogReconcileEnabled = await getDeployLogReconcileEnabled();
+	const scanRetentionCron = await getScanRetentionCron();
+	const scanRetentionEnabled = await getScanRetentionEnabled();
+	const scanRetentionKeep = await getScanRetentionKeep();
+	const scanRetentionGraceDays = await getScanRetentionGraceDays();
 
 	return [
 		{
@@ -952,6 +983,18 @@ export async function getSystemSchedules(): Promise<SystemScheduleInfo[]> {
 			nextRun: eventCleanupEnabled ? getNextRun(eventCleanupCron)?.toISOString() ?? null : null,
 			isSystem: true,
 			enabled: eventCleanupEnabled
+		},
+		{
+			id: SYSTEM_SCAN_RETENTION_ID,
+			type: 'system_cleanup' as const,
+			name: 'Vulnerability scan retention',
+			description:
+				`Keeps the ${scanRetentionKeep} newest scans per image and scanner, and removes ` +
+				`scans for images gone from the host for ${scanRetentionGraceDays} days`,
+			cronExpression: scanRetentionCron,
+			nextRun: scanRetentionEnabled ? getNextRun(scanRetentionCron)?.toISOString() ?? null : null,
+			isSystem: true,
+			enabled: scanRetentionEnabled
 		},
 		{
 			id: SYSTEM_VOLUME_HELPER_CLEANUP_ID,

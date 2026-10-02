@@ -2,6 +2,8 @@ import { json, type RequestHandler } from '@sveltejs/kit';
 import {
 	setScheduleCleanupEnabled,
 	setEventCleanupEnabled,
+	getScanRetentionEnabled,
+	setScanRetentionEnabled,
 	setScannerCleanupEnabled,
 	getScheduleCleanupEnabled,
 	getEventCleanupEnabled,
@@ -13,6 +15,7 @@ import { refreshSystemJobs } from '$lib/server/scheduler';
 const SYSTEM_SCHEDULE_CLEANUP_ID = 1;
 const SYSTEM_EVENT_CLEANUP_ID = 2;
 const SYSTEM_SCANNER_CLEANUP_ID = 4;
+const SYSTEM_SCAN_RETENTION_ID = 5;
 
 /**
  * @openapi
@@ -48,6 +51,11 @@ export const POST: RequestHandler = async ({ params, cookies }) => {
 		} else if (systemId === SYSTEM_SCANNER_CLEANUP_ID) {
 			const currentEnabled = await getScannerCleanupEnabled();
 			await setScannerCleanupEnabled(!currentEnabled);
+			await refreshSystemJobs();
+			return json({ success: true, enabled: !currentEnabled });
+		} else if (systemId === SYSTEM_SCAN_RETENTION_ID) {
+			const currentEnabled = await getScanRetentionEnabled();
+			await setScanRetentionEnabled(!currentEnabled);
 			await refreshSystemJobs();
 			return json({ success: true, enabled: !currentEnabled });
 		} else {

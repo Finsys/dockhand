@@ -94,6 +94,7 @@ import { encrypt, decrypt, decryptStrict, isEncrypted } from './encryption.js';
 import { parseEnvInterpolation } from './env-interpolation';
 import { parseInjectedSecretKeys, serializeInjectedSecretKeys } from './stack-secret-keys';
 import { invalidateVulnerabilitiesCache } from './vulnerabilities-cache';
+import { DEFAULT_RETENTION, stripUnstorableEscapes, type ScanRecord } from './scan-retention-core';
 
 // Re-export for backwards compatibility
 export { db, isPostgres, isSqlite };
@@ -690,6 +691,48 @@ export async function setSidebarPreferences(prefs: SidebarPreferences, userId?: 
 
 export async function deleteSidebarPreferences(userId?: number): Promise<void> {
 	const key = userId ? `user:${userId}:sidebar_preferences` : 'sidebar_preferences';
+	await deleteSetting(key);
+}
+
+// =============================================================================
+// TAG ORDER
+// =============================================================================
+
+/** Tag ids in the user's chosen order; empty means the default (by name). */
+export async function getTagOrder(userId?: number): Promise<number[]> {
+	const key = userId ? `user:${userId}:tag_order` : 'tag_order';
+	const value = await getSetting(key);
+	return Array.isArray(value) ? value : [];
+}
+
+export async function setTagOrder(order: number[], userId?: number): Promise<void> {
+	const key = userId ? `user:${userId}:tag_order` : 'tag_order';
+	await setSetting(key, order);
+}
+
+export async function deleteTagOrder(userId?: number): Promise<void> {
+	const key = userId ? `user:${userId}:tag_order` : 'tag_order';
+	await deleteSetting(key);
+}
+
+// =============================================================================
+// ENVIRONMENT ORDER
+// =============================================================================
+
+/** Environment ids in the user's chosen order; empty means the default (by name). */
+export async function getEnvironmentOrder(userId?: number): Promise<number[]> {
+	const key = userId ? `user:${userId}:environment_order` : 'environment_order';
+	const value = await getSetting(key);
+	return Array.isArray(value) ? value : [];
+}
+
+export async function setEnvironmentOrder(order: number[], userId?: number): Promise<void> {
+	const key = userId ? `user:${userId}:environment_order` : 'environment_order';
+	await setSetting(key, order);
+}
+
+export async function deleteEnvironmentOrder(userId?: number): Promise<void> {
+	const key = userId ? `user:${userId}:environment_order` : 'environment_order';
 	await deleteSetting(key);
 }
 
@@ -3451,7 +3494,9 @@ export async function saveVulnerabilityScan(data: {
 		lowCount: data.lowCount,
 		negligibleCount: data.negligibleCount,
 		unknownCount: data.unknownCount,
-		vulnerabilities: JSON.stringify(data.vulnerabilities),
+		// A NUL or lone surrogate from a scanner survives JSON.stringify but breaks
+		// every later PostgreSQL read of the column, so it never reaches storage.
+		vulnerabilities: stripUnstorableEscapes(JSON.stringify(data.vulnerabilities)),
 		error: data.error ?? null
 	}).returning();
 	// A new scan makes the dashboard's cached findings stale — drop them so every
@@ -3637,17 +3682,33 @@ export async function getScanFreshness(environmentId?: number | null): Promise<{
 	return { scans: n, oldestAgeSeconds, avgDurationSeconds };
 }
 
-export async function deleteOldScans(keepDays = 30): Promise<number> {
-	const cutoffDate = new Date(Date.now() - keepDays * 24 * 60 * 60 * 1000).toISOString();
-	const countResult = await db.select({ count: sql<number>`count(*)` })
-		.from(vulnerabilityScans)
-		.where(sql`scanned_at < ${cutoffDate}`);
-	const count = Number(countResult[0]?.count ?? 0);
-	if (count > 0) {
-		await db.delete(vulnerabilityScans)
-			.where(sql`scanned_at < ${cutoffDate}`);
+/** Every scan reduced to what a retention decision needs - no findings documents. */
+export async function listScanRecords(): Promise<ScanRecord[]> {
+	return db
+		.select({
+			id: vulnerabilityScans.id,
+			environmentId: vulnerabilityScans.environmentId,
+			imageId: vulnerabilityScans.imageId,
+			scanner: vulnerabilityScans.scanner,
+			scannedAt: vulnerabilityScans.scannedAt
+		})
+		.from(vulnerabilityScans) as Promise<ScanRecord[]>;
+}
+
+/**
+ * Delete the given scans, in batches.
+ *
+ * A single statement would bind one parameter per id, which SQLite caps at
+ * 32766, and a long-neglected install can exceed that many times over.
+ */
+export async function deleteScans(ids: number[], batchSize = 500): Promise<number> {
+	let deleted = 0;
+	for (let i = 0; i < ids.length; i += batchSize) {
+		const batch = ids.slice(i, i + batchSize);
+		await db.delete(vulnerabilityScans).where(inArray(vulnerabilityScans.id, batch));
+		deleted += batch.length;
 	}
-	return count;
+	return deleted;
 }
 
 // =============================================================================
@@ -4887,6 +4948,10 @@ const SCHEDULE_CLEANUP_ENABLED_KEY = 'schedule_cleanup_enabled';
 const EVENT_CLEANUP_ENABLED_KEY = 'event_cleanup_enabled';
 const SCANNER_CLEANUP_CRON_KEY = 'scanner_cleanup_cron';
 const SCANNER_CLEANUP_ENABLED_KEY = 'scanner_cleanup_enabled';
+const SCAN_RETENTION_CRON_KEY = 'scan_retention_cron';
+const SCAN_RETENTION_ENABLED_KEY = 'scan_retention_enabled';
+const SCAN_RETENTION_KEEP_KEY = 'scan_retention_keep';
+const SCAN_RETENTION_GRACE_DAYS_KEY = 'scan_retention_grace_days';
 const DEPLOY_LOG_RECONCILE_CRON_KEY = 'deploy_log_reconcile_cron';
 const DEPLOY_LOG_RECONCILE_ENABLED_KEY = 'deploy_log_reconcile_enabled';
 const DEFAULT_SCHEDULE_CLEANUP_CRON = '0 3 * * *'; // Daily at 3 AM
@@ -6090,4 +6155,52 @@ export async function updateBackupConfig(id: number, data: {
 
 export async function deleteBackupConfig(id: number): Promise<void> {
 	await db.delete(backupConfigs).where(eq(backupConfigs.id, id));
+}
+
+// --- Vulnerability scan retention -------------------------------------------
+// Scans are append-only and each carries its findings document, so without a
+// bound they grow until the dashboard costs gigabytes to render.
+
+const DEFAULT_SCAN_RETENTION_CRON = '30 4 * * *'; // Daily at 4:30 AM, after the deploy-log reconcile
+
+// These read through getSetting, which parses the JSON setSetting writes. Reading
+// the column directly would hand back a quoted string, and a cron of `"30 4 * * *"`
+// is not a cron.
+
+export async function getScanRetentionCron(): Promise<string> {
+	const value = await getSetting(SCAN_RETENTION_CRON_KEY);
+	return typeof value === 'string' && value.trim() ? value : DEFAULT_SCAN_RETENTION_CRON;
+}
+
+export async function setScanRetentionCron(cron: string): Promise<void> {
+	await setSetting(SCAN_RETENTION_CRON_KEY, cron);
+}
+
+export async function getScanRetentionEnabled(): Promise<boolean> {
+	// Absent means on: retention is what bounds the scan table's growth.
+	const value = await getSetting(SCAN_RETENTION_ENABLED_KEY);
+	if (value === null) return true;
+	return value === true || value === 'true';
+}
+
+export async function setScanRetentionEnabled(enabled: boolean): Promise<void> {
+	await setSetting(SCAN_RETENTION_ENABLED_KEY, enabled);
+}
+
+export async function getScanRetentionKeep(): Promise<number> {
+	const parsed = parseInt(String(await getSetting(SCAN_RETENTION_KEEP_KEY) ?? ''), 10);
+	return Number.isFinite(parsed) && parsed >= 1 ? parsed : DEFAULT_RETENTION.keepPerImage;
+}
+
+export async function setScanRetentionKeep(keep: number): Promise<void> {
+	await setSetting(SCAN_RETENTION_KEEP_KEY, Math.max(1, Math.floor(keep)));
+}
+
+export async function getScanRetentionGraceDays(): Promise<number> {
+	const parsed = parseInt(String(await getSetting(SCAN_RETENTION_GRACE_DAYS_KEY) ?? ''), 10);
+	return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_RETENTION.graceDays;
+}
+
+export async function setScanRetentionGraceDays(days: number): Promise<void> {
+	await setSetting(SCAN_RETENTION_GRACE_DAYS_KEY, Math.max(0, Math.floor(days)));
 }
