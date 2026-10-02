@@ -228,6 +228,58 @@ describe('referential integrity (undefined network/volume refs)', () => {
 		const ok = `services:\n  db:\n    image: postgres:16\n    volumes:\n      - pgdata:/var/lib/postgresql/data\nvolumes:\n  pgdata: {}\n`;
 		expect(ids(ok)).not.toContain('UNDEFINED_VOLUME_REF');
 	});
+
+	test('an interpolated source is left alone - it may expand to a path', () => {
+		// ${UPLOAD_LOCATION} usually names a host directory; the rule cannot know
+		// what it expands to, and compose itself reports a genuinely missing volume.
+		const src = `services:\n  server:\n    image: nginx:1.27\n    volumes:\n      - \${UPLOAD_LOCATION}:/data\n`;
+		expect(ids(src)).not.toContain('UNDEFINED_VOLUME_REF');
+	});
+
+	test('an interpolated source with a default is left alone', () => {
+		// The ':-' default carries a colon, so a naive split would also mangle it.
+		const src = `services:\n  server:\n    image: nginx:1.27\n    volumes:\n      - \${UPLOAD_LOCATION:-./library}:/data\n`;
+		expect(ids(src)).not.toContain('UNDEFINED_VOLUME_REF');
+	});
+
+	test('a named volume whose TARGET is interpolated is reported by its real name', () => {
+		// The interpolation is on the right of the colon, so the source is a plain
+		// named volume - and its name must not be cut short by the ':-' inside it.
+		const src = `services:\n  db:\n    image: postgres:16\n    volumes:\n      - pgdata:\${TARGET:-/var/lib/postgresql/data}\n`;
+		const f = find(src, 'UNDEFINED_VOLUME_REF');
+		expect(f?.message).toContain('"pgdata"');
+	});
+
+	test('the bare $VAR form is left alone too - compose accepts both spellings', () => {
+		const src = `services:\n  server:\n    image: nginx:1.27\n    volumes:\n      - $UPLOAD_LOCATION:/data\n`;
+		expect(ids(src)).not.toContain('UNDEFINED_VOLUME_REF');
+	});
+
+	test('a long-form interpolated source is left alone', () => {
+		// type: volume says it IS a named volume, but the name is only known once
+		// the variable expands, so membership cannot be checked here.
+		const src = `services:\n  server:\n    image: nginx:1.27\n    volumes:\n      - type: volume\n        source: \${VOL}\n        target: /data\n`;
+		expect(ids(src)).not.toContain('UNDEFINED_VOLUME_REF');
+	});
+
+	test('a long-form named volume is still flagged when it is genuinely missing', () => {
+		const src = `services:\n  server:\n    image: nginx:1.27\n    volumes:\n      - type: volume\n        source: pgdata\n        target: /data\n`;
+		expect(ids(src)).toContain('UNDEFINED_VOLUME_REF');
+	});
+
+	test('a doubled $$ is a literal dollar, not an interpolation', () => {
+		// Compose escapes a literal dollar as $$, so this really is a volume name.
+		const src = `services:\n  server:\n    image: nginx:1.27\n    volumes:\n      - $$literal:/data\n`;
+		expect(ids(src)).toContain('UNDEFINED_VOLUME_REF');
+	});
+
+	test('a plain named volume is still flagged alongside an interpolated one', () => {
+		const src = `services:\n  server:\n    image: nginx:1.27\n    volumes:\n      - \${EXT}:/photos\n      - pgdata:/data\n`;
+		const f = find(src, 'UNDEFINED_VOLUME_REF');
+		expect(f).toBeTruthy();
+		expect(f?.message).toContain('pgdata');
+		expect(f?.message).not.toContain('EXT');
+	});
 });
 
 describe('quick fixes (only unambiguous rules carry a fix)', () => {
