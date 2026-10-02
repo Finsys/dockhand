@@ -26,7 +26,7 @@ import { sendEventNotification } from './notifications';
 import { buildBasicAuthHeader } from './git-auth';
 import { assertSafeRepoUrl, assertSafeGitRef, repoFilePath, repoBaseEnvPath } from './git-url-safety';
 import { assertSafeRepoTarget } from './git-branch-lookup';
-import { shouldDeployGitStack, shouldForceRecreateGitStack } from './git-deploy-policy';
+import { shouldDeployGitStack, shouldForceRecreateGitStack, isDeployFailure, DEPLOY_FAILURE_PREFIX } from './git-deploy-policy';
 import { resolveStackBranch } from '../git-stack-branch';
 import { expandValue } from '$lib/utils/env-file-values';
 import {
@@ -1349,6 +1349,30 @@ async function notifyGitSync(stackName: string, envId: number | null | undefined
 }
 
 /**
+ * Mark a git stack whose deploy failed, so the next scheduled sync or webhook
+ * deploys the same commit again instead of skipping it.
+ *
+ * The commit is persisted as synced before the deploy runs, so without this the
+ * stack reports being in sync while its containers stay on the old version.
+ * Best-effort: a write failure must not turn a reported deploy outcome into
+ * something else, so it logs and returns.
+ */
+async function markGitStackDeployFailed(
+	stackId: number,
+	logPrefix: string,
+	error: string | undefined
+): Promise<void> {
+	try {
+		await updateGitStack(stackId, {
+			syncStatus: 'error',
+			syncError: `${DEPLOY_FAILURE_PREFIX}${error ?? 'unknown error'}`
+		});
+	} catch (e) {
+		console.error(`${logPrefix} Failed to record the deploy failure on the stack:`, e);
+	}
+}
+
+/**
  * The function every git-stack deploy trigger funnels through EXCEPT ONE: a
  * config-update-then-redeploy, both webhook methods, create-and-deploy, and (via
  * runGitStackSync) the cron scheduler and the schedules page's "run now" all reach
@@ -1445,11 +1469,20 @@ export async function deployGitStack(
 	// Check if there are changes - skip redeploy if no changes and not forced.
 	// For new stacks (first deploy), syncResult.updated is true. The forceRedeploy
 	// setting overrides the skip logic for webhooks/scheduled syncs.
+	// Read from the pre-sync snapshot: syncGitStack has already written 'synced'
+	// by now, so the live row no longer remembers that the last deploy failed.
+	// A failed clone also lands in 'error', so the stored reason decides - those
+	// containers are in step and must not be recreated.
+	const lastDeployFailed = isDeployFailure(gitStack.syncStatus, gitStack.syncError);
 	const shouldDeploy = shouldDeployGitStack({
 		force,
 		forceRedeploy: gitStack.forceRedeploy === true,
-		gitUpdated: syncResult.updated === true
+		gitUpdated: syncResult.updated === true,
+		lastDeployFailed
 	});
+	if (lastDeployFailed) {
+		console.log(`${logPrefix} Last deploy failed, retrying this commit`);
+	}
 	if (!shouldDeploy) {
 		console.log(`${logPrefix} No changes detected and force=false, forceRedeploy=false, skipping redeploy`);
 		const skippedResult = {
@@ -1463,9 +1496,10 @@ export async function deployGitStack(
 
 	const forceRecreate = shouldForceRecreateGitStack({
 		forceRedeploy: gitStack.forceRedeploy === true,
-		gitUpdated: syncResult.updated === true
+		gitUpdated: syncResult.updated === true,
+		lastDeployFailed
 	});
-	console.log(`${logPrefix} Will force recreate:`, forceRecreate, `(updated=${syncResult.updated}, forceRedeploy=${gitStack.forceRedeploy})`);
+	console.log(`${logPrefix} Will force recreate:`, forceRecreate, `(updated=${syncResult.updated}, forceRedeploy=${gitStack.forceRedeploy}, lastDeployFailed=${lastDeployFailed})`);
 	console.log(`${logPrefix} Build on deploy:`, gitStack.buildOnDeploy);
 	console.log(`${logPrefix} Re-pull images:`, gitStack.repullImages);
 	console.log(`${logPrefix} Force redeploy setting:`, gitStack.forceRedeploy);
@@ -1559,6 +1593,9 @@ export async function deployGitStack(
 		} catch (e) {
 			console.error(`${logPrefix} Failed to close run recorder on deploy error (original error preserved):`, e);
 		}
+		// Mark it here too: a throw skips the result branch below, and leaving the
+		// stack on 'synced' is the stuck state this records against.
+		await markGitStackDeployFailed(stackId, logPrefix, error instanceof Error ? error.message : String(error));
 		throw error;
 	}
 
@@ -1619,6 +1656,11 @@ export async function deployGitStack(
 			gitStackId: stackId,
 			composePath: resolvedComposePath
 		});
+	} else {
+		// The commit was recorded as synced before the deploy ran, so mark the
+		// failure on the stack: it is what the next run reads to deploy again, and
+		// what stops the UI reporting a stack that never deployed as in sync.
+		await markGitStackDeployFailed(stackId, logPrefix, result.error);
 	}
 
 	// git_sync_success / git_sync_failed for the actual deploy result. deployStack
