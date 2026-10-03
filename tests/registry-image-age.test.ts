@@ -182,11 +182,32 @@ describe('generic registry image creation time', () => {
 		}
 	});
 
-	test('limits response bodies with and without Content-Length', async () => {
-		for (const headers of [new Headers({ 'Content-Length': String(2 * 1024 * 1024) }), new Headers()]) {
-			const f = fixture();
-			expect(await fetchImageCreatedAt(f.request, async () => new Response('x'.repeat(1024 * 1024 + 1), { headers }))).toBeNull();
-		}
+	test('rejects oversized Content-Length without reading the body', async () => {
+		const f = fixture();
+		let cancelled = false;
+		const stream = new ReadableStream<Uint8Array>({ cancel() { cancelled = true; } });
+		expect(await fetchImageCreatedAt(f.request, async () => new Response(stream, {
+			headers: { 'Content-Length': String(2 * 1024 * 1024) }
+		}))).toBeNull();
+		expect(cancelled).toBe(true);
+	});
+
+	test('enforces the streaming cap without Content-Length and cancels unread chunks', async () => {
+		const f = fixture();
+		let chunks = 0;
+		let cancelled = false;
+		const stream = new ReadableStream<Uint8Array>({
+			pull(controller) {
+				chunks++;
+				controller.enqueue(new Uint8Array(256 * 1024));
+				if (chunks === 20) controller.close();
+			},
+			cancel() { cancelled = true; }
+		});
+		expect(await fetchImageCreatedAt(f.request, async () => new Response(stream))).toBeNull();
+		expect(chunks).toBeGreaterThan(4);
+		expect(chunks).toBeLessThan(20);
+		expect(cancelled).toBe(true);
 	});
 });
 

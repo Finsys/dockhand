@@ -56,7 +56,7 @@ export function resolveMinimumReleaseAgeConfig(
 	globalSetting: unknown,
 	environmentSetting: unknown = null
 ): MinimumReleaseAgeConfig {
-	if (environmentVariable !== undefined) {
+	if (environmentVariable !== undefined && environmentVariable.trim() !== '') {
 		const hours = parseMinimumReleaseAgeHours(environmentVariable);
 		if (hours === null) throw new Error('MINIMUM_RELEASE_AGE_HOURS must be a whole number from 0 to 720');
 		return { hours, overridden: true, inherited: true };

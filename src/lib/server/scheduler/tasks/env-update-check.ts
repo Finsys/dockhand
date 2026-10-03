@@ -1,4 +1,3 @@
-import { getMinimumReleaseAgeConfig } from '../../minimum-release-age';
 import { trackedImageReference } from '$lib/utils/tracked-image';
 /**
  * Environment Update Check Task
@@ -179,11 +178,6 @@ export async function runEnvUpdateCheckJob(
 				// Check dockhand.update label (label wins over DB settings)
 				if (isUpdateDisabledByLabel(inspectData.Config?.Labels)) {
 					await log(`  [${container.name}] Skipping - dockhand.update=false label`);
-					continue;
-				}
-
-				if (config.autoUpdate && inspectData.Config?.Labels?.['PODMAN_SYSTEMD_UNIT'] && (await getMinimumReleaseAgeConfig(environmentId)).hours > 0) {
-					await log(`  [${container.name}] Update deferred: image cooldown cannot pin the image selected by a systemd unit; update manually`);
 					continue;
 				}
 

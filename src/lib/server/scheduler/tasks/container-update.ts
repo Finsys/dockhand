@@ -1,4 +1,3 @@
-import { getMinimumReleaseAgeConfig } from '../../minimum-release-age';
 import { trackedImageReference } from '$lib/utils/tracked-image';
 /**
  * Container Auto-Update Task
@@ -382,16 +381,6 @@ export async function runContainerUpdate(
 				completedAt: new Date().toISOString(),
 				duration: Date.now() - startTime,
 				details: { reason: 'Image pinned to specific digest' }
-			});
-			return;
-		}
-
-		if (inspectData.Config?.Labels?.['PODMAN_SYSTEMD_UNIT'] && (await getMinimumReleaseAgeConfig(envId)).hours > 0) {
-			const reason = 'Image cooldown cannot pin the image selected by a systemd unit; update manually';
-			log(`Update deferred: ${reason}`);
-			await updateScheduleExecution(execution.id, {
-				status: 'skipped', completedAt: new Date().toISOString(), duration: Date.now() - startTime,
-				details: { reason }
 			});
 			return;
 		}

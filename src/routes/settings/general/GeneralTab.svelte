@@ -1145,7 +1145,7 @@ services:
 						Minimum image age
 					</Card.Title>
 					<Card.Description>
-						Delay automatic container updates until an image reaches this age, using its creation time from registry metadata. Missing, invalid, or future creation times use when Dockhand first observed the digest. Creation time reflects the build, not publication. Environments can override this setting. Manual pulls warn and proceed; stack deployments, including scheduled Git deployments, are exempt. Systemd-managed containers require manual updates while the cooldown is enabled.
+						Delay automatic container updates until an image reaches this age, using its creation time from registry metadata. Missing, invalid, or future creation times use when Dockhand first observed the digest. Creation time reflects the build, not publication. Environments can override this setting. Manual pulls warn and proceed; stack deployments, including scheduled Git deployments, are exempt.
 					</Card.Description>
 				</Card.Header>
 				<Card.Content class="flex items-end gap-3">

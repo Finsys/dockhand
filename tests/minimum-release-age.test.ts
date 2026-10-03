@@ -22,6 +22,14 @@ describe('minimum release age', () => {
 		expect(resolveMinimumReleaseAgeConfig(undefined, null, null)).toEqual({ hours: 0, overridden: false, inherited: true });
 	});
 
+	test('blank environment variables behave as unset', () => {
+		for (const value of ['', ' ', '\t\n']) {
+			expect(resolveMinimumReleaseAgeConfig(value, 72, 24)).toEqual({ hours: 24, overridden: false, inherited: false });
+			expect(resolveMinimumReleaseAgeConfig(value, 72, null).hours).toBe(72);
+			expect(resolveMinimumReleaseAgeConfig(value, null, null).hours).toBe(0);
+		}
+	});
+
 	test('environment variable takes precedence over both settings', () => {
 		expect(resolveMinimumReleaseAgeConfig('24', 72, 48)).toEqual({ hours: 24, overridden: true, inherited: true });
 		expect(() => resolveMinimumReleaseAgeConfig('invalid', 72, 48)).toThrow();
@@ -121,7 +129,7 @@ if (process.env.COOLDOWN_TEST_PHASE === 'create') {
  assert.equal(count(), 1);
  // Simulate an aged persisted observation, then reopen the database in another process.
  sqlite.query('UPDATE settings SET value = ?').run(JSON.stringify('2020-01-01T00:00:00.000Z'));
-} else {
+} else if (process.env.COOLDOWN_TEST_PHASE === 'reopen') {
  const existing = await imageReleaseAgeStatus('nginx:latest', digest, hours);
  assert.equal(existing.observedAt, '2020-01-01T00:00:00.000Z');
  assert.equal(existing.remainingMs, 0, 'A restart or re-check must not reset the cooldown');
@@ -137,23 +145,74 @@ if (process.env.COOLDOWN_TEST_PHASE === 'create') {
  const old = await imageReleaseAgeStatus('registry.example.com/team/old:latest', digest, 24, async () => oldCreation);
  assert.equal(old.source, 'created');
  assert.equal(old.remainingMs, 0, 'A three-day-old image must immediately pass a one-day minimum');
- const recentCreation = new Date(Date.now() - 3600000).toISOString();
- const recent = await imageReleaseAgeStatus('registry.example.com/team/old:latest', digest, 24, async () => recentCreation);
- assert.equal(recent.source, 'created');
- assert.ok(recent.remainingMs > 22 * 3600000 && recent.remainingMs <= 23 * 3600000);
+ let overwritten = false;
+ const unchanged = await imageReleaseAgeStatus('registry.example.com/team/old:latest', digest, 24, async () => { overwritten = true; return new Date().toISOString(); });
+ assert.equal(unchanged.observedAt, oldCreation, 'Verified creation metadata is immutable');
+ assert.equal(overwritten, false, 'Persisted verified metadata avoids repeat lookups');
  const fallback = await imageReleaseAgeStatus('registry.example.com/team/old:latest', digest, 24);
- assert.equal(fallback.source, 'first-observed');
- assert.ok(fallback.remainingMs > 24 * 3600000 - 5000);
+ assert.equal(fallback.source, 'created');
+ assert.equal(fallback.remainingMs, 0, 'Lookup failure must not restart cooldown for verified metadata');
+ const unknownImage = 'registry.example.com/team/unknown:latest';
+ const first = await imageReleaseAgeStatus(unknownImage, digest, 24);
  for (const timestamp of [null, 'garbage', new Date(Date.now() + 86400000).toISOString()]) {
-  const invalid = await imageReleaseAgeStatus('registry.example.com/team/old:latest', digest, 24, async () => timestamp);
+  const invalid = await imageReleaseAgeStatus(unknownImage, digest, 24, async () => timestamp);
   assert.equal(invalid.source, 'first-observed');
-  assert.equal(invalid.observedAt, fallback.observedAt, 'Invalid metadata must retain original observation');
+  assert.equal(invalid.observedAt, first.observedAt, 'Invalid metadata must retain original observation');
  }
- const unavailable = await imageReleaseAgeStatus('registry.example.com/team/old:latest', digest, 24, async () => { throw new Error('unreachable'); });
- assert.equal(unavailable.observedAt, fallback.observedAt);
+ const unavailable = await imageReleaseAgeStatus(unknownImage, digest, 24, async () => { throw new Error('unreachable'); });
+ assert.equal(unavailable.observedAt, first.observedAt);
+ const concurrentImage = 'registry.example.com/team/concurrent:latest';
+ await Promise.all(Array.from({length: 20}, (_, i) => imageReleaseAgeStatus(concurrentImage, digest, 24, async () => i % 2 ? null : oldCreation)));
+ assert.equal((await imageReleaseAgeStatus(concurrentImage, digest, 24)).observedAt, oldCreation, 'Concurrent failed lookups must not overwrite verified metadata');
+ const platformImage = 'registry.example.com/team/platform:latest';
+ const recentCreation = new Date(Date.now() - 3600000).toISOString();
+ await Promise.all([
+  imageReleaseAgeStatus(platformImage, digest, 24, async () => ({ platform: 'linux/amd64/', createdAt: oldCreation })),
+  imageReleaseAgeStatus(platformImage, digest, 24, async () => ({ platform: 'linux/arm64/', createdAt: recentCreation }))
+ ]);
+ const amd = await imageReleaseAgeStatus(platformImage, digest, 24, async () => ({ platform: 'linux/amd64/', createdAt: null }));
+ const arm = await imageReleaseAgeStatus(platformImage, digest, 24, async () => ({ platform: 'linux/arm64/', createdAt: null }));
+ assert.equal(amd.remainingMs, 0);
+ assert.equal(amd.observedAt, oldCreation);
+ assert.equal(arm.observedAt, recentCreation, 'Creation metadata is scoped to each index child platform');
+ assert.ok(arm.remainingMs > 22 * 3600000);
  let lookedUp = false;
  assert.equal(await imageReleaseAgeRemainingMs('nginx:latest', digest, 0, async () => { lookedUp = true; return oldCreation; }), 0);
  assert.equal(lookedUp, false, 'Disabled cooldown must not query metadata');
+ // The image is 71 hours old on first observation, then the process restarts
+ // two hours later while the registry is unreachable.
+ const firstNow = Date.now();
+ const created71h = new Date(firstNow - 71 * 3600000).toISOString();
+ await imageReleaseAgeStatus('registry.example.com/team/restart:latest', digest, 72, async () => created71h);
+ const platformRestartImage = 'registry.example.com/team/platform-restart:latest';
+ await Promise.all([
+  imageReleaseAgeStatus(platformRestartImage, digest, 72, async () => ({ platform: 'linux/amd64/', createdAt: created71h }), 1),
+  imageReleaseAgeStatus(platformRestartImage, digest, 72, async () => ({ platform: 'linux/arm64/', createdAt: new Date(firstNow - 3600000).toISOString() }), 2)
+ ]);
+ sqlite.query('INSERT INTO settings (key, value) VALUES (?, ?)').run('test_clock', String(firstNow + 2 * 3600000));
+} else {
+ Date.now = () => Number(sqlite.query('SELECT value FROM settings WHERE key = ?').get('test_clock').value);
+ const mature = await imageReleaseAgeStatus('registry.example.com/team/restart:latest', digest, 72, async () => { throw new Error('registry unreachable'); });
+ assert.equal(mature.source, 'created');
+ assert.equal(mature.remainingMs, 0, 'Creation timestamp must survive a process restart and failed lookup');
+ const scoped = await imageReleaseAgeStatus('registry.example.com/team/platform:latest', digest, 24, async persisted => ({ platform: 'linux/amd64/', createdAt: persisted['linux/amd64/'] ?? null }));
+ assert.equal(scoped.source, 'created');
+ assert.equal(scoped.remainingMs, 0, 'Platform creation metadata must survive restart');
+ const platformRestartImage = 'registry.example.com/team/platform-restart:latest';
+ for (const failedLookup of [async () => null, async () => { throw new Error('daemon /info timed out'); }]) {
+  const amd = await imageReleaseAgeStatus(platformRestartImage, digest, 72, failedLookup, 1);
+  assert.equal(amd.source, 'created');
+  assert.equal(amd.remainingMs, 0, 'Failed platform lookup after restart must retain the elapsed cooldown');
+  const arm = await imageReleaseAgeStatus(platformRestartImage, digest, 72, failedLookup, 2);
+  assert.equal(arm.source, 'created');
+  assert.ok(arm.remainingMs > 68 * 3600000 && arm.remainingMs <= 69 * 3600000, 'Environments must retain their own platform age');
+  const unknown = await imageReleaseAgeStatus(platformRestartImage, digest, 72, failedLookup, 3);
+  assert.equal(unknown.source, 'first-observed', 'An unknown environment must not borrow another platform');
+ }
+ const changedPlatform = await imageReleaseAgeStatus(platformRestartImage, digest, 72, async () => ({ platform: 'linux/arm64/', createdAt: null }), 1);
+ assert.ok(changedPlatform.remainingMs > 68 * 3600000, 'Successful platform detection must supersede the old association');
+ const changedFallback = await imageReleaseAgeStatus(platformRestartImage, digest, 72, async () => null, 1);
+ assert.equal(changedFallback.observedAt, changedPlatform.observedAt, 'The changed platform association must be persisted');
 }
 assert.equal(providerRequests, 0, 'Cooldown must not query provider APIs');
 sqlite.close();
@@ -163,7 +222,7 @@ await assert.rejects(imageReleaseAgeRemainingMs('nginx:latest', digest, hours), 
 test('persists one digest observation across concurrent checks and process restarts', () => {
 	const directory = mkdtempSync(join(tmpdir(), 'dockhand-cooldown-test-'));
 	try {
-		for (const phase of ['create', 'reopen']) {
+		for (const phase of ['create', 'reopen', 'metadata-restart']) {
 			const result = spawnSync(process.execPath, ['--eval', observationProbe], {
 				cwd: fileURLToPath(new URL('..', import.meta.url)),
 				env: { ...process.env, COOLDOWN_TEST_DB: join(directory, 'observations.sqlite'), COOLDOWN_TEST_PHASE: phase },

@@ -27,7 +27,7 @@ import type { Environment } from './db';
 import { getSetting } from './db';
 import { releaseAgeAdvisory } from './release-age-advisory';
 import { portableImageReference, trackedImageLabels, trackedImageReference } from '../utils/tracked-image';
-import { getMinimumReleaseAgeConfig, imageReleaseAgeRemainingMs, imageReleaseAgeStatus } from './minimum-release-age';
+import { getMinimumReleaseAgeConfig, imageReleaseAgeRemainingMs, imageReleaseAgeStatus, type ImageCreationMetadata } from './minimum-release-age';
 import { manualPullAgeWarning, verifiedImagePullPlan } from './minimum-release-age-core';
 import { getAdditionalVolumeBinds, dedupeVolumesForRecreate } from './mount-dedupe';
 import { resolveNanoCpusConflict, resolvePodmanUsernsMode } from './hostconfig-recreate';
@@ -111,6 +111,7 @@ export class DockerConnectionError extends Error {
  */
 export interface ContainerInspectResult {
 	Id: string;
+	Image: string;
 	Name: string;
 	RestartCount: number;
 	State: {
@@ -1916,12 +1917,18 @@ export async function createContainer(options: CreateContainerOptions, envId?: n
  * The unit's ExecStop removes the container and its Restart= policy respawns it from
  * `podman run --replace` on the CURRENT tag (the image already pulled), so a single stop
  * is the whole recreate. We then poll for the respawned container to come back under the
- * same name, RUNNING, with a new id, and return that id. If it never reaches running
+ * same name, RUNNING, with a new id, and return that id. Automatic updates also verify
+ * its image ID and attempt to restore the previous image if verification fails.
+ * If it never reaches running
  * (no Restart= policy, or a crash-loop on the new image), throw an actionable error
  * rather than the misleading rename failure - and never report a broken update as success.
  */
 async function recreateSystemdManagedContainer(
-	opts: { name: string; oldContainerId: string; wasRunning: boolean; unit: string },
+	opts: {
+		name: string; oldContainerId: string; wasRunning: boolean; unit: string;
+		verifiedImageId?: string;
+		rollback?: { imageId: string; repo: string; tag: string };
+	},
 	envId: number | null | undefined,
 	log?: (msg: string) => void
 ): Promise<{ Id: string }> {
@@ -1962,6 +1969,31 @@ async function recreateSystemdManagedContainer(
 			const outcome = decideRespawnOutcome(found, oldContainerId, Date.now() >= deadline);
 			if (!outcome.done) continue;
 			if (outcome.ok) {
+				if (opts.verifiedImageId) {
+					try {
+						const replacement = await inspectContainer(outcome.id, envId);
+						if (replacement.Image !== opts.verifiedImageId) {
+							throw new Error(`systemd unit ${unit} started ${name} with image ${replacement.Image}, instead of the approved image ${opts.verifiedImageId}`);
+						}
+					} catch (error) {
+						const reason = error instanceof Error ? error.message : String(error);
+						let recovery = 'Check the unit image and pull policy before retrying.';
+						if (opts.rollback) {
+							try {
+								log?.('Could not verify the systemd replacement; restoring the previous image...');
+								await tagImage(opts.rollback.imageId, opts.rollback.repo, opts.rollback.tag, envId);
+								await recreateSystemdManagedContainer({
+									name, oldContainerId: outcome.id, wasRunning: true, unit,
+									verifiedImageId: opts.rollback.imageId
+								}, envId, log);
+								recovery = 'The previous image was restored. Check the unit image and pull policy before retrying.';
+							} catch (rollbackError) {
+								recovery = `Rollback failed: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}. Check systemd unit ${unit} immediately.`;
+							}
+						}
+						throw new Error(`Could not verify the approved image for ${name}: ${reason}. ${recovery}`);
+					}
+				}
 				log?.(`systemd recreated ${name} (new container ${outcome.id.slice(0, 12)})`);
 				return { Id: outcome.id };
 			}
@@ -2053,13 +2085,26 @@ export async function recreateContainerFromInspect(
 	// stop, then wait for the unit to bring the container back on the new image.
 	const systemdUnit = config.Labels?.['PODMAN_SYSTEMD_UNIT'];
 	if (verifiedImageId) {
-		// Validate before stopping anything. A systemd unit controls its own image.
+		// Validate before stopping anything.
 		trackedImageLabels({}, newImage, verifiedImageId, verifiedImageReference);
-		if (systemdUnit) throw new Error('Automatic update deferred: image cooldown cannot pin the image selected by a systemd unit');
 	}
 	if (systemdUnit) {
+		let rollback: { imageId: string; repo: string; tag: string } | undefined;
+		if (verifiedImageId) {
+			// The unit uses a mutable tag. Detect an intervening pull before stopping
+			// the old container, then verify the actual replacement after respawn.
+			const selectedImage = await inspectImage(newImage, envId);
+			if (selectedImage.Id !== verifiedImageId) {
+				throw new Error(`Image ${newImage} changed before the systemd restart; update deferred, original container left running`);
+			}
+			const colon = newImage.lastIndexOf(':');
+			const hasTag = colon > newImage.lastIndexOf('/');
+			if (!newImage.includes('@') && /^sha256:[a-f0-9]{64}$/.test(inspectData.Image)) {
+				rollback = { imageId: inspectData.Image, repo: hasTag ? newImage.slice(0, colon) : newImage, tag: hasTag ? newImage.slice(colon + 1) : 'latest' };
+			}
+		}
 		return await recreateSystemdManagedContainer(
-			{ name, oldContainerId, wasRunning, unit: systemdUnit },
+			{ name, oldContainerId, wasRunning, unit: systemdUnit, verifiedImageId, rollback },
 			envId,
 			log
 		);
@@ -3068,7 +3113,7 @@ export async function verifyImageReleaseAge(imageName: string, envId?: number | 
 	if (hours > 0) {
 		const digest = await getRegistryManifestDigest(imageName, envId);
 		if (!digest) throw new Error(`Cannot verify the update cooldown for ${imageName}: registry digest unavailable. Check registry access and credentials; pull deferred.`);
-		const remaining = await imageReleaseAgeRemainingMs(imageName, digest, hours, () => getRegistryImageCreatedAt(imageName, digest, envId));
+		const remaining = await imageReleaseAgeRemainingMs(imageName, digest, hours, persisted => getRegistryImageCreatedAt(imageName, digest, envId, undefined, persisted), envId);
 		if (remaining > 0) {
 			throw new Error(`${imageName} is in its image update cooldown (${Math.ceil(remaining / 3600000)} hours remaining)`);
 		}
@@ -3087,7 +3132,7 @@ export async function getImageReleaseAgeWarning(imageName: string, envId?: numbe
 			const digest = await getRegistryManifestDigest(imageName, envId, signal);
 			signal.throwIfAborted();
 			if (!digest) return manualPullAgeWarning(imageName, hours, null);
-			return manualPullAgeWarning(imageName, hours, await imageReleaseAgeStatus(imageName, digest, hours, () => getRegistryImageCreatedAt(imageName, digest, envId, signal)));
+			return manualPullAgeWarning(imageName, hours, await imageReleaseAgeStatus(imageName, digest, hours, persisted => getRegistryImageCreatedAt(imageName, digest, envId, signal, persisted), envId));
 		});
 	} catch (error) {
 		console.warn(`[Pull] Could not determine update cooldown for ${imageName}:`, error);
@@ -3962,21 +4007,21 @@ async function getDockerDistributionDigest(imageName: string, envId?: number | n
 	}
 }
 
-/** Resolve the registry digest on the target environment first. Fall back to a
- * direct registry HEAD for daemons without the distribution inspect endpoint. */
+/** With a cooldown enabled, resolve the digest on the target environment first.
+ * Otherwise retain the direct registry HEAD without an extra daemon request. */
 export async function getRegistryManifestDigest(imageName: string, envId?: number | null, signal?: AbortSignal): Promise<string | null> {
 	return (await getRegistryManifestDigestDetailed(imageName, envId, signal)).digest;
 }
 
 export async function getRegistryManifestDigestDetailed(imageName: string, envId?: number | null, signal?: AbortSignal): Promise<{ digest: string | null; reason?: string }> {
 	const { registry } = parseImageReference(imageName);
-	if (!isSafeRegistryHost(registry)) return { digest: null, reason: describeRegistryFailure({ kind: 'blocked-host', registry }) };
+	if (!isSafeRegistryHost(registry).ok) return { digest: null, reason: describeRegistryFailure({ kind: 'blocked-host', registry }) };
 	signal?.throwIfAborted();
-	const daemonDigest = await getDockerDistributionDigest(imageName, envId, signal);
-	signal?.throwIfAborted();
-	if (daemonDigest) return { digest: daemonDigest };
-	// A daemon-local registry may be reachable from the target host, but Dockhand
-	// must never send its own direct registry request to a loopback address.
+	if ((await getMinimumReleaseAgeConfig(envId)).hours > 0) {
+		const daemonDigest = await getDockerDistributionDigest(imageName, envId, signal);
+		signal?.throwIfAborted();
+		if (daemonDigest) return { digest: daemonDigest };
+	}
 	return getRegistryManifestDigestDirectDetailed(imageName, signal);
 }
 
@@ -3984,7 +4029,7 @@ export async function getRegistryManifestDigestDetailed(imageName: string, envId
 // Failed lookups are retried on the next check; the durable fallback lives in settings.
 const imageCreationTimes = new Map<string, string>();
 
-async function getRegistryImageCreatedAt(imageName: string, digest: string, envId?: number | null, parentSignal?: AbortSignal): Promise<string | null> {
+async function getRegistryImageCreatedAt(imageName: string, digest: string, envId?: number | null, parentSignal?: AbortSignal, persisted: Readonly<Record<string, string>> = {}): Promise<ImageCreationMetadata | null> {
 	try {
 		const { registry, repo } = parseImageReference(imageName);
 		if (!isSafeRegistryHost(registry).ok) return null;
@@ -3994,8 +4039,9 @@ async function getRegistryImageCreatedAt(imageName: string, digest: string, envI
 		const platform = imagePlatform(info?.OSType, info?.Architecture);
 		if (!platform) return null;
 		const key = `${registry}/${repo}@${digest}/${platform.os}/${platform.architecture}/${platform.variant ?? ''}`;
-		const cached = imageCreationTimes.get(key);
-		if (cached) return cached;
+		const platformKey = `${platform.os}/${platform.architecture}/${platform.variant ?? ''}`;
+		const cached = persisted[platformKey] ?? imageCreationTimes.get(key);
+		if (cached) return { createdAt: cached, platform: platformKey };
 		signal.throwIfAborted();
 		const [authorization, scheme] = await Promise.all([
 			getRegistryBearerToken(registry, repo, signal), getRegistrySchemeForHost(registry)
@@ -4005,7 +4051,7 @@ async function getRegistryImageCreatedAt(imageName: string, digest: string, envI
 			if (imageCreationTimes.size >= 256) imageCreationTimes.delete(imageCreationTimes.keys().next().value!);
 			imageCreationTimes.set(key, created);
 		}
-		return created;
+		return { createdAt: created, platform: platformKey };
 	} catch {
 		return null;
 	}
@@ -4249,7 +4295,7 @@ export async function checkImageUpdateAvailable(
 
 async function imageCooldownRemainingMs(imageName: string, digest: string, envId?: number): Promise<number> {
 	const { hours } = await getMinimumReleaseAgeConfig(envId);
-	return hours > 0 ? imageReleaseAgeRemainingMs(imageName, digest, hours, () => getRegistryImageCreatedAt(imageName, digest, envId)) : 0;
+	return hours > 0 ? imageReleaseAgeRemainingMs(imageName, digest, hours, persisted => getRegistryImageCreatedAt(imageName, digest, envId, undefined, persisted), envId) : 0;
 }
 
 export async function tagImage(id: string, repo: string, tag: string, envId?: number | null) {

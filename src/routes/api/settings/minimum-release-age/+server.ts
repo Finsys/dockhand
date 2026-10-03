@@ -7,9 +7,13 @@ import { parseMinimumReleaseAgeHours } from '$lib/server/minimum-release-age-cor
  * @openapi
  * summary: Get the minimum image age in hours (creation time, with first-observed fallback)
  * resp-200: {hours:number!, overridden:boolean!, inherited:boolean!}
+ * resp-403: Permission denied (needs settings:view)
  */
 export const GET: RequestHandler = async ({ cookies }) => {
-	await authorize(cookies);
+	const auth = await authorize(cookies);
+	if (auth.authEnabled && !await auth.can('settings', 'view')) {
+		return json({ error: 'Permission denied' }, { status: 403 });
+	}
 	return json(await getMinimumReleaseAgeConfig());
 };
 
