@@ -27,6 +27,7 @@ const KNOWN_EXPORTS = [
 	'saveStackComposeFile',
 	'requireComposeFile',
 	'deployStack',
+	'getStackPathHints',
 	'getStackDir'
 ] as const;
 
