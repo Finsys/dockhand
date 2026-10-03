@@ -3,6 +3,11 @@ set -e
 
 # Dockhand Docker Entrypoint
 # === Configuration ===
+# Recorded before the defaults are applied: asking for a user and leaving it to
+# us are different requests, and only the second one means run as root. An empty
+# value counts as not asked for, since compose turns an undefined variable into one.
+PUID_WAS_SET=${PUID:+yes}
+PGID_WAS_SET=${PGID:+yes}
 PUID=${PUID:-1001}
 PGID=${PGID:-1001}
 
@@ -67,16 +72,16 @@ if [ "$RUNNING_AS_ROOT" = "false" ]; then
 fi
 
 # === User Setup ===
-# Root mode: PUID=0 requested OR already running as root with default PUID/PGID
+# Root mode: PUID=0 asked for, or nobody asked for a user at all and we are root
 if [ "$PUID" = "0" ]; then
     echo "Running as root user (PUID=0)"
     RUN_USER="root"
-elif [ "$RUNNING_AS_ROOT" = "true" ] && [ "$PUID" = "1001" ] && [ "$PGID" = "1001" ]; then
+elif [ "$RUNNING_AS_ROOT" = "true" ] && [ -z "$PUID_WAS_SET" ] && [ -z "$PGID_WAS_SET" ]; then
     echo "Running as root user"
     RUN_USER="root"
 else
     RUN_USER="dockhand"
-    # Only modify if PUID/PGID differ from image defaults (1001:1001)
+    # The dockhand user already has 1001:1001, so only a different id needs work
     if [ "$PUID" != "1001" ] || [ "$PGID" != "1001" ]; then
         echo "Configuring user with PUID=$PUID PGID=$PGID"
 
