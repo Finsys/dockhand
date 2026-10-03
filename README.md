@@ -147,13 +147,15 @@ Dockhand is licensed under the [Business Source License 1.1](LICENSE.txt) (BSL 1
 - A home lab, or anything else you run for yourself and not for a business
 - A non-profit or charity, for its own activities
 - A school, college, university or non-commercial research
+- Working for yourself - a freelancer, self-employed individual or sole trader
+  running infrastructure nobody else works on with you
 - Development, testing, staging, CI/CD, evaluation, demos and training - this one
   applies to **everyone, including companies**, with no limit on users or environments
 
 ### Needs a Commercial License:
 
-- Running your organization's live systems on it - a company, sole trader,
-  self-employed individual, public body or any other organization
+- Running your organization's live systems on it - a company, public body or any
+  other organization with employees
 
 ### Needs a separate agreement:
 
