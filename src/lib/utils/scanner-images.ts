@@ -14,6 +14,19 @@
 export const DEFAULT_GRYPE_IMAGE = 'anchore/grype:v0.119.0';
 export const DEFAULT_TRIVY_IMAGE = 'aquasec/trivy:0.75.0';
 
+/**
+ * The CLI arguments each scanner runs with when nothing is configured. Same
+ * reason they live here as the images: the server, the client store and the
+ * settings placeholders must not drift apart. `{image}` is substituted with
+ * the reference being scanned.
+ *
+ * Trivy is limited to the vulnerability scanner because that is the only
+ * result Dockhand reads; its secret and misconfiguration scanners cost real
+ * time per scan and their findings are discarded.
+ */
+export const DEFAULT_GRYPE_ARGS = '-o json -v {image}';
+export const DEFAULT_TRIVY_ARGS = 'image --scanners vuln --format json {image}';
+
 /** The repository half of an image reference, without the tag. */
 export function imageRepo(image: string): string {
 	const lastColon = image.lastIndexOf(':');

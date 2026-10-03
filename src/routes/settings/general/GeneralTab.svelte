@@ -21,7 +21,13 @@
 	import EditorThemeSelector from '$lib/components/EditorThemeSelector.svelte';
 	import ColoredActionsToggle from '$lib/components/ColoredActionsToggle.svelte';
 	import SemverCheckConfig from '$lib/components/SemverCheckConfig.svelte';
-	import { DEFAULT_GRYPE_IMAGE, DEFAULT_TRIVY_IMAGE, imageRepo } from '$lib/utils/scanner-images';
+	import {
+		DEFAULT_GRYPE_IMAGE,
+		DEFAULT_TRIVY_IMAGE,
+		DEFAULT_GRYPE_ARGS,
+		DEFAULT_TRIVY_ARGS,
+		imageRepo
+	} from '$lib/utils/scanner-images';
 	import { onMount } from 'svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 
@@ -1017,7 +1023,7 @@ services:
 							value={defaultGrypeArgs}
 							onblur={handleGrypeArgsBlur}
 							disabled={!$canAccess('settings', 'edit')}
-							placeholder={"-o json -v {image}"}
+							placeholder={DEFAULT_GRYPE_ARGS}
 						/>
 						<p class="text-xs text-muted-foreground">Use <code class="bg-muted px-1 rounded">{'{image}'}</code> as placeholder for the image name</p>
 					</div>
@@ -1028,7 +1034,7 @@ services:
 							value={defaultTrivyArgs}
 							onblur={handleTrivyArgsBlur}
 							disabled={!$canAccess('settings', 'edit')}
-							placeholder={"image --format json {image}"}
+							placeholder={DEFAULT_TRIVY_ARGS}
 						/>
 						<p class="text-xs text-muted-foreground">Use <code class="bg-muted px-1 rounded">{'{image}'}</code> as placeholder for the image name</p>
 					</div>

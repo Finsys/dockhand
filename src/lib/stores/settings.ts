@@ -1,4 +1,9 @@
-import { DEFAULT_GRYPE_IMAGE, DEFAULT_TRIVY_IMAGE } from '$lib/utils/scanner-images';
+import {
+	DEFAULT_GRYPE_IMAGE,
+	DEFAULT_TRIVY_IMAGE,
+	DEFAULT_GRYPE_ARGS,
+	DEFAULT_TRIVY_ARGS
+} from '$lib/utils/scanner-images';
 import { writable, derived, get } from 'svelte/store';
 import { browser } from '$app/environment';
 import {
@@ -80,8 +85,8 @@ const DEFAULT_SETTINGS: AppSettings = {
 	timeFormat: '24h',
 	dateFormat: 'DD.MM.YYYY',
 	downloadFormat: 'tar',
-	defaultGrypeArgs: '-o json -v {image}',
-	defaultTrivyArgs: 'image --format json {image}',
+	defaultGrypeArgs: DEFAULT_GRYPE_ARGS,
+	defaultTrivyArgs: DEFAULT_TRIVY_ARGS,
 	scheduleRetentionDays: 30,
 	eventRetentionDays: 30,
 	scheduleCleanupCron: '0 3 * * *',

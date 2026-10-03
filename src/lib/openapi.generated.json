@@ -25341,7 +25341,7 @@
               "example": {
                 "scanner": "grype",
                 "grypeArgs": "-o json -v {image}",
-                "trivyArgs": "image --format json {image}",
+                "trivyArgs": "image --scanners vuln --format json {image}",
                 "envId": 1
               }
             }

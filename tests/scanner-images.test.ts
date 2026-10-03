@@ -1,5 +1,13 @@
 import { describe, expect, test } from 'bun:test';
-import { DEFAULT_GRYPE_IMAGE, DEFAULT_TRIVY_IMAGE, imageRepo, imageTag, scannerToolInventory } from '../src/lib/utils/scanner-images';
+import {
+	DEFAULT_GRYPE_IMAGE,
+	DEFAULT_TRIVY_IMAGE,
+	DEFAULT_GRYPE_ARGS,
+	DEFAULT_TRIVY_ARGS,
+	imageRepo,
+	imageTag,
+	scannerToolInventory
+} from '../src/lib/utils/scanner-images';
 
 /**
  * The scanner image defaults, and the rule that a configured image always wins.
@@ -110,5 +118,49 @@ describe('retagging an image to a new version', () => {
 
 	test('an image with no tag at all', () => {
 		expect(retag('anchore/grype', 'v0.119.0')).toBe('anchore/grype:v0.119.0');
+	});
+});
+
+/**
+ * The default CLI arguments. Both must carry the {image} placeholder the runner
+ * substitutes, and trivy must stay limited to the vulnerability scanner - its
+ * secret and misconfiguration scanners cost time per scan and Dockhand reads
+ * neither.
+ */
+describe('default scanner CLI arguments', () => {
+	test('both substitute the image reference', () => {
+		expect(DEFAULT_GRYPE_ARGS).toContain('{image}');
+		expect(DEFAULT_TRIVY_ARGS).toContain('{image}');
+	});
+
+	test('both ask for json, which is what the parsers expect', () => {
+		expect(DEFAULT_GRYPE_ARGS).toContain('-o json');
+		expect(DEFAULT_TRIVY_ARGS).toContain('--format json');
+	});
+
+	test('trivy runs only the vulnerability scanner', () => {
+		// The whole token, not a prefix: 'vuln,secret' contains '--scanners vuln'
+		// and would quietly put the secret scanner back on every scan.
+		const tokens = DEFAULT_TRIVY_ARGS.split(/\s+/);
+		expect(tokens[tokens.indexOf('--scanners') + 1]).toBe('vuln');
+	});
+
+	test('adding a second scanner back would fail that check', () => {
+		// The near miss the substring assertion could not tell apart.
+		const widened = DEFAULT_TRIVY_ARGS.replace('--scanners vuln', '--scanners vuln,secret');
+		const tokens = widened.split(/\s+/);
+		expect(tokens[tokens.indexOf('--scanners') + 1]).not.toBe('vuln');
+	});
+
+	test('trivy still scans an image, not a filesystem or repo', () => {
+		expect(DEFAULT_TRIVY_ARGS.split(/\s+/)[0]).toBe('image');
+	});
+
+	test('neither carries a flag that would suppress findings', () => {
+		for (const args of [DEFAULT_GRYPE_ARGS, DEFAULT_TRIVY_ARGS]) {
+			expect(args).not.toContain('--skip-db-update');
+			expect(args).not.toContain('--severity');
+			expect(args).not.toContain('--ignore-unfixed');
+		}
 	});
 });

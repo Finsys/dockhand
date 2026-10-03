@@ -51,6 +51,7 @@ import { DEFAULT_GRYPE_IMAGE, DEFAULT_TRIVY_IMAGE } from '$lib/server/scanner';
 import { DEFAULT_HELPER_IMAGE } from '$lib/server/backups/restic';
 import { DEFAULT_STACK_LOG_OPERATIONS, sanitizeStackLogOperations, parseStackLogOperationsStorage, type StackLogOperation } from '$lib/utils/stack-log-operations';
 import { isValidEditorThemeId } from '$lib/utils/editor-themes';
+import { DEFAULT_GRYPE_ARGS, DEFAULT_TRIVY_ARGS } from '$lib/utils/scanner-images';
 
 // The real engine default (version-pinned, `-baseline`-aware). NOT a hardcoded
 // `:latest` — that would advertise a floating tag the backup engine never uses and,
@@ -161,8 +162,8 @@ const DEFAULT_SETTINGS: Omit<GeneralSettings, 'scheduleRetentionDays' | 'eventRe
 	timeFormat: '24h',
 	dateFormat: 'DD.MM.YYYY',
 	downloadFormat: 'tar',
-	defaultGrypeArgs: '-o json -v {image}',
-	defaultTrivyArgs: 'image --format json {image}',
+	defaultGrypeArgs: DEFAULT_GRYPE_ARGS,
+	defaultTrivyArgs: DEFAULT_TRIVY_ARGS,
 	logBufferSizeKb: 500,
 	logMaxLines: 2000,
 	defaultTimezone: 'UTC',
