@@ -15,6 +15,7 @@ import {
 	LayoutDashboard, LayoutGrid, ListMusic, MemoryStick, MessageCircle, Music2, PenTool, Play,
 	QrCode, Reply, Search, Share2, ShoppingBag, SlidersHorizontal, ToggleLeft, UserCog, UtensilsCrossed
 } from 'lucide-svelte';
+import * as lucide from 'lucide-svelte';
 import type { ComponentType } from 'svelte';
 
 // Icon mapping for rendering
@@ -65,7 +66,7 @@ const iconMap: Record<string, ComponentType> = {
 };
 
 export function getIconComponent(iconName: string): ComponentType {
-	return iconMap[iconName] || Globe;
+	return lucideComponent(iconName) || Globe;
 }
 
 /**
@@ -73,7 +74,50 @@ export function getIconComponent(iconName: string): ComponentType {
  * reject an unusable name rather than fall back to a placeholder glyph.
  */
 export function isKnownIconName(name: string): boolean {
-	return name in iconMap;
+	return !!lucideComponent(name);
+}
+
+// lucide exports a base Icon component beside the icons themselves. It draws
+// nothing without an iconNode prop, so it must not be reachable by name.
+const NON_ICON_EXPORTS = new globalThis.Set(['Icon']);
+
+/**
+ * A kebab-case icon name as lucide exports it: 'party-popper' -> 'PartyPopper'.
+ * Digits ride along with the part they belong to ('layers-3' -> 'Layers3').
+ */
+function pascalCase(name: string): string {
+	return name
+		.split('-')
+		.map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+		.join('');
+}
+
+/**
+ * Resolve an icon name to a component: our own map first, so a curated alias
+ * ('tree' for TreePine) keeps winning, then the whole lucide set, so any icon
+ * the library ships is usable without being listed here.
+ */
+// globalThis.Map, because the lucide namespace import shadows the global `Map`
+// with its own map icon component.
+const resolved: globalThis.Map<string, ComponentType | null> = new globalThis.Map();
+
+function lucideComponent(name: string): ComponentType | null {
+	if (Object.hasOwn(iconMap, name)) return iconMap[name];
+	// Memoised: the kebab-to-Pascal rewrite allocates, and a tag grid resolves the
+	// same handful of names on every render. A miss is cached too, so a typo in a
+	// label costs the lookup once rather than once per row.
+	const hit = resolved.get(name);
+	if (hit !== undefined) return hit;
+	// Own properties only, and never the base Icon: a label name is user input, so
+	// 'constructor' or '__proto__' must not reach Object.prototype and render as junk.
+	const exportName = pascalCase(name);
+	const exported =
+		!NON_ICON_EXPORTS.has(exportName) && Object.hasOwn(lucide, exportName)
+			? (lucide as Record<string, unknown>)[exportName]
+			: undefined;
+	const component = exported ? (exported as ComponentType) : null;
+	resolved.set(name, component);
+	return component;
 }
 
 export function isCustomIcon(icon: string | null | undefined): boolean {
