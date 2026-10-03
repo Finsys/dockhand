@@ -1,7 +1,7 @@
 {
 	"name": "dockhand",
 	"private": true,
-	"version": "1.0.49",
+	"version": "1.0.51",
 	"type": "module",
 	"scripts": {
 		"dev": "npx vite dev",
@@ -47,7 +47,7 @@
 		"better-sqlite3": "11.7.0",
 		"croner": "9.1.0",
 		"cronstrue": "3.9.0",
-		"devalue": "5.9.2",
+		"devalue": "5.9.3",
 		"drizzle-orm": "0.45.2",
 		"fast-xml-parser": "5.7.3",
 		"isomorphic-dompurify": "3.22.0",
@@ -57,7 +57,7 @@
 		"marked": "18.0.9",
 		"modern-tar": "0.8.0",
 		"mqtt": "5.15.2",
-		"nodemailer": "9.1.1",
+		"nodemailer": "10.0.10",
 		"otpauth": "9.4.1",
 		"postgres": "3.4.8",
 		"prom-client": "15.1.3",
@@ -65,7 +65,7 @@
 		"rollup": "4.60.0",
 		"svelte-dnd-action": "0.9.79",
 		"svelte-sonner": "1.0.7",
-		"undici": "7.29.0",
+		"undici": "7.30.0",
 		"ws": "8.21.0"
 	},
 	"devDependencies": {
@@ -120,6 +120,6 @@
 		"@codemirror/search": "6.6.0",
 		"@lezer/common": "1.5.0",
 		"@lezer/highlight": "1.2.3",
-		"devalue": "5.9.2"
+		"devalue": "5.9.3"
 	}
 }
