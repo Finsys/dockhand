@@ -10777,7 +10777,17 @@
           "environments"
         ],
         "summary": "List all Docker environments (hosts) known to Dockhand",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "includeInactive",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Include inactive environments (defaults to false)"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Environments accessible to the caller (filtered by RBAC in Enterprise mode; all environments in Free edition). The tlsKey (private TLS client key) and hawserToken secrets are NEVER returned; hasTlsKey / hasHawserToken indicate whether one is stored.",
@@ -10808,6 +10818,9 @@
                       },
                       "icon": {
                         "type": "string"
+                      },
+                      "isActive": {
+                        "type": "boolean"
                       },
                       "publicIp": {
                         "type": "string"
@@ -11203,6 +11216,9 @@
                   },
                   "icon": {
                     "type": "string"
+                  },
+                  "isActive": {
+                    "type": "boolean"
                   },
                   "socketPath": {
                     "type": "string"

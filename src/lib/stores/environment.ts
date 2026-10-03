@@ -13,6 +13,7 @@ export interface Environment {
 	id: number;
 	name: string;
 	icon?: string;
+	isActive?: boolean;
 	host?: string;
 	port?: number;
 	protocol?: string;

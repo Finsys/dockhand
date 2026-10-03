@@ -31,6 +31,7 @@ export const environments = sqliteTable('environments', {
 	tlsKey: text('tls_key'),
 	tlsSkipVerify: integer('tls_skip_verify', { mode: 'boolean' }).default(false),
 	icon: text('icon').default('globe'),
+	isActive: integer('is_active', { mode: 'boolean' }).default(true),
 	collectActivity: integer('collect_activity', { mode: 'boolean' }).default(true),
 	collectMetrics: integer('collect_metrics', { mode: 'boolean' }).default(true),
 	highlightChanges: integer('highlight_changes', { mode: 'boolean' }).default(true),
