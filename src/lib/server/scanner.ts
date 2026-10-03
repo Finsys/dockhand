@@ -4,7 +4,7 @@
 
 import {
 	listImages,
-	pullImage,
+	pullInternalImage,
 	createVolume,
 	listVolumes,
 	removeVolume,
@@ -370,7 +370,7 @@ async function ensureScannerImage(
 	});
 
 	try {
-		await pullImage(scannerImage, undefined, envId);
+		await pullInternalImage(scannerImage, envId);
 		return true;
 	} catch (error) {
 		const errorMsg = error instanceof Error ? error.message : String(error);

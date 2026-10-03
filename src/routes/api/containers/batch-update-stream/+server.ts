@@ -1,3 +1,4 @@
+import { trackedImageReference } from '$lib/utils/tracked-image';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
@@ -53,6 +54,7 @@ export interface UpdateProgress {
 	};
 	// Pull log specific fields
 	pullStatus?: string;
+	pullMessage?: string;
 	pullId?: string;
 	pullProgress?: string;
 	// Scan specific fields
@@ -187,7 +189,7 @@ export const POST: RequestHandler = async (event) => {
 				// Get full container config
 				const inspectData = await inspectContainer(liveId, envIdNum) as any;
 				const config = inspectData.Config;
-				const imageName = config.Image;
+				const imageName = trackedImageReference(config.Image, config.Labels);
 				const currentImageId = inspectData.Image;
 
 				// Capture the OLD image's Env/Labels BEFORE pulling — once the tag is
@@ -269,6 +271,7 @@ export const POST: RequestHandler = async (event) => {
 								containerId,
 								containerName,
 								pullStatus: data.status,
+								pullMessage: data.message,
 								pullId: data.id,
 								pullProgress: data.progress
 							});

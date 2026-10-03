@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { pullLogStatus } from '$lib/utils/pull-warning';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
@@ -207,6 +208,7 @@
 							failedIds.push(data.containerId);
 						}
 					} else if (data.type === 'pull_log') {
+					const pullStatus = pullLogStatus({ status: data.pullStatus, message: data.pullMessage }) ?? data.pullStatus;
 						// Add pull log to the container's log list
 						const containerProgress = progress.find(p => p.containerId === data.containerId);
 						if (containerProgress) {
@@ -214,11 +216,11 @@
 							if (data.pullId) {
 								const existingLog = containerProgress.pullLogs.find((l: any) => l.id === data.pullId);
 								if (existingLog) {
-									existingLog.status = data.pullStatus;
+									existingLog.status = pullStatus;
 									existingLog.progress = data.pullProgress;
 								} else {
 									containerProgress.pullLogs.push({
-										status: data.pullStatus,
+										status: pullStatus,
 										id: data.pullId,
 										progress: data.pullProgress
 									});
@@ -226,7 +228,7 @@
 							} else {
 								// General status message (no layer ID)
 								containerProgress.pullLogs.push({
-									status: data.pullStatus
+									status: pullStatus
 								});
 							}
 							progress = [...progress]; // Trigger reactivity
@@ -388,20 +390,21 @@ const severityOrder: Record<string, number> = { critical: 0, high: 1, medium: 2,
 						summary = { ...summary };
 					}
 				} else if (data.type === 'pull_log') {
+					const pullStatus = pullLogStatus({ status: data.pullStatus, message: data.pullMessage }) ?? data.pullStatus;
 					if (data.pullId) {
 						const existingLog = item.pullLogs.find(l => l.id === data.pullId);
 						if (existingLog) {
-							existingLog.status = data.pullStatus;
+							existingLog.status = pullStatus;
 							existingLog.progress = data.pullProgress;
 						} else {
 							item.pullLogs.push({
-								status: data.pullStatus,
+								status: pullStatus,
 								id: data.pullId,
 								progress: data.pullProgress
 							});
 						}
 					} else {
-						item.pullLogs.push({ status: data.pullStatus });
+						item.pullLogs.push({ status: pullStatus });
 					}
 					progress = [...progress];
 				}

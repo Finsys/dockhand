@@ -1,3 +1,4 @@
+import { trackedImageReference } from '$lib/utils/tracked-image';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
@@ -14,6 +15,7 @@ export interface UpdateCheckResult {
 	containerName: string;
 	imageName: string;
 	hasUpdate: boolean;
+	releaseAgeRemainingHours?: number;
 	currentDigest?: string;
 	newDigest?: string;
 	error?: string;
@@ -122,7 +124,7 @@ export const POST: RequestHandler = async ({ url, cookies, request }) => {
 		const checkContainer = async (container: typeof containers[0]): Promise<UpdateCheckResult> => {
 			try {
 				const inspectData = await inspectContainer(container.id, envIdNum) as any;
-				const imageName = inspectData.Config?.Image;
+				const imageName = trackedImageReference(inspectData.Config?.Image, inspectData.Config?.Labels);
 				const currentImageId = inspectData.Image;
 
 				if (!imageName) {
@@ -170,6 +172,7 @@ export const POST: RequestHandler = async ({ url, cookies, request }) => {
 					containerName: container.name,
 					imageName,
 					hasUpdate: result.hasUpdate,
+				releaseAgeRemainingHours: result.releaseAgeRemainingHours,
 					currentDigest: result.currentDigest,
 					newDigest: result.registryDigest,
 					error: result.error,

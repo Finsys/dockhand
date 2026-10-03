@@ -1,3 +1,4 @@
+import { trackedImageReference } from '$lib/utils/tracked-image';
 /**
  * Container Auto-Update Task
  *
@@ -319,7 +320,7 @@ export async function runContainerUpdate(
 
 		// Get the full container config to extract the image name (tag)
 		const inspectData = await inspectContainer(container.id, envId) as any;
-		const imageNameFromConfig = inspectData.Config?.Image;
+		const imageNameFromConfig = trackedImageReference(inspectData.Config?.Image, inspectData.Config?.Labels);
 
 		if (!imageNameFromConfig) {
 			log(`Could not determine image name from container config`);
@@ -439,18 +440,20 @@ export async function runContainerUpdate(
 		}
 
 		if (!registryCheck.hasUpdate) {
-			log(`Already up-to-date: ${containerName} is running the latest version`);
+			log(registryCheck.releaseAgeRemainingHours
+				? `Update deferred: ${registryCheck.releaseAgeRemainingHours} hour(s) remain in image update cooldown`
+				: `Already up-to-date: ${containerName} is running the latest version`);
 			await updateScheduleExecution(execution.id, {
 				status: 'skipped',
 				completedAt: new Date().toISOString(),
 				duration: Date.now() - startTime,
-				details: { reason: 'Already up-to-date' }
+				details: { reason: registryCheck.releaseAgeRemainingHours ? 'Image update cooldown' : 'Already up-to-date' }
 			});
 			return;
 		}
 
 		log(`Update available! Registry digest: ${registryCheck.registryDigest?.substring(0, 19) || 'unknown'}`);
-		const newDigest = registryCheck.registryDigest;
+		let newDigest = registryCheck.registryDigest;
 
 		// =============================================================================
 		// PULL & SCAN: Temp-tag protection flow
@@ -463,6 +466,8 @@ export async function runContainerUpdate(
 		// =============================================================================
 
 		let newImageId: string | null = null;
+		let verifiedImageId: string | undefined;
+		let verifiedImageReference: string | undefined;
 		let scanOutcome: ScanOutcome = { blocked: false };
 
 		if (shouldScan && !isDigestBasedImage(imageNameFromConfig)) {
@@ -472,10 +477,13 @@ export async function runContainerUpdate(
 			try {
 				// Pull new image
 				log(`Pulling new image: ${imageNameFromConfig}`);
-				await pullImage(imageNameFromConfig, undefined, envId);
+				const pulled = await pullImage(imageNameFromConfig, undefined, envId, true);
+				verifiedImageId = pulled?.imageId;
+				verifiedImageReference = pulled?.reference;
+				if (pulled) newDigest = pulled.digest;
 
 				// Get new image ID
-				newImageId = await getImageIdByTag(imageNameFromConfig, envId);
+				newImageId = verifiedImageId ?? await getImageIdByTag(imageNameFromConfig, envId);
 				if (!newImageId) {
 					throw new Error('Failed to get new image ID after pull');
 				}
@@ -563,7 +571,10 @@ export async function runContainerUpdate(
 			// No scanning - simple pull
 			log(`Pulling update (no vulnerability scan)...`);
 			try {
-				await pullImage(imageNameFromConfig, undefined, envId);
+				const pulled = await pullImage(imageNameFromConfig, undefined, envId, true);
+				verifiedImageId = pulled?.imageId;
+				verifiedImageReference = pulled?.reference;
+				if (pulled) newDigest = pulled.digest;
 				log(`Image pulled successfully`);
 			} catch (pullError: any) {
 				log(`Pull failed: ${pullError.message}`);
@@ -585,6 +596,8 @@ export async function runContainerUpdate(
 		const result = await recreateContainer(containerName, envId, {
 			log,
 			imageNameOverride: imageNameFromConfig,
+			verifiedImageId,
+			verifiedImageReference,
 			oldImageConfig
 		});
 
@@ -649,6 +662,10 @@ export async function runContainerUpdate(
  * No manual field mapping — zero settings loss.
  */
 export interface RecreateContainerOptions {
+	/** Immutable image approved by the cooldown; retain imageNameOverride as the update source. */
+	verifiedImageId?: string;
+	/** Pullable manifest reference for portable backup and Compose metadata. */
+	verifiedImageReference?: string;
 	/** Progress logger. */
 	log?: (msg: string) => void;
 	/** New image to recreate with (defaults to the container's current image). */
@@ -666,7 +683,7 @@ export async function recreateContainer(
 	envId?: number,
 	options: RecreateContainerOptions = {}
 ): Promise<{ success: boolean; error?: string }> {
-	const { log, imageNameOverride, oldImageConfig } = options;
+	const { log, imageNameOverride, oldImageConfig, verifiedImageId, verifiedImageReference } = options;
 	try {
 		const containers = await listContainers(true, envId);
 		const container = containers.find(c => c.name === containerName);
@@ -677,7 +694,7 @@ export async function recreateContainer(
 		}
 
 		const inspectData = await inspectContainer(container.id, envId) as any;
-		const imageName = imageNameOverride || inspectData.Config?.Image;
+		const imageName = imageNameOverride || trackedImageReference(inspectData.Config?.Image, inspectData.Config?.Labels);
 		// Capture the parent's id BEFORE recreate. A recreate gives the parent a NEW id,
 		// and any child using `network_mode: service:parent` / `container:parent` stores
 		// that old id in its own HostConfig.NetworkMode (`container:<oldId>`). After the
@@ -687,7 +704,7 @@ export async function recreateContainer(
 
 		log?.(`Recreating container: ${containerName} (image: ${imageName})`);
 
-		await recreateContainerFromInspect(inspectData, imageName, envId, log, oldImageConfig);
+		await recreateContainerFromInspect(inspectData, imageName, envId, log, oldImageConfig, verifiedImageId, verifiedImageReference);
 
 		// Parent recreate SUCCEEDED (a failure would have thrown and rolled the parent
 		// back to its original id, leaving children valid). Repoint any dependent

@@ -18,7 +18,7 @@ import { spawn } from 'child_process';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { runContainerWithStreaming, inspectImage, pullImage, putContainerArchive } from '../docker';
+import { runContainerWithStreaming, inspectImage, pullInternalImage, putContainerArchive } from '../docker';
 import { buildTar } from './tar';
 import type { MetadataFile } from './backup-script';
 import { getInstanceId } from './identity';
@@ -362,7 +362,7 @@ export async function ensureHelperImage(envId?: number | null): Promise<string> 
 	}
 	if (!exists) {
 		console.log(`[Backups] Pulling helper image: ${image}`);
-		await withTimeout(pullImage(image, undefined, envId ?? undefined), HELPER_PULL_TIMEOUT_MS,
+		await withTimeout(pullInternalImage(image, envId ?? undefined), HELPER_PULL_TIMEOUT_MS,
 			`timed out pulling helper image "${image}" - check that it is available and the registry is reachable`);
 	}
 	helperImagePresentUntil.set(memoKey, Date.now() + HELPER_IMAGE_MEMO_MS);

@@ -25,7 +25,7 @@ import { parseOptionsJson, buildJobOptions, parseSelectedVolumes, parseBackupFla
 import { getHostname } from '../license';
 import { getBackupConfig, getBackupConfigs, getBackupDestination, updateBackupConfig, updateBackupDestination, decryptBackupDestination } from '../db';
 import { getInstanceId } from './identity';
-import { inspectContainer } from '../docker';
+import { getPortableContainerConfig, inspectContainer } from '../docker';
 import { sendEventNotification } from '../notifications';
 import type { BackupResult, RestoreResult, ResticRun, BackupTargetType } from './models';
 import type { MetadataFile } from './backup-script';
@@ -553,7 +553,12 @@ async function collectMetadata(
 	if (type === 'container') {
 		try {
 			const [c] = (await resolveTargets(type, targetName, envId)).containers;
-			if (c) containerInspect = await inspectContainer(c.id, envId ?? undefined);
+			if (c) {
+				const inspect = await inspectContainer(c.id, envId ?? undefined) as { Config?: { Image?: string; Labels?: Record<string, string> | null } };
+				containerInspect = inspect.Config
+					? { ...inspect, Config: await getPortableContainerConfig(inspect.Config, envId) }
+					: inspect;
+			}
 		} catch { /* metadata best-effort; the volume data is what matters */ }
 	}
 

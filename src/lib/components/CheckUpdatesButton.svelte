@@ -130,6 +130,7 @@
 			const failed: FailedCheckItem[] = data.results
 				.filter((r: any) => r.error && !r.hasUpdate)
 				.map((r: any) => ({ containerId: r.containerId, containerName: r.containerName, imageName: r.imageName, error: r.error }));
+			const deferred = data.results.filter((r: any) => r.releaseAgeRemainingHours && !r.systemContainer && !r.updateDisabled);
 			// Semver suggestions are independent of digest updates: a container can be
 			// digest-current yet run an outdated version tag.
 			const newerVersions: NewerVersionItem[] = data.results
@@ -146,7 +147,12 @@
 				// Keep the "Latest" status until re-check / env-switch — don't auto-revert (#1019)
 				status = 'none';
 				if (failed.length > 0) {
-					showFailedChecksToast(failed, 'All containers are up to date');
+					showFailedChecksToast(failed, deferred.length > 0 ? `${deferred.length} update(s) cooling down` : 'All containers are up to date');
+				} else if (deferred.length > 0) {
+					toast.info(`${deferred.length} update(s) cooling down`, {
+						description: deferred.map((r: any) => `${r.containerName}: ${r.releaseAgeRemainingHours} hour(s) remaining`).join('\n'),
+						descriptionClass: 'whitespace-pre-line'
+					});
 				} else {
 					toast.success('All containers are up to date');
 				}
@@ -154,7 +160,8 @@
 				status = 'found';
 				const parts = [
 					withUpdates.length > 0 ? `${withUpdates.length} update${withUpdates.length !== 1 ? 's' : ''} available` : '',
-					semverNote
+					semverNote,
+					deferred.length > 0 ? `${deferred.length} cooling down` : ''
 				].filter(Boolean);
 				const summary = parts.join(', ');
 				if (failed.length > 0) {

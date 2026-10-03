@@ -1,6 +1,6 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { inspectContainer, inspectImage } from '$lib/server/docker';
+import { getPortableContainerConfig, inspectContainer, inspectImage } from '$lib/server/docker';
 import { getSecretKeysToMask } from '$lib/server/db';
 import { getStackComposeFile } from '$lib/server/stacks';
 import { authorize } from '$lib/server/authorize';
@@ -76,6 +76,8 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 		} catch {
 			// image not present / not pullable - fall back to keeping all values
 		}
+
+		if (containerData.Config) containerData.Config = await getPortableContainerConfig(containerData.Config, envIdNum);
 
 		const compose = inspectToCompose(containerData, {
 			serviceName,
