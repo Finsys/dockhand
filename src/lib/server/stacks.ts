@@ -23,7 +23,7 @@ import {
 	type DeletionSkipReason
 } from './git-deletions';
 import { buildComposeOperationArgs, shouldRunSeparateBuildStep } from './compose-args';
-import { findStackNameCollision, moveStackFilePathCrossDevice, resolveStackDirForLayout } from './stack-path-utils';
+import { findStackNameCollision, isInternalDefaultComposePath, moveStackFilePathCrossDevice, resolveStackDirForLayout } from './stack-path-utils';
 import { db, environments, eq } from './db/drizzle.js';
 import { isAllowedStackFilename } from './stack-filename';
 
@@ -47,9 +47,28 @@ import {
 	getAutoUpdateSetting,
 	getStackSourceByComposePath,
 	getSecretProviderById,
-	setStackInjectedSecretKeys
+	setStackInjectedSecretKeys,
+	getSecretKeysToMask
 } from './db';
 import { getProvider } from './secretproviders';
+
+// Version-pointer access (stack_sources.last_saved_at / last_deployed_at) for the
+// S02 version core. Source of truth is the dedicated stack-source-pointers module;
+// re-exported here so the helpers sit alongside the existing stack_sources access.
+// The re-export is safe: stack-source-pointers.ts has a side-effect-free top level,
+// so importing it does not trigger the db/drizzle.js startup seed (better-sqlite3).
+export {
+	readStackSourcePointer,
+	upsertStackSourcePointer,
+	type StackSourcePointerValues,
+	type StackSourcePointers
+} from './stack-source-pointers.js';
+// S03: crash-safe versioned save orchestration (PURE — only node:fs + stack-versions)
+// plus local pointer access for the internal save seams. The pointer import is safe
+// (side-effect-free top level, no better-sqlite3 seed); saveStackVersion is pure.
+import { readStackSourcePointer, upsertStackSourcePointer } from './stack-source-pointers.js';
+import { saveStackVersion, computeRevertedEnvVars, serializeEnvVars } from './stack-version-wiring.js';
+import { listVersions, atomicWriteFile } from './stack-versions.js';
 import { stripSurroundingQuotes } from './secretproviders/shared';
 import { resolveComposeDockerHost, buildComposeBaseArgs } from './compose-docker-args';
 import { unregisterSchedule } from './scheduler';
@@ -235,7 +254,7 @@ if (typeof process !== 'undefined') {
  * Execute a function with exclusive lock on a stack.
  * Prevents race conditions when multiple operations target the same stack.
  */
-async function withStackLock<T>(stackName: string, fn: () => Promise<T>): Promise<T> {
+export async function withStackLock<T>(stackName: string, fn: () => Promise<T>): Promise<T> {
 	const lockKey = stackName;
 
 	// Wait for any existing lock to release
@@ -964,21 +983,35 @@ export async function saveStackComposeFile(
 	}
 
 	if (composePath) {
-		// Write directly to the custom compose file path
-		// Ensure parent directory exists for custom paths
-		const parentDir = dirname(composePath);
-		if (!existsSync(parentDir)) {
-			try {
-				mkdirSync(parentDir, { recursive: true });
-			} catch (err: any) {
-				return { success: false, error: `Failed to create directory for compose file: ${err.message}` };
+		// The edit modal always submits the resolved compose path - including the
+		// INTERNAL default path for internal stacks. Only a genuinely external path
+		// is a "custom path". The internal default must take the versioned save
+		// below (which records the version and advances last_saved_at); the
+		// custom-path write here skips versioning, so routing internal-default saves
+		// here left those stacks with no history at all. Internal default = any of
+		// the four standard compose filenames inside the stack's own dir (PR #1548
+		// point 3: matching only compose.yaml let docker-compose.yml internals fall
+		// through to the unversioned branch).
+		const internalDir = create
+			? await getStackDir(name, envId)
+			: await findStackDir(name, envId);
+		if (!isInternalDefaultComposePath(composePath, internalDir)) {
+			// Write directly to the custom compose file path
+			// Ensure parent directory exists for custom paths
+			const parentDir = dirname(composePath);
+			if (!existsSync(parentDir)) {
+				try {
+					mkdirSync(parentDir, { recursive: true });
+				} catch (err: any) {
+					return { success: false, error: `Failed to create directory for compose file: ${err.message}` };
+				}
 			}
-		}
-		try {
-			writeFileSync(composePath, content);
-			return { success: true };
-		} catch (err: any) {
-			return { success: false, error: `Failed to save compose file: ${err.message}` };
+			try {
+				writeFileSync(composePath, content);
+				return { success: true };
+			} catch (err: any) {
+				return { success: false, error: `Failed to save compose file: ${err.message}` };
+			}
 		}
 	}
 
@@ -1020,11 +1053,32 @@ export async function saveStackComposeFile(
 		}
 	}
 
+	// S03: versioned, locked save for the INTERNAL compose file. Records a bounded
+	// secret-free version (compose YAML verbatim) and advances last_saved_at under
+	// the per-stack lock. The safe-pointer (lastDeployedAt) ensures the deployed
+	// version is never pruned. On a version-write failure the live file is already
+	// rolled back by the orchestration (all-or-nothing), so we just report failure.
+	// Only the internal compose.yaml is versioned here; the custom-path branch above
+	// (composePath set) is out of scope for S03.
 	try {
-		writeFileSync(composeFile, content);
-		// Return the path actually written so the caller can persist it even when it
-		// supplied no explicit composePath (else the stored path is null while the file
-		// exists at the default location - #1515).
+		await withStackLock(name, async () => {
+			// Read the pointer INSIDE the lock so a concurrent deploy's
+			// last_deployed_at advance can't race this save (PR #1548 point 10).
+			const pointer = await readStackSourcePointer(name, envId ?? null);
+			await saveStackVersion({
+				stackDir,
+				livePath: composeFile,
+				type: 'compose',
+				content,
+				// Compose is not secret-filtered — no secretKeys needed.
+				lastDeployedAt: pointer?.lastDeployedAt ?? null,
+				advancePointer: (values) => upsertStackSourcePointer(name, envId ?? null, values),
+			});
+		});
+		// Return the path actually written (saveStackVersion wrote to composeFile) so
+		// the caller can persist it even when it supplied no explicit composePath
+		// (else the stored path is null while the file exists at the default location
+		// - #1515).
 		return { success: true, composePath: composeFile };
 	} catch (err: any) {
 		return { success: false, error: `Failed to ${create ? 'create' : 'save'} compose file: ${err.message}` };
@@ -2174,7 +2228,7 @@ export async function listComposeStacks(envId?: number | null): Promise<ComposeS
 /**
  * Get containers for a specific stack by label
  */
-async function getStackContainers(stackName: string, envId?: number | null): Promise<any[]> {
+export async function getStackContainers(stackName: string, envId?: number | null): Promise<any[]> {
 	const { listContainers } = await import('./docker.js');
 	const containers = await listContainers(true, envId);
 	return containers.filter((c) => c.labels['com.docker.compose.project'] === stackName);
@@ -3362,6 +3416,20 @@ export async function deployStack(options: DeployStackOptions): Promise<StackOpe
 		// stack_* notification (deployGitStack sends git_sync_*).
 		await notifyStackDeploy(name, envId, result, isGitDeploy ?? false);
 
+		// S03: advance the deployed-version pointer on a successful deploy. This is the
+		// single return point every deploy path (local / Hawser / git) funnels through,
+		// and it runs inside the withStackLock body, so the pointer reflects the version
+		// that is now live. Best-effort and success-gated: a pointer-advance failure
+		// must NEVER fail an already-succeeded deploy — it only affects which version is
+		// considered "deployed" (prune-safety + the S05 saved-vs-deployed indicator).
+		if (result.success) {
+			try {
+				await upsertStackSourcePointer(name, envId ?? null, { lastDeployedAt: new Date().toISOString() });
+			} catch (err) {
+				console.warn(`[Stack:${name}] Failed to advance last_deployed_at:`, err);
+			}
+		}
+
 		// Clear stale pending-update badges (#1311). Fire-and-forget with a timeout so a
 		// slow Docker API can't delay or affect the already-succeeded deploy.
 		if (result.success && pullPolicy && typeof envId === 'number') {
@@ -3572,6 +3640,15 @@ export async function writeRawStackEnvFile(
 		const v = await validateStackPath(customEnvPath);
 		if (!v.ok) throw new Error(v.error || 'Invalid env path');
 	}
+	// PR #1548 point 7: resolve the stack dir ONCE - findStackDir (the EXISTING
+	// stack dir - custom / adopted layouts included) with getStackDir as
+	// fallback - and REUSE that single resolution for both the live .env path
+	// (default location, below) and the version record, so the .history/ dir
+	// always sits next to the .env file that is actually written, consistently
+	// with the env/raw route.
+	const stackDir =
+		(await findStackDir(stackName, envId ?? null)) ?? (await getStackDir(stackName, envId ?? null));
+
 	let envFilePath: string;
 	if (customEnvPath) {
 		envFilePath = customEnvPath;
@@ -3584,8 +3661,8 @@ export async function writeRawStackEnvFile(
 			// Derive env path from custom compose path location
 			envFilePath = join(dirname(source.composePath), '.env');
 		} else {
-			// Fall back to default location
-			envFilePath = join(await findStackDir(stackName, envId) || await getStackDir(stackName, envId), '.env');
+			// Default location: .env inside the single resolved stack dir above.
+			envFilePath = join(stackDir, '.env');
 		}
 	}
 
@@ -3595,7 +3672,107 @@ export async function writeRawStackEnvFile(
 		mkdirSync(dir, { recursive: true });
 	}
 
-	writeFileSync(envFilePath, rawContent);
+	// S03: versioned, locked save for the INTERNAL env file. Writes the raw .env to
+	// envFilePath AND records a non-secret env version in the resolved stack dir
+	// (the .history/ lives there even for adopted stacks with a custom envPath).
+	// Secrets are stripped from the stored version (secretKeys from the DB). The
+	// safe-pointer (lastDeployedAt) ensures the deployed version is never pruned.
+	// On error the saveStackVersion throw propagates to the caller (which already
+	// handles it); the live file is rolled back by the orchestration (all-or-nothing).
+	// Complete secret set (DB isSecret UNION provider-injected keys). The narrower
+	// injected-keys-only set would let DB-stored secrets leak plaintext into the
+	// version file (PR #1548 review point 1).
+	const secretKeys = [...(await getSecretKeysToMask(stackName, envId ?? null))];
+	await withStackLock(stackName, async () => {
+		// Read the pointer INSIDE the lock (PR #1548 point 10).
+		const pointer = await readStackSourcePointer(stackName, envId ?? null);
+		await saveStackVersion({
+			stackDir,
+			livePath: envFilePath,
+			type: 'env',
+			content: rawContent,
+			secretKeys,
+			lastDeployedAt: pointer?.lastDeployedAt ?? null,
+			advancePointer: (values) => upsertStackSourcePointer(stackName, envId ?? null, values),
+		});
+	});
+}
+
+/**
+ * Revert a saved stack version to its live source (S03).
+ *
+ * - `type === 'compose'`: restore the internal `compose.yaml` (S03 versions only the
+ *   internal compose.yaml for the stack dir).
+ * - `type === 'env'`:
+ *   - GIT stack: the DB is the live source. Restore the version's NON-secret subset
+ *     via a NON-destructive merge (computeRevertedEnvVars) so existing secrets are
+ *     PRESERVED — setStackEnvVars deletes-then-inserts the (stack, env) row, so
+ *     feeding only the non-secret subset would WIPE the secrets.
+ *   - internal / adopted: restore the version's non-secret Record to the live `.env`
+ *     file (serializeEnvVars). Comments are lost — a documented S03 limitation.
+ *
+ * Reverting restores an EXISTING version to live; it does NOT create a new version
+ * record. It advances `last_saved_at` so the S05 saved-vs-deployed indicator reflects
+ * the reverted content. Runs under the per-stack lock, so a concurrent save/revert is
+ * last-write-wins.
+ */
+export async function revertStackVersion(
+	stackName: string,
+	envId: number | null | undefined,
+	type: 'compose' | 'env',
+	versionId: string
+): Promise<{ success: boolean; error?: string; timestamp?: string }> {
+	const stackDir =
+		(await findStackDir(stackName, envId ?? null)) ||
+		(await getStackDir(stackName, envId ?? null));
+
+	return withStackLock(stackName, async () => {
+		const versions = listVersions(stackDir, type);
+		const version = versions.find((v) => v.id === versionId);
+		if (!version) {
+			return { success: false, error: `Version ${versionId} not found for ${type}` };
+		}
+
+		if (type === 'env') {
+			const record = version.content as Record<string, string>;
+			const source = await getStackSource(stackName, envId ?? null);
+			if (source?.sourceType === 'git') {
+				// GIT env: the DB is the live source. Read the current vars WITH real
+				// secret values (maskSecrets=false) so the non-destructive merge can
+				// preserve them, merge the version's non-secret subset over them, and
+				// write the merged set back. Secrets survive; nothing secret is wiped.
+				const currentVars = await getStackEnvVars(stackName, envId ?? null, false);
+				const merged = computeRevertedEnvVars(currentVars, record);
+				await setStackEnvVars(stackName, envId ?? null, merged);
+			} else {
+				// internal / adopted: restore the non-secret Record to the live .env file
+				// (same path resolution as writeRawStackEnvFile; comments are lost).
+				const envFilePath = source?.envPath
+					? source.envPath
+					: source?.composePath
+						? join(dirname(source.composePath), '.env')
+						: join(stackDir, '.env');
+				await atomicWriteFile(envFilePath, serializeEnvVars(record));
+			}
+		} else {
+			// type === 'compose': restore the internal compose.yaml.
+			await atomicWriteFile(join(stackDir, 'compose.yaml'), version.content as string);
+		}
+
+		// Point last_saved_at at the REVERTED version's timestamp (not "now"): the
+		// pointer means "the version whose content is live right now", and after a
+		// revert that is exactly this version (live == version content on the
+		// secret-free basis). "now" would point at a time with no version entry.
+		// Best-effort: a pointer failure must NOT fail a revert whose live source
+		// has already been restored.
+		try {
+			await upsertStackSourcePointer(stackName, envId ?? null, { lastSavedAt: version.timestamp });
+		} catch (err) {
+			console.warn(`[Stack:${stackName}] Failed to advance last_saved_at on revert:`, err);
+		}
+
+		return { success: true, timestamp: version.timestamp };
+	});
 }
 
 /**

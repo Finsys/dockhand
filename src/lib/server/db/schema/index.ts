@@ -361,6 +361,9 @@ export const stackSources = sqliteTable('stack_sources', {
 	// Per-stack icon: a lucide name ('server'), 'selfhst:<ref>', or 'custom:<file>'.
 	// Null -> UI falls back to a generic icon.
 	icon: text('icon'),
+	// Version pointers (ISO-8601 strings). NULL = never saved / never deployed.
+	lastSavedAt: text('last_saved_at'),
+	lastDeployedAt: text('last_deployed_at'),
 	createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
 	updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`)
 }, (table) => ({

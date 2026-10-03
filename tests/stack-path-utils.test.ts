@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
 	findStackNameCollision,
+	isInternalDefaultComposePath,
 	moveStackFilePathCrossDevice,
 	resolveStackDirForLayout
 } from '../src/lib/server/stack-path-utils';
@@ -12,6 +13,33 @@ const tempDirs: string[] = [];
 
 afterEach(() => {
 	for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
+describe('isInternalDefaultComposePath (PR #1548 point 3)', () => {
+	const internalDir = '/data/stacks/Local/mystack';
+
+	it('matches all four standard compose filenames inside the stack dir', () => {
+		for (const name of ['compose.yaml', 'compose.yml', 'docker-compose.yml', 'docker-compose.yaml']) {
+			expect(isInternalDefaultComposePath(join(internalDir, name), internalDir)).toBe(true);
+		}
+	});
+
+	it('rejects external paths even with a standard filename', () => {
+		expect(isInternalDefaultComposePath('/opt/other-stack/compose.yaml', internalDir)).toBe(false);
+	});
+
+	it('rejects non-standard filenames inside the stack dir (renamed/adopted files are custom paths)', () => {
+		expect(isInternalDefaultComposePath(join(internalDir, 'my-compose.yaml'), internalDir)).toBe(false);
+	});
+
+	it('rejects when the internal dir is unknown (null/undefined)', () => {
+		expect(isInternalDefaultComposePath(join(internalDir, 'compose.yaml'), null)).toBe(false);
+		expect(isInternalDefaultComposePath(join(internalDir, 'compose.yaml'), undefined)).toBe(false);
+	});
+
+	it('rejects relative paths (dirname mismatch)', () => {
+		expect(isInternalDefaultComposePath('compose.yaml', internalDir)).toBe(false);
+	});
 });
 
 describe('moveStackFilePathCrossDevice', () => {
