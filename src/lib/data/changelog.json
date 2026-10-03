@@ -1,8 +1,7 @@
 [
   {
     "version": "1.0.51",
-    "date": "",
-    "comingSoon": true,
+    "date": "2026-10-03",
     "changes": [
       { "type": "feature", "text": "drag to reorder environments (#1638)" },
       { "type": "feature", "text": "drag to reorder tags, and the grid groups follow that order (#1651)" },
@@ -16,7 +15,8 @@
       { "type": "fix", "text": "default scanner images bumped to grype v0.119.0 and trivy 0.75.0 (#1658)" },
       { "type": "feature", "text": "containers can be tagged with a dockhand.tags label, with a colour and icon (#1655)" },
       { "type": "feature", "text": "containers optionally show the tags their stack carries (#1665)" },
-      { "type": "feature", "text": "drag files onto the file browser to upload them (#1661, PR#1662, @Wardrop)" }
+      { "type": "feature", "text": "drag files onto the file browser to upload them (#1661, PR#1662, @Wardrop)" },
+      { "type": "fix", "text": "update docker-compose 5.5.1-r2, undici 7.30.0, devalue 5.9.3 and nodemailer 10.0.10 for security fixes" }
     ],
     "imageTag": "fnsys/dockhand:v1.0.51"
   },
