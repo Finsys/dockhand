@@ -2,6 +2,7 @@ import { trackedImageReference } from '$lib/utils/tracked-image';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
+import { rowsToPersist } from '$lib/utils/pending-update-rows';
 import { listContainers, inspectContainer, checkImageUpdateAvailable, getTagArtifactKind } from '$lib/server/docker';
 import { clearPendingContainerUpdates, addPendingContainerUpdate, getPendingContainerUpdates, getGlobalSemverConfig } from '$lib/server/db';
 import { isSystemContainer, isPodmanInfraContainer } from '$lib/server/scheduler/tasks/update-utils';
@@ -210,19 +211,18 @@ export const POST: RequestHandler = async ({ url, cookies, request }) => {
 		const updatesFound = results.filter(r => r.hasUpdate && !r.systemContainer && !r.updateDisabled).length;
 
 		// Persist a row for anything worth showing on reload: a digest update, a
-		// newer-version-tag (semver) suggestion, or both. A pure-semver row (no
-		// digest update) still persists so the badge survives a page reload.
+		// newer-version-tag (semver) suggestion, a held update waiting out its
+		// cooldown, or any combination. A row with none of the three is not worth
+		// keeping. A held update persists with hasImageUpdate false, so it shows as
+		// waiting without ever being offered for a bulk update.
 		if (envIdNum) {
-			for (const result of results) {
-				if (result.systemContainer || result.updateDisabled) continue;
-				const hasImageUpdate = result.hasUpdate;
-				if (!hasImageUpdate && !result.newerVersion) continue;
+			for (const row of rowsToPersist(results)) {
 				await addPendingContainerUpdate(
 					envIdNum,
-					result.containerId,
-					result.containerName,
-					result.imageName,
-					{ hasImageUpdate, newerVersion: result.newerVersion ?? null }
+					row.containerId,
+					row.containerName,
+					row.imageName,
+					row.options
 				);
 			}
 		}

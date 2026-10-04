@@ -5,7 +5,7 @@
 	import * as Tabs from '$lib/components/ui/tabs';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
-	import { Loader2, Box, Info, Layers, Cpu, MemoryStick, HardDrive, Network, Shield, Settings2, Code, Copy, Check, XCircle, Activity, Wifi, Pencil, RefreshCw, X, Folder, FolderOpen, Moon, Tags, ExternalLink, Gpu, Globe, Link, Unlink, Play, Square as SquareIcon, RotateCw, Trash2, CircleArrowUp } from 'lucide-svelte';
+	import { Loader2, Box, Info, Layers, Cpu, MemoryStick, HardDrive, Network, Shield, Settings2, Code, Copy, Check, XCircle, Activity, Wifi, Pencil, RefreshCw, X, Folder, FolderOpen, Moon, Tags, ExternalLink, Gpu, Globe, Link, Unlink, Play, Square as SquareIcon, RotateCw, Trash2, CircleArrowUp, Clock } from 'lucide-svelte';
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
 	import ContainerIcon from '$lib/components/ContainerIcon.svelte';
 	import * as Select from '$lib/components/ui/select';
@@ -47,6 +47,9 @@
 
 	// Whether this container has a newer image waiting, from the same store the list reads.
 	const hasImageUpdate = $derived($containerStore.pendingUpdateIds.includes(containerId));
+	// Hours left on a held update. An update exists, but the image is too young to
+	// apply, so it is shown as waiting rather than offered.
+	const cooldownHours = $derived($containerStore.coolingDown.get(containerId) ?? null);
 
 	function doUpdate() {
 		if (!onUpdate) return;
@@ -741,6 +744,11 @@
 					<div class="ml-auto mr-6 flex items-center gap-1">
 						<!-- Lifecycle actions (#461). Mirrors the per-row action set on the containers page;
 						     non-destructive actions refresh the inspect data in place, Delete closes the modal. -->
+						{#if !hasImageUpdate && cooldownHours}
+							<span title="Update held: {cooldownHours} hour(s) left of the minimum image age">
+								<Clock class="w-4 h-4 text-muted-foreground" />
+							</span>
+						{/if}
 						{#if hasImageUpdate && onUpdate}
 							<ConfirmPopover
 								open={confirmUpdateOpen}
@@ -1069,6 +1077,14 @@
 											Update available
 										</span>
 									{/if}
+								{:else if cooldownHours}
+									<span
+										title="An update is available, but the image has not yet reached the minimum image age"
+										class="flex items-center gap-1 text-xs text-muted-foreground shrink-0"
+									>
+										<Clock class="w-3.5 h-3.5" />
+										Update held - {cooldownHours}h left
+									</span>
 								{/if}
 							</div>
 						</div>

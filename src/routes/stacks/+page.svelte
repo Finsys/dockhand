@@ -1025,12 +1025,16 @@
 	// True when any stack container shows an update-available (amber) or
 	// check-failed (red) indicator — gates the "dismiss indicators" button.
 	const hasUpdateIndicators = $derived(
-		stacks.some((s) => s.updatesAvailable || (s.newerVersionCount ?? 0) > 0) ||
+		stacks.some((s) => s.updatesAvailable || (s.newerVersionCount ?? 0) > 0 || (s.coolingDownCount ?? 0) > 0) ||
 			failedUpdateCheckIds.size > 0
 	);
 	// Counts for the compact dismiss: stacks with a digest update, and total containers
 	// with a newer version tag - each shown with its icon, mirroring the containers page.
 	const stackDigestCount = $derived(stacks.filter((s) => s.updatesAvailable).length);
+	// Containers waiting out the minimum image age, across every stack.
+	const stackCoolingDownCount = $derived(
+		stacks.reduce((sum, s) => sum + (s.coolingDownCount ?? 0), 0)
+	);
 	const stackNewerVersionCount = $derived(
 		stacks.reduce((sum, s) => sum + (s.newerVersionCount ?? 0), 0)
 	);
@@ -1780,6 +1784,7 @@
 				show={hasUpdateIndicators}
 				digestCount={stackDigestCount}
 				newerVersionCount={stackNewerVersionCount}
+				coolingDownCount={stackCoolingDownCount}
 				onDismiss={dismissStackUpdates}
 			/>
 			<Button
@@ -2087,6 +2092,17 @@
 							</Tooltip.Trigger>
 							<Tooltip.Content>
 								{stack.newerVersionCount} container{(stack.newerVersionCount ?? 0) > 1 ? 's have' : ' has'} a newer version tag.
+							</Tooltip.Content>
+						</Tooltip.Root>
+					{/if}
+					{#if (stack.coolingDownCount ?? 0) > 0}
+						<Tooltip.Root>
+							<Tooltip.Trigger class="inline-flex items-center gap-0.5 self-center shrink-0 text-muted-foreground">
+								<Clock class="w-3.5 h-3.5" />
+								<span class="text-2xs font-medium leading-none">{stack.coolingDownCount}</span>
+							</Tooltip.Trigger>
+							<Tooltip.Content>
+								{stack.coolingDownCount} container{(stack.coolingDownCount ?? 0) > 1 ? 's are' : ' is'} waiting out the minimum image age.
 							</Tooltip.Content>
 						</Tooltip.Root>
 					{/if}

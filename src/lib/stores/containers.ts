@@ -1,5 +1,6 @@
 import { writable, get } from 'svelte/store';
 import { browser } from '$app/environment';
+import { splitPendingUpdates } from '$lib/utils/pending-update-rows';
 import type { ContainerInfo, ContainerStats } from '$lib/types';
 import { appendEnvParam, clearStaleEnvironment, environments } from '$lib/stores/environment';
 import { appSettings } from '$lib/stores/settings';
@@ -32,6 +33,12 @@ export interface ContainerStoreState {
 	failedUpdateErrors: Map<string, string>;
 	/** Newer VERSION tag (semver) suggestions from the last check, keyed by container ID. Advisory. */
 	newerVersions: Map<string, NewerVersion>;
+	/**
+	 * Hours left on a held update, keyed by container ID. An entry means an update
+	 * exists but the image is too young to apply, so it is shown as waiting and is
+	 * deliberately NOT offered for a bulk update.
+	 */
+	coolingDown: Map<string, number>;
 	/** Whether the current environment has vulnerability scanning */
 	envHasScanning: boolean;
 	/** Environment-level vulnerability criteria */
@@ -52,6 +59,7 @@ const INITIAL_STATE: ContainerStoreState = {
 	failedUpdateIds: [],
 	failedUpdateErrors: new Map(),
 	newerVersions: new Map(),
+	coolingDown: new Map(),
 	envHasScanning: false,
 	envVulnerabilityCriteria: 'never',
 	loading: true,
@@ -299,14 +307,12 @@ function createContainerStore() {
 			// "update available" state; newerVersion rows drive the Tag badge. Always
 			// patch (even on an empty list) so a cleared server state clears the store -
 			// otherwise stale badges/counters linger after the last update is applied.
-			const rows: any[] = data.pendingUpdates ?? [];
-			const withImageUpdate = rows.filter((u) => u.hasImageUpdate);
+			const split = splitPendingUpdates(data);
 			patch({
-				pendingUpdateIds: withImageUpdate.map((u) => u.containerId),
-				pendingUpdateNames: new Map(withImageUpdate.map((u) => [u.containerId, u.containerName])),
-				newerVersions: new Map(
-					rows.filter((u) => u.newerVersion).map((u) => [u.containerId, u.newerVersion as NewerVersion])
-				)
+				pendingUpdateIds: split.updatable.map((u) => u.containerId),
+				pendingUpdateNames: new Map(split.updatable.map((u) => [u.containerId, u.containerName])),
+				newerVersions: split.newerVersions as Map<string, NewerVersion>,
+				coolingDown: split.coolingDown
 			});
 		} catch {
 			// Ignore errors - background load
@@ -370,6 +376,11 @@ function createContainerStore() {
 		/** Record newer-version-tag (semver) suggestions from the last check. Session-only, advisory. */
 		setNewerVersions(map: Map<string, NewerVersion>) {
 			patch({ newerVersions: map });
+		},
+
+		/** Record which containers are waiting out the minimum image age, as id -> hours left. */
+		setCoolingDown(map: Map<string, number>) {
+			patch({ coolingDown: map });
 		},
 
 		/** Patch arbitrary fields */

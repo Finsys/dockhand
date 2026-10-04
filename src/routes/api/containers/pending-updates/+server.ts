@@ -2,6 +2,7 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
 import { getPendingContainerUpdates, removePendingContainerUpdate, clearPendingContainerUpdates } from '$lib/server/db';
+import { getMinimumReleaseAgeConfig } from '$lib/server/minimum-release-age';
 
 function safeParse(json: string): unknown {
 	try {
@@ -17,7 +18,7 @@ function safeParse(json: string): unknown {
  * @openapi
  * summary: List the containers in an environment that have a pending image update recorded (requires the 'view' permission)
  * query: env:integer! The target environment ID (required) (from GET /api/environments)
- * resp-200: {environmentId:integer!, pendingUpdates:array<{containerId:string!, containerName:string!, currentImage:string!, checkedAt:string!, hasImageUpdate:boolean!, newerVersion:object}>!}
+ * resp-200: {environmentId:integer!, minimumReleaseAgeHours:integer!, pendingUpdates:array<{containerId:string!, containerName:string!, currentImage:string!, checkedAt:string!, hasImageUpdate:boolean!, newerVersion:object, releaseAgeRemainingHours:integer}>!}
  * resp-400: Environment ID is required
  * resp-403: Permission denied
  * resp-500: Failed to get the pending updates
@@ -38,16 +39,24 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 	}
 
 	try {
-		const pendingUpdates = await getPendingContainerUpdates(envIdNum);
+		const [pendingUpdates, releaseAge] = await Promise.all([
+			getPendingContainerUpdates(envIdNum),
+			getMinimumReleaseAgeConfig(envIdNum).catch(() => ({ hours: 0 }))
+		]);
 		return json({
 			environmentId: envIdNum,
+			// The client needs this to decide whether a stored cooldown still applies:
+			// turning the cooldown off must drop the "waiting" indicators at once,
+			// rather than leaving them until the next check rewrites the rows.
+			minimumReleaseAgeHours: releaseAge.hours,
 			pendingUpdates: pendingUpdates.map(u => ({
 				containerId: u.containerId,
 				containerName: u.containerName,
 				currentImage: u.currentImage,
 				checkedAt: u.checkedAt,
 				hasImageUpdate: u.hasImageUpdate,
-				newerVersion: u.newerVersion ? safeParse(u.newerVersion) : null
+				newerVersion: u.newerVersion ? safeParse(u.newerVersion) : null,
+				releaseAgeRemainingHours: u.releaseAgeRemainingHours ?? null
 			}))
 		});
 	} catch (error: any) {

@@ -5888,10 +5888,15 @@ export async function addPendingContainerUpdate(
 	// A row can exist for a digest update, a newer-version-tag (semver) suggestion,
 	// or both. Both flags default to the classic "digest update only" shape so
 	// existing callers keep working unchanged.
-	options: { hasImageUpdate?: boolean; newerVersion?: unknown | null } = {}
+	options: {
+		hasImageUpdate?: boolean;
+		newerVersion?: unknown | null;
+		releaseAgeRemainingHours?: number | null;
+	} = {}
 ): Promise<void> {
 	const hasImageUpdate = options.hasImageUpdate ?? true;
 	const newerVersion = options.newerVersion != null ? JSON.stringify(options.newerVersion) : null;
+	const releaseAgeRemainingHours = options.releaseAgeRemainingHours ?? null;
 	const now = new Date().toISOString();
 	// Use insert with onConflictDoUpdate for upsert behavior
 	await db.insert(pendingContainerUpdates)
@@ -5902,6 +5907,7 @@ export async function addPendingContainerUpdate(
 			currentImage,
 			hasImageUpdate,
 			newerVersion,
+			releaseAgeRemainingHours,
 			checkedAt: now
 		})
 		.onConflictDoUpdate({
@@ -5911,6 +5917,7 @@ export async function addPendingContainerUpdate(
 				currentImage,
 				hasImageUpdate,
 				newerVersion,
+				releaseAgeRemainingHours,
 				checkedAt: now
 			}
 		});

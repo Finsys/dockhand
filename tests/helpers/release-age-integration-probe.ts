@@ -288,7 +288,16 @@ if (phase === 'metadata-info-failure') {
 		assert.equal(pullReferences.length, 0, 'Young images must be deferred before moving any tag');
 		assert.equal(createBody, undefined);
 		assert.ok(logs.some(line => line.includes('2 hour(s) remain')), JSON.stringify(logs));
-		assert.equal(pendingUpdates.length, 0);
+		if (phase.startsWith('env')) {
+			// A held update is persisted so the UI can show it as waiting across a
+			// reload, with hasImageUpdate false so no bulk update ever offers it.
+			assert.equal(pendingUpdates.length, 1, 'A held update must be surfaced as waiting');
+			const options = pendingUpdates[0][4];
+			assert.equal(options.hasImageUpdate, false, 'A held update must not be offered for a bulk update');
+			assert.equal(options.releaseAgeRemainingHours, 2);
+		} else {
+			assert.equal(pendingUpdates.length, 0);
+		}
 	} else if (systemdFailure) {
 		assert.equal(ageChecks, 2);
 		assert.equal(createBody, undefined, 'Systemd owns both recreation and rollback');

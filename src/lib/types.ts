@@ -21,6 +21,8 @@ export interface ContainerInfo {
 	id: string;
 	name: string;
 	image: string;
+	/** sha256 image ID - matches a vulnerability scan's imageId. */
+	imageId: string;
 	state: string;
 	status: string;
 	health?: string;
@@ -31,6 +33,8 @@ export interface ContainerInfo {
 		PublicPort?: number;
 		Type: string;
 	}>;
+	restartCount: number;
+	command?: string;
 	labels: Record<string, string>;
 	mounts: Array<{
 		type: string;
@@ -158,6 +162,8 @@ export interface ComposeStackInfo {
 	status: string;
 	updatesAvailable?: boolean;
 	updateCount?: number;
+	/** Containers whose update is held by the minimum image age. Never redeployable. */
+	coolingDownCount?: number;
 	/** How many containers in this stack have a newer version tag (semver). */
 	newerVersionCount?: number;
 	sourceType?: 'external' | 'internal' | 'git';

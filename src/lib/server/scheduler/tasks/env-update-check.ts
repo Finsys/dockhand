@@ -139,6 +139,9 @@ export async function runEnvUpdateCheckJob(
 		}
 		// Collected here so a single notification can summarise all newly-found versions.
 		const newSemverFindings: { containerName: string; imageName: string; newerVersion: NewerVersion }[] = [];
+	// A held update is worth a row too: it must show as waiting without being
+	// offered for a bulk update.
+	const cooldownByContainer = new Map<string, number>();
 		const semverByContainer = new Map<string, NewerVersion>();
 
 		// Clear pending updates at the start - we'll re-add as we discover updates
@@ -219,8 +222,11 @@ export async function runEnvUpdateCheckJob(
 					await log(`    UPDATE AVAILABLE`);
 					await log(`      Current: ${result.currentDigest?.substring(0, 24) || 'unknown'}...`);
 					await log(`      New:     ${result.registryDigest?.substring(0, 24) || 'unknown'}...`);
+				} else if (result.releaseAgeRemainingHours) {
+					cooldownByContainer.set(container.id, result.releaseAgeRemainingHours);
+					await log(`    Update deferred: ${result.releaseAgeRemainingHours} hour(s) remain in image update cooldown`);
 				} else {
-					await log(result.releaseAgeRemainingHours ? `    Update deferred: ${result.releaseAgeRemainingHours} hour(s) remain in image update cooldown` : `    Up to date`);
+					await log(`    Up to date`);
 				}
 
 				// Newer-version-tag (semver) detection - independent of the digest check.
@@ -248,7 +254,8 @@ export async function runEnvUpdateCheckJob(
 		// semver suggestion so a pure-semver container still gets a (badge) row.
 		const pendingContainerIds = new Set<string>([
 			...updatesAvailable.map((u) => u.containerId),
-			...semverByContainer.keys()
+			...semverByContainer.keys(),
+			...cooldownByContainer.keys()
 		]);
 		for (const cid of pendingContainerIds) {
 			const digest = updatesAvailable.find((u) => u.containerId === cid);
@@ -259,7 +266,11 @@ export async function runEnvUpdateCheckJob(
 				cid,
 				digest?.containerName ?? container?.name ?? cid,
 				digest?.imageName ?? container?.image ?? '',
-				{ hasImageUpdate: !!digest, newerVersion: semver }
+				{
+					hasImageUpdate: !!digest,
+					newerVersion: semver,
+					releaseAgeRemainingHours: cooldownByContainer.get(cid) ?? null
+				}
 			);
 		}
 

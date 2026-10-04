@@ -35,6 +35,8 @@
 			withUpdates: UpdateCheckResultItem[];
 			failed: FailedCheckItem[];
 			newerVersions: NewerVersionItem[];
+			/** Containers whose update is held by the minimum image age, as id -> hours left. */
+			coolingDown: Map<string, number>;
 		}) => void;
 	}
 
@@ -171,7 +173,12 @@
 				}
 			}
 
-			onComplete?.({ withUpdates, failed, newerVersions });
+			onComplete?.({
+				withUpdates,
+				failed,
+				newerVersions,
+				coolingDown: new Map(deferred.map((r: any) => [r.containerId, r.releaseAgeRemainingHours as number]))
+			});
 		} catch {
 			failError();
 		}

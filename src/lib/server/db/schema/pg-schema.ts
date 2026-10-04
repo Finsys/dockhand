@@ -546,6 +546,9 @@ export const pendingContainerUpdates = pgTable('pending_container_updates', {
 	// A newer VERSION tag (semver) for a pinned image, as JSON {tag,bump,skipped}.
 	// Null when there's no semver suggestion. Advisory - never auto-applied.
 	newerVersion: text('newer_version'),
+	// Hours left before a held update may be applied. Null when no cooldown applies,
+	// so a row can record "waiting" without claiming the update is ready.
+	releaseAgeRemainingHours: integer('release_age_remaining_hours'),
 	checkedAt: timestamp('checked_at', { mode: 'string' }).defaultNow(),
 	createdAt: timestamp('created_at', { mode: 'string' }).defaultNow()
 }, (table) => ({

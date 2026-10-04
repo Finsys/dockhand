@@ -26,6 +26,8 @@ import { buildComposeOperationArgs, shouldRunSeparateBuildStep } from './compose
 import { findStackNameCollision, getStackPathHintsFromContainers, moveStackFilePathCrossDevice, resolveStackDirForLayout } from './stack-path-utils';
 import { db, environments, eq } from './db/drizzle.js';
 import { isAllowedStackFilename } from './stack-filename';
+import { coolingDown as coolingDownRows } from '$lib/utils/pending-update-rows';
+import { getMinimumReleaseAgeConfig } from './minimum-release-age';
 
 import { deriveStackStatus } from './stack-status';
 import {
@@ -2059,12 +2061,17 @@ export async function listComposeStacks(envId?: number | null): Promise<ComposeS
 	// on hasImageUpdate. `newerVersionIds` drives the separate semver stack badge.
 	const pendingUpdateIds = new Set<string>();
 	const newerVersionIds = new Set<string>();
+	// A held update: an update exists but the image is too young to apply. Counted
+	// separately so it never reaches updateCount, which offers a redeploy.
+	const coolingDownIds = new Set<string>();
 	const newerVersionById = new Map<string, unknown>();
 	if (typeof envId === 'number') {
 		try {
 			const pending = await getPendingContainerUpdates(envId);
+			const heldIds = coolingDownRows(pending, (await getMinimumReleaseAgeConfig(envId).catch(() => ({ hours: 0 }))).hours);
 			pending.forEach((p) => {
 				if (p.hasImageUpdate) pendingUpdateIds.add(p.containerId);
+				if (heldIds.has(p.containerId)) coolingDownIds.add(p.containerId);
 				if (p.newerVersion) {
 					newerVersionIds.add(p.containerId);
 					try {
@@ -2161,6 +2168,8 @@ export async function listComposeStacks(envId?: number | null): Promise<ComposeS
 			updateCount: stackContainers.filter((c) => pendingUpdateIds.has(c.id)).length,
 			// Newer-version-tag (semver) suggestions in this stack - drives the Tag badge.
 			newerVersionCount: stackContainers.filter((c) => newerVersionIds.has(c.id)).length,
+			// Held updates in this stack - shown as waiting, never offered for redeploy.
+			coolingDownCount: stackContainers.filter((c) => coolingDownIds.has(c.id)).length,
 			status: deriveStackStatus({
 				total: stackContainers.length,
 				running: runningCount,

@@ -35,6 +35,7 @@
 		NotepadText,
 		RefreshCw,
 		CircleArrowUp,
+		Clock,
 		X,
 		Terminal,
 		ArrowUpDown,
@@ -557,13 +558,20 @@
 	const containersWithFailedCheckSet = $derived(new Set($containerStore.failedUpdateIds));
 	const failedUpdateErrors = $derived($containerStore.failedUpdateErrors);
 
+	// Hours left on a held update, keyed by container ID. Deliberately kept OUT of
+	// containersWithUpdatesSet: the cooldown is what stops the update, so offering it
+	// for a bulk update would promise something it blocks.
+	const coolingDownMap = $derived($containerStore.coolingDown);
+
 	// Any update indicator on the page - digest updates, newer-version tags, or failed
 	// checks. Drives the compact "dismiss all" (×) button.
 	const hasUpdateIndicators = $derived(
 		$containerStore.pendingUpdateIds.length > 0 ||
 		hasNewerVersions ||
+		coolingDownMap.size > 0 ||
 		$containerStore.failedUpdateIds.length > 0
 	);
+
 
 	// Newer-version-tag (semver) suggestions from the last check, keyed by container ID.
 	const newerVersionsMap = $derived($containerStore.newerVersions);
@@ -735,6 +743,7 @@
 		withUpdates: Array<{ containerId: string; containerName: string }>;
 		failed?: Array<{ containerId: string; error: string }>;
 		newerVersions?: Array<{ containerId: string; newerVersion: import('$lib/server/semver/find-newer').NewerVersion }>;
+		coolingDown?: Map<string, number>;
 	}) {
 		if (result.withUpdates.length === 0) {
 			containerStore.setPendingUpdates([], new Map());
@@ -755,6 +764,9 @@
 		// Newer-version-tag (semver) suggestions — advisory badge, session-only.
 		const newer = result.newerVersions ?? [];
 		containerStore.setNewerVersions(new Map(newer.map((n) => [n.containerId, n.newerVersion])));
+		// Held updates, from the same check: without this the Clock indicators would
+		// still show whatever the previous check found.
+		containerStore.setCoolingDown(result.coolingDown ?? new Map());
 	}
 
 	// Load pending updates from database (persisted from check-updates or scheduled jobs)
@@ -795,6 +807,9 @@
 				containerStore.setFailedUpdates([], new Map());
 				// Newer-version (semver) badges are session-only too — dismiss them alongside.
 				containerStore.setNewerVersions(new Map());
+				// The DELETE removed the held rows as well, so their Clock indicators must
+				// go with them - otherwise they render against rows that no longer exist.
+				containerStore.setCoolingDown(new Map());
 			}
 		} catch {
 			toast.error('Failed to clear update indicators');
@@ -1671,6 +1686,7 @@
 					show={hasUpdateIndicators}
 					digestCount={updatableContainersCount}
 					newerVersionCount={$containerStore.newerVersions.size}
+					coolingDownCount={coolingDownMap.size}
 					onDismiss={dismissPendingUpdates}
 				/>
 				{#if $canAccess('containers', 'remove')}
@@ -2027,6 +2043,12 @@
 										</a>
 									{/if}
 								{/if}
+							{:else if coolingDownMap.has(container.id)}
+								<!-- An update exists but the image is too young to apply. Muted, not
+								     amber: there is nothing for the user to act on. -->
+								<span title="Update held: {coolingDownMap.get(container.id)} hour(s) left of the minimum image age">
+									<Clock class="w-3 h-3 text-muted-foreground shrink-0" />
+								</span>
 							{:else if containersWithFailedCheckSet.has(container.id)}
 								<Tooltip.Root>
 									<Tooltip.Trigger>
