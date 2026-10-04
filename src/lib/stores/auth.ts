@@ -30,7 +30,7 @@ export interface AuthUser {
 	displayName?: string;
 	avatar?: string;
 	isAdmin: boolean;
-	provider: 'local' | 'ldap' | 'oidc';
+	provider: 'local' | 'ldap' | 'oidc' | 'passkey';
 	permissions: Permissions;
 }
 

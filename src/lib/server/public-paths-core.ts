@@ -19,6 +19,8 @@ export const PUBLIC_EXACT = [
 	'/api/auth/session',
 	'/api/auth/settings',
 	'/api/auth/providers',
+	'/api/auth/passkeys/login/options',
+	'/api/auth/passkeys/login/verify',
 	'/api/license',
 	'/api/changelog',
 	'/api/settings/theme'

@@ -45,10 +45,26 @@ describe('a prefix entry covers its subtree, which is the point of it', () => {
 	test('the prefix list stays short, because each entry opens a whole subtree', () => {
 		expect(PUBLIC_PREFIXES.sort()).toEqual(['/api/auth/oidc', '/api/docs', '/api/health']);
 	});
+
+	test('signing in with a passkey is public, registering one is not', () => {
+		// Both halves of the login ceremony run before there is a session.
+		expect(isPublicPath('/api/auth/passkeys/login/options')).toBe(true);
+		expect(isPublicPath('/api/auth/passkeys/login/verify')).toBe(true);
+		// Listed one by one rather than as a prefix, so nothing added under
+		// /api/auth/passkeys/ later is born unauthenticated.
+		expect(isPublicPath('/api/auth/passkeys')).toBe(false);
+		expect(isPublicPath('/api/auth/passkeys/register/options')).toBe(false);
+		expect(isPublicPath('/api/auth/passkeys/login')).toBe(false);
+	});
 });
 
 describe('routes that must never be public', () => {
 	const mustBeProtected = [
+		// Registering a passkey acts on the signed-in account, so it stays behind a
+		// session even though signing in WITH one cannot.
+		'/api/auth/passkeys/register/options',
+		'/api/auth/passkeys/register/verify',
+		'/api/profile/passkeys',
 		'/api/users',
 		'/api/users/1',
 		'/api/containers',

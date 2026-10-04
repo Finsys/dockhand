@@ -14,6 +14,7 @@
 	import * as Alert from '$lib/components/ui/alert';
 	import { themeStore, applyTheme } from '$lib/stores/theme';
 	import { safeRedirectOrRoot } from '$lib/utils/safe-redirect';
+	import { startAuthentication } from '@simplewebauthn/browser';
 
 	interface AuthProvider {
 		id: string;
@@ -34,6 +35,7 @@
 	let autoLoginUrl = $state<string | null>(null);
 	let selectedProvider = $state('local');
 	let loadingProviders = $state(true);
+	let passkeyLoading = $state(false);
 
 	// Get redirect URL from query params (validated path-relative only)
 	const redirectUrl = $derived(safeRedirectOrRoot($page.url.searchParams.get('redirect')));
@@ -163,6 +165,36 @@
 		}
 	}
 
+	async function handlePasskeyLogin() {
+		passkeyLoading = true;
+		error = null;
+		try {
+			const optionsResponse = await fetch('/api/auth/passkeys/login/options', { method: 'POST' });
+			const optionsData = await optionsResponse.json();
+			if (!optionsResponse.ok) throw new Error(optionsData.error || 'Passkey login is unavailable');
+
+			const authenticationResponse = await startAuthentication({ optionsJSON: optionsData.options });
+			const verifyResponse = await fetch('/api/auth/passkeys/login/verify', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ ceremonyId: optionsData.ceremonyId, response: authenticationResponse })
+			});
+			const verifyData = await verifyResponse.json();
+			if (!verifyResponse.ok || !verifyData.success) throw new Error(verifyData.error || 'Passkey login failed');
+
+			await authStore.check();
+			await appSettings.refresh();
+			await environments.refresh();
+			goto(redirectUrl);
+		} catch (e) {
+			error = e instanceof Error && e.name !== 'NotAllowedError'
+				? e.message
+				: 'Passkey sign-in was cancelled or timed out';
+		} finally {
+			passkeyLoading = false;
+		}
+	}
+
 	function getProviderIcon(type: 'local' | 'ldap' | 'oidc') {
 		if (type === 'ldap') return Network;
 		if (type === 'oidc') return KeyRound;
@@ -200,6 +232,22 @@
 					<TriangleAlert class="h-4 w-4" />
 					<Alert.Description>{error}</Alert.Description>
 				</Alert.Root>
+			{/if}
+
+			{#if !requiresMfa}
+				<Button
+					variant="outline"
+					class="w-full justify-center gap-3 mb-4"
+					onclick={handlePasskeyLogin}
+					disabled={passkeyLoading || loading || ssoLoading !== null}
+				>
+					{#if passkeyLoading}
+						<Loader2 class="h-5 w-5 animate-spin" />
+					{:else}
+						<KeyRound class="h-5 w-5" />
+					{/if}
+					<span>Sign in with passkey</span>
+				</Button>
 			{/if}
 
 			<!-- SSO Buttons -->

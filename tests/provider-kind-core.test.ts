@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { providerKind, oidcProviderName } from '../src/lib/server/provider-kind-core';
+import { providerKind, oidcProviderName, isFederatedSession } from '../src/lib/server/provider-kind-core';
 
 /**
  * What a session's provider column means.
@@ -34,6 +34,10 @@ describe('the kind of account a session belongs to', () => {
 	test('something nothing writes grants nothing extra', () => {
 		expect(providerKind('saml')).toBe('local');
 		expect(providerKind('oidcx')).toBe('local');
+		// Exact, not a prefix: 'passkeyx' is not a passkey session.
+		expect(providerKind('passkeyx')).toBe('local');
+		expect(providerKind('passkey:')).toBe('local');
+		expect(providerKind('PASSKEY')).toBe('local');
 	});
 });
 
@@ -52,5 +56,38 @@ describe('which provider should end the session', () => {
 		expect(oidcProviderName('ldap:AD')).toBeNull();
 		expect(oidcProviderName('local')).toBeNull();
 		expect(oidcProviderName(null)).toBeNull();
+	});
+});
+
+describe('whether a session has a password to confirm', () => {
+	// Creating an API token asks a local account for its password first, so a stolen
+	// session cannot mint a durable credential. Only a federated account skips that,
+	// because it has no password here.
+	test('a federated sign-in has none', () => {
+		expect(isFederatedSession('oidc')).toBe(true);
+		expect(isFederatedSession('oidc:Keycloak')).toBe(true);
+		expect(isFederatedSession('ldap')).toBe(true);
+		expect(isFederatedSession('ldap:AD')).toBe(true);
+	});
+
+	test('a passkey session is a local account signing in differently', () => {
+		// The whole point: it must still be asked for the password.
+		expect(isFederatedSession('passkey')).toBe(false);
+	});
+
+	test('a local session has one', () => {
+		expect(isFederatedSession('local')).toBe(false);
+		expect(isFederatedSession(null)).toBe(false);
+		expect(isFederatedSession(undefined)).toBe(false);
+	});
+
+	test('a near miss is not federated, so it is asked for the password', () => {
+		// An unrecognised value must fail CLOSED - toward asking - rather than
+		// inheriting a federated bypass from a lookalike prefix.
+		expect(isFederatedSession('oidcx')).toBe(false);
+		expect(isFederatedSession('ldapx')).toBe(false);
+		expect(isFederatedSession('OIDC')).toBe(false);
+		expect(isFederatedSession('saml')).toBe(false);
+		expect(isFederatedSession('')).toBe(false);
 	});
 });

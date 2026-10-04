@@ -41,7 +41,7 @@ export const GET: RequestHandler = async ({ cookies }) => {
 			avatar: user.avatar,
 			mfaEnabled: user.mfaEnabled,
 			isAdmin,
-			provider: currentUser.provider || 'local',
+			provider: user.authProvider || 'local',
 			lastLogin: user.lastLogin,
 			createdAt: user.createdAt,
 			updatedAt: user.updatedAt
@@ -128,6 +128,7 @@ export const PUT: RequestHandler = async ({ request, cookies }) => {
 			avatar: user.avatar,
 			mfaEnabled: user.mfaEnabled,
 			isAdmin,
+			provider: user.authProvider || 'local',
 			lastLogin: user.lastLogin,
 			createdAt: user.createdAt,
 			updatedAt: user.updatedAt

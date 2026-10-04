@@ -127,6 +127,13 @@
       "when": 1791094946737,
       "tag": "0017_pending_update_cooldown",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1791134066582,
+      "tag": "0018_add_passkey_credentials",
+      "breakpoints": true
     }
   ]
 }

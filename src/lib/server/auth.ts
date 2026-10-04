@@ -116,7 +116,7 @@ export interface AuthenticatedUser {
 	displayName?: string;
 	avatar?: string;
 	isAdmin: boolean;
-	provider: 'local' | 'ldap' | 'oidc';
+	provider: 'local' | 'ldap' | 'oidc' | 'passkey';
 	permissions: Permissions;
 }
 
@@ -386,7 +386,7 @@ export async function getOidcLogoutRedirect(
  */
 async function buildAuthenticatedUser(
 	user: User,
-	provider: 'local' | 'ldap' | 'oidc'
+	provider: 'local' | 'ldap' | 'oidc' | 'passkey'
 ): Promise<AuthenticatedUser> {
 	const permissions = await getUserPermissionsById(user.id);
 
