@@ -157,12 +157,19 @@
 	// are already local, pulling is an explicit extra step the operator reaches for
 	// via the popover, not something either main button does silently.
 	//
-	// forceRecreate differs: Save & redeploy defaults to true, preserving the
-	// endpoint's prior always-on behavior (env var changes need --force-recreate to
-	// take effect) now that it's a real choice instead of hardcoded. Create & Start
-	// defaults to false -- there is nothing to recreate on a stack that doesn't exist
-	// yet.
-	let saveRedeployDefaults = $derived<DeployOptions>({ pull: false, build: hasBuildSection, forceRecreate: true });
+	// forceRecreate is pre-checked only for a stack that HAS env vars: compose sees a
+	// changed compose file on its own, but not a changed shell variable, so without the
+	// flag an env edit would not reach the container. With no env vars there is nothing
+	// compose can miss, so leaving it off recreates just the services that changed
+	// instead of the whole stack. Create & Start defaults to false -- there is nothing
+	// to recreate on a stack that doesn't exist yet.
+
+	// Environment variables state. Declared here because the defaults below read the
+	// count; a blank row the user has not named yet does not count as a variable.
+	let envVars = $state<EnvVar[]>([]);
+	const envVarCount = $derived(envVars.filter(v => v.key.trim()).length);
+
+	let saveRedeployDefaults = $derived<DeployOptions>({ pull: false, build: hasBuildSection, forceRecreate: envVarCount > 0 });
 	let createStartDefaults = $derived<DeployOptions>({ pull: false, build: hasBuildSection, forceRecreate: false });
 	let activeTab = $state<'editor' | 'graph' | 'backups' | 'deploys'>('editor');
 	let backupCount = $state(0);
@@ -200,8 +207,6 @@
 	let probeError = $state<string | null>(null);
 	let probeSeq = 0;
 
-	// Environment variables state
-	let envVars = $state<EnvVar[]>([]);
 	let rawEnvContent = $state(''); // Raw .env file content (comments preserved)
 	let envValidation = $state<ValidationResult | null>(null);
 	let validating = $state(false);
@@ -1085,9 +1090,6 @@
 	let validateTimer: ReturnType<typeof setTimeout> | null = null;
 
 	const defaultCompose = $appSettings.defaultComposeTemplate;
-
-	// Count of defined environment variables (with non-empty keys)
-	const envVarCount = $derived(envVars.filter(v => v.key.trim()).length);
 
 	// Build a lookup map from envVars for quick access
 	const envVarMap = $derived.by(() => {
@@ -2809,6 +2811,7 @@
 							defaultPull={createStartDefaults.pull}
 							defaultBuild={createStartDefaults.build}
 							defaultForceRecreate={createStartDefaults.forceRecreate}
+							showPresets
 							reason={hasBuildSection ? 'Auto-checked: this compose file has a build: section' : undefined}
 							onDeploy={(options) => handleCreate(true, false, options)}
 						>
@@ -2851,6 +2854,10 @@
 							defaultPull={saveRedeployDefaults.pull}
 							defaultBuild={saveRedeployDefaults.build}
 							defaultForceRecreate={saveRedeployDefaults.forceRecreate}
+							showPresets
+							forceRecreateReason={envVarCount > 0
+								? 'Pre-checked because this stack sets environment variables, and compose cannot see a changed variable on its own. Untick it to recreate only the services whose configuration changed.'
+								: 'Left off because this stack sets no environment variables, so compose recreates only the services whose configuration changed. Tick it to recreate every service.'}
 							reason={hasBuildSection ? 'Auto-checked: this compose file has a build: section' : undefined}
 							onDeploy={(options) => handleSave(true, undefined, false, options)}
 						>
