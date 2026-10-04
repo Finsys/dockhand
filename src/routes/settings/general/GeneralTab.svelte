@@ -1143,9 +1143,23 @@ services:
 					<Card.Title class="text-sm font-medium flex items-center gap-2">
 						<Clock class="w-4 h-4" />
 						Minimum image age
+						<Tooltip.Provider delayDuration={100}>
+							<Tooltip.Root>
+								<Tooltip.Trigger>
+									<HelpCircle class="w-4 h-4 text-muted-foreground cursor-help" />
+								</Tooltip.Trigger>
+								<Tooltip.Portal>
+									<Tooltip.Content side="right" sideOffset={8} class="!w-96 space-y-2">
+										<p>The age comes from the image's creation time in the registry, which records the build rather than the publication. When the registry gives no usable time, Dockhand counts from when it first saw that digest.</p>
+										<p>An environment can override this value. Manual pulls warn and proceed; stack deployments, including scheduled Git ones, are exempt.</p>
+										<p>A newer image restarts the wait on itself, so a project publishing faster than this age never updates automatically.</p>
+									</Tooltip.Content>
+								</Tooltip.Portal>
+							</Tooltip.Root>
+						</Tooltip.Provider>
 					</Card.Title>
 					<Card.Description>
-						Delay automatic container updates until an image reaches this age, using its creation time from registry metadata. Missing, invalid, or future creation times use when Dockhand first observed the digest. Creation time reflects the build, not publication. Environments can override this setting. Manual pulls warn and proceed; stack deployments, including scheduled Git deployments, are exempt.
+						Hold automatic container updates until a new image has been out for a while.
 					</Card.Description>
 				</Card.Header>
 				<Card.Content class="flex items-end gap-3">

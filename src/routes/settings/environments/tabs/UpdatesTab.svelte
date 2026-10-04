@@ -6,7 +6,8 @@
 	import CronEditor from '$lib/components/cron-editor.svelte';
 	import TimezoneSelector from '$lib/components/TimezoneSelector.svelte';
 	import VulnerabilityCriteriaSelector, { type VulnerabilityCriteria } from '$lib/components/VulnerabilityCriteriaSelector.svelte';
-	import { CircleFadingArrowUp, CircleArrowUp, RefreshCw, Info, Trash2 } from 'lucide-svelte';
+	import * as Tooltip from '$lib/components/ui/tooltip';
+	import { CircleFadingArrowUp, CircleArrowUp, RefreshCw, Info, Trash2, HelpCircle } from 'lucide-svelte';
 	import { formatDateTime } from '$lib/stores/settings';
 	import { formatBytes } from '$lib/utils/format';
 
@@ -131,8 +132,24 @@
 
 <!-- Minimum image age -->
 <div class="space-y-3 pt-4 border-t">
-	<div class="text-sm font-medium">Minimum image age</div>
-	<p class="text-xs text-muted-foreground">Delay automatic container updates until an image reaches this age, using its creation time from registry metadata. Missing, invalid, or future creation times use when Dockhand first observed the digest. Creation time reflects the build, not publication. Manual pulls warn and proceed; stack deployments, including scheduled Git deployments, are exempt.</p>
+	<div class="text-sm font-medium flex items-center gap-2">
+		Minimum image age
+		<Tooltip.Provider delayDuration={100}>
+			<Tooltip.Root>
+				<Tooltip.Trigger>
+					<HelpCircle class="w-3.5 h-3.5 text-muted-foreground cursor-help" />
+				</Tooltip.Trigger>
+				<Tooltip.Portal>
+					<Tooltip.Content side="right" sideOffset={8} class="!w-96 space-y-2">
+						<p>The age comes from the image's creation time in the registry, which records the build rather than the publication. When the registry gives no usable time, Dockhand counts from when it first saw that digest.</p>
+						<p>Manual pulls warn and proceed; stack deployments, including scheduled Git ones, are exempt.</p>
+						<p>A newer image restarts the wait on itself, so a project publishing faster than this age never updates automatically.</p>
+					</Tooltip.Content>
+				</Tooltip.Portal>
+			</Tooltip.Root>
+		</Tooltip.Provider>
+	</div>
+	<p class="text-xs text-muted-foreground">Hold automatic container updates until a new image has been out for a while.</p>
 	<div class="flex items-center justify-between gap-3">
 		<div>
 			<Label>Override global cooldown</Label>
