@@ -571,6 +571,8 @@ export const backupDestinations = sqliteTable('backup_destinations', {
 	hostPath: text('host_path'),                     // bind-mount source for local repos
 	cacert: text('cacert'),                          // AES-256-GCM encrypted PEM: self-signed CA for a TLS backend (RESTIC_CACERT)
 	tlsClientCert: text('tls_client_cert'),          // AES-256-GCM encrypted PEM: client cert+key for mTLS (RESTIC_TLS_CLIENT_CERT)
+	sshPrivateKey: text('ssh_private_key'),          // AES-256-GCM encrypted private key for an SFTP backend
+	sshKnownHosts: text('ssh_known_hosts'),          // AES-256-GCM encrypted verified known_hosts data for an SFTP backend
 	policies: text('policies'),                      // JSON: { pruneSchedule, checkSchedule, autoUnlock, maxUnused }
 	lastTestAt: text('last_test_at'),
 	lastTestStatus: text('last_test_status'),        // 'success' | 'failed'

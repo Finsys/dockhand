@@ -134,6 +134,13 @@
       "when": 1791134066582,
       "tag": "0018_add_passkey_credentials",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1791395551648,
+      "tag": "0019_add_backup_sftp",
+      "breakpoints": true
     }
   ]
 }

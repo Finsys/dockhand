@@ -460,6 +460,12 @@ export async function migrateCredentials(): Promise<void> {
 			if (dest.envVars && isEncrypted(dest.envVars)) {
 				allEncrypted.push({ table: 'backupDestinations', id: dest.id, field: 'envVars', value: dest.envVars });
 			}
+			if (dest.sshPrivateKey && isEncrypted(dest.sshPrivateKey)) {
+				allEncrypted.push({ table: 'backupDestinations', id: dest.id, field: 'sshPrivateKey', value: dest.sshPrivateKey });
+			}
+			if (dest.sshKnownHosts && isEncrypted(dest.sshKnownHosts)) {
+				allEncrypted.push({ table: 'backupDestinations', id: dest.id, field: 'sshKnownHosts', value: dest.sshKnownHosts });
+			}
 		}
 
 		const providers = await db.select().from(secretProviders);
@@ -659,6 +665,14 @@ export async function migrateCredentials(): Promise<void> {
 		}
 		if (dest.envVars && !isEncrypted(dest.envVars)) {
 			updates.envVars = encrypt(dest.envVars);
+			migrated++;
+		}
+		if (dest.sshPrivateKey && !isEncrypted(dest.sshPrivateKey)) {
+			updates.sshPrivateKey = encrypt(dest.sshPrivateKey);
+			migrated++;
+		}
+		if (dest.sshKnownHosts && !isEncrypted(dest.sshKnownHosts)) {
+			updates.sshKnownHosts = encrypt(dest.sshKnownHosts);
 			migrated++;
 		}
 		if (Object.keys(updates).length > 0) {

@@ -11,15 +11,13 @@ import {
 	getBackupConfigs
 } from '$lib/server/db';
 import { registerSchedule, unregisterSchedule } from '$lib/server/scheduler';
-import { validatePolicySchedules, validateRepositoryForSave, validateAndSerializeFlags, parseBackupFlags } from '$lib/server/backups/helpers';
+import { validatePolicySchedules, validateRepositoryForSave, validateAndSerializeFlags, parseBackupFlags, validateSftpCredentials } from '$lib/server/backups/helpers';
 import { destinationHasRunningBackup } from '$lib/server/backups';
 
 /**
  * Single-destination response shape. envVars (decrypted cloud credentials) are
- * ONLY included for callers with backups:manage — the edit form that pre-fills
- * credential fields. A backups:view (Viewer) caller must never receive them
- * (audit #26/#29). The password is always stripped. The LIST endpoint omits
- * envVars entirely — see /api/backup/destinations/+server.ts.
+ * ONLY included for callers with backups:manage. Passwords and dedicated TLS/SFTP
+ * credentials are always stripped; edit forms receive only has... presence flags.
  */
 function prepareDestination(dest: any, includeSecrets: boolean): any {
 	const result = { ...dest };
@@ -29,13 +27,15 @@ function prepareDestination(dest: any, includeSecrets: boolean): any {
 	} else {
 		delete result.envVars;
 	}
-	// TLS certs (PEM) are never sent to the client - not even the ciphertext, and not even
-	// to a manage caller (like the password). The edit form only needs to know one IS set so
-	// it can show "leave blank to keep", so expose booleans and strip the values.
+	// Dedicated credential contents are never sent to the client, even as ciphertext.
 	result.hasCacert = !!dest.cacert;
 	result.hasTlsClientCert = !!dest.tlsClientCert;
+	result.hasSshPrivateKey = !!dest.sshPrivateKey;
+	result.hasSshKnownHosts = !!dest.sshKnownHosts;
 	delete result.cacert;
 	delete result.tlsClientCert;
+	delete result.sshPrivateKey;
+	delete result.sshKnownHosts;
 	// Split the stored `flags` JSON into separate fields the edit form binds to (legacy
 	// bare strings surface as backupFlags), so the UI never parses the string-vs-JSON column.
 	const { backup, restore } = parseBackupFlags(dest.flags);
@@ -48,10 +48,10 @@ function prepareDestination(dest: any, includeSecrets: boolean): any {
  * GET /api/backup/destinations/{id} - Get a single backup destination
  *
  * @openapi
- * summary: Fetch a single backup destination; decrypted cloud-credential env vars are only included for callers who can manage backups, and the password is always stripped
+ * summary: Fetch one backup destination; cloud env vars require manage permission, while passwords and dedicated TLS/SFTP credentials are always stripped
  * description: Permission denial (403, "backups:view") is produced by the shared requireBackups route guard.
  * path: id:integer! Backup destination id (from GET /api/backup/destinations)
- * resp-200: The backup destination object (envVars included only for "backups:manage" callers; password always stripped)
+ * resp-200: The destination with has... presence flags; envVars require "backups:manage", and dedicated secret values are never returned
  * resp-400: Invalid id (not a number)
  * resp-404: Destination not found
  */
@@ -79,9 +79,9 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
  * summary: Update a backup destination, re-validating repository and flags when supplied and re-registering maintenance schedules when policies change
  * description: Permission denial (403, "backups:manage") is produced by the shared requireBackups route guard.
  * path: id:integer! Backup destination id (from GET /api/backup/destinations)
- * body: {name:string, repository:string, password:string, envVars:{}, flags:string, backupFlags:string, restoreFlags:string, hostPath:string, cacert:string, tlsClientCert:string, policies:string}
+ * body: {name:string, repository:string, password:string, envVars:{}, flags:string, backupFlags:string, restoreFlags:string, hostPath:string, cacert:string, tlsClientCert:string, sshPrivateKey:string, sshKnownHosts:string, policies:string}
  * body-example: {"name":"S3 Offsite (renamed)","policies":"{\"pruneEnabled\":true,\"pruneSchedule\":\"0 0 1 * *\"}"}
- * resp-200: The updated backup destination object (password stripped, envVars echoed back to the managing caller)
+ * resp-200: The updated destination with password and dedicated TLS/SFTP credential values stripped
  * resp-400: Invalid input — invalid id, unsupported/SSRF-blocked repository, invalid restic flags, invalid policy cron, or switching to a local repository used by a remote-environment config
  * resp-404: Destination not found
  * resp-409: A backup using this destination is currently running, or a destination with the new name already exists
@@ -103,7 +103,13 @@ export const PUT: RequestHandler = async (event) => {
 
 	// Changing the repo target or password while a backup is writing to this
 	// destination would break the in-flight run. A policy/name-only edit is safe.
-	if ((body.repository !== undefined || body.password !== undefined) && await destinationHasRunningBackup(id)) {
+	if (
+		(body.repository !== undefined
+			|| body.password !== undefined
+			|| body.sshPrivateKey !== undefined
+			|| body.sshKnownHosts !== undefined)
+		&& await destinationHasRunningBackup(id)
+	) {
 		return json({ error: 'A backup using this destination is currently running. Try again once it finishes.' }, { status: 409 });
 	}
 
@@ -119,6 +125,14 @@ export const PUT: RequestHandler = async (event) => {
 		const repoError = validateRepositoryForSave(body.repository);
 		if (repoError) return json({ error: repoError }, { status: 400 });
 	}
+	const sftpError = validateSftpCredentials({
+		repository: body.repository ?? existing.repository,
+		sshPrivateKey: body.sshPrivateKey,
+		sshKnownHosts: body.sshKnownHosts,
+		hasStoredSshPrivateKey: !!existing.sshPrivateKey,
+		hasStoredSshKnownHosts: !!existing.sshKnownHosts
+	});
+	if (sftpError) return json({ error: sftpError }, { status: 400 });
 	// Flags: prefer the split shape; fall back to a legacy `flags` string. undefined for ALL
 	// three means "don't touch flags". Validate+serialize to the JSON stored in `flags`.
 	let flagsColumn: string | null | undefined = undefined;
@@ -143,6 +157,8 @@ export const PUT: RequestHandler = async (event) => {
 			hostPath: body.hostPath,
 			cacert: body.cacert,
 			tlsClientCert: body.tlsClientCert,
+			sshPrivateKey: body.sshPrivateKey,
+			sshKnownHosts: body.sshKnownHosts,
 			policies: body.policies
 		});
 		if (!updated) return json({ error: 'Update failed' }, { status: 500 });
@@ -162,10 +178,13 @@ export const PUT: RequestHandler = async (event) => {
 		await auditBackupDestination(event, 'update', id, updated.name, {
 			repositoryChanged: body.repository !== undefined && body.repository !== existing.repository,
 			passwordChanged: body.password !== undefined,
+			sshPrivateKeyChanged: body.sshPrivateKey !== undefined,
+			sshKnownHostsChanged: body.sshKnownHosts !== undefined,
 			policiesChanged: body.policies !== undefined
 		});
 
-		// PUT caller already holds backups:manage — safe to echo secrets back.
+		// PUT caller holds backups:manage, so envVars may be included; dedicated
+		// password/TLS/SFTP credential values remain stripped.
 		return json(prepareDestination(updated, true));
 	} catch (error: any) {
 		if (error.message?.includes('UNIQUE constraint')) {

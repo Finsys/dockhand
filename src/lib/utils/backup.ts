@@ -48,6 +48,7 @@ export function getRepoTypeIcon(repository: string): Component {
 	if (repository.startsWith('azure:')) return AzureBlobIcon;
 	if (repository.startsWith('gs:')) return GoogleCloudIcon;
 	if (repository.startsWith('rest:')) return RestServerIcon;
+	if (repository.startsWith('sftp:')) return RestServerIcon;
 	return Globe;
 }
 
@@ -58,6 +59,7 @@ export function getRepoTypeLabel(repository: string): string {
 	if (repository.startsWith('azure:')) return 'Azure Blob';
 	if (repository.startsWith('gs:')) return 'Google Cloud';
 	if (repository.startsWith('rest:')) return 'REST';
+	if (repository.startsWith('sftp:')) return 'SFTP';
 	return 'Unknown';
 }
 

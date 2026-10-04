@@ -4,8 +4,9 @@ import { authorize } from '$lib/server/authorize';
 import { requireBackups } from '$lib/server/backups/route-guards';
 import { getBackupDestination, decryptBackupDestination, updateBackupDestinationTestStatus } from '$lib/server/db';
 import { spawn } from 'child_process';
-import { buildResticEnv, cleanErrorMsg, isRepoNotInitializedError, RESTIC_EXIT_REPO_NOT_FOUND, validateRepositoryForSave } from '$lib/server/backups/helpers';
+import { buildResticEnv, cleanErrorMsg, isRepoNotInitializedError, RESTIC_EXIT_REPO_NOT_FOUND, validateRepositoryForSave, validateSftpCredentials } from '$lib/server/backups/helpers';
 import { withGcsCredFile, withTlsCertFiles } from '$lib/server/backups/restic';
+import { buildSftpResticOptionArgs, withSftpCredentialFiles, type SftpCredentials } from '$lib/server/backups/sftp';
 
 /**
  * Test a backup destination configuration.
@@ -13,9 +14,9 @@ import { withGcsCredFile, withTlsCertFiles } from '$lib/server/backups/restic';
  * - Without: uses inline credentials from request body (for testing before save)
  *
  * @openapi
- * summary: Test a backup repository — either a saved destination (by destinationId) or inline credentials supplied for a not-yet-saved destination
- * description: Provide `destinationId` to test a saved destination using its stored credentials, or omit it and supply `repository`/`password`/`envVars` to test before saving. Permission denial (403, "backups:manage") is produced by the shared requireBackups route guard. destinationId from GET /api/backup/destinations.
- * body: {destinationId:integer, repository:string, password:string, envVars:{}, cacert:string, tlsClientCert:string}
+ * summary: Test a saved or inline backup repository, including strict private-key SFTP authentication
+ * description: Provide `destinationId` to use stored credentials, or omit it and supply repository credentials inline. SFTP requires sshPrivateKey and verified sshKnownHosts; password auth and trust-on-first-use are never enabled. Permission denial (403, "backups:manage") is produced by the shared requireBackups route guard.
+ * body: {destinationId:integer, repository:string, password:string, envVars:{}, cacert:string, tlsClientCert:string, sshPrivateKey:string, sshKnownHosts:string}
  * body-example: {"repository":"s3:s3.amazonaws.com/my-bucket/restic","password":"***","envVars":{"AWS_ACCESS_KEY_ID":"***","AWS_SECRET_ACCESS_KEY":"***"}}
  * resp-200: Test result — { success: true } when the repository is reachable, or { success: false, needsInit?, error } otherwise
  * resp-200-example: {"success":true}
@@ -32,6 +33,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 	let repository: string;
 	let password: string;
 	let envVars: Record<string, string> = {};
+	let sftpCredentials: SftpCredentials = { privateKey: null, knownHosts: null };
 	// TLS certs must reach restic here too, or testing a saved self-signed/private-CA
 	// destination fails the handshake even though its backups succeed (they apply the cert).
 	let certs: { cacert: string | null; clientCert: string | null } = { cacert: null, clientCert: null };
@@ -45,6 +47,10 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 		password = decrypted.decryptedPassword;
 		envVars = decrypted.decryptedEnvVars;
 		certs = { cacert: decrypted.decryptedCacert, clientCert: decrypted.decryptedTlsClientCert };
+		sftpCredentials = {
+			privateKey: decrypted.decryptedSshPrivateKey,
+			knownHosts: decrypted.decryptedSshKnownHosts
+		};
 	} else {
 		// Inline test (before save)
 		if (!body.repository || !body.password) {
@@ -57,6 +63,12 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 		if (repoError) {
 			return json({ error: repoError }, { status: 400 });
 		}
+		const sftpError = validateSftpCredentials({
+			repository: body.repository,
+			sshPrivateKey: body.sshPrivateKey,
+			sshKnownHosts: body.sshKnownHosts
+		});
+		if (sftpError) return json({ error: sftpError }, { status: 400 });
 		repository = body.repository;
 		password = body.password;
 		if (body.envVars && typeof body.envVars === 'object') {
@@ -69,20 +81,32 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			cacert: typeof body.cacert === 'string' && body.cacert ? body.cacert : null,
 			clientCert: typeof body.tlsClientCert === 'string' && body.tlsClientCert ? body.tlsClientCert : null
 		};
+		sftpCredentials = {
+			privateKey: typeof body.sshPrivateKey === 'string' && body.sshPrivateKey ? body.sshPrivateKey : null,
+			knownHosts: typeof body.sshKnownHosts === 'string' && body.sshKnownHosts ? body.sshKnownHosts : null
+		};
 	}
 
 	const env = buildResticEnv(process.env, { repository, password, envVars });
 
 	try {
-		const result = await withTlsCertFiles(certs, env, (tlsEnv) => withGcsCredFile(tlsEnv, (runEnv) => new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => {
-			const proc = spawn('restic', ['snapshots', '--json', '--no-lock', '--latest', '1'], { env: runEnv, timeout: 30000 });
-			let stdout = '';
-			let stderr = '';
-			proc.stdout.on('data', (d) => { stdout += d; });
-			proc.stderr.on('data', (d) => { stderr += d; });
-			proc.on('close', (code) => resolve({ code: code ?? 1, stdout, stderr }));
-			proc.on('error', (err) => resolve({ code: 1, stdout: '', stderr: err.message }));
-		})));
+		const result = await withSftpCredentialFiles(repository, sftpCredentials, (sftpFiles) =>
+			withTlsCertFiles(certs, env, (tlsEnv) => withGcsCredFile(tlsEnv, (runEnv) =>
+				new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => {
+					const args = [
+						...buildSftpResticOptionArgs(repository, sftpFiles),
+						'snapshots', '--json', '--no-lock', '--latest', '1'
+					];
+					const proc = spawn('restic', args, { env: runEnv, timeout: 30000 });
+					let stdout = '';
+					let stderr = '';
+					proc.stdout.on('data', (d) => { stdout += d; });
+					proc.stderr.on('data', (d) => { stderr += d; });
+					proc.on('close', (code) => resolve({ code: code ?? 1, stdout, stderr }));
+					proc.on('error', (err) => resolve({ code: 1, stdout: '', stderr: err.message }));
+				})
+			))
+		);
 
 		if (result.code === 0) {
 			if (body.destinationId) await updateBackupDestinationTestStatus(body.destinationId, 'success');

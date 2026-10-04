@@ -33,6 +33,14 @@ import { TIMEOUTS, type ResticRun, type TimeoutTier } from './models';
 import { withTimeout, parseBackupFlags } from './helpers';
 import { resticCommand, finishScript, readExitMarker, buildHelperEnv, buildHelperBinds, localRepoGuard, localRepoChown, classifyProcClose, classifyProcError, gcsCredentialPreamble, tlsCertPreamble } from './restic-script';
 import { translateContainerPathViaMount } from '../host-path';
+import {
+	buildSftpCredentialEntries,
+	buildSftpResticOptionArgs,
+	SFTP_HELPER_KNOWN_HOSTS_FILE,
+	SFTP_HELPER_PRIVATE_KEY_FILE,
+	sftpResticPreamble,
+	withSftpCredentialFiles,
+} from './sftp';
 
 /** The destination's BACKUP/global flags for a given restic subcommand. Restore has its
  * OWN flags (threaded into the restore args by the restore builders), so this returns
@@ -166,27 +174,37 @@ export class Restic {
 			password: decrypted.decryptedPassword,
 			envVars: decrypted.decryptedEnvVars,
 		});
-		const fullArgs = [...args, ...backupFlagsForCommand(destination, args[0])];
 
-		return withTlsCertFiles({ cacert: decrypted.decryptedCacert, clientCert: decrypted.decryptedTlsClientCert }, env, (tlsEnv) => withGcsCredFile(tlsEnv, (runEnv) => new Promise<ResticRun>((resolve) => {
-			let stdout = '';
-			let stderr = '';
-			let settled = false;
-			const done = (run: ResticRun) => { if (!settled) { settled = true; resolve(run); } };
+		return withSftpCredentialFiles(
+			destination.repository,
+			{ privateKey: decrypted.decryptedSshPrivateKey, knownHosts: decrypted.decryptedSshKnownHosts },
+			(sftpFiles) => {
+				const fullArgs = [
+					...buildSftpResticOptionArgs(destination.repository, sftpFiles),
+					...args,
+					...backupFlagsForCommand(destination, args[0])
+				];
+				return withTlsCertFiles({ cacert: decrypted.decryptedCacert, clientCert: decrypted.decryptedTlsClientCert }, env, (tlsEnv) => withGcsCredFile(tlsEnv, (runEnv) => new Promise<ResticRun>((resolve) => {
+					let stdout = '';
+					let stderr = '';
+					let settled = false;
+					const done = (run: ResticRun) => { if (!settled) { settled = true; resolve(run); } };
 
-			const proc = spawn('restic', fullArgs, { env: runEnv, timeout: TIMEOUTS[tier] });
-			proc.stdout.on('data', (d) => { const s = String(d); stdout += s; stream?.onStdout?.(s); });
-			proc.stderr.on('data', (d) => { const s = String(d); stderr += s; stream?.onStderr?.(s); });
-			proc.on('close', (code, signal) => {
-				const { exitCode, stderr: stderrOut } = classifyProcClose(code, signal, stderr);
-				done({ exitCode, stdout, stderr: stderrOut });
-			});
-			proc.on('error', (err) => {
-				// restic missing / not spawnable - a real failure, surfaced as data.
-				const { exitCode, stderr: stderrOut } = classifyProcError(err, stderr);
-				done({ exitCode, stdout, stderr: stderrOut });
-			});
-		})));
+					const proc = spawn('restic', fullArgs, { env: runEnv, timeout: TIMEOUTS[tier] });
+					proc.stdout.on('data', (d) => { const s = String(d); stdout += s; stream?.onStdout?.(s); });
+					proc.stderr.on('data', (d) => { const s = String(d); stderr += s; stream?.onStderr?.(s); });
+					proc.on('close', (code, signal) => {
+						const { exitCode, stderr: stderrOut } = classifyProcClose(code, signal, stderr);
+						done({ exitCode, stdout, stderr: stderrOut });
+					});
+					proc.on('error', (err) => {
+						// restic missing / not spawnable - a real failure, surfaced as data.
+						const { exitCode, stderr: stderrOut } = classifyProcError(err, stderr);
+						done({ exitCode, stdout, stderr: stderrOut });
+					});
+				})));
+			}
+		);
 	}
 
 	/**
@@ -206,28 +224,38 @@ export class Restic {
 			password: decrypted.decryptedPassword,
 			envVars: decrypted.decryptedEnvVars,
 		});
-		const fullArgs = [...args, ...backupFlagsForCommand(destination, args[0])];
 
-		return withTlsCertFiles({ cacert: decrypted.decryptedCacert, clientCert: decrypted.decryptedTlsClientCert }, env, (tlsEnv) => withGcsCredFile(tlsEnv, (runEnv) => new Promise((resolve) => {
-			const chunks: Buffer[] = [];
-			let stderr = '';
-			let settled = false;
-			const done = (run: { exitCode: number | undefined; stdout: Buffer; stderr: string }) => {
-				if (!settled) { settled = true; resolve(run); }
-			};
+		return withSftpCredentialFiles(
+			destination.repository,
+			{ privateKey: decrypted.decryptedSshPrivateKey, knownHosts: decrypted.decryptedSshKnownHosts },
+			(sftpFiles) => {
+				const fullArgs = [
+					...buildSftpResticOptionArgs(destination.repository, sftpFiles),
+					...args,
+					...backupFlagsForCommand(destination, args[0])
+				];
+				return withTlsCertFiles({ cacert: decrypted.decryptedCacert, clientCert: decrypted.decryptedTlsClientCert }, env, (tlsEnv) => withGcsCredFile(tlsEnv, (runEnv) => new Promise((resolve) => {
+					const chunks: Buffer[] = [];
+					let stderr = '';
+					let settled = false;
+					const done = (run: { exitCode: number | undefined; stdout: Buffer; stderr: string }) => {
+						if (!settled) { settled = true; resolve(run); }
+					};
 
-			const proc = spawn('restic', fullArgs, { env: runEnv, timeout: TIMEOUTS[tier] });
-			proc.stdout.on('data', (d: Buffer) => { chunks.push(Buffer.from(d)); });
-			proc.stderr.on('data', (d) => { stderr += d; });
-			proc.on('close', (code, signal) => {
-				const { exitCode, stderr: stderrOut } = classifyProcClose(code, signal, stderr);
-				done({ exitCode, stdout: Buffer.concat(chunks), stderr: stderrOut });
-			});
-			proc.on('error', (err) => {
-				const { exitCode, stderr: stderrOut } = classifyProcError(err, stderr);
-				done({ exitCode, stdout: Buffer.concat(chunks), stderr: stderrOut });
-			});
-		})));
+					const proc = spawn('restic', fullArgs, { env: runEnv, timeout: TIMEOUTS[tier] });
+					proc.stdout.on('data', (d: Buffer) => { chunks.push(Buffer.from(d)); });
+					proc.stderr.on('data', (d) => { stderr += d; });
+					proc.on('close', (code, signal) => {
+						const { exitCode, stderr: stderrOut } = classifyProcClose(code, signal, stderr);
+						done({ exitCode, stdout: Buffer.concat(chunks), stderr: stderrOut });
+					});
+					proc.on('error', (err) => {
+						const { exitCode, stderr: stderrOut } = classifyProcError(err, stderr);
+						done({ exitCode, stdout: Buffer.concat(chunks), stderr: stderrOut });
+					});
+				})));
+			}
+		);
 	}
 
 	/**
@@ -272,22 +300,33 @@ export class Restic {
 		// Same shell as restic; covers every helper op. Works on a remote/Hawser daemon
 		// because the PEM rides an env var, not a host bind.
 		const tls = tlsCertPreamble();
+		const sftpEntries = buildSftpCredentialEntries(destination.repository, {
+			privateKey: decrypted.decryptedSshPrivateKey,
+			knownHosts: decrypted.decryptedSshKnownHosts,
+		});
+		const sftpFiles = sftpEntries.length > 0
+			? { privateKeyPath: SFTP_HELPER_PRIVATE_KEY_FILE, knownHostsPath: SFTP_HELPER_KNOWN_HOSTS_FILE }
+			: null;
+		const sftp = sftpResticPreamble(destination.repository, sftpFiles);
 		const cmd = spec.script
-			? ['sh', '-c', finishScript(`( ${gcs}${tls}${guard}${spec.script} )`) + chown]
-			: ['sh', '-c', finishScript(`${gcs}${tls}${guard}${resticCommand([...argv, ...backupFlagsForCommand(destination, argv[0])])}`) + chown];
+			? ['sh', '-c', finishScript(`( ${gcs}${tls}${sftp}${guard}${spec.script} )`) + chown]
+			: ['sh', '-c', finishScript(`${gcs}${tls}${sftp}${guard}${resticCommand([...argv, ...backupFlagsForCommand(destination, argv[0])])}`) + chown];
 
 		// The small metadata files (metadata.json + the light stack-dir listing) go into
 		// the container via put-archive (docker cp), NOT the Cmd, so they can't blow
 		// ARG_MAX. The stack dir's bytes ride a read-only host bind mount, not these files.
 		const metadataFiles = spec.metadataFiles ?? [];
-			const inlineEntries = metadataFiles.map((f) => ({ path: f.path.replace(/^\/+/, ''), content: Buffer.from(f.contentBase64, 'base64') }));
-			const beforeStart = metadataFiles.length > 0
-				? async (containerId: string) => {
-					// Each file's `path` is the full path from the container root (e.g.
-					// `metadata/metadata.json`), placing it under the right root.
-					await putContainerArchive(containerId, '/', await buildTar(inlineEntries), spec.envId);
-				}
-				: undefined;
+		const inlineEntries = [
+			...metadataFiles.map((f) => ({ path: f.path.replace(/^\/+/, ''), content: Buffer.from(f.contentBase64, 'base64') })),
+			...sftpEntries,
+		];
+		const beforeStart = inlineEntries.length > 0
+			? async (containerId: string) => {
+				// Each file's `path` is the full path from the container root (e.g.
+				// `metadata/metadata.json`), placing it under the right root.
+				await putContainerArchive(containerId, '/', await buildTar(inlineEntries), spec.envId);
+			}
+			: undefined;
 
 		let stdout = '';
 		let stderr = '';
