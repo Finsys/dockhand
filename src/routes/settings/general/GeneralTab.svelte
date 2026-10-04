@@ -386,8 +386,27 @@ services:
 		}
 	}
 
-	// Global newer-version-tag (semver) detection - one setting every update check
-	// (scheduled and manual) reads.
+	let releaseAgeHours = $state(0);
+	let releaseAgeOverridden = $state(false);
+	let releaseAgeSaving = $state(false);
+
+	async function saveReleaseAge() {
+		releaseAgeSaving = true;
+		try {
+			const res = await fetch('/api/settings/minimum-release-age', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ hours: releaseAgeHours })
+			});
+			const data = await res.json();
+			if (!res.ok) throw new Error(data.error || 'Failed to save minimum image age');
+			toast.success('Minimum image age updated');
+		} catch (error) {
+			toast.error(error instanceof Error ? error.message : 'Failed to save minimum image age');
+		} finally { releaseAgeSaving = false; }
+	}
+
+	// Global newer-version-tag (semver) detection.
 	let semverEnabled = $state(false);
 	let semverMaxBump = $state<'patch' | 'minor' | 'major'>('major');
 	let semverMatchFlavor = $state(true);
@@ -404,6 +423,14 @@ services:
 	let globalThemeLoaded = $state(false);
 
 	onMount(async () => {
+		try {
+			const res = await fetch('/api/settings/minimum-release-age');
+			if (res.ok) {
+				const config = await res.json();
+				releaseAgeHours = config.hours;
+				releaseAgeOverridden = config.overridden;
+			}
+		} catch { /* keep default */ }
 		try {
 			const res = await fetch('/api/settings/semver');
 			if (res.ok) {
@@ -1111,6 +1138,28 @@ services:
 			     compares versions, and the defaults shown to somebody who may not read
 			     it would be saved over the real configuration on the first change. -->
 			{#if $canAccess('settings', 'view')}
+			<Card.Root>
+				<Card.Header>
+					<Card.Title class="text-sm font-medium flex items-center gap-2">
+						<Clock class="w-4 h-4" />
+						Minimum image age
+					</Card.Title>
+					<Card.Description>
+						Delay automatic container updates until an image reaches this age, using its creation time from registry metadata. Missing, invalid, or future creation times use when Dockhand first observed the digest. Creation time reflects the build, not publication. Environments can override this setting. Manual pulls warn and proceed; stack deployments, including scheduled Git deployments, are exempt.
+					</Card.Description>
+				</Card.Header>
+				<Card.Content class="flex items-end gap-3">
+					<div class="space-y-2 flex-1">
+						<Label for="minimum-release-age">Hours (0–720)</Label>
+						<Input id="minimum-release-age" type="number" min="0" max="720" step="1" bind:value={releaseAgeHours} disabled={releaseAgeOverridden || !$canAccess('settings', 'edit')} />
+					</div>
+					<Button onclick={saveReleaseAge} disabled={releaseAgeSaving || releaseAgeOverridden || !$canAccess('settings', 'edit')}>Save</Button>
+				</Card.Content>
+				{#if releaseAgeOverridden}
+					<p class="px-6 pb-4 text-xs text-muted-foreground">Set by MINIMUM_RELEASE_AGE_HOURS.</p>
+				{/if}
+			</Card.Root>
+
 			<Card.Root>
 				<Card.Header>
 					<Card.Title class="text-sm font-medium flex items-center gap-2">

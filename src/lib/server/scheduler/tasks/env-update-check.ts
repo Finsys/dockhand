@@ -1,3 +1,4 @@
+import { trackedImageReference } from '$lib/utils/tracked-image';
 /**
  * Environment Update Check Task
  *
@@ -161,7 +162,7 @@ export async function runEnvUpdateCheckJob(
 		for (const container of containers) {
 			try {
 				const inspectData = await inspectContainer(container.id, environmentId) as any;
-				const imageName = inspectData.Config?.Image;
+				const imageName = trackedImageReference(inspectData.Config?.Image, inspectData.Config?.Labels);
 				const currentImageId = inspectData.Image;
 
 				if (!imageName) {
@@ -219,7 +220,7 @@ export async function runEnvUpdateCheckJob(
 					await log(`      Current: ${result.currentDigest?.substring(0, 24) || 'unknown'}...`);
 					await log(`      New:     ${result.registryDigest?.substring(0, 24) || 'unknown'}...`);
 				} else {
-					await log(`    Up to date`);
+					await log(result.releaseAgeRemainingHours ? `    Update deferred: ${result.releaseAgeRemainingHours} hour(s) remain in image update cooldown` : `    Up to date`);
 				}
 
 				// Newer-version-tag (semver) detection - independent of the digest check.
@@ -341,6 +342,9 @@ export async function runEnvUpdateCheckJob(
 				try {
 					await log(`\nUpdating: ${update.containerName}`);
 
+					let verifiedImageId: string | undefined;
+					let verifiedImageReference: string | undefined;
+
 					// SAFE-PULL FLOW
 					if (shouldScan && !isDigestBasedImage(update.imageName)) {
 						const tempTag = getTempImageTag(update.imageName);
@@ -348,10 +352,13 @@ export async function runEnvUpdateCheckJob(
 
 						// Step 1: Pull new image
 						await log(`  Pulling ${update.imageName}...`);
-						await pullImage(update.imageName, () => {}, environmentId);
+						const pulled = await pullImage(update.imageName, () => {}, environmentId, true);
+						verifiedImageId = pulled?.imageId;
+						verifiedImageReference = pulled?.reference;
+						if (pulled) update.newDigest = pulled.digest;
 
 						// Step 2: Get new image ID
-						const newImageId = await getImageIdByTag(update.imageName, environmentId);
+						const newImageId = verifiedImageId ?? await getImageIdByTag(update.imageName, environmentId);
 						if (!newImageId) {
 							throw new Error('Failed to get new image ID after pull');
 						}
@@ -366,7 +373,7 @@ export async function runEnvUpdateCheckJob(
 						const [tempRepo, tempTagName] = parseImageNameAndTag(tempTag);
 						await tagImage(newImageId, tempRepo, tempTagName, environmentId);
 
-						// Step 5: Scan temp image
+						// Step 5: Scan the immutable image ID
 						await log(`  Scanning for vulnerabilities...`);
 						let scanBlocked = false;
 						let blockReason = '';
@@ -376,7 +383,7 @@ export async function runEnvUpdateCheckJob(
 						const scanLogs: string[] = [];
 
 						try {
-							const scanResults = await scanImage(tempTag, environmentId, (progress) => {
+							const scanResults = await scanImage(newImageId, environmentId, (progress) => {
 								if (progress.message) {
 									scanLogs.push(`  [${progress.scanner || 'scan'}] ${progress.message}`);
 								}
@@ -466,14 +473,20 @@ export async function runEnvUpdateCheckJob(
 					} else {
 						// Simple pull (no scanning or digest-based image)
 						await log(`  Pulling ${update.imageName}...`);
-						await pullImage(update.imageName, () => {}, environmentId);
+						const pulled = await pullImage(update.imageName, () => {}, environmentId, true);
+						verifiedImageId = pulled?.imageId;
+						verifiedImageReference = pulled?.reference;
+						if (pulled) update.newDigest = pulled.digest;
 					}
 
 					// Recreate container with full config passthrough
 					await log(`  Recreating container...`);
 					const result = await recreateContainer(update.containerName, environmentId, {
 						log: (msg) => { log(`  ${msg}`); },
-						oldImageConfig: update.oldImageConfig
+						oldImageConfig: update.oldImageConfig,
+						imageNameOverride: update.imageName,
+						verifiedImageId,
+						verifiedImageReference
 					});
 					if (!result.success) throw new Error(result.error || 'Container recreation failed');
 

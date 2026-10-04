@@ -1841,6 +1841,8 @@ async function executeComposeCommand(
 ): Promise<StackOperationResult> {
 	const { stackName, envId, forceRecreate, build, noBuildCache, pullPolicy, removeVolumes, stackFiles, workingDir, composePath, envPath, useOverrideFile, serviceName, composeFileName, filesToDelete, removeFiles } = options;
 
+	// Stack deployments (including Git automation) are outside the container-update cooldown.
+
 	// Get environment configuration
 	const env = envId ? await getEnvironment(envId) : null;
 

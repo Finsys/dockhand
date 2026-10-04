@@ -1,5 +1,5 @@
 import { json } from '@sveltejs/kit';
-import { pullImage, buildRegistryAuthHeader } from '$lib/server/docker';
+import { pullImage, buildRegistryAuthHeader, getImageReleaseAgeWarning } from '$lib/server/docker';
 import type { RequestHandler } from './$types';
 import { getScannerSettings, scanImage } from '$lib/server/scanner';
 import { saveVulnerabilityScan, getEnvironment } from '$lib/server/db';
@@ -147,13 +147,25 @@ export const POST: RequestHandler = async (event) => {
 			if (!isEdgeConnected(edgeCheck.environmentId)) {
 				sendData({ status: 'error', error: 'Edge agent not connected' });
 				send('result', { status: 'error', error: 'Edge agent not connected' });
-				throw new Error('Edge agent not connected');
+				return;
 			}
 
+			const warning = await getImageReleaseAgeWarning(image, envId);
+			if (warning) sendData({ status: 'warning', message: warning });
 			const pullUrl = buildPullUrl(image);
 			const authHeaders = await buildRegistryAuthHeader(image);
+			let streamError: string | null = null;
+			const forwardProgress = (progress: any) => {
+				if (progress?.error || progress?.errorDetail) {
+					const message = progress.errorDetail?.message || progress.error || 'Image pull failed';
+					if (!streamError) sendData({ status: 'error', error: message });
+					streamError = message;
+				} else {
+					sendData(progress);
+				}
+			};
 
-			await new Promise<void>((resolve, reject) => {
+			await new Promise<void>((resolve) => {
 				const { cancel } = sendEdgeStreamRequest(
 					edgeCheck.environmentId!,
 					'POST',
@@ -165,30 +177,40 @@ export const POST: RequestHandler = async (event) => {
 								const lines = decoded.split('\n').filter((line) => line.trim());
 								for (const line of lines) {
 									try {
-										sendData(JSON.parse(line));
+										forwardProgress(JSON.parse(line));
 									} catch {
 										// Ignore parse errors for partial lines
 									}
 								}
 							} catch {
 								try {
-									sendData(JSON.parse(data));
+									forwardProgress(JSON.parse(data));
 								} catch {
 									// Ignore
 								}
 							}
 						},
 						onEnd: async () => {
-							sendData({ status: 'complete' });
-							await handleScanOnPull();
-							send('result', { status: 'complete' });
+							if (streamError) {
+								send('result', { status: 'error', error: streamError });
+							} else {
+								try {
+									sendData({ status: 'complete' });
+									await handleScanOnPull();
+									send('result', { status: 'complete' });
+								} catch (error) {
+									const message = error instanceof Error ? error.message : String(error);
+									sendData({ status: 'error', error: message });
+									send('result', { status: 'error', error: message });
+								}
+							}
 							resolve();
 						},
 						onError: (error: string) => {
 							console.error('Edge pull error:', error);
-							sendData({ status: 'error', error });
+							if (!streamError) sendData({ status: 'error', error });
 							send('result', { status: 'error', error });
-							reject(new Error(error));
+							resolve();
 						}
 					},
 					undefined,
@@ -209,10 +231,10 @@ export const POST: RequestHandler = async (event) => {
 				send('result', { status: 'complete' });
 			} catch (error) {
 				console.error('Error pulling image:', error);
-				const errMsg = String(error);
+				const errMsg = error instanceof Error ? error.message : String(error);
 				sendData({ status: 'error', error: errMsg });
 				send('result', { status: 'error', error: errMsg });
-				throw error;
+				return;
 			}
 		}
 	}, request);
