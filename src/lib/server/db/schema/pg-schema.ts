@@ -570,6 +570,8 @@ export const backupDestinations = pgTable('backup_destinations', {
 	hostPath: text('host_path'),
 	cacert: text('cacert'),
 	tlsClientCert: text('tls_client_cert'),
+	sshPrivateKey: text('ssh_private_key'),
+	sshKnownHosts: text('ssh_known_hosts'),
 	policies: text('policies'),
 	lastTestAt: timestamp('last_test_at', { mode: 'string' }),
 	lastTestStatus: text('last_test_status'),

@@ -18,10 +18,9 @@
 # (revert rclone — the rclone: backend is unfinished/removed; see vault rclone.md)
 FROM alpine:3.21
 
-# restic + tar (busybox) + a real shell + CA certs cover everything the helper does:
-# restic backup/restore/forget, the metadata shell script (set -e, tar), and TLS to
-# the backup repository.
-RUN apk add --no-cache restic ca-certificates tar
+# OpenSSH is required by restic's native sftp: backend. Password and agent auth are
+# disabled at runtime; the client uses Dockhand's temporary key and known_hosts files.
+RUN apk add --no-cache restic ca-certificates tar openssh-client
 
 COPY scripts/backup-entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

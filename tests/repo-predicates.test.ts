@@ -17,6 +17,7 @@ describe('isLocalRepo', () => {
 		expect(isLocalRepo('s3:s3.amazonaws.com/bucket')).toBe(false);
 		expect(isLocalRepo('rest:http://host:8000/')).toBe(false);
 		expect(isLocalRepo('b2:bucket:path')).toBe(false);
+		expect(isLocalRepo('sftp:user@host:/repo')).toBe(false);
 	});
 });
 
@@ -67,6 +68,7 @@ describe('backendSupportsTls (destination TLS fields visibility)', () => {
 		expect(backendSupportsTls('b2')).toBe(false);
 		expect(backendSupportsTls('azure')).toBe(false);
 		expect(backendSupportsTls('gs')).toBe(false);
+		expect(backendSupportsTls('sftp')).toBe(false);
 	});
 
 	test('editing a non-TLS backend that already has a cert stored still shows the section', () => {

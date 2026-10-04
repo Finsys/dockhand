@@ -9,6 +9,8 @@ import { join } from 'node:path';
 import { isValidCron } from '../scheduler/cron-utils';
 import { privateIpReason, dangerousHostReason, isSafeWebhookUrl, isSafeNotificationUrl } from '../url-safety';
 import { BackupError, isLocalRepo } from './models';
+import { parseSftpRepository, validateSftpRepository } from '$lib/shared/sftp-repository';
+export { validateSftpCredentials } from '$lib/shared/sftp-repository';
 export { privateIpReason };
 
 // Restic exits 10 when the repo isn't initialized.
@@ -169,7 +171,7 @@ export function validateRetention(retention: unknown): { ok: true } | { ok: fals
  */
 // Only the backends selectable in the destination form and verified end to end.
 // Add a scheme back here only once it has a form entry and a passing round-trip test.
-export const ALLOWED_REPO_SCHEMES = ['rest:', 's3:', 'b2:', 'azure:', 'gs:'] as const;
+export const ALLOWED_REPO_SCHEMES = ['rest:', 's3:', 'b2:', 'azure:', 'gs:', 'sftp:'] as const;
 
 /** True iff `repository` is a local absolute path or a supported scheme URL. */
 export function isAllowedRepository(repository: string | null | undefined): boolean {
@@ -555,7 +557,14 @@ export function resolveEnabledOnScheduleChange(input: {
  */
 export function validateRepositoryForSave(repository: string): string | null {
 	if (!isAllowedRepository(repository)) {
-		return 'Invalid repository: must be a local absolute path or a supported scheme (rest:, s3:, b2:, azure:, gs:)';
+		return 'Invalid repository: must be a local absolute path or a supported scheme (rest:, s3:, b2:, azure:, gs:, sftp:)';
+	}
+	const sftpError = validateSftpRepository(repository);
+	if (sftpError) return sftpError;
+	const sftp = parseSftpRepository(repository);
+	if (sftp) {
+		const reason = dangerousHostReason(sftp.host);
+		if (reason) return `Repository host not allowed: ${reason}`;
 	}
 	const httpMatch = repository.match(/https?:\/\/[^\s]+/);
 	if (httpMatch) {
