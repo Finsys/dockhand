@@ -61,6 +61,7 @@
 	interface Container {
 		id: string;
 		name: string;
+		displayName: string;
 		state: string;
 		image: string;
 		envId: number;
@@ -182,7 +183,7 @@
 			add(
 				// Env-scoped id: the same container id can arrive from several environments
 				// that share a daemon, and each must stay a distinct, correctly-labelled row.
-				{ id: `cont:${c.envId}:${c.id}`, group: G_CONT, label: c.name, keywords: `container ${c.image} ${c.envName}`.toLowerCase() },
+				{ id: `cont:${c.envId}:${c.id}`, group: G_CONT, label: c.displayName, keywords: `container ${c.name} ${c.image} ${c.envName}`.toLowerCase() },
 				{ icon: Box, run: () => containerAction(c, 'logs'), container: c }
 			);
 		}
@@ -501,7 +502,7 @@
 									{@const c = meta.container}
 									<ContainerIcon image={c.image} name={c.name} envId={c.envId} class="h-4 w-4 shrink-0" />
 									<div class="flex min-w-0 flex-col">
-										<span class="truncate">{item.label}</span>
+										<span class="truncate" title={c.name}>{item.label}</span>
 										<span class="flex items-center gap-1 truncate text-xs text-muted-foreground">
 											<EnvironmentIcon icon={c.envIcon} envId={c.envId} class="h-3 w-3 shrink-0" />
 											{c.envName} - {c.image}

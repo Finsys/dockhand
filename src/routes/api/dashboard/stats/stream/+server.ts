@@ -28,6 +28,7 @@ import { parseLabels } from '$lib/utils/label-colors';
 import { isEdgeConnected } from '$lib/server/hawser';
 import { getImageDiskUsageTotalSize } from '$lib/server/docker-disk-usage-core';
 import { calculateCpuPercent, calculateMemoryUsage, calculateMemoryLimit } from '$lib/server/stats-calc-core';
+import { containerDisplayName } from '$lib/utils/container-display-name';
 
 
 // Skip disk usage collection (Synology NAS performance fix)
@@ -463,6 +464,7 @@ async function getEnvironmentStatsProgressive(
 
 					return {
 						name: container.name,
+						displayName: containerDisplayName(container),
 						cpuPercent: Math.round(cpuPercent * 100) / 100,
 						memoryPercent: Math.round(memoryPercent * 100) / 100
 					};
@@ -473,7 +475,7 @@ async function getEnvironmentStatsProgressive(
 
 			const topContainersResults = await Promise.all(topContainersPromises);
 			envStats.topContainers = topContainersResults
-				.filter((c): c is { name: string; cpuPercent: number; memoryPercent: number } => c !== null)
+				.filter((c): c is { name: string; displayName: string; cpuPercent: number; memoryPercent: number } => c !== null)
 				.sort((a, b) => b.cpuPercent - a.cpuPercent)
 				.slice(0, 10);
 			envStats.loading!.topContainers = false;

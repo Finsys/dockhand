@@ -3,6 +3,8 @@
 // env identity (from the loop) onto each row. Extracted (like palette-filter) so the
 // exact field mapping that once regressed to Docker PascalCase is unit-testable.
 
+import { containerDisplayName } from './container-display-name';
+
 export interface PaletteEnv {
 	id: number;
 	name: string;
@@ -12,6 +14,8 @@ export interface PaletteEnv {
 export interface ContainerRow {
 	id: string;
 	name: string;
+	/** `dockhand.name` label or the real name; shown as the row label. */
+	displayName: string;
 	state: string;
 	image: string;
 	envId: number;
@@ -34,6 +38,7 @@ export function mapContainerRows(list: unknown, env: PaletteEnv): ContainerRow[]
 	return list.map((c: any) => ({
 		id: c.id,
 		name: c.name,
+		displayName: containerDisplayName(c),
 		state: c.state,
 		image: c.image,
 		envId: env.id,

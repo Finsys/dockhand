@@ -104,6 +104,7 @@ export interface EnvironmentStats {
 	topContainers?: Array<{
 		id: string;
 		name: string;
+		displayName?: string;
 		cpuPercent: number;
 		memoryPercent: number;
 	}>;

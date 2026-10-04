@@ -18,6 +18,7 @@
 	import { formatPorts } from '$lib/utils/port-format';
 	import { formatUptime } from '$lib/utils/container-status';
 	import { parseCustomUrl } from '$lib/utils/custom-url';
+	import { containerDisplayName } from '$lib/utils/container-display-name';
 	import { extractTraefikUrls } from '$lib/utils/traefik-urls';
 	import { resolveChangelogUrl } from '$lib/utils/changelog-url';
 	import { extractPangolinUrls } from '$lib/utils/pangolin-urls';
@@ -2552,7 +2553,7 @@
 										{:else}
 											<Box class="w-4 h-4 shrink-0 {container.state === 'running' ? 'text-emerald-500' : 'text-muted-foreground'}" />
 										{/if}
-										<span class="font-medium truncate" title={container.name}>{container.service}</span>
+										<span class="font-medium truncate" title={container.name}>{containerDisplayName({ name: container.service || container.name, labels: container.labels })}</span>
 										{#if container.updateAvailable && $appSettings.highlightUpdates}
 											<!-- Update arrow + changelog link read as one pair — keep them tight. -->
 											<span class="inline-flex items-center gap-0.5 shrink-0">

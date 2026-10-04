@@ -8,6 +8,7 @@
 	import { page } from '$app/stores';
 	import { toast } from 'svelte-sonner';
 	import { containerMatchesSearch } from '$lib/utils/container-search-core';
+	import { containerDisplayName } from '$lib/utils/container-display-name';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Popover from '$lib/components/ui/popover';
 	import * as Select from '$lib/components/ui/select';
@@ -1042,7 +1043,7 @@
 			let cmp = 0;
 			switch (sortField) {
 				case 'name':
-					cmp = a.name.localeCompare(b.name);
+					cmp = containerDisplayName(a).localeCompare(containerDisplayName(b)) || a.name.localeCompare(b.name);
 					break;
 				case 'image':
 					cmp = a.image.localeCompare(b.image);
@@ -1106,7 +1107,7 @@
 			}
 			// Secondary sort by name for stability when primary values are equal
 			if (cmp === 0 && sortField !== 'name') {
-				cmp = a.name.localeCompare(b.name);
+				cmp = containerDisplayName(a).localeCompare(containerDisplayName(b)) || a.name.localeCompare(b.name);
 			}
 			return sortDirection === 'asc' ? cmp : -cmp;
 		});
@@ -1946,7 +1947,7 @@
 								class="text-xs font-medium truncate text-left hover:text-primary hover:underline cursor-pointer"
 								title={container.name}
 								onclick={(e) => { e.stopPropagation(); inspectContainer(container); }}
-							>{container.name}</button>
+							>{containerDisplayName(container)}</button>
 							<!-- System containers (Dockhand, Hawser) carry no label badge; only an
 							     amber update indicator when a new version is out (they can't be
 							     self-updated from the UI, so the tooltip points to the update path). -->

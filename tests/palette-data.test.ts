@@ -13,6 +13,7 @@ describe('mapContainerRows', () => {
 			{
 				id: 'abc123',
 				name: 'nginx',
+				displayName: 'nginx',
 				state: 'running',
 				image: 'nginx:latest',
 				envId: 7,
@@ -20,6 +21,15 @@ describe('mapContainerRows', () => {
 				envIcon: 'server'
 			}
 		]);
+	});
+
+	test('displayName comes from the dockhand.name label, name stays real', () => {
+		const rows = mapContainerRows(
+			[{ id: 'a', name: 'acme-grafana', state: 'running', image: 'grafana', labels: { 'dockhand.name': 'grafana' } }],
+			env
+		);
+		expect(rows[0].name).toBe('acme-grafana');
+		expect(rows[0].displayName).toBe('grafana');
 	});
 
 	test('falls back to globe when the env has no icon', () => {

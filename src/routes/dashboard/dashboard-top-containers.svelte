@@ -3,6 +3,7 @@
 
 	interface Container {
 		name: string;
+		displayName?: string;
 		cpuPercent: number;
 		memoryPercent: number;
 	}
@@ -52,7 +53,7 @@
 			{#each containers.slice(0, limit) as container}
 				<!-- Container name -->
 				<span class="truncate text-foreground" title={container.name}>
-					{container.name}
+					{container.displayName ?? container.name}
 				</span>
 				<!-- CPU -->
 				<span class="flex items-center gap-0.5 text-muted-foreground whitespace-nowrap" title="CPU">
