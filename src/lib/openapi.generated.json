@@ -10094,6 +10094,9 @@
                     "environmentId": {
                       "type": "integer"
                     },
+                    "minimumReleaseAgeHours": {
+                      "type": "integer"
+                    },
                     "pendingUpdates": {
                       "type": "array",
                       "items": {
@@ -10117,6 +10120,9 @@
                           "newerVersion": {
                             "type": "object",
                             "properties": {}
+                          },
+                          "releaseAgeRemainingHours": {
+                            "type": "integer"
                           }
                         },
                         "required": [
@@ -10131,11 +10137,13 @@
                   },
                   "required": [
                     "environmentId",
+                    "minimumReleaseAgeHours",
                     "pendingUpdates"
                   ]
                 },
                 "example": {
                   "environmentId": 0,
+                  "minimumReleaseAgeHours": 0,
                   "pendingUpdates": [
                     {
                       "containerId": "string",
@@ -10143,7 +10151,8 @@
                       "currentImage": "string",
                       "checkedAt": "string",
                       "hasImageUpdate": true,
-                      "newerVersion": {}
+                      "newerVersion": {},
+                      "releaseAgeRemainingHours": 0
                     }
                   ]
                 }
