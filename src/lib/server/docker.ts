@@ -41,7 +41,12 @@ export { parseImageReference } from './registry/image-ref';
 import { rebaseEnvOntoImage, rebaseLabelsOntoImage, rebaseCommand, describeEnvRebase, describeLabelRebase, type ImageEnvLabels } from './container-env-merge';
 import { encodeRegistryAuth, fetchRegistryToken, isSafeRegistryHost } from './registry-auth';
 import { describeRegistryFailure } from './registry-failure-core';
-import { resolveRegistryScheme, type StoredRegistryScheme } from './registry-scheme-core';
+import {
+	getRegistryBearerToken as registryBearerToken,
+	getRegistryManifestDigestDirectDetailed as manifestDigestDirect,
+	getRegistrySchemeForHost as registrySchemeForHost,
+	type RegistryPorts
+} from './registry/manifest-digest';
 import { classifyManifest, type ArtifactKind } from './semver/manifest-artifact';
 import { isSystemContainer, classifyEmptyDigestImage, localDigestIsIndexChild, indexChildDigests } from './scheduler/tasks/update-utils';
 import { deepDiff } from '../utils/diff.js';
@@ -3371,152 +3376,22 @@ export async function findRegistryCredentials(registryHost: string): Promise<{ u
 	}
 }
 
-/**
- * Resolve http vs https for a registry host from the stored registries, so the
- * challenge/token request honours a plain-HTTP registry (#1580). Defaults to https.
- */
-async function getRegistrySchemeForHost(registryHost: string): Promise<'http' | 'https'> {
-	try {
-		const { getRegistries } = await import('./db.js');
-		const registries = await getRegistries();
-		const stored: StoredRegistryScheme[] = registries.map((reg) => {
-			const parsed = parseRegistryUrl(reg.url);
-			return { host: parsed.host, protocol: parsed.protocol, isHub: DOCKER_HUB_HOSTS.has(parsed.host) };
-		});
-		const requested = parseRegistryUrl(registryHost);
-		return resolveRegistryScheme(requested.host, stored, DOCKER_HUB_HOSTS.has(requested.host));
-	} catch {
-		return 'https';
-	}
+/** What registry/manifest-digest.ts cannot work out on its own. */
+function registryPorts(): RegistryPorts {
+	return {
+		parseRegistryUrl,
+		hubHosts: DOCKER_HUB_HOSTS,
+		listRegistries: async () => (await import('./db.js')).getRegistries(),
+		findCredentials: findRegistryCredentials
+	};
 }
 
-/**
- * Get bearer token from registry using challenge-response flow.
- * This follows the Docker Registry v2 authentication spec:
- * 1. Make request to /v2/ to get WWW-Authenticate challenge
- * 2. Parse realm, service, scope from challenge
- * 3. Request token from realm URL (with credentials if available)
- */
+async function getRegistrySchemeForHost(registryHost: string): Promise<'http' | 'https'> {
+	return registrySchemeForHost(registryHost, registryPorts());
+}
+
 async function getRegistryBearerToken(registry: string, repo: string, signal?: AbortSignal): Promise<string | null> {
-	try {
-		const hostSafety = isSafeRegistryHost(registry);
-		if (!hostSafety.ok) {
-			console.error(`[Registry] Refusing token request for ${registry}: ${hostSafety.reason}`);
-			return null;
-		}
-		// Honour the scheme the registry was configured with (#1580): a plain-HTTP local
-		// registry must not get an HTTPS challenge. Defaults to https when unconfigured.
-		const scheme = await getRegistrySchemeForHost(registry);
-		const registryUrl = `${scheme}://${registry}`;
-
-		// Look up stored credentials for this registry
-		const credentials = await findRegistryCredentials(registry);
-
-		// Step 1: Challenge request to /v2/
-		// Do not follow redirects on the challenge; a 3xx is treated as a non-401 below.
-		const challengeResponse = await fetch(`${registryUrl}/v2/`, {
-			method: 'GET',
-			headers: { 'User-Agent': 'Dockhand/1.0' },
-			signal,
-			redirect: 'manual'
-		});
-
-		// If 200, no auth needed
-		if (challengeResponse.ok) {
-			await drainResponse(challengeResponse);
-			return null;
-		}
-
-		// If not 401, something else is wrong
-		if (challengeResponse.status !== 401) {
-			await drainResponse(challengeResponse);
-			console.error(`Registry challenge failed: ${challengeResponse.status}`);
-			return null;
-		}
-
-		// Step 2: Parse WWW-Authenticate header
-		const wwwAuth = challengeResponse.headers.get('WWW-Authenticate') || '';
-		const challenge = wwwAuth.toLowerCase();
-
-		if (challenge.startsWith('basic')) {
-			// Basic auth - use credentials if we have them
-			await drainResponse(challengeResponse);
-			if (credentials) {
-				const basicAuth = Buffer.from(`${credentials.username}:${credentials.password}`).toString('base64');
-				return `Basic ${basicAuth}`;
-			}
-			return null;
-		}
-
-		if (!challenge.startsWith('bearer')) {
-			await drainResponse(challengeResponse);
-			console.error(`Unsupported auth type: ${wwwAuth}`);
-			return null;
-		}
-
-		// Drain 401 response body before bearer token fetch (required by Node.js/Undici for connection reuse)
-		await drainResponse(challengeResponse);
-
-		// Parse bearer challenge: Bearer realm="...",service="...",scope="..."
-		const realmMatch = wwwAuth.match(/realm="([^"]+)"/i);
-		const serviceMatch = wwwAuth.match(/service="([^"]+)"/i);
-
-		if (!realmMatch) {
-			console.error('No realm in WWW-Authenticate header');
-			return null;
-		}
-
-		const realm = realmMatch[1];
-		const service = serviceMatch ? serviceMatch[1] : '';
-		const scope = `repository:${repo}:pull`;
-
-		// Step 3: Request token from realm (with credentials if available).
-		// Empty scope is allowed — means "no specific resource permission".
-		// Useful for credential validation: some registries (Docker Hub)
-		// reject privileged scopes like registry:catalog:* even for valid
-		// users, so omitting scope is the only reliable login check.
-		const tokenUrl = new URL(realm);
-		if (service) tokenUrl.searchParams.set('service', service);
-		if (scope) tokenUrl.searchParams.set('scope', scope);
-
-		const authHeader = credentials
-			? `Basic ${Buffer.from(`${credentials.username}:${credentials.password}`).toString('base64')}`
-			: null;
-		const tokenResponse = await fetchRegistryToken(tokenUrl.toString(), authHeader, (url, init) => fetch(url, { ...init, signal }));
-
-		if (!tokenResponse.ok) {
-			// Surface enough to diagnose without leaking the secret: the response
-			// body (truncated), the final URL, and the identity (username only).
-			const errBody = (await tokenResponse.text()).slice(0, 300).replace(/\s+/g, ' ').trim();
-			const finalNote = tokenResponse.url && tokenResponse.url !== tokenUrl.toString()
-				? ` (final ${new URL(tokenResponse.url).origin})`
-				: '';
-			const identity = credentials
-				? ` as ${credentials.username.slice(0, 4)}...(len=${credentials.username.length})`
-				: ' anonymously';
-			console.error(
-				`[Registry] Token request failed: ${tokenResponse.status} at ${tokenUrl.origin}${finalNote}, sent${identity}` +
-					(errBody ? ` - response: ${errBody}` : '')
-			);
-			return null;
-		}
-
-		const tokenData = await tokenResponse.json() as { token?: string; access_token?: string };
-		const token = tokenData.token || tokenData.access_token || null;
-
-		return token ? `Bearer ${token}` : null;
-
-	} catch (e) {
-		const errorMsg = e instanceof Error ? e.message : String(e);
-		const cause = (e as any)?.cause;
-		const causeMsg = cause ? ` (cause: ${cause})` : '';
-		console.error('[Registry] Failed to get bearer token:', errorMsg + causeMsg);
-		const causeStr = String(cause ?? errorMsg);
-		if (causeStr.includes('EAI_AGAIN') || causeStr.includes('ENOTFOUND')) {
-			console.error('[Registry] DNS resolution failed. If you are on a NAS (Synology, uGreen, QNAP), try adding --dns=8.8.8.8 to your docker run command or set {"dns": ["8.8.8.8"]} in /etc/docker/daemon.json');
-		}
-		return null;
-	}
+	return registryBearerToken(registry, repo, registryPorts(), signal);
 }
 
 /**
@@ -3927,64 +3802,7 @@ export async function harborSearchRepositories(
 async function getRegistryManifestDigestDirectDetailed(
 	imageName: string, signal?: AbortSignal
 ): Promise<{ digest: string | null; reason?: string }> {
-	let registry = '';
-	try {
-		const parsed = parseImageReference(imageName);
-		registry = parsed.registry;
-		const { repo } = parsed;
-		const tag = imageName.includes('@') ? imageName.split('@').pop()! : parsed.tag;
-		if (!isSafeRegistryHost(registry).ok) {
-			return { digest: null, reason: describeRegistryFailure({ kind: 'blocked-host', registry }) };
-		}
-		const token = await getRegistryBearerToken(registry, repo, signal);
-		// Honour the stored registry scheme for the manifest fetch too (#1580), not just
-		// the token challenge - otherwise a plain-HTTP registry still gets an HTTPS request.
-		const scheme = await getRegistrySchemeForHost(registry);
-		const manifestUrl = `${scheme}://${registry}/v2/${repo}/manifests/${tag}`;
-
-		const headers: Record<string, string> = {
-			'User-Agent': 'Dockhand/1.0',
-			'Accept': [
-				'application/vnd.docker.distribution.manifest.list.v2+json',
-				'application/vnd.oci.image.index.v1+json',
-				'application/vnd.docker.distribution.manifest.v2+json',
-				'application/vnd.oci.image.manifest.v1+json'
-			].join(', ')
-		};
-		if (token) headers['Authorization'] = token;
-
-		const response = await fetch(manifestUrl, { method: 'HEAD', headers, signal });
-
-		if (!response.ok) {
-			await drainResponse(response);
-			const retryAfter = response.headers.get('Retry-After');
-			if (response.status === 429) {
-				console.warn(`[Registry] ${imageName}: rate limited (429)${retryAfter ? `, retry after ${retryAfter}s` : ''}`);
-			} else {
-				console.error(`[Registry] ${imageName}: ${response.status}`);
-			}
-			return {
-				digest: null,
-				reason: describeRegistryFailure({ kind: 'http', status: response.status, retryAfter })
-			};
-		}
-
-		const digest = response.headers.get('Docker-Content-Digest');
-		await drainResponse(response);
-		if (!digest) return { digest: null, reason: describeRegistryFailure({ kind: 'no-digest' }) };
-		return { digest };
-	} catch (e) {
-		const causeStr = String((e as any)?.cause ?? e);
-		if (causeStr.includes('EAI_AGAIN') || causeStr.includes('ENOTFOUND')) {
-			console.error(`[Registry] ${imageName}: DNS resolution failed. If you are on a NAS (Synology, uGreen, QNAP), add --dns=8.8.8.8 to your docker run command.`);
-		} else {
-			console.error(`[Registry] ${imageName}: ${e}`);
-		}
-		return {
-			digest: null,
-			reason: describeRegistryFailure({ kind: 'error', registry: registry || imageName, error: e })
-		};
-	}
+	return manifestDigestDirect(imageName, registryPorts(), signal);
 }
 
 /** The target daemon can resolve private registries that Dockhand itself cannot
