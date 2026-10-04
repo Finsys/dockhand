@@ -2305,6 +2305,214 @@
         "security": []
       }
     },
+    "/api/auth/passkeys/login/options": {
+      "post": {
+        "operationId": "post_api_auth_passkeys_login_options",
+        "tags": [
+          "auth"
+        ],
+        "summary": "Begin signing in with a passkey",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Request options and the ceremony id"
+          },
+          "400": {
+            "description": "Authentication is not enabled"
+          },
+          "403": {
+            "description": "Request origin does not match the configured ORIGIN"
+          },
+          "503": {
+            "description": "Passkeys are not configured (ORIGIN missing or not HTTPS)"
+          }
+        },
+        "security": [],
+        "description": "Returns the WebAuthn request options and a ceremony id to send back to the verify endpoint. Reachable without a session, since it runs before sign-in. The ceremony is single-use and expires after five minutes."
+      }
+    },
+    "/api/auth/passkeys/login/verify": {
+      "post": {
+        "operationId": "post_api_auth_passkeys_login_verify",
+        "tags": [
+          "auth"
+        ],
+        "summary": "Finish signing in with a passkey",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Sign-in succeeded and the session cookie was set"
+          },
+          "400": {
+            "description": "Authentication is not enabled, the body is malformed, or the ceremony expired"
+          },
+          "401": {
+            "description": "Passkey authentication failed"
+          },
+          "403": {
+            "description": "Request origin does not match the configured ORIGIN"
+          },
+          "503": {
+            "description": "Passkeys are not configured (ORIGIN missing or not HTTPS)"
+          }
+        },
+        "security": [],
+        "description": "Verifies the authenticator's assertion and, on success, issues the session cookie. A passkey requires user verification, so it is accepted as the whole interactive sign-in without a separate second factor.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ceremonyId": {
+                    "type": "string"
+                  },
+                  "response": {
+                    "type": "object",
+                    "properties": {}
+                  }
+                },
+                "required": [
+                  "ceremonyId",
+                  "response"
+                ]
+              },
+              "example": {
+                "ceremonyId": "string",
+                "response": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/passkeys/register/options": {
+      "post": {
+        "operationId": "post_api_auth_passkeys_register_options",
+        "tags": [
+          "auth"
+        ],
+        "summary": "Begin registering a passkey for the signed-in user",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Creation options and the ceremony id"
+          },
+          "400": {
+            "description": "Authentication is not enabled, or the name is missing or too long"
+          },
+          "401": {
+            "description": "Not authenticated"
+          },
+          "403": {
+            "description": "Request origin does not match the configured ORIGIN"
+          },
+          "409": {
+            "description": "A passkey with this name already exists for the user"
+          },
+          "503": {
+            "description": "Passkeys are not configured (ORIGIN missing or not HTTPS)"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Returns the WebAuthn creation options and a ceremony id to send back to the verify endpoint. Requires a session, since registering acts on the current account.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ]
+              },
+              "example": {
+                "name": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/passkeys/register/verify": {
+      "post": {
+        "operationId": "post_api_auth_passkeys_register_verify",
+        "tags": [
+          "auth"
+        ],
+        "summary": "Finish registering a passkey",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "The passkey was registered"
+          },
+          "400": {
+            "description": "Authentication is not enabled, the ceremony expired, or verification failed"
+          },
+          "401": {
+            "description": "Not authenticated"
+          },
+          "403": {
+            "description": "Request origin does not match the configured ORIGIN"
+          },
+          "409": {
+            "description": "This passkey is already registered"
+          },
+          "503": {
+            "description": "Passkeys are not configured (ORIGIN missing or not HTTPS)"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Verifies the attestation and stores the credential against the signed-in user, along with the AAGUID identifying the authenticator model.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ceremonyId": {
+                    "type": "string"
+                  },
+                  "response": {
+                    "type": "object",
+                    "properties": {}
+                  }
+                },
+                "required": [
+                  "ceremonyId",
+                  "response"
+                ]
+              },
+              "example": {
+                "ceremonyId": "string",
+                "response": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/auth/providers": {
       "get": {
         "operationId": "get_api_auth_providers",
@@ -21112,6 +21320,76 @@
             "bearerAuth": []
           }
         ]
+      }
+    },
+    "/api/profile/passkeys": {
+      "get": {
+        "operationId": "get_api_profile_passkeys",
+        "tags": [
+          "profile"
+        ],
+        "summary": "List the signed-in user's passkeys",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "The user's registered passkeys"
+          },
+          "400": {
+            "description": "Authentication is not enabled"
+          },
+          "401": {
+            "description": "Not authenticated"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Names and metadata only; no credential material is returned."
+      }
+    },
+    "/api/profile/passkeys/{id}": {
+      "delete": {
+        "operationId": "delete_api_profile_passkeys_id",
+        "tags": [
+          "profile"
+        ],
+        "summary": "Remove one of the signed-in user's passkeys",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Path parameter \"id\" (auto-detected from the handler's source - no @openapi annotation for this parameter yet)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The passkey was removed"
+          },
+          "400": {
+            "description": "Authentication is not enabled, or the id is not a number"
+          },
+          "404": {
+            "description": "No such passkey for this user"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Scoped to the caller's own credentials, so another user's id yields a 404. The shared guard in this file answers first and may instead return 401 when there is no session, 403 on an origin mismatch, or 503 when passkeys are not configured."
       }
     },
     "/api/profile/preferences": {

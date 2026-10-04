@@ -7,7 +7,9 @@
       { "type": "fix", "text": "a container started with PUID=1001 runs as that user instead of root (#1669)" },
       { "type": "feature", "text": "offer the compose file detected from container labels when adopting an external stack (#1612, PR#1617, @ondras)" },
       { "type": "feature", "text": "hold off automatic updates until a new image is older than a configurable minimum image age (#918, #1365, PR#1643, @TheDuffman85)" },
-      { "type": "feature", "text": "a dockhand.name label sets the name a container is shown under (#1623)" }
+      { "type": "feature", "text": "a dockhand.name label sets the name a container is shown under (#1623)" },
+      { "type": "feature", "text": "redeploy a stack without recreating every service, and choose how it redeploys (#148)" },
+      { "type": "feature", "text": "sign in with a passkey instead of a password (#1431, PR#1431, @StefanSa, @timcappalli)" }
     ],
     "imageTag": "fnsys/dockhand:v1.0.52"
   },
