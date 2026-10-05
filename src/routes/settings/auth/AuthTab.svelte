@@ -338,19 +338,15 @@
 						</div>
 					</div>
 					<div class="space-y-1.5 border-t border-border/60 pt-4">
-						<div class="flex items-start gap-4">
-							<div class="flex-1">
-								<Label class="text-sm">Allow passkey sign-in</Label>
-								<p class="text-xs text-muted-foreground mt-0.5">
-									Offer passkeys on the login page, and let people register one from their
-									profile. Off hides the option and refuses the endpoints; existing passkeys
-									are kept and work again when you turn it back on.
-								</p>
-							</div>
-							<div class="shrink-0">
-								<TogglePill bind:checked={passkeysEnabled} disabled={!$canAccess('settings', 'edit')} />
-							</div>
+						<div class="flex items-center gap-3">
+							<Label class="text-sm">Allow passkey sign-in</Label>
+							<TogglePill bind:checked={passkeysEnabled} disabled={!$canAccess('settings', 'edit')} />
 						</div>
+						<p class="text-xs text-muted-foreground">
+							Offer passkeys on the login page, and let people register one from their
+							profile. Off hides the option and refuses the endpoints; existing passkeys
+							are kept and work again when you turn it back on.
+						</p>
 						{#if passkeysEnabled && !passkeysConfigurable}
 							<div class="flex items-start gap-2 rounded-md bg-muted/50 p-2 text-xs text-muted-foreground">
 								<Info class="w-3.5 h-3.5 mt-0.5 shrink-0" />
