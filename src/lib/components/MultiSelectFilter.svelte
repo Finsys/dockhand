@@ -7,6 +7,8 @@
 		label: string;
 		icon?: Component;
 		color?: string;
+		/** Colour the label too, not just the icon - for an entry that needs to stand out. */
+		colorLabel?: boolean;
 	}
 
 	interface Props {
@@ -88,7 +90,7 @@
 				{:else if option.color}
 					<span class="w-2 h-2 mr-2 rounded-full shrink-0 {option.color.replace('text-', 'bg-')}"></span>
 				{/if}
-				<span class={option.color && !option.icon ? option.color : ''}>{option.label}</span>
+				<span class={option.color && (!option.icon || option.colorLabel) ? option.color : ''}>{option.label}</span>
 			</Select.Item>
 		{/each}
 	</Select.Content>

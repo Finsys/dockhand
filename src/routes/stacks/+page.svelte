@@ -3,6 +3,7 @@
 </svelte:head>
 
 <script lang="ts">
+	import { matchesStackFilter } from '$lib/utils/grid-filters';
 	import { onMount, onDestroy } from 'svelte';
 	import { goto, afterNavigate } from '$app/navigation';
 	import { page } from '$app/stores';
@@ -487,6 +488,16 @@
 		{ value: 'not deployed', label: 'Not deployed', icon: Rocket, color: 'text-violet-500' }
 	];
 
+	// Health rides the status filter as synthetic 'health:*' entries rather than a
+	// second dropdown. Always offered, unlike update-available: the question "is
+	// anything unhealthy" is asked precisely when the answer is no.
+	const filterOptions = [
+		...stackStatusTypes,
+		{ value: 'health:unhealthy', label: 'Unhealthy', icon: HeartOff, color: 'text-red-500', colorLabel: true },
+		{ value: 'health:starting', label: 'Starting up', icon: Heart, color: 'text-amber-500' },
+		{ value: 'health:healthy', label: 'Healthy', icon: HeartPulse, color: 'text-emerald-500' }
+	];
+
 	function getStackStatusIcon(status: string) {
 		const s = stackStatusTypes.find(t => t.value === status.toLowerCase());
 		return s?.icon || Layers;
@@ -748,7 +759,7 @@
 
 		// Filter by status (uses display status so git "created" matches "not deployed")
 		if (statusFilter.length > 0) {
-			result = result.filter(stack => statusFilter.includes(getDisplayStatus(stack).toLowerCase()));
+			result = result.filter(stack => matchesStackFilter(stack, statusFilter, getDisplayStatus(stack)));
 		}
 
 		// Filter by user-defined tags.
@@ -1718,7 +1729,7 @@
 			<SearchInput bind:value={searchInput} placeholder="Search stacks..." class="h-8 w-48 text-sm" />
 			<MultiSelectFilter
 				bind:value={statusFilter}
-				options={stackStatusTypes}
+				options={filterOptions}
 				placeholder="All statuses"
 				pluralLabel="statuses"
 				width="w-44"
@@ -2282,9 +2293,25 @@
 				{:else if column.id === 'status'}
 					{@const displayStatus = getDisplayStatus(stack)}
 					{@const StatusIcon = getStackStatusIcon(displayStatus)}
-					<span class={getStatusClasses(displayStatus)}>
-						<StatusIcon class="w-3 h-3" />
-						{displayStatus}
+					{@const stackHealth = stack.health}
+					<span class="inline-flex items-center gap-1.5 min-w-0 max-w-full">
+						<span class={getStatusClasses(displayStatus)}>
+							<StatusIcon class="w-3 h-3" />
+							{displayStatus}
+						</span>
+						{#if stackHealth === 'unhealthy'}
+							<span class="inline-flex shrink-0" title="One or more containers are unhealthy">
+								<HeartOff class="w-3.5 h-3.5 text-red-500" />
+							</span>
+						{:else if stackHealth === 'starting'}
+							<span class="inline-flex shrink-0" title="A healthcheck has not settled yet">
+								<Heart class="w-3.5 h-3.5 text-amber-500" />
+							</span>
+						{:else if stackHealth === 'healthy'}
+							<span class="inline-flex shrink-0" title="All checked containers are healthy">
+								<HeartPulse class="w-3.5 h-3.5 text-emerald-500" />
+							</span>
+						{/if}
 					</span>
 				{:else if column.id === 'actions'}
 					<div class="relative flex gap-1 justify-end">

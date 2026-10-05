@@ -29,7 +29,7 @@ import { isAllowedStackFilename } from './stack-filename';
 import { coolingDown as coolingDownRows } from '$lib/utils/pending-update-rows';
 import { getMinimumReleaseAgeConfig } from './minimum-release-age';
 
-import { deriveStackStatus } from './stack-status';
+import { deriveStackStatus, deriveStackHealth } from './stack-status';
 import {
 	getEnvironment,
 	getSecretEnvVarsAsRecord,
@@ -2175,7 +2175,10 @@ export async function listComposeStacks(envId?: number | null): Promise<ComposeS
 				running: runningCount,
 				restarting: restartingCount,
 				completed: completedCount
-			})
+			}),
+			// Reported beside status, not inside it: a running stack with one unhealthy
+			// container is still running.
+			health: deriveStackHealth(containerDetails)
 		};
 	});
 

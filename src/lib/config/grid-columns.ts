@@ -74,7 +74,10 @@ export const stackColumns: ColumnConfig[] = [
 	{ id: 'select', label: '', fixed: 'start', width: 32, resizable: false },
 	{ id: 'expand', label: '', fixed: 'start', width: 24, resizable: false },
 	{ id: 'name', label: 'Name', sortable: true, sortField: 'name', width: 180, minWidth: 100, grow: true },
-	{ id: 'status', label: 'Status', sortable: true, sortField: 'status', width: 120, minWidth: 90 },
+	// Wide enough for the status badge plus the health icon beside it. Deliberately
+	// still truncating: a saved width from before this widening is never re-clamped,
+	// so overflowing content would paint over the next column instead of clipping.
+	{ id: 'status', label: 'Status', sortable: true, sortField: 'status', width: 142, minWidth: 116 },
 	{ id: 'source', label: 'Source', width: 100, minWidth: 100, noTruncate: true },
 	{ id: 'webhook', label: 'Webhook', width: 90, minWidth: 70, defaultVisible: false, hint: 'Git-stack webhook id and URL (for wiring Gitea/GitHub/GitLab)' },
 	{ id: 'location', label: 'Location', width: 180, minWidth: 100 },

@@ -162,6 +162,8 @@ export interface ComposeStackInfo {
 	containers: string[];
 	containerDetails: StackContainer[];
 	status: string;
+	/** Health of the stack's running containers, reported separately from status. */
+	health?: 'healthy' | 'unhealthy' | 'starting' | 'none';
 	updatesAvailable?: boolean;
 	updateCount?: number;
 	/** Containers whose update is held by the minimum image age. Never redeployable. */
