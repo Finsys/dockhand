@@ -7,6 +7,7 @@
 
 import type { SecretProviderConfig, SecretProviderType } from './secretproviders/shared';
 import { normalizeColor, type Tag, type TagColor } from '$lib/utils/tags-core';
+import { passkeysEnabledFromSetting } from '$lib/utils/passkey-availability';
 import { mergeProviderConfigForWrite } from './secretproviders/shared';
 import {
 	db,
@@ -5279,6 +5280,25 @@ export interface GlobalSemverConfig {
 	maxBump: 'patch' | 'minor' | 'major';
 	matchFlavor: boolean;
 	includePrerelease: boolean;
+	/**
+	 * Drop a candidate whose image was built BEFORE the running one. A repository
+	 * that still carries old tags whose names sort high (`lidarr:8.1.2135` is
+	 * really 0.8.1.2135 from 2021) otherwise reads as a major upgrade. Looks the date
+	 * up for the chosen candidate only, and caches it per digest.
+	 */
+	rejectOlderImages: boolean;
+}
+
+const PASSKEYS_ENABLED_KEY = 'passkeys_enabled';
+
+/** Whether this instance offers passkey sign-in. The default lives in the pure
+ *  passkeysEnabledFromSetting, so what an absent value means is unit-tested. */
+export async function getPasskeysEnabled(): Promise<boolean> {
+	return passkeysEnabledFromSetting(await getSetting(PASSKEYS_ENABLED_KEY));
+}
+
+export async function setPasskeysEnabled(enabled: boolean): Promise<void> {
+	await setSetting(PASSKEYS_ENABLED_KEY, enabled);
 }
 
 const GLOBAL_SEMVER_KEY = 'global_semver_check';
@@ -5286,7 +5306,8 @@ const DEFAULT_SEMVER_CONFIG: GlobalSemverConfig = {
 	enabled: false,
 	maxBump: 'major',
 	matchFlavor: true,
-	includePrerelease: false
+	includePrerelease: false,
+	rejectOlderImages: true
 };
 
 export async function getGlobalSemverConfig(): Promise<GlobalSemverConfig> {

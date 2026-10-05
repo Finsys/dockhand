@@ -4,7 +4,8 @@ import { verifyAuthenticationResponse, type AuthenticationResponseJSON } from '@
 import {
 	getPasskeyCredentialByCredentialId,
 	getUser,
-	updatePasskeyCounter
+	updatePasskeyCounter,
+	getPasskeysEnabled
 } from '$lib/server/db';
 import { createUserSession, isAuthEnabled } from '$lib/server/auth';
 import { auditAuth } from '$lib/server/audit';
@@ -25,12 +26,15 @@ const NO_STORE = { 'Cache-Control': 'no-store' };
  * resp-200-desc: Sign-in succeeded and the session cookie was set
  * resp-400: Authentication is not enabled, the body is malformed, or the ceremony expired
  * resp-401: Passkey authentication failed
- * resp-403: Request origin does not match the configured ORIGIN
+ * resp-403: Passkeys are disabled on this instance, or the request origin does not match the configured ORIGIN
  * resp-503: Passkeys are not configured (ORIGIN missing or not HTTPS)
  */
 export const POST: RequestHandler = async (event) => {
 	const { request, cookies } = event;
 	if (!(await isAuthEnabled())) return json({ error: 'Authentication is not enabled' }, { status: 400, headers: NO_STORE });
+	// Hiding the button is not switching the feature off: the endpoints answer a
+	// direct request too, so the administrator's setting is enforced here.
+	if (!(await getPasskeysEnabled())) return json({ error: 'Passkeys are disabled on this instance' }, { status: 403, headers: NO_STORE });
 
 	let config;
 	try {

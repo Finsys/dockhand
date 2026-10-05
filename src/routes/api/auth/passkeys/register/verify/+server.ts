@@ -5,7 +5,8 @@ import {
 	createPasskeyCredential,
 	getPasskeyCredentialByCredentialId,
 	getPasskeyCredentialByNameForUser,
-	getPasskeyCredentialsForUser
+	getPasskeyCredentialsForUser,
+	getPasskeysEnabled
 } from '$lib/server/db';
 import { isAuthEnabled, SESSION_COOKIE, validateSession } from '$lib/server/auth';
 import {
@@ -36,12 +37,15 @@ function uniqueConstraint(error: unknown): 'name' | 'credential' | null {
  * resp-200-desc: The passkey was registered
  * resp-400: Authentication is not enabled, the ceremony expired, or verification failed
  * resp-401: Not authenticated
- * resp-403: Request origin does not match the configured ORIGIN
+ * resp-403: Passkeys are disabled on this instance, or the request origin does not match the configured ORIGIN
  * resp-409: This passkey is already registered
  * resp-503: Passkeys are not configured (ORIGIN missing or not HTTPS)
  */
 export const POST: RequestHandler = async ({ request, cookies }) => {
 	if (!(await isAuthEnabled())) return json({ error: 'Authentication is not enabled' }, { status: 400, headers: NO_STORE });
+	// Hiding the button is not switching the feature off: the endpoints answer a
+	// direct request too, so the administrator's setting is enforced here.
+	if (!(await getPasskeysEnabled())) return json({ error: 'Passkeys are disabled on this instance' }, { status: 403, headers: NO_STORE });
 
 	let config;
 	try {

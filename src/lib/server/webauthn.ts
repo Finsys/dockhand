@@ -110,6 +110,20 @@ export function getWebAuthnConfig(): WebAuthnConfig {
 	return { expectedOrigin: url.origin, rpId: url.hostname };
 }
 
+/**
+ * Whether this deployment can run a WebAuthn ceremony at all, as a question rather
+ * than an exception: the login page has to decide whether to offer passkeys, and a
+ * missing ORIGIN is a configuration state, not an error to surface there.
+ */
+export function isWebAuthnConfigured(): boolean {
+	try {
+		getWebAuthnConfig();
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 export function hasExactWebAuthnOrigin(request: Request): boolean {
 	return request.headers.get('origin') === getWebAuthnConfig().expectedOrigin;
 }

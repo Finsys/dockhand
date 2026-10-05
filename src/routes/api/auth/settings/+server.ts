@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from '@sveltejs/kit';
-import { getAuthSettings, updateAuthSettings, countAdminUsers } from '$lib/server/db';
+import { getAuthSettings, updateAuthSettings, countAdminUsers, getPasskeysEnabled, setPasskeysEnabled } from '$lib/server/db';
+import { isWebAuthnConfigured } from '$lib/server/webauthn';
 import { isEnterprise } from '$lib/server/license';
 import { authorize } from '$lib/server/authorize';
 
@@ -9,8 +10,9 @@ import { authorize } from '$lib/server/authorize';
 /**
  * @openapi
  * summary: Get the global authentication settings (whether auth is enabled and the default provider)
- * resp-200: {authEnabled:boolean!, defaultProvider:string}
- * resp-200-example: {"authEnabled":true,"defaultProvider":"local"}
+ * resp-200: {authEnabled:boolean!, defaultProvider:string, passkeysEnabled:boolean, passkeysConfigurable:boolean}
+ * resp-200-desc: passkeysEnabled is the administrator's setting; passkeysConfigurable says whether ORIGIN lets a ceremony run at all, so the settings screen can explain an offer that is on but inert
+ * resp-200-example: {"authEnabled":true,"defaultProvider":"local","passkeysEnabled":true,"passkeysConfigurable":true}
  * resp-401: Authentication required (auth is enabled and the caller is not authenticated)
  * resp-403: Permission denied (missing settings:view)
  * resp-500: Failed to read the auth settings
@@ -29,8 +31,8 @@ export const GET: RequestHandler = async ({ cookies }) => {
 	}
 
 	try {
-		const settings = await getAuthSettings();
-		return json(settings);
+		const [settings, passkeysEnabled] = await Promise.all([getAuthSettings(), getPasskeysEnabled()]);
+		return json({ ...settings, passkeysEnabled, passkeysConfigurable: isWebAuthnConfigured() });
 	} catch (error) {
 		console.error('Failed to get auth settings:', error);
 		return json({ error: 'Failed to get auth settings' }, { status: 500 });
@@ -43,9 +45,10 @@ export const GET: RequestHandler = async ({ cookies }) => {
  * @openapi
  * summary: Update the global authentication settings (enabling auth requires at least one admin/user to exist)
  * description: sessionTimeout is in seconds (clamped 3600..604800); 0 disables expiry so sessions never time out.
- * body: {authEnabled:boolean, defaultProvider:string, sessionTimeout:integer}
- * body-example: {"authEnabled":true,"defaultProvider":"local","sessionTimeout":86400}
- * resp-200: {authEnabled:boolean!, defaultProvider:string}
+ * body: {authEnabled:boolean, defaultProvider:string, sessionTimeout:integer, passkeysEnabled:boolean}
+ * body-example: {"authEnabled":true,"defaultProvider":"local","sessionTimeout":86400,"passkeysEnabled":true}
+ * resp-200: {authEnabled:boolean!, defaultProvider:string, passkeysEnabled:boolean, passkeysConfigurable:boolean}
+ * resp-200-example: {"authEnabled":true,"defaultProvider":"local","passkeysEnabled":true,"passkeysConfigurable":true}
  * resp-400: Cannot enable authentication without an existing user/admin (response includes requiresUser:true)
  * resp-401: Authentication required (auth is enabled and the caller is not authenticated)
  * resp-403: Permission denied (missing settings:edit)
@@ -91,8 +94,19 @@ export const PUT: RequestHandler = async ({ request, cookies }) => {
 				: Math.max(3600, Math.min(604800, parsed || 86400));
 		}
 
+		// Lives in its own settings row, not on auth_settings, so only an explicit
+		// boolean touches it - a client that does not send the field leaves the
+		// administrator's choice alone.
+		if (typeof data.passkeysEnabled === 'boolean') {
+			await setPasskeysEnabled(data.passkeysEnabled);
+		}
+
 		const settings = await updateAuthSettings(data);
-		return json(settings);
+		return json({
+			...settings,
+			passkeysEnabled: await getPasskeysEnabled(),
+			passkeysConfigurable: isWebAuthnConfigured()
+		});
 	} catch (error) {
 		console.error('Failed to update auth settings:', error);
 		return json({ error: 'Failed to update auth settings' }, { status: 500 });

@@ -2321,7 +2321,7 @@
             "description": "Authentication is not enabled"
           },
           "403": {
-            "description": "Request origin does not match the configured ORIGIN"
+            "description": "Passkeys are disabled on this instance, or the request origin does not match the configured ORIGIN"
           },
           "503": {
             "description": "Passkeys are not configured (ORIGIN missing or not HTTPS)"
@@ -2350,7 +2350,7 @@
             "description": "Passkey authentication failed"
           },
           "403": {
-            "description": "Request origin does not match the configured ORIGIN"
+            "description": "Passkeys are disabled on this instance, or the request origin does not match the configured ORIGIN"
           },
           "503": {
             "description": "Passkeys are not configured (ORIGIN missing or not HTTPS)"
@@ -2406,7 +2406,7 @@
             "description": "Not authenticated"
           },
           "403": {
-            "description": "Request origin does not match the configured ORIGIN"
+            "description": "Passkeys are disabled on this instance, or the request origin does not match the configured ORIGIN"
           },
           "409": {
             "description": "A passkey with this name already exists for the user"
@@ -2466,7 +2466,7 @@
             "description": "Not authenticated"
           },
           "403": {
-            "description": "Request origin does not match the configured ORIGIN"
+            "description": "Passkeys are disabled on this instance, or the request origin does not match the configured ORIGIN"
           },
           "409": {
             "description": "This passkey is already registered"
@@ -2523,7 +2523,7 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": "autoLoginUrl is present only when OIDC_AUTOLOGIN is set and exactly one OIDC provider is enabled; the login page then goes straight there",
+            "description": "passkeys says whether to offer passkey sign-in - true only when an administrator has it enabled AND ORIGIN allows a WebAuthn ceremony. autoLoginUrl is present only when OIDC_AUTOLOGIN is set and exactly one OIDC provider is enabled; the login page then goes straight there",
             "content": {
               "application/json": {
                 "schema": {
@@ -2557,6 +2557,9 @@
                     "defaultProvider": {
                       "type": "string"
                     },
+                    "passkeys": {
+                      "type": "boolean"
+                    },
                     "autoLoginUrl": {
                       "type": "string"
                     }
@@ -2576,7 +2579,8 @@
                       "initiateUrl": "/api/auth/oidc/1/initiate"
                     }
                   ],
-                  "defaultProvider": "local"
+                  "defaultProvider": "local",
+                  "passkeys": true
                 }
               }
             }
@@ -2672,7 +2676,7 @@
         "parameters": [],
         "responses": {
           "200": {
-            "description": "Successful response",
+            "description": "passkeysEnabled is the administrator's setting; passkeysConfigurable says whether ORIGIN lets a ceremony run at all, so the settings screen can explain an offer that is on but inert",
             "content": {
               "application/json": {
                 "schema": {
@@ -2683,6 +2687,12 @@
                     },
                     "defaultProvider": {
                       "type": "string"
+                    },
+                    "passkeysEnabled": {
+                      "type": "boolean"
+                    },
+                    "passkeysConfigurable": {
+                      "type": "boolean"
                     }
                   },
                   "required": [
@@ -2691,7 +2701,9 @@
                 },
                 "example": {
                   "authEnabled": true,
-                  "defaultProvider": "local"
+                  "defaultProvider": "local",
+                  "passkeysEnabled": true,
+                  "passkeysConfigurable": true
                 }
               }
             }
@@ -2728,6 +2740,12 @@
                     },
                     "defaultProvider": {
                       "type": "string"
+                    },
+                    "passkeysEnabled": {
+                      "type": "boolean"
+                    },
+                    "passkeysConfigurable": {
+                      "type": "boolean"
                     }
                   },
                   "required": [
@@ -2736,7 +2754,9 @@
                 },
                 "example": {
                   "authEnabled": true,
-                  "defaultProvider": "string"
+                  "defaultProvider": "local",
+                  "passkeysEnabled": true,
+                  "passkeysConfigurable": true
                 }
               }
             }
@@ -2771,13 +2791,17 @@
                   },
                   "sessionTimeout": {
                     "type": "integer"
+                  },
+                  "passkeysEnabled": {
+                    "type": "boolean"
                   }
                 }
               },
               "example": {
                 "authEnabled": true,
                 "defaultProvider": "local",
-                "sessionTimeout": 86400
+                "sessionTimeout": 86400,
+                "passkeysEnabled": true
               }
             }
           }
@@ -21349,7 +21373,7 @@
             "bearerAuth": []
           }
         ],
-        "description": "Names and metadata only; no credential material is returned."
+        "description": "Names and metadata only; no credential material is returned. `enabled` reports whether this instance currently offers passkeys, so the profile can hide the controls without a second request; existing passkeys are still listed when it is false."
       }
     },
     "/api/profile/passkeys/{id}": {
@@ -26067,20 +26091,25 @@
                     },
                     "includePrerelease": {
                       "type": "boolean"
+                    },
+                    "rejectOlderImages": {
+                      "type": "boolean"
                     }
                   },
                   "required": [
                     "enabled",
                     "maxBump",
                     "matchFlavor",
-                    "includePrerelease"
+                    "includePrerelease",
+                    "rejectOlderImages"
                   ]
                 },
                 "example": {
                   "enabled": true,
                   "maxBump": "minor",
                   "matchFlavor": true,
-                  "includePrerelease": false
+                  "includePrerelease": false,
+                  "rejectOlderImages": true
                 }
               }
             }
@@ -26157,6 +26186,9 @@
                   },
                   "includePrerelease": {
                     "type": "boolean"
+                  },
+                  "rejectOlderImages": {
+                    "type": "boolean"
                   }
                 }
               },
@@ -26164,7 +26196,8 @@
                 "enabled": true,
                 "maxBump": "minor",
                 "matchFlavor": true,
-                "includePrerelease": false
+                "includePrerelease": false,
+                "rejectOlderImages": true
               }
             }
           }

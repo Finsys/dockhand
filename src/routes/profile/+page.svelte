@@ -107,6 +107,9 @@
 	}
 	let passkeys = $state<Passkey[]>([]);
 	let passkeysLoading = $state(false);
+	// Whether this instance offers passkeys. Existing keys stay listed when it is
+	// off, so somebody can see what they registered before it was turned off.
+	let passkeysEnabled = $state(true);
 	let passkeyActionLoading = $state(false);
 	let passkeyName = $state('');
 	let passkeyError = $state('');
@@ -118,6 +121,7 @@
 			if (response.ok) {
 				const data = await response.json();
 				passkeys = data.passkeys || [];
+				passkeysEnabled = data.enabled !== false;
 			}
 		} finally {
 			passkeysLoading = false;
@@ -733,6 +737,12 @@
 							</div>
 						</div>
 
+						{#if !passkeysEnabled}
+							<p class="rounded-md bg-muted/50 p-2 text-xs text-muted-foreground">
+								Passkey sign-in is switched off for this instance. Any passkeys below are
+								kept and work again if an administrator turns it back on.
+							</p>
+						{:else}
 						<div class="space-y-2">
 							<Label for="passkey-name">Passkey name</Label>
 							<div class="flex flex-col sm:flex-row gap-2">
@@ -747,6 +757,7 @@
 							</Button>
 							</div>
 						</div>
+						{/if}
 
 						{#if passkeysLoading}
 							<p class="text-sm text-muted-foreground">Loading passkeys...</p>

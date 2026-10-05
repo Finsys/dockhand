@@ -2,6 +2,7 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from '@sveltejs/kit';
 import { generateAuthenticationOptions } from '@simplewebauthn/server';
 import { isAuthEnabled } from '$lib/server/auth';
+import { getPasskeysEnabled } from '$lib/server/db';
 import {
 	getWebAuthnConfig,
 	hasExactWebAuthnOrigin,
@@ -16,11 +17,14 @@ const NO_STORE = { 'Cache-Control': 'no-store' };
  * description: Returns the WebAuthn request options and a ceremony id to send back to the verify endpoint. Reachable without a session, since it runs before sign-in. The ceremony is single-use and expires after five minutes.
  * resp-200-desc: Request options and the ceremony id
  * resp-400: Authentication is not enabled
- * resp-403: Request origin does not match the configured ORIGIN
+ * resp-403: Passkeys are disabled on this instance, or the request origin does not match the configured ORIGIN
  * resp-503: Passkeys are not configured (ORIGIN missing or not HTTPS)
  */
 export const POST: RequestHandler = async ({ request }) => {
 	if (!(await isAuthEnabled())) return json({ error: 'Authentication is not enabled' }, { status: 400, headers: NO_STORE });
+	// Hiding the button is not switching the feature off: the endpoints answer a
+	// direct request too, so the administrator's setting is enforced here.
+	if (!(await getPasskeysEnabled())) return json({ error: 'Passkeys are disabled on this instance' }, { status: 403, headers: NO_STORE });
 
 	let config;
 	try {

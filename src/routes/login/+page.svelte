@@ -36,6 +36,8 @@
 	let selectedProvider = $state('local');
 	let loadingProviders = $state(true);
 	let passkeyLoading = $state(false);
+	// Offered only when an administrator allows it and ORIGIN supports a ceremony.
+	let passkeysOffered = $state(false);
 
 	// Get redirect URL from query params (validated path-relative only)
 	const redirectUrl = $derived(safeRedirectOrRoot($page.url.searchParams.get('redirect')));
@@ -57,12 +59,14 @@
 			const response = await fetch('/api/auth/providers');
 			const data = await response.json();
 			providers = data.providers || [{ id: 'local', name: 'Local', type: 'local' }];
+			passkeysOffered = data.passkeys === true;
 			autoLoginUrl = data.autoLoginUrl ?? null;
 			// Set default to first credential provider or first provider
 			const defaultProvider = data.defaultProvider || 'local';
 			selectedProvider = credentialProviders.find(p => p.id === defaultProvider)?.id || credentialProviders[0]?.id || 'local';
 		} catch {
 			providers = [{ id: 'local', name: 'Local', type: 'local' }];
+			passkeysOffered = false;
 		} finally {
 			loadingProviders = false;
 		}
@@ -234,7 +238,7 @@
 				</Alert.Root>
 			{/if}
 
-			{#if !requiresMfa}
+			{#if passkeysOffered && !requiresMfa}
 				<Button
 					variant="outline"
 					class="w-full justify-center gap-3 mb-4"
