@@ -6,10 +6,11 @@ import { rowsToPersist } from '$lib/utils/pending-update-rows';
 import { listContainers, inspectContainer, checkImageUpdateAvailable, getTagArtifactKind, getRegistryTagCreatedAt, inspectImage } from '$lib/server/docker';
 import { clearPendingContainerUpdates, addPendingContainerUpdate, getPendingContainerUpdates, getGlobalSemverConfig } from '$lib/server/db';
 import { isSystemContainer, isPodmanInfraContainer } from '$lib/server/scheduler/tasks/update-utils';
-import { isUpdateDisabledByLabel, isHiddenByLabel, getVersionPatternOverride } from '$lib/server/container-labels';
+import { isUpdateDisabledByLabel, isHiddenByLabel, getVersionPatternOverride, digestUpdateVisible } from '$lib/server/container-labels';
 import { createJobResponse } from '$lib/server/sse';
 import { checkNewerVersion, type ImageCreatedAtProbe } from '$lib/server/semver/check';
 import { parseTag } from '$lib/server/semver/tag-parser';
+import { tagFilterFromLabels } from '$lib/server/semver/tag-filter-labels';
 import { parseImageReference } from '$lib/server/registry/image-ref';
 import type { NewerVersion } from '$lib/server/semver/find-newer';
 
@@ -187,15 +188,20 @@ export const POST: RequestHandler = async ({ url, cookies, request }) => {
 				const newerVersion = semverEnabled && !systemContainer
 					? await checkNewerVersion(imageName, {
 							...semverOptions,
-							versionPattern
+							versionPattern,
+							tagFilter: tagFilterFromLabels(inspectData.Config?.Labels)
 						}, getTagArtifactKind, result.localDigests ?? [], staleCheck).catch(() => null)
 					: null;
+
+				// Matches the scheduled check: the label suppresses the same-tag digest
+				// result only, leaving the newer-version suggestion above untouched.
+				const digestUpdate = digestUpdateVisible(result.hasUpdate, inspectData.Config?.Labels);
 
 				return {
 					containerId: container.id,
 					containerName: container.name,
 					imageName,
-					hasUpdate: result.hasUpdate,
+					hasUpdate: digestUpdate,
 				releaseAgeRemainingHours: result.releaseAgeRemainingHours,
 					currentDigest: result.currentDigest,
 					newDigest: result.registryDigest,

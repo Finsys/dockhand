@@ -20,6 +20,8 @@ import {
 	getOrderValue,
 	getVersionPatternOverride,
 	DOCKHAND_LABELS,
+	isDigestWatchDisabledByLabel,
+	digestUpdateVisible
 } from '../src/lib/server/container-labels';
 
 // ---------------------------------------------------------------------------
@@ -363,5 +365,144 @@ describe('getVersionPatternOverride', () => {
 	test('returns null for a malformed label (safe fallback)', () => {
 		expect(getVersionPatternOverride({ 'dockhand.version.pattern': 'not-a-scheme' })).toBeNull();
 		expect(getVersionPatternOverride({ 'dockhand.version.pattern': 'regex:(' })).toBeNull();
+	});
+});
+
+describe('dockhand.watch.digest', () => {
+	// Switches off the same-tag digest report for one container while keeping
+	// newer-version detection. For an image that re-pushes its tag weekly the
+	// report arrives constantly while the version never moves.
+	test('absent means the digest check stays on', () => {
+		expect(isDigestWatchDisabledByLabel(undefined)).toBe(false);
+		expect(isDigestWatchDisabledByLabel(null)).toBe(false);
+		expect(isDigestWatchDisabledByLabel({})).toBe(false);
+	});
+
+	test('an explicit false disables it', () => {
+		for (const value of ['false', 'FALSE', 'no', '0']) {
+			expect(isDigestWatchDisabledByLabel({ 'dockhand.watch.digest': value })).toBe(true);
+		}
+	});
+
+	test('an explicit true leaves it on', () => {
+		for (const value of ['true', 'yes', '1']) {
+			expect(isDigestWatchDisabledByLabel({ 'dockhand.watch.digest': value })).toBe(false);
+		}
+	});
+
+	test('an unrecognised value leaves it on', () => {
+		// Fail-open: only a deliberate false stops a report somebody relies on.
+		expect(isDigestWatchDisabledByLabel({ 'dockhand.watch.digest': 'maybe' })).toBe(false);
+		expect(isDigestWatchDisabledByLabel({ 'dockhand.watch.digest': '' })).toBe(false);
+	});
+
+	test('the WUD spelling is read', () => {
+		expect(isDigestWatchDisabledByLabel({ 'wud.watch.digest': 'false' })).toBe(true);
+		expect(isDigestWatchDisabledByLabel({ 'wud/watch.digest': 'false' })).toBe(true);
+		expect(isDigestWatchDisabledByLabel({ 'wud.watch.digest': 'true' })).toBe(false);
+	});
+
+	test('the native label wins over the WUD one', () => {
+		// Both directions, so neither can quietly take precedence.
+		expect(isDigestWatchDisabledByLabel({
+			'dockhand.watch.digest': 'true',
+			'wud.watch.digest': 'false'
+		})).toBe(false);
+		expect(isDigestWatchDisabledByLabel({
+			'dockhand.watch.digest': 'false',
+			'wud.watch.digest': 'true'
+		})).toBe(true);
+	});
+});
+
+describe('digestUpdateVisible', () => {
+	// One decision shared by the update check, the API and the per-container
+	// auto-update: an inverted `!` in any one of them would read as ordinary code.
+	test('an update is reported when nothing says otherwise', () => {
+		expect(digestUpdateVisible(true, undefined)).toBe(true);
+		expect(digestUpdateVisible(true, {})).toBe(true);
+	});
+
+	test('the label suppresses a real update', () => {
+		expect(digestUpdateVisible(true, { 'dockhand.watch.digest': 'false' })).toBe(false);
+		expect(digestUpdateVisible(true, { 'wud.watch.digest': 'false' })).toBe(false);
+	});
+
+	test('no update stays no update, label or not', () => {
+		expect(digestUpdateVisible(false, undefined)).toBe(false);
+		expect(digestUpdateVisible(false, { 'dockhand.watch.digest': 'false' })).toBe(false);
+		expect(digestUpdateVisible(false, { 'dockhand.watch.digest': 'true' })).toBe(false);
+	});
+
+	test('the label does not invent an update', () => {
+		// The inverted form would report one for every unlabelled container.
+		expect(digestUpdateVisible(false, { 'dockhand.watch.digest': 'true' })).toBe(false);
+	});
+});
+
+describe('wud.watch as an alias of dockhand.update', () => {
+	test('wud.watch=false disables updates', () => {
+		expect(isUpdateDisabledByLabel({ 'wud.watch': 'false' })).toBe(true);
+		expect(isUpdateDisabledByLabel({ 'wud/watch': 'false' })).toBe(true);
+	});
+
+	test('wud.watch=true leaves them on', () => {
+		expect(isUpdateDisabledByLabel({ 'wud.watch': 'true' })).toBe(false);
+	});
+
+	test('the native label wins over the WUD one, both ways', () => {
+		expect(isUpdateDisabledByLabel({
+			'dockhand.update': 'true',
+			'wud.watch': 'false'
+		})).toBe(false);
+		expect(isUpdateDisabledByLabel({
+			'dockhand.update': 'false',
+			'wud.watch': 'true'
+		})).toBe(true);
+	});
+});
+
+describe('WUD watch labels keep WUD semantics', () => {
+	// WUD reads its own watch labels strictly: anything that is not the string
+	// `true` means "do not watch". Reading them with Dockhand's forgiving boolean
+	// would quietly start updating a container its owner had switched off.
+	test('any value other than true disables, as WUD does', () => {
+		for (const value of ['false', 'no', '0', 'yes', '1', 'on', 'nonsense']) {
+			expect(isUpdateDisabledByLabel({ 'wud.watch': value })).toBe(true);
+		}
+	});
+
+	test('only the exact string true leaves it watched', () => {
+		expect(isUpdateDisabledByLabel({ 'wud.watch': 'true' })).toBe(false);
+		expect(isUpdateDisabledByLabel({ 'wud.watch': 'TRUE' })).toBe(false);
+		expect(isUpdateDisabledByLabel({ 'wud.watch': '  true  ' })).toBe(false);
+	});
+
+	test('an empty value is not a decision', () => {
+		expect(isUpdateDisabledByLabel({ 'wud.watch': '' })).toBe(false);
+		expect(isUpdateDisabledByLabel({ 'wud.watch': '   ' })).toBe(false);
+	});
+
+	test('the same strictness applies to the digest label', () => {
+		expect(isDigestWatchDisabledByLabel({ 'wud.watch.digest': 'yes' })).toBe(true);
+		expect(isDigestWatchDisabledByLabel({ 'wud.watch.digest': 'true' })).toBe(false);
+	});
+
+	test('every prefix WUD accepts is read', () => {
+		for (const key of ['wud.watch', 'wud/watch', 'getwud.app/watch', 'wud.getwud.io/watch']) {
+			expect(isUpdateDisabledByLabel({ [key]: 'false' })).toBe(true);
+		}
+		for (const key of [
+			'wud.watch.digest',
+			'wud/watch.digest',
+			'getwud.app/watch.digest',
+			'wud.getwud.io/watch.digest'
+		]) {
+			expect(isDigestWatchDisabledByLabel({ [key]: 'false' })).toBe(true);
+		}
+	});
+
+	test('a native label still wins over the WUD one', () => {
+		expect(isUpdateDisabledByLabel({ 'dockhand.update': 'true', 'wud.watch': 'nonsense' })).toBe(false);
 	});
 });

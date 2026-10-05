@@ -171,3 +171,41 @@ describe('findNewerVersionTag with a version-pattern override', () => {
 		expect(result).toBeNull();
 	});
 });
+
+describe('compileVersionPattern refuses patterns that could stall a check', () => {
+	// The label comes from an image, and the compiled regex runs against every tag
+	// in a registry listing. The same guards protect the tag filters, so the two
+	// label paths must not drift apart: anything refused there is refused here.
+	const refused = [
+		'(?<major>a+)+$',
+		'(?<major>a|a)+$',
+		'(?<major>a|a){1,}$',
+		'(?<major>a+){1,}$',
+		'(?<major>\\d)' + 'a{1,9}'.repeat(10) + '!'
+	];
+
+	for (const source of refused) {
+		it(`refuses ${source.slice(0, 32)}`, () => {
+			expect(compileVersionPattern(`regex:${source}`)).toBeNull();
+		});
+	}
+
+	it('still compiles the pattern the manual documents', () => {
+		// Seven quantifiers, and none of them backtracking - the limit must not
+		// refuse the one override people are told to write.
+		const documented = 'regex:^(?<major>\\d{4})\\.(?<minor>\\d+)\\.(?<patch>\\d+)-[0-9a-f]+$';
+		expect(compileVersionPattern(documented)).not.toBeNull();
+	});
+
+	it('a refused pattern falls back to the default parser rather than failing', () => {
+		// Null means "parse this tag the usual way", so a hostile or mistyped label
+		// costs the override and never the update check.
+		expect(compileVersionPattern('regex:(?<major>a+)+$')).toBeNull();
+		expect(parseTag('1.2.3', compileVersionPattern('regex:(?<major>a+)+$'))).toEqual({
+			version: '1.2.3',
+			prefix: '',
+			suffix: '',
+			parts: [1, 2, 3]
+		});
+	});
+});

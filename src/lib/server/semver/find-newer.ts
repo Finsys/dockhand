@@ -7,6 +7,7 @@
  * compose, which we don't own. We just tell them "a newer version is out".
  */
 
+import { applyTagFilter, type TagFilter } from './tag-filter-labels';
 import {
 	parseTag,
 	prefixMatches,
@@ -31,6 +32,12 @@ export interface FindNewerOptions {
 	 * image with a non-standard tag scheme can still be compared. Absent = default.
 	 */
 	versionPattern?: RegExp | null;
+	/**
+	 * The container's own tag filters, from its labels. Applied BEFORE the version
+	 * comparison, and only ever narrowing: a label names an exception the global
+	 * settings cannot express, it does not widen what the instance offers.
+	 */
+	tagFilter?: TagFilter;
 }
 
 export interface NewerVersion {
@@ -125,7 +132,11 @@ export function findNewerVersionTag(
 	const maxRank = BUMP_RANK[maxBump];
 	const currentIsPrerelease = isPrerelease(current);
 
-	const candidates = allTags
+	// The container's own filters run first, so everything below compares only the
+	// tags it is willing to be offered.
+	const pool = options.tagFilter ? applyTagFilter(allTags, options.tagFilter) : allTags;
+
+	const candidates = pool
 		.map((tag) => ({ tag, parsed: parseTag(tag, versionPattern) }))
 		.filter((c): c is { tag: string; parsed: ParsedTag } => c.parsed !== null)
 		.filter((c) => prefixMatches(c.parsed.prefix, current.prefix))

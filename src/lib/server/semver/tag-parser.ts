@@ -137,12 +137,48 @@ export function compareParts(a: ParsedTag, b: ParsedTag): number {
 // The `dockhand.version.pattern` label value must start with this scheme, leaving
 // room for future non-regex strategies (e.g. `calver:`) under the same label.
 const VERSION_PATTERN_SCHEME = 'regex:';
-const MAX_PATTERN_LENGTH = 300;
+/** Shared with the tag filters: a pattern describing a tag name is short. */
+export const MAX_PATTERN_LENGTH = 300;
 // Nested quantifiers (`(a+)+`, `(a*)*`, `(a+)*`) are the classic catastrophic-
 // backtracking shape. Refuse them rather than run an attacker-supplied ReDoS on
 // every tag. A conservative reject: a group closed with a quantifier immediately
 // followed by another quantifier.
-const NESTED_QUANTIFIER_RE = /[+*}]\s*\)[+*?]|\([^)]*[+*][^)]*\)[+*]/;
+//
+// The outer quantifier includes the brace form: `(a+){1,}` backtracks exactly like
+// `(a+)+` and measured 24 seconds against a 28-character non-matching tag.
+const OUTER_QUANTIFIER = String.raw`(?:[+*?]|\{\d*,\d*\})`;
+export const NESTED_QUANTIFIER_RE = new RegExp(
+	String.raw`[+*}]\s*\)\s*${OUTER_QUANTIFIER}|\([^)]*[+*][^)]*\)\s*${OUTER_QUANTIFIER}`
+);
+
+/**
+ * An alternation of overlapping branches under a quantifier, `(a|a)+$`, backtracks
+ * just as badly as a nested quantifier but does not match the shape above.
+ * Measured: 17 seconds for the `+` form, 40 for `{1,}`, against a non-matching tag.
+ */
+export const ALTERNATION_QUANTIFIER_RE = new RegExp(
+	String.raw`\([^)|]*\|[^)]*\)\s*${OUTER_QUANTIFIER}`
+);
+
+/**
+ * A long chain of adjacent quantifiers needs no groups at all to blow up:
+ * `a{1,9}` repeated ten times is 61 characters with not one parenthesis, and both
+ * checks above let it through because they look for a SHAPE. Counting quantifiers
+ * bounds the work however the pattern is written.
+ *
+ * Measured on a chain of bounded repetitions against a non-matching tag: seven
+ * costs at most 125ms, eight 604ms, ten runs into seconds and keeps climbing with
+ * the tag's length. Eight is the limit, which admits every documented pattern -
+ * the most quantifier-heavy is a three-group CalVer override, at seven, and it
+ * costs nothing because it is not built to backtrack.
+ */
+export const MAX_QUANTIFIERS = 8;
+const QUANTIFIER_RE = /[+*?]|\{\d*,?\d*\}/g;
+
+/** Whether a pattern carries so many quantifiers that one match could stall. */
+export function hasTooManyQuantifiers(source: string): boolean {
+	return (source.match(QUANTIFIER_RE) ?? []).length > MAX_QUANTIFIERS;
+}
 
 /**
  * Compile a `dockhand.version.pattern` label value into a RegExp for parseTag's
@@ -159,7 +195,10 @@ export function compileVersionPattern(value: string | undefined | null): RegExp 
 	const source = trimmed.slice(VERSION_PATTERN_SCHEME.length);
 	if (source.length === 0 || source.length > MAX_PATTERN_LENGTH) return null;
 	if (!source.includes('(?<major>')) return null; // must yield at least a major
-	if (NESTED_QUANTIFIER_RE.test(source)) return null; // ReDoS guard
+	// ReDoS guards: two shapes plus a count, because a shape check always misses
+	// something the same pattern can be written another way to exploit.
+	if (NESTED_QUANTIFIER_RE.test(source) || ALTERNATION_QUANTIFIER_RE.test(source)) return null;
+	if (hasTooManyQuantifiers(source)) return null;
 
 	try {
 		return new RegExp(source);

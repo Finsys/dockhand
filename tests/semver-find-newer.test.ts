@@ -5,6 +5,7 @@
 import { describe, it, expect } from 'bun:test';
 import { findNewerVersionTag, findNewerImageTag, classifyBump, isRedundantNewerVersion, isStaleCandidate } from '../src/lib/server/semver/find-newer';
 import { parseTag } from '../src/lib/server/semver/tag-parser';
+import { tagFilterFromLabels } from '../src/lib/server/semver/tag-filter-labels';
 
 describe('findNewerVersionTag — happy paths', () => {
 	it('finds the highest newer version and lists what was skipped', () => {
@@ -292,5 +293,77 @@ describe('findNewerImageTag drops a stale candidate and keeps looking', () => {
 			probeWith(new Set())
 		);
 		expect(result?.tag).toBe('3.2.0');
+	});
+});
+
+describe('a container filters its own candidates', () => {
+	// Exercised THROUGH findNewerVersionTag, not just against applyTagFilter: a
+	// filter that is computed and then discarded looks identical to one that works.
+	const filter = (labels: Record<string, string>) => ({
+		tagFilter: tagFilterFromLabels(labels)
+	});
+
+	it('excludes a legacy tag that would otherwise win on name alone', () => {
+		const result = findNewerVersionTag(
+			'3.1.0',
+			['3.1.0', '3.1.1', '8.1.2135'],
+			filter({ 'dockhand.tag.exclude': '^8\\.' })
+		);
+		expect(result?.tag).toBe('3.1.1');
+	});
+
+	it('offers the legacy tag when no filter says otherwise', () => {
+		// The control: without the label the same list picks the stale tag, so the
+		// test above is measuring the filter and not something else.
+		expect(findNewerVersionTag('3.1.0', ['3.1.0', '3.1.1', '8.1.2135'])?.tag).toBe('8.1.2135');
+	});
+
+	it('include keeps the comparison inside one major line', () => {
+		const result = findNewerVersionTag(
+			'16.2',
+			['16.2', '16.15', '17.0'],
+			filter({ 'dockhand.tag.include': '^16\\.' })
+		);
+		expect(result?.tag).toBe('16.15');
+	});
+
+	it('the running tag survives an include that would drop it', () => {
+		// With the current tag filtered out of the pool the dedup map loses the entry
+		// that collapses `3.1` and `3.1.0`, so a tag EQUAL to what is running becomes
+		// a candidate and the check offers a non-upgrade.
+		const result = findNewerVersionTag(
+			'3.1',
+			['3.1', '3.1.0', '3.2.0'],
+			filter({ 'dockhand.tag.include': '^3\\.[12]' })
+		);
+		expect(result?.tag).toBe('3.2.0');
+		expect(result?.skipped).not.toContain('3.1');
+	});
+
+	it('returns null when the filter leaves nothing newer', () => {
+		expect(findNewerVersionTag(
+			'4.0.20',
+			['4.0.20', '5.14'],
+			filter({ 'dockhand.tag.exclude': '^5\\.' })
+		)).toBeNull();
+	});
+
+	it('the WUD spelling filters the same way', () => {
+		const result = findNewerVersionTag(
+			'3.1.0',
+			['3.1.0', '3.1.1', '8.1.2135'],
+			filter({ 'wud.tag.exclude': '^8\\.' })
+		);
+		expect(result?.tag).toBe('3.1.1');
+	});
+
+	it('a filter narrows the global settings rather than replacing them', () => {
+		// maxBump still applies: an include that admits a major jump does not grant one.
+		const result = findNewerVersionTag(
+			'1.2.0',
+			['1.2.0', '1.3.0', '2.0.0'],
+			{ ...filter({ 'dockhand.tag.include': '^[12]\\.' }), maxBump: 'minor' }
+		);
+		expect(result?.tag).toBe('1.3.0');
 	});
 });

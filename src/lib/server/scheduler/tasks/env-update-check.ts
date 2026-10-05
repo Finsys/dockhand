@@ -43,7 +43,8 @@ import { sendEventNotification } from '../../notifications';
 import { getScannerSettings, scanImage, type VulnerabilitySeverity } from '../../scanner';
 import { parseImageNameAndTag, combineScanSummaries, isSystemContainer, isPodmanInfraContainer } from './update-utils';
 import { resolveBlockDecision } from './block-decision';
-import { isUpdateDisabledByLabel, isHiddenByLabel, getVersionPatternOverride } from '../../container-labels';
+import { isUpdateDisabledByLabel, isHiddenByLabel, getVersionPatternOverride, digestUpdateVisible } from '../../container-labels';
+import { tagFilterFromLabels } from '$lib/server/semver/tag-filter-labels';
 import { recreateContainer } from './container-update';
 
 interface UpdateInfo {
@@ -203,6 +204,15 @@ export async function runEnvUpdateCheckJob(
 					continue;
 				}
 
+				// The label switches off the same-tag digest check only; the newer-version
+				// detection below still runs, which is the point of having it separate.
+				if (!digestUpdateVisible(result.hasUpdate, inspectData.Config?.Labels)) {
+					if (result.hasUpdate) {
+						await log(`    Image update suppressed by dockhand.watch.digest=false`);
+					}
+					result.hasUpdate = false;
+				}
+
 				if (result.hasUpdate) {
 					// Capture the OLD image's Env/Labels now, before any pull, for the
 					// env/label rebase (#1226, #1256).
@@ -257,7 +267,13 @@ export async function runEnvUpdateCheckJob(
 							};
 						}
 					}
-					const newer = await checkNewerVersion(imageName, { ...semverOptions, versionPattern }, getTagArtifactKind, result.localDigests ?? [], staleCheck).catch(() => null);
+					const newer = await checkNewerVersion(
+						imageName,
+						{ ...semverOptions, versionPattern, tagFilter: tagFilterFromLabels(inspectData.Config?.Labels) },
+						getTagArtifactKind,
+						result.localDigests ?? [],
+						staleCheck
+					).catch(() => null);
 					if (newer) {
 						semverByContainer.set(container.id, newer);
 						await log(`    NEWER VERSION: ${newer.tag} (${newer.bump})`);

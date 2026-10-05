@@ -14,6 +14,14 @@
  *     and stacks are listed; see tags-core.ts)
  * - dockhand.version.pattern=regex:... — Override how the newer-version check reads
  *     this image's tags, for non-standard tag schemes (named groups major/minor/patch)
+ * - dockhand.watch.digest=false - Stop the same-tag digest check for this container,
+ *     keeping newer-version detection (for images that re-push a tag often)
+ * - dockhand.tag.include / dockhand.tag.exclude - Per-container regex filters on the
+ *     newer-version candidates (see tag-filter-labels.ts)
+ *
+ * What's Up Docker equivalents are also read, so a WUD install migrates without
+ * re-labelling: wud.watch, wud.watch.digest, wud.tag.include, wud.tag.exclude. A
+ * native dockhand.* label always wins over the wud.* one.
  *
  * All label values are case-insensitive and accept: true/yes/1 and false/no/0.
  * The opt-out model means labels override DB settings (label wins).
@@ -31,7 +39,41 @@ export const DOCKHAND_LABELS = {
 	NAME: 'dockhand.name',
 	ADOPT: 'dockhand.adopt',
 	VERSION_PATTERN: 'dockhand.version.pattern',
+	WATCH_DIGEST: 'dockhand.watch.digest',
 } as const;
+
+/**
+ * What's Up Docker label equivalents, read so a WUD install migrates without
+ * re-labelling every container. A native dockhand.* label always wins.
+ */
+const WUD_LABELS = {
+	/** wud.watch=false is WUD's whole-container off switch, like dockhand.update=false. */
+	WATCH: ['wud.watch', 'wud/watch', 'getwud.app/watch', 'wud.getwud.io/watch'],
+	/** wud.watch.digest=false keeps version detection but stops the same-tag digest check. */
+	WATCH_DIGEST: [
+		'wud.watch.digest',
+		'wud/watch.digest',
+		'getwud.app/watch.digest',
+		'wud.getwud.io/watch.digest'
+	]
+} as const;
+
+/**
+ * The first of these keys the container sets, trimmed. A blank value counts as
+ * unset: an empty label is somebody half-writing one, not a decision. Shared with
+ * the tag filters, which read the same multi-spelling WUD keys.
+ */
+export function firstLabelValue(
+	labels: Record<string, string> | undefined | null,
+	keys: readonly string[]
+): string | undefined {
+	if (!labels) return undefined;
+	for (const key of keys) {
+		const value = labels[key];
+		if (typeof value === 'string' && value.trim()) return value.trim();
+	}
+	return undefined;
+}
 
 const TRUTHY_VALUES = new Set(['true', 'yes', '1']);
 const FALSY_VALUES = new Set(['false', 'no', '0']);
@@ -64,8 +106,50 @@ function getLabel(labels: Record<string, string> | undefined | null, key: string
  * Default (no label): allow updates (opt-out model).
  */
 export function isUpdateDisabledByLabel(labels: Record<string, string> | undefined | null): boolean {
-	const value = parseLabelBool(getLabel(labels, DOCKHAND_LABELS.UPDATE));
-	return value === false; // explicitly disabled
+	const own = parseLabelBool(getLabel(labels, DOCKHAND_LABELS.UPDATE));
+	if (own !== undefined) return own === false;
+	return wudWatchDisabled(firstLabelValue(labels, WUD_LABELS.WATCH));
+}
+
+/**
+ * WUD reads its own watch labels strictly: anything that is not the string `true`
+ * means "do not watch". A container set to `wud.watch=yes` is unwatched there, so
+ * reading it with Dockhand's more forgiving boolean would quietly start updating a
+ * container its owner had switched off.
+ */
+function wudWatchDisabled(value: string | undefined): boolean {
+	if (value === undefined || value.trim() === '') return false;
+	return value.trim().toLowerCase() !== 'true';
+}
+
+/**
+ * Whether a same-tag digest update should be reported for this container.
+ *
+ * Both update paths and the per-container auto-update ask the same question, so the
+ * decision lives here rather than being spelled out three times - an inverted `!`
+ * in one of them would otherwise read as perfectly ordinary code.
+ */
+export function digestUpdateVisible(
+	hasUpdate: boolean,
+	labels: Record<string, string> | undefined | null
+): boolean {
+	return hasUpdate && !isDigestWatchDisabledByLabel(labels);
+}
+
+/**
+ * Whether this container's same-tag digest check is switched off, keeping
+ * newer-version detection. For an image that re-pushes its tag often - weekly
+ * rebuilds, a base-OS refresh - that check reports every time while the version
+ * never moves.
+ *
+ * Only an EXPLICIT false disables it. WUD defaults digest watching OFF for semver
+ * tags; inheriting that default would silently stop Dockhand reporting rebuilds on
+ * every migrated container, so an absent label keeps the existing behaviour.
+ */
+export function isDigestWatchDisabledByLabel(labels: Record<string, string> | undefined | null): boolean {
+	const own = parseLabelBool(getLabel(labels, DOCKHAND_LABELS.WATCH_DIGEST));
+	if (own !== undefined) return own === false;
+	return wudWatchDisabled(firstLabelValue(labels, WUD_LABELS.WATCH_DIGEST));
 }
 
 /**
