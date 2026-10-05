@@ -1,5 +1,6 @@
 import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { generateKeyPairSync } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,14 +16,20 @@ import { validateRepositoryForSave } from '../../src/lib/server/backups/helpers'
 import {
 	buildSftpCredentialEntries,
 	buildSftpResticOptionArgs,
+	normalizeSftpPrivateKey,
 	SFTP_HELPER_KNOWN_HOSTS_FILE,
 	SFTP_HELPER_PRIVATE_KEY_FILE,
 	sftpResticPreamble,
+	validateSftpPrivateKey,
 	withSftpCredentialFiles,
 } from '../../src/lib/server/backups/sftp';
 import { buildTar } from '../../src/lib/server/backups/tar';
 
-const PRIVATE_KEY = '-----BEGIN OPENSSH PRIVATE KEY-----\ntest-only\n-----END OPENSSH PRIVATE KEY-----\n';
+const PRIVATE_KEY = generateKeyPairSync('rsa', {
+	modulusLength: 1024,
+	privateKeyEncoding: { type: 'pkcs1', format: 'pem' },
+	publicKeyEncoding: { type: 'spki', format: 'pem' },
+}).privateKey;
 const KNOWN_HOSTS = '[backup.example.com]:2222 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestOnly\n';
 const REPOSITORY = 'sftp://backup@backup.example.com:2222//srv/restic';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -119,6 +126,15 @@ describe('SFTP credential validation and edit semantics', () => {
 			hasStoredSshPrivateKey: true,
 			hasStoredSshKnownHosts: true,
 		}), null);
+	});
+
+	it('normalizes line endings and validates the key with OpenSSH', () => {
+		const crlfWithoutFinalNewline = PRIVATE_KEY.trimEnd().replace(/\n/g, '\r\n');
+		assert.equal(validateSftpPrivateKey(crlfWithoutFinalNewline), null);
+		assert.equal(normalizeSftpPrivateKey(crlfWithoutFinalNewline), PRIVATE_KEY);
+		assert.match(validateSftpPrivateKey(
+			'-----BEGIN OPENSSH PRIVATE KEY-----\ninvalid\n-----END OPENSSH PRIVATE KEY-----'
+		) ?? '', /invalid or unsupported/);
 	});
 });
 

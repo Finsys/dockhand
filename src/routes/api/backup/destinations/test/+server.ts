@@ -6,7 +6,8 @@ import { getBackupDestination, decryptBackupDestination, updateBackupDestination
 import { spawn } from 'child_process';
 import { buildResticEnv, cleanErrorMsg, isRepoNotInitializedError, RESTIC_EXIT_REPO_NOT_FOUND, validateRepositoryForSave, validateSftpCredentials } from '$lib/server/backups/helpers';
 import { withGcsCredFile, withTlsCertFiles } from '$lib/server/backups/restic';
-import { buildSftpResticOptionArgs, withSftpCredentialFiles, type SftpCredentials } from '$lib/server/backups/sftp';
+import { buildSftpResticOptionArgs, validateSftpPrivateKey, withSftpCredentialFiles, type SftpCredentials } from '$lib/server/backups/sftp';
+import { classifyRepoFailure } from '$lib/server/backups/repo';
 
 /**
  * Test a backup destination configuration.
@@ -69,6 +70,10 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			sshKnownHosts: body.sshKnownHosts
 		});
 		if (sftpError) return json({ error: sftpError }, { status: 400 });
+		if (typeof body.sshPrivateKey === 'string') {
+			const privateKeyError = validateSftpPrivateKey(body.sshPrivateKey);
+			if (privateKeyError) return json({ error: privateKeyError }, { status: 400 });
+		}
 		repository = body.repository;
 		password = body.password;
 		if (body.envVars && typeof body.envVars === 'object') {
@@ -117,10 +122,18 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 		// stderr matches the "no repository" family of messages. Return a distinct,
 		// friendlier status so the UI can offer to initialize.
 		const rawStderr = result.stderr.trim();
+		const classified = classifyRepoFailure({
+			exitCode: result.code,
+			stdout: result.stdout,
+			stderr: result.stderr,
+		});
 		const notInitialized =
-			result.code === RESTIC_EXIT_REPO_NOT_FOUND ||
-			isRepoNotInitializedError({ exitCode: result.code }) ||
-			/unable to open (config|repository)|Is there a repository/i.test(rawStderr);
+			classified.code === 'REPO_NOT_INITIALIZED' ||
+			(
+				(result.code === RESTIC_EXIT_REPO_NOT_FOUND ||
+					isRepoNotInitializedError({ exitCode: result.code })) &&
+				/unable to open (config|repository)|Is there a repository/i.test(rawStderr)
+			);
 
 		if (notInitialized) {
 			if (body.destinationId) await updateBackupDestinationTestStatus(body.destinationId, 'needs_init', 'Repository not initialized');

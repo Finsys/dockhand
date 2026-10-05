@@ -36,6 +36,14 @@ describe('classifyRepoFailure', () => {
 	it('exit 10 → REPO_NOT_INITIALIZED', () => {
 		expect(classifyRepoFailure(fail(10, 'x')).code).toBe('REPO_NOT_INITIALIZED');
 	});
+	it('SSH authentication failure takes precedence over restic exit 10', () => {
+		const classified = classifyRepoFailure(fail(
+			10,
+			'Load key "/tmp/id": invalid format\nPermission denied (publickey). unexpected EOF'
+		));
+		expect(classified.code).toBe('RESTIC');
+		expect(classified.error).toMatch(/invalid format/);
+	});
 	it('"is not a restic repository" → REPO_NOT_INITIALIZED', () => {
 		expect(classifyRepoFailure(fail(1, 'Fatal: is not a restic repository')).code).toBe('REPO_NOT_INITIALIZED');
 	});
