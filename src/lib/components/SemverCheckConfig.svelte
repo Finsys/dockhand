@@ -14,6 +14,8 @@
 		matchFlavor: boolean;
 		/** Consider -rc/-beta prerelease tags. */
 		includePrerelease: boolean;
+		/** Drop a candidate whose image was built before the running one. */
+		rejectOlderImages: boolean;
 		/**
 		 * When set, the current tag is floating (latest/stable/sha) so there is no
 		 * version to compare — the toggle is disabled and this tag is shown in the hint.
@@ -27,6 +29,7 @@
 		maxBump = $bindable(),
 		matchFlavor = $bindable(),
 		includePrerelease = $bindable(),
+		rejectOlderImages = $bindable(),
 		floatingTag
 	}: Props = $props();
 
@@ -111,6 +114,27 @@
 					</p>
 				</div>
 				<div class="shrink-0"><TogglePill bind:checked={includePrerelease} /></div>
+			</div>
+
+			<!-- ignore older images -->
+			<div class="space-y-2 border-t border-border/60 pt-3">
+				<div class="flex items-start gap-4">
+					<div class="flex-1">
+						<Label>Ignore tags older than what you run</Label>
+						<p class="text-xs text-muted-foreground mt-0.5">
+							Check when a candidate image was built and skip it if it predates the one you
+							are running. Adds a registry lookup for each suggested tag.
+						</p>
+					</div>
+					<div class="shrink-0"><TogglePill bind:checked={rejectOlderImages} /></div>
+				</div>
+				<div class="rounded-md border border-border bg-muted/40 p-2.5 text-[11.5px] leading-relaxed text-muted-foreground">
+					A tag is a name, not a date. Some repositories still carry old tags that sort
+					high: <code>lidarr:8.1.2135</code> is really <code>0.8.1.2135</code> from 2021, above a
+					current <code>3.1.0</code>.<br />
+					<span class="font-bold text-foreground">On</span> such a tag is skipped and the next real version is offered<br />
+					<span class="font-bold text-foreground">Off</span> names alone decide, as before
+				</div>
 			</div>
 		</div>
 	{/if}

@@ -9,7 +9,8 @@
       { "type": "feature", "text": "hold off automatic updates until a new image is older than a configurable minimum image age (#918, #1365, PR#1643, @TheDuffman85)" },
       { "type": "feature", "text": "a dockhand.name label sets the name a container is shown under (#1623)" },
       { "type": "feature", "text": "redeploy a stack without recreating every service, and choose how it redeploys (#148)" },
-      { "type": "feature", "text": "sign in with a passkey instead of a password (#1431, PR#1431, @StefanSa, @timcappalli)" }
+      { "type": "feature", "text": "sign in with a passkey instead of a password (#1431, PR#1431, @StefanSa, @timcappalli)" },
+      { "type": "fix", "text": "skip newer-version tags whose image is older than the one running (#1673)" }
     ],
     "imageTag": "fnsys/dockhand:v1.0.52"
   },

@@ -20,7 +20,9 @@ import {
 	removePendingContainerUpdate,
 	getPendingContainerUpdates
 } from '../../db';
-import { checkNewerVersion } from '../../semver/check';
+import { checkNewerVersion, type ImageCreatedAtProbe } from '../../semver/check';
+import { parseTag } from '../../semver/tag-parser';
+import { parseImageReference } from '../../registry/image-ref';
 import type { NewerVersion } from '../../semver/find-newer';
 import {
 	listContainers,
@@ -34,6 +36,7 @@ import {
 	tagImage,
 	inspectImage,
 	getTagArtifactKind,
+	getRegistryTagCreatedAt,
 } from '../../docker';
 import type { ImageEnvLabels } from '../../container-env-merge';
 import { sendEventNotification } from '../../notifications';
@@ -235,7 +238,26 @@ export async function runEnvUpdateCheckJob(
 					// A `dockhand.version.pattern` label lets a container teach the check
 					// how to read its own non-standard tags (CalVer+hash, etc.).
 					const versionPattern = getVersionPatternOverride(inspectData.Config?.Labels);
-					const newer = await checkNewerVersion(imageName, { ...semverOptions, versionPattern }, getTagArtifactKind, result.localDigests ?? []).catch(() => null);
+					// A version tag names what a maintainer called a build, not when it was
+					// made, so a repo still carrying high-sorting old tags offers them as
+					// upgrades. The running image's build date is read locally; the
+					// candidate's comes from the registry, for the chosen candidate only.
+					let staleCheck: { probeCreatedAt: ImageCreatedAtProbe; currentCreatedAt: string | null } | undefined;
+					// Skipped for a floating tag: checkNewerVersion short-circuits on one,
+					// so the inspect would buy nothing.
+					if (semverConfig.rejectOlderImages && parseTag(parseImageReference(imageName).tag, versionPattern)) {
+						const currentCreatedAt = await inspectImage(currentImageId, environmentId)
+							.then((img: any) => (typeof img?.Created === 'string' ? img.Created : null))
+							.catch(() => null);
+						if (currentCreatedAt) {
+							staleCheck = {
+								probeCreatedAt: (registry, repo, digest) =>
+									getRegistryTagCreatedAt(registry, repo, digest, environmentId),
+								currentCreatedAt
+							};
+						}
+					}
+					const newer = await checkNewerVersion(imageName, { ...semverOptions, versionPattern }, getTagArtifactKind, result.localDigests ?? [], staleCheck).catch(() => null);
 					if (newer) {
 						semverByContainer.set(container.id, newer);
 						await log(`    NEWER VERSION: ${newer.tag} (${newer.bump})`);

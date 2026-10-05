@@ -3,12 +3,14 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
 import { rowsToPersist } from '$lib/utils/pending-update-rows';
-import { listContainers, inspectContainer, checkImageUpdateAvailable, getTagArtifactKind } from '$lib/server/docker';
+import { listContainers, inspectContainer, checkImageUpdateAvailable, getTagArtifactKind, getRegistryTagCreatedAt, inspectImage } from '$lib/server/docker';
 import { clearPendingContainerUpdates, addPendingContainerUpdate, getPendingContainerUpdates, getGlobalSemverConfig } from '$lib/server/db';
 import { isSystemContainer, isPodmanInfraContainer } from '$lib/server/scheduler/tasks/update-utils';
 import { isUpdateDisabledByLabel, isHiddenByLabel, getVersionPatternOverride } from '$lib/server/container-labels';
 import { createJobResponse } from '$lib/server/sse';
-import { checkNewerVersion } from '$lib/server/semver/check';
+import { checkNewerVersion, type ImageCreatedAtProbe } from '$lib/server/semver/check';
+import { parseTag } from '$lib/server/semver/tag-parser';
+import { parseImageReference } from '$lib/server/registry/image-ref';
 import type { NewerVersion } from '$lib/server/semver/find-newer';
 
 export interface UpdateCheckResult {
@@ -161,11 +163,32 @@ export const POST: RequestHandler = async ({ url, cookies, request }) => {
 
 				// Newer-version-tag detection (opt-in). Skips instantly for floating tags,
 				// so it only hits the registry for pinned versions. Never throws.
+				const versionPattern = getVersionPatternOverride(inspectData.Config?.Labels);
+				// A tag names what a maintainer called a build, not when it was made, so a
+				// repo still carrying high-sorting old tags offers them as upgrades. Reads
+				// the running image's build date locally; skipped for a floating tag, which
+				// checkNewerVersion short-circuits anyway.
+				let staleCheck: { probeCreatedAt: ImageCreatedAtProbe; currentCreatedAt: string | null } | undefined;
+				if (
+					semverEnabled && !systemContainer && semverConfig.rejectOlderImages &&
+					parseTag(parseImageReference(imageName).tag, versionPattern)
+				) {
+					const currentCreatedAt = await inspectImage(currentImageId, envIdNum)
+						.then((img: any) => (typeof img?.Created === 'string' ? img.Created : null))
+						.catch(() => null);
+					if (currentCreatedAt) {
+						staleCheck = {
+							probeCreatedAt: (registry, repo, digest) =>
+								getRegistryTagCreatedAt(registry, repo, digest, envIdNum),
+							currentCreatedAt
+						};
+					}
+				}
 				const newerVersion = semverEnabled && !systemContainer
 					? await checkNewerVersion(imageName, {
 							...semverOptions,
-							versionPattern: getVersionPatternOverride(inspectData.Config?.Labels)
-						}, getTagArtifactKind, result.localDigests ?? []).catch(() => null)
+							versionPattern
+						}, getTagArtifactKind, result.localDigests ?? [], staleCheck).catch(() => null)
 					: null;
 
 				return {

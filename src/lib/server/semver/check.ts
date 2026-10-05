@@ -6,7 +6,7 @@
 import { parseImageReference } from '../registry/image-ref';
 import { parseTag } from './tag-parser';
 import { listVersionTags } from './tag-source';
-import { findNewerVersionTag, findNewerImageTag, isRedundantNewerVersion, type FindNewerOptions, type NewerVersion } from './find-newer';
+import { findNewerVersionTag, findNewerImageTag, isRedundantNewerVersion, isStaleCandidate, type FindNewerOptions, type NewerVersion } from './find-newer';
 import type { ArtifactKind } from './manifest-artifact';
 
 /** Probe a single tag's artifact kind + manifest digest. Injected so check.ts stays unit-testable. */
@@ -15,6 +15,17 @@ export type TagKindProbe = (
 	repo: string,
 	tag: string
 ) => Promise<{ kind: ArtifactKind; digest: string | null; childDigests?: string[] }>;
+
+/**
+ * When the candidate's build date is wanted, the caller supplies this and the
+ * running image's own date. Returning null (unknown) keeps the candidate, so a
+ * registry that will not answer never hides a real update.
+ */
+export type ImageCreatedAtProbe = (
+	registry: string,
+	repo: string,
+	digest: string
+) => Promise<string | null>;
 
 /**
  * Returns the newer-version suggestion for `imageRef`, or null when the current
@@ -31,7 +42,8 @@ export async function checkNewerVersion(
 	imageRef: string,
 	options: FindNewerOptions = {},
 	probeTagKind?: TagKindProbe,
-	currentImageDigests: readonly (string | null | undefined)[] = []
+	currentImageDigests: readonly (string | null | undefined)[] = [],
+	staleCheck?: { probeCreatedAt: ImageCreatedAtProbe; currentCreatedAt: string | null }
 ): Promise<NewerVersion | null> {
 	const { registry, repo, tag } = parseImageReference(imageRef);
 
@@ -55,7 +67,15 @@ export async function checkNewerVersion(
 				// exists, so stop rather than drop to a lower patch (#1572). Matches the
 				// index digest or a per-arch child digest (RepoDigests can hold either).
 				if (isRedundantNewerVersion(digest, currentImageDigests, childDigests)) return { ok: false, redundant: true };
-				return { ok: kind === 'image', digest };
+				if (kind !== 'image') return { ok: false };
+				// A tag whose image predates the running one is not an upgrade, whatever
+				// its name sorts to. Excluded rather than final, so a genuinely newer
+				// version lower down the list is still found.
+				if (staleCheck && digest) {
+					const candidateCreatedAt = await staleCheck.probeCreatedAt(registry, repo, digest).catch(() => null);
+					if (isStaleCandidate(candidateCreatedAt, staleCheck.currentCreatedAt)) return { ok: false };
+				}
+				return { ok: true, digest };
 			} catch {
 				return { ok: true }; // fail-open: never hide a real update on a probe error.
 			}

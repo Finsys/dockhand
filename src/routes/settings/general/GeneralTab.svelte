@@ -411,6 +411,7 @@ services:
 	let semverMaxBump = $state<'patch' | 'minor' | 'major'>('major');
 	let semverMatchFlavor = $state(true);
 	let semverIncludePrerelease = $state(false);
+	let semverRejectOlderImages = $state(true);
 	let semverLoaded = $state(false);
 
 	// The global theme defaults (what a new user starts with). With auth on the theme
@@ -439,6 +440,7 @@ services:
 				semverMaxBump = c.maxBump ?? 'major';
 				semverMatchFlavor = c.matchFlavor ?? true;
 				semverIncludePrerelease = c.includePrerelease ?? false;
+				semverRejectOlderImages = c.rejectOlderImages ?? true;
 			}
 			// A refusal means the values on screen are the built-in defaults, never the
 			// configuration, so the save effect stays disarmed rather than writing a
@@ -471,7 +473,8 @@ services:
 					enabled: semverEnabled,
 					maxBump: semverMaxBump,
 					matchFlavor: semverMatchFlavor,
-					includePrerelease: semverIncludePrerelease
+					includePrerelease: semverIncludePrerelease,
+					rejectOlderImages: semverRejectOlderImages
 				})
 			});
 		} catch {
@@ -1192,6 +1195,7 @@ services:
 						bind:maxBump={semverMaxBump}
 						bind:matchFlavor={semverMatchFlavor}
 						bind:includePrerelease={semverIncludePrerelease}
+						bind:rejectOlderImages={semverRejectOlderImages}
 					/>
 				</Card.Content>
 			</Card.Root>

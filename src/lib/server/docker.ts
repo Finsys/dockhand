@@ -3876,6 +3876,29 @@ async function getRegistryImageCreatedAt(imageName: string, digest: string, envI
 }
 
 /**
+ * When a candidate tag's image was built, for the semver check's stale-candidate
+ * rule. Takes the candidate's already-known manifest digest, so only the single
+ * chosen candidate is looked up - never a sweep over the tag list.
+ *
+ * `envId` selects the daemon whose os/arch decides which per-arch manifest to read;
+ * without it a remote environment would be judged by Dockhand's own platform.
+ * Dates are cached per digest+platform, so a repeat check costs nothing. The
+ * cooldown feature's persisted fallback is deliberately NOT used: it records when
+ * Dockhand first SAW a digest, which for an old tag is today - the opposite of the
+ * build date this rule needs.
+ * Returns null on any failure, which keeps the candidate (fail-open).
+ */
+export async function getRegistryTagCreatedAt(
+	registry: string,
+	repo: string,
+	digest: string,
+	envId?: number | null
+): Promise<string | null> {
+	const meta = await getRegistryImageCreatedAt(`${registry}/${repo}`, digest, envId);
+	return meta?.createdAt ?? null;
+}
+
+/**
  * Classify what a `registry/repo:tag` actually is (image vs Helm chart vs other
  * OCI artifact) by GET-ing its manifest, and return its manifest digest from the
  * same response. Used by the semver check so a Helm chart tag isn't offered as a

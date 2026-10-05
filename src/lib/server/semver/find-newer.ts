@@ -67,6 +67,27 @@ export function isRedundantNewerVersion(
 	return candidateChildDigests.some((d) => !!d && local.has(d));
 }
 
+/**
+ * A candidate is STALE when its image was built before the one already running.
+ * A version tag names what a maintainer called a build, not when it was made, so a
+ * repository that still carries old tags whose names sort high offers them as
+ * upgrades: `lidarr:8.1.2135` is really `0.8.1.2135` from 2021, above a running
+ * `3.1.0` from 2026 on name alone.
+ *
+ * Returns false whenever either timestamp is missing or unparseable, so a registry
+ * that does not answer can never hide a real update.
+ */
+export function isStaleCandidate(
+	candidateCreatedAt: string | null | undefined,
+	currentCreatedAt: string | null | undefined
+): boolean {
+	if (!candidateCreatedAt || !currentCreatedAt) return false;
+	const candidate = Date.parse(candidateCreatedAt);
+	const current = Date.parse(currentCreatedAt);
+	if (!Number.isFinite(candidate) || !Number.isFinite(current)) return false;
+	return candidate < current;
+}
+
 /** Which segment first differs decides the bump: [0]=major, [1]=minor, else patch. */
 export function classifyBump(current: ParsedTag, candidate: ParsedTag): VersionBump {
 	if ((candidate.parts[0] ?? 0) !== (current.parts[0] ?? 0)) return 'major';

@@ -3,7 +3,7 @@
  * messy real-world tag lists.
  */
 import { describe, it, expect } from 'bun:test';
-import { findNewerVersionTag, findNewerImageTag, classifyBump, isRedundantNewerVersion } from '../src/lib/server/semver/find-newer';
+import { findNewerVersionTag, findNewerImageTag, classifyBump, isRedundantNewerVersion, isStaleCandidate } from '../src/lib/server/semver/find-newer';
 import { parseTag } from '../src/lib/server/semver/tag-parser';
 
 describe('findNewerVersionTag — happy paths', () => {
@@ -219,5 +219,78 @@ describe('findNewerImageTag suppresses a same-digest candidate (#1572)', () => {
 		// 12.3.4 exists with a new digest -> a real update, offered.
 		const r = await findNewerImageTag('12.3', ['12.3', '12.3.3', '12.3.4'], probeFor({ '12.3.3': RUNNING, '12.3.4': 'sha256:new' }), {});
 		expect(r?.tag).toBe('12.3.4');
+	});
+});
+
+describe('isStaleCandidate', () => {
+	// A version tag names what a maintainer called a build, not when it was made.
+	// linuxserver/lidarr still carries `8.1.2135` (really 0.8.1.2135, built 2021)
+	// which sorts above a current `3.1.0` built in 2026.
+	it('rejects a candidate built before the running image', () => {
+		expect(isStaleCandidate('2021-11-06T15:03:15Z', '2026-09-23T00:00:00Z')).toBe(true);
+	});
+
+	it('keeps a candidate built after the running image', () => {
+		expect(isStaleCandidate('2026-09-30T00:00:00Z', '2026-09-23T00:00:00Z')).toBe(false);
+	});
+
+	it('keeps a candidate built at the same instant', () => {
+		// Not older, so not stale. A rebuild of the same source is still offered.
+		expect(isStaleCandidate('2026-09-23T00:00:00Z', '2026-09-23T00:00:00Z')).toBe(false);
+	});
+
+	it('keeps the candidate when either date is unknown', () => {
+		// Fail-open: a registry that will not answer must never hide a real update.
+		expect(isStaleCandidate(null, '2026-09-23T00:00:00Z')).toBe(false);
+		expect(isStaleCandidate('2021-11-06T15:03:15Z', null)).toBe(false);
+		expect(isStaleCandidate(undefined, undefined)).toBe(false);
+		expect(isStaleCandidate('', '2026-09-23T00:00:00Z')).toBe(false);
+	});
+
+	it('keeps the candidate when either date is unparseable', () => {
+		expect(isStaleCandidate('not-a-date', '2026-09-23T00:00:00Z')).toBe(false);
+		expect(isStaleCandidate('2021-11-06T15:03:15Z', 'whenever')).toBe(false);
+	});
+
+	it('compares instants, not strings, across offsets', () => {
+		// 2026-09-23T01:00:00+02:00 is 2026-09-22T23:00:00Z - older than the running
+		// image, even though the string sorts higher.
+		expect(isStaleCandidate('2026-09-23T01:00:00+02:00', '2026-09-23T00:00:00Z')).toBe(true);
+	});
+});
+
+describe('findNewerImageTag drops a stale candidate and keeps looking', () => {
+	// The reported shape: the highest-sorting tag is an ancient build, but a real
+	// newer version sits below it.
+	const probeWith = (staleTags: Set<string>) => async (tag: string) => ({
+		ok: !staleTags.has(tag),
+		digest: `sha256:${tag}`
+	});
+
+	it('skips the stale tag and offers the next-highest real version', async () => {
+		const result = await findNewerImageTag(
+			'3.1.0',
+			['3.1.0', '3.1.1', '8.1.2135'],
+			probeWith(new Set(['8.1.2135']))
+		);
+		expect(result?.tag).toBe('3.1.1');
+	});
+
+	it('returns null when every newer tag is stale', async () => {
+		const result = await findNewerImageTag(
+			'4.0.20',
+			['4.0.20', '5.14'],
+			probeWith(new Set(['5.14']))
+		);
+		expect(result).toBeNull();
+	});
+
+	it('still offers a genuine newer version when nothing is stale', async () => {
+		const result = await findNewerImageTag(
+			'3.1.0',
+			['3.1.0', '3.1.1', '3.2.0'],
+			probeWith(new Set())
+		);
+		expect(result?.tag).toBe('3.2.0');
 	});
 });
