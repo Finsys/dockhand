@@ -69,8 +69,7 @@
 		Loader2,
 		AlertCircle,
 		Tag,
-		Unplug
-	} from 'lucide-svelte';
+		Unplug, Heart, HeartPulse, HeartOff } from 'lucide-svelte';
 	import { broom } from '@lucide/lab';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import CreateContainerModal from './CreateContainerModal.svelte';
@@ -86,6 +85,8 @@
 	import VersionUpdateBadge from '$lib/components/VersionUpdateBadge.svelte';
 	import VersionUpdateModal from '$lib/components/VersionUpdateModal.svelte';
 	import type { ContainerInfo, TerminalMode } from '$lib/types';
+	import { matchesContainerHealthFilter, stateFilterValues } from '$lib/utils/grid-filters';
+	import { nextLogsSessions, panelsAfterRowClick, showsLogsIndicator } from '$lib/utils/active-logs-core';
 	import { matchesTagFilter, tagGroupDescriptor, mergeLabelTags, type Tag as UserTag, type TagColor, filterTagList, prunedTagFilter, withStackTags, stackLabelTags, mergeNamedTags } from '$lib/utils/tags-core';
 	import { isKnownIconName } from '$lib/utils/icons';
 	import { tagOrder } from '$lib/stores/tag-order';
@@ -597,7 +598,12 @@
 					icon: Tag,
 					color: 'text-amber-500'
 				}]
-			: [])
+			: []),
+		// Always offered, unlike the entries above: the question "is anything
+		// unhealthy" is asked precisely when the answer is no.
+		{ value: 'health:unhealthy', label: 'Unhealthy', icon: HeartOff, color: 'text-red-500', colorLabel: true },
+		{ value: 'health:starting', label: 'Starting up', icon: Heart, color: 'text-amber-500' },
+		{ value: 'health:healthy', label: 'Healthy', icon: HeartPulse, color: 'text-emerald-500' }
 	]);
 
 	// Drop the 'update-available' filter when no pending updates remain —
@@ -929,9 +935,10 @@
 	let activeLogs = $state<ActiveLogs[]>([]);
 	let currentLogsContainerId = $state<string | null>(null);
 
-	// Helper to check if container has active logs
+	// A row is "showing logs" when its panel is the visible one. Only one panel is
+	// rendered, so asking the session list instead would light a second row.
 	function hasActiveLogs(containerId: string): boolean {
-		return activeLogs.some(l => l.containerId === containerId);
+		return showsLogsIndicator(currentLogsContainerId, containerId);
 	}
 
 	// Helper to get active logs
@@ -1012,9 +1019,10 @@
 		// Filter by status. The synthetic 'update-available' value (#1063)
 		// is split off so it ANDs with real-state selections instead of
 		// being treated like another Docker state.
-		const stateValues = statusFilter.filter(
-			(v) => v !== UPDATE_AVAILABLE_FILTER_VALUE && v !== NEWER_VERSION_FILTER_VALUE
-		);
+		const stateValues = stateFilterValues(statusFilter, [
+			UPDATE_AVAILABLE_FILTER_VALUE,
+			NEWER_VERSION_FILTER_VALUE
+		]);
 		const updatesOnly = statusFilter.includes(UPDATE_AVAILABLE_FILTER_VALUE);
 		const newerVersionOnly = statusFilter.includes(NEWER_VERSION_FILTER_VALUE);
 		if (stateValues.length > 0) {
@@ -1026,6 +1034,7 @@
 		if (newerVersionOnly) {
 			result = result.filter((c) => newerVersionsMap.has(c.id));
 		}
+		result = result.filter((c) => matchesContainerHealthFilter(c.health, statusFilter));
 
 		// Filter by search query (name, image, any label key/value, or a
 		// `label:key`/`label:key=value` filter - see containerMatchesSearch).
@@ -1387,12 +1396,7 @@
 			// Just show the existing logs
 			currentLogsContainerId = container.id;
 		} else {
-			// Create new logs session
-			const logs: ActiveLogs = {
-				containerId: container.id,
-				containerName: container.name
-			};
-			activeLogs = [...activeLogs, logs];
+			activeLogs = nextLogsSessions(activeLogs, container);
 			currentLogsContainerId = container.id;
 		}
 	}
@@ -1405,21 +1409,13 @@
 	}
 
 	function selectContainer(container: ContainerInfo) {
-		// Handle logs - show if container has active logs, hide otherwise
-		if (hasActiveLogs(container.id)) {
-			currentLogsContainerId = container.id;
-		} else if (currentLogsContainerId) {
-			// Hide current logs but keep the session active
-			currentLogsContainerId = null;
-		}
-
-		// Handle terminal - show if container has active terminal, hide otherwise
-		if (hasActiveTerminal(container.id)) {
-			currentTerminalContainerId = container.id;
-		} else if (currentTerminalContainerId) {
-			// Hide current terminal but keep the session active
-			currentTerminalContainerId = null;
-		}
+		const next = panelsAfterRowClick(
+			{ logsId: currentLogsContainerId, terminalId: currentTerminalContainerId },
+			container.id,
+			hasActiveTerminal
+		);
+		currentLogsContainerId = next.logsId;
+		currentTerminalContainerId = next.terminalId;
 	}
 
 	function editContainer(id: string) {
