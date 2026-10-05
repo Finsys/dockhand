@@ -39,6 +39,7 @@
 	import BatchOperationModal from '$lib/components/BatchOperationModal.svelte';
 	import type { ComposeStackInfo, ContainerStats, StackContainer } from '$lib/types';
 	import { showsManagementActions } from '$lib/utils/stack-actions';
+	import { sumStackStats, type StackStats } from '$lib/utils/stack-stats';
 	import StackModal from './StackModal.svelte';
 	import DeleteStackModal from './DeleteStackModal.svelte';
 	import ComposeOutputModal from './ComposeOutputModal.svelte';
@@ -461,49 +462,8 @@
 	}
 
 	// Aggregate stats for a stack (sum of all running containers)
-	interface StackStats {
-		cpuPercent: number;
-		memoryUsage: number;
-		memoryLimit: number;
-		networkRx: number;
-		networkTx: number;
-		blockRead: number;
-		blockWrite: number;
-		runningCount: number;
-	}
-
 	function getStackStats(stack: ComposeStackInfo): StackStats | null {
-		if (!stack.containerDetails || stack.containerDetails.length === 0) return null;
-
-		let cpuPercent = 0;
-		let memoryUsage = 0;
-		let memoryLimit = 0;
-		let networkRx = 0;
-		let networkTx = 0;
-		let blockRead = 0;
-		let blockWrite = 0;
-		let runningCount = 0;
-
-		for (const container of stack.containerDetails) {
-			// Only aggregate stats from running containers
-			if (container.state !== 'running') continue;
-
-			const stats = containerStats.get(container.id);
-			if (stats) {
-				cpuPercent += stats.cpuPercent;
-				memoryUsage += stats.memoryUsage;
-				memoryLimit = Math.max(memoryLimit, stats.memoryLimit);
-				networkRx += stats.networkRx;
-				networkTx += stats.networkTx;
-				blockRead += stats.blockRead;
-				blockWrite += stats.blockWrite;
-				runningCount++;
-			}
-		}
-
-		if (runningCount === 0) return null;
-
-		return { cpuPercent, memoryUsage, memoryLimit, networkRx, networkTx, blockRead, blockWrite, runningCount };
+		return sumStackStats(stack.containerDetails ?? [], (id) => containerStats.get(id));
 	}
 
 	// Search and sort state - initialize from URL for persistence across navigation

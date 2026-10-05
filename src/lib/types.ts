@@ -124,6 +124,8 @@ export interface StackInfo {
 export interface ContainerStats {
 	id: string;
 	name: string;
+	/** The compose project this container belongs to, or null when standalone. */
+	stack?: string | null;
 	cpuPercent: number;
 	memoryUsage: number;      // Actual usage (total - cache), same as docker stats
 	memoryRaw: number;        // Raw total usage before cache subtraction

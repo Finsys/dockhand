@@ -135,6 +135,9 @@
       "name": "settings"
     },
     {
+      "name": "stack-stats"
+    },
+    {
       "name": "stack-tags"
     },
     {
@@ -10546,7 +10549,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Array of per-container stats snapshots (or, with `debug`, the raw stats for one container)"
+            "description": "Array of per-container stats snapshots (or, with `debug`, the raw stats for one container). Each entry carries `stack`, the compose project the container belongs to (null when standalone), so totals can be grouped without a second request. Note `memoryLimit` is the host limit each container reports, so take the MAXIMUM across a stack rather than the sum."
           },
           "403": {
             "description": "Permission denied"
@@ -26218,6 +26221,109 @@
           }
         },
         "security": []
+      }
+    },
+    "/api/stack-stats": {
+      "get": {
+        "operationId": "get_api_stack-stats",
+        "tags": [
+          "stack-stats"
+        ],
+        "summary": "Return a CPU/memory/network/block-IO stats snapshot per compose stack in an environment (needs stacks:view and containers:view)",
+        "parameters": [
+          {
+            "name": "env",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "The target environment ID (from GET /api/environments)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Array of per-stack totals sorted by name",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "cpuPercent": {
+                        "type": "number"
+                      },
+                      "memoryUsage": {
+                        "type": "integer"
+                      },
+                      "memoryLimit": {
+                        "type": "integer"
+                      },
+                      "networkRx": {
+                        "type": "integer"
+                      },
+                      "networkTx": {
+                        "type": "integer"
+                      },
+                      "blockRead": {
+                        "type": "integer"
+                      },
+                      "blockWrite": {
+                        "type": "integer"
+                      },
+                      "runningCount": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "cpuPercent",
+                      "memoryUsage",
+                      "memoryLimit",
+                      "networkRx",
+                      "networkTx",
+                      "blockRead",
+                      "blockWrite",
+                      "runningCount"
+                    ]
+                  }
+                },
+                "example": [
+                  {
+                    "name": "nextcloud",
+                    "cpuPercent": 1.42,
+                    "memoryUsage": 412090368,
+                    "memoryLimit": 16663232512,
+                    "networkRx": 1048576,
+                    "networkTx": 524288,
+                    "blockRead": 0,
+                    "blockWrite": 4096,
+                    "runningCount": 2
+                  }
+                ]
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied, or no access to this environment"
+          },
+          "404": {
+            "description": "Environment not found"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Sums the stats of each stack's running containers, the same totals the stacks list shows. `memoryLimit` is the largest per-container limit, not a sum. Stacks with no running container are omitted. Returns an empty array when no environment is configured or specified, or on internal error."
       }
     },
     "/api/stack-tags": {

@@ -94,6 +94,9 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 						const stat: ContainerStats = {
 							id: container.id,
 							name: container.name,
+							// Same field the one-shot endpoint reports, so a consumer can group
+							// by stack whichever of the two it reads.
+							stack: container.labels?.['com.docker.compose.project'] ?? null,
 							cpuPercent: Math.round(cpuPercent * 100) / 100,
 							memoryUsage: memory.usage,
 							memoryRaw: memory.raw,

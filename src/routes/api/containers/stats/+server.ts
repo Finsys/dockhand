@@ -4,15 +4,7 @@ import { listContainers, getContainerStats, EnvironmentNotFoundError } from '$li
 import { authorize } from '$lib/server/authorize';
 import { hasEnvironments } from '$lib/server/db';
 import type { ContainerStats } from '$lib/types';
-import { calculateCpuPercent, calculateMemoryUsage, calculateMemoryLimit, calculateNetworkIO, calculateBlockIO } from '$lib/server/stats-calc-core';
-
-// Helper to add timeout to promises
-function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
-	return Promise.race([
-		promise,
-		new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms))
-	]);
-}
+import { withTimeout, sampleContainerStats } from '$lib/server/container-stats';
 
 /**
  * GET /api/containers/stats - Get resource stats for all running containers
@@ -22,7 +14,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T
  * description: Returns an empty array when no environment is configured or specified. With `debug=<name>` it returns the raw memory_stats for a single container instead. On internal error it returns an empty array with status 200.
  * query: env:integer! The target environment ID the container lives in (from GET /api/environments)
  * query: debug:string Return raw Docker stats for the single container with this name instead of the aggregate list
- * resp-200: Array of per-container stats snapshots (or, with `debug`, the raw stats for one container)
+ * resp-200: Array of per-container stats snapshots (or, with `debug`, the raw stats for one container). Each entry carries `stack`, the compose project the container belongs to (null when standalone), so totals can be grouped without a second request. Note `memoryLimit` is the host limit each container reports, so take the MAXIMUM across a stack rather than the sum.
  * resp-403: Permission denied
  * resp-404: The requested debug container was not found
  */
@@ -75,43 +67,7 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 		// container" multiplies that into the caller's wait. The collection worker
 		// paces its own fan-out because it runs in the background, where waiting
 		// is free.
-		const statsPromises = runningContainers.map(async (container) => {
-			try {
-				const stats = await withTimeout(
-					getContainerStats(container.id, envIdNum) as Promise<any>,
-					8000, // 8 second timeout per container (TLS proxy + Docker CPU sampling needs ~2s)
-					null
-				);
-
-				if (!stats) return null;
-
-				const cpuPercent = calculateCpuPercent(stats);
-				// Calculate memory usage the same way Docker CLI does (excludes cache)
-				const memory = calculateMemoryUsage(stats.memory_stats);
-				const memoryLimit = calculateMemoryLimit(stats);
-				const memoryPercent = memoryLimit > 0 ? (memory.usage / memoryLimit) * 100 : 0;
-				const networkIO = calculateNetworkIO(stats);
-				const blockIO = calculateBlockIO(stats);
-
-				return {
-					id: container.id,
-					name: container.name,
-					cpuPercent: Math.round(cpuPercent * 100) / 100,
-					memoryUsage: memory.usage,
-					memoryRaw: memory.raw,
-					memoryCache: memory.cache,
-					memoryLimit,
-					memoryPercent: Math.round(memoryPercent * 100) / 100,
-					networkRx: networkIO.rx,
-					networkTx: networkIO.tx,
-					blockRead: blockIO.read,
-					blockWrite: blockIO.write
-				};
-			} catch (err) {
-				// Silently skip failed containers
-				return null;
-			}
-		});
+		const statsPromises = runningContainers.map((container) => sampleContainerStats(container, envIdNum));
 
 		const allStats = await Promise.all(statsPromises);
 		const validStats = allStats.filter((s): s is ContainerStats => s !== null);
