@@ -47,6 +47,19 @@ const EXIT_NOT_INITIALIZED = 10;
 /** Classify a failed restic run into a stable error code + message. */
 export function classifyRepoFailure(run: ResticRun): { code: BackupError['code']; error: string } {
 	const text = (run.stderr + '\n' + run.stdout).toLowerCase();
+	const accessFailed =
+		text.includes('load key ') ||
+		text.includes('permission denied') ||
+		text.includes('host key verification failed') ||
+		text.includes('remote host identification has changed') ||
+		text.includes('connection refused') ||
+		text.includes('connection timed out') ||
+		text.includes('could not resolve hostname') ||
+		text.includes('no route to host') ||
+		text.includes('unexpected eof');
+	if (accessFailed) {
+		return { code: 'RESTIC', error: run.stderr.trim() || run.stdout.trim() || 'repository connection failed' };
+	}
 	if (run.exitCode === EXIT_NOT_INITIALIZED || text.includes('is not a restic repository') || text.includes('unable to open config')) {
 		return { code: 'REPO_NOT_INITIALIZED', error: 'repository is not initialised' };
 	}

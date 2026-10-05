@@ -10,6 +10,7 @@ import {
 	decryptBackupDestination,
 	getBackupConfigs
 } from '$lib/server/db';
+import { validateSftpPrivateKey } from '$lib/server/backups/sftp';
 import { registerSchedule, unregisterSchedule } from '$lib/server/scheduler';
 import { validatePolicySchedules, validateRepositoryForSave, validateAndSerializeFlags, parseBackupFlags, validateSftpCredentials } from '$lib/server/backups/helpers';
 import { destinationHasRunningBackup } from '$lib/server/backups';
@@ -133,6 +134,10 @@ export const PUT: RequestHandler = async (event) => {
 		hasStoredSshKnownHosts: !!existing.sshKnownHosts
 	});
 	if (sftpError) return json({ error: sftpError }, { status: 400 });
+	if (typeof body.sshPrivateKey === 'string' && body.sshPrivateKey.trim()) {
+		const privateKeyError = validateSftpPrivateKey(body.sshPrivateKey);
+		if (privateKeyError) return json({ error: privateKeyError }, { status: 400 });
+	}
 	// Flags: prefer the split shape; fall back to a legacy `flags` string. undefined for ALL
 	// three means "don't touch flags". Validate+serialize to the JSON stored in `flags`.
 	let flagsColumn: string | null | undefined = undefined;
