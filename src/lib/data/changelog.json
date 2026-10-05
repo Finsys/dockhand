@@ -12,7 +12,8 @@
       { "type": "feature", "text": "sign in with a passkey instead of a password (#1431, PR#1431, @StefanSa, @timcappalli)" },
       { "type": "fix", "text": "skip newer-version tags whose image is older than the one running (#1673)" },
       { "type": "feature", "text": "filter newer-version candidates per container (#1674)" },
-      { "type": "feature", "text": "read per-stack resource totals from the API (#1626)" }
+      { "type": "feature", "text": "read per-stack resource totals from the API (#1626)" },
+      { "type": "feature", "text": "show stack health on the stacks page, and filter by it (#1678)" }
     ],
     "imageTag": "fnsys/dockhand:v1.0.52"
   },
