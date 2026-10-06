@@ -47,6 +47,12 @@ const EXIT_NOT_INITIALIZED = 10;
 /** Classify a failed restic run into a stable error code + message. */
 export function classifyRepoFailure(run: ResticRun): { code: BackupError['code']; error: string } {
 	const text = (run.stderr + '\n' + run.stdout).toLowerCase();
+	if (text.includes('permission denied (publickey')) {
+		return {
+			code: 'RESTIC',
+			error: 'SSH authentication failed: the server rejected the configured private key for this user. Verify that the matching public key is installed in the user account\'s authorized_keys file.'
+		};
+	}
 	const accessFailed =
 		text.includes('load key ') ||
 		text.includes('permission denied') ||

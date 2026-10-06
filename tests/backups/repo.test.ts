@@ -42,7 +42,7 @@ describe('classifyRepoFailure', () => {
 			'Load key "/tmp/id": invalid format\nPermission denied (publickey). unexpected EOF'
 		));
 		expect(classified.code).toBe('RESTIC');
-		expect(classified.error).toMatch(/invalid format/);
+		expect(classified.error).toMatch(/matching public key.*authorized_keys/);
 	});
 	it('"is not a restic repository" → REPO_NOT_INITIALIZED', () => {
 		expect(classifyRepoFailure(fail(1, 'Fatal: is not a restic repository')).code).toBe('REPO_NOT_INITIALIZED');
