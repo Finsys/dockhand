@@ -45,6 +45,8 @@ under **Settings > Backups > Add backup destination > SFTP (SSH key)**.
 SFTP destinations intentionally use a narrow SSH authentication model:
 
 - Supply a private key that does not require an interactive passphrase.
+- The repository path is optional. Leave it blank to use the SFTP account's home
+  directory, or enter a relative or absolute path for a dedicated repository location.
 - Paste `known_hosts` entries whose fingerprints you verified through an independent
   channel. For a custom port, the host field normally uses `[host]:port`.
 - Dockhand always enables `StrictHostKeyChecking=yes`. It does not support password
@@ -63,7 +65,7 @@ ssh-keygen -lf known_hosts
 
 This generic destination also covers providers such as Hetzner Storage Box
 ([Finsys/dockhand#1478](https://github.com/Finsys/dockhand/issues/1478)); use the
-provider's documented SSH user, port, repository path, and verified host key.
+provider's documented SSH user, port, optional repository path, and verified host key.
 
 ## Screenshots
 

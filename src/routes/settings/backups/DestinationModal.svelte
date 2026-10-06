@@ -113,7 +113,13 @@
 				{ key: 'host', label: 'SSH host', placeholder: 'backup.example.com' },
 				{ key: 'port', label: 'SSH port', placeholder: '22', optional: true },
 				{ key: 'username', label: 'SSH username', placeholder: 'backup' },
-				{ key: 'path', label: 'Repository path', placeholder: '/srv/restic/dockhand' },
+				{
+					key: 'path',
+					label: 'Repository path',
+					placeholder: 'Leave blank to use the account home directory',
+					optional: true,
+					hint: 'Optional. Relative paths start from the SFTP account home directory; leave blank to use that directory.'
+				},
 				{
 					key: 'sshPrivateKey',
 					label: 'SSH private key',
@@ -141,7 +147,9 @@
 			}),
 			parseRepo: (repo) => {
 				const parsed = parseSftpRepository(repo);
-				return parsed ? { ...parsed } : { host: '', port: '22', username: '', path: '' };
+				return parsed
+					? { ...parsed, path: parsed.path === '.' ? '' : parsed.path }
+					: { host: '', port: '22', username: '', path: '' };
 			}
 		},
 		{
@@ -330,6 +338,16 @@
 		if (field.secretField === 'sshPrivateKey') hadSshPrivateKey = false;
 		if (field.secretField === 'sshKnownHosts') hadSshKnownHosts = false;
 		formFields[field.key] = '';
+	}
+	function secretPlaceholder(field: FormField): string {
+		if (!isEditing || !hasStoredSecret(field)) return field.placeholder;
+		if (field.secretField === 'sshPrivateKey') {
+			return '(an SSH private key is stored — leave blank to keep it)';
+		}
+		if (field.secretField === 'sshKnownHosts') {
+			return '(verified known_hosts data is stored — leave blank to keep it)';
+		}
+		return '(leave blank to keep current)';
 	}
 	// All mandatory fields present? Drives the disabled state of Test/Create. On edit
 	// the credentials + password are already stored (secrets show blank = "keep
@@ -726,6 +744,7 @@
 								oninput={(e: Event) => { formFields[field.key] = (e.target as HTMLInputElement).value; }}
 								placeholder={field.placeholder}
 							/>
+							{#if field.hint}<p class="text-xs text-muted-foreground">{field.hint}</p>{/if}
 						</div>
 					{/if}
 				{/each}
@@ -765,7 +784,7 @@
 									rows={5}
 									value={formFields[field.key] ?? ''}
 									oninput={(e: Event) => { formFields[field.key] = (e.target as HTMLTextAreaElement).value; }}
-									placeholder={isEditing && field.secret ? '(leave blank to keep current)' : field.placeholder}
+									placeholder={secretPlaceholder(field)}
 									class="field-sizing-fixed max-h-40 resize-y overflow-auto font-mono text-xs"
 								/>
 							{:else}

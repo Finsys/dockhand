@@ -2,10 +2,9 @@
  * Shared backup utilities — used by BackupPanel, BackupsTab, RestoreModal, backups page.
  */
 
-import { HardDrive, Globe } from 'lucide-svelte';
+import { HardDrive, Globe, Server } from 'lucide-svelte';
 import { AmazonS3Icon, BackblazeIcon, AzureBlobIcon, GoogleCloudIcon, RestServerIcon } from '$lib/components/cloud-icons';
 import cronstrue from 'cronstrue';
-import type { Component } from 'svelte';
 import { computeExecutionTally, type Execution, type ExecutionTally } from '$lib/utils/execution-tally';
 export { computeExecutionTally, type Execution, type ExecutionTally };
 
@@ -41,14 +40,14 @@ export function classifyJobResult(result: any): { outcome: BackupOutcome; messag
 // Repository type helpers
 // ---------------------------------------------------------------------------
 
-export function getRepoTypeIcon(repository: string): Component {
+export function getRepoTypeIcon(repository: string) {
 	if (repository.startsWith('/') || repository.startsWith('./')) return HardDrive;
 	if (repository.startsWith('s3:')) return AmazonS3Icon;
 	if (repository.startsWith('b2:')) return BackblazeIcon;
 	if (repository.startsWith('azure:')) return AzureBlobIcon;
 	if (repository.startsWith('gs:')) return GoogleCloudIcon;
 	if (repository.startsWith('rest:')) return RestServerIcon;
-	if (repository.startsWith('sftp:')) return RestServerIcon;
+	if (repository.startsWith('sftp:')) return Server;
 	return Globe;
 }
 

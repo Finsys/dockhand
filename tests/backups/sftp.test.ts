@@ -63,6 +63,19 @@ describe('SFTP repository syntax', () => {
 		assert.equal(parseSftpRepository(repository)?.port, '22');
 	});
 
+	it('uses the account home directory when the repository path is empty', () => {
+		const repository = buildSftpRepository({
+			username: 'backup',
+			host: 'backup.example.com',
+			port: '22',
+			path: '',
+		});
+		assert.equal(repository, 'sftp://backup@backup.example.com/.');
+		assert.equal(parseSftpRepository(repository)?.path, '');
+		assert.equal(validateSftpRepository(repository), null);
+		assert.equal(validateSftpRepository('sftp://backup@backup.example.com/'), null);
+	});
+
 	it('accepts restic traditional syntax, including domain-confined users', () => {
 		assert.deepEqual(parseSftpRepository('sftp:user@domain@host:/repo'), {
 			username: 'user@domain',
@@ -218,6 +231,13 @@ describe('SFTP secret persistence and response surfaces', () => {
 		const modalSource = readFileSync(join(root, 'src/routes/settings/backups/DestinationModal.svelte'), 'utf8');
 		assert.match(modalSource, /accept=\{field\.accept\}/);
 		assert.doesNotMatch(modalSource, /accept:\s*['"][^'"]*(?:\.pem|\.known_hosts)/);
+	});
+
+	it('shows stored-secret guidance and uses the SFTP server icon', () => {
+		const modalSource = readFileSync(join(root, 'src/routes/settings/backups/DestinationModal.svelte'), 'utf8');
+		const backupUtils = readFileSync(join(root, 'src/lib/utils/backup.ts'), 'utf8');
+		assert.match(modalSource, /an SSH private key is stored — leave blank to keep it/);
+		assert.match(backupUtils, /repository\.startsWith\('sftp:'\)\) return Server/);
 	});
 
 	it('encrypts both dedicated fields and exposes only has... flags through APIs', () => {
