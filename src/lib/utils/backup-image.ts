@@ -22,3 +22,12 @@
 export function shouldSaveBackupImage(current: string, initial: string): boolean {
 	return (current ?? '').trim() !== (initial ?? '').trim();
 }
+
+export function syncBackupImageFromStore(
+	current: string,
+	initial: string,
+	stored: string
+): { current: string; initial: string } {
+	if (shouldSaveBackupImage(current, initial)) return { current, initial };
+	return { current: stored, initial: stored };
+}

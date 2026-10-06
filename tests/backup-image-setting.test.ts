@@ -5,7 +5,7 @@
  * auto-version-tracking across upgrades (see src/lib/utils/backup-image.ts).
  */
 import { describe, it, expect } from 'bun:test';
-import { shouldSaveBackupImage } from '../src/lib/utils/backup-image';
+import { shouldSaveBackupImage, syncBackupImageFromStore } from '../src/lib/utils/backup-image';
 
 describe('shouldSaveBackupImage', () => {
 	it('does NOT save when the value is unchanged (pre-filled default left as-is)', () => {
@@ -41,5 +41,29 @@ describe('shouldSaveBackupImage', () => {
 	it('tolerates null/undefined inputs without throwing', () => {
 		expect(shouldSaveBackupImage(undefined as unknown as string, '')).toBe(false);
 		expect(shouldSaveBackupImage('x', null as unknown as string)).toBe(true);
+	});
+});
+
+describe('syncBackupImageFromStore', () => {
+	it('replaces the pre-load default when the stored setting arrives', () => {
+		expect(syncBackupImageFromStore(
+			'fnsys/dockhand-backup:1.0.51',
+			'fnsys/dockhand-backup:1.0.51',
+			'ghcr.io/example/dockhand-backup:test'
+		)).toEqual({
+			current: 'ghcr.io/example/dockhand-backup:test',
+			initial: 'ghcr.io/example/dockhand-backup:test'
+		});
+	});
+
+	it('does not overwrite an unsaved user edit when the store changes', () => {
+		expect(syncBackupImageFromStore(
+			'ghcr.io/example/dockhand-backup:new',
+			'fnsys/dockhand-backup:1.0.51',
+			'ghcr.io/example/dockhand-backup:saved'
+		)).toEqual({
+			current: 'ghcr.io/example/dockhand-backup:new',
+			initial: 'fnsys/dockhand-backup:1.0.51'
+		});
 	});
 });
