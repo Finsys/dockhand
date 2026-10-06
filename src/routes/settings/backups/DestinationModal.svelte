@@ -121,7 +121,6 @@
 					secret: true,
 					multiline: true,
 					secretField: 'sshPrivateKey',
-					accept: '.pem,.key,application/x-pem-file,text/plain',
 					hint: 'Use a private key that does not require an interactive passphrase. Password authentication and ssh-agent are never used.'
 				},
 				{
@@ -131,7 +130,6 @@
 					secret: true,
 					multiline: true,
 					secretField: 'sshKnownHosts',
-					accept: '.known_hosts,.txt,text/plain',
 					hint: 'Paste host-key entries whose fingerprints you verified independently. Strict host-key checking is always enabled.'
 				}
 			],
@@ -757,7 +755,7 @@
 								</div>
 								<input
 									type="file"
-									accept={field.accept ?? 'application/json,.json,text/plain'}
+									accept={field.accept}
 									class="hidden"
 									bind:this={fileInputs[field.key]}
 									onchange={(e) => uploadTextToField(field.key, e)}

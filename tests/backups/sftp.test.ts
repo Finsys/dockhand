@@ -214,6 +214,12 @@ describe('SFTP runtime credential materialization', () => {
 });
 
 describe('SFTP secret persistence and response surfaces', () => {
+	it('allows extensionless OpenSSH key and known_hosts files in the upload picker', () => {
+		const modalSource = readFileSync(join(root, 'src/routes/settings/backups/DestinationModal.svelte'), 'utf8');
+		assert.match(modalSource, /accept=\{field\.accept\}/);
+		assert.doesNotMatch(modalSource, /accept:\s*['"][^'"]*(?:\.pem|\.known_hosts)/);
+	});
+
 	it('encrypts both dedicated fields and exposes only has... flags through APIs', () => {
 		const dbSource = readFileSync(join(root, 'src/lib/server/db.ts'), 'utf8');
 		assert.match(dbSource, /sshPrivateKey:\s*data\.sshPrivateKey\s*\?\s*encrypt\(data\.sshPrivateKey\)/);
