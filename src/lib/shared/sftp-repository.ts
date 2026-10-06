@@ -96,7 +96,6 @@ export function validateSftpRepository(repository: string): string | null {
 	if (!Number.isInteger(port) || port < 1 || port > 65535) {
 		return 'Invalid SFTP repository: SSH port must be between 1 and 65535';
 	}
-	if (!parsed.path.trim()) return 'Invalid SFTP repository: a repository path is required';
 	if (parsed.path.startsWith('~')) {
 		return 'Invalid SFTP repository: use a relative path or an absolute path instead of ~';
 	}
@@ -113,7 +112,7 @@ export function buildSftpRepository(fields: Partial<SftpRepositoryConfig>): stri
 	const host = rawHost.includes(':') ? `[${rawHost}]` : rawHost;
 	const port = fields.port?.trim() || '22';
 	const portPart = port === '22' ? '' : `:${port}`;
-	const path = encodePath(fields.path?.trim() || '');
+	const path = encodePath(fields.path?.trim() || '.');
 	return `sftp://${username}@${host}${portPart}/${path}`;
 }
 
