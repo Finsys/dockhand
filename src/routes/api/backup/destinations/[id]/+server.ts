@@ -17,18 +17,21 @@ import { destinationHasRunningBackup } from '$lib/server/backups';
 
 /**
  * Single-destination response shape. envVars (decrypted cloud credentials) are
- * ONLY included for callers with backups:manage. Passwords and dedicated TLS/SFTP
- * credentials are always stripped; edit forms receive only has... presence flags.
+ * ONLY included for callers with backups:manage. Public SSH known_hosts data follows
+ * that same rule. Passwords, TLS PEMs, and SSH private keys are always stripped.
  */
 function prepareDestination(dest: any, includeSecrets: boolean): any {
 	const result = { ...dest };
 	delete result.password;
 	if (includeSecrets) {
-		result.envVars = decryptBackupDestination(dest).decryptedEnvVars;
+		const decrypted = decryptBackupDestination(dest);
+		result.envVars = decrypted.decryptedEnvVars;
+		result.sshKnownHosts = decrypted.decryptedSshKnownHosts;
 	} else {
 		delete result.envVars;
+		delete result.sshKnownHosts;
 	}
-	// Dedicated credential contents are never sent to the client, even as ciphertext.
+	// Private credential contents are never sent to the client, even as ciphertext.
 	result.hasCacert = !!dest.cacert;
 	result.hasTlsClientCert = !!dest.tlsClientCert;
 	result.hasSshPrivateKey = !!dest.sshPrivateKey;
@@ -36,7 +39,6 @@ function prepareDestination(dest: any, includeSecrets: boolean): any {
 	delete result.cacert;
 	delete result.tlsClientCert;
 	delete result.sshPrivateKey;
-	delete result.sshKnownHosts;
 	// Split the stored `flags` JSON into separate fields the edit form binds to (legacy
 	// bare strings surface as backupFlags), so the UI never parses the string-vs-JSON column.
 	const { backup, restore } = parseBackupFlags(dest.flags);
@@ -49,10 +51,10 @@ function prepareDestination(dest: any, includeSecrets: boolean): any {
  * GET /api/backup/destinations/{id} - Get a single backup destination
  *
  * @openapi
- * summary: Fetch one backup destination; cloud env vars require manage permission, while passwords and dedicated TLS/SFTP credentials are always stripped
+ * summary: Fetch one backup destination; cloud env vars and public SSH known_hosts data require manage permission, while passwords, TLS PEMs, and SSH private keys are always stripped
  * description: Permission denial (403, "backups:view") is produced by the shared requireBackups route guard.
  * path: id:integer! Backup destination id (from GET /api/backup/destinations)
- * resp-200: The destination with has... presence flags; envVars require "backups:manage", and dedicated secret values are never returned
+ * resp-200: The destination with has... presence flags; envVars and sshKnownHosts require "backups:manage", and private credential values are never returned
  * resp-400: Invalid id (not a number)
  * resp-404: Destination not found
  */
@@ -188,8 +190,8 @@ export const PUT: RequestHandler = async (event) => {
 			policiesChanged: body.policies !== undefined
 		});
 
-		// PUT caller holds backups:manage, so envVars may be included; dedicated
-		// password/TLS/SFTP credential values remain stripped.
+		// PUT caller holds backups:manage, so envVars and public known_hosts data
+		// may be included; passwords, TLS PEMs, and SSH private keys remain stripped.
 		return json(prepareDestination(updated, true));
 	} catch (error: any) {
 		if (error.message?.includes('UNIQUE constraint')) {

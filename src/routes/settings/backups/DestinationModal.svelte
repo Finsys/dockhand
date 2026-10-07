@@ -31,6 +31,7 @@
 		hasTlsClientCert?: boolean;  // a client cert is stored
 		hasSshPrivateKey?: boolean;
 		hasSshKnownHosts?: boolean;
+		sshKnownHosts?: string | null;
 		flags?: string;
 		backupFlags?: string;   // split from the GET endpoint (legacy strings surface here)
 		restoreFlags?: string;
@@ -271,6 +272,7 @@
 	let hadTlsClientCert = $state(false);
 	let hadSshPrivateKey = $state(false);
 	let hadSshKnownHosts = $state(false);
+	let initialSshKnownHosts = $state('');
 	let caFileInput = $state<HTMLInputElement | null>(null);
 	let clientCertFileInput = $state<HTMLInputElement | null>(null);
 
@@ -393,7 +395,7 @@
 		formName = ''; formBackendType = 'local'; formFields = {}; formPassword = '';
 		formBackupFlags = ''; formRestoreFlags = ''; formError = '';
 		formCacert = ''; formTlsClientCert = ''; hadCacert = false; hadTlsClientCert = false;
-		hadSshPrivateKey = false; hadSshKnownHosts = false;
+		hadSshPrivateKey = false; hadSshKnownHosts = false; initialSshKnownHosts = '';
 		formSaving = false;
 		policyPruneEnabled = true; policyPruneSchedule = '0 0 1 * *'; policyPruneMaxUnused = '10';
 		policyCheckEnabled = true; policyCheckSchedule = '0 0 1 * *';
@@ -435,6 +437,8 @@
 				hadTlsClientCert = !!destination.hasTlsClientCert;
 				hadSshPrivateKey = !!destination.hasSshPrivateKey;
 				hadSshKnownHosts = !!destination.hasSshKnownHosts;
+				fields.sshKnownHosts = destination.sshKnownHosts ?? '';
+				initialSshKnownHosts = fields.sshKnownHosts;
 				formError = '';
 				// Load policies
 				const pol = destination.policies ? (() => { try { return JSON.parse(destination.policies); } catch { return {}; } })() : {};
@@ -631,8 +635,9 @@
 			if (formBackendType === 'sftp') {
 				if (formFields.sshPrivateKey?.trim()) body.sshPrivateKey = formFields.sshPrivateKey;
 				else if (isEditing && !hadSshPrivateKey) body.sshPrivateKey = '';
-				if (formFields.sshKnownHosts?.trim()) body.sshKnownHosts = formFields.sshKnownHosts;
-				else if (isEditing && !hadSshKnownHosts) body.sshKnownHosts = '';
+				if ((formFields.sshKnownHosts ?? '') !== initialSshKnownHosts) {
+					body.sshKnownHosts = formFields.sshKnownHosts ?? '';
+				}
 			} else if (isEditing && isSftpRepository(destination!.repository)) {
 				// A backend switch away from SFTP explicitly removes credentials that
 				// no longer have a purpose instead of retaining hidden private material.

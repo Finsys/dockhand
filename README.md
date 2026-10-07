@@ -51,8 +51,10 @@ SFTP destinations intentionally use a narrow SSH authentication model:
   channel. For a custom port, the host field normally uses `[host]:port`.
 - Dockhand always enables `StrictHostKeyChecking=yes`. It does not support password
   authentication, ssh-agent authentication or forwarding, or trust-on-first-use.
-- The key and `known_hosts` data are encrypted in the database, never returned by the
-  API, and materialized only as temporary `0600` files while Restic is running.
+- The private key and `known_hosts` data are encrypted in the database and materialized
+  only as temporary `0600` files while Restic is running. The private key is never
+  returned by the API; authorized destination editors can view the public `known_hosts`
+  data so host keys can be reviewed and updated.
 
 `ssh-keyscan` can collect a server's advertised public key, but its output is not
 trusted until you compare the fingerprint with the server/provider's published
