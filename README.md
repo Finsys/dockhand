@@ -21,6 +21,7 @@ Dockhand is a modern, efficient Docker management application providing real-tim
 ### Features
 
 - **Container Management**: Start, stop, restart, and monitor containers in real-time
+- **File Preservation**: [Preserve files during container updates](docs/container-copy-file.md) with automatic Compose environment-secret discovery and the `dockhand.copy-file` label
 - **Compose Stacks**: Visual editor for Docker Compose deployments
 - **Git Integration**: Deploy stacks from Git repositories with webhooks and auto-sync
 - **Multi-Environment**: Manage local and remote Docker hosts

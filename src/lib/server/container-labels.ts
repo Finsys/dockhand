@@ -3,6 +3,7 @@
  *
  * Docker container labels that control Dockhand behavior:
  * - dockhand.update=false  — Skip this container during auto-updates and batch updates
+ * - dockhand.copy-file=/path/a,/path/b - Preserve these files when recreating a container
  * - dockhand.hidden=true   — Hide this container from the Dockhand UI
  * - dockhand.notify=false  — Suppress notifications for this container's events
  * - dockhand.url=<url>     — Custom clickable URL displayed alongside container ports
@@ -32,6 +33,7 @@ import { compileVersionPattern } from './semver/tag-parser';
 /** Recognized Dockhand label keys */
 export const DOCKHAND_LABELS = {
 	UPDATE: 'dockhand.update',
+	COPY_FILE: 'dockhand.copy-file',
 	HIDDEN: 'dockhand.hidden',
 	NOTIFY: 'dockhand.notify',
 	URL: 'dockhand.url',
