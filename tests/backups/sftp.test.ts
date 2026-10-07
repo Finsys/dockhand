@@ -240,7 +240,7 @@ describe('SFTP secret persistence and response surfaces', () => {
 		assert.match(backupUtils, /repository\.startsWith\('sftp:'\)\) return Server/);
 	});
 
-	it('encrypts both dedicated fields and exposes only has... flags through APIs', () => {
+	it('encrypts both dedicated fields, hides private keys, and returns public known_hosts only to editors', () => {
 		const dbSource = readFileSync(join(root, 'src/lib/server/db.ts'), 'utf8');
 		assert.match(dbSource, /sshPrivateKey:\s*data\.sshPrivateKey\s*\?\s*encrypt\(data\.sshPrivateKey\)/);
 		assert.match(dbSource, /sshKnownHosts:\s*data\.sshKnownHosts\s*\?\s*encrypt\(data\.sshKnownHosts\)/);
@@ -255,8 +255,15 @@ describe('SFTP secret persistence and response surfaces', () => {
 			assert.match(source, /hasSshPrivateKey/);
 			assert.match(source, /hasSshKnownHosts/);
 			assert.match(source, /delete result\.sshPrivateKey/);
+			assert.match(source, /result\.sshKnownHosts = decrypted\.decryptedSshKnownHosts/);
 			assert.match(source, /delete result\.sshKnownHosts/);
 		}
+	});
+
+	it('populates known_hosts for editing without resubmitting unchanged data', () => {
+		const modalSource = readFileSync(join(root, 'src/routes/settings/backups/DestinationModal.svelte'), 'utf8');
+		assert.match(modalSource, /fields\.sshKnownHosts = destination\.sshKnownHosts \?\? ''/);
+		assert.match(modalSource, /formFields\.sshKnownHosts \?\? ''\) !== initialSshKnownHosts/);
 	});
 
 	it('ships OpenSSH in both helper variants and both database migrations', () => {

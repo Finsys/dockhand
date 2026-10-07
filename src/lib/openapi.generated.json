@@ -3799,7 +3799,7 @@
         "tags": [
           "backup"
         ],
-        "summary": "List all backup destinations without passwords, SFTP credentials, TLS PEMs, or cloud-credential env vars",
+        "summary": "List all backup destinations without passwords, SSH data, TLS PEMs, or cloud-credential env vars",
         "parameters": [],
         "responses": {
           "200": {
@@ -3825,7 +3825,7 @@
         "parameters": [],
         "responses": {
           "201": {
-            "description": "The created backup destination object (includes envVars supplied by the caller; password and dedicated TLS/SFTP credentials are stripped)"
+            "description": "The created backup destination object (includes envVars and public sshKnownHosts data supplied by the caller; password, TLS PEMs, and the SSH private key are stripped)"
           },
           "400": {
             "description": "Invalid input — missing name/repository/password, unsupported/SSRF-blocked repository, invalid restic flags, or an invalid cron schedule in the policies"
@@ -3920,7 +3920,7 @@
         "tags": [
           "backup"
         ],
-        "summary": "Fetch one backup destination; cloud env vars require manage permission, while passwords and dedicated TLS/SFTP credentials are always stripped",
+        "summary": "Fetch one backup destination; cloud env vars and public SSH known_hosts data require manage permission, while passwords, TLS PEMs, and SSH private keys are always stripped",
         "parameters": [
           {
             "name": "id",
@@ -3934,7 +3934,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The destination with has... presence flags; envVars require \"backups:manage\", and dedicated secret values are never returned"
+            "description": "The destination with has... presence flags; envVars and sshKnownHosts require \"backups:manage\", and private credential values are never returned"
           },
           "400": {
             "description": "Invalid id (not a number)"

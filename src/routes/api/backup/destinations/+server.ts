@@ -16,7 +16,7 @@ import { registerSchedule } from '$lib/server/scheduler';
 import { validateRepositoryForSave, validateAndSerializeFlags, validatePolicySchedules, validateSftpCredentials } from '$lib/server/backups/helpers';
 
 /**
- * Prepare a destination for API response without dedicated secret fields.
+ * Prepare a destination for an API response.
  *
  * The LIST endpoint omits envVars entirely. Cloud-credential env vars
  * (AWS_SECRET_ACCESS_KEY, AZURE_ACCOUNT_KEY, etc.) used to ship decrypted to
@@ -31,11 +31,13 @@ function prepareDestination(dest: any, opts: { includeEnvVars: boolean }): any {
 	delete result.password;
 	if (opts.includeEnvVars) {
 		result.envVars = decrypted.decryptedEnvVars;
+		result.sshKnownHosts = decrypted.decryptedSshKnownHosts;
 	} else {
 		delete result.envVars;
+		delete result.sshKnownHosts;
 	}
-	// Dedicated TLS/SFTP credential contents never reach the client; expose only
-	// whether each is set so edit forms can implement keep/replace/clear.
+	// Private credentials never reach the client. known_hosts is public host-key
+	// data and is returned only on manage-authorized create/detail/update surfaces.
 	result.hasCacert = !!dest.cacert;
 	result.hasTlsClientCert = !!dest.tlsClientCert;
 	result.hasSshPrivateKey = !!dest.sshPrivateKey;
@@ -43,7 +45,6 @@ function prepareDestination(dest: any, opts: { includeEnvVars: boolean }): any {
 	delete result.cacert;
 	delete result.tlsClientCert;
 	delete result.sshPrivateKey;
-	delete result.sshKnownHosts;
 	return result;
 }
 
@@ -51,7 +52,7 @@ function prepareDestination(dest: any, opts: { includeEnvVars: boolean }): any {
  * GET /api/backup/destinations - List backup destinations
  *
  * @openapi
- * summary: List all backup destinations without passwords, SFTP credentials, TLS PEMs, or cloud-credential env vars
+ * summary: List all backup destinations without passwords, SSH data, TLS PEMs, or cloud-credential env vars
  * description: Permission denial (403, "backups:view") is produced by the shared requireBackups route guard.
  * resp-200: Array of backup destination objects without secret values; has... flags indicate stored dedicated credentials
  */
@@ -73,7 +74,7 @@ export const GET: RequestHandler = async ({ cookies }) => {
  * description: Permission denial (403, "backups:manage") is produced by the shared requireBackups route guard.
  * body: {name:string!, repository:string!, password:string!, envVars:{}, flags:string, backupFlags:string, restoreFlags:string, hostPath:string, cacert:string, tlsClientCert:string, sshPrivateKey:string, sshKnownHosts:string, policies:string}
  * body-example: {"name":"S3 Offsite","repository":"s3:s3.amazonaws.com/my-bucket/restic","password":"***","envVars":{"AWS_ACCESS_KEY_ID":"***","AWS_SECRET_ACCESS_KEY":"***"}}
- * resp-201: The created backup destination object (includes envVars supplied by the caller; password and dedicated TLS/SFTP credentials are stripped)
+ * resp-201: The created backup destination object (includes envVars and public sshKnownHosts data supplied by the caller; password, TLS PEMs, and the SSH private key are stripped)
  * resp-400: Invalid input — missing name/repository/password, unsupported/SSRF-blocked repository, invalid restic flags, or an invalid cron schedule in the policies
  * resp-409: A destination with this name already exists
  * resp-500: Failed to create the destination (persistence error)
