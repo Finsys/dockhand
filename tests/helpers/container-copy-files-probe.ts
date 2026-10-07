@@ -8,6 +8,7 @@ import { packTar, unpackTar } from 'modern-tar';
 const phase = process.argv[2];
 const editing = phase.startsWith('edit');
 const stopped = phase.includes('stopped');
+const userns = phase.includes('userns');
 const removedLabel = phase.includes('remove-label');
 const edge = phase.includes('edge');
 const root = new URL('../../src/lib/server/', import.meta.url).pathname;
@@ -59,7 +60,7 @@ let sequence = 0;
 let failureTriggered = false;
 const original = {
 	Id: 'old', Name: '/app', Image: 'old-image', State: { Running: !stopped },
-	Config: { Image: 'app:latest', Env: [], Labels: labels },
+	Config: { Image: 'app:latest', Env: [], Labels: labels, User: userns && !phase.includes('empty') ? '12345:12346' : '' },
 	HostConfig: { NetworkMode: 'host', RestartPolicy: { Name: 'no' } },
 	NetworkSettings: { Networks: {} }, Mounts: []
 };
@@ -79,6 +80,7 @@ async function engine(input: string, options: RequestInit = {}): Promise<Respons
 	const path = decodeURIComponent(url.pathname);
 	const method = options.method ?? 'GET';
 	calls.push(`${method} ${path}`);
+	if (path === '/info') return Response.json({ SecurityOptions: userns ? ['name=userns'] : [], ServerVersion: phase.includes('old-engine') ? '29.6.2' : '29.8.2' });
 	if (path.startsWith('/images/') && path.endsWith('/json')) return Response.json({ Id: 'new-image', Config: { Env: [], Labels: {} } });
 	if (path === '/containers/create') {
 		if (phase.includes('create-failure') && !failureTriggered) { failureTriggered = true; return Response.json({ message: 'create failed' }, { status: 500 }); }
@@ -115,7 +117,7 @@ async function engine(input: string, options: RequestInit = {}): Promise<Respons
 		}
 		assert.equal(method, 'PUT');
 		assert.equal(container.State.Running, false, 'must inject before first start');
-		assert.equal(url.searchParams.get('copyUIDGID'), 'false');
+		assert.equal(url.searchParams.get('copyUIDGID'), String(userns));
 		assert.equal(url.searchParams.get('path'), '/');
 		if (phase.includes('copy-failure') && !failureTriggered) { failureTriggered = true; return new Response('secret must not appear in logs', { status: 500 }); }
 		const [file] = await unpackTar(options.body as Uint8Array);
@@ -143,7 +145,7 @@ const docker = await import(root + 'docker');
 const logs: string[] = [];
 const update = (id: string) => editing
 	? docker.updateContainer(id, removedLabel || phase.includes('edit-labels') ? { labels: {} }
-		: phase.includes('override') ? { volumeBinds: ['/new/token:/run/secrets/disk:ro'] } : {}, !stopped, 1)
+		: phase.includes('clear-user') ? { user: '' } : phase.includes('host-mode') ? { usernsMode: 'host' } : phase.includes('override') ? { volumeBinds: ['/new/token:/run/secrets/disk:ro'] } : {}, !stopped, 1)
 	: docker.recreateContainerFromInspect(structuredClone(containers.get(id)), 'app:latest', 1, (msg: string) => logs.push(msg));
 
 if (phase.includes('failure') || phase.includes('missing')) {
@@ -152,7 +154,7 @@ if (phase.includes('failure') || phase.includes('missing')) {
 	assert.equal(containers.get('old').Name, '/app');
 	assert.equal(containers.get('old').State.Running, !stopped, 'original must remain running or be restarted');
 	assert.deepEqual(files.get('old'), secret);
-	if (phase.includes('missing')) assert.ok(calls.every(call => /^(GET|HEAD) /.test(call)), 'snapshot failure must not mutate containers');
+	if (phase.includes('missing') || (userns && phase.includes('failure'))) assert.ok(calls.every(call => /^(GET|HEAD) /.test(call)), 'snapshot failure must not mutate containers');
 	if (phase.includes('copy-failure')) assert.ok(!calls.includes('POST /containers/new1/start'), 'failed copy must prevent start');
 	assert.ok(!logs.join('\n').includes('secret must not appear in logs'));
 } else {

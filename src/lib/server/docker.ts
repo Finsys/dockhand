@@ -2946,7 +2946,12 @@ export async function updateContainer(id: string, options: Partial<CreateContain
 	const discoveredPaths = await discoverComposeCopyFilePaths(oldContainerInfo.Config?.Labels);
 	const files = await snapshotContainerCopyFiles(
 		{ ...oldContainerInfo, Config: { ...oldContainerInfo.Config, Labels: labels } },
-		(path, request) => dockerFetch(path, request, envId), undefined, discoveredPaths
+		(path, request) => dockerFetch(path, request, envId), undefined, discoveredPaths,
+		{
+			...oldContainerInfo,
+			Config: { ...oldContainerInfo.Config, User: 'user' in options ? options.user : oldContainerInfo.Config?.User },
+			HostConfig: { ...oldContainerInfo.HostConfig, UsernsMode: 'usernsMode' in options ? options.usernsMode : oldContainerInfo.HostConfig?.UsernsMode }
+		}
 	);
 	try {
 		return await updateContainerWithCopyFiles(id, options, startAfterUpdate, envId, oldContainerInfo, files);

@@ -1,10 +1,15 @@
 import { describe, expect, test } from 'bun:test';
 import { packTar, unpackTar, type TarHeader } from 'modern-tar';
 import {
-	copyFilePaths, copyFileDisposition, sanitizeCopyFileArchive, snapshotContainerCopyFiles,
+	copyFilePaths, copyFileDisposition, sanitizeCopyFileArchive, snapshotContainerCopyFiles as snapshotFiles,
 	COPY_FILE_MAX_BYTES, COPY_FILE_MAX_ARCHIVE_BYTES, COPY_FILE_MAX_TOTAL_BYTES,
 	type CopyFileContainer, type CopyFileSnapshot
 } from '../src/lib/server/container-copy-files';
+
+// Existing cases run against an ordinary daemon; remapping tests supply /info explicitly.
+const snapshotContainerCopyFiles: typeof snapshotFiles = (container, request, ...args) => snapshotFiles(
+	container, (url, options) => url === '/info' ? Promise.resolve(Response.json({ SecurityOptions: [] })) : request(url, options), ...args
+);
 
 const label = 'dockhand.copy-file';
 const path = '/run/secrets/token';
@@ -193,5 +198,98 @@ describe('snapshot lifecycle', () => {
 		const snapshot = await snapshotContainerCopyFiles(container, async () => sourceResponse(large.slice()));
 		snapshot.dispose();
 		await expect(snapshot.inject('new')).rejects.toThrow('disposed');
+	});
+});
+
+describe('user namespace ownership', () => {
+	const source: CopyFileContainer = { ...container, Config: { ...container.Config, User: '12345:12346' } };
+	const info = (SecurityOptions = ['name=userns'], ServerVersion = '29.8.2') => Response.json({ SecurityOptions, ServerVersion });
+
+	test('remapped daemons use the configured user once for all files, keeping bytes and modes', async () => {
+		const calls: string[] = [];
+		const logs: string[] = [];
+		let uploads = 0;
+		const snapshot = await snapshotFiles(source, async (url, options) => {
+			calls.push(url);
+			if (url === '/info') return info(['name=seccomp,profile=builtin', 'name=userns,profile=custom']);
+			if (url.endsWith('/json')) return Response.json(source);
+			if (options.method === 'HEAD') return statResponse();
+			if (options.method === 'PUT') {
+				expect(url).toContain('copyUIDGID=true');
+				const [file] = await unpackTar(options.body as Uint8Array);
+				expect(file.data).toEqual(content);
+				expect(file.header.mode).toBe(0o640);
+				expect(file.header.uid).toBe(uploads++ === 0 ? 165536 : 177881);
+				return new Response(null);
+			}
+			const path = new URL(url, 'http://docker').searchParams.get('path')!;
+			return new Response(await tar({ name: path.split('/').at(-1), uid: path.endsWith('token') ? 165536 : 177881 }));
+		}, message => logs.push(message), ['/run/secrets/other']);
+		try { await snapshot.inject('new'); } finally { snapshot.dispose(); }
+		expect(calls.filter(url => url === '/info').length).toBe(1);
+		expect(uploads).toBe(2);
+		expect(logs.some(line => line.includes('replacement container user'))).toBe(true);
+	});
+
+	test('ordinary/rootless daemons and unavailable info retain captured ownership', async () => {
+		for (const getInfo of [
+			() => info([]), () => info(['name=rootless']), () => info(['name=usernsx', 'profile=userns']),
+			() => new Response(null, { status: 403 }), () => Response.json({}),
+			() => Response.json({ SecurityOptions: [null] }), () => { throw new Error('offline'); }
+		]) {
+			const snapshot = await snapshotFiles(source, async (url, options) => {
+				if (url === '/info') return getInfo();
+				if (url.endsWith('/json')) return Response.json(source);
+				if (options.method === 'HEAD') return statResponse();
+				if (options.method === 'PUT') { expect(url).toContain('copyUIDGID=false'); return new Response(null); }
+				return new Response(await tar());
+			});
+			try { await snapshot.inject('new'); } finally { snapshot.dispose(); }
+		}
+	});
+
+	test('unsupported remapped engines, empty users and host mode fail before archive requests', async () => {
+		for (const version of ['28.5.0', '29.6.2', '29.7.0-rc.1', '', 'unknown']) {
+			await expect(snapshotFiles(source, async url => {
+				expect(url).toBe('/info'); return info(['name=userns'], version);
+			})).rejects.toThrow('29.7.0');
+		}
+		for (const target of [
+			{ ...source, Config: { User: '' } }, { ...source, Config: {} },
+			{ ...source, HostConfig: { UsernsMode: 'host' } }
+		]) {
+			await expect(snapshotFiles(source, async url => {
+				expect(url).toBe('/info'); return info();
+			}, undefined, [], target)).rejects.toThrow('remapped daemon');
+		}
+	});
+
+	test('explicit root and newer engines are supported; replacement configuration is rechecked', async () => {
+		for (const user of ['0', '0:0', 'app:app', '12345:12346']) {
+			for (const replacement of ['same', 'empty', 'host']) {
+				let uploads = 0;
+				const target = { ...source, Config: { User: user } };
+				const snapshot = await snapshotFiles(source, async (url, options) => {
+					if (url === '/info') return info(['name=userns'], '30.0.0');
+					if (url.endsWith('/json')) return Response.json(replacement === 'empty'
+						? { ...target, Config: {} } : replacement === 'host' ? { ...target, HostConfig: { UsernsMode: 'host' } } : target);
+					if (options.method === 'HEAD') return statResponse();
+					if (options.method === 'PUT') { uploads++; expect(url).toContain('copyUIDGID=true'); return new Response(null); }
+					return new Response(await tar());
+				}, undefined, [], target);
+				try {
+					if (replacement === 'same') await snapshot.inject('new');
+					else await expect(snapshot.inject('new')).rejects.toThrow('remapped daemon');
+					expect(uploads).toBe(replacement === 'same' ? 1 : 0);
+				} finally { snapshot.dispose(); }
+			}
+		}
+	});
+
+	test('mounted files do not need daemon info or ownership changes', async () => {
+		const snapshot = await snapshotFiles({ ...container, Mounts: [{ Type: 'bind', Destination: path, RW: false }] }, async () => {
+			throw new Error('Unexpected I/O');
+		});
+		try { await snapshot.inject('new'); } finally { snapshot.dispose(); }
 	});
 });

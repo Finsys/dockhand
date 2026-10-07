@@ -14,8 +14,9 @@ let reservedBytes = 0;
 type Mount = { Type?: string; Destination?: string; Target?: string; RW?: boolean; ReadOnly?: boolean };
 export interface CopyFileContainer {
 	Id: string;
-	Config?: { Labels?: Record<string, string> | null };
+	Config?: { Labels?: Record<string, string> | null; User?: string };
 	HostConfig?: {
+		UsernsMode?: string;
 		ReadonlyRootfs?: boolean;
 		Mounts?: Mount[];
 		Binds?: string[] | null;
@@ -159,8 +160,55 @@ export interface CopyFileSnapshot {
 	dispose(): void;
 }
 
+async function copyFileOwnership(
+	request: CopyFileRequest, log?: Log
+): Promise<boolean> {
+	let info;
+	try {
+		const response = await request('/info', { signal: AbortSignal.timeout(TIMEOUT_MS) });
+		if (!response.ok) {
+			await response.body?.cancel();
+			throw new Error('Daemon info unavailable');
+		}
+		info = await response.json();
+		if (!Array.isArray(info.SecurityOptions) || info.SecurityOptions.some((value: unknown) => typeof value !== 'string')) {
+			throw new Error('Invalid daemon security options');
+		}
+	} catch {
+		// Socket proxies can deny /info. Keep captured ownership in that case;
+		// a refused archive upload still uses the existing rollback path.
+		log?.('dockhand.copy-file: daemon info unavailable; keeping captured file ownership');
+		return false;
+	}
+	const remapped = info.SecurityOptions.some((option: string) => option.split(',').includes('name=userns'));
+	if (!remapped) return false;
+	// Older Engines can silently assign the overflow owner instead of mapping
+	// Config.User. Unknown/prerelease versions are not evidence of this fix.
+	const version = typeof info.ServerVersion === 'string'
+		? /^(\d+)\.(\d+)\.(\d+)(?:$|[+~-])/.exec(info.ServerVersion) : null;
+	if (!version || /(?:rc|beta|alpha)/i.test(info.ServerVersion) ||
+		(Number(version[1]) < 29 || (Number(version[1]) === 29 && Number(version[2]) < 7))) {
+		throw new Error('dockhand.copy-file requires Docker Engine 29.7.0 or later for user namespace remapping');
+	}
+	return true;
+}
+
+function validateRemappedCopyOwner(container: CopyFileContainer): void {
+	// The archive API uses daemon-wide ID mappings even for userns=host.
+	// Do not substitute mapped ownership into an unremapped container.
+	if (container.HostConfig?.UsernsMode === 'host') {
+		throw new Error('dockhand.copy-file cannot preserve files with userns=host on a remapped daemon');
+	}
+	// Empty Config.User bypasses Docker's ownership override, so captured host
+	// IDs can still be mapped a second time. Explicit user "0" is supported.
+	if (!container.Config?.User?.trim()) {
+		throw new Error('dockhand.copy-file requires an explicit container user on a remapped daemon (use 0 for root)');
+	}
+}
+
 export async function snapshotContainerCopyFiles(
-	container: CopyFileContainer, request: CopyFileRequest, log?: Log, discoveredPaths: readonly string[] = []
+	container: CopyFileContainer, request: CopyFileRequest, log?: Log, discoveredPaths: readonly string[] = [],
+	destination: CopyFileContainer = container
 ): Promise<CopyFileSnapshot> {
 	// Explicit operator paths come first; discovery only fills gaps.
 	const paths = [...new Set([...copyFilePaths(container.Config?.Labels), ...discoveredPaths])];
@@ -175,6 +223,11 @@ export async function snapshotContainerCopyFiles(
 		log?.(`dockhand.copy-file: mount already provides ${path}`);
 		return false;
 	});
+	const copyUIDGID = selected.length > 0 && await copyFileOwnership(request, log);
+	if (copyUIDGID) {
+		validateRemappedCopyOwner(destination);
+		log?.('dockhand.copy-file: user namespace remapping enabled; copied files will use the replacement container user and group');
+	}
 	const files: { path: string; archive: Uint8Array }[] = [];
 	let heldBytes = 0;
 	let disposed = false;
@@ -190,6 +243,7 @@ export async function snapshotContainerCopyFiles(
 					throw new Error('dockhand.copy-file could not inspect replacement mounts');
 				}
 				const target = await response.json() as CopyFileContainer;
+				if (copyUIDGID) validateRemappedCopyOwner(target);
 				for (const file of files) {
 					const mount = coveringMount(target, file.path);
 					if (target.HostConfig?.ReadonlyRootfs || mount?.Type === 'tmpfs' || mount?.ReadOnly || mount?.RW === false) {
@@ -200,10 +254,10 @@ export async function snapshotContainerCopyFiles(
 			for (const file of files) {
 				try {
 					// Extract relative full paths at / so Docker creates missing parent dirs.
-					// Docker's copyUIDGID=true applies Config.User ownership to the tar.
-					// Leave it false to preserve each entry's captured numeric uid/gid,
-					// including root-owned secrets in a container running as non-root.
-					const response = await request(`/containers/${containerId}/archive?path=%2F&copyUIDGID=false&noOverwriteDirNonDir=true`, {
+					// Preserve captured uid/gid normally. Under userns-remap the archive
+					// contains host IDs that cannot round-trip through Docker's ID map;
+					// let Docker map Config.User instead (validated before stopping).
+					const response = await request(`/containers/${containerId}/archive?path=%2F&copyUIDGID=${copyUIDGID}&noOverwriteDirNonDir=true`, {
 						method: 'PUT', headers: { 'Content-Type': 'application/x-tar' },
 						body: file.archive as BodyInit, signal: AbortSignal.timeout(TIMEOUT_MS)
 					});

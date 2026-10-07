@@ -3,6 +3,8 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 for (const phase of [
+	'recreate-userns', 'recreate-userns-edge', 'edit-userns', 'recreate-userns-empty-failure',
+	'recreate-userns-old-engine-failure', 'edit-userns-clear-user-failure', 'edit-userns-host-mode-failure',
 	'recreate', 'recreate-stopped', 'recreate-missing', 'recreate-copy-failure',
 	'recreate-create-failure', 'recreate-start-failure', 'recreate-edge', 'recreate-edge-copy-failure',
 	'recreate-compose', 'recreate-compose-missing', 'recreate-compose-unreadable', 'recreate-compose-edge', 'edit-labels-compose',
