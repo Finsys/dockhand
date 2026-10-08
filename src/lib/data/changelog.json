@@ -13,7 +13,10 @@
       { "type": "fix", "text": "skip newer-version tags whose image is older than the one running (#1673)" },
       { "type": "feature", "text": "filter newer-version candidates per container (#1674)" },
       { "type": "feature", "text": "read per-stack resource totals from the API (#1626)" },
-      { "type": "feature", "text": "show stack health on the stacks page, and filter by it (#1678)" }
+      { "type": "feature", "text": "show stack health on the stacks page, and filter by it (#1678)" },
+      { "type": "fix", "text": "find the stack folder when a nested bind shares a name with one at the root (#1679)" },
+      { "type": "fix", "text": "ordering one container with dockhand.order now moves it ahead of the unlabelled ones (#1117)" },
+      { "type": "fix", "text": "restore preview no longer reports an empty target for a stack whose files are there (#1681)" }
     ],
     "imageTag": "fnsys/dockhand:v1.0.52"
   },
