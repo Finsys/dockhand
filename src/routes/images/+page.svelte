@@ -1122,7 +1122,7 @@
 				options={vulnContainerOptions}
 				placeholder="All containers"
 				pluralLabel="containers"
-				width="w-44"
+				width="w-48"
 			/>
 			<MultiSelectFilter
 				bind:value={vulnStackFilter}

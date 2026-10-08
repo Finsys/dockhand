@@ -81,7 +81,7 @@
 			</Button>
 		{/snippet}
 	</Popover.Trigger>
-	<Popover.Content class="w-60 p-1" align="start">
+	<Popover.Content class="w-64 p-1" align="start">
 		{#if hasSettings}
 			<!-- Collapsible settings section, open by default. The header toggles it; the
 			     state is persisted by the parent page (localStorage). -->
@@ -102,7 +102,7 @@
 				{#if groupBy !== undefined}
 					<div class="flex items-center gap-2 px-2 py-1.5">
 						<Rows3 class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-						<span class="text-xs flex-1">Group by tag</span>
+						<span class="text-xs min-w-0 flex-1 truncate text-left">Group by tag</span>
 						<TogglePill bind:checked={groupBy} />
 					</div>
 					{#if showBands !== undefined && groupBy}
@@ -110,7 +110,7 @@
 						     the icon column lines up on the left and the toggle on the right. -->
 						<div class="flex items-center gap-2 px-2 py-1.5">
 							<Paintbrush class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-							<span class="text-xs flex-1 whitespace-nowrap">Color group bands</span>
+							<span class="text-xs min-w-0 flex-1 truncate text-left">Color group bands</span>
 							<TogglePill bind:checked={showBands} />
 						</div>
 					{/if}
@@ -118,21 +118,21 @@
 				{#if showTags !== undefined}
 					<div class="flex items-center gap-2 px-2 py-1.5">
 						<TagIcon class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-						<span class="text-xs flex-1">Show tags</span>
+						<span class="text-xs min-w-0 flex-1 truncate text-left">Show tags</span>
 						<TogglePill bind:checked={showTags} />
 					</div>
 				{/if}
 				{#if inlineEditing !== undefined}
 					<div class="flex items-center gap-2 px-2 py-1.5">
 						<Pencil class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-						<span class="text-xs flex-1 whitespace-nowrap">Inline tag editing</span>
+						<span class="text-xs min-w-0 flex-1 truncate text-left">Inline tag editing</span>
 						<TogglePill bind:checked={inlineEditing} />
 					</div>
 				{/if}
 				{#if inheritStackTags !== undefined}
 					<div class="flex items-center gap-2 px-2 py-1.5">
 						<Layers class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-						<span class="text-xs flex-1 whitespace-nowrap">Show tags from stacks</span>
+						<span class="text-xs min-w-0 flex-1 truncate text-left">Show tags from stacks</span>
 						<TogglePill bind:checked={inheritStackTags} />
 					</div>
 				{/if}
@@ -148,7 +148,7 @@
 				<ToggleSwitch value={mode} leftValue="any" rightValue="all" onchange={(m) => (mode = m as TagFilterMode)} />
 			</div>
 			<div
-				class="max-h-64 overflow-y-auto"
+				class="max-h-64 overflow-y-auto pr-1"
 				use:dndzone={{
 					items: orderedTags,
 					dragDisabled: !reorderMode,
@@ -176,7 +176,7 @@
 						{:else}
 							<TagIcon class="h-3.5 w-3.5 shrink-0" style="color: {tagHex(tag.color)};" />
 						{/if}
-						<span class="truncate">{tag.name}</span>
+						<span class="min-w-0 flex-1 truncate text-left" title={tag.name}>{tag.name}</span>
 						{#if isSel}<Check class="ml-auto h-3.5 w-3.5 text-primary shrink-0" />{/if}
 					</button>
 				{/each}

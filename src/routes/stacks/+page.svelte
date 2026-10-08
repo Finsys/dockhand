@@ -1732,7 +1732,7 @@
 				options={filterOptions}
 				placeholder="All statuses"
 				pluralLabel="statuses"
-				width="w-44"
+				width="w-48"
 				defaultIcon={Layers}
 			/>
 			<TagFilter tags={filterTags} bind:selected={tagFilter} bind:mode={tagFilterMode} bind:groupBy={groupByTag} bind:showTags={showTags} bind:showBands={showBands} bind:inlineEditing={inlineTagEditing} bind:settingsExpanded={tagSettingsExpanded} />

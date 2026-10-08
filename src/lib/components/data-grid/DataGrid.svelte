@@ -830,9 +830,9 @@
 				{@const colConfig = columnConfigMap.get(colId)}
 				{#if colConfig}
 					<th
-						class="{colConfig.align === 'right' ? 'text-right' : colConfig.align === 'center' ? 'text-center' : 'text-left'} py-2 px-2 font-medium"
+						class="{colConfig.align === 'right' ? 'text-right' : colConfig.align === 'center' ? 'text-center' : 'text-left'} py-2 px-2 font-medium overflow-hidden"
 						style="width: {getDisplayWidth(colId)}px"
-						title={colConfig.hint || ''}
+						title={colConfig.hint || colConfig.label}
 					>
 						{#if headerCell}
 							{@render headerCell(colConfig, sortState)}
@@ -841,32 +841,32 @@
 							<button
 								type="button"
 								onclick={() => toggleSort(colId)}
-								class="flex items-center gap-1 hover:text-foreground transition-colors w-full {colConfig.align === 'right' ? 'justify-end' : colConfig.align === 'center' ? 'justify-center' : ''}"
+								class="flex items-center gap-1 hover:text-foreground transition-colors w-full min-w-0 {colConfig.align === 'right' ? 'justify-end' : colConfig.align === 'center' ? 'justify-center' : ''}"
 							>
-								{colConfig.label}
+								<span class="min-w-0 truncate">{colConfig.label}</span>
 								{#if colConfig.sortCycle}
 									{#if cycleActive}
 										<span class="text-xs font-semibold {ioMetricColor(sortState!.field)}">{ioMetricLabel(sortState!.field)}</span>
 										{#if sortState!.direction === 'asc'}
-											<ArrowUp class="w-3 h-3" />
+											<ArrowUp class="w-3 h-3 shrink-0" />
 										{:else}
-											<ArrowDown class="w-3 h-3" />
+											<ArrowDown class="w-3 h-3 shrink-0" />
 										{/if}
 									{:else}
-										<ArrowUpDown class="w-3 h-3 opacity-30" />
+										<ArrowUpDown class="w-3 h-3 opacity-30 shrink-0" />
 									{/if}
 								{:else if sortState?.field === getSortField(colId)}
 									{#if sortState.direction === 'asc'}
-										<ArrowUp class="w-3 h-3" />
+										<ArrowUp class="w-3 h-3 shrink-0" />
 									{:else}
-										<ArrowDown class="w-3 h-3" />
+										<ArrowDown class="w-3 h-3 shrink-0" />
 									{/if}
 								{:else}
-									<ArrowUpDown class="w-3 h-3 opacity-30" />
+									<ArrowUpDown class="w-3 h-3 opacity-30 shrink-0" />
 								{/if}
 							</button>
 						{:else}
-							{colConfig.label}
+							<span class="block truncate">{colConfig.label}</span>
 						{/if}
 
 						<!-- Resize handle -->

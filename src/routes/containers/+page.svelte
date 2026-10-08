@@ -1634,7 +1634,7 @@
 				options={filterOptions}
 				placeholder="All statuses"
 				pluralLabel="filters"
-				width="w-44"
+				width="w-48"
 				defaultIcon={Box}
 			/>
 			<TagFilter tags={filterTags} bind:selected={tagFilter} bind:mode={tagFilterMode} bind:groupBy={groupByTag} bind:showTags={showTags} bind:showBands={showBands} bind:inlineEditing={inlineTagEditing} bind:inheritStackTags bind:settingsExpanded={tagSettingsExpanded} />
