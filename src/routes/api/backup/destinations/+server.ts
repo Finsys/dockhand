@@ -17,16 +17,6 @@ import { registerSchedule } from '$lib/server/scheduler';
 import { validateRepositoryForSave, validateAndSerializeFlags, validatePolicySchedules, validateSftpCredentials } from '$lib/server/backups/helpers';
 
 /**
- * Prepare a destination for an API response.
- *
- * The LIST endpoint omits envVars entirely. Cloud-credential env vars
- * (AWS_SECRET_ACCESS_KEY, AZURE_ACCOUNT_KEY, etc.) used to ship decrypted to
- * any user with backups:view permission, even though the LIST view doesn't
- * need them. The edit modal re-fetches via GET /destinations/[id] (which
- * still returns envVars decrypted so the form can pre-fill credential
- * fields). Single GET is what populates the modal; LIST never needs them.
- */
-/**
  * GET /api/backup/destinations - List backup destinations
  *
  * @openapi
