@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import { getStackEnvVars } from '$lib/server/db';
 import { getStackComposeFile } from '$lib/server/stacks';
+import { pickAdditionalComposeContents } from '$lib/server/compose-files';
 import { authorize } from '$lib/server/authorize';
 import type { RequestHandler } from './$types';
 
@@ -96,7 +97,7 @@ function extractComposeVars(yaml: string): { required: string[]; optional: strin
  * summary: Validate a stack's defined environment variables against the variables required/optional by its compose file (compose content and the defined variable list may be supplied in the body, otherwise loaded from the saved file/DB)
  * path: name:string! Stack name (from GET /api/stacks)
  * query: env:integer Environment ID the stack belongs to (from GET /api/environments)
- * body: {compose:string, variables:array<string>}
+ * body: {compose:string, composePaths:array<string>, composeContents:object, variables:array<string>}
  * body-example: {"compose":"services:\n  web:\n    image: ${IMAGE}","variables":["IMAGE"]}
  * resp-200: {valid:boolean!, required:array<string>!, optional:array<string>!, defined:array<string>!, missing:array<string>!, unused:array<string>!}
  * resp-200-example: {"valid":false,"required":["IMAGE"],"optional":[],"defined":[],"missing":["IMAGE"],"unused":[]}
@@ -123,6 +124,9 @@ export const POST: RequestHandler = async ({ params, url, cookies, request }) =>
 		const stackName = decodeURIComponent(params.name);
 		let composeContent: string | null = null;
 		let providedVariables: string[] | null = null;
+		// Additional compose files (ordered set primary first) — an override can
+		// define or consume variables the primary never mentions.
+		let additionalSources: string[] = [];
 
 		// Check if compose content and/or variables are provided in body
 		const contentType = request.headers.get('content-type');
@@ -132,6 +136,7 @@ export const POST: RequestHandler = async ({ params, url, cookies, request }) =>
 				if (body.compose && typeof body.compose === 'string') {
 					composeContent = body.compose;
 				}
+				additionalSources = pickAdditionalComposeContents(body.composePaths, body.composeContents);
 				// Accept variables from UI for validation (overrides DB lookup)
 				if (Array.isArray(body.variables)) {
 					providedVariables = body.variables.filter((v: unknown) => typeof v === 'string');
@@ -148,6 +153,11 @@ export const POST: RequestHandler = async ({ params, url, cookies, request }) =>
 			const savedCompose = await getStackComposeFile(stackName, envIdNum);
 			if (savedCompose.success && savedCompose.content) {
 				composeContent = savedCompose.content;
+				if (savedCompose.composeContents) {
+					additionalSources = Object.entries(savedCompose.composeContents)
+						.filter(([path, content]) => path !== savedCompose.composePath && content.trim())
+						.map(([, content]) => content);
+				}
 			}
 		}
 
@@ -155,8 +165,17 @@ export const POST: RequestHandler = async ({ params, url, cookies, request }) =>
 			return json({ error: 'No compose content provided and no saved compose file found' }, { status: 400 });
 		}
 
-		// Extract variables from compose
-		const { required, optional } = extractComposeVars(composeContent);
+		// Extract variables from every compose file in the set: a ${VAR} with a
+		// default in one file is still required if another file requires it.
+		const requiredSet = new Set<string>();
+		const optionalSet = new Set<string>();
+		for (const source of [composeContent, ...additionalSources]) {
+			const vars = extractComposeVars(source);
+			for (const v of vars.required) requiredSet.add(v);
+			for (const v of vars.optional) optionalSet.add(v);
+		}
+		const required = [...requiredSet].sort();
+		const optional = [...optionalSet].filter((v) => !requiredSet.has(v)).sort();
 
 		// Get defined variables - either from request body or database
 		let defined: string[];

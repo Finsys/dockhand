@@ -10,7 +10,7 @@ import { parseCompose } from './parse';
 import { RULES } from './rules';
 import { renderEffectiveCompose } from './effective-compose';
 import { findingKey } from '../../utils/compose-quick-fix';
-import type { ValidateConfig, ValidateContext, ValidateReport, Finding, Severity } from './types';
+import type { ValidateConfig, ValidateContext, ValidateReport, Finding, Severity, ParsedCompose } from './types';
 
 const SEVERITY_ORDER: Record<Severity, number> = { error: 0, warn: 1, info: 2 };
 
@@ -47,41 +47,59 @@ function assemble(findings: Finding[]): ValidateReport {
 /**
  * Synchronous, offline lint. Parses the compose locally and runs the rule catalog.
  * This is the fast every-keystroke / edit-time path (no daemon).
+ *
+ * With additional sources (a multi-file Compose set, primary first), rules run on
+ * the merged document; each finding is attributed to the last file that still
+ * produces it so editor markers land on the file supplying the effective value.
  */
 export function runValidate(
 	composeSource: string,
 	ctx: ValidateContext = {},
-	config: ValidateConfig = {}
+	config: ValidateConfig = {},
+	additionalSources: string[] = [],
+	additionalSourceNames: string[] = []
 ): ValidateReport {
-	const parsed = parseCompose(composeSource);
-	const findings: Finding[] = [];
 	const disabled = new Set(config.disabled ?? []);
 	const overrides = config.severity ?? {};
+	const sources = [composeSource, ...additionalSources].map((source, index) => ({
+		parsed: parseCompose(source),
+		name: additionalSourceNames[index] ?? (index === 0 ? 'compose' : `compose[${index}]`)
+	}));
+	const multiFile = sources.length > 1;
+	const findings: Finding[] = [];
 
 	// A hard YAML/parse error is itself a finding; rules that need `doc` will no-op.
 	// (YAML_PARSE_ERROR is not a configurable rule - a file that won't parse is always
 	// an error.)
-	if (parsed.parseError) {
-		findings.push({
-			ruleId: 'YAML_PARSE_ERROR',
-			severity: 'error',
-			message: parsed.parseError.message,
-			hint: 'Fix the YAML syntax; nothing else can be checked until it parses.',
-			line: parsed.parseError.line
-		});
+	for (const source of sources) {
+		if (source.parsed.parseError) {
+			findings.push({
+				ruleId: 'YAML_PARSE_ERROR',
+				severity: 'error',
+				message: source.parsed.parseError.message,
+				hint: 'Fix the YAML syntax; nothing else can be checked until it parses.',
+				line: source.parsed.parseError.line,
+				...(multiFile ? { source: source.name } : {})
+			});
+		}
 	}
 
-	for (const rule of RULES) {
-		if (disabled.has(rule.id)) continue;
-		try {
-			for (const f of rule.check(parsed, ctx)) {
-				// Effective severity: explicit (graded rule) > user override > rule default.
-				const severity = f.severity ?? overrides[rule.id] ?? rule.defaultSeverity;
-				findings.push({ ...f, severity });
-			}
-		} catch {
-			// A rule must never break the whole report; skip its output on error.
-		}
+	if (!multiFile) {
+		findings.push(...runRules(sources[0].parsed, ctx, disabled, overrides));
+		return assemble(findings);
+	}
+
+	// Last source first, so the first match is the file whose value wins the merge.
+	const sourceFindings = sources.flatMap((source) =>
+		runRules(source.parsed, ctx, disabled, overrides).map((finding) => ({ ...finding, source: source.name }))
+	).reverse();
+	const merged = mergeParsedCompose(sources.map((source) => source.parsed));
+	for (const finding of runRules(merged, ctx, disabled, overrides)) {
+		// Unmatched findings only exist in the merged document; they stay file-level.
+		const match = sourceFindings.find(
+			(candidate) => candidate.ruleId === finding.ruleId && candidate.service === finding.service && candidate.message === finding.message
+		);
+		findings.push(match ?? finding);
 	}
 
 	return assemble(findings);
@@ -101,11 +119,13 @@ export async function runValidateWithConfig(
 	ctx: ValidateContext = {},
 	dockerHost?: string | null,
 	config: ValidateConfig = {},
-	envVars?: Record<string, string>
+	envVars?: Record<string, string>,
+	additionalSources?: string[],
+	additionalSourceNames?: string[]
 ): Promise<ValidateReport> {
-	const local = runValidate(composeSource, ctx, config);
+	const local = runValidate(composeSource, ctx, config, additionalSources, additionalSourceNames);
 
-	const cfg = await renderEffectiveCompose(stackName, composeSource, dockerHost, envVars);
+	const cfg = await renderEffectiveCompose(stackName, composeSource, dockerHost, envVars, additionalSources);
 
 	// If config produced schema errors, merge them in. If the file already failed to
 	// parse locally, prefer config's precise schema message but keep both.
@@ -115,6 +135,55 @@ export async function runValidateWithConfig(
 		return assemble([...located, ...local.findings]);
 	}
 	return local;
+}
+
+function runRules(
+	parsed: ParsedCompose,
+	ctx: ValidateContext,
+	disabled: Set<string>,
+	overrides: Record<string, Severity>
+): Finding[] {
+	const findings: Finding[] = [];
+	for (const rule of RULES) {
+		if (disabled.has(rule.id)) continue;
+		try {
+			for (const f of rule.check(parsed, ctx)) {
+				// Effective severity: explicit (graded rule) > user override > rule default.
+				const severity = f.severity ?? overrides[rule.id] ?? rule.defaultSeverity;
+				findings.push({ ...f, severity });
+			}
+		} catch {
+			// A rule must never break the whole report; skip its output on error.
+		}
+	}
+	return findings;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function mergeValues(base: unknown, overlay: unknown): unknown {
+	if (!isRecord(base) || !isRecord(overlay)) return overlay;
+	const merged: Record<string, unknown> = { ...base };
+	for (const [key, value] of Object.entries(overlay)) {
+		merged[key] = key in merged ? mergeValues(merged[key], value) : value;
+	}
+	return merged;
+}
+
+function mergeParsedCompose(sources: ParsedCompose[]): ParsedCompose {
+	let doc: Record<string, unknown> | null = null;
+	for (const source of sources) {
+		if (!source.doc) continue;
+		doc = doc ? (mergeValues(doc, source.doc) as Record<string, unknown>) : source.doc;
+	}
+	return {
+		doc,
+		lineOf: () => undefined,
+		indentOf: () => undefined,
+		columnOf: () => undefined
+	};
 }
 
 /**
