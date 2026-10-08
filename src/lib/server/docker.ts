@@ -18,7 +18,7 @@ import { toWebReadableStream } from './node-readable-stream';
 import { buildImagePruneFilters } from './image-prune-core';
 import { demuxDockerStream } from './docker-demux-core';
 import { computeRequestTimeoutMs, isPrunePath } from './backups/request-timeout';
-import { helperWaitDeadline, helperExitFromState } from './helper-wait-core';
+import { helperWaitDeadline, helperExitFromState, helperFailureDetail, needsDaemonErrorLookup } from './helper-wait-core';
 import { cancelReaderOnAbort } from './reader-abort-core';
 import { configuredMacAddress, endpointWithoutGeneratedMac } from './endpoint-mac-core';
 import { rescopeForPrimarySwitch } from './primary-network-switch-core';
@@ -38,7 +38,7 @@ import { decideRespawnOutcome, isExactNameMatch } from './systemd-recreate-core'
 import { parseImageReference } from './registry/image-ref';
 import { fetchImageCreatedAt, imagePlatform } from './registry/image-age';
 export { parseImageReference } from './registry/image-ref';
-import { rebaseEnvOntoImage, rebaseLabelsOntoImage, rebaseCommand, describeEnvRebase, describeLabelRebase, type ImageEnvLabels } from './container-env-merge';
+import { rebaseEnvOntoImage, rebaseLabelsOntoImage, rebaseCommand, describeEnvRebase, describeLabelRebase, composeImageLabelForRecreate, composeImageLabelForm, COMPOSE_IMAGE_LABEL, type ImageEnvLabels } from './container-env-merge';
 import { encodeRegistryAuth, fetchRegistryToken, isSafeRegistryHost } from './registry-auth';
 import { describeRegistryFailure } from './registry-failure-core';
 import {
@@ -2274,6 +2274,29 @@ export async function recreateContainerFromInspect(
 	// Keep the tracked tag separately; creation and rebasing use the verified ID.
 	if (verifiedImageId) createConfig.Labels = trackedImageLabels(createConfig.Labels, newImage, verifiedImageId, verifiedImageReference);
 
+	// Compose records which image it created a container from, and recreates the container
+	// whenever that disagrees with the image behind the service's tag. Carried over verbatim it
+	// still names the OLD image, so the next `docker compose up` restarts a container that
+	// already runs the right one - unplanned downtime, on a database as readily as anything
+	// else. Outside the try above so the verbatim-labels fallback is corrected too (#1687).
+	if (createConfig.Labels?.[COMPOSE_IMAGE_LABEL]) {
+		// Resolve the id ONCE and address the image by it from here on: a tag can be repointed
+		// between the pull and this read, and a digest fetched by tag would then describe an
+		// image the container is not created from.
+		const newId: string | undefined = verifiedImageId ?? ((await inspectImage(newImage, envId).catch(() => null)) as any)?.Id;
+		// Only fetched for the digest form, which a containerd image store uses.
+		const needsDigest = composeImageLabelForm(createConfig.Labels[COMPOSE_IMAGE_LABEL], inspectData.Image) === 'digest';
+		const composeImage = composeImageLabelForRecreate(
+			createConfig.Labels[COMPOSE_IMAGE_LABEL],
+			inspectData.Image,
+			{ imageId: newId, manifestDigest: needsDigest && newId ? await imageManifestDigest(newId, envId) : null }
+		);
+		if (composeImage) {
+			createConfig.Labels[COMPOSE_IMAGE_LABEL] = composeImage;
+			log?.(`Compose image label updated to the new image (${composeImage.slice(0, 19)})`);
+		}
+	}
+
 	// Strip default MemorySwappiness — Podman + cgroupv2 rejects it.
 	// Docker returns -1, Podman returns 0 when unset.
 	const swappiness = createConfig.HostConfig?.MemorySwappiness;
@@ -3281,6 +3304,24 @@ export async function getImageHistory(id: string, envId?: number | null) {
 
 export async function inspectImage(id: string, envId?: number | null) {
 	return dockerJsonRequest(`/images/${encodeURIComponent(id)}/json`, {}, envId);
+}
+
+/**
+ * The digest of an image's platform manifest, which a containerd image store reports and Compose
+ * records as `com.docker.compose.image` there. Needs `?manifests=true` (API 1.48+); older daemons
+ * and the classic image store answer without it, and get null. Never throws - the caller treats
+ * an unavailable digest as "leave the label alone".
+ */
+export async function imageManifestDigest(id: string, envId?: number | null): Promise<string | null> {
+	try {
+		const data = await dockerJsonRequest<{ Manifests?: Array<{ Kind?: string; Available?: boolean; Descriptor?: { digest?: string } }> }>(
+			`/images/${encodeURIComponent(id)}/json?manifests=true`, {}, envId
+		);
+		const image = (data?.Manifests ?? [])[0];
+		return image?.Descriptor?.digest || null;
+	} catch {
+		return null;
+	}
 }
 
 
@@ -5449,6 +5490,10 @@ export async function runContainerWithStreaming(options: {
 			// Poll is the safe default; set HELPERS_WAIT_MODE=wait to force the streaming /wait.
 			// Applies to every helper this function runs — backup/restore AND the image scanner.
 			let exitCode: number | undefined;
+			// The daemon's own reason when it refused to START the container (a bad bind
+			// source, a missing image platform). Such a container produces NO logs, so
+			// without this the failure reads as "no output" and says nothing.
+			let daemonError: string | undefined;
 			if (process.env.HELPERS_WAIT_MODE !== 'wait') {
 				// Bounded by the caller's timeout (scanner passes 600_000, probes 60_000);
 				// the backup helper passes 0 = unbounded. One line so the log confirms which
@@ -5467,6 +5512,7 @@ export async function runContainerWithStreaming(options: {
 							// terminally `created`/`dead` after a start failure (e.g. Docker 29.x
 							// exit 128 "failed to mount overlay: device or resource busy", #1487) -
 							// otherwise the unbounded poll waits forever for an `exited` that never comes.
+							if (st?.Error) daemonError = st.Error;
 							const resolved = helperExitFromState(st);
 							if (resolved !== undefined) {
 								exitCode = resolved;
@@ -5528,6 +5574,7 @@ export async function runContainerWithStreaming(options: {
 								StartedAt: st?.StartedAt, FinishedAt: st?.FinishedAt, Pid: st?.Pid,
 							})}`
 						);
+						if (st?.Error) daemonError = st.Error;
 						const resolved = helperExitFromState(st);
 						if (resolved !== undefined) {
 							exitCode = resolved;
@@ -5572,9 +5619,20 @@ export async function runContainerWithStreaming(options: {
 				} catch {
 					// Ignore stderr fetch errors
 				}
-				// Include stdout in the detail too — restic often writes its error
-				// summary there — so callers' error matching (e.g. repo-not-init) works.
-				const detail = (stderrText || stdout || 'no output').substring(0, 1000);
+				// A container the daemon refused has no logs, and the wait-mode route never
+				// inspects it, so read State.Error now rather than reporting "no output".
+				if (needsDaemonErrorLookup({ stderr: stderrText, stdout, daemonError })) {
+					try {
+						const insp = await dockerFetch(`/containers/${containerId}/json`, {}, options.envId);
+						if (insp.ok) {
+							const data = await insp.json() as { State?: { Error?: string } };
+							if (data.State?.Error) daemonError = data.State.Error;
+						}
+					} catch {
+						// Best-effort: a failed inspect just leaves the detail as it was.
+					}
+				}
+				const detail = helperFailureDetail({ stderr: stderrText, stdout, daemonError });
 				const code = exitCode === undefined ? 'unknown (could not determine container exit status)' : String(exitCode);
 				throw new Error(`Container exited with code ${code}: ${detail}`);
 			}
