@@ -29,11 +29,13 @@ import { releaseAgeAdvisory } from './release-age-advisory';
 import { portableImageReference, trackedImageLabels, trackedImageReference } from '../utils/tracked-image';
 import { getMinimumReleaseAgeConfig, imageReleaseAgeRemainingMs, imageReleaseAgeStatus, type ImageCreationMetadata } from './minimum-release-age';
 import { manualPullAgeWarning, verifiedImagePullPlan } from './minimum-release-age-core';
-import { getAdditionalVolumeBinds, dedupeVolumesForRecreate } from './mount-dedupe';
+import { getAdditionalVolumeBinds, dedupeVolumesForRecreate, normalizeMountTarget } from './mount-dedupe';
 import { resolveNanoCpusConflict, resolvePodmanUsernsMode } from './hostconfig-recreate';
 import { isUnknownNetworkKeyError, retryEndpointKey } from './podman-network-key';
 import { expectedEvents, EXPECTED_EVENT_TTL_MS } from './expected-events-core';
 import { decideRespawnOutcome, isExactNameMatch } from './systemd-recreate-core';
+import { snapshotContainerCopyFiles, type CopyFileSnapshot } from './container-copy-files';
+import { discoverComposeCopyFilePaths } from './compose-copy-files';
 // Import-light image parsing shared with the semver layer; re-exported below for callers.
 import { parseImageReference } from './registry/image-ref';
 import { fetchImageCreatedAt, imagePlatform } from './registry/image-age';
@@ -1458,7 +1460,11 @@ export interface CreateContainerOptions {
 	domainname?: string;
 }
 
-export async function createContainer(options: CreateContainerOptions, envId?: number | null) {
+export async function createContainer(
+	options: CreateContainerOptions, envId?: number | null,
+	/** Existing structured mounts when editing; not represented by volumeBinds. */
+	preservedMounts?: Array<{ Target?: string; [key: string]: unknown }>
+) {
 	const containerConfig: any = {
 		Image: options.image,
 		Env: options.env || [],
@@ -1526,6 +1532,18 @@ export async function createContainer(options: CreateContainerOptions, envId?: n
 
 	if (options.volumes) {
 		containerConfig.Volumes = options.volumes;
+	}
+	if (preservedMounts?.length) {
+		// Compose file secrets use HostConfig.Mounts, not Binds. Keep their full
+		// options on edits too; skipping an already-mounted copy-file target is
+		// safe only if the replacement retains that mount. Explicit bind edits
+		// take precedence at the same target, without duplicating mount points.
+		const targets = new Set((containerConfig.HostConfig.Binds ?? []).map((bind: string) => {
+			const parts = bind.split(':');
+			return normalizeMountTarget(parts.length > 1 ? parts[1] : parts[0]);
+		}));
+		containerConfig.HostConfig.Mounts = preservedMounts.filter(mount =>
+			!mount.Target || !targets.has(normalizeMountTarget(mount.Target)));
 	}
 
 	// Backward-compat: callers (and the auto-update inspect path) may still pass
@@ -2047,12 +2065,13 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
  * the image. No field mapping or stripping.
  *
  * Flow:
+ * 0. Discover Compose env secrets and snapshot them with dockhand.copy-file paths
  * 1. Stop container
  * 2. Rename to name-old (frees the name for the new container)
  * 3. Disconnect all networks (frees static IPs)
  * 4. Create new container with original name, one network
  * 5. Connect additional networks
- * 6. Start new container
+ * 6. Restore selected files, then start new container
  * 7. Remove old container
  *
  * On failure: rollback (rename old back, reconnect networks, restart old)
@@ -2069,6 +2088,25 @@ export async function recreateContainerFromInspect(
 	 * it cannot be re-fetched here. When omitted, the rebase falls back to a
 	 * best-effort inspect of the old image id and, failing that, verbatim.
 	 */
+	oldImageConfig?: ImageEnvLabels | null,
+	verifiedImageId?: string,
+	verifiedImageReference?: string
+): Promise<{ Id: string }> {
+	const discoveredPaths = await discoverComposeCopyFilePaths(inspectData.Config?.Labels);
+	const files = await snapshotContainerCopyFiles(inspectData, (path, options) => dockerFetch(path, options, envId), log, discoveredPaths);
+	try {
+		return await recreateContainerWithCopyFiles(inspectData, newImage, files, envId, log, oldImageConfig, verifiedImageId, verifiedImageReference);
+	} finally {
+		files.dispose();
+	}
+}
+
+async function recreateContainerWithCopyFiles(
+	inspectData: any,
+	newImage: string,
+	files: CopyFileSnapshot,
+	envId?: number | null,
+	log?: (msg: string) => void,
 	oldImageConfig?: ImageEnvLabels | null,
 	verifiedImageId?: string,
 	verifiedImageReference?: string
@@ -2441,18 +2479,18 @@ export async function recreateContainerFromInspect(
 		}
 	}
 
-	// 7. Start new container
-	if (wasRunning) {
-		log?.('Starting new container...');
-		try {
+	// 7. Restore selected files BEFORE starting, even if the original was stopped.
+	try {
+		await files.inject(newContainerId);
+		if (wasRunning) {
+			log?.('Starting new container...');
 			await startContainer(newContainerId, envId);
-		} catch (startError: any) {
-			log?.(`Start failed: ${startError.message}, rolling back...`);
-			// Remove failed new container
-			await removeContainer(newContainerId, true, envId).catch(() => {});
-			await rollback();
-			throw startError;
 		}
+	} catch (startError: any) {
+		log?.(`Restore/start failed: ${startError.message}, rolling back...`);
+		await removeContainer(newContainerId, true, envId).catch(() => {});
+		await rollback();
+		throw startError;
 	}
 
 	// 8. Log config diff between old and new container
@@ -2695,6 +2733,11 @@ export function extractContainerOptions(inspectData: any): CreateContainerOption
 	// Volume bindings - preserve ALL volumes including anonymous volumes
 	const volumeBinds: string[] = [];
 	const mountedPaths = new Set<string>();
+	// Structured mounts are passed through separately on edits. Do not convert
+	// their named volumes into Binds and lose VolumeOptions or duplicate targets.
+	for (const mount of hostConfig.Mounts ?? []) {
+		if (mount.Target) mountedPaths.add(normalizeMountTarget(mount.Target));
+	}
 
 	// First, add all entries from hostConfig.Binds (named volumes and bind mounts)
 	if (hostConfig.Binds && Array.isArray(hostConfig.Binds)) {
@@ -2702,7 +2745,7 @@ export function extractContainerOptions(inspectData: any): CreateContainerOption
 			volumeBinds.push(bind);
 			const parts = bind.split(':');
 			if (parts.length >= 2) {
-				mountedPaths.add(parts[1].split(':')[0]);
+				mountedPaths.add(normalizeMountTarget(parts[1]));
 			}
 		}
 	}
@@ -2711,7 +2754,7 @@ export function extractContainerOptions(inspectData: any): CreateContainerOption
 	const mounts = inspectData.Mounts || [];
 	for (const mount of mounts) {
 		if (mount.Type === 'volume' && mount.Name && mount.Destination) {
-			if (!mountedPaths.has(mount.Destination)) {
+			if (!mountedPaths.has(normalizeMountTarget(mount.Destination))) {
 				const bindStr = mount.RW === false
 					? `${mount.Name}:${mount.Destination}:ro`
 					: `${mount.Name}:${mount.Destination}`;
@@ -2919,6 +2962,31 @@ export function extractContainerOptions(inspectData: any): CreateContainerOption
  */
 export async function updateContainer(id: string, options: Partial<CreateContainerOptions>, startAfterUpdate = false, envId?: number | null) {
 	const oldContainerInfo = await inspectContainer(id, envId);
+	// An explicit label edit replaces the user labels. Honor additions/removals on
+	// this very recreation, rather than waiting until the next image update.
+	const labels = options.labels === undefined ? oldContainerInfo.Config?.Labels : options.labels;
+	// Discover from the current container, even if this edit changes its labels.
+	const discoveredPaths = await discoverComposeCopyFilePaths(oldContainerInfo.Config?.Labels);
+	const files = await snapshotContainerCopyFiles(
+		{ ...oldContainerInfo, Config: { ...oldContainerInfo.Config, Labels: labels } },
+		(path, request) => dockerFetch(path, request, envId), undefined, discoveredPaths,
+		{
+			...oldContainerInfo,
+			Config: { ...oldContainerInfo.Config, User: 'user' in options ? options.user : oldContainerInfo.Config?.User },
+			HostConfig: { ...oldContainerInfo.HostConfig, UsernsMode: 'usernsMode' in options ? options.usernsMode : oldContainerInfo.HostConfig?.UsernsMode }
+		}
+	);
+	try {
+		return await updateContainerWithCopyFiles(id, options, startAfterUpdate, envId, oldContainerInfo, files);
+	} finally {
+		files.dispose();
+	}
+}
+
+async function updateContainerWithCopyFiles(
+	id: string, options: Partial<CreateContainerOptions>, startAfterUpdate: boolean,
+	envId: number | null | undefined, oldContainerInfo: any, files: CopyFileSnapshot
+) {
 	const wasRunning = oldContainerInfo.State.Running;
 	const name = oldContainerInfo.Name?.replace(/^\//, '') || '';
 	const oldContainerId = oldContainerInfo.Id;
@@ -3026,22 +3094,23 @@ export async function updateContainer(id: string, options: Partial<CreateContain
 	// 4. Create new container
 	let newContainer;
 	try {
-		newContainer = await createContainer(mergedOptions, envId);
+		newContainer = await createContainer(mergedOptions, envId, hostConfig.Mounts);
 	} catch (createError) {
 		await rollback();
 		throw createError;
 	}
 
-	// 5. Start if needed
-	if (startAfterUpdate) {
-		try {
+	// 5. Restore files even when the caller leaves the replacement stopped.
+	try {
+		await files.inject(newContainer.id);
+		if (startAfterUpdate) {
 			await newContainer.start();
-		} catch (startError) {
-			// Remove failed new container and restore old one
-			await removeContainer(newContainer.id, true, envId).catch(() => {});
-			await rollback();
-			throw startError;
 		}
+	} catch (startError) {
+		// Remove failed new container and restore old one
+		await removeContainer(newContainer.id, true, envId).catch(() => {});
+		await rollback();
+		throw startError;
 	}
 
 	// 6. Remove old container (success path only)
