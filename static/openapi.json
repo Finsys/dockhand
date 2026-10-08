@@ -4646,6 +4646,9 @@
                   },
                   "mergeStackFiles": {
                     "type": "boolean"
+                  },
+                  "postRestore": {
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -4668,7 +4671,8 @@
                   "string"
                 ],
                 "skipStackFiles": true,
-                "mergeStackFiles": true
+                "mergeStackFiles": true,
+                "postRestore": "string"
               }
             }
           }
@@ -13366,6 +13370,64 @@
             "bearerAuth": []
           }
         ]
+      }
+    },
+    "/api/environments/report": {
+      "get": {
+        "operationId": "get_api_environments_report",
+        "tags": [
+          "environments"
+        ],
+        "summary": "Export an environment state report as a downloadable file",
+        "parameters": [
+          {
+            "name": "env",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "One environment id; omit to report on every accessible environment"
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Output format - json (default) or csv"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The report as a downloadable json or csv attachment"
+          },
+          "400": {
+            "description": "The env query parameter is not a number"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "403": {
+            "description": "A paid license is required, or permission denied"
+          },
+          "404": {
+            "description": "No accessible environment matches the requested id"
+          },
+          "500": {
+            "description": "Failed to build the report"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Inventory, vulnerability counts and scan coverage for one environment or for every environment the caller may see. Requires a valid paid license of either tier. The change history is included only for an enterprise license, because it is the audit log under another name."
       }
     },
     "/api/environments/test": {
