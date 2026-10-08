@@ -29,7 +29,7 @@ let cachedHostDataDir: string | null = null;
 let detectionAttempted = false;
 
 // Cache ALL mounts for path translation (not just DATA_DIR)
-let cachedMounts: Array<{ source: string; destination: string }> | null = null;
+let cachedMounts: ContainerMount[] | null = null;
 
 // Cache Dockhand's own Docker access method (detected from container inspect).
 // cachedOwnDockerHost holds ONLY a DOCKER_HOST the user set on Dockhand's own
@@ -81,9 +81,20 @@ export function getOwnContainerId(): string | null {
 	return null;
 }
 
+/**
+ * One of Dockhand's own mounts. `type` matters: a tmpfs reports an empty Source and
+ * lives in memory, so it can never be handed to the daemon as a path.
+ */
+export interface ContainerMount {
+	source: string;
+	destination: string;
+	type?: string;
+	name?: string;
+}
+
 /** Docker container inspect fields we read to populate the caches. */
 interface OwnContainerInfo {
-	Mounts?: Array<{ Type?: string; Source: string; Destination: string }>;
+	Mounts?: Array<{ Type?: string; Name?: string; Source: string; Destination: string }>;
 	Config?: { Env?: string[] };
 	HostConfig?: { ExtraHosts?: string[] };
 	NetworkSettings?: { Networks?: Record<string, unknown> };
@@ -98,7 +109,7 @@ interface OwnContainerInfo {
  * own env vars into cachedOwnDockerHost (which the scanner honors).
  */
 function populateCachesFromInspect(info: OwnContainerInfo, ownDockerHostOverride?: string): void {
-	cachedMounts = (info.Mounts || []).map(m => ({ source: m.Source, destination: m.Destination }));
+	cachedMounts = (info.Mounts || []).map(m => ({ source: m.Source, destination: m.Destination, type: m.Type, name: m.Name }));
 	console.log(`[HostPath] Cached ${cachedMounts.length} mount(s)`);
 
 	if (ownDockerHostOverride) {
@@ -430,7 +441,7 @@ export function translateContainerPathViaMount(containerPath: string): string | 
  * or before detectHostDataDir has run). Callers use this to tell "Dockhand is
  * containerized and this path is not under any bind" from "no mount info at all".
  */
-export function getCachedContainerMounts(): Array<{ source: string; destination: string }> {
+export function getCachedContainerMounts(): ContainerMount[] {
 	return cachedMounts ? [...cachedMounts] : [];
 }
 
@@ -638,4 +649,84 @@ export function findRelativeBindSources(composeContent: string): string[] {
 		if (m) found.push(m[1]);
 	}
 	return found;
+}
+
+/**
+ * The HOST_DATA_DIR an operator set, or null. Deliberately NOT the detected value:
+ * detection already comes from the mount table resolveHostPath reads, so treating it as
+ * an override would just shadow the more specific mount with DATA_DIR's root.
+ */
+export function getHostDataDirOverride(): string | null {
+	const v = process.env.HOST_DATA_DIR?.trim();
+	return v || null;
+}
+
+/** Why a container path could not be mapped to the host, for an actionable message. */
+export type HostPathFailure =
+	| { reason: 'not-containerized' }
+	| { reason: 'no-mount-covers'; dataDir: string }
+	| { reason: 'mount-not-on-disk'; mountType: string; destination: string };
+
+export type HostPathResult =
+	| { ok: true; hostPath: string; via: 'bind' | 'volume' | 'override'; mountDestination: string }
+	| { ok: false; failure: HostPathFailure };
+
+/**
+ * Map a path inside Dockhand's container to the path the DAEMON knows it by.
+ *
+ * The daemon only understands host paths, so anything Dockhand hands it - a helper's
+ * bind source, a compose relative volume - has to be translated first. The mount table
+ * from Dockhand's own inspect is the authority: the most specific mount covering the
+ * path wins, and its Source is where those bytes really live.
+ *
+ * Returns a REASON on failure rather than the input unchanged, so a caller can say what
+ * to fix instead of handing the daemon a path it cannot resolve.
+ */
+export function resolveHostPath(
+	containerPath: string,
+	mounts: ContainerMount[],
+	dataDir = resolve(process.env.DATA_DIR || '/app/data'),
+	hostDataDir = getHostDataDirOverride()
+): HostPathResult {
+	const target = resolve(containerPath).replace(/\/+$/, '') || '/';
+	const dataDirNorm = dataDir.replace(/\/+$/, '') || '/';
+	// HOST_DATA_DIR declares where DATA_DIR lives on the host, for a runtime whose mount
+	// introspection does not work (rootless, Podman, a custom hostname). It answers for the
+	// DATA_DIR SUBTREE, so it is consulted AFTER the mount table: a bind deeper than DATA_DIR
+	// names a different host dir for that subpath, and the declaration for the root must not
+	// speak for it.
+	const overrideHostPath = (): HostPathResult | null => {
+		if (!hostDataDir) return null;
+		if (target !== dataDirNorm && !target.startsWith(dataDirNorm + '/')) return null;
+		return {
+			ok: true,
+			hostPath: hostDataDir.replace(/\/+$/, '') + target.slice(dataDirNorm.length),
+			via: 'override',
+			mountDestination: dataDirNorm
+		};
+	};
+
+	if (mounts.length === 0) return overrideHostPath() ?? { ok: false, failure: { reason: 'not-containerized' } };
+	let best: ContainerMount | null = null;
+	for (const m of mounts) {
+		const dest = resolve(m.destination).replace(/\/+$/, '') || '/';
+		const covers = target === dest || dest === '/' || target.startsWith(dest + '/');
+		if (!covers) continue;
+		if (!best || dest.length > (resolve(best.destination).replace(/\/+$/, '') || '/').length) best = m;
+	}
+	if (!best) return overrideHostPath() ?? { ok: false, failure: { reason: 'no-mount-covers', dataDir } };
+
+	// tmpfs lives in memory and reports an empty Source; a daemon cannot bind it, and
+	// joining a subpath onto '' would silently yield a host-root path.
+	if (!best.source || (best.type && best.type !== 'bind' && best.type !== 'volume')) {
+		return overrideHostPath() ?? {
+			ok: false,
+			failure: { reason: 'mount-not-on-disk', mountType: best.type || 'unknown', destination: best.destination }
+		};
+	}
+
+	const dest = resolve(best.destination).replace(/\/+$/, '') || '/';
+	const rel = dest === '/' ? target : target.slice(dest.length);
+	const hostPath = (best.source.replace(/\/+$/, '') + rel) || '/';
+	return { ok: true, hostPath, via: best.type === 'volume' ? 'volume' : 'bind', mountDestination: best.destination };
 }
