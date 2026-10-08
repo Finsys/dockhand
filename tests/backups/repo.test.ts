@@ -36,6 +36,35 @@ describe('classifyRepoFailure', () => {
 	it('exit 10 → REPO_NOT_INITIALIZED', () => {
 		expect(classifyRepoFailure(fail(10, 'x')).code).toBe('REPO_NOT_INITIALIZED');
 	});
+	it('keeps a local unreadable config in the existing initialization flow', () => {
+		const classified = classifyRepoFailure(fail(
+			10,
+			'Fatal: unable to open config file: stat /r/config: permission denied'
+		), '/r');
+		expect(classified.code).toBe('REPO_NOT_INITIALIZED');
+	});
+	it('classifies public-key rejection only for SFTP repositories', () => {
+		const classified = classifyRepoFailure(fail(
+			10,
+			'Load key "/tmp/id": invalid format\nPermission denied (publickey). unexpected EOF'
+		), 'sftp://backup@example.com/repo');
+		expect(classified.code).toBe('RESTIC');
+		expect(classified.error).toMatch(/matching public key.*authorized_keys/);
+		expect(classifyRepoFailure(
+			fail(10, 'Permission denied (publickey).'),
+			'/local/repo'
+		).code).toBe('REPO_NOT_INITIALIZED');
+	});
+	it('classifies SFTP host-key and connection failures without offering initialization', () => {
+		expect(classifyRepoFailure(
+			fail(10, 'Host key verification failed.'),
+			'sftp://backup@example.com/repo'
+		).code).toBe('RESTIC');
+		expect(classifyRepoFailure(
+			fail(10, 'ssh: connect to host example.com port 22: Connection refused'),
+			'sftp://backup@example.com/repo'
+		).code).toBe('RESTIC');
+	});
 	it('"is not a restic repository" → REPO_NOT_INITIALIZED', () => {
 		expect(classifyRepoFailure(fail(1, 'Fatal: is not a restic repository')).code).toBe('REPO_NOT_INITIALIZED');
 	});

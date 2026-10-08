@@ -34,6 +34,7 @@ RUN APKO_ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "aarch64" || echo "x86_64") 
     "    - ca-certificates" \
     "    - busybox" \
     "    - restic" \
+    "    - openssh-client" \
     "entrypoint:" \
     "  command: /bin/sh" \
     "archs:" \
@@ -48,5 +49,5 @@ RUN apko build apko.yaml dockhand-backup:latest output.tar \
 
 FROM scratch
 COPY --from=os-builder /work/rootfs /
-COPY scripts/backup-entrypoint.sh /entrypoint.sh
+COPY --chmod=0755 scripts/backup-entrypoint.sh /entrypoint.sh
 ENTRYPOINT ["/entrypoint.sh"]

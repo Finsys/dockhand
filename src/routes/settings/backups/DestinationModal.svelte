@@ -7,7 +7,7 @@
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { Input } from '$lib/components/ui/input';
 	import { Textarea } from '$lib/components/ui/textarea';
-	import { Plus, Check, RefreshCw, Wifi, Database, HardDrive, Dices, Copy, BarChart3, Loader2, Clock, PackageCheck, FolderCheck, Unlock, CircleHelp, AlertTriangle, Upload } from 'lucide-svelte';
+	import { Plus, Check, RefreshCw, Wifi, Database, HardDrive, Dices, Copy, BarChart3, Loader2, Clock, PackageCheck, FolderCheck, Unlock, CircleHelp, AlertTriangle, Upload, Server } from 'lucide-svelte';
 	import { AWS_REGIONS, regionalEndpoint, extractS3Region } from '$lib/utils/s3-region';
 	import cronstrue from 'cronstrue';
 	import { formatBytes } from '$lib/utils/format';
@@ -19,6 +19,7 @@
 	import { toast } from 'svelte-sonner';
 	import { focusFirstInput } from '$lib/utils';
 	import { backendSupportsTls } from '$lib/shared/repo-predicates';
+	import { buildSftpRepository, isSftpRepository, parseSftpRepository } from '$lib/shared/sftp-repository';
 
 	interface Destination {
 		id: number;
@@ -28,6 +29,9 @@
 		envVars?: Record<string, string>;
 		hasCacert?: boolean;         // a CA cert is stored (the PEM itself is never sent back)
 		hasTlsClientCert?: boolean;  // a client cert is stored
+		hasSshPrivateKey?: boolean;
+		hasSshKnownHosts?: boolean;
+		sshKnownHosts?: string | null;
 		flags?: string;
 		backupFlags?: string;   // split from the GET endpoint (legacy strings surface here)
 		restoreFlags?: string;
@@ -82,6 +86,8 @@
 		optional?: boolean; // no red asterisk; not required for Test/Create
 		multiline?: boolean; // render a textarea (e.g. a pasted JSON credential)
 		hint?: string; // small helper text under the field
+		secretField?: 'sshPrivateKey' | 'sshKnownHosts';
+		accept?: string;
 	}
 
 	interface BackendType {
@@ -101,6 +107,51 @@
 			],
 			buildRepo: (f) => f.path || '',
 			parseRepo: (repo) => ({ path: repo })
+		},
+		{
+			value: 'sftp', label: 'SFTP (SSH key)', icon: Server,
+			fields: [
+				{ key: 'host', label: 'SSH host', placeholder: 'backup.example.com' },
+				{ key: 'port', label: 'SSH port', placeholder: '22', optional: true },
+				{ key: 'username', label: 'SSH username', placeholder: 'backup' },
+				{
+					key: 'path',
+					label: 'Repository path',
+					placeholder: 'Leave blank to use the account home directory',
+					optional: true,
+					hint: 'Optional. Relative paths start from the SFTP account home directory; leave blank to use that directory.'
+				},
+				{
+					key: 'sshPrivateKey',
+					label: 'SSH private key',
+					placeholder: '-----BEGIN OPENSSH PRIVATE KEY-----',
+					secret: true,
+					multiline: true,
+					secretField: 'sshPrivateKey',
+					hint: 'Use a private key that does not require an interactive passphrase. Password authentication and ssh-agent are never used.'
+				},
+				{
+					key: 'sshKnownHosts',
+					label: 'Verified known_hosts data',
+					placeholder: '[backup.example.com]:2222 ssh-ed25519 AAAA...',
+					secret: true,
+					multiline: true,
+					secretField: 'sshKnownHosts',
+					hint: 'Paste host-key entries whose fingerprints you verified independently. Strict host-key checking is always enabled.'
+				}
+			],
+			buildRepo: (f) => buildSftpRepository({
+				host: f.host,
+				port: f.port || '22',
+				username: f.username,
+				path: f.path
+			}),
+			parseRepo: (repo) => {
+				const parsed = parseSftpRepository(repo);
+				return parsed
+					? { ...parsed, path: parsed.path === '.' ? '' : parsed.path }
+					: { host: '', port: '22', username: '', path: '' };
+			}
 		},
 		{
 			value: 's3', label: 'Amazon S3', icon: AmazonS3Icon,
@@ -200,7 +251,7 @@
 
 	// Read a selected file into the field (e.g. a service-account JSON). Kept lenient:
 	// we accept any text; restic validates the JSON when the destination is tested.
-	async function uploadJsonToField(key: string, e: Event) {
+	async function uploadTextToField(key: string, e: Event) {
 		const input = e.target as HTMLInputElement;
 		const file = input.files?.[0];
 		if (!file) return;
@@ -219,6 +270,9 @@
 	let formTlsClientCert = $state('');
 	let hadCacert = $state(false);        // a cert was already stored when the modal opened
 	let hadTlsClientCert = $state(false);
+	let hadSshPrivateKey = $state(false);
+	let hadSshKnownHosts = $state(false);
+	let initialSshKnownHosts = $state('');
 	let caFileInput = $state<HTMLInputElement | null>(null);
 	let clientCertFileInput = $state<HTMLInputElement | null>(null);
 
@@ -264,8 +318,8 @@
 	let testStatusMsg = $state('');
 
 	const selectedBackend = $derived(backendTypes.find(b => b.value === formBackendType) ?? backendTypes[0]);
-	const repoFields = $derived(selectedBackend.fields.filter(f => !f.envKey));
-	const credentialFields = $derived(selectedBackend.fields.filter(f => f.envKey));
+	const repoFields = $derived(selectedBackend.fields.filter(f => !f.envKey && !f.secretField));
+	const credentialFields = $derived(selectedBackend.fields.filter(f => f.envKey || f.secretField));
 
 	// TLS certs only apply to backends self-hostable over HTTPS with a private CA
 	// (S3/REST); hidden for local/B2/Azure/Google Cloud. See backendSupportsTls.
@@ -277,13 +331,38 @@
 	function fieldRequired(f: FormField): boolean {
 		return !f.optional && f.key !== 'skipHostKey';
 	}
+	function hasStoredSecret(field: FormField): boolean {
+		if (field.secretField === 'sshPrivateKey') return hadSshPrivateKey;
+		if (field.secretField === 'sshKnownHosts') return hadSshKnownHosts;
+		return false;
+	}
+	function clearStoredSecret(field: FormField): void {
+		if (field.secretField === 'sshPrivateKey') hadSshPrivateKey = false;
+		if (field.secretField === 'sshKnownHosts') hadSshKnownHosts = false;
+		formFields[field.key] = '';
+	}
+	function secretPlaceholder(field: FormField): string {
+		if (!isEditing || !hasStoredSecret(field)) return field.placeholder;
+		if (field.secretField === 'sshPrivateKey') {
+			return '(an SSH private key is stored — leave blank to keep it)';
+		}
+		if (field.secretField === 'sshKnownHosts') {
+			return '(verified known_hosts data is stored — leave blank to keep it)';
+		}
+		return '(leave blank to keep current)';
+	}
 	// All mandatory fields present? Drives the disabled state of Test/Create. On edit
 	// the credentials + password are already stored (secrets show blank = "keep
 	// current"), so credential fields aren't required there - only repo fields are.
 	const requiredFieldsFilled = $derived(
 		selectedBackend.fields
-			.filter(f => fieldRequired(f) && !(isEditing && f.envKey))
-			.every(f => (formFields[f.key] ?? '').trim().length > 0)
+			.filter(fieldRequired)
+			.every((f) => {
+				if ((formFields[f.key] ?? '').trim()) return true;
+				if (!isEditing) return false;
+				if (f.envKey) return true;
+				return hasStoredSecret(f);
+			})
 	);
 	const formValid = $derived(
 		formName.trim().length > 0
@@ -306,7 +385,7 @@
 	}
 
 	function detectBackendType(repo: string): string {
-		for (const prefix of ['s3:', 'b2:', 'azure:', 'gs:', 'rest:']) {
+		for (const prefix of ['s3:', 'b2:', 'azure:', 'gs:', 'rest:', 'sftp:']) {
 			if (repo.startsWith(prefix)) return prefix.slice(0, -1);
 		}
 		return 'local';
@@ -316,6 +395,7 @@
 		formName = ''; formBackendType = 'local'; formFields = {}; formPassword = '';
 		formBackupFlags = ''; formRestoreFlags = ''; formError = '';
 		formCacert = ''; formTlsClientCert = ''; hadCacert = false; hadTlsClientCert = false;
+		hadSshPrivateKey = false; hadSshKnownHosts = false; initialSshKnownHosts = '';
 		formSaving = false;
 		policyPruneEnabled = true; policyPruneSchedule = '0 0 1 * *'; policyPruneMaxUnused = '10';
 		policyCheckEnabled = true; policyCheckSchedule = '0 0 1 * *';
@@ -355,6 +435,10 @@
 				formCacert = ''; formTlsClientCert = '';
 				hadCacert = !!destination.hasCacert;
 				hadTlsClientCert = !!destination.hasTlsClientCert;
+				hadSshPrivateKey = !!destination.hasSshPrivateKey;
+				hadSshKnownHosts = !!destination.hasSshKnownHosts;
+				fields.sshKnownHosts = destination.sshKnownHosts ?? '';
+				initialSshKnownHosts = fields.sshKnownHosts;
 				formError = '';
 				// Load policies
 				const pol = destination.policies ? (() => { try { return JSON.parse(destination.policies); } catch { return {}; } })() : {};
@@ -406,7 +490,7 @@
 
 	function handleBackendChange(value: string) {
 		formBackendType = value;
-		formFields = {};
+		formFields = value === 'sftp' ? { port: '22' } : {};
 	}
 
 	async function testConnection() {
@@ -430,6 +514,10 @@
 					cacert: formCacert.trim() || undefined,
 					tlsClientCert: formTlsClientCert.trim() || undefined
 				};
+				if (formBackendType === 'sftp') {
+					payload.sshPrivateKey = formFields.sshPrivateKey;
+					payload.sshKnownHosts = formFields.sshKnownHosts;
+				}
 			}
 			const res = await fetch('/api/backup/destinations/test', {
 				method: 'POST',
@@ -544,6 +632,18 @@
 			else if (isEditing && !hadCacert) body.cacert = '';
 			if (formTlsClientCert.trim()) body.tlsClientCert = formTlsClientCert;
 			else if (isEditing && !hadTlsClientCert) body.tlsClientCert = '';
+			if (formBackendType === 'sftp') {
+				if (formFields.sshPrivateKey?.trim()) body.sshPrivateKey = formFields.sshPrivateKey;
+				else if (isEditing && !hadSshPrivateKey) body.sshPrivateKey = '';
+				if ((formFields.sshKnownHosts ?? '') !== initialSshKnownHosts) {
+					body.sshKnownHosts = formFields.sshKnownHosts ?? '';
+				}
+			} else if (isEditing && isSftpRepository(destination!.repository)) {
+				// A backend switch away from SFTP explicitly removes credentials that
+				// no longer have a purpose instead of retaining hidden private material.
+				body.sshPrivateKey = '';
+				body.sshKnownHosts = '';
+			}
 			const res = await fetch(isEditing ? `/api/backup/destinations/${destination!.id}` : '/api/backup/destinations', {
 				method: isEditing ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
 			});
@@ -570,6 +670,11 @@
 			<div class="flex items-start gap-2 p-2.5 mt-4 rounded-md bg-amber-500/10 border border-amber-500/20 text-xs text-amber-600 dark:text-amber-400">
 				<HardDrive class="w-3.5 h-3.5 shrink-0 mt-0.5" />
 				<span>Enter the path as Dockhand sees it inside its own container (the container side of your backup volume mount, e.g. <code>/app/local-backups/...</code>), not the host path. Local path repositories work on the local Docker host, or a co-located socket-proxy on that same host. For remote hosts, use S3, REST, or another remote backend.</span>
+			</div>
+		{:else if selectedBackend.value === 'sftp'}
+			<div class="flex items-start gap-2 p-2.5 mt-4 rounded-md bg-blue-500/10 border border-blue-500/20 text-xs text-blue-700 dark:text-blue-300">
+				<Server class="w-3.5 h-3.5 shrink-0 mt-0.5" />
+				<span>Dockhand uses only the supplied private key and verified <code>known_hosts</code> entries. Strict host-key checking is always on; password login, ssh-agent use, agent forwarding, and trust-on-first-use are disabled.</span>
 			</div>
 		{/if}
 		<div class="grid grid-cols-2 gap-6 py-4">
@@ -644,6 +749,7 @@
 								oninput={(e: Event) => { formFields[field.key] = (e.target as HTMLInputElement).value; }}
 								placeholder={field.placeholder}
 							/>
+							{#if field.hint}<p class="text-xs text-muted-foreground">{field.hint}</p>{/if}
 						</div>
 					{/if}
 				{/each}
@@ -662,23 +768,28 @@
 							{#if field.multiline}
 								<div class="flex items-center justify-between">
 									<FieldLabel label={field.label} forId="field-{field.key}" required={fieldRequired(field)} />
-									<Button variant="outline" size="sm" class="h-7 px-2 text-xs" onclick={() => fileInputs[field.key]?.click()}>
-										<Upload class="mr-1 h-3 w-3" />Upload file
-									</Button>
+									<div class="flex gap-1">
+										{#if isEditing && field.secretField && hasStoredSecret(field) && !formFields[field.key]}
+											<Button variant="outline" size="sm" class="h-7 px-2 text-xs text-destructive" onclick={() => clearStoredSecret(field)}>Clear</Button>
+										{/if}
+										<Button variant="outline" size="sm" class="h-7 px-2 text-xs" onclick={() => fileInputs[field.key]?.click()}>
+											<Upload class="mr-1 h-3 w-3" />Upload file
+										</Button>
+									</div>
 								</div>
 								<input
 									type="file"
-									accept="application/json,.json"
+									accept={field.accept}
 									class="hidden"
 									bind:this={fileInputs[field.key]}
-									onchange={(e) => uploadJsonToField(field.key, e)}
+									onchange={(e) => uploadTextToField(field.key, e)}
 								/>
 								<Textarea
 									id="field-{field.key}"
 									rows={5}
 									value={formFields[field.key] ?? ''}
 									oninput={(e: Event) => { formFields[field.key] = (e.target as HTMLTextAreaElement).value; }}
-									placeholder={isEditing && field.secret ? '(leave blank to keep current)' : field.placeholder}
+									placeholder={secretPlaceholder(field)}
 									class="field-sizing-fixed max-h-40 resize-y overflow-auto font-mono text-xs"
 								/>
 							{:else}

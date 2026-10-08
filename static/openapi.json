@@ -3799,11 +3799,11 @@
         "tags": [
           "backup"
         ],
-        "summary": "List all backup destinations (restic repositories); the password is stripped and cloud-credential env vars are omitted from the list view",
+        "summary": "List all backup destinations without passwords, SSH data, TLS PEMs, or cloud-credential env vars",
         "parameters": [],
         "responses": {
           "200": {
-            "description": "Array of backup destination objects without secrets (no password, no envVars)"
+            "description": "Array of backup destination objects without secret values; has... flags indicate stored dedicated credentials"
           }
         },
         "security": [
@@ -3825,7 +3825,7 @@
         "parameters": [],
         "responses": {
           "201": {
-            "description": "The created backup destination object (includes decrypted envVars since the caller just supplied them; password is stripped)"
+            "description": "The created backup destination object (includes envVars and public sshKnownHosts data supplied by the caller; password, TLS PEMs, and the SSH private key are stripped)"
           },
           "400": {
             "description": "Invalid input — missing name/repository/password, unsupported/SSRF-blocked repository, invalid restic flags, or an invalid cron schedule in the policies"
@@ -3884,6 +3884,12 @@
                   "tlsClientCert": {
                     "type": "string"
                   },
+                  "sshPrivateKey": {
+                    "type": "string"
+                  },
+                  "sshKnownHosts": {
+                    "type": "string"
+                  },
                   "policies": {
                     "type": "string"
                   }
@@ -3914,7 +3920,7 @@
         "tags": [
           "backup"
         ],
-        "summary": "Fetch a single backup destination; decrypted cloud-credential env vars are only included for callers who can manage backups, and the password is always stripped",
+        "summary": "Fetch one backup destination; cloud env vars and public SSH known_hosts data require manage permission, while passwords, TLS PEMs, and SSH private keys are always stripped",
         "parameters": [
           {
             "name": "id",
@@ -3928,7 +3934,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The backup destination object (envVars included only for \"backups:manage\" callers; password always stripped)"
+            "description": "The destination with has... presence flags; envVars and sshKnownHosts require \"backups:manage\", and private credential values are never returned"
           },
           "400": {
             "description": "Invalid id (not a number)"
@@ -3966,7 +3972,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The updated backup destination object (password stripped, envVars echoed back to the managing caller)"
+            "description": "The updated destination with password and dedicated TLS/SFTP credential values stripped"
           },
           "400": {
             "description": "Invalid input — invalid id, unsupported/SSRF-blocked repository, invalid restic flags, invalid policy cron, or switching to a local repository used by a remote-environment config"
@@ -4026,6 +4032,12 @@
                     "type": "string"
                   },
                   "tlsClientCert": {
+                    "type": "string"
+                  },
+                  "sshPrivateKey": {
+                    "type": "string"
+                  },
+                  "sshKnownHosts": {
                     "type": "string"
                   },
                   "policies": {
@@ -4363,7 +4375,7 @@
         "tags": [
           "backup"
         ],
-        "summary": "Test a backup repository — either a saved destination (by destinationId) or inline credentials supplied for a not-yet-saved destination",
+        "summary": "Test a saved or inline backup repository, including strict private-key SFTP authentication",
         "parameters": [],
         "responses": {
           "200": {
@@ -4384,7 +4396,7 @@
             "bearerAuth": []
           }
         ],
-        "description": "Provide `destinationId` to test a saved destination using its stored credentials, or omit it and supply `repository`/`password`/`envVars` to test before saving. Permission denial (403, \"backups:manage\") is produced by the shared requireBackups route guard. destinationId from GET /api/backup/destinations.",
+        "description": "Provide `destinationId` to use stored credentials, or omit it and supply repository credentials inline. SFTP requires sshPrivateKey and verified sshKnownHosts; password auth and trust-on-first-use are never enabled. Permission denial (403, \"backups:manage\") is produced by the shared requireBackups route guard.",
         "requestBody": {
           "required": true,
           "content": {
@@ -4409,6 +4421,12 @@
                     "type": "string"
                   },
                   "tlsClientCert": {
+                    "type": "string"
+                  },
+                  "sshPrivateKey": {
+                    "type": "string"
+                  },
+                  "sshKnownHosts": {
                     "type": "string"
                   }
                 }

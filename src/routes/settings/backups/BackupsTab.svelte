@@ -23,7 +23,7 @@
 	import EnvironmentIcon from '$lib/components/EnvironmentIcon.svelte';
 	import { LoadingState } from '$lib/components/ui/loading-state';
 	import { getRepoTypeIcon, getRepoTypeLabel } from '$lib/utils/backup';
-	import { shouldSaveBackupImage } from '$lib/utils/backup-image';
+	import { shouldSaveBackupImage, syncBackupImageFromStore } from '$lib/utils/backup-image';
 	import { summarizeTestResults, formatTestSummary, type TestOutcome } from '$lib/utils/backup-test-summary';
 	import SnapshotBrowser from '../../containers/SnapshotBrowser.svelte';
 	import type { Component } from 'svelte';
@@ -165,6 +165,16 @@
 	let savingImage = $state(false);
 	let imageSavedOk = $state(false);
 
+	$effect(() => {
+		const synced = syncBackupImageFromStore(
+			backupImage,
+			backupImageInitial,
+			$appSettings.defaultBackupImage
+		);
+		backupImage = synced.current;
+		backupImageInitial = synced.initial;
+	});
+
 	async function saveBackupImage() {
 		if (!shouldSaveBackupImage(backupImage, backupImageInitial)) {
 			// Unchanged — nothing to persist. Give the same confirmation feedback.
@@ -180,6 +190,8 @@
 				body: JSON.stringify({ defaultBackupImage: backupImage })
 			});
 			if (res.ok) {
+				await appSettings.refresh();
+				backupImage = $appSettings.defaultBackupImage;
 				backupImageInitial = backupImage;
 				imageSavedOk = true;
 				setTimeout(() => { imageSavedOk = false; }, 2000);
