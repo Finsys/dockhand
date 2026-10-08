@@ -109,7 +109,7 @@
 	let passkeysLoading = $state(false);
 	// Whether this instance offers passkeys. Existing keys stay listed when it is
 	// off, so somebody can see what they registered before it was turned off.
-	let passkeysEnabled = $state(true);
+	let passkeysEnabled = $state(false);
 	let passkeyActionLoading = $state(false);
 	let passkeyName = $state('');
 	let passkeyError = $state('');
@@ -121,7 +121,7 @@
 			if (response.ok) {
 				const data = await response.json();
 				passkeys = data.passkeys || [];
-				passkeysEnabled = data.enabled !== false;
+				passkeysEnabled = data.enabled === true;
 			}
 		} finally {
 			passkeysLoading = false;

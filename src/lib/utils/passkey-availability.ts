@@ -14,12 +14,12 @@
 /**
  * Read the stored `passkeys_enabled` setting.
  *
- * Absent or unreadable means ON. The setting arriving in an upgrade must not switch
- * the feature off underneath an install whose users have already registered keys, so
- * only an explicit false disables it.
+ * Absent or unreadable means OFF: passkeys need an ORIGIN the deployment may not have,
+ * so an instance opts in once an administrator has somewhere for the credential to bind
+ * to. Only an explicit true enables it.
  */
 export function passkeysEnabledFromSetting(stored: unknown): boolean {
-	return stored !== false;
+	return stored === true;
 }
 
 export interface PasskeyAvailability {

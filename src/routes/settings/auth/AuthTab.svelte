@@ -52,7 +52,7 @@
 	let authForbidden = $state(false);
 	let authLoading = $state(true);
 	let sessionTimeout = $state(86400);
-	let passkeysEnabled = $state(true);
+	let passkeysEnabled = $state(false);
 	// Whether ORIGIN lets a ceremony run at all, so the screen can say why an
 	// enabled setting is still not offering anything.
 	let passkeysConfigurable = $state(true);
@@ -76,7 +76,7 @@
 				// 0 is the "never expire" sentinel; keep the last real timeout for the input.
 				neverExpire = data.sessionTimeout === 0;
 				sessionTimeout = data.sessionTimeout || 86400;
-				passkeysEnabled = data.passkeysEnabled !== false;
+				passkeysEnabled = data.passkeysEnabled === true;
 				passkeysConfigurable = data.passkeysConfigurable !== false;
 			}
 		} catch (error) {

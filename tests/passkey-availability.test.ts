@@ -30,26 +30,26 @@ describe('when passkeys are offered', () => {
 });
 
 describe('reading the stored setting', () => {
-	// The setting arriving in an upgrade must not switch passkeys off underneath an
-	// install whose users already registered keys, so only an explicit false disables.
-	test('absent means on', () => {
-		expect(passkeysEnabledFromSetting(null)).toBe(true);
-		expect(passkeysEnabledFromSetting(undefined)).toBe(true);
+	// Passkeys need an ORIGIN the deployment may not have, so an instance opts in
+	// rather than being opted in for it.
+	test('absent means off', () => {
+		expect(passkeysEnabledFromSetting(null)).toBe(false);
+		expect(passkeysEnabledFromSetting(undefined)).toBe(false);
 	});
 
-	test('an explicit false is the only thing that disables', () => {
-		expect(passkeysEnabledFromSetting(false)).toBe(false);
-	});
-
-	test('an explicit true enables', () => {
+	test('an explicit true is the only thing that enables', () => {
 		expect(passkeysEnabledFromSetting(true)).toBe(true);
 	});
 
-	test('an unreadable value is treated as on, not off', () => {
+	test('an explicit false disables', () => {
+		expect(passkeysEnabledFromSetting(false)).toBe(false);
+	});
+
+	test('an unreadable value does not enable', () => {
 		// getSetting hands back whatever parsed, or the raw string when it did not.
-		// None of these are a deliberate "off", so none may remove the sign-in method.
-		for (const junk of ['false', 0, '', 'nonsense', {}, [], NaN]) {
-			expect(passkeysEnabledFromSetting(junk)).toBe(true);
+		// None of these is a deliberate "on", so none may offer the sign-in method.
+		for (const junk of ['true', 'false', 1, 0, '', 'nonsense', {}, [], NaN]) {
+			expect(passkeysEnabledFromSetting(junk)).toBe(false);
 		}
 	});
 });
