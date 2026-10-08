@@ -4,6 +4,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Checkbox } from '$lib/components/ui/checkbox';
+	import { countTargetsWithData, overwriteAckReachable } from '$lib/utils/restore-gate-core';
 	import { Label } from '$lib/components/ui/label';
 	import { Badge } from '$lib/components/ui/badge';
 	import { RotateCcw, AlertTriangle, Loader2, HardDrive, Folder, Clock, Play, CheckCircle2, XCircle, Server, PackagePlus, Ban, Rocket, Box, Layers, HelpCircle, Info, KeyRound, FileX } from 'lucide-svelte';
@@ -151,6 +152,7 @@
 		unresolved: Array<{ key: string; reason: string }>;
 		helperOk: boolean;
 		helperError?: string;
+		localError?: string;
 	}
 	let targetPreview = $state<TargetPreview | null>(null);
 	let targetPreviewLoading = $state(false);
@@ -166,10 +168,12 @@
 	// A resolved target already holds data on the host (in-place is always destructive to it;
 	// a clone path/volume may be pre-populated). Drives the overwrite acknowledgement gate.
 	const targetsWithData = $derived(
-		(targetPreview?.volumes ?? []).filter((v) => v.hasData === 'has-data').length +
-		(targetPreview?.stackFiles?.hasData === 'has-data' ? 1 : 0)
+		countTargetsWithData(targetPreview?.volumes ?? [], targetPreview?.stackFiles)
 	);
 	const helperError = $derived(targetPreview && targetPreview.helperOk === false ? (targetPreview.helperError || 'the backup helper container could not run on the target environment') : '');
+	// A target on Dockhand's own disk that could not be read. Blocks the restore like a helper
+	// failure - an unknown target must not pass the overwrite gate - but names the right machine.
+	const localError = $derived(targetPreview?.localError ?? '');
 	// Probe result per volume key (has-data / empty / missing), for the per-row badges in the
 	// "What will happen" recap. Null while the probe hasn't returned for that row yet -> the row
 	// shows its own spinner.
@@ -202,6 +206,7 @@
 		// The probe helper must be able to run on the target - if it can't, neither the probe
 		// nor the restore can, so block up front rather than fail mid-restore.
 		!helperError &&
+		!localError &&
 		(mode === 'in-place'
 			// In-place: confirmOverwrite IS the overwrite acknowledgement (its copy says
 			// "replaces the live volume data"). The new-location-only overwriteAck checkbox
@@ -409,7 +414,7 @@
 					destinationId, snapshotId, mode, environmentId: envId,
 					targetType: targetIsStack ? 'stack' : 'container',
 					targetName: containerName, targetPath,
-					volumeDestinations, skipStackFiles,
+					volumeDestinations, skipStackFiles, postRestore,
 					volumes: selectedRows.map((v) => v.name),
 				})
 			});
@@ -432,7 +437,7 @@
 	// effect track them; the 350ms debounce collapses a burst of keystrokes into one request.
 	$effect(() => {
 		// touch the reactive inputs so the effect re-runs when they change
-		void [mode, effectiveEnvId, skipStackFiles, targetIsStack,
+		void [mode, effectiveEnvId, skipStackFiles, targetIsStack, postRestore,
 			selectedRows.map((v) => `${v.name}:${v.selected}:${v.destKind}:${v.dest}`).join('|')];
 		if (!open || !snapshotId) return;
 		// Clear the stale preview IMMEDIATELY (bump seq so any in-flight probe for the old target is
@@ -441,6 +446,10 @@
 		targetPreviewSeq++;
 		targetPreview = null;
 		targetPreviewError = '';
+		// The acknowledgement belongs to the preview it was given for. Selecting another volume or
+		// editing a destination can add a target that holds data, and a tick carried over would
+		// satisfy the gate for a location nobody was shown.
+		overwriteAck = false;
 		if (targetPreviewTimer) clearTimeout(targetPreviewTimer);
 		// No target env picked yet (new-location before you choose one) -> nothing to probe. Clear
 		// the loading state and don't schedule a probe that has nowhere to mount.
@@ -855,7 +864,16 @@
 				     when the "What will happen" recap can't render). The per-target paths + has-data
 				     badges + overwrite ack moved INTO the recap so there's one place, not two. -->
 				{#snippet hostTargetsBlock()}
-					{#if helperError}
+					{#if localError}
+						<div class="flex items-start gap-2 rounded-md border border-destructive/50 bg-destructive/10 p-2.5 text-xs">
+							<AlertTriangle class="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+							<div class="min-w-0">
+								<div class="font-medium text-destructive">Dockhand cannot read the stack folder</div>
+								<div class="mt-0.5 break-all text-muted-foreground">{localError}</div>
+								<div class="mt-1 text-muted-foreground">This folder is on Dockhand's own disk, not on {targetEnvName || 'the target environment'}. A restore can't run until Dockhand can read it.</div>
+							</div>
+						</div>
+					{:else if helperError}
 						<div class="flex items-start gap-2 rounded-md border border-destructive/50 bg-destructive/10 p-2.5 text-xs">
 							<AlertTriangle class="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
 							<div class="min-w-0">
@@ -997,12 +1015,27 @@
 									</li>
 								{/each}
 							</ul>
-							{#if targetsWithData > 0}
-								<label class="mt-2 flex cursor-pointer items-start gap-2 text-xs text-amber-600 dark:text-amber-400">
-									<Checkbox bind:checked={overwriteAck} class="mt-0.5" />
-									<span>I understand existing data at {targetsWithData === 1 ? 'this location' : `these ${targetsWithData} locations`} will be overwritten.</span>
-								</label>
-							{/if}
+						{/if}
+						<!-- The stack's compose/.env go to Dockhand's managed stack dir, which is a
+						     target of its own: a stack with no volumes selected still replaces it. -->
+						{#if targetPreview?.stackFiles?.willWrite}
+							<ul class="mt-1.5 space-y-1">
+								<li class="flex items-center gap-2 text-xs">
+									{@render kindBadge('bind')}
+									<span>stack files</span>
+									<span class="shrink-0 text-muted-foreground">&rarr;</span>
+									<span class="font-mono">{targetPreview.stackFiles.targetDir}</span>
+									{#if targetPreview.stackFiles.hasData}{@render hostDataBadge(targetPreview.stackFiles.hasData)}{/if}
+								</li>
+							</ul>
+						{/if}
+						<!-- Outside the selected-volumes block: the acknowledgement has to be reachable
+						     whenever ANY target holds data, including when only the stack dir does. -->
+						{#if overwriteAckReachable(targetsWithData)}
+							<label class="mt-2 flex cursor-pointer items-start gap-2 text-xs text-amber-600 dark:text-amber-400">
+								<Checkbox bind:checked={overwriteAck} class="mt-0.5" />
+								<span>I understand existing data at {targetsWithData === 1 ? 'this location' : `these ${targetsWithData} locations`} will be overwritten.</span>
+							</label>
 						{/if}
 						{#if postRestore !== 'none'}
 							<p class="mt-1.5 leading-relaxed">Then Dockhand will <b>{postRestoreLabel.toLowerCase()}</b> on {@render envChip(targetEnv, targetEnvName)}{#if sourceEnvName && sourceEnvName !== targetEnvName}. Nothing on {@render envChip(sourceEnv, sourceEnvName)} is touched{/if}.</p>

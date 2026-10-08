@@ -14,17 +14,19 @@ import {
 	parseProbeListing,
 	tagCapturedEntries,
 	isLocalDaemon,
+	isLocalDaemonForEnv,
+	classifyLocalDir,
 	STACKDIR_VOLUME_KEY,
 	isReservedVolumeKey,
 	stackDirSource,
 	stackDirProbeFixHint,
 	type HostStackDirInput,
+	hostPathAdvice
 } from '../../src/lib/server/backups/stackdir-plan';
 
 const base = (over: Partial<HostStackDirInput> = {}): HostStackDirInput => ({
 	composeFileName: 'docker-compose.yml',
 	bindDerivedHostPath: null,
-	dataDirHostPath: null,
 	mountHostPath: null,
 	workingDirLabel: null,
 	...over,
@@ -34,7 +36,7 @@ describe('resolveHostStackDir — host path in priority order (bind-derived firs
 	test('bindDerivedHostPath wins over EVERYTHING (daemon-authoritative)', () => {
 		const r = resolveHostStackDir(base({
 			bindDerivedHostPath: '/docker/data/dockhand/stacks/anton/pppppp',
-			dataDirHostPath: '/somewhere/else',
+			mountHostPath: '/somewhere/else',
 			workingDirLabel: '/app/data/stacks/anton/pppppp',
 		}));
 		expect(r.kind).toBe('candidate');
@@ -50,7 +52,7 @@ describe('resolveHostStackDir — host path in priority order (bind-derived firs
 		// local-only translations.
 		const r = resolveHostStackDir(base({
 			remoteStacksDirHostPath: '/opt/dockhand/stacks/myapp',
-			dataDirHostPath: '/docker/data/dockhand/stacks/myapp',
+			mountHostPath: '/docker/data/dockhand/stacks/myapp',
 			workingDirLabel: '/app/data/stacks/myapp',
 		}));
 		expect(r.kind).toBe('candidate');
@@ -69,62 +71,62 @@ describe('resolveHostStackDir — host path in priority order (bind-derived firs
 		if (r.kind === 'candidate') expect(r.source).toContain('bind');
 	});
 
-	test('SOCKET/LOCAL: DATA_DIR->HOST_DATA_DIR translation wins over the working_dir label', () => {
+	test('SOCKET/LOCAL: the mount-table mapping wins over the working_dir label', () => {
 		// The regression from the label-only resolver: on a socket env Dockhand deploys under
 		// /app/data (its CONTAINER view). The helper on the host needs /docker/data/dockhand/...
-		// The working_dir label is the container path and must NOT be used when the DATA_DIR
-		// translation is available.
+		// The working_dir label is the container path and must NOT be used when the mount
+		// table maps the stack dir.
 		const r = resolveHostStackDir(base({
-			dataDirHostPath: '/docker/data/dockhand/stacks/anton/pppppp',
+			mountHostPath: '/docker/data/dockhand/stacks/anton/pppppp',
 			workingDirLabel: '/app/data/stacks/anton/pppppp',   // container view - the wrong one
 		}));
 		expect(r.kind).toBe('candidate');
 		if (r.kind === 'candidate') {
 			expect(r.hostPath).toBe('/docker/data/dockhand/stacks/anton/pppppp');
 			expect(r.hostPath).not.toBe('/app/data/stacks/anton/pppppp');   // never the container path
-			expect(r.source).toContain('DATA_DIR');
+			expect(r.source).toContain('mount table');
 		}
 	});
 
 	test('ADOPTED/EXTERNAL: mount translation used when not under DATA_DIR', () => {
-		const r = resolveHostStackDir(base({ dataDirHostPath: null, mountHostPath: '/opt/stacks/blog', workingDirLabel: '/app/data/x' }));
+		const r = resolveHostStackDir(base({ mountHostPath: '/opt/stacks/blog', workingDirLabel: '/app/data/x' }));
 		expect(r.kind === 'candidate' && r.hostPath).toBe('/opt/stacks/blog');
 		expect((r as any).source).toContain('mount');
 	});
 
 	test('HAWSER / matching-paths: working_dir label used when no translation applies', () => {
 		// A hawser agent ran compose on the remote host, so the label IS the host path.
-		const r = resolveHostStackDir(base({ dataDirHostPath: null, mountHostPath: null, workingDirLabel: '/data/stacks/immich' }));
+		const r = resolveHostStackDir(base({ mountHostPath: null, workingDirLabel: '/data/stacks/immich' }));
 		expect(r.kind === 'candidate' && r.hostPath).toBe('/data/stacks/immich');
 		expect((r as any).source).toContain('working_dir');
 	});
 
 	test('composeFile taken from composeFileName (authoritative), NOT config_files', () => {
-		const r = resolveHostStackDir(base({ composeFileName: 'immich.yaml', dataDirHostPath: '/h/x' }));
+		const r = resolveHostStackDir(base({ composeFileName: 'immich.yaml', mountHostPath: '/h/x' }));
 		expect(r.kind === 'candidate' && r.composeFile).toBe('immich.yaml');
 	});
 
 	test("composeFileName '-' (stdin deploy) falls back to docker-compose.yml, never probes for '-'", () => {
 		// Dockhand deploys via `-f -` (stdin) so config_files is `-`. composeFileName is `-` too
 		// when derived from that; the resolver must NOT build a probe path ending in `/-`.
-		const r = resolveHostStackDir(base({ composeFileName: '-', dataDirHostPath: '/h/x' }));
+		const r = resolveHostStackDir(base({ composeFileName: '-', mountHostPath: '/h/x' }));
 		expect(r.kind === 'candidate' && r.composeFile).toBe('docker-compose.yml');
 	});
 
 	test('null composeFileName falls back to docker-compose.yml', () => {
-		const r = resolveHostStackDir(base({ composeFileName: null, dataDirHostPath: '/h/x' }));
+		const r = resolveHostStackDir(base({ composeFileName: null, mountHostPath: '/h/x' }));
 		expect(r.kind === 'candidate' && r.composeFile).toBe('docker-compose.yml');
 	});
 
 	test('trailing slashes on the chosen host path are normalized', () => {
-		expect((resolveHostStackDir(base({ dataDirHostPath: '/h/x/' })) as any).hostPath).toBe('/h/x');
+		expect((resolveHostStackDir(base({ mountHostPath: '/h/x/' })) as any).hostPath).toBe('/h/x');
 		expect((resolveHostStackDir(base({ mountHostPath: '/m/y///' })) as any).hostPath).toBe('/m/y');
 	});
 
 	test('NO BINDS: falls back to DATA_DIR translation (socket stack with only named volumes)', () => {
 		// A stack with no bind mounts (only named volumes, or none) can't be bind-derived, so
 		// bindDerivedHostPath is null. On socket the DATA_DIR translation still resolves it.
-		const r = resolveHostStackDir(base({ bindDerivedHostPath: null, dataDirHostPath: '/docker/data/dockhand/stacks/x' }));
+		const r = resolveHostStackDir(base({ bindDerivedHostPath: null, mountHostPath: '/docker/data/dockhand/stacks/x' }));
 		expect(r.kind === 'candidate' && r.hostPath).toBe('/docker/data/dockhand/stacks/x');
 	});
 
@@ -132,7 +134,7 @@ describe('resolveHostStackDir — host path in priority order (bind-derived firs
 		// The remaining gap the user worried about: no bind to derive from AND no translation
 		// (self-inspect failed / HOST_DATA_DIR unknown) AND no label. This is a CONSCIOUS
 		// unknown -> the caller hard-fails the stack backup rather than capturing an empty dir.
-		expect(resolveHostStackDir(base({ bindDerivedHostPath: null, dataDirHostPath: null, mountHostPath: null, workingDirLabel: null })).kind).toBe('unknown');
+		expect(resolveHostStackDir(base({ bindDerivedHostPath: null, mountHostPath: null, workingDirLabel: null })).kind).toBe('unknown');
 	});
 });
 
@@ -177,6 +179,56 @@ describe('deriveStackDirFromBinds — match compose relative dirs to discovered 
 	test('no matching source -> null (caller falls back to translation/label)', () => {
 		expect(deriveStackDirFromBinds(['html'], ['/unrelated/path'])).toBeNull();
 	});
+	// A bind's tail can also end a DEEPER bind's source, so the stack dir has to be the
+	// one most binds agree on rather than whichever source the daemon listed first.
+	test('a nested bind of the same name does not become the stack dir', () => {
+		const rel = ['config', 'tautulli/config'];
+		const plex = '/stack-root/plex/config';
+		const nested = '/stack-root/plex/tautulli/config';
+		expect(deriveStackDirFromBinds(rel, [plex, nested])).toBe('/stack-root/plex');
+		expect(deriveStackDirFromBinds(rel, [nested, plex])).toBe('/stack-root/plex');
+	});
+
+	test('the answer does not depend on the order the sources arrive in', () => {
+		const rel = ['data', 'pocketid/data', 'tinyauth/data'];
+		const sources = [
+			'/stack-root/proxy/data',
+			'/stack-root/proxy/pocketid/data',
+			'/stack-root/proxy/tinyauth/data'
+		];
+		const reversed = [...sources].reverse();
+		expect(deriveStackDirFromBinds(rel, sources)).toBe('/stack-root/proxy');
+		expect(deriveStackDirFromBinds(rel, reversed)).toBe('/stack-root/proxy');
+	});
+
+	test('a nested relative dir still derives the stack dir on its own', () => {
+		expect(deriveStackDirFromBinds(['conf/nginx'], ['/srv/web/conf/nginx'])).toBe('/srv/web');
+		// Reached only through the ends-with path: the dir is two levels down.
+		expect(deriveStackDirFromBinds(['conf/nginx'], ['/srv/web/x/conf/nginx'])).toBe('/srv/web/x');
+	});
+
+	// An absolute bind pointing outside the stack (a NAS library) is in the same source
+	// list, so it must never outrank the first real match however it is counted.
+	test('a bind outside the stack does not become the stack dir', () => {
+		expect(
+			deriveStackDirFromBinds(
+				['config', 'transcode'],
+				[
+					'/opt/stacks/plex/config',
+					'/opt/stacks/plex/transcode',
+					'/mnt/tank/plex/config',
+					'/mnt/tank/plex/transcode'
+				]
+			)
+		).toBe('/opt/stacks/plex');
+	});
+
+	test('a single stray absolute bind does not win on being shorter', () => {
+		expect(
+			deriveStackDirFromBinds(['config'], ['/docker/data/stacks/plex/config', '/srv/config'])
+		).toBe('/docker/data/stacks/plex');
+	});
+
 	test('no relative dirs -> null', () => {
 		expect(deriveStackDirFromBinds([], ['/srv/blog/html'])).toBeNull();
 	});
@@ -202,6 +254,82 @@ describe('trustBindDerivedForEnv — distrust the phantom bind path on direct-re
 	test('already-null bind-derived stays null regardless of env', () => {
 		expect(trustBindDerivedForEnv(null, { directRemote: false, hasRemoteStacksDir: false })).toBeNull();
 		expect(trustBindDerivedForEnv(null, { directRemote: true, hasRemoteStacksDir: true })).toBeNull();
+	});
+});
+
+describe('classifyLocalDir - what the restore preview asks about its own filesystem', () => {
+	const fs = (listing: Record<string, string[]>) => ({
+		exists: (p: string) => p in listing,
+		entries: (p: string) => listing[p] ?? []
+	});
+
+	test('a directory holding anything reports has-data', () => {
+		expect(classifyLocalDir('/d/s', fs({ '/d/s': ['docker-compose.yml'] })).kind).toBe('has-data');
+		// One dotfile is still data: .env alone is worth an overwrite warning.
+		expect(classifyLocalDir('/d/s', fs({ '/d/s': ['.env'] })).kind).toBe('has-data');
+	});
+
+	test('an existing but empty directory reports empty', () => {
+		expect(classifyLocalDir('/d/s', fs({ '/d/s': [] })).kind).toBe('empty');
+	});
+
+	// The near miss for 'empty': absent and present-but-empty are different answers, and only
+	// one of them means "nothing of the user's is here".
+	test('a directory that is not there reports missing, not empty', () => {
+		expect(classifyLocalDir('/d/s', fs({})).kind).toBe('missing');
+		expect(classifyLocalDir('/d/s', fs({ '/d/other': ['x'] })).kind).toBe('missing');
+	});
+
+	// The one that carries the data loss: 'empty' lets the caller skip the overwrite
+	// confirmation, so a directory we could not read must not borrow that answer. It reports
+	// `unreadable` rather than `helper-failed` because no helper is involved - the fault is on
+	// Dockhand's own disk, and naming the target environment sends the operator to the wrong one.
+	test('a directory that cannot be read reports unreadable, never empty', () => {
+		const boom = {
+			exists: () => true,
+			entries: () => { throw new Error('EACCES: permission denied'); }
+		};
+		const r = classifyLocalDir('/d/s', boom);
+		expect(r.kind).toBe('unreadable');
+		expect(r.kind).not.toBe('empty');
+		expect(r.kind).not.toBe('helper-failed');
+		expect(r.reason).toContain('/d/s');
+		expect(r.reason).toContain('EACCES');
+	});
+
+	test('a failing existence check is also unreadable, not empty', () => {
+		const boom = {
+			exists: () => { throw new Error('ELOOP: too many symbolic links'); },
+			entries: () => []
+		};
+		expect(classifyLocalDir('/d/s', boom).kind).toBe('unreadable');
+	});
+});
+
+describe('isLocalDaemonForEnv - a failed env lookup must read as REMOTE', () => {
+	test('no env selected is Dockhand\'s own daemon', () => {
+		expect(isLocalDaemonForEnv(null, null, null)).toBe(true);
+		expect(isLocalDaemonForEnv(undefined, undefined, 'tcp://anton:2375')).toBe(true);
+	});
+	test('an env that could not be read is remote, even though a null connectionType means local', () => {
+		// The near miss: the SAME null connectionType is local when it comes from a real row.
+		expect(isLocalDaemonForEnv(null, 7, null)).toBe(false);
+		expect(isLocalDaemonForEnv(undefined, 7, null)).toBe(false);
+		expect(isLocalDaemonForEnv({ connectionType: null }, 7, null)).toBe(true);
+	});
+	test('a real row still decides by connection type', () => {
+		expect(isLocalDaemonForEnv({ connectionType: 'socket' }, 7, null)).toBe(true);
+		expect(isLocalDaemonForEnv({ connectionType: 'hawser-standard', host: 'h', port: 2376 }, 7, null)).toBe(false);
+		expect(isLocalDaemonForEnv({ connectionType: 'direct', host: 'h', port: 2375 }, 7, 'tcp://h:2375')).toBe(true);
+		expect(isLocalDaemonForEnv({ connectionType: 'direct', host: 'rambo', port: 2375 }, 7, 'tcp://anton:2375')).toBe(false);
+	});
+	test('a direct env missing host or port cannot match Dockhand\'s own host', () => {
+		expect(isLocalDaemonForEnv({ connectionType: 'direct', host: 'h', port: null }, 7, 'tcp://h:2375')).toBe(false);
+		// A port-blind comparison would match here: dropping `env.port` leaves the host alone.
+		expect(isLocalDaemonForEnv({ connectionType: 'direct', host: 'h', port: null }, 7, 'tcp://h')).toBe(false);
+		// And a DIFFERENT port on the same host is a different daemon.
+		expect(isLocalDaemonForEnv({ connectionType: 'direct', host: 'h', port: 2376 }, 7, 'tcp://h:2375')).toBe(false);
+		expect(isLocalDaemonForEnv({ connectionType: 'direct', host: null, port: 2375 }, 7, 'tcp://h:2375')).toBe(false);
 	});
 });
 
@@ -369,5 +497,31 @@ describe('stackDirProbeFixHint', () => {
 
 	test('local: redeploy stages the files', () => {
 		expect(stackDirProbeFixHint({ kind: 'local' }, '/srv/stacks/app')).toContain('Redeploy the stack to stage its files there');
+	});
+});
+
+describe('hostPathAdvice', () => {
+	const local = { localDaemon: true, isHawser: false };
+
+	test('names the one setting that fixes each mapping failure', () => {
+		expect(hostPathAdvice({ reason: 'no-mount-covers', dataDir: '/app/data' }, local))
+			.toContain('HOST_DATA_DIR');
+		expect(hostPathAdvice({ reason: 'mount-not-on-disk', mountType: 'tmpfs', destination: '/app/data' }, local))
+			.toContain('tmpfs');
+		expect(hostPathAdvice({ reason: 'not-containerized' }, local)).toContain('HOST_DATA_DIR');
+	});
+
+	// A remote daemon cannot be fixed with HOST_DATA_DIR - its files are elsewhere.
+	test('points a remote environment at its stack path instead', () => {
+		const hawser = hostPathAdvice(null, { localDaemon: false, isHawser: true });
+		expect(hawser).toContain('Remote stack path');
+		expect(hawser).not.toContain('HOST_DATA_DIR');
+		const direct = hostPathAdvice(null, { localDaemon: false, isHawser: false });
+		expect(direct).toContain('Remote stack path');
+		expect(direct).not.toContain('HOST_DATA_DIR');
+	});
+
+	test('still says something useful with no failure detail', () => {
+		expect(hostPathAdvice(null, local).length).toBeGreaterThan(20);
 	});
 });
