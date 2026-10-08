@@ -40,7 +40,7 @@ import { json } from '@sveltejs/kit';
 import type { Permissions } from './db';
 import { getUserAccessibleEnvironments, userCanAccessEnvironment, userHasAdminRole } from './db';
 import { validateSession, isAuthEnabled, checkPermission, type AuthenticatedUser } from './auth';
-import { isEnterprise, hasValidEnterpriseLicense } from './license';
+import { isEnterprise, hasValidEnterpriseLicense, getLicenseType, type LicenseType } from './license';
 import { getRequestContext } from './request-context';
 
 export interface AuthorizationContext {
@@ -68,6 +68,13 @@ export interface AuthorizationContext {
 	 * deliberately leaves alone.
 	 */
 	hasValidLicense: boolean;
+
+	/**
+	 * The tier of the currently valid paid license, or null when none validates.
+	 * Gate a feature both tiers are entitled to on this rather than on
+	 * hasValidLicense, which answers only for enterprise.
+	 */
+	licenseTier: LicenseType | null;
 
 	/**
 	 * Check if the user has a specific permission.
@@ -147,6 +154,7 @@ export async function authorize(cookies: Cookies): Promise<AuthorizationContext>
 	const authEnabled = await isAuthEnabled();
 	const enterprise = await isEnterprise();
 	const validLicense = await hasValidEnterpriseLicense();
+	const licenseTier = await getLicenseType();
 
 	// Try request context first (set by hook — handles both cookie and Bearer)
 	const reqCtx = getRequestContext();
@@ -173,6 +181,7 @@ export async function authorize(cookies: Cookies): Promise<AuthorizationContext>
 		isAdmin,
 		isEnterprise: enterprise,
 		hasValidLicense: validLicense,
+		licenseTier,
 
 		async can(resource: keyof Permissions, action: string, environmentId?: number): Promise<boolean> {
 			// If auth is disabled, allow everything (initial setup)

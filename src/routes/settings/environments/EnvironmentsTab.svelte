@@ -28,9 +28,12 @@
 		AlertTriangle,
 		GripVertical,
 		RotateCcw,
-		ArrowUpDown
+		ArrowUpDown,
+		FileDown
 	} from 'lucide-svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
+	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
+	import { licenseStore } from '$lib/stores/license';
 	import { broom, whale } from '@lucide/lab';
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
 	import { canAccess } from '$lib/stores/auth';
@@ -105,6 +108,45 @@
 
 	// Environment state
 	let environments = $state<Environment[]>([]);
+
+	// The state report is a paid feature of either tier, so the control only
+	// appears once a license validates.
+	const canExportReport = $derived($licenseStore.licenseType === 'smb' || $licenseStore.licenseType === 'enterprise');
+
+	let exportingReport = $state(false);
+
+	// Fetched rather than navigated to: a navigation would drop the user on raw
+	// JSON if the licence lapsed or the permission is missing.
+	async function downloadReport(format: 'json' | 'csv', envId?: number) {
+		const params = new URLSearchParams({ format });
+		if (envId !== undefined) params.set('env', String(envId));
+		exportingReport = true;
+		try {
+			const response = await fetch(`/api/environments/report?${params}`);
+			if (!response.ok) {
+				const message = await response
+					.json()
+					.then((b) => b?.error)
+					.catch(() => null);
+				toast.error(message || `Export failed (${response.status})`);
+				return;
+			}
+			const blob = await response.blob();
+			const name =
+				response.headers.get('Content-Disposition')?.match(/filename="([^"]+)"/)?.[1] ??
+				`dockhand-report.${format}`;
+			const url = URL.createObjectURL(blob);
+			const link = document.createElement('a');
+			link.href = url;
+			link.download = name;
+			link.click();
+			URL.revokeObjectURL(url);
+		} catch (error) {
+			toast.error(error instanceof Error ? error.message : 'Export failed');
+		} finally {
+			exportingReport = false;
+		}
+	}
 	let envLoading = $state(true);
 	let showEnvModal = $state(false);
 	let editingEnv = $state<Environment | null>(null);
@@ -438,6 +480,36 @@
 				{/if}
 				<span class="w-14">Test all</span>
 			</Button>
+			{#if canExportReport}
+				<DropdownMenu.Root>
+					<DropdownMenu.Trigger>
+						{#snippet child({ props })}
+							<Button {...props} size="sm" variant="outline" disabled={environments.length === 0 || exportingReport}>
+								<FileDown class="w-4 h-4 mr-1" />
+								Export report
+							</Button>
+						{/snippet}
+					</DropdownMenu.Trigger>
+					<DropdownMenu.Content align="end" class="w-56">
+						<DropdownMenu.Label>All environments</DropdownMenu.Label>
+						<DropdownMenu.Item onclick={() => downloadReport('json')}>as JSON</DropdownMenu.Item>
+						<DropdownMenu.Item onclick={() => downloadReport('csv')}>as CSV</DropdownMenu.Item>
+						{#if environments.length > 1}
+							<DropdownMenu.Separator />
+							<DropdownMenu.Label>One environment</DropdownMenu.Label>
+							{#each environments as env (env.id)}
+								<DropdownMenu.Sub>
+									<DropdownMenu.SubTrigger>{env.name}</DropdownMenu.SubTrigger>
+									<DropdownMenu.SubContent>
+										<DropdownMenu.Item onclick={() => downloadReport('json', env.id)}>as JSON</DropdownMenu.Item>
+										<DropdownMenu.Item onclick={() => downloadReport('csv', env.id)}>as CSV</DropdownMenu.Item>
+									</DropdownMenu.SubContent>
+								</DropdownMenu.Sub>
+							{/each}
+						{/if}
+					</DropdownMenu.Content>
+				</DropdownMenu.Root>
+			{/if}
 			<Button size="sm" variant="outline" onclick={fetchEnvironments}>Refresh</Button>
 		</div>
 	</div>
