@@ -18,6 +18,7 @@ import {
 	isStackUnadoptable,
 	getDockhandLabels,
 	getOrderValue,
+	compareContainerOrder,
 	getVersionPatternOverride,
 	DOCKHAND_LABELS,
 	isDigestWatchDisabledByLabel,
@@ -225,10 +226,11 @@ describe('getDockhandLabels', () => {
 // ---------------------------------------------------------------------------
 
 describe('getOrderValue', () => {
-	test('returns 0 for null/undefined/empty/missing labels', () => {
-		expect(getOrderValue(undefined)).toBe(0);
-		expect(getOrderValue(null)).toBe(0);
-		expect(getOrderValue({})).toBe(0);
+	// Null, not a number: a sentinel would collide with a user who types that value.
+	test('an unlabelled container has no order', () => {
+		expect(getOrderValue(undefined)).toBe(null);
+		expect(getOrderValue(null)).toBe(null);
+		expect(getOrderValue({})).toBe(null);
 	});
 
 	test('parses valid integers', () => {
@@ -238,10 +240,11 @@ describe('getOrderValue', () => {
 		expect(getOrderValue({ 'dockhand.order': '0' })).toBe(0);
 	});
 
-	test('returns 0 for non-numeric values', () => {
-		expect(getOrderValue({ 'dockhand.order': 'abc' })).toBe(0);
-		expect(getOrderValue({ 'dockhand.order': 'first' })).toBe(0);
-		expect(getOrderValue({ 'dockhand.order': '' })).toBe(0);
+	// A typo must not silently promote a container past the ones ordered on purpose.
+	test('a non-numeric value counts as unlabelled', () => {
+		expect(getOrderValue({ 'dockhand.order': 'abc' })).toBe(null);
+		expect(getOrderValue({ 'dockhand.order': 'first' })).toBe(null);
+		expect(getOrderValue({ 'dockhand.order': '' })).toBe(null);
 	});
 
 	test('truncates floats to integer', () => {
@@ -504,5 +507,36 @@ describe('WUD watch labels keep WUD semantics', () => {
 
 	test('a native label still wins over the WUD one', () => {
 		expect(isUpdateDisabledByLabel({ 'dockhand.update': 'true', 'wud.watch': 'nonsense' })).toBe(false);
+	});
+});
+
+describe('compareContainerOrder', () => {
+	const c = (service: string, order?: string): { service: string; labels: Record<string, string> } => ({
+		service,
+		labels: order ? { 'dockhand.order': order } : {}
+	});
+	const order = (list: ReturnType<typeof c>[]) =>
+		[...list].sort(compareContainerOrder).map((x) => x.service);
+
+	// No value a user can type may land a container among the unlabelled ones.
+	test('keeps a large label ahead of the unlabelled', () => {
+		expect(order([c('proxy', '1000'), c('api', '2000'), c('newservice')]))
+			.toEqual(['proxy', 'api', 'newservice']);
+		expect(order([c('zz-last', '1000'), c('aaa'), c('zzz')]))
+			.toEqual(['zz-last', 'aaa', 'zzz']);
+	});
+
+	test('orders labelled containers among themselves by value', () => {
+		expect(order([c('c', '3'), c('a', '1'), c('b', '2')])).toEqual(['a', 'b', 'c']);
+		expect(order([c('db'), c('forgejo', '-1')])).toEqual(['forgejo', 'db']);
+	});
+
+	test('falls back to the service name within a rank', () => {
+		expect(order([c('b'), c('a')])).toEqual(['a', 'b']);
+		expect(order([c('b', '1'), c('a', '1')])).toEqual(['a', 'b']);
+	});
+
+	test('treats an unparseable value as unlabelled', () => {
+		expect(order([c('x', 'abc'), c('y', '1')])).toEqual(['y', 'x']);
 	});
 });

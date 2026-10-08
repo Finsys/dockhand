@@ -61,7 +61,7 @@ import { isDeletableStackDir } from './stack-delete-guard';
 import { cleanPem } from '$lib/utils/pem';
 import { quoteForEnvFile } from '$lib/utils/env-file-values';
 import { rewriteComposeVolumePaths, getHostDataDir } from './host-path';
-import { getOrderValue } from './container-labels';
+import { compareContainerOrder } from './container-labels';
 import { stackLabelTags, type LabelTagSpec } from '$lib/utils/tags-core';
 import { pendingRowsToClear } from './pending-updates-core';
 import { buildDockhandOverrideFile } from './dockhand-override-file';
@@ -2149,12 +2149,7 @@ export async function listComposeStacks(envId?: number | null): Promise<ComposeS
 					newerVersion: newerVersionById.get(c.id) ?? null
 				};
 			})
-			.sort((a, b) => {
-				const orderA = getOrderValue(a.labels);
-				const orderB = getOrderValue(b.labels);
-				if (orderA !== orderB) return orderA - orderB;
-				return a.service.localeCompare(b.service);
-			});
+			.sort(compareContainerOrder);
 
 		return {
 			name,
