@@ -4,7 +4,7 @@
     "date": "",
     "comingSoon": true,
     "changes": [
-      { "type": "feature", "text": "add private-key SFTP backup destinations with reviewable verified host keys, custom ports, and optional repository paths (Finsys/dockhand#1478)" },
+      { "type": "feature", "text": "add private-key SFTP backup destinations with reviewable verified host keys, custom ports, and optional repository paths (#1478, @ddeitterick)" },
       { "type": "fix", "text": "a container started with PUID=1001 runs as that user instead of root (#1669)" },
       { "type": "feature", "text": "offer the compose file detected from container labels when adopting an external stack (#1612, PR#1617, @ondras)" },
       { "type": "feature", "text": "hold off automatic updates until a new image is older than a configurable minimum image age (#918, #1365, PR#1643, @TheDuffman85)" },

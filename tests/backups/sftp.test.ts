@@ -1,7 +1,7 @@
 import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync } from 'node:crypto';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { unpackTar } from 'modern-tar';
@@ -16,6 +16,7 @@ import { validateRepositoryForSave } from '../../src/lib/server/backups/helpers'
 import {
 	buildSftpCredentialEntries,
 	buildSftpResticOptionArgs,
+	classifySftpKeygenExecutionError,
 	normalizeSftpPrivateKey,
 	SFTP_HELPER_KNOWN_HOSTS_FILE,
 	SFTP_HELPER_PRIVATE_KEY_FILE,
@@ -24,6 +25,7 @@ import {
 	withSftpCredentialFiles,
 } from '../../src/lib/server/backups/sftp';
 import { buildTar } from '../../src/lib/server/backups/tar';
+import { prepareBackupDestinationResponse } from '../../src/lib/server/backups/destination-response';
 
 const PRIVATE_KEY = generateKeyPairSync('rsa', {
 	modulusLength: 1024,
@@ -149,6 +151,24 @@ describe('SFTP credential validation and edit semantics', () => {
 			'-----BEGIN OPENSSH PRIVATE KEY-----\ninvalid\n-----END OPENSSH PRIVATE KEY-----'
 		) ?? '', /invalid or unsupported/);
 	});
+
+	it('distinguishes ssh-keygen timeout, missing binary, and other execution failures', () => {
+		assert.match(classifySftpKeygenExecutionError(Object.assign(new Error(), { code: 'ETIMEDOUT' })), /timed out/);
+		assert.match(classifySftpKeygenExecutionError(Object.assign(new Error(), { code: 'ENOENT' })), /unavailable/);
+		assert.match(classifySftpKeygenExecutionError(Object.assign(new Error(), { code: 'EACCES' })), /could not be validated/);
+	});
+
+	it('removes the validation directory when writing the key fails', () => {
+		let temporaryDirectory = '';
+		assert.throws(
+			() => validateSftpPrivateKey(PRIVATE_KEY, (path) => {
+				temporaryDirectory = dirname(path.toString());
+				throw new Error('simulated validation write failure');
+			}),
+			/simulated validation write failure/
+		);
+		assert.equal(existsSync(temporaryDirectory), false);
+	});
 });
 
 describe('SFTP runtime credential materialization', () => {
@@ -170,6 +190,41 @@ describe('SFTP runtime credential materialization', () => {
 				assert.equal(readFileSync(files!.knownHostsPath, 'utf8'), KNOWN_HOSTS);
 			}
 		);
+	});
+
+	it('does not rerun OpenSSH validation while materializing a previously validated key', async () => {
+		const storedKey = 'stored-key-that-was-validated-on-save\n';
+		await withSftpCredentialFiles(
+			REPOSITORY,
+			{ privateKey: storedKey, knownHosts: KNOWN_HOSTS },
+			async (files) => {
+				assert.equal(readFileSync(files!.privateKeyPath, 'utf8'), storedKey);
+			}
+		);
+		assert.equal(
+			buildSftpCredentialEntries(REPOSITORY, { privateKey: storedKey, knownHosts: KNOWN_HOSTS })[0].content.toString(),
+			storedKey
+		);
+	});
+
+	it('removes the temporary directory when writing credentials fails', async () => {
+		let temporaryDirectory = '';
+		let writes = 0;
+		await assert.rejects(
+			withSftpCredentialFiles(
+				REPOSITORY,
+				{ privateKey: PRIVATE_KEY, knownHosts: KNOWN_HOSTS },
+				async () => undefined,
+				(path, data, options) => {
+					temporaryDirectory = dirname(path.toString());
+					writes += 1;
+					if (writes === 2) throw new Error('simulated write failure');
+					writeFileSync(path, data, options);
+				}
+			),
+			/simulated write failure/
+		);
+		assert.equal(existsSync(temporaryDirectory), false);
 	});
 
 	it('builds strict public-key-only SSH options without embedding credential contents', () => {
@@ -240,24 +295,44 @@ describe('SFTP secret persistence and response surfaces', () => {
 		assert.match(backupUtils, /repository\.startsWith\('sftp:'\)\) return Server/);
 	});
 
-	it('encrypts both dedicated fields, hides private keys, and returns public known_hosts only to editors', () => {
+	it('encrypts both dedicated fields', () => {
 		const dbSource = readFileSync(join(root, 'src/lib/server/db.ts'), 'utf8');
 		assert.match(dbSource, /sshPrivateKey:\s*data\.sshPrivateKey\s*\?\s*encrypt\(data\.sshPrivateKey\)/);
 		assert.match(dbSource, /sshKnownHosts:\s*data\.sshKnownHosts\s*\?\s*encrypt\(data\.sshKnownHosts\)/);
 		assert.match(dbSource, /decryptStrict\(dest\.sshPrivateKey\)/);
 		assert.match(dbSource, /decryptStrict\(dest\.sshKnownHosts\)/);
+	});
 
-		for (const route of [
-			'src/routes/api/backup/destinations/+server.ts',
-			'src/routes/api/backup/destinations/[id]/+server.ts',
-		]) {
-			const source = readFileSync(join(root, route), 'utf8');
-			assert.match(source, /hasSshPrivateKey/);
-			assert.match(source, /hasSshKnownHosts/);
-			assert.match(source, /delete result\.sshPrivateKey/);
-			assert.match(source, /result\.sshKnownHosts = decrypted\.decryptedSshKnownHosts/);
-			assert.match(source, /delete result\.sshKnownHosts/);
-		}
+	it('serializes list, viewer, and editor responses without leaking the private key', () => {
+		const stored = {
+			id: 42,
+			name: 'SFTP',
+			password: 'encrypted-password',
+			envVars: 'encrypted-env',
+			cacert: 'encrypted-ca',
+			tlsClientCert: 'encrypted-client-cert',
+			sshPrivateKey: 'encrypted-private-key',
+			sshKnownHosts: 'encrypted-known-hosts'
+		};
+
+		const listOrViewer = prepareBackupDestinationResponse(stored);
+		assert.equal('password' in listOrViewer, false);
+		assert.equal('envVars' in listOrViewer, false);
+		assert.equal('cacert' in listOrViewer, false);
+		assert.equal('tlsClientCert' in listOrViewer, false);
+		assert.equal('sshPrivateKey' in listOrViewer, false);
+		assert.equal('sshKnownHosts' in listOrViewer, false);
+		assert.equal(listOrViewer.hasSshPrivateKey, true);
+		assert.equal(listOrViewer.hasSshKnownHosts, true);
+
+		const editor = prepareBackupDestinationResponse(stored, {
+			envVars: { AWS_ACCESS_KEY_ID: 'public-id' },
+			sshKnownHosts: KNOWN_HOSTS
+		});
+		assert.equal('password' in editor, false);
+		assert.equal('sshPrivateKey' in editor, false);
+		assert.deepEqual(editor.envVars, { AWS_ACCESS_KEY_ID: 'public-id' });
+		assert.equal(editor.sshKnownHosts, KNOWN_HOSTS);
 	});
 
 	it('populates known_hosts for editing without resubmitting unchanged data', () => {

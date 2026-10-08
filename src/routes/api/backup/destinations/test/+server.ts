@@ -126,7 +126,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			exitCode: result.code,
 			stdout: result.stdout,
 			stderr: result.stderr,
-		});
+		}, repository);
 		const notInitialized =
 			classified.code === 'REPO_NOT_INITIALIZED' ||
 			(

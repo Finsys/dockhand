@@ -11,6 +11,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'path';
 import { BackupError, type ResticRun } from './models';
 import { cleanErrorMsg, timingSafeStrEqual } from './security';
+import { isSftpRepository } from '$lib/shared/sftp-repository';
 
 /** The restic surface repo.ts needs (injected). */
 export interface ResticLocal {
@@ -45,28 +46,9 @@ export type RepoResult =
 const EXIT_NOT_INITIALIZED = 10;
 
 /** Classify a failed restic run into a stable error code + message. */
-export function classifyRepoFailure(run: ResticRun): { code: BackupError['code']; error: string } {
+export function classifyRepoFailure(run: ResticRun, repository = ''): { code: BackupError['code']; error: string } {
 	const text = (run.stderr + '\n' + run.stdout).toLowerCase();
-	if (text.includes('permission denied (publickey')) {
-		return {
-			code: 'RESTIC',
-			error: 'SSH authentication failed: the server rejected the configured private key for this user. Verify that the matching public key is installed in the user account\'s authorized_keys file.'
-		};
-	}
-	const accessFailed =
-		text.includes('load key ') ||
-		text.includes('permission denied') ||
-		text.includes('host key verification failed') ||
-		text.includes('remote host identification has changed') ||
-		text.includes('connection refused') ||
-		text.includes('connection timed out') ||
-		text.includes('could not resolve hostname') ||
-		text.includes('no route to host') ||
-		text.includes('unexpected eof');
-	if (accessFailed) {
-		return { code: 'RESTIC', error: run.stderr.trim() || run.stdout.trim() || 'repository connection failed' };
-	}
-	if (run.exitCode === EXIT_NOT_INITIALIZED || text.includes('is not a restic repository') || text.includes('unable to open config')) {
+	if (text.includes('is not a restic repository') || text.includes('unable to open config')) {
 		return { code: 'REPO_NOT_INITIALIZED', error: 'repository is not initialised' };
 	}
 	if (text.includes('wrong password') || text.includes('bad password') || text.includes('decrypt')) {
@@ -75,15 +57,39 @@ export function classifyRepoFailure(run: ResticRun): { code: BackupError['code']
 	if (text.includes('repository is already locked') || text.includes('unable to create lock')) {
 		return { code: 'REPO_LOCKED', error: 'repository is locked by another operation' };
 	}
+	if (isSftpRepository(repository)) {
+		if (text.includes('permission denied (publickey')) {
+			return {
+				code: 'RESTIC',
+				error: 'SSH authentication failed: the server rejected the configured private key for this user. Verify that the matching public key is installed in the user account\'s authorized_keys file.'
+			};
+		}
+		const accessFailed =
+			text.includes('load key ') ||
+			text.includes('permission denied') ||
+			text.includes('host key verification failed') ||
+			text.includes('remote host identification has changed') ||
+			text.includes('connection refused') ||
+			text.includes('connection timed out') ||
+			text.includes('could not resolve hostname') ||
+			text.includes('no route to host') ||
+			text.includes('unexpected eof');
+		if (accessFailed) {
+			return { code: 'RESTIC', error: run.stderr.trim() || run.stdout.trim() || 'repository connection failed' };
+		}
+	}
+	if (run.exitCode === EXIT_NOT_INITIALIZED) {
+		return { code: 'REPO_NOT_INITIALIZED', error: 'repository is not initialised' };
+	}
 	if (run.exitCode === undefined) {
 		return { code: 'RESTIC', error: 'restic did not complete (unknown outcome)' };
 	}
 	return { code: 'RESTIC', error: run.stderr.trim() || run.stdout.trim() || `restic exited ${run.exitCode}` };
 }
 
-function toResult(run: ResticRun): RepoResult {
+function toResult(run: ResticRun, repository: string): RepoResult {
 	if (run.exitCode === 0) return { ok: true, output: (run.stdout.trim() || run.stderr.trim() || 'ok') };
-	return { ok: false, ...classifyRepoFailure(run) };
+	return { ok: false, ...classifyRepoFailure(run, repository) };
 }
 
 /** Initialise a repository. Succeeds if init works OR the repo already exists. */
@@ -95,13 +101,13 @@ export async function initRepository(restic: ResticLocal, destination: any): Pro
 		(run.stderr + run.stdout).toLowerCase().includes('already exists')) {
 		return { ok: true, output: 'repository already initialised' };
 	}
-	return { ok: false, ...classifyRepoFailure(run) };
+	return { ok: false, ...classifyRepoFailure(run, destination.repository) };
 }
 
 /** Test that a repository is reachable + the password is correct (cheap read). */
 export async function testRepository(restic: ResticLocal, destination: any): Promise<RepoResult> {
 	const run = await restic.runLocal(destination, ['cat', 'config', '--no-lock']);
-	return toResult(run);
+	return toResult(run, destination.repository);
 }
 
 /** Integrity check. `readDataSubset` (e.g. '5%') re-reads pack data to prove
@@ -112,7 +118,7 @@ export async function checkRepository(restic: ResticLocal, destination: any, rea
 	if (readDataSubset) args.push('--read-data-subset', readDataSubset);
 	const stream = onProgress && { onStdout: (c: string) => forwardChunk(onProgress, c), onStderr: (c: string) => forwardChunk(onProgress, c) };
 	const run = await restic.runLocal(destination, args, 'data', stream || undefined);
-	return toResult(run);
+	return toResult(run, destination.repository);
 }
 
 /** Prune the repository (reclaim unreferenced data). Long timeout tier. */
@@ -121,7 +127,7 @@ export async function pruneRepository(restic: ResticLocal, destination: any, max
 	if (maxUnused) args.push('--max-unused', maxUnused);
 	const stream = onProgress && { onStdout: (c: string) => forwardChunk(onProgress, c), onStderr: (c: string) => forwardChunk(onProgress, c) };
 	const run = await restic.runLocal(destination, args, 'data', stream || undefined);
-	return toResult(run);
+	return toResult(run, destination.repository);
 }
 
 /**
@@ -143,13 +149,13 @@ export async function unlockRepository(restic: ResticLocal, destination: any, re
 	const args = removeAll ? ['unlock', '--remove-all'] : ['unlock'];
 	const stream = onProgress && { onStdout: (c: string) => forwardChunk(onProgress, c), onStderr: (c: string) => forwardChunk(onProgress, c) };
 	const run = await restic.runLocal(destination, args, 'interactive', stream || undefined);
-	return toResult(run);
+	return toResult(run, destination.repository);
 }
 
 /** Repository statistics (size, file count, snapshot count). */
 export async function repoStats(restic: ResticLocal, destination: any): Promise<RepoResult> {
 	const run = await restic.runLocal(destination, ['stats', '--no-lock', '--json']);
-	return toResult(run);
+	return toResult(run, destination.repository);
 }
 
 // =============================================================================

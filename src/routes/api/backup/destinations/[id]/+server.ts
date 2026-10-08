@@ -11,6 +11,7 @@ import {
 	getBackupConfigs
 } from '$lib/server/db';
 import { validateSftpPrivateKey } from '$lib/server/backups/sftp';
+import { prepareBackupDestinationResponse } from '$lib/server/backups/destination-response';
 import { registerSchedule, unregisterSchedule } from '$lib/server/scheduler';
 import { validatePolicySchedules, validateRepositoryForSave, validateAndSerializeFlags, parseBackupFlags, validateSftpCredentials } from '$lib/server/backups/helpers';
 import { destinationHasRunningBackup } from '$lib/server/backups';
@@ -21,24 +22,16 @@ import { destinationHasRunningBackup } from '$lib/server/backups';
  * that same rule. Passwords, TLS PEMs, and SSH private keys are always stripped.
  */
 function prepareDestination(dest: any, includeSecrets: boolean): any {
-	const result = { ...dest };
-	delete result.password;
+	let result;
 	if (includeSecrets) {
 		const decrypted = decryptBackupDestination(dest);
-		result.envVars = decrypted.decryptedEnvVars;
-		result.sshKnownHosts = decrypted.decryptedSshKnownHosts;
+		result = prepareBackupDestinationResponse(dest, {
+			envVars: decrypted.decryptedEnvVars,
+			sshKnownHosts: decrypted.decryptedSshKnownHosts
+		});
 	} else {
-		delete result.envVars;
-		delete result.sshKnownHosts;
+		result = prepareBackupDestinationResponse(dest);
 	}
-	// Private credential contents are never sent to the client, even as ciphertext.
-	result.hasCacert = !!dest.cacert;
-	result.hasTlsClientCert = !!dest.tlsClientCert;
-	result.hasSshPrivateKey = !!dest.sshPrivateKey;
-	result.hasSshKnownHosts = !!dest.sshKnownHosts;
-	delete result.cacert;
-	delete result.tlsClientCert;
-	delete result.sshPrivateKey;
 	// Split the stored `flags` JSON into separate fields the edit form binds to (legacy
 	// bare strings surface as backupFlags), so the UI never parses the string-vs-JSON column.
 	const { backup, restore } = parseBackupFlags(dest.flags);

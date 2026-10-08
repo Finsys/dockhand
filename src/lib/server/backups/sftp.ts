@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -23,20 +23,26 @@ export function normalizeSftpPrivateKey(privateKey: string): string {
 	return `${privateKey.replace(/\r\n?/g, '\n').trimEnd()}\n`;
 }
 
-export function validateSftpPrivateKey(privateKey: string): string | null {
+export function classifySftpKeygenExecutionError(error: NodeJS.ErrnoException): string {
+	if (error.code === 'ETIMEDOUT') return 'SSH private key validation timed out';
+	if (error.code === 'ENOENT') return 'SSH private key could not be validated because OpenSSH ssh-keygen is unavailable';
+	return 'SSH private key could not be validated with OpenSSH';
+}
+
+export function validateSftpPrivateKey(
+	privateKey: string,
+	writeFile: typeof writeFileSync = writeFileSync
+): string | null {
 	const dir = mkdtempSync(join(tmpdir(), 'dockhand-sftp-key-'));
-	chmodSync(dir, 0o700);
-	const privateKeyPath = join(dir, 'id');
-	writeFileSync(privateKeyPath, normalizeSftpPrivateKey(privateKey), { mode: 0o600 });
 	try {
+		const privateKeyPath = join(dir, 'id');
+		writeFile(privateKeyPath, normalizeSftpPrivateKey(privateKey), { mode: 0o600 });
 		const result = spawnSync('ssh-keygen', ['-y', '-P', '', '-f', privateKeyPath], {
 			encoding: 'utf8',
 			timeout: 5000,
 		});
 		if (result.error) {
-			return result.error.name === 'ETIMEDOUT'
-				? 'SSH private key validation timed out'
-				: 'SSH private key could not be validated with OpenSSH';
+			return classifySftpKeygenExecutionError(result.error);
 		}
 		if (result.status === 0) return null;
 		const stderr = result.stderr.toLowerCase();
@@ -53,8 +59,6 @@ function requireSftpCredentials(repository: string, credentials: SftpCredentials
 	if (!isSftpRepository(repository)) return;
 	if (!credentials.privateKey?.trim()) throw new Error('SFTP destination is missing its SSH private key');
 	if (!credentials.knownHosts?.trim()) throw new Error('SFTP destination is missing its verified SSH known_hosts data');
-	const privateKeyError = validateSftpPrivateKey(credentials.privateKey);
-	if (privateKeyError) throw new Error(privateKeyError);
 }
 
 function buildSshArgs(files: SftpCredentialFiles): string {
@@ -98,20 +102,20 @@ export function sftpResticPreamble(
 export async function withSftpCredentialFiles<T>(
 	repository: string,
 	credentials: SftpCredentials,
-	fn: (files: SftpCredentialFiles | null) => Promise<T>
+	fn: (files: SftpCredentialFiles | null) => Promise<T>,
+	writeFile: typeof writeFileSync = writeFileSync
 ): Promise<T> {
 	if (!isSftpRepository(repository)) return fn(null);
 	requireSftpCredentials(repository, credentials);
 
 	const dir = mkdtempSync(join(tmpdir(), 'dockhand-sftp-'));
-	chmodSync(dir, 0o700);
-	const files = {
-		privateKeyPath: join(dir, 'id'),
-		knownHostsPath: join(dir, 'known_hosts'),
-	};
-	writeFileSync(files.privateKeyPath, normalizeSftpPrivateKey(credentials.privateKey!), { mode: 0o600 });
-	writeFileSync(files.knownHostsPath, credentials.knownHosts!, { mode: 0o600 });
 	try {
+		const files = {
+			privateKeyPath: join(dir, 'id'),
+			knownHostsPath: join(dir, 'known_hosts'),
+		};
+		writeFile(files.privateKeyPath, normalizeSftpPrivateKey(credentials.privateKey!), { mode: 0o600 });
+		writeFile(files.knownHostsPath, credentials.knownHosts!, { mode: 0o600 });
 		return await fn(files);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });

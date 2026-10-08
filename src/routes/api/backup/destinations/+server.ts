@@ -11,6 +11,7 @@ import {
 	updateBackupDestinationTestStatus
 } from '$lib/server/db';
 import { validateSftpPrivateKey } from '$lib/server/backups/sftp';
+import { prepareBackupDestinationResponse } from '$lib/server/backups/destination-response';
 import { initRepository, testRepository } from '$lib/server/backups';
 import { registerSchedule } from '$lib/server/scheduler';
 import { validateRepositoryForSave, validateAndSerializeFlags, validatePolicySchedules, validateSftpCredentials } from '$lib/server/backups/helpers';
@@ -25,29 +26,6 @@ import { validateRepositoryForSave, validateAndSerializeFlags, validatePolicySch
  * still returns envVars decrypted so the form can pre-fill credential
  * fields). Single GET is what populates the modal; LIST never needs them.
  */
-function prepareDestination(dest: any, opts: { includeEnvVars: boolean }): any {
-	const decrypted = decryptBackupDestination(dest);
-	const result = { ...dest };
-	delete result.password;
-	if (opts.includeEnvVars) {
-		result.envVars = decrypted.decryptedEnvVars;
-		result.sshKnownHosts = decrypted.decryptedSshKnownHosts;
-	} else {
-		delete result.envVars;
-		delete result.sshKnownHosts;
-	}
-	// Private credentials never reach the client. known_hosts is public host-key
-	// data and is returned only on manage-authorized create/detail/update surfaces.
-	result.hasCacert = !!dest.cacert;
-	result.hasTlsClientCert = !!dest.tlsClientCert;
-	result.hasSshPrivateKey = !!dest.sshPrivateKey;
-	result.hasSshKnownHosts = !!dest.sshKnownHosts;
-	delete result.cacert;
-	delete result.tlsClientCert;
-	delete result.sshPrivateKey;
-	return result;
-}
-
 /**
  * GET /api/backup/destinations - List backup destinations
  *
@@ -63,7 +41,7 @@ export const GET: RequestHandler = async ({ cookies }) => {
 
 	const destinations = await getBackupDestinations();
 	// LIST: strip envVars (cloud creds). Modal re-fetches single destination to edit.
-	return json(destinations.map(d => prepareDestination(d, { includeEnvVars: false })));
+	return json(destinations.map(d => prepareBackupDestinationResponse(d)));
 };
 
 /**
@@ -176,7 +154,11 @@ export const POST: RequestHandler = async (event) => {
 
 		await auditBackupDestination(event, 'create', destination.id, destination.name, { repository: body.repository });
 		// POST returns envVars — user just provided them, no point re-hiding.
-		return json(prepareDestination(destination, { includeEnvVars: true }), { status: 201 });
+		const decrypted = decryptBackupDestination(destination);
+		return json(prepareBackupDestinationResponse(destination, {
+			envVars: decrypted.decryptedEnvVars,
+			sshKnownHosts: decrypted.decryptedSshKnownHosts
+		}), { status: 201 });
 	} catch (error: any) {
 		if (error.message?.includes('UNIQUE constraint')) {
 			return json({ error: 'A destination with this name already exists' }, { status: 409 });
