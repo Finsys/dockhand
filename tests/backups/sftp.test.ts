@@ -99,6 +99,37 @@ describe('SFTP repository syntax', () => {
 		assert.equal(validateRepositoryForSave(REPOSITORY), null);
 		assert.match(validateRepositoryForSave('sftp://backup@127.0.0.1:2222//srv/restic') ?? '', /not allowed/);
 	});
+
+	// The URL parser canonicalises an IPv4 host only for a special scheme (http, https),
+	// so for sftp: the policy has to recognise every spelling a resolver accepts.
+	it('blocks every spelling of a loopback or metadata host', () => {
+		for (const host of ['2130706433', '127.1', '017700000001', '0x7f.0.0.1', '2852039166']) {
+			assert.match(
+				validateRepositoryForSave(`sftp://backup@${host}//srv/restic`) ?? '',
+				/not allowed/,
+				`expected ${host} to be blocked`
+			);
+		}
+		// The legacy form is parsed without new URL(), so it is covered separately.
+		assert.match(validateRepositoryForSave('sftp:backup@2130706433:/srv/restic') ?? '', /not allowed/);
+	});
+
+	// Over-blocking would break the ordinary self-hosted case, so the allowed side is
+	// asserted too: a guard that blocked everything would pass the test above.
+	it('still admits a LAN address, a hostname and an IPv6 literal', () => {
+		for (const host of ['192.168.1.7', '10.0.0.5', 'nas.local', '[fd00::1]']) {
+			assert.equal(
+				validateRepositoryForSave(`sftp://backup@${host}//srv/restic`),
+				null,
+				`expected ${host} to be allowed`
+			);
+		}
+	});
+
+	it('rejects a host that would reach ssh as an option', () => {
+		assert.match(validateRepositoryForSave('sftp://backup@-oSomeOption//srv/restic') ?? '', /cannot start with/);
+		assert.match(validateRepositoryForSave('sftp:backup@-x:/srv/restic') ?? '', /cannot start with/);
+	});
 });
 
 describe('SFTP credential validation and edit semantics', () => {
@@ -143,13 +174,33 @@ describe('SFTP credential validation and edit semantics', () => {
 		}), null);
 	});
 
-	it('normalizes line endings and validates the key with OpenSSH', () => {
-		const crlfWithoutFinalNewline = PRIVATE_KEY.trimEnd().replace(/\n/g, '\r\n');
-		assert.equal(validateSftpPrivateKey(crlfWithoutFinalNewline), null);
+	// ssh-keygen is NOT installed in the unit-test image, so the verdict is injected
+	// rather than taken from the host: what is under test here is how the result is
+	// read, not whether this machine has OpenSSH. The real binary is exercised by the
+	// SFTP smoke test.
+	it('normalizes line endings and reads the OpenSSH verdict', () => {
+		const accepts = () => ({ status: 0 });
+		const rejects = () => ({ status: 255, stderr: 'invalid format' });
+		const written: string[] = [];
+		const record = ((path: unknown, data: unknown) => {
+			written.push(String(data));
+		}) as unknown as typeof writeFileSync;
+
+		const crlfWithoutFinalNewline = PRIVATE_KEY.trimEnd().replace(/\r?\n/g, '\r\n');
+		assert.equal(validateSftpPrivateKey(crlfWithoutFinalNewline, record, accepts), null);
+		// The key reaches ssh-keygen normalised, whatever line endings were pasted in.
+		assert.equal(written[0], PRIVATE_KEY);
 		assert.equal(normalizeSftpPrivateKey(crlfWithoutFinalNewline), PRIVATE_KEY);
-		assert.match(validateSftpPrivateKey(
-			'-----BEGIN OPENSSH PRIVATE KEY-----\ninvalid\n-----END OPENSSH PRIVATE KEY-----'
-		) ?? '', /invalid or unsupported/);
+
+		assert.match(
+			validateSftpPrivateKey('-----BEGIN OPENSSH PRIVATE KEY-----\ninvalid\n-----END OPENSSH PRIVATE KEY-----', record, rejects) ?? '',
+			/invalid or unsupported/
+		);
+	});
+
+	it('reports a passphrase-protected key distinctly', () => {
+		const passphrase = () => ({ status: 255, stderr: 'Load key: incorrect passphrase supplied' });
+		assert.match(validateSftpPrivateKey(PRIVATE_KEY, writeFileSync, passphrase) ?? '', /must not be passphrase-protected/);
 	});
 
 	it('distinguishes ssh-keygen timeout, missing binary, and other execution failures', () => {
@@ -351,6 +402,40 @@ describe('SFTP secret persistence and response surfaces', () => {
 			const source = readFileSync(join(root, migration), 'utf8');
 			assert.match(source, /ssh_private_key/);
 			assert.match(source, /ssh_known_hosts/);
+		}
+	});
+});
+
+/**
+ * An empty private key means "not supplied", not "malformed".
+ *
+ * A non-SFTP destination sends the field blank, so forking ssh-keygen on it refuses a
+ * test that has nothing to do with SSH - validateSftpPrivateKey('') DOES return an
+ * error, which is why every route has to check for content before calling it.
+ */
+describe('the empty-private-key contract', () => {
+	it('validation rejects an empty key, so callers must not pass one', () => {
+		// ssh-keygen refuses an empty file; injected, since the test image has no OpenSSH.
+		const rejects = () => ({ status: 255, stderr: 'invalid format' });
+		assert.match(validateSftpPrivateKey('', writeFileSync, rejects) ?? '', /invalid or unsupported/);
+		assert.match(validateSftpPrivateKey('   ', writeFileSync, rejects) ?? '', /invalid or unsupported/);
+	});
+
+	// All three routes that accept the field gate on `.trim()` before validating. The
+	// handlers pull in the DB layer, so the shared condition is asserted at source.
+	it('create, update and the inline test all gate on a non-blank key', () => {
+		const routes = [
+			'src/routes/api/backup/destinations/+server.ts',
+			'src/routes/api/backup/destinations/[id]/+server.ts',
+			'src/routes/api/backup/destinations/test/+server.ts'
+		];
+		for (const route of routes) {
+			const src = readFileSync(route, 'utf8');
+			assert.match(
+				src,
+				/typeof body\.sshPrivateKey === 'string' && body\.sshPrivateKey\.trim\(\)/,
+				`${route} must require a non-blank key before validating it`
+			);
 		}
 	});
 });

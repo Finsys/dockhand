@@ -43,25 +43,28 @@ describe('classifyRepoFailure', () => {
 		), '/r');
 		expect(classified.code).toBe('REPO_NOT_INITIALIZED');
 	});
+	// Measured on restic 0.19.1: an unreachable SFTP host exits 1, while exit 10 means
+	// the repository itself is not initialised. Classifying an SSH failure therefore
+	// reads exit 1, not 10 - a (10, "connection refused") pair restic never emits.
 	it('classifies public-key rejection only for SFTP repositories', () => {
 		const classified = classifyRepoFailure(fail(
-			10,
+			1,
 			'Load key "/tmp/id": invalid format\nPermission denied (publickey). unexpected EOF'
 		), 'sftp://backup@example.com/repo');
 		expect(classified.code).toBe('RESTIC');
 		expect(classified.error).toMatch(/matching public key.*authorized_keys/);
 		expect(classifyRepoFailure(
-			fail(10, 'Permission denied (publickey).'),
+			fail(1, 'Permission denied (publickey).'),
 			'/local/repo'
-		).code).toBe('REPO_NOT_INITIALIZED');
+		).code).toBe('RESTIC');
 	});
 	it('classifies SFTP host-key and connection failures without offering initialization', () => {
 		expect(classifyRepoFailure(
-			fail(10, 'Host key verification failed.'),
+			fail(1, 'Host key verification failed.'),
 			'sftp://backup@example.com/repo'
 		).code).toBe('RESTIC');
 		expect(classifyRepoFailure(
-			fail(10, 'ssh: connect to host example.com port 22: Connection refused'),
+			fail(1, 'ssh: connect to host example.com port 22: Connection refused'),
 			'sftp://backup@example.com/repo'
 		).code).toBe('RESTIC');
 	});
@@ -82,6 +85,32 @@ describe('classifyRepoFailure', () => {
 		const c = classifyRepoFailure(fail(1, 'some other error'));
 		expect(c.code).toBe('RESTIC');
 		expect(c.error).toBe('some other error');
+	});
+
+	// Exit 10 means the repository is not initialised, whatever the prose says, so the
+	// caller can offer "Create and init". The text below is restic 0.19.1's real exit-10
+	// output, measured against an empty directory.
+	it('an SFTP repo that exits 10 is REPO_NOT_INITIALIZED', () => {
+		const out = 'Fatal: repository does not exist: unable to open config file: '
+			+ 'stat /srv/b/config: no such file or directory\nIs there a repository at the following location?';
+		expect(classifyRepoFailure(fail(10, out), 'sftp:u@host:/b').code).toBe('REPO_NOT_INITIALIZED');
+		expect(classifyRepoFailure(fail(10, out), '/srv/b').code).toBe('REPO_NOT_INITIALIZED');
+	});
+
+	// An unreachable SFTP host exits 1 (measured), and that is reported as the restic
+	// error rather than as an uninitialised repository.
+	it('an SFTP connection failure is surfaced as the restic error', () => {
+		expect(classifyRepoFailure(fail(1, 'connection refused'), 'sftp:u@host:/b').code).toBe('RESTIC');
+		expect(classifyRepoFailure(fail(1, 'Host key verification failed.'), 'sftp:u@host:/b').code).toBe('RESTIC');
+	});
+
+	// The SSH block matches a bare "permission denied", which restic also prints for an
+	// ordinary local or S3 permissions mistake - that must keep its init affordance.
+	it('a permissions error on a non-SFTP repo is unaffected by the SSH rules', () => {
+		const msg = 'Fatal: unable to open config file: stat /r/config: permission denied';
+		for (const repo of ['/srv/backups', 's3:https://s3.amazonaws.com/b', 'rest:http://h:8000/b']) {
+			expect(classifyRepoFailure(fail(1, msg), repo).code).toBe('REPO_NOT_INITIALIZED');
+		}
 	});
 });
 
