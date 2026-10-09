@@ -33,7 +33,7 @@ import { getAdditionalVolumeBinds, dedupeVolumesForRecreate } from './mount-dedu
 import { resolveNanoCpusConflict, resolvePodmanUsernsMode } from './hostconfig-recreate';
 import { isUnknownNetworkKeyError, retryEndpointKey } from './podman-network-key';
 import { expectedEvents, EXPECTED_EVENT_TTL_MS } from './expected-events-core';
-import { decideRespawnOutcome, isExactNameMatch } from './systemd-recreate-core';
+import { decideRespawnOutcome, isExactNameMatch, isSystemdManagedUnit } from './systemd-recreate-core';
 // Import-light image parsing shared with the semver layer; re-exported below for callers.
 import { parseImageReference } from './registry/image-ref';
 import { fetchImageCreatedAt, imagePlatform } from './registry/image-age';
@@ -2088,7 +2088,10 @@ export async function recreateContainerFromInspect(
 	// already-removed id ("Failed to rename old container"), and creating our own
 	// container would collide with systemd's respawn. So hand the recreate to systemd:
 	// stop, then wait for the unit to bring the container back on the new image.
-	const systemdUnit = config.Labels?.['PODMAN_SYSTEMD_UNIT'];
+	// Only a unit that actually owns the lifecycle; podman-compose sets the same label
+	// for a template it never installs, and that container recreates normally.
+	const labelUnit = config.Labels?.['PODMAN_SYSTEMD_UNIT'];
+	const systemdUnit = isSystemdManagedUnit(labelUnit, config.Labels) ? labelUnit : undefined;
 	if (verifiedImageId) {
 		// Validate before stopping anything.
 		trackedImageLabels({}, newImage, verifiedImageId, verifiedImageReference);
