@@ -60,7 +60,7 @@ export interface BackupPorts {
 	 * `composeFileName` feeds the in-helper probe (assert the compose is visible under the mount).
 	 * `kind: 'unknown'` means the host folder can't be located (not compose-managed, or a remote
 	 * env with no Remote stacks directory) -> the caller HARD-FAILS the backup. Logged inside this port. */
-	planStackDirVolume(targetName: string, envId: number | null | undefined, excludedStackFiles?: string[]):
+	planStackDirVolume(targetName: string, envId: number | null | undefined, excludedStackFiles?: string[], capturedVolumeSources?: string[]):
 		Promise<
 			| { kind: 'unknown'; reason: string }
 			| { kind: 'candidate'; syntheticVolume: DiscoveredVolume; volumeKey: string; composeFileName: string; excludePaths: string[]; bindSources: string[]; probeHint?: StackDirProbeHint }
@@ -173,7 +173,12 @@ export class BackupService {
 			// compose-managed, so we HARD-FAIL rather than silently skip its files (option A).
 			// The synthetic volume rides the same helper-bind + lock machinery as any volume.
 			if (job.type === 'stack') {
-				const p = await this.ports.planStackDirVolume(job.targetName, envId, job.options.excludedStackFiles);
+				// Pass the volumes this run actually captures: a bind dir may only be
+				// dropped from the stack files when one of them covers it.
+				const p = await this.ports.planStackDirVolume(
+					job.targetName, envId, job.options.excludedStackFiles,
+					volumes.map((v) => v.source).filter(Boolean)
+				);
 				if (p.kind === 'unknown') {
 					return this.earlySkipOrError(job, triggeredBy,
 						`Cannot locate the stack folder on the host for "${job.targetName}" (${p.reason}). ` +
@@ -610,13 +615,39 @@ export class BackupService {
 	 * API returns VALIDATION. An operator filtering for failed backups would then never see
 	 * that this config has been backing up nothing (its target is gone). */
 	private async earlySkipOrError(job: BackupJob, triggeredBy: 'cron' | 'manual' | 'webhook', reason: string): Promise<BackupResult> {
+		// A validation failure is announced exactly like any other failed backup. It is the
+		// one most likely to go unnoticed for months - nothing crashed, so the only evidence
+		// is a row somebody has to open the UI to read - and the config would otherwise keep
+		// its last 'success' status while backing up nothing.
+		try { await this.ports.setConfigStatus(job.configId, 'failed'); } catch { /* non-fatal */ }
+		try {
+			await this.ports.notify('backup_failed', {
+				title: 'Backup failed',
+				message: `Backup of "${job.targetName}" failed: ${reason} (VALIDATION)`,
+				type: 'error', target: job.targetName, kind: 'backup', errorCode: 'VALIDATION'
+			}, job.environmentId);
+		} catch { /* non-fatal */ }
+
+		let executionId: number | undefined;
 		try {
 			const op = await this.ports.openOperation(job.targetName, job.configId, job.environmentId, triggeredBy);
+			executionId = op.id;
 			await op.close({ kind: 'error', code: 'VALIDATION', message: reason });
-			return { status: 'error', executionId: op.id, code: 'VALIDATION', error: reason };
-		} catch {
-			return { status: 'error', code: 'VALIDATION', error: reason };
+		} catch { /* the row is best-effort; the failure is still reported below */ }
+
+		if (job.options.webhookFailure) {
+			try {
+				this.ports.fireWebhook(job.options.webhookFailure, {
+					event: 'backup_failed',
+					executionId,
+					errorCode: 'VALIDATION',
+					target: job.targetName,
+					type: job.type,
+					error: reason,
+				});
+			} catch { /* webhook failure never changes the outcome */ }
 		}
+		return { status: 'error', executionId, code: 'VALIDATION', error: reason };
 	}
 
 	private errorResult(err: unknown): BackupResult {

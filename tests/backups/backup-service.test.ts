@@ -34,6 +34,8 @@ interface Recorder {
 	liveTargetReleased: number;
 	webhooks: Array<{ url: string; payload: any }>;
 	helperSpec?: any;   // the last spec passed to runInHelper (to assert binds/args forwarding)
+	/** What the service handed to planStackDirVolume as the captured volume sources. */
+	stackDirCapturedSources?: string[];
 }
 
 function newRecorder(): Recorder {
@@ -57,7 +59,8 @@ function makePorts(overrides: Partial<BackupPorts> = {}, rec?: Recorder): Backup
 	const base: BackupPorts = {
 		resolveTargets: async () => ({ containers: [{ id: 'c1', name: 'web', state: 'running' }] }),
 		discoverVolumes: async () => ({ volumes: [{ key: 'data', bind: 'data:/volumes/data:ro', name: 'data', type: 'volume', source: 'data' }], skipped: [] }),
-		planStackDirVolume: async () => ({
+		planStackDirVolume: async (_t: any, _e: any, _x: any, capturedVolumeSources?: string[]) => ({
+			...((r.stackDirCapturedSources = capturedVolumeSources), {}),
 			kind: 'candidate' as const,
 			syntheticVolume: { key: '__dockhand_stackdir__', bind: '/srv/stacks/web:/volumes/__dockhand_stackdir__:ro', name: '__dockhand_stackdir__', type: 'bind' as const, source: '/srv/stacks/web' },
 			volumeKey: '__dockhand_stackdir__',
@@ -420,6 +423,42 @@ describe('BackupService — no empty snapshot reaches retention', () => {
 		expect(rec.opClosed?.details?.skipped).not.toBe(true); // ...NOT a skip
 		expect(rec.opSkipped).toBeUndefined();                 // op.skip() was NOT used
 	});
+	it('announces the DELETED-target failure like any other: notification, config status, webhook', async () => {
+		// The durable row alone is not enough. Nothing crashes on this path, so without a
+		// notification the only evidence is a row somebody has to go and read - the shape of
+		// "I did not realise I had no backups for months".
+		const rec = newRecorder();
+		const svc = new BackupService(makePorts({ resolveTargets: async () => ({ containers: [] }) }, rec));
+		await svc.run({ ...job, options: { webhookFailure: 'https://hook.example/fail' } }, 'cron');
+		const failed = rec.notifications.find((n) => n.event === 'backup_failed');
+		expect(failed).toBeDefined();
+		expect(failed!.payload.errorCode).toBe('VALIDATION');
+		expect(String(failed!.payload.message)).toContain('web');
+		expect(rec.configStatus).toContain('failed');   // not left reading 'success'
+		expect(rec.webhooks.some((w) => w.payload.errorCode === 'VALIDATION')).toBe(true);
+	});
+	it('announces an unlocatable stack folder too (the stack-dir half of the same path)', async () => {
+		const rec = newRecorder();
+		const svc = new BackupService(makePorts({
+			planStackDirVolume: async () => ({ kind: 'unknown' as const, reason: 'no compose working_dir label' })
+		}, rec));
+		await svc.run({ ...job, type: 'stack', targetName: 'web' }, 'cron');
+		expect(rec.notifications.some((n) => n.event === 'backup_failed')).toBe(true);
+		expect(rec.configStatus).toContain('failed');
+	});
+	it('still reports the failure when even the execution row cannot be opened', async () => {
+		// openOperation failing must not swallow the notification - that would be the
+		// quietest possible failure.
+		const rec = newRecorder();
+		const svc = new BackupService(makePorts({
+			resolveTargets: async () => ({ containers: [] }),
+			openOperation: async () => { throw new Error('db down'); }
+		}, rec));
+		const res = await svc.run(job, 'cron');
+		expect(res.status).toBe('error');
+		expect(res.status === 'error' && res.executionId).toBeUndefined();
+		expect(rec.notifications.some((n) => n.event === 'backup_failed')).toBe(true);
+	});
 	it('succeeds with a config-only (metadata-only) snapshot when the target has zero volumes', async () => {
 		const rec = newRecorder();
 		const svc = new BackupService(makePorts({ discoverVolumes: async () => ({ volumes: [], skipped: [] }) }, rec));
@@ -658,5 +697,30 @@ describe('BackupService — volume log distinguishes binds by host source (#1373
 		expect(bindLines.some((m) => m.includes('/host/alpha') && m.includes('/data'))).toBe(true);
 		expect(bindLines.some((m) => m.includes('/host/beta') && m.includes('/data'))).toBe(true);
 		expect(bindLines[0]).not.toBe(bindLines[1]);
+	});
+});
+
+/**
+ * The seam that let the bug through: exclusions are decided from the compose file,
+ * while the volume set comes from the containers' mounts. The planner can only judge
+ * a bind dir safe to drop if it is told which volumes are actually captured - so the
+ * service has to pass them. A stub returning `excludePaths: []` (as this file's did)
+ * never exercises this, which is why it went unnoticed.
+ */
+describe('BackupService - stack dir planning gets the captured volume set', () => {
+	it('hands planStackDirVolume the sources of the volumes it captures', async () => {
+		const rec = newRecorder();
+		const svc = new BackupService(makePorts({}, rec));
+		await svc.run({ ...job, type: 'stack', targetName: 'web' }, 'manual');
+		expect(rec.stackDirCapturedSources).toEqual(['data']);
+	});
+
+	it('passes an empty list when nothing is captured, so nothing is excludable', async () => {
+		const rec = newRecorder();
+		const svc = new BackupService(makePorts({
+			discoverVolumes: async () => ({ volumes: [], skipped: [] })
+		}, rec));
+		await svc.run({ ...job, type: 'stack', targetName: 'web' }, 'manual');
+		expect(rec.stackDirCapturedSources).toEqual([]);
 	});
 });
