@@ -70,7 +70,11 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			sshKnownHosts: body.sshKnownHosts
 		});
 		if (sftpError) return json({ error: sftpError }, { status: 400 });
-		if (typeof body.sshPrivateKey === 'string') {
+		// An empty string is "no key supplied", not a malformed one: a non-SFTP
+		// destination sends the field blank, and forking ssh-keygen on it refuses a
+		// test that has nothing to do with SSH. Same condition the create/update
+		// routes use.
+		if (typeof body.sshPrivateKey === 'string' && body.sshPrivateKey.trim()) {
 			const privateKeyError = validateSftpPrivateKey(body.sshPrivateKey);
 			if (privateKeyError) return json({ error: privateKeyError }, { status: 400 });
 		}

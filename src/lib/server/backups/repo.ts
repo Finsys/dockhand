@@ -57,6 +57,12 @@ export function classifyRepoFailure(run: ResticRun, repository = ''): { code: Ba
 	if (text.includes('repository is already locked') || text.includes('unable to create lock')) {
 		return { code: 'REPO_LOCKED', error: 'repository is locked by another operation' };
 	}
+	// restic's own exit code is a stronger signal than matching its prose: a repo that is
+	// merely uninitialised must keep its "Create and init" affordance even when the output
+	// also mentions the connection.
+	if (run.exitCode === EXIT_NOT_INITIALIZED) {
+		return { code: 'REPO_NOT_INITIALIZED', error: 'repository is not initialised' };
+	}
 	if (isSftpRepository(repository)) {
 		if (text.includes('permission denied (publickey')) {
 			return {
@@ -77,9 +83,6 @@ export function classifyRepoFailure(run: ResticRun, repository = ''): { code: Ba
 		if (accessFailed) {
 			return { code: 'RESTIC', error: run.stderr.trim() || run.stdout.trim() || 'repository connection failed' };
 		}
-	}
-	if (run.exitCode === EXIT_NOT_INITIALIZED) {
-		return { code: 'REPO_NOT_INITIALIZED', error: 'repository is not initialised' };
 	}
 	if (run.exitCode === undefined) {
 		return { code: 'RESTIC', error: 'restic did not complete (unknown outcome)' };

@@ -29,23 +29,37 @@ export function classifySftpKeygenExecutionError(error: NodeJS.ErrnoException): 
 	return 'SSH private key could not be validated with OpenSSH';
 }
 
+/** The subset of spawnSync's result this validation reads. */
+export interface KeygenResult {
+	error?: NodeJS.ErrnoException;
+	status?: number | null;
+	stderr?: string;
+}
+
+/** Run ssh-keygen against a key file. Injectable so a test needs no OpenSSH present. */
+export type RunKeygen = (privateKeyPath: string) => KeygenResult;
+
+const runKeygenWithOpenSsh: RunKeygen = (privateKeyPath) =>
+	spawnSync('ssh-keygen', ['-y', '-P', '', '-f', privateKeyPath], {
+		encoding: 'utf8',
+		timeout: 5000
+	});
+
 export function validateSftpPrivateKey(
 	privateKey: string,
-	writeFile: typeof writeFileSync = writeFileSync
+	writeFile: typeof writeFileSync = writeFileSync,
+	runKeygen: RunKeygen = runKeygenWithOpenSsh
 ): string | null {
 	const dir = mkdtempSync(join(tmpdir(), 'dockhand-sftp-key-'));
 	try {
 		const privateKeyPath = join(dir, 'id');
 		writeFile(privateKeyPath, normalizeSftpPrivateKey(privateKey), { mode: 0o600 });
-		const result = spawnSync('ssh-keygen', ['-y', '-P', '', '-f', privateKeyPath], {
-			encoding: 'utf8',
-			timeout: 5000,
-		});
+		const result = runKeygen(privateKeyPath);
 		if (result.error) {
 			return classifySftpKeygenExecutionError(result.error);
 		}
 		if (result.status === 0) return null;
-		const stderr = result.stderr.toLowerCase();
+		const stderr = (result.stderr ?? '').toLowerCase();
 		if (stderr.includes('incorrect passphrase') || stderr.includes('bad passphrase')) {
 			return 'SSH private key must not be passphrase-protected';
 		}

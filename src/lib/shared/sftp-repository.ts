@@ -92,6 +92,9 @@ export function validateSftpRepository(repository: string): string | null {
 	}
 	if (!parsed.username.trim()) return 'Invalid SFTP repository: an SSH username is required';
 	if (!parsed.host.trim() || /\s/.test(parsed.host)) return 'Invalid SFTP repository: a valid SSH host is required';
+	// A leading dash reaches ssh in the host position, where it reads as an option and
+	// the connection fails on a usage error instead of saying the host is wrong.
+	if (parsed.host.startsWith('-')) return 'Invalid SFTP repository: a host cannot start with "-"';
 	const port = Number(parsed.port);
 	if (!Number.isInteger(port) || port < 1 || port > 65535) {
 		return 'Invalid SFTP repository: SSH port must be between 1 and 65535';
