@@ -37,38 +37,6 @@ Dockhand is a modern, efficient Docker management application providing real-tim
 - **Database**: SQLite or PostgreSQL via Drizzle ORM
 - **Docker**: direct docker API calls.
 
-## SFTP backup destinations
-
-Dockhand can use Restic's native `sftp:` backend with a custom SSH port. Configure it
-under **Settings > Backups > Add backup destination > SFTP (SSH key)**.
-
-SFTP destinations intentionally use a narrow SSH authentication model:
-
-- Supply a private key that does not require an interactive passphrase.
-- The repository path is optional. Leave it blank to use the SFTP account's home
-  directory, or enter a relative or absolute path for a dedicated repository location.
-- Paste `known_hosts` entries whose fingerprints you verified through an independent
-  channel. For a custom port, the host field normally uses `[host]:port`.
-- Dockhand always enables `StrictHostKeyChecking=yes`. It does not support password
-  authentication, ssh-agent authentication or forwarding, or trust-on-first-use.
-- The private key and `known_hosts` data are encrypted in the database and materialized
-  only as temporary `0600` files while Restic is running. The private key is never
-  returned by the API; authorized destination editors can view the public `known_hosts`
-  data so host keys can be reviewed and updated.
-
-`ssh-keyscan` can collect a server's advertised public key, but its output is not
-trusted until you compare the fingerprint with the server/provider's published
-fingerprint:
-
-```sh
-ssh-keyscan -p 2222 backup.example.com > known_hosts
-ssh-keygen -lf known_hosts
-```
-
-This generic destination also covers providers such as Hetzner Storage Box
-([Finsys/dockhand#1478](https://github.com/Finsys/dockhand/issues/1478)); use the
-provider's documented SSH user, port, optional repository path, and verified host key.
-
 ## Screenshots
 
 <table>
