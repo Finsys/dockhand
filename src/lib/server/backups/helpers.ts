@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { isValidCron } from '../scheduler/cron-utils';
 import { privateIpReason, dangerousHostReason, isSafeWebhookUrl, isSafeNotificationUrl } from '../url-safety';
 import { BackupError, isLocalRepo } from './models';
+export { buildRestRepository, parseRestRepository, redactUrlCredentials } from '$lib/utils/rest-repository';
 import { parseSftpRepository, validateSftpRepository } from '$lib/shared/sftp-repository';
 export { validateSftpCredentials } from '$lib/shared/sftp-repository';
 export { privateIpReason };

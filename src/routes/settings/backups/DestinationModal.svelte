@@ -9,6 +9,7 @@
 	import { Textarea } from '$lib/components/ui/textarea';
 	import { Plus, Check, RefreshCw, Wifi, Database, HardDrive, Dices, Copy, BarChart3, Loader2, Clock, PackageCheck, FolderCheck, Unlock, CircleHelp, AlertTriangle, Upload, Server } from 'lucide-svelte';
 	import { AWS_REGIONS, regionalEndpoint, extractS3Region } from '$lib/utils/s3-region';
+	import { buildRestRepository, parseRestRepository } from '$lib/utils/rest-repository';
 	import cronstrue from 'cronstrue';
 	import { formatBytes } from '$lib/utils/format';
 	import CronEditor from '$lib/components/cron-editor.svelte';
@@ -235,11 +236,16 @@
 		},
 		{
 			value: 'rest', label: 'REST server', icon: RestServerIcon,
+			// User and password are separate fields and encoded on the way into the URL:
+			// typed into the URL by hand, a password containing % or @ breaks restic's
+			// parser, and an unparseable location is echoed back with the password in it.
 			fields: [
-				{ key: 'url', label: 'Server URL', placeholder: 'https://backup-server:8000/repo-name' }
+				{ key: 'url', label: 'Server URL', placeholder: 'https://backup-server:8000/repo-name' },
+				{ key: 'user', label: 'Username', placeholder: 'dockhand-user', optional: true },
+				{ key: 'password', label: 'Password', placeholder: '', secret: true, optional: true }
 			],
-			buildRepo: (f) => `rest:${f.url || ''}`,
-			parseRepo: (repo) => ({ url: repo.replace(/^rest:/, '') })
+			buildRepo: (f) => buildRestRepository(f.url || '', f.user, f.password),
+			parseRepo: (repo) => parseRestRepository(repo)
 		}
 	];
 
