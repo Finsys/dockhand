@@ -39,6 +39,40 @@ export async function countFindings(
 }
 
 /**
+ * Severity counts PER IMAGE for an environment's newest scans.
+ *
+ * The environment-wide total cannot answer which image is vulnerable, and a compliance
+ * report has to name the image. Same statement, same de-duplication (one CVE counted
+ * once even when both grype and trivy found it), grouped one level down.
+ *
+ * Returns a map keyed by image id; an image whose scans produced no findings is absent,
+ * so a caller treats a missing entry as zero rather than as unscanned.
+ */
+export async function countFindingsByImage(
+	envIdNum: number,
+	liveImageIds: string[]
+): Promise<Map<string, SummaryCounts>> {
+	const byImage = new Map<string, SummaryCounts>();
+	if (liveImageIds.length === 0) return byImage;
+
+	const { head, mid, tail } = summaryFragments(isPostgres, true);
+	const images = sql.join(liveImageIds.map((id) => sql`${id}`), sql`, `);
+	const statement = sql`${sql.raw(head)}${envIdNum}${sql.raw(mid)}${images}${sql.raw(tail)}`;
+
+	const result: unknown = isPostgres
+		? await (db as { execute: (q: typeof statement) => Promise<unknown> }).execute(statement)
+		: await (db as { all: (q: typeof statement) => Promise<unknown> }).all(statement);
+
+	for (const row of allRows(result)) {
+		const id = row.image_id ?? row.imageId;
+		if (typeof id !== 'string') continue;
+		// `images` is meaningless per row; the row IS one image.
+		byImage.set(id, { ...readSummaryRow(row), images: 1 });
+	}
+	return byImage;
+}
+
+/**
  * The image names carrying findings, for the filter dropdown.
  *
  * Read from the scan rows rather than from the findings, so opening the page
@@ -64,6 +98,13 @@ export async function listScannedImageNames(
 				inArray(vulnerabilityScans.imageId, liveImageIds)
 			)
 		)) as { imageId: string; imageName: string }[];
+}
+
+/** Every row of a driver result, whichever shape that driver returns. */
+function allRows(result: unknown): Record<string, unknown>[] {
+	if (Array.isArray(result)) return result as Record<string, unknown>[];
+	const rows = (result as { rows?: unknown })?.rows;
+	return Array.isArray(rows) ? (rows as Record<string, unknown>[]) : [];
 }
 
 /** The first row of a driver result, whichever shape that driver returns. */

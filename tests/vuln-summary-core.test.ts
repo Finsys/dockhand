@@ -205,3 +205,79 @@ describe('when the count cannot be produced', () => {
 		expect(src).toMatch(/listScannedImageNames\([^)]*\)\.catch/);
 	});
 });
+
+/**
+ * The per-image grouping, run against a real SQLite database.
+ *
+ * The environment-wide statement answers "how many findings are here"; a compliance
+ * report has to answer "which image carries them". Asserting on the SQL text would not
+ * catch a wrong GROUP BY, so the statement is executed over seeded scans and the rows
+ * are compared.
+ */
+describe('summarySelect per-image grouping', () => {
+	const seed = (db: { run: (q: string) => void; query: (q: string) => { all: () => unknown }; close: () => void }) => {
+		db.run(`create table vulnerability_scans (
+			id integer primary key, environment_id integer, image_id text,
+			image_name text, scanner text, scanned_at text, vulnerabilities text
+		)`);
+		const f = (cve: string, sev: string) =>
+			JSON.stringify([{ id: cve, package: 'pkg', version: '1', severity: sev }]);
+		// postgres:16 carries everything; nginx is scanned and clean; api has one low.
+		db.run(`insert into vulnerability_scans values
+			(1, 1, 'sha256:pg',    'postgres:16',        'grype', '2026-10-01', '${f('CVE-1', 'critical')}'),
+			(2, 1, 'sha256:nginx', 'nginx:1.27',         'grype', '2026-10-01', '[]'),
+			(3, 1, 'sha256:api',   'ghcr.io/org/api:v2', 'grype', '2026-10-01', '${f('CVE-9', 'low')}')`);
+	};
+
+	test('each image is counted on its own row, not all on one', async () => {
+		// @ts-expect-error -- bun:sqlite is a runtime built-in with no types installed
+		const { Database } = await import('bun:sqlite');
+		const db = new Database(':memory:');
+		seed(db);
+
+		const sql = summarySelect(false, '1', `'sha256:pg', 'sha256:nginx', 'sha256:api'`, true);
+		const rows = db.query(sql).all() as Array<Record<string, number | string>>;
+		const byId = new Map(rows.map((r) => [r.image_id as string, r]));
+
+		expect(Number(byId.get('sha256:pg')?.critical)).toBe(1);
+		// The bug put every finding on one arbitrary row; api's own low must stay its own.
+		expect(Number(byId.get('sha256:api')?.low)).toBe(1);
+		expect(Number(byId.get('sha256:api')?.critical)).toBe(0);
+		// A scanned image with no findings produces no row, which the caller reads as zero.
+		expect(byId.has('sha256:nginx')).toBe(false);
+		db.close();
+	});
+
+	test('the per-image rows add up to the environment-wide total', async () => {
+		// @ts-expect-error -- bun:sqlite is a runtime built-in with no types installed
+		const { Database } = await import('bun:sqlite');
+		const db = new Database(':memory:');
+		seed(db);
+		const ids = `'sha256:pg', 'sha256:nginx', 'sha256:api'`;
+
+		const perImage = db.query(summarySelect(false, '1', ids, true)).all() as Array<Record<string, number>>;
+		const total = db.query(summarySelect(false, '1', ids, false)).all() as Array<Record<string, number>>;
+
+		const sum = (k: string) => perImage.reduce((a, r) => a + Number(r[k] ?? 0), 0);
+		// The headline figures and the table beneath them must not disagree.
+		expect(sum('critical')).toBe(Number(total[0].critical));
+		expect(sum('low')).toBe(Number(total[0].low));
+		expect(sum('total')).toBe(Number(total[0].total));
+		db.close();
+	});
+
+	test('a duplicate finding from a second scanner is still counted once', async () => {
+		// @ts-expect-error -- bun:sqlite is a runtime built-in with no types installed
+		const { Database } = await import('bun:sqlite');
+		const db = new Database(':memory:');
+		seed(db);
+		// trivy reports the same CVE on the same package/version as grype did.
+		db.run(`insert into vulnerability_scans values
+			(4, 1, 'sha256:pg', 'postgres:16', 'trivy', '2026-10-02',
+			 '${JSON.stringify([{ id: 'CVE-1', package: 'pkg', version: '1', severity: 'critical' }])}')`);
+
+		const rows = db.query(summarySelect(false, '1', `'sha256:pg'`, true)).all() as Array<Record<string, number>>;
+		expect(Number(rows[0].critical)).toBe(1);
+		db.close();
+	});
+});

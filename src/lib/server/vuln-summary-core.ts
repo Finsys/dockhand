@@ -71,24 +71,38 @@ export function summaryDialect(isPostgres: boolean) {
  * twice with different severities is counted once and the header agrees with
  * the table beneath it.
  */
-export function summaryFragments(isPostgres: boolean): {
+export function summaryFragments(
+	isPostgres: boolean,
+	perImage = false
+): {
 	head: string;
 	mid: string;
 	tail: string;
 } {
 	const ENV = '\u0000ENV\u0000';
 	const IMAGES = '\u0000IMAGES\u0000';
-	const [head, rest] = summarySelect(isPostgres, ENV, IMAGES).split(ENV);
+	const [head, rest] = summarySelect(isPostgres, ENV, IMAGES, perImage).split(ENV);
 	const [mid, tail] = rest.split(IMAGES);
 	return { head, mid, tail };
 }
 
 /** The statement with caller-supplied placeholder text (used by the fragments). */
-export function summarySelect(isPostgres: boolean, envParam: string, imageParams: string): string {
+export function summarySelect(
+	isPostgres: boolean,
+	envParam: string,
+	imageParams: string,
+	perImage = false
+): string {
 	const d = summaryDialect(isPostgres);
 	const counts = SUMMARY_SEVERITIES.map((s) => `${d.count(s)} as ${s}`).join(', ');
+	// Grouping by image answers "which image is vulnerable", which the environment-wide
+	// total cannot: the same findings, counted one level down.
+	const select = perImage
+		? `select image_id, count(*) as total, ${counts}`
+		: `select count(*) as total, ${counts}, count(distinct image_id) as images`;
+	const group = perImage ? '\ngroup by image_id' : '';
 
-	return `select count(*) as total, ${counts}, count(distinct image_id) as images
+	return `${select}
 from (
   select image_id, cve, pkg, ver, sev from (
     select v.image_id,
@@ -111,7 +125,7 @@ from (
     ${d.expand}
     where v.rn = 1 and v.image_id in (${imageParams})
   ) ranked where seen = 1
-) d`;
+) d${group}`;
 }
 
 /** Coerce a driver row into counts; drivers disagree on number versus string. */
