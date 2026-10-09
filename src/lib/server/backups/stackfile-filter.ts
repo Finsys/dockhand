@@ -122,6 +122,58 @@ export function relativeBindDirsFromCompose(
 }
 
 /**
+ * Which relative bind dirs may be dropped from the stack-dir capture.
+ *
+ * A bind dir is excluded because it is captured as its OWN volume instead - that is
+ * the whole bargain. When it is not in the volume set (the user deselected it, or no
+ * container was running to report the mount), excluding it drops the directory from
+ * the snapshot entirely: absent from the stack files AND absent from the volumes. A
+ * git stack feels this hardest, since a bind dir there is usually repository content
+ * like `scripts/`, not data anyone thinks to select.
+ *
+ * So a dir is only excluded when a captured volume actually covers it.
+ * `coveredSources` are the host paths of the volumes being captured; the dir is
+ * covered when one of them IS that dir (its own volume) or contains it.
+ */
+export function excludableBindDirs(
+	bindDirs: string[],
+	stackDir: string,
+	coveredSources: string[]
+): string[] {
+	if (bindDirs.length === 0) return [];
+	// Both sides are canonicalised before they are compared. A compose bind may spell a
+	// dir with `.` or `..` (`./data/../scripts`, which docker accepts and the daemon
+	// reports resolved), so comparing raw strings lets the sibling `data` volume
+	// "cover" `scripts` and drop a directory nothing captures.
+	//
+	// A host-root bind (`/:/host:ro`, as host-monitoring agents use) is NOT coverage:
+	// its bytes land under that volume's own key, while restore reads a stack's files
+	// only from /volumes/__dockhand_stackdir__ (stackDirSource), so a dir excluded on
+	// the strength of a root bind is in the snapshot yet unreachable to any restore.
+	// Canonicalising is what rules it out - `/` stays `/`, and nothing starts with `//`.
+	const covered = coveredSources.filter((s) => s && s.startsWith('/')).map(absPosix);
+	if (covered.length === 0) return [];
+
+	const root = absPosix(stackDir);
+	return bindDirs.filter((rel) => {
+		const abs = absPosix(`${root}/${rel.replace(/^\/+/, '')}`);
+		return covered.some((c) => c === abs || abs.startsWith(`${c}/`));
+	});
+}
+
+/** Canonicalise an absolute posix path: collapse `.`/`..` and duplicate or trailing
+ *  slashes. A `..` above the root is clamped at `/`, matching the kernel. */
+function absPosix(p: string): string {
+	const out: string[] = [];
+	for (const seg of p.split('/')) {
+		if (seg === '' || seg === '.') continue;
+		if (seg === '..') { out.pop(); continue; }
+		out.push(seg);
+	}
+	return `/${out.join('/')}`.replace(/^\/\/+/, '/');
+}
+
+/**
  * Every RELATIVE bind's path below the stack dir - FILES and DIRS alike (`./config.yaml`,
  * `./data`). Unlike relativeBindDirsFromCompose (dirs only, for EXCLUDE), this feeds host-path
  * DERIVATION: a single-file bind's daemon-reported mount.Source still pins the stack dir (strip

@@ -8,7 +8,7 @@
  * injected isDirRel and assert the derived relative dirs.
  */
 import { describe, test, expect } from 'bun:test';
-import { relativeBindDirsFromCompose, relativeBindsFromCompose, isUnderRelDir, isLoadBearingStackFile } from '../../src/lib/server/backups/stackfile-filter';
+import { relativeBindDirsFromCompose, relativeBindsFromCompose, isUnderRelDir, isLoadBearingStackFile, excludableBindDirs } from '../../src/lib/server/backups/stackfile-filter';
 
 const STACK = '/app/data/stacks/env/name';
 const allDirs = () => true;   // treat every candidate as a directory
@@ -211,5 +211,105 @@ describe('isUnderRelDir', () => {
 	});
 	test('no dirs -> nothing matches', () => {
 		expect(isUnderRelDir('data/db', [])).toBe(false);
+	});
+});
+
+/**
+ * A bind dir is dropped from the stack-dir capture because it is captured as its own
+ * volume. When it is not in the volume set, dropping it removes the directory from
+ * the snapshot altogether - verified against real restic: a clappo-shaped stack with
+ * ./scripts and ./migrations bound backed up 2 files (compose + an unbound dir), and
+ * after restore both directories were gone, which is what broke the redeploy.
+ */
+describe('excludableBindDirs', () => {
+	const STACK = '/opt/dockhand/stacks/srv1/clappo';
+
+	test('a dir with its own captured volume is excludable', () => {
+		expect(excludableBindDirs(['scripts'], STACK, [`${STACK}/scripts`])).toEqual(['scripts']);
+	});
+
+	test('a dir nobody captures is kept in the stack files', () => {
+		expect(excludableBindDirs(['scripts'], STACK, [`${STACK}/data`])).toEqual([]);
+	});
+
+	test('each dir is judged on its own', () => {
+		expect(excludableBindDirs(['scripts', 'migrations'], STACK, [`${STACK}/migrations`]))
+			.toEqual(['migrations']);
+	});
+
+	// No volumes at all is the case that motivated this: the capture would otherwise
+	// exclude every bind dir and store none of them.
+	test('with no volumes captured, nothing is excludable', () => {
+		expect(excludableBindDirs(['scripts', 'migrations'], STACK, [])).toEqual([]);
+	});
+
+	test('a volume covering the whole stack dir covers its bind dirs', () => {
+		expect(excludableBindDirs(['scripts'], STACK, [STACK])).toEqual(['scripts']);
+	});
+
+	test('a trailing slash on either side does not change the verdict', () => {
+		expect(excludableBindDirs(['scripts/'], STACK, [`${STACK}/scripts/`])).toEqual(['scripts/']);
+	});
+
+	// A named volume's source is its name, not a path; it can never cover a bind dir.
+	test('a named volume does not count as coverage', () => {
+		expect(excludableBindDirs(['scripts'], STACK, ['clappo_pgdata'])).toEqual([]);
+	});
+
+	test('a similarly-named sibling is not coverage', () => {
+		expect(excludableBindDirs(['scripts'], STACK, [`${STACK}/scripts-old`])).toEqual([]);
+	});
+
+	// The direction that matters: a SHORTER path sharing a prefix. Matching without
+	// the separator would let /clappo/scr "cover" /clappo/scripts and drop it.
+	test('a shorter path sharing a prefix is not coverage', () => {
+		expect(excludableBindDirs(['scripts'], STACK, [`${STACK}/scr`])).toEqual([]);
+		expect(excludableBindDirs(['migrations'], STACK, [`${STACK}/migr`])).toEqual([]);
+	});
+
+	test('a path outside the stack dir entirely is not coverage', () => {
+		expect(excludableBindDirs(['scripts'], STACK, ['/mnt/tank/scripts'])).toEqual([]);
+	});
+
+	// A compose bind may spell a dir through its sibling (`./data/../scripts`), which
+	// docker accepts and the daemon reports resolved. Comparing the raw strings let the
+	// `data` volume "cover" `scripts`, dropping a dir nothing captured.
+	test('a sibling volume does not cover a dir reached through it', () => {
+		expect(excludableBindDirs(['data/../scripts', 'data'], STACK, [`${STACK}/data`]))
+			.toEqual(['data']);
+	});
+
+	test('a dotted dir is still covered by its own volume, once canonicalised', () => {
+		expect(excludableBindDirs(['data/../scripts'], STACK, [`${STACK}/scripts`]))
+			.toEqual(['data/../scripts']);
+	});
+
+	test('a dotted covered source is canonicalised too', () => {
+		expect(excludableBindDirs(['scripts'], STACK, [`${STACK}/data/../scripts`]))
+			.toEqual(['scripts']);
+	});
+
+	test('. and doubled slashes do not change the verdict', () => {
+		expect(excludableBindDirs(['./scripts'], STACK, [`${STACK}//scripts`])).toEqual(['./scripts']);
+	});
+
+	// A host-root bind (`/:/host:ro`, what host-monitoring agents mount) is not coverage:
+	// restore reads a stack's files only from /volumes/__dockhand_stackdir__, so a dir
+	// excluded on its strength is in the snapshot but unreachable to any restore.
+	test('a host-root bind is not coverage', () => {
+		expect(excludableBindDirs(['scripts', 'migrations'], STACK, ['/'])).toEqual([]);
+	});
+
+	test('a root bind alongside a real covering volume leaves that one excludable', () => {
+		expect(excludableBindDirs(['scripts', 'migrations'], STACK, ['/', `${STACK}/scripts`]))
+			.toEqual(['scripts']);
+	});
+
+	test('a prefix sibling of the stack root is not coverage', () => {
+		expect(excludableBindDirs(['s'], '/opt-other/app', ['/opt'])).toEqual([]);
+	});
+
+	test('no bind dirs means nothing to decide', () => {
+		expect(excludableBindDirs([], STACK, [`${STACK}/scripts`])).toEqual([]);
 	});
 });

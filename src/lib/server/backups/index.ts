@@ -123,6 +123,10 @@ async function planStackDirVolume(
 	envId: number | null | undefined,
 	excludedStackFiles?: string[],
 	attempts = 7,
+	/** Host paths of the volumes this backup captures. A bind dir is only dropped
+	 *  from the stack files when one of these covers it - otherwise excluding it
+	 *  would leave the directory in neither the stack files nor the volumes. */
+	capturedVolumeSources?: string[],
 ): Promise<
 	| { kind: 'unknown'; reason: string }
 	| { kind: 'candidate'; syntheticVolume: DiscoveredVolume; volumeKey: string; composeFileName: string; excludePaths: string[]; bindSources: string[]; probeHint?: StackDirProbeHint }
@@ -284,9 +288,19 @@ async function planStackDirVolume(
 		try { return lstatSync(join(dockhandStackDir, rel)).isDirectory(); } catch { return false; }
 	};
 	const bindDirs = compose.content ? relativeBindDirsFromCompose(compose.content, dockhandStackDir ?? '', isDirRel) : [];
-	const excludePaths = bindDirs.map((rel) => `/volumes/${STACKDIR_VOLUME_KEY}/${rel}`);
+	// Only drop a bind dir when a captured volume actually covers it. Undefined means
+	// the caller did not say (the UI preview paths), and the old behaviour is kept.
+	const { excludableBindDirs } = await import('./stackfile-filter');
+	const droppable = capturedVolumeSources === undefined
+		? bindDirs
+		: excludableBindDirs(bindDirs, hostPath, capturedVolumeSources);
+	const kept = bindDirs.filter((rel) => !droppable.includes(rel));
+	const excludePaths = droppable.map((rel) => `/volumes/${STACKDIR_VOLUME_KEY}/${rel}`);
 	if (excludePaths.length > 0) {
-		console.log(`[Backup] stackdir "${targetName}": excluding ${excludePaths.length} compose bind dir(s) from the stackdir volume (captured separately as their own volumes): [${bindDirs.join(', ')}]`);
+		console.log(`[Backup] stackdir "${targetName}": excluding ${excludePaths.length} compose bind dir(s) from the stackdir volume (captured separately as their own volumes): [${droppable.join(', ')}]`);
+	}
+	if (kept.length > 0) {
+		console.log(`[Backup] stackdir "${targetName}": keeping ${kept.length} compose bind dir(s) IN the stackdir capture - no captured volume covers them: [${kept.join(', ')}]`);
 	}
 
 	// User deselections from the "Stack files on the host" picker: exclude each named top-level
@@ -690,7 +704,8 @@ function backupPorts(destination: any, onProgress?: (status: string, message: st
 	return {
 		resolveTargets: (type, targetName, envId) => resolveTargets(type, targetName, envId),
 		discoverVolumes: (containers, envId, selected) => discoverVolumes(containers, envId, selected),
-		planStackDirVolume: (targetName, envId, excludedStackFiles) => planStackDirVolume(targetName, envId, excludedStackFiles),
+		planStackDirVolume: (targetName, envId, excludedStackFiles, capturedVolumeSources) =>
+			planStackDirVolume(targetName, envId, excludedStackFiles, undefined, capturedVolumeSources),
 		stopForBackup: (type, targetName, containers, envId) => stopForBackup(type, targetName, containers, envId),
 		runInHelper: (spec) => run.runInHelper(spec),
 		runLocal: (args, tier) => run.runLocal(args, tier),
