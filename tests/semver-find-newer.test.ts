@@ -367,3 +367,41 @@ describe('a container filters its own candidates', () => {
 		expect(result?.tag).toBe('1.3.0');
 	});
 });
+
+/**
+ * linuxserver.io pins look like `v2.5.1-ls121`, where -lsNNN is a build counter that
+ * increments on every rebuild of the same upstream version. Flavor matching is on by
+ * default, so unless the counter is normalised each release sits in its own flavor and
+ * nothing is ever offered. Tags here are from the live linuxserver/kometa listing.
+ */
+describe('findNewerVersionTag - linuxserver build counters', () => {
+	const tags = [
+		'latest',
+		'develop',
+		'v2.5.0-ls119',
+		'v2.5.1-ls120',
+		'v2.5.1-ls121',
+		'v2.5.2-ls122',
+		'2.5.2',
+		'nightly-98c0d080-ls240'
+	];
+
+	it('offers the next release with flavor matching on, the default', () => {
+		expect(findNewerVersionTag('v2.5.1-ls121', tags, { matchFlavor: true })?.tag).toBe('v2.5.2-ls122');
+	});
+
+	it('does not cross over to the bare tag of the same version', () => {
+		// 2.5.2 is present and numerically newer, but it is a different flavor.
+		expect(findNewerVersionTag('v2.5.1-ls121', tags, { matchFlavor: true })?.tag).not.toBe('2.5.2');
+	});
+
+	it('offers nothing when the pinned build is already the newest', () => {
+		expect(findNewerVersionTag('v2.5.2-ls122', tags, { matchFlavor: true })).toBeNull();
+	});
+
+	// A rebuild of the SAME upstream version is a digest change, not a newer version -
+	// the version tuple is what decides, and 2.5.1 is not newer than 2.5.1.
+	it('does not treat a higher counter on the same version as a newer version', () => {
+		expect(findNewerVersionTag('v2.5.1-ls120', ['v2.5.1-ls120', 'v2.5.1-ls121'], { matchFlavor: true })).toBeNull();
+	});
+});

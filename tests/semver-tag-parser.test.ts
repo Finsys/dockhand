@@ -8,7 +8,8 @@ import {
 	flavorMatches,
 	compareParts,
 	isPrerelease,
-	compileVersionPattern
+	compileVersionPattern,
+	flavorOf
 } from '../src/lib/server/semver/tag-parser';
 import { findNewerVersionTag } from '../src/lib/server/semver/find-newer';
 
@@ -71,10 +72,33 @@ describe('flavorMatches', () => {
 	});
 
 	it('keeps a real build variant that only looks hex-ish, and a numeric build', () => {
-		// -ubuntu22.04 / -ls123 are variants, not hashes; a pure-numeric build isn't a hash.
+		// -ubuntu22.04 is a variant, not a hash; a pure-numeric build isn't a hash either.
 		expect(flavorMatches(parseTag('1.0-ubuntu22.04')!, parseTag('2.0-ubuntu22.04')!)).toBe(true);
 		expect(flavorMatches(parseTag('1.0-ubuntu22.04')!, parseTag('2.0')!)).toBe(false);
 		expect(flavorMatches(parseTag('1.0-12345678')!, parseTag('2.0')!)).toBe(false);
+	});
+
+	// linuxserver.io increments -lsNNN on every rebuild of the same upstream version,
+	// so it moves with each release instead of naming a variant. Read literally it makes
+	// every release its own flavor, and an image pinned as <version>-ls<build> matches
+	// no candidate.
+	it('collapses the linuxserver build counter so its releases share a flavor', () => {
+		expect(flavorOf(parseTag('v2.5.1-ls121')!)).toBe('-ls');
+		expect(flavorOf(parseTag('v2.5.2-ls122')!)).toBe('-ls');
+		expect(flavorMatches(parseTag('v2.5.1-ls121')!, parseTag('v2.5.2-ls122')!)).toBe(true);
+		// Any counter width, and a bare -ls with no digits.
+		expect(flavorMatches(parseTag('1.0-ls1')!, parseTag('1.1-ls999')!)).toBe(true);
+		expect(flavorMatches(parseTag('1.0-ls')!, parseTag('1.1-ls7')!)).toBe(true);
+	});
+
+	it('still keeps the linuxserver flavor apart from bare and from other variants', () => {
+		expect(flavorMatches(parseTag('v2.5.1-ls121')!, parseTag('2.5.2')!)).toBe(false);
+		expect(flavorMatches(parseTag('v2.5.1-ls121')!, parseTag('2.5.2-alpine')!)).toBe(false);
+		// A counter that is not at the end is left alone: linuxserver always puts it
+		// last, so this is some other suffix that merely starts with -ls.
+		expect(flavorOf(parseTag('1.0-ls121.1')!)).toBe('-ls121.1');
+		expect(flavorMatches(parseTag('1.0-lsio')!, parseTag('1.1-lsio')!)).toBe(true);
+		expect(flavorMatches(parseTag('1.0-lsio')!, parseTag('1.1-ls2')!)).toBe(false);
 	});
 });
 
