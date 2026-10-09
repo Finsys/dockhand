@@ -4,7 +4,7 @@
     "date": "",
     "comingSoon": true,
     "changes": [
-      { "type": "feature", "text": "add private-key SFTP backup destinations with reviewable verified host keys, custom ports, and optional repository paths (#1478, @ddeitterick)" },
+      { "type": "feature", "text": "back up to an SFTP server with a dedicated SSH key and verified host keys (#1478, PR#1693, @ddeitterick)" },
       { "type": "fix", "text": "a container started with PUID=1001 runs as that user instead of root (#1669)" },
       { "type": "feature", "text": "offer the compose file detected from container labels when adopting an external stack (#1612, PR#1617, @ondras)" },
       { "type": "feature", "text": "hold off automatic updates until a new image is older than a configurable minimum image age (#918, #1365, PR#1643, @TheDuffman85)" },
@@ -17,7 +17,9 @@
       { "type": "feature", "text": "show stack health on the stacks page, and filter by it (#1678)" },
       { "type": "fix", "text": "find the stack folder when a nested bind shares a name with one at the root (#1679)" },
       { "type": "fix", "text": "ordering one container with dockhand.order now moves it ahead of the unlabelled ones (#1117)" },
-      { "type": "fix", "text": "restore preview no longer reports an empty target for a stack whose files are there (#1681)" }
+      { "type": "fix", "text": "restore preview no longer reports an empty target for a stack whose files are there (#1681)" },
+      { "type": "fix", "text": "updating a Podman container started by podman-compose no longer leaves it stopped (#1692)" },
+      { "type": "fix", "text": "the next compose deploy no longer recreates a container Dockhand just updated (#1687)" }
     ],
     "imageTag": "fnsys/dockhand:v1.0.52"
   },
