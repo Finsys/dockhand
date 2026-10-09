@@ -19,7 +19,8 @@
       { "type": "fix", "text": "ordering one container with dockhand.order now moves it ahead of the unlabelled ones (#1117)" },
       { "type": "fix", "text": "restore preview no longer reports an empty target for a stack whose files are there (#1681)" },
       { "type": "fix", "text": "updating a Podman container started by podman-compose no longer leaves it stopped (#1692)" },
-      { "type": "fix", "text": "the next compose deploy no longer recreates a container Dockhand just updated (#1687)" }
+      { "type": "fix", "text": "the next compose deploy no longer recreates a container Dockhand just updated (#1687)" },
+      { "type": "fix", "text": "a stack's bind directories are no longer left out of a backup when no volume covers them (#1696)" }
     ],
     "imageTag": "fnsys/dockhand:v1.0.52"
   },

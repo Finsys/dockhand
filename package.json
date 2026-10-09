@@ -1,7 +1,7 @@
 {
 	"name": "dockhand",
 	"private": true,
-	"version": "1.0.51",
+	"version": "1.0.52",
 	"type": "module",
 	"scripts": {
 		"dev": "npx vite dev",
@@ -126,6 +126,12 @@
 		"@codemirror/search": "6.6.0",
 		"@lezer/common": "1.5.0",
 		"@lezer/highlight": "1.2.3",
-		"devalue": "5.9.3"
+		"devalue": "5.9.3",
+		"dompurify": "3.4.16",
+		"ip-address": "10.7.3",
+		"source-map-js": "1.2.2",
+		"jsdom": {
+			"undici": "8.11.2"
+		}
 	}
 }
