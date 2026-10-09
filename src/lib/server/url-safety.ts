@@ -144,6 +144,59 @@ function embeddedV4(h: string): string | null {
 	return null;
 }
 
+/**
+ * Rewrite an IPv4 address given in any form the resolver accepts into its dotted quad.
+ *
+ * `127.1`, `2130706433`, `017700000001` and `0x7f.0.0.1` all reach 127.0.0.1, so the
+ * policy has to judge the address a resolver will use, not the spelling it was handed.
+ * The URL parser normalizes this for a SPECIAL scheme (http:, https:) but not for one
+ * like sftp:, so it happens here, inside ipCategory, where every caller gets it.
+ *
+ * Anything that is not an IPv4 address in one of those forms is returned unchanged, so a
+ * hostname and an IPv6 literal pass through untouched.
+ */
+export function canonicalV4(host: string): string {
+	const parts = host.split('.');
+	if (parts.length > 4 || parts.some((p) => p === '')) return host;
+
+	// BigInt, because a value past 2^53 loses its low bits in float arithmetic - and the
+	// low bits are exactly what the address ends up being.
+	const nums: bigint[] = [];
+	for (const part of parts) {
+		let n: bigint;
+		try {
+			if (/^0[xX][0-9a-fA-F]+$/.test(part)) n = BigInt(part);
+			else if (/^0[0-7]+$/.test(part)) n = BigInt(`0o${part.slice(1)}`);
+			else if (/^(0|[1-9]\d*)$/.test(part)) n = BigInt(part);
+			else return host;
+		} catch {
+			return host;
+		}
+		nums.push(n);
+	}
+
+	// The last part absorbs the remaining octets: `127.1` is 127.0.0.1, and a lone
+	// number is the whole 32-bit address.
+	let last = nums[nums.length - 1];
+	const lead = nums.slice(0, -1);
+	if (lead.some((n) => n > 255n)) return host;
+	const span = 4 - lead.length;
+	if (span === 4) {
+		// inet_aton takes a lone number modulo 2^32 rather than rejecting it, so
+		// 0x17f000001 is 127.0.0.1 to every resolver and must be judged as such.
+		last %= 4294967296n;
+	} else if (last > 256n ** BigInt(span) - 1n) {
+		// A part that overflows the octets it has left is rejected by the resolver
+		// (`127.16777216` does not resolve), so rewriting it would block a host that
+		// could never have been reached.
+		return host;
+	}
+
+	const octets = lead.map(Number);
+	for (let i = span - 1; i >= 0; i--) octets.push(Number((last >> BigInt(i * 8)) & 0xffn));
+	return octets.join('.');
+}
+
 export function ipCategory(host: string): IpCategory | null {
 	const h = host.toLowerCase().replace(/^\[|\]$/g, '');
 	// IPv6 loopback / unspecified, then link-local / unique-local (private).
@@ -158,7 +211,7 @@ export function ipCategory(host: string): IpCategory | null {
 	const x6 = expandV6(h);
 	if (x6 && x6[0] === 0x64 && x6[1] === 0xff9b && x6[2] === 1) return 'reserved';
 	// IPv4-mapped/compatible IPv6 — judge the embedded v4 (see embeddedV4).
-	const v4 = embeddedV4(h) ?? h;
+	const v4 = canonicalV4(embeddedV4(h) ?? h);
 	const m = v4.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
 	if (m) {
 		const [a, b] = [Number(m[1]), Number(m[2])];
