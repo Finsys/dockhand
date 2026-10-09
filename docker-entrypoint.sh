@@ -210,8 +210,12 @@ if [ "$RUN_USER" = "root" ]; then
         exec "$@"
     fi
 else
-    # Running as non-root user
-    echo "Running as user: $RUN_USER"
+    # Running as non-root user. Print the uid/gid too: the account is created inside
+    # the container, so its NAME is ours and will not match the host's name for that
+    # uid - the number is what the reader can actually compare against PUID/PGID.
+    RUN_UID=$(id -u "$RUN_USER" 2>/dev/null || echo '?')
+    RUN_GID=$(id -g "$RUN_USER" 2>/dev/null || echo '?')
+    echo "Running as user: $RUN_USER ($RUN_UID:$RUN_GID)"
     if [ "$1" = "" ]; then
         exec su-exec "$RUN_USER" bun run ./build/index.js
     else
