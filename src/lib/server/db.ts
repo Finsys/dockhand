@@ -4433,7 +4433,7 @@ export async function saveDashboardPreferences(data: {
 // SCHEDULE EXECUTION OPERATIONS
 // =============================================================================
 
-export type ScheduleType = 'container_update' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune' | 'backup' | 'restore' | 'stack_deploy' | 'deploy_log_reconcile';
+export type ScheduleType = 'container_update' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune' | 'backup' | 'restore' | 'stack_deploy' | 'deploy_log_reconcile' | 'env_report';
 
 // Runtime list of every ScheduleType. Used to bound a no-type-filter executions
 // query to the caller's viewable types (viewableScheduleTypes). The two type
@@ -4449,7 +4449,8 @@ export const ALL_SCHEDULE_TYPES = [
 	'backup',
 	'restore',
 	'stack_deploy',
-	'deploy_log_reconcile'
+	'deploy_log_reconcile',
+	'env_report'
 ] as const satisfies readonly ScheduleType[];
 // Compile error if ALL_SCHEDULE_TYPES and ScheduleType ever diverge.
 type _ScheduleTypeExhaustive =
@@ -5372,6 +5373,73 @@ export async function getAllEnvUpdateCheckSettings(): Promise<Array<{ envId: num
 			const config = JSON.parse(row.value) as EnvUpdateCheckSettings;
 			if (config.enabled) {
 				results.push({ envId, settings: config });
+			}
+		} catch {
+			// Skip invalid entries
+		}
+	}
+	return results;
+}
+
+// =============================================================================
+// ENVIRONMENT REPORT SCHEDULE SETTINGS
+// =============================================================================
+
+/**
+ * A scheduled state report for one environment, mailed to a notification channel.
+ *
+ * Only an administrator configures this: the report lists everything running and every
+ * vulnerability known about it, and the mail leaves the installation on a timer with
+ * nobody watching. One key holding one object, so a field added later needs no migration.
+ */
+export interface EnvReportSettings {
+	enabled: boolean;
+	cron: string;
+	format: 'pdf' | 'csv';
+	/** The SMTP channel to mail it to. Only SMTP can carry the attachment. */
+	notificationId: number | null;
+}
+
+const envReportKey = (envId: number) => `env_${envId}_report`;
+
+export async function getEnvReportSettings(envId: number): Promise<EnvReportSettings | null> {
+	const result = await db.select().from(settings).where(eq(settings.key, envReportKey(envId)));
+	if (!result[0]) return null;
+	try {
+		return JSON.parse(result[0].value);
+	} catch {
+		return null;
+	}
+}
+
+export async function setEnvReportSettings(envId: number, config: EnvReportSettings): Promise<void> {
+	const key = envReportKey(envId);
+	const value = JSON.stringify(config);
+	const existing = await db.select().from(settings).where(eq(settings.key, key));
+	if (existing.length > 0) {
+		await db.update(settings)
+			.set({ value, updatedAt: new Date().toISOString() })
+			.where(eq(settings.key, key));
+	} else {
+		await db.insert(settings).values({ key, value });
+	}
+}
+
+export async function deleteEnvReportSettings(envId: number): Promise<void> {
+	await db.delete(settings).where(eq(settings.key, envReportKey(envId)));
+}
+
+/** Every environment with reporting switched on, for the scheduler to register at boot. */
+export async function getAllEnvReportSettings(): Promise<Array<{ envId: number; settings: EnvReportSettings }>> {
+	const rows = await db.select().from(settings).where(sql`${settings.key} LIKE 'env_%_report'`);
+	const results: Array<{ envId: number; settings: EnvReportSettings }> = [];
+	for (const row of rows) {
+		try {
+			const match = row.key.match(/^env_(\d+)_report$/);
+			if (!match) continue;
+			const config = JSON.parse(row.value) as EnvReportSettings;
+			if (config.enabled && config.cron) {
+				results.push({ envId: parseInt(match[1]), settings: config });
 			}
 		} catch {
 			// Skip invalid entries

@@ -4,6 +4,7 @@ import {
 	includeChanges,
 	imagesInUse,
 	reportFilename,
+	reportTier,
 	reportToCSV,
 	summarise,
 	unscannedImages,
@@ -217,5 +218,42 @@ describe('csv safety', () => {
 		});
 		const csv = reportToCSV(buildReport([e], includeChanges('smb'), META));
 		expect(csv).toContain("'=cmd()");
+	});
+});
+
+/**
+ * Which licences may have a report at all, and which one carries the change history.
+ * Two callers ask this - the download route about the caller's licence, the scheduler
+ * about the installation's - so a wrong answer here either hands the audit log to a
+ * tier that did not pay for it, or refuses a customer who did.
+ */
+describe('reportTier', () => {
+	test('a paid tier grants a report', () => {
+		expect(reportTier('enterprise')).toBe('enterprise');
+		expect(reportTier('smb')).toBe('smb');
+	});
+
+	test('no licence grants no report', () => {
+		expect(reportTier(null)).toBeNull();
+		expect(reportTier(undefined)).toBeNull();
+		expect(reportTier('')).toBeNull();
+		expect(reportTier('free')).toBeNull();
+		expect(reportTier('trial')).toBeNull();
+	});
+
+	// An unknown or misspelled value must not be read as a tier: matching loosely here
+	// is how an unlicensed instance would start exporting.
+	test('a tier is matched exactly, not loosely', () => {
+		expect(reportTier('ENTERPRISE')).toBeNull();
+		expect(reportTier('Enterprise')).toBeNull();
+		expect(reportTier('enterprise-trial')).toBeNull();
+		expect(reportTier('smb-readonly')).toBeNull();
+		expect(reportTier(' smb')).toBeNull();
+	});
+
+	// Only enterprise carries the audit log, whatever the report is otherwise allowed.
+	test('only the enterprise tier carries the change history', () => {
+		expect(includeChanges(reportTier('enterprise')!)).toBe(true);
+		expect(includeChanges(reportTier('smb')!)).toBe(false);
 	});
 });

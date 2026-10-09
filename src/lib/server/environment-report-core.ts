@@ -82,6 +82,19 @@ export interface ReportTotals {
  * is an enterprise feature, and an export must not hand the same data to a tier
  * that cannot open the audit page.
  */
+/**
+ * The report tier a licence grants, or null when none does.
+ *
+ * Both the download route and the scheduler have to answer this, from different
+ * sources (the caller's licence vs the installation's), so the mapping lives here
+ * rather than being spelled out twice.
+ */
+export function reportTier(licenseType: string | null | undefined): ReportTier | null {
+	if (licenseType === 'enterprise') return 'enterprise';
+	if (licenseType === 'smb') return 'smb';
+	return null;
+}
+
 export function includeChanges(tier: ReportTier): boolean {
 	return tier === 'enterprise';
 }

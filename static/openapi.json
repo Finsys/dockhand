@@ -12837,6 +12837,212 @@
         }
       }
     },
+    "/api/environments/{id}/report": {
+      "get": {
+        "operationId": "get_api_environments_id_report",
+        "tags": [
+          "environments"
+        ],
+        "summary": "Get the scheduled state report configuration for an environment",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Environment id (from GET /api/environments)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "settings": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "cron": {
+                          "type": "string"
+                        },
+                        "format": {
+                          "type": "string"
+                        },
+                        "notificationId": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "cron",
+                        "format"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "settings"
+                  ]
+                },
+                "example": {
+                  "settings": {
+                    "enabled": false,
+                    "cron": "0 6 1 * *",
+                    "format": "pdf",
+                    "notificationId": null
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Only an administrator can read the report schedule"
+          },
+          "404": {
+            "description": "Environment not found"
+          },
+          "500": {
+            "description": "Unexpected error while loading the settings"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Administrator only. The report lists everything running and every vulnerability known about it, and the schedule mails it out of the installation unattended, so configuring it is not delegated by a role."
+      },
+      "post": {
+        "operationId": "post_api_environments_id_report",
+        "tags": [
+          "environments"
+        ],
+        "summary": "Save the scheduled state report configuration for an environment (registers/unregisters the croner job)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Environment id (from GET /api/environments)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "settings": {
+                      "type": "object",
+                      "properties": {
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "cron": {
+                          "type": "string"
+                        },
+                        "format": {
+                          "type": "string"
+                        },
+                        "notificationId": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "enabled",
+                        "cron",
+                        "format"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "success",
+                    "settings"
+                  ]
+                },
+                "example": {
+                  "success": true,
+                  "settings": {
+                    "enabled": true,
+                    "cron": "string",
+                    "format": "string",
+                    "notificationId": 0
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The format must be pdf or csv, or the channel is missing, unknown, disabled or not an SMTP channel"
+          },
+          "403": {
+            "description": "Only an administrator can configure scheduled reports, or no commercial license is active"
+          },
+          "404": {
+            "description": "Environment not found"
+          },
+          "500": {
+            "description": "Unexpected error while saving the settings"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "description": "Administrator only. The channel must be an SMTP one - no other channel type can carry the report as an attachment.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "cron": {
+                    "type": "string"
+                  },
+                  "format": {
+                    "type": "string"
+                  },
+                  "notificationId": {
+                    "type": "integer"
+                  }
+                }
+              },
+              "example": {
+                "enabled": true,
+                "cron": "0 6 1 * *",
+                "format": "pdf",
+                "notificationId": 3
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/environments/{id}/test": {
       "post": {
         "operationId": "post_api_environments_id_test",
@@ -13414,12 +13620,12 @@
             "schema": {
               "type": "string"
             },
-            "description": "Output format - json (default) or csv"
+            "description": "Output format - json (default), csv, or pdf"
           }
         ],
         "responses": {
           "200": {
-            "description": "The report as a downloadable json or csv attachment"
+            "description": "The report as a downloadable json, csv or pdf attachment"
           },
           "400": {
             "description": "The env query parameter is not a number"

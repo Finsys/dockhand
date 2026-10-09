@@ -15,6 +15,11 @@ export interface NotificationPayload {
 	environmentId?: number;
 	environmentName?: string;
 	eventType?: string;
+	/**
+	 * Files to attach. Only SMTP can carry these - a webhook channel has nowhere to put
+	 * them, so a payload that NEEDS an attachment must be sent to an SMTP channel.
+	 */
+	attachments?: Array<{ filename: string; content: Buffer; contentType?: string }>;
 }
 
 export interface NotificationResult {

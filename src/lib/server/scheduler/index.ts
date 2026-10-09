@@ -31,6 +31,8 @@ import {
 	getDeployLogReconcileEnabled,
 	getEnvironments,
 	getEnvUpdateCheckSettings,
+	getEnvReportSettings,
+	getAllEnvReportSettings,
 	getAllEnvUpdateCheckSettings,
 	getImagePruneSettings,
 	getAllImagePruneSettings,
@@ -52,6 +54,7 @@ import {
 import { runContainerUpdate } from './tasks/container-update';
 import { runGitStackSync } from './tasks/git-stack-sync';
 import { runEnvUpdateCheckJob } from './tasks/env-update-check';
+import { runEnvReport } from './tasks/env-report';
 import { runImagePrune } from './tasks/image-prune';
 import { runScheduledBackup } from './tasks/backup';
 import { runRepoPrune, runRepoCheck, runRepoVerify } from './tasks/repo-maintenance';
@@ -361,6 +364,17 @@ export async function refreshAllSchedules(): Promise<void> {
 		console.error('[Scheduler] Error loading env update check schedules:', errorMsg);
 	}
 
+	// Register scheduled environment reports
+	let envReportCount = 0;
+	try {
+		for (const { envId } of await getAllEnvReportSettings()) {
+			if (await registerSchedule(envId, 'env_report', envId)) envReportCount++;
+		}
+	} catch (error) {
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[Scheduler] Error loading env report schedules:', errorMsg);
+	}
+
 	// Register image prune schedules
 	let imagePruneCount = 0;
 	try {
@@ -427,7 +441,7 @@ export async function refreshAllSchedules(): Promise<void> {
 		}
 	}
 
-	console.log(`[Scheduler] Registered ${containerCount} container schedules, ${gitStackCount} git stack schedules, ${envUpdateCheckCount} env update check schedules, ${imagePruneCount} image prune schedules, ${backupCount} backup schedules, ${repoPruneCount} repo prune schedules, ${repoCheckCount} repo check schedules, ${repoVerifyCount} repo verify schedules`);
+	console.log(`[Scheduler] Registered ${containerCount} container schedules, ${gitStackCount} git stack schedules, ${envUpdateCheckCount} env update check schedules, ${imagePruneCount} image prune schedules, ${backupCount} backup schedules, ${repoPruneCount} repo prune schedules, ${repoCheckCount} repo check schedules, ${repoVerifyCount} repo verify schedules, ${envReportCount} env report schedules`);
 }
 
 /**
@@ -436,7 +450,7 @@ export async function refreshAllSchedules(): Promise<void> {
  */
 export async function registerSchedule(
 	scheduleId: number,
-	type: 'container_update' | 'git_stack_sync' | 'env_update_check' | 'image_prune' | 'backup' | 'repo_prune' | 'repo_check' | 'repo_verify',
+	type: 'container_update' | 'git_stack_sync' | 'env_update_check' | 'image_prune' | 'backup' | 'repo_prune' | 'repo_check' | 'repo_verify' | 'env_report',
 	environmentId: number | null
 ): Promise<boolean> {
 	const key = `${type}-${scheduleId}`;
@@ -469,6 +483,14 @@ export async function registerSchedule(
 			if (!env) return false;
 			cronExpression = config.cron;
 			entityName = `Update: ${env.name}`;
+			enabled = config.enabled;
+		} else if (type === 'env_report') {
+			const config = await getEnvReportSettings(scheduleId);
+			if (!config) return false;
+			const env = await getEnvironment(scheduleId);
+			if (!env) return false;
+			cronExpression = config.cron;
+			entityName = `Report: ${env.name}`;
 			enabled = config.enabled;
 		} else if (type === 'image_prune') {
 			const config = await getImagePruneSettings(scheduleId);
@@ -531,6 +553,10 @@ export async function registerSchedule(
 				const config = await getEnvUpdateCheckSettings(scheduleId);
 				if (!config || !config.enabled) return;
 				await runEnvUpdateCheckJob(scheduleId, 'cron');
+			} else if (type === 'env_report') {
+				const config = await getEnvReportSettings(scheduleId);
+				if (!config || !config.enabled) return;
+				await runEnvReport(scheduleId, 'cron');
 			} else if (type === 'image_prune') {
 				const config = await getImagePruneSettings(scheduleId);
 				if (!config || !config.enabled) return;
@@ -576,7 +602,7 @@ export async function registerSchedule(
  */
 export function unregisterSchedule(
 	scheduleId: number,
-	type: 'container_update' | 'git_stack_sync' | 'env_update_check' | 'image_prune' | 'backup' | 'repo_prune' | 'repo_check' | 'repo_verify'
+	type: 'container_update' | 'git_stack_sync' | 'env_update_check' | 'image_prune' | 'backup' | 'repo_prune' | 'repo_check' | 'repo_verify' | 'env_report'
 ): void {
 	const key = `${type}-${scheduleId}`;
 	const job = activeJobs.get(key);
@@ -663,6 +689,18 @@ export async function refreshSchedulesForEnvironment(environmentId: number): Pro
 	} catch (error) {
 		const errorMsg = error instanceof Error ? error.message : String(error);
 		console.error('[Scheduler] Error refreshing image prune schedule:', errorMsg);
+	}
+
+	// Re-register the scheduled state report for this environment
+	try {
+		const config = await getEnvReportSettings(environmentId);
+		if (config && config.enabled) {
+			const registered = await registerSchedule(environmentId, 'env_report', environmentId);
+			if (registered) refreshedCount++;
+		}
+	} catch (error) {
+		const errorMsg = error instanceof Error ? error.message : String(error);
+		console.error('[Scheduler] Error refreshing env report schedule:', errorMsg);
 	}
 
 	// Re-register backup schedules for this environment (audit #11)

@@ -117,7 +117,7 @@
 
 	// Fetched rather than navigated to: a navigation would drop the user on raw
 	// JSON if the licence lapsed or the permission is missing.
-	async function downloadReport(format: 'json' | 'csv', envId?: number) {
+	async function downloadReport(format: 'json' | 'csv' | 'pdf', envId?: number) {
 		const params = new URLSearchParams({ format });
 		if (envId !== undefined) params.set('env', String(envId));
 		exportingReport = true;
@@ -492,8 +492,9 @@
 					</DropdownMenu.Trigger>
 					<DropdownMenu.Content align="end" class="w-56">
 						<DropdownMenu.Label>All environments</DropdownMenu.Label>
-						<DropdownMenu.Item onclick={() => downloadReport('json')}>as JSON</DropdownMenu.Item>
+						<DropdownMenu.Item onclick={() => downloadReport('pdf')}>as PDF</DropdownMenu.Item>
 						<DropdownMenu.Item onclick={() => downloadReport('csv')}>as CSV</DropdownMenu.Item>
+						<DropdownMenu.Item onclick={() => downloadReport('json')}>as JSON</DropdownMenu.Item>
 						{#if environments.length > 1}
 							<DropdownMenu.Separator />
 							<DropdownMenu.Label>One environment</DropdownMenu.Label>
@@ -501,8 +502,9 @@
 								<DropdownMenu.Sub>
 									<DropdownMenu.SubTrigger>{env.name}</DropdownMenu.SubTrigger>
 									<DropdownMenu.SubContent>
-										<DropdownMenu.Item onclick={() => downloadReport('json', env.id)}>as JSON</DropdownMenu.Item>
+										<DropdownMenu.Item onclick={() => downloadReport('pdf', env.id)}>as PDF</DropdownMenu.Item>
 										<DropdownMenu.Item onclick={() => downloadReport('csv', env.id)}>as CSV</DropdownMenu.Item>
+										<DropdownMenu.Item onclick={() => downloadReport('json', env.id)}>as JSON</DropdownMenu.Item>
 									</DropdownMenu.SubContent>
 								</DropdownMenu.Sub>
 							{/each}

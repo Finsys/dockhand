@@ -13,6 +13,7 @@ import {
 	getAllAutoUpdateGitStacks,
 	getAllEnvUpdateCheckSettings,
 	getAllImagePruneSettings,
+	getAllEnvReportSettings,
 	getBackupConfigs,
 	getBackupDestination,
 	getBackupDestinations,
@@ -29,7 +30,7 @@ import { authorize } from '$lib/server/authorize';
 
 export interface ScheduleInfo {
 	id: number;
-	type: 'container_update' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune' | 'backup' | 'repo_prune' | 'repo_check' | 'repo_verify' | 'stack_deploy' | 'deploy_log_reconcile';
+	type: 'container_update' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune' | 'backup' | 'repo_prune' | 'repo_check' | 'repo_verify' | 'stack_deploy' | 'deploy_log_reconcile' | 'env_report';
 	name: string;
 	entityName: string;
 	description?: string;
@@ -219,6 +220,42 @@ export const GET: RequestHandler = async ({ cookies }) => {
 			})
 		);
 		schedules.push(...imagePruneSchedules);
+
+		// Scheduled state reports. Listed like any other per-environment schedule so a
+		// failed delivery is visible here instead of only in the server log.
+		const envReportConfigs = await getAllEnvReportSettings();
+		const envReportSchedules = await Promise.all(
+			envReportConfigs.map(async ({ envId, settings: cfg }) => {
+				const [env, lastExecution, recentExecutions, timezone] = await Promise.all([
+					getEnvironment(envId),
+					getLastExecutionForSchedule('env_report', envId),
+					getRecentExecutionsForSchedule('env_report', envId, 5),
+					getEnvironmentTimezone(envId)
+				]);
+				const isEnabled = cfg.enabled ?? false;
+				const nextRun = isEnabled && cfg.cron ? getNextRun(cfg.cron, timezone) : null;
+
+				return {
+					id: envId,
+					type: 'env_report' as const,
+					name: `State report: ${env?.name || 'Unknown'}`,
+					entityName: env?.name || 'Unknown',
+					// The channel is deliberately not named: this list is read under
+					// `schedules:view`, which does not carry the notification settings.
+					description: `Mail the ${cfg.format.toUpperCase()} state report`,
+					environmentId: envId,
+					environmentName: env?.name ?? null,
+					enabled: isEnabled,
+					scheduleType: 'custom',
+					cronExpression: cfg.cron ?? null,
+					nextRun: nextRun?.toISOString() ?? null,
+					lastExecution: lastExecution ?? null,
+					recentExecutions,
+					isSystem: false
+				};
+			})
+		);
+		schedules.push(...envReportSchedules);
 
 		// Get backup schedules (audit #17 — GET must match the SSE stream listing)
 		const allBackupConfigs = await getBackupConfigs();
