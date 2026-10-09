@@ -12,6 +12,7 @@
 	import { toast } from 'svelte-sonner';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { copyToClipboard } from '$lib/utils/clipboard';
+	import { displayContainerUser } from '$lib/utils/effective-container-user';
 	import { parseCustomUrl } from '$lib/utils/custom-url';
 	import { formatBytes } from '$lib/utils/format';
 	import { Input } from '$lib/components/ui/input';
@@ -1605,7 +1606,7 @@
 							</div>
 							<div class="p-3 border border-border rounded-lg">
 								<p class="text-xs text-muted-foreground mb-1">User</p>
-								<code class="text-xs">{containerData.Config?.User || 'root'}</code>
+								<code class="text-xs">{displayContainerUser(containerData.Config?.User, processesData)}</code>
 							</div>
 							<div class="p-3 border border-border rounded-lg">
 								<p class="text-xs text-muted-foreground mb-1">User Namespace</p>
