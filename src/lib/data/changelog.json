@@ -1,8 +1,7 @@
 [
   {
     "version": "1.0.52",
-    "date": "",
-    "comingSoon": true,
+    "date": "2026-10-10",
     "changes": [
       { "type": "feature", "text": "back up to an SFTP server with a dedicated SSH key and verified host keys (#1478, PR#1693, @ddeitterick)" },
       { "type": "fix", "text": "a container started with PUID=1001 runs as that user instead of root (#1669)" },
