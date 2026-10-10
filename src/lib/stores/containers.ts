@@ -6,6 +6,7 @@ import { appendEnvParam, clearStaleEnvironment, environments } from '$lib/stores
 import { appSettings } from '$lib/stores/settings';
 import { toast } from 'svelte-sonner';
 import type { NewerVersion } from '$lib/types';
+import { m } from '$lib/paraglide/messages.js';
 
 export interface AutoUpdateSetting {
 	enabled: boolean;
@@ -81,7 +82,7 @@ function createContainerStore() {
 		scheduleType: string,
 		cronExpression: string
 	): { label: string; tooltip: string } {
-		if (!cronExpression) return { label: 'on', tooltip: 'Auto-update enabled' };
+		if (!cronExpression) return { label: m.containersstore_label_on(), tooltip: m.dashboard_status_auto_update() };
 
 		const parts = cronExpression.split(' ');
 		if (parts.length < 5) return { label: 'cron', tooltip: cronExpression };
@@ -101,15 +102,16 @@ function createContainerStore() {
 		}
 
 		if (scheduleType === 'daily' || dow === '*') {
-			return { label: 'daily', tooltip: `Daily at ${timeStr}` };
+			return { label: m.containersstore_label_daily(), tooltip: m.containersstore_tooltip_daily({ time: timeStr }) };
 		}
 
 		if (scheduleType === 'weekly') {
-			const days = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
-			const dayName = days[parseInt(dow)] || dow;
+			const days = [m.containersstore_day_sun, m.containersstore_day_mon, m.containersstore_day_tue, m.containersstore_day_wed, m.containersstore_day_thu, m.containersstore_day_fri, m.containersstore_day_sat];
+			const dayName = days[parseInt(dow)]?.() || dow;
+			const fullDayNames = [m.cron_sunday, m.cron_monday, m.cron_tuesday, m.cron_wednesday, m.cron_thursday, m.cron_friday, m.cron_saturday];
 			return {
 				label: dayName,
-				tooltip: `Every ${['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][parseInt(dow)] || dow} at ${timeStr}`
+				tooltip: m.containersstore_tooltip_weekly({ day: fullDayNames[parseInt(dow)]?.() || dow, time: timeStr })
 			};
 		}
 
@@ -209,7 +211,7 @@ function createContainerStore() {
 					environments.refresh();
 					return;
 				}
-				toast.error('Failed to load containers');
+				toast.error(m.containersstore_load_failed());
 				return;
 			}
 			const data: ContainerInfo[] = await response.json();
@@ -219,7 +221,7 @@ function createContainerStore() {
 			await fetchAutoUpdateSettings(envId);
 		} catch (error) {
 			console.error('Failed to fetch containers:', error);
-			toast.error('Failed to load containers');
+			toast.error(m.containersstore_load_failed());
 		} finally {
 			patch({ loading: false });
 			fetchingContainers = false;

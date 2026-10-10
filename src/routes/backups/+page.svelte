@@ -27,6 +27,7 @@
 	import { currentEnvironment } from '$lib/stores/environment';
 	import { watchJob, readJobResponse } from '$lib/utils/sse-fetch';
 	import { getRepoTypeIcon, formatCron, retentionSummary, classifyJobResult, tagLogLine, bulkDeleteSnapshots, bulkDeleteToast, bulkDeleteFailure } from '$lib/utils/backup';
+	import { cronstrueLocale } from '$lib/i18n/cron';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import BulkDeleteSnapshotsDialog from '$lib/components/BulkDeleteSnapshotsDialog.svelte';
 	import BulkDeleteErrorDialog from '$lib/components/BulkDeleteErrorDialog.svelte';
@@ -950,7 +951,7 @@
 					{#if config.isOrphan}
 						<span class="text-xs text-amber-500">no schedule</span>
 					{:else if config.schedule}
-						<span class="text-xs text-muted-foreground" title={config.schedule}>{formatCron(config.schedule)}</span>
+						<span class="text-xs text-muted-foreground" title={config.schedule}>{formatCron(config.schedule, cronstrueLocale())}</span>
 					{:else}
 						<span class="text-xs text-muted-foreground">—</span>
 					{/if}

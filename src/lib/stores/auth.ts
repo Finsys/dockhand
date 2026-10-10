@@ -1,5 +1,6 @@
 import { writable, derived } from 'svelte/store';
 import { environments } from './environment';
+import { m } from '$lib/paraglide/messages.js';
 
 export interface Permissions {
 	containers: string[];
@@ -106,7 +107,7 @@ function createAuthStore() {
 				const data = await response.json();
 
 				if (!response.ok) {
-					return { success: false, error: data.error || 'Login failed' };
+					return { success: false, error: data.error || m.login_error_failed() };
 				}
 
 				if (data.requiresMfa) {
@@ -119,9 +120,9 @@ function createAuthStore() {
 					return { success: true };
 				}
 
-				return { success: false, error: 'Login failed' };
+				return { success: false, error: m.login_error_failed() };
 			} catch (error) {
-				return { success: false, error: 'Network error' };
+				return { success: false, error: m.auth_network_error() };
 			}
 		},
 

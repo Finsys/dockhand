@@ -1,6 +1,7 @@
 import { writable, derived, readable } from 'svelte/store';
 import { browser } from '$app/environment';
-import { daysLeft, deriveLicenceFlags, licenceHeaderText } from '$lib/utils/license-expiry-text';
+import { daysLeft, deriveLicenceFlags, expiryParts, licenceHeaderParts } from '$lib/utils/license-expiry-text';
+import { m } from '$lib/paraglide/messages.js';
 
 export type LicenseType = 'enterprise' | 'smb';
 
@@ -133,12 +134,31 @@ export const daysUntilExpiry = derived(msUntilExpiry, ($ms) =>
 	$ms === null ? null : daysLeft($ms)
 );
 
-/** What the header says about the time left, or null when there is nothing to say. */
-export const expiryMessage = derived([licenseStore, msUntilExpiry], ([$license, $ms]) =>
-	licenceHeaderText({
+/**
+ * What the header says about the time left, or null when there is nothing to say.
+ * Same decision as licenceHeaderText (utils/license-expiry-text), worded in the UI language.
+ */
+export const expiryMessage = derived([licenseStore, msUntilExpiry], ([$license, $ms]) => {
+	const parts = licenceHeaderParts({
 		hasEnterpriseLicense: $license.hasEnterpriseLicense,
 		isEnterprise: $license.isEnterprise,
 		msRemaining: $ms,
 		problem: $license.problem
-	})
-);
+	});
+	if (!parts) return null;
+	if (parts.kind === 'problem') return m.licence_problem({ problem: parts.problem });
+	if (parts.kind === 'invalid') return m.licence_not_valid();
+	const expiry = expiryParts(parts.msRemaining);
+	switch (expiry.unit) {
+		case 'expired':
+			return m.licence_expired();
+		case 'minutes':
+			return m.licence_expires_minutes({ count: expiry.count });
+		case 'hours':
+			return m.licence_expires_hours({ count: expiry.count });
+		case 'tomorrow':
+			return m.licence_expires_tomorrow();
+		case 'days':
+			return m.licence_expires_days({ count: expiry.count });
+	}
+});

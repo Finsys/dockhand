@@ -134,9 +134,10 @@ export function retentionSummary(retention: string | RetentionPolicy | null | un
 // Cron helpers
 // ---------------------------------------------------------------------------
 
-export function formatCron(cron: string | null): string {
+/** `locale` is a cronstrue locale (see $lib/i18n/cron); English when omitted. */
+export function formatCron(cron: string | null, locale?: string): string {
 	if (!cron) return '—';
-	try { return cronstrue.toString(cron, { use24HourTimeFormat: true }); } catch { return cron; }
+	try { return cronstrue.toString(cron, { use24HourTimeFormat: true, ...(locale && { locale }) }); } catch { return cron; }
 }
 
 // ---------------------------------------------------------------------------

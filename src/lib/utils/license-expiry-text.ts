@@ -22,22 +22,39 @@ export function daysLeft(msRemaining: number): number {
  * `msRemaining` is expiry minus now, so a past licence is negative.
  */
 export function expiryText(msRemaining: number): string {
-	if (msRemaining <= 0) return 'License expired';
+	const parts = expiryParts(msRemaining);
+	switch (parts.unit) {
+		case 'expired':
+			return 'License expired';
+		case 'minutes':
+			return `License expires in ${parts.count} ${plural(parts.count, 'minute')}`;
+		case 'hours':
+			return `License expires in ${parts.count} ${plural(parts.count, 'hour')}`;
+		case 'tomorrow':
+			return 'License expires tomorrow';
+		case 'days':
+			return `License expires in ${parts.count} days`;
+	}
+}
+
+export type ExpiryParts = { unit: 'expired' | 'minutes' | 'hours' | 'tomorrow' | 'days'; count: number };
+
+/** The rounding behind expiryText, without the wording, so the UI can word it in the user's language. */
+export function expiryParts(msRemaining: number): ExpiryParts {
+	if (msRemaining <= 0) return { unit: 'expired', count: 0 };
 
 	if (msRemaining < HOUR) {
-		const minutes = Math.max(1, Math.round(msRemaining / MINUTE));
-		return `License expires in ${minutes} ${plural(minutes, 'minute')}`;
+		return { unit: 'minutes', count: Math.max(1, Math.round(msRemaining / MINUTE)) };
 	}
 
 	if (msRemaining < DAY) {
-		const hours = Math.max(1, Math.floor(msRemaining / HOUR));
-		return `License expires in ${hours} ${plural(hours, 'hour')}`;
+		return { unit: 'hours', count: Math.max(1, Math.floor(msRemaining / HOUR)) };
 	}
 
 	// Past the first full day, whole days read better than "in 47 hours".
 	const days = Math.floor(msRemaining / DAY);
-	if (days === 1) return 'License expires tomorrow';
-	return `License expires in ${days} days`;
+	if (days === 1) return { unit: 'tomorrow', count: 1 };
+	return { unit: 'days', count: days };
 }
 
 function plural(n: number, word: string): string {
@@ -80,14 +97,32 @@ export function licenceHeaderText(state: {
 	msRemaining: number | null;
 	problem: string | null;
 }): string | null {
+	const parts = licenceHeaderParts(state);
+	if (!parts) return null;
+	if (parts.kind === 'expiry') return expiryText(parts.msRemaining);
+	return parts.kind === 'problem' ? `License problem: ${parts.problem}` : 'License is not valid';
+}
+
+export type LicenceHeaderParts =
+	| { kind: 'expiry'; msRemaining: number }
+	| { kind: 'problem'; problem: string }
+	| { kind: 'invalid' };
+
+/** The decision behind licenceHeaderText, without the wording, so the UI can word it in the user's language. */
+export function licenceHeaderParts(state: {
+	hasEnterpriseLicense: boolean;
+	isEnterprise: boolean;
+	msRemaining: number | null;
+	problem: string | null;
+}): LicenceHeaderParts | null {
 	if (!shouldShowExpiryWarning(state)) return null;
 
 	// Expiry is the one failure the countdown already words well.
 	if (state.isEnterprise || (state.msRemaining !== null && state.msRemaining <= 0)) {
-		return state.msRemaining === null ? null : expiryText(state.msRemaining);
+		return state.msRemaining === null ? null : { kind: 'expiry', msRemaining: state.msRemaining };
 	}
 
-	return state.problem ? `License problem: ${state.problem}` : 'License is not valid';
+	return state.problem ? { kind: 'problem', problem: state.problem } : { kind: 'invalid' };
 }
 
 /** What the licence endpoint says, reduced to the flags the interface reasons about. */

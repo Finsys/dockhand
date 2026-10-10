@@ -17,7 +17,7 @@
 	import MultiSelectFilter from '$lib/components/MultiSelectFilter.svelte';
 	import { Play, Square, Trash2, Plus, ArrowBigDown, Pencil, ExternalLink, GitBranch, RefreshCw, Loader2, FileCode, FileText, FileOutput, Box, RotateCcw, ScrollText, Terminal, Eye, Network, HardDrive, Heart, HeartPulse, HeartOff, ChevronsUpDown, ChevronsDownUp, Rocket, AlertTriangle, X, Layers, Pause, CircleDashed, Skull, FolderOpen, Variable, Clock, RotateCw, Import, Ship, Cable, LayoutPanelLeft, Rows3, GripVertical, Globe, CircleArrowUp, NotepadText, Tag, Copy, Check } from 'lucide-svelte';
 	import { formatPorts } from '$lib/utils/port-format';
-	import { formatUptime } from '$lib/utils/container-status';
+	import { formatUptime } from '$lib/i18n/time';
 	import { parseCustomUrl } from '$lib/utils/custom-url';
 	import { containerDisplayName } from '$lib/utils/container-display-name';
 	import { extractTraefikUrls } from '$lib/utils/traefik-urls';

@@ -467,7 +467,7 @@ const severityOrder: Record<string, number> = { critical: 0, high: 1, medium: 2,
 					{@const activeContainer = progress.find(p => p.step !== 'done' && p.step !== 'failed' && p.step !== 'blocked')}
 					{#if activeContainer}
 						<span class="text-primary font-medium">
-							{getStepLabel(activeContainer.step)} {activeContainer.containerName}...
+							{m.containers_batchupdate_active_step({ step: getStepLabel(activeContainer.step), name: activeContainer.containerName })}
 						</span>
 						<span class="text-muted-foreground ml-2">({currentIndex}/{totalCount})</span>
 					{:else}

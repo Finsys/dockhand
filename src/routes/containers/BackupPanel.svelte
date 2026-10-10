@@ -25,6 +25,7 @@
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { getRepoTypeIcon, parseRetention, parseOptions, retentionSummary as getRetentionSummary, formatCron, runBackupAction, classifyJobResult, tagLogLine, fetchBackupExecutions, pickDuplicateDestinationId, duplicateStartsEnabled, type BackupAction, type BackupFormState } from '$lib/utils/backup';
+	import { cronstrueLocale } from '$lib/i18n/cron';
 	import { reconcileSelectedVolumeKeys } from '$lib/utils/mounts';
 	import { m } from '$lib/paraglide/messages.js';
 
@@ -621,7 +622,7 @@
 						{#if !cfg.enabled}<Badge variant="secondary" class="text-xs">{m.containers_backup_paused()}</Badge>{/if}
 					</div>
 					<div class="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
-						<span>{cfg.schedule ? formatCron(cfg.schedule) : m.containers_backup_manual()} ·{volumeSummary(cfg)}{cfgRetentionSummary(cfg) ? ` · ${cfgRetentionSummary(cfg)}` : ''}</span>
+						<span>{cfg.schedule ? formatCron(cfg.schedule, cronstrueLocale()) : m.containers_backup_manual()} ·{volumeSummary(cfg)}{cfgRetentionSummary(cfg) ? ` · ${cfgRetentionSummary(cfg)}` : ''}</span>
 						{#if cfg.lastBackupAt}
 							<span>·</span>
 							{#if cfg.lastBackupStatus === 'success'}<CheckCircle class="w-2.5 h-2.5 text-green-500" />{:else if cfg.lastBackupStatus === 'failed' || cfg.lastBackupStatus === 'error'}<XCircle class="w-2.5 h-2.5 text-destructive" />{/if}

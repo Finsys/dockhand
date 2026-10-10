@@ -5,6 +5,7 @@
 	import { columnResize } from '$lib/actions/column-resize';
 	import { gridPreferencesStore } from '$lib/stores/grid-preferences';
 	import { getAllColumnConfigs } from '$lib/config/grid-columns';
+	import { localizeColumn } from '$lib/i18n/grid-columns';
 	import { nextIoSortState } from '$lib/utils/io-sort-cycle';
 	import ColumnSettingsPopover from '$lib/components/ColumnSettingsPopover.svelte';
 	import { Skeleton } from '$lib/components/ui/skeleton';
@@ -139,8 +140,8 @@
 		footer
 	}: Props = $props();
 
-	// Column configuration
-	const columnConfigs = getAllColumnConfigs(gridId);
+	// Column configuration (label and hint in the UI language, also for headerCell snippets)
+	const columnConfigs = getAllColumnConfigs(gridId).map((c) => localizeColumn(gridId, c));
 	const columnConfigMap = new Map(columnConfigs.map((c) => [c.id, c]));
 	const fixedStartCols = columnConfigs.filter((c) => c.fixed === 'start').map((c) => c.id);
 	const fixedEndCols = columnConfigs.filter((c) => c.fixed === 'end').map((c) => c.id);

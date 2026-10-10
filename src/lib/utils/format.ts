@@ -47,19 +47,49 @@ export function formatErrorLines(msg: string | null | undefined): string {
  * the two out of sync until now.
  */
 export function formatRelativeTime(date: Date | string | number): string {
+	const parts = relativeTimeParts(date);
+	if (!parts) return '';
+	switch (parts.unit) {
+		case 'future':
+			return 'in the future';
+		case 'now':
+			return 'just now';
+		case 'minutes':
+			return `${parts.count}m ago`;
+		case 'hours':
+			return `${parts.count}h ago`;
+		case 'days':
+			return `${parts.count}d ago`;
+		case 'months':
+			return `${parts.count}mo ago`;
+		case 'years':
+			return `${parts.count}y ago`;
+	}
+}
+
+export type RelativeTimeParts = {
+	unit: 'future' | 'now' | 'minutes' | 'hours' | 'days' | 'months' | 'years';
+	count: number;
+};
+
+/**
+ * The rounding behind formatRelativeTime, without the wording, so the UI can word
+ * it in the user's language ($lib/i18n/time). Null for an unparseable date.
+ */
+export function relativeTimeParts(date: Date | string | number): RelativeTimeParts | null {
 	const d = parseTimestamp(date);
 	const ms = d.getTime();
-	if (isNaN(ms)) return '';
+	if (isNaN(ms)) return null;
 	const sec = Math.round((Date.now() - ms) / 1000);
-	if (sec < 0) return 'in the future';
-	if (sec < 45) return 'just now';
+	if (sec < 0) return { unit: 'future', count: 0 };
+	if (sec < 45) return { unit: 'now', count: 0 };
 	const min = Math.round(sec / 60);
-	if (min < 60) return `${min}m ago`;
+	if (min < 60) return { unit: 'minutes', count: min };
 	const hr = Math.round(min / 60);
-	if (hr < 24) return `${hr}h ago`;
+	if (hr < 24) return { unit: 'hours', count: hr };
 	const day = Math.round(hr / 24);
-	if (day < 30) return `${day}d ago`;
+	if (day < 30) return { unit: 'days', count: day };
 	const mo = Math.round(day / 30);
-	if (mo < 12) return `${mo}mo ago`;
-	return `${Math.round(mo / 12)}y ago`;
+	if (mo < 12) return { unit: 'months', count: mo };
+	return { unit: 'years', count: Math.round(mo / 12) };
 }

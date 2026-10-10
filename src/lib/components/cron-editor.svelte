@@ -5,6 +5,7 @@
 	import { appSettings } from '$lib/stores/settings';
 	import cronstrue from 'cronstrue';
 	import { m } from '$lib/paraglide/messages.js';
+	import { cronstrueLocale } from '$lib/i18n/cron';
 
 	// Reactive time format from settings
 	let is12Hour = $derived($appSettings.timeFormat === '12h');
@@ -177,7 +178,7 @@
 			const description = cronstrue.toString(value, {
 				use24HourTimeFormat: !is12Hour,
 				throwExceptionOnParseError: true,
-				locale: 'en' // You can add user locale preference here if needed
+				locale: cronstrueLocale()
 			});
 			return description;
 		} catch (error) {

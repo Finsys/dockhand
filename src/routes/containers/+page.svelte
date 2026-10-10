@@ -103,7 +103,8 @@
 	import { canAccess, isAdmin } from '$lib/stores/auth';
 	import { vulnerabilityCriteriaIcons } from '$lib/utils/update-steps';
 	import { compareIps } from '$lib/utils/ip';
-	import { formatUptime, parseUptimeToSeconds } from '$lib/utils/container-status';
+	import { parseUptimeToSeconds } from '$lib/utils/container-status';
+	import { formatUptime } from '$lib/i18n/time';
 	import { formatHostPortUrl } from '$lib/utils/url';
 	import { parseCustomUrl } from '$lib/utils/custom-url';
 	import { extractTraefikUrls } from '$lib/utils/traefik-urls';
@@ -2332,7 +2333,7 @@
 									{@const icon = vulnerabilityCriteriaIcons[criteria]}
 									{#if icon}
 										{@const IconComponent = icon.component}
-										<span class="cursor-default" title={icon.title}>
+										<span class="cursor-default" title={icon.title()}>
 											<IconComponent class={icon.class} />
 										</span>
 									{/if}

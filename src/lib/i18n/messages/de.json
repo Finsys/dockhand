@@ -2080,5 +2080,200 @@
 			}
 		}
 	],
-	"snapshotdialog_error_reported": "Das Backup-Tool meldete:"
+	"snapshotdialog_error_reported": "Das Backup-Tool meldete:",
+	"time_in_future": "in der Zukunft",
+	"time_just_now": "gerade eben",
+	"time_minutes_ago": "vor {count} Min.",
+	"time_hours_ago": "vor {count} Std.",
+	"time_days_ago": "vor {count} Tg.",
+	"time_months_ago": "vor {count} Mon.",
+	"time_years_ago": "vor {count} J.",
+	"duration_less_than_second": "Weniger als eine Sekunde",
+	"duration_about_minute": "Etwa eine Minute",
+	"duration_about_hour": "Etwa eine Stunde",
+	"duration_seconds": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Sekunde",
+				"countPlural=other": "{count} Sekunden"
+			}
+		}
+	],
+	"duration_minutes": "{count} Minuten",
+	"duration_hours": "{count} Stunden",
+	"duration_days": "{count} Tage",
+	"duration_weeks": "{count} Wochen",
+	"duration_months": "{count} Monate",
+	"duration_years": "{count} Jahre",
+	"duration_ago_less_than_second": "Vor weniger als einer Sekunde",
+	"duration_ago_about_minute": "Vor etwa einer Minute",
+	"duration_ago_about_hour": "Vor etwa einer Stunde",
+	"duration_ago_seconds": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "vor {count} Sekunde",
+				"countPlural=other": "vor {count} Sekunden"
+			}
+		}
+	],
+	"duration_ago_minutes": "vor {count} Minuten",
+	"duration_ago_hours": "vor {count} Stunden",
+	"duration_ago_days": "vor {count} Tagen",
+	"duration_ago_weeks": "vor {count} Wochen",
+	"duration_ago_months": "vor {count} Monaten",
+	"duration_ago_years": "vor {count} Jahren",
+	"licence_expired": "Lizenz abgelaufen",
+	"licence_expires_minutes": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "Lizenz läuft in {count} Minute ab",
+				"countPlural=other": "Lizenz läuft in {count} Minuten ab"
+			}
+		}
+	],
+	"licence_expires_hours": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "Lizenz läuft in {count} Stunde ab",
+				"countPlural=other": "Lizenz läuft in {count} Stunden ab"
+			}
+		}
+	],
+	"licence_expires_tomorrow": "Lizenz läuft morgen ab",
+	"licence_expires_days": "Lizenz läuft in {count} Tagen ab",
+	"licence_problem": "Lizenzproblem: {problem}",
+	"licence_not_valid": "Lizenz ist nicht gültig",
+	"licence_hold": "Diese Instanz braucht eine erneuerte Lizenz. Bis dahin können nur Administratoren Änderungen vornehmen, deshalb wirken die Seiten leer.",
+	"updatesteps_step_pulling": "Image wird gepullt",
+	"updatesteps_step_scanning": "Wird auf Schwachstellen gescannt",
+	"updatesteps_step_stopping": "Wird gestoppt",
+	"updatesteps_step_removing": "Wird entfernt",
+	"updatesteps_step_creating": "Wird erstellt",
+	"updatesteps_step_starting": "Wird gestartet",
+	"updatesteps_step_done": "Fertig",
+	"updatesteps_step_updated": "Aktualisiert",
+	"updatesteps_step_failed": "Fehlgeschlagen",
+	"updatesteps_step_blocked": "Durch Schwachstellen blockiert",
+	"updatesteps_step_checked": "Geprüft",
+	"updatesteps_step_skipped": "Aktuell",
+	"updatesteps_criteria_title_never": "Keine Blockierung durch Schwachstellen",
+	"updatesteps_criteria_title_any": "Bei jeder Schwachstelle blockieren",
+	"updatesteps_criteria_title_critical_high": "Bei kritischen oder hohen Schwachstellen blockieren",
+	"updatesteps_criteria_title_critical": "Nur bei kritischen Schwachstellen blockieren",
+	"updatesteps_criteria_title_more_than_current": "Bei mehr Schwachstellen als im aktuellen Image blockieren",
+	"containers_batchupdate_active_step": "{step}: {name}…",
+	"shell_user_container_default": "Container-Standard",
+	"containersstore_label_on": "an",
+	"containersstore_label_daily": "täglich",
+	"containersstore_day_sun": "so",
+	"containersstore_day_mon": "mo",
+	"containersstore_day_tue": "di",
+	"containersstore_day_wed": "mi",
+	"containersstore_day_thu": "do",
+	"containersstore_day_fri": "fr",
+	"containersstore_day_sat": "sa",
+	"containersstore_tooltip_daily": "Täglich um {time}",
+	"containersstore_tooltip_weekly": "Jeden {day} um {time}",
+	"containersstore_load_failed": "Container konnten nicht geladen werden",
+	"auth_network_error": "Netzwerkfehler",
+	"gridcol_name": "Name",
+	"gridcol_image": "Image",
+	"gridcol_state": "Status",
+	"gridcol_health": "Health",
+	"gridcol_uptime": "Laufzeit",
+	"gridcol_restarts": "Neustarts",
+	"gridcol_cpu": "CPU",
+	"gridcol_memory": "RAM",
+	"gridcol_net_io": "Netz-I/O",
+	"gridcol_disk_io": "Disk-I/O",
+	"gridcol_ip": "IP",
+	"gridcol_ports": "Ports",
+	"gridcol_auto_update": "Auto-Update",
+	"gridcol_stack": "Stack",
+	"gridcol_tags": "Tags",
+	"gridcol_size": "Größe",
+	"gridcol_updated": "Aktualisiert",
+	"gridcol_tag": "Tag",
+	"gridcol_id": "ID",
+	"gridcol_created": "Erstellt",
+	"gridcol_used_by": "Verwendet von",
+	"gridcol_driver": "Treiber",
+	"gridcol_scope": "Bereich",
+	"gridcol_subnet": "Subnetz",
+	"gridcol_gateway": "Gateway",
+	"gridcol_containers": "Container",
+	"gridcol_status": "Status",
+	"gridcol_source": "Quelle",
+	"gridcol_webhook": "Webhook",
+	"gridcol_location": "Speicherort",
+	"gridcol_networks": "Netzwerke",
+	"gridcol_volumes": "Volumes",
+	"gridcol_type": "Typ",
+	"gridcol_timestamp": "Zeitpunkt",
+	"gridcol_environment": "Umgebung",
+	"gridcol_action": "Aktion",
+	"gridcol_container": "Container",
+	"gridcol_exit": "Exit",
+	"gridcol_user": "Benutzer",
+	"gridcol_entity": "Objekt",
+	"gridcol_ip_address": "IP-Adresse",
+	"gridcol_schedule": "Zeitplan",
+	"gridcol_last_run": "Letzte Ausführung",
+	"gridcol_next_run": "Nächste Ausführung",
+	"gridcol_connection": "Verbindung",
+	"gridcol_host": "Host",
+	"gridcol_updates": "Updates",
+	"gridcol_images": "Images",
+	"gridcol_stacks": "Stacks",
+	"gridcol_events": "Events",
+	"gridcol_labels": "Labels",
+	"gridcol_repository": "Repository",
+	"gridcol_snapshots": "Snapshots",
+	"gridcol_last_backup": "Letztes Backup",
+	"gridcol_retention": "Aufbewahrung",
+	"gridcol_latest": "Neuester",
+	"gridcol_usage": "Verwendung",
+	"gridcol_stats": "Statistik",
+	"gridcol_cve": "CVE",
+	"gridcol_package": "Paket",
+	"gridcol_severity": "Schweregrad",
+	"gridcol_installed_version": "Installierte Version",
+	"gridcol_fixed_version": "Behoben in",
+	"gridcol_scanned": "Gescannt",
+	"gridcol_when": "Zeitpunkt",
+	"gridcol_duration": "Dauer",
+	"gridcol_trigger": "Auslöser",
+	"gridcol_summary": "Zusammenfassung",
+	"gridcol_hint_stack_webhook": "Webhook-ID und -URL des Git-Stacks (zum Anbinden von Gitea/GitHub/GitLab)",
+	"gridcol_hint_backup_type": "Container- oder Stack-Backup",
+	"gridcol_hint_backup_repository": "Backup-Ziel (S3, REST, lokal usw.)",
+	"gridcol_hint_last_backup_status": "Status des letzten Backups"
 }

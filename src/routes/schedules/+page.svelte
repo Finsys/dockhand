@@ -1252,7 +1252,7 @@
 									{@const criteria = (schedule.vulnerabilityCriteria || 'never') as VulnerabilityCriteria}
 									{@const icon = vulnerabilityCriteriaIcons[criteria]}
 									{@const IconComponent = icon.component}
-									<span class="cursor-default shrink-0" title={icon.title}>
+									<span class="cursor-default shrink-0" title={icon.title()}>
 										<IconComponent class={icon.class} />
 									</span>
 									Check, scan & auto-update
@@ -1266,7 +1266,7 @@
 									{@const criteria = schedule.vulnerabilityCriteria as VulnerabilityCriteria}
 									{@const icon = vulnerabilityCriteriaIcons[criteria]}
 									{@const IconComponent = icon.component}
-									<span class="cursor-default shrink-0" title={icon.title}>
+									<span class="cursor-default shrink-0" title={icon.title()}>
 										<IconComponent class={icon.class} />
 									</span>
 								{/if}

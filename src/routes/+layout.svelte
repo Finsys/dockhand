@@ -16,7 +16,7 @@
 	import { connectSSE, disconnectSSE } from '$lib/stores/events';
 	import { currentEnvironment, environments } from '$lib/stores/environment';
 	import { licenseStore, daysUntilExpiry, expiryMessage } from '$lib/stores/license';
-	import { licenceHoldMessage } from '$lib/utils/licence-hold';
+	import { heldByLapsedLicence } from '$lib/utils/licence-hold';
 	import { get } from 'svelte/store';
 	import { authStore } from '$lib/stores/auth';
 	import { extractPath, isSessionExpiryCandidate } from '$lib/utils/session-expiry';
@@ -40,14 +40,17 @@
 	let commandPaletteOpen = $state(false);
 	// Said once, at the top: a lapsed licence refuses every read, so each page would
 	// otherwise report it separately as an empty table or a request that failed.
+	// Same decision as licenceHoldMessage (utils/licence-hold), worded in the UI language.
 	const licenceHold = $derived(
-		licenceHoldMessage({
+		heldByLapsedLicence({
 			hasEnterpriseLicense: $licenseStore.hasEnterpriseLicense,
 			isEnterprise: $licenseStore.isEnterprise,
 			isAdmin: $authStore.user?.isAdmin ?? false,
 			isAuthenticated: $authStore.authEnabled ? !!$authStore.user : false,
 			loading: $licenseStore.loading || $authStore.loading
 		})
+			? m.licence_hold()
+			: null
 	);
 
 

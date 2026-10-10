@@ -7,6 +7,7 @@
 	import { Box, Layers, Loader2, Plus, ChevronDown, ChevronRight, ArrowRight, Zap, GitBranch, HelpCircle } from 'lucide-svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { formatCron, getRepoTypeIcon } from '$lib/utils/backup';
+	import { cronstrueLocale } from '$lib/i18n/cron';
 	import { standaloneContainers, volumesForStack, batchSkipDecision, type BackupItem } from '$lib/utils/mounts';
 	import { TogglePill } from '$lib/components/ui/toggle-pill';
 	import BackupPanel from '../../containers/BackupPanel.svelte';
@@ -285,7 +286,7 @@
 									<DestIcon class="w-3 h-3 text-primary/60" />
 									{dest.name}
 								{/if}
-								{cfg.schedule ? formatCron(cfg.schedule) : 'manual'}
+								{cfg.schedule ? formatCron(cfg.schedule, cronstrueLocale()) : 'manual'}
 							</span>
 						{:else}
 							<span class="text-xs text-muted-foreground flex-shrink-0">{itemConfigs.length} schedules</span>

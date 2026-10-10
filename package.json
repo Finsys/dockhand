@@ -12,7 +12,7 @@
 		"prepare": "(npx svelte-kit sync && npm run i18n:compile) || echo ''",
 		"check": "npx svelte-kit sync && npm run i18n:compile && npx svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "npx svelte-kit sync && npm run i18n:compile && npx svelte-check --tsconfig ./tsconfig.json --watch",
-		"i18n:compile": "npx paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide --strategy preferredLanguage baseLocale --silent",
+		"i18n:compile": "npx paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide --strategy preferredLanguage baseLocale --output-structure locale-modules --silent",
 		"test": "bun test tests/",
 		"test:unit": "bun test tests/",
 		"test:e2e": "npx playwright test integration/e2e/",

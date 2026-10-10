@@ -6,6 +6,7 @@
 	import { Label } from '$lib/components/ui/label';
 	import { gridPreferencesStore } from '$lib/stores/grid-preferences';
 	import { getConfigurableColumns } from '$lib/config/grid-columns';
+	import { columnLabel } from '$lib/i18n/grid-columns';
 	import type { GridId, ColumnPreference } from '$lib/types';
 	import { m } from '$lib/paraglide/messages.js';
 
@@ -29,7 +30,7 @@
 	const columnConfigs = $derived(getConfigurableColumns(gridId));
 	function getColumnLabel(id: string): string {
 		const config = columnConfigs.find((c) => c.id === id);
-		return config?.label || id;
+		return (config && columnLabel(gridId, config)) || id;
 	}
 
 	// Save columns and update grid immediately

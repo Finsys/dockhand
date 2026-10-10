@@ -743,9 +743,10 @@ export function formatDate(date: Date | string | number): string {
  * For display ONLY, alongside the absolute date - sort still uses the raw
  * timestamp, never this string.
  */
-// Re-exported from the import-light utils/format module (so it stays unit-testable
-// without pulling $app/environment). Kept exported here for existing callers.
-export { formatRelativeTime } from '$lib/utils/format';
+// Re-exported in the UI language from $lib/i18n/time, which reuses the rounding of the
+// import-light utils/format module (that one stays English and unit-testable without
+// pulling $app/environment). Kept exported here for existing callers.
+export { formatRelativeTime } from '$lib/i18n/time';
 
 /**
  * Get the current time format setting (for components that need it).

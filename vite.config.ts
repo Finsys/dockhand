@@ -1249,7 +1249,10 @@ export default defineConfig({
 		paraglideVitePlugin({
 			project: './project.inlang',
 			outdir: './src/lib/paraglide',
-			strategy: ['preferredLanguage', 'baseLocale']
+			strategy: ['preferredLanguage', 'baseLocale'],
+			// One module per locale instead of one per message: with thousands of messages the
+			// per-message layout makes the production build run out of memory.
+			outputStructure: 'locale-modules'
 		}),
 		tailwindcss(),
 		sveltekit(),
