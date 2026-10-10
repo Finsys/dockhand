@@ -3,11 +3,6 @@ set -e
 
 # Dockhand Docker Entrypoint (Node.js)
 # === Configuration ===
-# Recorded before the defaults are applied: asking for a user and leaving it to
-# us are different requests, and only the second one means run as root. An empty
-# value counts as not asked for, since compose turns an undefined variable into one.
-PUID_WAS_SET=${PUID:+yes}
-PGID_WAS_SET=${PGID:+yes}
 PUID=${PUID:-1001}
 PGID=${PGID:-1001}
 
@@ -78,7 +73,7 @@ fi
 if [ "$PUID" = "0" ]; then
     echo "Running as root user (PUID=0)"
     RUN_USER="root"
-elif [ "$RUNNING_AS_ROOT" = "true" ] && [ -z "$PUID_WAS_SET" ] && [ -z "$PGID_WAS_SET" ]; then
+elif [ "$RUNNING_AS_ROOT" = "true" ] && [ "$PUID" = "1001" ] && [ "$PGID" = "1001" ]; then
     echo "Running as root user"
     RUN_USER="root"
 else

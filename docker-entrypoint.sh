@@ -3,11 +3,6 @@ set -e
 
 # Dockhand Docker Entrypoint
 # === Configuration ===
-# Recorded before the defaults are applied: asking for a user and leaving it to
-# us are different requests, and only the second one means run as root. An empty
-# value counts as not asked for, since compose turns an undefined variable into one.
-PUID_WAS_SET=${PUID:+yes}
-PGID_WAS_SET=${PGID:+yes}
 PUID=${PUID:-1001}
 PGID=${PGID:-1001}
 
@@ -72,16 +67,16 @@ if [ "$RUNNING_AS_ROOT" = "false" ]; then
 fi
 
 # === User Setup ===
-# Root mode: PUID=0 asked for, or nobody asked for a user at all and we are root
+# Root mode: PUID=0 requested OR already running as root with default PUID/PGID
 if [ "$PUID" = "0" ]; then
     echo "Running as root user (PUID=0)"
     RUN_USER="root"
-elif [ "$RUNNING_AS_ROOT" = "true" ] && [ -z "$PUID_WAS_SET" ] && [ -z "$PGID_WAS_SET" ]; then
+elif [ "$RUNNING_AS_ROOT" = "true" ] && [ "$PUID" = "1001" ] && [ "$PGID" = "1001" ]; then
     echo "Running as root user"
     RUN_USER="root"
 else
     RUN_USER="dockhand"
-    # The dockhand user already has 1001:1001, so only a different id needs work
+    # Only modify if PUID/PGID differ from image defaults (1001:1001)
     if [ "$PUID" != "1001" ] || [ "$PGID" != "1001" ]; then
         echo "Configuring user with PUID=$PUID PGID=$PGID"
 
@@ -210,12 +205,8 @@ if [ "$RUN_USER" = "root" ]; then
         exec "$@"
     fi
 else
-    # Running as non-root user. Print the uid/gid too: the account is created inside
-    # the container, so its NAME is ours and will not match the host's name for that
-    # uid - the number is what the reader can actually compare against PUID/PGID.
-    RUN_UID=$(id -u "$RUN_USER" 2>/dev/null || echo '?')
-    RUN_GID=$(id -g "$RUN_USER" 2>/dev/null || echo '?')
-    echo "Running as user: $RUN_USER ($RUN_UID:$RUN_GID)"
+    # Running as non-root user
+    echo "Running as user: $RUN_USER"
     if [ "$1" = "" ]; then
         exec su-exec "$RUN_USER" bun run ./build/index.js
     else
