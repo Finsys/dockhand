@@ -1,4 +1,6 @@
 <script lang='ts' module>
+	import { m } from '$lib/paraglide/messages.js';
+
 	export interface SecretProvider {
 		id: number;
 		type: string;
@@ -22,7 +24,7 @@
 	// Selectable provider types + their labels. Mirrors the registered providers
 	// in src/lib/server/secretproviders (index.ts / shared.ts).
 	export const PROVIDER_TYPES: { value: string; label: string }[] = [
-		{ value: 'op-service-account', label: '1Password service account' },
+		{ value: 'op-service-account', get label() { return m.settings_secrets_type_op_service_account(); } },
 		{ value: 'op-connect', label: '1Password Connect' },
 		{ value: 'infisical', label: 'Infisical' },
 		{ value: 'vault', label: 'HashiCorp Vault' },
@@ -35,54 +37,55 @@
 
 	// Config fields per provider type, matching the config shapes in
 	// secretproviders/shared.ts. Non-required fields are optional overrides.
+	// Display texts are getters so they are read in the current UI language.
 	export const PROVIDER_FIELDS: Record<string, ProviderField[]> = {
 		'op-service-account': [
-			{ key: 'token', label: 'Service account token', type: 'password', required: true, placeholder: 'ops_eyJ...', hint: 'A 1Password service account token (starts with ops_).' },
+			{ key: 'token', get label() { return m.settings_secrets_field_op_sa_token(); }, type: 'password', required: true, placeholder: 'ops_eyJ...', get hint() { return m.settings_secrets_field_op_sa_token_hint(); } },
 		],
 		'op-connect': [
-			{ key: 'host', label: 'Connect host URL', type: 'text', required: true, placeholder: 'https://connect.example.com', hint: 'URL of your 1Password Connect server.' },
-			{ key: 'token', label: 'Connect token', type: 'password', required: true, placeholder: 'eyJ...', hint: 'A Connect access token with read access to the vault.' },
+			{ key: 'host', get label() { return m.settings_secrets_field_connect_host(); }, type: 'text', required: true, placeholder: 'https://connect.example.com', get hint() { return m.settings_secrets_field_connect_host_hint(); } },
+			{ key: 'token', get label() { return m.settings_secrets_field_connect_token(); }, type: 'password', required: true, placeholder: 'eyJ...', get hint() { return m.settings_secrets_field_connect_token_hint(); } },
 		],
 		infisical: [
-			{ key: 'host', label: 'API host', type: 'text', required: true, placeholder: 'https://app.infisical.com', hint: 'Infisical Cloud or your self-hosted URL.' },
-			{ key: 'token', label: 'Access token', type: 'password', required: false, placeholder: 'st...', hint: 'A static service/access token. Leave blank to use Universal Auth (client ID + secret) below instead.' },
-			{ key: 'clientId', label: 'Universal Auth client ID', type: 'text', required: false, placeholder: 'machine identity client id', hint: 'A Machine Identity client ID. Pair with the client secret; leave blank if using a static token.' },
-			{ key: 'clientSecret', label: 'Universal Auth client secret', type: 'password', required: false, placeholder: 'machine identity client secret', hint: 'The Machine Identity client secret. Exchanged for a short-lived token via Universal Auth.' },
+			{ key: 'host', get label() { return m.settings_secrets_field_infisical_host(); }, type: 'text', required: true, placeholder: 'https://app.infisical.com', get hint() { return m.settings_secrets_field_infisical_host_hint(); } },
+			{ key: 'token', get label() { return m.settings_secrets_field_infisical_token(); }, type: 'password', required: false, placeholder: 'st...', get hint() { return m.settings_secrets_field_infisical_token_hint(); } },
+			{ key: 'clientId', get label() { return m.settings_secrets_field_infisical_client_id(); }, type: 'text', required: false, get placeholder() { return m.settings_secrets_field_infisical_client_id_placeholder(); }, get hint() { return m.settings_secrets_field_infisical_client_id_hint(); } },
+			{ key: 'clientSecret', get label() { return m.settings_secrets_field_infisical_client_secret(); }, type: 'password', required: false, get placeholder() { return m.settings_secrets_field_infisical_client_secret_placeholder(); }, get hint() { return m.settings_secrets_field_infisical_client_secret_hint(); } },
 			// A single-scope service token (st.*) carries its own project + environment, so
 			// both are optional for it. A multi-scope or glob-path service token, and every
 			// other auth shape (Universal Auth, static non-st token), still need them.
-			{ key: 'projectId', label: 'Project ID', type: 'text', required: true, requiredWhen: (c) => !(c.token ?? '').trim().startsWith('st.'), placeholder: 'workspace / project id', hint: 'The workspace/project the secrets live in. Optional for a single-scope service token (st.), which already targets one project; a multi-scope token still needs it.' },
-			{ key: 'environment', label: 'Environment', type: 'text', required: true, requiredWhen: (c) => !(c.token ?? '').trim().startsWith('st.'), placeholder: 'prod', hint: 'Environment slug, e.g. prod / staging. Optional for a single-scope service token (st.).' },
-			{ key: 'path', label: 'Secret path', type: 'text', required: false, placeholder: '/', hint: 'Folder path within the project. Defaults to /.' },
+			{ key: 'projectId', get label() { return m.settings_secrets_field_project_id(); }, type: 'text', required: true, requiredWhen: (c) => !(c.token ?? '').trim().startsWith('st.'), get placeholder() { return m.settings_secrets_field_infisical_project_id_placeholder(); }, get hint() { return m.settings_secrets_field_infisical_project_id_hint(); } },
+			{ key: 'environment', get label() { return m.settings_secrets_field_environment(); }, type: 'text', required: true, requiredWhen: (c) => !(c.token ?? '').trim().startsWith('st.'), placeholder: 'prod', get hint() { return m.settings_secrets_field_infisical_environment_hint(); } },
+			{ key: 'path', get label() { return m.settings_secrets_field_secret_path(); }, type: 'text', required: false, placeholder: '/', get hint() { return m.settings_secrets_field_infisical_path_hint(); } },
 		],
 		vault: [
-			{ key: 'address', label: 'Vault address', type: 'text', required: true, placeholder: 'https://vault.example.com', hint: 'Base URL of your Vault server.' },
-			{ key: 'token', label: 'Vault token', type: 'password', required: true, placeholder: 'hvs...', hint: 'A token with read access to the KV path.' },
-			{ key: 'namespace', label: 'Namespace', type: 'text', required: false, placeholder: 'admin (Enterprise / HCP)', hint: 'Vault Enterprise / HCP only.' },
-			{ key: 'mount', label: 'KV mount', type: 'text', required: false, placeholder: 'secret', hint: 'KV v2 mount path. Defaults to "secret".' },
+			{ key: 'address', get label() { return m.settings_secrets_field_vault_address(); }, type: 'text', required: true, placeholder: 'https://vault.example.com', get hint() { return m.settings_secrets_field_vault_address_hint(); } },
+			{ key: 'token', get label() { return m.settings_secrets_field_vault_token(); }, type: 'password', required: true, placeholder: 'hvs...', get hint() { return m.settings_secrets_field_vault_token_hint(); } },
+			{ key: 'namespace', get label() { return m.settings_secrets_field_vault_namespace(); }, type: 'text', required: false, placeholder: 'admin (Enterprise / HCP)', get hint() { return m.settings_secrets_field_vault_namespace_hint(); } },
+			{ key: 'mount', get label() { return m.settings_secrets_field_vault_mount(); }, type: 'text', required: false, placeholder: 'secret', get hint() { return m.settings_secrets_field_vault_mount_hint(); } },
 		],
 		doppler: [
-			{ key: 'token', label: 'Token', type: 'password', required: true, placeholder: 'dp.st.... or dp.pt....', hint: 'A service token (dp.st.) already targets one config. A personal token (dp.pt.) also needs the project and config below.' },
-			{ key: 'project', label: 'Project', type: 'text', required: false, placeholder: 'only for a personal token (dp.pt.)', hint: 'Doppler project slug. Only needed with a personal token.' },
-			{ key: 'config', label: 'Config', type: 'text', required: false, placeholder: 'e.g. prd', hint: 'Config within the project. Only needed with a personal token.' },
+			{ key: 'token', get label() { return m.settings_secrets_field_doppler_token(); }, type: 'password', required: true, get placeholder() { return m.settings_secrets_field_doppler_token_placeholder(); }, get hint() { return m.settings_secrets_field_doppler_token_hint(); } },
+			{ key: 'project', get label() { return m.settings_secrets_field_project(); }, type: 'text', required: false, get placeholder() { return m.settings_secrets_field_doppler_project_placeholder(); }, get hint() { return m.settings_secrets_field_doppler_project_hint(); } },
+			{ key: 'config', get label() { return m.settings_secrets_field_doppler_config(); }, type: 'text', required: false, get placeholder() { return m.settings_secrets_field_doppler_config_placeholder(); }, get hint() { return m.settings_secrets_field_doppler_config_hint(); } },
 		],
 		bitwarden: [
-			{ key: 'token', label: 'Machine Account access token', type: 'password', required: true, placeholder: 'Machine Account access token', hint: 'A Bitwarden Secrets Manager Machine Account token with read access to the Project.' },
-			{ key: 'serverUrl', label: 'Server URL', type: 'text', required: false, placeholder: 'https://vault.bitwarden.com', hint: 'Optional for EU or self-hosted Bitwarden. Leave blank for Bitwarden US cloud.' },
+			{ key: 'token', get label() { return m.settings_secrets_field_bitwarden_token(); }, type: 'password', required: true, get placeholder() { return m.settings_secrets_field_bitwarden_token(); }, get hint() { return m.settings_secrets_field_bitwarden_token_hint(); } },
+			{ key: 'serverUrl', get label() { return m.settings_secrets_field_bitwarden_server_url(); }, type: 'text', required: false, placeholder: 'https://vault.bitwarden.com', get hint() { return m.settings_secrets_field_bitwarden_server_url_hint(); } },
 		],
 		proton: [
-			{ key: 'token', label: 'Personal access token', type: 'password', required: true, placeholder: 'pst_...::...', hint: 'A Proton Pass personal access token (pst_...) used by the operator-installed pass-cli.' },
+			{ key: 'token', get label() { return m.settings_secrets_field_proton_token(); }, type: 'password', required: true, placeholder: 'pst_...::...', get hint() { return m.settings_secrets_field_proton_token_hint(); } },
 		],
 		'azure-kv': [
-			{ key: 'vaultUri', label: 'Vault URI', type: 'text', required: true, placeholder: 'https://my-vault.vault.azure.net', hint: 'The Key Vault URI (from the vault Overview page).' },
-			{ key: 'tenantId', label: 'Tenant ID', type: 'text', required: true, placeholder: 'directory (tenant) ID', hint: 'Azure AD tenant (directory) ID of the app registration.' },
-			{ key: 'clientId', label: 'Client ID', type: 'text', required: true, placeholder: 'application (client) ID', hint: 'The service-principal (app registration) client ID.' },
-			{ key: 'clientSecret', label: 'Client secret', type: 'password', required: true, placeholder: 'app registration client secret', hint: 'A client secret for the app registration, with Get/List secret permission on the vault.' },
+			{ key: 'vaultUri', get label() { return m.settings_secrets_field_azure_vault_uri(); }, type: 'text', required: true, placeholder: 'https://my-vault.vault.azure.net', get hint() { return m.settings_secrets_field_azure_vault_uri_hint(); } },
+			{ key: 'tenantId', get label() { return m.settings_secrets_field_azure_tenant_id(); }, type: 'text', required: true, get placeholder() { return m.settings_secrets_field_azure_tenant_id_placeholder(); }, get hint() { return m.settings_secrets_field_azure_tenant_id_hint(); } },
+			{ key: 'clientId', get label() { return m.settings_secrets_field_azure_client_id(); }, type: 'text', required: true, get placeholder() { return m.settings_secrets_field_azure_client_id_placeholder(); }, get hint() { return m.settings_secrets_field_azure_client_id_hint(); } },
+			{ key: 'clientSecret', get label() { return m.settings_secrets_field_azure_client_secret(); }, type: 'password', required: true, get placeholder() { return m.settings_secrets_field_azure_client_secret_placeholder(); }, get hint() { return m.settings_secrets_field_azure_client_secret_hint(); } },
 		],
 		keepass: [
-			{ key: 'databasePath', label: 'Database path', type: 'text', required: true, placeholder: '/secrets/passwords.kdbx', hint: 'Absolute path to the .kdbx file as seen inside the Dockhand container (bind-mount it read-only). keepassxc-cli must be installed in the container.' },
-			{ key: 'password', label: 'Master password', type: 'password', required: false, requiredWhen: (c) => !(c.keyFilePath ?? '').trim(), placeholder: 'database master password', hint: 'The database master password. Optional if a key file is provided instead (or in addition).' },
-			{ key: 'keyFilePath', label: 'Key file path', type: 'text', required: false, placeholder: '/secrets/db.keyx', hint: 'Optional absolute path to the database key file, as seen inside the container.' },
+			{ key: 'databasePath', get label() { return m.settings_secrets_field_keepass_database_path(); }, type: 'text', required: true, placeholder: '/secrets/passwords.kdbx', get hint() { return m.settings_secrets_field_keepass_database_path_hint(); } },
+			{ key: 'password', get label() { return m.settings_secrets_field_keepass_password(); }, type: 'password', required: false, requiredWhen: (c) => !(c.keyFilePath ?? '').trim(), get placeholder() { return m.settings_secrets_field_keepass_password_placeholder(); }, get hint() { return m.settings_secrets_field_keepass_password_hint(); } },
+			{ key: 'keyFilePath', get label() { return m.settings_secrets_field_keepass_key_file(); }, type: 'text', required: false, placeholder: '/secrets/db.keyx', get hint() { return m.settings_secrets_field_keepass_key_file_hint(); } },
 		],
 	};
 
@@ -97,39 +100,39 @@
 	export type BulkSelectorField = { label: string; placeholder?: string; hint?: string };
 	export const BULK_SELECTOR_FIELDS: Record<string, BulkSelectorField> = {
 		'op-service-account': {
-			label: 'Environment',
-			placeholder: '1Password Environment id',
-			hint: 'Bulk-load every secret from this 1Password Environment. Leave blank to inject only inline op:// references.'
+			get label() { return m.settings_secrets_field_environment(); },
+			get placeholder() { return m.settings_secrets_bulk_op_placeholder(); },
+			get hint() { return m.settings_secrets_bulk_op_hint(); }
 		},
 		'vault': {
-			label: 'KV v2 path',
+			get label() { return m.settings_secrets_bulk_vault_label(); },
 			placeholder: 'path/to/secret',
-			hint: 'Bulk-load every key at this KV v2 path (under the configured mount).'
+			get hint() { return m.settings_secrets_bulk_vault_hint(); }
 		},
 		'infisical': {
-			label: 'Secret path',
+			get label() { return m.settings_secrets_field_secret_path(); },
 			placeholder: '/',
-			hint: 'Bulk-load every secret at this path (project and environment come from the provider config).'
+			get hint() { return m.settings_secrets_bulk_infisical_hint(); }
 		},
 		'bitwarden': {
-			label: 'Project',
-			placeholder: 'Bitwarden Project UUID',
-			hint: 'Bulk-load every secret from this Bitwarden Secrets Manager Project.'
+			get label() { return m.settings_secrets_field_project(); },
+			get placeholder() { return m.settings_secrets_bulk_bitwarden_placeholder(); },
+			get hint() { return m.settings_secrets_bulk_bitwarden_hint(); }
 		},
 		'proton': {
-			label: 'Vault',
-			placeholder: 'Proton Pass vault name',
-			hint: 'Bulk-load every item from this Proton Pass vault. Leave blank to inject only inline pass:// references.'
+			get label() { return m.settings_secrets_bulk_proton_label(); },
+			get placeholder() { return m.settings_secrets_bulk_proton_placeholder(); },
+			get hint() { return m.settings_secrets_bulk_proton_hint(); }
 		},
 		'azure-kv': {
 			label: 'Key Vault',
-			placeholder: 'any value enables bulk pull',
-			hint: 'Bulk-load every secret in the vault. Set any value to enable it; leave blank to inject only inline azurekv:// references.'
+			get placeholder() { return m.settings_secrets_bulk_azure_placeholder(); },
+			get hint() { return m.settings_secrets_bulk_azure_hint(); }
 		},
 		'keepass': {
-			label: 'Group',
-			placeholder: 'e.g. dockhand (leave blank for inline refs only)',
-			hint: 'Bulk-load every entry under this group as ENV=<entry password>. Leave blank to inject only inline keepass:// references.'
+			get label() { return m.settings_secrets_bulk_keepass_label(); },
+			get placeholder() { return m.settings_secrets_bulk_keepass_placeholder(); },
+			get hint() { return m.settings_secrets_bulk_keepass_hint(); }
 		}
 	};
 </script>
@@ -256,7 +259,7 @@
 			// allowed to be empty; non-secret required fields still must be present.
 			if (editing && field.type === 'password') continue;
 			if (fieldRequired(field, config) && !config[field.key]) {
-				return `${field.label} is required`;
+				return m.settings_secrets_error_field_required({ field: field.label });
 			}
 		}
 		return null;
@@ -300,16 +303,16 @@
 			}
 			const data = await response.json();
 			if (data.ok) {
-				toast.success('Connection works');
+				toast.success(m.settings_secrets_toast_connection_works());
 				clearTimeout(testOkTimer);
 				testOk = true;
 				testOkTimer = setTimeout(() => (testOk = false), 2000);
 			} else {
-				toast.error(data.error || 'Connection failed');
-				formError = data.error || 'Connection failed';
+				toast.error(data.error || m.settings_secrets_connection_failed());
+				formError = data.error || m.settings_secrets_connection_failed();
 			}
 		} catch {
-			toast.error('Connection test failed');
+			toast.error(m.settings_secrets_toast_connection_test_failed());
 		} finally {
 			formTesting = false;
 		}
@@ -317,7 +320,7 @@
 
 	async function save() {
 		if (!formName.trim()) {
-			formError = 'Name is required';
+			formError = m.settings_secrets_error_name_required();
 			return;
 		}
 
@@ -364,10 +367,10 @@
 				const data = await response.json();
 				formError =
 					data.error ||
-					`Failed to ${isEditing ? 'update' : 'create'} secret provider`;
+					(isEditing ? m.settings_secrets_error_update_failed() : m.settings_secrets_error_create_failed());
 			}
 		} catch {
-			formError = `Failed to ${isEditing ? 'update' : 'create'} secret provider`;
+			formError = isEditing ? m.settings_secrets_error_update_failed() : m.settings_secrets_error_create_failed();
 		} finally {
 			formSaving = false;
 		}
@@ -394,7 +397,7 @@
 		<Dialog.Header>
 			<Dialog.Title class="flex items-center gap-2">
 				<KeyRound class="w-5 h-5 text-muted-foreground" />
-				{isEditing ? "Edit" : "Add"} secret provider
+				{isEditing ? m.settings_secrets_edit_provider() : m.settings_secrets_add_provider()}
 			</Dialog.Title>
 		</Dialog.Header>
 		<div class="space-y-4">
@@ -404,15 +407,15 @@
 				</div>
 			{/if}
 			<div class="space-y-2">
-				<FieldLabel label="Name" forId="provider-name" required showOptional={false} />
+				<FieldLabel label={m.settings_secrets_name_label()} forId="provider-name" required showOptional={false} />
 				<Input
 					id="provider-name"
 					bind:value={formName}
-					placeholder="Production secrets"
+					placeholder={m.settings_secrets_name_placeholder()}
 				/>
 			</div>
 			<div class="space-y-2">
-				<FieldLabel label="Provider" forId="provider-type" required showOptional={false} />
+				<FieldLabel label={m.settings_secrets_provider_label()} forId="provider-type" required showOptional={false} />
 				<Select.Root
 					type="single"
 					value={formType}
@@ -451,7 +454,7 @@
 							type={field.type}
 							bind:value={formConfig[field.key]}
 							placeholder={isEditing && field.type === "password"
-								? "leave blank to keep existing"
+								? m.settings_secrets_keep_existing_placeholder()
 								: field.placeholder}
 						/>
 						{#if field.hint}
@@ -468,38 +471,38 @@
 						<p class="flex items-start gap-2 text-xs text-muted-foreground">
 							<Info class="h-3.5 w-3.5 shrink-0 mt-0.5 text-amber-500" />
 							<span>
-								Bitwarden Secrets Manager requires an externally installed or mounted official
-								<code>bws</code> client at <code>/usr/local/bin/bws</code> (or an absolute
-								<code>DOCKHAND_BWS_PATH</code> process override).
+								{m.settings_secrets_bws_note_before()}
+								<code>bws</code> {m.settings_secrets_cli_note_client_at()} <code>/usr/local/bin/bws</code> {m.settings_secrets_cli_note_override_before()}
+								<code>DOCKHAND_BWS_PATH</code> {m.settings_secrets_bws_note_override_after()}
 							</span>
 						</p>
 					{:else if formType === 'keepass'}
 						<p class="flex items-start gap-2 text-xs text-muted-foreground">
 							<Info class="h-3.5 w-3.5 shrink-0 mt-0.5 text-amber-500" />
 							<span>
-								KeePassXC requires the official <code>keepassxc-cli</code> client installed in the
-								container (or an absolute <code>DOCKHAND_KEEPASSXC_CLI_PATH</code> process override),
-								and the <code>.kdbx</code> database bind-mounted into the container read-only at the
-								path above. Supports both a bulk group pull and inline <code>keepass://</code>
-								references.
+								{m.settings_secrets_keepass_note_before()} <code>keepassxc-cli</code> {m.settings_secrets_keepass_note_override_before()}
+								<code>DOCKHAND_KEEPASSXC_CLI_PATH</code> {m.settings_secrets_keepass_note_database_before()}
+								<code>.kdbx</code> {m.settings_secrets_keepass_note_database_after()}
+								<code>keepass://</code>
+								{m.settings_secrets_cli_note_references()}
 							</span>
 						</p>
 					{:else}
 						<p class="flex items-start gap-2 text-xs text-muted-foreground">
 							<Info class="h-3.5 w-3.5 shrink-0 mt-0.5 text-amber-500" />
 							<span>
-								Proton Pass requires an externally installed or mounted official
-								<code>pass-cli</code> client at <code>/usr/local/bin/pass-cli</code> (or an absolute
-								<code>DOCKHAND_PASS_CLI_PATH</code> process override). Supports both a bulk vault pull
-								and inline <code>pass://</code> references.
+								{m.settings_secrets_proton_note_before()}
+								<code>pass-cli</code> {m.settings_secrets_cli_note_client_at()} <code>/usr/local/bin/pass-cli</code> {m.settings_secrets_cli_note_override_before()}
+								<code>DOCKHAND_PASS_CLI_PATH</code> {m.settings_secrets_proton_note_override_after()}
+								<code>pass://</code> {m.settings_secrets_cli_note_references()}
 							</span>
 						</p>
 					{/if}
 				</div>
 			{/if}
 			<p class="text-xs text-muted-foreground">
-				Configuration is stored encrypted.{#if isEditing}
-					Leave secret fields blank to keep the existing values.{/if}
+				{m.settings_secrets_config_encrypted()}{#if isEditing}
+					{m.settings_secrets_config_keep_blank()}{/if}
 			</p>
 		</div>
 		<Dialog.Footer>
@@ -520,10 +523,10 @@
 						<PlugZap class="w-4 h-4" />
 					{/if}
 				</span>
-				Test connection
+				{m.settings_secrets_test_connection()}
 			</Button>
 			<div class="flex-1"></div>
-			<Button variant="outline" onclick={handleClose}>Cancel</Button>
+			<Button variant="outline" onclick={handleClose}>{m.settings_secrets_cancel()}</Button>
 			<Button onclick={save} disabled={formSaving}>
 				{#if formSaving}
 					<RefreshCw class="w-4 h-4 mr-1 animate-spin" />
@@ -532,7 +535,7 @@
 				{:else}
 					<Plus class="w-4 h-4" />
 				{/if}
-				{isEditing ? "Save" : "Add"}
+				{isEditing ? m.settings_secrets_save() : m.settings_secrets_add()}
 			</Button>
 		</Dialog.Footer>
 	</Dialog.Content>

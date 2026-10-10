@@ -342,7 +342,10 @@ describe('SFTP secret persistence and response surfaces', () => {
 	it('shows stored-secret guidance and uses the SFTP server icon', () => {
 		const modalSource = readFileSync(join(root, 'src/routes/settings/backups/DestinationModal.svelte'), 'utf8');
 		const backupUtils = readFileSync(join(root, 'src/lib/utils/backup.ts'), 'utf8');
-		assert.match(modalSource, /an SSH private key is stored — leave blank to keep it/);
+		// UI texts live in the message catalogue; the English source text is what this check pins.
+		const en = JSON.parse(readFileSync(join(root, 'src/lib/i18n/messages/en.json'), 'utf8'));
+		assert.match(modalSource, /m\.settings_backups_ssh_key_stored_placeholder\(\)/);
+		assert.match(en.settings_backups_ssh_key_stored_placeholder, /an SSH private key is stored - leave blank to keep it/);
 		assert.match(backupUtils, /repository\.startsWith\('sftp:'\)\) return Server/);
 	});
 

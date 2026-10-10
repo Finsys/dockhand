@@ -21,6 +21,8 @@
 	import { focusFirstInput } from '$lib/utils';
 	import { backendSupportsTls } from '$lib/shared/repo-predicates';
 	import { buildSftpRepository, isSftpRepository, parseSftpRepository } from '$lib/shared/sftp-repository';
+	import { m } from '$lib/paraglide/messages.js';
+	import { splitAtName } from '$lib/i18n/split';
 
 	interface Destination {
 		id: number;
@@ -52,6 +54,13 @@
 
 	let { open = $bindable(), destination = null, existingDestinations = [], onClose, onSaved }: Props = $props();
 	const isEditing = $derived(destination !== null);
+	const localPathHint = splitAtName(m.settings_backups_local_path_hint);
+	const sftpHint = splitAtName(m.settings_backups_sftp_hint);
+	const regionHint = splitAtName(m.settings_backups_region_hint);
+	const caHint = splitAtName(m.settings_backups_ca_certificate_hint);
+	const clientCertHint = splitAtName(m.settings_backups_client_certificate_hint);
+	const conflictUsedBy = splitAtName(m.settings_backups_conflict_used_by);
+	const conflictClick = splitAtName(m.settings_backups_conflict_click);
 
 	// Stats for existing destinations
 	let repoStats = $state<{ totalSize: number; totalFiles: number; snapshots: number } | null>(null);
@@ -102,43 +111,43 @@
 
 	const backendTypes: BackendType[] = [
 		{
-			value: 'local', label: 'Local path', icon: HardDrive,
+			value: 'local', label: m.settings_backups_type_local(), icon: HardDrive,
 			fields: [
-				{ key: 'path', label: 'Path', placeholder: '/app/local-backups/myrepo', optional: true }
+				{ key: 'path', label: m.settings_backups_field_path(), placeholder: '/app/local-backups/myrepo', optional: true }
 			],
 			buildRepo: (f) => f.path || '',
 			parseRepo: (repo) => ({ path: repo })
 		},
 		{
-			value: 'sftp', label: 'SFTP (SSH key)', icon: Server,
+			value: 'sftp', label: m.settings_backups_type_sftp(), icon: Server,
 			fields: [
-				{ key: 'host', label: 'SSH host', placeholder: 'backup.example.com' },
-				{ key: 'port', label: 'SSH port', placeholder: '22', optional: true },
-				{ key: 'username', label: 'SSH username', placeholder: 'backup' },
+				{ key: 'host', label: m.settings_backups_field_ssh_host(), placeholder: 'backup.example.com' },
+				{ key: 'port', label: m.settings_backups_field_ssh_port(), placeholder: '22', optional: true },
+				{ key: 'username', label: m.settings_backups_field_ssh_username(), placeholder: 'backup' },
 				{
 					key: 'path',
-					label: 'Repository path',
-					placeholder: 'Leave blank to use the account home directory',
+					label: m.settings_backups_field_repository_path(),
+					placeholder: m.settings_backups_field_repository_path_placeholder(),
 					optional: true,
-					hint: 'Optional. Relative paths start from the SFTP account home directory; leave blank to use that directory.'
+					hint: m.settings_backups_field_repository_path_hint()
 				},
 				{
 					key: 'sshPrivateKey',
-					label: 'SSH private key',
+					label: m.settings_backups_field_ssh_private_key(),
 					placeholder: '-----BEGIN OPENSSH PRIVATE KEY-----',
 					secret: true,
 					multiline: true,
 					secretField: 'sshPrivateKey',
-					hint: 'Use a private key that does not require an interactive passphrase. Password authentication and ssh-agent are never used.'
+					hint: m.settings_backups_field_ssh_private_key_hint()
 				},
 				{
 					key: 'sshKnownHosts',
-					label: 'Verified known_hosts data',
+					label: m.settings_backups_field_known_hosts(),
 					placeholder: '[backup.example.com]:2222 ssh-ed25519 AAAA...',
 					secret: true,
 					multiline: true,
 					secretField: 'sshKnownHosts',
-					hint: 'Paste host-key entries whose fingerprints you verified independently. Strict host-key checking is always enabled.'
+					hint: m.settings_backups_field_known_hosts_hint()
 				}
 			],
 			buildRepo: (f) => buildSftpRepository({
@@ -157,12 +166,12 @@
 		{
 			value: 's3', label: 'Amazon S3', icon: AmazonS3Icon,
 			fields: [
-				{ key: 'region', label: 'AWS region', placeholder: '', optional: true },
-				{ key: 'endpoint', label: 'Endpoint', placeholder: 's3.amazonaws.com (or http://minio:9000)' },
-				{ key: 'bucket', label: 'Bucket', placeholder: 'my-backup-bucket' },
-				{ key: 'path', label: 'Path', placeholder: 'dockhand', optional: true },
-				{ key: 'accessKey', label: 'Access key ID', placeholder: '', envKey: 'AWS_ACCESS_KEY_ID' },
-				{ key: 'secretKey', label: 'Secret access key', placeholder: '', secret: true, envKey: 'AWS_SECRET_ACCESS_KEY' }
+				{ key: 'region', label: m.settings_backups_field_aws_region(), placeholder: '', optional: true },
+				{ key: 'endpoint', label: m.settings_backups_field_endpoint(), placeholder: m.settings_backups_field_endpoint_placeholder() },
+				{ key: 'bucket', label: m.settings_backups_field_bucket(), placeholder: 'my-backup-bucket' },
+				{ key: 'path', label: m.settings_backups_field_path(), placeholder: 'dockhand', optional: true },
+				{ key: 'accessKey', label: m.settings_backups_field_access_key_id(), placeholder: '', envKey: 'AWS_ACCESS_KEY_ID' },
+				{ key: 'secretKey', label: m.settings_backups_field_secret_access_key(), placeholder: '', secret: true, envKey: 'AWS_SECRET_ACCESS_KEY' }
 			],
 			buildRepo: (f) => {
 				const endpoint = f.endpoint || 's3.amazonaws.com';
@@ -190,10 +199,10 @@
 		{
 			value: 'b2', label: 'Backblaze B2', icon: BackblazeIcon,
 			fields: [
-				{ key: 'bucket', label: 'Bucket', placeholder: 'my-backup-bucket' },
-				{ key: 'path', label: 'Path', placeholder: 'dockhand', optional: true },
-				{ key: 'accountId', label: 'Key ID', placeholder: '', envKey: 'B2_ACCOUNT_ID' },
-				{ key: 'accountKey', label: 'Application key', placeholder: '', secret: true, envKey: 'B2_ACCOUNT_KEY' }
+				{ key: 'bucket', label: m.settings_backups_field_bucket(), placeholder: 'my-backup-bucket' },
+				{ key: 'path', label: m.settings_backups_field_path(), placeholder: 'dockhand', optional: true },
+				{ key: 'accountId', label: m.settings_backups_field_key_id(), placeholder: '', envKey: 'B2_ACCOUNT_ID' },
+				{ key: 'accountKey', label: m.settings_backups_field_application_key(), placeholder: '', secret: true, envKey: 'B2_ACCOUNT_KEY' }
 			],
 			buildRepo: (f) => `b2:${f.bucket}:${f.path || ''}`.replace(/:$/, ''),
 			parseRepo: (repo) => {
@@ -205,10 +214,10 @@
 		{
 			value: 'azure', label: 'Azure Blob', icon: AzureBlobIcon,
 			fields: [
-				{ key: 'container', label: 'Container', placeholder: 'my-backup-container' },
-				{ key: 'path', label: 'Path', placeholder: 'dockhand', optional: true },
-				{ key: 'accountName', label: 'Account name', placeholder: '', envKey: 'AZURE_ACCOUNT_NAME' },
-				{ key: 'accountKey', label: 'Account key', placeholder: '', secret: true, envKey: 'AZURE_ACCOUNT_KEY' }
+				{ key: 'container', label: m.settings_backups_field_container(), placeholder: 'my-backup-container' },
+				{ key: 'path', label: m.settings_backups_field_path(), placeholder: 'dockhand', optional: true },
+				{ key: 'accountName', label: m.settings_backups_field_account_name(), placeholder: '', envKey: 'AZURE_ACCOUNT_NAME' },
+				{ key: 'accountKey', label: m.settings_backups_field_account_key(), placeholder: '', secret: true, envKey: 'AZURE_ACCOUNT_KEY' }
 			],
 			// Keep the trailing colon: restic's azure parser needs `azure:container:`
 			// (it splits on ':' and rejects a repo with no second colon). B2/GS differ.
@@ -222,10 +231,10 @@
 		{
 			value: 'gs', label: 'Google Cloud', icon: GoogleCloudIcon,
 			fields: [
-				{ key: 'bucket', label: 'Bucket', placeholder: 'my-backup-bucket' },
-				{ key: 'path', label: 'Path', placeholder: '/dockhand', optional: true },
-				{ key: 'projectId', label: 'Project ID', placeholder: 'my-gcp-project', envKey: 'GOOGLE_PROJECT_ID' },
-				{ key: 'saJson', label: 'Service account JSON', placeholder: '{ "type": "service_account", ... }', secret: true, multiline: true, envKey: 'GOOGLE_APPLICATION_CREDENTIALS_JSON', hint: 'Paste or upload a service-account key JSON. It auto-refreshes, so scheduled backups keep working.' }
+				{ key: 'bucket', label: m.settings_backups_field_bucket(), placeholder: 'my-backup-bucket' },
+				{ key: 'path', label: m.settings_backups_field_path(), placeholder: '/dockhand', optional: true },
+				{ key: 'projectId', label: m.settings_backups_field_project_id(), placeholder: 'my-gcp-project', envKey: 'GOOGLE_PROJECT_ID' },
+				{ key: 'saJson', label: m.settings_backups_field_service_account_json(), placeholder: '{ "type": "service_account", ... }', secret: true, multiline: true, envKey: 'GOOGLE_APPLICATION_CREDENTIALS_JSON', hint: m.settings_backups_field_service_account_json_hint() }
 			],
 			buildRepo: (f) => `gs:${f.bucket}:${f.path || '/'}`,
 			parseRepo: (repo) => {
@@ -235,14 +244,14 @@
 			}
 		},
 		{
-			value: 'rest', label: 'REST server', icon: RestServerIcon,
+			value: 'rest', label: m.settings_backups_type_rest(), icon: RestServerIcon,
 			// User and password are separate fields and encoded on the way into the URL:
 			// typed into the URL by hand, a password containing % or @ breaks restic's
 			// parser, and an unparseable location is echoed back with the password in it.
 			fields: [
-				{ key: 'url', label: 'Server URL', placeholder: 'https://backup-server:8000/repo-name' },
-				{ key: 'user', label: 'Username', placeholder: 'dockhand-user', optional: true },
-				{ key: 'password', label: 'Password', placeholder: '', secret: true, optional: true }
+				{ key: 'url', label: m.settings_backups_field_server_url(), placeholder: 'https://backup-server:8000/repo-name' },
+				{ key: 'user', label: m.settings_backups_field_username(), placeholder: 'dockhand-user', optional: true },
+				{ key: 'password', label: m.settings_backups_field_password(), placeholder: '', secret: true, optional: true }
 			],
 			buildRepo: (f) => buildRestRepository(f.url || '', f.user, f.password),
 			parseRepo: (repo) => parseRestRepository(repo)
@@ -264,7 +273,7 @@
 		try {
 			formFields[key] = await file.text();
 		} catch {
-			toast.error('Could not read the selected file');
+			toast.error(m.settings_backups_read_file_failed());
 		}
 		input.value = ''; // let the same file be re-picked
 	}
@@ -290,7 +299,7 @@
 			const text = await file.text();
 			if (which === 'ca') formCacert = text; else formTlsClientCert = text;
 		} catch {
-			toast.error('Could not read the selected file');
+			toast.error(m.settings_backups_read_file_failed());
 		}
 		input.value = '';
 	}
@@ -350,12 +359,12 @@
 	function secretPlaceholder(field: FormField): string {
 		if (!isEditing || !hasStoredSecret(field)) return field.placeholder;
 		if (field.secretField === 'sshPrivateKey') {
-			return '(an SSH private key is stored — leave blank to keep it)';
+			return m.settings_backups_ssh_key_stored_placeholder();
 		}
 		if (field.secretField === 'sshKnownHosts') {
-			return '(verified known_hosts data is stored — leave blank to keep it)';
+			return m.settings_backups_known_hosts_stored_placeholder();
 		}
-		return '(leave blank to keep current)';
+		return m.settings_backups_keep_current_placeholder();
 	}
 	// All mandatory fields present? Drives the disabled state of Test/Create. On edit
 	// the credentials + password are already stored (secrets show blank = "keep
@@ -490,7 +499,7 @@
 			copiedOk = true;
 			setTimeout(() => { copiedOk = false; }, 1500);
 		} else {
-			toast.error('Could not copy to clipboard. Copy it manually, or use HTTPS to enable one-click copy.');
+			toast.error(m.settings_backups_copy_failed());
 		}
 	}
 
@@ -539,17 +548,17 @@
 				// existing destination already has its own "Init repo" action.
 				needsInit = !isEditing;
 				testStatus = 'needs_init';
-				testStatusMsg = 'Connectivity OK, repository needs init';
+				testStatusMsg = m.settings_backups_test_needs_init();
 			} else if (res.ok && data.success) {
 				needsInit = false;
 				testStatus = 'ok';
-				testStatusMsg = 'Connection successful';
+				testStatusMsg = m.settings_backups_test_connection_successful();
 			} else {
 				needsInit = false;
 				testStatus = 'error';
-				testStatusMsg = data.error || 'Connection test failed';
+				testStatusMsg = data.error || m.settings_backups_test_failed();
 			}
-		} catch { testStatus = 'error'; testStatusMsg = 'Connection test failed'; } finally { testing = false; }
+		} catch { testStatus = 'error'; testStatusMsg = m.settings_backups_test_failed(); } finally { testing = false; }
 	}
 
 	async function initRepo() {
@@ -558,8 +567,8 @@
 		try {
 			const res = await fetch(`/api/backup/destinations/${destination.id}/init`, { method: 'POST' });
 			const data = await res.json();
-			toast[res.ok && data.success ? 'success' : 'error'](data.success ? 'Repository initialized' : (data.error || 'Init failed'));
-		} catch { toast.error('Init failed'); } finally { initializing = false; }
+			toast[res.ok && data.success ? 'success' : 'error'](data.success ? m.settings_backups_repo_initialized() : (data.error || m.settings_backups_init_failed()));
+		} catch { toast.error(m.settings_backups_init_failed()); } finally { initializing = false; }
 	}
 
 	// Normalize a restic repository string for loose equality: lowercase, drop
@@ -591,9 +600,9 @@
 	});
 
 	async function save() {
-		if (!formName.trim()) { formError = 'Name is required'; return; }
+		if (!formName.trim()) { formError = m.settings_backups_name_required(); return; }
 		const repository = selectedBackend.buildRepo(formFields);
-		if (!repository.trim()) { formError = 'Repository fields are incomplete'; return; }
+		if (!repository.trim()) { formError = m.settings_backups_repo_fields_incomplete(); return; }
 
 		// Warn (once) if this repo is already used by another destination. Backups
 		// to a shared repo are serialized (restic locks the repo), not parallel —
@@ -656,17 +665,17 @@
 			// Creating a destination auto-initialises its repository server-side, so a
 			// create over a reachable-but-uninitialised repo (needsInit) needs no extra
 			// call here — the button just tells the user that up front ("Save and init").
-			if (res.ok) { open = false; onSaved(); toast.success(needsInit ? 'Destination created and repository initialized' : isEditing ? 'Destination updated' : 'Destination created'); }
-			else { const data = await res.json(); formError = data.error || 'Failed'; }
-		} catch { formError = 'Failed'; } finally { formSaving = false; }
+			if (res.ok) { open = false; onSaved(); toast.success(needsInit ? m.settings_backups_created_and_initialized() : isEditing ? m.settings_backups_updated() : m.settings_backups_created()); }
+			else { const data = await res.json(); formError = data.error || m.settings_backups_failed(); }
+		} catch { formError = m.settings_backups_failed(); } finally { formSaving = false; }
 	}
 </script>
 
 <Dialog.Root bind:open onOpenChange={(o) => { if (o) { formError = ''; repoConflictName = null; focusFirstInput(); } }}>
 	<Dialog.Content class="max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
 		<Dialog.Header>
-			<Dialog.Title>{isEditing ? 'Edit backup destination' : 'Add backup destination'}</Dialog.Title>
-			<Dialog.Description>{isEditing ? 'Update backup destination settings' : 'Configure a restic backup repository'}</Dialog.Description>
+			<Dialog.Title>{isEditing ? m.settings_backups_edit_title() : m.settings_backups_add_title()}</Dialog.Title>
+			<Dialog.Description>{isEditing ? m.settings_backups_edit_description() : m.settings_backups_add_description()}</Dialog.Description>
 		</Dialog.Header>
 
 		{#if formError}<p class="text-sm text-destructive">{formError}</p>{/if}
@@ -675,24 +684,24 @@
 		{#if selectedBackend.value === 'local'}
 			<div class="flex items-start gap-2 p-2.5 mt-4 rounded-md bg-amber-500/10 border border-amber-500/20 text-xs text-amber-600 dark:text-amber-400">
 				<HardDrive class="w-3.5 h-3.5 shrink-0 mt-0.5" />
-				<span>Enter the path as Dockhand sees it inside its own container (the container side of your backup volume mount, e.g. <code>/app/local-backups/...</code>), not the host path. Local path repositories work on the local Docker host, or a co-located socket-proxy on that same host. For remote hosts, use S3, REST, or another remote backend.</span>
+				<span>{localPathHint[0]}<code>/app/local-backups/...</code>{localPathHint[1]}</span>
 			</div>
 		{:else if selectedBackend.value === 'sftp'}
 			<div class="flex items-start gap-2 p-2.5 mt-4 rounded-md bg-blue-500/10 border border-blue-500/20 text-xs text-blue-700 dark:text-blue-300">
 				<Server class="w-3.5 h-3.5 shrink-0 mt-0.5" />
-				<span>Dockhand uses only the supplied private key and verified <code>known_hosts</code> entries. Strict host-key checking is always on; password login, ssh-agent use, agent forwarding, and trust-on-first-use are disabled.</span>
+				<span>{sftpHint[0]}<code>known_hosts</code>{sftpHint[1]}</span>
 			</div>
 		{/if}
 		<div class="grid grid-cols-2 gap-6 py-4">
 			<!-- Left column: connection -->
 			<div class="space-y-4">
 				<div class="space-y-2">
-					<FieldLabel label="Name" forId="dest-name" required />
+					<FieldLabel label={m.settings_backups_name()} forId="dest-name" required />
 					<Input id="dest-name" bind:value={formName} />
 				</div>
 
 				<div class="space-y-2">
-					<Label>Backend type</Label>
+					<Label>{m.settings_backups_backend_type()}</Label>
 					<Select.Root type="single" value={formBackendType} onValueChange={handleBackendChange}>
 						<Select.Trigger class="w-full">
 							<span class="flex items-center gap-2">
@@ -724,7 +733,7 @@
 									id="field-region"
 									value={formFields.region ?? ''}
 									oninput={(e: Event) => { formFields.region = (e.target as HTMLInputElement).value; }}
-									placeholder="e.g. eu-north-1"
+									placeholder={m.settings_backups_region_placeholder()}
 									class="flex-1"
 								/>
 								<!-- Quick-pick of AWS regions: fills the region AND the regional
@@ -734,7 +743,7 @@
 									formFields.region = v;
 									formFields.endpoint = regionalEndpoint(v);
 								}}>
-									<Select.Trigger class="w-36 shrink-0" aria-label="AWS regions quick pick">AWS regions</Select.Trigger>
+									<Select.Trigger class="w-36 shrink-0" aria-label={m.settings_backups_aws_regions_quick_pick()}>{m.settings_backups_aws_regions()}</Select.Trigger>
 									<Select.Content class="max-h-64">
 										{#each AWS_REGIONS as r}
 											<Select.Item value={r}>{r}</Select.Item>
@@ -743,7 +752,7 @@
 								</Select.Root>
 							</div>
 							<p class="text-xs text-muted-foreground">
-								Passed to restic as <code class="font-mono">AWS_DEFAULT_REGION</code>.
+								{regionHint[0]}<code class="font-mono">AWS_DEFAULT_REGION</code>{regionHint[1]}
 							</p>
 						</div>
 					{:else}
@@ -776,10 +785,10 @@
 									<FieldLabel label={field.label} forId="field-{field.key}" required={fieldRequired(field)} />
 									<div class="flex gap-1">
 										{#if isEditing && field.secretField && hasStoredSecret(field) && !formFields[field.key]}
-											<Button variant="outline" size="sm" class="h-7 px-2 text-xs text-destructive" onclick={() => clearStoredSecret(field)}>Clear</Button>
+											<Button variant="outline" size="sm" class="h-7 px-2 text-xs text-destructive" onclick={() => clearStoredSecret(field)}>{m.settings_backups_clear()}</Button>
 										{/if}
 										<Button variant="outline" size="sm" class="h-7 px-2 text-xs" onclick={() => fileInputs[field.key]?.click()}>
-											<Upload class="mr-1 h-3 w-3" />Upload file
+											<Upload class="mr-1 h-3 w-3" />{m.settings_backups_upload_file()}
 										</Button>
 									</div>
 								</div>
@@ -805,7 +814,7 @@
 									type={field.secret ? 'password' : 'text'}
 									value={formFields[field.key] ?? ''}
 									oninput={(e: Event) => { formFields[field.key] = (e.target as HTMLInputElement).value; }}
-									placeholder={isEditing && field.secret ? '(leave blank to keep current)' : field.placeholder}
+									placeholder={isEditing && field.secret ? m.settings_backups_keep_current_placeholder() : field.placeholder}
 								/>
 							{/if}
 							{#if field.hint}<p class="text-xs text-muted-foreground">{field.hint}</p>{/if}
@@ -814,42 +823,42 @@
 				{/each}
 
 				<div class="space-y-2">
-					<FieldLabel label="Encryption password" forId="dest-password" required={!isEditing} />
+					<FieldLabel label={m.settings_backups_encryption_password()} forId="dest-password" required={!isEditing} />
 					<div class="flex gap-1.5">
-						<Input id="dest-password" type="password" bind:value={formPassword} placeholder={isEditing ? '(leave blank to keep current)' : ''} class="flex-1" />
-						<Button variant="outline" size="sm" class="h-9 px-2 shrink-0" onclick={generatePassword} title="Generate strong password">
+						<Input id="dest-password" type="password" bind:value={formPassword} placeholder={isEditing ? m.settings_backups_keep_current_placeholder() : ''} class="flex-1" />
+						<Button variant="outline" size="sm" class="h-9 px-2 shrink-0" onclick={generatePassword} title={m.settings_backups_generate_password()}>
 							{#if generatedOk}<Check class="w-3.5 h-3.5 text-green-500" />{:else}<Dices class="w-3.5 h-3.5" />{/if}
 						</Button>
 						{#if formPassword}
-							<Button variant="outline" size="sm" class="h-9 px-2 shrink-0" onclick={copyPassword} title="Copy password">
+							<Button variant="outline" size="sm" class="h-9 px-2 shrink-0" onclick={copyPassword} title={m.settings_backups_copy_password()}>
 								{#if copiedOk}<Check class="w-3.5 h-3.5 text-green-500" />{:else}<Copy class="w-3.5 h-3.5" />{/if}
 							</Button>
 						{/if}
 					</div>
-					<p class="text-xs text-muted-foreground">Restic encrypts all data with this password. You will need it to restore.</p>
+					<p class="text-xs text-muted-foreground">{m.settings_backups_encryption_password_hint()}</p>
 				</div>
 
 				<div class="space-y-2">
-					<Label for="dest-backup-flags">Extra backup flags</Label>
+					<Label for="dest-backup-flags">{m.settings_backups_backup_flags()}</Label>
 					<Input id="dest-backup-flags" bind:value={formBackupFlags} />
 					<div class="text-xs text-muted-foreground space-y-0.5">
-						<p>Applied to backups. Common flags:</p>
+						<p>{m.settings_backups_backup_flags_hint()}</p>
 						<div class="flex flex-wrap gap-x-3 gap-y-0.5 font-mono">
-							<span class="cursor-pointer hover:text-foreground" onclick={() => { formBackupFlags = (formBackupFlags + ' --limit-upload 5120').trim(); }} title="Limit upload speed to 5 MB/s">--limit-upload</span>
-							<span class="cursor-pointer hover:text-foreground" onclick={() => { formBackupFlags = (formBackupFlags + ' --limit-download 10240').trim(); }} title="Limit download speed to 10 MB/s">--limit-download</span>
-							<span class="cursor-pointer hover:text-foreground" onclick={() => { formBackupFlags = (formBackupFlags + ' --verbose').trim(); }} title="Verbose output">--verbose</span>
-							<span class="cursor-pointer hover:text-foreground" onclick={() => { formBackupFlags = (formBackupFlags + ' --compression max').trim(); }} title="Maximum compression">--compression max</span>
+							<span class="cursor-pointer hover:text-foreground" onclick={() => { formBackupFlags = (formBackupFlags + ' --limit-upload 5120').trim(); }} title={m.settings_backups_flag_limit_upload()}>--limit-upload</span>
+							<span class="cursor-pointer hover:text-foreground" onclick={() => { formBackupFlags = (formBackupFlags + ' --limit-download 10240').trim(); }} title={m.settings_backups_flag_limit_download()}>--limit-download</span>
+							<span class="cursor-pointer hover:text-foreground" onclick={() => { formBackupFlags = (formBackupFlags + ' --verbose').trim(); }} title={m.settings_backups_flag_verbose()}>--verbose</span>
+							<span class="cursor-pointer hover:text-foreground" onclick={() => { formBackupFlags = (formBackupFlags + ' --compression max').trim(); }} title={m.settings_backups_flag_compression_max()}>--compression max</span>
 						</div>
 					</div>
 				</div>
 
 				<div class="space-y-2">
-					<Label for="dest-restore-flags">Extra restore flags</Label>
+					<Label for="dest-restore-flags">{m.settings_backups_restore_flags()}</Label>
 					<Input id="dest-restore-flags" bind:value={formRestoreFlags} />
 					<div class="text-xs text-muted-foreground space-y-0.5">
-						<p>Applied only to restores. Common flags:</p>
+						<p>{m.settings_backups_restore_flags_hint()}</p>
 						<div class="flex flex-wrap gap-x-3 gap-y-0.5 font-mono">
-							<span class="cursor-pointer hover:text-foreground" onclick={() => { formRestoreFlags = (formRestoreFlags + ' --exclude-xattr security.selinux').trim(); }} title="Skip the SELinux xattr the helper can't remove on a cross-distro restore (e.g. Ubuntu -> Fedora)">--exclude-xattr security.selinux</span>
+							<span class="cursor-pointer hover:text-foreground" onclick={() => { formRestoreFlags = (formRestoreFlags + ' --exclude-xattr security.selinux').trim(); }} title={m.settings_backups_flag_exclude_selinux()}>--exclude-xattr security.selinux</span>
 						</div>
 					</div>
 				</div>
@@ -862,20 +871,20 @@
 		     there. Optional; blank = use the system trust store. PEM content, uploaded or pasted. -->
 		{#if showTlsSection}
 		<div class="border-t pt-3 mt-2 space-y-3">
-			<span class="text-xs font-medium text-muted-foreground uppercase tracking-wide">TLS certificates (optional)</span>
+			<span class="text-xs font-medium text-muted-foreground uppercase tracking-wide">{m.settings_backups_tls_title()}</span>
 			<p class="text-xs text-muted-foreground -mt-1">
-				For a backend served over HTTPS with a private/self-signed CA. Leave blank to use the system trust store.
+				{m.settings_backups_tls_hint()}
 			</p>
 			<div class="grid grid-cols-2 gap-6">
 				<div class="space-y-1">
 					<div class="flex items-center justify-between">
-						<Label for="dest-cacert">CA certificate</Label>
+						<Label for="dest-cacert">{m.settings_backups_ca_certificate()}</Label>
 						<div class="flex gap-1">
 							{#if isEditing && hadCacert && !formCacert}
-								<Button variant="outline" size="sm" class="h-7 px-2 text-xs text-destructive" onclick={() => { hadCacert = false; }}>Clear</Button>
+								<Button variant="outline" size="sm" class="h-7 px-2 text-xs text-destructive" onclick={() => { hadCacert = false; }}>{m.settings_backups_clear()}</Button>
 							{/if}
 							<Button variant="outline" size="sm" class="h-7 px-2 text-xs" onclick={() => caFileInput?.click()}>
-								<Upload class="mr-1 h-3 w-3" />Upload
+								<Upload class="mr-1 h-3 w-3" />{m.settings_backups_upload()}
 							</Button>
 						</div>
 					</div>
@@ -884,20 +893,20 @@
 						id="dest-cacert"
 						rows={4}
 						bind:value={formCacert}
-						placeholder={isEditing && hadCacert ? '(a CA certificate is stored - leave blank to keep it)' : '-----BEGIN CERTIFICATE-----'}
+						placeholder={isEditing && hadCacert ? m.settings_backups_ca_stored_placeholder() : '-----BEGIN CERTIFICATE-----'}
 						class="field-sizing-fixed max-h-40 resize-y overflow-auto font-mono text-xs"
 					/>
-					<p class="text-xs text-muted-foreground">Verifies the backend's TLS certificate (restic <code class="font-mono">RESTIC_CACERT</code>).</p>
+					<p class="text-xs text-muted-foreground">{caHint[0]}<code class="font-mono">RESTIC_CACERT</code>{caHint[1]}</p>
 				</div>
 				<div class="space-y-1">
 					<div class="flex items-center justify-between">
-						<Label for="dest-client-cert">Client certificate (mTLS)</Label>
+						<Label for="dest-client-cert">{m.settings_backups_client_certificate()}</Label>
 						<div class="flex gap-1">
 							{#if isEditing && hadTlsClientCert && !formTlsClientCert}
-								<Button variant="outline" size="sm" class="h-7 px-2 text-xs text-destructive" onclick={() => { hadTlsClientCert = false; }}>Clear</Button>
+								<Button variant="outline" size="sm" class="h-7 px-2 text-xs text-destructive" onclick={() => { hadTlsClientCert = false; }}>{m.settings_backups_clear()}</Button>
 							{/if}
 							<Button variant="outline" size="sm" class="h-7 px-2 text-xs" onclick={() => clientCertFileInput?.click()}>
-								<Upload class="mr-1 h-3 w-3" />Upload
+								<Upload class="mr-1 h-3 w-3" />{m.settings_backups_upload()}
 							</Button>
 						</div>
 					</div>
@@ -906,10 +915,10 @@
 						id="dest-client-cert"
 						rows={4}
 						bind:value={formTlsClientCert}
-						placeholder={isEditing && hadTlsClientCert ? '(a client certificate is stored - leave blank to keep it)' : 'certificate + private key in one PEM'}
+						placeholder={isEditing && hadTlsClientCert ? m.settings_backups_client_stored_placeholder() : m.settings_backups_client_certificate_placeholder()}
 						class="field-sizing-fixed max-h-40 resize-y overflow-auto font-mono text-xs"
 					/>
-					<p class="text-xs text-muted-foreground">Certificate + key in one PEM for mutual TLS (restic <code class="font-mono">RESTIC_TLS_CLIENT_CERT</code>).</p>
+					<p class="text-xs text-muted-foreground">{clientCertHint[0]}<code class="font-mono">RESTIC_TLS_CLIENT_CERT</code>{clientCertHint[1]}</p>
 				</div>
 			</div>
 		</div>
@@ -918,17 +927,17 @@
 
 		<!-- Policies section -->
 		<div class="border-t pt-3 mt-2 space-y-3">
-			<span class="text-xs font-medium text-muted-foreground uppercase tracking-wide">Repository policies</span>
+			<span class="text-xs font-medium text-muted-foreground uppercase tracking-wide">{m.settings_backups_policies_title()}</span>
 
 			<!-- Prune policy -->
 			<div class="space-y-1.5">
 				<div class="flex items-center gap-3">
 					<div class="flex items-center gap-1.5">
 						<Clock class="w-3.5 h-3.5 text-muted-foreground" />
-						<Label class="text-sm">Scheduled prune</Label>
+						<Label class="text-sm">{m.settings_backups_policy_prune()}</Label>
 						<Tooltip.Provider delayDuration={200}>
 							<Tooltip.Root><Tooltip.Trigger><CircleHelp class="w-3 h-3 text-muted-foreground/50 cursor-help" /></Tooltip.Trigger>
-								<Tooltip.Portal><Tooltip.Content side="right" class="!w-64 text-xs">Removes unreferenced data from the repository. Frees disk space after snapshots are forgotten. Run monthly for most repos.</Tooltip.Content></Tooltip.Portal>
+								<Tooltip.Portal><Tooltip.Content side="right" class="!w-64 text-xs">{m.settings_backups_policy_prune_hint()}</Tooltip.Content></Tooltip.Portal>
 							</Tooltip.Root>
 						</Tooltip.Provider>
 					</div>
@@ -938,7 +947,7 @@
 					<div class="pl-5 space-y-2">
 						<CronEditor value={policyPruneSchedule} onchange={(v) => policyPruneSchedule = v} />
 						<div class="flex items-center gap-2">
-							<label class="text-xs text-muted-foreground">Max unused %</label>
+							<label class="text-xs text-muted-foreground">{m.settings_backups_policy_prune_max_unused()}</label>
 							<Input bind:value={policyPruneMaxUnused} type="number" min="0" max="100" class="h-8 text-xs w-20" />
 						</div>
 					</div>
@@ -950,10 +959,10 @@
 				<div class="flex items-center gap-3">
 					<div class="flex items-center gap-1.5">
 						<PackageCheck class="w-3.5 h-3.5 text-muted-foreground" />
-						<Label class="text-sm">Scheduled integrity check</Label>
+						<Label class="text-sm">{m.settings_backups_policy_check()}</Label>
 						<Tooltip.Provider delayDuration={200}>
 							<Tooltip.Root><Tooltip.Trigger><CircleHelp class="w-3 h-3 text-muted-foreground/50 cursor-help" /></Tooltip.Trigger>
-								<Tooltip.Portal><Tooltip.Content side="right" class="!w-64 text-xs">Verifies the structure and integrity of the repository. Detects corruption or missing data. Run monthly or after storage issues.</Tooltip.Content></Tooltip.Portal>
+								<Tooltip.Portal><Tooltip.Content side="right" class="!w-64 text-xs">{m.settings_backups_policy_check_hint()}</Tooltip.Content></Tooltip.Portal>
 							</Tooltip.Root>
 						</Tooltip.Provider>
 					</div>
@@ -971,10 +980,10 @@
 				<div class="flex items-center gap-3">
 					<div class="flex items-center gap-1.5">
 						<FolderCheck class="w-3.5 h-3.5 text-muted-foreground" />
-						<Label class="text-sm">Scheduled data verification</Label>
+						<Label class="text-sm">{m.settings_backups_policy_verify()}</Label>
 						<Tooltip.Provider delayDuration={200}>
 							<Tooltip.Root><Tooltip.Trigger><CircleHelp class="w-3 h-3 text-muted-foreground/50 cursor-help" /></Tooltip.Trigger>
-								<Tooltip.Portal><Tooltip.Content side="right" class="!w-64 text-xs">Reads a random subset of data packs to verify they're readable and intact. Catches bit rot and storage corruption. Slower and uses bandwidth on cloud repos. Off by default.</Tooltip.Content></Tooltip.Portal>
+								<Tooltip.Portal><Tooltip.Content side="right" class="!w-64 text-xs">{m.settings_backups_policy_verify_hint()}</Tooltip.Content></Tooltip.Portal>
 							</Tooltip.Root>
 						</Tooltip.Provider>
 					</div>
@@ -984,7 +993,7 @@
 					<div class="pl-5 space-y-2">
 						<CronEditor value={policyVerifySchedule} onchange={(v) => policyVerifySchedule = v} />
 						<div class="flex items-center gap-2">
-							<label class="text-xs text-muted-foreground">Data %</label>
+							<label class="text-xs text-muted-foreground">{m.settings_backups_policy_verify_data_subset()}</label>
 							<Select.Root type="single" value={policyVerifyDataSubset} onValueChange={(v) => policyVerifyDataSubset = v}>
 								<Select.Trigger class="h-8 w-20 text-xs">{policyVerifyDataSubset}</Select.Trigger>
 								<Select.Content>
@@ -1004,10 +1013,10 @@
 			<div class="flex items-center gap-3">
 				<div class="flex items-center gap-1.5">
 					<Unlock class="w-3.5 h-3.5 text-muted-foreground" />
-					<Label class="text-sm">Auto-unlock stale locks</Label>
+					<Label class="text-sm">{m.settings_backups_policy_auto_unlock()}</Label>
 					<Tooltip.Provider delayDuration={200}>
 						<Tooltip.Root><Tooltip.Trigger><CircleHelp class="w-3 h-3 text-muted-foreground/50 cursor-help" /></Tooltip.Trigger>
-							<Tooltip.Portal><Tooltip.Content side="right" class="!w-64 text-xs">Automatically removes stale repository locks before prune and check operations. Locks can be left behind by interrupted or crashed backups.</Tooltip.Content></Tooltip.Portal>
+							<Tooltip.Portal><Tooltip.Content side="right" class="!w-64 text-xs">{m.settings_backups_policy_auto_unlock_hint()}</Tooltip.Content></Tooltip.Portal>
 						</Tooltip.Root>
 					</Tooltip.Provider>
 				</div>
@@ -1020,7 +1029,7 @@
 			<div class="border-t pt-3 mt-2">
 				<div class="flex items-center gap-2 mb-2">
 					<BarChart3 class="w-3.5 h-3.5 text-muted-foreground" />
-					<span class="text-xs font-medium text-muted-foreground uppercase tracking-wide">Repository usage</span>
+					<span class="text-xs font-medium text-muted-foreground uppercase tracking-wide">{m.settings_backups_usage_title()}</span>
 					{#if loadingStats}
 						<Loader2 class="w-3 h-3 animate-spin text-muted-foreground" />
 					{/if}
@@ -1029,15 +1038,15 @@
 					<div class="grid grid-cols-3 gap-2">
 						<div class="bg-muted/30 rounded px-2 py-1.5 text-center border border-border/30">
 							<div class="text-sm font-semibold">{formatBytes(repoStats.totalSize)}</div>
-							<div class="text-[9px] text-muted-foreground">Size</div>
+							<div class="text-[9px] text-muted-foreground">{m.settings_backups_stat_size()}</div>
 						</div>
 						<div class="bg-muted/30 rounded px-2 py-1.5 text-center border border-border/30">
 							<div class="text-sm font-semibold">{repoStats.totalFiles.toLocaleString()}</div>
-							<div class="text-[9px] text-muted-foreground">Files</div>
+							<div class="text-[9px] text-muted-foreground">{m.settings_backups_stat_files()}</div>
 						</div>
 						<div class="bg-muted/30 rounded px-2 py-1.5 text-center border border-border/30">
 							<div class="text-sm font-semibold">{repoStats.snapshots}</div>
-							<div class="text-[9px] text-muted-foreground">Snapshots</div>
+							<div class="text-[9px] text-muted-foreground">{m.settings_backups_stat_snapshots()}</div>
 						</div>
 					</div>
 					<!-- Usage bar -->
@@ -1045,10 +1054,10 @@
 						<div class="h-2 bg-muted rounded-full overflow-hidden">
 							<div class="h-full bg-primary/60 rounded-full transition-all" style="width: {Math.min(100, (repoStats.totalSize / (1024 * 1024 * 1024)) * 10)}%"></div>
 						</div>
-						<p class="text-[10px] text-muted-foreground mt-1">{repoStats.snapshots} snapshots across {repoStats.totalFiles.toLocaleString()} files</p>
+						<p class="text-[10px] text-muted-foreground mt-1">{m.settings_backups_usage_summary({ snapshots: repoStats.snapshots, files: repoStats.totalFiles.toLocaleString() })}</p>
 					{/if}
 				{:else if !loadingStats}
-					<p class="text-xs text-muted-foreground">Loading repository stats...</p>
+					<p class="text-xs text-muted-foreground">{m.settings_backups_loading_stats()}</p>
 				{/if}
 			</div>
 		{/if}
@@ -1058,28 +1067,28 @@
 			<div class="flex-shrink-0 flex gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">
 				<AlertTriangle class="w-4 h-4 mt-0.5 flex-shrink-0" />
 				<span>
-					This repository is already used by <span class="font-medium">"{repoConflictName}"</span>.
-					Backups to a shared repository run one at a time (restic locks the repo), not in parallel.
-					Click <span class="font-medium">Save anyway</span> to continue.
+					{conflictUsedBy[0]}<span class="font-medium">{repoConflictName}</span>{conflictUsedBy[1]}
+					{m.settings_backups_conflict_serialized()}
+					{conflictClick[0]}<span class="font-medium">{m.settings_backups_save_anyway()}</span>{conflictClick[1]}
 				</span>
 			</div>
 		{/if}
 		<Dialog.Footer class="flex-shrink-0 border-t mt-auto pt-4">
 			<div class="flex items-center gap-2 mr-auto min-w-0">
-				<Button variant="outline" size="sm" onclick={testConnection} disabled={testing || !formValid} title={!formValid ? 'Fill in all required fields first' : undefined}>
+				<Button variant="outline" size="sm" onclick={testConnection} disabled={testing || !formValid} title={!formValid ? m.settings_backups_fill_required() : undefined}>
 					{#if testing}<Loader2 class="w-4 h-4 mr-1 animate-spin" />{:else}<Wifi class="w-4 h-4 mr-1" />{/if}
-					Test
+					{m.settings_backups_test()}
 				</Button>
 				{#if isEditing}
-					<Button variant="outline" size="sm" class="{destination?.lastTestStatus === 'success' ? 'opacity-30' : ''}" onclick={initRepo} disabled={initializing} title={destination?.lastTestStatus === 'success' ? 'Already initialized' : 'Initialize repository'}>
+					<Button variant="outline" size="sm" class="{destination?.lastTestStatus === 'success' ? 'opacity-30' : ''}" onclick={initRepo} disabled={initializing} title={destination?.lastTestStatus === 'success' ? m.settings_backups_already_initialized() : m.settings_backups_init_repository()}>
 						{#if initializing}<Loader2 class="w-4 h-4 mr-1 animate-spin" />{:else}<Database class="w-4 h-4 mr-1" />{/if}
-						Init repo
+						{m.settings_backups_init_repo()}
 					</Button>
 				{/if}
 				{#if testStatus === 'ok'}
 					<span class="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400"><Check class="w-3.5 h-3.5 shrink-0" />{testStatusMsg}</span>
 				{:else if testStatus === 'needs_init'}
-					<span class="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400"><Check class="w-3.5 h-3.5 shrink-0" />{testStatusMsg}{#if !isEditing} - done on save{/if}</span>
+					<span class="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400"><Check class="w-3.5 h-3.5 shrink-0" />{testStatusMsg}{#if !isEditing} - {m.settings_backups_test_done_on_save()}{/if}</span>
 				{:else if testStatus === 'error'}
 					<span class="flex items-center gap-1.5 min-w-0 text-xs text-destructive" title={testStatusMsg}>
 						<AlertTriangle class="w-3.5 h-3.5 shrink-0" />
@@ -1087,10 +1096,10 @@
 					</span>
 				{/if}
 			</div>
-			<Button variant="outline" onclick={() => { open = false; onClose(); }}>Cancel</Button>
-			<Button onclick={save} disabled={formSaving || !formValid} variant={repoConflictName ? 'destructive' : 'default'} title={!formValid ? 'Fill in all required fields first' : undefined}>
+			<Button variant="outline" onclick={() => { open = false; onClose(); }}>{m.settings_backups_cancel()}</Button>
+			<Button onclick={save} disabled={formSaving || !formValid} variant={repoConflictName ? 'destructive' : 'default'} title={!formValid ? m.settings_backups_fill_required() : undefined}>
 				{#if formSaving}<Loader2 class="w-4 h-4 mr-1 animate-spin" />{:else if repoConflictName}<AlertTriangle class="w-4 h-4 mr-1" />{:else if isEditing}<Check class="w-4 h-4 mr-1" />{:else}<Plus class="w-4 h-4 mr-1" />{/if}
-				{repoConflictName ? 'Save anyway' : needsInit && !isEditing ? 'Create and init' : isEditing ? 'Save' : 'Create'}
+				{repoConflictName ? m.settings_backups_save_anyway() : needsInit && !isEditing ? m.settings_backups_create_and_init() : isEditing ? m.settings_backups_save() : m.settings_backups_create()}
 			</Button>
 		</Dialog.Footer>
 	</Dialog.Content>

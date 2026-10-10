@@ -16,6 +16,8 @@
 	import PrivacyModal from './PrivacyModal.svelte';
 	import SelfUpdateDialog from './SelfUpdateDialog.svelte';
 	import ChangelogText from '$lib/components/ChangelogText.svelte';
+	import { m } from '$lib/paraglide/messages.js';
+	import { getLocale } from '$lib/paraglide/runtime.js';
 
 	interface Dependency {
 		name: string;
@@ -61,7 +63,7 @@
 
 	// Current version from git tag (injected at build time)
 	declare const __APP_VERSION__: string | null;
-	const currentVersion = __APP_VERSION__ || 'unknown';
+	const currentVersion = __APP_VERSION__ || m.settings_about_unknown();
 
 	const filteredDeps = $derived(
 		dependencies.filter(dep =>
@@ -73,10 +75,10 @@
 	async function fetchDependencies() {
 		try {
 			const res = await fetch('/api/dependencies');
-			if (!res.ok) throw new Error('Failed to fetch dependencies');
+			if (!res.ok) throw new Error(m.settings_about_dependencies_load_failed());
 			dependencies = await res.json();
 		} catch (e) {
-			depsError = e instanceof Error ? e.message : 'Unknown error';
+			depsError = e instanceof Error ? e.message : m.settings_about_unknown_error();
 		} finally {
 			loadingDeps = false;
 		}
@@ -85,29 +87,29 @@
 	async function fetchChangelog() {
 		try {
 			const res = await fetch('/api/changelog');
-			if (!res.ok) throw new Error('Failed to fetch changelog');
+			if (!res.ok) throw new Error(m.settings_about_changelog_load_failed());
 			// Shipped releases only: an unreleased (coming-soon) entry must not show as
 			// the "Latest" version.
 			changelog = releasedEntries(await res.json());
 		} catch (e) {
-			changelogError = e instanceof Error ? e.message : 'Unknown error';
+			changelogError = e instanceof Error ? e.message : m.settings_about_unknown_error();
 		} finally {
 			loadingChangelog = false;
 		}
 	}
 
 	function formatChangelogDate(dateStr: string): string {
-		if (!dateStr) return 'Unreleased';
+		if (!dateStr) return m.settings_about_unreleased();
 		try {
 			const date = new Date(dateStr);
-			if (isNaN(date.getTime())) return 'Unreleased';
-			return date.toLocaleDateString('en-US', {
+			if (isNaN(date.getTime())) return m.settings_about_unreleased();
+			return date.toLocaleDateString(getLocale(), {
 				year: 'numeric',
 				month: 'long',
 				day: 'numeric'
 			});
 		} catch {
-			return 'Unreleased';
+			return m.settings_about_unreleased();
 		}
 	}
 
@@ -125,68 +127,68 @@
 	const BUILD_BRANCH = __BUILD_BRANCH__ ?? null;
 
 	const TAGLINES = [
-		"Simplify. Deploy. Smile.",
-		"Less typing. More shipping.",
-		"Taming containers so you don't have to wrestle whales.",
-		"Docker management, minus the sea monsters.",
-		"Because wrangling containers shouldn't feel like open-heart surgery.",
-		"One interface to rule your containers (and your sanity).",
-		"CLI fatigue is real. We treat it.",
-		"Automate, orchestrate, hydrate — we handle the first two.",
-		"Turning docker ps into pure bliss.",
-		"Your API deserves better than bash therapy.",
-		"Where DevOps takes a deep breath.",
-		"Zero friction. Just containers.",
-		"Simplify. Deploy. Smile.",
-		"Because even the whale needs a handler.",
-		"From chaos to compose — elegantly.",
-		"No sea-sickness. Just smooth shipping.",
-		"Your Docker daemon's spirit guide.",
-		"Stop speaking whale. Start managing Docker like a human.",
-		"Because docker ps shouldn't be a lifestyle.",
-		"Your containers deserve better than shell scripts and stress.",
-		"We make your Docker behave — no magic flags required.",
-		"From jumbled YAMLs to zen-like order.",
-		"When your containers listen the first time.",
-		"Control the chaos, skip the CLI yoga.",
-		"Docker wrangling for the rest of us.",
-		"Making containers civilized since version 1.0.",
-		"Less whale-wrestling, more shipping.",
-		"Calm seas for every deployment.",
-		"No drama, just Docker.",
-		"Docker management, distilled.",
-		"Smooth orchestration. Zero overhead.",
-		"Build. Ship. Chill.",
-		"Think less. Deploy faster.",
-		"Total control — no keyboard acrobatics.",
-		"Because you've got better things to grep for.",
-		"No more container existential crises.",
-		"CLI fatigue? We prescribe automation.",
-		"One app to outsmart your bash history.",
-		"Making Docker less dockery since forever.",
-		"Because Docker shouldn't require a PhD in bash.",
-		"Your containers. Less chaos, more chill.",
-		"Stop copy-pasting the same docker ps | grep again.",
-		"Finally, a Docker UI that doesn't feel like punishment.",
-		"We speak fluent container, so you don't have to.",
-		"Bringing dignity back to Docker management.",
-		"For when you love Docker but hate Docker.",
-		"Automation for humans who still like buttons.",
-		"Taming your containers without taming your spirit.",
-		"No more whales in your workflow.",
-		"Keeping your containers in line since this morning.",
-		"Because every DevOps deserves a day off.",
-		"Serious about containers. Not about suffering.",
-		"Work smarter, not docker-harder.",
-		"Made for people who break prod responsibly.",
-		"Turning Docker discipline into an art form.",
-		"Your shortcut to shipping sanity.",
-		"Zero friction. Infinite containers.",
-		"Less yak-shaving, more image-pulling.",
-		"Because scripts age like milk.",
-		"CLI acrobatics are so 2020.",
-		"Containers behave. Developers rejoice.",
-		"Finally, a tool that respects your time and your terminal."
+		m.settings_about_tagline_simplify_deploy_smile,
+		m.settings_about_tagline_less_typing,
+		m.settings_about_tagline_taming_containers,
+		m.settings_about_tagline_minus_sea_monsters,
+		m.settings_about_tagline_open_heart_surgery,
+		m.settings_about_tagline_rule_your_containers,
+		m.settings_about_tagline_cli_fatigue_real,
+		m.settings_about_tagline_automate_orchestrate_hydrate,
+		m.settings_about_tagline_docker_ps_bliss,
+		m.settings_about_tagline_bash_therapy,
+		m.settings_about_tagline_devops_deep_breath,
+		m.settings_about_tagline_just_containers,
+		m.settings_about_tagline_simplify_deploy_smile,
+		m.settings_about_tagline_whale_needs_handler,
+		m.settings_about_tagline_chaos_to_compose,
+		m.settings_about_tagline_no_sea_sickness,
+		m.settings_about_tagline_daemon_spirit_guide,
+		m.settings_about_tagline_stop_speaking_whale,
+		m.settings_about_tagline_docker_ps_lifestyle,
+		m.settings_about_tagline_shell_scripts_and_stress,
+		m.settings_about_tagline_no_magic_flags,
+		m.settings_about_tagline_jumbled_yamls,
+		m.settings_about_tagline_containers_listen,
+		m.settings_about_tagline_skip_cli_yoga,
+		m.settings_about_tagline_rest_of_us,
+		m.settings_about_tagline_civilized_since_1_0,
+		m.settings_about_tagline_less_whale_wrestling,
+		m.settings_about_tagline_calm_seas,
+		m.settings_about_tagline_no_drama,
+		m.settings_about_tagline_distilled,
+		m.settings_about_tagline_smooth_orchestration,
+		m.settings_about_tagline_build_ship_chill,
+		m.settings_about_tagline_think_less,
+		m.settings_about_tagline_no_keyboard_acrobatics,
+		m.settings_about_tagline_better_things_to_grep,
+		m.settings_about_tagline_existential_crises,
+		m.settings_about_tagline_prescribe_automation,
+		m.settings_about_tagline_outsmart_bash_history,
+		m.settings_about_tagline_less_dockery,
+		m.settings_about_tagline_phd_in_bash,
+		m.settings_about_tagline_less_chaos_more_chill,
+		m.settings_about_tagline_stop_copy_pasting,
+		m.settings_about_tagline_not_punishment,
+		m.settings_about_tagline_fluent_container,
+		m.settings_about_tagline_dignity,
+		m.settings_about_tagline_love_hate_docker,
+		m.settings_about_tagline_humans_like_buttons,
+		m.settings_about_tagline_taming_spirit,
+		m.settings_about_tagline_no_whales_in_workflow,
+		m.settings_about_tagline_since_this_morning,
+		m.settings_about_tagline_devops_day_off,
+		m.settings_about_tagline_serious_about_containers,
+		m.settings_about_tagline_work_smarter,
+		m.settings_about_tagline_break_prod_responsibly,
+		m.settings_about_tagline_art_form,
+		m.settings_about_tagline_shipping_sanity,
+		m.settings_about_tagline_infinite_containers,
+		m.settings_about_tagline_less_yak_shaving,
+		m.settings_about_tagline_scripts_age_like_milk,
+		m.settings_about_tagline_so_2020,
+		m.settings_about_tagline_developers_rejoice,
+		m.settings_about_tagline_respects_your_time
 	];
 
 	interface SystemInfo {
@@ -298,7 +300,7 @@
 		try {
 			const response = await fetch('/api/self-update/check');
 			if (!response.ok) {
-				updateCheckError = 'Failed to check for updates';
+				updateCheckError = m.settings_about_update_check_failed();
 				return;
 			}
 
@@ -329,7 +331,7 @@
 				};
 			}
 		} catch (err) {
-			updateCheckError = 'Check failed: ' + String(err);
+			updateCheckError = m.settings_about_check_failed({ error: String(err) });
 		} finally {
 			checkingUpdate = false;
 		}
@@ -344,17 +346,17 @@
 		// Always show full format for layout stability
 		const pad = (n: number) => n.toString().padStart(2, '0');
 		if (days > 0) {
-			return `${days}d ${pad(hours)}:${pad(minutes)}:${pad(secs)}`;
+			return m.settings_about_uptime_days({ days, time: `${pad(hours)}:${pad(minutes)}:${pad(secs)}` });
 		} else {
 			return `${pad(hours)}:${pad(minutes)}:${pad(secs)}`;
 		}
 	}
 
 	function formatBuildDate(dateStr: string | null): string {
-		if (!dateStr) return 'Development';
+		if (!dateStr) return m.settings_about_build_development();
 		try {
 			const date = new Date(dateStr);
-			return date.toLocaleDateString('en-US', {
+			return date.toLocaleDateString(getLocale(), {
 				year: 'numeric',
 				month: 'short',
 				day: 'numeric'
@@ -420,7 +422,7 @@
 				fetch('/api/system'),
 				fetch('/api/host')
 			]);
-			if (!systemRes.ok) throw new Error('Failed to fetch system info');
+			if (!systemRes.ok) throw new Error(m.settings_about_system_info_load_failed());
 			systemInfo = await systemRes.json();
 
 			if (hostRes.ok) {
@@ -428,7 +430,7 @@
 				serverUptime = hostData.uptime;
 			}
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Unknown error';
+			error = e instanceof Error ? e.message : m.settings_about_unknown_error();
 		} finally {
 			loading = false;
 		}
@@ -470,7 +472,7 @@
 					<div class="animate-speedy {isJumping ? (clickCount >= 10 ? 'crazy-jumping' : `jumping-${jumpLevel}`) : ''} {hasClicked && !isJumping ? 'clicked' : ''}" onclick={handleLogoClick}>
 						<img
 							src="/logo.svg"
-							alt="Dockhand Logo"
+							alt={m.sidebar_logo_alt()}
 							class="h-36 w-auto object-contain"
 							style="filter: drop-shadow(0 2px 3px rgba(0,0,0,0.22));"
 						/>
@@ -486,33 +488,33 @@
 						<!-- Easter Egg Popup -->
 						{#if showEasterEgg}
 							<div class="easter-egg-popup">
-								Stop already, will you? Coming from r/selfhosted?
+								{m.settings_about_easter_egg()}
 							</div>
 						{/if}
 					</div>
 
 					<!-- Version Badge + Update Check -->
 					<div class="flex flex-col items-center gap-1">
-						<Badge variant="secondary" class="text-xs">Version {currentVersion}</Badge>
+						<Badge variant="secondary" class="text-xs">{m.settings_about_version_badge({ version: currentVersion })}</Badge>
 						{#if checkingUpdate}
 							<span class="flex items-center gap-1 text-xs text-muted-foreground">
 								<Loader2 class="w-3.5 h-3.5 animate-spin" />
-								Checking for updates...
+								{m.settings_about_checking_updates()}
 							</span>
 						{:else if updateAvailable && updateInfo}
 							<button class="flex items-center gap-1 text-xs text-amber-500 hover:text-amber-400 transition-colors" onclick={() => showSelfUpdateDialog = true}>
 								<CircleArrowUp class="w-3.5 h-3.5" />
-								Update available — click to see what's new
+								{m.settings_about_update_available()}
 							</button>
 						{:else if updateCheckDone && !updateAvailable}
 							<button class="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400 hover:text-emerald-500 dark:hover:text-emerald-300 transition-colors" onclick={checkForUpdates}>
 								<CheckCircle2 class="w-3.5 h-3.5" />
-								Up to date
+								{m.settings_about_up_to_date()}
 							</button>
 						{:else if updateCheckError}
 							<button class="flex items-center gap-1 text-xs text-foreground hover:text-muted-foreground transition-colors" onclick={checkForUpdates} title={updateCheckError}>
 								<TriangleAlert class="w-3.5 h-3.5 shrink-0" />
-								Update check unavailable — click to retry
+								{m.settings_about_update_check_unavailable()}
 							</button>
 						{/if}
 					</div>
@@ -534,14 +536,14 @@
 						{#if serverUptime !== null}
 							<div class="flex items-center gap-1 min-w-[8.5rem]">
 								<Clock class="w-3 h-3 shrink-0" />
-								<span class="tabular-nums">Uptime {formatUptime(serverUptime)}</span>
+								<span class="tabular-nums">{m.settings_about_uptime({ uptime: formatUptime(serverUptime) })}</span>
 							</div>
 						{/if}
 					</div>
 
 					<!-- Description -->
 					<p class="text-sm text-muted-foreground tagline-text {taglineAnimating ? 'tagline-zoom' : ''}">
-						{TAGLINES[taglineIndex]}
+						{TAGLINES[taglineIndex]()}
 					</p>
 
 					<!-- Website Link -->
@@ -555,12 +557,12 @@
 		<!-- System Stats Card (Right) -->
 		<Card.Root class="w-full h-full">
 			<Card.Header class="pb-2">
-				<Card.Title class="text-sm font-medium">System information</Card.Title>
+				<Card.Title class="text-sm font-medium">{m.settings_about_system_information()}</Card.Title>
 			</Card.Header>
 			<Card.Content>
 				{#if loading}
 					<div class="flex items-center justify-center py-6">
-						<div class="text-sm text-muted-foreground">Loading...</div>
+						<div class="text-sm text-muted-foreground">{m.settings_about_loading()}</div>
 					</div>
 				{:else if error}
 					<div class="flex items-center justify-center py-6">
@@ -577,7 +579,7 @@
 							</div>
 							<div class="text-sm pl-5 space-y-0.5">
 								<div class="flex items-center gap-2">
-									<span class="text-muted-foreground">Version</span>
+									<span class="text-muted-foreground">{m.settings_about_version()}</span>
 									<span>{systemInfo.docker.version}</span>
 									<span class="text-muted-foreground/50">|</span>
 									<span class="text-muted-foreground">API</span>
@@ -593,13 +595,13 @@
 						<div class="space-y-1.5">
 							<div class="flex items-center gap-2 text-xs font-medium text-muted-foreground">
 								<Plug class="w-3.5 h-3.5" />
-								Connection
+								{m.settings_about_connection()}
 							</div>
 							<div class="text-sm pl-5">
 								<div class="flex items-center gap-2 flex-wrap">
 									{#if systemInfo.docker.connection.type === 'socket'}
 										<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-violet-500/15 text-violet-600 dark:text-violet-400 shadow-sm ring-1 ring-violet-500/20">
-											Unix Socket
+											{m.settings_about_unix_socket()}
 										</span>
 										<span class="text-xs font-mono text-muted-foreground">{systemInfo.docker.connection.socketPath}</span>
 									{:else if systemInfo.docker.connection.type === 'https'}
@@ -621,17 +623,17 @@
 						<div class="space-y-1.5">
 							<div class="flex items-center gap-2 text-xs font-medium text-muted-foreground">
 								<Cpu class="w-3.5 h-3.5" />
-								Host
+								{m.settings_about_host()}
 							</div>
 							<div class="text-sm pl-5">
 								<div class="flex items-center gap-2">
-									<span class="text-muted-foreground">Name</span>
+									<span class="text-muted-foreground">{m.settings_about_name()}</span>
 									<span>{systemInfo.host.name}</span>
 									<span class="text-muted-foreground/50">|</span>
-									<span class="text-muted-foreground">CPUs</span>
+									<span class="text-muted-foreground">{m.settings_about_cpus()}</span>
 									<span>{systemInfo.host.cpus}</span>
 									<span class="text-muted-foreground/50">|</span>
-									<span class="text-muted-foreground">Memory</span>
+									<span class="text-muted-foreground">{m.settings_about_memory()}</span>
 									<span>{formatBytes(systemInfo.host.memory)}</span>
 								</div>
 							</div>
@@ -642,7 +644,7 @@
 						<div class="space-y-1.5">
 							<div class="flex items-center gap-2 text-xs font-medium text-muted-foreground">
 								<Cpu class="w-3.5 h-3.5" />
-								Runtime
+								{m.settings_about_runtime()}
 							</div>
 							<div class="text-sm pl-5">
 								<div class="flex items-center gap-2 flex-wrap">
@@ -664,7 +666,7 @@
 								{#if systemInfo.runtime.container.inContainer}
 								<div class="flex items-center gap-2 flex-wrap mt-1">
 									<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-500/15 text-blue-600 dark:text-blue-400 shadow-sm ring-1 ring-blue-500/20">
-										{systemInfo.runtime.container.runtime || 'Container'}
+										{systemInfo.runtime.container.runtime || m.settings_about_container()}
 									</span>
 									{#if systemInfo.runtime.ownContainer}
 										<span class="text-xs font-mono text-muted-foreground">{systemInfo.runtime.ownContainer.image}</span>
@@ -683,7 +685,7 @@
 						<div class="space-y-1.5">
 							<div class="flex items-center gap-2 text-xs font-medium text-muted-foreground">
 								<Database class="w-3.5 h-3.5" />
-								Database
+								{m.settings_about_database()}
 							</div>
 							<div class="text-sm pl-5 space-y-1">
 								<div class="flex items-center gap-2 flex-wrap">
@@ -703,7 +705,7 @@
 								</div>
 								{#if systemInfo.database.schemaVersion}
 									<div class="flex items-center gap-2">
-										<span class="text-muted-foreground">Schema</span>
+										<span class="text-muted-foreground">{m.settings_about_schema()}</span>
 										<span class="font-mono text-xs">{systemInfo.database.schemaVersion}</span>
 										{#if systemInfo.database.schemaDate}
 											<span class="text-muted-foreground/60 text-xs">({systemInfo.database.schemaDate})</span>
@@ -723,11 +725,11 @@
 								{:else}
 									<Crown class="w-3.5 h-3.5" />
 								{/if}
-								License
+								{m.settings_about_license()}
 							</div>
 							<div class="text-sm pl-5">
 								<div class="flex items-center gap-2 flex-wrap">
-									<span class="text-muted-foreground">Edition</span>
+									<span class="text-muted-foreground">{m.settings_about_edition()}</span>
 									{#if $licenseStore.licenseType === 'enterprise'}
 										<span class="text-amber-500 font-medium flex items-center gap-1">
 											<Crown class="w-3.5 h-3.5 fill-current" />
@@ -743,18 +745,18 @@
 									{/if}
 									{#if $licenseStore.isLicensed && $licenseStore.licensedTo}
 										<span class="text-muted-foreground/50">|</span>
-										<span class="text-muted-foreground">Licensed to</span>
+										<span class="text-muted-foreground">{m.settings_license_licensed_to()}</span>
 										<span>{$licenseStore.licensedTo}</span>
 									{/if}
 									<span class="text-muted-foreground/50">|</span>
-									<button class="text-primary hover:underline cursor-pointer" onclick={() => showLicenseModal = true}>Terms</button>
+									<button class="text-primary hover:underline cursor-pointer" onclick={() => showLicenseModal = true}>{m.settings_about_terms()}</button>
 									<span class="text-muted-foreground/50">|</span>
-									<button class="text-primary hover:underline cursor-pointer" onclick={() => showPrivacyModal = true}>Privacy</button>
+									<button class="text-primary hover:underline cursor-pointer" onclick={() => showPrivacyModal = true}>{m.settings_about_privacy()}</button>
 								</div>
 								<div class="flex items-center gap-2 flex-wrap mt-3 pt-2 border-t border-border/50">
 									<a href="https://github.com/Finsys/dockhand/issues" target="_blank" rel="noopener noreferrer" class="text-primary hover:underline inline-flex items-center gap-1.5 font-medium">
 										<MessageSquarePlus class="w-4 h-4" />
-										Submit issue or idea
+										{m.settings_about_submit_issue()}
 									</a>
 									<span class="text-muted-foreground/50">|</span>
 									<a href="https://discord.gg/rMxW9Y5cQw" target="_blank" rel="noopener noreferrer" class="hover:underline inline-flex items-center gap-1.5 font-medium text-indigo-500 dark:text-indigo-400">
@@ -765,12 +767,12 @@
 										<span class="text-muted-foreground/50">|</span>
 										<a href="https://buymeacoffee.com/dockhand" target="_blank" rel="noopener noreferrer" class="hover:underline inline-flex items-center gap-1.5 font-medium text-amber-600 dark:text-yellow-400">
 											<Coffee class="w-4 h-4" />
-											Buy me a coffee
+											{m.settings_about_buy_coffee()}
 										</a>
 									{/if}
 								</div>
 								{#if !$licenseStore.isLicensed}
-									<p class="text-xs text-muted-foreground mt-2">Dockhand Community Edition is free and always will be. No strings attached. Like it? Fuel the dev with caffeine.</p>
+									<p class="text-xs text-muted-foreground mt-2">{m.settings_about_community_note()}</p>
 								{/if}
 							</div>
 						</div>
@@ -783,35 +785,35 @@
 									<Box class="w-4 h-4 text-blue-500" />
 								</div>
 								<div class="text-lg font-bold">{systemInfo.stats.containers.total}</div>
-								<div class="text-2xs text-muted-foreground font-medium">Containers</div>
+								<div class="text-2xs text-muted-foreground font-medium">{m.nav_containers()}</div>
 							</div>
 							<div class="stat-box stat-box-cyan">
 								<div class="stat-icon-wrapper bg-cyan-500/10">
 									<Layers class="w-4 h-4 text-cyan-500" />
 								</div>
 								<div class="text-lg font-bold">{systemInfo.stats.stacks}</div>
-								<div class="text-2xs text-muted-foreground font-medium">Stacks</div>
+								<div class="text-2xs text-muted-foreground font-medium">{m.nav_stacks()}</div>
 							</div>
 							<div class="stat-box stat-box-purple">
 								<div class="stat-icon-wrapper bg-purple-500/10">
 									<Images class="w-4 h-4 text-purple-500" />
 								</div>
 								<div class="text-lg font-bold">{systemInfo.stats.images}</div>
-								<div class="text-2xs text-muted-foreground font-medium">Images</div>
+								<div class="text-2xs text-muted-foreground font-medium">{m.nav_images()}</div>
 							</div>
 							<div class="stat-box stat-box-green">
 								<div class="stat-icon-wrapper bg-green-500/10">
 									<HardDrive class="w-4 h-4 text-green-500" />
 								</div>
 								<div class="text-lg font-bold">{systemInfo.stats.volumes}</div>
-								<div class="text-2xs text-muted-foreground font-medium">Volumes</div>
+								<div class="text-2xs text-muted-foreground font-medium">{m.nav_volumes()}</div>
 							</div>
 							<div class="stat-box stat-box-orange">
 								<div class="stat-icon-wrapper bg-orange-500/10">
 									<Network class="w-4 h-4 text-orange-500" />
 								</div>
 								<div class="text-lg font-bold">{systemInfo.stats.networks}</div>
-								<div class="text-2xs text-muted-foreground font-medium">Networks</div>
+								<div class="text-2xs text-muted-foreground font-medium">{m.nav_networks()}</div>
 							</div>
 						</div>
 						{/if}
@@ -828,12 +830,12 @@
 				<Tabs.List class="w-full grid grid-cols-2">
 					<Tabs.Trigger value="releases" class="flex items-center gap-2">
 						<FileText class="w-4 h-4" />
-						<span>Release notes</span>
+						<span>{m.settings_about_release_notes()}</span>
 						<Badge variant="secondary" class="text-2xs">{changelog.length}</Badge>
 					</Tabs.Trigger>
 					<Tabs.Trigger value="dependencies" class="flex items-center gap-2">
 						<Package class="w-4 h-4" />
-						<span>Dependencies</span>
+						<span>{m.settings_about_dependencies()}</span>
 						<Badge variant="secondary" class="text-2xs">{dependencies.length}</Badge>
 					</Tabs.Trigger>
 				</Tabs.List>
@@ -842,7 +844,7 @@
 			<Tabs.Content value="releases" class="px-4 pb-4">
 				{#if loadingChangelog}
 					<div class="flex items-center justify-center py-8">
-						<div class="text-sm text-muted-foreground">Loading releases...</div>
+						<div class="text-sm text-muted-foreground">{m.settings_about_loading_releases()}</div>
 					</div>
 				{:else if changelogError}
 					<div class="flex items-center justify-center py-8">
@@ -868,9 +870,9 @@
 										<Tag class="w-4 h-4 text-primary" />
 										<span class="font-semibold">v{release.version}</span>
 										{#if index === 0}
-											<Badge variant="default" class="text-2xs">Latest</Badge>
+											<Badge variant="default" class="text-2xs">{m.settings_about_latest()}</Badge>
 										{/if}
-										<Badge variant="secondary" class="text-2xs">{release.changes.length} changes</Badge>
+										<Badge variant="secondary" class="text-2xs">{m.settings_about_changes_count({ count: release.changes.length })}</Badge>
 									</div>
 									<span class="text-xs text-muted-foreground">{formatChangelogDate(release.date)}</span>
 								</div>
@@ -882,12 +884,12 @@
 													{#if change.type === 'feature'}
 														<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-2xs font-medium bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 shrink-0">
 															<Sparkles class="w-3 h-3" />
-															New
+															{m.settings_about_change_new()}
 														</span>
 													{:else if change.type === 'fix'}
 														<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-2xs font-medium bg-amber-500/15 text-amber-600 dark:text-amber-400 shrink-0">
 															<Bug class="w-3 h-3" />
-															Fix
+															{m.settings_about_change_fix()}
 														</span>
 													{/if}
 													<ChangelogText text={change.text} />
@@ -907,11 +909,11 @@
 
 			<Tabs.Content value="dependencies" class="px-4 pb-4">
 				<div class="mb-3">
-					<SearchInput bind:value={depsSearch} placeholder="Search packages or licenses..." class="h-7 text-xs" containerClass="w-full max-w-xs" />
+					<SearchInput bind:value={depsSearch} placeholder={m.settings_about_search_dependencies()} class="h-7 text-xs" containerClass="w-full max-w-xs" />
 				</div>
 				{#if loadingDeps}
 					<div class="flex items-center justify-center py-8">
-						<div class="text-sm text-muted-foreground">Loading dependencies...</div>
+						<div class="text-sm text-muted-foreground">{m.settings_about_loading_dependencies()}</div>
 					</div>
 				{:else if depsError}
 					<div class="flex items-center justify-center py-8">
@@ -920,9 +922,9 @@
 				{:else}
 					<div class="space-y-1">
 						<div class="grid grid-cols-[1fr_auto_auto_auto] gap-2 text-2xs font-medium text-muted-foreground px-2 py-1 border-b">
-							<div>Package</div>
-							<div class="w-20 text-center">Version</div>
-							<div class="w-24 text-center">License</div>
+							<div>{m.settings_about_package()}</div>
+							<div class="w-20 text-center">{m.settings_about_version()}</div>
+							<div class="w-24 text-center">{m.settings_about_license()}</div>
 							<div class="w-8"></div>
 						</div>
 						<div class="max-h-[300px] overflow-y-auto pr-2">
@@ -942,7 +944,7 @@
 												target="_blank"
 												rel="noopener noreferrer"
 												class="text-muted-foreground hover:text-foreground transition-colors"
-												title="View on GitHub"
+												title={m.settings_about_view_on_github()}
 											>
 												<ExternalLink class="w-3.5 h-3.5" />
 											</a>

@@ -7,6 +7,8 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Loader2, GitBranch, KeyRound, Lock, Key, Globe, Play, CheckCircle2 } from 'lucide-svelte';
 	import { focusFirstInput } from '$lib/utils';
+	import { m } from '$lib/paraglide/messages.js';
+	import { splitAtName } from '$lib/i18n/split';
 
 	interface GitCredential {
 		id: number;
@@ -57,9 +59,9 @@
 
 	function getAuthLabel(type: string) {
 		switch (type) {
-			case 'ssh': return 'SSH Key';
-			case 'password': return 'Password';
-			default: return 'None';
+			case 'ssh': return m.stacks_git_auth_ssh_key();
+			case 'password': return m.stacks_git_auth_password();
+			default: return m.stacks_git_auth_none();
 		}
 	}
 
@@ -97,7 +99,7 @@
 
 	async function testRepository() {
 		if (!formUrl.trim()) {
-			formErrors.url = 'Repository URL is required to test';
+			formErrors.url = m.settings_git_error_url_required_to_test();
 			return;
 		}
 
@@ -119,13 +121,13 @@
 			testResult = data;
 
 			if (data.success) {
-				toast.success(`Connection successful! Branch: ${data.branch}, Commit: ${data.lastCommit}`);
+				toast.success(m.settings_git_test_success_detail({ branch: data.branch, commit: data.lastCommit }));
 			} else {
-				toast.error(data.error || 'Connection test failed');
+				toast.error(data.error || m.settings_git_connection_test_failed());
 			}
 		} catch (error) {
-			testResult = { success: false, error: 'Failed to test connection' };
-			toast.error('Failed to test connection');
+			testResult = { success: false, error: m.settings_git_test_connection_error() };
+			toast.error(m.settings_git_test_connection_error());
 		} finally {
 			testing = false;
 		}
@@ -135,11 +137,11 @@
 		formErrors = {};
 
 		if (!formName.trim()) {
-			formErrors.name = 'Name is required';
+			formErrors.name = m.settings_git_error_name_required();
 		}
 
 		if (!formUrl.trim()) {
-			formErrors.url = 'Repository URL is required';
+			formErrors.url = m.stacks_git_error_repo_url_required();
 		}
 
 		if (formErrors.name || formErrors.url) {
@@ -172,21 +174,21 @@
 
 			if (!response.ok) {
 				if (data.error?.includes('already exists')) {
-					formErrors.name = 'Repository name already exists';
+					formErrors.name = m.settings_git_error_repo_name_exists();
 				} else {
-					formError = data.error || 'Failed to save repository';
+					formError = data.error || m.settings_git_repo_save_failed();
 				}
-				toast.error(formError || 'Failed to save repository');
+				toast.error(formError || m.settings_git_repo_save_failed());
 				return;
 			}
 
 			const wasEditing = repository !== null;
 			onSaved();
 			onClose();
-			toast.success(wasEditing ? 'Repository updated' : 'Repository added');
+			toast.success(wasEditing ? m.settings_git_repo_updated() : m.settings_git_repo_added());
 		} catch (error) {
-			formError = 'Failed to save repository';
-			toast.error('Failed to save repository');
+			formError = m.settings_git_repo_save_failed();
+			toast.error(m.settings_git_repo_save_failed());
 		} finally {
 			formSaving = false;
 		}
@@ -199,36 +201,36 @@
 		<Dialog.Header>
 			<Dialog.Title class="flex items-center gap-2">
 				<GitBranch class="w-5 h-5" />
-				{isEditing ? 'Edit' : 'Add'} Git repository
+				{isEditing ? m.settings_git_repo_modal_title_edit() : m.settings_git_repo_modal_title_add()}
 			</Dialog.Title>
 			<Dialog.Description>
-				{isEditing ? 'Update repository settings' : 'Add a Git repository that can be used to deploy stacks'}
+				{isEditing ? m.settings_git_repo_modal_description_edit() : m.settings_git_repo_modal_description_add()}
 			</Dialog.Description>
 		</Dialog.Header>
 
 		<form onsubmit={(e) => { e.preventDefault(); saveRepository(); }} class="space-y-4">
 			<div class="space-y-2">
-				<Label for="repo-name">Name</Label>
+				<Label for="repo-name">{m.settings_git_name()}</Label>
 				<Input
 					id="repo-name"
 					bind:value={formName}
-					placeholder="e.g., my-app-repo"
+					placeholder={m.settings_git_repo_name_placeholder()}
 					class={formErrors.name ? 'border-destructive focus-visible:ring-destructive' : ''}
 					oninput={() => formErrors.name = undefined}
 				/>
 				{#if formErrors.name}
 					<p class="text-xs text-destructive">{formErrors.name}</p>
 				{:else if !isEditing}
-					<p class="text-xs text-muted-foreground">A friendly name to identify this repository</p>
+					<p class="text-xs text-muted-foreground">{m.settings_git_repo_name_hint()}</p>
 				{/if}
 			</div>
 
 			<div class="space-y-2">
-				<Label for="repo-url">Repository URL</Label>
+				<Label for="repo-url">{m.stacks_git_repo_url()}</Label>
 				<Input
 					id="repo-url"
 					bind:value={formUrl}
-					placeholder="https://github.com/user/repo.git or git@github.com:user/repo.git"
+					placeholder={m.settings_git_repo_url_placeholder()}
 					class={formErrors.url ? 'border-destructive focus-visible:ring-destructive' : ''}
 					oninput={() => { formErrors.url = undefined; testResult = null; }}
 				/>
@@ -238,12 +240,12 @@
 			</div>
 
 			<div class="space-y-2">
-				<Label for="repo-branch">Branch</Label>
+				<Label for="repo-branch">{m.stacks_git_branch()}</Label>
 				<Input id="repo-branch" bind:value={formBranch} placeholder="main" oninput={() => testResult = null} />
 			</div>
 
 			<div class="space-y-2">
-				<Label for="repo-credential">Credential (optional)</Label>
+				<Label for="repo-credential">{m.settings_git_credential_optional()}</Label>
 				<Select.Root
 					type="single"
 					value={formCredentialId?.toString() ?? 'none'}
@@ -260,7 +262,7 @@
 						{:else}
 							<span class="flex items-center gap-2">
 								<Globe class="w-4 h-4 text-muted-foreground" />
-								None (public repository)
+								{m.settings_git_credential_none()}
 							</span>
 						{/if}
 					</Select.Trigger>
@@ -268,7 +270,7 @@
 						<Select.Item value="none">
 							<span class="flex items-center gap-2">
 								<Globe class="w-4 h-4 text-muted-foreground" />
-								None (public repository)
+								{m.settings_git_credential_none()}
 							</span>
 						</Select.Item>
 						{#each credentials as cred}
@@ -288,8 +290,9 @@
 					</Select.Content>
 				</Select.Root>
 				{#if credentials.length === 0 && !isEditing}
+					{@const [addCredentialsBefore, addCredentialsAfter] = splitAtName(m.settings_git_add_credentials_hint)}
 					<p class="text-xs text-muted-foreground">
-						<a href="/settings?tab=git&subtab=credentials" class="text-primary hover:underline">Add credentials</a> for private repositories
+						{addCredentialsBefore}<a href="/settings?tab=git&subtab=credentials" class="text-primary hover:underline">{m.settings_git_add_credentials_link()}</a>{addCredentialsAfter}
 					</p>
 				{/if}
 			</div>
@@ -299,7 +302,7 @@
 			{/if}
 
 			<Dialog.Footer>
-				<Button variant="outline" type="button" onclick={onClose}>Cancel</Button>
+				<Button variant="outline" type="button" onclick={onClose}>{m.settings_git_cancel()}</Button>
 				<Button
 					type="button"
 					variant="outline"
@@ -314,14 +317,14 @@
 					{:else}
 						<Play class="w-4 h-4 mr-1.5" />
 					{/if}
-					Test
+					{m.settings_git_test()}
 				</Button>
 				<Button type="submit" disabled={formSaving}>
 					{#if formSaving}
 						<Loader2 class="w-4 h-4 mr-1 animate-spin" />
-						Saving...
+						{m.settings_git_saving()}
 					{:else}
-						{isEditing ? 'Save changes' : 'Add repository'}
+						{isEditing ? m.settings_git_save_changes() : m.settings_git_add_repository()}
 					{/if}
 				</Button>
 			</Dialog.Footer>

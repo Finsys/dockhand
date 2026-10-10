@@ -1,5 +1,5 @@
 <svelte:head>
-	<title>Settings - Dockhand</title>
+	<title>{m.nav_settings()} - Dockhand</title>
 </svelte:head>
 
 <script lang="ts">
@@ -21,6 +21,7 @@
 		Archive
 	} from 'lucide-svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
+	import { m } from '$lib/paraglide/messages.js';
 
 	// Import tab components
 	import GeneralTab from './general/GeneralTab.svelte';
@@ -48,26 +49,26 @@
 
 <div class="flex-1 min-h-0 flex flex-col gap-3 overflow-hidden">
 	<div class="shrink-0 flex flex-wrap justify-between items-center gap-3 min-h-8">
-		<PageHeader icon={Settings} title="Settings" showConnection={false} />
+		<PageHeader icon={Settings} title={m.nav_settings()} showConnection={false} />
 	</div>
 
 	<Tabs.Root value={activeTab} onValueChange={handleTabChange} class="w-full flex-1 min-h-0 flex flex-col">
 		<Tabs.List class="w-full flex flex-wrap h-auto gap-1 p-1">
 			<Tabs.Trigger value="general" class="flex-1 flex items-center justify-center gap-1.5">
 				<Settings class="w-4 h-4" />
-				General
+				{m.settings_page_tab_general()}
 			</Tabs.Trigger>
 			<Tabs.Trigger value="environments" class="flex-1 flex items-center justify-center gap-1.5">
 				<Globe class="w-4 h-4" />
-				Environments
+				{m.settings_page_tab_environments()}
 			</Tabs.Trigger>
 			<Tabs.Trigger value="labels" class="flex-1 flex items-center justify-center gap-1.5">
 				<Tags class="w-4 h-4" />
-				Labels and tags
+				{m.settings_page_tab_labels()}
 			</Tabs.Trigger>
 			<Tabs.Trigger value="registries" class="flex-1 flex items-center justify-center gap-1.5">
 				<Download class="w-4 h-4" />
-				Registries
+				{m.settings_page_tab_registries()}
 			</Tabs.Trigger>
 			<Tabs.Trigger value="git" class="flex-1 flex items-center justify-center gap-1.5">
 				<GitBranch class="w-4 h-4" />
@@ -75,34 +76,34 @@
 			</Tabs.Trigger>
 			<Tabs.Trigger value="secrets" class="flex-1 flex items-center justify-center gap-1.5">
 				<KeyRound class="w-4 h-4" />
-				Secrets
+				{m.settings_page_tab_secrets()}
 			</Tabs.Trigger>
 			<Tabs.Trigger value="config-sets" class="flex-1 flex items-center justify-center gap-1.5">
 				<Layers class="w-4 h-4" />
-				Config sets
+				{m.settings_page_tab_config_sets()}
 			</Tabs.Trigger>
 			<Tabs.Trigger value="notifications" class="flex-1 flex items-center justify-center gap-1.5">
 				<Bell class="w-4 h-4" />
-				Notifications
+				{m.settings_page_tab_notifications()}
 			</Tabs.Trigger>
 			<!-- BETA GATE: Backups tab hidden unless FEAT_BACKUPS_ENABLED (see features.ts) -->
 			{#if $page.data.backupsEnabled}
 				<Tabs.Trigger value="backups" class="flex-1 flex items-center justify-center gap-1.5">
 					<Archive class="w-4 h-4" />
-					Backups
+					{m.nav_backups()}
 				</Tabs.Trigger>
 			{/if}
 			<Tabs.Trigger value="auth" class="flex-1 flex items-center justify-center gap-1.5">
 				<Users class="w-4 h-4" />
-				Authentication
+				{m.settings_page_tab_auth()}
 			</Tabs.Trigger>
 			<Tabs.Trigger value="license" class="flex-1 flex items-center justify-center gap-1.5">
 				<Crown class="w-4 h-4" />
-				License
+				{m.settings_page_tab_license()}
 			</Tabs.Trigger>
 			<Tabs.Trigger value="about" class="flex-1 flex items-center justify-center gap-1.5">
 				<Info class="w-4 h-4" />
-				About
+				{m.settings_page_tab_about()}
 			</Tabs.Trigger>
 		</Tabs.List>
 
