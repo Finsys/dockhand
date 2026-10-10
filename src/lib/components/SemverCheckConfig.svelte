@@ -2,6 +2,8 @@
 	import { Label } from '$lib/components/ui/label';
 	import { TogglePill } from '$lib/components/ui/toggle-pill';
 	import { Tag, Info } from 'lucide-svelte';
+	import { m } from '$lib/paraglide/messages.js';
+	import { splitAtName } from '$lib/i18n/split';
 
 	type Bump = 'patch' | 'minor' | 'major';
 
@@ -35,16 +37,23 @@
 
 	const isFloating = $derived(!!floatingTag);
 	const bumps: Bump[] = ['patch', 'minor', 'major'];
+	const bumpLabels: Record<Bump, () => string> = {
+		patch: m.semver_bump_patch,
+		minor: m.semver_bump_minor,
+		major: m.semver_bump_major
+	};
+	const checkHint = splitAtName(m.semver_check_hint);
+	const exampleRunning = splitAtName(m.semver_example_running);
+	const prereleaseHint = splitAtName(m.semver_include_prereleases_hint);
 </script>
 
 <div class="space-y-4">
 	<div class="flex items-start gap-2" class:opacity-55={isFloating}>
 		<Tag class="w-4 h-4 text-green-500 glow-green mt-0.5 shrink-0" />
 		<div class="flex-1">
-			<Label>Check for newer version tags</Label>
+			<Label>{m.semver_check_newer_tags()}</Label>
 			<p class="text-xs text-muted-foreground mt-0.5">
-				For a container pinned to a version tag (e.g. <code>16.2</code>, <code>v3.0</code>), also detect
-				when a newer version is published. Advisory only.
+				{checkHint[0]}<code>16.2</code>, <code>v3.0</code>{checkHint[1]}
 			</p>
 		</div>
 		<TogglePill bind:checked={enabled} disabled={isFloating} />
@@ -53,7 +62,7 @@
 	{#if isFloating}
 		<div class="ml-6 flex items-start gap-2 rounded-md bg-muted/50 p-2 text-xs text-muted-foreground">
 			<Info class="w-3.5 h-3.5 mt-0.5 shrink-0" />
-			<span><code>{floatingTag}</code> is a floating tag — pin a version tag (e.g. <code>1.26</code>) to enable newer-version detection.</span>
+			<span><code>{floatingTag}</code> {m.semver_floating_hint_before()} <code>1.26</code>{m.semver_floating_hint_after()}</span>
 		</div>
 	{:else if enabled}
 		<!-- Indented under the header so it reads as "all this belongs to the toggle
@@ -62,7 +71,7 @@
 			<!-- max bump -->
 			<div class="space-y-2">
 				<div class="flex items-center gap-4">
-					<Label class="flex-1">Which updates to show</Label>
+					<Label class="flex-1">{m.semver_which_updates()}</Label>
 					<div class="inline-flex shrink-0 gap-0.5 rounded-lg border border-border bg-muted/60 p-0.5">
 						{#each bumps as bump}
 							<button
@@ -73,16 +82,16 @@
 										? 'bg-green-500/15 text-green-500 shadow-[inset_0_0_0_1px_rgba(34,197,94,0.3)]'
 										: 'text-muted-foreground hover:text-foreground'}"
 							>
-								{bump}
+								{bumpLabels[bump]()}
 							</button>
 						{/each}
 					</div>
 				</div>
 				<div class="rounded-md border border-border bg-muted/40 p-2.5 text-[11.5px] leading-relaxed text-muted-foreground">
-					Running <code>1.4.2</code>, you'll be told about:<br />
-					<span class="font-bold text-foreground">Patch</span> bug-fix only → <code>1.4.3</code><br />
-					<span class="font-bold text-foreground">Minor</span> new features too → <code>1.4.3</code>, <code>1.5.0</code><br />
-					<span class="font-bold text-foreground">Major</span> everything, incl. breaking → <code>1.4.3</code>, <code>1.5.0</code>, <code>2.0.0</code>
+					{exampleRunning[0]}<code>1.4.2</code>{exampleRunning[1]}<br />
+					<span class="font-bold text-foreground">{m.semver_bump_patch()}</span> {m.semver_example_patch()} → <code>1.4.3</code><br />
+					<span class="font-bold text-foreground">{m.semver_bump_minor()}</span> {m.semver_example_minor()} → <code>1.4.3</code>, <code>1.5.0</code><br />
+					<span class="font-bold text-foreground">{m.semver_bump_major()}</span> {m.semver_example_major()} → <code>1.4.3</code>, <code>1.5.0</code>, <code>2.0.0</code>
 				</div>
 			</div>
 
@@ -90,27 +99,26 @@
 			<div class="space-y-2 border-t border-border/60 pt-3">
 				<div class="flex items-start gap-4">
 					<div class="flex-1">
-						<Label>Match the tag flavor</Label>
+						<Label>{m.semver_match_flavor()}</Label>
 						<p class="text-xs text-muted-foreground mt-0.5">
-							Only suggest tags with the same suffix as the one you run — the flavor, like
-							<code>-alpine</code> or <code>-ls123</code>.
+							{m.semver_match_flavor_hint_before()}
+							<code>-alpine</code> {m.imagepull_format_hint_or()} <code>-ls123</code>{m.semver_match_flavor_hint_after()}
 						</p>
 					</div>
 					<div class="shrink-0"><TogglePill bind:checked={matchFlavor} /></div>
 				</div>
 				<div class="rounded-md border border-border bg-muted/40 p-2.5 text-[11.5px] leading-relaxed text-muted-foreground">
-					<span class="font-bold text-foreground">On</span> <code>1.2-alpine</code> → <code>1.5-alpine</code>, never bare <code>1.5</code><br />
-					<span class="font-bold text-foreground">Off</span> any newer version, even a different flavor — noisier
+					<span class="font-bold text-foreground">{m.semver_on()}</span> <code>1.2-alpine</code> → <code>1.5-alpine</code>, {m.semver_flavor_on_never_bare()} <code>1.5</code><br />
+					<span class="font-bold text-foreground">{m.semver_off()}</span> {m.semver_flavor_off_example()}
 				</div>
 			</div>
 
 			<!-- include prereleases -->
 			<div class="flex items-start gap-4 border-t border-border/60 pt-3">
 				<div class="flex-1">
-					<Label>Include prereleases</Label>
+					<Label>{m.semver_include_prereleases()}</Label>
 					<p class="text-xs text-muted-foreground mt-0.5">
-						Consider <code>-rc</code> / <code>-beta</code> tags. Off keeps a stable deployment on
-						stable releases.
+						{prereleaseHint[0]}<code>-rc</code> / <code>-beta</code>{prereleaseHint[1]}
 					</p>
 				</div>
 				<div class="shrink-0"><TogglePill bind:checked={includePrerelease} /></div>
@@ -120,20 +128,18 @@
 			<div class="space-y-2 border-t border-border/60 pt-3">
 				<div class="flex items-start gap-4">
 					<div class="flex-1">
-						<Label>Ignore tags older than what you run</Label>
+						<Label>{m.semver_ignore_older()}</Label>
 						<p class="text-xs text-muted-foreground mt-0.5">
-							Check when a candidate image was built and skip it if it predates the one you
-							are running. Adds a registry lookup for each suggested tag.
+							{m.semver_ignore_older_hint()}
 						</p>
 					</div>
 					<div class="shrink-0"><TogglePill bind:checked={rejectOlderImages} /></div>
 				</div>
 				<div class="rounded-md border border-border bg-muted/40 p-2.5 text-[11.5px] leading-relaxed text-muted-foreground">
-					A tag is a name, not a date. Some repositories still carry old tags that sort
-					high: <code>lidarr:8.1.2135</code> is really <code>0.8.1.2135</code> from 2021, above a
-					current <code>3.1.0</code>.<br />
-					<span class="font-bold text-foreground">On</span> such a tag is skipped and the next real version is offered<br />
-					<span class="font-bold text-foreground">Off</span> names alone decide, as before
+					{m.semver_old_tags_before()} <code>lidarr:8.1.2135</code> {m.semver_old_tags_is_really()} <code>0.8.1.2135</code> {m.semver_old_tags_from()}
+					<code>3.1.0</code>{m.semver_old_tags_after()}<br />
+					<span class="font-bold text-foreground">{m.semver_on()}</span> {m.semver_old_tags_on()}<br />
+					<span class="font-bold text-foreground">{m.semver_off()}</span> {m.semver_old_tags_off()}
 				</div>
 			</div>
 		</div>
@@ -142,7 +148,7 @@
 	{#if enabled && !isFloating}
 		<div class="ml-6 flex items-start gap-2 rounded-md bg-muted/50 p-2 text-xs text-muted-foreground">
 			<Info class="w-3.5 h-3.5 mt-0.5 shrink-0" />
-			<span>A newer version shows as a badge on the container — it is <strong class="text-foreground font-semibold">never auto-applied</strong>.</span>
+			<span>{m.semver_badge_note_before()} <strong class="text-foreground font-semibold">{m.semver_badge_note_strong()}</strong>{m.semver_badge_note_after()}</span>
 		</div>
 	{/if}
 </div>

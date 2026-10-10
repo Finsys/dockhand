@@ -48,6 +48,7 @@
 	import { themeStore } from '$lib/stores/theme';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import { startRegistration } from '@simplewebauthn/browser';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Profile {
 		id: number;
@@ -132,7 +133,7 @@
 	async function addPasskey() {
 		const name = passkeyName.trim();
 		if (!name) {
-			passkeyError = 'Enter a passkey name';
+			passkeyError = m.profile_passkey_error_name_required();
 			return;
 		}
 		passkeyActionLoading = true;
@@ -144,7 +145,7 @@
 				body: JSON.stringify({ name })
 			});
 			const optionsData = await optionsResponse.json();
-			if (!optionsResponse.ok) throw new Error(optionsData.error || 'Passkey registration is unavailable');
+			if (!optionsResponse.ok) throw new Error(optionsData.error || m.profile_passkey_error_unavailable());
 
 			const registrationResponse = await startRegistration({ optionsJSON: optionsData.options });
 			const verifyResponse = await fetch('/api/auth/passkeys/register/verify', {
@@ -156,29 +157,29 @@
 				})
 			});
 			const verifyData = await verifyResponse.json();
-			if (!verifyResponse.ok) throw new Error(verifyData.error || 'Passkey registration failed');
+			if (!verifyResponse.ok) throw new Error(verifyData.error || m.profile_passkey_error_failed());
 			passkeyName = '';
 			await fetchPasskeys();
-			showSuccessMessage('Passkey added successfully');
+			showSuccessMessage(m.profile_passkey_added_success());
 		} catch (e) {
 			passkeyError = e instanceof Error && e.name !== 'NotAllowedError'
 				? e.message
-				: 'Passkey registration was cancelled or timed out';
+				: m.profile_passkey_error_cancelled();
 		} finally {
 			passkeyActionLoading = false;
 		}
 	}
 
 	async function deletePasskey(passkey: Passkey) {
-		if (!window.confirm(`Delete passkey "${passkey.name || 'Passkey'}"?`)) return;
+		if (!window.confirm(m.profile_passkey_delete_confirm({ name: passkey.name || m.profile_passkey_default_name() }))) return;
 		passkeyError = '';
 		const response = await fetch(`/api/profile/passkeys/${passkey.id}`, { method: 'DELETE' });
 		if (response.ok) {
 			await fetchPasskeys();
-			showSuccessMessage('Passkey removed');
+			showSuccessMessage(m.profile_passkey_removed());
 		} else {
 			const data = await response.json();
-			passkeyError = data.error || 'Failed to remove passkey';
+			passkeyError = data.error || m.profile_passkey_error_remove_failed();
 		}
 	}
 
@@ -223,7 +224,7 @@
 		const file = input.files?.[0];
 		if (file) {
 			if (!file.type.startsWith('image/')) {
-				formError = 'Please select an image file';
+				formError = m.profile_avatar_error_not_image();
 				return;
 			}
 			const reader = new FileReader();
@@ -261,10 +262,10 @@
 				goto('/login');
 			} else {
 				const data = await response.json();
-				error = data.error || 'Failed to load profile';
+				error = data.error || m.profile_error_load_failed();
 			}
 		} catch (e) {
-			error = 'Failed to load profile';
+			error = m.profile_error_load_failed();
 		} finally {
 			loading = false;
 		}
@@ -287,16 +288,16 @@
 
 			if (response.ok) {
 				profile = await response.json();
-				formSuccess = 'Profile updated successfully';
+				formSuccess = m.profile_updated_success();
 				// Refresh auth store to update sidebar
 				await authStore.check();
 				setTimeout(() => formSuccess = '', 3000);
 			} else {
 				const data = await response.json();
-				formError = data.error || 'Failed to update profile';
+				formError = data.error || m.profile_error_update_failed();
 			}
 		} catch (e) {
-			formError = 'Failed to update profile';
+			formError = m.profile_error_update_failed();
 		} finally {
 			formSaving = false;
 		}
@@ -329,10 +330,10 @@
 				showMfaSetupModal = true;
 			} else {
 				const data = await response.json();
-				mfaError = data.error || 'Failed to setup MFA';
+				mfaError = data.error || m.profile_mfa_error_setup_failed();
 			}
 		} catch (e) {
-			mfaError = 'Failed to setup MFA';
+			mfaError = m.profile_mfa_error_setup_failed();
 		} finally {
 			mfaLoading = false;
 		}
@@ -340,16 +341,16 @@
 
 	async function handleMfaEnabled() {
 		await fetchProfile();
-		showSuccessMessage('MFA enabled successfully');
+		showSuccessMessage(m.profile_mfa_enabled_success());
 	}
 
 	async function handleMfaDisabled() {
 		await fetchProfile();
-		showSuccessMessage('MFA disabled successfully');
+		showSuccessMessage(m.profile_mfa_disabled_success());
 	}
 
 	function formatProfileDate(dateStr: string | null): string {
-		if (!dateStr) return 'Never';
+		if (!dateStr) return m.profile_never();
 		return formatDateTime(dateStr, true);
 	}
 
@@ -369,7 +370,7 @@
 				if (profile) {
 					profile.avatar = data.avatar;
 				}
-				formSuccess = 'Avatar updated successfully';
+				formSuccess = m.profile_avatar_updated_success();
 				await authStore.check();
 				setTimeout(() => formSuccess = '', 3000);
 				// Close cropper
@@ -380,10 +381,10 @@
 				}
 			} else {
 				const data = await response.json();
-				formError = data.error || 'Failed to upload avatar';
+				formError = data.error || m.profile_avatar_error_upload_failed();
 			}
 		} catch (e) {
-			formError = 'Failed to upload avatar';
+			formError = m.profile_avatar_error_upload_failed();
 		} finally {
 			avatarSaving = false;
 		}
@@ -402,15 +403,15 @@
 				if (profile) {
 					profile.avatar = null;
 				}
-				formSuccess = 'Avatar removed successfully';
+				formSuccess = m.profile_avatar_removed_success();
 				await authStore.check();
 				setTimeout(() => formSuccess = '', 3000);
 			} else {
 				const data = await response.json();
-				formError = data.error || 'Failed to remove avatar';
+				formError = data.error || m.profile_avatar_error_remove_failed();
 			}
 		} catch (e) {
-			formError = 'Failed to remove avatar';
+			formError = m.profile_avatar_error_remove_failed();
 		} finally {
 			avatarSaving = false;
 		}
@@ -438,13 +439,13 @@
 </script>
 
 <svelte:head>
-	<title>Profile - Dockhand</title>
+	<title>{m.profile_page_title()}</title>
 </svelte:head>
 
 <div class="container mx-auto p-6">
 	<div class="flex items-center gap-3 mb-6">
-		<PageHeader icon={User} title="Profile" showConnection={false}>
-			<p class="text-muted-foreground text-sm">Manage your account settings</p>
+		<PageHeader icon={User} title={m.profile_title()} showConnection={false}>
+			<p class="text-muted-foreground text-sm">{m.profile_subtitle()}</p>
 		</PageHeader>
 	</div>
 
@@ -479,7 +480,7 @@
 				<Card.Header>
 					<Card.Title class="flex items-center gap-2">
 						<User class="w-5 h-5" />
-						Account information
+						{m.profile_account_title()}
 					</Card.Title>
 				</Card.Header>
 				<Card.Content class="space-y-4">
@@ -523,7 +524,7 @@
 										onclick={removeAvatar}
 										disabled={avatarSaving}
 										class="absolute -bottom-1 -right-1 p-1 rounded-full bg-background border border-border text-muted-foreground hover:text-destructive hover:border-destructive transition-colors"
-										title="Remove photo"
+										title={m.profile_avatar_remove()}
 									>
 										<Trash2 class="w-3.5 h-3.5" />
 									</button>
@@ -535,19 +536,19 @@
 						<div class="flex-1 space-y-4">
 							<div class="grid grid-cols-2 gap-4">
 								<div>
-									<Label class="text-muted-foreground text-xs">Username</Label>
+									<Label class="text-muted-foreground text-xs">{m.login_username_label()}</Label>
 									<p class="font-medium">{profile.username}</p>
 								</div>
 								<div>
-									<Label class="text-muted-foreground text-xs">Role</Label>
+									<Label class="text-muted-foreground text-xs">{m.profile_role_label()}</Label>
 									<div class="flex items-center gap-2">
 										{#if profile.isAdmin}
 											<Badge variant="default" class="gap-1 rounded-sm">
 												<Crown class="w-3 h-3" />
-												Admin
+												{m.sidebar_role_admin()}
 											</Badge>
 										{:else}
-											<Badge variant="secondary" class="rounded-sm">User</Badge>
+											<Badge variant="secondary" class="rounded-sm">{m.sidebar_role_user()}</Badge>
 										{/if}
 									</div>
 								</div>
@@ -555,14 +556,14 @@
 
 							<div class="grid grid-cols-2 gap-4">
 								<div>
-									<Label class="text-muted-foreground text-xs">Created</Label>
+									<Label class="text-muted-foreground text-xs">{m.profile_created_label()}</Label>
 									<p class="text-sm flex items-center gap-1">
 										<Calendar class="w-3.5 h-3.5" />
 										{formatProfileDate(profile.createdAt)}
 									</p>
 								</div>
 								<div>
-									<Label class="text-muted-foreground text-xs">Last login</Label>
+									<Label class="text-muted-foreground text-xs">{m.profile_last_login_label()}</Label>
 									<p class="text-sm flex items-center gap-1">
 										<Clock class="w-3.5 h-3.5" />
 										{formatProfileDate(profile.lastLogin)}
@@ -579,7 +580,7 @@
 				<Card.Header>
 					<Card.Title class="flex items-center gap-2">
 						<Mail class="w-5 h-5" />
-						Profile details
+						{m.profile_details_title()}
 					</Card.Title>
 				</Card.Header>
 				<Card.Content class="flex-1 flex flex-col space-y-4">
@@ -592,18 +593,18 @@
 
 					<div class="space-y-4 flex-1">
 						<div class="space-y-2">
-							<Label>Display name</Label>
+							<Label>{m.profile_display_name_label()}</Label>
 							<Input
 								bind:value={formDisplayName}
-								placeholder="Enter display name"
+								placeholder={m.profile_display_name_placeholder()}
 							/>
 						</div>
 						<div class="space-y-2">
-							<Label>Email</Label>
+							<Label>{m.profile_email_label()}</Label>
 							<Input
 								type="email"
 								bind:value={formEmail}
-								placeholder="Enter email"
+								placeholder={m.profile_email_placeholder()}
 							/>
 						</div>
 					</div>
@@ -615,7 +616,7 @@
 							{:else}
 								<Check class="w-4 h-4" />
 							{/if}
-							Save changes
+							{m.profile_save_changes()}
 						</Button>
 					</div>
 				</Card.Content>
@@ -631,7 +632,7 @@
 				<Card.Header>
 					<Card.Title class="flex items-center gap-2">
 						<Shield class="w-5 h-5" />
-						Security
+						{m.profile_security_title()}
 					</Card.Title>
 				</Card.Header>
 				<Card.Content class="space-y-4">
@@ -641,12 +642,12 @@
 							<div class="flex items-center gap-3">
 								<Key class="w-5 h-5 text-muted-foreground" />
 								<div>
-									<p class="font-medium">Password</p>
-									<p class="text-sm text-muted-foreground">Change your password</p>
+									<p class="font-medium">{m.login_password_label()}</p>
+									<p class="text-sm text-muted-foreground">{m.profile_password_change_hint()}</p>
 								</div>
 							</div>
 							<Button variant="outline" onclick={() => showPasswordModal = true}>
-								Change password
+								{m.profile_password_change()}
 							</Button>
 						</div>
 					{:else}
@@ -654,8 +655,8 @@
 							<div class="flex items-center gap-3">
 								<Key class="w-5 h-5 text-muted-foreground" />
 								<div>
-									<p class="font-medium">Password</p>
-									<p class="text-sm text-muted-foreground">Managed by your SSO provider</p>
+									<p class="font-medium">{m.login_password_label()}</p>
+									<p class="text-sm text-muted-foreground">{m.profile_managed_by_sso()}</p>
 								</div>
 							</div>
 							<Badge class="gap-1 rounded-sm bg-yellow-500/20 text-yellow-600 border-yellow-500/30 hover:bg-yellow-500/30">
@@ -672,28 +673,28 @@
 								<Smartphone class="w-5 h-5 text-muted-foreground" />
 								<div>
 									<div class="flex items-center gap-2">
-										<p class="font-medium">Two-factor authentication</p>
+										<p class="font-medium">{m.profile_mfa_title()}</p>
 										{#if profile.mfaEnabled}
 											<Badge variant="default" class="bg-green-500 gap-1 rounded-sm">
 												<ShieldCheck class="w-3 h-3" />
-												Enabled
+												{m.profile_mfa_badge_enabled()}
 											</Badge>
 										{:else}
-											<Badge variant="secondary" class="rounded-sm">Disabled</Badge>
+											<Badge variant="secondary" class="rounded-sm">{m.profile_mfa_badge_disabled()}</Badge>
 										{/if}
 									</div>
 									<p class="text-sm text-muted-foreground">
 										{#if profile.mfaEnabled}
-											MFA is enabled for your account
+											{m.profile_mfa_enabled_hint()}
 										{:else}
-											Add an extra layer of security
+											{m.profile_mfa_disabled_hint()}
 										{/if}
 									</p>
 								</div>
 							</div>
 							{#if profile.mfaEnabled}
 								<Button variant="outline" onclick={() => showDisableMfaModal = true}>
-									Disable MFA
+									{m.profile_mfa_disable()}
 								</Button>
 							{:else}
 								<Button onclick={setupMfa} disabled={mfaLoading}>
@@ -702,7 +703,7 @@
 									{:else}
 										<QrCode class="w-4 h-4" />
 									{/if}
-									Setup MFA
+									{m.profile_mfa_setup()}
 								</Button>
 							{/if}
 						</div>
@@ -711,8 +712,8 @@
 							<div class="flex items-center gap-3">
 								<Smartphone class="w-5 h-5 text-muted-foreground" />
 								<div>
-									<p class="font-medium">Two-factor authentication</p>
-									<p class="text-sm text-muted-foreground">Managed by your SSO provider</p>
+									<p class="font-medium">{m.profile_mfa_title()}</p>
+									<p class="text-sm text-muted-foreground">{m.profile_managed_by_sso()}</p>
 								</div>
 							</div>
 							<Badge class="gap-1 rounded-sm bg-yellow-500/20 text-yellow-600 border-yellow-500/30 hover:bg-yellow-500/30">
@@ -733,46 +734,45 @@
 						<div class="flex items-center gap-3">
 							<KeyRound class="w-5 h-5 text-muted-foreground" />
 							<div>
-								<p class="font-medium">Passkeys</p>
-								<p class="text-sm text-muted-foreground">Use a device-bound or synced passkey to sign in</p>
+								<p class="font-medium">{m.profile_passkeys_title()}</p>
+								<p class="text-sm text-muted-foreground">{m.profile_passkeys_description()}</p>
 							</div>
 						</div>
 
 						{#if !passkeysEnabled}
 							<p class="rounded-md bg-muted/50 p-2 text-xs text-muted-foreground">
-								Passkey sign-in is switched off for this instance. Any passkeys below are
-								kept and work again if an administrator turns it back on.
+								{m.profile_passkeys_disabled_notice()}
 							</p>
 						{:else}
 						<div class="space-y-2">
-							<Label for="passkey-name">Passkey name</Label>
+							<Label for="passkey-name">{m.profile_passkey_name_label()}</Label>
 							<div class="flex flex-col sm:flex-row gap-2">
-							<Input id="passkey-name" bind:value={passkeyName} maxlength={64} placeholder="e.g. Token2 security key" />
+							<Input id="passkey-name" bind:value={passkeyName} maxlength={64} placeholder={m.profile_passkey_name_placeholder()} />
 							<Button onclick={addPasskey} disabled={passkeyActionLoading || !passkeyName.trim()} class="shrink-0">
 								{#if passkeyActionLoading}
 									<RefreshCw class="w-4 h-4 mr-1 animate-spin" />
 								{:else}
 									<Plus class="w-4 h-4 mr-1" />
 								{/if}
-								Add passkey
+								{m.profile_passkey_add()}
 							</Button>
 							</div>
 						</div>
 						{/if}
 
 						{#if passkeysLoading}
-							<p class="text-sm text-muted-foreground">Loading passkeys...</p>
+							<p class="text-sm text-muted-foreground">{m.profile_passkeys_loading()}</p>
 						{:else if passkeys.length === 0}
-							<p class="text-sm text-muted-foreground">No passkeys registered.</p>
+							<p class="text-sm text-muted-foreground">{m.profile_passkeys_empty()}</p>
 						{:else}
 							<div class="divide-y rounded-md border">
 								{#each passkeys as passkey (passkey.id)}
 									<div class="flex items-center justify-between gap-3 p-3">
 										<div class="min-w-0">
-											<p class="font-medium truncate">{passkey.name || 'Passkey'}</p>
+											<p class="font-medium truncate">{passkey.name || m.profile_passkey_default_name()}</p>
 											<p class="text-xs text-muted-foreground mt-1">
-											{passkey.deviceType === 'multiDevice' ? 'Synced passkey' : 'Device-bound passkey'}
-											{passkey.backedUp ? ' · backed up' : ''} · added {formatDateTime(passkey.createdAt)}
+											{passkey.deviceType === 'multiDevice' ? m.profile_passkey_synced() : m.profile_passkey_device_bound()}
+											{passkey.backedUp ? ` · ${m.profile_passkey_backed_up()}` : ''} · {m.profile_passkey_added_on({ date: formatDateTime(passkey.createdAt) })}
 											</p>
 										</div>
 										<Button
@@ -780,11 +780,11 @@
 											size="sm"
 											class="shrink-0 border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
 											onclick={() => deletePasskey(passkey)}
-											aria-label={`Delete passkey ${passkey.name || 'Passkey'}`}
-											title={`Delete passkey ${passkey.name || 'Passkey'}`}
+											aria-label={m.profile_passkey_delete_label({ name: passkey.name || m.profile_passkey_default_name() })}
+											title={m.profile_passkey_delete_label({ name: passkey.name || m.profile_passkey_default_name() })}
 										>
 											<Trash2 class="w-4 h-4 mr-1" />
-											Delete
+											{m.profile_passkey_delete()}
 										</Button>
 									</div>
 								{/each}
@@ -807,28 +807,28 @@
 					<Card.Title class="flex items-center gap-2 justify-between">
 						<span class="flex items-center gap-2">
 							<KeyRound class="w-5 h-5" />
-							API tokens
+							{m.profile_tokens_title()}
 						</span>
 						<Button variant="outline" size="sm" onclick={() => showApiTokenModal = true}>
 							<Plus class="w-4 h-4 mr-1" />
-							Generate token
+							{m.profile_token_generate()}
 						</Button>
 					</Card.Title>
-					<Card.Description>Create tokens for CI/CD pipelines and scripts</Card.Description>
+					<Card.Description>{m.profile_tokens_description()}</Card.Description>
 				</Card.Header>
 				<Card.Content>
 					{#if tokensLoading}
-						<p class="text-sm text-muted-foreground">Loading tokens...</p>
+						<p class="text-sm text-muted-foreground">{m.profile_tokens_loading()}</p>
 					{:else if apiTokens.length === 0}
-						<p class="text-sm text-muted-foreground">No API tokens created yet.</p>
+						<p class="text-sm text-muted-foreground">{m.profile_tokens_empty()}</p>
 					{:else}
 						<Table.Root>
 							<Table.Header>
 								<Table.Row>
-									<Table.Head>Name</Table.Head>
-									<Table.Head>Prefix</Table.Head>
-									<Table.Head>Last used</Table.Head>
-									<Table.Head>Expires</Table.Head>
+									<Table.Head>{m.profile_tokens_col_name()}</Table.Head>
+									<Table.Head>{m.profile_tokens_col_prefix()}</Table.Head>
+									<Table.Head>{m.profile_tokens_col_last_used()}</Table.Head>
+									<Table.Head>{m.profile_tokens_col_expires()}</Table.Head>
 									<Table.Head class="w-[80px]"></Table.Head>
 								</Table.Row>
 							</Table.Header>
@@ -840,22 +840,25 @@
 											<code class="text-xs bg-muted px-1.5 py-0.5 rounded">dh_{token.tokenPrefix}...</code>
 										</Table.Cell>
 										<Table.Cell class="text-sm text-muted-foreground">
-											{token.lastUsed ? formatDateTime(token.lastUsed) : 'Never'}
+											{token.lastUsed ? formatDateTime(token.lastUsed) : m.profile_never()}
 										</Table.Cell>
 										<Table.Cell class="text-sm">
 											{#if isTokenExpired(token.expiresAt)}
-												<Badge variant="destructive">Expired</Badge>
+												<Badge variant="destructive">{m.profile_tokens_expired()}</Badge>
 											{:else if token.expiresAt}
 												{formatDateTime(token.expiresAt)}
 											{:else}
-												<span class="text-muted-foreground">Never</span>
+												<span class="text-muted-foreground">{m.profile_never()}</span>
 											{/if}
 										</Table.Cell>
 										<Table.Cell>
 											<ConfirmPopover
-												title="Revoke token"
-												description="This token will stop working immediately."
-												confirmText="Revoke"
+												localized
+												action={m.profile_confirm_action_revoke()}
+												itemType={m.profile_item_token()}
+												itemName={token.name}
+												title={m.profile_token_revoke_title()}
+												confirmText={m.profile_token_revoke()}
 												onConfirm={() => revokeToken(token.id)}
 											>
 												<Button variant="ghost" size="sm" class="text-destructive hover:text-destructive">
@@ -881,9 +884,9 @@
 				<Card.Header>
 					<Card.Title class="flex items-center gap-2">
 						<Palette class="w-5 h-5" />
-						Appearance
+						{m.profile_appearance_title()}
 					</Card.Title>
-					<Card.Description>Customize the look of the application</Card.Description>
+					<Card.Description>{m.profile_appearance_description()}</Card.Description>
 				</Card.Header>
 				<Card.Content class="space-y-4">
 					<ThemeSelector userId={profile.id} />
@@ -899,9 +902,9 @@
 				<Card.Header>
 					<Card.Title class="flex items-center gap-2">
 						<Compass class="w-5 h-5" />
-						Navigation
+						{m.profile_navigation_title()}
 					</Card.Title>
-					<Card.Description>Your landing page and environment-click target. Leave on "Use global default" to follow the workspace setting.</Card.Description>
+					<Card.Description>{m.profile_navigation_description()}</Card.Description>
 				</Card.Header>
 				<Card.Content>
 					<NavigationSelector scope="user" />
@@ -915,9 +918,9 @@
 				<Card.Header>
 					<Card.Title class="flex items-center gap-2">
 						<Palette class="w-5 h-5" />
-						Editor theme
+						{m.profile_editor_theme_title()}
 					</Card.Title>
-					<Card.Description>Color theme for the code editor, with a live preview.</Card.Description>
+					<Card.Description>{m.profile_editor_theme_description()}</Card.Description>
 				</Card.Header>
 				<Card.Content>
 					<EditorThemeSelector userId={profile.id} />

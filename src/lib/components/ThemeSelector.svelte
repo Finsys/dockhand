@@ -6,26 +6,32 @@
 	import { lightThemes, darkThemes, fonts, monospaceFonts } from '$lib/themes';
 	import { themeStore, applyTheme, type FontSize, type ActionIconSize } from '$lib/stores/theme';
 	import { authStore } from '$lib/stores/auth';
+	import { m } from '$lib/paraglide/messages.js';
 
 	// Preload all monospace Google Fonts so dropdown previews render correctly
 	let monoFontsLoaded = $state(false);
 
 	// Font size options
-	const fontSizes: { id: FontSize; name: string }[] = [
-		{ id: 'xsmall', name: 'Extra Small' },
-		{ id: 'small', name: 'Small' },
-		{ id: 'normal', name: 'Normal' },
-		{ id: 'medium', name: 'Medium' },
-		{ id: 'large', name: 'Large' },
-		{ id: 'xlarge', name: 'Extra Large' }
+	const fontSizes: { id: FontSize; name: () => string }[] = [
+		{ id: 'xsmall', name: m.themes_size_xsmall },
+		{ id: 'small', name: m.themes_size_small },
+		{ id: 'normal', name: m.themes_size_normal },
+		{ id: 'medium', name: m.themes_size_medium },
+		{ id: 'large', name: m.themes_size_large },
+		{ id: 'xlarge', name: m.themes_size_xlarge }
 	];
 
-	const actionIconSizes: { id: ActionIconSize; name: string }[] = [
-		{ id: 'small', name: 'Small' },
-		{ id: 'normal', name: 'Normal' },
-		{ id: 'large', name: 'Large' },
-		{ id: 'xlarge', name: 'Extra Large' }
+	const actionIconSizes: { id: ActionIconSize; name: () => string }[] = [
+		{ id: 'small', name: m.themes_size_small },
+		{ id: 'normal', name: m.themes_size_normal },
+		{ id: 'large', name: m.themes_size_large },
+		{ id: 'xlarge', name: m.themes_size_xlarge }
 	];
+
+	// Theme names are proper names; only the generic "Default" is translated
+	function themeName(theme: { id: string; name: string }): string {
+		return theme.id === 'default' ? m.themes_default() : theme.name;
+	}
 
 	interface Props {
 		userId?: number; // Pass userId for per-user settings, undefined for global
@@ -169,7 +175,7 @@
 	<div class="flex items-center justify-between">
 		<div class="flex items-center gap-2">
 			<Sun class="w-4 h-4 text-muted-foreground" />
-			<Label>Light theme</Label>
+			<Label>{m.cmdpalette_group_light_theme()}</Label>
 		</div>
 		<Select.Root type="single" value={selectedLightTheme} onValueChange={handleLightThemeChange}>
 			<Select.Trigger class="w-56">
@@ -180,7 +186,7 @@
 								class="w-3 h-3 rounded-full border border-border"
 								style="background-color: {theme.preview}"
 							></span>
-							<span>{theme.name}</span>
+							<span>{themeName(theme)}</span>
 						{/if}
 					{/each}
 				</div>
@@ -193,7 +199,7 @@
 								class="w-3 h-3 rounded-full border border-border"
 								style="background-color: {theme.preview}"
 							></span>
-							<span>{theme.name}</span>
+							<span>{themeName(theme)}</span>
 						</div>
 					</Select.Item>
 				{/each}
@@ -205,7 +211,7 @@
 	<div class="flex items-center justify-between">
 		<div class="flex items-center gap-2">
 			<Moon class="w-4 h-4 text-muted-foreground" />
-			<Label>Dark theme</Label>
+			<Label>{m.cmdpalette_group_dark_theme()}</Label>
 		</div>
 		<Select.Root type="single" value={selectedDarkTheme} onValueChange={handleDarkThemeChange}>
 			<Select.Trigger class="w-56">
@@ -216,7 +222,7 @@
 								class="w-3 h-3 rounded-full border border-border"
 								style="background-color: {theme.preview}"
 							></span>
-							<span>{theme.name}</span>
+							<span>{themeName(theme)}</span>
 						{/if}
 					{/each}
 				</div>
@@ -229,7 +235,7 @@
 								class="w-3 h-3 rounded-full border border-border"
 								style="background-color: {theme.preview}"
 							></span>
-							<span>{theme.name}</span>
+							<span>{themeName(theme)}</span>
 						</div>
 					</Select.Item>
 				{/each}
@@ -241,7 +247,7 @@
 	<div class="flex items-center justify-between">
 		<div class="flex items-center gap-2">
 			<Type class="w-4 h-4 text-muted-foreground" />
-			<Label>Font</Label>
+			<Label>{m.cmdpalette_group_font()}</Label>
 		</div>
 		<Select.Root type="single" value={selectedFont} onValueChange={handleFontChange}>
 			<Select.Trigger class="w-56">
@@ -265,20 +271,20 @@
 	<div class="flex items-center justify-between">
 		<div class="flex items-center gap-2">
 			<AArrowUp class="w-4 h-4 text-muted-foreground" />
-			<Label>Font size</Label>
+			<Label>{m.logviewer_font_size()}</Label>
 		</div>
 		<Select.Root type="single" value={selectedFontSize} onValueChange={handleFontSizeChange}>
 			<Select.Trigger class="w-56">
 				{#each fontSizes as size}
 					{#if size.id === selectedFontSize}
-						<span>{size.name}</span>
+						<span>{size.name()}</span>
 					{/if}
 				{/each}
 			</Select.Trigger>
 			<Select.Content>
 				{#each fontSizes as size}
 					<Select.Item value={size.id}>
-						<span>{size.name}</span>
+						<span>{size.name()}</span>
 					</Select.Item>
 				{/each}
 			</Select.Content>
@@ -289,20 +295,20 @@
 	<div class="flex items-center justify-between">
 		<div class="flex items-center gap-2">
 			<Table class="w-4 h-4 text-muted-foreground" />
-			<Label>Grid font size</Label>
+			<Label>{m.themes_grid_font_size()}</Label>
 		</div>
 		<Select.Root type="single" value={selectedGridFontSize} onValueChange={handleGridFontSizeChange}>
 			<Select.Trigger class="w-56">
 				{#each fontSizes as size}
 					{#if size.id === selectedGridFontSize}
-						<span>{size.name}</span>
+						<span>{size.name()}</span>
 					{/if}
 				{/each}
 			</Select.Trigger>
 			<Select.Content>
 				{#each fontSizes as size}
 					<Select.Item value={size.id}>
-						<span>{size.name}</span>
+						<span>{size.name()}</span>
 					</Select.Item>
 				{/each}
 			</Select.Content>
@@ -313,20 +319,20 @@
 	<div class="flex items-center justify-between">
 		<div class="flex items-center gap-2">
 			<MousePointerClick class="w-4 h-4 text-muted-foreground" />
-			<Label>Grid buttons</Label>
+			<Label>{m.themes_grid_buttons()}</Label>
 		</div>
 		<Select.Root type="single" value={selectedActionIconSize} onValueChange={handleActionIconSizeChange}>
 			<Select.Trigger class="w-56">
 				{#each actionIconSizes as size}
 					{#if size.id === selectedActionIconSize}
-						<span>{size.name}</span>
+						<span>{size.name()}</span>
 					{/if}
 				{/each}
 			</Select.Trigger>
 			<Select.Content>
 				{#each actionIconSizes as size}
 					<Select.Item value={size.id}>
-						<span>{size.name}</span>
+						<span>{size.name()}</span>
 					</Select.Item>
 				{/each}
 			</Select.Content>
@@ -337,7 +343,7 @@
 	<div class="flex items-center justify-between">
 		<div class="flex items-center gap-2">
 			<Terminal class="w-4 h-4 text-muted-foreground" />
-			<Label>Terminal font</Label>
+			<Label>{m.themes_terminal_font()}</Label>
 		</div>
 		<Select.Root type="single" value={selectedTerminalFont} onValueChange={handleTerminalFontChange}>
 			<Select.Trigger class="w-56">

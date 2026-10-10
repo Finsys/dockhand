@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { browser } from '$app/environment';
+	import { m } from '$lib/paraglide/messages.js';
 
 	let container: HTMLDivElement;
 
@@ -37,7 +38,7 @@
 </script>
 
 <svelte:head>
-	<title>Dockhand API Docs</title>
+	<title>{m.apidocs_page_title()}</title>
 </svelte:head>
 
 <div bind:this={container}></div>

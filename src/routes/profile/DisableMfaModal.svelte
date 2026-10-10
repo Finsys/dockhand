@@ -3,6 +3,7 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { AlertTriangle, RefreshCw, Shield } from 'lucide-svelte';
 	import { focusFirstInput } from '$lib/utils';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		open: boolean;
@@ -40,23 +41,23 @@
 		<Dialog.Header>
 			<Dialog.Title class="flex items-center gap-2 text-destructive">
 				<AlertTriangle class="w-5 h-5" />
-				Disable two-factor authentication
+				{m.profile_mfa_disable_title()}
 			</Dialog.Title>
 		</Dialog.Header>
 		<div class="space-y-4">
 			<p class="text-sm text-muted-foreground">
-				Are you sure you want to disable two-factor authentication? This will make your account less secure.
+				{m.profile_mfa_disable_confirm()}
 			</p>
 		</div>
 		<Dialog.Footer>
-			<Button variant="outline" onclick={onClose}>Cancel</Button>
+			<Button variant="outline" onclick={onClose}>{m.profile_cancel()}</Button>
 			<Button variant="destructive" onclick={disableMfa} disabled={loading}>
 				{#if loading}
 					<RefreshCw class="w-4 h-4 animate-spin" />
 				{:else}
 					<Shield class="w-4 h-4" />
 				{/if}
-				Disable MFA
+				{m.profile_mfa_disable()}
 			</Button>
 		</Dialog.Footer>
 	</Dialog.Content>

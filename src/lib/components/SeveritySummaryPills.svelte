@@ -1,5 +1,13 @@
 <script lang="ts">
 	import { SUMMARY_SEVERITIES, severityLabel, getSeverityColor } from '$lib/utils/vulnerability';
+	import { m } from '$lib/paraglide/messages.js';
+
+	const severityMessages: Record<string, () => string> = {
+		critical: m.scanner_severity_critical,
+		high: m.scanner_severity_high,
+		medium: m.scanner_severity_medium,
+		low: m.scanner_severity_low
+	};
 
 	interface Props {
 		/** Counts keyed by severity (critical/high/medium/low). */
@@ -15,7 +23,7 @@
 
 	const pad = $derived(size === 'xs' ? 'px-2 py-0.5 text-2xs' : 'px-2.5 py-0.5 text-xs');
 	const pills = $derived(
-		SUMMARY_SEVERITIES.map((sev) => ({ sev, label: severityLabel(sev), count: counts[sev] }))
+		SUMMARY_SEVERITIES.map((sev) => ({ sev, label: severityMessages[sev]?.() ?? severityLabel(sev), count: counts[sev] }))
 			.filter((p) => !hideZero || p.count > 0)
 	);
 </script>

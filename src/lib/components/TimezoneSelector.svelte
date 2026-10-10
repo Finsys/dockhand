@@ -4,6 +4,7 @@
 	import * as Popover from '$lib/components/ui/popover';
 	import { Button } from '$lib/components/ui/button';
 	import { cn } from '$lib/utils';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		value: string;
@@ -18,7 +19,7 @@
 		onchange,
 		id,
 		class: className,
-		placeholder = 'Select timezone...'
+		placeholder = undefined
 	}: Props = $props();
 
 	let open = $state(false);
@@ -148,7 +149,7 @@
 			>
 				<span class="flex items-center gap-2 truncate">
 					<Globe class="h-4 w-4 shrink-0 text-muted-foreground" />
-					<span class="truncate">{value ? formatTimezoneShort(value) : placeholder}</span>
+					<span class="truncate">{value ? formatTimezoneShort(value) : (placeholder ?? m.timezone_select_placeholder())}</span>
 				</span>
 				<ChevronsUpDown class="ml-2 h-4 w-4 shrink-0 opacity-50" />
 			</Button>
@@ -156,11 +157,11 @@
 	</Popover.Trigger>
 	<Popover.Content class="w-[350px] p-0 z-[200]" align="start">
 		<Command.Root shouldFilter={false}>
-			<Command.Input bind:value={searchQuery} placeholder="Search timezone..." />
+			<Command.Input bind:value={searchQuery} placeholder={m.timezone_search_placeholder()} />
 			<Command.List class="max-h-[300px]">
-				<Command.Empty>No timezone found.</Command.Empty>
+				<Command.Empty>{m.timezone_no_results()}</Command.Empty>
 				{#if filteredCommon.length > 0}
-					<Command.Group heading="Common">
+					<Command.Group heading={m.timezone_group_common()}>
 						{#each filteredCommon as tz}
 							<Command.Item value={tz} onSelect={() => selectTimezone(tz)}>
 								<Check class={cn('mr-2 h-4 w-4', value === tz ? 'opacity-100' : 'opacity-0')} />
@@ -170,7 +171,7 @@
 					</Command.Group>
 				{/if}
 				{#if filteredOther.length > 0}
-					<Command.Group heading="All timezones">
+					<Command.Group heading={m.timezone_group_all()}>
 						{#each filteredOther as tz}
 							<Command.Item value={tz} onSelect={() => selectTimezone(tz)}>
 								<Check class={cn('mr-2 h-4 w-4', value === tz ? 'opacity-100' : 'opacity-0')} />
