@@ -11,6 +11,7 @@
 	import { standaloneContainers, volumesForStack, batchSkipDecision, type BackupItem } from '$lib/utils/mounts';
 	import { TogglePill } from '$lib/components/ui/toggle-pill';
 	import BackupPanel from '../../containers/BackupPanel.svelte';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		environmentId: number;
@@ -56,8 +57,8 @@
 	const unconfiguredCount = $derived(unconfiguredItems.length);
 	/** "3 stacks + 5 containers" / "3 stacks" / "5 containers" — only the non-zero parts. */
 	const unconfiguredLabel = $derived([
-		unconfiguredStacks > 0 ? `${unconfiguredStacks} ${unconfiguredStacks === 1 ? 'stack' : 'stacks'}` : '',
-		unconfiguredContainers > 0 ? `${unconfiguredContainers} ${unconfiguredContainers === 1 ? 'container' : 'containers'}` : '',
+		unconfiguredStacks > 0 ? m.settings_envs_stack_count({ count: unconfiguredStacks }) : '',
+		unconfiguredContainers > 0 ? m.settings_envs_container_count({ count: unconfiguredContainers }) : '',
 	].filter(Boolean).join(' + '));
 
 	async function fetchAll() {
@@ -122,7 +123,7 @@
 	}
 
 	async function batchApply() {
-		if (!batchDestId) { toast.error('Select a repository'); return; }
+		if (!batchDestId) { toast.error(m.settings_envs_backup_select_repository_error()); return; }
 		batchSaving = true;
 		let created = 0;
 		let skippedBindOnly = 0;
@@ -161,8 +162,8 @@
 				if (res.ok) created++;
 			} catch {}
 		}
-		const parts = [`Created ${created} backup schedule${created === 1 ? '' : 's'}`];
-		if (skippedBindOnly > 0) parts.push(`skipped ${skippedBindOnly} with only bind mounts`);
+		const parts = [m.settings_envs_backup_batch_created({ count: created })];
+		if (skippedBindOnly > 0) parts.push(m.settings_envs_backup_batch_skipped({ count: skippedBindOnly }));
 		toast.success(parts.join(', '));
 		showBatch = false;
 		batchSaving = false;
@@ -177,14 +178,14 @@
 		<Loader2 class="w-5 h-5 animate-spin text-muted-foreground" />
 	</div>
 {:else if items.length === 0}
-	<p class="text-sm text-muted-foreground py-4 text-center">No containers or stacks found on this environment.</p>
+	<p class="text-sm text-muted-foreground py-4 text-center">{m.settings_envs_backup_empty()}</p>
 {:else}
 	<!-- Batch setup -->
 	{#if unconfiguredCount > 0}
 		{#if !showBatch}
 			<div class="mb-2">
 				<Button variant="outline" size="sm" class="w-full" onclick={() => { showBatch = true; if (!batchDestId && usableDestinations.length > 0) batchDestId = usableDestinations[0].id; }}>
-					<Zap class="w-3.5 h-3.5 mr-1.5" />Schedule all ({unconfiguredLabel})
+					<Zap class="w-3.5 h-3.5 mr-1.5" />{m.settings_envs_backup_schedule_all({ items: unconfiguredLabel })}
 				</Button>
 			</div>
 		{:else}
@@ -198,7 +199,7 @@
 									{@const DIcon = getRepoTypeIcon(dest.repository)}
 									<span class="flex items-center gap-1.5 truncate"><DIcon class="w-3.5 h-3.5 text-primary/60 flex-shrink-0" />{dest.name}</span>
 								{/if}
-							{:else}Select repository{/if}
+							{:else}{m.settings_envs_backup_select_repository()}{/if}
 						</Select.Trigger>
 						<Select.Content>
 							{#each usableDestinations as dest}
@@ -212,24 +213,24 @@
 					<CronEditor value={batchSchedule} onchange={(v) => batchSchedule = v} />
 				</div>
 				<div class="flex items-center gap-2 text-xs">
-					<TogglePill bind:checked={batchSkipBinds} onLabel="Yes" offLabel="No" />
-					<span class="whitespace-nowrap">Skip bind mounts</span>
+					<TogglePill bind:checked={batchSkipBinds} onLabel={m.containers_backup_yes()} offLabel={m.containers_backup_no()} />
+					<span class="whitespace-nowrap">{m.settings_envs_backup_skip_bind_mounts()}</span>
 					<Tooltip.Root>
 						<Tooltip.Trigger>
 							<HelpCircle class="w-3.5 h-3.5 text-muted-foreground cursor-help" />
 						</Tooltip.Trigger>
 						<Tooltip.Content>
 							<div class="w-64">
-								<p class="text-xs">Prefer named volumes and skip host bind mounts (e.g. media libraries or ISOs). A stack that isn't running yet keeps all volumes until it comes up. Applied to each schedule as it's created - edit a schedule later to change it.</p>
+								<p class="text-xs">{m.settings_envs_backup_skip_bind_mounts_hint()}</p>
 							</div>
 						</Tooltip.Content>
 					</Tooltip.Root>
 				</div>
 				<div class="flex items-center justify-end gap-2">
-					<Button variant="ghost" size="sm" class="text-xs" onclick={() => showBatch = false}>Cancel</Button>
+					<Button variant="ghost" size="sm" class="text-xs" onclick={() => showBatch = false}>{m.containers_backup_cancel()}</Button>
 					<Button size="sm" disabled={!batchDestId || batchSaving} onclick={batchApply}>
 						{#if batchSaving}<Loader2 class="w-3.5 h-3.5 mr-1 animate-spin" />{/if}
-						Schedule {unconfiguredLabel}
+						{m.settings_envs_backup_schedule_items({ items: unconfiguredLabel })}
 					</Button>
 				</div>
 			</div>
@@ -266,15 +267,15 @@
 					<span class="flex min-w-0 flex-1 items-center gap-1.5">
 						<span class="truncate text-sm">{item.name}</span>
 						{#if item.git}
-							<span class="inline-flex flex-shrink-0 items-center gap-1 rounded-full border border-purple-500/30 bg-purple-500/10 px-1.5 py-0.5 text-[10px] font-medium text-purple-600 dark:text-purple-400" title="Git-deployed stack"><GitBranch class="h-2.5 w-2.5" />git</span>
+							<span class="inline-flex flex-shrink-0 items-center gap-1 rounded-full border border-purple-500/30 bg-purple-500/10 px-1.5 py-0.5 text-[10px] font-medium text-purple-600 dark:text-purple-400" title={m.settings_envs_backup_git_stack_title()}><GitBranch class="h-2.5 w-2.5" />git</span>
 						{/if}
 						{#if item.external}
-							<span class="inline-flex flex-shrink-0 items-center rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground" title="Untracked stack — can't be backed up until adopted">external</span>
+							<span class="inline-flex flex-shrink-0 items-center rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground" title={m.settings_envs_backup_external_title()}>{m.settings_envs_backup_external()}</span>
 						{/if}
 					</span>
 
 					{#if item.external}
-						<span class="text-xs text-muted-foreground/60 flex-shrink-0" title="This stack is untracked — Dockhand doesn't know its compose file location, so it can't be backed up. Adopt it (Stacks → Adopt) first.">adopt first</span>
+						<span class="text-xs text-muted-foreground/60 flex-shrink-0" title={m.settings_envs_backup_adopt_first_title()}>{m.settings_envs_backup_adopt_first()}</span>
 					{:else if hasBackup}
 						<ArrowRight class="w-3 h-3 text-muted-foreground/40 flex-shrink-0" />
 						{#if itemConfigs.length === 1}
@@ -286,14 +287,14 @@
 									<DestIcon class="w-3 h-3 text-primary/60" />
 									{dest.name}
 								{/if}
-								{cfg.schedule ? formatCron(cfg.schedule, cronstrueLocale()) : 'manual'}
+								{cfg.schedule ? formatCron(cfg.schedule, cronstrueLocale()) : m.settings_envs_backup_manual()}
 							</span>
 						{:else}
-							<span class="text-xs text-muted-foreground flex-shrink-0">{itemConfigs.length} schedules</span>
+							<span class="text-xs text-muted-foreground flex-shrink-0">{m.settings_envs_backup_schedule_count({ count: itemConfigs.length })}</span>
 						{/if}
 					{:else}
 						<span class="text-xs text-muted-foreground/50 flex items-center gap-1 flex-shrink-0">
-							<Plus class="w-3 h-3" />configure
+							<Plus class="w-3 h-3" />{m.settings_envs_backup_configure()}
 						</span>
 					{/if}
 				</svelte:element>

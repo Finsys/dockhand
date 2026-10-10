@@ -6,6 +6,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { FileText, RefreshCw, Mail, FileDown, Download } from 'lucide-svelte';
 	import { toast } from 'svelte-sonner';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface SmtpChannel {
 		id: number;
@@ -47,7 +48,7 @@
 			const response = await fetch(`/api/environments/report?format=${format}&env=${environmentId}`);
 			if (!response.ok) {
 				const message = await response.json().then((b) => b?.error).catch(() => null);
-				toast.error(message || 'Failed to build the report');
+				toast.error(message || m.settings_envs_report_build_failed());
 				return;
 			}
 			const blob = await response.blob();
@@ -62,7 +63,7 @@
 			URL.revokeObjectURL(url);
 		} catch (error) {
 			console.error('Failed to download the report:', error);
-			toast.error('Failed to build the report');
+			toast.error(m.settings_envs_report_build_failed());
 		} finally {
 			downloading = false;
 		}
@@ -70,23 +71,22 @@
 
 	const formatLabel = $derived(reportFormat === 'csv' ? 'CSV' : 'PDF');
 	const channelLabel = $derived(
-		smtpChannels.find((c) => c.id === reportNotificationId)?.name ?? 'Select a channel'
+		smtpChannels.find((c) => c.id === reportNotificationId)?.name ?? m.settings_envs_report_select_channel()
 	);
 </script>
 
 <div class="space-y-4">
 	<div class="flex items-center gap-2 text-sm font-medium">
 		<FileText class="w-4 h-4" />
-		Scheduled state report
+		{m.settings_envs_report_title()}
 	</div>
 	<p class="text-xs text-muted-foreground">
-		Mail a report of what is running in this environment, with its vulnerability counts and scan
-		coverage, on a schedule.
+		{m.settings_envs_report_description()}
 	</p>
 
 	{#if !licensed}
 		<div class="rounded-md border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
-			A commercial license is required to build a state report.
+			{m.settings_envs_report_license_required()}
 		</div>
 	{:else if reportLoading}
 		<div class="flex items-center justify-center py-4">
@@ -97,8 +97,8 @@
 		<div class="flex items-center gap-2 rounded-md border border-border bg-muted/30 p-3">
 			<Download class="w-4 h-4 text-muted-foreground shrink-0" />
 			<div class="flex-1 min-w-0">
-				<Label>Download this environment's report</Label>
-				<p class="text-xs text-muted-foreground">Build it now, for this environment only.</p>
+				<Label>{m.settings_envs_report_download()}</Label>
+				<p class="text-xs text-muted-foreground">{m.settings_envs_report_download_hint()}</p>
 			</div>
 			<Button size="sm" variant="outline" disabled={downloading || environmentId === null}
 				onclick={() => downloadNow('pdf')}>PDF</Button>
@@ -109,10 +109,9 @@
 		<div class="flex items-start gap-2 pt-1">
 			<FileDown class="w-4 h-4 text-sky-500 mt-0.5 shrink-0" />
 			<div class="flex-1">
-				<Label>Send a report on a schedule</Label>
+				<Label>{m.settings_envs_report_schedule_enable()}</Label>
 				<p class="text-xs text-muted-foreground">
-					The report lists every container and the vulnerabilities known about its images, and it
-					leaves this installation as a mail attachment.
+					{m.settings_envs_report_schedule_enable_hint()}
 				</p>
 			</div>
 			<TogglePill bind:checked={reportEnabled} />
@@ -122,7 +121,7 @@
 			<div class="flex items-start gap-2">
 				<div class="w-4 shrink-0"></div>
 				<div class="flex-1 space-y-2">
-					<Label>Schedule</Label>
+					<Label>{m.settings_envs_schedule()}</Label>
 					<CronEditor value={reportCron} onchange={(cron) => (reportCron = cron)} />
 				</div>
 			</div>
@@ -130,12 +129,12 @@
 			<div class="flex items-start gap-2">
 				<div class="w-4 shrink-0"></div>
 				<div class="flex-1 space-y-2">
-					<Label>Format</Label>
+					<Label>{m.settings_envs_report_format()}</Label>
 					<Select.Root type="single" bind:value={reportFormat}>
 						<Select.Trigger class="w-full">{formatLabel}</Select.Trigger>
 						<Select.Content>
-							<Select.Item value="pdf">PDF - formatted for reading and filing</Select.Item>
-							<Select.Item value="csv">CSV - for a spreadsheet or another tool</Select.Item>
+							<Select.Item value="pdf">{m.settings_envs_report_format_pdf()}</Select.Item>
+							<Select.Item value="csv">{m.settings_envs_report_format_csv()}</Select.Item>
 						</Select.Content>
 					</Select.Root>
 				</div>
@@ -144,12 +143,10 @@
 			<div class="flex items-start gap-2">
 				<Mail class="w-4 h-4 text-muted-foreground mt-7 shrink-0" />
 				<div class="flex-1 space-y-2">
-					<Label>Send to</Label>
+					<Label>{m.settings_envs_report_send_to()}</Label>
 					{#if smtpChannels.length === 0}
 						<p class="text-xs text-amber-600 dark:text-amber-400">
-							No SMTP channel is configured. Add one under Settings &gt; Notifications - a webhook
-							channel cannot carry the attachment. Until then, turn the schedule off above:
-							it cannot be saved without a channel.
+							{m.settings_envs_report_no_smtp_channel()}
 						</p>
 					{:else}
 						<Select.Root
@@ -165,7 +162,7 @@
 							</Select.Content>
 						</Select.Root>
 						<p class="text-xs text-muted-foreground">
-							Only SMTP channels are listed; the report is sent as an attachment.
+							{m.settings_envs_report_smtp_only_hint()}
 						</p>
 					{/if}
 				</div>
