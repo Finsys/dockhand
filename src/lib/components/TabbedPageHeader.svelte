@@ -62,7 +62,7 @@
 		if (tab.count === undefined) return null;
 		const countStr = typeof tab.count === 'number' ? tab.count.toLocaleString() : tab.count;
 		if (tab.total !== undefined) {
-			return `${countStr} of ${tab.total.toLocaleString()}`;
+			return m.pageheader_count_of({ count: countStr, total: tab.total.toLocaleString() });
 		}
 		return countStr;
 	}

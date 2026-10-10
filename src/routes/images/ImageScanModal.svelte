@@ -9,6 +9,7 @@
 	import { currentEnvironment } from '$lib/stores/environment';
 	import ScanTab from '$lib/components/ScanTab.svelte';
 	import type { ScanResult } from '$lib/components/ScanTab.svelte';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		open: boolean;
@@ -274,7 +275,7 @@
 				{:else}
 					<ShieldCheck class="w-5 h-5" />
 				{/if}
-				Vulnerability scan
+				{m.images_scan_title()}
 				<code class="text-sm font-normal bg-muted px-1.5 py-0.5 rounded ml-1">{imageName}</code>
 			</Dialog.Title>
 		</Dialog.Header>
@@ -296,7 +297,7 @@
 			<div class="flex gap-2">
 				{#if scanStatus === 'error'}
 					<Button variant="outline" onclick={() => scanTabRef?.startScan()}>
-						Retry
+						{m.images_scan_retry()}
 					</Button>
 				{/if}
 				{#if scanStatus === 'complete' && scanResults.length > 0 && totalVulnerabilities > 0}
@@ -305,7 +306,7 @@
 							{#snippet child({ props })}
 								<Button variant="outline" {...props}>
 									<Download class="w-4 h-4" />
-									Export
+									{m.images_scan_export()}
 								</Button>
 							{/snippet}
 						</DropdownMenu.Trigger>
@@ -325,15 +326,15 @@
 							{/if}
 							<DropdownMenu.Item onclick={exportToMarkdown} disabled={exportResults.length === 0}>
 								<FileText class="w-4 h-4 mr-2 text-blue-500" />
-								Markdown report (.md)
+								{m.images_scan_export_markdown()}
 							</DropdownMenu.Item>
 							<DropdownMenu.Item onclick={exportToCSV} disabled={exportResults.length === 0}>
 								<FileSpreadsheet class="w-4 h-4 mr-2 text-green-500" />
-								CSV spreadsheet (.csv)
+								{m.images_scan_export_csv()}
 							</DropdownMenu.Item>
 							<DropdownMenu.Item onclick={exportToJSON} disabled={exportResults.length === 0}>
 								<FileJson class="w-4 h-4 mr-2 text-amber-500" />
-								JSON data (.json)
+								{m.images_scan_export_json()}
 							</DropdownMenu.Item>
 							<DropdownMenu.Item onclick={exportToSARIF} disabled={exportResults.length === 0}>
 								<ShieldPlus class="w-4 h-4 mr-2 text-blue-500" />
@@ -349,9 +350,9 @@
 				disabled={scanStatus === 'scanning'}
 			>
 				{#if scanStatus === 'scanning'}
-					Scanning...
+					{m.containers_settings_scanning()}
 				{:else}
-					Close
+					{m.ui_close()}
 				{/if}
 			</Button>
 		</Dialog.Footer>

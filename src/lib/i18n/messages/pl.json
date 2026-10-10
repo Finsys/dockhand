@@ -1403,6 +1403,7 @@
 	"containers_restore_volumes_selected": [
 		{
 			"declarations": [
+				"input selected",
 				"input count",
 				"local countPlural = count: plural"
 			],

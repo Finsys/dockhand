@@ -12,9 +12,9 @@
 	import { Plus, Trash2, HardDrive, Database, Server, ChevronDown } from 'lucide-svelte';
 
 	const VOLUME_DRIVERS = [
-		{ value: 'local', label: 'Local', description: 'Default local driver', icon: HardDrive },
-		{ value: 'nfs', label: 'NFS', description: 'Network file system', icon: Server },
-		{ value: 'cifs', label: 'CIFS', description: 'Windows/SMB shares', icon: Database }
+		{ value: 'local', label: 'Local', description: m.volumes_create_driver_local_description(), icon: HardDrive },
+		{ value: 'nfs', label: 'NFS', description: m.volumes_create_driver_nfs_description(), icon: Server },
+		{ value: 'cifs', label: 'CIFS', description: m.volumes_create_driver_cifs_description(), icon: Database }
 	];
 
 	const SMB_VERSIONS = [
@@ -33,6 +33,7 @@
 
 	import { currentEnvironment, appendEnvParam } from '$lib/stores/environment';
 	import { focusFirstInput } from '$lib/utils';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		open: boolean;
@@ -113,16 +114,16 @@
 		errors = {};
 
 		if (!name.trim()) {
-			errors.name = 'Volume name is required';
+			errors.name = m.volumes_create_error_name_required();
 		}
 
 		// Validate driver-specific required fields
 		if (driver === 'cifs') {
-			if (!cifsServer.trim()) errors.server = 'Server is required';
-			if (!cifsShare.trim()) errors.share = 'Share path is required';
+			if (!cifsServer.trim()) errors.server = m.volumes_create_error_server_required();
+			if (!cifsShare.trim()) errors.share = m.volumes_create_error_share_required();
 		} else if (driver === 'nfs') {
-			if (!nfsServer.trim()) errors.server = 'Server is required';
-			if (!nfsPath.trim()) errors.path = 'Export path is required';
+			if (!nfsServer.trim()) errors.server = m.volumes_create_error_server_required();
+			if (!nfsPath.trim()) errors.path = m.volumes_create_error_export_path_required();
 		}
 
 		if (Object.keys(errors).length > 0) return;
@@ -191,14 +192,14 @@
 
 			if (!response.ok) {
 				const data = await response.json();
-				throw new Error(data.details || data.error || 'Failed to create volume');
+				throw new Error(data.details || data.error || m.volumes_create_error_failed());
 			}
 
 			resetForm();
 			open = false;
 			onSuccess?.();
 		} catch (err: any) {
-			error = err.message || 'Failed to create volume';
+			error = err.message || m.volumes_create_error_failed();
 			console.error('Failed to create volume:', err);
 		} finally {
 			creating = false;
@@ -216,7 +217,7 @@
 <Dialog.Root bind:open onOpenChange={(isOpen) => { if (isOpen) focusFirstInput(); handleOpenChange(isOpen); }}>
 	<Dialog.Content class="max-w-2xl">
 		<Dialog.Header>
-			<Dialog.Title>Create volume</Dialog.Title>
+			<Dialog.Title>{m.volumes_create_volume()}</Dialog.Title>
 		</Dialog.Header>
 
 		<div class="space-y-4">
@@ -228,7 +229,7 @@
 
 			<!-- Volume Name -->
 			<div class="space-y-2">
-				<Label for="volume-name">Volume name *</Label>
+				<Label for="volume-name">{m.volumes_create_name_label()}</Label>
 				<Input
 					id="volume-name"
 					bind:value={name}
@@ -244,7 +245,7 @@
 
 			<!-- Driver -->
 			<div class="space-y-2">
-				<Label for="driver">Driver</Label>
+				<Label for="driver">{m.volumes_driver()}</Label>
 				<Select.Root type="single" bind:value={driver} disabled={creating}>
 					<Select.Trigger class="w-full h-9">
 						{@const selectedDriver = VOLUME_DRIVERS.find(d => d.value === driver)}
@@ -253,7 +254,7 @@
 								<svelte:component this={selectedDriver.icon} class="w-4 h-4 mr-2 text-muted-foreground" />
 								{selectedDriver.label}
 							{:else}
-								Select driver
+								{m.volumes_create_select_driver()}
 							{/if}
 						</span>
 					</Select.Trigger>
@@ -270,7 +271,7 @@
 					</Select.Content>
 				</Select.Root>
 				<p class="text-xs text-muted-foreground">
-					Volume driver to use (local is default)
+					{m.volumes_create_driver_hint()}
 				</p>
 			</div>
 
@@ -279,7 +280,7 @@
 				<!-- CIFS fields -->
 				<div class="grid grid-cols-2 gap-4">
 					<div class="space-y-2">
-						<Label for="cifs-server">Server / IP *</Label>
+						<Label for="cifs-server">{m.volumes_create_server_label()}</Label>
 						<Input
 							id="cifs-server"
 							bind:value={cifsServer}
@@ -293,7 +294,7 @@
 						{/if}
 					</div>
 					<div class="space-y-2">
-						<Label for="cifs-share">Share path *</Label>
+						<Label for="cifs-share">{m.volumes_create_share_path_label()}</Label>
 						<Input
 							id="cifs-share"
 							bind:value={cifsShare}
@@ -309,7 +310,7 @@
 				</div>
 				<div class="grid grid-cols-2 gap-4">
 					<div class="space-y-2">
-						<Label for="cifs-username">Username</Label>
+						<Label for="cifs-username">{m.volumes_create_username()}</Label>
 						<Input
 							id="cifs-username"
 							bind:value={cifsUsername}
@@ -318,7 +319,7 @@
 						/>
 					</div>
 					<div class="space-y-2">
-						<Label for="cifs-password">Password</Label>
+						<Label for="cifs-password">{m.volumes_create_password()}</Label>
 						<Input
 							id="cifs-password"
 							type="password"
@@ -330,10 +331,10 @@
 				</div>
 				<div class="grid grid-cols-2 gap-4">
 					<div class="space-y-2">
-						<Label for="cifs-version">SMB version</Label>
+						<Label for="cifs-version">{m.volumes_create_smb_version()}</Label>
 						<Select.Root type="single" bind:value={cifsVersion} disabled={creating}>
 							<Select.Trigger class="w-full h-9">
-								{SMB_VERSIONS.find(v => v.value === cifsVersion)?.label ?? 'Select version'}
+								{SMB_VERSIONS.find(v => v.value === cifsVersion)?.label ?? m.volumes_create_select_version()}
 							</Select.Trigger>
 							<Select.Content>
 								{#each SMB_VERSIONS as v}
@@ -343,14 +344,14 @@
 						</Select.Root>
 					</div>
 					<div class="space-y-2">
-						<Label for="cifs-domain">Domain</Label>
+						<Label for="cifs-domain">{m.volumes_create_domain()}</Label>
 						<Input
 							id="cifs-domain"
 							bind:value={cifsDomain}
 							placeholder="WORKGROUP"
 							disabled={creating}
 						/>
-						<p class="text-xs text-muted-foreground">Optional AD/workgroup domain</p>
+						<p class="text-xs text-muted-foreground">{m.volumes_create_domain_hint()}</p>
 					</div>
 				</div>
 
@@ -362,28 +363,28 @@
 						onclick={() => showAdditionalOpts = !showAdditionalOpts}
 					>
 						<ChevronDown class="w-3.5 h-3.5 transition-transform {showAdditionalOpts ? 'rotate-180' : ''}" />
-						Additional options
+						{m.volumes_create_additional_options()}
 					</button>
 					{#if showAdditionalOpts}
 						<div class="space-y-2 pl-1">
 							<div class="flex items-center justify-end">
 								<Button type="button" size="sm" variant="outline" onclick={addDriverOpt} disabled={creating}>
 									<Plus class="w-3 h-3" />
-									Add option
+									{m.volumes_create_add_option()}
 								</Button>
 							</div>
 							{#if driverOpts.length > 0}
 								{#each driverOpts as opt, i}
 									<div class="flex gap-2">
-										<Input bind:value={opt.key} placeholder="Key" disabled={creating} class="flex-1" />
-										<Input bind:value={opt.value} placeholder="Value (optional)" disabled={creating} class="flex-1" />
+										<Input bind:value={opt.key} placeholder={m.volumes_create_key()} disabled={creating} class="flex-1" />
+										<Input bind:value={opt.value} placeholder={m.volumes_create_value_optional()} disabled={creating} class="flex-1" />
 										<Button type="button" size="icon" variant="ghost" onclick={() => removeDriverOpt(i)} disabled={creating}>
 											<Trash2 class="w-4 h-4" />
 										</Button>
 									</div>
 								{/each}
 							{:else}
-								<p class="text-xs text-muted-foreground">Extra mount options appended to the mount string</p>
+								<p class="text-xs text-muted-foreground">{m.volumes_create_extra_mount_options_hint()}</p>
 							{/if}
 						</div>
 					{/if}
@@ -392,7 +393,7 @@
 				<!-- NFS fields -->
 				<div class="grid grid-cols-2 gap-4">
 					<div class="space-y-2">
-						<Label for="nfs-server">Server / IP *</Label>
+						<Label for="nfs-server">{m.volumes_create_server_label()}</Label>
 						<Input
 							id="nfs-server"
 							bind:value={nfsServer}
@@ -406,7 +407,7 @@
 						{/if}
 					</div>
 					<div class="space-y-2">
-						<Label for="nfs-path">Export path *</Label>
+						<Label for="nfs-path">{m.volumes_create_export_path_label()}</Label>
 						<Input
 							id="nfs-path"
 							bind:value={nfsPath}
@@ -421,10 +422,10 @@
 					</div>
 				</div>
 				<div class="space-y-2">
-					<Label for="nfs-version">NFS version</Label>
+					<Label for="nfs-version">{m.volumes_create_nfs_version()}</Label>
 					<Select.Root type="single" bind:value={nfsVersion} disabled={creating}>
 						<Select.Trigger class="w-full max-w-[200px] h-9">
-							{NFS_VERSIONS.find(v => v.value === nfsVersion)?.label ?? 'Select version'}
+							{NFS_VERSIONS.find(v => v.value === nfsVersion)?.label ?? m.volumes_create_select_version()}
 						</Select.Trigger>
 						<Select.Content>
 							{#each NFS_VERSIONS as v}
@@ -436,15 +437,15 @@
 				<div class="flex items-center gap-6">
 					<div class="flex items-center gap-2">
 						<TogglePill bind:checked={nfsSoft} onLabel="Soft" offLabel="Hard" />
-						<span class="text-xs text-muted-foreground">mount</span>
+						<span class="text-xs text-muted-foreground">{m.volumes_create_nfs_mount()}</span>
 					</div>
 					<div class="flex items-center gap-2">
 						<TogglePill bind:checked={nfsNolock} />
-						<span class="text-xs text-muted-foreground">No lock</span>
+						<span class="text-xs text-muted-foreground">{m.volumes_create_nfs_no_lock()}</span>
 					</div>
 					<div class="flex items-center gap-2">
 						<TogglePill bind:checked={nfsReadOnly} />
-						<span class="text-xs text-muted-foreground">Read-only</span>
+						<span class="text-xs text-muted-foreground">{m.volumes_read_only()}</span>
 					</div>
 				</div>
 
@@ -456,28 +457,28 @@
 						onclick={() => showAdditionalOpts = !showAdditionalOpts}
 					>
 						<ChevronDown class="w-3.5 h-3.5 transition-transform {showAdditionalOpts ? 'rotate-180' : ''}" />
-						Additional options
+						{m.volumes_create_additional_options()}
 					</button>
 					{#if showAdditionalOpts}
 						<div class="space-y-2 pl-1">
 							<div class="flex items-center justify-end">
 								<Button type="button" size="sm" variant="outline" onclick={addDriverOpt} disabled={creating}>
 									<Plus class="w-3 h-3" />
-									Add option
+									{m.volumes_create_add_option()}
 								</Button>
 							</div>
 							{#if driverOpts.length > 0}
 								{#each driverOpts as opt, i}
 									<div class="flex gap-2">
-										<Input bind:value={opt.key} placeholder="Key" disabled={creating} class="flex-1" />
-										<Input bind:value={opt.value} placeholder="Value (optional)" disabled={creating} class="flex-1" />
+										<Input bind:value={opt.key} placeholder={m.volumes_create_key()} disabled={creating} class="flex-1" />
+										<Input bind:value={opt.value} placeholder={m.volumes_create_value_optional()} disabled={creating} class="flex-1" />
 										<Button type="button" size="icon" variant="ghost" onclick={() => removeDriverOpt(i)} disabled={creating}>
 											<Trash2 class="w-4 h-4" />
 										</Button>
 									</div>
 								{/each}
 							{:else}
-								<p class="text-xs text-muted-foreground">Extra mount options appended to the mount string</p>
+								<p class="text-xs text-muted-foreground">{m.volumes_create_extra_mount_options_hint()}</p>
 							{/if}
 						</div>
 					{/if}
@@ -486,7 +487,7 @@
 				<!-- Local driver - generic key-value options -->
 				<div class="space-y-2">
 					<div class="flex items-center justify-between">
-						<Label>Driver options</Label>
+						<Label>{m.volumes_driver_options()}</Label>
 						<Button
 							type="button"
 							size="sm"
@@ -495,7 +496,7 @@
 							disabled={creating}
 						>
 							<Plus class="w-3 h-3" />
-							Add option
+							{m.volumes_create_add_option()}
 						</Button>
 					</div>
 					{#if driverOpts.length > 0}
@@ -504,13 +505,13 @@
 								<div class="flex gap-2">
 									<Input
 										bind:value={opt.key}
-										placeholder="Key"
+										placeholder={m.volumes_create_key()}
 										disabled={creating}
 										class="flex-1"
 									/>
 									<Input
 										bind:value={opt.value}
-										placeholder="Value"
+										placeholder={m.volumes_create_value()}
 										disabled={creating}
 										class="flex-1"
 									/>
@@ -527,7 +528,7 @@
 							{/each}
 						</div>
 					{:else}
-						<p class="text-xs text-muted-foreground">No driver options configured</p>
+						<p class="text-xs text-muted-foreground">{m.volumes_no_driver_options()}</p>
 					{/if}
 				</div>
 			{/if}
@@ -535,7 +536,7 @@
 			<!-- Labels -->
 			<div class="space-y-2">
 				<div class="flex items-center justify-between">
-					<Label>Labels</Label>
+					<Label>{m.volumes_labels()}</Label>
 					<Button
 						type="button"
 						size="sm"
@@ -544,7 +545,7 @@
 						disabled={creating}
 					>
 						<Plus class="w-3 h-3" />
-						Add label
+						{m.volumes_create_add_label()}
 					</Button>
 				</div>
 				{#if labels.length > 0}
@@ -553,13 +554,13 @@
 							<div class="flex gap-2">
 								<Input
 									bind:value={label.key}
-									placeholder="Key"
+									placeholder={m.volumes_create_key()}
 									disabled={creating}
 									class="flex-1"
 								/>
 								<Input
 									bind:value={label.value}
-									placeholder="Value"
+									placeholder={m.volumes_create_value()}
 									disabled={creating}
 									class="flex-1"
 								/>
@@ -576,16 +577,16 @@
 						{/each}
 					</div>
 				{:else}
-					<p class="text-xs text-muted-foreground">No labels configured</p>
+					<p class="text-xs text-muted-foreground">{m.volumes_create_no_labels()}</p>
 				{/if}
 			</div>
 
 			<Dialog.Footer class="pt-4">
 				<Button variant="outline" onclick={() => (open = false)} disabled={creating}>
-					Cancel
+					{m.volumes_cancel()}
 				</Button>
 				<Button onclick={handleCreate} disabled={creating}>
-					{creating ? 'Creating...' : 'Create volume'}
+					{creating ? m.volumes_create_creating() : m.volumes_create_volume()}
 				</Button>
 			</Dialog.Footer>
 		</div>

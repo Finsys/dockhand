@@ -70,6 +70,24 @@ describe('UI translations', () => {
 		}
 	});
 
+	test('every placeholder of a plural or variant message is declared', () => {
+		// A variant should declare each variable it uses ('input x' or 'local x = ...'), as English
+		// does. Paraglide still fills in an undeclared one, so a missing declaration is easy to miss.
+		for (const locale of settings.locales) {
+			const undeclared = Object.entries(load(locale)).flatMap(([key, message]) =>
+				typeof message === 'string'
+					? []
+					: message.flatMap((variant) => {
+							const declared = (variant.declarations ?? []).map((d) => /^(?:input|local)\s+(\w+)/.exec(d)?.[1]);
+							return placeholders([variant])
+								.filter((name) => !declared.includes(name))
+								.map((name) => `${key}: ${name}`);
+						})
+			);
+			expect({ locale, undeclared }).toEqual({ locale, undeclared: [] });
+		}
+	});
+
 	for (const locale of settings.locales.filter((l: string) => l !== settings.baseLocale)) {
 		test(`${locale} has no keys that English does not have`, () => {
 			const extra = Object.keys(load(locale)).filter((key) => !(key in base));
