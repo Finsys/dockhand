@@ -1,5 +1,5 @@
 <svelte:head>
-	<title>Registry - Dockhand</title>
+	<title>{m.nav_registry()} - Dockhand</title>
 </svelte:head>
 
 <script lang="ts">
@@ -23,6 +23,7 @@
 	import { canAccess } from '$lib/stores/auth';
 	import { currentEnvironment, appendEnvParam } from '$lib/stores/environment';
 	import PageHeader from '$lib/components/PageHeader.svelte';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Registry {
 		id: number;
@@ -195,17 +196,17 @@
 				} else {
 					results = data.results || [];
 					if (data.notSupported && results.length === 0) {
-						errorMessage = data.message || 'This registry does not support searching all images.';
+						errorMessage = data.message || m.registry_error_search_not_supported();
 					}
 				}
 			} else {
 				const data = await response.json();
-				errorMessage = data.error || 'Search failed';
+				errorMessage = data.error || m.registry_error_search_failed();
 				results = [];
 			}
 		} catch (error) {
 			console.error('Failed to search images:', error);
-			errorMessage = 'Failed to search images';
+			errorMessage = m.registry_error_search_images();
 			results = [];
 		} finally {
 			loading = false;
@@ -252,14 +253,14 @@
 				}
 			} else {
 				const data = await response.json();
-				errorMessage = data.error || 'Failed to browse registry';
+				errorMessage = data.error || m.registry_error_browse_failed();
 				if (!loadMore) {
 					results = [];
 				}
 			}
 		} catch (error) {
 			console.error('Failed to browse registry:', error);
-			errorMessage = 'Failed to browse registry';
+			errorMessage = m.registry_error_browse_failed();
 			if (!loadMore) {
 				results = [];
 			}
@@ -369,7 +370,7 @@
 						...expandedImages[imageName],
 						loading: false,
 						loadingMore: false,
-						error: data.error || 'Failed to fetch tags'
+						error: data.error || m.registry_error_fetch_tags()
 					}
 				};
 			}
@@ -380,7 +381,7 @@
 					...expandedImages[imageName],
 					loading: false,
 					loadingMore: false,
-					error: error.message || 'Failed to fetch tags'
+					error: error.message || m.registry_error_fetch_tags()
 				}
 			};
 		}
@@ -413,10 +414,10 @@
 						size: info?.size ?? undefined,
 						lastUpdated: info?.lastUpdated ?? undefined,
 						enrichState: hasData ? 'done' : 'unavailable',
-						enrichReason: hasData ? undefined : (info?.reason || 'Unavailable')
+						enrichReason: hasData ? undefined : (info?.reason || m.registry_tag_info_unavailable())
 					});
 				} catch {
-					setTagEnrich(imageName, tag.name, { enrichState: 'unavailable', enrichReason: 'Request failed' });
+					setTagEnrich(imageName, tag.name, { enrichState: 'unavailable', enrichReason: m.registry_tag_info_request_failed() });
 				}
 			}
 		};
@@ -469,12 +470,12 @@
 		const diffMs = now.getTime() - date.getTime();
 		const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
 
-		if (diffDays === 0) return 'today';
-		if (diffDays === 1) return 'yesterday';
-		if (diffDays < 7) return `${diffDays} days ago`;
-		if (diffDays < 30) return `${Math.floor(diffDays / 7)} weeks ago`;
-		if (diffDays < 365) return `${Math.floor(diffDays / 30)} months ago`;
-		return `${Math.floor(diffDays / 365)} years ago`;
+		if (diffDays === 0) return m.registry_date_today();
+		if (diffDays === 1) return m.registry_date_yesterday();
+		if (diffDays < 7) return m.registry_date_days_ago({ count: diffDays });
+		if (diffDays < 30) return m.registry_date_weeks_ago({ count: Math.floor(diffDays / 7) });
+		if (diffDays < 365) return m.registry_date_months_ago({ count: Math.floor(diffDays / 30) });
+		return m.registry_date_years_ago({ count: Math.floor(diffDays / 365) });
 	}
 
 	function openCopyModal(imageName: string, tag?: string) {
@@ -513,7 +514,7 @@
 			});
 
 			if (response.ok) {
-				toast.success(`Deleted ${imageName}:${tag}`);
+				toast.success(m.registry_toast_deleted({ name: `${imageName}:${tag}` }));
 				// Refresh tags for this image
 				const state = expandedImages[imageName];
 				if (state) {
@@ -528,10 +529,10 @@
 				}
 			} else {
 				const data = await response.json();
-				toast.error(data.error || 'Failed to delete image');
+				toast.error(data.error || m.registry_toast_delete_failed());
 			}
 		} catch (error: any) {
-			toast.error(error.message || 'Failed to delete image');
+			toast.error(error.message || m.registry_toast_delete_failed());
 		} finally {
 			deleting = false;
 			confirmDeleteKey = null;
@@ -576,7 +577,7 @@
 				</Tooltip.Trigger>
 				<Tooltip.Portal>
 					<Tooltip.Content side="top" sideOffset={6}>
-						{tag.enrichReason || 'Unavailable'}
+						{tag.enrichReason || m.registry_tag_info_unavailable()}
 					</Tooltip.Content>
 				</Tooltip.Portal>
 			</Tooltip.Root>
@@ -588,11 +589,11 @@
 
 <div class="h-full flex flex-col gap-3 overflow-hidden">
 	<div class="shrink-0 flex flex-wrap justify-between items-center gap-3 min-h-8">
-		<PageHeader icon={Download} title="Registry" showConnection={false} />
+		<PageHeader icon={Download} title={m.nav_registry()} showConnection={false} />
 		{#if $canAccess('registries', 'edit')}
 		<a href="/settings?tab=registries" class="inline-flex items-center justify-center gap-2 whitespace-nowrap font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground h-8 rounded-md px-3 text-xs">
 			<Settings2 class="w-4 h-4" />
-			Manage registries
+			{m.registry_manage()}
 		</a>
 		{/if}
 	</div>
@@ -607,7 +608,7 @@
 				{:else}
 					<Server class="w-4 h-4 mr-2 text-muted-foreground shrink-0" />
 				{/if}
-				<span class="truncate">{selected ? selected.name : 'Select registry'}</span>
+				<span class="truncate">{selected ? selected.name : m.images_push_select_registry()}</span>
 				{#if selected?.hasCredentials}
 					<Badge variant="outline" class="ml-1.5 text-xs shrink-0">auth</Badge>
 				{/if}
@@ -632,7 +633,7 @@
 			<Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
 			<Input
 				type="text"
-				placeholder={selectedRegistry ? `Search ${selectedRegistry.name} for images...` : 'Search for images...'}
+				placeholder={selectedRegistry ? m.registry_search_placeholder_named({ name: selectedRegistry.name }) : m.registry_search_placeholder()}
 				bind:value={searchTerm}
 				onkeydown={handleKeydown}
 				class="pl-10"
@@ -644,7 +645,7 @@
 			{:else}
 				<Search class="w-4 h-4" />
 			{/if}
-			Search
+			{m.registry_search()}
 		</Button>
 		{#if supportsBrowsing()}
 			<Button variant="outline" onclick={() => browse()} disabled={loading || browsing}>
@@ -653,24 +654,24 @@
 				{:else}
 					<List class="w-4 h-4" />
 				{/if}
-				Browse
+				{m.registry_browse()}
 			</Button>
 		{/if}
 	</div>
 
 	<!-- Results -->
 	{#if loading || browsing}
-		<p class="text-muted-foreground text-sm">{browsing ? 'Loading catalog...' : 'Searching...'}</p>
+		<p class="text-muted-foreground text-sm">{browsing ? m.registry_loading_catalog() : m.registry_searching()}</p>
 	{:else if errorMessage}
 		<p class="text-red-600 dark:text-red-400 text-sm">{errorMessage}</p>
 	{:else if searched && results.length === 0}
 		<div class="text-sm">
 			<p class="text-muted-foreground">
-				{browseMode ? 'No images found in this registry' : `No images found for "${searchTerm}"`}
+				{browseMode ? m.registry_no_images_in_registry() : m.registry_no_images_for_term({ term: searchTerm })}
 			</p>
 			{#if !browseMode && supportsBrowsing()}
 				<p class="text-muted-foreground mt-2">
-					Tip: Large registries don't support search. Try <button class="text-primary underline" onclick={() => browse()}>Browse</button> and use the filter to find images.
+					{m.registry_search_tip_before()} <button class="text-primary underline" onclick={() => browse()}>{m.registry_search_tip_link()}</button> {m.registry_search_tip_after()}
 				</p>
 			{/if}
 		</div>
@@ -678,11 +679,11 @@
 		<!-- Browse mode filter -->
 		{#if browseMode}
 			<div class="shrink-0 flex items-center gap-2 text-sm">
-				<SearchInput bind:value={browseFilter} placeholder="Filter results..." class="h-8 text-xs" containerClass="flex-1 max-w-xs" />
+				<SearchInput bind:value={browseFilter} placeholder={m.registry_filter_placeholder()} class="h-8 text-xs" containerClass="flex-1 max-w-xs" />
 				<span class="text-muted-foreground text-xs">
 					{filteredResults.length === results.length
-						? `${results.length} images`
-						: `${filteredResults.length} of ${results.length} images`}
+						? m.registry_images_count({ count: results.length })
+						: m.registry_images_filtered_count({ filtered: filteredResults.length, count: results.length })}
 				</span>
 			</div>
 		{/if}
@@ -693,11 +694,11 @@
 			<table class="w-full text-sm">
 				<thead class="bg-muted sticky top-0 z-10">
 					<tr class="border-b">
-						<th class="text-left py-1.5 px-2 font-medium">Name</th>
+						<th class="text-left py-1.5 px-2 font-medium">{m.registry_col_name()}</th>
 						{#if !browseMode}
-							<th class="text-left py-1.5 px-2 font-medium">Description</th>
-							<th class="text-center py-1.5 px-2 font-medium w-16">Stars</th>
-							<th class="text-center py-1.5 px-2 font-medium w-20">Type</th>
+							<th class="text-left py-1.5 px-2 font-medium">{m.registry_col_description()}</th>
+							<th class="text-center py-1.5 px-2 font-medium w-16">{m.registry_col_stars()}</th>
+							<th class="text-center py-1.5 px-2 font-medium w-20">{m.registry_col_type()}</th>
 						{/if}
 					</tr>
 				</thead>
@@ -734,9 +735,9 @@
 								</td>
 								<td class="py-1.5 px-2 text-center">
 									{#if result.is_official}
-										<span class={getTypeClasses('official')}>Official</span>
+										<span class={getTypeClasses('official')}>{m.registry_type_official()}</span>
 									{:else if result.is_automated}
-										<span class={getTypeClasses('automated')}>Auto</span>
+										<span class={getTypeClasses('automated')}>{m.registry_type_automated()}</span>
 									{:else}
 										<span class="text-muted-foreground text-xs">-</span>
 									{/if}
@@ -750,7 +751,7 @@
 									{#if expandState?.loading}
 										<div class="flex items-center gap-2 text-xs text-muted-foreground py-2">
 											<Loader2 class="w-3.5 h-3.5 animate-spin" />
-											<span>Loading tags...</span>
+											<span>{m.registry_loading_tags()}</span>
 										</div>
 									{:else if expandState?.error}
 										<div class="text-xs text-red-500 py-2">
@@ -761,10 +762,10 @@
 											<table class="text-xs">
 												<thead class="text-muted-foreground sticky top-0 bg-background z-10">
 													<tr>
-														<th class="text-left py-1 px-2 pr-4 font-medium">Tag</th>
-														<th class="text-left py-1 px-2 pr-4 font-medium">Size</th>
-														<th class="text-left py-1 px-2 pr-4 font-medium">Modified</th>
-														<th class="text-left py-1 px-2 font-medium">Actions</th>
+														<th class="text-left py-1 px-2 pr-4 font-medium">{m.registry_col_tag()}</th>
+														<th class="text-left py-1 px-2 pr-4 font-medium">{m.registry_col_size()}</th>
+														<th class="text-left py-1 px-2 pr-4 font-medium">{m.registry_col_modified()}</th>
+														<th class="text-left py-1 px-2 font-medium">{m.registry_col_actions()}</th>
 													</tr>
 												</thead>
 												<tbody>
@@ -786,15 +787,15 @@
 																<div class="flex items-center gap-1">
 																	<button
 																		onclick={() => openPullModal(result.name, tag.name)}
-																		title={envHasScanning ? "Pull and scan this tag" : "Pull this tag"}
+																		title={envHasScanning ? m.registry_pull_scan_tag_title() : m.registry_pull_tag_title()}
 																		class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-muted transition-colors whitespace-nowrap"
 																	>
 																		<Download class="w-3 h-3 text-muted-foreground" />
-																		<span class="text-muted-foreground">{envHasScanning ? 'Pull & scan' : 'Pull'}</span>
+																		<span class="text-muted-foreground">{envHasScanning ? m.registry_pull_scan() : m.registry_pull()}</span>
 																	</button>
 																	<button
 																		onclick={() => openRunModal(result.name, tag.name)}
-																		title="Run container with this tag"
+																		title={m.registry_run_container_title()}
 																		class="p-1 rounded hover:bg-muted transition-colors"
 																	>
 																		<Play class="w-3 h-3 text-muted-foreground hover:text-foreground" />
@@ -802,7 +803,7 @@
 																	{#if pushableRegistries.length > 0}
 																		<button
 																			onclick={() => openCopyModal(result.name, tag.name)}
-																			title="Copy to another registry"
+																			title={m.registry_copy_to_other_title()}
 																			class="p-1 rounded hover:bg-muted transition-colors"
 																		>
 																			<Copy class="w-3 h-3 text-muted-foreground hover:text-foreground" />
@@ -811,15 +812,18 @@
 																	{#if supportsBrowsing()}
 																		{@const deleteKey = `${result.name}:${tag.name}`}
 																		<ConfirmPopover
-																			title="Delete tag"
+																			localized
+																			action={m.confirm_action_delete()}
+																			itemType={m.registry_item_tag()}
+																			title={m.registry_delete_tag_title()}
 																			description="Are you sure you want to delete {result.name}:{tag.name}? This cannot be undone."
-																			confirmText="Delete"
+																			confirmText={m.registry_delete_confirm()}
 																			open={confirmDeleteKey === deleteKey}
 																			onConfirm={() => deleteTag(result.name, tag.name)}
 																			onOpenChange={(open) => confirmDeleteKey = open ? deleteKey : null}
 																		>
 																			<button
-																				title="Delete this tag"
+																				title={m.registry_delete_tag_button_title()}
 																				class="p-1 rounded hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors"
 																				disabled={deleting}
 																			>
@@ -837,19 +841,19 @@
 											{#if expandState.loadingMore}
 												<div class="flex items-center justify-center py-2 text-xs text-muted-foreground">
 													<Loader2 class="w-3 h-3 animate-spin mr-2" />
-													Loading more...
+													{m.registry_loading_more()}
 												</div>
 											{/if}
 										</div>
 										<!-- Tags count -->
 										{#if expandState.total > 0}
 											<div class="text-xs text-muted-foreground pt-1">
-												{expandState.tags.length} of {expandState.total} tags loaded
+												{m.registry_tags_loaded({ loaded: expandState.tags.length, count: expandState.total })}
 											</div>
 										{/if}
 									{:else}
 										<div class="text-xs text-muted-foreground py-2">
-											No tags found
+											{m.registry_no_tags()}
 										</div>
 									{/if}
 								</td>
@@ -870,9 +874,9 @@
 				>
 					{#if loadingMore}
 						<Loader2 class="w-4 h-4 mr-2 animate-spin" />
-						Loading...
+						{m.registry_loading()}
 					{:else}
-						Load more images
+						{m.registry_load_more_images()}
 					{/if}
 				</Button>
 			</div>
@@ -882,9 +886,9 @@
 			<Download class="w-12 h-12 mx-auto mb-4 opacity-50" />
 			<p class="text-sm">
 				{#if supportsBrowsing()}
-					Search or browse {selectedRegistry?.name || 'a registry'} to find images
+					{selectedRegistry?.name ? m.registry_empty_search_browse_named({ name: selectedRegistry.name }) : m.registry_empty_search_browse()}
 				{:else}
-					Search {selectedRegistry?.name || 'a registry'} to find and pull images
+					{selectedRegistry?.name ? m.registry_empty_search_named({ name: selectedRegistry.name }) : m.registry_empty_search()}
 				{/if}
 			</p>
 		</div>
