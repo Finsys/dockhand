@@ -1,5 +1,13 @@
 [
   {
+    "version": "1.0.53",
+    "date": "2026-10-10",
+    "changes": [
+      { "type": "fix", "text": "remove the 1.0.52 PUID change that could alter stack file ownership on upgrade (#1700, #1701)" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.53"
+  },
+  {
     "version": "1.0.52",
     "date": "2026-10-10",
     "changes": [
