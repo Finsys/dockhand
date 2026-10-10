@@ -20,6 +20,7 @@
 		Unlock
 	} from 'lucide-svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Environment {
 		id: number;
@@ -131,7 +132,7 @@
 
 	async function createEnvironment() {
 		if (!formName.trim() || !formHost.trim()) {
-			formError = 'Name and host are required';
+			formError = m.environments_error_name_host_required();
 			return;
 		}
 
@@ -158,10 +159,10 @@
 				await fetchEnvironments();
 			} else {
 				const data = await response.json();
-				formError = data.error || 'Failed to create environment';
+				formError = data.error || m.environments_error_create_failed();
 			}
 		} catch (error) {
-			formError = 'Failed to create environment';
+			formError = m.environments_error_create_failed();
 		} finally {
 			formSaving = false;
 		}
@@ -169,7 +170,7 @@
 
 	async function updateEnvironment() {
 		if (!editingEnv || !formName.trim() || !formHost.trim()) {
-			formError = 'Name and host are required';
+			formError = m.environments_error_name_host_required();
 			return;
 		}
 
@@ -197,17 +198,17 @@
 				await fetchEnvironments();
 			} else {
 				const data = await response.json();
-				formError = data.error || 'Failed to update environment';
+				formError = data.error || m.environments_error_update_failed();
 			}
 		} catch (error) {
-			formError = 'Failed to update environment';
+			formError = m.environments_error_update_failed();
 		} finally {
 			formSaving = false;
 		}
 	}
 
 	async function deleteEnvironment(id: number) {
-		if (!confirm('Are you sure you want to delete this environment?')) return;
+		if (!confirm(m.environments_delete_confirm())) return;
 
 		try {
 			const response = await fetch(`/api/environments/${id}`, {
@@ -218,10 +219,10 @@
 				await fetchEnvironments();
 			} else {
 				const data = await response.json();
-				alert(data.error || 'Failed to delete environment');
+				alert(data.error || m.environments_error_delete_failed());
 			}
 		} catch (error) {
-			alert('Failed to delete environment');
+			alert(m.environments_error_delete_failed());
 		}
 	}
 
@@ -236,7 +237,7 @@
 			const result = await response.json();
 			testResults[id] = result;
 		} catch (error) {
-			testResults[id] = { success: false, error: 'Connection failed' };
+			testResults[id] = { success: false, error: m.environments_test_connection_failed() };
 		}
 		testResults = { ...testResults };
 	}
@@ -248,22 +249,22 @@
 
 <div class="space-y-4">
 	<div class="shrink-0 flex flex-wrap justify-between items-center gap-3 min-h-8">
-		<PageHeader icon={Globe} title="Environments">
-			<Badge variant="secondary" class="text-xs">{environments.length} total</Badge>
+		<PageHeader icon={Globe} title={m.dashboard_environments_title()}>
+			<Badge variant="secondary" class="text-xs">{m.environments_total_count({ count: environments.length })}</Badge>
 		</PageHeader>
 		<div class="flex gap-2">
 			<Button size="sm" onclick={openAddModal}>
 				<Plus class="w-4 h-4" />
-				Add environment
+				{m.dashboard_add_environment()}
 			</Button>
-			<Button size="sm" variant="outline" onclick={fetchEnvironments}>Refresh</Button>
+			<Button size="sm" variant="outline" onclick={fetchEnvironments}>{m.dashboard_refresh()}</Button>
 		</div>
 	</div>
 
 	{#if loading && environments.length === 0}
-		<p class="text-muted-foreground text-sm">Loading environments...</p>
+		<p class="text-muted-foreground text-sm">{m.dashboard_loading_environments()}</p>
 	{:else if environments.length === 0}
-		<p class="text-muted-foreground text-sm">No environments found</p>
+		<p class="text-muted-foreground text-sm">{m.environments_empty()}</p>
 	{:else}
 		<div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
 			{#each environments as env (env.id)}
@@ -282,7 +283,7 @@
 							{#if env.connectionType === 'socket' || !env.connectionType}
 								<span>{env.socketPath || '/var/run/docker.sock'}</span>
 							{:else if env.connectionType === 'hawser-edge'}
-								<span>Edge connection (outbound)</span>
+								<span>{m.environments_edge_connection_outbound()}</span>
 							{:else}
 								<span>{env.protocol || 'http'}://{env.host}:{env.port || 2375}</span>
 							{/if}
@@ -293,24 +294,24 @@
 								{#if testResult === 'testing'}
 									<div class="flex items-center gap-2 text-muted-foreground">
 										<RefreshCw class="w-4 h-4 animate-spin" />
-										<span>Testing connection...</span>
+										<span>{m.environments_testing_connection()}</span>
 									</div>
 								{:else if testResult.success}
 									<div class="flex items-center gap-2 text-green-600 dark:text-green-400">
 										<Wifi class="w-4 h-4" />
-										<span>Connected</span>
+										<span>{m.environments_test_connected()}</span>
 									</div>
 									{#if testResult.info}
 										<div class="mt-2 text-xs text-muted-foreground space-y-0.5">
-											<div>Host: {testResult.info.name}</div>
+											<div>{m.environments_test_info_host({ name: testResult.info.name })}</div>
 											<div>Docker: {testResult.info.serverVersion}</div>
-											<div>Containers: {testResult.info.containers} | Images: {testResult.info.images}</div>
+											<div>{m.environments_test_info_counts({ containers: testResult.info.containers, images: testResult.info.images })}</div>
 										</div>
 									{/if}
 								{:else}
 									<div class="flex items-center gap-2 text-red-600 dark:text-red-400">
 										<WifiOff class="w-4 h-4" />
-										<span>Failed</span>
+										<span>{m.environments_test_failed()}</span>
 									</div>
 									{#if testResult.error}
 										<div class="mt-1 text-xs text-muted-foreground">{testResult.error}</div>
@@ -331,7 +332,7 @@
 								{:else}
 									<Wifi class="w-3 h-3" />
 								{/if}
-								Test
+								{m.environments_test_button()}
 							</Button>
 							<Button
 								variant="outline"
@@ -359,7 +360,7 @@
 <Dialog.Root bind:open={showAddModal}>
 	<Dialog.Content class="max-w-md">
 		<Dialog.Header>
-			<Dialog.Title>Add environment</Dialog.Title>
+			<Dialog.Title>{m.dashboard_add_environment()}</Dialog.Title>
 		</Dialog.Header>
 		<div class="space-y-4">
 			{#if formError}
@@ -368,12 +369,12 @@
 
 			<!-- Quick URL parser -->
 			<div class="space-y-2 pb-3 border-b">
-				<Label for="quick-url">Quick URL (optional)</Label>
+				<Label for="quick-url">{m.environments_quick_url_label()}</Label>
 				<div class="flex gap-2">
 					<Input
 						id="quick-url"
 						bind:value={quickUrl}
-						placeholder="http://192.168.1.4:2375 or https://docker.example.com:2376"
+						placeholder={m.environments_quick_url_placeholder()}
 						class="flex-1"
 					/>
 					<Button
@@ -382,29 +383,29 @@
 						onclick={() => parseDockerUrl(quickUrl)}
 						disabled={!quickUrl.trim()}
 					>
-						Parse
+						{m.environments_parse_button()}
 					</Button>
 				</div>
 				<p class="text-xs text-muted-foreground">
-					Paste a full Docker URL to auto-fill the fields below
+					{m.environments_quick_url_hint()}
 				</p>
 			</div>
 
 			<div class="space-y-2">
-				<Label for="name">Name</Label>
-				<Input id="name" bind:value={formName} placeholder="Production server" />
+				<Label for="name">{m.environments_name_label()}</Label>
+				<Input id="name" bind:value={formName} placeholder={m.environments_name_placeholder()} />
 			</div>
 			<div class="space-y-2">
-				<Label for="host">Host</Label>
-				<Input id="host" bind:value={formHost} placeholder="192.168.1.100 or docker.example.com" />
+				<Label for="host">{m.environments_host_label()}</Label>
+				<Input id="host" bind:value={formHost} placeholder={m.environments_host_placeholder()} />
 			</div>
 			<div class="grid grid-cols-2 gap-4">
 				<div class="space-y-2">
-					<Label for="port">Port</Label>
+					<Label for="port">{m.environments_port_label()}</Label>
 					<Input id="port" type="number" bind:value={formPort} />
 				</div>
 				<div class="space-y-2">
-					<Label for="protocol">Protocol</Label>
+					<Label for="protocol">{m.environments_protocol_label()}</Label>
 					<Select.Root type="single" bind:value={formProtocol}>
 						<Select.Trigger class="w-full h-9">
 							{#if formProtocol === 'https'}
@@ -429,9 +430,9 @@
 			</div>
 			{#if formProtocol === 'https'}
 				<div class="space-y-4 pt-2 border-t">
-					<p class="text-xs text-muted-foreground">TLS certificates (optional)</p>
+					<p class="text-xs text-muted-foreground">{m.environments_tls_certificates_optional()}</p>
 					<div class="space-y-2">
-						<Label for="tls_ca">CA certificate</Label>
+						<Label for="tls_ca">{m.environments_tls_ca_label()}</Label>
 						<textarea
 							id="tls_ca"
 							bind:value={formTlsCa}
@@ -440,7 +441,7 @@
 						></textarea>
 					</div>
 					<div class="space-y-2">
-						<Label for="tls_cert">Client certificate</Label>
+						<Label for="tls_cert">{m.environments_tls_cert_label()}</Label>
 						<textarea
 							id="tls_cert"
 							bind:value={formTlsCert}
@@ -449,7 +450,7 @@
 						></textarea>
 					</div>
 					<div class="space-y-2">
-						<Label for="tls_key">Client key</Label>
+						<Label for="tls_key">{m.environments_tls_key_label()}</Label>
 						<textarea
 							id="tls_key"
 							bind:value={formTlsKey}
@@ -461,14 +462,14 @@
 			{/if}
 		</div>
 		<Dialog.Footer>
-			<Button variant="outline" onclick={() => (showAddModal = false)}>Cancel</Button>
+			<Button variant="outline" onclick={() => (showAddModal = false)}>{m.environments_cancel()}</Button>
 			<Button onclick={createEnvironment} disabled={formSaving}>
 				{#if formSaving}
 					<RefreshCw class="w-4 h-4 mr-1 animate-spin" />
 				{:else}
 					<Plus class="w-4 h-4" />
 				{/if}
-				Add
+				{m.environments_add_button()}
 			</Button>
 		</Dialog.Footer>
 	</Dialog.Content>
@@ -478,7 +479,7 @@
 <Dialog.Root bind:open={showEditModal}>
 	<Dialog.Content class="max-w-md">
 		<Dialog.Header>
-			<Dialog.Title>Edit environment</Dialog.Title>
+			<Dialog.Title>{m.environments_edit_title()}</Dialog.Title>
 		</Dialog.Header>
 		<div class="space-y-4">
 			{#if formError}
@@ -487,12 +488,12 @@
 
 			<!-- Quick URL parser -->
 			<div class="space-y-2 pb-3 border-b">
-				<Label for="edit-quick-url">Quick URL (optional)</Label>
+				<Label for="edit-quick-url">{m.environments_quick_url_label()}</Label>
 				<div class="flex gap-2">
 					<Input
 						id="edit-quick-url"
 						bind:value={quickUrl}
-						placeholder="http://192.168.1.4:2375 or https://docker.example.com:2376"
+						placeholder={m.environments_quick_url_placeholder()}
 						class="flex-1"
 					/>
 					<Button
@@ -501,29 +502,29 @@
 						onclick={() => parseDockerUrl(quickUrl)}
 						disabled={!quickUrl.trim()}
 					>
-						Parse
+						{m.environments_parse_button()}
 					</Button>
 				</div>
 				<p class="text-xs text-muted-foreground">
-					Paste a full Docker URL to auto-fill the fields below
+					{m.environments_quick_url_hint()}
 				</p>
 			</div>
 
 			<div class="space-y-2">
-				<Label for="edit-name">Name</Label>
-				<Input id="edit-name" bind:value={formName} placeholder="Production server" />
+				<Label for="edit-name">{m.environments_name_label()}</Label>
+				<Input id="edit-name" bind:value={formName} placeholder={m.environments_name_placeholder()} />
 			</div>
 			<div class="space-y-2">
-				<Label for="edit-host">Host</Label>
+				<Label for="edit-host">{m.environments_host_label()}</Label>
 				<Input id="edit-host" bind:value={formHost} placeholder="192.168.1.100" />
 			</div>
 			<div class="grid grid-cols-2 gap-4">
 				<div class="space-y-2">
-					<Label for="edit-port">Port</Label>
+					<Label for="edit-port">{m.environments_port_label()}</Label>
 					<Input id="edit-port" type="number" bind:value={formPort} />
 				</div>
 				<div class="space-y-2">
-					<Label for="edit-protocol">Protocol</Label>
+					<Label for="edit-protocol">{m.environments_protocol_label()}</Label>
 					<Select.Root type="single" bind:value={formProtocol}>
 						<Select.Trigger class="w-full h-9">
 							{#if formProtocol === 'https'}
@@ -548,9 +549,9 @@
 			</div>
 			{#if formProtocol === 'https'}
 				<div class="space-y-4 pt-2 border-t">
-					<p class="text-xs text-muted-foreground">TLS certificates (optional)</p>
+					<p class="text-xs text-muted-foreground">{m.environments_tls_certificates_optional()}</p>
 					<div class="space-y-2">
-						<Label for="edit-tls_ca">CA certificate</Label>
+						<Label for="edit-tls_ca">{m.environments_tls_ca_label()}</Label>
 						<textarea
 							id="edit-tls_ca"
 							bind:value={formTlsCa}
@@ -559,7 +560,7 @@
 						></textarea>
 					</div>
 					<div class="space-y-2">
-						<Label for="edit-tls_cert">Client certificate</Label>
+						<Label for="edit-tls_cert">{m.environments_tls_cert_label()}</Label>
 						<textarea
 							id="edit-tls_cert"
 							bind:value={formTlsCert}
@@ -568,7 +569,7 @@
 						></textarea>
 					</div>
 					<div class="space-y-2">
-						<Label for="edit-tls_key">Client key</Label>
+						<Label for="edit-tls_key">{m.environments_tls_key_label()}</Label>
 						<textarea
 							id="edit-tls_key"
 							bind:value={formTlsKey}
@@ -580,14 +581,14 @@
 			{/if}
 		</div>
 		<Dialog.Footer>
-			<Button variant="outline" onclick={() => { showEditModal = false; editingEnv = null; }}>Cancel</Button>
+			<Button variant="outline" onclick={() => { showEditModal = false; editingEnv = null; }}>{m.environments_cancel()}</Button>
 			<Button onclick={updateEnvironment} disabled={formSaving}>
 				{#if formSaving}
 					<RefreshCw class="w-4 h-4 mr-1 animate-spin" />
 				{:else}
 					<Check class="w-4 h-4" />
 				{/if}
-				Save
+				{m.environments_save_button()}
 			</Button>
 		</Dialog.Footer>
 	</Dialog.Content>

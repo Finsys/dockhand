@@ -1,5 +1,5 @@
 <svelte:head>
-	<title>Backups - Dockhand</title>
+	<title>{m.nav_backups()} - Dockhand</title>
 </svelte:head>
 
 <script lang="ts">
@@ -38,6 +38,7 @@
 	import CreateBackupModal from './CreateBackupModal.svelte';
 	import EditBackupConfigModal from './EditBackupConfigModal.svelte';
 	import ContainerIcon from '$lib/components/ContainerIcon.svelte';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface BackupConfig {
 		key: string;
@@ -207,12 +208,12 @@
 			if (body?.stopped) {
 				logModalLogs = [...logModalLogs, '⚠ Backup cancelled by user'];
 				logModalStatus = 'error';
-				logModalError = 'Cancelled';
+				logModalError = m.backups_cancelled();
 			} else {
 				logModalLogs = [...logModalLogs, 'Backup is finishing and can no longer be cancelled.'];
-				toast.info('Backup was already finishing — it will complete.');
+				toast.info(m.backups_already_finishing());
 			}
-		} catch { toast.error('Failed to stop backup'); }
+		} catch { toast.error(m.backups_stop_failed()); }
 	}
 	let confirmDeleteSnapshot = $state<string | null>(null);
 	let deletingSnapshot = $state<string | null>(null);
@@ -366,7 +367,7 @@
 			});
 		} catch (error) {
 			console.error('Failed to fetch backup data:', error);
-			toast.error('Failed to load backups');
+			toast.error(m.backups_load_failed());
 		} finally {
 			loading = false;
 		}
@@ -506,7 +507,7 @@
 				newMap.set(key, Array.isArray(snapData) ? snapData : []);
 			} else {
 				newMap.set(key, []);
-				toast.error(cleanErrorMessage(snapError || 'Failed to load snapshots'));
+				toast.error(cleanErrorMessage(snapError || m.containers_snapshot_error_load()));
 			}
 			snapshotsMap = newMap;
 
@@ -529,7 +530,7 @@
 			const newMap = new Map(snapshotsMap);
 			newMap.set(key, []);
 			snapshotsMap = newMap;
-			toast.error('Failed to load snapshots');
+			toast.error(m.containers_snapshot_error_load());
 		} finally {
 			const newLoading = new Set(loadingSnapshots);
 			newLoading.delete(key);
@@ -560,7 +561,7 @@
 	async function runBackupNow(config: BackupConfig) {
 		runningBackup = config.id;
 		lastError = null;
-		logModalTitle = `Backup: ${config.targetName}`;
+		logModalTitle = m.backups_log_title({ name: config.targetName });
 		logModalConfigId = config.id;
 		logModalStatus = 'running';
 		logModalLogs = [];
@@ -594,17 +595,17 @@
 				const { outcome, message } = classifyJobResult(result);
 				if (outcome === 'error') {
 					logModalStatus = 'error';
-					logModalError = message || 'Backup failed';
-					lastError = { configId: config.id, message: message || 'Backup failed' };
+					logModalError = message || m.containers_backup_failed();
+					lastError = { configId: config.id, message: message || m.containers_backup_failed() };
 				} else if (outcome === 'skipped') {
 					// Rejected (already running, or retention would wipe) — not a success.
 					logModalStatus = 'error';
-					logModalError = message || 'Backup skipped';
-					toast.info(message || 'Backup skipped');
+					logModalError = message || m.containers_backup_skipped();
+					toast.info(message || m.containers_backup_skipped());
 				} else {
 					logModalStatus = 'success';
-					if (outcome === 'warning') toast.warning(message || `Backup completed with warnings for ${config.targetName}`);
-					else toast.success(`Backup completed for ${config.targetName}`);
+					if (outcome === 'warning') toast.warning(message || m.backups_completed_with_warnings_for({ name: config.targetName }));
+					else toast.success(m.containers_backup_completed_for({ name: config.targetName }));
 				}
 				loadSnapshots(config);
 				fetchData();
@@ -615,8 +616,8 @@
 			}
 		} catch (err: any) {
 			logModalStatus = 'error';
-			logModalError = err.message || 'Failed to start backup';
-			lastError = { configId: config.id, message: err.message || 'Failed to start backup' };
+			logModalError = err.message || m.containers_backup_start_failed();
+			lastError = { configId: config.id, message: err.message || m.containers_backup_start_failed() };
 		} finally {
 			runningBackup = null;
 		}
@@ -644,12 +645,12 @@
 				body: JSON.stringify({ enabled: !config.enabled })
 			});
 			if (res.ok) {
-				toast.success(config.enabled ? 'Schedule paused' : 'Schedule resumed');
+				toast.success(config.enabled ? m.containers_backup_schedule_paused() : m.containers_backup_schedule_resumed());
 				fetchData();
 			} else {
-				toast.error('Failed to update schedule');
+				toast.error(m.containers_backup_schedule_update_failed());
 			}
-		} catch { toast.error('Failed to update schedule'); }
+		} catch { toast.error(m.containers_backup_schedule_update_failed()); }
 		togglingConfig = null;
 	}
 
@@ -662,14 +663,14 @@
 			if (res.ok) {
 				const data = await res.json().catch(() => ({}));
 				const n = data.snapshots?.deleted ?? 0;
-				toast.success(`Backup config removed for ${config.targetName}${withSnaps ? ` (${n} snapshot${n === 1 ? '' : 's'} deleted)` : ''}`);
+				toast.success(withSnaps ? m.backups_config_removed_with_snapshots({ name: config.targetName, count: n }) : m.backups_config_removed({ name: config.targetName }));
 				fetchData();
 			} else {
 				const data = await res.json().catch(() => ({}));
-				toast.error(data.error || 'Failed to delete backup config');
+				toast.error(data.error || m.backups_config_delete_failed());
 			}
 		} catch (err: any) {
-			toast.error(err?.message || 'Failed to delete backup config');
+			toast.error(err?.message || m.backups_config_delete_failed());
 		} finally {
 			deletingConfig = null;
 			confirmDeleteConfig = null;
@@ -685,7 +686,7 @@
 				method: 'DELETE'
 			});
 			if (res.ok) {
-				toast.success('Snapshot deleted');
+				toast.success(m.containers_snapshot_deleted());
 				await loadSnapshots(config);
 				// Update the async snapshot count (keyed per config, matching the column)
 				const loaded = snapshotsMap.get(config.key);
@@ -694,10 +695,10 @@
 				}
 			} else {
 				const data = await res.json();
-				toast.error(data.error || 'Failed to delete snapshot');
+				toast.error(data.error || m.containers_snapshot_error_delete());
 			}
 		} catch {
-			toast.error('Failed to delete snapshot');
+			toast.error(m.containers_snapshot_error_delete());
 		} finally {
 			deletingSnapshot = null;
 			confirmDeleteSnapshot = null;
@@ -747,28 +748,28 @@
 
 <div class="flex-1 min-h-0 flex flex-col gap-3 overflow-hidden">
 	<div class="shrink-0 flex flex-wrap justify-between items-center gap-3 min-h-8">
-		<PageHeader title="Backups" icon={Archive} count={filteredConfigs.length}>
+		<PageHeader title={m.nav_backups()} icon={Archive} count={filteredConfigs.length}>
 			{#if loading}
 				<span class="flex items-center gap-1.5 text-xs text-muted-foreground">
 					<Loader2 class="w-3.5 h-3.5 animate-spin" />
-					Loading…
+					{m.backups_loading()}
 				</span>
 			{:else if snapshotCountsLoading}
 				<SnapshotLoadProgress done={snapshotCountsDone} total={snapshotCountsTotal} />
 			{/if}
 		</PageHeader>
 		<div class="flex flex-wrap items-center gap-2">
-			<SearchInput bind:value={searchQuery} placeholder="Filter backups..." class="h-8 w-48 text-sm" />
+			<SearchInput bind:value={searchQuery} placeholder={m.backups_filter_placeholder()} class="h-8 w-48 text-sm" />
 			<Select.Root type="single" value={filterType} onValueChange={(v) => { filterType = v === 'all' ? '' : v; }}>
 				<Select.Trigger class="h-8 w-32 text-xs">
-					{#if filterType === 'container'}<Box class="w-3 h-3 mr-1 text-muted-foreground" />Containers
-					{:else if filterType === 'stack'}<Layers class="w-3 h-3 mr-1 text-muted-foreground" />Stacks
-					{:else}All types{/if}
+					{#if filterType === 'container'}<Box class="w-3 h-3 mr-1 text-muted-foreground" />{m.nav_containers()}
+					{:else if filterType === 'stack'}<Layers class="w-3 h-3 mr-1 text-muted-foreground" />{m.nav_stacks()}
+					{:else}{m.backups_filter_all_types()}{/if}
 				</Select.Trigger>
 				<Select.Content>
-					<Select.Item value="all">All types</Select.Item>
-					<Select.Item value="container"><Box class="w-3 h-3 mr-1.5 inline text-muted-foreground" />Containers</Select.Item>
-					<Select.Item value="stack"><Layers class="w-3 h-3 mr-1.5 inline text-muted-foreground" />Stacks</Select.Item>
+					<Select.Item value="all">{m.backups_filter_all_types()}</Select.Item>
+					<Select.Item value="container"><Box class="w-3 h-3 mr-1.5 inline text-muted-foreground" />{m.nav_containers()}</Select.Item>
+					<Select.Item value="stack"><Layers class="w-3 h-3 mr-1.5 inline text-muted-foreground" />{m.nav_stacks()}</Select.Item>
 				</Select.Content>
 			</Select.Root>
 			<Select.Root type="single" value={filterEnvId} onValueChange={(v) => { filterEnvId = v === 'all' ? '' : v; }}>
@@ -776,10 +777,10 @@
 					{@const env = environments.find(e => String(e.id) === filterEnvId)}
 					{#if env}
 						<EnvironmentIcon icon={env.icon || 'globe'} envId={env.id} class="w-3 h-3 mr-1 text-muted-foreground" />{env.name}
-					{:else}All envs{/if}
+					{:else}{m.backups_filter_all_envs()}{/if}
 				</Select.Trigger>
 				<Select.Content>
-					<Select.Item value="all">All environments</Select.Item>
+					<Select.Item value="all">{m.backups_filter_all_environments()}</Select.Item>
 					{#each environments as env}
 						<Select.Item value={String(env.id)}>
 							<EnvironmentIcon icon={env.icon || 'globe'} envId={env.id} class="w-3 h-3 mr-1.5 inline text-muted-foreground" />{env.name}
@@ -790,10 +791,10 @@
 			<Select.Root type="single" value={filterDestId} onValueChange={(v) => { filterDestId = v === 'all' ? '' : v; }}>
 				<Select.Trigger class="h-8 w-36 text-xs">
 					{@const dest = destinations.find(d => String(d.id) === filterDestId)}
-					{#if dest}{dest.name}{:else}All repos{/if}
+					{#if dest}{dest.name}{:else}{m.backups_filter_all_repos()}{/if}
 				</Select.Trigger>
 				<Select.Content>
-					<Select.Item value="all">All repositories</Select.Item>
+					<Select.Item value="all">{m.containers_snapshot_all_repositories()}</Select.Item>
 					{#each destinations as dest}
 						<Select.Item value={String(dest.id)}>{dest.name}</Select.Item>
 					{/each}
@@ -801,25 +802,25 @@
 			</Select.Root>
 			<Select.Root type="single" value={filterStatus} onValueChange={(v) => { filterStatus = v === 'all' ? '' : v; }}>
 				<Select.Trigger class="h-8 w-32 text-xs">
-					{#if filterStatus === 'success'}<CheckCircle class="w-3 h-3 mr-1 text-green-500" />Success
-					{:else if filterStatus === 'failed'}<XCircle class="w-3 h-3 mr-1 text-destructive" />Failed
-					{:else if filterStatus === 'orphan'}<AlertCircle class="w-3 h-3 mr-1 text-amber-500" />No schedule
-					{:else if filterStatus === 'scheduled'}<Clock class="w-3 h-3 mr-1 text-muted-foreground" />Scheduled
-					{:else}All status{/if}
+					{#if filterStatus === 'success'}<CheckCircle class="w-3 h-3 mr-1 text-green-500" />{m.backups_filter_success()}
+					{:else if filterStatus === 'failed'}<XCircle class="w-3 h-3 mr-1 text-destructive" />{m.backups_filter_failed()}
+					{:else if filterStatus === 'orphan'}<AlertCircle class="w-3 h-3 mr-1 text-amber-500" />{m.backups_filter_no_schedule()}
+					{:else if filterStatus === 'scheduled'}<Clock class="w-3 h-3 mr-1 text-muted-foreground" />{m.backups_filter_scheduled()}
+					{:else}{m.backups_filter_all_status()}{/if}
 				</Select.Trigger>
 				<Select.Content>
-					<Select.Item value="all">All status</Select.Item>
-					<Select.Item value="success"><CheckCircle class="w-3 h-3 mr-1 inline text-green-500" />Success</Select.Item>
-					<Select.Item value="failed"><XCircle class="w-3 h-3 mr-1 inline text-destructive" />Failed</Select.Item>
-					<Select.Item value="orphan"><AlertCircle class="w-3 h-3 mr-1 inline text-amber-500" />No schedule</Select.Item>
-					<Select.Item value="scheduled"><Clock class="w-3 h-3 mr-1 inline text-muted-foreground" />Scheduled</Select.Item>
+					<Select.Item value="all">{m.backups_filter_all_status()}</Select.Item>
+					<Select.Item value="success"><CheckCircle class="w-3 h-3 mr-1 inline text-green-500" />{m.backups_filter_success()}</Select.Item>
+					<Select.Item value="failed"><XCircle class="w-3 h-3 mr-1 inline text-destructive" />{m.backups_filter_failed()}</Select.Item>
+					<Select.Item value="orphan"><AlertCircle class="w-3 h-3 mr-1 inline text-amber-500" />{m.backups_filter_no_schedule()}</Select.Item>
+					<Select.Item value="scheduled"><Clock class="w-3 h-3 mr-1 inline text-muted-foreground" />{m.backups_filter_scheduled()}</Select.Item>
 				</Select.Content>
 			</Select.Root>
 			<Button size="sm" variant="outline" onclick={fetchData} disabled={loading}>
 				<RefreshCw class="w-3.5 h-3.5 {loading ? 'animate-spin' : ''}" />
 			</Button>
 			<Button size="sm" onclick={() => showCreateModal = true}>
-				<Package class="w-3.5 h-3.5 mr-1" />Backup
+				<Package class="w-3.5 h-3.5 mr-1" />{m.backups_new_backup()}
 			</Button>
 		</div>
 	</div>
@@ -827,22 +828,22 @@
 	{#if !loading && configs.length > 0}
 		<div class="shrink-0 flex flex-wrap items-center gap-3 text-xs text-muted-foreground px-1 pb-1">
 			{#if healthStats.healthy > 0}
-				<span class="flex items-center gap-1"><CheckCircle class="w-3 h-3 text-green-500" />{healthStats.healthy} healthy</span>
+				<span class="flex items-center gap-1"><CheckCircle class="w-3 h-3 text-green-500" />{m.backups_stats_healthy({ count: healthStats.healthy })}</span>
 			{/if}
 			{#if healthStats.failed > 0}
-				<span class="flex items-center gap-1"><XCircle class="w-3 h-3 text-destructive" />{healthStats.failed} failed</span>
+				<span class="flex items-center gap-1"><XCircle class="w-3 h-3 text-destructive" />{m.backups_stats_failed({ count: healthStats.failed })}</span>
 			{/if}
 			{#if healthStats.stale > 0}
-				<span class="flex items-center gap-1"><AlertCircle class="w-3 h-3 text-amber-500" />{healthStats.stale} stale</span>
+				<span class="flex items-center gap-1"><AlertCircle class="w-3 h-3 text-amber-500" />{m.backups_stats_stale({ count: healthStats.stale })}</span>
 			{/if}
 			{#if healthStats.neverRun > 0}
-				<span class="flex items-center gap-1"><Clock class="w-3 h-3" />{healthStats.neverRun} never run</span>
+				<span class="flex items-center gap-1"><Clock class="w-3 h-3" />{m.backups_stats_never_run({ count: healthStats.neverRun })}</span>
 			{/if}
 			{#if healthStats.orphans > 0}
-				<span class="flex items-center gap-1"><AlertCircle class="w-3 h-3 text-amber-500" />{healthStats.orphans} orphan{healthStats.orphans !== 1 ? 's' : ''}</span>
+				<span class="flex items-center gap-1"><AlertCircle class="w-3 h-3 text-amber-500" />{m.backups_stats_orphans({ count: healthStats.orphans })}</span>
 			{/if}
 			<span class="text-muted-foreground/50">·</span>
-			<span>{healthStats.scheduled} scheduled</span>
+			<span>{m.backups_stats_scheduled({ count: healthStats.scheduled })}</span>
 		</div>
 	{/if}
 
@@ -850,8 +851,8 @@
 	{#if configs.length === 0 && orphanTargets.length === 0 && !loading && !snapshotCountsLoading}
 		<div class="flex flex-col items-center justify-center py-16 text-center">
 			<Archive class="w-12 h-12 text-muted-foreground/30 mb-4" />
-			<h3 class="text-lg font-medium mb-1">No backups configured</h3>
-			<p class="text-sm text-muted-foreground">Configure backups on individual containers or stacks via their edit modal.</p>
+			<h3 class="text-lg font-medium mb-1">{m.backups_empty_title()}</h3>
+			<p class="text-sm text-muted-foreground">{m.backups_empty_hint()}</p>
 		</div>
 	{:else}
 		<!-- virtualScroll is OFF here on purpose: it assumes a fixed rowHeight, but an
@@ -894,9 +895,9 @@
 				{:else if column.id === 'type'}
 					<div class="flex justify-center">
 						{#if config.type === 'container'}
-							<Tooltip.Root><Tooltip.Trigger><Box class="w-3 h-3 text-muted-foreground" /></Tooltip.Trigger><Tooltip.Content>Container backup</Tooltip.Content></Tooltip.Root>
+							<Tooltip.Root><Tooltip.Trigger><Box class="w-3 h-3 text-muted-foreground" /></Tooltip.Trigger><Tooltip.Content>{m.backups_type_container_backup()}</Tooltip.Content></Tooltip.Root>
 						{:else}
-							<Tooltip.Root><Tooltip.Trigger><Layers class="w-3 h-3 text-muted-foreground" /></Tooltip.Trigger><Tooltip.Content>Stack backup</Tooltip.Content></Tooltip.Root>
+							<Tooltip.Root><Tooltip.Trigger><Layers class="w-3 h-3 text-muted-foreground" /></Tooltip.Trigger><Tooltip.Content>{m.backups_type_stack_backup()}</Tooltip.Content></Tooltip.Root>
 						{/if}
 					</div>
 				{:else if column.id === 'environment'}
@@ -938,7 +939,7 @@
 					{#if config.lastBackupAt}
 						<span class="text-xs">{formatDateTime(config.lastBackupAt)} <span class="text-muted-foreground opacity-60">({formatRelativeTime(config.lastBackupAt)})</span></span>
 					{:else}
-						<span class="text-xs text-muted-foreground">Never</span>
+						<span class="text-xs text-muted-foreground">{m.backups_never()}</span>
 					{/if}
 				{:else if column.id === 'retention'}
 					{@const summary = retentionSummary(config.retention)}
@@ -949,7 +950,7 @@
 					{/if}
 				{:else if column.id === 'schedule'}
 					{#if config.isOrphan}
-						<span class="text-xs text-amber-500">no schedule</span>
+						<span class="text-xs text-amber-500">{m.backups_schedule_none()}</span>
 					{:else if config.schedule}
 						<span class="text-xs text-muted-foreground" title={config.schedule}>{formatCron(config.schedule, cronstrueLocale())}</span>
 					{:else}
@@ -958,15 +959,15 @@
 				{:else if column.id === 'status'}
 					<div class="flex items-center justify-center">
 						{#if config.isOrphan}
-							<Tooltip.Root><Tooltip.Trigger><AlertCircle class="w-3 h-3 text-amber-500" /></Tooltip.Trigger><Tooltip.Content>No schedule — snapshots found in repository</Tooltip.Content></Tooltip.Root>
+							<Tooltip.Root><Tooltip.Trigger><AlertCircle class="w-3 h-3 text-amber-500" /></Tooltip.Trigger><Tooltip.Content>{m.backups_status_orphan()}</Tooltip.Content></Tooltip.Root>
 						{:else if runningBackup === config.id}
-							<Tooltip.Root><Tooltip.Trigger><Loader2 class="w-3 h-3 text-primary animate-spin" /></Tooltip.Trigger><Tooltip.Content>Backup in progress</Tooltip.Content></Tooltip.Root>
+							<Tooltip.Root><Tooltip.Trigger><Loader2 class="w-3 h-3 text-primary animate-spin" /></Tooltip.Trigger><Tooltip.Content>{m.backups_status_in_progress()}</Tooltip.Content></Tooltip.Root>
 						{:else if config.lastBackupStatus === 'success'}
-							<Tooltip.Root><Tooltip.Trigger><CheckCircle class="w-3 h-3 text-green-500" /></Tooltip.Trigger><Tooltip.Content>Last backup succeeded</Tooltip.Content></Tooltip.Root>
+							<Tooltip.Root><Tooltip.Trigger><CheckCircle class="w-3 h-3 text-green-500" /></Tooltip.Trigger><Tooltip.Content>{m.backups_status_last_succeeded()}</Tooltip.Content></Tooltip.Root>
 						{:else if config.lastBackupStatus === 'failed'}
-							<Tooltip.Root><Tooltip.Trigger><XCircle class="w-3 h-3 text-destructive" /></Tooltip.Trigger><Tooltip.Content>Last backup failed</Tooltip.Content></Tooltip.Root>
+							<Tooltip.Root><Tooltip.Trigger><XCircle class="w-3 h-3 text-destructive" /></Tooltip.Trigger><Tooltip.Content>{m.backups_status_last_failed()}</Tooltip.Content></Tooltip.Root>
 						{:else}
-							<Tooltip.Root><Tooltip.Trigger><AlertCircle class="w-3 h-3 text-muted-foreground" /></Tooltip.Trigger><Tooltip.Content>No backup run yet</Tooltip.Content></Tooltip.Root>
+							<Tooltip.Root><Tooltip.Trigger><AlertCircle class="w-3 h-3 text-muted-foreground" /></Tooltip.Trigger><Tooltip.Content>{m.backups_status_never_run()}</Tooltip.Content></Tooltip.Root>
 						{/if}
 					</div>
 				{:else if column.id === 'actions'}
@@ -975,22 +976,23 @@
 					<div class="flex items-center justify-end gap-1" onclick={(e) => e.stopPropagation()}>
 						{#if !config.isOrphan}
 							{#if config.schedule}
-								<button type="button" class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100" onclick={() => togglePause(config)} disabled={togglingConfig === config.id} title={config.enabled ? 'Pause schedule' : 'Resume schedule'}>
+								<button type="button" class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100" onclick={() => togglePause(config)} disabled={togglingConfig === config.id} title={config.enabled ? m.containers_backup_pause_schedule() : m.containers_backup_resume_schedule()}>
 									{#if togglingConfig === config.id}<RefreshCw class="w-3 h-3 text-muted-foreground animate-spin" />{:else if config.enabled}<Pause class="w-3 h-3 text-muted-foreground" />{:else}<RotateCwFadingClock class="w-3 h-3 text-muted-foreground" />{/if}
 								</button>
 							{/if}
-							<button type="button" class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100" onclick={() => { editConfig = config; editModalOpen = true; }} title="Edit backup">
+							<button type="button" class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100" onclick={() => { editConfig = config; editModalOpen = true; }} title={m.backups_edit_backup()}>
 								<Pencil class="w-3 h-3 text-muted-foreground" />
 							</button>
-							<button type="button" class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100" onclick={() => runBackupNow(config)} disabled={runningBackup === config.id} title="Run backup now">
+							<button type="button" class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100" onclick={() => runBackupNow(config)} disabled={runningBackup === config.id} title={m.backups_run_backup_now()}>
 								{#if runningBackup === config.id}<RefreshCw class="w-3 h-3 text-muted-foreground animate-spin" />{:else}<Play class="w-3 h-3 text-muted-foreground" />{/if}
 							</button>
 							<ConfirmPopover
 								open={confirmDeleteConfig === config.id}
-								action="Delete"
-								itemType="backup config"
+								localized
+								action={m.confirm_action_delete()}
+								itemType={m.backups_item_backup_config()}
 								itemName={config.targetName}
-								title={deleteConfigSnapshots ? 'Snapshots will be deleted too.' : 'Existing snapshots are kept.'}
+								title={deleteConfigSnapshots ? m.containers_backup_delete_title_with_snapshots() : m.backups_delete_title_keep_snapshots()}
 								position="left"
 								onConfirm={() => deleteConfig(config)}
 								onOpenChange={(open) => { confirmDeleteConfig = open ? config.id : null; if (open) deleteConfigSnapshots = false; }}
@@ -1004,8 +1006,8 @@
 								{/snippet}
 								{#snippet extraContent()}
 									<label class="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
-										<Checkbox bind:checked={deleteConfigSnapshots} aria-label="Also delete snapshots" />
-										Also delete this config's snapshots
+										<Checkbox bind:checked={deleteConfigSnapshots} aria-label={m.containers_backup_also_delete_snapshots()} />
+										{m.containers_backup_also_delete_config_snapshots()}
 									</label>
 								{/snippet}
 							</ConfirmPopover>
@@ -1029,7 +1031,7 @@
 						</div>
 					{/if}
 					<div class="flex items-center gap-1.5 mb-2">
-						<h4 class="text-xs font-medium text-muted-foreground">Snapshots</h4>
+						<h4 class="text-xs font-medium text-muted-foreground">{m.backups_snapshots_heading()}</h4>
 						<!-- Hide the count while refreshing — the number is stale until the reload
 						     finishes; the table rows below stay visible in the meantime. Fades
 						     out on refresh, back in once the fresh count lands. -->
@@ -1040,7 +1042,7 @@
 						{#if snapshots.some((s) => selectedSnapshots.has(s.id))}
 							{@const n = snapshots.filter((s) => selectedSnapshots.has(s.id)).length}
 							<button type="button" class="ml-2 inline-flex items-center gap-1.5 rounded-md border border-destructive/40 px-2 py-0.5 text-xs text-destructive transition-colors hover:bg-destructive/10" onclick={() => openConfigBulk(config)}>
-								<Trash2 class="h-3 w-3" /> Delete selected ({n})
+								<Trash2 class="h-3 w-3" /> {m.containers_snapshot_delete_selected({ count: n })}
 							</button>
 						{/if}
 					</div>
@@ -1050,10 +1052,10 @@
 						     visible (the header refresh icon already spins to signal progress). -->
 						<div class="flex items-center gap-2 py-4 text-xs text-muted-foreground">
 							<Loader2 class="w-3.5 h-3.5 animate-spin" />
-							Loading snapshots…
+							{m.containers_snapshot_loading()}
 						</div>
 					{:else if snapshots.length === 0}
-						<p class="text-xs text-muted-foreground py-4">No snapshots yet. Run a backup to create one.</p>
+						<p class="text-xs text-muted-foreground py-4">{m.backups_no_snapshots()}</p>
 					{:else}
 							<div class="max-h-80 overflow-auto rounded border bg-background ml-4 w-fit max-w-full">
 							<table>
@@ -1064,14 +1066,14 @@
 												checked={snapshots.length > 0 && snapshots.every((s) => selectedSnapshots.has(s.id))}
 												indeterminate={snapshots.some((s) => selectedSnapshots.has(s.id)) && !snapshots.every((s) => selectedSnapshots.has(s.id))}
 												onCheckedChange={() => toggleConfigAll(config)}
-												aria-label="Select all snapshots"
+												aria-label={m.containers_snapshot_select_all()}
 											/>
 										</th>
-										<th class="text-left py-1.5 w-24" style="padding-left:8px">ID</th>
-										<th class="text-left py-1.5 w-40" style="padding-left:8px">Created</th>
-										<th class="text-left py-1.5 w-64" style="padding-left:8px">Stats</th>
-										<th class="text-left py-1.5 w-32" style="padding-left:8px">Repo</th>
-										<th class="text-right px-3 py-1.5 w-28">Actions</th>
+										<th class="text-left py-1.5 w-24" style="padding-left:8px">{m.backups_snapshot_col_id()}</th>
+										<th class="text-left py-1.5 w-40" style="padding-left:8px">{m.backups_snapshot_col_created()}</th>
+										<th class="text-left py-1.5 w-64" style="padding-left:8px">{m.backups_snapshot_col_stats()}</th>
+										<th class="text-left py-1.5 w-32" style="padding-left:8px">{m.backups_snapshot_col_repo()}</th>
+										<th class="text-right px-3 py-1.5 w-28">{m.containers_snapshot_col_actions()}</th>
 									</tr>
 								</thead>
 								<tbody>
@@ -1080,13 +1082,13 @@
 										{@const isDiffPending = diffPending?.snapshot.id === snapshot.id}
 										<tr class="border-b last:border-0 hover:bg-muted/30 text-xs {isDiffPending ? 'bg-primary/10' : ''} {selectedSnapshots.has(snapshot.id) ? 'bg-primary/5' : ''}">
 											<td class="py-1.5" style="padding-left:8px">
-												<Checkbox checked={selectedSnapshots.has(snapshot.id)} onCheckedChange={() => toggleSnapshotSel(snapshot.id)} aria-label="Select snapshot {snapshot.shortId}" />
+												<Checkbox checked={selectedSnapshots.has(snapshot.id)} onCheckedChange={() => toggleSnapshotSel(snapshot.id)} aria-label={m.containers_snapshot_select({ id: snapshot.shortId })} />
 											</td>
 											<td class="py-1.5 font-mono text-muted-foreground" style="padding-left:8px">{snapshot.shortId}</td>
 											<td class="py-1.5" style="padding-left:8px">{formatDateTime(snapshot.time)} <span class="text-muted-foreground opacity-60">({formatRelativeTime(snapshot.time)})</span></td>
 											<td class="py-1.5 text-muted-foreground" style="padding-left:8px">
 												{#if stats}
-													{stats.filesNew} new, {stats.filesChanged} changed · {formatBytes(stats.dataAdded)}
+													{m.backups_snapshot_stats({ filesNew: stats.filesNew, filesChanged: stats.filesChanged, size: formatBytes(stats.dataAdded) })}
 												{:else}
 													—
 												{/if}
@@ -1102,22 +1104,23 @@
 											<td class="px-3 py-1.5 text-right">
 												<div class="flex items-center justify-end gap-0.5">
 													{#if snapshots.length >= 2}
-														<button type="button" class="p-1 rounded transition-colors {isDiffPending ? 'bg-primary/20 text-primary' : 'hover:bg-muted'}" onclick={() => toggleDiffSnapshot(snapshot, config.destinationId)} title={isDiffPending ? 'Cancel compare' : diffPending ? 'Compare with selected' : 'Compare'}>
+														<button type="button" class="p-1 rounded transition-colors {isDiffPending ? 'bg-primary/20 text-primary' : 'hover:bg-muted'}" onclick={() => toggleDiffSnapshot(snapshot, config.destinationId)} title={isDiffPending ? m.containers_snapshot_compare_cancel() : diffPending ? m.containers_snapshot_compare_with_selected() : m.containers_snapshot_compare()}>
 															<ArrowLeftRight class="w-3 h-3 {isDiffPending ? 'text-primary' : 'text-muted-foreground'}" />
 														</button>
 													{/if}
-													<button type="button" class="p-1 rounded hover:bg-muted transition-colors" onclick={() => openBrowser(config, snapshot)} title="Browse files">
+													<button type="button" class="p-1 rounded hover:bg-muted transition-colors" onclick={() => openBrowser(config, snapshot)} title={m.containers_snapshot_browse_files()}>
 														<FolderOpen class="w-3 h-3 text-muted-foreground" />
 													</button>
-													<button type="button" class="p-1 rounded hover:bg-muted transition-colors" onclick={() => openRestore(config, snapshot)} title="Restore">
+													<button type="button" class="p-1 rounded hover:bg-muted transition-colors" onclick={() => openRestore(config, snapshot)} title={m.containers_snapshot_restore()}>
 														<RotateCcw class="w-3 h-3 text-muted-foreground" />
 													</button>
 													<ConfirmPopover
 														open={confirmDeleteSnapshot === snapshot.id}
-														action="Delete"
-														itemType="snapshot"
+														localized
+														action={m.confirm_action_delete()}
+														itemType={m.containers_item_snapshot()}
 														itemName={snapshot.shortId}
-														title="Delete snapshot"
+														title={m.containers_snapshot_delete_title()}
 														position="left"
 														onConfirm={() => deleteSnapshot(config, snapshot)}
 														onOpenChange={(open) => confirmDeleteSnapshot = open ? snapshot.id : null}
@@ -1138,7 +1141,7 @@
 										<tr>
 											<td colspan="5" class="py-1.5 text-center">
 												<button type="button" class="text-xs text-primary hover:underline" onclick={() => { snapshotLimits = new Map(snapshotLimits).set(key, (snapshotLimits.get(key) || SNAPSHOT_PAGE_SIZE) + SNAPSHOT_PAGE_SIZE); }}>
-													Show more ({snapshots.length - (snapshotLimits.get(key) || SNAPSHOT_PAGE_SIZE)} remaining)
+													{m.backups_show_more({ count: snapshots.length - (snapshotLimits.get(key) || SNAPSHOT_PAGE_SIZE) })}
 												</button>
 											</td>
 										</tr>

@@ -8,6 +8,7 @@
 	import { Loader2, Archive } from 'lucide-svelte';
 	import BackupPanel from '../containers/BackupPanel.svelte';
 	import { normalizeMounts, volumesForStack, type VolumeInfo } from '$lib/utils/mounts';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface EditTarget {
 		id: number;
@@ -62,7 +63,7 @@
 		<Dialog.Header class="pb-0">
 			<Dialog.Title class="flex items-center gap-2 text-base">
 				<Archive class="w-4 h-4" />
-				Edit backup — {config?.targetName ?? ''}
+				{m.backups_edit_title({ name: config?.targetName ?? '' })}
 			</Dialog.Title>
 		</Dialog.Header>
 
@@ -70,7 +71,7 @@
 			{#if config}
 				{#if loading}
 					<div class="flex items-center gap-2 p-4 text-sm text-muted-foreground">
-						<Loader2 class="w-4 h-4 animate-spin" /> Loading volumes…
+						<Loader2 class="w-4 h-4 animate-spin" /> {m.backups_edit_loading_volumes()}
 					</div>
 				{:else}
 					<BackupPanel

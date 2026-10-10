@@ -16,6 +16,7 @@
 	import StackFilesPicker from '$lib/components/backup/StackFilesPicker.svelte';
 	import DestinationPicker from '$lib/components/backup/DestinationPicker.svelte';
 	import { normalizeMounts, volumesForStack, type VolumeInfo } from '$lib/utils/mounts';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		open: boolean;
@@ -80,7 +81,7 @@
 			const res = await fetch(`/api/backup/stack-dir-listing?target=${encodeURIComponent(item.name)}${envQ}`);
 			stackListing = await res.json();
 		} catch (e) {
-			stackListing = { kind: 'unknown', reason: e instanceof Error ? e.message : 'probe failed' };
+			stackListing = { kind: 'unknown', reason: e instanceof Error ? e.message : m.containers_backup_probe_failed() };
 		} finally {
 			loadingStackListing = false;
 		}
@@ -192,18 +193,18 @@
 				enabled: saveSchedule
 			});
 			if (!result.ok || !result.configId) {
-				toast.error(result.error || 'Failed to save backup');
+				toast.error(result.error || m.backups_create_save_failed());
 				return;
 			}
 			onCreated?.();
 			if (run) {
 				onRun?.({ configId: result.configId, targetName: selectedItem.name });
 			} else {
-				toast.success('Schedule saved');
+				toast.success(m.backups_create_schedule_saved());
 			}
 			open = false;
 		} catch (err: any) {
-			toast.error(err?.message || 'Failed to save backup');
+			toast.error(err?.message || m.backups_create_save_failed());
 		} finally {
 			saving = false;
 		}
@@ -226,13 +227,13 @@
 	<Dialog.Content class="max-w-5xl h-[85vh] flex flex-col">
 		<Dialog.Header class="pb-0">
 			<Dialog.Title class="flex items-center gap-2 text-base">
-				<Package class="w-4 h-4" />Create backup
+				<Package class="w-4 h-4" />{m.backups_create_title()}
 			</Dialog.Title>
 			{#if selectedItem}
 				<Dialog.Description class="flex items-center gap-2 text-sm flex-wrap">
 					{#if selectedItem.type === 'container'}<Box class="w-4 h-4 text-blue-500" />{:else}<Layers class="w-4 h-4 text-purple-500" />{/if}
 					{selectedItem.name}
-					<span class="text-muted-foreground">on</span>
+					<span class="text-muted-foreground">{m.modalheader_on_env()}</span>
 					<EnvironmentIcon icon={selectedItem.envIcon || 'globe'} envId={selectedItem.envId} class="w-4 h-4 text-muted-foreground" />
 					<span class="text-muted-foreground">{selectedItem.envName}</span>
 					{#if selectedDest}
@@ -251,7 +252,7 @@
 				onclick={() => step = 1}
 			>
 				<Box class="w-4 h-4" />
-				Source
+				{m.backups_create_step_source()}
 				{#if selectedItem}
 					<CheckCircle2 class="w-3.5 h-3.5 text-green-500" />
 				{/if}
@@ -263,7 +264,7 @@
 				onclick={() => { if (selectedItem) step = 2; }}
 			>
 				<Settings class="w-4 h-4" />
-				Configure
+				{m.backups_create_step_configure()}
 				{#if selectedDestId}
 					<CheckCircle2 class="w-3.5 h-3.5 text-green-500" />
 				{/if}
@@ -275,7 +276,7 @@
 				onclick={() => { if (selectedItem && selectedDestId) step = 3; }}
 			>
 				<Clock class="w-4 h-4" />
-				Schedule & run
+				{m.backups_create_step_schedule()}
 			</button>
 		</div>
 
@@ -288,7 +289,7 @@
 						{@const env = environments.find(e => e.id === selectedEnvId)}
 						{#if env}
 							<EnvironmentIcon icon={env.icon || 'globe'} envId={env.id} class="w-3 h-3 mr-1 text-muted-foreground" />{env.name}
-						{:else}Select environment{/if}
+						{:else}{m.backups_create_select_environment()}{/if}
 					</Select.Trigger>
 					<Select.Content>
 						{#each environments as env}
@@ -299,7 +300,7 @@
 					</Select.Content>
 				</Select.Root>
 				{#if selectedEnvId}
-					<SearchInput bind:value={searchQuery} placeholder="Search containers and stacks..." class="h-8 text-xs" containerClass="flex-1" />
+					<SearchInput bind:value={searchQuery} placeholder={m.backups_create_search_placeholder()} class="h-8 text-xs" containerClass="flex-1" />
 				{/if}
 			</div>
 		{/if}
@@ -320,17 +321,17 @@
 								>
 									{#if item.type === 'container'}<Box class="w-3.5 h-3.5 text-muted-foreground shrink-0" />{:else}<Layers class="w-3.5 h-3.5 text-muted-foreground shrink-0" />{/if}
 									<span class="font-medium truncate">{item.name}</span>
-									<Badge variant="outline" class="text-xs ml-auto shrink-0">{item.type}</Badge>
+									<Badge variant="outline" class="text-xs ml-auto shrink-0">{item.type === 'stack' ? m.stacks_item_stack() : m.containers_item_container()}</Badge>
 									{#if item.volumes.length > 0}
-										<span class="text-xs text-muted-foreground shrink-0">{item.volumes.length} vol</span>
+										<span class="text-xs text-muted-foreground shrink-0">{m.backups_create_volume_count_short({ count: item.volumes.length })}</span>
 									{/if}
 								</button>
 							{/each}
 						</div>
 					{:else if selectedEnvId}
-						<p class="text-xs text-muted-foreground py-4 text-center">No containers or stacks found</p>
+						<p class="text-xs text-muted-foreground py-4 text-center">{m.backups_create_no_sources()}</p>
 					{:else}
-						<p class="text-xs text-muted-foreground py-4 text-center">Select an environment to see available sources</p>
+						<p class="text-xs text-muted-foreground py-4 text-center">{m.backups_create_select_environment_hint()}</p>
 					{/if}
 				</div>
 
@@ -338,7 +339,7 @@
 				<!-- Step 2: Configure -->
 				<div class="space-y-4">
 					<div class="space-y-1">
-						<Label class="text-xs">Backup repository</Label>
+						<Label class="text-xs">{m.backups_create_repository()}</Label>
 						<DestinationPicker
 							destinations={destinations}
 							bind:value={selectedDestId}
@@ -349,8 +350,8 @@
 					<div class="flex items-center gap-3">
 						<TogglePill bind:checked={stopBeforeBackup} />
 						<div>
-							<Label class="text-xs">Stop {selectedItem?.type || 'container'} during backup</Label>
-							<p class="text-xs text-muted-foreground">Ensures data consistency (will restart after)</p>
+							<Label class="text-xs">{selectedItem?.type === 'stack' ? m.containers_backup_stop_stack_during() : m.containers_backup_stop_container_during()}</Label>
+							<p class="text-xs text-muted-foreground">{m.backups_create_stop_hint()}</p>
 						</div>
 					</div>
 
@@ -372,14 +373,14 @@
 							volumes={selectedItem.volumes}
 							bind:allVolumes
 							bind:selectedVolumes
-							emptyLabel="No volumes detected on this {selectedItem.type}"
+							emptyLabel={selectedItem.type === 'stack' ? m.containers_backup_no_volumes_stack() : m.containers_backup_no_volumes_container()}
 							showBindWarning={true}
 						/>
 					{/if}
 
 					<div class="flex justify-end pt-2">
 						<Button size="sm" onclick={() => step = 3} disabled={!selectedDestId}>
-							Next <ArrowBigRight class="w-3.5 h-3.5 ml-1" />
+							{m.backups_create_next()} <ArrowBigRight class="w-3.5 h-3.5 ml-1" />
 						</Button>
 					</div>
 				</div>
@@ -389,19 +390,19 @@
 				<div class="flex flex-col gap-4 h-full">
 					<div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground pb-2 border-b">
 						{#if allVolumes}
-							<span>All volumes</span>
+							<span>{m.backups_create_all_volumes()}</span>
 						{:else}
-							<span>{selectedVolumes.length} volume{selectedVolumes.length !== 1 ? 's' : ''}</span>
+							<span>{m.backups_create_volumes_count({ count: selectedVolumes.length })}</span>
 						{/if}
 						{#if stopBeforeBackup}
 							<span class="text-muted-foreground">·</span>
-							<span>stop during backup</span>
+							<span>{m.backups_create_summary_stop()}</span>
 						{/if}
 					</div>
 
 					<div class="flex items-center gap-2">
 						<Checkbox checked={saveSchedule} onCheckedChange={() => { saveSchedule = !saveSchedule; }} />
-						<span class="text-xs">Save as recurring schedule</span>
+						<span class="text-xs">{m.backups_create_save_recurring()}</span>
 					</div>
 
 					{#if saveSchedule}
@@ -410,22 +411,22 @@
 						</div>
 					{:else}
 						<p class="pl-6 text-[11px] text-muted-foreground">
-							Runs once now. The backup stays on the list so you can re-run or remove it later — it just won't run on a schedule.
+							{m.backups_create_run_once_hint()}
 						</p>
 					{/if}
 
 					<div class="flex items-center gap-2 pt-2">
-						<Button variant="outline" size="sm" onclick={() => step = 2} disabled={saving}>Back</Button>
+						<Button variant="outline" size="sm" onclick={() => step = 2} disabled={saving}>{m.backups_create_back()}</Button>
 						<div class="flex-1"></div>
 						{#if saveSchedule}
 							<Button variant="outline" size="sm" onclick={() => saveAndMaybeRun(false)} disabled={saving || scheduleInvalid || stackHelperFailed}>
 								{#if saving}<Loader2 class="w-3.5 h-3.5 mr-1.5 animate-spin" />{:else}<CheckCircle2 class="w-3.5 h-3.5 mr-1.5" />{/if}
-								Save schedule only
+								{m.backups_create_save_schedule_only()}
 							</Button>
 						{/if}
 						<Button size="sm" onclick={() => saveAndMaybeRun(true)} disabled={saving || (saveSchedule && scheduleInvalid) || stackHelperFailed}>
 							{#if saving}<Loader2 class="w-3.5 h-3.5 mr-1.5 animate-spin" />{:else}<Play class="w-3.5 h-3.5 mr-1.5" />{/if}
-							{saveSchedule ? 'Run & save schedule' : 'Run backup now'}
+							{saveSchedule ? m.backups_create_run_and_save() : m.backups_run_backup_now()}
 						</Button>
 					</div>
 				</div>
