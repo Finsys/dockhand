@@ -13,6 +13,7 @@
 	// else — a rename pencil, a status badge — goes in the `extra` snippet,
 	// rendered inline after the env suffix.
 	import ContainerIcon from '$lib/components/ContainerIcon.svelte';
+	import { m } from '$lib/paraglide/messages.js';
 
 	let {
 		icon,
@@ -52,7 +53,7 @@
 		</Tooltip.Root>
 	{/if}
 	{#if env}
-		<span class="shrink-0">on <span class="text-amber-600 dark:text-amber-400">{env}</span></span>
+		<span class="shrink-0">{m.modalheader_on_env()} <span class="text-amber-600 dark:text-amber-400">{env}</span></span>
 	{/if}
 	{#if extra}
 		<span class="shrink-0 flex items-center gap-2">{@render extra()}</span>

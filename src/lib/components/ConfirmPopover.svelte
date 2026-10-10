@@ -4,6 +4,7 @@
 	import * as Popover from '$lib/components/ui/popover';
 	import type { Snippet } from 'svelte';
 	import { appSettings } from '$lib/stores/settings';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		/** Optional — the popover self-manages its open state; bind only if the parent needs it. */
@@ -32,7 +33,7 @@
 		action,
 		itemName = '',
 		itemType,
-		confirmText = 'Confirm',
+		confirmText = undefined,
 		variant = 'destructive',
 		autoHideMs = 3000,
 		title = '',
@@ -143,7 +144,7 @@
 				{#if icon}{@render icon()}{/if}
 				<span class="text-xs whitespace-nowrap">{action} {itemType} {#if displayName}<strong class="font-semibold text-foreground">{displayName}</strong>{/if}?</span>
 				<Button size="sm" {variant} class="h-6 px-2 text-xs" onclick={handleConfirm}>
-					{confirmText}
+					{confirmText ?? m.confirm_default_confirm()}
 				</Button>
 			</div>
 			{#if extraContent}

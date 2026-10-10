@@ -15,6 +15,7 @@
 	import { themeStore, applyTheme } from '$lib/stores/theme';
 	import { safeRedirectOrRoot } from '$lib/utils/safe-redirect';
 	import { startAuthentication } from '@simplewebauthn/browser';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface AuthProvider {
 		id: string;
@@ -138,7 +139,7 @@
 			}
 
 			if (!result.success) {
-				error = result.error || 'Login failed';
+				error = result.error || m.login_error_failed();
 				loading = false;
 				return;
 			}
@@ -148,7 +149,7 @@
 			await environments.refresh();
 			goto(redirectUrl);
 		} catch (e) {
-			error = 'An unexpected error occurred';
+			error = m.login_error_unexpected();
 			loading = false;
 		}
 	}
@@ -164,7 +165,7 @@
 			const initiateUrl = `${provider.initiateUrl}?redirect=${encodeURIComponent(redirectUrl)}`;
 			window.location.href = initiateUrl;
 		} catch (e) {
-			error = 'Failed to initiate SSO login';
+			error = m.login_error_sso_initiate();
 			ssoLoading = null;
 		}
 	}
@@ -175,7 +176,7 @@
 		try {
 			const optionsResponse = await fetch('/api/auth/passkeys/login/options', { method: 'POST' });
 			const optionsData = await optionsResponse.json();
-			if (!optionsResponse.ok) throw new Error(optionsData.error || 'Passkey login is unavailable');
+			if (!optionsResponse.ok) throw new Error(optionsData.error || m.login_error_passkey_unavailable());
 
 			const authenticationResponse = await startAuthentication({ optionsJSON: optionsData.options });
 			const verifyResponse = await fetch('/api/auth/passkeys/login/verify', {
@@ -184,7 +185,7 @@
 				body: JSON.stringify({ ceremonyId: optionsData.ceremonyId, response: authenticationResponse })
 			});
 			const verifyData = await verifyResponse.json();
-			if (!verifyResponse.ok || !verifyData.success) throw new Error(verifyData.error || 'Passkey login failed');
+			if (!verifyResponse.ok || !verifyData.success) throw new Error(verifyData.error || m.login_error_passkey_failed());
 
 			await authStore.check();
 			await appSettings.refresh();
@@ -193,7 +194,7 @@
 		} catch (e) {
 			error = e instanceof Error && e.name !== 'NotAllowedError'
 				? e.message
-				: 'Passkey sign-in was cancelled or timed out';
+				: m.login_error_passkey_cancelled();
 		} finally {
 			passkeyLoading = false;
 		}
@@ -207,7 +208,7 @@
 </script>
 
 <svelte:head>
-	<title>Login - Dockhand</title>
+	<title>{m.login_page_title()}</title>
 </svelte:head>
 
 <div class="min-h-screen flex items-center justify-center bg-background p-4">
@@ -216,16 +217,16 @@
 			<div class="flex justify-center mb-4">
 				<img
 					src="/logo.svg"
-					alt="Dockhand Logo"
+					alt={m.sidebar_logo_alt()}
 					class="h-16 w-auto object-contain"
 				/>
 			</div>
-			<Card.Title class="text-2xl font-bold">Welcome back</Card.Title>
+			<Card.Title class="text-2xl font-bold">{m.login_welcome_back()}</Card.Title>
 			<Card.Description>
 				{#if requiresMfa}
-					Enter your two-factor authentication code
+					{m.login_mfa_prompt()}
 				{:else}
-					Sign in to your Dockhand account
+					{m.login_subtitle()}
 				{/if}
 			</Card.Description>
 		</Card.Header>
@@ -250,7 +251,7 @@
 					{:else}
 						<KeyRound class="h-5 w-5" />
 					{/if}
-					<span>Sign in with passkey</span>
+					<span>{m.login_passkey_button()}</span>
 				</Button>
 			{/if}
 
@@ -269,7 +270,7 @@
 							{:else}
 								<KeyRound class="h-5 w-5" />
 							{/if}
-							<span>Continue with {provider.name}</span>
+							<span>{m.login_continue_with_provider({ provider: provider.name })}</span>
 						</Button>
 					{/each}
 				</div>
@@ -280,7 +281,7 @@
 							<span class="w-full border-t"></span>
 						</div>
 						<div class="relative flex justify-center text-xs uppercase">
-							<span class="bg-card px-2 text-muted-foreground">or continue with</span>
+							<span class="bg-card px-2 text-muted-foreground">{m.login_or_continue_with()}</span>
 						</div>
 					</div>
 				{/if}
@@ -291,7 +292,7 @@
 					{#if !requiresMfa}
 						{#if credentialProviders.length > 1}
 							<div class="space-y-2">
-								<Label>Sign in with</Label>
+								<Label>{m.login_sign_in_with()}</Label>
 								<div class="grid gap-2">
 									{#each credentialProviders as provider}
 										{@const Icon = getProviderIcon(provider.type)}
@@ -308,11 +309,11 @@
 												<div class="font-medium text-sm">{provider.name}</div>
 												<div class="text-xs text-muted-foreground">
 													{#if provider.type === 'local'}
-														Local account
+														{m.login_provider_local()}
 													{:else if provider.type === 'ldap'}
-														LDAP directory
+														{m.login_provider_ldap()}
 													{:else}
-														Single sign-on
+														{m.login_provider_sso()}
 													{/if}
 												</div>
 											</div>
@@ -326,11 +327,11 @@
 						{/if}
 
 						<div class="space-y-2">
-							<Label for="username">Username</Label>
+							<Label for="username">{m.login_username_label()}</Label>
 							<Input
 								id="username"
 								type="text"
-								placeholder="Enter your username"
+								placeholder={m.login_username_placeholder()}
 								bind:value={username}
 								required
 								disabled={loading}
@@ -340,11 +341,11 @@
 						</div>
 
 						<div class="space-y-2">
-							<Label for="password">Password</Label>
+							<Label for="password">{m.login_password_label()}</Label>
 							<Input
 								id="password"
 								type="password"
-								placeholder="Enter your password"
+								placeholder={m.login_password_placeholder()}
 								bind:value={password}
 								required
 								disabled={loading}
@@ -355,14 +356,14 @@
 						<div class="space-y-2">
 							<div class="flex items-center gap-2 text-sm text-muted-foreground mb-4">
 								<Shield class="h-4 w-4" />
-								<span>Two-factor authentication required</span>
+								<span>{m.login_mfa_required()}</span>
 							</div>
-							<Label for="mfaToken">Authentication code</Label>
+							<Label for="mfaToken">{m.login_mfa_code_label()}</Label>
 							<Input
 								id="mfaToken"
 								name="totp"
 								type="text"
-								placeholder="Enter code"
+								placeholder={m.login_mfa_code_placeholder()}
 								bind:value={mfaToken}
 								required
 								disabled={loading}
@@ -370,7 +371,7 @@
 								autofocus
 							/>
 							<p class="text-xs text-muted-foreground">
-								Enter the 6-digit code from your authenticator app, or use a backup code
+								{m.login_mfa_code_hint()}
 							</p>
 						</div>
 					{/if}
@@ -378,10 +379,10 @@
 					<Button type="submit" class="w-full" disabled={loading}>
 						{#if loading}
 							<Loader2 class="mr-2 h-4 w-4 animate-spin" />
-							{requiresMfa ? 'Verifying...' : 'Signing in...'}
+							{requiresMfa ? m.login_verifying() : m.login_signing_in()}
 						{:else}
 							<LogIn class="mr-2 h-4 w-4" />
-							{requiresMfa ? 'Verify' : 'Sign in'}
+							{requiresMfa ? m.login_verify() : m.login_sign_in()}
 						{/if}
 					</Button>
 
@@ -396,7 +397,7 @@
 								error = null;
 							}}
 						>
-							Back to login
+							{m.login_back_to_login()}
 						</Button>
 					{/if}
 				</form>
@@ -404,7 +405,7 @@
 		</Card.Content>
 
 		<Card.Footer class="flex flex-col space-y-2 text-center text-sm text-muted-foreground">
-			<p>Dockhand Docker Management</p>
+			<p>{m.login_footer()}</p>
 		</Card.Footer>
 	</Card.Root>
 </div>

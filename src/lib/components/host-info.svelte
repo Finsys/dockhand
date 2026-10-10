@@ -14,6 +14,7 @@
 	import { themeStore, type FontSize } from '$lib/stores/theme';
 	import { formatBytes } from '$lib/utils/format';
 	import { getTimeFormat, getDefaultTimezone } from '$lib/stores/settings';
+	import { m } from '$lib/paraglide/messages.js';
 
 	// Font size scaling for header
 	let fontSize = $state<FontSize>('normal');
@@ -297,7 +298,7 @@
 		diskUsageLoading = false;
 
 		const targetEnv = envList.find((e: Environment) => Number(e.id) === Number(envId));
-		const envName = targetEnv?.name || `Environment ${envId}`;
+		const envName = targetEnv?.name || m.hostinfo_environment_fallback({ id: envId });
 
 		// Mark as switching and create new abort controller
 		switchingEnvId = envId;
@@ -312,7 +313,7 @@
 			if (!response.ok) {
 				offlineEnvIds.add(envId);
 				offlineEnvIds = new Set(offlineEnvIds);
-				toast.error(`Cannot switch to "${envName}" - environment is offline`);
+				toast.error(m.hostinfo_switch_offline({ name: envName }));
 				return;
 			}
 
@@ -321,7 +322,7 @@
 			if (newHostInfo.error) {
 				offlineEnvIds.add(envId);
 				offlineEnvIds = new Set(offlineEnvIds);
-				toast.error(`Cannot switch to "${envName}" - ${newHostInfo.error}`);
+				toast.error(m.hostinfo_switch_error({ name: envName, error: newHostInfo.error }));
 				return;
 			}
 
@@ -350,7 +351,7 @@
 			}
 			offlineEnvIds.add(envId);
 			offlineEnvIds = new Set(offlineEnvIds);
-			toast.error(`Cannot switch to "${envName}" - connection failed`);
+			toast.error(m.hostinfo_switch_connection_failed({ name: envName }));
 		} finally {
 			switchingEnvId = null;
 		}
@@ -438,11 +439,11 @@
 					<span class="font-medium text-foreground">{currentEnv.name}</span>
 				{:else}
 					<Globe class="{iconSizeLargeClass()} text-muted-foreground" />
-					<span class="font-medium text-foreground">Select environment</span>
+					<span class="font-medium text-foreground">{m.hostinfo_select_environment()}</span>
 				{/if}
 			{:else}
 				<Globe class="{iconSizeLargeClass()} text-muted-foreground" />
-				<span class="font-medium text-foreground">No environments</span>
+				<span class="font-medium text-foreground">{m.hostinfo_no_environments()}</span>
 			{/if}
 			<ChevronDown class="{iconSizeClass()}" />
 		</button>
@@ -457,7 +458,7 @@
 								bind:this={searchInputRef}
 								bind:value={searchTerm}
 								type="text"
-								placeholder="Search environments..."
+								placeholder={m.hostinfo_search_placeholder()}
 								class="w-full pl-7 pr-7 py-1 text-sm bg-transparent border rounded focus:outline-none focus:ring-1 focus:ring-ring"
 								onclick={(e) => e.stopPropagation()}
 								onkeydown={(e) => {
@@ -516,14 +517,14 @@
 							{/if}
 							<span class="flex-1 whitespace-nowrap" class:text-muted-foreground={isOffline}>{env.name}</span>
 							{#if isOffline && !isSwitching}
-								<span class="text-xs text-destructive">offline</span>
+								<span class="text-xs text-destructive">{m.hostinfo_offline()}</span>
 							{:else if Number(env.id) === Number(currentEnvId)}
 								<Check class="{iconSizeLargeClass()} text-primary shrink-0" />
 							{/if}
 						</button>
 					{:else}
 						<div class="px-3 py-2 text-sm text-muted-foreground">
-							No matching environments
+							{m.hostinfo_no_matching_environments()}
 						</div>
 					{/each}
 				</div>
@@ -539,7 +540,7 @@
 							<button
 								type="button"
 								class="flex items-center gap-1 font-medium text-muted-foreground hover:text-foreground transition-colors"
-								title="List environments by name again"
+								title={m.hostinfo_reset_order_title()}
 								onclick={() => {
 									environmentOrder.reset();
 									dragList = null;
@@ -547,7 +548,7 @@
 								}}
 							>
 								<RotateCcw class="w-3 h-3 shrink-0 text-red-400" />
-								Reset
+								{m.sidebar_reset()}
 							</button>
 							<button
 								type="button"
@@ -555,17 +556,17 @@
 								onclick={() => (reorderMode = false)}
 							>
 								<Check class="w-3 h-3 shrink-0 text-emerald-500" />
-								Apply
+								{m.sidebar_apply()}
 							</button>
 						{:else}
 							<button
 								type="button"
 								class="flex items-center gap-1 font-medium text-muted-foreground hover:text-foreground transition-colors"
-								title="Drag environments into the order you want them listed in"
+								title={m.hostinfo_reorder_title()}
 								onclick={() => (reorderMode = true)}
 							>
 								<ArrowUpDown class="w-3 h-3 shrink-0" />
-								Reorder
+								{m.hostinfo_reorder()}
 							</button>
 						{/if}
 					</div>
@@ -580,7 +581,7 @@
 		<!-- Hostname / IP (#962) — first info segment after the env dropdown.
 		     Hidden on narrow viewports to keep the strip readable. -->
 		{#if hostLabel}
-			<div class="hidden xl:flex items-center gap-1" title="Daemon hostname / IP">
+			<div class="hidden xl:flex items-center gap-1" title={m.hostinfo_hostname_ip_title()}>
 				<Server class="{iconSizeClass()}" />
 				<span>{hostLabel}</span>
 			</div>
@@ -615,7 +616,7 @@
 
 		<!-- CPU cores -->
 		{#if hostInfo.cpus > 0}
-			<span class="hidden lg:inline">{hostInfo.cpus} cores</span>
+			<span class="hidden lg:inline">{m.hostinfo_cpu_cores({ count: hostInfo.cpus })}</span>
 			<span class="hidden lg:inline text-border">|</span>
 		{/if}
 
@@ -646,15 +647,15 @@
 		<!-- Live indicator with timestamp -->
 		<div
 			class="flex items-center gap-2 {isConnected ? 'text-emerald-500' : 'text-muted-foreground'}"
-			title={isConnected ? 'Live updates connected' : 'Live updates disconnected'}
+			title={isConnected ? m.hostinfo_live_connected() : m.hostinfo_live_disconnected()}
 		>
 			<span
 				class="text-muted-foreground tabular-nums"
-				title={`${currentTimezone} - data refreshed at ${formatClock(lastUpdated, currentTimezone)}`}
+				title={m.hostinfo_clock_title({ timezone: currentTimezone, time: formatClock(lastUpdated, currentTimezone) })}
 			>{formatClock(now, currentTimezone)}</span>
 			{#if isConnected}
 				<Wifi class="{iconSizeLargeClass()}" />
-				<span class="font-medium">Live</span>
+				<span class="font-medium">{m.hostinfo_live()}</span>
 			{:else}
 				<WifiOff class="{iconSizeLargeClass()}" />
 			{/if}

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { themeStore, type FontSize } from '$lib/stores/theme';
 	import { sseConnected } from '$lib/stores/events';
+	import { m } from '$lib/paraglide/messages.js';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Wifi } from 'lucide-svelte';
 	import type { Component } from 'svelte';
@@ -93,7 +94,7 @@
 					</Badge>
 				{/if}
 				{#if tab.showConnection}
-					<span title={$sseConnected ? 'Live updates active - grid will auto-refresh' : 'Connecting to live updates...'}>
+					<span title={$sseConnected ? m.pageheader_live_active() : m.pageheader_live_connecting()}>
 						<Wifi class="w-3.5 h-3.5 {$sseConnected ? 'text-emerald-500' : 'text-muted-foreground'}" />
 					</span>
 				{/if}

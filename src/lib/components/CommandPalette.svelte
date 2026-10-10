@@ -40,6 +40,7 @@
 	import ContainerIcon from '$lib/components/ContainerIcon.svelte';
 	import StackIcon from '$lib/components/StackIcon.svelte';
 	import EnvironmentIcon from '$lib/components/EnvironmentIcon.svelte';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		open?: boolean;
@@ -48,7 +49,8 @@
 	let { open = $bindable(false) }: Props = $props();
 
 	interface NavItem {
-		name: string;
+		// A function so the name is read in the active language at render time
+		name: () => string;
 		href: string;
 		icon: typeof LayoutDashboard;
 		keywords?: string[];
@@ -83,18 +85,18 @@
 	let loading = $state(false);
 
 	const navigationItems: NavItem[] = [
-		{ name: 'Dashboard', href: '/', icon: LayoutDashboard, keywords: ['home', 'overview'] },
-		{ name: 'Containers', href: '/containers', icon: Box, keywords: ['docker', 'running'] },
-		{ name: 'Logs', href: '/logs', icon: ScrollText, keywords: ['output', 'debug'] },
-		{ name: 'Shell', href: '/terminal', icon: Terminal, keywords: ['exec', 'bash', 'sh'] },
-		{ name: 'Stacks', href: '/stacks', icon: Layers, keywords: ['compose', 'docker-compose'] },
-		{ name: 'Images', href: '/images', icon: Images, keywords: ['pull', 'build'] },
-		{ name: 'Volumes', href: '/volumes', icon: HardDrive, keywords: ['storage', 'data'] },
-		{ name: 'Networks', href: '/networks', icon: Network, keywords: ['bridge', 'host'] },
-		{ name: 'Registry', href: '/registry', icon: Download, keywords: ['hub', 'pull'] },
-		{ name: 'Activity', href: '/activity', icon: Eye, keywords: ['events', 'history'] },
-		{ name: 'Schedules', href: '/schedules', icon: Timer, keywords: ['cron', 'auto'] },
-		{ name: 'Settings', href: '/settings', icon: Settings, keywords: ['config', 'preferences'] }
+		{ name: m.nav_dashboard, href: '/', icon: LayoutDashboard, keywords: ['home', 'overview'] },
+		{ name: m.nav_containers, href: '/containers', icon: Box, keywords: ['docker', 'running'] },
+		{ name: m.nav_logs, href: '/logs', icon: ScrollText, keywords: ['output', 'debug'] },
+		{ name: m.nav_shell, href: '/terminal', icon: Terminal, keywords: ['exec', 'bash', 'sh'] },
+		{ name: m.nav_stacks, href: '/stacks', icon: Layers, keywords: ['compose', 'docker-compose'] },
+		{ name: m.nav_images, href: '/images', icon: Images, keywords: ['pull', 'build'] },
+		{ name: m.nav_volumes, href: '/volumes', icon: HardDrive, keywords: ['storage', 'data'] },
+		{ name: m.nav_networks, href: '/networks', icon: Network, keywords: ['bridge', 'host'] },
+		{ name: m.nav_registry, href: '/registry', icon: Download, keywords: ['hub', 'pull'] },
+		{ name: m.nav_activity, href: '/activity', icon: Eye, keywords: ['events', 'history'] },
+		{ name: m.nav_schedules, href: '/schedules', icon: Timer, keywords: ['cron', 'auto'] },
+		{ name: m.nav_settings, href: '/settings', icon: Settings, keywords: ['config', 'preferences'] }
 	];
 
 	// Group headings (source order drives render order).
@@ -107,6 +109,19 @@
 	const G_ENV = 'Switch environment';
 	const G_STACK = 'Stacks';
 	const G_CONT = 'Containers';
+
+	// The constants above key the groups (caps, order); this is the heading shown for each,
+	// read in the active language at render time. Enterprise is an edition name and shows as is.
+	const GROUP_LABELS: Record<string, () => string> = {
+		[G_NAV]: m.cmdpalette_group_navigation,
+		[G_LIGHT]: m.cmdpalette_group_light_theme,
+		[G_DARK]: m.cmdpalette_group_dark_theme,
+		[G_FONT]: m.cmdpalette_group_font,
+		[G_EDITOR]: m.cmdpalette_group_editor_theme,
+		[G_ENV]: m.cmdpalette_group_switch_environment,
+		[G_STACK]: m.nav_stacks,
+		[G_CONT]: m.nav_containers
+	};
 
 	// Presentation + action for each item, resolved by id (kept out of the pure model).
 	interface Meta {
@@ -131,14 +146,14 @@
 		for (const nav of navigationItems) {
 			if (nav.href === '/terminal' && !$canAccess('containers', 'exec')) continue;
 			add(
-				{ id: `nav:${nav.href}`, group: G_NAV, label: nav.name, keywords: (nav.keywords ?? []).join(' ') },
+				{ id: `nav:${nav.href}`, group: G_NAV, label: nav.name(), keywords: (nav.keywords ?? []).join(' ') },
 				{ icon: nav.icon, run: () => select(nav.href) }
 			);
 		}
 
 		if ($licenseStore.isEnterprise && $authStore.authEnabled) {
 			add(
-				{ id: 'ent:audit', group: G_ENT, label: 'Audit log', keywords: 'compliance audit' },
+				{ id: 'ent:audit', group: G_ENT, label: m.nav_audit_log(), keywords: 'compliance audit' },
 				{ icon: ClipboardList, run: () => select('/audit') }
 			);
 		}
@@ -442,8 +457,8 @@
 		class="p-0 gap-0 max-w-2xl overflow-hidden"
 		showCloseButton={false}
 	>
-		<Dialog.Title class="sr-only">Command palette</Dialog.Title>
-		<Dialog.Description class="sr-only">Search for pages, themes, environments, stacks and containers</Dialog.Description>
+		<Dialog.Title class="sr-only">{m.cmdpalette_title()}</Dialog.Title>
+		<Dialog.Description class="sr-only">{m.cmdpalette_description()}</Dialog.Description>
 
 		<div class="flex items-center gap-2 border-b px-3">
 			<Search class="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -451,7 +466,7 @@
 				bind:this={inputEl}
 				bind:value={query}
 				onkeydown={onListKeydown}
-				placeholder="Search..."
+				placeholder={m.cmdpalette_search_placeholder()}
 				role="combobox"
 				aria-expanded="true"
 				aria-controls="palette-list"
@@ -461,7 +476,7 @@
 		</div>
 
 		{#if rows.length === 0}
-			<div class="py-6 text-center text-sm text-muted-foreground">No results found.</div>
+			<div class="py-6 text-center text-sm text-muted-foreground">{m.cmdpalette_no_results()}</div>
 		{:else}
 			<div
 				id="palette-list"
@@ -479,7 +494,7 @@
 								class="absolute left-0 right-0 flex items-end px-3 pb-1 text-xs font-medium text-muted-foreground"
 								style="top: {offsets[index]}px; height: {HEADER_H}px;"
 							>
-								{row.group}
+								{GROUP_LABELS[row.group]?.() ?? row.group}
 							</div>
 						{:else}
 							{@const item = row.item}
@@ -511,12 +526,12 @@
 									{#if isActive}
 										<div class="ml-auto flex items-center gap-1">
 											{#if c.state === 'running'}
-												<button class="rounded p-1 hover:bg-muted" title="View logs" onclick={(e) => { e.stopPropagation(); containerAction(c, 'logs'); }}><FileText class="h-3 w-3" /></button>
-												<button class="rounded p-1 hover:bg-muted" title="Open terminal" onclick={(e) => { e.stopPropagation(); containerAction(c, 'terminal'); }}><Terminal class="h-3 w-3" /></button>
-												<button class="rounded p-1 hover:bg-muted" title="Restart" onclick={(e) => { e.stopPropagation(); containerAction(c, 'restart'); }}><RotateCcw class="h-3 w-3" /></button>
-												<button class="rounded p-1 text-destructive hover:bg-muted" title="Stop" onclick={(e) => { e.stopPropagation(); containerAction(c, 'stop'); }}><Square class="h-3 w-3" /></button>
+												<button class="rounded p-1 hover:bg-muted" title={m.cmdpalette_view_logs()} onclick={(e) => { e.stopPropagation(); containerAction(c, 'logs'); }}><FileText class="h-3 w-3" /></button>
+												<button class="rounded p-1 hover:bg-muted" title={m.cmdpalette_open_terminal()} onclick={(e) => { e.stopPropagation(); containerAction(c, 'terminal'); }}><Terminal class="h-3 w-3" /></button>
+												<button class="rounded p-1 hover:bg-muted" title={m.cmdpalette_restart()} onclick={(e) => { e.stopPropagation(); containerAction(c, 'restart'); }}><RotateCcw class="h-3 w-3" /></button>
+												<button class="rounded p-1 text-destructive hover:bg-muted" title={m.cmdpalette_stop()} onclick={(e) => { e.stopPropagation(); containerAction(c, 'stop'); }}><Square class="h-3 w-3" /></button>
 											{:else}
-												<button class="rounded p-1 text-green-500 hover:bg-muted" title="Start" onclick={(e) => { e.stopPropagation(); containerAction(c, 'start'); }}><Play class="h-3 w-3" /></button>
+												<button class="rounded p-1 text-green-500 hover:bg-muted" title={m.cmdpalette_start()} onclick={(e) => { e.stopPropagation(); containerAction(c, 'start'); }}><Play class="h-3 w-3" /></button>
 											{/if}
 										</div>
 									{/if}

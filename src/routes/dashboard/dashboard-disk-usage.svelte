@@ -3,6 +3,7 @@
 	import { formatBytes } from '$lib/utils/format';
 	import { Chart, Svg, Pie, Arc } from 'layerchart';
 	import { diskSegmentPath, type DiskSegmentKey } from '$lib/utils/disk-segment-path';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		imagesSize: number;
@@ -46,10 +47,10 @@
 	// Pie chart data - only include non-zero values
 	const pieData = $derived(
 		([
-			{ key: 'images', label: 'Images', value: imagesSize, color: '#0ea5e9' },
-			{ key: 'containers', label: 'Containers', value: containersSize, color: '#10b981' },
-			{ key: 'volumes', label: 'Volumes', value: volumesSize, color: '#f59e0b' },
-			{ key: 'buildCache', label: 'Build cache', value: buildCacheSize, color: '#8b5cf6' }
+			{ key: 'images', label: m.nav_images(), value: imagesSize, color: '#0ea5e9' },
+			{ key: 'containers', label: m.nav_containers(), value: containersSize, color: '#10b981' },
+			{ key: 'volumes', label: m.nav_volumes(), value: volumesSize, color: '#f59e0b' },
+			{ key: 'buildCache', label: m.dashboard_disk_build_cache(), value: buildCacheSize, color: '#8b5cf6' }
 		] satisfies { key: DiskSegmentKey; label: string; value: number; color: string }[]).filter(d => d.value > 0)
 	);
 
@@ -63,7 +64,7 @@
 	<div class="{withBorder ? 'pt-2 border-t border-border/50' : ''}">
 		<div class="flex items-center gap-1.5 text-xs text-muted-foreground mb-2">
 			<HardDrive class="w-3 h-3" />
-			<span class="font-medium">Disk usage</span>
+			<span class="font-medium">{m.dashboard_disk_usage()}</span>
 			<Loader2 class="w-3 h-3 animate-spin" />
 			<div class="skeleton w-12 h-3.5 rounded ml-auto"></div>
 		</div>
@@ -76,13 +77,13 @@
 			<div class="flex items-center gap-1.5">
 				<div class="w-2 h-2 rounded-full bg-muted shrink-0"></div>
 				<Image class="w-3 h-3 text-muted-foreground/50 shrink-0" />
-				<span class="text-muted-foreground/50">Images</span>
+				<span class="text-muted-foreground/50">{m.nav_images()}</span>
 				<div class="skeleton w-10 h-3 rounded ml-auto"></div>
 			</div>
 			<div class="flex items-center gap-1.5">
 				<div class="w-2 h-2 rounded-full bg-muted shrink-0"></div>
 				<Database class="w-3 h-3 text-muted-foreground/50 shrink-0" />
-				<span class="text-muted-foreground/50">Volumes</span>
+				<span class="text-muted-foreground/50">{m.nav_volumes()}</span>
 				<div class="skeleton w-10 h-3 rounded ml-auto"></div>
 			</div>
 		</div>
@@ -91,7 +92,7 @@
 	<div class="{withBorder ? 'pt-2 border-t border-border/50' : ''}">
 		<div class="flex items-center gap-1.5 text-xs text-muted-foreground mb-2">
 			<HardDrive class="w-3 h-3" />
-			<span class="font-medium">Disk usage</span>
+			<span class="font-medium">{m.dashboard_disk_usage()}</span>
 			<span class="ml-auto font-medium text-foreground">{formatBytes(totalSize)}</span>
 		</div>
 
@@ -154,28 +155,28 @@
 				<div
 					class="bg-sky-500 h-full transition-all duration-300"
 					style="width: {getPercentage(imagesSize)}%"
-					title="Images: {formatBytes(imagesSize)}"
+					title={m.dashboard_disk_images_title({ size: formatBytes(imagesSize) })}
 				></div>
 			{/if}
 			{#if containersSize > 0}
 				<div
 					class="bg-emerald-500 h-full transition-all duration-300"
 					style="width: {getPercentage(containersSize)}%"
-					title="Containers: {formatBytes(containersSize)}"
+					title={m.dashboard_disk_containers_title({ size: formatBytes(containersSize) })}
 				></div>
 			{/if}
 			{#if volumesSize > 0}
 				<div
 					class="bg-amber-500 h-full transition-all duration-300"
 					style="width: {getPercentage(volumesSize)}%"
-					title="Volumes: {formatBytes(volumesSize)}"
+					title={m.dashboard_disk_volumes_title({ size: formatBytes(volumesSize) })}
 				></div>
 			{/if}
 			{#if buildCacheSize > 0}
 				<div
 					class="bg-violet-500 h-full transition-all duration-300"
 					style="width: {getPercentage(buildCacheSize)}%"
-					title="Build cache: {formatBytes(buildCacheSize)}"
+					title={m.dashboard_disk_build_cache_title({ size: formatBytes(buildCacheSize) })}
 				></div>
 			{/if}
 		</div>
@@ -186,7 +187,7 @@
 				<div class="flex items-center gap-1.5">
 					<div class="w-2 h-2 rounded-full bg-sky-500 shrink-0"></div>
 					<Image class="w-3 h-3 text-muted-foreground shrink-0" />
-					<span class="text-muted-foreground truncate">Images</span>
+					<span class="text-muted-foreground truncate">{m.nav_images()}</span>
 					<span class="ml-auto font-medium tabular-nums">{formatBytes(imagesSize)}</span>
 				</div>
 			{/if}
@@ -194,7 +195,7 @@
 				<div class="flex items-center gap-1.5">
 					<div class="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></div>
 					<Box class="w-3 h-3 text-muted-foreground shrink-0" />
-					<span class="text-muted-foreground truncate">Containers</span>
+					<span class="text-muted-foreground truncate">{m.nav_containers()}</span>
 					<span class="ml-auto font-medium tabular-nums">{formatBytes(containersSize)}</span>
 				</div>
 			{/if}
@@ -202,7 +203,7 @@
 				<div class="flex items-center gap-1.5">
 					<div class="w-2 h-2 rounded-full bg-amber-500 shrink-0"></div>
 					<Database class="w-3 h-3 text-muted-foreground shrink-0" />
-					<span class="text-muted-foreground truncate">Volumes</span>
+					<span class="text-muted-foreground truncate">{m.nav_volumes()}</span>
 					<span class="ml-auto font-medium tabular-nums">{formatBytes(volumesSize)}</span>
 				</div>
 			{/if}
@@ -210,7 +211,7 @@
 				<div class="flex items-center gap-1.5">
 					<div class="w-2 h-2 rounded-full bg-violet-500 shrink-0"></div>
 					<Hammer class="w-3 h-3 text-muted-foreground shrink-0" />
-					<span class="text-muted-foreground truncate">Build cache</span>
+					<span class="text-muted-foreground truncate">{m.dashboard_disk_build_cache()}</span>
 					<span class="ml-auto font-medium tabular-nums">{formatBytes(buildCacheSize)}</span>
 				</div>
 			{/if}
