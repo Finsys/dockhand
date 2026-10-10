@@ -3,6 +3,7 @@
 	import StackIcon from '$lib/components/StackIcon.svelte';
 	import EnvironmentIcon from '$lib/components/EnvironmentIcon.svelte';
 	import { environments } from '$lib/stores/environment';
+	import { m } from '$lib/paraglide/messages.js';
 
 	// The one identity line shared by every deploy/compose output view (the docked panel
 	// in StackModal, the standalone ComposeOutputModal, and the git-deploy popover), so
@@ -44,7 +45,7 @@
 		<span class="truncate font-medium">{stackName}</span>
 	{/if}
 	{#if env}
-		<span class="shrink-0 text-muted-foreground">on</span>
+		<span class="shrink-0 text-muted-foreground">{m.modalheader_on_env()}</span>
 		<EnvironmentIcon icon={env.icon || 'server'} envId={env.id} class="{iconClass} shrink-0 text-muted-foreground" />
 		<span class="truncate font-medium text-amber-600 dark:text-amber-400">{env.name}</span>
 	{/if}

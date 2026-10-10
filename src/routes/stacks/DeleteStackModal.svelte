@@ -6,6 +6,7 @@
 	import GitGenericIcon from '$lib/components/icons/GitGenericIcon.svelte';
 	import StackIcon from '$lib/components/StackIcon.svelte';
 	import { appendEnvParam } from '$lib/stores/environment';
+	import { m } from '$lib/paraglide/messages.js';
 
 	// The parent owns the fetch; onConfirm receives what the user chose to remove.
 	let {
@@ -62,18 +63,18 @@
 	// choice (containers are always removed). `kind` picks the icon for the "kept" state.
 	const willHappen = $derived.by(() => {
 		const lines: { delete: boolean | null; kind: 'container' | 'files' | 'volumes'; text: string }[] = [
-			{ delete: null, kind: 'container', text: 'Stop and remove the stack’s containers' },
+			{ delete: null, kind: 'container', text: m.stacks_delete_will_remove_containers() },
 		];
 		if (hasFiles) {
 			lines.push(removeFiles
-				? { delete: true, kind: 'files', text: 'Delete the stack files on disk' }
-				: { delete: false, kind: 'files', text: 'Keep the stack files on disk' });
+				? { delete: true, kind: 'files', text: m.stacks_delete_will_delete_files() }
+				: { delete: false, kind: 'files', text: m.stacks_delete_will_keep_files() });
 		}
 		if (hasVolumes) {
 			const n = preview!.namedVolumes.length;
 			lines.push(removeVolumes
-				? { delete: true, kind: 'volumes', text: `Delete ${n} named volume(s) — data is unrecoverable` }
-				: { delete: false, kind: 'volumes', text: `Keep ${n} named volume(s)` });
+				? { delete: true, kind: 'volumes', text: m.stacks_delete_will_delete_volumes({ count: n }) }
+				: { delete: false, kind: 'volumes', text: m.stacks_delete_will_keep_volumes({ count: n }) });
 		}
 		return lines;
 	});
@@ -94,16 +95,16 @@
 		<Dialog.Header>
 			<Dialog.Title class="flex items-center gap-2">
 				<StackIcon icon={stackIcon} {stackName} {envId} class="w-5 h-5 shrink-0 text-muted-foreground" />
-				Remove stack "{stackName}"
+				{m.stacks_delete_title({ name: stackName })}
 			</Dialog.Title>
 			<Dialog.Description>
-				Choose what to remove. The stack's containers are always stopped and removed.
+				{m.stacks_delete_description()}
 			</Dialog.Description>
 		</Dialog.Header>
 
 		{#if loading}
 			<div class="flex items-center gap-2 py-4 text-sm text-muted-foreground">
-				<Loader2 class="w-4 h-4 animate-spin" /> Checking what can be removed…
+				<Loader2 class="w-4 h-4 animate-spin" /> {m.stacks_delete_checking()}
 			</div>
 		{:else if preview}
 			<div class="my-1 space-y-3">
@@ -112,7 +113,7 @@
 						<Checkbox bind:checked={removeFiles} class="mt-0.5" />
 						<Folder class="w-4 h-4 shrink-0 translate-y-0.5 text-amber-500" />
 						<div class="min-w-0">
-							<div class="text-sm">Delete files on disk</div>
+							<div class="text-sm">{m.stacks_delete_files_label()}</div>
 							{#if preview.stackDir}
 								<code class="block break-all text-xs text-muted-foreground">{preview.stackDir}</code>
 							{/if}
@@ -131,7 +132,7 @@
 						<Checkbox bind:checked={removeVolumes} class="mt-0.5" />
 						<Database class="w-4 h-4 shrink-0 translate-y-0.5 text-blue-500" />
 						<div class="min-w-0">
-							<div class="text-sm">Delete named volumes <span class="text-muted-foreground">(data is unrecoverable)</span></div>
+							<div class="text-sm">{m.stacks_delete_volumes_label()} <span class="text-muted-foreground">{m.stacks_delete_volumes_unrecoverable()}</span></div>
 							<div class="flex flex-wrap gap-1 mt-0.5">
 								{#each preview.namedVolumes as v}
 									<code class="rounded bg-muted px-1.5 py-0.5 text-xs">{v}</code>
@@ -143,8 +144,7 @@
 
 				{#if !preview.canDeleteFiles && !hasVolumes}
 					<p class="text-sm text-muted-foreground">
-						This stack has no files or named volumes Dockhand manages — only the stack
-						record and its containers will be removed.
+						{m.stacks_delete_nothing_managed()}
 					</p>
 				{/if}
 			</div>
@@ -152,7 +152,7 @@
 			<!-- What will happen — fixed set of lines; each flips red(delete)/green(keep). -->
 			<div class="mt-2 rounded-md border bg-muted/30 p-3">
 				<div class="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-					What will happen
+					{m.stacks_delete_what_will_happen()}
 				</div>
 				<ul class="space-y-1 text-sm">
 					{#each willHappen as w}
@@ -180,11 +180,11 @@
 
 		<div class="mt-4 flex justify-end gap-1.5">
 			<Button variant="outline" size="sm" onclick={() => (open = false)} disabled={busy}>
-				Cancel
+				{m.stacks_delete_cancel()}
 			</Button>
 			<Button variant="destructive" size="sm" onclick={run} disabled={busy || loading}>
 				{#if busy}<Loader2 class="w-3.5 h-3.5 mr-1 animate-spin" />{:else}<Trash2 class="w-3.5 h-3.5 mr-1" />{/if}
-				Remove
+				{m.stacks_delete_remove()}
 			</Button>
 		</div>
 	</Dialog.Content>

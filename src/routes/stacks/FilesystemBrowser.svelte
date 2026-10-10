@@ -6,6 +6,7 @@
 	import { Loader2, FolderOpen, File, FileText, ChevronRight, ArrowUp, AlertCircle, FolderPlus, Search, Import, Check, X } from 'lucide-svelte';
 	import type { Component } from 'svelte';
 	import RecentLocationsPanel from './RecentLocationsPanel.svelte';
+	import { m } from '$lib/paraglide/messages.js';
 
 	export interface FileEntry {
 		name: string;
@@ -39,7 +40,7 @@
 
 	let {
 		open = $bindable(false),
-		title = 'Select file',
+		title = m.stacks_fs_select_file(),
 		icon,
 		description,
 		initialPath = '/',
@@ -104,14 +105,14 @@
 			const data = await res.json();
 
 			if (!res.ok) {
-				error = data.error || 'Failed to load directory';
+				error = data.error || m.stacks_fs_load_directory_failed();
 				return;
 			}
 
 			currentPath = data.path;
 			entries = data.entries;
 		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to load directory';
+			error = e instanceof Error ? e.message : m.stacks_fs_load_directory_failed();
 		} finally {
 			loading = false;
 		}
@@ -213,7 +214,7 @@
 			const data = await res.json();
 
 			if (!res.ok) {
-				createError = data.error || 'Failed to create folder';
+				createError = data.error || m.stacks_fs_create_folder_failed();
 				return;
 			}
 
@@ -221,7 +222,7 @@
 			newFolderName = '';
 			loadDirectory(newPath);
 		} catch (e) {
-			createError = e instanceof Error ? e.message : 'Failed to create folder';
+			createError = e instanceof Error ? e.message : m.stacks_fs_create_folder_failed();
 		}
 	}
 
@@ -316,7 +317,7 @@
 						class="p-1 rounded hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed"
 						disabled={!canGoUp}
 						onclick={handleGoUp}
-						title="Go up"
+						title={m.stacks_fs_go_up()}
 					>
 						<ArrowUp class="w-4 h-4" />
 					</button>
@@ -326,7 +327,7 @@
 							<Input
 								bind:ref={folderInputEl}
 								bind:value={newFolderName}
-								placeholder="Folder name"
+								placeholder={m.stacks_fs_folder_name()}
 								class="h-7 w-40 max-w-40 text-xs"
 								onkeydown={handleFolderKeydown}
 							/>
@@ -335,7 +336,7 @@
 								class="p-1 rounded hover:bg-muted text-green-600 disabled:opacity-40 disabled:cursor-not-allowed"
 								disabled={!newFolderName.trim()}
 								onclick={confirmCreateFolder}
-								title="Create folder"
+								title={m.stacks_fs_create_folder()}
 							>
 								<Check class="w-4 h-4" />
 							</button>
@@ -343,7 +344,7 @@
 								type="button"
 								class="p-1 rounded hover:bg-muted text-muted-foreground"
 								onclick={cancelCreatingFolder}
-								title="Cancel"
+								title={m.stacks_fs_cancel()}
 							>
 								<X class="w-4 h-4" />
 							</button>
@@ -356,7 +357,7 @@
 							type="button"
 							class="p-1 rounded hover:bg-muted text-muted-foreground"
 							onclick={startCreatingFolder}
-							title="New folder"
+							title={m.stacks_fs_new_folder()}
 						>
 							<FolderPlus class="w-4 h-4" />
 						</button>
@@ -371,10 +372,10 @@
 						>
 							{#if scanning}
 								<Loader2 class="w-4 h-4 animate-spin" />
-								Scanning...
+								{m.stacks_fs_scanning()}
 							{:else}
 								<Search class="w-4 h-4" />
-								Scan this folder
+								{m.stacks_fs_scan_folder()}
 							{/if}
 						</Button>
 					{/if}
@@ -391,16 +392,16 @@
 						<div class="w-16 h-16 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center mb-4">
 							<AlertCircle class="w-8 h-8 text-red-500" />
 						</div>
-						<p class="text-red-600 dark:text-red-400 font-medium">Unable to browse files</p>
+						<p class="text-red-600 dark:text-red-400 font-medium">{m.stacks_fs_browse_error()}</p>
 						<p class="text-sm text-muted-foreground mt-1">{error}</p>
 						<Button variant="outline" size="sm" class="mt-4" onclick={() => currentPath && loadDirectory(currentPath)}>
-							Retry
+							{m.stacks_fs_retry()}
 						</Button>
 					</div>
 				{:else if filteredEntries.length === 0}
 					<div class="flex flex-col items-center justify-center py-12 text-muted-foreground">
 						<FolderOpen class="w-12 h-12 mb-3 opacity-50" />
-						<p>{selectMode === 'directory' ? 'No subdirectories' : 'Directory is empty'}</p>
+						<p>{selectMode === 'directory' ? m.stacks_fs_no_subdirectories() : m.stacks_fs_directory_empty()}</p>
 					</div>
 				{:else}
 					<div class="divide-y">
@@ -427,7 +428,7 @@
 									{entry.name}
 								</span>
 								{#if highlighted && isAdoptMode}
-									<Badge variant="secondary" class="text-xs">Compose file</Badge>
+									<Badge variant="secondary" class="text-xs">{m.stacks_fs_compose_file()}</Badge>
 								{:else if entry.type !== 'directory' && !isAdoptMode}
 									<span class="text-xs text-muted-foreground">{formatSize(entry.size)}</span>
 								{/if}
@@ -446,46 +447,46 @@
 			<Dialog.Footer class="border-t pt-4">
 				{#if selectMode === 'directory'}
 					<div class="flex-1 flex items-center gap-2 min-w-0">
-						<span class="text-xs text-muted-foreground shrink-0">Selected:</span>
+						<span class="text-xs text-muted-foreground shrink-0">{m.stacks_fs_selected()}</span>
 						<code class="text-xs font-mono bg-muted px-2 py-1 rounded truncate" title={currentPath || '/'}>{currentPath || '/'}</code>
 					</div>
 				{:else if selectMode === 'file_or_directory'}
 					<div class="flex-1 flex items-center gap-2 min-w-0">
 						{#if selectedPath}
-							<span class="text-xs text-muted-foreground shrink-0">Selected:</span>
+							<span class="text-xs text-muted-foreground shrink-0">{m.stacks_fs_selected()}</span>
 							<code class="text-xs font-mono bg-muted px-2 py-1 rounded truncate" title={selectedPath}>{selectedPath}</code>
 						{:else}
-							<span class="text-xs text-muted-foreground">Click to select file or folder, double-click to enter folder</span>
+							<span class="text-xs text-muted-foreground">{m.stacks_fs_hint_file_or_folder()}</span>
 						{/if}
 					</div>
 				{:else if selectedPath}
 					<div class="flex-1 flex items-center gap-2 min-w-0">
-						<span class="text-xs text-muted-foreground shrink-0">Selected:</span>
+						<span class="text-xs text-muted-foreground shrink-0">{m.stacks_fs_selected()}</span>
 						<code class="text-xs font-mono bg-muted px-2 py-1 rounded truncate" title={selectedPath}>{selectedPath}</code>
 					</div>
 				{:else}
 					<div class="flex-1 text-xs text-muted-foreground">
-						Click a file to select it
+						{m.stacks_fs_hint_file()}
 					</div>
 				{/if}
 				<Button variant="outline" onclick={handleClose}>
-					Cancel
+					{m.stacks_fs_cancel()}
 				</Button>
 				{#if selectMode === 'directory'}
 					<Button onclick={handleConfirm}>
 						<FolderPlus class="w-4 h-4" />
-						Select
+						{m.stacks_fs_select()}
 					</Button>
 				{:else if selectMode === 'file_or_directory'}
 					<Button onclick={handleConfirm}>
-						Select
+						{m.stacks_fs_select()}
 					</Button>
 				{:else}
 					<Button
 						disabled={!selectedPath}
 						onclick={handleConfirm}
 					>
-						Select
+						{m.stacks_fs_select()}
 					</Button>
 				{/if}
 			</Dialog.Footer>

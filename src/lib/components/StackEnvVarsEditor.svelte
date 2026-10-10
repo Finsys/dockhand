@@ -3,6 +3,7 @@
 	import { Input } from '$lib/components/ui/input';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { Plus, Trash2, Key, AlertCircle, CheckCircle2, FileText, Pencil, CircleDot, Undo2 } from 'lucide-svelte';
+	import { m } from '$lib/paraglide/messages.js';
 
 	export interface EnvVar {
 		key: string;
@@ -121,7 +122,7 @@
 								<Tooltip.Trigger>
 									<FileText class="w-3.5 h-3.5 text-muted-foreground" />
 								</Tooltip.Trigger>
-								<Tooltip.Content side="bottom"><p class="whitespace-nowrap">From env file in repository</p></Tooltip.Content>
+								<Tooltip.Content side="bottom"><p class="whitespace-nowrap">{m.stackenv_source_file()}</p></Tooltip.Content>
 							</Tooltip.Root>
 						{:else if source === 'override'}
 							<Tooltip.Root>
@@ -143,7 +144,7 @@
 										<Pencil class="w-3.5 h-3.5 text-blue-500" />
 									{/if}
 								</Tooltip.Trigger>
-								<Tooltip.Content side="bottom"><p class="whitespace-nowrap">{fileValues[variable.key] !== undefined ? 'Revert to file value' : 'Manual override (not in file)'}</p></Tooltip.Content>
+								<Tooltip.Content side="bottom"><p class="whitespace-nowrap">{fileValues[variable.key] !== undefined ? m.stackenv_source_revert() : m.stackenv_source_override()}</p></Tooltip.Content>
 							</Tooltip.Root>
 						{/if}
 					</div>
@@ -158,21 +159,21 @@
 									<Tooltip.Trigger>
 										<CheckCircle2 class="w-4 h-4 text-green-500" />
 									</Tooltip.Trigger>
-									<Tooltip.Content><p>Required variable defined</p></Tooltip.Content>
+									<Tooltip.Content><p>{m.stackenv_status_required_defined()}</p></Tooltip.Content>
 								</Tooltip.Root>
 							{:else if isVarOptional}
 								<Tooltip.Root>
 									<Tooltip.Trigger>
 										<CircleDot class="w-4 h-4 text-blue-400" />
 									</Tooltip.Trigger>
-									<Tooltip.Content><p>Optional variable (has default)</p></Tooltip.Content>
+									<Tooltip.Content><p>{m.stackenv_status_optional()}</p></Tooltip.Content>
 								</Tooltip.Root>
 							{:else if isVarUnused}
 								<Tooltip.Root>
 									<Tooltip.Trigger>
 										<AlertCircle class="w-4 h-4 text-amber-500" />
 									</Tooltip.Trigger>
-									<Tooltip.Content><p>Unused variable</p></Tooltip.Content>
+									<Tooltip.Content><p>{m.stackenv_status_unused()}</p></Tooltip.Content>
 								</Tooltip.Root>
 							{/if}
 						{/if}
@@ -181,7 +182,7 @@
 
 				<!-- Key Input with floating label -->
 				<div class="flex-1 relative">
-					<span class="absolute -top-2 left-2 text-2xs text-muted-foreground bg-background px-1">Name</span>
+					<span class="absolute -top-2 left-2 text-2xs text-muted-foreground bg-background px-1">{m.stackenv_field_name()}</span>
 					<Input
 						bind:value={variable.key}
 						disabled={readonly}
@@ -192,7 +193,7 @@
 
 				<!-- Value Input with floating label -->
 				<div class="flex-1 relative">
-					<span class="absolute -top-2 left-2 text-2xs text-muted-foreground bg-background px-1">Value</span>
+					<span class="absolute -top-2 left-2 text-2xs text-muted-foreground bg-background px-1">{m.stackenv_field_value()}</span>
 					<Input
 						bind:value={variable.value}
 						type={variable.isSecret ? 'password' : 'text'}
@@ -213,7 +214,7 @@
 					{@const existingSecret = isExistingSecret(variable.key, variable.isSecret)}
 					{#if existingSecret}
 						<!-- Existing secret from DB - show locked icon, no toggle (value can still be modified) -->
-						<div class="flex items-center h-9 w-9 justify-center shrink-0" title="Secret value (cannot unhide)">
+						<div class="flex items-center h-9 w-9 justify-center shrink-0" title={m.stackenv_secret_locked()}>
 							<Key class="w-3.5 h-3.5 text-amber-500" />
 						</div>
 					{:else}
@@ -221,7 +222,7 @@
 						<button
 							type="button"
 							onclick={() => toggleSecret(index)}
-							title={variable.isSecret ? 'Marked as secret' : 'Mark as secret'}
+							title={variable.isSecret ? m.stackenv_secret_marked() : m.stackenv_secret_mark()}
 							class="h-9 w-9 flex items-center justify-center rounded-md shrink-0 transition-colors {variable.isSecret ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}"
 						>
 							<Key class="w-3.5 h-3.5" />
@@ -251,11 +252,11 @@
 		<!-- Empty state -->
 		{#if variables.length === 0}
 			<div class="text-center py-6 text-muted-foreground">
-				<p class="text-sm">No environment variables defined.</p>
+				<p class="text-sm">{m.stackenv_empty()}</p>
 				{#if !readonly}
 					<Button type="button" variant="link" onclick={addVariable} class="mt-1 text-xs">
 						<Plus class="w-3 h-3" />
-						Add your first variable
+						{m.stackenv_add_first()}
 					</Button>
 				{/if}
 			</div>

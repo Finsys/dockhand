@@ -8,6 +8,8 @@
 	import { cn } from '$lib/utils';
 	import StackIcon from '$lib/components/StackIcon.svelte';
 	import { REDEPLOY_PRESETS, isPresetActive, composeCommandFor, type RedeployPreset } from '$lib/utils/redeploy-presets';
+	import { m } from '$lib/paraglide/messages.js';
+	import { splitAtName } from '$lib/i18n/split';
 
 	interface Props {
 		stackName: string;
@@ -118,7 +120,7 @@
 		{#snippet child({ props })}
 			<button
 				type="button"
-				title={triggerVariant === 'icon' ? 'Redeploy' : 'More deploy options'}
+				title={triggerVariant === 'icon' ? m.stacks_redeploy_trigger_title() : m.stacks_redeploy_more_options()}
 				{...props}
 				onclick={handleTriggerClick}
 				{disabled}
@@ -142,7 +144,7 @@
 		<div class="space-y-3">
 			<p class="flex items-center gap-1.5 text-xs text-muted-foreground">
 				<StackIcon icon={stackIcon} {stackName} {envId} class="w-4 h-4 shrink-0" />
-				<span class="truncate">Redeploy stack <strong class="font-semibold text-foreground">{stackName}</strong></span>
+				<span class="truncate">{splitAtName(m.stacks_redeploy_header)[0]}<strong class="font-semibold text-foreground">{stackName}</strong>{splitAtName(m.stacks_redeploy_header)[1]}</span>
 			</p>
 			{#if showPresets}
 			<div class="flex gap-1">
@@ -161,18 +163,18 @@
 			<div class="space-y-2">
 				<label class="flex items-center gap-2 cursor-pointer">
 					<Checkbox bind:checked={pull} disabled={deploying} />
-					<span class="text-xs">Pull images</span>
+					<span class="text-xs">{m.stacks_redeploy_pull_images()}</span>
 				</label>
 				<label class="flex items-center gap-2 cursor-pointer">
 					<Checkbox bind:checked={build} disabled={deploying} />
-					<span class="text-xs">Build images</span>
+					<span class="text-xs">{m.stacks_redeploy_build_images()}</span>
 				</label>
 				{#if reason}
 					<p class="text-2xs text-muted-foreground pl-6 -mt-1">{reason}</p>
 				{/if}
 				<label class="flex items-center gap-2 cursor-pointer">
 					<Checkbox bind:checked={forceRecreate} disabled={deploying} />
-					<span class="text-xs">Force recreate</span>
+					<span class="text-xs">{m.stacks_redeploy_force_recreate()}</span>
 				</label>
 				{#if forceRecreateReason}
 					<p class="text-2xs text-muted-foreground pl-6 -mt-1">{forceRecreateReason}</p>
@@ -187,9 +189,9 @@
 			>
 				{#if deploying}
 					<Loader2 class="w-3 h-3 mr-1 animate-spin" />
-					Deploying...
+					{m.stacks_redeploy_deploying()}
 				{:else}
-					Deploy
+					{m.stacks_redeploy_deploy()}
 				{/if}
 			</Button>
 		</div>

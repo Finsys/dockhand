@@ -14,6 +14,7 @@
 	import LogViewer from '$lib/components/LogViewer.svelte';
 	import DeployOutputHeader from './DeployOutputHeader.svelte';
 	import { GIT_LINE_MARKER } from '$lib/utils/log-lines';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		stackId: number;
@@ -68,7 +69,7 @@
 		// space, other producers don't) so it lines up with the text, not the edge.
 		const lastReal = [...logLines].reverse().find((l) => l.trim().length > 0);
 		const indent = lastReal ? (lastReal.match(/^\s*/)?.[0] ?? '') : '';
-		const [color, label] = overallStatus === 'complete' ? [ANSI.green, 'Succeeded'] : [ANSI.red, 'Failed'];
+		const [color, label] = overallStatus === 'complete' ? [ANSI.green, m.stacks_git_deploy_status_succeeded()] : [ANSI.red, m.stacks_git_deploy_status_failed()];
 		return base + (base ? '\n' : '') + indent + color + label + ANSI.reset;
 	});
 
@@ -99,7 +100,7 @@
 
 			if (!response.ok) {
 				const data = await response.json();
-				throw new Error(data.error || 'Failed to start deployment');
+				throw new Error(data.error || m.stacks_git_deploy_start_failed());
 			}
 
 			const { jobId } = await response.json();
@@ -122,7 +123,7 @@
 						deployFinished = true;
 					} else if (data.status === 'error') {
 						overallStatus = 'error';
-						errorMessage = data.error || 'Unknown error occurred';
+						errorMessage = data.error || m.stacks_git_unknown_error_occurred();
 						// Put the reason in the log too (as plain, uniconed lines) so a
 						// failure that happens mid-stream shows WHY, not just "Failed".
 						for (const l of errorMessage.split('\n')) {
@@ -147,7 +148,7 @@
 		} catch (error: any) {
 			console.error('Failed to deploy git stack:', error);
 			overallStatus = 'error';
-			errorMessage = error.message || 'Failed to deploy';
+			errorMessage = error.message || m.stacks_git_deploy_failed_fallback();
 			deployFinished = true;
 		}
 	}
@@ -194,9 +195,9 @@
 			: 'idle'
 	);
 	const headerStatusLine = $derived(
-		overallStatus === 'complete' ? 'Succeeded'
-			: overallStatus === 'error' ? 'Failed'
-			: isDeploying ? 'Deploying...'
+		overallStatus === 'complete' ? m.stacks_git_deploy_status_succeeded()
+			: overallStatus === 'error' ? m.stacks_git_deploy_status_failed()
+			: isDeploying ? m.stacks_git_deploying()
 			: ''
 	);
 
@@ -225,7 +226,7 @@
 		<!-- Header -->
 		<div class="px-6 py-4 border-b shrink-0">
 			<DeployOutputHeader
-				verb="Git deploy"
+				verb={m.stacks_git_deploy_verb()}
 				{stackName}
 				{stackIcon}
 				{envId}
@@ -240,17 +241,17 @@
 				<div class="flex items-start gap-3 py-2 px-2">
 					<AlertTriangle class="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
 					<div class="space-y-1">
-						<p class="font-medium">Sync from git?</p>
+						<p class="font-medium">{m.stacks_git_sync_confirm_title()}</p>
 						<p class="text-sm text-muted-foreground">
-							This will pull the latest changes for <strong class="text-foreground">{stackName}</strong>.
-							Containers will only restart if the configuration changed.
+							{m.stacks_git_sync_confirm_before()}<strong class="text-foreground">{stackName}</strong>{m.stacks_git_sync_confirm_after()}
+							{m.stacks_git_sync_confirm_restart_hint()}
 						</p>
 					</div>
 				</div>
 			{:else if logLines.length === 0 && isDeploying}
 				<div class="flex items-center gap-3 text-muted-foreground py-2 px-2">
 					<Loader2 class="w-4 h-4 animate-spin shrink-0" />
-					<span class="text-sm">Initializing...</span>
+					<span class="text-sm">{m.stacks_git_initializing()}</span>
 				</div>
 			{/if}
 
@@ -284,7 +285,7 @@
 			<!-- Left: cancel (confirm step only). The log has its own copy button. -->
 			<div>
 				{#if overallStatus === 'confirming'}
-					<Button variant="outline" onclick={handleCancelConfirm}>Cancel</Button>
+					<Button variant="outline" onclick={handleCancelConfirm}>{m.stacks_git_cancel()}</Button>
 				{/if}
 			</div>
 
@@ -293,7 +294,7 @@
 				{#if overallStatus === 'confirming'}
 					<Button onclick={handleConfirmDeploy}>
 						<Rocket class="w-4 h-4" />
-						Deploy
+						{m.stacks_git_deploy()}
 					</Button>
 				{:else}
 					<Button
@@ -303,9 +304,9 @@
 					>
 						{#if isDeploying}
 							<Loader2 class="w-4 h-4 animate-spin" />
-							Deploying...
+							{m.stacks_git_deploying()}
 						{:else}
-							Close
+							{m.ui_close()}
 						{/if}
 					</Button>
 				{/if}

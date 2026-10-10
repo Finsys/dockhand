@@ -2275,5 +2275,992 @@
 	"gridcol_hint_stack_webhook": "Webhook-ID und -URL des Git-Stacks (zum Anbinden von Gitea/GitHub/GitLab)",
 	"gridcol_hint_backup_type": "Container- oder Stack-Backup",
 	"gridcol_hint_backup_repository": "Backup-Ziel (S3, REST, lokal usw.)",
-	"gridcol_hint_last_backup_status": "Status des letzten Backups"
+	"gridcol_hint_last_backup_status": "Status des letzten Backups",
+	"stacks_item_stack": "Stack",
+	"stacks_list_filter_partial": "Teilweise",
+	"stacks_list_filter_stopped": "Gestoppt",
+	"stacks_list_filter_not_deployed": "Nicht bereitgestellt",
+	"stacks_list_status_stopped": "gestoppt",
+	"stacks_list_status_partial": "teilweise",
+	"stacks_list_status_not_deployed": "ausstehend",
+	"stacks_list_batch_starting": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Stack wird gestartet",
+				"countPlural=other": "{count} Stacks werden gestartet"
+			}
+		}
+	],
+	"stacks_list_batch_stopping": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Stack wird gestoppt",
+				"countPlural=other": "{count} Stacks werden gestoppt"
+			}
+		}
+	],
+	"stacks_list_batch_bringing_down": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Stack wird heruntergefahren",
+				"countPlural=other": "{count} Stacks werden heruntergefahren"
+			}
+		}
+	],
+	"stacks_list_batch_restarting": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Stack wird neu gestartet",
+				"countPlural=other": "{count} Stacks werden neu gestartet"
+			}
+		}
+	],
+	"stacks_list_batch_removing": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Stack wird entfernt",
+				"countPlural=other": "{count} Stacks werden entfernt"
+			}
+		}
+	],
+	"stacks_list_toast_load_failed": "Stacks konnten nicht geladen werden",
+	"stacks_list_output_starting": "Start von {name}",
+	"stacks_list_error_start": "Stack konnte nicht gestartet werden",
+	"stacks_list_output_stopping": "Stoppen von {name}",
+	"stacks_list_error_stop": "Stack konnte nicht gestoppt werden",
+	"stacks_list_output_recreating": "Neuerstellung von {name}",
+	"stacks_list_output_restarting": "Neustart von {name}",
+	"stacks_list_toast_recreated": "{name} neu erstellt",
+	"stacks_list_error_restart": "Stack konnte nicht neu gestartet werden",
+	"stacks_list_output_redeploying": "Neubereitstellung von {name}",
+	"stacks_list_output_option_pull": "Images pullen",
+	"stacks_list_output_option_build": "Images bauen",
+	"stacks_list_output_option_force_recreate": "Neu erstellen erzwingen",
+	"stacks_list_output_options": "Optionen: {options}",
+	"stacks_list_output_option_none": "keine",
+	"stacks_list_toast_redeploy_failed": "{name} konnte nicht neu bereitgestellt werden",
+	"stacks_list_toast_redeployed": "{name} neu bereitgestellt",
+	"stacks_list_error_redeploy": "Stack konnte nicht neu bereitgestellt werden",
+	"stacks_list_output_bringing_down": "Herunterfahren von {name}",
+	"stacks_list_toast_down_failed": "{name} konnte nicht heruntergefahren werden",
+	"stacks_list_toast_brought_down": "{name} heruntergefahren",
+	"stacks_list_error_down": "Stack konnte nicht heruntergefahren werden",
+	"stacks_list_error_remove": "Stack konnte nicht entfernt werden",
+	"stacks_list_removed_files_deleted": "Dateien gelöscht",
+	"stacks_list_removed_files_kept": "Dateien behalten",
+	"stacks_list_removed_volumes_deleted": "Volumes gelöscht",
+	"stacks_list_toast_removed": "{name} entfernt ({details})",
+	"stacks_list_toast_container_started": "Container gestartet",
+	"stacks_list_toast_container_stopped": "Container gestoppt",
+	"stacks_list_toast_container_restarted": "Container neu gestartet",
+	"stacks_list_toast_container_paused": "Container pausiert",
+	"stacks_list_toast_container_unpaused": "Container fortgesetzt",
+	"stacks_list_toast_container_removed": "Container entfernt",
+	"stacks_list_title": "Compose-Stacks",
+	"stacks_list_collapse_all": "Alle einklappen",
+	"stacks_list_expand_all": "Alle ausklappen",
+	"stacks_list_collapse": "Einklappen",
+	"stacks_list_expand": "Ausklappen",
+	"stacks_list_search_placeholder": "Stacks suchen…",
+	"stacks_list_filter_plural": "Status",
+	"stacks_list_layout_vertical": "Zur vertikalen Ansicht wechseln (Logs seitlich)",
+	"stacks_list_layout_horizontal": "Zur horizontalen Ansicht wechseln (Logs unten)",
+	"stacks_list_from_git": "Aus Git",
+	"stacks_list_adopt": "Übernehmen",
+	"stacks_list_confirm_stack_count": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Stack",
+				"countPlural=other": "{count} Stacks"
+			}
+		}
+	],
+	"stacks_list_action_down": "herunterfahren",
+	"stacks_list_bulk_down_title": "{count} herunterfahren",
+	"stacks_list_down": "Herunterfahren",
+	"stacks_list_empty_title": "Keine Compose-Stacks gefunden",
+	"stacks_list_empty_description": "Erstelle einen Stack oder stelle einen aus Git bereit, um loszulegen",
+	"stacks_list_system_dockhand": "Dockhand-Verwaltungscontainer",
+	"stacks_list_system_hawser": "Hawser-Remote-Agent",
+	"stacks_list_env_vars_configured": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Umgebungsvariable konfiguriert",
+				"countPlural=other": "{count} Umgebungsvariablen konfiguriert"
+			}
+		}
+	],
+	"stacks_list_git_updates_title": "Image-Updates verfügbar – aus Git bereitstellen, um sie zu übernehmen",
+	"stacks_list_external_update_hint": "Externer Stack - Update nur für einzelne Container möglich.",
+	"stacks_list_newer_version_tooltip": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Container hat einen neueren Versions-Tag.",
+				"countPlural=other": "{count} Container haben einen neueren Versions-Tag."
+			}
+		}
+	],
+	"stacks_list_cooling_down_tooltip": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Container wartet auf das Mindestalter des Images.",
+				"countPlural=other": "{count} Container warten auf das Mindestalter des Images."
+			}
+		}
+	],
+	"stacks_list_source_internal": "Intern",
+	"stacks_list_source_internal_hint": "Von Dockhand verwaltet",
+	"stacks_list_source_untracked": "Nicht erfasst",
+	"stacks_list_source_untracked_hint": "Speicherort der Compose-Datei unbekannt. Klicke auf den Stack-Namen oder auf Bearbeiten, um sie zu finden.",
+	"stacks_list_copy_webhook_url": "Webhook-URL kopieren",
+	"stacks_list_location_not_set": "Nicht festgelegt",
+	"stacks_list_health_unhealthy_title": "Mindestens ein Container ist ungesund",
+	"stacks_list_health_starting_title": "Ein Healthcheck ist noch nicht abgeschlossen",
+	"stacks_list_health_healthy_title": "Alle geprüften Container sind gesund",
+	"stacks_list_edit_git_stack": "Git-Stack bearbeiten",
+	"stacks_list_deploy": "Bereitstellen",
+	"stacks_list_sync_from_git": "Aus Git synchronisieren",
+	"stacks_list_view_logs": "Logs anzeigen",
+	"stacks_list_restart_mode_restart_hint": "Schneller Neustart der bestehenden Container. Ignoriert die depends_on-Reihenfolge.",
+	"stacks_list_restart_mode_ordered": "Der Reihe nach neu starten",
+	"stacks_list_restart_mode_ordered_hint": "Erst stoppen, dann in depends_on-Reihenfolge starten. Gleiche Container-IDs.",
+	"stacks_list_restart_mode_recreate": "Neu erstellen (stop & up)",
+	"stacks_list_restart_mode_recreate_hint": "Container der Reihe nach neu erstellen. Neue IDs, neuere Images werden erneut gepullt.",
+	"stacks_list_down_title": "Herunterfahren (Container entfernen)",
+	"stacks_list_restart_count": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Neustart",
+				"countPlural=other": "{count} Neustarts"
+			}
+		}
+	],
+	"stacks_list_spark_mem": "RAM",
+	"stacks_list_spark_net": "Netz",
+	"stacks_list_spark_disk": "Disk",
+	"stacks_list_volumes_mounted": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Volume eingebunden",
+				"countPlural=other": "{count} Volumes eingebunden"
+			}
+		}
+	],
+	"stacks_list_open_logs_inline": "Logs eingebettet öffnen",
+	"stacks_list_open_logs_full_view": "Logs in der Vollansicht öffnen",
+	"stacks_list_open_terminal": "Terminal öffnen",
+	"stacks_list_inspect_container": "Container-Details anzeigen",
+	"stacks_list_no_containers": "Keine Container",
+	"stacks_modal_validation_failed_status": "Validierung fehlgeschlagen ({status})",
+	"stacks_modal_validation_failed": "Validierung fehlgeschlagen",
+	"stacks_modal_path_hint_will_create_in": "Wird in {dir}/ erstellt",
+	"stacks_modal_path_hint_custom": "Eigener Speicherort",
+	"stacks_modal_path_hint_default": "Standard-Speicherort wird verwendet",
+	"stacks_modal_browser_select_compose_file": "Compose-Datei auswählen",
+	"stacks_modal_browser_select_compose_file_or_dir": "Compose-Datei oder Verzeichnis auswählen",
+	"stacks_modal_browser_select_env_file_or_dir": "Env-Datei oder Verzeichnis auswählen",
+	"stacks_modal_browser_relocate_title": "{name} verschieben",
+	"stacks_modal_move_files_failed": "Dateien konnten nicht verschoben werden",
+	"stacks_modal_move_files_error": "Beim Verschieben der Dateien ist ein Fehler aufgetreten",
+	"stacks_modal_load_compose_failed": "Compose-Datei konnte nicht geladen werden",
+	"stacks_modal_load_files_failed": "Dateien konnten nicht geladen werden",
+	"stacks_modal_provider_check_failed_status": "Provider-Prüfung fehlgeschlagen ({status})",
+	"stacks_modal_provider_check_failed": "Provider-Prüfung fehlgeschlagen",
+	"stacks_modal_container_unknown": "unbekannt",
+	"stacks_modal_name_required": "Stack-Name ist erforderlich",
+	"stacks_modal_name_invalid": "Muss kleingeschrieben sein, mit einem Buchstaben oder einer Ziffer beginnen und darf nur Buchstaben, Ziffern, Bindestriche und Unterstriche enthalten",
+	"stacks_modal_compose_content_required": "Inhalt der Compose-Datei ist erforderlich",
+	"stacks_modal_output_starting": "Start von {name}",
+	"stacks_modal_create_failed": "Stack konnte nicht erstellt werden",
+	"stacks_modal_toast_created": "Stack „{name}“ erstellt",
+	"stacks_modal_create_error": "Beim Erstellen des Stacks ist ein Fehler aufgetreten",
+	"stacks_modal_compose_content_or_path_required": "Inhalt oder Pfad der Compose-Datei ist erforderlich",
+	"stacks_modal_compose_location_required": "Bitte wähle einen Speicherort für die Compose-Datei",
+	"stacks_modal_save_env_file_failed": "Env-Datei konnte nicht gespeichert werden",
+	"stacks_modal_output_redeploying": "Neubereitstellung von {name}",
+	"stacks_modal_save_compose_failed": "Compose-Datei konnte nicht gespeichert werden",
+	"stacks_modal_toast_applied": "Stack angewendet",
+	"stacks_modal_toast_saved": "Stack gespeichert",
+	"stacks_modal_apply_failed": "Stack konnte nicht angewendet werden",
+	"stacks_modal_save_failed": "Stack konnte nicht gespeichert werden",
+	"stacks_modal_apply_error": "Beim Anwenden des Stacks ist ein Fehler aufgetreten",
+	"stacks_modal_save_error": "Beim Speichern des Stacks ist ein Fehler aufgetreten",
+	"stacks_modal_change_icon": "Stack-Icon ändern",
+	"stacks_modal_create_title": "Compose-Stack erstellen",
+	"stacks_modal_create_description": "Neuen Docker-Compose-Stack erstellen",
+	"stacks_modal_view_description": "Compose-Datei und Abhängigkeitsgraph ansehen",
+	"stacks_modal_edit_description": "Compose-Datei und Umgebungsvariablen bearbeiten",
+	"stacks_modal_tab_editor": "Editor",
+	"stacks_modal_tab_graph": "Graph",
+	"stacks_modal_tab_deploys": "Bereitstellungen",
+	"stacks_modal_loading_compose": "Compose-Datei wird geladen…",
+	"stacks_modal_tags": "Tags",
+	"stacks_modal_stack_name": "Stack-Name",
+	"stacks_modal_untracked_title": "Nicht erfasster Stack",
+	"stacks_modal_untracked_description": "– dieser Stack läuft in Docker, aber Dockhand weiß nicht, wo seine Compose-Datei auf dem Datenträger liegt. Suche die Datei, um den Stack bearbeiten und verwalten zu können.",
+	"stacks_modal_running_containers": "Laufende Container:",
+	"stacks_modal_git_readonly_title": "Dies ist ein von Git verwalteter Stack – Dockhand zeigt sein Compose schreibgeschützt an; bearbeite es im Repository.",
+	"stacks_modal_git_readonly": "Git · schreibgeschützt",
+	"stacks_modal_copy_commit_hash": "Commit-Hash kopieren",
+	"stacks_modal_copy_repository_url": "Repository-URL kopieren",
+	"stacks_modal_compose_file": "Compose-Datei",
+	"stacks_modal_path_enter_name_above": "Gib oben einen Stack-Namen ein",
+	"stacks_modal_path_not_specified": "Nicht angegeben",
+	"stacks_modal_env_file": "Env-Datei",
+	"stacks_modal_env_path_placeholder": "/path/to/.env (optional)",
+	"stacks_modal_theme_switch_dark": "Zum dunklen Theme wechseln",
+	"stacks_modal_theme_switch_light": "Zum hellen Theme wechseln",
+	"stacks_modal_compose_not_available": "Compose-Datei nicht verfügbar",
+	"stacks_modal_compose_not_available_hint": "Stelle diesen Git-Stack zuerst bereit oder synchronisiere ihn, damit Dockhand eine lokale Kopie seiner Compose-Datei hat.",
+	"stacks_modal_no_compose_selected": "Keine Compose-Datei ausgewählt",
+	"stacks_modal_no_compose_selected_hint": "Suche die Compose-Datei für diesen Stack. Sobald sie ausgewählt ist, lädt der Editor ihren Inhalt.",
+	"stacks_modal_browse_compose_file": "Compose-Datei suchen",
+	"stacks_modal_select_info_title": "Was passiert, wenn du eine Datei auswählst:",
+	"stacks_modal_select_info_text": "Dockhand erfasst diese Compose-Datei, sodass du den Stack in der Oberfläche bearbeiten, starten und stoppen kannst. Deine Dateien bleiben an ihrem aktuellen Ort.",
+	"stacks_modal_validate_title": "Dieses Compose vor dem Bereitstellen auf Probleme prüfen",
+	"stacks_modal_validate": "Validieren",
+	"stacks_modal_copy_requires_https": "Kopieren erfordert HTTPS",
+	"stacks_modal_copy_failed": "Fehlgeschlagen",
+	"stacks_modal_copied": "Kopiert",
+	"stacks_modal_copy": "Kopieren",
+	"stacks_modal_env_info": "Diese Variablen werden in eine .env-Datei im Stack-Verzeichnis geschrieben und an den Compose-Befehl übergeben.",
+	"stacks_modal_close_output": "Ausgabe schließen",
+	"stacks_modal_read_only": "Schreibgeschützt",
+	"stacks_modal_unsaved_changes": "Ungespeicherte Änderungen",
+	"stacks_modal_no_changes": "Keine Änderungen",
+	"stacks_modal_cancel": "Abbrechen",
+	"stacks_modal_creating": "Wird erstellt…",
+	"stacks_modal_create": "Erstellen",
+	"stacks_modal_starting": "Wird gestartet…",
+	"stacks_modal_create_and_start": "Erstellen & starten",
+	"stacks_modal_build_reason": "Automatisch ausgewählt: Diese Compose-Datei hat einen build:-Abschnitt",
+	"stacks_modal_saving": "Wird gespeichert…",
+	"stacks_modal_save": "Speichern",
+	"stacks_modal_deploying": "Wird bereitgestellt…",
+	"stacks_modal_save_and_redeploy": "Speichern & neu bereitstellen",
+	"stacks_modal_force_recreate_reason_on": "Vorausgewählt, weil dieser Stack Umgebungsvariablen setzt und Compose eine geänderte Variable nicht selbst erkennt. Entferne den Haken, um nur die Services mit geänderter Konfiguration neu zu erstellen.",
+	"stacks_modal_force_recreate_reason_off": "Nicht ausgewählt, weil dieser Stack keine Umgebungsvariablen setzt – Compose erstellt daher nur die Services mit geänderter Konfiguration neu. Setze den Haken, um jeden Service neu zu erstellen.",
+	"stacks_modal_choose_icon": "Wähle ein Stack-Icon",
+	"stacks_modal_unsaved_description": "Du hast ungespeicherte Änderungen. Möchtest du wirklich schließen, ohne zu speichern?",
+	"stacks_modal_continue_editing": "Weiter bearbeiten",
+	"stacks_modal_discard_changes": "Änderungen verwerfen",
+	"stacks_modal_path_change_title": "Stack-Dateien verschieben?",
+	"stacks_modal_path_change_description": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "Du hast den Speicherort des Stacks geändert. Am alten Speicherort liegt {count} Datei, die an den neuen Speicherort verschoben werden kann.",
+				"countPlural=other": "Du hast den Speicherort des Stacks geändert. Am alten Speicherort liegen {count} Dateien, die an den neuen Speicherort verschoben werden können."
+			}
+		}
+	],
+	"stacks_modal_path_change_question": "Möchtest du alle Dateien an den neuen Speicherort verschieben oder an ihrem Platz lassen?",
+	"stacks_modal_leave_files": "Dateien belassen",
+	"stacks_modal_move_files": "Dateien verschieben",
+	"stacks_modal_browse_confirm_title": "Editor-Inhalt ersetzen?",
+	"stacks_modal_browse_confirm_description": "Wenn du eine andere Compose-Datei lädst, wird der aktuelle Editor-Inhalt ersetzt.",
+	"stacks_modal_browse_confirm_current": "Aktuell:",
+	"stacks_modal_browse_confirm_unsaved": "(nicht gespeichert)",
+	"stacks_modal_browse_confirm_new": "Neu:",
+	"stacks_modal_replace_content": "Inhalt ersetzen",
+	"stacks_modal_persistence_title": "Dieser Speicherort ist nicht persistent",
+	"stacks_modal_persistence_pick_another": "Anderen Speicherort wählen",
+	"stacks_modal_persistence_use_anyway": "Trotzdem verwenden",
+	"stacks_modal_relocate_title": "Stack verschieben?",
+	"stacks_modal_relocate_description": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Datei im Stack-Ordner wird verschoben.",
+				"countPlural=other": "Alle {count} Dateien im Stack-Ordner werden verschoben."
+			}
+		}
+	],
+	"stacks_modal_relocate_from": "Von",
+	"stacks_modal_relocate_to": "Nach",
+	"stacks_modal_moving": "Wird verschoben…",
+	"stacks_modal_exists_title": "Stack existiert bereits",
+	"stacks_modal_exists_description": "Ein Stack namens „{name}“ existiert bereits. Bitte wähle einen anderen Namen.",
+	"stacks_modal_ok": "OK",
+	"stacks_graph_parse_error_partial": "{error} (Teilgraph wird angezeigt)",
+	"stacks_graph_node_missing": "fehlt",
+	"stacks_graph_node_network_caption": "Netzwerk: {driver}",
+	"stacks_graph_node_volume_caption": "Volume: {driver}",
+	"stacks_graph_node_config_caption": "Config",
+	"stacks_graph_node_secret_caption": "Secret",
+	"stacks_graph_type_service": "Service",
+	"stacks_graph_type_network": "Netzwerk",
+	"stacks_graph_type_volume": "Volume",
+	"stacks_graph_type_config": "Config",
+	"stacks_graph_type_secret": "Secret",
+	"stacks_graph_edge_dependency": "Abhängigkeit",
+	"stacks_graph_edge_link": "Link",
+	"stacks_graph_edge_network_connection": "Netzwerkverbindung",
+	"stacks_graph_edge_volume_mount": "Volume-Mount",
+	"stacks_graph_edge_config_mount": "Config-Mount",
+	"stacks_graph_edge_secret_mount": "Secret-Mount",
+	"stacks_graph_add": "Hinzufügen",
+	"stacks_graph_cancel": "Abbrechen",
+	"stacks_graph_dependency_mode": "Abhängigkeit",
+	"stacks_graph_mount_mode": "Mount",
+	"stacks_graph_hint_click_target_service": "Klicke auf den Ziel-Service",
+	"stacks_graph_hint_click_source_service": "Klicke auf den Quell-Service",
+	"stacks_graph_hint_click_mount_source": "Klicke auf Volume/Netzwerk/Config/Secret",
+	"stacks_graph_change_layout": "Layout ändern",
+	"stacks_graph_layout_tree": "Baum",
+	"stacks_graph_layout_grid": "Raster",
+	"stacks_graph_layout_circle": "Kreis",
+	"stacks_graph_layout_radial": "Radial",
+	"stacks_graph_layout_force": "Kräftebasiert",
+	"stacks_graph_theme_dark": "Zum dunklen Theme wechseln",
+	"stacks_graph_theme_light": "Zum hellen Theme wechseln",
+	"stacks_graph_yaml_parse_error": "YAML-Syntaxfehler",
+	"stacks_graph_save_and_close": "Speichern und schließen",
+	"stacks_graph_delete": "Löschen",
+	"stacks_graph_remove_connection": "Verbindung entfernen",
+	"stacks_graph_image": "Image",
+	"stacks_graph_command": "Befehl",
+	"stacks_graph_restart_policy": "Neustart-Richtlinie",
+	"stacks_graph_restart_no": "Nie",
+	"stacks_graph_restart_always": "Immer",
+	"stacks_graph_restart_on_failure": "Bei Fehler",
+	"stacks_graph_restart_unless_stopped": "Außer wenn gestoppt",
+	"stacks_graph_port_mappings": "Port-Zuordnungen",
+	"stacks_graph_host": "Host",
+	"stacks_graph_container": "Container",
+	"stacks_graph_volumes": "Volumes",
+	"stacks_graph_environment": "Umgebungsvariablen",
+	"stacks_graph_key": "Schlüssel",
+	"stacks_graph_value": "Wert",
+	"stacks_graph_labels": "Labels",
+	"stacks_graph_depends_on": "Hängt ab von",
+	"stacks_graph_remove_dependency": "Abhängigkeit entfernen",
+	"stacks_graph_driver": "Treiber",
+	"stacks_graph_ipam_config": "IPAM-Konfiguration",
+	"stacks_graph_subnet": "Subnetz",
+	"stacks_graph_gateway": "Gateway",
+	"stacks_graph_external_network": "Externes Netzwerk",
+	"stacks_graph_internal_network": "Internes Netzwerk",
+	"stacks_graph_attachable": "Verbindbar (attachable)",
+	"stacks_graph_driver_options": "Treiberoptionen",
+	"stacks_graph_external_volume": "Externes Volume",
+	"stacks_graph_external_config": "Externe Config",
+	"stacks_graph_external_name_optional": "Externer Name (optional)",
+	"stacks_graph_config_source_hint": "Gib eines davon an: Datei, Inhalt oder Umgebungsvariable",
+	"stacks_graph_file_path": "Dateipfad",
+	"stacks_graph_content_inline": "Inhalt (inline)",
+	"stacks_graph_environment_variable": "Umgebungsvariable",
+	"stacks_graph_external_secret": "Externes Secret",
+	"stacks_graph_secret_source_hint": "Gib eines davon an: Datei oder Umgebungsvariable",
+	"stacks_graph_edge_dependency_desc": "Dieser Service hängt von {service} ab und startet erst danach.",
+	"stacks_graph_edge_volume_mount_desc": "Volume ist in diesem Service eingebunden.",
+	"stacks_graph_edge_network_connection_desc": "Service ist mit diesem Netzwerk verbunden.",
+	"stacks_graph_edge_config_mount_desc": "Config ist in diesem Service eingebunden.",
+	"stacks_graph_edge_secret_mount_desc": "Secret ist in diesem Service eingebunden.",
+	"stacks_graph_add_element": "{type} hinzufügen",
+	"stacks_graph_name": "Name",
+	"stacks_graph_ports_comma_separated": "Ports (kommagetrennt)",
+	"stacks_graph_close_menu": "Menü schließen",
+	"stacks_git_auth_ssh_key": "SSH-Key",
+	"stacks_git_auth_password": "Passwort",
+	"stacks_git_auth_none": "Keine",
+	"stacks_git_toast_select_repo_first": "Wähle zuerst ein Repository aus",
+	"stacks_git_toast_enter_repo_url_first": "Gib zuerst eine Repository-URL ein",
+	"stacks_git_toast_env_load_failed": "Umgebungsvariablen konnten nicht geladen werden",
+	"stacks_git_unknown_error": "Unbekannter Fehler",
+	"stacks_git_toast_no_env_vars": "Keine Umgebungsvariablen gefunden",
+	"stacks_git_toast_no_env_vars_description": "Im Repository wurden keine .env-Dateien gefunden. Du kannst Variablen trotzdem manuell hinzufügen.",
+	"stacks_git_toast_vars_loaded": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Variable geladen",
+				"countPlural=other": "{count} Variablen geladen"
+			}
+		}
+	],
+	"stacks_git_toast_vars_loaded_description": "Du kannst die Werte jetzt vor dem Bereitstellen anpassen",
+	"stacks_git_toast_deploy_failed": "Bereitstellung fehlgeschlagen",
+	"stacks_git_error_stack_name_required": "Stack-Name ist erforderlich",
+	"stacks_git_error_stack_name_invalid": "Der Stack-Name muss kleingeschrieben sein, mit einem Buchstaben oder einer Ziffer beginnen und darf nur Buchstaben, Ziffern, Bindestriche und Unterstriche enthalten",
+	"stacks_git_error_repository_required": "Wähle ein Repository aus",
+	"stacks_git_error_repo_name_required": "Repository-Name ist erforderlich",
+	"stacks_git_error_repo_url_required": "Repository-URL ist erforderlich",
+	"stacks_git_error_webhook_secret_required": "Bei aktiviertem Webhook ist ein Webhook-Secret erforderlich",
+	"stacks_git_output_title_deploying": "Bereitstellung von {name}",
+	"stacks_git_error_save_failed": "Git-Stack konnte nicht gespeichert werden",
+	"stacks_git_change_icon": "Stack-Icon ändern",
+	"stacks_git_title_edit": "Git-Stack bearbeiten",
+	"stacks_git_title_create": "Aus Git bereitstellen",
+	"stacks_git_description_edit": "Einstellungen des Git-Stacks aktualisieren",
+	"stacks_git_description_create": "Stelle einen Compose-Stack aus einem Git-Repository bereit",
+	"stacks_git_tab_deploys": "Bereitstellungen",
+	"stacks_git_repository": "Repository",
+	"stacks_git_repo_mode_existing": "Vorhandenes auswählen",
+	"stacks_git_repo_mode_new": "Neues hinzufügen",
+	"stacks_git_select_repository_placeholder": "Repository auswählen…",
+	"stacks_git_no_repositories": "Keine Repositorys konfiguriert. Klicke auf „Neues hinzufügen“, um eines hinzuzufügen.",
+	"stacks_git_branch": "Branch",
+	"stacks_git_branch_repo_default": "Repository-Standard ({branch})",
+	"stacks_git_branch_hint": "Branch, aus dem dieser Stack bereitgestellt wird. Lass das Feld leer, um dem im Repository eingestellten Branch zu folgen ({branch}).",
+	"stacks_git_repo_name": "Repository-Name",
+	"stacks_git_repo_name_placeholder": "z. B. my-stacks",
+	"stacks_git_repo_url": "Repository-URL",
+	"stacks_git_branch_type_or_pick": "Gib einen Namen ein oder wähle einen aus der Liste.",
+	"stacks_git_credential": "Zugangsdaten",
+	"stacks_git_credential_none": "Keine (öffentlich)",
+	"stacks_git_credential_hint": "SSH-Key oder Token für private Repositorys.",
+	"stacks_git_stack_name": "Stack-Name",
+	"stacks_git_stack_name_placeholder": "z. B. my-app",
+	"stacks_git_stack_name_hint": "Unter diesem Namen wird der Stack bereitgestellt",
+	"stacks_git_tags": "Tags",
+	"stacks_git_compose_path": "Pfad der Compose-Datei",
+	"stacks_git_compose_path_hint": "Pfad zur Compose-Datei innerhalb des Repositorys",
+	"stacks_git_env_file": "Zusätzliche Env-Datei (optional)",
+	"stacks_git_env_file_tip_default_before": "Die Datei",
+	"stacks_git_env_file_tip_default_after": "im Compose-Verzeichnis wird immer automatisch geladen, sofern vorhanden.",
+	"stacks_git_env_file_tip_custom_before": "Nutze dieses Feld für eine zusätzliche Env-Datei mit abweichendem Namen (z. B.",
+	"stacks_git_env_file_tip_custom_middle": "). Ihre Werte überschreiben die Standarddatei",
+	"stacks_git_env_file_tip_custom_after": ".",
+	"stacks_git_env_file_tip_precedence": "Überschreibungen im Editor für Umgebungsvariablen rechts haben immer Vorrang.",
+	"stacks_git_env_file_hint": "Zusätzliche Env-Datei, die an Docker Compose übergeben wird",
+	"stacks_git_context_dir": "Kontextverzeichnis (optional)",
+	"stacks_git_context_dir_tip_working_dir": "Arbeitsverzeichnis für Docker Compose, relativ zum Stammverzeichnis des Repositorys. Alle Dateien in diesem Verzeichnis stehen für Volume-Mounts und Build-Kontexte zur Verfügung.",
+	"stacks_git_context_dir_tip_root_before": "Nutze",
+	"stacks_git_context_dir_tip_root_after": "für das Stammverzeichnis des Repositorys, wenn deine Compose-Datei auf Dateien in benachbarten Verzeichnissen verweist.",
+	"stacks_git_context_dir_tip_default": "Standardmäßig das Verzeichnis, in dem die Compose-Datei liegt.",
+	"stacks_git_context_dir_placeholder": "Standard: Verzeichnis der Compose-Datei",
+	"stacks_git_context_dir_hint_before": "Relativ zum Stammverzeichnis des Repositorys, z. B.",
+	"stacks_git_context_dir_hint_after": "für das Stammverzeichnis",
+	"stacks_git_scheduled_sync": "Geplante Synchronisierung aktivieren",
+	"stacks_git_scheduled_sync_hint": "Synchronisiert das Repository automatisch und stellt den Stack bei Änderungen neu bereit.",
+	"stacks_git_webhook_enable": "Webhook aktivieren",
+	"stacks_git_webhook_hint": "Empfängt Push-Ereignisse deines Git-Anbieters, um Synchronisierung und Neubereitstellung auszulösen.",
+	"stacks_git_webhook_url": "Webhook-URL",
+	"stacks_git_copy_url": "URL kopieren",
+	"stacks_git_copy_requires_https": "Kopieren erfordert HTTPS",
+	"stacks_git_webhook_secret": "Webhook-Secret",
+	"stacks_git_webhook_secret_placeholder": "Erforderlich – Secret generieren oder einfügen",
+	"stacks_git_copy_secret": "Secret kopieren",
+	"stacks_git_generate_secret": "Secret generieren",
+	"stacks_git_webhook_url_after_create": "Die Webhook-URL ist verfügbar, sobald der Stack erstellt wurde.",
+	"stacks_git_webhook_configure_hint": "Trage diese URL bei deinem Git-Anbieter ein. Das Secret dient zur Signaturprüfung.",
+	"stacks_git_deploy_options": "Bereitstellungsoptionen",
+	"stacks_git_build_on_deploy": "Images beim Bereitstellen bauen",
+	"stacks_git_build_on_deploy_hint_before": "Führt",
+	"stacks_git_build_on_deploy_hint_after": "aus, um vor dem Start der Container Images aus Dockerfiles zu bauen.",
+	"stacks_git_no_build_cache": "Build-Cache deaktivieren",
+	"stacks_git_no_build_cache_hint_before": "Übergibt",
+	"stacks_git_no_build_cache_hint_after": "und erzwingt so einen sauberen Build ohne zwischengespeicherte Layer.",
+	"stacks_git_repull_images": "Images erneut pullen",
+	"stacks_git_repull_images_hint_before": "Pullt vor dem Bereitstellen immer die neuesten Images, auch wenn sich die Compose-Datei nicht geändert hat. Nützlich für CI/CD-Workflows mit statischen Tags wie",
+	"stacks_git_repull_images_hint_after": ".",
+	"stacks_git_force_redeploy": "Neubereitstellung erzwingen",
+	"stacks_git_force_redeploy_hint": "Stellt den Stack bei Webhook oder geplanter Synchronisierung immer neu bereit, auch wenn keine Git-Änderungen erkannt werden.",
+	"stacks_git_deploy_now": "Jetzt bereitstellen",
+	"stacks_git_deploy_now_hint": "Stack sofort klonen und bereitstellen",
+	"stacks_git_env_info_storage_before": "Überschreibe Variablen aus den Env-Dateien deines Repositorys. Nicht geheime Werte werden in",
+	"stacks_git_env_info_storage_after": "im Stack-Verzeichnis gespeichert. Secrets werden in der Datenbank gespeichert und beim Bereitstellen über die Shell-Umgebung eingefügt.",
+	"stacks_git_env_info_interpolation_before": "Variablen stehen für die",
+	"stacks_git_env_info_interpolation": "Interpolation in der Compose-Datei",
+	"stacks_git_env_info_syntax_before": "mit der Syntax",
+	"stacks_git_env_info_syntax_after": "zur Verfügung. Sie werden nicht automatisch in Container eingefügt – nutze",
+	"stacks_git_env_info_reference_before": "oder trage",
+	"stacks_git_env_info_reference_in": "in",
+	"stacks_git_env_info_reference_after": "ein, um sie weiterzugeben.",
+	"stacks_git_loading": "Wird geladen…",
+	"stacks_git_populate": "Einlesen",
+	"stacks_git_populate_tip_before": "Klont das Repository und lädt die Umgebungsvariablen aus der Datei",
+	"stacks_git_populate_tip_after": "(im Compose-Verzeichnis) und der zusätzlichen Env-Datei (falls angegeben), damit du siehst, was du überschreiben kannst.",
+	"stacks_git_cancel": "Abbrechen",
+	"stacks_git_deploying": "Wird bereitgestellt…",
+	"stacks_git_save_and_deploy": "Speichern und bereitstellen",
+	"stacks_git_saving": "Wird gespeichert…",
+	"stacks_git_save_changes": "Änderungen speichern",
+	"stacks_git_creating": "Wird erstellt…",
+	"stacks_git_deploy": "Bereitstellen",
+	"stacks_git_create": "Erstellen",
+	"stacks_git_exists_title": "Stack existiert bereits",
+	"stacks_git_exists_description": "Ein Stack namens „{name}“ existiert bereits. Wähle einen anderen Namen.",
+	"stacks_git_ok": "OK",
+	"stacks_git_choose_icon": "Wähle ein Stack-Icon",
+	"stacks_git_branches_loading": "Branches werden geladen…",
+	"stacks_git_branch_search_placeholder": "Branch-Namen eingeben…",
+	"stacks_git_branches_heading": "Branches",
+	"stacks_git_branch_default_badge": "Standard",
+	"stacks_git_branch_custom_heading": "Benutzerdefiniert",
+	"stacks_git_branch_use_custom": "„{branch}“ verwenden",
+	"stacks_git_branch_empty": "Gib einen Branch-Namen ein (z. B. „main“) oder wähle einen aus der Liste.",
+	"stacks_git_badge_per_stack": "(pro Stack)",
+	"stacks_git_deploy_status_succeeded": "Erfolgreich",
+	"stacks_git_deploy_status_failed": "Fehlgeschlagen",
+	"stacks_git_deploy_start_failed": "Bereitstellung konnte nicht gestartet werden",
+	"stacks_git_unknown_error_occurred": "Ein unbekannter Fehler ist aufgetreten",
+	"stacks_git_deploy_failed_fallback": "Bereitstellung fehlgeschlagen",
+	"stacks_git_deploy_verb": "Git-Bereitstellung",
+	"stacks_git_sync_confirm_title": "Aus Git synchronisieren?",
+	"stacks_git_sync_confirm_before": "Damit werden die neuesten Änderungen für ",
+	"stacks_git_sync_confirm_after": " abgerufen.",
+	"stacks_git_sync_confirm_restart_hint": "Container werden nur neu gestartet, wenn sich die Konfiguration geändert hat.",
+	"stacks_git_initializing": "Wird initialisiert…",
+	"stacks_import_unknown_environment": "Unbekannt",
+	"stacks_import_scan_failed": "Ordner konnte nicht gescannt werden",
+	"stacks_import_all_already_adopted": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Stack in diesem Ordner wurde bereits übernommen",
+				"countPlural=other": "Alle {count} Stacks in diesem Ordner wurden bereits übernommen"
+			}
+		}
+	],
+	"stacks_import_none_found": "Keine Compose-Stacks in diesem Ordner gefunden",
+	"stacks_import_no_environment": "Keine Umgebung ausgewählt",
+	"stacks_import_adopt_stack_failed": "Stack konnte nicht übernommen werden",
+	"stacks_import_adopted_stack": "Stack „{name}“ übernommen",
+	"stacks_import_failed_with_error": "Fehlgeschlagen: {error}",
+	"stacks_import_adopt_failed": "Übernahme fehlgeschlagen",
+	"stacks_import_adopt_stacks_failed": "Stacks konnten nicht übernommen werden",
+	"stacks_import_adopted_count": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Stack übernommen",
+				"countPlural=other": "{count} Stacks übernommen"
+			}
+		}
+	],
+	"stacks_import_adopt_count_failed": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Stack konnte nicht übernommen werden",
+				"countPlural=other": "{count} Stacks konnten nicht übernommen werden"
+			}
+		}
+	],
+	"stacks_import_browser_title_env": "Stacks in {env} übernehmen",
+	"stacks_import_browser_title": "Stacks übernehmen",
+	"stacks_import_browser_description_remote": "Durchsuche das Dateisystem des Dockhand-Hosts nach Compose-Dateien. Die Dateien werden lokal verwaltet — Hawser leitet nur Docker-API-Aufrufe weiter, keinen Dateisystemzugriff.",
+	"stacks_import_browser_description": "Navigiere zu einer Compose-Datei oder scanne einen Ordner nach Stacks.",
+	"stacks_import_results_title": "Wähle Stacks zur Übernahme in",
+	"stacks_import_results_description": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Stack gefunden. Wähle aus, was du in {env} übernehmen möchtest.",
+				"countPlural=other": "{count} Stacks gefunden. Wähle aus, welche du in {env} übernehmen möchtest."
+			}
+		}
+	],
+	"stacks_import_service_count": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Service",
+				"countPlural=other": "{count} Services"
+			}
+		}
+	],
+	"stacks_import_running_count": "{count} laufend",
+	"stacks_import_remote_files_before": "Diese Compose-Dateien liegen auf dem",
+	"stacks_import_remote_host": "Dockhand-Host",
+	"stacks_import_remote_files_after": ", nicht auf {env}. Docker-Befehle werden über Hawser an {env} gesendet, die Dateien werden aber lokal verwaltet.",
+	"stacks_import_remote_file_before": "Diese Compose-Datei liegt auf dem",
+	"stacks_import_remote_file_after": ", nicht auf {env}. Docker-Befehle werden über Hawser an {env} gesendet, die Datei wird aber lokal verwaltet.",
+	"stacks_import_adopt_info_title": "Was beim Übernehmen passiert:",
+	"stacks_import_adopt_info_stacks": "Dockhand verwaltet dann diese Compose-Dateien, sodass du die Stacks in der Oberfläche bearbeiten, starten und stoppen kannst. Deine Dateien bleiben an ihrem aktuellen Ort.",
+	"stacks_import_adopt_info_stack": "Dockhand verwaltet dann diese Compose-Datei, sodass du den Stack in der Oberfläche bearbeiten, starten und stoppen kannst. Deine Dateien bleiben an ihrem aktuellen Ort.",
+	"stacks_import_selected_of_total": "von {total} ausgewählt",
+	"stacks_import_back": "Zurück",
+	"stacks_import_cancel": "Abbrechen",
+	"stacks_import_adopting": "Wird übernommen…",
+	"stacks_import_adopt_count": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Stack übernehmen",
+				"countPlural=other": "{count} Stacks übernehmen"
+			}
+		}
+	],
+	"stacks_import_preview_title": "Diesen Stack übernehmen?",
+	"stacks_import_preview_description": "Prüfe die Compose-Datei, bevor du sie übernimmst.",
+	"stacks_import_preview_stack_label": "Stack:",
+	"stacks_import_preview_unknown_name": "unbekannt",
+	"stacks_import_adopt_stack": "Stack übernehmen",
+	"stacks_deploys_log_load_failed_status": "Log konnte nicht geladen werden ({status})",
+	"stacks_deploys_log_load_failed": "Log konnte nicht geladen werden.",
+	"stacks_deploys_delete_failed": "Bereitstellungslauf konnte nicht gelöscht werden",
+	"stacks_deploys_deleted": "Bereitstellungslauf gelöscht",
+	"stacks_deploys_history_load_failed_status": "Bereitstellungsverlauf konnte nicht geladen werden ({status})",
+	"stacks_deploys_history_load_failed": "Bereitstellungsverlauf konnte nicht geladen werden.",
+	"stacks_deploys_empty_title": "Noch keine Bereitstellungsläufe.",
+	"stacks_deploys_empty_description": "Stelle diesen Stack bereit — sein Verlauf erscheint hier.",
+	"stacks_deploys_item_run": "Bereitstellungslauf",
+	"stacks_deploys_delete_title": "Diesen Lauf löschen",
+	"stacks_deploys_build": "Build",
+	"stacks_deploys_triggered_by": "Ausgelöst durch",
+	"stacks_deploys_built": "Gebaut:",
+	"stacks_deploys_pulled": "Gepullt:",
+	"stacks_deploys_log_truncated": "Log gekürzt",
+	"stacks_deploys_log_missing": "Protokoll nicht mehr verfügbar.",
+	"stacks_deploys_drag_to_resize": "Ziehen, um die Größe zu ändern",
+	"stacks_fs_select_file": "Datei auswählen",
+	"stacks_fs_load_directory_failed": "Ordner konnte nicht geladen werden",
+	"stacks_fs_create_folder_failed": "Ordner konnte nicht erstellt werden",
+	"stacks_fs_go_up": "Eine Ebene höher",
+	"stacks_fs_folder_name": "Ordnername",
+	"stacks_fs_create_folder": "Ordner erstellen",
+	"stacks_fs_cancel": "Abbrechen",
+	"stacks_fs_new_folder": "Neuer Ordner",
+	"stacks_fs_scanning": "Wird gescannt…",
+	"stacks_fs_scan_folder": "Diesen Ordner scannen",
+	"stacks_fs_browse_error": "Dateien können nicht angezeigt werden",
+	"stacks_fs_retry": "Erneut versuchen",
+	"stacks_fs_no_subdirectories": "Keine Unterordner",
+	"stacks_fs_directory_empty": "Ordner ist leer",
+	"stacks_fs_compose_file": "Compose-Datei",
+	"stacks_fs_selected": "Ausgewählt:",
+	"stacks_fs_hint_file_or_folder": "Klicke, um eine Datei oder einen Ordner auszuwählen, Doppelklick öffnet den Ordner",
+	"stacks_fs_hint_file": "Klicke auf eine Datei, um sie auszuwählen",
+	"stacks_fs_select": "Auswählen",
+	"stacks_fs_default_location": "Standardort",
+	"stacks_fs_browse_for": "{label} auswählen",
+	"stacks_fs_change_location": "Speicherort ändern",
+	"stacks_fs_copy_path": "Pfad kopieren",
+	"stacks_fs_copy_requires_https": "Kopieren erfordert HTTPS",
+	"stacks_fs_locations": "Speicherorte",
+	"stacks_fs_dockhand_default": "Dockhand-Standard",
+	"stacks_fs_remove_recent": "Aus der Liste entfernen",
+	"stacks_fs_no_locations": "Noch keine Speicherorte. Durchsuche Ordner, um sie hier hinzuzufügen.",
+	"stacks_fs_detect_failed": "Es konnte keine Compose-Datei erkannt werden.",
+	"stacks_fs_detect_invalid_labels": "Die Labels müssen genau einen absoluten Pfad zu einer YAML-Datei angeben.",
+	"stacks_fs_detect_checking": "Compose-Pfad-Labels werden geprüft…",
+	"stacks_fs_detect_from_labels": "Aus Container-Labels erkannt:",
+	"stacks_fs_detect_shared_files_hint": "Verwendet Dateien im Dateisystem von Dockhand. Bei einer entfernten Umgebung müssen es dieselben, gemeinsam genutzten Dateien sein.",
+	"stacks_fs_detect_use_file": "Erkannte Datei verwenden",
+	"stacks_fs_detect_use_file_hint": "Lädt die Datei in den Editor, wie beim Durchsuchen. Klicke auf Speichern, um die Zuordnung zu behalten.",
+	"stacks_fs_detect_not_found": "Es konnte keine Compose-Datei erkannt werden. Du kannst manuell nach einer Datei suchen.",
+	"stacks_fs_detect_error_hint": "{error} Du kannst trotzdem manuell nach einer Datei suchen.",
+	"stacks_validate_title": "Compose-Validierung",
+	"stacks_validate_errors": "Fehler",
+	"stacks_validate_warnings": "Warnungen",
+	"stacks_validate_suggestions": "Vorschläge",
+	"stacks_validate_recheck": "Erneut prüfen",
+	"stacks_validate_close_panel": "Panel schließen",
+	"stacks_validate_validating": "Wird validiert…",
+	"stacks_validate_no_problems": "Keine Probleme gefunden",
+	"stacks_validate_all_checks_passed": "Alle aktivierten Prüfungen bestanden.",
+	"stacks_validate_line": "Zeile {line}",
+	"stacks_validate_apply_fix": "Schnellkorrektur anwenden",
+	"stacks_validate_fix": "Beheben",
+	"stacks_icon_title": "Wähle ein Icon",
+	"stacks_icon_manifest_error": "Die Icon-Liste von selfh.st konnte nicht geladen werden. Prüfe, ob der Server Internetzugang hat.",
+	"stacks_icon_tab_icons": "Icons",
+	"stacks_icon_tab_app_logos": "App-Logos",
+	"stacks_icon_tab_upload": "Hochladen",
+	"stacks_icon_search_icons": "Icons suchen…",
+	"stacks_icon_search_app_logos": "App-Logos suchen (plex, jellyfin, grafana …)",
+	"stacks_icon_loading_list": "Icon-Liste wird geladen…",
+	"stacks_icon_loading_icons": "Icons werden geladen…",
+	"stacks_icon_no_match": "Keine App-Logos für „{query}“ gefunden.",
+	"stacks_icon_attribution_before": "App-Logos von",
+	"stacks_icon_attribution_after": ", lizenziert unter CC BY 4.0. Einmal abgerufen und lokal zwischengespeichert.",
+	"stacks_icon_trademark_notice": "Produktnamen, Logos und Marken sind Eigentum ihrer jeweiligen Inhaber und dienen nur der Identifikation; ihre Verwendung impliziert keine Billigung durch die Inhaber.",
+	"stacks_icon_upload_hint": "Klicke, um ein Bild hochzuladen, und schneide es dann zu",
+	"stacks_icon_upload_formats": "PNG, SVG oder WebP",
+	"stacks_icon_clear": "Icon entfernen",
+	"stacks_icon_crop_title": "Icon zuschneiden",
+	"stacks_icon_save": "Icon speichern",
+	"stacks_redeploy_trigger_title": "Neu bereitstellen",
+	"stacks_redeploy_more_options": "Weitere Bereitstellungsoptionen",
+	"stacks_redeploy_pull_images": "Images pullen",
+	"stacks_redeploy_build_images": "Images bauen",
+	"stacks_redeploy_force_recreate": "Neu erstellen erzwingen",
+	"stacks_redeploy_deploying": "Wird bereitgestellt…",
+	"stacks_redeploy_deploy": "Bereitstellen",
+	"stacks_delete_will_remove_containers": "Container des Stacks stoppen und entfernen",
+	"stacks_delete_will_delete_files": "Stack-Dateien auf dem Datenträger löschen",
+	"stacks_delete_will_keep_files": "Stack-Dateien auf dem Datenträger behalten",
+	"stacks_delete_will_delete_volumes": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} benanntes Volume löschen – die Daten sind nicht wiederherstellbar",
+				"countPlural=other": "{count} benannte Volumes löschen – die Daten sind nicht wiederherstellbar"
+			}
+		}
+	],
+	"stacks_delete_will_keep_volumes": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} benanntes Volume behalten",
+				"countPlural=other": "{count} benannte Volumes behalten"
+			}
+		}
+	],
+	"stacks_delete_title": "Stack „{name}“ entfernen",
+	"stacks_delete_description": "Wähle, was entfernt werden soll. Die Container des Stacks werden immer gestoppt und entfernt.",
+	"stacks_delete_checking": "Wird geprüft, was entfernt werden kann…",
+	"stacks_delete_files_label": "Dateien auf dem Datenträger löschen",
+	"stacks_delete_volumes_label": "Benannte Volumes löschen",
+	"stacks_delete_volumes_unrecoverable": "(Daten sind nicht wiederherstellbar)",
+	"stacks_delete_nothing_managed": "Dieser Stack hat keine von Dockhand verwalteten Dateien oder benannten Volumes – nur der Stack-Eintrag und seine Container werden entfernt.",
+	"stacks_delete_what_will_happen": "Was passiert",
+	"stacks_delete_cancel": "Abbrechen",
+	"stacks_delete_remove": "Entfernen",
+	"stacks_output_recreated_count": "{count} neu erstellt",
+	"stacks_output_created_count": "{count} erstellt",
+	"stacks_output_started_count": "{count} gestartet",
+	"stackenv_title": "Umgebungsvariablen",
+	"stackenv_view_form": "Formularansicht",
+	"stackenv_view_text": "Textansicht (rohe .env-Datei)",
+	"stackenv_pill_missing": "{count} fehlend",
+	"stackenv_pill_defined": "{count} definiert",
+	"stackenv_pill_optional": "{count} optional",
+	"stackenv_load": "Laden",
+	"stackenv_add": "Hinzufügen",
+	"stackenv_clear_title": "Alle Variablen löschen?",
+	"stackenv_confirm_action_clear": "löschen",
+	"stackenv_item_environment_variables": "Umgebungsvariablen",
+	"stackenv_clear_confirm": "Alle löschen",
+	"stackenv_clear": "Leeren",
+	"stackenv_interpolation_before": "Diese Variablen stehen für die",
+	"stackenv_interpolation_strong": "Interpolation in der Compose-Datei",
+	"stackenv_interpolation_using": "mit der Syntax",
+	"stackenv_interpolation_after": "zur Verfügung.",
+	"stackenv_interpolation_pass_before": "Um sie an Container weiterzugeben, verweise im Abschnitt",
+	"stackenv_interpolation_pass_after": "der Compose-Datei auf sie.",
+	"stackenv_syntax_required": "erforderlich",
+	"stackenv_syntax_optional": "optional",
+	"stackenv_syntax_required_error": "erforderlich mit Fehlermeldung",
+	"stackenv_secrets_not_shown": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Secret wird nicht angezeigt.",
+				"countPlural=other": "{count} Secrets werden nicht angezeigt."
+			}
+		}
+	],
+	"stackenv_secrets_not_shown_detail": "Secrets werden nie auf den Datenträger geschrieben, sondern beim Start des Stacks über die Shell-Umgebung eingespeist.",
+	"stackenv_providerref_before": "Eine Secret-Provider-Referenz",
+	"stackenv_providerref_resolved": "wird",
+	"stackenv_providerref_here": "hier",
+	"stackenv_providerref_here_after": ", in der Umgebung des Stacks, aufgelöst. Sie wird",
+	"stackenv_providerref_not": "nicht",
+	"stackenv_providerref_not_after": "aufgelöst, wenn sie direkt in einem Compose-Block",
+	"stackenv_providerref_block": "steht - verweise dort stattdessen mit",
+	"stackenv_providerref_instead": "auf die Variable.",
+	"stackenv_parse_warnings_title": "Einige Zeilen konnten nicht verarbeitet werden:",
+	"stackenv_parse_warnings_more": "…und {count} weitere",
+	"stackenv_parse_warnings_hint": "Wechsle zur Textansicht, um diese Zeilen zu bearbeiten.",
+	"stackenv_injected_loaded": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Secret geladen",
+				"countPlural=other": "{count} Secrets geladen"
+			}
+		}
+	],
+	"stackenv_injected_from": "aus",
+	"stackenv_injected_the_provider": "dem Provider",
+	"stackenv_injected_detail_before": "Beim letzten Bereitstellen in den Container eingespeist — nie in",
+	"stackenv_injected_detail_after": " geschrieben.",
+	"stackenv_unbound_title": "Kein Secret-Provider verknüpft",
+	"stackenv_unbound_detail": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Secret wurde beim letzten Bereitstellen eingespeist, aber der Stack ist mit keinem Provider mehr verknüpft. Beim nächsten Bereitstellen fällt es weg. Wähle wieder einen Provider aus, um es zu behalten.",
+				"countPlural=other": "Diese {count} Secrets wurden beim letzten Bereitstellen eingespeist, aber der Stack ist mit keinem Provider mehr verknüpft. Beim nächsten Bereitstellen fallen sie weg. Wähle wieder einen Provider aus, um sie zu behalten."
+			}
+		}
+	],
+	"stackenv_probe_failed_named": "{provider} konnte nicht geprüft werden: {error}",
+	"stackenv_probe_failed": "Der Secret-Provider konnte nicht geprüft werden: {error}",
+	"stackenv_add_missing": "Fehlende hinzufügen:",
+	"stackenv_source_file": "Aus der Env-Datei im Repository",
+	"stackenv_source_revert": "Auf den Wert aus der Datei zurücksetzen",
+	"stackenv_source_override": "Manuell überschrieben (nicht in der Datei)",
+	"stackenv_status_required_defined": "Erforderliche Variable definiert",
+	"stackenv_status_optional": "Optionale Variable (mit Standardwert)",
+	"stackenv_status_unused": "Nicht verwendete Variable",
+	"stackenv_field_name": "Name",
+	"stackenv_field_value": "Wert",
+	"stackenv_secret_locked": "Secret-Wert (lässt sich nicht wieder einblenden)",
+	"stackenv_secret_marked": "Als Secret markiert",
+	"stackenv_secret_mark": "Als Secret markieren",
+	"stackenv_empty": "Keine Umgebungsvariablen definiert.",
+	"stackenv_add_first": "Füge deine erste Variable hinzu",
+	"secretprovider_label": "Secret-Provider",
+	"secretprovider_unknown": "Unbekannter Provider",
+	"secretprovider_none_disabled": "Keiner — deaktiviert",
+	"secretprovider_none": "Keiner",
+	"stacks_list_restart_stack": "Stack {name} neu starten",
+	"stacks_redeploy_header": "Stack {name} neu bereitstellen"
 }
