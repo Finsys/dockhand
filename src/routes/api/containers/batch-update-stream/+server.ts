@@ -15,9 +15,9 @@ import {
 } from '$lib/server/docker';
 import { auditContainer } from '$lib/server/audit';
 import { getScannerSettings, scanImage } from '$lib/server/scanner';
-import { saveVulnerabilityScan, removePendingContainerUpdateByName, getPendingContainerUpdates, type VulnerabilityCriteria } from '$lib/server/db';
+import { saveVulnerabilityScan, removePendingContainerUpdateByName, getPendingContainerUpdates, getEnvironment, type VulnerabilityCriteria } from '$lib/server/db';
 import { resolveContainer, labelForMissing } from '$lib/utils/stale-container-id';
-import { parseImageNameAndTag, shouldBlockUpdate, combineScanSummaries, isSystemContainer } from '$lib/server/scheduler/tasks/update-utils';
+import { parseImageNameAndTag, shouldBlockUpdate, combineScanSummaries, isSystemContainer, isEnvironmentTransportContainer, batchUpdateStillApplies } from '$lib/server/scheduler/tasks/update-utils';
 import { isUpdateDisabledByLabel } from '$lib/server/container-labels';
 import { recreateContainer } from '$lib/server/scheduler/tasks/container-update';
 import { createJob, appendLine, completeJob, failJob } from '$lib/server/jobs';
@@ -73,12 +73,14 @@ export interface UpdateProgress {
 	}>;
 }
 
-/** id -> name from the pending rows, read once for the whole batch. */
-async function pendingNames(envId: number | null): Promise<Map<string, string>> {
+/** id -> what the last update check recorded, read once for the whole batch. */
+async function pendingRows(
+	envId: number | null
+): Promise<Map<string, { name: string; image: string | null }>> {
 	if (envId == null) return new Map();
 	try {
 		const rows = await getPendingContainerUpdates(envId);
-		return new Map(rows.map((r) => [r.containerId, r.containerName]));
+		return new Map(rows.map((r) => [r.containerId, { name: r.containerName, image: r.currentImage ?? null }]));
 	} catch {
 		return new Map();
 	}
@@ -149,7 +151,16 @@ export const POST: RequestHandler = async (event) => {
 			message: `Starting update of ${containerIds.length} container${containerIds.length > 1 ? 's' : ''}${shouldScan ? ' with vulnerability scanning' : ''}`
 		});
 
-		const namesById = await pendingNames(envIdNum ?? null);
+		const pendingById = await pendingRows(envIdNum ?? null);
+		// The host this environment is reached through: when it names a container,
+		// that container carries the connection and must not be stopped mid-update.
+		const env = envIdNum == null ? null : await getEnvironment(envIdNum).catch(() => null);
+		const envHost = env?.host ?? null;
+		// Only a TCP connection is reached THROUGH a port. A socket or edge environment
+		// still stores 2375 in that column (the schema defaults it), and acting on it
+		// would skip any container that merely publishes 2375 alongside the socket.
+		const reachedOverTcp = env?.connectionType === 'direct' || env?.connectionType === 'hawser-standard';
+		const envPort = reachedOverTcp ? (env?.port ?? null) : null;
 
 		// Process containers sequentially
 		for (let i = 0; i < containerIds.length; i++) {
@@ -162,7 +173,8 @@ export const POST: RequestHandler = async (event) => {
 				// An update recreates the container under a new id, so a selection made
 				// before one ran holds an id that no longer exists. The pending row keeps
 				// the NAME, which survives, so the same container is still reachable.
-				const pendingName = namesById.get(containerId) ?? null;
+				const pending = pendingById.get(containerId) ?? null;
+				const pendingName = pending?.name ?? null;
 				const container = resolveContainer(containers, containerId, pendingName);
 
 				if (!container) {
@@ -215,6 +227,53 @@ export const POST: RequestHandler = async (event) => {
 						total: containerIds.length,
 						success: true,
 						message: `Skipping ${containerName} - cannot update ${systemType} container`
+					});
+					skippedCount++;
+					continue;
+				}
+
+				// The selection came from a list the browser already had. Updating a
+				// container outside Dockhand leaves its pending row behind, so verify
+				// it still runs what the check recorded before pulling (#1689).
+				if (!batchUpdateStillApplies(pending?.image, imageName)) {
+					// The row described a container that is gone, so retire it: leaving it
+					// would keep the badge lit and skip every later attempt the same way.
+					if (envIdNum != null) {
+						await removePendingContainerUpdateByName(envIdNum, containerName).catch(() => {});
+					}
+					sendData({
+						type: 'progress',
+						containerId,
+						containerName,
+						step: 'skipped',
+						current: i + 1,
+						total: containerIds.length,
+						success: true,
+						message: `Skipping ${containerName} - already updated outside Dockhand (was ${pending?.image}, now ${imageName})`
+					});
+					skippedCount++;
+					continue;
+				}
+
+				// Skip the container Dockhand reaches this environment through: stopping
+				// it severs the connection the update runs over (#1689).
+				if (isEnvironmentTransportContainer({
+					name: containerName,
+					mountSources: (inspectData.Mounts ?? []).map((m: any) => m?.Source),
+					// Ports maps "<containerPort>/tcp" -> [{ HostIp, HostPort }]. The HOST side
+					// is what the environment is reached on; the container port may differ.
+					publishedPorts: Object.values(inspectData.NetworkSettings?.Ports ?? {})
+						.flatMap((b: any) => (b ?? []).map((x: any) => ({ port: Number(x?.HostPort), hostIp: x?.HostIp })))
+				}, envHost, envPort)) {
+					sendData({
+						type: 'progress',
+						containerId,
+						containerName,
+						step: 'skipped',
+						current: i + 1,
+						total: containerIds.length,
+						success: true,
+						message: `Skipping ${containerName} - Dockhand reaches this environment through it`
 					});
 					skippedCount++;
 					continue;
