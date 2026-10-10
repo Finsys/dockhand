@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { m } from "$lib/paraglide/messages.js";
 	import { Button } from "$lib/components/ui/button/index.js";
 	import { cn } from "$lib/utils.js";
 	import { PanelLeft as PanelLeftIcon } from "lucide-svelte";
@@ -31,5 +32,5 @@
 	{...restProps}
 >
 	<PanelLeftIcon />
-	<span class="sr-only">Toggle Sidebar</span>
+	<span class="sr-only">{m.ui_toggle_sidebar()}</span>
 </Button>

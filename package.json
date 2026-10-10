@@ -9,9 +9,10 @@
 		"build": "npx vite build",
 		"start": "node ./server.js",
 		"preview": "node ./build/index.js",
-		"prepare": "npx svelte-kit sync || echo ''",
-		"check": "npx svelte-kit sync && npx svelte-check --tsconfig ./tsconfig.json",
-		"check:watch": "npx svelte-kit sync && npx svelte-check --tsconfig ./tsconfig.json --watch",
+		"prepare": "(npx svelte-kit sync && npm run i18n:compile) || echo ''",
+		"check": "npx svelte-kit sync && npm run i18n:compile && npx svelte-check --tsconfig ./tsconfig.json",
+		"check:watch": "npx svelte-kit sync && npm run i18n:compile && npx svelte-check --tsconfig ./tsconfig.json --watch",
+		"i18n:compile": "npx paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide --strategy preferredLanguage baseLocale --silent",
 		"test": "bun test tests/",
 		"test:unit": "bun test tests/",
 		"test:e2e": "npx playwright test integration/e2e/",
@@ -73,6 +74,8 @@
 		"ws": "8.21.0"
 	},
 	"devDependencies": {
+		"@inlang/paraglide-js": "2.25.4",
+		"@inlang/plugin-message-format": "4.4.0",
 		"@internationalized/date": "^3.10.1",
 		"@layerstack/tailwind": "^1.0.1",
 		"@lucide/svelte": "^0.562.0",

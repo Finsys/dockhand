@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Loader2 } from 'lucide-svelte';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		compact?: boolean;
@@ -11,11 +12,11 @@
 {#if compact}
 	<div class="flex items-center gap-2 text-muted-foreground py-1">
 		<Loader2 class="w-4 h-4 animate-spin opacity-50" />
-		<span class="text-xs">Connecting...</span>
+		<span class="text-xs">{m.dashboard_connecting()}</span>
 	</div>
 {:else}
 	<div class="flex flex-col items-center justify-center py-8 text-muted-foreground">
 		<Loader2 class="w-8 h-8 mb-2 animate-spin opacity-50" />
-		<span class="text-sm">Connecting to environment...</span>
+		<span class="text-sm">{m.dashboard_connecting_environment()}</span>
 	</div>
 {/if}

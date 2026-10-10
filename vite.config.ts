@@ -1,5 +1,6 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import tailwindcss from '@tailwindcss/vite';
+import { paraglideVitePlugin } from '@inlang/paraglide-js';
 import { defineConfig, type Plugin } from 'vite';
 import { execSync } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
@@ -1241,7 +1242,19 @@ async function handleHawserMessage(ws: any, msg: any) {
 }
 
 export default defineConfig({
-	plugins: [tailwindcss(), sveltekit(), webSocketPlugin()],
+	plugins: [
+		// UI translations: messages live in src/lib/i18n/messages, the compiled
+		// output in src/lib/paraglide is generated (and git-ignored). The language
+		// follows the browser and falls back to English.
+		paraglideVitePlugin({
+			project: './project.inlang',
+			outdir: './src/lib/paraglide',
+			strategy: ['preferredLanguage', 'baseLocale']
+		}),
+		tailwindcss(),
+		sveltekit(),
+		webSocketPlugin()
+	],
 	define: {
 		__BUILD_DATE__: JSON.stringify(new Date().toISOString()),
 		__BUILD_COMMIT__: JSON.stringify(getGitCommit()),

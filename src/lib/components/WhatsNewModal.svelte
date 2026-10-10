@@ -5,6 +5,7 @@
 	import { compareVersions } from '$lib/utils/version';
 	import { releasedEntries } from '$lib/utils/changelog-filter';
 	import ChangelogText from '$lib/components/ChangelogText.svelte';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface ChangelogEntry {
 		version: string;
@@ -55,7 +56,7 @@
 		<Dialog.Header>
 			<Dialog.Title class="flex items-center gap-2">
 				<ScrollText class="w-5 h-5 text-muted-foreground" />
-				Dockhand has been updated to {version}
+				{m.whatsnew_title({ version })}
 			</Dialog.Title>
 		</Dialog.Header>
 
@@ -80,7 +81,7 @@
 		</div>
 
 		<Dialog.Footer>
-			<Button onclick={onDismiss}>Got it</Button>
+			<Button onclick={onDismiss}>{m.whatsnew_got_it()}</Button>
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>
