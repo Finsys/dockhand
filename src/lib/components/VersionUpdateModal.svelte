@@ -9,6 +9,7 @@
 	import { formatDate } from '$lib/stores/settings';
 	import { repoBaseOf } from '$lib/utils/pinned-ref';
 	import type { NewerVersion } from '$lib/types';
+	import { m } from '$lib/paraglide/messages.js';
 
 	// Minimal shape shared by ContainerInfo and StackContainer - all the modal needs.
 	type ModalContainer = { id: string; name: string; image: string };
@@ -104,7 +105,7 @@
 		const ok = await copyToClipboard(`${repoBase}:${newerVersion.tag}`);
 		if (ok) {
 			copied = true;
-			toast.success('New image tag copied');
+			toast.success(m.updates_toast_tag_copied());
 			setTimeout(() => (copied = false), 1500);
 		}
 	}
@@ -116,7 +117,7 @@
 		const ok = await copyToClipboard(`${repoBase}:${newerVersion.tag}@${newerVersion.digest}`);
 		if (ok) {
 			copiedPinned = true;
-			toast.success('New tag with digest copied');
+			toast.success(m.updates_toast_pinned_tag_copied());
 			setTimeout(() => (copiedPinned = false), 1500);
 		}
 	}
@@ -159,7 +160,7 @@
 						<button
 							type="button"
 							onclick={copyTag}
-							title={copied ? 'Copied!' : 'Copy new tag'}
+							title={copied ? m.updates_copied() : m.updates_copy_new_tag()}
 							class="inline-flex items-center p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
 						>
 							{#if copied}
@@ -174,7 +175,7 @@
 							{newerVersion.bump}
 						</span>
 						{#if versionPath.length > 1}
-							<span class="text-xs font-normal text-muted-foreground">{versionPath.length} versions ahead</span>
+							<span class="text-xs font-normal text-muted-foreground">{m.updates_versions_ahead({ count: versionPath.length })}</span>
 						{/if}
 					</span>
 				</Dialog.Title>
@@ -185,7 +186,7 @@
 				<button
 					type="button"
 					onclick={copyPinnedTag}
-					title={copiedPinned ? 'Copied!' : 'Copy the new tag pinned to its digest (tag@sha256)'}
+					title={copiedPinned ? m.updates_copied() : m.updates_copy_pinned_tag_title()}
 					class="group flex items-center gap-1.5 w-full text-left px-2 py-1.5 rounded-md border border-border bg-muted/30 hover:bg-muted/60 transition-colors cursor-pointer focus:outline-none focus-visible:ring-1 focus-visible:ring-ring"
 				>
 					<ShieldCheck class="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
@@ -201,7 +202,7 @@
 			<!-- Version path. A version with release notes is a link that opens + scrolls to them. -->
 			{#if versionPath.length > 1}
 				<div class="flex items-center gap-1.5 flex-wrap text-xs px-1">
-					<span class="text-muted-foreground">Path:</span>
+					<span class="text-muted-foreground">{m.updates_path()}</span>
 					<span class="font-mono text-muted-foreground">{currentTag}</span>
 					{#each versionPath as v, i}
 						{@const isTarget = i === versionPath.length - 1}
@@ -210,7 +211,7 @@
 							<button
 								type="button"
 								onclick={() => jumpToNote(v)}
-								title="Jump to release notes for {v}"
+								title={m.updates_jump_to_notes({ version: v })}
 								class="font-mono cursor-pointer transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded {isTarget ? 'text-amber-400 font-semibold' : 'text-foreground hover:text-amber-400'}"
 							>{v}</button>
 						{:else}
@@ -225,7 +226,7 @@
 				{#if loading}
 					<div class="flex items-center justify-center py-10 text-muted-foreground">
 						<RefreshCw class="w-5 h-5 animate-spin" />
-						<span class="ml-2 text-sm">Loading release notes...</span>
+						<span class="ml-2 text-sm">{m.updates_loading_notes()}</span>
 					</div>
 				{:else if notes.length > 0}
 					{#each versionPath.slice().reverse() as version}
@@ -244,7 +245,7 @@
 										rel="noopener noreferrer"
 										onclick={(e) => e.stopPropagation()}
 										class="text-muted-foreground hover:text-foreground shrink-0 {note.publishedAt ? '' : 'ml-auto'}"
-										title="Open on GitHub"
+										title={m.updates_open_on_github()}
 									>
 										<ExternalLink class="w-3.5 h-3.5" />
 									</a>
@@ -262,14 +263,13 @@
 							<div class="flex items-start gap-2.5">
 								<Info class="w-5 h-5 shrink-0 text-amber-500 mt-0.5" />
 								<p class="text-sm text-muted-foreground">
-									GitHub's rate limit was hit while fetching release notes. Set a
-									<code class="text-xs">DOCKHAND_GITHUB_TOKEN</code> (a personal access token, no scopes needed)
-									to raise the limit from 60 to 5000 requests/hour.
+									{m.updates_rate_limit_before()}
+									<code class="text-xs">DOCKHAND_GITHUB_TOKEN</code> {m.updates_rate_limit_after()}
 								</p>
 							</div>
 							{#if changelogUrl}
 								<Button variant="outline" size="sm" href={changelogUrl} target="_blank" rel="noopener noreferrer">
-									<ExternalLink class="w-3.5 h-3.5 mr-1.5" /> View changelog
+									<ExternalLink class="w-3.5 h-3.5 mr-1.5" /> {m.updates_view_changelog()}
 								</Button>
 							{/if}
 						</div>
@@ -278,15 +278,15 @@
 							<BookOpen class="w-8 h-8 text-muted-foreground/50" />
 							<p class="text-sm text-muted-foreground max-w-sm">
 								{#if changelogUrl}
-									Release notes for these versions aren't available inline.
+									{m.updates_notes_not_inline()}
 								{:else}
-									This image doesn't publish release notes Dockhand can read
-									(no <code class="text-xs">org.opencontainers.image.source</code> label pointing at a GitHub or Gitea/Forgejo repo).
+									{m.updates_no_source_before()}
+									<code class="text-xs">org.opencontainers.image.source</code> {m.updates_no_source_after()}
 								{/if}
 							</p>
 							{#if changelogUrl}
 								<Button variant="outline" size="sm" href={changelogUrl} target="_blank" rel="noopener noreferrer">
-									<ExternalLink class="w-3.5 h-3.5 mr-1.5" /> View changelog
+									<ExternalLink class="w-3.5 h-3.5 mr-1.5" /> {m.updates_view_changelog()}
 								</Button>
 							{/if}
 						</div>
@@ -297,11 +297,11 @@
 			<Dialog.Footer class="flex-row items-center gap-2 sm:justify-between">
 				<div class="text-xs text-muted-foreground">
 					{#if source}
-						Notes from <code class="text-xs">{source}</code>
+						{m.updates_notes_from()} <code class="text-xs">{source}</code>
 					{/if}
 				</div>
 				<div class="flex gap-2">
-					<Button variant="outline" size="sm" onclick={close}>Close</Button>
+					<Button variant="outline" size="sm" onclick={close}>{m.ui_close()}</Button>
 				</div>
 			</Dialog.Footer>
 		{/if}

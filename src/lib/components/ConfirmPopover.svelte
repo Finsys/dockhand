@@ -26,6 +26,13 @@
 		extraContent?: Snippet;
 		/** Optional leading glyph rendered before the confirm text (e.g. a stack icon). */
 		icon?: Snippet;
+		/**
+		 * Set when `action` and `itemType` come from translated messages: the question is then
+		 * built from the `confirm_question` message, so each language keeps its own word order
+		 * ("Delete container x?" / "Container x löschen?"). Transitional until every caller is
+		 * translated; untranslated callers keep the English order.
+		 */
+		localized?: boolean;
 	}
 
 	let {
@@ -44,7 +51,8 @@
 		onOpenChange,
 		children,
 		extraContent,
-		icon
+		icon,
+		localized = false
 	}: Props = $props();
 
 	const triggerClass = $derived(unstyled
@@ -57,6 +65,19 @@
 
 	// Truncate long names
 	const displayName = $derived(itemName && itemName.length > 20 ? itemName.slice(0, 20) + '...' : itemName);
+
+	// Localized question split around the (bold) name: the message places {name} where the
+	// language wants it, a marker character stands in for it and is cut out again here.
+	const NAME_MARKER = '\u0000';
+	const question = $derived.by(() => {
+		if (!localized) return null;
+		const text = m.confirm_question({ action, itemType, name: displayName ? NAME_MARKER : '' })
+			.replace(/\s+/g, ' ')
+			.replace(/ ([?!.])/g, '$1')
+			.trim();
+		const [before, after = ''] = text.split(NAME_MARKER);
+		return { before: before.charAt(0).toUpperCase() + before.slice(1), after };
+	});
 
 	// The heavy bits-ui Popover.Root (floating-ui context + portal) is only mounted once
 	// this confirm is actually opened. Before that the trigger is a plain button, so a grid
@@ -142,7 +163,11 @@
 		<div class="flex flex-col gap-1.5">
 			<div class="flex items-center gap-2">
 				{#if icon}{@render icon()}{/if}
-				<span class="text-xs whitespace-nowrap">{action} {itemType} {#if displayName}<strong class="font-semibold text-foreground">{displayName}</strong>{/if}?</span>
+				{#if question}
+					<span class="text-xs whitespace-nowrap">{question.before}{#if displayName}<strong class="font-semibold text-foreground">{displayName}</strong>{/if}{question.after}</span>
+				{:else}
+					<span class="text-xs whitespace-nowrap">{action} {itemType} {#if displayName}<strong class="font-semibold text-foreground">{displayName}</strong>{/if}?</span>
+				{/if}
 				<Button size="sm" {variant} class="h-6 px-2 text-xs" onclick={handleConfirm}>
 					{confirmText ?? m.confirm_default_confirm()}
 				</Button>

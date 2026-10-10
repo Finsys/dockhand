@@ -6,6 +6,7 @@
 	import { appendEnvParam } from '$lib/stores/environment';
 	import { watchJob } from '$lib/utils/sse-fetch';
 	import type { NewerVersion } from '$lib/types';
+	import { m } from '$lib/paraglide/messages.js';
 
 	export interface UpdateCheckResultItem {
 		containerId: string;
@@ -78,7 +79,7 @@
 
 	function showFailedChecksToast(failed: FailedCheckItem[], prefix: string) {
 		const details = failed.map((f) => `• ${f.containerName}: ${f.error}`).join('\n');
-		toast.warning(`${prefix} (${failed.length} failed to check)`, {
+		toast.warning(m.updates_failed_checks_summary({ summary: prefix, count: failed.length }), {
 			description: details,
 			descriptionClass: 'whitespace-pre-line',
 			class: '!w-[28rem] !max-w-[28rem]',
@@ -142,28 +143,28 @@
 			// A newer version tag is a real result even when no digest update exists,
 			// so it counts toward the "found" state and the summary message.
 			const semverNote = newerVersions.length > 0
-				? `${newerVersions.length} newer version tag${newerVersions.length !== 1 ? 's' : ''}`
+				? m.updates_newer_version_tags({ count: newerVersions.length })
 				: '';
 
 			if (withUpdates.length === 0 && newerVersions.length === 0) {
 				// Keep the "Latest" status until re-check / env-switch — don't auto-revert (#1019)
 				status = 'none';
 				if (failed.length > 0) {
-					showFailedChecksToast(failed, deferred.length > 0 ? `${deferred.length} update(s) cooling down` : 'All containers are up to date');
+					showFailedChecksToast(failed, deferred.length > 0 ? m.updates_cooling_down({ count: deferred.length }) : m.updates_all_up_to_date());
 				} else if (deferred.length > 0) {
-					toast.info(`${deferred.length} update(s) cooling down`, {
-						description: deferred.map((r: any) => `${r.containerName}: ${r.releaseAgeRemainingHours} hour(s) remaining`).join('\n'),
+					toast.info(m.updates_cooling_down({ count: deferred.length }), {
+						description: deferred.map((r: any) => m.updates_hours_remaining({ name: r.containerName, count: r.releaseAgeRemainingHours })).join('\n'),
 						descriptionClass: 'whitespace-pre-line'
 					});
 				} else {
-					toast.success('All containers are up to date');
+					toast.success(m.updates_all_up_to_date());
 				}
 			} else {
 				status = 'found';
 				const parts = [
-					withUpdates.length > 0 ? `${withUpdates.length} update${withUpdates.length !== 1 ? 's' : ''} available` : '',
+					withUpdates.length > 0 ? m.updates_available_count({ count: withUpdates.length }) : '',
 					semverNote,
-					deferred.length > 0 ? `${deferred.length} cooling down` : ''
+					deferred.length > 0 ? m.updates_cooling_down_short({ count: deferred.length }) : ''
 				].filter(Boolean);
 				const summary = parts.join(', ');
 				if (failed.length > 0) {
@@ -191,28 +192,28 @@
 	variant="outline"
 	onclick={checkForUpdates}
 	disabled={status === 'checking'}
-	title="Check for available updates"
+	title={m.updates_check_title()}
 	class="relative overflow-hidden"
 >
 	{#if displayStatus === 'checking'}
 		<CircleArrowUp class="w-3.5 h-3.5 animate-spin" />
 		{#if progress.total > 0}
-			<span class="tabular-nums">Checking {String(progress.checked).padStart(String(progress.total).length, ' ')}/{progress.total}</span>
+			<span class="tabular-nums">{m.updates_checking_progress({ checked: String(progress.checked).padStart(String(progress.total).length, ' '), total: progress.total })}</span>
 			<div
 				class="absolute bottom-0 left-0 h-px bg-foreground transition-[width] duration-150 ease-out"
 				style="width: {(progress.checked / progress.total) * 100}%"
 			></div>
 		{:else}
-			Check for updates
+			{m.updates_check()}
 		{/if}
 	{:else if displayStatus === 'none' || displayStatus === 'found'}
 		<Check class="w-3.5 h-3.5 mr-1 text-green-600" />
-		Check for updates
+		{m.updates_check()}
 	{:else if displayStatus === 'error'}
 		<XCircle class="w-3.5 h-3.5 mr-1 text-destructive" />
-		Check for updates
+		{m.updates_check()}
 	{:else}
 		<CircleArrowUp class="w-3.5 h-3.5" />
-		Check for updates
+		{m.updates_check()}
 	{/if}
 </Button>

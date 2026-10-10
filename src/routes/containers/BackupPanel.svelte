@@ -26,6 +26,7 @@
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { getRepoTypeIcon, parseRetention, parseOptions, retentionSummary as getRetentionSummary, formatCron, runBackupAction, classifyJobResult, tagLogLine, fetchBackupExecutions, pickDuplicateDestinationId, duplicateStartsEnabled, type BackupAction, type BackupFormState } from '$lib/utils/backup';
 	import { reconcileSelectedVolumeKeys } from '$lib/utils/mounts';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		containerName: string;
@@ -151,10 +152,10 @@
 				progressLogs = [...progressLogs, '[dockhand] Cancelling backup…'];
 			} else {
 				const d = await res.json().catch(() => ({}));
-				toast.error(d.error || 'Failed to cancel backup');
+				toast.error(d.error || m.containers_backup_cancel_failed());
 			}
 		} catch {
-			toast.error('Failed to cancel backup');
+			toast.error(m.containers_backup_cancel_failed());
 		} finally {
 			cancelling = false;
 		}
@@ -361,13 +362,13 @@
 	 * other actions don't apply to in-place edits.
 	 */
 	async function submitForm(action: BackupAction) {
-		if (!editDestinationId) { toast.error('Select a backup repository'); return; }
+		if (!editDestinationId) { toast.error(m.containers_backup_select_repository()); return; }
 		// A local repo on a non-co-located env is allowed here; it fails loud at run
 		// time via the helper's localRepoGuard rather than being blocked up front.
 		// Cron only matters when the schedule will be persisted. run-once
 		// clears it server-side so the field value is irrelevant.
 		if ((action === 'save' || action === 'save-run') && editScheduleInvalid) {
-			toast.error('Schedule is invalid');
+			toast.error(m.containers_backup_schedule_invalid());
 			return;
 		}
 
@@ -398,13 +399,13 @@
 				} : undefined
 			});
 			if (!result.ok) {
-				if (runsBackup) { progressStatus = 'error'; progressError = result.error || 'Backup failed'; }
-				else toast.error(result.error || 'Backup failed');
+				if (runsBackup) { progressStatus = 'error'; progressError = result.error || m.containers_backup_failed(); }
+				else toast.error(result.error || m.containers_backup_failed());
 				return;
 			}
 			if (runsBackup) progressStatus = 'success';
-			if (action === 'save') toast.success(isNew ? 'Backup schedule added' : 'Backup schedule updated');
-			else toast.success(`Backup completed for ${containerName}`);
+			if (action === 'save') toast.success(isNew ? m.containers_backup_schedule_added() : m.containers_backup_schedule_updated());
+			else toast.success(m.containers_backup_completed_for({ name: containerName }));
 			editingConfig = null; isNew = false; duplicating = false;
 			fetchConfigs();
 			// 'save-run'/'run-once' just wrote a snapshot — reload the list so it appears
@@ -424,13 +425,13 @@
 			if (res.ok) {
 				const data = await res.json().catch(() => ({}));
 				const n = data.snapshots?.deleted ?? 0;
-				toast.success(`Backup schedule removed${withSnaps ? ` (${n} snapshot${n === 1 ? '' : 's'} deleted)` : ''}`);
+				toast.success(withSnaps ? m.containers_backup_schedule_removed_with_snapshots({ count: n }) : m.containers_backup_schedule_removed());
 				fetchConfigs();
 				onConfigSaved?.();
 			} else {
-				toast.error('Failed to delete');
+				toast.error(m.containers_backup_delete_failed());
 			}
-		} catch { toast.error('Failed to delete'); }
+		} catch { toast.error(m.containers_backup_delete_failed()); }
 		confirmDeleteId = null;
 		deleteConfigSnapshots = false;
 	}
@@ -448,13 +449,13 @@
 				body: JSON.stringify({ enabled: !cfg.enabled })
 			});
 			if (res.ok) {
-				toast.success(cfg.enabled ? 'Schedule paused' : 'Schedule resumed');
+				toast.success(cfg.enabled ? m.containers_backup_schedule_paused() : m.containers_backup_schedule_resumed());
 				fetchConfigs();
 				onConfigSaved?.();
 			} else {
-				toast.error('Failed to update schedule');
+				toast.error(m.containers_backup_schedule_update_failed());
 			}
-		} catch { toast.error('Failed to update schedule'); }
+		} catch { toast.error(m.containers_backup_schedule_update_failed()); }
 		togglingId = null;
 	}
 
@@ -480,19 +481,19 @@
 				// backups page. Only 'success'/'warning' get the green result.
 				if (outcome === 'error' || outcome === 'skipped') {
 					progressStatus = 'error';
-					progressError = message || (outcome === 'skipped' ? 'Backup skipped' : 'Backup failed');
+					progressError = message || (outcome === 'skipped' ? m.containers_backup_skipped() : m.containers_backup_failed());
 				} else {
 					progressStatus = 'success';
 				}
-				if (outcome === 'skipped') toast.info(message || 'Backup skipped');
-				else if (outcome === 'warning') toast.warning(message || 'Backup completed with warnings');
+				if (outcome === 'skipped') toast.info(message || m.containers_backup_skipped());
+				else if (outcome === 'warning') toast.warning(message || m.containers_backup_completed_with_warnings());
 				fetchConfigs();
 				// A new snapshot was written (success/warning) — reload the list so it
 				// shows up without a manual refresh. Skipped = no snapshot, nothing to do.
 				if (outcome !== 'skipped') void snapshotsPanel?.refresh();
 				void loadHistory(); // a run (even failed/skipped) is a new history entry
-			} else { progressStatus = 'error'; progressError = data.error || 'Failed to start backup'; }
-		} catch { progressStatus = 'error'; progressError = 'Failed to start backup'; } finally { runningBackup = null; }
+			} else { progressStatus = 'error'; progressError = data.error || m.containers_backup_start_failed(); }
+		} catch { progressStatus = 'error'; progressError = m.containers_backup_start_failed(); } finally { runningBackup = null; }
 	}
 
 	function cfgRetentionSummary(cfg: BackupConfig): string {
@@ -500,9 +501,9 @@
 	}
 
 	function volumeSummary(cfg: BackupConfig): string {
-		if (cfg.selectedVolumes === null) return `All volumes (${volumes.length})`;
+		if (cfg.selectedVolumes === null) return m.containers_backup_all_volumes({ count: volumes.length });
 		const sel = typeof cfg.selectedVolumes === 'string' ? JSON.parse(cfg.selectedVolumes) : cfg.selectedVolumes;
-		return `${sel.length} of ${volumes.length} volumes`;
+		return m.containers_backup_volumes_selected({ selected: sel.length, total: volumes.length });
 	}
 
 	// Resolved host stack-dir path (stacks only): WHERE the helper will read the stack folder
@@ -541,7 +542,7 @@
 			const res = await fetch(`/api/backup/stack-dir-listing?${params}`);
 			stackListing = await res.json();
 		} catch (e) {
-			stackListing = { kind: 'unknown', reason: e instanceof Error ? e.message : 'probe failed' };
+			stackListing = { kind: 'unknown', reason: e instanceof Error ? e.message : m.containers_backup_probe_failed() };
 		} finally {
 			loadingStackListing = false;
 		}
@@ -563,21 +564,21 @@
 		class="relative -mb-px border-b-2 px-3 py-1.5 text-sm font-medium transition-colors {subTab === 'schedules' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}"
 		onclick={() => (subTab = 'schedules')}
 	>
-		Schedules{#if configs.length > 0}<span class="ml-1.5 rounded-full bg-primary/15 px-1.5 text-xs text-primary">{configs.length}</span>{/if}
+		{m.nav_schedules()}{#if configs.length > 0}<span class="ml-1.5 rounded-full bg-primary/15 px-1.5 text-xs text-primary">{configs.length}</span>{/if}
 	</button>
 	<button
 		type="button"
 		class="relative -mb-px flex items-center border-b-2 px-3 py-1.5 text-sm font-medium transition-colors {subTab === 'snapshots' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}"
 		onclick={() => (subTab = 'snapshots')}
 	>
-		Snapshots{#if snapshotsLoading}<Loader2 class="ml-1.5 h-3.5 w-3.5 animate-spin text-primary" />{:else if snapshotCount !== null}<span class="ml-1.5 rounded-full bg-primary/15 px-1.5 text-xs text-primary">{snapshotCount}</span>{/if}
+		{m.containers_backup_tab_snapshots()}{#if snapshotsLoading}<Loader2 class="ml-1.5 h-3.5 w-3.5 animate-spin text-primary" />{:else if snapshotCount !== null}<span class="ml-1.5 rounded-full bg-primary/15 px-1.5 text-xs text-primary">{snapshotCount}</span>{/if}
 	</button>
 	<button
 		type="button"
 		class="relative -mb-px flex items-center gap-1.5 border-b-2 px-3 py-1.5 text-sm font-medium transition-colors {subTab === 'history' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}"
 		onclick={() => (subTab = 'history')}
 	>
-		History
+		{m.containers_backup_tab_history()}
 		{#if historyLoading}<Loader2 class="h-3.5 w-3.5 animate-spin text-primary" />{:else if tally.ok > 0 || tally.failed > 0}
 			{#if tally.ok > 0}<span class="inline-flex items-center gap-0.5 rounded-full bg-emerald-500/15 px-1.5 text-xs font-medium text-emerald-500"><Check class="h-3 w-3" />{tally.ok}</span>{/if}
 			{#if tally.failed > 0}<span class="inline-flex items-center gap-0.5 rounded-full bg-red-500/15 px-1.5 text-xs font-semibold text-red-500"><X class="h-3 w-3" />{tally.failed}</span>{/if}
@@ -616,11 +617,11 @@
 				<div class="flex-1 min-w-0">
 					<div class="flex items-center gap-2">
 						<Icon class="w-3.5 h-3.5 text-primary/70 flex-shrink-0" />
-						<span class="text-sm font-medium truncate">{dest?.name || 'Unknown'}</span>
-						{#if !cfg.enabled}<Badge variant="secondary" class="text-xs">Paused</Badge>{/if}
+						<span class="text-sm font-medium truncate">{dest?.name || m.containers_backup_unknown_destination()}</span>
+						{#if !cfg.enabled}<Badge variant="secondary" class="text-xs">{m.containers_backup_paused()}</Badge>{/if}
 					</div>
 					<div class="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
-						<span>{cfg.schedule ? formatCron(cfg.schedule) : 'Manual'} · {volumeSummary(cfg)}{cfgRetentionSummary(cfg) ? ` · ${cfgRetentionSummary(cfg)}` : ''}</span>
+						<span>{cfg.schedule ? formatCron(cfg.schedule) : m.containers_backup_manual()} ·{volumeSummary(cfg)}{cfgRetentionSummary(cfg) ? ` · ${cfgRetentionSummary(cfg)}` : ''}</span>
 						{#if cfg.lastBackupAt}
 							<span>·</span>
 							{#if cfg.lastBackupStatus === 'success'}<CheckCircle class="w-2.5 h-2.5 text-green-500" />{:else if cfg.lastBackupStatus === 'failed' || cfg.lastBackupStatus === 'error'}<XCircle class="w-2.5 h-2.5 text-destructive" />{/if}
@@ -630,25 +631,26 @@
 				</div>
 				<div class="flex items-center gap-0.5 flex-shrink-0">
 					{#if cfg.schedule}
-						<button type="button" class="p-1 rounded hover:bg-muted" onclick={() => togglePause(cfg)} disabled={togglingId === cfg.id} title={cfg.enabled ? 'Pause schedule' : 'Resume schedule'}>
+						<button type="button" class="p-1 rounded hover:bg-muted" onclick={() => togglePause(cfg)} disabled={togglingId === cfg.id} title={cfg.enabled ? m.containers_backup_pause_schedule() : m.containers_backup_resume_schedule()}>
 							{#if togglingId === cfg.id}<Loader2 class="w-3 h-3 animate-spin text-muted-foreground" />{:else if cfg.enabled}<Pause class="w-3 h-3 text-muted-foreground" />{:else}<RotateCwFadingClock class="w-3 h-3 text-muted-foreground" />{/if}
 						</button>
 					{/if}
-					<button type="button" class="p-1 rounded hover:bg-muted" onclick={() => runBackupNow(cfg)} disabled={runningBackup === cfg.id} title="Run now">
+					<button type="button" class="p-1 rounded hover:bg-muted" onclick={() => runBackupNow(cfg)} disabled={runningBackup === cfg.id} title={m.containers_backup_run_now()}>
 						{#if runningBackup === cfg.id}<Loader2 class="w-3 h-3 animate-spin text-muted-foreground" />{:else}<Play class="w-3 h-3 text-muted-foreground" />{/if}
 					</button>
-					<button type="button" class="p-1 rounded hover:bg-muted" onclick={() => startEditConfig(cfg)} title="Edit">
+					<button type="button" class="p-1 rounded hover:bg-muted" onclick={() => startEditConfig(cfg)} title={m.containers_backup_edit()}>
 						<Pencil class="w-3 h-3 text-muted-foreground" />
 					</button>
-					<button type="button" class="p-1 rounded hover:bg-muted" onclick={() => startDuplicateConfig(cfg)} title="Duplicate">
+					<button type="button" class="p-1 rounded hover:bg-muted" onclick={() => startDuplicateConfig(cfg)} title={m.containers_backup_duplicate()}>
 						<Copy class="w-3 h-3 text-muted-foreground" />
 					</button>
 					<ConfirmPopover
 						open={confirmDeleteId === cfg.id}
-						action="Delete"
-						itemType="backup schedule"
+						localized
+						action={m.confirm_action_delete()}
+						itemType={m.containers_item_backup_schedule()}
 						itemName={dest?.name || ''}
-						title={deleteConfigSnapshots ? 'Snapshots will be deleted too.' : 'Remove schedule (snapshots are kept)'}
+						title={deleteConfigSnapshots ? m.containers_backup_delete_title_with_snapshots() : m.containers_backup_delete_title_keep_snapshots()}
 						position="left"
 						onConfirm={() => deleteConfig(cfg.id)}
 						onOpenChange={(open) => { confirmDeleteId = open ? cfg.id : null; if (open) deleteConfigSnapshots = false; }}
@@ -658,8 +660,8 @@
 						{/snippet}
 						{#snippet extraContent()}
 							<label class="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
-								<Checkbox bind:checked={deleteConfigSnapshots} aria-label="Also delete snapshots" />
-								Also delete this config's snapshots
+								<Checkbox bind:checked={deleteConfigSnapshots} aria-label={m.containers_backup_also_delete_snapshots()} />
+								{m.containers_backup_also_delete_config_snapshots()}
 							</label>
 						{/snippet}
 					</ConfirmPopover>
@@ -668,14 +670,14 @@
 		{/each}
 
 		{#if configs.length === 0 && !isNew && !editingConfig}
-			<p class="text-xs text-muted-foreground py-4 text-center">No backup schedules configured for this {type}.</p>
+			<p class="text-xs text-muted-foreground py-4 text-center">{type === 'stack' ? m.containers_backup_no_schedules_stack() : m.containers_backup_no_schedules_container()}</p>
 		{/if}
 
 		<!-- Edit/New form -->
 		{#if isNew || editingConfig}
 			<div class="border border-primary/30 rounded-md p-4 space-y-4 bg-muted/10">
 				<div class="flex items-center justify-between">
-					<span class="text-xs font-medium uppercase tracking-wide text-muted-foreground">{isNew ? 'New backup schedule' : 'Edit schedule'}</span>
+					<span class="text-xs font-medium uppercase tracking-wide text-muted-foreground">{isNew ? m.containers_backup_new_schedule() : m.containers_backup_edit_schedule()}</span>
 					<button type="button" class="p-1 rounded hover:bg-muted" onclick={cancelEdit}>
 						<X class="w-3.5 h-3.5 text-muted-foreground" />
 					</button>
@@ -695,11 +697,11 @@
 				<!-- Toggles -->
 				<div class="flex items-center gap-3 max-w-md">
 					<TogglePill bind:checked={editEnabled} />
-					<Label class="text-xs">Enabled</Label>
+					<Label class="text-xs">{m.containers_backup_enabled()}</Label>
 				</div>
 				<div class="flex items-center gap-3 max-w-md">
 					<TogglePill bind:checked={editStopBefore} />
-					<Label class="text-xs">Stop {type} during backup</Label>
+					<Label class="text-xs">{type === 'stack' ? m.containers_backup_stop_stack_during() : m.containers_backup_stop_container_during()}</Label>
 				</div>
 				<!-- Stack files on the host: probe the host, show the resolved dir + let the user
 				     pick which entries to back up. Shown BEFORE the volume list. -->
@@ -720,97 +722,93 @@
 					volumes={volumes}
 					bind:allVolumes={editAllVolumes}
 					bind:selectedVolumes={editSelectedVolumes}
-					emptyLabel="No volumes detected on this {type}"
+					emptyLabel={type === 'stack' ? m.containers_backup_no_volumes_stack() : m.containers_backup_no_volumes_container()}
 				/>
 
 				<!-- Advanced -->
 				<button type="button" class="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground w-full" onclick={() => showAdvanced = !showAdvanced}>
 					<ChevronDown class="w-3.5 h-3.5 transition-transform {showAdvanced ? 'rotate-0' : '-rotate-90'}" />
-					Advanced
+					{m.containers_backup_advanced()}
 				</button>
 				{#if showAdvanced}
 					<div class="space-y-3 pl-1">
 						<!-- Retention policy -->
 						<div class="space-y-1.5">
-							<Label class="text-xs font-medium">Retention policy</Label>
-							<p class="text-xs text-muted-foreground">Older snapshots are pruned after each backup. Set 0 to disable.</p>
+							<Label class="text-xs font-medium">{m.containers_backup_retention_policy()}</Label>
+							<p class="text-xs text-muted-foreground">{m.containers_backup_retention_hint()}</p>
 							<div class="grid grid-cols-5 gap-2">
 								<div class="space-y-0.5">
-									<label class="text-xs text-muted-foreground">Last</label>
+									<label class="text-xs text-muted-foreground">{m.containers_backup_keep_last()}</label>
 									<Input bind:value={editKeepLast} type="number" min="0" max="999" class="h-7 text-xs" />
 								</div>
 								<div class="space-y-0.5">
-									<label class="text-xs text-muted-foreground">Daily</label>
+									<label class="text-xs text-muted-foreground">{m.containers_backup_keep_daily()}</label>
 									<Input bind:value={editKeepDaily} type="number" min="0" max="365" class="h-7 text-xs" />
 								</div>
 								<div class="space-y-0.5">
-									<label class="text-xs text-muted-foreground">Weekly</label>
+									<label class="text-xs text-muted-foreground">{m.containers_backup_keep_weekly()}</label>
 									<Input bind:value={editKeepWeekly} type="number" min="0" max="52" class="h-7 text-xs" />
 								</div>
 								<div class="space-y-0.5">
-									<label class="text-xs text-muted-foreground">Monthly</label>
+									<label class="text-xs text-muted-foreground">{m.containers_backup_keep_monthly()}</label>
 									<Input bind:value={editKeepMonthly} type="number" min="0" max="120" class="h-7 text-xs" />
 								</div>
 								<div class="space-y-0.5">
-									<label class="text-xs text-muted-foreground">Yearly</label>
+									<label class="text-xs text-muted-foreground">{m.containers_backup_keep_yearly()}</label>
 									<Input bind:value={editKeepYearly} type="number" min="0" max="100" class="h-7 text-xs" />
 								</div>
 							</div>
 						</div>
 						<!-- Exclude patterns -->
 						<div class="space-y-1">
-							<Label class="text-xs font-medium">Exclude patterns</Label>
+							<Label class="text-xs font-medium">{m.containers_backup_exclude_patterns()}</Label>
 							<Input bind:value={editExclude} class="h-7 text-xs font-mono" placeholder="*.log, *.tmp, cache/" />
-							<p class="text-xs text-muted-foreground">Comma-separated glob patterns to exclude from backup.</p>
+							<p class="text-xs text-muted-foreground">{m.containers_backup_exclude_patterns_hint()}</p>
 						</div>
 						<!-- Exclude cache directories -->
 						<div class="space-y-1">
 							<div class="flex items-center gap-3">
-								<TogglePill bind:checked={editExcludeCaches} onLabel="Yes" offLabel="No" />
-								<Label class="text-xs font-medium">Skip cache directories</Label>
+								<TogglePill bind:checked={editExcludeCaches} onLabel={m.containers_backup_yes()} offLabel={m.containers_backup_no()} />
+								<Label class="text-xs font-medium">{m.containers_backup_skip_caches()}</Label>
 							</div>
 							<p class="text-xs text-muted-foreground leading-snug">
-								Skips folders containing a <code class="font-mono text-xs">CACHEDIR.TAG</code> marker file
-								— used by npm, pip, Cargo, browsers, and many other tools to tag
-								regenerable cache content. Saves significant backup space; the contents
-								can always be rebuilt from source. Turn off only if you have a specific
-								reason to back up cache data.
+								{m.containers_backup_skip_caches_hint_before()} <code class="font-mono text-xs">CACHEDIR.TAG</code> {m.containers_backup_skip_caches_hint_after()}
 							</p>
 						</div>
 						<!-- Compression & bandwidth -->
 						<div class="grid grid-cols-3 gap-2">
 							<div class="space-y-1">
-								<Label class="text-xs font-medium">Compression</Label>
+								<Label class="text-xs font-medium">{m.containers_backup_compression()}</Label>
 								<Select.Root type="single" value={editCompression} onValueChange={(v) => { editCompression = v; }}>
 									<Select.Trigger class="h-9 w-full text-xs">{editCompression}</Select.Trigger>
 									<Select.Content>
-										<Select.Item value="auto">Auto</Select.Item>
-										<Select.Item value="off">Off</Select.Item>
-										<Select.Item value="max">Max</Select.Item>
+										<Select.Item value="auto">{m.containers_backup_compression_auto()}</Select.Item>
+										<Select.Item value="off">{m.containers_backup_compression_off()}</Select.Item>
+										<Select.Item value="max">{m.containers_backup_compression_max()}</Select.Item>
 									</Select.Content>
 								</Select.Root>
 							</div>
 							<div class="space-y-1">
-								<Label class="text-xs font-medium">Upload limit</Label>
+								<Label class="text-xs font-medium">{m.containers_backup_upload_limit()}</Label>
 								<Input bind:value={editLimitUpload} type="number" min="0" class="h-9 text-xs font-mono" placeholder="KiB/s" />
 							</div>
 							<div class="space-y-1">
-								<Label class="text-xs font-medium">Download limit</Label>
+								<Label class="text-xs font-medium">{m.containers_backup_download_limit()}</Label>
 								<Input bind:value={editLimitDownload} type="number" min="0" class="h-9 text-xs font-mono" placeholder="KiB/s" />
 							</div>
 						</div>
 						<!-- Webhook hooks -->
 						<div class="space-y-1.5">
-							<Label class="text-xs font-medium">Webhook hooks</Label>
+							<Label class="text-xs font-medium">{m.containers_backup_webhooks()}</Label>
 							<div class="space-y-1">
-								<label class="text-xs text-muted-foreground">On success</label>
+								<label class="text-xs text-muted-foreground">{m.containers_backup_on_success()}</label>
 								<Input bind:value={editWebhookSuccess} class="h-7 text-xs font-mono" placeholder="https://healthchecks.io/ping/..." />
 							</div>
 							<div class="space-y-1">
-								<label class="text-xs text-muted-foreground">On failure</label>
+								<label class="text-xs text-muted-foreground">{m.containers_backup_on_failure()}</label>
 								<Input bind:value={editWebhookFailure} class="h-7 text-xs font-mono" placeholder="https://hooks.slack.com/..." />
 							</div>
-							<p class="text-xs text-muted-foreground">POST with a JSON payload sent after backup completes (falls back to GET for simple receivers). Use for healthchecks, Slack, etc.</p>
+							<p class="text-xs text-muted-foreground">{m.containers_backup_webhooks_hint()}</p>
 						</div>
 					</div>
 				{/if}
@@ -820,26 +818,26 @@
 				     state (destination, schedule, volumes, retention, options) —
 				     they only differ in what happens after persistence. -->
 				<div class="flex justify-end gap-2 pt-2 border-t">
-					<Button size="sm" variant="outline" onclick={cancelEdit}>Cancel</Button>
+					<Button size="sm" variant="outline" onclick={cancelEdit}>{m.containers_backup_cancel()}</Button>
 					{#if editingConfig}
 						<Button size="sm" onclick={() => submitForm('save')} disabled={saving || editScheduleInvalid}>
 							{#if saving}<Loader2 class="w-3.5 h-3.5 mr-1 animate-spin" />{:else}<Save class="w-3.5 h-3.5 mr-1" />{/if}
-							Save
+							{m.containers_backup_save()}
 						</Button>
 					{:else}
 						{#if !duplicating}
-							<Button size="sm" variant="outline" onclick={() => submitForm('run-once')} disabled={saving || !editDestinationId} title="Run a backup now, don't save a schedule">
+							<Button size="sm" variant="outline" onclick={() => submitForm('run-once')} disabled={saving || !editDestinationId} title={m.containers_backup_run_once_title()}>
 								{#if saving && submitAction === 'run-once'}<Loader2 class="w-3.5 h-3.5 mr-1 animate-spin" />{:else}<Play class="w-3.5 h-3.5 mr-1" />{/if}
-								Run once
+								{m.containers_backup_run_once()}
 							</Button>
 						{/if}
 						<Button size="sm" variant="outline" onclick={() => submitForm('save')} disabled={saving || editScheduleInvalid || !editDestinationId}>
 							{#if saving && submitAction === 'save'}<Loader2 class="w-3.5 h-3.5 mr-1 animate-spin" />{:else}<Save class="w-3.5 h-3.5 mr-1" />{/if}
-							Save schedule
+							{m.containers_backup_save_schedule()}
 						</Button>
-						<Button size="sm" onclick={() => submitForm('save-run')} disabled={saving || editScheduleInvalid || !editDestinationId} title="Save the schedule and run a backup immediately">
+						<Button size="sm" onclick={() => submitForm('save-run')} disabled={saving || editScheduleInvalid || !editDestinationId} title={m.containers_backup_save_run_title()}>
 							{#if saving && submitAction === 'save-run'}<Loader2 class="w-3.5 h-3.5 mr-1 animate-spin" />{:else}<Play class="w-3.5 h-3.5 mr-1" />{/if}
-							Save & run now
+							{m.containers_backup_save_run()}
 						</Button>
 					{/if}
 				</div>
@@ -850,7 +848,7 @@
 		{#if configs.length > 0 && !isNew && !editingConfig}
 			<Button size="sm" variant="ghost" class="w-full text-muted-foreground" onclick={startNewConfig}>
 				<Plus class="w-3.5 h-3.5 mr-1" />
-				Add another schedule
+				{m.containers_backup_add_another()}
 			</Button>
 		{/if}
 
@@ -858,7 +856,7 @@
 		{#if configs.length === 0 && !isNew && !editingConfig}
 			<Button size="sm" variant="outline" class="w-full" onclick={startNewConfig}>
 				<Plus class="w-3.5 h-3.5 mr-1" />
-				Configure a backup
+				{m.containers_backup_configure()}
 			</Button>
 		{/if}
 	</div>
@@ -873,7 +871,7 @@
 				<TypeIcon class="h-4 w-4 text-muted-foreground" />
 				<span>{containerName}</span>
 				{#if progressEnv}
-					<span class="text-sm font-normal text-muted-foreground">on</span>
+					<span class="text-sm font-normal text-muted-foreground">{m.modalheader_on_env()}</span>
 					<span class="flex items-center gap-1 text-sm font-medium text-amber-500"><EnvironmentIcon icon={progressEnv.icon || 'globe'} envId={progressEnv.id} class="h-3.5 w-3.5" />{progressEnv.name}</span>
 				{/if}
 				{#if progressDest}
@@ -882,27 +880,27 @@
 					<span class="flex items-center gap-1.5 rounded-md border bg-muted/40 px-2 py-0.5 text-xs font-normal"><RepoIcon class="h-3.5 w-3.5 text-primary/70" />{progressDest.name}</span>
 				{/if}
 			</Dialog.Title>
-			<Dialog.Description class="sr-only">Live backup progress for {containerName}.</Dialog.Description>
+			<Dialog.Description class="sr-only">{m.containers_backup_progress_description({ name: containerName })}</Dialog.Description>
 		</Dialog.Header>
 		<!-- flex-1 + fixed dialog height: the log fills the space and SCROLLS internally,
 		     so the dialog never grows/jumps as lines stream in. -->
 		<LogConsole lines={progressLogs} class="flex-1 min-h-0" />
 		<div class="flex shrink-0 items-center gap-1.5 text-sm">
 			{#if progressStatus === 'running'}
-				<Loader2 class="h-4 w-4 animate-spin text-muted-foreground" /><span class="text-muted-foreground">Backing up…</span>
+				<Loader2 class="h-4 w-4 animate-spin text-muted-foreground" /><span class="text-muted-foreground">{m.containers_backup_backing_up()}</span>
 			{:else if progressStatus === 'success'}
-				<CheckCircle class="h-4 w-4 text-green-500" /><span class="text-green-500">Backup completed</span>
+				<CheckCircle class="h-4 w-4 text-green-500" /><span class="text-green-500">{m.containers_backup_completed()}</span>
 			{:else}
-				<XCircle class="h-4 w-4 text-destructive" /><span class="text-destructive">{progressError || 'Backup failed'}</span>
+				<XCircle class="h-4 w-4 text-destructive" /><span class="text-destructive">{progressError || m.containers_backup_failed()}</span>
 			{/if}
 		</div>
 		<Dialog.Footer>
 			{#if progressStatus === 'running'}
 				<Button size="sm" variant="destructive" disabled={cancelling || progressConfigId == null} onclick={cancelRunningBackup}>
-					{#if cancelling}<Loader2 class="mr-1 h-3.5 w-3.5 animate-spin" />Cancelling…{:else}<X class="mr-1 h-3.5 w-3.5" />Cancel backup{/if}
+					{#if cancelling}<Loader2 class="mr-1 h-3.5 w-3.5 animate-spin" />{m.containers_backup_cancelling()}{:else}<X class="mr-1 h-3.5 w-3.5" />{m.containers_backup_cancel_backup()}{/if}
 				</Button>
 			{:else}
-				<Button size="sm" onclick={() => (progressOpen = false)}>OK</Button>
+				<Button size="sm" onclick={() => (progressOpen = false)}>{m.containers_backup_ok()}</Button>
 			{/if}
 		</Dialog.Footer>
 	</Dialog.Content>
@@ -912,18 +910,18 @@
 <Dialog.Root bind:open={logDialogOpen}>
 	<Dialog.Content class="max-w-4xl h-[80vh] overflow-hidden flex flex-col">
 		<Dialog.Header>
-			<Dialog.Title class="flex items-center gap-2 text-base"><FileText class="h-4 w-4" />Backup log</Dialog.Title>
+			<Dialog.Title class="flex items-center gap-2 text-base"><FileText class="h-4 w-4" />{m.containers_backup_log_title()}</Dialog.Title>
 		</Dialog.Header>
 		<div class="flex-1 flex flex-col min-h-0">
 			{#if logDialogLoading}
 				<div class="flex items-center justify-center py-8 gap-2 text-muted-foreground">
 					<Loader2 class="h-4 w-4 animate-spin" />
-					<span class="text-sm">Loading log…</span>
+					<span class="text-sm">{m.containers_backup_loading_log()}</span>
 				</div>
 			{:else if logDialogContent}
 				<ExecutionLogViewer logs={logDialogContent} />
 			{:else}
-				<p class="py-8 text-center text-sm text-muted-foreground">No log output was recorded for this run.</p>
+				<p class="py-8 text-center text-sm text-muted-foreground">{m.containers_backup_no_log_output()}</p>
 			{/if}
 		</div>
 	</Dialog.Content>

@@ -10,6 +10,7 @@
 	import { appendEnvParam } from '$lib/stores/environment';
 	import { formatBytes } from '$lib/utils/format';
 	import { watchJob } from '$lib/utils/sse-fetch';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface LayerProgress {
 		id: string;
@@ -161,7 +162,7 @@
 			});
 
 			if (!response.ok) {
-				throw new Error('Failed to start pull');
+				throw new Error(m.pull_error_start_failed());
 			}
 
 			const { jobId } = await response.json();
@@ -169,7 +170,7 @@
 				if (line.event === 'progress') handlePullProgress(line.data as any);
 			}) as { success?: boolean; status?: string; error?: string } | null;
 			if (status === 'pulling' && (result?.status === 'error' || result?.success === false)) {
-				handlePullProgress({ status: 'error', error: result.error || 'Failed to pull image' });
+				handlePullProgress({ status: 'error', error: result.error || m.pull_error_failed() });
 			}
 
 			if (status === 'pulling') {
@@ -181,7 +182,7 @@
 		} catch (error: any) {
 			duration = Date.now() - startTime;
 			status = 'error';
-			errorMessage = error.message || 'Failed to pull image';
+			errorMessage = error.message || m.pull_error_failed();
 			if (!outputLines.some((line) => line === `[error] ${errorMessage}`)) {
 				addOutputLine(`[error] ${errorMessage}`);
 				onError?.(errorMessage);
@@ -208,7 +209,7 @@
 		} else if (data.status === 'error') {
 			duration = Date.now() - startTime;
 			status = 'error';
-			errorMessage = data.error || 'Unknown error occurred';
+			errorMessage = data.error || m.containers_batchupdate_unknown_error();
 			addOutputLine(`[error] ${errorMessage}`);
 			onError?.(errorMessage);
 		} else if (data.id) {
@@ -304,7 +305,7 @@
 	<!-- Image Input -->
 	{#if showImageInput}
 		<div class="space-y-2 shrink-0">
-			<Label for="pull-image" class="text-sm font-medium">Image name</Label>
+			<Label for="pull-image" class="text-sm font-medium">{m.pull_image_name_label()}</Label>
 			<div class="flex gap-2">
 				<Input
 					id="pull-image"
@@ -320,10 +321,10 @@
 				>
 					{#if isPulling}
 						<Download class="w-4 h-4 mr-2 animate-spin" />
-						Pulling...
+						{m.containers_settings_pulling()}
 					{:else}
 						<Download class="w-4 h-4" />
-						Pull
+						{m.containers_create_tab_pull()}
 					{/if}
 				</Button>
 			</div>
@@ -338,20 +339,20 @@
 				<div class="flex items-center gap-2">
 					{#if status === 'pulling'}
 						<Download class="w-4 h-4 animate-spin text-blue-600" />
-						<span class="text-sm">Pulling layers...</span>
+						<span class="text-sm">{m.pull_status_pulling_layers()}</span>
 					{:else if status === 'complete'}
 						<CheckCircle2 class="w-4 h-4 text-green-600" />
-						<span class="text-sm text-green-600">Pull completed!</span>
+						<span class="text-sm text-green-600">{m.pull_status_complete()}</span>
 					{:else if status === 'error'}
 						<XCircle class="w-4 h-4 text-red-600" />
-						<span class="text-sm text-red-600">Failed</span>
+						<span class="text-sm text-red-600">{m.batchop_summary_failed()}</span>
 					{/if}
 				</div>
 				<div class="flex items-center gap-3">
 					{#if status === 'pulling' || status === 'complete'}
 						<Badge variant="secondary" class="text-xs min-w-20 text-center">
 							{#if totalLayers > 0}
-								{completedLayers} / {totalLayers} layers
+								{m.pull_layers_progress({ completed: completedLayers, total: totalLayers })}
 							{:else}
 								...
 							{/if}
@@ -369,7 +370,7 @@
 					<Progress value={overallProgress} class="h-2" />
 					<div class="text-xs text-muted-foreground h-4">
 						{#if downloadStats.totalBytes > 0}
-							Downloaded: {formatBytes(downloadStats.downloadedBytes)} / {formatBytes(downloadStats.totalBytes)}
+							{m.pull_downloaded({ downloaded: formatBytes(downloadStats.downloadedBytes), total: formatBytes(downloadStats.totalBytes) })}
 						{/if}
 					</div>
 				</div>
@@ -392,9 +393,9 @@
 				<table class="w-full text-xs">
 					<thead class="bg-muted sticky top-0">
 						<tr>
-							<th class="text-left py-1.5 px-3 font-medium w-28">Layer ID</th>
-							<th class="text-left py-1.5 px-3 font-medium">Status</th>
-							<th class="text-right py-1.5 px-3 font-medium w-24">Progress</th>
+							<th class="text-left py-1.5 px-3 font-medium w-28">{m.pull_col_layer_id()}</th>
+							<th class="text-left py-1.5 px-3 font-medium">{m.containers_inspect_status()}</th>
+							<th class="text-right py-1.5 px-3 font-medium w-24">{m.containers_batchupdate_progress()}</th>
 						</tr>
 					</thead>
 					<tbody>
@@ -434,7 +435,7 @@
 											<span class="text-muted-foreground w-8">{percentage}%</span>
 										</div>
 									{:else if isComplete}
-										<span class="text-green-600">Done</span>
+										<span class="text-green-600">{m.pull_layer_done()}</span>
 									{:else}
 										<span class="text-muted-foreground">-</span>
 									{/if}
@@ -451,9 +452,9 @@
 			<div class="flex items-center justify-between text-xs text-muted-foreground mb-2 shrink-0">
 				<div class="flex items-center gap-2">
 					<Terminal class="w-3.5 h-3.5" />
-					<span>Output ({outputLines.length} lines)</span>
+					<span>{m.pull_output_lines({ count: outputLines.length })}</span>
 				</div>
-				<button type="button" onclick={toggleLogTheme} class="p-1 rounded hover:bg-muted transition-colors cursor-pointer" title="Toggle log theme">
+				<button type="button" onclick={toggleLogTheme} class="p-1 rounded hover:bg-muted transition-colors cursor-pointer" title={m.pull_toggle_log_theme()}>
 					{#if logDarkMode}
 						<Sun class="w-3.5 h-3.5" />
 					{:else}
@@ -488,7 +489,7 @@
 	<!-- Idle state -->
 	{#if status === 'idle' && !showImageInput}
 		<div class="flex-1 flex items-center justify-center text-muted-foreground">
-			<p class="text-sm">Enter an image name to start pulling</p>
+			<p class="text-sm">{m.pull_idle_hint()}</p>
 		</div>
 	{/if}
 </div>

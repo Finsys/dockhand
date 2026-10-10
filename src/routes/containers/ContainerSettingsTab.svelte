@@ -19,6 +19,7 @@
 	import type { VulnerabilityCriteria } from '$lib/components/VulnerabilityCriteriaSelector.svelte';
 	import type { SystemContainerType } from '$lib/types';
 	import { isSameNetwork } from '$lib/utils/network-identity';
+	import { m } from '$lib/paraglide/messages.js';
 
 	// Detect system containers (must match server-side logic in update-utils.ts)
 	function detectSystemContainer(imageName: string): SystemContainerType | null {
@@ -347,10 +348,10 @@
 
 	// Display label for the current network mode in the trigger
 	const networkModeLabel = $derived.by(() => {
-		if (networkModeType === 'bridge') return 'Bridge';
-		if (networkModeType === 'host') return 'Host';
-		if (networkModeType === 'none') return 'None';
-		if (networkModeType === 'container') return containerRef ? `Container: ${containerRef}` : 'Container';
+		if (networkModeType === 'bridge') return m.containers_settings_network_bridge();
+		if (networkModeType === 'host') return m.containers_settings_network_host();
+		if (networkModeType === 'none') return m.containers_settings_network_none();
+		if (networkModeType === 'container') return containerRef ? m.containers_settings_network_container_ref({ name: containerRef }) : m.containers_settings_network_container();
 		return networkMode;  // custom network name
 	});
 
@@ -386,17 +387,17 @@
 
 	function validateIpv4(value: string): string | null {
 		if (!value) return null;
-		return ipv4Regex.test(value) ? null : 'Invalid IPv4 address';
+		return ipv4Regex.test(value) ? null : m.containers_settings_invalid_ipv4();
 	}
 
 	function validateIpv6(value: string): string | null {
 		if (!value) return null;
-		return ipv6Regex.test(value) ? null : 'Invalid IPv6 address';
+		return ipv6Regex.test(value) ? null : m.containers_settings_invalid_ipv6();
 	}
 
 	function validateMac(value: string): string | null {
 		if (!value) return null;
-		return macRegex.test(value) ? null : 'Invalid MAC address (e.g., 02:42:ac:11:00:02)';
+		return macRegex.test(value) ? null : m.containers_settings_invalid_mac();
 	}
 
 	// Auto-expand networks that have config
@@ -707,16 +708,16 @@
 			});
 			const data = await res.json().catch(() => ({}));
 			if (!res.ok) {
-				toast.error(data.error || 'Update failed');
+				toast.error(data.error || m.containers_settings_update_failed());
 				return;
 			}
-			toast.success('Applied — no restart needed');
+			toast.success(m.containers_settings_applied_no_restart());
 			// Surface Docker warnings (e.g. "Memory swap will fall back to ...") inline.
 			if (Array.isArray(data.warnings) && data.warnings.length > 0) {
 				for (const w of data.warnings) toast.warning(w);
 			}
 		} catch (err: any) {
-			toast.error(err?.message || 'Update failed');
+			toast.error(err?.message || m.containers_settings_update_failed());
 		} finally {
 			applyingField = null;
 		}
@@ -733,7 +734,7 @@
 	function applyMemoryLimit() {
 		const bytes = parseMemory(memoryLimit);
 		if (memoryLimit && bytes === undefined) {
-			toast.error('Invalid memory value (e.g. 512m, 1g)');
+			toast.error(m.containers_settings_invalid_memory_example());
 			return;
 		}
 		// Docker uses 0 to clear an existing limit.
@@ -743,7 +744,7 @@
 	function applyMemoryReservation() {
 		const bytes = parseMemory(memoryReservation);
 		if (memoryReservation && bytes === undefined) {
-			toast.error('Invalid memory value');
+			toast.error(m.containers_settings_invalid_memory());
 			return;
 		}
 		return applyInPlace('memoryReservation', { MemoryReservation: bytes ?? 0 });
@@ -752,7 +753,7 @@
 	function applyNanoCpus() {
 		const n = parseNanoCpus(nanoCpus);
 		if (nanoCpus && n === undefined) {
-			toast.error('Invalid CPU limit (e.g. 0.5, 1.5, 2)');
+			toast.error(m.containers_settings_invalid_cpu_limit());
 			return;
 		}
 		return applyInPlace('nanoCpus', { NanoCpus: n ?? 0 });
@@ -761,7 +762,7 @@
 	function applyCpuShares() {
 		const n = parsePositiveInt(cpuShares);
 		if (cpuShares && n === undefined) {
-			toast.error('Invalid CPU shares');
+			toast.error(m.containers_settings_invalid_cpu_shares());
 			return;
 		}
 		return applyInPlace('cpuShares', { CpuShares: n ?? 0 });
@@ -770,7 +771,7 @@
 	function applyCpuQuota() {
 		const n = parsePositiveInt(cpuQuota);
 		if (cpuQuota && n === undefined) {
-			toast.error('Invalid CPU quota');
+			toast.error(m.containers_settings_invalid_cpu_quota());
 			return;
 		}
 		return applyInPlace('cpuQuota', { CpuQuota: n ?? 0 });
@@ -779,7 +780,7 @@
 	function applyCpuPeriod() {
 		const n = parsePositiveInt(cpuPeriod);
 		if (cpuPeriod && n === undefined) {
-			toast.error('Invalid CPU period');
+			toast.error(m.containers_settings_invalid_cpu_period());
 			return;
 		}
 		return applyInPlace('cpuPeriod', { CpuPeriod: n ?? 0 });
@@ -805,24 +806,24 @@
 			<div class="flex items-center gap-3">
 				<Package class="w-5 h-5 text-muted-foreground" />
 				<div>
-					<p class="text-sm font-medium">Image: <code class="bg-muted px-1.5 py-0.5 rounded">{image || 'Not set'}</code></p>
+					<p class="text-sm font-medium">{m.containers_settings_image_label()} <code class="bg-muted px-1.5 py-0.5 rounded">{image || m.containers_settings_image_not_set()}</code></p>
 					{#if imageSummary.isPulling || imageSummary.isScanning}
 						<p class="text-xs text-blue-600 flex items-center gap-1 mt-0.5">
 							<Loader2 class="w-3 h-3 animate-spin" />
-							{imageSummary.isScanning ? 'Scanning...' : 'Pulling...'}
+							{imageSummary.isScanning ? m.containers_settings_scanning() : m.containers_settings_pulling()}
 						</p>
 					{:else if imageSummary.imageReady}
 						<p class="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
 							<CheckCircle2 class="w-3 h-3" />
-							Image pulled and ready
+							{m.containers_settings_image_ready()}
 							{#if imageSummary.scanResults && imageSummary.scanResults.length > 0}
-								• <span class="{imageSummary.hasCriticalOrHigh ? 'text-red-600' : (imageSummary.totalVulnerabilities ?? 0) > 0 ? 'text-amber-600' : 'text-green-600'}">{imageSummary.totalVulnerabilities ?? 0} vulnerabilities</span>
+								• <span class="{imageSummary.hasCriticalOrHigh ? 'text-red-600' : (imageSummary.totalVulnerabilities ?? 0) > 0 ? 'text-amber-600' : 'text-green-600'}">{m.containers_settings_vulnerabilities_count({ count: imageSummary.totalVulnerabilities ?? 0 })}</span>
 							{/if}
 						</p>
 					{:else if !image}
 						<p class="text-xs text-amber-600 flex items-center gap-1 mt-0.5">
 							<AlertTriangle class="w-3 h-3" />
-							Go to "Pull" tab to set the image
+							{m.containers_settings_go_to_pull_tab({ tab: m.containers_create_tab_pull() })}
 						</p>
 					{/if}
 				</div>
@@ -835,13 +836,13 @@
 		<div class="space-y-2">
 			<div class="flex items-center gap-2 pb-2 border-b">
 				<Settings2 class="w-4 h-4 text-muted-foreground" />
-				<h3 class="text-sm font-semibold text-foreground">{mode === 'edit' ? 'Apply config set' : 'Config set'}</h3>
+				<h3 class="text-sm font-semibold text-foreground">{mode === 'edit' ? m.containers_settings_apply_config_set() : m.containers_settings_config_set()}</h3>
 			</div>
 			<div class="flex gap-2 items-end">
 				<div class="flex-1">
 					<Select.Root type="single" value={selectedConfigSetId} onValueChange={applyConfigSet}>
 						<Select.Trigger class="w-full h-9">
-							<span>{selectedConfigSetId ? configSets.find(c => c.id === parseInt(selectedConfigSetId))?.name : (mode === 'edit' ? 'Select a config set to merge values...' : 'Select a config set to pre-fill values...')}</span>
+							<span>{selectedConfigSetId ? configSets.find(c => c.id === parseInt(selectedConfigSetId))?.name : (mode === 'edit' ? m.containers_settings_config_set_merge_placeholder() : m.containers_settings_config_set_prefill_placeholder())}</span>
 						</Select.Trigger>
 						<Select.Content>
 							{#each configSets as configSet}
@@ -859,7 +860,7 @@
 				</div>
 			</div>
 			{#if mode === 'edit'}
-				<p class="text-xs text-muted-foreground">Note: Values from the config set will be merged with existing settings. Existing keys won't be overwritten.</p>
+				<p class="text-xs text-muted-foreground">{m.containers_settings_config_set_merge_note()}</p>
 			{/if}
 		</div>
 	{/if}
@@ -867,12 +868,12 @@
 	<!-- Basic Settings -->
 	<div class="space-y-3">
 		<div class="flex items-center gap-2 pb-2 border-b">
-			<h3 class="text-sm font-semibold text-foreground">Basic settings</h3>
+			<h3 class="text-sm font-semibold text-foreground">{m.containers_settings_basic_settings()}</h3>
 		</div>
 
 		<div class="grid grid-cols-2 gap-3">
 			<div class="space-y-1.5">
-				<Label for="name" class="text-xs font-medium">Container name *</Label>
+				<Label for="name" class="text-xs font-medium">{m.containers_settings_container_name()}</Label>
 				<Input
 					id="name"
 					bind:value={name}
@@ -888,12 +889,12 @@
 			{#if mode === 'edit'}
 				<div class="space-y-1.5">
 					<div class="flex items-center gap-2">
-						<Label for="image" class="text-xs font-medium">Image *</Label>
+						<Label for="image" class="text-xs font-medium">{m.containers_settings_image_required()}</Label>
 						{#if hasImageUpdate}
-							<span title="A newer image is available - update from the containers list or the details view"
+							<span title={m.containers_settings_update_available_title()}
 								class="flex items-center gap-1 text-xs text-amber-500">
 								<CircleArrowUp class="w-3.5 h-3.5" />
-								Update available
+								{m.containers_settings_update_available()}
 							</span>
 						{/if}
 					</div>
@@ -913,18 +914,18 @@
 		</div>
 
 		<div class="space-y-1.5">
-			<Label for="command" class="text-xs font-medium">Command (optional)</Label>
+			<Label for="command" class="text-xs font-medium">{m.containers_settings_command_optional()}</Label>
 			<Input id="command" bind:value={command} placeholder="/bin/sh -c 'echo hello'" class="h-9" />
 		</div>
 
 		<div class="space-y-1.5">
-			<Label for="entrypoint" class="text-xs font-medium">Entrypoint (optional)</Label>
+			<Label for="entrypoint" class="text-xs font-medium">{m.containers_settings_entrypoint_optional()}</Label>
 			<Input id="entrypoint" bind:value={entrypoint} placeholder="/docker-entrypoint.sh" class="h-9" />
 		</div>
 
 		<div class="grid grid-cols-2 gap-3">
 			<div class="space-y-1.5">
-				<Label class="text-xs font-medium">Restart policy</Label>
+				<Label class="text-xs font-medium">{m.containers_settings_restart_policy()}</Label>
 				<div class="flex items-center gap-1.5">
 					<Select.Root type="single" bind:value={restartPolicy}>
 						<Select.Trigger id="restartPolicy" tabindex={0} class="w-full h-9">
@@ -938,32 +939,32 @@
 								{:else}
 									<PauseCircle class="w-3.5 h-3.5 mr-2 text-blue-500" />
 								{/if}
-								{restartPolicy === 'no' ? 'No' : restartPolicy === 'always' ? 'Always' : restartPolicy === 'on-failure' ? 'On failure' : 'Unless stopped'}
+								{restartPolicy === 'no' ? m.containers_settings_restart_no() : restartPolicy === 'always' ? m.containers_settings_restart_always() : restartPolicy === 'on-failure' ? m.containers_settings_restart_on_failure() : m.containers_settings_restart_unless_stopped()}
 							</span>
 						</Select.Trigger>
 						<Select.Content>
 							<Select.Item value="no">
 								{#snippet children()}
 									<Ban class="w-3.5 h-3.5 mr-2 text-muted-foreground" />
-									No
+									{m.containers_settings_restart_no()}
 								{/snippet}
 							</Select.Item>
 							<Select.Item value="always">
 								{#snippet children()}
 									<RotateCw class="w-3.5 h-3.5 mr-2 text-green-500" />
-									Always
+									{m.containers_settings_restart_always()}
 								{/snippet}
 							</Select.Item>
 							<Select.Item value="on-failure">
 								{#snippet children()}
 									<AlertTriangle class="w-3.5 h-3.5 mr-2 text-amber-500" />
-									On failure
+									{m.containers_settings_restart_on_failure()}
 								{/snippet}
 							</Select.Item>
 							<Select.Item value="unless-stopped">
 								{#snippet children()}
 									<PauseCircle class="w-3.5 h-3.5 mr-2 text-blue-500" />
-									Unless stopped
+									{m.containers_settings_restart_unless_stopped()}
 								{/snippet}
 							</Select.Item>
 						</Select.Content>
@@ -976,7 +977,7 @@
 							class="h-9 shrink-0 px-2"
 							disabled={applyingField !== null}
 							onclick={applyRestartPolicy}
-							title="Apply"
+							title={m.containers_settings_apply()}
 						>
 							{#if applyingField === 'restart'}
 								<Loader2 class="w-3.5 h-3.5 animate-spin" />
@@ -988,21 +989,21 @@
 				</div>
 				{#if restartPolicy === 'on-failure'}
 					<div class="space-y-1.5 mt-2">
-						<Label class="text-xs font-medium">Max retry count</Label>
+						<Label class="text-xs font-medium">{m.containers_settings_max_retry_count()}</Label>
 						<Input
 							type="number"
 							bind:value={restartMaxRetries}
-							placeholder="Unlimited"
+							placeholder={m.containers_settings_unlimited()}
 							min="0"
 							class="h-9"
 						/>
-						<p class="text-xs text-muted-foreground">Leave empty for unlimited retries</p>
+						<p class="text-xs text-muted-foreground">{m.containers_settings_max_retry_hint()}</p>
 					</div>
 				{/if}
 			</div>
 
 			<div class="space-y-1.5">
-				<Label class="text-xs font-medium">Network</Label>
+				<Label class="text-xs font-medium">{m.containers_settings_network()}</Label>
 				<Popover.Root bind:open={networkModePickerOpen}>
 					<Popover.Trigger bind:ref={networkModePickerTriggerRef}>
 						{#snippet child({ props })}
@@ -1033,30 +1034,30 @@
 					</Popover.Trigger>
 					<Popover.Content class="w-[var(--bits-popover-anchor-width)] p-0" align="start">
 						<Command.Root>
-							<Command.Input placeholder="Filter networks..." />
+							<Command.Input placeholder={m.containers_settings_filter_networks()} />
 							<Command.List class="max-h-64">
-								<Command.Empty>No networks found.</Command.Empty>
+								<Command.Empty>{m.containers_settings_no_networks_found()}</Command.Empty>
 								<Command.Group>
 									<Command.Item value="bridge" onSelect={() => { networkMode = 'bridge'; closeAndFocusNetworkModePicker(); }}>
 										<Share2 class="text-emerald-500" />
-										<span>Bridge</span>
+										<span>{m.containers_settings_network_bridge()}</span>
 									</Command.Item>
 									<Command.Item value="host" onSelect={() => { networkMode = 'host'; closeAndFocusNetworkModePicker(); }}>
 										<Server class="text-sky-500" />
-										<span>Host</span>
+										<span>{m.containers_settings_network_host()}</span>
 									</Command.Item>
 									<Command.Item value="none" onSelect={() => { networkMode = 'none'; closeAndFocusNetworkModePicker(); }}>
 										<CircleOff class="text-muted-foreground" />
-										<span>None</span>
+										<span>{m.containers_settings_network_none()}</span>
 									</Command.Item>
 									<Command.Item value="container" onSelect={() => { if (!networkMode.startsWith('container:')) networkMode = 'container:'; closeAndFocusNetworkModePicker(); }}>
 										<Box class="text-violet-500" />
-										<span>Container</span>
+										<span>{m.containers_settings_network_container()}</span>
 									</Command.Item>
 								</Command.Group>
 								{#if customNetworks.length > 0}
 									<Command.Separator />
-									<Command.Group heading="Custom networks">
+									<Command.Group heading={m.containers_settings_custom_networks()}>
 										{#each customNetworks as n (n.name)}
 											<Command.Item value={n.name} onSelect={() => { networkMode = n.name; closeAndFocusNetworkModePicker(); }}>
 												<Network class="text-orange-500" />
@@ -1082,7 +1083,7 @@
 									aria-expanded={containerPickerOpen}
 								>
 									<span class="truncate min-w-0 flex-1 text-left {containerRef ? '' : 'text-muted-foreground'}">
-										{containerRef || 'Select a container...'}
+										{containerRef || m.containers_settings_select_container()}
 									</span>
 									<ChevronsUpDown class="w-4 h-4 shrink-0 opacity-50" />
 								</Button>
@@ -1090,9 +1091,9 @@
 						</Popover.Trigger>
 						<Popover.Content class="w-[var(--bits-popover-anchor-width)] p-0" align="start">
 							<Command.Root>
-								<Command.Input placeholder="Filter by name..." />
+								<Command.Input placeholder={m.containers_settings_filter_by_name()} />
 								<Command.List class="max-h-64">
-									<Command.Empty>No containers found.</Command.Empty>
+									<Command.Empty>{m.containers_settings_no_containers_found()}</Command.Empty>
 									<Command.Group>
 										{#each availableContainers as c (c.id)}
 											<Command.Item
@@ -1114,19 +1115,19 @@
 						</Popover.Content>
 					</Popover.Root>
 					{#if !containerRef}
-						<p class="text-xs text-amber-600 mt-1">Select a container to share its network namespace</p>
+						<p class="text-xs text-amber-600 mt-1">{m.containers_settings_select_container_hint()}</p>
 					{/if}
 				{/if}
 			</div>
 		</div>
 
 		<div class="flex items-center gap-3 pt-1">
-			<Label class="text-xs font-normal">Pull image before update</Label>
+			<Label class="text-xs font-normal">{m.containers_settings_pull_before_update()}</Label>
 			<TogglePill bind:checked={repullImage} />
 		</div>
 
 		<div class="flex items-center gap-3 pt-1">
-			<Label class="text-xs font-normal">Start container after {mode === 'create' ? 'creation' : 'update'}</Label>
+			<Label class="text-xs font-normal">{mode === 'create' ? m.containers_settings_start_after_creation() : m.containers_settings_start_after_update()}</Label>
 			<TogglePill bind:checked={startAfterCreate} />
 		</div>
 	</div>
@@ -1137,14 +1138,14 @@
 			<div class="flex justify-between items-center pb-2 border-b">
 				<div class="flex items-center gap-2">
 					<Network class="w-4 h-4 text-muted-foreground" />
-					<h3 class="text-sm font-semibold text-foreground">Additional networks</h3>
+					<h3 class="text-sm font-semibold text-foreground">{m.containers_settings_additional_networks()}</h3>
 				</div>
 			</div>
 
 			<div class="space-y-2">
 				{#if selectableNetworks.length === 0}
 					<Button variant="outline" disabled class="w-full justify-start font-normal text-muted-foreground">
-						All networks already attached
+						{m.containers_settings_all_networks_attached()}
 					</Button>
 				{:else}
 					<Popover.Root bind:open={networkPickerOpen}>
@@ -1157,16 +1158,16 @@
 									role="combobox"
 									aria-expanded={networkPickerOpen}
 								>
-									<span class="text-muted-foreground">Select network to add...</span>
+									<span class="text-muted-foreground">{m.containers_settings_select_network_to_add()}</span>
 									<ChevronsUpDown class="w-4 h-4 opacity-50" />
 								</Button>
 							{/snippet}
 						</Popover.Trigger>
 						<Popover.Content class="w-[var(--bits-popover-anchor-width)] p-0" align="start">
 							<Command.Root>
-								<Command.Input placeholder="Filter networks..." />
+								<Command.Input placeholder={m.containers_settings_filter_networks()} />
 								<Command.List class="max-h-64">
-									<Command.Empty>No networks found.</Command.Empty>
+									<Command.Empty>{m.containers_settings_no_networks_found()}</Command.Empty>
 									<Command.Group>
 										{#each selectableNetworks as network (network.name)}
 											<Command.Item
@@ -1209,7 +1210,7 @@
 											<span class={getDriverBadgeClasses(network.driver)}>{network.driver}</span>
 										{/if}
 										{#if hasNetworkConfig(networkName)}
-											<Badge variant="secondary" class="text-2xs">configured</Badge>
+											<Badge variant="secondary" class="text-2xs">{m.containers_settings_configured()}</Badge>
 										{/if}
 									</button>
 									<button
@@ -1224,10 +1225,10 @@
 									<div class="px-2.5 pb-2.5 pt-1 border-t space-y-2">
 										<div class="grid grid-cols-2 gap-2">
 											<div class="space-y-1">
-												<Label class="text-2xs font-medium text-muted-foreground">IPv4 address</Label>
+												<Label class="text-2xs font-medium text-muted-foreground">{m.containers_settings_ipv4_address()}</Label>
 												<Input
 													bind:value={networkConfigs[networkName].ipv4Address}
-													placeholder="e.g., 172.28.0.100"
+													placeholder={m.containers_settings_example_placeholder({ example: '172.28.0.100' })}
 													class="h-8 text-xs"
 												/>
 												{#if validateIpv4(networkConfigs[networkName].ipv4Address)}
@@ -1235,10 +1236,10 @@
 												{/if}
 											</div>
 											<div class="space-y-1">
-												<Label class="text-2xs font-medium text-muted-foreground">IPv6 address</Label>
+												<Label class="text-2xs font-medium text-muted-foreground">{m.containers_settings_ipv6_address()}</Label>
 												<Input
 													bind:value={networkConfigs[networkName].ipv6Address}
-													placeholder="e.g., fd00::100"
+													placeholder={m.containers_settings_example_placeholder({ example: 'fd00::100' })}
 													class="h-8 text-xs"
 												/>
 												{#if validateIpv6(networkConfigs[networkName].ipv6Address)}
@@ -1247,10 +1248,10 @@
 											</div>
 										</div>
 										<div class="space-y-1">
-											<Label class="text-2xs font-medium text-muted-foreground">Aliases (comma-separated)</Label>
+											<Label class="text-2xs font-medium text-muted-foreground">{m.containers_settings_aliases()}</Label>
 											<Input
 												bind:value={networkConfigs[networkName].aliases}
-												placeholder="e.g., myalias, web"
+												placeholder={m.containers_settings_example_placeholder({ example: 'myalias, web' })}
 												class="h-8 text-xs"
 											/>
 										</div>
@@ -1263,10 +1264,10 @@
 
 				<!-- MAC Address -->
 				<div class="space-y-1 pt-1">
-					<Label class="text-xs font-medium">MAC address</Label>
+					<Label class="text-xs font-medium">{m.containers_settings_mac_address()}</Label>
 					<Input
 						bind:value={macAddress}
-						placeholder="e.g., 02:42:ac:11:00:02"
+						placeholder={m.containers_settings_example_placeholder({ example: '02:42:ac:11:00:02' })}
 						class="h-9"
 					/>
 					{#if validateMac(macAddress)}
@@ -1275,7 +1276,7 @@
 				</div>
 
 				{#if mode === 'edit'}
-					<p class="text-xs text-muted-foreground">Container will be connected to selected networks in addition to the network mode above</p>
+					<p class="text-xs text-muted-foreground">{m.containers_settings_additional_networks_hint()}</p>
 				{/if}
 			</div>
 		</div>
@@ -1284,10 +1285,10 @@
 	<!-- Port Mappings -->
 	<div class="space-y-2">
 		<div class="flex justify-between items-center pb-2 border-b">
-			<h3 class="text-sm font-semibold text-foreground">Port mappings</h3>
+			<h3 class="text-sm font-semibold text-foreground">{m.containers_settings_port_mappings()}</h3>
 			<Button type="button" size="sm" variant="ghost" onclick={addPortMapping} class="h-7 text-xs">
 				<Plus class="w-3.5 h-3.5" />
-				Add
+				{m.containers_settings_add()}
 			</Button>
 		</div>
 
@@ -1300,14 +1301,14 @@
 				<div class="flex flex-col gap-1">
 					<div class="flex gap-2 items-center">
 						<div class="flex-1 relative group/port">
-							<span class="absolute -top-2 left-2 text-2xs text-muted-foreground bg-background px-1">Host</span>
-							<Input bind:value={mapping.hostPort} type="text" placeholder="e.g. 8080 or 127.0.0.1:8080" class="h-9 {(hostPortError || hostIpError) && mapping.hostPort ? 'border-destructive' : ''}" />
+							<span class="absolute -top-2 left-2 text-2xs text-muted-foreground bg-background px-1">{m.containers_settings_port_host()}</span>
+							<Input bind:value={mapping.hostPort} type="text" placeholder={m.containers_settings_host_port_placeholder()} class="h-9 {(hostPortError || hostIpError) && mapping.hostPort ? 'border-destructive' : ''}" />
 							<button
 								type="button"
 								class="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground/50 hover:text-primary transition-colors opacity-0 group-hover/port:opacity-100"
 								onclick={() => findFreePort(index)}
 								disabled={findingFreePort}
-								title="Find next available Docker port"
+								title={m.containers_settings_find_free_port()}
 							>
 								{#if findingFreePort}
 									<Loader2 class="w-3.5 h-3.5 animate-spin" />
@@ -1317,8 +1318,8 @@
 							</button>
 						</div>
 						<div class="flex-1 relative">
-							<span class="absolute -top-2 left-2 text-2xs text-muted-foreground bg-background px-1">Container</span>
-							<Input bind:value={mapping.containerPort} type="text" placeholder="e.g. 8080 or 8000-8005" class="h-9 {containerPortError && mapping.containerPort ? 'border-destructive' : ''}" />
+							<span class="absolute -top-2 left-2 text-2xs text-muted-foreground bg-background px-1">{m.containers_settings_port_container()}</span>
+							<Input bind:value={mapping.containerPort} type="text" placeholder={m.containers_settings_container_port_placeholder()} class="h-9 {containerPortError && mapping.containerPort ? 'border-destructive' : ''}" />
 						</div>
 					<ToggleGroup
 						value={mapping.protocol}
@@ -1349,27 +1350,27 @@
 						<CircleHelp class="w-3.5 h-3.5 text-muted-foreground/70 cursor-help shrink-0" />
 					</Tooltip.Trigger>
 					<Tooltip.Content class="max-w-xs text-xs" side="right">
-						<p class="font-medium mb-1">Supported host port formats:</p>
+						<p class="font-medium mb-1">{m.containers_settings_port_formats_title()}</p>
 						<ul class="space-y-0.5 text-muted-foreground">
-							<li><code class="text-foreground">8080</code> — bind to all interfaces</li>
-							<li><code class="text-foreground">127.0.0.1:8080</code> — bind to specific IP</li>
-							<li><code class="text-foreground">8000-8005</code> — port range (container port must also be a range)</li>
-							<li>Leave host port empty for random allocation</li>
+							<li><code class="text-foreground">8080</code> — {m.containers_settings_port_format_all_interfaces()}</li>
+							<li><code class="text-foreground">127.0.0.1:8080</code> — {m.containers_settings_port_format_specific_ip()}</li>
+							<li><code class="text-foreground">8000-8005</code> — {m.containers_settings_port_format_range()}</li>
+							<li>{m.containers_settings_port_format_random()}</li>
 						</ul>
 					</Tooltip.Content>
 				</Tooltip.Root>
 			</Tooltip.Provider>
-			Hover the host port field and click the search icon to find the next available port.
+			{m.containers_settings_find_free_port_hint()}
 		</p>
 	</div>
 
 	<!-- Volume Mappings -->
 	<div class="space-y-2">
 		<div class="flex justify-between items-center pb-2 border-b">
-			<h3 class="text-sm font-semibold text-foreground">Volume mappings</h3>
+			<h3 class="text-sm font-semibold text-foreground">{m.containers_settings_volume_mappings()}</h3>
 			<Button type="button" size="sm" variant="ghost" onclick={addVolumeMapping} class="h-7 text-xs">
 				<Plus class="w-3.5 h-3.5" />
-				Add
+				{m.containers_settings_add()}
 			</Button>
 		</div>
 
@@ -1377,11 +1378,11 @@
 			{#each volumeMappings as mapping, index}
 				<div class="flex gap-2 items-center">
 					<div class="flex-1 relative">
-						<span class="absolute -top-2 left-2 text-2xs text-muted-foreground bg-background px-1">Host path</span>
+						<span class="absolute -top-2 left-2 text-2xs text-muted-foreground bg-background px-1">{m.containers_settings_host_path()}</span>
 						<Input bind:value={mapping.hostPath} class="h-9" />
 					</div>
 					<div class="flex-1 relative">
-						<span class="absolute -top-2 left-2 text-2xs text-muted-foreground bg-background px-1">Container path</span>
+						<span class="absolute -top-2 left-2 text-2xs text-muted-foreground bg-background px-1">{m.containers_settings_container_path()}</span>
 						<Input bind:value={mapping.containerPath} class="h-9" />
 					</div>
 					<ToggleGroup
@@ -1407,10 +1408,10 @@
 	<!-- Environment Variables -->
 	<div class="space-y-2">
 		<div class="flex justify-between items-center pb-2 border-b">
-			<h3 class="text-sm font-semibold text-foreground">Environment variables</h3>
+			<h3 class="text-sm font-semibold text-foreground">{m.containers_settings_environment_variables()}</h3>
 			<Button type="button" size="sm" variant="ghost" onclick={addEnvVar} class="h-7 text-xs">
 				<Plus class="w-3.5 h-3.5" />
-				Add
+				{m.containers_settings_add()}
 			</Button>
 		</div>
 
@@ -1418,11 +1419,11 @@
 			{#each envVars as envVar, index}
 				<div class="flex gap-2 items-center">
 					<div class="flex-1 relative">
-						<span class="absolute -top-2 left-2 text-2xs text-muted-foreground bg-background px-1">Key</span>
+						<span class="absolute -top-2 left-2 text-2xs text-muted-foreground bg-background px-1">{m.containers_settings_key()}</span>
 						<Input bind:value={envVar.key} class="h-9" />
 					</div>
 					<div class="flex-1 relative">
-						<span class="absolute -top-2 left-2 text-2xs text-muted-foreground bg-background px-1">Value</span>
+						<span class="absolute -top-2 left-2 text-2xs text-muted-foreground bg-background px-1">{m.containers_settings_value()}</span>
 						<Input bind:value={envVar.value} class="h-9" />
 					</div>
 					<Button
@@ -1443,10 +1444,10 @@
 	<!-- Labels -->
 	<div class="space-y-2">
 		<div class="flex justify-between items-center pb-2 border-b">
-			<h3 class="text-sm font-semibold text-foreground">Labels</h3>
+			<h3 class="text-sm font-semibold text-foreground">{m.containers_settings_labels()}</h3>
 			<Button type="button" size="sm" variant="ghost" onclick={addLabel} class="h-7 text-xs">
 				<Plus class="w-3.5 h-3.5" />
-				Add
+				{m.containers_settings_add()}
 			</Button>
 		</div>
 
@@ -1454,11 +1455,11 @@
 			{#each labels as label, index}
 				<div class="flex gap-2 items-center">
 					<div class="flex-1 relative">
-						<span class="absolute -top-2 left-2 text-2xs text-muted-foreground bg-background px-1">Key</span>
+						<span class="absolute -top-2 left-2 text-2xs text-muted-foreground bg-background px-1">{m.containers_settings_key()}</span>
 						<Input bind:value={label.key} class="h-9" />
 					</div>
 					<div class="flex-1 relative">
-						<span class="absolute -top-2 left-2 text-2xs text-muted-foreground bg-background px-1">Value</span>
+						<span class="absolute -top-2 left-2 text-2xs text-muted-foreground bg-background px-1">{m.containers_settings_value()}</span>
 						<Input bind:value={label.value} class="h-9" />
 					</div>
 					<Button
@@ -1478,7 +1479,7 @@
 
 	<!-- Advanced Options Header -->
 	<div class="pt-2">
-		<p class="text-xs text-muted-foreground mb-3">Advanced container options (click to expand)</p>
+		<p class="text-xs text-muted-foreground mb-3">{m.containers_settings_advanced_hint()}</p>
 	</div>
 
 	<!-- Resources Section (Collapsible) -->
@@ -1490,9 +1491,9 @@
 		>
 			<div class="flex items-center gap-2">
 				<Cpu class="w-4 h-4 text-muted-foreground" />
-				<span class="text-sm font-medium">Resources</span>
+				<span class="text-sm font-medium">{m.containers_settings_resources()}</span>
 				{#if memoryLimit || nanoCpus || cpuShares}
-					<Badge variant="secondary" class="text-2xs">configured</Badge>
+					<Badge variant="secondary" class="text-2xs">{m.containers_settings_configured()}</Badge>
 				{/if}
 			</div>
 			{#if showResources}
@@ -1504,15 +1505,15 @@
 		{#if showResources}
 			<div class="px-3 pb-3 space-y-3 border-t">
 				<p class="text-xs text-muted-foreground pt-2">
-					Configure memory and CPU limits for this container.
+					{m.containers_settings_resources_hint()}
 					{#if canApplyInPlace}
-						The <CornerDownLeft class="w-3 h-3 inline-block -mt-0.5" /> button next to each field applies the change without restarting.
+						{m.containers_settings_resources_apply_hint_before()} <CornerDownLeft class="w-3 h-3 inline-block -mt-0.5" /> {m.containers_settings_resources_apply_hint_after()}
 					{/if}
 				</p>
 
 				{#snippet inlineApplyBtn(field: InPlaceFieldKey, onclick: () => void)}
 					{#if canApplyInPlace}
-						<Button type="button" variant="outline" size="sm" class="h-9 shrink-0 px-2" disabled={applyingField !== null} {onclick} title="Apply">
+						<Button type="button" variant="outline" size="sm" class="h-9 shrink-0 px-2" disabled={applyingField !== null} {onclick} title={m.containers_settings_apply()}>
 							{#if applyingField === field}
 								<Loader2 class="w-3.5 h-3.5 animate-spin" />
 							{:else}
@@ -1524,30 +1525,30 @@
 
 				<div class="grid grid-cols-2 gap-3">
 					<div class="space-y-1.5">
-						<Label for="memoryLimit" class="text-xs font-medium">Memory limit</Label>
+						<Label for="memoryLimit" class="text-xs font-medium">{m.containers_settings_memory_limit()}</Label>
 						<div class="flex items-center gap-1.5">
-							<Input id="memoryLimit" bind:value={memoryLimit} placeholder="e.g., 512m, 1g" class="h-9" />
+							<Input id="memoryLimit" bind:value={memoryLimit} placeholder={m.containers_settings_example_placeholder({ example: '512m, 1g' })} class="h-9" />
 							{@render inlineApplyBtn('memory', applyMemoryLimit)}
 						</div>
 					</div>
 					<div class="space-y-1.5">
-						<Label for="memoryReservation" class="text-xs font-medium">Memory reservation</Label>
+						<Label for="memoryReservation" class="text-xs font-medium">{m.containers_settings_memory_reservation()}</Label>
 						<div class="flex items-center gap-1.5">
-							<Input id="memoryReservation" bind:value={memoryReservation} placeholder="e.g., 256m" class="h-9" />
+							<Input id="memoryReservation" bind:value={memoryReservation} placeholder={m.containers_settings_example_placeholder({ example: '256m' })} class="h-9" />
 							{@render inlineApplyBtn('memoryReservation', applyMemoryReservation)}
 						</div>
 					</div>
 				</div>
 				<div class="grid grid-cols-2 gap-3">
 					<div class="space-y-1.5">
-						<Label for="nanoCpus" class="text-xs font-medium">CPU limit</Label>
+						<Label for="nanoCpus" class="text-xs font-medium">{m.containers_settings_cpu_limit()}</Label>
 						<div class="flex items-center gap-1.5">
-							<Input id="nanoCpus" bind:value={nanoCpus} placeholder="e.g., 0.5, 1.5, 2" class="h-9" />
+							<Input id="nanoCpus" bind:value={nanoCpus} placeholder={m.containers_settings_example_placeholder({ example: '0.5, 1.5, 2' })} class="h-9" />
 							{@render inlineApplyBtn('nanoCpus', applyNanoCpus)}
 						</div>
 					</div>
 					<div class="space-y-1.5">
-						<Label for="cpuShares" class="text-xs font-medium">CPU shares</Label>
+						<Label for="cpuShares" class="text-xs font-medium">{m.containers_settings_cpu_shares()}</Label>
 						<div class="flex items-center gap-1.5">
 							<Input id="cpuShares" bind:value={cpuShares} type="number" placeholder="1024" class="h-9" />
 							{@render inlineApplyBtn('cpuShares', applyCpuShares)}
@@ -1556,20 +1557,20 @@
 				</div>
 				<div class="grid grid-cols-2 gap-3">
 					<div class="space-y-1.5">
-						<Label for="cpuQuota" class="text-xs font-medium">CPU quota</Label>
+						<Label for="cpuQuota" class="text-xs font-medium">{m.containers_settings_cpu_quota()}</Label>
 						<div class="flex items-center gap-1.5">
-							<Input id="cpuQuota" bind:value={cpuQuota} type="number" placeholder="e.g., 50000" class="h-9" />
+							<Input id="cpuQuota" bind:value={cpuQuota} type="number" placeholder={m.containers_settings_example_placeholder({ example: '50000' })} class="h-9" />
 							{@render inlineApplyBtn('cpuQuota', applyCpuQuota)}
 						</div>
-						<p class="text-xs text-muted-foreground">Microseconds per period</p>
+						<p class="text-xs text-muted-foreground">{m.containers_settings_cpu_quota_hint()}</p>
 					</div>
 					<div class="space-y-1.5">
-						<Label for="cpuPeriod" class="text-xs font-medium">CPU period</Label>
+						<Label for="cpuPeriod" class="text-xs font-medium">{m.containers_settings_cpu_period()}</Label>
 						<div class="flex items-center gap-1.5">
-							<Input id="cpuPeriod" bind:value={cpuPeriod} type="number" placeholder="Default: 100000" class="h-9" />
+							<Input id="cpuPeriod" bind:value={cpuPeriod} type="number" placeholder={m.containers_settings_cpu_period_placeholder()} class="h-9" />
 							{@render inlineApplyBtn('cpuPeriod', applyCpuPeriod)}
 						</div>
-						<p class="text-xs text-muted-foreground">Period in microseconds</p>
+						<p class="text-xs text-muted-foreground">{m.containers_settings_cpu_period_hint()}</p>
 					</div>
 				</div>
 			</div>
@@ -1585,9 +1586,9 @@
 		>
 			<div class="flex items-center gap-2">
 				<Shield class="w-4 h-4 text-muted-foreground" />
-				<span class="text-sm font-medium">Security</span>
+				<span class="text-sm font-medium">{m.containers_settings_security()}</span>
 				{#if privilegedMode || containerUser || capAdd.length > 0 || capDrop.length > 0 || securityOptions.length > 0}
-					<Badge variant="secondary" class="text-2xs">configured</Badge>
+					<Badge variant="secondary" class="text-2xs">{m.containers_settings_configured()}</Badge>
 				{/if}
 			</div>
 			{#if showSecurity}
@@ -1600,25 +1601,25 @@
 			<div class="px-3 pb-3 space-y-3 border-t">
 				<div class="grid grid-cols-2 gap-3 pt-2">
 					<div class="space-y-1.5">
-						<Label for="containerUser" class="text-xs font-medium">User</Label>
-						<Input id="containerUser" bind:value={containerUser} placeholder="user:group or UID:GID" class="h-9" />
+						<Label for="containerUser" class="text-xs font-medium">{m.containers_settings_user()}</Label>
+						<Input id="containerUser" bind:value={containerUser} placeholder={m.containers_settings_user_placeholder()} class="h-9" />
 					</div>
 					<div class="space-y-1.5 flex flex-col justify-center pt-4">
 						<div class="flex items-center space-x-2">
 							<Checkbox id="privilegedMode" bind:checked={privilegedMode} />
 							<Label for="privilegedMode" class="text-xs font-normal flex items-center gap-1">
 								<Lock class="w-3 h-3 text-amber-500" />
-								Privileged mode
+								{m.containers_settings_privileged_mode()}
 							</Label>
 						</div>
 					</div>
 				</div>
 
 				<div class="space-y-2">
-					<Label class="text-xs font-medium">Add capabilities</Label>
+					<Label class="text-xs font-medium">{m.containers_settings_add_capabilities()}</Label>
 					<Select.Root type="single" value="" onValueChange={(v) => { addCapability('add', v); }}>
 						<Select.Trigger class="h-9">
-							<span class="text-muted-foreground">Select capability to add...</span>
+							<span class="text-muted-foreground">{m.containers_settings_select_capability_add()}</span>
 						</Select.Trigger>
 						<Select.Content>
 							{#each commonCapabilities.filter(c => !capAdd.includes(c)) as cap}
@@ -1641,10 +1642,10 @@
 				</div>
 
 				<div class="space-y-2">
-					<Label class="text-xs font-medium">Drop capabilities</Label>
+					<Label class="text-xs font-medium">{m.containers_settings_drop_capabilities()}</Label>
 					<Select.Root type="single" value="" onValueChange={(v) => { addCapability('drop', v); }}>
 						<Select.Trigger class="h-9">
-							<span class="text-muted-foreground">Select capability to drop...</span>
+							<span class="text-muted-foreground">{m.containers_settings_select_capability_drop()}</span>
 						</Select.Trigger>
 						<Select.Content>
 							{#each commonCapabilities.filter(c => !capDrop.includes(c)) as cap}
@@ -1667,11 +1668,11 @@
 				</div>
 
 				<div class="space-y-2 pt-2 border-t">
-					<Label class="text-xs font-medium">Security options</Label>
+					<Label class="text-xs font-medium">{m.containers_settings_security_options()}</Label>
 					<div class="flex gap-2">
 						<Input
 							bind:value={securityOptionInput}
-							placeholder="e.g., no-new-privileges, seccomp=unconfined"
+							placeholder={m.containers_settings_example_placeholder({ example: 'no-new-privileges, seccomp=unconfined' })}
 							class="h-9 flex-1"
 							onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addSecurityOption(); } }}
 						/>
@@ -1691,7 +1692,7 @@
 							{/each}
 						</div>
 					{/if}
-					<p class="text-xs text-muted-foreground">Common options: no-new-privileges, seccomp=unconfined, apparmor=unconfined</p>
+					<p class="text-xs text-muted-foreground">{m.containers_settings_security_options_hint()}</p>
 				</div>
 			</div>
 		{/if}
@@ -1706,9 +1707,9 @@
 		>
 			<div class="flex items-center gap-2">
 				<HeartPulse class="w-4 h-4 text-muted-foreground" />
-				<span class="text-sm font-medium">Healthcheck</span>
+				<span class="text-sm font-medium">{m.containers_settings_healthcheck()}</span>
 				{#if healthcheckEnabled}
-					<Badge variant="secondary" class="text-2xs">enabled</Badge>
+					<Badge variant="secondary" class="text-2xs">{m.containers_settings_enabled()}</Badge>
 				{/if}
 			</div>
 			{#if showHealth}
@@ -1721,28 +1722,28 @@
 			<div class="px-3 pb-3 space-y-3 border-t">
 				<div class="flex items-center space-x-2 pt-2">
 					<Checkbox id="healthcheckEnabled" bind:checked={healthcheckEnabled} />
-					<Label for="healthcheckEnabled" class="text-xs font-normal">Enable healthcheck</Label>
+					<Label for="healthcheckEnabled" class="text-xs font-normal">{m.containers_settings_enable_healthcheck()}</Label>
 				</div>
 				{#if healthcheckEnabled}
 					<div class="space-y-1.5">
-						<Label for="healthcheckCommand" class="text-xs font-medium">Command</Label>
-						<Input id="healthcheckCommand" bind:value={healthcheckCommand} placeholder="e.g., curl -f http://localhost/ || exit 1" class="h-9" />
+						<Label for="healthcheckCommand" class="text-xs font-medium">{m.containers_settings_command()}</Label>
+						<Input id="healthcheckCommand" bind:value={healthcheckCommand} placeholder={m.containers_settings_example_placeholder({ example: 'curl -f http://localhost/ || exit 1' })} class="h-9" />
 					</div>
 					<div class="grid grid-cols-4 gap-3">
 						<div class="space-y-1.5">
-							<Label for="healthcheckInterval" class="text-xs font-medium">Interval (s)</Label>
+							<Label for="healthcheckInterval" class="text-xs font-medium">{m.containers_settings_interval()}</Label>
 							<Input id="healthcheckInterval" type="number" bind:value={healthcheckInterval} min="1" class="h-9" />
 						</div>
 						<div class="space-y-1.5">
-							<Label for="healthcheckTimeout" class="text-xs font-medium">Timeout (s)</Label>
+							<Label for="healthcheckTimeout" class="text-xs font-medium">{m.containers_settings_timeout()}</Label>
 							<Input id="healthcheckTimeout" type="number" bind:value={healthcheckTimeout} min="1" class="h-9" />
 						</div>
 						<div class="space-y-1.5">
-							<Label for="healthcheckRetries" class="text-xs font-medium">Retries</Label>
+							<Label for="healthcheckRetries" class="text-xs font-medium">{m.containers_settings_retries()}</Label>
 							<Input id="healthcheckRetries" type="number" bind:value={healthcheckRetries} min="1" class="h-9" />
 						</div>
 						<div class="space-y-1.5">
-							<Label for="healthcheckStartPeriod" class="text-xs font-medium">Start (s)</Label>
+							<Label for="healthcheckStartPeriod" class="text-xs font-medium">{m.containers_settings_start_period()}</Label>
 							<Input id="healthcheckStartPeriod" type="number" bind:value={healthcheckStartPeriod} min="0" class="h-9" />
 						</div>
 					</div>
@@ -1760,9 +1761,9 @@
 		>
 			<div class="flex items-center gap-2">
 				<Wifi class="w-4 h-4 text-muted-foreground" />
-				<span class="text-sm font-medium">DNS settings</span>
+				<span class="text-sm font-medium">{m.containers_settings_dns_settings()}</span>
 				{#if dnsServers.length > 0 || dnsSearch.length > 0}
-					<Badge variant="secondary" class="text-2xs">configured</Badge>
+					<Badge variant="secondary" class="text-2xs">{m.containers_settings_configured()}</Badge>
 				{/if}
 			</div>
 			{#if showDns}
@@ -1774,11 +1775,11 @@
 		{#if showDns}
 			<div class="px-3 pb-3 space-y-3 border-t">
 				<div class="space-y-2 pt-2">
-					<Label class="text-xs font-medium">DNS servers</Label>
+					<Label class="text-xs font-medium">{m.containers_settings_dns_servers()}</Label>
 					<div class="flex gap-2">
 						<Input
 							bind:value={dnsInput}
-							placeholder="e.g., 8.8.8.8"
+							placeholder={m.containers_settings_example_placeholder({ example: '8.8.8.8' })}
 							class="h-9 flex-1"
 							onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addDnsServer(); } }}
 						/>
@@ -1802,11 +1803,11 @@
 
 				<!-- DNS Search domains -->
 				<div class="space-y-2">
-					<Label class="text-xs font-medium">DNS search domains</Label>
+					<Label class="text-xs font-medium">{m.containers_settings_dns_search_domains()}</Label>
 					<div class="flex gap-2">
 						<Input
 							bind:value={dnsSearchInput}
-							placeholder="e.g., example.com"
+							placeholder={m.containers_settings_example_placeholder({ example: 'example.com' })}
 							class="h-9 flex-1"
 							onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addDnsSearch(); } }}
 						/>
@@ -1830,11 +1831,11 @@
 
 				<!-- DNS Options -->
 				<div class="space-y-2">
-					<Label class="text-xs font-medium">DNS options</Label>
+					<Label class="text-xs font-medium">{m.containers_settings_dns_options()}</Label>
 					<div class="flex gap-2">
 						<Input
 							bind:value={dnsOptionInput}
-							placeholder="e.g., ndots:5"
+							placeholder={m.containers_settings_example_placeholder({ example: 'ndots:5' })}
 							class="h-9 flex-1"
 							onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addDnsOption(); } }}
 						/>
@@ -1868,7 +1869,7 @@
 		>
 			<div class="flex items-center gap-2">
 				<HardDrive class="w-4 h-4 text-muted-foreground" />
-				<span class="text-sm font-medium">Devices</span>
+				<span class="text-sm font-medium">{m.containers_settings_devices()}</span>
 				{#if deviceMappings.length > 0}
 					<Badge variant="secondary" class="text-2xs">{deviceMappings.length}</Badge>
 				{/if}
@@ -1884,7 +1885,7 @@
 				<div class="flex justify-end pt-2">
 					<Button type="button" size="sm" variant="ghost" onclick={addDeviceMapping} class="h-7 text-xs">
 						<Plus class="w-3.5 h-3.5" />
-						Add device
+						{m.containers_settings_add_device()}
 					</Button>
 				</div>
 				{#each deviceMappings as mapping, index}
@@ -1917,7 +1918,7 @@
 				<Gpu class="w-4 h-4 text-muted-foreground" />
 				<span class="text-sm font-medium">GPU</span>
 				{#if gpuEnabled}
-					<Badge variant="secondary" class="text-2xs">configured</Badge>
+					<Badge variant="secondary" class="text-2xs">{m.containers_settings_configured()}</Badge>
 				{/if}
 			</div>
 			{#if showGpu}
@@ -1929,12 +1930,12 @@
 		{#if showGpu}
 			<div class="px-3 pb-3 space-y-3 border-t">
 				<div class="flex items-center justify-between pt-2">
-					<Label class="text-xs font-medium">Enable GPU access</Label>
+					<Label class="text-xs font-medium">{m.containers_settings_enable_gpu()}</Label>
 					<TogglePill bind:checked={gpuEnabled} />
 				</div>
 
 				<div class="space-y-1.5">
-					<Label class="text-xs font-medium">Runtime</Label>
+					<Label class="text-xs font-medium">{m.containers_settings_runtime()}</Label>
 					<div class="flex gap-2">
 						<Select.Root type="single" value={runtime === '' ? '' : runtime === 'nvidia' ? 'nvidia' : 'custom'} onValueChange={(v) => {
 							if (v === '') runtime = '';
@@ -1942,18 +1943,18 @@
 							else if (v === 'custom') runtime = customRuntimeInput || '';
 						}}>
 							<Select.Trigger class="h-9 flex-1">
-								<span>{runtime === '' ? 'Default (runc)' : runtime === 'nvidia' ? 'NVIDIA' : `Custom: ${runtime}`}</span>
+								<span>{runtime === '' ? m.containers_settings_runtime_default() : runtime === 'nvidia' ? 'NVIDIA' : m.containers_settings_runtime_custom_value({ runtime })}</span>
 							</Select.Trigger>
 							<Select.Content>
-								<Select.Item value="" label="Default (runc)" />
+								<Select.Item value="" label={m.containers_settings_runtime_default()} />
 								<Select.Item value="nvidia" label="NVIDIA" />
-								<Select.Item value="custom" label="Custom..." />
+								<Select.Item value="custom" label={m.containers_settings_runtime_custom()} />
 							</Select.Content>
 						</Select.Root>
 						{#if runtime !== '' && runtime !== 'nvidia'}
 							<Input
 								bind:value={customRuntimeInput}
-								placeholder="Runtime name"
+								placeholder={m.containers_settings_runtime_name()}
 								class="h-9 w-40"
 								oninput={() => { runtime = customRuntimeInput; }}
 							/>
@@ -1963,13 +1964,13 @@
 
 				{#if gpuEnabled}
 					<div class="space-y-1.5">
-						<Label class="text-xs font-medium">GPU mode</Label>
+						<Label class="text-xs font-medium">{m.containers_settings_gpu_mode()}</Label>
 						<ToggleGroup
 							value={gpuMode}
 							options={[
-								{ value: 'all', label: 'All' },
-								{ value: 'count', label: 'Count' },
-								{ value: 'specific', label: 'Specific' }
+								{ value: 'all', label: m.containers_settings_gpu_mode_all() },
+								{ value: 'count', label: m.containers_settings_gpu_mode_count() },
+								{ value: 'specific', label: m.containers_settings_gpu_mode_specific() }
 							]}
 							onchange={(v) => { gpuMode = v as 'all' | 'count' | 'specific'; }}
 						/>
@@ -1977,18 +1978,18 @@
 
 					{#if gpuMode === 'count'}
 						<div class="space-y-1.5">
-							<Label class="text-xs font-medium">GPU count</Label>
+							<Label class="text-xs font-medium">{m.containers_settings_gpu_count()}</Label>
 							<Input type="number" bind:value={gpuCount} min="1" placeholder="1" class="h-9 w-24" />
 						</div>
 					{/if}
 
 					{#if gpuMode === 'specific'}
 						<div class="space-y-2">
-							<Label class="text-xs font-medium">Device IDs</Label>
+							<Label class="text-xs font-medium">{m.containers_settings_device_ids()}</Label>
 							<div class="flex gap-2">
 								<Input
 									bind:value={gpuDeviceIdInput}
-									placeholder="e.g., 0, GPU-xxxx"
+									placeholder={m.containers_settings_example_placeholder({ example: '0, GPU-xxxx' })}
 									class="h-9 flex-1"
 									onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addGpuDeviceId(); } }}
 								/>
@@ -2012,15 +2013,15 @@
 					{/if}
 
 					<div class="space-y-1.5">
-						<Label class="text-xs font-medium">Driver</Label>
+						<Label class="text-xs font-medium">{m.containers_settings_driver()}</Label>
 						<Input bind:value={gpuDriver} placeholder="nvidia" class="h-9" />
 					</div>
 
 					<div class="space-y-2">
-						<Label class="text-xs font-medium">Capabilities</Label>
+						<Label class="text-xs font-medium">{m.containers_settings_capabilities()}</Label>
 						<Select.Root type="single" value="" onValueChange={(v) => { addGpuCapability(v); }}>
 							<Select.Trigger class="h-9">
-								<span class="text-muted-foreground">Add capability...</span>
+								<span class="text-muted-foreground">{m.containers_settings_add_capability()}</span>
 							</Select.Trigger>
 							<Select.Content>
 								{#each commonGpuCapabilities.filter(c => !gpuCapabilities.includes(c)) as cap}
@@ -2055,7 +2056,7 @@
 		>
 			<div class="flex items-center gap-2">
 				<Settings2 class="w-4 h-4 text-muted-foreground" />
-				<span class="text-sm font-medium">Ulimits</span>
+				<span class="text-sm font-medium">{m.containers_settings_ulimits()}</span>
 				{#if ulimits.length > 0}
 					<Badge variant="secondary" class="text-2xs">{ulimits.length}</Badge>
 				{/if}
@@ -2071,7 +2072,7 @@
 				<div class="flex justify-end pt-2">
 					<Button type="button" size="sm" variant="ghost" onclick={addUlimit} class="h-7 text-xs">
 						<Plus class="w-3.5 h-3.5" />
-						Add ulimit
+						{m.containers_settings_add_ulimit()}
 					</Button>
 				</div>
 				{#each ulimits as ulimit, index}
@@ -2086,8 +2087,8 @@
 								{/each}
 							</Select.Content>
 						</Select.Root>
-						<Input bind:value={ulimit.soft} type="number" placeholder="Soft" class="h-9 flex-1" />
-						<Input bind:value={ulimit.hard} type="number" placeholder="Hard" class="h-9 flex-1" />
+						<Input bind:value={ulimit.soft} type="number" placeholder={m.containers_settings_ulimit_soft()} class="h-9 flex-1" />
+						<Input bind:value={ulimit.hard} type="number" placeholder={m.containers_settings_ulimit_hard()} class="h-9 flex-1" />
 						<Button
 							type="button"
 							size="icon"
@@ -2107,7 +2108,7 @@
 	<div class="space-y-3">
 		<div class="flex items-center gap-2 pb-2 border-b">
 			<RefreshCw class="w-4 h-4 text-muted-foreground" />
-			<h3 class="text-sm font-semibold text-foreground">Auto-update</h3>
+			<h3 class="text-sm font-semibold text-foreground">{m.containers_settings_auto_update()}</h3>
 		</div>
 		<AutoUpdateSettings
 			bind:enabled={autoUpdateEnabled}

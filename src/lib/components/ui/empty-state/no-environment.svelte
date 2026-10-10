@@ -4,6 +4,7 @@
 	import { Server, Settings } from 'lucide-svelte';
 	import { goto } from '$app/navigation';
 	import { environments } from '$lib/stores/environment';
+	import { m } from '$lib/paraglide/messages.js';
 
 	const hasEnvironments = $derived($environments.length > 0);
 </script>
@@ -11,18 +12,18 @@
 {#if hasEnvironments}
 	<EmptyState
 		icon={Server}
-		title="No environment selected"
-		description="Select a Docker environment from the dropdown to get started"
+		title={m.emptystate_no_environment_selected_title()}
+		description={m.emptystate_no_environment_selected_description()}
 	/>
 {:else}
 	<EmptyState
 		icon={Server}
-		title="No environment configured"
-		description="Add a Docker environment in Settings to get started"
+		title={m.emptystate_no_environment_configured_title()}
+		description={m.emptystate_no_environment_configured_description()}
 	>
 		<Button variant="secondary" onclick={() => goto('/settings?tab=environments')}>
 			<Settings class="w-4 h-4" />
-			Go to Settings
+			{m.dashboard_go_to_settings()}
 		</Button>
 	</EmptyState>
 {/if}

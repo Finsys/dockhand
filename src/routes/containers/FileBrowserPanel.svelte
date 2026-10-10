@@ -42,6 +42,7 @@
 	import { toast } from 'svelte-sonner';
 	import { LoadingState } from '$lib/components/ui/loading-state';
 	import { formatDateTime, appSettings } from '$lib/stores/settings';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface FileEntry {
 		name: string;
@@ -111,7 +112,7 @@
 	// In a snapshot, the stack dir rides a reserved volume key; show it by what it holds,
 	// not the raw internal key. Navigation still uses the real name.
 	function displayEntryName(name: string): string {
-		if (isSnapshotMode && name === '__dockhand_stackdir__') return 'Stack files (compose, config)';
+		if (isSnapshotMode && name === '__dockhand_stackdir__') return m.containers_files_stack_files_entry();
 		return name;
 	}
 
@@ -429,7 +430,7 @@
 				}
 				data = await res.json();
 				if (!res.ok) {
-					throw new Error(data.error || 'Failed to read file');
+					throw new Error(data.error || m.containers_files_error_read());
 				}
 			}
 
@@ -439,7 +440,7 @@
 				content: data.content
 			};
 		} catch (err: any) {
-			toast.error(err.message || 'Failed to open file');
+			toast.error(err.message || m.containers_files_error_open());
 		} finally {
 			loadingFile = false;
 			loadingPreview = false;
@@ -464,7 +465,7 @@
 			const data = await res.json();
 
 			if (!res.ok) {
-				throw new Error(data.error || 'Failed to read file');
+				throw new Error(data.error || m.containers_files_error_read());
 			}
 
 			editorContent = data.content;
@@ -474,7 +475,7 @@
 				content: data.content
 			};
 		} catch (err: any) {
-			toast.error(err.message || 'Failed to open file');
+			toast.error(err.message || m.containers_files_error_open());
 		} finally {
 			loadingFile = false;
 		}
@@ -498,13 +499,13 @@
 			const data = await res.json();
 
 			if (!res.ok) {
-				throw new Error(data.error || 'Failed to save file');
+				throw new Error(data.error || m.containers_files_error_save());
 			}
 
-			toast.success('File saved');
+			toast.success(m.containers_files_saved());
 			forceCloseEditor(); // saved → close without re-prompting the dirty guard
 		} catch (err: any) {
-			toast.error(err.message || 'Failed to save file');
+			toast.error(err.message || m.containers_files_error_save());
 		} finally {
 			savingFile = false;
 		}
@@ -528,7 +529,7 @@
 	// Create file or directory
 	async function handleCreate() {
 		if (!createName.trim()) {
-			toast.error('Name is required');
+			toast.error(m.containers_files_name_required());
 			return;
 		}
 
@@ -548,16 +549,16 @@
 			const data = await res.json();
 
 			if (!res.ok) {
-				throw new Error(data.error || 'Failed to create');
+				throw new Error(data.error || m.containers_files_error_create());
 			}
 
-			toast.success(`${createType === 'file' ? 'File' : 'Directory'} created`);
+			toast.success(createType === 'file' ? m.containers_files_file_created() : m.containers_files_directory_created());
 			showCreateModal = false;
 			createName = '';
 			createOwner = '';
 			loadDirectory(currentPath);
 		} catch (err: any) {
-			toast.error(err.message || 'Failed to create');
+			toast.error(err.message || m.containers_files_error_create());
 		} finally {
 			creating = false;
 		}
@@ -580,13 +581,13 @@
 			const data = await res.json();
 
 			if (!res.ok) {
-				throw new Error(data.error || 'Failed to delete');
+				throw new Error(data.error || m.containers_files_error_delete());
 			}
 
-			toast.success(`Deleted ${entry.name}`);
+			toast.success(m.containers_files_deleted({ name: entry.name }));
 			loadDirectory(currentPath);
 		} catch (err: any) {
-			toast.error(err.message || 'Failed to delete');
+			toast.error(err.message || m.containers_files_error_delete());
 		} finally {
 			deleting = null;
 		}
@@ -601,7 +602,7 @@
 
 	async function handleRename() {
 		if (!renameEntry || !renameName.trim()) {
-			toast.error('Name is required');
+			toast.error(m.containers_files_name_required());
 			return;
 		}
 
@@ -628,15 +629,15 @@
 			const data = await res.json();
 
 			if (!res.ok) {
-				throw new Error(data.error || 'Failed to rename');
+				throw new Error(data.error || m.containers_files_error_rename());
 			}
 
-			toast.success('Renamed successfully');
+			toast.success(m.containers_files_renamed());
 			showRenameModal = false;
 			renameEntry = null;
 			loadDirectory(currentPath);
 		} catch (err: any) {
-			toast.error(err.message || 'Failed to rename');
+			toast.error(err.message || m.containers_files_error_rename());
 		} finally {
 			renaming = false;
 		}
@@ -674,7 +675,7 @@
 
 	async function handleChmod() {
 		if (!chmodEntry || !chmodMode.trim()) {
-			toast.error('Mode is required');
+			toast.error(m.containers_files_mode_required());
 			return;
 		}
 
@@ -694,15 +695,15 @@
 			const data = await res.json();
 
 			if (!res.ok) {
-				throw new Error(data.error || 'Failed to change permissions');
+				throw new Error(data.error || m.containers_files_error_chmod());
 			}
 
-			toast.success('Permissions changed');
+			toast.success(m.containers_files_chmod_success());
 			showChmodModal = false;
 			chmodEntry = null;
 			loadDirectory(currentPath);
 		} catch (err: any) {
-			toast.error(err.message || 'Failed to change permissions');
+			toast.error(err.message || m.containers_files_error_chmod());
 		} finally {
 			changingPerms = false;
 		}
@@ -718,7 +719,7 @@
 
 	async function handleChown() {
 		if (!chownEntry || !chownOwner.trim()) {
-			toast.error('Owner is required');
+			toast.error(m.containers_files_owner_required());
 			return;
 		}
 
@@ -738,15 +739,15 @@
 			const data = await res.json();
 
 			if (!res.ok) {
-				throw new Error(data.error || 'Failed to change owner');
+				throw new Error(data.error || m.containers_files_error_chown());
 			}
 
-			toast.success('Owner changed');
+			toast.success(m.containers_files_chown_success());
 			showChownModal = false;
 			chownEntry = null;
 			loadDirectory(currentPath);
 		} catch (err: any) {
-			toast.error(err.message || 'Failed to change owner');
+			toast.error(err.message || m.containers_files_error_chown());
 		} finally {
 			changingOwner = false;
 		}
@@ -840,7 +841,7 @@
 			}
 
 			if (!res.ok) {
-				throw new Error(data.error || 'Failed to load directory');
+				throw new Error(data.error || m.containers_files_error_load_directory());
 			}
 
 			currentPath = data.path || path;
@@ -955,17 +956,17 @@
 
 			if (!res.ok) {
 				const details = data.details?.join('; ') || '';
-				throw new Error(details || data.error || 'Upload failed');
+				throw new Error(details || data.error || m.containers_files_error_upload());
 			}
 
-			toast.success(`Uploaded ${data.uploaded.length} file(s)`);
+			toast.success(m.containers_files_uploaded_count({ count: data.uploaded.length }));
 			if (data.errors?.length) {
-				toast.error(`Failed: ${data.errors.join(', ')}`);
+				toast.error(m.containers_files_upload_partial_failed({ errors: data.errors.join(', ') }));
 			}
 
 			loadDirectory(currentPath);
 		} catch (err: any) {
-			toast.error(err.message || 'Upload failed');
+			toast.error(err.message || m.containers_files_error_upload());
 		} finally {
 			uploading = false;
 		}
@@ -997,7 +998,7 @@
 		if (!dropTargetReady || uploading) return;
 		const items = Array.from(e.dataTransfer?.items ?? []);
 		if (items.some((item) => item.webkitGetAsEntry()?.isDirectory)) {
-			toast.error('Folder upload is not supported');
+			toast.error(m.containers_files_folder_upload_unsupported());
 			return;
 		}
 		uploadFiles(Array.from(e.dataTransfer?.files ?? []));
@@ -1041,14 +1042,14 @@
 <div
 	class="flex flex-col h-full relative"
 	role="region"
-	aria-label="File browser"
+	aria-label={m.containers_files_browser_label()}
 	ondragover={handleDragOver}
 	ondragleave={handleDragLeave}
 	ondrop={handleDrop}
 >
 	{#if dragging}
 		<div class="absolute inset-0 z-20 pointer-events-none flex items-center justify-center gap-2 bg-background/80 border-2 border-dashed border-primary rounded-lg text-sm">
-			<Upload class="w-4 h-4" /> Drop files to upload to {currentPath}
+			<Upload class="w-4 h-4" /> {m.containers_files_drop_to_upload({ path: currentPath })}
 		</div>
 	{/if}
 	<!-- Header with breadcrumbs and actions -->
@@ -1089,7 +1090,7 @@
 				size="icon"
 				class="h-7 w-7"
 				onclick={() => { createType = 'file'; createName = ''; createOwner = ''; showCreateModal = true; }}
-				title="New file"
+				title={m.containers_files_new_file()}
 			>
 				<FilePlus class="w-3.5 h-3.5" />
 			</Button>
@@ -1098,7 +1099,7 @@
 				size="icon"
 				class="h-7 w-7"
 				onclick={() => { createType = 'directory'; createName = ''; createOwner = ''; showCreateModal = true; }}
-				title="New directory"
+				title={m.containers_files_new_directory()}
 			>
 				<FolderPlus class="w-3.5 h-3.5" />
 			</Button>
@@ -1115,7 +1116,7 @@
 				class="h-7 w-7"
 				onclick={() => fileInput.click()}
 				disabled={uploading || loading}
-				title="Upload files"
+				title={m.containers_files_upload_files()}
 			>
 				{#if uploading}
 					<Loader2 class="w-3.5 h-3.5 animate-spin" />
@@ -1129,7 +1130,7 @@
 			size="icon"
 			class="h-7 w-7"
 			onclick={toggleHiddenFiles}
-			title={showHiddenFiles ? 'Hide hidden files' : 'Show hidden files'}
+			title={showHiddenFiles ? m.containers_files_hide_hidden() : m.containers_files_show_hidden()}
 		>
 			{#if showHiddenFiles}
 				<Eye class="w-3.5 h-3.5" />
@@ -1143,7 +1144,7 @@
 			class="h-7 w-7"
 			onclick={() => loadDirectory(currentPath)}
 			disabled={loading}
-			title="Refresh"
+			title={m.containers_files_refresh()}
 		>
 			<RefreshCw class="w-3.5 h-3.5 {loading ? 'animate-spin' : ''}" />
 		</Button>
@@ -1152,22 +1153,22 @@
 	<!-- File list -->
 	<div class="flex-1 overflow-auto relative">
 		{#if loading}
-			<LoadingState class="absolute inset-0 z-10 bg-background/80" label="Loading files..." />
+			<LoadingState class="absolute inset-0 z-10 bg-background/80" label={m.containers_files_loading()} />
 		{/if}
 		{#if error}
 			<div class="flex items-center justify-center p-4 h-full">
 				<div class="max-w-md bg-destructive/5 border border-destructive/20 rounded-lg p-4 text-center">
 					<AlertCircle class="w-6 h-6 text-destructive mx-auto" />
-					<p class="text-sm font-medium text-destructive mt-2">Unable to browse files</p>
+					<p class="text-sm font-medium text-destructive mt-2">{m.containers_files_browse_error()}</p>
 					<p class="text-xs text-muted-foreground mt-2 break-words font-mono bg-muted/50 rounded px-2 py-1.5">{error}</p>
 					<Button variant="outline" size="sm" class="mt-3" onclick={() => loadDirectory(currentPath)}>
-						Retry
+						{m.containers_files_retry()}
 					</Button>
 				</div>
 			</div>
 		{:else if !loading && displayEntries().length === 0}
 			<div class="flex items-center justify-center h-32 text-muted-foreground">
-				<span class="text-sm">{showHiddenFiles ? 'Directory is empty' : 'No visible files (hidden files are hidden)'}</span>
+				<span class="text-sm">{showHiddenFiles ? m.containers_files_directory_empty() : m.containers_files_no_visible_files()}</span>
 			</div>
 		{:else if displayEntries().length > 0}
 			<!-- Bare <table>, not Table.Root: Table.Root wraps the table in an
@@ -1179,29 +1180,29 @@
 					<Table.Row>
 						<Table.Head class="w-[35%] py-1.5 text-xs font-medium">
 							<button type="button" class="flex items-center gap-1 hover:text-foreground" onclick={() => toggleSort('name')}>
-								Name
+								{m.containers_files_name()}
 								<svelte:component this={getSortIcon('name')} class="w-3 h-3 opacity-50" />
 							</button>
 						</Table.Head>
 						<Table.Head class="w-[8%] py-1.5 text-xs font-medium">
 							<button type="button" class="flex items-center gap-1 hover:text-foreground" onclick={() => toggleSort('size')}>
-								Size
+								{m.containers_files_col_size()}
 								<svelte:component this={getSortIcon('size')} class="w-3 h-3 opacity-50" />
 							</button>
 						</Table.Head>
 						<Table.Head class="w-[14%] py-1.5 text-xs font-medium">
-							<span class="text-muted-foreground">Permissions</span>
+							<span class="text-muted-foreground">{m.containers_files_col_permissions()}</span>
 						</Table.Head>
 						<Table.Head class="w-[12%] py-1.5 text-xs font-medium">
-							<span class="text-muted-foreground">Owner</span>
+							<span class="text-muted-foreground">{m.containers_files_owner()}</span>
 						</Table.Head>
 						<Table.Head class="w-[14%] py-1.5 text-xs font-medium">
 							<button type="button" class="flex items-center gap-1 hover:text-foreground" onclick={() => toggleSort('modified')}>
-								Modified
+								{m.containers_files_col_modified()}
 								<svelte:component this={getSortIcon('modified')} class="w-3 h-3 opacity-50" />
 							</button>
 						</Table.Head>
-						<Table.Head class="w-[21%] py-1.5 text-xs font-medium text-right">Actions</Table.Head>
+						<Table.Head class="w-[21%] py-1.5 text-xs font-medium text-right">{m.containers_files_col_actions()}</Table.Head>
 					</Table.Row>
 				</Table.Header>
 				<Table.Body>
@@ -1238,7 +1239,7 @@
 									{#if entry.readonly && entry.type === 'file'}
 										<span
 											class="inline-flex items-center gap-0.5 ml-1.5 px-1 py-0.5 text-2xs bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded"
-											title="Read-only file (no write permission)"
+											title={m.containers_files_readonly_file_title()}
 										>
 											<Lock class="w-2.5 h-2.5" />
 											RO
@@ -1272,7 +1273,7 @@
 											class="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
 											onclick={(e: MouseEvent) => { e.stopPropagation(); openFileForView(entry); }}
 											disabled={loadingFile}
-											title="View file"
+											title={m.containers_files_view_file()}
 										>
 											<Eye class="w-3 h-3" />
 										</Button>
@@ -1284,7 +1285,7 @@
 											class="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity {entry.readonly ? 'cursor-not-allowed' : ''}"
 											onclick={(e: MouseEvent) => { e.stopPropagation(); if (!entry.readonly) openFileForEdit(entry); }}
 											disabled={loadingFile || entry.readonly}
-											title={entry.readonly ? "File is read-only" : "Edit file"}
+											title={entry.readonly ? m.containers_files_file_readonly() : m.containers_files_edit_file()}
 										>
 											{#if loadingFile}
 												<Loader2 class="w-3 h-3 animate-spin" />
@@ -1301,7 +1302,7 @@
 											size="icon"
 											class="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
 											onclick={(e: MouseEvent) => { e.stopPropagation(); openRenameModal(entry); }}
-											title="Rename"
+											title={m.containers_files_rename()}
 										>
 											<TextCursorInput class="w-3 h-3" />
 										</Button>
@@ -1310,7 +1311,7 @@
 											size="icon"
 											class="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
 											onclick={(e: MouseEvent) => { e.stopPropagation(); openChmodModal(entry); }}
-											title="Change permissions"
+											title={m.containers_files_change_permissions()}
 										>
 											<Shield class="w-3 h-3" />
 										</Button>
@@ -1319,16 +1320,17 @@
 											size="icon"
 											class="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
 											onclick={(e: MouseEvent) => { e.stopPropagation(); openChownModal(entry); }}
-											title="Change owner"
+											title={m.containers_files_change_owner()}
 										>
 											<UserCog class="w-3 h-3" />
 										</Button>
 										<ConfirmPopover
 											open={confirmDeleteEntry === entry.name}
-											action="Delete"
-											itemType={entry.type === 'directory' ? 'directory' : 'file'}
+											localized
+											action={m.confirm_action_delete()}
+											itemType={entry.type === 'directory' ? m.containers_files_item_directory() : m.containers_files_item_file()}
 											itemName={entry.name}
-											confirmText="Delete"
+											confirmText={m.containers_files_delete()}
 											variant="destructive"
 											onConfirm={() => handleDelete(entry)}
 											onOpenChange={(open) => confirmDeleteEntry = open ? entry.name : null}
@@ -1348,7 +1350,7 @@
 											size="icon"
 											class="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
 											onclick={(e: MouseEvent) => { e.stopPropagation(); downloadFile(entry); }}
-											title="Download"
+											title={m.containers_files_download()}
 										>
 											<Download class="w-3 h-3" />
 										</Button>
@@ -1372,7 +1374,7 @@
 					<span class="text-muted-foreground">{editingFile.path}</span>
 				</div>
 				<div class="flex items-center gap-1">
-					<Button variant="ghost" size="icon" class="h-7 w-7" onclick={toggleEditorTheme} title={editorTheme === 'light' ? 'Switch to dark theme' : 'Switch to light theme'}>
+					<Button variant="ghost" size="icon" class="h-7 w-7" onclick={toggleEditorTheme} title={editorTheme === 'light' ? m.containers_files_theme_dark() : m.containers_files_theme_light()}>
 						{#if editorTheme === 'light'}
 							<Moon class="w-3.5 h-3.5" />
 						{:else}
@@ -1385,9 +1387,9 @@
 						{:else}
 							<Save class="w-3.5 h-3.5 mr-1.5" />
 						{/if}
-						Save
+						{m.containers_files_save()}
 					</Button>
-					<Button variant="ghost" size="icon" class="h-7 w-7" onclick={closeEditor} title="Close editor">
+					<Button variant="ghost" size="icon" class="h-7 w-7" onclick={closeEditor} title={m.containers_files_close_editor()}>
 						<X class="w-3.5 h-3.5" />
 					</Button>
 				</div>
@@ -1407,16 +1409,16 @@
 	<Dialog.Root open={showCloseConfirm} onOpenChange={(o) => { if (!o) showCloseConfirm = false; }}>
 		<Dialog.Content class="sm:max-w-md">
 			<Dialog.Header>
-				<Dialog.Title>Unsaved changes</Dialog.Title>
+				<Dialog.Title>{m.containers_files_unsaved_title()}</Dialog.Title>
 				<Dialog.Description>
-					{editingFile?.name ?? 'This file'} has unsaved changes. Save them before closing?
+					{editingFile ? m.containers_files_unsaved_description({ name: editingFile.name }) : m.containers_files_unsaved_description_unnamed()}
 				</Dialog.Description>
 			</Dialog.Header>
 			<Dialog.Footer class="gap-2 sm:justify-between">
-				<Button variant="outline" onclick={() => showCloseConfirm = false}>Cancel</Button>
+				<Button variant="outline" onclick={() => showCloseConfirm = false}>{m.containers_files_cancel()}</Button>
 				<div class="flex gap-2">
-					<Button variant="destructive" onclick={forceCloseEditor}>Discard</Button>
-					<Button onclick={saveFile} disabled={savingFile}>Save</Button>
+					<Button variant="destructive" onclick={forceCloseEditor}>{m.containers_files_discard()}</Button>
+					<Button onclick={saveFile} disabled={savingFile}>{m.containers_files_save()}</Button>
 				</div>
 			</Dialog.Footer>
 		</Dialog.Content>
@@ -1424,7 +1426,7 @@
 
 	<!-- File Viewer Overlay -->
 	{#if loadingPreview && !viewingFile}
-		<LoadingState class="absolute inset-0 z-10 bg-background" label={`Loading preview${previewingName ? ` - ${previewingName}` : ''}...`} />
+		<LoadingState class="absolute inset-0 z-10 bg-background" label={previewingName ? m.containers_files_loading_preview_named({ name: previewingName }) : m.containers_files_loading_preview()} />
 	{:else if viewingFile}
 		<div class="absolute inset-0 bg-background flex flex-col z-10">
 			<div class="flex items-center justify-between p-2 border-b bg-muted/30">
@@ -1432,17 +1434,17 @@
 					<Eye class="w-3.5 h-3.5 text-muted-foreground" />
 					<span class="font-medium">{viewingFile.name}</span>
 					<span class="text-muted-foreground">{viewingFile.path}</span>
-					<span class="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">read-only</span>
+					<span class="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">{m.containers_files_readonly_badge()}</span>
 				</div>
 				<div class="flex items-center gap-1">
-					<Button variant="ghost" size="icon" class="h-7 w-7" onclick={toggleEditorTheme} title={editorTheme === 'light' ? 'Switch to dark theme' : 'Switch to light theme'}>
+					<Button variant="ghost" size="icon" class="h-7 w-7" onclick={toggleEditorTheme} title={editorTheme === 'light' ? m.containers_files_theme_dark() : m.containers_files_theme_light()}>
 						{#if editorTheme === 'light'}
 							<Moon class="w-3.5 h-3.5" />
 						{:else}
 							<Sun class="w-3.5 h-3.5" />
 						{/if}
 					</Button>
-					<Button variant="ghost" size="icon" class="h-7 w-7" onclick={closeViewer} title="Close viewer">
+					<Button variant="ghost" size="icon" class="h-7 w-7" onclick={closeViewer} title={m.containers_files_close_viewer()}>
 						<X class="w-3.5 h-3.5" />
 					</Button>
 				</div>
@@ -1463,41 +1465,41 @@
 <Dialog.Root bind:open={showCreateModal}>
 	<Dialog.Content class="max-w-sm">
 		<Dialog.Header>
-			<Dialog.Title>Create {createType === 'file' ? 'File' : 'Directory'}</Dialog.Title>
+			<Dialog.Title>{createType === 'file' ? m.containers_files_create_file_title() : m.containers_files_create_directory_title()}</Dialog.Title>
 		</Dialog.Header>
 		<div class="space-y-4 py-4">
 			<div class="space-y-2">
-				<Label for="create-name">Name</Label>
+				<Label for="create-name">{m.containers_files_name()}</Label>
 				<Input
 					id="create-name"
 					bind:value={createName}
-					placeholder={createType === 'file' ? 'filename.txt' : 'directory-name'}
+					placeholder={createType === 'file' ? m.containers_files_filename_placeholder() : m.containers_files_directory_placeholder()}
 					onkeydown={(e: KeyboardEvent) => { if (e.key === 'Enter') handleCreate(); }}
 				/>
 			</div>
 			<div class="space-y-2">
-				<Label for="create-owner">Owner (optional)</Label>
+				<Label for="create-owner">{m.containers_files_owner_optional()}</Label>
 				<Input
 					id="create-owner"
 					bind:value={createOwner}
-					placeholder="e.g. 1000:1000 or www-data"
+					placeholder={m.containers_files_owner_placeholder()}
 					onkeydown={(e: KeyboardEvent) => { if (e.key === 'Enter') handleCreate(); }}
 				/>
 				<p class="text-xs text-muted-foreground">
-					Leave blank to use the container's default user (usually root).
+					{m.containers_files_owner_default_hint()}
 				</p>
 			</div>
 			<p class="text-xs text-muted-foreground">
-				Will be created in: {currentPath}
+				{m.containers_files_create_location({ path: currentPath })}
 			</p>
 		</div>
 		<Dialog.Footer>
-			<Button variant="outline" onclick={() => showCreateModal = false}>Cancel</Button>
+			<Button variant="outline" onclick={() => showCreateModal = false}>{m.containers_files_cancel()}</Button>
 			<Button onclick={handleCreate} disabled={creating || !createName.trim()}>
 				{#if creating}
 					<Loader2 class="w-4 h-4 mr-2 animate-spin" />
 				{/if}
-				Create
+				{m.containers_files_create()}
 			</Button>
 		</Dialog.Footer>
 	</Dialog.Content>
@@ -1507,11 +1509,11 @@
 <Dialog.Root bind:open={showRenameModal}>
 	<Dialog.Content class="max-w-sm">
 		<Dialog.Header>
-			<Dialog.Title>Rename</Dialog.Title>
+			<Dialog.Title>{m.containers_files_rename()}</Dialog.Title>
 		</Dialog.Header>
 		<div class="space-y-4 py-4">
 			<div class="space-y-2">
-				<Label for="rename-name">New name</Label>
+				<Label for="rename-name">{m.containers_files_new_name()}</Label>
 				<Input
 					id="rename-name"
 					bind:value={renameName}
@@ -1520,12 +1522,12 @@
 			</div>
 		</div>
 		<Dialog.Footer>
-			<Button variant="outline" onclick={() => showRenameModal = false}>Cancel</Button>
+			<Button variant="outline" onclick={() => showRenameModal = false}>{m.containers_files_cancel()}</Button>
 			<Button onclick={handleRename} disabled={renaming || !renameName.trim()}>
 				{#if renaming}
 					<Loader2 class="w-4 h-4 mr-2 animate-spin" />
 				{/if}
-				Rename
+				{m.containers_files_rename()}
 			</Button>
 		</Dialog.Footer>
 	</Dialog.Content>
@@ -1535,12 +1537,12 @@
 <Dialog.Root bind:open={showChmodModal}>
 	<Dialog.Content class="max-w-md">
 		<Dialog.Header>
-			<Dialog.Title>Change permissions</Dialog.Title>
+			<Dialog.Title>{m.containers_files_change_permissions()}</Dialog.Title>
 		</Dialog.Header>
 		<div class="space-y-4 py-4">
 			{#if chmodEntry}
 				<p class="text-sm text-muted-foreground">{chmodEntry.name}</p>
-				<p class="text-xs text-muted-foreground">Current: {chmodEntry.permissions}</p>
+				<p class="text-xs text-muted-foreground">{m.containers_files_current({ value: chmodEntry.permissions })}</p>
 			{/if}
 
 			<!-- Permission checkboxes -->
@@ -1549,26 +1551,26 @@
 					<thead>
 						<tr class="text-muted-foreground text-xs">
 							<th class="text-left font-normal pb-2"></th>
-							<th class="text-center font-normal pb-2 w-16">Read</th>
-							<th class="text-center font-normal pb-2 w-16">Write</th>
-							<th class="text-center font-normal pb-2 w-16">Execute</th>
+							<th class="text-center font-normal pb-2 w-16">{m.containers_files_perm_read()}</th>
+							<th class="text-center font-normal pb-2 w-16">{m.containers_files_perm_write()}</th>
+							<th class="text-center font-normal pb-2 w-16">{m.containers_files_perm_execute()}</th>
 						</tr>
 					</thead>
 					<tbody>
 						<tr>
-							<td class="py-1.5 text-muted-foreground">Owner</td>
+							<td class="py-1.5 text-muted-foreground">{m.containers_files_owner()}</td>
 							<td class="text-center"><input type="checkbox" bind:checked={permOwnerR} onchange={checkboxesToOctal} class="rounded" /></td>
 							<td class="text-center"><input type="checkbox" bind:checked={permOwnerW} onchange={checkboxesToOctal} class="rounded" /></td>
 							<td class="text-center"><input type="checkbox" bind:checked={permOwnerX} onchange={checkboxesToOctal} class="rounded" /></td>
 						</tr>
 						<tr>
-							<td class="py-1.5 text-muted-foreground">Group</td>
+							<td class="py-1.5 text-muted-foreground">{m.containers_files_perm_group()}</td>
 							<td class="text-center"><input type="checkbox" bind:checked={permGroupR} onchange={checkboxesToOctal} class="rounded" /></td>
 							<td class="text-center"><input type="checkbox" bind:checked={permGroupW} onchange={checkboxesToOctal} class="rounded" /></td>
 							<td class="text-center"><input type="checkbox" bind:checked={permGroupX} onchange={checkboxesToOctal} class="rounded" /></td>
 						</tr>
 						<tr>
-							<td class="py-1.5 text-muted-foreground">Others</td>
+							<td class="py-1.5 text-muted-foreground">{m.containers_files_perm_others()}</td>
 							<td class="text-center"><input type="checkbox" bind:checked={permOtherR} onchange={checkboxesToOctal} class="rounded" /></td>
 							<td class="text-center"><input type="checkbox" bind:checked={permOtherW} onchange={checkboxesToOctal} class="rounded" /></td>
 							<td class="text-center"><input type="checkbox" bind:checked={permOtherX} onchange={checkboxesToOctal} class="rounded" /></td>
@@ -1580,18 +1582,18 @@
 			<!-- Preview -->
 			<div class="flex items-center gap-4 text-sm bg-muted/50 rounded-lg p-3">
 				<div>
-					<span class="text-muted-foreground text-xs">Octal:</span>
+					<span class="text-muted-foreground text-xs">{m.containers_files_octal()}</span>
 					<span class="font-mono font-medium ml-1">{chmodMode}</span>
 				</div>
 				<div>
-					<span class="text-muted-foreground text-xs">Symbolic:</span>
+					<span class="text-muted-foreground text-xs">{m.containers_files_symbolic()}</span>
 					<span class="font-mono font-medium ml-1">{checkboxesToSymbolic()}</span>
 				</div>
 			</div>
 
 			<!-- Manual octal input -->
 			<div class="space-y-2">
-				<Label for="chmod-mode">Or enter octal mode directly</Label>
+				<Label for="chmod-mode">{m.containers_files_octal_input_label()}</Label>
 				<Input
 					id="chmod-mode"
 					bind:value={chmodMode}
@@ -1605,17 +1607,17 @@
 			{#if chmodEntry?.type === 'directory'}
 				<label class="flex items-center gap-2 text-sm">
 					<input type="checkbox" bind:checked={chmodRecursive} class="rounded" />
-					Apply recursively
+					{m.containers_files_apply_recursively()}
 				</label>
 			{/if}
 		</div>
 		<Dialog.Footer>
-			<Button variant="outline" onclick={() => showChmodModal = false}>Cancel</Button>
+			<Button variant="outline" onclick={() => showChmodModal = false}>{m.containers_files_cancel()}</Button>
 			<Button onclick={handleChmod} disabled={changingPerms || !chmodMode.trim()}>
 				{#if changingPerms}
 					<Loader2 class="w-4 h-4 mr-2 animate-spin" />
 				{/if}
-				Apply
+				{m.containers_files_apply()}
 			</Button>
 		</Dialog.Footer>
 	</Dialog.Content>
@@ -1624,43 +1626,43 @@
 <Dialog.Root bind:open={showChownModal}>
 	<Dialog.Content class="max-w-md">
 		<Dialog.Header>
-			<Dialog.Title>Change owner</Dialog.Title>
+			<Dialog.Title>{m.containers_files_change_owner()}</Dialog.Title>
 		</Dialog.Header>
 		<div class="space-y-4 py-4">
 			{#if chownEntry}
 				<p class="text-sm text-muted-foreground">{chownEntry.name}</p>
 				{#if chownEntry.owner}
-					<p class="text-xs text-muted-foreground">Current: {chownEntry.owner}</p>
+					<p class="text-xs text-muted-foreground">{m.containers_files_current({ value: chownEntry.owner })}</p>
 				{/if}
 			{/if}
 
 			<div class="space-y-2">
-				<Label for="chown-owner">Owner</Label>
+				<Label for="chown-owner">{m.containers_files_owner()}</Label>
 				<Input
 					id="chown-owner"
 					bind:value={chownOwner}
-					placeholder="e.g. 1000:1000 or www-data"
+					placeholder={m.containers_files_owner_placeholder()}
 					onkeydown={(e: KeyboardEvent) => { if (e.key === 'Enter') handleChown(); }}
 				/>
 				<p class="text-xs text-muted-foreground">
-					A user or user:group. Numeric ids work even when the name is not in the container.
+					{m.containers_files_chown_hint()}
 				</p>
 			</div>
 
 			{#if chownEntry?.type === 'directory'}
 				<label class="flex items-center gap-2 text-sm">
 					<input type="checkbox" bind:checked={chownRecursive} class="rounded" />
-					Apply recursively
+					{m.containers_files_apply_recursively()}
 				</label>
 			{/if}
 		</div>
 		<Dialog.Footer>
-			<Button variant="outline" onclick={() => showChownModal = false}>Cancel</Button>
+			<Button variant="outline" onclick={() => showChownModal = false}>{m.containers_files_cancel()}</Button>
 			<Button onclick={handleChown} disabled={changingOwner || !chownOwner.trim()}>
 				{#if changingOwner}
 					<Loader2 class="w-4 h-4 mr-2 animate-spin" />
 				{/if}
-				Apply
+				{m.containers_files_apply()}
 			</Button>
 		</Dialog.Footer>
 	</Dialog.Content>

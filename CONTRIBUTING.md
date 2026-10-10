@@ -36,7 +36,7 @@ Dockhand welcomes all contributions so thank you for considering contributing!
 
 ## Translations
 
-UI texts live in `src/lib/i18n/messages/<locale>.json` ([Paraglide JS](https://inlang.com/m/gerre34r/library-inlang-paraglideJs), English is the source). In components, use `m.<key>()` from `$lib/paraglide/messages.js` instead of literal text, and add the key to every locale file. To add a language, copy `en.json`, translate the values (keep `{placeholders}` as they are) and add the locale to `project.inlang/settings.json`. The UI follows the browser language and falls back to English; `bun test tests/i18n-messages.test.ts` checks that every locale has the same keys and placeholders as English.
+UI texts live in `src/lib/i18n/messages/<locale>.json` ([Paraglide JS](https://inlang.com/m/gerre34r/library-inlang-paraglideJs), English is the source). In components, use `m.<key>()` from `$lib/paraglide/messages.js` instead of literal text; keys are snake_case with an area prefix (`containers_list_…`). To add a language, copy `en.json`, translate the values (keep `{placeholders}` as they are) and add the locale to `project.inlang/settings.json`. The UI follows the browser language; a key that a locale does not have yet falls back to English, so a translation can follow an area later. `bun test tests/i18n-messages.test.ts` checks that no locale has keys or placeholders that English does not have, and that the locales listed as complete in that test have every key.
 
 ## CLA Agreement
 

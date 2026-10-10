@@ -214,5 +214,1871 @@
 	"pageheader_live_active": "Live-Updates aktiv - die Ansicht aktualisiert sich selbst",
 	"pageheader_live_connecting": "Verbindung zu Live-Updates wird hergestellt…",
 	"ui_close": "Schließen",
-	"ui_toggle_sidebar": "Seitenleiste ein-/ausblenden"
+	"ui_toggle_sidebar": "Seitenleiste ein-/ausblenden",
+	"confirm_question": "{itemType} {name} {action}?",
+	"confirm_action_delete": "löschen",
+	"confirm_action_remove": "entfernen",
+	"confirm_action_update": "aktualisieren",
+	"confirm_action_prune": "bereinigen",
+	"confirm_action_stop": "stoppen",
+	"confirm_action_start": "starten",
+	"confirm_action_restart": "neu starten",
+	"confirm_action_pause": "pausieren",
+	"confirm_action_unpause": "fortsetzen",
+	"containers_item_container": "Container",
+	"containers_item_snapshot": "Snapshot",
+	"containers_item_backup_schedule": "Backup-Zeitplan",
+	"containers_list_search_placeholder": "Name, Image, Label suchen…",
+	"containers_list_filter_all_statuses": "Alle Status",
+	"containers_list_filter_plural": "Filter",
+	"containers_list_filter_running": "Läuft",
+	"containers_list_filter_paused": "Pausiert",
+	"containers_list_filter_restarting": "Startet neu",
+	"containers_list_filter_exited": "Beendet",
+	"containers_list_filter_created": "Erstellt",
+	"containers_list_filter_dead": "Tot",
+	"containers_list_filter_newer_version": "Neuere Version",
+	"containers_list_filter_unhealthy": "Ungesund",
+	"containers_list_filter_starting_up": "Startet",
+	"containers_list_filter_healthy": "Gesund",
+	"containers_list_update_available": "Update verfügbar",
+	"containers_list_state_running": "läuft",
+	"containers_list_state_paused": "pausiert",
+	"containers_list_state_restarting": "startet neu",
+	"containers_list_state_exited": "beendet",
+	"containers_list_state_created": "erstellt",
+	"containers_list_state_dead": "tot",
+	"containers_list_health_healthy": "gesund",
+	"containers_list_health_unhealthy": "ungesund",
+	"containers_list_health_starting": "startet",
+	"containers_list_batch_starting": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Container wird gestartet",
+				"countPlural=other": "{count} Container werden gestartet"
+			}
+		}
+	],
+	"containers_list_batch_stopping": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Container wird gestoppt",
+				"countPlural=other": "{count} Container werden gestoppt"
+			}
+		}
+	],
+	"containers_list_batch_restarting": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Container wird neu gestartet",
+				"countPlural=other": "{count} Container werden neu gestartet"
+			}
+		}
+	],
+	"containers_list_batch_pausing": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Container wird pausiert",
+				"countPlural=other": "{count} Container werden pausiert"
+			}
+		}
+	],
+	"containers_list_batch_unpausing": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Container wird fortgesetzt",
+				"countPlural=other": "{count} Container werden fortgesetzt"
+			}
+		}
+	],
+	"containers_list_batch_removing": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Container wird entfernt",
+				"countPlural=other": "{count} Container werden entfernt"
+			}
+		}
+	],
+	"containers_list_toast_clear_updates_failed": "Update-Hinweise konnten nicht entfernt werden",
+	"containers_list_toast_updated": "{count} Container aktualisiert",
+	"containers_list_toast_update_failed": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Container konnte nicht aktualisiert werden",
+				"countPlural=other": "{count} Container konnten nicht aktualisiert werden"
+			}
+		}
+	],
+	"containers_list_toast_updates_blocked": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Update durch die Schwachstellen-Richtlinie blockiert",
+				"countPlural=other": "{count} Updates durch die Schwachstellen-Richtlinie blockiert"
+			}
+		}
+	],
+	"containers_list_error_start": "Container konnte nicht gestartet werden",
+	"containers_list_error_stop": "Container konnte nicht gestoppt werden",
+	"containers_list_error_pause": "Container konnte nicht pausiert werden",
+	"containers_list_error_unpause": "Container konnte nicht fortgesetzt werden",
+	"containers_list_error_restart": "Container konnte nicht neu gestartet werden",
+	"containers_list_error_remove": "Container konnte nicht entfernt werden",
+	"containers_list_toast_start_failed": "{name} konnte nicht gestartet werden",
+	"containers_list_toast_started": "{name} gestartet",
+	"containers_list_toast_stop_failed": "{name} konnte nicht gestoppt werden",
+	"containers_list_toast_stopped": "{name} gestoppt",
+	"containers_list_toast_pause_failed": "{name} konnte nicht pausiert werden",
+	"containers_list_toast_paused": "{name} pausiert",
+	"containers_list_toast_unpause_failed": "{name} konnte nicht fortgesetzt werden",
+	"containers_list_toast_resumed": "{name} fortgesetzt",
+	"containers_list_toast_restart_failed": "{name} konnte nicht neu gestartet werden",
+	"containers_list_toast_restarted": "{name} neu gestartet",
+	"containers_list_toast_remove_failed": "{name} konnte nicht entfernt werden",
+	"containers_list_toast_removed": "{name} entfernt",
+	"containers_list_toast_copied": "In die Zwischenablage kopiert",
+	"containers_list_create": "Erstellen",
+	"containers_list_confirm_all_containers": "alle {count} Container",
+	"containers_list_update_all": "Alle aktualisieren",
+	"containers_list_update_all_title": "Alle Container mit verfügbaren Updates aktualisieren",
+	"containers_list_update_all_count": "Alle aktualisieren ({count})",
+	"containers_list_confirm_stopped_containers": "gestoppte Container",
+	"containers_list_prune_title": "Container bereinigen",
+	"containers_list_prune": "Bereinigen",
+	"containers_list_refresh": "Aktualisieren",
+	"containers_list_layout_vertical": "Zur vertikalen Ansicht wechseln (Logs/Terminal seitlich)",
+	"containers_list_layout_horizontal": "Zur horizontalen Ansicht wechseln (Logs/Terminal unten)",
+	"containers_list_selected_count": "{count} ausgewählt",
+	"containers_list_clear_selection": "Aufheben",
+	"containers_list_confirm_stopped_count": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} gestoppten Container",
+				"countPlural=other": "{count} gestoppte Container"
+			}
+		}
+	],
+	"containers_list_bulk_start_title": "{count} starten",
+	"containers_list_start": "Starten",
+	"containers_list_confirm_running_count": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} laufenden Container",
+				"countPlural=other": "{count} laufende Container"
+			}
+		}
+	],
+	"containers_list_bulk_stop_title": "{count} stoppen",
+	"containers_list_stop": "Stoppen",
+	"containers_list_bulk_pause_title": "{count} pausieren",
+	"containers_list_pause": "Pausieren",
+	"containers_list_confirm_paused_count": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} pausierten Container",
+				"countPlural=other": "{count} pausierte Container"
+			}
+		}
+	],
+	"containers_list_bulk_unpause_title": "{count} fortsetzen",
+	"containers_list_unpause": "Fortsetzen",
+	"containers_list_confirm_container_count": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Container",
+				"countPlural=other": "{count} Container"
+			}
+		}
+	],
+	"containers_list_bulk_restart_title": "{count} neu starten",
+	"containers_list_restart": "Neu starten",
+	"containers_list_bulk_remove_title": "{count} entfernen",
+	"containers_list_remove": "Entfernen",
+	"containers_list_confirm_selected_count": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} ausgewählten Container",
+				"countPlural=other": "{count} ausgewählte Container"
+			}
+		}
+	],
+	"containers_list_update": "Aktualisieren",
+	"containers_list_update_selected_title": "Ausgewählte Container auf das neueste Image aktualisieren",
+	"containers_list_update_selected_count": "{count} aktualisieren",
+	"containers_list_empty_title": "Keine Container gefunden",
+	"containers_list_empty_description": "Erstelle einen neuen Container, um loszulegen",
+	"containers_list_untagged": "Ohne Tag",
+	"containers_list_settings_about": "Einstellungen > Über",
+	"containers_list_hawser_update_hint": "Das Update erfolgt auf dem entfernten Host, auf dem Hawser läuft.",
+	"containers_list_hawser_update_instructions": "Update-Anleitung auf GitHub",
+	"containers_list_update_click_title": "Update verfügbar - zum Aktualisieren klicken",
+	"containers_list_view_changelog": "Changelog anzeigen",
+	"containers_list_update_held_title": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "Update zurückgehalten: noch {count} Stunde bis zum Mindestalter des Images",
+				"countPlural=other": "Update zurückgehalten: noch {count} Stunden bis zum Mindestalter des Images"
+			}
+		}
+	],
+	"containers_list_update_check_failed": "Update-Prüfung fehlgeschlagen",
+	"containers_list_registry_query_failed": "Registry konnte nicht abgefragt werden",
+	"containers_list_update_status_unknown": "Update-Status unbekannt – oft ein Rate-Limit von Docker Hub. Versuche es später erneut.",
+	"containers_list_restart_count": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Neustart",
+				"countPlural=other": "{count} Neustarts"
+			}
+		}
+	],
+	"containers_list_memory_unlimited": "unbegrenzt",
+	"containers_list_memory_title_cache": "{usage} / {limit} (Gesamt: {total} | Cache: {cache})",
+	"containers_list_network_title": "↓{received} empfangen / ↑{sent} gesendet",
+	"containers_list_disk_title": "↓{read} gelesen / ↑{written} geschrieben",
+	"containers_list_no_ip": "keine IP",
+	"containers_list_open_in_new_tab": "{url} in neuem Tab öffnen",
+	"containers_list_traefik_title": "Traefik-Router {router} → {url}",
+	"containers_list_pangolin_title": "Pangolin-Ressource {resource} → {url}",
+	"containers_list_exposed_port": "Exponierter (interner) Port",
+	"containers_list_no_schedules_permission": "Du hast keine Berechtigung, Zeitpläne anzusehen",
+	"containers_list_show_logs": "Logs anzeigen",
+	"containers_list_open_logs": "Logs öffnen",
+	"containers_list_show_terminal": "Terminal anzeigen",
+	"containers_list_detecting_shells": "Shells werden erkannt…",
+	"containers_list_no_shell": "Keine Shell verfügbar",
+	"containers_list_no_shell_installed": "In diesem Container ist keine Shell installiert.",
+	"containers_list_terminal_mode": "Modus",
+	"containers_list_terminal_attach": "An Prozess anhängen",
+	"containers_list_terminal_exec": "Shell (exec)",
+	"containers_list_terminal_shell": "Shell",
+	"containers_list_select": "Auswählen",
+	"containers_list_shell_unavailable": "(nicht verfügbar)",
+	"containers_list_terminal_user": "Benutzer",
+	"containers_list_remove_user": "Benutzer entfernen",
+	"containers_list_add_user_placeholder": "Benutzer hinzufügen… (Enter)",
+	"containers_list_terminal_connect": "Verbinden",
+	"containers_list_browse_files": "Dateien durchsuchen",
+	"containers_list_view_details": "Details anzeigen",
+	"containers_list_edit": "Bearbeiten",
+	"containers_inspect_title": "Containerdetails:",
+	"containers_inspect_save": "Speichern",
+	"containers_inspect_cancel": "Abbrechen",
+	"containers_inspect_rename": "Container umbenennen",
+	"containers_inspect_open_stack": "Stack „{stack}“ öffnen",
+	"containers_inspect_live_receiving": "Live-Updates werden empfangen",
+	"containers_inspect_connection_lost": "Verbindung verloren",
+	"containers_inspect_live": "Live",
+	"containers_inspect_offline": "Offline",
+	"containers_inspect_update_held_title": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "Update zurückgehalten: noch {count} Stunde bis zum Mindestalter des Images",
+				"countPlural=other": "Update zurückgehalten: noch {count} Stunden bis zum Mindestalter des Images"
+			}
+		}
+	],
+	"containers_inspect_update_available_title": "Update verfügbar - zum Aktualisieren klicken",
+	"containers_inspect_action_stop": "Stoppen",
+	"containers_inspect_action_restart": "Neu starten",
+	"containers_inspect_action_start": "Starten",
+	"containers_inspect_action_edit": "Bearbeiten",
+	"containers_inspect_action_delete": "Löschen",
+	"containers_inspect_view_raw_title": "Rohe Inspect-Daten anzeigen",
+	"containers_inspect_raw": "Inspect",
+	"containers_inspect_tab_overview": "Übersicht",
+	"containers_inspect_tab_logs": "Logs",
+	"containers_inspect_tab_layers": "Layer",
+	"containers_inspect_tab_processes": "Prozesse",
+	"containers_inspect_tab_network": "Netzwerk",
+	"containers_inspect_tab_mounts": "Mounts",
+	"containers_inspect_tab_files": "Dateien",
+	"containers_inspect_tab_environment": "Umgebungsvariablen",
+	"containers_inspect_tab_labels": "Labels",
+	"containers_inspect_tab_security": "Sicherheit",
+	"containers_inspect_tab_resources": "Ressourcen",
+	"containers_inspect_tab_health": "Healthcheck",
+	"containers_inspect_tab_compose": "Compose",
+	"containers_inspect_loading": "Wird geladen…",
+	"containers_inspect_memory": "Arbeitsspeicher",
+	"containers_inspect_unlimited": "unbegrenzt",
+	"containers_inspect_network_io": "Netzwerk-I/O",
+	"containers_inspect_disk_io": "Datenträger-I/O",
+	"containers_inspect_disk_read": "Lesen:",
+	"containers_inspect_disk_write": "Schreiben:",
+	"containers_inspect_processes": "Prozesse",
+	"containers_inspect_view_process_list": "Prozessliste anzeigen",
+	"containers_inspect_processes_running": "laufen im Container",
+	"containers_inspect_status": "Status",
+	"containers_inspect_state": "Zustand",
+	"containers_inspect_unknown": "unbekannt",
+	"containers_inspect_restart_policy": "Neustart-Richtlinie",
+	"containers_inspect_exit_code": "Exit-Code",
+	"containers_inspect_restart_count": "Anzahl Neustarts",
+	"containers_inspect_basic_info": "Allgemeine Informationen",
+	"containers_inspect_platform": "Plattform",
+	"containers_inspect_created": "Erstellt",
+	"containers_inspect_started": "Gestartet",
+	"containers_inspect_not_available": "k. A.",
+	"containers_inspect_image": "Image",
+	"containers_inspect_update_available": "Update verfügbar",
+	"containers_inspect_newer_image_available": "Ein neueres Image ist verfügbar",
+	"containers_inspect_update_held_hint": "Ein Update ist verfügbar, aber das Image hat das Mindestalter noch nicht erreicht",
+	"containers_inspect_update_held_short": "Update zurückgehalten - noch {hours} h",
+	"containers_inspect_command": "Befehl",
+	"containers_inspect_not_running": "Container läuft nicht",
+	"containers_inspect_process_count": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Prozess",
+				"countPlural=other": "{count} Prozesse"
+			}
+		}
+	],
+	"containers_inspect_no_processes": "Keine Prozesse gefunden",
+	"containers_inspect_processes_fetch_failed": "Prozesse konnten nicht abgerufen werden",
+	"containers_inspect_no_image_info": "Keine Image-Informationen verfügbar",
+	"containers_inspect_network_mode": "Netzwerkmodus",
+	"containers_inspect_dns_config": "DNS-Konfiguration",
+	"containers_inspect_dns_servers": "DNS-Server",
+	"containers_inspect_dns_search": "DNS-Suche",
+	"containers_inspect_dns_options": "DNS-Optionen",
+	"containers_inspect_extra_hosts": "Zusätzliche Hosts",
+	"containers_inspect_connected_networks": "Verbundene Netzwerke",
+	"containers_inspect_shared_namespace_before": "Der Netzwerk-Namespace wird über",
+	"containers_inspect_shared_namespace_after": "geteilt – weitere Netzwerke können nicht verbunden werden.",
+	"containers_inspect_network_leave": "Verlassen",
+	"containers_inspect_gateway": "Gateway",
+	"containers_inspect_aliases": "Aliasse",
+	"containers_inspect_no_networks_connected": "Keine Netzwerke verbunden.",
+	"containers_inspect_network_unknown": "Unbekannt",
+	"containers_inspect_networks_loading": "Netzwerke werden geladen…",
+	"containers_inspect_network_join_placeholder": "Netzwerk beitreten…",
+	"containers_inspect_no_networks_available": "Keine Netzwerke verfügbar",
+	"containers_inspect_network_join": "Beitreten",
+	"containers_inspect_network_connected": "Mit {network} verbunden",
+	"containers_inspect_network_connected_generic": "Mit dem Netzwerk verbunden",
+	"containers_inspect_network_connect_failed": "Verbinden mit dem Netzwerk fehlgeschlagen",
+	"containers_inspect_network_disconnected": "Von {network} getrennt",
+	"containers_inspect_network_disconnect_failed": "Trennen vom Netzwerk fehlgeschlagen",
+	"containers_inspect_port_mappings": "Port-Zuordnungen",
+	"containers_inspect_open_url": "{url} öffnen",
+	"containers_inspect_mount_read_write": "Lesen/Schreiben",
+	"containers_inspect_mount_read_only": "Schreibgeschützt",
+	"containers_inspect_mount_source": "Quelle",
+	"containers_inspect_mount_destination": "Ziel",
+	"containers_inspect_driver": "Treiber",
+	"containers_inspect_mount_propagation": "Propagation",
+	"containers_inspect_no_mounts": "Keine Mounts konfiguriert",
+	"containers_inspect_paused": "Container ist pausiert",
+	"containers_inspect_env_diverge": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Umgebungsvariable weicht vom Image ab:",
+				"countPlural=other": "{count} Umgebungsvariablen weichen vom Image ab:"
+			}
+		}
+	],
+	"containers_inspect_divergence_note": "Beim nächsten Update werden vom Image stammende Werte, die du nicht überschrieben hast, aus dem neuen Image übernommen; selbst gesetzte Werte bleiben erhalten. Mit „Entfernen & Bereitstellen“ setzt du alles auf den Stand des Images zurück.",
+	"containers_inspect_no_env": "Keine Umgebungsvariablen",
+	"containers_inspect_labels_diverge": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Label weicht vom Image ab:",
+				"countPlural=other": "{count} Labels weichen vom Image ab:"
+			}
+		}
+	],
+	"containers_inspect_filter_labels": "Labels filtern…",
+	"containers_inspect_label_count": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Label",
+				"countPlural=other": "{count} Labels"
+			}
+		}
+	],
+	"containers_inspect_label_count_filtered": "{visible} von {total}",
+	"containers_inspect_copied": "Kopiert!",
+	"containers_inspect_copied_short": "Kopiert",
+	"containers_inspect_copy_visible_labels": "Sichtbare Labels als key=value-Zeilen kopieren",
+	"containers_inspect_copy_all": "Alle kopieren",
+	"containers_inspect_copy_label": "Label kopieren",
+	"containers_inspect_no_labels_match": "Keine Labels passen zu „{filter}“",
+	"containers_inspect_no_labels": "Keine Labels",
+	"containers_inspect_privileged": "Privilegiert",
+	"containers_inspect_yes": "Ja",
+	"containers_inspect_no": "Nein",
+	"containers_inspect_readonly_root": "Root schreibgeschützt",
+	"containers_inspect_user": "Benutzer",
+	"containers_inspect_user_namespace": "Benutzer-Namespace",
+	"containers_inspect_security_options": "Sicherheitsoptionen",
+	"containers_inspect_apparmor_profile": "AppArmor-Profil",
+	"containers_inspect_default": "Standard",
+	"containers_inspect_added_capabilities": "Hinzugefügte Capabilities",
+	"containers_inspect_dropped_capabilities": "Entfernte Capabilities",
+	"containers_inspect_default_security": "Standard-Sicherheitseinstellungen",
+	"containers_inspect_resource_limits": "Ressourcenlimits",
+	"containers_inspect_cpu_shares": "CPU-Shares",
+	"containers_inspect_memory_swap": "Arbeitsspeicher-Swap",
+	"containers_inspect_memory_reservation": "Arbeitsspeicher-Reservierung",
+	"containers_inspect_pids_limit": "PID-Limit",
+	"containers_inspect_oom_kill": "OOM-Kill",
+	"containers_inspect_disabled": "Deaktiviert",
+	"containers_inspect_enabled": "Aktiviert",
+	"containers_inspect_cpu_period_quota": "CPU-Periode/-Quota",
+	"containers_inspect_devices": "Geräte",
+	"containers_inspect_runtime": "Runtime",
+	"containers_inspect_gpu_count": "Anzahl",
+	"containers_inspect_gpu_all": "Alle",
+	"containers_inspect_device_ids": "Geräte-IDs",
+	"containers_inspect_capabilities": "Capabilities",
+	"containers_inspect_cgroup_settings": "Cgroup-Einstellungen",
+	"containers_inspect_cgroup_parent": "Cgroup-Parent",
+	"containers_inspect_cgroupns_mode": "Cgroupns-Modus",
+	"containers_inspect_health_configuration": "Konfiguration",
+	"containers_inspect_health_interval": "Intervall",
+	"containers_inspect_health_timeout": "Timeout",
+	"containers_inspect_health_retries": "Wiederholungen",
+	"containers_inspect_health_start_period": "Startphase",
+	"containers_inspect_health_current_status": "Aktueller Status",
+	"containers_inspect_health_failing_streak": "Fehlschläge in Folge",
+	"containers_inspect_health_log": "Healthcheck-Log",
+	"containers_inspect_health_exit": "Exit: {code}",
+	"containers_inspect_health_waiting": "Warte auf den ersten abgeschlossenen Healthcheck…",
+	"containers_inspect_no_health_check": "Kein Healthcheck konfiguriert",
+	"containers_inspect_fetch_details_failed": "Containerdetails konnten nicht abgerufen werden",
+	"containers_inspect_load_details_failed": "Containerdetails konnten nicht geladen werden",
+	"containers_inspect_copy_to_clipboard": "In die Zwischenablage kopieren",
+	"containers_inspect_copy_requires_https": "Kopieren erfordert HTTPS",
+	"containers_inspect_copy_failed": "Fehlgeschlagen",
+	"containers_inspect_copy": "Kopieren",
+	"containers_compose_generate_failed_status": "Compose konnte nicht erzeugt werden ({status})",
+	"containers_compose_generate_failed": "Compose konnte nicht erzeugt werden",
+	"containers_compose_copy_failed": "Kopieren fehlgeschlagen",
+	"containers_compose_validation_failed_status": "Validierung fehlgeschlagen ({status})",
+	"containers_compose_validation_failed": "Validierung fehlgeschlagen",
+	"containers_compose_read_stack_failed": "Compose von {stack} konnte nicht gelesen werden",
+	"containers_compose_merged_review": "In {stack} zusammengeführt - prüfe den hervorgehobenen Service und speichere dann",
+	"containers_compose_merge_failed": "Zusammenführen fehlgeschlagen",
+	"containers_compose_service_renamed": "„{original}“ gibt es in {stack} bereits; als „{key}“ hinzugefügt",
+	"containers_compose_save_failed_status": "Speichern fehlgeschlagen ({status})",
+	"containers_compose_saved_to": "In {stack} gespeichert",
+	"containers_compose_save_failed": "Speichern fehlgeschlagen",
+	"containers_compose_generating": "Compose wird erzeugt…",
+	"containers_compose_stack_banner_before": "Dieser Container gehört bereits zum Stack",
+	"containers_compose_stack_banner_after": ". Das erzeugte Compose ist eine neue Definition, die du separat speichern oder in einen anderen Stack einfügen kannst.",
+	"containers_compose_env_label": "Umgebungsvariablen",
+	"containers_compose_env_user_set": "Nur selbst gesetzte",
+	"containers_compose_env_all": "Alle",
+	"containers_compose_validate": "Validieren",
+	"containers_compose_copy": "Kopieren",
+	"containers_compose_download": "Herunterladen",
+	"containers_compose_save_as_new_stack": "Als neuen Stack speichern",
+	"containers_compose_append_to_existing": "An bestehenden Stack anhängen",
+	"containers_compose_loading": "Wird geladen…",
+	"containers_compose_no_internal_stacks": "Keine internen Stacks",
+	"containers_compose_review_before": "Vorschau der Zusammenführung in",
+	"containers_compose_review_after": ". Der hervorgehobene Service wird hinzugefügt.",
+	"containers_compose_cancel": "Abbrechen",
+	"containers_compose_save_to": "In {stack} speichern",
+	"containers_compose_stack_created": "Stack erstellt",
+	"containers_terminal_connecting": "Verbindung zu {name} wird hergestellt…",
+	"containers_terminal_session_info": "Shell: {shell}, Benutzer: {user}",
+	"containers_terminal_user_default": "Standard",
+	"containers_terminal_error": "Fehler: {message}",
+	"containers_terminal_session_ended": "Sitzung beendet.",
+	"containers_terminal_connection_error": "Verbindungsfehler",
+	"containers_terminal_disconnected": "Verbindung getrennt.",
+	"containers_terminal_title": "Terminal - {name}",
+	"containers_terminal_connected": "Verbunden",
+	"containers_terminal_detecting_shells": "Verfügbare Shells werden ermittelt…",
+	"containers_terminal_no_shell": "Keine Shell verfügbar",
+	"containers_terminal_no_shell_installed": "In diesem Container ist keine Shell installiert.",
+	"containers_terminal_no_shell_hint": "Container auf Basis von scratch- oder Distroless-Images enthalten oft keine Shell.",
+	"containers_terminal_open_session": "Terminalsitzung öffnen",
+	"containers_terminal_configure_session": "Wähle Shell und Benutzer für diese Sitzung",
+	"containers_terminal_shell_label": "Shell",
+	"containers_terminal_select_shell": "Shell auswählen",
+	"containers_terminal_unavailable": "(nicht verfügbar)",
+	"containers_terminal_user_label": "Benutzer",
+	"containers_terminal_select_user": "Benutzer auswählen",
+	"containers_terminal_connect": "Verbinden",
+	"containers_terminal_loading": "Wird geladen…",
+	"containers_terminal_open_new_window": "In neuem Fenster öffnen",
+	"containers_settings_network_bridge": "Bridge",
+	"containers_settings_network_host": "Host",
+	"containers_settings_network_none": "Keins",
+	"containers_settings_network_container": "Container",
+	"containers_settings_network_container_ref": "Container: {name}",
+	"containers_settings_invalid_ipv4": "Ungültige IPv4-Adresse",
+	"containers_settings_invalid_ipv6": "Ungültige IPv6-Adresse",
+	"containers_settings_invalid_mac": "Ungültige MAC-Adresse (z. B. 02:42:ac:11:00:02)",
+	"containers_settings_update_failed": "Aktualisierung fehlgeschlagen",
+	"containers_settings_applied_no_restart": "Übernommen — kein Neustart nötig",
+	"containers_settings_invalid_memory_example": "Ungültiger Arbeitsspeicherwert (z. B. 512m, 1g)",
+	"containers_settings_invalid_memory": "Ungültiger Arbeitsspeicherwert",
+	"containers_settings_invalid_cpu_limit": "Ungültiges CPU-Limit (z. B. 0.5, 1.5, 2)",
+	"containers_settings_invalid_cpu_shares": "Ungültige CPU-Anteile",
+	"containers_settings_invalid_cpu_quota": "Ungültiges CPU-Kontingent",
+	"containers_settings_invalid_cpu_period": "Ungültige CPU-Periode",
+	"containers_settings_image_label": "Image:",
+	"containers_settings_image_not_set": "Nicht festgelegt",
+	"containers_settings_scanning": "Wird gescannt…",
+	"containers_settings_pulling": "Wird gepullt…",
+	"containers_settings_image_ready": "Image gepullt und bereit",
+	"containers_settings_vulnerabilities_count": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Schwachstelle",
+				"countPlural=other": "{count} Schwachstellen"
+			}
+		}
+	],
+	"containers_settings_go_to_pull_tab": "Wechsle zum Tab „{tab}“, um das Image festzulegen",
+	"containers_settings_apply_config_set": "Config-Set anwenden",
+	"containers_settings_config_set": "Config-Set",
+	"containers_settings_config_set_merge_placeholder": "Wähle ein Config-Set, um Werte zusammenzuführen…",
+	"containers_settings_config_set_prefill_placeholder": "Wähle ein Config-Set, um Werte vorauszufüllen…",
+	"containers_settings_config_set_merge_note": "Hinweis: Werte aus dem Config-Set werden mit den bestehenden Einstellungen zusammengeführt. Vorhandene Schlüssel werden nicht überschrieben.",
+	"containers_settings_basic_settings": "Grundeinstellungen",
+	"containers_settings_container_name": "Containername *",
+	"containers_settings_image_required": "Image *",
+	"containers_settings_update_available_title": "Ein neueres Image ist verfügbar - aktualisiere den Container über die Containerliste oder die Detailansicht",
+	"containers_settings_update_available": "Update verfügbar",
+	"containers_settings_command_optional": "Befehl (optional)",
+	"containers_settings_entrypoint_optional": "Entrypoint (optional)",
+	"containers_settings_restart_policy": "Neustart-Richtlinie",
+	"containers_settings_restart_no": "Nie",
+	"containers_settings_restart_always": "Immer",
+	"containers_settings_restart_on_failure": "Bei Fehler",
+	"containers_settings_restart_unless_stopped": "Außer wenn gestoppt",
+	"containers_settings_apply": "Übernehmen",
+	"containers_settings_max_retry_count": "Max. Wiederholungen",
+	"containers_settings_unlimited": "Unbegrenzt",
+	"containers_settings_max_retry_hint": "Lass das Feld leer für unbegrenzte Wiederholungen",
+	"containers_settings_network": "Netzwerk",
+	"containers_settings_filter_networks": "Netzwerke filtern…",
+	"containers_settings_no_networks_found": "Keine Netzwerke gefunden.",
+	"containers_settings_custom_networks": "Eigene Netzwerke",
+	"containers_settings_select_container": "Wähle einen Container…",
+	"containers_settings_filter_by_name": "Nach Namen filtern…",
+	"containers_settings_no_containers_found": "Keine Container gefunden.",
+	"containers_settings_select_container_hint": "Wähle einen Container, dessen Netzwerk-Namespace mitgenutzt werden soll",
+	"containers_settings_pull_before_update": "Image vor dem Update pullen",
+	"containers_settings_start_after_creation": "Container nach dem Erstellen starten",
+	"containers_settings_start_after_update": "Container nach dem Update starten",
+	"containers_settings_additional_networks": "Zusätzliche Netzwerke",
+	"containers_settings_all_networks_attached": "Alle Netzwerke bereits verbunden",
+	"containers_settings_select_network_to_add": "Wähle ein Netzwerk zum Hinzufügen…",
+	"containers_settings_configured": "konfiguriert",
+	"containers_settings_ipv4_address": "IPv4-Adresse",
+	"containers_settings_ipv6_address": "IPv6-Adresse",
+	"containers_settings_aliases": "Aliase (kommagetrennt)",
+	"containers_settings_mac_address": "MAC-Adresse",
+	"containers_settings_additional_networks_hint": "Der Container wird zusätzlich zum Netzwerkmodus oben mit den ausgewählten Netzwerken verbunden",
+	"containers_settings_example_placeholder": "z. B. {example}",
+	"containers_settings_port_mappings": "Port-Zuordnungen",
+	"containers_settings_add": "Hinzufügen",
+	"containers_settings_port_host": "Host",
+	"containers_settings_port_container": "Container",
+	"containers_settings_host_port_placeholder": "z. B. 8080 oder 127.0.0.1:8080",
+	"containers_settings_find_free_port": "Nächsten freien Docker-Port suchen",
+	"containers_settings_container_port_placeholder": "z. B. 8080 oder 8000-8005",
+	"containers_settings_port_formats_title": "Unterstützte Formate für den Host-Port:",
+	"containers_settings_port_format_all_interfaces": "an alle Schnittstellen binden",
+	"containers_settings_port_format_specific_ip": "an eine bestimmte IP binden",
+	"containers_settings_port_format_range": "Portbereich (der Container-Port muss ebenfalls ein Bereich sein)",
+	"containers_settings_port_format_random": "Lass den Host-Port leer für eine zufällige Zuweisung",
+	"containers_settings_find_free_port_hint": "Fahre mit der Maus über das Feld für den Host-Port und klicke auf das Lupensymbol, um den nächsten freien Port zu finden.",
+	"containers_settings_volume_mappings": "Volume-Zuordnungen",
+	"containers_settings_host_path": "Host-Pfad",
+	"containers_settings_container_path": "Container-Pfad",
+	"containers_settings_environment_variables": "Umgebungsvariablen",
+	"containers_settings_key": "Schlüssel",
+	"containers_settings_value": "Wert",
+	"containers_settings_labels": "Labels",
+	"containers_settings_advanced_hint": "Erweiterte Container-Optionen (klicke zum Aufklappen)",
+	"containers_settings_resources": "Ressourcen",
+	"containers_settings_resources_hint": "Lege Arbeitsspeicher- und CPU-Limits für diesen Container fest.",
+	"containers_settings_resources_apply_hint_before": "Die Schaltfläche",
+	"containers_settings_resources_apply_hint_after": "neben jedem Feld übernimmt die Änderung ohne Neustart.",
+	"containers_settings_memory_limit": "Arbeitsspeicher-Limit",
+	"containers_settings_memory_reservation": "Arbeitsspeicher-Reservierung",
+	"containers_settings_cpu_limit": "CPU-Limit",
+	"containers_settings_cpu_shares": "CPU-Anteile",
+	"containers_settings_cpu_quota": "CPU-Kontingent",
+	"containers_settings_cpu_quota_hint": "Mikrosekunden pro Periode",
+	"containers_settings_cpu_period": "CPU-Periode",
+	"containers_settings_cpu_period_placeholder": "Standard: 100000",
+	"containers_settings_cpu_period_hint": "Periode in Mikrosekunden",
+	"containers_settings_security": "Sicherheit",
+	"containers_settings_user": "Benutzer",
+	"containers_settings_user_placeholder": "benutzer:gruppe oder UID:GID",
+	"containers_settings_privileged_mode": "Privilegierter Modus",
+	"containers_settings_add_capabilities": "Capabilities hinzufügen",
+	"containers_settings_select_capability_add": "Wähle eine Capability zum Hinzufügen…",
+	"containers_settings_drop_capabilities": "Capabilities entfernen",
+	"containers_settings_select_capability_drop": "Wähle eine Capability zum Entfernen…",
+	"containers_settings_security_options": "Sicherheitsoptionen",
+	"containers_settings_security_options_hint": "Gängige Optionen: no-new-privileges, seccomp=unconfined, apparmor=unconfined",
+	"containers_settings_healthcheck": "Healthcheck",
+	"containers_settings_enabled": "aktiviert",
+	"containers_settings_enable_healthcheck": "Healthcheck aktivieren",
+	"containers_settings_command": "Befehl",
+	"containers_settings_interval": "Intervall (s)",
+	"containers_settings_timeout": "Timeout (s)",
+	"containers_settings_retries": "Wiederholungen",
+	"containers_settings_start_period": "Startphase (s)",
+	"containers_settings_dns_settings": "DNS-Einstellungen",
+	"containers_settings_dns_servers": "DNS-Server",
+	"containers_settings_dns_search_domains": "DNS-Suchdomänen",
+	"containers_settings_dns_options": "DNS-Optionen",
+	"containers_settings_devices": "Geräte",
+	"containers_settings_add_device": "Gerät hinzufügen",
+	"containers_settings_enable_gpu": "GPU-Zugriff aktivieren",
+	"containers_settings_runtime": "Runtime",
+	"containers_settings_runtime_default": "Standard (runc)",
+	"containers_settings_runtime_custom_value": "Benutzerdefiniert: {runtime}",
+	"containers_settings_runtime_custom": "Benutzerdefiniert…",
+	"containers_settings_runtime_name": "Name der Runtime",
+	"containers_settings_gpu_mode": "GPU-Modus",
+	"containers_settings_gpu_mode_all": "Alle",
+	"containers_settings_gpu_mode_count": "Anzahl",
+	"containers_settings_gpu_mode_specific": "Bestimmte",
+	"containers_settings_gpu_count": "Anzahl GPUs",
+	"containers_settings_device_ids": "Geräte-IDs",
+	"containers_settings_driver": "Treiber",
+	"containers_settings_capabilities": "Capabilities",
+	"containers_settings_add_capability": "Capability hinzufügen…",
+	"containers_settings_ulimits": "Ulimits",
+	"containers_settings_add_ulimit": "Ulimit hinzufügen",
+	"containers_settings_ulimit_soft": "Soft-Limit",
+	"containers_settings_ulimit_hard": "Hard-Limit",
+	"containers_settings_auto_update": "Auto-Update",
+	"containers_autoupdate_scheduled_unavailable": "Zeitgesteuerte Auto-Updates nicht verfügbar",
+	"containers_autoupdate_dockhand_hint_before": "Dockhand aktualisiert sich nicht automatisch nach Zeitplan. Sobald eine neue Version erscheint, aktualisiere es unter",
+	"containers_autoupdate_dockhand_hint_link": "Einstellungen > Über",
+	"containers_autoupdate_dockhand_hint_after": ".",
+	"containers_autoupdate_unavailable": "Auto-Updates nicht verfügbar",
+	"containers_autoupdate_hawser_hint": "Hawser-Agents müssen auf ihrem entfernten Host aktualisiert werden.",
+	"containers_autoupdate_hawser_instructions": "Update-Anleitung auf GitHub ansehen",
+	"containers_autoupdate_enable": "Automatische Image-Updates aktivieren",
+	"containers_autoupdate_vulnerability_criteria": "Schwachstellenkriterien",
+	"containers_autoupdate_vulnerability_hint": "Blockiert Auto-Updates, wenn das neue Image Schwachstellen aufweist, die diesen Kriterien entsprechen",
+	"containers_create_name_required": "Containername ist erforderlich",
+	"containers_create_image_required": "Image-Name ist erforderlich",
+	"containers_create_failed": "Container konnte nicht erstellt werden",
+	"containers_create_success_pulled": "Container erstellt (Image {image} wurde automatisch gepullt)",
+	"containers_create_success": "Container erfolgreich erstellt",
+	"containers_create_failed_error": "Container konnte nicht erstellt werden: {error}",
+	"containers_create_title": "Neuen Container erstellen",
+	"containers_create_tab_pull": "Pullen",
+	"containers_create_tab_scan": "Scan",
+	"containers_create_tab_container": "Container",
+	"containers_create_scanning_disabled": "Der Schwachstellenscan ist für diese Umgebung deaktiviert.",
+	"containers_create_scanning_enable_hint": "Aktiviere ihn unter Einstellungen -> Umgebungen, um Images zu scannen.",
+	"containers_create_critical_vulnerabilities": "Kritische/hohe Schwachstellen im Image gefunden",
+	"containers_create_cancel": "Abbrechen",
+	"containers_create_creating": "Wird erstellt…",
+	"containers_create_submit": "Container erstellen",
+	"containers_edit_fetch_failed": "Container konnte nicht abgerufen werden: {status}",
+	"containers_edit_load_failed": "Containerdaten konnten nicht geladen werden: {error}",
+	"containers_edit_name_required": "Containername ist erforderlich",
+	"containers_edit_image_required": "Image-Name ist erforderlich",
+	"containers_edit_status_renaming": "Container wird umbenannt…",
+	"containers_edit_rename_failed": "Container konnte nicht umbenannt werden",
+	"containers_edit_status_renamed": "Container erfolgreich umbenannt!",
+	"containers_edit_status_updating": "Container wird aktualisiert…",
+	"containers_edit_update_failed": "Container konnte nicht aktualisiert werden",
+	"containers_edit_status_updated": "Container erfolgreich aktualisiert!",
+	"containers_edit_status_saving_auto_update": "Auto-Update-Einstellungen werden gespeichert…",
+	"containers_edit_status_auto_update_saved": "Auto-Update-Einstellungen gespeichert!",
+	"containers_edit_update_failed_error": "Container konnte nicht aktualisiert werden: {error}",
+	"containers_edit_change_icon": "Icon ändern",
+	"containers_edit_change_container_icon": "Container-Icon ändern",
+	"containers_edit_title": "Container bearbeiten",
+	"containers_edit_save": "Speichern",
+	"containers_edit_cancel": "Abbrechen",
+	"containers_edit_rename": "Container umbenennen",
+	"containers_edit_loading": "Containerdaten werden geladen…",
+	"containers_edit_compose_warning_before": "Dieser Container gehört zum Compose-Stack ",
+	"containers_edit_compose_rename_warning_after": ". Das Umbenennen kann Probleme bei der Stack-Verwaltung verursachen.",
+	"containers_edit_compose_config_warning_after": ". Änderungen können überschrieben werden, wenn der Stack neu bereitgestellt wird.",
+	"containers_edit_tags": "Tags",
+	"containers_edit_updating": "Wird aktualisiert…",
+	"containers_edit_submit": "Container aktualisieren",
+	"containers_edit_unsaved_title": "Ungespeicherte Änderungen",
+	"containers_edit_unsaved_description": "Du hast ungespeicherte Änderungen. Möchtest du wirklich schließen, ohne zu speichern?",
+	"containers_edit_continue_editing": "Weiter bearbeiten",
+	"containers_edit_discard_changes": "Änderungen verwerfen",
+	"containers_edit_choose_icon": "Wähle ein Container-Icon",
+	"containers_batchupdate_image_cached": "Image im Cache (Registry-Version entspricht der lokalen)",
+	"containers_batchupdate_start_failed": "Update konnte nicht gestartet werden",
+	"containers_batchupdate_unknown_error": "Unbekannter Fehler aufgetreten",
+	"containers_batchupdate_failed": "Update fehlgeschlagen",
+	"containers_batchupdate_force_failed": "Erzwungenes Update fehlgeschlagen",
+	"containers_batchupdate_title": "Container werden aktualisiert",
+	"containers_batchupdate_processing": "Container {current} von {total} wird verarbeitet…",
+	"containers_batchupdate_status_complete": "Update abgeschlossen",
+	"containers_batchupdate_status_failed": "Update fehlgeschlagen",
+	"containers_batchupdate_preparing": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "Update von {count} Container wird vorbereitet…",
+				"countPlural=other": "Update von {count} Containern wird vorbereitet…"
+			}
+		}
+	],
+	"containers_batchupdate_progress": "Fortschritt",
+	"containers_batchupdate_filter_updated": "Aktualisiert ({count})",
+	"containers_batchupdate_filter_failed": "Fehlgeschlagen ({count})",
+	"containers_batchupdate_update_anyway": "Trotzdem aktualisieren",
+	"containers_batchupdate_hide_logs": "Logs ausblenden",
+	"containers_batchupdate_show_logs": "Logs anzeigen",
+	"containers_batchupdate_vulnerabilities_found": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Schwachstelle gefunden",
+				"countPlural=other": "{count} Schwachstellen gefunden"
+			}
+		}
+	],
+	"containers_batchupdate_vulnerabilities_found_capped": "{count}+ Schwachstellen gefunden",
+	"containers_batchupdate_col_severity": "Schweregrad",
+	"containers_batchupdate_col_package": "Paket",
+	"containers_batchupdate_col_version": "Version",
+	"containers_batchupdate_col_fixed": "Behoben in",
+	"containers_batchupdate_and_more": "…und {count} weitere",
+	"containers_batchupdate_updating": "Wird aktualisiert…",
+	"containers_files_stack_files_entry": "Stack-Dateien (Compose, Konfiguration)",
+	"containers_files_error_read": "Datei konnte nicht gelesen werden",
+	"containers_files_error_open": "Datei konnte nicht geöffnet werden",
+	"containers_files_error_save": "Datei konnte nicht gespeichert werden",
+	"containers_files_saved": "Datei gespeichert",
+	"containers_files_name_required": "Name ist erforderlich",
+	"containers_files_error_create": "Erstellen fehlgeschlagen",
+	"containers_files_file_created": "Datei erstellt",
+	"containers_files_directory_created": "Ordner erstellt",
+	"containers_files_error_delete": "Löschen fehlgeschlagen",
+	"containers_files_deleted": "{name} gelöscht",
+	"containers_files_error_rename": "Umbenennen fehlgeschlagen",
+	"containers_files_renamed": "Erfolgreich umbenannt",
+	"containers_files_mode_required": "Modus ist erforderlich",
+	"containers_files_error_chmod": "Berechtigungen konnten nicht geändert werden",
+	"containers_files_chmod_success": "Berechtigungen geändert",
+	"containers_files_owner_required": "Eigentümer ist erforderlich",
+	"containers_files_error_chown": "Eigentümer konnte nicht geändert werden",
+	"containers_files_chown_success": "Eigentümer geändert",
+	"containers_files_error_load_directory": "Ordner konnte nicht geladen werden",
+	"containers_files_error_upload": "Hochladen fehlgeschlagen",
+	"containers_files_uploaded_count": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Datei hochgeladen",
+				"countPlural=other": "{count} Dateien hochgeladen"
+			}
+		}
+	],
+	"containers_files_upload_partial_failed": "Fehlgeschlagen: {errors}",
+	"containers_files_folder_upload_unsupported": "Das Hochladen von Ordnern wird nicht unterstützt",
+	"containers_files_browser_label": "Dateibrowser",
+	"containers_files_drop_to_upload": "Dateien hier ablegen, um sie nach {path} hochzuladen",
+	"containers_files_new_file": "Neue Datei",
+	"containers_files_new_directory": "Neuer Ordner",
+	"containers_files_upload_files": "Dateien hochladen",
+	"containers_files_hide_hidden": "Versteckte Dateien ausblenden",
+	"containers_files_show_hidden": "Versteckte Dateien einblenden",
+	"containers_files_refresh": "Aktualisieren",
+	"containers_files_loading": "Dateien werden geladen…",
+	"containers_files_browse_error": "Dateien können nicht angezeigt werden",
+	"containers_files_retry": "Erneut versuchen",
+	"containers_files_directory_empty": "Ordner ist leer",
+	"containers_files_no_visible_files": "Keine sichtbaren Dateien (versteckte Dateien sind ausgeblendet)",
+	"containers_files_name": "Name",
+	"containers_files_col_size": "Größe",
+	"containers_files_col_permissions": "Berechtigungen",
+	"containers_files_owner": "Eigentümer",
+	"containers_files_col_modified": "Geändert",
+	"containers_files_col_actions": "Aktionen",
+	"containers_files_readonly_file_title": "Schreibgeschützte Datei (keine Schreibberechtigung)",
+	"containers_files_view_file": "Datei anzeigen",
+	"containers_files_file_readonly": "Datei ist schreibgeschützt",
+	"containers_files_edit_file": "Datei bearbeiten",
+	"containers_files_rename": "Umbenennen",
+	"containers_files_change_permissions": "Berechtigungen ändern",
+	"containers_files_change_owner": "Eigentümer ändern",
+	"containers_files_item_directory": "Ordner",
+	"containers_files_item_file": "Datei",
+	"containers_files_delete": "Löschen",
+	"containers_files_download": "Herunterladen",
+	"containers_files_theme_dark": "Zum dunklen Theme wechseln",
+	"containers_files_theme_light": "Zum hellen Theme wechseln",
+	"containers_files_save": "Speichern",
+	"containers_files_close_editor": "Editor schließen",
+	"containers_files_unsaved_title": "Ungespeicherte Änderungen",
+	"containers_files_unsaved_description": "{name} hat ungespeicherte Änderungen. Vor dem Schließen speichern?",
+	"containers_files_unsaved_description_unnamed": "Diese Datei hat ungespeicherte Änderungen. Vor dem Schließen speichern?",
+	"containers_files_cancel": "Abbrechen",
+	"containers_files_discard": "Verwerfen",
+	"containers_files_loading_preview_named": "Vorschau wird geladen - {name}…",
+	"containers_files_loading_preview": "Vorschau wird geladen…",
+	"containers_files_readonly_badge": "schreibgeschützt",
+	"containers_files_close_viewer": "Ansicht schließen",
+	"containers_files_create_file_title": "Datei erstellen",
+	"containers_files_create_directory_title": "Ordner erstellen",
+	"containers_files_filename_placeholder": "dateiname.txt",
+	"containers_files_directory_placeholder": "ordnername",
+	"containers_files_owner_optional": "Eigentümer (optional)",
+	"containers_files_owner_placeholder": "z. B. 1000:1000 oder www-data",
+	"containers_files_owner_default_hint": "Lass das Feld leer, um den Standardbenutzer des Containers zu verwenden (meist root).",
+	"containers_files_create_location": "Wird erstellt in: {path}",
+	"containers_files_create": "Erstellen",
+	"containers_files_new_name": "Neuer Name",
+	"containers_files_current": "Aktuell: {value}",
+	"containers_files_perm_read": "Lesen",
+	"containers_files_perm_write": "Schreiben",
+	"containers_files_perm_execute": "Ausführen",
+	"containers_files_perm_group": "Gruppe",
+	"containers_files_perm_others": "Andere",
+	"containers_files_octal": "Oktal:",
+	"containers_files_symbolic": "Symbolisch:",
+	"containers_files_octal_input_label": "Oder gib den Oktalmodus direkt ein",
+	"containers_files_apply_recursively": "Rekursiv anwenden",
+	"containers_files_apply": "Übernehmen",
+	"containers_files_chown_hint": "Ein Benutzer oder Benutzer:Gruppe. Numerische IDs funktionieren auch, wenn der Name im Container nicht existiert.",
+	"containers_files_browse_title": "Dateien durchsuchen",
+	"containers_files_modal_description": "Dateien im Dateisystem des Containers durchsuchen, hochladen und herunterladen.",
+	"containers_snapshot_no_metadata": "Keine Metadaten verfügbar",
+	"containers_snapshot_error_load_metadata": "Metadaten konnten nicht geladen werden",
+	"containers_snapshot_browse_verb": "Snapshot durchsuchen",
+	"containers_snapshot_browse_description": "Dateien im Snapshot {id} durchsuchen.",
+	"containers_snapshot_tab_files": "Dateien",
+	"containers_snapshot_tab_metadata": "Metadaten",
+	"containers_snapshot_loading_metadata": "Metadaten werden geladen…",
+	"containers_snapshot_backup_info": "Backup-Infos",
+	"containers_snapshot_type": "Typ",
+	"containers_snapshot_name": "Name",
+	"containers_snapshot_backup_time": "Backup-Zeitpunkt",
+	"containers_snapshot_environment_id": "Umgebungs-ID",
+	"containers_snapshot_compose_file": "Compose-Datei",
+	"containers_snapshot_stack_files": "Stack-Dateien",
+	"containers_snapshot_captured": "erfasst",
+	"containers_snapshot_not_captured": "nicht erfasst",
+	"containers_snapshot_volumes_binds": "Volumes & Binds ({count})",
+	"containers_snapshot_stack_files_count": "Stack-Dateien ({count})",
+	"containers_snapshot_secrets_count": "Secrets ({count})",
+	"containers_snapshot_secrets_hint": "Verschlüsselt mit dem Schlüssel dieser Instanz gespeichert. Wird beim Wiederherstellen in den Stack übernommen (Werte werden nie angezeigt).",
+	"containers_snapshot_image": "Image",
+	"containers_snapshot_container_id": "Container-ID",
+	"containers_snapshot_state_at_backup": "Status beim Backup",
+	"containers_snapshot_created": "Erstellt",
+	"containers_snapshot_command": "Befehl",
+	"containers_snapshot_entrypoint": "Entrypoint",
+	"containers_snapshot_working_dir": "Arbeitsverzeichnis",
+	"containers_snapshot_user": "Benutzer",
+	"containers_snapshot_exposed_ports": "Exponierte Ports",
+	"containers_snapshot_restart_policy": "Neustart-Richtlinie",
+	"containers_snapshot_restart_max_retries": "(max. {count})",
+	"containers_snapshot_network_mode": "Netzwerkmodus",
+	"containers_snapshot_privileged": "Privilegiert",
+	"containers_snapshot_yes": "ja",
+	"containers_snapshot_port_bindings": "Port-Zuordnungen",
+	"containers_snapshot_health_at_backup": "Health-Status beim Backup",
+	"containers_snapshot_security": "Sicherheit",
+	"containers_snapshot_badge_privileged": "privilegiert",
+	"containers_snapshot_badge_readonly_rootfs": "Rootfs schreibgeschützt",
+	"containers_snapshot_runtime": "Laufzeitumgebung",
+	"containers_snapshot_log_driver": "Log-Treiber",
+	"containers_snapshot_stop_signal": "Stoppsignal",
+	"containers_snapshot_platform": "Plattform",
+	"containers_snapshot_dns_hosts": "DNS & Hosts",
+	"containers_snapshot_labels_count": "Labels ({count})",
+	"containers_snapshot_env_vars_count": "Umgebungsvariablen ({count})",
+	"containers_snapshot_no_metadata_for_snapshot": "Für diesen Snapshot sind keine Metadaten verfügbar",
+	"containers_snapshot_error_load": "Snapshots konnten nicht geladen werden",
+	"containers_snapshot_compare_same_repo": "Zum Vergleichen sind zwei Snapshots aus demselben Repository nötig",
+	"containers_snapshot_deleted": "Snapshot gelöscht",
+	"containers_snapshot_error_delete": "Snapshot konnte nicht gelöscht werden",
+	"containers_snapshot_refresh": "Snapshots aktualisieren",
+	"containers_snapshot_loading_progress": "Snapshots werden geladen… {done} von {total} Repositorys",
+	"containers_snapshot_loading": "Snapshots werden geladen…",
+	"containers_snapshot_empty": "Noch keine Snapshots für {name}.",
+	"containers_snapshot_empty_hint": "Starte im Reiter „Zeitpläne“ ein Backup, um einen zu erstellen.",
+	"containers_snapshot_all_repositories": "Alle Repositorys",
+	"containers_snapshot_delete_selected": "Ausgewählte löschen ({count})",
+	"containers_snapshot_clear_selection": "Auswahl aufheben",
+	"containers_snapshot_delete_all": "Alle löschen ({count})",
+	"containers_snapshot_select_all": "Alle Snapshots auswählen",
+	"containers_snapshot_col_snapshot": "Snapshot",
+	"containers_snapshot_col_taken": "Erstellt",
+	"containers_snapshot_col_added": "Hinzugefügt",
+	"containers_snapshot_col_repository": "Repository",
+	"containers_snapshot_col_actions": "Aktionen",
+	"containers_snapshot_select": "Snapshot {id} auswählen",
+	"containers_snapshot_stats_title": "{filesNew} neue, {filesChanged} geänderte Dateien",
+	"containers_snapshot_compare_cancel": "Vergleich abbrechen",
+	"containers_snapshot_compare_with_selected": "Mit ausgewähltem Snapshot vergleichen",
+	"containers_snapshot_compare": "Vergleichen",
+	"containers_snapshot_browse_files": "Dateien durchsuchen",
+	"containers_snapshot_restore": "Wiederherstellen",
+	"containers_snapshot_delete_title": "Snapshot löschen",
+	"containers_backup_cancel_failed": "Backup konnte nicht abgebrochen werden",
+	"containers_backup_select_repository": "Wähle ein Backup-Repository",
+	"containers_backup_schedule_invalid": "Zeitplan ist ungültig",
+	"containers_backup_failed": "Backup fehlgeschlagen",
+	"containers_backup_schedule_added": "Backup-Zeitplan hinzugefügt",
+	"containers_backup_schedule_updated": "Backup-Zeitplan aktualisiert",
+	"containers_backup_completed_for": "Backup für {name} abgeschlossen",
+	"containers_backup_schedule_removed": "Backup-Zeitplan entfernt",
+	"containers_backup_schedule_removed_with_snapshots": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "Backup-Zeitplan entfernt ({count} Snapshot gelöscht)",
+				"countPlural=other": "Backup-Zeitplan entfernt ({count} Snapshots gelöscht)"
+			}
+		}
+	],
+	"containers_backup_delete_failed": "Löschen fehlgeschlagen",
+	"containers_backup_schedule_paused": "Zeitplan pausiert",
+	"containers_backup_schedule_resumed": "Zeitplan fortgesetzt",
+	"containers_backup_schedule_update_failed": "Zeitplan konnte nicht aktualisiert werden",
+	"containers_backup_skipped": "Backup übersprungen",
+	"containers_backup_completed_with_warnings": "Backup mit Warnungen abgeschlossen",
+	"containers_backup_start_failed": "Backup konnte nicht gestartet werden",
+	"containers_backup_all_volumes": "Alle Volumes ({count})",
+	"containers_backup_volumes_selected": "{selected} von {total} Volumes",
+	"containers_backup_probe_failed": "Prüfung fehlgeschlagen",
+	"containers_backup_tab_snapshots": "Snapshots",
+	"containers_backup_tab_history": "Verlauf",
+	"containers_backup_unknown_destination": "Unbekannt",
+	"containers_backup_paused": "Pausiert",
+	"containers_backup_manual": "Manuell",
+	"containers_backup_pause_schedule": "Zeitplan pausieren",
+	"containers_backup_resume_schedule": "Zeitplan fortsetzen",
+	"containers_backup_run_now": "Jetzt ausführen",
+	"containers_backup_edit": "Bearbeiten",
+	"containers_backup_duplicate": "Duplizieren",
+	"containers_backup_delete_title_with_snapshots": "Die Snapshots werden ebenfalls gelöscht.",
+	"containers_backup_delete_title_keep_snapshots": "Zeitplan entfernen (Snapshots bleiben erhalten)",
+	"containers_backup_also_delete_snapshots": "Snapshots ebenfalls löschen",
+	"containers_backup_also_delete_config_snapshots": "Auch die Snapshots dieser Konfiguration löschen",
+	"containers_backup_no_schedules_container": "Für diesen Container sind keine Backup-Zeitpläne eingerichtet.",
+	"containers_backup_no_schedules_stack": "Für diesen Stack sind keine Backup-Zeitpläne eingerichtet.",
+	"containers_backup_new_schedule": "Neuer Backup-Zeitplan",
+	"containers_backup_edit_schedule": "Zeitplan bearbeiten",
+	"containers_backup_enabled": "Aktiviert",
+	"containers_backup_stop_container_during": "Container während des Backups stoppen",
+	"containers_backup_stop_stack_during": "Stack während des Backups stoppen",
+	"containers_backup_no_volumes_container": "Keine Volumes in diesem Container gefunden",
+	"containers_backup_no_volumes_stack": "Keine Volumes in diesem Stack gefunden",
+	"containers_backup_advanced": "Erweitert",
+	"containers_backup_retention_policy": "Aufbewahrungsrichtlinie",
+	"containers_backup_retention_hint": "Ältere Snapshots werden nach jedem Backup bereinigt. 0 schaltet die jeweilige Regel ab.",
+	"containers_backup_keep_last": "Letzte",
+	"containers_backup_keep_daily": "Täglich",
+	"containers_backup_keep_weekly": "Wöchentlich",
+	"containers_backup_keep_monthly": "Monatlich",
+	"containers_backup_keep_yearly": "Jährlich",
+	"containers_backup_exclude_patterns": "Ausschlussmuster",
+	"containers_backup_exclude_patterns_hint": "Kommagetrennte Glob-Muster, die vom Backup ausgeschlossen werden.",
+	"containers_backup_yes": "Ja",
+	"containers_backup_no": "Nein",
+	"containers_backup_skip_caches": "Cache-Verzeichnisse überspringen",
+	"containers_backup_skip_caches_hint_before": "Überspringt Ordner mit der Markierungsdatei",
+	"containers_backup_skip_caches_hint_after": "— npm, pip, Cargo, Browser und viele andere Tools kennzeichnen damit Cache-Inhalte, die sich neu erzeugen lassen. Spart viel Backup-Speicherplatz; die Inhalte lassen sich jederzeit aus der Quelle neu aufbauen. Schalte das nur aus, wenn du Cache-Daten aus einem bestimmten Grund sichern willst.",
+	"containers_backup_compression": "Komprimierung",
+	"containers_backup_compression_auto": "Auto",
+	"containers_backup_compression_off": "Aus",
+	"containers_backup_compression_max": "Max",
+	"containers_backup_upload_limit": "Upload-Limit",
+	"containers_backup_download_limit": "Download-Limit",
+	"containers_backup_webhooks": "Webhooks",
+	"containers_backup_on_success": "Bei Erfolg",
+	"containers_backup_on_failure": "Bei Fehler",
+	"containers_backup_webhooks_hint": "Nach Abschluss des Backups wird ein POST mit JSON-Payload gesendet (für einfache Empfänger ersatzweise GET). Gedacht für Healthchecks, Slack usw.",
+	"containers_backup_cancel": "Abbrechen",
+	"containers_backup_save": "Speichern",
+	"containers_backup_run_once_title": "Jetzt ein Backup ausführen, ohne einen Zeitplan zu speichern",
+	"containers_backup_run_once": "Einmal ausführen",
+	"containers_backup_save_schedule": "Zeitplan speichern",
+	"containers_backup_save_run_title": "Zeitplan speichern und sofort ein Backup ausführen",
+	"containers_backup_save_run": "Speichern & jetzt ausführen",
+	"containers_backup_add_another": "Weiteren Zeitplan hinzufügen",
+	"containers_backup_configure": "Backup einrichten",
+	"containers_backup_progress_description": "Live-Fortschritt des Backups für {name}.",
+	"containers_backup_backing_up": "Backup läuft…",
+	"containers_backup_completed": "Backup abgeschlossen",
+	"containers_backup_cancelling": "Wird abgebrochen…",
+	"containers_backup_cancel_backup": "Backup abbrechen",
+	"containers_backup_ok": "OK",
+	"containers_backup_log_title": "Backup-Log",
+	"containers_backup_loading_log": "Log wird geladen…",
+	"containers_backup_no_log_output": "Für diesen Lauf wurde keine Log-Ausgabe aufgezeichnet.",
+	"containers_restore_post_start_stack": "Stack starten",
+	"containers_restore_post_start_container": "Container starten",
+	"containers_restore_post_recreate_if_missing": "Neu erstellen, falls nicht vorhanden",
+	"containers_restore_post_recreate_container": "Container neu erstellen",
+	"containers_restore_post_redeploy_stack": "Stack neu bereitstellen",
+	"containers_restore_post_do_nothing": "Nichts tun",
+	"containers_restore_post_start_stack_phrase": "der Start des Stacks",
+	"containers_restore_post_start_container_phrase": "der Start des Containers",
+	"containers_restore_post_recreate_if_missing_phrase": "bei Bedarf die Neuerstellung",
+	"containers_restore_post_recreate_container_phrase": "die Neuerstellung des Containers",
+	"containers_restore_post_redeploy_stack_phrase": "die Neubereitstellung des Stacks",
+	"containers_restore_post_do_nothing_phrase": "nichts weiter",
+	"containers_restore_helper_failed_default": "der Backup-Helfer-Container konnte auf der Zielumgebung nicht ausgeführt werden",
+	"containers_restore_read_snapshot_failed": "Snapshot konnte nicht gelesen werden",
+	"containers_restore_check_paths_failed": "Die Zielpfade auf der Umgebung konnten nicht geprüft werden.",
+	"containers_restore_check_paths_unreachable": "Der Server war zum Prüfen der Zielpfade nicht erreichbar.",
+	"containers_restore_failed": "Wiederherstellung fehlgeschlagen",
+	"containers_restore_completed_with_warnings": "Wiederherstellung mit Warnungen abgeschlossen",
+	"containers_restore_restore": "Wiederherstellen",
+	"containers_restore_header_to": "nach",
+	"containers_restore_description": "Snapshot {id} für {name} wiederherstellen.",
+	"containers_restore_reading_snapshot": "Snapshot wird gelesen…",
+	"containers_restore_restoring": "Wird wiederhergestellt…",
+	"containers_restore_completed": "Wiederherstellung abgeschlossen",
+	"containers_restore_done_restored_to": "auf {env} wiederhergestellt",
+	"containers_restore_done_restored_to_stack_redeployed": "auf {env} wiederhergestellt, Stack neu bereitgestellt",
+	"containers_restore_done_restored_to_container_recreated": "auf {env} wiederhergestellt, Container neu erstellt",
+	"containers_restore_done_live_replaced": "Live-Volume ersetzt — starte {name} neu, um es zu nutzen",
+	"containers_restore_done_live_replaced_stack": "Live-Volume ersetzt — starte {name} neu bzw. stelle den Stack neu bereit, um es zu nutzen",
+	"containers_restore_step1_title": "Wohin soll es gehen?",
+	"containers_restore_step1_hint": "wähle Ziel und Art",
+	"containers_restore_mode_new_location": "In eine Umgebung",
+	"containers_restore_mode_new_location_hint": "Als Klon in einer Umgebung deiner Wahl anlegen.",
+	"containers_restore_mode_in_place": "Live überschreiben",
+	"containers_restore_mode_in_place_hint": "Ersetzt die Live-Daten direkt vor Ort. Destruktiv.",
+	"containers_restore_target_environment": "Zielumgebung",
+	"containers_restore_select_environment": "Umgebung auswählen…",
+	"containers_restore_step2_overwritten": "Was wird überschrieben?",
+	"containers_restore_step2_restored": "Was wird wiederhergestellt?",
+	"containers_restore_volumes_selected": [
+		{
+			"declarations": [
+				"input selected",
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{selected} von {count} Volume",
+				"countPlural=other": "{selected} von {count} Volumes"
+			}
+		}
+	],
+	"containers_restore_tooltip_resolved_by": "Alle Ziele gelten aus Sicht des Docker-Daemons auf",
+	"containers_restore_tooltip_the_target": "der Zielumgebung",
+	"containers_restore_tooltip_daemon": ": Ein",
+	"containers_restore_host_path_lower": "Host-Pfad",
+	"containers_restore_tooltip_host_path_rule": "muss auf diesem Host existieren (nicht auf dem von Dockhand), während ein",
+	"containers_restore_tooltip_named_volume": "benanntes Volume",
+	"containers_restore_tooltip_after_container": "dort angelegt wird. Benannte Volumes sind portabler und daher vorzuziehen. Der Schritt nach der Wiederherstellung startet den Container; schlägt er fehl, sind die Daten trotzdem wiederhergestellt und du machst manuell weiter.",
+	"containers_restore_tooltip_after_stack": "dort angelegt wird. Benannte Volumes sind portabler und daher vorzuziehen. Der Schritt nach der Wiederherstellung startet den Stack; schlägt er fehl, sind die Daten trotzdem wiederhergestellt und du machst manuell weiter.",
+	"containers_restore_no_volumes_container": "Dieser Snapshot enthält keine Volumes — die Wiederherstellung erstellt den Container aus seiner gespeicherten Konfiguration neu.",
+	"containers_restore_no_volumes_stack": "Dieser Snapshot enthält keine Volumes — die Wiederherstellung erstellt den Stack aus seiner gespeicherten Konfiguration neu.",
+	"containers_restore_host_path": "Host-Pfad",
+	"containers_restore_volume": "Volume",
+	"containers_restore_placeholder_path": "/absoluter/pfad",
+	"containers_restore_placeholder_volume": "volume-name",
+	"containers_restore_volume_conflict_before": "Volume",
+	"containers_restore_volume_conflict_after": "existiert bereits auf {env}. Entferne es oder wähle ein anderes Ziel.",
+	"containers_restore_path_absolute": "Ein Host-Pfad muss absolut sein — er beginnt mit",
+	"containers_restore_path_example": "z. B.",
+	"containers_restore_step3_title": "Und danach?",
+	"containers_restore_step3_hint_in_place": "wieder starten",
+	"containers_restore_step3_hint_new_location": "auf dem Ziel starten",
+	"containers_restore_after_restore": "Nach der Wiederherstellung",
+	"containers_restore_name_conflict_stack": "Ein Stack namens",
+	"containers_restore_name_conflict_container": "Ein Container namens",
+	"containers_restore_name_conflict_after": "existiert bereits auf {env}. Entferne ihn oder wähle „Nichts tun“ — die Wiederherstellung überschreibt ihn nicht.",
+	"containers_restore_badge_has_data": "enthält Daten",
+	"containers_restore_badge_empty": "leer",
+	"containers_restore_badge_new": "neu",
+	"containers_restore_local_error_title": "Dockhand kann den Stack-Ordner nicht lesen",
+	"containers_restore_local_error_hint": "Dieser Ordner liegt auf Dockhands eigenem Datenträger, nicht auf {env}. Eine Wiederherstellung ist erst möglich, wenn Dockhand ihn lesen kann.",
+	"containers_restore_the_target_environment": "der Zielumgebung",
+	"containers_restore_helper_error_title": "Der Backup-Helfer kann auf {env} nicht ausgeführt werden",
+	"containers_restore_this_environment": "dieser Umgebung",
+	"containers_restore_helper_error_hint": "Eine Wiederherstellung ist erst möglich, wenn das behoben ist - derselbe Helfer schreibt die wiederhergestellten Daten.",
+	"containers_restore_check_paths_title": "Zielpfade konnten nicht geprüft werden",
+	"containers_restore_secrets_restore_count": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Secret aus diesem Backup wiederherstellen.",
+				"countPlural=other": "{count} Secrets aus diesem Backup wiederherstellen."
+			}
+		}
+	],
+	"containers_restore_secrets_turn_off_hint": "Schalte das aus, um den Stack ohne Secrets zu starten und sie von Hand zu setzen.",
+	"containers_restore_secrets_encryption_before": "Secrets sind mit dem Schlüssel dieser Dockhand-Instanz verschlüsselt. Eine Wiederherstellung auf einer anderen Instanz braucht denselben Schlüssel",
+	"containers_restore_secrets_encryption_after": ", sonst bleiben sie unlesbar.",
+	"containers_restore_skip_stack_files": "Nur Volume-Daten wiederherstellen (Stack-Dateien überspringen)",
+	"containers_restore_skip_stack_files_hint": "Lässt die gesicherte Compose-Datei und Konfiguration weg - nur die Volume-Daten werden wiederhergestellt. Andernfalls werden die Stack-Dateien wiederhergestellt und in Dockhand registriert, sodass du den Stack bearbeiten und neu bereitstellen kannst.",
+	"containers_restore_what_will_happen": "Was passiert",
+	"containers_restore_summary_the_snapshot": "Der Snapshot",
+	"containers_restore_summary_taken": "vom",
+	"containers_restore_summary_from": "aus",
+	"containers_restore_summary_inplace_will": "überschreibt",
+	"containers_restore_summary_inplace_overwrite": "die Live-Daten",
+	"containers_restore_wiped_replaced": "geleert und ersetzt",
+	"containers_restore_the_container_is": "Der Container wird",
+	"containers_restore_the_stack_is": "Der Stack wird",
+	"containers_restore_inplace_stopped_before": "vor der Wiederherstellung gestoppt",
+	"containers_restore_inplace_swap_then": "(rechne mit Ausfallzeit); die Volumes werden ausgetauscht (erst vorbereitet, dann übernommen), danach folgt",
+	"containers_restore_confirm_overwrite": "Mir ist klar, dass dies die Live-Daten der Volumes ersetzt.",
+	"containers_restore_summary_will_be_restored_to": "wird wiederhergestellt auf",
+	"containers_restore_checking_on": "prüfe auf",
+	"containers_restore_host_fallback": "Host",
+	"containers_restore_stack_files": "Stack-Dateien",
+	"containers_restore_overwrite_ack": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "Mir ist klar, dass vorhandene Daten an diesem Ort überschrieben werden.",
+				"countPlural=other": "Mir ist klar, dass vorhandene Daten an diesen {count} Orten überschrieben werden."
+			}
+		}
+	],
+	"containers_restore_then_dockhand_will": "Danach folgt",
+	"containers_restore_nothing_on": "Auf",
+	"containers_restore_is_touched": "bleibt alles unberührt",
+	"containers_restore_not_started": "nicht gestartet",
+	"containers_restore_not_started_data_lands": "— die Daten landen auf",
+	"containers_restore_not_started_bring_up": "und du startest ihn selbst.",
+	"containers_restore_secrets_restored_before": "Die Wiederherstellung umfasst auch",
+	"containers_restore_secrets_count": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Secret",
+				"countPlural=other": "{count} Secrets"
+			}
+		}
+	],
+	"containers_restore_secrets_restored_after": "aus dem Backup.",
+	"containers_restore_secrets_skipped_before": "Für",
+	"containers_restore_secrets_skipped_will": "erfolgt",
+	"containers_restore_secrets_skipped_not": "keine",
+	"containers_restore_secrets_skipped_after": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "Wiederherstellung — setze es danach von Hand.",
+				"countPlural=other": "Wiederherstellung — setze sie danach von Hand."
+			}
+		}
+	],
+	"containers_restore_remap_title": "Du hast Name oder Typ eines Volumes geändert",
+	"containers_restore_remap_stack_before": "Deine Daten landen in den neuen Volumes. Der Stack wird aber aus der gespeicherten Compose-Datei neu bereitgestellt, die noch die",
+	"containers_restore_remap_container_before": "Deine Daten landen in den neuen Volumes. Der neu erstellte Container bindet aber die",
+	"containers_restore_remap_original": "ursprünglichen",
+	"containers_restore_remap_stack_after": "Volumes nennt — er startet also mit leeren Volumes.",
+	"containers_restore_remap_container_after": "Volumes ein — er sieht die wiederhergestellten Daten also nicht.",
+	"containers_restore_remap_after_restoring": "Nach der Wiederherstellung:",
+	"containers_restore_remap_fix_stack": "Passe die Compose-Datei an die neuen Volume-Namen an und stelle den Stack dann neu bereit.",
+	"containers_restore_remap_fix_container": "Bearbeite den Container und richte den Mount auf das neue Volume.",
+	"containers_restore_remap_next_step_before": "Nächster Schritt auf",
+	"containers_restore_remap_next_step_after": "gesetzt, damit er nicht mit falschen Daten startet.",
+	"containers_restore_ok": "OK",
+	"containers_restore_cancel": "Abbrechen",
+	"containers_restore_checking_target": "Ziel wird geprüft…",
+	"containers_restore_overwrite_and_restore": "Überschreiben & wiederherstellen",
+	"containers_restore_restore_and_start": "Wiederherstellen & starten",
+	"updates_failed_checks_summary": [
+		{
+			"declarations": [
+				"input summary",
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{summary} ({count} Prüfung fehlgeschlagen)",
+				"countPlural=other": "{summary} ({count} Prüfungen fehlgeschlagen)"
+			}
+		}
+	],
+	"updates_newer_version_tags": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} neuerer Versions-Tag",
+				"countPlural=other": "{count} neuere Versions-Tags"
+			}
+		}
+	],
+	"updates_cooling_down": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Update zurückgehalten",
+				"countPlural=other": "{count} Updates zurückgehalten"
+			}
+		}
+	],
+	"updates_all_up_to_date": "Alle Container sind aktuell",
+	"updates_hours_remaining": [
+		{
+			"declarations": [
+				"input name",
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{name}: noch {count} Stunde",
+				"countPlural=other": "{name}: noch {count} Stunden"
+			}
+		}
+	],
+	"updates_available_count": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Update verfügbar",
+				"countPlural=other": "{count} Updates verfügbar"
+			}
+		}
+	],
+	"updates_cooling_down_short": "{count} zurückgehalten",
+	"updates_check_title": "Nach verfügbaren Updates suchen",
+	"updates_checking_progress": "Prüfe {checked}/{total}",
+	"updates_check": "Nach Updates suchen",
+	"updates_dismiss_all_title": "Alle Update-Hinweise verwerfen",
+	"updates_cooling_down_title": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Update wartet auf das Mindestalter des Images",
+				"countPlural=other": "{count} Updates warten auf das Mindestalter des Images"
+			}
+		}
+	],
+	"updates_newer_version_available": "Neuere Version verfügbar",
+	"updates_move_to": "Aktualisieren auf",
+	"updates_versions_ahead_of_running": "{count} Versionen neuer als dein aktuelles Tag.",
+	"updates_badge_hint": "Klicke für die Release Notes. Wird nie automatisch angewendet.",
+	"updates_toast_tag_copied": "Neues Image-Tag kopiert",
+	"updates_toast_pinned_tag_copied": "Neues Tag mit Digest kopiert",
+	"updates_copied": "Kopiert!",
+	"updates_copy_new_tag": "Neues Tag kopieren",
+	"updates_versions_ahead": "{count} Versionen neuer",
+	"updates_copy_pinned_tag_title": "Neues Tag mit Digest kopieren (tag@sha256)",
+	"updates_path": "Pfad:",
+	"updates_jump_to_notes": "Zu den Release Notes für {version} springen",
+	"updates_loading_notes": "Release Notes werden geladen…",
+	"updates_open_on_github": "Auf GitHub öffnen",
+	"updates_rate_limit_before": "Beim Abrufen der Release Notes wurde das Rate-Limit von GitHub erreicht. Setze",
+	"updates_rate_limit_after": "(ein Personal Access Token, keine Scopes nötig), um das Limit von 60 auf 5000 Anfragen pro Stunde anzuheben.",
+	"updates_view_changelog": "Changelog anzeigen",
+	"updates_notes_not_inline": "Release Notes für diese Versionen sind hier nicht direkt verfügbar.",
+	"updates_no_source_before": "Dieses Image veröffentlicht keine Release Notes, die Dockhand lesen kann (kein Label",
+	"updates_no_source_after": "mit Verweis auf ein GitHub- oder Gitea/Forgejo-Repo).",
+	"updates_notes_from": "Release Notes von",
+	"tags_filter_all": "Alle Tags",
+	"tags_filter_count": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Tag",
+				"countPlural=other": "{count} Tags"
+			}
+		}
+	],
+	"tags_settings": "Einstellungen",
+	"tags_group_by_tag": "Nach Tag gruppieren",
+	"tags_color_group_bands": "Farbige Gruppenbalken",
+	"tags_show_tags": "Tags anzeigen",
+	"tags_inline_editing": "Tags direkt bearbeiten",
+	"tags_show_stack_tags": "Tags von Stacks anzeigen",
+	"tags_none_yet": "Noch keine Tags",
+	"tags_match": "Passend zu",
+	"tags_match_any": "einem",
+	"tags_match_all": "allen",
+	"tags_clear": "Auswahl aufheben",
+	"tags_reset_order_title": "Tags wieder nach Namen sortieren",
+	"tags_reset": "Zurücksetzen",
+	"tags_apply": "Übernehmen",
+	"tags_reorder_title": "Ziehe die Tags in die Reihenfolge, in der sie aufgelistet und gruppiert werden sollen",
+	"tags_reorder": "Umsortieren",
+	"tags_edit": "Tags bearbeiten",
+	"tags_search_or_create_placeholder": "Tag suchen oder erstellen…",
+	"tags_search_placeholder": "Tags suchen…",
+	"tags_create_new": "Neues Tag erstellen",
+	"tags_icon_placeholder": "Icon (optional)…",
+	"tags_default_icon": "Standard-Tag-Icon",
+	"tags_create": "Erstellen",
+	"tags_none": "Keine Tags",
+	"tags_inherited_from_stack_title": "Vom Stack dieses Containers geerbt - entferne es aus den Tags des Stacks",
+	"tags_from_stack": "vom Stack",
+	"tags_remove": "Tag entfernen",
+	"batchop_progress_removing": "wird entfernt",
+	"batchop_progress_starting": "wird gestartet",
+	"batchop_progress_stopping": "wird gestoppt",
+	"batchop_progress_restarting": "wird neu gestartet",
+	"batchop_progress_pausing": "wird pausiert",
+	"batchop_progress_unpausing": "wird fortgesetzt",
+	"batchop_operation_remove": "entfernen",
+	"batchop_operation_start": "starten",
+	"batchop_operation_stop": "stoppen",
+	"batchop_operation_restart": "neu starten",
+	"batchop_operation_pause": "pausieren",
+	"batchop_operation_unpause": "fortsetzen",
+	"batchop_operation_down": "herunterfahren",
+	"batchop_count_containers": "{count} Container",
+	"batchop_count_images": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Image",
+				"countPlural=other": "{count} Images"
+			}
+		}
+	],
+	"batchop_count_volumes": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Volume",
+				"countPlural=other": "{count} Volumes"
+			}
+		}
+	],
+	"batchop_count_networks": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Netzwerk",
+				"countPlural=other": "{count} Netzwerke"
+			}
+		}
+	],
+	"batchop_count_stacks": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Stack",
+				"countPlural=other": "{count} Stacks"
+			}
+		}
+	],
+	"batchop_processing": "Verarbeite {items}…",
+	"batchop_preparing": "Vorbereitung: {items} {operation}…",
+	"batchop_completed": "Abgeschlossen: {count} erfolgreich",
+	"batchop_completed_failed": "{count} fehlgeschlagen",
+	"batchop_completed_cancelled": "{count} abgebrochen",
+	"batchop_status_pending": "ausstehend",
+	"batchop_status_done": "fertig",
+	"batchop_status_failed": "fehlgeschlagen",
+	"batchop_status_cancelled": "abgebrochen",
+	"batchop_summary_succeeded": "Erfolgreich",
+	"batchop_summary_failed": "Fehlgeschlagen",
+	"batchop_summary_cancelled": "Abgebrochen",
+	"batchop_summary_pending": "Ausstehend",
+	"batchop_cancel": "Abbrechen",
+	"batchop_confirm_cancel_close": "Der Vorgang läuft noch. Abbrechen und schließen?",
+	"grid_column_settings": "Spalteneinstellungen",
+	"grid_columns": "Spalten",
+	"grid_reset_to_defaults": "Auf Standard zurücksetzen",
+	"grid_reset": "Zurücksetzen",
+	"grid_filter_clear": "Auswahl aufheben",
+	"grid_untagged": "Ohne Tag",
+	"grid_actions": "Aktionen",
+	"grid_deselect_all": "Alle abwählen",
+	"grid_select_all": "Alle auswählen",
+	"grid_collapse_row": "Einklappen",
+	"grid_expand_row": "Ausklappen",
+	"emptystate_no_environment_selected_title": "Keine Umgebung ausgewählt",
+	"emptystate_no_environment_selected_description": "Wähle eine Docker-Umgebung aus der Auswahlliste, um loszulegen",
+	"emptystate_no_environment_configured_title": "Keine Umgebung konfiguriert",
+	"emptystate_no_environment_configured_description": "Füge in den Einstellungen eine Docker-Umgebung hinzu, um loszulegen",
+	"tagsection_empty_hint": "Keine Tags - klicke auf das Tag-Icon, um eines hinzuzufügen",
+	"ui_toggle_on": "AN",
+	"ui_toggle_off": "AUS",
+	"pull_error_start_failed": "Pull konnte nicht gestartet werden",
+	"pull_error_failed": "Image konnte nicht gepullt werden",
+	"pull_image_name_label": "Image-Name",
+	"pull_status_pulling_layers": "Layer werden gepullt…",
+	"pull_status_complete": "Pull abgeschlossen!",
+	"pull_layers_progress": "{completed} / {total} Layer",
+	"pull_downloaded": "Heruntergeladen: {downloaded} / {total}",
+	"pull_col_layer_id": "Layer-ID",
+	"pull_layer_done": "Fertig",
+	"pull_output_lines": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "Ausgabe ({count} Zeile)",
+				"countPlural=other": "Ausgabe ({count} Zeilen)"
+			}
+		}
+	],
+	"pull_toggle_log_theme": "Log-Farbmodus wechseln",
+	"pull_idle_hint": "Gib einen Image-Namen ein, um mit dem Pullen zu beginnen",
+	"scan_starting": "Schwachstellenscan wird gestartet…",
+	"scan_failed": "Scan fehlgeschlagen",
+	"scan_ready": "Bereit zum Scannen",
+	"scan_scanning": "Wird auf Schwachstellen gescannt…",
+	"scan_vulnerabilities_found": "Schwachstellen gefunden",
+	"scan_some_vulnerabilities_found": "Einige Schwachstellen gefunden",
+	"scan_no_vulnerabilities": "Keine Schwachstellen!",
+	"scan_idle_prompt_before": "Scanne",
+	"scan_idle_prompt_after": "auf Schwachstellen",
+	"scan_start": "Scan starten",
+	"scan_tab_output": "Ausgabe",
+	"scan_tab_results": "Scan-Ergebnisse",
+	"scan_output_lines": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "Ausgabe ({count} Zeile)",
+				"countPlural=other": "Ausgabe ({count} Zeilen)"
+			}
+		}
+	],
+	"scan_toggle_log_theme": "Log-Farbmodus wechseln",
+	"vulncriteria_never": "Nie blockieren",
+	"vulncriteria_any": "Jede Schwachstelle",
+	"vulncriteria_badge_any": "Jede Schwachstelle",
+	"vulncriteria_critical_high": "Kritisch oder hoch",
+	"vulncriteria_critical": "Nur kritisch",
+	"vulncriteria_more_than_current": "Mehr als das aktuelle Image",
+	"updatestats_checked": "Geprüft",
+	"updatestats_updated_count": "{count} aktualisiert",
+	"updatestats_blocked_count": "{count} blockiert",
+	"updatestats_updated": "Aktualisiert",
+	"updatestats_blocked": "Blockiert",
+	"scanner_severity_critical": "Kritisch",
+	"scanner_severity_high": "Hoch",
+	"scanner_severity_medium": "Mittel",
+	"scanner_severity_low": "Niedrig",
+	"cron_invalid": "Ungültig",
+	"cron_daily": "Täglich",
+	"cron_weekly": "Wöchentlich",
+	"cron_custom": "Individuell",
+	"cron_at": "um",
+	"cron_on": "am",
+	"cron_monday": "Montag",
+	"cron_tuesday": "Dienstag",
+	"cron_wednesday": "Mittwoch",
+	"cron_thursday": "Donnerstag",
+	"cron_friday": "Freitag",
+	"cron_saturday": "Samstag",
+	"cron_sunday": "Sonntag",
+	"backupui_no_volumes_detected": "Keine Volumes gefunden",
+	"backupui_backup_all_volumes": "Alle Volumes sichern ({count})",
+	"backupui_bind_mounts_detected": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Bind-Mount gefunden",
+				"countPlural=other": "{count} Bind-Mounts gefunden"
+			}
+		}
+	],
+	"backupui_bind_mounts_warning": "Die Inhalte werden im Snapshot erfasst, die Quellen der Binds sind aber Host-Pfade. Für eine Wiederherstellung in einer anderen Umgebung müssen genau diese Pfade auf dem Ziel-Host existieren — sonst starten die Dienste mit leeren Mounts.",
+	"backupui_from_source": "aus {source}",
+	"backupui_not_backed_up": "Socket / Systempfad - wird nicht gesichert",
+	"backupui_select_repository": "Repository auswählen…",
+	"backupui_needs_same_host_title": "Ein Repository mit lokalem Pfad funktioniert nur, wenn der Docker-Daemon dieser Umgebung auf demselben Host läuft wie Dockhand.",
+	"backupui_needs_same_host": "gleicher Host nötig",
+	"backupui_snapshot_title": "{verb}: {name}",
+	"backupui_snapshot_title_from_repo": "{verb}: {name} aus {repository}",
+	"backupui_snapshot_taken": "erstellt am {time}",
+	"backupui_snapshot_taken_on_env": "erstellt auf {env} am {time}",
+	"backupui_this_environment": "Diese Umgebung",
+	"backupui_stack_files_title": "Stack-Dateien auf dem Host",
+	"backupui_stack_files_probing": "Stack-Ordner wird auf dem Host gesucht…",
+	"backupui_stack_files_captured_at": "Vom Host erfasst unter",
+	"backupui_stack_path_origin_title": "Woher dieser Pfad stammt",
+	"backupui_stack_path_origin_socket": "ist eine Socket-Umgebung. Das Backup liest den Stack-Ordner aus dem eigenen Stack-Verzeichnis von Dockhand auf diesem Host.",
+	"backupui_host_data_dir_hint_before": "Wenn dieser Pfad falsch aussieht und Dockhand in einem Container läuft, setze",
+	"backupui_host_data_dir_hint_after": "so, dass es dorthin zeigt, wo das Daten-Volume auf dem Host liegt.",
+	"backupui_stack_path_origin_direct": "ist eine Direkt-Umgebung. Das Backup liest den Stack-Ordner von diesem Pfad auf dem entfernten Docker-Host.",
+	"backupui_configured_stack_path": "In dieser Umgebung gesetzter Remote-Stack-Pfad:",
+	"backupui_direct_derived_before": "Er wird aus den Bind-Mounts des Stacks abgeleitet. Um ihn ausdrücklich festzulegen, nutze",
+	"backupui_stack_path_setting": "Umgebungen > (bearbeiten) > Remote-Stack-Pfad (für Backup)",
+	"backupui_direct_derived_after": "und öffne diesen Dialog erneut.",
+	"backupui_stack_path_origin_hawser": "ist eine Hawser-Umgebung. Das Backup liest den Stack-Ordner aus dem Stack-Verzeichnis des Hawser-Agents auf dessen Host.",
+	"backupui_hawser_default_before": "Standardmäßig ist das",
+	"backupui_hawser_default_custom": ". Verwendet der Agent ein eigenes",
+	"backupui_hawser_default_set_under": ", trage es unter",
+	"backupui_hawser_default_after": "ein und öffne diesen Dialog erneut.",
+	"backupui_backup_all_files": "Alle Dateien sichern ({count})",
+	"backupui_captured_as_bind": "unten als Bind erfasst",
+	"backupui_captured_as_volume": "unten als Volume erfasst",
+	"backupui_always_kept": "immer enthalten",
+	"backupui_helper_failed_title": "Der Backup-Helfer kann auf dieser Umgebung nicht ausgeführt werden",
+	"backupui_helper_failed_hint": "Ein Backup ist erst möglich, wenn das behoben ist - derselbe Helfer-Container erfasst die Stack-Dateien.",
+	"backupui_no_stack_folder_title": "Kein Stack-Ordner auf dem Host gefunden",
+	"backupui_no_stack_folder_socket_before": "In einer Socket-Umgebung bedeutet das meist, dass",
+	"backupui_no_stack_folder_socket_after": "nicht zu dem Ort passt, an dem das Daten-Volume auf dem Host eingehängt ist. Korrigiere das, brich dann ab und richte dieses Backup neu ein.",
+	"backupui_no_stack_folder_direct": "Lege den Stack-Pfad der Umgebung fest (Umgebungen > bearbeiten > Remote-Stack-Pfad für Backup), brich dann ab und richte dieses Backup neu ein.",
+	"backupui_no_stack_folder_hawser_before": "Bei Hawser bedeutet das meist, dass der Agent ein eigenes",
+	"backupui_no_stack_folder_hawser_middle": "verwendet (nicht das Standardverzeichnis",
+	"backupui_no_stack_folder_hawser_after": "). Lege den Stack-Pfad der Umgebung fest (Umgebungen > bearbeiten > Remote-Stack-Pfad für Backup), brich dann ab und richte dieses Backup neu ein.",
+	"execution_trigger_scheduled": "Geplant",
+	"execution_trigger_webhook": "Webhook",
+	"execution_status_success": "erfolgreich",
+	"execution_status_warning": "mit Warnungen",
+	"execution_status_failed": "fehlgeschlagen",
+	"execution_status_running": "läuft",
+	"execution_status_skipped": "übersprungen",
+	"execution_status_queued": "in Warteschlange",
+	"execution_empty": "Noch keine Backup-Läufe.",
+	"execution_empty_hint": "Führe ein Backup aus — der Verlauf erscheint dann hier.",
+	"execution_col_run": "Lauf",
+	"execution_col_trigger": "Auslöser",
+	"execution_col_duration": "Dauer",
+	"execution_col_status": "Status",
+	"execution_col_detail": "Details",
+	"execution_col_repo": "Repo",
+	"execution_details_summary": "{filesNew} neu · {filesChanged} geändert · {size}",
+	"execution_view_log": "Log anzeigen",
+	"execution_hide_error": "Fehler ausblenden",
+	"execution_show_error": "Fehler anzeigen",
+	"execution_toggle_log_theme": "Log-Design umschalten",
+	"execution_no_logs": "Keine Logs verfügbar",
+	"execution_output_lines": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "Ausgabe ({count} Zeile)",
+				"countPlural=other": "Ausgabe ({count} Zeilen)"
+			}
+		}
+	],
+	"snapshotdialog_delete_title": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Snapshot löschen?",
+				"countPlural=other": "{count} Snapshots löschen?"
+			}
+		}
+	],
+	"snapshotdialog_delete_description": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "Der ausgewählte Snapshot wird endgültig vergessen und aus seinem Backup-Repository bereinigt. Das lässt sich nicht rückgängig machen.",
+				"countPlural=other": "Die ausgewählten Snapshots werden endgültig vergessen und aus ihrem Backup-Repository bereinigt. Das lässt sich nicht rückgängig machen."
+			}
+		}
+	],
+	"snapshotdialog_delete": "Löschen",
+	"snapshotdialog_error_title": "Snapshots konnten nicht gelöscht werden",
+	"snapshotdialog_error_partial": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Snapshot wurde gelöscht, der Rest konnte nicht gelöscht werden. Das Backup-Tool meldete:",
+				"countPlural=other": "{count} Snapshots wurden gelöscht, der Rest konnte nicht gelöscht werden. Das Backup-Tool meldete:"
+			}
+		}
+	],
+	"snapshotdialog_error_reported": "Das Backup-Tool meldete:"
 }

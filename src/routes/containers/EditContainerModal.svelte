@@ -20,6 +20,7 @@
 	import type { VulnerabilityCriteria } from '$lib/components/VulnerabilityCriteriaSelector.svelte';
 	import { parseHostPort, expandPortBindings, formatHostPort } from '$lib/utils/port-parse';
 	import { formatBytes } from '$lib/utils/format';
+	import { m } from '$lib/paraglide/messages.js';
 
 	// Parse shell command respecting quotes
 	function parseShellCommand(cmd: string): string[] {
@@ -401,7 +402,7 @@
 			const data = await response.json();
 
 			if (!response.ok || data.error) {
-				throw new Error(data.error || `Failed to fetch container: ${response.status}`);
+				throw new Error(data.error || m.containers_edit_fetch_failed({ status: response.status }));
 			}
 
 			// Parse basic container data
@@ -680,7 +681,7 @@
 				runtime
 			};
 		} catch (err) {
-			error = 'Failed to load container data: ' + String(err);
+			error = m.containers_edit_load_failed({ error: String(err) });
 		} finally {
 			loadingData = false;
 			// Fetch backup schedule count (BETA GATE: only when backups enabled)
@@ -879,12 +880,12 @@
 
 		let hasErrors = false;
 		if (!name.trim()) {
-			errors.name = 'Container name is required';
+			errors.name = m.containers_edit_name_required();
 			hasErrors = true;
 		}
 
 		if (!image.trim()) {
-			errors.image = 'Image name is required';
+			errors.image = m.containers_edit_image_required();
 			hasErrors = true;
 		}
 
@@ -908,7 +909,7 @@
 		try {
 			// If only name changed, use the rename endpoint
 			if (hasOnlyNameChanged()) {
-				statusMessage = 'Renaming container...';
+				statusMessage = m.containers_edit_status_renaming();
 
 				const response = await fetch(appendEnvParam(
 					`/api/containers/${containerId}/rename`,
@@ -923,12 +924,12 @@
 				const result = await response.json();
 
 				if (!response.ok) {
-					error = result.error || 'Failed to rename container';
+					error = result.error || m.containers_edit_rename_failed();
 					loading = false;
 					return;
 				}
 
-				statusMessage = 'Container renamed successfully!';
+				statusMessage = m.containers_edit_status_renamed();
 
 				if (autoUpdateChanged) {
 					await saveAutoUpdateSettings(name.trim());
@@ -943,7 +944,7 @@
 
 			// Full update required - recreate container
 			if (containerConfigChanged) {
-				statusMessage = 'Updating container...';
+				statusMessage = m.containers_edit_status_updating();
 
 				const ports: Record<string, { HostIp?: string; HostPort: string }> = {};
 				portMappings
@@ -1093,23 +1094,23 @@
 				}
 
 				if (!response.ok) {
-					error = result.error || 'Failed to update container';
+					error = result.error || m.containers_edit_update_failed();
 					if (result.details) {
 						error += ': ' + result.details;
 					}
 					return;
 				}
 
-				statusMessage = 'Container updated successfully!';
+				statusMessage = m.containers_edit_status_updated();
 			}
 
 			if (autoUpdateChanged) {
 				if (!containerConfigChanged) {
-					statusMessage = 'Saving auto-update settings...';
+					statusMessage = m.containers_edit_status_saving_auto_update();
 				}
 				await saveAutoUpdateSettings(name.trim());
 				if (!containerConfigChanged) {
-					statusMessage = 'Auto-update settings saved!';
+					statusMessage = m.containers_edit_status_auto_update_saved();
 				}
 			}
 
@@ -1119,7 +1120,7 @@
 			onClose();
 		} catch (err) {
 			if (signal.aborted) return;
-			error = 'Failed to update container: ' + String(err);
+			error = m.containers_edit_update_failed_error({ error: String(err) });
 		} finally {
 			loading = false;
 			abortController = null;
@@ -1199,13 +1200,13 @@
 				<button
 					type="button"
 					onclick={() => (showIconPicker = true)}
-					title="Change icon"
+					title={m.containers_edit_change_icon()}
 					class="mr-1 rounded p-0.5 hover:bg-muted transition-colors cursor-pointer"
-					aria-label="Change container icon"
+					aria-label={m.containers_edit_change_container_icon()}
 				>
 					<ContainerIcon {image} name={name} override={iconOverride} envId={currentEnvId} class="w-4 h-4" fallbackIcon={Box} showFallbackWhenOff />
 				</button>
-				Edit container
+				{m.containers_edit_title()}
 				{#if isEditingTitle}
 					<span class="ml-1">-</span>
 					<input
@@ -1221,7 +1222,7 @@
 					<button
 						type="button"
 						onclick={saveEditingTitle}
-						title="Save"
+						title={m.containers_edit_save()}
 						class="p-0.5 rounded hover:bg-muted transition-colors"
 					>
 						<Check class="w-3 h-3 text-green-500 hover:text-green-600" />
@@ -1229,7 +1230,7 @@
 					<button
 						type="button"
 						onclick={cancelEditingTitle}
-						title="Cancel"
+						title={m.containers_edit_cancel()}
 						class="p-0.5 rounded hover:bg-muted transition-colors"
 					>
 						<X class="w-3 h-3 text-muted-foreground hover:text-foreground" />
@@ -1240,13 +1241,13 @@
 					<button
 						type="button"
 						onclick={startEditingTitle}
-						title="Rename container"
+						title={m.containers_edit_rename()}
 						class="p-0.5 rounded hover:bg-muted transition-colors ml-0.5"
 					>
 						<Pencil class="w-3 h-3 text-muted-foreground hover:text-foreground" />
 					</button>
 					{#if $currentEnvironment}
-						<span class="font-semibold ml-1">on <span class="text-amber-600 dark:text-amber-400">{$currentEnvironment.name}</span></span>
+						<span class="font-semibold ml-1">{m.modalheader_on_env()} <span class="text-amber-600 dark:text-amber-400">{$currentEnvironment.name}</span></span>
 					{/if}
 				{/if}
 			</Dialog.Title>
@@ -1255,7 +1256,7 @@
 		{#if loadingData}
 			<div class="flex-1 flex items-center justify-center text-muted-foreground text-sm min-h-[200px]">
 				<Loader2 class="w-5 h-5 animate-spin mr-2" />
-				Loading container data...
+				{m.containers_edit_loading()}
 			</div>
 		{:else}
 			<div class="px-5 flex gap-1 border-b shrink-0">
@@ -1265,7 +1266,7 @@
 					onclick={() => activeTab = 'settings'}
 				>
 					<Settings class="w-3.5 h-3.5" />
-					Settings
+					{m.nav_settings()}
 				</button>
 				<!-- BETA GATE: Backups tab hidden unless FEAT_BACKUPS_ENABLED (see features.ts) -->
 				{#if $page.data.backupsEnabled}
@@ -1275,7 +1276,7 @@
 						onclick={() => activeTab = 'backups'}
 					>
 						<Archive class="w-3.5 h-3.5" />
-						Backups
+						{m.nav_backups()}
 						{#if backupCount > 0}<span class="bg-primary/15 text-primary text-[10px] px-1.5 rounded-full font-medium">{backupCount}</span>{/if}
 						<!-- Run tally so a failed backup is visible before opening the tab. -->
 						{#if backupTally.ok > 0}<span class="inline-flex items-center gap-0.5 rounded-full bg-emerald-500/15 px-1.5 text-[10px] font-medium text-emerald-500"><Check class="w-2.5 h-2.5" />{backupTally.ok}</span>{/if}
@@ -1298,18 +1299,18 @@
 				{#if showComposeRenameWarning}
 					<div class="mb-4 px-3 py-2 text-xs text-amber-700 dark:text-amber-300 bg-amber-100/50 dark:bg-amber-900/30 rounded-md flex items-start gap-2">
 						<Layers class="w-4 h-4 shrink-0 mt-0.5" />
-						<span>This container is part of the <strong>{composeStackName}</strong> compose stack. Renaming it may cause issues with stack management.</span>
+						<span>{m.containers_edit_compose_warning_before()}<strong>{composeStackName}</strong>{m.containers_edit_compose_rename_warning_after()}</span>
 					</div>
 				{/if}
 				{#if showComposeConfigWarning}
 					<div class="mb-4 px-3 py-2 text-xs text-amber-700 dark:text-amber-300 bg-amber-100/50 dark:bg-amber-900/30 rounded-md flex items-start gap-2">
 						<Layers class="w-4 h-4 shrink-0 mt-0.5" />
-						<span>This container is part of the <strong>{composeStackName}</strong> compose stack. Changes may be overwritten when the stack is redeployed.</span>
+						<span>{m.containers_edit_compose_warning_before()}<strong>{composeStackName}</strong>{m.containers_edit_compose_config_warning_after()}</span>
 					</div>
 				{/if}
 
 				<div class="space-y-1.5 pb-4 border-b">
-					<span class="text-xs font-medium">Tags</span>
+					<span class="text-xs font-medium">{m.containers_edit_tags()}</span>
 					<ContainerTagsSection containerName={name} envId={currentEnvId} />
 				</div>
 
@@ -1387,14 +1388,14 @@
 
 			<div class="flex justify-end gap-2 px-5 py-3 border-t bg-muted/30 shrink-0">
 				<Button type="button" variant="outline" onclick={handleClose} size="sm">
-					Cancel
+					{m.containers_edit_cancel()}
 				</Button>
 				<Button type="button" variant="secondary" disabled={loading} size="sm" onclick={handleSubmit}>
 					{#if loading}
 						<Loader2 class="w-4 h-4 mr-1 animate-spin" />
-						Updating...
+						{m.containers_edit_updating()}
 					{:else}
-						Update container
+						{m.containers_edit_submit()}
 					{/if}
 				</Button>
 			</div>
@@ -1406,20 +1407,20 @@
 <Dialog.Root bind:open={showConfirmClose}>
 	<Dialog.Content class="max-w-sm">
 		<Dialog.Header>
-			<Dialog.Title>Unsaved changes</Dialog.Title>
+			<Dialog.Title>{m.containers_edit_unsaved_title()}</Dialog.Title>
 			<Dialog.Description>
-				You have unsaved changes. Are you sure you want to close without saving?
+				{m.containers_edit_unsaved_description()}
 			</Dialog.Description>
 		</Dialog.Header>
 		<div class="flex justify-end gap-1.5 mt-4">
 			<Button variant="outline" size="sm" onclick={() => showConfirmClose = false}>
-				Continue editing
+				{m.containers_edit_continue_editing()}
 			</Button>
 			<Button variant="destructive" size="sm" onclick={discardAndClose}>
-				Discard changes
+				{m.containers_edit_discard_changes()}
 			</Button>
 		</div>
 	</Dialog.Content>
 </Dialog.Root>
 
-<IconPickerModal bind:open={showIconPicker} value={iconOverride} onselect={onIconSelect} title="Choose a container icon" />
+<IconPickerModal bind:open={showIconPicker} value={iconOverride} onselect={onIconSelect} title={m.containers_edit_choose_icon()} />

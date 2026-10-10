@@ -4,6 +4,7 @@
 	import { Calendar, CalendarDays, Clock } from 'lucide-svelte';
 	import { appSettings } from '$lib/stores/settings';
 	import cronstrue from 'cronstrue';
+	import { m } from '$lib/paraglide/messages.js';
 
 	// Reactive time format from settings
 	let is12Hour = $derived($appSettings.timeFormat === '12h');
@@ -204,13 +205,13 @@
 	}));
 
 	const daysOfWeek = [
-		{ value: '1', label: 'Monday' },
-		{ value: '2', label: 'Tuesday' },
-		{ value: '3', label: 'Wednesday' },
-		{ value: '4', label: 'Thursday' },
-		{ value: '5', label: 'Friday' },
-		{ value: '6', label: 'Saturday' },
-		{ value: '0', label: 'Sunday' }
+		{ value: '1', label: m.cron_monday },
+		{ value: '2', label: m.cron_tuesday },
+		{ value: '3', label: m.cron_wednesday },
+		{ value: '4', label: m.cron_thursday },
+		{ value: '5', label: m.cron_friday },
+		{ value: '6', label: m.cron_saturday },
+		{ value: '0', label: m.cron_sunday }
 	];
 </script>
 
@@ -226,24 +227,24 @@
 	/>
 	{#if value}
 		{@const readable = humanReadable()}
-		<p class="text-[9px] mt-0.5 {readable === 'Invalid' ? 'text-destructive' : 'text-muted-foreground/60'}">{readable}</p>
+		<p class="text-[9px] mt-0.5 {readable === 'Invalid' ? 'text-destructive' : 'text-muted-foreground/60'}">{readable === 'Invalid' ? m.cron_invalid() : readable}</p>
 	{/if}
 </div>
 {:else}
 <div class="flex items-center gap-2">
 	<!-- Schedule Type Selector -->
 	<Select.Root type="single" value={scheduleType} onValueChange={handleScheduleTypeChange} {disabled}>
-		<Select.Trigger class="w-[120px] h-9 flex-shrink-0">
+		<Select.Trigger class="w-auto min-w-[120px] h-9 flex-shrink-0">
 			<div class="flex items-center gap-2">
 				{#if scheduleType === 'daily'}
 					<Calendar class="w-4 h-4" />
-					<span>Daily</span>
+					<span>{m.cron_daily()}</span>
 				{:else if scheduleType === 'weekly'}
 					<CalendarDays class="w-4 h-4" />
-					<span>Weekly</span>
+					<span>{m.cron_weekly()}</span>
 				{:else}
 					<Clock class="w-4 h-4" />
-					<span>Custom</span>
+					<span>{m.cron_custom()}</span>
 				{/if}
 			</div>
 		</Select.Trigger>
@@ -251,19 +252,19 @@
 			<Select.Item value="daily">
 				<div class="flex items-center gap-2">
 					<Calendar class="w-4 h-4" />
-					<span>Daily</span>
+					<span>{m.cron_daily()}</span>
 				</div>
 			</Select.Item>
 			<Select.Item value="weekly">
 				<div class="flex items-center gap-2">
 					<CalendarDays class="w-4 h-4" />
-					<span>Weekly</span>
+					<span>{m.cron_weekly()}</span>
 				</div>
 			</Select.Item>
 			<Select.Item value="custom">
 				<div class="flex items-center gap-2">
 					<Clock class="w-4 h-4" />
-					<span>Custom</span>
+					<span>{m.cron_custom()}</span>
 				</div>
 			</Select.Item>
 		</Select.Content>
@@ -271,7 +272,7 @@
 
 	{#if scheduleType === 'daily' || scheduleType === 'weekly'}
 		<!-- Time Selectors -->
-		<span class="text-sm text-muted-foreground">at</span>
+		<span class="text-sm text-muted-foreground">{m.cron_at()}</span>
 		<Select.Root type="single" value={hour} onValueChange={handleHourChange} {disabled}>
 			<Select.Trigger class="w-[85px] h-9 flex-shrink-0">
 				<span>{hours.find((h: { value: string; label: string }) => h.value === hour)?.label || hour}</span>
@@ -294,14 +295,14 @@
 		</Select.Root>
 
 		{#if scheduleType === 'weekly'}
-			<span class="text-sm text-muted-foreground">on</span>
+			<span class="text-sm text-muted-foreground">{m.cron_on()}</span>
 			<Select.Root type="single" value={dayOfWeek} onValueChange={handleDayOfWeekChange} {disabled}>
 				<Select.Trigger class="w-[100px] h-9 flex-shrink-0">
-					<span>{daysOfWeek.find(d => d.value === dayOfWeek)?.label || dayOfWeek}</span>
+					<span>{daysOfWeek.find(d => d.value === dayOfWeek)?.label() || dayOfWeek}</span>
 				</Select.Trigger>
 				<Select.Content>
 					{#each daysOfWeek as d}
-						<Select.Item value={d.value} label={d.label} />
+						<Select.Item value={d.value} label={d.label()} />
 					{/each}
 				</Select.Content>
 			</Select.Root>
@@ -326,7 +327,7 @@
 	{@const readable = humanReadable()}
 	{@const isInvalid = readable === 'Invalid'}
 	<p class="text-[10px] mt-0.5 {isInvalid ? 'text-destructive' : 'text-muted-foreground/60'}">
-		{readable}
+		{isInvalid ? m.cron_invalid() : readable}
 	</p>
 {/if}
 {/if}

@@ -6,6 +6,7 @@
 	import { Label } from '$lib/components/ui/label';
 	import { Terminal as TerminalIcon, X, ExternalLink, Shell, User, Loader2, AlertCircle } from 'lucide-svelte';
 	import { detectShells, getBestShell, hasAvailableShell, USER_OPTIONS, type ShellDetectionResult } from '$lib/utils/shell-detection';
+	import { m } from '$lib/paraglide/messages.js';
 
 	// Dynamic imports for browser-only xterm
 	let Terminal: any;
@@ -110,8 +111,8 @@
 			wsUrl += `&envId=${envId}`;
 		}
 
-		terminal.writeln(`\x1b[90mConnecting to ${containerName}...\x1b[0m`);
-		terminal.writeln(`\x1b[90mShell: ${selectedShell}, User: ${selectedUser || 'default'}\x1b[0m`);
+		terminal.writeln(`\x1b[90m${m.containers_terminal_connecting({ name: containerName })}\x1b[0m`);
+		terminal.writeln(`\x1b[90m${m.containers_terminal_session_info({ shell: selectedShell, user: selectedUser || m.containers_terminal_user_default() })}\x1b[0m`);
 		terminal.writeln('');
 
 		ws = new WebSocket(wsUrl);
@@ -135,9 +136,9 @@
 					terminal?.write(msg.data);
 				} else if (msg.type === 'error') {
 					error = msg.message;
-					terminal?.writeln(`\x1b[31mError: ${msg.message}\x1b[0m`);
+					terminal?.writeln(`\x1b[31m${m.containers_terminal_error({ message: msg.message })}\x1b[0m`);
 				} else if (msg.type === 'exit') {
-					terminal?.writeln('\x1b[90m\r\nSession ended.\x1b[0m');
+					terminal?.writeln(`\x1b[90m\r\n${m.containers_terminal_session_ended()}\x1b[0m`);
 					connected = false;
 					// Close the dialog after a brief delay so user sees the message
 					setTimeout(() => {
@@ -152,12 +153,12 @@
 		ws.onerror = (e) => {
 			console.error('WebSocket error:', e);
 			error = 'Connection error';
-			terminal?.writeln('\x1b[31mConnection error\x1b[0m');
+			terminal?.writeln(`\x1b[31m${m.containers_terminal_connection_error()}\x1b[0m`);
 		};
 
 		ws.onclose = () => {
 			connected = false;
-			terminal?.writeln('\x1b[90mDisconnected.\x1b[0m');
+			terminal?.writeln(`\x1b[90m${m.containers_terminal_disconnected()}\x1b[0m`);
 		};
 	}
 
@@ -273,11 +274,11 @@
 			<div class="flex items-center justify-between">
 				<div class="flex items-center gap-2">
 					<TerminalIcon class="w-5 h-5" />
-					<Dialog.Title>Terminal - {containerName}</Dialog.Title>
+					<Dialog.Title>{m.containers_terminal_title({ name: containerName })}</Dialog.Title>
 					{#if connected}
 						<span class="inline-flex items-center gap-1 text-xs text-green-500">
 							<span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-							Connected
+							{m.containers_terminal_connected()}
 						</span>
 					{/if}
 				</div>
@@ -295,39 +296,39 @@
 				{#if detectingShells}
 					<div class="text-center">
 						<Loader2 class="w-12 h-12 mx-auto mb-4 text-muted-foreground animate-spin" />
-						<h3 class="text-lg font-medium">Detecting available shells...</h3>
+						<h3 class="text-lg font-medium">{m.containers_terminal_detecting_shells()}</h3>
 					</div>
 				{:else if !anyShellAvailable}
 					<div class="text-center">
 						<AlertCircle class="w-12 h-12 mx-auto mb-4 text-amber-500" />
-						<h3 class="text-lg font-medium text-amber-500">No shell available</h3>
+						<h3 class="text-lg font-medium text-amber-500">{m.containers_terminal_no_shell()}</h3>
 						<p class="text-sm text-muted-foreground mt-2">
-							This container does not have any shell installed.
+							{m.containers_terminal_no_shell_installed()}
 						</p>
 						<p class="text-xs text-muted-foreground/70 mt-1">
-							Containers built from scratch or distroless images often don't include shells.
+							{m.containers_terminal_no_shell_hint()}
 						</p>
 						<Button onclick={handleClose} variant="outline" class="mt-6">
-							Close
+							{m.ui_close()}
 						</Button>
 					</div>
 				{:else}
 					<div class="w-full max-w-md space-y-6">
 						<div class="text-center">
 							<TerminalIcon class="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
-							<h3 class="text-lg font-medium">Open terminal session</h3>
+							<h3 class="text-lg font-medium">{m.containers_terminal_open_session()}</h3>
 							<p class="text-sm text-muted-foreground mt-1">
-								Configure the shell and user for this session
+								{m.containers_terminal_configure_session()}
 							</p>
 						</div>
 
 						<div class="space-y-4">
 							<div class="space-y-2">
-								<Label>Shell</Label>
+								<Label>{m.containers_terminal_shell_label()}</Label>
 								<Select.Root type="single" bind:value={selectedShell}>
 									<Select.Trigger class="w-full h-10">
 										<Shell class="w-4 h-4 mr-2 text-muted-foreground" />
-										<span>{shellDetection?.allShells.find(o => o.path === selectedShell)?.label || 'Select shell'}</span>
+										<span>{shellDetection?.allShells.find(o => o.path === selectedShell)?.label || m.containers_terminal_select_shell()}</span>
 									</Select.Trigger>
 									<Select.Content>
 										{#if shellDetection}
@@ -341,7 +342,7 @@
 													<span class={option.available ? 'text-foreground' : 'text-muted-foreground/60'}>
 														{option.label}
 														{#if !option.available}
-															<span class="text-xs ml-1">(unavailable)</span>
+															<span class="text-xs ml-1">{m.containers_terminal_unavailable()}</span>
 														{/if}
 													</span>
 												</Select.Item>
@@ -352,11 +353,11 @@
 							</div>
 
 							<div class="space-y-2">
-								<Label>User</Label>
+								<Label>{m.containers_terminal_user_label()}</Label>
 								<Select.Root type="single" bind:value={selectedUser}>
 									<Select.Trigger class="w-full h-10">
 										<User class="w-4 h-4 mr-2 text-muted-foreground" />
-										<span>{USER_OPTIONS.find(o => o.value === selectedUser)?.label || 'Select user'}</span>
+										<span>{USER_OPTIONS.find(o => o.value === selectedUser)?.label || m.containers_terminal_select_user()}</span>
 									</Select.Trigger>
 									<Select.Content>
 										{#each USER_OPTIONS as option}
@@ -373,9 +374,9 @@
 						<div class="flex gap-2">
 							<Button onclick={startSession} class="flex-1" disabled={!xtermLoaded || !anyShellAvailable}>
 								<TerminalIcon class="w-4 h-4" />
-								{xtermLoaded ? 'Connect' : 'Loading...'}
+								{xtermLoaded ? m.containers_terminal_connect() : m.containers_terminal_loading()}
 							</Button>
-							<Button onclick={openInNewWindow} variant="outline" disabled={!xtermLoaded} title="Open in new window">
+							<Button onclick={openInNewWindow} variant="outline" disabled={!xtermLoaded} title={m.containers_terminal_open_new_window()}>
 								<ExternalLink class="w-4 h-4" />
 							</Button>
 						</div>

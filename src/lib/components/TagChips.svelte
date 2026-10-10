@@ -3,6 +3,7 @@
 	import TagLucideIcon from '$lib/components/TagLucideIcon.svelte';
 	import { tagHex } from '$lib/utils/tags-core';
 	import type { Tag } from '$lib/utils/tags-core';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		tags: Tag[];
@@ -26,7 +27,7 @@
 				{/if}
 				{tag.name}
 				{#if onRemove}
-					<button type="button" title="Remove tag" class="-mr-0.5 ml-0.5 rounded-full hover:bg-current/20"
+					<button type="button" title={m.tags_remove()} class="-mr-0.5 ml-0.5 rounded-full hover:bg-current/20"
 						onclick={(e) => { e.stopPropagation(); onRemove?.(tag); }}>
 						<X class="h-2.5 w-2.5" />
 					</button>

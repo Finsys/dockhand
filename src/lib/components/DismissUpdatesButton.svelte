@@ -3,6 +3,7 @@
 	import { CircleArrowUp, Clock, Tag } from 'lucide-svelte';
 	import { scale } from 'svelte/transition';
 	import { backOut } from 'svelte/easing';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		/** Whether any update indicator is present (digest, newer-version, or failed check). */
@@ -27,7 +28,7 @@
 		variant="outline"
 		onclick={onDismiss}
 		class="gap-1.5 border-amber-500/40 text-amber-600 hover:bg-amber-500/10 hover:border-amber-500"
-		title="Dismiss all update indicators"
+		title={m.updates_dismiss_all_title()}
 	>
 		{#if digestCount > 0}
 			<span class="flex items-center gap-0.5">
@@ -42,7 +43,7 @@
 			</span>
 		{/if}
 		{#if coolingDownCount > 0}
-			<span class="flex items-center gap-0.5 text-muted-foreground" title="{coolingDownCount} update(s) waiting out the minimum image age">
+			<span class="flex items-center gap-0.5 text-muted-foreground" title={m.updates_cooling_down_title({ count: coolingDownCount })}>
 				<Clock class="w-3 h-3" />
 				<span class="text-xs font-medium tabular-nums">{coolingDownCount}</span>
 			</span>

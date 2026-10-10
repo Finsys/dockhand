@@ -8,6 +8,7 @@
 	import { watchJob } from '$lib/utils/sse-fetch';
 	import { scanProgressLines } from '$lib/utils/scan-progress-lines';
 	import ScanResultsView from '../../routes/images/ScanResultsView.svelte';
+	import { m } from '$lib/paraglide/messages.js';
 
 	export interface ScanResult {
 		scanner: 'grype' | 'trivy';
@@ -133,7 +134,7 @@
 
 		status = 'scanning';
 		errorMessage = '';
-		scanMessage = 'Starting vulnerability scan...';
+		scanMessage = m.scan_starting();
 		outputLines = [];
 		startTime = Date.now();
 		results = [];
@@ -200,7 +201,7 @@
 				// Global error
 				duration = Date.now() - startTime;
 				status = 'error';
-				errorMessage = data.error || data.message || 'Scan failed';
+				errorMessage = data.error || data.message || m.scan_failed();
 				onError?.(errorMessage);
 			}
 		}
@@ -224,30 +225,30 @@
 			<div class="flex items-center gap-2">
 				{#if status === 'idle'}
 					<Shield class="w-4 h-4 text-muted-foreground" />
-					<span class="text-sm text-muted-foreground">Ready to scan</span>
+					<span class="text-sm text-muted-foreground">{m.scan_ready()}</span>
 				{:else if status === 'scanning'}
 					<Shield class="w-4 h-4 animate-spin text-blue-600" />
-					<span class="text-sm">Scanning for vulnerabilities...</span>
+					<span class="text-sm">{m.scan_scanning()}</span>
 				{:else if status === 'complete'}
 					{#if hasCriticalOrHigh}
 						<ShieldX class="w-4 h-4 text-red-500" />
-						<span class="text-sm text-red-500">Vulnerabilities found</span>
+						<span class="text-sm text-red-500">{m.scan_vulnerabilities_found()}</span>
 					{:else if totalVulnerabilities > 0}
 						<ShieldAlert class="w-4 h-4 text-yellow-500" />
-						<span class="text-sm text-yellow-500">Some vulnerabilities found</span>
+						<span class="text-sm text-yellow-500">{m.scan_some_vulnerabilities_found()}</span>
 					{:else}
 						<ShieldCheck class="w-4 h-4 text-green-600" />
-						<span class="text-sm text-green-600">No vulnerabilities!</span>
+						<span class="text-sm text-green-600">{m.scan_no_vulnerabilities()}</span>
 					{/if}
 				{:else if status === 'error'}
 					<ShieldX class="w-4 h-4 text-red-600" />
-					<span class="text-sm text-red-600">Scan failed</span>
+					<span class="text-sm text-red-600">{m.scan_failed()}</span>
 				{/if}
 			</div>
 			<div class="flex items-center gap-3">
 				{#if status === 'complete' && results.length > 0}
 					<Badge variant={hasCriticalOrHigh ? 'destructive' : totalVulnerabilities > 0 ? 'secondary' : 'outline'} class="text-xs">
-						{totalVulnerabilities} vulnerabilities
+						{m.containers_settings_vulnerabilities_count({ count: totalVulnerabilities })}
 					</Badge>
 				{/if}
 				<span class="text-xs text-muted-foreground min-w-12">
@@ -276,10 +277,10 @@
 	{#if status === 'idle'}
 		<div class="flex-1 flex flex-col items-center justify-center gap-4 text-muted-foreground">
 			<Shield class="w-12 h-12 opacity-50" />
-			<p class="text-sm">Scan <code class="bg-muted px-1.5 py-0.5 rounded">{imageName}</code> for vulnerabilities</p>
+			<p class="text-sm">{m.scan_idle_prompt_before()} <code class="bg-muted px-1.5 py-0.5 rounded">{imageName}</code> {m.scan_idle_prompt_after()}</p>
 			<Button onclick={startScan}>
 				<Shield class="w-4 h-4" />
-				Start scan
+				{m.scan_start()}
 			</Button>
 		</div>
 	{/if}
@@ -294,7 +295,7 @@
 					onclick={() => activeTab = 'output'}
 				>
 					<Terminal class="w-3 h-3 inline mr-1" />
-					Output
+					{m.scan_tab_output()}
 				</button>
 				<button
 					class="px-3 py-1.5 text-xs font-medium border-b-2 transition-colors cursor-pointer {activeTab === 'results' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}"
@@ -307,7 +308,7 @@
 					{:else}
 						<ShieldCheck class="w-3 h-3 inline mr-1 text-green-500" />
 					{/if}
-					Scan results
+					{m.scan_tab_results()}
 					<Badge variant={hasCriticalOrHigh ? 'destructive' : 'secondary'} class="ml-1 text-2xs py-0">
 						{totalVulnerabilities}
 					</Badge>
@@ -322,9 +323,9 @@
 				<div class="flex items-center justify-between text-xs text-muted-foreground mb-2 shrink-0">
 					<div class="flex items-center gap-2">
 						<Terminal class="w-3.5 h-3.5" />
-						<span>Output ({outputLines.length} lines)</span>
+						<span>{m.scan_output_lines({ count: outputLines.length })}</span>
 					</div>
-					<button type="button" onclick={toggleLogTheme} class="p-1 rounded hover:bg-muted transition-colors cursor-pointer" title="Toggle log theme">
+					<button type="button" onclick={toggleLogTheme} class="p-1 rounded hover:bg-muted transition-colors cursor-pointer" title={m.scan_toggle_log_theme()}>
 						{#if logDarkMode}
 							<Sun class="w-3.5 h-3.5" />
 						{:else}
