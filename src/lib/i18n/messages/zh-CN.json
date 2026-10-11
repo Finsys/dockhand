@@ -2091,5 +2091,993 @@
 	"gridcol_hint_stack_webhook": "Git 堆栈 webhook ID 和 URL(用于对接 Gitea/GitHub/GitLab)",
 	"gridcol_hint_backup_type": "容器或堆栈备份",
 	"gridcol_hint_backup_repository": "备份目标 (S3、REST、本地等)",
-	"gridcol_hint_last_backup_status": "上次备份状态"
+	"gridcol_hint_last_backup_status": "上次备份状态",
+	"stacks_item_stack": "堆栈",
+	"stacks_list_filter_partial": "部分",
+	"stacks_list_filter_stopped": "已停止",
+	"stacks_list_filter_not_deployed": "未部署",
+	"stacks_list_status_stopped": "已停止",
+	"stacks_list_status_partial": "部分",
+	"stacks_list_status_not_deployed": "未部署",
+	"stacks_list_batch_starting": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "正在启动 {count} 个堆栈",
+				"countPlural=other": "正在启动 {count} 个堆栈"
+			}
+		}
+	],
+	"stacks_list_batch_stopping": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "正在停止 {count} 个堆栈",
+				"countPlural=other": "正在停止 {count} 个堆栈"
+			}
+		}
+	],
+	"stacks_list_batch_bringing_down": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "正在下线 {count} 个堆栈",
+				"countPlural=other": "正在下线 {count} 个堆栈"
+			}
+		}
+	],
+	"stacks_list_batch_restarting": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "正在重启 {count} 个堆栈",
+				"countPlural=other": "正在重启 {count} 个堆栈"
+			}
+		}
+	],
+	"stacks_list_batch_removing": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "正在移除 {count} 个堆栈",
+				"countPlural=other": "正在移除 {count} 个堆栈"
+			}
+		}
+	],
+	"stacks_list_toast_load_failed": "加载堆栈失败",
+	"stacks_list_output_starting": "正在启动 {name}",
+	"stacks_list_error_start": "启动堆栈失败",
+	"stacks_list_output_stopping": "正在停止 {name}",
+	"stacks_list_error_stop": "停止堆栈失败",
+	"stacks_list_output_recreating": "正在重建 {name}",
+	"stacks_list_output_restarting": "正在重启 {name}",
+	"stacks_list_toast_recreated": "已重建 {name}",
+	"stacks_list_error_restart": "重启堆栈失败",
+	"stacks_list_output_redeploying": "正在重新部署 {name}",
+	"stacks_list_output_option_pull": "拉取镜像",
+	"stacks_list_output_option_build": "构建镜像",
+	"stacks_list_output_option_force_recreate": "强制重建",
+	"stacks_list_output_options": "选项:{options}",
+	"stacks_list_output_option_none": "无",
+	"stacks_list_toast_redeploy_failed": "重新部署 {name} 失败",
+	"stacks_list_toast_redeployed": "已重新部署 {name}",
+	"stacks_list_error_redeploy": "重新部署堆栈失败",
+	"stacks_list_output_bringing_down": "正在下线 {name}",
+	"stacks_list_toast_down_failed": "下线 {name} 失败",
+	"stacks_list_toast_brought_down": "已下线 {name}",
+	"stacks_list_error_down": "下线堆栈失败",
+	"stacks_list_error_remove": "移除堆栈失败",
+	"stacks_list_removed_files_deleted": "文件已删除",
+	"stacks_list_removed_files_kept": "文件已保留",
+	"stacks_list_removed_volumes_deleted": "数据卷已删除",
+	"stacks_list_toast_removed": "已移除 {name}({details})",
+	"stacks_list_toast_container_started": "容器已启动",
+	"stacks_list_toast_container_stopped": "容器已停止",
+	"stacks_list_toast_container_restarted": "容器已重启",
+	"stacks_list_toast_container_paused": "容器已暂停",
+	"stacks_list_toast_container_unpaused": "容器已恢复",
+	"stacks_list_toast_container_removed": "容器已移除",
+	"stacks_list_title": "Compose 堆栈",
+	"stacks_list_collapse_all": "全部折叠",
+	"stacks_list_expand_all": "全部展开",
+	"stacks_list_collapse": "折叠",
+	"stacks_list_expand": "展开",
+	"stacks_list_search_placeholder": "搜索堆栈...",
+	"stacks_list_filter_plural": "个状态",
+	"stacks_list_layout_vertical": "切换为垂直布局(日志在侧边)",
+	"stacks_list_layout_horizontal": "切换为水平布局(日志在下方)",
+	"stacks_list_from_git": "来自 Git",
+	"stacks_list_adopt": "接管",
+	"stacks_list_confirm_stack_count": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} 个堆栈",
+				"countPlural=other": "{count} 个堆栈"
+			}
+		}
+	],
+	"stacks_list_action_down": "下线",
+	"stacks_list_bulk_down_title": "下线 {count} 个",
+	"stacks_list_down": "下线",
+	"stacks_list_empty_title": "未找到 compose 堆栈",
+	"stacks_list_empty_description": "创建堆栈或从 Git 部署以开始使用",
+	"stacks_list_system_dockhand": "Dockhand 管理容器",
+	"stacks_list_system_hawser": "Hawser 远程代理",
+	"stacks_list_env_vars_configured": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "已配置 {count} 个环境变量",
+				"countPlural=other": "已配置 {count} 个环境变量"
+			}
+		}
+	],
+	"stacks_list_git_updates_title": "有镜像更新可用 — 从 Git 部署以应用",
+	"stacks_list_external_update_hint": "外部堆栈 - 仅可对单个容器进行更新。",
+	"stacks_list_newer_version_tooltip": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} 个容器有更新的版本标签。",
+				"countPlural=other": "{count} 个容器有更新的版本标签。"
+			}
+		}
+	],
+	"stacks_list_cooling_down_tooltip": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} 个容器正在等待镜像最小存在期。",
+				"countPlural=other": "{count} 个容器正在等待镜像最小存在期。"
+			}
+		}
+	],
+	"stacks_list_source_internal": "内部",
+	"stacks_list_source_internal_hint": "由 Dockhand 管理",
+	"stacks_list_source_untracked": "未跟踪",
+	"stacks_list_source_untracked_hint": "Compose 文件位置未知。点击堆栈名称或编辑按钮来定位它。",
+	"stacks_list_copy_webhook_url": "复制 webhook URL",
+	"stacks_list_location_not_set": "未设置",
+	"stacks_list_health_unhealthy_title": "一个或多个容器不健康",
+	"stacks_list_health_starting_title": "健康检查尚未稳定",
+	"stacks_list_health_healthy_title": "所有检查的容器均健康",
+	"stacks_list_edit_git_stack": "编辑 Git 堆栈",
+	"stacks_list_deploy": "部署",
+	"stacks_list_sync_from_git": "从 Git 同步",
+	"stacks_list_view_logs": "查看日志",
+	"stacks_list_restart_mode_restart_hint": "快速原地重启。忽略 depends_on 顺序。",
+	"stacks_list_restart_mode_ordered": "按顺序重启",
+	"stacks_list_restart_mode_ordered_hint": "按 depends_on 顺序先停止再启动。容器 ID 不变。",
+	"stacks_list_restart_mode_recreate": "重建(停止并启动)",
+	"stacks_list_restart_mode_recreate_hint": "按顺序重建容器。生成新 ID,并重新拉取更新的镜像。",
+	"stacks_list_down_title": "下线(移除容器)",
+	"stacks_list_restart_count": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "重启 {count} 次",
+				"countPlural=other": "重启 {count} 次"
+			}
+		}
+	],
+	"stacks_list_spark_mem": "内存",
+	"stacks_list_spark_net": "网络",
+	"stacks_list_spark_disk": "磁盘",
+	"stacks_list_volumes_mounted": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "已挂载 {count} 个数据卷",
+				"countPlural=other": "已挂载 {count} 个数据卷"
+			}
+		}
+	],
+	"stacks_list_open_logs_inline": "内联打开日志",
+	"stacks_list_open_logs_full_view": "以完整视图打开日志",
+	"stacks_list_open_terminal": "打开终端",
+	"stacks_list_inspect_container": "检查容器",
+	"stacks_list_no_containers": "没有容器",
+	"stacks_modal_validation_failed_status": "校验失败({status})",
+	"stacks_modal_validation_failed": "校验失败",
+	"stacks_modal_path_hint_will_create_in": "将在 {dir}/ 中创建",
+	"stacks_modal_path_hint_custom": "自定义位置",
+	"stacks_modal_path_hint_default": "使用默认位置",
+	"stacks_modal_browser_select_compose_file": "选择 compose 文件",
+	"stacks_modal_browser_select_compose_file_or_dir": "选择 compose 文件或目录",
+	"stacks_modal_browser_select_env_file_or_dir": "选择环境变量文件或目录",
+	"stacks_modal_browser_relocate_title": "迁移 {name} 的位置",
+	"stacks_modal_move_files_failed": "移动文件失败",
+	"stacks_modal_move_files_error": "移动文件时发生错误",
+	"stacks_modal_load_compose_failed": "加载 compose 文件失败",
+	"stacks_modal_load_files_failed": "加载文件失败",
+	"stacks_modal_provider_check_failed_status": "检查提供者失败 ({status})",
+	"stacks_modal_provider_check_failed": "检查提供者失败",
+	"stacks_modal_container_unknown": "未知",
+	"stacks_modal_name_required": "堆栈名称必填",
+	"stacks_modal_name_invalid": "必须为小写,以字母或数字开头,且只能包含字母、数字、连字符和下划线",
+	"stacks_modal_compose_content_required": "compose 文件内容必填",
+	"stacks_modal_output_starting": "正在启动 {name}",
+	"stacks_modal_create_failed": "创建堆栈失败",
+	"stacks_modal_toast_created": "已创建堆栈 \"{name}\"",
+	"stacks_modal_create_error": "创建堆栈时发生错误",
+	"stacks_modal_compose_content_or_path_required": "compose 文件内容或路径必填",
+	"stacks_modal_compose_location_required": "请选择 compose 文件位置",
+	"stacks_modal_save_env_file_failed": "保存环境变量文件失败",
+	"stacks_modal_output_redeploying": "正在重新部署 {name}",
+	"stacks_modal_save_compose_failed": "保存 compose 文件失败",
+	"stacks_modal_toast_applied": "已应用堆栈",
+	"stacks_modal_toast_saved": "堆栈已保存",
+	"stacks_modal_apply_failed": "应用堆栈失败",
+	"stacks_modal_save_failed": "保存堆栈失败",
+	"stacks_modal_apply_error": "应用堆栈时发生错误",
+	"stacks_modal_save_error": "保存堆栈时发生错误",
+	"stacks_modal_change_icon": "更改堆栈图标",
+	"stacks_modal_create_title": "创建 compose 堆栈",
+	"stacks_modal_create_description": "创建新的 Docker Compose 堆栈",
+	"stacks_modal_view_description": "查看 compose 文件和依赖图",
+	"stacks_modal_edit_description": "编辑 compose 文件和环境变量",
+	"stacks_modal_tab_editor": "编辑器",
+	"stacks_modal_tab_graph": "图表",
+	"stacks_modal_tab_deploys": "部署",
+	"stacks_modal_loading_compose": "正在加载 compose 文件…",
+	"stacks_modal_tags": "标签",
+	"stacks_modal_stack_name": "堆栈名称",
+	"stacks_modal_untracked_title": "未跟踪的堆栈",
+	"stacks_modal_untracked_description": "—— 此堆栈正在 Docker 中运行,但 Dockhand 不知道其 compose 文件存储在磁盘上的位置。浏览找到该文件以开始编辑和管理它。",
+	"stacks_modal_running_containers": "运行中的容器:",
+	"stacks_modal_git_readonly_title": "这是一个由 Git 管理的堆栈——Dockhand 以只读方式显示其 compose;请在仓库中编辑它。",
+	"stacks_modal_git_readonly": "Git · 只读",
+	"stacks_modal_copy_commit_hash": "复制提交哈希",
+	"stacks_modal_copy_repository_url": "复制仓库 URL",
+	"stacks_modal_compose_file": "Compose 文件",
+	"stacks_modal_path_enter_name_above": "请在上方输入堆栈名称",
+	"stacks_modal_path_not_specified": "未指定",
+	"stacks_modal_env_file": "环境变量文件",
+	"stacks_modal_env_path_placeholder": "/path/to/.env（可选）",
+	"stacks_modal_theme_switch_dark": "切换为深色主题",
+	"stacks_modal_theme_switch_light": "切换为浅色主题",
+	"stacks_modal_compose_not_available": "Compose 文件不可用",
+	"stacks_modal_compose_not_available_hint": "请先部署或同步此 Git 堆栈,以便 Dockhand 拥有其 compose 文件的本地副本。",
+	"stacks_modal_no_compose_selected": "未选择 compose 文件",
+	"stacks_modal_no_compose_selected_hint": "浏览以定位此堆栈的 compose 文件。选择后编辑器将加载文件内容。",
+	"stacks_modal_browse_compose_file": "浏览 compose 文件",
+	"stacks_modal_select_info_title": "选择文件时会发生什么：",
+	"stacks_modal_select_info_text": "Dockhand 将跟踪此 compose 文件,让您可以在 UI 中编辑、启动和停止堆栈。您的文件保留在当前位置。",
+	"stacks_modal_validate_title": "部署前检查此 compose 的问题",
+	"stacks_modal_validate": "验证",
+	"stacks_modal_copy_requires_https": "复制需要 HTTPS",
+	"stacks_modal_copy_failed": "失败",
+	"stacks_modal_copied": "已复制",
+	"stacks_modal_copy": "复制",
+	"stacks_modal_env_info": "这些变量将写入堆栈目录中的 .env 文件,并传递给 compose 命令。",
+	"stacks_modal_close_output": "关闭输出",
+	"stacks_modal_read_only": "只读",
+	"stacks_modal_unsaved_changes": "未保存的更改",
+	"stacks_modal_no_changes": "无更改",
+	"stacks_modal_cancel": "取消",
+	"stacks_modal_creating": "正在创建...",
+	"stacks_modal_create": "创建",
+	"stacks_modal_starting": "正在启动...",
+	"stacks_modal_create_and_start": "创建并启动",
+	"stacks_modal_build_reason": "自动勾选:此 compose 文件包含 build: 段",
+	"stacks_modal_saving": "保存中...",
+	"stacks_modal_save": "保存",
+	"stacks_modal_deploying": "部署中...",
+	"stacks_modal_save_and_redeploy": "保存并重新部署",
+	"stacks_modal_force_recreate_reason_on": "已预先勾选,因为此堆栈设置了环境变量,而 compose 自身无法感知变量变更。取消勾选以仅重建配置发生变化的服务。",
+	"stacks_modal_force_recreate_reason_off": "未勾选,因为此堆栈未设置环境变量,所以 compose 只会重建配置发生变化的服务。勾选以重建所有服务。",
+	"stacks_modal_choose_icon": "选择堆栈图标",
+	"stacks_modal_unsaved_description": "你有未保存的更改。确定要在不保存的情况下关闭吗？",
+	"stacks_modal_continue_editing": "继续编辑",
+	"stacks_modal_discard_changes": "放弃更改",
+	"stacks_modal_path_change_title": "移动堆栈文件？",
+	"stacks_modal_path_change_description": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "你已更改堆栈位置。旧位置有 {count} 个文件可移动到新位置。",
+				"countPlural=other": "你已更改堆栈位置。旧位置有 {count} 个文件可移动到新位置。"
+			}
+		}
+	],
+	"stacks_modal_path_change_question": "要将所有文件移动到新位置，还是保留在原处？",
+	"stacks_modal_leave_files": "保留文件",
+	"stacks_modal_move_files": "移动文件",
+	"stacks_modal_browse_confirm_title": "替换编辑器内容?",
+	"stacks_modal_browse_confirm_description": "加载不同的 compose 文件将替换当前编辑器内容。",
+	"stacks_modal_browse_confirm_current": "当前:",
+	"stacks_modal_browse_confirm_unsaved": "(未保存)",
+	"stacks_modal_browse_confirm_new": "新：",
+	"stacks_modal_replace_content": "替换内容",
+	"stacks_modal_persistence_title": "此位置未持久化",
+	"stacks_modal_persistence_pick_another": "选择其他位置",
+	"stacks_modal_persistence_use_anyway": "仍然使用",
+	"stacks_modal_relocate_title": "迁移堆栈?",
+	"stacks_modal_relocate_description": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "堆栈文件夹中的全部 {count} 个文件都将被移动。",
+				"countPlural=other": "堆栈文件夹中的全部 {count} 个文件都将被移动。"
+			}
+		}
+	],
+	"stacks_modal_relocate_from": "从",
+	"stacks_modal_relocate_to": "到",
+	"stacks_modal_moving": "正在移动…",
+	"stacks_modal_exists_title": "堆栈已存在",
+	"stacks_modal_exists_description": "名为 \"{name}\" 的堆栈已存在。请选择其他名称。",
+	"stacks_modal_ok": "确定",
+	"stacks_graph_parse_error_partial": "{error}(显示部分图)",
+	"stacks_graph_node_missing": "缺失",
+	"stacks_graph_node_network_caption": "网络:{driver}",
+	"stacks_graph_node_volume_caption": "数据卷:{driver}",
+	"stacks_graph_node_config_caption": "Config",
+	"stacks_graph_node_secret_caption": "密钥",
+	"stacks_graph_type_service": "服务",
+	"stacks_graph_type_network": "网络",
+	"stacks_graph_type_volume": "数据卷",
+	"stacks_graph_type_config": "Config",
+	"stacks_graph_type_secret": "密钥",
+	"stacks_graph_edge_dependency": "依赖",
+	"stacks_graph_edge_link": "链接",
+	"stacks_graph_edge_network_connection": "网络连接",
+	"stacks_graph_edge_volume_mount": "数据卷挂载",
+	"stacks_graph_edge_config_mount": "配置挂载",
+	"stacks_graph_edge_secret_mount": "密钥挂载",
+	"stacks_graph_add": "添加",
+	"stacks_graph_cancel": "取消",
+	"stacks_graph_dependency_mode": "依赖",
+	"stacks_graph_mount_mode": "挂载",
+	"stacks_graph_hint_click_target_service": "点击目标服务",
+	"stacks_graph_hint_click_source_service": "点击源服务",
+	"stacks_graph_hint_click_mount_source": "点击数据卷/网络/config/secret",
+	"stacks_graph_change_layout": "更改布局",
+	"stacks_graph_layout_tree": "树",
+	"stacks_graph_layout_grid": "网格",
+	"stacks_graph_layout_circle": "圆形",
+	"stacks_graph_layout_radial": "径向",
+	"stacks_graph_layout_force": "强制",
+	"stacks_graph_theme_dark": "切换为深色主题",
+	"stacks_graph_theme_light": "切换为浅色主题",
+	"stacks_graph_yaml_parse_error": "YAML 解析错误",
+	"stacks_graph_save_and_close": "保存并关闭",
+	"stacks_graph_delete": "删除",
+	"stacks_graph_remove_connection": "删除连接",
+	"stacks_graph_image": "镜像",
+	"stacks_graph_command": "命令",
+	"stacks_graph_restart_policy": "重启策略",
+	"stacks_graph_restart_no": "否",
+	"stacks_graph_restart_always": "总是",
+	"stacks_graph_restart_on_failure": "失败时",
+	"stacks_graph_restart_unless_stopped": "除非被停止",
+	"stacks_graph_port_mappings": "端口映射",
+	"stacks_graph_host": "主机",
+	"stacks_graph_container": "容器",
+	"stacks_graph_volumes": "数据卷",
+	"stacks_graph_environment": "环境",
+	"stacks_graph_key": "键",
+	"stacks_graph_value": "值",
+	"stacks_graph_labels": "标签",
+	"stacks_graph_depends_on": "依赖于",
+	"stacks_graph_remove_dependency": "删除依赖",
+	"stacks_graph_driver": "驱动",
+	"stacks_graph_ipam_config": "IPAM 配置",
+	"stacks_graph_subnet": "子网",
+	"stacks_graph_gateway": "网关",
+	"stacks_graph_external_network": "外部网络",
+	"stacks_graph_internal_network": "内部网络",
+	"stacks_graph_attachable": "可附加",
+	"stacks_graph_driver_options": "驱动选项",
+	"stacks_graph_external_volume": "外部数据卷",
+	"stacks_graph_external_config": "外部配置",
+	"stacks_graph_external_name_optional": "外部名称（可选）",
+	"stacks_graph_config_source_hint": "指定以下之一:file、content 或 environment",
+	"stacks_graph_file_path": "文件路径",
+	"stacks_graph_content_inline": "内容（内联）",
+	"stacks_graph_environment_variable": "环境变量",
+	"stacks_graph_external_secret": "外部密钥",
+	"stacks_graph_secret_source_hint": "指定以下之一:file 或 environment",
+	"stacks_graph_edge_dependency_desc": "此服务依赖于 {service},将在其之后启动。",
+	"stacks_graph_edge_volume_mount_desc": "数据卷已挂载到此服务。",
+	"stacks_graph_edge_network_connection_desc": "服务已连接到此网络。",
+	"stacks_graph_edge_config_mount_desc": "Config 已挂载到此服务。",
+	"stacks_graph_edge_secret_mount_desc": "密钥已挂载到此服务。",
+	"stacks_graph_add_element": "添加 {type}",
+	"stacks_graph_name": "名称",
+	"stacks_graph_ports_comma_separated": "端口（逗号分隔）",
+	"stacks_graph_close_menu": "关闭菜单",
+	"stacks_git_auth_ssh_key": "SSH 密钥",
+	"stacks_git_auth_password": "密码",
+	"stacks_git_auth_none": "无",
+	"stacks_git_toast_select_repo_first": "请先选择仓库",
+	"stacks_git_toast_enter_repo_url_first": "请先输入仓库 URL",
+	"stacks_git_toast_env_load_failed": "加载环境变量失败",
+	"stacks_git_unknown_error": "未知错误",
+	"stacks_git_toast_no_env_vars": "未找到环境变量",
+	"stacks_git_toast_no_env_vars_description": "仓库中未找到 .env 文件。你仍可手动添加变量。",
+	"stacks_git_toast_vars_loaded": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "已加载 {count} 个变量",
+				"countPlural=other": "已加载 {count} 个变量"
+			}
+		}
+	],
+	"stacks_git_toast_vars_loaded_description": "你现在可以在部署前自定义各项值",
+	"stacks_git_toast_deploy_failed": "部署失败",
+	"stacks_git_error_stack_name_required": "堆栈名称必填",
+	"stacks_git_error_stack_name_invalid": "堆栈名称必须为小写,以字母或数字开头,且只能包含字母、数字、连字符和下划线",
+	"stacks_git_error_repository_required": "请选择仓库",
+	"stacks_git_error_repo_name_required": "仓库名称必填",
+	"stacks_git_error_repo_url_required": "仓库 URL 必填",
+	"stacks_git_error_webhook_secret_required": "启用 webhook 时必须设置 webhook 密钥",
+	"stacks_git_output_title_deploying": "正在部署 {name}",
+	"stacks_git_error_save_failed": "保存 Git 堆栈失败",
+	"stacks_git_change_icon": "更改堆栈图标",
+	"stacks_git_title_edit": "编辑 Git 堆栈",
+	"stacks_git_title_create": "从 Git 部署",
+	"stacks_git_description_edit": "更新 Git 堆栈设置",
+	"stacks_git_description_create": "从 Git 仓库部署 compose 堆栈",
+	"stacks_git_tab_deploys": "部署",
+	"stacks_git_repository": "仓库",
+	"stacks_git_repo_mode_existing": "选择现有",
+	"stacks_git_repo_mode_new": "新增",
+	"stacks_git_select_repository_placeholder": "选择仓库...",
+	"stacks_git_no_repositories": "未配置仓库。点击\"添加\"以新增一个。",
+	"stacks_git_branch": "分支",
+	"stacks_git_branch_repo_default": "仓库默认 ({branch})",
+	"stacks_git_branch_hint": "此堆栈部署使用的分支。留空则跟随仓库上配置的分支（{branch}）。",
+	"stacks_git_repo_name": "仓库名称",
+	"stacks_git_repo_name_placeholder": "例如:my-stacks",
+	"stacks_git_repo_url": "仓库 URL",
+	"stacks_git_branch_type_or_pick": "输入名称或从列表中选择。",
+	"stacks_git_credential": "凭据",
+	"stacks_git_credential_none": "无（公开）",
+	"stacks_git_credential_hint": "用于私有仓库的 SSH 密钥或令牌。",
+	"stacks_git_stack_name": "堆栈名称",
+	"stacks_git_stack_name_placeholder": "例如:my-app",
+	"stacks_git_stack_name_hint": "这将是已部署堆栈的名称",
+	"stacks_git_tags": "标签",
+	"stacks_git_compose_path": "Compose 文件路径",
+	"stacks_git_compose_path_hint": "仓库内 compose 文件的路径",
+	"stacks_git_env_file": "额外的 env 文件（可选）",
+	"stacks_git_env_file_tip_default_before": "A",
+	"stacks_git_env_file_tip_default_after": "compose 目录中的文件如果存在，总是会被自动加载。",
+	"stacks_git_env_file_tip_custom_before": "此字段用于名称非标准的额外 env 文件（例如",
+	"stacks_git_env_file_tip_custom_middle": "）。其值会覆盖默认的",
+	"stacks_git_env_file_tip_custom_after": "。",
+	"stacks_git_env_file_tip_precedence": "右侧环境变量编辑器中的覆盖始终具有最高优先级。",
+	"stacks_git_env_file_hint": "传递给 Docker Compose 的额外 env 文件",
+	"stacks_git_context_dir": "上下文目录（可选）",
+	"stacks_git_context_dir_tip_working_dir": "Docker Compose 的工作目录，相对于仓库根目录。此目录中的所有文件都可用于数据卷挂载和构建上下文。",
+	"stacks_git_context_dir_tip_root_before": "使用",
+	"stacks_git_context_dir_tip_root_after": "用于仓库根目录，当你的 compose 文件引用了同级目录中的文件时。",
+	"stacks_git_context_dir_tip_default": "默认为 compose 文件的父目录。",
+	"stacks_git_context_dir_placeholder": "默认为 compose 文件所在目录",
+	"stacks_git_context_dir_hint_before": "相对于仓库根目录,例如",
+	"stacks_git_context_dir_hint_after": "用于 root",
+	"stacks_git_scheduled_sync": "启用定时同步",
+	"stacks_git_scheduled_sync_hint": "如有变更，自动同步仓库并重新部署堆栈。",
+	"stacks_git_webhook_enable": "启用 Webhook",
+	"stacks_git_webhook_hint": "接收来自 Git 提供商的推送事件,以触发同步和重新部署。",
+	"stacks_git_webhook_url": "Webhook URL",
+	"stacks_git_copy_url": "复制 URL",
+	"stacks_git_copy_requires_https": "复制需要 HTTPS",
+	"stacks_git_webhook_secret": "Webhook 密钥",
+	"stacks_git_webhook_secret_placeholder": "必填 - 生成或粘贴一个密钥",
+	"stacks_git_copy_secret": "复制密钥",
+	"stacks_git_generate_secret": "生成密钥",
+	"stacks_git_webhook_url_after_create": "Webhook URL 将在创建堆栈后可用。",
+	"stacks_git_webhook_configure_hint": "在您的 Git 提供商中配置此 URL。Secret 用于签名验证。",
+	"stacks_git_deploy_options": "部署选项",
+	"stacks_git_build_on_deploy": "部署时构建镜像",
+	"stacks_git_build_on_deploy_hint_before": "运行",
+	"stacks_git_build_on_deploy_hint_after": "以在启动容器前从 Dockerfile 构建镜像。",
+	"stacks_git_no_build_cache": "禁用构建缓存",
+	"stacks_git_no_build_cache_hint_before": "通过",
+	"stacks_git_no_build_cache_hint_after": "以强制不使用缓存层进行全新构建。",
+	"stacks_git_repull_images": "重新拉取镜像",
+	"stacks_git_repull_images_hint_before": "部署前始终拉取最新镜像，即使 compose 文件没有变化。适用于使用静态标签的 CI/CD 工作流，例如",
+	"stacks_git_repull_images_hint_after": "。",
+	"stacks_git_force_redeploy": "强制重新部署",
+	"stacks_git_force_redeploy_hint": "在 webhook 或计划同步时始终重新部署堆栈，即使未检测到 git 变更。",
+	"stacks_git_deploy_now": "立即部署",
+	"stacks_git_deploy_now_hint": "克隆并立即部署堆栈",
+	"stacks_git_env_info_storage_before": "覆盖仓库 env 文件中的变量。非机密变量保存到",
+	"stacks_git_env_info_storage_after": "(堆栈目录中)。机密变量存储在数据库中,并在部署时通过 shell 环境注入。",
+	"stacks_git_env_info_interpolation_before": "变量可用于",
+	"stacks_git_env_info_interpolation": "compose 文件插值",
+	"stacks_git_env_info_syntax_before": "使用",
+	"stacks_git_env_info_syntax_after": "语法。它们不会自动注入容器——请使用",
+	"stacks_git_env_info_reference_before": "或引用",
+	"stacks_git_env_info_reference_in": "在",
+	"stacks_git_env_info_reference_after": "中将其传入。",
+	"stacks_git_loading": "加载中…",
+	"stacks_git_populate": "填充",
+	"stacks_git_populate_tip_before": "克隆仓库并从中加载环境变量：",
+	"stacks_git_populate_tip_after": "文件（位于 compose 目录）以及额外的 env 文件（如果指定），以便你看到可以覆盖的内容。",
+	"stacks_git_cancel": "取消",
+	"stacks_git_deploying": "部署中...",
+	"stacks_git_save_and_deploy": "保存并部署",
+	"stacks_git_saving": "保存中...",
+	"stacks_git_save_changes": "保存更改",
+	"stacks_git_creating": "正在创建...",
+	"stacks_git_deploy": "部署",
+	"stacks_git_create": "创建",
+	"stacks_git_exists_title": "堆栈已存在",
+	"stacks_git_exists_description": "名为 \"{name}\" 的堆栈已存在。请选择其他名称。",
+	"stacks_git_ok": "确定",
+	"stacks_git_choose_icon": "选择堆栈图标",
+	"stacks_git_branches_loading": "正在加载分支…",
+	"stacks_git_branch_search_placeholder": "输入分支名称…",
+	"stacks_git_branches_heading": "分支",
+	"stacks_git_branch_default_badge": "默认",
+	"stacks_git_branch_custom_heading": "自定义",
+	"stacks_git_branch_use_custom": "使用 \"{branch}\"",
+	"stacks_git_branch_empty": "输入分支名称（例如 \"main\"）或从列表中选择。",
+	"stacks_git_badge_per_stack": "（按堆栈）",
+	"stacks_git_deploy_status_succeeded": "成功",
+	"stacks_git_deploy_status_failed": "失败",
+	"stacks_git_deploy_start_failed": "启动部署失败",
+	"stacks_git_unknown_error_occurred": "发生未知错误",
+	"stacks_git_deploy_failed_fallback": "部署失败",
+	"stacks_git_deploy_verb": "Git 部署",
+	"stacks_git_sync_confirm_title": "从 git 同步?",
+	"stacks_git_sync_confirm_before": "这将拉取以下堆栈的最新更改:",
+	"stacks_git_sync_confirm_after": "。",
+	"stacks_git_sync_confirm_restart_hint": "仅当配置发生变化时容器才会重启。",
+	"stacks_git_initializing": "正在初始化…",
+	"stacks_import_unknown_environment": "未知",
+	"stacks_import_scan_failed": "扫描目录失败",
+	"stacks_import_all_already_adopted": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "此目录中的 {count} 个堆栈已全部接管",
+				"countPlural=other": "此目录中的 {count} 个堆栈已全部接管"
+			}
+		}
+	],
+	"stacks_import_none_found": "此目录中未找到 compose 堆栈",
+	"stacks_import_no_environment": "未选择环境",
+	"stacks_import_adopt_stack_failed": "接管堆栈失败",
+	"stacks_import_adopted_stack": "已接管堆栈 \"{name}\"",
+	"stacks_import_failed_with_error": "失败:{error}",
+	"stacks_import_adopt_failed": "接管失败",
+	"stacks_import_adopt_stacks_failed": "接管堆栈失败",
+	"stacks_import_adopted_count": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "已接管 {count} 个堆栈",
+				"countPlural=other": "已接管 {count} 个堆栈"
+			}
+		}
+	],
+	"stacks_import_adopt_count_failed": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "接管 {count} 个堆栈失败",
+				"countPlural=other": "接管 {count} 个堆栈失败"
+			}
+		}
+	],
+	"stacks_import_browser_title_env": "接管堆栈到 {env}",
+	"stacks_import_browser_title": "接管堆栈",
+	"stacks_import_browser_description_remote": "浏览 Dockhand 主机文件系统以查找 compose 文件。文件在本地管理——Hawser 仅代理 Docker API 调用,不代理文件系统访问。",
+	"stacks_import_browser_description": "浏览 compose 文件或扫描目录中的堆栈。",
+	"stacks_import_results_title": "选择要采纳的堆栈",
+	"stacks_import_results_description": [
+		{
+			"declarations": [
+				"input count",
+				"input env",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "找到 {count} 个堆栈。选择是否将其接管到 {env}。",
+				"countPlural=other": "找到 {count} 个堆栈。选择要接管到 {env} 的堆栈。"
+			}
+		}
+	],
+	"stacks_import_service_count": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} 个服务",
+				"countPlural=other": "{count} 个服务"
+			}
+		}
+	],
+	"stacks_import_running_count": "{count} 个运行中",
+	"stacks_import_remote_files_before": "这些 compose 文件位于",
+	"stacks_import_remote_host": "Dockhand 主机",
+	"stacks_import_remote_files_after": "，不在 {env} 上。Docker 命令将通过 Hawser 发送到 {env}，但文件在本地管理。",
+	"stacks_import_remote_file_before": "此 compose 文件位于",
+	"stacks_import_remote_file_after": "，不在 {env} 上。Docker 命令将通过 Hawser 发送到 {env}，但该文件在本地管理。",
+	"stacks_import_adopt_info_title": "采纳时会发生什么：",
+	"stacks_import_adopt_info_stacks": "Dockhand 将跟踪这些 compose 文件,让您可以在 UI 中编辑、启动和停止堆栈。您的文件保留在当前位置。",
+	"stacks_import_adopt_info_stack": "Dockhand 将跟踪此 compose 文件,让您可以在 UI 中编辑、启动和停止堆栈。您的文件保留在当前位置。",
+	"stacks_import_selected_of_total": "共 {total} 项已选中",
+	"stacks_import_back": "返回",
+	"stacks_import_cancel": "取消",
+	"stacks_import_adopting": "正在接管...",
+	"stacks_import_adopt_count": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "接管 {count} 个堆栈",
+				"countPlural=other": "接管 {count} 个堆栈"
+			}
+		}
+	],
+	"stacks_import_preview_title": "接管此堆栈？",
+	"stacks_import_preview_description": "采纳前请检查 compose 文件。",
+	"stacks_import_preview_stack_label": "堆栈:",
+	"stacks_import_preview_unknown_name": "未知",
+	"stacks_import_adopt_stack": "接管堆栈",
+	"stacks_deploys_log_load_failed_status": "加载日志失败 ({status})",
+	"stacks_deploys_log_load_failed": "加载日志失败。",
+	"stacks_deploys_delete_failed": "删除部署运行失败",
+	"stacks_deploys_deleted": "部署运行记录已删除",
+	"stacks_deploys_history_load_failed_status": "加载部署历史失败 ({status})",
+	"stacks_deploys_history_load_failed": "加载部署历史失败。",
+	"stacks_deploys_empty_title": "尚无部署运行记录。",
+	"stacks_deploys_empty_description": "部署此堆栈 - 其运行历史将显示在此处。",
+	"stacks_deploys_item_run": "次部署",
+	"stacks_deploys_delete_title": "删除此次运行",
+	"stacks_deploys_build": "构建",
+	"stacks_deploys_triggered_by": "触发者",
+	"stacks_deploys_built": "构建于：",
+	"stacks_deploys_pulled": "已拉取:",
+	"stacks_deploys_log_truncated": "日志已截断",
+	"stacks_deploys_log_missing": "协议不再可用。",
+	"stacks_deploys_drag_to_resize": "拖动以调整大小",
+	"stacks_fs_select_file": "选择文件",
+	"stacks_fs_load_directory_failed": "加载目录失败",
+	"stacks_fs_create_folder_failed": "创建文件夹失败",
+	"stacks_fs_go_up": "向上一级",
+	"stacks_fs_folder_name": "文件夹名称",
+	"stacks_fs_create_folder": "创建文件夹",
+	"stacks_fs_cancel": "取消",
+	"stacks_fs_new_folder": "新建文件夹",
+	"stacks_fs_scanning": "扫描中...",
+	"stacks_fs_scan_folder": "扫描此文件夹",
+	"stacks_fs_browse_error": "无法浏览文件",
+	"stacks_fs_retry": "重试",
+	"stacks_fs_no_subdirectories": "没有子目录",
+	"stacks_fs_directory_empty": "目录为空",
+	"stacks_fs_compose_file": "Compose 文件",
+	"stacks_fs_selected": "已选:",
+	"stacks_fs_hint_file_or_folder": "单击选择文件或文件夹，双击进入文件夹",
+	"stacks_fs_hint_file": "点击文件以选中",
+	"stacks_fs_select": "选择",
+	"stacks_fs_default_location": "默认位置",
+	"stacks_fs_browse_for": "浏览 {label}",
+	"stacks_fs_change_location": "更改位置",
+	"stacks_fs_copy_path": "复制路径",
+	"stacks_fs_copy_requires_https": "复制需要 HTTPS",
+	"stacks_fs_locations": "位置",
+	"stacks_fs_dockhand_default": "Dockhand 默认",
+	"stacks_fs_remove_recent": "从最近中删除",
+	"stacks_fs_no_locations": "尚无位置。浏览文件夹以在此处添加。",
+	"stacks_fs_detect_failed": "未检测到 Compose 文件。",
+	"stacks_fs_detect_invalid_labels": "标签必须恰好指定一个 YAML 文件的绝对路径。",
+	"stacks_fs_detect_checking": "正在检查 Compose 路径标签...",
+	"stacks_fs_detect_from_labels": "从容器标签检测到:",
+	"stacks_fs_detect_shared_files_hint": "使用 Dockhand 文件系统上的文件。对于远程环境，这些必须是相同的共享文件。",
+	"stacks_fs_detect_use_file": "使用检测到的文件",
+	"stacks_fs_detect_use_file_hint": "将文件加载到编辑器中，与“浏览”相同。点击“保存”以保留该指定。",
+	"stacks_fs_detect_not_found": "无法检测到 Compose 文件。您可以手动浏览选择文件。",
+	"stacks_fs_detect_error_hint": "{error} 你仍然可以手动浏览选择文件。",
+	"stacks_validate_title": "Compose 校验",
+	"stacks_validate_errors": "错误",
+	"stacks_validate_warnings": "警告",
+	"stacks_validate_suggestions": "建议",
+	"stacks_validate_recheck": "重新检查",
+	"stacks_validate_close_panel": "关闭面板",
+	"stacks_validate_validating": "正在验证...",
+	"stacks_validate_no_problems": "未发现问题",
+	"stacks_validate_all_checks_passed": "通过所有已启用的检查。",
+	"stacks_validate_line": "L{line}",
+	"stacks_validate_apply_fix": "应用快速修复",
+	"stacks_validate_fix": "修复",
+	"stacks_icon_title": "选择图标",
+	"stacks_icon_manifest_error": "无法加载 selfh.st 图标列表。请检查服务器能否访问互联网。",
+	"stacks_icon_tab_icons": "图标",
+	"stacks_icon_tab_app_logos": "应用图标",
+	"stacks_icon_tab_upload": "上传",
+	"stacks_icon_search_icons": "搜索图标...",
+	"stacks_icon_search_app_logos": "搜索应用徽标(plex、jellyfin、grafana...)",
+	"stacks_icon_loading_list": "正在加载图标列表…",
+	"stacks_icon_loading_icons": "正在加载图标…",
+	"stacks_icon_no_match": "没有匹配 \"{query}\" 的应用图标。",
+	"stacks_icon_attribution_before": "应用图标来自",
+	"stacks_icon_attribution_after": "，采用 CC BY 4.0 许可。仅获取一次并缓存在本地。",
+	"stacks_icon_trademark_notice": "产品名称、徽标和商标均为其各自所有者的财产,仅用于标识;其使用不代表认可。",
+	"stacks_icon_upload_hint": "点击上传图片，然后裁剪",
+	"stacks_icon_upload_formats": "PNG、SVG 或 WebP",
+	"stacks_icon_clear": "清除图标",
+	"stacks_icon_crop_title": "裁剪图标",
+	"stacks_icon_save": "保存图标",
+	"stacks_redeploy_trigger_title": "重新部署",
+	"stacks_redeploy_more_options": "更多部署选项",
+	"stacks_redeploy_pull_images": "拉取镜像",
+	"stacks_redeploy_build_images": "构建镜像",
+	"stacks_redeploy_force_recreate": "强制重建",
+	"stacks_redeploy_deploying": "部署中...",
+	"stacks_redeploy_deploy": "部署",
+	"stacks_delete_will_remove_containers": "停止并移除该堆栈的容器",
+	"stacks_delete_will_delete_files": "删除磁盘上的堆栈文件",
+	"stacks_delete_will_keep_files": "保留磁盘上的堆栈文件",
+	"stacks_delete_will_delete_volumes": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "删除 {count} 个命名数据卷——数据不可恢复",
+				"countPlural=other": "删除 {count} 个命名数据卷——数据不可恢复"
+			}
+		}
+	],
+	"stacks_delete_will_keep_volumes": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "保留 {count} 个命名数据卷",
+				"countPlural=other": "保留 {count} 个命名数据卷"
+			}
+		}
+	],
+	"stacks_delete_title": "删除堆栈 \"{name}\"",
+	"stacks_delete_description": "选择要移除的内容。堆栈的容器将始终被停止并移除。",
+	"stacks_delete_checking": "正在检查可移除的内容…",
+	"stacks_delete_files_label": "删除磁盘上的文件",
+	"stacks_delete_volumes_label": "删除命名数据卷",
+	"stacks_delete_volumes_unrecoverable": "(数据不可恢复)",
+	"stacks_delete_nothing_managed": "此堆栈没有 Dockhand 管理的文件或命名数据卷——只会删除堆栈记录及其容器。",
+	"stacks_delete_what_will_happen": "将会发生什么",
+	"stacks_delete_cancel": "取消",
+	"stacks_delete_remove": "删除",
+	"stacks_output_recreated_count": "{count} 个已重建",
+	"stacks_output_created_count": "{count} 个已创建",
+	"stacks_output_started_count": "{count} 个已启动",
+	"stackenv_title": "环境变量",
+	"stackenv_view_form": "表单视图",
+	"stackenv_view_text": "文本视图(原始 .env 文件)",
+	"stackenv_pill_missing": "缺失 {count} 项",
+	"stackenv_pill_defined": "已定义 {count}",
+	"stackenv_pill_optional": "{count} 项可选",
+	"stackenv_load": "加载",
+	"stackenv_add": "添加",
+	"stackenv_clear_title": "清除所有变量？",
+	"stackenv_confirm_action_clear": "清除",
+	"stackenv_item_environment_variables": "环境变量",
+	"stackenv_clear_confirm": "全部清除",
+	"stackenv_clear": "清除",
+	"stackenv_interpolation_before": "这些变量可用于",
+	"stackenv_interpolation_strong": "compose 文件插值",
+	"stackenv_interpolation_using": "使用",
+	"stackenv_interpolation_after": "语法。",
+	"stackenv_interpolation_pass_before": "要将它们传入容器,请在 compose 文件的",
+	"stackenv_interpolation_pass_after": "部分。",
+	"stackenv_syntax_required": "必填",
+	"stackenv_syntax_optional": "可选",
+	"stackenv_syntax_required_error": "必填且有错误",
+	"stackenv_secrets_not_shown": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} 个密钥未显示。",
+				"countPlural=other": "{count} 个密钥未显示。"
+			}
+		}
+	],
+	"stackenv_secrets_not_shown_detail": "密钥永远不会写入磁盘,而是在堆栈启动时通过 shell 环境注入。",
+	"stackenv_providerref_before": "密钥提供者引用",
+	"stackenv_providerref_resolved": "已解析",
+	"stackenv_providerref_here": "此处",
+	"stackenv_providerref_here_after": "，位于堆栈的环境中。它是",
+	"stackenv_providerref_not": "不是",
+	"stackenv_providerref_not_after": "直接写在 compose 中时会解析",
+	"stackenv_providerref_block": "块 —— 在那里使用以下方式引用该变量",
+	"stackenv_providerref_instead": "。",
+	"stackenv_parse_warnings_title": "部分行无法解析:",
+	"stackenv_parse_warnings_more": "...以及另外 {count} 项",
+	"stackenv_parse_warnings_hint": "切换到文本视图以编辑这些行。",
+	"stackenv_injected_loaded": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "已加载 {count} 个密钥",
+				"countPlural=other": "已加载 {count} 个密钥"
+			}
+		}
+	],
+	"stackenv_injected_from": "从",
+	"stackenv_injected_the_provider": "该提供者",
+	"stackenv_injected_detail_before": "在上次部署时注入容器 — 永不写入到",
+	"stackenv_injected_detail_after": "。",
+	"stackenv_unbound_title": "未绑定密钥提供商",
+	"stackenv_unbound_detail": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "这 {count} 个密钥在上次部署时注入,但堆栈已不再绑定提供者。下次部署将丢弃它们。重新选择提供者以保留。",
+				"countPlural=other": "这 {count} 个密钥在上次部署时注入,但堆栈已不再绑定提供者。下次部署将丢弃它们。重新选择提供者以保留。"
+			}
+		}
+	],
+	"stackenv_probe_failed_named": "无法检查 {provider}：{error}",
+	"stackenv_probe_failed": "无法检查密钥提供者:{error}",
+	"stackenv_add_missing": "添加缺失项：",
+	"stackenv_source_file": "来自仓库中的 env 文件",
+	"stackenv_source_revert": "恢复为文件中的值",
+	"stackenv_source_override": "手动覆盖(不在文件中)",
+	"stackenv_status_required_defined": "必填变量已定义",
+	"stackenv_status_optional": "可选变量（有默认值）",
+	"stackenv_status_unused": "未使用的变量",
+	"stackenv_field_name": "名称",
+	"stackenv_field_value": "值",
+	"stackenv_secret_locked": "密钥值(无法取消隐藏)",
+	"stackenv_secret_marked": "已标记为机密",
+	"stackenv_secret_mark": "标记为机密",
+	"stackenv_empty": "未定义环境变量。",
+	"stackenv_add_first": "添加您的第一个变量",
+	"secretprovider_label": "密钥提供商",
+	"secretprovider_unknown": "未知提供者",
+	"secretprovider_none_disabled": "无——已禁用",
+	"secretprovider_none": "无",
+	"stacks_list_restart_stack": "重启堆栈 {name}",
+	"stacks_redeploy_header": "重新部署堆栈 {name}"
 }
