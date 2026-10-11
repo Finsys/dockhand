@@ -1896,5 +1896,200 @@
 			}
 		}
 	],
-	"snapshotdialog_error_reported": "备份工具报告:"
+	"snapshotdialog_error_reported": "备份工具报告:",
+	"time_in_future": "未来",
+	"time_just_now": "刚刚",
+	"time_minutes_ago": "{count} 分钟前",
+	"time_hours_ago": "{count} 小时前",
+	"time_days_ago": "{count} 天前",
+	"time_months_ago": "{count} 个月前",
+	"time_years_ago": "{count} 年前",
+	"duration_less_than_second": "不到 1 秒",
+	"duration_about_minute": "约 1 分钟",
+	"duration_about_hour": "约 1 小时",
+	"duration_seconds": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} 秒",
+				"countPlural=other": "{count} 秒"
+			}
+		}
+	],
+	"duration_minutes": "{count} 分钟",
+	"duration_hours": "{count} 小时",
+	"duration_days": "{count} 天",
+	"duration_weeks": "{count} 周",
+	"duration_months": "{count} 个月",
+	"duration_years": "{count} 年",
+	"duration_ago_less_than_second": "不到 1 秒前",
+	"duration_ago_about_minute": "约 1 分钟前",
+	"duration_ago_about_hour": "约 1 小时前",
+	"duration_ago_seconds": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} 秒前",
+				"countPlural=other": "{count} 秒前"
+			}
+		}
+	],
+	"duration_ago_minutes": "{count} 分钟前",
+	"duration_ago_hours": "{count} 小时前",
+	"duration_ago_days": "{count} 天前",
+	"duration_ago_weeks": "{count} 周前",
+	"duration_ago_months": "{count} 个月前",
+	"duration_ago_years": "{count} 年前",
+	"licence_expired": "许可证已过期",
+	"licence_expires_minutes": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "许可证将在 {count} 分钟后过期",
+				"countPlural=other": "许可证将在 {count} 分钟后过期"
+			}
+		}
+	],
+	"licence_expires_hours": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "许可证将在 {count} 小时后过期",
+				"countPlural=other": "许可证将在 {count} 小时后过期"
+			}
+		}
+	],
+	"licence_expires_tomorrow": "许可证明天过期",
+	"licence_expires_days": "许可证将在 {count} 天后过期",
+	"licence_problem": "许可证问题:{problem}",
+	"licence_not_valid": "许可证无效",
+	"licence_hold": "此实例的许可证需要续期。续期完成前仅管理员可进行操作,因此页面看起来会是空的。",
+	"updatesteps_step_pulling": "正在拉取镜像",
+	"updatesteps_step_scanning": "正在扫描漏洞",
+	"updatesteps_step_stopping": "正在停止",
+	"updatesteps_step_removing": "正在删除",
+	"updatesteps_step_creating": "正在创建",
+	"updatesteps_step_starting": "正在启动",
+	"updatesteps_step_done": "完成",
+	"updatesteps_step_updated": "已更新",
+	"updatesteps_step_failed": "失败",
+	"updatesteps_step_blocked": "已被漏洞阻止",
+	"updatesteps_step_checked": "已检查",
+	"updatesteps_step_skipped": "最新",
+	"updatesteps_criteria_title_never": "不按漏洞阻止",
+	"updatesteps_criteria_title_any": "存在任何漏洞即阻止",
+	"updatesteps_criteria_title_critical_high": "严重或高危漏洞即阻止",
+	"updatesteps_criteria_title_critical": "仅严重漏洞阻止",
+	"updatesteps_criteria_title_more_than_current": "高于当前等级即阻止",
+	"containers_batchupdate_active_step": "{step} {name}…",
+	"shell_user_container_default": "容器默认",
+	"containersstore_label_on": "于",
+	"containersstore_label_daily": "每日",
+	"containersstore_day_sun": "周日",
+	"containersstore_day_mon": "周一",
+	"containersstore_day_tue": "周二",
+	"containersstore_day_wed": "周三",
+	"containersstore_day_thu": "周四",
+	"containersstore_day_fri": "周五",
+	"containersstore_day_sat": "周六",
+	"containersstore_tooltip_daily": "每天 {time}",
+	"containersstore_tooltip_weekly": "每{day} {time}",
+	"containersstore_load_failed": "加载容器失败",
+	"auth_network_error": "网络错误",
+	"gridcol_name": "名称",
+	"gridcol_image": "镜像",
+	"gridcol_state": "状态",
+	"gridcol_health": "健康状态",
+	"gridcol_uptime": "运行时间",
+	"gridcol_restarts": "重启次数",
+	"gridcol_cpu": "CPU",
+	"gridcol_memory": "内存",
+	"gridcol_net_io": "网络 I/O",
+	"gridcol_disk_io": "磁盘 I/O",
+	"gridcol_ip": "IP",
+	"gridcol_ports": "端口",
+	"gridcol_auto_update": "自动更新",
+	"gridcol_stack": "堆栈",
+	"gridcol_tags": "标签",
+	"gridcol_size": "大小",
+	"gridcol_updated": "已更新",
+	"gridcol_tag": "标签",
+	"gridcol_id": "ID",
+	"gridcol_created": "已创建",
+	"gridcol_used_by": "使用者",
+	"gridcol_driver": "驱动",
+	"gridcol_scope": "范围",
+	"gridcol_subnet": "子网",
+	"gridcol_gateway": "网关",
+	"gridcol_containers": "容器",
+	"gridcol_status": "状态",
+	"gridcol_source": "来源",
+	"gridcol_webhook": "Webhook",
+	"gridcol_location": "位置",
+	"gridcol_networks": "网络",
+	"gridcol_volumes": "数据卷",
+	"gridcol_type": "类型",
+	"gridcol_timestamp": "时间戳",
+	"gridcol_environment": "环境",
+	"gridcol_action": "操作",
+	"gridcol_container": "容器",
+	"gridcol_exit": "退出码",
+	"gridcol_user": "用户",
+	"gridcol_entity": "实体",
+	"gridcol_ip_address": "IP 地址",
+	"gridcol_schedule": "计划任务",
+	"gridcol_last_run": "上次运行",
+	"gridcol_next_run": "下次运行",
+	"gridcol_connection": "连接",
+	"gridcol_host": "主机",
+	"gridcol_updates": "更新",
+	"gridcol_images": "镜像",
+	"gridcol_stacks": "堆栈",
+	"gridcol_events": "事件",
+	"gridcol_labels": "标签",
+	"gridcol_repository": "仓库",
+	"gridcol_snapshots": "快照",
+	"gridcol_last_backup": "上次备份",
+	"gridcol_retention": "保留策略",
+	"gridcol_latest": "最新",
+	"gridcol_usage": "用量",
+	"gridcol_stats": "统计",
+	"gridcol_cve": "CVE",
+	"gridcol_package": "软件包",
+	"gridcol_severity": "严重性",
+	"gridcol_installed_version": "已安装版本",
+	"gridcol_fixed_version": "修复版本",
+	"gridcol_scanned": "已扫描",
+	"gridcol_when": "时间",
+	"gridcol_duration": "时长",
+	"gridcol_trigger": "触发",
+	"gridcol_summary": "摘要",
+	"gridcol_hint_stack_webhook": "Git 堆栈 webhook ID 和 URL(用于对接 Gitea/GitHub/GitLab)",
+	"gridcol_hint_backup_type": "容器或堆栈备份",
+	"gridcol_hint_backup_repository": "备份目标 (S3、REST、本地等)",
+	"gridcol_hint_last_backup_status": "上次备份状态"
 }
