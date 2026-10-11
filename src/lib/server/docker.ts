@@ -5411,7 +5411,7 @@ export async function runContainerWithStreaming(options: {
 			// dies with the ephemeral container so it never accumulates on disk.
 			LogConfig: {
 				Type: 'json-file',
-				Config: { 'max-file': '1', 'max-size': '1g' }
+				Config: { 'max-file': '1', 'max-size': '1g', 'compress': 'false' }
 			}
 		}
 	};
