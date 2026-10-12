@@ -502,4 +502,21 @@ describe('a container showing its stack tags', () => {
 		withStackTags([], [src]);
 		expect(src.inherited).toBeUndefined();
 	});
+
+	test('does not cross-contaminate labels between containers of the same stack (#1740)', () => {
+		// Container A has tag1, Container B has tag2.
+		// A container's own tags must only reflect its own labels and stack assignments,
+		// never neighboring container labels.
+		const containerATags = mergeLabelTags([], { 'dockhand.tags': 'tag1' }, CATALOG);
+		const containerBTags = mergeLabelTags([], { 'dockhand.tags': 'tag2' }, CATALOG);
+		const stackTags = [PROD];
+
+		const resolvedA = withStackTags(containerATags, stackTags);
+		const resolvedB = withStackTags(containerBTags, stackTags);
+
+		expect(resolvedA.map((t) => t.name)).toEqual(['tag1', 'prod']);
+		expect(resolvedB.map((t) => t.name)).toEqual(['tag2', 'prod']);
+		expect(resolvedA.some((t) => t.name === 'tag2')).toBe(false);
+		expect(resolvedB.some((t) => t.name === 'tag1')).toBe(false);
+	});
 });

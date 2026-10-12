@@ -87,7 +87,7 @@
 	import type { ContainerInfo, TerminalMode } from '$lib/types';
 	import { matchesContainerHealthFilter, stateFilterValues } from '$lib/utils/grid-filters';
 	import { nextLogsSessions, panelsAfterRowClick, showsLogsIndicator } from '$lib/utils/active-logs-core';
-	import { matchesTagFilter, tagGroupDescriptor, mergeLabelTags, type Tag as UserTag, type TagColor, filterTagList, prunedTagFilter, withStackTags, stackLabelTags, mergeNamedTags } from '$lib/utils/tags-core';
+	import { matchesTagFilter, tagGroupDescriptor, mergeLabelTags, type Tag as UserTag, type TagColor, filterTagList, prunedTagFilter, withStackTags } from '$lib/utils/tags-core';
 	import { isKnownIconName } from '$lib/utils/icons';
 	import { tagOrder } from '$lib/stores/tag-order';
 	import { applyOrder } from '$lib/utils/apply-order';
@@ -217,35 +217,8 @@
 		const assignedToStack = (stackTagsMap[stack] ?? [])
 			.map((id) => tagById.get(id))
 			.filter((t): t is UserTag => !!t);
-		// A stack also carries whatever its services name in their labels, which is
-		// what the stacks page shows - inherit that too, or a service with no label
-		// of its own stays untagged under a stack the UI shows as tagged.
-		const fromStack = mergeNamedTags(
-			assignedToStack,
-			stackLabelTagsByProject[stack],
-			tagCatalog,
-			isKnownIconName
-		);
-		return withStackTags(own, fromStack);
+		return withStackTags(own, assignedToStack);
 	}
-
-	// The label tags each compose project carries, unioned across its containers -
-	// the same rule listComposeStacks applies server-side, computed here from the
-	// rows already on screen rather than fetching the stacks.
-	const stackLabelTagsByProject = $derived.by(() => {
-		if (!inheritStackTags) return {} as Record<string, ReturnType<typeof stackLabelTags>>;
-		const byProject = new Map<string, Array<Record<string, string> | undefined>>();
-		for (const c of containers) {
-			const p = getComposeProject(c.labels);
-			if (!p) continue;
-			const list = byProject.get(p) ?? [];
-			list.push(c.labels);
-			byProject.set(p, list);
-		}
-		const out: Record<string, ReturnType<typeof stackLabelTags>> = {};
-		for (const [p, labels] of byProject) out[p] = stackLabelTags(labels);
-		return out;
-	});
 
 	// The filter lists the catalogue plus any tag only a label names, so a tag that
 	// lives in a label can still be filtered and grouped by.
