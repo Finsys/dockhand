@@ -2,6 +2,7 @@
 	import { page } from '$app/stores';
 	import { onMount, onDestroy } from 'svelte';
 	import { Terminal as TerminalIcon } from 'lucide-svelte';
+	import { m } from '$lib/paraglide/messages.js';
 
 	// Dynamic imports for browser-only xterm
 	let Terminal: any;
@@ -21,7 +22,7 @@
 	let containerId = $derived($page.params.id);
 	let shell = $derived($page.url.searchParams.get('shell') || '/bin/bash');
 	let user = $derived($page.url.searchParams.get('user') || 'root');
-	let name = $derived($page.url.searchParams.get('name') || 'Container');
+	let name = $derived($page.url.searchParams.get('name') || m.terminal_container_fallback());
 
 	function initTerminal() {
 		if (!terminalRef || terminal || !xtermLoaded) return;
@@ -89,15 +90,15 @@
 		const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
 		const wsUrl = `${protocol}//${window.location.host}/api/containers/${containerId}/exec?shell=${encodeURIComponent(shell)}&user=${encodeURIComponent(user)}`;
 
-		terminal.writeln(`\x1b[90mConnecting to ${name}...\x1b[0m`);
-		terminal.writeln(`\x1b[90mShell: ${shell}, User: ${user || 'default'}\x1b[0m`);
+		terminal.writeln(`\x1b[90m${m.containers_terminal_connecting({ name })}\x1b[0m`);
+		terminal.writeln(`\x1b[90m${m.containers_terminal_session_info({ shell, user: user || m.containers_terminal_user_default() })}\x1b[0m`);
 		terminal.writeln('');
 
 		ws = new WebSocket(wsUrl);
 
 		ws.onopen = () => {
 			connected = true;
-			document.title = `Terminal - ${name}`;
+			document.title = m.containers_terminal_title({ name });
 			terminal?.focus();
 			// Send initial resize
 			if (fitAddon && terminal) {
@@ -115,9 +116,9 @@
 					terminal?.write(msg.data);
 				} else if (msg.type === 'error') {
 					error = msg.message;
-					terminal?.writeln(`\x1b[31mError: ${msg.message}\x1b[0m`);
+					terminal?.writeln(`\x1b[31m${m.containers_terminal_error({ message: msg.message })}\x1b[0m`);
 				} else if (msg.type === 'exit') {
-					terminal?.writeln('\x1b[90m\r\nSession ended.\x1b[0m');
+					terminal?.writeln(`\x1b[90m\r\n${m.containers_terminal_session_ended()}\x1b[0m`);
 					connected = false;
 					// Close the window after a brief delay so user sees the message
 					setTimeout(() => {
@@ -131,13 +132,13 @@
 
 		ws.onerror = (e) => {
 			console.error('WebSocket error:', e);
-			error = 'Connection error';
-			terminal?.writeln('\x1b[31mConnection error\x1b[0m');
+			error = m.containers_terminal_connection_error();
+			terminal?.writeln(`\x1b[31m${m.containers_terminal_connection_error()}\x1b[0m`);
 		};
 
 		ws.onclose = () => {
 			connected = false;
-			terminal?.writeln('\x1b[90mDisconnected.\x1b[0m');
+			terminal?.writeln(`\x1b[90m${m.containers_terminal_disconnected()}\x1b[0m`);
 		};
 	}
 
@@ -194,7 +195,7 @@
 </script>
 
 <svelte:head>
-	<title>Terminal - {containerName || 'Loading...'}</title>
+	<title>{m.containers_terminal_title({ name: containerName || m.containers_terminal_loading() })}</title>
 </svelte:head>
 
 <div class="h-screen w-screen flex flex-col bg-[#0c0c0c]">
@@ -206,18 +207,18 @@
 			{#if connected}
 				<span class="inline-flex items-center gap-1 text-xs text-green-500">
 					<span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-					Connected
+					{m.containers_terminal_connected()}
 				</span>
 			{:else if error}
 				<span class="text-xs text-red-500">{error}</span>
 			{:else}
-				<span class="text-xs text-zinc-500">Connecting...</span>
+				<span class="text-xs text-zinc-500">{m.terminal_status_connecting()}</span>
 			{/if}
 		</div>
 		<div class="flex items-center gap-2 text-xs text-zinc-500">
-			<span>Shell: {shell}</span>
+			<span>{m.terminal_header_shell({ shell })}</span>
 			<span>|</span>
-			<span>User: {user}</span>
+			<span>{m.terminal_header_user({ user })}</span>
 		</div>
 	</div>
 
@@ -227,7 +228,7 @@
 			<div bind:this={terminalRef} class="h-full w-full"></div>
 		{:else}
 			<div class="h-full w-full flex items-center justify-center">
-				<span class="text-zinc-500">Loading terminal...</span>
+				<span class="text-zinc-500">{m.terminal_loading_terminal()}</span>
 			</div>
 		{/if}
 	</div>
