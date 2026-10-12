@@ -1899,5 +1899,200 @@
 			}
 		}
 	],
-	"snapshotdialog_error_reported": "L'outil de sauvegarde a signalé :"
+	"snapshotdialog_error_reported": "L'outil de sauvegarde a signalé :",
+	"time_in_future": "dans le futur",
+	"time_just_now": "à l'instant",
+	"time_minutes_ago": "il y a {count} min",
+	"time_hours_ago": "il y a {count} h",
+	"time_days_ago": "il y a {count} j",
+	"time_months_ago": "il y a {count} mois",
+	"time_years_ago": "il y a {count} an(s)",
+	"duration_less_than_second": "Moins d'une seconde",
+	"duration_about_minute": "Environ une minute",
+	"duration_about_hour": "Environ une heure",
+	"duration_seconds": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} seconde",
+				"countPlural=other": "{count} secondes"
+			}
+		}
+	],
+	"duration_minutes": "{count} minutes",
+	"duration_hours": "{count} heures",
+	"duration_days": "{count} jours",
+	"duration_weeks": "{count} semaines",
+	"duration_months": "{count} mois",
+	"duration_years": "{count} ans",
+	"duration_ago_less_than_second": "Il y a moins d'une seconde",
+	"duration_ago_about_minute": "Il y a environ une minute",
+	"duration_ago_about_hour": "Il y a environ une heure",
+	"duration_ago_seconds": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "Il y a {count} seconde",
+				"countPlural=other": "Il y a {count} secondes"
+			}
+		}
+	],
+	"duration_ago_minutes": "Il y a {count} minutes",
+	"duration_ago_hours": "Il y a {count} heures",
+	"duration_ago_days": "Il y a {count} jours",
+	"duration_ago_weeks": "Il y a {count} semaines",
+	"duration_ago_months": "Il y a {count} mois",
+	"duration_ago_years": "Il y a {count} ans",
+	"licence_expired": "Licence expirée",
+	"licence_expires_minutes": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "La licence expire dans {count} minute",
+				"countPlural=other": "La licence expire dans {count} minutes"
+			}
+		}
+	],
+	"licence_expires_hours": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "La licence expire dans {count} heure",
+				"countPlural=other": "La licence expire dans {count} heures"
+			}
+		}
+	],
+	"licence_expires_tomorrow": "La licence expire demain",
+	"licence_expires_days": "La licence expire dans {count} jours",
+	"licence_problem": "Problème de licence : {problem}",
+	"licence_not_valid": "La licence n'est pas valide",
+	"licence_hold": "La licence de cette instance doit être renouvelée. D'ici là, seuls les administrateurs peuvent faire des changements, donc les pages sembleront vides.",
+	"updatesteps_step_pulling": "Téléchargement de l'image",
+	"updatesteps_step_scanning": "Analyse des vulnérabilités",
+	"updatesteps_step_stopping": "Arrêt",
+	"updatesteps_step_removing": "Retrait",
+	"updatesteps_step_creating": "Création",
+	"updatesteps_step_starting": "Démarrage",
+	"updatesteps_step_done": "Terminé",
+	"updatesteps_step_updated": "Mis à jour",
+	"updatesteps_step_failed": "Échec",
+	"updatesteps_step_blocked": "Bloqué par des vulnérabilités",
+	"updatesteps_step_checked": "Vérifié",
+	"updatesteps_step_skipped": "À jour",
+	"updatesteps_criteria_title_never": "Aucun blocage selon les vulnérabilités",
+	"updatesteps_criteria_title_any": "Bloquer en cas de vulnérabilité",
+	"updatesteps_criteria_title_critical_high": "Bloquer si critiques ou élevées",
+	"updatesteps_criteria_title_critical": "Bloquer si critiques seulement",
+	"updatesteps_criteria_title_more_than_current": "Bloquer si plus que l'image actuelle",
+	"containers_batchupdate_active_step": "{step} {name}...",
+	"shell_user_container_default": "Par défaut du conteneur",
+	"containersstore_label_on": "le",
+	"containersstore_label_daily": "quotidien",
+	"containersstore_day_sun": "dim",
+	"containersstore_day_mon": "lun",
+	"containersstore_day_tue": "mar",
+	"containersstore_day_wed": "mer",
+	"containersstore_day_thu": "jeu",
+	"containersstore_day_fri": "ven",
+	"containersstore_day_sat": "sam",
+	"containersstore_tooltip_daily": "Tous les jours à {time}",
+	"containersstore_tooltip_weekly": "Chaque {day} à {time}",
+	"containersstore_load_failed": "Impossible de charger les conteneurs",
+	"auth_network_error": "Erreur réseau",
+	"gridcol_name": "Nom",
+	"gridcol_image": "Image",
+	"gridcol_state": "État",
+	"gridcol_health": "Santé",
+	"gridcol_uptime": "Temps d'activité",
+	"gridcol_restarts": "Redémarrages",
+	"gridcol_cpu": "CPU",
+	"gridcol_memory": "Mémoire",
+	"gridcol_net_io": "E/S réseau",
+	"gridcol_disk_io": "E/S disque",
+	"gridcol_ip": "IP",
+	"gridcol_ports": "Ports",
+	"gridcol_auto_update": "Mise à jour auto",
+	"gridcol_stack": "Stack",
+	"gridcol_tags": "Tags",
+	"gridcol_size": "Taille",
+	"gridcol_updated": "Mis à jour",
+	"gridcol_tag": "Tag",
+	"gridcol_id": "ID",
+	"gridcol_created": "Créé",
+	"gridcol_used_by": "Utilisé par",
+	"gridcol_driver": "Pilote",
+	"gridcol_scope": "Portée",
+	"gridcol_subnet": "Sous-réseau",
+	"gridcol_gateway": "Passerelle",
+	"gridcol_containers": "Conteneurs",
+	"gridcol_status": "Statut",
+	"gridcol_source": "Source",
+	"gridcol_webhook": "Webhook",
+	"gridcol_location": "Emplacement",
+	"gridcol_networks": "Réseaux",
+	"gridcol_volumes": "Volumes",
+	"gridcol_type": "Type",
+	"gridcol_timestamp": "Horodatage",
+	"gridcol_environment": "Environnement",
+	"gridcol_action": "Action",
+	"gridcol_container": "Conteneur",
+	"gridcol_exit": "Sortie",
+	"gridcol_user": "Utilisateur",
+	"gridcol_entity": "Entité",
+	"gridcol_ip_address": "Adresse IP",
+	"gridcol_schedule": "Planification",
+	"gridcol_last_run": "Dernière exécution",
+	"gridcol_next_run": "Prochaine exécution",
+	"gridcol_connection": "Connexion",
+	"gridcol_host": "Hôte",
+	"gridcol_updates": "Mises à jour",
+	"gridcol_images": "Images",
+	"gridcol_stacks": "Stacks",
+	"gridcol_events": "Événements",
+	"gridcol_labels": "Étiquettes",
+	"gridcol_repository": "Dépôt",
+	"gridcol_snapshots": "Snapshots",
+	"gridcol_last_backup": "Dernière sauvegarde",
+	"gridcol_retention": "Rétention",
+	"gridcol_latest": "Dernière",
+	"gridcol_usage": "Utilisation",
+	"gridcol_stats": "Stats",
+	"gridcol_cve": "CVE",
+	"gridcol_package": "Paquet",
+	"gridcol_severity": "Gravité",
+	"gridcol_installed_version": "Version installée",
+	"gridcol_fixed_version": "Version corrigée",
+	"gridcol_scanned": "Analysé",
+	"gridcol_when": "Quand",
+	"gridcol_duration": "Durée",
+	"gridcol_trigger": "Déclencheur",
+	"gridcol_summary": "Résumé",
+	"gridcol_hint_stack_webhook": "ID et URL du webhook de la stack Git (pour brancher Gitea/GitHub/GitLab)",
+	"gridcol_hint_backup_type": "Sauvegarde de conteneur ou de stack",
+	"gridcol_hint_backup_repository": "Destination de sauvegarde (S3, REST, locale, etc.)",
+	"gridcol_hint_last_backup_status": "Statut de la dernière sauvegarde"
 }
