@@ -3609,5 +3609,417 @@
 	"networks_graph_internal_network": "Réseau interne",
 	"networks_graph_attachable": "Attachable",
 	"networks_graph_edge_network_connection_desc": "Service connecté à ce réseau.",
-	"pageheader_count_of": "{count} sur {total}"
+	"pageheader_count_of": "{count} sur {total}",
+	"logs_layout_single": "Simple",
+	"logs_layout_multi": "Multiple",
+	"logs_layout_grouped": "Groupé",
+	"logs_fetch_failed": "Impossible de récupérer les journaux : {error}",
+	"logs_stream_ended": "Flux terminé",
+	"logs_streaming_start_failed": "Impossible de démarrer le streaming",
+	"logs_reconnecting": "Reconnexion ({attempt}/{max})...",
+	"logs_connection_failed_retry": "Échec de la connexion. Cliquez pour réessayer.",
+	"logs_search_containers_placeholder": "Rechercher des conteneurs...",
+	"logs_no_matches": "Aucun résultat",
+	"logs_current": "actuel",
+	"logs_filter_containers_placeholder": "Filtrer les conteneurs...",
+	"logs_saved_groups": "Groupes enregistrés",
+	"logs_delete_group": "Supprimer le groupe",
+	"logs_favorites": "Favoris",
+	"logs_select_for_merge": "Sélectionner pour fusionner",
+	"logs_remove_from_favorites": "Retirer des favoris",
+	"logs_add_to_favorites": "Ajouter aux favoris",
+	"logs_group_name_placeholder": "Nom du groupe...",
+	"logs_save_group": "Enregistrer le groupe",
+	"logs_merge_containers": "Fusionner les journaux de {count} conteneurs",
+	"logs_select_containers_grouped": "Sélectionnez des conteneurs dans la liste pour afficher les journaux fusionnés",
+	"logs_connected_live_streaming": "Connecté - Streaming en direct",
+	"logs_disconnected": "Déconnecté",
+	"logs_streaming_paused": "Streaming en pause",
+	"logs_pause_live_streaming": "Mettre le streaming en pause",
+	"logs_resume_live_streaming": "Reprendre le streaming",
+	"logs_stream": "Flux",
+	"logs_toggle_auto_scroll": "Activer/désactiver le défilement automatique",
+	"logs_auto_scroll": "Défilement auto",
+	"logs_tail_lines_title": "Nombre de lignes de journal à charger",
+	"logs_tail_lines_option": "{amount} lignes",
+	"logs_toggle_word_wrap": "Activer/désactiver le retour à la ligne",
+	"logs_wrap": "Retour à la ligne",
+	"logs_hide_timestamps": "Masquer les horodatages",
+	"logs_show_timestamps": "Afficher les horodatages",
+	"logs_hide_container_name": "Masquer le préfixe du nom du conteneur",
+	"logs_show_container_name": "Afficher le préfixe du nom du conteneur",
+	"logs_hide_line_numbers": "Masquer les numéros de ligne",
+	"logs_show_line_numbers": "Afficher les numéros de ligne",
+	"logs_switch_light_mode": "Passer en mode clair",
+	"logs_switch_dark_mode": "Passer en mode sombre",
+	"logs_filter_mode_show_all": "Afficher toutes les lignes (mode filtre actif)",
+	"logs_filter_mode_hide_non_matching": "Masquer les lignes sans correspondance",
+	"logs_previous_match": "Résultat précédent",
+	"logs_next_match": "Résultat suivant",
+	"logs_close_search": "Fermer la recherche",
+	"logs_search_logs": "Rechercher dans les journaux",
+	"logs_copy_logs": "Copier les journaux",
+	"logs_download_logs": "Télécharger les journaux",
+	"logs_clear_logs": "Effacer les journaux",
+	"logs_previous_match_shortcut": "Résultat précédent (Maj+Entrée)",
+	"logs_next_match_shortcut": "Résultat suivant (Entrée)",
+	"logs_close_search_shortcut": "Fermer la recherche (Échap)",
+	"logs_search_logs_shortcut": "Rechercher dans les journaux (Ctrl+F)",
+	"logs_refresh_logs": "Actualiser les journaux",
+	"logs_select_container_from_list": "Sélectionnez un conteneur dans la liste",
+	"logs_select_container": "Sélectionnez un conteneur pour afficher ses journaux",
+	"logs_terminal_below": "Terminal en dessous",
+	"logs_terminal_side": "Terminal sur le côté",
+	"logs_loading_logs": "Chargement des journaux...",
+	"logs_timerange_title": "Plage horaire : {range}",
+	"logs_timerange_filter": "Filtrer les journaux par plage horaire",
+	"logs_timerange_from": "De",
+	"logs_timerange_to": "À",
+	"logs_timerange_time": "Heure :",
+	"logs_timerange_clear": "Effacer",
+	"logviewer_toggle_auto_refresh": "Activer/désactiver l'actualisation automatique",
+	"logviewer_toggle_auto_scroll": "Activer/désactiver le défilement automatique",
+	"logviewer_font_size": "Taille de police",
+	"logviewer_toggle_word_wrap": "Activer/désactiver le retour à la ligne",
+	"logviewer_hide_line_numbers": "Masquer les numéros de ligne",
+	"logviewer_show_line_numbers": "Afficher les numéros de ligne",
+	"logviewer_search_placeholder": "Rechercher...",
+	"logviewer_show_all_lines": "Afficher toutes les lignes (mode filtre actif)",
+	"logviewer_hide_non_matching_lines": "Masquer les lignes sans correspondance",
+	"logviewer_previous_match": "Précédent",
+	"logviewer_next_match": "Suivant",
+	"logviewer_search_logs": "Rechercher dans les journaux",
+	"logviewer_copied": "Copié!",
+	"logviewer_copy_logs": "Copier les journaux",
+	"logviewer_download_logs": "Télécharger les journaux",
+	"logviewer_clear_logs": "Effacer les journaux",
+	"logviewer_refresh_logs": "Actualiser les journaux",
+	"logviewer_loading_logs": "Chargement des journaux...",
+	"logspanel_connection_error": "Erreur de connexion",
+	"logspanel_start_streaming_failed": "Impossible de démarrer le streaming",
+	"logspanel_reconnecting": "Reconnexion ({attempt}/{max})...",
+	"logspanel_fetch_failed": "Impossible de récupérer les journaux : {error}",
+	"logspanel_unknown_error": "Erreur inconnue",
+	"logspanel_connected_live_streaming": "Connecté - Streaming en direct",
+	"logspanel_status_live": "En direct",
+	"logspanel_connecting": "Connexion...",
+	"logspanel_status_disconnected": "Déconnecté",
+	"logspanel_click_to_reconnect": "Cliquez pour vous reconnecter",
+	"logspanel_status_offline": "Hors ligne",
+	"logspanel_streaming_paused": "Streaming en pause",
+	"logspanel_status_paused": "En pause",
+	"logspanel_pause_live_streaming": "Mettre le streaming en pause",
+	"logspanel_resume_live_streaming": "Reprendre le streaming",
+	"logspanel_tail_lines_title": "Nombre de lignes de journal à charger",
+	"logspanel_tail_lines_option": "{count} lignes",
+	"logspanel_hide_timestamps": "Masquer les horodatages",
+	"logspanel_show_timestamps": "Afficher les horodatages",
+	"logspanel_hide_container_name_prefix": "Masquer le préfixe du nom du conteneur",
+	"logspanel_show_container_name_prefix": "Afficher le préfixe du nom du conteneur",
+	"logspanel_switch_to_light_mode": "Passer en mode clair",
+	"logspanel_switch_to_dark_mode": "Passer en mode sombre",
+	"logspanel_close_logs": "Fermer les journaux",
+	"logspanel_connecting_to_stream": "Connexion au flux de journaux...",
+	"terminal_page_title": "Terminal",
+	"terminal_search_placeholder": "Rechercher des conteneurs en cours d'exécution...",
+	"terminal_no_running_containers": "Aucun conteneur en cours d'exécution",
+	"terminal_no_matches": "Aucun résultat",
+	"terminal_container_connected": "connecté",
+	"terminal_mode_label": "Mode :",
+	"terminal_disconnect": "Déconnecter",
+	"terminal_shell_label": "Shell :",
+	"terminal_user_label": "Utilisateur :",
+	"terminal_select_container": "Sélectionnez un conteneur pour ouvrir un shell",
+	"terminal_no_shell_in_container": "Aucun shell disponible dans ce conteneur",
+	"terminal_no_shell_installed": "Ce conteneur n'a peut-être pas de shell installé.",
+	"terminal_status_disconnected": "Déconnecté",
+	"terminal_copy_output": "Copier la sortie",
+	"terminal_clear_shortcut": "Effacer (Cmd+L)",
+	"terminal_reconnect": "Reconnecter",
+	"terminal_reconnecting": "Reconnexion...",
+	"terminal_attaching": "Attachement à {name}...",
+	"terminal_attach_info": "Docker attach : processus principal du conteneur",
+	"terminal_panel_attach_prefix": "Attach :",
+	"terminal_panel_terminal_prefix": "Terminal :",
+	"terminal_panel_clear_shortcut": "Effacer le terminal (Ctrl+L)",
+	"terminal_panel_close": "Fermer le terminal",
+	"terminal_container_fallback": "Conteneur",
+	"terminal_status_connecting": "Connexion...",
+	"terminal_header_shell": "Shell : {shell}",
+	"terminal_header_user": "Utilisateur : {user}",
+	"terminal_loading_terminal": "Chargement du terminal...",
+	"registry_error_search_not_supported": "Ce registre ne permet pas de rechercher dans toutes les images.",
+	"registry_error_search_failed": "Échec de la recherche",
+	"registry_error_search_images": "Impossible de rechercher des images",
+	"registry_error_browse_failed": "Impossible de parcourir le registre",
+	"registry_error_fetch_tags": "Impossible de récupérer les tags",
+	"registry_tag_info_unavailable": "Indisponible",
+	"registry_tag_info_request_failed": "Échec de la requête",
+	"registry_date_today": "aujourd'hui",
+	"registry_date_yesterday": "hier",
+	"registry_date_days_ago": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "il y a {count} jour",
+				"countPlural=other": "il y a {count} jours"
+			}
+		}
+	],
+	"registry_date_weeks_ago": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "il y a {count} semaine",
+				"countPlural=other": "il y a {count} semaines"
+			}
+		}
+	],
+	"registry_date_months_ago": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "il y a {count} mois",
+				"countPlural=other": "il y a {count} mois"
+			}
+		}
+	],
+	"registry_date_years_ago": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "il y a {count} an",
+				"countPlural=other": "il y a {count} ans"
+			}
+		}
+	],
+	"registry_toast_deleted": "{name} supprimé",
+	"registry_toast_delete_failed": "Impossible de supprimer l'image",
+	"registry_manage": "Gérer les registres",
+	"registry_search_placeholder_named": "Rechercher des images dans {name}...",
+	"registry_search_placeholder": "Rechercher des images...",
+	"registry_search": "Rechercher",
+	"registry_browse": "Parcourir",
+	"registry_loading_catalog": "Chargement du catalogue...",
+	"registry_searching": "Recherche...",
+	"registry_no_images_in_registry": "Aucune image trouvée dans ce registre",
+	"registry_no_images_for_term": "Aucune image trouvée pour « {term} »",
+	"registry_search_tip_before": "Astuce : les grands registres ne prennent pas en charge la recherche. Essayez",
+	"registry_search_tip_link": "Parcourir",
+	"registry_search_tip_after": "et utilisez le filtre pour trouver des images.",
+	"registry_filter_placeholder": "Filtrer les résultats...",
+	"registry_images_count": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} image",
+				"countPlural=other": "{count} images"
+			}
+		}
+	],
+	"registry_images_filtered_count": [
+		{
+			"declarations": [
+				"input filtered",
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{filtered} sur {count} image",
+				"countPlural=other": "{filtered} sur {count} images"
+			}
+		}
+	],
+	"registry_col_name": "Nom",
+	"registry_col_description": "Description",
+	"registry_col_stars": "Étoiles",
+	"registry_col_type": "Type",
+	"registry_type_official": "Officielle",
+	"registry_type_automated": "Auto",
+	"registry_loading_tags": "Chargement des tags...",
+	"registry_col_tag": "Tag",
+	"registry_col_size": "Taille",
+	"registry_col_modified": "Modifié",
+	"registry_col_actions": "Actions",
+	"registry_pull_scan_tag_title": "Télécharger et analyser ce tag",
+	"registry_pull_tag_title": "Télécharger ce tag",
+	"registry_pull_scan": "Télécharger et analyser",
+	"registry_pull": "Télécharger",
+	"registry_run_container_title": "Exécuter un conteneur avec ce tag",
+	"registry_copy_to_other_title": "Copier vers un autre registre",
+	"registry_item_tag": "le tag",
+	"registry_delete_tag_title": "Supprimer le tag",
+	"registry_delete_confirm": "Supprimer",
+	"registry_delete_tag_button_title": "Supprimer ce tag",
+	"registry_loading_more": "Chargement d'autres éléments...",
+	"registry_tags_loaded": [
+		{
+			"declarations": [
+				"input loaded",
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{loaded} tag chargé sur {count}",
+				"countPlural=other": "{loaded} tags chargés sur {count}"
+			}
+		}
+	],
+	"registry_no_tags": "Aucun tag trouvé",
+	"registry_loading": "Chargement...",
+	"registry_load_more_images": "Charger plus d'images",
+	"registry_empty_search_browse_named": "Recherchez ou parcourez {name} pour trouver des images",
+	"registry_empty_search_browse": "Recherchez ou parcourez un registre pour trouver des images",
+	"registry_empty_search_named": "Recherchez dans {name} pour trouver et télécharger des images",
+	"registry_empty_search": "Recherchez dans un registre pour trouver et télécharger des images",
+	"registry_copy_title": "Copier vers un registre",
+	"registry_copy_step_pull": "Téléchargement",
+	"registry_copy_step_scan": "Analyse",
+	"registry_copy_to_clipboard": "Copier dans le presse-papiers",
+	"registry_copy_requires_https": "La copie nécessite HTTPS",
+	"registry_copy_retry_pull": "Réessayer le téléchargement",
+	"registry_copy_retry_scan": "Réessayer l'analyse",
+	"registry_copy_start": "Démarrer la copie",
+	"registry_copy_critical_found": "Vulnérabilités critiques/élevées trouvées",
+	"registry_copy_vulnerabilities_found": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} vulnérabilité trouvée",
+				"countPlural=other": "{count} vulnérabilités trouvées"
+			}
+		}
+	],
+	"registry_copy_push_anyway": "Envoyer quand même",
+	"registry_copy_continue_to_push": "Continuer vers l'envoi",
+	"imagepull_dockerhub_public": "Docker Hub (public)",
+	"imagepull_title_pull": "Télécharger l'image",
+	"imagepull_title_pull_scan": "Télécharger et analyser l'image",
+	"imagepull_title_pull_to_env": "Télécharger l'image vers {name}",
+	"imagepull_title_pull_scan_to_env": "Télécharger et analyser l'image vers {name}",
+	"imagepull_pull": "Télécharger",
+	"imagepull_scan": "Analyser",
+	"imagepull_registry_label": "Registre",
+	"imagepull_placeholder_dockerhub": "nginx:latest ou library/nginx:1.25",
+	"imagepull_format_hint_before": "Format :",
+	"imagepull_format_hint_or": "ou",
+	"imagepull_full_image_reference": "Référence complète de l'image",
+	"imagepull_retry": "Réessayer",
+	"imagepull_retry_scan": "Réessayer l'analyse",
+	"imagepull_removing": "Suppression...",
+	"imagepull_remove_image": "Supprimer l'image",
+	"imagepull_keep_image": "Conserver l'image",
+	"imagepull_ok": "OK",
+	"templates_toast_load_failed": "Impossible de charger les modèles de la bibliothèque",
+	"templates_toast_generate_compose_failed": "Impossible de générer le fichier compose",
+	"templates_toast_load_template_failed": "Impossible de charger le modèle",
+	"templates_refresh": "Actualiser les modèles",
+	"templates_tab_browse": "Parcourir",
+	"templates_tab_sources": "Sources",
+	"templates_search_placeholder": "Rechercher des modèles...",
+	"templates_filter_all_categories": "Toutes les catégories",
+	"templates_filter_categories_count": "{count} catégories",
+	"templates_filter_all_sources": "Toutes les sources",
+	"templates_filter_sources_count": "{count} sources",
+	"templates_clear_filters": "Effacer les filtres",
+	"templates_empty_no_sources_title": "Aucune source de modèles configurée",
+	"templates_empty_no_sources_description": "Allez dans l'onglet Sources pour activer des catalogues de modèles",
+	"templates_empty_no_match_title": "Aucun modèle ne correspond à vos filtres",
+	"templates_empty_no_match_description": "Essayez d'ajuster votre recherche ou vos critères de filtre",
+	"templates_toast_stack_deployed": "Stack déployée à partir d'un modèle de la bibliothèque",
+	"templates_sources_toast_load_failed": "Impossible de charger les sources de modèles",
+	"templates_sources_toast_update_failed": "Impossible de mettre à jour la source",
+	"templates_sources_toast_removed": "Source supprimée",
+	"templates_sources_toast_remove_failed": "Impossible de supprimer la source",
+	"templates_sources_toast_added": "Source ajoutée",
+	"templates_sources_toast_add_failed": "Impossible d'ajouter la source",
+	"templates_sources_connection_failed": "Échec de la connexion",
+	"templates_sources_toast_validation_failed": "{count} source(s) ont échoué à la validation",
+	"templates_sources_toast_all_reachable": "Toutes les sources sont accessibles",
+	"templates_sources_toast_disabled_inactive": "{count} source(s) inactive(s) désactivée(s)",
+	"templates_sources_intro": "Configurez les sources de catalogues de modèles. Les modèles sont récupérés et mis en cache pendant 1 heure.",
+	"templates_sources_validating": "Validation...",
+	"templates_sources_validate": "Valider",
+	"templates_sources_disable_inactive": "Désactiver les inactives",
+	"templates_sources_add_source": "Ajouter une source",
+	"templates_sources_name_label": "Nom",
+	"templates_sources_name_placeholder": "Mes modèles",
+	"templates_sources_url_label": "URL",
+	"templates_sources_add": "Ajouter",
+	"templates_sources_cancel": "Annuler",
+	"templates_sources_loading": "Chargement des sources...",
+	"templates_sources_template_count": "{count} modèles",
+	"templates_card_no_description": "Aucune description disponible",
+	"templates_card_open_project_title": "Ouvrir la page du projet : {url}",
+	"templates_card_project": "Projet",
+	"templates_card_open_details_title": "Ouvrir le guide détaillé sur portainer-templates.as93.net",
+	"templates_card_details": "Détails",
+	"editor_var_missing_required": "Variable obligatoire manquante",
+	"editor_var_in_vault_title": "Présente dans le fournisseur de secrets lié",
+	"editor_var_required_defined": "Variable obligatoire (définie)",
+	"editor_var_optional_default": "Variable facultative (a une valeur par défaut)",
+	"editor_var_value_provided": "Valeur fournie",
+	"editor_var_missing_badge": "MANQUANTE",
+	"editor_var_not_defined": "Variable obligatoire non définie",
+	"editor_var_in_vault_badge": "DANS LE COFFRE",
+	"editor_var_secret_value": "Valeur secrète",
+	"editor_search_find": "Rechercher",
+	"editor_search_replace": "Remplacer",
+	"editor_search_next": "suivant",
+	"editor_search_previous": "précédent",
+	"editor_search_all": "tout",
+	"editor_search_match_case": "respecter la casse",
+	"editor_search_regexp": "regexp",
+	"editor_search_by_word": "mot entier",
+	"editor_search_replace_one": "remplacer",
+	"editor_search_replace_all": "tout remplacer",
+	"editor_panel_close": "fermer",
+	"editor_goto_line": "Aller à la ligne",
+	"editor_goto_line_submit": "aller",
+	"diff_yes": "Oui",
+	"diff_no": "Non",
+	"diff_empty": "(vide)",
+	"diff_no_changes": "Aucun changement enregistré"
 }
