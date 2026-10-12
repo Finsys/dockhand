@@ -1,5 +1,5 @@
 <svelte:head>
-	<title>Templates - Dockhand</title>
+	<title>{m.nav_templates()} - Dockhand</title>
 </svelte:head>
 
 <script lang="ts">
@@ -24,6 +24,7 @@
 	import TemplateCard from './TemplateCard.svelte';
 	import TemplateSourcesTab from './TemplateSourcesTab.svelte';
 	import StackModal from '../stacks/StackModal.svelte';
+	import { m } from '$lib/paraglide/messages.js';
 
 	// State
 	let templates = $state<TemplateItem[]>([]);
@@ -85,7 +86,7 @@
 			templates = await response.json();
 			cacheTimestamp = Date.now();
 		} catch {
-			toast.error('Failed to load library templates');
+			toast.error(m.templates_toast_load_failed());
 		} finally {
 			loading = false;
 		}
@@ -102,7 +103,7 @@
 
 			if (!response.ok) {
 				const data = await response.json();
-				throw new Error(data.error || 'Failed to generate compose');
+				throw new Error(data.error || m.templates_toast_generate_compose_failed());
 			}
 
 			const { compose } = await response.json();
@@ -110,7 +111,7 @@
 			stackModalCompose = compose;
 			showStackModal = true;
 		} catch (error) {
-			toast.error(error instanceof Error ? error.message : 'Failed to load template');
+			toast.error(error instanceof Error ? error.message : m.templates_toast_load_template_failed());
 		} finally {
 			loadingTemplateId = null;
 		}
@@ -128,12 +129,12 @@
 <div class="flex-1 min-h-0 flex flex-col gap-3 overflow-hidden">
 	<!-- Header -->
 	<div class="shrink-0 flex flex-wrap justify-between items-center gap-3 min-h-8">
-		<PageHeader icon={LibraryBig} title="Templates" count={loading ? undefined : filteredTemplates.length} showConnection={false}>
+		<PageHeader icon={LibraryBig} title={m.nav_templates()} count={loading ? undefined : filteredTemplates.length} showConnection={false}>
 			<button
 				class="p-1 rounded hover:bg-muted transition-colors"
 				onclick={() => fetchTemplates(true)}
 				disabled={loading}
-				title="Refresh templates"
+				title={m.templates_refresh()}
 			>
 				{#if loading}
 					<Loader2 class="w-3.5 h-3.5 animate-spin text-emerald-500" />
@@ -150,14 +151,14 @@
 					onclick={() => activeTab = 'browse'}
 				>
 					<Package class="w-3.5 h-3.5" />
-					Browse
+					{m.templates_tab_browse()}
 				</button>
 				<button
 					class="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors {activeTab === 'sources' ? 'bg-white dark:bg-zinc-900 shadow-sm' : 'text-muted-foreground hover:text-foreground'}"
 					onclick={() => activeTab = 'sources'}
 				>
 					<Settings2 class="w-3.5 h-3.5" />
-					Sources
+					{m.templates_tab_sources()}
 				</button>
 			</div>
 		</div>
@@ -170,7 +171,7 @@
 				<Search class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
 				<Input
 					type="text"
-					placeholder="Search templates..."
+					placeholder={m.templates_search_placeholder()}
 					class="pl-9 w-64 h-8 text-sm"
 					bind:value={searchQuery}
 					onkeydown={(e) => e.key === 'Escape' && (searchQuery = '')}
@@ -183,11 +184,11 @@
 					<Select.Trigger size="sm" class="w-44 text-sm">
 						<span class="truncate">
 							{#if selectedCategories.length === 0}
-								All categories
+								{m.templates_filter_all_categories()}
 							{:else if selectedCategories.length === 1}
 								{selectedCategories[0]}
 							{:else}
-								{selectedCategories.length} categories
+								{m.templates_filter_categories_count({ count: selectedCategories.length })}
 							{/if}
 						</span>
 					</Select.Trigger>
@@ -205,11 +206,11 @@
 					<Select.Trigger size="sm" class="w-48 text-sm">
 						<span class="truncate">
 							{#if selectedSources.length === 0}
-								All sources
+								{m.templates_filter_all_sources()}
 							{:else if selectedSources.length === 1}
 								{selectedSources[0]}
 							{:else}
-								{selectedSources.length} sources
+								{m.templates_filter_sources_count({ count: selectedSources.length })}
 							{/if}
 						</span>
 					</Select.Trigger>
@@ -229,7 +230,7 @@
 					class="text-xs"
 					onclick={() => { selectedCategories = []; selectedSources = []; searchQuery = ''; }}
 				>
-					Clear filters
+					{m.templates_clear_filters()}
 				</Button>
 			{/if}
 		</div>
@@ -263,8 +264,8 @@
 				<div class="flex items-center justify-center h-full">
 					<EmptyState
 						icon={Package}
-						title={templates.length === 0 ? 'No template sources configured' : 'No templates match your filters'}
-						description={templates.length === 0 ? 'Go to the Sources tab to enable template catalogs' : 'Try adjusting your search or filter criteria'}
+						title={templates.length === 0 ? m.templates_empty_no_sources_title() : m.templates_empty_no_match_title()}
+						description={templates.length === 0 ? m.templates_empty_no_sources_description() : m.templates_empty_no_match_description()}
 					/>
 				</div>
 			{:else}
@@ -296,6 +297,6 @@
 	onClose={() => showStackModal = false}
 	onSuccess={() => {
 		showStackModal = false;
-		toast.success('Stack deployed from library template');
+		toast.success(m.templates_toast_stack_deployed());
 	}}
 />

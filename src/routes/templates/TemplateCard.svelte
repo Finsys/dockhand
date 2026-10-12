@@ -4,6 +4,7 @@
 	import { Package, Star, Download, Loader2, ExternalLink, BookOpen } from 'lucide-svelte';
 	import type { TemplateItem } from '../api/templates/+server';
 	import { renderDescription } from '$lib/utils/template-description';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		template: TemplateItem;
@@ -67,7 +68,7 @@
 		<Card.Content class="px-3 pb-2 pt-0" onclick={(e: MouseEvent) => { if ((e.target as HTMLElement).closest('a')) e.stopPropagation(); }}>
 			<!-- eslint-disable-next-line svelte/no-at-html-tags -->
 			<p class="text-xs text-muted-foreground line-clamp-2">
-				{@html renderDescription(template.description) || 'No description available'}
+				{@html renderDescription(template.description) || m.templates_card_no_description()}
 			</p>
 		</Card.Content>
 		<!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -90,7 +91,7 @@
 						target="_blank"
 						rel="noopener"
 						class="flex items-center gap-0.5 hover:text-primary hover:underline"
-						title={`Open project page: ${template.projectUrl}`}
+						title={m.templates_card_open_project_title({ url: template.projectUrl })}
 						onclick={(e: MouseEvent) => {
 							e.stopPropagation();
 							e.preventDefault();
@@ -98,7 +99,7 @@
 						}}
 					>
 						<ExternalLink class="w-3 h-3" />
-						Project
+						{m.templates_card_project()}
 					</a>
 				{/if}
 				{#if template.detailsUrl}
@@ -107,7 +108,7 @@
 						target="_blank"
 						rel="noopener"
 						class="flex items-center gap-0.5 hover:text-primary hover:underline"
-						title="Open the detailed guide on portainer-templates.as93.net"
+						title={m.templates_card_open_details_title()}
 						onclick={(e: MouseEvent) => {
 							e.stopPropagation();
 							e.preventDefault();
@@ -115,7 +116,7 @@
 						}}
 					>
 						<BookOpen class="w-3 h-3" />
-						Details
+						{m.templates_card_details()}
 					</a>
 				{/if}
 				{#if template.stars}

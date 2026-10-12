@@ -204,6 +204,7 @@
 	import { markdown } from '@codemirror/lang-markdown';
 	import { xml } from '@codemirror/lang-xml';
 	import { sql } from '@codemirror/lang-sql';
+	import { m } from '$lib/paraglide/messages.js';
 
 	export interface VariableMarker {
 		name: string;
@@ -278,10 +279,10 @@
 			// The colored dot
 			const dot = document.createElement('span');
 			dot.className = `var-marker var-marker-${this.type}`;
-			dot.title = this.type === 'missing' ? 'Missing required variable'
-				: this.type === 'invault' ? 'Present in the bound secret provider'
-				: this.type === 'required' ? 'Required variable (defined)'
-				: 'Optional variable (has default)';
+			dot.title = this.type === 'missing' ? m.editor_var_missing_required()
+				: this.type === 'invault' ? m.editor_var_in_vault_title()
+				: this.type === 'required' ? m.editor_var_required_defined()
+				: m.editor_var_optional_default();
 			wrapper.appendChild(dot);
 
 			// Checkmark if value is provided
@@ -289,7 +290,7 @@
 				const check = document.createElement('span');
 				check.className = 'var-marker-check';
 				check.innerHTML = '✓';
-				check.title = 'Value provided';
+				check.title = m.editor_var_value_provided();
 				wrapper.appendChild(check);
 			}
 
@@ -317,16 +318,16 @@
 
 			if (this.variant === 'missing') {
 				// Red MISSING badge with icon
-				span.innerHTML = '⚠ MISSING';
-				span.title = 'Required variable not defined';
+				span.innerHTML = `⚠ ${m.editor_var_missing_badge()}`;
+				span.title = m.editor_var_not_defined();
 			} else if (this.variant === 'invault') {
 				// Green IN VAULT badge - the key currently exists in the bound secret
 				// provider (live probe). Inline lucide KeyRound SVG, currentColor.
-				span.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:0.85em;height:0.85em;display:inline-block;vertical-align:-0.12em;margin-right:3px"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/></svg>IN VAULT';
-				span.title = 'Present in the bound secret provider';
+				span.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:0.85em;height:0.85em;display:inline-block;vertical-align:-0.12em;margin-right:3px"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/></svg>' + m.editor_var_in_vault_badge();
+				span.title = m.editor_var_in_vault_title();
 			} else {
 				span.textContent = this.isSecret ? '••••••' : this.value;
-				span.title = this.isSecret ? 'Secret value' : this.value;
+				span.title = this.isSecret ? m.editor_var_secret_value() : this.value;
 			}
 			return span;
 		}
@@ -919,6 +920,22 @@
 			...themeExtensions,
 			EditorView.lineWrapping,
 			EditorState.tabSize.of(2),
+			// UI language for CodeMirror's search panel and go-to-line dialog
+			EditorState.phrases.of({
+				'Find': m.editor_search_find(),
+				'Replace': m.editor_search_replace(),
+				'next': m.editor_search_next(),
+				'previous': m.editor_search_previous(),
+				'all': m.editor_search_all(),
+				'match case': m.editor_search_match_case(),
+				'regexp': m.editor_search_regexp(),
+				'by word': m.editor_search_by_word(),
+				'replace': m.editor_search_replace_one(),
+				'replace all': m.editor_search_replace_all(),
+				'close': m.editor_panel_close(),
+				'Go to line': m.editor_goto_line(),
+				'go': m.editor_goto_line_submit()
+			}),
 			getLanguageExtension(language),
 			// Vertical indentation guides, opt-in per user (#1410). Subtle tones for both themes.
 			...(get(themeStore).editorIndentGuides
