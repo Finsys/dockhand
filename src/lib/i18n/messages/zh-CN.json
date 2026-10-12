@@ -3609,5 +3609,417 @@
 	"networks_graph_internal_network": "内部网络",
 	"networks_graph_attachable": "可附加",
 	"networks_graph_edge_network_connection_desc": "服务已连接到此网络。",
-	"pageheader_count_of": "{count} / {total}"
+	"pageheader_count_of": "{count} / {total}",
+	"logs_layout_single": "单个",
+	"logs_layout_multi": "多个",
+	"logs_layout_grouped": "分组",
+	"logs_fetch_failed": "获取日志失败: {error}",
+	"logs_stream_ended": "流已结束",
+	"logs_streaming_start_failed": "开始流式传输失败",
+	"logs_reconnecting": "正在重连 ({attempt}/{max})…",
+	"logs_connection_failed_retry": "连接失败,点击重试",
+	"logs_search_containers_placeholder": "搜索容器…",
+	"logs_no_matches": "未找到匹配项",
+	"logs_current": "当前",
+	"logs_filter_containers_placeholder": "筛选容器...",
+	"logs_saved_groups": "已保存的分组",
+	"logs_delete_group": "删除分组",
+	"logs_favorites": "收藏",
+	"logs_select_for_merge": "选择以合并",
+	"logs_remove_from_favorites": "从收藏中删除",
+	"logs_add_to_favorites": "添加到收藏",
+	"logs_group_name_placeholder": "组名称...",
+	"logs_save_group": "保存分组",
+	"logs_merge_containers": "合并 {count} 个容器的日志",
+	"logs_select_containers_grouped": "从列表中选择容器以查看合并日志",
+	"logs_connected_live_streaming": "已连接 - 实时流式传输",
+	"logs_disconnected": "已断开连接",
+	"logs_streaming_paused": "流式传输已暂停",
+	"logs_pause_live_streaming": "暂停实时流",
+	"logs_resume_live_streaming": "恢复实时流",
+	"logs_stream": "流",
+	"logs_toggle_auto_scroll": "切换自动滚动",
+	"logs_auto_scroll": "自动滚动",
+	"logs_tail_lines_title": "要加载的日志行数",
+	"logs_tail_lines_option": "{amount} 行",
+	"logs_toggle_word_wrap": "切换自动换行",
+	"logs_wrap": "换行",
+	"logs_hide_timestamps": "隐藏时间戳",
+	"logs_show_timestamps": "显示时间戳",
+	"logs_hide_container_name": "隐藏容器名前缀",
+	"logs_show_container_name": "显示容器名前缀",
+	"logs_hide_line_numbers": "隐藏行号",
+	"logs_show_line_numbers": "显示行号",
+	"logs_switch_light_mode": "切换到浅色模式",
+	"logs_switch_dark_mode": "切换到深色模式",
+	"logs_filter_mode_show_all": "显示所有行(筛选模式生效中)",
+	"logs_filter_mode_hide_non_matching": "隐藏不匹配的行",
+	"logs_previous_match": "上一个匹配项",
+	"logs_next_match": "下一个匹配",
+	"logs_close_search": "关闭搜索",
+	"logs_search_logs": "搜索日志",
+	"logs_copy_logs": "复制日志",
+	"logs_download_logs": "下载日志",
+	"logs_clear_logs": "清除日志",
+	"logs_previous_match_shortcut": "上一个匹配项 (Shift+Enter)",
+	"logs_next_match_shortcut": "下一个匹配（Enter）",
+	"logs_close_search_shortcut": "关闭搜索 (Esc)",
+	"logs_search_logs_shortcut": "搜索日志 (Ctrl+F)",
+	"logs_refresh_logs": "刷新日志",
+	"logs_select_container_from_list": "从列表中选择一个容器",
+	"logs_select_container": "选择一个容器以查看日志",
+	"logs_terminal_below": "终端在下方",
+	"logs_terminal_side": "终端在侧边",
+	"logs_loading_logs": "正在加载日志…",
+	"logs_timerange_title": "时间范围: {range}",
+	"logs_timerange_filter": "按时间范围筛选日志",
+	"logs_timerange_from": "从",
+	"logs_timerange_to": "到",
+	"logs_timerange_time": "时间:",
+	"logs_timerange_clear": "清除",
+	"logviewer_toggle_auto_refresh": "切换自动刷新",
+	"logviewer_toggle_auto_scroll": "切换自动滚动",
+	"logviewer_font_size": "字体大小",
+	"logviewer_toggle_word_wrap": "切换自动换行",
+	"logviewer_hide_line_numbers": "隐藏行号",
+	"logviewer_show_line_numbers": "显示行号",
+	"logviewer_search_placeholder": "搜索...",
+	"logviewer_show_all_lines": "显示所有行(筛选模式生效中)",
+	"logviewer_hide_non_matching_lines": "隐藏不匹配的行",
+	"logviewer_previous_match": "上一个",
+	"logviewer_next_match": "下一步",
+	"logviewer_search_logs": "搜索日志",
+	"logviewer_copied": "已复制！",
+	"logviewer_copy_logs": "复制日志",
+	"logviewer_download_logs": "下载日志",
+	"logviewer_clear_logs": "清除日志",
+	"logviewer_refresh_logs": "刷新日志",
+	"logviewer_loading_logs": "正在加载日志…",
+	"logspanel_connection_error": "连接错误",
+	"logspanel_start_streaming_failed": "开始流式传输失败",
+	"logspanel_reconnecting": "正在重连 ({attempt}/{max})…",
+	"logspanel_fetch_failed": "获取日志失败: {error}",
+	"logspanel_unknown_error": "未知错误",
+	"logspanel_connected_live_streaming": "已连接 - 实时流式传输",
+	"logspanel_status_live": "实时",
+	"logspanel_connecting": "正在连接...",
+	"logspanel_status_disconnected": "已断开连接",
+	"logspanel_click_to_reconnect": "点击重新连接",
+	"logspanel_status_offline": "离线",
+	"logspanel_streaming_paused": "流式传输已暂停",
+	"logspanel_status_paused": "已暂停",
+	"logspanel_pause_live_streaming": "暂停实时流",
+	"logspanel_resume_live_streaming": "恢复实时流",
+	"logspanel_tail_lines_title": "要加载的日志行数",
+	"logspanel_tail_lines_option": "{count} 行",
+	"logspanel_hide_timestamps": "隐藏时间戳",
+	"logspanel_show_timestamps": "显示时间戳",
+	"logspanel_hide_container_name_prefix": "隐藏容器名前缀",
+	"logspanel_show_container_name_prefix": "显示容器名前缀",
+	"logspanel_switch_to_light_mode": "切换到浅色模式",
+	"logspanel_switch_to_dark_mode": "切换到深色模式",
+	"logspanel_close_logs": "关闭日志",
+	"logspanel_connecting_to_stream": "正在连接到日志流...",
+	"terminal_page_title": "终端",
+	"terminal_search_placeholder": "搜索运行中的容器…",
+	"terminal_no_running_containers": "没有运行中的容器",
+	"terminal_no_matches": "未找到匹配项",
+	"terminal_container_connected": "已连接",
+	"terminal_mode_label": "模式：",
+	"terminal_disconnect": "断开连接",
+	"terminal_shell_label": "Shell:",
+	"terminal_user_label": "用户：",
+	"terminal_select_container": "选择要打开 shell 的容器",
+	"terminal_no_shell_in_container": "此容器中没有可用的终端",
+	"terminal_no_shell_installed": "此容器可能未安装 shell。",
+	"terminal_status_disconnected": "已断开连接",
+	"terminal_copy_output": "复制输出",
+	"terminal_clear_shortcut": "清除 (Cmd+L)",
+	"terminal_reconnect": "重新连接",
+	"terminal_reconnecting": "正在重连…",
+	"terminal_attaching": "正在附加到 {name}…",
+	"terminal_attach_info": "Docker attach: 容器主进程",
+	"terminal_panel_attach_prefix": "附加:",
+	"terminal_panel_terminal_prefix": "终端:",
+	"terminal_panel_clear_shortcut": "清除终端 (Ctrl+L)",
+	"terminal_panel_close": "关闭终端",
+	"terminal_container_fallback": "容器",
+	"terminal_status_connecting": "正在连接...",
+	"terminal_header_shell": "Shell:{shell}",
+	"terminal_header_user": "用户：{user}",
+	"terminal_loading_terminal": "正在加载终端…",
+	"registry_error_search_not_supported": "该注册表不支持搜索所有镜像",
+	"registry_error_search_failed": "搜索失败",
+	"registry_error_search_images": "搜索镜像失败",
+	"registry_error_browse_failed": "浏览注册表失败",
+	"registry_error_fetch_tags": "获取标签失败",
+	"registry_tag_info_unavailable": "不可用",
+	"registry_tag_info_request_failed": "请求失败",
+	"registry_date_today": "今天",
+	"registry_date_yesterday": "昨天",
+	"registry_date_days_ago": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} 天前",
+				"countPlural=other": "{count} 天前"
+			}
+		}
+	],
+	"registry_date_weeks_ago": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} 周前",
+				"countPlural=other": "{count} 周前"
+			}
+		}
+	],
+	"registry_date_months_ago": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} 个月前",
+				"countPlural=other": "{count} 个月前"
+			}
+		}
+	],
+	"registry_date_years_ago": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} 年前",
+				"countPlural=other": "{count} 年前"
+			}
+		}
+	],
+	"registry_toast_deleted": "已删除 {name}",
+	"registry_toast_delete_failed": "删除镜像失败",
+	"registry_manage": "管理镜像仓库",
+	"registry_search_placeholder_named": "在 {name} 中搜索镜像…",
+	"registry_search_placeholder": "搜索镜像…",
+	"registry_search": "搜索",
+	"registry_browse": "浏览",
+	"registry_loading_catalog": "正在加载目录…",
+	"registry_searching": "正在搜索…",
+	"registry_no_images_in_registry": "该注册表中未找到镜像",
+	"registry_no_images_for_term": "未找到匹配 \"{term}\" 的镜像",
+	"registry_search_tip_before": "提示:大型镜像仓库不支持搜索。请尝试",
+	"registry_search_tip_link": "浏览",
+	"registry_search_tip_after": "并使用过滤器查找镜像。",
+	"registry_filter_placeholder": "筛选结果...",
+	"registry_images_count": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} 个镜像",
+				"countPlural=other": "{count} 个镜像"
+			}
+		}
+	],
+	"registry_images_filtered_count": [
+		{
+			"declarations": [
+				"input filtered",
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{filtered} / {count} 个镜像",
+				"countPlural=other": "{filtered} / {count} 个镜像"
+			}
+		}
+	],
+	"registry_col_name": "名称",
+	"registry_col_description": "描述",
+	"registry_col_stars": "星标",
+	"registry_col_type": "类型",
+	"registry_type_official": "官方",
+	"registry_type_automated": "自动",
+	"registry_loading_tags": "正在加载标签…",
+	"registry_col_tag": "标签",
+	"registry_col_size": "大小",
+	"registry_col_modified": "已修改",
+	"registry_col_actions": "操作",
+	"registry_pull_scan_tag_title": "拉取并扫描此标签",
+	"registry_pull_tag_title": "拉取此标签",
+	"registry_pull_scan": "拉取并扫描",
+	"registry_pull": "拉取",
+	"registry_run_container_title": "使用此标签运行容器",
+	"registry_copy_to_other_title": "复制到另一个镜像仓库",
+	"registry_item_tag": "标签",
+	"registry_delete_tag_title": "删除标签",
+	"registry_delete_confirm": "删除",
+	"registry_delete_tag_button_title": "删除此标签",
+	"registry_loading_more": "正在加载更多…",
+	"registry_tags_loaded": [
+		{
+			"declarations": [
+				"input loaded",
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "已加载 {loaded} / {count} 个标签",
+				"countPlural=other": "已加载 {loaded} / {count} 个标签"
+			}
+		}
+	],
+	"registry_no_tags": "未找到标签",
+	"registry_loading": "加载中…",
+	"registry_load_more_images": "加载更多镜像",
+	"registry_empty_search_browse_named": "搜索或浏览 {name} 以查找镜像",
+	"registry_empty_search_browse": "搜索或浏览注册表以查找镜像",
+	"registry_empty_search_named": "搜索 {name} 以查找并拉取镜像",
+	"registry_empty_search": "搜索注册表以查找并拉取镜像",
+	"registry_copy_title": "复制到镜像仓库",
+	"registry_copy_step_pull": "拉取",
+	"registry_copy_step_scan": "扫描",
+	"registry_copy_to_clipboard": "复制到剪贴板",
+	"registry_copy_requires_https": "复制需要 HTTPS",
+	"registry_copy_retry_pull": "重试拉取",
+	"registry_copy_retry_scan": "重试扫描",
+	"registry_copy_start": "开始复制",
+	"registry_copy_critical_found": "发现严重/高危漏洞",
+	"registry_copy_vulnerabilities_found": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "发现 {count} 个漏洞",
+				"countPlural=other": "发现 {count} 个漏洞"
+			}
+		}
+	],
+	"registry_copy_push_anyway": "仍然推送",
+	"registry_copy_continue_to_push": "继续推送",
+	"imagepull_dockerhub_public": "Docker Hub(公开)",
+	"imagepull_title_pull": "拉取镜像",
+	"imagepull_title_pull_scan": "拉取并扫描镜像",
+	"imagepull_title_pull_to_env": "拉取镜像到 {name}",
+	"imagepull_title_pull_scan_to_env": "拉取并扫描镜像到 {name}",
+	"imagepull_pull": "拉取",
+	"imagepull_scan": "扫描",
+	"imagepull_registry_label": "镜像仓库",
+	"imagepull_placeholder_dockerhub": "nginx:latest 或 library/nginx:1.25",
+	"imagepull_format_hint_before": "格式：",
+	"imagepull_format_hint_or": "或",
+	"imagepull_full_image_reference": "完整镜像引用",
+	"imagepull_retry": "重试",
+	"imagepull_retry_scan": "重试扫描",
+	"imagepull_removing": "删除中...",
+	"imagepull_remove_image": "删除镜像",
+	"imagepull_keep_image": "保留镜像",
+	"imagepull_ok": "确定",
+	"templates_toast_load_failed": "加载模板库失败",
+	"templates_toast_generate_compose_failed": "生成 compose 失败",
+	"templates_toast_load_template_failed": "加载模板失败",
+	"templates_refresh": "刷新模板",
+	"templates_tab_browse": "浏览",
+	"templates_tab_sources": "来源",
+	"templates_search_placeholder": "搜索模板...",
+	"templates_filter_all_categories": "所有类别",
+	"templates_filter_categories_count": "{count} 个分类",
+	"templates_filter_all_sources": "所有来源",
+	"templates_filter_sources_count": "{count} 个来源",
+	"templates_clear_filters": "清除筛选器",
+	"templates_empty_no_sources_title": "未配置模板源",
+	"templates_empty_no_sources_description": "前往“源”选项卡以启用模板目录",
+	"templates_empty_no_match_title": "没有匹配筛选条件的模板",
+	"templates_empty_no_match_description": "尝试调整搜索或筛选条件",
+	"templates_toast_stack_deployed": "已从模板库部署堆栈",
+	"templates_sources_toast_load_failed": "加载模板来源失败",
+	"templates_sources_toast_update_failed": "更新来源失败",
+	"templates_sources_toast_removed": "来源已移除",
+	"templates_sources_toast_remove_failed": "移除来源失败",
+	"templates_sources_toast_added": "来源已添加",
+	"templates_sources_toast_add_failed": "添加来源失败",
+	"templates_sources_connection_failed": "连接失败",
+	"templates_sources_toast_validation_failed": "{count} 个源验证失败",
+	"templates_sources_toast_all_reachable": "所有来源均可达",
+	"templates_sources_toast_disabled_inactive": "已禁用 {count} 个不活跃的源",
+	"templates_sources_intro": "配置模板目录来源。模板会被获取并缓存 1 小时。",
+	"templates_sources_validating": "正在验证...",
+	"templates_sources_validate": "验证",
+	"templates_sources_disable_inactive": "禁用非活动项",
+	"templates_sources_add_source": "添加来源",
+	"templates_sources_name_label": "名称",
+	"templates_sources_name_placeholder": "我的模板",
+	"templates_sources_url_label": "URL",
+	"templates_sources_add": "添加",
+	"templates_sources_cancel": "取消",
+	"templates_sources_loading": "正在加载来源…",
+	"templates_sources_template_count": "{count} 个模板",
+	"templates_card_no_description": "暂无描述",
+	"templates_card_open_project_title": "打开项目页面: {url}",
+	"templates_card_project": "项目",
+	"templates_card_open_details_title": "在 portainer-templates.as93.net 打开详细指南",
+	"templates_card_details": "详细信息",
+	"editor_var_missing_required": "缺少必填变量",
+	"editor_var_in_vault_title": "已存在于绑定的密钥提供者中",
+	"editor_var_required_defined": "必填变量(已定义)",
+	"editor_var_optional_default": "可选变量（有默认值）",
+	"editor_var_value_provided": "已提供值",
+	"editor_var_missing_badge": "缺失",
+	"editor_var_not_defined": "必填变量未定义",
+	"editor_var_in_vault_badge": "保险库中",
+	"editor_var_secret_value": "密钥值",
+	"editor_search_find": "查找",
+	"editor_search_replace": "替换",
+	"editor_search_next": "下一步",
+	"editor_search_previous": "上一个",
+	"editor_search_all": "全部",
+	"editor_search_match_case": "区分大小写",
+	"editor_search_regexp": "正则",
+	"editor_search_by_word": "全词匹配",
+	"editor_search_replace_one": "替换",
+	"editor_search_replace_all": "全部替换",
+	"editor_panel_close": "关闭",
+	"editor_goto_line": "跳转到行",
+	"editor_goto_line_submit": "跳转",
+	"diff_yes": "是",
+	"diff_no": "否",
+	"diff_empty": "(空)",
+	"diff_no_changes": "未记录更改"
 }
