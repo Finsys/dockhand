@@ -149,7 +149,7 @@ describe('toRegistryRef for the bare image ID the auto-update scans with', () =>
 
 	test('a temp tag is still cleaned when it is the only one', () => {
 		// Nothing better exists, and the stripped form is what was pulled.
-		expect(toRegistryRef(ID, ['nginx:1.27-dockhand-pending'])).toBe(ID);
+		expect(toRegistryRef(ID, ['nginx:1.27-dockhand-pending'])).toBe('nginx:1.27');
 	});
 
 	test('stays the ID when the inspect offers nothing usable', () => {

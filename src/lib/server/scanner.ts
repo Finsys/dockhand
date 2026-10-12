@@ -906,8 +906,11 @@ async function runScannerContainerCore(
 		// findRegistryCredentials matches on the registry HOST, not the full ref, so
 		// resolve the registry the same way image pulls do (parseImageReference), not
 		// by passing the tagged image name (which never matches a stored org path).
-		const registry = parseImageReference(imageName).registry;
-		const authority = imageRegistryAuthority(imageName);
+		// When imageName was a bare SHA, parseImageReference on registryRef will correctly
+		// resolve the registry host instead of index.docker.io/library/sha256.
+		const refForAuth = registryRef !== imageName ? registryRef : imageName;
+		const registry = parseImageReference(refForAuth).registry;
+		const authority = imageRegistryAuthority(refForAuth);
 		const creds = await findRegistryCredentials(registry);
 		const authEnv = registryAuthEnv(scannerType, creds, authority ?? undefined);
 		if (authEnv.length > 0) {

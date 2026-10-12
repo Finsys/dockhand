@@ -60,9 +60,11 @@ export function toRegistryRef(image: string, repoTags?: string[] | null): string
 		const tags = (repoTags || []).filter(
 			(t) => typeof t === 'string' && t && t !== '<none>:<none>'
 		);
-		// A temp tag is no better than the ID here, so take a real one or nothing.
+		// Prefer a real tag; if the only available tag is a temp tag (e.g. during safe-pull
+		// where the real tag was restored to the safe image), clean and use the temp tag.
 		const real = tags.find((t) => !isTempTag(t));
-		return real ? toRegistryRef(real) : image;
+		const candidate = real || tags.find((t) => isTempTag(t));
+		return candidate ? toRegistryRef(candidate) : image;
 	}
 
 	// A digest pins the content and resolves in the registry as-is.
