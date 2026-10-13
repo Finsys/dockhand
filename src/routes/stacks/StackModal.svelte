@@ -77,7 +77,7 @@
 		readonly?: boolean; // View compose content without allowing local changes
 		gitInfo?: { commit?: string; url?: string; branch?: string } | null; // Git provenance for read-only git stacks
 		onClose: () => void;
-		onConvertToGit?: ((isUntracked: boolean) => void) | null;
+		onConvertToGit?: (() => void) | null;
 		onSuccess: () => void; // Called after create or save
 	}
 
@@ -2754,9 +2754,9 @@
 					{/if}
 				</div>
 				{#if !readonly && mode === 'edit' && onConvertToGit}
-					<Button variant="outline" onclick={() => onConvertToGit?.(needsFileLocation)} disabled={saving || loading}>
+					<Button variant="outline" onclick={onConvertToGit} disabled={saving || loading}>
 						<GitGraph class="w-4 h-4" />
-						Convert to Git
+						{m.stacks_git_convert_to_git()}
 					</Button>
 				{/if}
 			</div>

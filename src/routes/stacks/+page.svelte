@@ -1193,29 +1193,30 @@
 			});
 
 			if (!response.ok) {
-				let errorMsg = 'Failed to convert stack to local source';
+				let errorMsg = m.stacks_git_error_convert_local_failed();
 				try {
 					const data = await response.json();
 					errorMsg = data.error || errorMsg;
 				} catch {
 					// ignore parse errors
 				}
-				showErrorDialog(`Failed to convert ${stackName}`, errorMsg);
+				showErrorDialog(m.stacks_git_error_convert_title({ name: stackName }), errorMsg);
 				return;
 			}
 
-			toast.success(`Converted ${stackName} to local source`);
+			toast.success(m.stacks_git_toast_convert_local_success({ name: stackName }));
 			showGitModal = false;
 			editingGitStack = null;
 			await fetchStacks();
 		} catch (error) {
 			console.error('Failed to convert stack to local source:', error);
-			const errorMsg = error instanceof Error ? error.message : 'Failed to convert stack to local source';
-			showErrorDialog(`Failed to convert ${stackName}`, errorMsg);
+			const errorMsg = error instanceof Error ? error.message : m.stacks_git_error_convert_local_failed();
+			showErrorDialog(m.stacks_git_error_convert_title({ name: stackName }), errorMsg);
 		}
 	}
 
-	async function convertLocalStackToGit(stackName: string, isUntracked: boolean) {
+	async function convertLocalStackToGit(stackName: string) {
+		const isUntracked = getStackSource(stackName).sourceType === 'external';
 		operationError = null;
 		showEditModal = false;
 		editingStackName = '';
@@ -3224,10 +3225,10 @@
 		loadTags(envId);
 	}}
 	onConvertToGit={editingStackName && (
-		stackSources[editingStackName]?.sourceType === 'internal'
-		|| (!stackSources[editingStackName] && $canAccess('stacks', 'create'))
+		(getStackSource(editingStackName).sourceType === 'internal' && $canAccess('stacks', 'edit'))
+		|| (getStackSource(editingStackName).sourceType === 'external' && $canAccess('stacks', 'create'))
 	)
-		? (isUntracked) => convertLocalStackToGit(editingStackName, isUntracked)
+		? () => convertLocalStackToGit(editingStackName)
 		: null}
 	onSuccess={fetchStacks}
 />
