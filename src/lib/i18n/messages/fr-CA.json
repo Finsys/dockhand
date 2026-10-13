@@ -4422,6 +4422,222 @@
 	"alerts_title": "Alertes",
 	"alerts_empty_title": "Aucune alerte configurée",
 	"alerts_empty_description": "La configuration des alertes arrive bientôt",
+	"profile_page_title": "Profil - Dockhand",
+	"profile_title": "Profil",
+	"profile_subtitle": "Gérez les paramètres de votre compte",
+	"profile_never": "Jamais",
+	"profile_cancel": "Annuler",
+	"profile_done": "Terminé",
+	"profile_error_load_failed": "Impossible de charger le profil",
+	"profile_updated_success": "Profil mis à jour",
+	"profile_error_update_failed": "Impossible de mettre à jour le profil",
+	"profile_account_title": "Informations du compte",
+	"profile_role_label": "Rôle",
+	"profile_created_label": "Créé",
+	"profile_last_login_label": "Dernière connexion",
+	"profile_avatar_remove": "Supprimer la photo",
+	"profile_avatar_error_not_image": "Veuillez sélectionner un fichier image",
+	"profile_avatar_updated_success": "Avatar mis à jour",
+	"profile_avatar_error_upload_failed": "Impossible d'envoyer l'avatar",
+	"profile_avatar_removed_success": "Avatar supprimé",
+	"profile_avatar_error_remove_failed": "Impossible de supprimer l'avatar",
+	"profile_details_title": "Détails du profil",
+	"profile_display_name_label": "Nom d'affichage",
+	"profile_display_name_placeholder": "Saisissez le nom d'affichage",
+	"profile_email_label": "Courriel",
+	"profile_email_placeholder": "Saisissez le courriel",
+	"profile_save_changes": "Enregistrer les modifications",
+	"profile_security_title": "Sécurité",
+	"profile_managed_by_sso": "Géré par votre fournisseur SSO",
+	"profile_password_change_hint": "Changez votre mot de passe",
+	"profile_password_change": "Changer le mot de passe",
+	"profile_password_current_label": "Mot de passe actuel",
+	"profile_password_current_placeholder": "Saisissez le mot de passe actuel",
+	"profile_password_new_label": "Nouveau mot de passe",
+	"profile_password_new_placeholder": "Saisissez le nouveau mot de passe",
+	"profile_password_repeat_label": "Répétez le nouveau mot de passe",
+	"profile_password_repeat_placeholder": "Répétez le nouveau mot de passe",
+	"profile_password_error_required": "Tous les champs sont obligatoires",
+	"profile_password_error_mismatch": "Les mots de passe ne correspondent pas",
+	"profile_password_error_too_short": "Le mot de passe doit contenir au moins 8 caractères",
+	"profile_password_changed": "Mot de passe modifié",
+	"profile_password_error_change_failed": "Impossible de changer le mot de passe",
+	"profile_mfa_title": "Authentification à deux facteurs",
+	"profile_mfa_badge_enabled": "Activée",
+	"profile_mfa_badge_disabled": "Désactivée",
+	"profile_mfa_enabled_hint": "La MFA est activée pour votre compte",
+	"profile_mfa_disabled_hint": "Ajoutez une couche de sécurité supplémentaire",
+	"profile_mfa_setup": "Configurer la MFA",
+	"profile_mfa_enable": "Activer la MFA",
+	"profile_mfa_disable": "Désactiver la MFA",
+	"profile_mfa_error_setup_failed": "Impossible de configurer la MFA",
+	"profile_mfa_enabled_success": "MFA activée",
+	"profile_mfa_disabled_success": "MFA désactivée",
+	"profile_mfa_setup_title": "Configurer l'authentification à deux facteurs",
+	"profile_mfa_scan_hint": "Scannez ce code QR avec votre application d'authentification (Google Authenticator, Authy, etc.)",
+	"profile_mfa_qr_alt": "Code QR de la MFA",
+	"profile_mfa_manual_entry": "Ou saisissez ce code manuellement :",
+	"profile_mfa_code_label": "Code de vérification",
+	"profile_mfa_code_placeholder": "Saisissez le code à 6 chiffres",
+	"profile_mfa_code_hint": "Saisissez le code de votre application d'authentification pour vérifier la configuration",
+	"profile_mfa_error_code_required": "Veuillez saisir le code de vérification",
+	"profile_mfa_error_invalid_code": "Code de vérification invalide",
+	"profile_mfa_error_verify_failed": "Impossible de vérifier la MFA",
+	"profile_mfa_backup_codes_hint": "Conservez ces codes de secours en lieu sûr. Chaque code ne peut servir qu'une seule fois pour vous connecter si vous perdez l'accès à votre application d'authentification.",
+	"profile_mfa_copy_requires_https": "La copie nécessite HTTPS",
+	"profile_mfa_copy_failed": "Échec",
+	"profile_mfa_copied": "Copié!",
+	"profile_mfa_copy_codes": "Copier les codes",
+	"profile_mfa_download": "Télécharger",
+	"profile_mfa_backup_file_title": "Codes de secours MFA de Dockhand",
+	"profile_mfa_backup_file_intro": "Ces codes permettent de vous connecter si vous perdez l'accès à votre application d'authentification.",
+	"profile_mfa_backup_file_single_use": "Chaque code ne peut servir qu'une seule fois.",
+	"profile_mfa_backup_file_generated": "Généré le : {date}",
+	"profile_mfa_disable_title": "Désactiver l'authentification à deux facteurs",
+	"profile_mfa_disable_confirm": "Voulez-vous vraiment désactiver l'authentification à deux facteurs? Votre compte sera moins sécurisé.",
+	"profile_passkeys_title": "Clés d'accès",
+	"profile_passkeys_description": "Utilisez une clé d'accès liée à un appareil ou synchronisée pour vous connecter",
+	"profile_passkeys_disabled_notice": "La connexion par clé d'accès est désactivée pour cette instance. Les clés d'accès ci-dessous sont conservées et refonctionneront si un administrateur la réactive.",
+	"profile_passkey_name_label": "Nom de la clé d'accès",
+	"profile_passkey_name_placeholder": "p. ex. clé de sécurité Token2",
+	"profile_passkey_add": "Ajouter une clé d'accès",
+	"profile_passkeys_loading": "Chargement des clés d'accès...",
+	"profile_passkeys_empty": "Aucune clé d'accès enregistrée.",
+	"profile_passkey_default_name": "Clé d'accès",
+	"profile_passkey_synced": "Clé d'accès synchronisée",
+	"profile_passkey_device_bound": "Clé d'accès liée à l'appareil",
+	"profile_passkey_backed_up": "sauvegardée",
+	"profile_passkey_added_on": "ajoutée le {date}",
+	"profile_passkey_delete": "Supprimer",
+	"profile_passkey_delete_label": "Supprimer la clé d'accès {name}",
+	"profile_passkey_delete_confirm": "Supprimer la clé d'accès « {name} »?",
+	"profile_passkey_error_name_required": "Saisissez un nom pour la clé d'accès",
+	"profile_passkey_error_unavailable": "L'enregistrement de clés d'accès n'est pas disponible",
+	"profile_passkey_error_failed": "Échec de l'enregistrement de la clé d'accès",
+	"profile_passkey_error_cancelled": "L'enregistrement de la clé d'accès a été annulé ou a expiré",
+	"profile_passkey_added_success": "Clé d'accès ajoutée",
+	"profile_passkey_removed": "Clé d'accès supprimée",
+	"profile_passkey_error_remove_failed": "Impossible de supprimer la clé d'accès",
+	"profile_tokens_title": "Jetons d'API",
+	"profile_tokens_description": "Créez des jetons pour les pipelines CI/CD et les scripts",
+	"profile_tokens_loading": "Chargement des jetons...",
+	"profile_tokens_empty": "Aucun jeton d'API créé pour le moment.",
+	"profile_tokens_col_name": "Nom",
+	"profile_tokens_col_prefix": "Préfixe",
+	"profile_tokens_col_last_used": "Dernière utilisation",
+	"profile_tokens_col_expires": "Expire",
+	"profile_tokens_expired": "Expiré",
+	"profile_token_revoke_title": "Révoquer le jeton",
+	"profile_token_revoke": "Révoquer",
+	"profile_token_generate": "Générer un jeton",
+	"profile_token_generate_title": "Générer un jeton d'API",
+	"profile_token_created_title": "Jeton créé",
+	"profile_token_copy_now": "Copiez ce jeton maintenant. Il ne sera plus affiché.",
+	"profile_token_name_label": "Nom",
+	"profile_token_name_placeholder": "p. ex. pipeline CI/CD",
+	"profile_token_password_placeholder": "Confirmez votre mot de passe",
+	"profile_token_expiration_label": "Expiration",
+	"profile_token_expiration_none": "Sans expiration",
+	"profile_token_expiration_30_days": "30 jours",
+	"profile_token_expiration_90_days": "90 jours",
+	"profile_token_expiration_1_year": "1 an",
+	"profile_token_expiration_custom": "Date personnalisée",
+	"profile_token_creating": "Création...",
+	"profile_token_error_name_required": "Le nom du jeton est obligatoire",
+	"profile_token_error_password_required": "Le mot de passe est obligatoire",
+	"profile_token_error_create_failed": "Impossible de créer le jeton",
+	"profile_appearance_title": "Apparence",
+	"profile_appearance_description": "Personnalisez l'apparence de l'application",
+	"profile_navigation_title": "Navigation",
+	"profile_navigation_description": "Votre page d'accueil et la cible du clic sur un environnement. Laissez « Utiliser la valeur globale par défaut » pour suivre le réglage de l'espace de travail.",
+	"profile_editor_theme_title": "Thème de l'éditeur",
+	"profile_editor_theme_description": "Thème de couleurs de l'éditeur de code, avec aperçu en direct.",
+	"themes_size_xsmall": "Très petite",
+	"themes_size_small": "Petite",
+	"themes_size_normal": "Normale",
+	"themes_size_medium": "Moyenne",
+	"themes_size_large": "Grande",
+	"themes_size_xlarge": "Très grande",
+	"themes_default": "Par défaut",
+	"themes_grid_font_size": "Taille de police des tableaux",
+	"themes_grid_buttons": "Boutons des tableaux",
+	"themes_terminal_font": "Police du terminal",
+	"themes_theme": "Thème",
+	"themes_editor_default": "Par défaut (suit le thème de l'application)",
+	"themes_group_dark": "Sombre",
+	"themes_group_light": "Clair",
+	"themes_editor_hint": "S'applique à tous les éditeurs de code (fichiers compose, env, configuration). Suit ce thème quel que soit le réglage clair/sombre de l'application.",
+	"themes_editor_preview_comment": "Aperçu en direct - le thème de votre éditeur",
+	"timezone_select_placeholder": "Sélectionner un fuseau horaire...",
+	"timezone_search_placeholder": "Rechercher un fuseau horaire...",
+	"timezone_no_results": "Aucun fuseau horaire trouvé.",
+	"timezone_group_common": "Courants",
+	"timezone_group_all": "Tous les fuseaux horaires",
+	"semver_check_newer_tags": "Rechercher des tags de version plus récents",
+	"semver_check_hint": "Pour un conteneur épinglé sur un tag de version (p. ex. {name}), détecte aussi la publication d'une version plus récente. À titre indicatif seulement.",
+	"semver_floating_hint_before": "est un tag flottant - épinglez un tag de version (p. ex.",
+	"semver_floating_hint_after": ") pour activer la détection des versions plus récentes.",
+	"semver_which_updates": "Mises à jour à afficher",
+	"semver_bump_patch": "Correctif",
+	"semver_bump_minor": "Mineure",
+	"semver_bump_major": "Majeure",
+	"semver_example_running": "Si vous exécutez {name}, vous serez informé de :",
+	"semver_example_patch": "corrections de bogues seulement",
+	"semver_example_minor": "nouvelles fonctionnalités aussi",
+	"semver_example_major": "tout, y compris les changements incompatibles",
+	"semver_match_flavor": "Respecter la variante du tag",
+	"semver_match_flavor_hint_before": "Ne suggère que des tags ayant le même suffixe que celui que vous exécutez - la variante, comme",
+	"semver_match_flavor_hint_after": ".",
+	"semver_on": "Activé",
+	"semver_off": "Désactivé",
+	"semver_flavor_on_never_bare": "jamais sans suffixe",
+	"semver_flavor_off_example": "toute version plus récente, même d'une autre variante - plus bruyant",
+	"semver_include_prereleases": "Inclure les préversions",
+	"semver_include_prereleases_hint": "Prendre en compte les tags {name}. Désactivé, un déploiement stable reste sur des versions stables.",
+	"semver_ignore_older": "Ignorer les tags plus anciens que celui que vous exécutez",
+	"semver_ignore_older_hint": "Vérifie quand l'image candidate a été construite et l'ignore si elle précède celle que vous exécutez. Ajoute une requête au registre pour chaque tag suggéré.",
+	"semver_old_tags_before": "Un tag est un nom, pas une date. Certains dépôts conservent d'anciens tags qui se classent haut :",
+	"semver_old_tags_is_really": "est en réalité",
+	"semver_old_tags_from": "de 2021, au-dessus d'un actuel",
+	"semver_old_tags_after": ".",
+	"semver_old_tags_on": "un tel tag est ignoré et la vraie version suivante est proposée",
+	"semver_old_tags_off": "les noms seuls décident, comme avant",
+	"semver_badge_note_before": "Une version plus récente s'affiche sous forme de pastille sur le conteneur - elle n'est",
+	"semver_badge_note_strong": "jamais appliquée automatiquement",
+	"semver_badge_note_after": ".",
+	"toggles_indent_guides": "Guides d'indentation",
+	"toggles_indent_guides_description": "Guides verticaux indiquant le niveau d'imbrication dans l'éditeur de code.",
+	"toggles_indent_guides_enabled": "Guides d'indentation activés",
+	"toggles_indent_guides_disabled": "Guides d'indentation désactivés",
+	"toggles_animate_icons": "Animer les icônes",
+	"toggles_animate_icons_description": "Indicateurs de chargement pendant les téléchargements, analyses et mises à jour.",
+	"toggles_animate_icons_enabled": "Animation des icônes activée",
+	"toggles_animate_icons_disabled": "Animation des icônes désactivée",
+	"toggles_colored_actions": "Boutons de tableau en couleur",
+	"toggles_colored_actions_description": "Utiliser des couleurs sémantiques plutôt que le gris atténué",
+	"toggles_colored_actions_enabled": "Boutons d'action en couleur",
+	"toggles_colored_actions_disabled": "Boutons d'action remis par défaut",
+	"iconpicker_no_icons": "Aucune icône trouvée",
+	"iconpicker_pick_icon": "Choisir une icône",
+	"ui_sidebar_title": "Barre latérale",
+	"ui_sidebar_description": "Affiche la barre latérale mobile.",
+	"ui_copy_error": "Copier l'erreur",
+	"ui_clear_search": "Effacer la recherche",
+	"ui_date_picker_placeholder": "Choisir une date",
+	"apidocs_page_title": "Documentation de l'API de Dockhand",
+	"profile_confirm_action_revoke": "Révoquer",
+	"profile_item_token": "le jeton",
+	"password_strength_too_short": "Trop court",
+	"password_strength_weak": "Faible",
+	"password_strength_fair": "Moyen",
+	"password_strength_good": "Bon",
+	"password_strength_strong": "Fort",
+	"avatar_crop_title": "Recadrer l'avatar",
+	"avatar_save": "Enregistrer l'avatar",
+	"avatar_crop_hint": "Faites glisser pour repositionner. Utilisez le curseur pour zoomer.",
+	"avatar_cancel": "Annuler",
+	"avatar_uploading": "Envoi...",
+	"avatar_loading": "Chargement...",
 	"settings_page_tab_general": "Général",
 	"settings_page_tab_environments": "Environnements",
 	"settings_page_tab_labels": "Étiquettes et tags",
@@ -4477,21 +4693,7 @@
 	"settings_about_dependencies": "Dépendances",
 	"settings_about_loading_releases": "Chargement des versions...",
 	"settings_about_latest": "Dernière",
-	"settings_about_changes_count": [
-		{
-			"declarations": [
-				"input count",
-				"local countPlural = count: plural"
-			],
-			"selectors": [
-				"countPlural"
-			],
-			"match": {
-				"countPlural=one": "{count} changement",
-				"countPlural=other": "{count} changements"
-			}
-		}
-	],
+	"settings_about_changes_count": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "{count} changement", "countPlural=other": "{count} changements"}}],
 	"settings_about_change_new": "Nouveau",
 	"settings_about_change_fix": "Correctif",
 	"settings_about_search_dependencies": "Rechercher des paquets ou des licences...",
@@ -4667,56 +4869,14 @@
 	"settings_backups_status_needs_init": "À initialiser",
 	"settings_backups_status_failed": "Échec",
 	"settings_backups_filter_all_statuses": "Tous les statuts",
-	"settings_backups_destination_count": [
-		{
-			"declarations": [
-				"input count",
-				"local countPlural = count: plural"
-			],
-			"selectors": [
-				"countPlural"
-			],
-			"match": {
-				"countPlural=one": "{count} destination",
-				"countPlural=other": "{count} destinations"
-			}
-		}
-	],
+	"settings_backups_destination_count": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "{count} destination", "countPlural=other": "{count} destinations"}}],
 	"settings_backups_add_destination": "Ajouter une destination",
 	"settings_backups_test_all": "Tout tester",
 	"settings_backups_loading": "Chargement des destinations de sauvegarde...",
 	"settings_backups_empty_title": "Aucune destination de sauvegarde",
 	"settings_backups_empty_description": "Ajoutez une destination de sauvegarde pour commencer à protéger les données de vos conteneurs",
-	"settings_backups_usage_containers": [
-		{
-			"declarations": [
-				"input count",
-				"local countPlural = count: plural"
-			],
-			"selectors": [
-				"countPlural"
-			],
-			"match": {
-				"countPlural=one": "{count} conteneur utilise ce dépôt",
-				"countPlural=other": "{count} conteneurs utilisent ce dépôt"
-			}
-		}
-	],
-	"settings_backups_usage_stacks": [
-		{
-			"declarations": [
-				"input count",
-				"local countPlural = count: plural"
-			],
-			"selectors": [
-				"countPlural"
-			],
-			"match": {
-				"countPlural=one": "{count} stack utilise ce dépôt",
-				"countPlural=other": "{count} stacks utilisent ce dépôt"
-			}
-		}
-	],
+	"settings_backups_usage_containers": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "{count} conteneur utilise ce dépôt", "countPlural=other": "{count} conteneurs utilisent ce dépôt"}}],
+	"settings_backups_usage_stacks": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "{count} stack utilise ce dépôt", "countPlural=other": "{count} stacks utilisent ce dépôt"}}],
 	"settings_backups_stat_total_size": "Taille totale",
 	"settings_backups_stat_files": "Fichiers",
 	"settings_backups_stat_snapshots": "Snapshots",
@@ -5045,21 +5205,7 @@
 	"settings_general_label_filter_any": "n'importe laquelle",
 	"settings_general_label_filter_all": "toutes",
 	"settings_general_scan_title": "Résultats de l'analyse des stacks externes",
-	"settings_general_scan_description": [
-		{
-			"declarations": [
-				"input count",
-				"local countPlural = count: plural"
-			],
-			"selectors": [
-				"countPlural"
-			],
-			"match": {
-				"countPlural=one": "{count} chemin configuré analysé pour des fichiers Docker Compose",
-				"countPlural=other": "{count} chemins configurés analysés pour des fichiers Docker Compose"
-			}
-		}
-	],
+	"settings_general_scan_description": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "{count} chemin configuré analysé pour des fichiers Docker Compose", "countPlural=other": "{count} chemins configurés analysés pour des fichiers Docker Compose"}}],
 	"settings_general_scan_found": "{count} trouvées",
 	"settings_general_scan_new": "{count} nouvelles",
 	"settings_general_scan_adopted": "{count} adoptées",
@@ -5083,21 +5229,7 @@
 	"settings_general_scan_no_results": "Aucun fichier Docker Compose trouvé dans les chemins configurés.",
 	"settings_general_scan_no_results_hint": "Vérifiez que vos chemins contiennent compose.yaml, compose.yml ou des fichiers similaires.",
 	"settings_general_scan_scanned_paths": "Chemins analysés",
-	"settings_general_scan_selected_count": [
-		{
-			"declarations": [
-				"input count",
-				"local countPlural = count: plural"
-			],
-			"selectors": [
-				"countPlural"
-			],
-			"match": {
-				"countPlural=one": "{count} stack sélectionnée",
-				"countPlural=other": "{count} stacks sélectionnées"
-			}
-		}
-	],
+	"settings_general_scan_selected_count": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "{count} stack sélectionnée", "countPlural=other": "{count} stacks sélectionnées"}}],
 	"settings_general_scan_adopt_selected": "Adopter la sélection",
 	"settings_general_scan_view_stacks": "Voir les stacks",
 	"settings_git_tab_repositories": "Dépôts",
@@ -5219,78 +5351,18 @@
 	"settings_registries_cancel": "Annuler",
 	"settings_registries_save": "Enregistrer",
 	"settings_registries_add": "Ajouter",
-	"settings_labels_toast_renamed": [
-		{
-			"declarations": [
-				"input oldLabel",
-				"input newLabel",
-				"input count",
-				"local countPlural = count: plural"
-			],
-			"selectors": [
-				"countPlural"
-			],
-			"match": {
-				"countPlural=one": "« {oldLabel} » renommée en « {newLabel} » dans {count} environnement",
-				"countPlural=other": "« {oldLabel} » renommée en « {newLabel} » dans {count} environnements"
-			}
-		}
-	],
+	"settings_labels_toast_renamed": [{"declarations": ["input oldLabel", "input newLabel", "input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "« {oldLabel} » renommée en « {newLabel} » dans {count} environnement", "countPlural=other": "« {oldLabel} » renommée en « {newLabel} » dans {count} environnements"}}],
 	"settings_labels_toast_rename_failed": "Impossible de renommer l'étiquette",
-	"settings_labels_toast_added": [
-		{
-			"declarations": [
-				"input label",
-				"input count",
-				"local countPlural = count: plural"
-			],
-			"selectors": [
-				"countPlural"
-			],
-			"match": {
-				"countPlural=one": "« {label} » ajoutée à {count} environnement",
-				"countPlural=other": "« {label} » ajoutée à {count} environnements"
-			}
-		}
-	],
+	"settings_labels_toast_added": [{"declarations": ["input label", "input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "« {label} » ajoutée à {count} environnement", "countPlural=other": "« {label} » ajoutée à {count} environnements"}}],
 	"settings_labels_toast_add_failed": "Impossible d'ajouter l'étiquette",
-	"settings_labels_toast_removed": [
-		{
-			"declarations": [
-				"input label",
-				"input count",
-				"local countPlural = count: plural"
-			],
-			"selectors": [
-				"countPlural"
-			],
-			"match": {
-				"countPlural=one": "« {label} » retirée de {count} environnement",
-				"countPlural=other": "« {label} » retirée de {count} environnements"
-			}
-		}
-	],
+	"settings_labels_toast_removed": [{"declarations": ["input label", "input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "« {label} » retirée de {count} environnement", "countPlural=other": "« {label} » retirée de {count} environnements"}}],
 	"settings_labels_toast_delete_failed": "Impossible de supprimer l'étiquette",
 	"settings_labels_toast_color_set": "Couleur définie pour « {label} »",
 	"settings_labels_toast_color_reset": "Couleur réinitialisée pour « {label} »",
 	"settings_labels_toast_color_failed": "Impossible de définir la couleur",
 	"settings_labels_title": "Étiquettes d'environnement",
 	"settings_labels_description": "Gérez les étiquettes de tous les environnements. Renommer ou supprimer une étiquette s'applique à chaque environnement qui l'utilise.",
-	"settings_labels_count": [
-		{
-			"declarations": [
-				"input count",
-				"local countPlural = count: plural"
-			],
-			"selectors": [
-				"countPlural"
-			],
-			"match": {
-				"countPlural=one": "{count} étiquette",
-				"countPlural=other": "{count} étiquettes"
-			}
-		}
-	],
+	"settings_labels_count": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "{count} étiquette", "countPlural=other": "{count} étiquettes"}}],
 	"settings_labels_add_label": "Ajouter une étiquette",
 	"settings_labels_loading": "Chargement des étiquettes...",
 	"settings_labels_empty": "Aucune étiquette trouvée",
@@ -5307,22 +5379,7 @@
 	"settings_labels_item_label": "l'étiquette",
 	"settings_labels_remove": "Supprimer",
 	"settings_labels_rename_title": "Renommer l'étiquette",
-	"settings_labels_rename_description": [
-		{
-			"declarations": [
-				"input label",
-				"input count",
-				"local countPlural = count: plural"
-			],
-			"selectors": [
-				"countPlural"
-			],
-			"match": {
-				"countPlural=one": "Cela renommera « {label} » dans {count} environnement.",
-				"countPlural=other": "Cela renommera « {label} » dans {count} environnements."
-			}
-		}
-	],
+	"settings_labels_rename_description": [{"declarations": ["input label", "input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "Cela renommera « {label} » dans {count} environnement.", "countPlural=other": "Cela renommera « {label} » dans {count} environnements."}}],
 	"settings_labels_current_name": "Nom actuel",
 	"settings_labels_new_name": "Nouveau nom",
 	"settings_labels_new_name_placeholder": "Saisissez le nouveau nom de l'étiquette",
@@ -5337,21 +5394,7 @@
 	"settings_labels_select_all": "Tout sélectionner",
 	"settings_labels_clear": "Effacer",
 	"settings_labels_no_environments": "Aucun environnement disponible",
-	"settings_labels_envs_selected": [
-		{
-			"declarations": [
-				"input count",
-				"local countPlural = count: plural"
-			],
-			"selectors": [
-				"countPlural"
-			],
-			"match": {
-				"countPlural=one": "{count} environnement sélectionné",
-				"countPlural=other": "{count} environnements sélectionnés"
-			}
-		}
-	],
+	"settings_labels_envs_selected": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "{count} environnement sélectionné", "countPlural=other": "{count} environnements sélectionnés"}}],
 	"settings_labels_tags_toast_create_failed": "Impossible de créer le tag",
 	"settings_labels_tags_toast_update_failed": "Impossible de mettre à jour le tag",
 	"settings_labels_tags_toast_delete_failed": "Impossible de supprimer le tag",
@@ -5380,21 +5423,7 @@
 	"settings_notifications_title": "Canaux de notification",
 	"settings_notifications_intro": "Configurez des canaux de notification pour recevoir des alertes sur les événements Docker. Prend en charge le courriel SMTP et les URL de webhook (Discord, Slack, Telegram, ntfy, Bark, Signal, Zabbix, Apprise, etc.).",
 	"settings_notifications_per_env_hint": "Les réglages détaillés des notifications (types d'événements, activation/désactivation) se configurent par environnement dans les paramètres de l'environnement.",
-	"settings_notifications_channel_count": [
-		{
-			"declarations": [
-				"input count",
-				"local countPlural = count: plural"
-			],
-			"selectors": [
-				"countPlural"
-			],
-			"match": {
-				"countPlural=one": "{count} canal",
-				"countPlural=other": "{count} canaux"
-			}
-		}
-	],
+	"settings_notifications_channel_count": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "{count} canal", "countPlural=other": "{count} canaux"}}],
 	"settings_notifications_add_channel": "Ajouter un canal",
 	"settings_notifications_refresh": "Actualiser",
 	"settings_notifications_loading": "Chargement des canaux de notification...",
@@ -5402,21 +5431,7 @@
 	"settings_notifications_empty_description": "Ajoutez un canal pour commencer à recevoir des alertes sur les événements Docker",
 	"settings_notifications_enabled": "Activé",
 	"settings_notifications_disabled": "Désactivé",
-	"settings_notifications_webhook_url_count": [
-		{
-			"declarations": [
-				"input count",
-				"local countPlural = count: plural"
-			],
-			"selectors": [
-				"countPlural"
-			],
-			"match": {
-				"countPlural=one": "Webhook : {count} URL",
-				"countPlural=other": "Webhook : {count} URL"
-			}
-		}
-	],
+	"settings_notifications_webhook_url_count": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "Webhook : {count} URL", "countPlural=other": "Webhook : {count} URL"}}],
 	"settings_notifications_sending_test": "Envoi du test...",
 	"settings_notifications_test_sent": "Test envoyé",
 	"settings_notifications_test_failed": "Échec du test",
@@ -5616,21 +5631,7 @@
 	"settings_secrets_item_provider": "le fournisseur de secrets",
 	"settings_secrets_delete_title": "Supprimer",
 	"settings_secrets_checking_stacks": "Recherche des stacks qui utilisent ce fournisseur...",
-	"settings_secrets_unbinds_stacks": [
-		{
-			"declarations": [
-				"input count",
-				"local countPlural = count: plural"
-			],
-			"selectors": [
-				"countPlural"
-			],
-			"match": {
-				"countPlural=one": "Cela détache {count} stack ; son prochain déploiement abandonne les secrets injectés :",
-				"countPlural=other": "Cela détache {count} stacks ; leur prochain déploiement abandonne les secrets injectés :"
-			}
-		}
-	],
+	"settings_secrets_unbinds_stacks": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "Cela détache {count} stack ; son prochain déploiement abandonne les secrets injectés :", "countPlural=other": "Cela détache {count} stacks ; leur prochain déploiement abandonne les secrets injectés :"}}],
 	"settings_configsets_error_name_required": "Le nom est obligatoire",
 	"settings_configsets_error_name_exists": "Ce nom d'ensemble de configuration existe déjà",
 	"settings_configsets_error_update_failed": "Impossible de mettre à jour l'ensemble de configuration",
