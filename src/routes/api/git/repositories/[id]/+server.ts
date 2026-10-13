@@ -39,7 +39,13 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 			return json({ error: 'Repository not found' }, { status: 404 });
 		}
 
-		return json(repository);
+		const allStacksUsing = await getGitStacksByRepositoryId(id);
+		const accessibleEnvIds = await auth.getAccessibleEnvironmentIds();
+		const stacksUsing = accessibleEnvIds === null
+			? allStacksUsing
+			: allStacksUsing.filter((s) => s.environmentId === null || accessibleEnvIds.includes(s.environmentId));
+
+		return json({ ...repository, stacksUsing });
 	} catch (error) {
 		console.error('Failed to get git repository:', error);
 		return json({ error: 'Failed to get git repository' }, { status: 500 });
