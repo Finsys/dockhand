@@ -8,20 +8,33 @@ import {
 	getGitRepository,
 	getStackEnvVars,
 	getStackSource,
+	secretProviderExists,
 	setStackEnvVars,
 	upsertStackSource
 } from '$lib/server/db';
-import { secureRandomBytes } from '$lib/server/crypto-fallback';
 import { registerSchedule } from '$lib/server/scheduler';
 import { auditGitStack, auditStack } from '$lib/server/audit';
 import { createJobResponse } from '$lib/server/sse';
 import { deployGitStack } from '$lib/server/git';
 import { getStackComposeFile } from '$lib/server/stacks';
 import { parseEnvVars } from '$lib/server/env-parser';
+import { allowSecretlessWebhook, webhookConfigRequiresSecret } from '$lib/server/webhook-secret-policy';
 import { existsSync, readFileSync } from 'node:fs';
 
 const STACK_NAME_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9_-]*$/;
 
+/**
+ * @openapi
+ * summary: Convert an internal stack to Git management
+ * path: name:string! Stack name (from GET /api/stacks)
+ * query: env:integer Environment ID the stack belongs to (from GET /api/environments)
+ * body: {stackName:string,repositoryId:integer,url:string,repoName:string,branch:string,credentialId:integer,composePath:string,envFilePath:string,autoUpdate:boolean,autoUpdateSchedule:string,autoUpdateCron:string,webhookEnabled:boolean,webhookSecret:string,contextDir:string,buildOnDeploy:boolean,noBuildCache:boolean,repullImages:boolean,forceRedeploy:boolean,secretProviderId:integer,envVars:array<{key:string!,value:string,isSecret:boolean}>,deployNow:boolean}
+ * resp-200: Git stack created; returns the git stack record, or a job response when deployNow starts deployment
+ * resp-400: Invalid conversion request or repository configuration
+ * resp-403: Caller lacks stacks:edit or required secrets:view permission
+ * resp-404: Stack not found
+ * resp-500: Failed to convert stack to Git management
+ */
 export const POST: RequestHandler = async (event) => {
 	const { params, request, url, cookies } = event;
 	const auth = await authorize(cookies);
@@ -67,12 +80,20 @@ export const POST: RequestHandler = async (event) => {
 			return json({ error: 'Permission denied: binding a secret provider requires the secrets permission' }, { status: 403 });
 		}
 
+		if (typeof data.secretProviderId === 'number' && !(await secretProviderExists(data.secretProviderId))) {
+			return json({ error: 'The selected secret provider no longer exists. Reopen the stack and pick a current provider.' }, { status: 400 });
+		}
+
 		if (data.stackName && data.stackName.trim() !== stackName) {
 			return json({ error: 'Stack name cannot be changed during conversion' }, { status: 400 });
 		}
 
 		if (!STACK_NAME_REGEX.test(stackName)) {
 			return json({ error: 'Invalid stack name' }, { status: 400 });
+		}
+
+		if (webhookConfigRequiresSecret(!!data.webhookEnabled, !!data.webhookSecret?.trim(), allowSecretlessWebhook())) {
+			return json({ error: 'A webhook secret is required when the webhook is enabled' }, { status: 400 });
 		}
 
 		let repositoryId = data.repositoryId;
@@ -111,11 +132,6 @@ export const POST: RequestHandler = async (event) => {
 			}
 		}
 
-		let webhookSecret = data.webhookSecret;
-		if (data.webhookEnabled && !webhookSecret) {
-			webhookSecret = secureRandomBytes(32).toString('hex');
-		}
-
 		const gitStack = await createGitStack({
 			stackName,
 			environmentId: envIdNum ?? null,
@@ -129,7 +145,7 @@ export const POST: RequestHandler = async (event) => {
 			autoUpdateSchedule: data.autoUpdateSchedule || 'daily',
 			autoUpdateCron: data.autoUpdateCron || '0 3 * * *',
 			webhookEnabled: data.webhookEnabled || false,
-			webhookSecret,
+			webhookSecret: data.webhookSecret || null,
 			contextDir: data.contextDir || null,
 			buildOnDeploy: data.buildOnDeploy ?? false,
 			noBuildCache: data.noBuildCache ?? false,
@@ -217,7 +233,11 @@ export const POST: RequestHandler = async (event) => {
 		if (data.deployNow) {
 			return createJobResponse(async (send) => {
 				try {
-					const deployResult = await deployGitStack(gitStack.id);
+					const deployResult = await deployGitStack(gitStack.id, {
+						triggeredBy: 'manual',
+						userId: auth.user?.id,
+						onLine: (line) => send('progress', { type: 'line', line })
+					});
 					await auditGitStack(event, 'deploy', gitStack.id, gitStack.stackName, gitStack.environmentId);
 					send('result', {
 						...gitStack,

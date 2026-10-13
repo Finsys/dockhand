@@ -667,7 +667,7 @@
 				loadSecretProviderBindingForStack(convertStackName)
 			]);
 			if (!localStackEnvVarsLoaded || !secretProviderBindingLoaded) {
-				formError = 'Failed to load the current stack settings. Close and reopen this dialog to retry.';
+				formError = m.stacks_git_error_conversion_settings_load_failed();
 			}
 		} else {
 			formRepoMode = repositories.length > 0 ? 'existing' : 'new';
@@ -816,6 +816,7 @@
 
 			let body: any = {
 				stackName: formStackName,
+				...(isUntrackedCreateMode ? { takeOverExternalStack: true } : {}),
 				composePath: formComposePath || 'compose.yaml',
 				envFilePath: formEnvFilePath,
 				environmentId: environmentId,
@@ -897,7 +898,7 @@
 					outputOk = false;
 					outputMs = Date.now() - outputStartedAt;
 				}
-				formError = data.error || (convertStackName ? 'Failed to convert stack to Git management' : m.stacks_git_error_save_failed());
+				formError = data.error || (convertStackName ? m.stacks_git_error_convert_failed() : m.stacks_git_error_save_failed());
 				return;
 			}
 
@@ -1010,10 +1011,10 @@
 					{/if}
 					<div>
 						<Dialog.Title class="text-sm font-semibold text-zinc-800 dark:text-zinc-100">
-							{gitStack ? m.stacks_git_title_edit() : isConvertMode ? 'Convert to Git' : m.stacks_git_title_create()}
+							{gitStack ? m.stacks_git_title_edit() : isConvertMode ? m.stacks_git_convert_to_git() : m.stacks_git_title_create()}
 						</Dialog.Title>
 						<Dialog.Description class="text-xs text-zinc-500 dark:text-zinc-400">
-							{gitStack ? m.stacks_git_description_edit() : isConvertMode ? 'Attach this local stack to a Git repository' : m.stacks_git_description_create()}
+							{gitStack ? m.stacks_git_description_edit() : isConvertMode ? m.stacks_git_description_convert() : m.stacks_git_description_create()}
 						</Dialog.Description>
 					</div>
 				</div>
@@ -1662,17 +1663,18 @@
 					{#if activeTab !== 'backups' && gitStack && onConvertToLocal}
 						<ConfirmPopover
 							open={confirmConvertToLocal}
-							action="Convert"
-							itemType="stack"
+							action={m.confirm_action_convert()}
+							itemType={m.stacks_item_stack()}
 							itemName={gitStack.stackName}
-							title="Convert to local source"
+							title={m.stacks_git_convert_to_local()}
+							localized
 							onConfirm={onConvertToLocal}
 							onOpenChange={(open) => (confirmConvertToLocal = open)}
 						>
 							{#snippet children()}
 								<Button variant="outline" disabled={formSaving}>
 									<FileText class="w-4 h-4" />
-									Convert to local
+									{m.stacks_git_convert_to_local()}
 								</Button>
 							{/snippet}
 						</ConfirmPopover>
@@ -1705,9 +1707,9 @@
 							<Button onclick={() => saveGitStack(formDeployNow)} disabled={formSaving || isInitializing || !conversionDataReady}>
 								{#if formSaving}
 									<Loader2 class="w-4 h-4 mr-1 animate-spin" />
-									{formDeployNow ? m.stacks_git_deploying() : isConvertMode ? 'Converting...' : m.stacks_git_creating()}
+									{formDeployNow ? m.stacks_git_deploying() : isConvertMode ? m.stacks_git_converting() : m.stacks_git_creating()}
 								{:else}
-									{formDeployNow ? m.stacks_git_deploy() : isConvertMode ? 'Convert' : m.stacks_git_create()}
+									{formDeployNow ? m.stacks_git_deploy() : isConvertMode ? m.stacks_git_convert() : m.stacks_git_create()}
 								{/if}
 							</Button>
 						{/if}
