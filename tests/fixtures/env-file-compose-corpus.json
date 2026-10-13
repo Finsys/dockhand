@@ -1,0 +1,641 @@
+{
+  "seed": {
+    "A": "setval",
+    "EMPTY": "",
+    "B": "second"
+  },
+  "cases": [
+    {
+      "input": "plain",
+      "expected": "plain"
+    },
+    {
+      "input": "with space",
+      "expected": "with space"
+    },
+    {
+      "input": "a#b",
+      "expected": "a#b"
+    },
+    {
+      "input": "a #b",
+      "expected": "a"
+    },
+    {
+      "input": "end ",
+      "expected": "end"
+    },
+    {
+      "input": " start",
+      "expected": "start"
+    },
+    {
+      "input": "${A}",
+      "expected": "setval"
+    },
+    {
+      "input": "$A",
+      "expected": "setval"
+    },
+    {
+      "input": "pa$$w",
+      "expected": "pa$w"
+    },
+    {
+      "input": "a=b",
+      "expected": "a=b"
+    },
+    {
+      "input": "a:b",
+      "expected": "a:b"
+    },
+    {
+      "input": "a,b",
+      "expected": "a,b"
+    },
+    {
+      "input": "a;b",
+      "expected": "a;b"
+    },
+    {
+      "input": "a|b",
+      "expected": "a|b"
+    },
+    {
+      "input": "tab\there",
+      "expected": "tab\there"
+    },
+    {
+      "input": "100%",
+      "expected": "100%"
+    },
+    {
+      "input": "a\"b",
+      "expected": "a\"b"
+    },
+    {
+      "input": "\"plain\"",
+      "expected": "plain"
+    },
+    {
+      "input": "\"with space\"",
+      "expected": "with space"
+    },
+    {
+      "input": "\"a#b\"",
+      "expected": "a#b"
+    },
+    {
+      "input": "\"a #b\"",
+      "expected": "a #b"
+    },
+    {
+      "input": "\"end \"",
+      "expected": "end "
+    },
+    {
+      "input": "\" start\"",
+      "expected": " start"
+    },
+    {
+      "input": "\"${A}\"",
+      "expected": "setval"
+    },
+    {
+      "input": "\"$A\"",
+      "expected": "setval"
+    },
+    {
+      "input": "\"pa$$w\"",
+      "expected": "pa$w"
+    },
+    {
+      "input": "\"a=b\"",
+      "expected": "a=b"
+    },
+    {
+      "input": "\"a:b\"",
+      "expected": "a:b"
+    },
+    {
+      "input": "\"a,b\"",
+      "expected": "a,b"
+    },
+    {
+      "input": "\"a;b\"",
+      "expected": "a;b"
+    },
+    {
+      "input": "\"a|b\"",
+      "expected": "a|b"
+    },
+    {
+      "input": "\"tab\there\"",
+      "expected": "tab\there"
+    },
+    {
+      "input": "\"100%\"",
+      "expected": "100%"
+    },
+    {
+      "input": "\"a'b\"",
+      "expected": "a'b"
+    },
+    {
+      "input": "'plain'",
+      "expected": "plain"
+    },
+    {
+      "input": "'with space'",
+      "expected": "with space"
+    },
+    {
+      "input": "'a#b'",
+      "expected": "a#b"
+    },
+    {
+      "input": "'a #b'",
+      "expected": "a #b"
+    },
+    {
+      "input": "'end '",
+      "expected": "end "
+    },
+    {
+      "input": "' start'",
+      "expected": " start"
+    },
+    {
+      "input": "'${A}'",
+      "expected": "${A}"
+    },
+    {
+      "input": "'$A'",
+      "expected": "$A"
+    },
+    {
+      "input": "'pa$$w'",
+      "expected": "pa$$w"
+    },
+    {
+      "input": "'a=b'",
+      "expected": "a=b"
+    },
+    {
+      "input": "'a:b'",
+      "expected": "a:b"
+    },
+    {
+      "input": "'a,b'",
+      "expected": "a,b"
+    },
+    {
+      "input": "'a;b'",
+      "expected": "a;b"
+    },
+    {
+      "input": "'a|b'",
+      "expected": "a|b"
+    },
+    {
+      "input": "'tab\there'",
+      "expected": "tab\there"
+    },
+    {
+      "input": "'100%'",
+      "expected": "100%"
+    },
+    {
+      "input": "'a\"b'",
+      "expected": "a\"b"
+    },
+    {
+      "input": "${A:-d}",
+      "expected": "setval"
+    },
+    {
+      "input": "${A:-}",
+      "expected": "setval"
+    },
+    {
+      "input": "${A:-a-b}",
+      "expected": "setval"
+    },
+    {
+      "input": "${A:-${B}}",
+      "expected": "setval"
+    },
+    {
+      "input": "${A:-x y}",
+      "expected": "setval"
+    },
+    {
+      "input": "${A-d}",
+      "expected": "setval"
+    },
+    {
+      "input": "${A-}",
+      "expected": "setval"
+    },
+    {
+      "input": "${A-a-b}",
+      "expected": "setval"
+    },
+    {
+      "input": "${A-${B}}",
+      "expected": "setval"
+    },
+    {
+      "input": "${A-x y}",
+      "expected": "setval"
+    },
+    {
+      "input": "${A:+d}",
+      "expected": "d"
+    },
+    {
+      "input": "${A:+}",
+      "expected": ""
+    },
+    {
+      "input": "${A:+a-b}",
+      "expected": "a-b"
+    },
+    {
+      "input": "${A:+${B}}",
+      "expected": "second"
+    },
+    {
+      "input": "${A:+x y}",
+      "expected": "x y"
+    },
+    {
+      "input": "${A+d}",
+      "expected": "d"
+    },
+    {
+      "input": "${A+}",
+      "expected": ""
+    },
+    {
+      "input": "${A+a-b}",
+      "expected": "a-b"
+    },
+    {
+      "input": "${A+${B}}",
+      "expected": "second"
+    },
+    {
+      "input": "${A+x y}",
+      "expected": "x y"
+    },
+    {
+      "input": "${EMPTY:-d}",
+      "expected": "d"
+    },
+    {
+      "input": "${EMPTY:-}",
+      "expected": ""
+    },
+    {
+      "input": "${EMPTY:-a-b}",
+      "expected": "a-b"
+    },
+    {
+      "input": "${EMPTY:-${B}}",
+      "expected": "second"
+    },
+    {
+      "input": "${EMPTY:-x y}",
+      "expected": "x y"
+    },
+    {
+      "input": "${EMPTY-d}",
+      "expected": ""
+    },
+    {
+      "input": "${EMPTY-}",
+      "expected": ""
+    },
+    {
+      "input": "${EMPTY-a-b}",
+      "expected": ""
+    },
+    {
+      "input": "${EMPTY-${B}}",
+      "expected": ""
+    },
+    {
+      "input": "${EMPTY-x y}",
+      "expected": ""
+    },
+    {
+      "input": "${EMPTY:+d}",
+      "expected": ""
+    },
+    {
+      "input": "${EMPTY:+}",
+      "expected": ""
+    },
+    {
+      "input": "${EMPTY:+a-b}",
+      "expected": ""
+    },
+    {
+      "input": "${EMPTY:+${B}}",
+      "expected": ""
+    },
+    {
+      "input": "${EMPTY:+x y}",
+      "expected": ""
+    },
+    {
+      "input": "${EMPTY+d}",
+      "expected": "d"
+    },
+    {
+      "input": "${EMPTY+}",
+      "expected": ""
+    },
+    {
+      "input": "${EMPTY+a-b}",
+      "expected": "a-b"
+    },
+    {
+      "input": "${EMPTY+${B}}",
+      "expected": "second"
+    },
+    {
+      "input": "${EMPTY+x y}",
+      "expected": "x y"
+    },
+    {
+      "input": "${MISS:-d}",
+      "expected": "d"
+    },
+    {
+      "input": "${MISS:-}",
+      "expected": ""
+    },
+    {
+      "input": "${MISS:-a-b}",
+      "expected": "a-b"
+    },
+    {
+      "input": "${MISS:-${B}}",
+      "expected": "second"
+    },
+    {
+      "input": "${MISS:-x y}",
+      "expected": "x y"
+    },
+    {
+      "input": "${MISS-d}",
+      "expected": "d"
+    },
+    {
+      "input": "${MISS-}",
+      "expected": ""
+    },
+    {
+      "input": "${MISS-a-b}",
+      "expected": "a-b"
+    },
+    {
+      "input": "${MISS-${B}}",
+      "expected": "second"
+    },
+    {
+      "input": "${MISS-x y}",
+      "expected": "x y"
+    },
+    {
+      "input": "${MISS:+d}",
+      "expected": ""
+    },
+    {
+      "input": "${MISS:+}",
+      "expected": ""
+    },
+    {
+      "input": "${MISS:+a-b}",
+      "expected": ""
+    },
+    {
+      "input": "${MISS:+${B}}",
+      "expected": ""
+    },
+    {
+      "input": "${MISS:+x y}",
+      "expected": ""
+    },
+    {
+      "input": "${MISS+d}",
+      "expected": ""
+    },
+    {
+      "input": "${MISS+}",
+      "expected": ""
+    },
+    {
+      "input": "${MISS+a-b}",
+      "expected": ""
+    },
+    {
+      "input": "${MISS+${B}}",
+      "expected": ""
+    },
+    {
+      "input": "${MISS+x y}",
+      "expected": ""
+    },
+    {
+      "input": "${MISS:-${A}}",
+      "expected": "setval"
+    },
+    {
+      "input": "${MISS:-${MISS:-deep}}",
+      "expected": "deep"
+    },
+    {
+      "input": "$A$B",
+      "expected": "setvalsecond"
+    },
+    {
+      "input": "${A}-${B}",
+      "expected": "setval-second"
+    },
+    {
+      "input": "x${A}y${B}z",
+      "expected": "xsetvalysecondz"
+    },
+    {
+      "input": "$",
+      "expected": "$"
+    },
+    {
+      "input": "$$",
+      "expected": "$"
+    },
+    {
+      "input": "$$$",
+      "expected": "$$"
+    },
+    {
+      "input": "$$$$",
+      "expected": "$$"
+    },
+    {
+      "input": "a$",
+      "expected": "a$"
+    },
+    {
+      "input": "$b",
+      "expected": ""
+    },
+    {
+      "input": "a$$b",
+      "expected": "a$b"
+    },
+    {
+      "input": "$$A",
+      "expected": "$A"
+    },
+    {
+      "input": "$A$$",
+      "expected": "setval$"
+    },
+    {
+      "input": "cost$5",
+      "expected": "cost$5"
+    },
+    {
+      "input": "$_x",
+      "expected": ""
+    },
+    {
+      "input": "$9",
+      "expected": "$9"
+    },
+    {
+      "input": "${A}$",
+      "expected": "setval$"
+    },
+    {
+      "input": "x$ y",
+      "expected": "x$ y"
+    },
+    {
+      "input": "\"pre\\npost\"",
+      "expected": "pre\npost"
+    },
+    {
+      "input": "'pre\\npost'",
+      "expected": "pre\\npost"
+    },
+    {
+      "input": "\"pre\\tpost\"",
+      "expected": "pre\tpost"
+    },
+    {
+      "input": "'pre\\tpost'",
+      "expected": "pre\\tpost"
+    },
+    {
+      "input": "\"pre\\rpost\"",
+      "expected": "pre\rpost"
+    },
+    {
+      "input": "'pre\\rpost'",
+      "expected": "pre\\rpost"
+    },
+    {
+      "input": "\"pre\\\\post\"",
+      "expected": "pre\\post"
+    },
+    {
+      "input": "'pre\\\\post'",
+      "expected": "pre\\\\post"
+    },
+    {
+      "input": "\"pre\\\"post\"",
+      "expected": "pre\"post"
+    },
+    {
+      "input": "'pre\\\"post'",
+      "expected": "pre\\\"post"
+    },
+    {
+      "input": "\"pre\\$post\"",
+      "expected": "pre$post"
+    },
+    {
+      "input": "'pre\\$post'",
+      "expected": "pre\\$post"
+    },
+    {
+      "input": "\"pre\\0101post\"",
+      "expected": "preApost"
+    },
+    {
+      "input": "'pre\\0101post'",
+      "expected": "pre\\0101post"
+    },
+    {
+      "input": "\"pre\\apost\"",
+      "expected": "pre\u0007post"
+    },
+    {
+      "input": "'pre\\apost'",
+      "expected": "pre\\apost"
+    },
+    {
+      "input": "\"pre\\bpost\"",
+      "expected": "pre\bpost"
+    },
+    {
+      "input": "'pre\\bpost'",
+      "expected": "pre\\bpost"
+    },
+    {
+      "input": "\"pre\\fpost\"",
+      "expected": "pre\fpost"
+    },
+    {
+      "input": "'pre\\fpost'",
+      "expected": "pre\\fpost"
+    },
+    {
+      "input": "\"pre\\vpost\"",
+      "expected": "pre\u000bpost"
+    },
+    {
+      "input": "'pre\\vpost'",
+      "expected": "pre\\vpost"
+    },
+    {
+      "input": "\"pre\\zpost\"",
+      "expected": "pre\\zpost"
+    },
+    {
+      "input": "'pre\\zpost'",
+      "expected": "pre\\zpost"
+    },
+    {
+      "input": "a}b",
+      "expected": "a}b"
+    },
+    {
+      "input": "}{",
+      "expected": "}{"
+    },
+    {
+      "input": "${A}}",
+      "expected": "setval}"
+    },
+    {
+      "input": "{$A}",
+      "expected": "{setval}"
+    }
+  ]
+}

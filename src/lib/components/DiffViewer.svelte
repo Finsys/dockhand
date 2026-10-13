@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { ArrowRight } from 'lucide-svelte';
 	import { formatFieldName, type AuditDiff, type FieldChange } from '$lib/utils/diff';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		diff: AuditDiff | null;
@@ -13,10 +14,10 @@
 			return '—';
 		}
 		if (typeof value === 'boolean') {
-			return value ? 'Yes' : 'No';
+			return value ? m.diff_yes() : m.diff_no();
 		}
 		if (Array.isArray(value)) {
-			if (value.length === 0) return '(empty)';
+			if (value.length === 0) return m.diff_empty();
 			if (value.every(v => typeof v === 'string' || typeof v === 'number')) {
 				return value.join(', ');
 			}
@@ -71,5 +72,5 @@
 		{/each}
 	</div>
 {:else}
-	<p class="text-sm text-muted-foreground italic">No changes recorded</p>
+	<p class="text-sm text-muted-foreground italic">{m.diff_no_changes()}</p>
 {/if}

@@ -3,7 +3,7 @@ import { createSelfhstMatcher } from '$lib/utils/selfhst-match';
 
 /**
  * A single shared matcher ((image, name?) -> selfh.st reference) built from the manifest.
- * Resolves by image first, then by container name. The manifest is fetched at most once
+ * Resolves by image first, then container name, then image namespace. The manifest is fetched at most once
  * per session, only after something first needs it (i.e. the selfh.st-icons toggle is on).
  * Until it loads, the matcher returns null for everything, so containers keep the generic
  * icon.
@@ -21,9 +21,10 @@ export async function ensureSelfhstMatcher(): Promise<void> {
 	try {
 		const res = await fetch('/api/icons/selfhst-manifest');
 		if (!res.ok) return;
-		const entries = (await res.json()) as { Reference?: string; SVG?: string }[];
+		const entries = (await res.json()) as { Reference?: string; SVG?: string; WebP?: string; PNG?: string }[];
 		const refs = new Set<string>();
-		for (const e of entries) if (e.SVG === 'Yes' && e.Reference) refs.add(e.Reference.toLowerCase());
+		// Keep any icon available in a format we can serve (SVG, else WebP, else PNG).
+		for (const e of entries) if (e.Reference && (e.SVG === 'Yes' || e.WebP === 'Yes' || e.PNG === 'Yes')) refs.add(e.Reference.toLowerCase());
 		matcher.set(createSelfhstMatcher(refs));
 		loaded = true;
 	} catch {

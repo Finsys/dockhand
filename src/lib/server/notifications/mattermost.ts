@@ -1,6 +1,49 @@
 /** Mattermost incoming webhook. mmost:// or mmosts:// (HTTPS). */
 import { notificationFetch, drainResponse, type NotificationPayload, type NotificationResult } from './shared';
 
+/** Severity colours, matching the Discord embed so the two channels read alike. */
+const ATTACHMENT_COLORS: Record<string, string> = {
+	error: '#FF0000',
+	warning: '#FFAA00',
+	success: '#00FF00',
+	info: '#0099FF'
+};
+
+/**
+ * The webhook body for one notification.
+ *
+ * Mattermost accepts Slack-style attachments, which carry a severity colour and a
+ * footer the plain `text` form cannot. The attachment replaces `text` rather than
+ * accompanying it - Mattermost renders both, so sending both shows the message
+ * twice (#1607). `fallback` is what push notifications and email digests read, so
+ * it carries the message for anyone not looking at the channel.
+ */
+export function buildMattermostBody(
+	payload: NotificationPayload,
+	username?: string,
+	nowSeconds: number = Math.floor(Date.now() / 1000)
+): Record<string, unknown> {
+	const title = payload.environmentName
+		? `${payload.title} [${payload.environmentName}]`
+		: payload.title;
+
+	const body: Record<string, unknown> = {
+		attachments: [
+			{
+				color: ATTACHMENT_COLORS[payload.type ?? 'info'] ?? ATTACHMENT_COLORS.info,
+				fallback: `${title}\n${payload.message}`,
+				title,
+				text: payload.message,
+				mrkdwn_in: ['text', 'pretext'],
+				ts: nowSeconds,
+				...(payload.environmentName && { footer: `Environment: ${payload.environmentName}` })
+			}
+		]
+	};
+	if (username) body.username = username;
+	return body;
+}
+
 export async function sendMattermost(appriseUrl: string, payload: NotificationPayload): Promise<NotificationResult> {
 	// mmost://[botname@]hostname[:port][/path]/token or mmosts://...
 	const isSecure = appriseUrl.startsWith('mmosts');
@@ -27,14 +70,7 @@ export async function sendMattermost(appriseUrl: string, payload: NotificationPa
 
 	const url = `${protocol}://${hostAndPath}/hooks/${token}`;
 
-	const envTag = payload.environmentName ? ` \`${payload.environmentName}\`` : '';
-	const body: Record<string, string> = {
-		text: `*${payload.title}*${envTag}\n${payload.message}`
-	};
-
-	if (username) {
-		body.username = username;
-	}
+	const body = buildMattermostBody(payload, username);
 
 	try {
 		const response = await notificationFetch(url, {

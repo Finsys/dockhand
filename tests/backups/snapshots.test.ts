@@ -8,6 +8,7 @@ import {
 	assertInstanceOwned,
 	assertEnvAccess,
 	guardSnapshotAccess,
+	selectOwnedForForget,
 	listSnapshots,
 	resolveSnapshotEnvId,
 	filterSnapshotsByAccessibleEnv,
@@ -99,6 +100,33 @@ describe('guardSnapshotAccess — instance AND env, in order', () => {
 	it('blocks our snapshot in an inaccessible env', async () => {
 		const r = reader([{ id: SNAP, tags: ['dockhand:instance=me', 'dockhand:envid=9'] }]);
 		await expect(guardSnapshotAccess(r, {}, 'me', SNAP, enterprise([3]))).rejects.toThrow(/access denied/);
+	});
+});
+
+describe('selectOwnedForForget — the bulk-delete preVetted contract', () => {
+	const ids = ['a'.repeat(64), 'b'.repeat(64), 'c'.repeat(64)];
+
+	it('preVetted forwards every id and NEVER calls the guard (route already vetted them)', async () => {
+		let guardCalls = 0;
+		const guard = async () => { guardCalls++; };
+		const out = await selectOwnedForForget(ids, { preVetted: true, guard });
+		expect(out.owned).toEqual(ids);
+		expect(out.skipped).toEqual([]);
+		expect(guardCalls).toBe(0); // the whole point: no per-id ownership re-listing
+	});
+
+	it('without preVetted, a guard rejection drops that id to skipped (never forgotten)', async () => {
+		// 'b' is not owned / not accessible -> the guard throws -> it must be skipped, not owned.
+		const guard = async (id: string) => { if (id === ids[1]) throw new Error('not owned'); };
+		const out = await selectOwnedForForget(ids, { preVetted: false, guard });
+		expect(out.owned).toEqual([ids[0], ids[2]]);
+		expect(out.skipped).toEqual([ids[1]]);
+	});
+
+	it('without preVetted, all-rejected yields no owned ids (nothing reaches restic)', async () => {
+		const out = await selectOwnedForForget(ids, { preVetted: false, guard: async () => { throw new Error('x'); } });
+		expect(out.owned).toEqual([]);
+		expect(out.skipped).toEqual(ids);
 	});
 });
 

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button';
+	import { m } from '$lib/paraglide/messages.js';
 	import { ChevronDown, ChevronRight, CheckCircle2, XCircle, Loader2 } from 'lucide-svelte';
 	import type { StepType } from '$lib/utils/update-steps';
 	import { getStepIcon, getStepLabel, getStepColor } from '$lib/utils/update-steps';
@@ -83,7 +84,7 @@
 				class="h-6 px-2 text-xs text-amber-600 hover:text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950/50"
 				onclick={onForceUpdate}
 			>
-				Update anyway
+				{m.containers_batchupdate_update_anyway()}
 			</Button>
 		{/if}
 	{/if}
@@ -94,7 +95,7 @@
 			type="button"
 			onclick={onToggleLogs}
 			class="p-1 hover:bg-muted rounded cursor-pointer"
-			title={showLogs ? 'Hide logs' : 'Show logs'}
+			title={showLogs ? m.containers_batchupdate_hide_logs() : m.containers_batchupdate_show_logs()}
 		>
 			{#if showLogs}
 				<ChevronDown class="w-4 h-4 text-muted-foreground" />

@@ -1,4 +1,5 @@
 import { appendEnvParam } from '$lib/stores/environment';
+import { m } from '$lib/paraglide/messages.js';
 
 export interface ShellInfo {
 	path: string;
@@ -16,7 +17,13 @@ export const SHELL_OPTIONS: Omit<ShellInfo, 'available'>[] = [
 export const USER_OPTIONS = [
 	{ value: 'root', label: 'root' },
 	{ value: 'nobody', label: 'nobody' },
-	{ value: '', label: 'Container default' }
+	// Getter, so the label is read in the active locale when rendered
+	{
+		value: '',
+		get label() {
+			return m.shell_user_container_default();
+		}
+	}
 ];
 
 const TERMINAL_USER_STORAGE_KEY = 'dockhand-terminal-users';

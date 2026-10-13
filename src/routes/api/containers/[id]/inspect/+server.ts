@@ -16,7 +16,7 @@ import {
  * @openapi
  * summary: Return the full Docker inspect payload for a container (requires the 'inspect' permission)
  * path: id:string! Container ID or name (from GET /api/containers)
- * query: env:integer The target environment ID (omit for the local/default Docker host) (from GET /api/environments)
+ * query: env:integer! The target environment ID the container lives in (from GET /api/environments)
  * resp-200: The raw Docker inspect object for the container
  * resp-403: Permission denied
  * resp-500: Failed to inspect the container

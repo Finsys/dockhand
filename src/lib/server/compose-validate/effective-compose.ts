@@ -26,6 +26,7 @@ import { resolveComposeDockerHost, buildComposeBaseArgs } from '../compose-docke
 import { parseCompose } from './parse';
 import { extractMaterializableEnvFiles } from './env-file-paths';
 import type { Finding } from './types';
+import { isPlaceholderArtefact, PLACEHOLDER } from '$lib/utils/validate-provider-keys';
 
 const CONFIG_TIMEOUT_MS = 20_000;
 const OUTPUT_LIMIT = 8 * 1024 * 1024;
@@ -128,6 +129,9 @@ export function parseConfigErrors(stderr: string): Finding[] {
 			.replace(/"$/, '')
 			.trim();
 		if (!msg || seen.has(msg)) continue;
+		// A complaint about the stand-in value is an artefact of previewing a secret we
+		// do not have, not a fault in the file.
+		if (isPlaceholderArtefact(msg)) continue;
 		seen.add(msg);
 		const lineMatch = /line\s+(\d+)/i.exec(msg);
 		findings.push({
@@ -138,6 +142,10 @@ export function parseConfigErrors(stderr: string): Finding[] {
 			line: lineMatch ? Number(lineMatch[1]) : undefined
 		});
 	}
+	// Every message was a placeholder artefact: config only tripped over the stand-in,
+	// so there is nothing to report.
+	if (findings.length === 0 && stderr.includes(PLACEHOLDER)) return [];
+
 	// If config failed but printed nothing useful, still record one error.
 	if (findings.length === 0) {
 		findings.push({

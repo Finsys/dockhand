@@ -13,20 +13,28 @@ import { clearTokenCache } from '$lib/server/api-tokens';
 // GET /api/roles/[id] - Get a specific role
 /**
  * @openapi
- * summary: Get a single role by id; available in setup mode or with an enterprise license
+ * summary: Get a single role by id; needs admin or users:view, plus an enterprise license
  * path: id:integer! Numeric id of the role (from GET /api/roles)
  * resp-200: {id:integer!, name:string!, description:string, isSystem:boolean!, permissions:{}}
  * resp-400: Role id is required
- * resp-403: Enterprise license required
+ * resp-403: Enterprise license required, or the account may not view users
  * resp-404: Role not found
  * resp-500: Failed to read the role
  */
 export const GET: RequestHandler = async ({ params, cookies }) => {
 	const auth = await authorize(cookies);
 
-	// Allow viewing roles when auth is disabled (setup mode) or with enterprise license
-	if (auth.authEnabled && !auth.isEnterprise) {
-		return json({ error: 'Enterprise license required' }, { status: 403 });
+	// Before auth is switched on there is nobody to check, and the setup screens show
+	// the built-in roles.
+	if (auth.authEnabled) {
+		if (!auth.isEnterprise) {
+			return json({ error: 'Enterprise license required' }, { status: 403 });
+		}
+		// Same gate as the list route: a role carries its full permission matrix, and
+		// role ids are sequential, so reading them one at a time rebuilds the list.
+		if (!auth.isAdmin && !(await auth.can('users', 'view'))) {
+			return json({ error: 'Permission denied' }, { status: 403 });
+		}
 	}
 
 	if (!params.id) {
@@ -68,7 +76,7 @@ export const PUT: RequestHandler = async (event) => {
 	const auth = await authorize(cookies);
 
 	// Check enterprise license
-	if (!auth.isEnterprise) {
+	if (!auth.hasValidLicense) {
 		return json({ error: 'Enterprise license required' }, { status: 403 });
 	}
 
@@ -135,7 +143,7 @@ export const DELETE: RequestHandler = async (event) => {
 	const auth = await authorize(cookies);
 
 	// Check enterprise license
-	if (!auth.isEnterprise) {
+	if (!auth.hasValidLicense) {
 		return json({ error: 'Enterprise license required' }, { status: 403 });
 	}
 

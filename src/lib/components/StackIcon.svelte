@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Box } from 'lucide-svelte';
+	import { Box, Layers } from 'lucide-svelte';
 	import { getStackIconComponent, isSelfhstIcon, selfhstRef, isCustomIcon } from '$lib/utils/icons';
 	import { selfhstIcons, requestSelfhst } from '$lib/stores/selfhst-icons';
 
@@ -23,8 +23,12 @@
 
 	const selfhst = $derived(selfhstRef(icon));
 	const custom = $derived(isCustomIcon(icon));
-	// Lucide is the fallback for any non-selfhst, non-custom value (incl. null).
-	const LucideIcon = $derived(!isSelfhstIcon(icon) && !custom ? getStackIconComponent(icon || '') : null);
+	// A named lucide icon resolves via the map; an EMPTY/null value falls back to Layers -
+	// the generic stack glyph used everywhere else in the stacks UI (page header, tiles,
+	// list). getStackIconComponent's own default is Boxes, which reads as a different icon.
+	const LucideIcon = $derived(
+		!isSelfhstIcon(icon) && !custom ? (icon ? getStackIconComponent(icon) : Layers) : null
+	);
 
 	// Resolve the selfh.st icon via the shared batch store (one request for the whole
 	// list) instead of a per-icon <img src>. `resolved`: data URI when ready, '' when it

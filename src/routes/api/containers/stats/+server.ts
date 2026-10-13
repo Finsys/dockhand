@@ -4,79 +4,7 @@ import { listContainers, getContainerStats, EnvironmentNotFoundError } from '$li
 import { authorize } from '$lib/server/authorize';
 import { hasEnvironments } from '$lib/server/db';
 import type { ContainerStats } from '$lib/types';
-
-function calculateCpuPercent(stats: any): number {
-	const cpuDelta = stats.cpu_stats.cpu_usage.total_usage - stats.precpu_stats.cpu_usage.total_usage;
-	const systemDelta = stats.cpu_stats.system_cpu_usage - stats.precpu_stats.system_cpu_usage;
-	const cpuCount = stats.cpu_stats.online_cpus || stats.cpu_stats.cpu_usage.percpu_usage?.length || 1;
-
-	if (systemDelta > 0 && cpuDelta > 0) {
-		return (cpuDelta / systemDelta) * cpuCount * 100;
-	}
-	return 0;
-}
-
-function calculateNetworkIO(stats: any): { rx: number; tx: number } {
-	let rx = 0;
-	let tx = 0;
-
-	if (stats.networks) {
-		for (const iface of Object.values(stats.networks) as any[]) {
-			rx += iface.rx_bytes || 0;
-			tx += iface.tx_bytes || 0;
-		}
-	}
-
-	return { rx, tx };
-}
-
-function calculateBlockIO(stats: any): { read: number; write: number } {
-	let read = 0;
-	let write = 0;
-
-	const ioStats = stats.blkio_stats?.io_service_bytes_recursive;
-	if (Array.isArray(ioStats)) {
-		for (const entry of ioStats) {
-			if (entry.op === 'read' || entry.op === 'Read') {
-				read += entry.value || 0;
-			} else if (entry.op === 'write' || entry.op === 'Write') {
-				write += entry.value || 0;
-			}
-		}
-	}
-
-	return { read, write };
-}
-
-/**
- * Calculate memory usage the same way Docker CLI does.
- * Docker subtracts cache (inactive_file) from total usage to show actual memory consumption.
- * - cgroup v2: subtract inactive_file from stats
- * - cgroup v1: subtract total_inactive_file from stats
- * See: https://docs.docker.com/engine/containers/runmetrics/
- *
- * Returns: { usage: actual memory (minus cache), raw: total usage, cache: file cache }
- */
-function calculateMemoryUsage(memoryStats: any): { usage: number; raw: number; cache: number } {
-	const raw = memoryStats?.usage || 0;
-	const stats = memoryStats?.stats || {};
-
-	// cgroup v2 uses 'inactive_file', cgroup v1 uses 'total_inactive_file'
-	const cache = stats.inactive_file ?? stats.total_inactive_file ?? 0;
-
-	// Only subtract cache if it's less than raw usage (sanity check)
-	const usage = (cache > 0 && cache < raw) ? raw - cache : raw;
-
-	return { usage, raw, cache };
-}
-
-// Helper to add timeout to promises
-function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
-	return Promise.race([
-		promise,
-		new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms))
-	]);
-}
+import { withTimeout, sampleContainerStats } from '$lib/server/container-stats';
 
 /**
  * GET /api/containers/stats - Get resource stats for all running containers
@@ -84,9 +12,9 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T
  * @openapi
  * summary: Return a CPU/memory/network/block-IO stats snapshot for every running container in an environment (requires the 'view' permission)
  * description: Returns an empty array when no environment is configured or specified. With `debug=<name>` it returns the raw memory_stats for a single container instead. On internal error it returns an empty array with status 200.
- * query: env:integer The target environment ID (omit for the local/default Docker host) (from GET /api/environments)
+ * query: env:integer! The target environment ID the container lives in (from GET /api/environments)
  * query: debug:string Return raw Docker stats for the single container with this name instead of the aggregate list
- * resp-200: Array of per-container stats snapshots (or, with `debug`, the raw stats for one container)
+ * resp-200: Array of per-container stats snapshots (or, with `debug`, the raw stats for one container). Each entry carries `stack`, the compose project the container belongs to (null when standalone), so totals can be grouped without a second request. Note `memoryLimit` is the host limit each container reports, so take the MAXIMUM across a stack rather than the sum.
  * resp-403: Permission denied
  * resp-404: The requested debug container was not found
  */
@@ -134,44 +62,12 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 			return json({ error: 'Container not found' }, { status: 404 });
 		}
 
-		// Get stats for each running container (in parallel with timeout)
-		const statsPromises = runningContainers.map(async (container) => {
-			try {
-				const stats = await withTimeout(
-					getContainerStats(container.id, envIdNum) as Promise<any>,
-					8000, // 8 second timeout per container (TLS proxy + Docker CPU sampling needs ~2s)
-					null
-				);
-
-				if (!stats) return null;
-
-				const cpuPercent = calculateCpuPercent(stats);
-				// Calculate memory usage the same way Docker CLI does (excludes cache)
-				const memory = calculateMemoryUsage(stats.memory_stats);
-				const memoryLimit = stats.memory_stats?.limit || 1;
-				const memoryPercent = (memory.usage / memoryLimit) * 100;
-				const networkIO = calculateNetworkIO(stats);
-				const blockIO = calculateBlockIO(stats);
-
-				return {
-					id: container.id,
-					name: container.name,
-					cpuPercent: Math.round(cpuPercent * 100) / 100,
-					memoryUsage: memory.usage,
-					memoryRaw: memory.raw,
-					memoryCache: memory.cache,
-					memoryLimit,
-					memoryPercent: Math.round(memoryPercent * 100) / 100,
-					networkRx: networkIO.rx,
-					networkTx: networkIO.tx,
-					blockRead: blockIO.read,
-					blockWrite: blockIO.write
-				};
-			} catch (err) {
-				// Silently skip failed containers
-				return null;
-			}
-		});
+		// All at once, deliberately. The daemon samples CPU twice per call, so each
+		// one costs about two seconds no matter what; anything narrower than "every
+		// container" multiplies that into the caller's wait. The collection worker
+		// paces its own fan-out because it runs in the background, where waiting
+		// is free.
+		const statsPromises = runningContainers.map((container) => sampleContainerStats(container, envIdNum));
 
 		const allStats = await Promise.all(statsPromises);
 		const validStats = allStats.filter((s): s is ContainerStats => s !== null);

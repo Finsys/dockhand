@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
+import { isFederatedSession } from '$lib/server/provider-kind-core';
 import { generateApiToken, listUserTokens } from '$lib/server/api-tokens';
 import { isAuthEnabled, verifyPassword } from '$lib/server/auth';
 import { getUser } from '$lib/server/db';
@@ -119,9 +120,12 @@ export const POST: RequestHandler = async (event) => {
 	}
 	const { name, expiresAt, password } = body;
 
-	// Local users must confirm their password to create tokens
-	// SSO/OIDC and LDAP users skip this (they authenticated via their IdP)
-	if (auth.user.provider === 'local') {
+	// A local account confirms its password before a durable token is minted, so a
+	// stolen session cannot mint one. Only a federated sign-in skips it, because the
+	// account has no password here to confirm. Written as a skip-list of those two, so
+	// a session kind added later asks for the password rather than silently bypassing
+	// it - a passkey session is still a local account.
+	if (!isFederatedSession(auth.user.provider)) {
 		if (isPwRateLimited(auth.user.id)) {
 			return json({ error: 'Too many failed password attempts. Try again later.' }, { status: 429 });
 		}

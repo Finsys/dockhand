@@ -3,6 +3,8 @@
 	import * as Popover from '$lib/components/ui/popover';
 	import { Calendar } from '$lib/components/ui/calendar';
 	import { CalendarDate, today, getLocalTimeZone } from '@internationalized/date';
+	import { m } from '$lib/paraglide/messages.js';
+	import { getLocale } from '$lib/paraglide/runtime.js';
 
 	interface Props {
 		sinceDate: string;
@@ -91,7 +93,7 @@
 <Popover.Root bind:open onOpenChange={(v) => { if (v) picking = sinceDate && !untilDate ? 'to' : 'from'; }}>
 	<Popover.Trigger
 		class="flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-colors {hasFilter ? (darkMode ? 'bg-amber-500/20 ring-1 ring-amber-500/50 text-amber-400' : 'bg-amber-500/30 ring-1 ring-amber-600/50 text-amber-700') : darkMode ? 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-300'}"
-		title={hasFilter ? `Time range: ${formatLabel()}` : 'Filter logs by time range'}
+		title={hasFilter ? m.logs_timerange_title({ range: formatLabel() }) : m.logs_timerange_filter()}
 	>
 		<CalendarClock class="w-3 h-3" />
 		{#if hasFilter}<span class="tabular-nums">{formatLabel()}</span>{/if}
@@ -105,14 +107,14 @@
 					onclick={() => picking = 'from'}
 					class="flex-1 px-3 py-1.5 text-xs font-medium transition-colors {picking === 'from' ? 'text-foreground border-b-2 border-primary' : 'text-muted-foreground hover:text-foreground'}"
 				>
-					From{#if sinceDate}<span class="ml-1 text-muted-foreground">({sinceDate.slice(5)})</span>{/if}
+					{m.logs_timerange_from()}{#if sinceDate}<span class="ml-1 text-muted-foreground">({sinceDate.slice(5)})</span>{/if}
 				</button>
 				<button
 					type="button"
 					onclick={() => picking = 'to'}
 					class="flex-1 px-3 py-1.5 text-xs font-medium transition-colors {picking === 'to' ? 'text-foreground border-b-2 border-primary' : 'text-muted-foreground hover:text-foreground'}"
 				>
-					To{#if untilDate}<span class="ml-1 text-muted-foreground">({untilDate.slice(5)})</span>{/if}
+					{m.logs_timerange_to()}{#if untilDate}<span class="ml-1 text-muted-foreground">({untilDate.slice(5)})</span>{/if}
 				</button>
 			</div>
 
@@ -122,11 +124,12 @@
 					type="single"
 					value={sinceCalValue}
 					onValueChange={onFromSelect}
+					locale={getLocale()}
 					class="p-2"
 				/>
 				<div class="px-3 pb-2">
 					<div class="flex items-center gap-2">
-						<span class="text-xs text-muted-foreground">Time:</span>
+						<span class="text-xs text-muted-foreground">{m.logs_timerange_time()}</span>
 						<input type="time" bind:value={sinceTime} class="h-7 rounded border border-border px-2 text-xs bg-background text-foreground [color-scheme:dark] focus:outline-none focus:ring-1 focus:ring-ring" />
 					</div>
 				</div>
@@ -135,11 +138,12 @@
 					type="single"
 					value={untilCalValue}
 					onValueChange={onToSelect}
+					locale={getLocale()}
 					class="p-2"
 				/>
 				<div class="px-3 pb-2">
 					<div class="flex items-center gap-2">
-						<span class="text-xs text-muted-foreground">Time:</span>
+						<span class="text-xs text-muted-foreground">{m.logs_timerange_time()}</span>
 						<input type="time" bind:value={untilTime} class="h-7 rounded border border-border px-2 text-xs bg-background text-foreground [color-scheme:dark] focus:outline-none focus:ring-1 focus:ring-ring" />
 					</div>
 				</div>
@@ -147,8 +151,8 @@
 
 			<!-- Actions -->
 			<div class="flex items-center gap-2 px-3 pb-2">
-				<button onclick={apply} class="px-2 py-1 rounded text-xs bg-primary text-primary-foreground hover:bg-primary/90" disabled={!sinceDate && !untilDate}>Apply</button>
-				<button onclick={clear} class="px-2 py-1 rounded text-xs bg-muted text-muted-foreground hover:bg-muted/80">Clear</button>
+				<button onclick={apply} class="px-2 py-1 rounded text-xs bg-primary text-primary-foreground hover:bg-primary/90" disabled={!sinceDate && !untilDate}>{m.tags_apply()}</button>
+				<button onclick={clear} class="px-2 py-1 rounded text-xs bg-muted text-muted-foreground hover:bg-muted/80">{m.logs_timerange_clear()}</button>
 			</div>
 		</div>
 	</Popover.Content>

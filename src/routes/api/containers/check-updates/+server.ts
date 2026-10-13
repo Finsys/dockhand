@@ -1,12 +1,17 @@
+import { trackedImageReference } from '$lib/utils/tracked-image';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
-import { listContainers, inspectContainer, checkImageUpdateAvailable, getTagArtifactKind } from '$lib/server/docker';
+import { rowsToPersist } from '$lib/utils/pending-update-rows';
+import { listContainers, inspectContainer, checkImageUpdateAvailable, getTagArtifactKind, getRegistryTagCreatedAt, inspectImage } from '$lib/server/docker';
 import { clearPendingContainerUpdates, addPendingContainerUpdate, getPendingContainerUpdates, getGlobalSemverConfig } from '$lib/server/db';
 import { isSystemContainer, isPodmanInfraContainer } from '$lib/server/scheduler/tasks/update-utils';
-import { isUpdateDisabledByLabel, isHiddenByLabel, getVersionPatternOverride } from '$lib/server/container-labels';
+import { isUpdateDisabledByLabel, isHiddenByLabel, getVersionPatternOverride, digestUpdateVisible } from '$lib/server/container-labels';
 import { createJobResponse } from '$lib/server/sse';
-import { checkNewerVersion } from '$lib/server/semver/check';
+import { checkNewerVersion, type ImageCreatedAtProbe } from '$lib/server/semver/check';
+import { parseTag } from '$lib/server/semver/tag-parser';
+import { tagFilterFromLabels } from '$lib/server/semver/tag-filter-labels';
+import { parseImageReference } from '$lib/server/registry/image-ref';
 import type { NewerVersion } from '$lib/server/semver/find-newer';
 
 export interface UpdateCheckResult {
@@ -14,6 +19,7 @@ export interface UpdateCheckResult {
 	containerName: string;
 	imageName: string;
 	hasUpdate: boolean;
+	releaseAgeRemainingHours?: number;
 	currentDigest?: string;
 	newDigest?: string;
 	error?: string;
@@ -32,7 +38,7 @@ export interface UpdateCheckResult {
  * @openapi
  * summary: Read the cached pending image-update records for an environment (no fresh check; requires the 'view' permission)
  * description: Returns the containers currently flagged as having a pending image update from the last check. Does not trigger a new check — use POST to run a fresh check.
- * query: env:integer The target environment ID (omit for the local/default Docker host) (from GET /api/environments)
+ * query: env:integer! The target environment ID the container lives in (from GET /api/environments)
  * resp-200: {environmentId:integer!, pendingUpdates:array<{containerId:string!, containerName:string!, currentImage:string!, checkedAt:string}>!}
  * resp-400: Environment ID required
  * resp-403: Permission denied
@@ -75,7 +81,7 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
  *
  * @openapi
  * summary: Trigger a fresh image-update check across all (non-hidden, non-podman-infra) containers in an environment
- * query: env:integer The target environment ID (omit for the local/default Docker host) (from GET /api/environments)
+ * query: env:integer! The target environment ID the container lives in (from GET /api/environments)
  * resp-200: text/event-stream job stream ("progress" events with {checked,total}, final "result" event with {total,updatesFound,results}) — or, with "Accept: application/json", the final result as plain JSON
  * resp-403: Permission denied
  */
@@ -122,7 +128,7 @@ export const POST: RequestHandler = async ({ url, cookies, request }) => {
 		const checkContainer = async (container: typeof containers[0]): Promise<UpdateCheckResult> => {
 			try {
 				const inspectData = await inspectContainer(container.id, envIdNum) as any;
-				const imageName = inspectData.Config?.Image;
+				const imageName = trackedImageReference(inspectData.Config?.Image, inspectData.Config?.Labels);
 				const currentImageId = inspectData.Image;
 
 				if (!imageName) {
@@ -158,18 +164,45 @@ export const POST: RequestHandler = async ({ url, cookies, request }) => {
 
 				// Newer-version-tag detection (opt-in). Skips instantly for floating tags,
 				// so it only hits the registry for pinned versions. Never throws.
+				const versionPattern = getVersionPatternOverride(inspectData.Config?.Labels);
+				// A tag names what a maintainer called a build, not when it was made, so a
+				// repo still carrying high-sorting old tags offers them as upgrades. Reads
+				// the running image's build date locally; skipped for a floating tag, which
+				// checkNewerVersion short-circuits anyway.
+				let staleCheck: { probeCreatedAt: ImageCreatedAtProbe; currentCreatedAt: string | null } | undefined;
+				if (
+					semverEnabled && !systemContainer && semverConfig.rejectOlderImages &&
+					parseTag(parseImageReference(imageName).tag, versionPattern)
+				) {
+					const currentCreatedAt = await inspectImage(currentImageId, envIdNum)
+						.then((img: any) => (typeof img?.Created === 'string' ? img.Created : null))
+						.catch(() => null);
+					if (currentCreatedAt) {
+						staleCheck = {
+							probeCreatedAt: (registry, repo, digest) =>
+								getRegistryTagCreatedAt(registry, repo, digest, envIdNum),
+							currentCreatedAt
+						};
+					}
+				}
 				const newerVersion = semverEnabled && !systemContainer
 					? await checkNewerVersion(imageName, {
 							...semverOptions,
-							versionPattern: getVersionPatternOverride(inspectData.Config?.Labels)
-						}, getTagArtifactKind).catch(() => null)
+							versionPattern,
+							tagFilter: tagFilterFromLabels(inspectData.Config?.Labels)
+						}, getTagArtifactKind, result.localDigests ?? [], staleCheck).catch(() => null)
 					: null;
+
+				// Matches the scheduled check: the label suppresses the same-tag digest
+				// result only, leaving the newer-version suggestion above untouched.
+				const digestUpdate = digestUpdateVisible(result.hasUpdate, inspectData.Config?.Labels);
 
 				return {
 					containerId: container.id,
 					containerName: container.name,
 					imageName,
-					hasUpdate: result.hasUpdate,
+					hasUpdate: digestUpdate,
+				releaseAgeRemainingHours: result.releaseAgeRemainingHours,
 					currentDigest: result.currentDigest,
 					newDigest: result.registryDigest,
 					error: result.error,
@@ -207,19 +240,18 @@ export const POST: RequestHandler = async ({ url, cookies, request }) => {
 		const updatesFound = results.filter(r => r.hasUpdate && !r.systemContainer && !r.updateDisabled).length;
 
 		// Persist a row for anything worth showing on reload: a digest update, a
-		// newer-version-tag (semver) suggestion, or both. A pure-semver row (no
-		// digest update) still persists so the badge survives a page reload.
+		// newer-version-tag (semver) suggestion, a held update waiting out its
+		// cooldown, or any combination. A row with none of the three is not worth
+		// keeping. A held update persists with hasImageUpdate false, so it shows as
+		// waiting without ever being offered for a bulk update.
 		if (envIdNum) {
-			for (const result of results) {
-				if (result.systemContainer || result.updateDisabled) continue;
-				const hasImageUpdate = result.hasUpdate;
-				if (!hasImageUpdate && !result.newerVersion) continue;
+			for (const row of rowsToPersist(results)) {
 				await addPendingContainerUpdate(
 					envIdNum,
-					result.containerId,
-					result.containerName,
-					result.imageName,
-					{ hasImageUpdate, newerVersion: result.newerVersion ?? null }
+					row.containerId,
+					row.containerName,
+					row.imageName,
+					row.options
 				);
 			}
 		}

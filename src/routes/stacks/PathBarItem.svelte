@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Copy, Check, XCircle, FolderOpen, FolderSync } from 'lucide-svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		label: string;
@@ -22,7 +23,7 @@
 		onCopy,
 		onBrowse,
 		onChangeLocation,
-		defaultText = 'Default location',
+		defaultText = m.stacks_fs_default_location(),
 		isSuggested = false,
 		copied = null,
 		sourceHint
@@ -62,7 +63,7 @@
 		<button
 			onclick={onBrowse}
 			class="p-1 rounded transition-colors shrink-0 hover:bg-zinc-200 dark:hover:bg-zinc-700"
-			title={`Browse for ${label.toLowerCase()}`}
+			title={m.stacks_fs_browse_for({ label })}
 		>
 			<FolderOpen class="w-3.5 h-3.5" />
 		</button>
@@ -71,7 +72,7 @@
 		<button
 			onclick={onChangeLocation}
 			class="p-1 rounded transition-colors shrink-0 hover:bg-zinc-200 dark:hover:bg-zinc-700"
-			title="Change location"
+			title={m.stacks_fs_change_location()}
 		>
 			<FolderSync class="w-3.5 h-3.5" />
 		</button>
@@ -79,7 +80,7 @@
 	<button
 		onclick={onCopy}
 		class="p-1 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors shrink-0 {!path ? 'opacity-40 cursor-not-allowed' : ''}"
-		title="Copy path"
+		title={m.stacks_fs_copy_path()}
 		disabled={!path}
 	>
 		{#if copied === 'error'}
@@ -87,7 +88,7 @@
 				<Tooltip.Trigger>
 					<XCircle class="w-3.5 h-3.5 text-red-500" />
 				</Tooltip.Trigger>
-				<Tooltip.Content>Copy requires HTTPS</Tooltip.Content>
+				<Tooltip.Content>{m.stacks_fs_copy_requires_https()}</Tooltip.Content>
 			</Tooltip.Root>
 		{:else if copied === 'ok'}
 			<Check class="w-3.5 h-3.5 text-green-500" />

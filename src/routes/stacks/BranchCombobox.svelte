@@ -4,6 +4,7 @@
 	import * as Popover from '$lib/components/ui/popover';
 	import { buttonVariants } from '$lib/components/ui/button';
 	import { cn } from '$lib/utils';
+	import { m } from '$lib/paraglide/messages.js';
 
 	/**
 	 * Free-text, searchable branch picker.
@@ -119,7 +120,7 @@
 				<GitBranch class="h-4 w-4 shrink-0 text-muted-foreground" />
 				{#if loading}
 					<Loader2 class="h-4 w-4 animate-spin" />
-					<span class="text-muted-foreground">Loading branches…</span>
+					<span class="text-muted-foreground">{m.stacks_git_branches_loading()}</span>
 				{:else}
 					<span class="truncate">{displayValue}</span>
 				{/if}
@@ -129,10 +130,10 @@
 	</Popover.Trigger>
 	<Popover.Content class="w-[350px] p-0 z-[200]" align="start">
 		<Command.Root shouldFilter={false}>
-			<Command.Input bind:value={searchQuery} placeholder="Type a branch name…" />
+			<Command.Input bind:value={searchQuery} placeholder={m.stacks_git_branch_search_placeholder()} />
 			<Command.List class="max-h-[300px]">
 				{#if loading}
-					<Command.Empty>Loading branches…</Command.Empty>
+					<Command.Empty>{m.stacks_git_branches_loading()}</Command.Empty>
 				{:else}
 					{#if clearLabel && onclear && !searchQuery.trim()}
 						<Command.Item value="__repo_default__" onSelect={clearBranch}>
@@ -142,13 +143,13 @@
 						</Command.Item>
 					{/if}
 					{#if filteredBranches.length > 0}
-						<Command.Group heading="Branches">
+						<Command.Group heading={m.stacks_git_branches_heading()}>
 							{#each filteredBranches as branch}
 								<Command.Item value={branch.name} onSelect={() => selectBranch(branch.name)}>
 									<Check class={cn('mr-2 h-4 w-4 shrink-0', value === branch.name ? 'opacity-100' : 'opacity-0')} />
 									<span class="truncate">{branch.name}</span>
 									{#if defaultBranch && branch.name === defaultBranch}
-										<span class="ml-2 shrink-0 text-[10px] font-medium uppercase tracking-wide text-amber-500">default</span>
+										<span class="ml-2 shrink-0 text-[10px] font-medium uppercase tracking-wide text-amber-500">{m.stacks_git_branch_default_badge()}</span>
 									{/if}
 									<span class="ml-auto shrink-0 pl-2 font-mono text-xs text-muted-foreground">{branch.sha}</span>
 								</Command.Item>
@@ -156,16 +157,16 @@
 						</Command.Group>
 					{/if}
 					{#if freeTextBranch}
-						<Command.Group heading="Custom">
+						<Command.Group heading={m.stacks_git_branch_custom_heading()}>
 							<Command.Item value={freeTextBranch} onSelect={() => selectBranch(freeTextBranch)}>
 								<GitBranch class="mr-2 h-4 w-4" />
-								<span class="truncate">Use "{freeTextBranch}"</span>
+								<span class="truncate">{m.stacks_git_branch_use_custom({ branch: freeTextBranch })}</span>
 							</Command.Item>
 						</Command.Group>
 					{/if}
 					{#if filteredBranches.length === 0 && !freeTextBranch && !loading}
 						<Command.Empty>
-							Type a branch name (e.g. "main") or pick from the list.
+							{m.stacks_git_branch_empty()}
 						</Command.Empty>
 					{/if}
 				{/if}

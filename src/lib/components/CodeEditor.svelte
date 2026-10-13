@@ -11,6 +11,8 @@
 	import { oneDarkHighlightStyle } from '@codemirror/theme-one-dark';
 	import { indentationMarkers } from '@replit/codemirror-indentation-markers';
 	import { themeStore } from '$lib/stores/theme';
+	import { getEditorThemeExtension } from '$lib/utils/editor-theme-extensions';
+	import { gutterBackgroundFor } from '$lib/utils/gutter-contrast';
 	import { get } from 'svelte/store';
 	import { shell } from '@codemirror/legacy-modes/mode/shell';
 	import { dockerFile } from '@codemirror/legacy-modes/mode/dockerfile';
@@ -202,6 +204,7 @@
 	import { markdown } from '@codemirror/lang-markdown';
 	import { xml } from '@codemirror/lang-xml';
 	import { sql } from '@codemirror/lang-sql';
+	import { m } from '$lib/paraglide/messages.js';
 
 	export interface VariableMarker {
 		name: string;
@@ -233,9 +236,11 @@
 		onLintClick?: (line: number) => void;
 		/** 1-based inclusive line ranges highlighted as freshly-added (green), e.g. a merged-in service. */
 		addedLineMarkers?: { line: number; endLine: number }[];
+		/** Force a specific editor color theme id, ignoring the user's stored preference (live preview). */
+		editorThemeOverride?: string;
 	}
 
-	let { value = '', language = 'yaml', readonly = false, theme = 'dark', onchange, class: className = '', variableMarkers: variableMarkersProp = [], lintMarkers: lintMarkersProp = [], onLintClick, addedLineMarkers: addedLineMarkersProp = [] }: Props = $props();
+	let { value = '', language = 'yaml', readonly = false, theme = 'dark', onchange, class: className = '', variableMarkers: variableMarkersProp = [], lintMarkers: lintMarkersProp = [], onLintClick, addedLineMarkers: addedLineMarkersProp = [], editorThemeOverride }: Props = $props();
 
 	// Keep markers reactive - destructured props with defaults lose reactivity
 	const variableMarkers = $derived(variableMarkersProp);
@@ -274,10 +279,10 @@
 			// The colored dot
 			const dot = document.createElement('span');
 			dot.className = `var-marker var-marker-${this.type}`;
-			dot.title = this.type === 'missing' ? 'Missing required variable'
-				: this.type === 'invault' ? 'Present in the bound secret provider'
-				: this.type === 'required' ? 'Required variable (defined)'
-				: 'Optional variable (has default)';
+			dot.title = this.type === 'missing' ? m.editor_var_missing_required()
+				: this.type === 'invault' ? m.editor_var_in_vault_title()
+				: this.type === 'required' ? m.editor_var_required_defined()
+				: m.editor_var_optional_default();
 			wrapper.appendChild(dot);
 
 			// Checkmark if value is provided
@@ -285,7 +290,7 @@
 				const check = document.createElement('span');
 				check.className = 'var-marker-check';
 				check.innerHTML = '✓';
-				check.title = 'Value provided';
+				check.title = m.editor_var_value_provided();
 				wrapper.appendChild(check);
 			}
 
@@ -313,16 +318,16 @@
 
 			if (this.variant === 'missing') {
 				// Red MISSING badge with icon
-				span.innerHTML = '⚠ MISSING';
-				span.title = 'Required variable not defined';
+				span.innerHTML = `⚠ ${m.editor_var_missing_badge()}`;
+				span.title = m.editor_var_not_defined();
 			} else if (this.variant === 'invault') {
 				// Green IN VAULT badge - the key currently exists in the bound secret
 				// provider (live probe). Inline lucide KeyRound SVG, currentColor.
-				span.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:0.85em;height:0.85em;display:inline-block;vertical-align:-0.12em;margin-right:3px"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/></svg>IN VAULT';
-				span.title = 'Present in the bound secret provider';
+				span.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:0.85em;height:0.85em;display:inline-block;vertical-align:-0.12em;margin-right:3px"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/></svg>' + m.editor_var_in_vault_badge();
+				span.title = m.editor_var_in_vault_title();
 			} else {
 				span.textContent = this.isSecret ? '••••••' : this.value;
-				span.title = this.isSecret ? 'Secret value' : this.value;
+				span.title = this.isSecret ? m.editor_var_secret_value() : this.value;
 			}
 			return span;
 		}
@@ -759,9 +764,9 @@
 			padding: '8px 0'
 		},
 		'.cm-gutters': {
-			backgroundColor: '#1a1a1a',
+			backgroundColor: '#212121',
 			color: '#858585',
-			border: 'none',
+			borderRight: '1px solid #333333',
 			fontFamily: 'var(--font-editor, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace)',
 			fontSize: '13px'
 		},
@@ -801,14 +806,14 @@
 			padding: '8px 0'
 		},
 		'.cm-gutters': {
-			backgroundColor: '#fafafa',
+			backgroundColor: '#f1f1f1',
 			color: '#a1a1aa',
-			border: 'none',
+			borderRight: '1px solid #e0e0e0',
 			fontFamily: 'var(--font-editor, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace)',
 			fontSize: '13px'
 		},
 		'.cm-activeLineGutter': {
-			backgroundColor: '#f4f4f5'
+			backgroundColor: '#e8e8e8'
 		},
 		'.cm-activeLine': {
 			backgroundColor: '#f4f4f5'
@@ -837,13 +842,51 @@
 	// Track last applied markers to avoid redundant updates
 	let lastAppliedMarkersJson = '';
 
+	// Give the gutter a background derived from the (rendered) code background so line
+	// numbers stay visibly separated on any @uiw theme (#1309). Reads the real applied
+	// colour, so it works without knowing the theme's palette.
+	function applyGutterContrast() {
+		if (!view) return;
+		const gutters = view.dom.querySelector('.cm-gutters') as HTMLElement | null;
+		if (!gutters) return;
+		// The theme background can sit on .cm-content, the editor root, or the scroller;
+		// take the first that resolves to a real rgb() (skip transparent).
+		let gutterBg: string | null = null;
+		for (const sel of ['.cm-content', '.cm-scroller', '.cm-editor']) {
+			const el = (sel === '.cm-editor' ? view.dom : view.dom.querySelector(sel)) as HTMLElement | null;
+			if (!el) continue;
+			gutterBg = gutterBackgroundFor(getComputedStyle(el).backgroundColor);
+			if (gutterBg) break;
+		}
+		if (gutterBg) gutters.style.backgroundColor = gutterBg;
+	}
+
 	function createEditor() {
 		if (!container || view || initialized) return;
 		initialized = true;
 
-		const themeExtensions = theme === 'dark'
-			? [dockhandDark, syntaxHighlighting(oneDarkHighlightStyle)]
-			: [dockhandLight, syntaxHighlighting(defaultHighlightStyle)];
+		// Editor color theme (#1309): 'default' keeps the built-in theme that follows
+		// the app's dark/light toggle; any other id applies a @uiw theme extension
+		// (self-contained - it brings its own background/gutter/syntax colors).
+		const editorThemeId = editorThemeOverride ?? get(themeStore).editorTheme;
+		const pickedExtension = getEditorThemeExtension(editorThemeId);
+		// @uiw themes don't set a font, and most give the gutter the same background as the
+		// code so line numbers blend in (#1309). Force the user's editor font and a firmer
+		// border here; the distinct gutter BACKGROUND is derived from the rendered code
+		// background after mount (applyGutterContrast) so it stays visible on any theme.
+		const editorThemeTweaks = EditorView.theme({
+			'.cm-content, .cm-gutters': {
+				fontFamily: 'var(--font-editor, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace)'
+			},
+			'.cm-gutters': {
+				borderRight: '1px solid rgba(128, 128, 128, 0.5)'
+			}
+		});
+		const themeExtensions = pickedExtension
+			? [pickedExtension, editorThemeTweaks]
+			: theme === 'dark'
+				? [dockhandDark, syntaxHighlighting(oneDarkHighlightStyle)]
+				: [dockhandLight, syntaxHighlighting(defaultHighlightStyle)];
 
 		// Build autocompletion config - add Docker Compose completions for YAML
 		// Note: activateOnTyping can interfere with key repeat, so we disable it
@@ -877,6 +920,22 @@
 			...themeExtensions,
 			EditorView.lineWrapping,
 			EditorState.tabSize.of(2),
+			// UI language for CodeMirror's search panel and go-to-line dialog
+			EditorState.phrases.of({
+				'Find': m.editor_search_find(),
+				'Replace': m.editor_search_replace(),
+				'next': m.editor_search_next(),
+				'previous': m.editor_search_previous(),
+				'all': m.editor_search_all(),
+				'match case': m.editor_search_match_case(),
+				'regexp': m.editor_search_regexp(),
+				'by word': m.editor_search_by_word(),
+				'replace': m.editor_search_replace_one(),
+				'replace all': m.editor_search_replace_all(),
+				'close': m.editor_panel_close(),
+				'Go to line': m.editor_goto_line(),
+				'go': m.editor_goto_line_submit()
+			}),
 			getLanguageExtension(language),
 			// Vertical indentation guides, opt-in per user (#1410). Subtle tones for both themes.
 			...(get(themeStore).editorIndentGuides
@@ -941,6 +1000,11 @@
 			parent: container,
 			dispatchTransactions
 		});
+
+		// Derive a visibly distinct gutter background from the theme's rendered code
+		// background (#1309). Only for @uiw themes; the built-in dockhand themes set their
+		// own gutter colour. Runs after mount so getComputedStyle sees the applied theme.
+		if (pickedExtension) applyGutterContrast();
 
 		// Push initial variable markers if provided. Lint markers need no initial
 		// dispatch: currentLintField/gutter are created from lintMarkers, and the reactive
@@ -1074,17 +1138,23 @@
 	let prevLanguage = $state(language);
 	let prevTheme = $state(theme);
 	let prevIndentGuides = $state($themeStore.editorIndentGuides);
+	let prevEditorTheme = $state(editorThemeOverride ?? $themeStore.editorTheme);
+	let prevEditorFont = $state($themeStore.editorFont);
 
-	// Recreate editor if language, theme, or the indent-guides preference changes
+	// Recreate editor if language, theme, indent-guides, the color theme, or the editor font changes
 	$effect(() => {
 		const currentLanguage = language;
 		const currentTheme = theme;
 		const currentIndentGuides = $themeStore.editorIndentGuides;
+		const currentEditorTheme = editorThemeOverride ?? $themeStore.editorTheme;
+		const currentEditorFont = $themeStore.editorFont;
 
-		if (view && (currentLanguage !== prevLanguage || currentTheme !== prevTheme || currentIndentGuides !== prevIndentGuides)) {
+		if (view && (currentLanguage !== prevLanguage || currentTheme !== prevTheme || currentIndentGuides !== prevIndentGuides || currentEditorTheme !== prevEditorTheme || currentEditorFont !== prevEditorFont)) {
 			prevLanguage = currentLanguage;
 			prevTheme = currentTheme;
 			prevIndentGuides = currentIndentGuides;
+			prevEditorTheme = currentEditorTheme;
+			prevEditorFont = currentEditorFont;
 			const currentContent = view.state.doc.toString();
 			destroyEditor();
 			value = currentContent; // Preserve content

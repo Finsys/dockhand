@@ -9,8 +9,13 @@ import {
 	Anchor, Ship, Plane, Rocket, Car, Bike, TrainFront, Bus, Truck,
 	Activity, BarChart3, ChartLine, ChartPie, TrendingUp, Gauge, Timer,
 	Mail, MessageSquare, Phone, Video, Camera, Music, Headphones, Volume2,
-	MapPin, Map, Compass, Navigation, Flag, Bookmark, Target
+	MapPin, Map, Compass, Navigation, Flag, Bookmark, Target,
+	Apple, Asterisk, Beer, BellRing, Book, CircleDot, CloudRain, CloudUpload, Dot, Droplet,
+	File, Filter, Fish, Flashlight, Flower2, GraduationCap, Highlighter, Layers3,
+	LayoutDashboard, LayoutGrid, ListMusic, MemoryStick, MessageCircle, Music2, PenTool, Play,
+	QrCode, Reply, Search, Share2, ShoppingBag, SlidersHorizontal, ToggleLeft, UserCog, UtensilsCrossed
 } from 'lucide-svelte';
+import * as lucide from 'lucide-svelte';
 import type { ComponentType } from 'svelte';
 
 // Icon mapping for rendering
@@ -36,11 +41,83 @@ const iconMap: Record<string, ComponentType> = {
 	'mail': Mail, 'message-square': MessageSquare, 'phone': Phone, 'video': Video,
 	'camera': Camera, 'music': Music, 'headphones': Headphones, 'volume-2': Volume2,
 	'map-pin': MapPin, 'map': Map, 'compass': Compass, 'navigation': Navigation,
-	'flag': Flag, 'bookmark': Bookmark, 'target': Target
+	'flag': Flag, 'bookmark': Bookmark, 'target': Target,
+	'folder': Folder, 'file': File, 'file-text': FileText, 'files': Files, 'image': ImageIcon,
+	'film': Film, 'play': Play, 'music-2': Music2, 'list-music': ListMusic, 'podcast': Podcast,
+	'gamepad': Gamepad2, 'dices': Dices, 'puzzle': Puzzle, 'trophy': Trophy, 'medal': Medal, 'ticket': Ticket,
+	'cloud-download': CloudDownload, 'cloud-upload': CloudUpload, 'download': Download, 'upload': Upload,
+	'share': Share2, 'rss': Rss, 'link': Link,
+	'users': Users, 'user': User, 'user-cog': UserCog, 'contact': Contact, 'bot': Bot, 'brain': BrainCircuit,
+	'bell': Bell, 'bell-ring': BellRing, 'calendar': Calendar, 'clock': Clock, 'alarm-clock': AlarmClock, 'hourglass': Hourglass,
+	'shopping-cart': ShoppingCart, 'shopping-bag': ShoppingBag, 'credit-card': CreditCard, 'wallet': Wallet,
+	'dollar-sign': DollarSign, 'receipt': Receipt, 'banknote': Banknote,
+	'coffee': Coffee, 'pizza': Pizza, 'utensils': UtensilsCrossed, 'beer': Beer, 'wine': Wine, 'apple': Apple,
+	'leaf': Leaf, 'tree': TreePine, 'flower': Flower2, 'bug': Bug, 'cat': Cat, 'dog': Dog, 'fish': Fish, 'bird': Bird,
+	'palette': Palette, 'brush': Brush, 'pen-tool': PenTool, 'grid': Grid3x3, 'layout-grid': LayoutGrid, 'dashboard': LayoutDashboard,
+	'memory-stick': MemoryStick, 'usb': Usb, 'plug': Plug, 'battery': Battery, 'power': Power, 'bluetooth': Bluetooth,
+	'layers-3': Layers3, 'workflow': Workflow, 'boxes': Boxes, 'component': Component, 'blocks': Blocks,
+	'thermometer': Thermometer, 'droplet': Droplet, 'wind': Wind, 'umbrella': Umbrella, 'cloud-rain': CloudRain,
+	'lightbulb': Lightbulb, 'flashlight': Flashlight, 'fingerprint': Fingerprint, 'scan-line': ScanLine,
+	'qr-code': QrCode, 'webhook': Webhook,
+	'book': Book, 'book-open': BookOpen, 'graduation-cap': GraduationCap, 'newspaper': Newspaper,
+	'feather': Feather, 'pencil': Pencil, 'highlighter': Highlighter,
+	'inbox': Inbox, 'send': Send, 'reply': Reply, 'at-sign': AtSign, 'hash': Hash, 'message-circle': MessageCircle, 'megaphone': Megaphone,
+	'filter': Filter, 'search': Search, 'sliders': SlidersHorizontal, 'toggle': ToggleLeft, 'circle-dot': CircleDot, 'dot': Dot, 'asterisk': Asterisk
 };
 
 export function getIconComponent(iconName: string): ComponentType {
-	return iconMap[iconName] || Globe;
+	return lucideComponent(iconName) || Globe;
+}
+
+/**
+ * Whether an icon reference resolves to something drawable, for callers that must
+ * reject an unusable name rather than fall back to a placeholder glyph.
+ */
+export function isKnownIconName(name: string): boolean {
+	return !!lucideComponent(name);
+}
+
+// lucide exports a base Icon component beside the icons themselves. It draws
+// nothing without an iconNode prop, so it must not be reachable by name.
+const NON_ICON_EXPORTS = new globalThis.Set(['Icon']);
+
+/**
+ * A kebab-case icon name as lucide exports it: 'party-popper' -> 'PartyPopper'.
+ * Digits ride along with the part they belong to ('layers-3' -> 'Layers3').
+ */
+function pascalCase(name: string): string {
+	return name
+		.split('-')
+		.map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+		.join('');
+}
+
+/**
+ * Resolve an icon name to a component: our own map first, so a curated alias
+ * ('tree' for TreePine) keeps winning, then the whole lucide set, so any icon
+ * the library ships is usable without being listed here.
+ */
+// globalThis.Map, because the lucide namespace import shadows the global `Map`
+// with its own map icon component.
+const resolved: globalThis.Map<string, ComponentType | null> = new globalThis.Map();
+
+function lucideComponent(name: string): ComponentType | null {
+	if (Object.hasOwn(iconMap, name)) return iconMap[name];
+	// Memoised: the kebab-to-Pascal rewrite allocates, and a tag grid resolves the
+	// same handful of names on every render. A miss is cached too, so a typo in a
+	// label costs the lookup once rather than once per row.
+	const hit = resolved.get(name);
+	if (hit !== undefined) return hit;
+	// Own properties only, and never the base Icon: a label name is user input, so
+	// 'constructor' or '__proto__' must not reach Object.prototype and render as junk.
+	const exportName = pascalCase(name);
+	const exported =
+		!NON_ICON_EXPORTS.has(exportName) && Object.hasOwn(lucide, exportName)
+			? (lucide as Record<string, unknown>)[exportName]
+			: undefined;
+	const component = exported ? (exported as ComponentType) : null;
+	resolved.set(name, component);
+	return component;
 }
 
 export function isCustomIcon(icon: string | null | undefined): boolean {

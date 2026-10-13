@@ -66,7 +66,11 @@ export function validateBackupConfig(input: BackupConfigInput): ValidationResult
 	}
 	if (input.allVolumes === false) {
 		const sel = input.selectedVolumes;
-		if (!Array.isArray(sel) || sel.length === 0) {
+		// An empty selection would back up no volumes. That is fine for a STACK - its
+		// compose/.env files are always captured, so the snapshot is a valid config-only
+		// backup (restorable via redeploy). For a CONTAINER there are no such files, so an
+		// empty selection really would back up nothing and stays an error.
+		if (!Array.isArray(sel) || (sel.length === 0 && input.type !== 'stack')) {
 			issues.push({ field: 'selectedVolumes', message: 'select at least one volume, or enable "all volumes"' });
 		}
 	}

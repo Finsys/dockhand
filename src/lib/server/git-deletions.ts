@@ -376,6 +376,39 @@ export function buildNextManifest(newCommit: string, newFiles: Record<string, st
 	return { commit: newCommit, files: { ...newFiles } };
 }
 
+/** Compare two commit refs by their 7-char short form (the DB stores 7-char,
+ * git returns 40-char); null/empty never matches. */
+function sameCommit(a: string | null | undefined, b: string | null | undefined): boolean {
+	if (!a || !b) return false;
+	return a.substring(0, 7) === b.substring(0, 7);
+}
+
+/**
+ * Whether a sync can skip re-hashing the whole compose tree. Skipping is safe
+ * ONLY when the git diff proved no compose-dir change AND the diff was taken
+ * against the SAME commit the manifest was built at. The second condition is
+ * load-bearing: a bare Sync advances the diff baseline (lastCommit) without
+ * persisting the manifest (only a deploy does), so `changedInComposeDir===false`
+ * alone does NOT imply the on-disk tree still matches the manifest. When the
+ * baselines match and a prior manifest exists, nothing was added/modified/
+ * deleted, so the manifest carries forward verbatim and the unconditional
+ * full re-hash (which blocks the event loop on a large tree) is skipped. Any
+ * mismatch, undefined change state (new clone / diff failed), or empty manifest
+ * falls back to a full re-hash - the safe default that self-corrects drift.
+ */
+export function canSkipTreeRehash(
+	changedInComposeDir: boolean | undefined,
+	manifestSize: number,
+	manifestCommit: string | null | undefined,
+	diffBaselineCommit: string | null | undefined
+): boolean {
+	return (
+		changedInComposeDir === false &&
+		manifestSize > 0 &&
+		sameCommit(manifestCommit, diffBaselineCommit)
+	);
+}
+
 // =============================================================================
 // Sync summary (per-file status table)
 // =============================================================================

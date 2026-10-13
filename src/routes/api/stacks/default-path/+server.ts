@@ -2,6 +2,7 @@ import { json } from '@sveltejs/kit';
 import { join } from 'path';
 import { getStackDir } from '$lib/server/stacks';
 import { getEnvironment } from '$lib/server/db';
+import { authorize } from '$lib/server/authorize';
 import type { RequestHandler } from './$types';
 
 /**
@@ -17,12 +18,22 @@ import type { RequestHandler } from './$types';
  * resp-200: {stackDir:string!, composePath:string!, envPath:string!, source:string!}
  * resp-200-example: {"stackDir":"/data/stacks/prod/web","composePath":"/data/stacks/prod/web/compose.yaml","envPath":"/data/stacks/prod/web/.env","source":"default"}
  * resp-400: Stack name is required
+ * resp-403: Permission denied (needs stacks:view, and access to the environment)
  */
-export const GET: RequestHandler = async ({ url }) => {
+export const GET: RequestHandler = async ({ url, cookies }) => {
+	// The answer embeds the environment's name in a host path, so without the env
+	// check this walks ?env=1..N and reads back every environment's name.
+	const auth = await authorize(cookies);
+	const permDenied = await auth.requirePermission('stacks', 'view');
+	if (permDenied) return permDenied;
+
 	const stackName = url.searchParams.get('name');
 	const envId = url.searchParams.get('env');
 	const location = url.searchParams.get('location');
 	const envIdNum = envId ? parseInt(envId) : undefined;
+
+	const envDenied = await auth.requireEnvAccess(envIdNum);
+	if (envDenied) return envDenied;
 
 	if (!stackName) {
 		return json({ error: 'Stack name is required' }, { status: 400 });

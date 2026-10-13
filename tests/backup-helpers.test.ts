@@ -599,6 +599,7 @@ describe('isAllowedRepository', () => {
 	test('accepts an absolute local path and supported schemes', () => {
 		expect(isAllowedRepository('/data/repo')).toBe(true);
 		expect(isAllowedRepository('s3:http://minio/bucket')).toBe(true);
+		expect(isAllowedRepository('sftp:user@backup.example.com:/srv/restic')).toBe(true);
 	});
 	test('rejects an unknown scheme and empty/nullish input', () => {
 		expect(isAllowedRepository('ftp://x')).toBe(false);
@@ -617,6 +618,10 @@ describe('validateRepositoryForSave', () => {
 	});
 	test('a URL-form repo pointing at the cloud-metadata IP is rejected (SSRF guard)', () => {
 		expect(validateRepositoryForSave('rest:http://169.254.169.254/x')).toMatch(/not allowed/);
+	});
+	test('a valid SFTP repo is accepted and loopback SFTP is rejected', () => {
+		expect(validateRepositoryForSave('sftp://backup@backup.example.com:2222//srv/restic')).toBeNull();
+		expect(validateRepositoryForSave('sftp://backup@127.0.0.1:2222//srv/restic')).toMatch(/not allowed/);
 	});
 });
 

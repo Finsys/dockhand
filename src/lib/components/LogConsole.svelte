@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Terminal, Sun, Moon, Folder, HardDrive } from 'lucide-svelte';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		/** Log lines. A leading `[source]` token is rendered as a colored pill. */
@@ -52,9 +53,9 @@
 	<div class="mb-2 flex shrink-0 items-center justify-between text-xs text-muted-foreground">
 		<div class="flex items-center gap-2">
 			<Terminal class="h-3.5 w-3.5" />
-			<span>Output ({lines.length} {lines.length === 1 ? 'line' : 'lines'})</span>
+			<span>{m.execution_output_lines({ count: lines.length })}</span>
 		</div>
-		<button type="button" onclick={() => (dark = !dark)} class="cursor-pointer rounded p-1 transition-colors hover:bg-muted" title="Toggle log theme">
+		<button type="button" onclick={() => (dark = !dark)} class="cursor-pointer rounded p-1 transition-colors hover:bg-muted" title={m.execution_toggle_log_theme()}>
 			{#if dark}<Sun class="h-3.5 w-3.5" />{:else}<Moon class="h-3.5 w-3.5" />{/if}
 		</button>
 	</div>

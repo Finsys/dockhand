@@ -4,6 +4,7 @@ import { authorize } from '$lib/server/authorize';
 import { createGzip } from 'zlib';
 import { Readable } from 'stream';
 import { validateDockerIdParam } from '$lib/server/docker-validation';
+import { exportFileStem, shortId, exportRefFor } from '$lib/server/image-export-name';
 import type { RequestHandler } from './$types';
 
 /**
@@ -11,8 +12,9 @@ import type { RequestHandler } from './$types';
  *
  * @openapi
  * summary: Export a Docker image as a downloadable tar (or tar.gz) stream
- * path: id:string! Image ID or name to export (from GET /api/images)
+ * path: id:string! Image ID to export (from GET /api/images); a name containing a slash cannot be used here, since it would split the route
  * query: env:integer ID of the environment the image belongs to (from GET /api/environments)
+ * query: tag:string Which of the image's tags to name the download after (defaults to its first tag)
  * query: compress:boolean Gzip the tar stream and serve it as .tar.gz (default false)
  * resp-200: The image tar (application/x-tar) or gzipped tar (application/gzip) as an attachment
  * resp-403: Permission denied
@@ -35,24 +37,25 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 
 	try {
 
-		// Get image info for filename
-		let imageName = params.id;
+		// The tag the caller clicked, so an image with several tags is not always
+		// named after the first one.
+		const requestedTag = url.searchParams.get('tag');
+		let imageName: string;
+		let exportRef = params.id;
 		try {
 			const imageInfo = await inspectImage(params.id, envIdNum);
-			if (imageInfo.RepoTags?.[0]) {
-				// Use first tag, replace : and / with _ for filename safety
-				imageName = imageInfo.RepoTags[0].replace(/[:/]/g, '_');
-			} else {
-				// Use short ID
-				imageName = params.id.replace('sha256:', '').slice(0, 12);
-			}
+			imageName = exportFileStem(params.id, imageInfo.RepoTags, requestedTag);
+
+			// Exported by tag rather than by id, because a tar saved by id carries
+			// RepoTags: null and loads back as an unnamed image. The tag has to be one
+			// the image really has - it is going to the daemon.
+			exportRef = exportRefFor(params.id, imageInfo.RepoTags, requestedTag);
 		} catch {
-			// Use ID as fallback
-			imageName = params.id.replace('sha256:', '').slice(0, 12);
+			imageName = shortId(params.id);
 		}
 
 		// Get the tar stream from Docker
-		const dockerResponse = await exportImage(params.id, envIdNum);
+		const dockerResponse = await exportImage(exportRef, envIdNum);
 
 		if (!dockerResponse.body) {
 			return json({ error: 'No response body from Docker' }, { status: 500 });
@@ -66,6 +69,11 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 			// Create a gzip stream and pipe the tar through it
 			const gzip = createGzip();
 			const nodeStream = Readable.fromWeb(dockerResponse.body as any);
+			// pipe() does not forward a source error, and the Response has already been
+			// returned by the time a multi-GB export loses its host, so the failure
+			// arrives on the event loop with nothing to catch it. Hand it to the
+			// destination, which surfaces it as a truncated download.
+			nodeStream.on('error', (err) => gzip.destroy(err));
 			const compressedStream = nodeStream.pipe(gzip);
 
 			// Convert back to web stream

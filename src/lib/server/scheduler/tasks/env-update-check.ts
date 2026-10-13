@@ -1,3 +1,4 @@
+import { trackedImageReference } from '$lib/utils/tracked-image';
 /**
  * Environment Update Check Task
  *
@@ -19,7 +20,9 @@ import {
 	removePendingContainerUpdate,
 	getPendingContainerUpdates
 } from '../../db';
-import { checkNewerVersion } from '../../semver/check';
+import { checkNewerVersion, type ImageCreatedAtProbe } from '../../semver/check';
+import { parseTag } from '../../semver/tag-parser';
+import { parseImageReference } from '../../registry/image-ref';
 import type { NewerVersion } from '../../semver/find-newer';
 import {
 	listContainers,
@@ -33,13 +36,15 @@ import {
 	tagImage,
 	inspectImage,
 	getTagArtifactKind,
+	getRegistryTagCreatedAt,
 } from '../../docker';
 import type { ImageEnvLabels } from '../../container-env-merge';
 import { sendEventNotification } from '../../notifications';
 import { getScannerSettings, scanImage, type VulnerabilitySeverity } from '../../scanner';
 import { parseImageNameAndTag, combineScanSummaries, isSystemContainer, isPodmanInfraContainer } from './update-utils';
 import { resolveBlockDecision } from './block-decision';
-import { isUpdateDisabledByLabel, isHiddenByLabel, getVersionPatternOverride } from '../../container-labels';
+import { isUpdateDisabledByLabel, isHiddenByLabel, getVersionPatternOverride, getVersionPatternRejection, digestUpdateVisible } from '../../container-labels';
+import { tagFilterFromLabels } from '$lib/server/semver/tag-filter-labels';
 import { recreateContainer } from './container-update';
 
 interface UpdateInfo {
@@ -138,6 +143,9 @@ export async function runEnvUpdateCheckJob(
 		}
 		// Collected here so a single notification can summarise all newly-found versions.
 		const newSemverFindings: { containerName: string; imageName: string; newerVersion: NewerVersion }[] = [];
+	// A held update is worth a row too: it must show as waiting without being
+	// offered for a bulk update.
+	const cooldownByContainer = new Map<string, number>();
 		const semverByContainer = new Map<string, NewerVersion>();
 
 		// Clear pending updates at the start - we'll re-add as we discover updates
@@ -161,7 +169,7 @@ export async function runEnvUpdateCheckJob(
 		for (const container of containers) {
 			try {
 				const inspectData = await inspectContainer(container.id, environmentId) as any;
-				const imageName = inspectData.Config?.Image;
+				const imageName = trackedImageReference(inspectData.Config?.Image, inspectData.Config?.Labels);
 				const currentImageId = inspectData.Image;
 
 				if (!imageName) {
@@ -196,6 +204,15 @@ export async function runEnvUpdateCheckJob(
 					continue;
 				}
 
+				// The label switches off the same-tag digest check only; the newer-version
+				// detection below still runs, which is the point of having it separate.
+				if (!digestUpdateVisible(result.hasUpdate, inspectData.Config?.Labels)) {
+					if (result.hasUpdate) {
+						await log(`    Image update suppressed by dockhand.watch.digest=false`);
+					}
+					result.hasUpdate = false;
+				}
+
 				if (result.hasUpdate) {
 					// Capture the OLD image's Env/Labels now, before any pull, for the
 					// env/label rebase (#1226, #1256).
@@ -218,6 +235,9 @@ export async function runEnvUpdateCheckJob(
 					await log(`    UPDATE AVAILABLE`);
 					await log(`      Current: ${result.currentDigest?.substring(0, 24) || 'unknown'}...`);
 					await log(`      New:     ${result.registryDigest?.substring(0, 24) || 'unknown'}...`);
+				} else if (result.releaseAgeRemainingHours) {
+					cooldownByContainer.set(container.id, result.releaseAgeRemainingHours);
+					await log(`    Update deferred: ${result.releaseAgeRemainingHours} hour(s) remain in image update cooldown`);
 				} else {
 					await log(`    Up to date`);
 				}
@@ -228,7 +248,41 @@ export async function runEnvUpdateCheckJob(
 					// A `dockhand.version.pattern` label lets a container teach the check
 					// how to read its own non-standard tags (CalVer+hash, etc.).
 					const versionPattern = getVersionPatternOverride(inspectData.Config?.Labels);
-					const newer = await checkNewerVersion(imageName, { ...semverOptions, versionPattern }, getTagArtifactKind).catch(() => null);
+					// Say so when the label was refused: the fall back to the default
+					// parser is silent otherwise, and from outside the label just looks
+					// like it does nothing.
+					const patternRejection = getVersionPatternRejection(inspectData.Config?.Labels);
+					if (patternRejection) {
+						await log(
+							`  [${container.name}] dockhand.version.pattern ignored - ${patternRejection}`
+						);
+					}
+					// A version tag names what a maintainer called a build, not when it was
+					// made, so a repo still carrying high-sorting old tags offers them as
+					// upgrades. The running image's build date is read locally; the
+					// candidate's comes from the registry, for the chosen candidate only.
+					let staleCheck: { probeCreatedAt: ImageCreatedAtProbe; currentCreatedAt: string | null } | undefined;
+					// Skipped for a floating tag: checkNewerVersion short-circuits on one,
+					// so the inspect would buy nothing.
+					if (semverConfig.rejectOlderImages && parseTag(parseImageReference(imageName).tag, versionPattern)) {
+						const currentCreatedAt = await inspectImage(currentImageId, environmentId)
+							.then((img: any) => (typeof img?.Created === 'string' ? img.Created : null))
+							.catch(() => null);
+						if (currentCreatedAt) {
+							staleCheck = {
+								probeCreatedAt: (registry, repo, digest) =>
+									getRegistryTagCreatedAt(registry, repo, digest, environmentId),
+								currentCreatedAt
+							};
+						}
+					}
+					const newer = await checkNewerVersion(
+						imageName,
+						{ ...semverOptions, versionPattern, tagFilter: tagFilterFromLabels(inspectData.Config?.Labels) },
+						getTagArtifactKind,
+						result.localDigests ?? [],
+						staleCheck
+					).catch(() => null);
 					if (newer) {
 						semverByContainer.set(container.id, newer);
 						await log(`    NEWER VERSION: ${newer.tag} (${newer.bump})`);
@@ -247,7 +301,8 @@ export async function runEnvUpdateCheckJob(
 		// semver suggestion so a pure-semver container still gets a (badge) row.
 		const pendingContainerIds = new Set<string>([
 			...updatesAvailable.map((u) => u.containerId),
-			...semverByContainer.keys()
+			...semverByContainer.keys(),
+			...cooldownByContainer.keys()
 		]);
 		for (const cid of pendingContainerIds) {
 			const digest = updatesAvailable.find((u) => u.containerId === cid);
@@ -258,7 +313,11 @@ export async function runEnvUpdateCheckJob(
 				cid,
 				digest?.containerName ?? container?.name ?? cid,
 				digest?.imageName ?? container?.image ?? '',
-				{ hasImageUpdate: !!digest, newerVersion: semver }
+				{
+					hasImageUpdate: !!digest,
+					newerVersion: semver,
+					releaseAgeRemainingHours: cooldownByContainer.get(cid) ?? null
+				}
 			);
 		}
 
@@ -341,6 +400,9 @@ export async function runEnvUpdateCheckJob(
 				try {
 					await log(`\nUpdating: ${update.containerName}`);
 
+					let verifiedImageId: string | undefined;
+					let verifiedImageReference: string | undefined;
+
 					// SAFE-PULL FLOW
 					if (shouldScan && !isDigestBasedImage(update.imageName)) {
 						const tempTag = getTempImageTag(update.imageName);
@@ -348,10 +410,13 @@ export async function runEnvUpdateCheckJob(
 
 						// Step 1: Pull new image
 						await log(`  Pulling ${update.imageName}...`);
-						await pullImage(update.imageName, () => {}, environmentId);
+						const pulled = await pullImage(update.imageName, () => {}, environmentId, true);
+						verifiedImageId = pulled?.imageId;
+						verifiedImageReference = pulled?.reference;
+						if (pulled) update.newDigest = pulled.digest;
 
 						// Step 2: Get new image ID
-						const newImageId = await getImageIdByTag(update.imageName, environmentId);
+						const newImageId = verifiedImageId ?? await getImageIdByTag(update.imageName, environmentId);
 						if (!newImageId) {
 							throw new Error('Failed to get new image ID after pull');
 						}
@@ -366,7 +431,7 @@ export async function runEnvUpdateCheckJob(
 						const [tempRepo, tempTagName] = parseImageNameAndTag(tempTag);
 						await tagImage(newImageId, tempRepo, tempTagName, environmentId);
 
-						// Step 5: Scan temp image
+						// Step 5: Scan the immutable image ID
 						await log(`  Scanning for vulnerabilities...`);
 						let scanBlocked = false;
 						let blockReason = '';
@@ -376,7 +441,7 @@ export async function runEnvUpdateCheckJob(
 						const scanLogs: string[] = [];
 
 						try {
-							const scanResults = await scanImage(tempTag, environmentId, (progress) => {
+							const scanResults = await scanImage(newImageId, environmentId, (progress) => {
 								if (progress.message) {
 									scanLogs.push(`  [${progress.scanner || 'scan'}] ${progress.message}`);
 								}
@@ -466,14 +531,20 @@ export async function runEnvUpdateCheckJob(
 					} else {
 						// Simple pull (no scanning or digest-based image)
 						await log(`  Pulling ${update.imageName}...`);
-						await pullImage(update.imageName, () => {}, environmentId);
+						const pulled = await pullImage(update.imageName, () => {}, environmentId, true);
+						verifiedImageId = pulled?.imageId;
+						verifiedImageReference = pulled?.reference;
+						if (pulled) update.newDigest = pulled.digest;
 					}
 
 					// Recreate container with full config passthrough
 					await log(`  Recreating container...`);
 					const result = await recreateContainer(update.containerName, environmentId, {
 						log: (msg) => { log(`  ${msg}`); },
-						oldImageConfig: update.oldImageConfig
+						oldImageConfig: update.oldImageConfig,
+						imageNameOverride: update.imageName,
+						verifiedImageId,
+						verifiedImageReference
 					});
 					if (!result.success) throw new Error(result.error || 'Container recreation failed');
 

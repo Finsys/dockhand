@@ -27,6 +27,7 @@ import { authorize } from '$lib/server/authorize';
  * path: id:integer! Schedule id (semantics depend on type — container/git-stack/backup-config id, environment id, or a synthetic repo-policy id) (from GET /api/schedules)
  * resp-200: {success:boolean!}
  * resp-400: Invalid schedule id, invalid/unsupported type, or system_cleanup (cannot be removed)
+ * resp-403: Permission denied
  * resp-404: Schedule (or backup destination, for repo_* types) not found
  * resp-500: Unexpected error while deleting the schedule
  */

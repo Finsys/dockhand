@@ -11,6 +11,8 @@ import {
 	readExitMarker,
 	buildHelperEnv,
 	buildHelperBinds,
+	RESTIC_CACHE_VOLUME,
+	RESTIC_CACHE_PATH,
 	localRepoGuard,
 	localRepoChown,
 	classifyProcClose,
@@ -161,18 +163,23 @@ describe('binary stdout capture — Buffer.concat is lossless where string conca
 });
 
 describe('buildHelperEnv', () => {
-	it('sets repo, password, progress, plus allowlisted cloud vars', () => {
+	it('sets repo, password, progress, cache dir, plus allowlisted cloud vars', () => {
 		const env = buildHelperEnv('s3:bucket', 'pw', { AWS_ACCESS_KEY_ID: 'k' });
 		expect(env).toContain('RESTIC_REPOSITORY=s3:bucket');
 		expect(env).toContain('RESTIC_PASSWORD=pw');
 		expect(env).toContain('RESTIC_PROGRESS_FPS=2');
+		expect(env).toContain(`RESTIC_CACHE_DIR=${RESTIC_CACHE_PATH}`);
 		expect(env).toContain('AWS_ACCESS_KEY_ID=k');
+	});
+	it('points RESTIC_CACHE_DIR at the mounted cache volume path', () => {
+		const env = buildHelperEnv('s3:bucket', 'p', {});
+		expect(env).toContain(`RESTIC_CACHE_DIR=${RESTIC_CACHE_PATH}`);
 	});
 	it('is caller-filtered — it does NOT re-filter, so pass the allowlisted map', () => {
 		// The caller passes filterCloudEnvVars(...); this fn trusts that. Given an
 		// empty map, no cloud vars are added.
 		const env = buildHelperEnv('r', 'p', {});
-		expect(env).toHaveLength(3);
+		expect(env).toHaveLength(4);
 	});
 	it('adds the TLS PEM content vars when certs are supplied', () => {
 		const env = buildHelperEnv('rest:https://x/repo', 'p', {}, { cacert: 'CA-PEM', clientCert: 'CLIENT-PEM' });
@@ -193,13 +200,19 @@ describe('buildHelperEnv', () => {
 
 describe('buildHelperBinds', () => {
 	const resolve = (p: string) => `/host${p}`;
-	it('passes volume binds through unchanged for a remote repo', () => {
+	const cache = `${RESTIC_CACHE_VOLUME}:${RESTIC_CACHE_PATH}`;
+	it('prepends the persistent cache volume and passes volume binds through for a remote repo', () => {
 		const binds = buildHelperBinds('s3:bucket', ['vol:/volumes/vol:ro'], resolve);
-		expect(binds).toEqual(['vol:/volumes/vol:ro']);
+		expect(binds).toEqual([cache, 'vol:/volumes/vol:ro']);
 	});
-	it('adds the repo path bind for a local (filesystem) repo', () => {
+	it('adds the repo path bind for a local (filesystem) repo, cache still first', () => {
 		const binds = buildHelperBinds('/srv/restic', ['vol:/volumes/vol:ro'], resolve);
-		expect(binds).toEqual(['vol:/volumes/vol:ro', '/host/srv/restic:/srv/restic']);
+		expect(binds).toEqual([cache, 'vol:/volumes/vol:ro', '/host/srv/restic:/srv/restic']);
+	});
+	it('mounts the cache as a NAMED volume (no leading slash - daemon-managed, works on remote/hawser)', () => {
+		const binds = buildHelperBinds('s3:bucket', [], resolve);
+		expect(binds[0]).toBe(cache);
+		expect(binds[0].startsWith('/')).toBe(false);
 	});
 	it('does not mutate the caller array', () => {
 		const input = ['a:/volumes/a:ro'];

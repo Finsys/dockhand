@@ -26,14 +26,16 @@ import { sendEventNotification } from './notifications';
 import { buildBasicAuthHeader } from './git-auth';
 import { assertSafeRepoUrl, assertSafeGitRef, repoFilePath, repoBaseEnvPath } from './git-url-safety';
 import { assertSafeRepoTarget } from './git-branch-lookup';
-import { shouldDeployGitStack, shouldForceRecreateGitStack } from './git-deploy-policy';
+import { shouldDeployGitStack, shouldForceRecreateGitStack, isDeployFailure, DEPLOY_FAILURE_PREFIX } from './git-deploy-policy';
 import { resolveStackBranch } from '../git-stack-branch';
+import { expandValue } from '$lib/utils/env-file-values';
 import {
 	parseManifest,
 	serializeManifest,
 	hashDirFiles,
 	computeDeletions,
 	buildNextManifest,
+	canSkipTreeRehash,
 	buildSyncChangeSummary,
 	formatChangeTable,
 	skipReasonMessage,
@@ -470,13 +472,34 @@ async function computeSyncDeletionPlan(options: {
 	composeDir: string; // absolute path inside the clone
 	composeFileName: string | undefined; // compose file relative to composeDir
 	rawManifest: string | null | undefined;
+	// When the caller's git diff proved NOTHING changed in the compose dir between
+	// the deployed commit and the new clone, hashing the whole tree is pure waste:
+	// no file changed, so none was deleted. Large trees (tens of thousands of files)
+	// otherwise block the event loop re-hashing unchanged files on every deploy.
+	// undefined = unknown -> hash (safe default; e.g. new clone / diff failed).
+	changedInComposeDir?: boolean;
+	// The commit the git diff was taken against. Skipping is only safe when this
+	// equals the manifest's own commit; otherwise the diff baseline has drifted
+	// from the manifest (e.g. a bare Sync advanced lastCommit without persisting
+	// the manifest) and a full re-hash is required to stay correct.
+	diffBaselineCommit?: string | null;
 }): Promise<{ plan: DeletionPlan; newFiles: Record<string, string>; previousManifest: SyncManifest }> {
-	const { logPrefix, composeDir, composeFileName, rawManifest } = options;
+	const { logPrefix, composeDir, composeFileName, rawManifest, changedInComposeDir, diffBaselineCommit } = options;
 
 	const previousManifest = parseManifest(rawManifest);
+	const manifestSize = Object.keys(previousManifest.files).length;
+
+	// Fast path: git proved no compose-dir file changed, the diff baseline matches
+	// the manifest's commit, and we have a prior manifest. Nothing can have been
+	// added/modified/deleted, so carry the manifest forward verbatim instead of
+	// re-hashing the entire tree.
+	if (canSkipTreeRehash(changedInComposeDir, manifestSize, previousManifest.commit, diffBaselineCommit)) {
+		console.log(`${logPrefix} Deletion sync: no compose-dir changes, skipping full re-hash of ${manifestSize} file(s)`);
+		return { plan: { toDelete: [], skipped: [] }, newFiles: { ...previousManifest.files }, previousManifest };
+	}
+
 	const newFiles = hashDirFiles(composeDir);
 
-	const manifestSize = Object.keys(previousManifest.files).length;
 	console.log(`${logPrefix} Deletion sync: manifest has ${manifestSize} file(s)${manifestSize === 0 ? ' (first sync — nothing will be deleted)' : ''}`);
 
 	// First sync / legacy manifest: nothing was recorded, so nothing can be deleted
@@ -1236,12 +1259,17 @@ export async function syncGitStack(stackId: number): Promise<SyncResult> {
 			console.log(`${logPrefix} No env file path configured`);
 		}
 
-		// Deletion sync (#966): manifest-vs-clone deletion plan
+		// Deletion sync (#966): manifest-vs-clone deletion plan.
+		// `updated` is the dir-scoped git-diff result (false when the commit didn't
+		// change OR no compose-dir file changed) - lets the plan skip re-hashing an
+		// unchanged tree.
 		const deletionData = await computeSyncDeletionPlan({
 			logPrefix,
 			composeDir,
 			composeFileName,
-			rawManifest: gitStack.syncedFiles
+			rawManifest: gitStack.syncedFiles,
+			changedInComposeDir: updated,
+			diffBaselineCommit: previousCommit
 		});
 
 		// Update git stack status
@@ -1318,6 +1346,30 @@ async function notifyGitSync(stackName: string, envId: number | null | undefined
 			}, envId ?? undefined);
 		}
 	} catch { /* never changes the deploy outcome */ }
+}
+
+/**
+ * Mark a git stack whose deploy failed, so the next scheduled sync or webhook
+ * deploys the same commit again instead of skipping it.
+ *
+ * The commit is persisted as synced before the deploy runs, so without this the
+ * stack reports being in sync while its containers stay on the old version.
+ * Best-effort: a write failure must not turn a reported deploy outcome into
+ * something else, so it logs and returns.
+ */
+async function markGitStackDeployFailed(
+	stackId: number,
+	logPrefix: string,
+	error: string | undefined
+): Promise<void> {
+	try {
+		await updateGitStack(stackId, {
+			syncStatus: 'error',
+			syncError: `${DEPLOY_FAILURE_PREFIX}${error ?? 'unknown error'}`
+		});
+	} catch (e) {
+		console.error(`${logPrefix} Failed to record the deploy failure on the stack:`, e);
+	}
 }
 
 /**
@@ -1417,11 +1469,20 @@ export async function deployGitStack(
 	// Check if there are changes - skip redeploy if no changes and not forced.
 	// For new stacks (first deploy), syncResult.updated is true. The forceRedeploy
 	// setting overrides the skip logic for webhooks/scheduled syncs.
+	// Read from the pre-sync snapshot: syncGitStack has already written 'synced'
+	// by now, so the live row no longer remembers that the last deploy failed.
+	// A failed clone also lands in 'error', so the stored reason decides - those
+	// containers are in step and must not be recreated.
+	const lastDeployFailed = isDeployFailure(gitStack.syncStatus, gitStack.syncError);
 	const shouldDeploy = shouldDeployGitStack({
 		force,
 		forceRedeploy: gitStack.forceRedeploy === true,
-		gitUpdated: syncResult.updated === true
+		gitUpdated: syncResult.updated === true,
+		lastDeployFailed
 	});
+	if (lastDeployFailed) {
+		console.log(`${logPrefix} Last deploy failed, retrying this commit`);
+	}
 	if (!shouldDeploy) {
 		console.log(`${logPrefix} No changes detected and force=false, forceRedeploy=false, skipping redeploy`);
 		const skippedResult = {
@@ -1435,9 +1496,10 @@ export async function deployGitStack(
 
 	const forceRecreate = shouldForceRecreateGitStack({
 		forceRedeploy: gitStack.forceRedeploy === true,
-		gitUpdated: syncResult.updated === true
+		gitUpdated: syncResult.updated === true,
+		lastDeployFailed
 	});
-	console.log(`${logPrefix} Will force recreate:`, forceRecreate, `(updated=${syncResult.updated}, forceRedeploy=${gitStack.forceRedeploy})`);
+	console.log(`${logPrefix} Will force recreate:`, forceRecreate, `(updated=${syncResult.updated}, forceRedeploy=${gitStack.forceRedeploy}, lastDeployFailed=${lastDeployFailed})`);
 	console.log(`${logPrefix} Build on deploy:`, gitStack.buildOnDeploy);
 	console.log(`${logPrefix} Re-pull images:`, gitStack.repullImages);
 	console.log(`${logPrefix} Force redeploy setting:`, gitStack.forceRedeploy);
@@ -1531,6 +1593,9 @@ export async function deployGitStack(
 		} catch (e) {
 			console.error(`${logPrefix} Failed to close run recorder on deploy error (original error preserved):`, e);
 		}
+		// Mark it here too: a throw skips the result branch below, and leaving the
+		// stack on 'synced' is the stuck state this records against.
+		await markGitStackDeployFailed(stackId, logPrefix, error instanceof Error ? error.message : String(error));
 		throw error;
 	}
 
@@ -1591,6 +1656,11 @@ export async function deployGitStack(
 			gitStackId: stackId,
 			composePath: resolvedComposePath
 		});
+	} else {
+		// The commit was recorded as synced before the deploy ran, so mark the
+		// failure on the stack: it is what the next run reads to deploy again, and
+		// what stops the UI reporting a stack that never deployed as in sync.
+		await markGitStackDeployFailed(stackId, logPrefix, result.error);
 	}
 
 	// git_sync_success / git_sync_failed for the actual deploy result. deployStack
@@ -1875,13 +1945,17 @@ export async function deployGitStackWithProgress(
 			}
 		}
 
-		// Deletion sync (#966): manifest-vs-clone deletion plan
+		// Deletion sync (#966): manifest-vs-clone deletion plan. `updated` is the
+		// dir-scoped git-diff result; when nothing changed the plan skips re-hashing
+		// the whole tree.
 		const logPrefix = `[Stack:${gitStack.stackName}]`;
 		const deletionData = await computeSyncDeletionPlan({
 			logPrefix,
 			composeDir,
 			composeFileName: progressComposeFileName,
-			rawManifest: gitStack.syncedFiles
+			rawManifest: gitStack.syncedFiles,
+			changedInComposeDir: updated,
+			diffBaselineCommit: previousCommit
 		});
 
 		// Update git stack status
@@ -2100,7 +2174,16 @@ export async function listGitStackEnvFiles(stackId: number): Promise<{ files: st
  * Parse a .env file content into key-value pairs.
  * Handles comments, empty lines, and quoted values.
  */
-export function parseEnvFileContent(content: string, stackName?: string): Record<string, string> {
+export function parseEnvFileContent(
+	content: string,
+	stackName?: string,
+	options?: { expand?: boolean }
+): Record<string, string> {
+	// Expanding is for a DEPLOY, which needs the values a service will see. A caller
+	// showing the file to somebody wants their own text back, references and all -
+	// resolving it there would turn ${DIRECTORY} into a path in front of them, and an
+	// edit saved from that view would flatten the variable for good.
+	const expand = options?.expand !== false;
 	const logPrefix = stackName ? `[Stack:${stackName}]` : '[Git]';
 	const result: Record<string, string> = {};
 	const skippedLines: string[] = [];
@@ -2137,7 +2220,9 @@ export function parseEnvFileContent(content: string, stackName?: string): Record
 
 		// Only add if key is valid env var name
 		if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
-			result[key] = value;
+			// Quotes are the file's syntax, and a value may refer to an earlier line -
+			// both of which compose resolves before a service ever sees the value.
+			result[key] = expand ? expandValue(value, result) : value;
 		} else {
 			invalidKeys.push(`Line ${i + 1}: "${key}" (invalid key format)`);
 		}
@@ -2187,7 +2272,9 @@ export async function readGitStackEnvFile(
 
 	try {
 		const content = readFileSync(fullPath, 'utf-8');
-		const vars = parseEnvFileContent(content);
+		// A view of the user's own file: their text, not what a deploy would resolve it
+		// to. This is also the diff base the editor decides overrides against.
+		const vars = parseEnvFileContent(content, undefined, { expand: false });
 		return { vars };
 	} catch (error: any) {
 		return { vars: {}, error: error.message };
@@ -2293,7 +2380,7 @@ export async function previewRepoEnvFiles(options: PreviewEnvOptions): Promise<P
 		if (existsSync(baseEnvPath)) {
 			console.log(`${logPrefix} Reading .env from: ${baseEnvPath}`);
 			const content = readFileSync(baseEnvPath, 'utf-8');
-			const baseVars = parseEnvFileContent(content, 'preview');
+			const baseVars = parseEnvFileContent(content, 'preview', { expand: false });
 			for (const [key, value] of Object.entries(baseVars)) {
 				vars[key] = value;
 				sources[key] = '.env';
@@ -2310,7 +2397,7 @@ export async function previewRepoEnvFiles(options: PreviewEnvOptions): Promise<P
 			if (existsSync(additionalEnvPath)) {
 				console.log(`${logPrefix} Reading additional env file: ${additionalEnvPath}`);
 				const content = readFileSync(additionalEnvPath, 'utf-8');
-				const additionalVars = parseEnvFileContent(content, 'preview');
+				const additionalVars = parseEnvFileContent(content, 'preview', { expand: false });
 				for (const [key, value] of Object.entries(additionalVars)) {
 					vars[key] = value;
 					sources[key] = 'envFile';

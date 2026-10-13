@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { m } from '$lib/paraglide/messages.js';
+
 	interface Props {
 		password: string;
 	}
@@ -24,11 +26,11 @@
 	});
 
 	const strengthLabel = $derived(
-		strength === 0 ? 'Too short' :
-		strength === 1 ? 'Weak' :
-		strength === 2 ? 'Fair' :
-		strength === 3 ? 'Good' :
-		'Strong'
+		strength === 0 ? m.password_strength_too_short() :
+		strength === 1 ? m.password_strength_weak() :
+		strength === 2 ? m.password_strength_fair() :
+		strength === 3 ? m.password_strength_good() :
+		m.password_strength_strong()
 	);
 
 	const strengthColor = $derived(

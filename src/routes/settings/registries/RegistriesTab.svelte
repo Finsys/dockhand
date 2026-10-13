@@ -11,6 +11,7 @@
 	import { canAccess } from '$lib/stores/auth';
 	import RegistryModal from './RegistryModal.svelte';
 	import { EmptyState } from '$lib/components/ui/empty-state';
+	import { m } from '$lib/paraglide/messages.js';
 
 	// Registry types
 	interface Registry {
@@ -48,7 +49,7 @@
 			registries = await response.json();
 		} catch (error) {
 			console.error('Failed to fetch registries:', error);
-			toast.error('Failed to fetch registries');
+			toast.error(m.settings_registries_fetch_failed());
 		} finally {
 			regLoading = false;
 		}
@@ -67,13 +68,13 @@
 
 			if (response.ok) {
 				await fetchRegistries();
-				toast.success('Registry deleted');
+				toast.success(m.settings_registries_deleted());
 			} else {
 				const data = await response.json();
-				toast.error(data.error || 'Failed to delete registry');
+				toast.error(data.error || m.settings_registries_delete_failed());
 			}
 		} catch (error) {
-			toast.error('Failed to delete registry');
+			toast.error(m.settings_registries_delete_failed());
 		}
 	}
 
@@ -95,7 +96,7 @@
 			}
 		} catch {
 			testResults[id] = { success: false, message: 'Connection failed' };
-			toast.error('Connection test failed');
+			toast.error(m.settings_registries_connection_test_failed());
 		} finally {
 			testingRegistryId = null;
 		}
@@ -109,13 +110,13 @@
 
 			if (response.ok) {
 				await fetchRegistries();
-				toast.success('Default registry updated');
+				toast.success(m.settings_registries_default_updated());
 			} else {
-				toast.error('Failed to set default registry');
+				toast.error(m.settings_registries_set_default_failed());
 			}
 		} catch (error) {
 			console.error('Failed to set default registry:', error);
-			toast.error('Failed to set default registry');
+			toast.error(m.settings_registries_set_default_failed());
 		}
 	}
 
@@ -127,26 +128,26 @@
 <div class="space-y-4">
 	<div class="flex justify-between items-center">
 		<div class="flex items-center gap-3">
-			<Badge variant="secondary" class="text-xs">{registries.length} total</Badge>
+			<Badge variant="secondary" class="text-xs">{m.settings_registries_total({ count: registries.length })}</Badge>
 		</div>
 		<div class="flex gap-2">
 			{#if $canAccess('registries', 'create')}
 				<Button size="sm" onclick={() => openRegModal()}>
 					<Plus class="w-4 h-4" />
-					Add registry
+					{m.settings_registries_add_registry()}
 				</Button>
 			{/if}
-			<Button size="sm" variant="outline" onclick={fetchRegistries}>Refresh</Button>
+			<Button size="sm" variant="outline" onclick={fetchRegistries}>{m.settings_registries_refresh()}</Button>
 		</div>
 	</div>
 
 	{#if regLoading && registries.length === 0}
-		<p class="text-muted-foreground text-sm">Loading registries...</p>
+		<p class="text-muted-foreground text-sm">{m.settings_registries_loading()}</p>
 	{:else if registries.length === 0}
 		<EmptyState
 			icon={Download}
-			title="No registries found"
-			description="Add a Docker registry to pull and push images"
+			title={m.settings_registries_empty_title()}
+			description={m.settings_registries_empty_description()}
 		/>
 	{:else}
 		<div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -165,10 +166,10 @@
 							</div>
 							<div class="flex items-center gap-1">
 								{#if registry.isDefault}
-									<Badge variant="default" class="text-xs">Default</Badge>
+									<Badge variant="default" class="text-xs">{m.settings_registries_default()}</Badge>
 								{/if}
 								{#if registry.hasCredentials}
-									<Badge variant="secondary" class="text-xs">Auth</Badge>
+									<Badge variant="secondary" class="text-xs">{m.settings_registries_auth()}</Badge>
 								{/if}
 							</div>
 						</div>
@@ -194,7 +195,7 @@
 									onclick={() => setRegDefault(registry.id)}
 								>
 									<Star class="w-3 h-3" />
-									Set default
+									{m.settings_registries_set_default()}
 								</Button>
 							{/if}
 							<Button
@@ -202,7 +203,7 @@
 								size="sm"
 								onclick={() => testRegistry(registry.id)}
 								disabled={testingRegistryId === registry.id}
-								title="Test connectivity"
+								title={m.settings_registries_test_connectivity()}
 							>
 								{#if testingRegistryId === registry.id}
 									<RefreshCw class="w-3 h-3 animate-spin" />
@@ -226,10 +227,11 @@
 							{#if $canAccess('registries', 'delete')}
 								<ConfirmPopover
 									open={confirmDeleteRegistryId === registry.id}
-									action="Delete"
-									itemType="registry"
+									localized
+									action={m.confirm_action_delete()}
+									itemType={m.settings_registries_item_registry()}
 									itemName={registry.name}
-									title="Remove"
+									title={m.settings_registries_remove()}
 									position="left"
 									onConfirm={() => deleteRegistry(registry.id)}
 									onOpenChange={(open) => confirmDeleteRegistryId = open ? registry.id : null}

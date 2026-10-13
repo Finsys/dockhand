@@ -4,6 +4,7 @@ import { authorize } from '$lib/server/authorize';
 import { isSafeWebhookUrl } from '$lib/server/url-safety';
 import { getTemplateSources, type TemplateSource } from '$lib/server/templates';
 import { getAs93Slugs, resolveAs93Url } from '$lib/server/as93-slugs';
+import { dedupeTemplateIds } from '$lib/utils/template-dedupe';
 
 export interface TemplateItem {
 	id: string;
@@ -242,7 +243,7 @@ export const GET: RequestHandler = async ({ cookies }) => {
 	const enabledSources = sources.filter(s => s.enabled);
 
 	const results = await Promise.all(enabledSources.map(fetchSource));
-	const templates = results.flat();
+	const templates = dedupeTemplateIds(results.flat());
 
 	return json(templates);
 };

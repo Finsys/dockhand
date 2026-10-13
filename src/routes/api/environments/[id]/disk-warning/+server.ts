@@ -2,13 +2,16 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
 import { getEnvironment, getEnvSetting, setEnvSetting } from '$lib/server/db';
+import { getDockerInfo } from '$lib/server/docker';
+import { supportsPercentageWarnings } from '$lib/utils/disk-percentage-support';
 
 /**
  * @openapi
  * summary: Get the disk-space warning thresholds for an environment
+ * description: percentageSupported and storageDriver are null when the host could not be reached, which means unknown rather than unsupported - only false says the host reports no storage pool size and so percentage warnings would never fire there.
  * path: id:integer! Environment id (from GET /api/environments)
- * resp-200: {enabled:boolean!, mode:string!, threshold:integer!, thresholdGb:integer!}
- * resp-200-example: {"enabled":true,"mode":"percentage","threshold":80,"thresholdGb":50}
+ * resp-200: {enabled:boolean!, mode:string!, threshold:integer!, thresholdGb:integer!, percentageSupported:boolean, storageDriver:string}
+ * resp-200-example: {"enabled":true,"mode":"percentage","threshold":80,"thresholdGb":50,"percentageSupported":false,"storageDriver":"overlay2"}
  * resp-403: Permission denied (RBAC 'environments:view' missing)
  * resp-404: Environment not found
  * resp-500: Unexpected error while loading the settings
@@ -33,7 +36,28 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 		const threshold = (await getEnvSetting('disk_warning_threshold', id)) ?? 80;
 		const thresholdGb = (await getEnvSetting('disk_warning_threshold_gb', id)) ?? 50;
 
-		return json({ enabled, mode, threshold, thresholdGb });
+		// Percentage mode divides by a total only some storage drivers report, so the
+		// form can say up front that the mode would do nothing here. An unreachable
+		// host answers null - unknown, not unsupported.
+		let percentageSupported: boolean | null = null;
+		let storageDriver: string | null = null;
+		try {
+			// Bounded: a wedged daemon that accepted the connection answers nothing, and
+			// reading a settings page must not wait on it. Giving up lands on the same
+			// "could not ask" answer as any other failure.
+			const info = await Promise.race([
+				getDockerInfo(id),
+				new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000))
+			]);
+			if (info) {
+				percentageSupported = supportsPercentageWarnings(info.DriverStatus);
+				storageDriver = typeof info.Driver === 'string' ? info.Driver : null;
+			}
+		} catch {
+			// Host down or unreachable: leave it unknown rather than claiming anything.
+		}
+
+		return json({ enabled, mode, threshold, thresholdGb, percentageSupported, storageDriver });
 	} catch (error) {
 		console.error('Failed to get disk warning settings:', error);
 		return json({ error: 'Failed to get disk warning settings' }, { status: 500 });

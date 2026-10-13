@@ -4,6 +4,7 @@ import { runValidateWithConfig } from '$lib/server/compose-validate';
 import { buildValidateContext } from '$lib/server/compose-validate/context';
 import { getEnvironment } from '$lib/server/db';
 import type { ValidateConfig } from '$lib/server/compose-validate/types';
+import { withProviderKeysAsSet, sanitizeProviderKeys } from '$lib/utils/validate-provider-keys';
 import type { RequestHandler } from './$types';
 
 /**
@@ -38,7 +39,7 @@ async function resolveDockerHostForConfig(envIdNum: number | undefined): Promise
  * description: Set existing:true when validating an already-deployed stack, so the stack's own running containers/ports are excluded from the cross-stack collision checks; omit it (or false) for a brand-new stack, where a name/port clash with a running stack of the same name must still be reported.
  * path: name:string! Stack name (used to exclude the stack's own containers from cross-stack collision checks)
  * query: env:integer Environment ID for the context-aware checks (from GET /api/environments)
- * body: {compose:string!, existing:boolean, config:{disabled:[string], severity:object}, envVars:object}
+ * body: {compose:string!, existing:boolean, config:{disabled:[string], severity:object}, envVars:object, providerKeys:array<string>}
  * body-example: {"compose":"services:\n  web:\n    image: nginx:latest\n    ports: [\"8080:80\"]\n"}
  * resp-200: {findings:[{ruleId:string!, severity:string!, message:string!, hint:string, service:string, line:integer, fix:object, fixDescription:string}]!, counts:{error:integer!, warn:integer!, info:integer!}!}
  * resp-200-example: {"findings":[{"ruleId":"LATEST_TAG","severity":"warn","message":"\"web\" uses `:latest` (nginx:latest)","hint":"Pin a version tag for reproducible deploys and to enable newer-version detection.","service":"web","line":3}],"counts":{"error":0,"warn":1,"info":0}}
@@ -60,6 +61,7 @@ export const POST: RequestHandler = async ({ cookies, url, params, request }) =>
 		compose?: string;
 		config?: ValidateConfig;
 		envVars?: Record<string, string>;
+		providerKeys?: string[];
 		existing?: boolean;
 	};
 	const compose = typeof body.compose === 'string' ? body.compose : '';
@@ -69,12 +71,18 @@ export const POST: RequestHandler = async ({ cookies, url, params, request }) =>
 
 	// The editor's current env vars (incl. secrets) so `docker compose config` resolves
 	// `${VAR}` the same way a deploy will, instead of reporting a spurious "VAR not set".
-	const envVars: Record<string, string> = {};
+	const editorEnvVars: Record<string, string> = {};
 	if (body.envVars && typeof body.envVars === 'object') {
 		for (const [k, v] of Object.entries(body.envVars)) {
-			if (typeof k === 'string' && typeof v === 'string') envVars[k] = v;
+			if (typeof k === 'string' && typeof v === 'string') editorEnvVars[k] = v;
 		}
 	}
+
+	// A bound provider supplies more keys at deploy time. The editor sends the NAMES it
+	// probed (the ones behind its IN VAULT markers) and they are filled with a
+	// placeholder, since config only asks whether a variable is set - no secret value is
+	// needed, so none is requested or transmitted (#1621).
+	const envVars = withProviderKeysAsSet(editorEnvVars, sanitizeProviderKeys(body.providerKeys));
 
 	const stackName = decodeURIComponent(params.name);
 	// Self-exclusion (don't flag the stack's own running containers/ports as collisions)

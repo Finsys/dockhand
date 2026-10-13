@@ -41,7 +41,7 @@ export interface MetadataFile {
  * @param resticArgs the full restic argv (starting with 'backup') — already
  *                   tag/exclude/flag-assembled by the caller.
  */
-import type { StackDirProbeHint } from './stackdir-plan';
+import { stackDirProbeFixHint, type StackDirProbeHint } from './stackdir-plan';
 
 export function buildBackupScript(resticArgs: string[], stackDirProbe?: { volumeKey: string; composeFileName: string; label?: string; hostPath?: string; hint?: StackDirProbeHint }): string {
 	// restic runs backgrounded so the SIGINT-forwarding trap can reach it on cancel
@@ -63,19 +63,14 @@ export function buildBackupScript(resticArgs: string[], stackDirProbe?: { volume
 	if (stackDirProbe) {
 		const composePath = shellQuote(`/volumes/${stackDirProbe.volumeKey}/${stackDirProbe.composeFileName}`);
 		const label = stackDirProbe.label ? ` ${stackDirProbe.label}` : '';
-		// The compose is missing under the host dir we bind-mounted. For a remote env (hawser or a
-		// user-set path) tell the operator to point "Remote stack path (for backup)" at the real host
-		// path; for a local stack a redeploy stages the files.
+		// The compose is missing under the host dir we bind-mounted. The fix depends on WHY
+		// (path wrong vs not-deployed-there-yet vs local) - stackDirProbeFixHint decides.
 		const hint = stackDirProbe.hint;
 		const remote = hint?.kind === 'hawser-defaulted' || hint?.kind === 'user-set';
 		const where = remote ? hint.hostPath : stackDirProbe.hostPath;
 		// "on <env>" when we know the environment name, else a plain "on the host".
 		const on = remote && hint.envName ? ` on ${hint.envName}` : ` on the host`;
-		// Name the EXACT settings location so the operator can go straight there.
-		const settingsLoc = remote && hint.envName ? `Settings > Environments > ${hint.envName}` : `Settings > Environments`;
-		const fix = remote
-			? ` Set "Remote stack path (for backup)" in ${settingsLoc} to the real host path where this stack's files live.`
-			: ` Redeploy the stack to stage its files there.`;
+		const fix = stackDirProbeFixHint(hint, where);
 		const at = where ? ` in ${where}` : '';
 		// Build the whole message as ONE string and shell-quote it so the operator-facing text
 		// (which contains quotes, parens, and `>` - e.g. `"Remote stack path (for backup)"` and

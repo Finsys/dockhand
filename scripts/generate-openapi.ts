@@ -45,7 +45,8 @@ import { buildSpec } from './openapi/build-spec';
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = join(SCRIPT_DIR, '..');
 const ROUTES_ROOT = join(ROOT_DIR, 'src', 'routes');
-const HOOKS_FILE = join(ROOT_DIR, 'src', 'hooks.server.ts');
+// The public-route lists live in public-paths-core.ts.
+const HOOKS_FILE = join(ROOT_DIR, 'src', 'lib', 'server', 'public-paths-core.ts');
 const PACKAGE_JSON = join(ROOT_DIR, 'package.json');
 // Bundled as an importable module (src/lib) rather than read from disk at
 // runtime — see src/routes/api/docs/+server.ts. The production Docker image

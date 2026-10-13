@@ -5,20 +5,17 @@
  */
 
 import { describe, test, expect } from 'bun:test';
-import { getOrderValue } from '../src/lib/server/container-labels';
+import { compareContainerOrder } from '../src/lib/server/container-labels';
 
 interface MockContainer {
 	service: string;
 	labels: Record<string, string>;
 }
 
+// The production comparator, not a copy of it: a local reimplementation would stay
+// green against a broken one.
 function sortContainers(containers: MockContainer[]): MockContainer[] {
-	return [...containers].sort((a, b) => {
-		const orderA = getOrderValue(a.labels);
-		const orderB = getOrderValue(b.labels);
-		if (orderA !== orderB) return orderA - orderB;
-		return a.service.localeCompare(b.service);
-	});
+	return [...containers].sort(compareContainerOrder);
 }
 
 describe('stack container sort order', () => {
@@ -71,18 +68,37 @@ describe('stack container sort order', () => {
 			{ service: 'worker', labels: { 'dockhand.order': '2' } },
 		];
 		const sorted = sortContainers(containers);
-		// nginx(-1) → postgres(0) → redis(0) → app(1) → worker(2)
-		expect(sorted.map(c => c.service)).toEqual(['nginx', 'postgres', 'redis', 'app', 'worker']);
+		// Every labelled container comes first, in its own order; the unlabelled ones
+		// follow alphabetically.
+		expect(sorted.map(c => c.service)).toEqual(['nginx', 'app', 'worker', 'postgres', 'redis']);
 	});
 
-	test('invalid order values treated as 0', () => {
+	// Ordering ONE service is the common case: labelling it must be enough to move it
+	// ahead of the rest, without labelling the whole stack or guessing a negative value.
+	test('labelling a single service moves it to the front', () => {
+		const containers: MockContainer[] = [
+			{ service: 'db', labels: {} },
+			{ service: 'forgejo', labels: { 'dockhand.order': '1' } }
+		];
+		expect(sortContainers(containers).map(c => c.service)).toEqual(['forgejo', 'db']);
+	});
+
+	// A stack that worked around this with negative values keeps the order it had.
+	test('negative values still sort first', () => {
+		const containers: MockContainer[] = [
+			{ service: 'db', labels: {} },
+			{ service: 'forgejo', labels: { 'dockhand.order': '-1' } }
+		];
+		expect(sortContainers(containers).map(c => c.service)).toEqual(['forgejo', 'db']);
+	});
+
+	test('an invalid order value sorts with the unlabelled containers', () => {
 		const containers: MockContainer[] = [
 			{ service: 'redis', labels: { 'dockhand.order': 'abc' } },
 			{ service: 'app', labels: { 'dockhand.order': '1' } },
 			{ service: 'nginx', labels: {} },
 		];
 		const sorted = sortContainers(containers);
-		// nginx(0) → redis(0, invalid=0) → app(1)
-		expect(sorted.map(c => c.service)).toEqual(['nginx', 'redis', 'app']);
+		expect(sorted.map(c => c.service)).toEqual(['app', 'nginx', 'redis']);
 	});
 });

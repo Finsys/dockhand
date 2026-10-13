@@ -48,6 +48,7 @@
 	import { licenseStore } from '$lib/stores/license';
 	import RoleModal from './RoleModal.svelte';
 	import EnvironmentIcon from '$lib/components/EnvironmentIcon.svelte';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Role {
 		id: number;
@@ -140,6 +141,51 @@
 		activate: KeyRound
 	};
 
+	// Display names for the permission identifiers above
+	const categoryLabels: Record<string, () => string> = {
+		containers: m.nav_containers,
+		images: m.nav_images,
+		volumes: m.nav_volumes,
+		networks: m.nav_networks,
+		stacks: m.nav_stacks,
+		environments: m.audit_entity_environments,
+		registries: m.audit_entity_registries,
+		git: m.settings_roles_category_git,
+		notifications: m.settings_roles_category_notifications,
+		configsets: m.settings_roles_category_configsets,
+		settings: m.nav_settings,
+		users: m.audit_entity_users,
+		license: m.settings_roles_category_license,
+		audit_logs: m.nav_audit_log,
+		activity: m.nav_activity,
+		schedules: m.nav_schedules,
+		secrets: m.settings_roles_category_secrets,
+		backups: m.nav_backups
+	};
+
+	const permissionLabels: Record<string, () => string> = {
+		view: m.settings_roles_action_view,
+		create: m.settings_roles_action_create,
+		start: m.settings_roles_action_start,
+		stop: m.settings_roles_action_stop,
+		restart: m.settings_roles_action_restart,
+		remove: m.settings_roles_action_remove,
+		delete: m.settings_roles_action_delete,
+		exec: m.settings_roles_action_exec,
+		logs: m.settings_roles_action_logs,
+		inspect: m.settings_roles_action_inspect,
+		pull: m.settings_roles_action_pull,
+		push: m.settings_roles_action_push,
+		build: m.settings_roles_action_build,
+		edit: m.settings_roles_action_edit,
+		manage: m.settings_roles_action_manage,
+		send: m.settings_roles_action_send,
+		test: m.settings_roles_action_test,
+		connect: m.settings_roles_action_connect,
+		disconnect: m.settings_roles_action_disconnect,
+		activate: m.settings_roles_action_activate
+	};
+
 	// Define which categories are system-wide vs environment-specific
 	const systemCategories = ['users', 'settings', 'environments', 'registries', 'notifications', 'configsets', 'git', 'license', 'audit_logs', 'schedules'];
 	const envCategories = ['containers', 'images', 'volumes', 'networks', 'stacks'];
@@ -166,7 +212,7 @@
 			}
 		} catch (error) {
 			console.error('Failed to fetch roles:', error);
-			toast.error('Failed to fetch roles');
+			toast.error(m.settings_roles_toast_fetch_failed());
 		} finally {
 			rolesLoading = false;
 		}
@@ -215,13 +261,13 @@
 			const response = await fetch(`/api/roles/${roleId}`, { method: 'DELETE' });
 			if (response.ok) {
 				await fetchRoles();
-				toast.success('Role deleted');
+				toast.success(m.settings_roles_toast_deleted());
 			} else {
-				toast.error('Failed to delete role');
+				toast.error(m.settings_roles_toast_delete_failed());
 			}
 		} catch (error) {
 			console.error('Failed to delete role:', error);
-			toast.error('Failed to delete role');
+			toast.error(m.settings_roles_toast_delete_failed());
 		} finally {
 			confirmDeleteRoleId = null;
 		}
@@ -252,15 +298,14 @@
 			<div class="text-center">
 				<h3 class="text-lg font-medium mb-2 flex items-center justify-center gap-2">
 					<Crown class="w-5 h-5 text-amber-500" />
-					Enterprise feature
+					{m.audit_enterprise_title()}
 				</h3>
 				<p class="text-sm text-muted-foreground mb-4 max-w-md mx-auto">
-					Role-based access control (RBAC) is available with an enterprise license. Define custom
-					roles with granular permissions and assign them to users.
+					{m.settings_roles_enterprise_description()}
 				</p>
 				<Button onclick={() => onTabChange('license')}>
 					<Key class="w-4 h-4" />
-					Activate license
+					{m.audit_activate_license()}
 				</Button>
 			</div>
 		</Card.Content>
@@ -273,16 +318,16 @@
 					<div>
 						<Card.Title class="text-sm font-medium flex items-center gap-2">
 							<Shield class="w-4 h-4" />
-							Roles
+							{m.audit_entity_roles()}
 						</Card.Title>
 						<p class="text-xs text-muted-foreground mt-1">
-							Define roles with granular permissions and assign them to users for access control.
+							{m.settings_roles_description()}
 						</p>
 					</div>
 					{#if $canAccess('settings', 'edit')}
 						<Button size="sm" onclick={() => openRoleModal(null)}>
 							<Plus class="w-4 h-4" />
-							Add role
+							{m.settings_roles_add_role()}
 						</Button>
 					{/if}
 				</div>
@@ -295,8 +340,8 @@
 				{:else if roles.length === 0}
 					<div class="text-center py-8 text-sm text-muted-foreground">
 						<Shield class="w-8 h-8 mx-auto mb-2 opacity-50" />
-						<p>No roles configured</p>
-						<p class="text-xs">Create a role to define custom permissions</p>
+						<p>{m.settings_roles_empty_title()}</p>
+						<p class="text-xs">{m.settings_roles_empty_hint()}</p>
 					</div>
 				{:else}
 					<div class="space-y-2 max-h-96 overflow-y-auto">
@@ -307,7 +352,7 @@
 									<div class="flex items-center gap-2 mb-1">
 										<span class="font-medium text-sm">{role.name}</span>
 										{#if role.isSystem}
-											<Badge variant="outline" class="text-xs">System</Badge>
+											<Badge variant="outline" class="text-xs">{m.schedules_badge_system()}</Badge>
 										{/if}
 									</div>
 									{#if role.description}
@@ -316,7 +361,7 @@
 									<!-- Permission Pills - System -->
 									{#if pills.system.length > 0}
 										<div class="flex flex-wrap items-center gap-1 mb-1">
-											<span class="text-2xs text-muted-foreground font-medium uppercase tracking-wide mr-1">System:</span>
+											<span class="text-2xs text-muted-foreground font-medium uppercase tracking-wide mr-1">{m.settings_roles_pills_system()}</span>
 											{#each pills.system as { category, perms }}
 												{@const CategoryIcon = categoryIcons[category]}
 												<span
@@ -327,12 +372,12 @@
 													{#if CategoryIcon}
 														<svelte:component this={CategoryIcon} class="w-3 h-3" />
 													{/if}
-													<span class="capitalize">{category}</span>
+													<span>{categoryLabels[category]?.() ?? category}</span>
 													<span class="inline-flex items-center gap-0.5 opacity-70">
 														{#each perms as perm}
 															{@const PermIcon = permissionIcons[perm]}
 															{#if PermIcon}
-																<span title={perm}>
+																<span title={permissionLabels[perm]?.() ?? perm}>
 																	<svelte:component this={PermIcon} class="w-2.5 h-2.5" />
 																</span>
 															{/if}
@@ -345,11 +390,11 @@
 									<!-- Permission Pills - Environment -->
 									{#if pills.env.length > 0}
 										<div class="flex flex-wrap items-center gap-1">
-											<span class="text-2xs text-muted-foreground font-medium uppercase tracking-wide mr-1">Env</span>
+											<span class="text-2xs text-muted-foreground font-medium uppercase tracking-wide mr-1">{m.settings_roles_pills_env()}</span>
 											{#if role.environmentIds === null || role.environmentIds === undefined}
 												<Badge variant="secondary" class="text-2xs gap-0.5 px-1 py-0 h-4">
 													<Globe class="w-2.5 h-2.5" />
-													All
+													{m.settings_roles_all()}
 												</Badge>
 											{:else if role.environmentIds.length > 0}
 												{@const envs = role.environmentIds
@@ -373,12 +418,12 @@
 													{#if CategoryIcon}
 														<svelte:component this={CategoryIcon} class="w-3 h-3" />
 													{/if}
-													<span class="capitalize">{category}</span>
+													<span>{categoryLabels[category]?.() ?? category}</span>
 													<span class="inline-flex items-center gap-0.5 opacity-70">
 														{#each perms as perm}
 															{@const PermIcon = permissionIcons[perm]}
 															{#if PermIcon}
-																<span title={perm}>
+																<span title={permissionLabels[perm]?.() ?? perm}>
 																	<svelte:component this={PermIcon} class="w-2.5 h-2.5" />
 																</span>
 															{/if}
@@ -393,23 +438,24 @@
 									<div class="flex items-center gap-1 flex-shrink-0">
 										{#if role.isSystem}
 											<!-- System roles: only Copy button -->
-											<Button variant="ghost" size="sm" onclick={() => copyRole(role)} title="Copy as new role">
+											<Button variant="ghost" size="sm" onclick={() => copyRole(role)} title={m.settings_roles_copy_as_new()}>
 												<Copy class="w-4 h-4" />
 											</Button>
 										{:else}
 											<!-- Custom roles: Copy, Edit and Delete -->
-											<Button variant="ghost" size="sm" onclick={() => copyRole(role)} title="Copy as new role">
+											<Button variant="ghost" size="sm" onclick={() => copyRole(role)} title={m.settings_roles_copy_as_new()}>
 												<Copy class="w-4 h-4" />
 											</Button>
-											<Button variant="ghost" size="sm" onclick={() => openRoleModal(role)} title="Edit role">
+											<Button variant="ghost" size="sm" onclick={() => openRoleModal(role)} title={m.settings_roles_edit_role()}>
 												<Pencil class="w-4 h-4" />
 											</Button>
 											<ConfirmPopover
+												localized
 												open={confirmDeleteRoleId === role.id}
-												action="Delete"
-												itemType="role"
+												action={m.confirm_action_delete()}
+												itemType={m.settings_roles_item_role()}
 												itemName={role.name}
-												title="Delete"
+												title={m.settings_roles_delete()}
 												onConfirm={() => deleteRole(role.id)}
 												onOpenChange={(open) => (confirmDeleteRoleId = open ? role.id : null)}
 											>

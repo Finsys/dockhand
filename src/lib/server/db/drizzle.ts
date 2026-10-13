@@ -915,6 +915,7 @@ export const notificationSettings = schemaProxy.notificationSettings;
 export const environmentNotifications = schemaProxy.environmentNotifications;
 export const authSettings = schemaProxy.authSettings;
 export const users = schemaProxy.users;
+export const passkeyCredentials = schemaProxy.passkeyCredentials;
 export const sessions = schemaProxy.sessions;
 export const ldapConfig = schemaProxy.ldapConfig;
 export const oidcConfig = schemaProxy.oidcConfig;
@@ -926,6 +927,9 @@ export const gitStacks = schemaProxy.gitStacks;
 export const secretProviders = schemaProxy.secretProviders;
 export const stackSources = schemaProxy.stackSources;
 export const containerIconOverrides = schemaProxy.containerIconOverrides;
+export const tags = schemaProxy.tags;
+export const containerTags = schemaProxy.containerTags;
+export const stackTags = schemaProxy.stackTags;
 export const vulnerabilityScans = schemaProxy.vulnerabilityScans;
 export const auditLogs = schemaProxy.auditLogs;
 export const containerEvents = schemaProxy.containerEvents;
@@ -949,6 +953,8 @@ export type {
 	NewSetting,
 	User,
 	NewUser,
+	PasskeyCredential,
+	NewPasskeyCredential,
 	Session,
 	NewSession,
 	Role,

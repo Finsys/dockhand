@@ -7,7 +7,7 @@ import {
 	deleteBackupConfig
 } from '$lib/server/db';
 import { registerSchedule, unregisterSchedule, isValidCron } from '$lib/server/scheduler';
-import { isBackupRunning } from '$lib/server/backups';
+import { isBackupRunning, forgetSnapshotsForConfig } from '$lib/server/backups';
 import { validateRetention, resolveRetentionForUpdate, resolveEnabledOnScheduleChange } from '$lib/server/backups/helpers';
 import { requireBackups, loadConfigGateEnv } from '$lib/server/backups/route-guards';
 
@@ -128,15 +128,16 @@ export const PUT: RequestHandler = async (event) => {
  * DELETE /api/backup/configs/{id} - Delete a backup configuration
  *
  * @openapi
- * summary: Delete a backup configuration and unregister its schedule
- * description: Permission ("backups:manage") and environment-access denials (403) and not-found (404) are produced by the shared route guards.
+ * summary: Delete a backup configuration and unregister its schedule, optionally forgetting its snapshots too
+ * description: Permission ("backups:manage") and environment-access denials (403) and not-found (404) are produced by the shared route guards. With deleteSnapshots=true the config's snapshots are forgotten and pruned (best-effort; reported in the response, never blocks the delete).
  * path: id:integer! Backup configuration id (from GET /api/backup/configs)
- * resp-200: Returns { success: true } once the configuration is deleted
- * resp-200-example: {"success":true}
+ * query: deleteSnapshots:boolean Also forget and prune this config's snapshots (default false; snapshots survive so a restore is still possible)
+ * resp-200: Returns { success: true }, plus { snapshots: { deleted, skipped, error? } } when deleteSnapshots=true
+ * resp-200-example: {"success":true,"snapshots":{"deleted":3,"skipped":0}}
  * resp-409: A backup is currently running for this config — stop it before deleting
  */
 export const DELETE: RequestHandler = async (event) => {
-	const { params, cookies } = event;
+	const { params, url, cookies } = event;
 	const auth = await authorize(cookies);
 	const denied = await requireBackups(auth, 'manage');
 	if (denied) return denied;
@@ -153,10 +154,20 @@ export const DELETE: RequestHandler = async (event) => {
 		return json({ error: 'A backup is currently running for this config — stop it before deleting' }, { status: 409 });
 	}
 
+	// Optionally forget this config's snapshots too (opt-in; snapshots survive by default so
+	// a restore is still possible after removing the schedule). Do it BEFORE deleting the row
+	// while destinationId is still known; matched by the snapshots' own dockhand:configid tag.
+	// Best-effort: a restic failure is reported in the response but never blocks the delete.
+	let snapshotsResult: { deleted: number; skipped: number; error?: string } | undefined;
+	if (url.searchParams.get('deleteSnapshots') === 'true') {
+		const r = await forgetSnapshotsForConfig(id, existing.destinationId).catch((e) => ({ deleted: [], skipped: [], error: e instanceof Error ? e.message : String(e) }));
+		snapshotsResult = { deleted: r.deleted.length, skipped: r.skipped.length, ...(r.error ? { error: r.error } : {}) };
+	}
+
 	// Unregister schedule before deleting
 	unregisterSchedule(id, 'backup');
 
 	await deleteBackupConfig(id);
-	await auditBackup(event, 'delete', existing.targetName, existing.environmentId, { configId: id });
-	return json({ success: true });
+	await auditBackup(event, 'delete', existing.targetName, existing.environmentId, { configId: id, ...(snapshotsResult ? { snapshotsDeleted: snapshotsResult.deleted, snapshotsSkipped: snapshotsResult.skipped } : {}) });
+	return json({ success: true, ...(snapshotsResult ? { snapshots: snapshotsResult } : {}) });
 };

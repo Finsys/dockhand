@@ -12,6 +12,7 @@
 	 */
 	import * as Select from '$lib/components/ui/select';
 	import { getRepoTypeIcon, localRepoNeedsSameHost } from '$lib/utils/backup';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Destination {
 		id: number;
@@ -37,7 +38,7 @@
 		value = $bindable(),
 		env,
 		triggerClass = 'h-9 w-full',
-		placeholder = 'Select repository...'
+		placeholder = m.backupui_select_repository()
 	}: Props = $props();
 
 	const selected = $derived(destinations.find((d) => d.id === value));
@@ -68,7 +69,7 @@
 					<DIcon class="w-4 h-4 text-muted-foreground" />
 					{dest.name}
 					{#if localOnRemote}
-						<span class="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-600 dark:text-amber-400" title="A local-path repo only works if this environment's Docker daemon is on the same host as Dockhand.">needs same host</span>
+						<span class="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-600 dark:text-amber-400" title={m.backupui_needs_same_host_title()}>{m.backupui_needs_same_host()}</span>
 					{/if}
 				</span>
 			</Select.Item>

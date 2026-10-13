@@ -12,7 +12,7 @@ import { resolveAndFetchReleaseNotes } from '$lib/server/semver/release-notes';
  * @openapi
  * summary: Resolve GitHub release notes for the versions a semver update-check surfaced (requires the 'view' permission)
  * path: id:string! Container ID or name (from GET /api/containers)
- * query: env:integer The target environment ID (omit for the local/default Docker host) (from GET /api/environments)
+ * query: env:integer! The target environment ID the container lives in (from GET /api/environments)
  * query: versions:string! Comma-separated version tags to fetch notes for (target + skipped), e.g. "16.3-alpine,16.4-alpine"
  * resp-200: {changelogUrl:string, source:string, rateLimited:boolean, notes:array<{version:string!, name:string, githubTag:string, body:string, publishedAt:string, url:string!}>!}
  * resp-200-example: {"changelogUrl":"https://github.com/go-gitea/gitea/releases","source":"go-gitea/gitea","notes":[{"version":"1.22.0","name":"v1.22.0","githubTag":"v1.22.0","body":"## Changes...","publishedAt":"2024-05-01T00:00:00Z","url":"https://github.com/go-gitea/gitea/releases/tag/v1.22.0"}]}

@@ -10,7 +10,7 @@
  */
 
 import os from 'node:os';
-import { createHash } from 'node:crypto';
+import { createHash, randomInt } from 'node:crypto';
 import argon2 from 'argon2';
 import type { Cookies } from '@sveltejs/kit';
 import {
@@ -44,10 +44,36 @@ import {
 import { Client as LdapClient } from 'ldapts';
 import { resolveSessionTimeout, cookieMaxAge } from '$lib/utils/session-timeout';
 import { escapeLdapFilterValue } from './ldap-filter';
-import { isEnterprise } from './license';
+import { isEnterprise, isLicenseLapsed } from './license';
 import { secureRandomBytes } from './crypto-fallback';
 import { invalidateTokenCacheForUser } from './token-cache';
+import { encrypt, decrypt, looksLikeCiphertext } from './encryption';
 import { oidcDiscoveryUrls, fetchOidcDiscovery } from '$lib/utils/oidc-discovery-url';
+import { createRemoteJWKSet } from 'jose';
+import { verifyIdTokenWithKeys } from './oidc-token-core';
+import {
+	requireIdToken,
+	rejectedToken,
+	applyUserinfo,
+	describeTokenExchangeFailure,
+	redactTokenErrorBody
+} from './oidc-callback-core';
+import { OIDC_END_SESSION } from './features';
+import { providerKind, oidcProviderName } from './provider-kind-core';
+import {
+	OIDC_STATE_TTL_SECONDS,
+	loginStateCookieName,
+	loginStateCookiesToEvict,
+	encodeLoginState,
+	type OidcLoginState
+} from './oidc-login-state';
+import {
+	mergeUserinfo,
+	claimsGrantAdmin,
+	identityFromClaims,
+	rolesFromClaims,
+	type Claims
+} from './oidc-claims-core';
 
 // Session cookie name
 const SESSION_COOKIE_NAME = 'dockhand_session';
@@ -90,7 +116,7 @@ export interface AuthenticatedUser {
 	displayName?: string;
 	avatar?: string;
 	isAdmin: boolean;
-	provider: 'local' | 'ldap' | 'oidc';
+	provider: 'local' | 'ldap' | 'oidc' | 'passkey';
 	permissions: Permissions;
 }
 
@@ -274,7 +300,7 @@ export async function validateSessionById(sessionId: string): Promise<Authentica
 	const user = await getUser(session.userId);
 	if (!user || !user.isActive) return null;
 
-	return await buildAuthenticatedUser(user, session.provider as 'local' | 'ldap' | 'oidc');
+	return await buildAuthenticatedUser(user, providerKind(session.provider));
 }
 
 /**
@@ -297,6 +323,60 @@ export async function destroySession(cookies: Cookies): Promise<void> {
 	cookies.delete(SESSION_COOKIE_NAME, { path: '/' });
 }
 
+/**
+ * Where to send somebody so the identity provider ends its session too.
+ *
+ * Signing out of Dockhand alone leaves the provider's session open, so the next
+ * sign-in goes straight back to the same account without asking - which is not what
+ * anybody means by signing out, and on a shared machine is a real problem (#562,
+ * #1318).
+ *
+ * Split in two on purpose. Reading the provider needs the session cookie, so it has
+ * to happen first; reaching the provider is network I/O that can hang or throw, so it
+ * must not stand between the caller and destroying the session. A logout that cannot
+ * reach the provider still logs the user out.
+ */
+
+/** Which OIDC provider issued this session, read while the session still exists. */
+export async function getSessionOidcProvider(cookies: Cookies): Promise<string | null> {
+	if (!OIDC_END_SESSION) return null;
+
+	const sessionId = getSessionIdFromCookies(cookies);
+	if (!sessionId) return null;
+
+	const session = await dbGetSession(sessionId);
+	if (!session || providerKind(session.provider) !== 'oidc') return null;
+
+	// A bare `oidc` cannot say which provider, so it gets the local logout alone.
+	return oidcProviderName(session.provider);
+}
+
+/**
+ * Where to send the browser to end the session at the provider, or null.
+ *
+ * Null when the session named no provider, when that provider is gone or publishes
+ * no end-session endpoint, or when `OIDC_END_SESSION` is off - one instance-wide env
+ * flag, not a per-provider switch. Never throws: every failure degrades to the
+ * local-only logout that has already happened by the time this runs.
+ */
+export async function getOidcLogoutRedirect(
+	providerName: string | null,
+	postLogoutRedirectUri?: string
+): Promise<string | null> {
+	if (!OIDC_END_SESSION || !providerName) return null;
+
+	try {
+		const configs = await getOidcConfigs();
+		const config = configs.find((c) => c.name === providerName);
+		if (!config) return null;
+
+		return await buildOidcLogoutUrl(config.id, postLogoutRedirectUri);
+	} catch (error) {
+		console.warn('[OIDC] Could not build the provider logout URL:', error);
+		return null;
+	}
+}
+
 // ============================================
 // User Permissions
 // ============================================
@@ -306,7 +386,7 @@ export async function destroySession(cookies: Cookies): Promise<void> {
  */
 async function buildAuthenticatedUser(
 	user: User,
-	provider: 'local' | 'ldap' | 'oidc'
+	provider: 'local' | 'ldap' | 'oidc' | 'passkey'
 ): Promise<AuthenticatedUser> {
 	const permissions = await getUserPermissionsById(user.id);
 
@@ -398,6 +478,13 @@ export async function checkPermission(
 
 	// Admins (those with Admin role) can do anything
 	if (await userHasAdminRole(user.id)) return true;
+
+	// Past this point the caller is not an administrator. A license that stopped
+	// validating holds them here: the roles still say what they may do, but an expiry
+	// or a renamed host is an accident, and carrying on as normal would leave an
+	// instance running on a license nobody is paying for. An administrator got through
+	// above, so the state can still be fixed.
+	if (await isLicenseLapsed()) return false;
 
 	// If checking within an environment context, get environment-specific permissions
 	if (environmentId !== undefined) {
@@ -886,7 +973,7 @@ function generateBackupCodes(): string[] {
 	for (let i = 0; i < 10; i++) {
 		let code = '';
 		for (let j = 0; j < 8; j++) {
-			code += chars.charAt(Math.floor(Math.random() * chars.length));
+			code += chars.charAt(randomInt(chars.length));
 		}
 		codes.push(code);
 	}
@@ -1092,7 +1179,6 @@ const RATE_LIMIT_LOCKOUT_MS = 15 * 60 * 1000; // 15 minute lockout
 // Guard against multiple intervals during HMR
 declare global {
 	var __authRateLimitCleanupInterval: ReturnType<typeof setInterval> | undefined;
-	var __authOidcStateCleanupInterval: ReturnType<typeof setInterval> | undefined;
 }
 
 // Cleanup expired rate limit entries every 5 minutes (guarded for HMR)
@@ -1168,27 +1254,60 @@ export function clearRateLimit(identifier: string): void {
 // OIDC/SSO Authentication
 // ============================================
 
-// In-memory store for OIDC state (nonce, code_verifier)
-// In production, consider using Redis or database for multi-instance deployments
-const oidcStateStore = new Map<string, {
-	configId: number;
-	codeVerifier: string;
-	nonce: string;
-	redirectUrl: string;
-	expiresAt: number;
-}>();
+// A login in flight is carried by the browser, not held here: see
+// oidc-login-state.ts. Anything kept in this process is lost when the callback
+// reaches a different one, which is every login on a two-container deployment.
 
-// Clean up expired OIDC states periodically (guarded for HMR)
-if (!globalThis.__authOidcStateCleanupInterval) {
-	globalThis.__authOidcStateCleanupInterval = setInterval(() => {
-		const now = Date.now();
-		for (const [state, data] of oidcStateStore.entries()) {
-			if (data.expiresAt < now) {
-				oidcStateStore.delete(state);
-			}
-		}
-	}, 60000); // Every minute
+/** When a login-state cookie expires, or null if it cannot be read. */
+function loginStateExpiry(value: string): number | null {
+	if (!looksLikeCiphertext(value)) return null;
+	try {
+		const parsed = JSON.parse(decrypt(value) ?? '');
+		return typeof parsed?.expiresAt === 'number' ? parsed.expiresAt : null;
+	} catch {
+		return null;
+	}
 }
+
+/** The cookie name this login's state lives under. */
+export function cookieNameFor(state: string): string {
+	return loginStateCookieName(state, (v) => createHash('sha256').update(v).digest('hex'));
+}
+
+/**
+ * Hand the in-flight login to the browser.
+ *
+ * `sameSite: 'lax'` is what lets it survive the redirect back from the provider - a
+ * stricter cookie is not sent on a cross-site navigation, which is exactly the trip
+ * this cookie exists to make. Encrypted with the instance key, so the PKCE verifier
+ * and nonce inside are neither readable nor forgeable by the browser holding them.
+ */
+export function setLoginStateCookie(
+	cookies: Cookies,
+	state: OidcLoginState,
+	request?: Request
+): void {
+	// A browser may only hold a few unfinished logins. Decided from the cookies THIS
+	// request carried, so it can never touch another browser's sign-in.
+	const existing = cookies.getAll().map((c) => ({
+		name: c.name,
+		expiresAt: loginStateExpiry(c.value)
+	}));
+	for (const stale of loginStateCookiesToEvict(existing)) {
+		cookies.delete(stale, { path: '/' });
+	}
+
+	cookies.set(cookieNameFor(state.state), encodeLoginState(state, encrypt), {
+		path: '/',
+		httpOnly: true,
+		secure: isSecureContext(request),
+		sameSite: 'lax',
+		maxAge: OIDC_STATE_TTL_SECONDS
+	});
+}
+
+/** How long to wait on an issuer's discovery document before giving up. */
+const OIDC_DISCOVERY_TIMEOUT_MS = 10_000;
 
 // OIDC Discovery document cache
 const oidcDiscoveryCache = new Map<string, {
@@ -1227,7 +1346,12 @@ async function getOidcDiscovery(issuerUrl: string): Promise<OidcDiscoveryDocumen
 
 	// Try the canonical (no trailing slash) discovery URL first, then the trailing-slash
 	// variant some providers require (FortiAuthenticator 404s the canonical one, #1368).
-	const response = await fetchOidcDiscovery(oidcDiscoveryUrls(issuerUrl), (url) => fetch(url));
+	// Bounded: an unreachable issuer that never answers would otherwise hold every
+	// caller open for as long as the socket lives, and two candidate URLs are tried
+	// one after the other.
+	const response = await fetchOidcDiscovery(oidcDiscoveryUrls(issuerUrl), (url) =>
+		fetch(url, { signal: AbortSignal.timeout(OIDC_DISCOVERY_TIMEOUT_MS) })
+	);
 
 	const document = await response.json() as OidcDiscoveryDocument;
 
@@ -1238,6 +1362,38 @@ async function getOidcDiscovery(issuerUrl: string): Promise<OidcDiscoveryDocumen
 	});
 
 	return document;
+}
+
+// One key set per provider, so the provider's signing keys are not re-fetched on every
+// login. jose refreshes them on its own when a token names a key it has not seen,
+// which is what makes key rotation a non-event.
+const oidcKeyStores = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
+
+function getKeyStore(jwksUri: string): ReturnType<typeof createRemoteJWKSet> {
+	let store = oidcKeyStores.get(jwksUri);
+	if (!store) {
+		store = createRemoteJWKSet(new URL(jwksUri));
+		oidcKeyStores.set(jwksUri, store);
+	}
+	return store;
+}
+
+/** The claims of an id_token, once it has been proven to come from the provider. */
+async function verifyIdToken(
+	idToken: string,
+	discovery: OidcDiscoveryDocument,
+	config: { clientId: string; name: string },
+	expectedNonce: string
+): Promise<Claims> {
+	if (!discovery.jwks_uri) {
+		throw new Error(`${config.name} publishes no signing keys (jwks_uri), so tokens cannot be verified`);
+	}
+
+	return verifyIdTokenWithKeys(idToken, getKeyStore(discovery.jwks_uri), {
+		issuer: discovery.issuer,
+		clientId: config.clientId,
+		nonce: expectedNonce
+	});
 }
 
 /**
@@ -1255,7 +1411,7 @@ function generatePkce(): { codeVerifier: string; codeChallenge: string } {
 export async function buildOidcAuthorizationUrl(
 	configId: number,
 	redirectUrl: string = '/'
-): Promise<{ url: string; state: string } | { error: string }> {
+): Promise<{ url: string; state: string; loginState: OidcLoginState } | { error: string }> {
 	const config = await getOidcConfig(configId);
 	if (!config || !config.enabled) {
 		return { error: 'OIDC configuration not found or disabled' };
@@ -1269,14 +1425,17 @@ export async function buildOidcAuthorizationUrl(
 		const nonce = secureRandomBytes(16).toString('base64url');
 		const { codeVerifier, codeChallenge } = generatePkce();
 
-		// Store state for callback verification (expires in 10 minutes)
-		oidcStateStore.set(state, {
+		// Handed back for the caller to put in the browser's cookie. Holding it in
+		// this process instead loses every login that comes back to a different one -
+		// two containers behind one proxy, or a restart mid-login (#1601).
+		const loginState: OidcLoginState = {
 			configId,
+			state,
 			codeVerifier,
 			nonce,
 			redirectUrl,
-			expiresAt: Date.now() + 600000
-		});
+			expiresAt: Date.now() + OIDC_STATE_TTL_SECONDS * 1000
+		};
 
 		// Build authorization URL
 		const params = new URLSearchParams({
@@ -1291,7 +1450,7 @@ export async function buildOidcAuthorizationUrl(
 		});
 
 		const authUrl = `${discovery.authorization_endpoint}?${params.toString()}`;
-		return { url: authUrl, state };
+		return { url: authUrl, state, loginState };
 	} catch (error: any) {
 		const errorMsg = error instanceof Error ? error.message : String(error);
 		console.error('[OIDC] Failed to build authorization URL:', errorMsg);
@@ -1304,21 +1463,8 @@ export async function buildOidcAuthorizationUrl(
  */
 export async function handleOidcCallback(
 	code: string,
-	state: string
-): Promise<LoginResult & { redirectUrl?: string }> {
-	// Validate state
-	const stateData = oidcStateStore.get(state);
-	if (!stateData) {
-		return { success: false, error: 'Invalid or expired state' };
-	}
-
-	// Remove state immediately to prevent replay
-	oidcStateStore.delete(state);
-
-	if (stateData.expiresAt < Date.now()) {
-		return { success: false, error: 'SSO session expired' };
-	}
-
+	stateData: OidcLoginState
+): Promise<LoginResult & { redirectUrl?: string; providerName?: string; providerId?: number }> {
 	const config = await getOidcConfig(stateData.configId);
 	if (!config || !config.enabled) {
 		return { success: false, error: 'OIDC configuration not found or disabled' };
@@ -1345,11 +1491,11 @@ export async function handleOidcCallback(
 
 		if (!tokenResponse.ok) {
 			const errorBody = await tokenResponse.text();
-			console.error('Token exchange failed:', tokenResponse.status, errorBody);
-			console.error('Token endpoint:', discovery.token_endpoint);
-			console.error('Redirect URI:', config.redirectUri);
-			console.error('Client ID:', config.clientId);
-			return { success: false, error: `Failed to exchange authorization code: ${errorBody}` };
+			// Named and prefixed like every other OIDC line: with more than one provider
+			// configured, a bare message does not say which one refused.
+			console.error(`[OIDC] ${config.name} refused the authorization code: HTTP ${tokenResponse.status} ${redactTokenErrorBody(errorBody)}`);
+			console.error(`[OIDC] ${config.name} token endpoint: ${discovery.token_endpoint}, redirect URI sent: ${config.redirectUri}`);
+			return { success: false, error: describeTokenExchangeFailure(tokenResponse.status, errorBody) };
 		}
 
 		const tokens = await tokenResponse.json() as {
@@ -1359,21 +1505,29 @@ export async function handleOidcCallback(
 			expires_in?: number;
 		};
 
-		// Decode and validate ID token (basic validation - in production use a JWT library)
-		let claims: Record<string, any> = {};
-
-		if (tokens.id_token) {
-			const idTokenParts = tokens.id_token.split('.');
-			if (idTokenParts.length === 3) {
-				try {
-					claims = JSON.parse(Buffer.from(idTokenParts[1], 'base64url').toString());
-				} catch {
-					return { success: false, error: 'Invalid ID token' };
-				}
-			}
+		// The id_token is the only thing tying this login to the provider. Everything
+		// downstream - the username, and whether the account becomes an administrator -
+		// is read out of it, so it is verified before a single claim is trusted:
+		// signature against the provider's published keys, issuer, audience, expiry,
+		// and the nonce from the request that started this login.
+		const present = requireIdToken(tokens);
+		if (!present.proceed) {
+			return { success: false, error: present.error };
 		}
 
-		// If no ID token or need more info, fetch from userinfo endpoint
+		let claims: Claims;
+		try {
+			claims = await verifyIdToken(tokens.id_token!, discovery, config, stateData.nonce);
+		} catch (error) {
+			const reason = error instanceof Error ? error.message : String(error);
+			console.warn(`[OIDC] Rejected an ID token from ${config.name}: ${reason}`);
+			const rejected = rejectedToken(error);
+			return { success: false, error: rejected.proceed ? reason : rejected.error };
+		}
+
+		// userinfo may carry claims the token omits, but only about the same person.
+		// Its values override the token's, and the admin claim is read afterwards, so a
+		// response about a different subject would be a way in.
 		if (discovery.userinfo_endpoint && tokens.access_token) {
 			try {
 				const userinfoResponse = await fetch(discovery.userinfo_endpoint, {
@@ -1383,39 +1537,30 @@ export async function handleOidcCallback(
 				});
 				if (userinfoResponse.ok) {
 					const userinfo = await userinfoResponse.json();
-					claims = { ...claims, ...userinfo };
+					const step = applyUserinfo(claims, userinfo, config.name);
+					if (!step.proceed) {
+						console.warn(
+							`[OIDC] ${config.name} returned userinfo for a different subject; rejecting the sign-in`
+						);
+						return { success: false, error: step.error };
+					}
+					if (step.warn) console.warn(step.warn);
+					claims = step.claims;
 				}
 			} catch (e) {
 				console.warn('Failed to fetch userinfo:', e);
 			}
 		}
 
-		// Validate nonce if present in ID token
-		if (claims.nonce && claims.nonce !== stateData.nonce) {
-			return { success: false, error: 'Invalid nonce' };
-		}
-
-		// Extract user information using configured claims
-		const username = claims[config.usernameClaim] || claims.preferred_username || claims.sub;
-		const email = claims[config.emailClaim] || claims.email;
-		const displayName = claims[config.displayNameClaim] || claims.name;
-
-		if (!username) {
+		const identity = identityFromClaims(claims, config);
+		if (!identity.ok) {
 			return { success: false, error: 'Username claim not found in token' };
 		}
+		const { username, email, displayName } = identity;
 
-		// Determine if user should be admin based on claim
-		let shouldBeAdmin = false;
-		if (config.adminClaim && config.adminValue) {
-			const adminClaimValue = claims[config.adminClaim];
-			// Support multiple comma-separated admin values
-			const adminValues = config.adminValue.split(',').map((v: string) => v.trim());
-			if (Array.isArray(adminClaimValue)) {
-				shouldBeAdmin = adminClaimValue.some((v: string) => adminValues.includes(v));
-			} else {
-				shouldBeAdmin = adminValues.includes(adminClaimValue);
-			}
-		}
+		// Read off claims that are now known to come from the provider, and to be about
+		// the subject the token names.
+		const shouldBeAdmin = claimsGrantAdmin(claims, config.adminClaim, config.adminValue);
 
 		// Build provider string for storage (e.g., "oidc:Keycloak")
 		const authProvider = `oidc:${config.name}`;
@@ -1460,21 +1605,15 @@ export async function handleOidcCallback(
 					? JSON.parse(config.roleMappings)
 					: config.roleMappings;
 
-				const roleMappingsClaim = config.roleMappingsClaim || 'groups';
-				const claimValue = claims[roleMappingsClaim];
+				const mapped = rolesFromClaims(claims, roleMappings, config.roleMappingsClaim);
 
-				if (Array.isArray(roleMappings) && claimValue) {
-					const claimValues = Array.isArray(claimValue) ? claimValue : [claimValue];
-
-					// Get user's current roles to avoid duplicates
+				if (mapped.length > 0) {
+					// Roles the user already holds, so a repeat login is not a repeat write.
 					const userRoles = await getUserRoles(user.id);
 
-					for (const mapping of roleMappings) {
-						if (mapping.claimValue && mapping.roleId && claimValues.includes(mapping.claimValue)) {
-							const hasRole = userRoles.some(r => r.roleId === mapping.roleId);
-							if (!hasRole) {
-								await assignUserRole(user.id, mapping.roleId, null);
-							}
+					for (const roleId of mapped) {
+						if (!userRoles.some((r) => r.roleId === roleId)) {
+							await assignUserRole(user.id, roleId, null);
 						}
 					}
 				}
@@ -1495,7 +1634,8 @@ export async function handleOidcCallback(
 			success: true,
 			user: await buildAuthenticatedUser(user, 'oidc'),
 			redirectUrl: stateData.redirectUrl,
-			providerName: config.name
+			providerName: config.name,
+			providerId: config.id
 		};
 	} catch (error: any) {
 		const errorMsg = error instanceof Error ? error.message : String(error);

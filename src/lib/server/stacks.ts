@@ -5,12 +5,14 @@
  * All lifecycle operations use docker compose commands.
  */
 
-import { existsSync, mkdirSync, rmSync, readdirSync, cpSync, statSync, unlinkSync, renameSync, readFileSync, writeFileSync, realpathSync, accessSync, constants as fsConstants } from 'node:fs';
-import { join, resolve, dirname, basename, isAbsolute, normalize as pathNormalize, sep as pathSep } from 'node:path';
+import { existsSync, mkdirSync, rmSync, readdirSync, cpSync, statSync, lstatSync, readlinkSync, unlinkSync, renameSync, readFileSync, writeFileSync, realpathSync, accessSync, constants as fsConstants } from 'node:fs';
+import { join, resolve, relative, dirname, basename, isAbsolute, normalize as pathNormalize, sep as pathSep } from 'node:path';
+import { judgeSymlink } from './stack-symlinks';
 import { spawn as nodeSpawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { redactSecretVars } from './secret-redact';
 import { collectProcess } from './process-output-core';
+import { dockerTlsEnv } from './docker-tls-env';
 import { makeLineForwarder, makeRedactedLineSink } from './secret-redaction';
 import {
 	applyFileDeletions,
@@ -22,11 +24,13 @@ import {
 	type DeletionSkipReason
 } from './git-deletions';
 import { buildComposeOperationArgs, shouldRunSeparateBuildStep } from './compose-args';
-import { findStackNameCollision, moveStackFilePathCrossDevice, resolveStackDirForLayout } from './stack-path-utils';
+import { findStackNameCollision, getStackPathHintsFromContainers, moveStackFilePathCrossDevice, resolveStackDirForLayout } from './stack-path-utils';
 import { db, environments, eq } from './db/drizzle.js';
 import { isAllowedStackFilename } from './stack-filename';
+import { coolingDown as coolingDownRows } from '$lib/utils/pending-update-rows';
+import { getMinimumReleaseAgeConfig } from './minimum-release-age';
 
-import { deriveStackStatus } from './stack-status';
+import { deriveStackStatus, deriveStackHealth } from './stack-status';
 import {
 	getEnvironment,
 	getSecretEnvVarsAsRecord,
@@ -56,8 +60,10 @@ import { sendEventNotification } from './notifications';
 import { deleteGitStackFiles, parseEnvFileContent } from './git';
 import { isDeletableStackDir } from './stack-delete-guard';
 import { cleanPem } from '$lib/utils/pem';
+import { quoteForEnvFile } from '$lib/utils/env-file-values';
 import { rewriteComposeVolumePaths, getHostDataDir } from './host-path';
-import { getOrderValue } from './container-labels';
+import { compareContainerOrder } from './container-labels';
+import { stackLabelTags, type LabelTagSpec } from '$lib/utils/tags-core';
 import { pendingRowsToClear } from './pending-updates-core';
 import { buildDockhandOverrideFile } from './dockhand-override-file';
 
@@ -141,6 +147,14 @@ export interface ComposeStackInfo {
 	status: 'running' | 'stopped' | 'partial' | 'restarting' | 'created';
 	sourceType?: StackSourceType;
 	hasComposeFile?: boolean;
+	/**
+	 * Tags the stack's containers name in their `dockhand.tags` labels, each with
+	 * the colour and icon it asks for. Derived from what is on the containers, so
+	 * a stack started outside Dockhand carries them too. Compose keeps
+	 * project-level labels off the containers, so a service label is the only one
+	 * that reaches the daemon.
+	 */
+	labelTags?: LabelTagSpec[];
 }
 
 /**
@@ -284,37 +298,49 @@ async function readDirFilesAsMap(dirPath: string): Promise<Record<string, string
 	let totalSize = 0;
 	const skipped: string[] = [];
 
+	/** Read one regular file into the map, honouring the per-file and total caps. */
+	async function readOneFile(fullPath: string, relPath: string, fileSize: number): Promise<void> {
+		if (fileSize > MAX_FILE_SIZE) {
+			skipped.push(`${relPath} (${(fileSize / 1024 / 1024).toFixed(1)} MB)`);
+			return;
+		}
+		if (totalSize + fileSize > MAX_TOTAL_SIZE) {
+			skipped.push(`${relPath} (would exceed ${MAX_TOTAL_SIZE / 1024 / 1024} MB total limit)`);
+			return;
+		}
+		const bytes = readFileSync(fullPath);
+		totalSize += fileSize;
+		if (isBinaryContent(bytes)) {
+			files[relPath] = `base64:${bytes.toString('base64')}`;
+		} else {
+			files[relPath] = new TextDecoder().decode(bytes);
+		}
+	}
+
 	async function scanDir(currentPath: string, relativePath: string = ''): Promise<void> {
 		const entries = readdirSync(currentPath, { withFileTypes: true });
 		for (const entry of entries) {
 			const fullPath = join(currentPath, entry.name);
 			const relPath = relativePath ? `${relativePath}/${entry.name}` : entry.name;
 
+			// A symlink is neither isDirectory() nor isFile() to withFileTypes, so without
+			// this it would match no branch and vanish from the payload unremarked. The
+			// protocol carries path -> content and cannot express a link, so the link is
+			// not sent; it is named instead, because a file the agent never receives has
+			// to be visible to whoever wonders where it went.
+			if (entry.isSymbolicLink()) {
+				let target = '?';
+				try { target = readlinkSync(fullPath); } catch { /* keep the placeholder */ }
+				skipped.push(`${relPath} -> ${target} (symlink; only regular files are sent)`);
+				continue;
+			}
+
 			if (entry.isDirectory()) {
 				// Skip .git directory
 				if (entry.name === '.git') continue;
 				await scanDir(fullPath, relPath);
 			} else if (entry.isFile()) {
-				const fileSize = statSync(fullPath).size;
-
-				if (fileSize > MAX_FILE_SIZE) {
-					skipped.push(`${relPath} (${(fileSize / 1024 / 1024).toFixed(1)} MB)`);
-					continue;
-				}
-
-				if (totalSize + fileSize > MAX_TOTAL_SIZE) {
-					skipped.push(`${relPath} (would exceed ${MAX_TOTAL_SIZE / 1024 / 1024} MB total limit)`);
-					continue;
-				}
-
-				const bytes = readFileSync(fullPath);
-				totalSize += fileSize;
-
-				if (isBinaryContent(bytes)) {
-					files[relPath] = `base64:${bytes.toString('base64')}`;
-				} else {
-					files[relPath] = new TextDecoder().decode(bytes);
-				}
+				await readOneFile(fullPath, relPath, statSync(fullPath).size);
 			}
 		}
 	}
@@ -1045,7 +1071,15 @@ async function checkFlatLocalStackNameCollision(stackName: string, envId?: numbe
  * Login to all configured Docker registries before running compose commands.
  * This ensures that `docker compose up` can pull images from private registries.
  */
-async function loginToRegistries(dockerHost?: string, logPrefix = '[Stack]', apiVersion?: string): Promise<void> {
+// TLS material for a registry login against an HTTPS Docker daemon. `certDir` is the
+// temp dir compose already wrote ca/cert/key.pem into, reused so certs aren't written
+// twice; `skipVerify` mirrors the compose spawn's DOCKER_TLS_VERIFY.
+interface LoginTlsOptions {
+	certDir: string;
+	skipVerify?: boolean;
+}
+
+async function loginToRegistries(dockerHost?: string, logPrefix = '[Stack]', apiVersion?: string, tls?: LoginTlsOptions): Promise<void> {
 	const { getRegistries } = await import('./db.js');
 	const registries = await getRegistries();
 
@@ -1060,6 +1094,11 @@ async function loginToRegistries(dockerHost?: string, logPrefix = '[Stack]', api
 	// Pass through explicit DOCKER_API_VERSION if provided by caller
 	if (apiVersion) {
 		spawnEnv.DOCKER_API_VERSION = apiVersion;
+	}
+	// Speak TLS to an HTTPS daemon (mTLS proxy on :2376), same material compose uses -
+	// otherwise `docker login` talks plaintext HTTP and the terminator rejects it (#1557).
+	if (tls) {
+		Object.assign(spawnEnv, dockerTlsEnv(tls.certDir, tls.skipVerify));
 	}
 
 	for (const reg of registries) {
@@ -1369,10 +1408,8 @@ async function executeLocalCompose(
 			if (cleanedKey) writeFileSync(join(tlsCertDir, 'key.pem'), cleanedKey);
 		}
 
-		// Set Docker TLS environment variables
-		spawnEnv.DOCKER_TLS = '1';
-		spawnEnv.DOCKER_CERT_PATH = tlsCertDir;
-		spawnEnv.DOCKER_TLS_VERIFY = tlsConfig.skipVerify ? '0' : '1';
+		// Set Docker TLS environment variables (shared with the registry-login spawn, #1557)
+		Object.assign(spawnEnv, dockerTlsEnv(tlsCertDir, tlsConfig.skipVerify));
 
 		console.log(`${logPrefix} TLS enabled: DOCKER_CERT_PATH=${tlsCertDir}, DOCKER_TLS_VERIFY=${spawnEnv.DOCKER_TLS_VERIFY}`);
 	}
@@ -1466,7 +1503,8 @@ async function executeLocalCompose(
 
 	// Login to registries before pulling images
 	if (operation === 'up' || operation === 'pull') {
-		await loginToRegistries(dockerHost, logPrefix, spawnEnv.DOCKER_API_VERSION);
+		await loginToRegistries(dockerHost, logPrefix, spawnEnv.DOCKER_API_VERSION,
+			tlsCertDir ? { certDir: tlsCertDir, skipVerify: tlsConfig?.skipVerify } : undefined);
 	}
 
 	try {
@@ -1666,8 +1704,11 @@ async function executeComposeViaHawser(
 				console.log(`${logPrefix} Preserving existing .env from stackFiles (${files['.env'].length} chars), envVars passed separately for substitution`);
 			} else {
 				// No .env in stackFiles - generate one from NON-SECRET envVars only
+				// Compose interpolates this file when it reads it. Quoting the whole value
+				// carries it through intact - unquoted, a hash after a space becomes a
+				// comment, surrounding spaces are trimmed and a dollar is eaten.
 				const envContent = Object.entries(envVars)
-					.map(([key, value]) => `${key}=${value}`)
+					.map(([key, value]) => `${key}=${quoteForEnvFile(value)}`)
 					.join('\n');
 				files['.env'] = envContent;
 				console.log(`${logPrefix} Generated .env file with ${Object.keys(envVars).length} non-secret variables`);
@@ -1828,6 +1869,8 @@ async function executeComposeCommand(
 	onLine?: (line: string) => void
 ): Promise<StackOperationResult> {
 	const { stackName, envId, forceRecreate, build, noBuildCache, removeOrphans, noDeps, pullPolicy, removeVolumes, stackFiles, workingDir, composePath, envPath, useOverrideFile, serviceName, serviceNames, composeFileName, filesToDelete, removeFiles } = options;
+
+	// Stack deployments (including Git automation) are outside the container-update cooldown.
 
 	// Get environment configuration
 	const env = envId ? await getEnvironment(envId) : null;
@@ -2055,12 +2098,17 @@ export async function listComposeStacks(envId?: number | null): Promise<ComposeS
 	// on hasImageUpdate. `newerVersionIds` drives the separate semver stack badge.
 	const pendingUpdateIds = new Set<string>();
 	const newerVersionIds = new Set<string>();
+	// A held update: an update exists but the image is too young to apply. Counted
+	// separately so it never reaches updateCount, which offers a redeploy.
+	const coolingDownIds = new Set<string>();
 	const newerVersionById = new Map<string, unknown>();
 	if (typeof envId === 'number') {
 		try {
 			const pending = await getPendingContainerUpdates(envId);
+			const heldIds = coolingDownRows(pending, (await getMinimumReleaseAgeConfig(envId).catch(() => ({ hours: 0 }))).hours);
 			pending.forEach((p) => {
 				if (p.hasImageUpdate) pendingUpdateIds.add(p.containerId);
+				if (heldIds.has(p.containerId)) coolingDownIds.add(p.containerId);
 				if (p.newerVersion) {
 					newerVersionIds.add(p.containerId);
 					try {
@@ -2138,27 +2186,31 @@ export async function listComposeStacks(envId?: number | null): Promise<ComposeS
 					newerVersion: newerVersionById.get(c.id) ?? null
 				};
 			})
-			.sort((a, b) => {
-				const orderA = getOrderValue(a.labels);
-				const orderB = getOrderValue(b.labels);
-				if (orderA !== orderB) return orderA - orderB;
-				return a.service.localeCompare(b.service);
-			});
+			.sort(compareContainerOrder);
 
 		return {
 			name,
 			containers: Array.from(containerIds),
 			containerDetails,
+			// The union of what this stack's containers name: compose keeps a
+			// project-level label off the containers, so a service label is the only
+			// one that reaches the daemon.
+			labelTags: stackLabelTags(stackContainers.map((c) => c.labels)),
 			updatesAvailable: stackContainers.some((c) => pendingUpdateIds.has(c.id)),
 			updateCount: stackContainers.filter((c) => pendingUpdateIds.has(c.id)).length,
 			// Newer-version-tag (semver) suggestions in this stack - drives the Tag badge.
 			newerVersionCount: stackContainers.filter((c) => newerVersionIds.has(c.id)).length,
+			// Held updates in this stack - shown as waiting, never offered for redeploy.
+			coolingDownCount: stackContainers.filter((c) => coolingDownIds.has(c.id)).length,
 			status: deriveStackStatus({
 				total: stackContainers.length,
 				running: runningCount,
 				restarting: restartingCount,
 				completed: completedCount
-			})
+			}),
+			// Reported beside status, not inside it: a running stack with one unhealthy
+			// container is still running.
+			health: deriveStackHealth(containerDetails)
 		};
 	});
 
@@ -2188,21 +2240,7 @@ export async function getStackPathHints(
 	configFiles: string[] | null;
 }> {
 	const containers = await getStackContainers(stackName, envId);
-
-	if (containers.length === 0) {
-		return { workingDir: null, configFiles: null };
-	}
-
-	// Get labels from first container (all containers in stack have same project labels)
-	const labels = containers[0].labels || {};
-
-	const workingDir = labels['com.docker.compose.project.working_dir'] || null;
-	const configFilesRaw = labels['com.docker.compose.project.config_files'] || null;
-
-	// Config files can be comma-separated if multiple compose files were used
-	const configFiles = configFilesRaw ? configFilesRaw.split(',').map((f: string) => f.trim()) : null;
-
-	return { workingDir, configFiles };
+	return getStackPathHintsFromContainers(containers);
 }
 
 /**
@@ -2438,12 +2476,27 @@ export async function redeployStackFromDir(
 	}
 	const envPath = join(stackDir, '.env');
 	const hasEnv = existsSync(envPath);
-	const envVars = hasEnv ? parseEnvFileContent(readFileSync(envPath, 'utf-8'), stackName) : undefined;
+	const envFileContent = hasEnv ? readFileSync(envPath, 'utf-8') : undefined;
+	let envVars = envFileContent ? parseEnvFileContent(envFileContent, stackName) : undefined;
 	// Secret env vars are stored encrypted in the DB and deliberately never written
 	// to the snapshot's .env, so the extracted dir has no copy of them. Load them
 	// from the DB and inject them like every other compose path does (#1329) —
 	// otherwise a restored stack comes up with its secrets interpolating to "".
-	const secretVars = await getSecretEnvVarsAsRecord(stackName, envId);
+	let secretVars = await getSecretEnvVarsAsRecord(stackName, envId);
+	// Resolve provider references (op://, keepass://, azurekv://, pass://, bulk pull) the
+	// same way the start/restart/deploy paths do - this path loaded raw DB secrets, so a
+	// secret-marked reference would otherwise reach the container as the literal string.
+	const source = await getStackSource(stackName, envId ?? undefined);
+	const resolved = await resolveProviderEnvVars(
+		{ ...(envVars ?? {}) },
+		{ ...secretVars },
+		`[Stack:${stackName}]`,
+		source?.secretProviderId,
+		envFileContent,
+		{ stackName, envId: envId ?? undefined }
+	);
+	envVars = resolved.dbNonSecretVars;
+	secretVars = resolved.secretVars;
 	// For Hawser, ship the entire tree (compose + include:d files + sidecars + .env).
 	const stackFiles = await readDirFilesAsMap(stackDir);
 	return await executeComposeCommand(
@@ -2454,7 +2507,12 @@ export async function redeployStackFromDir(
 			composePath,
 			envPath: hasEnv ? envPath : undefined,
 			composeFileName,
-			stackFiles
+			stackFiles,
+			// A restore rewrote the stack dir and swapped the volume data underneath the
+			// stack. Force-recreate so the container is rebuilt fresh against the restored
+			// state; a plain `up` sees the unchanged compose and only restarts the stopped
+			// container, which can leave it not-yet-running after an in-place swap.
+			forceRecreate: true
 		},
 		composeContent,
 		envVars,
@@ -2512,9 +2570,11 @@ export async function startStack(
 	const containers = await getStackContainers(stackName, envId);
 	const operation = containers.length > 0 ? 'start' : 'up';
 
-	if (operation === 'up') {
-		await applyProviderSecretsToComposeResult(result, stackName, envId, `[Stack:${stackName}]`);
-	}
+	// Resolve secret-provider values for BOTH operations: `docker compose start`
+	// parses and interpolates the compose file too, so a stack with required
+	// provider secrets (${VAR:?required}) fails to start without them - e.g. the
+	// post-backup restart of a stopped stack (#1579).
+	await applyProviderSecretsToComposeResult(result, stackName, envId, `[Stack:${stackName}]`);
 
 	const startResult = await executeComposeCommand(
 		operation,
@@ -2551,6 +2611,12 @@ export async function stopStack(
 	// file with the panel vars missing and errors (#1313). Matches startStack/deployStack.
 	// sourceType is plumbed through from requireComposeFile to avoid a redundant DB lookup.
 	const isGitStack = result.sourceType === 'git';
+
+	// `docker compose stop` interpolates the compose file too, so a stack with required
+	// provider secrets (${VAR:?required}) fails to stop without them - e.g. the
+	// stop-during-backup path (#1579). bestEffort: stopping a stack must not be blocked
+	// by an unreachable provider, so a resolve failure falls back to on-disk/DB vars.
+	await applyProviderSecretsToComposeResult(result, stackName, envId, `[Stack:${stackName}]`, true);
 
 	const composeResult = await executeComposeCommand(
 		'stop',
@@ -2604,10 +2670,16 @@ export async function restartStack(
 
 	let composeResult: StackOperationResult;
 
+	// Resolve secret-provider values up front: every restart mode ends in a compose
+	// command (up/start/restart) that interpolates the compose file, so a stack with
+	// required provider secrets (${VAR:?required}) fails without them (#1579). bestEffort:
+	// restarting a running stack must not be blocked by an unreachable provider, so a
+	// resolve failure falls back to on-disk/DB vars rather than aborting the restart.
+	await applyProviderSecretsToComposeResult(result, stackName, envId, `[Stack:${stackName}]`, true);
+
 	if (mode === 'recreate') {
 		// Stop first, then bring up with --force-recreate to ensure new container IDs
 		await executeComposeCommand('stop', opts, result.content!, result.nonSecretVars, result.secretVars, onLine);
-		await applyProviderSecretsToComposeResult(result, stackName, envId, `[Stack:${stackName}]`);
 		composeResult = await executeComposeCommand('up', { ...opts, forceRecreate: true }, result.content!, result.nonSecretVars, result.secretVars, onLine);
 	} else if (mode === 'ordered') {
 		// Stop everything, then start in depends_on order (compose start honors the
@@ -2644,6 +2716,11 @@ export async function downStack(
 	// useOverrideFile for git stacks — same reason as stopStack (#1313).
 	// sourceType is plumbed through from requireComposeFile to avoid a redundant DB lookup.
 	const isGitStack = result.sourceType === 'git';
+
+	// `docker compose down` interpolates the compose file too, so a stack with required
+	// provider secrets (${VAR:?required}) fails to come down without them (#1579).
+	// bestEffort: an unreachable provider must not block tearing a stack down.
+	await applyProviderSecretsToComposeResult(result, stackName, envId, `[Stack:${stackName}]`, true);
 
 	const composeResult = await executeComposeCommand(
 		'down',
@@ -2745,8 +2822,22 @@ export async function removeStack(
 
 		// If compose file exists, run docker compose down first
 		if (composeResult.success) {
-			const envVars = await getNonSecretEnvVarsAsRecord(stackName, envId);
-			const secretVars = await getSecretEnvVarsAsRecord(stackName, envId);
+			// `docker compose down` interpolates the compose file, so a stack with
+			// required provider secrets (${VAR:?required}) needs them resolved to come
+			// down (#1579). bestEffort: an unreachable provider must not block removal.
+			// suggestedEnvPath covers custom-path stacks whose stored envPath is null but
+			// have a real sibling .env (the selector/refs may live only there).
+			const resolved = await resolveProviderVarsBestEffort(
+				stackName,
+				envId,
+				await getNonSecretEnvVarsAsRecord(stackName, envId),
+				await getSecretEnvVarsAsRecord(stackName, envId),
+				composeResult.envPath ?? composeResult.suggestedEnvPath,
+				`[Stack:${stackName}]`,
+				true
+			);
+			const envVars = resolved.nonSecretVars;
+			const secretVars = resolved.secretVars;
 
 			// Stack removal cleanup (#1162): the agent deletes ONLY what Dockhand
 			// explicitly lists. The list is the local staging dir contents — exactly
@@ -2895,17 +2986,31 @@ export async function removeStack(
 		// "Remove stack" (deleteFiles=false) leaves the compose/.env/data on disk; "Remove
 		// stack + files" (default) deletes them.
 		if (stackDir && deleteFiles) {
-			try {
-				rmSync(stackDir, { recursive: true, force: true });
-			} catch (err: any) {
-				console.error(`Failed to delete stack directory: ${err.message}`);
-				cleanupErrors.push(`directory: ${err.message}`);
+			// The local `docker compose down` we just ran had this dir as its cwd
+			// (executeComposeCommand spawns with cwd: composeFileDir), so on a direct
+			// env the dir can be transiently busy the instant the process exits -
+			// rmSync then leaves it (EBUSY/ENOTEMPTY) or existsSync is still true.
+			// Retry a few times with a short backoff so the just-exited compose child
+			// releases its cwd/fds. Hawser envs run compose on the agent, so they
+			// never hit this.
+			let lastErr = '';
+			for (let attempt = 0; attempt < 5; attempt++) {
+				try {
+					rmSync(stackDir, { recursive: true, force: true });
+				} catch (err: any) {
+					lastErr = err.message;
+				}
+				if (!existsSync(stackDir)) { lastErr = ''; break; }
+				lastErr = lastErr || 'Directory still exists after deletion attempt';
+				await new Promise((r) => setTimeout(r, 200));
 			}
-			// Verify deletion succeeded (rmSync with force:true may not throw on some failures)
-			if (existsSync(stackDir)) {
-				const verifyErr = 'Directory still exists after deletion attempt';
-				console.error(`Failed to delete stack directory: ${verifyErr}`);
-				cleanupErrors.push(`directory: ${verifyErr}`);
+			if (lastErr) {
+				console.error(`Failed to delete stack directory: ${lastErr}`);
+				// A residual dir under Dockhand's own stacks tree blocks nothing when the
+				// caller forced removal: the containers are gone and a same-name recreate
+				// re-clones over it (syncGitStack rmSyncs the path first). So it is a
+				// warning under force, and only a hard failure (blocks recreate) otherwise.
+				cleanupErrors.push(`${force ? 'directory-warning' : 'directory'}: ${lastErr}`);
 			}
 		}
 
@@ -3112,11 +3217,40 @@ export async function deployStack(options: DeployStackOptions): Promise<StackOpe
 			// and would be destroyed, causing data loss (#831).
 			console.log(`${logPrefix} Copying source directory to stack directory...`);
 			mkdirSync(workingDir, { recursive: true });
+			// Links are copied verbatim so a relative one stays relative: resolving it
+			// writes an absolute path into the clone, and the next deploy then finds the
+			// destination link resolving onto its own source and cp refuses the copy.
+			// judgeSymlink names the three shapes that cannot be carried; each is dropped
+			// and reported, since a file the stack does not get should not be a mystery.
+			const refused: string[] = [];
 			cpSync(sourceDir, workingDir, {
 				recursive: true,
 				force: true,
-				filter: (src) => !src.includes('/.git/') && !src.endsWith('/.git')
+				verbatimSymlinks: true,
+				filter: (src) => {
+					if (src.includes('/.git/') || src.endsWith('/.git')) return false;
+					let target: string;
+					try {
+						if (!lstatSync(src).isSymbolicLink()) return true;
+						target = readlinkSync(src);
+					} catch {
+						// Unreadable means it is not a link we can judge; let cp decide.
+						return true;
+					}
+					const verdict = judgeSymlink(src, target, sourceDir, existsSync);
+					if (verdict.kind === 'refuse') {
+						refused.push(`  ${relative(sourceDir, src)} -> ${target} (skipped: ${verdict.reason})`);
+						return false;
+					}
+					return true;
+				}
 			});
+			if (refused.length > 0) {
+				console.log(`${logPrefix} Skipped ${refused.length} symlink(s):`);
+				for (const line of refused) console.log(`${logPrefix} ${line}`);
+				onLine?.(`Skipped ${refused.length} symlink(s):`);
+				for (const line of refused) onLine?.(line);
+			}
 			console.log(`${logPrefix} Copied ${sourceDir} -> ${workingDir}`);
 
 			// Git deletion sync (#966): remove files that were deleted from the
@@ -3777,6 +3911,50 @@ async function resolveProviderEnvVars(
 }
 
 /**
+ * Resolve the bound provider's secrets over a raw (nonSecretVars, secretVars) pair.
+ * Returns the merged vars. bestEffort=true (lifecycle paths that must not be blocked by
+ * an unreachable provider: stop/restart/down/remove) logs and returns the inputs
+ * unchanged if the provider is down, so the op falls back to the on-disk/DB vars. The
+ * single source of truth both the compose-result helper and removeStack use, so envPath
+ * derivation cannot drift between them.
+ */
+async function resolveProviderVarsBestEffort(
+	stackName: string,
+	envId: number | null | undefined,
+	nonSecretVars: Record<string, string>,
+	secretVars: Record<string, string>,
+	envPath: string | null | undefined,
+	logPrefix: string,
+	bestEffort = false
+): Promise<{ nonSecretVars: Record<string, string>; secretVars: Record<string, string> }> {
+	let envFileContent: string | undefined;
+	if (envPath && existsSync(envPath)) {
+		try {
+			envFileContent = readFileSync(envPath, 'utf-8');
+		} catch (err) {
+			console.warn(`${logPrefix} Failed to read .env at ${envPath}:`, err);
+		}
+	}
+
+	try {
+		const source = await getStackSource(stackName, envId ?? undefined);
+		const resolved = await resolveProviderEnvVars(
+			{ ...nonSecretVars },
+			{ ...secretVars },
+			logPrefix,
+			source?.secretProviderId,
+			envFileContent,
+			{ stackName, envId: envId ?? undefined }
+		);
+		return { nonSecretVars: resolved.dbNonSecretVars, secretVars: resolved.secretVars };
+	} catch (err) {
+		if (!bestEffort) throw err;
+		console.warn(`${logPrefix} Provider secret resolution failed, proceeding without provider secrets:`, err);
+		return { nonSecretVars, secretVars };
+	}
+}
+
+/**
  * Resolve the bound provider's secrets for a compose result produced by
  * requireComposeFile(). Mutates result.secretVars / result.nonSecretVars in
  * place so callers can pass the result through to executeComposeCommand
@@ -3786,30 +3964,19 @@ async function applyProviderSecretsToComposeResult(
 	result: RequireComposeResult,
 	stackName: string,
 	envId: number | null | undefined,
-	logPrefix: string
+	logPrefix: string,
+	// Lifecycle paths that must not be blocked by an unreachable provider (stop/restart/
+	// down/remove) pass bestEffort: a resolve error is logged and the compose command
+	// proceeds with whatever vars are on disk/DB. Deploy paths (start/up) keep the throw.
+	bestEffort = false
 ): Promise<void> {
 	if (!result.success || !result.secretVars || !result.nonSecretVars) return;
 
-	let envFileContent: string | undefined;
-	if (result.envPath && existsSync(result.envPath)) {
-		try {
-			envFileContent = readFileSync(result.envPath, 'utf-8');
-		} catch (err) {
-			console.warn(`${logPrefix} Failed to read .env at ${result.envPath}:`, err);
-		}
-	}
-
-	const source = await getStackSource(stackName, envId ?? undefined);
-	const { dbNonSecretVars, secretVars } = await resolveProviderEnvVars(
-		{ ...result.nonSecretVars },
-		{ ...result.secretVars },
-		logPrefix,
-		source?.secretProviderId,
-		envFileContent,
-		{ stackName, envId: envId ?? undefined }
+	const resolved = await resolveProviderVarsBestEffort(
+		stackName, envId, result.nonSecretVars, result.secretVars, result.envPath, logPrefix, bestEffort
 	);
-	result.nonSecretVars = dbNonSecretVars;
-	result.secretVars = secretVars;
+	result.nonSecretVars = resolved.nonSecretVars;
+	result.secretVars = resolved.secretVars;
 }
 
 // =============================================================================

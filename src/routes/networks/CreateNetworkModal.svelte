@@ -1,33 +1,35 @@
 <script lang="ts" module>
+	import { m } from '$lib/paraglide/messages.js';
+
 	// Static data moved outside component to prevent recreation on each mount
 	const NETWORK_DRIVERS = [
-		{ value: 'bridge', label: 'Bridge', description: 'Default network driver' },
-		{ value: 'host', label: 'Host', description: 'Use host networking directly' },
-		{ value: 'overlay', label: 'Overlay', description: 'Swarm multi-host networking' },
-		{ value: 'macvlan', label: 'Macvlan', description: 'Assign MAC address to containers' },
-		{ value: 'ipvlan', label: 'IPvlan', description: 'IPvlan L2/L3 networking' },
-		{ value: 'none', label: 'None', description: 'Disable networking' }
+		{ value: 'bridge', label: 'Bridge', description: m.networks_create_driver_bridge_desc },
+		{ value: 'host', label: 'Host', description: m.networks_create_driver_host_desc },
+		{ value: 'overlay', label: 'Overlay', description: m.networks_create_driver_overlay_desc },
+		{ value: 'macvlan', label: 'Macvlan', description: m.networks_create_driver_macvlan_desc },
+		{ value: 'ipvlan', label: 'IPvlan', description: m.networks_create_driver_ipvlan_desc },
+		{ value: 'none', label: 'None', description: m.networks_create_driver_none_desc }
 	] as const;
 
-	const COMMON_DRIVER_OPTIONS: Record<string, { key: string; description: string }[]> = {
+	const COMMON_DRIVER_OPTIONS: Record<string, { key: string; description: () => string }[]> = {
 		bridge: [
-			{ key: 'com.docker.network.bridge.name', description: 'Bridge device name' },
-			{ key: 'com.docker.network.bridge.enable_ip_masquerade', description: 'Enable IP masquerading (true/false)' },
-			{ key: 'com.docker.network.bridge.enable_icc', description: 'Enable inter-container communication (true/false)' },
-			{ key: 'com.docker.network.bridge.host_binding_ipv4', description: 'Host binding IPv4 address' },
-			{ key: 'com.docker.network.driver.mtu', description: 'MTU size' }
+			{ key: 'com.docker.network.bridge.name', description: m.networks_create_opt_bridge_name },
+			{ key: 'com.docker.network.bridge.enable_ip_masquerade', description: m.networks_create_opt_ip_masquerade },
+			{ key: 'com.docker.network.bridge.enable_icc', description: m.networks_create_opt_icc },
+			{ key: 'com.docker.network.bridge.host_binding_ipv4', description: m.networks_create_opt_host_binding_ipv4 },
+			{ key: 'com.docker.network.driver.mtu', description: m.networks_create_opt_mtu }
 		],
 		macvlan: [
-			{ key: 'parent', description: 'Parent interface (e.g., eth0)' },
-			{ key: 'macvlan_mode', description: 'Mode: bridge, private, vepa, passthru' }
+			{ key: 'parent', description: m.networks_create_opt_parent },
+			{ key: 'macvlan_mode', description: m.networks_create_opt_macvlan_mode }
 		],
 		ipvlan: [
-			{ key: 'parent', description: 'Parent interface (e.g., eth0)' },
-			{ key: 'ipvlan_mode', description: 'Mode: l2, l3, l3s' },
-			{ key: 'ipvlan_flag', description: 'Flag: bridge, private, vepa' }
+			{ key: 'parent', description: m.networks_create_opt_parent },
+			{ key: 'ipvlan_mode', description: m.networks_create_opt_ipvlan_mode },
+			{ key: 'ipvlan_flag', description: m.networks_create_opt_ipvlan_flag }
 		],
 		overlay: [
-			{ key: 'encrypted', description: 'Enable encryption (true/false)' }
+			{ key: 'encrypted', description: m.networks_create_opt_encrypted }
 		]
 	};
 
@@ -125,18 +127,18 @@
 		let hasErrors = false;
 
 		if (!name.trim()) {
-			errors.name = 'Network name is required';
+			errors.name = m.networks_create_error_name_required();
 			hasErrors = true;
 		}
 
 		// Validation for macvlan/ipvlan
 		if (needsParentConfig) {
 			if (!parentInterface.trim()) {
-				errors.parentInterface = `Parent interface is required for ${driver} networks`;
+				errors.parentInterface = m.networks_create_error_parent_required({ driver });
 				hasErrors = true;
 			}
 			if (!subnet.trim()) {
-				errors.subnet = `Subnet is required for ${driver} networks`;
+				errors.subnet = m.networks_create_error_subnet_required({ driver });
 				hasErrors = true;
 			}
 		}
@@ -232,14 +234,14 @@
 			const data = await response.json();
 
 			if (!response.ok) {
-				throw new Error(data.details || data.error || 'Failed to create network');
+				throw new Error(data.details || data.error || m.networks_create_error_failed());
 			}
 
 			resetForm();
 			open = false;
 			onSuccess?.();
 		} catch (err) {
-			error = err instanceof Error ? err.message : 'Failed to create network';
+			error = err instanceof Error ? err.message : m.networks_create_error_failed();
 		} finally {
 			creating = false;
 		}
@@ -256,24 +258,24 @@
 		<Dialog.Header>
 			<Dialog.Title class="flex items-center gap-2">
 				<Network class="w-5 h-5" />
-				Create network
+				{m.networks_create_title()}
 			</Dialog.Title>
-			<Dialog.Description>Configure a new Docker network with custom settings.</Dialog.Description>
+			<Dialog.Description>{m.networks_create_description()}</Dialog.Description>
 		</Dialog.Header>
 
 		<Tabs.Root value="basic" class="mt-4">
 			<Tabs.List class="grid w-full grid-cols-4">
 				<Tabs.Trigger value="basic" class="flex items-center gap-1.5 text-xs">
-					<Network class="w-3.5 h-3.5" />Basic
+					<Network class="w-3.5 h-3.5" />{m.networks_create_tab_basic()}
 				</Tabs.Trigger>
 				<Tabs.Trigger value="ipam" class="flex items-center gap-1.5 text-xs">
 					<Settings class="w-3.5 h-3.5" />IPAM
 				</Tabs.Trigger>
 				<Tabs.Trigger value="options" class="flex items-center gap-1.5 text-xs">
-					<Settings class="w-3.5 h-3.5" />Options
+					<Settings class="w-3.5 h-3.5" />{m.networks_create_tab_options()}
 				</Tabs.Trigger>
 				<Tabs.Trigger value="labels" class="flex items-center gap-1.5 text-xs">
-					<Tag class="w-3.5 h-3.5" />Labels
+					<Tag class="w-3.5 h-3.5" />{m.networks_create_tab_labels()}
 				</Tabs.Trigger>
 			</Tabs.List>
 
@@ -281,7 +283,7 @@
 				<!-- Basic Tab -->
 				<Tabs.Content value="basic" class="space-y-4 h-full overflow-y-auto">
 				<div class="space-y-2">
-					<Label for="name">Network name *</Label>
+					<Label for="name">{m.networks_create_name_label()}</Label>
 					<Input
 						id="name"
 						bind:value={name}
@@ -295,7 +297,7 @@
 				</div>
 
 				<div class="space-y-2">
-					<Label for="driver">Driver</Label>
+					<Label for="driver">{m.networks_create_driver()}</Label>
 					<Select.Root type="single" bind:value={driver}>
 						<Select.Trigger class="w-full h-9">
 							<span class="flex items-center">
@@ -312,7 +314,7 @@
 								{:else}
 									<CircleOff class="w-4 h-4 mr-2 text-muted-foreground" />
 								{/if}
-								{NETWORK_DRIVERS.find(d => d.value === driver)?.label || 'Select driver'}
+								{NETWORK_DRIVERS.find(d => d.value === driver)?.label || m.networks_create_select_driver()}
 							</span>
 						</Select.Trigger>
 						<Select.Content>
@@ -335,7 +337,7 @@
 											{/if}
 											<div class="flex flex-col">
 												<span>{d.label}</span>
-												<span class="text-xs text-muted-foreground">{d.description}</span>
+												<span class="text-xs text-muted-foreground">{d.description()}</span>
 											</div>
 										</div>
 									{/snippet}
@@ -348,11 +350,11 @@
 				{#if needsParentConfig}
 					<div class="bg-amber-500/10 border border-amber-500/20 rounded-md p-3 space-y-3">
 						<p class="text-xs font-medium text-amber-600 dark:text-amber-400">
-							{driver === 'macvlan' ? 'Macvlan' : 'IPvlan'} configuration (required)
+							{m.networks_create_parent_config_title({ driver: driver === 'macvlan' ? 'Macvlan' : 'IPvlan' })}
 						</p>
 						<div class="grid grid-cols-2 gap-3">
 							<div class="space-y-1">
-								<Label for="parentInterface" class="text-xs">Parent interface *</Label>
+								<Label for="parentInterface" class="text-xs">{m.networks_create_parent_interface_label()}</Label>
 								<Input
 									id="parentInterface"
 									bind:value={parentInterface}
@@ -366,15 +368,15 @@
 							</div>
 							{#if driver === 'macvlan'}
 								<div class="space-y-1">
-									<Label for="macvlanMode" class="text-xs">Mode</Label>
+									<Label for="macvlanMode" class="text-xs">{m.networks_create_mode()}</Label>
 									<Select.Root type="single" bind:value={macvlanMode}>
 										<Select.Trigger class="h-8 text-xs">
 											<Layers class="w-3 h-3 mr-1.5 text-muted-foreground" />
-											<span>{macvlanMode === 'bridge' ? 'Bridge (default)' : macvlanMode === 'private' ? 'Private' : macvlanMode === 'vepa' ? 'VEPA' : 'Passthru'}</span>
+											<span>{macvlanMode === 'bridge' ? m.networks_create_mode_default({ mode: 'Bridge' }) : macvlanMode === 'private' ? 'Private' : macvlanMode === 'vepa' ? 'VEPA' : 'Passthru'}</span>
 										</Select.Trigger>
 										<Select.Content>
-											<Select.Item value="bridge" label="Bridge (default)">
-												<Layers class="w-3 h-3 mr-1.5 text-muted-foreground" />Bridge (default)
+											<Select.Item value="bridge" label={m.networks_create_mode_default({ mode: 'Bridge' })}>
+												<Layers class="w-3 h-3 mr-1.5 text-muted-foreground" />{m.networks_create_mode_default({ mode: 'Bridge' })}
 											</Select.Item>
 											<Select.Item value="private" label="Private">
 												<Layers class="w-3 h-3 mr-1.5 text-muted-foreground" />Private
@@ -390,15 +392,15 @@
 								</div>
 							{:else}
 								<div class="space-y-1">
-									<Label for="ipvlanMode" class="text-xs">Mode</Label>
+									<Label for="ipvlanMode" class="text-xs">{m.networks_create_mode()}</Label>
 									<Select.Root type="single" bind:value={ipvlanMode}>
 										<Select.Trigger class="h-8 text-xs">
 											<Share2 class="w-3 h-3 mr-1.5 text-muted-foreground" />
-											<span>{ipvlanMode === 'l2' ? 'L2 (default)' : ipvlanMode === 'l3' ? 'L3' : 'L3S'}</span>
+											<span>{ipvlanMode === 'l2' ? m.networks_create_mode_default({ mode: 'L2' }) : ipvlanMode === 'l3' ? 'L3' : 'L3S'}</span>
 										</Select.Trigger>
 										<Select.Content>
-											<Select.Item value="l2" label="L2 (default)">
-												<Share2 class="w-3 h-3 mr-1.5 text-muted-foreground" />L2 (default)
+											<Select.Item value="l2" label={m.networks_create_mode_default({ mode: 'L2' })}>
+												<Share2 class="w-3 h-3 mr-1.5 text-muted-foreground" />{m.networks_create_mode_default({ mode: 'L2' })}
 											</Select.Item>
 											<Select.Item value="l3" label="L3">
 												<Share2 class="w-3 h-3 mr-1.5 text-muted-foreground" />L3
@@ -413,7 +415,7 @@
 						</div>
 						<div class="grid grid-cols-2 gap-3">
 							<div class="space-y-1">
-								<Label for="subnetQuick" class="text-xs">Subnet *</Label>
+								<Label for="subnetQuick" class="text-xs">{m.networks_create_subnet_required_label()}</Label>
 								<Input
 									id="subnetQuick"
 									bind:value={subnet}
@@ -426,7 +428,7 @@
 								{/if}
 							</div>
 							<div class="space-y-1">
-								<Label for="gatewayQuick" class="text-xs">Gateway</Label>
+								<Label for="gatewayQuick" class="text-xs">{m.networks_create_gateway()}</Label>
 								<Input id="gatewayQuick" bind:value={gateway} placeholder="192.168.1.1" class="h-8" />
 							</div>
 						</div>
@@ -437,24 +439,24 @@
 					<div class="flex items-center gap-3">
 						<TogglePill bind:checked={internal} />
 						<div>
-							<span class="text-sm font-normal">Internal network</span>
-							<span class="text-muted-foreground text-xs block">Restrict external access to this network</span>
+							<span class="text-sm font-normal">{m.networks_create_internal()}</span>
+							<span class="text-muted-foreground text-xs block">{m.networks_create_internal_hint()}</span>
 						</div>
 					</div>
 
 					<div class="flex items-center gap-3">
 						<TogglePill bind:checked={attachable} />
 						<div>
-							<span class="text-sm font-normal">Attachable</span>
-							<span class="text-muted-foreground text-xs block">Allow manual container attachment (overlay networks)</span>
+							<span class="text-sm font-normal">{m.networks_create_attachable()}</span>
+							<span class="text-muted-foreground text-xs block">{m.networks_create_attachable_hint()}</span>
 						</div>
 					</div>
 
 					<div class="flex items-center gap-3">
 						<TogglePill bind:checked={enableIPv6} />
 						<div>
-							<span class="text-sm font-normal">Enable IPv6</span>
-							<span class="text-muted-foreground text-xs block">Enable IPv6 networking</span>
+							<span class="text-sm font-normal">{m.networks_create_ipv6()}</span>
+							<span class="text-muted-foreground text-xs block">{m.networks_create_ipv6_hint()}</span>
 						</div>
 					</div>
 				</div>
@@ -463,41 +465,41 @@
 				<!-- IPAM Tab -->
 				<Tabs.Content value="ipam" class="space-y-4 h-full overflow-y-auto">
 				<div class="space-y-2">
-					<Label for="ipamDriver">IPAM driver</Label>
+					<Label for="ipamDriver">{m.networks_create_ipam_driver()}</Label>
 					<Input id="ipamDriver" bind:value={ipamDriver} placeholder="default" />
-					<p class="text-xs text-muted-foreground">IP Address Management driver (default: default)</p>
+					<p class="text-xs text-muted-foreground">{m.networks_create_ipam_driver_hint()}</p>
 				</div>
 
 				<div class="grid grid-cols-2 gap-4">
 					<div class="space-y-2">
-						<Label for="subnet">Subnet</Label>
+						<Label for="subnet">{m.networks_create_subnet()}</Label>
 						<Input id="subnet" bind:value={subnet} placeholder="172.20.0.0/16" />
 					</div>
 					<div class="space-y-2">
-						<Label for="gateway">Gateway</Label>
+						<Label for="gateway">{m.networks_create_gateway()}</Label>
 						<Input id="gateway" bind:value={gateway} placeholder="172.20.0.1" />
 					</div>
 				</div>
 
 				<div class="space-y-2">
-					<Label for="ipRange">IP range</Label>
+					<Label for="ipRange">{m.networks_create_ip_range()}</Label>
 					<Input id="ipRange" bind:value={ipRange} placeholder="172.20.10.0/24" />
-					<p class="text-xs text-muted-foreground">Allocate container IPs from a sub-range of the subnet</p>
+					<p class="text-xs text-muted-foreground">{m.networks_create_ip_range_hint()}</p>
 				</div>
 
 				<!-- Auxiliary Addresses -->
 				<div class="space-y-2">
 					<div class="flex items-center justify-between">
-						<Label>Auxiliary addresses</Label>
+						<Label>{m.networks_create_aux_addresses()}</Label>
 						<Button variant="outline" size="sm" onclick={() => auxAddresses = addItem(auxAddresses)}>
-							<Plus class="w-3 h-3" />Add
+							<Plus class="w-3 h-3" />{m.networks_create_add()}
 						</Button>
 					</div>
-					<p class="text-xs text-muted-foreground">Reserve IP addresses for network devices (e.g., host=192.168.1.1)</p>
+					<p class="text-xs text-muted-foreground">{m.networks_create_aux_addresses_hint()}</p>
 					{#each auxAddresses as aux, i}
 						<div class="flex gap-2 items-center">
 							<div class="flex-1 relative">
-								<span class="absolute -top-2 left-2 text-2xs text-muted-foreground bg-background px-1">Hostname</span>
+								<span class="absolute -top-2 left-2 text-2xs text-muted-foreground bg-background px-1">{m.networks_create_hostname()}</span>
 								<Input bind:value={aux.key} class="h-9" />
 							</div>
 							<div class="flex-1 relative">
@@ -514,19 +516,19 @@
 				<!-- IPAM Options -->
 				<div class="space-y-2">
 					<div class="flex items-center justify-between">
-						<Label>IPAM options</Label>
+						<Label>{m.networks_create_ipam_options()}</Label>
 						<Button variant="outline" size="sm" onclick={() => ipamOptions = addItem(ipamOptions)}>
-							<Plus class="w-3 h-3" />Add
+							<Plus class="w-3 h-3" />{m.networks_create_add()}
 						</Button>
 					</div>
 					{#each ipamOptions as opt, i}
 						<div class="flex gap-2 items-center">
 							<div class="flex-1 relative">
-								<span class="absolute -top-2 left-2 text-2xs text-muted-foreground bg-background px-1">Key</span>
+								<span class="absolute -top-2 left-2 text-2xs text-muted-foreground bg-background px-1">{m.networks_create_key()}</span>
 								<Input bind:value={opt.key} class="h-9" />
 							</div>
 							<div class="flex-1 relative">
-								<span class="absolute -top-2 left-2 text-2xs text-muted-foreground bg-background px-1">Value</span>
+								<span class="absolute -top-2 left-2 text-2xs text-muted-foreground bg-background px-1">{m.networks_create_value()}</span>
 								<Input bind:value={opt.value} class="h-9" />
 							</div>
 							<Button variant="ghost" size="sm" onclick={() => ipamOptions = removeItem(ipamOptions, i)}>
@@ -541,18 +543,18 @@
 				<Tabs.Content value="options" class="space-y-4 h-full overflow-y-auto">
 				<div class="space-y-2">
 					<div class="flex items-center justify-between">
-						<Label>Driver options</Label>
+						<Label>{m.networks_create_driver_options()}</Label>
 						<Button variant="outline" size="sm" onclick={() => driverOptions = addItem(driverOptions)}>
-							<Plus class="w-3 h-3" />Add
+							<Plus class="w-3 h-3" />{m.networks_create_add()}
 						</Button>
 					</div>
-					<p class="text-xs text-muted-foreground">Set driver-specific options (-o key=value)</p>
+					<p class="text-xs text-muted-foreground">{m.networks_create_driver_options_hint()}</p>
 
 					{#if COMMON_DRIVER_OPTIONS[driver]?.length > 0}
 						<div class="bg-muted/50 rounded-md p-3 text-xs space-y-1">
-							<p class="font-medium">Common options for {driver} driver:</p>
+							<p class="font-medium">{m.networks_create_common_options({ driver })}</p>
 							{#each COMMON_DRIVER_OPTIONS[driver] as opt}
-								<p><code class="bg-muted px-1 rounded">{opt.key}</code> - {opt.description}</p>
+								<p><code class="bg-muted px-1 rounded">{opt.key}</code> - {opt.description()}</p>
 							{/each}
 						</div>
 					{/if}
@@ -560,11 +562,11 @@
 					{#each driverOptions as opt, i}
 						<div class="flex gap-2 items-center">
 							<div class="flex-1 relative">
-								<span class="absolute -top-2 left-2 text-2xs text-muted-foreground bg-background px-1">Key</span>
+								<span class="absolute -top-2 left-2 text-2xs text-muted-foreground bg-background px-1">{m.networks_create_key()}</span>
 								<Input bind:value={opt.key} class="h-9" />
 							</div>
 							<div class="flex-1 relative">
-								<span class="absolute -top-2 left-2 text-2xs text-muted-foreground bg-background px-1">Value</span>
+								<span class="absolute -top-2 left-2 text-2xs text-muted-foreground bg-background px-1">{m.networks_create_value()}</span>
 								<Input bind:value={opt.value} class="h-9" />
 							</div>
 							<Button variant="ghost" size="sm" onclick={() => driverOptions = removeItem(driverOptions, i)}>
@@ -579,21 +581,21 @@
 				<Tabs.Content value="labels" class="space-y-4 h-full overflow-y-auto">
 				<div class="space-y-2">
 					<div class="flex items-center justify-between">
-						<Label>Labels</Label>
+						<Label>{m.networks_create_labels()}</Label>
 						<Button variant="outline" size="sm" onclick={() => labels = addItem(labels)}>
-							<Plus class="w-3 h-3" />Add
+							<Plus class="w-3 h-3" />{m.networks_create_add()}
 						</Button>
 					</div>
-					<p class="text-xs text-muted-foreground">Set metadata labels on the network</p>
+					<p class="text-xs text-muted-foreground">{m.networks_create_labels_hint()}</p>
 
 					{#each labels as label, i}
 						<div class="flex gap-2 items-center">
 							<div class="flex-1 relative">
-								<span class="absolute -top-2 left-2 text-2xs text-muted-foreground bg-background px-1">Key</span>
+								<span class="absolute -top-2 left-2 text-2xs text-muted-foreground bg-background px-1">{m.networks_create_key()}</span>
 								<Input bind:value={label.key} class="h-9" />
 							</div>
 							<div class="flex-1 relative">
-								<span class="absolute -top-2 left-2 text-2xs text-muted-foreground bg-background px-1">Value</span>
+								<span class="absolute -top-2 left-2 text-2xs text-muted-foreground bg-background px-1">{m.networks_create_value()}</span>
 								<Input bind:value={label.value} class="h-9" />
 							</div>
 							<Button variant="ghost" size="sm" onclick={() => labels = removeItem(labels, i)}>
@@ -602,7 +604,7 @@
 						</div>
 					{/each}
 					{#if labels.length === 0}
-						<p class="text-xs text-muted-foreground italic">No labels configured</p>
+						<p class="text-xs text-muted-foreground italic">{m.networks_create_no_labels()}</p>
 					{/if}
 				</div>
 				</Tabs.Content>
@@ -619,14 +621,14 @@
 		{#if errors.name || errors.parentInterface || errors.subnet}
 			<Alert.Root variant="destructive" class="mt-4">
 				<TriangleAlert class="h-4 w-4" />
-				<Alert.Description>Please fix the validation errors above</Alert.Description>
+				<Alert.Description>{m.networks_create_fix_errors()}</Alert.Description>
 			</Alert.Root>
 		{/if}
 
 		<Dialog.Footer class="mt-6">
-			<Button variant="outline" onclick={handleClose} disabled={creating}>Cancel</Button>
+			<Button variant="outline" onclick={handleClose} disabled={creating}>{m.networks_create_cancel()}</Button>
 			<Button onclick={handleSubmit} disabled={creating}>
-				{#if creating}Creating...{:else}Create network{/if}
+				{#if creating}{m.networks_create_creating()}{:else}{m.networks_create_submit()}{/if}
 			</Button>
 		</Dialog.Footer>
 	</Dialog.Content>

@@ -21,6 +21,31 @@ const MANIFEST_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 // transiently-failed fetch, is retried instead of stuck on the fallback glyph forever.
 const NEG_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 1 day
 
+// selfh.st serves each icon in up to three formats. About 16% of the collection has no
+// SVG (e.g. `unpackerr`), so we fall back to raster. SVG first (scalable, sanitizable),
+// then WebP (smaller than PNG at equal quality), then PNG as the last resort. All render
+// via <img>, so a raster icon is as safe as the sanitized SVG.
+const ICON_FORMATS = [
+	{ ext: 'svg', dir: 'svg', contentType: 'image/svg+xml' },
+	{ ext: 'webp', dir: 'webp', contentType: 'image/webp' },
+	{ ext: 'png', dir: 'png', contentType: 'image/png' }
+] as const;
+type IconFormat = (typeof ICON_FORMATS)[number];
+
+/** Cached icon bytes plus the media type to serve them with. */
+export interface SelfhstIcon {
+	buffer: Buffer;
+	contentType: string;
+}
+
+/** True when the buffer's magic bytes match the format (rejects mislabelled/garbage bytes). */
+export function magicOk(ext: 'svg' | 'webp' | 'png', buf: Buffer): boolean {
+	if (ext === 'svg') return buf[0] === 0x3c; // '<'
+	if (ext === 'png') return buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
+	// webp: "RIFF"...."WEBP"
+	return buf.length >= 12 && buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP';
+}
+
 /** Write bytes atomically (temp + rename) so a crash mid-write never leaves a partial file. */
 function atomicWrite(path: string, data: Buffer): void {
 	const tmp = `${path}.${process.pid}.tmp`;
@@ -50,85 +75,98 @@ function cacheDir(): string {
 	return dir;
 }
 
-/** Absolute cache path for a ref's svg. Throws on an invalid ref (never builds a path from junk). */
-export function selfhstCachePath(ref: string): string {
+/**
+ * Absolute cache path for a ref's icon in a given format (default svg). Throws on an
+ * invalid ref (never builds a path from junk). The ext is from a fixed internal set.
+ */
+export function selfhstCachePath(ref: string, ext: IconFormat['ext'] = 'svg'): string {
 	if (!isValidSelfhstRef(ref)) throw new Error('Invalid selfh.st icon reference');
-	return join(cacheDir(), `${ref}.svg`);
+	return join(cacheDir(), `${ref}.${ext}`);
 }
 
 async function fetchWithTimeout(url: string): Promise<Response> {
 	const ac = new AbortController();
 	const t = setTimeout(() => ac.abort(), FETCH_TIMEOUT_MS);
 	try {
-		return await fetch(url, { signal: ac.signal, headers: { Accept: 'image/svg+xml,*/*' } });
+		return await fetch(url, { signal: ac.signal, headers: { Accept: 'image/*,*/*' } });
 	} finally {
 		clearTimeout(t);
 	}
 }
 
 /**
- * Return the cached SVG bytes for a ref, fetching+caching from the CDN on a miss.
- * Returns null when the ref is invalid, not found upstream, or the fetch fails -
- * the caller then serves a 404 and the UI falls back to a generic icon. Never throws.
+ * A valid cached file for this format, or null. A NON-EMPTY file that fails the magic
+ * check is corrupt and dropped so it refetches. A 0-byte file is left alone: for the svg
+ * format that is the negative-cache tombstone, honoured by the dedicated check in the
+ * caller (deleting it here would defeat the negative cache).
  */
-export async function getSelfhstIcon(ref: string): Promise<Buffer | null> {
-	if (!isValidSelfhstRef(ref)) return null;
-	const path = selfhstCachePath(ref);
-	if (existsSync(path)) {
-		try {
-			const cached = readFileSync(path);
-			// A zero-byte file is a negative-cache tombstone; honour it until it expires,
-			// then fall through to refetch (a ref added upstream later, or a transient
-			// failure, must not be stuck on the fallback forever).
-			if (cached.length === 0) {
-				if (Date.now() - statSync(path).mtimeMs < NEG_CACHE_TTL_MS) return null;
-			} else if (cached[0] === 0x3c) {
-				return cached; // still looks like an SVG - serve it
-			}
-			// zero-byte-but-stale, or a nonzero-but-corrupt file (e.g. a truncated write):
-			// drop it and refetch.
-			try {
-				unlinkSync(path);
-			} catch {
-				/* best-effort */
-			}
-		} catch {
-			// fall through to refetch
-		}
-	}
-	const tombstone = () => {
-		try {
-			atomicWrite(path, Buffer.alloc(0));
-		} catch {
-			/* best-effort */
-		}
-	};
+function readCachedFormat(ref: string, fmt: IconFormat): Buffer | null {
+	const path = selfhstCachePath(ref, fmt.ext);
+	if (!existsSync(path)) return null;
 	try {
-		const res = await fetchWithTimeout(`${CDN_BASE}/svg/${ref}.svg`);
-		if (!res.ok) {
-			// Remember the miss (with a TTL) so a matched-but-missing ref isn't re-fetched
-			// every render - covers 404 and transient 5xx/timeouts alike.
-			tombstone();
-			return null;
-		}
-		const buf = Buffer.from(await res.arrayBuffer());
-		if (buf.length === 0 || buf.length > MAX_ICON_BYTES) return null;
-		// Sanity check: SVG starts with '<' (xml/svg), never binary junk.
-		if (buf[0] !== 0x3c) return null;
-		// Strip active content before caching. The icons come from a third-party
-		// community repo; an SVG is an active-content format, so a poisoned/scripted
-		// logo could carry <script>/on*/<foreignObject>. We render only via <img>
-		// (script-inert) AND serve with a locked-down CSP, but sanitizing at rest is
-		// defense in depth so a cached file can never be a stored-XSS payload.
-		const clean = Buffer.from(sanitizeSvg(buf.toString('utf-8')), 'utf-8');
-		atomicWrite(path, clean);
-		return clean;
+		const cached = readFileSync(path);
+		if (cached.length === 0) return null; // tombstone / empty - leave it in place
+		if (magicOk(fmt.ext, cached)) return cached;
+		try { unlinkSync(path); } catch { /* best-effort */ }
 	} catch {
-		// Network error / timeout: tombstone with a TTL so we back off instead of
-		// re-running an 8s-timeout fetch on every remount of the row.
-		tombstone();
-		return null;
+		/* fall through */
 	}
+	return null;
+}
+
+/**
+ * Return the cached icon bytes + content type for a ref, fetching+caching from the CDN
+ * on a miss. Tries SVG, then WebP, then PNG (about 16% of the collection has no SVG).
+ * Returns null when the ref is invalid, exists in no format upstream, or every fetch
+ * fails - the caller then serves a placeholder. Never throws.
+ */
+export async function getSelfhstIcon(ref: string): Promise<SelfhstIcon | null> {
+	if (!isValidSelfhstRef(ref)) return null;
+
+	// Serve from cache if any format is already stored.
+	for (const fmt of ICON_FORMATS) {
+		const cached = readCachedFormat(ref, fmt);
+		if (cached) return { buffer: cached, contentType: fmt.contentType };
+	}
+
+	// Negative-cache tombstone (keyed on the .svg path) means "no format exists"; honour
+	// it until it expires, then fall through to refetch every format.
+	const tombPath = selfhstCachePath(ref, 'svg');
+	if (existsSync(tombPath)) {
+		try {
+			const st = statSync(tombPath);
+			if (st.size === 0 && Date.now() - st.mtimeMs < NEG_CACHE_TTL_MS) return null;
+		} catch { /* fall through */ }
+	}
+
+	// Try each format in order. A 404 for one format just moves to the next; only when
+	// ALL formats miss (or error) do we tombstone below.
+	for (const fmt of ICON_FORMATS) {
+		try {
+			const res = await fetchWithTimeout(`${CDN_BASE}/${fmt.dir}/${ref}.${fmt.ext}`);
+			if (!res.ok) continue; // not in this format - try the next
+			const buf = Buffer.from(await res.arrayBuffer());
+			if (buf.length === 0 || buf.length > MAX_ICON_BYTES || !magicOk(fmt.ext, buf)) continue;
+			if (fmt.ext === 'svg') {
+				// Strip active content before caching. An SVG from a third-party repo could
+				// carry <script>/on*/<foreignObject>; we render via <img> and a locked-down
+				// CSP, but sanitizing at rest is defense in depth against a stored payload.
+				const clean = Buffer.from(sanitizeSvg(buf.toString('utf-8')), 'utf-8');
+				atomicWrite(selfhstCachePath(ref, 'svg'), clean);
+				return { buffer: clean, contentType: fmt.contentType };
+			}
+			// Raster formats are inert bytes; cache verbatim after the magic-byte check.
+			atomicWrite(selfhstCachePath(ref, fmt.ext), buf);
+			return { buffer: buf, contentType: fmt.contentType };
+		} catch {
+			// timeout / network for this format - try the next, then tombstone if all fail
+		}
+	}
+
+	// Every format missed. Tombstone (with a TTL) so a matched-but-missing ref isn't
+	// re-fetched on every render; a transient network error backs off the same way.
+	try { atomicWrite(tombPath, Buffer.alloc(0)); } catch { /* best-effort */ }
+	return null;
 }
 
 /**

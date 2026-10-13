@@ -11,6 +11,7 @@
 	import { formatBytes } from '$lib/utils/format';
 	import { getRepoTypeIcon } from '$lib/utils/backup';
 	import type { Execution } from '$lib/utils/execution-tally';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		executions: Execution[];
@@ -65,7 +66,19 @@
 		}
 	}
 	function triggerLabel(trigger: string) {
-		return trigger === 'cron' ? 'Scheduled' : trigger === 'webhook' ? 'Webhook' : 'Manual';
+		return trigger === 'cron' ? m.execution_trigger_scheduled() : trigger === 'webhook' ? m.execution_trigger_webhook() : m.containers_backup_manual();
+	}
+	// Tooltip text for the status badge; unknown statuses are shown as they come.
+	function statusLabel(status: string): string {
+		switch (status) {
+			case 'success': return m.execution_status_success();
+			case 'warning': return m.execution_status_warning();
+			case 'failed':  return m.execution_status_failed();
+			case 'running': return m.execution_status_running();
+			case 'skipped': return m.execution_status_skipped();
+			case 'queued':  return m.execution_status_queued();
+			default:        return status;
+		}
 	}
 </script>
 
@@ -74,20 +87,20 @@
 {:else if executions.length === 0}
 	<div class="flex min-h-[60vh] flex-col items-center justify-center py-10 text-center">
 		<Clock class="mb-3 h-10 w-10 text-muted-foreground/40" />
-		<p class="text-sm text-muted-foreground">No backup runs yet.</p>
-		<p class="mt-1 text-xs text-muted-foreground">Run a backup — its history appears here.</p>
+		<p class="text-sm text-muted-foreground">{m.execution_empty()}</p>
+		<p class="mt-1 text-xs text-muted-foreground">{m.execution_empty_hint()}</p>
 	</div>
 {:else}
 	<div class="overflow-x-auto">
 		<table class="w-full text-xs">
 			<thead>
 				<tr class="border-b text-left text-muted-foreground">
-					<th class="py-1.5 pl-2 font-medium">Run</th>
-					<th class="py-1.5 pl-2 text-center font-medium">Trigger</th>
-					<th class="py-1.5 pl-2 font-medium">Duration</th>
-					<th class="py-1.5 pl-2 text-center font-medium">Status</th>
-					<th class="py-1.5 pl-2 font-medium">Detail</th>
-					{#if showRepo}<th class="py-1.5 pl-2 font-medium">Repo</th>{/if}
+					<th class="py-1.5 pl-2 font-medium">{m.execution_col_run()}</th>
+					<th class="py-1.5 pl-2 text-center font-medium">{m.execution_col_trigger()}</th>
+					<th class="py-1.5 pl-2 font-medium">{m.execution_col_duration()}</th>
+					<th class="py-1.5 pl-2 text-center font-medium">{m.execution_col_status()}</th>
+					<th class="py-1.5 pl-2 font-medium">{m.execution_col_detail()}</th>
+					{#if showRepo}<th class="py-1.5 pl-2 font-medium">{m.execution_col_repo()}</th>{/if}
 					<th class="py-1.5 pr-2 font-medium"></th>
 				</tr>
 			</thead>
@@ -107,7 +120,7 @@
 						</td>
 						<td class="py-1.5 pl-2 text-muted-foreground">{formatDuration(exec.duration)}</td>
 						<td class="py-1.5 pl-2 text-center">
-							<span class="inline-flex h-5 w-5 items-center justify-center rounded {badge.cls}" title={exec.status}>
+							<span class="inline-flex h-5 w-5 items-center justify-center rounded {badge.cls}" title={statusLabel(exec.status)}>
 								<BadgeIcon class="h-3 w-3 {exec.status === 'running' ? 'animate-spin' : ''}" />
 							</span>
 						</td>
@@ -115,7 +128,7 @@
 							{#if exec.errorMessage}
 								<span class="text-destructive">{cleanError(exec.errorMessage)}</span>
 							{:else if exec.status === 'success' && exec.details?.dataAdded !== undefined}
-								<span class="text-muted-foreground">{exec.details.filesNew ?? 0} new · {exec.details.filesChanged ?? 0} changed · {formatBytes(exec.details.dataAdded ?? 0)}</span>
+								<span class="text-muted-foreground">{m.execution_details_summary({ filesNew: exec.details.filesNew ?? 0, filesChanged: exec.details.filesChanged ?? 0, size: formatBytes(exec.details.dataAdded ?? 0) })}</span>
 							{:else}
 								<span class="text-muted-foreground/60">—</span>
 							{/if}
@@ -133,12 +146,12 @@
 						<td class="py-1.5 pr-2 text-right">
 							<div class="flex items-center justify-end gap-0.5">
 								{#if onViewLog}
-									<button type="button" class="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground" onclick={() => onViewLog?.(exec.id)} title="View log">
+									<button type="button" class="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground" onclick={() => onViewLog?.(exec.id)} title={m.execution_view_log()}>
 										<FileText class="h-3 w-3" />
 									</button>
 								{/if}
 								{#if isFail && exec.errorMessage}
-									<button type="button" class="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground" onclick={() => toggle(exec.id)} title={isOpen ? 'Hide error' : 'Show error'}>
+									<button type="button" class="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground" onclick={() => toggle(exec.id)} title={isOpen ? m.execution_hide_error() : m.execution_show_error()}>
 										<ChevronDown class="h-3.5 w-3.5 transition-transform {isOpen ? '' : '-rotate-90'}" />
 									</button>
 								{/if}
@@ -150,7 +163,7 @@
 							<td colspan={showRepo ? 7 : 6} class="px-2 py-2">
 								<div class="rounded-md border border-l-[3px] border-destructive/40 border-l-destructive bg-destructive/5 p-2.5">
 									<div class="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-destructive">
-										<X class="h-3 w-3" /> Backup failed
+										<X class="h-3 w-3" /> {m.containers_backup_failed()}
 									</div>
 									<pre class="whitespace-pre-wrap break-all font-mono text-[11px] text-destructive/90">{exec.errorMessage}</pre>
 								</div>

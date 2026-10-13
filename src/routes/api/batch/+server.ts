@@ -131,8 +131,9 @@ async function processWithConcurrency<T>(
  *
  * @openapi
  * summary: Run a bulk operation (start/stop/restart/pause/unpause/remove/down, depending on entity type) across many containers, images, volumes, networks, or stacks; clients that send Accept application/json get a synchronous summary, others get a jobId and progress over Server-Sent Events
+ * description: Containers, images, volumes and networks are addressed by `id`; a STACK is addressed by `name`, because compose identifies a project by its name and GET /api/stacks returns no id. For a stack send the name in `name` - it is also accepted in `id`, which is what older callers did.
  * query: env:integer Environment ID the entities belong to (from GET /api/environments)
- * body: {operation:string!, entityType:string!, items:array<{id:string!, name:string!}>!, options:{force:boolean, removeVolumes:boolean}}
+ * body: {operation:string!, entityType:string!, items:array<{id:string, name:string}>!, options:{force:boolean, removeVolumes:boolean}}
  * body-example: {"operation":"restart","entityType":"containers","items":[{"id":"abc123","name":"web"}],"options":{"force":false}}
  * resp-200: Either a synchronous completion summary ({type:"complete", summary:{total, success, failed}}) or an async job handle ({jobId}) whose progress streams over SSE
  * resp-200-example: {"jobId":"job_abc123"}
@@ -260,6 +261,13 @@ export const POST: RequestHandler = async ({ url, cookies, request }) => {
 	return json({ jobId: job.id });
 };
 
+/** A usable stack name, or null for anything that is not a non-empty string. */
+function asName(value: unknown): string | null {
+	if (typeof value !== 'string') return null;
+	const trimmed = value.trim();
+	return trimmed ? trimmed : null;
+}
+
 /**
  * Execute a single operation on an entity.
  * Centralized operation execution to keep code DRY.
@@ -286,9 +294,18 @@ async function executeOperation(
 		case 'networks':
 			await executeNetworkOperation(operation, id, envIdNum);
 			break;
-		case 'stacks':
-			await executeStackOperation(operation, id, envIdNum, options);
+		case 'stacks': {
+			// A stack is addressed by NAME - it has no id, and GET /api/stacks returns
+			// none. `id` is still accepted as the name so a caller that put the name
+			// there (the only thing that ever worked) keeps working. Both are checked
+			// for being a non-empty string: an item carrying neither would otherwise
+			// reach the container fallback as undefined, where the compose-project
+			// filter matches every container that has no project label at all.
+			const stackName = asName(name) ?? asName(id);
+			if (!stackName) throw new Error('A stack item needs a name');
+			await executeStackOperation(operation, stackName, envIdNum, options);
 			break;
+		}
 		default:
 			throw new Error(`Unsupported entity type: ${entityType}`);
 	}

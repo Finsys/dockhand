@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Check, CircleOff } from 'lucide-svelte';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		checked: boolean;
@@ -9,7 +10,7 @@
 		onchange?: (checked: boolean) => void;
 	}
 
-	let { checked = $bindable(), disabled = false, onLabel = 'ON', offLabel = 'OFF', onchange }: Props = $props();
+	let { checked = $bindable(), disabled = false, onLabel = undefined, offLabel = undefined, onchange }: Props = $props();
 
 	function toggle() {
 		if (disabled) return;
@@ -27,9 +28,9 @@
 >
 	{#if checked}
 		<Check class="w-3 h-3" />
-		{onLabel}
+		{onLabel ?? m.ui_toggle_on()}
 	{:else}
 		<CircleOff class="w-3 h-3" />
-		{offLabel}
+		{offLabel ?? m.ui_toggle_off()}
 	{/if}
 </button>

@@ -17,17 +17,17 @@ const CONCURRENCY = 8;
  * one response, so the WAF sees a single request. Refs that can't be resolved are
  * simply omitted (no per-icon 404s, which also read as probing).
  *
- * Each icon is returned as a `data:image/svg+xml` URI so the picker keeps rendering
- * via <img> (script-inert) rather than inlining SVG markup - the SVG sanitizer was
- * designed for the <img>+CSP path, so we don't weaken it by switching to {@html}.
+ * Each icon is returned as a `data:` URI (image/svg+xml, image/webp, or image/png) so the
+ * picker keeps rendering via <img> (script-inert) rather than inlining SVG markup - the SVG
+ * sanitizer was designed for the <img>+CSP path, so we don't weaken it by switching to {@html}.
  *
  * @openapi
  * summary: Resolve multiple selfh.st app icons in one request (avoids per-icon requests a WAF flags as crawling)
- * description: Takes a list of selfh.st icon references and returns each resolved icon as a data:image/svg+xml URI, keyed by reference. Unresolvable or invalid refs are omitted rather than returned as errors. Each icon is fetched from the CDN once and cached on disk, same as the single-icon endpoint.
+ * description: Takes a list of selfh.st icon references and returns each resolved icon as a data: URI (image/svg+xml, image/webp, or image/png depending on the format available), keyed by reference. Unresolvable or invalid refs are omitted rather than returned as errors. Each icon is fetched from the CDN once and cached on disk, same as the single-icon endpoint.
  * body: {refs:array<string>!}
  * body-example: {"refs":["plex","gitea","grafana"]}
  * resp-200: {icons:object!}
- * resp-200-desc: icons maps each resolved reference to a data:image/svg+xml base64 URI; unresolvable refs are omitted.
+ * resp-200-desc: icons maps each resolved reference to a data: base64 URI in the format available (svg/webp/png); unresolvable refs are omitted.
  * resp-200-example: {"icons":{"plex":"data:image/svg+xml;base64,PHN2Zy4uLg=="}}
  * resp-400: The request body is missing a refs array
  */
@@ -50,10 +50,11 @@ export const POST: RequestHandler = async ({ request }) => {
 	async function worker(): Promise<void> {
 		while (next < refs.length) {
 			const ref = refs[next++];
-			const buf = await getSelfhstIcon(ref);
+			const icon = await getSelfhstIcon(ref);
 			// data: URI so the picker renders via <img> (script-inert), keeping the same
-			// safety posture as the single-icon endpoint.
-			if (buf) icons[ref] = `data:image/svg+xml;base64,${buf.toString('base64')}`;
+			// safety posture as the single-icon endpoint. The media type matches the
+			// resolved format (svg/webp/png).
+			if (icon) icons[ref] = `data:${icon.contentType};base64,${icon.buffer.toString('base64')}`;
 		}
 	}
 	await Promise.all(Array.from({ length: Math.min(CONCURRENCY, refs.length) }, worker));

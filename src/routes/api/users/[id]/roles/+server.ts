@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from '@sveltejs/kit';
 import { isEnterprise } from '$lib/server/license';
+import { authorize } from '$lib/server/authorize';
 import { validateSession } from '$lib/server/auth';
 import {
 	getUserRoles,
@@ -16,10 +17,12 @@ import { invalidateTokenCacheForUser } from '$lib/server/api-tokens';
 /**
  * @openapi
  * summary: List the roles assigned to a user (enterprise only)
+ * description: Requires users:view, except for one's own assignments. Which roles an account holds says what it can reach, so it is read like the account itself.
  * path: id:integer! Numeric id of the user (from GET /api/users)
  * resp-200: array<{roleId:integer!, name:string!, environmentId:integer}>
  * resp-400: User id is required
- * resp-403: Enterprise license required
+ * resp-401: Not authenticated
+ * resp-403: Enterprise license required, or permission denied (missing users:view)
  * resp-404: User not found
  * resp-500: Failed to read the user roles
  */
@@ -27,6 +30,17 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 	// Check enterprise license
 	if (!(await isEnterprise())) {
 		return json({ error: 'Enterprise license required' }, { status: 403 });
+	}
+
+	const auth = await authorize(cookies);
+	if (auth.authEnabled && !auth.isAuthenticated) {
+		return json({ error: 'Authentication required' }, { status: 401 });
+	}
+	// Naming somebody's roles names what they can reach, which is the same map of the
+	// instance the account listing gives. Own assignments need no permission.
+	if (Number(params.id) !== auth.user?.id) {
+		const denied = await auth.requirePermission('users', 'view');
+		if (denied) return denied;
 	}
 
 	if (!params.id) {

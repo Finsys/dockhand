@@ -8,19 +8,31 @@
 	import { TogglePill, ToggleSwitch } from '$lib/components/ui/toggle-pill';
 	import CronEditor from '$lib/components/cron-editor.svelte';
 	import TimezoneSelector from '$lib/components/TimezoneSelector.svelte';
-	import { Eye, Bell, Database, Calendar, ShieldCheck, FileText, AlertTriangle, HelpCircle, Globe, Activity, Clock, Info, Save, RotateCcw, LayoutDashboard, Tags, Archive, ChevronRight, ChevronDown, Compass } from 'lucide-svelte';
+	import { Eye, Bell, Database, Calendar, ShieldCheck, FileText, AlertTriangle, HelpCircle, Globe, Activity, Clock, Info, Save, RotateCcw, LayoutDashboard, Tags, Archive, ChevronRight, ChevronDown, Compass, Layers } from 'lucide-svelte';
+	import { STACK_LOG_OPERATIONS, type StackLogOperation } from '$lib/utils/stack-log-operations';
 	import CodeEditor from '$lib/components/CodeEditor.svelte';
 	import { appSettings, type DateFormat, type DownloadFormat, type EventCollectionMode, type LabelFilterMode } from '$lib/stores/settings';
 	import { canAccess, authStore } from '$lib/stores/auth';
 	import { toast } from 'svelte-sonner';
 	import ThemeSelector from '$lib/components/ThemeSelector.svelte';
+	import LanguageSelector from '$lib/components/LanguageSelector.svelte';
 	import NavigationSelector from '$lib/components/NavigationSelector.svelte';
 	import AnimateIconsToggle from '$lib/components/AnimateIconsToggle.svelte';
 	import IndentGuidesToggle from '$lib/components/IndentGuidesToggle.svelte';
+	import EditorThemeSelector from '$lib/components/EditorThemeSelector.svelte';
 	import ColoredActionsToggle from '$lib/components/ColoredActionsToggle.svelte';
 	import SemverCheckConfig from '$lib/components/SemverCheckConfig.svelte';
+	import {
+		DEFAULT_GRYPE_IMAGE,
+		DEFAULT_TRIVY_IMAGE,
+		DEFAULT_GRYPE_ARGS,
+		DEFAULT_TRIVY_ARGS,
+		imageRepo
+	} from '$lib/utils/scanner-images';
 	import { onMount } from 'svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
+	import { m } from '$lib/paraglide/messages.js';
+	import { splitAtName } from '$lib/i18n/split';
 
 	// General settings state - these derive from the store
 	let confirmDestructive = $derived($appSettings.confirmDestructive);
@@ -42,6 +54,22 @@
 	let defaultTrivyImage = $derived($appSettings.defaultTrivyImage);
 	let defaultScannerNetworkMode = $derived($appSettings.defaultScannerNetworkMode);
 	let defaultScannerDns = $derived($appSettings.defaultScannerDns);
+	let stackLogOperations = $derived($appSettings.stackLogOperations);
+	// Display labels; the shared module keeps its English labels for the server and tests.
+	const stackLogOperationLabels: Record<StackLogOperation, () => string> = {
+		start: m.settings_general_stack_log_op_start,
+		stop: m.settings_general_stack_log_op_stop,
+		restart: m.settings_general_stack_log_op_restart,
+		deploy: m.settings_general_stack_log_op_deploy,
+		down: m.settings_general_stack_log_op_down
+	};
+
+	function toggleStackLogOperation(op: StackLogOperation, show: boolean) {
+		const next = show
+			? [...stackLogOperations, op]
+			: stackLogOperations.filter((o) => o !== op);
+		appSettings.setStackLogOperations(next);
+	}
 	let showAdvancedScannerSettings = $state(false);
 	let defaultComposeTemplate = $derived($appSettings.defaultComposeTemplate);
 	let labelFilterMode = $derived($appSettings.labelFilterMode);
@@ -76,12 +104,12 @@ services:
 
 	function saveComposeTemplate() {
 		appSettings.setDefaultComposeTemplate(composeTemplateWIP);
-		toast.success('Compose template updated');
+		toast.success(m.settings_general_toast_compose_template_updated());
 	}
 
 	function revertComposeTemplate() {
 		composeTemplateWIP = builtinComposeTemplate;
-		toast.info('Template reverted to default');
+		toast.info(m.settings_general_toast_template_reverted());
 	}
 	let scheduleRetentionDays = $derived($appSettings.scheduleRetentionDays);
 	let eventRetentionDays = $derived($appSettings.eventRetentionDays);
@@ -89,6 +117,10 @@ services:
 	let eventCleanupCron = $derived($appSettings.eventCleanupCron);
 	let scheduleCleanupEnabled = $derived($appSettings.scheduleCleanupEnabled);
 	let eventCleanupEnabled = $derived($appSettings.eventCleanupEnabled);
+	let scanRetentionCron = $derived($appSettings.scanRetentionCron);
+	let scanRetentionEnabled = $derived($appSettings.scanRetentionEnabled);
+	let scanRetentionKeep = $derived($appSettings.scanRetentionKeep);
+	let scanRetentionGraceDays = $derived($appSettings.scanRetentionGraceDays);
 	let scannerCleanupCron = $derived($appSettings.scannerCleanupCron);
 	let scannerCleanupEnabled = $derived($appSettings.scannerCleanupEnabled);
 	let deployLogReconcileCron = $derived($appSettings.deployLogReconcileCron);
@@ -111,15 +143,15 @@ services:
 			if (res.ok && data.success) {
 				const total = (data.removedVolumes?.length || 0) + (data.removedDirs?.length || 0);
 				if (total > 0) {
-					toast.success(`Scanner cache cleared (${total} items removed)`);
+					toast.success(m.settings_general_toast_scanner_cache_cleared({ count: total }));
 				} else {
-					toast.info('Scanner cache was already empty');
+					toast.info(m.settings_general_toast_scanner_cache_empty());
 				}
 			} else {
-				toast.error(data.error || 'Failed to clear scanner cache');
+				toast.error(data.error || m.settings_general_toast_scanner_cache_clear_failed());
 			}
 		} catch {
-			toast.error('Failed to clear scanner cache');
+			toast.error(m.settings_general_toast_scanner_cache_clear_failed());
 		} finally {
 			clearingCache = false;
 		}
@@ -133,78 +165,103 @@ services:
 	];
 
 	const downloadFormatOptions: { value: DownloadFormat; label: string; description: string }[] = [
-		{ value: 'tar', label: 'tar', description: 'Uncompressed archive' },
-		{ value: 'tar.gz', label: 'tar.gz', description: 'Gzip-compressed archive' },
-		{ value: 'raw', label: 'No archive', description: 'Single file, raw bytes' }
+		{ value: 'tar', label: 'tar', description: m.settings_general_download_tar_description() },
+		{ value: 'tar.gz', label: 'tar.gz', description: m.settings_general_download_targz_description() },
+		{ value: 'raw', label: m.settings_general_download_no_archive(), description: m.settings_general_download_raw_description() }
 	];
 
 	const downloadFormatLabel: Record<DownloadFormat, string> = {
 		tar: 'tar',
 		'tar.gz': 'tar.gz',
-		raw: 'No archive'
+		raw: m.settings_general_download_no_archive()
 	};
 
 	function handleScheduleRetentionChange(e: Event) {
 		const value = Math.max(1, Math.min(365, parseInt((e.target as HTMLInputElement).value) || 30));
 		appSettings.setScheduleRetentionDays(value);
-		toast.success('Schedule retention updated');
+		toast.success(m.settings_general_toast_schedule_retention_updated());
 	}
 
 	function handleEventRetentionChange(e: Event) {
 		const value = Math.max(1, Math.min(365, parseInt((e.target as HTMLInputElement).value) || 30));
 		appSettings.setEventRetentionDays(value);
-		toast.success('Event retention updated');
+		toast.success(m.settings_general_toast_event_retention_updated());
 	}
 
 	function handleScheduleCleanupCronChange(cron: string) {
 		appSettings.setScheduleCleanupCron(cron);
-		toast.success('Schedule cleanup cron updated');
+		toast.success(m.settings_general_toast_schedule_cleanup_cron_updated());
 	}
 
 	function handleEventCleanupCronChange(cron: string) {
 		appSettings.setEventCleanupCron(cron);
-		toast.success('Event cleanup cron updated');
+		toast.success(m.settings_general_toast_event_cleanup_cron_updated());
 	}
 
 	function handleScheduleCleanupEnabledChange() {
 		const newState = !scheduleCleanupEnabled;
 		appSettings.setScheduleCleanupEnabled(newState);
-		toast.success(newState ? 'Schedule cleanup enabled' : 'Schedule cleanup disabled');
+		toast.success(newState ? m.settings_general_toast_schedule_cleanup_enabled() : m.settings_general_toast_schedule_cleanup_disabled());
 	}
 
 	function handleEventCleanupEnabledChange() {
 		const newState = !eventCleanupEnabled;
 		appSettings.setEventCleanupEnabled(newState);
-		toast.success(newState ? 'Event cleanup enabled' : 'Event cleanup disabled');
+		toast.success(newState ? m.settings_general_toast_event_cleanup_enabled() : m.settings_general_toast_event_cleanup_disabled());
+	}
+
+	function handleScanRetentionEnabledChange() {
+		const newState = !scanRetentionEnabled;
+		appSettings.setScanRetentionEnabled(newState);
+		toast.success(newState ? m.settings_general_toast_scan_retention_enabled() : m.settings_general_toast_scan_retention_disabled());
+	}
+
+	function handleScanRetentionCronChange(cron: string) {
+		appSettings.setScanRetentionCron(cron);
+		toast.success(m.settings_general_toast_scan_retention_schedule_updated());
+	}
+
+	function handleScanRetentionKeepChange(event: Event) {
+		const value = parseInt((event.target as HTMLInputElement).value, 10);
+		if (!Number.isFinite(value) || value < 1) return;
+		appSettings.setScanRetentionKeep(value);
+		toast.success(m.settings_general_toast_scan_retention_updated());
+	}
+
+	function handleScanRetentionGraceChange(event: Event) {
+		const value = parseInt((event.target as HTMLInputElement).value, 10);
+		if (!Number.isFinite(value) || value < 0) return;
+		appSettings.setScanRetentionGraceDays(value);
+		toast.success(m.settings_general_toast_scan_retention_updated());
 	}
 
 	function handleScannerCleanupCronChange(cron: string) {
 		appSettings.setScannerCleanupCron(cron);
-		toast.success('Scanner cleanup cron updated');
+		toast.success(m.settings_general_toast_scanner_cleanup_cron_updated());
 	}
 
 	function handleScannerCleanupEnabledChange() {
 		const newState = !scannerCleanupEnabled;
 		appSettings.setScannerCleanupEnabled(newState);
-		toast.success(newState ? 'Scanner cleanup enabled' : 'Scanner cleanup disabled');
+		toast.success(newState ? m.settings_general_toast_scanner_cleanup_enabled() : m.settings_general_toast_scanner_cleanup_disabled());
 	}
 
 	function handleDeployLogReconcileCronChange(cron: string) {
 		appSettings.setDeployLogReconcileCron(cron);
-		toast.success('Deploy log reconcile cron updated');
+		toast.success(m.settings_general_toast_deploy_log_reconcile_cron_updated());
 	}
 
 	function handleDeployLogReconcileEnabledChange() {
 		const newState = !deployLogReconcileEnabled;
 		appSettings.setDeployLogReconcileEnabled(newState);
-		toast.success(newState ? 'Deploy log reconcile enabled' : 'Deploy log reconcile disabled');
+		toast.success(newState ? m.settings_general_toast_deploy_log_reconcile_enabled() : m.settings_general_toast_deploy_log_reconcile_disabled());
 	}
 
 	function handleGrypeImageBlur(e: Event) {
 		const value = (e.target as HTMLInputElement).value.trim();
 		if (value && value !== defaultGrypeImage) {
 			appSettings.setDefaultGrypeImage(value);
-			toast.success('Grype image updated');
+			toast.success(m.settings_general_toast_scanner_image_updated({ scanner: 'Grype' }));
 		}
 	}
 
@@ -212,15 +269,57 @@ services:
 		const value = (e.target as HTMLInputElement).value.trim();
 		if (value && value !== defaultTrivyImage) {
 			appSettings.setDefaultTrivyImage(value);
-			toast.success('Trivy image updated');
+			toast.success(m.settings_general_toast_scanner_image_updated({ scanner: 'Trivy' }));
 		}
+	}
+
+	// Newer scanner releases, asked for on demand: the check reaches the registry,
+	// and the image stays pinned until someone applies the suggestion.
+	let checkingScannerVersions = $state(false);
+	let newerScanners = $state<{ grype: string | null; trivy: string | null }>({ grype: null, trivy: null });
+	// Per scanner: the check ran and found nothing newer. Applying a suggestion
+	// does NOT set this - that image has not been re-checked.
+	let scannerUpToDate = $state<{ grype: boolean; trivy: boolean }>({ grype: false, trivy: false });
+
+	async function checkScannerVersions() {
+		checkingScannerVersions = true;
+		try {
+			const res = await fetch('/api/settings/scanner?checkNewerVersions=true');
+			const data = await res.json();
+			newerScanners = {
+				grype: data.newerVersions?.grype?.latest ?? null,
+				trivy: data.newerVersions?.trivy?.latest ?? null
+			};
+			scannerUpToDate = { grype: !newerScanners.grype, trivy: !newerScanners.trivy };
+		} catch {
+			toast.error(m.settings_general_toast_scanner_versions_check_failed());
+		} finally {
+			checkingScannerVersions = false;
+		}
+	}
+
+	function applyScannerVersion(scanner: 'grype' | 'trivy') {
+		const tag = scanner === 'grype' ? newerScanners.grype : newerScanners.trivy;
+		if (!tag) return;
+		const current = scanner === 'grype' ? defaultGrypeImage : defaultTrivyImage;
+		const image = `${imageRepo(current)}:${tag}`;
+		if (scanner === 'grype') {
+			appSettings.setDefaultGrypeImage(image);
+			newerScanners = { ...newerScanners, grype: null };
+			scannerUpToDate = { ...scannerUpToDate, grype: false };
+		} else {
+			appSettings.setDefaultTrivyImage(image);
+			newerScanners = { ...newerScanners, trivy: null };
+			scannerUpToDate = { ...scannerUpToDate, trivy: false };
+		}
+		toast.success(m.settings_general_toast_scanner_image_set({ image }));
 	}
 
 	function handleGrypeArgsBlur(e: Event) {
 		const value = (e.target as HTMLInputElement).value.trim();
 		if (value !== defaultGrypeArgs) {
 			appSettings.setDefaultGrypeArgs(value);
-			toast.success('Grype default arguments updated');
+			toast.success(m.settings_general_toast_scanner_args_updated({ scanner: 'Grype' }));
 		}
 	}
 
@@ -228,7 +327,7 @@ services:
 		const value = (e.target as HTMLInputElement).value.trim();
 		if (value !== defaultTrivyArgs) {
 			appSettings.setDefaultTrivyArgs(value);
-			toast.success('Trivy default arguments updated');
+			toast.success(m.settings_general_toast_scanner_args_updated({ scanner: 'Trivy' }));
 		}
 	}
 
@@ -236,7 +335,7 @@ services:
 		const trimmed = (value ?? '').trim();
 		if (trimmed !== defaultScannerNetworkMode) {
 			appSettings.setDefaultScannerNetworkMode(trimmed);
-			toast.success(trimmed ? `Scanner network mode set to ${trimmed}` : 'Scanner network mode cleared');
+			toast.success(trimmed ? m.settings_general_toast_scanner_network_mode_set({ mode: trimmed }) : m.settings_general_toast_scanner_network_mode_cleared());
 		}
 	}
 
@@ -251,42 +350,42 @@ services:
 			cleaned.every((v, i) => v === defaultScannerDns[i]);
 		if (!sameAsCurrent) {
 			appSettings.setDefaultScannerDns(cleaned);
-			toast.success(cleaned.length ? `Scanner DNS set to ${cleaned.join(', ')}` : 'Scanner DNS cleared');
+			toast.success(cleaned.length ? m.settings_general_toast_scanner_dns_set({ dns: cleaned.join(', ') }) : m.settings_general_toast_scanner_dns_cleared());
 		}
 	}
 
 	// Anything above 2K starts feeling laggy in browsers without virtualized rendering.
 	const logMaxLinesOptions = [
-		{ value: '500', label: '500 lines' },
-		{ value: '1000', label: '1,000 lines' },
-		{ value: '2000', label: '2,000 lines' }
+		{ value: '500', label: m.settings_general_log_lines({ lines: (500).toLocaleString() }) },
+		{ value: '1000', label: m.settings_general_log_lines({ lines: (1000).toLocaleString() }) },
+		{ value: '2000', label: m.settings_general_log_lines({ lines: (2000).toLocaleString() }) }
 	];
 
 	function handleLogMaxLinesChange(value: string | undefined) {
 		const n = parseInt(value ?? '');
 		if (!Number.isFinite(n) || n <= 0) return;
 		appSettings.setLogMaxLines(Math.min(2000, Math.max(100, n)));
-		toast.success('Log buffer size updated');
+		toast.success(m.settings_general_toast_log_buffer_updated());
 	}
 
 	function handleEventCollectionModeChange(value: string | undefined) {
 		if (value === 'stream' || value === 'poll') {
 			appSettings.setEventCollectionMode(value);
-			toast.success(`Event collection mode: ${value}`);
+			toast.success(m.settings_general_toast_event_mode({ mode: value === 'stream' ? m.activity_mode_stream() : m.activity_mode_poll() }));
 		}
 	}
 
 	function handleEventPollIntervalChange(selected: { value: number } | undefined) {
 		if (selected?.value) {
 			appSettings.setEventPollInterval(selected.value);
-			toast.success(`Event poll interval: ${selected.value / 1000}s`);
+			toast.success(m.settings_general_toast_event_poll_interval({ seconds: selected.value / 1000 }));
 		}
 	}
 
 	function handleMetricsIntervalChange(selected: { value: number } | undefined) {
 		if (selected?.value) {
 			appSettings.setMetricsCollectionInterval(selected.value);
-			toast.success(`Metrics interval: ${selected.value / 1000}s`);
+			toast.success(m.settings_general_toast_metrics_interval({ seconds: selected.value / 1000 }));
 		}
 	}
 
@@ -294,16 +393,36 @@ services:
 		const value = (e.target as HTMLInputElement).value.trim();
 		if (value && value !== defaultBackupImage) {
 			appSettings.setDefaultBackupImage(value);
-			toast.success('Backup image updated');
+			toast.success(m.settings_general_toast_backup_image_updated());
 		}
 	}
 
-	// Global newer-version-tag (semver) detection - one setting every update check
-	// (scheduled and manual) reads.
+	let releaseAgeHours = $state(0);
+	let releaseAgeOverridden = $state(false);
+	let releaseAgeSaving = $state(false);
+
+	async function saveReleaseAge() {
+		releaseAgeSaving = true;
+		try {
+			const res = await fetch('/api/settings/minimum-release-age', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ hours: releaseAgeHours })
+			});
+			const data = await res.json();
+			if (!res.ok) throw new Error(data.error || m.settings_general_toast_min_age_save_failed());
+			toast.success(m.settings_general_toast_min_age_updated());
+		} catch (error) {
+			toast.error(error instanceof Error ? error.message : m.settings_general_toast_min_age_save_failed());
+		} finally { releaseAgeSaving = false; }
+	}
+
+	// Global newer-version-tag (semver) detection.
 	let semverEnabled = $state(false);
 	let semverMaxBump = $state<'patch' | 'minor' | 'major'>('major');
 	let semverMatchFlavor = $state(true);
 	let semverIncludePrerelease = $state(false);
+	let semverRejectOlderImages = $state(true);
 	let semverLoaded = $state(false);
 
 	// The global theme defaults (what a new user starts with). With auth on the theme
@@ -317,6 +436,14 @@ services:
 
 	onMount(async () => {
 		try {
+			const res = await fetch('/api/settings/minimum-release-age');
+			if (res.ok) {
+				const config = await res.json();
+				releaseAgeHours = config.hours;
+				releaseAgeOverridden = config.overridden;
+			}
+		} catch { /* keep default */ }
+		try {
 			const res = await fetch('/api/settings/semver');
 			if (res.ok) {
 				const c = await res.json();
@@ -324,9 +451,17 @@ services:
 				semverMaxBump = c.maxBump ?? 'major';
 				semverMatchFlavor = c.matchFlavor ?? true;
 				semverIncludePrerelease = c.includePrerelease ?? false;
+				semverRejectOlderImages = c.rejectOlderImages ?? true;
 			}
-		} catch { /* keep defaults */ }
-		semverLoaded = true;
+			// A refusal means the values on screen are the built-in defaults, never the
+			// configuration, so the save effect stays disarmed rather than writing a
+			// guess over it. Any other failure still arms it: the controls are visible
+			// and edits have to reach the server rather than vanish.
+			semverLoaded = res.status !== 401 && res.status !== 403;
+		} catch {
+			// The request never landed, so nothing says this account may not save.
+			semverLoaded = true;
+		}
 
 		try {
 			const res = await fetch('/api/settings/general');
@@ -349,11 +484,12 @@ services:
 					enabled: semverEnabled,
 					maxBump: semverMaxBump,
 					matchFlavor: semverMatchFlavor,
-					includePrerelease: semverIncludePrerelease
+					includePrerelease: semverIncludePrerelease,
+					rejectOlderImages: semverRejectOlderImages
 				})
 			});
 		} catch {
-			toast.error('Failed to save version-check settings');
+			toast.error(m.settings_general_toast_semver_save_failed());
 		}
 	}
 
@@ -372,7 +508,7 @@ services:
 				<Card.Header>
 					<Card.Title class="text-sm font-medium flex items-center gap-2">
 						<Eye class="w-4 h-4" />
-						Appearance
+						{m.profile_appearance_title()}
 						<Tooltip.Provider delayDuration={100}>
 							<Tooltip.Root>
 								<Tooltip.Trigger>
@@ -381,9 +517,9 @@ services:
 								<Tooltip.Portal>
 									<Tooltip.Content side="right" sideOffset={8} class="!w-80">
 										{#if $authStore.authEnabled}
-											These settings apply to the login page and as defaults. Personal preferences can be configured in your profile.
+											{m.settings_general_appearance_help_auth()}
 										{:else}
-											Theme and font settings are global when authentication is disabled.
+											{m.settings_general_appearance_help_no_auth()}
 										{/if}
 									</Tooltip.Content>
 								</Tooltip.Portal>
@@ -397,222 +533,180 @@ services:
 						<div class="space-y-4">
 							<div class="space-y-1">
 								<div class="flex items-center gap-3">
-									<Label>Show stopped containers</Label>
+									<Label>{m.settings_general_show_stopped()}</Label>
 									<TogglePill
 										checked={showStoppedContainers}
 										onchange={(checked) => {
 											appSettings.setShowStoppedContainers(checked);
-											toast.success(checked ? 'Stopped containers shown' : 'Stopped containers hidden');
+											toast.success(checked ? m.settings_general_toast_stopped_shown() : m.settings_general_toast_stopped_hidden());
 										}}
 										disabled={!$canAccess('settings', 'edit')}
 									/>
 								</div>
-								<p class="text-xs text-muted-foreground">Display stopped and exited containers in lists</p>
+								<p class="text-xs text-muted-foreground">{m.settings_general_show_stopped_hint()}</p>
 							</div>
 							<div class="space-y-1">
 								<div class="flex items-center gap-3">
-									<Label>Highlight available updates</Label>
+									<Label>{m.settings_general_highlight_updates()}</Label>
 									<TogglePill
 										checked={highlightUpdates}
 										onchange={(checked) => {
 											appSettings.setHighlightUpdates(checked);
-											toast.success(checked ? 'Update highlighting enabled' : 'Update highlighting disabled');
+											toast.success(checked ? m.settings_general_toast_highlight_updates_enabled() : m.settings_general_toast_highlight_updates_disabled());
 										}}
 										disabled={!$canAccess('settings', 'edit')}
 									/>
 								</div>
-								<p class="text-xs text-muted-foreground">Highlight container rows in amber when updates are available</p>
+								<p class="text-xs text-muted-foreground">{m.settings_general_highlight_updates_hint()}</p>
 							</div>
 							<div class="space-y-1">
 								<div class="flex items-center gap-3">
-									<Label>Show changelog links</Label>
+									<Label>{m.settings_general_changelog_links()}</Label>
 									<Tooltip.Root>
 										<Tooltip.Trigger>
 											<HelpCircle class="w-3.5 h-3.5 text-muted-foreground" />
 										</Tooltip.Trigger>
 										<Tooltip.Content side="top" class="w-96 max-w-[90vw]">
-											<p>Surface a release-notes link next to the image name on rows with updates available. The link is resolved from the image's <code>org.opencontainers.image.source</code> label, from the <code>ghcr.io</code> registry path, or from an explicit <code>dockhand.changelog.url</code> label override.</p>
+											<p>{m.settings_general_changelog_links_help_before()} <code>org.opencontainers.image.source</code> {m.settings_general_changelog_links_help_after_label()} <code>ghcr.io</code> {m.settings_general_changelog_links_help_after_registry()} <code>dockhand.changelog.url</code> {m.settings_general_changelog_links_help_after_override()}</p>
 										</Tooltip.Content>
 									</Tooltip.Root>
 									<TogglePill
 										checked={showImageChangelogLinks}
 										onchange={(checked) => {
 											appSettings.setShowImageChangelogLinks(checked);
-											toast.success(checked ? 'Changelog links shown' : 'Changelog links hidden');
+											toast.success(checked ? m.settings_general_toast_changelog_links_shown() : m.settings_general_toast_changelog_links_hidden());
 										}}
 										disabled={!$canAccess('settings', 'edit')}
 									/>
 								</div>
-								<p class="text-xs text-muted-foreground">Show a release-notes icon next to images with updates available</p>
+								<p class="text-xs text-muted-foreground">{m.settings_general_changelog_links_hint()}</p>
 							</div>
 							<div class="space-y-1">
 								<div class="flex items-center gap-3">
-									<Label>Use selfh.st icons</Label>
+									<Label>{m.settings_general_selfhst_icons()}</Label>
 									<Tooltip.Root>
 										<Tooltip.Trigger>
 											<HelpCircle class="w-3.5 h-3.5 text-muted-foreground" />
 										</Tooltip.Trigger>
 										<Tooltip.Content side="top" class="w-96 max-w-[90vw]">
-											<p>Show app logos from <a href="https://selfh.st" target="_blank" rel="noopener" class="underline">selfh.st</a> as container icons, matched automatically from the image name. Logos are fetched once and cached locally, so your browser never contacts an external CDN. Off by default. Logos are CC BY 4.0; product names and trademarks are the property of their respective owners and are shown for identification only, without implying endorsement.</p>
+											<p>{splitAtName(m.settings_general_selfhst_icons_help)[0]}<a href="https://selfh.st" target="_blank" rel="noopener" class="underline">selfh.st</a>{splitAtName(m.settings_general_selfhst_icons_help)[1]}</p>
 										</Tooltip.Content>
 									</Tooltip.Root>
 									<TogglePill
 										checked={useSelfhstIcons}
 										onchange={(checked) => {
 											appSettings.setUseSelfhstIcons(checked);
-											toast.success(checked ? 'selfh.st icons enabled' : 'selfh.st icons disabled');
+											toast.success(checked ? m.settings_general_toast_selfhst_enabled() : m.settings_general_toast_selfhst_disabled());
 										}}
 										disabled={!$canAccess('settings', 'edit')}
 									/>
 								</div>
-								<p class="text-xs text-muted-foreground">Auto app logos on containers, fetched from selfh.st and cached locally</p>
+								<p class="text-xs text-muted-foreground">{m.settings_general_selfhst_icons_hint()}</p>
 							</div>
 							<div class="space-y-1">
 								<div class="flex items-center gap-3">
-									<Label>Show "What's New"</Label>
+									<Label>{m.settings_general_whats_new()}</Label>
 									<TogglePill
 										checked={showWhatsNew}
 										onchange={(checked) => {
 											appSettings.setShowWhatsNew(checked);
-											toast.success(checked ? "What's New popup enabled" : "What's New popup disabled");
+											toast.success(checked ? m.settings_general_toast_whats_new_enabled() : m.settings_general_toast_whats_new_disabled());
 										}}
 										disabled={!$canAccess('settings', 'edit')}
 									/>
 								</div>
-								<p class="text-xs text-muted-foreground">Show the "What's New" popup after upgrading to a new version</p>
+								<p class="text-xs text-muted-foreground">{m.settings_general_whats_new_hint()}</p>
 							</div>
 							<div class="space-y-1">
 								<div class="flex items-center gap-3">
-									<Label>Compact port display</Label>
+									<Label>{m.settings_general_compact_ports()}</Label>
 									<TogglePill
 										checked={compactPorts}
 										onchange={(checked) => {
 											appSettings.setCompactPorts(checked);
-											toast.success(checked ? 'Compact port display enabled' : 'Showing all ports');
+											toast.success(checked ? m.settings_general_toast_compact_ports_enabled() : m.settings_general_toast_all_ports_shown());
 										}}
 										disabled={!$canAccess('settings', 'edit')}
 									/>
 								</div>
-								<p class="text-xs text-muted-foreground">Show first port with +N count instead of all ports</p>
+								<p class="text-xs text-muted-foreground">{m.settings_general_compact_ports_hint()}</p>
 							</div>
 							<div class="space-y-1">
 								<div class="flex items-center gap-3">
-									<Label>Show exposed ports</Label>
+									<Label>{m.settings_general_exposed_ports()}</Label>
 									<Tooltip.Root>
 										<Tooltip.Trigger>
 											<HelpCircle class="w-3.5 h-3.5 text-muted-foreground" />
 										</Tooltip.Trigger>
 										<Tooltip.Content side="top" class="w-96 max-w-[90vw]">
-											<p>Shows internal container ports (from EXPOSE directives) that are not published to the host. These appear in the container list with an amber badge to distinguish them from published port mappings.</p>
+											<p>{m.settings_general_exposed_ports_help()}</p>
 										</Tooltip.Content>
 									</Tooltip.Root>
 									<TogglePill
 										checked={showExposedPorts}
 										onchange={(checked) => {
 											appSettings.setShowExposedPorts(checked);
-											toast.success(checked ? 'Showing exposed ports in container list' : 'Exposed ports hidden from container list');
+											toast.success(checked ? m.settings_general_toast_exposed_ports_shown() : m.settings_general_toast_exposed_ports_hidden());
 										}}
 										disabled={!$canAccess('settings', 'edit')}
 									/>
 								</div>
-								<p class="text-xs text-muted-foreground">Display internal container ports in the container list grid</p>
+								<p class="text-xs text-muted-foreground">{m.settings_general_exposed_ports_hint()}</p>
 							</div>
 							<div class="space-y-1">
 								<div class="flex items-center gap-3">
-									<Label>Show git commit hash</Label>
+									<Label>{m.settings_general_git_commit_hash()}</Label>
 									<Tooltip.Root>
 										<Tooltip.Trigger>
 											<HelpCircle class="w-3.5 h-3.5 text-muted-foreground" />
 										</Tooltip.Trigger>
 										<Tooltip.Content side="top" class="w-96 max-w-[90vw]">
-											<p>Shows the deployed short commit hash on the Git badge in the stacks list source column, with the full hash, repo URL and branch in a tooltip.</p>
+											<p>{m.settings_general_git_commit_hash_help()}</p>
 										</Tooltip.Content>
 									</Tooltip.Root>
 									<TogglePill
 										checked={showGitCommitHash}
 										onchange={(checked) => {
 											appSettings.setShowGitCommitHash(checked);
-											toast.success(checked ? 'Showing git commit hash on stack badges' : 'Git commit hash hidden');
+											toast.success(checked ? m.settings_general_toast_git_commit_hash_shown() : m.settings_general_toast_git_commit_hash_hidden());
 										}}
 										disabled={!$canAccess('settings', 'edit')}
 									/>
 								</div>
-								<p class="text-xs text-muted-foreground">Display the deployed commit hash on the Git source badge in the stacks list</p>
+								<p class="text-xs text-muted-foreground">{m.settings_general_git_commit_hash_hint()}</p>
 							</div>
 							<div class="space-y-1">
 								<div class="flex items-center gap-3">
-									<Label>Honor Traefik/Pangolin/Caddy labels</Label>
+									<Label>{m.settings_general_proxy_labels()}</Label>
 									<Tooltip.Root>
 										<Tooltip.Trigger>
 											<HelpCircle class="w-3.5 h-3.5 text-muted-foreground" />
 										</Tooltip.Trigger>
 										<Tooltip.Content side="top" class="w-96 max-w-[90vw]">
-											<p>Parse <code>traefik.http.routers.&lt;name&gt;.rule</code>, <code>pangolin.public-resources.&lt;name&gt;.full-domain</code>, <code>pangolin.private-resources.&lt;name&gt;.full-domain</code>, and caddy-docker-proxy <code>caddy</code>/<code>caddy_&lt;n&gt;</code> site-address labels, and surface the resulting URLs as clickable pills next to ports. When off, only explicit <code>dockhand.url</code> labels are shown.</p>
+											<p>{m.settings_general_proxy_labels_help_before()} <code>traefik.http.routers.&lt;name&gt;.rule</code>, <code>pangolin.public-resources.&lt;name&gt;.full-domain</code>, <code>pangolin.private-resources.&lt;name&gt;.full-domain</code>, {m.settings_general_proxy_labels_help_caddy()} <code>caddy</code>/<code>caddy_&lt;n&gt;</code> {m.settings_general_proxy_labels_help_after_caddy()} <code>dockhand.url</code> {m.settings_general_proxy_labels_help_after_url()}</p>
 										</Tooltip.Content>
 									</Tooltip.Root>
 									<TogglePill
 										checked={honorProxyLabels}
 										onchange={(checked) => {
 											appSettings.setHonorProxyLabels(checked);
-											toast.success(checked ? 'Proxy labels honored' : 'Proxy labels ignored');
+											toast.success(checked ? m.settings_general_toast_proxy_labels_honored() : m.settings_general_toast_proxy_labels_ignored());
 										}}
 										disabled={!$canAccess('settings', 'edit')}
 									/>
 								</div>
-								<p class="text-xs text-muted-foreground">Show URLs inferred from Traefik and Pangolin labels alongside dockhand.url</p>
-							</div>
-							<div class="space-y-1">
-								<div class="flex items-center gap-3">
-									<Label>Time format</Label>
-									<ToggleSwitch
-										value={timeFormat}
-										leftValue="24h"
-										rightValue="12h"
-										onchange={(newFormat) => {
-											appSettings.setTimeFormat(newFormat as '12h' | '24h');
-											toast.success(`Time format set to ${newFormat === '12h' ? '12-hour (AM/PM)' : '24-hour'}`);
-										}}
-										disabled={!$canAccess('settings', 'edit')}
-									/>
-								</div>
-								<p class="text-xs text-muted-foreground">Display timestamps in 12-hour (AM/PM) or 24-hour format</p>
-							</div>
-							<div class="space-y-1">
-								<div class="flex items-center gap-3">
-									<Label>Date format</Label>
-									<Select.Root
-										type="single"
-										value={dateFormat}
-										onValueChange={(value) => {
-											if (value) {
-												appSettings.setDateFormat(value as DateFormat);
-												toast.success(`Date format set to ${value}`);
-											}
-										}}
-										disabled={!$canAccess('settings', 'edit')}
-									>
-										<Select.Trigger class="w-[180px]">
-											<Calendar class="w-4 h-4 mr-2" />
-											<span>{dateFormat}</span>
-										</Select.Trigger>
-										<Select.Content>
-											{#each dateFormatOptions as option}
-												<Select.Item value={option.value}>
-													<div class="flex items-center justify-between w-full gap-4">
-														<span>{option.label}</span>
-														<span class="text-xs text-muted-foreground">{option.example}</span>
-													</div>
-												</Select.Item>
-											{/each}
-										</Select.Content>
-									</Select.Root>
-								</div>
-								<p class="text-xs text-muted-foreground">How dates are displayed throughout the app</p>
+								<p class="text-xs text-muted-foreground">{m.settings_general_proxy_labels_hint()}</p>
 							</div>
 						</div>
 						<!-- Right column: Theme settings (always shown, with hint when auth enabled) -->
 						<div class="space-y-4">
 							<ThemeSelector />
+							<!-- The language lives in this browser, so there is no global default to
+							     edit here and no per-account value either. With auth on, the profile
+							     page is where personal choices live, and this one goes with them. -->
+							{#if !$authStore.authEnabled}
+								<LanguageSelector />
+							{/if}
 							<!-- With auth on the toggles edit the GLOBAL defaults, so they wait for
 							     those to load; binding globalValue=undefined first would show the
 							     admin's own profile value. With auth off the store IS the global
@@ -626,12 +720,72 @@ services:
 								<div class="text-xs text-muted-foreground flex items-start gap-1.5 mt-2 p-2 bg-muted/50 rounded-md">
 									<HelpCircle class="w-3.5 h-3.5 shrink-0 mt-0.5" />
 									<div>
-										<p>These are the <strong>defaults for new users</strong> - they don't change your own view. To customise how <em>you</em> see the app, use the theme settings in your <a href="/profile" class="text-primary hover:underline">profile</a>.</p>
+										<p>{m.settings_general_theme_defaults_before()} <strong>{m.settings_general_theme_defaults_strong()}</strong> {m.settings_general_theme_defaults_middle()} <em>{m.settings_general_theme_defaults_you()}</em> {m.settings_general_theme_defaults_after()} <a href="/profile" class="text-primary hover:underline">{m.settings_general_theme_defaults_link()}</a>.</p>
 									</div>
 								</div>
 							{/if}
 						</div>
 					</div>
+				<!-- Time + date format span the full card width, two columns, so they get
+				     room instead of crowding inside the narrow settings column. -->
+				<div class="mt-4 border-t pt-4">
+					<div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+						<div class="space-y-1">
+							<div class="flex items-center gap-3">
+								<Label>{m.settings_general_time_format()}</Label>
+								<ToggleSwitch
+									value={timeFormat}
+									leftValue="24h"
+									rightValue="12h"
+									onchange={(newFormat) => {
+										appSettings.setTimeFormat(newFormat as '12h' | '24h');
+										toast.success(newFormat === '12h' ? m.settings_general_toast_time_format_12h() : m.settings_general_toast_time_format_24h());
+									}}
+									disabled={!$canAccess('settings', 'edit')}
+								/>
+							</div>
+							<p class="text-xs text-muted-foreground">{m.settings_general_time_format_hint()}</p>
+						</div>
+						<div class="space-y-1">
+							<div class="flex items-center gap-3">
+								<Label>{m.settings_general_date_format()}</Label>
+								<Select.Root
+									type="single"
+									value={dateFormat}
+									onValueChange={(value) => {
+										if (value) {
+											appSettings.setDateFormat(value as DateFormat);
+											toast.success(m.settings_general_toast_date_format({ format: value }));
+										}
+									}}
+									disabled={!$canAccess('settings', 'edit')}
+								>
+									<Select.Trigger class="w-[180px]">
+										<Calendar class="w-4 h-4 mr-2" />
+										<span>{dateFormat}</span>
+									</Select.Trigger>
+									<Select.Content>
+										{#each dateFormatOptions as option}
+											<Select.Item value={option.value}>
+												<div class="flex items-center justify-between w-full gap-4">
+													<span>{option.label}</span>
+													<span class="text-xs text-muted-foreground">{option.example}</span>
+												</div>
+											</Select.Item>
+										{/each}
+									</Select.Content>
+								</Select.Root>
+							</div>
+							<p class="text-xs text-muted-foreground">{m.settings_general_date_format_hint()}</p>
+						</div>
+					</div>
+				</div>
+				<!-- Editor theme spans the full card width so the live preview isn't cramped. -->
+				{#if !$authStore.authEnabled || globalThemeLoaded}
+					<div class="mt-4 border-t pt-4">
+						<EditorThemeSelector />
+					</div>
+				{/if}
 				</Card.Content>
 			</Card.Root>
 
@@ -639,7 +793,7 @@ services:
 				<Card.Header>
 					<Card.Title class="text-sm font-medium flex items-center gap-2">
 						<Compass class="w-4 h-4" />
-						Navigation
+						{m.profile_navigation_title()}
 					</Card.Title>
 				</Card.Header>
 				<Card.Content>
@@ -651,21 +805,21 @@ services:
 				<Card.Header>
 					<Card.Title class="text-sm font-medium flex items-center gap-2">
 						<Globe class="w-4 h-4" />
-						Scheduling
+						{m.settings_general_scheduling()}
 					</Card.Title>
 				</Card.Header>
 				<Card.Content class="space-y-4">
 					<div class="space-y-2">
-						<Label>Default timezone</Label>
+						<Label>{m.settings_general_default_timezone()}</Label>
 						<TimezoneSelector
 							value={defaultTimezone}
 							onchange={(value) => {
 								appSettings.setDefaultTimezone(value);
-								toast.success(`Default timezone set to ${value}`);
+								toast.success(m.settings_general_toast_default_timezone({ timezone: value }));
 							}}
 							class="w-[320px]"
 						/>
-						<p class="text-xs text-muted-foreground">Default timezone for new environments. Used for scheduled tasks like auto-updates.</p>
+						<p class="text-xs text-muted-foreground">{m.settings_general_default_timezone_hint()}</p>
 					</div>
 				</Card.Content>
 			</Card.Root>
@@ -674,23 +828,23 @@ services:
 				<Card.Header>
 					<Card.Title class="text-sm font-medium flex items-center gap-2">
 						<Bell class="w-4 h-4" />
-						Confirmations
+						{m.settings_general_confirmations()}
 					</Card.Title>
 				</Card.Header>
 				<Card.Content class="space-y-4">
 					<div class="space-y-1">
 						<div class="flex items-center gap-3">
-							<Label>Confirm destructive actions</Label>
+							<Label>{m.settings_general_confirm_destructive()}</Label>
 							<TogglePill
 								checked={confirmDestructive}
 								onchange={(checked) => {
 									appSettings.setConfirmDestructive(checked);
-									toast.success(checked ? 'Confirmations enabled' : 'Confirmations disabled');
+									toast.success(checked ? m.settings_general_toast_confirmations_enabled() : m.settings_general_toast_confirmations_disabled());
 								}}
 								disabled={!$canAccess('settings', 'edit')}
 							/>
 						</div>
-						<p class="text-xs text-muted-foreground">Show confirmation dialogs before deleting resources</p>
+						<p class="text-xs text-muted-foreground">{m.settings_general_confirm_destructive_hint()}</p>
 					</div>
 				</Card.Content>
 			</Card.Root>
@@ -699,14 +853,14 @@ services:
 				<Card.Header>
 					<Card.Title class="text-sm font-medium flex items-center gap-2">
 						<FileText class="w-4 h-4" />
-						Logs & files
+						{m.settings_general_logs_files()}
 					</Card.Title>
 				</Card.Header>
 				<Card.Content>
 					<div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
 						<div class="space-y-4">
 							<div class="space-y-2">
-								<Label for="log-max-lines">Log buffer size</Label>
+								<Label for="log-max-lines">{m.settings_general_log_buffer_size()}</Label>
 								<Select.Root
 									type="single"
 									value={String(logMaxLines)}
@@ -714,7 +868,7 @@ services:
 									disabled={!$canAccess('settings', 'edit')}
 								>
 									<Select.Trigger id="log-max-lines" class="w-48">
-										{logMaxLines.toLocaleString()} lines
+										{m.settings_general_log_lines({ lines: logMaxLines.toLocaleString() })}
 									</Select.Trigger>
 									<Select.Content>
 										{#each logMaxLinesOptions as opt}
@@ -722,18 +876,18 @@ services:
 										{/each}
 									</Select.Content>
 								</Select.Root>
-								<p class="text-xs text-muted-foreground">Maximum number of log lines kept per container panel. Older lines are dropped when the limit is exceeded.</p>
+								<p class="text-xs text-muted-foreground">{m.settings_general_log_buffer_size_hint()}</p>
 							</div>
 							<div class="space-y-1">
 								<div class="flex items-center gap-3">
-									<Label>Download format</Label>
+									<Label>{m.settings_general_download_format()}</Label>
 									<Select.Root
 										type="single"
 										value={downloadFormat}
 										onValueChange={(value) => {
 											if (value) {
 												appSettings.setDownloadFormat(value as DownloadFormat);
-												toast.success(`Download format set to ${downloadFormatLabel[value as DownloadFormat]}`);
+												toast.success(m.settings_general_toast_download_format({ format: downloadFormatLabel[value as DownloadFormat] }));
 											}
 										}}
 										disabled={!$canAccess('settings', 'edit')}
@@ -754,26 +908,26 @@ services:
 										</Select.Content>
 									</Select.Root>
 								</div>
-								<p class="text-xs text-muted-foreground">Format when downloading files from containers or volumes. "No archive" emits raw bytes for single files; directories still download as tar.</p>
+								<p class="text-xs text-muted-foreground">{m.settings_general_download_format_hint()}</p>
 							</div>
 						</div>
 						<div class="space-y-4">
 							<div class="space-y-1">
 								<div class="flex items-center gap-3">
-									<Label>Format log timestamps</Label>
+									<Label>{m.settings_general_format_log_timestamps()}</Label>
 									<TogglePill
 										checked={formatLogTimestamps}
 										onchange={(checked) => {
 											appSettings.setFormatLogTimestamps(checked);
-											toast.success(checked ? 'Log timestamp formatting enabled' : 'Log timestamp formatting disabled');
+											toast.success(checked ? m.settings_general_toast_log_timestamps_enabled() : m.settings_general_toast_log_timestamps_disabled());
 										}}
 										disabled={!$canAccess('settings', 'edit')}
 									/>
 								</div>
-								<p class="text-xs text-muted-foreground">Convert ISO timestamps in logs to your configured date/time format</p>
+								<p class="text-xs text-muted-foreground">{m.settings_general_format_log_timestamps_hint()}</p>
 								<div class="flex items-start gap-1.5 mt-1">
 									<Info class="w-3.5 h-3.5 text-muted-foreground shrink-0 mt-0.5" />
-									<p class="text-xs text-muted-foreground">Docker logs use UTC timestamps by default. When enabled, timestamps like <code class="bg-muted px-1 rounded">2026-01-12T07:47:44Z</code> are converted to local time using your date/time settings.</p>
+									<p class="text-xs text-muted-foreground">{splitAtName(m.settings_general_format_log_timestamps_info)[0]}<code class="bg-muted px-1 rounded">2026-01-12T07:47:44Z</code>{splitAtName(m.settings_general_format_log_timestamps_info)[1]}</p>
 								</div>
 							</div>
 						</div>
@@ -784,10 +938,34 @@ services:
 			<Card.Root>
 				<Card.Header>
 					<Card.Title class="text-sm font-medium flex items-center gap-2">
-						<FileText class="w-4 h-4" />
-						Compose template
+						<Layers class="w-4 h-4" />
+						{m.settings_general_stack_operation_logs()}
 					</Card.Title>
-					<p class="text-xs text-muted-foreground">Default YAML content when creating a new stack.</p>
+					<p class="text-xs text-muted-foreground">{m.settings_general_stack_operation_logs_hint()}</p>
+				</Card.Header>
+				<Card.Content>
+					<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-3">
+						{#each STACK_LOG_OPERATIONS as op}
+							<div class="flex items-center gap-3">
+								<TogglePill
+									checked={stackLogOperations.includes(op.key)}
+									onchange={(checked) => toggleStackLogOperation(op.key, checked)}
+									disabled={!$canAccess('settings', 'edit')}
+								/>
+								<Label>{stackLogOperationLabels[op.key]()}</Label>
+							</div>
+						{/each}
+					</div>
+				</Card.Content>
+			</Card.Root>
+
+			<Card.Root>
+				<Card.Header>
+					<Card.Title class="text-sm font-medium flex items-center gap-2">
+						<FileText class="w-4 h-4" />
+						{m.settings_general_compose_template()}
+					</Card.Title>
+					<p class="text-xs text-muted-foreground">{m.settings_general_compose_template_hint()}</p>
 				</Card.Header>
 				<Card.Content class="space-y-3">
 					<div class="h-64">
@@ -803,11 +981,11 @@ services:
 						<div class="flex gap-2">
 							<Button size="sm" variant="outline" onclick={saveComposeTemplate}>
 								<Save class="w-3.5 h-3.5" />
-								Save template
+								{m.settings_general_save_template()}
 							</Button>
 							<Button size="sm" variant="ghost" onclick={revertComposeTemplate}>
 								<RotateCcw class="w-3.5 h-3.5" />
-								Revert to default
+								{m.settings_general_revert_to_default()}
 							</Button>
 						</div>
 					{/if}
@@ -818,57 +996,94 @@ services:
 
 		<!-- Right column -->
 		<div class="space-y-4">
+			<!-- Held to settings:view: these describe how this installation is built
+			     and run, and showing the built-in defaults to somebody who may not read
+			     them would present a guess as the configuration. -->
+			{#if $canAccess('settings', 'view')}
 			<Card.Root>
 				<Card.Header>
 					<Card.Title class="text-sm font-medium flex items-center gap-2">
 						<ShieldCheck class="w-4 h-4" />
-						Vulnerability scanners
+						{m.settings_general_vulnerability_scanners()}
 					</Card.Title>
 				</Card.Header>
 				<Card.Content class="space-y-4">
 					<div class="space-y-2">
-						<Label for="grype-image">Grype image</Label>
+						<Label for="grype-image">{m.settings_general_scanner_image({ scanner: 'Grype' })}</Label>
 						<Input
 							id="grype-image"
 							value={defaultGrypeImage}
 							onblur={handleGrypeImageBlur}
 							disabled={!$canAccess('settings', 'edit')}
-							placeholder={"anchore/grype:v0.110.0"}
+							placeholder={DEFAULT_GRYPE_IMAGE}
 						/>
-						<p class="text-xs text-muted-foreground">Docker image for Grype scanner. Pin to a specific version for supply chain security.</p>
+						<div class="flex items-center gap-2 flex-wrap">
+							<p class="text-xs text-muted-foreground">{m.settings_general_scanner_image_hint({ scanner: 'Grype' })}</p>
+							{#if newerScanners.grype}
+								<button
+									type="button"
+									class="inline-flex items-center gap-1 text-2xs px-1.5 py-0.5 rounded-full border border-green-500/30 bg-green-500/10 text-green-600 hover:bg-green-500/20 transition-colors"
+									onclick={() => applyScannerVersion('grype')}
+									disabled={!$canAccess('settings', 'edit')}
+								>
+									{m.settings_general_scanner_use_version({ version: newerScanners.grype })}
+								</button>
+							{:else if scannerUpToDate.grype}
+								<span class="text-2xs text-muted-foreground">{m.settings_general_scanner_up_to_date()}</span>
+							{/if}
+						</div>
 					</div>
 					<div class="space-y-2">
-						<Label for="trivy-image">Trivy image</Label>
+						<Label for="trivy-image">{m.settings_general_scanner_image({ scanner: 'Trivy' })}</Label>
 						<Input
 							id="trivy-image"
 							value={defaultTrivyImage}
 							onblur={handleTrivyImageBlur}
 							disabled={!$canAccess('settings', 'edit')}
-							placeholder={"aquasec/trivy:0.69.3"}
+							placeholder={DEFAULT_TRIVY_IMAGE}
 						/>
-						<p class="text-xs text-muted-foreground">Docker image for Trivy scanner. Pin to a specific version for supply chain security.</p>
+						<div class="flex items-center gap-2 flex-wrap">
+							<p class="text-xs text-muted-foreground">{m.settings_general_scanner_image_hint({ scanner: 'Trivy' })}</p>
+							{#if newerScanners.trivy}
+								<button
+									type="button"
+									class="inline-flex items-center gap-1 text-2xs px-1.5 py-0.5 rounded-full border border-green-500/30 bg-green-500/10 text-green-600 hover:bg-green-500/20 transition-colors"
+									onclick={() => applyScannerVersion('trivy')}
+									disabled={!$canAccess('settings', 'edit')}
+								>
+									{m.settings_general_scanner_use_version({ version: newerScanners.trivy })}
+								</button>
+							{:else if scannerUpToDate.trivy}
+								<span class="text-2xs text-muted-foreground">{m.settings_general_scanner_up_to_date()}</span>
+							{/if}
+						</div>
+						<div class="pt-1">
+							<Button variant="outline" size="sm" onclick={checkScannerVersions} disabled={checkingScannerVersions}>
+								{checkingScannerVersions ? m.settings_general_scanner_checking() : m.settings_general_scanner_check_versions()}
+							</Button>
+						</div>
 					</div>
 					<div class="space-y-2">
-						<Label for="grype-args">Default Grype arguments</Label>
+						<Label for="grype-args">{m.settings_general_scanner_default_args({ scanner: 'Grype' })}</Label>
 						<Input
 							id="grype-args"
 							value={defaultGrypeArgs}
 							onblur={handleGrypeArgsBlur}
 							disabled={!$canAccess('settings', 'edit')}
-							placeholder={"-o json -v {image}"}
+							placeholder={DEFAULT_GRYPE_ARGS}
 						/>
-						<p class="text-xs text-muted-foreground">Use <code class="bg-muted px-1 rounded">{'{image}'}</code> as placeholder for the image name</p>
+						<p class="text-xs text-muted-foreground">{splitAtName(m.settings_general_scanner_args_hint)[0]}<code class="bg-muted px-1 rounded">{'{image}'}</code>{splitAtName(m.settings_general_scanner_args_hint)[1]}</p>
 					</div>
 					<div class="space-y-2">
-						<Label for="trivy-args">Default Trivy arguments</Label>
+						<Label for="trivy-args">{m.settings_general_scanner_default_args({ scanner: 'Trivy' })}</Label>
 						<Input
 							id="trivy-args"
 							value={defaultTrivyArgs}
 							onblur={handleTrivyArgsBlur}
 							disabled={!$canAccess('settings', 'edit')}
-							placeholder={"image --format json {image}"}
+							placeholder={DEFAULT_TRIVY_ARGS}
 						/>
-						<p class="text-xs text-muted-foreground">Use <code class="bg-muted px-1 rounded">{'{image}'}</code> as placeholder for the image name</p>
+						<p class="text-xs text-muted-foreground">{splitAtName(m.settings_general_scanner_args_hint)[0]}<code class="bg-muted px-1 rounded">{'{image}'}</code>{splitAtName(m.settings_general_scanner_args_hint)[1]}</p>
 					</div>
 					<div class="pt-2">
 						<button
@@ -881,45 +1096,45 @@ services:
 							{:else}
 								<ChevronRight class="w-3.5 h-3.5" />
 							{/if}
-							Advanced settings
+							{m.settings_general_advanced_settings()}
 						</button>
 					</div>
 					{#if showAdvancedScannerSettings}
 						<div class="space-y-2">
-							<Label for="scanner-network-mode">Network mode</Label>
+							<Label for="scanner-network-mode">{m.containers_inspect_network_mode()}</Label>
 							<Select.Root
 								type="single"
 								value={defaultScannerNetworkMode}
 								onValueChange={handleScannerNetworkModeChange}
 							>
 								<Select.Trigger id="scanner-network-mode" class="w-full" disabled={!$canAccess('settings', 'edit')}>
-									<span>{defaultScannerNetworkMode || 'Default (auto-detect)'}</span>
+									<span>{defaultScannerNetworkMode || m.settings_general_scanner_network_default()}</span>
 								</Select.Trigger>
 								<Select.Content>
-									<Select.Item value="">Default (auto-detect)</Select.Item>
+									<Select.Item value="">{m.settings_general_scanner_network_default()}</Select.Item>
 									<Select.Item value="host">host</Select.Item>
 									<Select.Item value="bridge">bridge</Select.Item>
 									<Select.Item value="none">none</Select.Item>
 								</Select.Content>
 							</Select.Root>
-							<p class="text-xs text-muted-foreground">Override the Docker network mode for vulnerability scanner containers. Use <code class="bg-muted px-1 rounded">host</code> on hosts where the default bridge can't reach the internet (e.g. iptables disabled, SELinux restricted).</p>
+							<p class="text-xs text-muted-foreground">{splitAtName(m.settings_general_scanner_network_mode_hint)[0]}<code class="bg-muted px-1 rounded">host</code>{splitAtName(m.settings_general_scanner_network_mode_hint)[1]}</p>
 						</div>
 						<div class="space-y-2">
-							<Label for="scanner-dns">DNS servers</Label>
+							<Label for="scanner-dns">{m.containers_settings_dns_servers()}</Label>
 							<Input
 								id="scanner-dns"
 								value={defaultScannerDns.join(', ')}
 								onblur={handleScannerDnsBlur}
 								disabled={!$canAccess('settings', 'edit')}
 							/>
-							<p class="text-xs text-muted-foreground">Comma-separated DNS IPs for scanner containers. Empty = inherit from the Docker daemon.</p>
+							<p class="text-xs text-muted-foreground">{m.settings_general_scanner_dns_hint()}</p>
 						</div>
 					{/if}
 					<div class="pt-2 border-t">
 						<div class="flex items-center justify-between">
 							<div>
-								<p class="text-sm font-medium">Scanner cache</p>
-								<p class="text-xs text-muted-foreground">Remove cached vulnerability databases to free disk space. Next scan will re-download fresh data (~200MB).</p>
+								<p class="text-sm font-medium">{m.settings_general_scanner_cache()}</p>
+								<p class="text-xs text-muted-foreground">{m.settings_general_scanner_cache_hint()}</p>
 							</div>
 							<Button
 								variant="outline"
@@ -928,26 +1143,65 @@ services:
 								onclick={clearScannerCache}
 							>
 								{#if clearingCache}
-									Clearing...
+									{m.settings_general_clearing()}
 								{:else}
-									Clear cache
+									{m.settings_general_clear_cache()}
 								{/if}
 							</Button>
 						</div>
 					</div>
 				</Card.Content>
 			</Card.Root>
+			{/if}
+
+			<!-- Held to settings:view with the rest: it decides how every update check
+			     compares versions, and the defaults shown to somebody who may not read
+			     it would be saved over the real configuration on the first change. -->
+			{#if $canAccess('settings', 'view')}
+			<Card.Root>
+				<Card.Header>
+					<Card.Title class="text-sm font-medium flex items-center gap-2">
+						<Clock class="w-4 h-4" />
+						{m.settings_envs_min_age_title()}
+						<Tooltip.Provider delayDuration={100}>
+							<Tooltip.Root>
+								<Tooltip.Trigger>
+									<HelpCircle class="w-4 h-4 text-muted-foreground cursor-help" />
+								</Tooltip.Trigger>
+								<Tooltip.Portal>
+									<Tooltip.Content side="right" sideOffset={8} class="!w-96 space-y-2">
+										<p>{m.settings_envs_min_age_help_source()}</p>
+										<p>{m.settings_general_min_age_help_override()}</p>
+										<p>{m.settings_envs_min_age_help_restart()}</p>
+									</Tooltip.Content>
+								</Tooltip.Portal>
+							</Tooltip.Root>
+						</Tooltip.Provider>
+					</Card.Title>
+					<Card.Description>
+						{m.settings_envs_min_age_description()}
+					</Card.Description>
+				</Card.Header>
+				<Card.Content class="flex items-end gap-3">
+					<div class="space-y-2 flex-1">
+						<Label for="minimum-release-age">{m.settings_general_min_age_hours()}</Label>
+						<Input id="minimum-release-age" type="number" min="0" max="720" step="1" bind:value={releaseAgeHours} disabled={releaseAgeOverridden || !$canAccess('settings', 'edit')} />
+					</div>
+					<Button onclick={saveReleaseAge} disabled={releaseAgeSaving || releaseAgeOverridden || !$canAccess('settings', 'edit')}>{m.settings_general_save()}</Button>
+				</Card.Content>
+				{#if releaseAgeOverridden}
+					<p class="px-6 pb-4 text-xs text-muted-foreground">{m.settings_general_min_age_set_by_env()}</p>
+				{/if}
+			</Card.Root>
 
 			<Card.Root>
 				<Card.Header>
 					<Card.Title class="text-sm font-medium flex items-center gap-2">
 						<Tags class="w-4 h-4" />
-						Newer version tags
+						{m.settings_general_newer_version_tags()}
 					</Card.Title>
 					<Card.Description>
-						How the update check looks for newer version tags on pinned images. Applies to every
-						check - scheduled and manual. Per-environment settings decide whether to check on a
-						schedule; this decides how versions are compared.
+						{m.settings_general_newer_version_tags_description()}
 					</Card.Description>
 				</Card.Header>
 				<Card.Content>
@@ -956,30 +1210,36 @@ services:
 						bind:maxBump={semverMaxBump}
 						bind:matchFlavor={semverMatchFlavor}
 						bind:includePrerelease={semverIncludePrerelease}
+						bind:rejectOlderImages={semverRejectOlderImages}
 					/>
 				</Card.Content>
 			</Card.Root>
+			{/if}
 
+			<!-- Held to settings:view: these describe how this installation is built
+			     and run, and showing the built-in defaults to somebody who may not read
+			     them would present a guess as the configuration. -->
+			{#if $canAccess('settings', 'view')}
 			<Card.Root>
 				<Card.Header>
 					<Card.Title class="text-sm font-medium flex items-center gap-2">
 						<Database class="w-4 h-4" />
-						System jobs
+						{m.schedules_type_system_jobs()}
 					</Card.Title>
 				</Card.Header>
 				<Card.Content class="space-y-4">
 					<div class="space-y-3">
 						<div>
 							<div class="flex items-center gap-2">
-								<Label>Activity event collection mode</Label>
+								<Label>{m.settings_general_event_collection_mode()}</Label>
 								<Tooltip.Root>
 									<Tooltip.Trigger>
 										<HelpCircle class="w-3.5 h-3.5 text-muted-foreground" />
 									</Tooltip.Trigger>
 									<Tooltip.Content class="w-80">
 										<p class="text-xs">
-											<strong>Stream:</strong> Continuous event stream from Docker, instant notifications, higher CPU usage<br />
-											<strong>Poll:</strong> Periodic checks for new events, slight notification delay, lower CPU usage
+											<strong>{m.activity_mode_stream()}:</strong> {m.settings_general_event_mode_stream_hint()}<br />
+											<strong>{m.activity_mode_poll()}:</strong> {m.settings_general_event_mode_poll_hint()}
 										</p>
 									</Tooltip.Content>
 								</Tooltip.Root>
@@ -996,7 +1256,7 @@ services:
 										class="accent-primary w-4 h-4"
 									/>
 									<Activity class="w-3.5 h-3.5" />
-									<span class="text-sm">Stream</span>
+									<span class="text-sm">{m.activity_mode_stream()}</span>
 								</label>
 								<label class="flex items-center gap-2 cursor-pointer">
 									<input
@@ -1009,10 +1269,10 @@ services:
 										class="accent-primary w-4 h-4"
 									/>
 									<Clock class="w-3.5 h-3.5" />
-									<span class="text-sm">Poll</span>
+									<span class="text-sm">{m.activity_mode_poll()}</span>
 								</label>
 
-								<span class="text-xs text-muted-foreground {(eventCollectionMode || 'stream') === 'poll' ? '' : 'invisible'}">every</span>
+								<span class="text-xs text-muted-foreground {(eventCollectionMode || 'stream') === 'poll' ? '' : 'invisible'}">{m.settings_general_poll_every()}</span>
 								<Select.Root
 									type="single"
 									value={String(eventPollInterval || 60000)}
@@ -1035,15 +1295,14 @@ services:
 
 					<div class="space-y-1 pt-2 border-t">
 						<div class="flex items-center gap-2">
-							<Label for="metrics-interval">Metrics collection interval</Label>
+							<Label for="metrics-interval">{m.settings_general_metrics_interval()}</Label>
 							<Tooltip.Root>
 								<Tooltip.Trigger>
 									<HelpCircle class="w-3.5 h-3.5 text-muted-foreground" />
 								</Tooltip.Trigger>
 								<Tooltip.Content class="w-80">
 									<p class="text-xs">
-										How often to collect CPU/memory metrics from running containers. Lower intervals
-										provide more frequent updates but increase CPU usage.
+										{m.settings_general_metrics_interval_help()}
 									</p>
 								</Tooltip.Content>
 							</Tooltip.Root>
@@ -1070,14 +1329,14 @@ services:
 
 					<div class="space-y-1 pt-2 border-t">
 						<div class="flex items-center gap-3">
-							<Label for="schedule-retention">Schedule execution cleanup</Label>
+							<Label for="schedule-retention">{m.settings_general_schedule_cleanup()}</Label>
 							<TogglePill
 								checked={scheduleCleanupEnabled}
 								onchange={handleScheduleCleanupEnabledChange}
 								disabled={!$canAccess('settings', 'edit')}
 							/>
 						</div>
-						<p class="text-xs text-muted-foreground">Delete executions older than specified days</p>
+						<p class="text-xs text-muted-foreground">{m.settings_general_schedule_cleanup_hint()}</p>
 						<div class="flex items-center gap-2 mt-2">
 							<Input
 								id="schedule-retention"
@@ -1089,7 +1348,7 @@ services:
 								disabled={!$canAccess('settings', 'edit') || !scheduleCleanupEnabled}
 								class="w-20"
 							/>
-							<span class="text-sm text-muted-foreground">days</span>
+							<span class="text-sm text-muted-foreground">{m.settings_general_days()}</span>
 							<div class="ml-auto">
 								<CronEditor
 									value={scheduleCleanupCron}
@@ -1101,14 +1360,14 @@ services:
 					</div>
 					<div class="space-y-1">
 						<div class="flex items-center gap-3">
-							<Label for="event-retention">Container event cleanup</Label>
+							<Label for="event-retention">{m.settings_general_event_cleanup()}</Label>
 							<TogglePill
 								checked={eventCleanupEnabled}
 								onchange={handleEventCleanupEnabledChange}
 								disabled={!$canAccess('settings', 'edit')}
 							/>
 						</div>
-						<p class="text-xs text-muted-foreground">Delete events older than specified days</p>
+						<p class="text-xs text-muted-foreground">{m.settings_general_event_cleanup_hint()}</p>
 						<div class="flex items-center gap-2 mt-2">
 							<Input
 								id="event-retention"
@@ -1120,7 +1379,7 @@ services:
 								disabled={!$canAccess('settings', 'edit') || !eventCleanupEnabled}
 								class="w-20"
 							/>
-							<span class="text-sm text-muted-foreground">days</span>
+							<span class="text-sm text-muted-foreground">{m.settings_general_days()}</span>
 							<div class="ml-auto">
 								<CronEditor
 									value={eventCleanupCron}
@@ -1130,26 +1389,69 @@ services:
 							</div>
 						</div>
 					</div>
-					<div class="space-y-1 pt-2 border-t">
+					<div class="space-y-1">
 						<div class="flex items-center gap-3">
-							<Label>Volume helper cleanup</Label>
-							<Badge variant="secondary" class="text-xs">Always enabled</Badge>
+							<Label for="scan-retention-keep">{m.settings_general_scan_retention()}</Label>
+							<TogglePill
+								checked={scanRetentionEnabled}
+								onchange={handleScanRetentionEnabledChange}
+								disabled={!$canAccess('settings', 'edit')}
+							/>
 						</div>
 						<p class="text-xs text-muted-foreground">
-							Automatically removes temporary containers used for browsing volume contents.
-							Runs every 30 minutes and on startup.
+							{m.settings_general_scan_retention_hint()}
+						</p>
+						<div class="flex items-center gap-2 mt-2">
+							<Input
+								id="scan-retention-keep"
+								type="number"
+								min="1"
+								max="100"
+								value={scanRetentionKeep}
+								onchange={handleScanRetentionKeepChange}
+								disabled={!$canAccess('settings', 'edit') || !scanRetentionEnabled}
+								class="w-20"
+							/>
+							<span class="text-sm text-muted-foreground">{m.settings_general_scan_retention_keep()}</span>
+							<Input
+								id="scan-retention-grace"
+								type="number"
+								min="0"
+								max="365"
+								value={scanRetentionGraceDays}
+								onchange={handleScanRetentionGraceChange}
+								disabled={!$canAccess('settings', 'edit') || !scanRetentionEnabled}
+								class="w-20 ml-3"
+							/>
+							<span class="text-sm text-muted-foreground">{m.settings_general_scan_retention_grace()}</span>
+							<div class="ml-auto">
+								<CronEditor
+									value={scanRetentionCron}
+									onchange={handleScanRetentionCronChange}
+									disabled={!$canAccess('settings', 'edit') || !scanRetentionEnabled}
+								/>
+							</div>
+						</div>
+					</div>
+					<div class="space-y-1 pt-2 border-t">
+						<div class="flex items-center gap-3">
+							<Label>{m.settings_general_volume_helper_cleanup()}</Label>
+							<Badge variant="secondary" class="text-xs">{m.settings_general_always_enabled()}</Badge>
+						</div>
+						<p class="text-xs text-muted-foreground">
+							{m.settings_general_volume_helper_cleanup_hint()}
 						</p>
 					</div>
 					<div class="space-y-1 pt-2 border-t">
 						<div class="flex items-center gap-3">
-							<Label>Scanner cache cleanup</Label>
+							<Label>{m.settings_general_scanner_cleanup()}</Label>
 							<TogglePill
 								checked={scannerCleanupEnabled}
 								onchange={handleScannerCleanupEnabledChange}
 								disabled={!$canAccess('settings', 'edit')}
 							/>
 						</div>
-						<p class="text-xs text-muted-foreground">Remove cached vulnerability databases to reclaim disk space</p>
+						<p class="text-xs text-muted-foreground">{m.settings_general_scanner_cleanup_hint()}</p>
 						{#if scannerCleanupEnabled}
 							<div class="mt-2">
 								<CronEditor
@@ -1162,7 +1464,7 @@ services:
 					</div>
 					<div class="space-y-1 pt-2 border-t">
 						<div class="flex items-center gap-3">
-							<Label>Deploy log reconcile</Label>
+							<Label>{m.schedules_type_deploy_log_reconcile()}</Label>
 							<Tooltip.Provider delayDuration={100}>
 								<Tooltip.Root>
 									<Tooltip.Trigger>
@@ -1170,11 +1472,7 @@ services:
 									</Tooltip.Trigger>
 									<Tooltip.Portal>
 										<Tooltip.Content side="right" sideOffset={8} class="!w-80">
-											Every deploy from Dockhand keeps a log file on disk, linked to its run in the
-											Deploys tab. This job runs on a schedule to keep the two in sync: it deletes
-											orphaned log files whose deploy run was already removed, and marks a run whose
-											log file has gone missing (so the Deploys tab shows "log unavailable" instead
-											of a blank). It never deletes a deploy run itself.
+											{m.settings_general_deploy_log_reconcile_help()}
 										</Tooltip.Content>
 									</Tooltip.Portal>
 								</Tooltip.Root>
@@ -1185,7 +1483,7 @@ services:
 								disabled={!$canAccess('settings', 'edit')}
 							/>
 						</div>
-						<p class="text-xs text-muted-foreground">Keeps deploy-log files in sync with their deploy records: removes logs whose run is gone, and flags runs whose log went missing (never deletes a run).</p>
+						<p class="text-xs text-muted-foreground">{m.settings_general_deploy_log_reconcile_hint()}</p>
 						{#if deployLogReconcileEnabled}
 							<div class="mt-2">
 								<CronEditor
@@ -1198,50 +1496,51 @@ services:
 					</div>
 					<div class="space-y-1 pt-2 border-t">
 						<div class="flex items-center gap-3">
-							<Label>Protect scanner images from prune</Label>
+							<Label>{m.settings_general_protect_helper_images()}</Label>
 							<Tooltip.Root>
 								<Tooltip.Trigger>
 									<HelpCircle class="w-3.5 h-3.5 text-muted-foreground" />
 								</Tooltip.Trigger>
 								<Tooltip.Content side="top" class="w-96 max-w-[90vw]">
-									<p>When ON, "Prune all unused" skips Dockhand's grype and trivy scanner images so the next scan doesn't have to re-pull them (and re-download the ~100MB vuln database). When OFF, prune behaves like vanilla Docker and may remove them.</p>
+									<p>{m.settings_general_protect_helper_images_help()}</p>
 								</Tooltip.Content>
 							</Tooltip.Root>
 							<TogglePill
 								checked={$appSettings.protectScannerImages}
 								onchange={(checked) => {
 									appSettings.setProtectScannerImages(checked);
-									toast.success(checked ? 'Scanner images will be skipped during prune' : 'Scanner images will be pruned with everything else');
+									toast.success(checked ? m.settings_general_toast_helper_images_protected() : m.settings_general_toast_helper_images_unprotected());
 								}}
 								disabled={!$canAccess('settings', 'edit')}
 							/>
 						</div>
-						<p class="text-xs text-muted-foreground">Skip grype and trivy images during "Prune all unused"</p>
+						<p class="text-xs text-muted-foreground">{m.settings_general_protect_helper_images_hint()}</p>
 					</div>
 				</Card.Content>
 			</Card.Root>
+			{/if}
 
 			<Card.Root>
 				<Card.Header>
 					<Card.Title class="text-sm font-medium flex items-center gap-2">
 						<LayoutDashboard class="w-4 h-4" />
-						Dashboard
+						{m.nav_dashboard()}
 					</Card.Title>
 				</Card.Header>
 				<Card.Content class="space-y-4">
 					<div class="space-y-3">
 						<div class="space-y-1">
 							<div class="flex items-center gap-3">
-								<Label>Label filter matching</Label>
+								<Label>{m.settings_general_label_filter_mode()}</Label>
 								<Tooltip.Root>
 									<Tooltip.Trigger>
 										<HelpCircle class="w-3.5 h-3.5 text-muted-foreground" />
 									</Tooltip.Trigger>
 									<Tooltip.Content class="w-80">
 										<p class="text-xs">
-											Controls how multiple selected labels filter environments on the dashboard.
-											<strong>"Any"</strong>: shows environments that have at least one of the selected labels.
-											<strong>"All"</strong>: shows only environments that have every selected label.
+											{m.settings_general_label_filter_help_intro()}
+											<strong>{m.settings_general_label_filter_any_quoted()}</strong>: {m.settings_general_label_filter_any_help()}
+											<strong>{m.settings_general_label_filter_all_quoted()}</strong>: {m.settings_general_label_filter_all_help()}
 										</p>
 									</Tooltip.Content>
 								</Tooltip.Root>
@@ -1249,6 +1548,8 @@ services:
 									value={labelFilterMode}
 									leftValue="any"
 									rightValue="all"
+									leftLabel={m.settings_general_label_filter_any()}
+									rightLabel={m.settings_general_label_filter_all()}
 									onchange={(mode) => appSettings.setLabelFilterMode(mode as LabelFilterMode)}
 									disabled={!$canAccess('settings', 'edit')}
 								/>

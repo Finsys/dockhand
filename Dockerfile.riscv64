@@ -23,7 +23,7 @@
 # -----------------------------------------------------------------------------
 # Alpine edge has docker-cli for riscv64 but NOT docker-compose.
 # Build it from source since Go has excellent riscv64 cross-compilation.
-FROM --platform=$BUILDPLATFORM golang:1.25.9-alpine AS compose-builder
+FROM --platform=$BUILDPLATFORM golang:1.26.9-alpine AS compose-builder
 ARG TARGETARCH
 
 RUN apk add --no-cache git
@@ -49,7 +49,10 @@ RUN MAKEFLAGS="-j$(nproc)" npm ci --ignore-scripts \
     && MAKEFLAGS="-j$(nproc)" npm rebuild
 
 COPY . .
-RUN npm run build
+# The message catalogue puts the build close to Node's default heap: it needs over 3 GB
+# at 2168 keys across 6 locales and grows with every locale. Without a limit the build
+# dies as an exit-134 OOM with no useful message, so state the ceiling here.
+RUN NODE_OPTIONS=--max-old-space-size=6144 npm run build
 
 # -----------------------------------------------------------------------------
 # Stage 3: Native Addon Builder (runs on riscv64 via QEMU)
@@ -72,7 +75,7 @@ RUN MAKEFLAGS="-j$(nproc)" npm ci --omit=dev --ignore-scripts \
 # -----------------------------------------------------------------------------
 # Stage 4: Go Collector Builder (cross-compile from build platform)
 # -----------------------------------------------------------------------------
-FROM --platform=$BUILDPLATFORM golang:1.25.13 AS go-builder
+FROM --platform=$BUILDPLATFORM golang:1.26.9 AS go-builder
 ARG TARGETARCH
 WORKDIR /app
 COPY collector/ ./collector/

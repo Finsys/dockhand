@@ -3,6 +3,8 @@
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import { themeStore } from '$lib/stores/theme';
 	import { getMonospaceFont } from '$lib/themes';
+	import type { TerminalMode } from '$lib/types';
+	import { m } from '$lib/paraglide/messages.js';
 
 	// Dynamic imports for browser-only xterm
 	let TerminalClass: any;
@@ -16,11 +18,12 @@
 		shell: string;
 		user: string;
 		envId: number | null;
+		mode?: TerminalMode;
 		fontSize?: number;
 		autoConnect?: boolean;
 	}
 
-	let { containerId, containerName, shell, user, envId, fontSize = 13, autoConnect = true }: Props = $props();
+	let { containerId, containerName, shell, user, envId, mode = 'exec', fontSize = 13, autoConnect = true }: Props = $props();
 
 	let terminal: any = null;
 	let fitAddon: any = null;
@@ -75,7 +78,7 @@
 			ws = null;
 		}
 		connected = false;
-		terminal?.writeln('\x1b[90m\r\nReconnecting...\x1b[0m');
+		terminal?.writeln(`\x1b[90m\r\n${m.terminal_reconnecting()}\x1b[0m`);
 		connect();
 	}
 
@@ -178,13 +181,24 @@
 		// In production, connect to the same port as the app
 		const isDev = import.meta.env.DEV;
 		const portPart = isDev ? ':5174' : (window.location.port ? `:${window.location.port}` : '');
-		let wsUrl = `${protocol}//${wsHost}${portPart}/api/containers/${containerId}/exec?shell=${encodeURIComponent(shell)}&user=${encodeURIComponent(user)}`;
+		const params = new URLSearchParams({
+			shell,
+			user
+		});
+		if (mode === 'attach') {
+			params.set('mode', 'attach');
+		}
+		let wsUrl = `${protocol}//${wsHost}${portPart}/api/containers/${containerId}/exec?${params}`;
 		if (envId) {
 			wsUrl += `&envId=${envId}`;
 		}
 
-		terminal.writeln(`\x1b[90mConnecting to ${containerName}...\x1b[0m`);
-		terminal.writeln(`\x1b[90mShell: ${shell}, User: ${user || 'default'}\x1b[0m`);
+		terminal.writeln(`\x1b[90m${mode === 'attach' ? m.terminal_attaching({ name: containerName }) : m.containers_terminal_connecting({ name: containerName })}\x1b[0m`);
+		if (mode === 'attach') {
+			terminal.writeln(`\x1b[90m${m.terminal_attach_info()}\x1b[0m`);
+		} else {
+			terminal.writeln(`\x1b[90m${m.containers_terminal_session_info({ shell, user: user || m.containers_terminal_user_default() })}\x1b[0m`);
+		}
 		terminal.writeln('');
 
 		ws = new WebSocket(wsUrl);
@@ -207,9 +221,9 @@
 					terminal?.write(msg.data);
 				} else if (msg.type === 'error') {
 					error = msg.message;
-					terminal?.writeln(`\x1b[31mError: ${msg.message}\x1b[0m`);
+					terminal?.writeln(`\x1b[31m${m.containers_terminal_error({ message: msg.message })}\x1b[0m`);
 				} else if (msg.type === 'exit') {
-					terminal?.writeln('\x1b[90m\r\nSession ended.\x1b[0m');
+					terminal?.writeln(`\x1b[90m\r\n${m.containers_terminal_session_ended()}\x1b[0m`);
 					connected = false;
 				}
 			} catch {
@@ -219,12 +233,12 @@
 
 		ws.onerror = () => {
 			error = 'Connection error';
-			terminal?.writeln('\x1b[31mConnection error\x1b[0m');
+			terminal?.writeln(`\x1b[31m${m.containers_terminal_connection_error()}\x1b[0m`);
 		};
 
 		ws.onclose = () => {
 			connected = false;
-			terminal?.writeln('\x1b[90mDisconnected.\x1b[0m');
+			terminal?.writeln(`\x1b[90m${m.containers_terminal_disconnected()}\x1b[0m`);
 		};
 	}
 

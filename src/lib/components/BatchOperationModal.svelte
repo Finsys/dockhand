@@ -5,13 +5,37 @@
 	import { Check, X, Loader2, Circle, Ban } from 'lucide-svelte';
 	import { onDestroy } from 'svelte';
 	import { formatBytes } from '$lib/utils/format';
+	import { m } from '$lib/paraglide/messages.js';
 
-	const progressText: Record<string, string> = {
-		remove: 'removing',
-		start: 'starting',
-		stop: 'stopping',
-		restart: 'restarting',
-		down: 'stopping'
+	// Functions so the text is read in the active language at render time
+	const progressText: Record<string, () => string> = {
+		remove: m.batchop_progress_removing,
+		start: m.batchop_progress_starting,
+		stop: m.batchop_progress_stopping,
+		restart: m.batchop_progress_restarting,
+		pause: m.batchop_progress_pausing,
+		unpause: m.batchop_progress_unpausing,
+		down: m.batchop_progress_stopping
+	};
+
+	// The operation as a verb, for the "preparing" line
+	const operationText: Record<string, () => string> = {
+		remove: m.batchop_operation_remove,
+		start: m.batchop_operation_start,
+		stop: m.batchop_operation_stop,
+		restart: m.batchop_operation_restart,
+		pause: m.batchop_operation_pause,
+		unpause: m.batchop_operation_unpause,
+		down: m.batchop_operation_down
+	};
+
+	// "{count} containers" etc., so each language can inflect the noun
+	const entityCountText: Record<Props['entityType'], (inputs: { count: number }) => string> = {
+		containers: m.batchop_count_containers,
+		images: m.batchop_count_images,
+		volumes: m.batchop_count_volumes,
+		networks: m.batchop_count_networks,
+		stacks: m.batchop_count_stacks
 	};
 
 	// Local type definitions (matching server types)
@@ -177,7 +201,7 @@
 	function handleClose() {
 		if (isRunning) {
 			// Confirm before closing during operation
-			if (!confirm('Operation is still running. Cancel and close?')) {
+			if (!confirm(m.batchop_confirm_cancel_close())) {
 				return;
 			}
 			handleCancel();
@@ -215,11 +239,11 @@
 			<Dialog.Title>{title}</Dialog.Title>
 			<Dialog.Description>
 				{#if isRunning}
-					Processing {items.length} {entityType}...
+					{m.batchop_processing({ items: entityCountText[entityType]({ count: items.length }) })}
 				{:else if isComplete}
-					Completed: {successCount} succeeded{#if failCount > 0}, {failCount} failed{/if}{#if cancelledCount > 0}, {cancelledCount} cancelled{/if}{#if totalSize && successCount > 0} ({formatBytes(totalSize)}){/if}
+					{m.batchop_completed({ count: successCount })}{#if failCount > 0}, {m.batchop_completed_failed({ count: failCount })}{/if}{#if cancelledCount > 0}, {m.batchop_completed_cancelled({ count: cancelledCount })}{/if}{#if totalSize && successCount > 0} ({formatBytes(totalSize)}){/if}
 				{:else}
-					Preparing to {operation} {items.length} {entityType}...
+					{m.batchop_preparing({ operation: operationText[operation]?.() ?? operation, items: entityCountText[entityType]({ count: items.length }) })}
 				{/if}
 			</Dialog.Description>
 		</Dialog.Header>
@@ -260,15 +284,15 @@
 						<!-- Status text -->
 						<span class="text-xs text-muted-foreground flex-shrink-0">
 							{#if item.status === 'pending'}
-								pending
+								{m.batchop_status_pending()}
 							{:else if item.status === 'processing'}
-								{progressText[operation] ?? operation}...
+								{progressText[operation]?.() ?? operation}...
 							{:else if item.status === 'success'}
-								done
+								{m.batchop_status_done()}
 							{:else if item.status === 'error'}
-								<span class="text-red-500">failed</span>
+								<span class="text-red-500">{m.batchop_status_failed()}</span>
 							{:else if item.status === 'cancelled'}
-								<span class="text-amber-500">cancelled</span>
+								<span class="text-amber-500">{m.batchop_status_cancelled()}</span>
 							{/if}
 						</span>
 					</div>
@@ -285,26 +309,26 @@
 		<!-- Footer: Summary + Button in one row -->
 		<div class="flex items-center justify-between pt-2">
 			<div class="flex items-center gap-3 text-sm">
-				<div class="flex items-center gap-1" title="Succeeded">
+				<div class="flex items-center gap-1" title={m.batchop_summary_succeeded()}>
 					<Check class="w-4 h-4 text-green-500" />
 					<span class="tabular-nums">{successCount}</span>
 				</div>
-				<div class="flex items-center gap-1" title="Failed">
+				<div class="flex items-center gap-1" title={m.batchop_summary_failed()}>
 					<X class="w-4 h-4 text-red-500" />
 					<span class="tabular-nums">{failCount}</span>
 				</div>
-				<div class="flex items-center gap-1" title="Cancelled">
+				<div class="flex items-center gap-1" title={m.batchop_summary_cancelled()}>
 					<Ban class="w-4 h-4 text-amber-500" />
 					<span class="tabular-nums">{cancelledCount}</span>
 				</div>
-				<div class="flex items-center gap-1 text-muted-foreground" title="Pending">
+				<div class="flex items-center gap-1 text-muted-foreground" title={m.batchop_summary_pending()}>
 					<Circle class="w-4 h-4" />
 					<span class="tabular-nums">{items.length - successCount - failCount - cancelledCount}</span>
 				</div>
 			</div>
 			{#if isRunning}
 				<Button variant="outline" size="sm" onclick={handleCancel}>
-					Cancel
+					{m.batchop_cancel()}
 				</Button>
 			{:else}
 				<Button size="sm" onclick={handleOk}>

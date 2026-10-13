@@ -1,7 +1,8 @@
 import { json } from '@sveltejs/kit';
-import { createContainerFile, createContainerDirectory } from '$lib/server/docker';
+import { createContainerFile, createContainerDirectory, chownContainerPath } from '$lib/server/docker';
 import { authorize } from '$lib/server/authorize';
 import { validateDockerIdParam } from '$lib/server/docker-validation';
+import { parseChownSpec } from '$lib/server/chown-spec-core';
 import type { RequestHandler } from './$types';
 
 /**
@@ -10,11 +11,11 @@ import type { RequestHandler } from './$types';
  * @openapi
  * summary: Create an empty file or a directory inside a container (requires the 'exec' permission)
  * path: id:string! Container ID or name (from GET /api/containers)
- * query: env:integer The target environment ID (omit for the local/default Docker host) (from GET /api/environments)
- * body: {path:string!, type:string!}
- * body-example: {"path":"/app/data","type":"directory"}
- * resp-200: {success:boolean!, path:string!, type:string!}
- * resp-200-example: {"success":true,"path":"/app/data","type":"directory"}
+ * query: env:integer! The target environment ID the container lives in (from GET /api/environments)
+ * body: {path:string!, type:string!, owner:string}
+ * body-example: {"path":"/app/data","type":"directory","owner":"1000:1000"}
+ * resp-200: {success:boolean!, path:string!, type:string!, owner:string}
+ * resp-200-example: {"success":true,"path":"/app/data","type":"directory","owner":"1000:1000"}
  * resp-400: Path missing, type not "file" or "directory", or the container is not running
  * resp-403: Permission denied
  * resp-404: Parent directory not found
@@ -37,7 +38,7 @@ export const POST: RequestHandler = async ({ params, url, cookies, request }) =>
 
 	try {
 		const body = await request.json();
-		const { path, type } = body;
+		const { path, type, owner } = body;
 
 		if (!path || typeof path !== 'string') {
 			return json({ error: 'Path is required' }, { status: 400 });
@@ -47,17 +48,34 @@ export const POST: RequestHandler = async ({ params, url, cookies, request }) =>
 			return json({ error: 'Type must be "file" or "directory"' }, { status: 400 });
 		}
 
+		// Validate the optional owner up front so we don't create then fail on chown.
+		let ownerSpec: string | undefined;
+		if (owner !== undefined && owner !== null && String(owner).trim() !== '') {
+			const parsed = parseChownSpec(owner);
+			if ('error' in parsed) {
+				return json({ error: parsed.error }, { status: 400 });
+			}
+			ownerSpec = parsed.value;
+		}
+
 		if (type === 'file') {
 			await createContainerFile(params.id, path, envIdNum);
 		} else {
 			await createContainerDirectory(params.id, path, envIdNum);
 		}
 
-		return json({ success: true, path, type });
+		if (ownerSpec) {
+			await chownContainerPath(params.id, path, ownerSpec, type === 'directory', envIdNum);
+		}
+
+		return json({ success: true, path, type, owner: ownerSpec ?? null });
 	} catch (error: any) {
 		console.error('Error creating path:', error);
 		const msg = error.message || String(error);
 
+		if (msg.includes('invalid user') || msg.includes('invalid group')) {
+			return json({ error: 'That user or group does not exist in the container' }, { status: 400 });
+		}
 		if (msg.includes('Permission denied')) {
 			return json({ error: 'Permission denied' }, { status: 403 });
 		}

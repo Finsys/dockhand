@@ -15,6 +15,8 @@ export interface TarEntry {
 	/** Path inside the archive, e.g. "metadata/stacks/foo/compose.yaml". A leading slash is stripped. */
 	path: string;
 	content: Uint8Array;
+	/** Unix file mode. Defaults to 0644; credential files use 0600. */
+	mode?: number;
 }
 
 /** A file to stream into the tar lazily from disk (no in-RAM contents). */
@@ -46,7 +48,7 @@ export function buildTarStream(sources: TarFileSource[], inlineEntries: TarEntry
 	(async () => {
 		try {
 			for (const e of inlineEntries) {
-				const w = packer.controller.add({ name: e.path.replace(/^\/+/, ''), size: e.content.length, mode: 0o644, mtime, uid: 0, gid: 0, uname: 'root', gname: 'root', type: 'file' });
+				const w = packer.controller.add({ name: e.path.replace(/^\/+/, ''), size: e.content.length, mode: e.mode ?? 0o644, mtime, uid: 0, gid: 0, uname: 'root', gname: 'root', type: 'file' });
 				await Readable.toWeb(Readable.from(Buffer.from(e.content))).pipeTo(w);
 			}
 			for (const s of sources) {
@@ -71,7 +73,7 @@ export function buildTar(entries: TarEntry[], mtimeSecs = Math.floor(Date.now() 
 			header: {
 				name: e.path.replace(/^\/+/, ''),
 				size: e.content.length,
-				mode: 0o644,
+				mode: e.mode ?? 0o644,
 				mtime: new Date(mtimeSecs * 1000),
 				uid: 0,
 				gid: 0,

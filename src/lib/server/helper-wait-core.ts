@@ -58,3 +58,27 @@ export function helperExitFromState(state: HelperContainerState | undefined | nu
 	}
 	return undefined;
 }
+
+/**
+ * Does the failure still lack any explanation, so the daemon's own State.Error is worth
+ * an extra inspect? A container that produced output already explains itself, and one
+ * whose daemon error was captured on the poll loop needs no second read.
+ */
+export function needsDaemonErrorLookup(parts: { stderr?: string; stdout?: string; daemonError?: string }): boolean {
+	return !parts.stderr && !parts.stdout && !parts.daemonError;
+}
+
+/**
+ * The detail to report when a helper container did not succeed.
+ *
+ * A container that RAN explains itself in its own output, so that comes first. One the
+ * daemon refused to start produces none at all - its only explanation is the daemon's
+ * State.Error, which is why that is kept rather than reported as "no output".
+ */
+export function helperFailureDetail(
+	parts: { stderr?: string; stdout?: string; daemonError?: string },
+	limit = 1000
+): string {
+	const detail = parts.stderr || parts.stdout || parts.daemonError || 'no output';
+	return detail.substring(0, limit);
+}

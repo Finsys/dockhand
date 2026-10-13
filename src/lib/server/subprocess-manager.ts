@@ -25,6 +25,7 @@ import {
 } from './db';
 import { sendEnvironmentNotification, sendEventNotification } from './notifications';
 import { isNotifyDisabledByLabel } from './container-labels';
+import { expectedEvents } from './expected-events-core';
 import { rssBeforeOp, rssAfterOp } from './rss-tracker';
 import { pushMetric } from './metrics-store';
 
@@ -93,6 +94,8 @@ let readyPromise: Promise<void> | null = null;
 const recentEvents: Map<string, number> = new Map();
 // Disk warning cooldown per env
 const lastDiskWarning: Map<number, number> = new Map();
+/** Environments already told they cannot use percentage warnings. */
+const warnedNoPoolSize = new Set<number>();
 // Environment name cache (for notifications)
 const envNames: Map<number, string> = new Map();
 // Track which envIds are currently configured in Go
@@ -322,8 +325,10 @@ async function handleContainerEvent(msg: GoMessage): Promise<void> {
 	// Sub-category: notification
 	const notifBefore = rssBeforeOp();
 
-	// Check dockhand.notify label — Docker includes container labels in event Actor.Attributes
-	if (!isNotifyDisabledByLabel(event.Actor?.Attributes)) {
+	// Check dockhand.notify label — Docker includes container labels in event Actor.Attributes.
+	// Also skip die/kill/stop that an in-progress update deliberately caused (#68).
+	const suppressExpected = expectedEvents.shouldSuppress(containerId, action, Date.now());
+	if (!suppressExpected && !isNotifyDisabledByLabel(event.Actor?.Attributes)) {
 		const actionLabel = action.startsWith('health_status')
 			? action.includes('unhealthy') ? 'Unhealthy' : 'Healthy'
 			: action.charAt(0).toUpperCase() + action.slice(1);
@@ -393,7 +398,22 @@ async function handleDiskUsage(msg: GoMessage): Promise<void> {
 					}
 				}
 			}
-			if (dataSpaceTotal <= 0) return;
+			if (dataSpaceTotal <= 0) {
+				// Say it once per environment: silence here looks exactly like "measured,
+				// all fine", which is how a full disk goes unnoticed. Only latch it once
+				// the host has actually answered - a cycle that carried no /info says
+				// nothing about the host, and latching on it would spend the one warning
+				// on an outage and stay quiet after the host comes back.
+				if (msg.info && !warnedNoPoolSize.has(msg.envId)) {
+					warnedNoPoolSize.add(msg.envId);
+					console.warn(
+						`[metrics] env ${msg.envId}: percentage disk warnings cannot fire - this host ` +
+							`reports no storage pool size (driver ${msg.info?.Driver ?? 'unknown'}). ` +
+							`Switch the environment to absolute (GB) warnings.`
+					);
+				}
+				return;
+			}
 
 			const diskPercentUsed = (totalUsed / dataSpaceTotal) * 100;
 			const threshold = (await getEnvSetting('disk_warning_threshold', msg.envId)) || 80;
@@ -547,7 +567,15 @@ function readStdout(): void {
 			if (lineBuffer[i] === 0x0a) { // newline
 				if (i > start) {
 					const line = lineBuffer.toString('utf8', start, i);
-					handleLine(line);
+					// This runs on a bare stdout callback, and the sync branches dispatch
+					// to every SSE subscriber. A throw anywhere down there would reach the
+					// event loop and take the process with it, so one worker message can
+					// never be worth more than itself.
+					try {
+						handleLine(line);
+					} catch (err) {
+						console.error('[SubprocessManager] Error handling worker message:', err);
+					}
 				}
 				start = i + 1;
 			}

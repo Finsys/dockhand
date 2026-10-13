@@ -82,6 +82,11 @@ type containerInfo struct {
 }
 
 type containerStats struct {
+	// Read/Preread timestamps and NumProcs are used for the Windows CPU formula,
+	// which has no system_cpu_usage to divide by (#1574).
+	Read     string `json:"read"`
+	Preread  string `json:"preread"`
+	NumProcs uint32 `json:"num_procs"`
 	CPUStats struct {
 		CPUUsage struct {
 			TotalUsage uint64 `json:"total_usage"`
@@ -97,11 +102,74 @@ type containerStats struct {
 	} `json:"precpu_stats"`
 	MemoryStats struct {
 		Usage uint64 `json:"usage"`
-		Stats struct {
+		// Windows reports memory as privateworkingset (already cache-free) instead
+		// of usage; a nil pointer means the payload is a Unix one (#1574).
+		PrivateWorkingSet *uint64 `json:"privateworkingset"`
+		Stats             struct {
 			InactiveFile      uint64 `json:"inactive_file"`
 			TotalInactiveFile uint64 `json:"total_inactive_file"`
 		} `json:"stats"`
 	} `json:"memory_stats"`
+}
+
+// calcCPUPercent mirrors src/lib/server/stats-calc-core.ts. Unix uses the
+// cpu-vs-system delta ratio; Windows has no system_cpu_usage, so it uses the
+// wall-clock formula (num_procs * elapsed) - detected by privateworkingset (#1574).
+func calcCPUPercent(s *containerStats) float64 {
+	// Compare BEFORE subtracting: uint64 underflow (precpu > cpu on a first sample
+	// or a counter reset) would wrap to a huge positive and slip past a >0 guard,
+	// producing an absurd CPU%. A non-increasing counter means no usage -> 0.
+	cur := s.CPUStats.CPUUsage.TotalUsage
+	prev := s.PrecpuStats.CPUUsage.TotalUsage
+	if cur <= prev {
+		return 0
+	}
+	cpuDelta := float64(cur - prev)
+
+	if s.MemoryStats.PrivateWorkingSet != nil {
+		read, errR := time.Parse(time.RFC3339Nano, s.Read)
+		preread, errP := time.Parse(time.RFC3339Nano, s.Preread)
+		if errR != nil || errP != nil {
+			return 0
+		}
+		// possIntervals = num_procs * elapsed-MILLISECONDS; cpu% = cpuDelta / (possIntervals*100).
+		// Matches the Docker CLI / Portainer Windows formula and the TS core.
+		elapsedMs := float64(read.Sub(preread).Milliseconds())
+		possIntervals := float64(s.NumProcs) * elapsedMs
+		if possIntervals > 0 {
+			return cpuDelta / (possIntervals * 100)
+		}
+		return 0
+	}
+
+	curSys := s.CPUStats.SystemCPUUsage
+	prevSys := s.PrecpuStats.SystemCPUUsage
+	if curSys <= prevSys {
+		return 0
+	}
+	sysDelta := float64(curSys - prevSys)
+	cpuCount := s.CPUStats.OnlineCPUs
+	if cpuCount == 0 {
+		cpuCount = 1
+	}
+	return (cpuDelta / sysDelta) * float64(cpuCount) * 100
+}
+
+// calcMemUsage mirrors the TS core: Windows uses privateworkingset (cache-free),
+// Unix subtracts inactive-file cache from usage.
+func calcMemUsage(s *containerStats) uint64 {
+	if s.MemoryStats.PrivateWorkingSet != nil {
+		return *s.MemoryStats.PrivateWorkingSet
+	}
+	memUsage := s.MemoryStats.Usage
+	memCache := s.MemoryStats.Stats.InactiveFile
+	if memCache == 0 {
+		memCache = s.MemoryStats.Stats.TotalInactiveFile
+	}
+	if memCache > 0 && memCache < memUsage {
+		return memUsage - memCache
+	}
+	return memUsage
 }
 
 type dockerInfo struct {
@@ -496,27 +564,8 @@ func (m *manager) collectMetrics(env *environment) {
 				return
 			}
 
-			cpuDelta := float64(stats.CPUStats.CPUUsage.TotalUsage - stats.PrecpuStats.CPUUsage.TotalUsage)
-			sysDelta := float64(stats.CPUStats.SystemCPUUsage - stats.PrecpuStats.SystemCPUUsage)
-			cpuCount := stats.CPUStats.OnlineCPUs
-			if cpuCount == 0 {
-				cpuCount = 1
-			}
-
-			var cpuPct float64
-			if sysDelta > 0 && cpuDelta > 0 {
-				cpuPct = (cpuDelta / sysDelta) * float64(cpuCount) * 100
-			}
-
-			memUsage := stats.MemoryStats.Usage
-			memCache := stats.MemoryStats.Stats.InactiveFile
-			if memCache == 0 {
-				memCache = stats.MemoryStats.Stats.TotalInactiveFile
-			}
-			actualMem := memUsage
-			if memCache > 0 && memCache < memUsage {
-				actualMem = memUsage - memCache
-			}
+			cpuPct := calcCPUPercent(&stats)
+			actualMem := calcMemUsage(&stats)
 
 			results[idx] = statsResult{cpu: cpuPct, mem: actualMem}
 		}(i, c.ID)

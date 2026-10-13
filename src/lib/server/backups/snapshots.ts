@@ -160,6 +160,36 @@ export async function filterSnapshotsByAccessibleEnv<T extends { tags: string[] 
 }
 
 /**
+ * Split a bulk-delete's ids into the ones to forget vs. the ones to skip.
+ *
+ * `preVetted` is the contract behind the bulk/config-delete perf path: the caller has
+ * ALREADY proven instance ownership + env access for every id via an instance-scoped
+ * restic listing (the batch route's `resolveSnapshotEnvId`, or the config listing's
+ * `--tag instance,configid`), which is a strictly stronger proof than the per-id guard.
+ * So preVetted forwards the ids as-is and NEVER calls `guard`. Without it, each id is
+ * guarded here and a failing one is skipped (never forgotten) - the only path that lets
+ * a not-owned / not-accessible id reach restic is a caller wrongly asserting preVetted.
+ * Pure over the injected `guard` so the branch is unit-testable without a repo.
+ */
+export async function selectOwnedForForget(
+	snapshotIds: string[],
+	opts: { preVetted?: boolean; guard: (id: string) => Promise<void> },
+): Promise<{ owned: string[]; skipped: string[] }> {
+	if (opts.preVetted) return { owned: snapshotIds, skipped: [] };
+	const owned: string[] = [];
+	const skipped: string[] = [];
+	for (const id of snapshotIds) {
+		try {
+			await opts.guard(id);
+			owned.push(id);
+		} catch {
+			skipped.push(id);
+		}
+	}
+	return { owned, skipped };
+}
+
+/**
  * List this installation's snapshots in a repository (optionally scoped to one
  * config). Enterprise callers only see snapshots whose env they can access.
  */

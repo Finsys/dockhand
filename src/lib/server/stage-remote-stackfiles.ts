@@ -34,10 +34,18 @@ export interface StageResult {
  * must stage in full - a cap would defeat the whole point of streaming. */
 function collectSources(rootDir: string): TarFileSource[] {
 	const sources: TarFileSource[] = [];
+	const skipped: string[] = [];
 	const walk = (dir: string) => {
 		for (const entry of readdirSync(dir, { withFileTypes: true })) {
 			if (entry.name === '.git') continue;
 			const full = join(dir, entry.name);
+			// A tar entry carries contents, not a link, so a symlink is not staged. It is
+			// named rather than passed over in silence, so a file missing on the remote
+			// host has a reason next to it.
+			if (entry.isSymbolicLink()) {
+				skipped.push(relative(rootDir, full));
+				continue;
+			}
 			if (entry.isDirectory()) { walk(full); continue; }
 			if (!entry.isFile()) continue;
 			// archivePath is POSIX-relative to rootDir (tar entries under remoteDir).
@@ -45,6 +53,9 @@ function collectSources(rootDir: string): TarFileSource[] {
 		}
 	};
 	walk(rootDir);
+	if (skipped.length > 0) {
+		console.log(`[StageRemote] ${skipped.length} symlink(s) not staged (only regular files are): ${skipped.join(', ')}`);
+	}
 	return sources;
 }
 

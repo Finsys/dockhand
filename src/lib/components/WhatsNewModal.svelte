@@ -3,13 +3,16 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Sparkles, Bug, Zap, CheckCircle, ScrollText } from 'lucide-svelte';
 	import { compareVersions } from '$lib/utils/version';
+	import { releasedEntries } from '$lib/utils/changelog-filter';
 	import ChangelogText from '$lib/components/ChangelogText.svelte';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface ChangelogEntry {
 		version: string;
 		date: string;
 		changes: Array<{ type: string; text: string }>;
 		imageTag?: string;
+		comingSoon?: boolean;
 	}
 
 	interface Props {
@@ -22,9 +25,11 @@
 
 	let { open = $bindable(), version, changelog, lastSeenVersion, onDismiss }: Props = $props();
 
-	// Filter to show versions newer than lastSeenVersion, limited to 3 most recent
+	// Versions newer than lastSeenVersion, 3 most recent. Coming-soon (unreleased)
+	// entries are excluded: the user is on a released build, so an unreleased version
+	// must never appear as something they "missed".
 	const missedReleases = $derived(
-		changelog
+		releasedEntries(changelog)
 			.filter((r) => {
 				if (!lastSeenVersion) return true; // Show all if first time
 				return compareVersions(r.version, lastSeenVersion.replace(/^v/, '')) > 0;
@@ -51,7 +56,7 @@
 		<Dialog.Header>
 			<Dialog.Title class="flex items-center gap-2">
 				<ScrollText class="w-5 h-5 text-muted-foreground" />
-				Dockhand has been updated to {version}
+				{m.whatsnew_title({ version })}
 			</Dialog.Title>
 		</Dialog.Header>
 
@@ -76,7 +81,7 @@
 		</div>
 
 		<Dialog.Footer>
-			<Button onclick={onDismiss}>Got it</Button>
+			<Button onclick={onDismiss}>{m.whatsnew_got_it()}</Button>
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>

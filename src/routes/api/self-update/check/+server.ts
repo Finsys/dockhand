@@ -5,6 +5,7 @@ import { getOwnContainerId, getOwnDockerHost, getAutoDetectedDockerHost } from '
 import { getRegistryManifestDigest, unixSocketRequest, dockerFetch } from '$lib/server/docker';
 import { getEnvironments } from '$lib/server/db';
 import { compareVersions } from '$lib/utils/version';
+import { checkByVersionOnly } from '$lib/utils/self-update-availability';
 import type { RequestHandler } from './$types';
 
 /**
@@ -79,6 +80,26 @@ async function localDockerFetch(path: string, options: RequestInit = {}): Promis
 	return unixSocketRequest(socketPath, path, options);
 }
 
+/** The published changelog, or why it could not be read. */
+async function fetchChangelog(): Promise<
+	{ ok: true; data: unknown } | { ok: false; error: string }
+> {
+	try {
+		const response = await fetch(
+			'https://raw.githubusercontent.com/Finsys/dockhand/main/src/lib/data/changelog.json',
+			{ signal: AbortSignal.timeout(10000) }
+		);
+		if (!response.ok) {
+			console.log(`[SelfUpdate] Failed to fetch changelog from GitHub: ${response.status}`);
+			return { ok: false, error: 'Could not fetch changelog from GitHub' };
+		}
+		return { ok: true, data: await response.json() };
+	} catch (e: unknown) {
+		console.log(`[SelfUpdate] Changelog fetch failed: ${e instanceof Error ? e.message : String(e)}`);
+		return { ok: false, error: 'Could not fetch changelog from GitHub' };
+	}
+}
+
 /**
  * Check if a Dockhand update is available.
  * Admin-only. Auto-checked when Settings > About is opened.
@@ -89,7 +110,8 @@ async function localDockerFetch(path: string, options: RequestInit = {}): Promis
 /**
  * @openapi
  * summary: Check whether a newer Dockhand image is available (version-tag compare via GitHub changelog, or registry-digest compare for mutable tags like :latest)
- * resp-200: {updateAvailable:boolean!, currentImage:string, newImage:string, latestVersion:string, currentDigest:string, newDigest:string, containerName:string, isComposeManaged:boolean, isLocalImage:boolean, error:string} (also used for "not running in Docker" / inspection / changelog / registry failures — reported as updateAvailable:false + error, not an HTTP error status)
+ * description: Where Dockhand can inspect its own container it compares the image and its digest. Where it cannot - Kubernetes, a plain Podman pod, bare metal - there is no image to read, so it falls back to comparing the build's own version against the newest release in the changelog and answers with versionOnly:true. That answer names no image and must not be offered as an update: such a deployment replaces the image through its own manifest.
+ * resp-200: {updateAvailable:boolean!, currentImage:string, newImage:string, latestVersion:string, currentVersion:string, currentDigest:string, newDigest:string, containerName:string, isComposeManaged:boolean, isLocalImage:boolean, versionOnly:boolean, error:string} (also used for inspection / changelog / registry failures - reported as updateAvailable:false + error, not an HTTP error status)
  * resp-403: Admin access required
  */
 export const GET: RequestHandler = async ({ cookies }) => {
@@ -100,11 +122,17 @@ export const GET: RequestHandler = async ({ cookies }) => {
 
 	const containerId = getOwnContainerId();
 	if (!containerId) {
-		console.log('[SelfUpdate] Not running in Docker, skipping update check');
-		return json({
-			updateAvailable: false,
-			error: 'Not running in Docker'
-		});
+		// No container to inspect (Kubernetes, a plain Podman pod, bare metal), so the
+		// image and its digest are unknowable. The build's own version and the
+		// changelog are not, and together they still answer "is there a newer
+		// release" - without offering an update, which only the runtime could apply.
+		console.log('[SelfUpdate] No container runtime to inspect; comparing versions only');
+		const runningVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : null;
+		const changelog = await fetchChangelog();
+		if (!changelog.ok) {
+			return json({ updateAvailable: false, versionOnly: true, error: changelog.error });
+		}
+		return json(checkByVersionOnly(runningVersion, changelog.data));
 	}
 
 	try {

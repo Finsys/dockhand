@@ -1,5 +1,6 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import tailwindcss from '@tailwindcss/vite';
+import { paraglideVitePlugin } from '@inlang/paraglide-js';
 import { defineConfig, type Plugin } from 'vite';
 import { execSync } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
@@ -171,50 +172,25 @@ function resolveDockerTarget(
 	};
 }
 
-// ============ Exec API Helpers ============
+// ============ Terminal Stream Helpers ============
 
-function buildExecStartHttpRequest(execId: string, target: DockerTarget): string {
-	const body = JSON.stringify({ Detach: false, Tty: true });
+function buildDockerStreamHttpRequest(path: string, target: DockerTarget, body = ''): string {
 	const tokenHeader = target.type === 'tcp' && target.hawserToken
 		? `X-Hawser-Token: ${target.hawserToken}\r\n`
 		: '';
 	// Use actual host for proper routing through reverse proxies like Caddy
 	const host = target.host || 'localhost';
-	return `POST /exec/${execId}/start HTTP/1.1\r\nHost: ${host}\r\nContent-Type: application/json\r\n${tokenHeader}Connection: Upgrade\r\nUpgrade: tcp\r\nContent-Length: ${body.length}\r\n\r\n${body}`;
+	return `POST ${path} HTTP/1.1\r\nHost: ${host}\r\nContent-Type: application/json\r\n${tokenHeader}Connection: Upgrade\r\nUpgrade: tcp\r\nContent-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`;
 }
 
 // ============ Stream Processing ============
 
-function processTerminalOutput(
-	data: string,
-	state: { headersStripped: boolean; isChunked: boolean }
-): string | null {
-	let text = data;
-
-	if (!state.headersStripped) {
-		if (text.toLowerCase().includes('transfer-encoding: chunked')) {
-			state.isChunked = true;
-		}
-		const headerEnd = text.indexOf('\r\n\r\n');
-		if (headerEnd > -1) {
-			text = text.slice(headerEnd + 4);
-			state.headersStripped = true;
-		} else if (text.startsWith('HTTP/')) {
-			return null;
-		}
-	}
-
-	if (state.isChunked && text) {
-		text = text.replace(/^[0-9a-fA-F]+\r\n/gm, '').replace(/\r\n$/g, '');
-	}
-
-	return text || null;
-}
+import { createDockerStreamState, processDockerStreamChunk, translateAttachInput, type DockerStreamState } from './src/lib/server/docker-stream-core';
 
 // ============ Hawser Edge Exec Messages ============
 
-function createExecStartMessage(execId: string, containerId: string, shell: string, user: string, cols = 120, rows = 30) {
-	return { type: 'exec_start', execId, containerId, cmd: shell, user, cols, rows };
+function createExecStartMessage(execId: string, containerId: string, shell: string, user: string, cols = 120, rows = 30, attach = false) {
+	return { type: 'exec_start', execId, containerId, cmd: shell, user, cols, rows, attach };
 }
 
 function createExecInputMessage(execId: string, data: string) {
@@ -396,15 +372,35 @@ async function resizeExecForWs(execId: string, cols: number, rows: number, targe
 	}
 }
 
+async function resizeContainerForWs(containerId: string, cols: number, rows: number, target: ReturnType<typeof getDockerTarget>): Promise<void> {
+	try {
+		await dockerHttpRequest('POST', `/containers/${encodeURIComponent(containerId)}/resize?h=${rows}&w=${cols}`, target);
+	} catch {
+		// Ignore resize errors
+	}
+}
+
+async function getContainerTtyForWs(containerId: string, target: ReturnType<typeof getDockerTarget>): Promise<boolean> {
+	try {
+		const response = await dockerHttpRequest('GET', `/containers/${encodeURIComponent(containerId)}/json`, target);
+		if (response.statusCode === 200) {
+			return Boolean(JSON.parse(response.body).Config?.Tty);
+		}
+	} catch {
+	// Keep multiplexing enabled if the TTY setting cannot be read.
+	}
+	return false;
+}
+
 // Map to track Docker streams per WebSocket (keyed by unique connection ID)
 // Includes WebSocket reference for orphan detection
-const dockerStreams = new Map<string, { stream: any; execId: string; target: ReturnType<typeof getDockerTarget>; state: { isChunked: boolean }; ws: any }>();
+const dockerStreams = new Map<string, { stream: any; execId: string | null; containerId: string; mode: 'exec' | 'attach'; target: ReturnType<typeof getDockerTarget>; state: DockerStreamState; ws: any }>();
 
 // Counter for unique WebSocket connection IDs
 let wsConnectionCounter = 0;
 
 // Map to track Edge exec sessions (execId -> frontend WebSocket)
-const edgeExecSessions = new Map<string, { ws: any; execId: string; environmentId: number }>();
+const edgeExecSessions = new Map<string, { ws: any; execId: string; environmentId: number; streamState?: DockerStreamState }>();
 
 // Cleanup interval reference - only started in dev mode
 let cleanupInterval: ReturnType<typeof setInterval> | null = null;
@@ -532,7 +528,11 @@ const wsToEnvId = new Map<any, number>();
 function webSocketPlugin(): Plugin {
 	return {
 		name: 'websocket',
-		configureServer() {
+		async configureServer() {
+			// Install the process crash guard before the dev WS server accepts anything,
+			// so dev matches prod (where it installs before listen via hooks.server.ts).
+			await import('./src/lib/server/crash-guard.js');
+
 			// Start cleanup interval for dev mode only
 			startCleanupInterval();
 
@@ -597,6 +597,7 @@ function webSocketPlugin(): Plugin {
 					const containerIdIndex = pathParts.indexOf('containers') + 1;
 					const containerId = pathParts[containerIdIndex];
 
+					const mode = url.searchParams.get('mode') === 'attach' ? 'attach' : 'exec';
 					const shell = url.searchParams.get('shell') || '/bin/sh';
 					const user = url.searchParams.get('user') || 'root';
 					const envIdParam = url.searchParams.get('envId');
@@ -634,7 +635,7 @@ function webSocketPlugin(): Plugin {
 					const target = getDockerTarget(envId);
 
 					try {
-						// Handle Hawser Edge mode differently - use WebSocket protocol
+						// Hawser Edge relays exec and (for capable agents) attach.
 						if (target.type === 'hawser-edge') {
 							const conn = edgeConnections.get(target.environmentId);
 							if (!conn) {
@@ -643,21 +644,48 @@ function webSocketPlugin(): Plugin {
 								return;
 							}
 
+							const attach = mode === 'attach';
+							let streamState: DockerStreamState | undefined;
+							if (attach) {
+								let containerTty = false;
+								try {
+									if (typeof globalThis.__terminalGetContainerTty === 'function') {
+										containerTty = await globalThis.__terminalGetContainerTty(containerId, envId);
+									}
+								} catch {
+									// Keep multiplexing enabled if the TTY setting cannot be read.
+								}
+								// Attach output is a raw hijacked stream (no HTTP headers); only demux
+								// is needed, so seed the state with headersStripped already true.
+								streamState = createDockerStreamState(!containerTty);
+								streamState.headersStripped = true;
+							}
+
 							const execId = crypto.randomUUID();
-							edgeExecSessions.set(execId, { ws, execId, environmentId: target.environmentId });
+							edgeExecSessions.set(execId, { ws, execId, environmentId: target.environmentId, streamState });
 							meta.edgeExecId = execId;
 
-							const execStartMsg = createExecStartMessage(execId, containerId, shell, user);
+							const execStartMsg = createExecStartMessage(execId, containerId, shell, user, 120, 30, attach);
 							conn.ws.send(JSON.stringify(execStartMsg));
 							return;
 						}
 
 						// Direct Docker connection (unix or tcp/hawser-standard)
-						const exec = await createExecForWs(containerId, [shell], user, target);
-						const execId = exec.Id;
-
-						let headersStripped = false;
-						const state = { isChunked: false };
+						let execId: string | null = null;
+						let streamPath: string;
+						let streamBody = '';
+						let multiplexed = false;
+						if (mode === 'attach') {
+							const containerTty = await getContainerTtyForWs(containerId, target);
+							multiplexed = !containerTty;
+							streamPath = `/containers/${encodeURIComponent(containerId)}/attach?stream=1&stdin=1&stdout=1&stderr=1`;
+						} else {
+							const exec = await createExecForWs(containerId, [shell], user, target);
+							execId = exec.Id;
+							streamPath = `/exec/${execId}/start`;
+							streamBody = JSON.stringify({ Detach: false, Tty: true });
+						}
+						const state = createDockerStreamState(multiplexed);
 
 						// Create Node.js TCP/Unix socket connection to Docker
 						let dockerStream: net.Socket;
@@ -679,30 +707,13 @@ function webSocketPlugin(): Plugin {
 						}
 
 						dockerStream.on('connect', () => {
-							const httpRequest = buildExecStartHttpRequest(execId, target);
-							dockerStream.write(httpRequest);
+							dockerStream.write(buildDockerStreamHttpRequest(streamPath, target, streamBody));
 						});
 
 						dockerStream.on('data', (data: Buffer) => {
 							if (ws.readyState === WsWebSocket.OPEN) {
-								let text = data.toString('utf-8');
-								if (!headersStripped) {
-									if (text.toLowerCase().includes('transfer-encoding: chunked')) {
-										state.isChunked = true;
-									}
-									const headerEnd = text.indexOf('\r\n\r\n');
-									if (headerEnd > -1) {
-										text = text.slice(headerEnd + 4);
-										headersStripped = true;
-									} else if (text.startsWith('HTTP/')) {
-										return;
-									}
-								}
-								if (state.isChunked && text) {
-									text = text.replace(/^[0-9a-fA-F]+\r\n/gm, '').replace(/\r\n$/g, '');
-								}
-								if (text) {
-									ws.send(JSON.stringify({ type: 'output', data: text }));
+								for (const text of processDockerStreamChunk(data, state)) {
+									if (text) ws.send(JSON.stringify({ type: 'output', data: text }));
 								}
 							}
 						});
@@ -721,7 +732,7 @@ function webSocketPlugin(): Plugin {
 							}
 						});
 
-						dockerStreams.set(connId, { stream: dockerStream, execId, target, state, ws });
+						dockerStreams.set(connId, { stream: dockerStream, execId, containerId, mode, target, state, ws });
 					} catch (error: any) {
 						console.error('[Terminal WS] Connection error:', error?.message || error);
 						ws.send(JSON.stringify({ type: 'error', message: error.message }));
@@ -758,7 +769,9 @@ function webSocketPlugin(): Plugin {
 								try {
 									const msg = JSON.parse(message.toString());
 									if (msg.type === 'input') {
-										conn.ws.send(JSON.stringify(createExecInputMessage(edgeExecId, msg.data)));
+										// Non-TTY attach has no pty to convert Enter (\r) to a newline.
+										const inputData = translateAttachInput(msg.data, !!session.streamState?.multiplexed);
+										conn.ws.send(JSON.stringify(createExecInputMessage(edgeExecId, inputData)));
 									} else if (msg.type === 'resize') {
 										conn.ws.send(JSON.stringify(createExecResizeMessage(edgeExecId, msg.cols, msg.rows)));
 									}
@@ -779,9 +792,14 @@ function webSocketPlugin(): Plugin {
 					try {
 						const msg = JSON.parse(message.toString());
 						if (msg.type === 'input' && d.stream) {
-							d.stream.write(msg.data);
-						} else if (msg.type === 'resize' && d.execId) {
-							resizeExecForWs(d.execId, msg.cols, msg.rows, d.target);
+							// Non-TTY attach has no pty to convert Enter (\r) to a newline.
+							d.stream.write(translateAttachInput(msg.data, d.mode === 'attach' && d.state.multiplexed));
+						} else if (msg.type === 'resize') {
+							if (d.mode === 'attach') {
+								resizeContainerForWs(d.containerId, msg.cols, msg.rows, d.target);
+							} else if (d.execId) {
+								resizeExecForWs(d.execId, msg.cols, msg.rows, d.target);
+							}
 						}
 					} catch {
 						if (d.stream) {
@@ -1175,12 +1193,19 @@ async function handleHawserMessage(ws: any, msg: any) {
 			// Frontend doesn't need explicit ready message, it's already waiting for output
 		}
 	} else if (msg.type === 'exec_output') {
-		// Terminal output from exec session
+		// Terminal output from exec/attach session
 		const session = edgeExecSessions.get(msg.execId);
 		if (session?.ws?.readyState === 1) {
-			// Decode base64 data
-			const data = Buffer.from(msg.data, 'base64').toString('utf-8');
-			session.ws.send(JSON.stringify({ type: 'output', data }));
+			const bytes = Buffer.from(msg.data, 'base64');
+			// Attach sessions carry a stream state: demultiplex non-TTY frames.
+			// Exec sessions are raw TTY text and pass straight through.
+			if (session.streamState) {
+				for (const text of processDockerStreamChunk(bytes, session.streamState)) {
+					if (text) session.ws.send(JSON.stringify({ type: 'output', data: text }));
+				}
+			} else {
+				session.ws.send(JSON.stringify({ type: 'output', data: bytes.toString('utf-8') }));
+			}
 		}
 	} else if (msg.type === 'exec_end') {
 		// Exec session ended
@@ -1217,7 +1242,26 @@ async function handleHawserMessage(ws: any, msg: any) {
 }
 
 export default defineConfig({
-	plugins: [tailwindcss(), sveltekit(), webSocketPlugin()],
+	plugins: [
+		// UI translations: messages live in src/lib/i18n/messages, the compiled
+		// output in src/lib/paraglide is generated (and git-ignored). The language
+		// follows the browser and falls back to English.
+		paraglideVitePlugin({
+			project: './project.inlang',
+			outdir: './src/lib/paraglide',
+			// The language is decided in hooks.client.ts, which overwrites getLocale().
+			// Paraglide's own cookie and localStorage strategies cannot be used: its
+			// getLocale() writes the resolved locale back on first read, which would
+			// pin whatever the browser negotiated and ignore it from then on.
+			strategy: ['preferredLanguage', 'baseLocale'],
+			// One module per locale instead of one per message: with thousands of messages the
+			// per-message layout makes the production build run out of memory.
+			outputStructure: 'locale-modules'
+		}),
+		tailwindcss(),
+		sveltekit(),
+		webSocketPlugin()
+	],
 	define: {
 		__BUILD_DATE__: JSON.stringify(new Date().toISOString()),
 		__BUILD_COMMIT__: JSON.stringify(getGitCommit()),

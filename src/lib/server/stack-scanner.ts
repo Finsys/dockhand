@@ -11,12 +11,11 @@ import yaml from 'js-yaml';
 import { getExternalStackPaths, getStackSources, upsertStackSource, type StackSourceType } from './db';
 import { DockerConnectionError } from './docker';
 import { normalizeStackName } from '$lib/utils/stack-name';
+import { shouldSkipScanDir } from '$lib/utils/scan-skip';
 
 // Compose file patterns to detect (in order of priority - prefer new style first)
 const COMPOSE_PATTERNS = ['compose.yaml', 'compose.yml', 'docker-compose.yml', 'docker-compose.yaml'];
 
-// Directories to skip during scanning
-const SKIP_DIRECTORIES = ['.git', 'node_modules', '.docker', '__pycache__', '.venv', 'venv'];
 
 // Maximum recursion depth to prevent runaway scanning
 const MAX_DEPTH = 5;
@@ -149,8 +148,8 @@ async function scanPath(basePath: string): Promise<{ stacks: DiscoveredStack[]; 
 			const entryPath = join(currentPath, entry.name);
 
 			if (entry.isDirectory()) {
-				// Skip excluded directories
-				if (SKIP_DIRECTORIES.includes(entry.name)) continue;
+				// Skip excluded and hidden (dot) directories (#1251).
+				if (shouldSkipScanDir(entry.name)) continue;
 
 				// Skip if we already found a compose file here
 				if (foundStackDirs.has(entryPath)) continue;

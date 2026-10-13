@@ -1,5 +1,6 @@
 import { writable, derived } from 'svelte/store';
 import { environments } from './environment';
+import { m } from '$lib/paraglide/messages.js';
 
 export interface Permissions {
 	containers: string[];
@@ -30,7 +31,7 @@ export interface AuthUser {
 	displayName?: string;
 	avatar?: string;
 	isAdmin: boolean;
-	provider: 'local' | 'ldap' | 'oidc';
+	provider: 'local' | 'ldap' | 'oidc' | 'passkey';
 	permissions: Permissions;
 }
 
@@ -106,7 +107,7 @@ function createAuthStore() {
 				const data = await response.json();
 
 				if (!response.ok) {
-					return { success: false, error: data.error || 'Login failed' };
+					return { success: false, error: data.error || m.login_error_failed() };
 				}
 
 				if (data.requiresMfa) {
@@ -119,9 +120,9 @@ function createAuthStore() {
 					return { success: true };
 				}
 
-				return { success: false, error: 'Login failed' };
+				return { success: false, error: m.login_error_failed() };
 			} catch (error) {
-				return { success: false, error: 'Network error' };
+				return { success: false, error: m.auth_network_error() };
 			}
 		},
 
@@ -129,8 +130,13 @@ function createAuthStore() {
 		 * Logout and clear session
 		 */
 		async logout() {
+			let logoutUrl: string | undefined;
 			try {
-				await fetch('/api/auth/logout', { method: 'POST' });
+				const response = await fetch('/api/auth/logout', { method: 'POST' });
+				// An OIDC session ends at the provider too, or the next sign-in walks
+				// straight back into the same account without being asked.
+				const data = await response.json().catch(() => null);
+				if (data?.logoutUrl) logoutUrl = data.logoutUrl;
 			} finally {
 				// Clear auth state
 				set({
@@ -142,6 +148,15 @@ function createAuthStore() {
 				// Clear environment data to prevent showing stale info on login screen
 				environments.clear();
 			}
+
+			// After the local state is clear, so a provider that never redirects back
+			// still leaves this tab signed out.
+			if (logoutUrl) window.location.href = logoutUrl;
+
+			// Where the caller should send somebody who has just signed out. The login
+			// form, explicitly: a provider whose session is still open would sign them
+			// straight back in if the page went looking for one on its own.
+			return { logoutUrl: logoutUrl ?? null, next: '/login?local=1' };
 		},
 
 		/**

@@ -37,7 +37,8 @@ export async function sendSmtpNotification(config: SmtpConfig, payload: Notifica
 			to: config.to_emails.join(', '),
 			subject: `[Dockhand]${envText} ${payload.title}`,
 			text: `${payload.title}${envText}\n\n${payload.message}`,
-			html
+			html,
+			...(payload.attachments?.length ? { attachments: payload.attachments } : {})
 		});
 
 		return { success: true };

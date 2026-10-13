@@ -4,71 +4,7 @@ import { getContainerStats, EnvironmentNotFoundError } from '$lib/server/docker'
 import { authorize } from '$lib/server/authorize';
 import { hasEnvironments } from '$lib/server/db';
 import { validateDockerIdParam } from '$lib/server/docker-validation';
-
-function calculateCpuPercent(stats: any): number {
-	const cpuDelta = stats.cpu_stats.cpu_usage.total_usage - stats.precpu_stats.cpu_usage.total_usage;
-	const systemDelta = stats.cpu_stats.system_cpu_usage - stats.precpu_stats.system_cpu_usage;
-	const cpuCount = stats.cpu_stats.online_cpus || stats.cpu_stats.cpu_usage.percpu_usage?.length || 1;
-
-	if (systemDelta > 0 && cpuDelta > 0) {
-		return (cpuDelta / systemDelta) * cpuCount * 100;
-	}
-	return 0;
-}
-
-function calculateNetworkIO(stats: any): { rx: number; tx: number } {
-	let rx = 0;
-	let tx = 0;
-
-	if (stats.networks) {
-		for (const iface of Object.values(stats.networks) as any[]) {
-			rx += iface.rx_bytes || 0;
-			tx += iface.tx_bytes || 0;
-		}
-	}
-
-	return { rx, tx };
-}
-
-function calculateBlockIO(stats: any): { read: number; write: number } {
-	let read = 0;
-	let write = 0;
-
-	const ioStats = stats.blkio_stats?.io_service_bytes_recursive;
-	if (Array.isArray(ioStats)) {
-		for (const entry of ioStats) {
-			if (entry.op === 'read' || entry.op === 'Read') {
-				read += entry.value || 0;
-			} else if (entry.op === 'write' || entry.op === 'Write') {
-				write += entry.value || 0;
-			}
-		}
-	}
-
-	return { read, write };
-}
-
-/**
- * Calculate memory usage the same way Docker CLI does.
- * Docker subtracts cache (inactive_file) from total usage to show actual memory consumption.
- * - cgroup v2: subtract inactive_file from stats
- * - cgroup v1: subtract total_inactive_file from stats
- * See: https://docs.docker.com/engine/containers/runmetrics/
- *
- * Returns: { usage: actual memory (minus cache), raw: total usage, cache: file cache }
- */
-function calculateMemoryUsage(memoryStats: any): { usage: number; raw: number; cache: number } {
-	const raw = memoryStats?.usage || 0;
-	const stats = memoryStats?.stats || {};
-
-	// cgroup v2 uses 'inactive_file', cgroup v1 uses 'total_inactive_file'
-	const cache = stats.inactive_file ?? stats.total_inactive_file ?? 0;
-
-	// Only subtract cache if it's less than raw usage (sanity check)
-	const usage = (cache > 0 && cache < raw) ? raw - cache : raw;
-
-	return { usage, raw, cache };
-}
+import { calculateCpuPercent, calculateMemoryUsage, calculateMemoryLimit, calculateNetworkIO, calculateBlockIO } from '$lib/server/stats-calc-core';
 
 /**
  * GET /api/containers/{id}/stats - Get a single container's resource stats
@@ -76,7 +12,7 @@ function calculateMemoryUsage(memoryStats: any): { usage: number; raw: number; c
  * @openapi
  * summary: Return a one-shot CPU/memory/network/block-IO stats snapshot for a container (Docker-CLI-equivalent memory accounting)
  * path: id:string! Container ID or name (from GET /api/containers)
- * query: env:integer The target environment ID (omit for the local/default Docker host) (from GET /api/environments)
+ * query: env:integer! The target environment ID the container lives in (from GET /api/environments)
  * resp-200: {cpuPercent:number!, memoryUsage:integer!, memoryRaw:integer!, memoryCache:integer!, memoryLimit:integer!, memoryPercent:number!, networkRx:integer!, networkTx:integer!, blockRead:integer!, blockWrite:integer!, timestamp:integer!}
  * resp-403: Permission denied
  * resp-404: No environment configured, the environment was not found, or the container was not found
@@ -106,8 +42,8 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 
 		const cpuPercent = calculateCpuPercent(stats);
 		const memory = calculateMemoryUsage(stats.memory_stats);
-		const memoryLimit = stats.memory_stats?.limit || 1;
-		const memoryPercent = (memory.usage / memoryLimit) * 100;
+		const memoryLimit = calculateMemoryLimit(stats);
+		const memoryPercent = memoryLimit > 0 ? (memory.usage / memoryLimit) * 100 : 0;
 		const networkIO = calculateNetworkIO(stats);
 		const blockIO = calculateBlockIO(stats);
 

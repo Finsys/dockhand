@@ -19,6 +19,8 @@
  * unit-tested directly; the module also holds the small in-memory state.
  */
 
+import { KeyedSerializer } from '../keyed-serializer';
+
 /**
  * Build the live-target lock key from the env and the set of data paths the
  * operation touches. Callers pass the docker bind strings they will use
@@ -92,33 +94,12 @@ export class LiveTargetLocks {
 }
 
 /**
- * Per-destination serialization: operations on the same destination id run one
- * at a time, in arrival order. `run` chains onto the destination's current tail
- * promise, so a second caller waits for the first to settle (success or failure)
- * before starting. Cleared when a destination's chain drains.
+ * Per-destination serialization: operations on the same restic REPOSITORY run
+ * one at a time, in arrival order. The key is the repository rather than the
+ * destination id, because the restic lock is per-repo: two different destination
+ * rows pointing at the same repo must serialize together or they collide on that
+ * lock (a backup then waits out `--retry-lock`, ~5-10 min).
+ *
+ * The queueing itself is the shared KeyedSerializer.
  */
-export class DestinationSerializer {
-	// One tail promise per serialization KEY. The key is the restic REPOSITORY,
-	// not the destination id: the restic lock is per-repo, so two DIFFERENT
-	// destination rows that point at the SAME repo must serialize together or they
-	// collide on the repo lock (a backup then waits out `--retry-lock`, ~5-10 min).
-	// The map holds at most one entry per distinct repo, so we never prune it —
-	// simpler and obviously correct. The stored tail always resolves (never
-	// rejects) so one failed op can't reject an unrelated op that chains behind it.
-	private tails = new Map<string, Promise<void>>();
-
-	async run<T>(key: string | number, fn: () => Promise<T>): Promise<T> {
-		const k = String(key);
-		const prev = this.tails.get(k) ?? Promise.resolve();
-		// Gate that opens when our turn is fully done, so the next caller waits.
-		let opened!: () => void;
-		const done = new Promise<void>((r) => { opened = r; });
-		this.tails.set(k, prev.then(() => done));
-		await prev; // wait for our turn (prev never rejects)
-		try {
-			return await fn();
-		} finally {
-			opened(); // release the next caller regardless of our outcome
-		}
-	}
-}
+export class DestinationSerializer extends KeyedSerializer {}

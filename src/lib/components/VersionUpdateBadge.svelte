@@ -2,6 +2,7 @@
 	import { Tag } from 'lucide-svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import type { NewerVersion } from '$lib/types';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		/** The newer-version suggestion for this container (target tag + how many were skipped). */
@@ -45,17 +46,17 @@
 		<div class="space-y-1.5">
 			<p class="font-medium text-sm flex items-center gap-1.5">
 				<Tag class="w-4 h-4 text-amber-500 shrink-0" />
-				Newer version available
+				{m.updates_newer_version_available()}
 			</p>
 			<p class="text-xs">
-				<span class="text-muted-foreground">Move to</span>
+				<span class="text-muted-foreground">{m.updates_move_to()}</span>
 				<code class="mx-0.5 rounded bg-muted px-1 py-0.5 font-mono">{newerVersion.tag}</code>
 				<span class="font-semibold uppercase {bumpColor}">{newerVersion.bump}</span>
 			</p>
 			{#if behind > 1}
-				<p class="text-xs text-muted-foreground">{behind} versions ahead of the tag you run.</p>
+				<p class="text-xs text-muted-foreground">{m.updates_versions_ahead_of_running({ count: behind })}</p>
 			{/if}
-			<p class="text-xs text-muted-foreground">Click for release notes. Never auto-applied.</p>
+			<p class="text-xs text-muted-foreground">{m.updates_badge_hint()}</p>
 		</div>
 	</Tooltip.Content>
 </Tooltip.Root>

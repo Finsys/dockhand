@@ -1,4 +1,4 @@
-import { setGlobalDispatcher, Agent, EnvHttpProxyAgent } from 'undici';
+import { setGlobalDispatcher, Agent, EnvHttpProxyAgent, type Dispatcher } from 'undici';
 import dns from 'node:dns';
 import net from 'node:net';
 
@@ -135,4 +135,30 @@ if (ALLOW_IPV6) {
 	setGlobalDispatcher(new EnvHttpProxyAgent({ connect: connectOptions }));
 } else {
 	setGlobalDispatcher(new Agent({ connect: connectOptions }));
+}
+
+// Timeouts for long-lived streaming Docker requests (container logs follow, events,
+// the backup helper's restic progress). undici's default bodyTimeout (300s) aborts a
+// response body that goes quiet - which a backup legitimately does while restic uploads
+// to a remote repo - and the abort surfaces as an unhandled UND_ERR_BODY_TIMEOUT that
+// crashes the process. Only bodyTimeout is disabled: the body is the quiet phase, and
+// the caller's AbortController (fired on container exit) cancels the read. headersTimeout
+// keeps undici's default so a daemon that connects but never sends a response line is
+// still bounded (nothing else caps that pre-header wait).
+export const STREAMING_DISPATCHER_TIMEOUTS = { bodyTimeout: 0 };
+
+// Dispatcher for streaming requests: the SAME proxy/DNS choice the global block makes
+// (proxy honored when set; IPv4-pinning connect only when ALLOW_IPV6 is off, so the
+// IPv6 opt-in keeps the native resolver), only with bodyTimeout added. Lazily built and
+// reused (one dispatcher, not one per request).
+let streamingDispatcher: Dispatcher | undefined;
+export function getStreamingDispatcher(): Dispatcher {
+	if (!streamingDispatcher) {
+		// connectOptions carries the IPv4 pinning; ALLOW_IPV6 mode drops it for the native resolver.
+		const connect = ALLOW_IPV6 ? {} : { connect: connectOptions };
+		streamingDispatcher = hasProxy
+			? new EnvHttpProxyAgent({ ...connect, ...STREAMING_DISPATCHER_TIMEOUTS })
+			: new Agent({ ...connect, ...STREAMING_DISPATCHER_TIMEOUTS });
+	}
+	return streamingDispatcher;
 }

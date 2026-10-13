@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Cpu, MemoryStick, Loader2 } from 'lucide-svelte';
 	import { formatBytes } from '$lib/utils/format';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Metrics {
 		cpuPercent?: number;
@@ -72,7 +73,7 @@
 			<div class="space-y-1">
 				<div class="flex items-center justify-between text-xs">
 					<span class="flex items-center gap-1 text-muted-foreground/50">
-						<MemoryStick class="w-3 h-3" /> Memory <Loader2 class="w-3 h-3 animate-spin" />
+						<MemoryStick class="w-3 h-3" /> {m.dashboard_memory()} <Loader2 class="w-3 h-3 animate-spin" />
 					</span>
 					<div class="skeleton w-16 h-3.5 rounded"></div>
 				</div>
@@ -85,12 +86,12 @@
 {:else if !collectMetrics}
 	<!-- Metrics collection disabled -->
 	<div class="text-xs text-muted-foreground text-center py-1">
-		Metrics collection disabled
+		{m.dashboard_metrics_disabled()}
 	</div>
 {:else if !hasMetrics}
 	<!-- No metrics available -->
 	<div class="text-xs text-muted-foreground text-center py-1">
-		No metrics available
+		{m.dashboard_no_metrics()}
 	</div>
 {:else if compact}
 	<!-- Compact horizontal bars for mini tiles -->
@@ -136,7 +137,7 @@
 		<div class="space-y-1">
 			<div class="flex items-center justify-between text-xs">
 				<span class="flex items-center gap-1 text-muted-foreground">
-					<MemoryStick class="w-3 h-3" /> Memory
+					<MemoryStick class="w-3 h-3" /> {m.dashboard_memory()}
 				</span>
 				<span class="font-medium">
 					{memoryPercent.toFixed(1)}%

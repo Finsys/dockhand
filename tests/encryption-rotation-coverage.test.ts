@@ -34,11 +34,11 @@ describe('encryption key rotation covers backup destinations (audit #6)', () => 
 		);
 	});
 
-	it('re-encrypts backup destination password and envVars during rotation', () => {
-		// The rotation branch collects encrypted values into allEncrypted; both
-		// fields must be pushed so the new key re-encrypts them.
+	it('re-encrypts every backup destination secret during rotation', () => {
 		assert.match(encryptionSrc, /table:\s*'backupDestinations',\s*id:\s*dest\.id,\s*field:\s*'password'/);
 		assert.match(encryptionSrc, /table:\s*'backupDestinations',\s*id:\s*dest\.id,\s*field:\s*'envVars'/);
+		assert.match(encryptionSrc, /table:\s*'backupDestinations',\s*id:\s*dest\.id,\s*field:\s*'sshPrivateKey'/);
+		assert.match(encryptionSrc, /table:\s*'backupDestinations',\s*id:\s*dest\.id,\s*field:\s*'sshKnownHosts'/);
 	});
 
 	it('writes the re-encrypted backup destination values back on rotation', () => {
@@ -59,6 +59,8 @@ describe('encryption key rotation covers backup destinations (audit #6)', () => 
 			/dest\.password[\s\S]{0,120}encrypt\(dest\.password\)/,
 			'plain-text migration must encrypt an unencrypted backup destination password'
 		);
+		assert.match(encryptionSrc, /dest\.sshPrivateKey[\s\S]{0,160}encrypt\(dest\.sshPrivateKey\)/);
+		assert.match(encryptionSrc, /dest\.sshKnownHosts[\s\S]{0,160}encrypt\(dest\.sshKnownHosts\)/);
 	});
 });
 

@@ -163,6 +163,50 @@ export interface BackupItem {
 	volumes: VolumeInfo[];
 }
 
+/**
+ * The restic keys of an item's NAMED volumes only - bind mounts (and unbackupable
+ * host/socket binds) dropped. Used by the env batch-setup "skip bind mounts" toggle to
+ * build a selection that captures app data (named volumes) while skipping large host
+ * bind sources like media libraries or ISOs.
+ */
+export function namedVolumeKeys(item: { volumes: VolumeInfo[] }): string[] {
+	return item.volumes
+		.filter((v) => v.mountType === 'volume' && !v.unbackupable)
+		.map((v) => v.key);
+}
+
+/** What the env batch setup should do with one item when "skip bind mounts" is on. */
+export type BatchSkipDecision =
+	| { action: 'skip' } // nothing worth backing up (a bind-only container)
+	| { action: 'all' } // volumes unknown (a down stack) - don't narrow, capture everything
+	| { action: 'named'; selectedVolumes: string[] }; // narrow to this item's named volumes
+
+/**
+ * Decide how one batch item is scheduled under "skip bind mounts". Pure so the
+ * type-dependent branching is unit-testable.
+ *
+ * The mount list is empty in two very different cases: a bind-only target (binds present,
+ * zero named) vs a DOWN stack whose containers aren't listed (nothing known at all). We
+ * must not freeze an empty named-selection for a down stack - that would permanently
+ * capture only its compose/.env even after it comes up, silently missing its real
+ * volumes. So: no mounts known at all -> 'all' (safe: capture everything once it's up);
+ * some mounts but none named -> 'named' with [] for a stack (stack files still captured),
+ * or 'skip' for a container (nothing to back up).
+ */
+export function batchSkipDecision(item: {
+	type: 'stack' | 'container';
+	volumes: VolumeInfo[];
+}): BatchSkipDecision {
+	const named = namedVolumeKeys(item);
+	if (named.length > 0) return { action: 'named', selectedVolumes: named };
+	// Zero named volumes. Distinguish "unknown" (no mounts listed at all) from
+	// "genuinely only bind mounts".
+	if (item.volumes.length === 0) return { action: 'all' };
+	// Some mounts, all bind: a stack still captures its compose/.env (config-only);
+	// a container has nothing to back up.
+	return item.type === 'stack' ? { action: 'named', selectedVolumes: [] } : { action: 'skip' };
+}
+
 function containerName(c: RawContainer): string {
 	return c.name || c.Names?.[0]?.replace(/^\//, '') || '';
 }

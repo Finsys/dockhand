@@ -51,3 +51,27 @@ export function resolvedRefVarNames(
 	const resolved = new Set(resolvedRefs);
 	return refPairs.filter((p) => resolved.has(p.ref)).map((p) => p.varName);
 }
+
+/**
+ * The prefixes a provider resolves as an inline reference: 1Password
+ * (service-account and Connect), KeePass, Azure Key Vault, Proton Pass.
+ *
+ * Kept in one place because the editor decides what to send for probing and the
+ * server decides what to resolve; a provider whose prefix reaches only one of
+ * them shows every variable as missing while resolving perfectly on deploy.
+ * A provider that gains an inline syntax belongs here as well as in its own
+ * isReference.
+ */
+export const INLINE_REF_PREFIXES = ['op://', 'keepass://', 'azurekv://', 'pass://'] as const;
+
+/**
+ * Whether a value is an inline provider reference rather than a literal.
+ *
+ * Quotes are stripped first, the same way every provider's isReference does:
+ * 1Password's "Copy Secret Reference" puts the reference on the clipboard
+ * wrapped in quotes, and a bare prefix test would skip the pasted value.
+ */
+export function isInlineProviderRef(value: string): boolean {
+	const normalized = value.trim().replace(/^(["'])(.*)\1$/s, '$2');
+	return INLINE_REF_PREFIXES.some((prefix) => normalized.startsWith(prefix));
+}

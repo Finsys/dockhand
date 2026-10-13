@@ -1,8 +1,9 @@
 <script lang="ts">
-	import { Loader2, CheckCircle2, XCircle, Rocket, Layers } from 'lucide-svelte';
+	import { Loader2, CheckCircle2, XCircle, Rocket } from 'lucide-svelte';
 	import StackIcon from '$lib/components/StackIcon.svelte';
 	import EnvironmentIcon from '$lib/components/EnvironmentIcon.svelte';
 	import { environments } from '$lib/stores/environment';
+	import { m } from '$lib/paraglide/messages.js';
 
 	// The one identity line shared by every deploy/compose output view (the docked panel
 	// in StackModal, the standalone ComposeOutputModal, and the git-deploy popover), so
@@ -13,8 +14,7 @@
 		// The action word, e.g. "Bringing down" or "Git deploy".
 		verb: string;
 		stackName?: string;
-		// Icon value (lucide/selfhst/custom). When unset, a generic Layers glyph shows --
-		// never StackIcon's Boxes fallback, which reads as a different icon.
+		// Icon value (lucide/selfhst/custom). When unset, StackIcon shows the generic Layers glyph.
 		stackIcon?: string | null;
 		envId?: number | null;
 		// Drives the leading icon. 'idle' shows a rocket (a not-yet-started deploy prompt).
@@ -41,15 +41,11 @@
 	{/if}
 	<span class="shrink-0 font-medium">{verb}</span>
 	{#if stackName}
-		{#if stackIcon}
-			<StackIcon icon={stackIcon} {stackName} {envId} class="{iconClass} shrink-0 text-muted-foreground" />
-		{:else}
-			<Layers class="{iconClass} shrink-0 text-muted-foreground" />
-		{/if}
+		<StackIcon icon={stackIcon} {stackName} {envId} class="{iconClass} shrink-0 text-muted-foreground" />
 		<span class="truncate font-medium">{stackName}</span>
 	{/if}
 	{#if env}
-		<span class="shrink-0 text-muted-foreground">on</span>
+		<span class="shrink-0 text-muted-foreground">{m.modalheader_on_env()}</span>
 		<EnvironmentIcon icon={env.icon || 'server'} envId={env.id} class="{iconClass} shrink-0 text-muted-foreground" />
 		<span class="truncate font-medium text-amber-600 dark:text-amber-400">{env.name}</span>
 	{/if}

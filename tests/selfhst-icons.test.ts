@@ -8,7 +8,8 @@ import {
 	selfhstCachePath,
 	sanitizeSvg,
 	getSelfhstIcon,
-	sanitizeRefList
+	sanitizeRefList,
+	magicOk
 } from '../src/lib/server/selfhst-icons';
 import { looksLikeImage } from '../src/lib/server/stack-icons';
 
@@ -69,6 +70,21 @@ describe('sanitizeSvg (SVG-XSS defense)', () => {
 	});
 });
 
+describe('magicOk (selfh.st icon format detection)', () => {
+	test('accepts each format by its magic bytes', () => {
+		expect(magicOk('svg', Buffer.from('<svg></svg>'))).toBe(true);
+		expect(magicOk('png', Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))).toBe(true);
+		expect(magicOk('webp', Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(4), Buffer.from('WEBP')]))).toBe(true);
+	});
+	test('rejects mislabelled or garbage bytes', () => {
+		expect(magicOk('svg', Buffer.from([0x89, 0x50]))).toBe(false); // png bytes, not svg
+		expect(magicOk('png', Buffer.from('<svg>'))).toBe(false);      // svg bytes, not png
+		expect(magicOk('webp', Buffer.from('RIFFxxxxNOPE'))).toBe(false); // RIFF but not WEBP
+		expect(magicOk('webp', Buffer.from('RIFF'))).toBe(false);      // too short for the WEBP tag
+		expect(magicOk('png', Buffer.alloc(0))).toBe(false);
+	});
+});
+
 describe('looksLikeImage (upload magic-byte check)', () => {
 	test('accepts real image magic bytes', () => {
 		expect(looksLikeImage(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 0]))).toBe(true); // PNG
@@ -111,8 +127,25 @@ describe('getSelfhstIcon cache-hit handling', () => {
 	test('serves a valid cached SVG without refetching', async () => {
 		const p = selfhstCachePath('plex');
 		writeFileSync(p, '<svg>ok</svg>');
-		const buf = await getSelfhstIcon('plex');
-		expect(buf?.toString()).toBe('<svg>ok</svg>');
+		const icon = await getSelfhstIcon('plex');
+		expect(icon?.buffer.toString()).toBe('<svg>ok</svg>');
+		expect(icon?.contentType).toBe('image/svg+xml');
+	});
+
+	test('serves a cached WebP when there is no SVG (raster fallback)', async () => {
+		// unpackerr-style ref: only a raster format is cached.
+		const webp = Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(4), Buffer.from('WEBP'), Buffer.from('payload')]);
+		writeFileSync(selfhstCachePath('unpackerr', 'webp'), webp);
+		const icon = await getSelfhstIcon('unpackerr');
+		expect(icon?.contentType).toBe('image/webp');
+		expect(icon?.buffer.length).toBe(webp.length);
+	});
+
+	test('prefers SVG over a cached raster format', async () => {
+		writeFileSync(selfhstCachePath('grafana', 'svg'), '<svg>v</svg>');
+		writeFileSync(selfhstCachePath('grafana', 'png'), Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3, 4]));
+		const icon = await getSelfhstIcon('grafana');
+		expect(icon?.contentType).toBe('image/svg+xml');
 	});
 
 	test('a fresh zero-byte tombstone returns null (no refetch)', async () => {
@@ -147,6 +180,97 @@ describe('getSelfhstIcon cache-hit handling', () => {
 		// The stale tombstone was acted on (dropped then rewritten), i.e. its mtime advanced -
 		// proving it was NOT returned as a still-valid negative-cache hit.
 		if (existsSync(p)) expect(statSync(p).mtimeMs).toBeGreaterThan(before);
+	});
+
+	test('a fresh tombstone is honoured WITHOUT any refetch', async () => {
+		const ref = 'tomb-no-refetch';
+		writeFileSync(selfhstCachePath(ref), Buffer.alloc(0)); // fresh 0-byte tombstone
+		let calls = 0;
+		const prev = globalThis.fetch;
+		globalThis.fetch = (async () => { calls++; return new Response(null, { status: 404 }); }) as typeof globalThis.fetch;
+		try {
+			expect(await getSelfhstIcon(ref)).toBeNull();
+			expect(calls).toBe(0); // the negative cache suppressed every CDN fetch
+			expect(existsSync(selfhstCachePath(ref))).toBe(true); // tombstone still there
+		} finally {
+			globalThis.fetch = prev;
+		}
+	});
+});
+
+// The multi-format FETCH fallback (svg -> webp -> png over the wire). A url-discriminating
+// stub returns the format-specific status/body so we exercise the real fetch loop, magic-byte
+// validation, verbatim raster caching, and the svg-first short-circuit - none of which the
+// cache-HIT tests above reach.
+describe('getSelfhstIcon fetch fallback', () => {
+	let dir: string;
+	let realFetch: typeof globalThis.fetch;
+	beforeAll(() => {
+		dir = mkdtempSync(join(tmpdir(), 'selfhst-fetch-'));
+		process.env.DATA_DIR = dir;
+		realFetch = globalThis.fetch;
+	});
+	afterAll(() => {
+		globalThis.fetch = realFetch;
+		delete process.env.DATA_DIR;
+		rmSync(dir, { recursive: true, force: true });
+	});
+
+	test('svg 404 falls through to a webp 200 and caches it verbatim as image/webp', async () => {
+		const ref = 'raster-only';
+		const webp = Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(4), Buffer.from('WEBP'), Buffer.from('bytes')]);
+		const seen: string[] = [];
+		globalThis.fetch = (async (url: string) => {
+			seen.push(url);
+			if (url.endsWith('.svg')) return new Response(null, { status: 404 });
+			if (url.endsWith('.webp')) return new Response(new Uint8Array(webp), { status: 200 });
+			return new Response(null, { status: 404 });
+		}) as typeof globalThis.fetch;
+
+		const icon = await getSelfhstIcon(ref);
+		expect(icon?.contentType).toBe('image/webp');
+		expect(icon?.buffer.length).toBe(webp.length);
+		// svg was tried first, webp second; the raster is cached verbatim.
+		expect(seen.some((u) => u.endsWith('/svg/raster-only.svg'))).toBe(true);
+		expect(seen.some((u) => u.endsWith('/webp/raster-only.webp'))).toBe(true);
+		expect(readFileSync(selfhstCachePath(ref, 'webp')).length).toBe(webp.length);
+	});
+
+	test('svg 200 short-circuits: webp/png are never requested', async () => {
+		const ref = 'has-svg';
+		const seen: string[] = [];
+		globalThis.fetch = (async (url: string) => {
+			seen.push(url);
+			if (url.endsWith('.svg')) return new Response('<svg>x</svg>', { status: 200 });
+			return new Response(null, { status: 404 });
+		}) as typeof globalThis.fetch;
+
+		const icon = await getSelfhstIcon(ref);
+		expect(icon?.contentType).toBe('image/svg+xml');
+		expect(seen.some((u) => u.endsWith('.webp'))).toBe(false);
+		expect(seen.some((u) => u.endsWith('.png'))).toBe(false);
+	});
+
+	test('a raster with wrong magic bytes is rejected (not cached, not served)', async () => {
+		const ref = 'bad-magic';
+		globalThis.fetch = (async (url: string) => {
+			if (url.endsWith('.svg')) return new Response(null, { status: 404 });
+			// 200 but the body is not a real webp/png (fails magicOk)
+			return new Response('not-an-image', { status: 200 });
+		}) as typeof globalThis.fetch;
+
+		expect(await getSelfhstIcon(ref)).toBeNull();
+		expect(existsSync(selfhstCachePath(ref, 'webp'))).toBe(false);
+		expect(existsSync(selfhstCachePath(ref, 'png'))).toBe(false);
+	});
+
+	test('all formats missing writes a tombstone (creation is mandated, not optional)', async () => {
+		const ref = 'no-format-anywhere';
+		globalThis.fetch = (async () => new Response(null, { status: 404 })) as typeof globalThis.fetch;
+		expect(await getSelfhstIcon(ref)).toBeNull();
+		const tomb = selfhstCachePath(ref); // <ref>.svg
+		expect(existsSync(tomb)).toBe(true);
+		expect(readFileSync(tomb).length).toBe(0); // a 0-byte negative-cache tombstone
 	});
 });
 

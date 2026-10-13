@@ -8,6 +8,7 @@
 	import { tick } from 'svelte';
 	import ImageScanModal from './ImageScanModal.svelte';
 	import { watchJob } from '$lib/utils/sse-fetch';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		imageName: string | (() => string);
@@ -111,7 +112,7 @@
 			});
 
 			if (!response.ok) {
-				throw new Error('Failed to start pull');
+				throw new Error(m.pull_error_start_failed());
 			}
 
 			const { jobId } = await response.json();
@@ -134,7 +135,7 @@
 						}
 					} else if (data.status === 'error') {
 						overallStatus = 'error';
-						errorMessage = data.error || 'Unknown error occurred';
+						errorMessage = data.error || m.containers_batchupdate_unknown_error();
 					} else if (data.id) {
 						// Layer progress update - only process if id looks like a layer hash (12 hex chars)
 						const isLayerId = /^[a-f0-9]{12}$/i.test(data.id);
@@ -197,7 +198,7 @@
 		} catch (error: any) {
 			console.error('Failed to pull image:', error);
 			overallStatus = 'error';
-			errorMessage = error.message || 'Failed to pull image';
+			errorMessage = error.message || m.pull_error_failed();
 		}
 	}
 
@@ -256,16 +257,16 @@
 				<div class="flex items-center gap-2">
 					{#if overallStatus === 'idle'}
 						<Loader2 class="w-4 h-4 animate-spin text-muted-foreground" />
-						<span class="text-sm text-muted-foreground">Initializing...</span>
+						<span class="text-sm text-muted-foreground">{m.images_pull_initializing()}</span>
 					{:else if overallStatus === 'pulling'}
 						<Loader2 class="w-4 h-4 animate-spin text-blue-600" />
-						<span class="text-sm">Pulling...</span>
+						<span class="text-sm">{m.containers_settings_pulling()}</span>
 					{:else if overallStatus === 'complete'}
 						<CheckCircle2 class="w-4 h-4 text-green-600" />
-						<span class="text-sm text-green-600">Complete!</span>
+						<span class="text-sm text-green-600">{m.images_pull_complete()}</span>
 					{:else if overallStatus === 'error'}
 						<XCircle class="w-4 h-4 text-red-600" />
-						<span class="text-sm text-red-600">Failed</span>
+						<span class="text-sm text-red-600">{m.batchop_summary_failed()}</span>
 					{/if}
 				</div>
 				{#if totalLayers > 0}
@@ -329,7 +330,7 @@
 			</div>
 		{:else if overallStatus === 'complete'}
 			<div class="p-3">
-				<p class="text-xs text-muted-foreground text-center py-2">Image is up to date</p>
+				<p class="text-xs text-muted-foreground text-center py-2">{m.images_pull_up_to_date()}</p>
 			</div>
 		{/if}
 
@@ -342,7 +343,7 @@
 					class="w-full"
 					onclick={() => handleOpenChange(false)}
 				>
-					Close
+					{m.ui_close()}
 				</Button>
 			</div>
 		{/if}

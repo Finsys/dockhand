@@ -37,7 +37,7 @@ RUN APKO_ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "aarch64" || echo "x86_64") 
     "    - busybox" \
     "    - tzdata" \
     "    - docker-cli" \
-    "    - docker-compose=5.5.0-r2" \
+    "    - docker-compose=5.5.1-r2" \
     "    - docker-cli-buildx" \
     "    - sqlite" \
     "    - postgresql-client" \
@@ -88,7 +88,10 @@ RUN MAKEFLAGS="-j$(nproc)" npm ci --ignore-scripts \
 
 # Copy source code and build
 COPY . .
-RUN npm run build
+# The message catalogue puts the build close to Node's default heap: it needs over 3 GB
+# at 2168 keys across 6 locales and grows with every locale. Without a limit the build
+# dies as an exit-134 OOM with no useful message, so state the ceiling here.
+RUN NODE_OPTIONS=--max-old-space-size=6144 npm run build
 
 # Production dependencies only
 # Preserve better-sqlite3 native addon (no prebuilds exist for Node 24 ABI 137)
@@ -99,7 +102,7 @@ RUN cp -r node_modules/better-sqlite3/build /tmp/better-sqlite3-build \
     && rm -rf node_modules/@types /tmp/better-sqlite3-build
 
 # Build Go collector
-FROM --platform=$BUILDPLATFORM golang:1.25.13 AS go-builder
+FROM --platform=$BUILDPLATFORM golang:1.26.9 AS go-builder
 ARG TARGETARCH
 WORKDIR /app
 COPY collector/ ./collector/

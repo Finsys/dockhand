@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import { authorize } from '$lib/server/authorize';
+import { planNetworkEnvVars } from '$lib/server/self-update-network-core';
 import { getAdditionalVolumeBinds, dedupeVolumesForRecreate } from '$lib/server/mount-dedupe';
 import {
 	getOwnContainerId,
@@ -12,8 +13,12 @@ import {
 import { buildRegistryAuthHeader, unixSocketRequest, unixSocketStreamRequest } from '$lib/server/docker';
 import type { RequestHandler } from './$types';
 import { prefersJSON, sseToJSON } from '$lib/server/sse';
+import { updaterImageForVariant } from '$lib/server/updater-image-core';
 
-const UPDATER_IMAGE = 'fnsys/dockhand-updater:latest';
+// Baseline Dockhand (old x86_64 without v2) needs the Alpine/musl updater; the Wolfi
+// default can't exec there (exit 127 at "Launching updater"). Mirrors the backup
+// helper's variant split.
+const UPDATER_IMAGE = updaterImageForVariant(process.env.DOCKHAND_VARIANT);
 const UPDATER_LABEL = 'dockhand.updater';
 
 /** Get TCP Docker host if configured, null otherwise. */
@@ -188,52 +193,6 @@ function buildCreateConfig(inspectData: any, newImage: string): any {
 }
 
 /**
- * Build NETWORKS and NETWORK_OPTS_* env vars from inspect data's NetworkSettings.
- * The sidecar uses these to reconnect networks via `docker network connect` CLI.
- */
-function buildNetworkEnvVars(inspectData: any): string[] {
-	const networks: Record<string, any> = inspectData.NetworkSettings?.Networks || {};
-	const entries = Object.entries(networks);
-	if (entries.length === 0) return [];
-
-	const networkNames: string[] = [];
-	const envVars: string[] = [];
-
-	for (const [netName, netConfig] of entries) {
-		networkNames.push(netName);
-
-		const nc = netConfig as any;
-		const opts: string[] = [];
-
-		if (nc.IPAMConfig?.IPv4Address) {
-			opts.push(`--ip ${nc.IPAMConfig.IPv4Address}`);
-		}
-		if (nc.IPAMConfig?.IPv6Address) {
-			opts.push(`--ip6 ${nc.IPAMConfig.IPv6Address}`);
-		}
-		if (nc.Aliases && nc.Aliases.length > 0) {
-			for (const alias of nc.Aliases) {
-				opts.push(`--alias ${alias}`);
-			}
-		}
-		if (nc.Links && nc.Links.length > 0) {
-			for (const link of nc.Links) {
-				opts.push(`--link ${link}`);
-			}
-		}
-
-		if (opts.length > 0) {
-			// Env var name: dots and dashes become underscores
-			const safeNetName = netName.replace(/[.-]/g, '_');
-			envVars.push(`NETWORK_OPTS_${safeNetName}=${opts.join(' ')}`);
-		}
-	}
-
-	envVars.unshift(`NETWORKS=${networkNames.join(' ')}`);
-	return envVars;
-}
-
-/**
  * SSE stream endpoint for self-update.
  * Pulls image, creates new container, then launches minimal sidecar.
  */
@@ -320,7 +279,13 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 				}
 				const inspectData = await inspectResponse.json();
 				const createConfig = buildCreateConfig(inspectData, newImage);
-				const networkEnvVars = buildNetworkEnvVars(inspectData);
+				const networkPlan = planNetworkEnvVars(inspectData.NetworkSettings?.Networks);
+				if (networkPlan.skipped.length > 0) {
+					send('log', {
+						message: `Not reconnecting ${networkPlan.skipped.length} network(s) whose names are not plain network names: ${networkPlan.skipped.join(', ')}`
+					});
+				}
+				const networkEnvVars = networkPlan.envVars;
 				send('log', { message: `Networks: ${networkEnvVars.length > 0 ? networkEnvVars[0] : 'default'}` });
 				sendStep('building_config', 'completed', 'Config ready');
 

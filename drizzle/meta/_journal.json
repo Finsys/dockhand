@@ -113,6 +113,34 @@
       "when": 1788099517358,
       "tag": "0015_deploy_run_index",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1789748940121,
+      "tag": "0016_add_tags",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1791094942098,
+      "tag": "0017_pending_update_cooldown",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1791134060487,
+      "tag": "0018_add_passkey_credentials",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1791395550734,
+      "tag": "0019_add_backup_sftp",
+      "breakpoints": true
     }
   ]
 }

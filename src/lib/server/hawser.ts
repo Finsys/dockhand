@@ -128,7 +128,13 @@ export function initializeEdgeManager(): void {
 				}
 				for (const [requestId, pending] of conn.pendingStreamRequests) {
 					console.log(`[Hawser] Ending stream request ${requestId} due to connection timeout`);
-					pending.onEnd?.('Connection timeout');
+					// onEnd is caller-supplied and runs on a bare interval callback, so a
+					// throw here would reach the event loop instead of ending one stream.
+					try {
+						pending.onEnd?.('Connection timeout');
+					} catch (err) {
+						console.error(`[Hawser] Error ending stream request ${requestId}:`, err);
+					}
 				}
 				conn.pendingRequests.clear();
 				conn.pendingStreamRequests.clear();
@@ -138,7 +144,11 @@ export function initializeEdgeManager(): void {
 					conn.pingInterval = undefined;
 				}
 
-				conn.ws.close(1001, 'Connection timeout');
+				try {
+					conn.ws.close(1001, 'Connection timeout');
+				} catch (err) {
+					console.error(`[Hawser] Error closing timed-out connection for environment ${envId}:`, err);
+				}
 				edgeConnections.delete(envId);
 				updateEnvironmentStatus(envId, null);
 			}

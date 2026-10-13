@@ -3,14 +3,18 @@
 	import { toast } from 'svelte-sonner';
 	import { Loader2, FolderOpen, RotateCcw, Trash2, ArrowLeftRight, HardDrive, Archive, RefreshCw } from 'lucide-svelte';
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
+	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { LoadingState } from '$lib/components/ui/loading-state';
 	import { formatDateTime, formatRelativeTime } from '$lib/stores/settings';
 	import { formatBytes } from '$lib/utils/format';
 	import { readJobResponse } from '$lib/utils/sse-fetch';
-	import { getRepoTypeIcon, selectOwnSnapshotsFromDestination } from '$lib/utils/backup';
+	import { getRepoTypeIcon, selectOwnSnapshotsFromDestination, bulkDeleteSnapshots, bulkDeleteToast, bulkDeleteFailure } from '$lib/utils/backup';
+	import BulkDeleteSnapshotsDialog from '$lib/components/BulkDeleteSnapshotsDialog.svelte';
+	import BulkDeleteErrorDialog from '$lib/components/BulkDeleteErrorDialog.svelte';
 	import SnapshotBrowser from './SnapshotBrowser.svelte';
 	import RestoreModal from './RestoreModal.svelte';
 	import SnapshotDiffModal from '../backups/SnapshotDiffModal.svelte';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		/** The backup target name (container or stack) whose snapshots to list. */
@@ -49,6 +53,15 @@
 	let snapshots = $state<Snapshot[]>([]);
 	let deletingSnapshot = $state<string | null>(null);
 	let confirmDeleteSnapshot = $state<string | null>(null);
+	// Multi-select for bulk delete (same Set model as the containers grid), keyed by
+	// snapshot id. Bulk delete groups by destination and calls the batch endpoint.
+	let selectedSnapshots = $state<Set<string>>(new Set());
+	let bulkDeleting = $state(false);
+	let bulkDialogOpen = $state(false);
+	let bulkScope = $state<'selected' | 'all'>('selected');
+	let bulkDeleteErrorOpen = $state(false);
+	let bulkDeleteError = $state('');
+	let bulkDeleteErrorDeleted = $state(0);
 	// snapshotId → { filesNew, filesChanged, dataAdded } from schedule executions.
 	let stats = $state<Map<string, { filesNew: number; filesChanged: number; dataAdded: number }>>(new Map());
 
@@ -86,6 +99,16 @@
 	const visibleSnapshots = $derived(
 		repoFilter == null ? snapshots : snapshots.filter((s) => s._destinationId === repoFilter)
 	);
+	// Selection is scoped to what's currently visible (respects the repo filter), like the
+	// containers grid's select-all only covering the filtered rows.
+	const allVisibleSelected = $derived(
+		visibleSnapshots.length > 0 && visibleSnapshots.every((s) => selectedSnapshots.has(s.id))
+	);
+	const someVisibleSelected = $derived(
+		visibleSnapshots.some((s) => selectedSnapshots.has(s.id)) && !allVisibleSelected
+	);
+	const selectedCount = $derived(visibleSnapshots.filter((s) => selectedSnapshots.has(s.id)).length);
+
 	// A dropped repo filter (e.g. after a delete removed the last snapshot of a repo)
 	// falls back to "all" so the list never shows an empty filtered view.
 	$effect(() => {
@@ -155,7 +178,7 @@
 			stats = statMap;
 		} catch {
 			snapshots = [];
-			toast.error('Failed to load snapshots');
+			toast.error(m.containers_snapshot_error_load());
 		} finally {
 			loading = false;
 			onLoadingChange?.(false);
@@ -179,7 +202,7 @@
 		if (diffPending) {
 			// Second selection → compare (older first). Both must share a destination.
 			if (diffPending._destinationId !== s._destinationId) {
-				toast.error('Compare needs two snapshots from the same repository');
+				toast.error(m.containers_snapshot_compare_same_repo());
 				diffPending = null;
 				return;
 			}
@@ -199,19 +222,58 @@
 		try {
 			const res = await fetch(`/api/backup/snapshots/${s.id}?destinationId=${s._destinationId}`, { method: 'DELETE' });
 			if (res.ok) {
-				toast.success('Snapshot deleted');
+				toast.success(m.containers_snapshot_deleted());
 				await loadSnapshots();
 			} else {
 				const data = await res.json();
-				toast.error(data.error || 'Failed to delete snapshot');
+				toast.error(data.error || m.containers_snapshot_error_delete());
 			}
 		} catch {
-			toast.error('Failed to delete snapshot');
+			toast.error(m.containers_snapshot_error_delete());
 		} finally {
 			deletingSnapshot = null;
 			confirmDeleteSnapshot = null;
 		}
 	}
+
+	function toggleSnapshot(id: string) {
+		const next = new Set(selectedSnapshots);
+		if (next.has(id)) next.delete(id); else next.add(id);
+		selectedSnapshots = next;
+	}
+	function toggleSelectAllVisible() {
+		const next = new Set(selectedSnapshots);
+		if (allVisibleSelected) for (const s of visibleSnapshots) next.delete(s.id);
+		else for (const s of visibleSnapshots) next.add(s.id);
+		selectedSnapshots = next;
+	}
+
+	// Bulk delete via the shared helper (groups by destination, one restic forget per repo).
+	// `scope` = the currently-selected snapshots, or ALL visible ones.
+	async function bulkDelete(scope: 'selected' | 'all') {
+		const targets = scope === 'all' ? visibleSnapshots : visibleSnapshots.filter((s) => selectedSnapshots.has(s.id));
+		if (targets.length === 0) return;
+		bulkDeleting = true;
+		try {
+			const result = await bulkDeleteSnapshots(targets);
+			const failure = bulkDeleteFailure(result);
+			if (failure) {
+				bulkDeleteError = failure.error;
+				bulkDeleteErrorDeleted = failure.deleted;
+				bulkDeleteErrorOpen = true;
+			} else {
+				const t = bulkDeleteToast(result);
+				toast[t.type](t.message);
+			}
+			selectedSnapshots = new Set();
+			await loadSnapshots();
+		} finally {
+			bulkDeleting = false;
+			bulkDialogOpen = false;
+		}
+	}
+	function openBulk(scope: 'selected' | 'all') { bulkScope = scope; bulkDialogOpen = true; }
+	const bulkCount = $derived(bulkScope === 'all' ? visibleSnapshots.length : selectedCount);
 
 	// `hasBackups` arrives from the parent AFTER this panel mounts (the parent
 	// fetches its configs async), so it starts false and flips true once configs
@@ -237,7 +299,7 @@
      (which has no header row) instead of sitting one row lower. -->
 {#if snapshots.length > 0}
 	<div class="mb-2 flex items-center justify-end">
-		<button type="button" class="flex items-center gap-1.5 rounded p-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50" onclick={() => refresh()} disabled={loading} title="Refresh snapshots">
+		<button type="button" class="flex items-center gap-1.5 rounded p-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50" onclick={() => refresh()} disabled={loading} title={m.containers_snapshot_refresh()}>
 			<RefreshCw class="h-3.5 w-3.5" />
 		</button>
 	</div>
@@ -247,12 +309,12 @@
 	<!-- First load only: a quiet spinner, no skeleton. On a refresh where rows already
 	     exist we fall through and keep the real table visible (the header refresh icon
 	     already signals progress). Matches the History tab's empty/loading treatment. -->
-	<LoadingState class="min-h-[50vh]" label={loadTotal > 1 ? `Loading snapshots… ${loadDone} of ${loadTotal} repos` : 'Loading snapshots…'} />
+	<LoadingState class="min-h-[50vh]" label={loadTotal > 1 ? m.containers_snapshot_loading_progress({ done: loadDone, total: loadTotal }) : m.containers_snapshot_loading()} />
 {:else if snapshots.length === 0}
 	<div class="flex min-h-[60vh] flex-col items-center justify-center py-10 text-center">
 		<Archive class="mb-3 h-10 w-10 text-muted-foreground/40" />
-		<p class="text-sm text-muted-foreground">No snapshots yet for {targetName}.</p>
-		<p class="mt-1 text-xs text-muted-foreground">Run a backup from the Schedules tab to create one.</p>
+		<p class="text-sm text-muted-foreground">{m.containers_snapshot_empty({ name: targetName })}</p>
+		<p class="mt-1 text-xs text-muted-foreground">{m.containers_snapshot_empty_hint()}</p>
 	</div>
 {:else}
 	<!-- Repo filter chips (Option C) — only when the target spans more than one repo. -->
@@ -263,7 +325,7 @@
 				class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors {repoFilter == null ? 'border-primary/50 bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:text-foreground'}"
 				onclick={() => (repoFilter = null)}
 			>
-				All repositories <span class="text-[10px] opacity-70">{snapshots.length}</span>
+				{m.containers_snapshot_all_repositories()} <span class="text-[10px] opacity-70">{snapshots.length}</span>
 			</button>
 			{#each repoGroups as g}
 				{@const GIcon = getRepoTypeIcon(g.repository)}
@@ -277,15 +339,32 @@
 			{/each}
 		</div>
 	{/if}
+	<!-- Bulk actions: delete the selected snapshots, or all in the current view. -->
+	<div class="mb-2 flex items-center gap-2">
+		{#if selectedCount > 0}
+			<button type="button" class="inline-flex items-center gap-1.5 rounded-md border border-destructive/40 px-2.5 py-1 text-xs text-destructive transition-colors hover:bg-destructive/10" onclick={() => openBulk('selected')}>
+				<Trash2 class="h-3 w-3" /> {m.containers_snapshot_delete_selected({ count: selectedCount })}
+			</button>
+			<button type="button" class="text-xs text-muted-foreground hover:text-foreground" onclick={() => (selectedSnapshots = new Set())}>{m.containers_snapshot_clear_selection()}</button>
+		{/if}
+		{#if visibleSnapshots.length > 0}
+			<button type="button" class="ml-auto inline-flex items-center gap-1.5 rounded-md border border-destructive/40 px-2.5 py-1 text-xs text-destructive transition-colors hover:bg-destructive/10" onclick={() => openBulk('all')}>
+				<Trash2 class="h-3 w-3" /> {m.containers_snapshot_delete_all({ count: visibleSnapshots.length })}
+			</button>
+		{/if}
+	</div>
 	<div class="overflow-x-auto">
 		<table class="w-full text-xs">
 			<thead>
 				<tr class="border-b text-left text-muted-foreground">
-					<th class="py-1.5 pl-2 font-medium">Snapshot</th>
-					<th class="py-1.5 pl-2 font-medium">Taken</th>
-					<th class="py-1.5 pl-2 font-medium">Added</th>
-					<th class="py-1.5 pl-2 font-medium">Repository</th>
-					<th class="py-1.5 pr-3 text-right font-medium">Actions</th>
+					<th class="w-8 py-1.5 pl-2">
+						<Checkbox checked={allVisibleSelected} indeterminate={someVisibleSelected} onCheckedChange={toggleSelectAllVisible} aria-label={m.containers_snapshot_select_all()} />
+					</th>
+					<th class="py-1.5 pl-2 font-medium">{m.containers_snapshot_col_snapshot()}</th>
+					<th class="py-1.5 pl-2 font-medium">{m.containers_snapshot_col_taken()}</th>
+					<th class="py-1.5 pl-2 font-medium">{m.containers_snapshot_col_added()}</th>
+					<th class="py-1.5 pl-2 font-medium">{m.containers_snapshot_col_repository()}</th>
+					<th class="py-1.5 pr-3 text-right font-medium">{m.containers_snapshot_col_actions()}</th>
 				</tr>
 			</thead>
 			<tbody>
@@ -293,32 +372,36 @@
 					{@const isDiffPending = diffPending?.id === s.id}
 					{@const RepoIcon = getRepoTypeIcon(s._destinationRepository)}
 					{@const st = stats.get(s.id)}
-					<tr class="border-b text-xs last:border-0 hover:bg-muted/30 {isDiffPending ? 'bg-primary/10' : ''}">
+					<tr class="border-b text-xs last:border-0 hover:bg-muted/30 {isDiffPending ? 'bg-primary/10' : ''} {selectedSnapshots.has(s.id) ? 'bg-primary/5' : ''}">
+						<td class="py-1.5 pl-2">
+							<Checkbox checked={selectedSnapshots.has(s.id)} onCheckedChange={() => toggleSnapshot(s.id)} aria-label={m.containers_snapshot_select({ id: s.shortId })} />
+						</td>
 						<td class="py-1.5 pl-2 font-mono text-muted-foreground">{s.shortId}</td>
 						<td class="py-1.5 pl-2">{formatDateTime(s.time)} <span class="text-muted-foreground opacity-60">({formatRelativeTime(s.time)})</span></td>
-						<td class="py-1.5 pl-2 text-muted-foreground" title={st ? `${st.filesNew} new, ${st.filesChanged} changed files` : ''}>{st ? formatBytes(st.dataAdded) : '—'}</td>
+						<td class="py-1.5 pl-2 text-muted-foreground" title={st ? m.containers_snapshot_stats_title({ filesNew: st.filesNew, filesChanged: st.filesChanged }) : ''}>{st ? formatBytes(st.dataAdded) : '—'}</td>
 						<td class="py-1.5 pl-2 text-muted-foreground">
 							<span class="flex items-center gap-1.5"><RepoIcon class="h-3.5 w-3.5 text-primary/70" />{s._destinationName}</span>
 						</td>
 						<td class="px-3 py-1.5 text-right">
 							<div class="flex items-center justify-end gap-0.5">
 								{#if visibleSnapshots.length >= 2}
-									<button type="button" class="rounded p-1 transition-colors {isDiffPending ? 'bg-primary/20 text-primary' : 'hover:bg-muted'}" onclick={() => toggleDiff(s)} title={isDiffPending ? 'Cancel compare' : diffPending ? 'Compare with selected' : 'Compare'}>
+									<button type="button" class="rounded p-1 transition-colors {isDiffPending ? 'bg-primary/20 text-primary' : 'hover:bg-muted'}" onclick={() => toggleDiff(s)} title={isDiffPending ? m.containers_snapshot_compare_cancel() : diffPending ? m.containers_snapshot_compare_with_selected() : m.containers_snapshot_compare()}>
 										<ArrowLeftRight class="h-3 w-3 {isDiffPending ? 'text-primary' : 'text-muted-foreground'}" />
 									</button>
 								{/if}
-								<button type="button" class="rounded p-1 transition-colors hover:bg-muted" onclick={() => openBrowser(s)} title="Browse files">
+								<button type="button" class="rounded p-1 transition-colors hover:bg-muted" onclick={() => openBrowser(s)} title={m.containers_snapshot_browse_files()}>
 									<FolderOpen class="h-3 w-3 text-muted-foreground" />
 								</button>
-								<button type="button" class="rounded p-1 transition-colors hover:bg-muted" onclick={() => openRestore(s)} title="Restore">
+								<button type="button" class="rounded p-1 transition-colors hover:bg-muted" onclick={() => openRestore(s)} title={m.containers_snapshot_restore()}>
 									<RotateCcw class="h-3 w-3 text-muted-foreground" />
 								</button>
 								<ConfirmPopover
 									open={confirmDeleteSnapshot === s.id}
-									action="Delete"
-									itemType="snapshot"
+									localized
+									action={m.confirm_action_delete()}
+									itemType={m.containers_item_snapshot()}
 									itemName={s.shortId}
-									title="Delete snapshot"
+									title={m.containers_snapshot_delete_title()}
 									position="left"
 									onConfirm={() => deleteSnapshot(s)}
 									onOpenChange={(open) => confirmDeleteSnapshot = open ? s.id : null}
@@ -339,6 +422,9 @@
 		</table>
 	</div>
 {/if}
+
+<BulkDeleteSnapshotsDialog bind:open={bulkDialogOpen} count={bulkCount} busy={bulkDeleting} onConfirm={() => bulkDelete(bulkScope)} />
+<BulkDeleteErrorDialog bind:open={bulkDeleteErrorOpen} error={bulkDeleteError} deleted={bulkDeleteErrorDeleted} />
 
 <SnapshotBrowser
 	bind:open={showBrowser}

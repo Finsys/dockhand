@@ -4,6 +4,11 @@
  */
 import { describe, it, expect } from 'bun:test';
 import { withTimeout, resolveEnabledOnScheduleChange } from '../../src/lib/server/backups/helpers';
+import {
+	buildRestRepository,
+	parseRestRepository,
+	redactUrlCredentials
+} from '../../src/lib/utils/rest-repository';
 import { BackupError } from '../../src/lib/server/backups/models';
 
 describe('withTimeout', () => {
@@ -114,5 +119,104 @@ describe('resolveEnabledOnScheduleChange', () => {
 			existingSchedule: null,
 			newSchedule: '   '
 		})).toBe(false);
+	});
+});
+
+/**
+ * Composing a rest: URL by hand is what makes a strong password unusable and leaks it
+ * on failure. Verified against restic 0.19.1: an unencoded `%` is rejected outright
+ * ("invalid URL escape"), and a location restic cannot parse is echoed with the
+ * password in clear - restic only masks what it parsed.
+ */
+describe('buildRestRepository', () => {
+	it('emits exactly one rest: prefix whether or not the user typed one', () => {
+		expect(buildRestRepository('http://h:8000/repo')).toBe('rest:http://h:8000/repo');
+		expect(buildRestRepository('rest:http://h:8000/repo')).toBe('rest:http://h:8000/repo');
+		// The doubled prefix is the case that made restic print the password verbatim.
+		expect(buildRestRepository('rest:http://h:8000/repo')).not.toContain('rest:rest:');
+	});
+
+	it('percent-encodes characters that would otherwise break the URL', () => {
+		const repo = buildRestRepository('http://h:8000/repo', 'dockhand-user', 'p%ss@w0rd');
+		expect(repo).toBe('rest:http://dockhand-user:p%25ss%40w0rd@h:8000/repo');
+		// Round-trips through the URL parser, which is what restic does.
+		expect(() => new URL(repo.replace(/^rest:/, ''))).not.toThrow();
+	});
+
+	it('handles a 64-character random password with the usual troublesome characters', () => {
+		const pw = 'aB3%@:/?#[]!$&\'()*+,;=~-_.wXyZ0123456789%%@@::////AaBbCcDdEeFfGg';
+		const repo = buildRestRepository('https://backup:8000/r', 'u', pw);
+		const parsed = new URL(repo.replace(/^rest:/, ''));
+		expect(decodeURIComponent(parsed.password)).toBe(pw);
+		expect(parsed.hostname).toBe('backup');
+		expect(parsed.pathname).toBe('/r');
+	});
+
+	it('replaces credentials already present in the server field', () => {
+		expect(buildRestRepository('http://old:secret@h:8000/repo', 'new', 'pw')).toBe(
+			'rest:http://new:pw@h:8000/repo'
+		);
+	});
+
+	it('leaves a server field alone when no credentials are given', () => {
+		expect(buildRestRepository('http://u:p@h:8000/repo')).toBe('rest:http://u:p@h:8000/repo');
+	});
+
+	it('an empty server yields an empty repository, never a bare prefix', () => {
+		expect(buildRestRepository('')).toBe('');
+		expect(buildRestRepository('   ')).toBe('');
+		expect(buildRestRepository('', 'u', 'p')).toBe('');
+	});
+
+	it('round-trips through parseRestRepository', () => {
+		const pw = 'p%ss@w0rd:with/slashes';
+		const repo = buildRestRepository('http://h:8000/repo', 'dockhand-user', pw);
+		expect(parseRestRepository(repo)).toEqual({
+			url: 'http://h:8000/repo',
+			user: 'dockhand-user',
+			password: pw
+		});
+	});
+
+	it('parses a repository that carries no credentials', () => {
+		expect(parseRestRepository('rest:http://h:8000/repo')).toEqual({
+			url: 'http://h:8000/repo',
+			user: '',
+			password: ''
+		});
+	});
+});
+
+/**
+ * The test error reaches the browser AND is stored unencrypted in
+ * backup_destinations.last_test_error, so it must never carry a password.
+ */
+describe('redactUrlCredentials', () => {
+	it('redacts the password restic printed when it could not parse the location', () => {
+		// Verbatim shape from restic 0.19.1 on a rest:rest: location.
+		const msg =
+			'Stat(<config/>) returned error: Head "rest:http://dockhand-user:SuperSecret123@host:8000/my-backups/config": unsupported protocol scheme "rest"';
+		const out = redactUrlCredentials(msg);
+		expect(out).not.toContain('SuperSecret123');
+		expect(out).toContain('dockhand-user:***@');
+	});
+
+	it('redacts every occurrence, not just the first', () => {
+		const out = redactUrlCredentials('a http://u1:p1@h/x and b https://u2:p2@h/y');
+		expect(out).not.toContain('p1');
+		expect(out).not.toContain('p2');
+	});
+
+	it('leaves a message with no credentials untouched', () => {
+		const msg = 'Head "http://host:8000/my-backups/config": connection refused';
+		expect(redactUrlCredentials(msg)).toBe(msg);
+	});
+
+	it('does not mangle a url that has no userinfo', () => {
+		expect(redactUrlCredentials('see http://host:8000/path')).toBe('see http://host:8000/path');
+	});
+
+	it('is safe on empty input', () => {
+		expect(redactUrlCredentials('')).toBe('');
 	});
 });

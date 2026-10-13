@@ -4,7 +4,7 @@ import { getSecretProviderById } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
 import { getProvider } from '$lib/server/secretproviders';
 import { UnsupportedOperationError, parseProviderError } from '$lib/server/secretproviders/shared';
-import { probeBulkKeysCached, probeRefsCached } from '$lib/server/secretproviders/probe-cache';
+import { probeCombinedCached } from '$lib/server/secretproviders/probe-cache';
 
 /**
  * Live probe of a stored provider: given a bulk selector and/or inline op://
@@ -60,26 +60,19 @@ export const POST: RequestHandler = async ({ params, cookies, request }) => {
 	let bulkKeys: string[] = [];
 	let resolvedRefs: string[] = [];
 
+	// Both halves in one call: a CLI provider that can serve them from a single
+	// backend session does so, instead of paying a login per half.
+	//
 	// A provider missing a mode throws UnsupportedOperationError; that is not a
 	// failure - it just means that mode contributes no keys. Any other throw
 	// (network, bad token, bad path) is a real probe failure.
-	if (selector && provider.supportsBulk) {
-		try {
-			bulkKeys = await probeBulkKeysCached(id, provider, row.config, selector);
-		} catch (e) {
-			if (!(e instanceof UnsupportedOperationError)) {
-				return json({ ok: false, error: shortError(e) }, { status: 200 });
-			}
-		}
-	}
-
-	if (refs.length && provider.supportsReferences) {
-		try {
-			resolvedRefs = await probeRefsCached(id, provider, row.config, refs);
-		} catch (e) {
-			if (!(e instanceof UnsupportedOperationError)) {
-				return json({ ok: false, error: shortError(e) }, { status: 200 });
-			}
+	try {
+		const combined = await probeCombinedCached(id, provider, row.config, selector, refs);
+		bulkKeys = combined.bulkKeys;
+		resolvedRefs = combined.resolvedRefs;
+	} catch (e) {
+		if (!(e instanceof UnsupportedOperationError)) {
+			return json({ ok: false, error: shortError(e) }, { status: 200 });
 		}
 	}
 

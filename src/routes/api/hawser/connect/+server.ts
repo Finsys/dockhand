@@ -11,6 +11,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { isEdgeConnected, getAllEdgeConnections } from '$lib/server/hawser';
+import { authorize } from '$lib/server/authorize';
 
 /**
  * GET /api/hawser/connect
@@ -20,22 +21,39 @@ import { isEdgeConnected, getAllEdgeConnections } from '$lib/server/hawser';
 /**
  * @openapi
  * summary: Report the Hawser Edge WebSocket endpoint status and list currently connected agents
+ * description: Requires environments:view. Each entry names a remote host and the Docker and agent versions running on it, so the listing is limited to the environments the caller can reach.
  * resp-200: {status:string!, message:string!, protocol:string!, activeConnections:integer!, connections:array<{environmentId:integer!, agentId:string, agentName:string, agentVersion:string, dockerVersion:string, hostname:string, capabilities:array<string>, connectedAt:string, lastHeartbeat:string}>!}
  * resp-200-example: {"status":"ready","message":"Hawser Edge WebSocket endpoint. Connect via WebSocket.","protocol":"wss://<host>/api/hawser/connect","activeConnections":0,"connections":[]}
+ * resp-401: Not authenticated
+ * resp-403: Permission denied (missing environments:view)
  */
-export const GET: RequestHandler = async () => {
+export const GET: RequestHandler = async ({ cookies }) => {
+	const auth = await authorize(cookies);
+	if (auth.authEnabled && !auth.isAuthenticated) {
+		return json({ error: 'Authentication required' }, { status: 401 });
+	}
+	// An inventory of the remote machines this instance manages, down to the Docker
+	// build running on each, so it follows the environments it describes.
+	const denied = await auth.requirePermission('environments', 'view');
+	if (denied) return denied;
+
+	// null means every environment is the caller's to see.
+	const reachable = await auth.getAccessibleEnvironmentIds();
+
 	const connections = getAllEdgeConnections();
-	const connectionList = Array.from(connections.entries()).map(([envId, conn]) => ({
-		environmentId: envId,
-		agentId: conn.agentId,
-		agentName: conn.agentName,
-		agentVersion: conn.agentVersion,
-		dockerVersion: conn.dockerVersion,
-		hostname: conn.hostname,
-		capabilities: conn.capabilities,
-		connectedAt: conn.connectedAt.toISOString(),
-		lastHeartbeat: new Date(conn.lastHeartbeat).toISOString()
-	}));
+	const connectionList = Array.from(connections.entries())
+		.filter(([envId]) => reachable === null || reachable.includes(envId))
+		.map(([envId, conn]) => ({
+			environmentId: envId,
+			agentId: conn.agentId,
+			agentName: conn.agentName,
+			agentVersion: conn.agentVersion,
+			dockerVersion: conn.dockerVersion,
+			hostname: conn.hostname,
+			capabilities: conn.capabilities,
+			connectedAt: conn.connectedAt.toISOString(),
+			lastHeartbeat: new Date(conn.lastHeartbeat).toISOString()
+		}));
 
 	return json({
 		status: 'ready',

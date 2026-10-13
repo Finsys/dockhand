@@ -3,57 +3,7 @@ import { listContainers, getContainerStats, EnvironmentNotFoundError } from '$li
 import { authorize } from '$lib/server/authorize';
 import { hasEnvironments } from '$lib/server/db';
 import type { ContainerStats } from '$lib/types';
-
-function calculateCpuPercent(stats: any): number {
-	const cpuDelta = stats.cpu_stats.cpu_usage.total_usage - stats.precpu_stats.cpu_usage.total_usage;
-	const systemDelta = stats.cpu_stats.system_cpu_usage - stats.precpu_stats.system_cpu_usage;
-	const cpuCount = stats.cpu_stats.online_cpus || stats.cpu_stats.cpu_usage.percpu_usage?.length || 1;
-
-	if (systemDelta > 0 && cpuDelta > 0) {
-		return (cpuDelta / systemDelta) * cpuCount * 100;
-	}
-	return 0;
-}
-
-function calculateNetworkIO(stats: any): { rx: number; tx: number } {
-	let rx = 0;
-	let tx = 0;
-
-	if (stats.networks) {
-		for (const iface of Object.values(stats.networks) as any[]) {
-			rx += iface.rx_bytes || 0;
-			tx += iface.tx_bytes || 0;
-		}
-	}
-
-	return { rx, tx };
-}
-
-function calculateBlockIO(stats: any): { read: number; write: number } {
-	let read = 0;
-	let write = 0;
-
-	const ioStats = stats.blkio_stats?.io_service_bytes_recursive;
-	if (Array.isArray(ioStats)) {
-		for (const entry of ioStats) {
-			if (entry.op === 'read' || entry.op === 'Read') {
-				read += entry.value || 0;
-			} else if (entry.op === 'write' || entry.op === 'Write') {
-				write += entry.value || 0;
-			}
-		}
-	}
-
-	return { read, write };
-}
-
-function calculateMemoryUsage(memoryStats: any): { usage: number; raw: number; cache: number } {
-	const raw = memoryStats?.usage || 0;
-	const stats = memoryStats?.stats || {};
-	const cache = stats.inactive_file ?? stats.total_inactive_file ?? 0;
-	const usage = (cache > 0 && cache < raw) ? raw - cache : raw;
-	return { usage, raw, cache };
-}
+import { calculateCpuPercent, calculateMemoryUsage, calculateMemoryLimit, calculateNetworkIO, calculateBlockIO } from '$lib/server/stats-calc-core';
 
 function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
 	let timeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -119,6 +69,11 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 				);
 				const runningContainers = containers.filter(c => c.state === 'running');
 
+				// All at once, deliberately. The daemon samples CPU twice per call, so
+				// each one costs about two seconds no matter what; anything narrower
+				// than "every container" multiplies that into the wait for a table the
+				// user is watching. The collection worker paces its own fan-out because
+				// it runs in the background, where waiting is free.
 				const statsPromises = runningContainers.map(async (container) => {
 					try {
 						const stats = await withTimeout(
@@ -131,14 +86,17 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 
 						const cpuPercent = calculateCpuPercent(stats);
 						const memory = calculateMemoryUsage(stats.memory_stats);
-						const memoryLimit = stats.memory_stats?.limit || 1;
-						const memoryPercent = (memory.usage / memoryLimit) * 100;
+						const memoryLimit = calculateMemoryLimit(stats);
+						const memoryPercent = memoryLimit > 0 ? (memory.usage / memoryLimit) * 100 : 0;
 						const networkIO = calculateNetworkIO(stats);
 						const blockIO = calculateBlockIO(stats);
 
 						const stat: ContainerStats = {
 							id: container.id,
 							name: container.name,
+							// Same field the one-shot endpoint reports, so a consumer can group
+							// by stack whichever of the two it reads.
+							stack: container.labels?.['com.docker.compose.project'] ?? null,
 							cpuPercent: Math.round(cpuPercent * 100) / 100,
 							memoryUsage: memory.usage,
 							memoryRaw: memory.raw,

@@ -15,24 +15,28 @@ import { invalidateTokenCacheForUser } from '$lib/server/api-tokens';
 import { auditUser } from '$lib/server/audit';
 
 // GET /api/users - List all users
-// Free for all - local users are needed for basic auth
 /**
  * @openapi
- * summary: List all local/SSO users (any authenticated user may view — only mutations are RBAC-gated)
+ * summary: List all local/SSO users
+ * description: Requires users:view. The list carries every account's email address and says which ones are administrators.
  * resp-200: array<{id:integer!, username:string!, email:string, displayName:string, isAdmin:boolean!, isActive:boolean!, isSso:boolean!, authProvider:string!}>
  * resp-200-example: [{"id":1,"username":"admin","email":"admin@example.com","displayName":"Admin","isAdmin":true,"isActive":true,"isSso":false,"authProvider":"local"}]
  * resp-401: Not authenticated
+ * resp-403: Permission denied (missing users:view)
  * resp-500: Unexpected error while loading users
  */
 export const GET: RequestHandler = async ({ cookies }) => {
 	const auth = await authorize(cookies);
 
-	// When auth is enabled, require valid session (no specific permission needed to view users list)
 	if (auth.authEnabled && !auth.isAuthenticated) {
 		return json({ error: 'Authentication required' }, { status: 401 });
 	}
-	// Any authenticated user can view the users list
-	// Admin permissions are only needed for create/edit/delete operations
+	// Names, email addresses and which accounts hold the Admin role: a ready-made
+	// target list for phishing, so it is gated like any other personal data. Creating
+	// the very first account is unaffected - that path is a POST, and the hook lets it
+	// through while no user exists.
+	const denied = await auth.requirePermission('users', 'view');
+	if (denied) return denied;
 
 	try {
 		const allUsers = await getUsers();

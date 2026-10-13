@@ -2,20 +2,23 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { X, GripHorizontal, RefreshCw, Copy, Trash2 } from 'lucide-svelte';
 	import * as Select from '$lib/components/ui/select';
+	import type { TerminalMode } from '$lib/types';
 	import Terminal from './Terminal.svelte';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		containerId: string;
 		containerName: string;
 		shell: string;
 		user: string;
+		mode?: TerminalMode;
 		visible: boolean;
 		envId: number | null;
 		fillHeight?: boolean;
 		onClose: () => void;
 	}
 
-	let { containerId, containerName, shell, user, visible, envId, fillHeight = false, onClose }: Props = $props();
+	let { containerId, containerName, shell, user, mode = 'exec', visible, envId, fillHeight = false, onClose }: Props = $props();
 
 	let terminalComponent: ReturnType<typeof Terminal>;
 	let panelRef: HTMLDivElement;
@@ -167,15 +170,15 @@
 	<!-- Header -->
 	<div class="flex items-center justify-between px-3 py-1.5 border-b border-zinc-800 bg-zinc-900/50">
 		<div class="flex items-center gap-2">
-			<span class="text-xs text-zinc-400">Terminal:</span>
+			<span class="text-xs text-zinc-400">{mode === 'attach' ? m.terminal_panel_attach_prefix() : m.terminal_panel_terminal_prefix()}</span>
 			<span class="text-xs text-zinc-200 font-medium">{containerName}</span>
 			{#if connected}
 				<span class="inline-flex items-center gap-1 text-xs text-green-500">
 					<span class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
-					Connected
+					{m.containers_terminal_connected()}
 				</span>
 			{:else}
-				<span class="text-xs text-zinc-500">Disconnected</span>
+				<span class="text-xs text-zinc-500">{m.terminal_status_disconnected()}</span>
 			{/if}
 		</div>
 		<div class="flex items-center gap-2">
@@ -194,7 +197,7 @@
 			<button
 				onclick={() => terminalComponent?.clear()}
 				class="p-1 rounded hover:bg-zinc-800 transition-colors"
-				title="Clear terminal (Ctrl+L)"
+				title={m.terminal_panel_clear_shortcut()}
 			>
 				<Trash2 class="w-3 h-3 text-zinc-500 hover:text-zinc-300" />
 			</button>
@@ -202,7 +205,7 @@
 			<button
 				onclick={() => terminalComponent?.copyOutput()}
 				class="p-1 rounded hover:bg-zinc-800 transition-colors"
-				title="Copy output"
+				title={m.terminal_copy_output()}
 			>
 				<Copy class="w-3 h-3 text-zinc-500 hover:text-zinc-300" />
 			</button>
@@ -211,7 +214,7 @@
 				<button
 					onclick={() => terminalComponent?.reconnect()}
 					class="flex items-center gap-1 px-1.5 py-0.5 rounded text-xs bg-amber-500/20 ring-1 ring-amber-500/50 text-amber-400 hover:bg-amber-500/30 transition-colors"
-					title="Reconnect"
+					title={m.terminal_reconnect()}
 				>
 					<RefreshCw class="w-3 h-3" />
 				</button>
@@ -220,7 +223,7 @@
 			<button
 				onclick={handleClose}
 				class="p-1 rounded hover:bg-zinc-800 transition-colors"
-				title="Close terminal"
+				title={m.terminal_panel_close()}
 			>
 				<X class="w-3 h-3 text-zinc-500 hover:text-zinc-300" />
 			</button>
@@ -229,14 +232,17 @@
 
 	<!-- Terminal content -->
 	<div class="flex-1 overflow-hidden p-1">
-		<Terminal
-			bind:this={terminalComponent}
-			{containerId}
-			{containerName}
-			{shell}
-			{user}
-			{envId}
-			{fontSize}
-		/>
+		{#key `${containerId}-${mode}-${shell}-${user}`}
+			<Terminal
+				bind:this={terminalComponent}
+				{containerId}
+				{containerName}
+				{shell}
+				{user}
+				{mode}
+				{envId}
+				{fontSize}
+			/>
+		{/key}
 	</div>
 </div>

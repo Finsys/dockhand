@@ -160,15 +160,31 @@ describe('buildBackupScript', () => {
 			expect(script).toContain('compose dupa.yaml not found');
 		});
 
-		it('user-set hint: same clear "set the real host path" instruction', () => {
+		it('user-set hint (hawser): same clear "set the real host path" instruction', () => {
 			const script = buildBackupScript(['backup', '/volumes/', '/metadata/'], {
 				volumeKey: '__dockhand_stackdir__', composeFileName: 'compose.yaml',
 				hostPath: '/opt/agent/stacks/gitlab',
-				hint: { kind: 'user-set', hostPath: '/opt/agent/stacks/gitlab', envName: 'remote-1' }
+				hint: { kind: 'user-set', transport: 'hawser', hostPath: '/opt/agent/stacks/gitlab', envName: 'remote-1' }
 			});
 			expect(script).toContain('not found in /opt/agent/stacks/gitlab on remote-1');
 			expect(script).toContain('Set "Remote stack path (for backup)" in Settings > Environments > remote-1');
 			expect(script).not.toContain('Redeploy the stack');
+		});
+
+		it('user-set hint (direct-remote): the path is set, so tell them to REDEPLOY (files are staged on up), not to change the path', () => {
+			const script = buildBackupScript(['backup', '/volumes/', '/metadata/'], {
+				volumeKey: '__dockhand_stackdir__', composeFileName: 'compose.yaml',
+				hostPath: '/home/ubuntu/Docker/dockhand/cf-tunnel',
+				hint: { kind: 'user-set', transport: 'direct', hostPath: '/home/ubuntu/Docker/dockhand/cf-tunnel', envName: 'DOOBER' }
+			});
+			// Apostrophes in the message are shell-escaped in the generated script, so match on
+			// apostrophe-free fragments here; the exact wording is asserted in stackdir-plan.test.ts
+			// against the pure builder.
+			expect(script).toContain('not found in /home/ubuntu/Docker/dockhand/cf-tunnel on DOOBER');
+			expect(script).toContain('The Remote stack path is set');
+			expect(script).toContain('redeploy the stack so Dockhand stages them');
+			// It must NOT tell them to set the path (they already did) - that was the confusing advice.
+			expect(script).not.toContain('Set "Remote stack path (for backup)"');
 		});
 
 		it('falls back to "on the host" when the env name is unknown (never prints null)', () => {
@@ -221,7 +237,8 @@ describe('buildBackupScript', () => {
 		// generated script through sh for each hint kind to guarantee it stays valid.
 		for (const hint of [
 			{ kind: 'hawser-defaulted', hostPath: '/data/stacks/x', envName: "prod's-env (eu)" } as const,
-			{ kind: 'user-set', hostPath: '/opt/agent/stacks/x', envName: 'remote-1' } as const,
+			{ kind: 'user-set', transport: 'hawser', hostPath: '/opt/agent/stacks/x', envName: 'remote-1' } as const,
+			{ kind: 'user-set', transport: 'direct', hostPath: '/opt/agent/stacks/x', envName: "prod's-env (eu)" } as const,
 			{ kind: 'local' } as const,
 		]) {
 			it(`round-trip: generated probe script is valid sh for hint kind=${hint.kind}`, () => {

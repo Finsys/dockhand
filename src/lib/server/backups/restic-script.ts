@@ -10,6 +10,19 @@ import { isLocalRepo } from './models';
 /** The marker line the helper prints carrying restic's real exit code. */
 export const EXIT_MARKER = 'DOCKHAND_RESTIC_EXIT=';
 
+/**
+ * A persistent restic cache for the helper. The helper container is ephemeral
+ * (removed after each op), so a cache inside it is cold every run and restic
+ * re-downloads the whole repo index/snapshot metadata from the backend to dedup
+ * - many object GETs per backup, growing with the repo. A NAMED volume
+ * (not a host path) is managed by the TARGET daemon, so it survives the helper
+ * and works identically on local, direct-remote and Hawser envs - no host path
+ * is reachable on a remote daemon. restic keys its cache per-repo internally, so
+ * one shared volume serves every destination.
+ */
+export const RESTIC_CACHE_VOLUME = 'dockhand-restic-cache';
+export const RESTIC_CACHE_PATH = '/root/.cache/restic';
+
 /** Quote a single argument for safe interpolation into an `sh -c` string. */
 export function shellQuote(s: string): string {
 	return `'${s.replace(/'/g, `'\\''`)}'`;
@@ -160,6 +173,9 @@ export function buildHelperEnv(
 		`RESTIC_REPOSITORY=${repository}`,
 		`RESTIC_PASSWORD=${password}`,
 		'RESTIC_PROGRESS_FPS=2',
+		// Point restic at the mounted persistent cache (buildHelperBinds mounts the
+		// dockhand-restic-cache volume here) so it isn't cold on every run.
+		`RESTIC_CACHE_DIR=${RESTIC_CACHE_PATH}`,
 	];
 	for (const [k, v] of Object.entries(allowedCloudVars)) env.push(`${k}=${v}`);
 	// PEM CONTENT (not a path) - tlsCertPreamble writes it to a file in the helper.
@@ -178,7 +194,10 @@ export function buildHelperBinds(
 	volumeBinds: string[],
 	resolveLocalRepoHostPath: (repoPath: string) => string
 ): string[] {
-	const binds = [...volumeBinds];
+	// Persistent restic cache first (named volume, daemon-managed, survives the
+	// ephemeral helper) so backups reuse the repo index instead of re-fetching it
+	// from the backend every run.
+	const binds = [`${RESTIC_CACHE_VOLUME}:${RESTIC_CACHE_PATH}`, ...volumeBinds];
 	if (isLocalRepo(repository)) {
 		binds.push(`${resolveLocalRepoHostPath(repository)}:${repository}`);
 	}

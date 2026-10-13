@@ -8,6 +8,7 @@ import Bitwarden from './Bitwarden.svelte';
 import ProtonPass from './ProtonPass.svelte';
 import AzureKeyVault from './AzureKeyVault.svelte';
 import KeePassXC from './KeePassXC.svelte';
+import Psono from './Psono.svelte';
 
 /** Brand icon for a secret-provider type. Falls back to a generic key icon. */
 export function getProviderIcon(type: string): Component {
@@ -29,6 +30,8 @@ export function getProviderIcon(type: string): Component {
 			return AzureKeyVault;
 		case 'keepass':
 			return KeePassXC;
+		case 'psono':
+			return Psono;
 		default:
 			return KeyRound; // any future provider until it has a brand icon
 	}

@@ -4,7 +4,7 @@
 
 import {
 	listImages,
-	pullImage,
+	pullInternalImage,
 	createVolume,
 	listVolumes,
 	removeVolume,
@@ -12,12 +12,27 @@ import {
 	runContainerWithStreaming,
 	inspectImage,
 	checkImageUpdateAvailable,
-	getNegotiatedApiVersion
+	getNegotiatedApiVersion,
+	findRegistryCredentials,
+	parseImageReference
 } from './docker';
+import {
+	isDaemonExportFailure,
+	chooseReportedError,
+	resolveRegistryScanTarget,
+	needsRepoTags,
+	type RegistryScanTarget,
+	toRegistryScanCmd,
+	toRegistryRef,
+	registryAuthEnv,
+	imageRegistryAuthority,
+	RegistryFallbackMemory
+} from './scanner-registry-core';
 import { getEnvironment, getEnvSetting, getSetting } from './db';
 import { sendEventNotification } from './notifications';
 import { detectRemoteSocketPath } from './scanner-socket-detect';
-import { truncateForLog, classifyUnparseableOutput } from './scanner-output-core';
+import { truncateForLog, classifyUnparseableOutput, pickScanDisplayName } from './scanner-output-core';
+import { checkNewerVersion } from './semver/check';
 import {
 	getHostDockerSocket,
 	getHostDataDir,
@@ -118,19 +133,27 @@ async function withScannerLock<T>(scannerType: string, fn: () => Promise<T>): Pr
 // Key: "{scannerType}:{imageName}", Value: Promise that resolves to the scan result
 const inProgressScans = new Map<string, Promise<string>>();
 
+// Per-env memory of a broken daemon image store (blob-loss on `docker save`), so
+// later scans on that env go registry-first instead of retrying the doomed daemon
+// export every time. Process-lifetime only; resets on restart (#1569/#1350).
+const registryFallback = new RegistryFallbackMemory();
+
 /** Scanner queue depth — for the metrics endpoint. `inProgress` = distinct
  *  image scans running/deduped; `locked` = scanner types holding the serial lock. */
 export function getScannerStats(): { inProgress: number; locked: number } {
 	return { inProgress: inProgressScans.size, locked: scannerLocks.size };
 }
 
-// Default CLI arguments for scanners (image name is substituted for {image})
-export const DEFAULT_GRYPE_ARGS = '-o json -v {image}';
-export const DEFAULT_TRIVY_ARGS = 'image --format json {image}';
-
 // Pinned scanner images — avoid :latest after the March 2026 Trivy supply chain attack
-export const DEFAULT_GRYPE_IMAGE = 'anchore/grype:v0.115.0';
-export const DEFAULT_TRIVY_IMAGE = 'aquasec/trivy:0.71.2';
+import {
+	DEFAULT_GRYPE_IMAGE,
+	DEFAULT_TRIVY_IMAGE,
+	DEFAULT_GRYPE_ARGS,
+	DEFAULT_TRIVY_ARGS
+} from '$lib/utils/scanner-images';
+// The images are re-exported because docker.ts imports them from here; the args
+// have no such consumer, so they stay where they are defined.
+export { DEFAULT_GRYPE_IMAGE, DEFAULT_TRIVY_IMAGE };
 
 export interface VulnerabilitySeverity {
 	critical: number;
@@ -351,7 +374,7 @@ async function ensureScannerImage(
 	});
 
 	try {
-		await pullImage(scannerImage, undefined, envId);
+		await pullInternalImage(scannerImage, envId);
 		return true;
 	} catch (error) {
 		const errorMsg = error instanceof Error ? error.message : String(error);
@@ -565,15 +588,21 @@ function parseTrivyOutput(output: string): { vulnerabilities: Vulnerability[]; s
 	return { vulnerabilities, summary };
 }
 
-// Get the SHA256 image ID for a given image name/tag
-async function getImageSha(imageName: string, envId?: number): Promise<string> {
+/**
+ * Resolve the stable image ID AND a human-readable display name from ONE inspect.
+ * The scan is driven by `imageRef`, which the auto-update path passes as a bare digest; that
+ * digest would otherwise be stored and shown in notifications. `displayName` prefers a real
+ * RepoTag (see pickScanDisplayName); `imageId` is the SHA used for cache keying (unchanged).
+ */
+async function resolveImageIdentity(imageRef: string, envId?: number): Promise<{ imageId: string; displayName: string }> {
 	try {
-		const imageInfo = await inspectImage(imageName, envId) as any;
-		// The Id field contains the full sha256:... hash
-		return imageInfo.Id || imageName;
+		const info = await inspectImage(imageRef, envId) as any;
+		return {
+			imageId: info.Id || imageRef,
+			displayName: pickScanDisplayName(imageRef, info.RepoTags)
+		};
 	} catch {
-		// If we can't inspect the image, fall back to the name
-		return imageName;
+		return { imageId: imageRef, displayName: imageRef };
 	}
 }
 
@@ -658,7 +687,10 @@ async function runScannerContainer(
 	}
 }
 
-// Internal implementation of scanner container run
+// Internal implementation of scanner container run. Handles the daemon-export
+// blob bug (#1569/#1350): if this env is already known-broken, go registry-first;
+// otherwise try the daemon path and, on a blob-export failure, remember the env
+// and retry straight from the registry.
 async function runScannerContainerImpl(
 	scannerImage: string,
 	scannerType: 'grype' | 'trivy',
@@ -667,10 +699,48 @@ async function runScannerContainerImpl(
 	envId?: number,
 	onOutput?: (line: string) => void
 ): Promise<string> {
-	// Serialize scans of the same type to avoid DB lock conflicts and re-downloads
-	return withScannerLock(scannerType, () =>
-		runScannerContainerCore(scannerImage, scannerType, imageName, cmd, envId, onOutput)
-	);
+	const run = (registryMode: boolean) =>
+		// Serialize scans of the same type to avoid DB lock conflicts and re-downloads
+		withScannerLock(scannerType, () =>
+			runScannerContainerCore(scannerImage, scannerType, imageName, cmd, envId, onOutput, registryMode)
+		);
+
+	// This env's store lost blobs on a prior scan -> try the registry first, since the
+	// daemon export is the slow half and was already seen to fail. The daemon stays as
+	// the fallback, because a registry cannot answer every ref: a local-only image, or a
+	// private registry with no stored credentials. The preference is NOT cleared on a
+	// daemon success - blob loss is per-image, so one image exporting proves nothing
+	// about the store, and releasing the env would send the next scan back through the
+	// doomed export.
+	if (registryFallback.prefersRegistry(envId)) {
+		console.log(`[Scanner] ${scannerType}: env ${envId ?? 'local'} previously broke daemon export - trying the registry first`);
+		try {
+			return await run(true);
+		} catch (registryError) {
+			const rmsg = registryError instanceof Error ? registryError.message : String(registryError);
+			console.warn(`[Scanner] ${scannerType}: registry scan failed (${rmsg.split('\n')[0]}); retrying via the daemon`);
+			try {
+				return await run(false);
+			} catch (daemonError) {
+				const dmsg = daemonError instanceof Error ? daemonError.message : String(daemonError);
+				// Both halves failed; the core decides which failure explains the outcome.
+				throw chooseReportedError(rmsg, dmsg) === 'registry' ? registryError : daemonError;
+			}
+		}
+	}
+
+	try {
+		return await run(false);
+	} catch (error) {
+		const msg = error instanceof Error ? error.message : String(error);
+		if (!isDaemonExportFailure(msg)) throw error;
+		// The daemon handed the scanner an incomplete tar (containerd/OCI store blob
+		// loss). Remember this env and retry from the registry.
+		console.warn(`[Scanner] ${scannerType}: daemon export produced an incomplete image for ${imageName}; retrying from the registry`);
+		onOutput?.(`Daemon image export was incomplete; retrying scan from the registry...`);
+		registryFallback.markBroken(envId);
+		return run(true);
+	}
 }
 
 async function runScannerContainerCore(
@@ -679,9 +749,10 @@ async function runScannerContainerCore(
 	imageName: string,
 	cmd: string[],
 	envId?: number,
-	onOutput?: (line: string) => void
+	onOutput?: (line: string) => void,
+	registryMode?: boolean
 ): Promise<string> {
-	console.log(`[Scanner] Starting ${scannerType} scan for image: ${imageName}, envId: ${envId ?? 'local'}`);
+	console.log(`[Scanner] Starting ${scannerType} scan for image: ${imageName}, envId: ${envId ?? 'local'}${registryMode ? ' (registry mode)' : ''}`);
 
 	// Always use the base cache path — serial lock prevents concurrent conflicts
 	const basePath = scannerType === 'grype' ? '/cache/grype' : '/cache/trivy';
@@ -770,14 +841,56 @@ async function runScannerContainerCore(
 		console.log(`[Scanner] Standard mode - using volume: ${volumeName}`);
 	}
 
-	// Build binds — only include socket mount when using socket mode
+	// Build binds — only include socket mount when using socket mode.
+	// In registry mode the scanner pulls straight from the registry, so the daemon
+	// socket is deliberately NOT mounted (that is the whole point - it bypasses the
+	// broken `docker save`).
 	const binds: string[] = [];
-	if (hostSocketPath) {
+	if (hostSocketPath && !registryMode) {
 		binds.push(`${hostSocketPath}:/var/run/docker.sock:ro`);
 	}
 	binds.push(cacheBind);
 
 	console.log(`[Scanner] Container bind mounts: ${JSON.stringify(binds)}`);
+
+	// Registry mode: rewrite the command to scan the registry ref (grype needs a
+	// `registry:` source prefix; trivy scans the ref once no socket is present) and
+	// attach credentials for the image's registry from the configured registries.
+	// The scanner now reads from the registry instead of the local daemon, so it
+	// needs outbound reachability to the registry. On a hawser env the scanner runs
+	// on the remote host with default networking; if that registry is internal-only
+	// and was previously reachable only via the daemon, the registry scan can't reach
+	// it. Surface that so a split-network user knows why.
+	let registryScanTarget: RegistryScanTarget | null = null;
+	if (registryMode) {
+		// Only a bare image ID needs the inspect, and that is a remote round-trip, so
+		// the core decides whether to pay for it.
+		let repoTags: string[] | undefined;
+		if (needsRepoTags(imageName)) {
+			try {
+				repoTags = ((await inspectImage(imageName, envId)) as any)?.RepoTags ?? undefined;
+			} catch {
+				// Leave it unresolved; the scan fails with the registry's own message
+				// rather than an inspect error that says nothing about the scan.
+			}
+		}
+		// One call decides the ref to scan AND the registry to authenticate against, so
+		// the two can never disagree about which image is being read.
+		registryScanTarget = resolveRegistryScanTarget(
+			imageName,
+			repoTags,
+			(ref) => parseImageReference(ref).registry
+		);
+		if (registryScanTarget.resolved) {
+			console.log(`[Scanner] Registry mode - scanning ${registryScanTarget.ref} (${imageName} is local)`);
+		} else if (registryScanTarget.unresolvableId) {
+			console.warn(`[Scanner] Registry mode - no pushed tag known for ${imageName}; the registry cannot resolve it`);
+		}
+		cmd = toRegistryScanCmd(scannerType, cmd, imageName, registryScanTarget.ref);
+		if (isHawser) {
+			console.warn(`[Scanner] Registry-mode fallback on a remote (hawser) env - the scanner container must be able to reach the registry from the remote host's default network.`);
+		}
+	}
 
 	// Environment variables to ensure scanners use the correct cache path
 	const envVars = scannerType === 'grype'
@@ -806,9 +919,34 @@ async function runScannerContainerCore(
 		}
 	}
 
-	// In TCP mode, pass DOCKER_HOST so scanner connects to Docker via TCP
-	if (scannerDockerHost) {
+	// In TCP mode, pass DOCKER_HOST so scanner connects to Docker via TCP.
+	// Not in registry mode - there is no daemon connection to make.
+	if (scannerDockerHost && !registryMode) {
 		envVars.push(`DOCKER_HOST=${scannerDockerHost}`);
+	}
+
+	// Registry mode: attach credentials for the image's registry so a private
+	// image (e.g. a self-hosted ZOT) authenticates. Public images match nothing
+	// and scan anonymously, exactly as before this fix.
+	if (registryMode) {
+		// findRegistryCredentials matches on the registry HOST, not the full ref, so
+		// resolve the registry the same way image pulls do (parseImageReference), not
+		// by passing the tagged image name (which never matches a stored org path).
+		// Resolved above, in the same `if (registryMode)` block that rewrote the command,
+		// so the scan and its credentials always describe one image. A missing target
+		// would mean the two blocks had drifted apart.
+		if (!registryScanTarget) {
+			throw new Error('Registry mode reached the credential step without a resolved target');
+		}
+		const { registry, authority } = registryScanTarget;
+		const creds = await findRegistryCredentials(registry);
+		const authEnv = registryAuthEnv(scannerType, creds, authority ?? undefined);
+		if (authEnv.length > 0) {
+			envVars.push(...authEnv);
+			console.log(`[Scanner] Registry mode - using stored credentials for ${registry}`);
+		} else {
+			console.log(`[Scanner] Registry mode - no stored credentials for ${registry}, anonymous`);
+		}
 	}
 
 	// Apply user-configured overrides on top of auto-detection (#1219).
@@ -920,12 +1058,12 @@ export async function scanWithGrype(
 
 		const { vulnerabilities, summary } = parseGrypeOutput(output);
 
-		// Get the actual SHA256 image ID for reliable caching
-		const imageId = await getImageSha(imageName, envId);
+		// SHA256 id for caching + a readable name for the record/notification.
+		const { imageId, displayName } = await resolveImageIdentity(imageName, envId);
 
 		const result: ScanResult = {
 			imageId,
-			imageName,
+			imageName: displayName,
 			scanner: 'grype',
 			scannedAt: new Date().toISOString(),
 			vulnerabilities,
@@ -1017,12 +1155,12 @@ export async function scanWithTrivy(
 
 		const { vulnerabilities, summary } = parseTrivyOutput(output);
 
-		// Get the actual SHA256 image ID for reliable caching
-		const imageId = await getImageSha(imageName, envId);
+		// SHA256 id for caching + a readable name for the record/notification.
+		const { imageId, displayName } = await resolveImageIdentity(imageName, envId);
 
 		const result: ScanResult = {
 			imageId,
-			imageName,
+			imageName: displayName,
 			scanner: 'trivy',
 			scannedAt: new Date().toISOString(),
 			vulnerabilities,
@@ -1110,8 +1248,10 @@ export async function scanImage(
 			unknown: Math.max(...results.map(r => r.summary.unknown))
 		};
 
-		// Send notifications (async, don't block return)
-		sendVulnerabilityNotifications(imageName, combinedSummary, envId).catch(err => {
+		// Notify with the readable name the scan resolved (a tag when the image has one),
+		// not the bare digest the caller may have passed in.
+		const notifyName = results[0]?.imageName || imageName;
+		sendVulnerabilityNotifications(notifyName, combinedSummary, envId).catch(err => {
 			const errorMsg = err instanceof Error ? err.message : String(err);
 			console.error('[Scanner] Failed to send vulnerability notifications:', errorMsg);
 		});
@@ -1248,6 +1388,49 @@ export async function checkScannerUpdates(envId?: number): Promise<{
 	}
 
 	return result;
+}
+
+/**
+ * The newest scanner release published upstream, per scanner.
+ *
+ * Distinct from checkScannerUpdates, which compares the digest behind the SAME
+ * tag: on a pinned tag that only notices a rebuild, never that a later release
+ * exists. This reads the repo's tag list, so it answers the question the
+ * settings screen actually asks.
+ *
+ * Suggestion only - the configured image is never changed here. Pinning is what
+ * keeps a scan reproducible, so moving to a new version stays a deliberate act.
+ * Never throws: a registry failure yields null and the UI simply shows nothing.
+ */
+export async function checkScannerNewerVersions(): Promise<{
+	grype: { current: string; latest: string | null };
+	trivy: { current: string; latest: string | null };
+}> {
+	const defaults = await getGlobalScannerDefaults();
+
+	const newest = async (image: string): Promise<string | null> => {
+		try {
+			// matchFlavor pinned ON: grype publishes -debug, -nonroot and per-arch
+			// variants of every release, so ignoring the flavor offers a plain tag a
+			// -debug variant, and vice versa. Passed explicitly rather than relying on
+			// the default, which a change to findNewerVersionTag could flip.
+			const newer = await checkNewerVersion(image, { maxBump: 'major', matchFlavor: true });
+			return newer?.tag ?? null;
+		} catch (e) {
+			console.error('[Scanner] Newer-version check failed for', image, e);
+			return null;
+		}
+	};
+
+	const [grypeLatest, trivyLatest] = await Promise.all([
+		newest(defaults.grypeImage),
+		newest(defaults.trivyImage)
+	]);
+
+	return {
+		grype: { current: defaults.grypeImage, latest: grypeLatest },
+		trivy: { current: defaults.trivyImage, latest: trivyLatest }
+	};
 }
 
 // Clean up scanner database volumes (removes cached vulnerability databases)

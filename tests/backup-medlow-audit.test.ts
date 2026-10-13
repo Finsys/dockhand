@@ -67,13 +67,12 @@ describe('validateRetention — keep-* bounds (audit #13)', () => {
 
 describe('isAllowedRepository — scheme allowlist (audit #7/#53)', () => {
 	it('accepts local absolute paths and known schemes', () => {
-		for (const r of ['/srv/backups', 's3:s3.amazonaws.com/bucket', 'rest:https://r.example/repo', 'b2:bucket', 'azure:container', 'gs:bucket']) {
+		for (const r of ['/srv/backups', 's3:s3.amazonaws.com/bucket', 'rest:https://r.example/repo', 'b2:bucket', 'azure:container', 'gs:bucket', 'sftp:user@host:/path']) {
 			assert.equal(isAllowedRepository(r), true, `should allow ${r}`);
 		}
 	});
 	it('rejects unknown schemes, relative paths, and empty', () => {
-		// rclone:/sftp:/swift: were removed from the allowlist (unfinished/untested backends)
-		for (const r of ['s3//typo', 'ftp://host/x', './relative', 'file:///etc/passwd', 'rclone:remote:path', 'sftp:user@host:/path', 'swift:container', '', null, undefined]) {
+		for (const r of ['s3//typo', 'ftp://host/x', './relative', 'file:///etc/passwd', 'rclone:remote:path', 'swift:container', '', null, undefined]) {
 			assert.equal(isAllowedRepository(r as any), false, `should reject ${r}`);
 		}
 	});

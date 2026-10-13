@@ -11,10 +11,11 @@
  *   apprises://host[:port]/key                → HTTPS variant
  *   apprise://host[:port]/prefix/key          → path-prefixed Apprise behind a reverse proxy
  *   apprise://host[:port]/key?tag=devops      → optional tag filter
+ *   apprise://user:pass@host[:port]/key       - HTTP Basic auth (sent as a header)
  *
  * Setup docs: https://github.com/caronc/apprise-api
  */
-import { notificationFetch, drainResponse, type NotificationPayload, type NotificationResult } from './shared';
+import { notificationFetch, drainResponse, splitBasicAuth, type NotificationPayload, type NotificationResult } from './shared';
 
 export async function sendApprise(appriseUrl: string, payload: NotificationPayload): Promise<NotificationResult> {
 	const isSecure = appriseUrl.startsWith('apprises');
@@ -32,7 +33,13 @@ export async function sendApprise(appriseUrl: string, payload: NotificationPaylo
 	if (parts.length < 2) {
 		return { success: false, error: 'Invalid Apprise URL. Expected: apprise://host[:port]/key' };
 	}
-	const hostPort = parts[0];
+	let hostPort: string;
+	let authHeader: string | null;
+	try {
+		({ host: hostPort, authHeader } = splitBasicAuth(parts[0]));
+	} catch (error) {
+		return { success: false, error: `Invalid Apprise URL: ${error instanceof Error ? error.message : String(error)}` };
+	}
 	// The Apprise key is the last path segment. Anything between host and key
 	// is a path prefix (some users mount Apprise behind a reverse proxy
 	// at /apprise/ — we preserve that).
@@ -65,9 +72,11 @@ export async function sendApprise(appriseUrl: string, payload: NotificationPaylo
 	if (format) body.format = format; // text | markdown | html
 
 	try {
+		const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+		if (authHeader) headers['Authorization'] = authHeader;
 		const response = await notificationFetch(`${baseUrl}/notify/${encodeURIComponent(key)}`, {
 			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
+			headers,
 			body: JSON.stringify(body)
 		});
 

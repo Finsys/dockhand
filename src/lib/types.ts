@@ -14,10 +14,15 @@ export interface NewerVersion {
 	digest?: string;
 }
 
+/** Terminal connection mode: an interactive `docker exec` shell, or `docker attach` to PID 1. */
+export type TerminalMode = 'exec' | 'attach';
+
 export interface ContainerInfo {
 	id: string;
 	name: string;
 	image: string;
+	/** sha256 image ID - matches a vulnerability scan's imageId. */
+	imageId: string;
 	state: string;
 	status: string;
 	health?: string;
@@ -28,6 +33,8 @@ export interface ContainerInfo {
 		PublicPort?: number;
 		Type: string;
 	}>;
+	restartCount: number;
+	command?: string;
 	labels: Record<string, string>;
 	mounts: Array<{
 		type: string;
@@ -117,6 +124,8 @@ export interface StackInfo {
 export interface ContainerStats {
 	id: string;
 	name: string;
+	/** The compose project this container belongs to, or null when standalone. */
+	stack?: string | null;
 	cpuPercent: number;
 	memoryUsage: number;      // Actual usage (total - cache), same as docker stats
 	memoryRaw: number;        // Raw total usage before cache subtraction
@@ -153,8 +162,12 @@ export interface ComposeStackInfo {
 	containers: string[];
 	containerDetails: StackContainer[];
 	status: string;
+	/** Health of the stack's running containers, reported separately from status. */
+	health?: 'healthy' | 'unhealthy' | 'starting' | 'none';
 	updatesAvailable?: boolean;
 	updateCount?: number;
+	/** Containers whose update is held by the minimum image age. Never redeployable. */
+	coolingDownCount?: number;
 	/** How many containers in this stack have a newer version tag (semver). */
 	newerVersionCount?: number;
 	sourceType?: 'external' | 'internal' | 'git';

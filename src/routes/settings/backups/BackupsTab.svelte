@@ -4,9 +4,10 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Input } from '$lib/components/ui/input';
+	import { SearchInput } from '$lib/components/ui/search-input';
 	import * as Select from '$lib/components/ui/select';
 	import { DataGrid } from '$lib/components/data-grid';
-	import { Plus, Trash2, Pencil, HardDrive, Server, CheckCircle, XCircle, AlertCircle, Wifi, Database, RefreshCw, Search, FolderSync, Archive, Loader2, Save, CircleHelp, Unlock, PackageCheck, Eraser, BarChart3, Wrench, FolderCheck, KeyRound } from 'lucide-svelte';
+	import { Plus, Trash2, Pencil, HardDrive, Server, CheckCircle, XCircle, AlertCircle, Wifi, Database, RefreshCw, FolderSync, Archive, Loader2, Save, CircleHelp, Unlock, PackageCheck, Eraser, BarChart3, Wrench, FolderCheck, KeyRound } from 'lucide-svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { Label } from '$lib/components/ui/label';
 	import { appSettings } from '$lib/stores/settings';
@@ -15,10 +16,14 @@
 	import { formatDateTime, formatRelativeTime } from '$lib/stores/settings';
 	import { FolderOpen, Box, Layers, FileStack, Camera, ChevronRight, ChevronDown } from 'lucide-svelte';
 	import { formatBytes } from '$lib/utils/format';
+	import { Checkbox } from '$lib/components/ui/checkbox';
+	import { bulkDeleteSnapshots, bulkDeleteToast, bulkDeleteFailure } from '$lib/utils/backup';
+	import BulkDeleteSnapshotsDialog from '$lib/components/BulkDeleteSnapshotsDialog.svelte';
+	import BulkDeleteErrorDialog from '$lib/components/BulkDeleteErrorDialog.svelte';
 	import EnvironmentIcon from '$lib/components/EnvironmentIcon.svelte';
 	import { LoadingState } from '$lib/components/ui/loading-state';
 	import { getRepoTypeIcon, getRepoTypeLabel } from '$lib/utils/backup';
-	import { shouldSaveBackupImage } from '$lib/utils/backup-image';
+	import { shouldSaveBackupImage, syncBackupImageFromStore } from '$lib/utils/backup-image';
 	import { summarizeTestResults, formatTestSummary, type TestOutcome } from '$lib/utils/backup-test-summary';
 	import SnapshotBrowser from '../../containers/SnapshotBrowser.svelte';
 	import type { Component } from 'svelte';
@@ -29,6 +34,8 @@
 	import { watchJob, readJobResponse } from '$lib/utils/sse-fetch';
 	import RotatePasswordModal from './RotatePasswordModal.svelte';
 	import { EmptyState } from '$lib/components/ui/empty-state';
+	import { m } from '$lib/paraglide/messages.js';
+	import { splitAtName } from '$lib/i18n/split';
 
 	interface Destination {
 		id: number;
@@ -85,7 +92,9 @@
 		const s = new Set(loadingStats); s.add(destId); loadingStats = s;
 		try {
 			const res = await fetch(`/api/backup/destinations/${destId}/task`, {
-				method: 'POST', headers: { 'Content-Type': 'application/json' },
+				// Accept: json makes the job endpoint run the read synchronously and return
+				// {success, stats} instead of {jobId} (which this call doesn't poll).
+				method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
 				body: JSON.stringify({ task: 'stats' })
 			});
 			const data = await res.json();
@@ -158,6 +167,16 @@
 	let savingImage = $state(false);
 	let imageSavedOk = $state(false);
 
+	$effect(() => {
+		const synced = syncBackupImageFromStore(
+			backupImage,
+			backupImageInitial,
+			$appSettings.defaultBackupImage
+		);
+		backupImage = synced.current;
+		backupImageInitial = synced.initial;
+	});
+
 	async function saveBackupImage() {
 		if (!shouldSaveBackupImage(backupImage, backupImageInitial)) {
 			// Unchanged — nothing to persist. Give the same confirmation feedback.
@@ -173,23 +192,25 @@
 				body: JSON.stringify({ defaultBackupImage: backupImage })
 			});
 			if (res.ok) {
+				await appSettings.refresh();
+				backupImage = $appSettings.defaultBackupImage;
 				backupImageInitial = backupImage;
 				imageSavedOk = true;
 				setTimeout(() => { imageSavedOk = false; }, 2000);
 			}
-			else toast.error('Failed to save');
-		} catch { toast.error('Failed to save'); }
+			else toast.error(m.settings_backups_save_failed());
+		} catch { toast.error(m.settings_backups_save_failed()); }
 		finally { savingImage = false; }
 	}
 	let initializingId = $state<number | null>(null);
 	let runningTask = $state<{ destId: number; task: string } | null>(null);
 
 	const REPO_TASK_TITLES: Record<string, string> = {
-		unlock: 'Unlock repository',
-		prune: 'Prune unused data',
-		check: 'Check integrity',
-		'repair-index': 'Repair index',
-		'repair-snapshots': 'Repair snapshots'
+		unlock: m.settings_backups_task_unlock(),
+		prune: m.settings_backups_task_prune(),
+		check: m.settings_backups_task_check(),
+		'repair-index': m.settings_backups_task_repair_index(),
+		'repair-snapshots': m.settings_backups_task_repair_snapshots()
 	};
 
 	async function runRepoTask(destId: number, task: string) {
@@ -198,7 +219,8 @@
 		if (task === 'stats') {
 			try {
 				const res = await fetch(`/api/backup/destinations/${destId}/task`, {
-					method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ task })
+					// Accept: json runs the read synchronously so we get {success, stats}, not {jobId}.
+					method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ task })
 				});
 				const data = await res.json();
 				if (data.success && data.stats) {
@@ -206,10 +228,10 @@
 					m.set(destId, data.stats);
 					repoStats = m;
 				} else if (!data.success) {
-					toast.error(data.error || 'Stats failed');
+					toast.error(data.error || m.settings_backups_stats_failed());
 				}
 			} catch (err: any) {
-				toast.error(err.message || 'Stats failed');
+				toast.error(err.message || m.settings_backups_stats_failed());
 			} finally {
 				runningTask = null;
 			}
@@ -227,7 +249,7 @@
 	}
 
 	function verifyDestination(dest: any) {
-		streamRepoAction(`Verify data integrity - ${dest.name}`, `/api/backup/destinations/${dest.id}/verify`, {}, dest.repository);
+		streamRepoAction(`${m.settings_backups_task_verify()} - ${dest.name}`, `/api/backup/destinations/${dest.id}/verify`, {}, dest.repository);
 	}
 
 	/** Run a restic maintenance action, streaming its output live into the shared
@@ -253,7 +275,7 @@
 				}) as any;
 				if (result?.success === false) {
 					actionLogStatus = 'error';
-					actionLogError = result.error || 'Action failed';
+					actionLogError = result.error || m.settings_backups_action_failed();
 				} else {
 					actionLogStatus = 'success';
 				}
@@ -263,11 +285,11 @@
 			} else {
 				// Backward-compat JSON path (Accept negotiated to one-shot): show result.
 				actionLogStatus = data.success ? 'success' : 'error';
-				if (!data.success) actionLogError = data.error || 'Action failed';
+				if (!data.success) actionLogError = data.error || m.settings_backups_action_failed();
 			}
 		} catch (err: any) {
 			actionLogStatus = 'error';
-			actionLogError = err.message || 'Action failed';
+			actionLogError = err.message || m.settings_backups_action_failed();
 		}
 	}
 
@@ -278,6 +300,54 @@
 	let browseDestRepo = $state('');
 	let browseSnapshots = $state<any[]>([]);
 	let browseLoading = $state(false);
+	const browseTitle = splitAtName(m.settings_backups_browse_title);
+
+	// Multi-select bulk delete for the repo browser (shared helper + dialog). All snapshots
+	// here belong to the one browsed destination (browseDestId).
+	let selectedSnapshots = $state<Set<string>>(new Set());
+	let bulkDialogOpen = $state(false);
+	let bulkDeleting = $state(false);
+	let bulkDeleteErrorOpen = $state(false);
+	let bulkDeleteError = $state('');
+	let bulkDeleteErrorDeleted = $state(0);
+	function toggleSnapshotSel(id: string) {
+		const next = new Set(selectedSnapshots);
+		if (next.has(id)) next.delete(id); else next.add(id);
+		selectedSnapshots = next;
+	}
+	function toggleGroupAll(snaps: any[]) {
+		const all = snaps.length > 0 && snaps.every((s) => selectedSnapshots.has(s.id));
+		const next = new Set(selectedSnapshots);
+		if (all) for (const s of snaps) next.delete(s.id);
+		else for (const s of snaps) next.add(s.id);
+		selectedSnapshots = next;
+	}
+	async function bulkDeleteBrowsed() {
+		const targets = browseSnapshots
+			.filter((s) => selectedSnapshots.has(s.id))
+			.map((s) => ({ id: s.id, _destinationId: browseDestId }));
+		if (targets.length === 0) return;
+		bulkDeleting = true;
+		try {
+			const result = await bulkDeleteSnapshots(targets);
+			const failure = bulkDeleteFailure(result);
+			if (failure) {
+				bulkDeleteError = failure.error;
+				bulkDeleteErrorDeleted = failure.deleted;
+				bulkDeleteErrorOpen = true;
+			} else {
+				const t = bulkDeleteToast(result);
+				toast[t.type](t.message);
+			}
+			selectedSnapshots = new Set();
+			const dest = destinations.find((d) => d.id === browseDestId);
+			if (dest) await browseDestination(dest);
+		} finally {
+			bulkDeleting = false;
+			bulkDialogOpen = false;
+		}
+	}
+	const browseSelectedCount = $derived(browseSnapshots.filter((s) => selectedSnapshots.has(s.id)).length);
 
 	function snapName(snap: any): string {
 		return (snap.tags || []).find((t: string) => t.startsWith('dockhand:name='))?.replace('dockhand:name=', '') || '';
@@ -367,6 +437,7 @@
 		browseDestName = dest.name;
 		browseDestRepo = dest.repository;
 		browseSnapshots = [];
+		selectedSnapshots = new Set(); // don't carry a prior destination's selection over
 		browseOpen = true;
 		browseLoading = true;
 		try {
@@ -377,17 +448,27 @@
 			});
 			const d = await readJobResponse(res);
 			if (d?.error) {
-				const errMsg = d.error || 'Failed to list snapshots';
+				const errMsg = d.error || m.settings_backups_list_snapshots_failed();
 				try { const p = JSON.parse(errMsg); toast.error(p.message || errMsg); } catch { toast.error(errMsg); }
 			} else {
 				browseSnapshots = d.snapshots ?? d;
 			}
-		} catch { toast.error('Failed to list snapshots'); }
+		} catch { toast.error(m.settings_backups_list_snapshots_failed()); }
 		finally { browseLoading = false; }
 	}
 
 	const getTypeIcon = getRepoTypeIcon;
-	const getTypeLabel = getRepoTypeLabel;
+	/**
+	 * The repository's type for the grid. Only the two prose labels are translated -
+	 * S3, SFTP and the rest are product names. getRepoTypeLabel stays free of i18n so
+	 * server code can keep importing it.
+	 */
+	function getTypeLabel(repository: string): string {
+		const raw = getRepoTypeLabel(repository);
+		if (raw === 'Local') return m.settings_backups_repo_type_local();
+		if (raw === 'Unknown') return m.settings_backups_repo_type_unknown();
+		return raw;
+	}
 
 	function getUsageCount(destId: number): { containers: number; stacks: number } {
 		const related = configs.filter(c => c.destinationId === destId);
@@ -438,7 +519,7 @@
 			if (envRes.ok) { const envData = await envRes.json(); environments = Array.isArray(envData) ? envData : []; }
 		} catch (error) {
 			console.error('Failed to fetch backup data:', error);
-			toast.error('Failed to fetch backup destinations');
+			toast.error(m.settings_backups_load_failed());
 		} finally {
 			loading = false;
 		}
@@ -471,13 +552,13 @@
 			const res = await fetch(`/api/backup/destinations/${id}/test`, { method: 'POST' });
 			const data = await res.json();
 			if (data.success) {
-				toast.success('Connection test successful');
+				toast.success(m.settings_backups_test_successful());
 			} else if (data.status === 'needs_init') {
-				toast.warning(data.error || 'Repository needs initialization');
+				toast.warning(data.error || m.settings_backups_repo_needs_init());
 			} else {
-				toast.error(data.error || 'Connection test failed');
+				toast.error(data.error || m.settings_backups_test_failed());
 			}
-		} catch { toast.error('Connection test failed'); }
+		} catch { toast.error(m.settings_backups_test_failed()); }
 		finally { testingId = null; await fetchData(); }
 	}
 
@@ -486,8 +567,8 @@
 		try {
 			const res = await fetch(`/api/backup/destinations/${id}/init`, { method: 'POST' });
 			const data = await res.json();
-			toast[data.success ? 'success' : 'error'](data.message || data.error || 'Init failed');
-		} catch { toast.error('Init failed'); }
+			toast[data.success ? 'success' : 'error'](data.message || data.error || m.settings_backups_init_failed());
+		} catch { toast.error(m.settings_backups_init_failed()); }
 		finally { initializingId = null; await fetchData(); }
 	}
 
@@ -496,12 +577,12 @@
 			const response = await fetch(`/api/backup/destinations/${id}`, { method: 'DELETE' });
 			if (response.ok) {
 				await fetchData();
-				toast.success('Destination deleted');
+				toast.success(m.settings_backups_deleted());
 			} else {
 				const data = await response.json();
-				toast.error(data.error || 'Failed to delete destination');
+				toast.error(data.error || m.settings_backups_delete_failed());
 			}
-		} catch { toast.error('Failed to delete destination'); }
+		} catch { toast.error(m.settings_backups_delete_failed()); }
 	}
 
 	onMount(() => { fetchData(); });
@@ -511,7 +592,7 @@
 	<!-- Backup helper image -->
 	<div class="flex items-center gap-3 p-3 border rounded-md bg-muted/20">
 		<Label class="text-xs shrink-0 flex items-center gap-1.5">
-			Backup helper image
+			{m.settings_backups_helper_image()}
 			<Tooltip.Provider delayDuration={200}>
 				<Tooltip.Root>
 					<Tooltip.Trigger>
@@ -519,7 +600,7 @@
 					</Tooltip.Trigger>
 					<Tooltip.Portal>
 						<Tooltip.Content side="bottom" sideOffset={4} class="!w-80 text-xs">
-							Docker image with restic for backup/restore. Auto-pulled on first run. Change for private registries.
+							{m.settings_backups_helper_image_hint()}
 						</Tooltip.Content>
 					</Tooltip.Portal>
 				</Tooltip.Root>
@@ -533,37 +614,30 @@
 
 	<div class="flex justify-between items-center">
 		<div class="flex items-center gap-3">
-			<div class="relative">
-				<Search class="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-				<Input
-					bind:value={searchQuery}
-					placeholder="Filter destinations..."
-					class="pl-9 h-8 w-64 text-sm"
-				/>
-			</div>
+			<SearchInput bind:value={searchQuery} placeholder={m.settings_backups_filter_placeholder()} class="h-8 w-64 text-sm" />
 			<Select.Root type="single" value={statusFilter} onValueChange={(v) => statusFilter = (v as typeof statusFilter) ?? 'all'}>
 				<Select.Trigger class="h-8 w-40 text-sm">
-					{statusFilter === 'success' ? 'Initialized' : statusFilter === 'needs_init' ? 'Needs init' : statusFilter === 'failed' ? 'Failed' : 'All statuses'}
+					{statusFilter === 'success' ? m.settings_backups_status_initialized() : statusFilter === 'needs_init' ? m.settings_backups_status_needs_init() : statusFilter === 'failed' ? m.settings_backups_status_failed() : m.settings_backups_filter_all_statuses()}
 				</Select.Trigger>
 				<Select.Content>
-					<Select.Item value="all">All statuses</Select.Item>
-					<Select.Item value="success"><CheckCircle class="w-3.5 h-3.5 text-green-500 mr-1.5 inline" />Initialized</Select.Item>
-					<Select.Item value="needs_init"><AlertCircle class="w-3.5 h-3.5 text-amber-500 mr-1.5 inline" />Needs init</Select.Item>
-					<Select.Item value="failed"><XCircle class="w-3.5 h-3.5 text-destructive mr-1.5 inline" />Failed</Select.Item>
+					<Select.Item value="all">{m.settings_backups_filter_all_statuses()}</Select.Item>
+					<Select.Item value="success"><CheckCircle class="w-3.5 h-3.5 text-green-500 mr-1.5 inline" />{m.settings_backups_status_initialized()}</Select.Item>
+					<Select.Item value="needs_init"><AlertCircle class="w-3.5 h-3.5 text-amber-500 mr-1.5 inline" />{m.settings_backups_status_needs_init()}</Select.Item>
+					<Select.Item value="failed"><XCircle class="w-3.5 h-3.5 text-destructive mr-1.5 inline" />{m.settings_backups_status_failed()}</Select.Item>
 				</Select.Content>
 			</Select.Root>
-			<Badge variant="secondary" class="text-xs">{destinations.length} destination{destinations.length !== 1 ? 's' : ''}</Badge>
+			<Badge variant="secondary" class="text-xs">{m.settings_backups_destination_count({ count: destinations.length })}</Badge>
 		</div>
 		<div class="flex gap-2">
 			{#if $canAccess('backups', 'manage')}
 				<Button size="sm" onclick={() => openModal()}>
 					<Plus class="w-4 h-4 mr-1" />
-					Add destination
+					{m.settings_backups_add_destination()}
 				</Button>
 			{/if}
 			<Button size="sm" variant="outline" onclick={testAllDestinations} disabled={testingAll}>
 				{#if testingAll}<Loader2 class="w-3.5 h-3.5 mr-1 animate-spin" />{:else}<Wifi class="w-3.5 h-3.5 mr-1" />{/if}
-				Test all
+				{m.settings_backups_test_all()}
 			</Button>
 			<Button size="sm" variant="outline" onclick={fetchData}>
 				<RefreshCw class="w-3.5 h-3.5" />
@@ -572,12 +646,12 @@
 	</div>
 
 	{#if loading && destinations.length === 0}
-		<p class="text-muted-foreground text-sm">Loading backup destinations...</p>
+		<p class="text-muted-foreground text-sm">{m.settings_backups_loading()}</p>
 	{:else if destinations.length === 0}
 		<EmptyState
 			icon={Archive as unknown as Component}
-			title="No backup destinations"
-			description="Add a backup destination to start protecting your container data"
+			title={m.settings_backups_empty_title()}
+			description={m.settings_backups_empty_description()}
 		/>
 	{:else}
 		<DataGrid
@@ -608,10 +682,10 @@
 					{#if usage.containers > 0 || usage.stacks > 0}
 						<div class="flex items-center gap-1.5">
 							{#if usage.containers > 0}
-								<span class="flex items-center gap-0.5 text-xs text-muted-foreground" title="{usage.containers} container{usage.containers !== 1 ? 's' : ''} using this repository"><Box class="w-3 h-3" />{usage.containers}</span>
+								<span class="flex items-center gap-0.5 text-xs text-muted-foreground" title={m.settings_backups_usage_containers({ count: usage.containers })}><Box class="w-3 h-3" />{usage.containers}</span>
 							{/if}
 							{#if usage.stacks > 0}
-								<span class="flex items-center gap-0.5 text-xs text-muted-foreground" title="{usage.stacks} stack{usage.stacks !== 1 ? 's' : ''} using this repository"><Layers class="w-3 h-3" />{usage.stacks}</span>
+								<span class="flex items-center gap-0.5 text-xs text-muted-foreground" title={m.settings_backups_usage_stacks({ count: usage.stacks })}><Layers class="w-3 h-3" />{usage.stacks}</span>
 							{/if}
 						</div>
 					{:else}
@@ -621,9 +695,9 @@
 					{@const stat = repoStats.get(dest.id)}
 					{#if stat}
 						<div class="flex items-center gap-2 text-xs text-muted-foreground">
-							<span class="flex items-center gap-0.5" title="Total size"><HardDrive class="w-3 h-3" />{formatBytes(stat.totalSize)}</span>
-							<span class="flex items-center gap-0.5" title="Files"><FileStack class="w-3 h-3" />{stat.totalFiles}</span>
-							<span class="flex items-center gap-0.5" title="Snapshots"><Camera class="w-3 h-3" />{stat.snapshots}</span>
+							<span class="flex items-center gap-0.5" title={m.settings_backups_stat_total_size()}><HardDrive class="w-3 h-3" />{formatBytes(stat.totalSize)}</span>
+							<span class="flex items-center gap-0.5" title={m.settings_backups_stat_files()}><FileStack class="w-3 h-3" />{stat.totalFiles}</span>
+							<span class="flex items-center gap-0.5" title={m.settings_backups_stat_snapshots()}><Camera class="w-3 h-3" />{stat.snapshots}</span>
 						</div>
 					{:else if loadingStats.has(dest.id)}
 						<Loader2 class="w-3 h-3 animate-spin text-muted-foreground" />
@@ -634,19 +708,19 @@
 					{#if dest.lastTestStatus === 'success'}
 						<div class="flex items-center gap-1.5">
 							<CheckCircle class="w-3.5 h-3.5 text-green-500" />
-							<span class="text-xs text-green-600 dark:text-green-400">Initialized</span>
+							<span class="text-xs text-green-600 dark:text-green-400">{m.settings_backups_status_initialized()}</span>
 						</div>
 					{:else if dest.lastTestStatus === 'needs_init'}
 						<div class="flex items-center gap-1.5">
 							<AlertCircle class="w-3.5 h-3.5 text-amber-500" />
-							<span class="text-xs text-amber-600 dark:text-amber-400">Needs init</span>
+							<span class="text-xs text-amber-600 dark:text-amber-400">{m.settings_backups_status_needs_init()}</span>
 						</div>
 					{:else if dest.lastTestStatus === 'failed'}
 						<Tooltip.Root>
 							<Tooltip.Trigger>
 								<div class="flex items-center gap-1.5">
 									<XCircle class="w-3.5 h-3.5 text-destructive" />
-									<span class="text-xs text-destructive">Failed</span>
+									<span class="text-xs text-destructive">{m.settings_backups_status_failed()}</span>
 								</div>
 							</Tooltip.Trigger>
 							{#if dest.lastTestError}
@@ -656,12 +730,12 @@
 					{:else if testingAll}
 						<div class="flex items-center gap-1.5">
 							<Loader2 class="w-3.5 h-3.5 text-muted-foreground animate-spin" />
-							<span class="text-xs text-muted-foreground">Testing...</span>
+							<span class="text-xs text-muted-foreground">{m.settings_backups_testing()}</span>
 						</div>
 					{:else}
 						<div class="flex items-center gap-1.5">
 							<AlertCircle class="w-3.5 h-3.5 text-muted-foreground" />
-							<span class="text-xs text-muted-foreground">Not tested</span>
+							<span class="text-xs text-muted-foreground">{m.settings_backups_not_tested()}</span>
 						</div>
 					{/if}
 				{:else if column.id === 'actions'}
@@ -670,21 +744,21 @@
 					<div class="flex items-center justify-end gap-0.5" onclick={(e) => e.stopPropagation()}>
 						{#if dest.lastTestStatus === 'success'}
 							<!-- Repo actions (only for initialized repos) -->
-							<button type="button" class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100" onclick={() => browseDestination(dest)} title="Browse snapshots">
+							<button type="button" class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100" onclick={() => browseDestination(dest)} title={m.settings_backups_browse_snapshots()}>
 								<FolderOpen class="grid-action-icon grid-action-info text-muted-foreground" />
 							</button>
-							<button type="button" class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100" onclick={() => runRepoTask(dest.id, 'stats')} disabled={runningTask?.destId === dest.id} title="Repository stats">
+							<button type="button" class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100" onclick={() => runRepoTask(dest.id, 'stats')} disabled={runningTask?.destId === dest.id} title={m.settings_backups_repo_stats()}>
 								{#if runningTask?.destId === dest.id && runningTask.task === 'stats'}<Loader2 class="grid-action-icon text-muted-foreground animate-spin" />{:else}<BarChart3 class="grid-action-icon grid-action-info text-muted-foreground" />{/if}
 							</button>
-							<button type="button" class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100" onclick={() => runRepoTask(dest.id, 'check')} disabled={runningTask?.destId === dest.id} title="Check integrity">
+							<button type="button" class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100" onclick={() => runRepoTask(dest.id, 'check')} disabled={runningTask?.destId === dest.id} title={m.settings_backups_task_check()}>
 								{#if runningTask?.destId === dest.id && runningTask.task === 'check'}<Loader2 class="grid-action-icon text-muted-foreground animate-spin" />{:else}<PackageCheck class="grid-action-icon grid-action-info text-muted-foreground" />{/if}
 							</button>
-							<button type="button" class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100" onclick={() => verifyDestination(dest)} title="Verify data integrity">
+							<button type="button" class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100" onclick={() => verifyDestination(dest)} title={m.settings_backups_task_verify()}>
 								<FolderCheck class="grid-action-icon grid-action-info text-muted-foreground" />
 							</button>
 							<ConfirmPopover
 								open={confirmAction?.destId === dest.id && confirmAction.task === 'unlock'}
-								action="Unlock" itemType="repository" itemName={dest.name} confirmText="Unlock" position="left" title="Unlock repository"
+								localized action={m.settings_backups_confirm_action_unlock()} itemType={m.settings_backups_item_repository()} itemName={dest.name} confirmText={m.settings_backups_unlock()} position="left" title={m.settings_backups_task_unlock()}
 								onConfirm={() => { confirmAction = null; runRepoTask(dest.id, 'unlock'); }}
 								onOpenChange={(o) => confirmAction = o ? { destId: dest.id, task: 'unlock' } : null}
 							>
@@ -694,7 +768,7 @@
 							</ConfirmPopover>
 							<ConfirmPopover
 								open={confirmAction?.destId === dest.id && confirmAction.task === 'prune'}
-								action="Prune" itemType="unused data from" itemName={dest.name} confirmText="Prune" variant="destructive" position="left" title="Prune unused data"
+								localized action={m.confirm_action_prune()} itemType={m.settings_backups_item_unused_data_from()} itemName={dest.name} confirmText={m.settings_backups_prune()} variant="destructive" position="left" title={m.settings_backups_task_prune()}
 								onConfirm={() => { confirmAction = null; runRepoTask(dest.id, 'prune'); }}
 								onOpenChange={(o) => confirmAction = o ? { destId: dest.id, task: 'prune' } : null}
 							>
@@ -704,7 +778,7 @@
 							</ConfirmPopover>
 							<ConfirmPopover
 								open={confirmAction?.destId === dest.id && confirmAction.task === 'repair'}
-								action="Repair" itemType="index for" itemName={dest.name} confirmText="Repair" variant="destructive" position="left" title="Repair index"
+								localized action={m.settings_backups_confirm_action_repair()} itemType={m.settings_backups_item_index_for()} itemName={dest.name} confirmText={m.settings_backups_repair()} variant="destructive" position="left" title={m.settings_backups_task_repair_index()}
 								onConfirm={() => { confirmAction = null; runRepoTask(dest.id, 'repair-index'); }}
 								onOpenChange={(o) => confirmAction = o ? { destId: dest.id, task: 'repair' } : null}
 							>
@@ -715,27 +789,28 @@
 						{/if}
 						<!-- Init (only when needs_init) -->
 						{#if dest.lastTestStatus === 'needs_init'}
-							<button type="button" class="p-0.5 rounded hover:bg-muted transition-colors text-amber-500 hover:text-amber-600" onclick={() => initDestination(dest.id)} disabled={initializingId === dest.id} title="Initialize repository">
+							<button type="button" class="p-0.5 rounded hover:bg-muted transition-colors text-amber-500 hover:text-amber-600" onclick={() => initDestination(dest.id)} disabled={initializingId === dest.id} title={m.settings_backups_init_repository()}>
 								{#if initializingId === dest.id}<Loader2 class="w-3 h-3 animate-spin" />{:else}<Database class="w-3 h-3" />{/if}
 							</button>
 						{/if}
 						<!-- Always visible: test, edit, delete -->
-						<button type="button" class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100" onclick={() => testDestination(dest.id)} disabled={testingId === dest.id} title="Test connection">
+						<button type="button" class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100" onclick={() => testDestination(dest.id)} disabled={testingId === dest.id} title={m.settings_backups_test_connection()}>
 							{#if testingId === dest.id}<RefreshCw class="grid-action-icon text-muted-foreground animate-spin" />{:else}<Wifi class="grid-action-icon grid-action-restart text-muted-foreground" />{/if}
 						</button>
 						{#if $canAccess('backups', 'manage')}
-							<button type="button" class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100" onclick={() => { rotateDestId = dest.id; rotateDestName = dest.name; rotateModalOpen = true; }} title="Rotate repository password">
+							<button type="button" class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100" onclick={() => { rotateDestId = dest.id; rotateDestName = dest.name; rotateModalOpen = true; }} title={m.settings_backups_rotate_title()}>
 								<KeyRound class="grid-action-icon grid-action-edit text-muted-foreground" />
 							</button>
-							<button type="button" class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100" onclick={() => openModal(dest)} title="Edit">
+							<button type="button" class="p-0.5 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100" onclick={() => openModal(dest)} title={m.settings_backups_edit()}>
 								<Pencil class="grid-action-icon grid-action-edit text-muted-foreground" />
 							</button>
 							<ConfirmPopover
 								open={confirmDeleteId === dest.id}
-								action="Delete"
-								itemType="destination"
+								localized
+								action={m.confirm_action_delete()}
+								itemType={m.settings_backups_item_destination()}
 								itemName={dest.name}
-								title="Remove"
+								title={m.settings_backups_remove()}
 								position="left"
 								onConfirm={() => deleteDestination(dest.id)}
 								onOpenChange={(open) => confirmDeleteId = open ? dest.id : null}
@@ -765,22 +840,28 @@
 		<Dialog.Header>
 			<Dialog.Title class="flex items-center gap-2">
 				<FolderOpen class="w-5 h-5" />
-				Repository snapshots on
+				{browseTitle[0]}
 				<svelte:component this={getRepoTypeIcon(browseDestRepo)} class="w-4 h-4" />
 				<span class="text-amber-600 dark:text-amber-400">{browseDestName}</span>
+				{browseTitle[1]}
 			</Dialog.Title>
 		</Dialog.Header>
 		{#if !browseLoading && browseSnapshots.length > 0}
-			<div class="flex gap-2 pb-3 flex-shrink-0">
-				<Input bind:value={browseFilterName} placeholder="Filter by name..." class="h-8 max-w-xs" />
-				<Input bind:value={browseFilterEnv} placeholder="Filter by environment..." class="h-8 max-w-xs" />
+			<div class="flex items-center gap-2 pb-3 flex-shrink-0">
+				<Input bind:value={browseFilterName} placeholder={m.settings_backups_filter_by_name()} class="h-8 max-w-xs" />
+				<Input bind:value={browseFilterEnv} placeholder={m.settings_backups_filter_by_env()} class="h-8 max-w-xs" />
+				{#if browseSelectedCount > 0}
+					<button type="button" class="ml-auto inline-flex items-center gap-1.5 rounded-md border border-destructive/40 px-2.5 py-1 text-xs text-destructive transition-colors hover:bg-destructive/10" onclick={() => (bulkDialogOpen = true)}>
+						<Trash2 class="h-3 w-3" /> {m.settings_backups_delete_selected({ count: browseSelectedCount })}
+					</button>
+				{/if}
 			</div>
 		{/if}
 		<div class="flex-1 min-h-0">
 			{#if browseLoading}
-				<LoadingState class="h-full" label="Loading snapshots..." />
+				<LoadingState class="h-full" label={m.settings_backups_loading_snapshots()} />
 			{:else if browseSnapshots.length === 0}
-				<div class="flex h-full items-center justify-center"><p class="text-sm text-muted-foreground">No snapshots in this repository.</p></div>
+				<div class="flex h-full items-center justify-center"><p class="text-sm text-muted-foreground">{m.settings_backups_no_snapshots()}</p></div>
 			{:else}
 				<DataGrid
 					data={browseGroups}
@@ -820,7 +901,7 @@
 									<span class="truncate">{group.env.name}</span>
 								</span>
 							{:else if group.env}
-								<Badge variant="secondary" class="text-2xs font-normal text-muted-foreground">missing</Badge>
+								<Badge variant="secondary" class="text-2xs font-normal text-muted-foreground">{m.settings_backups_env_missing()}</Badge>
 							{:else}
 								<span class="text-xs text-muted-foreground">—</span>
 							{/if}
@@ -841,20 +922,31 @@
 								<Table.Root>
 									<Table.Header class="sticky top-0 z-10 bg-background">
 										<Table.Row>
-											<Table.Head class="w-28 py-1.5 text-xs" style="padding-left:8px">ID</Table.Head>
-											<Table.Head class="py-1.5 text-xs" style="padding-left:8px">Created</Table.Head>
-											<Table.Head class="w-16 py-1.5 text-xs text-right" style="padding-right:8px">Browse</Table.Head>
+											<Table.Head class="w-8 py-1.5" style="padding-left:8px">
+												<Checkbox
+													checked={group.snapshots.length > 0 && group.snapshots.every((s) => selectedSnapshots.has(s.id))}
+													indeterminate={group.snapshots.some((s) => selectedSnapshots.has(s.id)) && !group.snapshots.every((s) => selectedSnapshots.has(s.id))}
+													onCheckedChange={() => toggleGroupAll(group.snapshots)}
+													aria-label={m.containers_snapshot_select_all()}
+												/>
+											</Table.Head>
+											<Table.Head class="w-28 py-1.5 text-xs" style="padding-left:8px">{m.backups_snapshot_col_id()}</Table.Head>
+											<Table.Head class="py-1.5 text-xs" style="padding-left:8px">{m.backups_snapshot_col_created()}</Table.Head>
+											<Table.Head class="w-16 py-1.5 text-xs text-right" style="padding-right:8px">{m.settings_backups_col_browse()}</Table.Head>
 										</Table.Row>
 									</Table.Header>
 									<Table.Body>
 										{#each group.snapshots as snap}
-											<Table.Row class="cursor-pointer hover:bg-muted/50" onclick={() => { snapshotBrowseDestId = browseDestId; snapshotBrowseId = snap.id; snapshotBrowseName = group.name; snapshotBrowseOpen = true; }}>
-												<Table.Cell class="font-mono text-xs text-muted-foreground py-1" style="padding-left:8px">{snap.shortId}</Table.Cell>
+											<Table.Row class="hover:bg-muted/50 {selectedSnapshots.has(snap.id) ? 'bg-primary/5' : ''}">
+												<Table.Cell class="py-1" style="padding-left:8px" onclick={(e) => e.stopPropagation()}>
+													<Checkbox checked={selectedSnapshots.has(snap.id)} onCheckedChange={() => toggleSnapshotSel(snap.id)} aria-label={m.containers_snapshot_select({ id: snap.shortId })} />
+												</Table.Cell>
+												<Table.Cell class="cursor-pointer font-mono text-xs text-muted-foreground py-1" style="padding-left:8px" onclick={() => { snapshotBrowseDestId = browseDestId; snapshotBrowseId = snap.id; snapshotBrowseName = group.name; snapshotBrowseOpen = true; }}>{snap.shortId}</Table.Cell>
 												<Table.Cell class="text-xs py-1" style="padding-left:8px">{formatDateTime(snap.time)} <span class="text-muted-foreground opacity-60">({formatRelativeTime(snap.time)})</span></Table.Cell>
 												<Table.Cell class="text-right py-1">
-													<span class="inline-flex p-1 rounded hover:bg-muted transition-colors text-muted-foreground" title="Browse snapshot content">
+													<button type="button" class="inline-flex p-1 rounded hover:bg-muted transition-colors text-muted-foreground" title={m.settings_backups_browse_snapshot_content()} onclick={(e) => { e.stopPropagation(); snapshotBrowseDestId = browseDestId; snapshotBrowseId = snap.id; snapshotBrowseName = group.name; snapshotBrowseOpen = true; }}>
 														<FolderOpen class="w-3.5 h-3.5" />
-													</span>
+													</button>
 												</Table.Cell>
 											</Table.Row>
 										{/each}
@@ -867,10 +959,13 @@
 			{/if}
 		</div>
 		<Dialog.Footer class="pt-4">
-			<Button variant="outline" onclick={() => browseOpen = false}>Close</Button>
+			<Button variant="outline" onclick={() => browseOpen = false}>{m.ui_close()}</Button>
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>
+
+<BulkDeleteSnapshotsDialog bind:open={bulkDialogOpen} count={browseSelectedCount} busy={bulkDeleting} onConfirm={bulkDeleteBrowsed} />
+<BulkDeleteErrorDialog bind:open={bulkDeleteErrorOpen} error={bulkDeleteError} deleted={bulkDeleteErrorDeleted} />
 
 <SnapshotBrowser
 	bind:open={snapshotBrowseOpen}

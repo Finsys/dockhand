@@ -1,7 +1,8 @@
 import { json } from '@sveltejs/kit';
-import { putContainerArchive, inspectContainer, execInContainer } from '$lib/server/docker';
+import { putContainerArchive, inspectContainer, chownContainerPath } from '$lib/server/docker';
 import { authorize } from '$lib/server/authorize';
 import { validateDockerIdParam } from '$lib/server/docker-validation';
+import { parseChownSpec } from '$lib/server/chown-spec-core';
 import type { RequestHandler } from './$types';
 
 /**
@@ -91,8 +92,9 @@ function createTarArchive(filename: string, content: Uint8Array): Uint8Array {
  * summary: Upload one or more files into a container directory (requires the 'exec' permission)
  * description: Send `multipart/form-data` with one or more `files` parts; each file is tar-wrapped and written into the target directory. Partial success is reported per file in `uploaded`/`errors`.
  * body-multipart: files:binary[]! One or more files to write into the target directory
+ * body-multipart: owner:string Optional owner ("user", "user:group", "uid" or "uid:gid") to chown the uploaded files to; defaults to the container's configured user
  * path: id:string! Container ID or name (from GET /api/containers)
- * query: env:integer The target environment ID (omit for the local/default Docker host) (from GET /api/environments)
+ * query: env:integer! The target environment ID the container lives in (from GET /api/environments)
  * query: path:string! Absolute target directory inside the container
  * resp-200: {success:boolean!, uploaded:array<string>!, errors:array<string>}
  * resp-200-example: {"success":true,"uploaded":["app.conf"]}
@@ -109,7 +111,7 @@ export const POST: RequestHandler = async ({ params, url, request, cookies }) =>
 
 	const path = url.searchParams.get('path');
 	const envId = url.searchParams.get('env');
-	const envIdNum = envId ? parseInt(envId) : undefined;
+	const envIdNum = envId ? Number.parseInt(envId) : undefined;
 
 	// Permission check with environment context
 	if (auth.authEnabled && !await auth.can('containers', 'exec', envIdNum)) {
@@ -128,13 +130,26 @@ export const POST: RequestHandler = async ({ params, url, request, cookies }) =>
 			return json({ error: 'No files provided' }, { status: 400 });
 		}
 
-		// We'll inspect the container once to determine its default user
-		let defaultUser: string | undefined;
-		try {
-			const inspectData = await inspectContainer(params.id, envIdNum);
-			defaultUser = inspectData.Config.User || undefined;
-		} catch (e) {
-			console.warn('Failed to inspect container for user info', e);
+		// Explicit owner from the form wins; otherwise fall back to the container's
+		// default user (Config.User), matching the pre-existing behaviour.
+		let owner: string | undefined;
+		const ownerField = formData.get('owner');
+		if (typeof ownerField === 'string' && ownerField.trim() !== '') {
+			const parsed = parseChownSpec(ownerField);
+			if ('error' in parsed) {
+				return json({ error: parsed.error }, { status: 400 });
+			}
+			owner = parsed.value;
+		} else {
+			try {
+				const inspectData = await inspectContainer(params.id, envIdNum);
+				const defaultUser = inspectData.Config.User || undefined;
+				if (defaultUser) {
+					owner = defaultUser.includes(':') ? defaultUser : `${defaultUser}:${defaultUser}`;
+				}
+			} catch (e) {
+				console.warn('Failed to inspect container for user info', e);
+			}
 		}
 
 		// For simplicity, we'll upload files one at a time
@@ -151,20 +166,14 @@ export const POST: RequestHandler = async ({ params, url, request, cookies }) =>
 					params.id,
 					path,
 					tar,
-					envId ? parseInt(envId) : undefined
+					envId ? Number.parseInt(envId) : undefined
 				);
 
-				// chown the uploaded file
-				if (defaultUser) {
+				// chown the uploaded file to the requested (or container-default) owner.
+				if (owner) {
 					const targetPath = path.endsWith('/') ? `${path}${file.name}` : `${path}/${file.name}`;
-					const ownerGroup = defaultUser.includes(':') ? defaultUser : `${defaultUser}:${defaultUser}`;
 					try {
-						await execInContainer(
-							params.id,
-							['chown', '-R', ownerGroup, targetPath],
-							envId ? parseInt(envId) : undefined,
-							'root'
-						);
+						await chownContainerPath(params.id, targetPath, owner, true, envId ? Number.parseInt(envId) : undefined);
 					} catch (e) {
 						console.warn('Failed to set ownership on', targetPath, e);
 					}

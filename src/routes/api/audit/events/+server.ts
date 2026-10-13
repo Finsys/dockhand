@@ -12,7 +12,7 @@ export const GET: RequestHandler = async ({ cookies }) => {
 	const auth = await authorize(cookies);
 
 	// Audit log is Enterprise-only
-	if (!auth.isEnterprise) {
+	if (!auth.hasValidLicense) {
 		return new Response(JSON.stringify(enterpriseRequired()), {
 			status: 403,
 			headers: { 'Content-Type': 'application/json' }

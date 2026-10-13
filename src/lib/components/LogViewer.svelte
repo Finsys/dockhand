@@ -9,6 +9,7 @@
 	import { themeStore } from '$lib/stores/theme';
 	import { getMonospaceFont } from '$lib/themes';
 	import { AnsiUp } from 'ansi_up';
+	import { m } from '$lib/paraglide/messages.js';
 	const ansiUp = new AnsiUp();
 	ansiUp.use_classes = true;
 
@@ -281,7 +282,7 @@
 			<button
 				onclick={() => onAutoRefreshChange?.(!autoRefresh)}
 				class="flex items-center gap-1 px-1.5 py-0.5 rounded text-xs transition-colors {autoRefresh ? (dark ? 'bg-amber-500/20 ring-1 ring-amber-500/50 text-amber-400' : 'bg-amber-500/30 ring-1 ring-amber-600/50 text-amber-700') : dark ? 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-300'}"
-				title="Toggle auto-refresh"
+				title={m.logviewer_toggle_auto_refresh()}
 			>
 				<RefreshCw class="w-3 h-3" />
 			</button>
@@ -289,7 +290,7 @@
 			<button
 				onclick={() => onAutoScrollChange?.(!autoScroll)}
 				class="flex items-center gap-1 px-1.5 py-0.5 rounded text-xs transition-colors {autoScroll ? (dark ? 'bg-amber-500/20 ring-1 ring-amber-500/50 text-amber-400' : 'bg-amber-500/30 ring-1 ring-amber-600/50 text-amber-700') : dark ? 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-300'}"
-				title="Toggle auto-scroll"
+				title={m.logviewer_toggle_auto_scroll()}
 			>
 				<ArrowDownToLine class="w-3 h-3" />
 			</button>
@@ -298,7 +299,7 @@
 			     buttons around it -- neutralize all of it with ! overrides and hide the
 			     chevron so it reads as one more toolbar control. -->
 			<Select.Root type="single" value={String(fontSize)} onValueChange={(v) => { fontSize = Number(v); localStorage.setItem(FONT_SIZE_KEY, String(fontSize)); }}>
-				<Select.Trigger class="!h-6 !w-auto !gap-1 !rounded !border-0 !bg-transparent !px-1.5 !py-0.5 !text-xs !shadow-none transition-colors dark:!bg-transparent [&>svg:last-child]:hidden {dark ? 'text-zinc-500 hover:text-zinc-300 hover:!bg-zinc-800' : 'text-gray-500 hover:text-gray-700 hover:!bg-gray-300'}" title="Font size">
+				<Select.Trigger class="!h-6 !w-auto !gap-1 !rounded !border-0 !bg-transparent !px-1.5 !py-0.5 !text-xs !shadow-none transition-colors dark:!bg-transparent [&>svg:last-child]:hidden {dark ? 'text-zinc-500 hover:text-zinc-300 hover:!bg-zinc-800' : 'text-gray-500 hover:text-gray-700 hover:!bg-gray-300'}" title={m.logviewer_font_size()}>
 					<Type class="w-3 h-3" />
 					<span>{fontSize}px</span>
 				</Select.Trigger>
@@ -315,7 +316,7 @@
 			<button
 				onclick={() => wordWrap = !wordWrap}
 				class="p-1 rounded transition-colors {wordWrap ? (dark ? 'bg-amber-500/20 ring-1 ring-amber-500/50' : 'bg-amber-500/30 ring-1 ring-amber-600/50') : ''} {dark ? 'hover:bg-zinc-800' : 'hover:bg-gray-300'}"
-				title="Toggle word wrap"
+				title={m.logviewer_toggle_word_wrap()}
 			>
 				<WrapText class="w-3 h-3 transition-colors {wordWrap ? (dark ? 'text-amber-400' : 'text-amber-700') : dark ? 'text-zinc-500 hover:text-zinc-300' : 'text-gray-500 hover:text-gray-700'}" />
 			</button>
@@ -323,7 +324,7 @@
 			<button
 				onclick={() => { showLineNumbers = !showLineNumbers; localStorage.setItem('dockhand-log-line-numbers', String(showLineNumbers)); }}
 				class="p-1 rounded transition-colors {showLineNumbers ? (dark ? 'bg-amber-500/20 ring-1 ring-amber-500/50' : 'bg-amber-500/30 ring-1 ring-amber-600/50') : ''} {dark ? 'hover:bg-zinc-800' : 'hover:bg-gray-300'}"
-				title={showLineNumbers ? 'Hide line numbers' : 'Show line numbers'}
+				title={showLineNumbers ? m.logviewer_hide_line_numbers() : m.logviewer_show_line_numbers()}
 			>
 				<Hash class="w-3 h-3 transition-colors {showLineNumbers ? (dark ? 'text-amber-400' : 'text-amber-700') : dark ? 'text-zinc-500 hover:text-zinc-300' : 'text-gray-500 hover:text-gray-700'}" />
 			</button>
@@ -334,7 +335,7 @@
 					<input
 						bind:this={logSearchInputRef}
 						type="text"
-						placeholder="Search..."
+						placeholder={m.logviewer_search_placeholder()}
 						bind:value={logSearchQuery}
 						onkeydown={handleLogSearchKeydown}
 						class="bg-transparent border-none outline-none text-xs w-20 {dark ? 'text-zinc-200 placeholder:text-zinc-500' : 'text-gray-800 placeholder:text-gray-400'}"
@@ -342,7 +343,7 @@
 					<button
 						onclick={toggleSearchFilterMode}
 						class="p-0.5 rounded transition-colors {logSearchFilterMode ? (dark ? 'bg-amber-500/20 ring-1 ring-amber-500/50' : 'bg-amber-500/30 ring-1 ring-amber-600/50') : dark ? 'hover:bg-zinc-700' : 'hover:bg-gray-300'}"
-						title={logSearchFilterMode ? 'Show all lines (filter mode active)' : 'Hide non-matching lines'}
+						title={logSearchFilterMode ? m.logviewer_show_all_lines() : m.logviewer_hide_non_matching_lines()}
 					>
 						<Filter class="w-3 h-3 transition-colors {logSearchFilterMode ? (dark ? 'text-amber-400' : 'text-amber-700') : dark ? 'text-zinc-400' : 'text-gray-500'}" />
 					</button>
@@ -351,13 +352,13 @@
 					{:else if logSearchQuery}
 						<span class="text-xs {dark ? 'text-zinc-500' : 'text-gray-400'}">0/0</span>
 					{/if}
-					<button onclick={() => navigateMatch('prev')} class="p-0.5 rounded {dark ? 'hover:bg-zinc-700' : 'hover:bg-gray-300'}" title="Previous">
+					<button onclick={() => navigateMatch('prev')} class="p-0.5 rounded {dark ? 'hover:bg-zinc-700' : 'hover:bg-gray-300'}" title={m.logviewer_previous_match()}>
 						<ChevronUp class="w-3 h-3 {dark ? 'text-zinc-400' : 'text-gray-500'}" />
 					</button>
-					<button onclick={() => navigateMatch('next')} class="p-0.5 rounded {dark ? 'hover:bg-zinc-700' : 'hover:bg-gray-300'}" title="Next">
+					<button onclick={() => navigateMatch('next')} class="p-0.5 rounded {dark ? 'hover:bg-zinc-700' : 'hover:bg-gray-300'}" title={m.logviewer_next_match()}>
 						<ChevronDown class="w-3 h-3 {dark ? 'text-zinc-400' : 'text-gray-500'}" />
 					</button>
-					<button onclick={closeLogSearch} class="p-0.5 rounded {dark ? 'hover:bg-zinc-700' : 'hover:bg-gray-300'}" title="Close">
+					<button onclick={closeLogSearch} class="p-0.5 rounded {dark ? 'hover:bg-zinc-700' : 'hover:bg-gray-300'}" title={m.ui_close()}>
 						<X class="w-3 h-3 {dark ? 'text-zinc-400' : 'text-gray-500'}" />
 					</button>
 				</div>
@@ -365,7 +366,7 @@
 				<button
 					onclick={toggleLogSearch}
 					class="p-1 rounded transition-colors {dark ? 'hover:bg-zinc-800' : 'hover:bg-gray-300'}"
-					title="Search logs"
+					title={m.logviewer_search_logs()}
 				>
 					<Search class="w-3 h-3 {dark ? 'text-zinc-500 hover:text-zinc-300' : 'text-gray-500 hover:text-gray-700'}" />
 				</button>
@@ -374,7 +375,7 @@
 			<button
 				onclick={copyLogs}
 				class="p-1 rounded transition-colors {dark ? 'hover:bg-zinc-800' : 'hover:bg-gray-300'}"
-				title={copied ? 'Copied!' : 'Copy logs'}
+				title={copied ? m.logviewer_copied() : m.logviewer_copy_logs()}
 			>
 				{#if copied}
 					<Check class="w-3 h-3 text-emerald-500" />
@@ -386,7 +387,7 @@
 			<button
 				onclick={downloadLogs}
 				class="p-1 rounded transition-colors {dark ? 'hover:bg-zinc-800' : 'hover:bg-gray-300'}"
-				title="Download logs"
+				title={m.logviewer_download_logs()}
 			>
 				<Download class="w-3 h-3 {dark ? 'text-zinc-500 hover:text-zinc-300' : 'text-gray-500 hover:text-gray-700'}" />
 			</button>
@@ -395,7 +396,7 @@
 				<button
 					onclick={() => onClear?.()}
 					class="p-1 rounded transition-colors {dark ? 'hover:bg-zinc-800' : 'hover:bg-gray-300'}"
-					title="Clear logs"
+					title={m.logviewer_clear_logs()}
 				>
 					<Eraser class="w-3 h-3 {dark ? 'text-zinc-500 hover:text-zinc-300' : 'text-gray-500 hover:text-gray-700'}" />
 				</button>
@@ -405,7 +406,7 @@
 				<button
 					onclick={() => onRefresh?.()}
 					class="p-1 rounded transition-colors {dark ? 'hover:bg-zinc-800' : 'hover:bg-gray-300'}"
-					title="Refresh logs"
+					title={m.logviewer_refresh_logs()}
 				>
 					<RefreshCw class="w-3 h-3 {dark ? 'text-zinc-500 hover:text-zinc-300' : 'text-gray-500 hover:text-gray-700'}" />
 				</button>
@@ -420,10 +421,10 @@
 		{:else if loading}
 			<div class="flex items-center justify-center h-full {dark ? 'text-zinc-500' : 'text-gray-500'}">
 				<RefreshCw class="w-5 h-5 animate-spin mr-2" />
-				Loading logs...
+				{m.logviewer_loading_logs()}
 			</div>
 		{:else}
-			<p class="text-sm {dark ? 'text-zinc-500' : 'text-gray-500'}">No logs available</p>
+			<p class="text-sm {dark ? 'text-zinc-500' : 'text-gray-500'}">{m.execution_no_logs()}</p>
 		{/if}
 	</div>
 </div>

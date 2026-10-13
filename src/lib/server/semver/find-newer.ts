@@ -7,6 +7,7 @@
  * compose, which we don't own. We just tell them "a newer version is out".
  */
 
+import { applyTagFilter, type TagFilter } from './tag-filter-labels';
 import {
 	parseTag,
 	prefixMatches,
@@ -31,6 +32,12 @@ export interface FindNewerOptions {
 	 * image with a non-standard tag scheme can still be compared. Absent = default.
 	 */
 	versionPattern?: RegExp | null;
+	/**
+	 * The container's own tag filters, from its labels. Applied BEFORE the version
+	 * comparison, and only ever narrowing: a label names an exception the global
+	 * settings cannot express, it does not widen what the instance offers.
+	 */
+	tagFilter?: TagFilter;
 }
 
 export interface NewerVersion {
@@ -42,6 +49,50 @@ export interface NewerVersion {
 	skipped: string[];
 	/** The target tag's manifest digest (`sha256:...`), when probed. Lets the UI show/copy the new tag digest-pinned. */
 	digest?: string;
+}
+
+/**
+ * A newer-version suggestion is REDUNDANT when the candidate tag resolves to the
+ * same image the running container already has - i.e. a more specific tag
+ * (`12.3.3`) pointing at the exact image a broader pinned tag (`12.3`) already
+ * runs. Reporting it is a false-positive update (#1572).
+ *
+ * Matches in BOTH digest shapes, because a `docker pull` may record either the
+ * multi-arch INDEX digest or just the PER-ARCH CHILD digest in RepoDigests (#1367):
+ * the running image's digests are compared against the candidate's index digest AND
+ * its per-arch child digests. Returns false when there is nothing to compare (no
+ * candidate digest / no local digests) so a real update is never hidden.
+ */
+export function isRedundantNewerVersion(
+	candidateDigest: string | null | undefined,
+	currentImageDigests: readonly (string | null | undefined)[],
+	candidateChildDigests: readonly (string | null | undefined)[] = []
+): boolean {
+	const local = new Set(currentImageDigests.filter((d): d is string => !!d));
+	if (local.size === 0) return false;
+	if (candidateDigest && local.has(candidateDigest)) return true;
+	return candidateChildDigests.some((d) => !!d && local.has(d));
+}
+
+/**
+ * A candidate is STALE when its image was built before the one already running.
+ * A version tag names what a maintainer called a build, not when it was made, so a
+ * repository that still carries old tags whose names sort high offers them as
+ * upgrades: `lidarr:8.1.2135` is really `0.8.1.2135` from 2021, above a running
+ * `3.1.0` from 2026 on name alone.
+ *
+ * Returns false whenever either timestamp is missing or unparseable, so a registry
+ * that does not answer can never hide a real update.
+ */
+export function isStaleCandidate(
+	candidateCreatedAt: string | null | undefined,
+	currentCreatedAt: string | null | undefined
+): boolean {
+	if (!candidateCreatedAt || !currentCreatedAt) return false;
+	const candidate = Date.parse(candidateCreatedAt);
+	const current = Date.parse(currentCreatedAt);
+	if (!Number.isFinite(candidate) || !Number.isFinite(current)) return false;
+	return candidate < current;
 }
 
 /** Which segment first differs decides the bump: [0]=major, [1]=minor, else patch. */
@@ -81,7 +132,11 @@ export function findNewerVersionTag(
 	const maxRank = BUMP_RANK[maxBump];
 	const currentIsPrerelease = isPrerelease(current);
 
-	const candidates = allTags
+	// The container's own filters run first, so everything below compares only the
+	// tags it is willing to be offered.
+	const pool = options.tagFilter ? applyTagFilter(allTags, options.tagFilter) : allTags;
+
+	const candidates = pool
 		.map((tag) => ({ tag, parsed: parseTag(tag, versionPattern) }))
 		.filter((c): c is { tag: string; parsed: ParsedTag } => c.parsed !== null)
 		.filter((c) => prefixMatches(c.parsed.prefix, current.prefix))
@@ -141,7 +196,7 @@ export function findNewerVersionTag(
 export async function findNewerImageTag(
 	currentTag: string,
 	allTags: string[],
-	probe: (tag: string) => Promise<{ ok: boolean; digest?: string | null }>,
+	probe: (tag: string) => Promise<{ ok: boolean; digest?: string | null; redundant?: boolean }>,
 	options: FindNewerOptions = {},
 	maxSkips = 5
 ): Promise<NewerVersion | null> {
@@ -150,8 +205,12 @@ export async function findNewerImageTag(
 		const pool = excluded.size ? allTags.filter((t) => !excluded.has(t)) : allTags;
 		const newer = findNewerVersionTag(currentTag, pool, options);
 		if (!newer) return null;
-		const { ok, digest } = await probe(newer.tag);
+		const { ok, digest, redundant } = await probe(newer.tag);
 		if (ok) return digest ? { ...newer, digest } : newer;
+		// The highest newer tag resolves to the image already running (a more specific
+		// tag of the same digest, e.g. 12.3 running 12.3.3). There is nothing newer, and
+		// dropping to a LOWER patch would be a downgrade - stop, don't search below it.
+		if (redundant) return null;
 		excluded.add(newer.tag);
 	}
 	return null;

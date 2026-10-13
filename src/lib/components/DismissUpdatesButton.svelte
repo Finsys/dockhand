@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button';
-	import { CircleArrowUp, Tag } from 'lucide-svelte';
+	import { CircleArrowUp, Clock, Tag } from 'lucide-svelte';
 	import { scale } from 'svelte/transition';
 	import { backOut } from 'svelte/easing';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		/** Whether any update indicator is present (digest, newer-version, or failed check). */
@@ -11,10 +12,13 @@
 		digestCount: number;
 		/** Number of items with a newer-version tag - shows the tag icon + count. */
 		newerVersionCount: number;
+		/** Number of items whose update is held by the minimum image age. Muted, not
+		 *  amber: there is nothing to act on until the image is old enough. */
+		coolingDownCount?: number;
 		onDismiss: () => void;
 	}
 
-	let { show, digestCount, newerVersionCount, onDismiss }: Props = $props();
+	let { show, digestCount, newerVersionCount, coolingDownCount = 0, onDismiss }: Props = $props();
 </script>
 
 {#if show}
@@ -24,7 +28,7 @@
 		variant="outline"
 		onclick={onDismiss}
 		class="gap-1.5 border-amber-500/40 text-amber-600 hover:bg-amber-500/10 hover:border-amber-500"
-		title="Dismiss all update indicators"
+		title={m.updates_dismiss_all_title()}
 	>
 		{#if digestCount > 0}
 			<span class="flex items-center gap-0.5">
@@ -38,7 +42,13 @@
 				<span class="text-xs font-medium tabular-nums">{newerVersionCount}</span>
 			</span>
 		{/if}
-		{#if digestCount === 0 && newerVersionCount === 0}
+		{#if coolingDownCount > 0}
+			<span class="flex items-center gap-0.5 text-muted-foreground" title={m.updates_cooling_down_title({ count: coolingDownCount })}>
+				<Clock class="w-3 h-3" />
+				<span class="text-xs font-medium tabular-nums">{coolingDownCount}</span>
+			</span>
+		{/if}
+		{#if digestCount === 0 && newerVersionCount === 0 && coolingDownCount === 0}
 			<!-- only failed checks remain - fall back to the update icon -->
 			<CircleArrowUp class="w-3.5 h-3.5" />
 		{/if}

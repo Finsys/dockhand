@@ -35,6 +35,7 @@ export type SecretProviderType =
 	| 'proton'
 	| 'azure-kv'
 	| 'keepass'
+	| 'psono'
 	// eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents
 	| (string & {});
 
@@ -237,6 +238,19 @@ export interface KeePassConfig {
 }
 
 /** Persisted (encrypted) config, discriminated by the provider `type`. */
+/**
+ * Psono: a restricted, read-only API key. `serverUrl` is the instance root; the
+ * `/server` suffix Psono serves its API under is appended when missing.
+ *
+ * `apiKeySecretKey` never leaves this server - every secret is decrypted locally,
+ * which is why Psono's own "allow insecure access" must stay off on the key.
+ */
+export interface PsonoConfig {
+	serverUrl: string;
+	apiKeyId: string;
+	apiKeySecretKey: string;
+}
+
 export type SecretProviderConfig =
 	| ServiceAccountConfig
 	| ConnectConfig
@@ -246,7 +260,8 @@ export type SecretProviderConfig =
 	| BitwardenConfig
 	| ProtonConfig
 	| AzureKvConfig
-	| KeePassConfig;
+	| KeePassConfig
+	| PsonoConfig;
 
 /**
  * Config keys that hold a SECRET across every provider type. Only these are stripped
@@ -255,7 +270,7 @@ export type SecretProviderConfig =
  * a non-secret coordinate the user needs to see and edit. Keep in sync with the
  * `type: 'password'` fields in ProviderModal.svelte's PROVIDER_FIELDS.
  */
-export const SECRET_CONFIG_KEYS = new Set(['token', 'clientSecret', 'password']);
+export const SECRET_CONFIG_KEYS = new Set(['token', 'clientSecret', 'password', 'apiKeySecretKey']);
 
 /**
  * Every user-overridable connection-destination field across all provider types. If a
@@ -359,6 +374,12 @@ export function redactProviderConfig(config: SecretProviderConfig): Record<strin
 export interface TestConnectionResult {
 	ok: boolean;
 	error?: string;
+	/**
+	 * The connection works, but something about the credential is worth saying - a key
+	 * wider than Dockhand needs, for instance. Shown alongside the success, never
+	 * instead of it, so a working setup is not reported as broken.
+	 */
+	warning?: string;
 }
 
 /**
@@ -428,4 +449,18 @@ export interface SecretProvider<C extends SecretProviderConfig = SecretProviderC
 	 * concept throw {@link UnsupportedOperationError}.
 	 */
 	resolveBulk(config: C, selector: string): Promise<Record<string, string>>;
+
+	/**
+	 * Optional: does a bulk pull AND a reference batch against ONE backend
+	 * session. Only worth implementing where opening a session is expensive - a
+	 * CLI provider pays a full login per call, so the editor probe (which needs
+	 * both) otherwise logs in twice for one keystroke. Callers that see it
+	 * absent must fall back to calling the two methods separately.
+	 */
+	resolveCombined?(
+		config: C,
+		selector: string | undefined,
+		refs: string[],
+		logPrefix?: string
+	): Promise<{ bulk: Record<string, string>; refs: Map<string, string> }>;
 }

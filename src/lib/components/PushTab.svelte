@@ -3,6 +3,8 @@
 	import { CheckCircle2, XCircle, Loader2, AlertCircle, Terminal, Sun, Moon, Upload } from 'lucide-svelte';
 	import { appendEnvParam } from '$lib/stores/environment';
 	import { watchJob } from '$lib/utils/sse-fetch';
+	import { m } from '$lib/paraglide/messages.js';
+	import { splitAtName } from '$lib/i18n/split';
 
 	type PushStatus = 'idle' | 'pushing' | 'complete' | 'error';
 
@@ -90,7 +92,7 @@
 
 		reset();
 		status = 'pushing';
-		statusMessage = 'Finding image...';
+		statusMessage = m.images_push_finding_image();
 
 		try {
 			// Small delay to ensure image is indexed
@@ -116,7 +118,7 @@
 
 			if (!pulledImage) {
 				console.log('Looking for:', sourceImageName, 'Available tags:', images.map((i: any) => i.tags).flat());
-				errorMessage = 'Could not find image to push';
+				errorMessage = m.images_push_error_not_found();
 				status = 'error';
 				onError?.(errorMessage);
 				return;
@@ -138,7 +140,7 @@
 
 			if (!pushResponse.ok) {
 				const data = await pushResponse.json();
-				errorMessage = data.error || 'Failed to push image';
+				errorMessage = data.error || m.images_push_error_failed();
 				status = 'error';
 				addOutputLine(`[error] ${errorMessage}`);
 				onError?.(errorMessage);
@@ -153,13 +155,13 @@
 			// If job ended without an explicit complete/error event
 			if (status === 'pushing') {
 				status = 'complete';
-				statusMessage = 'Image pushed successfully!';
+				statusMessage = m.images_push_success();
 				addOutputLine(`[push] Push complete!`);
 				onComplete?.(targetTag);
 			}
 		} catch (error: any) {
 			console.error('Failed to push image:', error);
-			errorMessage = error.message || 'Failed to push image';
+			errorMessage = error.message || m.images_push_error_failed();
 			status = 'error';
 			addOutputLine(`[error] ${errorMessage}`);
 			onError?.(errorMessage);
@@ -176,12 +178,12 @@
 		} else if (data.status === 'pushing') {
 			addOutputLine(`[push] Pushing layers...`);
 		} else if (data.status === 'complete') {
-			statusMessage = data.message || 'Image pushed successfully!';
+			statusMessage = data.message || m.images_push_success();
 			status = 'complete';
 			addOutputLine(`[push] ${data.message || 'Push complete!'}`);
 			onComplete?.(targetTag || data.targetTag || '');
 		} else if (data.status === 'error' || data.error) {
-			errorMessage = data.error || 'Push failed';
+			errorMessage = data.error || m.images_push_failed();
 			status = 'error';
 			addOutputLine(`[error] ${data.error}`);
 			onError?.(errorMessage);
@@ -210,10 +212,10 @@
 						<span class="text-sm">{statusMessage}</span>
 					{:else if status === 'complete'}
 						<CheckCircle2 class="w-4 h-4 text-green-600" />
-						<span class="text-sm text-green-600">Push complete!</span>
+						<span class="text-sm text-green-600">{m.images_push_complete()}</span>
 					{:else if status === 'error'}
 						<XCircle class="w-4 h-4 text-red-600" />
-						<span class="text-sm text-red-600">Push failed</span>
+						<span class="text-sm text-red-600">{m.images_push_failed()}</span>
 					{/if}
 				</div>
 				{#if status === 'complete' && targetTag}
@@ -237,9 +239,9 @@
 				<div class="flex items-center justify-between text-xs text-muted-foreground mb-2 shrink-0">
 					<div class="flex items-center gap-2">
 						<Terminal class="w-3.5 h-3.5" />
-						<span>Output ({outputLines.length} lines)</span>
+						<span>{m.pull_output_lines({ count: outputLines.length })}</span>
 					</div>
-					<button type="button" onclick={toggleLogTheme} class="p-1 rounded hover:bg-muted transition-colors cursor-pointer" title="Toggle log theme">
+					<button type="button" onclick={toggleLogTheme} class="p-1 rounded hover:bg-muted transition-colors cursor-pointer" title={m.pull_toggle_log_theme()}>
 						{#if logDarkMode}
 							<Sun class="w-3.5 h-3.5" />
 						{:else}
@@ -276,7 +278,7 @@
 	{#if status === 'idle'}
 		<div class="flex-1 flex flex-col items-center justify-center gap-4 text-muted-foreground">
 			<Upload class="w-12 h-12 opacity-50" />
-			<p class="text-sm">Ready to push to <code class="bg-muted px-1.5 py-0.5 rounded">{registryName}</code></p>
+			<p class="text-sm">{splitAtName(m.images_push_ready)[0]}<code class="bg-muted px-1.5 py-0.5 rounded">{registryName}</code>{splitAtName(m.images_push_ready)[1]}</p>
 		</div>
 	{/if}
 </div>

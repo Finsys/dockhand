@@ -2,7 +2,9 @@
 	import '../app.css';
 	import { onMount } from 'svelte';
 	import { browser } from '$app/environment';
+	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
+	import { toast } from 'svelte-sonner';
 	import { Toaster } from '$lib/components/ui/sonner';
 	import AppSidebar from '$lib/components/app-sidebar.svelte';
 	import ThemeToggle from '$lib/components/theme-toggle.svelte';
@@ -13,13 +15,18 @@
 	import { SidebarProvider, SidebarTrigger } from '$lib/components/ui/sidebar';
 	import { connectSSE, disconnectSSE } from '$lib/stores/events';
 	import { currentEnvironment, environments } from '$lib/stores/environment';
-	import { licenseStore, daysUntilExpiry } from '$lib/stores/license';
+	import { licenseStore, daysUntilExpiry, expiryMessage } from '$lib/stores/license';
+	import { heldByLapsedLicence } from '$lib/utils/licence-hold';
+	import { get } from 'svelte/store';
 	import { authStore } from '$lib/stores/auth';
+	import { extractPath, isSessionExpiryCandidate } from '$lib/utils/session-expiry';
 	import { themeStore, applyTheme } from '$lib/stores/theme';
 	import { gridPreferencesStore } from '$lib/stores/grid-preferences';
 	import { appSettings } from '$lib/stores/settings';
 	import { shouldShowWhatsNew } from '$lib/utils/version';
 	import { AlertTriangle, Search } from 'lucide-svelte';
+	import { getLocale } from '$lib/paraglide/runtime.js';
+	import { m } from '$lib/paraglide/messages.js';
 
 	// Check if current route is login page (no sidebar needed)
 	const isLoginPage = $derived($page.url.pathname === '/login');
@@ -31,6 +38,22 @@
 	let { children, data } = $props();
 	let envId = $state<number | null>(null);
 	let commandPaletteOpen = $state(false);
+	// Said once, at the top: a lapsed licence refuses every read, so each page would
+	// otherwise report it separately as an empty table or a request that failed.
+	// Same decision as licenceHoldMessage (utils/licence-hold), worded in the UI language.
+	const licenceHold = $derived(
+		heldByLapsedLicence({
+			hasEnterpriseLicense: $licenseStore.hasEnterpriseLicense,
+			isEnterprise: $licenseStore.isEnterprise,
+			isAdmin: $authStore.user?.isAdmin ?? false,
+			isAuthenticated: $authStore.authEnabled ? !!$authStore.user : false,
+			loading: $licenseStore.loading || $authStore.loading
+		})
+			? m.licence_hold()
+			: null
+	);
+
+
 
 	// What's New modal state
 	let showWhatsNewModal = $state(false);
@@ -72,6 +95,9 @@
 	});
 
 	onMount(() => {
+		// app.html ships lang="en"; tell the browser (and screen readers) the UI language
+		document.documentElement.lang = getLocale();
+
 		// Apply theme from localStorage immediately (for flash-free loading)
 		applyTheme(themeStore.get());
 
@@ -81,14 +107,54 @@
 		// Connect to SSE for real-time Docker events (global)
 		connectSSE(envId);
 
-		// Check enterprise license status
+		// Check enterprise license status, and again whenever somebody comes back to
+		// the page - a licence activated elsewhere is only visible after asking again.
 		licenseStore.check();
+		const stopWatchingLicense = licenseStore.watchForChanges();
 
 		// Check auth status
 		authStore.check();
 
+		// Redirect to the login page when the session expires mid-use (#1577): once auth is
+		// enabled, a stale session makes every /api/* call return 401, but the UI otherwise
+		// keeps showing the last page. Intercept fetch to catch that centrally, so we don't
+		// have to touch every call site. A 401 is only treated as expiry after re-checking
+		// the session with the server, so a proxied upstream-auth 401 (e.g. bad registry
+		// credentials on /api/registry/image) doesn't wrongly log the user out.
+		const originalFetch = window.fetch;
+		let checkingExpiry = false; // dedupe concurrent 401s while the session re-check is in flight
+		window.fetch = async (...args) => {
+			const response = await originalFetch(...args);
+			try {
+				const path = extractPath(args[0], window.location.origin);
+				if (
+					isSessionExpiryCandidate(response.status, path) &&
+					get(authStore).authEnabled &&
+					!checkingExpiry &&
+					window.location.pathname !== '/login'
+				) {
+					checkingExpiry = true;
+					try {
+						await authStore.check(); // confirm with the server whether the session is actually gone
+						const auth = get(authStore);
+						if (auth.authEnabled && !auth.authenticated && window.location.pathname !== '/login') {
+							toast.error(m.layout_session_expired());
+							goto('/login');
+						}
+					} finally {
+						checkingExpiry = false;
+					}
+				}
+			} catch {
+				// URL parsing / check failures are non-fatal; never break the original response.
+			}
+			return response;
+		};
+
 		return () => {
+			window.fetch = originalFetch;
 			disconnectSSE();
+			stopWatchingLicense();
 		};
 	});
 
@@ -131,7 +197,7 @@
 
 <svelte:head>
 	<link rel="icon" href="/logo_light.webp" />
-	<title>Dockhand - Docker Management</title>
+	<title>{m.layout_page_title()}</title>
 </svelte:head>
 
 {#if noSidebar}
@@ -155,7 +221,7 @@
 						class="flex items-center gap-2 px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground border rounded-md hover:bg-muted/50 transition-colors"
 					>
 						<Search class="w-3.5 h-3.5" />
-						<span class="hidden sm:inline">Search...</span>
+						<span class="hidden sm:inline">{m.layout_search()}</span>
 						<kbd class="pointer-events-none hidden sm:inline-flex h-5 select-none items-center gap-1 rounded border bg-muted px-1.5 font-mono text-2xs font-medium text-muted-foreground">
 							{#if isMac}
 								<span class="text-xs">⌘</span>
@@ -165,28 +231,30 @@
 							K
 						</kbd>
 					</button>
-					{#if $licenseStore.isEnterprise && $daysUntilExpiry !== null && $daysUntilExpiry <= 30}
+					{#if $expiryMessage}
 						<a
 							href="/settings?tab=license"
 							class="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors
-								{$daysUntilExpiry <= 7
+								{!$licenseStore.isEnterprise || $daysUntilExpiry <= 7
 									? 'bg-red-100 text-red-800 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400 dark:hover:bg-red-900/50'
 									: 'bg-amber-100 text-amber-800 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:hover:bg-amber-900/50'}"
 						>
 							<AlertTriangle class="w-3.5 h-3.5" />
-							{#if $daysUntilExpiry <= 0}
-								License expired
-							{:else if $daysUntilExpiry === 1}
-								License expires tomorrow
-							{:else}
-								License expires in {$daysUntilExpiry} days
-							{/if}
+							{$expiryMessage}
 						</a>
 					{/if}
 					<ThemeToggle />
 				</div>
 			</header>
 			<div class="flex-1 min-h-0 h-[calc(100%-3.5rem)] overflow-auto py-2 px-3 flex flex-col">
+				{#if licenceHold}
+					<!-- A lapsed licence refuses every read at once, so each page would
+					     otherwise show its own empty table or spinner and read as broken. -->
+					<div class="flex items-start gap-2 mb-2 px-3 py-2 rounded-md border border-amber-500/40 bg-amber-100 text-amber-900 dark:bg-amber-900/25 dark:text-amber-300 flex-shrink-0">
+						<AlertTriangle class="w-4 h-4 mt-0.5 flex-shrink-0" />
+						<p class="text-xs">{licenceHold}</p>
+					</div>
+				{/if}
 				{@render children?.()}
 			</div>
 		</MainContent>

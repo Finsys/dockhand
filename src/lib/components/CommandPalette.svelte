@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { onMount, untrack } from 'svelte';
+	import { onMount, untrack, tick } from 'svelte';
 	import { goto } from '$app/navigation';
-	import * as Command from '$lib/components/ui/command';
+	import * as Dialog from '$lib/components/ui/dialog';
 	import {
 		LayoutDashboard,
 		Box,
@@ -22,17 +22,25 @@
 		Square,
 		RotateCcw,
 		FileText,
-		CircleDot,
 		Sun,
 		Moon,
 		Type,
-		Check
+		Check,
+		Palette
 	} from 'lucide-svelte';
 	import { licenseStore } from '$lib/stores/license';
 	import { authStore, canAccess } from '$lib/stores/auth';
 	import { currentEnvironment } from '$lib/stores/environment';
 	import { themeStore, onDarkModeChange } from '$lib/stores/theme';
 	import { lightThemes, darkThemes, fonts } from '$lib/themes';
+	import { EDITOR_THEMES } from '$lib/utils/editor-themes';
+	import { filterPalette, type PaletteItem } from '$lib/utils/palette-filter';
+	import { mapContainerRows, mapStackRows, roundRobin } from '$lib/utils/palette-data';
+	import { buildOffsets, visibleRange } from '$lib/utils/palette-virtual';
+	import ContainerIcon from '$lib/components/ContainerIcon.svelte';
+	import StackIcon from '$lib/components/StackIcon.svelte';
+	import EnvironmentIcon from '$lib/components/EnvironmentIcon.svelte';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		open?: boolean;
@@ -40,81 +48,316 @@
 
 	let { open = $bindable(false) }: Props = $props();
 
-	interface CommandItem {
-		name: string;
+	interface NavItem {
+		// A function so the name is read in the active language at render time
+		name: () => string;
 		href: string;
 		icon: typeof LayoutDashboard;
 		keywords?: string[];
 	}
-
 	interface Environment {
 		id: number;
 		name: string;
 		icon?: string;
 	}
-
 	interface Container {
 		id: string;
 		name: string;
+		displayName: string;
 		state: string;
 		image: string;
 		envId: number;
 		envName: string;
+		envIcon: string;
+	}
+	interface Stack {
+		id: string;
+		name: string;
+		icon?: string | null;
+		envId: number;
+		envName: string;
+		envIcon: string;
 	}
 
 	let environments = $state<Environment[]>([]);
 	let containers = $state<Container[]>([]);
+	let stacks = $state<Stack[]>([]);
 	let loading = $state(false);
 
-	const navigationItems: CommandItem[] = [
-		{ name: 'Dashboard', href: '/', icon: LayoutDashboard, keywords: ['home', 'overview'] },
-		{ name: 'Containers', href: '/containers', icon: Box, keywords: ['docker', 'running'] },
-		{ name: 'Logs', href: '/logs', icon: ScrollText, keywords: ['output', 'debug'] },
-		{ name: 'Shell', href: '/terminal', icon: Terminal, keywords: ['exec', 'bash', 'sh'] },
-		{ name: 'Stacks', href: '/stacks', icon: Layers, keywords: ['compose', 'docker-compose'] },
-		{ name: 'Images', href: '/images', icon: Images, keywords: ['pull', 'build'] },
-		{ name: 'Volumes', href: '/volumes', icon: HardDrive, keywords: ['storage', 'data'] },
-		{ name: 'Networks', href: '/networks', icon: Network, keywords: ['bridge', 'host'] },
-		{ name: 'Registry', href: '/registry', icon: Download, keywords: ['hub', 'pull'] },
-		{ name: 'Activity', href: '/activity', icon: Eye, keywords: ['events', 'history'] },
-		{ name: 'Schedules', href: '/schedules', icon: Timer, keywords: ['cron', 'auto'] },
-		{ name: 'Settings', href: '/settings', icon: Settings, keywords: ['config', 'preferences'] }
+	const navigationItems: NavItem[] = [
+		{ name: m.nav_dashboard, href: '/', icon: LayoutDashboard, keywords: ['home', 'overview'] },
+		{ name: m.nav_containers, href: '/containers', icon: Box, keywords: ['docker', 'running'] },
+		{ name: m.nav_logs, href: '/logs', icon: ScrollText, keywords: ['output', 'debug'] },
+		{ name: m.nav_shell, href: '/terminal', icon: Terminal, keywords: ['exec', 'bash', 'sh'] },
+		{ name: m.nav_stacks, href: '/stacks', icon: Layers, keywords: ['compose', 'docker-compose'] },
+		{ name: m.nav_images, href: '/images', icon: Images, keywords: ['pull', 'build'] },
+		{ name: m.nav_volumes, href: '/volumes', icon: HardDrive, keywords: ['storage', 'data'] },
+		{ name: m.nav_networks, href: '/networks', icon: Network, keywords: ['bridge', 'host'] },
+		{ name: m.nav_registry, href: '/registry', icon: Download, keywords: ['hub', 'pull'] },
+		{ name: m.nav_activity, href: '/activity', icon: Eye, keywords: ['events', 'history'] },
+		{ name: m.nav_schedules, href: '/schedules', icon: Timer, keywords: ['cron', 'auto'] },
+		{ name: m.nav_settings, href: '/settings', icon: Settings, keywords: ['config', 'preferences'] }
 	];
 
-	// Filter items based on permissions
-	const filteredItems = $derived(
-		navigationItems.filter(item => {
-			if (item.href === '/terminal' && !$canAccess('containers', 'exec')) return false;
-			if (item.href === '/audit' && (!$licenseStore.isEnterprise || !$authStore.authEnabled)) return false;
-			return true;
-		})
-	);
+	// Group headings (source order drives render order).
+	const G_NAV = 'Navigation';
+	const G_ENT = 'Enterprise';
+	const G_LIGHT = 'Light theme';
+	const G_DARK = 'Dark theme';
+	const G_FONT = 'Font';
+	const G_EDITOR = 'Editor theme';
+	const G_ENV = 'Switch environment';
+	const G_STACK = 'Stacks';
+	const G_CONT = 'Containers';
 
-	// Load environments and containers when palette opens
-	async function loadData() {
+	// The constants above key the groups (caps, order); this is the heading shown for each,
+	// read in the active language at render time. Enterprise is an edition name and shows as is.
+	const GROUP_LABELS: Record<string, () => string> = {
+		[G_NAV]: m.cmdpalette_group_navigation,
+		[G_LIGHT]: m.cmdpalette_group_light_theme,
+		[G_DARK]: m.cmdpalette_group_dark_theme,
+		[G_FONT]: m.cmdpalette_group_font,
+		[G_EDITOR]: m.cmdpalette_group_editor_theme,
+		[G_ENV]: m.cmdpalette_group_switch_environment,
+		[G_STACK]: m.nav_stacks,
+		[G_CONT]: m.nav_containers
+	};
+
+	// Presentation + action for each item, resolved by id (kept out of the pure model).
+	interface Meta {
+		icon: typeof LayoutDashboard;
+		preview?: string; // swatch colour for theme rows
+		run: () => void;
+		container?: Container; // container rows render actions when active/hovered
+		stack?: Stack; // stack rows render the real stack icon + env icon
+		env?: Environment; // env rows render the real environment icon
+	}
+
+	// Build the flat item model + the id->meta lookup. Cheap array maps; re-runs only when
+	// a source array changes. No scoring here.
+	const built = $derived.by(() => {
+		const items: PaletteItem[] = [];
+		const meta = new Map<string, Meta>();
+		const add = (item: PaletteItem, m: Meta) => {
+			items.push(item);
+			meta.set(item.id, m);
+		};
+
+		for (const nav of navigationItems) {
+			if (nav.href === '/terminal' && !$canAccess('containers', 'exec')) continue;
+			add(
+				{ id: `nav:${nav.href}`, group: G_NAV, label: nav.name(), keywords: (nav.keywords ?? []).join(' ') },
+				{ icon: nav.icon, run: () => select(nav.href) }
+			);
+		}
+
+		if ($licenseStore.isEnterprise && $authStore.authEnabled) {
+			add(
+				{ id: 'ent:audit', group: G_ENT, label: m.nav_audit_log(), keywords: 'compliance audit' },
+				{ icon: ClipboardList, run: () => select('/audit') }
+			);
+		}
+
+		for (const t of lightThemes) {
+			add(
+				{ id: `light:${t.id}`, group: G_LIGHT, label: t.name, keywords: 'light theme', active: $themeStore.lightTheme === t.id },
+				{ icon: Sun, preview: t.preview, run: () => applyLightTheme(t.id) }
+			);
+		}
+		for (const t of darkThemes) {
+			add(
+				{ id: `dark:${t.id}`, group: G_DARK, label: t.name, keywords: 'dark theme', active: $themeStore.darkTheme === t.id },
+				{ icon: Moon, preview: t.preview, run: () => applyDarkTheme(t.id) }
+			);
+		}
+		for (const f of fonts) {
+			add(
+				{ id: `font:${f.id}`, group: G_FONT, label: f.name, keywords: 'font', active: $themeStore.font === f.id },
+				{ icon: Type, run: () => applyFont(f.id) }
+			);
+		}
+		for (const t of EDITOR_THEMES) {
+			add(
+				{ id: `editor:${t.id}`, group: G_EDITOR, label: t.label, keywords: 'editor theme code', active: $themeStore.editorTheme === t.id },
+				{ icon: Palette, run: () => applyEditorTheme(t.id) }
+			);
+		}
+		for (const env of environments) {
+			add(
+				{ id: `env:${env.id}`, group: G_ENV, label: env.name, keywords: 'environment', active: $currentEnvironment?.id === env.id },
+				{ icon: Server, run: () => selectEnv(env), env }
+			);
+		}
+		for (const s of stacks) {
+			add(
+				{ id: `stack:${s.envId}:${s.name}`, group: G_STACK, label: s.name, keywords: `stack compose ${s.envName}`.toLowerCase() },
+				{ icon: Layers, run: () => selectStack(s), stack: s }
+			);
+		}
+		for (const c of containers) {
+			add(
+				// Env-scoped id: the same container id can arrive from several environments
+				// that share a daemon, and each must stay a distinct, correctly-labelled row.
+				{ id: `cont:${c.envId}:${c.id}`, group: G_CONT, label: c.displayName, keywords: `container ${c.name} ${c.image} ${c.envName}`.toLowerCase() },
+				{ icon: Box, run: () => containerAction(c, 'logs'), container: c }
+			);
+		}
+
+		return { items, meta };
+	});
+
+	// Per-group caps for the empty (no-query) view so we never mount every item.
+	const DEFAULT_CAPS: Record<string, number> = {
+		[G_LIGHT]: 6,
+		[G_DARK]: 6,
+		[G_FONT]: 6,
+		[G_EDITOR]: 6,
+		[G_STACK]: 12,
+		[G_CONT]: 12
+	};
+
+	let query = $state('');
+
+	const filtered = $derived(filterPalette(built.items, query, { defaultCaps: DEFAULT_CAPS }));
+
+	// Flatten to render rows: a header pseudo-row precedes each group's items.
+	type Row = { type: 'header'; group: string } | { type: 'item'; item: PaletteItem };
+	const rows = $derived.by(() => {
+		const out: Row[] = [];
+		let lastGroup = '';
+		for (const item of filtered) {
+			if (item.group !== lastGroup) {
+				out.push({ type: 'header', group: item.group });
+				lastGroup = item.group;
+			}
+			out.push({ type: 'item', item });
+		}
+		return out;
+	});
+
+	// Indices of selectable (item) rows, for keyboard nav.
+	const itemRowIndices = $derived(rows.map((r, i) => (r.type === 'item' ? i : -1)).filter((i) => i >= 0));
+
+	// --- fixed-height virtualization (DataGrid pattern) ---
+	const ITEM_H = 44;
+	const HEADER_H = 28;
+	const BUFFER = 6;
+	let scrollTop = $state(0);
+	let viewportH = $state(320);
+	let listEl = $state<HTMLDivElement | null>(null);
+
+	const offsets = $derived(buildOffsets(rows.map((r) => (r.type === 'header' ? HEADER_H : ITEM_H))));
+	const totalHeight = $derived(offsets[rows.length] ?? 0);
+
+	const range = $derived(visibleRange(offsets, scrollTop, viewportH, BUFFER));
+	const startIndex = $derived(range.start);
+	const endIndex = $derived(range.end);
+	const visible = $derived(rows.slice(startIndex, endIndex).map((row, k) => ({ row, index: startIndex + k })));
+
+	// --- keyboard selection over the ITEM rows ---
+	let activeRow = $state(0); // an index into `rows` pointing at an item row
+
+	// Reset scroll + selection to the top when the query changes.
+	$effect(() => {
+		void query;
+		untrack(() => {
+			activeRow = itemRowIndices.length > 0 ? itemRowIndices[0] : -1;
+			scrollTop = 0;
+			if (listEl) listEl.scrollTop = 0;
+		});
+	});
+
+	// Re-seed the selection when rows arrive without a query change - data loads async, so
+	// a query typed before containers/stacks resolve leaves activeRow at -1 (Enter would
+	// no-op) until the results appear. This snaps it to the first item once they do.
+	$effect(() => {
+		if (activeRow < 0 && itemRowIndices.length > 0) {
+			untrack(() => (activeRow = itemRowIndices[0]));
+		}
+	});
+
+	function moveActive(delta: number) {
+		if (itemRowIndices.length === 0) return;
+		const pos = itemRowIndices.indexOf(activeRow);
+		const next = pos < 0 ? 0 : (pos + delta + itemRowIndices.length) % itemRowIndices.length;
+		activeRow = itemRowIndices[next];
+		scrollActiveIntoView();
+	}
+
+	function scrollActiveIntoView() {
+		if (activeRow < 0 || !listEl) return;
+		const top = offsets[activeRow];
+		const bottom = top + ITEM_H;
+		if (top < scrollTop) listEl.scrollTop = top;
+		else if (bottom > scrollTop + viewportH) listEl.scrollTop = bottom - viewportH;
+	}
+
+	function runActive() {
+		if (activeRow < 0) return;
+		const row = rows[activeRow];
+		if (row?.type === 'item') built.meta.get(row.item.id)?.run();
+	}
+
+	function onListKeydown(e: KeyboardEvent) {
+		if (e.key === 'ArrowDown') { e.preventDefault(); moveActive(1); }
+		else if (e.key === 'ArrowUp') { e.preventDefault(); moveActive(-1); }
+		else if (e.key === 'Enter') { e.preventDefault(); runActive(); }
+		else if (e.key === 'Home') { e.preventDefault(); if (itemRowIndices.length) { activeRow = itemRowIndices[0]; scrollActiveIntoView(); } }
+		else if (e.key === 'End') { e.preventDefault(); if (itemRowIndices.length) { activeRow = itemRowIndices[itemRowIndices.length - 1]; scrollActiveIntoView(); } }
+	}
+
+	// --- data loading (lazy on open, cached with stale-while-revalidate) ---
+	// The palette fetches environments + per-host containers + per-host stacks, a burst
+	// that scales with host count. Cache it: within FRESH_MS an open reuses the cached
+	// data with no fetch; when stale, the cached list stays visible while a background
+	// refresh updates it in place (loadData sets state at the end, never clearing first).
+	const FRESH_MS = 30_000;
+	let lastLoadedAt = 0;
+
+	async function loadData(force = false) {
 		if (loading) return;
+		if (!force && lastLoadedAt > 0 && Date.now() - lastLoadedAt < FRESH_MS) return;
 		loading = true;
 		try {
-			const [envsRes, containersRes] = await Promise.all([
-				fetch('/api/environments'),
-				fetch('/api/containers?all=true')
-			]);
-
+			const envsRes = await fetch('/api/environments');
+			let envs: Environment[] = [];
 			if (envsRes.ok) {
-				environments = await envsRes.json();
+				envs = await envsRes.json();
+				environments = envs;
 			}
 
-			if (containersRes.ok) {
-				const data = await containersRes.json();
-				containers = data.map((c: any) => ({
-					id: c.Id,
-					name: c.Names?.[0]?.replace(/^\//, '') || c.Id.substring(0, 12),
-					state: c.State,
-					image: c.Image,
-					envId: c.environmentId || 0,
-					envName: c.environmentName || 'Local'
-				}));
-			}
+			// Containers and stacks are both per-environment: fetch every env in
+			// parallel for cross-env search (/api/containers returns [] without ?env=).
+			const [containerResults, stackResults] = await Promise.all([
+				Promise.all(
+					envs.map(async (env) => {
+						try {
+							const res = await fetch(`/api/containers?all=true&env=${env.id}`);
+							if (!res.ok) return [] as Container[];
+							return mapContainerRows(await res.json(), env);
+						} catch {
+							return [] as Container[];
+						}
+					})
+				),
+				Promise.all(
+					envs.map(async (env) => {
+						try {
+							const res = await fetch(`/api/stacks?env=${env.id}`);
+							if (!res.ok) return [] as Stack[];
+							return mapStackRows(await res.json(), env);
+						} catch {
+							return [] as Stack[];
+						}
+					})
+				)
+			]);
+			// Interleave containers round-robin across environments so the capped empty
+			// view surfaces variety - when several envs share a daemon, a plain flat()
+			// would fill the cap with the earliest env's containers (and their copies).
+			containers = roundRobin(containerResults);
+			stacks = stackResults.flat();
+			lastLoadedAt = Date.now();
 		} catch (e) {
 			console.error('Failed to load command palette data:', e);
 		} finally {
@@ -122,51 +365,61 @@
 		}
 	}
 
-	function handleSelect(href: string) {
+	// --- actions ---
+	function select(href: string) {
 		open = false;
 		goto(href);
 	}
-
-	function handleEnvSelect(env: Environment) {
+	function selectEnv(env: Environment) {
 		open = false;
 		currentEnvironment.set({ id: env.id, name: env.name });
 	}
-
-	function handleLightThemeSelect(themeId: string) {
+	function selectStack(s: Stack) {
+		open = false;
+		// Switch to the stack's environment (the stacks page reads currentEnvironment, not
+		// the URL), then filter to the stack and expand it - same as clicking its name.
+		currentEnvironment.set({ id: s.envId, name: s.envName });
+		goto(`/stacks?env=${s.envId}&expand=${encodeURIComponent(s.name)}`);
+	}
+	function applyLightTheme(themeId: string) {
 		const userId = $authStore.authEnabled && $authStore.user ? $authStore.user.id : undefined;
 		themeStore.setPreference('lightTheme', themeId, userId);
-		// Switch to light mode
 		document.documentElement.classList.remove('dark');
 		localStorage.setItem('theme', 'light');
 		onDarkModeChange();
 	}
-
-	function handleDarkThemeSelect(themeId: string) {
+	function applyDarkTheme(themeId: string) {
 		const userId = $authStore.authEnabled && $authStore.user ? $authStore.user.id : undefined;
 		themeStore.setPreference('darkTheme', themeId, userId);
-		// Switch to dark mode
 		document.documentElement.classList.add('dark');
 		localStorage.setItem('theme', 'dark');
 		onDarkModeChange();
 	}
-
-	function handleFontSelect(fontId: string) {
+	function applyFont(fontId: string) {
 		const userId = $authStore.authEnabled && $authStore.user ? $authStore.user.id : undefined;
 		themeStore.setPreference('font', fontId, userId);
 	}
-
-	async function handleContainerAction(containerId: string, action: 'logs' | 'terminal' | 'start' | 'stop' | 'restart') {
+	function applyEditorTheme(themeId: string) {
+		const userId = $authStore.authEnabled && $authStore.user ? $authStore.user.id : undefined;
+		themeStore.setPreference('editorTheme', themeId, userId);
 		open = false;
-		const container = containers.find(c => c.id === containerId);
-		const envParam = container?.envId ? `?env=${container.envId}` : '';
-
-		if (action === 'logs') {
-			goto(`/logs?container=${containerId}${envParam ? '&env=' + container?.envId : ''}`);
-		} else if (action === 'terminal') {
-			goto(`/terminal?container=${containerId}${envParam ? '&env=' + container?.envId : ''}`);
+	}
+	async function containerAction(container: Container, action: 'logs' | 'terminal' | 'start' | 'stop' | 'restart') {
+		open = false;
+		const containerId = container.id;
+		const envQuery = container.envId ? `&env=${container.envId}` : '';
+		if (action === 'logs' || action === 'terminal') {
+			// The logs/terminal pages load their container list from currentEnvironment, not
+			// the URL env - so a cross-host jump must switch the environment first, or the
+			// target container (on another host) is never found. start/stop/restart just hit
+			// the API with ?env= and must NOT move the user off their current host.
+			if (container.envId) {
+				currentEnvironment.set({ id: container.envId, name: container.envName });
+			}
+			goto(`/${action === 'logs' ? 'logs' : 'terminal'}?container=${containerId}${envQuery}`);
 		} else {
 			try {
-				await fetch(`/api/containers/${containerId}/${action}${envParam}`, { method: 'POST' });
+				await fetch(`/api/containers/${containerId}/${action}${container.envId ? `?env=${container.envId}` : ''}`, { method: 'POST' });
 			} catch (e) {
 				console.error(`Failed to ${action} container:`, e);
 			}
@@ -180,12 +433,18 @@
 		}
 	}
 
-	// Load data when dialog opens
+	// Load data + reset query/focus when the dialog opens.
 	$effect(() => {
 		if (open) {
-			untrack(() => loadData());
+			untrack(() => {
+				query = '';
+				loadData();
+				tick().then(() => inputEl?.focus());
+			});
 		}
 	});
+
+	let inputEl = $state<HTMLInputElement | null>(null);
 
 	onMount(() => {
 		document.addEventListener('keydown', handleKeydown);
@@ -193,163 +452,121 @@
 	});
 </script>
 
-<Command.Dialog bind:open title="Command Palette" description="Search for pages and actions">
-	<Command.Input placeholder="Search..." />
-	<Command.List>
-		<Command.Empty>No results found.</Command.Empty>
-		<Command.Group heading="Navigation">
-			{#each filteredItems as item (item.href)}
-				<Command.Item
-					value={item.name + ' ' + (item.keywords?.join(' ') || '')}
-					onSelect={() => handleSelect(item.href)}
-				>
-					<item.icon class="mr-2 h-4 w-4" />
-					<span>{item.name}</span>
-				</Command.Item>
-			{/each}
-		</Command.Group>
-		{#if $licenseStore.isEnterprise && $authStore.authEnabled}
-			<Command.Separator />
-			<Command.Group heading="Enterprise">
-				<Command.Item
-					value="Audit log compliance"
-					onSelect={() => handleSelect('/audit')}
-				>
-					<ClipboardList class="mr-2 h-4 w-4" />
-					<span>Audit log</span>
-				</Command.Item>
-			</Command.Group>
-		{/if}
-		<Command.Separator />
-		<Command.Group heading="Light theme">
-			{#each lightThemes as theme (theme.id)}
-				<Command.Item
-					value={`light theme ${theme.name}`}
-					onSelect={() => handleLightThemeSelect(theme.id)}
-				>
-					<Sun class="mr-2 h-4 w-4" />
-					<div class="flex items-center gap-2">
-						<div
-							class="w-3 h-3 rounded-full border"
-							style="background-color: {theme.preview}"
-						></div>
-						<span>{theme.name}</span>
-					</div>
-					{#if $themeStore.lightTheme === theme.id}
-						<Check class="ml-auto h-4 w-4 text-green-500" />
-					{/if}
-				</Command.Item>
-			{/each}
-		</Command.Group>
-		<Command.Separator />
-		<Command.Group heading="Dark theme">
-			{#each darkThemes as theme (theme.id)}
-				<Command.Item
-					value={`dark theme ${theme.name}`}
-					onSelect={() => handleDarkThemeSelect(theme.id)}
-				>
-					<Moon class="mr-2 h-4 w-4" />
-					<div class="flex items-center gap-2">
-						<div
-							class="w-3 h-3 rounded-full border"
-							style="background-color: {theme.preview}"
-						></div>
-						<span>{theme.name}</span>
-					</div>
-					{#if $themeStore.darkTheme === theme.id}
-						<Check class="ml-auto h-4 w-4 text-green-500" />
-					{/if}
-				</Command.Item>
-			{/each}
-		</Command.Group>
-		<Command.Separator />
-		<Command.Group heading="Font">
-			{#each fonts as font (font.id)}
-				<Command.Item
-					value={`font ${font.name}`}
-					onSelect={() => handleFontSelect(font.id)}
-				>
-					<Type class="mr-2 h-4 w-4" />
-					<span>{font.name}</span>
-					{#if $themeStore.font === font.id}
-						<Check class="ml-auto h-4 w-4 text-green-500" />
-					{/if}
-				</Command.Item>
-			{/each}
-		</Command.Group>
-		{#if environments.length > 0}
-			<Command.Separator />
-			<Command.Group heading="Switch environment">
-				{#each environments as env (env.id)}
-					<Command.Item
-						value={`environment ${env.name}`}
-						onSelect={() => handleEnvSelect(env)}
-					>
-						<Server class="mr-2 h-4 w-4" />
-						<span>{env.name}</span>
-						{#if $currentEnvironment?.id === env.id}
-							<CircleDot class="ml-auto h-4 w-4 text-green-500" />
+<Dialog.Root bind:open>
+	<Dialog.Content
+		class="p-0 gap-0 max-w-2xl overflow-hidden"
+		showCloseButton={false}
+	>
+		<Dialog.Title class="sr-only">{m.cmdpalette_title()}</Dialog.Title>
+		<Dialog.Description class="sr-only">{m.cmdpalette_description()}</Dialog.Description>
+
+		<div class="flex items-center gap-2 border-b px-3">
+			<Search class="h-4 w-4 shrink-0 text-muted-foreground" />
+			<input
+				bind:this={inputEl}
+				bind:value={query}
+				onkeydown={onListKeydown}
+				placeholder={m.cmdpalette_search_placeholder()}
+				role="combobox"
+				aria-expanded="true"
+				aria-controls="palette-list"
+				aria-activedescendant={activeRow >= 0 ? `palette-row-${activeRow}` : undefined}
+				class="h-11 w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+			/>
+		</div>
+
+		{#if rows.length === 0}
+			<div class="py-6 text-center text-sm text-muted-foreground">{m.cmdpalette_no_results()}</div>
+		{:else}
+			<div
+				id="palette-list"
+				role="listbox"
+				tabindex="-1"
+				bind:this={listEl}
+				bind:clientHeight={viewportH}
+				onscroll={(e) => (scrollTop = e.currentTarget.scrollTop)}
+				class="max-h-[min(60vh,400px)] overflow-y-auto"
+			>
+				<div style="height: {totalHeight}px; position: relative;">
+					{#each visible as { row, index } (index)}
+						{#if row.type === 'header'}
+							<div
+								class="absolute left-0 right-0 flex items-end px-3 pb-1 text-xs font-medium text-muted-foreground"
+								style="top: {offsets[index]}px; height: {HEADER_H}px;"
+							>
+								{GROUP_LABELS[row.group]?.() ?? row.group}
+							</div>
+						{:else}
+							{@const item = row.item}
+							{@const meta = built.meta.get(item.id)}
+							{@const isActive = index === activeRow}
+							<!-- Keyboard nav is handled at the listbox level via the search input
+							     (arrows + enter); rows are mouse targets only, not tab stops. -->
+							<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
+							<div
+								id="palette-row-{index}"
+								role="option"
+								tabindex={-1}
+								aria-selected={isActive}
+								onclick={() => { activeRow = index; meta?.run(); }}
+								onmousemove={() => (activeRow = index)}
+								class="absolute left-0 right-0 flex cursor-pointer items-center gap-2 px-3 text-sm {isActive ? 'bg-accent text-accent-foreground' : ''}"
+								style="top: {offsets[index]}px; height: {ITEM_H}px;"
+							>
+								{#if meta?.container}
+									{@const c = meta.container}
+									<ContainerIcon image={c.image} name={c.name} envId={c.envId} class="h-4 w-4 shrink-0" />
+									<div class="flex min-w-0 flex-col">
+										<span class="truncate" title={c.name}>{item.label}</span>
+										<span class="flex items-center gap-1 truncate text-xs text-muted-foreground">
+											<EnvironmentIcon icon={c.envIcon} envId={c.envId} class="h-3 w-3 shrink-0" />
+											{c.envName} - {c.image}
+										</span>
+									</div>
+									{#if isActive}
+										<div class="ml-auto flex items-center gap-1">
+											{#if c.state === 'running'}
+												<button class="rounded p-1 hover:bg-muted" title={m.cmdpalette_view_logs()} onclick={(e) => { e.stopPropagation(); containerAction(c, 'logs'); }}><FileText class="h-3 w-3" /></button>
+												<button class="rounded p-1 hover:bg-muted" title={m.cmdpalette_open_terminal()} onclick={(e) => { e.stopPropagation(); containerAction(c, 'terminal'); }}><Terminal class="h-3 w-3" /></button>
+												<button class="rounded p-1 hover:bg-muted" title={m.cmdpalette_restart()} onclick={(e) => { e.stopPropagation(); containerAction(c, 'restart'); }}><RotateCcw class="h-3 w-3" /></button>
+												<button class="rounded p-1 text-destructive hover:bg-muted" title={m.cmdpalette_stop()} onclick={(e) => { e.stopPropagation(); containerAction(c, 'stop'); }}><Square class="h-3 w-3" /></button>
+											{:else}
+												<button class="rounded p-1 text-green-500 hover:bg-muted" title={m.cmdpalette_start()} onclick={(e) => { e.stopPropagation(); containerAction(c, 'start'); }}><Play class="h-3 w-3" /></button>
+											{/if}
+										</div>
+									{/if}
+								{:else if meta?.stack}
+									{@const s = meta.stack}
+									<StackIcon icon={s.icon} stackName={s.name} envId={s.envId} class="h-4 w-4 shrink-0" />
+									<div class="flex min-w-0 flex-col">
+										<span class="truncate">{item.label}</span>
+										<span class="flex items-center gap-1 truncate text-xs text-muted-foreground">
+											<EnvironmentIcon icon={s.envIcon} envId={s.envId} class="h-3 w-3 shrink-0" />
+											{s.envName}
+										</span>
+									</div>
+								{:else if meta?.env}
+									<EnvironmentIcon icon={meta.env.icon || 'globe'} envId={meta.env.id} class="h-4 w-4 shrink-0" />
+									<span class="truncate">{item.label}</span>
+									{#if item.active}
+										<Check class="ml-auto h-4 w-4 shrink-0 text-green-500" />
+									{/if}
+								{:else}
+									{@const Icon = meta?.icon ?? Box}
+									<Icon class="h-4 w-4 shrink-0 text-muted-foreground" />
+									{#if meta?.preview}
+										<span class="h-3 w-3 shrink-0 rounded-full border" style="background-color: {meta.preview}"></span>
+									{/if}
+									<span class="truncate">{item.label}</span>
+									{#if item.active}
+										<Check class="ml-auto h-4 w-4 shrink-0 text-green-500" />
+									{/if}
+								{/if}
+							</div>
 						{/if}
-					</Command.Item>
-				{/each}
-			</Command.Group>
+					{/each}
+				</div>
+			</div>
 		{/if}
-		{#if containers.length > 0}
-			<Command.Separator />
-			<Command.Group heading="Containers">
-				{#each containers as container (container.id)}
-					<Command.Item
-						value={`container ${container.name} ${container.image} ${container.envName}`}
-						onSelect={() => handleContainerAction(container.id, 'logs')}
-					>
-						<Box class="mr-2 h-4 w-4" />
-						<div class="flex flex-col">
-							<span>{container.name}</span>
-							<span class="text-xs text-muted-foreground">{container.envName} • {container.image}</span>
-						</div>
-						<div class="ml-auto flex items-center gap-1">
-							{#if container.state === 'running'}
-								<button
-									class="p-1 hover:bg-muted rounded"
-									onclick={(e) => { e.stopPropagation(); handleContainerAction(container.id, 'logs'); }}
-									title="View logs"
-								>
-									<FileText class="h-3 w-3" />
-								</button>
-								<button
-									class="p-1 hover:bg-muted rounded"
-									onclick={(e) => { e.stopPropagation(); handleContainerAction(container.id, 'terminal'); }}
-									title="Open terminal"
-								>
-									<Terminal class="h-3 w-3" />
-								</button>
-								<button
-									class="p-1 hover:bg-muted rounded"
-									onclick={(e) => { e.stopPropagation(); handleContainerAction(container.id, 'restart'); }}
-									title="Restart"
-								>
-									<RotateCcw class="h-3 w-3" />
-								</button>
-								<button
-									class="p-1 hover:bg-muted rounded text-destructive"
-									onclick={(e) => { e.stopPropagation(); handleContainerAction(container.id, 'stop'); }}
-									title="Stop"
-								>
-									<Square class="h-3 w-3" />
-								</button>
-							{:else}
-								<button
-									class="p-1 hover:bg-muted rounded text-green-500"
-									onclick={(e) => { e.stopPropagation(); handleContainerAction(container.id, 'start'); }}
-									title="Start"
-								>
-									<Play class="h-3 w-3" />
-								</button>
-							{/if}
-						</div>
-					</Command.Item>
-				{/each}
-			</Command.Group>
-		{/if}
-	</Command.List>
-</Command.Dialog>
+	</Dialog.Content>
+</Dialog.Root>

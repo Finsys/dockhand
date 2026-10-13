@@ -3,6 +3,7 @@ import type { RequestHandler } from '@sveltejs/kit';
 import { getUserThemePreferences, setUserThemePreferences } from '$lib/server/db';
 import { validateSession, isAuthEnabled } from '$lib/server/auth';
 import { lightThemes, darkThemes, fonts, monospaceFonts } from '$lib/themes';
+import { isValidEditorThemeId } from '$lib/utils/editor-themes';
 
 // GET /api/profile/preferences - Get current user's theme preferences
 /**
@@ -35,8 +36,8 @@ export const GET: RequestHandler = async ({ cookies }) => {
 /**
  * @openapi
  * summary: Update the current user's UI preferences (each field is optional)
- * body: {lightTheme:string, darkTheme:string, font:string, fontSize:string, gridFontSize:string, terminalFont:string, editorFont:string, animateIcons:boolean, coloredActionButtons:boolean, actionIconSize:string, editorIndentGuides:boolean}
- * resp-400: A supplied field has the wrong type (e.g. editorIndentGuides not a boolean)
+ * body: {lightTheme:string, darkTheme:string, font:string, fontSize:string, gridFontSize:string, terminalFont:string, editorFont:string, animateIcons:boolean, coloredActionButtons:boolean, actionIconSize:string, editorIndentGuides:boolean, editorTheme:string}
+ * resp-400: A supplied field has the wrong type or an invalid value (e.g. editorIndentGuides not a boolean, or an unknown editorTheme)
  * resp-401: Not authenticated
  * resp-500: Failed to save preferences
  */
@@ -62,7 +63,7 @@ export const PUT: RequestHandler = async ({ request, cookies }) => {
 
 		const validActionIconSizes = ['small', 'normal', 'large', 'xlarge'];
 
-		const updates: { lightTheme?: string; darkTheme?: string; font?: string; fontSize?: string; gridFontSize?: string; terminalFont?: string; editorFont?: string; animateIcons?: boolean; coloredActionButtons?: boolean; actionIconSize?: string; editorIndentGuides?: boolean } = {};
+		const updates: { lightTheme?: string; darkTheme?: string; font?: string; fontSize?: string; gridFontSize?: string; terminalFont?: string; editorFont?: string; animateIcons?: boolean; coloredActionButtons?: boolean; actionIconSize?: string; editorIndentGuides?: boolean; editorTheme?: string } = {};
 
 		if (data.lightTheme !== undefined) {
 			if (!validLightThemeIds.includes(data.lightTheme)) {
@@ -125,6 +126,13 @@ export const PUT: RequestHandler = async ({ request, cookies }) => {
 				return json({ error: 'Invalid editorIndentGuides' }, { status: 400 });
 			}
 			updates.editorIndentGuides = data.editorIndentGuides;
+		}
+
+		if (data.editorTheme !== undefined) {
+			if (!isValidEditorThemeId(data.editorTheme)) {
+				return json({ error: 'Invalid editor theme' }, { status: 400 });
+			}
+			updates.editorTheme = data.editorTheme;
 		}
 
 		if (data.coloredActionButtons !== undefined) {

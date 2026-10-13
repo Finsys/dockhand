@@ -1,5 +1,6 @@
 <script lang="ts">
 	import * as Card from '$lib/components/ui/card';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		name?: string;
@@ -139,7 +140,7 @@
 				<div class="min-w-0 flex-1 space-y-1">
 					{#if name}
 						<div class="font-medium text-sm truncate">{name}</div>
-						<div class="text-xs text-muted-foreground truncate">{host || 'Connecting...'}</div>
+						<div class="text-xs text-muted-foreground truncate">{host || m.dashboard_connecting()}</div>
 					{:else}
 						<div class="skeleton h-4 w-24 rounded"></div>
 						<div class="skeleton h-3 w-32 rounded"></div>
@@ -197,7 +198,7 @@
 				<div class="min-w-0 flex-1 space-y-1">
 					{#if name}
 						<div class="font-medium text-sm truncate">{name}</div>
-						<div class="text-xs text-muted-foreground truncate">{host || 'Connecting...'}</div>
+						<div class="text-xs text-muted-foreground truncate">{host || m.dashboard_connecting()}</div>
 					{:else}
 						<div class="skeleton h-4 w-24 rounded"></div>
 						<div class="skeleton h-3 w-32 rounded"></div>
@@ -268,7 +269,7 @@
 				<div class="min-w-0 flex-1 space-y-1">
 					{#if name}
 						<div class="font-medium text-sm truncate">{name}</div>
-						<div class="text-xs text-muted-foreground truncate">{host || 'Connecting...'}</div>
+						<div class="text-xs text-muted-foreground truncate">{host || m.dashboard_connecting()}</div>
 					{:else}
 						<div class="skeleton h-4 w-24 rounded"></div>
 						<div class="skeleton h-3 w-32 rounded"></div>
@@ -352,7 +353,7 @@
 				<div class="min-w-0 flex-1 space-y-1">
 					{#if name}
 						<div class="font-medium text-sm truncate">{name}</div>
-						<div class="text-xs text-muted-foreground truncate">{host || 'Connecting...'}</div>
+						<div class="text-xs text-muted-foreground truncate">{host || m.dashboard_connecting()}</div>
 					{:else}
 						<div class="skeleton h-4 w-24 rounded"></div>
 						<div class="skeleton h-3 w-32 rounded"></div>
@@ -431,7 +432,7 @@
 				<div class="min-w-0 flex-1 space-y-1">
 					{#if name}
 						<div class="font-medium text-sm truncate">{name}</div>
-						<div class="text-xs text-muted-foreground truncate">{host || 'Connecting...'}</div>
+						<div class="text-xs text-muted-foreground truncate">{host || m.dashboard_connecting()}</div>
 					{:else}
 						<div class="skeleton h-4 w-24 rounded"></div>
 						<div class="skeleton h-3 w-32 rounded"></div>
@@ -528,7 +529,7 @@
 				<div class="min-w-0 flex-1 space-y-1">
 					{#if name}
 						<div class="font-medium text-sm truncate">{name}</div>
-						<div class="text-xs text-muted-foreground truncate">{host || 'Connecting...'}</div>
+						<div class="text-xs text-muted-foreground truncate">{host || m.dashboard_connecting()}</div>
 					{:else}
 						<div class="skeleton h-4 w-24 rounded"></div>
 						<div class="skeleton h-3 w-32 rounded"></div>

@@ -547,6 +547,17 @@ export function analyzeHandlerBody(body: string, pathParamNames: string[] = []):
 	const redirectRe = /\bredirect\(\s*(\d{3})/g;
 	let rm;
 	while ((rm = redirectRe.exec(body)) !== null) statusCodes.add(rm[1]);
+	// The authorize() guards return a ready-made 403 instead of building one inline, so
+	// a handler that uses them emits a status no literal in its body mentions. Without
+	// this the gate calls the documented 403 stale and argues against the shared guard.
+	// Comment lines are skipped: a handler that merely mentions the guard in its JSDoc
+	// would otherwise be credited with a 403 it never returns, and the drift gate would
+	// stop noticing when one goes missing.
+	const callsGuard = body
+		.split('\n')
+		.filter((line) => !/^\s*(\*|\/\/)/.test(line))
+		.some((line) => /\b(auth\.)?require(Permission|EnvAccess)\s*\(/.test(line));
+	if (callsGuard) statusCodes.add('403');
 
 	const bodyFields = new Set<string>();
 	// `const { a, b } = await request.json();` and `const { a, b } = body;`
@@ -586,9 +597,8 @@ export function analyzeHandlerBody(body: string, pathParamNames: string[] = []):
 // PUBLIC_PATHS extraction (from hooks.server.ts) — auth-exemption discovery
 // ---------------------------------------------------------------------------
 
-export function extractPublicPaths(hooksFile: string): string[] {
-	const content = readFileSync(hooksFile, 'utf-8');
-	const m = content.match(/const PUBLIC_PATHS\s*=\s*\[([\s\S]*?)\];/);
+function literalsIn(content: string, listName: string): string[] {
+	const m = content.match(new RegExp(`const ${listName}\\s*=\\s*\\[([\\s\\S]*?)\\];`));
 	if (!m) return [];
 	const paths: string[] = [];
 	const strRe = /'([^']+)'/g;
@@ -597,14 +607,34 @@ export function extractPublicPaths(hooksFile: string): string[] {
 	return paths;
 }
 
+/**
+ * The paths hooks.server.ts lets through unauthenticated.
+ *
+ * Kept as two lists because they match differently: an exact entry covers only itself,
+ * a prefix entry covers its subtree. Flattening them would mark a protected route
+ * beneath an exact entry as public in the spec.
+ */
+export function extractPublicPaths(hooksFile: string): { exact: string[]; prefixes: string[] } {
+	const content = readFileSync(hooksFile, 'utf-8');
+	return {
+		exact: literalsIn(content, 'PUBLIC_EXACT'),
+		prefixes: literalsIn(content, 'PUBLIC_PREFIXES')
+	};
+}
+
 // Two exceptions hardcoded directly in isPublicPath() as regexes (webhook
 // signature/secret auth instead of session/token) — not expressible as a
 // simple PUBLIC_PATHS prefix string. The one manual special-case this
 // generator needs; documented in the research doc's coverage-gap section.
 export const PUBLIC_PATH_REGEXES = [/^\/api\/git\/stacks\/\d+\/webhook$/, /^\/api\/git\/webhook\/\d+$/];
 
-export function isPublic(openapiPath: string, publicPaths: string[]): boolean {
-	if (publicPaths.some((p) => openapiPath === p || openapiPath.startsWith(p + '/'))) return true;
+export function isPublic(
+	openapiPath: string,
+	publicPaths: { exact: string[]; prefixes: string[] }
+): boolean {
+	if (publicPaths.exact.includes(openapiPath)) return true;
+	if (publicPaths.prefixes.some((p) => openapiPath === p || openapiPath.startsWith(p + '/')))
+		return true;
 	const asConcretePath = openapiPath.replace(/\{[^}]+\}/g, '1');
 	return PUBLIC_PATH_REGEXES.some((re) => re.test(asConcretePath));
 }

@@ -384,6 +384,228 @@
     "repository": "https://github.com/typescript-eslint/typescript-eslint"
   },
   {
+    "name": "@uiw/codemirror-theme-abcdef",
+    "version": "4.25.11",
+    "license": "MIT",
+    "repository": "https://github.com/uiwjs/react-codemirror"
+  },
+  {
+    "name": "@uiw/codemirror-theme-abyss",
+    "version": "4.25.11",
+    "license": "MIT",
+    "repository": "https://github.com/uiwjs/react-codemirror"
+  },
+  {
+    "name": "@uiw/codemirror-theme-androidstudio",
+    "version": "4.25.11",
+    "license": "MIT",
+    "repository": "https://github.com/uiwjs/react-codemirror"
+  },
+  {
+    "name": "@uiw/codemirror-theme-andromeda",
+    "version": "4.25.11",
+    "license": "MIT",
+    "repository": "https://github.com/uiwjs/react-codemirror"
+  },
+  {
+    "name": "@uiw/codemirror-theme-atomone",
+    "version": "4.25.11",
+    "license": "MIT",
+    "repository": "https://github.com/uiwjs/react-codemirror"
+  },
+  {
+    "name": "@uiw/codemirror-theme-aura",
+    "version": "4.25.11",
+    "license": "MIT",
+    "repository": "https://github.com/uiwjs/react-codemirror"
+  },
+  {
+    "name": "@uiw/codemirror-theme-basic",
+    "version": "4.25.11",
+    "license": "MIT",
+    "repository": "https://github.com/uiwjs/react-codemirror"
+  },
+  {
+    "name": "@uiw/codemirror-theme-bbedit",
+    "version": "4.25.11",
+    "license": "MIT",
+    "repository": "https://github.com/uiwjs/react-codemirror"
+  },
+  {
+    "name": "@uiw/codemirror-theme-bespin",
+    "version": "4.25.11",
+    "license": "MIT",
+    "repository": "https://github.com/uiwjs/react-codemirror"
+  },
+  {
+    "name": "@uiw/codemirror-theme-console",
+    "version": "4.25.11",
+    "license": "MIT",
+    "repository": "https://github.com/uiwjs/react-codemirror"
+  },
+  {
+    "name": "@uiw/codemirror-theme-copilot",
+    "version": "4.25.11",
+    "license": "MIT",
+    "repository": "https://github.com/uiwjs/react-codemirror"
+  },
+  {
+    "name": "@uiw/codemirror-theme-darcula",
+    "version": "4.25.11",
+    "license": "MIT",
+    "repository": "https://github.com/uiwjs/react-codemirror"
+  },
+  {
+    "name": "@uiw/codemirror-theme-dracula",
+    "version": "4.25.11",
+    "license": "MIT",
+    "repository": "https://github.com/uiwjs/react-codemirror"
+  },
+  {
+    "name": "@uiw/codemirror-theme-duotone",
+    "version": "4.25.11",
+    "license": "MIT",
+    "repository": "https://github.com/uiwjs/react-codemirror"
+  },
+  {
+    "name": "@uiw/codemirror-theme-eclipse",
+    "version": "4.25.11",
+    "license": "MIT",
+    "repository": "https://github.com/uiwjs/react-codemirror"
+  },
+  {
+    "name": "@uiw/codemirror-theme-github",
+    "version": "4.25.11",
+    "license": "MIT",
+    "repository": "https://github.com/uiwjs/react-codemirror"
+  },
+  {
+    "name": "@uiw/codemirror-theme-gruvbox-dark",
+    "version": "4.25.11",
+    "license": "MIT",
+    "repository": "https://github.com/uiwjs/react-codemirror"
+  },
+  {
+    "name": "@uiw/codemirror-theme-kimbie",
+    "version": "4.25.11",
+    "license": "MIT",
+    "repository": "https://github.com/uiwjs/react-codemirror"
+  },
+  {
+    "name": "@uiw/codemirror-theme-material",
+    "version": "4.25.11",
+    "license": "MIT",
+    "repository": "https://github.com/uiwjs/react-codemirror"
+  },
+  {
+    "name": "@uiw/codemirror-theme-monokai",
+    "version": "4.25.11",
+    "license": "MIT",
+    "repository": "https://github.com/uiwjs/react-codemirror"
+  },
+  {
+    "name": "@uiw/codemirror-theme-monokai-dimmed",
+    "version": "4.25.11",
+    "license": "MIT",
+    "repository": "https://github.com/uiwjs/react-codemirror"
+  },
+  {
+    "name": "@uiw/codemirror-theme-noctis-lilac",
+    "version": "4.25.11",
+    "license": "MIT",
+    "repository": "https://github.com/uiwjs/react-codemirror"
+  },
+  {
+    "name": "@uiw/codemirror-theme-nord",
+    "version": "4.25.11",
+    "license": "MIT",
+    "repository": "https://github.com/uiwjs/react-codemirror"
+  },
+  {
+    "name": "@uiw/codemirror-theme-okaidia",
+    "version": "4.25.11",
+    "license": "MIT",
+    "repository": "https://github.com/uiwjs/react-codemirror"
+  },
+  {
+    "name": "@uiw/codemirror-theme-quietlight",
+    "version": "4.25.11",
+    "license": "MIT",
+    "repository": "https://github.com/uiwjs/react-codemirror"
+  },
+  {
+    "name": "@uiw/codemirror-theme-red",
+    "version": "4.25.11",
+    "license": "MIT",
+    "repository": "https://github.com/uiwjs/react-codemirror"
+  },
+  {
+    "name": "@uiw/codemirror-theme-solarized",
+    "version": "4.25.11",
+    "license": "MIT",
+    "repository": "https://github.com/uiwjs/react-codemirror"
+  },
+  {
+    "name": "@uiw/codemirror-theme-sublime",
+    "version": "4.25.11",
+    "license": "MIT",
+    "repository": "https://github.com/uiwjs/react-codemirror"
+  },
+  {
+    "name": "@uiw/codemirror-theme-tokyo-night",
+    "version": "4.25.11",
+    "license": "MIT",
+    "repository": "https://github.com/uiwjs/react-codemirror"
+  },
+  {
+    "name": "@uiw/codemirror-theme-tokyo-night-day",
+    "version": "4.25.11",
+    "license": "MIT",
+    "repository": "https://github.com/uiwjs/react-codemirror"
+  },
+  {
+    "name": "@uiw/codemirror-theme-tokyo-night-storm",
+    "version": "4.25.11",
+    "license": "MIT",
+    "repository": "https://github.com/uiwjs/react-codemirror"
+  },
+  {
+    "name": "@uiw/codemirror-theme-tomorrow-night-blue",
+    "version": "4.25.11",
+    "license": "MIT",
+    "repository": "https://github.com/uiwjs/react-codemirror"
+  },
+  {
+    "name": "@uiw/codemirror-theme-vscode",
+    "version": "4.25.11",
+    "license": "MIT",
+    "repository": "https://github.com/uiwjs/react-codemirror"
+  },
+  {
+    "name": "@uiw/codemirror-theme-white",
+    "version": "4.25.11",
+    "license": "MIT",
+    "repository": "https://github.com/uiwjs/react-codemirror"
+  },
+  {
+    "name": "@uiw/codemirror-theme-xcode",
+    "version": "4.25.11",
+    "license": "MIT",
+    "repository": "https://github.com/uiwjs/react-codemirror"
+  },
+  {
+    "name": "@uiw/codemirror-themes",
+    "version": "4.25.11",
+    "license": "MIT",
+    "repository": "https://github.com/uiwjs/react-codemirror"
+  },
+  {
+    "name": "@uiw/codemirror-themes-all",
+    "version": "4.25.11",
+    "license": "MIT",
+    "repository": "https://github.com/uiwjs/react-codemirror"
+  },
+  {
     "name": "abort-controller",
     "version": "3.0.0",
     "license": "MIT",
@@ -631,7 +853,7 @@
   },
   {
     "name": "dockhand",
-    "version": "1.0.45",
+    "version": "1.0.46",
     "license": "UNLICENSED",
     "repository": null
   },
@@ -817,7 +1039,7 @@
   },
   {
     "name": "js-yaml",
-    "version": "4.3.1",
+    "version": "4.3.2",
     "license": "MIT",
     "repository": "https://github.com/nodeca/js-yaml"
   },
@@ -943,7 +1165,7 @@
   },
   {
     "name": "nodemailer",
-    "version": "9.0.1",
+    "version": "9.1.0",
     "license": "MIT-0",
     "repository": "https://github.com/nodemailer/nodemailer"
   },

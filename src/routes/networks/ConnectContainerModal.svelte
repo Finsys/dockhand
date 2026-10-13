@@ -8,6 +8,7 @@
 	import { Link, Loader2, Box } from 'lucide-svelte';
 	import { focusFirstInput } from '$lib/utils';
 	import type { NetworkInfo } from '$lib/types';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Container {
 		id: string;
@@ -75,17 +76,17 @@
 			});
 
 			if (response.ok) {
-				toast.success(`Connected ${selectedContainerInfo?.name || 'container'} to ${network.name}`);
+				toast.success(m.networks_connect_toast_connected({ container: selectedContainerInfo?.name || m.networks_connect_container_fallback(), network: network.name }));
 				open = false;
 				selectedContainer = undefined;
 				onSuccess();
 			} else {
 				const data = await response.json();
-				toast.error(data.details || 'Failed to connect container');
+				toast.error(data.details || m.networks_connect_toast_failed());
 			}
 		} catch (error) {
 			console.error('Failed to connect container:', error);
-			toast.error('Failed to connect container');
+			toast.error(m.networks_connect_toast_failed());
 		} finally {
 			submitting = false;
 		}
@@ -104,10 +105,10 @@
 		<Dialog.Header>
 			<Dialog.Title class="flex items-center gap-2">
 				<Link class="w-4 h-4" />
-				Connect container to {network?.name}
+				{m.networks_connect_title({ network: network?.name ?? '' })}
 			</Dialog.Title>
 			<Dialog.Description>
-				Select a container to connect to this network.
+				{m.networks_connect_description()}
 			</Dialog.Description>
 		</Dialog.Header>
 
@@ -119,12 +120,12 @@
 			{:else if availableContainers.length === 0}
 				<div class="text-center py-8 text-muted-foreground">
 					<Box class="w-8 h-8 mx-auto mb-2 opacity-50" />
-					<p class="text-sm">No containers available to connect.</p>
-					<p class="text-xs mt-1">All containers are already connected to this network.</p>
+					<p class="text-sm">{m.networks_connect_none_available()}</p>
+					<p class="text-xs mt-1">{m.networks_connect_all_connected()}</p>
 				</div>
 			{:else}
 				<div class="space-y-2">
-					<Label for="container">Container</Label>
+					<Label for="container">{m.networks_connect_container_label()}</Label>
 					<Select.Root type="single" bind:value={selectedContainer}>
 						<Select.Trigger id="container" class="w-full">
 							{#if selectedContainerInfo}
@@ -133,7 +134,7 @@
 									{selectedContainerInfo.name}
 								</span>
 							{:else}
-								<span class="text-muted-foreground">Select a container...</span>
+								<span class="text-muted-foreground">{m.networks_connect_select_placeholder()}</span>
 							{/if}
 						</Select.Trigger>
 						<Select.Content>
@@ -154,7 +155,7 @@
 
 		<Dialog.Footer>
 			<Button variant="outline" onclick={() => open = false} disabled={submitting}>
-				Cancel
+				{m.networks_connect_cancel()}
 			</Button>
 			<Button
 				onclick={handleConnect}
@@ -165,7 +166,7 @@
 				{:else}
 					<Link class="w-4 h-4" />
 				{/if}
-				Connect
+				{m.networks_connect_submit()}
 			</Button>
 		</Dialog.Footer>
 	</Dialog.Content>

@@ -4,6 +4,7 @@ import type { DockerClientConfig } from '$lib/server/docker';
 import { getEnvironment } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
 import { isSafeNotificationUrl } from '$lib/server/url-safety';
+import { memorySupportFromInfo } from '$lib/utils/memory-support';
 import type { RequestHandler } from './$types';
 
 interface TestConnectionRequest {
@@ -58,7 +59,7 @@ function buildDockerClientConfig(config: TestConnectionRequest): DockerClientCon
  * description: Pass environmentId to fall back to that saved environment's stored secrets (hawserToken, tlsKey) for any secret field left blank in the body, so Test connection works when editing without re-entering the token.
  * body: {connectionType:string!, socketPath:string, host:string, port:integer, protocol:string, tlsCa:string, tlsCert:string, tlsKey:string, tlsSkipVerify:boolean, hawserToken:string, environmentId:integer}
  * body-example: {"connectionType":"socket","socketPath":"/var/run/docker.sock"}
- * resp-200: {success:boolean!, info:{serverVersion:string, containers:integer, images:integer, name:string}, hawser:{}}
+ * resp-200: {success:boolean!, info:{serverVersion:string, containers:integer, images:integer, name:string, memoryLimitSupported:boolean, showMemoryWarning:boolean}, hawser:{}}
  * resp-200-desc: success:false with a human-readable error message is also returned as HTTP 200 (connection failures are not transport errors)
  * resp-400: Host is required for direct/hawser-standard connection types
  * resp-403: The caller cannot access the environment named by environmentId
@@ -177,13 +178,20 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 			}
 		}
 
+		const memSupport = memorySupportFromInfo(info);
 		return json({
 			success: true,
 			info: {
 				serverVersion: info.ServerVersion,
 				containers: info.Containers,
 				images: info.Images,
-				name: info.Name
+				name: info.Name,
+				// The kernel's cgroup memory controller: false => per-container memory
+				// shows 0 (common on Raspberry Pi). The modal warns on this at create time.
+				memoryLimitSupported: memSupport.memoryLimitSupported,
+				// Whether to actually show the cgroup-accounting warning. False on a
+				// Windows daemon, where MemoryLimit is false but memory reports fine (#1574).
+				showMemoryWarning: memSupport.warn
 			},
 			hawser: hawserInfo
 		});

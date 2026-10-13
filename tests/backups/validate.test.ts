@@ -49,10 +49,18 @@ describe('validateBackupConfig', () => {
 		expect(validateBackupConfig({ ...okConfig, retention: '{"keepLast":5}' }).ok).toBe(true);
 		expect(validateBackupConfig({ ...okConfig, retention: '' }).ok).toBe(true);
 	});
-	it('requires a non-empty selection when allVolumes is false', () => {
+	it('requires a non-empty selection when allVolumes is false (container)', () => {
 		expect(validateBackupConfig({ ...okConfig, allVolumes: false, selectedVolumes: [] }).ok).toBe(false);
 		expect(validateBackupConfig({ ...okConfig, allVolumes: false, selectedVolumes: null }).ok).toBe(false);
 		expect(validateBackupConfig({ ...okConfig, allVolumes: false, selectedVolumes: ['data'] }).ok).toBe(true);
+	});
+	it('allows an empty selection for a STACK (its compose/.env are always captured)', () => {
+		// "skip bind mounts" on a stack with only bind mounts -> empty selection, but the
+		// stack files still make it a valid config-only backup (#1570).
+		const stack = { ...okConfig, type: 'stack', targetName: 'my-stack' };
+		expect(validateBackupConfig({ ...stack, allVolumes: false, selectedVolumes: [] }).ok).toBe(true);
+		// null (not an array) is still rejected even for a stack - the batch always sends [].
+		expect(validateBackupConfig({ ...stack, allVolumes: false, selectedVolumes: null }).ok).toBe(false);
 	});
 	it('reports ALL problems at once, not just the first', () => {
 		const r = validateBackupConfig({ type: 'vm', targetName: '', destinationId: null, schedule: 'bad' });

@@ -18,8 +18,11 @@ import {
 	isStackUnadoptable,
 	getDockhandLabels,
 	getOrderValue,
+	compareContainerOrder,
 	getVersionPatternOverride,
 	DOCKHAND_LABELS,
+	isDigestWatchDisabledByLabel,
+	digestUpdateVisible
 } from '../src/lib/server/container-labels';
 
 // ---------------------------------------------------------------------------
@@ -223,10 +226,11 @@ describe('getDockhandLabels', () => {
 // ---------------------------------------------------------------------------
 
 describe('getOrderValue', () => {
-	test('returns 0 for null/undefined/empty/missing labels', () => {
-		expect(getOrderValue(undefined)).toBe(0);
-		expect(getOrderValue(null)).toBe(0);
-		expect(getOrderValue({})).toBe(0);
+	// Null, not a number: a sentinel would collide with a user who types that value.
+	test('an unlabelled container has no order', () => {
+		expect(getOrderValue(undefined)).toBe(null);
+		expect(getOrderValue(null)).toBe(null);
+		expect(getOrderValue({})).toBe(null);
 	});
 
 	test('parses valid integers', () => {
@@ -236,10 +240,11 @@ describe('getOrderValue', () => {
 		expect(getOrderValue({ 'dockhand.order': '0' })).toBe(0);
 	});
 
-	test('returns 0 for non-numeric values', () => {
-		expect(getOrderValue({ 'dockhand.order': 'abc' })).toBe(0);
-		expect(getOrderValue({ 'dockhand.order': 'first' })).toBe(0);
-		expect(getOrderValue({ 'dockhand.order': '' })).toBe(0);
+	// A typo must not silently promote a container past the ones ordered on purpose.
+	test('a non-numeric value counts as unlabelled', () => {
+		expect(getOrderValue({ 'dockhand.order': 'abc' })).toBe(null);
+		expect(getOrderValue({ 'dockhand.order': 'first' })).toBe(null);
+		expect(getOrderValue({ 'dockhand.order': '' })).toBe(null);
 	});
 
 	test('truncates floats to integer', () => {
@@ -363,5 +368,175 @@ describe('getVersionPatternOverride', () => {
 	test('returns null for a malformed label (safe fallback)', () => {
 		expect(getVersionPatternOverride({ 'dockhand.version.pattern': 'not-a-scheme' })).toBeNull();
 		expect(getVersionPatternOverride({ 'dockhand.version.pattern': 'regex:(' })).toBeNull();
+	});
+});
+
+describe('dockhand.watch.digest', () => {
+	// Switches off the same-tag digest report for one container while keeping
+	// newer-version detection. For an image that re-pushes its tag weekly the
+	// report arrives constantly while the version never moves.
+	test('absent means the digest check stays on', () => {
+		expect(isDigestWatchDisabledByLabel(undefined)).toBe(false);
+		expect(isDigestWatchDisabledByLabel(null)).toBe(false);
+		expect(isDigestWatchDisabledByLabel({})).toBe(false);
+	});
+
+	test('an explicit false disables it', () => {
+		for (const value of ['false', 'FALSE', 'no', '0']) {
+			expect(isDigestWatchDisabledByLabel({ 'dockhand.watch.digest': value })).toBe(true);
+		}
+	});
+
+	test('an explicit true leaves it on', () => {
+		for (const value of ['true', 'yes', '1']) {
+			expect(isDigestWatchDisabledByLabel({ 'dockhand.watch.digest': value })).toBe(false);
+		}
+	});
+
+	test('an unrecognised value leaves it on', () => {
+		// Fail-open: only a deliberate false stops a report somebody relies on.
+		expect(isDigestWatchDisabledByLabel({ 'dockhand.watch.digest': 'maybe' })).toBe(false);
+		expect(isDigestWatchDisabledByLabel({ 'dockhand.watch.digest': '' })).toBe(false);
+	});
+
+	test('the WUD spelling is read', () => {
+		expect(isDigestWatchDisabledByLabel({ 'wud.watch.digest': 'false' })).toBe(true);
+		expect(isDigestWatchDisabledByLabel({ 'wud/watch.digest': 'false' })).toBe(true);
+		expect(isDigestWatchDisabledByLabel({ 'wud.watch.digest': 'true' })).toBe(false);
+	});
+
+	test('the native label wins over the WUD one', () => {
+		// Both directions, so neither can quietly take precedence.
+		expect(isDigestWatchDisabledByLabel({
+			'dockhand.watch.digest': 'true',
+			'wud.watch.digest': 'false'
+		})).toBe(false);
+		expect(isDigestWatchDisabledByLabel({
+			'dockhand.watch.digest': 'false',
+			'wud.watch.digest': 'true'
+		})).toBe(true);
+	});
+});
+
+describe('digestUpdateVisible', () => {
+	// One decision shared by the update check, the API and the per-container
+	// auto-update: an inverted `!` in any one of them would read as ordinary code.
+	test('an update is reported when nothing says otherwise', () => {
+		expect(digestUpdateVisible(true, undefined)).toBe(true);
+		expect(digestUpdateVisible(true, {})).toBe(true);
+	});
+
+	test('the label suppresses a real update', () => {
+		expect(digestUpdateVisible(true, { 'dockhand.watch.digest': 'false' })).toBe(false);
+		expect(digestUpdateVisible(true, { 'wud.watch.digest': 'false' })).toBe(false);
+	});
+
+	test('no update stays no update, label or not', () => {
+		expect(digestUpdateVisible(false, undefined)).toBe(false);
+		expect(digestUpdateVisible(false, { 'dockhand.watch.digest': 'false' })).toBe(false);
+		expect(digestUpdateVisible(false, { 'dockhand.watch.digest': 'true' })).toBe(false);
+	});
+
+	test('the label does not invent an update', () => {
+		// The inverted form would report one for every unlabelled container.
+		expect(digestUpdateVisible(false, { 'dockhand.watch.digest': 'true' })).toBe(false);
+	});
+});
+
+describe('wud.watch as an alias of dockhand.update', () => {
+	test('wud.watch=false disables updates', () => {
+		expect(isUpdateDisabledByLabel({ 'wud.watch': 'false' })).toBe(true);
+		expect(isUpdateDisabledByLabel({ 'wud/watch': 'false' })).toBe(true);
+	});
+
+	test('wud.watch=true leaves them on', () => {
+		expect(isUpdateDisabledByLabel({ 'wud.watch': 'true' })).toBe(false);
+	});
+
+	test('the native label wins over the WUD one, both ways', () => {
+		expect(isUpdateDisabledByLabel({
+			'dockhand.update': 'true',
+			'wud.watch': 'false'
+		})).toBe(false);
+		expect(isUpdateDisabledByLabel({
+			'dockhand.update': 'false',
+			'wud.watch': 'true'
+		})).toBe(true);
+	});
+});
+
+describe('WUD watch labels keep WUD semantics', () => {
+	// WUD reads its own watch labels strictly: anything that is not the string
+	// `true` means "do not watch". Reading them with Dockhand's forgiving boolean
+	// would quietly start updating a container its owner had switched off.
+	test('any value other than true disables, as WUD does', () => {
+		for (const value of ['false', 'no', '0', 'yes', '1', 'on', 'nonsense']) {
+			expect(isUpdateDisabledByLabel({ 'wud.watch': value })).toBe(true);
+		}
+	});
+
+	test('only the exact string true leaves it watched', () => {
+		expect(isUpdateDisabledByLabel({ 'wud.watch': 'true' })).toBe(false);
+		expect(isUpdateDisabledByLabel({ 'wud.watch': 'TRUE' })).toBe(false);
+		expect(isUpdateDisabledByLabel({ 'wud.watch': '  true  ' })).toBe(false);
+	});
+
+	test('an empty value is not a decision', () => {
+		expect(isUpdateDisabledByLabel({ 'wud.watch': '' })).toBe(false);
+		expect(isUpdateDisabledByLabel({ 'wud.watch': '   ' })).toBe(false);
+	});
+
+	test('the same strictness applies to the digest label', () => {
+		expect(isDigestWatchDisabledByLabel({ 'wud.watch.digest': 'yes' })).toBe(true);
+		expect(isDigestWatchDisabledByLabel({ 'wud.watch.digest': 'true' })).toBe(false);
+	});
+
+	test('every prefix WUD accepts is read', () => {
+		for (const key of ['wud.watch', 'wud/watch', 'getwud.app/watch', 'wud.getwud.io/watch']) {
+			expect(isUpdateDisabledByLabel({ [key]: 'false' })).toBe(true);
+		}
+		for (const key of [
+			'wud.watch.digest',
+			'wud/watch.digest',
+			'getwud.app/watch.digest',
+			'wud.getwud.io/watch.digest'
+		]) {
+			expect(isDigestWatchDisabledByLabel({ [key]: 'false' })).toBe(true);
+		}
+	});
+
+	test('a native label still wins over the WUD one', () => {
+		expect(isUpdateDisabledByLabel({ 'dockhand.update': 'true', 'wud.watch': 'nonsense' })).toBe(false);
+	});
+});
+
+describe('compareContainerOrder', () => {
+	const c = (service: string, order?: string): { service: string; labels: Record<string, string> } => ({
+		service,
+		labels: order ? { 'dockhand.order': order } : {}
+	});
+	const order = (list: ReturnType<typeof c>[]) =>
+		[...list].sort(compareContainerOrder).map((x) => x.service);
+
+	// No value a user can type may land a container among the unlabelled ones.
+	test('keeps a large label ahead of the unlabelled', () => {
+		expect(order([c('proxy', '1000'), c('api', '2000'), c('newservice')]))
+			.toEqual(['proxy', 'api', 'newservice']);
+		expect(order([c('zz-last', '1000'), c('aaa'), c('zzz')]))
+			.toEqual(['zz-last', 'aaa', 'zzz']);
+	});
+
+	test('orders labelled containers among themselves by value', () => {
+		expect(order([c('c', '3'), c('a', '1'), c('b', '2')])).toEqual(['a', 'b', 'c']);
+		expect(order([c('db'), c('forgejo', '-1')])).toEqual(['forgejo', 'db']);
+	});
+
+	test('falls back to the service name within a rank', () => {
+		expect(order([c('b'), c('a')])).toEqual(['a', 'b']);
+		expect(order([c('b', '1'), c('a', '1')])).toEqual(['a', 'b']);
+	});
+
+	test('treats an unparseable value as unlabelled', () => {
+		expect(order([c('x', 'abc'), c('y', '1')])).toEqual(['y', 'x']);
 	});
 });

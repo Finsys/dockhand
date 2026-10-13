@@ -2,10 +2,9 @@
  * Shared backup utilities — used by BackupPanel, BackupsTab, RestoreModal, backups page.
  */
 
-import { HardDrive, Globe } from 'lucide-svelte';
+import { HardDrive, Globe, Server } from 'lucide-svelte';
 import { AmazonS3Icon, BackblazeIcon, AzureBlobIcon, GoogleCloudIcon, RestServerIcon } from '$lib/components/cloud-icons';
 import cronstrue from 'cronstrue';
-import type { Component } from 'svelte';
 import { computeExecutionTally, type Execution, type ExecutionTally } from '$lib/utils/execution-tally';
 export { computeExecutionTally, type Execution, type ExecutionTally };
 
@@ -41,13 +40,14 @@ export function classifyJobResult(result: any): { outcome: BackupOutcome; messag
 // Repository type helpers
 // ---------------------------------------------------------------------------
 
-export function getRepoTypeIcon(repository: string): Component {
+export function getRepoTypeIcon(repository: string) {
 	if (repository.startsWith('/') || repository.startsWith('./')) return HardDrive;
 	if (repository.startsWith('s3:')) return AmazonS3Icon;
 	if (repository.startsWith('b2:')) return BackblazeIcon;
 	if (repository.startsWith('azure:')) return AzureBlobIcon;
 	if (repository.startsWith('gs:')) return GoogleCloudIcon;
 	if (repository.startsWith('rest:')) return RestServerIcon;
+	if (repository.startsWith('sftp:')) return Server;
 	return Globe;
 }
 
@@ -58,6 +58,7 @@ export function getRepoTypeLabel(repository: string): string {
 	if (repository.startsWith('azure:')) return 'Azure Blob';
 	if (repository.startsWith('gs:')) return 'Google Cloud';
 	if (repository.startsWith('rest:')) return 'REST';
+	if (repository.startsWith('sftp:')) return 'SFTP';
 	return 'Unknown';
 }
 
@@ -133,9 +134,10 @@ export function retentionSummary(retention: string | RetentionPolicy | null | un
 // Cron helpers
 // ---------------------------------------------------------------------------
 
-export function formatCron(cron: string | null): string {
+/** `locale` is a cronstrue locale (see $lib/i18n/cron); English when omitted. */
+export function formatCron(cron: string | null, locale?: string): string {
 	if (!cron) return '—';
-	try { return cronstrue.toString(cron, { use24HourTimeFormat: true }); } catch { return cron; }
+	try { return cronstrue.toString(cron, { use24HourTimeFormat: true, ...(locale && { locale }) }); } catch { return cron; }
 }
 
 // ---------------------------------------------------------------------------
@@ -176,6 +178,30 @@ export interface BackupFormState {
  *               orphan) but no zombie config row is left behind.
  */
 export type BackupAction = 'save' | 'save-run' | 'run-once';
+
+/**
+ * Whether a duplicated config should start enabled.
+ *
+ * A manual config is stored disabled because it has no schedule; its copy exists to
+ * be given one, so it starts enabled. A copy of a scheduled config keeps whatever
+ * the original was, so duplicating a paused schedule does not quietly resume it.
+ */
+export function duplicateStartsEnabled(source: { schedule?: string | null; enabled?: boolean }): boolean {
+	if (!source.schedule) return true;
+	return source.enabled !== false;
+}
+
+/**
+ * Destination for a duplicated schedule: the first repository this target has no
+ * schedule for yet, so the copy lands elsewhere by default; else the source's own.
+ */
+export function pickDuplicateDestinationId(
+	sourceDestinationId: number,
+	destinationIds: number[],
+	usedDestinationIds: number[]
+): number {
+	return destinationIds.find((id) => !usedDestinationIds.includes(id)) ?? sourceDestinationId;
+}
 
 export interface BuildBodyOptions {
 	enabled: boolean;
@@ -433,4 +459,87 @@ export function selectOwnSnapshotsFromDestination<S extends { tags?: string[] }>
 	return snaps
 		.filter((s) => snapshotMatchesConfigScope(s.tags, configIds, targetName))
 		.map((s) => ({ ...s, _destinationId: dest.id, _destinationName: dest.name, _destinationRepository: dest.repository }));
+}
+
+/**
+ * Group snapshots by their destination id, returning `{ destinationId, snapshotIds }`
+ * batches. Bulk delete needs this because `restic forget` runs against ONE repo at a
+ * time, so a selection spanning multiple destinations becomes one batch call per dest.
+ * Pure so the grouping is unit-tested independently of the UI.
+ */
+export function groupSnapshotIdsByDestination<S extends { id: string; _destinationId: number }>(
+	snaps: S[]
+): { destinationId: number; snapshotIds: string[] }[] {
+	const byDest = new Map<number, string[]>();
+	for (const s of snaps) {
+		const arr = byDest.get(s._destinationId) ?? [];
+		arr.push(s.id);
+		byDest.set(s._destinationId, arr);
+	}
+	return [...byDest.entries()].map(([destinationId, snapshotIds]) => ({ destinationId, snapshotIds }));
+}
+
+export interface BulkDeleteResult {
+	deleted: number;
+	skipped: number;
+	/** true if any destination's batch call returned a non-2xx. */
+	failed: boolean;
+	/** Raw restic error from the first failing destination (repo locked, timeout, etc.),
+	 * surfaced verbatim so the user sees the real reason instead of a generic message. */
+	error?: string;
+}
+
+/**
+ * Delete many snapshots via the batch endpoint, grouped by destination (one
+ * `restic forget --prune` per repo). Shared by every snapshot list (containers/stacks
+ * backup modal, the Backups page, the Settings repo browser) so the delete logic is one
+ * place. Callers own the UI (toasts, reload); this only performs the calls and tallies.
+ */
+export async function bulkDeleteSnapshots(
+	targets: { id: string; _destinationId: number }[]
+): Promise<BulkDeleteResult> {
+	let deleted = 0, skipped = 0, failed = false, error: string | undefined;
+	for (const { destinationId, snapshotIds } of groupSnapshotIdsByDestination(targets)) {
+		try {
+			const res = await fetch('/api/backup/snapshots/batch-delete', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ destinationId, snapshotIds })
+			});
+			const data = await res.json().catch(() => ({}));
+			deleted += data.deleted?.length ?? 0;
+			if (res.ok) skipped += data.skipped?.length ?? 0;
+			else {
+				failed = true;
+				if (!error && data.error) error = String(data.error);
+			}
+		} catch {
+			failed = true;
+		}
+	}
+	return { deleted, skipped, failed, error };
+}
+
+/**
+ * A hard restic failure that warrants the full-error dialog (repo locked, timeout,
+ * etc.) rather than a toast. Returns the raw restic error and how many were still
+ * deleted, or null when there is no such failure (toast handles success/skipped).
+ * A `failed` with no `error` (e.g. a thrown fetch) also returns null - nothing
+ * verbatim to show - so the caller falls back to the toast.
+ */
+export function bulkDeleteFailure(r: BulkDeleteResult): { error: string; deleted: number } | null {
+	if (r.failed && r.error) return { error: r.error, deleted: r.deleted };
+	return null;
+}
+
+/**
+ * Consistent toast wording for a bulk-delete result, shared by every snapshot list.
+ * Returns { type, message } so each caller fires its own toast (import stays local).
+ * A hard restic failure with a verbatim error is handled by the caller via
+ * bulkDeleteFailure + the error dialog, not here.
+ */
+export function bulkDeleteToast(r: BulkDeleteResult): { type: 'success' | 'error'; message: string } {
+	if (r.failed) return { type: 'error', message: r.deleted > 0 ? `Deleted ${r.deleted}, but some snapshots could not be deleted` : 'Snapshots could not be deleted' };
+	if (r.deleted === 0 && r.skipped > 0) return { type: 'error', message: `${r.skipped} snapshot${r.skipped === 1 ? '' : 's'} could not be deleted (not owned or no access)` };
+	return { type: 'success', message: `Deleted ${r.deleted} snapshot${r.deleted === 1 ? '' : 's'}${r.skipped > 0 ? ` (${r.skipped} skipped)` : ''}` };
 }

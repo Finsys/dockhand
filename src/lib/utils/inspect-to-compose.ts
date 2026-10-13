@@ -10,6 +10,7 @@
  * Pure and dependency-light (js-yaml only) so it is unit-testable without a daemon.
  */
 import yaml from 'js-yaml';
+import { portableImageReference, UPDATE_SOURCE_LABEL } from './tracked-image';
 
 /** The slice of a Docker inspect object this mapper reads (loosely typed on purpose). */
 export interface DockerInspect {
@@ -220,7 +221,7 @@ export function inspectToComposeService(
 	const composeServiceName = config.Labels?.['com.docker.compose.service'];
 	const service: Record<string, unknown> = {};
 
-	if (config.Image) service.image = config.Image;
+	if (config.Image) service.image = portableImageReference(config.Image, config.Labels);
 	service.container_name = name;
 
 	// Entrypoint / command: drop them when they equal the image's own (an image default the
@@ -250,7 +251,7 @@ export function inspectToComposeService(
 	if (config.Labels) {
 		const imageLabels = options.imageLabels ?? {};
 		const labels = Object.entries(config.Labels).filter(
-			([k, v]) => !k.startsWith('com.docker.compose.') && imageLabels[k] !== v
+			([k, v]) => !k.startsWith('com.docker.compose.') && k !== UPDATE_SOURCE_LABEL && imageLabels[k] !== v
 		);
 		if (labels.length > 0) service.labels = Object.fromEntries(labels);
 	}

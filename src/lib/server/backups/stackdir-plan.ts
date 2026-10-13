@@ -94,17 +94,29 @@ export function hostStackDirFromBind(relSource: string, hostSource: string): str
  * `bindSources`: the daemon-reported host source paths of the stack's bind mounts (mount.Source).
  */
 export function deriveStackDirFromBinds(relBindDirs: string[], bindSources: string[]): string | null {
+	// Candidates in discovery order, each with the number of binds that agree on it.
+	// A stack's own root is confirmed by every relative bind; a nested bind's parent is
+	// confirmed by one, so the best-supported candidate wins and order only decides
+	// between equally-supported ones. Order is kept as the last word because a bind
+	// source may point outside the stack entirely (an absolute `/mnt/tank/...` bind
+	// sits in the same list), and such a stray must never outrank the first real match.
+	const order: string[] = [];
+	const votes = new Map<string, number>();
+
 	for (const rel of relBindDirs) {
-		const tail = '/' + rel.replace(/^\/+|\/+$/g, '');
 		for (const src of bindSources) {
-			const derived = hostStackDirFromBind('./' + rel.replace(/^\/+/, ''), src);
-			if (derived) return derived;
-			// Also handle a nested relative dir (`./conf/nginx`) whose source ends with the tail.
-			const hs = typeof src === 'string' ? src.trim().replace(/\/+$/, '') : '';
-			if (hs.endsWith(tail)) { const d = hs.slice(0, hs.length - tail.length); return d === '' ? '/' : d; }
+			const dir = hostStackDirFromBind('./' + rel.replace(/^\/+/, ''), src);
+			if (!dir) continue;
+			if (!votes.has(dir)) order.push(dir);
+			votes.set(dir, (votes.get(dir) ?? 0) + 1);
 		}
 	}
-	return null;
+
+	let best: string | null = null;
+	for (const dir of order) {
+		if (best === null || (votes.get(dir) ?? 0) > (votes.get(best) ?? 0)) best = dir;
+	}
+	return best;
 }
 
 /**
@@ -177,7 +189,7 @@ export const PROBE_MISSING_SENTINEL = '__PROBE_MISSING__';
 /** Data-presence verdict for a probed host path / volume. `helper-failed` (the container could not
  * run at all) is decided by the CALLER catching the run error - the classifier only sees stdout of
  * a helper that DID run, so it returns has-data / empty / missing. */
-export type ProbeDataKind = 'has-data' | 'empty' | 'missing' | 'helper-failed';
+export type ProbeDataKind = 'has-data' | 'empty' | 'missing' | 'helper-failed' | 'unreadable';
 
 /** Classify a probe helper's stdout (pure, unit-testable). The list-script prints the missing
  * sentinel when the path doesn't exist, one `<type>\t<size>\t<name>` line per entry otherwise. */
@@ -203,6 +215,45 @@ export function isLocalDaemon(connectionType: string | null, envTcpHost: string 
 	return false;
 }
 
+/**
+ * Does a directory Dockhand writes itself already hold data? Takes its filesystem reads as
+ * arguments so the decision is testable without touching a disk.
+ *
+ * `empty` is what lets the caller skip an overwrite confirmation before a destructive swap,
+ * so a directory we could not READ must never answer `empty` - it reports a failure the
+ * caller blocks on instead.
+ */
+export function classifyLocalDir(
+	dir: string,
+	fs: { exists: (p: string) => boolean; entries: (p: string) => string[] }
+): { kind: ProbeDataKind; reason?: string } {
+	try {
+		if (!fs.exists(dir)) return { kind: 'missing' };
+		return fs.entries(dir).length > 0 ? { kind: 'has-data' } : { kind: 'empty' };
+	} catch (e) {
+		// `unreadable`, not `helper-failed`: no helper is involved and the fault is on Dockhand's
+		// own disk, so blaming the target environment would send the operator to the wrong machine.
+		return { kind: 'unreadable', reason: `Cannot read ${dir}: ${e instanceof Error ? e.message : String(e)}` };
+	}
+}
+
+/**
+ * Same question as isLocalDaemon, for a caller whose environment lookup may have FAILED.
+ * An env that could not be read is REMOTE: isLocalDaemon reads a null connectionType as
+ * local (the no-env-configured case), so handing it a failed read would apply Dockhand's
+ * own path translations to a stack on another machine.
+ */
+export function isLocalDaemonForEnv(
+	env: { connectionType?: string | null; host?: string | null; port?: number | null } | null | undefined,
+	envId: number | null | undefined,
+	ownDockerHost: string | null
+): boolean {
+	if (envId == null) return true; // no env selected -> Dockhand's own daemon
+	if (!env) return false; // lookup failed -> assume remote
+	const tcp = env.host && env.port ? `tcp://${env.host}:${env.port}` : null;
+	return isLocalDaemon(env.connectionType ?? null, tcp, ownDockerHost);
+}
+
 // Context the in-helper probe-fail message needs to give the operator an ACTIONABLE next step
 // (the fix differs by wiring). `hawser-defaulted`: a hawser env with no remote_stacks_dir fell
 // back to /data/stacks and it came up empty -> the agent stores stacks under a DIFFERENT host dir
@@ -211,8 +262,37 @@ export function isLocalDaemon(connectionType: string | null, envTcpHost: string 
 // wrong. `local`: a socket/local-daemon stack -> redeploy staged its files.
 export type StackDirProbeHint =
 	| { kind: 'hawser-defaulted'; hostPath: string; envName: string | null }
-	| { kind: 'user-set'; hostPath: string; envName: string | null }
+	// `transport` distinguishes how the files reach the host: a hawser agent keeps them
+	// under its own STACKS_DIR (the path just needs to be the right HOST mapping), while a
+	// direct-remote env has Dockhand COPY them there on `up` - so a direct env whose path is
+	// set but empty needs a redeploy, not a path change.
+	| { kind: 'user-set'; transport: 'hawser' | 'direct'; hostPath: string; envName: string | null }
 	| { kind: 'local' };
+
+/**
+ * The operator-facing fix line for a STACKDIR PROBE FAILED, tailored to why the compose
+ * is missing under the mounted host dir. Pure so it can be unit-tested (the message is the
+ * only actionable thing the user sees when a stack backup can't find its files).
+ */
+export function stackDirProbeFixHint(hint: StackDirProbeHint | undefined, hostPath: string | undefined): string {
+	const envName = hint && 'envName' in hint ? hint.envName : null;
+	const settingsLoc = envName ? `Settings > Environments > ${envName}` : `Settings > Environments`;
+	const at = hostPath ? ` at ${hostPath}` : '';
+	// A direct-remote env stages the files on deploy: if the path is set but the folder is
+	// empty, the stack simply hasn't been deployed there yet - a redeploy stages it. Naming a
+	// path change here (as the other branches do) is the wrong advice and sends the user in
+	// circles when the path is already correct.
+	if (hint?.kind === 'user-set' && hint.transport === 'direct') {
+		return ` The Remote stack path is set, but this stack's files aren't on ${envName ?? 'the host'} yet - redeploy the stack so Dockhand stages them${at}. (down/start/restart don't copy; it must be a deploy.)`;
+	}
+	// Hawser (defaulted or user-set): the agent keeps stacks under its own dir, so an empty
+	// probe means the configured HOST path doesn't map to where the agent actually writes.
+	if (hint?.kind === 'hawser-defaulted' || hint?.kind === 'user-set') {
+		return ` Set "Remote stack path (for backup)" in ${settingsLoc} to the real host path where this stack's files live.`;
+	}
+	// Local stack: a redeploy stages the files into the managed stack dir.
+	return ` Redeploy the stack to stage its files there.`;
+}
 
 /** Result of resolving the candidate host stack folder (before the runtime probe). */
 export type HostStackDirResolution =
@@ -237,18 +317,17 @@ export interface HostStackDirInput {
 	 * bind lives on the host, so this needs no DATA_DIR/HOST_DATA_DIR config and works on socket,
 	 * direct-local, adopted, and hawser. Null when the stack has no usable relative bind. */
 	bindDerivedHostPath: string | null;
-	/** Dockhand's stack dir translated to the host via DATA_DIR -> HOST_DATA_DIR. Non-null
-	 * (and != the container path) when the stack lives under Dockhand's DATA_DIR and the host
-	 * data dir is known - the SOCKET/LOCAL Dockhand-deployed case. Fallback when no bind. */
-	dataDirHostPath: string | null;
-	/** Dockhand's stack dir translated to the host via a container bind mount, for an
-	 * adopted/external stack that lives OUTSIDE DATA_DIR but on a mounted host path. */
+	/** Dockhand's stack dir mapped through its OWN mount table (resolveHostPath): the most
+	 * specific bind or volume covering the path, so this covers both a Dockhand-deployed stack
+	 * under DATA_DIR and an adopted one outside it. Null when no mount covers the path or the
+	 * daemon is not Dockhand's own host. */
 	mountHostPath: string | null;
 	/** com.docker.compose.project.working_dir label. For a HAWSER agent (which ran compose on
 	 * the remote host) or a matching-paths direct env, this IS the real host path. Used only
 	 * when neither translation applies (the daemon is not Dockhand's own host). */
 	workingDirLabel: string | null;
 }
+
 
 /**
  * Resolve the CANDIDATE host stack folder. ONE FLOW still: the helper always bind-mounts this
@@ -284,14 +363,37 @@ export function resolveHostStackDir(input: HostStackDirInput): HostStackDirResol
 	const viaRemoteDir = norm(input.remoteStacksDirHostPath);
 	if (viaRemoteDir) return { kind: 'candidate', hostPath: viaRemoteDir, composeFile, source: 'declared host stack path (direct-remote remote_stacks_dir / hawser agent STACKS_DIR)' };
 
-	const viaData = norm(input.dataDirHostPath);
-	if (viaData) return { kind: 'candidate', hostPath: viaData, composeFile, source: 'DATA_DIR -> HOST_DATA_DIR translation (Dockhand-deployed, local)' };
-
 	const viaMount = norm(input.mountHostPath);
-	if (viaMount) return { kind: 'candidate', hostPath: viaMount, composeFile, source: 'container mount translation (adopted/external stack)' };
+	if (viaMount) return { kind: 'candidate', hostPath: viaMount, composeFile, source: "Dockhand's own mount table (bind or volume covering the stack dir)" };
 
 	const wd = norm(input.workingDirLabel);
 	if (wd) return { kind: 'candidate', hostPath: wd, composeFile, source: 'compose working_dir label (hawser agent / matching paths)' };
 
 	return { kind: 'unknown', reason: 'could not locate the stack folder on the host (no DATA_DIR/mount translation and no working_dir label)' };
+}
+
+/**
+ * What to tell the user when the stack folder could not be located, given why the
+ * container-to-host mapping failed. A reason alone is not actionable; each of these
+ * names the one setting that fixes it.
+ */
+export function hostPathAdvice(
+	failure: { reason: string; dataDir?: string; mountType?: string; destination?: string } | null,
+	opts: { localDaemon: boolean; isHawser: boolean }
+): string {
+	if (!opts.localDaemon) {
+		return opts.isHawser
+			? 'Set the agent stack path in Settings > Environments > this environment > "Remote stack path (for backup)".'
+			: 'Set "Remote stack path (for backup)" in Settings > Environments > this environment, so the deploy stages the files where the daemon can read them.';
+	}
+	switch (failure?.reason) {
+		case 'no-mount-covers':
+			return `The stack folder is not under any path mounted into Dockhand, so the daemon cannot reach it. Mount it, or set HOST_DATA_DIR to the host side of ${failure.dataDir ?? 'DATA_DIR'}.`;
+		case 'mount-not-on-disk':
+			return `The stack folder sits on a ${failure.mountType ?? 'non-disk'} mount at ${failure.destination ?? 'its mount point'}, which has no host path to read. Move it onto a bind or a volume.`;
+		case 'not-containerized':
+			return 'Dockhand reports no mounts of its own, so paths were used as-is. Set HOST_DATA_DIR if its data directory is not at the same path on the host.';
+		default:
+			return 'Redeploy the stack so its files are staged where the daemon can read them, or set HOST_DATA_DIR.';
+	}
 }

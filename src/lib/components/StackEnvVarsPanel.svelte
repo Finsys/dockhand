@@ -8,7 +8,9 @@
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { getProviderIcon } from '$lib/components/provider-icons';
 	import { providerTypeLabel } from '../../routes/settings/secrets/ProviderModal.svelte';
-	import { effectiveMissing } from '$lib/utils/invault-markers';
+	import { effectiveMissing, isInlineProviderRef } from '$lib/utils/invault-markers';
+	import { parseRawContent, generateRawContent, keysInRawContent, mergeParsedIntoVariables, textEditorContent as deriveTextEditorContent } from '$lib/utils/env-panel-core';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		variables: EnvVar[]; // Bindable - ALL variables (secrets + non-secrets)
@@ -96,26 +98,16 @@
 	// Count of secrets (for display in hint)
 	const secretCount = $derived(variables.filter(v => v.isSecret && v.key.trim()).length);
 
-	// True when any variable's VALUE is a provider reference (op:// / pass://).
-	// Such a reference is resolved only here (stack env), never when written
-	// straight into a compose environment: block - so we surface a hint.
+	// True when any variable's VALUE is a provider reference. Such a reference is
+	// resolved only here (stack env), never when written straight into a compose
+	// environment: block - so we surface a hint.
 	const hasProviderReference = $derived(
-		variables.some((v) => {
-			const val = (v.value ?? '').trim();
-			return val.startsWith('op://') || val.startsWith('pass://');
-		})
+		variables.some((v) => isInlineProviderRef((v.value ?? '').trim()))
 	);
 
-	// Generate text representation from variables (non-secrets only)
-	// This is used for text view display
-	const generatedRawContent = $derived.by(() => {
-		const nonSecrets = variables.filter(v => v.key.trim() && !v.isSecret);
-		if (nonSecrets.length === 0) return '';
-		return nonSecrets.map(v => `${v.key.trim()}=${v.value}`).join('\n') + '\n';
-	});
-
-	// Text editor content - either from file (rawContent prop) or generated from variables
-	const textEditorContent = $derived(rawContent.trim() ? rawContent : generatedRawContent);
+	// What text view shows: the .env file, or the non-secret rows rendered as text when
+	// there is no file yet.
+	const textEditorContent = $derived(deriveTextEditorContent(rawContent, variables));
 
 	/**
 	 * Sync variables with rawContent after initial load.
@@ -124,7 +116,7 @@
 	 */
 	export function syncAfterLoad(loadedVars: EnvVar[], loadedRaw: string) {
 		if (!loadedRaw.trim()) {
-			// No raw content from file - just set variables, text view will use generatedRawContent
+			// No raw content from file - just set variables; text view renders them as text
 			variables = loadedVars;
 			rawContent = '';
 			return;
@@ -144,39 +136,6 @@
 		rawContent = loadedRaw;
 	}
 
-	/**
-	 * Parse raw content to extract non-secret variables.
-	 */
-	function parseRawContent(content: string): { vars: EnvVar[], warnings: string[] } {
-		const result: EnvVar[] = [];
-		const warnings: string[] = [];
-		let lineNum = 0;
-
-		for (const line of content.split('\n')) {
-			lineNum++;
-			const trimmed = line.trim();
-			if (!trimmed || trimmed.startsWith('#')) continue;
-
-			const eqIndex = trimmed.indexOf('=');
-			if (eqIndex === -1) {
-				warnings.push(`Line ${lineNum}: "${trimmed.slice(0, 30)}${trimmed.length > 30 ? '...' : ''}" (no = found)`);
-				continue;
-			}
-
-			const key = trimmed.slice(0, eqIndex).trim();
-			const value = trimmed.slice(eqIndex + 1);
-
-			if (key) {
-				if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key)) {
-					warnings.push(`Line ${lineNum}: "${key}" (invalid variable name)`);
-					continue;
-				}
-				result.push({ key, value, isSecret: false });
-			}
-		}
-
-		return { vars: result, warnings };
-	}
 
 	/**
 	 * Sync variables (non-secrets) TO rawContent.
@@ -188,7 +147,7 @@
 		// If no raw content exists, generate fresh
 		if (!rawContent.trim()) {
 			if (nonSecretVars.length > 0) {
-				rawContent = nonSecretVars.map(v => `${v.key.trim()}=${v.value}`).join('\n') + '\n';
+				rawContent = generateRawContent(nonSecretVars);
 			}
 			return;
 		}
@@ -242,18 +201,17 @@
 	}
 
 	/**
-	 * Sync rawContent TO variables.
-	 * Parses raw content for non-secrets, preserves existing secrets.
+	 * Parse editor text back into variables.
+	 *
+	 * `shownBefore` is what the editor was displaying before this text arrived. Rows
+	 * outside it were never on screen - a selector written straight into variables by
+	 * the provider picker, say - so they are kept rather than wiped (#1620). Rows that
+	 * WERE on screen and are absent from the new text were deleted by the user.
 	 */
-	function syncRawToVariables(content?: string) {
+	function syncRawToVariables(content?: string, shownBefore?: Set<string>) {
 		const { vars, warnings } = parseRawContent(content ?? rawContent);
 		parseWarnings = warnings;
-
-		// Preserve existing secrets (they're not in rawContent)
-		const existingSecrets = variables.filter(v => v.isSecret);
-
-		// Merge: non-secrets from raw + existing secrets
-		variables = [...vars, ...existingSecrets];
+		variables = mergeParsedIntoVariables(vars, variables, shownBefore ?? keysInRawContent(textEditorContent));
 	}
 
 	/**
@@ -261,9 +219,11 @@
 	 * Always syncs variables→raw to get proper .env content for disk.
 	 */
 	export function prepareForSave(): { rawContent: string; variables: EnvVar[] } {
-		// If in text view, first sync raw→variables to capture edits
+		// If in text view, first sync raw->variables to capture edits. Parse what the
+		// editor SHOWS: with an empty .env that is the rows rendered as text, and reading
+		// rawContent instead would drop every visible non-secret row (#1620).
 		if (viewMode === 'text') {
-			syncRawToVariables();
+			syncRawToVariables(textEditorContent);
 		}
 		// Then sync variables→raw to ensure rawContent is up to date
 		syncVariablesToRaw();
@@ -275,8 +235,11 @@
 	}
 
 	function handleTextChange(value: string) {
+		// Capture what was on screen BEFORE the edit, so a row the user just deleted is
+		// not mistaken for one the editor never showed.
+		const shownBefore = keysInRawContent(textEditorContent);
 		rawContent = value;
-		syncRawToVariables(); // Sync to variables so parent's envVars updates (for compose decorations)
+		syncRawToVariables(value, shownBefore); // keeps parent's envVars live for compose decorations
 		onchange?.();
 	}
 
@@ -285,8 +248,8 @@
 			// Form → Text: sync variables to raw (preserves comments)
 			syncVariablesToRaw();
 		} else if (newMode === 'form' && viewMode === 'text') {
-			// Text → Form: use textEditorContent which falls back to generatedRawContent
-			// when rawContent is empty (fixes vars lost on view switch for git stacks)
+			// Text -> Form: parse what the editor shows, which is the rows rendered as text
+			// when there is no .env file (keeps vars that only exist as rows)
 			syncRawToVariables(textEditorContent);
 		}
 
@@ -350,7 +313,7 @@
 		<!-- Header row: title + info + view toggle + validation pills + actions -->
 		<div class="flex items-center gap-2 justify-between">
 			<div class="flex items-center gap-2 flex-wrap min-w-0">
-				<span class="text-xs text-zinc-500 dark:text-zinc-400 shrink-0">Environment variables</span>
+				<span class="text-xs text-zinc-500 dark:text-zinc-400 shrink-0">{m.stackenv_title()}</span>
 			{#if infoText}
 				<Tooltip.Root>
 					<Tooltip.Trigger>
@@ -369,7 +332,7 @@
 					type="button"
 					class="flex items-center gap-1 px-1.5 py-0.5 rounded text-2xs transition-colors {viewMode === 'form' ? 'bg-white dark:bg-zinc-700 text-zinc-800 dark:text-zinc-100 shadow-sm' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200'}"
 					onclick={() => handleViewModeChange('form')}
-					title="Form view"
+					title={m.stackenv_view_form()}
 				>
 					<List class="w-3 h-3" />
 				</button>
@@ -377,7 +340,7 @@
 					type="button"
 					class="flex items-center gap-1 px-1.5 py-0.5 rounded text-2xs transition-colors {viewMode === 'text' ? 'bg-white dark:bg-zinc-700 text-zinc-800 dark:text-zinc-100 shadow-sm' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200'}"
 					onclick={() => handleViewModeChange('text')}
-					title="Text view (raw .env file)"
+					title={m.stackenv_view_text()}
 				>
 					<FileText class="w-3 h-3" />
 				</button>
@@ -387,17 +350,17 @@
 				<div class="flex gap-1 flex-wrap">
 					{#if effectiveValidation.missing.length > 0}
 						<span class="inline-flex items-center px-1.5 py-0.5 rounded text-2xs font-medium bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300">
-							{effectiveValidation.missing.length} missing
+							{m.stackenv_pill_missing({ count: effectiveValidation.missing.length })}
 						</span>
 					{/if}
 					{#if effectiveValidation.required.length > 0}
 						<span class="inline-flex items-center px-1.5 py-0.5 rounded text-2xs font-medium bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300">
-							{effectiveValidation.required.length - effectiveValidation.missing.length} defined
+							{m.stackenv_pill_defined({ count: effectiveValidation.required.length - effectiveValidation.missing.length })}
 						</span>
 					{/if}
 					{#if effectiveValidation.optional.length > 0}
 						<span class="inline-flex items-center px-1.5 py-0.5 rounded text-2xs font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
-							{effectiveValidation.optional.length} optional
+							{m.stackenv_pill_optional({ count: effectiveValidation.optional.length })}
 						</span>
 					{/if}
 				</div>
@@ -411,20 +374,21 @@
 					{/if}
 					<Button type="button" size="sm" variant="ghost" onclick={handleLoadFromFile} class="h-6 text-xs px-2">
 						<Upload class="w-3.5 h-3.5" />
-						Load
+						{m.stackenv_load()}
 					</Button>
 					{#if viewMode === 'form'}
 						<Button type="button" size="sm" variant="ghost" onclick={addEnvVariable} class="h-6 text-xs px-2">
 							<Plus class="w-3.5 h-3.5" />
-							Add
+							{m.stackenv_add()}
 						</Button>
 					{/if}
 					<ConfirmPopover
 						bind:open={confirmClearOpen}
-						title="Clear all variables?"
-						action="clear"
-						itemType="environment variables"
-						confirmText="Clear all"
+						localized
+						title={m.stackenv_clear_title()}
+						action={m.stackenv_confirm_action_clear()}
+						itemType={m.stackenv_item_environment_variables()}
+						confirmText={m.stackenv_clear_confirm()}
 						onConfirm={clearAll}
 						onOpenChange={(o) => confirmClearOpen = o}
 					>
@@ -437,7 +401,7 @@
 								disabled={!hasContent}
 							>
 								<Trash2 class="w-3.5 h-3.5" />
-								Clear
+								{m.stackenv_clear()}
 							</Button>
 						{/snippet}
 					</ConfirmPopover>
@@ -457,15 +421,15 @@
 				<div class="flex items-start gap-2 px-2.5 py-2 rounded bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800/50">
 					<Info class="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
 					<p class="text-xs text-blue-700 dark:text-blue-300">
-						These variables are available for <strong>compose file interpolation</strong> using <code class="bg-blue-100 dark:bg-blue-800/40 px-1 rounded">${'{VAR_NAME}'}</code> syntax.
-						To pass them to containers, reference them in the compose file's <code class="bg-blue-100 dark:bg-blue-800/40 px-1 rounded">environment:</code> section.
+						{m.stackenv_interpolation_before()} <strong>{m.stackenv_interpolation_strong()}</strong> {m.stackenv_interpolation_using()} <code class="bg-blue-100 dark:bg-blue-800/40 px-1 rounded">${'{VAR_NAME}'}</code> {m.stackenv_interpolation_after()}
+						{m.stackenv_interpolation_pass_before()} <code class="bg-blue-100 dark:bg-blue-800/40 px-1 rounded">environment:</code> {m.stackenv_interpolation_pass_after()}
 					</p>
 				</div>
 			{/if}
 			<div class="flex flex-wrap gap-x-3 gap-y-0.5 text-2xs text-zinc-400 dark:text-zinc-500 font-mono">
-				<span><span class="text-zinc-500 dark:text-zinc-400">${`{VAR}`}</span> required</span>
-				<span><span class="text-zinc-500 dark:text-zinc-400">${`{VAR:-default}`}</span> optional</span>
-				<span><span class="text-zinc-500 dark:text-zinc-400">${`{VAR:?error}`}</span> required w/ error</span>
+				<span><span class="text-zinc-500 dark:text-zinc-400">${`{VAR}`}</span> {m.stackenv_syntax_required()}</span>
+				<span><span class="text-zinc-500 dark:text-zinc-400">${`{VAR:-default}`}</span> {m.stackenv_syntax_optional()}</span>
+				<span><span class="text-zinc-500 dark:text-zinc-400">${`{VAR:?error}`}</span> {m.stackenv_syntax_required_error()}</span>
 			</div>
 		{:else if showInterpolationHint && secretCount > 0}
 			<!-- Interpolation hint + secrets hint combined for text view -->
@@ -473,15 +437,15 @@
 				<div class="flex items-start gap-2 px-2.5 py-2 rounded bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800/50">
 					<Info class="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
 					<p class="text-xs text-blue-700 dark:text-blue-300">
-						These variables are available for <strong>compose file interpolation</strong> using <code class="bg-blue-100 dark:bg-blue-800/40 px-1 rounded">${'{VAR_NAME}'}</code> syntax.
-						To pass them to containers, reference them in the compose file's <code class="bg-blue-100 dark:bg-blue-800/40 px-1 rounded">environment:</code> section.
+						{m.stackenv_interpolation_before()} <strong>{m.stackenv_interpolation_strong()}</strong> {m.stackenv_interpolation_using()} <code class="bg-blue-100 dark:bg-blue-800/40 px-1 rounded">${'{VAR_NAME}'}</code> {m.stackenv_interpolation_after()}
+						{m.stackenv_interpolation_pass_before()} <code class="bg-blue-100 dark:bg-blue-800/40 px-1 rounded">environment:</code> {m.stackenv_interpolation_pass_after()}
 					</p>
 				</div>
 				<div class="flex items-start gap-2 px-2.5 py-2 rounded bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50">
 					<ShieldAlert class="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
 					<div class="text-xs text-amber-700 dark:text-amber-300">
-						<span class="font-medium">{secretCount} secret{secretCount === 1 ? '' : 's'} not shown.</span>
-						<span class="text-amber-600 dark:text-amber-400">Secrets are never written to disk and are injected via shell environment when the stack starts.</span>
+						<span class="font-medium">{m.stackenv_secrets_not_shown({ count: secretCount })}</span>
+						<span class="text-amber-600 dark:text-amber-400">{m.stackenv_secrets_not_shown_detail()}</span>
 					</div>
 				</div>
 			</div>
@@ -490,8 +454,8 @@
 			<div class="flex items-start gap-2 px-2.5 py-2 rounded bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800/50">
 				<Info class="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
 				<p class="text-xs text-blue-700 dark:text-blue-300">
-					These variables are available for <strong>compose file interpolation</strong> using <code class="bg-blue-100 dark:bg-blue-800/40 px-1 rounded">${'{VAR_NAME}'}</code> syntax.
-					To pass them to containers, reference them in the compose file's <code class="bg-blue-100 dark:bg-blue-800/40 px-1 rounded">environment:</code> section.
+					{m.stackenv_interpolation_before()} <strong>{m.stackenv_interpolation_strong()}</strong> {m.stackenv_interpolation_using()} <code class="bg-blue-100 dark:bg-blue-800/40 px-1 rounded">${'{VAR_NAME}'}</code> {m.stackenv_interpolation_after()}
+					{m.stackenv_interpolation_pass_before()} <code class="bg-blue-100 dark:bg-blue-800/40 px-1 rounded">environment:</code> {m.stackenv_interpolation_pass_after()}
 				</p>
 			</div>
 		{:else if secretCount > 0}
@@ -499,17 +463,17 @@
 			<div class="flex items-start gap-2 px-2.5 py-2 rounded bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50">
 				<ShieldAlert class="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
 				<div class="text-xs text-amber-700 dark:text-amber-300">
-					<span class="font-medium">{secretCount} secret{secretCount === 1 ? '' : 's'} not shown.</span>
-					<span class="text-amber-600 dark:text-amber-400">Secrets are never written to disk and are injected via shell environment when the stack starts.</span>
+					<span class="font-medium">{m.stackenv_secrets_not_shown({ count: secretCount })}</span>
+					<span class="text-amber-600 dark:text-amber-400">{m.stackenv_secrets_not_shown_detail()}</span>
 				</div>
 			</div>
 		{/if}
-		<!-- Provider-reference placement hint: op:// / pass:// only resolve here, not in compose environment: -->
+		<!-- Provider-reference placement hint: inline refs only resolve here, not in compose environment: -->
 		{#if hasProviderReference}
 			<div class="flex items-start gap-2 px-2.5 py-2 rounded bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50">
 				<Info class="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
 				<p class="text-xs text-amber-700 dark:text-amber-300">
-					A <code class="bg-amber-100 dark:bg-amber-800/40 px-1 rounded">op://</code> / <code class="bg-amber-100 dark:bg-amber-800/40 px-1 rounded">pass://</code> reference is resolved <strong>here</strong>, in the stack's environment. It is <strong>not</strong> resolved when written directly in a compose <code class="bg-amber-100 dark:bg-amber-800/40 px-1 rounded">environment:</code> block - reference the variable there with <code class="bg-amber-100 dark:bg-amber-800/40 px-1 rounded">${'{VAR}'}</code> instead.
+					{m.stackenv_providerref_before()} (<code class="bg-amber-100 dark:bg-amber-800/40 px-1 rounded">op://</code>, <code class="bg-amber-100 dark:bg-amber-800/40 px-1 rounded">keepass://</code>, <code class="bg-amber-100 dark:bg-amber-800/40 px-1 rounded">azurekv://</code>, <code class="bg-amber-100 dark:bg-amber-800/40 px-1 rounded">pass://</code>) {m.stackenv_providerref_resolved()} <strong>{m.stackenv_providerref_here()}</strong>{m.stackenv_providerref_here_after()} <strong>{m.stackenv_providerref_not()}</strong> {m.stackenv_providerref_not_after()} <code class="bg-amber-100 dark:bg-amber-800/40 px-1 rounded">environment:</code> {m.stackenv_providerref_block()} <code class="bg-amber-100 dark:bg-amber-800/40 px-1 rounded">${'{VAR}'}</code> {m.stackenv_providerref_instead()}
 				</p>
 			</div>
 		{/if}
@@ -518,16 +482,16 @@
 			<div class="flex items-start gap-2 px-2 py-1.5 rounded bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50">
 				<AlertTriangle class="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
 				<div class="text-2xs text-amber-700 dark:text-amber-300">
-					<span class="font-medium">Some lines couldn't be parsed:</span>
+					<span class="font-medium">{m.stackenv_parse_warnings_title()}</span>
 					<ul class="mt-0.5 list-disc list-inside">
 						{#each parseWarnings.slice(0, 3) as warning}
 							<li>{warning}</li>
 						{/each}
 						{#if parseWarnings.length > 3}
-							<li>...and {parseWarnings.length - 3} more</li>
+							<li>{m.stackenv_parse_warnings_more({ count: parseWarnings.length - 3 })}</li>
 						{/if}
 					</ul>
-					<p class="mt-1 text-amber-600 dark:text-amber-400">Switch to text view to edit these lines.</p>
+					<p class="mt-1 text-amber-600 dark:text-amber-400">{m.stackenv_parse_warnings_hint()}</p>
 				</div>
 			</div>
 		{/if}
@@ -537,8 +501,8 @@
 				<Check class="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
 				<div class="text-xs text-emerald-700 dark:text-emerald-300 min-w-0">
 					<div class="flex items-center gap-1.5 flex-wrap">
-						<span class="font-semibold">{injectedSecretKeys.length} secret{injectedSecretKeys.length === 1 ? '' : 's'} loaded</span>
-						<span class="text-emerald-600/70 dark:text-emerald-400/70">from</span>
+						<span class="font-semibold">{m.stackenv_injected_loaded({ count: injectedSecretKeys.length })}</span>
+						<span class="text-emerald-600/70 dark:text-emerald-400/70">{m.stackenv_injected_from()}</span>
 						{#if providerType}
 							{@const ProviderIcon = getProviderIcon(providerType)}
 							<span class="inline-flex items-center gap-1 font-medium">
@@ -547,10 +511,10 @@
 							</span>
 							{#if providerName}<span class="text-emerald-600/70 dark:text-emerald-400/70">&middot; {providerName}</span>{/if}
 						{:else}
-							<span class="font-medium">the provider</span>
+							<span class="font-medium">{m.stackenv_injected_the_provider()}</span>
 						{/if}
 					</div>
-					<p class="text-emerald-600 dark:text-emerald-400 mt-0.5">Injected into the container at last deploy &mdash; never written to <code>.env</code>.</p>
+					<p class="text-emerald-600 dark:text-emerald-400 mt-0.5">{m.stackenv_injected_detail_before()} <code>.env</code>{m.stackenv_injected_detail_after()}</p>
 					<div class="flex flex-wrap gap-1.5 mt-1.5">
 						{#each injectedSecretKeys as key}
 							<span class="inline-flex items-center gap-1 font-mono text-2xs font-semibold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-800/40 border border-emerald-300 dark:border-emerald-700">
@@ -565,9 +529,9 @@
 			<div class="flex items-start gap-2 px-2.5 py-2 rounded bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50">
 				<AlertTriangle class="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
 				<div class="text-xs text-amber-700 dark:text-amber-300 min-w-0">
-					<div class="font-semibold">No secret provider is bound</div>
+					<div class="font-semibold">{m.stackenv_unbound_title()}</div>
 					<p class="text-amber-600 dark:text-amber-400 mt-0.5">
-						These {injectedSecretKeys.length} secret{injectedSecretKeys.length === 1 ? ' was' : 's were'} injected on the last deploy but the stack is no longer bound to a provider. The next deploy will drop {injectedSecretKeys.length === 1 ? 'it' : 'them'}. Reselect a provider to keep them.
+						{m.stackenv_unbound_detail({ count: injectedSecretKeys.length })}
 					</p>
 					<div class="flex flex-wrap gap-1.5 mt-1.5">
 						{#each injectedSecretKeys as key}
@@ -584,14 +548,14 @@
 			<div class="flex items-start gap-2 px-2.5 py-2 rounded bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50">
 				<AlertTriangle class="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
 				<div class="text-xs text-amber-700 dark:text-amber-300 min-w-0">
-					Couldn't check {providerName ?? 'the secret provider'}: {probeError}
+					{providerName != null ? m.stackenv_probe_failed_named({ provider: providerName, error: probeError }) : m.stackenv_probe_failed({ error: probeError })}
 				</div>
 			</div>
 		{/if}
 		<!-- Add missing variables (form mode only) -->
 		{#if viewMode === 'form' && effectiveValidation && effectiveValidation.missing.length > 0 && !readonly}
 			<div class="flex flex-wrap gap-1 items-center">
-				<span class="text-xs text-muted-foreground mr-1">Add missing:</span>
+				<span class="text-xs text-muted-foreground mr-1">{m.stackenv_add_missing()}</span>
 				{#each effectiveValidation.missing as missing}
 					<button
 						type="button"

@@ -17,7 +17,8 @@ const DEFAULT_THEME_SETTINGS = {
 	animateIcons: true,
 	coloredActionButtons: false,
 	actionIconSize: 'normal',
-	editorIndentGuides: false
+	editorIndentGuides: false,
+	editorTheme: 'default'
 };
 
 /**
@@ -39,7 +40,8 @@ export const GET: RequestHandler = async () => {
 			animateIcons,
 			coloredActionButtons,
 			actionIconSize,
-			editorIndentGuides
+			editorIndentGuides,
+			editorTheme
 		] = await Promise.all([
 			getSetting('theme_light'),
 			getSetting('theme_dark'),
@@ -51,7 +53,8 @@ export const GET: RequestHandler = async () => {
 			getSetting('animate_icons'),
 			getSetting('colored_action_buttons'),
 			getSetting('action_icon_size'),
-			getSetting('editor_indent_guides')
+			getSetting('editor_indent_guides'),
+			getSetting('theme_editor_theme')
 		]);
 
 		return json({
@@ -65,7 +68,8 @@ export const GET: RequestHandler = async () => {
 			animateIcons: animateIcons ?? DEFAULT_THEME_SETTINGS.animateIcons,
 			coloredActionButtons: coloredActionButtons ?? DEFAULT_THEME_SETTINGS.coloredActionButtons,
 			actionIconSize: actionIconSize ?? DEFAULT_THEME_SETTINGS.actionIconSize,
-			editorIndentGuides: editorIndentGuides ?? DEFAULT_THEME_SETTINGS.editorIndentGuides
+			editorIndentGuides: editorIndentGuides ?? DEFAULT_THEME_SETTINGS.editorIndentGuides,
+			editorTheme: editorTheme ?? DEFAULT_THEME_SETTINGS.editorTheme
 		});
 	} catch (error) {
 		console.error('Failed to get theme settings:', error);

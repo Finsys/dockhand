@@ -28,3 +28,32 @@ export function classifyUnparseableOutput(output: string): 'truncated' | 'cli-er
 	if (firstLine && !firstLine.startsWith('{')) return 'cli-error';
 	return 'unknown';
 }
+
+/** A bare image ID: `sha256:<64 hex>` or just the 64-hex digest. */
+function isBareDigest(ref: string): boolean {
+	return /^(sha256:)?[0-9a-f]{64}$/.test(ref);
+}
+
+/** A Dockhand-internal temporary tag (`...-dockhand-pending` / `-dockhand-update`) applied
+ * during the safe auto-update scan - a poor label to show a user, preferred only if no real
+ * tag exists. */
+function isTempTag(tag: string): boolean {
+	return /-dockhand-(pending|update)(:|$)/.test(tag);
+}
+
+/**
+ * The human-readable name a scan should record and notify with.
+ *
+ * A scan is driven by whatever ref the caller passed, and the auto-update path passes
+ * either a bare image ID - which would show as `Image "sha256:..." has N critical` - or
+ * the temporary tag it applied while scanning, which outlives the scan in the dashboard
+ * long after the image has been retagged. Both are poor labels, so a real RepoTag from
+ * the inspect wins over either. Any other ref is the caller's own name and is kept.
+ */
+export function pickScanDisplayName(imageRef: string, repoTags: string[] | undefined | null): string {
+	if (!isBareDigest(imageRef) && !isTempTag(imageRef)) return imageRef;
+	const tags = (repoTags || []).filter((t) => typeof t === 'string' && t && t !== '<none>:<none>');
+	const realTag = tags.find((t) => !isTempTag(t));
+	// Nothing better to offer: a genuinely untagged image leaves only what came in.
+	return realTag ?? tags[0] ?? imageRef;
+}

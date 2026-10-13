@@ -1,4 +1,5 @@
 // v1.0.12
+import '$lib/server/crash-guard.js';
 import '$lib/server/dns-dispatcher.js';
 import { initDatabase, hasAnyUser } from '$lib/server/db';
 import { startSubprocesses, stopSubprocesses } from '$lib/server/subprocess-manager';
@@ -20,6 +21,7 @@ import type { HandleServerError, Handle } from '@sveltejs/kit';
 import { redirect } from '@sveltejs/kit';
 import { startRssTracker, stopRssTracker, rssBeforeOp, rssAfterOp } from '$lib/server/rss-tracker';
 import { getClientIp } from '$lib/server/client-ip';
+import { isPublicPath } from '$lib/server/public-paths-core';
 import { BACKUPS_ENABLED, API_DOCS_ENABLED } from '$lib/server/features';
 // Side-effect import: installs globalThis.__authenticateWsUpgrade and
 // globalThis.__canAccessEnvForUser used by the raw WS upgrade handlers in
@@ -255,32 +257,6 @@ function isBearerRateLimited(ip: string): boolean {
 		return false;
 	}
 	return true;
-}
-
-// Routes that don't require authentication
-const PUBLIC_PATHS = [
-	'/login',
-	'/api/auth/login',
-	'/api/auth/logout',
-	'/api/auth/session',
-	'/api/auth/settings',
-	'/api/auth/providers',
-	'/api/auth/oidc',
-	'/api/license',
-	'/api/changelog',
-	'/api/dependencies',
-	'/api/health',
-	'/api/settings/theme',
-	'/api/docs'
-];
-
-// Check if path is public
-function isPublicPath(pathname: string): boolean {
-	// Webhook endpoints have their own auth (signature/secret verification)
-	if (pathname.match(/^\/api\/git\/stacks\/\d+\/webhook$/)) return true;
-	if (pathname.match(/^\/api\/git\/webhook\/\d+$/)) return true;
-
-	return PUBLIC_PATHS.some(path => pathname === path || pathname.startsWith(path + '/'));
 }
 
 // True only for real static files. API routes are never static, even when a path

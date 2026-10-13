@@ -238,6 +238,60 @@ export function describeLabelRebase(
 	return { adopted, preserved, userOnly };
 }
 
+/** Compose records which image it created a container from, and recreates the container when
+ *  that no longer matches the image behind the service's tag. */
+export const COMPOSE_IMAGE_LABEL = 'com.docker.compose.image';
+
+/** What a compose image label holds, which decides what to write on a recreate. */
+export type ComposeImageLabelForm = 'id' | 'digest' | 'unknown';
+
+/** A label value we can reason about at all: a sha256 digest as Docker spells one. */
+const SHA256_RE = /^sha256:[0-9a-f]{64}$/;
+
+/**
+ * Which form the old label is in. Compose writes the local image id, or - on a containerd image
+ * store, and for a service pinning `platform:` - the platform manifest digest. Measured on
+ * compose 5.1.3 (id) and 5.6.0 with containerd (digest).
+ *
+ * The old image is often untagged or gone by the time a recreate runs, so its manifest digest
+ * cannot be read back. Matching the old image's id is therefore what identifies the id form, and
+ * any OTHER well-formed digest is the digest form. Anything else is `unknown`.
+ */
+export function composeImageLabelForm(
+	oldLabel: string | undefined | null,
+	oldImageId: string | undefined | null
+): ComposeImageLabelForm {
+	if (!oldLabel || !SHA256_RE.test(oldLabel)) return 'unknown';
+	if (oldImageId && oldLabel === oldImageId) return 'id';
+	return 'digest';
+}
+
+/**
+ * What the compose image label should say on a container recreated onto a new image.
+ *
+ * Compose recreates a container whenever this disagrees with the image behind the service's tag,
+ * so carrying the old value over makes the next `docker compose up` restart a container that
+ * already runs the right image. The replacement has to be in the SAME form the old value was in,
+ * which `composeImageLabelForm` establishes from values we can observe on both images.
+ *
+ * Returns the value to write, or null to leave the label alone - a form we cannot account for is
+ * one only Compose can repair, and guessing would trade one wrong value for another.
+ */
+export function composeImageLabelForRecreate(
+	oldLabel: string | undefined | null,
+	oldImageId: string | undefined | null,
+	next: { imageId?: string | null; manifestDigest?: string | null }
+): string | null {
+	switch (composeImageLabelForm(oldLabel, oldImageId)) {
+		case 'id':
+			return next.imageId || null;
+		case 'digest':
+			return next.manifestDigest || null;
+		default:
+			return null;
+	}
+}
+
 /**
  * Rebase a container's labels onto the new image's defaults. Same
  * value-aware logic as env, plus operational labels (compose/dockhand)

@@ -1,3 +1,4 @@
+import { collectPullWarning, type PullWarning } from '$lib/utils/pull-warning';
 import { json } from '@sveltejs/kit';
 import { listContainers, createContainer, pullImage, EnvironmentNotFoundError, DockerConnectionError, type CreateContainerOptions } from '$lib/server/docker';
 import { authorize } from '$lib/server/authorize';
@@ -67,7 +68,7 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
  * query: env:integer Environment id (from GET /api/environments)
  * body: {name:string!, image:string!, ports:{}, volumes:{}, volumeBinds:array<string>, env:array<string>, labels:{}, cmd:array<string>, entrypoint:array<string>, workingDir:string, restartPolicy:string, restartMaxRetries:integer, networkMode:string, additionalNetworks:array<string>, networkAliases:array<string>, networkIpv4Address:string, networkIpv6Address:string, startAfterCreate:boolean}
  * body-example: {"name":"my-app","image":"nginx:latest","startAfterCreate":true}
- * resp-200: {success:boolean!, id:string!, imagePulled:boolean}
+ * resp-200: {success:boolean!, id:string!, imagePulled:boolean, warnings:array<{status:string!, message:string!}>}
  * resp-403: Permission denied, or access denied to this environment
  * resp-500: Container creation failed, or the image could not be pulled
  */
@@ -88,6 +89,7 @@ export const POST: RequestHandler = async (event) => {
 		return json({ error: 'Access denied to this environment' }, { status: 403 });
 	}
 
+	const warnings: PullWarning[] = [];
 	try {
 		const body = await request.json();
 		const { startAfterCreate, ...options } = body;
@@ -105,7 +107,7 @@ export const POST: RequestHandler = async (event) => {
 			// Audit log
 		await auditContainer(event, 'create', container.id, options.name, envIdNum, { image: options.image });
 
-			return json({ success: true, id: container.id });
+			return json({ warnings, success: true, id: container.id });
 		} catch (createError: any) {
 			// If error is due to missing image, try to pull it first
 			if (createError.statusCode === 404 && createError.json?.message?.includes('No such image')) {
@@ -113,7 +115,7 @@ export const POST: RequestHandler = async (event) => {
 
 				try {
 					// Pull the image
-					await pullImage(options.image, undefined, envIdNum);
+					await pullImage(options.image, (data) => collectPullWarning(warnings, data), envIdNum);
 					console.log(`Successfully pulled image: ${options.image}`);
 
 					// Retry creating the container
@@ -127,10 +129,11 @@ export const POST: RequestHandler = async (event) => {
 					// Audit log
 		await auditContainer(event, 'create', container.id, options.name, envIdNum, { image: options.image, imagePulled: true });
 
-					return json({ success: true, id: container.id, imagePulled: true });
+					return json({ warnings, success: true, id: container.id, imagePulled: true });
 				} catch (pullError) {
 					console.error('Error pulling image:', pullError);
 					return json({
+						warnings,
 						error: 'Failed to pull image',
 						details: `Could not pull image ${options.image}: ${String(pullError)}`
 					}, { status: 500 });

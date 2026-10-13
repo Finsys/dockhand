@@ -14,7 +14,9 @@ import {
 	rebaseLabelsOntoImage,
 	rebaseCommand,
 	describeEnvRebase,
-	describeLabelRebase
+	describeLabelRebase,
+	composeImageLabelForRecreate,
+	composeImageLabelForm
 } from '../src/lib/server/container-env-merge';
 
 // Small helpers for order-independent assertions.
@@ -287,5 +289,77 @@ describe('rebaseCommand — Cmd/Entrypoint rebase (#1371)', () => {
 		const r = rebaseCommand(reordered, NEW_CMD, ['node', 'dist/other.js']);
 		expect(r.value).toEqual(reordered);
 		expect(r.adopted).toBe(false);
+	});
+});
+
+describe('composeImageLabelForRecreate - what the compose image label should say after a recreate', () => {
+	const OLD_ID = 'sha256:aa049e689e141a4358ad1d4562dc49c88a89fbab711fd8fcc33f684c80b26301';
+	const NEW_ID = 'sha256:8a1efc5f479551822b47424ccae982026b633f28818eab0387348120a61e10e2';
+	const NEW_DIGEST = 'sha256:cea43ed33a3afbbec230f0a1372e749a5abd36ed178dc0e4b0157e6e2991bb01';
+	const next = { imageId: NEW_ID, manifestDigest: NEW_DIGEST };
+
+	// The id form, measured on compose 5.1.3: the label is the local image id, so the recreated
+	// container gets the new one. Without this the label names an image the host often no longer
+	// has, and the next `docker compose up` recreates a container already running the right image.
+	test('an id-form label is replaced with the new image id', () => {
+		expect(composeImageLabelForRecreate(OLD_ID, OLD_ID, next)).toBe(NEW_ID);
+	});
+
+	// The digest form, measured over a containerd image store on compose 5.5.1 and 5.6.0. A
+	// service pinning `platform:` writes the same form - the value was confirmed against the
+	// daemon, though the recreate-vs-no-recreate half was not isolated there. Writing an image
+	// id in this form would be just as stale as keeping the old value.
+	test('a digest-form label is replaced with the new manifest digest', () => {
+		const oldDigest = 'sha256:d5db4f4d4d378db5f9e5012b90ff39b5d4d06ba55c878b1d4aa55e50cbec202f';
+		expect(composeImageLabelForRecreate(oldDigest, OLD_ID, next)).toBe(NEW_DIGEST);
+	});
+
+	// Each form takes its own replacement: handing back the other one is the bug in miniature.
+	test('the forms do not borrow each other\'s replacement', () => {
+		expect(composeImageLabelForRecreate(OLD_ID, OLD_ID, next)).not.toBe(NEW_DIGEST);
+		const oldDigest = 'sha256:d5db4f4d4d378db5f9e5012b90ff39b5d4d06ba55c878b1d4aa55e50cbec202f';
+		expect(composeImageLabelForRecreate(oldDigest, OLD_ID, next)).not.toBe(NEW_ID);
+	});
+
+	// A replacement we could not obtain means leaving the label as it was, never clearing it.
+	test('a missing replacement leaves the label alone', () => {
+		expect(composeImageLabelForRecreate(OLD_ID, OLD_ID, { imageId: null, manifestDigest: NEW_DIGEST })).toBeNull();
+		const oldDigest = 'sha256:d5db4f4d4d378db5f9e5012b90ff39b5d4d06ba55c878b1d4aa55e50cbec202f';
+		expect(composeImageLabelForRecreate(oldDigest, OLD_ID, { imageId: NEW_ID, manifestDigest: null })).toBeNull();
+	});
+
+	test('nothing to correct when the container had no such label', () => {
+		expect(composeImageLabelForRecreate(undefined, OLD_ID, next)).toBeNull();
+		expect(composeImageLabelForRecreate('', OLD_ID, next)).toBeNull();
+	});
+});
+
+describe('composeImageLabelForm - telling the two forms apart', () => {
+	const OLD_ID = 'sha256:aa049e689e141a4358ad1d4562dc49c88a89fbab711fd8fcc33f684c80b26301';
+	const DIGEST = 'sha256:d5db4f4d4d378db5f9e5012b90ff39b5d4d06ba55c878b1d4aa55e50cbec202f';
+
+	test('matching the old image id is the id form', () => {
+		expect(composeImageLabelForm(OLD_ID, OLD_ID)).toBe('id');
+	});
+
+	// The old image is usually untagged or gone by recreate time, so its manifest digest cannot
+	// be read back: any other well-formed digest is taken to be the digest form.
+	test('another well-formed digest is the digest form', () => {
+		expect(composeImageLabelForm(DIGEST, OLD_ID)).toBe('digest');
+	});
+
+	// Without the old id there is nothing to match against, so the id form cannot be established.
+	test('an unknown old image id cannot yield the id form', () => {
+		expect(composeImageLabelForm(OLD_ID, undefined)).toBe('digest');
+	});
+
+	// The near misses: only something shaped like a docker digest is worth acting on at all.
+	test('a value that is not a sha256 digest is unknown', () => {
+		expect(composeImageLabelForm('', OLD_ID)).toBe('unknown');
+		expect(composeImageLabelForm(undefined, OLD_ID)).toBe('unknown');
+		expect(composeImageLabelForm('latest', OLD_ID)).toBe('unknown');
+		expect(composeImageLabelForm('sha256:abc', OLD_ID)).toBe('unknown');
+		expect(composeImageLabelForm(OLD_ID.toUpperCase(), OLD_ID)).toBe('unknown');
+		expect(composeImageLabelForm(OLD_ID.replace('sha256:', ''), OLD_ID)).toBe('unknown');
 	});
 });

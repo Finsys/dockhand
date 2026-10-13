@@ -1,0 +1,1 @@
+ALTER TABLE "pending_container_updates" ADD COLUMN "release_age_remaining_hours" integer;
