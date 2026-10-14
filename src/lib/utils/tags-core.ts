@@ -373,6 +373,22 @@ export function withStackTags(ownTags: Tag[], stackTags: Tag[]): Tag[] {
 }
 
 /**
+ * Add a container's stack name as an inherited tag.
+ *
+ * It resolves through the catalogue like label tags do, so a matching user-defined
+ * tag keeps its configured colour and icon. The inherited marker keeps this
+ * synthetic association read-only in the container tag editor.
+ */
+export function withStackNameTag(
+	ownTags: Tag[],
+	stackName: string | null | undefined,
+	catalog: Tag[]
+): Tag[] {
+	if (!stackName) return ownTags;
+	return withStackTags(ownTags, mergeNamedTags([], [stackName], catalog));
+}
+
+/**
  * The tags the filter offers: the catalogue, plus any tag only a label names.
  *
  * Without the second half a label tag could be seen on a row but not filtered or

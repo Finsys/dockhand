@@ -87,7 +87,7 @@
 	import type { ContainerInfo, TerminalMode } from '$lib/types';
 	import { matchesContainerHealthFilter, stateFilterValues } from '$lib/utils/grid-filters';
 	import { nextLogsSessions, panelsAfterRowClick, showsLogsIndicator } from '$lib/utils/active-logs-core';
-	import { matchesTagFilter, tagGroupDescriptor, mergeLabelTags, type Tag as UserTag, type TagColor, filterTagList, prunedTagFilter, withStackTags, stackLabelTags, mergeNamedTags } from '$lib/utils/tags-core';
+	import { matchesTagFilter, tagGroupDescriptor, mergeLabelTags, type Tag as UserTag, type TagColor, filterTagList, prunedTagFilter, withStackTags, withStackNameTag, stackLabelTags, mergeNamedTags } from '$lib/utils/tags-core';
 	import { isKnownIconName } from '$lib/utils/icons';
 	import { tagOrder } from '$lib/stores/tag-order';
 	import { applyOrder } from '$lib/utils/apply-order';
@@ -146,10 +146,19 @@
 	let inheritStackTags = $state(
 		typeof window === 'undefined' || localStorage.getItem(INHERIT_STACK_TAGS_KEY) !== '0'
 	);
+	const USE_STACK_AS_TAG_KEY = 'dockhand-containers-use-stack-as-tag';
+	let useStackAsTag = $state(
+		typeof window !== 'undefined' && localStorage.getItem(USE_STACK_AS_TAG_KEY) === '1'
+	);
 	$effect(() => {
 		const v = inheritStackTags;
 		if (typeof window === 'undefined') return;
 		localStorage.setItem(INHERIT_STACK_TAGS_KEY, v ? '1' : '0');
+	});
+	$effect(() => {
+		const v = useStackAsTag;
+		if (typeof window === 'undefined') return;
+		localStorage.setItem(USE_STACK_AS_TAG_KEY, v ? '1' : '0');
 	});
 	let tagCatalog = $state<UserTag[]>([]);
 	// The catalogue has actually been fetched. Until then the tag picker is only
@@ -211,22 +220,24 @@
 			.map((id) => tagById.get(id))
 			.filter((t): t is UserTag => !!t);
 		const own = mergeLabelTags(assigned, container.labels, tagCatalog, isKnownIconName);
-		if (!inheritStackTags) return own;
 		const stack = getComposeProject(container.labels);
-		if (!stack) return own;
-		const assignedToStack = (stackTagsMap[stack] ?? [])
-			.map((id) => tagById.get(id))
-			.filter((t): t is UserTag => !!t);
-		// A stack also carries whatever its services name in their labels, which is
-		// what the stacks page shows - inherit that too, or a service with no label
-		// of its own stays untagged under a stack the UI shows as tagged.
-		const fromStack = mergeNamedTags(
-			assignedToStack,
-			stackLabelTagsByProject[stack],
-			tagCatalog,
-			isKnownIconName
-		);
-		return withStackTags(own, fromStack);
+		let tags = own;
+		if (inheritStackTags && stack) {
+			const assignedToStack = (stackTagsMap[stack] ?? [])
+				.map((id) => tagById.get(id))
+				.filter((t): t is UserTag => !!t);
+			// A stack also carries whatever its services name in their labels, which is
+			// what the stacks page shows - inherit that too, or a service with no label
+			// of its own stays untagged under a stack the UI shows as tagged.
+			const fromStack = mergeNamedTags(
+				assignedToStack,
+				stackLabelTagsByProject[stack],
+				tagCatalog,
+				isKnownIconName
+			);
+			tags = withStackTags(tags, fromStack);
+		}
+		return useStackAsTag ? withStackNameTag(tags, stack, tagCatalog) : tags;
 	}
 
 	// The label tags each compose project carries, unioned across its containers -
@@ -1579,7 +1590,7 @@
 		});
 	}
 
-	function getComposeProject(labels: ContainerInfo['labels']): string | null {
+	function getComposeProject(labels: ContainerInfo['labels'] | undefined): string | null {
 		return labels?.['com.docker.compose.project'] || null;
 	}
 
@@ -1673,7 +1684,7 @@
 				width="w-48"
 				defaultIcon={Box}
 			/>
-			<TagFilter tags={filterTags} bind:selected={tagFilter} bind:mode={tagFilterMode} bind:groupBy={groupByTag} bind:showTags={showTags} bind:showBands={showBands} bind:inlineEditing={inlineTagEditing} bind:inheritStackTags bind:settingsExpanded={tagSettingsExpanded} />
+			<TagFilter tags={filterTags} bind:selected={tagFilter} bind:mode={tagFilterMode} bind:groupBy={groupByTag} bind:showTags={showTags} bind:showBands={showBands} bind:inlineEditing={inlineTagEditing} bind:inheritStackTags bind:useStackAsTag bind:settingsExpanded={tagSettingsExpanded} />
 			<!-- Action buttons: scroll horizontally on narrow screens (mobile) instead of
 			     clipping the overflow. min-w-0 lets the row shrink below its content so
 			     overflow-x can kick in; shrink-0 keeps each button its natural size. -->
@@ -2890,4 +2901,3 @@
 	}
 
 </style>
-

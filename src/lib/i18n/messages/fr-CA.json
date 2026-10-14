@@ -1603,6 +1603,7 @@
 	"tags_show_tags": "Afficher les tags",
 	"tags_inline_editing": "Modification des tags en ligne",
 	"tags_show_stack_tags": "Afficher les tags des stacks",
+	"tags_use_stack_as_tag": "Utiliser la stack comme tag",
 	"tags_none_yet": "Aucun tag pour l'instant",
 	"tags_match": "Correspondance",
 	"tags_match_any": "au moins un",
