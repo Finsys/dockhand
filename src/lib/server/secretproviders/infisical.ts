@@ -2,10 +2,11 @@
  * Infisical provider.
  *
  * Talks to an Infisical instance (Infisical Cloud or self-hosted) over its
- * public REST API to bulk-pull every secret under a project / environment /
- * path. Infisical has no inline compose-reference syntax (no op://-style
- * marker), so this provider is bulk-only: `resolveSecretReferences` is
- * unsupported and `isReference` is always false.
+ * public REST API (`GET /api/v4/secrets`) to bulk-pull every secret under a
+ * project / environment / path, including secrets brought in by folder imports
+ * (`includeImports=true`). Infisical has no inline compose-reference syntax
+ * (no op://-style marker), so this provider is bulk-only:
+ * `resolveSecretReferences` is unsupported and `isReference` is always false.
  *
  * Two auth shapes are supported (see InfisicalConfig):
  *   - a static `token`, sent as-is as `Authorization: Bearer <token>`.
@@ -25,15 +26,21 @@ import type { InfisicalConfig, SecretProvider, TestConnectionResult } from './sh
 import { assertSafeProviderHost, parseProviderError, isJsonResponse } from './shared';
 import { UnsupportedOperationError } from './shared';
 
-/** Shape of a single secret in the /api/v3/secrets/raw response. */
+/** Shape of a single secret in the GET /api/v4/secrets response. */
 interface RawSecret {
 	secretKey: string;
 	secretValue: string;
 }
 
-/** The parts of the /api/v3/secrets/raw response Dockhand consumes. */
-interface RawSecretsResponse {
+/** One imported folder in the v4 list response. Secrets stay nested; Dockhand flattens them. */
+interface RawImport {
 	secrets?: RawSecret[];
+}
+
+/** The parts of the GET /api/v4/secrets response Dockhand consumes. */
+export interface InfisicalSecretsResponse {
+	secrets?: RawSecret[];
+	imports?: RawImport[];
 }
 
 /** Strips a trailing slash so `${base}${path}` never doubles up. */
@@ -44,9 +51,9 @@ function baseUrl(host: string): string {
 
 /**
  * A service token (`st.<id>.<secret>`) carries its own project, environment and
- * secretPath (single non-glob scope), so `/secrets/raw` infers them from the token
- * and workspaceId/environment are optional. Every other auth shape (Universal Auth
- * access token, static non-`st.` token) requires workspaceId.
+ * secretPath (single non-glob scope), so `/api/v4/secrets` infers them from the
+ * token and projectId/environment are optional. Every other auth shape (Universal
+ * Auth access token, static non-`st.` token) requires projectId.
  */
 function isServiceToken(token: string | undefined): boolean {
 	return !!token && token.trim().startsWith('st.');
@@ -55,7 +62,7 @@ function isServiceToken(token: string | undefined): boolean {
 /**
  * Infisical infers project + environment from a service token only when its scope is
  * single and non-glob. A multi-scope or glob-path token still needs an explicit
- * workspaceId, and Infisical answers a bare 400 - so when a service-token config with no
+ * projectId, and Infisical answers 400 - so when a service-token config with no
  * projectId gets a 4xx, point the user at the real cause.
  */
 function multiScopeHint(statusCode: number, config: InfisicalConfig): string {
@@ -66,25 +73,56 @@ function multiScopeHint(statusCode: number, config: InfisicalConfig): string {
 }
 
 /**
- * Builds the /api/v3/secrets/raw URL. The secret path defaults to `/` (Infisical's
- * root). workspaceId/environment are omitted when empty so a service token can infer
- * them from its own scope. `expandSecretReferences=true` makes Infisical resolve
- * native secret references (a value like `${OTHER}`) to their final value server-side;
- * this endpoint leaves them raw by default, which would inject the literal reference.
+ * Builds the GET /api/v4/secrets URL.
+ * https://infisical.com/docs/api-reference/endpoints/secrets/list
+ *
+ * The secret path defaults to `/` (Infisical's root). projectId/environment are
+ * omitted when empty so a service token can infer them from its own scope.
+ * `viewSecretValue=true` asks for plaintext. `expandSecretReferences=true` makes
+ * Infisical resolve native secret references (a value like `${OTHER}`) server-side.
+ * `includeImports=true` returns secrets from imported folders in `imports`; those
+ * are merged in {@link collectInfisicalSecrets}.
  */
-function rawSecretsUrl(
+export function infisicalSecretsUrl(
 	host: string,
-	workspaceId: string | undefined,
+	projectId: string | undefined,
 	environment: string | undefined,
 	secretPath: string
 ): string {
 	const params = new URLSearchParams({
 		secretPath: secretPath || '/',
-		expandSecretReferences: 'true'
+		viewSecretValue: 'true',
+		expandSecretReferences: 'true',
+		includeImports: 'true'
 	});
-	if (workspaceId) params.set('workspaceId', workspaceId);
+	if (projectId) params.set('projectId', projectId);
 	if (environment) params.set('environment', environment);
-	return `${baseUrl(host)}/api/v3/secrets/raw?${params.toString()}`;
+	return `${baseUrl(host)}/api/v4/secrets?${params.toString()}`;
+}
+
+/**
+ * Flattens a v4 list response into a key/value map.
+ *
+ * Imported secrets arrive separately from the destination folder. A key defined
+ * in the destination folder overrides every import. When two imports share a
+ * key, the later entry wins — that is the bottom-most import in the Infisical
+ * UI (https://infisical.com/docs/documentation/platform/secret-reference).
+ */
+export function collectInfisicalSecrets(payload: InfisicalSecretsResponse): Record<string, string> {
+	const result: Record<string, string> = {};
+	for (const imported of payload.imports ?? []) {
+		assignSecrets(result, imported?.secrets);
+	}
+	assignSecrets(result, payload.secrets);
+	return result;
+}
+
+function assignSecrets(result: Record<string, string>, secrets: RawSecret[] | undefined): void {
+	for (const secret of secrets ?? []) {
+		if (secret?.secretKey !== undefined) {
+			result[secret.secretKey] = secret.secretValue;
+		}
+	}
 }
 
 /** The parts of the Universal Auth login response Dockhand consumes. */
@@ -258,7 +296,7 @@ export const infisicalProvider: SecretProvider<InfisicalConfig> = {
 		try {
 			const token = await resolveAccessToken(config);
 			const { statusCode, body } = await request(
-				rawSecretsUrl(host, projectId, environment, '/'),
+				infisicalSecretsUrl(host, projectId, environment, '/'),
 				{
 					method: 'GET',
 					headers: { authorization: `Bearer ${token}` }
@@ -313,7 +351,7 @@ export const infisicalProvider: SecretProvider<InfisicalConfig> = {
 
 		const token = await resolveAccessToken(config);
 		const { statusCode, body } = await request(
-			rawSecretsUrl(host, projectId, environment, secretPath),
+			infisicalSecretsUrl(host, projectId, environment, secretPath),
 			{
 				method: 'GET',
 				headers: { authorization: `Bearer ${token}` }
@@ -327,13 +365,7 @@ export const infisicalProvider: SecretProvider<InfisicalConfig> = {
 			throw new Error(`[Infisical] Bulk pull failed with HTTP ${statusCode}${multiScopeHint(statusCode, config)}`);
 		}
 
-		const payload = (await body.json()) as RawSecretsResponse;
-		const result: Record<string, string> = {};
-		for (const secret of payload.secrets ?? []) {
-			if (secret?.secretKey !== undefined) {
-				result[secret.secretKey] = secret.secretValue;
-			}
-		}
-		return result;
+		const payload = (await body.json()) as InfisicalSecretsResponse;
+		return collectInfisicalSecrets(payload);
 	}
 };
