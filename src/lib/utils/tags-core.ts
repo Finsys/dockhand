@@ -82,9 +82,16 @@ export function normalizeTag(raw: unknown): string | null {
 export type TagFilterMode = 'all' | 'any';
 
 /**
+ * Sentinel ID for filtering untagged items (items with no tags).
+ * Placed in the filterTagIds array alongside ordinary tag IDs.
+ */
+export const UNTAGGED_TAG_ID = -1;
+
+/**
  * True if an item's tags satisfy the filter. `mode` 'all' requires every selected
- * tag id (AND); 'any' requires at least one (OR). An empty filter matches everything;
- * a non-empty filter never matches an untagged item.
+ * tag id (AND); 'any' requires at least one (OR). An empty filter matches everything.
+ *
+ * Supports `UNTAGGED_TAG_ID` (-1) to match untagged items.
  */
 export function matchesTagFilter(
 	itemTagIds: number[] | undefined,
@@ -92,11 +99,25 @@ export function matchesTagFilter(
 	mode: TagFilterMode = 'all'
 ): boolean {
 	if (!filterTagIds.length) return true;
-	if (!itemTagIds?.length) return false;
+	const isUntagged = !itemTagIds?.length;
+	const wantsUntagged = filterTagIds.includes(UNTAGGED_TAG_ID);
+
+	if (mode === 'any') {
+		if (isUntagged) return wantsUntagged;
+		const have = new Set(itemTagIds);
+		return filterTagIds.some((id) => id !== UNTAGGED_TAG_ID && have.has(id));
+	}
+
+	// mode === 'all'
+	// An item cannot simultaneously be untagged and carry real tags.
+	const realFilterIds = filterTagIds.filter((id) => id !== UNTAGGED_TAG_ID);
+	if (wantsUntagged) {
+		if (realFilterIds.length > 0) return false;
+		return isUntagged;
+	}
+	if (isUntagged) return false;
 	const have = new Set(itemTagIds);
-	return mode === 'any'
-		? filterTagIds.some((id) => have.has(id))
-		: filterTagIds.every((id) => have.has(id));
+	return realFilterIds.every((id) => have.has(id));
 }
 
 /** Case-insensitive name order, tie-broken by id so it is total and stable. #1625 */
@@ -404,5 +425,6 @@ export function filterTagList(catalog: Tag[], rowTags: Tag[][]): Tag[] {
 export function prunedTagFilter(saved: number[], offered: Tag[], ready: boolean): number[] {
 	if (!ready) return saved;
 	const ids = new Set(offered.map((t) => t.id));
+	ids.add(UNTAGGED_TAG_ID);
 	return saved.every((id) => ids.has(id)) ? saved : saved.filter((id) => ids.has(id));
 }

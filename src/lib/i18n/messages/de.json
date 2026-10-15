@@ -1710,6 +1710,7 @@
 	"updates_no_source_after": "mit Verweis auf ein GitHub- oder Gitea/Forgejo-Repo).",
 	"updates_notes_from": "Release Notes von",
 	"tags_filter_all": "Alle Tags",
+	"tags_filter_untagged": "Ohne Tag",
 	"tags_filter_count": [
 		{
 			"declarations": [

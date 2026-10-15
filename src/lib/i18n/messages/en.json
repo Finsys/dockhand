@@ -1582,6 +1582,7 @@
 	"updates_no_source_after": "label pointing at a GitHub or Gitea/Forgejo repo).",
 	"updates_notes_from": "Notes from",
 	"tags_filter_all": "All tags",
+	"tags_filter_untagged": "Untagged",
 	"tags_filter_count": [
 		{
 			"declarations": [

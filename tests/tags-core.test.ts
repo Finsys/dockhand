@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'bun:test';
 import { applyOrder } from '../src/lib/utils/apply-order';
-import { normalizeTag, matchesTagFilter, normalizeColor, tagGroupDescriptor, compareTagNames, tagHex, TAG_COLORS, MAX_TAG_LENGTH, type Tag } from '../src/lib/utils/tags-core';
+import { normalizeTag, matchesTagFilter, normalizeColor, tagGroupDescriptor, compareTagNames, tagHex, TAG_COLORS, MAX_TAG_LENGTH, UNTAGGED_TAG_ID, prunedTagFilter, type Tag } from '../src/lib/utils/tags-core';
 
 describe('normalizeTag', () => {
 	test('trims and collapses whitespace', () => {
@@ -162,6 +162,30 @@ describe('matchesTagFilter', () => {
 	test('untagged item with a non-empty filter never matches', () => {
 		expect(matchesTagFilter([], [1])).toBe(false);
 		expect(matchesTagFilter(undefined, [1])).toBe(false);
+	});
+	describe('#1704 - UNTAGGED_TAG_ID filter support', () => {
+		test('matches untagged items when UNTAGGED_TAG_ID is selected on its own', () => {
+			expect(matchesTagFilter([], [UNTAGGED_TAG_ID])).toBe(true);
+			expect(matchesTagFilter(undefined, [UNTAGGED_TAG_ID])).toBe(true);
+			expect(matchesTagFilter([1], [UNTAGGED_TAG_ID])).toBe(false);
+			expect(matchesTagFilter([1, 2], [UNTAGGED_TAG_ID])).toBe(false);
+		});
+		test('ANY mode: matches items with no tags OR items with any matching real tag', () => {
+			expect(matchesTagFilter([], [1, UNTAGGED_TAG_ID], 'any')).toBe(true);
+			expect(matchesTagFilter(undefined, [1, UNTAGGED_TAG_ID], 'any')).toBe(true);
+			expect(matchesTagFilter([1], [1, UNTAGGED_TAG_ID], 'any')).toBe(true);
+			expect(matchesTagFilter([2], [1, UNTAGGED_TAG_ID], 'any')).toBe(false);
+			expect(matchesTagFilter([1, 2], [1, UNTAGGED_TAG_ID], 'any')).toBe(true);
+		});
+		test('ALL mode: an item cannot simultaneously be untagged and have tags', () => {
+			expect(matchesTagFilter([], [1, UNTAGGED_TAG_ID], 'all')).toBe(false);
+			expect(matchesTagFilter([1], [1, UNTAGGED_TAG_ID], 'all')).toBe(false);
+		});
+		test('prunedTagFilter preserves UNTAGGED_TAG_ID', () => {
+			const catalog: Tag[] = [{ id: 1, name: 'prod', color: 'blue' }];
+			expect(prunedTagFilter([1, UNTAGGED_TAG_ID], catalog, true)).toEqual([1, UNTAGGED_TAG_ID]);
+			expect(prunedTagFilter([999, UNTAGGED_TAG_ID], catalog, true)).toEqual([UNTAGGED_TAG_ID]);
+		});
 	});
 });
 
