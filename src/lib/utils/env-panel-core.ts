@@ -6,6 +6,8 @@
  * them goes through here.
  */
 
+import { unquote } from './env-file-values';
+
 export interface EnvVarLike {
 	key: string;
 	value: string;
@@ -37,14 +39,14 @@ export function parseRawContent(content: string): ParsedRawContent<EnvVarLike & 
 		}
 
 		const key = trimmed.slice(0, eqIndex).trim();
-		const value = trimmed.slice(eqIndex + 1);
+		const rawValue = trimmed.slice(eqIndex + 1);
 		if (!key) continue;
 
 		if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key)) {
 			warnings.push(`Line ${lineNum}: "${key}" (invalid variable name)`);
 			continue;
 		}
-		vars.push({ key, value, isSecret: false });
+		vars.push({ key, value: unquote(rawValue), isSecret: false });
 	}
 
 	return { vars, warnings };
