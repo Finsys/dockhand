@@ -526,6 +526,7 @@
 	"containers_inspect_action_stop": "Stop",
 	"containers_inspect_action_restart": "Restart",
 	"containers_inspect_action_start": "Start",
+	"containers_inspect_action_terminal": "Terminal",
 	"containers_inspect_action_edit": "Edit",
 	"containers_inspect_action_delete": "Delete",
 	"containers_inspect_view_raw_title": "View raw inspect data",
