@@ -1731,7 +1731,7 @@
 	"tags_show_tags": "Tags anzeigen",
 	"tags_inline_editing": "Tags direkt bearbeiten",
 	"tags_show_stack_tags": "Tags von Stacks anzeigen",
-	"tags_use_stack_as_tag": "Stack als Tag verwenden",
+	"tags_use_stack_as_tag": "Stack-Namen als Tag verwenden",
 	"tags_none_yet": "Noch keine Tags",
 	"tags_match": "Passend zu",
 	"tags_match_any": "einem",
