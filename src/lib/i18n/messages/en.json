@@ -6264,6 +6264,22 @@
 	"settings_git_test_connection": "Test connection",
 	"settings_git_item_repository": "repository",
 	"settings_git_delete": "Delete",
+	"settings_git_checking_stacks": "Checking which stacks use this repository...",
+	"settings_git_delete_affects_stacks": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "Deleting this repository affects {count} stack:",
+				"countPlural=other": "Deleting this repository affects {count} stacks:"
+			}
+		}
+	],
 	"settings_git_error_url_required_to_test": "Repository URL is required to test",
 	"settings_git_test_success_detail": "Connection successful! Branch: {branch}, Commit: {commit}",
 	"settings_git_connection_test_failed": "Connection test failed",

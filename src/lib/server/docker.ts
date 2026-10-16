@@ -17,6 +17,7 @@ import { pumpWebStreamToWritable } from './stream-pump';
 import { toWebReadableStream } from './node-readable-stream';
 import { buildImagePruneFilters } from './image-prune-core';
 import { demuxDockerStream } from './docker-demux-core';
+import { isDockerProbePath, isDockerNetworkError } from './docker-probe-core';
 import {
 	computeRequestTimeoutMs,
 	isPrunePath,
@@ -815,6 +816,23 @@ export function unixSocketStreamRequest(
 	});
 }
 
+function logDockerFetchFailure(
+	targetLabel: string,
+	method: string,
+	path: string,
+	elapsed: number,
+	msg: string,
+	error: unknown
+) {
+	// For probing endpoints failing with expected network reachability errors (e.g. host is powered off),
+	// downgrade to debug/warn to avoid error log flooding (#1739).
+	if (isDockerProbePath(path) && isDockerNetworkError(error)) {
+		console.debug(`[Docker] ${targetLabel}: ${method} ${path} probe failed after ${elapsed}ms (host offline/unreachable): ${msg}`);
+	} else {
+		console.error(`[Docker] ${targetLabel}: ${method} ${path} failed after ${elapsed}ms: ${msg}`);
+	}
+}
+
 export async function dockerFetch(
 	path: string,
 	options: DockerFetchOptions = {},
@@ -900,7 +918,7 @@ export async function dockerFetch(
 			const elapsed = Date.now() - startTime;
 			// Log error message only, not full stack trace
 			const msg = error?.message || String(error);
-			console.error(`[Docker] Edge env ${config.environmentId}: ${method} ${path} failed after ${elapsed}ms: ${msg}`);
+			logDockerFetchFailure(`Edge env ${config.environmentId}`, method, path, elapsed, msg, error);
 			throw DockerConnectionError.fromError(error);
 		}
 	}
@@ -920,7 +938,7 @@ export async function dockerFetch(
 			const elapsed = Date.now() - startTime;
 			// Log error message only, not full stack trace
 			const msg = error?.message || String(error);
-			console.error(`[Docker] Socket: ${method} ${path} failed after ${elapsed}ms: ${msg}`);
+			logDockerFetchFailure('Socket', method, path, elapsed, msg, error);
 			throw DockerConnectionError.fromError(error);
 		}
 	} else {
@@ -953,7 +971,7 @@ export async function dockerFetch(
 			} catch (error: any) {
 				const elapsed = Date.now() - startTime;
 				const msg = error?.message || String(error);
-				console.error(`[Docker] ${config.connectionType || 'direct'} ${config.host}: ${method} ${path} failed after ${elapsed}ms: ${msg}`);
+				logDockerFetchFailure(`${config.connectionType || 'direct'} ${config.host}`, method, path, elapsed, msg, error);
 				throw DockerConnectionError.fromError(error);
 			}
 		}
@@ -993,7 +1011,7 @@ export async function dockerFetch(
 		} catch (error: any) {
 			const elapsed = Date.now() - startTime;
 			const msg = error?.message || String(error);
-			console.error(`[Docker] ${config.connectionType || 'direct'} ${config.host}: ${method} ${path} failed after ${elapsed}ms: ${msg}`);
+			logDockerFetchFailure(`${config.connectionType || 'direct'} ${config.host}`, method, path, elapsed, msg, error);
 			throw DockerConnectionError.fromError(error);
 		}
 	}

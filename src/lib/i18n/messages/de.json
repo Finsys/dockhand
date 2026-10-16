@@ -6547,6 +6547,22 @@
 	"settings_git_test_connection": "Verbindung testen",
 	"settings_git_item_repository": "Repository",
 	"settings_git_delete": "Löschen",
+	"settings_git_checking_stacks": "Es wird geprüft, welche Stacks dieses Repository verwenden…",
+	"settings_git_delete_affects_stacks": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "Das Löschen dieses Repositorys betrifft {count} Stack:",
+				"countPlural=other": "Das Löschen dieses Repositorys betrifft {count} Stacks:"
+			}
+		}
+	],
 	"settings_git_error_url_required_to_test": "Für den Test ist eine Repository-URL erforderlich",
 	"settings_git_test_success_detail": "Verbindung erfolgreich! Branch: {branch}, Commit: {commit}",
 	"settings_git_connection_test_failed": "Verbindungstest fehlgeschlagen",
