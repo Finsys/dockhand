@@ -46,6 +46,7 @@
 	import ComposeGraphViewer from './ComposeGraphViewer.svelte';
 	import RedeployPopover from './RedeployPopover.svelte';
 	import { hasBuildSection as detectBuildSection } from '$lib/utils/compose-build-detect';
+	import { unquote } from '$lib/utils/env-file-values';
 	import { m } from '$lib/paraglide/messages.js';
 
 
@@ -862,8 +863,8 @@
 			const eqIndex = trimmed.indexOf('=');
 			if (eqIndex > 0) {
 				const key = trimmed.substring(0, eqIndex);
-				const value = trimmed.substring(eqIndex + 1);
-				vars.push({ key, value, isSecret: false });
+				const rawValue = trimmed.substring(eqIndex + 1);
+				vars.push({ key, value: unquote(rawValue), isSecret: false });
 			}
 		}
 		envVars = vars;

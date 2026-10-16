@@ -171,6 +171,15 @@ describe('parseRawContent', () => {
 		expect(parseRawContent('EMPTY=\n').vars).toEqual([{ key: 'EMPTY', value: '', isSecret: false }]);
 	});
 
+	test('#1750 - surrounding double or single quotes are unquoted', () => {
+		const { vars } = parseRawContent('FOO="bar"\nBAZ=\'qux\'\nPLAIN=hello\n');
+		expect(vars).toEqual([
+			{ key: 'FOO', value: 'bar', isSecret: false },
+			{ key: 'BAZ', value: 'qux', isSecret: false },
+			{ key: 'PLAIN', value: 'hello', isSecret: false }
+		]);
+	});
+
 	test('round-trips with generateRawContent', () => {
 		const rows: EnvVarLike[] = [{ key: 'A', value: '1' }, { key: 'B', value: 'x=y' }];
 		const { vars } = parseRawContent(generateRawContent(rows));
