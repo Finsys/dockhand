@@ -1661,6 +1661,7 @@
 	"tags_show_tags": "Pokaż tagi",
 	"tags_inline_editing": "Edycja tagów w wierszu",
 	"tags_show_stack_tags": "Pokaż tagi ze stacków",
+	"tags_use_stack_as_tag": "Użyj nazwy stacka jako tagu",
 	"tags_none_yet": "Jeszcze bez tagów",
 	"tags_match": "Dopasuj",
 	"tags_match_any": "dowolny",

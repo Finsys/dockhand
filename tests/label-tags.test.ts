@@ -9,6 +9,7 @@ import {
 	matchesTagFilter,
 	prunedTagFilter,
 	stackLabelTags,
+	withStackNameTag,
 	withStackTags,
 	type Tag
 } from '../src/lib/utils/tags-core';
@@ -518,5 +519,34 @@ describe('a container showing its stack tags', () => {
 		expect(resolvedB.map((t) => t.name)).toEqual(['tag2', 'prod']);
 		expect(resolvedA.some((t) => t.name === 'tag2')).toBe(false);
 		expect(resolvedB.some((t) => t.name === 'tag1')).toBe(false);
+	});
+});
+
+describe('using a container stack name as a tag', () => {
+	test('adds the stack name as an inherited synthetic tag', () => {
+		const out = withStackNameTag([], 'media-stack', CATALOG);
+		expect(out).toEqual([{
+			id: labelTagId('media-stack'),
+			name: 'media-stack',
+			color: 'slate',
+			icon: null,
+			inherited: true
+		}]);
+	});
+
+	test('uses a matching catalog tag appearance', () => {
+		const out = withStackNameTag([], 'prod', CATALOG);
+		expect(out).toEqual([{ ...PROD, inherited: true }]);
+	});
+
+	test('does not duplicate a direct tag with the same name', () => {
+		const out = withStackNameTag([PROD], 'PROD', CATALOG);
+		expect(out).toEqual([PROD]);
+		expect(out[0].inherited).toBeUndefined();
+	});
+
+	test('a container outside a stack is unchanged', () => {
+		const own = [PROD];
+		expect(withStackNameTag(own, null, CATALOG)).toBe(own);
 	});
 });

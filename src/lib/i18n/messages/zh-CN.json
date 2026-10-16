@@ -1603,6 +1603,7 @@
 	"tags_show_tags": "显示标签",
 	"tags_inline_editing": "内联标签编辑",
 	"tags_show_stack_tags": "显示堆栈的标签",
+	"tags_use_stack_as_tag": "将堆栈名称用作标签",
 	"tags_none_yet": "尚无标签",
 	"tags_match": "匹配",
 	"tags_match_any": "任一",

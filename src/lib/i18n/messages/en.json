@@ -1603,6 +1603,7 @@
 	"tags_show_tags": "Show tags",
 	"tags_inline_editing": "Inline tag editing",
 	"tags_show_stack_tags": "Show tags from stacks",
+	"tags_use_stack_as_tag": "Use stack name as tag",
 	"tags_none_yet": "No tags yet",
 	"tags_match": "Match",
 	"tags_match_any": "any",

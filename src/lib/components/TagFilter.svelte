@@ -1,7 +1,7 @@
 <script lang="ts">
 	import * as Popover from '$lib/components/ui/popover';
 	import { Button } from '$lib/components/ui/button';
-	import { Tag as TagIcon, Check, ChevronDown, ChevronRight, Rows3, Paintbrush, Pencil, Settings2, GripVertical, RotateCcw, ArrowUpDown, Layers } from 'lucide-svelte';
+	import { Tag as TagIcon, Check, ChevronDown, ChevronRight, Rows3, Paintbrush, Pencil, Settings2, GripVertical, RotateCcw, ArrowUpDown, Layers, Boxes } from 'lucide-svelte';
 	import { TogglePill } from '$lib/components/ui/toggle-pill';
 	import TagLucideIcon from '$lib/components/TagLucideIcon.svelte';
 	import { tagHex } from '$lib/utils/tags-core';
@@ -23,13 +23,14 @@
 		showBands?: boolean;      // 'coloured group bands' toggle (bindable); shown only while groupBy is on
 		inlineEditing?: boolean;  // 'show a tag button on each row' toggle (bindable); omit to hide it
 		inheritStackTags?: boolean; // 'show a container its stack's tags' toggle (bindable); omit to hide it
+		useStackAsTag?: boolean;   // 'use the container stack name as a tag' toggle (bindable); omit to hide it
 		settingsExpanded?: boolean; // collapsed state of the settings section (bindable)
 		width?: string;
 	}
-	let { tags, selected = $bindable([]), mode = $bindable('all'), groupBy = $bindable(undefined), showTags = $bindable(undefined), showBands = $bindable(undefined), inlineEditing = $bindable(undefined), inheritStackTags = $bindable(undefined), settingsExpanded = $bindable(true), width = 'w-44' }: Props = $props();
+	let { tags, selected = $bindable([]), mode = $bindable('all'), groupBy = $bindable(undefined), showTags = $bindable(undefined), showBands = $bindable(undefined), inlineEditing = $bindable(undefined), inheritStackTags = $bindable(undefined), useStackAsTag = $bindable(undefined), settingsExpanded = $bindable(true), width = 'w-44' }: Props = $props();
 
 	// Whether any of the settings toggles are present, so the section only renders when it has content.
-	const hasSettings = $derived(groupBy !== undefined || showTags !== undefined || inlineEditing !== undefined || inheritStackTags !== undefined);
+	const hasSettings = $derived(groupBy !== undefined || showTags !== undefined || inlineEditing !== undefined || inheritStackTags !== undefined || useStackAsTag !== undefined);
 
 	let open = $state(false);
 
@@ -135,6 +136,13 @@
 						<Layers class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
 						<span class="text-xs min-w-0 flex-1 truncate text-left">{m.tags_show_stack_tags()}</span>
 						<TogglePill bind:checked={inheritStackTags} />
+					</div>
+				{/if}
+				{#if useStackAsTag !== undefined}
+					<div class="flex items-center gap-2 px-2 py-1.5">
+						<Boxes class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+						<span class="text-xs min-w-0 flex-1 truncate text-left">{m.tags_use_stack_as_tag()}</span>
+						<TogglePill bind:checked={useStackAsTag} />
 					</div>
 				{/if}
 			{/if}
