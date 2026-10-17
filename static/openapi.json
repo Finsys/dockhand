@@ -15350,7 +15350,7 @@
             "description": "Permission denied (needs stacks:create; binding a secret provider also needs secrets:view)"
           },
           "409": {
-            "description": "A git stack with this name already exists in the environment"
+            "description": "A stack with this name already exists in the environment"
           },
           "500": {
             "description": "Failed to create the git stack"
@@ -15388,6 +15388,9 @@
                   },
                   "webhookSecret": {
                     "type": "string"
+                  },
+                  "takeOverExternalStack": {
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -15400,7 +15403,8 @@
                 "repositoryId": 0,
                 "secretProviderId": 0,
                 "webhookEnabled": true,
-                "webhookSecret": "string"
+                "webhookSecret": "string",
+                "takeOverExternalStack": true
               }
             }
           }
@@ -15666,6 +15670,72 @@
           }
         ],
         "description": "Clients sending `Accept: application/json` get a synchronous, buffered SSE-as-JSON result; otherwise a jobId is returned immediately and progress is delivered out-of-band."
+      }
+    },
+    "/api/git/stacks/{id}/detach": {
+      "post": {
+        "operationId": "post_api_git_stacks_id_detach",
+        "tags": [
+          "git"
+        ],
+        "summary": "Convert a git-managed stack to a local stack",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Git stack ID (from GET /api/git/stacks)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ]
+                },
+                "example": {
+                  "success": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid git stack ID"
+          },
+          "403": {
+            "description": "Caller lacks the stacks:edit permission for the stack environment"
+          },
+          "404": {
+            "description": "Git stack not found"
+          },
+          "409": {
+            "description": "No deployed compose file is available; deploy the Git stack before conversion"
+          },
+          "500": {
+            "description": "Failed to convert the stack to a local source"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/git/stacks/{id}/env-files": {
@@ -26924,6 +26994,181 @@
             "bearerAuth": []
           }
         ]
+      }
+    },
+    "/api/stacks/{name}/attach": {
+      "post": {
+        "operationId": "post_api_stacks_name_attach",
+        "tags": [
+          "stacks"
+        ],
+        "summary": "Convert an internal stack to Git management",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Stack name (from GET /api/stacks)"
+          },
+          {
+            "name": "env",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Environment ID the stack belongs to (from GET /api/environments)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Git stack created; returns the git stack record, or a job response when deployNow starts deployment"
+          },
+          "400": {
+            "description": "Invalid conversion request or repository configuration"
+          },
+          "403": {
+            "description": "Caller lacks stacks:edit or required secrets:view permission"
+          },
+          "404": {
+            "description": "Stack not found"
+          },
+          "500": {
+            "description": "Failed to convert stack to Git management"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "stackName": {
+                    "type": "string"
+                  },
+                  "repositoryId": {
+                    "type": "integer"
+                  },
+                  "url": {
+                    "type": "string"
+                  },
+                  "repoName": {
+                    "type": "string"
+                  },
+                  "branch": {
+                    "type": "string"
+                  },
+                  "credentialId": {
+                    "type": "integer"
+                  },
+                  "composePath": {
+                    "type": "string"
+                  },
+                  "envFilePath": {
+                    "type": "string"
+                  },
+                  "autoUpdate": {
+                    "type": "boolean"
+                  },
+                  "autoUpdateSchedule": {
+                    "type": "string"
+                  },
+                  "autoUpdateCron": {
+                    "type": "string"
+                  },
+                  "webhookEnabled": {
+                    "type": "boolean"
+                  },
+                  "webhookSecret": {
+                    "type": "string"
+                  },
+                  "contextDir": {
+                    "type": "string"
+                  },
+                  "buildOnDeploy": {
+                    "type": "boolean"
+                  },
+                  "noBuildCache": {
+                    "type": "boolean"
+                  },
+                  "repullImages": {
+                    "type": "boolean"
+                  },
+                  "forceRedeploy": {
+                    "type": "boolean"
+                  },
+                  "secretProviderId": {
+                    "type": "integer"
+                  },
+                  "envVars": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "key": {
+                          "type": "string"
+                        },
+                        "value": {
+                          "type": "string"
+                        },
+                        "isSecret": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "key"
+                      ]
+                    }
+                  },
+                  "deployNow": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "example": {
+                "stackName": "string",
+                "repositoryId": 0,
+                "url": "string",
+                "repoName": "string",
+                "branch": "string",
+                "credentialId": 0,
+                "composePath": "string",
+                "envFilePath": "string",
+                "autoUpdate": true,
+                "autoUpdateSchedule": "string",
+                "autoUpdateCron": "string",
+                "webhookEnabled": true,
+                "webhookSecret": "string",
+                "contextDir": "string",
+                "buildOnDeploy": true,
+                "noBuildCache": true,
+                "repullImages": true,
+                "forceRedeploy": true,
+                "secretProviderId": 0,
+                "envVars": [
+                  {
+                    "key": "string",
+                    "value": "string",
+                    "isSecret": true
+                  }
+                ],
+                "deployNow": true
+              }
+            }
+          }
+        }
       }
     },
     "/api/stacks/{name}/check-path-change": {

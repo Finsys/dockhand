@@ -114,6 +114,8 @@
 	let stackModalReadonly = $state(false);
 	let stackModalGitInfo = $state<{ commit?: string; url?: string; branch?: string } | null>(null);
 	let editingGitStack = $state<any>(null);
+	let convertingStackName = $state<string | null>(null);
+	let untrackedStackName = $state<string | null>(null);
 	let envId = $state<number | null>(null);
 
 	// User-defined tags: assignments (name -> tagId[]) + catalog + filter.
@@ -1138,8 +1140,10 @@
 		return stack.status;
 	}
 
-	async function openGitModal(gitStack: any = undefined) {
+	async function openGitModal(gitStack?: any, stackName?: string | null, isUntracked = false) {
 		editingGitStack = gitStack || null;
+		convertingStackName = isUntracked ? null : stackName || null;
+		untrackedStackName = isUntracked ? stackName || null : null;
 		// Fetch repositories and credentials before opening modal
 		try {
 			const [reposRes, credsRes] = await Promise.all([
@@ -1154,6 +1158,44 @@
 			gitCredentials = [];
 		}
 		showGitModal = true;
+	}
+
+	async function convertGitStackToLocal(stackName: string, gitStackId: number) {
+		operationError = null;
+		try {
+			const response = await fetch(appendEnvParam(`/api/git/stacks/${gitStackId}/detach`, envId), {
+				method: 'POST'
+			});
+
+			if (!response.ok) {
+				let errorMsg = m.stacks_git_error_convert_local_failed();
+				try {
+					const data = await response.json();
+					errorMsg = data.error || errorMsg;
+				} catch {
+					// ignore parse errors
+				}
+				showErrorDialog(m.stacks_git_error_convert_title({ name: stackName }), errorMsg);
+				return;
+			}
+
+			toast.success(m.stacks_git_toast_convert_local_success({ name: stackName }));
+			showGitModal = false;
+			editingGitStack = null;
+			await fetchStacks();
+		} catch (error) {
+			console.error('Failed to convert stack to local source:', error);
+			const errorMsg = error instanceof Error ? error.message : m.stacks_git_error_convert_local_failed();
+			showErrorDialog(m.stacks_git_error_convert_title({ name: stackName }), errorMsg);
+		}
+	}
+
+	async function convertLocalStackToGit(stackName: string) {
+		const isUntracked = getStackSource(stackName).sourceType === 'external';
+		operationError = null;
+		showEditModal = false;
+		editingStackName = '';
+		await openGitModal(null, stackName, isUntracked);
 	}
 
 	async function startStack(name: string) {
@@ -3134,12 +3176,20 @@
 		stackModalGitInfo = null;
 		loadTags(envId);
 	}}
+	onConvertToGit={editingStackName && (
+		(getStackSource(editingStackName).sourceType === 'internal' && $canAccess('stacks', 'edit'))
+		|| (getStackSource(editingStackName).sourceType === 'external' && $canAccess('stacks', 'create'))
+	)
+		? () => convertLocalStackToGit(editingStackName)
+		: null}
 	onSuccess={fetchStacks}
 />
 
 <GitStackModal
 	bind:open={showGitModal}
 	gitStack={editingGitStack}
+	convertStackName={convertingStackName}
+	{untrackedStackName}
 	environmentId={envId}
 	icon={editingGitStack ? (stackSources[editingGitStack.stackName]?.icon ?? null) : null}
 	repositories={gitRepositories}
@@ -3148,7 +3198,10 @@
 		showGitModal = false;
 		editingGitStack = null;
 		loadTags(envId);
+		convertingStackName = null;
+		untrackedStackName = null;
 	}}
+	onConvertToLocal={editingGitStack ? () => convertGitStackToLocal(editingGitStack.stackName, editingGitStack.id) : null}
 	onSaved={fetchStacks}
 />
 
