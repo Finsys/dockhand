@@ -19,7 +19,7 @@ const NET_IO_SORT_CYCLE = [
 // Container grid columns
 export const containerColumns: ColumnConfig[] = [
 	{ id: 'select', label: '', fixed: 'start', width: 32, resizable: false },
-	{ id: 'name', label: 'Name', sortable: true, sortField: 'name', width: 140, minWidth: 80, grow: true },
+	{ id: 'name', label: 'Name', sortable: true, sortField: 'name', width: 140, minWidth: 140, grow: true },
 	{ id: 'image', label: 'Image', sortable: true, sortField: 'image', width: 180, minWidth: 100, grow: true },
 	{ id: 'state', label: 'State', sortable: true, sortField: 'state', width: 90, minWidth: 70, noTruncate: true },
 	{ id: 'health', label: 'Health', sortable: true, sortField: 'health', width: 55, minWidth: 40 },
