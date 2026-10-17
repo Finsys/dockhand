@@ -2820,6 +2820,16 @@
 	onRestart={$canAccess('containers', 'restart') ? (id) => restartContainer(id) : undefined}
 	onRemove={$canAccess('containers', 'remove') ? (id) => removeContainer(id) : undefined}
 	onEdit={$canAccess('containers', 'edit') ? (id) => editContainer(id) : undefined}
+	onTerminal={$canAccess('containers', 'exec')
+		? (id, name) => {
+			const container = containers.find((c) => c.id === id);
+			if (container) {
+				openTerminal(container);
+			} else {
+				goto(appendEnvParam(`/terminal?container=${id}`, envId));
+			}
+		}
+		: undefined}
 	onUpdate={$canAccess('containers', 'create')
 		? (id, name) => updateSingleContainer(id, name)
 		: undefined}
