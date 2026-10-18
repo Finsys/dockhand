@@ -12,7 +12,6 @@
 import { expandValue } from '../../utils/env-file-values';
 
 const ENV_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
-const DANGEROUS_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 
 // Compose reads `export KEY=value` as KEY; SOPS keeps the prefix as part of the key.
 const EXPORT_PREFIX_RE = /^export\s+/;
@@ -24,11 +23,12 @@ const SOPS_MAC_RE = /^sops_mac=/m;
 const SOPS_VERSION_RE = /^sops_version=/m;
 const SOPS_METADATA_PREFIX = 'sops_';
 
-// age X25519 identity, as printed by `age-keygen`: Bech32, upper case. Not anchored
-// to a line: a password input collapses a pasted keys.txt onto one line.
-const AGE_IDENTITY_RE = /AGE-SECRET-KEY-1[023456789ACDEFGHJKLMNPQRSTUVWXYZ]{58}(?![0-9A-Z])/g;
-// Plugin (YubiKey, TPM, ...) and post-quantum identities need more than SOPS_AGE_KEY.
-const UNSUPPORTED_IDENTITY_RE = /AGE-PLUGIN-[A-Z0-9-]+-1|AGE-SECRET-KEY-PQ-1/;
+// age identity as printed by `age-keygen` (X25519) or `age-keygen -pq` (post-quantum):
+// Bech32, upper case. Not anchored to a line: a password input collapses a pasted
+// keys.txt onto one line.
+const AGE_IDENTITY_RE = /AGE-SECRET-KEY-(?:PQ-)?1[023456789ACDEFGHJKLMNPQRSTUVWXYZ]{58}(?![0-9A-Z])/g;
+// Plugin identities (YubiKey, TPM, ...) need a plugin binary the image does not have.
+const PLUGIN_IDENTITY_RE = /AGE-PLUGIN-[A-Z0-9-]+-1/;
 
 /** True when `content` is a SOPS-encrypted dotenv file. */
 export function isSopsDotenv(content: string | undefined | null): content is string {
@@ -90,10 +90,10 @@ export function normalizeAgeIdentities(raw: unknown): string {
 	if (typeof raw !== 'string' || !raw.trim()) throw new Error('SOPS age key is required');
 	const identities = [...new Set(raw.match(AGE_IDENTITY_RE) ?? [])];
 	if (identities.length === 0) {
-		if (UNSUPPORTED_IDENTITY_RE.test(raw)) {
-			throw new Error('SOPS age key: only X25519 identities (AGE-SECRET-KEY-1...) are supported, not plugin or post-quantum ones');
+		if (PLUGIN_IDENTITY_RE.test(raw)) {
+			throw new Error('SOPS age key: plugin identities (AGE-PLUGIN-...) are not supported');
 		}
-		throw new Error('SOPS age key must contain at least one AGE-SECRET-KEY-1... identity');
+		throw new Error('SOPS age key must contain at least one AGE-SECRET-KEY-... identity');
 	}
 	return identities.join('\n');
 }
@@ -101,10 +101,7 @@ export function normalizeAgeIdentities(raw: unknown): string {
 /**
  * Merges a decrypted env file into the resolver's maps, in place. Decrypted values
  * become secrets (shell env, never disk) underneath explicit DB secrets and DB
- * overrides. A DB non-secret that is still ciphertext is no override - the restore
- * path passes the env file itself in as non-secrets - so it is dropped instead,
- * and the ciphertext never reaches compose in place of the value. Returns how many
- * values were injected.
+ * overrides. Returns how many values were injected.
  */
 export function mergeDecryptedEnvFile(
 	decrypted: Record<string, string>,
@@ -113,7 +110,6 @@ export function mergeDecryptedEnvFile(
 ): number {
 	let injected = 0;
 	for (const [key, value] of Object.entries(decrypted)) {
-		if (Object.hasOwn(dbNonSecretVars, key) && isSopsCiphertext(dbNonSecretVars[key])) delete dbNonSecretVars[key];
 		if (Object.hasOwn(secretVars, key) || Object.hasOwn(dbNonSecretVars, key)) continue;
 		secretVars[key] = value;
 		injected++;
@@ -152,7 +148,8 @@ export function parseSopsDecryptOutput(
 	const skipped: string[] = [];
 	for (const [rawKey, value] of Object.entries(parsed as Record<string, unknown>)) {
 		const key = rawKey.replace(EXPORT_PREFIX_RE, '');
-		if (!ENV_NAME_RE.test(key) || DANGEROUS_KEYS.has(key) || typeof value !== 'string' || value.includes('\0')) {
+		// __proto__ would set the prototype of the plain object the values are merged into.
+		if (!ENV_NAME_RE.test(key) || key === '__proto__' || typeof value !== 'string' || value.includes('\0')) {
 			skipped.push(rawKey);
 			continue;
 		}

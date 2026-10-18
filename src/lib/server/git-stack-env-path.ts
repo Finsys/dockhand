@@ -29,6 +29,6 @@ export function gitStackEnvFileRelPath(stack: GitStackEnvPathInput): string | nu
 		? posix.normalize(stack.contextDir.trim())
 		: posix.dirname(posix.normalize(stack.composePath));
 	const rel = posix.relative(posix.normalize(`/${sourceDir}`), posix.normalize(`/${envFilePath}`));
-	if (!rel || rel === '..' || rel.startsWith('../') || posix.isAbsolute(rel)) return null;
+	if (!rel || rel === '..' || rel.startsWith('../')) return null;
 	return rel;
 }

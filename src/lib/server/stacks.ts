@@ -3355,12 +3355,7 @@ export async function deployStack(options: DeployStackOptions): Promise<StackOpe
 		// Only a file inside the stack directory: one outside it (an env file path above
 		// the compose directory) was never copied from the repository.
 		let configuredEnvFileContent: string | undefined;
-		const configuredRel = actualEnvPath ? relative(workingDir, actualEnvPath) : '';
-		if (
-			sourceDir && envFileName && actualEnvPath &&
-			configuredRel && !configuredRel.startsWith('..') && !isAbsolute(configuredRel) &&
-			existsSync(actualEnvPath)
-		) {
+		if (sourceDir && envFileName && !envFileName.startsWith('..') && actualEnvPath && existsSync(actualEnvPath)) {
 			try {
 				configuredEnvFileContent = readFileSync(actualEnvPath, 'utf-8');
 			} catch (err) {

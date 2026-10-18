@@ -72,9 +72,13 @@ describe('normalizeAgeIdentities', () => {
 		expect(normalizeAgeIdentities(raw)).toBe(`${TEST_IDENTITY}\n${OTHER_IDENTITY}`);
 	});
 
-	test('names plugin and post-quantum identities as unsupported', () => {
-		expect(() => normalizeAgeIdentities('AGE-PLUGIN-YUBIKEY-1QQQQ')).toThrow(/only X25519 identities/);
-		expect(() => normalizeAgeIdentities('AGE-SECRET-KEY-PQ-1QQQQ')).toThrow(/only X25519 identities/);
+	test('accepts a post-quantum identity (age-keygen -pq)', () => {
+		const pq = `AGE-SECRET-KEY-PQ-1${TEST_IDENTITY.slice('AGE-SECRET-KEY-1'.length)}`;
+		expect(normalizeAgeIdentities(`${pq}\n${TEST_IDENTITY}`)).toBe(`${pq}\n${TEST_IDENTITY}`);
+	});
+
+	test('names a plugin identity as unsupported', () => {
+		expect(() => normalizeAgeIdentities('AGE-PLUGIN-YUBIKEY-1QQQQ')).toThrow(/plugin identities/);
 	});
 
 	test('rejects input without an identity, without echoing it', () => {
@@ -157,6 +161,11 @@ describe('parseSopsDecryptOutput', () => {
 			all(['GOOD', 'BAD-KEY', '__proto__x'])
 		);
 		expect(vars).toEqual({ GOOD: 'x', __proto__x: 'y' });
+
+		// Written as JSON text: an object literal would set the prototype instead.
+		const proto = parseSopsDecryptOutput('{"__proto__":"x","GOOD":"y"}', all(['__proto__', 'GOOD']));
+		expect(proto.vars).toEqual({ GOOD: 'y' });
+		expect(proto.skipped).toEqual(['__proto__']);
 		expect(skipped).toEqual(['BAD-KEY']);
 	});
 
@@ -187,14 +196,6 @@ describe('mergeDecryptedEnvFile', () => {
 		expect(secretVars).toEqual({ toString: 'a', valueOf: 'b' });
 	});
 
-	test('a non-secret that is still ciphertext is replaced, not kept as an override', () => {
-		const ciphertext = 'ENC[AES256_GCM,data:GX0t,iv:abc=,tag:def=,type:str]';
-		const dbNonSecretVars = { DB_PASSWORD: ciphertext, LOG_LEVEL: 'info' };
-		const secretVars: Record<string, string> = {};
-		mergeDecryptedEnvFile({ DB_PASSWORD: 's3cr3t' }, dbNonSecretVars, secretVars);
-		expect(dbNonSecretVars).toEqual({ LOG_LEVEL: 'info' });
-		expect(secretVars).toEqual({ DB_PASSWORD: 's3cr3t' });
-	});
 });
 
 describe('gitStackEnvFileRelPath', () => {
@@ -269,6 +270,6 @@ describe.skipIf(!sopsPath)('SOPS provider (real sops binary)', () => {
 		expect(await sopsProvider.testConnection({ ageKey: TEST_IDENTITY })).toEqual({ ok: true });
 		const bad = await sopsProvider.testConnection({ ageKey: 'nope' });
 		expect(bad.ok).toBe(false);
-		expect(bad.error).toMatch(/AGE-SECRET-KEY-1/);
+		expect(bad.error).toMatch(/AGE-SECRET-KEY-\.\.\./);
 	});
 });

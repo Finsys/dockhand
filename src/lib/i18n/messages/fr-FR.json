@@ -6346,7 +6346,7 @@
 	"settings_secrets_keepass_note_database_before": "du processus), et la base de données",
 	"settings_secrets_keepass_note_database_after": "montée en bind dans le conteneur en lecture seule au chemin ci-dessus. Prend en charge à la fois un chargement groupé par groupe et les",
 	"settings_secrets_field_sops_age_key": "Clé secrète age",
-	"settings_secrets_field_sops_age_key_hint": "Une ou plusieurs identités age X25519 (AGE-SECRET-KEY-1...) destinataires du fichier env chiffré. Vous pouvez aussi coller tout le keys.txt généré par age-keygen.",
+	"settings_secrets_field_sops_age_key_hint": "Une ou plusieurs identités age (AGE-SECRET-KEY-...) destinataires du fichier env chiffré. Vous pouvez aussi coller tout le keys.txt généré par age-keygen.",
 	"settings_secrets_sops_note_before": "Déchiffre le fichier env de la stack Git lorsqu'il a été chiffré avec",
 	"settings_secrets_sops_note_override_before": "pour l'une de ces clés. Les valeurs sont injectées comme secrets et jamais écrites sur le disque. Le client sops est inclus dans l'image ; pour en utiliser un autre, définissez un chemin absolu dans",
 	"settings_secrets_sops_note_after": ".",

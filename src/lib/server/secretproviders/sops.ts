@@ -7,11 +7,12 @@
  * the provider implements `decryptEnvFile` and nothing else.
  *
  * An adapter around the `sops` executable (shipped in the image, overridable with
- * DOCKHAND_SOPS_PATH; needs sops 3.10+, which reads stdin when given no file). The
+ * DOCKHAND_SOPS_PATH; needs sops 3.12+: 3.10 reads stdin when given no file, 3.12
+ * takes post-quantum age identities, and every image ships 3.12 or later). The
  * ciphertext goes in on stdin - not as `/dev/stdin`, which cannot be opened on the
  * socket Node gives a child for stdin on Linux - and the plaintext comes back on
  * stdout, so neither touches the disk. The age identity is passed to the child
- * only, via SOPS_AGE_KEY in an otherwise minimal environment - never on argv (it
+ * only, via SOPS_AGE_KEY in an otherwise empty environment - never on argv (it
  * would show on /proc/<pid>/cmdline), and without HOME so SOPS cannot fall back to
  * an SSH key or keys.txt that happens to exist in the container.
  */
@@ -30,25 +31,18 @@ const STDOUT_OUTPUT_LIMIT = 10 * 1024 * 1024;
 const STDERR_OUTPUT_LIMIT = 64 * 1024;
 const KILL_GRACE_MS = 2_000;
 
-class SopsCliError extends Error {
-	constructor(message: string) {
-		super(message);
-		this.name = 'SopsCliError';
-	}
-}
-
 function executablePath(): string {
 	const override = process.env.DOCKHAND_SOPS_PATH?.trim();
 	if (!override) return DEFAULT_CLI_PATH;
-	if (!isAbsolute(override)) throw new SopsCliError('SOPS executable path must be absolute');
+	if (!isAbsolute(override)) throw new Error('SOPS executable path must be absolute');
 	return override;
 }
 
-function spawnFailure(error: unknown): SopsCliError {
+function spawnFailure(error: unknown): Error {
 	const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
-	if (code === 'ENOENT') return new SopsCliError('SOPS executable was not found');
-	if (code === 'EACCES') return new SopsCliError('SOPS executable is not executable');
-	return new SopsCliError('SOPS executable could not be started');
+	if (code === 'ENOENT') return new Error('SOPS executable was not found');
+	if (code === 'EACCES') return new Error('SOPS executable is not executable');
+	return new Error('SOPS executable could not be started');
 }
 
 /**
@@ -77,12 +71,11 @@ async function executeSops(
 		return await new Promise<Buffer>((resolve, reject) => {
 			let stdoutBytes = 0;
 			let stderrBytes = 0;
-			let failure: SopsCliError | undefined;
+			let failure: Error | undefined;
 			let settled = false;
 			let killTimer: ReturnType<typeof setTimeout> | undefined;
 
-			const env: Record<string, string> = { PATH: '/usr/local/bin:/usr/bin:/bin' };
-			if (ageKey) env.SOPS_AGE_KEY = ageKey;
+			const env: Record<string, string> = ageKey ? { SOPS_AGE_KEY: ageKey } : {};
 
 			const child = spawn(executablePath(), args, {
 				stdio: ['pipe', 'pipe', 'pipe'],
@@ -90,7 +83,7 @@ async function executeSops(
 				env
 			});
 
-			const terminate = (error: SopsCliError) => {
+			const terminate = (error: Error) => {
 				if (failure) return;
 				failure = error;
 				try {
@@ -110,7 +103,7 @@ async function executeSops(
 			};
 
 			const timeout = setTimeout(
-				() => terminate(new SopsCliError(cliTimeoutMessage('SOPS', phase, timeoutMs, TIMEOUT_ENV_VAR))),
+				() => terminate(new Error(cliTimeoutMessage('SOPS', phase, timeoutMs, TIMEOUT_ENV_VAR))),
 				timeoutMs
 			);
 
@@ -124,7 +117,7 @@ async function executeSops(
 				const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
 				stdoutBytes += data.length;
 				if (stdoutBytes > STDOUT_OUTPUT_LIMIT) {
-					terminate(new SopsCliError('SOPS output exceeded the size limit'));
+					terminate(new Error('SOPS output exceeded the size limit'));
 					return;
 				}
 				stdoutChunks.push(Buffer.from(data));
@@ -135,7 +128,7 @@ async function executeSops(
 				if (failure) return;
 				stderrBytes += Buffer.byteLength(chunk);
 				if (stderrBytes > STDERR_OUTPUT_LIMIT) {
-					terminate(new SopsCliError('SOPS error output exceeded the size limit'));
+					terminate(new Error('SOPS error output exceeded the size limit'));
 				}
 			});
 
@@ -157,7 +150,7 @@ async function executeSops(
 					return;
 				}
 				if (code !== 0) {
-					reject(new SopsCliError(nonZeroExitMessage(code)));
+					reject(new Error(nonZeroExitMessage(code)));
 					return;
 				}
 				resolve(Buffer.concat(stdoutChunks, stdoutBytes));
@@ -187,8 +180,7 @@ export const sopsProvider: SecretProvider<SopsConfig> = {
 			normalizeAgeIdentities(config.ageKey);
 			// There is no backend to reach: what can fail is the key's shape (checked above)
 			// and the executable. --disable-version-check keeps --version off the network.
-			const output = await executeSops('version check', ['--disable-version-check', '--version'], undefined, undefined);
-			output.fill(0);
+			await executeSops('version check', ['--disable-version-check', '--version'], undefined, undefined);
 			return { ok: true };
 		} catch (error: unknown) {
 			return { ok: false, error: sanitizedError(error) };
