@@ -7,8 +7,10 @@
  * the provider implements `decryptEnvFile` and nothing else.
  *
  * An adapter around the `sops` executable (shipped in the image, overridable with
- * DOCKHAND_SOPS_PATH). The ciphertext goes in on stdin and the plaintext comes back
- * on stdout, so neither touches the disk. The age identity is passed to the child
+ * DOCKHAND_SOPS_PATH; needs sops 3.10+, which reads stdin when given no file). The
+ * ciphertext goes in on stdin - not as `/dev/stdin`, which cannot be opened on the
+ * socket Node gives a child for stdin on Linux - and the plaintext comes back on
+ * stdout, so neither touches the disk. The age identity is passed to the child
  * only, via SOPS_AGE_KEY in an otherwise minimal environment - never on argv (it
  * would show on /proc/<pid>/cmdline), and without HOME so SOPS cannot fall back to
  * an SSH key or keys.txt that happens to exist in the container.
@@ -207,7 +209,7 @@ export const sopsProvider: SecretProvider<SopsConfig> = {
 		try {
 			output = await executeSops(
 				'decrypt',
-				['decrypt', '--input-type', 'dotenv', '--output-type', 'json', '/dev/stdin'],
+				['decrypt', '--input-type', 'dotenv', '--output-type', 'json'],
 				ageKey,
 				content
 			);
