@@ -48,6 +48,7 @@ RUN APKO_ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "aarch64" || echo "x86_64") 
     "    - tini" \
     "    - su-exec" \
     "    - restic" \
+    "    - sops" \
     "    - glibc" \
     "    - libstdc++" \
     "entrypoint:" \

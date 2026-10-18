@@ -99,6 +99,7 @@ RUN apk add --no-cache \
     postgresql17-client \
     git \
     openssh-client \
+    sops \
     curl \
     tini \
     su-exec \
