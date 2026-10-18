@@ -478,8 +478,8 @@ export interface SecretProvider<C extends SecretProviderConfig = SecretProviderC
 	 * Optional: decrypts a stack's whole env file (e.g. a SOPS-encrypted dotenv
 	 * committed to a Git stack) into a flat key/value map. Only called for content
 	 * the provider's backend encrypted - the caller checks the format first.
-	 * Failures throw, so a stack never deploys with ciphertext in place of its
-	 * secrets.
+	 * A failure to decrypt throws, so a stack bound to the provider never deploys
+	 * with ciphertext in place of its secrets.
 	 */
 	decryptEnvFile?(config: C, content: string, logPrefix?: string): Promise<Record<string, string>>;
 }

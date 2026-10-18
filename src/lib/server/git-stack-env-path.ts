@@ -11,7 +11,8 @@
 import { posix } from 'node:path';
 
 export interface GitStackEnvPathInput {
-	composePath: string;
+	// Nullable in the database even though the column has a default.
+	composePath: string | null;
 	contextDir?: string | null;
 	envFilePath?: string | null;
 }
@@ -23,7 +24,7 @@ export interface GitStackEnvPathInput {
  */
 export function gitStackEnvFileRelPath(stack: GitStackEnvPathInput): string | null {
 	const envFilePath = stack.envFilePath?.trim();
-	if (!envFilePath) return null;
+	if (!envFilePath || !stack.composePath) return null;
 	const sourceDir = stack.contextDir?.trim()
 		? posix.normalize(stack.contextDir.trim())
 		: posix.dirname(posix.normalize(stack.composePath));

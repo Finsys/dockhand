@@ -9,11 +9,14 @@ import { describe, test, expect } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+	envFileKeys,
 	isSopsCiphertext,
 	isSopsDotenv,
 	mergeDecryptedEnvFile,
 	normalizeAgeIdentities,
-	parseSopsDecryptOutput
+	parseSopsDecryptOutput,
+	sopsEncryptedKeys,
+	withoutSopsArtifacts
 } from '../src/lib/server/secretproviders/sops-core';
 import { gitStackEnvFileRelPath } from '../src/lib/server/git-stack-env-path';
 import { redactProviderConfig, SECRET_CONFIG_KEYS } from '../src/lib/server/secretproviders/shared';
@@ -69,6 +72,11 @@ describe('normalizeAgeIdentities', () => {
 		expect(normalizeAgeIdentities(raw)).toBe(`${TEST_IDENTITY}\n${OTHER_IDENTITY}`);
 	});
 
+	test('names plugin and post-quantum identities as unsupported', () => {
+		expect(() => normalizeAgeIdentities('AGE-PLUGIN-YUBIKEY-1QQQQ')).toThrow(/only X25519 identities/);
+		expect(() => normalizeAgeIdentities('AGE-SECRET-KEY-PQ-1QQQQ')).toThrow(/only X25519 identities/);
+	});
+
 	test('rejects input without an identity, without echoing it', () => {
 		for (const raw of ['', '   ', 'age1publickeyonly', 'AGE-SECRET-KEY-1TOOSHORT', undefined, 42]) {
 			let message = '';
@@ -83,26 +91,79 @@ describe('normalizeAgeIdentities', () => {
 	});
 });
 
-describe('parseSopsDecryptOutput', () => {
-	test('strips one layer of matching quotes, as compose does for an env file', () => {
-		const { vars } = parseSopsDecryptOutput(
-			JSON.stringify({ A: '"with spaces"', B: "'single'", C: '"mismatched\'', D: '""', E: ' padded ' })
+describe('sopsEncryptedKeys / envFileKeys', () => {
+	test('lists only the keys whose value sops encrypted, export prefix and metadata aside', () => {
+		// Not EMPTY (sops leaves an empty value as is), PUBLIC_unencrypted (left in the
+		// clear by the suffix) or BAD-KEY (no env-var name).
+		expect([...sopsEncryptedKeys(ENCRYPTED)].sort()).toEqual(
+			['COMMENTED', 'DB_PASSWORD', 'ESCAPED', 'EXPORTED', 'QUOTED', 'REF', 'SINGLE']
 		);
-		expect(vars).toEqual({ A: 'with spaces', B: 'single', C: '"mismatched\'', D: '', E: ' padded ' });
+	});
+
+	test('reads the names a plain env file defines', () => {
+		expect([...envFileKeys('# c\nA=1\nexport B=2\n  C = 3\nnot a line\n')]).toEqual(['A', 'B', 'C']);
+		expect(envFileKeys(undefined).size).toBe(0);
+	});
+});
+
+describe('withoutSopsArtifacts', () => {
+	test('drops the sops_* metadata and values still encrypted', () => {
+		expect(
+			withoutSopsArtifacts({ A: 'ENC[AES256_GCM,data:x,iv:y,tag:z,type:str]', sops_mac: 'm', sops_version: '3', PLAIN: 'p' })
+		).toEqual({ PLAIN: 'p' });
+	});
+});
+
+describe('parseSopsDecryptOutput', () => {
+	const all = (keys: string[]) => new Set(keys);
+
+	test('reads values the way compose reads an env file', () => {
+		const { vars } = parseSopsDecryptOutput(
+			JSON.stringify({
+				A: '"with spaces"',
+				B: "'single $A'",
+				C: '"mismatched\'',
+				D: '""',
+				E: 'value # comment',
+				F: '${A}-x',
+				G: '"esc \\" q"',
+				'export H': 'h'
+			}),
+			all(['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'])
+		);
+		expect(vars).toEqual({
+			A: 'with spaces',
+			B: 'single $A',
+			C: '"mismatched\'',
+			D: '',
+			E: 'value',
+			F: 'with spaces-x',
+			G: 'esc " q',
+			H: 'h'
+		});
+	});
+
+	test('returns only encrypted keys, but lets later lines refer to the rest', () => {
+		const { vars } = parseSopsDecryptOutput(
+			JSON.stringify({ HOST_unencrypted: 'db', URL: 'postgres://${HOST_unencrypted}' }),
+			all(['URL'])
+		);
+		expect(vars).toEqual({ URL: 'postgres://db' });
 	});
 
 	test('skips keys that are not env-var names, reporting the name only', () => {
 		const { vars, skipped } = parseSopsDecryptOutput(
-			JSON.stringify({ GOOD: 'x', 'BAD-KEY': 'secret-value', __proto__x: 'y' })
+			JSON.stringify({ GOOD: 'x', 'BAD-KEY': 'secret-value', __proto__x: 'y' }),
+			all(['GOOD', 'BAD-KEY', '__proto__x'])
 		);
 		expect(vars).toEqual({ GOOD: 'x', __proto__x: 'y' });
 		expect(skipped).toEqual(['BAD-KEY']);
 	});
 
 	test('rejects output that is not a flat JSON object', () => {
-		expect(() => parseSopsDecryptOutput('not json')).toThrow(/not JSON/);
-		expect(() => parseSopsDecryptOutput('[]')).toThrow(/key\/value map/);
-		expect(() => parseSopsDecryptOutput('null')).toThrow(/key\/value map/);
+		expect(() => parseSopsDecryptOutput('not json', all([]))).toThrow(/not JSON/);
+		expect(() => parseSopsDecryptOutput('[]', all([]))).toThrow(/key\/value map/);
+		expect(() => parseSopsDecryptOutput('null', all([]))).toThrow(/key\/value map/);
 	});
 });
 
@@ -118,6 +179,12 @@ describe('mergeDecryptedEnvFile', () => {
 		expect(injected).toBe(1);
 		expect(secretVars).toEqual({ DB_PASSWORD: 'explicit-db-secret', TOKEN: 't0k3n' });
 		expect(dbNonSecretVars).toEqual({ LOG_LEVEL: 'debug', API_URL: 'https://override' });
+	});
+
+	test('names that exist on Object.prototype are injected like any other', () => {
+		const secretVars: Record<string, string> = {};
+		mergeDecryptedEnvFile({ toString: 'a', valueOf: 'b' }, {}, secretVars);
+		expect(secretVars).toEqual({ toString: 'a', valueOf: 'b' });
 	});
 
 	test('a non-secret that is still ciphertext is replaced, not kept as an override', () => {
@@ -148,6 +215,7 @@ describe('gitStackEnvFileRelPath', () => {
 		expect(gitStackEnvFileRelPath({ composePath: 'compose.yaml', envFilePath: '  ' })).toBeNull();
 		expect(gitStackEnvFileRelPath({ composePath: 'stacks/app/compose.yaml', envFilePath: 'secrets.sops.env' })).toBeNull();
 		expect(gitStackEnvFileRelPath({ composePath: 'stacks/app/compose.yaml', envFilePath: 'stacks/app' })).toBeNull();
+		expect(gitStackEnvFileRelPath({ composePath: null, envFilePath: 'secrets.sops.env' })).toBeNull();
 	});
 });
 
@@ -173,7 +241,17 @@ describe.skipIf(!sopsPath)('SOPS provider (real sops binary)', () => {
 	test('decrypts the env file with a recipient key', async () => {
 		const { sopsProvider } = await import('../src/lib/server/secretproviders/sops');
 		const vars = await sopsProvider.decryptEnvFile!({ ageKey: TEST_KEYS_TXT }, ENCRYPTED);
-		expect(vars).toEqual({ DB_PASSWORD: 's3cr3t', QUOTED: 'with spaces', EMPTY: '' });
+		// EMPTY and PUBLIC_unencrypted are not encrypted (compose reads them from the
+		// file); BAD-KEY is no env-var name.
+		expect(vars).toEqual({
+			DB_PASSWORD: 's3cr3t',
+			QUOTED: 'with spaces',
+			EXPORTED: 'e1',
+			COMMENTED: 'value',
+			REF: 's3cr3t-x',
+			ESCAPED: 'a " b',
+			SINGLE: '$DB_PASSWORD'
+		});
 	});
 
 	test('fails, rather than deploying ciphertext, when no key is a recipient', async () => {
@@ -183,7 +261,7 @@ describe.skipIf(!sopsPath)('SOPS provider (real sops binary)', () => {
 
 	test('fails on content sops cannot read', async () => {
 		const { sopsProvider } = await import('../src/lib/server/secretproviders/sops');
-		await expect(sopsProvider.decryptEnvFile!({ ageKey: TEST_IDENTITY }, 'A=b\n')).rejects.toThrow(/could not decrypt/);
+		await expect(sopsProvider.decryptEnvFile!({ ageKey: TEST_IDENTITY }, 'A=b\n')).rejects.toThrow(/not be valid SOPS dotenv/);
 	});
 
 	test('testConnection checks the key shape and the executable', async () => {

@@ -5,19 +5,30 @@
  * SOPS encrypts a dotenv file value by value and appends its own metadata as
  * `sops_*` lines. Only files in that shape are handed to the CLI; a plain env file
  * bound to a SOPS provider is left alone, exactly as before the provider existed.
+ *
+ * Nothing here logs: the decrypted values pass through these functions.
  */
+
+import { expandValue } from '../../utils/env-file-values';
 
 const ENV_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const DANGEROUS_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+
+// Compose reads `export KEY=value` as KEY; SOPS keeps the prefix as part of the key.
+const EXPORT_PREFIX_RE = /^export\s+/;
+const ENV_LINE_RE = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/;
 
 // Every SOPS dotenv file carries both of these; a hand-written env file practically
 // never does. Anchored to a line start so a value that merely mentions them is no match.
 const SOPS_MAC_RE = /^sops_mac=/m;
 const SOPS_VERSION_RE = /^sops_version=/m;
+const SOPS_METADATA_PREFIX = 'sops_';
 
 // age X25519 identity, as printed by `age-keygen`: Bech32, upper case. Not anchored
 // to a line: a password input collapses a pasted keys.txt onto one line.
 const AGE_IDENTITY_RE = /AGE-SECRET-KEY-1[023456789ACDEFGHJKLMNPQRSTUVWXYZ]{58}(?![0-9A-Z])/g;
+// Plugin (YubiKey, TPM, ...) and post-quantum identities need more than SOPS_AGE_KEY.
+const UNSUPPORTED_IDENTITY_RE = /AGE-PLUGIN-[A-Z0-9-]+-1|AGE-SECRET-KEY-PQ-1/;
 
 /** True when `content` is a SOPS-encrypted dotenv file. */
 export function isSopsDotenv(content: string | undefined | null): content is string {
@@ -31,6 +42,44 @@ export function isSopsCiphertext(value: unknown): boolean {
 }
 
 /**
+ * The keys of a SOPS file whose values are encrypted. SOPS can leave some values in
+ * the clear (`unencrypted_suffix` / `unencrypted_regex`); those are not secrets, and
+ * compose already reads them from the file itself.
+ */
+export function sopsEncryptedKeys(content: string): Set<string> {
+	const keys = new Set<string>();
+	for (const line of content.split('\n')) {
+		const match = ENV_LINE_RE.exec(line);
+		if (match && !match[1].startsWith(SOPS_METADATA_PREFIX) && isSopsCiphertext(match[2])) keys.add(match[1]);
+	}
+	return keys;
+}
+
+/** The variable names an env file defines, read the way compose reads them. */
+export function envFileKeys(content: string | undefined): Set<string> {
+	const keys = new Set<string>();
+	for (const line of (content ?? '').split('\n')) {
+		const match = ENV_LINE_RE.exec(line);
+		if (match) keys.add(match[1]);
+	}
+	return keys;
+}
+
+/**
+ * A SOPS file's parsed vars without what only SOPS needs: its `sops_*` metadata and
+ * values still encrypted. For the places that read the file as plain env (Hawser
+ * merges it into the remote compose environment), where both would otherwise land.
+ */
+export function withoutSopsArtifacts(vars: Record<string, string>): Record<string, string> {
+	const out: Record<string, string> = {};
+	for (const [key, value] of Object.entries(vars)) {
+		if (key.startsWith(SOPS_METADATA_PREFIX) || isSopsCiphertext(value)) continue;
+		out[key] = value;
+	}
+	return out;
+}
+
+/**
  * Normalises the configured age key(s) into the newline-separated form SOPS reads
  * from `SOPS_AGE_KEY`. Accepts a bare `AGE-SECRET-KEY-1...` or the whole `keys.txt`
  * written by `age-keygen` - its comments (creation date, public key) are not
@@ -41,6 +90,9 @@ export function normalizeAgeIdentities(raw: unknown): string {
 	if (typeof raw !== 'string' || !raw.trim()) throw new Error('SOPS age key is required');
 	const identities = [...new Set(raw.match(AGE_IDENTITY_RE) ?? [])];
 	if (identities.length === 0) {
+		if (UNSUPPORTED_IDENTITY_RE.test(raw)) {
+			throw new Error('SOPS age key: only X25519 identities (AGE-SECRET-KEY-1...) are supported, not plugin or post-quantum ones');
+		}
 		throw new Error('SOPS age key must contain at least one AGE-SECRET-KEY-1... identity');
 	}
 	return identities.join('\n');
@@ -61,8 +113,8 @@ export function mergeDecryptedEnvFile(
 ): number {
 	let injected = 0;
 	for (const [key, value] of Object.entries(decrypted)) {
-		if (key in dbNonSecretVars && isSopsCiphertext(dbNonSecretVars[key])) delete dbNonSecretVars[key];
-		if (key in secretVars || key in dbNonSecretVars) continue;
+		if (Object.hasOwn(dbNonSecretVars, key) && isSopsCiphertext(dbNonSecretVars[key])) delete dbNonSecretVars[key];
+		if (Object.hasOwn(secretVars, key) || Object.hasOwn(dbNonSecretVars, key)) continue;
 		secretVars[key] = value;
 		injected++;
 	}
@@ -70,23 +122,21 @@ export function mergeDecryptedEnvFile(
 }
 
 /**
- * Strips ONE layer of matching surrounding quotes. SOPS's dotenv format keeps a
- * value's quotes as part of the value, while Compose strips them when it reads an
- * env file - so `PASSWORD="a b"` would otherwise reach the container with the
- * quotes. Unlike stripSurroundingQuotes in ./shared, whitespace is kept: it is
- * part of the secret.
- */
-function stripMatchingQuotes(value: string): string {
-	return value.replace(/^(["'])(.*)\1$/s, '$2');
-}
-
-/**
  * Parses the JSON that `sops decrypt --input-type dotenv --output-type json`
- * prints into a flat env map. SOPS has already left its `sops_*` metadata out.
- * Keys that are not valid env-var names are skipped (with their name reported,
- * never their value) rather than failing the whole file.
+ * prints into a flat env map, reading each value the way compose reads an env
+ * file. SOPS's dotenv format takes everything after `=` verbatim, while compose
+ * strips quotes and an `export` prefix, drops a ` # comment`, unescapes double
+ * quotes and expands `${VAR}` from earlier lines - so without this, a value would
+ * reach the container differently from the same line in a plain `.env`.
+ *
+ * Only `encryptedKeys` are returned: a value SOPS left in the clear is no secret
+ * and compose reads it from the file. Keys that are not valid env-var names are
+ * skipped, with their name reported, never their value.
  */
-export function parseSopsDecryptOutput(stdout: string): { vars: Record<string, string>; skipped: string[] } {
+export function parseSopsDecryptOutput(
+	stdout: string,
+	encryptedKeys: ReadonlySet<string>
+): { vars: Record<string, string>; skipped: string[] } {
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(stdout);
@@ -96,14 +146,18 @@ export function parseSopsDecryptOutput(stdout: string): { vars: Record<string, s
 	if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
 		throw new Error('SOPS returned output that is not a key/value map');
 	}
+	// Every value, encrypted or not, is known to the lines below it, as in compose.
+	const known = Object.create(null) as Record<string, string>;
 	const vars = Object.create(null) as Record<string, string>;
 	const skipped: string[] = [];
-	for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+	for (const [rawKey, value] of Object.entries(parsed as Record<string, unknown>)) {
+		const key = rawKey.replace(EXPORT_PREFIX_RE, '');
 		if (!ENV_NAME_RE.test(key) || DANGEROUS_KEYS.has(key) || typeof value !== 'string' || value.includes('\0')) {
-			skipped.push(key);
+			skipped.push(rawKey);
 			continue;
 		}
-		vars[key] = stripMatchingQuotes(value);
+		known[key] = expandValue(value, known);
+		if (encryptedKeys.has(key)) vars[key] = known[key];
 	}
 	return { vars, skipped };
 }

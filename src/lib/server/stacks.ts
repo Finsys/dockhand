@@ -11,6 +11,7 @@ import { join, resolve, relative, dirname, basename, isAbsolute, normalize as pa
 import { judgeSymlink } from './stack-symlinks';
 import { spawn as nodeSpawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
+import type { StackSourceWithRepo } from './db';
 import { redactSecretVars } from './secret-redact';
 import { collectProcess } from './process-output-core';
 import { dockerTlsEnv } from './docker-tls-env';
@@ -56,7 +57,7 @@ import {
 } from './db';
 import { getProvider } from './secretproviders';
 import { stripSurroundingQuotes } from './secretproviders/shared';
-import { isSopsDotenv, mergeDecryptedEnvFile } from './secretproviders/sops-core';
+import { envFileKeys, isSopsDotenv, mergeDecryptedEnvFile, withoutSopsArtifacts } from './secretproviders/sops-core';
 import { gitStackEnvFileRelPath } from './git-stack-env-path';
 import { resolveComposeDockerHost, buildComposeBaseArgs } from './compose-docker-args';
 import { unregisterSchedule } from './scheduler';
@@ -1917,7 +1918,12 @@ async function executeComposeCommand(
 			if (envPath && existsSync(envPath)) {
 				try {
 					const envFileContent = readFileSync(envPath, 'utf-8');
-					const envFileVars = parseEnvFileContent(envFileContent, stackName);
+					const parsedEnvFileVars = parseEnvFileContent(envFileContent, stackName);
+					// A SOPS file's metadata and ciphertext are no values to inject; its
+					// decrypted values arrive as secretVars.
+					const envFileVars = isSopsDotenv(envFileContent)
+						? withoutSopsArtifacts(parsedEnvFileVars)
+						: parsedEnvFileVars;
 					// Merge: envFileVars (lowest) < envVars (DB overrides)
 					// secretVars are handled separately in executeComposeViaHawser
 					hawserEnvVars = { ...envFileVars, ...(envVars || {}) };
@@ -2481,6 +2487,9 @@ export async function redeployStackFromDir(
 	const hasEnv = existsSync(envPath);
 	const envFileContent = hasEnv ? readFileSync(envPath, 'utf-8') : undefined;
 	let envVars = envFileContent ? parseEnvFileContent(envFileContent, stackName) : undefined;
+	// A SOPS .env's metadata is no value, and its ciphertext is replaced by the
+	// decrypted values the resolver below adds as secrets.
+	if (envVars && isSopsDotenv(envFileContent)) envVars = withoutSopsArtifacts(envVars);
 	// Secret env vars are stored encrypted in the DB and deliberately never written
 	// to the snapshot's .env, so the extracted dir has no copy of them. Load them
 	// from the DB and inject them like every other compose path does (#1329) —
@@ -2496,7 +2505,8 @@ export async function redeployStackFromDir(
 		`[Stack:${stackName}]`,
 		source?.secretProviderId,
 		envFileContent,
-		{ stackName, envId: envId ?? undefined }
+		{ stackName, envId: envId ?? undefined },
+		readConfiguredGitEnvFile(source, stackDir, envPath, `[Stack:${stackName}]`)
 	);
 	envVars = resolved.dbNonSecretVars;
 	secretVars = resolved.secretVars;
@@ -3342,8 +3352,15 @@ export async function deployStack(options: DeployStackOptions): Promise<StackOpe
 
 		// A Git stack's configured env file is not necessarily the .env read above: a
 		// repo can carry both, and only the configured one may be SOPS-encrypted.
+		// Only a file inside the stack directory: one outside it (an env file path above
+		// the compose directory) was never copied from the repository.
 		let configuredEnvFileContent: string | undefined;
-		if (sourceDir && envFileName && actualEnvPath && existsSync(actualEnvPath)) {
+		const configuredRel = actualEnvPath ? relative(workingDir, actualEnvPath) : '';
+		if (
+			sourceDir && envFileName && actualEnvPath &&
+			configuredRel && !configuredRel.startsWith('..') && !isAbsolute(configuredRel) &&
+			existsSync(actualEnvPath)
+		) {
 			try {
 				configuredEnvFileContent = readFileSync(actualEnvPath, 'utf-8');
 			} catch (err) {
@@ -3760,13 +3777,24 @@ async function resolveProviderEnvVars(
 
 	// --- Encrypted env file (SOPS) -------------------------------------------
 	// A provider that decrypts whole env files gets the stack's env file(s) when
-	// they are in its format; see mergeDecryptedEnvFile for the precedence.
-	const encryptedEnvFiles = [...new Set([stackEnvFileContent, configuredEnvFileContent])].filter(isSopsDotenv);
-	if (encryptedEnvFiles.length > 0) {
+	// they are in its format; see mergeDecryptedEnvFile for the precedence. Compose
+	// reads `--env-file .env` before the configured file and the later one wins, so
+	// the configured file is merged first (the first merged wins), and a key a
+	// later-read plain file defines is left to that file rather than overridden
+	// from the shell.
+	const envFiles = [configuredEnvFileContent, stackEnvFileContent].filter(
+		(content, i, all): content is string => !!content && all.indexOf(content) === i
+	);
+	if (envFiles.some(isSopsDotenv)) {
 		if (!providerRow || !provider?.decryptEnvFile) {
 			console.warn(`${logPrefix} The env file is SOPS-encrypted but no SOPS secret provider is bound to this stack; its values stay encrypted`);
 		} else {
-			for (const content of encryptedEnvFiles) {
+			const definedByPlainFile = new Set<string>();
+			for (const content of envFiles) {
+				if (!isSopsDotenv(content)) {
+					for (const key of envFileKeys(content)) definedByPlainFile.add(key);
+					continue;
+				}
 				let decrypted: Record<string, string>;
 				try {
 					decrypted = await provider.decryptEnvFile(providerRow.config, content, logPrefix);
@@ -3774,6 +3802,7 @@ async function resolveProviderEnvVars(
 					const msg = e instanceof Error ? e.message : String(e);
 					throw new Error(`Failed to decrypt the env file: ${msg}`);
 				}
+				for (const key of definedByPlainFile) delete decrypted[key];
 				const injected = mergeDecryptedEnvFile(decrypted, dbNonSecretVars, secretVars);
 				console.log(`${logPrefix} ${provider.label} decrypted ${injected} secret(s) from the env file`);
 			}
@@ -3899,6 +3928,31 @@ async function resolveProviderEnvVars(
 }
 
 /**
+ * A Git stack's configured env file (possibly SOPS-encrypted) as a deploy copied it
+ * into `stackDir`, for the paths that otherwise only read the .env beside the
+ * compose file (`alreadyReadPath`). Undefined when no provider is bound - only a
+ * provider consumes it - or when there is no such file to read.
+ */
+function readConfiguredGitEnvFile(
+	source: StackSourceWithRepo | null | undefined,
+	stackDir: string,
+	alreadyReadPath: string | null | undefined,
+	logPrefix: string
+): string | undefined {
+	if (!source?.secretProviderId || !source.gitStack) return undefined;
+	const rel = gitStackEnvFileRelPath(source.gitStack);
+	if (!rel) return undefined;
+	const path = join(stackDir, rel);
+	if (path === alreadyReadPath || !existsSync(path)) return undefined;
+	try {
+		return readFileSync(path, 'utf-8');
+	} catch (err) {
+		console.warn(`${logPrefix} Failed to read env file at ${path}:`, err);
+		return undefined;
+	}
+}
+
+/**
  * Resolve the bound provider's secrets over a raw (nonSecretVars, secretVars) pair.
  * Returns the merged vars. bestEffort=true (lifecycle paths that must not be blocked by
  * an unreachable provider: stop/restart/down/remove) logs and returns the inputs
@@ -3926,22 +3980,9 @@ async function resolveProviderVarsBestEffort(
 
 	try {
 		const source = await getStackSource(stackName, envId ?? undefined);
-		// Lifecycle paths only know the .env beside the compose file; a Git stack's
-		// configured env file (possibly SOPS-encrypted) sits where the deploy copied it.
-		let configuredEnvFileContent: string | undefined;
-		const configuredRel = source?.secretProviderId && source.gitStack
-			? gitStackEnvFileRelPath(source.gitStack)
-			: null;
-		if (configuredRel) {
-			const configuredPath = join(await getStackDir(stackName, envId), configuredRel);
-			if (configuredPath !== envPath && existsSync(configuredPath)) {
-				try {
-					configuredEnvFileContent = readFileSync(configuredPath, 'utf-8');
-				} catch (err) {
-					console.warn(`${logPrefix} Failed to read env file at ${configuredPath}:`, err);
-				}
-			}
-		}
+		const configuredEnvFileContent = source?.gitStack
+			? readConfiguredGitEnvFile(source, await getStackDir(stackName, envId), envPath, logPrefix)
+			: undefined;
 		const resolved = await resolveProviderEnvVars(
 			{ ...nonSecretVars },
 			{ ...secretVars },

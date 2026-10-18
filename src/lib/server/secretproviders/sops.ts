@@ -19,7 +19,7 @@ import { isAbsolute } from 'node:path';
 import type { SecretProvider, SopsConfig, TestConnectionResult } from './shared';
 import { UnsupportedOperationError } from './shared';
 import { cliTimeoutMessage, cliTimeoutMs } from './cli-timeout-core';
-import { normalizeAgeIdentities, parseSopsDecryptOutput } from './sops-core';
+import { normalizeAgeIdentities, parseSopsDecryptOutput, sopsEncryptedKeys } from './sops-core';
 
 const DEFAULT_CLI_PATH = '/usr/bin/sops';
 const TIMEOUT_ENV_VAR = 'DOCKHAND_SOPS_TIMEOUT_MS';
@@ -55,15 +55,20 @@ function spawnFailure(error: unknown): SopsCliError {
  * exit code is all the diagnosis there is.
  */
 function nonZeroExitMessage(code: number | null): string {
-	if (code === 128) return 'SOPS could not decrypt the env file: none of the configured age keys is a recipient of it';
-	return `SOPS could not decrypt the env file (exit code ${code})`;
+	if (code === 128) return 'none of the configured age keys is a recipient of the env file';
+	return `sops exited with code ${code}; the env file may not be valid SOPS dotenv`;
 }
 
 /**
  * Runs one sops process without a shell, bounding its lifetime and output. stdout
  * is captured; stderr is only counted.
  */
-async function executeSops(args: string[], ageKey: string | undefined, stdin: string | undefined): Promise<Buffer> {
+async function executeSops(
+	phase: string,
+	args: string[],
+	ageKey: string | undefined,
+	stdin: string | undefined
+): Promise<Buffer> {
 	const stdoutChunks: Buffer[] = [];
 	const timeoutMs = cliTimeoutMs(process.env[TIMEOUT_ENV_VAR], DEFAULT_TIMEOUT_MS);
 	try {
@@ -103,7 +108,7 @@ async function executeSops(args: string[], ageKey: string | undefined, stdin: st
 			};
 
 			const timeout = setTimeout(
-				() => terminate(new SopsCliError(cliTimeoutMessage('SOPS', 'decrypt', timeoutMs, TIMEOUT_ENV_VAR))),
+				() => terminate(new SopsCliError(cliTimeoutMessage('SOPS', phase, timeoutMs, TIMEOUT_ENV_VAR))),
 				timeoutMs
 			);
 
@@ -180,7 +185,7 @@ export const sopsProvider: SecretProvider<SopsConfig> = {
 			normalizeAgeIdentities(config.ageKey);
 			// There is no backend to reach: what can fail is the key's shape (checked above)
 			// and the executable. --disable-version-check keeps --version off the network.
-			const output = await executeSops(['--disable-version-check', '--version'], undefined, undefined);
+			const output = await executeSops('version check', ['--disable-version-check', '--version'], undefined, undefined);
 			output.fill(0);
 			return { ok: true };
 		} catch (error: unknown) {
@@ -201,11 +206,12 @@ export const sopsProvider: SecretProvider<SopsConfig> = {
 		let output: Buffer | undefined;
 		try {
 			output = await executeSops(
+				'decrypt',
 				['decrypt', '--input-type', 'dotenv', '--output-type', 'json', '/dev/stdin'],
 				ageKey,
 				content
 			);
-			const { vars, skipped } = parseSopsDecryptOutput(output.toString('utf8'));
+			const { vars, skipped } = parseSopsDecryptOutput(output.toString('utf8'), sopsEncryptedKeys(content));
 			if (skipped.length > 0) {
 				console.warn(`${logPrefix} SOPS skipped ${skipped.length} key(s) that are not valid environment variable names: ${skipped.join(', ')}`);
 			}
