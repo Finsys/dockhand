@@ -201,7 +201,7 @@ export const sopsProvider: SecretProvider<SopsConfig> = {
 		try {
 			output = await executeSops(
 				'decrypt',
-				['decrypt', '--input-type', 'dotenv', '--output-type', 'json'],
+				['decrypt', '--input-type', 'dotenv', '--output-type', 'dotenv'],
 				ageKey,
 				content
 			);

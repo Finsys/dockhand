@@ -100,7 +100,7 @@ describe('sopsEncryptedKeys / envFileKeys', () => {
 		// Not EMPTY (sops leaves an empty value as is), PUBLIC_unencrypted (left in the
 		// clear by the suffix) or BAD-KEY (no env-var name).
 		expect([...sopsEncryptedKeys(ENCRYPTED)].sort()).toEqual(
-			['COMMENTED', 'DB_PASSWORD', 'ESCAPED', 'EXPORTED', 'QUOTED', 'REF', 'SINGLE']
+			['COMMENTED', 'DB_PASSWORD', 'ESCAPED', 'EXPORTED', 'NEWLINE', 'QUOTED', 'REF', 'SINGLE', 'WINPATH']
 		);
 	});
 
@@ -123,16 +123,18 @@ describe('parseSopsDecryptOutput', () => {
 
 	test('reads values the way compose reads an env file', () => {
 		const { vars } = parseSopsDecryptOutput(
-			JSON.stringify({
-				A: '"with spaces"',
-				B: "'single $A'",
-				C: '"mismatched\'',
-				D: '""',
-				E: 'value # comment',
-				F: '${A}-x',
-				G: '"esc \\" q"',
-				'export H': 'h'
-			}),
+			[
+				'# a comment',
+				'A="with spaces"',
+				"B='single $A'",
+				'C="mismatched\'',
+				'D=""',
+				'E=value # comment',
+				'F=${A}-x',
+				String.raw`G="esc \" q"`,
+				'export H=h',
+				''
+			].join('\n'),
 			all(['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'])
 		);
 		expect(vars).toEqual({
@@ -147,32 +149,33 @@ describe('parseSopsDecryptOutput', () => {
 		});
 	});
 
-	test('returns only encrypted keys, but lets later lines refer to the rest', () => {
+	test('a backslash escape is read only inside double quotes, as compose does', () => {
 		const { vars } = parseSopsDecryptOutput(
-			JSON.stringify({ HOST_unencrypted: 'db', URL: 'postgres://${HOST_unencrypted}' }),
-			all(['URL'])
+			[String.raw`A=C:\new\dir`, String.raw`B='x\ny'`, String.raw`C="x\ny"`, String.raw`D=a\\b`, String.raw`E="a\\b"`].join('\n'),
+			all(['A', 'B', 'C', 'D', 'E'])
 		);
+		expect(vars).toEqual({
+			A: String.raw`C:\new\dir`,
+			B: String.raw`x\ny`,
+			C: 'x\ny',
+			D: String.raw`a\\b`,
+			E: String.raw`a\b`
+		});
+	});
+
+	test('returns only encrypted keys, but lets later lines refer to the rest', () => {
+		const { vars } = parseSopsDecryptOutput('HOST_unencrypted=db\nURL=postgres://${HOST_unencrypted}\n', all(['URL']));
 		expect(vars).toEqual({ URL: 'postgres://db' });
 	});
 
-	test('skips keys that are not env-var names, reporting the name only', () => {
+	test('skips lines whose key is not an env-var name, reporting the name only', () => {
 		const { vars, skipped } = parseSopsDecryptOutput(
-			JSON.stringify({ GOOD: 'x', 'BAD-KEY': 'secret-value', __proto__x: 'y' }),
-			all(['GOOD', 'BAD-KEY', '__proto__x'])
+			'GOOD=x\nBAD-KEY=secret-value\n__proto__x=y\n__proto__=z\n',
+			all(['GOOD', 'BAD-KEY', '__proto__x', '__proto__'])
 		);
 		expect(vars).toEqual({ GOOD: 'x', __proto__x: 'y' });
-
-		// Written as JSON text: an object literal would set the prototype instead.
-		const proto = parseSopsDecryptOutput('{"__proto__":"x","GOOD":"y"}', all(['__proto__', 'GOOD']));
-		expect(proto.vars).toEqual({ GOOD: 'y' });
-		expect(proto.skipped).toEqual(['__proto__']);
-		expect(skipped).toEqual(['BAD-KEY']);
-	});
-
-	test('rejects output that is not a flat JSON object', () => {
-		expect(() => parseSopsDecryptOutput('not json', all([]))).toThrow(/not JSON/);
-		expect(() => parseSopsDecryptOutput('[]', all([]))).toThrow(/key\/value map/);
-		expect(() => parseSopsDecryptOutput('null', all([]))).toThrow(/key\/value map/);
+		expect(Object.getPrototypeOf(vars)).toBeNull();
+		expect(skipped).toEqual(['BAD-KEY', '__proto__']);
 	});
 });
 
@@ -251,7 +254,9 @@ describe.skipIf(!sopsPath)('SOPS provider (real sops binary)', () => {
 			COMMENTED: 'value',
 			REF: 's3cr3t-x',
 			ESCAPED: 'a " b',
-			SINGLE: '$DB_PASSWORD'
+			SINGLE: '$DB_PASSWORD',
+			WINPATH: String.raw`C:\new\dir`,
+			NEWLINE: 'x\ny'
 		});
 	});
 

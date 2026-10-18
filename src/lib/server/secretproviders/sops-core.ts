@@ -11,10 +11,7 @@
 
 import { expandValue } from '../../utils/env-file-values';
 
-const ENV_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
-
-// Compose reads `export KEY=value` as KEY; SOPS keeps the prefix as part of the key.
-const EXPORT_PREFIX_RE = /^export\s+/;
+// A `KEY=value` line as compose reads it, `export` prefix allowed.
 const ENV_LINE_RE = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/;
 
 // Every SOPS dotenv file carries both of these; a hand-written env file practically
@@ -118,42 +115,36 @@ export function mergeDecryptedEnvFile(
 }
 
 /**
- * Parses the JSON that `sops decrypt --input-type dotenv --output-type json`
- * prints into a flat env map, reading each value the way compose reads an env
- * file. SOPS's dotenv format takes everything after `=` verbatim, while compose
- * strips quotes and an `export` prefix, drops a ` # comment`, unescapes double
- * quotes and expands `${VAR}` from earlier lines - so without this, a value would
- * reach the container differently from the same line in a plain `.env`.
+ * Parses what `sops decrypt --input-type dotenv --output-type dotenv` prints - the
+ * file as it was written, values decrypted - into a flat env map, reading each line
+ * the way compose reads an env file: quotes, an `export` prefix, a ` # comment`,
+ * double-quote escapes and `${VAR}` references from earlier lines. (JSON output is
+ * no use here: SOPS turns a literal `\n` into a newline when it reads the file, which
+ * compose does only inside double quotes, and the JSON cannot tell the two apart.)
  *
  * Only `encryptedKeys` are returned: a value SOPS left in the clear is no secret
- * and compose reads it from the file. Keys that are not valid env-var names are
- * skipped, with their name reported, never their value.
+ * and compose reads it from the file. A line whose key is not a valid env-var name
+ * is skipped, with its name reported, never its value.
  */
 export function parseSopsDecryptOutput(
 	stdout: string,
 	encryptedKeys: ReadonlySet<string>
 ): { vars: Record<string, string>; skipped: string[] } {
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(stdout);
-	} catch {
-		throw new Error('SOPS returned output that is not JSON');
-	}
-	if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-		throw new Error('SOPS returned output that is not a key/value map');
-	}
 	// Every value, encrypted or not, is known to the lines below it, as in compose.
 	const known = Object.create(null) as Record<string, string>;
 	const vars = Object.create(null) as Record<string, string>;
 	const skipped: string[] = [];
-	for (const [rawKey, value] of Object.entries(parsed as Record<string, unknown>)) {
-		const key = rawKey.replace(EXPORT_PREFIX_RE, '');
+	for (const line of stdout.split('\n')) {
+		const trimmed = line.trim();
+		if (!trimmed || trimmed.startsWith('#')) continue;
+		const match = ENV_LINE_RE.exec(line);
 		// __proto__ would set the prototype of the plain object the values are merged into.
-		if (!ENV_NAME_RE.test(key) || key === '__proto__' || typeof value !== 'string' || value.includes('\0')) {
-			skipped.push(rawKey);
+		if (!match || match[1] === '__proto__' || match[2].includes('\0')) {
+			skipped.push(trimmed.split('=', 1)[0].trim());
 			continue;
 		}
-		known[key] = expandValue(value, known);
+		const [, key, raw] = match;
+		known[key] = expandValue(raw, known);
 		if (encryptedKeys.has(key)) vars[key] = known[key];
 	}
 	return { vars, skipped };
