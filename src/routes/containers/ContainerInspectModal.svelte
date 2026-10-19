@@ -5,7 +5,7 @@
 	import * as Tabs from '$lib/components/ui/tabs';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
-	import { Loader2, Box, Info, Layers, Cpu, MemoryStick, HardDrive, Network, Shield, Settings2, Code, Copy, Check, XCircle, Activity, Wifi, Pencil, RefreshCw, X, Folder, FolderOpen, Moon, Tags, ExternalLink, Gpu, Globe, Link, Unlink, Play, Square as SquareIcon, RotateCw, Trash2, CircleArrowUp, Clock } from 'lucide-svelte';
+	import { Loader2, Box, Info, Layers, Cpu, MemoryStick, HardDrive, Network, Shield, Settings2, Code, Copy, Check, XCircle, Activity, Wifi, Pencil, RefreshCw, X, Folder, FolderOpen, Moon, Tags, ExternalLink, Gpu, Globe, Link, Unlink, Play, Square as SquareIcon, RotateCw, Trash2, CircleArrowUp, Clock, Terminal } from 'lucide-svelte';
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
 	import ContainerIcon from '$lib/components/ContainerIcon.svelte';
 	import * as Select from '$lib/components/ui/select';
@@ -18,6 +18,7 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import { currentEnvironment, appendEnvParam, environments } from '$lib/stores/environment';
+	import { canAccess } from '$lib/stores/auth';
 	import ImageLayersView from '../images/ImageLayersView.svelte';
 	import ContainerComposeTab from './ContainerComposeTab.svelte';
 	import LogsPanel from '../logs/LogsPanel.svelte';
@@ -41,11 +42,13 @@
 		onRestart?: (id: string) => Promise<void> | void;
 		onRemove?: (id: string) => Promise<void> | void;
 		onEdit?: (id: string) => void;
+		/** Open interactive terminal for the container */
+		onTerminal?: (id: string, name: string) => void;
 		/** Runs the image update. The parent owns the update modal, so this closes ours. */
 		onUpdate?: (id: string, name: string) => void;
 	}
 
-	let { open = $bindable(), containerId, containerName, onRename, onStart, onStop, onRestart, onRemove, onEdit, onUpdate }: Props = $props();
+	let { open = $bindable(), containerId, containerName, onRename, onStart, onStop, onRestart, onRemove, onEdit, onTerminal, onUpdate }: Props = $props();
 
 	// Whether this container has a newer image waiting, from the same store the list reads.
 	const hasImageUpdate = $derived($containerStore.pendingUpdateIds.includes(containerId));
@@ -116,6 +119,15 @@
 		// Close the inspect modal first so EditContainerModal isn't stacked on top.
 		open = false;
 		onEdit(containerId);
+	}
+	function doTerminal() {
+		const name = displayName || containerName || containerId.slice(0, 12);
+		open = false;
+		if (onTerminal) {
+			onTerminal(containerId, name);
+		} else {
+			goto(appendEnvParam(`/terminal?container=${containerId}`, $currentEnvironment?.id ?? null));
+		}
 	}
 
 	// Rename state
@@ -768,6 +780,16 @@
 							</ConfirmPopover>
 						{/if}
 						{#if containerData.State?.Running}
+							{#if $canAccess('containers', 'exec')}
+								<button
+									type="button"
+									onclick={doTerminal}
+									title={m.containers_inspect_action_terminal()}
+									class="p-1 rounded hover:bg-muted transition-colors cursor-pointer"
+								>
+									<Terminal class="w-4 h-4 text-muted-foreground hover:text-foreground" />
+								</button>
+							{/if}
 							{#if onStop}
 								<ConfirmPopover
 									localized
