@@ -7014,7 +7014,7 @@
 	"settings_secrets_psono_note_with": " mit ",
 	"settings_secrets_psono_note_on_and": " ein und ",
 	"settings_secrets_psono_note_off": " aus, und hänge die Secrets an, die er lesen darf. Dockhand entschlüsselt jedes Secret lokal, der geheime Schlüssel wird also nie an den Psono-Server gesendet. Unterstützt einen Sammelabruf der Secrets des Keys sowie Inline-Referenzen der Form ",
-	"settings_secrets_psono_note_after": ".",
+	"settings_secrets_psono_note_after": " Referenzen. Ein Secret vom Typ Umgebungsvariablen stellt jeden seiner Schlüssel als eigene Variable bereit, und psono://<id>/<KEY> liest einen einzelnen Schlüssel.",
 	"settings_secrets_psono_note_api_keys": "API keys",
 	"settings_secrets_psono_note_restrict": "Restrict to secrets",
 	"settings_secrets_psono_note_insecure": "Allow insecure access",

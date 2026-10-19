@@ -6442,7 +6442,7 @@
 	"settings_secrets_psono_note_with": " avec ",
 	"settings_secrets_psono_note_on_and": " activé et ",
 	"settings_secrets_psono_note_off": " désactivé, puis attachez-y les secrets qu'elle peut lire. Dockhand déchiffre chaque secret localement, la clé secrète n'est donc jamais envoyée au serveur Psono. Prend en charge à la fois un chargement en masse des secrets de la clé et les références en ligne de la forme ",
-	"settings_secrets_psono_note_after": ".",
+	"settings_secrets_psono_note_after": " references. Un secret de type Variables d'environnement expose chacune de ses clés comme une variable, et psono://<id>/<KEY> lit une seule clé.",
 	"settings_secrets_psono_note_api_keys": "API keys",
 	"settings_secrets_psono_note_restrict": "Restrict to secrets",
 	"settings_secrets_psono_note_insecure": "Allow insecure access"

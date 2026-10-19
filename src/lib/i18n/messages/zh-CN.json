@@ -6839,7 +6839,7 @@
 	"settings_secrets_psono_note_with": " 下创建该密钥，开启 ",
 	"settings_secrets_psono_note_on_and": "，关闭 ",
 	"settings_secrets_psono_note_off": "，并附加它可读取的机密。Dockhand 在本地解密每条机密，因此 secret key 绝不会发送到 Psono 服务器。支持批量拉取该密钥下的机密，也支持内联 ",
-	"settings_secrets_psono_note_after": " 引用。",
+	"settings_secrets_psono_note_after": " 引用。环境变量类型的密钥会将其每个键作为独立变量提供，psono://<id>/<KEY> 可读取单个键。",
 	"settings_secrets_psono_note_api_keys": "API keys",
 	"settings_secrets_psono_note_restrict": "Restrict to secrets",
 	"settings_secrets_psono_note_insecure": "Allow insecure access"

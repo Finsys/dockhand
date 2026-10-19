@@ -6731,7 +6731,7 @@
 	"settings_secrets_psono_note_with": " with ",
 	"settings_secrets_psono_note_on_and": " on and ",
 	"settings_secrets_psono_note_off": " off, and attach the secrets it may read. Dockhand decrypts every secret locally, so the secret key is never sent to the Psono server. Supports a bulk pull of the key's secrets and inline ",
-	"settings_secrets_psono_note_after": " references.",
+	"settings_secrets_psono_note_after": " references. An Environment Variables secret exposes each of its keys as its own variable, and psono://<id>/<KEY> reads a single key.",
 	"settings_secrets_psono_note_api_keys": "API keys",
 	"settings_secrets_psono_note_restrict": "Restrict to secrets",
 	"settings_secrets_psono_note_insecure": "Allow insecure access",
