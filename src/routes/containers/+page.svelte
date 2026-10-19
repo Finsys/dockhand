@@ -327,6 +327,7 @@
 	const STATUS_FILTER_STORAGE_KEY = 'dockhand-containers-status-filter';
 	const UPDATE_AVAILABLE_FILTER_VALUE = 'update-available';
 	const NEWER_VERSION_FILTER_VALUE = 'newer-version';
+	const COOLING_DOWN_FILTER_VALUE = 'cooling-down';
 	let statusFilter = $state<string[]>([]);
 
 	// Status types with icons for filter and table
@@ -608,6 +609,14 @@
 					color: 'text-amber-500'
 				}]
 			: []),
+		...(coolingDownMap.size > 0
+			? [{
+					value: COOLING_DOWN_FILTER_VALUE,
+					label: m.containers_list_filter_cooling_down(),
+					icon: Clock,
+					color: 'text-muted-foreground'
+				}]
+			: []),
 		// Always offered, unlike the entries above: the question "is anything
 		// unhealthy" is asked precisely when the answer is no.
 		{ value: 'health:unhealthy', label: m.containers_list_filter_unhealthy(), icon: HeartOff, color: 'text-red-500', colorLabel: true },
@@ -629,6 +638,10 @@
 		// newer version, or the dropdown hides the entry and the list stays empty.
 		if (statusFilter.includes(NEWER_VERSION_FILTER_VALUE) && !hasNewerVersions) {
 			statusFilter = statusFilter.filter((v) => v !== NEWER_VERSION_FILTER_VALUE);
+		}
+		// Same guard for the cooling-down filter.
+		if (statusFilter.includes(COOLING_DOWN_FILTER_VALUE) && coolingDownMap.size === 0) {
+			statusFilter = statusFilter.filter((v) => v !== COOLING_DOWN_FILTER_VALUE);
 		}
 	});
 
@@ -1036,10 +1049,12 @@
 		// being treated like another Docker state.
 		const stateValues = stateFilterValues(statusFilter, [
 			UPDATE_AVAILABLE_FILTER_VALUE,
-			NEWER_VERSION_FILTER_VALUE
+			NEWER_VERSION_FILTER_VALUE,
+			COOLING_DOWN_FILTER_VALUE
 		]);
 		const updatesOnly = statusFilter.includes(UPDATE_AVAILABLE_FILTER_VALUE);
 		const newerVersionOnly = statusFilter.includes(NEWER_VERSION_FILTER_VALUE);
+		const coolingDownOnly = statusFilter.includes(COOLING_DOWN_FILTER_VALUE);
 		if (stateValues.length > 0) {
 			result = result.filter((c) => stateValues.includes(c.state.toLowerCase()));
 		}
@@ -1048,6 +1063,9 @@
 		}
 		if (newerVersionOnly) {
 			result = result.filter((c) => newerVersionsMap.has(c.id));
+		}
+		if (coolingDownOnly) {
+			result = result.filter((c) => coolingDownMap.has(c.id));
 		}
 		result = result.filter((c) => matchesContainerHealthFilter(c.health, statusFilter));
 
@@ -2356,6 +2374,16 @@
 						{:else}
 							<span class="text-gray-400 dark:text-gray-600 text-xs text-center block">-</span>
 						{/if}
+					{:else if column.id === 'cooldown'}
+						{#if coolingDownMap.has(container.id)}
+							{@const hours = coolingDownMap.get(container.id)!}
+							<span class="text-xs text-muted-foreground tabular-nums whitespace-nowrap cursor-default flex items-center justify-end gap-1"
+								title={m.containers_list_update_held_title({ count: hours })}>
+								<Clock class="w-3 h-3 shrink-0" />{m.containers_list_cooldown_hours({ count: hours })}
+							</span>
+						{:else}
+							<span class="text-gray-400 dark:text-gray-600 text-xs text-right block">-</span>
+						{/if}
 					{:else if column.id === 'stack'}
 						{#if stack}
 							<Tooltip.Root>
@@ -2820,16 +2848,6 @@
 	onRestart={$canAccess('containers', 'restart') ? (id) => restartContainer(id) : undefined}
 	onRemove={$canAccess('containers', 'remove') ? (id) => removeContainer(id) : undefined}
 	onEdit={$canAccess('containers', 'edit') ? (id) => editContainer(id) : undefined}
-	onTerminal={$canAccess('containers', 'exec')
-		? (id, name) => {
-			const container = containers.find((c) => c.id === id);
-			if (container) {
-				openTerminal(container);
-			} else {
-				goto(appendEnvParam(`/terminal?container=${id}`, envId));
-			}
-		}
-		: undefined}
 	onUpdate={$canAccess('containers', 'create')
 		? (id, name) => updateSingleContainer(id, name)
 		: undefined}

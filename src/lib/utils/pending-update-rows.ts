@@ -145,3 +145,16 @@ export function coolingDown(rows: PendingUpdateRow[], cooldownHours = 1): Map<st
 	}
 	return out;
 }
+
+/**
+ * The two cooldown fields a container detail carries, kept in lockstep: a
+ * container is marked waiting ONLY when hours are known for it, so the UI can
+ * never draw the clock without the number beside it.
+ */
+export function containerCooldownFields(
+	coolingDownHoursById: Map<string, number>,
+	id: string
+): { coolingDown: boolean; coolingDownHours: number | undefined } {
+	const hours = coolingDownHoursById.get(id);
+	return { coolingDown: hours !== undefined, coolingDownHours: hours };
+}

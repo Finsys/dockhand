@@ -32,6 +32,7 @@ export const containerColumns: ColumnConfig[] = [
 	{ id: 'ip', label: 'IP', sortable: true, sortField: 'ip', width: 100, minWidth: 80 },
 	{ id: 'ports', label: 'Ports', sortable: true, sortField: 'ports', width: 120, minWidth: 60 },
 	{ id: 'autoUpdate', label: 'Auto-update', width: 95, minWidth: 70 },
+	{ id: 'cooldown', label: 'Cooldown', width: 85, minWidth: 60, align: 'right', defaultVisible: false },
 	{ id: 'stack', label: 'Stack', sortable: true, sortField: 'stack', width: 100, minWidth: 60 },
 	{ id: 'actions', label: '', fixed: 'end', width: 200, minWidth: 150, resizable: true }
 ];

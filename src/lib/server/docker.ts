@@ -4270,7 +4270,8 @@ export async function checkImageUpdateAvailable(
 	imageName: string,
 	currentImageId: string,
 	envId?: number,
-	reportPinnedDigest = true
+	reportPinnedDigest = true,
+	skipCooldown = false
 ): Promise<ImageUpdateCheckResult> {
 	// A digest with no tag names one manifest, so there is nothing to follow. A tag that
 	// records its digest - the shape a base image patched for a CVE takes - is checked by
@@ -4286,7 +4287,7 @@ export async function checkImageUpdateAvailable(
 	if (plan.skip) {
 		return { hasUpdate: false, currentDigest: imageName.split('@')[1] };
 	}
-	const result = await checkTagForUpdate(plan.reference, currentImageId, envId);
+	const result = await checkTagForUpdate(plan.reference, currentImageId, envId, skipCooldown);
 	if (!resolvePinnedToDigest(plan, result.hasUpdate)) return result;
 	// A moved digest on a pinned tag. Report it (pinned flag, never applied) unless the
 	// admin opted out (#1780), in which case it goes fully silent: clear hasUpdate too,
@@ -4299,7 +4300,8 @@ export async function checkImageUpdateAvailable(
 async function checkTagForUpdate(
 	checkedReference: string,
 	currentImageId: string,
-	envId?: number
+	envId?: number,
+	skipCooldown = false
 ): Promise<ImageUpdateCheckResult> {
 	const imageName = checkedReference;
 	try {
@@ -4354,7 +4356,7 @@ async function checkTagForUpdate(
 			const { hasUpdate, isLocalImage, registryDigest: rd } = classifyEmptyDigestImage(registryDigest);
 			if (hasUpdate && rd) {
 				const remaining = await imageCooldownRemainingMs(checkedReference, rd, envId);
-				if (remaining > 0) return { hasUpdate: false, currentDigest: currentImageId, registryDigest: rd, releaseAgeRemainingHours: Math.ceil(remaining / 3600000) };
+				if (remaining > 0 && !skipCooldown) return { hasUpdate: false, currentDigest: currentImageId, registryDigest: rd, releaseAgeRemainingHours: Math.ceil(remaining / 3600000) };
 			}
 			return { hasUpdate, isLocalImage, currentDigest: currentImageId, registryDigest: rd };
 		}
@@ -4388,7 +4390,7 @@ async function checkTagForUpdate(
 			return { hasUpdate: false, currentDigest: currentRepoDigests[0], localDigests };
 		}
 		const remaining = await imageCooldownRemainingMs(checkedReference, registryDigest, envId);
-		if (remaining > 0) {
+		if (remaining > 0 && !skipCooldown) {
 			return { hasUpdate: false, currentDigest: currentRepoDigests[0], registryDigest, localDigests, releaseAgeRemainingHours: Math.ceil(remaining / 3600000) };
 		}
 

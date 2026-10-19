@@ -44,8 +44,9 @@ import { sendEventNotification } from '../../notifications';
 import { getScannerSettings, scanImage, type VulnerabilitySeverity } from '../../scanner';
 import { parseImageNameAndTag, combineScanSummaries, isSystemContainer, isPodmanInfraContainer } from './update-utils';
 import { resolveBlockDecision } from './block-decision';
-import { isUpdateDisabledByLabel, isHiddenByLabel, getVersionPatternOverride, getVersionPatternRejection, digestUpdateVisible, pinnedDigestReportVisible } from '../../container-labels';
+import { isUpdateDisabledByLabel, isHiddenByLabel, getVersionPatternOverride, getVersionPatternRejection, digestUpdateVisible, pinnedDigestReportVisible, isCooldownSkippedByLabel } from '../../container-labels';
 import { tagFilterFromLabels } from '$lib/server/semver/tag-filter-labels';
+import { tagTransformFromLabels } from '$lib/server/semver/tag-transform';
 import { recreateContainer } from './container-update';
 
 interface UpdateInfo {
@@ -199,7 +200,8 @@ export async function runEnvUpdateCheckJob(
 
 				const result = await checkImageUpdateAvailable(
 					imageName, currentImageId, environmentId,
-					pinnedDigestReportVisible(reportPinnedGlobal, inspectData.Config?.Labels)
+					pinnedDigestReportVisible(reportPinnedGlobal, inspectData.Config?.Labels),
+					isCooldownSkippedByLabel(inspectData.Config?.Labels)
 				);
 
 				if (result.isLocalImage) {
@@ -297,7 +299,7 @@ export async function runEnvUpdateCheckJob(
 					}
 					const newer = await checkNewerVersion(
 						imageName,
-						{ ...semverOptions, versionPattern, tagFilter: tagFilterFromLabels(inspectData.Config?.Labels) },
+						{ ...semverOptions, versionPattern, tagFilter: tagFilterFromLabels(inspectData.Config?.Labels), tagTransform: tagTransformFromLabels(inspectData.Config?.Labels) },
 						getTagArtifactKind,
 						result.localDigests ?? [],
 						staleCheck

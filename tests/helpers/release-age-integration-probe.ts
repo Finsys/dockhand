@@ -14,7 +14,7 @@ const scanning = phase.includes('scan');
 const systemd = phase.includes('systemd');
 const systemdFailure = systemd && (phase.includes('race') || phase.includes('inspect-failure') || phase.includes('preflight'));
 const deferred = phase.includes('young');
-let remainingMs = deferred ? 3600001 : 0;
+let remainingMs = deferred || phase === 'skip-cooldown' ? 3600001 : 0;
 let ageChecks = 0;
 const pendingUpdates: any[] = [];
 const logs: string[] = [];
@@ -254,6 +254,17 @@ if (phase === 'metadata-info-failure') {
 	assert.equal(matureResult.hasUpdate, true, JSON.stringify(matureResult));
 	assert.equal(matureResult.releaseAgeRemainingHours, undefined);
 	assert.equal(ageChecks, 2, 'Mature re-check must run the same age gate');
+	assert.equal(pullReferences.length, 0, 'Checking only must not pull');
+} else if (phase === 'skip-cooldown') {
+	// Within the cooldown (remainingMs > 0). Without the skip flag the update is held;
+	// dockhand.skip.cooldown=true passes skipCooldown=true and the update applies now.
+	const held = await docker.checkImageUpdateAvailable(image, old, 1, true, false);
+	assert.equal(held.hasUpdate, false, JSON.stringify(held));
+	assert.equal(held.releaseAgeRemainingHours, 2, 'Default path must still report the held hours');
+	const skipped = await docker.checkImageUpdateAvailable(image, old, 1, true, true);
+	assert.equal(skipped.hasUpdate, true, JSON.stringify(skipped));
+	assert.equal(skipped.releaseAgeRemainingHours, undefined, 'A skipped cooldown must not report held hours');
+	assert.equal(skipped.registryDigest, digest);
 	assert.equal(pullReferences.length, 0, 'Checking only must not pull');
 } else if (phase === 'young') {
 	await assert.rejects(docker.pullImage(image, undefined, 1, true), /cooldown/);

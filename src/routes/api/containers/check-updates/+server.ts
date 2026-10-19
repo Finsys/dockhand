@@ -6,11 +6,12 @@ import { rowsToPersist } from '$lib/utils/pending-update-rows';
 import { listContainers, inspectContainer, checkImageUpdateAvailable, getTagArtifactKind, getRegistryTagCreatedAt, inspectImage } from '$lib/server/docker';
 import { clearPendingContainerUpdates, addPendingContainerUpdate, getPendingContainerUpdates, getGlobalSemverConfig, getPinnedDigestReportEnabled } from '$lib/server/db';
 import { isSystemContainer, isPodmanInfraContainer } from '$lib/server/scheduler/tasks/update-utils';
-import { isUpdateDisabledByLabel, isHiddenByLabel, getVersionPatternOverride, digestUpdateVisible, pinnedDigestReportVisible } from '$lib/server/container-labels';
+import { isUpdateDisabledByLabel, isHiddenByLabel, getVersionPatternOverride, digestUpdateVisible, pinnedDigestReportVisible, isCooldownSkippedByLabel } from '$lib/server/container-labels';
 import { createJobResponse } from '$lib/server/sse';
 import { checkNewerVersion, type ImageCreatedAtProbe } from '$lib/server/semver/check';
 import { parseTag } from '$lib/server/semver/tag-parser';
 import { tagFilterFromLabels } from '$lib/server/semver/tag-filter-labels';
+import { tagTransformFromLabels } from '$lib/server/semver/tag-transform';
 import { parseImageReference } from '$lib/server/registry/image-ref';
 import type { NewerVersion } from '$lib/server/semver/find-newer';
 
@@ -165,7 +166,8 @@ export const POST: RequestHandler = async ({ url, cookies, request }) => {
 
 				const result = await checkImageUpdateAvailable(
 					imageName, currentImageId, envIdNum,
-					pinnedDigestReportVisible(reportPinnedGlobal, inspectData.Config?.Labels)
+					pinnedDigestReportVisible(reportPinnedGlobal, inspectData.Config?.Labels),
+					isCooldownSkippedByLabel(inspectData.Config?.Labels)
 				);
 
 				// System containers (Dockhand itself, Hawser) have their own update path and are
@@ -201,7 +203,8 @@ export const POST: RequestHandler = async ({ url, cookies, request }) => {
 					? await checkNewerVersion(imageName, {
 							...semverOptions,
 							versionPattern,
-							tagFilter: tagFilterFromLabels(inspectData.Config?.Labels)
+							tagFilter: tagFilterFromLabels(inspectData.Config?.Labels),
+						tagTransform: tagTransformFromLabels(inspectData.Config?.Labels)
 						}, getTagArtifactKind, result.localDigests ?? [], staleCheck).catch(() => null)
 					: null;
 

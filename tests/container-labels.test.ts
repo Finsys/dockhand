@@ -22,6 +22,7 @@ import {
 	getVersionPatternOverride,
 	DOCKHAND_LABELS,
 	isDigestWatchDisabledByLabel,
+	isCooldownSkippedByLabel,
 	digestUpdateVisible,
 	pinnedDigestReportVisible
 } from '../src/lib/server/container-labels';
@@ -562,5 +563,30 @@ describe('pinnedDigestReportVisible (#1780 - per-container label wins over the g
 		// parseLabelBool returns undefined for junk, so neither branch of the label wins.
 		expect(pinnedDigestReportVisible(true, { 'dockhand.pin.report': 'maybe' })).toBe(true);
 		expect(pinnedDigestReportVisible(false, { 'dockhand.pin.report': 'maybe' })).toBe(false);
+	});
+});
+
+describe('isCooldownSkippedByLabel (dockhand.skip.cooldown=true exempts from the minimum image age)', () => {
+	test('absent, empty, or missing labels keep the cooldown (safe default)', () => {
+		expect(isCooldownSkippedByLabel(undefined)).toBe(false);
+		expect(isCooldownSkippedByLabel(null)).toBe(false);
+		expect(isCooldownSkippedByLabel({})).toBe(false);
+	});
+
+	test('only an explicit true skips the cooldown', () => {
+		for (const value of ['true', 'TRUE', 'yes', '1']) {
+			expect(isCooldownSkippedByLabel({ 'dockhand.skip.cooldown': value })).toBe(true);
+		}
+	});
+
+	test('a falsey value does NOT skip (the cooldown stays on)', () => {
+		for (const value of ['false', 'no', '0']) {
+			expect(isCooldownSkippedByLabel({ 'dockhand.skip.cooldown': value })).toBe(false);
+		}
+	});
+
+	test('an unparseable value keeps the cooldown', () => {
+		expect(isCooldownSkippedByLabel({ 'dockhand.skip.cooldown': 'maybe' })).toBe(false);
+		expect(isCooldownSkippedByLabel({ 'dockhand.skip.cooldown': '' })).toBe(false);
 	});
 });

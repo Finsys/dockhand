@@ -478,6 +478,7 @@
 
 	// Status filter state
 	const STATUS_FILTER_STORAGE_KEY = 'dockhand-stacks-status-filter';
+	const COOLING_DOWN_FILTER_VALUE = 'cooling-down';
 	let statusFilter = $state<string[]>([]);
 
 	// Stack status types with icons and colors
@@ -493,12 +494,28 @@
 	// Health rides the status filter as synthetic 'health:*' entries rather than a
 	// second dropdown. Always offered, unlike update-available: the question "is
 	// anything unhealthy" is asked precisely when the answer is no.
-	const filterOptions = [
+	const filterOptions = $derived([
 		...stackStatusTypes,
+		...(stackCoolingDownCount > 0
+			? [{
+					value: COOLING_DOWN_FILTER_VALUE,
+					label: m.containers_list_filter_cooling_down(),
+					icon: Clock,
+					color: 'text-muted-foreground'
+				}]
+			: []),
 		{ value: 'health:unhealthy', label: m.containers_list_filter_unhealthy(), icon: HeartOff, color: 'text-red-500', colorLabel: true },
 		{ value: 'health:starting', label: m.containers_list_filter_starting_up(), icon: Heart, color: 'text-amber-500' },
 		{ value: 'health:healthy', label: m.containers_list_filter_healthy(), icon: HeartPulse, color: 'text-emerald-500' }
-	];
+	]);
+
+	// Drop the cooling-down filter once nothing is waiting, or the dropdown hides the
+	// entry and the user cannot deselect it while the list stays empty.
+	$effect(() => {
+		if (statusFilter.includes(COOLING_DOWN_FILTER_VALUE) && stackCoolingDownCount === 0) {
+			statusFilter = statusFilter.filter((v) => v !== COOLING_DOWN_FILTER_VALUE);
+		}
+	});
 
 	function getStackStatusIcon(status: string) {
 		const s = stackStatusTypes.find(t => t.value === status.toLowerCase());
@@ -759,9 +776,16 @@
 			);
 		}
 
+		// The cooling-down filter is synthetic (not a stack status), so apply it
+		// separately and keep it out of the status match below.
+		if (statusFilter.includes(COOLING_DOWN_FILTER_VALUE)) {
+			result = result.filter(stack => (stack.coolingDownCount ?? 0) > 0);
+		}
+		const statusOnly = statusFilter.filter(v => v !== COOLING_DOWN_FILTER_VALUE);
+
 		// Filter by status (uses display status so git "created" matches "not deployed")
-		if (statusFilter.length > 0) {
-			result = result.filter(stack => matchesStackFilter(stack, statusFilter, getDisplayStatus(stack)));
+		if (statusOnly.length > 0) {
+			result = result.filter(stack => matchesStackFilter(stack, statusOnly, getDisplayStatus(stack)));
 		}
 
 		// Filter by user-defined tags.
@@ -2657,6 +2681,26 @@
 															{m.containers_list_pinned_digest_heading()}
 														</p>
 														<p class="text-muted-foreground text-xs break-words">{m.containers_list_pinned_digest_title()}</p>
+													</div>
+												</Tooltip.Content>
+											</Tooltip.Root>
+										{:else if container.coolingDown && $appSettings.highlightUpdates}
+											<!-- An update exists but the image is too young to apply. Muted,
+											     not amber: there is nothing for the user to act on yet. The
+											     hours left are shown inline beside the clock. -->
+											<Tooltip.Root>
+												<Tooltip.Trigger
+													class="inline-flex items-center gap-1 text-muted-foreground text-xs tabular-nums"
+												>
+													<Clock class="w-3.5 h-3.5 shrink-0" />
+													{#if container.coolingDownHours}{m.containers_list_cooldown_hours({ count: container.coolingDownHours })}{/if}
+												</Tooltip.Trigger>
+												<Tooltip.Content side="right" class="w-72 p-3">
+													<div class="space-y-1.5">
+														<p class="font-medium text-sm flex items-center gap-1.5 whitespace-nowrap">
+															<Clock class="w-4 h-4 text-muted-foreground shrink-0" />
+															{m.containers_list_update_held_title({ count: container.coolingDownHours ?? 0 })}
+														</p>
 													</div>
 												</Tooltip.Content>
 											</Tooltip.Root>

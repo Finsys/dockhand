@@ -42,7 +42,7 @@ import { getScannerSettings, scanImage, type ScanResult, type VulnerabilitySever
 import { sendEventNotification } from '../../notifications';
 import { parseImageNameAndTag, combineScanSummaries, isSystemContainer, isPodmanInfraContainer } from './update-utils';
 import { resolveBlockDecision } from './block-decision';
-import { isUpdateDisabledByLabel, isHiddenByLabel, isDigestWatchDisabledByLabel } from '../../container-labels';
+import { isUpdateDisabledByLabel, isHiddenByLabel, isDigestWatchDisabledByLabel, isCooldownSkippedByLabel } from '../../container-labels';
 
 // =============================================================================
 // TYPES
@@ -415,7 +415,10 @@ export async function runContainerUpdate(
 		// =============================================================================
 
 		log(`Checking registry for updates: ${imageNameFromConfig}`);
-		const registryCheck = await checkImageUpdateAvailable(imageNameFromConfig, currentImageId, envId);
+		const registryCheck = await checkImageUpdateAvailable(
+			imageNameFromConfig, currentImageId, envId, true,
+			isCooldownSkippedByLabel(inspectData.Config?.Labels)
+		);
 
 		if (registryCheck.isLocalImage) {
 			log(`Local image detected - skipping (auto-update requires registry)`);

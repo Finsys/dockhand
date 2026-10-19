@@ -30,7 +30,7 @@ import { findStackNameCollision, getStackPathHintsFromContainers, moveStackFileP
 import { isValidStackName } from './stack-name-guard';
 import { db, environments, eq } from './db/drizzle.js';
 import { isAllowedStackFilename } from './stack-filename';
-import { coolingDown as coolingDownRows } from '$lib/utils/pending-update-rows';
+import { coolingDown as coolingDownRows, containerCooldownFields } from '$lib/utils/pending-update-rows';
 import { getMinimumReleaseAgeConfig } from './minimum-release-age';
 
 import { deriveStackStatus, deriveStackHealth } from './stack-status';
@@ -149,6 +149,10 @@ export interface ContainerDetail {
 	labels: Record<string, string>;
 	/** The tag's digest moved but this container pins the old one (reported, not applied). */
 	pinnedToDigest?: boolean;
+	/** An update exists but the image is too young to apply (waiting out the minimum age). */
+	coolingDown?: boolean;
+	/** Hours still left on that minimum-age wait. */
+	coolingDownHours?: number;
 }
 
 /**
@@ -2102,7 +2106,7 @@ export async function listComposeStacks(envId?: number | null): Promise<ComposeS
 	const newerVersionIds = new Set<string>();
 	// A held update: an update exists but the image is too young to apply. Counted
 	// separately so it never reaches updateCount, which offers a redeploy.
-	const coolingDownIds = new Set<string>();
+	const coolingDownHoursById = new Map<string, number>();
 	// The tag's digest moved but the image pins the old one. Reported, never applied
 	// (the compose file is what has to change), so kept out of updateCount too.
 	const pinnedDigestIds = new Set<string>();
@@ -2114,7 +2118,7 @@ export async function listComposeStacks(envId?: number | null): Promise<ComposeS
 			pending.forEach((p) => {
 				if (p.hasImageUpdate) pendingUpdateIds.add(p.containerId);
 				if (p.pinnedToDigest) pinnedDigestIds.add(p.containerId);
-				if (heldIds.has(p.containerId)) coolingDownIds.add(p.containerId);
+				if (heldIds.has(p.containerId)) coolingDownHoursById.set(p.containerId, heldIds.get(p.containerId)!);
 				if (p.newerVersion) {
 					newerVersionIds.add(p.containerId);
 					try {
@@ -2190,6 +2194,7 @@ export async function listComposeStacks(envId?: number | null): Promise<ComposeS
 					labels: c.labels || {},
 					updateAvailable: pendingUpdateIds.has(c.id),
 					pinnedToDigest: pinnedDigestIds.has(c.id),
+					...containerCooldownFields(coolingDownHoursById, c.id),
 					newerVersion: newerVersionById.get(c.id) ?? null
 				};
 			})
@@ -2208,7 +2213,7 @@ export async function listComposeStacks(envId?: number | null): Promise<ComposeS
 			// Newer-version-tag (semver) suggestions in this stack - drives the Tag badge.
 			newerVersionCount: stackContainers.filter((c) => newerVersionIds.has(c.id)).length,
 			// Held updates in this stack - shown as waiting, never offered for redeploy.
-			coolingDownCount: stackContainers.filter((c) => coolingDownIds.has(c.id)).length,
+			coolingDownCount: stackContainers.filter((c) => coolingDownHoursById.has(c.id)).length,
 			// Containers whose pinned digest moved - reported, never applied.
 			pinnedDigestCount: stackContainers.filter((c) => pinnedDigestIds.has(c.id)).length,
 			status: deriveStackStatus({

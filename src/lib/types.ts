@@ -166,6 +166,9 @@ export interface StackContainer {
 	updateAvailable?: boolean;
 	/** The tag's digest moved but this container pins the old one (reported, not applied). */
 	pinnedToDigest?: boolean;
+	/** An update exists but the image is too young to apply (waiting out the minimum age). */
+	coolingDown?: boolean;
+	coolingDownHours?: number;
 	/** A newer VERSION tag (semver) for this pinned image, or null. Advisory. */
 	newerVersion?: NewerVersion | null;
 }

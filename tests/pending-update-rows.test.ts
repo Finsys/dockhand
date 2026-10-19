@@ -10,6 +10,7 @@
 
 import { describe, expect, test } from 'bun:test';
 import {
+	containerCooldownFields,
 	coolingDown,
 	isWorthPersisting,
 	rowsToPersist,
@@ -282,5 +283,28 @@ describe('missing and malformed fields', () => {
 	test('a semver-only row is neither updatable nor held', () => {
 		expect(updatableIds([semver('a')])).toEqual([]);
 		expect(coolingDown([semver('a')]).size).toBe(0);
+	});
+});
+
+describe('container cooldown fields stay in lockstep', () => {
+	test('a waiting container carries its hours', () => {
+		const map = new Map([['a', 5]]);
+		expect(containerCooldownFields(map, 'a')).toEqual({ coolingDown: true, coolingDownHours: 5 });
+	});
+
+	test('a container not in the map is not waiting and has no hours', () => {
+		const map = new Map([['a', 5]]);
+		expect(containerCooldownFields(map, 'b')).toEqual({
+			coolingDown: false,
+			coolingDownHours: undefined
+		});
+	});
+
+	test('zero hours still counts as waiting and reports the zero', () => {
+		// The map only ever holds positive hours (coolingDown() drops zero), but the
+		// boolean follows map membership, not truthiness, so the clock can never be
+		// drawn without a number beside it.
+		const map = new Map([['a', 0]]);
+		expect(containerCooldownFields(map, 'a')).toEqual({ coolingDown: true, coolingDownHours: 0 });
 	});
 });
