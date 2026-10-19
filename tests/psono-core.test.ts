@@ -266,9 +266,9 @@ describe('inspectedSecretIds', () => {
 
 describe('envVarsSecretToEntries (Environment Variables secret)', () => {
 	const secret = {
-		type: 'env_vars',
+		type: 'environment_variables',
 		title: 'myapp',
-		env_vars: [
+		environment_variables_variables: [
 			{ key: 'SECRET_KEY', value: 's3cr3t' },
 			{ key: 'API_KEY', value: 'ak-123' }
 		]
@@ -286,7 +286,7 @@ describe('envVarsSecretToEntries (Environment Variables secret)', () => {
 
 	test('a key that is not a valid variable name is skipped, not rewritten', () => {
 		const r = envVarsSecretToEntries({
-			env_vars: [
+			environment_variables_variables: [
 				{ key: 'DB-PASS', value: 'x' },
 				{ key: 'OK_ONE', value: 'y' },
 				{ key: '2FA', value: 'z' }
@@ -297,7 +297,7 @@ describe('envVarsSecretToEntries (Environment Variables secret)', () => {
 
 	test('duplicate keys within one secret keep the first', () => {
 		const r = envVarsSecretToEntries({
-			env_vars: [
+			environment_variables_variables: [
 				{ key: 'TOKEN', value: 'first' },
 				{ key: 'TOKEN', value: 'second' }
 			]
@@ -307,7 +307,7 @@ describe('envVarsSecretToEntries (Environment Variables secret)', () => {
 
 	test('items missing key or value, or non-string, are ignored', () => {
 		const r = envVarsSecretToEntries({
-			env_vars: [
+			environment_variables_variables: [
 				{ key: 'A', value: 'a' },
 				{ key: '', value: 'noname' },
 				{ key: 'B' },
@@ -324,12 +324,21 @@ describe('envVarsSecretToEntries (Environment Variables secret)', () => {
 		expect(envVarsSecretToEntries(null)).toBe(null);
 		expect(envVarsSecretToEntries([{ key: 'A', value: 'a' }])).toBe(null);
 	});
+
+	test('the normalised env_vars field name is accepted as a fallback', () => {
+		// Some Psono tooling (e.g. psonoci json) emits the normalised `env_vars` shape;
+		// the real server hands back `environment_variables_variables`. Both resolve.
+		expect(envVarsSecretToEntries({ env_vars: [{ key: 'ONLY', value: 'v' }] })).toEqual({
+			entries: [{ name: 'ONLY', value: 'v' }],
+			skipped: []
+		});
+	});
 });
 
 describe('referenceValue addresses an env_vars key by name', () => {
 	const secret = {
-		type: 'env_vars',
-		env_vars: [
+		type: 'environment_variables',
+		environment_variables_variables: [
 			{ key: 'SECRET_KEY', value: 's3cr3t' },
 			{ key: 'API_KEY', value: 'ak-123' }
 		]

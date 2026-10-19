@@ -145,13 +145,19 @@ export function secretToEnvVar(
 
 /**
  * The {key,value} items of a Psono Environment Variables secret, or null when the
- * decrypted record is not one. Psono stores this type as `env_vars: [{key,value}]`,
- * one secret holding a whole `.env`, so it has no scalar value field for
- * `secretToEnvVar` to read - it is handled on its own.
+ * decrypted record is not one. Psono stores this type's pairs under
+ * `environment_variables_variables: [{key,value}]` (the field name in Psono's own
+ * client, alongside `environment_variables_title`/`_notes`), one secret holding a
+ * whole `.env`, so it has no scalar value field for `secretToEnvVar` to read - it is
+ * handled on its own. `env_vars` is accepted as a fallback for the normalised shape
+ * some Psono tooling emits.
  */
 export function envVarsEntries(decrypted: unknown): Array<{ key: string; value: string }> | null {
 	if (!decrypted || typeof decrypted !== 'object' || Array.isArray(decrypted)) return null;
-	const arr = (decrypted as Record<string, unknown>).env_vars;
+	const rec = decrypted as Record<string, unknown>;
+	const arr = Array.isArray(rec.environment_variables_variables)
+		? rec.environment_variables_variables
+		: rec.env_vars;
 	if (!Array.isArray(arr)) return null;
 	const out: Array<{ key: string; value: string }> = [];
 	for (const item of arr) {
