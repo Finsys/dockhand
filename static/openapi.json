@@ -33367,7 +33367,7 @@
         "tags": [
           "metrics"
         ],
-        "summary": "Prometheus metrics endpoint (disabled and 404s unless EXPORT_METRICS=true; public if app auth is disabled, otherwise requires a session or bearer token)",
+        "summary": "Prometheus metrics endpoint (disabled and 404s unless EXPORT_METRICS=true; public if app auth is disabled or EXPORT_METRICS_PUBLIC=true, otherwise requires a session or bearer token)",
         "parameters": [],
         "responses": {
           "200": {
