@@ -2697,9 +2697,9 @@
 												</Tooltip.Trigger>
 												<Tooltip.Content side="right" class="w-72 p-3">
 													<div class="space-y-1.5">
-														<p class="font-medium text-sm flex items-center gap-1.5 whitespace-nowrap">
-															<Clock class="w-4 h-4 text-muted-foreground shrink-0" />
-															{m.containers_list_update_held_title({ count: container.coolingDownHours ?? 0 })}
+														<p class="font-medium text-sm flex items-start gap-1.5">
+															<Clock class="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />
+															<span>{m.containers_list_update_held_title({ count: container.coolingDownHours ?? 0 })}</span>
 														</p>
 													</div>
 												</Tooltip.Content>
