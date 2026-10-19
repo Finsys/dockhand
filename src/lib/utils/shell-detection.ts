@@ -169,3 +169,12 @@ export function getBestShell(
 export function hasAvailableShell(result: ShellDetectionResult): boolean {
 	return result.shells.length > 0;
 }
+
+/**
+ * The user a container switch should land on: a saved preference wins, otherwise
+ * root. A picker instance outlives a container switch, so without the root fallback
+ * the previous container's user would carry over.
+ */
+export function userForContainerSwitch(savedUser: string | null, currentUser: string): string {
+	return savedUser !== null ? savedUser : 'root';
+}
