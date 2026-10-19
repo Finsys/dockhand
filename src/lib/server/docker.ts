@@ -4269,7 +4269,8 @@ export interface ImageUpdateCheckResult {
 export async function checkImageUpdateAvailable(
 	imageName: string,
 	currentImageId: string,
-	envId?: number
+	envId?: number,
+	reportPinnedDigest = true
 ): Promise<ImageUpdateCheckResult> {
 	// A digest with no tag names one manifest, so there is nothing to follow. A tag that
 	// records its digest - the shape a base image patched for a CVE takes - is checked by
@@ -4277,13 +4278,22 @@ export async function checkImageUpdateAvailable(
 	// means "a newer digest exists but the compose pins the old one", so the caller
 	// reports the move without applying it. A pinned tag whose digest has NOT moved is
 	// simply up to date and carries no flag, so the pin marker and the update counters
-	// never fire on a quiet pin.
+	// never fire on a quiet pin. `reportPinnedDigest` is the admin opt-out (#1780): off,
+	// the move is not flagged at all - for someone who pins deliberately and never acts
+	// on it. The digest check itself still runs (hasUpdate reflects it); only the pinned
+	// FLAG is withheld, so the pulled-manifest-is-the-pinned-one logic is unchanged.
 	const plan = imageCheckPlan(imageName);
 	if (plan.skip) {
 		return { hasUpdate: false, currentDigest: imageName.split('@')[1] };
 	}
 	const result = await checkTagForUpdate(plan.reference, currentImageId, envId);
-	return resolvePinnedToDigest(plan, result.hasUpdate) ? { ...result, pinnedToDigest: true } : result;
+	if (!resolvePinnedToDigest(plan, result.hasUpdate)) return result;
+	// A moved digest on a pinned tag. Report it (pinned flag, never applied) unless the
+	// admin opted out (#1780), in which case it goes fully silent: clear hasUpdate too,
+	// so a suppressed pin is NOT mistaken for an applicable update and recreated.
+	return reportPinnedDigest
+		? { ...result, pinnedToDigest: true }
+		: { ...result, hasUpdate: false };
 }
 
 async function checkTagForUpdate(

@@ -56,7 +56,7 @@ const db = {
 	createScheduleExecution: async () => ({ id: 1 }), updateScheduleExecution: async (_id: number, data: any) => { executions.push(data); },
 	appendScheduleExecutionLog: async (_id: number, line: string) => { logs.push(line); }, saveVulnerabilityScan: noop, getCombinedScanForImage: async () => null,
 	getEnvUpdateCheckSettings: async () => ({ enabled: true, autoUpdate: true, vulnerabilityCriteria: 'never' }),
-	getGlobalSemverConfig: async () => ({ enabled: false }), clearPendingContainerUpdates: noop,
+	getGlobalSemverConfig: async () => ({ enabled: false }), getPinnedDigestReportEnabled: async () => true, clearPendingContainerUpdates: noop,
 	addPendingContainerUpdate: async (...args: any[]) => { pendingUpdates.push(args); }, removePendingContainerUpdate: async () => { removedPending++; }, removePendingContainerUpdateByName: async () => { removedPending++; }, getPendingContainerUpdates: async () => []
 };
 mock.module(root + 'db', () => db);

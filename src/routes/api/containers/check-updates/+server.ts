@@ -4,9 +4,9 @@ import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
 import { rowsToPersist } from '$lib/utils/pending-update-rows';
 import { listContainers, inspectContainer, checkImageUpdateAvailable, getTagArtifactKind, getRegistryTagCreatedAt, inspectImage } from '$lib/server/docker';
-import { clearPendingContainerUpdates, addPendingContainerUpdate, getPendingContainerUpdates, getGlobalSemverConfig } from '$lib/server/db';
+import { clearPendingContainerUpdates, addPendingContainerUpdate, getPendingContainerUpdates, getGlobalSemverConfig, getPinnedDigestReportEnabled } from '$lib/server/db';
 import { isSystemContainer, isPodmanInfraContainer } from '$lib/server/scheduler/tasks/update-utils';
-import { isUpdateDisabledByLabel, isHiddenByLabel, getVersionPatternOverride, digestUpdateVisible } from '$lib/server/container-labels';
+import { isUpdateDisabledByLabel, isHiddenByLabel, getVersionPatternOverride, digestUpdateVisible, pinnedDigestReportVisible } from '$lib/server/container-labels';
 import { createJobResponse } from '$lib/server/sse';
 import { checkNewerVersion, type ImageCreatedAtProbe } from '$lib/server/semver/check';
 import { parseTag } from '$lib/server/semver/tag-parser';
@@ -128,6 +128,9 @@ export const POST: RequestHandler = async ({ url, cookies, request }) => {
 			matchFlavor: semverConfig.matchFlavor,
 			includePrerelease: semverConfig.includePrerelease
 		} as const;
+		// Global opt-out for moved-digest reports on pinned images (#1780); a
+		// per-container label can still override it either way.
+		const reportPinnedGlobal = await getPinnedDigestReportEnabled();
 
 		// Check container for updates
 		let checked = 0;
@@ -160,7 +163,10 @@ export const POST: RequestHandler = async ({ url, cookies, request }) => {
 					};
 				}
 
-				const result = await checkImageUpdateAvailable(imageName, currentImageId, envIdNum);
+				const result = await checkImageUpdateAvailable(
+					imageName, currentImageId, envIdNum,
+					pinnedDigestReportVisible(reportPinnedGlobal, inspectData.Config?.Labels)
+				);
 
 				// System containers (Dockhand itself, Hawser) have their own update path and are
 				// never shown/counted as a container update, so skip the extra registry call and

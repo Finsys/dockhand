@@ -8,6 +8,7 @@
 import type { SecretProviderConfig, SecretProviderType } from './secretproviders/shared';
 import { normalizeColor, type Tag, type TagColor } from '$lib/utils/tags-core';
 import { passkeysEnabledFromSetting } from '$lib/utils/passkey-availability';
+import { pinnedDigestReportEnabledFromSetting } from '$lib/utils/pinned-digest-report';
 import { mergeProviderConfigForWrite } from './secretproviders/shared';
 import {
 	db,
@@ -5300,6 +5301,18 @@ export async function getPasskeysEnabled(): Promise<boolean> {
 
 export async function setPasskeysEnabled(enabled: boolean): Promise<void> {
 	await setSetting(PASSKEYS_ENABLED_KEY, enabled);
+}
+
+const PINNED_DIGEST_REPORT_KEY = 'report_pinned_digest';
+
+/** Whether a moved digest on a `tag@sha256:` pinned image is reported (#1755/#1780).
+ *  Default ON; the pure helper is where "absent means on" is unit-tested. */
+export async function getPinnedDigestReportEnabled(): Promise<boolean> {
+	return pinnedDigestReportEnabledFromSetting(await getSetting(PINNED_DIGEST_REPORT_KEY));
+}
+
+export async function setPinnedDigestReportEnabled(enabled: boolean): Promise<void> {
+	await setSetting(PINNED_DIGEST_REPORT_KEY, enabled);
 }
 
 const GLOBAL_SEMVER_KEY = 'global_semver_check';

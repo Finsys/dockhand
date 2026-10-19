@@ -22,7 +22,8 @@ import {
 	getVersionPatternOverride,
 	DOCKHAND_LABELS,
 	isDigestWatchDisabledByLabel,
-	digestUpdateVisible
+	digestUpdateVisible,
+	pinnedDigestReportVisible
 } from '../src/lib/server/container-labels';
 
 // ---------------------------------------------------------------------------
@@ -538,5 +539,28 @@ describe('compareContainerOrder', () => {
 
 	test('treats an unparseable value as unlabelled', () => {
 		expect(order([c('x', 'abc'), c('y', '1')])).toEqual(['y', 'x']);
+	});
+});
+
+describe('pinnedDigestReportVisible (#1780 - per-container label wins over the global setting)', () => {
+	test('no label falls through to the global setting', () => {
+		expect(pinnedDigestReportVisible(true, {})).toBe(true);
+		expect(pinnedDigestReportVisible(false, {})).toBe(false);
+		expect(pinnedDigestReportVisible(true, null)).toBe(true);
+		expect(pinnedDigestReportVisible(false, undefined)).toBe(false);
+	});
+
+	test('dockhand.pin.report=false silences the container even when global is ON', () => {
+		expect(pinnedDigestReportVisible(true, { 'dockhand.pin.report': 'false' })).toBe(false);
+	});
+
+	test('dockhand.pin.report=true re-enables the container even when global is OFF', () => {
+		expect(pinnedDigestReportVisible(false, { 'dockhand.pin.report': 'true' })).toBe(true);
+	});
+
+	test('an unparseable label value is ignored and the global decides', () => {
+		// parseLabelBool returns undefined for junk, so neither branch of the label wins.
+		expect(pinnedDigestReportVisible(true, { 'dockhand.pin.report': 'maybe' })).toBe(true);
+		expect(pinnedDigestReportVisible(false, { 'dockhand.pin.report': 'maybe' })).toBe(false);
 	});
 });

@@ -8,7 +8,7 @@
 	import { TogglePill, ToggleSwitch } from '$lib/components/ui/toggle-pill';
 	import CronEditor from '$lib/components/cron-editor.svelte';
 	import TimezoneSelector from '$lib/components/TimezoneSelector.svelte';
-	import { Eye, Bell, Database, Calendar, ShieldCheck, FileText, AlertTriangle, HelpCircle, Globe, Activity, Clock, Info, Save, RotateCcw, LayoutDashboard, Tags, Archive, ChevronRight, ChevronDown, Compass, Layers } from 'lucide-svelte';
+	import { Eye, Bell, Database, Calendar, ShieldCheck, FileText, AlertTriangle, HelpCircle, Globe, Activity, Clock, Info, Save, RotateCcw, LayoutDashboard, Tags, Archive, ChevronRight, ChevronDown, Compass, Layers, Pin } from 'lucide-svelte';
 	import { STACK_LOG_OPERATIONS, type StackLogOperation } from '$lib/utils/stack-log-operations';
 	import CodeEditor from '$lib/components/CodeEditor.svelte';
 	import { appSettings, type DateFormat, type DownloadFormat, type EventCollectionMode, type LabelFilterMode } from '$lib/stores/settings';
@@ -425,6 +425,10 @@ services:
 	let semverRejectOlderImages = $state(true);
 	let semverLoaded = $state(false);
 
+	// Global opt-out for moved-digest reports on pinned `tag@sha256:` images (#1780).
+	let pinnedDigestReport = $state(true);
+	let pinnedDigestReportLoaded = $state(false);
+
 	// The global theme defaults (what a new user starts with). With auth on the theme
 	// toggles here edit these, not the admin's own profile. Rendering waits on
 	// globalThemeLoaded: until the fetch fills these, a toggle handed globalValue=undefined
@@ -464,6 +468,16 @@ services:
 		}
 
 		try {
+			const res = await fetch('/api/settings/pinned-digest-report');
+			if (res.ok) pinnedDigestReport = (await res.json()).enabled ?? true;
+			// Same disarm rule as semver: a refusal means the on-screen value is the
+			// default, so the save effect must not write it back.
+			pinnedDigestReportLoaded = res.status !== 401 && res.status !== 403;
+		} catch {
+			pinnedDigestReportLoaded = true;
+		}
+
+		try {
 			const res = await fetch('/api/settings/general');
 			if (res.ok) {
 				const g = await res.json();
@@ -497,6 +511,23 @@ services:
 	$effect(() => {
 		semverEnabled; semverMaxBump; semverMatchFlavor; semverIncludePrerelease;
 		if (semverLoaded) saveSemverConfig();
+	});
+
+	async function savePinnedDigestReport() {
+		try {
+			await fetch('/api/settings/pinned-digest-report', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ enabled: pinnedDigestReport })
+			});
+		} catch {
+			toast.error(m.settings_general_toast_pinned_digest_save_failed());
+		}
+	}
+
+	$effect(() => {
+		pinnedDigestReport;
+		if (pinnedDigestReportLoaded) savePinnedDigestReport();
 	});
 </script>
 
@@ -1212,6 +1243,27 @@ services:
 						bind:includePrerelease={semverIncludePrerelease}
 						bind:rejectOlderImages={semverRejectOlderImages}
 					/>
+				</Card.Content>
+			</Card.Root>
+
+			<Card.Root>
+				<Card.Header>
+					<Card.Title class="text-sm font-medium flex items-center gap-2">
+						<Pin class="w-4 h-4" />
+						{m.settings_general_pinned_digest_title()}
+					</Card.Title>
+					<Card.Description>
+						{m.settings_general_pinned_digest_description()}
+					</Card.Description>
+				</Card.Header>
+				<Card.Content>
+					<div class="flex items-start justify-between gap-4">
+						<div class="min-w-0">
+							<div class="text-sm font-medium">{m.settings_general_pinned_digest_toggle()}</div>
+							<p class="text-xs text-muted-foreground mt-0.5">{m.settings_general_pinned_digest_hint()}</p>
+						</div>
+						<TogglePill bind:checked={pinnedDigestReport} disabled={!$canAccess('settings', 'edit')} />
+					</div>
 				</Card.Content>
 			</Card.Root>
 			{/if}
