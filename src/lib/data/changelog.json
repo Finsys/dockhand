@@ -8,7 +8,12 @@
       { "type": "feature", "text": "moved-digest reports on pinned images are now configurable, globally or per container (#1780)" },
       { "type": "feature", "text": "terminal button in the container details view (#1754, PR#1768, @Totopo27)" },
       { "type": "fix", "text": "mobile layouts for the containers list and environment tabs (PR#1758, @ddeitterick)" },
-      { "type": "feature", "text": "Psono bulk pull and inline references now read Environment Variables secrets (#1784)" }
+      { "type": "feature", "text": "Psono bulk pull and inline references now read Environment Variables secrets (#1784)" },
+      { "type": "feature", "text": "decrypt a git stack's SOPS-encrypted env file with a new SOPS (age) secret provider (#386, PR#1781, @oha-4)" },
+      { "type": "fix", "text": "update docker-compose to 5.6.0-r2 to pick up its CVE fixes" },
+      { "type": "feature", "text": "EXPORT_METRICS_PUBLIC leaves the /metrics endpoint reachable without authentication, off by default (#1698)" },
+      { "type": "feature", "text": "recognise build/revision tag bumps (-lsNNN, -rN) as newer versions, with tag.transform and link.template label support (#1703)" },
+      { "type": "feature", "text": "minimum image age visual improvements and dockhand.skip.cooldown label (#1725)" }
     ],
     "imageTag": "fnsys/dockhand:v1.0.55"
   },
