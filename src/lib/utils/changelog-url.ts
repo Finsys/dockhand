@@ -24,6 +24,50 @@
 const GITHUB_HOST = 'github.com';
 const GHCR_PREFIX = 'ghcr.io/';
 
+// The first dotted-number run in a tag, split into numeric parts. A local copy so
+// this client-safe util needs no `$lib/server` import (SvelteKit forbids that in the
+// browser). Deliberately minimal - only what the link-template placeholders need.
+function versionPartsOf(tag: string): { version: string; parts: string[] } {
+	const m = /\d+\.\d+(?:\.\d+)?(?:\.\d+)?/.exec(tag);
+	if (!m) return { version: '', parts: [] };
+	return { version: m[0], parts: m[0].split('.') };
+}
+
+/**
+ * Substitute a link-template value's placeholders against a target tag. Supports
+ * `${original}`/`${raw}`/`${transformed}` (the tag verbatim - no transform formula is
+ * in scope here), `${version}`, and `${major}`/`${minor}`/`${patch}` read from it. A
+ * placeholder whose value cannot be derived (the tag is not a version) is left empty.
+ * Returns null when the tag is missing, so no half-built URL is offered.
+ */
+export function interpolateLinkTemplate(template: string, tag: string | null | undefined): string | null {
+	if (!tag) return null;
+	const { version, parts } = versionPartsOf(tag);
+	const part = (i: number) => parts[i] ?? '';
+	return template.replace(/\$\{\s*(original|raw|transformed|version|major|minor|patch|prerelease)\s*\}/gi, (_m, name: string) => {
+		switch (name.toLowerCase()) {
+			case 'original':
+			case 'raw':
+			case 'transformed':
+				return tag;
+			case 'version':
+				return version;
+			case 'major':
+				return part(0);
+			case 'minor':
+				return part(1);
+			case 'patch':
+				return part(2);
+			case 'prerelease': {
+				const pr = /(?:^|[-.])(rc|beta|alpha|nightly|dev|pre|snapshot)[.\-]?\d*/i.exec(tag);
+				return pr ? pr[0].replace(/^[-.]/, '') : '';
+			}
+			default:
+				return '';
+		}
+	});
+}
+
 /**
  * Substitute `{{version}}` / `{{tag}}` (case-insensitive, whitespace-tolerant)
  * in a changelog-url override. Backward-compatible: a URL with NO placeholder is
@@ -76,5 +120,32 @@ export function resolveChangelogUrl(
 		}
 	}
 
+	// Last resort: a `wud.link.template` (or dockhand.link.template) label, so a
+	// migrating install keeps its changelog links for Docker Hub images that carry
+	// no derivable source. Its placeholders (${original}/${major}/...) resolve
+	// against the target version.
+	const template = firstLinkTemplate(labels);
+	if (template) {
+		return interpolateLinkTemplate(template, version);
+	}
+
 	return null;
+}
+
+/** Link-template label keys, native first - the order they are consulted in. */
+const LINK_TEMPLATE_LABELS = [
+	'dockhand.link.template',
+	'wud.link.template',
+	'wud/link.template',
+	'getwud.app/link.template',
+	'wud.getwud.io/link.template'
+];
+
+function firstLinkTemplate(labels?: Record<string, string> | null): string | undefined {
+	if (!labels) return undefined;
+	for (const key of LINK_TEMPLATE_LABELS) {
+		const v = labels[key];
+		if (typeof v === 'string' && v.trim()) return v.trim();
+	}
+	return undefined;
 }
