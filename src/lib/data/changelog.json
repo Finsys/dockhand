@@ -1,5 +1,17 @@
 [
   {
+    "version": "1.0.55",
+    "date": "",
+    "comingSoon": true,
+    "changes": [
+      { "type": "fix", "text": "backup history shows the destination each run used, not the schedule's current one (#1783)" },
+      { "type": "feature", "text": "moved-digest reports on pinned images are now configurable, globally or per container (#1780)" },
+      { "type": "feature", "text": "terminal button in the container details view (#1754, PR#1768, @Totopo27)" },
+      { "type": "fix", "text": "mobile layouts for the containers list and environment tabs (PR#1758, @ddeitterick)" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.55"
+  },
+  {
     "version": "1.0.54",
     "date": "2026-10-17",
     "changes": [
