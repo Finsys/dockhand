@@ -209,7 +209,10 @@
 				const d = destinations.find((x) => x.id === c.destinationId);
 				return [c.id, { repository: d?.repository, name: d?.name }] as const;
 			}));
-			const r = await fetchBackupExecutions(ids, 50, repoByConfig);
+			// Per-run destination lookup: a run stamps the destination it actually
+			// wrote to, so re-pointing the schedule doesn't rewrite old runs' repo (#1783).
+			const destById = new Map(destinations.map((d) => [d.id, { repository: d.repository, name: d.name }] as const));
+			const r = await fetchBackupExecutions(ids, 50, repoByConfig, destById);
 			executions = r.executions;
 			tally = { ok: r.ok, failed: r.failed };
 			onTally?.(tally);

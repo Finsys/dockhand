@@ -59,8 +59,9 @@ async function makeOperationHandle(
 	environmentId: number | null,
 	triggeredBy: 'cron' | 'manual' | 'webhook',
 	onProgress?: (s: string, m: string) => void,
+	destinationId?: number,
 ): Promise<OperationHandle> {
-	const op = await openOperation({ kind, scheduleId, environmentId, entityName, triggeredBy }, onProgress);
+	const op = await openOperation({ kind, scheduleId, environmentId, entityName, triggeredBy, destinationId }, onProgress);
 	return {
 		id: op.id,
 		progress: (status, message) => op.progress(status, message),
@@ -718,8 +719,8 @@ function backupPorts(destination: any, onProgress?: (status: string, message: st
 		serializeDestination: (id, fn) => serializeByRepo(id, fn),
 		// Forward the run's live-progress callback into the operation record so the
 		// SSE route streams it (the record also throttles the durable log writes).
-		openOperation: (entityName, scheduleId, environmentId, triggeredBy, cb) =>
-			makeOperationHandle('backup', entityName, scheduleId, environmentId, triggeredBy, cb ?? onProgress),
+		openOperation: (entityName, scheduleId, environmentId, triggeredBy, cb, destinationId) =>
+			makeOperationHandle('backup', entityName, scheduleId, environmentId, triggeredBy, cb ?? onProgress, destinationId),
 		notify: (event, payload, envId) => notify(event, payload, envId),
 		fireWebhook: (url, payload) => { void fireWebhook(url, payload, { log: (m) => onProgress?.('webhook', m) }); },
 		setConfigStatus: async (configId, status) => { await updateBackupConfig(configId, { lastBackupStatus: status, lastBackupAt: new Date().toISOString() }); },

@@ -5,7 +5,7 @@
 import { HardDrive, Globe, Server } from 'lucide-svelte';
 import { AmazonS3Icon, BackblazeIcon, AzureBlobIcon, GoogleCloudIcon, RestServerIcon } from '$lib/components/cloud-icons';
 import cronstrue from 'cronstrue';
-import { computeExecutionTally, type Execution, type ExecutionTally } from '$lib/utils/execution-tally';
+import { computeExecutionTally, resolveRunRepo, type Execution, type ExecutionTally } from '$lib/utils/execution-tally';
 export { computeExecutionTally, type Execution, type ExecutionTally };
 
 // ---------------------------------------------------------------------------
@@ -391,11 +391,18 @@ export function tagLogLine(msg: string): string {
  *
  * Pass `repoByConfig` (configId → {repository, name}) to stamp each run with which
  * repo it wrote to — the History table shows a Repo column when this is present.
+ *
+ * `destById` (destinationId → {repository, name}) takes precedence per run: a run
+ * records the destination it ACTUALLY wrote to in `details.destinationId`, so the
+ * History reports that rather than the config's current destination, which changes
+ * when the schedule is re-pointed (#1783). `repoByConfig` is the fallback for runs
+ * that predate the stamp.
  */
 export async function fetchBackupExecutions(
 	configIds: number[],
 	limit = 50,
-	repoByConfig?: Map<number, { repository?: string; name?: string }>
+	repoByConfig?: Map<number, { repository?: string; name?: string }>,
+	destById?: Map<number, { repository?: string; name?: string }>
 ): Promise<ExecutionTally> {
 	if (!configIds.length) return { executions: [], ok: 0, failed: 0 };
 	const all: Execution[] = [];
@@ -404,9 +411,12 @@ export async function fetchBackupExecutions(
 			const res = await fetch(`/api/schedules/executions?scheduleType=backup&scheduleId=${id}&limit=${limit}`);
 			if (!res.ok) return;
 			const data = await res.json();
-			const dest = repoByConfig?.get(id);
+			const configDest = repoByConfig?.get(id);
 			for (const e of data.executions || []) {
 				const exec = e as Execution;
+				// The destination this run actually used wins; fall back to the config's
+				// current destination for older runs with no stamp (#1783).
+				const dest = resolveRunRepo(exec.details?.destinationId, destById, configDest);
 				if (dest) { exec._repository = dest.repository; exec._destinationName = dest.name; }
 				all.push(exec);
 			}
