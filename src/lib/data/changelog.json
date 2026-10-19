@@ -7,7 +7,8 @@
       { "type": "fix", "text": "backup history shows the destination each run used, not the schedule's current one (#1783)" },
       { "type": "feature", "text": "moved-digest reports on pinned images are now configurable, globally or per container (#1780)" },
       { "type": "feature", "text": "terminal button in the container details view (#1754, PR#1768, @Totopo27)" },
-      { "type": "fix", "text": "mobile layouts for the containers list and environment tabs (PR#1758, @ddeitterick)" }
+      { "type": "fix", "text": "mobile layouts for the containers list and environment tabs (PR#1758, @ddeitterick)" },
+      { "type": "feature", "text": "Psono bulk pull and inline references now read Environment Variables secrets (#1784)" }
     ],
     "imageTag": "fnsys/dockhand:v1.0.55"
   },
