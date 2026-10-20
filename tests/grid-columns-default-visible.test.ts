@@ -6,6 +6,9 @@
 import { describe, it, expect } from 'bun:test';
 import {
 	containerColumns,
+	stackColumns,
+	networkColumns,
+	volumeColumns,
 	getDefaultColumnPreferences,
 	getConfigurableColumns
 } from '../src/lib/config/grid-columns';
@@ -37,5 +40,23 @@ describe('container grid responsive sizing', () => {
 		const name = containerColumns.find((column) => column.id === 'name');
 		expect(name).toBeDefined();
 		expect(name!.minWidth).toBe(name!.width);
+	});
+});
+
+describe('actions column resizability across data grids (#1777)', () => {
+	it('makes actions column resizable on containers, stacks, volumes, and networks', () => {
+		const grids = [
+			{ name: 'containers', cols: containerColumns },
+			{ name: 'stacks', cols: stackColumns },
+			{ name: 'volumes', cols: volumeColumns },
+			{ name: 'networks', cols: networkColumns }
+		];
+
+		for (const { name, cols } of grids) {
+			const actions = cols.find((c) => c.id === 'actions');
+			expect(actions).toBeDefined();
+			expect(actions!.resizable).toBe(true);
+			expect(actions!.minWidth).toBeGreaterThan(0);
+		}
 	});
 });

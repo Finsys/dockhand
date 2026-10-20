@@ -45,7 +45,7 @@ export const imageColumns: ColumnConfig[] = [
 	{ id: 'tags', label: 'Tags', sortable: true, sortField: 'tags', width: 80, minWidth: 50 },
 	{ id: 'size', label: 'Size', sortable: true, sortField: 'size', width: 80, minWidth: 60 },
 	{ id: 'updated', label: 'Updated', sortable: true, sortField: 'created', width: 140, minWidth: 100 },
-	{ id: 'actions', label: '', fixed: 'end', width: 120, resizable: false }
+	{ id: 'actions', label: '', fixed: 'end', width: 120, minWidth: 80, resizable: true }
 ];
 
 // Image tags grid columns (nested inside expanded image row)
@@ -55,7 +55,7 @@ export const imageTagColumns: ColumnConfig[] = [
 	{ id: 'size', label: 'Size', width: 80, minWidth: 60 },
 	{ id: 'created', label: 'Created', width: 140, minWidth: 100 },
 	{ id: 'used', label: 'Used by', width: 100, minWidth: 70 },
-	{ id: 'actions', label: '', fixed: 'end', width: 200, resizable: false }
+	{ id: 'actions', label: '', fixed: 'end', width: 200, minWidth: 120, resizable: true }
 ];
 
 // Network grid columns
@@ -67,7 +67,7 @@ export const networkColumns: ColumnConfig[] = [
 	{ id: 'subnet', label: 'Subnet', sortable: true, sortField: 'subnet', width: 160, minWidth: 100 },
 	{ id: 'gateway', label: 'Gateway', sortable: true, sortField: 'gateway', width: 140, minWidth: 100 },
 	{ id: 'containers', label: 'Containers', sortable: true, sortField: 'containers', width: 100, minWidth: 70 },
-	{ id: 'actions', label: '', fixed: 'end', width: 160, resizable: false }
+	{ id: 'actions', label: '', fixed: 'end', width: 160, minWidth: 120, resizable: true }
 ];
 
 // Stack grid columns
@@ -89,7 +89,7 @@ export const stackColumns: ColumnConfig[] = [
 	{ id: 'diskIO', label: 'Disk I/O', width: 100, minWidth: 70, align: 'right', sortable: true, sortCycle: DISK_IO_SORT_CYCLE },
 	{ id: 'networks', label: 'Networks', width: 80, minWidth: 60 },
 	{ id: 'volumes', label: 'Volumes', width: 80, minWidth: 60 },
-	{ id: 'actions', label: '', fixed: 'end', width: 180, resizable: false }
+	{ id: 'actions', label: '', fixed: 'end', width: 180, minWidth: 140, resizable: true }
 ];
 
 // Volume grid columns
@@ -102,7 +102,7 @@ export const volumeColumns: ColumnConfig[] = [
 	{ id: 'stack', label: 'Stack', sortable: true, sortField: 'stack', width: 120, minWidth: 80 },
 	{ id: 'usedBy', label: 'Used by', width: 150, minWidth: 80 },
 	{ id: 'created', label: 'Created', sortable: true, sortField: 'created', width: 160, minWidth: 120 },
-	{ id: 'actions', label: '', fixed: 'end', width: 160, resizable: false }
+	{ id: 'actions', label: '', fixed: 'end', width: 160, minWidth: 120, resizable: true }
 ];
 
 // Activity grid columns (no selection, no column reordering - simpler grid)
@@ -137,7 +137,7 @@ export const scheduleColumns: ColumnConfig[] = [
 	{ id: 'lastRun', label: 'Last run', width: 160, minWidth: 120 },
 	{ id: 'nextRun', label: 'Next run', width: 160, minWidth: 100 },
 	{ id: 'status', label: 'Status', width: 70, resizable: false },
-	{ id: 'actions', label: '', fixed: 'end', width: 100, resizable: false }
+	{ id: 'actions', label: '', fixed: 'end', width: 100, minWidth: 80, resizable: true }
 ];
 
 // Environment grid columns (dashboard list view)
@@ -169,7 +169,7 @@ export const backupColumns: ColumnConfig[] = [
 	{ id: 'retention', label: 'Retention', width: 120, minWidth: 80 },
 	{ id: 'schedule', label: 'Schedule', width: 110, minWidth: 80 },
 	{ id: 'status', label: 'Status', sortable: true, sortField: 'lastBackupStatus', width: 75, resizable: false, align: 'center' as any, hint: 'Last backup status' },
-	{ id: 'actions', label: '', fixed: 'end', width: 100, resizable: false }
+	{ id: 'actions', label: '', fixed: 'end', width: 100, minWidth: 80, resizable: true }
 ];
 
 // Repository-snapshots grid columns (the "Repository snapshots on X" dialog).
