@@ -122,6 +122,34 @@ function firstString(obj: Record<string, unknown>, keys: readonly string[]): str
 	return null;
 }
 
+/** The title of a decrypted secret of any type (Environment Variables included), or null. */
+export function secretTitle(decrypted: unknown): string | null {
+	if (!decrypted || typeof decrypted !== 'object' || Array.isArray(decrypted)) return null;
+	return firstString(decrypted as Record<string, unknown>, [
+		...TITLE_FIELDS,
+		'environment_variables_title'
+	]);
+}
+
+/** Selector values that only switch bulk pull on, without narrowing it. */
+const BULK_ALL = new Set(['1', 'true', 'yes', 'on', 'all', '*']);
+
+/**
+ * The secret titles a bulk-pull selector narrows the pull to, or null for "every
+ * secret the key grants". An empty selector or one of the plain enable values
+ * (`1`, `true`, `all`, ...) keeps the original behaviour; anything else is a
+ * comma-separated list of titles, matched case-insensitively.
+ */
+export function bulkTitleFilter(selector: string | undefined | null): string[] | null {
+	const s = (selector ?? '').trim();
+	if (s === '' || BULK_ALL.has(s.toLowerCase())) return null;
+	const titles = s
+		.split(',')
+		.map((t) => t.trim().toLowerCase())
+		.filter((t) => t !== '');
+	return titles.length > 0 ? titles : null;
+}
+
 /**
  * One named value from a decrypted secret, for a bulk pull.
  *

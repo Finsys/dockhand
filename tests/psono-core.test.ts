@@ -11,7 +11,9 @@ import {
 	parsePsonoReference,
 	referenceValue,
 	keyPermissionWarning,
-	inspectedSecretIds
+	inspectedSecretIds,
+	bulkTitleFilter,
+	secretTitle
 } from '../src/lib/server/secretproviders/psono-core';
 
 // The two-step decryption is exercised against a payload sealed EXACTLY the way
@@ -381,5 +383,36 @@ describe('safeKeyForLog (a skipped key is arbitrary decrypted text)', () => {
 
 	test('a normal key is quoted but otherwise intact', () => {
 		expect(safeKeyForLog('db-pass')).toBe('"db-pass"');
+	});
+});
+
+describe('bulkTitleFilter (selector narrows a bulk pull by secret title)', () => {
+	test('blank and the plain enable values keep every granted secret', () => {
+		for (const s of ['', '  ', '1', 'true', 'YES', 'on', 'all', '*', undefined, null]) {
+			expect(bulkTitleFilter(s as string)).toBe(null);
+		}
+	});
+
+	test('anything else is a case-insensitive, trimmed title list', () => {
+		expect(bulkTitleFilter('homelable')).toEqual(['homelable']);
+		expect(bulkTitleFilter(' Homelable , RackPad ,')).toEqual(['homelable', 'rackpad']);
+	});
+
+	test('a list of only separators is not a filter', () => {
+		expect(bulkTitleFilter(' , ,')).toBe(null);
+	});
+});
+
+describe('secretTitle', () => {
+	test('reads the title of every secret type, Environment Variables included', () => {
+		expect(secretTitle({ environment_variables_title: 'homelable' })).toBe('homelable');
+		expect(secretTitle({ website_password_title: 'Site' })).toBe('Site');
+		expect(secretTitle({ note_title: 'N' })).toBe('N');
+	});
+
+	test('no title, or not an object, is null', () => {
+		expect(secretTitle({ environment_variables_variables: [] })).toBe(null);
+		expect(secretTitle(null)).toBe(null);
+		expect(secretTitle([{ note_title: 'x' }])).toBe(null);
 	});
 });

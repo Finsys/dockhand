@@ -34,6 +34,8 @@ import {
 	isPsonoReference,
 	referenceValue,
 	keyPermissionWarning,
+	bulkTitleFilter,
+	secretTitle,
 	inspectedSecretIds,
 	type PsonoEncryptedSecret,
 	type PsonoKeyInspection
@@ -252,12 +254,15 @@ export const psonoProvider: SecretProvider<PsonoConfig> = {
 	/**
 	 * Every secret the API key grants, as env vars.
 	 *
-	 * The selector is ignored: a restricted key already defines the scope, and Psono
-	 * has no server-side folder filter for this access mode. A secret that cannot be
-	 * read or named is skipped with a warning rather than failing the deploy, but a
-	 * failure to reach the server at all propagates.
+	 * A restricted key already defines the scope, and Psono has no server-side folder
+	 * filter for this access mode, so the selector can only narrow the pull on the
+	 * client: `1` / `true` / `all` (or blank) keep every granted secret, anything else
+	 * is a comma-separated list of secret TITLES and only matching secrets are used.
+	 * That lets one key carry many stacks' secrets without their variables colliding.
+	 * A secret that cannot be read or named is skipped with a warning rather than
+	 * failing the deploy, but a failure to reach the server at all propagates.
 	 */
-	async resolveBulk(config: PsonoConfig): Promise<Record<string, string>> {
+	async resolveBulk(config: PsonoConfig, selector = ''): Promise<Record<string, string>> {
 		const res = await inspect(config);
 		if (!res.ok) throw new Error(res.error);
 		const ids = inspectedSecretIds(res.data);
@@ -284,6 +289,20 @@ export const psonoProvider: SecretProvider<PsonoConfig> = {
 			}
 			out[name] = value;
 		};
+		const titles = bulkTitleFilter(selector);
+		if (titles !== null) {
+			const kept = decrypted.filter((e) => {
+				const t = e.d === null ? null : secretTitle(e.d);
+				return t !== null && titles.includes(t.toLowerCase());
+			});
+			if (kept.length === 0) {
+				console.warn(
+					`[Psono] bulk: none of the ${ids.length} granted secret(s) is titled ${safeKeyForLog(selector)}`
+				);
+			}
+			decrypted.length = 0;
+			decrypted.push(...kept);
+		}
 		for (const { id, d } of decrypted) {
 			if (d === null) continue;
 			// An Environment Variables secret holds many key/value pairs - inject each.
