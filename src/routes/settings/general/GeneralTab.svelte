@@ -422,7 +422,7 @@ services:
 	let semverMaxBump = $state<'patch' | 'minor' | 'major'>('major');
 	let semverMatchFlavor = $state(true);
 	let semverIncludePrerelease = $state(false);
-	let semverRejectOlderImages = $state(true);
+	let semverRejectOlderImages = $state(false);
 	let semverLoaded = $state(false);
 
 	// Global opt-out for moved-digest reports on pinned `tag@sha256:` images (#1780).
@@ -455,7 +455,7 @@ services:
 				semverMaxBump = c.maxBump ?? 'major';
 				semverMatchFlavor = c.matchFlavor ?? true;
 				semverIncludePrerelease = c.includePrerelease ?? false;
-				semverRejectOlderImages = c.rejectOlderImages ?? true;
+				semverRejectOlderImages = c.rejectOlderImages ?? false;
 			}
 			// A refusal means the values on screen are the built-in defaults, never the
 			// configuration, so the save effect stays disarmed rather than writing a
