@@ -131,23 +131,27 @@ export function secretTitle(decrypted: unknown): string | null {
 	]);
 }
 
-/** Selector values that only switch bulk pull on, without narrowing it. */
-const BULK_ALL = new Set(['1', 'true', 'yes', 'on', 'all', '*']);
+/** A selector starting with this narrows a bulk pull to the listed secret titles. */
+const TITLE_SELECTOR_PREFIX = 'title:';
 
 /**
  * The secret titles a bulk-pull selector narrows the pull to, or null for "every
- * secret the key grants". An empty selector or one of the plain enable values
- * (`1`, `true`, `all`, ...) keeps the original behaviour; anything else is a
- * comma-separated list of titles, matched case-insensitively.
+ * secret the key grants".
+ *
+ * Only an explicit `title:<name>[,<name>...]` selector narrows the pull. Every other
+ * value keeps pulling everything: the manual has always said the value is ignored
+ * ("any value turns the bulk pull on"), so existing stacks may hold any text there.
+ * An empty list after the prefix (`title:`) yields `[]` so the caller can reject it
+ * instead of silently pulling everything.
  */
 export function bulkTitleFilter(selector: string | undefined | null): string[] | null {
 	const s = (selector ?? '').trim();
-	if (s === '' || BULK_ALL.has(s.toLowerCase())) return null;
-	const titles = s
+	if (!s.toLowerCase().startsWith(TITLE_SELECTOR_PREFIX)) return null;
+	return s
+		.slice(TITLE_SELECTOR_PREFIX.length)
 		.split(',')
-		.map((t) => t.trim().toLowerCase())
+		.map((t) => t.trim())
 		.filter((t) => t !== '');
-	return titles.length > 0 ? titles : null;
 }
 
 /**

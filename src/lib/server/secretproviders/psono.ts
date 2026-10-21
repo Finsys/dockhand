@@ -256,11 +256,11 @@ export const psonoProvider: SecretProvider<PsonoConfig> = {
 	 *
 	 * A restricted key already defines the scope, and Psono has no server-side folder
 	 * filter for this access mode, so the selector can only narrow the pull on the
-	 * client: `1` / `true` / `all` (or blank) keep every granted secret, anything else
-	 * is a comma-separated list of secret TITLES and only matching secrets are used.
-	 * That lets one key carry many stacks' secrets without their variables colliding.
-	 * A secret that cannot be read or named is skipped with a warning rather than
-	 * failing the deploy, but a failure to reach the server at all propagates.
+	 * client: `title:<name>[,<name>...]` keeps only the secrets with those TITLES (so one
+	 * key can carry many stacks' secrets without their variables colliding, and a title
+	 * that matches nothing fails the deploy); every other value, as before, keeps every
+	 * granted secret. A secret that cannot be read or named is skipped with a warning
+	 * rather than failing the deploy, but a failure to reach the server at all propagates.
 	 */
 	async resolveBulk(config: PsonoConfig, selector = ''): Promise<Record<string, string>> {
 		const res = await inspect(config);
@@ -291,13 +291,25 @@ export const psonoProvider: SecretProvider<PsonoConfig> = {
 		};
 		const titles = bulkTitleFilter(selector);
 		if (titles !== null) {
+			if (titles.length === 0) {
+				throw new Error(
+					'Psono: the selector "title:" names no secret - write title:<name>[,<name>...]'
+				);
+			}
+			const wanted = titles.map((t) => t.toLowerCase());
+			const found = new Set<string>();
 			const kept = decrypted.filter((e) => {
 				const t = e.d === null ? null : secretTitle(e.d);
-				return t !== null && titles.includes(t.toLowerCase());
+				if (t === null || !wanted.includes(t.toLowerCase())) return false;
+				found.add(t.toLowerCase());
+				return true;
 			});
-			if (kept.length === 0) {
-				console.warn(
-					`[Psono] bulk: none of the ${ids.length} granted secret(s) is titled ${safeKeyForLog(selector)}`
+			// A stack that comes up without some of its secrets is worse than a failed
+			// deploy, so a title that matches nothing stops the deploy.
+			const missing = titles.filter((t) => !found.has(t.toLowerCase()));
+			if (missing.length > 0) {
+				throw new Error(
+					`Psono: no readable secret titled ${missing.map(safeKeyForLog).join(', ')} among the ${ids.length} this API key grants - check the title and that the secret is attached to the key`
 				);
 			}
 			decrypted.length = 0;

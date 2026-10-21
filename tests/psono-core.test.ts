@@ -386,20 +386,21 @@ describe('safeKeyForLog (a skipped key is arbitrary decrypted text)', () => {
 	});
 });
 
-describe('bulkTitleFilter (selector narrows a bulk pull by secret title)', () => {
-	test('blank and the plain enable values keep every granted secret', () => {
-		for (const s of ['', '  ', '1', 'true', 'YES', 'on', 'all', '*', undefined, null]) {
+describe('bulkTitleFilter (only an explicit title: selector narrows a bulk pull)', () => {
+	test('every value without the title: prefix keeps every granted secret', () => {
+		for (const s of ['', '  ', '1', 'true', 'all', 'homelable', 'free text', undefined, null]) {
 			expect(bulkTitleFilter(s as string)).toBe(null);
 		}
 	});
 
-	test('anything else is a case-insensitive, trimmed title list', () => {
-		expect(bulkTitleFilter('homelable')).toEqual(['homelable']);
-		expect(bulkTitleFilter(' Homelable , RackPad ,')).toEqual(['homelable', 'rackpad']);
+	test('title:<list> is a trimmed, comma-separated list that keeps its case', () => {
+		expect(bulkTitleFilter('title:homelable')).toEqual(['homelable']);
+		expect(bulkTitleFilter(' TITLE: Homelable , rackpad ,')).toEqual(['Homelable', 'rackpad']);
 	});
 
-	test('a list of only separators is not a filter', () => {
-		expect(bulkTitleFilter(' , ,')).toBe(null);
+	test('the prefix without any name is an empty list, for the caller to reject', () => {
+		expect(bulkTitleFilter('title:')).toEqual([]);
+		expect(bulkTitleFilter('title: , ,')).toEqual([]);
 	});
 });
 
