@@ -184,7 +184,10 @@
 				{ id: 'container_exited', label: 'Container exited', description: 'When a container exits unexpectedly' },
 				{ id: 'container_unhealthy', label: 'Container unhealthy', description: 'When a container health check fails' },
 				{ id: 'container_oom', label: 'Container OOM killed', description: 'When a container is killed due to out of memory' },
-				{ id: 'container_updated', label: 'Container updated', description: 'When a container image is updated' }
+				{ id: 'container_updated', label: 'Container updated', description: 'When a container image is updated' },
+				{ id: 'container_scheduled_start', label: 'Scheduled start', description: 'When a container is started by its schedule' },
+				{ id: 'container_scheduled_stop', label: 'Scheduled stop', description: 'When a container is stopped by its schedule' },
+				{ id: 'container_scheduled_failed', label: 'Scheduled action failed', description: 'When a scheduled start or stop of a container fails' }
 			]
 		},
 		{

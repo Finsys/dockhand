@@ -11,23 +11,27 @@
  */
 
 /** Actions an auto-update legitimately triggers, whose notification is noise. */
-const SUPPRESSED_ACTIONS = new Set(['die', 'kill', 'stop']);
+const SUPPRESSED_ACTIONS: readonly string[] = ['die', 'kill', 'stop'];
 
 export class ExpectedEventsTracker {
-	// containerId -> expiry epoch-ms. Kept small: entries are dropped on check.
-	private readonly expiry = new Map<string, number>();
+	// containerId -> expiry epoch-ms and the actions it silences. Kept small: entries
+	// are dropped on check.
+	private readonly expiry = new Map<string, { until: number; actions: ReadonlySet<string> }>();
 
-	/** Mark a container's imminent stop/kill as expected for `ttlMs` from `now`. */
-	markExpected(containerId: string, now: number, ttlMs: number): void {
+	/**
+	 * Mark a container's imminent `actions` as expected for `ttlMs` from `now`. By
+	 * default the stop an update causes; a scheduled start passes `['start']`.
+	 */
+	markExpected(containerId: string, now: number, ttlMs: number, actions: readonly string[] = SUPPRESSED_ACTIONS): void {
 		if (!containerId) return;
-		this.expiry.set(containerId, now + ttlMs);
+		this.expiry.set(containerId, { until: now + ttlMs, actions: new Set(actions) });
 	}
 
 	/**
-	 * True when this action for this container should NOT notify: it is a
-	 * die/kill/stop for a container marked expected and still within its window.
-	 * A non-suppressed action (start, oom, health) always returns false, so those
-	 * still notify even mid-update. Expired/unknown ids return false.
+	 * True when this action for this container should NOT notify: it is one of the
+	 * actions the container was marked for, still within its window. Any other
+	 * action (oom, health, a start after an update) still notifies. Expired/unknown
+	 * ids return false.
 	 */
 	shouldSuppress(containerId: string, action: string, now: number): boolean {
 		// Opportunistically drop everything already past its window so happy-path
@@ -35,13 +39,12 @@ export class ExpectedEventsTracker {
 		// accumulate for the process lifetime. Cheap: the map holds at most a handful
 		// of in-flight updates at once.
 		this.prune(now);
-		if (!SUPPRESSED_ACTIONS.has(action)) return false;
-		const exp = this.expiry.get(containerId);
-		if (exp === undefined) return false;
+		const entry = this.expiry.get(containerId);
+		if (entry === undefined || !entry.actions.has(action)) return false;
 		// A single update legitimately emits die AND kill AND stop for the same id, so
 		// do NOT delete on a suppressed hit (that would let the 2nd/3rd through); the
 		// prune above reclaims the entry once its window passes.
-		return now <= exp;
+		return now <= entry.until;
 	}
 
 	/** Clear a container's mark, e.g. when an update rolls back and restarts it so a
@@ -52,8 +55,8 @@ export class ExpectedEventsTracker {
 
 	/** Drop all entries whose window has passed (called opportunistically). */
 	prune(now: number): void {
-		for (const [id, exp] of this.expiry) {
-			if (now > exp) this.expiry.delete(id);
+		for (const [id, entry] of this.expiry) {
+			if (now > entry.until) this.expiry.delete(id);
 		}
 	}
 

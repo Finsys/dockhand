@@ -8,7 +8,7 @@ import { deleteAutoUpdateSchedule, getAutoUpdateSetting, getSecretKeysToMask, re
 import { getStackComposeFile } from '$lib/server/stacks';
 import { authorize } from '$lib/server/authorize';
 import { auditContainer } from '$lib/server/audit';
-import { unregisterSchedule } from '$lib/server/scheduler';
+import { unregisterSchedule, forgetScheduledContainerAction } from '$lib/server/scheduler';
 import { validateDockerIdParam } from '$lib/server/docker-validation';
 import type { RequestHandler } from './$types';
 
@@ -140,6 +140,12 @@ export const DELETE: RequestHandler = async (event) => {
 		} catch (error) {
 			console.error('Failed to cleanup auto-update schedule:', error);
 			// Don't fail the deletion if schedule cleanup fails
+		}
+
+		try {
+			await forgetScheduledContainerAction(containerName, envIdNum);
+		} catch (error) {
+			console.error('Failed to clean up the scheduled start/stop:', error);
 		}
 
 		// Clean up pending container update if exists

@@ -137,6 +137,24 @@ export const autoUpdateSettings = sqliteTable('auto_update_settings', {
 	envContainerUnique: unique().on(table.environmentId, table.containerName)
 }));
 
+// Scheduled start and stop of one container. A time is HH:MM or a cron
+// expression; source 'label' rows mirror dockhand.start.at / dockhand.stop.at.
+export const scheduledContainerActions = sqliteTable('scheduled_container_actions', {
+	id: integer('id').primaryKey({ autoIncrement: true }),
+	environmentId: integer('environment_id').notNull().references(() => environments.id, { onDelete: 'cascade' }),
+	containerName: text('container_name').notNull(),
+	enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+	startAt: text('start_at'),
+	stopAt: text('stop_at'),
+	source: text('source').notNull().default('ui'),
+	lastStarted: text('last_started'),
+	lastStopped: text('last_stopped'),
+	createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`),
+	updatedAt: text('updated_at').default(sql`CURRENT_TIMESTAMP`)
+}, (table) => ({
+	envContainerUnique: unique().on(table.environmentId, table.containerName)
+}));
+
 export const notificationSettings = sqliteTable('notification_settings', {
 	id: integer('id').primaryKey({ autoIncrement: true }),
 	type: text('type').notNull(),
@@ -735,6 +753,9 @@ export type NewStackEvent = typeof stackEvents.$inferInsert;
 
 export type AutoUpdateSetting = typeof autoUpdateSettings.$inferSelect;
 export type NewAutoUpdateSetting = typeof autoUpdateSettings.$inferInsert;
+
+export type ScheduledContainerAction = typeof scheduledContainerActions.$inferSelect;
+export type NewScheduledContainerAction = typeof scheduledContainerActions.$inferInsert;
 
 export type UserPreference = typeof userPreferences.$inferSelect;
 export type NewUserPreference = typeof userPreferences.$inferInsert;

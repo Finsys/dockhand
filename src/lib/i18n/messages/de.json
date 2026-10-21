@@ -1013,6 +1013,15 @@
 	"containers_settings_ulimit_soft": "Soft-Limit",
 	"containers_settings_ulimit_hard": "Hard-Limit",
 	"containers_settings_auto_update": "Auto-Update",
+	"containers_settings_scheduled_actions": "Geplanter Start und Stopp",
+	"containers_schedule_start_at": "Starten um",
+	"containers_schedule_stop_at": "Stoppen um",
+	"containers_schedule_hint": "Zeiten gelten in der Zeitzone der Umgebung. Die Labels dockhand.start.at und dockhand.stop.at akzeptieren auch HH:MM.",
+	"containers_schedule_from_labels": "Durch die Labels dockhand.start.at / dockhand.stop.at dieses Containers festgelegt. Ändern Sie die Labels, um den Zeitplan zu ändern.",
+	"containers_schedule_label_errors": "Diese Labels wurden ignoriert:",
+	"containers_schedule_system": "Dockhand- und Hawser-Container können nicht nach Zeitplan gestartet oder gestoppt werden.",
+	"containers_schedule_restart_always": "Dieser Container verwendet die Neustart-Richtlinie \"always\": Startet Docker oder der Host neu, während er gestoppt ist, startet er trotz Zeitplan wieder. Verwenden Sie \"unless-stopped\", damit er gestoppt bleibt.",
+	"containers_schedule_save_failed": "Geplanter Start und Stopp konnten nicht gespeichert werden: {error}",
 	"containers_autoupdate_scheduled_unavailable": "Zeitgesteuerte Auto-Updates nicht verfügbar",
 	"containers_autoupdate_dockhand_hint_before": "Dockhand aktualisiert sich nicht automatisch nach Zeitplan. Sobald eine neue Version erscheint, aktualisiere es unter",
 	"containers_autoupdate_dockhand_hint_link": "Einstellungen > Über",
@@ -1598,22 +1607,6 @@
 	"containers_restore_checking_target": "Ziel wird geprüft…",
 	"containers_restore_overwrite_and_restore": "Überschreiben & wiederherstellen",
 	"containers_restore_restore_and_start": "Wiederherstellen & starten",
-	"updates_failed_checks_summary": [
-		{
-			"declarations": [
-				"input summary",
-				"input count",
-				"local countPlural = count: plural"
-			],
-			"selectors": [
-				"countPlural"
-			],
-			"match": {
-				"countPlural=one": "{summary} ({count} Prüfung fehlgeschlagen)",
-				"countPlural=other": "{summary} ({count} Prüfungen fehlgeschlagen)"
-			}
-		}
-	],
 	"updates_newer_version_tags": [
 		{
 			"declarations": [
@@ -1645,6 +1638,9 @@
 		}
 	],
 	"updates_all_up_to_date": "Alle Container sind aktuell",
+	"updates_rest_up_to_date": "Die übrigen Container sind aktuell",
+	"updates_check_failed_all": "Update-Prüfung fehlgeschlagen",
+	"updates_failed_checks_header": "{count} Container konnten nicht geprüft werden",
 	"updates_hours_remaining": [
 		{
 			"declarations": [
@@ -3833,7 +3829,6 @@
 	"logs_streaming_paused": "Streaming pausiert",
 	"logs_pause_live_streaming": "Live-Streaming pausieren",
 	"logs_resume_live_streaming": "Live-Streaming fortsetzen",
-	"logs_stream": "Streamen",
 	"logs_toggle_auto_scroll": "Auto-Scroll umschalten",
 	"logs_auto_scroll": "Auto-Scroll",
 	"logs_tail_lines_title": "Anzahl der zu ladenden Log-Zeilen",
@@ -4357,6 +4352,13 @@
 	"schedules_empty_hint": "Aktiviere Auto-Update für Container oder Auto-Sync für Git-Stacks, damit sie hier erscheinen",
 	"schedules_execution_details": "Ausführungsdetails",
 	"schedules_type_container_update": "Container-Update",
+	"schedules_type_container_start": "Container-Start",
+	"schedules_type_container_stop": "Container-Stopp",
+	"schedules_type_container_starts": "Container-Starts",
+	"schedules_type_container_stops": "Container-Stopps",
+	"schedules_desc_container_start": "Startet den Container",
+	"schedules_desc_container_stop": "Stoppt den Container",
+	"schedules_badge_from_labels": "Aus Labels",
 	"schedules_type_environment_update": "Umgebungs-Update",
 	"schedules_type_git_stack_sync": "Git-Stack-Synchronisierung",
 	"schedules_type_backup": "Backup",
@@ -5152,6 +5154,12 @@
 	"settings_envs_event_container_oom_desc": "Wenn ein Container wegen Arbeitsspeichermangels beendet wird",
 	"settings_envs_event_container_updated": "Container aktualisiert",
 	"settings_envs_event_container_updated_desc": "Wenn das Image eines Containers aktualisiert wird",
+	"settings_envs_event_container_scheduled_start": "Geplanter Start",
+	"settings_envs_event_container_scheduled_start_desc": "Wenn ein Container nach Zeitplan gestartet wird",
+	"settings_envs_event_container_scheduled_stop": "Geplanter Stopp",
+	"settings_envs_event_container_scheduled_stop_desc": "Wenn ein Container nach Zeitplan gestoppt wird",
+	"settings_envs_event_container_scheduled_failed": "Geplante Aktion fehlgeschlagen",
+	"settings_envs_event_container_scheduled_failed_desc": "Wenn ein geplanter Start oder Stopp eines Containers fehlschlägt",
 	"settings_envs_event_group_auto_update": "Auto-Update-Ereignisse",
 	"settings_envs_event_auto_update_success": "Update erfolgreich",
 	"settings_envs_event_auto_update_success_desc": "Container erfolgreich auf neues Image aktualisiert",

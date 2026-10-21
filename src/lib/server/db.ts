@@ -32,6 +32,7 @@ import {
 	configSets,
 	hostMetrics,
 	autoUpdateSettings,
+	scheduledContainerActions,
 	notificationSettings,
 	environmentNotifications,
 	authSettings,
@@ -98,6 +99,7 @@ import { parseEnvInterpolation } from './env-interpolation';
 import { parseInjectedSecretKeys, serializeInjectedSecretKeys } from './stack-secret-keys';
 import { invalidateVulnerabilitiesCache } from './vulnerabilities-cache';
 import { DEFAULT_RETENTION, stripUnstorableEscapes, type ScanRecord } from './scan-retention-core';
+import { semverConfigFromSetting } from './semver/global-config';
 
 // Re-export for backwards compatibility
 export { db, isPostgres, isSqlite };
@@ -1006,6 +1008,83 @@ export async function deleteAutoUpdateSetting(containerName: string, environment
 // Alias for consistency with plan
 export const deleteAutoUpdateSchedule = deleteAutoUpdateSetting;
 
+// =============================================================================
+// SCHEDULED CONTAINER START / STOP
+// =============================================================================
+
+export type ScheduledContainerActionData = typeof scheduledContainerActions.$inferSelect;
+
+export async function getScheduledContainerActions(environmentId?: number): Promise<ScheduledContainerActionData[]> {
+	if (environmentId) {
+		return db.select().from(scheduledContainerActions).where(eq(scheduledContainerActions.environmentId, environmentId));
+	}
+	return db.select().from(scheduledContainerActions);
+}
+
+export async function getScheduledContainerAction(containerName: string, environmentId: number): Promise<ScheduledContainerActionData | null> {
+	const rows = await db.select().from(scheduledContainerActions)
+		.where(and(eq(scheduledContainerActions.containerName, containerName), eq(scheduledContainerActions.environmentId, environmentId)));
+	return rows[0] ?? null;
+}
+
+export async function getScheduledContainerActionById(id: number): Promise<ScheduledContainerActionData | null> {
+	const rows = await db.select().from(scheduledContainerActions).where(eq(scheduledContainerActions.id, id));
+	return rows[0] ?? null;
+}
+
+/** Create or overwrite a container's start/stop times. */
+export async function upsertScheduledContainerAction(
+	containerName: string,
+	environmentId: number,
+	data: { startAt: string | null; stopAt: string | null; source: 'ui' | 'label'; enabled?: boolean }
+): Promise<ScheduledContainerActionData> {
+	const existing = await getScheduledContainerAction(containerName, environmentId);
+	if (existing) {
+		await db.update(scheduledContainerActions)
+			.set({
+				startAt: data.startAt,
+				stopAt: data.stopAt,
+				source: data.source,
+				...(data.enabled === undefined ? {} : { enabled: data.enabled }),
+				updatedAt: new Date().toISOString()
+			})
+			.where(eq(scheduledContainerActions.id, existing.id));
+	} else {
+		await db.insert(scheduledContainerActions).values({
+			environmentId,
+			containerName,
+			startAt: data.startAt,
+			stopAt: data.stopAt,
+			source: data.source,
+			enabled: data.enabled ?? true
+		});
+	}
+	return (await getScheduledContainerAction(containerName, environmentId))!;
+}
+
+export async function setScheduledContainerActionEnabled(id: number, enabled: boolean): Promise<void> {
+	await db.update(scheduledContainerActions)
+		.set({ enabled, updatedAt: new Date().toISOString() })
+		.where(eq(scheduledContainerActions.id, id));
+}
+
+export async function recordScheduledContainerActionRun(id: number, action: 'start' | 'stop'): Promise<void> {
+	const now = new Date().toISOString();
+	await db.update(scheduledContainerActions)
+		.set(action === 'start' ? { lastStarted: now, updatedAt: now } : { lastStopped: now, updatedAt: now })
+		.where(eq(scheduledContainerActions.id, id));
+}
+
+export async function deleteScheduledContainerActionById(id: number): Promise<void> {
+	await db.delete(scheduledContainerActions).where(eq(scheduledContainerActions.id, id));
+}
+
+export async function renameScheduledContainerAction(oldName: string, newName: string, environmentId: number): Promise<void> {
+	await db.update(scheduledContainerActions)
+		.set({ containerName: newName, updatedAt: new Date().toISOString() })
+		.where(and(eq(scheduledContainerActions.containerName, oldName), eq(scheduledContainerActions.environmentId, environmentId)));
+}
+
 export async function renameAutoUpdateSchedule(
 	oldName: string,
 	newName: string,
@@ -1038,6 +1117,9 @@ export const NOTIFICATION_EVENT_TYPES = [
 	{ id: 'container_oom', label: 'Out of memory', description: 'When a container is killed due to out of memory', group: 'container', scope: 'environment' },
 	{ id: 'container_updated', label: 'Container updated', description: 'When a container image is updated', group: 'container', scope: 'environment' },
 	{ id: 'image_pulled', label: 'Image pulled', description: 'When a new image is pulled', group: 'container', scope: 'environment' },
+	{ id: 'container_scheduled_start', label: 'Scheduled start', description: 'When a container is started by its schedule', group: 'container', scope: 'environment' },
+	{ id: 'container_scheduled_stop', label: 'Scheduled stop', description: 'When a container is stopped by its schedule', group: 'container', scope: 'environment' },
+	{ id: 'container_scheduled_failed', label: 'Scheduled action failed', description: 'When a scheduled start or stop of a container fails', group: 'container', scope: 'environment' },
 
 	// Auto-update events (environment-scoped)
 	{ id: 'auto_update_success', label: 'Auto-update success', description: 'Container successfully updated to new image', group: 'auto_update', scope: 'environment' },
@@ -4434,7 +4516,7 @@ export async function saveDashboardPreferences(data: {
 // SCHEDULE EXECUTION OPERATIONS
 // =============================================================================
 
-export type ScheduleType = 'container_update' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune' | 'backup' | 'restore' | 'stack_deploy' | 'deploy_log_reconcile' | 'env_report';
+export type ScheduleType = 'container_update' | 'container_start' | 'container_stop' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune' | 'backup' | 'restore' | 'stack_deploy' | 'deploy_log_reconcile' | 'env_report';
 
 // Runtime list of every ScheduleType. Used to bound a no-type-filter executions
 // query to the caller's viewable types (viewableScheduleTypes). The two type
@@ -4443,6 +4525,8 @@ export type ScheduleType = 'container_update' | 'git_stack_sync' | 'system_clean
 // missing from (or extra in) this array.
 export const ALL_SCHEDULE_TYPES = [
 	'container_update',
+	'container_start',
+	'container_stop',
 	'git_stack_sync',
 	'system_cleanup',
 	'env_update_check',
@@ -5316,22 +5400,9 @@ export async function setPinnedDigestReportEnabled(enabled: boolean): Promise<vo
 }
 
 const GLOBAL_SEMVER_KEY = 'global_semver_check';
-const DEFAULT_SEMVER_CONFIG: GlobalSemverConfig = {
-	enabled: false,
-	maxBump: 'major',
-	matchFlavor: true,
-	includePrerelease: false,
-	rejectOlderImages: true
-};
-
 export async function getGlobalSemverConfig(): Promise<GlobalSemverConfig> {
 	const result = await db.select().from(settings).where(eq(settings.key, GLOBAL_SEMVER_KEY));
-	if (!result[0]) return { ...DEFAULT_SEMVER_CONFIG };
-	try {
-		return { ...DEFAULT_SEMVER_CONFIG, ...JSON.parse(result[0].value) };
-	} catch {
-		return { ...DEFAULT_SEMVER_CONFIG };
-	}
+	return semverConfigFromSetting(result[0]?.value);
 }
 
 export async function setGlobalSemverConfig(config: GlobalSemverConfig): Promise<void> {

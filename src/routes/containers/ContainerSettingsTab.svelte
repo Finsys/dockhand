@@ -8,7 +8,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { TogglePill, ToggleGroup } from '$lib/components/ui/toggle-pill';
-	import { Plus, Trash2, Settings2, RefreshCw, Network, X, Ban, RotateCw, AlertTriangle, PauseCircle, Share2, Server, CircleOff, Box, ChevronDown, ChevronsUpDown, Check, ChevronRight, Cpu, Shield, HeartPulse, Wifi, HardDrive, Lock, Loader2, CheckCircle2, Package, Gpu, Search, CircleHelp, CornerDownLeft, CircleArrowUp } from 'lucide-svelte';
+	import { Plus, Trash2, Settings2, RefreshCw, Network, X, Ban, RotateCw, AlertTriangle, PauseCircle, Share2, Server, CircleOff, Box, ChevronDown, ChevronsUpDown, Check, ChevronRight, Cpu, Shield, HeartPulse, Wifi, HardDrive, Lock, Loader2, CheckCircle2, Package, Gpu, Search, CircleHelp, CornerDownLeft, CircleArrowUp, Clock } from 'lucide-svelte';
 	import { toast } from 'svelte-sonner';
 	import { parseMemory, parseNanoCpus, parsePositiveInt } from '$lib/utils/container-resources';
 	import { parseHostPort, validatePort, validateIp, formatHostPort, expandPortBindings } from '$lib/utils/port-parse';
@@ -16,6 +16,7 @@
 	import { currentEnvironment } from '$lib/stores/environment';
 	import { Badge } from '$lib/components/ui/badge';
 	import AutoUpdateSettings from './AutoUpdateSettings.svelte';
+	import ScheduledActionsSettings from './ScheduledActionsSettings.svelte';
 	import type { VulnerabilityCriteria } from '$lib/components/VulnerabilityCriteriaSelector.svelte';
 	import type { SystemContainerType } from '$lib/types';
 	import { isSameNetwork } from '$lib/utils/network-identity';
@@ -152,6 +153,8 @@
 		autoUpdateEnabled: boolean;
 		autoUpdateCronExpression: string;
 		vulnerabilityCriteria: VulnerabilityCriteria;
+		// Scheduled start/stop: absent while creating, as the container does not exist yet
+		schedule?: { startAt: string; stopAt: string; source: 'ui' | 'label'; labelErrors: string[]; systemContainer: boolean } | null;
 		// Config sets
 		configSets: ConfigSet[];
 		selectedConfigSetId: string;
@@ -224,6 +227,7 @@
 		autoUpdateEnabled = $bindable(),
 		autoUpdateCronExpression = $bindable(),
 		vulnerabilityCriteria = $bindable(),
+		schedule = $bindable(null),
 		configSets,
 		selectedConfigSetId = $bindable(),
 		errors = $bindable(),
@@ -2117,4 +2121,21 @@
 			systemContainer={detectSystemContainer(image)}
 		/>
 	</div>
+
+	{#if schedule}
+		<div class="space-y-3">
+			<div class="flex items-center gap-2 pb-2 border-b">
+				<Clock class="w-4 h-4 text-muted-foreground" />
+				<h3 class="text-sm font-semibold text-foreground">{m.containers_settings_scheduled_actions()}</h3>
+			</div>
+			<ScheduledActionsSettings
+				bind:startAt={schedule.startAt}
+				bind:stopAt={schedule.stopAt}
+				source={schedule.source}
+				labelErrors={schedule.labelErrors}
+				systemContainer={schedule.systemContainer}
+				{restartPolicy}
+			/>
+		</div>
+	{/if}
 </div>
