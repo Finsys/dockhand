@@ -9,6 +9,7 @@
  */
 
 import { resolve, sep, join, dirname } from 'node:path';
+import { isForbiddenStackPath } from './fs-guard';
 
 export function assertSafeRepoUrl(url: string): void {
 	const u = (url || '').trim();
@@ -40,8 +41,9 @@ export function assertSafeGitRef(ref: string | null | undefined): void {
  * `./` still resolve, only a path that escapes the clone is refused. A leading `/` is
  * treated as repo-root-relative (`/qbittorrent/compose.yaml` -> `qbittorrent/compose.yaml`)
  * since the clone is the root the user reasons about; the containment check below still
- * blocks any real escape (`/../x` -> `../x` -> refused). `label` names the field for the
- * error message.
+ * blocks any real escape (`/../x` -> `../x` -> refused). A repository can also commit a
+ * symlink that points out (`root -> /`), so a path whose links lead to Dockhand's own
+ * secrets or /proc is refused as well. `label` names the field for the error message.
  */
 export function repoFilePath(repoPath: string, userRel: string, label: string): string {
 	const rel = userRel.replace(/^\/+/, '');
@@ -49,7 +51,15 @@ export function repoFilePath(repoPath: string, userRel: string, label: string): 
 	if (abs !== repoPath && !abs.startsWith(repoPath + sep)) {
 		throw new Error(`${label} must be a path inside the repository (got "${userRel}")`);
 	}
+	assertNotForbidden(abs, label, userRel);
 	return abs;
+}
+
+/** Throws when a path, its symlinks followed, reaches a location stacks may never use. */
+function assertNotForbidden(abs: string, label: string, shown: string): void {
+	if (isForbiddenStackPath(abs)) {
+		throw new Error(`${label} "${shown}" leads to a location that is not allowed`);
+	}
 }
 
 /**
@@ -60,5 +70,7 @@ export function repoFilePath(repoPath: string, userRel: string, label: string): 
  */
 export function repoBaseEnvPath(repoPath: string, composeUserPath: string): string {
 	const safeComposePath = repoFilePath(repoPath, composeUserPath, 'Compose path');
-	return join(dirname(safeComposePath), '.env');
+	const envPath = join(dirname(safeComposePath), '.env');
+	assertNotForbidden(envPath, 'Env file', '.env');
+	return envPath;
 }

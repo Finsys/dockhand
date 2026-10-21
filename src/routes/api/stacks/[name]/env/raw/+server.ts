@@ -4,6 +4,7 @@ import { findStackDir, getStackDir } from '$lib/server/stacks';
 import { getStackSource } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
 import { existsSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import { isForbiddenStackPath } from '$lib/server/fs-guard';
 import { join, dirname } from 'node:path';
 import type { RequestHandler } from './$types';
 
@@ -17,7 +18,7 @@ import type { RequestHandler } from './$types';
  * resp-400: Invalid stack name (or malformed request body)
  * resp-200: {content:string!, noEnvFile:boolean}
  * resp-200-example: {"content":"FOO=bar\n# comment\nBAZ=qux\n"}
- * resp-403: Permission denied (requires stacks:view, or environment access denied on enterprise)
+ * resp-403: Permission denied (requires stacks:view, or environment access denied on enterprise), or the env file path is a protected location
  * resp-500: Failed to get environment file
  */
 export const GET: RequestHandler = async ({ params, url, cookies }) => {
@@ -70,6 +71,10 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 		}
 
 		let content = '';
+		// The stored path is client-chosen; never read or write a protected location through it.
+		if (envFilePath && isForbiddenStackPath(envFilePath)) {
+			return json({ error: 'Env file path is not allowed' }, { status: 403 });
+		}
 		if (envFilePath && existsSync(envFilePath)) {
 			try {
 				content = readFileSync(envFilePath, 'utf-8');
@@ -97,7 +102,7 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
  * resp-200: {success:boolean!, noEnvFile:boolean, deleted:boolean}
  * resp-200-example: {"success":true}
  * resp-400: Invalid body (content string required) or refusal to write a masked "***" placeholder
- * resp-403: Permission denied (requires stacks:edit, or environment access denied on enterprise)
+ * resp-403: Permission denied (requires stacks:edit, or environment access denied on enterprise), or the env file path is a protected location
  * resp-500: Failed to save environment file
  */
 export const PUT: RequestHandler = async ({ params, url, cookies, request }) => {
@@ -154,6 +159,10 @@ export const PUT: RequestHandler = async ({ params, url, cookies, request }) => 
 			}
 		}
 
+		// The stored path is client-chosen; never read or write a protected location through it.
+		if (envFilePath && isForbiddenStackPath(envFilePath)) {
+			return json({ error: 'Env file path is not allowed' }, { status: 403 });
+		}
 		// Only write if we have a valid path
 		if (!envFilePath) {
 			return json({ success: true });

@@ -9,6 +9,7 @@ import { existsSync, mkdirSync, rmSync, readdirSync, cpSync, statSync, lstatSync
 import { attachResolvedSecrets } from './resolved-secrets.js';
 import { join, resolve, relative, dirname, basename, isAbsolute, normalize as pathNormalize, sep as pathSep } from 'node:path';
 import { judgeSymlink } from './stack-symlinks';
+import { isForbiddenStackPath, holdsForbiddenStackPath } from './fs-guard';
 import { spawn as nodeSpawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import type { StackSourceWithRepo } from './db';
@@ -60,7 +61,7 @@ import { stripSurroundingQuotes } from './secretproviders/shared';
 import { envFileKeys, isSopsDotenv, mergeDecryptedEnvFile, withoutSopsArtifacts } from './secretproviders/sops-core';
 import { gitStackEnvFileRelPath } from './git-stack-env-path';
 import { resolveComposeDockerHost, buildComposeBaseArgs } from './compose-docker-args';
-import { unregisterSchedule } from './scheduler';
+import { unregisterSchedule, forgetScheduledContainerAction } from './scheduler';
 import { sendEventNotification } from './notifications';
 import { deleteGitStackFiles, parseEnvFileContent } from './git';
 import { isDeletableStackDir } from './stack-delete-guard';
@@ -538,6 +539,7 @@ export interface StackPathValidation {
  *   - filename matches the stack-filename gate (.yml/.yaml/.env family)
  *   - normalized form contains no .. segments (parent directory resolved
  *     via realpath so a symlinked component can't smuggle traversal in)
+ *   - it does not reach Dockhand's own secrets, /proc or a .ssh/.git path (isForbiddenStackPath)
  */
 export async function validateStackPath(input: string): Promise<StackPathValidation> {
 	if (!input || typeof input !== 'string') {
@@ -558,6 +560,10 @@ export async function validateStackPath(input: string): Promise<StackPathValidat
 			ok: false,
 			error: `File "${filename}" is not an allowed stack filename (must end in .yml, .yaml, or .env)`
 		};
+	}
+
+	if (isForbiddenStackPath(resolvedPath)) {
+		return { ok: false, error: 'Path is not allowed' };
 	}
 
 	return { ok: true, resolved: resolvedPath };
@@ -768,6 +774,10 @@ export async function getStackComposeFile(
 
 	// Case 2: Stack has custom composePath set - use it
 	if (source.composePath) {
+		// Checked on every read, so a path stored before the check existed is refused too.
+		if (isForbiddenStackPath(source.composePath)) {
+			return { success: false, error: 'Compose path is not allowed', composePath: source.composePath, envPath: source.envPath };
+		}
 		try {
 			if (!existsSync(source.composePath)) {
 				return {
@@ -843,6 +853,15 @@ export async function getStackComposeFile(
 	};
 }
 
+/** A symlink whose target, links followed, is a forbidden stack path. */
+function linksIntoForbidden(p: string): boolean {
+	try {
+		return lstatSync(p).isSymbolicLink() && isForbiddenStackPath(p);
+	} catch {
+		return false;
+	}
+}
+
 /**
  * Save or create a stack compose file without deploying.
  * @param name - Stack name
@@ -890,6 +909,21 @@ export async function saveStackComposeFile(
 		if (!v.ok) return { success: false, error: v.error };
 	}
 
+	// The paths a save moves FROM must be this stack's own: its stored files or its current
+	// directory. Anything else would let a save move another stack's (or any) files.
+	if (options?.oldComposePath || options?.oldEnvPath || options?.moveFromDir) {
+		const currentDir = source?.composePath ? dirname(source.composePath) : await findStackDir(name, envId);
+		const own = (p: string, stored: string | null | undefined) =>
+			(!!stored && resolve(p) === resolve(stored)) || (!!currentDir && dirname(resolve(p)) === resolve(currentDir));
+		if (
+			(options.oldComposePath && !own(options.oldComposePath, source?.composePath)) ||
+			(options.oldEnvPath && !own(options.oldEnvPath, source?.envPath)) ||
+			(options.moveFromDir && (!currentDir || resolve(options.moveFromDir) !== resolve(currentDir)))
+		) {
+			return { success: false, error: 'Path is not allowed' };
+		}
+	}
+
 	// Handle compose file move/rename when path changes
 	if (options?.oldComposePath && options?.composePath &&
 		options.oldComposePath !== options.composePath &&
@@ -930,6 +964,10 @@ export async function saveStackComposeFile(
 	// Get the new directory from composePath
 	const newDir = options?.composePath ? dirname(options.composePath) : null;
 
+	// Every entry of moveFromDir is moved, so neither directory may hold a protected location.
+	if (options?.moveFromDir && newDir && (holdsForbiddenStackPath(options.moveFromDir) || holdsForbiddenStackPath(newDir))) {
+		return { success: false, error: 'Path is not allowed' };
+	}
 	if (options?.moveFromDir && newDir && options.moveFromDir !== newDir && existsSync(options.moveFromDir)) {
 		try {
 			// Ensure new directory exists
@@ -950,6 +988,11 @@ export async function saveStackComposeFile(
 				} catch (renameErr: any) {
 					// If rename fails (e.g., cross-filesystem), try copy+delete
 					if (renameErr.code === 'EXDEV') {
+						// The copy follows a link at either end; the stack's own .git or .ssh is copied.
+						if (linksIntoForbidden(oldFilePath) || linksIntoForbidden(newFilePath)) {
+							console.warn(`[Stack] Skipped ${file}: path is not allowed`);
+							continue;
+						}
 						const stat = statSync(oldFilePath);
 						if (stat.isDirectory()) {
 							// For directories, use recursive copy
@@ -2448,6 +2491,12 @@ export async function requireComposeFile(
 		envFilePath = join(stackDir, '.env');
 	}
 
+	// The env file reaches compose (--env-file, or read into the Hawser request), so a stored
+	// or derived path into a protected location is refused like the compose path itself.
+	if (envFilePath && isForbiddenStackPath(envFilePath)) {
+		return { success: false, error: 'Env file path is not allowed' };
+	}
+
 	// Docker Compose reads non-secrets from the .env file via --env-file.
 	// Secrets and non-secrets from DB need to be injected via shell environment
 	// for stacks without .env files (e.g., git stacks with manual env vars).
@@ -2489,7 +2538,8 @@ export async function redeployStackFromDir(
 		throw new Error('restored compose file is empty; cannot redeploy');
 	}
 	const envPath = join(stackDir, '.env');
-	const hasEnv = existsSync(envPath);
+	// A restored .env can be a link; never read one into a protected location.
+	const hasEnv = existsSync(envPath) && !isForbiddenStackPath(envPath);
 	const envFileContent = hasEnv ? readFileSync(envPath, 'utf-8') : undefined;
 	let envVars = envFileContent ? parseEnvFileContent(envFileContent, stackName) : undefined;
 	// A SOPS .env's metadata is no value, and its ciphertext is replaced by the
@@ -2958,6 +3008,7 @@ export async function removeStack(
 			} catch {
 				// Ignore cleanup errors
 			}
+			await forgetScheduledContainerAction(containerName, envIdNum).catch(() => {});
 
 			// Clean up pending container update
 			try {
@@ -3633,6 +3684,9 @@ export async function writeStackEnvFile(
 		}
 	}
 
+	// The derived path (stored, or the .env beside the compose file) can be a link into a
+	// protected location; it is checked here, where it is finally known.
+	if (isForbiddenStackPath(envFilePath)) throw new Error('Path is not allowed');
 	// Ensure parent directory exists
 	const dir = dirname(envFilePath);
 	if (!existsSync(dir)) {
@@ -3682,6 +3736,9 @@ export async function writeRawStackEnvFile(
 		}
 	}
 
+	// The derived path (stored, or the .env beside the compose file) can be a link into a
+	// protected location; it is checked here, where it is finally known.
+	if (isForbiddenStackPath(envFilePath)) throw new Error('Path is not allowed');
 	// Ensure parent directory exists
 	const dir = dirname(envFilePath);
 	if (!existsSync(dir)) {
@@ -3970,7 +4027,7 @@ async function resolveProviderVarsBestEffort(
 	bestEffort = false
 ): Promise<{ nonSecretVars: Record<string, string>; secretVars: Record<string, string> }> {
 	let envFileContent: string | undefined;
-	if (envPath && existsSync(envPath)) {
+	if (envPath && existsSync(envPath) && !isForbiddenStackPath(envPath)) {
 		try {
 			envFileContent = readFileSync(envPath, 'utf-8');
 		} catch (err) {

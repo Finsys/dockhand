@@ -10,6 +10,7 @@ import { join, basename, dirname, resolve } from 'node:path';
 import yaml from 'js-yaml';
 import { getExternalStackPaths, getStackSources, upsertStackSource, type StackSourceType } from './db';
 import { DockerConnectionError } from './docker';
+import { isForbiddenStackPath } from './fs-guard';
 import { normalizeStackName } from '$lib/utils/stack-name';
 import { shouldSkipScanDir } from '$lib/utils/scan-skip';
 
@@ -225,6 +226,12 @@ export async function adoptStack(
 
 	if (alreadyAdopted) {
 		return { success: false, error: 'Already adopted' };
+	}
+
+	// Adopted paths are read back and written through the stack routes, so they may not
+	// point at Dockhand's own secrets, /proc or a .ssh/.git path.
+	if ((stack.composePath && isForbiddenStackPath(stack.composePath)) || (stack.envPath && isForbiddenStackPath(stack.envPath))) {
+		return { success: false, error: 'Path is not allowed' };
 	}
 
 	// The compose file must live on Dockhand's own filesystem - it is the source of truth

@@ -3,9 +3,11 @@ import { parseEnvFileForForm } from '$lib/utils/env-file-values';
 import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
 import { getStackSource, updateStackSource } from '$lib/server/db';
-import { isProtectedPath } from '$lib/server/fs-guard';
-import { existsSync, readdirSync, renameSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, rmSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { findStackDir } from '$lib/server/stacks';
+import { isForbiddenStackPath, holdsForbiddenStackPath } from '$lib/server/fs-guard';
+import { moveDirEntries } from '$lib/server/stack-relocate-move';
+import { existsSync, readdirSync, readFileSync, mkdirSync, rmSync } from 'node:fs';
+import { join, dirname, resolve } from 'node:path';
 
 /**
  * POST /api/stacks/[name]/relocate
@@ -19,7 +21,7 @@ import { join, dirname } from 'node:path';
  * resp-200: {success:boolean!, movedFiles:array<string>!, errors:array<string>, composeContent:string!, rawEnvContent:string!, envVars:array<{key:string!, value:string!, isSecret:boolean!}>!}
  * resp-200-example: {"success":true,"movedFiles":["compose.yaml",".env"],"composeContent":"services: {}","rawEnvContent":"FOO=bar\n","envVars":[{"key":"FOO","value":"bar","isSecret":false}]}
  * resp-400: oldDir and newComposePath are required, or the source directory does not exist
- * resp-403: Permission denied (requires stacks:edit), or a supplied path is not allowed
+ * resp-403: Permission denied (requires stacks:edit), a supplied path is not allowed, or oldDir is not the stack's current directory
  * resp-404: No stack source row for this name and environment
  * resp-500: Failed to relocate stack
  */
@@ -45,20 +47,32 @@ export const POST: RequestHandler = async ({ params, request, url, cookies }) =>
 		const newDir = dirname(newComposePath);
 
 		// Every caller-supplied path is read from / written to / deleted below, so
-		// they must not reach Dockhand's own secrets (.encryption_key, db/, /proc) -
-		// the same guard the file browser uses. Without it stacks:edit could read the
-		// master key or /proc/self/environ back through the response.
+		// they must not reach Dockhand's own secrets (.encryption_key, db/, /proc) through
+		// the stack-path guard. Without it stacks:edit could read the master key or
+		// /proc/self/environ back through the response.
 		for (const p of [oldDir, newComposePath, newDir, newEnvPath].filter(Boolean)) {
-			if (isProtectedPath(p)) {
+			if (isForbiddenStackPath(p)) {
 				return json({ error: 'Path is not allowed' }, { status: 403 });
 			}
+		}
+		// Every entry of oldDir is moved into newDir, so neither may hold a protected
+		// location (DATA_DIR holds db/ and the key; / holds /proc).
+		if (holdsForbiddenStackPath(oldDir) || holdsForbiddenStackPath(newDir)) {
+			return json({ error: 'Path is not allowed' }, { status: 403 });
 		}
 
 		// Relocate only manages an existing stack's own source row. Reject an unknown
 		// stack name up front so this can't be used as a generic move/read primitive
 		// against an arbitrary route name.
-		if (!(await getStackSource(name, envIdNum ?? null))) {
+		const source = await getStackSource(name, envIdNum ?? null);
+		if (!source) {
 			return json({ error: 'Stack not found' }, { status: 404 });
+		}
+
+		// Only this stack's own directory can be moved; the target may be anywhere allowed.
+		const currentDir = source.composePath ? dirname(source.composePath) : await findStackDir(name, envIdNum ?? null);
+		if (!currentDir || resolve(oldDir) !== resolve(currentDir)) {
+			return json({ error: 'oldDir must be the stack\'s current directory' }, { status: 403 });
 		}
 
 		// Verify old directory exists
@@ -71,35 +85,7 @@ export const POST: RequestHandler = async ({ params, request, url, cookies }) =>
 			mkdirSync(newDir, { recursive: true });
 		}
 
-		// Move all files from old directory to new directory
-		const files = readdirSync(oldDir);
-		const movedFiles: string[] = [];
-		const errors: string[] = [];
-
-		for (const file of files) {
-			const oldFilePath = join(oldDir, file);
-			const newFilePath = join(newDir, file);
-
-			try {
-				// Use rename for atomic move (same filesystem) or copy+delete for cross-filesystem
-				renameSync(oldFilePath, newFilePath);
-				movedFiles.push(file);
-			} catch (renameErr: any) {
-				if (renameErr.code === 'EXDEV') {
-					// Cross-filesystem move - copy then delete
-					try {
-						const data = readFileSync(oldFilePath);
-						writeFileSync(newFilePath, data);
-						unlinkSync(oldFilePath);
-						movedFiles.push(file);
-					} catch (copyErr: any) {
-						errors.push(`Failed to copy ${file}: ${copyErr.message}`);
-					}
-				} else {
-					errors.push(`Failed to move ${file}: ${renameErr.message}`);
-				}
-			}
-		}
+		const { movedFiles, errors } = moveDirEntries(oldDir, newDir);
 
 		// Remove old directory if it's now empty
 		try {
@@ -122,8 +108,8 @@ export const POST: RequestHandler = async ({ params, request, url, cookies }) =>
 		let rawEnvContent = '';
 		const envVars: { key: string; value: string; isSecret: boolean }[] = [];
 
-		// Read compose file
-		if (existsSync(newComposePath)) {
+		// Read compose file. Guarded again: an entry moved into place can be a link.
+		if (existsSync(newComposePath) && !isForbiddenStackPath(newComposePath)) {
 			composeContent = readFileSync(newComposePath, 'utf-8');
 		}
 
@@ -131,7 +117,7 @@ export const POST: RequestHandler = async ({ params, request, url, cookies }) =>
 		// omitted the fallback is join(newDir, '.env'), which readFileSync would follow
 		// through a final symlink - so guard it here too, matching the explicit form.
 		const envFilePath = newEnvPath || join(newDir, '.env');
-		if (existsSync(envFilePath) && !isProtectedPath(envFilePath)) {
+		if (existsSync(envFilePath) && !isForbiddenStackPath(envFilePath)) {
 			rawEnvContent = readFileSync(envFilePath, 'utf-8');
 
 			for (const { key, value } of parseEnvFileForForm(rawEnvContent)) {
