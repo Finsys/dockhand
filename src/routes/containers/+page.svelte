@@ -799,6 +799,8 @@
 		containerStore.setCoolingDown(result.coolingDown ?? new Map());
 		// Images pinned to a digest their tag has moved past: found, reported, not applied.
 		containerStore.setPinnedDigest(new Set((result.pinned ?? []).map((p) => p.containerId)));
+		// The saved rows also hold updates kept for containers whose check failed.
+		loadPendingUpdates();
 	}
 
 	// Load pending updates from database (persisted from check-updates or scheduled jobs)

@@ -83,6 +83,51 @@ export function rowsToPersist(results: CheckResult[]): PersistableRow[] {
 	return out;
 }
 
+/** A row as stored, as far as carrying it over is concerned (`newerVersion` is JSON text). */
+export interface StoredPendingRow {
+	containerId: string;
+	containerName: string;
+	currentImage: string;
+	hasImageUpdate: boolean;
+	newerVersion: string | null;
+	releaseAgeRemainingHours: number | null;
+	pinnedToDigest: boolean;
+}
+
+/**
+ * The rows to persist once a check is done, keeping what a failed check could not
+ * re-confirm. A container whose registry check errored keeps the digest half of its
+ * previous row (update, pin, hold) - a transient registry failure must not erase an
+ * update that is already known. Its newer-version half is the fresh one when this
+ * check found one, else the previous. Every other container gets exactly `rows`.
+ */
+export function withPreviousOnError(
+	rows: PersistableRow[],
+	previous: StoredPendingRow[],
+	erroredIds: ReadonlySet<string>
+): PersistableRow[] {
+	const out = rows.map((r) => ({ ...r, options: { ...r.options } }));
+	for (const prev of previous) {
+		if (!erroredIds.has(prev.containerId)) continue;
+		let previousNewer: unknown = null;
+		try { previousNewer = prev.newerVersion ? JSON.parse(prev.newerVersion) : null; } catch { previousNewer = null; }
+		const digestHalf = {
+			hasImageUpdate: prev.hasImageUpdate,
+			releaseAgeRemainingHours: prev.releaseAgeRemainingHours,
+			pinnedToDigest: prev.pinnedToDigest
+		};
+		const fresh = out.find((r) => r.containerId === prev.containerId);
+		if (fresh) {
+			Object.assign(fresh.options, digestHalf);
+			continue;
+		}
+		const options = { ...digestHalf, newerVersion: previousNewer };
+		if (!isWorthPersisting(options)) continue;
+		out.push({ containerId: prev.containerId, containerName: prev.containerName, imageName: prev.currentImage, options });
+	}
+	return out;
+}
+
 /** The pending-updates response, as far as the client store is concerned. */
 export interface PendingUpdatesResponse {
 	pendingUpdates?: PendingUpdateRow[] & { containerName?: string }[];

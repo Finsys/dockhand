@@ -2,11 +2,11 @@ import { trackedImageReference } from '$lib/utils/tracked-image';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
-import { rowsToPersist } from '$lib/utils/pending-update-rows';
+import { rowsToPersist, withPreviousOnError } from '$lib/utils/pending-update-rows';
 import { listContainers, inspectContainer, checkImageUpdateAvailable, getTagArtifactKind, getRegistryTagCreatedAt, inspectImage } from '$lib/server/docker';
 import { clearPendingContainerUpdates, addPendingContainerUpdate, getPendingContainerUpdates, getGlobalSemverConfig, getPinnedDigestReportEnabled } from '$lib/server/db';
 import { isSystemContainer, isPodmanInfraContainer } from '$lib/server/scheduler/tasks/update-utils';
-import { isUpdateDisabledByLabel, isHiddenByLabel, getVersionPatternOverride, digestUpdateVisible, pinnedDigestReportVisible, isCooldownSkippedByLabel } from '$lib/server/container-labels';
+import { isUpdateDisabledByLabel, isHiddenByLabel, getVersionPatternOverride, digestUpdateVisible, pinnedDigestReportVisible, isCooldownSkippedByLabel, isDigestWatchDisabledByLabel } from '$lib/server/container-labels';
 import { createJobResponse } from '$lib/server/sse';
 import { checkNewerVersion, type ImageCreatedAtProbe } from '$lib/server/semver/check';
 import { parseTag } from '$lib/server/semver/tag-parser';
@@ -104,7 +104,9 @@ export const POST: RequestHandler = async ({ url, cookies, request }) => {
 	}
 
 	return createJobResponse(async (send) => {
-		// Clear existing pending updates for this environment before checking
+		// Clear existing pending updates for this environment before checking, keeping
+		// them in hand so a container whose check fails retains what was known.
+		const previousRows = envIdNum ? await getPendingContainerUpdates(envIdNum).catch(() => []) : [];
 		if (envIdNum) {
 			await clearPendingContainerUpdates(envIdNum);
 		}
@@ -167,7 +169,8 @@ export const POST: RequestHandler = async ({ url, cookies, request }) => {
 				const result = await checkImageUpdateAvailable(
 					imageName, currentImageId, envIdNum,
 					pinnedDigestReportVisible(reportPinnedGlobal, inspectData.Config?.Labels),
-					isCooldownSkippedByLabel(inspectData.Config?.Labels)
+					isCooldownSkippedByLabel(inspectData.Config?.Labels),
+					!isDigestWatchDisabledByLabel(inspectData.Config?.Labels)
 				);
 
 				// System containers (Dockhand itself, Hawser) have their own update path and are
@@ -261,7 +264,8 @@ export const POST: RequestHandler = async ({ url, cookies, request }) => {
 		// keeping. A held update persists with hasImageUpdate false, so it shows as
 		// waiting without ever being offered for a bulk update.
 		if (envIdNum) {
-			for (const row of rowsToPersist(results)) {
+			const erroredIds = new Set(results.filter((r) => r.error).map((r) => r.containerId));
+			for (const row of withPreviousOnError(rowsToPersist(results), previousRows, erroredIds)) {
 				await addPendingContainerUpdate(
 					envIdNum,
 					row.containerId,

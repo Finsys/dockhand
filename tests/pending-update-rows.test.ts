@@ -10,6 +10,9 @@
 
 import { describe, expect, test } from 'bun:test';
 import {
+	withPreviousOnError,
+	type StoredPendingRow,
+	type PersistableRow,
 	containerCooldownFields,
 	coolingDown,
 	isWorthPersisting,
@@ -306,5 +309,59 @@ describe('container cooldown fields stay in lockstep', () => {
 		// drawn without a number beside it.
 		const map = new Map([['a', 0]]);
 		expect(containerCooldownFields(map, 'a')).toEqual({ coolingDown: true, coolingDownHours: 0 });
+	});
+});
+
+describe('withPreviousOnError (a failed check keeps what was known)', () => {
+	const prev = (over: Partial<StoredPendingRow>): StoredPendingRow => ({
+		containerId: 'a', containerName: 'app', currentImage: 'nginx:latest',
+		hasImageUpdate: false, newerVersion: null, releaseAgeRemainingHours: null, pinnedToDigest: false, ...over
+	});
+	const fresh = (id: string, options: Partial<PersistableRow['options']>): PersistableRow => ({
+		containerId: id, containerName: id, imageName: 'img',
+		options: { hasImageUpdate: false, newerVersion: null, releaseAgeRemainingHours: null, pinnedToDigest: false, ...options }
+	});
+
+	test('an errored container keeps its known update', () => {
+		const rows = withPreviousOnError([], [prev({ hasImageUpdate: true })], new Set(['a']));
+		expect(rows).toEqual([{ containerId: 'a', containerName: 'app', imageName: 'nginx:latest',
+			options: { hasImageUpdate: true, releaseAgeRemainingHours: null, pinnedToDigest: false, newerVersion: null } }]);
+	});
+
+	test('a container whose check succeeded gets exactly the fresh result, the old row is dropped', () => {
+		expect(withPreviousOnError([], [prev({ hasImageUpdate: true })], new Set())).toEqual([]);
+		const r = withPreviousOnError([fresh('a', { hasImageUpdate: false, newerVersion: { tag: '2' } })], [prev({ hasImageUpdate: true })], new Set());
+		expect(r[0].options.hasImageUpdate).toBe(false);
+	});
+
+	test('an errored container keeps the digest half but takes a fresh newer version', () => {
+		const r = withPreviousOnError(
+			[fresh('a', { newerVersion: { tag: '3.0' } })],
+			[prev({ hasImageUpdate: true, pinnedToDigest: false, releaseAgeRemainingHours: null, newerVersion: JSON.stringify({ tag: '2.0' }) })],
+			new Set(['a'])
+		);
+		expect(r).toHaveLength(1);
+		expect(r[0].options).toEqual({ hasImageUpdate: true, newerVersion: { tag: '3.0' }, releaseAgeRemainingHours: null, pinnedToDigest: false });
+	});
+
+	test('a kept pin and a kept hold stay what they were', () => {
+		const r = withPreviousOnError([], [prev({ pinnedToDigest: true }), prev({ containerId: 'b', releaseAgeRemainingHours: 5 })], new Set(['a', 'b']));
+		expect(r.map((x) => [x.containerId, x.options.pinnedToDigest, x.options.releaseAgeRemainingHours])).toEqual([['a', true, null], ['b', false, 5]]);
+	});
+
+	test('a previous newer version is parsed back from its stored JSON, a malformed one is dropped', () => {
+		expect(withPreviousOnError([], [prev({ newerVersion: JSON.stringify({ tag: '2.0' }) })], new Set(['a']))[0].options.newerVersion).toEqual({ tag: '2.0' });
+		expect(withPreviousOnError([], [prev({ newerVersion: '{not json' })], new Set(['a']))).toEqual([]);
+	});
+
+	test('an errored container with nothing known gets no row', () => {
+		expect(withPreviousOnError([], [prev({})], new Set(['a']))).toEqual([]);
+		expect(withPreviousOnError([], [], new Set(['a']))).toEqual([]);
+	});
+
+	test('the input rows are not mutated', () => {
+		const input = [fresh('a', {})];
+		withPreviousOnError(input, [prev({ hasImageUpdate: true })], new Set(['a']));
+		expect(input[0].options.hasImageUpdate).toBe(false);
 	});
 });
