@@ -8,6 +8,7 @@
 	import { themeStore } from '$lib/stores/theme';
 	import { getMonospaceFont } from '$lib/themes';
 	import { parseLines, renderLineHtml, type LogEntry } from '$lib/utils/log-entry';
+	import { getStreamingControlState } from '$lib/utils/log-streaming-state';
 	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
@@ -779,9 +780,10 @@
 		</div>
 		<div class="flex items-center gap-2">
 			<!-- Streaming toggle -->
+			{@const streamingState = getStreamingControlState(streamingEnabled, darkMode)}
 			<button
 				onclick={toggleStreaming}
-				class="flex items-center gap-1 px-1.5 py-0.5 rounded text-xs transition-colors {streamingEnabled ? (darkMode ? 'bg-amber-500/20 ring-1 ring-amber-500/50 text-amber-400' : 'bg-amber-500/30 ring-1 ring-amber-600/50 text-amber-700') : darkMode ? 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-300'}"
+				class="flex items-center gap-1 px-1.5 py-0.5 rounded text-xs transition-colors {streamingState.buttonClass}"
 				title={streamingEnabled ? m.logspanel_pause_live_streaming() : m.logspanel_resume_live_streaming()}
 			>
 				{#if streamingEnabled}
