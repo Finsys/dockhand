@@ -20915,6 +20915,107 @@
         ]
       }
     },
+    "/api/preferences/language": {
+      "get": {
+        "operationId": "get_api_preferences_language",
+        "tags": [
+          "preferences"
+        ],
+        "summary": "Get the chosen interface language (null when the browser's language is followed)",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "language is a locale code, or null when the browser's language is followed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "language": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "example": {
+                  "language": "en"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to get the language preference"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "operationId": "put_api_preferences_language",
+        "tags": [
+          "preferences"
+        ],
+        "summary": "Set the interface language; null goes back to following the browser",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "The stored language, a locale code or null",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "language": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "example": {
+                  "language": "en"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "language is not one of the interface languages, or null"
+          },
+          "500": {
+            "description": "Failed to save the language preference"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "language": {
+                    "type": "string"
+                  }
+                }
+              },
+              "example": {
+                "language": "en"
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/preferences/sidebar": {
       "get": {
         "operationId": "get_api_preferences_sidebar",

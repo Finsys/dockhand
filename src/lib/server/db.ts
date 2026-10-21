@@ -699,6 +699,19 @@ export async function deleteSidebarPreferences(userId?: number): Promise<void> {
 	await deleteSetting(key);
 }
 
+/** The interface language chosen for this user (or the install, without auth); null when none. */
+export async function getLanguagePreference(userId?: number): Promise<string | null> {
+	const value = await getSetting(userId ? `user:${userId}:language` : 'language');
+	return typeof value === 'string' ? value : null;
+}
+
+/** Store the interface language; null removes the choice so the browser decides again. */
+export async function setLanguagePreference(language: string | null, userId?: number): Promise<void> {
+	const key = userId ? `user:${userId}:language` : 'language';
+	if (language === null) await deleteSetting(key);
+	else await setSetting(key, language);
+}
+
 // =============================================================================
 // TAG ORDER
 // =============================================================================

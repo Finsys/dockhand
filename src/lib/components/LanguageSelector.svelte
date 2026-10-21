@@ -6,11 +6,11 @@
 	 * somebody running a Polish browser who wants the interface in German has no way
 	 * to say so.
 	 *
-	 * The choice belongs to the browser, not the account: paraglide decides the
-	 * locale before the first message renders, which is earlier than any answer from
-	 * the server could arrive, so it has to be readable synchronously at startup.
-	 * "Follow the browser" is the ABSENCE of a choice rather than a value, which is
-	 * what keeps Accept-Language working for everyone who never opens this.
+	 * The choice is kept in localStorage, read synchronously at startup, and on the server
+	 * (per user with auth, for the install without), which the client init hook copies
+	 * back before the first render and the root layout after sign-in. "Follow the browser" is the ABSENCE of a choice
+	 * rather than a value, which is what keeps Accept-Language working for everyone who
+	 * never opens this.
 	 *
 	 * Changing it reloads the page. Messages are plain function calls, so Svelte has
 	 * nothing to re-run and the text already on screen would otherwise stay put.
@@ -22,9 +22,11 @@
 		LOCALE_STORAGE_KEY,
 		FOLLOW_BROWSER,
 		asLocale,
-		fromNavigator
+		fromNavigator,
+		chooseLanguage
 	} from '$lib/i18n/locale-preference';
 	import { m } from '$lib/paraglide/messages.js';
+	import { toast } from 'svelte-sonner';
 
 	/** Endonyms: each language is listed the way its own speakers write it. */
 	const NAMES: Record<string, string> = {
@@ -57,28 +59,29 @@
 			: (NAMES[chosen] ?? chosen)
 	);
 
-	function choose(value: string | undefined) {
+	/** Bumped after a refused choice so the menu drops the selection it kept locally. */
+	let resetKey = $state(0);
+
+	async function choose(value: string | undefined) {
 		if (!value || value === chosen) return;
+		let store: Storage;
 		try {
-			if (value === FOLLOW_BROWSER) {
-				// Removing it, not storing a marker: an absent key is what hands the
-				// decision back to Accept-Language.
-				localStorage.removeItem(LOCALE_STORAGE_KEY);
-			} else if (asLocale(value)) {
-				localStorage.setItem(LOCALE_STORAGE_KEY, value);
-			} else {
-				return;
-			}
+			store = localStorage;
 		} catch {
-			// A blocked store cannot remember the choice, so do not reload and pretend.
+			toast.error(m.language_storage_blocked());
+			resetKey++;
 			return;
 		}
-		location.reload();
+		const result = await chooseLanguage(value, fetch, store, () => location.reload());
+		if (result === 'saved' || result === 'ignored') return;
+		toast.error(result === 'blocked' ? m.language_storage_blocked() : m.language_save_failed());
+		resetKey++;
 	}
 </script>
 
 <div class="space-y-1">
 	<Label for="language-select">{m.language_label()}</Label>
+	{#key resetKey}
 	<Select.Root type="single" value={chosen} onValueChange={choose}>
 		<Select.Trigger id="language-select" class="w-full">{label}</Select.Trigger>
 		<Select.Content>
@@ -90,5 +93,6 @@
 			{/each}
 		</Select.Content>
 	</Select.Root>
+	{/key}
 	<p class="text-xs text-muted-foreground">{m.language_hint()}</p>
 </div>
