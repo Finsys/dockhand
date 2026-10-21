@@ -3,6 +3,8 @@
 	import { Button } from '$lib/components/ui/button';
 	import { CircleArrowUp, Check, XCircle } from 'lucide-svelte';
 	import { toast } from 'svelte-sonner';
+	import { noUpdatesOutcome, checkableCounts } from '$lib/utils/update-check-outcome';
+	import CheckUpdatesToast from './CheckUpdatesToast.svelte';
 	import { appendEnvParam } from '$lib/stores/environment';
 	import { watchJob } from '$lib/utils/sse-fetch';
 	import type { NewerVersion } from '$lib/types';
@@ -91,14 +93,15 @@
 	// When idle, reflect persisted pending updates as the "found" (green) state.
 	const displayStatus = $derived(status === 'idle' && hasPendingUpdates ? 'found' : status);
 
-	function showFailedChecksToast(failed: FailedCheckItem[], prefix: string) {
-		const details = failed.map((f) => `• ${f.containerName}: ${f.error}`).join('\n');
-		toast.warning(m.updates_failed_checks_summary({ summary: prefix, count: failed.length }), {
-			description: details,
-			descriptionClass: 'whitespace-pre-line',
-			class: '!w-[28rem] !max-w-[28rem]',
-			duration: Infinity,
-			action: { label: 'OK', onClick: () => {} }
+	type SummaryCounts = { updates: number; newerTags: number; pinned: number; coolingDown: number };
+	const NO_COUNTS: SummaryCounts = { updates: 0, newerTags: 0, pinned: 0, coolingDown: 0 };
+
+	// A toast with failures stays until dismissed, so the list can be read.
+	function showSummaryToast(counts: SummaryCounts, failed: FailedCheckItem[], headline?: string) {
+		toast.custom(CheckUpdatesToast, {
+			componentProps: { ...counts, failed, headline, envId },
+			duration: failed.length > 0 ? Infinity : undefined,
+			unstyled: true
 		});
 	}
 
@@ -160,17 +163,23 @@
 				.filter((r: any) => r.newerVersion && !r.systemContainer && !r.updateDisabled)
 				.map((r: any) => ({ containerId: r.containerId, newerVersion: r.newerVersion }));
 
-			// A newer version tag is a real result even when no digest update exists,
-			// so it counts toward the "found" state and the summary message.
-			const semverNote = newerVersions.length > 0
-				? m.updates_newer_version_tags({ count: newerVersions.length })
-				: '';
-
 			if (withUpdates.length === 0 && newerVersions.length === 0 && pinned.length === 0) {
-				// Keep the "Latest" status until re-check / env-switch — don't auto-revert (#1019)
-				status = 'none';
+				const counts = checkableCounts(data.results);
+				const outcome = noUpdatesOutcome(counts.failed, counts.checkable, deferred.length);
+				if (outcome.status === 'error') {
+					// Every check failed: nothing is known to be current, so no "Latest" state.
+					failError();
+				} else {
+					// Keep the "Latest" status until re-check / env-switch - don't auto-revert (#1019)
+					status = 'none';
+				}
 				if (failed.length > 0) {
-					showFailedChecksToast(failed, deferred.length > 0 ? m.updates_cooling_down({ count: deferred.length }) : m.updates_all_up_to_date());
+					// Held updates show as their own count; a headline stands in only when there is none.
+					if (outcome.headline === 'cooling-down') {
+						showSummaryToast({ ...NO_COUNTS, coolingDown: deferred.length }, failed);
+					} else {
+						showSummaryToast(NO_COUNTS, failed, outcome.headline === 'all-failed' ? m.updates_check_failed_all() : m.updates_rest_up_to_date());
+					}
 				} else if (deferred.length > 0) {
 					toast.info(m.updates_cooling_down({ count: deferred.length }), {
 						description: deferred.map((r: any) => m.updates_hours_remaining({ name: r.containerName, count: r.releaseAgeRemainingHours })).join('\n'),
@@ -181,18 +190,12 @@
 				}
 			} else {
 				status = 'found';
-				const parts = [
-					withUpdates.length > 0 ? m.updates_available_count({ count: withUpdates.length }) : '',
-					semverNote,
-					pinned.length > 0 ? m.updates_pinned_digest_short({ count: pinned.length }) : '',
-					deferred.length > 0 ? m.updates_cooling_down_short({ count: deferred.length }) : ''
-				].filter(Boolean);
-				const summary = parts.join(', ');
-				if (failed.length > 0) {
-					showFailedChecksToast(failed, summary);
-				} else {
-					toast.info(summary);
-				}
+				// A newer version tag is a real result even when no digest update exists,
+				// so it counts toward the "found" state and the summary.
+				showSummaryToast(
+					{ updates: withUpdates.length, newerTags: newerVersions.length, pinned: pinned.length, coolingDown: deferred.length },
+					failed
+				);
 			}
 
 			onComplete?.({
