@@ -78,6 +78,9 @@ export function isDigestBasedImage(image: string): boolean {
  * What an update check should do with a reference.
  *
  * `skip` - a digest with no tag names one manifest, so nothing can move.
+ * `watchDigest` - false for a pinned tag whose move would not be reported
+ * (`reportPinnedDigest` off): its digest is not worth a registry request, but the local
+ * digests are still read for the newer-version check.
  * `check` - ask the registry about `reference`, and when `pinned` is set report any move
  * without applying it, because pulling the original reference returns the manifest
  * already running.
@@ -86,14 +89,16 @@ export interface ImageCheckPlan {
 	skip: boolean;
 	reference: string;
 	pinned: boolean;
+	watchDigest: boolean;
 }
 
-export function imageCheckPlan(image: string): ImageCheckPlan {
+export function imageCheckPlan(image: string, reportPinnedDigest = true): ImageCheckPlan {
 	const pinning = imagePinning(image);
 	return {
 		skip: pinning === 'digest',
 		reference: imageReferenceWithoutDigest(image),
-		pinned: pinning === 'tag-with-digest'
+		pinned: pinning === 'tag-with-digest',
+		watchDigest: pinning !== 'tag-with-digest' || reportPinnedDigest
 	};
 }
 

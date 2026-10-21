@@ -47,16 +47,18 @@ import { parseImageReference } from './registry/image-ref';
 import { fetchImageCreatedAt, imagePlatform } from './registry/image-age';
 export { parseImageReference } from './registry/image-ref';
 import { rebaseEnvOntoImage, rebaseLabelsOntoImage, rebaseCommand, describeEnvRebase, describeLabelRebase, composeImageLabelForRecreate, composeImageLabelForm, COMPOSE_IMAGE_LABEL, type ImageEnvLabels } from './container-env-merge';
-import { encodeRegistryAuth, fetchRegistryToken, isSafeRegistryHost } from './registry-auth';
+import { encodeRegistryAuth, isSafeRegistryHost } from './registry-auth';
+import { registryAuthHeader } from './registry/auth-header';
 import { describeRegistryFailure } from './registry-failure-core';
 import {
 	getRegistryBearerToken as registryBearerToken,
 	getRegistryManifestDigestDirectDetailed as manifestDigestDirect,
 	getRegistrySchemeForHost as registrySchemeForHost,
+	readManifestIndex,
 	type RegistryPorts
 } from './registry/manifest-digest';
 import { classifyManifest, type ArtifactKind } from './semver/manifest-artifact';
-import { isSystemContainer, classifyEmptyDigestImage, localDigestIsIndexChild, indexChildDigests, samePlatformImage } from './scheduler/tasks/update-utils';
+import { isSystemContainer, classifyEmptyDigestImage, indexChildDigests, multiArchVerdict, readWithRetry, cachedIndexReader, type MultiArchVerdict } from './scheduler/tasks/update-utils';
 import { deepDiff } from '../utils/diff.js';
 import { getInstanceId } from './backups/identity';
 import { isOwnedBackupHelper } from './backups/reap-core';
@@ -3617,117 +3619,16 @@ async function getRegistryBearerToken(registry: string, repo: string, signal?: A
  * @param registryUrl - Full registry URL (e.g., 'https://ghcr.io' or 'https://registry.example.com/org')
  * @param scope - Token scope (e.g., 'registry:catalog:*' or 'repository:user/repo:pull')
  * @param credentials - Optional credentials { username, password }
+ * @param signal - Optional deadline for the challenge and token requests together
  * @returns Authorization header value (e.g., 'Bearer xxx' or 'Basic xxx') or null
  */
 export async function getRegistryAuthHeader(
 	registryUrl: string,
 	scope: string,
-	credentials?: { username: string; password: string } | null
+	credentials?: { username: string; password: string } | null,
+	signal?: AbortSignal
 ): Promise<string | null> {
-	try {
-		// Parse URL to extract host (V2 API is always at the host root)
-		const parsed = parseRegistryUrl(registryUrl);
-		const hostSafety = isSafeRegistryHost(parsed.host);
-		if (!hostSafety.ok) {
-			console.error(`[Registry] Refusing auth challenge for ${parsed.host}: ${hostSafety.reason}`);
-			return null;
-		}
-		const apiBaseUrl = `${parsed.protocol}://${parsed.host}`;
-
-		// Step 1: Challenge request to /v2/ (always at registry root, not under org path).
-		// Do not follow redirects; a 3xx is treated as a non-401 below.
-		const challengeResponse = await fetch(`${apiBaseUrl}/v2/`, {
-			method: 'GET',
-			headers: { 'User-Agent': 'Dockhand/1.0' },
-			redirect: 'manual'
-		});
-
-		// If 200, no auth needed
-		if (challengeResponse.ok) {
-			await drainResponse(challengeResponse);
-			return null;
-		}
-
-		// If not 401, something else is wrong
-		if (challengeResponse.status !== 401) {
-			await drainResponse(challengeResponse);
-			console.error(`Registry challenge failed: ${challengeResponse.status}`);
-			return null;
-		}
-
-		// Step 2: Parse WWW-Authenticate header
-		const wwwAuth = challengeResponse.headers.get('WWW-Authenticate') || '';
-		const challenge = wwwAuth.toLowerCase();
-
-		if (challenge.startsWith('basic')) {
-			// Basic auth - use credentials if we have them
-			await drainResponse(challengeResponse);
-			if (credentials) {
-				const basicAuth = Buffer.from(`${credentials.username}:${credentials.password}`).toString('base64');
-				return `Basic ${basicAuth}`;
-			}
-			return null;
-		}
-
-		if (!challenge.startsWith('bearer')) {
-			await drainResponse(challengeResponse);
-			console.error(`Unsupported auth type: ${wwwAuth}`);
-			return null;
-		}
-
-		// Drain 401 response body before bearer token fetch (required by Node.js/Undici for connection reuse)
-		await drainResponse(challengeResponse);
-
-		// Parse bearer challenge: Bearer realm="...",service="...",scope="..."
-		const realmMatch = wwwAuth.match(/realm="([^"]+)"/i);
-		const serviceMatch = wwwAuth.match(/service="([^"]+)"/i);
-
-		if (!realmMatch) {
-			console.error('No realm in WWW-Authenticate header');
-			return null;
-		}
-
-		const realm = realmMatch[1];
-		const service = serviceMatch ? serviceMatch[1] : '';
-
-		// Step 3: Request token from realm (with credentials if available).
-		// Empty scope is allowed — means "no specific resource permission".
-		// Useful for credential validation: some registries (Docker Hub)
-		// reject privileged scopes like registry:catalog:* even for valid
-		// users, so omitting scope is the only reliable login check.
-		const tokenUrl = new URL(realm);
-		if (service) tokenUrl.searchParams.set('service', service);
-		if (scope) tokenUrl.searchParams.set('scope', scope);
-
-		const authHeader = credentials
-			? `Basic ${Buffer.from(`${credentials.username}:${credentials.password}`).toString('base64')}`
-			: null;
-		const tokenResponse = await fetchRegistryToken(tokenUrl.toString(), authHeader);
-
-		if (!tokenResponse.ok) {
-			const errorBody = (await tokenResponse.text().catch(() => '')).slice(0, 300).replace(/\s+/g, ' ').trim();
-			const finalNote = tokenResponse.url && tokenResponse.url !== tokenUrl.toString()
-				? ` (final ${new URL(tokenResponse.url).origin})`
-				: '';
-			const identity = credentials
-				? ` as ${credentials.username.slice(0, 4)}...(len=${credentials.username.length})`
-				: ' anonymously';
-			console.error(`[Registry] Token request failed: ${tokenResponse.status} at ${tokenUrl.origin}${finalNote}, sent${identity}${errorBody ? ` - response: ${errorBody}` : ''}`);
-			return null;
-		}
-
-		const tokenData = await tokenResponse.json() as { token?: string; access_token?: string };
-		const token = tokenData.token || tokenData.access_token || null;
-
-		return token ? `Bearer ${token}` : null;
-
-	} catch (e) {
-		const errorMsg = e instanceof Error ? e.message : String(e);
-		const cause = (e as any)?.cause;
-		const causeMsg = cause ? ` (cause: ${cause})` : '';
-		console.error('[Registry] Failed to get auth header:', errorMsg + causeMsg);
-		return null;
-	}
+	return registryAuthHeader(registryUrl, scope, credentials, { parseRegistryUrl, signal });
 }
 
 /**
@@ -4006,54 +3907,14 @@ export async function harborSearchRepositories(
 	return results;
 }
 
-/**
- * Check the registry for the current manifest digest of an image.
- * Simple HEAD request to get Docker-Content-Digest header.
- * Docker stores the manifest list digest in RepoDigests, so we compare that directly.
- */
-/** Direct registry request with upstream diagnostic details. */
-async function getRegistryManifestDigestDirectDetailed(
-	imageName: string, signal?: AbortSignal
-): Promise<{ digest: string | null; reason?: string }> {
-	return manifestDigestDirect(imageName, registryPorts(), signal);
+/** The tag's digest, read by Dockhand straight from the registry with its stored credentials. */
+export async function getRegistryManifestDigest(imageName: string, _envId?: number | null, signal?: AbortSignal): Promise<string | null> {
+	return (await getRegistryManifestDigestDetailed(imageName, _envId, signal)).digest;
 }
 
-/** The target daemon can resolve private registries that Dockhand itself cannot
- * reach (especially through Hawser). This endpoint reads metadata, not layers. */
-async function getDockerDistributionDigest(imageName: string, envId?: number | null, signal?: AbortSignal): Promise<string | null> {
-	try {
-		const headers = await buildRegistryAuthHeader(imageName);
-		const response = await dockerFetch(`/distribution/${encodeURIComponent(imageName)}/json`, { headers, signal }, envId);
-		if (!response.ok) {
-			console.warn(`[Registry] Docker distribution inspect for ${imageName} returned HTTP ${response.status}`);
-			await drainResponse(response);
-			return null;
-		}
-		const data = await response.json() as { Descriptor?: { digest?: unknown } };
-		const digest = data.Descriptor?.digest;
-		return typeof digest === 'string' && /^sha256:[a-f0-9]{64}$/i.test(digest) ? digest : null;
-	} catch (error) {
-		console.warn(`[Registry] Docker distribution inspect failed for ${imageName}:`, error);
-		return null;
-	}
-}
-
-/** With a cooldown enabled, resolve the digest on the target environment first.
- * Otherwise retain the direct registry HEAD without an extra daemon request. */
-export async function getRegistryManifestDigest(imageName: string, envId?: number | null, signal?: AbortSignal): Promise<string | null> {
-	return (await getRegistryManifestDigestDetailed(imageName, envId, signal)).digest;
-}
-
-export async function getRegistryManifestDigestDetailed(imageName: string, envId?: number | null, signal?: AbortSignal): Promise<{ digest: string | null; reason?: string }> {
-	const { registry } = parseImageReference(imageName);
-	if (!isSafeRegistryHost(registry).ok) return { digest: null, reason: describeRegistryFailure({ kind: 'blocked-host', registry }) };
+export async function getRegistryManifestDigestDetailed(imageName: string, _envId?: number | null, signal?: AbortSignal): Promise<{ digest: string | null; reason?: string }> {
 	signal?.throwIfAborted();
-	if ((await getMinimumReleaseAgeConfig(envId)).hours > 0) {
-		const daemonDigest = await getDockerDistributionDigest(imageName, envId, signal);
-		signal?.throwIfAborted();
-		if (daemonDigest) return { digest: daemonDigest };
-	}
-	return getRegistryManifestDigestDirectDetailed(imageName, signal);
+	return manifestDigestDirect(imageName, registryPorts(), signal);
 }
 
 // Cache only verified creation dates, keyed by immutable digest and target platform.
@@ -4162,77 +4023,44 @@ export async function getTagArtifactKind(
 	}
 }
 
-/** Fetch a manifest/index body by tag or digest. Null on any failure; never throws. */
-async function fetchManifestBody(
-	registry: string,
-	repo: string,
-	reference: string,
-	token: string | null,
-	scheme: string
-): Promise<unknown | null> {
-	const headers: Record<string, string> = {
-		'User-Agent': 'Dockhand/1.0',
-		'Accept': [
-			'application/vnd.docker.distribution.manifest.list.v2+json',
-			'application/vnd.oci.image.index.v1+json'
-		].join(', ')
-	};
-	if (token) headers['Authorization'] = token;
-	const response = await fetch(`${scheme}://${registry}/v2/${repo}/manifests/${reference}`, {
-		method: 'GET',
-		headers,
-		signal: AbortSignal.timeout(8000)
-	});
-	if (!response.ok) {
-		await drainResponse(response);
-		return null;
-	}
-	return response.json();
-}
+/** Index reads by digest, shared by every check (see cachedIndexReader). */
+const indexByDigest = new Map<string, unknown>();
 
 /**
- * Rule out a multi-arch false positive after the index digest did not match any local
- * digest. Two shapes, both resolved from the registry's CURRENT index for the tag:
- *  - the local image recorded a per-arch CHILD of the current index, or
- *  - the local image recorded an OLD index whose entry for the daemon's platform is the
- *    SAME image as the new index's entry - the tag was republished with only another
- *    architecture or the attestations changed.
- * Best-effort: ANY failure (network, non-index, unauthenticated) returns false so the
- * caller keeps its "update available" verdict. Never throws; own short timeouts; runs
- * only on the already-flagged path.
+ * Whether an index-digest mismatch on a multi-arch tag is a real update (see
+ * `multiArchVerdict`). Each read gets one retry after a transient failure; a check that
+ * still cannot read the registry answers `unknown` rather than guessing.
  */
 async function localImageMatchesRegistry(
 	imageName: string,
 	localDigests: string[],
-	envId?: number | null
-): Promise<boolean> {
-	try {
-		const { registry, repo, tag } = parseImageReference(imageName);
-		if (!isSafeRegistryHost(registry).ok) return false;
-		const token = await getRegistryBearerToken(registry, repo);
-		const scheme = await getRegistrySchemeForHost(registry);
-
-		const registryIndex = await fetchManifestBody(registry, repo, tag, token, scheme);
-		if (registryIndex === null) return false;
-
-		// Local per-arch child of the current index.
-		if (localDigestIsIndexChild(localDigests, registryIndex)) return true;
-
-		// Local digest is an OLD index; compare the daemon-platform entry of both.
-		// Only worth the /info and the extra manifest reads when the registry side is
-		// actually a multi-arch index - a single-arch tag has no platform entry to compare.
-		if (indexChildDigests(registryIndex).length === 0) return false;
-		const info = await dockerJsonRequest('/info', { signal: AbortSignal.timeout(8000) }, envId) as { OSType?: string; Architecture?: string };
-		const platform = imagePlatform(info?.OSType, info?.Architecture);
-		if (!platform) return false;
-		for (const localDigest of localDigests) {
-			const localIndex = await fetchManifestBody(registry, repo, localDigest, token, scheme);
-			if (localIndex && samePlatformImage(localIndex, registryIndex, platform)) return true;
+	envId?: number | null,
+	registryDigest?: string
+): Promise<MultiArchVerdict> {
+	const { registry, repo, tag } = parseImageReference(imageName);
+	if (!isSafeRegistryHost(registry).ok) return { kind: 'unknown', reason: describeRegistryFailure({ kind: 'blocked-host', registry }) };
+	// Authenticated only when a read misses the cache.
+	let auth: Promise<[string | null, string]> | null = null;
+	const credentials = () => (auth ??= Promise.all([getRegistryBearerToken(registry, repo), getRegistrySchemeForHost(registry)]));
+	const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+	const readIndex = cachedIndexReader(async (reference) => {
+		const [token, scheme] = await credentials();
+		return readWithRetry(() => readManifestIndex(registry, repo, reference, token, scheme), sleep);
+	}, indexByDigest, `${registry}/${repo}`);
+	return multiArchVerdict({
+		tag,
+		currentDigest: registryDigest,
+		localDigests,
+		readIndex,
+		platform: async () => {
+			try {
+				const info = await dockerJsonRequest('/info', { signal: AbortSignal.timeout(8000) }, envId) as { OSType?: string; Architecture?: string };
+				return imagePlatform(info?.OSType, info?.Architecture);
+			} catch {
+				return null;
+			}
 		}
-		return false;
-	} catch {
-		return false;
-	}
+	});
 }
 
 export interface ImageUpdateCheckResult {
@@ -4271,7 +4099,8 @@ export async function checkImageUpdateAvailable(
 	currentImageId: string,
 	envId?: number,
 	reportPinnedDigest = true,
-	skipCooldown = false
+	skipCooldown = false,
+	watchDigest = true
 ): Promise<ImageUpdateCheckResult> {
 	// A digest with no tag names one manifest, so there is nothing to follow. A tag that
 	// records its digest - the shape a base image patched for a CVE takes - is checked by
@@ -4280,28 +4109,24 @@ export async function checkImageUpdateAvailable(
 	// reports the move without applying it. A pinned tag whose digest has NOT moved is
 	// simply up to date and carries no flag, so the pin marker and the update counters
 	// never fire on a quiet pin. `reportPinnedDigest` is the admin opt-out (#1780): off,
-	// the move is not flagged at all - for someone who pins deliberately and never acts
-	// on it. The digest check itself still runs (hasUpdate reflects it); only the pinned
-	// FLAG is withheld, so the pulled-manifest-is-the-pinned-one logic is unchanged.
-	const plan = imageCheckPlan(imageName);
+	// a pinned tag's digest is not asked about (plan.watchDigest), for someone who pins
+	// deliberately and never acts on a move.
+	const plan = imageCheckPlan(imageName, reportPinnedDigest);
 	if (plan.skip) {
 		return { hasUpdate: false, currentDigest: imageName.split('@')[1] };
 	}
-	const result = await checkTagForUpdate(plan.reference, currentImageId, envId, skipCooldown);
+	const result = await checkTagForUpdate(plan.reference, currentImageId, envId, skipCooldown, watchDigest && plan.watchDigest);
 	if (!resolvePinnedToDigest(plan, result.hasUpdate)) return result;
-	// A moved digest on a pinned tag. Report it (pinned flag, never applied) unless the
-	// admin opted out (#1780), in which case it goes fully silent: clear hasUpdate too,
-	// so a suppressed pin is NOT mistaken for an applicable update and recreated.
-	return reportPinnedDigest
-		? { ...result, pinnedToDigest: true }
-		: { ...result, hasUpdate: false };
+	// A moved digest on a pinned tag: reported with the pinned flag, never applied.
+	return { ...result, pinnedToDigest: true };
 }
 
 async function checkTagForUpdate(
 	checkedReference: string,
 	currentImageId: string,
 	envId?: number,
-	skipCooldown = false
+	skipCooldown = false,
+	watchDigest = true
 ): Promise<ImageUpdateCheckResult> {
 	const imageName = checkedReference;
 	try {
@@ -4338,6 +4163,12 @@ async function checkTagForUpdate(
 		const localDigests = currentRepoDigests
 			.map(extractDigest)
 			.filter((d): d is string => d !== null);
+
+		// Digest watching off (dockhand.watch.digest=false): no registry request at all.
+		// The local digests are still returned for the newer-version check.
+		if (!watchDigest) {
+			return { hasUpdate: false, currentDigest: currentRepoDigests[0] ?? currentImageId, localDigests };
+		}
 
 		// The RUNNING image has no repo digests. That is ambiguous: it can be a
 		// genuinely local/built image (no registry to check against), OR a registry
@@ -4384,10 +4215,20 @@ async function checkTagForUpdate(
 		// The HEAD digest (always the manifest-list/index digest) didn't match. Before
 		// declaring an update, rule out the multi-arch false positives: a local per-arch
 		// child digest never equals the index digest, and an index that moved while the
-		// daemon-platform image stayed the same is not an update either. Both are
-		// best-effort registry reads; on any failure hasUpdate stays true.
-		if (await localImageMatchesRegistry(imageName, localDigests, envId)) {
+		// daemon-platform image stayed the same is not an update either. A registry that
+		// cannot be read to decide is an error, never a guessed update.
+		const multiArch = await localImageMatchesRegistry(imageName, localDigests, envId, registryDigest);
+		if (multiArch.kind === 'same') {
 			return { hasUpdate: false, currentDigest: currentRepoDigests[0], localDigests };
+		}
+		if (multiArch.kind === 'unknown') {
+			return {
+				hasUpdate: false,
+				currentDigest: currentRepoDigests[0],
+				registryDigest,
+				localDigests,
+				error: `Could not confirm whether the multi-arch image is current: ${multiArch.reason}`
+			};
 		}
 		const remaining = await imageCooldownRemainingMs(checkedReference, registryDigest, envId);
 		if (remaining > 0 && !skipCooldown) {
