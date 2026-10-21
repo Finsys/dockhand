@@ -5,6 +5,8 @@
     "comingSoon": true,
     "changes": [
       { "type": "feature", "text": "start and stop a container on a schedule (#1178)" },
+      { "type": "feature", "text": "the interface language is kept on the server, so it survives a browser that clears its data (#1795)" },
+      { "type": "fix", "text": "the actions column can be resized in every data grid (#1777, PR#1787, @Totopo27)" },
       { "type": "fix", "text": "newer version tags are found on GHCR repositories with very many tags (#1792)" },
       { "type": "fix", "text": "a stack that bind-mounts a single file restores, also onto a host where the file is missing (#1793)" },
       { "type": "fix", "text": "the log view's live streaming toggle shows its state like the other toggles (#1654)" },
