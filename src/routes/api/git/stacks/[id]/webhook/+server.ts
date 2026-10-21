@@ -51,6 +51,45 @@ export const POST: RequestHandler = async (event) => {
 			});
 			return json({ error: 'Webhook secret is not configured for this stack' }, { status: 401 });
 		}
+		let payload = '';
+		if (policy.action === 'verify') {
+			const webhookSecret = gitStack.webhookSecret as string;
+			payload = await request.text();
+			const githubSignature = request.headers.get('x-hub-signature-256');
+			const gitlabToken = request.headers.get('x-gitlab-token');
+
+			const signature = githubSignature || gitlabToken;
+
+			if (!verifyWebhookSignature(payload, signature, webhookSecret)) {
+				await auditGitStack(event, 'webhook', id, gitStack.stackName, gitStack.environmentId, {
+					method: 'POST', source, error: 'invalid_signature'
+				});
+				return json({ error: 'Invalid webhook signature' }, { status: 401 });
+			}
+		} else if (policy.action === 'deploy-unverified') {
+			payload = await request.text();
+		}
+
+		// When the payload is a GitHub/GitLab push event, verify the push ref targets the tracked branch.
+		const trackedBranch = gitStack.branch || gitStack.repoBranch;
+		if (trackedBranch && payload.trim().startsWith('{')) {
+			try {
+				const body = JSON.parse(payload);
+				if (typeof body?.ref === 'string' && body.ref) {
+					const pushRef = body.ref;
+					const expectedRef = `refs/heads/${trackedBranch}`;
+					if (pushRef !== expectedRef && pushRef !== trackedBranch) {
+						await auditGitStack(event, 'webhook', id, gitStack.stackName, gitStack.environmentId, {
+							method: 'POST', source, result: 'skipped'
+						});
+						return json({ success: true, skipped: true, output: `Push was to ${pushRef}, not tracked branch ${trackedBranch}` });
+					}
+				}
+			} catch {
+				// Non-JSON payload or malformed: continue with regular deployment
+			}
+		}
+
 		if (policy.action === 'deploy-unverified') {
 			// ALLOW_WEBHOOKS_WITHOUT_SECRET opt-in (isolated network): deploy without
 			// verification, but record the unverified trigger in the audit trail.
@@ -59,21 +98,6 @@ export const POST: RequestHandler = async (event) => {
 				method: 'POST', source, verification: 'skipped_no_secret', result: result.skipped ? 'skipped' : result.success ? 'deployed' : 'failed'
 			});
 			return json(result);
-		}
-
-		// policy.action === 'verify' here, so a secret is present.
-		const webhookSecret = gitStack.webhookSecret as string;
-		const payload = await request.text();
-		const githubSignature = request.headers.get('x-hub-signature-256');
-		const gitlabToken = request.headers.get('x-gitlab-token');
-
-		const signature = githubSignature || gitlabToken;
-
-		if (!verifyWebhookSignature(payload, signature, webhookSecret)) {
-			await auditGitStack(event, 'webhook', id, gitStack.stackName, gitStack.environmentId, {
-				method: 'POST', source, error: 'invalid_signature'
-			});
-			return json({ error: 'Invalid webhook signature' }, { status: 401 });
 		}
 
 		// Deploy the git stack (syncs and deploys only if there are changes)
