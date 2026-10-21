@@ -26,7 +26,7 @@
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { getRepoTypeIcon, parseRetention, parseOptions, retentionSummary as getRetentionSummary, formatCron, runBackupAction, classifyJobResult, tagLogLine, fetchBackupExecutions, pickDuplicateDestinationId, duplicateStartsEnabled, type BackupAction, type BackupFormState } from '$lib/utils/backup';
 	import { cronstrueLocale } from '$lib/i18n/cron';
-	import { reconcileSelectedVolumeKeys } from '$lib/utils/mounts';
+	import { reconcileSelectedVolumeKeys, fileBindKeys } from '$lib/utils/mounts';
 	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
@@ -727,6 +727,7 @@
 					bind:allVolumes={editAllVolumes}
 					bind:selectedVolumes={editSelectedVolumes}
 					emptyLabel={type === 'stack' ? m.containers_backup_no_volumes_stack() : m.containers_backup_no_volumes_container()}
+					fileKeys={fileBindKeys(volumes, stackListing?.kind === 'listed' ? stackListing : null)}
 				/>
 
 				<!-- Advanced -->

@@ -452,19 +452,6 @@ export async function probeStackDir(
 	}
 }
 
-/** The busybox list-script for a data-presence probe: print the missing sentinel if the mount
- * point does not exist, otherwise emit one `<type>\t<size>\t<name>` line per top-level entry. */
-function probeListScript(missingSentinel: string): string {
-	return (
-		`if [ ! -e /probe ]; then printf '%s' '${missingSentinel}'; exit 0; fi; ` +
-		`cd /probe 2>/dev/null || { printf '%s' '${missingSentinel}'; exit 0; }; ` +
-		`for f in * .*; do ` +
-		`[ "$f" = "." ] || [ "$f" = ".." ] && continue; [ -e "$f" ] || continue; ` +
-		`if [ -d "$f" ]; then t=d; else t=f; fi; s=$(stat -c %s "$f" 2>/dev/null || echo 0); ` +
-		`printf '%s\\t%s\\t%s\\n' "$t" "$s" "$f"; done`
-	);
-}
-
 /**
  * Does a path on DOCKHAND'S OWN filesystem already hold data? For a target Dockhand writes
  * itself with node:fs - the managed stack dir - which no daemon can answer about: on a remote
@@ -489,7 +476,7 @@ export async function probeHostPath(
 	hostPath: string,
 	envId: number | null | undefined,
 ): Promise<{ kind: import('./stackdir-plan').ProbeDataKind; reason?: string }> {
-	const { classifyProbeListing, PROBE_MISSING_SENTINEL } = await import('./stackdir-plan');
+	const { classifyProbeListing, PROBE_MISSING_SENTINEL, probeListScript } = await import('./stackdir-plan');
 	const { runContainerWithStreaming } = await import('../docker');
 	const { ensureHelperImage } = await import('./restic');
 	const { INSTANCE_LABEL } = await import('./reap-core');
@@ -524,7 +511,7 @@ export async function probeVolumeData(
 	volumeName: string,
 	envId: number | null | undefined,
 ): Promise<{ kind: import('./stackdir-plan').ProbeDataKind; reason?: string }> {
-	const { classifyProbeListing, PROBE_MISSING_SENTINEL } = await import('./stackdir-plan');
+	const { classifyProbeListing, PROBE_MISSING_SENTINEL, probeListScript } = await import('./stackdir-plan');
 	const { runContainerWithStreaming, inspectVolume } = await import('../docker');
 	const { ensureHelperImage } = await import('./restic');
 	const { INSTANCE_LABEL } = await import('./reap-core');
@@ -867,6 +854,7 @@ function restorePorts(destination: any, access: { isEnterprise: boolean; canAcce
 			await guardSnapshotAccess(reader(), destination, instanceId, snapshotId, access);
 		},
 		listSnapshotVolumes: async (_destinationId, snapshotId) => listSnapshotVolumes(destination, snapshotId),
+		listSnapshotFileVolumes: async (_destinationId, snapshotId) => (await readSnapshotVolumes(destination, snapshotId)).files,
 		resolveTargets: async (targetName, envId, type) => resolveTargets(type ?? 'container', targetName, envId),
 		stopBeforeRestore: async (containers, envId) => {
 			const running = containers.filter((c) => c.state === 'running');
@@ -1080,7 +1068,13 @@ function reader() {
  * is NOT a user data volume, so it must never reach the restore volume picker, "restore
  * all", or the in-place swap. The stack dir is restored only via the redeploy path. */
 async function listSnapshotVolumes(destination: any, snapshotId: string): Promise<string[]> {
+	return (await readSnapshotVolumes(destination, snapshotId)).names;
+}
+
+/** The snapshot's volume keys, and which of them is a single file. */
+async function readSnapshotVolumes(destination: any, snapshotId: string): Promise<{ names: string[]; files: string[] }> {
 	const { isReservedVolumeKey } = await import('./stackdir-plan');
+	const { snapshotVolumeNodes } = await import('./snapshot-volumes-core');
 	const run = await restic.runLocal(destination, ['ls', '--json', '--no-lock', snapshotId, '/volumes/']);
 	// A FAILED `ls` (timeout / killed / slow remote backend) is NOT "the snapshot has no
 	// volumes" - returning [] there makes restore report a MISLEADING "not found in snapshot,
@@ -1088,19 +1082,7 @@ async function listSnapshotVolumes(destination: any, snapshotId: string): Promis
 	if (run.exitCode !== 0) {
 		throw new BackupError('RESTIC', `could not list the snapshot's volumes: ${run.stderr.trim() || 'restic ls failed'}`, { exitCode: run.exitCode });
 	}
-	const names = new Set<string>();
-	for (const line of run.stdout.split('\n')) {
-		try {
-			const e = JSON.parse(line.trim());
-			// Accept EITHER node discriminator: message_type (current restic) or struct_type
-			// (deprecated) - a restic bump that drops the old field must not silently return [].
-			if ((e?.message_type === 'node' || e?.struct_type === 'node') && typeof e.path === 'string' && e.path.startsWith('/volumes/')) {
-				const parts = e.path.split('/');
-				if (parts.length >= 3 && parts[2] && !isReservedVolumeKey(parts[2])) names.add(parts[2]);
-			}
-		} catch { /* skip non-JSON */ }
-	}
-	return [...names];
+	return snapshotVolumeNodes(run.stdout, isReservedVolumeKey);
 }
 
 async function notify(event: string, payload: Record<string, unknown>, envId: number | null | undefined): Promise<void> {

@@ -193,6 +193,21 @@ export type ProbeDataKind = 'has-data' | 'empty' | 'missing' | 'helper-failed' |
 
 /** Classify a probe helper's stdout (pure, unit-testable). The list-script prints the missing
  * sentinel when the path doesn't exist, one `<type>\t<size>\t<name>` line per entry otherwise. */
+/** The busybox list-script for a data-presence probe of the mount point `root`: print the missing
+ * sentinel if it does not exist, otherwise one `<type>\t<size>\t<name>` line per top-level entry.
+ * A FILE at the mount point (a single-file bind target) is one entry of its own: it holds data. */
+export function probeListScript(missingSentinel: string, root = '/probe'): string {
+	return (
+		`if [ ! -e ${root} ]; then printf '%s' '${missingSentinel}'; exit 0; fi; ` +
+		`if [ -f ${root} ]; then printf 'f\\t%s\\tfile\\n' "$(stat -c %s ${root} 2>/dev/null || echo 0)"; exit 0; fi; ` +
+		`cd ${root} 2>/dev/null || { printf '%s' '${missingSentinel}'; exit 0; }; ` +
+		`for f in * .*; do ` +
+		`[ "$f" = "." ] || [ "$f" = ".." ] && continue; [ -e "$f" ] || continue; ` +
+		`if [ -d "$f" ]; then t=d; else t=f; fi; s=$(stat -c %s "$f" 2>/dev/null || echo 0); ` +
+		`printf '%s\\t%s\\t%s\\n' "$t" "$s" "$f"; done`
+	);
+}
+
 export function classifyProbeListing(stdout: string): 'has-data' | 'empty' | 'missing' {
 	if (stdout.includes(PROBE_MISSING_SENTINEL)) return 'missing';
 	return parseProbeListing(stdout).length > 0 ? 'has-data' : 'empty';
