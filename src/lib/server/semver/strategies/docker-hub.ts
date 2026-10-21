@@ -10,6 +10,9 @@
  * comparator pick the target.
  */
 
+import type { TagList } from '../tag-source-core';
+import { registryRequestSignal } from '../../registry/request-timeout';
+
 /** Newest-first pages; a few pages cover recent version tags across major lines. */
 const MAX_PAGES = 3;
 const PAGE_SIZE = 100;
@@ -24,19 +27,21 @@ interface HubTagsResponse {
 
 /**
  * @param repo Full Hub repo path, e.g. `library/nginx` or `grafana/grafana`.
+ * A failed page ends the listing with what was read, marked incomplete. Reaching
+ * MAX_PAGES is complete: the newest tags are already in.
  */
-export async function fetchDockerHubTags(repo: string): Promise<string[]> {
+export async function fetchDockerHubTags(repo: string): Promise<TagList> {
 	const tags: string[] = [];
 
 	for (let page = 1; page <= MAX_PAGES; page++) {
 		const url = `https://hub.docker.com/v2/repositories/${repo}/tags?page_size=${PAGE_SIZE}&page=${page}&ordering=last_updated`;
-		const response = await fetch(url, { headers: { Accept: 'application/json' } });
-		if (!response.ok) break;
+		const response = await fetch(url, { headers: { Accept: 'application/json' }, signal: registryRequestSignal() });
+		if (!response.ok) return { tags, complete: false };
 
 		const data = (await response.json()) as HubTagsResponse;
 		tags.push(...(data.results ?? []).map((t) => t.name));
 		if (!data.next) break;
 	}
 
-	return tags;
+	return { tags, complete: true };
 }

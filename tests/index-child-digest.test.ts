@@ -169,7 +169,7 @@ describe('samePlatformImage (#1756 phantom update)', () => {
 /**
  * The wiring in docker.ts, pinned at SOURCE level because that module cannot be imported
  * under bun (better-sqlite3). These assert the branch is SPELLED, not that it runs; the
- * behaviour is pinned by the samePlatformImage/platformChildDigest tests above. They are a
+ * behaviour is pinned by tests/multi-arch-verdict.test.ts and the tests above. They are a
  * tripwire against the phantom-update branch being dropped or rewired to compare the wrong bodies.
  */
 describe('localImageMatchesRegistry wires the phantom-update check', () => {
@@ -177,16 +177,24 @@ describe('localImageMatchesRegistry wires the phantom-update check', () => {
 	const fn = src.slice(src.indexOf('async function localImageMatchesRegistry'),
 		src.indexOf('export interface ImageUpdateCheckResult'));
 
-	test('it still rules out the #1367 per-arch child case', () => {
-		expect(fn).toContain('localDigestIsIndexChild(localDigests, registryIndex)');
+	test('it decides through multiArchVerdict, with one retry per read', () => {
+		expect(fn).toContain('multiArchVerdict({');
+		expect(fn).toContain('readWithRetry(() => readManifestIndex(registry, repo, reference, token, scheme), sleep)');
 	});
 
-	test('it compares the daemon-platform entry of the local and registry indexes', () => {
+	test('it reads the index by the digest the tag resolved to, through the digest cache', () => {
+		expect(fn).toContain('currentDigest: registryDigest,');
+		expect(fn).toContain('}, indexByDigest, `${registry}/${repo}`);');
+		expect(fn).toContain('readIndex,');
+	});
+
+	test('it compares against the daemon platform', () => {
 		expect(fn).toContain('imagePlatform(info?.OSType, info?.Architecture)');
-		expect(fn).toContain('samePlatformImage(localIndex, registryIndex, platform)');
 	});
 
-	test('the check runs on the already-flagged path before declaring an update', () => {
-		expect(src).toContain('if (await localImageMatchesRegistry(imageName, localDigests, envId)) {');
+	test('the caller clears a same verdict and turns unknown into an error, never an update', () => {
+		expect(src).toContain('const multiArch = await localImageMatchesRegistry(imageName, localDigests, envId, registryDigest);');
+		expect(src).toContain("if (multiArch.kind === 'same') {");
+		expect(src).toContain("if (multiArch.kind === 'unknown') {");
 	});
 });

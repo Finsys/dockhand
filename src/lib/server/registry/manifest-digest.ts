@@ -14,6 +14,7 @@ import { describeRegistryFailure } from '../registry-failure-core';
 import { drainResponse } from '../notifications/shared';
 import { parseImageReference } from './image-ref';
 import { resolveRegistryScheme, type StoredRegistryScheme } from '../registry-scheme-core';
+import { registryRequestSignal } from './request-timeout';
 
 export interface RegistryCredentials {
 	username: string;
@@ -32,6 +33,12 @@ export interface RegistryPorts {
 	findCredentials: (registryHost: string) => Promise<RegistryCredentials | null>;
 	/** Injectable for tests; defaults to global fetch. */
 	fetch?: typeof fetch;
+	/** Per-request timeout in ms for the challenge, token and HEAD; tests shorten it. */
+	requestTimeoutMs?: number;
+}
+
+function requestSignal(ports: RegistryPorts, signal?: AbortSignal): AbortSignal {
+	return registryRequestSignal(signal, ports.requestTimeoutMs);
 }
 
 const USER_AGENT = 'Dockhand/1.0';
@@ -100,7 +107,7 @@ export async function getRegistryBearerToken(
 		const challengeResponse = await doFetch(`${registryUrl}/v2/`, {
 			method: 'GET',
 			headers: { 'User-Agent': USER_AGENT },
-			signal,
+			signal: requestSignal(ports, signal),
 			redirect: 'manual'
 		});
 
@@ -159,7 +166,7 @@ export async function getRegistryBearerToken(
 
 		const authHeader = credentials ? basicAuth(credentials) : null;
 		const tokenResponse = await fetchRegistryToken(tokenUrl.toString(), authHeader, (url, init) =>
-			doFetch(url, { ...init, signal })
+			doFetch(url, { ...init, signal: requestSignal(ports, signal) })
 		);
 
 		if (!tokenResponse.ok) {
@@ -225,7 +232,7 @@ export async function getRegistryManifestDigestDirectDetailed(
 		};
 		if (token) headers['Authorization'] = token;
 
-		const response = await doFetch(manifestUrl, { method: 'HEAD', headers, signal });
+		const response = await doFetch(manifestUrl, { method: 'HEAD', headers, signal: requestSignal(ports, signal) });
 
 		if (!response.ok) {
 			await drainResponse(response);
@@ -256,5 +263,58 @@ export async function getRegistryManifestDigestDirectDetailed(
 			digest: null,
 			reason: describeRegistryFailure({ kind: 'error', registry: registry || imageName, error: e })
 		};
+	}
+}
+
+/**
+ * One manifest read for the multi-arch check. `body: null` means the registry has no index
+ * under that reference (404 under an index-only Accept: a single-arch manifest, or a digest
+ * that is not an index) - an answer, not a failure. A failure carries its reason and
+ * whether a second attempt could change it (network, timeout, unreadable body, 429, 5xx).
+ */
+export type IndexRead =
+	| { ok: true; body: unknown | null }
+	| { ok: false; reason: string; retryable: boolean };
+
+/** Read a manifest/index by tag or digest with an index-only Accept. Never throws. */
+export async function readManifestIndex(
+	registry: string,
+	repo: string,
+	reference: string,
+	token: string | null,
+	scheme: string,
+	doFetch: typeof fetch = fetch,
+	timeoutMs = 8000
+): Promise<IndexRead> {
+	const headers: Record<string, string> = {
+		'User-Agent': USER_AGENT,
+		'Accept': [
+			'application/vnd.docker.distribution.manifest.list.v2+json',
+			'application/vnd.oci.image.index.v1+json'
+		].join(', ')
+	};
+	if (token) headers['Authorization'] = token;
+	let response: Response;
+	try {
+		response = await doFetch(`${scheme}://${registry}/v2/${repo}/manifests/${reference}`, {
+			method: 'GET',
+			headers,
+			signal: AbortSignal.timeout(timeoutMs)
+		});
+	} catch (error) {
+		return { ok: false, retryable: true, reason: describeRegistryFailure({ kind: 'error', registry, error }) };
+	}
+	if (!response.ok) {
+		const { status } = response;
+		const retryAfter = response.headers.get('Retry-After');
+		await drainResponse(response);
+		// Under an index-only Accept, ghcr answers a single-arch manifest with 404: not an index, not a failure.
+		if (status === 404) return { ok: true, body: null };
+		return { ok: false, retryable: status === 429 || status >= 500, reason: describeRegistryFailure({ kind: 'http', status, retryAfter }) };
+	}
+	try {
+		return { ok: true, body: await response.json() };
+	} catch (error) {
+		return { ok: false, retryable: true, reason: describeRegistryFailure({ kind: 'error', registry, error }) };
 	}
 }
