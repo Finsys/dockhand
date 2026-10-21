@@ -4,6 +4,10 @@
     "date": "",
     "comingSoon": true,
     "changes": [
+      { "type": "feature", "text": "start and stop a container on a schedule (#1178)" },
+      { "type": "fix", "text": "newer version tags are found on GHCR repositories with very many tags (#1792)" },
+      { "type": "fix", "text": "a stack that bind-mounts a single file restores, also onto a host where the file is missing (#1793)" },
+      { "type": "fix", "text": "the log view's live streaming toggle shows its state like the other toggles (#1654)" },
       { "type": "fix", "text": "backup history shows the destination each run used, not the schedule's current one (#1783)" },
       { "type": "feature", "text": "moved-digest reports on pinned images are now configurable, globally or per container (#1780)" },
       { "type": "feature", "text": "terminal button in the container details view (#1754, PR#1768, @Totopo27)" },
