@@ -17,7 +17,7 @@ import { redactEnvironment } from '$lib/server/environment-redact';
  * query: includeInactive:boolean Include inactive environments (defaults to false)
  * resp-200: array<{id:integer!, name:string!, connectionType:string!, host:string, port:integer, protocol:string, icon:string, isActive:boolean, publicIp:string, timezone:string, hasTlsKey:boolean, hasHawserToken:boolean}>
  * resp-200-desc: Environments accessible to the caller (filtered by RBAC in Enterprise mode; all environments in Free edition). The tlsKey (private TLS client key) and hawserToken secrets are NEVER returned; hasTlsKey / hasHawserToken indicate whether one is stored.
- * resp-200-example: [{"id":1,"name":"hhdocker01","connectionType":"socket","host":null,"port":2375,"protocol":"http","icon":"server","publicIp":"203.0.113.10","timezone":"Europe/Berlin","hasTlsKey":false,"hasHawserToken":false},{"id":2,"name":"hhdocker02","connectionType":"hawser-edge","host":null,"port":2375,"protocol":"http","icon":"server","publicIp":null,"timezone":"Europe/Berlin","hasTlsKey":false,"hasHawserToken":true}]
+ * resp-200-example: [{"id":1,"name":"hhdocker01","connectionType":"socket","host":null,"port":2375,"protocol":"http","icon":"server","isActive":true,"publicIp":"203.0.113.10","timezone":"Europe/Berlin","hasTlsKey":false,"hasHawserToken":false},{"id":2,"name":"hhdocker02","connectionType":"hawser-edge","host":null,"port":2375,"protocol":"http","icon":"server","isActive":true,"publicIp":null,"timezone":"Europe/Berlin","hasTlsKey":false,"hasHawserToken":true}]
  * resp-403: Permission denied (RBAC 'environments:view' missing)
  * resp-500: Unexpected error while loading environments
  */
@@ -80,8 +80,8 @@ export const GET: RequestHandler = async ({ cookies, url }) => {
 /**
  * @openapi
  * summary: Register a new Docker environment (host)
- * body: {name:string!, connectionType:string, host:string, port:integer, protocol:string, socketPath:string, icon:string, publicIp:string, labels:string}
- * body-example: {"name":"hhdocker03","connectionType":"socket","socketPath":"/var/run/docker.sock","icon":"server"}
+ * body: {name:string!, connectionType:string, host:string, port:integer, protocol:string, socketPath:string, icon:string, isActive:boolean, publicIp:string, labels:string}
+ * body-example: {"name":"hhdocker03","connectionType":"socket","socketPath":"/var/run/docker.sock","icon":"server","isActive":true}
  * resp-200: {id:integer!, name:string!, connectionType:string!}
  * resp-200-example: {"id":3,"name":"hhdocker03","connectionType":"socket"}
  * resp-400: Invalid name, invalid connectionType, or host missing for direct/hawser-standard
@@ -135,6 +135,7 @@ export const POST: RequestHandler = async (event) => {
 			tlsKey: cleanPem(data.tlsKey),
 			tlsSkipVerify: data.tlsSkipVerify || false,
 			icon: data.icon || 'globe',
+			isActive: typeof data.isActive === 'boolean' ? data.isActive : true,
 			socketPath: data.socketPath || '/var/run/docker.sock',
 			collectActivity: data.collectActivity !== false,
 			collectMetrics: data.collectMetrics !== false,

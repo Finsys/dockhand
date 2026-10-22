@@ -162,7 +162,9 @@ export async function getEnvironmentByName(name: string): Promise<Environment | 
 	};
 }
 
-export async function createEnvironment(env: Omit<Environment, 'id' | 'createdAt' | 'updatedAt'>): Promise<Environment> {
+export async function createEnvironment(
+	env: Pick<Environment, 'name'> & Partial<Omit<Environment, 'id' | 'createdAt' | 'updatedAt'>>
+): Promise<Environment> {
 	const result = await db.insert(environments).values({
 		name: env.name,
 		host: env.host || null,

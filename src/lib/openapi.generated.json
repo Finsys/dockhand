@@ -10828,6 +10828,7 @@
                     "port": 2375,
                     "protocol": "http",
                     "icon": "server",
+                    "isActive": true,
                     "publicIp": "203.0.113.10",
                     "timezone": "Europe/Berlin",
                     "hasTlsKey": false,
@@ -10841,6 +10842,7 @@
                     "port": 2375,
                     "protocol": "http",
                     "icon": "server",
+                    "isActive": true,
                     "publicIp": null,
                     "timezone": "Europe/Berlin",
                     "hasTlsKey": false,
@@ -10954,6 +10956,9 @@
                   "icon": {
                     "type": "string"
                   },
+                  "isActive": {
+                    "type": "boolean"
+                  },
                   "publicIp": {
                     "type": "string"
                   },
@@ -10969,7 +10974,8 @@
                 "name": "hhdocker03",
                 "connectionType": "socket",
                 "socketPath": "/var/run/docker.sock",
-                "icon": "server"
+                "icon": "server",
+                "isActive": true
               }
             }
           }
