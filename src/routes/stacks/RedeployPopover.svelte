@@ -7,6 +7,9 @@
 	import type { Snippet } from 'svelte';
 	import { cn } from '$lib/utils';
 	import StackIcon from '$lib/components/StackIcon.svelte';
+	import { REDEPLOY_PRESETS, isPresetActive, composeCommandFor, type RedeployPreset } from '$lib/utils/redeploy-presets';
+	import { m } from '$lib/paraglide/messages.js';
+	import { splitAtName } from '$lib/i18n/split';
 
 	interface Props {
 		stackName: string;
@@ -43,6 +46,14 @@
 		defaultForceRecreate?: boolean;
 		/** Short note shown under the checkboxes, e.g. explaining why Build is pre-checked. */
 		reason?: string;
+		/** Short note under Force recreate, saying what it changes for this stack. */
+		forceRecreateReason?: string;
+		/**
+		 * Show the one-click presets. Off by default: they are named for the choices the
+		 * stack editor offers, and a caller whose defaults fall outside that set would
+		 * open with no preset highlighted and nothing to tell the user where they are.
+		 */
+		showPresets?: boolean;
 		onDeploy: (options: { pull: boolean; build: boolean; forceRecreate: boolean }) => Promise<void>;
 		children: Snippet;
 	}
@@ -60,6 +71,8 @@
 		defaultBuild = false,
 		defaultForceRecreate = false,
 		reason,
+		forceRecreateReason,
+		showPresets = false,
 		onDeploy,
 		children
 	}: Props = $props();
@@ -91,6 +104,15 @@
 		}
 		open = !open;
 	}
+
+	// Shortcuts for the three combinations people reach for; the checkboxes stay the
+	// source of truth, so every other combination is still one click away.
+	function applyPreset(p: RedeployPreset) {
+		pull = p.pull;
+		forceRecreate = p.forceRecreate;
+	}
+
+	const composeCommand = $derived(composeCommandFor({ pull, build, forceRecreate }));
 </script>
 
 <Popover.Root bind:open>
@@ -98,7 +120,7 @@
 		{#snippet child({ props })}
 			<button
 				type="button"
-				title={triggerVariant === 'icon' ? 'Redeploy' : 'More deploy options'}
+				title={triggerVariant === 'icon' ? m.stacks_redeploy_trigger_title() : m.stacks_redeploy_more_options()}
 				{...props}
 				onclick={handleTriggerClick}
 				{disabled}
@@ -114,7 +136,7 @@
 		{/snippet}
 	</Popover.Trigger>
 	<Popover.Content
-		class="w-72 p-3 z-[200]"
+		class="w-[26rem] p-3 z-[200]"
 		{side}
 		{align}
 		sideOffset={8}
@@ -122,25 +144,43 @@
 		<div class="space-y-3">
 			<p class="flex items-center gap-1.5 text-xs text-muted-foreground">
 				<StackIcon icon={stackIcon} {stackName} {envId} class="w-4 h-4 shrink-0" />
-				<span class="truncate">Redeploy stack <strong class="font-semibold text-foreground">{stackName}</strong></span>
+				<span class="truncate">{splitAtName(m.stacks_redeploy_header)[0]}<strong class="font-semibold text-foreground">{stackName}</strong>{splitAtName(m.stacks_redeploy_header)[1]}</span>
 			</p>
+			{#if showPresets}
+			<div class="flex gap-1">
+				{#each REDEPLOY_PRESETS as p}
+					<button
+						type="button"
+						disabled={deploying}
+						onclick={() => applyPreset(p)}
+						class="flex-1 rounded border px-1.5 py-1 text-2xs transition-colors disabled:opacity-50 {isPresetActive(p, { pull, forceRecreate })
+							? 'border-primary/50 bg-primary/10 text-foreground'
+							: 'border-border text-muted-foreground hover:bg-muted'}"
+					>{p.label}</button>
+				{/each}
+			</div>
+			{/if}
 			<div class="space-y-2">
 				<label class="flex items-center gap-2 cursor-pointer">
 					<Checkbox bind:checked={pull} disabled={deploying} />
-					<span class="text-xs">Pull images</span>
+					<span class="text-xs">{m.stacks_redeploy_pull_images()}</span>
 				</label>
 				<label class="flex items-center gap-2 cursor-pointer">
 					<Checkbox bind:checked={build} disabled={deploying} />
-					<span class="text-xs">Build images</span>
+					<span class="text-xs">{m.stacks_redeploy_build_images()}</span>
 				</label>
 				{#if reason}
 					<p class="text-2xs text-muted-foreground pl-6 -mt-1">{reason}</p>
 				{/if}
 				<label class="flex items-center gap-2 cursor-pointer">
 					<Checkbox bind:checked={forceRecreate} disabled={deploying} />
-					<span class="text-xs">Force recreate</span>
+					<span class="text-xs">{m.stacks_redeploy_force_recreate()}</span>
 				</label>
+				{#if forceRecreateReason}
+					<p class="text-2xs text-muted-foreground pl-6 -mt-1">{forceRecreateReason}</p>
+				{/if}
 			</div>
+			<p class="min-h-[2.25rem] border-t pt-2 font-mono text-2xs leading-snug text-muted-foreground">{composeCommand}</p>
 			<Button
 				size="sm"
 				class="w-full h-7 text-xs"
@@ -149,9 +189,9 @@
 			>
 				{#if deploying}
 					<Loader2 class="w-3 h-3 mr-1 animate-spin" />
-					Deploying...
+					{m.stacks_redeploy_deploying()}
 				{:else}
-					Deploy
+					{m.stacks_redeploy_deploy()}
 				{/if}
 			</Button>
 		</div>

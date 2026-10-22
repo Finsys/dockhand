@@ -1,12 +1,15 @@
 <script lang="ts">
 	import * as Select from '$lib/components/ui/select';
-	import type { Component } from 'svelte';
+	import type { IconComponent } from '$lib/types';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface FilterOption {
 		value: string;
 		label: string;
-		icon?: Component;
+		icon?: IconComponent;
 		color?: string;
+		/** Colour the label too, not just the icon - for an entry that needs to stand out. */
+		colorLabel?: boolean;
 	}
 
 	interface Props {
@@ -15,7 +18,7 @@
 		placeholder: string;
 		pluralLabel?: string;
 		width?: string;
-		defaultIcon?: Component;
+		defaultIcon?: IconComponent;
 	}
 
 	let {
@@ -78,7 +81,7 @@
 				class="w-full px-2 py-1 text-xs text-left text-muted-foreground/60 hover:text-muted-foreground"
 				onclick={clearAndClose}
 			>
-				Clear
+				{m.grid_filter_clear()}
 			</button>
 		{/if}
 		{#each options as option}
@@ -88,7 +91,7 @@
 				{:else if option.color}
 					<span class="w-2 h-2 mr-2 rounded-full shrink-0 {option.color.replace('text-', 'bg-')}"></span>
 				{/if}
-				<span class={option.color && !option.icon ? option.color : ''}>{option.label}</span>
+				<span class={option.color && (!option.icon || option.colorLabel) ? option.color : ''}>{option.label}</span>
 			</Select.Item>
 		{/each}
 	</Select.Content>

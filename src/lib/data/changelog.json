@@ -1,5 +1,134 @@
 [
   {
+    "version": "1.0.55",
+    "date": "",
+    "comingSoon": true,
+    "changes": [
+      { "type": "fix", "text": "backup history shows the destination each run used, not the schedule's current one (#1783)" },
+      { "type": "feature", "text": "moved-digest reports on pinned images are now configurable, globally or per container (#1780)" },
+      { "type": "feature", "text": "terminal button in the container details view (#1754, PR#1768, @Totopo27)" },
+      { "type": "fix", "text": "mobile layouts for the containers list and environment tabs (PR#1758, @ddeitterick)" },
+      { "type": "feature", "text": "Psono bulk pull and inline references now read Environment Variables secrets (#1784)" },
+      { "type": "feature", "text": "decrypt a git stack's SOPS-encrypted env file with a new SOPS (age) secret provider (#386, PR#1781, @oha-4)" },
+      { "type": "fix", "text": "update docker-compose to 5.6.0-r2 to pick up its CVE fixes" },
+      { "type": "feature", "text": "EXPORT_METRICS_PUBLIC leaves the /metrics endpoint reachable without authentication, off by default (#1698)" },
+      { "type": "feature", "text": "recognise build/revision tag bumps (-lsNNN, -rN) as newer versions, with tag.transform and link.template label support (#1703)" },
+      { "type": "feature", "text": "minimum image age visual improvements and dockhand.skip.cooldown label (#1725)" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.55"
+  },
+  {
+    "version": "1.0.54",
+    "date": "2026-10-17",
+    "changes": [
+      { "type": "fix", "text": "a version pattern with four or five parts is no longer refused, and an ignored pattern says why (#1702)" },
+      { "type": "fix", "text": "reading pages no longer fails behind an nginx reverse proxy that uses an upstream block (#1707)" },
+      { "type": "fix", "text": "image scans work again when the Docker daemon compresses its logs (PR#1715, @santacruz-usa)" },
+      { "type": "fix", "text": "a container with a long stop_grace_period updates instead of being left stopped" },
+      { "type": "feature", "text": "the interface follows your language - translation engine and German (#494, PR#1706, PR#1709, PR#1718, PR#1719, PR#1722, PR#1726, PR#1734, PR#1736, PR#1738, PR#1742, @Hellraiser28)" },
+      { "type": "feature", "text": "Simplified Chinese translation (#494, PR#1708, PR#1716, PR#1720, PR#1721, PR#1730, PR#1733, PR#1741, PR#1749, @maicent)" },
+      { "type": "feature", "text": "French translations, for France and Canada (#494, PR#1714, PR#1717, PR#1727, PR#1728, PR#1729, PR#1732, PR#1735, PR#1746, PR#1747, PR#1748, @MagnanGG)" },
+      { "type": "feature", "text": "Polish translation (#494)" },
+      { "type": "fix", "text": "a wider sidebar so translated labels fit (PR#1731, @MagnanGG)" },
+      { "type": "fix", "text": "a scheduled update is no longer blocked by a failed scan of an image the registry cannot name (#1737)" },
+      { "type": "feature", "text": "Psono as a secret provider, with bulk pull and inline psono:// references" },
+      { "type": "feature", "text": "the secret-provider banner collapses its key list when a stack loads many secrets (#1771)" },
+      { "type": "feature", "text": "filter containers and stacks by \"Untagged\" (#1704, PR#1763, @Totopo27)" },
+      { "type": "fix", "text": "bulk operations on stacks over the API no longer fail every item (#1745)" },
+      { "type": "fix", "text": "a quoted value from a .env file no longer keeps its quotes in the form (#1750)" },
+      { "type": "fix", "text": "a dockhand.tags label stays on the container that carries it (#1740, PR#1743, @Totopo27)" },
+      { "type": "fix", "text": "the update check now reports a newer release on Kubernetes instead of giving up (#1710)" },
+      { "type": "fix", "text": "a moved digest on a pinned tag is now reported instead of silently ignored (#1755)" },
+      { "type": "fix", "text": "an unreachable environment no longer fills the log with errors for its own health checks (#1739, PR#1752, @Totopo27)" },
+      { "type": "fix", "text": "a git stack no longer recreates every container when a commit only touched files that do not affect them (#1761, #419, #364)" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.54"
+  },
+  {
+    "version": "1.0.53",
+    "date": "2026-10-10",
+    "changes": [
+      { "type": "fix", "text": "remove the 1.0.52 PUID change that could alter stack file ownership on upgrade (#1700, #1701)" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.53"
+  },
+  {
+    "version": "1.0.52",
+    "date": "2026-10-10",
+    "changes": [
+      { "type": "feature", "text": "back up to an SFTP server with a dedicated SSH key and verified host keys (#1478, PR#1693, @ddeitterick)" },
+      { "type": "fix", "text": "a container started with PUID=1001 runs as that user instead of root (#1669)" },
+      { "type": "feature", "text": "offer the compose file detected from container labels when adopting an external stack (#1612, PR#1617, @ondras)" },
+      { "type": "feature", "text": "hold off automatic updates until a new image is older than a configurable minimum image age (#918, #1365, PR#1643, @TheDuffman85)" },
+      { "type": "feature", "text": "a dockhand.name label sets the name a container is shown under (#1623)" },
+      { "type": "feature", "text": "redeploy a stack without recreating every service, and choose how it redeploys (#148)" },
+      { "type": "feature", "text": "sign in with a passkey instead of a password (#1431, PR#1431, @StefanSa, @timcappalli)" },
+      { "type": "fix", "text": "skip newer-version tags whose image is older than the one running (#1673)" },
+      { "type": "feature", "text": "filter newer-version candidates per container (#1674)" },
+      { "type": "feature", "text": "read per-stack resource totals from the API (#1626)" },
+      { "type": "feature", "text": "show stack health on the stacks page, and filter by it (#1678)" },
+      { "type": "fix", "text": "find the stack folder when a nested bind shares a name with one at the root (#1679)" },
+      { "type": "fix", "text": "ordering one container with dockhand.order now moves it ahead of the unlabelled ones (#1117)" },
+      { "type": "fix", "text": "restore preview no longer reports an empty target for a stack whose files are there (#1681)" },
+      { "type": "fix", "text": "updating a Podman container started by podman-compose no longer leaves it stopped (#1692)" },
+      { "type": "fix", "text": "the next compose deploy no longer recreates a container Dockhand just updated (#1687)" },
+      { "type": "fix", "text": "a stack's bind directories are no longer left out of a backup when no volume covers them (#1696)" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.52"
+  },
+  {
+    "version": "1.0.51",
+    "date": "2026-10-03",
+    "changes": [
+      { "type": "feature", "text": "drag to reorder environments (#1638)" },
+      { "type": "feature", "text": "drag to reorder tags, and the grid groups follow that order (#1651)" },
+      { "type": "fix", "text": "compose validate no longer reports a volume path built from a variable as undefined (#1653)" },
+      { "type": "fix", "text": "sorting containers by uptime now orders an hour-old container correctly (#1652)" },
+      { "type": "fix", "text": "the vulnerability scan retention schedule saves and reloads correctly" },
+      { "type": "fix", "text": "the stack editor no longer re-queries the secret provider while it sits idle (#1646)" },
+      { "type": "fix", "text": "keepass:// and azurekv:// references are recognised in the stack editor" },
+      { "type": "fix", "text": "a git stack whose deploy fails is retried on the next sync instead of being marked in sync (#1660)" },
+      { "type": "fix", "text": "the scanner check now finds newer grype and trivy releases, not just a rebuild of the pinned tag (#1658)" },
+      { "type": "fix", "text": "default scanner images bumped to grype v0.119.0 and trivy 0.75.0 (#1658)" },
+      { "type": "feature", "text": "containers can be tagged with a dockhand.tags label, with a colour and icon (#1655)" },
+      { "type": "feature", "text": "containers optionally show the tags their stack carries (#1665)" },
+      { "type": "feature", "text": "drag files onto the file browser to upload them (#1661, PR#1662, @Wardrop)" },
+      { "type": "fix", "text": "update docker-compose 5.5.1-r2, undici 7.30.0, devalue 5.9.3 and nodemailer 10.0.10 for security fixes" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.51"
+  },
+  {
+    "version": "1.0.50",
+    "date": "2026-09-30",
+    "changes": [
+      { "type": "feature", "text": "update a container straight from its details view when a newer image is available (#1588)" },
+      { "type": "feature", "text": "duplicate a backup schedule to reuse its settings for another destination (#1578)" },
+      { "type": "feature", "text": "mark a secret provider as default so new stacks start with it selected (#1609)" },
+      { "type": "feature", "text": "optionally skip the login form, and sign out at the identity provider (#563, #562, #1318)" },
+      { "type": "feature", "text": "dashboard disk usage segments link straight to images, volumes or containers (#1314)" },
+      { "type": "feature", "text": "the container file browser opens at the container's working directory (#1285)" },
+      { "type": "feature", "text": "mattermost notifications arrive as colour-coded cards, like the discord ones (#1607)" },
+      { "type": "feature", "text": "container icons fall back to the image namespace when the name has none (#1624)" },
+      { "type": "feature", "text": "tag groups are ordered alphabetically by tag name (#1625)" },
+      { "type": "fix", "text": "oidc sign-in survives a restart and works across multiple replicas (#1601)" },
+      { "type": "fix", "text": "cleaner image scan logs, and the real registry error (#1486, #1628, #1629)" },
+      { "type": "fix", "text": "compose validate no longer flags variables a secret provider supplies (#1621)" },
+      { "type": "fix", "text": "updating a container through the API keeps its secondary networks and their aliases" },
+      { "type": "fix", "text": "recreating a container no longer reuses its old auto-assigned MAC address (#1618)" },
+      { "type": "fix", "text": "podman's default bridge is no longer shown as an extra network on containers (#1619)" },
+      { "type": "fix", "text": "a scheduled container update clears its pending row, so update all no longer fails on it (#1632)" },
+      { "type": "fix", "text": "image prune no longer times out after 30s when filters are set (#1630)" },
+      { "type": "fix", "text": "exporting an image whose name contains a slash no longer fails (#1635)" },
+      { "type": "fix", "text": "percentage disk warnings are marked as unusable on hosts that report no total (#1631)" },
+      { "type": "fix", "text": "https now starts with certificates that have no subject, like newer let's encrypt ones (#1622)" },
+      { "type": "fix", "text": "dashboard keeps its top containers and recent events after a container event (#1608)" },
+      { "type": "fix", "text": "the secret provider selector is no longer lost on save in the env text view (#1620)" },
+      { "type": "fix", "text": "a git stack .env value can be quoted and refer to another variable (#1018)" },
+      { "type": "fix", "text": "update docker-compose 5.5.1-r1, devalue 5.9.2 and nodemailer 9.1.1 for security fixes" }
+    ],
+    "imageTag": "fnsys/dockhand:v1.0.50"
+  },
+  {
     "version": "1.0.49",
     "date": "2026-09-23",
     "comingSoon": false,

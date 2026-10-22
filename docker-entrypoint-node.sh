@@ -108,11 +108,23 @@ else
     # (e.g. ./postgresql:/var/lib/postgresql) that need different ownership (#719).
     DATA_DIR="${DATA_DIR:-/app/data}"
     chown "$RUN_USER":"$RUN_USER" "$DATA_DIR" 2>/dev/null || true
-    for subdir in db stacks git-repos tmp icons snapshots scanner-cache; do
+    # Dockhand's own directories. `stacks` is deliberately absent: a stack folder
+    # holds the volumes that stack binds from it (./postgresql, ./config), owned by
+    # the uid that stack's own image runs as, and taking those breaks the stack
+    # (#719). A fresh install needs no help here - the app creates its stack folders
+    # as the running user. Switching PUID on an install that ran as root is the one
+    # case that does: those folders stay root-owned, and stacks cannot be created or
+    # edited until the operator chowns them once. The manual says so.
+    for subdir in db git-repos tmp icons snapshots scanner-cache; do
         if [ -d "$DATA_DIR/$subdir" ]; then
             chown -R "$RUN_USER":"$RUN_USER" "$DATA_DIR/$subdir" 2>/dev/null || true
         fi
     done
+    # Files directly in the data dir - .encryption_key above all. Every stored
+    # secret is encrypted with it, so an unreadable one shows up as the
+    # environments failing to connect rather than as a file problem.
+    find "$DATA_DIR" -maxdepth 1 -type f \
+        -exec chown "$RUN_USER":"$RUN_USER" {} + 2>/dev/null || true
     if [ "$RUN_USER" = "dockhand" ]; then
         chown -R dockhand:dockhand /home/dockhand 2>/dev/null || true
     fi
@@ -120,7 +132,7 @@ else
     if [ -n "$DATA_DIR" ] && [ "$DATA_DIR" != "/app/data" ] && [ "$DATA_DIR" != "./data" ]; then
         mkdir -p "$DATA_DIR"
         chown "$RUN_USER":"$RUN_USER" "$DATA_DIR" 2>/dev/null || true
-        for subdir in db stacks git-repos tmp icons snapshots scanner-cache; do
+        for subdir in db git-repos tmp icons snapshots scanner-cache; do
             if [ -d "$DATA_DIR/$subdir" ]; then
                 chown -R "$RUN_USER":"$RUN_USER" "$DATA_DIR/$subdir" 2>/dev/null || true
             fi

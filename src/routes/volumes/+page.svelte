@@ -1,5 +1,5 @@
 <svelte:head>
-	<title>Volumes - Dockhand</title>
+	<title>{m.nav_volumes()} - Dockhand</title>
 </svelte:head>
 
 <script lang="ts">
@@ -29,6 +29,7 @@
 	import { formatDateTime } from '$lib/stores/settings';
 	import { EmptyState, NoEnvironment } from '$lib/components/ui/empty-state';
 	import { DataGrid } from '$lib/components/data-grid';
+	import { m } from '$lib/paraglide/messages.js';
 
 	type SortField = 'name' | 'driver' | 'type' | 'stack' | 'created';
 	type SortDirection = 'asc' | 'desc';
@@ -69,8 +70,8 @@
 
 	// Usage filter options (static)
 	const usageOptions = [
-		{ value: 'in-use', label: 'In use', icon: CircleDot, color: 'text-emerald-500' },
-		{ value: 'unused', label: 'Unused', icon: Circle, color: 'text-muted-foreground' }
+		{ value: 'in-use', label: m.volumes_list_filter_in_use(), icon: CircleDot, color: 'text-emerald-500' },
+		{ value: 'unused', label: m.volumes_list_filter_unused(), icon: Circle, color: 'text-muted-foreground' }
 	];
 
 	// Confirmation popover state
@@ -111,7 +112,7 @@
 	}
 
 	function bulkRemove() {
-		batchOpTitle = `Removing ${selectedInFilter.length} volume${selectedInFilter.length !== 1 ? 's' : ''}`;
+		batchOpTitle = m.volumes_list_batch_removing({ count: selectedInFilter.length });
 		batchOpOperation = 'remove';
 		batchOpItems = selectedInFilter.map(v => ({ id: v.name, name: v.name }));
 		showBatchOpModal = true;
@@ -261,7 +262,7 @@
 			volumes = await response.json();
 		} catch (error) {
 			console.error('Failed to fetch volumes:', error);
-			toast.error('Failed to load volumes');
+			toast.error(m.volumes_list_toast_load_failed());
 		} finally {
 			loading = false;
 		}
@@ -273,20 +274,20 @@
 			const response = await fetch(appendEnvParam(`/api/volumes/${encodeURIComponent(name)}?force=true`, envId), { method: 'DELETE' });
 			if (!response.ok) {
 				const data = await response.json();
-				deleteError = { name, message: data.details || data.error || 'Failed to remove volume' };
-				toast.error(`Failed to remove ${name}`);
+				deleteError = { name, message: data.details || data.error || m.volumes_list_error_remove() };
+				toast.error(m.containers_list_toast_remove_failed({ name }));
 				// Auto-hide error after 5 seconds
 				pendingTimeouts.push(setTimeout(() => {
 					if (deleteError?.name === name) deleteError = null;
 				}, 5000));
 				return;
 			}
-			toast.success(`Removed ${name}`);
+			toast.success(m.containers_list_toast_removed({ name }));
 			await fetchVolumes();
 		} catch (error) {
 			console.error('Failed to remove volume:', error);
-			deleteError = { name, message: 'Failed to remove volume' };
-			toast.error(`Failed to remove ${name}`);
+			deleteError = { name, message: m.volumes_list_error_remove() };
+			toast.error(m.containers_list_toast_remove_failed({ name }));
 			pendingTimeouts.push(setTimeout(() => {
 				if (deleteError?.name === name) deleteError = null;
 			}, 5000));
@@ -294,7 +295,7 @@
 	}
 
 	function formatDate(dateString: string): string {
-		if (!dateString) return 'N/A';
+		if (!dateString) return m.containers_inspect_not_available();
 		return formatDateTime(dateString);
 	}
 
@@ -335,10 +336,10 @@
 			link.click();
 			document.body.removeChild(link);
 
-			toast.success(`Exporting ${volumeName}...`);
+			toast.success(m.volumes_list_toast_exporting({ name: volumeName }));
 		} catch (err) {
 			console.error('Failed to export volume:', err);
-			toast.error(`Failed to export ${volumeName}`);
+			toast.error(m.volumes_list_toast_export_failed({ name: volumeName }));
 		} finally {
 			pendingTimeouts.push(setTimeout(() => {
 				if (exportingVolume === volumeName) exportingVolume = null;
@@ -355,15 +356,15 @@
 			});
 			if (response.ok) {
 				pruneStatus = 'success';
-				toast.success('Unused volumes pruned');
+				toast.success(m.volumes_list_toast_pruned());
 				await fetchVolumes();
 			} else {
 				pruneStatus = 'error';
-				toast.error('Failed to prune volumes');
+				toast.error(m.volumes_list_toast_prune_failed());
 			}
 		} catch (error) {
 			pruneStatus = 'error';
-			toast.error('Failed to prune volumes');
+			toast.error(m.volumes_list_toast_prune_failed());
 		}
 		pendingTimeouts.push(setTimeout(() => {
 			pruneStatus = 'idle';
@@ -422,31 +423,32 @@
 
 <div class="flex-1 min-h-0 flex flex-col gap-3 overflow-hidden">
 	<div class="shrink-0 flex flex-wrap justify-between items-center gap-3 min-h-8">
-		<PageHeader icon={HardDrive} title="Volumes" count={volumes.length} />
+		<PageHeader icon={HardDrive} title={m.nav_volumes()} count={volumes.length} />
 		<div class="flex flex-wrap items-center gap-2">
-			<SearchInput bind:value={searchInput} placeholder="Search volumes..." class="h-8 w-48 text-sm" />
+			<SearchInput bind:value={searchInput} placeholder={m.volumes_list_search_placeholder()} class="h-8 w-48 text-sm" />
 			<MultiSelectFilter
 				bind:value={driverFilter}
 				options={driverOptions}
-				placeholder="Driver"
-				pluralLabel="drivers"
+				placeholder={m.volumes_driver()}
+				pluralLabel={m.volumes_list_filter_drivers_plural()}
 				width="w-28"
 				defaultIcon={Database}
 			/>
 			<MultiSelectFilter
 				bind:value={usageFilter}
 				options={usageOptions}
-				placeholder="Usage"
-				pluralLabel="usages"
+				placeholder={m.volumes_list_filter_usage()}
+				pluralLabel={m.volumes_list_filter_usages_plural()}
 				width="w-28"
 				defaultIcon={CircleDot}
 			/>
 			{#if $canAccess('volumes', 'remove')}
 			<ConfirmPopover
 				open={confirmPrune}
-				action="Prune"
-				itemType="unused volumes"
-				title="Prune volumes"
+				localized
+				action={m.confirm_action_prune()}
+				itemType={m.volumes_list_confirm_unused_volumes()}
+				title={m.volumes_list_prune_title()}
 				position="left"
 				onConfirm={pruneVolumes}
 				onOpenChange={(open) => confirmPrune = open}
@@ -463,16 +465,16 @@
 						{:else}
 							<Icon iconNode={broom} class="w-3.5 h-3.5" />
 						{/if}
-						Prune
+						{m.containers_list_prune()}
 					</span>
 				{/snippet}
 			</ConfirmPopover>
 			{/if}
-			<Button size="sm" variant="outline" onclick={fetchVolumes}>Refresh</Button>
+			<Button size="sm" variant="outline" onclick={fetchVolumes}>{m.containers_list_refresh()}</Button>
 			{#if $canAccess('volumes', 'create')}
 			<Button size="sm" variant="secondary" onclick={() => showCreateModal = true}>
 				<Plus class="w-3.5 h-3.5" />
-				Create
+				{m.containers_list_create()}
 			</Button>
 			{/if}
 		</div>
@@ -482,20 +484,21 @@
 	<div class="h-4 shrink-0">
 		{#if selectedVolumes.size > 0}
 			<div class="flex items-center gap-1 text-xs text-muted-foreground h-full">
-			<span>{selectedInFilter.length} selected</span>
+			<span>{m.containers_list_selected_count({ count: selectedInFilter.length })}</span>
 			<button
 				type="button"
 				class="inline-flex items-center gap-1 px-1.5 py-0 rounded border border-border hover:border-foreground/30 hover:shadow transition-all"
 				onclick={selectNone}
 			>
-				Clear
+				{m.containers_list_clear_selection()}
 			</button>
 			{#if $canAccess('volumes', 'remove')}
 			<ConfirmPopover
 				open={confirmBulkRemove}
-				action="Delete"
-				itemType="{selectedInFilter.length} volume{selectedInFilter.length !== 1 ? 's' : ''}"
-				title="Delete {selectedInFilter.length}"
+				localized
+				action={m.confirm_action_delete()}
+				itemType={m.volumes_list_confirm_volume_count({ count: selectedInFilter.length })}
+				title={m.volumes_list_bulk_delete_title({ count: selectedInFilter.length })}
 				unstyled
 				onConfirm={bulkRemove}
 				onOpenChange={(open) => confirmBulkRemove = open}
@@ -503,7 +506,7 @@
 				{#snippet children({ open })}
 					<span class="inline-flex items-center gap-1 px-1.5 py-0 rounded border border-border hover:text-destructive hover:border-destructive/40 hover:shadow transition-all cursor-pointer">
 						<Trash2 class="w-3 h-3" />
-						Delete
+						{m.volumes_list_delete()}
 					</span>
 				{/snippet}
 			</ConfirmPopover>
@@ -517,8 +520,8 @@
 	{:else if !loading && volumes.length === 0}
 		<EmptyState
 			icon={HardDrive}
-			title="No volumes found"
-			description="Create a volume to persist container data"
+			title={m.volumes_list_empty_title()}
+			description={m.volumes_list_empty_description()}
 		/>
 	{:else}
 		<DataGrid
@@ -553,7 +556,7 @@
 							type="button"
 							onclick={(e) => { e.stopPropagation(); goto(appendEnvParam(`/stacks?search=${encodeURIComponent(stack)}`, envId)); }}
 							class="cursor-pointer"
-							title={`Open stack "${stack}"`}
+							title={m.containers_inspect_open_stack({ stack })}
 						>
 							<Badge variant="secondary" class="text-xs py-0 px-1.5 shadow-sm rounded-sm hover:bg-primary/10 hover:border-primary/50 transition-colors">{stack}</Badge>
 						</button>
@@ -589,7 +592,7 @@
 						<button
 							type="button"
 							onclick={() => inspectVolume(volume.name)}
-							title="View details"
+							title={m.containers_list_view_details()}
 							class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
 						>
 							<Eye class="grid-action-icon grid-action-info text-muted-foreground hover:text-foreground" />
@@ -597,7 +600,7 @@
 						<button
 							type="button"
 							onclick={() => browseVolume(volume.name)}
-							title="Browse files"
+							title={m.containers_list_browse_files()}
 							class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
 						>
 							<FolderOpen class="grid-action-icon grid-action-info text-muted-foreground hover:text-foreground" />
@@ -605,7 +608,7 @@
 						<button
 							type="button"
 							onclick={() => exportVolume(volume.name)}
-							title="Export volume as {$appSettings.downloadFormat || 'tar'}"
+							title={m.volumes_list_export_title({ format: $appSettings.downloadFormat || 'tar' })}
 							class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer {exportingVolume === volume.name ? 'animate-pulse' : ''}"
 							disabled={exportingVolume === volume.name}
 						>
@@ -616,7 +619,7 @@
 						<button
 							type="button"
 							onclick={() => cloneVolume(volume.name)}
-							title="Clone volume"
+							title={m.volumes_clone_title()}
 							class="p-1 rounded hover:bg-muted transition-colors opacity-70 hover:opacity-100 cursor-pointer"
 						>
 							<Stamp class="grid-action-icon grid-action-edit text-muted-foreground hover:text-foreground" />
@@ -626,10 +629,11 @@
 						<div class="relative">
 							<ConfirmPopover
 								open={confirmDeleteName === volume.name}
-								action="Delete"
-								itemType="volume"
+								localized
+								action={m.confirm_action_delete()}
+								itemType={m.volumes_item_volume()}
 								itemName={volume.name}
-								title="Remove"
+								title={m.containers_list_remove()}
 								onConfirm={() => removeVolume(volume.name)}
 								onOpenChange={(open) => confirmDeleteName = open ? volume.name : null}
 							>

@@ -2,6 +2,7 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { CheckCircle2, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-svelte';
 	import { getSeverityColor, SEVERITY_ORDER } from '$lib/utils/vulnerability';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface ScanResult {
 		scanner: 'grype' | 'trivy';
@@ -86,7 +87,7 @@
 </script>
 
 {#if results.length === 0}
-	<div class="text-sm text-muted-foreground">No scan results available</div>
+	<div class="text-sm text-muted-foreground">{m.images_scan_results_none()}</div>
 {:else}
 	<div class="flex flex-col gap-2 h-full">
 		<!-- Scanner tabs (only if multiple results) -->
@@ -117,42 +118,42 @@
 			<div class="flex flex-wrap items-center gap-1.5 shrink-0">
 				{#if activeResult.summary.critical > 0}
 					<Badge variant="outline" class="bg-red-500/10 text-red-500 border-red-500/30 text-xs py-0">
-						{activeResult.summary.critical} Critical
+						{m.images_scan_results_count_critical({ count: activeResult.summary.critical })}
 					</Badge>
 				{/if}
 				{#if activeResult.summary.high > 0}
 					<Badge variant="outline" class="bg-orange-500/10 text-orange-500 border-orange-500/30 text-xs py-0">
-						{activeResult.summary.high} High
+						{m.images_scan_results_count_high({ count: activeResult.summary.high })}
 					</Badge>
 				{/if}
 				{#if activeResult.summary.medium > 0}
 					<Badge variant="outline" class="bg-yellow-500/10 text-yellow-600 border-yellow-500/30 text-xs py-0">
-						{activeResult.summary.medium} Medium
+						{m.images_scan_results_count_medium({ count: activeResult.summary.medium })}
 					</Badge>
 				{/if}
 				{#if activeResult.summary.low > 0}
 					<Badge variant="outline" class="bg-blue-500/10 text-blue-500 border-blue-500/30 text-xs py-0">
-						{activeResult.summary.low} Low
+						{m.images_scan_results_count_low({ count: activeResult.summary.low })}
 					</Badge>
 				{/if}
 				{#if activeResult.summary.negligible > 0}
 					<Badge variant="outline" class="bg-gray-500/10 text-gray-500 border-gray-500/30 text-xs py-0">
-						{activeResult.summary.negligible} Negligible
+						{m.images_scan_results_count_negligible({ count: activeResult.summary.negligible })}
 					</Badge>
 				{/if}
 				{#if activeResult.summary.unknown > 0}
 					<Badge variant="outline" class="bg-gray-500/10 text-gray-500 border-gray-500/30 text-xs py-0">
-						{activeResult.summary.unknown} Unknown
+						{m.images_scan_results_count_unknown({ count: activeResult.summary.unknown })}
 					</Badge>
 				{/if}
 				{#if activeResult.vulnerabilities.length === 0}
 					<Badge variant="outline" class="bg-green-500/10 text-green-500 border-green-500/30 text-xs py-0">
 						<CheckCircle2 class="w-3 h-3 mr-1" />
-						No vulnerabilities
+						{m.images_scan_results_no_vulnerabilities()}
 					</Badge>
 				{/if}
 				<span class="text-xs text-muted-foreground ml-2">
-					{activeResult.scanner === 'grype' ? 'Grype' : 'Trivy'} • {activeResult.vulnerabilities.length} total
+					{activeResult.scanner === 'grype' ? 'Grype' : 'Trivy'} • {m.images_scan_results_total({ count: activeResult.vulnerabilities.length })}
 					{#if activeResult.scanDuration}• {formatDuration(activeResult.scanDuration)}{/if}
 				</span>
 			</div>
@@ -165,7 +166,7 @@
 							<tr>
 								<th class="text-left py-1.5 px-2 font-medium w-[22%]">
 									<button type="button" class="flex items-center gap-1 hover:text-foreground transition-colors" onclick={() => toggleSort('id')}>
-										CVE ID
+										{m.images_scan_results_col_cve_id()}
 										{#if sortBy === 'id'}
 											{#if sortDir === 'asc'}<ArrowUp class="w-3 h-3" />{:else}<ArrowDown class="w-3 h-3" />{/if}
 										{:else}
@@ -175,7 +176,7 @@
 								</th>
 								<th class="text-left py-1.5 px-2 font-medium w-[12%]">
 									<button type="button" class="flex items-center gap-1 hover:text-foreground transition-colors" onclick={() => toggleSort('severity')}>
-										Severity
+										{m.images_scan_results_col_severity()}
 										{#if sortBy === 'severity'}
 											{#if sortDir === 'asc'}<ArrowUp class="w-3 h-3" />{:else}<ArrowDown class="w-3 h-3" />{/if}
 										{:else}
@@ -185,7 +186,7 @@
 								</th>
 								<th class="text-left py-1.5 px-2 font-medium w-[28%]">
 									<button type="button" class="flex items-center gap-1 hover:text-foreground transition-colors" onclick={() => toggleSort('package')}>
-										Package
+										{m.images_scan_results_col_package()}
 										{#if sortBy === 'package'}
 											{#if sortDir === 'asc'}<ArrowUp class="w-3 h-3" />{:else}<ArrowDown class="w-3 h-3" />{/if}
 										{:else}
@@ -193,8 +194,8 @@
 										{/if}
 									</button>
 								</th>
-								<th class="text-left py-1.5 px-2 font-medium w-[18%]">Installed</th>
-								<th class="text-left py-1.5 px-2 font-medium w-[20%]">Fixed in</th>
+								<th class="text-left py-1.5 px-2 font-medium w-[18%]">{m.images_scan_results_col_installed()}</th>
+								<th class="text-left py-1.5 px-2 font-medium w-[20%]">{m.images_scan_results_col_fixed_in()}</th>
 							</tr>
 						</thead>
 						<tbody>

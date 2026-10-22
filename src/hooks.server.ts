@@ -21,6 +21,8 @@ import type { HandleServerError, Handle } from '@sveltejs/kit';
 import { redirect } from '@sveltejs/kit';
 import { startRssTracker, stopRssTracker, rssBeforeOp, rssAfterOp } from '$lib/server/rss-tracker';
 import { getClientIp } from '$lib/server/client-ip';
+import { isPublicPath } from '$lib/server/public-paths-core';
+import { METRICS_PUBLIC } from '$lib/server/metrics';
 import { BACKUPS_ENABLED, API_DOCS_ENABLED } from '$lib/server/features';
 // Side-effect import: installs globalThis.__authenticateWsUpgrade and
 // globalThis.__canAccessEnvForUser used by the raw WS upgrade handlers in
@@ -258,32 +260,6 @@ function isBearerRateLimited(ip: string): boolean {
 	return true;
 }
 
-// Routes that don't require authentication
-const PUBLIC_PATHS = [
-	'/login',
-	'/api/auth/login',
-	'/api/auth/logout',
-	'/api/auth/session',
-	'/api/auth/settings',
-	'/api/auth/providers',
-	'/api/auth/oidc',
-	'/api/license',
-	'/api/changelog',
-	'/api/dependencies',
-	'/api/health',
-	'/api/settings/theme',
-	'/api/docs'
-];
-
-// Check if path is public
-function isPublicPath(pathname: string): boolean {
-	// Webhook endpoints have their own auth (signature/secret verification)
-	if (pathname.match(/^\/api\/git\/stacks\/\d+\/webhook$/)) return true;
-	if (pathname.match(/^\/api\/git\/webhook\/\d+$/)) return true;
-
-	return PUBLIC_PATHS.some(path => pathname === path || pathname.startsWith(path + '/'));
-}
-
 // True only for real static files. API routes are never static, even when a path
 // ends in an asset-like extension (a route parameter can), so they always go through
 // the normal request handling below.
@@ -377,7 +353,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 		const ctx = { user, authEnabled: true, authMethod };
 
 		// Public paths don't require authentication
-		if (isPublicPath(event.url.pathname)) {
+		if (isPublicPath(event.url.pathname, METRICS_PUBLIC)) {
 			return requestContext.run(ctx, async () => compressResponse(event.request, await resolve(event)));
 		}
 

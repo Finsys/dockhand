@@ -107,23 +107,27 @@ non-profit activities.
 non-commercial research institution using the Licensed Work for teaching,
 learning or non-commercial research.
 
-(d) Commercial License. You hold a valid Commercial License granted by Licensor
+(d) Sole operator use. You are an individual, including a self-employed
+individual or sole trader, using the Licensed Work for infrastructure that you
+operate yourself and that no employee of yours uses alongside you.
+
+(e) Commercial License. You hold a valid Commercial License granted by Licensor
 under Part B of the Dockhand License or under another written agreement with
 Licensor, and your production use is within the scope and term of that
 Commercial License.
 
-(e) Cure period. Your production use is not covered by (a) to (d) and Licensor
+(f) Cure period. Your production use is not covered by (a) to (e) and Licensor
 has notified you of this in writing: you may continue that production use for
 thirty (30) days after the notice, solely in order to obtain a Commercial
 License or to stop the production use. If you do either within that period,
 Licensor will treat the earlier production use as cured.
 
 Any other production use - including production use by or on behalf of a
-company, sole trader or self-employed individual, public body or any other
-organization - requires a Commercial License from Licensor.
+company, public body or any other organization that has employees - requires a
+Commercial License from Licensor.
 
 Use of the Licensed Work by a contractor or service provider acting solely on
-behalf of a person or organization covered by (a) to (d), and only for that
+behalf of a person or organization covered by (a) to (e), and only for that
 person's or organization's own infrastructure, is treated as use by that person
 or organization.
 

@@ -8,6 +8,7 @@
 	import { formatDateTime } from '$lib/stores/settings';
 	import ContainerTile from '../containers/ContainerTile.svelte';
 	import ContainerInspectModal from '../containers/ContainerInspectModal.svelte';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		open: boolean;
@@ -45,11 +46,11 @@
 			const envId = $currentEnvironment?.id ?? null;
 			const response = await fetch(appendEnvParam(`/api/networks/${networkId}/inspect`, envId));
 			if (!response.ok) {
-				throw new Error('Failed to fetch network details');
+				throw new Error(m.networks_inspect_error_fetch());
 			}
 			networkData = await response.json();
 		} catch (err: any) {
-			error = err.message || 'Failed to load network details';
+			error = err.message || m.networks_inspect_error_load();
 			console.error('Failed to fetch network inspect:', err);
 		} finally {
 			loading = false;
@@ -57,7 +58,7 @@
 	}
 
 	function formatNetworkDate(dateString: string): string {
-		if (!dateString) return 'N/A';
+		if (!dateString) return m.networks_inspect_not_available();
 		return formatDateTime(dateString, true);
 	}
 </script>
@@ -65,7 +66,7 @@
 <Dialog.Root bind:open>
 	<Dialog.Content class="max-w-4xl max-h-[90vh] flex flex-col" onOpenAutoFocus={(e) => e.preventDefault()}>
 		<Dialog.Header class="shrink-0">
-			<ModalHeader icon={Network} title="Network" name={networkName || networkId} />
+			<ModalHeader icon={Network} title={m.networks_inspect_title()} name={networkName || networkId} />
 		</Dialog.Header>
 
 		<div class="flex-1 overflow-auto space-y-4 min-h-0 pr-2">
@@ -80,10 +81,10 @@
 			{:else if networkData}
 				<!-- Basic Info -->
 				<div class="space-y-3">
-					<h3 class="text-sm font-semibold">Basic information</h3>
+					<h3 class="text-sm font-semibold">{m.networks_inspect_basic_info()}</h3>
 					<div class="grid grid-cols-2 gap-3 text-sm">
 						<div>
-							<p class="text-muted-foreground">Name</p>
+							<p class="text-muted-foreground">{m.networks_inspect_name()}</p>
 							<p class="font-medium">{networkData.Name}</p>
 						</div>
 						<div>
@@ -91,21 +92,21 @@
 							<code class="text-xs">{networkData.Id?.slice(0, 12)}</code>
 						</div>
 						<div>
-							<p class="text-muted-foreground">Driver</p>
+							<p class="text-muted-foreground">{m.networks_inspect_driver()}</p>
 							<Badge variant="outline">{networkData.Driver}</Badge>
 						</div>
 						<div>
-							<p class="text-muted-foreground">Scope</p>
+							<p class="text-muted-foreground">{m.networks_inspect_scope()}</p>
 							<Badge variant="secondary">{networkData.Scope}</Badge>
 						</div>
 						<div>
-							<p class="text-muted-foreground">Created</p>
+							<p class="text-muted-foreground">{m.networks_inspect_created()}</p>
 							<p>{formatNetworkDate(networkData.Created)}</p>
 						</div>
 						<div>
-							<p class="text-muted-foreground">Internal</p>
+							<p class="text-muted-foreground">{m.networks_inspect_internal()}</p>
 							<Badge variant={networkData.Internal ? 'destructive' : 'secondary'}>
-								{networkData.Internal ? 'Yes' : 'No'}
+								{networkData.Internal ? m.networks_inspect_yes() : m.networks_inspect_no()}
 							</Badge>
 						</div>
 					</div>
@@ -114,32 +115,32 @@
 				<!-- IPAM Configuration -->
 				{#if networkData.IPAM}
 					<div class="space-y-3">
-						<h3 class="text-sm font-semibold">IPAM configuration</h3>
+						<h3 class="text-sm font-semibold">{m.networks_inspect_ipam_config()}</h3>
 						<div class="space-y-2">
 							<div class="text-sm">
-								<p class="text-muted-foreground">Driver</p>
+								<p class="text-muted-foreground">{m.networks_inspect_driver()}</p>
 								<p>{networkData.IPAM.Driver || 'default'}</p>
 							</div>
 							{#if networkData.IPAM.Config && networkData.IPAM.Config.length > 0}
 								<div class="space-y-2">
-									<p class="text-muted-foreground text-sm">Subnets</p>
+									<p class="text-muted-foreground text-sm">{m.networks_inspect_subnets()}</p>
 									{#each networkData.IPAM.Config as config}
 										<div class="p-2 bg-muted rounded text-sm space-y-1">
 											{#if config.Subnet}
 												<div class="flex justify-between">
-													<span class="text-muted-foreground">Subnet:</span>
+													<span class="text-muted-foreground">{m.networks_inspect_subnet()}</span>
 													<code>{config.Subnet}</code>
 												</div>
 											{/if}
 											{#if config.Gateway}
 												<div class="flex justify-between">
-													<span class="text-muted-foreground">Gateway:</span>
+													<span class="text-muted-foreground">{m.networks_inspect_gateway()}</span>
 													<code>{config.Gateway}</code>
 												</div>
 											{/if}
 											{#if config.IPRange}
 												<div class="flex justify-between">
-													<span class="text-muted-foreground">IP Range:</span>
+													<span class="text-muted-foreground">{m.networks_inspect_ip_range()}</span>
 													<code>{config.IPRange}</code>
 												</div>
 											{/if}
@@ -154,7 +155,7 @@
 				<!-- Connected Containers -->
 				{#if networkData.Containers && Object.keys(networkData.Containers).length > 0}
 					<div class="space-y-3">
-						<h3 class="text-sm font-semibold">Connected containers ({Object.keys(networkData.Containers).length})</h3>
+						<h3 class="text-sm font-semibold">{m.networks_inspect_connected_containers({ count: Object.keys(networkData.Containers).length })}</h3>
 						<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
 							{#each Object.entries(networkData.Containers) as [id, container]}
 								<ContainerTile
@@ -170,14 +171,14 @@
 					</div>
 				{:else}
 					<div class="text-sm text-muted-foreground text-center py-4">
-						No containers connected to this network
+						{m.networks_inspect_no_containers()}
 					</div>
 				{/if}
 
 				<!-- Options -->
 				{#if networkData.Options && Object.keys(networkData.Options).length > 0}
 					<div class="space-y-3">
-						<h3 class="text-sm font-semibold">Driver options</h3>
+						<h3 class="text-sm font-semibold">{m.networks_inspect_driver_options()}</h3>
 						<div class="space-y-1">
 							{#each Object.entries(networkData.Options) as [key, value]}
 								<div class="flex justify-between text-sm p-2 bg-muted rounded">
@@ -192,7 +193,7 @@
 				<!-- Labels -->
 				{#if networkData.Labels && Object.keys(networkData.Labels).length > 0}
 					<div class="space-y-3">
-						<h3 class="text-sm font-semibold">Labels</h3>
+						<h3 class="text-sm font-semibold">{m.networks_inspect_labels()}</h3>
 						<div class="space-y-1">
 							{#each Object.entries(networkData.Labels) as [key, value]}
 								<div class="flex justify-between text-sm p-2 bg-muted rounded">
@@ -207,7 +208,7 @@
 		</div>
 
 		<Dialog.Footer class="shrink-0">
-			<Button variant="outline" onclick={() => (open = false)}>Close</Button>
+			<Button variant="outline" onclick={() => (open = false)}>{m.ui_close()}</Button>
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>

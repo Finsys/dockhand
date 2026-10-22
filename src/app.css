@@ -90,11 +90,11 @@ html.colored-actions.dark .grid-action-terminal { color: rgb(74 222 128); }
 html.colored-actions .grid-action-transfer { color: rgb(37 99 235); }
 html.colored-actions.dark .grid-action-transfer { color: rgb(96 165 250); }
 
-/* State badge - width scales with grid font size to stay consistent */
+/* State badge - a minimum so the badges line up, then it grows with its text.
+   A state name is a translated word: "restarting" and "uruchomiony" are wider
+   than the English short states the fixed width was sized for. */
 .state-badge {
-	width: calc(70px * var(--grid-font-size-scale, 1));
 	min-width: calc(70px * var(--grid-font-size-scale, 1));
-	max-width: calc(70px * var(--grid-font-size-scale, 1));
 	text-align: center;
 }
 

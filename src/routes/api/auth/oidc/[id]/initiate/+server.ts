@@ -1,8 +1,19 @@
 import { json, redirect } from '@sveltejs/kit';
 import type { RequestHandler } from '@sveltejs/kit';
-import { buildOidcAuthorizationUrl, isAuthEnabled } from '$lib/server/auth';
+import { buildOidcAuthorizationUrl, isAuthEnabled, setLoginStateCookie } from '$lib/server/auth';
 import { getOidcConfig } from '$lib/server/db';
 import { safeRedirectOrRoot } from '$lib/utils/safe-redirect';
+
+/**
+ * Send the browser back to the login form with the reason.
+ *
+ * This endpoint is reached by navigation, not fetch, so a JSON error body would be
+ * rendered as the page - and with auto-login on, reloading it just repeats the
+ * failure. `local=1` keeps the form up instead of bouncing straight out again.
+ */
+function backToLogin(message: string) {
+	return redirect(302, `/login?local=1&error=${encodeURIComponent(message)}`);
+}
 
 // GET /api/auth/oidc/[id]/initiate - Start OIDC authentication flow
 /**
@@ -10,12 +21,10 @@ import { safeRedirectOrRoot } from '$lib/utils/safe-redirect';
  * summary: Start the OIDC login flow for a provider — on success throws a 302 redirect to the IdP authorization URL
  * path: id:integer! Numeric id of the OIDC provider (from GET /api/auth/oidc)
  * query: redirect:string Post-login destination path to return to (defaults to /)
- * resp-302: Redirect to the IdP's authorization URL
+ * resp-302: Redirect to the IdP's authorization URL, or back to /login?local=1&error=... when the provider is unknown, disabled or unreachable
  * resp-400: Authentication is not enabled, or the configuration id is invalid
- * resp-404: OIDC provider not found or disabled
- * resp-500: Failed to build the authorization URL / initiate SSO
  */
-export const GET: RequestHandler = async ({ params, url }) => {
+export const GET: RequestHandler = async ({ params, url, cookies, request }) => {
 	// Check if auth is enabled
 	if (!await isAuthEnabled()) {
 		return json({ error: 'Authentication is not enabled' }, { status: 400 });
@@ -32,14 +41,18 @@ export const GET: RequestHandler = async ({ params, url }) => {
 	try {
 		const config = await getOidcConfig(id);
 		if (!config || !config.enabled) {
-			return json({ error: 'OIDC provider not found or disabled' }, { status: 404 });
+			throw backToLogin('OIDC provider not found or disabled');
 		}
 
 		const result = await buildOidcAuthorizationUrl(id, redirectUrl);
 
 		if ('error' in result) {
-			return json({ error: result.error }, { status: 500 });
+			throw backToLogin(result.error);
 		}
+
+		// The login travels with the browser, so the callback can land on any
+		// instance behind the proxy and still be resumable.
+		setLoginStateCookie(cookies, result.loginState, request);
 
 		// Redirect to the IdP
 		throw redirect(302, result.url);
@@ -49,7 +62,7 @@ export const GET: RequestHandler = async ({ params, url }) => {
 			throw error;
 		}
 		console.error('Failed to initiate OIDC:', error);
-		return json({ error: error.message || 'Failed to initiate SSO' }, { status: 500 });
+		throw backToLogin(error.message || 'Failed to initiate SSO');
 	}
 };
 
@@ -65,7 +78,7 @@ export const GET: RequestHandler = async ({ params, url }) => {
  * resp-404: OIDC provider not found or disabled
  * resp-500: Failed to build the authorization URL / initiate SSO
  */
-export const POST: RequestHandler = async ({ params, request }) => {
+export const POST: RequestHandler = async ({ params, request, cookies }) => {
 	// Check if auth is enabled
 	if (!await isAuthEnabled()) {
 		return json({ error: 'Authentication is not enabled' }, { status: 400 });
@@ -90,6 +103,10 @@ export const POST: RequestHandler = async ({ params, request }) => {
 		if ('error' in result) {
 			return json({ error: result.error }, { status: 500 });
 		}
+
+		// Same cookie as the redirect form of this endpoint: the browser is about to
+		// follow result.url itself, and has to come back with the login it started.
+		setLoginStateCookie(cookies, result.loginState, request);
 
 		return json({ url: result.url });
 	} catch (error: any) {

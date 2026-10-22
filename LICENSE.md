@@ -59,13 +59,15 @@ You may make production use of the Licensed Work if, and only for as long as, at
 
 (c) Educational and research use. You are a school, college, university or non-commercial research institution using the Licensed Work for teaching, learning or non-commercial research.
 
-(d) Commercial License. You hold a valid Commercial License granted by Licensor under Part B of the Dockhand License or under another written agreement with Licensor, and your production use is within the scope and term of that Commercial License.
+(d) Sole operator use. You are an individual, including a self-employed individual or sole trader, using the Licensed Work for infrastructure that you operate yourself and that no employee of yours uses alongside you.
 
-(e) Cure period. Your production use is not covered by (a) to (d) and Licensor has notified you of this in writing: you may continue that production use for thirty (30) days after the notice, solely in order to obtain a Commercial License or to stop the production use. If you do either within that period, Licensor will treat the earlier production use as cured.
+(e) Commercial License. You hold a valid Commercial License granted by Licensor under Part B of the Dockhand License or under another written agreement with Licensor, and your production use is within the scope and term of that Commercial License.
 
-Any other production use — including production use by or on behalf of a company, sole trader or self-employed individual, public body or any other organization — requires a Commercial License from Licensor.
+(f) Cure period. Your production use is not covered by (a) to (e) and Licensor has notified you of this in writing: you may continue that production use for thirty (30) days after the notice, solely in order to obtain a Commercial License or to stop the production use. If you do either within that period, Licensor will treat the earlier production use as cured.
 
-Use of the Licensed Work by a contractor or service provider acting solely on behalf of a person or organization covered by (a) to (d), and only for that person's or organization's own infrastructure, is treated as use by that person or organization.
+Any other production use — including production use by or on behalf of a company, public body or any other organization that has employees — requires a Commercial License from Licensor.
+
+Use of the Licensed Work by a contractor or service provider acting solely on behalf of a person or organization covered by (a) to (e), and only for that person's or organization's own infrastructure, is treated as use by that person or organization.
 
 "Production use" means using the Licensed Work to manage, monitor or operate containers, images, stacks, volumes, networks or Docker environments that serve your customers or end users, that run your live business or organizational systems, or on whose availability you otherwise rely for your day-to-day operations. Using the Licensed Work for development, testing, staging, CI/CD, evaluation, demonstration, training or learning purposes is not production use, regardless of who you are and regardless of the number of users, installations or environments involved, and is permitted under this License without a Commercial License.
 

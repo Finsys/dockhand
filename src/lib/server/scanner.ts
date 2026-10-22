@@ -4,7 +4,7 @@
 
 import {
 	listImages,
-	pullImage,
+	pullInternalImage,
 	createVolume,
 	listVolumes,
 	removeVolume,
@@ -18,7 +18,13 @@ import {
 } from './docker';
 import {
 	isDaemonExportFailure,
+	scanErrorOutput,
+	chooseReportedError,
+	resolveRegistryScanTarget,
+	needsRepoTags,
+	type RegistryScanTarget,
 	toRegistryScanCmd,
+	toRegistryRef,
 	registryAuthEnv,
 	imageRegistryAuthority,
 	RegistryFallbackMemory
@@ -27,6 +33,7 @@ import { getEnvironment, getEnvSetting, getSetting } from './db';
 import { sendEventNotification } from './notifications';
 import { detectRemoteSocketPath } from './scanner-socket-detect';
 import { truncateForLog, classifyUnparseableOutput, pickScanDisplayName } from './scanner-output-core';
+import { checkNewerVersion } from './semver/check';
 import {
 	getHostDockerSocket,
 	getHostDataDir,
@@ -138,13 +145,16 @@ export function getScannerStats(): { inProgress: number; locked: number } {
 	return { inProgress: inProgressScans.size, locked: scannerLocks.size };
 }
 
-// Default CLI arguments for scanners (image name is substituted for {image})
-export const DEFAULT_GRYPE_ARGS = '-o json -v {image}';
-export const DEFAULT_TRIVY_ARGS = 'image --format json {image}';
-
 // Pinned scanner images — avoid :latest after the March 2026 Trivy supply chain attack
-export const DEFAULT_GRYPE_IMAGE = 'anchore/grype:v0.115.0';
-export const DEFAULT_TRIVY_IMAGE = 'aquasec/trivy:0.71.2';
+import {
+	DEFAULT_GRYPE_IMAGE,
+	DEFAULT_TRIVY_IMAGE,
+	DEFAULT_GRYPE_ARGS,
+	DEFAULT_TRIVY_ARGS
+} from '$lib/utils/scanner-images';
+// The images are re-exported because docker.ts imports them from here; the args
+// have no such consumer, so they stay where they are defined.
+export { DEFAULT_GRYPE_IMAGE, DEFAULT_TRIVY_IMAGE };
 
 export interface VulnerabilitySeverity {
 	critical: number;
@@ -365,7 +375,7 @@ async function ensureScannerImage(
 	});
 
 	try {
-		await pullImage(scannerImage, undefined, envId);
+		await pullInternalImage(scannerImage, envId);
 		return true;
 	} catch (error) {
 		const errorMsg = error instanceof Error ? error.message : String(error);
@@ -696,18 +706,39 @@ async function runScannerContainerImpl(
 			runScannerContainerCore(scannerImage, scannerType, imageName, cmd, envId, onOutput, registryMode)
 		);
 
-	// This env's store already lost blobs on a prior scan -> skip the doomed daemon
-	// export and scan the registry directly.
+	// This env's store lost blobs on a prior scan -> try the registry first, since the
+	// daemon export is the slow half and was already seen to fail. The daemon stays as
+	// the fallback, because a registry cannot answer every ref: a local-only image, or a
+	// private registry with no stored credentials. The preference is NOT cleared on a
+	// daemon success - blob loss is per-image, so one image exporting proves nothing
+	// about the store, and releasing the env would send the next scan back through the
+	// doomed export.
 	if (registryFallback.prefersRegistry(envId)) {
-		console.log(`[Scanner] ${scannerType}: env ${envId ?? 'local'} known to break daemon export - scanning registry directly`);
-		return run(true);
+		console.log(`[Scanner] ${scannerType}: env ${envId ?? 'local'} previously broke daemon export - trying the registry first`);
+		try {
+			return await run(true);
+		} catch (registryError) {
+			const rmsg = registryError instanceof Error ? registryError.message : String(registryError);
+			console.warn(`[Scanner] ${scannerType}: registry scan failed (${rmsg.split('\n')[0]}); retrying via the daemon`);
+			try {
+				return await run(false);
+			} catch (daemonError) {
+				// Both halves failed; the core decides which failure explains the outcome.
+				// It classifies the daemon error for the export bug, so feed it the FULL
+				// output, not the truncated message (same ~1000-char cut as below).
+				throw chooseReportedError(rmsg, scanErrorOutput(daemonError)) === 'registry'
+					? registryError
+					: daemonError;
+			}
+		}
 	}
 
 	try {
 		return await run(false);
 	} catch (error) {
-		const msg = error instanceof Error ? error.message : String(error);
-		if (!isDaemonExportFailure(msg)) throw error;
+		// Classify on the FULL scanner output, not the truncated error message: the
+		// export-bug signal usually lands after the message's ~1000-char cut.
+		if (!isDaemonExportFailure(scanErrorOutput(error))) throw error;
 		// The daemon handed the scanner an incomplete tar (containerd/OCI store blob
 		// loss). Remember this env and retry from the registry.
 		console.warn(`[Scanner] ${scannerType}: daemon export produced an incomplete image for ${imageName}; retrying from the registry`);
@@ -835,8 +866,32 @@ async function runScannerContainerCore(
 	// on the remote host with default networking; if that registry is internal-only
 	// and was previously reachable only via the daemon, the registry scan can't reach
 	// it. Surface that so a split-network user knows why.
+	let registryScanTarget: RegistryScanTarget | null = null;
 	if (registryMode) {
-		cmd = toRegistryScanCmd(scannerType, cmd, imageName);
+		// Only a bare image ID needs the inspect, and that is a remote round-trip, so
+		// the core decides whether to pay for it.
+		let repoTags: string[] | undefined;
+		if (needsRepoTags(imageName)) {
+			try {
+				repoTags = ((await inspectImage(imageName, envId)) as any)?.RepoTags ?? undefined;
+			} catch {
+				// Leave it unresolved; the scan fails with the registry's own message
+				// rather than an inspect error that says nothing about the scan.
+			}
+		}
+		// One call decides the ref to scan AND the registry to authenticate against, so
+		// the two can never disagree about which image is being read.
+		registryScanTarget = resolveRegistryScanTarget(
+			imageName,
+			repoTags,
+			(ref) => parseImageReference(ref).registry
+		);
+		if (registryScanTarget.resolved) {
+			console.log(`[Scanner] Registry mode - scanning ${registryScanTarget.ref} (${imageName} is local)`);
+		} else if (registryScanTarget.unresolvableId) {
+			console.warn(`[Scanner] Registry mode - no pushed tag known for ${imageName}; the registry cannot resolve it`);
+		}
+		cmd = toRegistryScanCmd(scannerType, cmd, imageName, registryScanTarget.ref);
 		if (isHawser) {
 			console.warn(`[Scanner] Registry-mode fallback on a remote (hawser) env - the scanner container must be able to reach the registry from the remote host's default network.`);
 		}
@@ -882,8 +937,13 @@ async function runScannerContainerCore(
 		// findRegistryCredentials matches on the registry HOST, not the full ref, so
 		// resolve the registry the same way image pulls do (parseImageReference), not
 		// by passing the tagged image name (which never matches a stored org path).
-		const registry = parseImageReference(imageName).registry;
-		const authority = imageRegistryAuthority(imageName);
+		// Resolved above, in the same `if (registryMode)` block that rewrote the command,
+		// so the scan and its credentials always describe one image. A missing target
+		// would mean the two blocks had drifted apart.
+		if (!registryScanTarget) {
+			throw new Error('Registry mode reached the credential step without a resolved target');
+		}
+		const { registry, authority } = registryScanTarget;
 		const creds = await findRegistryCredentials(registry);
 		const authEnv = registryAuthEnv(scannerType, creds, authority ?? undefined);
 		if (authEnv.length > 0) {
@@ -1333,6 +1393,49 @@ export async function checkScannerUpdates(envId?: number): Promise<{
 	}
 
 	return result;
+}
+
+/**
+ * The newest scanner release published upstream, per scanner.
+ *
+ * Distinct from checkScannerUpdates, which compares the digest behind the SAME
+ * tag: on a pinned tag that only notices a rebuild, never that a later release
+ * exists. This reads the repo's tag list, so it answers the question the
+ * settings screen actually asks.
+ *
+ * Suggestion only - the configured image is never changed here. Pinning is what
+ * keeps a scan reproducible, so moving to a new version stays a deliberate act.
+ * Never throws: a registry failure yields null and the UI simply shows nothing.
+ */
+export async function checkScannerNewerVersions(): Promise<{
+	grype: { current: string; latest: string | null };
+	trivy: { current: string; latest: string | null };
+}> {
+	const defaults = await getGlobalScannerDefaults();
+
+	const newest = async (image: string): Promise<string | null> => {
+		try {
+			// matchFlavor pinned ON: grype publishes -debug, -nonroot and per-arch
+			// variants of every release, so ignoring the flavor offers a plain tag a
+			// -debug variant, and vice versa. Passed explicitly rather than relying on
+			// the default, which a change to findNewerVersionTag could flip.
+			const newer = await checkNewerVersion(image, { maxBump: 'major', matchFlavor: true });
+			return newer?.tag ?? null;
+		} catch (e) {
+			console.error('[Scanner] Newer-version check failed for', image, e);
+			return null;
+		}
+	};
+
+	const [grypeLatest, trivyLatest] = await Promise.all([
+		newest(defaults.grypeImage),
+		newest(defaults.trivyImage)
+	]);
+
+	return {
+		grype: { current: defaults.grypeImage, latest: grypeLatest },
+		trivy: { current: defaults.trivyImage, latest: trivyLatest }
+	};
 }
 
 // Clean up scanner database volumes (removes cached vulnerability databases)

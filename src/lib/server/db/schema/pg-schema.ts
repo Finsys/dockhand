@@ -15,7 +15,8 @@ import {
 	bigint,
 	timestamp,
 	unique,
-	index
+	index,
+	uniqueIndex
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
@@ -546,7 +547,14 @@ export const pendingContainerUpdates = pgTable('pending_container_updates', {
 	hasImageUpdate: boolean('has_image_update').notNull().default(true),
 	// A newer VERSION tag (semver) for a pinned image, as JSON {tag,bump,skipped}.
 	// Null when there's no semver suggestion. Advisory - never auto-applied.
+	// True when the image is `repo:tag@sha256:...` and the digest behind its tag has
+	// moved. Reported, never applied: the pull returns the pinned manifest, so the
+	// compose file is what has to change. Defaults false so existing rows are unchanged.
+	pinnedToDigest: boolean('pinned_to_digest').notNull().default(false),
 	newerVersion: text('newer_version'),
+	// Hours left before a held update may be applied. Null when no cooldown applies,
+	// so a row can record "waiting" without claiming the update is ready.
+	releaseAgeRemainingHours: integer('release_age_remaining_hours'),
 	checkedAt: timestamp('checked_at', { mode: 'string' }).defaultNow(),
 	createdAt: timestamp('created_at', { mode: 'string' }).defaultNow()
 }, (table) => ({
@@ -567,6 +575,8 @@ export const backupDestinations = pgTable('backup_destinations', {
 	hostPath: text('host_path'),
 	cacert: text('cacert'),
 	tlsClientCert: text('tls_client_cert'),
+	sshPrivateKey: text('ssh_private_key'),
+	sshKnownHosts: text('ssh_known_hosts'),
 	policies: text('policies'),
 	lastTestAt: timestamp('last_test_at', { mode: 'string' }),
 	lastTestStatus: text('last_test_status'),
@@ -646,3 +656,35 @@ export const templateSources = pgTable('template_sources', {
 	createdAt: timestamp('created_at', { mode: 'string' }).defaultNow(),
 	updatedAt: timestamp('updated_at', { mode: 'string' }).defaultNow()
 });
+
+
+// =============================================================================
+// PASSKEYS (WebAuthn)
+// =============================================================================
+
+/**
+ * A registered WebAuthn credential.
+ *
+ * `counter` is the authenticator's signature counter: it must only ever move
+ * forward, so a replayed or cloned credential is refused at login. It is a bigint
+ * because the counter is an unsigned 32-bit value. `aaguid` identifies the
+ * authenticator model, which is what lets a credential be named after the manager
+ * it lives in.
+ */
+export const passkeyCredentials = pgTable('passkey_credentials', {
+	id: serial('id').primaryKey(),
+	userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+	credentialId: text('credential_id').notNull().unique(),
+	webauthnUserId: text('webauthn_user_id').notNull(),
+	publicKey: text('public_key').notNull(),
+	counter: bigint('counter', { mode: 'number' }).notNull().default(0),
+	deviceType: text('device_type').notNull(),
+	backedUp: boolean('backed_up').notNull().default(false),
+	transports: text('transports'),
+	aaguid: text('aaguid'),
+	name: text('name'),
+	createdAt: timestamp('created_at', { mode: 'string' }).notNull().defaultNow()
+}, (table) => ({
+	userIdIdx: index('passkey_credentials_user_id_idx').on(table.userId),
+	userNameUnique: uniqueIndex('passkey_credentials_user_name_unique').on(table.userId, sql`lower(${table.name})`)
+}));

@@ -10,6 +10,7 @@
 	import { canAccess } from '$lib/stores/auth';
 	import GitRepositoryModal from './GitRepositoryModal.svelte';
 	import { EmptyState } from '$lib/components/ui/empty-state';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface GitCredential {
 		id: number;
@@ -33,6 +34,8 @@
 	let showModal = $state(false);
 	let editingRepo = $state<GitRepository | null>(null);
 	let confirmDeleteId = $state<number | null>(null);
+	let deleteAffectedStacks = $state<Array<{ stackName: string; environmentId: number | null }>>([]);
+	let loadingAffected = $state(false);
 	let testingId = $state<number | null>(null);
 	let testResult = $state<{ id: number; success: boolean; message: string } | null>(null);
 
@@ -42,7 +45,7 @@
 			repositories = await response.json();
 		} catch (error) {
 			console.error('Failed to fetch git repositories:', error);
-			toast.error('Failed to fetch git repositories');
+			toast.error(m.settings_git_repos_fetch_failed());
 		} finally {
 			loading = false;
 		}
@@ -54,7 +57,7 @@
 			credentials = await response.json();
 		} catch (error) {
 			console.error('Failed to fetch git credentials:', error);
-			toast.error('Failed to fetch git credentials');
+			toast.error(m.settings_git_credentials_fetch_failed());
 		}
 	}
 
@@ -72,18 +75,34 @@
 		await fetchRepositories();
 	}
 
+	async function loadAffectedStacks(id: number) {
+		loadingAffected = true;
+		deleteAffectedStacks = [];
+		try {
+			const res = await fetch(`/api/git/repositories/${id}`);
+			if (res.ok) {
+				const data = await res.json();
+				deleteAffectedStacks = data.stacksUsing ?? [];
+			}
+		} catch {
+			// Non-fatal: the confirmation still works, just without the stack list.
+		} finally {
+			loadingAffected = false;
+		}
+	}
+
 	async function deleteRepository(id: number) {
 		try {
 			const response = await fetch(`/api/git/repositories/${id}`, { method: 'DELETE' });
 			if (response.ok) {
 				await fetchRepositories();
-				toast.success('Repository deleted');
+				toast.success(m.settings_git_repo_deleted());
 			} else {
-				toast.error('Failed to delete repository');
+				toast.error(m.settings_git_repo_delete_failed());
 			}
 		} catch (error) {
 			console.error('Failed to delete repository:', error);
-			toast.error('Failed to delete repository');
+			toast.error(m.settings_git_repo_delete_failed());
 		}
 	}
 
@@ -97,16 +116,16 @@
 				testResult = {
 					id,
 					success: true,
-					message: `Connected! Branch: ${data.branch}, Last commit: ${data.lastCommit}`
+					message: m.settings_git_repo_test_connected({ branch: data.branch, commit: data.lastCommit })
 				};
-				toast.success('Repository connection successful');
+				toast.success(m.settings_git_repo_test_success());
 			} else {
 				testResult = {
 					id,
 					success: false,
-					message: data.error || 'Connection failed'
+					message: data.error || m.settings_git_connection_failed()
 				};
-				toast.error(`Connection failed: ${data.error || 'Unknown error'}`);
+				toast.error(m.settings_git_connection_failed_detail({ error: data.error || m.stacks_git_unknown_error() }));
 			}
 			// Auto-clear after 5 seconds
 			setTimeout(() => {
@@ -118,9 +137,9 @@
 			testResult = {
 				id,
 				success: false,
-				message: 'Failed to test connection'
+				message: m.settings_git_test_connection_error()
 			};
-			toast.error('Failed to test repository connection');
+			toast.error(m.settings_git_repo_test_error());
 		} finally {
 			testingId = null;
 		}
@@ -135,26 +154,26 @@
 <div class="space-y-4">
 	<div class="flex justify-between items-center">
 		<div>
-			<h3 class="text-lg font-medium">Git repositories</h3>
-			<p class="text-sm text-muted-foreground">Manage Git repositories that can be used to deploy stacks</p>
+			<h3 class="text-lg font-medium">{m.settings_git_repos_title()}</h3>
+			<p class="text-sm text-muted-foreground">{m.settings_git_repos_description()}</p>
 		</div>
 		{#if $canAccess('settings', 'edit')}
 			<Button size="sm" onclick={() => openModal()}>
 				<Plus class="w-4 h-4" />
-				Add repository
+				{m.settings_git_add_repository()}
 			</Button>
 		{/if}
 	</div>
 
 	{#if loading}
-		<p class="text-sm text-muted-foreground">Loading repositories...</p>
+		<p class="text-sm text-muted-foreground">{m.settings_git_repos_loading()}</p>
 	{:else if repositories.length === 0}
 		<Card.Root>
 			<Card.Content>
 				<EmptyState
 					icon={FolderGit2}
-					title="No Git repositories configured"
-					description="Add a repository to use it when deploying stacks from Git"
+					title={m.settings_git_repos_empty_title()}
+					description={m.settings_git_repos_empty_description()}
 				/>
 			</Card.Content>
 		</Card.Root>
@@ -169,7 +188,7 @@
 							<button
 								type="button"
 								class="font-medium text-sm truncate text-left hover:underline cursor-pointer"
-								title="Edit repository"
+								title={m.settings_git_edit_repository()}
 								onclick={() => openModal(repo)}
 							>{repo.name}</button>
 						{:else}
@@ -189,14 +208,14 @@
 							</span>
 						{/if}
 						{#if repo.credentialName}
-							<span class="flex items-center gap-1 text-xs text-muted-foreground" title="Using credential: {repo.credentialName}">
+							<span class="flex items-center gap-1 text-xs text-muted-foreground" title={m.settings_git_using_credential({ name: repo.credentialName })}>
 								<Lock class="w-3 h-3" />
 								<span class="hidden sm:inline">{repo.credentialName}</span>
 							</span>
 						{:else}
-							<span class="flex items-center gap-1 text-xs text-muted-foreground" title="Public repository">
+							<span class="flex items-center gap-1 text-xs text-muted-foreground" title={m.settings_git_public_repository()}>
 								<Globe class="w-3 h-3" />
-								<span class="hidden sm:inline">Public</span>
+								<span class="hidden sm:inline">{m.settings_git_public()}</span>
 							</span>
 						{/if}
 						<Badge variant="outline" class="text-xs flex items-center gap-1">
@@ -209,7 +228,7 @@
 							class="h-7 w-7"
 							onclick={() => testRepository(repo.id)}
 							disabled={testingId === repo.id}
-							title="Test connection"
+							title={m.settings_git_test_connection()}
 						>
 							{#if testingId === repo.id}
 								<Loader2 class="w-3.5 h-3.5 animate-spin" />
@@ -218,20 +237,40 @@
 							{/if}
 						</Button>
 						{#if $canAccess('settings', 'edit')}
-							<Button variant="ghost" size="icon" class="h-7 w-7" onclick={() => openModal(repo)} title="Edit repository">
+							<Button variant="ghost" size="icon" class="h-7 w-7" onclick={() => openModal(repo)} title={m.settings_git_edit_repository()}>
 								<Pencil class="w-3.5 h-3.5" />
 							</Button>
 							<ConfirmPopover
 								open={confirmDeleteId === repo.id}
-								action="Delete"
-								itemType="repository"
+								localized
+								action={m.confirm_action_delete()}
+								itemType={m.settings_git_item_repository()}
 								itemName={repo.name}
-								title="Delete"
+								title={m.settings_git_delete()}
+								autoHideMs={0}
 								onConfirm={() => deleteRepository(repo.id)}
-								onOpenChange={(open) => confirmDeleteId = open ? repo.id : null}
+								onOpenChange={(open) => {
+									confirmDeleteId = open ? repo.id : null;
+									if (open) loadAffectedStacks(repo.id);
+									else deleteAffectedStacks = [];
+								}}
 							>
 								{#snippet children({ open })}
 									<Trash2 class="w-3.5 h-3.5 {open ? 'text-destructive' : 'text-muted-foreground hover:text-destructive'}" />
+								{/snippet}
+								{#snippet extraContent()}
+									{#if loadingAffected}
+										<p class="text-xs text-muted-foreground">{m.settings_git_checking_stacks()}</p>
+									{:else if deleteAffectedStacks.length > 0}
+										<p class="text-xs text-amber-600 dark:text-amber-500">
+											{m.settings_git_delete_affects_stacks({ count: deleteAffectedStacks.length })}
+										</p>
+										<ul class="mt-1 text-xs text-muted-foreground list-disc list-inside max-h-24 overflow-y-auto">
+											{#each deleteAffectedStacks as s}
+												<li>{s.stackName}</li>
+											{/each}
+										</ul>
+									{/if}
 								{/snippet}
 							</ConfirmPopover>
 						{/if}

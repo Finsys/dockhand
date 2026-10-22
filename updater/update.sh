@@ -41,7 +41,7 @@ log "Container renamed to $CONTAINER_NAME"
 if [ -n "$NETWORKS" ]; then
     for NET in $NETWORKS; do
         OPTS_VAR="NETWORK_OPTS_$(echo "$NET" | tr '.-' '__')"
-        OPTS=$(eval echo "\$$OPTS_VAR" 2>/dev/null || true)
+        OPTS=$(env | grep -F -m1 -- "$OPTS_VAR=" | cut -d= -f2-)
         log "Connecting to network $NET ${OPTS:+($OPTS)}"
         # shellcheck disable=SC2086
         docker network connect $OPTS "$NET" "$NEW_CONTAINER_ID" || log "  Warning: failed to connect to $NET"

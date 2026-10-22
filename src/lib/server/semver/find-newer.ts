@@ -7,12 +7,16 @@
  * compose, which we don't own. We just tell them "a newer version is out".
  */
 
+import { applyTagFilter, type TagFilter } from './tag-filter-labels';
+import { applyTagTransform, type TagTransform } from './tag-transform';
 import {
 	parseTag,
 	prefixMatches,
 	flavorMatches,
+	flavorOf,
 	compareParts,
 	isPrerelease,
+	isCalVerDrift,
 	type ParsedTag
 } from './tag-parser';
 
@@ -31,6 +35,19 @@ export interface FindNewerOptions {
 	 * image with a non-standard tag scheme can still be compared. Absent = default.
 	 */
 	versionPattern?: RegExp | null;
+	/**
+	 * The container's own tag filters, from its labels. Applied BEFORE the version
+	 * comparison, and only ever narrowing: a label names an exception the global
+	 * settings cannot express, it does not widen what the instance offers.
+	 */
+	tagFilter?: TagFilter;
+	/**
+	 * A `wud.tag.transform` / `dockhand.tag.transform` formula from the container's
+	 * labels. Rewrites the running tag and every candidate BEFORE parsing, so
+	 * a non-standard revision scheme parses as a comparable version. The ORIGINAL tag
+	 * is still what gets reported - the transform only feeds the comparison.
+	 */
+	tagTransform?: TagTransform | null;
 }
 
 export interface NewerVersion {
@@ -67,6 +84,27 @@ export function isRedundantNewerVersion(
 	return candidateChildDigests.some((d) => !!d && local.has(d));
 }
 
+/**
+ * A candidate is STALE when its image was built before the one already running.
+ * A version tag names what a maintainer called a build, not when it was made, so a
+ * repository that still carries old tags whose names sort high offers them as
+ * upgrades: `lidarr:8.1.2135` is really `0.8.1.2135` from 2021, above a running
+ * `3.1.0` from 2026 on name alone.
+ *
+ * Returns false whenever either timestamp is missing or unparseable, so a registry
+ * that does not answer can never hide a real update.
+ */
+export function isStaleCandidate(
+	candidateCreatedAt: string | null | undefined,
+	currentCreatedAt: string | null | undefined
+): boolean {
+	if (!candidateCreatedAt || !currentCreatedAt) return false;
+	const candidate = Date.parse(candidateCreatedAt);
+	const current = Date.parse(currentCreatedAt);
+	if (!Number.isFinite(candidate) || !Number.isFinite(current)) return false;
+	return candidate < current;
+}
+
 /** Which segment first differs decides the bump: [0]=major, [1]=minor, else patch. */
 export function classifyBump(current: ParsedTag, candidate: ParsedTag): VersionBump {
 	if ((candidate.parts[0] ?? 0) !== (current.parts[0] ?? 0)) return 'major';
@@ -96,20 +134,27 @@ export function findNewerVersionTag(
 	allTags: string[],
 	options: FindNewerOptions = {}
 ): NewerVersion | null {
-	const { maxBump = 'major', includePrerelease = false, matchFlavor = true, versionPattern = null } = options;
+	const { maxBump = 'major', includePrerelease = false, matchFlavor = true, versionPattern = null, tagTransform = null } = options;
 
-	const current = parseTag(currentTag, versionPattern);
+	const current = parseTag(applyTagTransform(tagTransform, currentTag), versionPattern);
 	if (!current) return null; // floating tag — not a version, never suggest.
 
 	const maxRank = BUMP_RANK[maxBump];
 	const currentIsPrerelease = isPrerelease(current);
 
-	const candidates = allTags
-		.map((tag) => ({ tag, parsed: parseTag(tag, versionPattern) }))
+	// The container's own filters run first, so everything below compares only the
+	// tags it is willing to be offered.
+	const pool = options.tagFilter ? applyTagFilter(allTags, options.tagFilter) : allTags;
+
+	const candidates = pool
+		// Parse the TRANSFORMED tag for comparison, but keep the ORIGINAL `tag` - that
+		// is what we offer the user and what the registry actually serves.
+		.map((tag) => ({ tag, parsed: parseTag(applyTagTransform(tagTransform, tag), versionPattern) }))
 		.filter((c): c is { tag: string; parsed: ParsedTag } => c.parsed !== null)
 		.filter((c) => prefixMatches(c.parsed.prefix, current.prefix))
 		.filter((c) => !matchFlavor || flavorMatches(c.parsed, current))
 		.filter((c) => includePrerelease || currentIsPrerelease || !isPrerelease(c.parsed))
+		.filter((c) => !isCalVerDrift(current, c.parsed))
 		.filter((c) => compareParts(c.parsed, current) > 0)
 		.filter((c) => BUMP_RANK[classifyBump(current, c.parsed)] <= maxRank);
 
@@ -121,19 +166,28 @@ export function findNewerVersionTag(
 	// `v3.0` suggests `v3.6`, not `3.6`). Keyed by the numeric tuple.
 	const byVersion = new Map<string, { tag: string; parsed: ParsedTag }>();
 	for (const c of candidates) {
-		// Key on the numeric value with trailing zero segments trimmed, so `1.2` and
-		// `1.2.0` (equal under compareParts) collapse to one entry instead of both
-		// landing in `skipped` and racing for `target`.
-		const key = versionKey(c.parsed.parts);
+		// Key on the numeric value (trailing zero segments trimmed, so `1.2` and
+		// `1.2.0` collapse) PLUS the flavor, so only truly-equal versions merge. Two
+		// builds of one version with different suffixes (`-ls121` vs `-ls122`,
+		// `-rc2` vs `-rc3`) share the numeric tuple but are distinct images and must
+		// each survive to be ordered.
+		const key = `${versionKey(c.parsed.parts)}\0${flavorOf(c.parsed)}`;
 		const existing = byVersion.get(key);
 		if (!existing) {
 			byVersion.set(key, c);
 			continue;
 		}
-		// Prefer the variant that shares the current tag's exact prefix.
-		const cMatches = c.parsed.prefix === current.prefix;
-		const existingMatches = existing.parsed.prefix === current.prefix;
-		if (cMatches && !existingMatches) byVersion.set(key, c);
+		// Same version and flavor: keep the newer build (its suffix orders it), and on
+		// a true tie prefer the variant sharing the current tag's exact prefix (so
+		// `v3.6` beats `3.6`).
+		const bySuffix = compareParts(c.parsed, existing.parsed);
+		if (bySuffix > 0) {
+			byVersion.set(key, c);
+		} else if (bySuffix === 0) {
+			const cMatches = c.parsed.prefix === current.prefix;
+			const existingMatches = existing.parsed.prefix === current.prefix;
+			if (cMatches && !existingMatches) byVersion.set(key, c);
+		}
 	}
 
 	const deduped = Array.from(byVersion.values());

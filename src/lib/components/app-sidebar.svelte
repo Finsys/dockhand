@@ -35,13 +35,21 @@
 		RotateCcw
 	} from 'lucide-svelte';
 	import { flip } from 'svelte/animate';
+	import { dndzone, type DndEvent } from 'svelte-dnd-action';
 	import { licenseStore } from '$lib/stores/license';
 	import { authStore, hasAnyAccess } from '$lib/stores/auth';
 	import { selfUpdate } from '$lib/stores/self-update';
 	import { appSettings } from '$lib/stores/settings';
-	import { sidebarPreferencesStore, orderItems } from '$lib/stores/sidebar-preferences';
+	import {
+		sidebarPreferencesStore,
+		orderItems,
+		mergeVisibleOrder
+	} from '$lib/stores/sidebar-preferences';
+	import { environmentOrder } from '$lib/stores/environment-order';
+	import { tagOrder } from '$lib/stores/tag-order';
 	import * as Avatar from '$lib/components/ui/avatar';
 	import * as Tooltip from '$lib/components/ui/tooltip';
+	import { m } from '$lib/paraglide/messages.js';
 
 	const appVersion = __APP_VERSION__ || 'unknown';
 	const buildCommit = __BUILD_COMMIT__ ?? null;
@@ -59,7 +67,8 @@
 	interface MenuItem {
 		href: string;
 		Icon: typeof LayoutDashboard;
-		label: string;
+		// A function so the label is read in the active language at render time
+		label: () => string;
 		// Permission resource required to see this menu item (enterprise only)
 		// Show menu if user has ANY permission for this resource, or 'always' (no check)
 		permission?: keyof Permissions | 'always';
@@ -81,8 +90,12 @@
 		sidebar.setOpenMobile(false);
 		// Per-user layout must not leak to the next user on this browser
 		sidebarPreferencesStore.clearLocal();
-		await authStore.logout();
-		goto('/login');
+		environmentOrder.clearLocal();
+		tagOrder.clearLocal();
+		// The store navigates away itself when the provider has a session to end, and
+		// that destination is already this same login page.
+		const { logoutUrl, next } = await authStore.logout();
+		if (!logoutUrl) goto(next);
 	}
 
 	/**
@@ -123,29 +136,32 @@
 	}
 
 	const menuItems: readonly MenuItem[] = [
-		{ href: '/?home', Icon: LayoutDashboard, label: 'Dashboard', permission: 'always' },
-		{ href: '/containers', Icon: Box, label: 'Containers', permission: 'containers' },
-		{ href: '/logs', Icon: ScrollText, label: 'Logs', permission: 'containers' },
-		{ href: '/terminal', Icon: Terminal, label: 'Shell', permission: 'containers' },
-		{ href: '/stacks', Icon: Layers, label: 'Stacks', permission: 'stacks' },
-		{ href: '/images', Icon: Images, label: 'Images', permission: 'images' },
-		{ href: '/volumes', Icon: HardDrive, label: 'Volumes', permission: 'volumes' },
-		{ href: '/networks', Icon: Network, label: 'Networks', permission: 'networks' },
-		{ href: '/templates', Icon: LibraryBig, label: 'Templates', permission: 'templates' },
-		{ href: '/registry', Icon: Download, label: 'Registry', permission: 'registries' },
-		{ href: '/activity', Icon: Activity, label: 'Activity', permission: 'activity' },
-		{ href: '/backups', Icon: Archive, label: 'Backups', permission: 'backups' },
-		{ href: '/schedules', Icon: Timer, label: 'Schedules', permission: 'schedules' },
-		{ href: '/audit', Icon: ClipboardList, label: 'Audit log', permission: 'audit_logs', enterpriseOnly: true },
-		{ href: '/settings', Icon: Settings, label: 'Settings', permission: 'settings' }
+		{ href: '/?home', Icon: LayoutDashboard, label: m.nav_dashboard, permission: 'always' },
+		{ href: '/containers', Icon: Box, label: m.nav_containers, permission: 'containers' },
+		{ href: '/logs', Icon: ScrollText, label: m.nav_logs, permission: 'containers' },
+		{ href: '/terminal', Icon: Terminal, label: m.nav_shell, permission: 'containers' },
+		{ href: '/stacks', Icon: Layers, label: m.nav_stacks, permission: 'stacks' },
+		{ href: '/images', Icon: Images, label: m.nav_images, permission: 'images' },
+		{ href: '/volumes', Icon: HardDrive, label: m.nav_volumes, permission: 'volumes' },
+		{ href: '/networks', Icon: Network, label: m.nav_networks, permission: 'networks' },
+		{ href: '/templates', Icon: LibraryBig, label: m.nav_templates, permission: 'templates' },
+		{ href: '/registry', Icon: Download, label: m.nav_registry, permission: 'registries' },
+		{ href: '/activity', Icon: Activity, label: m.nav_activity, permission: 'activity' },
+		{ href: '/backups', Icon: Archive, label: m.nav_backups, permission: 'backups' },
+		{ href: '/schedules', Icon: Timer, label: m.nav_schedules, permission: 'schedules' },
+		{ href: '/audit', Icon: ClipboardList, label: m.nav_audit_log, permission: 'audit_logs', enterpriseOnly: true },
+		{ href: '/settings', Icon: Settings, label: m.nav_settings, permission: 'settings' }
 	] as const;
 
 	// --- Sidebar customization (#1252): reorder + hide/show menu items ---
 
 	let editMode = $state(false);
-	let dragHref = $state<string | null>(null);
-	// Order buffer while dragging - persisted once on drop, not per dragover
+	// Order buffer while dragging - persisted once on drop, not per move
 	let draftOrder = $state<string[] | null>(null);
+	// dndzone keys items by `id`, which the menu does not carry; href is the key.
+	type DndMenuItem = MenuItem & { id: string };
+	// The list dndzone is currently showing: its own mid-drag, ours otherwise.
+	let dragItems = $state<DndMenuItem[] | null>(null);
 
 	// Full menu (incl. permission-hidden items) in the user's saved order,
 	// so reordering never loses positions of items the user can't see.
@@ -153,6 +169,9 @@
 	const hiddenSet = $derived(new Set($sidebarPreferencesStore.hidden));
 	// Permission filter first, then user-hidden filter
 	const editableItems = $derived(orderedItems.filter(canSeeMenuItem));
+	const dndItems: DndMenuItem[] = $derived(
+		dragItems ?? editableItems.map((item) => ({ ...item, id: item.href }))
+	);
 	const visibleItems = $derived(editableItems.filter((item) => !hiddenSet.has(item.href)));
 
 	// Edit mode only makes sense expanded - exit when the sidebar collapses
@@ -177,9 +196,8 @@
 	}
 
 	/**
-	 * Place fromHref before/after toHref in the full order list.
-	 * No-ops when the result wouldn't change, which keeps dragover
-	 * events from thrashing the list while the pointer hovers a row.
+	 * Place fromHref before/after toHref in the full order list. Backs the
+	 * keyboard reorder; pointer drags go through dndzone.
 	 */
 	function moveTo(fromHref: string, toHref: string, before: boolean) {
 		const current = orderedItems.map((i) => i.href);
@@ -193,6 +211,9 @@
 	}
 
 	function moveBy(href: string, delta: -1 | 1) {
+		// While dndzone owns the list its drop writes the order; a keyboard move
+		// here would save one the drop is about to replace.
+		if (dragItems) return;
 		const visible = editableItems.map((i) => i.href);
 		const from = visible.indexOf(href);
 		const to = from + delta;
@@ -204,23 +225,14 @@
 		}
 	}
 
-	function endDrag() {
-		if (draftOrder) {
-			persist(draftOrder);
-			draftOrder = null;
-		}
-		dragHref = null;
+	function handleConsider(e: CustomEvent<DndEvent<DndMenuItem>>) {
+		dragItems = e.detail.items;
 	}
 
-	// Transparent 1x1 drag image: suppresses the browser's ghost snapshot so
-	// the flip animation of the list itself reads as the drag movement.
-	let ghostImg: HTMLImageElement | null = null;
-	function transparentGhost(): HTMLImageElement {
-		if (!ghostImg) {
-			ghostImg = new Image(1, 1);
-			ghostImg.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
-		}
-		return ghostImg;
+	function handleFinalize(e: CustomEvent<DndEvent<DndMenuItem>>) {
+		const visibleOrder = e.detail.items.map((item) => item.href);
+		dragItems = null;
+		persist(mergeVisibleOrder(orderedItems.map((i) => i.href), visibleOrder));
 	}
 </script>
 
@@ -233,7 +245,7 @@
 		{#if $selfUpdate.updateAvailable && $selfUpdate.latestVersion}
 			<div class="flex items-center gap-1.5 pt-1 text-amber-500">
 				<CircleArrowUp class="w-3.5 h-3.5 shrink-0" />
-				Update available: <span class="font-mono">v{$selfUpdate.latestVersion}</span>
+				{m.sidebar_update_available()} <span class="font-mono">v{$selfUpdate.latestVersion}</span>
 			</div>
 		{/if}
 	</div>
@@ -244,7 +256,7 @@
 		<!-- Expanded state: logo + collapse button -->
 		<div class="relative flex items-center justify-center w-full group-data-[state=collapsed]:hidden">
 			<a href="/?home" class="flex justify-center relative">
-				<img src="/logo.svg" alt="Dockhand Logo" class="h-[52px] w-auto object-contain mt-2 mb-1" />
+				<img src="/logo.svg" alt={m.sidebar_logo_alt()} class="h-[52px] w-auto object-contain mt-2 mb-1" />
 				{#if $licenseStore.isEnterprise}
 					<Crown class="w-4 h-4 absolute top-0 -right-[6px] text-amber-500 fill-amber-400 drop-shadow-sm rotate-[20deg]" />
 				{/if}
@@ -253,8 +265,8 @@
 				type="button"
 				onclick={() => sidebar.toggle()}
 				class="absolute right-1 p-1.5 rounded-md hover:bg-sidebar-accent text-gray-300 hover:text-gray-400 transition-colors"
-				title="Collapse sidebar"
-				aria-label="Collapse sidebar"
+				title={m.sidebar_collapse()}
+				aria-label={m.sidebar_collapse()}
 			>
 				<PanelLeftClose class="w-4 h-4" aria-hidden="true" />
 			</button>
@@ -264,8 +276,8 @@
 			type="button"
 			onclick={() => sidebar.toggle()}
 			class="hidden group-data-[state=collapsed]:flex p-1.5 rounded-md hover:bg-sidebar-accent text-muted-foreground hover:text-foreground transition-colors"
-			title="Expand sidebar"
-			aria-label="Expand sidebar"
+			title={m.sidebar_expand()}
+			aria-label={m.sidebar_expand()}
 		>
 			<PanelLeft class="w-4 h-4" aria-hidden="true" />
 		</button>
@@ -273,57 +285,51 @@
 
 	<Sidebar.Content>
 		<Sidebar.Group>
-			<Sidebar.Menu>
-				{#each editMode ? editableItems : visibleItems as item (item.href)}
-					<li class="group/menu-item relative" animate:flip={{ duration: 200 }}>
-						{#if editMode}
+			{#if editMode}
+				<!-- Own <ul> in edit mode: `use:` cannot be applied to a component,
+				     and dndzone needs the real list element. Same classes as Sidebar.Menu. -->
+				<ul
+					data-sidebar="menu"
+					class="flex w-full min-w-0 flex-col gap-1"
+					use:dndzone={{
+						items: dndItems,
+						flipDurationMs: 200,
+						dropTargetStyle: {}
+					}}
+					onconsider={handleConsider}
+					onfinalize={handleFinalize}
+				>
+					{#each dndItems as item (item.id)}
+						<li class="group/menu-item relative" animate:flip={{ duration: 200 }}>
 							<div
 								role="listitem"
-								class="flex items-center gap-1.5 px-1.5 py-1 rounded-md text-xs select-none transition-opacity
-									{hiddenSet.has(item.href) ? 'opacity-40' : ''}
-									{dragHref === item.href ? 'opacity-30 bg-sidebar-accent' : ''}"
-								draggable="true"
-								ondragstart={(e) => {
-									dragHref = item.href;
-									if (e.dataTransfer) {
-										e.dataTransfer.effectAllowed = 'move';
-										// Safari won't start a drag without data
-										e.dataTransfer.setData('text/plain', item.href);
-										e.dataTransfer.setDragImage(transparentGhost(), 0, 0);
-									}
-								}}
-								ondragover={(e) => {
-									e.preventDefault();
-									if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
-									if (!dragHref || dragHref === item.href) return;
-									// Only reorder when the pointer is past the row midpoint,
-									// so a hover near the boundary doesn't flip back and forth
-									const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-									const before = e.clientY < rect.top + rect.height / 2;
-									moveTo(dragHref, item.href, before);
-								}}
-								ondrop={(e) => e.preventDefault()}
-								ondragend={endDrag}
+								class="flex items-center gap-1.5 px-1.5 py-1 rounded-md text-xs select-none transition-opacity cursor-grab
+									{hiddenSet.has(item.href) ? 'opacity-40' : ''}"
 							>
 								<button
 									type="button"
 									class="cursor-grab text-muted-foreground/60 hover:text-foreground focus:outline-none focus-visible:text-foreground"
-									aria-label="Reorder {item.label}"
-									title="Drag to reorder (or use arrow keys)"
+									aria-label={m.sidebar_reorder_item({ label: item.label() })}
+									title={m.sidebar_reorder_hint()}
 									onkeydown={(e) => {
-										if (e.key === 'ArrowUp') { e.preventDefault(); moveBy(item.href, -1); }
-										if (e.key === 'ArrowDown') { e.preventDefault(); moveBy(item.href, 1); }
+										// dndzone listens for the same arrows on the row this button
+										// sits in, so the event must not reach it: both would move
+										// the item, and one keypress would shift it twice.
+										if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+										e.preventDefault();
+										e.stopPropagation();
+										moveBy(item.href, e.key === 'ArrowUp' ? -1 : 1);
 									}}
 								>
 									<GripVertical class="w-3 h-3" />
 								</button>
 								<item.Icon class="!w-3.5 !h-3.5 shrink-0" aria-hidden="true" />
-								<span class="flex-1 truncate">{item.label}</span>
+								<span class="flex-1 truncate">{item.label()}</span>
 								<button
 									type="button"
 									class="text-muted-foreground/60 hover:text-foreground transition-colors"
-									title={hiddenSet.has(item.href) ? `Show ${item.label}` : `Hide ${item.label}`}
-									aria-label={hiddenSet.has(item.href) ? `Show ${item.label}` : `Hide ${item.label}`}
+									title={hiddenSet.has(item.href) ? m.sidebar_show_item({ label: item.label() }) : m.sidebar_hide_item({ label: item.label() })}
+									aria-label={hiddenSet.has(item.href) ? m.sidebar_show_item({ label: item.label() }) : m.sidebar_hide_item({ label: item.label() })}
 									onclick={() => toggleHidden(item.href)}
 								>
 									{#if hiddenSet.has(item.href)}
@@ -333,28 +339,34 @@
 									{/if}
 								</button>
 							</div>
-						{:else}
-							<Sidebar.MenuButton href={item.href} isActive={isActive(item.href)} tooltipContent={item.label} onclick={() => sidebar.setOpenMobile(false)}>
+						</li>
+					{/each}
+				</ul>
+			{:else}
+				<Sidebar.Menu>
+					{#each visibleItems as item (item.href)}
+						<li class="group/menu-item relative" animate:flip={{ duration: 200 }}>
+							<Sidebar.MenuButton href={item.href} isActive={isActive(item.href)} tooltipContent={item.label()} onclick={() => sidebar.setOpenMobile(false)}>
 								<item.Icon aria-hidden="true" />
-								<span class="group-data-[state=collapsed]:hidden">{item.label}</span>
+								<span class="group-data-[state=collapsed]:hidden">{item.label()}</span>
 							</Sidebar.MenuButton>
-						{/if}
-					</li>
-				{/each}
-			</Sidebar.Menu>
+						</li>
+					{/each}
+				</Sidebar.Menu>
+			{/if}
 			{#if editMode}
 				<div class="flex items-center justify-between px-2 py-1 mt-1 text-xs leading-none">
 					<button
 						type="button"
 						class="flex items-center gap-1 whitespace-nowrap font-medium text-muted-foreground hover:text-foreground transition-colors"
-						title="Reset menu to default order and visibility"
+						title={m.sidebar_reset_title()}
 						onclick={() => {
 							sidebarPreferencesStore.reset();
 							editMode = false;
 						}}
 					>
 						<RotateCcw class="w-3 h-3 shrink-0 text-red-400" />
-						Reset
+						{m.sidebar_reset()}
 					</button>
 					<button
 						type="button"
@@ -362,7 +374,7 @@
 						onclick={() => (editMode = false)}
 					>
 						<Check class="w-3 h-3 shrink-0 text-emerald-500" />
-						Apply
+						{m.sidebar_apply()}
 					</button>
 				</div>
 			{/if}
@@ -377,7 +389,7 @@
 			<a
 				href="/settings?tab=about"
 				class="inline-flex p-1 rounded-md hover:bg-sidebar-accent transition-colors"
-				aria-label="Dockhand update available"
+				aria-label={m.sidebar_update_available_label()}
 			>
 				<CircleArrowUp class="w-4 h-4 text-amber-500 {$appSettings.highlightUpdates ? 'glow-amber' : ''}" />
 			</a>
@@ -399,7 +411,7 @@
 				<a
 					href="/settings?tab=about"
 					class="inline-flex"
-					aria-label="Dockhand update available"
+					aria-label={m.sidebar_update_available_label()}
 				>
 					<CircleArrowUp class="w-3 h-3 text-amber-500 {$appSettings.highlightUpdates ? 'glow-amber' : ''}" />
 				</a>
@@ -412,8 +424,8 @@
 			<button
 				type="button"
 				class="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md text-muted-foreground/50 hover:text-foreground hover:bg-sidebar-accent transition-all opacity-0 group-hover/version:opacity-100 focus-visible:opacity-100"
-				title="Customize menu"
-				aria-label="Customize menu"
+				title={m.sidebar_customize_menu()}
+				aria-label={m.sidebar_customize_menu()}
 				onclick={() => (editMode = true)}
 			>
 				<Pencil class="w-3 h-3" />
@@ -436,7 +448,7 @@
 						href="/profile"
 						onclick={() => sidebar.setOpenMobile(false)}
 						class="flex items-center gap-2 px-2 py-1.5 group-data-[state=collapsed]:px-1 group-data-[state=collapsed]:py-1 rounded-md hover:bg-sidebar-accent transition-colors group-data-[state=collapsed]:justify-center"
-						title="View profile"
+						title={m.sidebar_view_profile()}
 					>
 						<Avatar.Root class="w-8 h-8 group-data-[state=collapsed]:w-6 group-data-[state=collapsed]:h-6 shrink-0 transition-all">
 							<Avatar.Image src={$authStore.user.avatar} alt={$authStore.user.username} />
@@ -446,7 +458,7 @@
 						</Avatar.Root>
 						<div class="flex flex-col min-w-0 group-data-[state=collapsed]:hidden">
 							<span class="text-sm font-medium truncate">{$authStore.user.displayName || $authStore.user.username}</span>
-							<span class="text-xs text-muted-foreground truncate">{$authStore.user.isAdmin ? 'Admin' : 'User'}</span>
+							<span class="text-xs text-muted-foreground truncate">{$authStore.user.isAdmin ? m.sidebar_role_admin() : m.sidebar_role_user()}</span>
 						</div>
 					</a>
 				</Sidebar.MenuItem>
@@ -455,10 +467,10 @@
 						type="button"
 						onclick={handleLogout}
 						class="flex items-center gap-2 w-full px-2 py-1.5 group-data-[state=collapsed]:px-1 group-data-[state=collapsed]:py-1 text-sm text-muted-foreground hover:text-foreground hover:bg-sidebar-accent rounded-md transition-colors group-data-[state=collapsed]:justify-center"
-						title="Sign out"
+						title={m.sidebar_sign_out()}
 					>
 						<LogOut class="w-4 h-4 shrink-0 group-data-[state=collapsed]:w-3.5 group-data-[state=collapsed]:h-3.5" />
-						<span class="group-data-[state=collapsed]:hidden">Sign out</span>
+						<span class="group-data-[state=collapsed]:hidden">{m.sidebar_sign_out()}</span>
 					</button>
 				</Sidebar.MenuItem>
 			</Sidebar.Menu>

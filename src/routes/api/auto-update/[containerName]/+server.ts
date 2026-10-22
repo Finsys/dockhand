@@ -16,6 +16,7 @@ import { authorize } from '$lib/server/authorize';
  * query: env:integer Environment the container belongs to (from GET /api/environments)
  * resp-200: {enabled:boolean!, scheduleType:string!, cronExpression:string, vulnerabilityCriteria:string!}
  * resp-200-example: {"enabled":false,"scheduleType":"daily","cronExpression":"0 3 * * *","vulnerabilityCriteria":"never"}
+ * resp-403: Permission denied, or no access to the environment
  * resp-500: Failed to get auto-update setting
  */
 export const GET: RequestHandler = async ({ params, url, cookies }) => {
@@ -25,7 +26,8 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 	if (permDenied) return permDenied;
 
 	try {
-		const containerName = decodeURIComponent(params.containerName);
+		// Used as-is; the container name keys a database lookup, not a path.
+		const containerName = params.containerName;
 		const envIdParam = url.searchParams.get('env');
 		const envId = envIdParam ? parseInt(envIdParam) : undefined;
 
@@ -65,6 +67,7 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
  * body-example: {"enabled":true,"cronExpression":"0 3 * * *","vulnerabilityCriteria":"never"}
  * resp-200: {id:integer!, enabled:boolean!, scheduleType:string!, cronExpression:string, vulnerabilityCriteria:string!, deleted:boolean, success:boolean}
  * resp-200-example: {"success":true,"deleted":true}
+ * resp-403: Permission denied, or no access to the environment
  * resp-500: Failed to save auto-update setting
  */
 export const POST: RequestHandler = async ({ params, url, request, cookies }) => {
@@ -74,7 +77,8 @@ export const POST: RequestHandler = async ({ params, url, request, cookies }) =>
 	if (permDenied) return permDenied;
 
 	try {
-		const containerName = decodeURIComponent(params.containerName);
+		// Used as-is; the container name keys a database lookup, not a path.
+		const containerName = params.containerName;
 		const envIdParam = url.searchParams.get('env');
 		const envId = envIdParam ? parseInt(envIdParam) : undefined;
 
@@ -145,6 +149,7 @@ export const POST: RequestHandler = async ({ params, url, request, cookies }) =>
  * query: env:integer Environment the container belongs to (from GET /api/environments)
  * resp-200: {success:boolean!}
  * resp-200-example: {"success":true}
+ * resp-403: Permission denied, or no access to the environment
  * resp-500: Failed to delete auto-update setting
  */
 export const DELETE: RequestHandler = async ({ params, url, cookies }) => {
@@ -154,7 +159,8 @@ export const DELETE: RequestHandler = async ({ params, url, cookies }) => {
 	if (permDenied) return permDenied;
 
 	try {
-		const containerName = decodeURIComponent(params.containerName);
+		// Used as-is; the container name keys a database lookup, not a path.
+		const containerName = params.containerName;
 		const envIdParam = url.searchParams.get('env');
 		const envId = envIdParam ? parseInt(envIdParam) : undefined;
 

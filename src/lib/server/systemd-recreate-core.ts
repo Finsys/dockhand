@@ -2,6 +2,35 @@
 // Import-light (no docker/db) so the respawn-detection logic is unit-testable without a
 // live Podman socket.
 
+/**
+ * Whether a `PODMAN_SYSTEMD_UNIT` label really means systemd owns the lifecycle.
+ *
+ * Quadlet sets the label for a unit that exists, whose ExecStop removes the container
+ * and whose Restart= brings a fresh one back - the handover the systemd recreate path
+ * relies on. podman-compose sets the SAME label unconditionally, naming a
+ * `podman-compose@<project>.service` template that it never installs: nothing removes
+ * the container and nothing respawns it, so handing the recreate to systemd stops the
+ * container and then waits for a restart that cannot come.
+ *
+ * podman-compose stamps its own `io.podman.compose.*` labels alongside, which Quadlet
+ * does not, so the two are told apart by those rather than by the unit name - a project
+ * legitimately called "podman-compose" would otherwise be misread.
+ *
+ * The `io.podman.compose.*` labels stay the right signal even when podman-compose is
+ * itself launched from a systemd unit: measured on podman 5.4.2, such a container gets
+ * `RestartPolicy=no` and stays Exited(137) under its original id after a stop, so there
+ * is no respawn to wait for and the normal recreate is what has to run.
+ */
+export function isSystemdManagedUnit(
+	unit: string | undefined,
+	labels: Record<string, string> | undefined
+): boolean {
+	if (!unit) return false;
+	const keys = Object.keys(labels || {});
+	if (keys.some((k) => k.startsWith('io.podman.compose.'))) return false;
+	return true;
+}
+
 export interface FoundContainer {
 	Id: string;
 	State: string;

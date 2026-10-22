@@ -1,4 +1,5 @@
 import { json } from '@sveltejs/kit';
+import { isValidStackName } from '$lib/server/stack-name-guard';
 import { authorize } from '$lib/server/authorize';
 import { loadOwnedDeployRun } from '$lib/server/deploy-run-access';
 import { readRunLog } from '$lib/server/deploy-log-store';
@@ -24,6 +25,7 @@ import type { RequestHandler } from './$types';
  * description: 400 ("Invalid run id") is produced by the shared loadOwnedDeployRun() helper (deploy-run-access.ts), not literally in this handler's body -- the openapi generator's static scanner cannot see status()/error() calls in a different file, hence the prose here instead of a resp-400 line (same pattern as POST /api/backup/destinations/{id}/task's description). The 404 below covers BOTH loadOwnedDeployRun's "run not found / belongs to a different stack" AND this handler's own "log file missing" -- the latter IS literal in this file's body, which is why it can stay a resp-404 line.
  * path: name:string! Stack name (from GET /api/stacks)
  * path: runId:integer! Run id (from GET /api/stacks/{name}/deploys)
+ * resp-400: Invalid stack name
  * resp-200: Plain-text log content
  * resp-401: Authentication required
  * resp-403: Permission denied (needs stacks:view for the run's own environment), or access denied to this environment
@@ -41,7 +43,11 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 		return json({ error: 'Permission denied' }, { status: 403 });
 	}
 
-	const stackName = decodeURIComponent(params.name);
+	// Validate the name shape before it is used in a filesystem path.
+	const stackName = params.name;
+	if (!isValidStackName(stackName)) {
+		return json({ error: 'Invalid stack name' }, { status: 400 });
+	}
 	const loaded = await loadOwnedDeployRun(stackName, params.runId, auth);
 	if ('response' in loaded) return loaded.response;
 

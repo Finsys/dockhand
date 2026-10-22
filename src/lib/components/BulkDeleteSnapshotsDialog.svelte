@@ -2,6 +2,7 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import { AlertTriangle, Loader2, Trash2 } from 'lucide-svelte';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		open: boolean;
@@ -19,18 +20,17 @@
 		<Dialog.Header>
 			<Dialog.Title class="flex items-center gap-2 text-destructive">
 				<AlertTriangle class="h-5 w-5" />
-				Delete {count} snapshot{count === 1 ? '' : 's'}?
+				{m.snapshotdialog_delete_title({ count })}
 			</Dialog.Title>
 		</Dialog.Header>
 		<p class="text-sm text-muted-foreground">
-			This permanently forgets and prunes the selected snapshot{count === 1 ? '' : 's'} from
-			{count === 1 ? 'its' : 'their'} backup repository. This cannot be undone.
+			{m.snapshotdialog_delete_description({ count })}
 		</p>
 		<Dialog.Footer class="gap-2 sm:justify-end">
-			<Button variant="outline" onclick={() => (open = false)} disabled={busy}>Cancel</Button>
+			<Button variant="outline" onclick={() => (open = false)} disabled={busy}>{m.containers_backup_cancel()}</Button>
 			<Button variant="destructive" onclick={onConfirm} disabled={busy}>
 				{#if busy}<Loader2 class="mr-1 h-4 w-4 animate-spin" />{:else}<Trash2 class="mr-1 h-4 w-4" />{/if}
-				Delete
+				{m.snapshotdialog_delete()}
 			</Button>
 		</Dialog.Footer>
 	</Dialog.Content>

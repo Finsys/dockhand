@@ -3,7 +3,7 @@ import { createSelfhstMatcher } from '$lib/utils/selfhst-match';
 
 /**
  * A single shared matcher ((image, name?) -> selfh.st reference) built from the manifest.
- * Resolves by image first, then by container name. The manifest is fetched at most once
+ * Resolves by image first, then container name, then image namespace. The manifest is fetched at most once
  * per session, only after something first needs it (i.e. the selfh.st-icons toggle is on).
  * Until it loads, the matcher returns null for everything, so containers keep the generic
  * icon.

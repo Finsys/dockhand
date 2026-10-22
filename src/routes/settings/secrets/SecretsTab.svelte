@@ -13,6 +13,7 @@
 		PlugZap,
 		RefreshCw,
 		Check,
+		Star,
 	} from 'lucide-svelte';
 	import { scale } from 'svelte/transition';
 	import { backOut, cubicIn } from 'svelte/easing';
@@ -24,6 +25,7 @@
 		providerTypeLabel,
 	} from './ProviderModal.svelte';
 	import { getProviderIcon } from '$lib/components/provider-icons';
+	import { m } from '$lib/paraglide/messages.js';
 
 	let providers = $state<SecretProvider[]>([]);
 	let loading = $state(true);
@@ -39,6 +41,9 @@
 	// Brief green tick on the tile's Test button right after a successful test.
 	let testOkId = $state<number | null>(null);
 	let testOkTimer: ReturnType<typeof setTimeout> | undefined;
+	// Preselected on new stacks. Null = none, so every stack picks its own (#1609).
+	let defaultProviderId = $state<number | null>(null);
+	let savingDefaultId = $state<number | null>(null);
 
 	async function fetchProviders() {
 		loading = true;
@@ -47,9 +52,48 @@
 			providers = await response.json();
 		} catch (e) {
 			console.error('Failed to fetch secret providers:', e);
-			toast.error('Failed to fetch secret providers');
+			toast.error(m.settings_secrets_toast_fetch_failed());
 		} finally {
 			loading = false;
+		}
+	}
+
+	async function fetchDefaultProvider() {
+		try {
+			const response = await fetch('/api/secret-providers/default');
+			if (!response.ok) return;
+			const data = await response.json();
+			defaultProviderId = data.providerId ?? null;
+		} catch (e) {
+			console.warn('Failed to load the default secret provider:', e);
+		}
+	}
+
+	// Star the provider, or un-star it to go back to no default.
+	async function toggleDefault(provider: SecretProvider) {
+		const next = defaultProviderId === provider.id ? null : provider.id;
+		savingDefaultId = provider.id;
+		try {
+			const response = await fetch('/api/secret-providers/default', {
+				method: 'PUT',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ providerId: next }),
+			});
+			const data = await response.json();
+			if (!response.ok) {
+				toast.error(data.error || m.settings_secrets_toast_default_save_failed());
+				return;
+			}
+			defaultProviderId = data.providerId ?? null;
+			toast.success(
+				next === null
+					? m.settings_secrets_toast_no_default()
+					: m.settings_secrets_toast_default_set({ name: provider.name }),
+			);
+		} catch {
+			toast.error(m.settings_secrets_toast_default_save_failed());
+		} finally {
+			savingDefaultId = null;
 		}
 	}
 
@@ -81,13 +125,16 @@
 			});
 			if (response.ok) {
 				await fetchProviders();
-				toast.success('Secret provider deleted');
+				// Deleting the default leaves the stored id dangling; the API resolves
+				// it against the live list, so re-read rather than assuming.
+				if (defaultProviderId === id) await fetchDefaultProvider();
+				toast.success(m.settings_secrets_toast_deleted());
 			} else {
 				const data = await response.json();
-				toast.error(data.error || 'Failed to delete secret provider');
+				toast.error(data.error || m.settings_secrets_toast_delete_failed());
 			}
 		} catch {
-			toast.error('Failed to delete secret provider');
+			toast.error(m.settings_secrets_toast_delete_failed());
 		}
 	}
 
@@ -100,17 +147,17 @@
 			);
 			const data = await response.json();
 			if (data.ok) {
-				toast.success(`${provider.name}: connection works`);
+				toast.success(m.settings_secrets_toast_test_ok({ name: provider.name }));
 				clearTimeout(testOkTimer);
 				testOkId = provider.id;
 				testOkTimer = setTimeout(() => (testOkId = null), 2000);
 			} else {
 				toast.error(
-					`${provider.name}: ${data.error || 'connection failed'}`,
+					m.settings_secrets_toast_test_failed({ name: provider.name, error: data.error || m.settings_secrets_toast_test_failed_fallback() }),
 				);
 			}
 		} catch {
-			toast.error('Connection test failed');
+			toast.error(m.settings_secrets_toast_connection_test_failed());
 		} finally {
 			testingId = null;
 		}
@@ -118,6 +165,7 @@
 
 	onMount(() => {
 		fetchProviders();
+		fetchDefaultProvider();
 	});
 </script>
 
@@ -125,29 +173,29 @@
 	<div class="flex justify-between items-center">
 		<div class="flex items-center gap-3">
 			<Badge variant="secondary" class="text-xs"
-				>{providers.length} total</Badge
+				>{m.settings_secrets_total({ count: providers.length })}</Badge
 			>
 		</div>
 		<div class="flex gap-2">
 			{#if $canAccess("secrets", "create")}
 				<Button size="sm" onclick={() => openModal()}>
 					<Plus class="w-4 h-4" />
-					Add secret provider
+					{m.settings_secrets_add_provider()}
 				</Button>
 			{/if}
 			<Button size="sm" variant="outline" onclick={fetchProviders}
-				>Refresh</Button
+				>{m.settings_secrets_refresh()}</Button
 			>
 		</div>
 	</div>
 
 	{#if loading && providers.length === 0}
-		<p class="text-muted-foreground text-sm">Loading secret providers...</p>
+		<p class="text-muted-foreground text-sm">{m.settings_secrets_loading()}</p>
 	{:else if providers.length === 0}
 		<EmptyState
 			icon={KeyRound}
-			title="No secret providers"
-			description="Add a provider (1Password, Infisical, HashiCorp Vault, ...) to load secrets at deploy time"
+			title={m.settings_secrets_empty_title()}
+			description={m.settings_secrets_empty_description()}
 		/>
 	{:else}
 		<div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -162,6 +210,15 @@
 									<Card.Title class="text-base"
 										>{provider.name}</Card.Title
 									>
+									{#if defaultProviderId === provider.id}
+										<Badge
+											variant="outline"
+											class="text-xs gap-1 border-amber-500/50 text-amber-600 dark:text-amber-400"
+										>
+											<Star class="w-3 h-3 fill-current" />
+											{m.settings_secrets_default()}
+										</Badge>
+									{/if}
 								</div>
 								<Badge variant="secondary" class="text-xs"
 									>{providerTypeLabel(provider.type)}</Badge
@@ -170,9 +227,9 @@
 						</Card.Header>
 						<Card.Content class="space-y-3">
 							<div class="text-xs text-muted-foreground">
-								Added {new Date(
+								{m.settings_secrets_added_on({ date: new Date(
 									provider.createdAt,
-								).toLocaleDateString()}
+								).toLocaleDateString() })}
 							</div>
 							<div class="flex gap-2 pt-2 min-h-[32px]">
 								{#if $canAccess("secrets", "view")}
@@ -194,10 +251,27 @@
 												<PlugZap class="w-3 h-3" />
 											{/if}
 										</span>
-										Test
+										{m.settings_secrets_test()}
 									</Button>
 								{/if}
 								{#if $canAccess("secrets", "edit")}
+									<Button
+										variant="outline"
+										size="sm"
+										onclick={() => toggleDefault(provider)}
+										disabled={savingDefaultId === provider.id}
+										title={defaultProviderId === provider.id
+											? m.settings_secrets_default_unset_title()
+											: m.settings_secrets_default_set_title()}
+										class={defaultProviderId === provider.id
+											? 'border-amber-500/50 text-amber-600 dark:text-amber-400'
+											: ''}
+									>
+										<Star
+											class="w-3 h-3 mr-1 {defaultProviderId === provider.id ? 'fill-current' : ''}"
+										/>
+										{defaultProviderId === provider.id ? m.settings_secrets_default() : m.settings_secrets_make_default()}
+									</Button>
 									<Button
 										variant="outline"
 										size="sm"
@@ -209,10 +283,11 @@
 								{#if $canAccess("secrets", "delete")}
 									<ConfirmPopover
 										open={confirmDeleteId === provider.id}
-										action="Delete"
-										itemType="secret provider"
+										localized
+										action={m.confirm_action_delete()}
+										itemType={m.settings_secrets_item_provider()}
 										itemName={provider.name}
-										title="Remove"
+										title={m.settings_secrets_delete_title()}
 										position="left"
 										autoHideMs={0}
 										onConfirm={() =>
@@ -232,10 +307,10 @@
 										{/snippet}
 										{#snippet extraContent()}
 											{#if loadingAffected}
-												<p class="text-xs text-muted-foreground">Checking which stacks use this provider...</p>
+												<p class="text-xs text-muted-foreground">{m.settings_secrets_checking_stacks()}</p>
 											{:else if deleteAffectedStacks.length > 0}
 												<p class="text-xs text-amber-600 dark:text-amber-500">
-													This unbinds {deleteAffectedStacks.length} stack{deleteAffectedStacks.length === 1 ? '' : 's'}; their next deploy drops the injected secrets:
+													{m.settings_secrets_unbinds_stacks({ count: deleteAffectedStacks.length })}
 												</p>
 												<ul class="mt-1 text-xs text-muted-foreground list-disc list-inside max-h-24 overflow-y-auto">
 													{#each deleteAffectedStacks as s}

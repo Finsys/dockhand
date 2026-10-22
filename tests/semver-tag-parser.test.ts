@@ -8,7 +8,10 @@ import {
 	flavorMatches,
 	compareParts,
 	isPrerelease,
-	compileVersionPattern
+	compileVersionPattern,
+	hasTooManyQuantifiers,
+	versionPatternRejection,
+	flavorOf
 } from '../src/lib/server/semver/tag-parser';
 import { findNewerVersionTag } from '../src/lib/server/semver/find-newer';
 
@@ -58,10 +61,15 @@ describe('prefixMatches', () => {
 });
 
 describe('flavorMatches', () => {
-	it('is an exact suffix match', () => {
+	it('matches a plain variant but keeps a version-bearing variant distinct', () => {
 		expect(flavorMatches(parseTag('1.0-alpine')!, parseTag('2.0-alpine')!)).toBe(true);
 		expect(flavorMatches(parseTag('1.0-alpine')!, parseTag('2.0')!)).toBe(false);
+		// `alpine` (any Alpine) and `alpine3.19` (a specific one) are different variants:
+		// a version baked into the variant token forks the flavor, so one is not offered
+		// as an update to the other. Build counters (-rN, -lsNNN) are the exception.
 		expect(flavorMatches(parseTag('1.0-alpine')!, parseTag('2.0-alpine3.19')!)).toBe(false);
+		expect(flavorMatches(parseTag('1.0-alpine3.19')!, parseTag('2.0-alpine3.20')!)).toBe(false);
+		expect(flavorMatches(parseTag('7.4-php8.1')!, parseTag('8.1-php8.2')!)).toBe(false);
 	});
 
 	it('collapses a trailing commit hash so hashed releases share a flavor (searxng)', () => {
@@ -71,10 +79,36 @@ describe('flavorMatches', () => {
 	});
 
 	it('keeps a real build variant that only looks hex-ish, and a numeric build', () => {
-		// -ubuntu22.04 / -ls123 are variants, not hashes; a pure-numeric build isn't a hash.
+		// -ubuntu22.04 is a variant, not a hash; a pure-numeric build isn't a hash either.
 		expect(flavorMatches(parseTag('1.0-ubuntu22.04')!, parseTag('2.0-ubuntu22.04')!)).toBe(true);
 		expect(flavorMatches(parseTag('1.0-ubuntu22.04')!, parseTag('2.0')!)).toBe(false);
-		expect(flavorMatches(parseTag('1.0-12345678')!, parseTag('2.0')!)).toBe(false);
+		// A pure-numeric build carries no flavor skeleton, so it shares the (empty)
+		// flavor of a bare tag - the digits order it, they don't fork a variant.
+		expect(flavorMatches(parseTag('1.0-12345678')!, parseTag('2.0')!)).toBe(true);
+	});
+
+	// linuxserver.io increments -lsNNN on every rebuild of the same upstream version,
+	// so it moves with each release instead of naming a variant. Read literally it makes
+	// every release its own flavor, and an image pinned as <version>-ls<build> matches
+	// no candidate.
+	it('collapses the linuxserver build counter so its releases share a flavor', () => {
+		// The flavor is the non-numeric skeleton: the -lsNNN counter reduces to `ls`.
+		expect(flavorOf(parseTag('v2.5.1-ls121')!)).toBe('ls');
+		expect(flavorOf(parseTag('v2.5.2-ls122')!)).toBe('ls');
+		expect(flavorMatches(parseTag('v2.5.1-ls121')!, parseTag('v2.5.2-ls122')!)).toBe(true);
+		// Any counter width, and a bare -ls with no digits.
+		expect(flavorMatches(parseTag('1.0-ls1')!, parseTag('1.1-ls999')!)).toBe(true);
+		expect(flavorMatches(parseTag('1.0-ls')!, parseTag('1.1-ls7')!)).toBe(true);
+	});
+
+	it('still keeps the linuxserver flavor apart from bare and from other variants', () => {
+		expect(flavorMatches(parseTag('v2.5.1-ls121')!, parseTag('2.5.2')!)).toBe(false);
+		expect(flavorMatches(parseTag('v2.5.1-ls121')!, parseTag('2.5.2-alpine')!)).toBe(false);
+		// A counter is <prefix><digits> with no dot; `ls121.1` has a dotted number, so it
+		// is treated as a version-bearing variant and kept whole, not collapsed to `ls`.
+		expect(flavorOf(parseTag('1.0-ls121.1')!)).toBe('ls121.1');
+		expect(flavorMatches(parseTag('1.0-lsio')!, parseTag('1.1-lsio')!)).toBe(true);
+		expect(flavorMatches(parseTag('1.0-lsio')!, parseTag('1.1-ls2')!)).toBe(false);
 	});
 });
 
@@ -121,6 +155,111 @@ describe('compileVersionPattern', () => {
 	it('compiles a valid pattern with a major group', () => {
 		const re = compileVersionPattern('regex:^(?<major>\\d{4})\\.(?<minor>\\d+)\\.(?<patch>\\d+)-[0-9a-f]+$');
 		expect(re).toBeInstanceOf(RegExp);
+	});
+
+	// A named group is the only way to write an override, so its `?` must not be
+	// counted as a quantifier: at two per part, the documented p4/p5 forms could
+	// never compile. Real tags: ghcr.io/alexdelprete/pbs-docker 4.2.8-1.1 and
+	// lscr.io/linuxserver/deluge 2.2.0-r2-ls366.
+	it('accepts the documented five-part patterns', () => {
+		expect(
+			compileVersionPattern(
+				'regex:^(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)-(?<p4>\\d+)\\.(?<p5>\\d+)$'
+			)
+		).toBeInstanceOf(RegExp);
+		expect(
+			compileVersionPattern(
+				'regex:^(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)-r(?<p4>\\d+)-ls(?<p5>\\d+)$'
+			)
+		).toBeInstanceOf(RegExp);
+	});
+
+	it('does not count the ? of any group-opening form', () => {
+		// Non-capturing, lookahead, lookbehind: each spends a `?` that quantifies nothing.
+		expect(hasTooManyQuantifiers('(?:a)(?:b)(?:c)(?:d)(?:e)(?:f)(?:g)(?:h)(?:i)')).toBe(false);
+		expect(hasTooManyQuantifiers('(?=a)(?=b)(?=c)(?=d)(?=e)(?=f)(?=g)(?=h)(?=i)')).toBe(false);
+		expect(hasTooManyQuantifiers('(?<=a)(?<=b)(?<=c)(?<=d)(?<=e)(?<=f)(?<=g)(?<=h)(?<=i)')).toBe(false);
+		expect(hasTooManyQuantifiers('(?<!a)(?<!b)(?<!c)(?<!d)(?<!e)(?<!f)(?<!g)(?<!h)(?<!i)')).toBe(false);
+		// A real optional `?` after an atom still counts, and nine of them is over.
+		expect(hasTooManyQuantifiers('a?b?c?d?e?f?g?h?i?')).toBe(true);
+		expect(hasTooManyQuantifiers('a?b?c?d?e?f?g?h?')).toBe(false);
+	});
+
+	// The count is what bounds a pattern with no exploitable SHAPE, so not counting
+	// group syntax must not widen what gets through.
+	it('still rejects a long quantifier chain that needs no groups', () => {
+		const chain = '^' + '\\d{1,9}'.repeat(10) + '$';
+		expect(hasTooManyQuantifiers(chain)).toBe(true);
+		expect(compileVersionPattern(`regex:^(?<major>\\d+)${'\\d{1,9}'.repeat(10)}$`)).toBeNull();
+	});
+
+	it('still rejects a nested or alternating quantifier inside a named group', () => {
+		// Shape guards, which the count never stood in for.
+		expect(compileVersionPattern('regex:^(?<major>(\\d+)+)\\.(?<minor>\\d+)$')).toBeNull();
+		expect(compileVersionPattern('regex:^(?<major>(\\d|x)*)\\.(?<minor>\\d+)$')).toBeNull();
+	});
+});
+
+// A refused label falls back to the default parser silently, which is the right
+// trade but leaves the label looking like it does nothing. This is what the caller
+// logs so somebody does not have to read tag-parser.ts to find out why.
+describe('versionPatternRejection', () => {
+	it('says nothing when there is no label, or the label is good', () => {
+		expect(versionPatternRejection(undefined)).toBeNull();
+		expect(versionPatternRejection('')).toBeNull();
+		expect(
+			versionPatternRejection('regex:^(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)$')
+		).toBeNull();
+		// The forms this fix exists for.
+		expect(
+			versionPatternRejection(
+				'regex:^(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)-(?<p4>\\d+)\\.(?<p5>\\d+)$'
+			)
+		).toBeNull();
+	});
+
+	it('names each reason a pattern is refused', () => {
+		expect(versionPatternRejection('^(?<major>\\d+)$')).toContain('regex:');
+		expect(versionPatternRejection('regex:')).toContain('empty');
+		expect(versionPatternRejection('regex:' + 'a'.repeat(400))).toContain('too long');
+		expect(versionPatternRejection('regex:(?<minor>\\d+)')).toContain('major');
+		expect(versionPatternRejection('regex:(?<major>(a+)+)$')).toContain('backtrack');
+		expect(versionPatternRejection('regex:(?<major>(a|b)+)$')).toContain('backtrack');
+		expect(
+			versionPatternRejection(`regex:^(?<major>\\d+)${'\\d{1,9}'.repeat(10)}$`)
+		).toContain('quantifiers');
+		expect(versionPatternRejection('regex:(?<major>(')).toContain('does not compile');
+	});
+
+	// Both halves answer about the same label, so they must never disagree: a
+	// rejection with a compiled pattern, or a silent refusal, is the bug this pairs against.
+	it('agrees with compileVersionPattern on every case', () => {
+		const cases = [
+			undefined,
+			'',
+			'^(?<major>\\d+)$',
+			'regex:',
+			'regex:(?<minor>\\d+)',
+			'regex:(?<major>(a+)+)$',
+			'regex:(?<major>(a|b)+)$',
+			'regex:(?<major>(',
+			'regex:' + 'a'.repeat(400),
+			`regex:^(?<major>\\d+)${'\\d{1,9}'.repeat(10)}$`,
+			'regex:^(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)$',
+			'regex:^(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)-(?<p4>\\d+)\\.(?<p5>\\d+)$',
+			'regex:^(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)-r(?<p4>\\d+)-ls(?<p5>\\d+)$'
+		];
+		for (const c of cases) {
+			const compiled = compileVersionPattern(c);
+			const reason = versionPatternRejection(c);
+			// No label is neither compiled nor a rejection.
+			if (!c) {
+				expect(compiled).toBeNull();
+				expect(reason).toBeNull();
+				continue;
+			}
+			expect(compiled === null).toBe(reason !== null);
+		}
 	});
 });
 
@@ -169,5 +308,43 @@ describe('findNewerVersionTag with a version-pattern override', () => {
 	it('returns null when the current tag does not match the override', () => {
 		const result = findNewerVersionTag('latest', ['2024.12.6-b2c3d4e'], { versionPattern: calver });
 		expect(result).toBeNull();
+	});
+});
+
+describe('compileVersionPattern refuses patterns that could stall a check', () => {
+	// The label comes from an image, and the compiled regex runs against every tag
+	// in a registry listing. The same guards protect the tag filters, so the two
+	// label paths must not drift apart: anything refused there is refused here.
+	const refused = [
+		'(?<major>a+)+$',
+		'(?<major>a|a)+$',
+		'(?<major>a|a){1,}$',
+		'(?<major>a+){1,}$',
+		'(?<major>\\d)' + 'a{1,9}'.repeat(10) + '!'
+	];
+
+	for (const source of refused) {
+		it(`refuses ${source.slice(0, 32)}`, () => {
+			expect(compileVersionPattern(`regex:${source}`)).toBeNull();
+		});
+	}
+
+	it('still compiles the pattern the manual documents', () => {
+		// Seven quantifiers, and none of them backtracking - the limit must not
+		// refuse the one override people are told to write.
+		const documented = 'regex:^(?<major>\\d{4})\\.(?<minor>\\d+)\\.(?<patch>\\d+)-[0-9a-f]+$';
+		expect(compileVersionPattern(documented)).not.toBeNull();
+	});
+
+	it('a refused pattern falls back to the default parser rather than failing', () => {
+		// Null means "parse this tag the usual way", so a hostile or mistyped label
+		// costs the override and never the update check.
+		expect(compileVersionPattern('regex:(?<major>a+)+$')).toBeNull();
+		expect(parseTag('1.2.3', compileVersionPattern('regex:(?<major>a+)+$'))).toEqual({
+			version: '1.2.3',
+			prefix: '',
+			suffix: '',
+			parts: [1, 2, 3]
+		});
 	});
 });

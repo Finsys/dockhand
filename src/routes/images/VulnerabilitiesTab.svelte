@@ -13,6 +13,7 @@
 		ArrowUp, ArrowDown, ArrowUpDown, ShieldAlert, Box, Layers, NotepadText
 	} from 'lucide-svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		envId: number | null;
@@ -74,23 +75,23 @@
 <div class="flex-1 min-h-0 flex flex-col gap-2">
 	<!-- Summary row: scanned count + severity pills -->
 	<div class="shrink-0 flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-		<span>Images scanned: <span class="font-medium text-foreground">{summary.imagesScanned}/{summary.totalImages}</span></span>
-		<span>Total: <span class="font-medium text-foreground">{summary.total}</span></span>
+		<span>{m.images_scan_tab_images_scanned()} <span class="font-medium text-foreground">{summary.imagesScanned}/{summary.totalImages}</span></span>
+		<span>{m.images_scan_tab_total()} <span class="font-medium text-foreground">{summary.total}</span></span>
 		<SeveritySummaryPills counts={summary} />
 	</div>
 
 	{#if !scannerEnabled}
 		<div class="flex-1 min-h-0 flex flex-col items-center justify-center text-center gap-2 text-muted-foreground">
 			<ShieldAlert class="w-10 h-10 opacity-40" />
-			<p class="text-sm">No vulnerability scanner is configured for this environment.</p>
-			<a href="/settings?tab=environments" class="text-sm text-primary hover:underline">Configure a scanner in settings</a>
+			<p class="text-sm">{m.images_scan_tab_no_scanner()}</p>
+			<a href="/settings?tab=environments" class="text-sm text-primary hover:underline">{m.images_scan_tab_configure_scanner()}</a>
 		</div>
 	{:else}
 		{#if !loading && findings.length === 0}
 			<div class="flex-1 min-h-0 flex flex-col items-center justify-center text-center gap-2 text-muted-foreground">
 				<ShieldCheck class="w-10 h-10 opacity-40" />
-				<p class="text-sm">No vulnerabilities found.</p>
-				<p class="text-xs">Click "Scan all images" to populate this view.</p>
+				<p class="text-sm">{m.images_scan_tab_no_vulnerabilities()}</p>
+				<p class="text-xs">{m.images_scan_tab_empty_hint()}</p>
 			</div>
 		{:else}
 			<div class="flex-1 min-h-0 flex flex-col">
@@ -175,7 +176,7 @@
 							{#if finding.fixedVersion}
 								<span class="font-mono text-xs truncate" title={finding.fixedVersion}>{finding.fixedVersion}</span>
 							{:else}
-								<span class="text-xs text-muted-foreground">No fix</span>
+								<span class="text-xs text-muted-foreground">{m.images_scan_tab_no_fix()}</span>
 							{/if}
 						{:else if column.id === 'image'}
 							<span class="font-mono text-xs truncate" title={finding.imageName}>{finding.imageName}</span>
@@ -186,7 +187,7 @@
 										type="button"
 										onclick={() => inspectContainer(finding.containers![0])}
 										class="inline-flex items-center gap-1 text-xs text-blue-500 hover:underline truncate"
-										title={`Inspect ${finding.containers[0].name}`}
+										title={m.images_scan_tab_inspect_container({ name: finding.containers[0].name })}
 									>
 										<Box class="w-3 h-3 shrink-0 opacity-70" />
 										<span class="truncate">{finding.containers[0].name}</span>
@@ -206,7 +207,7 @@
 									type="button"
 									onclick={() => openStack(finding.stacks![0])}
 									class="inline-flex items-center gap-1 text-xs text-blue-500 hover:underline truncate"
-									title={`View stack ${finding.stacks[0]}`}
+									title={m.images_scan_tab_view_stack({ name: finding.stacks[0] })}
 								>
 									<Layers class="w-3 h-3 shrink-0 opacity-70" />
 									<span class="truncate">{finding.stacks[0]}</span>

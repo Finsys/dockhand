@@ -5,6 +5,7 @@
 	import { authStore } from '$lib/stores/auth';
 	import { resolveToggleValue, shouldSkipApply } from '$lib/utils/theme-preference';
 	import { toast } from 'svelte-sonner';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		userId?: number; // omit for global default (login page / auth-disabled)
@@ -27,14 +28,14 @@
 	function onToggle(value: boolean) {
 		checked = value;
 		themeStore.setPreference('editorIndentGuides', value, userId, skipApply);
-		toast.success(value ? 'Indentation guides enabled' : 'Indentation guides disabled');
+		toast.success(value ? m.toggles_indent_guides_enabled() : m.toggles_indent_guides_disabled());
 	}
 </script>
 
 <div class="space-y-1">
 	<div class="flex items-center gap-3">
-		<Label>Indentation guides</Label>
+		<Label>{m.toggles_indent_guides()}</Label>
 		<TogglePill {checked} onchange={onToggle} />
 	</div>
-	<p class="text-xs text-muted-foreground">Vertical guides showing nesting depth in the code editor.</p>
+	<p class="text-xs text-muted-foreground">{m.toggles_indent_guides_description()}</p>
 </div>

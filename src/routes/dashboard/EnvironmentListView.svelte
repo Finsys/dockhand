@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Loader2, Circle, Route, UndoDot, Plug, Icon, CircleArrowUp } from 'lucide-svelte';
+	import { Loader2, Circle, Route, UndoDot, Plug, Icon, CircleArrowUp, Pin, Tag } from 'lucide-svelte';
 	import { whale } from '@lucide/lab';
 	import EnvironmentIcon from '$lib/components/EnvironmentIcon.svelte';
 	import { getLabelColors } from '$lib/utils/label-colors';
@@ -8,6 +8,7 @@
 	import type { DataGridRowState, DataGridSortState } from '$lib/components/data-grid/types';
 	import type { ColumnConfig } from '$lib/types';
 	import type { TileItem } from '$lib/stores/dashboard';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		tiles: TileItem[];
@@ -23,11 +24,11 @@
 
 	function connectionLabel(type: string | undefined): string {
 		switch (type) {
-			case 'hawser-standard': return 'Standard';
-			case 'hawser-edge': return 'Edge';
-			case 'direct': return 'Direct';
-			case 'socket': return 'Socket';
-			default: return 'Socket';
+			case 'hawser-standard': return m.dashboard_connection_standard();
+			case 'hawser-edge': return m.dashboard_connection_edge();
+			case 'direct': return m.dashboard_connection_direct();
+			case 'socket': return m.dashboard_connection_socket();
+			default: return m.dashboard_connection_socket();
 		}
 	}
 
@@ -189,10 +190,26 @@
 
 			{:else if column.id === 'updates'}
 				{#if s && !isOffline}
-					{#if s.containers.pendingUpdates > 0}
-						<div class="flex items-center gap-1">
-							<CircleArrowUp class="w-3.5 h-3.5 text-amber-500" />
-							<span class="text-amber-500 font-medium">{s.containers.pendingUpdates}</span>
+					{#if s.containers.pendingUpdates > 0 || (s.containers.newerVersion ?? 0) > 0 || (s.containers.pinnedDigest ?? 0) > 0}
+						<div class="flex items-center gap-2">
+							{#if s.containers.pendingUpdates > 0}
+								<span class="flex items-center gap-1">
+									<CircleArrowUp class="w-3.5 h-3.5 text-amber-500" />
+									<span class="text-amber-500 font-medium">{s.containers.pendingUpdates}</span>
+								</span>
+							{/if}
+							{#if (s.containers.newerVersion ?? 0) > 0}
+								<span class="flex items-center gap-1" title={m.dashboard_containers_newer_version()}>
+									<Tag class="w-3.5 h-3.5 text-amber-500" />
+									<span class="text-amber-500 font-medium">{s.containers.newerVersion}</span>
+								</span>
+							{/if}
+							{#if (s.containers.pinnedDigest ?? 0) > 0}
+								<span class="flex items-center gap-1" title={m.dashboard_containers_pinned_digest()}>
+									<Pin class="w-3.5 h-3.5 text-amber-500" />
+									<span class="text-amber-500 font-medium">{s.containers.pinnedDigest}</span>
+								</span>
+							{/if}
 						</div>
 					{:else}
 						<span class="text-muted-foreground">0</span>

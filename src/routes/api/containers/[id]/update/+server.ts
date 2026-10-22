@@ -1,3 +1,4 @@
+import { collectPullWarning, type PullWarning } from '$lib/utils/pull-warning';
 import { json } from '@sveltejs/kit';
 import { inspectContainer, pullImage, updateContainer, type CreateContainerOptions } from '$lib/server/docker';
 import { authorize } from '$lib/server/authorize';
@@ -16,7 +17,7 @@ import type { RequestHandler } from './$types';
  * query: env:integer! The target environment ID the container lives in (from GET /api/environments)
  * body: {image:string, name:string, repullImage:boolean, startAfterUpdate:boolean}
  * body-example: {"image":"nginx:latest","name":"web","repullImage":true,"startAfterUpdate":true}
- * resp-200: {success:boolean!, id:string!}
+ * resp-200: {success:boolean!, id:string!, warnings:array<{status:string!, message:string!}>}
  * resp-200-example: {"success":true,"id":"3f4a1c2b9d8e"}
  * resp-403: Permission denied
  * resp-404: Container not found
@@ -37,6 +38,7 @@ export const POST: RequestHandler = async (event) => {
 		return json({ error: 'Permission denied' }, { status: 403 });
 	}
 
+	const warnings: PullWarning[] = [];
 	try {
 		const body = await request.json();
 		const { startAfterUpdate, repullImage, ...options } = body;
@@ -67,7 +69,7 @@ export const POST: RequestHandler = async (event) => {
 		if (repullImage) {
 			console.log(`Pulling image...`);
 			try {
-				await pullImage(options.image, undefined, envIdNum);
+				await pullImage(options.image, (data) => collectPullWarning(warnings, data), envIdNum);
 				console.log(`Image pulled successfully`);
 			} catch (pullError: any) {
 				console.log(`Pull failed: ${pullError.message}`);
@@ -89,12 +91,12 @@ export const POST: RequestHandler = async (event) => {
 		// Audit log - include full options to see what was modified
 		await auditContainer(event, 'update', container.id, options.name, envIdNum, { ...options, startAfterUpdate });
 
-		return json({ success: true, id: container.id });
+		return json({ warnings, success: true, id: container.id });
 	} catch (error: any) {
 		if (error?.statusCode === 404) {
 			return json({ error: error.json?.message || 'Container not found' }, { status: 404 });
 		}
 		console.error('Error updating container:', error?.message || error);
-		return json({ error: 'Failed to update container', details: error?.message || String(error) }, { status: 500 });
+		return json({ warnings, error: 'Failed to update container', details: error?.message || String(error) }, { status: 500 });
 	}
 };

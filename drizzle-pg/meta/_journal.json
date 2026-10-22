@@ -124,8 +124,36 @@
     {
       "idx": 17,
       "version": "7",
-      "when": 1789748942000,
-      "tag": "0017_add_environment_active",
+      "when": 1791094946737,
+      "tag": "0017_pending_update_cooldown",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1791134066582,
+      "tag": "0018_add_passkey_credentials",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1791395551648,
+      "tag": "0019_add_backup_sftp",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1792055758210,
+      "tag": "0020_pending_update_pinned_digest",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1792704928025,
+      "tag": "0021_add_environment_active",
       "breakpoints": true
     }
   ]

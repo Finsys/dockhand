@@ -98,6 +98,47 @@ describe('resolveRestoreTargets - stack files', () => {
 		expect(r.stackFiles?.willWrite).toBe(false);
 	});
 
+	// willWrite answers "does the restore REPLACE this directory". A redeploy materialises the
+	// managed stack dir itself (redeployStack -> materialiseStackFiles with overwrite), so opting
+	// out of stack files does not spare it - and the overwrite gate reads willWrite to decide
+	// whether to ask. Reporting false here lets a redeploy delete the user's compose unasked.
+	test('skipStackFiles with a redeploy still writes the stack dir', () => {
+		const r = resolveRestoreTargets({
+			job: { mode: 'new-location', targetType: 'stack', targetName: 'blog', skipStackFiles: true, postRestore: 'redeploy' },
+			volumes: [], metadata: null, stackDir: '/app/data/stacks/anton/blog',
+		});
+		expect(r.stackFiles?.willWrite).toBe(true);
+	});
+
+	// The near misses: only a redeploy materialises the dir on its own, so no other post-restore
+	// action may override the opt-out.
+	test('skipStackFiles with any other post-restore action stays false', () => {
+		for (const postRestore of ['none', 'recreate', 'start', undefined, null]) {
+			const r = resolveRestoreTargets({
+				job: { mode: 'new-location', targetType: 'stack', targetName: 'blog', skipStackFiles: true, postRestore },
+				volumes: [], metadata: null, stackDir: '/app/data/stacks/anton/blog',
+			});
+			expect(r.stackFiles?.willWrite).toBe(false);
+		}
+	});
+
+	test('a redeploy without skipStackFiles is unchanged', () => {
+		const r = resolveRestoreTargets({
+			job: { mode: 'new-location', targetType: 'stack', targetName: 'blog', postRestore: 'redeploy' },
+			volumes: [], metadata: null, stackDir: '/app/data/stacks/anton/blog',
+		});
+		expect(r.stackFiles?.willWrite).toBe(true);
+	});
+
+	// A missing target name means there is no stack dir to write, whatever runs afterwards.
+	test('no target name is never a write', () => {
+		const r = resolveRestoreTargets({
+			job: { mode: 'new-location', targetType: 'stack', postRestore: 'redeploy' },
+			volumes: [], metadata: null, stackDir: '/app/data/stacks/anton/blog',
+		});
+		expect(r.stackFiles?.willWrite).toBe(false);
+	});
+
 	test('mergeStackFiles -> overwrite false', () => {
 		const r = resolveRestoreTargets({
 			job: { mode: 'new-location', targetType: 'stack', targetName: 'blog', mergeStackFiles: true },

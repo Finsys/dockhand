@@ -26,8 +26,9 @@ import { sendEventNotification } from './notifications';
 import { buildBasicAuthHeader } from './git-auth';
 import { assertSafeRepoUrl, assertSafeGitRef, repoFilePath, repoBaseEnvPath } from './git-url-safety';
 import { assertSafeRepoTarget } from './git-branch-lookup';
-import { shouldDeployGitStack, shouldForceRecreateGitStack } from './git-deploy-policy';
+import { gitDeployDecision, isDeployFailure, DEPLOY_FAILURE_PREFIX } from './git-deploy-policy';
 import { resolveStackBranch } from '../git-stack-branch';
+import { expandValue, parseEnvFileForForm } from '$lib/utils/env-file-values';
 import {
 	parseManifest,
 	serializeManifest,
@@ -1348,6 +1349,30 @@ async function notifyGitSync(stackName: string, envId: number | null | undefined
 }
 
 /**
+ * Mark a git stack whose deploy failed, so the next scheduled sync or webhook
+ * deploys the same commit again instead of skipping it.
+ *
+ * The commit is persisted as synced before the deploy runs, so without this the
+ * stack reports being in sync while its containers stay on the old version.
+ * Best-effort: a write failure must not turn a reported deploy outcome into
+ * something else, so it logs and returns.
+ */
+async function markGitStackDeployFailed(
+	stackId: number,
+	logPrefix: string,
+	error: string | undefined
+): Promise<void> {
+	try {
+		await updateGitStack(stackId, {
+			syncStatus: 'error',
+			syncError: `${DEPLOY_FAILURE_PREFIX}${error ?? 'unknown error'}`
+		});
+	} catch (e) {
+		console.error(`${logPrefix} Failed to record the deploy failure on the stack:`, e);
+	}
+}
+
+/**
  * The function every git-stack deploy trigger funnels through EXCEPT ONE: a
  * config-update-then-redeploy, both webhook methods, create-and-deploy, and (via
  * runGitStackSync) the cron scheduler and the schedules page's "run now" all reach
@@ -1444,11 +1469,21 @@ export async function deployGitStack(
 	// Check if there are changes - skip redeploy if no changes and not forced.
 	// For new stacks (first deploy), syncResult.updated is true. The forceRedeploy
 	// setting overrides the skip logic for webhooks/scheduled syncs.
-	const shouldDeploy = shouldDeployGitStack({
+	// Read from the pre-sync snapshot: syncGitStack has already written 'synced'
+	// by now, so the live row no longer remembers that the last deploy failed.
+	// A failed clone also lands in 'error', so the stored reason decides - those
+	// containers are in step and must not be recreated.
+	const lastDeployFailed = isDeployFailure(gitStack.syncStatus, gitStack.syncError);
+	const decision = gitDeployDecision({
 		force,
 		forceRedeploy: gitStack.forceRedeploy === true,
-		gitUpdated: syncResult.updated === true
+		gitUpdated: syncResult.updated === true,
+		lastDeployFailed
 	});
+	const shouldDeploy = decision.deploy;
+	if (lastDeployFailed) {
+		console.log(`${logPrefix} Last deploy failed, retrying this commit`);
+	}
 	if (!shouldDeploy) {
 		console.log(`${logPrefix} No changes detected and force=false, forceRedeploy=false, skipping redeploy`);
 		const skippedResult = {
@@ -1460,19 +1495,16 @@ export async function deployGitStack(
 		return skippedResult;
 	}
 
-	const forceRecreate = shouldForceRecreateGitStack({
-		forceRedeploy: gitStack.forceRedeploy === true,
-		gitUpdated: syncResult.updated === true
-	});
-	console.log(`${logPrefix} Will force recreate:`, forceRecreate, `(updated=${syncResult.updated}, forceRedeploy=${gitStack.forceRedeploy})`);
+	const forceRecreate = decision.forceRecreate;
+	console.log(`${logPrefix} Will force recreate:`, forceRecreate, `(forceRedeploy=${gitStack.forceRedeploy}, lastDeployFailed=${lastDeployFailed})`);
 	console.log(`${logPrefix} Build on deploy:`, gitStack.buildOnDeploy);
 	console.log(`${logPrefix} Re-pull images:`, gitStack.repullImages);
 	console.log(`${logPrefix} Force redeploy setting:`, gitStack.forceRedeploy);
 
-	// Deploy using unified function - handles both new and existing stacks
-	// Uses `docker compose up -d --remove-orphans` which only recreates changed services
-	// Force recreate whenever git detected changes to ensure containers pick up
-	// new env var values even if compose file itself didn't change
+	// Deploy using unified function - handles both new and existing stacks.
+	// `docker compose up -d --remove-orphans` recreates exactly the services whose
+	// configuration changed (image, env value, compose field), so a git change is left
+	// for compose to act on rather than forcing a whole-stack recreate.
 	console.log(`${logPrefix} Calling deployStack...`);
 	console.log(`${logPrefix} Source directory (composeDir):`, syncResult.composeDir);
 	console.log(`${logPrefix} Compose filename:`, syncResult.composeFileName);
@@ -1558,6 +1590,9 @@ export async function deployGitStack(
 		} catch (e) {
 			console.error(`${logPrefix} Failed to close run recorder on deploy error (original error preserved):`, e);
 		}
+		// Mark it here too: a throw skips the result branch below, and leaving the
+		// stack on 'synced' is the stuck state this records against.
+		await markGitStackDeployFailed(stackId, logPrefix, error instanceof Error ? error.message : String(error));
 		throw error;
 	}
 
@@ -1618,6 +1653,11 @@ export async function deployGitStack(
 			gitStackId: stackId,
 			composePath: resolvedComposePath
 		});
+	} else {
+		// The commit was recorded as synced before the deploy ran, so mark the
+		// failure on the stack: it is what the next run reads to deploy again, and
+		// what stops the UI reporting a stack that never deployed as in sync.
+		await markGitStackDeployFailed(stackId, logPrefix, result.error);
 	}
 
 	// git_sync_success / git_sync_failed for the actual deploy result. deployStack
@@ -2131,7 +2171,16 @@ export async function listGitStackEnvFiles(stackId: number): Promise<{ files: st
  * Parse a .env file content into key-value pairs.
  * Handles comments, empty lines, and quoted values.
  */
-export function parseEnvFileContent(content: string, stackName?: string): Record<string, string> {
+export function parseEnvFileContent(
+	content: string,
+	stackName?: string,
+	options?: { expand?: boolean }
+): Record<string, string> {
+	// Expanding is for a DEPLOY, which needs the values a service will see. A caller
+	// showing the file to somebody wants their own text back, references and all -
+	// resolving it there would turn ${DIRECTORY} into a path in front of them, and an
+	// edit saved from that view would flatten the variable for good.
+	const expand = options?.expand !== false;
 	const logPrefix = stackName ? `[Stack:${stackName}]` : '[Git]';
 	const result: Record<string, string> = {};
 	const skippedLines: string[] = [];
@@ -2168,7 +2217,9 @@ export function parseEnvFileContent(content: string, stackName?: string): Record
 
 		// Only add if key is valid env var name
 		if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
-			result[key] = value;
+			// Quotes are the file's syntax, and a value may refer to an earlier line -
+			// both of which compose resolves before a service ever sees the value.
+			result[key] = expand ? expandValue(value, result) : value;
 		} else {
 			invalidKeys.push(`Line ${i + 1}: "${key}" (invalid key format)`);
 		}
@@ -2218,7 +2269,14 @@ export async function readGitStackEnvFile(
 
 	try {
 		const content = readFileSync(fullPath, 'utf-8');
-		const vars = parseEnvFileContent(content);
+		// The editor's reading, shared with every other filler of that form: quoting is
+		// the file's syntax and comes off, while a `${NAME}` reference stays as the user
+		// wrote it rather than being resolved the way a deploy would. This is also the
+		// diff base the editor decides overrides against, so it has to match what the
+		// form shows or an untouched variable reads as an override.
+		const vars = Object.fromEntries(
+			parseEnvFileForForm(content).map((row) => [row.key, row.value])
+		);
 		return { vars };
 	} catch (error: any) {
 		return { vars: {}, error: error.message };
@@ -2313,6 +2371,9 @@ export async function previewRepoEnvFiles(options: PreviewEnvOptions): Promise<P
 
 		console.log(`${logPrefix} Clone successful`);
 
+		// Values are read the way the editor form shows them, the same as every other
+		// filler of that form: quoting comes off, a reference stays unresolved.
+		//
 		// The base .env sits beside the compose file (repoBaseEnvPath keeps it inside the
 		// temp dir without doubling the prefix, #1495).
 		const baseEnvPath = repoBaseEnvPath(tempDir, composePath);
@@ -2324,7 +2385,9 @@ export async function previewRepoEnvFiles(options: PreviewEnvOptions): Promise<P
 		if (existsSync(baseEnvPath)) {
 			console.log(`${logPrefix} Reading .env from: ${baseEnvPath}`);
 			const content = readFileSync(baseEnvPath, 'utf-8');
-			const baseVars = parseEnvFileContent(content, 'preview');
+			const baseVars = Object.fromEntries(
+				parseEnvFileForForm(content).map((row) => [row.key, row.value])
+			);
 			for (const [key, value] of Object.entries(baseVars)) {
 				vars[key] = value;
 				sources[key] = '.env';
@@ -2341,7 +2404,9 @@ export async function previewRepoEnvFiles(options: PreviewEnvOptions): Promise<P
 			if (existsSync(additionalEnvPath)) {
 				console.log(`${logPrefix} Reading additional env file: ${additionalEnvPath}`);
 				const content = readFileSync(additionalEnvPath, 'utf-8');
-				const additionalVars = parseEnvFileContent(content, 'preview');
+				const additionalVars = Object.fromEntries(
+					parseEnvFileForForm(content).map((row) => [row.key, row.value])
+				);
 				for (const [key, value] of Object.entries(additionalVars)) {
 					vars[key] = value;
 					sources[key] = 'envFile';

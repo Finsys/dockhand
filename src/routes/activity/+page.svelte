@@ -43,6 +43,7 @@
 	import { currentDateInTimezone, dayBoundaryToUtcISO } from '$lib/utils/date-format';
 	import { NoEnvironment } from '$lib/components/ui/empty-state';
 	import { DataGrid } from '$lib/components/data-grid';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface ContainerEvent {
 		id: number;
@@ -143,19 +144,19 @@
 	let eventSource: EventSource | null = null;
 
 	const actionOptions = [
-		{ value: 'create', label: 'Create', icon: Plus, color: 'text-emerald-500' },
-		{ value: 'start', label: 'Start', icon: Play, color: 'text-emerald-500' },
-		{ value: 'stop', label: 'Stop', icon: Square, color: 'text-amber-500' },
-		{ value: 'die', label: 'Die', icon: Skull, color: 'text-red-500' },
-		{ value: 'kill', label: 'Kill', icon: Zap, color: 'text-red-500' },
-		{ value: 'restart', label: 'Restart', icon: RotateCcw, color: 'text-sky-500' },
-		{ value: 'pause', label: 'Pause', icon: Pause, color: 'text-amber-500' },
-		{ value: 'unpause', label: 'Unpause', icon: CirclePlay, color: 'text-emerald-500' },
-		{ value: 'destroy', label: 'Destroy', icon: Trash2, color: 'text-red-500' },
-		{ value: 'rename', label: 'Rename', icon: Pencil, color: 'text-muted-foreground' },
-		{ value: 'update', label: 'Update', icon: Pencil, color: 'text-sky-500' },
-		{ value: 'oom', label: 'Out of memory', icon: AlertTriangle, color: 'text-red-500' },
-		{ value: 'health_status', label: 'Health status', icon: Heart, color: 'text-amber-500' }
+		{ value: 'create', label: m.activity_action_create(), icon: Plus, color: 'text-emerald-500' },
+		{ value: 'start', label: m.activity_action_start(), icon: Play, color: 'text-emerald-500' },
+		{ value: 'stop', label: m.activity_action_stop(), icon: Square, color: 'text-amber-500' },
+		{ value: 'die', label: m.activity_action_die(), icon: Skull, color: 'text-red-500' },
+		{ value: 'kill', label: m.activity_action_kill(), icon: Zap, color: 'text-red-500' },
+		{ value: 'restart', label: m.activity_action_restart(), icon: RotateCcw, color: 'text-sky-500' },
+		{ value: 'pause', label: m.activity_action_pause(), icon: Pause, color: 'text-amber-500' },
+		{ value: 'unpause', label: m.activity_action_unpause(), icon: CirclePlay, color: 'text-emerald-500' },
+		{ value: 'destroy', label: m.activity_action_destroy(), icon: Trash2, color: 'text-red-500' },
+		{ value: 'rename', label: m.activity_action_rename(), icon: Pencil, color: 'text-muted-foreground' },
+		{ value: 'update', label: m.activity_action_update(), icon: Pencil, color: 'text-sky-500' },
+		{ value: 'oom', label: m.activity_action_oom(), icon: AlertTriangle, color: 'text-red-500' },
+		{ value: 'health_status', label: m.activity_action_health_status(), icon: Heart, color: 'text-amber-500' }
 	];
 
 	// Date filter preset
@@ -167,12 +168,12 @@
 	);
 
 	const datePresets = [
-		{ value: 'today', label: 'Today' },
-		{ value: 'yesterday', label: 'Yesterday' },
-		{ value: 'last7days', label: 'Last 7 days' },
-		{ value: 'last30days', label: 'Last 30 days' },
-		{ value: 'thisMonth', label: 'This month' },
-		{ value: 'lastMonth', label: 'Last month' }
+		{ value: 'today', label: m.activity_date_today() },
+		{ value: 'yesterday', label: m.activity_date_yesterday() },
+		{ value: 'last7days', label: m.activity_date_last_7_days() },
+		{ value: 'last30days', label: m.activity_date_last_30_days() },
+		{ value: 'thisMonth', label: m.activity_date_this_month() },
+		{ value: 'lastMonth', label: m.activity_date_last_month() }
 	];
 
 	// Filter dates are calendar days in the configured display timezone (#1269).
@@ -249,9 +250,9 @@
 			});
 			if (!res.ok) {
 				const data = await res.json();
-				throw new Error(data.error || 'Failed to clear activity');
+				throw new Error(data.error || m.activity_toast_clear_failed());
 			}
-			toast.success('Activity log cleared');
+			toast.success(m.activity_toast_cleared());
 			// Reset and reload
 			events = [];
 			eventIds = new Set();
@@ -642,36 +643,36 @@
 </script>
 
 <svelte:head>
-	<title>Activity - Dockhand</title>
+	<title>{m.nav_activity()} - Dockhand</title>
 </svelte:head>
 
 <div class="flex-1 min-h-0 flex flex-col gap-3 overflow-hidden">
 	<!-- Header with inline filters -->
 	<div class="shrink-0 flex flex-wrap justify-between items-center gap-3 min-h-8">
 		<div class="flex items-center gap-3">
-			<PageHeader icon={Activity} title="Activity" count={visibleEnd > 0 ? `${visibleStart}-${visibleEnd}` : undefined} total={total > 0 ? total : undefined} countClass="min-w-32" />
+			<PageHeader icon={Activity} title={m.nav_activity()} count={visibleEnd > 0 ? `${visibleStart}-${visibleEnd}` : undefined} total={total > 0 ? total : undefined} countClass="min-w-32" />
 			<Badge variant="outline" class="gap-1.5 {($appSettings.eventCollectionMode || 'stream') === 'stream' ? 'text-green-500 border-green-500/50' : 'text-amber-500 border-amber-500/50'}">
 				{#if ($appSettings.eventCollectionMode || 'stream') === 'stream'}
 					<Wifi class="w-3 h-3" />
-					<span>Stream</span>
+					<span>{m.activity_mode_stream()}</span>
 				{:else if ($appSettings.eventCollectionMode || 'stream') === 'poll'}
 					<Radio class="w-3 h-3" />
-					<span>Poll</span><span class="text-[10px] opacity-70">({($appSettings.eventPollInterval || 60000) / 1000}s)</span>
+					<span>{m.activity_mode_poll()}</span><span class="text-[10px] opacity-70">({($appSettings.eventPollInterval || 60000) / 1000}s)</span>
 				{:else}
-					<span class="text-muted-foreground">Off</span>
+					<span class="text-muted-foreground">{m.activity_mode_off()}</span>
 				{/if}
 			</Badge>
 		</div>
 		<div class="flex flex-wrap items-center gap-2">
 			<!-- Container name search -->
-			<SearchInput bind:value={filterContainerName} placeholder="Container..." class="h-8 w-36 text-sm" />
+			<SearchInput bind:value={filterContainerName} placeholder={m.activity_filter_container_placeholder()} class="h-8 w-36 text-sm" />
 
 			<!-- Action filter -->
 			<MultiSelectFilter
 				bind:value={filterActions}
 				options={actionOptions}
-				placeholder="Action"
-				pluralLabel="actions"
+				placeholder={m.activity_filter_action()}
+				pluralLabel={m.activity_filter_actions_plural()}
 				width="w-36"
 				defaultIcon={Activity}
 			/>
@@ -692,16 +693,16 @@
 						{/if}
 						<span class="truncate">
 							{#if filterEnvironmentId === null}
-								Environment
+								{m.activity_filter_environment()}
 							{:else}
-								{selectedEnv?.name || 'Environment'}
+								{selectedEnv?.name || m.activity_filter_environment()}
 							{/if}
 						</span>
 					</Select.Trigger>
 					<Select.Content>
 						<Select.Item value="">
 							<Server class="w-4 h-4 mr-2 text-muted-foreground" />
-							All environments
+							{m.activity_filter_all_environments()}
 						</Select.Item>
 						{#each environments as env}
 							<Select.Item value={String(env.id)}>
@@ -724,31 +725,31 @@
 					}
 				}}
 			>
-				<Select.Trigger size="sm" class="w-32 text-sm">
+				<Select.Trigger size="sm" class="w-44 text-sm">
 					<Calendar class="w-3.5 h-3.5 mr-1.5 text-muted-foreground shrink-0" />
 					<span class="truncate">
 						{#if selectedDatePreset === 'custom'}
-							Custom
+							{m.activity_date_custom()}
 						{:else if selectedDatePreset}
-							{datePresets.find(d => d.value === selectedDatePreset)?.label || 'All time'}
+							{datePresets.find(d => d.value === selectedDatePreset)?.label || m.activity_date_all_time()}
 						{:else}
-							All time
+							{m.activity_date_all_time()}
 						{/if}
 					</span>
 				</Select.Trigger>
 				<Select.Content>
-					<Select.Item value="">All time</Select.Item>
+					<Select.Item value="">{m.activity_date_all_time()}</Select.Item>
 					{#each datePresets as preset}
 						<Select.Item value={preset.value}>{preset.label}</Select.Item>
 					{/each}
-					<Select.Item value="custom">Custom range...</Select.Item>
+					<Select.Item value="custom">{m.activity_date_custom_range()}</Select.Item>
 				</Select.Content>
 			</Select.Root>
 
 			<!-- Custom date inputs -->
 			{#if selectedDatePreset === 'custom'}
-				<DatePicker bind:value={filterFromDate} placeholder="From" class="h-8 w-28" />
-				<DatePicker bind:value={filterToDate} placeholder="To" class="h-8 w-28" />
+				<DatePicker bind:value={filterFromDate} placeholder={m.activity_date_from()} class="h-8 w-28" />
+				<DatePicker bind:value={filterToDate} placeholder={m.activity_date_to()} class="h-8 w-28" />
 			{/if}
 
 			<!-- Clear filters -->
@@ -758,7 +759,7 @@
 				class="h-8 px-2"
 				onclick={clearFilters}
 				disabled={!hasActiveFilters}
-				title="Clear all filters"
+				title={m.activity_clear_filters()}
 			>
 				<X class="w-3.5 h-3.5" />
 			</Button>
@@ -769,12 +770,13 @@
 
 			{#if $canAccess('activity', 'delete')}
 				<ConfirmPopover
+					localized
 					bind:open={showClearConfirm}
-					action="Clear"
-					itemType="activity log"
-					title="Clear all"
+					action={m.activity_confirm_action_clear()}
+					itemType={m.activity_item_activity_log()}
+					title={m.activity_clear_all_title()}
 					onConfirm={clearActivity}
-					confirmText="Clear"
+					confirmText={m.activity_clear_confirm()}
 					variant="destructive"
 					disabled={clearingActivity}
 					onOpenChange={(open) => showClearConfirm = open}
@@ -828,8 +830,8 @@
 				{:else if column.id === 'container'}
 					<div class="flex items-center gap-1 truncate text-xs">
 						<Box class="w-3 h-3 text-muted-foreground shrink-0" />
-						<span class="truncate" title={event.containerName || event.containerId || 'Unknown'}>
-							{event.containerName || (event.containerId ? event.containerId.slice(0, 12) : 'Unknown')}
+						<span class="truncate" title={event.containerName || event.containerId || m.activity_unknown()}>
+							{event.containerName || (event.containerId ? event.containerId.slice(0, 12) : m.activity_unknown())}
 						</span>
 					</div>
 				{:else if column.id === 'image'}
@@ -857,26 +859,26 @@
 			{#snippet emptyState()}
 				<div class="flex flex-col items-center justify-center py-16 text-muted-foreground">
 					<FileX class="w-10 h-10 mb-3 opacity-40" />
-					<p>No container events found</p>
-					<p class="text-xs mt-1">Events will appear here as containers start, stop, etc.</p>
+					<p>{m.activity_empty_title()}</p>
+					<p class="text-xs mt-1">{m.activity_empty_hint()}</p>
 				</div>
 			{/snippet}
 
 			{#snippet loadingState()}
 				<div class="flex items-center justify-center py-16 text-muted-foreground">
 					<RefreshCw class="w-5 h-5 animate-spin mr-2" />
-					Loading...
+					{m.activity_loading()}
 				</div>
 			{/snippet}
 			{#snippet footer()}
 				{#if loadingMore}
 					<div class="flex items-center justify-center py-2 text-muted-foreground">
 						<Loader2 class="w-4 h-4 animate-spin mr-2" />
-						Loading more...
+						{m.activity_loading_more()}
 					</div>
 				{:else if !hasMore && events.length > 0}
 					<div class="text-center py-2 text-sm text-muted-foreground">
-						End of results ({total.toLocaleString()} events)
+						{m.activity_end_of_results({ count: total, total: total.toLocaleString() })}
 					</div>
 				{/if}
 			{/snippet}
@@ -888,17 +890,17 @@
 <Dialog.Root bind:open={showDetailDialog}>
 	<Dialog.Content class="max-w-4xl">
 		<Dialog.Header>
-			<Dialog.Title>Event details</Dialog.Title>
+			<Dialog.Title>{m.activity_details_title()}</Dialog.Title>
 		</Dialog.Header>
 		{#if selectedEvent}
 			<div class="space-y-4">
 				<div class="grid grid-cols-2 gap-4">
 					<div>
-						<label class="text-sm font-medium text-muted-foreground">Timestamp</label>
+						<label class="text-sm font-medium text-muted-foreground">{m.activity_details_timestamp()}</label>
 						<p class="font-mono text-sm">{formatTimestamp(selectedEvent.timestamp)}</p>
 					</div>
 					<div>
-						<label class="text-sm font-medium text-muted-foreground">Action</label>
+						<label class="text-sm font-medium text-muted-foreground">{m.activity_details_action()}</label>
 						<p>
 							<Badge class="{getActionColor(selectedEvent.action)} gap-1">
 								<svelte:component this={getActionIcon(selectedEvent.action)} class="w-3 h-3" />
@@ -907,25 +909,25 @@
 						</p>
 					</div>
 					<div class="min-w-0">
-						<label class="text-sm font-medium text-muted-foreground">Container name</label>
+						<label class="text-sm font-medium text-muted-foreground">{m.activity_details_container_name()}</label>
 						<p class="flex items-start gap-1">
 							<Box class="w-4 h-4 mt-0.5 shrink-0 text-muted-foreground" />
 							<span class="font-mono text-sm break-all min-w-0">{selectedEvent.containerName || '-'}</span>
 						</p>
 					</div>
 					<div>
-						<label class="text-sm font-medium text-muted-foreground">Container ID</label>
+						<label class="text-sm font-medium text-muted-foreground">{m.activity_details_container_id()}</label>
 						<p class="font-mono text-sm break-all">{selectedEvent.containerId}</p>
 					</div>
 					{#if selectedEvent.image}
 						<div class="col-span-2">
-							<label class="text-sm font-medium text-muted-foreground">Image</label>
+							<label class="text-sm font-medium text-muted-foreground">{m.activity_details_image()}</label>
 							<p class="font-mono text-sm break-all">{selectedEvent.image}</p>
 						</div>
 					{/if}
 					{#if selectedEvent.environmentName}
 						<div>
-							<label class="text-sm font-medium text-muted-foreground">Environment</label>
+							<label class="text-sm font-medium text-muted-foreground">{m.activity_details_environment()}</label>
 							<p>{selectedEvent.environmentName}</p>
 						</div>
 					{/if}
@@ -933,7 +935,7 @@
 
 				{#if selectedEvent.actorAttributes && Object.keys(selectedEvent.actorAttributes).length > 0}
 					<div>
-						<label class="text-sm font-medium text-muted-foreground">Attributes</label>
+						<label class="text-sm font-medium text-muted-foreground">{m.activity_details_attributes()}</label>
 						<div class="mt-1 border rounded-md overflow-hidden max-h-[200px] overflow-y-auto">
 							<table class="w-full text-xs">
 								<tbody>
@@ -951,7 +953,7 @@
 			</div>
 		{/if}
 		<Dialog.Footer>
-			<Button variant="outline" onclick={() => showDetailDialog = false}>Close</Button>
+			<Button variant="outline" onclick={() => showDetailDialog = false}>{m.ui_close()}</Button>
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>

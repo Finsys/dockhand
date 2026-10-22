@@ -1,9 +1,14 @@
 import { json, redirect } from '@sveltejs/kit';
 import type { RequestHandler } from '@sveltejs/kit';
-import { handleOidcCallback, createUserSession, isAuthEnabled } from '$lib/server/auth';
+import { handleOidcCallback, createUserSession, isAuthEnabled, cookieNameFor } from '$lib/server/auth';
 import { auditAuth } from '$lib/server/audit';
 import { getClientIp } from '$lib/server/client-ip';
 import { safeRedirectOrRoot } from '$lib/utils/safe-redirect';
+import { decrypt, looksLikeCiphertext } from '$lib/server/encryption';
+import {
+	decodeLoginState,
+	loginStateMessage
+} from '$lib/server/oidc-login-state';
 
 // GET /api/auth/oidc/callback - Handle OIDC callback from IdP
 /**
@@ -33,8 +38,7 @@ export const GET: RequestHandler = async (event) => {
 
 	// Handle error from IdP
 	if (error) {
-		console.error('OIDC error from IdP:', error, errorDescription);
-		console.warn(`[Auth] OIDC login failed: ip=${clientIp} error=${errorDescription || error}`);
+		console.warn(`[Auth] OIDC login failed: ip=${clientIp} error=${error}${errorDescription ? ` - ${errorDescription}` : ''}`);
 		const errorMsg = encodeURIComponent(errorDescription || error);
 		throw redirect(302, `/login?error=${errorMsg}`);
 	}
@@ -44,8 +48,29 @@ export const GET: RequestHandler = async (event) => {
 		throw redirect(302, '/login?error=invalid_callback');
 	}
 
+	// Read the login this callback belongs to, clearing the cookie first so a later
+	// callback in this browser cannot resume it. What stops a concurrent replay is
+	// the authorization code, which the provider honours once.
+	const cookieName = cookieNameFor(state);
+	const stateCookie = cookies.get(cookieName);
+	cookies.delete(cookieName, { path: '/' });
+
+	const loginState = decodeLoginState(
+		stateCookie,
+		state,
+		{ isCiphertext: looksLikeCiphertext, decrypt },
+		Date.now()
+	);
+	if (!loginState.ok) {
+		const message = loginStateMessage(loginState.reason);
+		// The sentence, not the bare code: "missing" alone leaves whoever reads the log
+		// to guess between an expired login, a replay, and cookies being blocked.
+		console.warn(`[Auth] OIDC login failed: ip=${clientIp} reason=${loginState.reason} - ${message}`);
+		throw redirect(302, `/login?error=${encodeURIComponent(message)}`);
+	}
+
 	try {
-		const result = await handleOidcCallback(code, state);
+		const result = await handleOidcCallback(code, loginState.state);
 
 		if (!result.success || !result.user) {
 			console.warn(`[Auth] OIDC login failed: ip=${clientIp} error=${result.error || 'Authentication failed'}`);
@@ -54,7 +79,10 @@ export const GET: RequestHandler = async (event) => {
 		}
 
 		// Create session
-		await createUserSession(result.user.id, 'oidc', cookies, event.request);
+		// Named, not a bare 'oidc': logging out has to know which provider to end the
+		// session with, and the column already holds this shape for the user row.
+		const sessionProvider = result.providerName ? `oidc:${result.providerName}` : 'oidc';
+		await createUserSession(result.user.id, sessionProvider, cookies, event.request);
 		console.log(`[Auth] OIDC login successful: user=${result.user.username} provider=${result.providerName || 'oidc'} ip=${clientIp}`);
 
 		// Audit log

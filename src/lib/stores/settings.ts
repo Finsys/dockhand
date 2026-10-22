@@ -1,3 +1,9 @@
+import {
+	DEFAULT_GRYPE_IMAGE,
+	DEFAULT_TRIVY_IMAGE,
+	DEFAULT_GRYPE_ARGS,
+	DEFAULT_TRIVY_ARGS
+} from '$lib/utils/scanner-images';
 import { writable, derived, get } from 'svelte/store';
 import { browser } from '$app/environment';
 import {
@@ -39,6 +45,10 @@ export interface AppSettings {
 	scannerCleanupEnabled: boolean;
 	deployLogReconcileCron: string;
 	deployLogReconcileEnabled: boolean;
+	scanRetentionCron: string;
+	scanRetentionEnabled: boolean;
+	scanRetentionKeep: number;
+	scanRetentionGraceDays: number;
 	logBufferSizeKb: number;  // legacy, retained for migration — UI uses logMaxLines
 	logMaxLines: number;       // line-count cap for the log buffer (replaces KB-based limit)
 	defaultTimezone: string;
@@ -75,8 +85,8 @@ const DEFAULT_SETTINGS: AppSettings = {
 	timeFormat: '24h',
 	dateFormat: 'DD.MM.YYYY',
 	downloadFormat: 'tar',
-	defaultGrypeArgs: '-o json -v {image}',
-	defaultTrivyArgs: 'image --format json {image}',
+	defaultGrypeArgs: DEFAULT_GRYPE_ARGS,
+	defaultTrivyArgs: DEFAULT_TRIVY_ARGS,
 	scheduleRetentionDays: 30,
 	eventRetentionDays: 30,
 	scheduleCleanupCron: '0 3 * * *',
@@ -87,6 +97,10 @@ const DEFAULT_SETTINGS: AppSettings = {
 	scannerCleanupEnabled: true,
 	deployLogReconcileCron: '0 4 * * *',
 	deployLogReconcileEnabled: true,
+	scanRetentionCron: '30 4 * * *',
+	scanRetentionEnabled: true,
+	scanRetentionKeep: 10,
+	scanRetentionGraceDays: 7,
 	logBufferSizeKb: 500,
 	logMaxLines: 2000,
 	defaultTimezone: 'UTC',
@@ -98,8 +112,8 @@ const DEFAULT_SETTINGS: AppSettings = {
 	formatLogTimestamps: false,
 	externalStackPaths: [],
 	primaryStackLocation: null,
-	defaultGrypeImage: 'anchore/grype:v0.115.0',
-	defaultTrivyImage: 'aquasec/trivy:0.71.2',
+	defaultGrypeImage: DEFAULT_GRYPE_IMAGE,
+	defaultTrivyImage: DEFAULT_TRIVY_IMAGE,
 	labelFilterMode: 'any',
 	honorProxyLabels: true,
 	showImageChangelogLinks: true,
@@ -180,6 +194,10 @@ function createSettingsStore() {
 					scannerCleanupEnabled: settings.scannerCleanupEnabled ?? DEFAULT_SETTINGS.scannerCleanupEnabled,
 					deployLogReconcileCron: settings.deployLogReconcileCron ?? DEFAULT_SETTINGS.deployLogReconcileCron,
 					deployLogReconcileEnabled: settings.deployLogReconcileEnabled ?? DEFAULT_SETTINGS.deployLogReconcileEnabled,
+					scanRetentionCron: settings.scanRetentionCron ?? DEFAULT_SETTINGS.scanRetentionCron,
+					scanRetentionEnabled: settings.scanRetentionEnabled ?? DEFAULT_SETTINGS.scanRetentionEnabled,
+					scanRetentionKeep: settings.scanRetentionKeep ?? DEFAULT_SETTINGS.scanRetentionKeep,
+					scanRetentionGraceDays: settings.scanRetentionGraceDays ?? DEFAULT_SETTINGS.scanRetentionGraceDays,
 					logBufferSizeKb: settings.logBufferSizeKb ?? DEFAULT_SETTINGS.logBufferSizeKb,
 					logMaxLines: deriveLogMaxLines(settings),
 					defaultTimezone: settings.defaultTimezone ?? DEFAULT_SETTINGS.defaultTimezone,
@@ -243,6 +261,10 @@ function createSettingsStore() {
 					scannerCleanupEnabled: updatedSettings.scannerCleanupEnabled ?? DEFAULT_SETTINGS.scannerCleanupEnabled,
 					deployLogReconcileCron: updatedSettings.deployLogReconcileCron ?? DEFAULT_SETTINGS.deployLogReconcileCron,
 					deployLogReconcileEnabled: updatedSettings.deployLogReconcileEnabled ?? DEFAULT_SETTINGS.deployLogReconcileEnabled,
+					scanRetentionCron: updatedSettings.scanRetentionCron ?? DEFAULT_SETTINGS.scanRetentionCron,
+					scanRetentionEnabled: updatedSettings.scanRetentionEnabled ?? DEFAULT_SETTINGS.scanRetentionEnabled,
+					scanRetentionKeep: updatedSettings.scanRetentionKeep ?? DEFAULT_SETTINGS.scanRetentionKeep,
+					scanRetentionGraceDays: updatedSettings.scanRetentionGraceDays ?? DEFAULT_SETTINGS.scanRetentionGraceDays,
 					logBufferSizeKb: updatedSettings.logBufferSizeKb ?? DEFAULT_SETTINGS.logBufferSizeKb,
 					logMaxLines: deriveLogMaxLines(updatedSettings),
 					defaultTimezone: updatedSettings.defaultTimezone ?? DEFAULT_SETTINGS.defaultTimezone,
@@ -451,6 +473,34 @@ function createSettingsStore() {
 			update((current) => {
 				const newSettings = { ...current, deployLogReconcileEnabled: value };
 				saveSettings({ deployLogReconcileEnabled: value });
+				return newSettings;
+			});
+		},
+		setScanRetentionCron: (value: string) => {
+			update((current) => {
+				const newSettings = { ...current, scanRetentionCron: value };
+				saveSettings({ scanRetentionCron: value });
+				return newSettings;
+			});
+		},
+		setScanRetentionEnabled: (value: boolean) => {
+			update((current) => {
+				const newSettings = { ...current, scanRetentionEnabled: value };
+				saveSettings({ scanRetentionEnabled: value });
+				return newSettings;
+			});
+		},
+		setScanRetentionKeep: (value: number) => {
+			update((current) => {
+				const newSettings = { ...current, scanRetentionKeep: value };
+				saveSettings({ scanRetentionKeep: value });
+				return newSettings;
+			});
+		},
+		setScanRetentionGraceDays: (value: number) => {
+			update((current) => {
+				const newSettings = { ...current, scanRetentionGraceDays: value };
+				saveSettings({ scanRetentionGraceDays: value });
 				return newSettings;
 			});
 		},
@@ -693,9 +743,10 @@ export function formatDate(date: Date | string | number): string {
  * For display ONLY, alongside the absolute date - sort still uses the raw
  * timestamp, never this string.
  */
-// Re-exported from the import-light utils/format module (so it stays unit-testable
-// without pulling $app/environment). Kept exported here for existing callers.
-export { formatRelativeTime } from '$lib/utils/format';
+// Re-exported in the UI language from $lib/i18n/time, which reuses the rounding of the
+// import-light utils/format module (that one stays English and unit-testable without
+// pulling $app/environment). Kept exported here for existing callers.
+export { formatRelativeTime } from '$lib/i18n/time';
 
 /**
  * Get the current time format setting (for components that need it).

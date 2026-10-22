@@ -5,6 +5,7 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { Progress } from '$lib/components/ui/progress';
 	import { CircleArrowUp, CheckCircle2, XCircle, Loader2, Circle, Ship, Sparkles, Bug, Wrench, RotateCcw, AlertCircle } from 'lucide-svelte';
+	import { m } from '$lib/paraglide/messages.js';
 
 	declare const __APP_VERSION__: string | null;
 
@@ -58,19 +59,19 @@
 
 	const ALL_STEPS = [
 		// Preparation (from SSE)
-		{ id: 'pulling_image', label: 'Pulling new image' },
-		{ id: 'building_config', label: 'Building container config' },
-		{ id: 'pulling_updater', label: 'Pulling updater' },
-		{ id: 'creating_container', label: 'Creating new container' },
-		{ id: 'launching_updater', label: 'Launching updater' },
+		{ id: 'pulling_image', label: m.settings_about_step_pulling_image },
+		{ id: 'building_config', label: m.settings_about_step_building_config },
+		{ id: 'pulling_updater', label: m.settings_about_step_pulling_updater },
+		{ id: 'creating_container', label: m.settings_about_step_creating_container },
+		{ id: 'launching_updater', label: m.settings_about_step_launching_updater },
 		// Update (from updater container logs)
-		{ id: 'stopping', label: 'Stopping Dockhand' },
-		{ id: 'removing', label: 'Removing old container' },
-		{ id: 'renaming', label: 'Renaming container' },
-		{ id: 'connecting', label: 'Connecting networks' },
-		{ id: 'starting', label: 'Starting Dockhand' },
+		{ id: 'stopping', label: m.settings_about_step_stopping },
+		{ id: 'removing', label: m.settings_about_step_removing },
+		{ id: 'renaming', label: m.settings_about_step_renaming },
+		{ id: 'connecting', label: m.settings_about_step_connecting },
+		{ id: 'starting', label: m.settings_about_step_starting },
 		// Reconnect
-		{ id: 'reconnecting', label: 'Waiting for Dockhand' }
+		{ id: 'reconnecting', label: m.settings_about_step_reconnecting }
 	] as const;
 
 	// Updater log markers → step id mapping
@@ -82,7 +83,7 @@
 		{ start: 'Starting container', end: 'Container is running', id: 'starting' }
 	];
 
-	let steps = $state<StepState[]>(ALL_STEPS.map(s => ({ id: s.id, label: s.label, status: 'pending', logs: [], showLogs: false })));
+	let steps = $state<StepState[]>(ALL_STEPS.map(s => ({ id: s.id, label: s.label(), status: 'pending', logs: [], showLogs: false })));
 	let scrollTick = $state(0);
 	let stepsListEl = $state<HTMLDivElement | null>(null);
 
@@ -114,7 +115,7 @@
 		consecutivePollFailures = 0;
 		releaseNotes = [];
 		lastParsedLogCount = 0;
-		steps = ALL_STEPS.map(s => ({ id: s.id, label: s.label, status: 'pending', logs: [], showLogs: false }));
+		steps = ALL_STEPS.map(s => ({ id: s.id, label: s.label(), status: 'pending', logs: [], showLogs: false }));
 		stopPolling();
 	}
 
@@ -212,7 +213,7 @@
 	async function startUpdate() {
 		phase = 'preparing';
 		errorMessage = null;
-		steps = ALL_STEPS.map(s => ({ id: s.id, label: s.label, status: 'pending', logs: [], showLogs: false }));
+		steps = ALL_STEPS.map(s => ({ id: s.id, label: s.label(), status: 'pending', logs: [], showLogs: false }));
 
 		try {
 			const response = await fetch('/api/self-update', {
@@ -226,14 +227,14 @@
 			if (contentType.includes('application/json')) {
 				const data = await response.json();
 				phase = 'error';
-				errorMessage = data.error || 'Update failed';
+				errorMessage = data.error || m.settings_about_update_failed();
 				return;
 			}
 
 			// It's an SSE stream
 			if (!response.body) {
 				phase = 'error';
-				errorMessage = 'No response body';
+				errorMessage = m.settings_about_no_response_body();
 				return;
 			}
 
@@ -262,7 +263,7 @@
 		} catch (err) {
 			if (phase === 'preparing') {
 				phase = 'error';
-				errorMessage = 'Connection lost: ' + String(err);
+				errorMessage = m.settings_about_connection_lost({ error: String(err) });
 			}
 		}
 	}
@@ -288,7 +289,7 @@
 			startProgressPolling();
 		} else if (event === 'error') {
 			phase = 'error';
-			errorMessage = data.message || 'Update failed';
+			errorMessage = data.message || m.settings_about_update_failed();
 			// Mark current active step as error
 			const currentId = activeStepId();
 			if (currentId) {
@@ -332,7 +333,7 @@
 					switchToRestarting();
 				} else {
 					phase = 'error';
-					errorMessage = `Updater exited with code ${data.exitCode}`;
+					errorMessage = m.settings_about_updater_exited({ code: String(data.exitCode) });
 					const currentId = activeStepId();
 					if (currentId) setStepStatus(currentId, 'error');
 				}
@@ -432,7 +433,7 @@
 				phase = 'completed';
 				const step = getStep('reconnecting');
 				if (step) {
-					step.label = 'Dockhand is back online';
+					step.label = m.settings_about_step_back_online();
 					step.status = 'completed';
 					steps = [...steps];
 				}
@@ -486,9 +487,9 @@
 			<Dialog.Title class="flex items-center gap-2">
 				<CircleArrowUp class="w-5 h-5 text-amber-500" />
 				{#if phase === 'confirm'}
-					Update Dockhand
+					{m.settings_about_update_title()}
 				{:else}
-					Updating Dockhand
+					{m.settings_about_updating_title()}
 				{/if}
 			</Dialog.Title>
 			{#if phase !== 'confirm'}
@@ -497,11 +498,11 @@
 						<span class="text-primary font-medium">{activeStep.label}...</span>
 						<span class="text-muted-foreground ml-2">({completedCount}/{ALL_STEPS.length})</span>
 					{:else if phase === 'completed'}
-						Update complete
+						{m.settings_about_update_complete()}
 					{:else if phase === 'error'}
-						Update failed
+						{m.settings_about_update_failed()}
 					{:else}
-						Preparing...
+						{m.settings_about_preparing()}
 					{/if}
 				</Dialog.Description>
 			{/if}
@@ -512,7 +513,7 @@
 			<div class="space-y-4 py-2 overflow-y-auto min-h-0 flex-1">
 				<div class="space-y-2">
 					<div class="flex items-center justify-between text-sm">
-						<span class="text-muted-foreground">Container</span>
+						<span class="text-muted-foreground">{m.settings_about_container()}</span>
 						<span class="font-medium flex items-center gap-1.5">
 							<Ship class="w-3.5 h-3.5" />
 							{containerName}
@@ -520,26 +521,26 @@
 					</div>
 					{#if isVersionUpdate}
 						<div class="flex items-center justify-between text-sm">
-							<span class="text-muted-foreground">Current image</span>
+							<span class="text-muted-foreground">{m.settings_about_current_image()}</span>
 							<Badge variant="secondary" class="font-mono text-xs">{currentImage}</Badge>
 						</div>
 						<div class="flex items-center justify-between text-sm">
-							<span class="text-muted-foreground">New image</span>
+							<span class="text-muted-foreground">{m.settings_about_new_image()}</span>
 							<Badge variant="default" class="font-mono text-xs">{newImage}</Badge>
 						</div>
 					{:else}
 						<div class="flex items-center justify-between text-sm">
-							<span class="text-muted-foreground">Image</span>
+							<span class="text-muted-foreground">{m.settings_about_image()}</span>
 							<Badge variant="secondary" class="font-mono text-xs">{currentImage}</Badge>
 						</div>
 						{#if currentDigest || newDigest}
 							<div class="flex items-center justify-between text-sm">
-								<span class="text-muted-foreground">Current digest</span>
-								<span class="font-mono text-xs text-muted-foreground">{currentDigest ? currentDigest.replace('sha256:', '').slice(0, 12) : 'unknown'}</span>
+								<span class="text-muted-foreground">{m.settings_about_current_digest()}</span>
+								<span class="font-mono text-xs text-muted-foreground">{currentDigest ? currentDigest.replace('sha256:', '').slice(0, 12) : m.settings_about_unknown()}</span>
 							</div>
 							<div class="flex items-center justify-between text-sm">
-								<span class="text-muted-foreground">New digest</span>
-								<span class="font-mono text-xs text-amber-500">{newDigest ? newDigest.replace('sha256:', '').slice(0, 12) : 'unknown'}</span>
+								<span class="text-muted-foreground">{m.settings_about_new_digest()}</span>
+								<span class="font-mono text-xs text-amber-500">{newDigest ? newDigest.replace('sha256:', '').slice(0, 12) : m.settings_about_unknown()}</span>
 							</div>
 						{/if}
 					{/if}
@@ -548,12 +549,12 @@
 				{#if loadingNotes}
 					<div class="flex items-center gap-2 text-sm text-muted-foreground py-2">
 						<Loader2 class="w-4 h-4 animate-spin" />
-						Loading release notes...
+						{m.updates_loading_notes()}
 					</div>
 				{:else if releaseNotes.length > 0}
 					<div class="border rounded-md overflow-hidden">
 						<div class="bg-muted/50 px-3 py-2 border-b">
-							<p class="text-sm font-medium">What's new</p>
+							<p class="text-sm font-medium">{m.settings_about_whats_new()}</p>
 						</div>
 						<div class="p-3 space-y-3 overflow-y-auto">
 							{#each releaseNotes as entry}
@@ -580,7 +581,7 @@
 				{#if isComposeManaged}
 					<div class="rounded-md border border-blue-500/30 bg-blue-500/5 p-3">
 						<p class="text-xs text-muted-foreground">
-							<span class="font-medium text-blue-400">Note:</span> This container is managed by Docker Compose. After update it will continue to work but may lose Compose tracking. Use <code class="text-2xs">docker compose pull && docker compose up -d</code> for Compose-aware updates.
+							<span class="font-medium text-blue-400">{m.settings_about_note_label()}</span> {m.settings_about_compose_note_before()} <code class="text-2xs">docker compose pull && docker compose up -d</code> {m.settings_about_compose_note_after()}
 						</p>
 					</div>
 				{/if}
@@ -588,11 +589,11 @@
 
 			<Dialog.Footer>
 				<Button variant="outline" onclick={handleClose}>
-					Cancel
+					{m.settings_about_cancel()}
 				</Button>
 				<Button onclick={startUpdate}>
 					<CircleArrowUp class="w-4 h-4 mr-2" />
-					Update now
+					{m.settings_about_update_now()}
 				</Button>
 			</Dialog.Footer>
 
@@ -602,7 +603,7 @@
 				<!-- Progress bar -->
 				<div class="space-y-2 shrink-0">
 					<div class="flex items-center justify-between text-sm">
-						<span class="text-muted-foreground">Progress</span>
+						<span class="text-muted-foreground">{m.settings_about_progress()}</span>
 						<Badge variant="secondary">{completedCount}/{ALL_STEPS.length}</Badge>
 					</div>
 					<Progress value={progressPercentage} class="h-2" />
@@ -654,16 +655,16 @@
 				{#if phase === 'completed'}
 					<Button onclick={() => window.location.reload()}>
 						<RotateCcw class="w-4 h-4 mr-2" />
-						Reload
+						{m.settings_about_reload()}
 					</Button>
 				{:else if phase === 'error'}
 					<Button variant="outline" onclick={handleClose}>
-						Close
+						{m.ui_close()}
 					</Button>
 				{:else}
 					<Button variant="outline" disabled>
 						<Loader2 class="w-4 h-4 mr-2 animate-spin" />
-						Updating...
+						{m.settings_about_updating()}
 					</Button>
 				{/if}
 			</Dialog.Footer>

@@ -25,7 +25,7 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 		return json({ error: 'Unauthorized' }, { status: 401 });
 	}
 
-	if (!auth.isEnterprise) {
+	if (!auth.hasValidLicense) {
 		return json({ error: 'Enterprise license required' }, { status: 403 });
 	}
 
@@ -73,7 +73,7 @@ export const PUT: RequestHandler = async (event) => {
 		return json({ error: 'Unauthorized' }, { status: 401 });
 	}
 
-	if (!auth.isEnterprise) {
+	if (!auth.hasValidLicense) {
 		return json({ error: 'Enterprise license required' }, { status: 403 });
 	}
 
@@ -155,7 +155,7 @@ export const DELETE: RequestHandler = async (event) => {
 		return json({ error: 'Unauthorized' }, { status: 401 });
 	}
 
-	if (!auth.isEnterprise) {
+	if (!auth.hasValidLicense) {
 		return json({ error: 'Enterprise license required' }, { status: 403 });
 	}
 

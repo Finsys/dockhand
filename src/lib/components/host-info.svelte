@@ -1,15 +1,20 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { Cpu, MemoryStick, Box, Globe, ChevronDown, Check, HardDrive, Clock, Wifi, WifiOff, Route, UndoDot, Icon, AlertCircle, Loader2, Search, Server, X } from 'lucide-svelte';
+	import { Cpu, MemoryStick, Box, Globe, ChevronDown, Check, HardDrive, Clock, Wifi, WifiOff, Route, UndoDot, Icon, AlertCircle, Loader2, Search, Server, X, GripVertical, RotateCcw, ArrowUpDown } from 'lucide-svelte';
 	import { whale } from '@lucide/lab';
 	import { Button } from '$lib/components/ui/button';
 	import { currentEnvironment, environments, type Environment } from '$lib/stores/environment';
+	import { environmentOrder } from '$lib/stores/environment-order';
+	import { dndzone, type DndEvent } from 'svelte-dnd-action';
+	import { flip } from 'svelte/animate';
+	import { cubicOut } from 'svelte/easing';
 	import { sseConnected } from '$lib/stores/events';
 	import EnvironmentIcon from '$lib/components/EnvironmentIcon.svelte';
 	import { toast } from 'svelte-sonner';
 	import { themeStore, type FontSize } from '$lib/stores/theme';
 	import { formatBytes } from '$lib/utils/format';
 	import { getTimeFormat, getDefaultTimezone } from '$lib/stores/settings';
+	import { m } from '$lib/paraglide/messages.js';
 
 	// Font size scaling for header
 	let fontSize = $state<FontSize>('normal');
@@ -123,6 +128,31 @@
 			: envList
 	);
 
+	// --- Reorder ---
+	// dndzone owns the gesture (pointer + touch + keyboard); we own the order.
+	let reorderMode = $state(false);
+	// The list dndzone is currently showing: its own during a drag, ours otherwise.
+	let dragList = $state<Environment[] | null>(null);
+
+	// Reordering a filtered subset cannot express a position in the full list,
+	// so dragging is only live when every environment is on screen.
+	const canReorder = $derived(reorderMode && !searchTerm.trim());
+
+	const reorderList = $derived(dragList ?? envList);
+
+	function handleConsider(e: CustomEvent<DndEvent<Environment>>) {
+		dragList = e.detail.items;
+	}
+
+	function handleFinalize(e: CustomEvent<DndEvent<Environment>>) {
+		const items = e.detail.items;
+		dragList = null;
+		// A gesture that began before a filter was typed would hand back only the
+		// visible environments; saving that would push the hidden ones to the end.
+		if (!canReorder || items.length !== envList.length) return;
+		environmentOrder.save(items.map((env) => env.id));
+	}
+
 	// Clear search and focus when dropdown opens/closes
 	$effect(() => {
 		if (showDropdown && showSearch) {
@@ -130,6 +160,16 @@
 			setTimeout(() => searchInputRef?.focus(), 0);
 		} else {
 			searchTerm = '';
+		}
+	});
+
+	// A closed menu leaves reorder mode behind it. Reopening into reorder mode would
+	// swallow the click meant to switch environment, and a drag abandoned by the
+	// close would leave the list dimmed and half-reordered.
+	$effect(() => {
+		if (!showDropdown && reorderMode) {
+			reorderMode = false;
+			dragList = null;
 		}
 	});
 
@@ -258,7 +298,7 @@
 		diskUsageLoading = false;
 
 		const targetEnv = envList.find((e: Environment) => Number(e.id) === Number(envId));
-		const envName = targetEnv?.name || `Environment ${envId}`;
+		const envName = targetEnv?.name || m.hostinfo_environment_fallback({ id: envId });
 
 		// Mark as switching and create new abort controller
 		switchingEnvId = envId;
@@ -273,7 +313,7 @@
 			if (!response.ok) {
 				offlineEnvIds.add(envId);
 				offlineEnvIds = new Set(offlineEnvIds);
-				toast.error(`Cannot switch to "${envName}" - environment is offline`);
+				toast.error(m.hostinfo_switch_offline({ name: envName }));
 				return;
 			}
 
@@ -282,7 +322,7 @@
 			if (newHostInfo.error) {
 				offlineEnvIds.add(envId);
 				offlineEnvIds = new Set(offlineEnvIds);
-				toast.error(`Cannot switch to "${envName}" - ${newHostInfo.error}`);
+				toast.error(m.hostinfo_switch_error({ name: envName, error: newHostInfo.error }));
 				return;
 			}
 
@@ -311,7 +351,7 @@
 			}
 			offlineEnvIds.add(envId);
 			offlineEnvIds = new Set(offlineEnvIds);
-			toast.error(`Cannot switch to "${envName}" - connection failed`);
+			toast.error(m.hostinfo_switch_connection_failed({ name: envName }));
 		} finally {
 			switchingEnvId = null;
 		}
@@ -355,6 +395,10 @@
 	}
 
 	function handleClickOutside(event: MouseEvent) {
+		// dndzone lifts the dragged row onto document.body, so the pointer release
+		// that ends a drag looks like a click outside the menu. Closing there would
+		// unmount the list before dndzone can finalize, losing the new order.
+		if (dragList) return;
 		const target = event.target as HTMLElement;
 		if (!target.closest('.env-dropdown')) {
 			showDropdown = false;
@@ -395,11 +439,11 @@
 					<span class="font-medium text-foreground">{currentEnv.name}</span>
 				{:else}
 					<Globe class="{iconSizeLargeClass()} text-muted-foreground" />
-					<span class="font-medium text-foreground">Select environment</span>
+					<span class="font-medium text-foreground">{m.hostinfo_select_environment()}</span>
 				{/if}
 			{:else}
 				<Globe class="{iconSizeLargeClass()} text-muted-foreground" />
-				<span class="font-medium text-foreground">No environments</span>
+				<span class="font-medium text-foreground">{m.hostinfo_no_environments()}</span>
 			{/if}
 			<ChevronDown class="{iconSizeClass()}" />
 		</button>
@@ -414,7 +458,7 @@
 								bind:this={searchInputRef}
 								bind:value={searchTerm}
 								type="text"
-								placeholder="Search environments..."
+								placeholder={m.hostinfo_search_placeholder()}
 								class="w-full pl-7 pr-7 py-1 text-sm bg-transparent border rounded focus:outline-none focus:ring-1 focus:ring-ring"
 								onclick={(e) => e.stopPropagation()}
 								onkeydown={(e) => {
@@ -438,16 +482,32 @@
 						</div>
 					</div>
 				{/if}
-				<div class="py-1 max-h-[calc(100vh-8rem)] overflow-y-auto">
-					{#each filteredEnvList as env (env.id)}
+				<div
+					class="py-1 max-h-[calc(100vh-8rem)] overflow-y-auto"
+					use:dndzone={{
+						items: canReorder ? reorderList : filteredEnvList,
+						dragDisabled: !canReorder,
+						flipDurationMs: 180,
+						dropTargetStyle: {}
+					}}
+					onconsider={handleConsider}
+					onfinalize={handleFinalize}
+				>
+					{#each canReorder ? reorderList : filteredEnvList as env (env.id)}
 						{@const isOffline = offlineEnvIds.has(env.id)}
 						{@const isSwitching = switchingEnvId === env.id}
 						<button
-							onclick={() => switchEnvironment(env.id)}
+							animate:flip={{ duration: 180, easing: cubicOut }}
+							onclick={() => { if (!canReorder) switchEnvironment(env.id); }}
 							disabled={isSwitching}
-							class="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-muted transition-colors text-left cursor-pointer disabled:cursor-wait disabled:opacity-70"
+							class="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-muted transition-colors text-left cursor-pointer disabled:cursor-wait disabled:opacity-70 {canReorder
+								? 'cursor-grab active:cursor-grabbing'
+								: ''}"
 							class:opacity-60={isOffline && !isSwitching}
 						>
+							{#if canReorder}
+								<GripVertical class="{iconSizeLargeClass()} text-muted-foreground shrink-0" />
+							{/if}
 							{#if isSwitching}
 								<Loader2 class="{iconSizeLargeClass()} text-muted-foreground shrink-0 animate-spin" />
 							{:else if isOffline}
@@ -457,17 +517,60 @@
 							{/if}
 							<span class="flex-1 whitespace-nowrap" class:text-muted-foreground={isOffline}>{env.name}</span>
 							{#if isOffline && !isSwitching}
-								<span class="text-xs text-destructive">offline</span>
+								<span class="text-xs text-destructive">{m.hostinfo_offline()}</span>
 							{:else if Number(env.id) === Number(currentEnvId)}
 								<Check class="{iconSizeLargeClass()} text-primary shrink-0" />
 							{/if}
 						</button>
 					{:else}
 						<div class="px-3 py-2 text-sm text-muted-foreground">
-							No matching environments
+							{m.hostinfo_no_matching_environments()}
 						</div>
 					{/each}
 				</div>
+				{#if envList.length > 1 && (!searchTerm.trim() || reorderMode)}
+					<!-- Toggling reorder mode swaps these buttons, so the clicked one is
+					     gone by the time the document listener tests it and the menu
+					     reads the click as landing outside itself. -->
+					<div
+						class="border-t px-3 py-1.5 flex items-center gap-3 text-xs leading-none"
+						onclick={(e) => e.stopPropagation()}
+					>
+						{#if reorderMode}
+							<button
+								type="button"
+								class="flex items-center gap-1 font-medium text-muted-foreground hover:text-foreground transition-colors"
+								title={m.hostinfo_reset_order_title()}
+								onclick={() => {
+									environmentOrder.reset();
+									dragList = null;
+									reorderMode = false;
+								}}
+							>
+								<RotateCcw class="w-3 h-3 shrink-0 text-red-400" />
+								{m.sidebar_reset()}
+							</button>
+							<button
+								type="button"
+								class="flex items-center gap-1 font-medium text-muted-foreground hover:text-foreground transition-colors"
+								onclick={() => (reorderMode = false)}
+							>
+								<Check class="w-3 h-3 shrink-0 text-emerald-500" />
+								{m.sidebar_apply()}
+							</button>
+						{:else}
+							<button
+								type="button"
+								class="flex items-center gap-1 font-medium text-muted-foreground hover:text-foreground transition-colors"
+								title={m.hostinfo_reorder_title()}
+								onclick={() => (reorderMode = true)}
+							>
+								<ArrowUpDown class="w-3 h-3 shrink-0" />
+								{m.hostinfo_reorder()}
+							</button>
+						{/if}
+					</div>
+				{/if}
 			</div>
 		{/if}
 	</div>
@@ -478,7 +581,7 @@
 		<!-- Hostname / IP (#962) — first info segment after the env dropdown.
 		     Hidden on narrow viewports to keep the strip readable. -->
 		{#if hostLabel}
-			<div class="hidden xl:flex items-center gap-1" title="Daemon hostname / IP">
+			<div class="hidden xl:flex items-center gap-1" title={m.hostinfo_hostname_ip_title()}>
 				<Server class="{iconSizeClass()}" />
 				<span>{hostLabel}</span>
 			</div>
@@ -513,7 +616,7 @@
 
 		<!-- CPU cores -->
 		{#if hostInfo.cpus > 0}
-			<span class="hidden lg:inline">{hostInfo.cpus} cores</span>
+			<span class="hidden lg:inline">{m.hostinfo_cpu_cores({ count: hostInfo.cpus })}</span>
 			<span class="hidden lg:inline text-border">|</span>
 		{/if}
 
@@ -544,15 +647,15 @@
 		<!-- Live indicator with timestamp -->
 		<div
 			class="flex items-center gap-2 {isConnected ? 'text-emerald-500' : 'text-muted-foreground'}"
-			title={isConnected ? 'Live updates connected' : 'Live updates disconnected'}
+			title={isConnected ? m.hostinfo_live_connected() : m.hostinfo_live_disconnected()}
 		>
 			<span
 				class="text-muted-foreground tabular-nums"
-				title={`${currentTimezone} - data refreshed at ${formatClock(lastUpdated, currentTimezone)}`}
+				title={m.hostinfo_clock_title({ timezone: currentTimezone, time: formatClock(lastUpdated, currentTimezone) })}
 			>{formatClock(now, currentTimezone)}</span>
 			{#if isConnected}
 				<Wifi class="{iconSizeLargeClass()}" />
-				<span class="font-medium">Live</span>
+				<span class="font-medium">{m.hostinfo_live()}</span>
 			{:else}
 				<WifiOff class="{iconSizeLargeClass()}" />
 			{/if}

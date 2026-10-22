@@ -3,6 +3,7 @@ import { restartStack, ComposeFileNotFoundError } from '$lib/server/stacks';
 import { authorize } from '$lib/server/authorize';
 import { auditStack } from '$lib/server/audit';
 import { createJobResponse } from '$lib/server/sse';
+import { isValidStackName } from '$lib/server/stack-name-guard';
 import type { RequestHandler } from './$types';
 
 /**
@@ -11,6 +12,7 @@ import type { RequestHandler } from './$types';
  * path: name:string! Stack name (from GET /api/stacks)
  * query: env:integer Environment ID the stack belongs to (from GET /api/environments)
  * query: mode:string Restart mode — "recreate" recreates containers (new IDs, re-pull), "ordered" does a stop+start honoring depends_on ordering (same IDs), anything else is a plain in-place restart
+ * resp-400: Invalid stack name
  * resp-200: Server-Sent-Events job stream with a final result event ({success, output})
  * resp-403: Permission denied (requires stacks:restart, or environment access denied on enterprise)
  */
@@ -34,9 +36,14 @@ export const POST: RequestHandler = async (event) => {
 	const modeParam = url.searchParams.get('mode');
 	const mode = modeParam === 'recreate' ? 'recreate' : modeParam === 'ordered' ? 'ordered' : 'restart';
 
+	// Validate the name shape before it is used in a filesystem path.
+	if (!isValidStackName(params.name)) {
+		return json({ error: 'Invalid stack name' }, { status: 400 });
+	}
+
 	return createJobResponse(async (send) => {
 		try {
-			const stackName = decodeURIComponent(params.name);
+			const stackName = params.name;
 			const result = await restartStack(stackName, envIdNum, mode, (line) => send('progress', { type: 'line', line }));
 
 			// Audit log

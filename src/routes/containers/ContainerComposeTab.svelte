@@ -18,6 +18,7 @@
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import { toast } from 'svelte-sonner';
 	import { mergeServiceIntoCompose, computeAddedRange } from '$lib/utils/compose-merge';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		containerId: string;
@@ -51,7 +52,7 @@
 			const res = await fetch(appendEnvParam(`/api/containers/${containerId}/compose`, envId));
 			if (!res.ok) {
 				const body = await res.json().catch(() => ({}));
-				throw new Error(body.error || `Failed to generate compose (${res.status})`);
+				throw new Error(body.error || m.containers_compose_generate_failed_status({ status: res.status }));
 			}
 			const data = await res.json();
 			composeUserEnv = data.compose ?? '';
@@ -60,7 +61,7 @@
 			stackProject = data.stackProject ?? null;
 			editorContent = onlyUserEnv ? composeUserEnv : composeFullEnv;
 		} catch (e) {
-			loadError = e instanceof Error ? e.message : 'Failed to generate compose';
+			loadError = e instanceof Error ? e.message : m.containers_compose_generate_failed();
 		} finally {
 			loading = false;
 		}
@@ -107,7 +108,7 @@
 			copied = true;
 			setTimeout(() => (copied = false), 1500);
 		} else {
-			toast.error('Failed to copy');
+			toast.error(m.containers_compose_copy_failed());
 		}
 	}
 
@@ -151,14 +152,14 @@
 			);
 			if (!res.ok) {
 				const body = await res.json().catch(() => ({}));
-				throw new Error(body.error || `Validation failed (${res.status})`);
+				throw new Error(body.error || m.containers_compose_validation_failed_status({ status: res.status }));
 			}
 			const fresh = await res.json();
 			if (seq !== validateSeq) return;
 			validateReport = fresh;
 		} catch (e) {
 			if (seq !== validateSeq) return;
-			validateError = e instanceof Error ? e.message : 'Validation failed';
+			validateError = e instanceof Error ? e.message : m.containers_compose_validation_failed();
 			validateReport = null;
 		} finally {
 			if (seq === validateSeq) validateLoading = false;
@@ -215,16 +216,16 @@
 			const res = await fetch(appendEnvParam(`/api/stacks/${encodeURIComponent(stack.name)}/compose`, envId));
 			if (!res.ok) {
 				const body = await res.json().catch(() => ({}));
-				throw new Error(body.error || `Failed to read ${stack.name} compose`);
+				throw new Error(body.error || m.containers_compose_read_stack_failed({ stack: stack.name }));
 			}
 			const { content } = await res.json();
 			mergeBaseCompose = content ?? '';
 			mergedIntoStack = stack.name;
 			// Merge using the CURRENT env variant of the generated service (warn on clash once).
 			applyMerge(onlyUserEnv ? composeUserEnv : composeFullEnv, stack.name, true);
-			toast.info(`Merged into ${stack.name} - review the highlighted service, then Save`);
+			toast.info(m.containers_compose_merged_review({ stack: stack.name }));
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Merge failed');
+			toast.error(e instanceof Error ? e.message : m.containers_compose_merge_failed());
 		} finally {
 			merging = false;
 		}
@@ -240,7 +241,7 @@
 		// Only warn on the first merge - re-merges from the env toggle would re-spam the toast.
 		if (renamed && notify) {
 			const original = key.replace(/-\d+$/, '');
-			toast.warning(`"${original}" already exists in ${stackName}; added as "${key}"`);
+			toast.warning(m.containers_compose_service_renamed({ original, stack: stackName, key }));
 		}
 		// Set text + highlight in ONE transaction so the decorations land on the new doc.
 		const ranges = computeAddedRange(merged, key);
@@ -262,14 +263,14 @@
 			});
 			if (!res.ok) {
 				const body = await res.json().catch(() => ({}));
-				throw new Error(body.error || `Failed to save (${res.status})`);
+				throw new Error(body.error || m.containers_compose_save_failed_status({ status: res.status }));
 			}
-			toast.success(`Saved to ${mergedIntoStack}`);
+			toast.success(m.containers_compose_saved_to({ stack: mergedIntoStack }));
 			mergedIntoStack = null;
 			mergeBaseCompose = '';
 			addedLineMarkers = [];
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : 'Save failed');
+			toast.error(e instanceof Error ? e.message : m.containers_compose_save_failed());
 		} finally {
 			merging = false;
 		}
@@ -289,7 +290,7 @@
 <div class="flex flex-col h-full min-h-0 gap-3">
 	{#if loading}
 		<div class="flex items-center justify-center py-12 text-muted-foreground">
-			<Loader2 class="h-5 w-5 animate-spin mr-2" /> Generating compose...
+			<Loader2 class="h-5 w-5 animate-spin mr-2" /> {m.containers_compose_generating()}
 		</div>
 	{:else if loadError}
 		<div class="text-sm text-red-500 py-4">{loadError}</div>
@@ -298,47 +299,47 @@
 		{#if stackProject}
 			<div class="flex items-center gap-2 text-xs rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2">
 				<Layers class="h-3.5 w-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
-				<span>This container already belongs to stack <span class="font-semibold">{stackProject}</span>. The generated compose is a fresh definition you can save separately or merge elsewhere.</span>
+				<span>{m.containers_compose_stack_banner_before()} <span class="font-semibold">{stackProject}</span>{m.containers_compose_stack_banner_after()}</span>
 			</div>
 		{/if}
 
 		<!-- Toolbar -->
 		<div class="flex items-center gap-2 flex-wrap">
-			<span class="text-xs text-muted-foreground">Environment</span>
+			<span class="text-xs text-muted-foreground">{m.containers_compose_env_label()}</span>
 			<ToggleSwitch
 				value={envMode}
 				leftValue="user"
 				rightValue="all"
-				leftLabel="User-set only"
-				rightLabel="All"
+				leftLabel={m.containers_compose_env_user_set()}
+				rightLabel={m.containers_compose_env_all()}
 				onchange={(v) => { const m = v as 'user' | 'all'; envMode = m; reseedEditor(m); }}
 			/>
 			<div class="flex-1"></div>
 			<Button variant="outline" size="sm" onclick={runValidate} disabled={validateLoading}>
 				{#if validateLoading}<Loader2 class="h-3.5 w-3.5 mr-1.5 animate-spin" />{:else}<ShieldCheck class="h-3.5 w-3.5 mr-1.5" />{/if}
-				Validate
+				{m.containers_compose_validate()}
 			</Button>
 			<Button variant="outline" size="sm" onclick={doCopy}>
 				{#if copied}<Check class="h-3.5 w-3.5 mr-1.5 text-green-500" />{:else}<Copy class="h-3.5 w-3.5 mr-1.5" />{/if}
-				Copy
+				{m.containers_compose_copy()}
 			</Button>
 			<Button variant="outline" size="sm" onclick={doDownload}>
-				<Download class="h-3.5 w-3.5 mr-1.5" /> Download
+				<Download class="h-3.5 w-3.5 mr-1.5" /> {m.containers_compose_download()}
 			</Button>
 			<Button size="sm" variant="outline" onclick={() => (stackModalOpen = true)}>
-				<FileCode class="h-3.5 w-3.5 mr-1.5" /> Save as new stack
+				<FileCode class="h-3.5 w-3.5 mr-1.5" /> {m.containers_compose_save_as_new_stack()}
 			</Button>
 			<DropdownMenu.Root bind:open={appendMenuOpen} onOpenChange={(o) => o && loadInternalStacks()}>
 				<DropdownMenu.Trigger>
 					<Button size="sm" variant="outline">
-						<ListPlus class="h-3.5 w-3.5 mr-1.5" /> Append to existing <ChevronDown class="h-3.5 w-3.5 ml-1" />
+						<ListPlus class="h-3.5 w-3.5 mr-1.5" /> {m.containers_compose_append_to_existing()} <ChevronDown class="h-3.5 w-3.5 ml-1" />
 					</Button>
 				</DropdownMenu.Trigger>
 				<DropdownMenu.Content align="end" class="w-64 max-h-72 overflow-auto">
 					{#if loadingStacks}
-						<div class="flex items-center gap-2 px-2 py-2 text-xs text-muted-foreground"><Loader2 class="h-3.5 w-3.5 animate-spin" /> Loading...</div>
+						<div class="flex items-center gap-2 px-2 py-2 text-xs text-muted-foreground"><Loader2 class="h-3.5 w-3.5 animate-spin" /> {m.containers_compose_loading()}</div>
 					{:else if existingStacks.length === 0}
-						<div class="px-2 py-2 text-xs text-muted-foreground">No internal stacks</div>
+						<div class="px-2 py-2 text-xs text-muted-foreground">{m.containers_compose_no_internal_stacks()}</div>
 					{:else}
 						{#each existingStacks as s (s.name)}
 							<DropdownMenu.Item
@@ -359,11 +360,11 @@
 		{#if mergedIntoStack}
 			<div class="flex items-center gap-2 text-xs rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2">
 				<Info class="h-3.5 w-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
-				<span class="flex-1">Reviewing merge into <span class="font-semibold">{mergedIntoStack}</span>. The highlighted service is what will be added.</span>
-				<Button variant="ghost" size="sm" onclick={cancelMerge} disabled={merging}>Cancel</Button>
+				<span class="flex-1">{m.containers_compose_review_before()} <span class="font-semibold">{mergedIntoStack}</span>{m.containers_compose_review_after()}</span>
+				<Button variant="ghost" size="sm" onclick={cancelMerge} disabled={merging}>{m.containers_compose_cancel()}</Button>
 				<Button size="sm" onclick={saveToExisting} disabled={merging}>
 					{#if merging}<Loader2 class="h-3.5 w-3.5 mr-1.5 animate-spin" />{:else}<Save class="h-3.5 w-3.5 mr-1.5" />{/if}
-					Save to {mergedIntoStack}
+					{m.containers_compose_save_to({ stack: mergedIntoStack })}
 				</Button>
 			</div>
 		{/if}
@@ -407,6 +408,6 @@
 	onClose={() => (stackModalOpen = false)}
 	onSuccess={() => {
 		stackModalOpen = false;
-		toast.success('Stack created');
+		toast.success(m.containers_compose_stack_created());
 	}}
 />

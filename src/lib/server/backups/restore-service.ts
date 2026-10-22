@@ -26,6 +26,7 @@ import {
 	type PostRestoreOutcome,
 	type ResticRun,
 } from './models';
+import { describeFsError } from '../fs-error';
 import { buildInPlaceRestore, buildNewLocationRestore, buildCloneRestore } from './restore-script';
 import { assertSafeVolumeInclude, assertSafeRestoreTarget } from './security';
 import { liveTargetKey } from './locks';
@@ -721,7 +722,10 @@ export class RestoreService {
 				}
 			}
 		} catch (err) {
-			return { action, ok: false, error: err instanceof Error ? err.message : String(err) };
+			// This string is what the operator reads and quotes back. Most failures here
+			// come from Docker, which describeFsError passes through as its message; for a
+			// filesystem one it adds the code and the path, which name the actual fault.
+			return { action, ok: false, error: describeFsError(err) };
 		}
 	}
 

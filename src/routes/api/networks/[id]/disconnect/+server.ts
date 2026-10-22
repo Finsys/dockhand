@@ -4,6 +4,7 @@ import { disconnectContainerFromNetwork, inspectNetwork } from '$lib/server/dock
 import { authorize } from '$lib/server/authorize';
 import { auditNetwork } from '$lib/server/audit';
 import { validateDockerIdParam } from '$lib/server/docker-validation';
+import { refuseOwnContainer } from '$lib/server/own-container-guard';
 
 /**
  * @openapi
@@ -16,7 +17,7 @@ import { validateDockerIdParam } from '$lib/server/docker-validation';
  * resp-200: {success:boolean!}
  * resp-200-example: {"success":true}
  * resp-400: Container ID is required
- * resp-403: Permission denied
+ * resp-403: Permission denied (needs networks:disconnect; the Dockhand container's own networks are admin-only)
  * resp-500: Failed to disconnect container from network
  */
 export const POST: RequestHandler = async (event) => {
@@ -45,6 +46,15 @@ export const POST: RequestHandler = async (event) => {
 
 		const invalidContainer = validateDockerIdParam(containerId, 'container');
 		if (invalidContainer) return invalidContainer;
+
+		// Dockhand's own networking is administrator territory: the update helper
+		// reconnects the replacement container to whatever it finds attached here, so
+		// this is read back later by a privileged step. Docker takes a name wherever
+		// it takes an id, so resolve to the id before comparing.
+		if (auth.authEnabled && !auth.isAdmin) {
+			const denied = await refuseOwnContainer(containerId, envIdNum);
+			if (denied) return denied;
+		}
 
 		// Get network name for audit
 		let networkName = params.id;

@@ -28,3 +28,15 @@ export const API_DOCS_ENABLED = process.env.FEAT_API_DOCS === 'true';
  * boot. Default false: a secret is required.
  */
 export const ALLOW_WEBHOOKS_WITHOUT_SECRET = process.env.ALLOW_WEBHOOKS_WITHOUT_SECRET === 'true';
+
+/**
+ * Whether logging out also ends the session at the OIDC provider.
+ *
+ * On by default, because leaving the provider's session open means the next visit
+ * signs straight back in without being asked for anything. Set
+ * OIDC_END_SESSION=false where a provider's end-session endpoint misbehaves - for
+ * instance one that rejects the return address and shows its own error page. The
+ * local session is destroyed either way, so turning this off never leaves anybody
+ * signed in to Dockhand. Read once at boot.
+ */
+export const OIDC_END_SESSION = process.env.OIDC_END_SESSION !== 'false';

@@ -14,8 +14,9 @@ export interface GroupDescriptor {
 	/** Optional icon names shown in the header (e.g. one per tag in the combo). */
 	icons?: (string | null)[];
 	/**
-	 * Sort weight for ordering groups against each other. Lower comes first.
-	 * Ungrouped rows use +Infinity so they always trail. Defaults to 0.
+	 * Sort weight for ordering groups against each other. Lower comes first; equal
+	 * weights fall back to label order. Ungrouped rows use +Infinity so they always
+	 * trail. Defaults to 0.
 	 */
 	order?: number;
 }
@@ -34,16 +35,15 @@ export const UNGROUPED_KEY = '__ungrouped__';
 /**
  * Partition `data` into ordered groups. Row order WITHIN a group is preserved
  * (the caller pre-sorts `data`), so grouping composes with column sorting.
- * Group order: by `order` weight, then first-appearance, so it is stable and
- * independent of object identity. The ungrouped bucket always trails.
+ * Group order: by `order` weight, then label (case-insensitive), then key, so it
+ * does not depend on row order. The ungrouped bucket always trails.
  */
 export function groupData<T>(
 	data: T[],
 	groupBy: (item: T) => GroupDescriptor | null,
 	ungroupedLabel = 'Untagged'
 ): DataGridGroup<T>[] {
-	const groups = new Map<string, DataGridGroup<T> & { order: number; seq: number }>();
-	let seq = 0;
+	const groups = new Map<string, DataGridGroup<T> & { order: number }>();
 
 	for (const item of data) {
 		const desc = groupBy(item);
@@ -56,8 +56,7 @@ export function groupData<T>(
 				color: desc?.color ?? null,
 				icons: desc?.icons ?? [],
 				items: [],
-				order: desc ? (desc.order ?? 0) : Number.POSITIVE_INFINITY,
-				seq: seq++
+				order: desc ? (desc.order ?? 0) : Number.POSITIVE_INFINITY
 			};
 			groups.set(key, g);
 		}
@@ -65,6 +64,11 @@ export function groupData<T>(
 	}
 
 	return [...groups.values()]
-		.sort((a, b) => a.order - b.order || a.seq - b.seq)
-		.map(({ order: _order, seq: _seq, ...g }) => g);
+		.sort(
+			(a, b) =>
+				a.order - b.order ||
+				a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }) ||
+				(a.key < b.key ? -1 : a.key > b.key ? 1 : 0)
+		)
+		.map(({ order: _order, ...g }) => g);
 }

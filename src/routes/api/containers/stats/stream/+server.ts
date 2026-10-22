@@ -69,6 +69,11 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 				);
 				const runningContainers = containers.filter(c => c.state === 'running');
 
+				// All at once, deliberately. The daemon samples CPU twice per call, so
+				// each one costs about two seconds no matter what; anything narrower
+				// than "every container" multiplies that into the wait for a table the
+				// user is watching. The collection worker paces its own fan-out because
+				// it runs in the background, where waiting is free.
 				const statsPromises = runningContainers.map(async (container) => {
 					try {
 						const stats = await withTimeout(
@@ -89,6 +94,9 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
 						const stat: ContainerStats = {
 							id: container.id,
 							name: container.name,
+							// Same field the one-shot endpoint reports, so a consumer can group
+							// by stack whichever of the two it reads.
+							stack: container.labels?.['com.docker.compose.project'] ?? null,
 							cpuPercent: Math.round(cpuPercent * 100) / 100,
 							memoryUsage: memory.usage,
 							memoryRaw: memory.raw,

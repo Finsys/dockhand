@@ -1,4 +1,5 @@
 import { json } from '@sveltejs/kit';
+import { parseEnvFileForForm } from '$lib/utils/env-file-values';
 import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
 import { getStackSource, updateStackSource } from '$lib/server/db';
@@ -133,17 +134,8 @@ export const POST: RequestHandler = async ({ params, request, url, cookies }) =>
 		if (existsSync(envFilePath) && !isProtectedPath(envFilePath)) {
 			rawEnvContent = readFileSync(envFilePath, 'utf-8');
 
-			// Parse env vars from raw content
-			const lines = rawEnvContent.split('\n');
-			for (const line of lines) {
-				const trimmed = line.trim();
-				if (!trimmed || trimmed.startsWith('#')) continue;
-				const eqIndex = trimmed.indexOf('=');
-				if (eqIndex > 0) {
-					const key = trimmed.substring(0, eqIndex);
-					const value = trimmed.substring(eqIndex + 1);
-					envVars.push({ key, value, isSecret: false });
-				}
+			for (const { key, value } of parseEnvFileForForm(rawEnvContent)) {
+				envVars.push({ key, value, isSecret: false });
 			}
 		}
 

@@ -31,6 +31,7 @@
 	import { toast } from 'svelte-sonner';
 	import { focusFirstInput } from '$lib/utils';
 	import { readJobResponse } from '$lib/utils/sse-fetch';
+	import { m } from '$lib/paraglide/messages.js';
 
 
 	// localStorage key for persisted split ratio
@@ -44,9 +45,9 @@
 
 	function getAuthLabel(authType: string) {
 		switch (authType) {
-			case 'ssh': return 'SSH Key';
-			case 'password': return 'Password';
-			default: return 'None';
+			case 'ssh': return m.stacks_git_auth_ssh_key();
+			case 'password': return m.stacks_git_auth_password();
+			default: return m.stacks_git_auth_none();
 		}
 	}
 
@@ -448,11 +449,11 @@
 	async function populateEnvVars() {
 		// Validate we have repository info
 		if (formRepoMode === 'existing' && !formRepositoryId) {
-			toast.error('Please select a repository first');
+			toast.error(m.stacks_git_toast_select_repo_first());
 			return;
 		}
 		if (formRepoMode === 'new' && !formNewRepoUrl.trim()) {
-			toast.error('Please enter a repository URL first');
+			toast.error(m.stacks_git_toast_enter_repo_url_first());
 			return;
 		}
 
@@ -482,8 +483,8 @@
 			const data = await response.json();
 
 			if (!response.ok) {
-				toast.error('Failed to load env variables', {
-					description: data.error || 'Unknown error'
+				toast.error(m.stacks_git_toast_env_load_failed(), {
+					description: data.error || m.stacks_git_unknown_error()
 				});
 				return;
 			}
@@ -492,8 +493,8 @@
 			const count = Object.keys(vars).length;
 
 			if (count === 0) {
-				toast.info('No environment variables found', {
-					description: 'No .env files found in the repository. You can still add variables manually.'
+				toast.info(m.stacks_git_toast_no_env_vars(), {
+					description: m.stacks_git_toast_no_env_vars_description()
 				});
 				return;
 			}
@@ -505,12 +506,12 @@
 			fileEnvVars = vars;
 			envVars = mergeGitStackEnvVars(vars, envVars.filter((v) => v.key.trim()));
 
-			toast.success(`Loaded ${count} variable${count === 1 ? '' : 's'}`, {
-				description: 'You can now customize values before deploying'
+			toast.success(m.stacks_git_toast_vars_loaded({ count }), {
+				description: m.stacks_git_toast_vars_loaded_description()
 			});
 		} catch (e) {
 			console.error('Failed to populate env vars:', e);
-			toast.error('Failed to load env variables');
+			toast.error(m.stacks_git_toast_env_load_failed());
 		} finally {
 			populatingEnvVars = false;
 		}
@@ -659,32 +660,32 @@
 
 		const trimmedStackName = formStackName.trim();
 		if (!trimmedStackName) {
-			errors.stackName = 'Stack name is required';
+			errors.stackName = m.stacks_git_error_stack_name_required();
 			hasErrors = true;
 		} else if (!STACK_NAME_REGEX.test(trimmedStackName)) {
-			errors.stackName = 'Stack name must be lowercase, start with a letter or number, and contain only letters, numbers, hyphens, and underscores';
+			errors.stackName = m.stacks_git_error_stack_name_invalid();
 			hasErrors = true;
 		}
 
 		if (formRepoMode === 'existing' && !formRepositoryId) {
-			errors.repository = 'Please select a repository';
+			errors.repository = m.stacks_git_error_repository_required();
 			hasErrors = true;
 		}
 
 		if (formRepoMode === 'new' && !formNewRepoName.trim()) {
-			errors.repoName = 'Repository name is required';
+			errors.repoName = m.stacks_git_error_repo_name_required();
 			hasErrors = true;
 		}
 
 		if (formRepoMode === 'new' && !formNewRepoUrl.trim()) {
-			errors.repoUrl = 'Repository URL is required';
+			errors.repoUrl = m.stacks_git_error_repo_url_required();
 			hasErrors = true;
 		}
 
 		// A secret is required unless the instance opted into secret-less webhooks
 		// (ALLOW_WEBHOOKS_WITHOUT_SECRET, for isolated networks) - mirror the server.
 		if (formWebhookEnabled && !formWebhookSecret.trim() && !$page.data.allowSecretlessWebhook) {
-			errors.webhookSecret = 'A webhook secret is required when the webhook is enabled';
+			errors.webhookSecret = m.stacks_git_error_webhook_secret_required();
 			hasErrors = true;
 		}
 
@@ -763,7 +764,7 @@
 			// "Save and deploy" shows progress like StackModal's "Save & redeploy".
 			// (A plain save with no deploy has no output to show.)
 			if (deployAfterSave) {
-				outputTitle = `Deploying ${formStackName.trim()}`;
+				outputTitle = m.stacks_git_output_title_deploying({ name: formStackName.trim() });
 				outputLines = [];
 				outputRunning = true;
 				outputOk = undefined;
@@ -792,7 +793,7 @@
 					outputOk = false;
 					outputMs = Date.now() - outputStartedAt;
 				}
-				formError = data.error || 'Failed to save git stack';
+				formError = data.error || m.stacks_git_error_save_failed();
 				return;
 			}
 
@@ -810,8 +811,8 @@
 				outputMs = Date.now() - outputStartedAt;
 			}
 			if (deployResult && !deployResult.success) {
-				toast.error('Deployment failed', {
-					description: deployResult.error || 'Unknown error'
+				toast.error(m.stacks_git_toast_deploy_failed(), {
+					description: deployResult.error || m.stacks_git_unknown_error()
 				});
 				deploysReloadKey++; // the failed run is recorded; refresh the Deploys tab
 				onSaved(); // Still refresh the list to show the new stack
@@ -825,7 +826,7 @@
 			// can review the log; a plain save closes as before.
 			if (!deployAfterSave) onClose();
 		} catch (error) {
-			formError = 'Failed to save git stack';
+			formError = m.stacks_git_error_save_failed();
 		} finally {
 			formSaving = false;
 		}
@@ -888,7 +889,7 @@
 					{#if gitStack}
 						<button
 							type="button"
-							title="Change stack icon"
+							title={m.stacks_git_change_icon()}
 							onclick={() => (showIconPicker = true)}
 							class="p-1.5 rounded-md bg-zinc-200 dark:bg-zinc-700 hover:ring-2 hover:ring-primary transition-shadow"
 						>
@@ -905,10 +906,10 @@
 					{/if}
 					<div>
 						<Dialog.Title class="text-sm font-semibold text-zinc-800 dark:text-zinc-100">
-							{gitStack ? 'Edit git stack' : 'Deploy from Git'}
+							{gitStack ? m.stacks_git_title_edit() : m.stacks_git_title_create()}
 						</Dialog.Title>
 						<Dialog.Description class="text-xs text-zinc-500 dark:text-zinc-400">
-							{gitStack ? 'Update git stack settings' : 'Deploy a compose stack from a Git repository'}
+							{gitStack ? m.stacks_git_description_edit() : m.stacks_git_description_create()}
 						</Dialog.Description>
 					</div>
 				</div>
@@ -933,14 +934,14 @@
 					class="relative -mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm transition-colors {activeTab === 'settings' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}"
 					onclick={() => (activeTab = 'settings')}
 				>
-					<Settings2 class="h-3.5 w-3.5" /> Settings
+					<Settings2 class="h-3.5 w-3.5" /> {m.nav_settings()}
 				</button>
 				<button
 					type="button"
 					class="relative -mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm transition-colors {activeTab === 'deploys' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}"
 					onclick={() => (activeTab = 'deploys')}
 				>
-					<History class="h-3.5 w-3.5" /> Deploys
+					<History class="h-3.5 w-3.5" /> {m.stacks_git_tab_deploys()}
 					{#if deploysTally.ok > 0}
 						<span class="inline-flex items-center gap-0.5 rounded-full bg-emerald-500/15 px-1.5 text-[10px] font-medium text-emerald-500"><Check class="h-2.5 w-2.5" />{deploysTally.ok}</span>
 					{/if}
@@ -957,7 +958,7 @@
 						class="relative -mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm transition-colors {activeTab === 'backups' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}"
 						onclick={() => (activeTab = 'backups')}
 					>
-						<Archive class="h-3.5 w-3.5" /> Backups
+						<Archive class="h-3.5 w-3.5" /> {m.nav_backups()}
 						{#if backupTally.ok > 0}<span class="inline-flex items-center gap-0.5 rounded-full bg-emerald-500/15 px-1.5 text-[10px] font-medium text-emerald-500"><Check class="w-2.5 h-2.5" />{backupTally.ok}</span>{/if}
 						{#if backupTally.failed > 0}<span class="inline-flex items-center gap-0.5 rounded-full bg-red-500/15 px-1.5 text-[10px] font-semibold text-red-500"><X class="w-2.5 h-2.5" />{backupTally.failed}</span>{/if}
 					</button>
@@ -987,7 +988,7 @@
 			<!-- Repository selection -->
 			{#if !gitStack}
 				<div class="space-y-3">
-					<Label>Repository</Label>
+					<Label>{m.stacks_git_repository()}</Label>
 					<div class="flex gap-2">
 						<Button
 							variant={formRepoMode === 'existing' ? 'default' : 'outline'}
@@ -995,14 +996,14 @@
 							onclick={() => formRepoMode = 'existing'}
 							disabled={repositories.length === 0}
 						>
-							Select existing
+							{m.stacks_git_repo_mode_existing()}
 						</Button>
 						<Button
 							variant={formRepoMode === 'new' ? 'default' : 'outline'}
 							size="sm"
 							onclick={() => formRepoMode = 'new'}
 						>
-							Add new
+							{m.stacks_git_repo_mode_new()}
 						</Button>
 					</div>
 
@@ -1025,7 +1026,7 @@
 										<span class="text-muted-foreground text-xs truncate hidden sm:inline">({repoPath})</span>
 									</div>
 								{:else}
-									<span class="text-muted-foreground">Select a repository...</span>
+									<span class="text-muted-foreground">{m.stacks_git_select_repository_placeholder()}</span>
 								{/if}
 							</Select.Trigger>
 							<Select.Content>
@@ -1053,35 +1054,35 @@
 							<p class="text-xs text-destructive">{errors.repository}</p>
 						{:else if repositories.length === 0}
 							<p class="text-xs text-muted-foreground">
-								No repositories configured. Click "Add new" to add one.
+								{m.stacks_git_no_repositories()}
 							</p>
 						{/if}
 						<!-- Branch selection for existing repository -->
 						{#if formRepoMode === 'existing' && selectedRepo}
 							<div class="space-y-2">
-								<Label for="existing-repo-branch">Branch</Label>
+								<Label for="existing-repo-branch">{m.stacks_git_branch()}</Label>
 								<BranchCombobox
 									id="existing-repo-branch"
 									value={formBranch ?? ''}
 									branches={branches}
 									defaultBranch={selectedRepo.branch}
 									loading={branchesLoading}
-									placeholder="Repository default ({selectedRepo.branch})"
-									clearLabel="Repository default ({selectedRepo.branch})"
+									placeholder={m.stacks_git_branch_repo_default({ branch: selectedRepo.branch })}
+									clearLabel={m.stacks_git_branch_repo_default({ branch: selectedRepo.branch })}
 									onchange={(v) => { formBranch = v; }}
 									onclear={() => { formBranch = null; }}
 								/>
-								<p class="text-xs text-muted-foreground">Branch this stack deploys from. Leave empty to follow the branch configured on the repository ({selectedRepo.branch}).</p>
+								<p class="text-xs text-muted-foreground">{m.stacks_git_branch_hint({ branch: selectedRepo.branch })}</p>
 							</div>
 						{/if}
 					{:else}
 						<div class="space-y-3 p-3 border rounded-md bg-muted/30">
 							<div class="space-y-2">
-								<Label for="new-repo-name">Repository name</Label>
+								<Label for="new-repo-name">{m.stacks_git_repo_name()}</Label>
 								<Input
 									id="new-repo-name"
 									bind:value={formNewRepoName}
-									placeholder="e.g., my-stacks"
+									placeholder={m.stacks_git_repo_name_placeholder()}
 									class={errors.repoName ? 'border-destructive focus-visible:ring-destructive' : ''}
 									oninput={() => errors.repoName = undefined}
 								/>
@@ -1090,7 +1091,7 @@
 								{/if}
 							</div>
 							<div class="space-y-2">
-								<Label for="new-repo-url">Repository URL</Label>
+								<Label for="new-repo-url">{m.stacks_git_repo_url()}</Label>
 								<Input
 									id="new-repo-url"
 									bind:value={formNewRepoUrl}
@@ -1104,7 +1105,7 @@
 							</div>
 							<div class="grid grid-cols-2 items-start gap-3">
 								<div class="space-y-2">
-									<Label for="new-repo-branch">Branch</Label>
+									<Label for="new-repo-branch">{m.stacks_git_branch()}</Label>
 									<!-- Free-text, searchable branch picker. Supports both discovered
 									     branches and arbitrary typed names: a new/private repository whose
 									     branch enumeration fails must not force the user onto "main" — they
@@ -1122,10 +1123,10 @@
 										onchange={(v) => { formNewRepoBranch = v; }}
 										onclear={() => { formNewRepoBranch = 'main'; }}
 									/>
-									<p class="text-xs text-muted-foreground">Type a name or pick from the list.</p>
+									<p class="text-xs text-muted-foreground">{m.stacks_git_branch_type_or_pick()}</p>
 								</div>
 								<div class="space-y-2">
-									<Label for="new-repo-credential">Credential</Label>
+									<Label for="new-repo-credential">{m.stacks_git_credential()}</Label>
 									<Select.Root
 										type="single"
 										value={formNewRepoCredentialId?.toString() ?? 'none'}
@@ -1144,14 +1145,14 @@
 												<span>{selectedCred.name} ({getAuthLabel(selectedCred.authType)})</span>
 											{:else}
 												<Key class="w-4 h-4 mr-2 text-muted-foreground" />
-												<span>None (public)</span>
+												<span>{m.stacks_git_credential_none()}</span>
 											{/if}
 										</Select.Trigger>
 										<Select.Content>
 											<Select.Item value="none">
 												<span class="flex items-center gap-2">
 													<Key class="w-4 h-4 text-muted-foreground" />
-													None (public)
+													{m.stacks_git_credential_none()}
 												</span>
 											</Select.Item>
 											{#each credentials as cred}
@@ -1170,7 +1171,7 @@
 											{/each}
 										</Select.Content>
 									</Select.Root>
-									<p class="text-xs text-muted-foreground">SSH key or token for private repositories.</p>
+									<p class="text-xs text-muted-foreground">{m.stacks_git_credential_hint()}</p>
 								</div>
 							</div>
 						</div>
@@ -1180,31 +1181,31 @@
 
 			<!-- Stack configuration -->
 			<div class="space-y-2">
-				<Label for="stack-name">Stack name</Label>
+				<Label for="stack-name">{m.stacks_git_stack_name()}</Label>
 				<Input
 					id="stack-name"
 					bind:value={formStackName}
-					placeholder="e.g., my-app"
+					placeholder={m.stacks_git_stack_name_placeholder()}
 					class={errors.stackName ? 'border-destructive focus-visible:ring-destructive' : ''}
 					oninput={() => { errors.stackName = undefined; formStackNameUserModified = true; }}
 				/>
 				{#if errors.stackName}
 					<p class="text-xs text-destructive">{errors.stackName}</p>
 				{:else}
-					<p class="text-xs text-muted-foreground">This will be the name of the deployed stack</p>
+					<p class="text-xs text-muted-foreground">{m.stacks_git_stack_name_hint()}</p>
 				{/if}
 			</div>
 
 			{#if gitStack?.stackName}
 				<div class="space-y-2">
-					<Label>Tags</Label>
+					<Label>{m.stacks_git_tags()}</Label>
 					<StackTagsSection stackName={gitStack.stackName} envId={effectiveEnvId} />
 				</div>
 			{/if}
 
 			{#if gitStack && selectedRepo}
 				<div class="space-y-2">
-					<Label>Repository</Label>
+					<Label>{m.stacks_git_repository()}</Label>
 					<div class="flex h-9 items-center gap-2 rounded-md border border-input bg-muted/50 px-3 py-1 text-sm text-muted-foreground">
 						<FolderGit2 class="w-4 h-4 shrink-0" />
 						<span class="truncate" title={selectedRepo.url}>{selectedRepo.url}</span>
@@ -1214,41 +1215,41 @@
 
 			{#if gitStack && selectedRepo}
 				<div class="space-y-2">
-					<Label for="stack-branch">Branch</Label>
+					<Label for="stack-branch">{m.stacks_git_branch()}</Label>
 					<BranchCombobox
 						id="stack-branch"
 						value={formBranch ?? ''}
 						branches={branches}
 						defaultBranch={selectedRepo.branch}
 						loading={branchesLoading}
-						placeholder="Repository default ({selectedRepo.branch})"
-						clearLabel="Repository default ({selectedRepo.branch})"
+						placeholder={m.stacks_git_branch_repo_default({ branch: selectedRepo.branch })}
+						clearLabel={m.stacks_git_branch_repo_default({ branch: selectedRepo.branch })}
 						onchange={(v) => { formBranch = v; }}
 						onclear={() => { formBranch = null; }}
 					/>
-					<p class="text-xs text-muted-foreground">Branch this stack deploys from. Leave empty to follow the branch configured on the repository ({selectedRepo.branch}).</p>
+					<p class="text-xs text-muted-foreground">{m.stacks_git_branch_hint({ branch: selectedRepo.branch })}</p>
 				</div>
 			{/if}
 
 			<div class="space-y-2">
-				<Label for="compose-path">Compose file path</Label>
+				<Label for="compose-path">{m.stacks_git_compose_path()}</Label>
 				<Input id="compose-path" bind:value={formComposePath} placeholder="compose.yaml" />
-				<p class="text-xs text-muted-foreground">Path to the compose file within the repository</p>
+				<p class="text-xs text-muted-foreground">{m.stacks_git_compose_path_hint()}</p>
 			</div>
 
 			<!-- Additional env file for variable substitution -->
 			<div class="space-y-2">
 				<div class="flex items-center gap-1.5">
-					<Label for="env-file-path">Additional env file (optional)</Label>
+					<Label for="env-file-path">{m.stacks_git_env_file()}</Label>
 					<Tooltip.Root>
 						<Tooltip.Trigger>
 							<HelpCircle class="w-3.5 h-3.5 text-muted-foreground cursor-help" />
 						</Tooltip.Trigger>
 						<Tooltip.Content>
 							<div class="w-80">
-								<p class="text-xs">A <code class="bg-muted px-1 rounded">.env</code> file in the compose directory is always loaded automatically, if present.</p>
-								<p class="text-xs mt-2">Use this field for an additional env file with a non-standard name (e.g. <code class="bg-muted px-1 rounded">.env.production</code>). Its values override the default <code class="bg-muted px-1 rounded">.env</code>.</p>
-								<p class="text-xs mt-2">Overrides from the environment variables editor on the right always take highest precedence.</p>
+								<p class="text-xs">{m.stacks_git_env_file_tip_default_before()} <code class="bg-muted px-1 rounded">.env</code> {m.stacks_git_env_file_tip_default_after()}</p>
+								<p class="text-xs mt-2">{m.stacks_git_env_file_tip_custom_before()} <code class="bg-muted px-1 rounded">.env.production</code>{m.stacks_git_env_file_tip_custom_middle()} <code class="bg-muted px-1 rounded">.env</code>{m.stacks_git_env_file_tip_custom_after()}</p>
+								<p class="text-xs mt-2">{m.stacks_git_env_file_tip_precedence()}</p>
 							</div>
 						</Tooltip.Content>
 					</Tooltip.Root>
@@ -1258,22 +1259,22 @@
 						bind:value={formEnvFilePath}
 						placeholder=""
 					/>
-				<p class="text-xs text-muted-foreground">Additional env file to pass to Docker Compose</p>
+				<p class="text-xs text-muted-foreground">{m.stacks_git_env_file_hint()}</p>
 			</div>
 
 			<!-- Context directory -->
 			<div class="space-y-2">
 				<div class="flex items-center gap-1.5">
-					<Label for="context-dir">Context directory (optional)</Label>
+					<Label for="context-dir">{m.stacks_git_context_dir()}</Label>
 					<Tooltip.Root>
 						<Tooltip.Trigger>
 							<HelpCircle class="w-3.5 h-3.5 text-muted-foreground cursor-help" />
 						</Tooltip.Trigger>
 						<Tooltip.Content>
 							<div class="w-80">
-								<p class="text-xs">Working directory for Docker Compose, relative to the repository root. All files in this directory will be available for volume mounts and build contexts.</p>
-								<p class="text-xs mt-2">Use <code class="bg-muted px-1 rounded">.</code> for the repository root when your compose file references files in sibling directories.</p>
-								<p class="text-xs mt-2">Defaults to the compose file's parent directory.</p>
+								<p class="text-xs">{m.stacks_git_context_dir_tip_working_dir()}</p>
+								<p class="text-xs mt-2">{m.stacks_git_context_dir_tip_root_before()} <code class="bg-muted px-1 rounded">.</code> {m.stacks_git_context_dir_tip_root_after()}</p>
+								<p class="text-xs mt-2">{m.stacks_git_context_dir_tip_default()}</p>
 							</div>
 						</Tooltip.Content>
 					</Tooltip.Root>
@@ -1282,9 +1283,9 @@
 					id="context-dir"
 					value={formContextDir ?? ''}
 					oninput={(e) => { const v = (e.target as HTMLInputElement).value; formContextDir = v.trim() || null; }}
-					placeholder="Defaults to compose file's directory"
+					placeholder={m.stacks_git_context_dir_placeholder()}
 				/>
-				<p class="text-xs text-muted-foreground">Relative to repository root, e.g. <code class="text-xs bg-muted px-1 rounded">.</code> for root</p>
+				<p class="text-xs text-muted-foreground">{m.stacks_git_context_dir_hint_before()} <code class="text-xs bg-muted px-1 rounded">.</code> {m.stacks_git_context_dir_hint_after()}</p>
 			</div>
 
 			<!-- Auto-update section -->
@@ -1292,12 +1293,12 @@
 			<div class="flex items-center gap-3">
 				<div class="flex items-center gap-2 flex-1">
 					<RefreshCw class="w-4 h-4 text-muted-foreground" />
-					<Label class="text-sm font-normal">Enable scheduled sync</Label>
+					<Label class="text-sm font-normal">{m.stacks_git_scheduled_sync()}</Label>
 				</div>
 				<TogglePill bind:checked={formAutoUpdate} />
 			</div>
 				<p class="text-xs text-muted-foreground">
-					Automatically sync repository and redeploy stack if there are changes.
+					{m.stacks_git_scheduled_sync_hint()}
 				</p>
 				{#if formAutoUpdate}
 					<CronEditor
@@ -1312,7 +1313,7 @@
 			<div class="flex items-center gap-3">
 				<div class="flex items-center gap-2 flex-1">
 					<Webhook class="w-4 h-4 text-muted-foreground" />
-					<Label class="text-sm font-normal">Enable webhook</Label>
+					<Label class="text-sm font-normal">{m.stacks_git_webhook_enable()}</Label>
 				</div>
 				<TogglePill
 					bind:checked={formWebhookEnabled}
@@ -1320,12 +1321,12 @@
 				/>
 			</div>
 				<p class="text-xs text-muted-foreground">
-					Receive push events from your Git provider to trigger sync and redeploy.
+					{m.stacks_git_webhook_hint()}
 				</p>
 				{#if formWebhookEnabled}
 					{#if gitStack}
 						<div class="space-y-2">
-							<Label>Webhook URL</Label>
+							<Label>{m.stacks_git_webhook_url()}</Label>
 							<div class="flex gap-2">
 								<Input
 									value={getWebhookUrl(gitStack.id)}
@@ -1336,14 +1337,14 @@
 									variant="outline"
 									size="sm"
 									onclick={() => copyWebhookField(getWebhookUrl(gitStack.id), 'url')}
-									title="Copy URL"
+									title={m.stacks_git_copy_url()}
 								>
 									{#if copiedWebhookUrl === 'error'}
 										<Tooltip.Root open>
 											<Tooltip.Trigger>
 												<XCircle class="w-4 h-4 text-red-500" />
 											</Tooltip.Trigger>
-											<Tooltip.Content>Copy requires HTTPS</Tooltip.Content>
+											<Tooltip.Content>{m.stacks_git_copy_requires_https()}</Tooltip.Content>
 										</Tooltip.Root>
 									{:else if copiedWebhookUrl === 'ok'}
 										<Check class="w-4 h-4 text-green-500" />
@@ -1355,12 +1356,12 @@
 						</div>
 					{/if}
 					<div class="space-y-2">
-						<Label for="webhook-secret">Webhook secret</Label>
+						<Label for="webhook-secret">{m.stacks_git_webhook_secret()}</Label>
 						<div class="flex gap-2">
 							<Input
 								id="webhook-secret"
 								bind:value={formWebhookSecret}
-								placeholder="Required - generate or paste a secret"
+								placeholder={m.stacks_git_webhook_secret_placeholder()}
 								class="font-mono text-xs {errors.webhookSecret ? 'border-destructive focus-visible:ring-destructive' : ''}"
 								oninput={() => errors.webhookSecret = undefined}
 							/>
@@ -1369,14 +1370,14 @@
 									variant="outline"
 									size="sm"
 									onclick={() => copyWebhookField(formWebhookSecret, 'secret')}
-									title="Copy secret"
+									title={m.stacks_git_copy_secret()}
 								>
 									{#if copiedWebhookSecret === 'error'}
 										<Tooltip.Root open>
 											<Tooltip.Trigger>
 												<XCircle class="w-4 h-4 text-red-500" />
 											</Tooltip.Trigger>
-											<Tooltip.Content>Copy requires HTTPS</Tooltip.Content>
+											<Tooltip.Content>{m.stacks_git_copy_requires_https()}</Tooltip.Content>
 										</Tooltip.Root>
 									{:else if copiedWebhookSecret === 'ok'}
 										<Check class="w-4 h-4 text-green-500" />
@@ -1395,7 +1396,7 @@
 										<Key class="w-4 h-4" />
 									</Button>
 								</Tooltip.Trigger>
-								<Tooltip.Content>Generate secret</Tooltip.Content>
+								<Tooltip.Content>{m.stacks_git_generate_secret()}</Tooltip.Content>
 							</Tooltip.Root>
 						</div>
 						{#if errors.webhookSecret}
@@ -1404,11 +1405,11 @@
 					</div>
 					{#if !gitStack}
 						<p class="text-xs text-muted-foreground">
-							The webhook URL will be available after creating the stack.
+							{m.stacks_git_webhook_url_after_create()}
 						</p>
 					{:else}
 						<p class="text-xs text-muted-foreground">
-							Configure this URL in your Git provider. Secret is used for signature verification.
+							{m.stacks_git_webhook_configure_hint()}
 						</p>
 					{/if}
 				{/if}
@@ -1416,48 +1417,48 @@
 
 			<!-- Deploy options section -->
 			<div class="space-y-3 p-3 bg-muted/50 rounded-md">
-				<p class="text-xs font-medium text-muted-foreground uppercase tracking-wider">Deploy options</p>
+				<p class="text-xs font-medium text-muted-foreground uppercase tracking-wider">{m.stacks_git_deploy_options()}</p>
 				<div class="flex items-center gap-3">
 					<div class="flex items-center gap-2 flex-1">
 						<Hammer class="w-4 h-4 text-muted-foreground" />
-						<Label class="text-sm font-normal">Build images on deploy</Label>
+						<Label class="text-sm font-normal">{m.stacks_git_build_on_deploy()}</Label>
 					</div>
 					<TogglePill bind:checked={formBuildOnDeploy} />
 				</div>
 				<p class="text-xs text-muted-foreground">
-					Run <code class="text-xs bg-muted px-1 rounded">--build</code> to build images from Dockerfiles before starting containers.
+					{m.stacks_git_build_on_deploy_hint_before()} <code class="text-xs bg-muted px-1 rounded">--build</code> {m.stacks_git_build_on_deploy_hint_after()}
 				</p>
 				{#if formBuildOnDeploy}
 				<div class="flex items-center gap-3 ml-6">
 					<div class="flex items-center gap-2 flex-1">
 						<Ban class="w-4 h-4 text-muted-foreground" />
-						<Label class="text-sm font-normal">Disable build cache</Label>
+						<Label class="text-sm font-normal">{m.stacks_git_no_build_cache()}</Label>
 					</div>
 					<TogglePill bind:checked={formNoBuildCache} />
 				</div>
 				<p class="text-xs text-muted-foreground ml-6">
-					Pass <code class="text-xs bg-muted px-1 rounded">--no-cache</code> to force a clean build without using cached layers.
+					{m.stacks_git_no_build_cache_hint_before()} <code class="text-xs bg-muted px-1 rounded">--no-cache</code> {m.stacks_git_no_build_cache_hint_after()}
 				</p>
 				{/if}
 				<div class="flex items-center gap-3">
 					<div class="flex items-center gap-2 flex-1">
 						<ArrowDownToLine class="w-4 h-4 text-muted-foreground" />
-						<Label class="text-sm font-normal">Re-pull images</Label>
+						<Label class="text-sm font-normal">{m.stacks_git_repull_images()}</Label>
 					</div>
 					<TogglePill bind:checked={formRepullImages} />
 				</div>
 				<p class="text-xs text-muted-foreground">
-					Always pull latest images before deploying, even if the compose file hasn't changed. Useful for CI/CD workflows with static tags like <code class="text-xs bg-muted px-1 rounded">:latest</code>.
+					{m.stacks_git_repull_images_hint_before()} <code class="text-xs bg-muted px-1 rounded">:latest</code>{m.stacks_git_repull_images_hint_after()}
 				</p>
 				<div class="flex items-center gap-3">
 					<div class="flex items-center gap-2 flex-1">
 						<Zap class="w-4 h-4 text-muted-foreground" />
-						<Label class="text-sm font-normal">Force redeployment</Label>
+						<Label class="text-sm font-normal">{m.stacks_git_force_redeploy()}</Label>
 					</div>
 					<TogglePill bind:checked={formForceRedeploy} />
 				</div>
 				<p class="text-xs text-muted-foreground">
-					Always redeploy the stack on webhook or scheduled sync, even if no git changes are detected.
+					{m.stacks_git_force_redeploy_hint()}
 				</p>
 			</div>
 
@@ -1468,8 +1469,8 @@
 						<div class="flex items-center gap-2 flex-1">
 							<Rocket class="w-4 h-4 text-muted-foreground" />
 							<div class="flex-1">
-								<Label class="text-sm font-normal">Deploy now</Label>
-								<p class="text-xs text-muted-foreground">Clone and deploy the stack immediately</p>
+								<Label class="text-sm font-normal">{m.stacks_git_deploy_now()}</Label>
+								<p class="text-xs text-muted-foreground">{m.stacks_git_deploy_now_hint()}</p>
 							</div>
 						</div>
 						<TogglePill bind:checked={formDeployNow} />
@@ -1510,7 +1511,7 @@
 					providerName={secretProviders.find((p) => p.id === formSecretProviderId)?.name ?? null}
 					providerBound={formSecretProviderId != null && secretProviders.some((p) => p.id === formSecretProviderId)}
 					placeholder={{ key: 'MY_VAR', value: 'value' }}
-					infoText="Override variables from your repository env files. Non-secrets are saved to <code class='bg-muted px-1 rounded'>.env.dockhand</code> in the stack directory. Secrets are stored in the database and injected via shell environment at deploy time.<br/><br/>Variables are available for <strong>compose file interpolation</strong> using <code class='bg-muted px-1 rounded'>${'{VAR_NAME}'}</code> syntax. They are not automatically injected into containers — use <code class='bg-muted px-1 rounded'>environment:</code> or reference <code class='bg-muted px-1 rounded'>.env.dockhand</code> in <code class='bg-muted px-1 rounded'>env_file:</code> to pass them through."
+					infoText="{m.stacks_git_env_info_storage_before()} <code class='bg-muted px-1 rounded'>.env.dockhand</code> {m.stacks_git_env_info_storage_after()}<br/><br/>{m.stacks_git_env_info_interpolation_before()} <strong>{m.stacks_git_env_info_interpolation()}</strong> {m.stacks_git_env_info_syntax_before()} <code class='bg-muted px-1 rounded'>${'{VAR_NAME}'}</code> {m.stacks_git_env_info_syntax_after()} <code class='bg-muted px-1 rounded'>environment:</code> {m.stacks_git_env_info_reference_before()} <code class='bg-muted px-1 rounded'>.env.dockhand</code> {m.stacks_git_env_info_reference_in()} <code class='bg-muted px-1 rounded'>env_file:</code> {m.stacks_git_env_info_reference_after()}"
 					existingSecretKeys={gitStack !== null ? existingSecretKeys : new Set()}
 					showInterpolationHint={true}
 				>
@@ -1526,10 +1527,10 @@
 							>
 								{#if populatingEnvVars}
 									<Loader2 class="w-3.5 h-3.5 mr-1 animate-spin" />
-									Loading...
+									{m.stacks_git_loading()}
 								{:else}
 									<Download class="w-3.5 h-3.5" />
-									Populate
+									{m.stacks_git_populate()}
 								{/if}
 							</Button>
 							<Tooltip.Root>
@@ -1538,7 +1539,7 @@
 								</Tooltip.Trigger>
 								<Tooltip.Content>
 									<div class="w-64">
-										<p class="text-xs">Clone the repository and load environment variables from the <code class="bg-muted px-1 rounded">.env</code> file (in compose directory) and additional env file (if specified), so you can see what you can override.</p>
+										<p class="text-xs">{m.stacks_git_populate_tip_before()} <code class="bg-muted px-1 rounded">.env</code> {m.stacks_git_populate_tip_after()}</p>
 									</div>
 								</Tooltip.Content>
 							</Tooltip.Root>
@@ -1550,7 +1551,7 @@
 		{/if}
 
 		<Dialog.Footer class="px-5 py-2.5 border-t border-zinc-200 dark:border-zinc-700 flex-shrink-0">
-			<Button variant="outline" onclick={onClose}>{activeTab === 'backups' ? 'Close' : 'Cancel'}</Button>
+			<Button variant="outline" onclick={onClose}>{activeTab === 'backups' ? m.ui_close() : m.stacks_git_cancel()}</Button>
 			<!-- The deploy-form save buttons belong to the Settings tab. On the Backups
 			     tab the backup panel manages its own saving, so only Close is shown. -->
 			{#if activeTab !== 'backups'}
@@ -1558,27 +1559,27 @@
 					<Button variant="outline" onclick={() => saveGitStack(true)} disabled={formSaving}>
 						{#if formSaving}
 							<Loader2 class="w-4 h-4 mr-1 animate-spin" />
-							Deploying...
+							{m.stacks_git_deploying()}
 						{:else}
 							<Rocket class="w-4 h-4" />
-							Save and deploy
+							{m.stacks_git_save_and_deploy()}
 						{/if}
 					</Button>
 					<Button onclick={() => saveGitStack(false)} disabled={formSaving}>
 						{#if formSaving}
 							<Loader2 class="w-4 h-4 mr-1 animate-spin" />
-							Saving...
+							{m.stacks_git_saving()}
 						{:else}
-							Save changes
+							{m.stacks_git_save_changes()}
 						{/if}
 					</Button>
 				{:else}
 					<Button onclick={() => saveGitStack(formDeployNow)} disabled={formSaving}>
 						{#if formSaving}
 							<Loader2 class="w-4 h-4 mr-1 animate-spin" />
-							{formDeployNow ? 'Deploying...' : 'Creating...'}
+							{formDeployNow ? m.stacks_git_deploying() : m.stacks_git_creating()}
 						{:else}
-							{formDeployNow ? 'Deploy' : 'Create'}
+							{formDeployNow ? m.stacks_git_deploy() : m.stacks_git_create()}
 						{/if}
 					</Button>
 				{/if}
@@ -1593,21 +1594,21 @@
 		<Dialog.Header>
 			<Dialog.Title class="flex items-center gap-2">
 				<TriangleAlert class="w-5 h-5 text-amber-500" />
-				Stack already exists
+				{m.stacks_git_exists_title()}
 			</Dialog.Title>
 			<Dialog.Description>
-				A stack named "{formStackName}" already exists. Please choose a different name.
+				{m.stacks_git_exists_description({ name: formStackName })}
 			</Dialog.Description>
 		</Dialog.Header>
 		<div class="flex justify-end mt-4">
 			<Button size="sm" onclick={() => showExistsWarning = false}>
-				OK
+				{m.stacks_git_ok()}
 			</Button>
 		</div>
 	</Dialog.Content>
 </Dialog.Root>
 
-<IconPickerModal bind:open={showIconPicker} value={formIcon} onselect={onIconSelect} title="Choose a stack icon" />
+<IconPickerModal bind:open={showIconPicker} value={formIcon} onselect={onIconSelect} title={m.stacks_git_choose_icon()} />
 
 <!-- Live compose output for "Save and deploy" (see saveGitStack). -->
 <ComposeOutputModal

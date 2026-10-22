@@ -1,5 +1,6 @@
 <script lang="ts">
-	import type { Component, Snippet } from 'svelte';
+	import type { Snippet } from 'svelte';
+	import type { IconComponent } from '$lib/types';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { currentEnvironment } from '$lib/stores/environment';
@@ -13,6 +14,7 @@
 	// else — a rename pencil, a status badge — goes in the `extra` snippet,
 	// rendered inline after the env suffix.
 	import ContainerIcon from '$lib/components/ContainerIcon.svelte';
+	import { m } from '$lib/paraglide/messages.js';
 
 	let {
 		icon,
@@ -23,7 +25,7 @@
 		iconImage = undefined,
 		iconName = undefined
 	}: {
-		icon: Component;
+		icon: IconComponent;
 		title: string;
 		name?: string;
 		envName?: string;
@@ -52,7 +54,7 @@
 		</Tooltip.Root>
 	{/if}
 	{#if env}
-		<span class="shrink-0">on <span class="text-amber-600 dark:text-amber-400">{env}</span></span>
+		<span class="shrink-0">{m.modalheader_on_env()} <span class="text-amber-600 dark:text-amber-400">{env}</span></span>
 	{/if}
 	{#if extra}
 		<span class="shrink-0 flex items-center gap-2">{@render extra()}</span>

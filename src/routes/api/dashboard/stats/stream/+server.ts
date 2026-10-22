@@ -20,7 +20,7 @@ import {
 	DockerConnectionError
 } from '$lib/server/docker';
 import { listComposeStacks } from '$lib/server/stacks';
-import { countLivePending } from '$lib/server/pending-updates-core';
+import { countLivePending, countImageUpdates, countLivePinnedDigest, countPinnedDigest, countLiveNewerVersion, countNewerVersion } from '$lib/server/pending-updates-core';
 import { authorize } from '$lib/server/authorize';
 import { prefersJSON, sseToJSON } from '$lib/server/sse';
 import type { EnvironmentStats } from '../+server';
@@ -28,6 +28,7 @@ import { parseLabels } from '$lib/utils/label-colors';
 import { isEdgeConnected } from '$lib/server/hawser';
 import { getImageDiskUsageTotalSize } from '$lib/server/docker-disk-usage-core';
 import { calculateCpuPercent, calculateMemoryUsage, calculateMemoryLimit } from '$lib/server/stats-calc-core';
+import { containerDisplayName } from '$lib/utils/container-display-name';
 
 
 // Skip disk usage collection (Synology NAS performance fix)
@@ -129,7 +130,7 @@ async function getEnvironmentStatsProgressive(
 		labels: parseLabels(env.labels),
 		connectionType: (env.connectionType as 'socket' | 'direct' | 'hawser-standard' | 'hawser-edge') || 'socket',
 		online: false,
-		containers: { total: 0, running: 0, stopped: 0, paused: 0, restarting: 0, unhealthy: 0, pendingUpdates: 0 },
+		containers: { total: 0, running: 0, stopped: 0, paused: 0, restarting: 0, unhealthy: 0, pendingUpdates: 0, pinnedDigest: 0 , newerVersion: 0 },
 		images: { total: 0, totalSize: 0 },
 		volumes: { total: 0, totalSize: 0 },
 		containersSize: 0,
@@ -193,7 +194,9 @@ async function getEnvironmentStatsProgressive(
 
 		// pendingUpdates is live-matched below once the container list is fetched (#1006);
 		// seed to the raw count so a container-list timeout still shows something.
-		envStats.containers.pendingUpdates = pendingUpdates.length;
+		envStats.containers.pendingUpdates = countImageUpdates(pendingUpdates);
+		envStats.containers.pinnedDigest = countPinnedDigest(pendingUpdates);
+		envStats.containers.newerVersion = countNewerVersion(pendingUpdates);
 
 		if (recentEventsResult.events.length > 0) {
 			envStats.recentEvents = recentEventsResult.events.map(e => ({
@@ -287,6 +290,8 @@ async function getEnvironmentStatsProgressive(
 				// guaranteed real here (the null-guard above threw on a timeout), so no
 				// empty-list fallback needed - unlike the non-stream twin.
 				envStats.containers.pendingUpdates = countLivePending(pendingUpdates, containers.map((c: any) => c.id));
+				envStats.containers.pinnedDigest = countLivePinnedDigest(pendingUpdates, containers.map((c: any) => c.id));
+				envStats.containers.newerVersion = countLiveNewerVersion(pendingUpdates, containers.map((c: any) => c.id));
 				envStats.loading!.containers = false;
 
 				onPartialUpdate({
@@ -463,6 +468,7 @@ async function getEnvironmentStatsProgressive(
 
 					return {
 						name: container.name,
+						displayName: containerDisplayName(container),
 						cpuPercent: Math.round(cpuPercent * 100) / 100,
 						memoryPercent: Math.round(memoryPercent * 100) / 100
 					};
@@ -473,14 +479,14 @@ async function getEnvironmentStatsProgressive(
 
 			const topContainersResults = await Promise.all(topContainersPromises);
 			envStats.topContainers = topContainersResults
-				.filter((c): c is { name: string; cpuPercent: number; memoryPercent: number } => c !== null)
+				.filter((c): c is { name: string; displayName: string; cpuPercent: number; memoryPercent: number } => c !== null)
 				.sort((a, b) => b.cpuPercent - a.cpuPercent)
 				.slice(0, 10);
 			envStats.loading!.topContainers = false;
 
 			onPartialUpdate({
 				id: env.id,
-				topContainers: [...envStats.topContainers],
+				topContainers: [...envStats.topContainers!],
 				loading: { ...envStats.loading! }
 			});
 

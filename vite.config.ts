@@ -1,5 +1,6 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import tailwindcss from '@tailwindcss/vite';
+import { paraglideVitePlugin } from '@inlang/paraglide-js';
 import { defineConfig, type Plugin } from 'vite';
 import { execSync } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
@@ -1241,7 +1242,26 @@ async function handleHawserMessage(ws: any, msg: any) {
 }
 
 export default defineConfig({
-	plugins: [tailwindcss(), sveltekit(), webSocketPlugin()],
+	plugins: [
+		// UI translations: messages live in src/lib/i18n/messages, the compiled
+		// output in src/lib/paraglide is generated (and git-ignored). The language
+		// follows the browser and falls back to English.
+		paraglideVitePlugin({
+			project: './project.inlang',
+			outdir: './src/lib/paraglide',
+			// The language is decided in hooks.client.ts, which overwrites getLocale().
+			// Paraglide's own cookie and localStorage strategies cannot be used: its
+			// getLocale() writes the resolved locale back on first read, which would
+			// pin whatever the browser negotiated and ignore it from then on.
+			strategy: ['preferredLanguage', 'baseLocale'],
+			// One module per locale instead of one per message: with thousands of messages the
+			// per-message layout makes the production build run out of memory.
+			outputStructure: 'locale-modules'
+		}),
+		tailwindcss(),
+		sveltekit(),
+		webSocketPlugin()
+	],
 	define: {
 		__BUILD_DATE__: JSON.stringify(new Date().toISOString()),
 		__BUILD_COMMIT__: JSON.stringify(getGitCommit()),

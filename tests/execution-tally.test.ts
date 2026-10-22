@@ -4,7 +4,7 @@
  * modal tab counters. UI-free so it runs under bun test.
  */
 import { describe, test, expect } from 'bun:test';
-import { computeExecutionTally, type Execution } from '../src/lib/utils/execution-tally';
+import { computeExecutionTally, resolveRunRepo, type RunRepo, type Execution } from '../src/lib/utils/execution-tally';
 
 const ex = (over: Partial<Execution>): Execution => ({
 	id: 1, triggeredAt: '2026-07-22T03:00:00Z', triggeredBy: 'cron',
@@ -69,5 +69,32 @@ describe('computeExecutionTally — newest-first sort (merged across configs)', 
 		const before = input.map((e) => e.id);
 		computeExecutionTally(input);
 		expect(input.map((e) => e.id)).toEqual(before);
+	});
+});
+
+describe('resolveRunRepo (#1783 - a run reports the repo it used, not the config current one)', () => {
+	const A: RunRepo = { repository: '/mnt/tempA', name: 'Temp A' };
+	const B: RunRepo = { repository: 'rest:backup-server', name: 'Backup-Server' };
+	const destById = new Map<number, RunRepo>([[1, A], [2, B]]);
+	const configDest = B; // the schedule's CURRENT destination (was re-pointed from A to B)
+
+	test('a run stamped with its own destination reports THAT, not the config current', () => {
+		// The bug: both runs showed B (current). A run that wrote to dest 1 must show A.
+		expect(resolveRunRepo(1, destById, configDest)).toEqual(A);
+		expect(resolveRunRepo(2, destById, configDest)).toEqual(B);
+	});
+
+	test('an unstamped (older) run falls back to the config destination', () => {
+		expect(resolveRunRepo(undefined, destById, configDest)).toEqual(configDest);
+	});
+
+	test('a stamped id with no matching destination falls back to the config', () => {
+		// Destination deleted since the run: better to show the config than nothing.
+		expect(resolveRunRepo(999, destById, configDest)).toEqual(configDest);
+	});
+
+	test('no destById map at all falls back to the config (surfaces that omit the Repo column)', () => {
+		expect(resolveRunRepo(1, undefined, configDest)).toEqual(configDest);
+		expect(resolveRunRepo(undefined, undefined, undefined)).toBeUndefined();
 	});
 });

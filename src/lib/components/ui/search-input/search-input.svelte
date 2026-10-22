@@ -3,6 +3,7 @@
 	import { Input } from '$lib/components/ui/input';
 	import { cn } from '$lib/utils.js';
 	import type { HTMLInputAttributes } from 'svelte/elements';
+	import { m } from '$lib/paraglide/messages.js';
 
 	// A search field with a leading magnifier and a trailing clear (X) button that shows
 	// once there is text. Escape also clears. Drop-in for the hand-rolled
@@ -19,7 +20,7 @@
 		value = $bindable(''),
 		class: className,
 		containerClass,
-		placeholder = 'Search...',
+		placeholder = undefined,
 		onkeydown,
 		...rest
 	}: Props = $props();
@@ -29,7 +30,7 @@
 	<Search class="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
 	<Input
 		type="text"
-		{placeholder}
+		placeholder={placeholder ?? m.layout_search()}
 		bind:value
 		onkeydown={(e) => {
 			if (e.key === 'Escape' && value) {
@@ -45,7 +46,7 @@
 		<button
 			type="button"
 			tabindex={-1}
-			aria-label="Clear search"
+			aria-label={m.ui_clear_search()}
 			onclick={() => (value = '')}
 			class="absolute right-2 top-1/2 -translate-y-1/2 rounded-sm p-0.5 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
 		>

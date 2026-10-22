@@ -5,6 +5,7 @@
 	import DeployOutputHeader from './DeployOutputHeader.svelte';
 	import DeploySummaryBar from './DeploySummaryBar.svelte';
 	import { formatRunStatus } from '$lib/utils/run-status';
+	import { m } from '$lib/paraglide/messages.js';
 
 	// A plain display window for compose output. It owns none of the polling —
 	// the parent pushes lines in as they arrive via readJobResponse's onLine callback
@@ -110,7 +111,7 @@
 		/>
 
 		<Dialog.Footer class="shrink-0">
-			<Button variant="outline" onclick={handleClose}>Close</Button>
+			<Button variant="outline" onclick={handleClose}>{m.ui_close()}</Button>
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>

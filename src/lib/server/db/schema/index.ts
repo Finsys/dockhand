@@ -12,7 +12,8 @@ import {
 	real,
 	primaryKey,
 	unique,
-	index
+	index,
+	uniqueIndex
 } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
 
@@ -545,9 +546,16 @@ export const pendingContainerUpdates = sqliteTable('pending_container_updates', 
 	// True when a digest image update is pending (the classic amber icon). Defaults
 	// true so pre-existing rows keep behaving exactly as before.
 	hasImageUpdate: integer('has_image_update', { mode: 'boolean' }).notNull().default(true),
+	// True when the image is `repo:tag@sha256:...` and the digest behind its tag has
+	// moved. Reported, never applied: the pull returns the pinned manifest, so the
+	// compose file is what has to change. Defaults false so existing rows are unchanged.
+	pinnedToDigest: integer('pinned_to_digest', { mode: 'boolean' }).notNull().default(false),
 	// A newer VERSION tag (semver) for a pinned image, as JSON {tag,bump,skipped}.
 	// Null when there's no semver suggestion. Advisory - never auto-applied.
 	newerVersion: text('newer_version'),
+	// Hours left before a held update may be applied. Null when no cooldown applies,
+	// so a row can record "waiting" without claiming the update is ready.
+	releaseAgeRemainingHours: integer('release_age_remaining_hours'),
 	checkedAt: text('checked_at').default(sql`CURRENT_TIMESTAMP`),
 	createdAt: text('created_at').default(sql`CURRENT_TIMESTAMP`)
 }, (table) => ({
@@ -568,6 +576,8 @@ export const backupDestinations = sqliteTable('backup_destinations', {
 	hostPath: text('host_path'),                     // bind-mount source for local repos
 	cacert: text('cacert'),                          // AES-256-GCM encrypted PEM: self-signed CA for a TLS backend (RESTIC_CACERT)
 	tlsClientCert: text('tls_client_cert'),          // AES-256-GCM encrypted PEM: client cert+key for mTLS (RESTIC_TLS_CLIENT_CERT)
+	sshPrivateKey: text('ssh_private_key'),          // AES-256-GCM encrypted private key for an SFTP backend
+	sshKnownHosts: text('ssh_known_hosts'),          // AES-256-GCM encrypted verified known_hosts data for an SFTP backend
 	policies: text('policies'),                      // JSON: { pruneSchedule, checkSchedule, autoUnlock, maxUnused }
 	lastTestAt: text('last_test_at'),
 	lastTestStatus: text('last_test_status'),        // 'success' | 'failed'
@@ -747,3 +757,37 @@ export type NewBackupDestination = typeof backupDestinations.$inferInsert;
 
 export type BackupConfig = typeof backupConfigs.$inferSelect;
 export type NewBackupConfig = typeof backupConfigs.$inferInsert;
+
+
+// =============================================================================
+// PASSKEYS (WebAuthn)
+// =============================================================================
+
+/**
+ * A registered WebAuthn credential.
+ *
+ * `counter` is the authenticator's signature counter: it must only ever move
+ * forward, so a replayed or cloned credential is refused at login. `aaguid`
+ * identifies the authenticator model, which is what lets a credential be named
+ * after the manager it lives in.
+ */
+export const passkeyCredentials = sqliteTable('passkey_credentials', {
+	id: integer('id').primaryKey({ autoIncrement: true }),
+	userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+	credentialId: text('credential_id').notNull().unique(),
+	webauthnUserId: text('webauthn_user_id').notNull(),
+	publicKey: text('public_key').notNull(),
+	counter: integer('counter').notNull().default(0),
+	deviceType: text('device_type').notNull(),
+	backedUp: integer('backed_up', { mode: 'boolean' }).notNull().default(false),
+	transports: text('transports'),
+	aaguid: text('aaguid'),
+	name: text('name'),
+	createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`)
+}, (table) => ({
+	userIdIdx: index('passkey_credentials_user_id_idx').on(table.userId),
+	userNameUnique: uniqueIndex('passkey_credentials_user_name_unique').on(table.userId, sql`lower(${table.name})`)
+}));
+
+export type PasskeyCredential = typeof passkeyCredentials.$inferSelect;
+export type NewPasskeyCredential = typeof passkeyCredentials.$inferInsert;

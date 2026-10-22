@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import { filterByAccessibleEnv } from '$lib/server/env-scope-filter';
 import {
 	getSecretProviders,
 	getSecretProviderById,
@@ -47,9 +48,7 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 	// cannot reach. null = all-environments access (admin/free/disabled) -> no filter.
 	const allStacksUsing = await getStacksUsingSecretProvider(id);
 	const accessibleEnvIds = await auth.getAccessibleEnvironmentIds();
-	const stacksUsing = accessibleEnvIds === null
-		? allStacksUsing
-		: allStacksUsing.filter((s) => s.environmentId === null || accessibleEnvIds.includes(s.environmentId));
+	const stacksUsing = filterByAccessibleEnv(allStacksUsing, accessibleEnvIds);
 	return json({ ...summary, config: redactProviderConfig(config), stacksUsing });
 };
 

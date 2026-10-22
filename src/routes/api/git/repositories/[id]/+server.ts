@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import { filterByAccessibleEnv } from '$lib/server/env-scope-filter';
 import {
 	getGitRepository,
 	updateGitRepository,
@@ -16,7 +17,8 @@ import { computeAuditDiff } from '$lib/utils/diff';
  * @openapi
  * summary: Get a single git repository by ID
  * path: id:integer! Git repository ID (from GET /api/git/repositories)
- * resp-200: {id:integer!, name:string!, url:string!, branch:string!, credentialId:integer}
+ * resp-200: {id:integer!, name:string!, url:string!, branch:string!, credentialId:integer, stacksUsing:array<object>!}
+ * resp-200-desc: stacksUsing lists the git stacks bound to this repository, each {stackName, environmentId}, filtered to the caller's accessible environments (plus null-env stacks) on enterprise.
  * resp-400: The id path segment is not a valid integer
  * resp-403: Caller lacks the git:view permission
  * resp-404: No repository exists with that ID
@@ -39,7 +41,11 @@ export const GET: RequestHandler = async ({ params, cookies }) => {
 			return json({ error: 'Repository not found' }, { status: 404 });
 		}
 
-		return json(repository);
+		const allStacksUsing = await getGitStacksByRepositoryId(id);
+		const accessibleEnvIds = await auth.getAccessibleEnvironmentIds();
+		const stacksUsing = filterByAccessibleEnv(allStacksUsing, accessibleEnvIds);
+
+		return json({ ...repository, stacksUsing });
 	} catch (error) {
 		console.error('Failed to get git repository:', error);
 		return json({ error: 'Failed to get git repository' }, { status: 500 });

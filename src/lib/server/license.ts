@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import os from 'node:os';
 import { getSetting, setSetting } from './db';
+import { enforcesRoles, licenseValid, lapsed } from './license-state-core';
 import { sendEventNotification } from './notifications';
 
 // RSA Public Key for license verification
@@ -154,7 +155,18 @@ export async function deactivateLicense(): Promise<boolean> {
 }
 
 /**
- * Checks if the current installation has an active enterprise license
+ * Whether this installation runs the enterprise model: roles exist and are enforced.
+ *
+ * Stays true when the license stops validating. The roles are still assigned and still
+ * describe who was trusted with what, so authorization keeps working exactly as it did
+ * the minute before - including the environment scoping that dozens of endpoints gate
+ * on. Flipping this to false on an expiry would switch the whole instance to the free
+ * edition, where every authenticated user has full access, and silently promote every
+ * account to administrator.
+ *
+ * What a lapse DOES change is who may act: see `isLicenseLapsed`, which holds everyone
+ * but administrators until a valid license is installed. Feature availability - the
+ * things a customer is paying for - is `hasValidEnterpriseLicense`.
  */
 export async function isEnterprise(): Promise<boolean> {
 	const stored = await getStoredLicense();
@@ -162,9 +174,42 @@ export async function isEnterprise(): Promise<boolean> {
 		return false;
 	}
 
-	const validation = validateLicense(stored.key, getHostname());
-	// Only true for enterprise licenses (SMB does not unlock enterprise features)
-	return validation.valid && validation.active && validation.payload?.type === 'enterprise';
+	return enforcesRoles(validateLicense(stored.key, getHostname()));
+}
+
+/**
+ * Whether the enterprise license is currently valid.
+ *
+ * This is the question to ask when gating a paid FEATURE - LDAP, the audit log, role
+ * editing. An expired license should stop selling those, while `isEnterprise` keeps
+ * enforcing the roles the customer already has.
+ */
+export async function hasValidEnterpriseLicense(): Promise<boolean> {
+	const stored = await getStoredLicense();
+	if (!stored || !stored.key) {
+		return false;
+	}
+
+	return licenseValid(validateLicense(stored.key, getHostname()));
+}
+
+/**
+ * Whether an enterprise license is installed but no longer validates.
+ *
+ * The instance keeps its roles (see `isEnterprise`) but stops taking instructions from
+ * anyone who is not an administrator, so an expiry or a renamed host cannot quietly
+ * hand a viewer more than their role allows. An administrator still gets through, which
+ * is what makes the state recoverable.
+ *
+ * Only a genuine enterprise key reaches this: the signature is checked first, so a
+ * forged or corrupt key leaves no payload and reads as the free edition. Otherwise
+ * anyone able to write the setting could lock the instance out with a junk string.
+ */
+export async function isLicenseLapsed(): Promise<boolean> {
+	const stored = await getStoredLicense();
+	if (!stored || !stored.key) return false;
+
+	return lapsed(validateLicense(stored.key, getHostname()));
 }
 
 /**

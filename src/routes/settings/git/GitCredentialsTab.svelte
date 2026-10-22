@@ -9,6 +9,7 @@
 	import { canAccess } from '$lib/stores/auth';
 	import GitCredentialModal from './GitCredentialModal.svelte';
 	import { EmptyState } from '$lib/components/ui/empty-state';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface GitCredential {
 		id: number;
@@ -33,7 +34,7 @@
 			credentials = await response.json();
 		} catch (error) {
 			console.error('Failed to fetch git credentials:', error);
-			toast.error('Failed to fetch git credentials');
+			toast.error(m.settings_git_credentials_fetch_failed());
 		} finally {
 			loading = false;
 		}
@@ -58,24 +59,24 @@
 			const response = await fetch(`/api/git/credentials/${id}`, { method: 'DELETE' });
 			if (response.ok) {
 				await fetchCredentials();
-				toast.success('Credential deleted');
+				toast.success(m.settings_git_credential_deleted());
 			} else {
-				toast.error('Failed to delete credential');
+				toast.error(m.settings_git_credential_delete_failed());
 			}
 		} catch (error) {
 			console.error('Failed to delete credential:', error);
-			toast.error('Failed to delete credential');
+			toast.error(m.settings_git_credential_delete_failed());
 		}
 	}
 
 	function getAuthTypeBadge(authType: string) {
 		switch (authType) {
 			case 'password':
-				return { label: 'Password', class: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200' };
+				return { label: m.stacks_git_auth_password(), class: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200' };
 			case 'ssh':
-				return { label: 'SSH Key', class: 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200' };
+				return { label: m.stacks_git_auth_ssh_key(), class: 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200' };
 			default:
-				return { label: 'None', class: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200' };
+				return { label: m.stacks_git_auth_none(), class: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200' };
 		}
 	}
 
@@ -87,26 +88,26 @@
 <div class="space-y-4">
 	<div class="flex justify-between items-center">
 		<div>
-			<h3 class="text-lg font-medium">Git credentials</h3>
-			<p class="text-sm text-muted-foreground">Manage credentials for accessing Git repositories</p>
+			<h3 class="text-lg font-medium">{m.settings_git_credentials_title()}</h3>
+			<p class="text-sm text-muted-foreground">{m.settings_git_credentials_description()}</p>
 		</div>
 		{#if $canAccess('settings', 'edit')}
 			<Button size="sm" onclick={() => openModal()}>
 				<Plus class="w-4 h-4" />
-				Add credential
+				{m.settings_git_add_credential()}
 			</Button>
 		{/if}
 	</div>
 
 	{#if loading}
-		<p class="text-sm text-muted-foreground">Loading credentials...</p>
+		<p class="text-sm text-muted-foreground">{m.settings_git_credentials_loading()}</p>
 	{:else if credentials.length === 0}
 		<Card.Root>
 			<Card.Content>
 				<EmptyState
 					icon={Key}
-					title="No Git credentials configured"
-					description="Add credentials to connect to private Git repositories"
+					title={m.settings_git_credentials_empty_title()}
+					description={m.settings_git_credentials_empty_description()}
 				/>
 			</Card.Content>
 		</Card.Root>
@@ -129,9 +130,9 @@
 								<div class="font-medium text-sm">{cred.name}</div>
 								<div class="text-xs text-muted-foreground">
 									{#if cred.username}
-										Username: {cred.username}
+										{m.settings_git_username_value({ username: cred.username })}
 									{:else}
-										No username
+										{m.settings_git_no_username()}
 									{/if}
 								</div>
 							</div>
@@ -146,10 +147,11 @@
 								</Button>
 								<ConfirmPopover
 									open={confirmDeleteId === cred.id}
-									action="Delete"
-									itemType="credential"
+									localized
+									action={m.confirm_action_delete()}
+									itemType={m.settings_git_item_credential()}
 									itemName={cred.name}
-									title="Delete"
+									title={m.settings_git_delete()}
 									onConfirm={() => deleteCredential(cred.id)}
 									onOpenChange={(open) => confirmDeleteId = open ? cred.id : null}
 								>

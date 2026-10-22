@@ -43,3 +43,32 @@ describe('pickScanDisplayName', () => {
 		expect(pickScanDisplayName(BARE, [])).toBe(BARE); // bare 64-hex, no sha256: prefix
 	});
 });
+
+describe('a temporary auto-update tag', () => {
+	it('gives way to the tag the image really carries', () => {
+		// The auto-update path scans under a tag it applied itself, then retags the
+		// image - so the recorded name outlives the tag and shows a name nothing has.
+		expect(pickScanDisplayName('saelix/sencho:latest-dockhand-pending', ['saelix/sencho:latest']))
+			.toBe('saelix/sencho:latest');
+		expect(pickScanDisplayName('nginx:1-dockhand-update', ['nginx:1']))
+			.toBe('nginx:1');
+	});
+
+	it('is kept when the image carries nothing better', () => {
+		expect(pickScanDisplayName('x:latest-dockhand-pending', []))
+			.toBe('x:latest-dockhand-pending');
+		expect(pickScanDisplayName('x:latest-dockhand-pending', ['y:latest-dockhand-pending']))
+			.toBe('y:latest-dockhand-pending');
+	});
+
+	it('a name the caller chose is still left alone', () => {
+		// Only a digest or a temp tag is a poor label; anything else is deliberate.
+		expect(pickScanDisplayName('nginx:latest', ['other:tag'])).toBe('nginx:latest');
+		expect(pickScanDisplayName('registry.io/app:1.2', [])).toBe('registry.io/app:1.2');
+	});
+
+	it('a bare digest still resolves to a real tag', () => {
+		expect(pickScanDisplayName(DIGEST, ['nginx:latest'])).toBe('nginx:latest');
+		expect(pickScanDisplayName(DIGEST, [])).toBe(DIGEST);
+	});
+});

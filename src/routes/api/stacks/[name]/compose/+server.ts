@@ -2,6 +2,7 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { getStackComposeFile, deployStack, saveStackComposeFile, requireComposeFile } from '$lib/server/stacks';
 import { authorize } from '$lib/server/authorize';
+import { isValidStackName } from '$lib/server/stack-name-guard';
 import { createJobResponse } from '$lib/server/sse';
 import { createRunRecorder } from '$lib/server/deploy-run-record';
 import { hashComposeContent, hashEnvFingerprint } from '$lib/server/deploy-run-record-core';
@@ -12,6 +13,7 @@ import { hashComposeContent, hashEnvFingerprint } from '$lib/server/deploy-run-r
  * summary: Get a stack's compose file content plus its resolved compose/env paths
  * path: name:string The stack name
  * query: env:integer Environment id the stack belongs to
+ * resp-400: Invalid stack name
  * resp-403: Permission denied (needs stacks:view)
  * resp-404: Stack or compose file not found
  * resp-500: Failed to read the compose file
@@ -26,6 +28,11 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 	}
 	const envAccessDenied = await auth.requireEnvAccess(envIdNum ?? null);
 	if (envAccessDenied) return envAccessDenied;
+
+	// The name reaches getStackComposeFile and a filesystem path; reject a traversal first.
+	if (!isValidStackName(name)) {
+		return json({ error: 'Invalid stack name' }, { status: 400 });
+	}
 
 	try {
 		const result = await getStackComposeFile(name, envIdNum);
@@ -78,6 +85,11 @@ export const PUT: RequestHandler = async ({ params, request, url, cookies }) => 
 	}
 	const envAccessDenied = await auth.requireEnvAccess(envIdNum ?? null);
 	if (envAccessDenied) return envAccessDenied;
+
+	// The name reaches saveStackComposeFile (a writeFileSync path); reject a traversal first.
+	if (!isValidStackName(name)) {
+		return json({ error: 'Invalid stack name' }, { status: 400 });
+	}
 
 	try {
 		const body = await request.json();

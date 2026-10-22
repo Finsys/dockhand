@@ -34,6 +34,10 @@ Dockhand welcomes all contributions so thank you for considering contributing!
    ```
 5. Open your browser and navigate to `http://localhost:5173` (or the port specified in the Bun output) to see the application running.
 
+## Translations
+
+UI texts live in `src/lib/i18n/messages/<locale>.json` ([Paraglide JS](https://inlang.com/m/gerre34r/library-inlang-paraglideJs), English is the source). In components, use `m.<key>()` from `$lib/paraglide/messages.js` instead of literal text; keys are snake_case with an area prefix (`containers_list_…`). To add a language, copy `en.json`, translate the values (keep `{placeholders}` as they are) and add the locale to `project.inlang/settings.json`. The UI follows the browser language; a key that a locale does not have yet falls back to English, so a translation can follow an area later. `bun test tests/i18n-messages.test.ts` checks that no locale has keys or placeholders that English does not have, and that the locales listed as complete in that test have every key.
+
 ## CLA Agreement
 
 When contributing to Dockhand, you will be asked to sign a Contributor License Agreement (CLA) to ensure that all contributions are properly licensed. This helps protect both you and the project. The agreement can be found [here](https://cla-assistant.io/Finsys/dockhand).

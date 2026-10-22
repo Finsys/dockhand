@@ -8,6 +8,7 @@
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import * as Alert from '$lib/components/ui/alert';
 	import { focusFirstInput } from '$lib/utils';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		open: boolean;
@@ -37,7 +38,7 @@
 
 	async function verifyAndEnableMfa() {
 		if (!token) {
-			error = 'Please enter the verification code';
+			error = m.profile_mfa_error_code_required();
 			return;
 		}
 
@@ -57,10 +58,10 @@
 				backupCodes = data.backupCodes || [];
 				showBackupCodes = true;
 			} else {
-				error = data.error || 'Invalid verification code';
+				error = data.error || m.profile_mfa_error_invalid_code();
 			}
 		} catch (e) {
-			error = 'Failed to verify MFA';
+			error = m.profile_mfa_error_verify_failed();
 		} finally {
 			loading = false;
 		}
@@ -77,7 +78,7 @@
 	}
 
 	function downloadBackupCodes() {
-		const content = `Dockhand MFA Backup Codes\n${'='.repeat(30)}\n\nThese codes can be used to sign in if you lose access to your authenticator app.\nEach code can only be used once.\n\n${formatBackupCodes()}\n\nGenerated: ${new Date().toISOString()}`;
+		const content = `${m.profile_mfa_backup_file_title()}\n${'='.repeat(30)}\n\n${m.profile_mfa_backup_file_intro()}\n${m.profile_mfa_backup_file_single_use()}\n\n${formatBackupCodes()}\n\n${m.profile_mfa_backup_file_generated({ date: new Date().toISOString() })}`;
 		const blob = new Blob([content], { type: 'text/plain' });
 		const url = URL.createObjectURL(blob);
 		const a = document.createElement('a');
@@ -102,10 +103,10 @@
 			<Dialog.Title class="flex items-center gap-2">
 				{#if showBackupCodes}
 					<ShieldCheck class="w-5 h-5 text-green-500" />
-					MFA enabled successfully
+					{m.profile_mfa_enabled_success()}
 				{:else}
 					<QrCode class="w-5 h-5" />
-					Setup two-factor authentication
+					{m.profile_mfa_setup_title()}
 				{/if}
 			</Dialog.Title>
 		</Dialog.Header>
@@ -116,7 +117,7 @@
 				<Alert.Root>
 					<TriangleAlert class="h-4 w-4" />
 					<Alert.Description>
-						Save these backup codes in a safe place. Each code can only be used once to sign in if you lose access to your authenticator app.
+						{m.profile_mfa_backup_codes_hint()}
 					</Alert.Description>
 				</Alert.Root>
 
@@ -136,27 +137,27 @@
 								<Tooltip.Trigger>
 									<XCircle class="w-4 h-4 text-red-500" />
 								</Tooltip.Trigger>
-								<Tooltip.Content>Copy requires HTTPS</Tooltip.Content>
+								<Tooltip.Content>{m.profile_mfa_copy_requires_https()}</Tooltip.Content>
 							</Tooltip.Root>
-							Failed
+							{m.profile_mfa_copy_failed()}
 						{:else if copied === 'ok'}
 							<Check class="w-4 h-4" />
-							Copied!
+							{m.profile_mfa_copied()}
 						{:else}
 							<Copy class="w-4 h-4" />
-							Copy codes
+							{m.profile_mfa_copy_codes()}
 						{/if}
 					</Button>
 					<Button variant="outline" class="flex-1" onclick={downloadBackupCodes}>
 						<Download class="w-4 h-4" />
-						Download
+						{m.profile_mfa_download()}
 					</Button>
 				</div>
 			</div>
 			<Dialog.Footer>
 				<Button onclick={handleDone}>
 					<ShieldCheck class="w-4 h-4" />
-					Done
+					{m.profile_done()}
 				</Button>
 			</Dialog.Footer>
 		{:else}
@@ -170,43 +171,43 @@
 				{/if}
 
 				<p class="text-sm text-muted-foreground">
-					Scan this QR code with your authenticator app (Google Authenticator, Authy, etc.)
+					{m.profile_mfa_scan_hint()}
 				</p>
 
 				{#if qrCode}
 					<div class="flex justify-center p-4 bg-white rounded-lg">
-						<img src={qrCode} alt="MFA QR Code" class="w-48 h-48" />
+						<img src={qrCode} alt={m.profile_mfa_qr_alt()} class="w-48 h-48" />
 					</div>
 				{/if}
 
 				<div class="space-y-2">
-					<Label class="text-xs text-muted-foreground">Or enter this code manually:</Label>
+					<Label class="text-xs text-muted-foreground">{m.profile_mfa_manual_entry()}</Label>
 					<code class="block p-2 bg-muted rounded text-sm font-mono break-all">{secret}</code>
 				</div>
 
 				<div class="space-y-2">
-					<Label>Verification code</Label>
+					<Label>{m.profile_mfa_code_label()}</Label>
 					<Input
 						bind:value={token}
 						name="totp"
-						placeholder="Enter 6-digit code"
+						placeholder={m.profile_mfa_code_placeholder()}
 						maxlength={6}
 						autocomplete="one-time-code"
 					/>
 					<p class="text-xs text-muted-foreground">
-						Enter the code from your authenticator app to verify setup
+						{m.profile_mfa_code_hint()}
 					</p>
 				</div>
 			</div>
 			<Dialog.Footer>
-				<Button variant="outline" onclick={onClose}>Cancel</Button>
+				<Button variant="outline" onclick={onClose}>{m.profile_cancel()}</Button>
 				<Button onclick={verifyAndEnableMfa} disabled={loading || !token}>
 					{#if loading}
 						<RefreshCw class="w-4 h-4 animate-spin" />
 					{:else}
 						<ShieldCheck class="w-4 h-4" />
 					{/if}
-					Enable MFA
+					{m.profile_mfa_enable()}
 				</Button>
 			</Dialog.Footer>
 		{/if}

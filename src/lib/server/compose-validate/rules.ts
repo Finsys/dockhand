@@ -16,6 +16,16 @@ import { SERVICE_KEYS, TOP_LEVEL_KEYS, isLikelyTypo } from './vocab';
 
 // --- small readers over the plain-object compose --------------------------------
 
+/**
+ * Whether a value carries a compose variable reference - `${VAR}`, `${VAR:-x}` or
+ * the bare `$VAR`. A doubled `$$` is compose's escape for a literal dollar, so it
+ * is stripped before looking.
+ */
+function isInterpolated(value: string): boolean {
+	const bare = value.replaceAll('$$', '');
+	return bare.includes('${') || /\$[A-Za-z_]/.test(bare);
+}
+
 function services(p: ParsedCompose): Record<string, Record<string, unknown>> {
 	const s = p.doc?.services;
 	return s && typeof s === 'object' && !Array.isArray(s)
@@ -489,16 +499,27 @@ export const RULES: RuleDefinition[] = [
 					const v = vols[i];
 					// A NAMED volume source is a bare token (no '/' or '.') on the left of ':'
 					// in short form, or a { type: volume, source } in long form. Bind mounts
-					// (paths) are not named volumes and are exempt.
+					// (paths) are not named volumes and are exempt. So is an interpolated
+					// source: its expansion decides both whether it is a path at all and
+					// what the name would be, and compose reports a truly missing volume
+					// once it knows the value.
 					let src: string | null = null;
 					if (typeof v === 'string') {
 						const left = v.split(':')[0];
-						if (left && !left.startsWith('/') && !left.startsWith('.') && !left.startsWith('~')) {
+						if (
+							left &&
+							!isInterpolated(left) &&
+							!left.startsWith('/') &&
+							!left.startsWith('.') &&
+							!left.startsWith('~')
+						) {
 							src = left;
 						}
 					} else {
 						const o = asRecord(v);
-						if (o?.type === 'volume' && typeof o.source === 'string') src = o.source;
+						if (o?.type === 'volume' && typeof o.source === 'string' && !isInterpolated(o.source)) {
+							src = o.source;
+						}
 					}
 					if (src && !defined.has(src)) {
 						out.push({

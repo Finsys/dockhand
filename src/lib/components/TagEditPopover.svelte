@@ -6,11 +6,15 @@
 	import TagLucideIcon from '$lib/components/TagLucideIcon.svelte';
 	import { iconMap } from '$lib/utils/icons';
 	import { TAG_COLORS, tagHex, normalizeTag, type Tag, type TagColor } from '$lib/utils/tags-core';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		open?: boolean;
 		catalog: Tag[];        // all tags in the env
 		selected: number[];    // currently-assigned tag ids
+		/** Tag ids this item shows because its STACK carries them. Listed but not
+		 *  toggleable: they belong to the stack, not to this item. */
+		inherited?: number[];
 		/** Create a catalog tag; resolves to the created/existing Tag. */
 		onCreate: (name: string, color: TagColor, icon: string | null) => Promise<Tag | null>;
 		/** Persist the new assignment set. */
@@ -18,7 +22,7 @@
 		/** Whether the current user may create catalog tags (admin only). Assigning existing tags is always allowed. */
 		allowCreate?: boolean;
 	}
-	let { open = $bindable(false), catalog, selected, onCreate, onApply, allowCreate = false }: Props = $props();
+	let { open = $bindable(false), catalog, selected, inherited = [], onCreate, onApply, allowCreate = false }: Props = $props();
 
 	// The heavy Popover.Root (bits-ui floating-ui context + portal) is only mounted once
 	// the user actually opens this row's editor. Before that each row renders a plain
@@ -86,7 +90,7 @@
 
 {#if !activated}
 	<!-- Cheap placeholder: no Popover.Root until the user opens this row's editor. -->
-	<button type="button" title="Edit tags" onclick={activate}
+	<button type="button" title={m.tags_edit()} onclick={activate}
 		class="inline-flex h-4 w-4 items-center justify-center rounded text-muted-foreground/60 hover:text-foreground">
 		<TagIcon class="h-3 w-3" />
 	</button>
@@ -94,20 +98,20 @@
 <Popover.Root bind:open>
 	<Popover.Trigger>
 		{#snippet child({ props })}
-			<button {...props} type="button" title="Edit tags"
+			<button {...props} type="button" title={m.tags_edit()}
 				class="inline-flex h-4 w-4 items-center justify-center rounded text-muted-foreground/60 hover:text-foreground">
 				<TagIcon class="h-3 w-3" />
 			</button>
 		{/snippet}
 	</Popover.Trigger>
 	<Popover.Content class="w-64 p-2" align="start">
-		<Input bind:value={query} placeholder={allowCreate ? 'Search or create a tag...' : 'Search tags...'} class="h-8 text-sm"
+		<Input bind:value={query} placeholder={allowCreate ? m.tags_search_or_create_placeholder() : m.tags_search_placeholder()} class="h-8 text-sm"
 			onkeydown={(e: KeyboardEvent) => { if (e.key === 'Enter' && canCreate) create(); }} />
 
 		{#if canCreate}
 			{@const hex = tagHex(newColor)}
 			<div class="mt-2 rounded-md border p-2">
-				<div class="text-2xs text-muted-foreground">Create new tag</div>
+				<div class="text-2xs text-muted-foreground">{m.tags_create_new()}</div>
 				<!-- Live preview of the pill. -->
 				<div class="my-1.5">
 					<span class="inline-flex items-center gap-1 rounded-full border px-1.5 py-0 text-2xs font-medium"
@@ -125,9 +129,9 @@
 				</div>
 				<!-- Icon picker: default tag icon, or a lucide icon. -->
 				<div class="mt-2">
-					<Input bind:value={iconSearch} placeholder="Icon (optional)..." class="h-7 text-2xs" />
+					<Input bind:value={iconSearch} placeholder={m.tags_icon_placeholder()} class="h-7 text-2xs" />
 					<div class="mt-1 grid grid-cols-8 gap-0.5 max-h-24 overflow-y-auto p-0.5">
-						<button type="button" title="Default tag icon" onclick={() => (newIcon = null)}
+						<button type="button" title={m.tags_default_icon()} onclick={() => (newIcon = null)}
 							class="flex aspect-square items-center justify-center rounded hover:bg-muted {newIcon === null ? 'bg-primary/15 ring-1 ring-inset ring-primary' : ''}">
 							<TagIcon class="h-3.5 w-3.5" style="color: {hex};" />
 						</button>
@@ -140,25 +144,32 @@
 					</div>
 				</div>
 				<button type="button" onclick={create} disabled={creating}
-					class="mt-2 w-full rounded bg-primary px-2 py-1 text-2xs font-medium text-primary-foreground disabled:opacity-50">Create</button>
+					class="mt-2 w-full rounded bg-primary px-2 py-1 text-2xs font-medium text-primary-foreground disabled:opacity-50">{m.tags_create()}</button>
 			</div>
 		{/if}
 
 		<div class="mt-2 max-h-56 overflow-y-auto">
 			{#if filtered.length === 0 && !canCreate}
-				<div class="px-2 py-3 text-center text-xs text-muted-foreground">No tags</div>
+				<div class="px-2 py-3 text-center text-xs text-muted-foreground">{m.tags_none()}</div>
 			{/if}
 			{#each filtered as tag (tag.id)}
 				{@const isSel = selected.includes(tag.id)}
-				<button type="button" onclick={() => toggle(tag.id)}
-					class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted">
+				{@const fromStack = !isSel && inherited.includes(tag.id)}
+				<button type="button" onclick={() => !fromStack && toggle(tag.id)}
+					disabled={fromStack}
+					title={fromStack ? m.tags_inherited_from_stack_title() : undefined}
+					class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm {fromStack ? 'cursor-default opacity-60' : 'hover:bg-muted'}">
 					{#if tag.icon}
 						<TagLucideIcon name={tag.icon} class="h-3.5 w-3.5 shrink-0" style="color: {tagHex(tag.color)};" />
 					{:else}
 						<span class="h-2 w-2 shrink-0 rounded-full" style="background-color: {tagHex(tag.color)};"></span>
 					{/if}
 					<span class="truncate">{tag.name}</span>
-					{#if isSel}<Check class="ml-auto h-3.5 w-3.5 text-primary shrink-0" />{/if}
+					{#if isSel}
+						<Check class="ml-auto h-3.5 w-3.5 text-primary shrink-0" />
+					{:else if fromStack}
+						<span class="ml-auto text-2xs text-muted-foreground shrink-0">{m.tags_from_stack()}</span>
+					{/if}
 				</button>
 			{/each}
 		</div>

@@ -2,11 +2,10 @@
  * Shared backup utilities — used by BackupPanel, BackupsTab, RestoreModal, backups page.
  */
 
-import { HardDrive, Globe } from 'lucide-svelte';
+import { HardDrive, Globe, Server } from 'lucide-svelte';
 import { AmazonS3Icon, BackblazeIcon, AzureBlobIcon, GoogleCloudIcon, RestServerIcon } from '$lib/components/cloud-icons';
 import cronstrue from 'cronstrue';
-import type { Component } from 'svelte';
-import { computeExecutionTally, type Execution, type ExecutionTally } from '$lib/utils/execution-tally';
+import { computeExecutionTally, resolveRunRepo, type Execution, type ExecutionTally } from '$lib/utils/execution-tally';
 export { computeExecutionTally, type Execution, type ExecutionTally };
 
 // ---------------------------------------------------------------------------
@@ -41,13 +40,14 @@ export function classifyJobResult(result: any): { outcome: BackupOutcome; messag
 // Repository type helpers
 // ---------------------------------------------------------------------------
 
-export function getRepoTypeIcon(repository: string): Component {
+export function getRepoTypeIcon(repository: string) {
 	if (repository.startsWith('/') || repository.startsWith('./')) return HardDrive;
 	if (repository.startsWith('s3:')) return AmazonS3Icon;
 	if (repository.startsWith('b2:')) return BackblazeIcon;
 	if (repository.startsWith('azure:')) return AzureBlobIcon;
 	if (repository.startsWith('gs:')) return GoogleCloudIcon;
 	if (repository.startsWith('rest:')) return RestServerIcon;
+	if (repository.startsWith('sftp:')) return Server;
 	return Globe;
 }
 
@@ -58,6 +58,7 @@ export function getRepoTypeLabel(repository: string): string {
 	if (repository.startsWith('azure:')) return 'Azure Blob';
 	if (repository.startsWith('gs:')) return 'Google Cloud';
 	if (repository.startsWith('rest:')) return 'REST';
+	if (repository.startsWith('sftp:')) return 'SFTP';
 	return 'Unknown';
 }
 
@@ -133,9 +134,10 @@ export function retentionSummary(retention: string | RetentionPolicy | null | un
 // Cron helpers
 // ---------------------------------------------------------------------------
 
-export function formatCron(cron: string | null): string {
+/** `locale` is a cronstrue locale (see $lib/i18n/cron); English when omitted. */
+export function formatCron(cron: string | null, locale?: string): string {
 	if (!cron) return '—';
-	try { return cronstrue.toString(cron, { use24HourTimeFormat: true }); } catch { return cron; }
+	try { return cronstrue.toString(cron, { use24HourTimeFormat: true, ...(locale && { locale }) }); } catch { return cron; }
 }
 
 // ---------------------------------------------------------------------------
@@ -176,6 +178,30 @@ export interface BackupFormState {
  *               orphan) but no zombie config row is left behind.
  */
 export type BackupAction = 'save' | 'save-run' | 'run-once';
+
+/**
+ * Whether a duplicated config should start enabled.
+ *
+ * A manual config is stored disabled because it has no schedule; its copy exists to
+ * be given one, so it starts enabled. A copy of a scheduled config keeps whatever
+ * the original was, so duplicating a paused schedule does not quietly resume it.
+ */
+export function duplicateStartsEnabled(source: { schedule?: string | null; enabled?: boolean }): boolean {
+	if (!source.schedule) return true;
+	return source.enabled !== false;
+}
+
+/**
+ * Destination for a duplicated schedule: the first repository this target has no
+ * schedule for yet, so the copy lands elsewhere by default; else the source's own.
+ */
+export function pickDuplicateDestinationId(
+	sourceDestinationId: number,
+	destinationIds: number[],
+	usedDestinationIds: number[]
+): number {
+	return destinationIds.find((id) => !usedDestinationIds.includes(id)) ?? sourceDestinationId;
+}
 
 export interface BuildBodyOptions {
 	enabled: boolean;
@@ -365,11 +391,18 @@ export function tagLogLine(msg: string): string {
  *
  * Pass `repoByConfig` (configId → {repository, name}) to stamp each run with which
  * repo it wrote to — the History table shows a Repo column when this is present.
+ *
+ * `destById` (destinationId → {repository, name}) takes precedence per run: a run
+ * records the destination it ACTUALLY wrote to in `details.destinationId`, so the
+ * History reports that rather than the config's current destination, which changes
+ * when the schedule is re-pointed (#1783). `repoByConfig` is the fallback for runs
+ * that predate the stamp.
  */
 export async function fetchBackupExecutions(
 	configIds: number[],
 	limit = 50,
-	repoByConfig?: Map<number, { repository?: string; name?: string }>
+	repoByConfig?: Map<number, { repository?: string; name?: string }>,
+	destById?: Map<number, { repository?: string; name?: string }>
 ): Promise<ExecutionTally> {
 	if (!configIds.length) return { executions: [], ok: 0, failed: 0 };
 	const all: Execution[] = [];
@@ -378,9 +411,12 @@ export async function fetchBackupExecutions(
 			const res = await fetch(`/api/schedules/executions?scheduleType=backup&scheduleId=${id}&limit=${limit}`);
 			if (!res.ok) return;
 			const data = await res.json();
-			const dest = repoByConfig?.get(id);
+			const configDest = repoByConfig?.get(id);
 			for (const e of data.executions || []) {
 				const exec = e as Execution;
+				// The destination this run actually used wins; fall back to the config's
+				// current destination for older runs with no stamp (#1783).
+				const dest = resolveRunRepo(exec.details?.destinationId, destById, configDest);
 				if (dest) { exec._repository = dest.repository; exec._destinationName = dest.name; }
 				all.push(exec);
 			}

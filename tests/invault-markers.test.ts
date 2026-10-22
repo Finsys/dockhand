@@ -1,5 +1,11 @@
 import { describe, test, expect } from 'bun:test';
-import { classifyMarker, resolvedRefVarNames, effectiveMissing } from '../src/lib/utils/invault-markers';
+import {
+	classifyMarker,
+	resolvedRefVarNames,
+	effectiveMissing,
+	isInlineProviderRef,
+	INLINE_REF_PREFIXES
+} from '../src/lib/utils/invault-markers';
 
 describe('classifyMarker', () => {
 	const inVault = new Set(['DB_PASSWORD', 'API_KEY']);
@@ -86,5 +92,60 @@ describe('resolvedRefVarNames', () => {
 
 	test('no inline refs -> empty', () => {
 		expect(resolvedRefVarNames([], ['op://whatever'])).toEqual([]);
+	});
+});
+
+// The editor decides which values to send for probing; the server decides which to
+// resolve on deploy. A prefix known to only one side is invisible to the live probe
+// while resolving fine at deploy time - the variable then reads as MISSING forever.
+describe('isInlineProviderRef', () => {
+	test('recognises every supported prefix', () => {
+		// One per provider family that resolves inline refs on deploy; a missing
+		// prefix here reads as MISSING in the editor while deploying fine.
+		expect(isInlineProviderRef('op://vault/item/field')).toBe(true);
+		expect(isInlineProviderRef('keepass://Group/Entry/Password')).toBe(true);
+		expect(isInlineProviderRef('azurekv://my-secret')).toBe(true);
+		expect(isInlineProviderRef('pass://MockVault/my-item/password')).toBe(true);
+	});
+
+	test('a quoted reference still counts - 1Password copies it with quotes', () => {
+		expect(isInlineProviderRef('"op://vault/item/field"')).toBe(true);
+		expect(isInlineProviderRef("'pass://v/i/f'")).toBe(true);
+		expect(isInlineProviderRef('  "azurekv://my-secret"  ')).toBe(true);
+	});
+
+	test('mismatched or one-sided quotes are left alone', () => {
+		// Only a matching pair is stripped, exactly as the server-side normalizer does.
+		expect(isInlineProviderRef('"op://vault/item/field')).toBe(false);
+		expect(isInlineProviderRef('x"op://vault/item/field"')).toBe(false);
+	});
+
+	test('a literal value is not a reference', () => {
+		expect(isInlineProviderRef('hunter2')).toBe(false);
+		expect(isInlineProviderRef('')).toBe(false);
+		expect(isInlineProviderRef('https://example.com')).toBe(false);
+	});
+
+	test('the prefix must lead - a ref mentioned mid-value is a literal', () => {
+		expect(isInlineProviderRef('see op://vault/item/field')).toBe(false);
+		expect(isInlineProviderRef('x pass://v/i/f')).toBe(false);
+	});
+
+	test('a lookalike prefix does not match', () => {
+		// Near misses: the scheme must be exact, or a typo would silently probe.
+		expect(isInlineProviderRef('ops://vault/item/field')).toBe(false);
+		expect(isInlineProviderRef('op:/vault/item/field')).toBe(false);
+		expect(isInlineProviderRef('OP://vault/item/field')).toBe(false);
+		expect(isInlineProviderRef('passs://v/i/f')).toBe(false);
+		expect(isInlineProviderRef('pass:/v/i/f')).toBe(false);
+		expect(isInlineProviderRef('PASS://v/i/f')).toBe(false);
+	});
+
+	test('every declared prefix is accepted by the predicate', () => {
+		// Guards the pair: a prefix added to the list must not need a second edit
+		// here to actually be probed.
+		for (const prefix of INLINE_REF_PREFIXES) {
+			expect(isInlineProviderRef(`${prefix}vault/item/field`)).toBe(true);
+		}
 	});
 });

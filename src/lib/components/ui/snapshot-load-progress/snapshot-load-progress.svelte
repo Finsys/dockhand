@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Loader2 } from 'lucide-svelte';
+	import { m } from '$lib/paraglide/messages.js';
 
 	// Progress indicator for the per-destination snapshot sweep. Each backup repo is
 	// queried separately and a slow/unreachable one can take up to the backend's restic
@@ -19,5 +20,5 @@
 	<Loader2 class="w-3.5 h-3.5 animate-spin" />
 	<!-- The "X of N repos" count only adds information with more than one repo; with a
 	     single repo it reads oddly ("1 of 1"), so just say "Loading snapshots…". -->
-	Loading snapshots…{#if total > 1} {done} of {total} repos{/if}
+	{total > 1 ? m.containers_snapshot_loading_progress({ done, total }) : m.containers_snapshot_loading()}
 </span>

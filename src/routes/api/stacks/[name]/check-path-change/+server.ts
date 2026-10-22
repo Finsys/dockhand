@@ -3,6 +3,7 @@ import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
 import { getStackSource } from '$lib/server/db';
 import { findStackDir } from '$lib/server/stacks';
+import { isValidStackName } from '$lib/server/stack-name-guard';
 import { getCachedContainerMounts, unpersistedComposePathWarning } from '$lib/server/host-path';
 import { existsSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -18,6 +19,7 @@ import { join, dirname } from 'node:path';
  * body-example: {"newComposePath":"/opt/stacks/web/compose.yaml"}
  * resp-200: {hasChanges:boolean!, oldDir:string, newDir:string, fileCount:integer!, currentComposePath:string, persistenceWarning:string}
  * resp-200-example: {"hasChanges":true,"oldDir":"/opt/stacks/old","newDir":"/opt/stacks/web","fileCount":3,"currentComposePath":"/opt/stacks/old/compose.yaml"}
+ * resp-400: Invalid stack name
  * resp-403: Permission denied (requires stacks:edit)
  * resp-500: Failed to check path changes
  */
@@ -34,6 +36,12 @@ export const POST: RequestHandler = async ({ params, request, url, cookies }) =>
 	}
 	const envAccessDenied = await auth.requireEnvAccess(envIdNum ?? null);
 	if (envAccessDenied) return envAccessDenied;
+
+	// SvelteKit decodes the route param once; reject any name that is not a plain stack
+	// name before it reaches findStackDir and a filesystem path.
+	if (!isValidStackName(name)) {
+		return json({ error: 'Invalid stack name' }, { status: 400 });
+	}
 
 	try {
 		const body = await request.json();

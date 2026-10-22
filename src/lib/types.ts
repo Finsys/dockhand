@@ -1,5 +1,16 @@
 // Shared types that can be used in both client and server code
 
+import type { Component, ComponentType } from 'svelte';
+
+/**
+ * An icon passed as a component. Covers both lucide-svelte icons, which are still
+ * class components (ComponentType), and the project's own `.svelte` icon components,
+ * which are Svelte 5 function components (Component). A plain `Component` rejects the
+ * lucide classes and a plain `ComponentType` rejects the function components, so icon
+ * props and icon-returning helpers take the union.
+ */
+export type IconComponent = ComponentType | Component<Record<string, unknown>>;
+
 /**
  * System container type - containers that cannot be updated from within Dockhand.
  */
@@ -21,6 +32,8 @@ export interface ContainerInfo {
 	id: string;
 	name: string;
 	image: string;
+	/** sha256 image ID - matches a vulnerability scan's imageId. */
+	imageId: string;
 	state: string;
 	status: string;
 	health?: string;
@@ -31,6 +44,8 @@ export interface ContainerInfo {
 		PublicPort?: number;
 		Type: string;
 	}>;
+	restartCount: number;
+	command?: string;
 	labels: Record<string, string>;
 	mounts: Array<{
 		type: string;
@@ -120,6 +135,8 @@ export interface StackInfo {
 export interface ContainerStats {
 	id: string;
 	name: string;
+	/** The compose project this container belongs to, or null when standalone. */
+	stack?: string | null;
 	cpuPercent: number;
 	memoryUsage: number;      // Actual usage (total - cache), same as docker stats
 	memoryRaw: number;        // Raw total usage before cache subtraction
@@ -147,6 +164,11 @@ export interface StackContainer {
 	created: number;
 	labels: Record<string, string>;
 	updateAvailable?: boolean;
+	/** The tag's digest moved but this container pins the old one (reported, not applied). */
+	pinnedToDigest?: boolean;
+	/** An update exists but the image is too young to apply (waiting out the minimum age). */
+	coolingDown?: boolean;
+	coolingDownHours?: number;
 	/** A newer VERSION tag (semver) for this pinned image, or null. Advisory. */
 	newerVersion?: NewerVersion | null;
 }
@@ -156,10 +178,16 @@ export interface ComposeStackInfo {
 	containers: string[];
 	containerDetails: StackContainer[];
 	status: string;
+	/** Health of the stack's running containers, reported separately from status. */
+	health?: 'healthy' | 'unhealthy' | 'starting' | 'none';
 	updatesAvailable?: boolean;
 	updateCount?: number;
+	/** Containers whose update is held by the minimum image age. Never redeployable. */
+	coolingDownCount?: number;
 	/** How many containers in this stack have a newer version tag (semver). */
 	newerVersionCount?: number;
+	/** How many containers in this stack have a pinned digest that moved (reported, not applied). */
+	pinnedDigestCount?: number;
 	sourceType?: 'external' | 'internal' | 'git';
 	repository?: {
 		id: number;

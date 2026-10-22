@@ -7,6 +7,7 @@
 	import { toast } from 'svelte-sonner';
 	import { appendEnvParam } from '$lib/stores/environment';
 	import { focusFirstInput } from '$lib/utils';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		open: boolean;
@@ -38,7 +39,7 @@
 
 	async function handleClone() {
 		if (!newName.trim()) {
-			error = 'Please enter a name for the new volume';
+			error = m.volumes_clone_error_name_required();
 			return;
 		}
 
@@ -55,14 +56,14 @@
 
 			if (!response.ok) {
 				const data = await response.json();
-				throw new Error(data.details || data.error || 'Failed to clone volume');
+				throw new Error(data.details || data.error || m.volumes_clone_error_failed());
 			}
 
-			toast.success(`Volume cloned as "${newName}"`);
+			toast.success(m.volumes_clone_toast_cloned({ name: newName }));
 			onsuccess();
 			open = false;
 		} catch (e: any) {
-			error = e.message || 'Failed to clone volume';
+			error = e.message || m.volumes_clone_error_failed();
 		} finally {
 			cloning = false;
 		}
@@ -74,20 +75,20 @@
 		<Dialog.Header>
 			<Dialog.Title class="flex items-center gap-2">
 				<Copy class="w-5 h-5" />
-				Clone volume
+				{m.volumes_clone_title()}
 			</Dialog.Title>
 			<Dialog.Description>
-				Create a new volume with the same driver and options as "{volumeName}".
+				{m.volumes_clone_description({ name: volumeName })}
 			</Dialog.Description>
 		</Dialog.Header>
 
 		<div class="space-y-4 py-4">
 			<div class="space-y-2">
-				<Label for="new-name">New volume name</Label>
+				<Label for="new-name">{m.volumes_clone_new_name_label()}</Label>
 				<Input
 					id="new-name"
 					bind:value={newName}
-					placeholder="Enter new volume name"
+					placeholder={m.volumes_clone_new_name_placeholder()}
 					disabled={cloning}
 					onkeydown={(e) => e.key === 'Enter' && handleClone()}
 				/>
@@ -98,13 +99,13 @@
 			{/if}
 
 			<p class="text-xs text-muted-foreground">
-				Note: This creates an empty volume with the same configuration. To copy data, use the Export feature on the source volume and import into the new volume.
+				{m.volumes_clone_note()}
 			</p>
 		</div>
 
 		<Dialog.Footer>
 			<Button variant="outline" onclick={() => (open = false)} disabled={cloning}>
-				Cancel
+				{m.volumes_cancel()}
 			</Button>
 			<Button onclick={handleClone} disabled={cloning || !newName.trim()}>
 				{#if cloning}
@@ -112,7 +113,7 @@
 				{:else}
 					<Copy class="w-4 h-4" />
 				{/if}
-				Clone
+				{m.volumes_clone_submit()}
 			</Button>
 		</Dialog.Footer>
 	</Dialog.Content>

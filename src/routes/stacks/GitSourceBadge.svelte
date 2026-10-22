@@ -4,6 +4,7 @@
 	import { forgeIcon } from '$lib/utils/git-forge';
 	import { appSettings } from '$lib/stores/settings';
 import { effectiveStackBranch } from '$lib/git-stack-branch';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		source: { repository?: { url?: string; branch?: string } | null; gitStack?: { lastCommit?: string | null; branch?: string | null } | null };
@@ -54,7 +55,7 @@ import { effectiveStackBranch } from '$lib/git-stack-branch';
 							<GitBranch class="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
 							<span class="text-xs">{effectiveBranch}</span>
 							{#if isPerStackBranch}
-								<span class="text-[10px] text-muted-foreground">(per-stack)</span>
+								<span class="text-[10px] text-muted-foreground">{m.stacks_git_badge_per_stack()}</span>
 							{/if}
 						</div>
 					{/if}

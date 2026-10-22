@@ -3,6 +3,8 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Layers } from 'lucide-svelte';
 	import ImageLayersView from './ImageLayersView.svelte';
+	import { m } from '$lib/paraglide/messages.js';
+	import { splitAtName } from '$lib/i18n/split';
 
 	interface Props {
 		open: boolean;
@@ -18,7 +20,7 @@
 		<Dialog.Header>
 			<Dialog.Title class="flex items-center gap-2">
 				<Layers class="w-5 h-5" />
-				Image layers: <span class="text-muted-foreground font-normal">{imageName || imageId.slice(7, 19)}</span>
+				{splitAtName(m.images_list_layers_title)[0]}<span class="text-muted-foreground font-normal">{imageName || imageId.slice(7, 19)}</span>{splitAtName(m.images_list_layers_title)[1]}
 			</Dialog.Title>
 		</Dialog.Header>
 
@@ -31,7 +33,7 @@
 		</div>
 
 		<Dialog.Footer>
-			<Button variant="outline" onclick={() => (open = false)}>Close</Button>
+			<Button variant="outline" onclick={() => (open = false)}>{m.ui_close()}</Button>
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>

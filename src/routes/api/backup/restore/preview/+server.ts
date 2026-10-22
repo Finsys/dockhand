@@ -11,7 +11,7 @@ import { jobResult } from '$lib/server/sse';
  * @openapi
  * summary: Preview what a restore would write (resolved targets + volume/stack contents)
  * description: With includeTargets it also resolves the concrete restore targets (host paths / volumes); without it, returns the metadata-only preview the initial modal load relies on.
- * body: {destinationId:integer!, snapshotId:string!, includeTargets:boolean, targetEnvId:integer, environmentId:integer, mode:string, targetType:string, targetName:string, targetPath:string, volumeDestinations:object, volumes:array<string>, skipStackFiles:boolean, mergeStackFiles:boolean}
+ * body: {destinationId:integer!, snapshotId:string!, includeTargets:boolean, targetEnvId:integer, environmentId:integer, mode:string, targetType:string, targetName:string, targetPath:string, volumeDestinations:object, volumes:array<string>, skipStackFiles:boolean, mergeStackFiles:boolean, postRestore:string}
  * resp-200: object
  * resp-200-desc: The snapshot preview, optionally with a resolved targets list
  * resp-400: Missing required fields (destinationId, snapshotId)
@@ -59,6 +59,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 				volumeDestinations: body.volumeDestinations,
 				skipStackFiles: body.skipStackFiles,
 				mergeStackFiles: body.mergeStackFiles,
+				postRestore: body.postRestore,
 				volumes: body.volumes,
 			}, access);
 			return { ...preview, targets };

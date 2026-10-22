@@ -7,6 +7,8 @@
 
 import type { SecretProviderConfig, SecretProviderType } from './secretproviders/shared';
 import { normalizeColor, type Tag, type TagColor } from '$lib/utils/tags-core';
+import { passkeysEnabledFromSetting } from '$lib/utils/passkey-availability';
+import { pinnedDigestReportEnabledFromSetting } from '$lib/utils/pinned-digest-report';
 import { mergeProviderConfigForWrite } from './secretproviders/shared';
 import {
 	db,
@@ -34,6 +36,7 @@ import {
 	environmentNotifications,
 	authSettings,
 	users,
+	passkeyCredentials,
 	sessions,
 	roles,
 	userRoles,
@@ -94,6 +97,7 @@ import { encrypt, decrypt, decryptStrict, isEncrypted } from './encryption.js';
 import { parseEnvInterpolation } from './env-interpolation';
 import { parseInjectedSecretKeys, serializeInjectedSecretKeys } from './stack-secret-keys';
 import { invalidateVulnerabilitiesCache } from './vulnerabilities-cache';
+import { DEFAULT_RETENTION, stripUnstorableEscapes, type ScanRecord } from './scan-retention-core';
 
 // Re-export for backwards compatibility
 export { db, isPostgres, isSqlite };
@@ -694,6 +698,48 @@ export async function setSidebarPreferences(prefs: SidebarPreferences, userId?: 
 
 export async function deleteSidebarPreferences(userId?: number): Promise<void> {
 	const key = userId ? `user:${userId}:sidebar_preferences` : 'sidebar_preferences';
+	await deleteSetting(key);
+}
+
+// =============================================================================
+// TAG ORDER
+// =============================================================================
+
+/** Tag ids in the user's chosen order; empty means the default (by name). */
+export async function getTagOrder(userId?: number): Promise<number[]> {
+	const key = userId ? `user:${userId}:tag_order` : 'tag_order';
+	const value = await getSetting(key);
+	return Array.isArray(value) ? value : [];
+}
+
+export async function setTagOrder(order: number[], userId?: number): Promise<void> {
+	const key = userId ? `user:${userId}:tag_order` : 'tag_order';
+	await setSetting(key, order);
+}
+
+export async function deleteTagOrder(userId?: number): Promise<void> {
+	const key = userId ? `user:${userId}:tag_order` : 'tag_order';
+	await deleteSetting(key);
+}
+
+// =============================================================================
+// ENVIRONMENT ORDER
+// =============================================================================
+
+/** Environment ids in the user's chosen order; empty means the default (by name). */
+export async function getEnvironmentOrder(userId?: number): Promise<number[]> {
+	const key = userId ? `user:${userId}:environment_order` : 'environment_order';
+	const value = await getSetting(key);
+	return Array.isArray(value) ? value : [];
+}
+
+export async function setEnvironmentOrder(order: number[], userId?: number): Promise<void> {
+	const key = userId ? `user:${userId}:environment_order` : 'environment_order';
+	await setSetting(key, order);
+}
+
+export async function deleteEnvironmentOrder(userId?: number): Promise<void> {
+	const key = userId ? `user:${userId}:environment_order` : 'environment_order';
 	await deleteSetting(key);
 }
 
@@ -3455,7 +3501,9 @@ export async function saveVulnerabilityScan(data: {
 		lowCount: data.lowCount,
 		negligibleCount: data.negligibleCount,
 		unknownCount: data.unknownCount,
-		vulnerabilities: JSON.stringify(data.vulnerabilities),
+		// A NUL or lone surrogate from a scanner survives JSON.stringify but breaks
+		// every later PostgreSQL read of the column, so it never reaches storage.
+		vulnerabilities: stripUnstorableEscapes(JSON.stringify(data.vulnerabilities)),
 		error: data.error ?? null
 	}).returning();
 	// A new scan makes the dashboard's cached findings stale — drop them so every
@@ -3602,40 +3650,6 @@ export async function getCombinedScanForImage(
 	return combined;
 }
 
-export async function getAllLatestScans(environmentId?: number | null): Promise<VulnerabilityScanData[]> {
-	// This complex query requires raw SQL or multiple queries
-	// For simplicity, we'll fetch all and filter in JS
-	let results;
-	if (environmentId !== undefined) {
-		if (environmentId === null) {
-			results = await db.select().from(vulnerabilityScans)
-				.where(isNull(vulnerabilityScans.environmentId))
-				.orderBy(desc(vulnerabilityScans.scannedAt));
-		} else {
-			results = await db.select().from(vulnerabilityScans)
-				.where(eq(vulnerabilityScans.environmentId, environmentId))
-				.orderBy(desc(vulnerabilityScans.scannedAt));
-		}
-	} else {
-		results = await db.select().from(vulnerabilityScans)
-			.orderBy(desc(vulnerabilityScans.scannedAt));
-	}
-
-	// Group by imageId + scanner and take latest
-	const latestMap = new Map<string, typeof results[0]>();
-	for (const row of results) {
-		const key = `${row.imageId}:${row.scanner}`;
-		if (!latestMap.has(key)) {
-			latestMap.set(key, row);
-		}
-	}
-
-	return Array.from(latestMap.values()).map(row => ({
-		...row,
-		vulnerabilities: row.vulnerabilities ? JSON.parse(row.vulnerabilities) : []
-	})) as VulnerabilityScanData[];
-}
-
 /**
  * Scan freshness for the metrics endpoint: how stale the OLDEST scan is
  * (surfaces environments whose scans have gone stale) and the average scan
@@ -3675,17 +3689,33 @@ export async function getScanFreshness(environmentId?: number | null): Promise<{
 	return { scans: n, oldestAgeSeconds, avgDurationSeconds };
 }
 
-export async function deleteOldScans(keepDays = 30): Promise<number> {
-	const cutoffDate = new Date(Date.now() - keepDays * 24 * 60 * 60 * 1000).toISOString();
-	const countResult = await db.select({ count: sql<number>`count(*)` })
-		.from(vulnerabilityScans)
-		.where(sql`scanned_at < ${cutoffDate}`);
-	const count = Number(countResult[0]?.count ?? 0);
-	if (count > 0) {
-		await db.delete(vulnerabilityScans)
-			.where(sql`scanned_at < ${cutoffDate}`);
+/** Every scan reduced to what a retention decision needs - no findings documents. */
+export async function listScanRecords(): Promise<ScanRecord[]> {
+	return db
+		.select({
+			id: vulnerabilityScans.id,
+			environmentId: vulnerabilityScans.environmentId,
+			imageId: vulnerabilityScans.imageId,
+			scanner: vulnerabilityScans.scanner,
+			scannedAt: vulnerabilityScans.scannedAt
+		})
+		.from(vulnerabilityScans) as Promise<ScanRecord[]>;
+}
+
+/**
+ * Delete the given scans, in batches.
+ *
+ * A single statement would bind one parameter per id, which SQLite caps at
+ * 32766, and a long-neglected install can exceed that many times over.
+ */
+export async function deleteScans(ids: number[], batchSize = 500): Promise<number> {
+	let deleted = 0;
+	for (let i = 0; i < ids.length; i += batchSize) {
+		const batch = ids.slice(i, i + batchSize);
+		await db.delete(vulnerabilityScans).where(inArray(vulnerabilityScans.id, batch));
+		deleted += batch.length;
 	}
-	return count;
+	return deleted;
 }
 
 // =============================================================================
@@ -4408,7 +4438,7 @@ export async function saveDashboardPreferences(data: {
 // SCHEDULE EXECUTION OPERATIONS
 // =============================================================================
 
-export type ScheduleType = 'container_update' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune' | 'backup' | 'restore' | 'stack_deploy' | 'deploy_log_reconcile';
+export type ScheduleType = 'container_update' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune' | 'backup' | 'restore' | 'stack_deploy' | 'deploy_log_reconcile' | 'env_report';
 
 // Runtime list of every ScheduleType. Used to bound a no-type-filter executions
 // query to the caller's viewable types (viewableScheduleTypes). The two type
@@ -4424,7 +4454,8 @@ export const ALL_SCHEDULE_TYPES = [
 	'backup',
 	'restore',
 	'stack_deploy',
-	'deploy_log_reconcile'
+	'deploy_log_reconcile',
+	'env_report'
 ] as const satisfies readonly ScheduleType[];
 // Compile error if ALL_SCHEDULE_TYPES and ScheduleType ever diverge.
 type _ScheduleTypeExhaustive =
@@ -4925,6 +4956,10 @@ const SCHEDULE_CLEANUP_ENABLED_KEY = 'schedule_cleanup_enabled';
 const EVENT_CLEANUP_ENABLED_KEY = 'event_cleanup_enabled';
 const SCANNER_CLEANUP_CRON_KEY = 'scanner_cleanup_cron';
 const SCANNER_CLEANUP_ENABLED_KEY = 'scanner_cleanup_enabled';
+const SCAN_RETENTION_CRON_KEY = 'scan_retention_cron';
+const SCAN_RETENTION_ENABLED_KEY = 'scan_retention_enabled';
+const SCAN_RETENTION_KEEP_KEY = 'scan_retention_keep';
+const SCAN_RETENTION_GRACE_DAYS_KEY = 'scan_retention_grace_days';
 const DEPLOY_LOG_RECONCILE_CRON_KEY = 'deploy_log_reconcile_cron';
 const DEPLOY_LOG_RECONCILE_ENABLED_KEY = 'deploy_log_reconcile_enabled';
 const DEFAULT_SCHEDULE_CLEANUP_CRON = '0 3 * * *'; // Daily at 3 AM
@@ -5251,6 +5286,37 @@ export interface GlobalSemverConfig {
 	maxBump: 'patch' | 'minor' | 'major';
 	matchFlavor: boolean;
 	includePrerelease: boolean;
+	/**
+	 * Drop a candidate whose image was built BEFORE the running one. A repository
+	 * that still carries old tags whose names sort high (`lidarr:8.1.2135` is
+	 * really 0.8.1.2135 from 2021) otherwise reads as a major upgrade. Looks the date
+	 * up for the chosen candidate only, and caches it per digest.
+	 */
+	rejectOlderImages: boolean;
+}
+
+const PASSKEYS_ENABLED_KEY = 'passkeys_enabled';
+
+/** Whether this instance offers passkey sign-in. The default lives in the pure
+ *  passkeysEnabledFromSetting, so what an absent value means is unit-tested. */
+export async function getPasskeysEnabled(): Promise<boolean> {
+	return passkeysEnabledFromSetting(await getSetting(PASSKEYS_ENABLED_KEY));
+}
+
+export async function setPasskeysEnabled(enabled: boolean): Promise<void> {
+	await setSetting(PASSKEYS_ENABLED_KEY, enabled);
+}
+
+const PINNED_DIGEST_REPORT_KEY = 'report_pinned_digest';
+
+/** Whether a moved digest on a `tag@sha256:` pinned image is reported (#1755/#1780).
+ *  Default ON; the pure helper is where "absent means on" is unit-tested. */
+export async function getPinnedDigestReportEnabled(): Promise<boolean> {
+	return pinnedDigestReportEnabledFromSetting(await getSetting(PINNED_DIGEST_REPORT_KEY));
+}
+
+export async function setPinnedDigestReportEnabled(enabled: boolean): Promise<void> {
+	await setSetting(PINNED_DIGEST_REPORT_KEY, enabled);
 }
 
 const GLOBAL_SEMVER_KEY = 'global_semver_check';
@@ -5258,7 +5324,8 @@ const DEFAULT_SEMVER_CONFIG: GlobalSemverConfig = {
 	enabled: false,
 	maxBump: 'major',
 	matchFlavor: true,
-	includePrerelease: false
+	includePrerelease: false,
+	rejectOlderImages: true
 };
 
 export async function getGlobalSemverConfig(): Promise<GlobalSemverConfig> {
@@ -5323,6 +5390,73 @@ export async function getAllEnvUpdateCheckSettings(): Promise<Array<{ envId: num
 			const config = JSON.parse(row.value) as EnvUpdateCheckSettings;
 			if (config.enabled) {
 				results.push({ envId, settings: config });
+			}
+		} catch {
+			// Skip invalid entries
+		}
+	}
+	return results;
+}
+
+// =============================================================================
+// ENVIRONMENT REPORT SCHEDULE SETTINGS
+// =============================================================================
+
+/**
+ * A scheduled state report for one environment, mailed to a notification channel.
+ *
+ * Only an administrator configures this: the report lists everything running and every
+ * vulnerability known about it, and the mail leaves the installation on a timer with
+ * nobody watching. One key holding one object, so a field added later needs no migration.
+ */
+export interface EnvReportSettings {
+	enabled: boolean;
+	cron: string;
+	format: 'pdf' | 'csv';
+	/** The SMTP channel to mail it to. Only SMTP can carry the attachment. */
+	notificationId: number | null;
+}
+
+const envReportKey = (envId: number) => `env_${envId}_report`;
+
+export async function getEnvReportSettings(envId: number): Promise<EnvReportSettings | null> {
+	const result = await db.select().from(settings).where(eq(settings.key, envReportKey(envId)));
+	if (!result[0]) return null;
+	try {
+		return JSON.parse(result[0].value);
+	} catch {
+		return null;
+	}
+}
+
+export async function setEnvReportSettings(envId: number, config: EnvReportSettings): Promise<void> {
+	const key = envReportKey(envId);
+	const value = JSON.stringify(config);
+	const existing = await db.select().from(settings).where(eq(settings.key, key));
+	if (existing.length > 0) {
+		await db.update(settings)
+			.set({ value, updatedAt: new Date().toISOString() })
+			.where(eq(settings.key, key));
+	} else {
+		await db.insert(settings).values({ key, value });
+	}
+}
+
+export async function deleteEnvReportSettings(envId: number): Promise<void> {
+	await db.delete(settings).where(eq(settings.key, envReportKey(envId)));
+}
+
+/** Every environment with reporting switched on, for the scheduler to register at boot. */
+export async function getAllEnvReportSettings(): Promise<Array<{ envId: number; settings: EnvReportSettings }>> {
+	const rows = await db.select().from(settings).where(sql`${settings.key} LIKE 'env_%_report'`);
+	const results: Array<{ envId: number; settings: EnvReportSettings }> = [];
+	for (const row of rows) {
+		try {
+			const match = row.key.match(/^env_(\d+)_report$/);
+			if (!match) continue;
+			const config = JSON.parse(row.value) as EnvReportSettings;
+			if (config.enabled && config.cron) {
+				results.push({ envId: parseInt(match[1]), settings: config });
 			}
 		} catch {
 			// Skip invalid entries
@@ -5861,10 +5995,17 @@ export async function addPendingContainerUpdate(
 	// A row can exist for a digest update, a newer-version-tag (semver) suggestion,
 	// or both. Both flags default to the classic "digest update only" shape so
 	// existing callers keep working unchanged.
-	options: { hasImageUpdate?: boolean; newerVersion?: unknown | null } = {}
+	options: {
+		hasImageUpdate?: boolean;
+		newerVersion?: unknown | null;
+		releaseAgeRemainingHours?: number | null;
+		pinnedToDigest?: boolean;
+	} = {}
 ): Promise<void> {
 	const hasImageUpdate = options.hasImageUpdate ?? true;
 	const newerVersion = options.newerVersion != null ? JSON.stringify(options.newerVersion) : null;
+	const releaseAgeRemainingHours = options.releaseAgeRemainingHours ?? null;
+	const pinnedToDigest = options.pinnedToDigest ?? false;
 	const now = new Date().toISOString();
 	// Use insert with onConflictDoUpdate for upsert behavior
 	await db.insert(pendingContainerUpdates)
@@ -5875,6 +6016,8 @@ export async function addPendingContainerUpdate(
 			currentImage,
 			hasImageUpdate,
 			newerVersion,
+			releaseAgeRemainingHours,
+			pinnedToDigest,
 			checkedAt: now
 		})
 		.onConflictDoUpdate({
@@ -5884,6 +6027,8 @@ export async function addPendingContainerUpdate(
 				currentImage,
 				hasImageUpdate,
 				newerVersion,
+				releaseAgeRemainingHours,
+				pinnedToDigest,
 				checkedAt: now
 			}
 		});
@@ -5897,6 +6042,24 @@ export async function removePendingContainerUpdate(environmentId: number, contai
 		.where(and(
 			eq(pendingContainerUpdates.environmentId, environmentId),
 			eq(pendingContainerUpdates.containerId, containerId)
+		));
+}
+
+/**
+ * Clear a pending update by container NAME.
+ *
+ * An update recreates the container under a new id, so a caller that ran the update
+ * no longer holds the id the row was written with. The name survives the recreate,
+ * which is what the auto-update schedule identifies a container by anyway.
+ */
+export async function removePendingContainerUpdateByName(
+	environmentId: number,
+	containerName: string
+): Promise<void> {
+	await db.delete(pendingContainerUpdates)
+		.where(and(
+			eq(pendingContainerUpdates.environmentId, environmentId),
+			eq(pendingContainerUpdates.containerName, containerName)
 		));
 }
 
@@ -5925,6 +6088,8 @@ export async function createBackupDestination(data: {
 	policies?: string | null;
 	cacert?: string | null;
 	tlsClientCert?: string | null;
+	sshPrivateKey?: string | null;
+	sshKnownHosts?: string | null;
 }): Promise<BackupDestination> {
 	const result = await db.insert(backupDestinations).values({
 		name: data.name,
@@ -5935,7 +6100,9 @@ export async function createBackupDestination(data: {
 		hostPath: data.hostPath ?? null,
 		policies: data.policies ?? null,
 		cacert: data.cacert ? encrypt(data.cacert) : null,
-		tlsClientCert: data.tlsClientCert ? encrypt(data.tlsClientCert) : null
+		tlsClientCert: data.tlsClientCert ? encrypt(data.tlsClientCert) : null,
+		sshPrivateKey: data.sshPrivateKey ? encrypt(data.sshPrivateKey) : null,
+		sshKnownHosts: data.sshKnownHosts ? encrypt(data.sshKnownHosts) : null
 	}).returning();
 	return result[0];
 }
@@ -5950,6 +6117,8 @@ export async function updateBackupDestination(id: number, data: {
 	policies?: string | null;
 	cacert?: string | null;
 	tlsClientCert?: string | null;
+	sshPrivateKey?: string | null;
+	sshKnownHosts?: string | null;
 	lastTestAt?: string | null;
 	lastTestStatus?: string | null;
 	lastTestError?: string | null;
@@ -5967,6 +6136,9 @@ export async function updateBackupDestination(id: number, data: {
 	// Certs (optional): undefined = keep, '' = clear (user removed it), value = encrypt.
 	if (data.cacert !== undefined) updateData.cacert = data.cacert ? encrypt(data.cacert) : null;
 	if (data.tlsClientCert !== undefined) updateData.tlsClientCert = data.tlsClientCert ? encrypt(data.tlsClientCert) : null;
+	// SFTP credentials use the same keep/replace/clear contract as TLS PEMs.
+	if (data.sshPrivateKey !== undefined) updateData.sshPrivateKey = data.sshPrivateKey ? encrypt(data.sshPrivateKey) : null;
+	if (data.sshKnownHosts !== undefined) updateData.sshKnownHosts = data.sshKnownHosts ? encrypt(data.sshKnownHosts) : null;
 	if (data.flags !== undefined) updateData.flags = data.flags;
 	if (data.hostPath !== undefined) updateData.hostPath = data.hostPath;
 	if (data.policies !== undefined) updateData.policies = data.policies;
@@ -5994,7 +6166,14 @@ export async function updateBackupDestinationTestStatus(id: number, status: 'suc
 /**
  * Decrypt sensitive fields from a backup destination for runtime use.
  */
-export function decryptBackupDestination(dest: BackupDestination): BackupDestination & { decryptedPassword: string; decryptedEnvVars: Record<string, string>; decryptedCacert: string | null; decryptedTlsClientCert: string | null } {
+export function decryptBackupDestination(dest: BackupDestination): BackupDestination & {
+	decryptedPassword: string;
+	decryptedEnvVars: Record<string, string>;
+	decryptedCacert: string | null;
+	decryptedTlsClientCert: string | null;
+	decryptedSshPrivateKey: string | null;
+	decryptedSshKnownHosts: string | null;
+} {
 	// (audit low #55) Fail closed: if the stored password is a genuine ciphertext
 	// blob that can't be decrypted (wrong/rotated key), decryptStrict throws rather
 	// than forwarding the literal `enc:v1:...` string as RESTIC_PASSWORD.
@@ -6015,7 +6194,17 @@ export function decryptBackupDestination(dest: BackupDestination): BackupDestina
 	// the literal enc:v1 string to restic.
 	const decryptedCacert = dest.cacert ? (decryptStrict(dest.cacert) || null) : null;
 	const decryptedTlsClientCert = dest.tlsClientCert ? (decryptStrict(dest.tlsClientCert) || null) : null;
-	return { ...dest, decryptedPassword, decryptedEnvVars, decryptedCacert, decryptedTlsClientCert };
+	const decryptedSshPrivateKey = dest.sshPrivateKey ? (decryptStrict(dest.sshPrivateKey) || null) : null;
+	const decryptedSshKnownHosts = dest.sshKnownHosts ? (decryptStrict(dest.sshKnownHosts) || null) : null;
+	return {
+		...dest,
+		decryptedPassword,
+		decryptedEnvVars,
+		decryptedCacert,
+		decryptedTlsClientCert,
+		decryptedSshPrivateKey,
+		decryptedSshKnownHosts
+	};
 }
 
 // =============================================================================
@@ -6110,4 +6299,133 @@ export async function updateBackupConfig(id: number, data: {
 
 export async function deleteBackupConfig(id: number): Promise<void> {
 	await db.delete(backupConfigs).where(eq(backupConfigs.id, id));
+}
+
+// --- Vulnerability scan retention -------------------------------------------
+// Scans are append-only and each carries its findings document, so without a
+// bound they grow until the dashboard costs gigabytes to render.
+
+const DEFAULT_SCAN_RETENTION_CRON = '30 4 * * *'; // Daily at 4:30 AM, after the deploy-log reconcile
+
+// These read through getSetting, which parses the JSON setSetting writes. Reading
+// the column directly would hand back a quoted string, and a cron of `"30 4 * * *"`
+// is not a cron.
+
+export async function getScanRetentionCron(): Promise<string> {
+	const value = await getSetting(SCAN_RETENTION_CRON_KEY);
+	return typeof value === 'string' && value.trim() ? value : DEFAULT_SCAN_RETENTION_CRON;
+}
+
+export async function setScanRetentionCron(cron: string): Promise<void> {
+	await setSetting(SCAN_RETENTION_CRON_KEY, cron);
+}
+
+export async function getScanRetentionEnabled(): Promise<boolean> {
+	// Absent means on: retention is what bounds the scan table's growth.
+	const value = await getSetting(SCAN_RETENTION_ENABLED_KEY);
+	if (value === null) return true;
+	return value === true || value === 'true';
+}
+
+export async function setScanRetentionEnabled(enabled: boolean): Promise<void> {
+	await setSetting(SCAN_RETENTION_ENABLED_KEY, enabled);
+}
+
+export async function getScanRetentionKeep(): Promise<number> {
+	const parsed = parseInt(String(await getSetting(SCAN_RETENTION_KEEP_KEY) ?? ''), 10);
+	return Number.isFinite(parsed) && parsed >= 1 ? parsed : DEFAULT_RETENTION.keepPerImage;
+}
+
+export async function setScanRetentionKeep(keep: number): Promise<void> {
+	await setSetting(SCAN_RETENTION_KEEP_KEY, Math.max(1, Math.floor(keep)));
+}
+
+export async function getScanRetentionGraceDays(): Promise<number> {
+	const parsed = parseInt(String(await getSetting(SCAN_RETENTION_GRACE_DAYS_KEY) ?? ''), 10);
+	return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_RETENTION.graceDays;
+}
+
+export async function setScanRetentionGraceDays(days: number): Promise<void> {
+	await setSetting(SCAN_RETENTION_GRACE_DAYS_KEY, Math.max(0, Math.floor(days)));
+}
+
+
+// =============================================================================
+// PASSKEY CREDENTIAL OPERATIONS
+// =============================================================================
+
+export interface PasskeyCredentialData {
+	id: number;
+	userId: number;
+	credentialId: string;
+	webauthnUserId: string;
+	publicKey: string;
+	counter: number;
+	deviceType: string;
+	backedUp: boolean;
+	transports: string | null;
+	aaguid: string | null;
+	name: string | null;
+	createdAt: string;
+}
+
+export async function createPasskeyCredential(
+	data: Omit<PasskeyCredentialData, 'id' | 'createdAt'>
+): Promise<PasskeyCredentialData> {
+	const rows = await db.insert(passkeyCredentials).values(data).returning();
+	return rows[0] as PasskeyCredentialData;
+}
+
+export async function getPasskeyCredentialByCredentialId(credentialId: string): Promise<PasskeyCredentialData | null> {
+	const rows = await db.select().from(passkeyCredentials).where(eq(passkeyCredentials.credentialId, credentialId)).limit(1);
+	return rows[0] as PasskeyCredentialData || null;
+}
+
+export async function getPasskeyCredentialsForUser(userId: number): Promise<PasskeyCredentialData[]> {
+	return await db.select().from(passkeyCredentials)
+		.where(eq(passkeyCredentials.userId, userId))
+		.orderBy(asc(passkeyCredentials.createdAt)) as PasskeyCredentialData[];
+}
+
+export async function getPasskeyCredentialByNameForUser(
+	userId: number,
+	name: string
+): Promise<PasskeyCredentialData | null> {
+	const rows = await db.select().from(passkeyCredentials)
+		.where(and(
+			eq(passkeyCredentials.userId, userId),
+			sql`lower(${passkeyCredentials.name}) = lower(${name})`
+		))
+		.limit(1);
+	return rows[0] as PasskeyCredentialData || null;
+}
+
+export async function deletePasskeyCredentialForUser(id: number, userId: number): Promise<boolean> {
+	const rows = await db.delete(passkeyCredentials)
+		.where(and(eq(passkeyCredentials.id, id), eq(passkeyCredentials.userId, userId)))
+		.returning({ id: passkeyCredentials.id });
+	return rows.length === 1;
+}
+
+/**
+ * Advance a credential's signature counter, refusing the move if another request
+ * already advanced it. A counter that does not move forward is how a cloned
+ * authenticator shows itself, so the caller must fail the login when this returns
+ * false.
+ *
+ * Multi-device passkeys commonly keep a zero counter; the one-time challenge still
+ * prevents replay there, so no write is needed in that case.
+ */
+export async function updatePasskeyCounter(
+	id: number,
+	previousCounter: number,
+	newCounter: number
+): Promise<boolean> {
+	if (previousCounter === 0 && newCounter === 0) return true;
+
+	const rows = await db.update(passkeyCredentials)
+		.set({ counter: newCounter })
+		.where(and(eq(passkeyCredentials.id, id), eq(passkeyCredentials.counter, previousCounter)))
+		.returning({ id: passkeyCredentials.id });
+	return rows.length === 1;
 }

@@ -1,5 +1,5 @@
 <svelte:head>
-	<title>Terminal - Dockhand</title>
+	<title>{m.terminal_page_title()} - Dockhand</title>
 </svelte:head>
 
 <script lang="ts">
@@ -9,14 +9,15 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import * as Select from '$lib/components/ui/select';
-	import { Search, ChevronDown, Terminal as TerminalIcon, Unplug, RefreshCw, Trash2, Copy, Shell, User, Loader2, AlertCircle } from 'lucide-svelte';
+	import { Search, ChevronDown, Terminal as TerminalIcon, Unplug, RefreshCw, Trash2, Copy, Shell, Loader2, AlertCircle } from 'lucide-svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import ContainerIcon from '$lib/components/ContainerIcon.svelte';
 	import type { ContainerInfo, TerminalMode } from '$lib/types';
 	import { currentEnvironment, environments, appendEnvParam } from '$lib/stores/environment';
 	import Terminal from './Terminal.svelte';
 	import { NoEnvironment } from '$lib/components/ui/empty-state';
-	import { detectShells, getBestShell, hasAvailableShell, USER_OPTIONS, getSavedUser, saveUserForContainer, getCustomUsers, removeCustomUser, type ShellInfo, type ShellDetectionResult } from '$lib/utils/shell-detection';
+	import ShellUserPicker from './ShellUserPicker.svelte';
+	import { m } from '$lib/paraglide/messages.js';
 
 	// Track if we've handled the initial container from URL
 	let initialContainerHandled = $state(false);
@@ -29,37 +30,20 @@
 	let terminalComponent: ReturnType<typeof Terminal> | undefined;
 	let connected = $state(false);
 
-	// Shell detection state
-	let shellDetection = $state<ShellDetectionResult | null>(null);
-	let detectingShells = $state(false);
+	// Detection state is owned by ShellUserPicker and surfaced here for the output-area
+	// empty states (detecting / no shell available).
+	let terminalDetecting = $state(false);
+	let terminalAnyShell = $state(true);
 
-	// Shell/user options
 	let terminalMode = $state<TerminalMode>('exec');
 	let selectedShell = $state('/bin/bash');
-	let selectedUser = $state('root');
-	let customUserInput = $state('');
-	let customUsers = $state<string[]>([]);
 	let terminalFontSize = $state(14);
-
-	// Track previous shell/user for reconnection
-	let prevShell = $state('/bin/bash');
-	let prevUser = $state('root');
 
 	const fontSizeOptions = [10, 12, 14, 16, 18];
 
 	// Searchable dropdown state
 	let searchQuery = $state('');
 	let dropdownOpen = $state(false);
-
-	// Derived: check if selected shell is available
-	const selectedShellAvailable = $derived(
-		!shellDetection || shellDetection.shells.includes(selectedShell)
-	);
-
-	// Derived: check if any shell is available
-	const anyShellAvailable = $derived(
-		!shellDetection || hasAvailableShell(shellDetection)
-	);
 
 	// Polling intervals - module scope for cleanup in onDestroy
 	let containerInterval: ReturnType<typeof setInterval> | null = null;
@@ -123,33 +107,8 @@
 		selectedContainer = container;
 		searchQuery = '';
 		dropdownOpen = false;
-
-		// Detect available shells
-		detectingShells = true;
-		shellDetection = null;
-		try {
-			shellDetection = await detectShells(container.id, envId);
-
-			// Auto-select best available shell if current is not available
-			const bestShell = getBestShell(shellDetection, selectedShell);
-			if (bestShell && bestShell !== selectedShell) {
-				selectedShell = bestShell;
-			}
-
-			// Restore saved user for this container
-			const savedUser = getSavedUser(container.id);
-			if (savedUser !== null) {
-				selectedUser = savedUser;
-				committedUser = savedUser;
-			} else {
-				selectedUser = 'root';
-				committedUser = 'root';
-			}
-		} catch (error) {
-			console.error('Failed to detect shells:', error);
-		} finally {
-			detectingShells = false;
-		}
+		// Shell detection and saved-user restore happen in ShellUserPicker, keyed on
+		// the new container id.
 	}
 
 	function clearSelection() {
@@ -159,7 +118,6 @@
 		selectedContainer = null;
 		searchQuery = '';
 		connected = false;
-		shellDetection = null;
 	}
 
 	function handleInputFocus() {
@@ -181,43 +139,8 @@
 		}
 	}
 
-	// Committed user: only updates when a preset is selected or custom input is confirmed
+	// Committed user, driven by ShellUserPicker (which persists it per container).
 	let committedUser = $state('root');
-
-	function commitUser(user: string) {
-		committedUser = user;
-		if (selectedContainer) {
-			saveUserForContainer(selectedContainer.id, user);
-			customUsers = getCustomUsers();
-		}
-	}
-
-	// When a user is selected from dropdown, commit immediately
-	function onUserSelectChange(value: string) {
-		commitUser(value);
-	}
-
-	// Confirm custom user on Enter
-	function onCustomUserKeydown(e: KeyboardEvent) {
-		e.stopPropagation();
-		if (e.key === 'Enter' && customUserInput.trim()) {
-			const newUser = customUserInput.trim();
-			selectedUser = newUser;
-			commitUser(newUser);
-			customUserInput = '';
-		}
-	}
-
-	// Watch for shell/user changes while connected and trigger reconnect
-	$effect(() => {
-		if (terminalMode === 'exec' && selectedContainer && connected && terminalComponent) {
-			if (selectedShell !== prevShell || committedUser !== prevUser) {
-				terminalComponent.reconnect();
-			}
-		}
-		prevShell = selectedShell;
-		prevUser = committedUser;
-	});
 
 	// Change font size
 	function changeFontSize(newSize: number) {
@@ -231,7 +154,6 @@
 	}
 
 	onMount(async () => {
-		customUsers = getCustomUsers();
 		if ($page.url.searchParams.get('mode') === 'attach') {
 			terminalMode = 'attach';
 		}
@@ -277,21 +199,21 @@
 
 {#if $environments.length === 0 || !$currentEnvironment}
 	<div class="flex flex-col flex-1 min-h-0 h-full">
-		<PageHeader icon={TerminalIcon} title="Shell" class="h-9 mb-3" />
+		<PageHeader icon={TerminalIcon} title={m.nav_shell()} class="h-9 mb-3" />
 		<NoEnvironment />
 	</div>
 {:else}
 <div class="flex flex-col flex-1 min-h-0 h-full gap-3">
 	<!-- Header with container selector -->
 	<div class="flex items-center gap-4 flex-wrap">
-		<PageHeader icon={TerminalIcon} title="Shell" />
+		<PageHeader icon={TerminalIcon} title={m.nav_shell()} />
 		<div class="relative flex-1 max-w-md min-w-[200px]">
 			<!-- Search input - always visible, shows selected container or placeholder -->
 			<div class="relative">
 				<Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
 				<Input
 					type="text"
-					placeholder={selectedContainer ? selectedContainer.name : "Search running containers..."}
+					placeholder={selectedContainer ? selectedContainer.name : m.terminal_search_placeholder()}
 					bind:value={searchQuery}
 					onfocus={handleInputFocus}
 					onblur={handleInputBlur}
@@ -306,7 +228,7 @@
 				<div class="absolute top-full left-0 right-0 mt-1 border rounded-md bg-popover shadow-lg z-50 max-h-64 overflow-auto">
 					{#if filteredContainers().length === 0}
 						<div class="px-3 py-2 text-sm text-muted-foreground">
-							{containers.length === 0 ? 'No running containers' : 'No matches found'}
+							{containers.length === 0 ? m.terminal_no_running_containers() : m.terminal_no_matches()}
 						</div>
 					{:else}
 						{#each filteredContainers() as container}
@@ -319,7 +241,7 @@
 								<span class="font-medium truncate">{container.name}</span>
 								<span class="text-muted-foreground text-xs truncate">({container.image})</span>
 								{#if selectedContainer?.id === container.id}
-									<span class="ml-auto text-xs text-primary">connected</span>
+									<span class="ml-auto text-xs text-primary">{m.terminal_container_connected()}</span>
 								{/if}
 							</button>
 						{/each}
@@ -328,25 +250,25 @@
 			{/if}
 		</div>
 		<div class="flex items-center gap-2">
-			<Label class="text-sm text-muted-foreground">Mode:</Label>
+			<Label class="text-sm text-muted-foreground">{m.terminal_mode_label()}</Label>
 			<Select.Root type="single" value={terminalMode} onValueChange={(value) => terminalMode = value as TerminalMode}>
 				<Select.Trigger class="h-9 w-48">
 					{#if terminalMode === 'attach'}
 						<Unplug class="w-4 h-4 mr-2 text-muted-foreground" />
-						<span>Attach to process</span>
+						<span>{m.containers_list_terminal_attach()}</span>
 					{:else}
 						<Shell class="w-4 h-4 mr-2 text-muted-foreground" />
-						<span>Shell (exec)</span>
+						<span>{m.containers_list_terminal_exec()}</span>
 					{/if}
 				</Select.Trigger>
 				<Select.Content>
-					<Select.Item value="exec" label="Shell (exec)">
+					<Select.Item value="exec" label={m.containers_list_terminal_exec()}>
 						<Shell class="w-4 h-4 mr-2 text-muted-foreground" />
-						Shell (exec)
+						{m.containers_list_terminal_exec()}
 					</Select.Item>
-					<Select.Item value="attach" label="Attach to process">
+					<Select.Item value="attach" label={m.containers_list_terminal_attach()}>
 						<Unplug class="w-4 h-4 mr-2 text-muted-foreground" />
-						Attach to process
+						{m.containers_list_terminal_attach()}
 					</Select.Item>
 				</Select.Content>
 			</Select.Root>
@@ -355,118 +277,22 @@
 		{#if selectedContainer}
 			<Button size="sm" variant="ghost" onclick={clearSelection} class="h-9 px-3 text-sm text-muted-foreground hover:text-foreground">
 				<Unplug class="w-4 h-4 mr-1.5" />
-				Disconnect
+				{m.terminal_disconnect()}
 			</Button>
 		{/if}
 
-		<!-- Shell selector - only used by exec mode -->
-		{#if terminalMode === 'exec'}
-		<div class="flex items-center gap-2">
-			<Label class="text-sm text-muted-foreground">Shell:</Label>
-			{#if detectingShells}
-				<div class="h-9 w-36 flex items-center justify-center border rounded-md bg-muted/50">
-					<Loader2 class="w-4 h-4 animate-spin text-muted-foreground" />
-				</div>
-			{:else}
-				<Select.Root type="single" bind:value={selectedShell}>
-					<Select.Trigger class="h-9 w-44" disabled={!anyShellAvailable}>
-						<Shell class="w-4 h-4 mr-2 text-muted-foreground" />
-						<span class={!selectedShellAvailable ? 'text-muted-foreground line-through' : ''}>
-							{shellDetection?.allShells.find(o => o.path === selectedShell)?.label ||
-							 (selectedShell === '/bin/bash' ? 'Bash' :
-							  selectedShell === '/bin/sh' ? 'Shell (sh)' :
-							  selectedShell === '/bin/zsh' ? 'Zsh' :
-							  selectedShell === '/bin/ash' ? 'Ash (Alpine)' : 'Select')}
-						</span>
-					</Select.Trigger>
-					<Select.Content>
-						{#if shellDetection}
-							{#each shellDetection.allShells as option}
-								<Select.Item
-									value={option.path}
-									label={option.label}
-									disabled={!option.available}
-								>
-									<Shell class="w-4 h-4 mr-2 {option.available ? 'text-green-500' : 'text-muted-foreground/40'}" />
-									<span class={option.available ? 'text-foreground' : 'text-muted-foreground/60'}>
-										{option.label}
-										{#if !option.available}
-											<span class="text-xs ml-1">(unavailable)</span>
-										{/if}
-									</span>
-								</Select.Item>
-							{/each}
-						{:else}
-							<Select.Item value="/bin/bash" label="Bash">
-								<Shell class="w-4 h-4 mr-2 text-muted-foreground" />
-								Bash
-							</Select.Item>
-							<Select.Item value="/bin/sh" label="Shell (sh)">
-								<Shell class="w-4 h-4 mr-2 text-muted-foreground" />
-								Shell (sh)
-							</Select.Item>
-							<Select.Item value="/bin/zsh" label="Zsh">
-								<Shell class="w-4 h-4 mr-2 text-muted-foreground" />
-								Zsh
-							</Select.Item>
-							<Select.Item value="/bin/ash" label="Ash (Alpine)">
-								<Shell class="w-4 h-4 mr-2 text-muted-foreground" />
-								Ash (Alpine)
-							</Select.Item>
-						{/if}
-					</Select.Content>
-				</Select.Root>
-			{/if}
-		</div>
-
-		<!-- User selector - only used by exec mode -->
-		<div class="flex items-center gap-2">
-			<Label class="text-sm text-muted-foreground">User:</Label>
-			<Select.Root type="single" bind:value={selectedUser} onValueChange={onUserSelectChange}>
-				<Select.Trigger class="h-9 w-48">
-					<User class="w-4 h-4 mr-2 text-muted-foreground" />
-					<span>{USER_OPTIONS.find(o => o.value === selectedUser)?.label || selectedUser || 'Select'}</span>
-				</Select.Trigger>
-				<Select.Content>
-					{#each USER_OPTIONS as option}
-						<Select.Item value={option.value} label={option.label}>
-							<User class="w-4 h-4 mr-2 text-muted-foreground" />
-							{option.label}
-						</Select.Item>
-					{/each}
-					{#if customUsers.length > 0}
-						<div class="h-px bg-border my-1"></div>
-						{#each customUsers as cu}
-							<div class="flex items-center group">
-								<Select.Item value={cu} label={cu} class="flex-1">
-									<User class="w-4 h-4 mr-2 text-muted-foreground" />
-									{cu}
-								</Select.Item>
-								<button
-									type="button"
-									class="p-1 mr-1 opacity-0 group-hover:opacity-100 hover:text-destructive transition-opacity"
-									onclick={(e) => { e.stopPropagation(); e.preventDefault(); removeCustomUser(cu); customUsers = getCustomUsers(); if (selectedUser === cu) { selectedUser = 'root'; commitUser('root'); } }}
-									title="Remove user"
-								>
-									<Trash2 class="w-3 h-3" />
-								</button>
-							</div>
-						{/each}
-					{/if}
-					<div class="h-px bg-border my-1"></div>
-					<!-- svelte-ignore a11y_autofocus -->
-					<div class="px-2 py-1">
-						<Input
-							class="h-7 text-xs"
-							placeholder="Add user... (Enter)"
-							bind:value={customUserInput}
-							onkeydown={onCustomUserKeydown}
-							onclick={(e) => e.stopPropagation()}
-						/>
-					</div>
-				</Select.Content>
-			</Select.Root>
-		</div>
+		<!-- Shell + user selectors (exec mode), shared with the inspect-modal terminal. -->
+		{#if terminalMode === 'exec' && selectedContainer}
+			<ShellUserPicker
+				containerId={selectedContainer.id}
+				{envId}
+				bind:shell={selectedShell}
+				bind:user={committedUser}
+				mode={terminalMode}
+				bind:detecting={terminalDetecting}
+				bind:anyShellAvailable={terminalAnyShell}
+				onChange={() => { if (connected && terminalComponent) terminalComponent.reconnect(); }}
+			/>
 		{/if}
 	</div>
 
@@ -476,24 +302,24 @@
 			<div class="flex items-center justify-center h-full text-muted-foreground">
 				<div class="text-center">
 					<TerminalIcon class="w-12 h-12 mx-auto mb-3 opacity-50" />
-					<p>Select a container to open shell</p>
+					<p>{m.terminal_select_container()}</p>
 				</div>
 			</div>
-		{:else if terminalMode === 'exec' && detectingShells}
+		{:else if terminalMode === 'exec' && terminalDetecting}
 			<div class="flex items-center justify-center h-full text-muted-foreground">
 				<div class="text-center">
 					<Loader2 class="w-12 h-12 mx-auto mb-3 opacity-50 animate-spin" />
-					<p>Detecting available shells...</p>
+					<p>{m.containers_terminal_detecting_shells()}</p>
 				</div>
 			</div>
-		{:else if terminalMode === 'exec' && !anyShellAvailable}
+		{:else if terminalMode === 'exec' && !terminalAnyShell}
 			<div class="flex items-center justify-center h-full text-muted-foreground">
 				<div class="text-center">
 					<AlertCircle class="w-12 h-12 mx-auto mb-3 opacity-50 text-amber-500" />
-					<p class="font-medium text-amber-500">No shell available in this container</p>
-					<p class="text-sm mt-2">This container may not have a shell installed.</p>
+					<p class="font-medium text-amber-500">{m.terminal_no_shell_in_container()}</p>
+					<p class="text-sm mt-2">{m.terminal_no_shell_installed()}</p>
 					<p class="text-xs mt-1 text-muted-foreground/70">
-						Containers built from scratch or distroless images often don't include shells.
+						{m.containers_terminal_no_shell_hint()}
 					</p>
 				</div>
 			</div>
@@ -504,10 +330,10 @@
 					{#if connected}
 						<span class="inline-flex items-center gap-1 text-xs text-green-500">
 							<span class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
-							Connected
+							{m.containers_terminal_connected()}
 						</span>
 					{:else}
-						<span class="text-xs text-zinc-500">Disconnected</span>
+						<span class="text-xs text-zinc-500">{m.terminal_status_disconnected()}</span>
 					{/if}
 				</div>
 				<div class="flex items-center gap-3">
@@ -524,21 +350,21 @@
 					<button
 						onclick={() => terminalComponent?.copyOutput()}
 						class="p-1 rounded hover:bg-zinc-800 transition-colors"
-						title="Copy output"
+						title={m.terminal_copy_output()}
 					>
 						<Copy class="w-3 h-3 text-zinc-500 hover:text-zinc-300" />
 					</button>
 					<button
 						onclick={() => terminalComponent?.clear()}
 						class="p-1 rounded hover:bg-zinc-800 transition-colors"
-						title="Clear (Cmd+L)"
+						title={m.terminal_clear_shortcut()}
 					>
 						<Trash2 class="w-3 h-3 text-zinc-500 hover:text-zinc-300" />
 					</button>
 					<button
 						onclick={() => terminalComponent?.reconnect()}
 						class="p-1 rounded hover:bg-zinc-800 transition-colors"
-						title="Reconnect"
+						title={m.terminal_reconnect()}
 					>
 						<RefreshCw class="w-3 h-3 text-zinc-500 hover:text-zinc-300" />
 					</button>

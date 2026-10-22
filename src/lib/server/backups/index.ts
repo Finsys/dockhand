@@ -10,6 +10,7 @@
  *   the read/repo helpers re-exported for the API routes
  */
 import { Restic, type HelperRunSpec } from './restic';
+import { describeFsError } from '../fs-error';
 import { BackupService, formatResticLines, type BackupPorts, type BackupJob, type OperationHandle } from './backup-service';
 import { RestoreService, type RestorePorts, type RestoreJob } from './restore-service';
 import { openOperation } from './operations';
@@ -25,7 +26,7 @@ import { parseOptionsJson, buildJobOptions, parseSelectedVolumes, parseBackupFla
 import { getHostname } from '../license';
 import { getBackupConfig, getBackupConfigs, getBackupDestination, updateBackupConfig, updateBackupDestination, decryptBackupDestination } from '../db';
 import { getInstanceId } from './identity';
-import { inspectContainer } from '../docker';
+import { getPortableContainerConfig, inspectContainer } from '../docker';
 import { sendEventNotification } from '../notifications';
 import type { BackupResult, RestoreResult, ResticRun, BackupTargetType } from './models';
 import type { MetadataFile } from './backup-script';
@@ -58,8 +59,9 @@ async function makeOperationHandle(
 	environmentId: number | null,
 	triggeredBy: 'cron' | 'manual' | 'webhook',
 	onProgress?: (s: string, m: string) => void,
+	destinationId?: number,
 ): Promise<OperationHandle> {
-	const op = await openOperation({ kind, scheduleId, environmentId, entityName, triggeredBy }, onProgress);
+	const op = await openOperation({ kind, scheduleId, environmentId, entityName, triggeredBy, destinationId }, onProgress);
 	return {
 		id: op.id,
 		progress: (status, message) => op.progress(status, message),
@@ -123,6 +125,10 @@ async function planStackDirVolume(
 	envId: number | null | undefined,
 	excludedStackFiles?: string[],
 	attempts = 7,
+	/** Host paths of the volumes this backup captures. A bind dir is only dropped
+	 *  from the stack files when one of these covers it - otherwise excluding it
+	 *  would leave the directory in neither the stack files nor the volumes. */
+	capturedVolumeSources?: string[],
 ): Promise<
 	| { kind: 'unknown'; reason: string }
 	| { kind: 'candidate'; syntheticVolume: DiscoveredVolume; volumeKey: string; composeFileName: string; excludePaths: string[]; bindSources: string[]; probeHint?: StackDirProbeHint }
@@ -130,8 +136,8 @@ async function planStackDirVolume(
 	const { getStackComposeFile } = await import('../stacks');
 	const { dirname, join, basename, resolve } = await import('path');
 	const { lstatSync } = await import('fs');
-	const { translateToHostPath, translateContainerPathViaMount, getOwnDockerHost, getAutoDetectedDockerHost, pathOverriddenBySubMount, getCachedContainerMounts } = await import('../host-path');
-	const { resolveHostStackDir, deriveStackDirFromBinds, trustBindDerivedForEnv, isLocalDaemon, STACKDIR_VOLUME_KEY } = await import('./stackdir-plan');
+	const { resolveHostPath, getOwnDockerHost, getAutoDetectedDockerHost, getCachedContainerMounts } = await import('../host-path');
+	const { resolveHostStackDir, deriveStackDirFromBinds, trustBindDerivedForEnv, isLocalDaemonForEnv, hostPathAdvice, STACKDIR_VOLUME_KEY } = await import('./stackdir-plan');
 	const { relativeBindDirsFromCompose, relativeBindsFromCompose } = await import('./stackfile-filter');
 
 	// The stack dir as DOCKHAND sees it (compose file's parent). This is the authoritative
@@ -173,7 +179,6 @@ async function planStackDirVolume(
 	// STACKS_DIR; the in-helper probe validates the guess and errors clearly if it's wrong.
 	const HAWSER_DEFAULT_STACKS_DIR = '/data/stacks';
 	let envConnType: string | null = null;
-	let envTcpHost: string | null = null;
 	let remoteStacksDir: string | null = null;
 	let isHawser = false;
 	// True when a hawser env had NO remote_stacks_dir set and we fell back to the agent's default
@@ -182,13 +187,16 @@ async function planStackDirVolume(
 	// /data/stacks is mounted from another host path), so the user must set the HOST-side path.
 	let remoteStacksDirDefaulted = false;
 	let envName: string | null = null;
+	// The env row, or null when the lookup failed. isLocalDaemonForEnv reads that null as
+	// REMOTE, so a failed read can never apply Dockhand's own path translations to a stack
+	// on another machine.
+	let envRow: { connectionType?: string | null; host?: string | null; port?: number | null } | null = null;
 	if (envId != null) {
 		try {
 			const { getEnvironment, getEnvSetting } = await import('../db');
 			const env = await getEnvironment(envId);
 			envConnType = env?.connectionType ?? null;
 			envName = env?.name ?? null;
-			envTcpHost = env?.host && env?.port ? `tcp://${env.host}:${env.port}` : null;
 			isHawser = envConnType === 'hawser-standard' || envConnType === 'hawser-edge';
 			if (envConnType === 'direct') {
 				const rsd = await getEnvSetting('remote_stacks_dir', envId);
@@ -204,10 +212,11 @@ async function planStackDirVolume(
 				remoteStacksDir = userSet ? normalizeBaseDir(rsd) : HAWSER_DEFAULT_STACKS_DIR;
 				remoteStacksDirDefaulted = !userSet;
 			}
-		} catch { /* treat as unknown -> non-local (safe: skips the wrong-host translation) */ }
+			envRow = env ?? null;
+		} catch { /* envRow stays null -> non-local, skipping the wrong-host translation */ }
 	}
 	const ownHost = getOwnDockerHost() ?? getAutoDetectedDockerHost();
-	const localDaemon = isLocalDaemon(envConnType, envTcpHost, ownHost);
+	const localDaemon = isLocalDaemonForEnv(envRow, envId, ownHost);
 
 	// A direct-REMOTE daemon (not Dockhand's host) shares no filesystem with Dockhand. Its
 	// working_dir label is Dockhand's OWN path (the stack was deployed via stdin), NOT a path on
@@ -232,20 +241,17 @@ async function planStackDirVolume(
 	// (see trustBindDerivedForEnv) - distrust it there so resolution falls through to UNKNOWN (hard-fail).
 	const trustedBindDerived = trustBindDerivedForEnv(bindDerivedHostPath, { directRemote, hasRemoteStacksDir: !!remoteStacksDir });
 
-	// Fallback host-path candidates (LOCAL daemon only). dataDirHostPath: DATA_DIR -> HOST_DATA_DIR
-	// (returns the input unchanged when NOT under DATA_DIR, so we null it in that case).
-	// mountHostPath: via a container bind mount (adopted/external stacks outside DATA_DIR).
-	// workingDirLabel: for hawser/matching-paths where the label already IS the host path.
-	const viaDataRaw = localDaemon && dockhandStackDir ? translateToHostPath(dockhandStackDir) : null;
-	// A separate bind mount at a subpath of DATA_DIR (e.g. /app/data/stacks -> some host dir)
-	// makes the DATA_DIR translation wrong - the files live under that bind, not the DATA_DIR
-	// volume root. In that case drop the DATA_DIR candidate so the resolver uses mountHostPath,
-	// which longest-prefix-matches the more specific bind and is correct (#1533).
-	const overriddenBySubMount = localDaemon && dockhandStackDir
-		? pathOverriddenBySubMount(dockhandStackDir, resolve(process.env.DATA_DIR || '/app/data'), getCachedContainerMounts())
-		: false;
-	const dataDirHostPath = viaDataRaw && viaDataRaw !== dockhandStackDir && !overriddenBySubMount ? viaDataRaw : null;
-	const mountHostPath = localDaemon && dockhandStackDir ? translateContainerPathViaMount(dockhandStackDir) : null;
+	// Fallback host-path candidates (LOCAL daemon only). workingDirLabel is the host path only
+	// for hawser/matching-paths; mountHostPath comes from Dockhand's own mount table.
+	// ONE translation from Dockhand's own mount table: the most specific mount covering the
+	// stack dir decides, so a bind nested inside a volume-backed DATA_DIR resolves to the bind
+	// and not to the outer volume's root. It reports WHY it could not map a path, which the
+	// hard-fail message below turns into something actionable.
+	const mapped = localDaemon && dockhandStackDir
+		? resolveHostPath(dockhandStackDir, getCachedContainerMounts(), resolve(process.env.DATA_DIR || '/app/data'))
+		: null;
+	const mountHostPath = mapped?.ok ? mapped.hostPath : null;
+	const mapFailure = mapped && !mapped.ok ? mapped.failure : null;
 
 	const resolution = resolveHostStackDir({
 		composeFileName: composeFileName0,
@@ -254,7 +260,6 @@ async function planStackDirVolume(
 		// the resolver, then this. Null for socket/hawser/local.
 		remoteStacksDirHostPath,
 		bindDerivedHostPath: trustedBindDerived,
-		dataDirHostPath,
 		mountHostPath,
 		workingDirLabel: trustedWorkingDirLabel,
 	});
@@ -265,8 +270,11 @@ async function planStackDirVolume(
 		// rather than silently capturing a possibly-stale local copy.
 		// Report every candidate we tried so an UNKNOWN is diagnosable without SSH: which
 		// inputs were null tells us WHY (e.g. workingDir null = 0 containers listed).
-		console.log(`[Backup] stackdir plan for "${targetName}": UNKNOWN reason="${resolution.reason}" dockhandStackDir=${dockhandStackDir ?? 'none'} | connType=${envConnType} localDaemon=${localDaemon} remoteStacksDir=${remoteStacksDir ?? 'null'} containers=${stackContainers.length} bindDerived=${bindDerivedHostPath ?? 'null'} dataDir=${dataDirHostPath ?? 'null'} mount=${mountHostPath ?? 'null'} workingDirLabel=${workingDirLabel ?? 'null'}`);
-		return { kind: 'unknown', reason: resolution.reason };
+		console.log(`[Backup] stackdir plan for "${targetName}": UNKNOWN reason="${resolution.reason}" dockhandStackDir=${dockhandStackDir ?? 'none'} | connType=${envConnType} localDaemon=${localDaemon} remoteStacksDir=${remoteStacksDir ?? 'null'} containers=${stackContainers.length} bindDerived=${bindDerivedHostPath ?? 'null'} mapFailure=${mapFailure?.reason ?? 'none'} mount=${mountHostPath ?? 'null'} workingDirLabel=${workingDirLabel ?? 'null'}`);
+		return {
+			kind: 'unknown',
+			reason: `${resolution.reason}. ${hostPathAdvice(mapFailure, { localDaemon, isHawser })}`
+		};
 	}
 	const hostPath = resolution.hostPath;
 	const composeFileName = resolution.composeFile;
@@ -282,9 +290,19 @@ async function planStackDirVolume(
 		try { return lstatSync(join(dockhandStackDir, rel)).isDirectory(); } catch { return false; }
 	};
 	const bindDirs = compose.content ? relativeBindDirsFromCompose(compose.content, dockhandStackDir ?? '', isDirRel) : [];
-	const excludePaths = bindDirs.map((rel) => `/volumes/${STACKDIR_VOLUME_KEY}/${rel}`);
+	// Only drop a bind dir when a captured volume actually covers it. Undefined means
+	// the caller did not say (the UI preview paths), and the old behaviour is kept.
+	const { excludableBindDirs } = await import('./stackfile-filter');
+	const droppable = capturedVolumeSources === undefined
+		? bindDirs
+		: excludableBindDirs(bindDirs, hostPath, capturedVolumeSources);
+	const kept = bindDirs.filter((rel) => !droppable.includes(rel));
+	const excludePaths = droppable.map((rel) => `/volumes/${STACKDIR_VOLUME_KEY}/${rel}`);
 	if (excludePaths.length > 0) {
-		console.log(`[Backup] stackdir "${targetName}": excluding ${excludePaths.length} compose bind dir(s) from the stackdir volume (captured separately as their own volumes): [${bindDirs.join(', ')}]`);
+		console.log(`[Backup] stackdir "${targetName}": excluding ${excludePaths.length} compose bind dir(s) from the stackdir volume (captured separately as their own volumes): [${droppable.join(', ')}]`);
+	}
+	if (kept.length > 0) {
+		console.log(`[Backup] stackdir "${targetName}": keeping ${kept.length} compose bind dir(s) IN the stackdir capture - no captured volume covers them: [${kept.join(', ')}]`);
 	}
 
 	// User deselections from the "Stack files on the host" picker: exclude each named top-level
@@ -448,6 +466,19 @@ function probeListScript(missingSentinel: string): string {
 }
 
 /**
+ * Does a path on DOCKHAND'S OWN filesystem already hold data? For a target Dockhand writes
+ * itself with node:fs - the managed stack dir - which no daemon can answer about: on a remote
+ * env the path does not exist there at all. The answer must be definite: an unreadable
+ * directory is NOT reported as empty, since the caller uses `empty` to skip the overwrite
+ * confirmation before a destructive swap.
+ */
+export async function probeLocalDir(dir: string): Promise<{ kind: import('./stackdir-plan').ProbeDataKind; reason?: string }> {
+	const { existsSync, readdirSync } = await import('fs');
+	const { classifyLocalDir } = await import('./stackdir-plan');
+	return classifyLocalDir(dir, { exists: existsSync, entries: readdirSync });
+}
+
+/**
  * Does an arbitrary host path have data on the TARGET daemon? Runs the same helper-container
  * mechanism as probeStackDir but for a caller-supplied path, and - unlike probeStackDir which
  * folds every failure into `unknown` - DISTINGUISHES a helper that could not run (`helper-failed`,
@@ -553,7 +584,12 @@ async function collectMetadata(
 	if (type === 'container') {
 		try {
 			const [c] = (await resolveTargets(type, targetName, envId)).containers;
-			if (c) containerInspect = await inspectContainer(c.id, envId ?? undefined);
+			if (c) {
+				const inspect = await inspectContainer(c.id, envId ?? undefined) as { Config?: { Image?: string; Labels?: Record<string, string> | null } };
+				containerInspect = inspect.Config
+					? { ...inspect, Config: await getPortableContainerConfig(inspect.Config, envId) }
+					: inspect;
+			}
 		} catch { /* metadata best-effort; the volume data is what matters */ }
 	}
 
@@ -670,7 +706,8 @@ function backupPorts(destination: any, onProgress?: (status: string, message: st
 	return {
 		resolveTargets: (type, targetName, envId) => resolveTargets(type, targetName, envId),
 		discoverVolumes: (containers, envId, selected) => discoverVolumes(containers, envId, selected),
-		planStackDirVolume: (targetName, envId, excludedStackFiles) => planStackDirVolume(targetName, envId, excludedStackFiles),
+		planStackDirVolume: (targetName, envId, excludedStackFiles, capturedVolumeSources) =>
+			planStackDirVolume(targetName, envId, excludedStackFiles, undefined, capturedVolumeSources),
 		stopForBackup: (type, targetName, containers, envId) => stopForBackup(type, targetName, containers, envId),
 		runInHelper: (spec) => run.runInHelper(spec),
 		runLocal: (args, tier) => run.runLocal(args, tier),
@@ -682,8 +719,8 @@ function backupPorts(destination: any, onProgress?: (status: string, message: st
 		serializeDestination: (id, fn) => serializeByRepo(id, fn),
 		// Forward the run's live-progress callback into the operation record so the
 		// SSE route streams it (the record also throttles the durable log writes).
-		openOperation: (entityName, scheduleId, environmentId, triggeredBy, cb) =>
-			makeOperationHandle('backup', entityName, scheduleId, environmentId, triggeredBy, cb ?? onProgress),
+		openOperation: (entityName, scheduleId, environmentId, triggeredBy, cb, destinationId) =>
+			makeOperationHandle('backup', entityName, scheduleId, environmentId, triggeredBy, cb ?? onProgress, destinationId),
 		notify: (event, payload, envId) => notify(event, payload, envId),
 		fireWebhook: (url, payload) => { void fireWebhook(url, payload, { log: (m) => onProgress?.('webhook', m) }); },
 		setConfigStatus: async (configId, status) => { await updateBackupConfig(configId, { lastBackupStatus: status, lastBackupAt: new Date().toISOString() }); },
@@ -806,6 +843,10 @@ async function materialiseStackFiles(destination: any, snapId: string, stackName
 			console.log(`[Backup] materialiseStackFiles: wrote ${extracted.length} entries to ${resolvedTarget} (${overwrite ? 'replaced' : 'merged'})`);
 			return true;
 		} catch (copyErr) {
+			// The code, the syscall and the path are what identify the fault; the message
+			// alone reads the same for several different causes. The error is rethrown
+			// below, so this records the detail while the object is still in hand.
+			console.error(`[Backup] materialiseStackFiles: staging swap failed for ${resolvedTarget}: ${describeFsError(copyErr)}`);
 			try { rmSync(staging, { recursive: true, force: true }); } catch { /* best effort */ }
 			if (existsSync(oldAside) && !existsSync(resolvedTarget)) {
 				try { renameSync(oldAside, resolvedTarget); } catch { /* best effort */ }
@@ -1129,6 +1170,9 @@ export interface RestoreTargetPreview {
 	unresolved: Array<{ key: string; reason: string }>;
 	helperOk: boolean;
 	helperError?: string;
+	/** A target on Dockhand's OWN disk that could not be read. Blocks like helperError, but names
+	 *  the right machine: no helper is involved and the target environment is not at fault. */
+	localError?: string;
 }
 
 /**
@@ -1151,6 +1195,7 @@ export async function previewRestoreTargets(
 		volumeDestinations?: Array<{ volume: string; kind: 'volume' | 'path'; target: string }>;
 		skipStackFiles?: boolean;
 		mergeStackFiles?: boolean;
+		postRestore?: string | null;
 		volumes?: string[];
 	},
 	access: { isEnterprise: boolean; canAccessEnvironment: (id: number) => Promise<boolean> } = { isEnterprise: false, canAccessEnvironment: async () => true },
@@ -1180,15 +1225,33 @@ export async function previewRestoreTargets(
 	const volProbes = await Promise.all(resolved.volumes.map(async (v) => ({
 		v, probe: v.type === 'volume' ? await probeVolumeData(v.target, envId) : await probeHostPath(v.target, envId),
 	})));
+	// A stack restore writes stack files to two places, each probed by whoever can see it.
+	//
+	// The target HOST receives them when the restore extracts loose volumes into `targetPath`,
+	// which happens only when at least one volume has no destination mapping - and every such
+	// volume already appears above as a loose-files row bound to that same path, so the helper
+	// probes it there. With no volumes to extract, nothing is written to targetPath.
+	//
+	// The managed stack dir is the other one, and Dockhand writes it with node:fs on its OWN
+	// filesystem (getStackDir -> DATA_DIR/stacks/...) so it can edit and redeploy the stack
+	// afterwards. A container on the target daemon cannot answer for that path: on a remote env
+	// it does not exist there, and translating it to a host path can fail in ways that read as
+	// "empty" - which would skip the overwrite gate before materialiseStackFiles replaces the
+	// directory. Read it where it actually lives.
 	const stackProbe = resolved.stackFiles
-		? (resolved.stackFiles.willWrite ? await probeHostPath(resolved.stackFiles.targetDir, envId) : { kind: 'empty' as const })
+		? (resolved.stackFiles.willWrite ? await probeLocalDir(resolved.stackFiles.targetDir) : { kind: 'empty' as const })
 		: null;
 
 	// Collect helperOk AFTER all probes: a helper-failed on ANY probe flips it off.
 	let helperOk = true;
 	let helperError: string | undefined;
+	// A directory Dockhand cannot read is reported separately from a helper that cannot run: the
+	// first is on Dockhand's own disk, the second on the target environment, and they need
+	// different fixes. Both BLOCK - an unknown target must never pass the overwrite gate.
+	let localError: string | undefined;
 	const noteHelper = (r: { kind: import('./stackdir-plan').ProbeDataKind; reason?: string }) => {
 		if (r.kind === 'helper-failed') { helperOk = false; if (!helperError) helperError = r.reason; }
+		if (r.kind === 'unreadable' && !localError) localError = r.reason;
 		return r.kind;
 	};
 
@@ -1199,7 +1262,7 @@ export async function previewRestoreTargets(
 		? { targetDir: resolved.stackFiles.targetDir, willWrite: resolved.stackFiles.willWrite, hasData: noteHelper(stackProbe!) }
 		: null;
 
-	return { volumes, stackFiles, unresolved: resolved.unresolved, helperOk, helperError };
+	return { volumes, stackFiles, unresolved: resolved.unresolved, helperOk, helperError, localError };
 }
 
 // --- snapshot reads (routes already apply the env guard; we add instance own.) ---

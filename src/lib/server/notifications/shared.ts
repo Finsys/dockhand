@@ -15,6 +15,11 @@ export interface NotificationPayload {
 	environmentId?: number;
 	environmentName?: string;
 	eventType?: string;
+	/**
+	 * Files to attach. Only SMTP can carry these - a webhook channel has nowhere to put
+	 * them, so a payload that NEEDS an attachment must be sent to an SMTP channel.
+	 */
+	attachments?: Array<{ filename: string; content: Buffer; contentType?: string }>;
 }
 
 export interface NotificationResult {
@@ -77,4 +82,29 @@ export async function drainResponse(response: Response): Promise<void> {
 /** Append `[env name]` to a title when present. Used by every provider. */
 export function titleWithEnv(payload: NotificationPayload): string {
 	return payload.environmentName ? `${payload.title} [${payload.environmentName}]` : payload.title;
+}
+
+/**
+ * Move `user:pass@` userinfo off a URL authority into a Basic Authorization header:
+ * fetch() refuses URLs that carry credentials (#1611). user/pass are percent-decoded,
+ * so `/ ? # %` (and ideally `@ :`) inside them must be encoded. Throws on malformed encoding.
+ */
+export function splitBasicAuth(authority: string): { host: string; authHeader: string | null } {
+	// URL parsing ends the authority at a backslash, so an '@' after one is path, not userinfo.
+	const backslash = authority.indexOf('\\');
+	const at = authority.lastIndexOf('@', backslash === -1 ? authority.length : backslash);
+	if (at === -1) return { host: authority, authHeader: null };
+	const userinfo = authority.slice(0, at);
+	const host = authority.slice(at + 1);
+	const colon = userinfo.indexOf(':');
+	let user: string;
+	let pass: string;
+	try {
+		user = decodeURIComponent(colon === -1 ? userinfo : userinfo.slice(0, colon));
+		pass = colon === -1 ? '' : decodeURIComponent(userinfo.slice(colon + 1));
+	} catch {
+		throw new Error('malformed percent-encoding in URL credentials');
+	}
+	if (!user && !pass) return { host, authHeader: null };
+	return { host, authHeader: `Basic ${Buffer.from(`${user}:${pass}`).toString('base64')}` };
 }

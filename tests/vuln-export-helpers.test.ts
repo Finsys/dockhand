@@ -250,3 +250,25 @@ describe('rowsToCSV', () => {
 		expect(csv.split('\n')[0]).toBe('Fixed Version,Link');
 	});
 });
+
+describe('the name shown for an already-recorded scan', () => {
+	const scan = {
+		imageId: 'sha256:abc',
+		imageName: 'saelix/sencho:latest-dockhand-pending',
+		scannedAt: '2026-09-01T00:00:00Z',
+		vulnerabilities: [{ id: 'CVE-1', severity: 'high', package: 'p', version: '1' }]
+	};
+
+	test('follows what the host calls the image now', () => {
+		// The scan recorded a temporary tag the image no longer carries; re-scanning
+		// every stale row is not an option, so the live name wins at display time.
+		const names = new Map([['sha256:abc', 'saelix/sencho:latest']]);
+		const out = flattenScansToFindings([scan] as never, { namesByImage: names });
+		expect(out[0].imageName).toBe('saelix/sencho:latest');
+	});
+
+	test('keeps the recorded name when the host offers none', () => {
+		const out = flattenScansToFindings([scan] as never, {});
+		expect(out[0].imageName).toBe('saelix/sencho:latest-dockhand-pending');
+	});
+});

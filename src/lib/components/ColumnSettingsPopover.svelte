@@ -6,7 +6,9 @@
 	import { Label } from '$lib/components/ui/label';
 	import { gridPreferencesStore } from '$lib/stores/grid-preferences';
 	import { getConfigurableColumns } from '$lib/config/grid-columns';
+	import { columnLabel } from '$lib/i18n/grid-columns';
 	import type { GridId, ColumnPreference } from '$lib/types';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		gridId: GridId;
@@ -28,7 +30,7 @@
 	const columnConfigs = $derived(getConfigurableColumns(gridId));
 	function getColumnLabel(id: string): string {
 		const config = columnConfigs.find((c) => c.id === id);
-		return config?.label || id;
+		return (config && columnLabel(gridId, config)) || id;
 	}
 
 	// Save columns and update grid immediately
@@ -73,7 +75,7 @@
 		{#snippet child({ props })}
 			<button
 				type="button"
-				title="Column settings"
+				title={m.grid_column_settings()}
 				{...props}
 				class="inline-flex items-center justify-center p-1 rounded hover:bg-muted/50 text-muted-foreground hover:text-foreground transition-colors"
 			>
@@ -84,16 +86,16 @@
 	<Popover.Content class="w-64 p-0" side="bottom" align="end" sideOffset={8}>
 		<div class="p-3 border-b">
 			<div class="flex items-center justify-between">
-				<span class="font-medium text-sm">Columns</span>
+				<span class="font-medium text-sm">{m.grid_columns()}</span>
 				<Button
 					variant="ghost"
 					size="sm"
 					class="h-6 px-2 text-xs"
 					onclick={resetToDefaults}
-					title="Reset to defaults"
+					title={m.grid_reset_to_defaults()}
 				>
 					<RotateCcw class="w-3 h-3" />
-					Reset
+					{m.grid_reset()}
 				</Button>
 			</div>
 		</div>

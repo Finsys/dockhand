@@ -9,6 +9,8 @@
  * to the shortest true, readable string.
  */
 
+import { redactUrlCredentials } from '$lib/utils/rest-repository';
+
 /**
  * cleanErrorMsg is on the error path — it must NEVER throw and become the crash it
  * was meant to describe. Coerce any non-string to its raw string, and wrap the whole
@@ -17,11 +19,21 @@
  */
 export function cleanErrorMsg(msg: unknown): string {
 	const raw = typeof msg === 'string' ? msg : safeString(msg);
+	let out: string;
 	try {
-		return clean(raw);
+		out = clean(raw);
 	} catch {
 		// Any unforeseen failure in parsing → return the raw string untouched.
-		return raw;
+		out = raw;
+	}
+	// restic masks the password in a repository URL only when it could PARSE the
+	// location; an unparseable one is echoed whole. This string reaches the browser and
+	// is stored unencrypted in backup_destinations.last_test_error, so strip any
+	// userinfo here. Must not throw - this is the error path.
+	try {
+		return redactUrlCredentials(out);
+	} catch {
+		return out;
 	}
 }
 

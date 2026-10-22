@@ -6,6 +6,7 @@
 	import { Plus, Trash2, Globe, Loader2, CheckCircle2, XCircle, ShieldCheck } from 'lucide-svelte';
 	import { toast } from 'svelte-sonner';
 	import type { TemplateSource } from '$lib/server/templates';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		onSourcesChanged: () => void;
@@ -29,7 +30,7 @@
 				sources = await response.json();
 			}
 		} catch {
-			toast.error('Failed to load template sources');
+			toast.error(m.templates_sources_toast_load_failed());
 		} finally {
 			loading = false;
 		}
@@ -50,7 +51,7 @@
 		} catch {
 			source.enabled = !newEnabled;
 			sources = sources;
-			toast.error('Failed to update source');
+			toast.error(m.templates_sources_toast_update_failed());
 		}
 	}
 
@@ -59,10 +60,10 @@
 			const response = await fetch(`/api/templates/sources?id=${source.id}`, { method: 'DELETE' });
 			if (!response.ok) throw new Error();
 			sources = sources.filter(s => s.id !== source.id);
-			toast.success('Source removed');
+			toast.success(m.templates_sources_toast_removed());
 			onSourcesChanged();
 		} catch {
-			toast.error('Failed to remove source');
+			toast.error(m.templates_sources_toast_remove_failed());
 		}
 	}
 
@@ -80,10 +81,10 @@
 			newName = '';
 			newUrl = '';
 			addingNew = false;
-			toast.success('Source added');
+			toast.success(m.templates_sources_toast_added());
 			onSourcesChanged();
 		} catch {
-			toast.error('Failed to add source');
+			toast.error(m.templates_sources_toast_add_failed());
 		}
 	}
 
@@ -107,7 +108,7 @@
 				const templates = Array.isArray(data) ? data : (data.templates || []);
 				validationResults.set(key, { ok: true, count: templates.length });
 			} catch (error) {
-				const msg = error instanceof Error ? error.message : 'Connection failed';
+				const msg = error instanceof Error ? error.message : m.templates_sources_connection_failed();
 				validationResults.set(key, { ok: false, error: msg });
 				failedCount++;
 			}
@@ -118,9 +119,9 @@
 		validating = false;
 
 		if (failedCount > 0) {
-			toast.warning(`${failedCount} source(s) failed validation`);
+			toast.warning(m.templates_sources_toast_validation_failed({ count: failedCount }));
 		} else {
-			toast.success('All sources are reachable');
+			toast.success(m.templates_sources_toast_all_reachable());
 		}
 	}
 
@@ -140,7 +141,7 @@
 		}
 		sources = sources;
 		if (disabled > 0) {
-			toast.success(`Disabled ${disabled} inactive source(s)`);
+			toast.success(m.templates_sources_toast_disabled_inactive({ count: disabled }));
 			onSourcesChanged();
 		}
 	}
@@ -153,27 +154,27 @@
 <div class="space-y-4 max-w-3xl">
 	<div class="flex items-center justify-between">
 		<p class="text-sm text-muted-foreground">
-			Configure template catalog sources. Templates are fetched and cached for 1 hour.
+			{m.templates_sources_intro()}
 		</p>
 		<div class="flex items-center gap-2">
 			<Button size="sm" variant="outline" onclick={validateAllSources} disabled={validating}>
 				{#if validating}
 					<Loader2 class="w-3.5 h-3.5 mr-1.5 animate-spin" />
-					Validating...
+					{m.templates_sources_validating()}
 				{:else}
 					<ShieldCheck class="w-3.5 h-3.5 mr-1.5" />
-					Validate
+					{m.templates_sources_validate()}
 				{/if}
 			</Button>
 			{#if validationResults.size > 0 && [...validationResults.values()].some(v => !v.ok)}
 				<Button size="sm" variant="outline" onclick={disableInactive}>
 					<XCircle class="w-3.5 h-3.5 mr-1.5" />
-					Disable inactive
+					{m.templates_sources_disable_inactive()}
 				</Button>
 			{/if}
 			<Button size="sm" onclick={() => addingNew = !addingNew}>
 				<Plus class="w-3.5 h-3.5 mr-1.5" />
-				Add source
+				{m.templates_sources_add_source()}
 			</Button>
 		</div>
 	</div>
@@ -183,15 +184,15 @@
 			<Card.Content class="p-3">
 				<div class="flex items-end gap-3">
 					<div class="flex-1 space-y-1">
-						<label for="new-source-name" class="text-xs font-medium text-muted-foreground">Name</label>
-						<Input id="new-source-name" bind:value={newName} placeholder="My templates" class="h-8 text-sm" />
+						<label for="new-source-name" class="text-xs font-medium text-muted-foreground">{m.templates_sources_name_label()}</label>
+						<Input id="new-source-name" bind:value={newName} placeholder={m.templates_sources_name_placeholder()} class="h-8 text-sm" />
 					</div>
 					<div class="flex-[2] space-y-1">
-						<label for="new-source-url" class="text-xs font-medium text-muted-foreground">URL</label>
+						<label for="new-source-url" class="text-xs font-medium text-muted-foreground">{m.templates_sources_url_label()}</label>
 						<Input id="new-source-url" bind:value={newUrl} placeholder="https://example.com/templates.json" class="h-8 text-sm" />
 					</div>
-					<Button size="sm" onclick={addSource} disabled={!newName.trim() || !newUrl.trim()}>Add</Button>
-					<Button size="sm" variant="ghost" onclick={() => addingNew = false}>Cancel</Button>
+					<Button size="sm" onclick={addSource} disabled={!newName.trim() || !newUrl.trim()}>{m.templates_sources_add()}</Button>
+					<Button size="sm" variant="ghost" onclick={() => addingNew = false}>{m.templates_sources_cancel()}</Button>
 				</div>
 			</Card.Content>
 		</Card.Root>
@@ -200,7 +201,7 @@
 	{#if loading}
 		<div class="flex items-center justify-center py-8 text-muted-foreground">
 			<Loader2 class="w-5 h-5 animate-spin mr-2" />
-			Loading sources...
+			{m.templates_sources_loading()}
 		</div>
 	{:else}
 		<div class="space-y-2">
@@ -224,7 +225,7 @@
 								<div class="flex items-center gap-2">
 									<span class="text-sm font-medium">{source.name}</span>
 									{#if validation?.ok && validation.count !== undefined}
-										<span class="text-xs text-muted-foreground">({validation.count} templates)</span>
+										<span class="text-xs text-muted-foreground">({m.templates_sources_template_count({ count: validation.count })})</span>
 									{/if}
 								</div>
 								<div class="text-xs text-muted-foreground truncate">{source.url}</div>

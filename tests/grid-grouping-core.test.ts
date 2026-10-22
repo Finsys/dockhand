@@ -19,7 +19,7 @@ describe('groupData', () => {
 		expect(prod.items.map((r) => r.id)).toEqual([1, 3]); // order preserved
 	});
 
-	it('orders groups by `order` weight then first appearance', () => {
+	it('orders groups by `order` weight first', () => {
 		const data: Row[] = [
 			{ id: 1, combo: 'infra' }, // len 5
 			{ id: 2, combo: 'prod' },  // len 4
@@ -41,15 +41,27 @@ describe('groupData', () => {
 		expect(groups[groups.length - 1].items.map((r) => r.id)).toEqual([1, 3]);
 	});
 
-	it('is stable when two groups share the same order weight', () => {
-		// same length -> same order -> first appearance decides
+	it('breaks equal order weights by label, case-insensitively', () => {
+		// same length -> same order -> label decides, not first appearance (#1625)
 		const data: Row[] = [
-			{ id: 1, combo: 'aaa' },
-			{ id: 2, combo: 'bbb' },
-			{ id: 3, combo: 'aaa' }
+			{ id: 1, combo: 'ccc' },
+			{ id: 2, combo: 'BBB' },
+			{ id: 3, combo: 'aaa' },
+			{ id: 4, combo: 'ccc' }
 		];
 		const groups = groupData(data, by).filter((g) => g.key !== UNGROUPED_KEY);
-		expect(groups.map((g) => g.key)).toEqual(['aaa', 'bbb']);
+		expect(groups.map((g) => g.key)).toEqual(['aaa', 'BBB', 'ccc']);
+	});
+
+	it('falls back to key when order and label tie, regardless of row order', () => {
+		const same = (r: Row): GroupDescriptor | null =>
+			r.combo ? { key: r.combo, label: 'x', order: 1 } : null;
+		const data: Row[] = [
+			{ id: 1, combo: 'k2' },
+			{ id: 2, combo: 'k1' }
+		];
+		expect(groupData(data, same).map((g) => g.key)).toEqual(['k1', 'k2']);
+		expect(groupData([...data].reverse(), same).map((g) => g.key)).toEqual(['k1', 'k2']);
 	});
 
 	it('carries color and icons from the descriptor', () => {

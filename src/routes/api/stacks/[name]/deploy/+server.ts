@@ -1,4 +1,5 @@
 import { json } from '@sveltejs/kit';
+import { isValidStackName } from '$lib/server/stack-name-guard';
 import { deployStack, requireComposeFile, ComposeFileNotFoundError } from '$lib/server/stacks';
 import { authorize } from '$lib/server/authorize';
 import { auditStack } from '$lib/server/audit';
@@ -14,6 +15,7 @@ import type { RequestHandler } from './$types';
  * query: env:integer Environment ID the stack belongs to (from GET /api/environments)
  * body: {pull:boolean, build:boolean, forceRecreate:boolean}
  * body-example: {"pull":true,"build":false,"forceRecreate":false}
+ * resp-400: Invalid stack name
  * resp-200: Server-Sent-Events job stream with progress events and a final result event ({success, output})
  * resp-403: Permission denied (requires stacks:start, or environment access denied on enterprise)
  */
@@ -41,7 +43,11 @@ export const POST: RequestHandler = async (event) => {
 		forceRecreate?: boolean;
 	};
 
-	const stackName = decodeURIComponent(params.name);
+	// Validate the name shape before it is used in a filesystem path.
+	const stackName = params.name;
+	if (!isValidStackName(stackName)) {
+		return json({ error: 'Invalid stack name' }, { status: 400 });
+	}
 
 	// Read up-front (not inside createJobResponse's callback, as before): the run
 	// record needs a compose/env hash and a schedule_executions row BEFORE the job

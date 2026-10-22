@@ -8,8 +8,12 @@
 export function parseTimeStringToSeconds(timeStr: string): number {
 	const str = timeStr.toLowerCase();
 
+	// Docker's HumanDuration emits three phrasings with no digit in them, so the
+	// numeric match below cannot see any of them: "Less than a second", "About a
+	// minute", and "About an hour" (a duration that rounds to exactly one hour).
 	if (str.includes('less than a second')) return 1;
 	if (str.includes('less than a minute') || str.includes('about a minute')) return 60;
+	if (str.includes('about an hour')) return 3600;
 
 	const match = str.match(/(\d+)\s*(second|minute|hour|day|week|month|year)/);
 	if (!match) return 0;

@@ -1,0 +1,1 @@
+ALTER TABLE `pending_container_updates` ADD `pinned_to_digest` integer DEFAULT false NOT NULL;

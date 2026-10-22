@@ -61,6 +61,9 @@ export interface RestoreTargetInput {
 	volumeDestinations?: Array<{ volume: string; kind: 'volume' | 'path'; target: string }>;
 	skipStackFiles?: boolean;
 	mergeStackFiles?: boolean;
+	/** What runs after the data lands. A redeploy materialises the managed stack dir itself, so it
+	 *  replaces the dir even when the caller opted out of stack files. */
+	postRestore?: string | null;
 }
 
 /**
@@ -115,12 +118,13 @@ export function resolveRestoreTargets(input: {
 		}
 	}
 
-	// Stack files land in the managed stack dir. Written only for a stack restore that isn't
-	// opting out (skipStackFiles) and has a target name + resolved dir. Mirrors the guard in
-	// runNewLocationStack / runCloneStack.
+	// Stack files land in the managed stack dir. willWrite answers "does the restore REPLACE this
+	// directory", which is not the same as "does it call writeLocalStackFiles": a redeploy
+	// materialises the dir itself (redeployStack), so it replaces the dir even when the caller
+	// asked to skip stack files. Opting out only suppresses the write when nothing else does it.
 	let stackFiles: ResolvedStackFiles | null = null;
 	if (job.targetType === 'stack' && stackDir) {
-		const willWrite = !!job.targetName && !job.skipStackFiles;
+		const willWrite = !!job.targetName && (!job.skipStackFiles || job.postRestore === 'redeploy');
 		stackFiles = { targetDir: stackDir, willWrite, overwrite: job.mergeStackFiles !== true };
 	}
 

@@ -6,6 +6,7 @@
 	import { BULK_SELECTOR_FIELDS } from '../../routes/settings/secrets/ProviderModal.svelte';
 	import { SELECTOR_VARS, BULK_SELECTOR_VAR } from '$lib/utils/bulk-selector';
 	import type { EnvVar } from '$lib/components/StackEnvVarsEditor.svelte';
+	import { m } from '$lib/paraglide/messages.js';
 
 	type ProviderOption = { id: number; name: string; type: string };
 
@@ -51,7 +52,7 @@
 {#if providers.length > 0 || secretProviderId !== null}
 	<div class="px-3 py-2 border-b border-zinc-200 dark:border-zinc-700 bg-zinc-100/60 dark:bg-zinc-800/60 flex flex-col gap-1.5 text-xs">
 		<div class="flex items-center gap-2">
-			<Label for="secret-provider-select{idSuffix}" class="text-xs text-muted-foreground shrink-0">Secret provider</Label>
+			<Label for="secret-provider-select{idSuffix}" class="text-xs text-muted-foreground shrink-0">{m.secretprovider_label()}</Label>
 			<Select.Root
 				type="single"
 				value={secretProviderId !== null ? String(secretProviderId) : ''}
@@ -63,15 +64,15 @@
 						{@const SelIcon = sel ? getProviderIcon(sel.type) : null}
 						<span class="flex items-center gap-2 min-w-0">
 							{#if SelIcon}<SelIcon class="h-4 w-4 shrink-0 text-muted-foreground" />{/if}
-							<span class="truncate min-w-0">{sel?.name ?? 'Unknown provider'}</span>
+							<span class="truncate min-w-0">{sel?.name ?? m.secretprovider_unknown()}</span>
 						</span>
 					{:else}
-						<span class="text-muted-foreground truncate">None — disabled</span>
+						<span class="text-muted-foreground truncate">{m.secretprovider_none_disabled()}</span>
 					{/if}
 				</Select.Trigger>
 				<Select.Content>
-					<Select.Item value="" label="None">
-						<span class="text-muted-foreground">None — disabled</span>
+					<Select.Item value="" label={m.secretprovider_none()}>
+						<span class="text-muted-foreground">{m.secretprovider_none_disabled()}</span>
 					</Select.Item>
 					{#each providers as provider (provider.id)}
 						{@const ProviderIcon = getProviderIcon(provider.type)}

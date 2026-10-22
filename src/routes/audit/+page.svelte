@@ -65,6 +65,7 @@
 	import { DataGrid } from '$lib/components/data-grid';
 	import DiffViewer from '$lib/components/DiffViewer.svelte';
 	import type { AuditDiff } from '$lib/utils/diff';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface AuditLogEntry {
 		id: number;
@@ -164,38 +165,38 @@
 	let showExportMenu = $state(false);
 
 	const entityTypes = [
-		{ value: 'container', label: 'Containers' },
-		{ value: 'image', label: 'Images' },
-		{ value: 'volume', label: 'Volumes' },
-		{ value: 'network', label: 'Networks' },
-		{ value: 'stack', label: 'Stacks' },
-		{ value: 'environment', label: 'Environments' },
-		{ value: 'registry', label: 'Registries' },
-		{ value: 'user', label: 'Users' },
-		{ value: 'role', label: 'Roles' },
-		{ value: 'settings', label: 'Settings' },
-		{ value: 'git_repository', label: 'Git repositories' },
-		{ value: 'git_credential', label: 'Git credentials' }
+		{ value: 'container', label: m.nav_containers() },
+		{ value: 'image', label: m.nav_images() },
+		{ value: 'volume', label: m.nav_volumes() },
+		{ value: 'network', label: m.nav_networks() },
+		{ value: 'stack', label: m.nav_stacks() },
+		{ value: 'environment', label: m.audit_entity_environments() },
+		{ value: 'registry', label: m.audit_entity_registries() },
+		{ value: 'user', label: m.audit_entity_users() },
+		{ value: 'role', label: m.audit_entity_roles() },
+		{ value: 'settings', label: m.nav_settings() },
+		{ value: 'git_repository', label: m.audit_entity_git_repositories() },
+		{ value: 'git_credential', label: m.audit_entity_git_credentials() }
 	];
 
 	const actionTypes = [
-		{ value: 'create', label: 'Create' },
-		{ value: 'update', label: 'Update' },
-		{ value: 'delete', label: 'Delete' },
-		{ value: 'start', label: 'Start' },
-		{ value: 'stop', label: 'Stop' },
-		{ value: 'restart', label: 'Restart' },
-		{ value: 'pause', label: 'Pause' },
-		{ value: 'unpause', label: 'Unpause' },
-		{ value: 'pull', label: 'Pull' },
-		{ value: 'push', label: 'Push' },
-		{ value: 'prune', label: 'Prune' },
-		{ value: 'exec', label: 'Exec' },
-		{ value: 'connect', label: 'Connect' },
-		{ value: 'disconnect', label: 'Disconnect' },
-		{ value: 'login', label: 'Login' },
-		{ value: 'logout', label: 'Logout' },
-		{ value: 'sync', label: 'Sync' }
+		{ value: 'create', label: m.audit_action_create() },
+		{ value: 'update', label: m.audit_action_update() },
+		{ value: 'delete', label: m.audit_action_delete() },
+		{ value: 'start', label: m.audit_action_start() },
+		{ value: 'stop', label: m.audit_action_stop() },
+		{ value: 'restart', label: m.audit_action_restart() },
+		{ value: 'pause', label: m.audit_action_pause() },
+		{ value: 'unpause', label: m.audit_action_unpause() },
+		{ value: 'pull', label: m.audit_action_pull() },
+		{ value: 'push', label: m.audit_action_push() },
+		{ value: 'prune', label: m.audit_action_prune() },
+		{ value: 'exec', label: m.audit_action_exec() },
+		{ value: 'connect', label: m.audit_action_connect() },
+		{ value: 'disconnect', label: m.audit_action_disconnect() },
+		{ value: 'login', label: m.audit_action_login() },
+		{ value: 'logout', label: m.audit_action_logout() },
+		{ value: 'sync', label: m.audit_action_sync() }
 	];
 
 	// Date filter preset
@@ -208,12 +209,12 @@
 	);
 
 	const datePresets = [
-		{ value: 'today', label: 'Today' },
-		{ value: 'yesterday', label: 'Yesterday' },
-		{ value: 'last7days', label: 'Last 7 days' },
-		{ value: 'last30days', label: 'Last 30 days' },
-		{ value: 'thisMonth', label: 'This month' },
-		{ value: 'lastMonth', label: 'Last month' }
+		{ value: 'today', label: m.audit_date_today() },
+		{ value: 'yesterday', label: m.audit_date_yesterday() },
+		{ value: 'last7days', label: m.audit_date_last_7_days() },
+		{ value: 'last30days', label: m.audit_date_last_30_days() },
+		{ value: 'thisMonth', label: m.audit_date_this_month() },
+		{ value: 'lastMonth', label: m.audit_date_last_month() }
 	];
 
 	// Filter dates are calendar days in the configured display timezone (#1269).
@@ -596,14 +597,14 @@
 </script>
 
 <svelte:head>
-	<title>Audit log - Dockhand</title>
+	<title>{m.nav_audit_log()} - Dockhand</title>
 </svelte:head>
 
 <div class="flex-1 min-h-0 flex flex-col gap-3 overflow-hidden">
 	<!-- Header -->
 	<div class="shrink-0 flex flex-wrap justify-between items-center gap-3 min-h-8">
 		<div class="flex items-center gap-3">
-			<PageHeader icon={Crown} title="Audit log" iconClass="text-amber-500" count={visibleEnd > 0 ? `${visibleStart}-${visibleEnd}` : undefined} total={total > 0 ? total : undefined} countClass="min-w-32" />
+			<PageHeader icon={Crown} title={m.nav_audit_log()} iconClass="text-amber-500" count={visibleEnd > 0 ? `${visibleStart}-${visibleEnd}` : undefined} total={total > 0 ? total : undefined} countClass="min-w-32" />
 		</div>
 		{#if $licenseStore.isEnterprise}
 			<div class="flex flex-wrap items-center gap-2">
@@ -613,11 +614,11 @@
 						<User class="w-3.5 h-3.5 mr-1.5 text-muted-foreground shrink-0" />
 						<span class="truncate">
 							{#if filterUsernames.length === 0}
-								User
+								{m.audit_filter_user()}
 							{:else if filterUsernames.length === 1}
 								{filterUsernames[0]}
 							{:else}
-								{filterUsernames.length} users
+								{m.audit_filter_users_count({ count: filterUsernames.length })}
 							{/if}
 						</span>
 					</Select.Trigger>
@@ -628,7 +629,7 @@
 								class="w-full px-2 py-1 text-xs text-left text-muted-foreground/60 hover:text-muted-foreground"
 								onclick={() => filterUsernames = []}
 							>
-								Clear
+								{m.grid_filter_clear()}
 							</button>
 						{/if}
 						{#each users as user}
@@ -646,11 +647,11 @@
 						<Box class="w-3.5 h-3.5 mr-1.5 text-muted-foreground shrink-0" />
 						<span class="truncate">
 							{#if filterEntityTypes.length === 0}
-								Entity
+								{m.audit_filter_entity()}
 							{:else if filterEntityTypes.length === 1}
 								{entityTypes.find(e => e.value === filterEntityTypes[0])?.label || filterEntityTypes[0]}
 							{:else}
-								{filterEntityTypes.length} entities
+								{m.audit_filter_entities_count({ count: filterEntityTypes.length })}
 							{/if}
 						</span>
 					</Select.Trigger>
@@ -661,7 +662,7 @@
 								class="w-full px-2 py-1 text-xs text-left text-muted-foreground/60 hover:text-muted-foreground"
 								onclick={() => filterEntityTypes = []}
 							>
-								Clear
+								{m.grid_filter_clear()}
 							</button>
 						{/if}
 						{#each entityTypes as type}
@@ -679,11 +680,11 @@
 						<Activity class="w-3.5 h-3.5 mr-1.5 text-muted-foreground shrink-0" />
 						<span class="truncate">
 							{#if filterActions.length === 0}
-								Action
+								{m.audit_filter_action()}
 							{:else if filterActions.length === 1}
 								{actionTypes.find(a => a.value === filterActions[0])?.label || filterActions[0]}
 							{:else}
-								{filterActions.length} actions
+								{m.audit_filter_actions_count({ count: filterActions.length })}
 							{/if}
 						</span>
 					</Select.Trigger>
@@ -694,7 +695,7 @@
 								class="w-full px-2 py-1 text-xs text-left text-muted-foreground/60 hover:text-muted-foreground"
 								onclick={() => filterActions = []}
 							>
-								Clear
+								{m.grid_filter_clear()}
 							</button>
 						{/if}
 						{#each actionTypes as action}
@@ -722,16 +723,16 @@
 							{/if}
 							<span class="truncate">
 								{#if filterEnvironmentId === null}
-									Environment
+									{m.audit_filter_environment()}
 								{:else}
-									{selectedEnv?.name || 'Environment'}
+									{selectedEnv?.name || m.audit_filter_environment()}
 								{/if}
 							</span>
 						</Select.Trigger>
 						<Select.Content>
 							<Select.Item value="">
 								<Server class="w-4 h-4 mr-2 text-muted-foreground" />
-								All environments
+								{m.audit_filter_all_environments()}
 							</Select.Item>
 							{#each environments as env}
 								<Select.Item value={String(env.id)}>
@@ -754,31 +755,31 @@
 						}
 					}}
 				>
-					<Select.Trigger size="sm" class="w-32 text-sm">
+					<Select.Trigger size="sm" class="w-44 text-sm">
 						<Calendar class="w-3.5 h-3.5 mr-1.5 text-muted-foreground shrink-0" />
 						<span class="truncate">
 							{#if selectedDatePreset === 'custom'}
-								Custom
+								{m.audit_date_custom()}
 							{:else if selectedDatePreset}
-								{datePresets.find(d => d.value === selectedDatePreset)?.label || 'All time'}
+								{datePresets.find(d => d.value === selectedDatePreset)?.label || m.audit_date_all_time()}
 							{:else}
-								All time
+								{m.audit_date_all_time()}
 							{/if}
 						</span>
 					</Select.Trigger>
 					<Select.Content>
-						<Select.Item value="">All time</Select.Item>
+						<Select.Item value="">{m.audit_date_all_time()}</Select.Item>
 						{#each datePresets as preset}
 							<Select.Item value={preset.value}>{preset.label}</Select.Item>
 						{/each}
-						<Select.Item value="custom">Custom range...</Select.Item>
+						<Select.Item value="custom">{m.audit_date_custom_range()}</Select.Item>
 					</Select.Content>
 				</Select.Root>
 
 				<!-- Custom date inputs -->
 				{#if selectedDatePreset === 'custom'}
-					<DatePicker bind:value={filterFromDate} placeholder="From" class="h-8 w-28" />
-					<DatePicker bind:value={filterToDate} placeholder="To" class="h-8 w-28" />
+					<DatePicker bind:value={filterFromDate} placeholder={m.audit_date_from()} class="h-8 w-28" />
+					<DatePicker bind:value={filterToDate} placeholder={m.audit_date_to()} class="h-8 w-28" />
 				{/if}
 
 				<!-- Clear filters -->
@@ -788,7 +789,7 @@
 					class="h-8 px-2"
 					onclick={clearFilters}
 					disabled={!hasActiveFilters}
-					title="Clear all filters"
+					title={m.audit_clear_filters()}
 				>
 					<X class="w-3.5 h-3.5" />
 				</Button>
@@ -796,7 +797,7 @@
 				<!-- Live indicator -->
 				<span
 					class="flex items-center gap-1.5 text-xs {$auditSseConnected ? 'text-emerald-500' : 'text-muted-foreground'}"
-					title={$auditSseConnected ? 'Live updates active' : 'Connecting...'}
+					title={$auditSseConnected ? m.audit_live_active() : m.audit_connecting()}
 				>
 					<Wifi class="w-3.5 h-3.5" />
 				</span>
@@ -845,20 +846,20 @@
 	{#if $licenseStore.loading}
 		<div class="flex flex-col items-center justify-center py-16 text-center">
 			<Loader2 class="w-8 h-8 animate-spin text-muted-foreground mb-4" />
-			<p class="text-muted-foreground">Loading...</p>
+			<p class="text-muted-foreground">{m.audit_loading()}</p>
 		</div>
 	{:else if !$licenseStore.isEnterprise}
 		<div class="flex flex-col items-center justify-center py-16 text-center">
 			<div class="w-16 h-16 rounded-full bg-amber-500/10 flex items-center justify-center mb-4">
 				<Crown class="w-8 h-8 text-amber-500" />
 			</div>
-			<h2 class="text-xl font-semibold mb-2">Enterprise feature</h2>
+			<h2 class="text-xl font-semibold mb-2">{m.audit_enterprise_title()}</h2>
 			<p class="text-muted-foreground max-w-md mb-6">
-				Audit logging is an enterprise feature that tracks all user actions for compliance and security monitoring.
+				{m.audit_enterprise_description()}
 			</p>
 			<Button variant="outline" href="/settings?tab=license">
 				<Key class="w-4 h-4" />
-				Activate license
+				{m.audit_activate_license()}
 			</Button>
 		</div>
 	{:else}
@@ -923,14 +924,14 @@
 			{#snippet emptyState()}
 				<div class="flex flex-col items-center justify-center py-16 text-muted-foreground">
 					<FileX class="w-10 h-10 mb-3 opacity-40" />
-					<p>No audit log entries found</p>
+					<p>{m.audit_empty()}</p>
 				</div>
 			{/snippet}
 
 			{#snippet loadingState()}
 				<div class="flex items-center justify-center py-16 text-muted-foreground">
 					<RefreshCw class="w-5 h-5 animate-spin mr-2" />
-					Loading...
+					{m.audit_loading()}
 				</div>
 			{/snippet}
 
@@ -938,11 +939,11 @@
 				{#if loadingMore}
 					<div class="flex items-center justify-center py-2 text-muted-foreground">
 						<Loader2 class="w-4 h-4 animate-spin mr-2" />
-						Loading more...
+						{m.audit_loading_more()}
 					</div>
 				{:else if !hasMore && logs.length > 0}
 					<div class="text-center py-2 text-sm text-muted-foreground">
-						End of results ({total.toLocaleString()} entries)
+						{m.audit_end_of_results({ count: total, total: total.toLocaleString() })}
 					</div>
 				{/if}
 			{/snippet}
@@ -954,24 +955,24 @@
 <Dialog.Root bind:open={showDetailDialog}>
 	<Dialog.Content class="max-w-2xl">
 		<Dialog.Header>
-			<Dialog.Title>Audit log details</Dialog.Title>
+			<Dialog.Title>{m.audit_details_title()}</Dialog.Title>
 		</Dialog.Header>
 		{#if selectedLog}
 			<div class="space-y-4">
 				<div class="grid grid-cols-2 gap-4">
 					<div>
-						<label class="text-sm font-medium text-muted-foreground">Timestamp</label>
+						<label class="text-sm font-medium text-muted-foreground">{m.audit_details_timestamp()}</label>
 						<p class="font-mono text-sm">{formatTimestamp(selectedLog.createdAt)}</p>
 					</div>
 					<div>
-						<label class="text-sm font-medium text-muted-foreground">User</label>
+						<label class="text-sm font-medium text-muted-foreground">{m.audit_details_user()}</label>
 						<p class="flex items-center gap-1">
 							<User class="w-4 h-4 text-muted-foreground" />
 							{selectedLog.username}
 						</p>
 					</div>
 					<div>
-						<label class="text-sm font-medium text-muted-foreground">Action</label>
+						<label class="text-sm font-medium text-muted-foreground">{m.audit_details_action()}</label>
 						<p>
 							<Badge class="{getActionColor(selectedLog.action)} gap-1">
 								<svelte:component this={getActionIcon(selectedLog.action)} class="w-3 h-3" />
@@ -980,7 +981,7 @@
 						</p>
 					</div>
 					<div>
-						<label class="text-sm font-medium text-muted-foreground">Entity type</label>
+						<label class="text-sm font-medium text-muted-foreground">{m.audit_details_entity_type()}</label>
 						<p class="flex items-center gap-1">
 							<svelte:component this={getEntityIcon(selectedLog.entityType)} class="w-4 h-4 text-muted-foreground" />
 							{selectedLog.entityType}
@@ -988,25 +989,25 @@
 					</div>
 					{#if selectedLog.entityName}
 						<div>
-							<label class="text-sm font-medium text-muted-foreground">Entity name</label>
+							<label class="text-sm font-medium text-muted-foreground">{m.audit_details_entity_name()}</label>
 							<p>{selectedLog.entityName}</p>
 						</div>
 					{/if}
 					{#if selectedLog.entityId}
 						<div>
-							<label class="text-sm font-medium text-muted-foreground">Entity ID</label>
+							<label class="text-sm font-medium text-muted-foreground">{m.audit_details_entity_id()}</label>
 							<p class="font-mono text-sm break-all">{selectedLog.entityId}</p>
 						</div>
 					{/if}
 					{#if selectedLog.environmentId}
 						<div>
-							<label class="text-sm font-medium text-muted-foreground">Environment ID</label>
+							<label class="text-sm font-medium text-muted-foreground">{m.audit_details_environment_id()}</label>
 							<p>{selectedLog.environmentId}</p>
 						</div>
 					{/if}
 					{#if selectedLog.ipAddress}
 						<div>
-							<label class="text-sm font-medium text-muted-foreground">IP address</label>
+							<label class="text-sm font-medium text-muted-foreground">{m.audit_details_ip_address()}</label>
 							<p class="font-mono text-sm">{selectedLog.ipAddress}</p>
 						</div>
 					{/if}
@@ -1014,33 +1015,33 @@
 
 				{#if selectedLog.description}
 					<div>
-						<label class="text-sm font-medium text-muted-foreground">Description</label>
+						<label class="text-sm font-medium text-muted-foreground">{m.audit_details_description()}</label>
 						<p>{selectedLog.description}</p>
 					</div>
 				{/if}
 
 				{#if selectedLog.userAgent}
 					<div>
-						<label class="text-sm font-medium text-muted-foreground">User agent</label>
+						<label class="text-sm font-medium text-muted-foreground">{m.audit_details_user_agent()}</label>
 						<p class="text-xs text-muted-foreground break-all">{selectedLog.userAgent}</p>
 					</div>
 				{/if}
 
 				{#if selectedLog.details?.changes}
 					<div>
-						<label class="text-sm font-medium text-muted-foreground mb-2 block">Changes</label>
+						<label class="text-sm font-medium text-muted-foreground mb-2 block">{m.audit_details_changes()}</label>
 						<DiffViewer diff={selectedLog.details as AuditDiff} />
 					</div>
 				{:else if selectedLog.details}
 					<div>
-						<label class="text-sm font-medium text-muted-foreground">Details</label>
+						<label class="text-sm font-medium text-muted-foreground">{m.audit_details_details()}</label>
 						<pre class="mt-1 p-3 bg-muted rounded-md text-xs overflow-auto max-h-[200px]">{JSON.stringify(selectedLog.details, null, 2)}</pre>
 					</div>
 				{/if}
 			</div>
 		{/if}
 		<Dialog.Footer>
-			<Button variant="outline" onclick={() => showDetailDialog = false}>Close</Button>
+			<Button variant="outline" onclick={() => showDetailDialog = false}>{m.ui_close()}</Button>
 		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>
@@ -1051,6 +1052,6 @@
 		type="button"
 		class="fixed inset-0 z-40"
 		onclick={() => showExportMenu = false}
-		aria-label="Close menu"
+		aria-label={m.audit_close_menu()}
 	></button>
 {/if}

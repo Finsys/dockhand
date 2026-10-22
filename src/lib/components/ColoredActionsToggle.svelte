@@ -5,6 +5,7 @@
 	import { authStore } from '$lib/stores/auth';
 	import { resolveToggleValue, shouldSkipApply } from '$lib/utils/theme-preference';
 	import { toast } from 'svelte-sonner';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		userId?: number; // omit for global default (login page / auth-disabled)
@@ -25,14 +26,14 @@
 	function onToggle(value: boolean) {
 		checked = value;
 		themeStore.setPreference('coloredActionButtons', value, userId, skipApply);
-		toast.success(value ? 'Action buttons colored' : 'Action buttons reset to default');
+		toast.success(value ? m.toggles_colored_actions_enabled() : m.toggles_colored_actions_disabled());
 	}
 </script>
 
 <div class="space-y-1">
 	<div class="flex items-center gap-3">
-		<Label>Colored grid buttons</Label>
+		<Label>{m.toggles_colored_actions()}</Label>
 		<TogglePill {checked} onchange={onToggle} />
 	</div>
-	<p class="text-xs text-muted-foreground">Use semantic colors instead of muted gray</p>
+	<p class="text-xs text-muted-foreground">{m.toggles_colored_actions_description()}</p>
 </div>

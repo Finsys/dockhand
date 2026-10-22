@@ -1,4 +1,5 @@
 import { json } from '@sveltejs/kit';
+import { isValidStackName } from '$lib/server/stack-name-guard';
 import { getStackEnvVars } from '$lib/server/db';
 import { getStackComposeFile } from '$lib/server/stacks';
 import { authorize } from '$lib/server/authorize';
@@ -120,7 +121,11 @@ export const POST: RequestHandler = async ({ params, url, cookies, request }) =>
 	}
 
 	try {
-		const stackName = decodeURIComponent(params.name);
+		// Validate the name shape before it is used in a filesystem path.
+		const stackName = params.name;
+		if (!isValidStackName(stackName)) {
+			return json({ error: 'Invalid stack name' }, { status: 400 });
+		}
 		let composeContent: string | null = null;
 		let providedVariables: string[] | null = null;
 

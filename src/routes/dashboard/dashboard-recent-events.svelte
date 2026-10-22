@@ -14,8 +14,9 @@
 		AlertTriangle,
 		Heart
 	} from 'lucide-svelte';
-	import type { Component } from 'svelte';
+	import type { IconComponent } from '$lib/types';
 	import { formatDateTime } from '$lib/stores/settings';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Event {
 		container_name: string;
@@ -31,7 +32,7 @@
 
 	let { events, limit = 8, onclick }: Props = $props();
 
-	function getActionIcon(action: string): Component {
+	function getActionIcon(action: string): IconComponent {
 		switch (action) {
 			case 'create': return Plus;
 			case 'start': return Play;
@@ -80,14 +81,14 @@
 		const diffMs = now.getTime() - date.getTime();
 		const diffMins = Math.floor(diffMs / 60000);
 
-		if (diffMins < 1) return 'now';
-		if (diffMins < 60) return `${diffMins}m`;
+		if (diffMins < 1) return m.dashboard_events_time_now();
+		if (diffMins < 60) return m.dashboard_events_time_minutes({ count: diffMins });
 
 		const diffHours = Math.floor(diffMins / 60);
-		if (diffHours < 24) return `${diffHours}h`;
+		if (diffHours < 24) return m.dashboard_events_time_hours({ count: diffHours });
 
 		const diffDays = Math.floor(diffHours / 24);
-		return `${diffDays}d`;
+		return m.dashboard_events_time_days({ count: diffDays });
 	}
 </script>
 
@@ -110,7 +111,7 @@
 	>
 		<div class="flex items-center gap-1.5 text-xs text-muted-foreground mb-2">
 			<Activity class="w-3 h-3" />
-			<span class="font-medium">Recent events</span>
+			<span class="font-medium">{m.dashboard_events_recent()}</span>
 		</div>
 		<!-- Grid layout with fixed columns: timestamp, action icon, container name -->
 		<div class="grid grid-cols-[auto_auto_1fr] gap-x-2 gap-y-1 text-xs">

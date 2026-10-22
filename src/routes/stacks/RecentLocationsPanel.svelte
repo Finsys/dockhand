@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { FolderOpen, X, Home } from 'lucide-svelte';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		currentPath?: string | null;
@@ -75,7 +76,7 @@
 </script>
 
 <div class="w-56 border-r p-3 overflow-y-auto shrink-0">
-	<h3 class="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">Locations</h3>
+	<h3 class="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">{m.stacks_fs_locations()}</h3>
 	<div class="space-y-1">
 		<!-- Default Dockhand location (always shown, not removable) -->
 		{#if defaultBasePath}
@@ -85,7 +86,7 @@
 				onclick={() => onSelect(defaultBasePath!)}
 			>
 				<Home class="w-4 h-4 shrink-0 text-sky-500" />
-				<span class="truncate" title={defaultBasePath}>Dockhand default</span>
+				<span class="truncate" title={defaultBasePath}>{m.stacks_fs_dockhand_default()}</span>
 			</button>
 		{/if}
 
@@ -104,7 +105,7 @@
 					type="button"
 					class="p-1 opacity-0 group-hover:opacity-100 hover:bg-muted rounded transition-opacity"
 					onclick={() => handleRemove(location)}
-					title="Remove from recent"
+					title={m.stacks_fs_remove_recent()}
 				>
 					<X class="w-3 h-3 text-muted-foreground" />
 				</button>
@@ -113,7 +114,7 @@
 
 		{#if !defaultBasePath && locations.length === 0}
 			<p class="text-xs text-muted-foreground italic px-2">
-				No locations yet. Browse folders to add them here.
+				{m.stacks_fs_no_locations()}
 			</p>
 		{/if}
 	</div>

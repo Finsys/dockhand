@@ -17,6 +17,7 @@ import { auditBackup, auditBackupDestination } from '$lib/server/audit';
  * path: id:integer! Schedule id (semantics depend on type) (from GET /api/schedules)
  * resp-200: {success:boolean!, enabled:boolean!}
  * resp-400: Invalid schedule id, unsupported type, or system_cleanup/deploy_log_reconcile (cannot be paused)
+ * resp-403: Permission denied
  * resp-404: Schedule, backup config, or backup destination not found
  * resp-500: Unexpected error while toggling the schedule
  */

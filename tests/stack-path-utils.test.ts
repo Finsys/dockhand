@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
 	findStackNameCollision,
+	getStackPathHintsFromContainers,
 	moveStackFilePathCrossDevice,
 	resolveStackDirForLayout
 } from '../src/lib/server/stack-path-utils';
@@ -12,6 +13,48 @@ const tempDirs: string[] = [];
 
 afterEach(() => {
 	for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
+describe('getStackPathHintsFromContainers', () => {
+	const configLabel = 'com.docker.compose.project.config_files';
+	const dirLabel = 'com.docker.compose.project.working_dir';
+	const container = { labels: { [configLabel]: '/opt/web/compose.yaml', [dirLabel]: '/opt/web' } };
+	const hints = { workingDir: '/opt/web', configFiles: ['/opt/web/compose.yaml'] };
+	const emptyHints = { workingDir: null, configFiles: null };
+
+	it('returns hints for a single container and agreeing containers', () => {
+		expect(getStackPathHintsFromContainers([container])).toEqual(hints);
+		expect(getStackPathHintsFromContainers([container, container])).toEqual(hints);
+	});
+
+	it.each([undefined, null, {}, { [configLabel]: '' }, { [configLabel]: '-' }])(
+		'ignores unusable labels in either container order: %j', (labels: Record<string, string> | null | undefined) => {
+			const child = { labels: { ...labels, [dirLabel]: '/unrelated' } };
+			expect(getStackPathHintsFromContainers([child, container])).toEqual(hints);
+			expect(getStackPathHintsFromContainers([container, child])).toEqual(hints);
+			expect(getStackPathHintsFromContainers([{ labels }])).toEqual(emptyHints);
+		}
+	);
+
+	it('returns null hints for no containers or only missing, empty and stdin labels', () => {
+		expect(getStackPathHintsFromContainers([])).toEqual(emptyHints);
+		expect(getStackPathHintsFromContainers([
+			{}, { labels: null }, { labels: {} }, { labels: { [configLabel]: '' } }, { labels: { [configLabel]: '-' } }
+		])).toEqual(emptyHints);
+	});
+
+	it('returns null hints for conflicting paths in either container order', () => {
+		const other = { labels: { [configLabel]: '/other/compose.yaml', [dirLabel]: '/other' } };
+		expect(getStackPathHintsFromContainers([container, {}, other])).toEqual(emptyHints);
+		expect(getStackPathHintsFromContainers([other, {}, container])).toEqual(emptyHints);
+	});
+
+	it('preserves comma-separated file order and trims each path', () => {
+		const labels = { [configLabel]: '/opt/web/compose.yaml, /opt/web/override.yml ' };
+		expect(getStackPathHintsFromContainers([{ labels }, { labels }])).toEqual({
+			workingDir: null, configFiles: ['/opt/web/compose.yaml', '/opt/web/override.yml']
+		});
+	});
 });
 
 describe('moveStackFilePathCrossDevice', () => {
@@ -35,6 +78,23 @@ describe('resolveStackDirForLayout', () => {
 	it('uses flat STACKS_DIR for local stacks and environment scope otherwise', () => {
 		expect(resolveStackDirForLayout('/data/stacks', '/srv/stacks', 'app', 'local', true)).toBe('/srv/stacks/app');
 		expect(resolveStackDirForLayout('/data/stacks', '/srv/stacks', 'app', 'production', false)).toBe('/data/stacks/production/app');
+	});
+
+	it('refuses a name with a separator before it can escape the root', () => {
+		// Defence in depth behind the route guard: a name that is not a plain stack name
+		// can only ever address a child of the root, so building a path from it throws
+		// rather than returning one that points outside.
+		for (const bad of ['..', '../db', 'a/../b', 'a/b', '/etc', 'foo/bar']) {
+			expect(() => resolveStackDirForLayout('/data/stacks', '/srv/stacks', bad, 'production', false)).toThrow();
+			expect(() => resolveStackDirForLayout('/data/stacks', '/srv/stacks', bad, undefined, true)).toThrow();
+		}
+	});
+
+	it('keeps a legitimate name working under both layouts', () => {
+		expect(resolveStackDirForLayout('/data/stacks', '/srv/stacks', 'my-stack_1', 'prod', false))
+			.toBe('/data/stacks/prod/my-stack_1');
+		expect(resolveStackDirForLayout('/data/stacks', '/srv/stacks', 'my-stack_1', undefined, true))
+			.toBe('/srv/stacks/my-stack_1');
 	});
 });
 

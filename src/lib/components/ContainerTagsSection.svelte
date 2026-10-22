@@ -4,6 +4,7 @@
 	import { appendEnvParam } from '$lib/stores/environment';
 	import { isAdmin } from '$lib/stores/auth';
 	import type { Tag, TagColor } from '$lib/utils/tags-core';
+	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
 		containerName: string;
@@ -11,7 +12,7 @@
 		/** Shown when the container has no tags (assign affordance). */
 		emptyHint?: string;
 	}
-	let { containerName, envId, emptyHint = 'No tags - click the tag icon to add one' }: Props = $props();
+	let { containerName, envId, emptyHint = undefined }: Props = $props();
 
 	let catalog = $state<Tag[]>([]);
 	let assigned = $state<number[]>([]);
@@ -61,6 +62,6 @@
 	<TagChips tags={assignedTags} onRemove={(t) => apply(assigned.filter((id) => id !== t.id))} />
 	<TagEditPopover catalog={catalog} selected={assigned} onCreate={createTag} onApply={apply} allowCreate={$isAdmin} />
 	{#if assignedTags.length === 0}
-		<span class="text-xs text-muted-foreground">{emptyHint}</span>
+		<span class="text-xs text-muted-foreground">{emptyHint ?? m.tagsection_empty_hint()}</span>
 	{/if}
 </div>

@@ -10,18 +10,25 @@ import { auditRole } from '$lib/server/audit';
 // GET /api/roles - List all roles
 /**
  * @openapi
- * summary: List all roles (built-in and custom); available in setup mode or with an enterprise license
+ * summary: List all roles (built-in and custom); needs admin or users:view, plus an enterprise license
  * resp-200: array<{id:integer!, name:string!, description:string, isSystem:boolean!, permissions:{}}>
- * resp-403: Enterprise license required
+ * resp-403: Enterprise license required, or the account may not view users
  * resp-500: Failed to read the roles
  */
 export const GET: RequestHandler = async ({ cookies }) => {
 	const auth = await authorize(cookies);
 
-	// Allow viewing roles when auth is disabled (setup mode) or with enterprise license
-	// This lets users see built-in roles before activating auth/enterprise
-	if (auth.authEnabled && !auth.isEnterprise) {
-		return json({ error: 'Enterprise license required' }, { status: 403 });
+	// Before auth is switched on there is nobody to check, and the setup screens show
+	// the built-in roles.
+	if (auth.authEnabled) {
+		if (!auth.isEnterprise) {
+			return json({ error: 'Enterprise license required' }, { status: 403 });
+		}
+		// A role carries its full permission matrix, which is a map of who may do what
+		// here. Reading it belongs with managing users, not with holding an account.
+		if (!auth.isAdmin && !(await auth.can('users', 'view'))) {
+			return json({ error: 'Permission denied' }, { status: 403 });
+		}
 	}
 
 	try {
@@ -51,7 +58,7 @@ export const POST: RequestHandler = async (event) => {
 	const auth = await authorize(cookies);
 
 	// Check enterprise license
-	if (!auth.isEnterprise) {
+	if (!auth.hasValidLicense) {
 		return json({ error: 'Enterprise license required' }, { status: 403 });
 	}
 

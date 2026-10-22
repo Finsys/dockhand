@@ -10,6 +10,8 @@
 	import { toast } from 'svelte-sonner';
 	import { onMount } from 'svelte';
 	import EnvironmentIcon from '$lib/components/EnvironmentIcon.svelte';
+	import { m } from '$lib/paraglide/messages.js';
+	import { splitAtName } from '$lib/i18n/split';
 
 	interface RunningStackInfo {
 		envId: number;
@@ -127,7 +129,7 @@
 	);
 
 	const defaultEnv = $derived(environments.find(e => e.id === defaultEnvId));
-	const defaultEnvName = $derived(defaultEnv?.name || 'Select environment');
+	const defaultEnvName = $derived(defaultEnv?.name || m.backups_create_select_environment());
 
 	function isSelected(composePath: string): boolean {
 		return stackSelections.has(composePath);
@@ -220,7 +222,7 @@
 				if (!response.ok) {
 					// Add all stacks in this batch as failed
 					for (const stack of stacks) {
-						totalFailed.push({ name: stack.name, error: data.error || 'Failed to adopt' });
+						totalFailed.push({ name: stack.name, error: data.error || m.stacks_import_adopt_failed() });
 					}
 				} else {
 					// Track adopted stacks with their environment
@@ -232,10 +234,10 @@
 			}
 
 			if (totalAdopted.length > 0) {
-				toast.success(`Adopted ${totalAdopted.length} stack(s)`);
+				toast.success(m.stacks_import_adopted_count({ count: totalAdopted.length }));
 			}
 			if (totalFailed.length > 0) {
-				toast.error(`Failed to adopt ${totalFailed.length} stack(s)`);
+				toast.error(m.stacks_import_adopt_count_failed({ count: totalFailed.length }));
 			}
 
 			// Update the result to reflect adopted stacks
@@ -266,7 +268,7 @@
 			onAdopted?.();
 
 		} catch (err) {
-			toast.error('Failed to adopt stacks');
+			toast.error(m.stacks_import_adopt_stacks_failed());
 		} finally {
 			adopting = false;
 		}
@@ -278,10 +280,10 @@
 		<Dialog.Header>
 			<Dialog.Title class="flex items-center gap-2">
 				<Search class="w-5 h-5" />
-				External stack scan results
+				{m.settings_general_scan_title()}
 			</Dialog.Title>
 			<Dialog.Description>
-				Scanned {scannedPaths.length} configured path{scannedPaths.length !== 1 ? 's' : ''} for Docker Compose files
+				{m.settings_general_scan_description({ count: scannedPaths.length })}
 			</Dialog.Description>
 		</Dialog.Header>
 
@@ -292,30 +294,30 @@
 				<div class="flex items-center gap-4 p-3 rounded-lg bg-muted/50">
 					<div class="flex items-center gap-2">
 						<FolderOpen class="w-4 h-4 text-muted-foreground" />
-						<span class="text-sm font-medium">{result.discovered.length + result.skipped.length + adoptedStacks.length} found</span>
+						<span class="text-sm font-medium">{m.settings_general_scan_found({ count: result.discovered.length + result.skipped.length + adoptedStacks.length })}</span>
 					</div>
 					{#if result.discovered.length > 0}
 						<div class="flex items-center gap-1.5 text-blue-600 dark:text-blue-500">
 							<Import class="w-4 h-4" />
-							<span class="text-sm">{result.discovered.length} new</span>
+							<span class="text-sm">{m.settings_general_scan_new({ count: result.discovered.length })}</span>
 						</div>
 					{/if}
 					{#if adoptedStacks.length > 0}
 						<div class="flex items-center gap-1.5 text-green-600 dark:text-green-500">
 							<CheckCircle2 class="w-4 h-4" />
-							<span class="text-sm">{adoptedStacks.length} adopted</span>
+							<span class="text-sm">{m.settings_general_scan_adopted({ count: adoptedStacks.length })}</span>
 						</div>
 					{/if}
 					{#if result.skipped.length > 0}
 						<div class="flex items-center gap-1.5 text-muted-foreground">
 							<SkipForward class="w-4 h-4" />
-							<span class="text-sm">{result.skipped.length} already adopted</span>
+							<span class="text-sm">{m.settings_general_scan_already_adopted_count({ count: result.skipped.length })}</span>
 						</div>
 					{/if}
 					{#if result.errors.length > 0}
 						<div class="flex items-center gap-1.5 text-destructive">
 							<AlertCircle class="w-4 h-4" />
-							<span class="text-sm">{result.errors.length} errors</span>
+							<span class="text-sm">{m.settings_general_scan_errors_count({ count: result.errors.length })}</span>
 						</div>
 					{/if}
 				</div>
@@ -324,19 +326,19 @@
 				{#if result.discovered.length > 0}
 					{#if loadingEnvs}
 						<div class="flex items-center gap-3 p-3 rounded-lg border bg-muted/30">
-							<Label class="text-sm font-medium shrink-0">Adopt to:</Label>
+							<Label class="text-sm font-medium shrink-0">{m.settings_general_scan_adopt_to()}</Label>
 							<div class="flex items-center gap-2 text-muted-foreground">
 								<Loader2 class="w-4 h-4 animate-spin" />
-								<span class="text-sm">Loading...</span>
+								<span class="text-sm">{m.settings_general_scan_loading()}</span>
 							</div>
 						</div>
 					{:else if environments.length === 0}
 						<div class="flex items-center gap-3 p-3 rounded-lg border bg-muted/30">
-							<p class="text-sm text-destructive">No environments configured</p>
+							<p class="text-sm text-destructive">{m.dashboard_no_environments_title()}</p>
 						</div>
 					{:else if environments.length > 1}
 						<div class="flex items-center gap-3 p-3 rounded-lg border bg-muted/30">
-							<Label class="text-sm font-medium shrink-0">Adopt to:</Label>
+							<Label class="text-sm font-medium shrink-0">{m.settings_general_scan_adopt_to()}</Label>
 							<Select.Root
 								type="single"
 								value={defaultEnvId?.toString()}
@@ -362,7 +364,7 @@
 								</Select.Content>
 							</Select.Root>
 							<Button variant="outline" size="sm" onclick={applyDefaultEnvToAll} disabled={stackSelections.size === 0}>
-								Apply to all
+								{m.settings_general_scan_apply_to_all()}
 							</Button>
 						</div>
 					{/if}
@@ -377,7 +379,7 @@
 						<div class="flex items-center justify-between">
 							<h4 class="text-sm font-medium flex items-center gap-2 text-blue-600 dark:text-blue-500">
 								<Import class="w-4 h-4" />
-								Available for adoption
+								{m.settings_general_scan_available()}
 							</h4>
 							<button
 								type="button"
@@ -385,7 +387,7 @@
 								onclick={toggleAll}
 							>
 								<Checkbox checked={allSelected} indeterminate={someSelected} />
-								<span>{allSelected ? 'Deselect all' : 'Select all'}</span>
+								<span>{allSelected ? m.grid_deselect_all() : m.grid_select_all()}</span>
 							</button>
 						</div>
 						<div class="space-y-1.5">
@@ -419,13 +421,13 @@
 											{#if stack.unadoptable}
 												<Badge variant="outline" class="text-xs text-amber-600 dark:text-amber-500 border-amber-300 dark:border-amber-600 gap-1">
 													<Lock class="w-3 h-3" />
-													Not adoptable
+													{m.settings_general_scan_not_adoptable()}
 													<Tooltip.Root>
 														<Tooltip.Trigger>
 															<HelpCircle class="w-3 h-3 opacity-60" />
 														</Tooltip.Trigger>
 														<Tooltip.Content class="max-w-sm">
-															<p class="text-xs">A container in this stack is labelled <code class="bg-muted px-1 rounded">dockhand.adopt=false</code>, so Dockhand won't adopt it.</p>
+															<p class="text-xs">{splitAtName(m.settings_general_scan_not_adoptable_help)[0]}<code class="bg-muted px-1 rounded">dockhand.adopt=false</code>{splitAtName(m.settings_general_scan_not_adoptable_help)[1]}</p>
 														</Tooltip.Content>
 													</Tooltip.Root>
 												</Badge>
@@ -433,13 +435,13 @@
 											{#if stack.runningOn && stack.runningOn.length > 0}
 												<Badge variant="outline" class="text-xs text-green-600 dark:text-green-500 border-green-300 dark:border-green-600 gap-1">
 													<Play class="w-3 h-3" />
-													Running on {stack.runningOn.map(r => r.envName).join(', ')}
+													{m.settings_general_scan_running_on({ envs: stack.runningOn.map(r => r.envName).join(', ') })}
 													<Tooltip.Root>
 														<Tooltip.Trigger>
 															<HelpCircle class="w-3 h-3 opacity-60" />
 														</Tooltip.Trigger>
 														<Tooltip.Content class="max-w-sm">
-															<p class="text-xs">This stack is already running (detected via Docker's <code class="bg-muted px-1 rounded">com.docker.compose.project</code> label). Adopting will allow you to manage it through Dockhand.</p>
+															<p class="text-xs">{splitAtName(m.settings_general_scan_running_help)[0]}<code class="bg-muted px-1 rounded">com.docker.compose.project</code>{splitAtName(m.settings_general_scan_running_help)[1]}</p>
 														</Tooltip.Content>
 													</Tooltip.Root>
 												</Badge>
@@ -449,7 +451,7 @@
 										{#if stack.envPath}
 											<p class="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
 												<FileText class="w-3 h-3" />
-												.env file detected
+												{m.settings_general_scan_env_file_detected()}
 											</p>
 										{/if}
 									</button>
@@ -459,13 +461,13 @@
 											<!-- Note if importing to different environment than running -->
 											{#if stack.runningOn && stack.runningOn.length > 0 && !stack.runningOn.some(r => r.envId === stackEnvId)}
 												<Badge variant="outline" class="text-xs text-amber-600 dark:text-amber-500 border-amber-300 dark:border-amber-600 gap-1">
-													Running elsewhere
+													{m.settings_general_scan_running_elsewhere()}
 													<Tooltip.Root>
 														<Tooltip.Trigger>
 															<HelpCircle class="w-3 h-3 opacity-60" />
 														</Tooltip.Trigger>
 														<Tooltip.Content class="max-w-sm">
-															<p class="text-xs">This stack is running on a different environment ({stack.runningOn?.map(r => r.envName).join(', ')}). You can still adopt it here, but it won't affect the running containers.</p>
+															<p class="text-xs">{m.settings_general_scan_running_elsewhere_help({ envs: stack.runningOn?.map(r => r.envName).join(', ') ?? '' })}</p>
 														</Tooltip.Content>
 													</Tooltip.Root>
 												</Badge>
@@ -482,7 +484,7 @@
 														{@const stackEnv = getStackEnv(stack.composePath)}
 														<EnvironmentIcon icon={stackEnv?.icon || 'globe'} envId={stackEnv?.id || 0} class="w-3.5 h-3.5 mr-1.5 shrink-0" />
 													{/if}
-													<span class="truncate">{getStackEnv(stack.composePath)?.name || 'Select'}</span>
+													<span class="truncate">{getStackEnv(stack.composePath)?.name || m.settings_general_scan_select()}</span>
 												</Select.Trigger>
 												<Select.Content>
 													{#each environments as env}
@@ -508,7 +510,7 @@
 					<div class="space-y-2">
 						<h4 class="text-sm font-medium flex items-center gap-2 text-green-600 dark:text-green-500">
 							<CheckCircle2 class="w-4 h-4" />
-							Adopted stacks
+							{m.settings_general_scan_adopted_stacks()}
 						</h4>
 						<div class="space-y-1.5">
 							{#each adoptedStacks as adopted}
@@ -533,7 +535,7 @@
 					<div class="space-y-2">
 						<h4 class="text-sm font-medium flex items-center gap-2 text-muted-foreground">
 							<SkipForward class="w-4 h-4" />
-							Already adopted
+							{m.settings_general_scan_already_adopted()}
 						</h4>
 						<div class="space-y-1.5">
 							{#each result.skipped as stack}
@@ -554,7 +556,7 @@
 					<div class="space-y-2">
 						<h4 class="text-sm font-medium flex items-center gap-2 text-destructive">
 							<AlertCircle class="w-4 h-4" />
-							Errors
+							{m.settings_general_scan_errors()}
 						</h4>
 						<div class="space-y-1.5">
 							{#each result.errors as error}
@@ -574,14 +576,14 @@
 				{#if result.discovered.length === 0 && result.skipped.length === 0 && result.adopted.length === 0 && result.errors.length === 0}
 					<div class="text-center py-8 text-muted-foreground">
 						<FolderOpen class="w-12 h-12 mx-auto mb-3 opacity-50" />
-						<p class="text-sm">No Docker Compose files found in the configured paths.</p>
-						<p class="text-xs mt-1">Make sure your paths contain compose.yaml, compose.yml, or similar files.</p>
+						<p class="text-sm">{m.settings_general_scan_no_results()}</p>
+						<p class="text-xs mt-1">{m.settings_general_scan_no_results_hint()}</p>
 					</div>
 				{/if}
 
 				<!-- Scanned paths -->
 				<div class="space-y-2 pt-2 border-t">
-					<h4 class="text-xs font-medium text-muted-foreground uppercase tracking-wide">Scanned paths</h4>
+					<h4 class="text-xs font-medium text-muted-foreground uppercase tracking-wide">{m.settings_general_scan_scanned_paths()}</h4>
 					<div class="space-y-1">
 						{#each scannedPaths as path}
 							<code class="text-xs text-muted-foreground block">{path}</code>
@@ -594,11 +596,11 @@
 		<Dialog.Footer class="flex items-center justify-between">
 			<div class="text-xs text-muted-foreground">
 				{#if selectedCount > 0}
-					{selectedCount} stack{selectedCount !== 1 ? 's' : ''} selected
+					{m.settings_general_scan_selected_count({ count: selectedCount })}
 				{/if}
 			</div>
 			<div class="flex items-center gap-2">
-				<Button variant="outline" onclick={() => { open = false; onclose(); }}>Close</Button>
+				<Button variant="outline" onclick={() => { open = false; onclose(); }}>{m.ui_close()}</Button>
 				{#if result && result.discovered.length > 0}
 					<Button
 						onclick={handleAdopt}
@@ -606,14 +608,14 @@
 					>
 						{#if adopting}
 							<Loader2 class="w-4 h-4 mr-2 animate-spin" />
-							Adopting...
+							{m.stacks_import_adopting()}
 						{:else}
 							<Import class="w-4 h-4" />
-							Adopt selected
+							{m.settings_general_scan_adopt_selected()}
 						{/if}
 					</Button>
 				{:else if adoptedStacks.length > 0}
-					<Button href="/stacks">View stacks</Button>
+					<Button href="/stacks">{m.settings_general_scan_view_stacks()}</Button>
 				{/if}
 			</div>
 		</Dialog.Footer>

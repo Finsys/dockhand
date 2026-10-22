@@ -19,27 +19,35 @@ import { computeAuditDiff } from '$lib/utils/diff';
 import { invalidateTokenCacheForUser } from '$lib/server/api-tokens';
 
 // GET /api/users/[id] - Get a specific user
-// Free for all - local users are needed for basic auth
 /**
  * @openapi
  * summary: Get a single user by id (password hash is never returned; isAdmin is derived from role assignment)
+ * description: Requires users:view, except for one's own record. The payload names the account, its email, whether it holds the Admin role and whether MFA is set up.
  * path: id:integer! Numeric id of the user (from GET /api/users)
  * resp-200: {id:integer!, username:string!, email:string, displayName:string, mfaEnabled:boolean!, isAdmin:boolean!, isActive:boolean!, lastLogin:string, createdAt:string!, updatedAt:string!}
  * resp-400: User id is required
  * resp-401: Authentication required (auth is enabled and the caller is not authenticated)
+ * resp-403: Permission denied (missing users:view, reading another user's record)
  * resp-404: User not found
  * resp-500: Failed to read the user
  */
 export const GET: RequestHandler = async ({ params, cookies }) => {
 	const auth = await authorize(cookies);
 
-	// When auth is enabled, require authentication (any authenticated user can view)
 	if (auth.authEnabled && !auth.isAuthenticated) {
 		return json({ error: 'Authentication required' }, { status: 401 });
 	}
 
 	if (!params.id) {
 		return json({ error: 'User ID is required' }, { status: 400 });
+	}
+
+	// Ids are sequential, so leaving this open would rebuild the whole directory a
+	// loop at a time - and this record says more than the list does, down to who has
+	// no MFA. Reading one's own record needs no permission.
+	if (Number(params.id) !== auth.user?.id) {
+		const denied = await auth.requirePermission('users', 'view');
+		if (denied) return denied;
 	}
 
 	try {

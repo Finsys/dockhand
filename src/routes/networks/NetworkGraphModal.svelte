@@ -7,6 +7,7 @@
 	import { ErrorDialog } from "$lib/components/ui/error-dialog";
 	import NetworkGraphViewer from "./NetworkGraphViewer.svelte";
 	import type { NetworkInfo } from "$lib/types";
+	import { m } from "$lib/paraglide/messages.js";
 
 
 	interface Props {
@@ -105,8 +106,8 @@
 							<Layers class="w-4 h-4 text-zinc-600 dark:text-zinc-300" />
 						</div>
 						<div>
-							<Dialog.Title class="text-sm font-semibold text-zinc-800 dark:text-zinc-100">View network graph</Dialog.Title>
-							<Dialog.Description class="text-xs text-zinc-500 dark:text-zinc-400">View network connections between containers</Dialog.Description>
+							<Dialog.Title class="text-sm font-semibold text-zinc-800 dark:text-zinc-100">{m.networks_graph_modal_title()}</Dialog.Title>
+							<Dialog.Description class="text-xs text-zinc-500 dark:text-zinc-400">{m.networks_graph_modal_description()}</Dialog.Description>
 						</div>
 					</div>
 				</div>
