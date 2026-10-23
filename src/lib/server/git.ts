@@ -1435,7 +1435,8 @@ export async function deployGitStack(
 		// a recorder error must never change the notify/return workflow below. Skip the
 		// benign "Sync already in progress" overlap -- it's a concurrency skip, not a
 		// deploy failure, and recording it would clutter history with false failures.
-		if (!(syncResult.error ?? '').includes('Sync already in progress')) {
+		const isConcurrentSync = (syncResult.error ?? '').includes('Sync already in progress');
+		if (!isConcurrentSync) {
 			try {
 				const failRecorder = await createRunRecorder({
 					stackName: gitStack.stackName,
@@ -1452,8 +1453,8 @@ export async function deployGitStack(
 			} catch (e) {
 				console.error(`${logPrefix} Failed to record git sync failure:`, e);
 			}
+			await notifyGitSync(gitStack.stackName, gitStack.environmentId, failResult);
 		}
-		await notifyGitSync(gitStack.stackName, gitStack.environmentId, failResult);
 		return failResult;
 	}
 
