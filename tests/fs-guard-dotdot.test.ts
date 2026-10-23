@@ -4,7 +4,7 @@
  * as in the Dockhand image) must be refused like /etc/passwd itself.
  */
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
-import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync, rmSync, realpathSync, openSync, closeSync, unlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync, rmSync, realpathSync, openSync, closeSync, unlinkSync, accessSync, constants } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { isProtectedPath, isForbiddenStackPath, holdsForbiddenStackPath } from '../src/lib/server/fs-guard';
@@ -236,7 +236,10 @@ describe('isForbiddenStackPath - the narrower rule for stack paths', () => {
 	});
 
 	test('stacks under /etc or /root are allowed, unlike in the file browser', () => {
-		for (const p of ['/root/docker/app/compose.yaml', '/etc/compose/app/compose.yml']) {
+		// An unreadable /root (a non-root runner) fails closed, so only judge it when it can be walked.
+		const walkable = (dir: string) => { try { accessSync(dir, constants.X_OK); return true; } catch { return false; } };
+		const paths = ['/etc/compose/app/compose.yml', ...(walkable('/root') ? ['/root/docker/app/compose.yaml'] : [])];
+		for (const p of paths) {
 			expect(isForbiddenStackPath(p)).toBe(false);
 			expect(isProtectedPath(p)).toBe(true);
 		}
