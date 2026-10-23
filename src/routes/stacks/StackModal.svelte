@@ -1549,12 +1549,19 @@
 			const envId = $currentEnvironment?.id ?? null;
 			// Use 'new' as placeholder stack name for new stacks
 			const stackNameForValidation = mode === 'edit' ? stackName : (newStackName.trim() || 'new');
-			// Pass current UI env vars for validation
+			// Pass current UI env vars and values for validation
 			const currentVars = envVars.filter(v => v.key.trim()).map(v => v.key.trim());
+			const currentEnvValues: Record<string, string> = {};
+			for (const v of envVars) {
+				const k = v.key.trim();
+				if (k && v.value) {
+					currentEnvValues[k] = v.value;
+				}
+			}
 			const response = await fetch(appendEnvParam(`/api/stacks/${encodeURIComponent(stackNameForValidation)}/env/validate`, envId), {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ compose: content, variables: currentVars })
+				body: JSON.stringify({ compose: content, variables: currentVars, envValues: currentEnvValues })
 			});
 
 			if (response.ok) {

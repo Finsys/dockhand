@@ -66,7 +66,7 @@ import { sendEventNotification } from './notifications';
 import { deleteGitStackFiles, parseEnvFileContent } from './git';
 import { isDeletableStackDir } from './stack-delete-guard';
 import { cleanPem } from '$lib/utils/pem';
-import { quoteForEnvFile } from '$lib/utils/env-file-values';
+import { quoteForEnvFile, parseEnvFileForForm } from '$lib/utils/env-file-values';
 import { rewriteComposeVolumePaths, getHostDataDir } from './host-path';
 import { compareContainerOrder } from './container-labels';
 import { stackLabelTags, type LabelTagSpec } from '$lib/utils/tags-core';
@@ -702,6 +702,70 @@ export async function countStackEnvVars(stackName: string, envId?: number | null
 	} catch {
 		return 0;
 	}
+}
+
+/**
+ * Load all environment variables (file non-secrets + DB secrets) for a stack.
+ * Shared between GET /api/stacks/[name]/env and POST /api/stacks/[name]/env/validate.
+ */
+export async function loadStackVariables(
+	stackName: string,
+	envId?: number | null
+): Promise<{ variables: { key: string; value: string; isSecret: boolean }[]; error?: string; status?: number }> {
+	// Get secrets from database (masked - values show as '***')
+	const dbSecrets = await getStackEnvVars(stackName, envId, true);
+
+	// Check if this stack has a custom compose path configured
+	const source = await getStackSource(stackName, envId);
+
+	let envFilePath: string | null = null;
+
+	if (source?.envPath === '') {
+		envFilePath = null;
+	} else if (source?.envPath) {
+		envFilePath = source.envPath;
+	} else if (source?.composePath) {
+		envFilePath = join(dirname(source.composePath), '.env');
+	} else {
+		const stackDir = await findStackDir(stackName, envId);
+		if (stackDir) {
+			envFilePath = join(stackDir, '.env');
+		}
+	}
+
+	const variables: { key: string; value: string; isSecret: boolean }[] = [];
+
+	if (source?.sourceType === 'git') {
+		// Git stacks: ALL vars (overrides + secrets) come from DB
+		for (const dbVar of dbSecrets) {
+			variables.push({ key: dbVar.key, value: dbVar.value, isSecret: dbVar.isSecret });
+		}
+	} else {
+		// Internal/adopted stacks: non-secrets from file, secrets from DB
+		// The stored path is client-chosen; never read or write a protected location through it.
+		if (envFilePath && isForbiddenStackPath(envFilePath)) {
+			return { variables: [], error: 'Env file path is not allowed', status: 403 };
+		}
+		if (envFilePath && existsSync(envFilePath)) {
+			try {
+				const content = readFileSync(envFilePath, 'utf-8');
+				for (const { key, value } of parseEnvFileForForm(content)) {
+					variables.push({ key, value, isSecret: false });
+				}
+			} catch {
+				// Ignore file read errors
+			}
+		}
+
+		// Secrets come from the database (never written to file)
+		for (const secret of dbSecrets) {
+			if (secret.isSecret) {
+				variables.push({ key: secret.key, value: secret.value, isSecret: true });
+			}
+		}
+	}
+
+	return { variables };
 }
 
 /** Fall back to the default layout when STACKS_DIR cannot safely be used. */

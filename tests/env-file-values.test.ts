@@ -551,7 +551,7 @@ describe('parseEnvFileForForm is the one reader', () => {
 		// is checked is that each one CALLS it and that no line in it slices a value out of
 		// the text itself.
 		const callers = [
-			'../src/routes/api/stacks/[name]/env/+server.ts',
+			'../src/lib/server/stacks.ts',
 			'../src/routes/api/stacks/[name]/relocate/+server.ts',
 			'../src/routes/stacks/StackModal.svelte',
 			'../src/lib/server/git.ts'
