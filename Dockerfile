@@ -67,12 +67,10 @@ RUN apko build apko.yaml dockhand-base:latest output.tar \
 # -----------------------------------------------------------------------------
 # Stage 2: Application Builder (pure Node.js)
 # -----------------------------------------------------------------------------
-# Pinned to node 24.18.1 (the exact node v1.0.40 shipped with). node 24.19.0 has a napi
-# teardown bug that crashes the better-sqlite3 native addon during `npm run build`
-# (Statement::~Statement -> Assert(env != nullptr), exit 134). The `24-slim` moving tag
-# picked up 24.19.0, and once the build cache was pruned every build recompiled the addon
-# on the broken node. Pinning the digest restores the known-good v1.0.40 toolchain.
-FROM --platform=$TARGETPLATFORM node:24.18.1-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7 AS app-builder
+# Pinned by digest. Node 24.19.0 - 24.21.x abort the better-sqlite3 addon
+# (Assert(env != nullptr), exit 134, an upstream napi regression); 24.22.x carries the fix.
+# Keep every Dockerfile on the same version.
+FROM --platform=$TARGETPLATFORM node:24.22.1-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205 AS app-builder
 
 WORKDIR /app
 
