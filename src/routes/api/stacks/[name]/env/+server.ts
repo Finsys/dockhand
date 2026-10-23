@@ -1,12 +1,8 @@
 import { json } from '@sveltejs/kit';
 import { isValidStackName } from '$lib/server/stack-name-guard';
-import { getStackEnvVars, setStackEnvVars, getStackSource, getStackInjectedSecretKeys, getSecretProviderById } from '$lib/server/db';
-import { findStackDir } from '$lib/server/stacks';
+import { setStackEnvVars, getStackSource, getStackInjectedSecretKeys, getSecretProviderById } from '$lib/server/db';
+import { loadStackVariables } from '$lib/server/stacks';
 import { authorize } from '$lib/server/authorize';
-import { existsSync, readFileSync } from 'node:fs';
-import { isForbiddenStackPath } from '$lib/server/fs-guard';
-import { join, dirname } from 'node:path';
-import { parseEnvFileForForm } from '$lib/utils/env-file-values';
 import type { RequestHandler } from './$types';
 
 /**
@@ -51,63 +47,12 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 			return json({ error: 'Invalid stack name' }, { status: 400 });
 		}
 
-		// Get secrets from database (masked - values show as '***')
-		const dbSecrets = await getStackEnvVars(stackName, envIdNum, true);
-
-		// Check if this stack has a custom compose path configured
+		const loaded = await loadStackVariables(stackName, envIdNum);
+		if (loaded.error) {
+			return json({ error: loaded.error }, { status: loaded.status || 500 });
+		}
+		const variables = loaded.variables;
 		const source = await getStackSource(stackName, envIdNum);
-
-		// Determine the env file path based on path resolution rules:
-		// - envPath = '' (empty string) → explicitly no env file
-		// - envPath = '/path/.env' → use custom path
-		// - envPath = null with composePath → .env next to compose
-		// - envPath = null without composePath → use default location
-		let envFilePath: string | null = null;
-
-		if (source?.envPath === '') {
-			envFilePath = null;
-		} else if (source?.envPath) {
-			envFilePath = source.envPath;
-		} else if (source?.composePath) {
-			envFilePath = join(dirname(source.composePath), '.env');
-		} else {
-			const stackDir = await findStackDir(stackName, envIdNum);
-			if (stackDir) {
-				envFilePath = join(stackDir, '.env');
-			}
-		}
-
-		const variables: { key: string; value: string; isSecret: boolean }[] = [];
-
-		if (source?.sourceType === 'git') {
-			// Git stacks: ALL vars (overrides + secrets) come from DB
-			for (const dbVar of dbSecrets) {
-				variables.push({ key: dbVar.key, value: dbVar.value, isSecret: dbVar.isSecret });
-			}
-		} else {
-			// Internal/adopted stacks: non-secrets from file, secrets from DB
-			// The stored path is client-chosen; never read or write a protected location through it.
-			if (envFilePath && isForbiddenStackPath(envFilePath)) {
-				return json({ error: 'Env file path is not allowed' }, { status: 403 });
-			}
-			if (envFilePath && existsSync(envFilePath)) {
-				try {
-					const content = readFileSync(envFilePath, 'utf-8');
-					for (const { key, value } of parseEnvFileForForm(content)) {
-						variables.push({ key, value, isSecret: false });
-					}
-				} catch {
-					// Ignore file read errors
-				}
-			}
-
-			// Secrets come from the database (never written to file)
-			for (const secret of dbSecrets) {
-				if (secret.isSecret) {
-					variables.push({ key: secret.key, value: secret.value, isSecret: true });
-				}
-			}
-		}
 
 		// Provider-injected key NAMES from the last deploy (no values) + the bound
 		// provider's type/name, so the UI can show "these were loaded from <provider>".

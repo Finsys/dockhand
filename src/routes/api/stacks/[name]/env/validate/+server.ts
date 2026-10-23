@@ -1,94 +1,9 @@
 import { json } from '@sveltejs/kit';
 import { isValidStackName } from '$lib/server/stack-name-guard';
-import { getStackEnvVars } from '$lib/server/db';
-import { getStackComposeFile } from '$lib/server/stacks';
+import { getStackComposeFile, loadStackVariables } from '$lib/server/stacks';
 import { authorize } from '$lib/server/authorize';
+import { validateStackEnvVars, type EnvValidationResult } from '$lib/server/env-parser';
 import type { RequestHandler } from './$types';
-
-interface ValidationResult {
-	valid: boolean;
-	required: string[];
-	optional: string[];
-	defined: string[];
-	missing: string[];
-	unused: string[];
-}
-
-/** Docker and Compose built-in env vars consumed implicitly at runtime (not via ${} interpolation) */
-const DOCKER_COMPOSE_BUILTIN_VARS = new Set([
-	// Docker Compose
-	'COMPOSE_PROJECT_NAME', 'COMPOSE_FILE', 'COMPOSE_PROFILES',
-	'COMPOSE_CONVERT_WINDOWS_PATHS', 'COMPOSE_PATH_SEPARATOR',
-	'COMPOSE_IGNORE_ORPHANS', 'COMPOSE_REMOVE_ORPHANS',
-	'COMPOSE_PARALLEL_LIMIT', 'COMPOSE_ANSI', 'COMPOSE_STATUS_STDOUT',
-	'COMPOSE_ENV_FILES', 'COMPOSE_DISABLE_ENV_FILE', 'COMPOSE_MENU',
-	'COMPOSE_EXPERIMENTAL', 'COMPOSE_PROGRESS',
-	// Docker CLI
-	'DOCKER_API_VERSION', 'DOCKER_CERT_PATH', 'DOCKER_CONFIG',
-	'DOCKER_CONTEXT', 'DOCKER_CUSTOM_HEADERS', 'DOCKER_DEFAULT_PLATFORM',
-	'DOCKER_HIDE_LEGACY_COMMANDS', 'DOCKER_HOST', 'DOCKER_TLS',
-	'DOCKER_TLS_VERIFY', 'BUILDKIT_PROGRESS', 'NO_COLOR',
-]);
-
-/**
- * Extract environment variables from compose YAML content.
- * Matches ${VAR_NAME} and ${VAR_NAME:-default} patterns.
- * Ignores variables in commented lines (lines starting with #).
- * Ignores escaped $$ (Docker Compose escape syntax for literal $).
- * Returns { required: [...], optional: [...] }
- */
-function extractComposeVars(yaml: string): { required: string[]; optional: string[] } {
-	const required: string[] = [];
-	const optional: string[] = [];
-
-	// Process line by line to skip commented lines
-	const lines = yaml.split('\n');
-	for (const line of lines) {
-		// Skip lines that are comments (start with # after optional whitespace)
-		const trimmedLine = line.trim();
-		if (trimmedLine.startsWith('#')) {
-			continue;
-		}
-
-		// Match ${VAR_NAME} (required) and ${VAR_NAME:-default} or ${VAR_NAME-default} (optional)
-		// Use negative lookbehind (?<!\$) to skip escaped $$ (Docker Compose escape syntax)
-		const regex = /(?<!\$)\$\{([A-Za-z_][A-Za-z0-9_]*)(?:(:-?)[^}]*)?\}/g;
-		let match;
-
-		while ((match = regex.exec(line)) !== null) {
-			const varName = match[1];
-			const hasDefault = match[2] !== undefined;
-
-			if (hasDefault) {
-				if (!optional.includes(varName) && !required.includes(varName)) {
-					optional.push(varName);
-				}
-			} else {
-				// Move from optional to required if we find a non-default usage
-				const optIdx = optional.indexOf(varName);
-				if (optIdx !== -1) {
-					optional.splice(optIdx, 1);
-				}
-				if (!required.includes(varName)) {
-					required.push(varName);
-				}
-			}
-		}
-
-		// Also match $VAR_NAME (simple variable substitution)
-		// Use negative lookbehind (?<!\$) to skip escaped $$
-		// Also require $ to not be preceded by an alphanumeric char (avoids matching inside values like "1$abc")
-		const simpleRegex = /(?<![A-Za-z0-9\$])\$([A-Za-z_][A-Za-z0-9_]*)(?![{A-Za-z0-9_])/g;
-		while ((match = simpleRegex.exec(line)) !== null) {
-			const varName = match[1];
-			if (!required.includes(varName) && !optional.includes(varName)) {
-				required.push(varName);
-			}
-		}
-	}
-
-	return { required: required.sort(), optional: optional.sort() };
-}
 
 /**
  * POST /api/stacks/[name]/env/validate?env=X
@@ -97,7 +12,7 @@ function extractComposeVars(yaml: string): { required: string[]; optional: strin
  * summary: Validate a stack's defined environment variables against the variables required/optional by its compose file (compose content and the defined variable list may be supplied in the body, otherwise loaded from the saved file/DB)
  * path: name:string! Stack name (from GET /api/stacks)
  * query: env:integer Environment ID the stack belongs to (from GET /api/environments)
- * body: {compose:string, variables:array<string>}
+ * body: {compose:string, variables:array<string>, envValues:object}
  * body-example: {"compose":"services:\n  web:\n    image: ${IMAGE}","variables":["IMAGE"]}
  * resp-200: {valid:boolean!, required:array<string>!, optional:array<string>!, defined:array<string>!, missing:array<string>!, unused:array<string>!}
  * resp-200-example: {"valid":false,"required":["IMAGE"],"optional":[],"defined":[],"missing":["IMAGE"],"unused":[]}
@@ -129,8 +44,9 @@ export const POST: RequestHandler = async ({ params, url, cookies, request }) =>
 		let composeContent: string | null = null;
 		let providedVariables: string[] | null = null;
 
-		// Check if compose content and/or variables are provided in body
+		// Check if compose content, variables and/or env values are provided in body
 		const contentType = request.headers.get('content-type');
+		let providedEnvValues: Record<string, string> | null = null;
 		if (contentType?.includes('application/json')) {
 			try {
 				const body = await request.json();
@@ -140,6 +56,9 @@ export const POST: RequestHandler = async ({ params, url, cookies, request }) =>
 				// Accept variables from UI for validation (overrides DB lookup)
 				if (Array.isArray(body.variables)) {
 					providedVariables = body.variables.filter((v: unknown) => typeof v === 'string');
+				}
+				if (body.envValues && typeof body.envValues === 'object' && !Array.isArray(body.envValues)) {
+					providedEnvValues = body.envValues as Record<string, string>;
 				}
 			} catch {
 				// Ignore JSON parse errors - will try to load from file
@@ -160,33 +79,27 @@ export const POST: RequestHandler = async ({ params, url, cookies, request }) =>
 			return json({ error: 'No compose content provided and no saved compose file found' }, { status: 400 });
 		}
 
-		// Extract variables from compose
-		const { required, optional } = extractComposeVars(composeContent);
-
-		// Get defined variables - either from request body or database
+		// Get defined variables and values - either from request body or loaded stack env
 		let defined: string[];
+		let envValuesForValidation: Record<string, string> | string[] = [];
+
 		if (providedVariables !== null) {
 			// Use provided variables from UI
 			defined = providedVariables.sort();
+			if (providedEnvValues) {
+				envValuesForValidation = providedEnvValues;
+			}
 		} else {
-			// Fall back to database
-			const envVars = await getStackEnvVars(stackName, envIdNum, false);
-			defined = envVars.map(v => v.key).sort();
+			// Fall back to loading stack variables from DB + .env file
+			const loaded = await loadStackVariables(stackName, envIdNum);
+			if (loaded.error) {
+				return json({ error: loaded.error }, { status: loaded.status || 500 });
+			}
+			defined = loaded.variables.map(v => v.key).sort();
+			envValuesForValidation = loaded.variables.map(v => v.value);
 		}
 
-		// Calculate missing and unused. Built-in Docker/Compose vars are provided implicitly
-		// by the runtime, so they're never "missing" even if not in the user's env panel.
-		const missing = required.filter(v => !defined.includes(v) && !DOCKER_COMPOSE_BUILTIN_VARS.has(v));
-		const unused = defined.filter(v => !required.includes(v) && !optional.includes(v) && !DOCKER_COMPOSE_BUILTIN_VARS.has(v));
-
-		const result: ValidationResult = {
-			valid: missing.length === 0,
-			required,
-			optional,
-			defined,
-			missing,
-			unused
-		};
+		const result = validateStackEnvVars(composeContent, defined, envValuesForValidation);
 
 		return json(result);
 	} catch (error) {
