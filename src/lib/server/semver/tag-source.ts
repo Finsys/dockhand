@@ -1,7 +1,7 @@
 /**
  * List every version-looking tag an image's registry publishes, so the pure
  * `findNewerVersionTag` can pick the newest. Routes to the right fetch strategy
- * by host (Docker Hub API vs generic Registry v2), and caches each listing: 6 h for a
+ * by host (Docker Hub API vs generic Registry v2), and caches each listing: 1 h for a
  * complete list, 10 min for a partial or failed one (tag-source-core.ts).
  *
  * GHCR note: ghcr.io works through the generic v2 path here. GitHub's Packages
@@ -21,15 +21,15 @@ const tagCache = createTagCache();
  * the listings `tagListings` picks, each cached on its own. A partial listing returns the
  * tags it read; a failed one returns [], which the caller treats as nothing newer.
  */
-export async function listVersionTags(imageRef: string): Promise<string[]> {
+export async function listVersionTags(imageRef: string, listedAfter?: number): Promise<string[]> {
 	const { registry, repo, tag } = parseImageReference(imageRef);
 	const dockerHub = isDockerHub(registry);
 	const lists = await Promise.all(tagListings(registry, repo, tag, dockerHub).map(({ key, after }) =>
 		tagCache.get(key, async () => {
 			if (dockerHub) return fetchDockerHubTags(repo);
-			const credentials = await findRegistryCredentials(registry).catch(() => null);
+			const credentials = await findRegistryCredentials(registry, repo).catch(() => null);
 			return after ? fetchGenericV2TagsAfter(registry, repo, credentials, after) : fetchGenericV2Tags(registry, repo, credentials);
-		})
+		}, listedAfter)
 	));
 	return lists.length === 1 ? lists[0] : [...new Set(lists.flat())];
 }

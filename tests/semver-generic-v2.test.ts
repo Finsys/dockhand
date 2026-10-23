@@ -6,14 +6,20 @@ import { describe, it, expect, mock, beforeEach } from 'bun:test';
 
 // The strategy resolves auth through docker.ts's getRegistryAuthHeader; stub it so
 // the test never touches the network or the native docker module.
+const credentialLookups: string[][] = [];
 mock.module('../src/lib/server/docker', () => ({
 	getRegistryAuthHeader: async () => 'Bearer test-token',
-	findRegistryCredentials: async () => null
+	findRegistryCredentials: async (host: string, repo: string) => {
+		credentialLookups.push([host, repo]);
+		return null;
+	}
 }));
 
 const { fetchGenericV2Tags, fetchGenericV2TagsAfter } = await import('../src/lib/server/semver/strategies/generic-v2');
 const { tagListings, createTagCache } = await import('../src/lib/server/semver/tag-source-core');
 const { listVersionTags, __resetTagSourceCacheForTests } = await import('../src/lib/server/semver/tag-source');
+const { registryAuthCache } = await import('../src/lib/server/registry/auth-cache');
+const { checkNewerVersion } = await import('../src/lib/server/semver/check');
 
 function tagsResponse(tags: string[], nextPath?: string) {
 	return {
@@ -29,6 +35,22 @@ describe('fetchGenericV2Tags', () => {
 	it('returns a single page when there is no next link', async () => {
 		globalThis.fetch = mock(async () => tagsResponse(['1.0', '1.1'])) as unknown as typeof fetch;
 		expect(await fetchGenericV2Tags('codeberg.org', 'forgejo/forgejo')).toEqual({ tags: ['1.0', '1.1'], complete: true });
+	});
+
+	it('a 401 on the tag list drops the cached token it was sent with', async () => {
+		registryAuthCache.clear();
+		await registryAuthCache.get('k', async () => ({ header: 'Bearer test-token', ttlMs: 60_000 }));
+		globalThis.fetch = mock(async () => ({ ok: false, status: 401, headers: { get: () => null } })) as unknown as typeof fetch;
+		await fetchGenericV2Tags('codeberg.org', 'forgejo/forgejo');
+		expect(registryAuthCache.size()).toBe(0);
+	});
+
+	it('a 429 on the tag list keeps the cached token', async () => {
+		registryAuthCache.clear();
+		await registryAuthCache.get('k', async () => ({ header: 'Bearer test-token', ttlMs: 60_000 }));
+		globalThis.fetch = mock(async () => ({ ok: false, status: 429, headers: { get: () => null } })) as unknown as typeof fetch;
+		await fetchGenericV2Tags('codeberg.org', 'forgejo/forgejo');
+		expect(registryAuthCache.size()).toBe(1);
 	});
 
 	it('follows the Link header across pages and concatenates', async () => {
@@ -203,5 +225,32 @@ describe('listVersionTags merges the listings and shares the start listing acros
 		await listVersionTags('registry.example.com/team/app:v3.9.1');
 		expect(calls.filter((c) => !c.includes('last=')).length).toBe(1);
 		expect(calls.filter((c) => c.includes('last=')).length).toBe(2);
+	});
+
+	it('a start time after the cached listing lists the tags again', async () => {
+		const calls: string[] = [];
+		globalThis.fetch = mock(async (url: string) => (calls.push(String(url)), tagsResponse(['2.0']))) as unknown as typeof fetch;
+		await listVersionTags('registry.example.com/team/fresh:1.0');
+		const listed = calls.length;
+		await listVersionTags('registry.example.com/team/fresh:1.0');
+		expect(calls.length).toBe(listed);
+		await listVersionTags('registry.example.com/team/fresh:1.0', Date.now() + 1);
+		expect(calls.length).toBeGreaterThan(listed);
+	});
+
+	it('checkNewerVersion passes the start time on, so a manual check sees a tag released since the last listing', async () => {
+		let tags = ['1.0'];
+		globalThis.fetch = mock(async () => tagsResponse(tags)) as unknown as typeof fetch;
+		expect(await checkNewerVersion('registry.example.com/team/released:1.0')).toBeNull();
+		tags = ['1.0', '1.1'];
+		expect(await checkNewerVersion('registry.example.com/team/released:1.0')).toBeNull();
+		expect((await checkNewerVersion('registry.example.com/team/released:1.0', {}, undefined, [], undefined, Date.now() + 1))?.tag).toBe('1.1');
+	});
+
+	it('looks up credentials with the image repo, so an org-path registry entry can match', async () => {
+		credentialLookups.length = 0;
+		globalThis.fetch = mock(async () => tagsResponse(['2.0'])) as unknown as typeof fetch;
+		await listVersionTags('registry.example.com/team/app:1.0');
+		expect(credentialLookups[0]).toEqual(['registry.example.com', 'team/app']);
 	});
 });
