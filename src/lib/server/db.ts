@@ -6056,7 +6056,7 @@ export async function getPendingContainerUpdates(environmentId: number): Promise
 
 /**
  * Clear all pending container updates for an environment.
- * Called before checking for updates to ensure fresh state.
+ * Update checks call it once they have their results, right before saving them.
  */
 export async function clearPendingContainerUpdates(environmentId: number): Promise<void> {
 	await db.delete(pendingContainerUpdates)

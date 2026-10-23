@@ -22,6 +22,7 @@ import {
 	getPendingContainerUpdates
 } from '../../db';
 import { checkNewerVersion, type ImageCreatedAtProbe } from '../../semver/check';
+import { userCheckListedAfter } from '../../semver/tag-source-core';
 import { parseTag } from '../../semver/tag-parser';
 import { parseImageReference } from '../../registry/image-ref';
 import type { NewerVersion } from '../../semver/find-newer';
@@ -158,9 +159,6 @@ export async function runEnvUpdateCheckJob(
 	const pinnedByContainer = new Map<string, boolean>();
 		const semverByContainer = new Map<string, NewerVersion>();
 		const erroredIds = new Set<string>();
-
-		// Clear pending updates at the start - we'll re-add as we discover updates
-		await clearPendingContainerUpdates(environmentId);
 
 		// Get all containers in this environment, excluding ones hidden via
 		// dockhand.hidden=true (consistent with manual check-updates, #1083).
@@ -308,7 +306,9 @@ export async function runEnvUpdateCheckJob(
 						{ ...semverOptions, versionPattern, tagFilter: tagFilterFromLabels(inspectData.Config?.Labels), tagTransform: tagTransformFromLabels(inspectData.Config?.Labels) },
 						getTagArtifactKind,
 						result.localDigests ?? [],
-						staleCheck
+						staleCheck,
+						// Run now from Schedules lists afresh, like the containers page button.
+						triggeredBy === 'manual' ? userCheckListedAfter(startTime) : undefined
 					).catch(() => null);
 					if (newer) {
 						semverByContainer.set(container.id, newer);
@@ -348,6 +348,9 @@ export async function runEnvUpdateCheckJob(
 				}
 			};
 		});
+		// Replace the saved rows only now: while the run is going, and when it fails before
+		// this point, the environment keeps showing what the previous run found.
+		await clearPendingContainerUpdates(environmentId);
 		for (const row of withPreviousOnError(freshRows, previousRows, erroredIds)) {
 			await addPendingContainerUpdate(environmentId, row.containerId, row.containerName, row.imageName, row.options);
 		}
@@ -645,7 +648,7 @@ export async function runEnvUpdateCheckJob(
 			// Check-only mode: just send notification
 			await log('');
 			await log('Check-only mode - sending notification about available updates');
-			// Pending updates already added as we discovered them
+			// Pending rows were persisted above
 
 			await sendEventNotification('updates_detected', {
 				title: `Container updates available in ${env.name}`,

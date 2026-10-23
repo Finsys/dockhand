@@ -49,7 +49,9 @@ const noop = async () => {};
 // The saved pending rows: a clear really empties them, so reading after the clear finds nothing.
 let pendingStore: any[] = phase.includes('keep-on-error')
 	? [{ containerId: originalId, containerName: 'app', currentImage: image, hasImageUpdate: true, newerVersion: null, releaseAgeRemainingHours: null, pinnedToDigest: false }]
-	: [];
+	: phase.endsWith('-stale')
+		? [{ containerId: 'gone', containerName: 'gone', currentImage: image, hasImageUpdate: true, newerVersion: null, releaseAgeRemainingHours: null, pinnedToDigest: false }]
+		: [];
 const environment = { id: 1, name: 'test', connectionType: 'direct', protocol: 'http', host: 'daemon.test', port: 2375 };
 const db = {
 	setEnvSetting: noop, deleteSetting: noop,
@@ -61,7 +63,11 @@ const db = {
 	appendScheduleExecutionLog: async (_id: number, line: string) => { logs.push(line); }, saveVulnerabilityScan: noop, getCombinedScanForImage: async () => null,
 	getEnvUpdateCheckSettings: async () => ({ enabled: true, autoUpdate: true, vulnerabilityCriteria: 'never' }),
 	getGlobalSemverConfig: async () => ({ enabled: false }), getPinnedDigestReportEnabled: async () => true, clearPendingContainerUpdates: async () => { pendingStore = []; },
-	addPendingContainerUpdate: async (...args: any[]) => { pendingUpdates.push(args); }, removePendingContainerUpdate: async () => { removedPending++; }, removePendingContainerUpdateByName: async () => { removedPending++; }, getPendingContainerUpdates: async () => [...pendingStore]
+	addPendingContainerUpdate: async (...args: any[]) => {
+		pendingUpdates.push(args);
+		// Upsert into the saved rows too, so the order of clear and insert is observable.
+		pendingStore = [...pendingStore.filter(r => r.containerId !== args[1]), { containerId: args[1], containerName: args[2], currentImage: args[3], ...args[4] }];
+	}, removePendingContainerUpdate: async () => { removedPending++; }, removePendingContainerUpdateByName: async () => { removedPending++; }, getPendingContainerUpdates: async () => [...pendingStore]
 };
 mock.module(root + 'db', () => db);
 mock.module(root + 'hawser', () => ({ sendEdgeRequest: noop, sendEdgeStreamRequest: noop, isEdgeConnected: () => false }));
@@ -135,6 +141,8 @@ globalThis.fetch = (async (input: string | URL | Request, init: RequestInit = {}
 	}
 	if (phase === 'metadata-info-failure' && path === '/info') return new Response('{}', { status: 503 });
 	if (phase === 'multiarch-different' && path === '/info') return Response.json({ OSType: 'linux', Architecture: 'x86_64' });
+	// The environment cannot be listed: a check must fail without touching the saved updates.
+	if (phase.endsWith('-list') && path === '/containers/json') return Response.json({ message: 'daemon unreachable' }, { status: 500 });
 	if (path === '/containers/json') {
 		if (url.searchParams.has('filters')) return Response.json(systemd ? [{ Id: current.Id, Names: ['/app'], State: current.State.Running ? 'running' : 'exited' }] : []);
 		return Response.json([{ Id: current.Id, Names: ['/app'], Image: current.Config.Image, ImageID: current.Image, Labels: current.Config.Labels, State: 'exited', Status: 'Exited (0)' }]);
@@ -255,6 +263,32 @@ if (phase === 'metadata-info-failure') {
 	assert.equal(stalledSignal?.aborted, true);
 	assert.ok(progress.some(p => p.status === 'warning' && p.message.includes('could not be determined')));
 	assert.equal(pullReferences.length, 1, 'An advisory timeout must still pull');
+} else if (phase.endsWith('-stale')) {
+	// A row for a container that no longer exists is dropped by a check that completes.
+	if (phase.startsWith('env-')) {
+		const { runEnvUpdateCheckJob } = await import(root + 'scheduler/tasks/env-update-check');
+		await runEnvUpdateCheckJob(1, 'cron');
+	} else {
+		const { POST } = await import('../../src/routes/api/containers/check-updates/+server');
+		const response = await POST({ url: new URL('http://dockhand/api/containers/check-updates?env=1'), cookies: {}, request: new Request('http://dockhand', { method: 'POST', headers: { Accept: 'application/json' } }) } as any);
+		await response.text();
+	}
+	assert.deepEqual(pendingStore.map(r => [r.containerId, r.hasImageUpdate]), [[originalId, true]], 'A completed check must replace the saved rows with what it found: ' + JSON.stringify(pendingStore));
+} else if (phase.endsWith('-list')) {
+	// Listing the environment fails before anything is checked: the saved updates stay.
+	if (phase.startsWith('env-')) {
+		const { runEnvUpdateCheckJob } = await import(root + 'scheduler/tasks/env-update-check');
+		await runEnvUpdateCheckJob(1, 'cron');
+		assert.ok(executions.some(e => e.status === 'failed'), JSON.stringify(executions));
+	} else {
+		const { POST } = await import('../../src/routes/api/containers/check-updates/+server');
+		const response = await POST({ url: new URL('http://dockhand/api/containers/check-updates?env=1'), cookies: {}, request: new Request('http://dockhand', { method: 'POST', headers: { Accept: 'application/json' } }) } as any);
+		const body = await response.text();
+		assert.ok(/error|fail/i.test(body), 'The manual check must report the failure: ' + body);
+	}
+	assert.ok(calls.includes('GET /containers/json'), 'The listing must have been attempted: ' + calls.join(', '));
+	assert.equal(pendingStore.length, 1, 'A failed check must not clear the known updates: ' + JSON.stringify(pendingStore));
+	assert.equal(pendingStore[0].containerId, originalId);
 } else if (phase.includes('keep-on-error')) {
 	// The registry fails; the update already known for the container must survive.
 	if (phase.startsWith('env-keep-on-error')) {
@@ -305,19 +339,18 @@ if (phase === 'metadata-info-failure') {
 		assert.equal(indexReads(), 2, 'A transient index failure is read once more before it is reported');
 	} else if (phase === 'multiarch-different') {
 		// The current index plus each of the two local digests (both 404: not an index) is
-		// read once. The registry is authenticated once for the HEAD and once for all three
-		// index reads together.
+		// read once. The cached sign-in serves the HEAD and all three index reads.
 		const manifestGets = () => calls.filter(call => call.startsWith('GET /v2/team/app/manifests/')).length;
 		const challenges = () => calls.filter(call => call === 'GET /v2/').length;
 		assert.equal(result.hasUpdate, true, JSON.stringify(result));
 		assert.equal(result.error, undefined);
 		assert.equal(manifestGets(), 3);
-		assert.equal(challenges(), 2, 'One sign-in serves every index read of a check');
-		// Repeated: every read by digest, the 404s included, is reused; only the HEAD signs in.
+		assert.equal(challenges(), 1, 'One sign-in serves the HEAD and every index read of a check');
+		// Repeated: every read by digest, the 404s included, is reused, and so is the sign-in.
 		const again = await docker.checkImageUpdateAvailable(image, old, 1);
 		assert.equal(again.hasUpdate, true, JSON.stringify(again));
 		assert.equal(manifestGets(), 3, 'A repeated check must reuse every read by digest');
-		assert.equal(challenges(), 3, 'A check whose reads are all reused must not sign in for them');
+		assert.equal(challenges(), 1, 'A repeated check within the token lifetime must not sign in again');
 	} else {
 		assert.equal(result.hasUpdate, false, JSON.stringify(result));
 		assert.equal(result.error, undefined);

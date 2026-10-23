@@ -9,6 +9,7 @@ import { isSystemContainer, isPodmanInfraContainer } from '$lib/server/scheduler
 import { isUpdateDisabledByLabel, isHiddenByLabel, getVersionPatternOverride, digestUpdateVisible, pinnedDigestReportVisible, isCooldownSkippedByLabel, isDigestWatchDisabledByLabel } from '$lib/server/container-labels';
 import { createJobResponse } from '$lib/server/sse';
 import { checkNewerVersion, type ImageCreatedAtProbe } from '$lib/server/semver/check';
+import { userCheckListedAfter } from '$lib/server/semver/tag-source-core';
 import { parseTag } from '$lib/server/semver/tag-parser';
 import { tagFilterFromLabels } from '$lib/server/semver/tag-filter-labels';
 import { tagTransformFromLabels } from '$lib/server/semver/tag-transform';
@@ -104,12 +105,10 @@ export const POST: RequestHandler = async ({ url, cookies, request }) => {
 	}
 
 	return createJobResponse(async (send) => {
-		// Clear existing pending updates for this environment before checking, keeping
-		// them in hand so a container whose check fails retains what was known.
+		// A manual check reads tag lists listed during this check, or in the minute before it.
+		const listedAfter = userCheckListedAfter(Date.now());
+		// The saved rows, kept in hand so a container whose check fails retains what was known.
 		const previousRows = envIdNum ? await getPendingContainerUpdates(envIdNum).catch(() => []) : [];
-		if (envIdNum) {
-			await clearPendingContainerUpdates(envIdNum);
-		}
 
 		const allContainers = await listContainers(true, envIdNum);
 		// Skip:
@@ -208,7 +207,7 @@ export const POST: RequestHandler = async ({ url, cookies, request }) => {
 							versionPattern,
 							tagFilter: tagFilterFromLabels(inspectData.Config?.Labels),
 						tagTransform: tagTransformFromLabels(inspectData.Config?.Labels)
-						}, getTagArtifactKind, result.localDigests ?? [], staleCheck).catch(() => null)
+						}, getTagArtifactKind, result.localDigests ?? [], staleCheck, listedAfter).catch(() => null)
 					: null;
 
 				// Matches the scheduled check: the label suppresses the same-tag digest
@@ -265,6 +264,8 @@ export const POST: RequestHandler = async ({ url, cookies, request }) => {
 		// waiting without ever being offered for a bulk update.
 		if (envIdNum) {
 			const erroredIds = new Set(results.filter((r) => r.error).map((r) => r.containerId));
+			// Replace the saved rows only now, so a check that fails before this point leaves them as they were.
+			await clearPendingContainerUpdates(envIdNum);
 			for (const row of withPreviousOnError(rowsToPersist(results), previousRows, erroredIds)) {
 				await addPendingContainerUpdate(
 					envIdNum,
