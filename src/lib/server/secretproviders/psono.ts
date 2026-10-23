@@ -34,6 +34,8 @@ import {
 	isPsonoReference,
 	referenceValue,
 	keyPermissionWarning,
+	bulkTitleFilter,
+	secretTitle,
 	inspectedSecretIds,
 	type PsonoEncryptedSecret,
 	type PsonoKeyInspection
@@ -252,12 +254,15 @@ export const psonoProvider: SecretProvider<PsonoConfig> = {
 	/**
 	 * Every secret the API key grants, as env vars.
 	 *
-	 * The selector is ignored: a restricted key already defines the scope, and Psono
-	 * has no server-side folder filter for this access mode. A secret that cannot be
-	 * read or named is skipped with a warning rather than failing the deploy, but a
-	 * failure to reach the server at all propagates.
+	 * A restricted key already defines the scope, and Psono has no server-side folder
+	 * filter for this access mode, so the selector can only narrow the pull on the
+	 * client: `title:<name>[,<name>...]` keeps only the secrets with those TITLES (so one
+	 * key can carry many stacks' secrets without their variables colliding, and a title
+	 * that matches nothing fails the deploy); every other value, as before, keeps every
+	 * granted secret. A secret that cannot be read or named is skipped with a warning
+	 * rather than failing the deploy, but a failure to reach the server at all propagates.
 	 */
-	async resolveBulk(config: PsonoConfig): Promise<Record<string, string>> {
+	async resolveBulk(config: PsonoConfig, selector = ''): Promise<Record<string, string>> {
 		const res = await inspect(config);
 		if (!res.ok) throw new Error(res.error);
 		const ids = inspectedSecretIds(res.data);
@@ -284,6 +289,32 @@ export const psonoProvider: SecretProvider<PsonoConfig> = {
 			}
 			out[name] = value;
 		};
+		const titles = bulkTitleFilter(selector);
+		if (titles !== null) {
+			if (titles.length === 0) {
+				throw new Error(
+					'Psono: the selector "title:" names no secret - write title:<name>[,<name>...]'
+				);
+			}
+			const wanted = titles.map((t) => t.toLowerCase());
+			const found = new Set<string>();
+			const kept = decrypted.filter((e) => {
+				const t = e.d === null ? null : secretTitle(e.d);
+				if (t === null || !wanted.includes(t.toLowerCase())) return false;
+				found.add(t.toLowerCase());
+				return true;
+			});
+			// A stack that comes up without some of its secrets is worse than a failed
+			// deploy, so a title that matches nothing stops the deploy.
+			const missing = titles.filter((t) => !found.has(t.toLowerCase()));
+			if (missing.length > 0) {
+				throw new Error(
+					`Psono: no readable secret titled ${missing.map(safeKeyForLog).join(', ')} among the ${ids.length} this API key grants - check the title and that the secret is attached to the key`
+				);
+			}
+			decrypted.length = 0;
+			decrypted.push(...kept);
+		}
 		for (const { id, d } of decrypted) {
 			if (d === null) continue;
 			// An Environment Variables secret holds many key/value pairs - inject each.
