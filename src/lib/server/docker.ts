@@ -49,6 +49,9 @@ export { parseImageReference } from './registry/image-ref';
 import { rebaseEnvOntoImage, rebaseLabelsOntoImage, rebaseCommand, describeEnvRebase, describeLabelRebase, composeImageLabelForRecreate, composeImageLabelForm, COMPOSE_IMAGE_LABEL, type ImageEnvLabels } from './container-env-merge';
 import { encodeRegistryAuth, isSafeRegistryHost } from './registry-auth';
 import { registryAuthHeader } from './registry/auth-header';
+import { forgetRegistryAuth } from './registry/auth-cache';
+import { parseRegistryUrl, pickRegistryCredentials } from './registry/credential-match';
+export { parseRegistryUrl };
 import { describeRegistryFailure } from './registry-failure-core';
 import {
 	getRegistryBearerToken as registryBearerToken,
@@ -3273,8 +3276,8 @@ function logAuthDiagnostics(
 export async function buildRegistryAuthHeader(imageName: string): Promise<Record<string, string>> {
 	const headers: Record<string, string> = {};
 	try {
-		const { registry } = parseImageReference(imageName);
-		const creds = await findRegistryCredentials(registry);
+		const { registry, repo } = parseImageReference(imageName);
+		const creds = await findRegistryCredentials(registry, repo);
 		if (creds) {
 			// Docker Engine requires 'https://index.docker.io/v1/' as serveraddress
 			// for Docker Hub auth — just the hostname is treated as unauthenticated
@@ -3500,79 +3503,23 @@ export async function imageManifestDigest(id: string, envId?: number | null): Pr
 
 
 /**
- * Parse a registry URL into host and path components.
- * Handles URLs with or without protocol, and preserves organization paths.
- *
- * Examples:
- *   'https://registry.example.com/org' -> { host: 'registry.example.com', path: '/org', fullRegistry: 'registry.example.com/org' }
- *   'ghcr.io' -> { host: 'ghcr.io', path: '', fullRegistry: 'ghcr.io' }
- *   'registry.example.com:5000/myorg' -> { host: 'registry.example.com:5000', path: '/myorg', fullRegistry: 'registry.example.com:5000/myorg' }
+ * Find registry credentials from Dockhand's stored registries for an image's registry
+ * host and repo. Matching rules: pickRegistryCredentials (longest stored path wins).
  */
-export function parseRegistryUrl(url: string): { host: string; path: string; fullRegistry: string; protocol: string } {
-	// Detect protocol (default to https)
-	const protocol = url.startsWith('http://') ? 'http' : 'https';
-	// Remove protocol
-	const withoutProtocol = url.replace(/^https?:\/\//, '');
-	// Remove trailing slash
-	const trimmed = withoutProtocol.replace(/\/$/, '');
-	// Split on first slash (after port if present)
-	const slashIndex = trimmed.indexOf('/');
-	if (slashIndex === -1) {
-		return { host: trimmed, path: '', fullRegistry: trimmed, protocol };
-	}
-	const host = trimmed.substring(0, slashIndex);
-	const path = trimmed.substring(slashIndex); // includes leading /
-	return { host, path, fullRegistry: trimmed, protocol };
-}
-
-/**
- * Find registry credentials from Dockhand's stored registries.
- * Matches by registry URL including organization path if present.
- *
- * Matching logic:
- * - Full match: stored 'registry.example.com/org' matches requested 'registry.example.com/org'
- * - Host-only stored: stored 'registry.example.com' matches requested 'registry.example.com/org'
- *   (allows a single credential entry to work for all org paths)
- */
-export async function findRegistryCredentials(registryHost: string): Promise<{ username: string; password: string } | null> {
+export async function findRegistryCredentials(registryHost: string, repo: string): Promise<{ username: string; password: string } | null> {
 	try {
 		// Import here to avoid circular dependency
 		const { getRegistries } = await import('./db.js');
 		const registries = await getRegistries();
 
+		const picked = pickRegistryCredentials(registries, registryHost, repo, DOCKER_HUB_HOSTS);
+		if (picked) {
+			console.log(`[Registry] matched stored=${picked.registry.url} requested=${registryHost}/${repo} via=${picked.via}`);
+			// Older rows may hold untrimmed credentials
+			return { username: picked.registry.username!.trim(), password: picked.registry.password!.trim() };
+		}
+
 		const requested = parseRegistryUrl(registryHost);
-
-		for (const reg of registries) {
-			const stored = parseRegistryUrl(reg.url);
-
-			// Match if:
-			// 1. Full registry paths match exactly, OR
-			// 2. Hosts match and stored registry has no path (applies to any org)
-			if (stored.fullRegistry === requested.fullRegistry ||
-			    (stored.host === requested.host && !stored.path)) {
-				if (reg.username && reg.password) {
-					const via = stored.fullRegistry === requested.fullRegistry ? 'full' : 'host-only';
-					console.log(`[Registry] matched stored=${reg.url} requested=${registryHost} via=${via}`);
-					// Normalize legacy creds saved before #1105 trim fix
-					return { username: reg.username.trim(), password: reg.password.trim() };
-				}
-			}
-		}
-
-		// Bidirectional Docker Hub alias matching:
-		// If the requested host is any Docker Hub variant, match against any stored Docker Hub variant
-		if (DOCKER_HUB_HOSTS.has(requested.host)) {
-			for (const reg of registries) {
-				const stored = parseRegistryUrl(reg.url);
-				if (DOCKER_HUB_HOSTS.has(stored.host)) {
-					if (reg.username && reg.password) {
-						console.log(`[Registry] matched stored=${reg.url} requested=${registryHost} via=hub-alias`);
-						return { username: reg.username.trim(), password: reg.password.trim() };
-					}
-				}
-			}
-		}
-
 		// No stored credentials matched. This is NOT an error for public images —
 		// anonymous access still works; it just means no auth header is attached.
 		// (A Docker Hub entry configured without a username/password is anonymous,
@@ -3620,15 +3567,17 @@ async function getRegistryBearerToken(registry: string, repo: string, signal?: A
  * @param scope - Token scope (e.g., 'registry:catalog:*' or 'repository:user/repo:pull')
  * @param credentials - Optional credentials { username, password }
  * @param signal - Optional deadline for the challenge and token requests together
+ * @param cache - false to always ask the registry (callers that do not drop a rejected header)
  * @returns Authorization header value (e.g., 'Bearer xxx' or 'Basic xxx') or null
  */
 export async function getRegistryAuthHeader(
 	registryUrl: string,
 	scope: string,
 	credentials?: { username: string; password: string } | null,
-	signal?: AbortSignal
+	signal?: AbortSignal,
+	cache = true
 ): Promise<string | null> {
-	return registryAuthHeader(registryUrl, scope, credentials, { parseRegistryUrl, signal });
+	return registryAuthHeader(registryUrl, scope, credentials, { parseRegistryUrl, signal, cache });
 }
 
 /**
@@ -3654,7 +3603,8 @@ export async function getRegistryAuth(
 		? { username: registry.username, password: registry.password }
 		: null;
 
-	const authHeader = await getRegistryAuthHeader(registry.url, scope, credentials);
+	// Registry browsing makes few requests and does not drop a rejected header, so it skips the cache.
+	const authHeader = await getRegistryAuthHeader(registry.url, scope, credentials, undefined, false);
 
 	return { baseUrl, orgPath: parsed.path, authHeader };
 }
@@ -4008,6 +3958,7 @@ export async function getTagArtifactKind(
 		});
 		if (!res.ok) {
 			await drainResponse(res);
+			if (res.status === 401) forgetRegistryAuth(token, registry);
 			return { kind: 'image', digest: null };
 		}
 		const digest = res.headers.get('Docker-Content-Digest');

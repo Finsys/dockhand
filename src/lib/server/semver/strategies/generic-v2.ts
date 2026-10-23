@@ -9,6 +9,7 @@ import { getRegistryAuthHeader } from '../../docker';
 import { isSafeRegistryHost } from '../../registry-auth';
 import type { TagList } from '../tag-source-core';
 import { registryRequestSignal } from '../../registry/request-timeout';
+import { forgetRegistryAuth } from '../../registry/auth-cache';
 
 /** Pages read from each starting point; a guard against pathological repos. */
 const MAX_PAGES = 50;
@@ -48,7 +49,10 @@ async function readTags(registry: string, repo: string, credentials: { username:
 	for (let page = 0; page < MAX_PAGES && path; page++) {
 		const response = await fetch(`${base}${path}`, { headers, redirect: 'manual', signal: registryRequestSignal() });
 		// A redirect (never followed off the guarded host) or a 4xx/5xx ends the read.
-		if (!response.ok) return { tags, ok: false, cut: false, failedStatus: response.status, failedPage: page };
+		if (!response.ok) {
+			if (response.status === 401) forgetRegistryAuth(authHeader, registry);
+			return { tags, ok: false, cut: false, failedStatus: response.status, failedPage: page };
+		}
 		const data = (await response.json()) as TagsListResponse;
 		tags.push(...(data.tags ?? []));
 		path = nextPagePath(response.headers.get('link'));

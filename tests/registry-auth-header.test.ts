@@ -3,8 +3,12 @@
  * the header it produces, and that a registry which never answers either request
  * is cut off by the caller's deadline.
  */
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test, beforeEach } from 'bun:test';
 import { registryAuthHeader } from '../src/lib/server/registry/auth-header';
+import { registryAuthCache } from '../src/lib/server/registry/auth-cache';
+
+// The auth handshake is cached process-wide; each test starts from an empty cache.
+beforeEach(() => registryAuthCache.clear());
 
 const parseRegistryUrl = (url: string) => {
 	const m = url.match(/^(https?):\/\/([^/]+)/);
