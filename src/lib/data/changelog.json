@@ -1,8 +1,7 @@
 [
   {
     "version": "1.0.55",
-    "date": "",
-    "comingSoon": true,
+    "date": "2026-10-23",
     "changes": [
       { "type": "feature", "text": "start and stop a container on a schedule (#1178)" },
       { "type": "feature", "text": "the interface language is kept on the server, so it survives a browser that clears its data (#1795)" },
@@ -17,6 +16,7 @@
       { "type": "feature", "text": "Psono bulk pull and inline references now read Environment Variables secrets (#1784)" },
       { "type": "feature", "text": "decrypt a git stack's SOPS-encrypted env file with a new SOPS (age) secret provider (#386, PR#1781, @oha-4)" },
       { "type": "fix", "text": "update docker-compose to 5.6.0-r2 to pick up its CVE fixes" },
+      { "type": "fix", "text": "update Node.js to 24.22.1 to pick up its October 21, 2026 security fixes" },
       { "type": "feature", "text": "EXPORT_METRICS_PUBLIC makes /metrics endpoint public, off by default (#1698)" },
       { "type": "feature", "text": "-lsNNN and -rN tag bumps count as newer versions, with tag.transform and link.template labels (#1703)" },
       { "type": "feature", "text": "minimum image age visual improvements and dockhand.skip.cooldown label (#1725)" }
