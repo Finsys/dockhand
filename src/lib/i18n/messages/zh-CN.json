@@ -1293,6 +1293,7 @@
 	"containers_backup_no_schedules_stack": "此堆栈未配置备份计划。",
 	"containers_backup_new_schedule": "新建备份计划",
 	"containers_backup_edit_schedule": "编辑计划",
+	"containers_backup_on_schedule": "按计划运行",
 	"containers_backup_enabled": "已启用",
 	"containers_backup_stop_container_during": "备份期间停止容器",
 	"containers_backup_stop_stack_during": "备份期间停止堆栈",
@@ -1826,7 +1827,7 @@
 	"backupui_hawser_default_set_under": ",请在下方设置",
 	"backupui_hawser_default_after": "并重新打开此对话框。",
 	"backupui_backup_all_files": "备份所有文件（{count}）",
-	"backupui_captured_as_bind": "已在下方捕获为绑定挂载",
+	"backupui_captured_as_bind": "下方也作为绑定挂载",
 	"backupui_captured_as_volume": "已在下方捕获为数据卷",
 	"backupui_always_kept": "始终保留",
 	"backupui_helper_failed_title": "备份辅助程序无法在此环境上运行",
@@ -3148,6 +3149,21 @@
 			}
 		}
 	],
+	"images_list_toast_pruned_count": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "已清理 {count} 个镜像",
+				"countPlural=other": "已清理 {count} 个镜像"
+			}
+		}
+	],
 	"images_list_toast_no_dangling": "没有可清理的悬空镜像",
 	"images_list_toast_prune_failed": "清理镜像失败",
 	"images_list_toast_no_unused": "没有可清理的未使用镜像",
@@ -4137,6 +4153,7 @@
 	"backups_already_finishing": "备份已在收尾——它将正常完成。",
 	"backups_stop_failed": "停止备份失败",
 	"backups_load_failed": "加载备份失败",
+	"backups_diff_other_destination": "无法比较位于不同目标位置的快照",
 	"backups_log_title": "备份: {name}",
 	"backups_completed_with_warnings_for": "{name} 的备份已完成但有警告",
 	"backups_config_removed": "已移除 {name} 的备份配置",
@@ -5137,6 +5154,7 @@
 	"settings_envs_prune_mode_all_hint": "删除未被任何容器使用的所有镜像(更激进)",
 	"settings_envs_prune_last_pruned": "上次清理：{date}",
 	"settings_envs_prune_last_result": "已移除 {count} 个镜像,回收 {size}",
+	"settings_envs_prune_last_result_count": "已移除 {count} 个镜像",
 	"settings_envs_prune_in_use_note": "正在使用或已停止的容器正在使用的镜像永远不会被删除。",
 	"settings_envs_timezone": "时区",
 	"settings_envs_timezone_hint": "用于调度自动更新、Git 同步和镜像清理",

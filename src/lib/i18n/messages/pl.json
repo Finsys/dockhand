@@ -1335,6 +1335,7 @@
 	"containers_backup_no_schedules_stack": "Dla tego stacka nie skonfigurowano harmonogramów backupu.",
 	"containers_backup_new_schedule": "Nowy harmonogram backupu",
 	"containers_backup_edit_schedule": "Edytuj harmonogram",
+	"containers_backup_on_schedule": "Uruchamiaj według harmonogramu",
 	"containers_backup_enabled": "Włączony",
 	"containers_backup_stop_container_during": "Zatrzymaj kontener na czas backupu",
 	"containers_backup_stop_stack_during": "Zatrzymaj stack na czas backupu",
@@ -1970,7 +1971,7 @@
 	"backupui_hawser_default_set_under": ", ustaw to w",
 	"backupui_hawser_default_after": "i otwórz to okno ponownie.",
 	"backupui_backup_all_files": "Backup wszystkich plików ({count})",
-	"backupui_captured_as_bind": "zapisany jako bind poniżej",
+	"backupui_captured_as_bind": "też jako bind poniżej",
 	"backupui_captured_as_volume": "zapisany jako wolumen poniżej",
 	"backupui_always_kept": "zawsze zachowywane",
 	"backupui_helper_failed_title": "Kontener pomocniczy backupu nie może uruchomić się w tym środowisku",
@@ -3570,6 +3571,23 @@
 			}
 		}
 	],
+	"images_list_toast_pruned_count": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "Prune: {count} obraz",
+				"countPlural=few": "Prune: {count} obrazy",
+				"countPlural=many": "Prune: {count} obrazów",
+				"countPlural=other": "Prune: {count} obrazu"
+			}
+		}
+	],
 	"images_list_toast_no_dangling": "Brak osieroconych obrazów do prune",
 	"images_list_toast_prune_failed": "Nie udało się wykonać prune obrazów",
 	"images_list_toast_no_unused": "Brak nieużywanych obrazów do prune",
@@ -4669,6 +4687,7 @@
 	"backups_already_finishing": "Backup był już na ukończeniu - zostanie dokończony.",
 	"backups_stop_failed": "Nie udało się zatrzymać backupu",
 	"backups_load_failed": "Nie udało się wczytać backupów",
+	"backups_diff_other_destination": "Nie można porównać snapshotów z różnych miejsc docelowych",
 	"backups_log_title": "Backup: {name}",
 	"backups_completed_with_warnings_for": "Backup {name} zakończony z ostrzeżeniami",
 	"backups_config_removed": "Usunięto konfigurację backupu dla {name}",
@@ -5553,6 +5572,7 @@
 	"settings_envs_prune_mode_all_hint": "Usuwa wszystkie obrazy nieużywane przez żaden kontener (bardziej agresywne)",
 	"settings_envs_prune_last_pruned": "Ostatni prune: {date}",
 	"settings_envs_prune_last_result": [{"declarations": ["input count", "input size", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "Usunięto {count} obraz, zwolniono {size}", "countPlural=few": "Usunięto {count} obrazy, zwolniono {size}", "countPlural=many": "Usunięto {count} obrazów, zwolniono {size}", "countPlural=other": "Usunięto {count} obrazu, zwolniono {size}"}}],
+	"settings_envs_prune_last_result_count": [{"declarations": ["input count", "local countPlural = count: plural"], "selectors": ["countPlural"], "match": {"countPlural=one": "Usunięto {count} obraz", "countPlural=few": "Usunięto {count} obrazy", "countPlural=many": "Usunięto {count} obrazów", "countPlural=other": "Usunięto {count} obrazu"}}],
 	"settings_envs_prune_in_use_note": "Obrazy używane przez działające lub zatrzymane kontenery nigdy nie zostaną usunięte.",
 	"settings_envs_timezone": "Strefa czasowa",
 	"settings_envs_timezone_hint": "Używana do planowania automatycznych aktualizacji, synchronizacji Git i czyszczenia obrazów",

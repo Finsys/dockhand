@@ -1293,6 +1293,7 @@
 	"containers_backup_no_schedules_stack": "Aucune planification de sauvegarde configurée pour cette stack.",
 	"containers_backup_new_schedule": "Nouvelle planification de sauvegarde",
 	"containers_backup_edit_schedule": "Modifier la planification",
+	"containers_backup_on_schedule": "Exécuter selon un horaire",
 	"containers_backup_enabled": "Activée",
 	"containers_backup_stop_container_during": "Arrêter le conteneur pendant la sauvegarde",
 	"containers_backup_stop_stack_during": "Arrêter la stack pendant la sauvegarde",
@@ -1826,7 +1827,7 @@
 	"backupui_hawser_default_set_under": "personnalisé, définissez-le sous",
 	"backupui_hawser_default_after": "et rouvrez cette boîte de dialogue.",
 	"backupui_backup_all_files": "Sauvegarder tous les fichiers ({count})",
-	"backupui_captured_as_bind": "capturé comme montage bind ci-dessous",
+	"backupui_captured_as_bind": "aussi monté en bind ci-dessous",
 	"backupui_captured_as_volume": "capturé comme volume ci-dessous",
 	"backupui_always_kept": "toujours conservé",
 	"backupui_helper_failed_title": "Le conteneur auxiliaire de sauvegarde ne peut pas s'exécuter sur cet environnement",
@@ -3148,6 +3149,21 @@
 			}
 		}
 	],
+	"images_list_toast_pruned_count": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} image nettoyée",
+				"countPlural=other": "{count} images nettoyées"
+			}
+		}
+	],
 	"images_list_toast_no_dangling": "Aucune image orpheline à nettoyer",
 	"images_list_toast_prune_failed": "Impossible de nettoyer les images",
 	"images_list_toast_no_unused": "Aucune image inutilisée à nettoyer",
@@ -4137,6 +4153,7 @@
 	"backups_already_finishing": "La sauvegarde se terminait déjà : elle va aboutir.",
 	"backups_stop_failed": "Impossible d'arrêter la sauvegarde",
 	"backups_load_failed": "Impossible de charger les sauvegardes",
+	"backups_diff_other_destination": "Impossible de comparer des instantanés situés sur des destinations différentes",
 	"backups_log_title": "Sauvegarde : {name}",
 	"backups_completed_with_warnings_for": "Sauvegarde terminée avec des avertissements pour {name}",
 	"backups_config_removed": "Configuration de sauvegarde supprimée pour {name}",
@@ -5011,6 +5028,7 @@
 	"settings_envs_prune_mode_all_hint": "Supprime toutes les images non utilisées par un conteneur (plus agressif)",
 	"settings_envs_prune_last_pruned": "Dernier nettoyage : {date}",
 	"settings_envs_prune_last_result": "{count} images supprimées, {size} récupérés",
+	"settings_envs_prune_last_result_count": "{count} images supprimées",
 	"settings_envs_prune_in_use_note": "Les images utilisées par des conteneurs en cours d'exécution ou arrêtés ne seront jamais supprimées.",
 	"settings_envs_timezone": "Fuseau horaire",
 	"settings_envs_timezone_hint": "Utilisé pour planifier les mises à jour automatiques, les synchronisations git et le nettoyage des images",

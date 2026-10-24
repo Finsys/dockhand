@@ -1293,6 +1293,7 @@
 	"containers_backup_no_schedules_stack": "No backup schedules configured for this stack.",
 	"containers_backup_new_schedule": "New backup schedule",
 	"containers_backup_edit_schedule": "Edit schedule",
+	"containers_backup_on_schedule": "Run on a schedule",
 	"containers_backup_enabled": "Enabled",
 	"containers_backup_stop_container_during": "Stop container during backup",
 	"containers_backup_stop_stack_during": "Stop stack during backup",
@@ -1826,7 +1827,7 @@
 	"backupui_hawser_default_set_under": ", set it under",
 	"backupui_hawser_default_after": "and re-open this dialog.",
 	"backupui_backup_all_files": "Backup all files ({count})",
-	"backupui_captured_as_bind": "captured as a bind below",
+	"backupui_captured_as_bind": "also a bind below",
 	"backupui_captured_as_volume": "captured as a volume below",
 	"backupui_always_kept": "always kept",
 	"backupui_helper_failed_title": "The backup helper can't run on this environment",
@@ -3148,6 +3149,21 @@
 			}
 		}
 	],
+	"images_list_toast_pruned_count": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "Pruned {count} image",
+				"countPlural=other": "Pruned {count} images"
+			}
+		}
+	],
 	"images_list_toast_no_dangling": "No dangling images to prune",
 	"images_list_toast_prune_failed": "Failed to prune images",
 	"images_list_toast_no_unused": "No unused images to prune",
@@ -4137,6 +4153,7 @@
 	"backups_already_finishing": "Backup was already finishing - it will complete.",
 	"backups_stop_failed": "Failed to stop backup",
 	"backups_load_failed": "Failed to load backups",
+	"backups_diff_other_destination": "Snapshots on different destinations can't be compared",
 	"backups_log_title": "Backup: {name}",
 	"backups_completed_with_warnings_for": "Backup completed with warnings for {name}",
 	"backups_config_removed": "Backup config removed for {name}",
@@ -5137,6 +5154,7 @@
 	"settings_envs_prune_mode_all_hint": "Removes all images not used by any container (more aggressive)",
 	"settings_envs_prune_last_pruned": "Last pruned: {date}",
 	"settings_envs_prune_last_result": "{count} images removed, {size} reclaimed",
+	"settings_envs_prune_last_result_count": "{count} images removed",
 	"settings_envs_prune_in_use_note": "Images in use by running or stopped containers will never be removed.",
 	"settings_envs_timezone": "Timezone",
 	"settings_envs_timezone_hint": "Used for scheduling auto-updates, git syncs, and image pruning",

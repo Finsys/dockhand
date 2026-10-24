@@ -1363,6 +1363,7 @@
 	"containers_backup_no_schedules_stack": "Für diesen Stack sind keine Backup-Zeitpläne eingerichtet.",
 	"containers_backup_new_schedule": "Neuer Backup-Zeitplan",
 	"containers_backup_edit_schedule": "Zeitplan bearbeiten",
+	"containers_backup_on_schedule": "Nach Zeitplan ausführen",
 	"containers_backup_enabled": "Aktiviert",
 	"containers_backup_stop_container_during": "Container während des Backups stoppen",
 	"containers_backup_stop_stack_during": "Stack während des Backups stoppen",
@@ -1995,7 +1996,7 @@
 	"backupui_hawser_default_set_under": ", trage es unter",
 	"backupui_hawser_default_after": "ein und öffne diesen Dialog erneut.",
 	"backupui_backup_all_files": "Alle Dateien sichern ({count})",
-	"backupui_captured_as_bind": "unten als Bind erfasst",
+	"backupui_captured_as_bind": "auch unten als Bind",
 	"backupui_captured_as_volume": "unten als Volume erfasst",
 	"backupui_always_kept": "immer enthalten",
 	"backupui_helper_failed_title": "Der Backup-Helfer kann auf dieser Umgebung nicht ausgeführt werden",
@@ -3317,6 +3318,21 @@
 			}
 		}
 	],
+	"images_list_toast_pruned_count": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Image bereinigt",
+				"countPlural=other": "{count} Images bereinigt"
+			}
+		}
+	],
 	"images_list_toast_no_dangling": "Keine verwaisten Images zum Bereinigen",
 	"images_list_toast_prune_failed": "Images konnten nicht bereinigt werden",
 	"images_list_toast_no_unused": "Keine ungenutzten Images zum Bereinigen",
@@ -4376,6 +4392,7 @@
 	"backups_already_finishing": "Das Backup war bereits in der Abschlussphase - es wird fertiggestellt.",
 	"backups_stop_failed": "Backup konnte nicht gestoppt werden",
 	"backups_load_failed": "Backups konnten nicht geladen werden",
+	"backups_diff_other_destination": "Snapshots auf verschiedenen Zielen können nicht verglichen werden",
 	"backups_log_title": "Backup: {name}",
 	"backups_completed_with_warnings_for": "Backup für {name} mit Warnungen abgeschlossen",
 	"backups_config_removed": "Backup-Konfiguration für {name} entfernt",
@@ -5388,6 +5405,21 @@
 			"match": {
 				"countPlural=one": "{count} Image entfernt, {size} freigegeben",
 				"countPlural=other": "{count} Images entfernt, {size} freigegeben"
+			}
+		}
+	],
+	"settings_envs_prune_last_result_count": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Image entfernt",
+				"countPlural=other": "{count} Images entfernt"
 			}
 		}
 	],
