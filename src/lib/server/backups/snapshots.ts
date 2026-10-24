@@ -21,7 +21,7 @@ import { isValidSnapshotId } from './security';
 
 /** The minimal restic surface snapshots.ts needs (injected). */
 export interface ResticReader {
-	runLocal(destination: any, args: string[], tier?: 'interactive' | 'data'): Promise<ResticRun>;
+	runLocal(destination: any, args: string[], tier?: 'interactive' | 'data', stream?: undefined, signal?: AbortSignal): Promise<ResticRun>;
 }
 
 /** Caller access context for the environment guard. `isEnterprise=false` means
@@ -199,6 +199,7 @@ export async function listSnapshots(
 	instanceId: string,
 	access: AccessContext,
 	configId?: number,
+	signal?: AbortSignal,
 ): Promise<ReturnType<typeof parseSnapshots>> {
 	// Per-config listing (a config row's own snapshots) stays instance-scoped - a config is
 	// this install's, and its configid collides across instances (a fresh install reuses
@@ -207,7 +208,7 @@ export async function listSnapshots(
 	// Dockhand snapshots (a physically-copied or shared repo) never surface as orphans (#1351).
 	const args = ['snapshots', '--json', '--no-lock'];
 	if (configId != null) args.push('--tag', `${instanceTagFilter(instanceId)},dockhand:configid=${configId}`);
-	const run = await restic.runLocal(destination, args);
+	const run = await restic.runLocal(destination, args, 'interactive', undefined, signal);
 	if (run.exitCode !== 0) {
 		// An empty repo (not initialised) and a real error look different; surface
 		// the stderr so the caller can classify. Return [] only on a clean exit.

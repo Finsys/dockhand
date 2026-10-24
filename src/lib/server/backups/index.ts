@@ -439,10 +439,10 @@ export async function probeStackDir(
 		if (entries.length === 0) {
 			return { kind: 'unknown', reason: `The stack folder at ${hostPath} is empty or does not exist on the Docker host. Set the environment's stack path and re-configure.` };
 		}
-		// Tag entries that are ALSO a bind mount so the picker shows them as non-deselectable
-		// (captured via the Volumes section, not here). Two sources: daemon bind sources (runtime,
-		// only for a RUNNING stack) AND the compose bind-dir names (always available) — the latter
-		// so a stopped stack's `./memos` bind still shows as captured-by-bind, not a plain file.
+		// Tag entries that are ALSO a bind mount so the picker labels them ("also a bind below").
+		// Two sources: daemon bind sources (runtime, only for a RUNNING stack) AND the compose
+		// bind-dir names (always available) - the latter so a stopped stack's `./memos` bind still
+		// shows as captured-by-bind, not a plain file.
 		const bindDirNames = plan.excludePaths
 			.map((p) => p.replace(`/volumes/${STACKDIR_VOLUME_KEY}/`, '').split('/')[0])
 			.filter(Boolean);
@@ -1058,8 +1058,8 @@ function restorePorts(destination: any, access: { isEnterprise: boolean; canAcce
 /** A ResticReader adapter over the shared Restic instance (for snapshots.ts). */
 function reader() {
 	return {
-		runLocal: (dest: any, args: string[], tier?: 'interactive' | 'data', stream?: { onStdout?: (chunk: string) => void; onStderr?: (chunk: string) => void }) =>
-			restic.runLocal(dest, args, tier, stream)
+		runLocal: (dest: any, args: string[], tier?: 'interactive' | 'data', stream?: { onStdout?: (chunk: string) => void; onStderr?: (chunk: string) => void }, signal?: AbortSignal) =>
+			restic.runLocal(dest, args, tier, stream, signal)
 	};
 }
 
@@ -1271,12 +1271,12 @@ async function serializeByRepo<T>(destinationId: number, fn: () => Promise<T>): 
 }
 
 /** List a config's (or a destination's) snapshots, newest first. Instance-owned. */
-export async function listSnapshots(destinationId: number, configId?: number): Promise<ReturnType<typeof parseSnapshots>> {
+export async function listSnapshots(destinationId: number, configId?: number, signal?: AbortSignal): Promise<ReturnType<typeof parseSnapshots>> {
 	const destination = await loadDest(destinationId);
 	const instanceId = await getInstanceId();
 	// No per-env filtering here — the route already gated env access; pass a
 	// permissive access ctx (instance scoping still applies).
-	return listSnapshotsCore(reader(), destination, instanceId, { isEnterprise: false, canAccessEnvironment: async () => true }, configId);
+	return listSnapshotsCore(reader(), destination, instanceId, { isEnterprise: false, canAccessEnvironment: async () => true }, configId, signal);
 }
 
 /** Browse a snapshot's file tree at a path (restic ls). */

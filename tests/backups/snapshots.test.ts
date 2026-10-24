@@ -130,6 +130,16 @@ describe('selectOwnedForForget — the bulk-delete preVetted contract', () => {
 	});
 });
 
+describe('listSnapshots - abort', () => {
+	it('hands the caller signal to restic', async () => {
+		let got: AbortSignal | undefined;
+		const r: ResticReader = { async runLocal(_d, _a, _t, _s, signal) { got = signal; return { exitCode: 0, stdout: '[]', stderr: '' }; } };
+		const signal = new AbortController().signal;
+		await listSnapshots(r, {}, 'me', freeAccess, undefined, signal);
+		expect(got).toBe(signal);
+	});
+});
+
 describe('listSnapshots — filters to accessible environments (enterprise)', () => {
 	const snaps = [
 		{ id: 'x'.repeat(64), tags: ['dockhand:instance=me', 'dockhand:envid=3'] },
