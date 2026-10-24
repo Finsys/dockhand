@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { imageCheckPlan, resolvePinnedToDigest, imagePinning, imageReferenceWithoutDigest, isDigestBasedImage } from '../src/lib/utils/tracked-image';
+import { summarizeCheck } from '../src/lib/utils/update-check-outcome';
 
 /**
  * `repo@sha256:...` and `repo:tag@sha256:...` read alike and mean opposite things.
@@ -196,10 +197,10 @@ describe('a pinned image is reported apart from an applicable update', () => {
 	test('it is kept out of the set a bulk update acts on', () => {
 		// withUpdates is what the update modal is handed, so a pinned image joining it
 		// would offer a button whose pull returns the manifest already running.
-		const line = checkButton.split('\n').find((l) => l.includes('const withUpdates'));
-		const filter = checkButton.slice(checkButton.indexOf('const withUpdates'));
-		expect(line).toBeTruthy();
-		expect(filter.slice(0, 300)).toContain('!r.pinnedToDigest');
+		const s = summarizeCheck([{ containerId: 'a', containerName: 'a', imageName: 'a:1', hasUpdate: true, pinnedToDigest: true }]);
+		expect(s.withUpdates).toEqual([]);
+		expect(s.pinned).toHaveLength(1);
+		expect(checkButton).toContain('summarizeCheck(');
 	});
 
 	test('it still counts as a result, so a check does not report "all up to date"', () => {

@@ -1029,6 +1029,7 @@
 	// Counts for the compact dismiss: stacks with a digest update, and total containers
 	// with a newer version tag - each shown with its icon, mirroring the containers page.
 	const stackDigestCount = $derived(stacks.filter((s) => s.updatesAvailable).length);
+	const stackContainerIds = $derived(new Set(stacks.flatMap((s) => (s.containerDetails ?? []).map((c) => c.id))));
 	// Containers waiting out the minimum image age, across every stack.
 	const stackCoolingDownCount = $derived(
 		stacks.reduce((sum, s) => sum + (s.coolingDownCount ?? 0), 0)
@@ -1813,6 +1814,7 @@
 			<CheckUpdatesButton
 				{envId}
 				hasPendingUpdates={stacks.some((s) => s.updatesAvailable)}
+				containerIds={loading ? undefined : stackContainerIds}
 				onComplete={(result) => {
 					// Record failed checks so stack containers show a "check failed" state
 					// instead of masquerading as up to date (#1255). Session-only.
