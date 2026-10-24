@@ -5,6 +5,7 @@
 import { HardDrive, Globe, Server } from 'lucide-svelte';
 import { AmazonS3Icon, BackblazeIcon, AzureBlobIcon, GoogleCloudIcon, RestServerIcon } from '$lib/components/cloud-icons';
 import cronstrue from 'cronstrue';
+import { DEFAULT_SCHEDULED_RETENTION } from '$lib/shared/backup-retention';
 import { computeExecutionTally, resolveRunRepo, type Execution, type ExecutionTally } from '$lib/utils/execution-tally';
 export { computeExecutionTally, type Execution, type ExecutionTally };
 
@@ -178,6 +179,29 @@ export interface BackupFormState {
  *               orphan) but no zombie config row is left behind.
  */
 export type BackupAction = 'save' | 'save-run' | 'run-once';
+
+/** What a config edit saves: a manual one keeps no cron and stays off, so no schedule is invented. */
+export function scheduleToSave(scheduled: boolean, schedule: string, enabled: boolean): { schedule: string; enabled: boolean } {
+	return scheduled ? { schedule, enabled } : { schedule: '', enabled: false };
+}
+
+export interface RetentionFields { keepLast: number; keepDaily: number; keepWeekly: number; keepMonthly: number; keepYearly: number }
+
+/**
+ * The form's retention when the schedule toggle flips. Switching a schedule on with no
+ * policy shows the default the server stores for it; switching off again before saving
+ * gives back what was there, so a manual config does not pick up a policy on the way.
+ * `saved` is what the switch-on replaced, carried between the two calls.
+ */
+export function retentionOnScheduleToggle(on: boolean, current: RetentionFields, saved: RetentionFields | null): { retention: RetentionFields; saved: RetentionFields | null } {
+	const fromDefault = { keepLast: 0, keepYearly: 0, ...DEFAULT_SCHEDULED_RETENTION };
+	const same = (a: RetentionFields, b: RetentionFields) => (Object.keys(a) as (keyof RetentionFields)[]).every((k) => a[k] === b[k]);
+	if (on) {
+		const empty = Object.values(current).every((v) => !v);
+		return empty ? { retention: fromDefault, saved: current } : { retention: current, saved: null };
+	}
+	return saved && same(current, fromDefault) ? { retention: saved, saved: null } : { retention: current, saved: null };
+}
 
 /**
  * Whether a duplicated config should start enabled.
@@ -469,6 +493,103 @@ export function selectOwnSnapshotsFromDestination<S extends { tags?: string[] }>
 	return snaps
 		.filter((s) => snapshotMatchesConfigScope(s.tags, configIds, targetName))
 		.map((s) => ({ ...s, _destinationId: dest.id, _destinationName: dest.name, _destinationRepository: dest.repository }));
+}
+
+/**
+ * Every live config's snapshots of this install, from each destination's full listing:
+ * a config's from every destination holding them (a schedule moved to another destination
+ * keeps its older ones there), each id once, newest first. Everything else (a deleted
+ * config's or another install's) is an orphan, grouped by destination and target name.
+ */
+export function indexDestinationSnapshots<S extends { id: string; time: string; tags?: string[] | null }>(
+	byDestination: Map<number, S[]>,
+	liveConfigIds: Set<number>,
+	thisInstance: string
+): { perConfig: Map<number, S[]>; orphans: Array<{ key: string; destinationId: number; targetName: string; snapshots: S[] }> } {
+	const tagVal = (snap: S, prefix: string) => (snap.tags || []).find((t) => t.startsWith(prefix))?.slice(prefix.length);
+	const add = <K>(m: Map<K, S[]>, k: K, snap: S) => {
+		const list = m.get(k);
+		if (list) list.push(snap); else m.set(k, [snap]);
+	};
+	const perConfig = new Map<number, S[]>();
+	const orphans: Array<{ key: string; destinationId: number; targetName: string; snapshots: S[] }> = [];
+	for (const [destinationId, snaps] of byDestination) {
+		const orphanByName = new Map<string, S[]>();
+		for (const snap of snaps) {
+			const cid = Number(tagVal(snap, 'dockhand:configid='));
+			if (tagVal(snap, 'dockhand:instance=') === thisInstance && Number.isInteger(cid) && liveConfigIds.has(cid)) add(perConfig, cid, snap);
+			else add(orphanByName, tagVal(snap, 'dockhand:name=') || 'unknown', snap);
+		}
+		for (const [targetName, list] of orphanByName) {
+			orphans.push({ key: `orphan-${targetName}-${destinationId}`, destinationId, targetName, snapshots: newestFirst(list) });
+		}
+	}
+	for (const [cid, list] of perConfig) perConfig.set(cid, newestFirst(list));
+	return { perConfig, orphans };
+}
+
+/** Newest first, a snapshot seen on two destinations sharing a repository once. */
+function newestFirst<S extends { id: string; time: string }>(list: S[]): S[] {
+	const seen = new Set<string>();
+	return list
+		.filter((s) => {
+			if (seen.has(s.id)) return false;
+			seen.add(s.id);
+			return true;
+		})
+		.map((s) => ({ s, t: new Date(s.time).getTime() }))
+		.sort((a, b) => b.t - a.t)
+		.map(({ s }) => s);
+}
+
+/** The lists with one config's snapshots of this install dropped from one destination, once they are forgotten there. */
+export function withoutConfigSnapshots<S extends { tags?: string[] | null }>(
+	byDestination: Map<number, S[]>,
+	destinationId: number,
+	configId: number,
+	thisInstance: string
+): Map<number, S[]> {
+	const list = byDestination.get(destinationId);
+	if (!list) return byDestination;
+	const own = (s: S) => (s.tags || []).includes(`dockhand:configid=${configId}`) && (s.tags || []).includes(`dockhand:instance=${thisInstance}`);
+	return new Map(byDestination).set(destinationId, list.filter((s) => !own(s)));
+}
+
+/**
+ * A destination's listing applied to the page state: a list replaces the previous one and
+ * clears its error; a failure records the error and keeps the previous list on screen.
+ */
+export function applyDestinationListing<S>(
+	lists: Map<number, S[]>,
+	errors: Map<number, string>,
+	destinationId: number,
+	result: { snapshots: S[] } | { error: string }
+): { lists: Map<number, S[]>; errors: Map<number, string> } {
+	const nextErrors = new Map(errors);
+	if ('error' in result) {
+		nextErrors.set(destinationId, result.error);
+		return { lists, errors: nextErrors };
+	}
+	nextErrors.delete(destinationId);
+	return { lists: new Map(lists).set(destinationId, result.snapshots), errors: nextErrors };
+}
+
+/**
+ * The destinations whose listing can change a config's row: its current one, every one
+ * it lists snapshots from, and any not read yet (it may hold some).
+ */
+export function rowDestinationIds(
+	currentId: number,
+	snapshots: Array<{ _destinationId?: number }>,
+	destinationIds: number[],
+	isListed: (id: number) => boolean
+): number[] {
+	return destinationIds.filter((id) => id === currentId || !isListed(id) || snapshots.some((s) => s._destinationId === id));
+}
+
+/** restic diffs two snapshots of ONE repository, so a pair from two destinations cannot be compared. */
+export function canDiffSnapshots(a: { _destinationId?: number }, b: { _destinationId?: number }): boolean {
+	return a._destinationId === b._destinationId;
 }
 
 /**
