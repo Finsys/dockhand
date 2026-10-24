@@ -5555,7 +5555,7 @@ export interface ImagePruneSettings {
 	pruneMode: 'dangling' | 'all';
 	lastPruned?: string;
 	lastResult?: {
-		spaceReclaimed: number;
+		spaceReclaimed?: number;
 		imagesRemoved: number;
 	};
 }

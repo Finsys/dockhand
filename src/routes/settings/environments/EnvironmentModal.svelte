@@ -585,7 +585,7 @@
 	let imagePruneCron = $state('0 3 * * 0'); // Default: 3 AM Sunday
 	let imagePruneMode = $state<'dangling' | 'all'>('dangling');
 	let imagePruneLastPruned = $state<string | undefined>(undefined);
-	let imagePruneLastResult = $state<{ spaceReclaimed: number; imagesRemoved: number } | undefined>(undefined);
+	let imagePruneLastResult = $state<{ spaceReclaimed?: number; imagesRemoved: number } | undefined>(undefined);
 	let imagePruneLoading = $state(false);
 
 	// === Validation Functions ===

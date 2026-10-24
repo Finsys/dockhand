@@ -15,7 +15,7 @@ import * as tls from 'node:tls';
 import { createHash } from 'node:crypto';
 import { pumpWebStreamToWritable } from './stream-pump';
 import { toWebReadableStream } from './node-readable-stream';
-import { buildImagePruneFilters } from './image-prune-core';
+import { buildImagePruneFilters, pruneAllUnused, type ImagePruneResult } from './image-prune-core';
 import { demuxDockerStream } from './docker-demux-core';
 import { isExpectedConnectionError, isQuietDockerFailure, transportTimeoutError } from './docker-probe-core';
 import {
@@ -4935,11 +4935,21 @@ export async function pruneContainers(envId?: number | null) {
 	return dockerJsonRequest('/containers/prune', { method: 'POST' }, envId);
 }
 
-export async function pruneImages(dangling = true, envId?: number | null) {
+function pruneAllUnusedImages(envId?: number | null): Promise<ImagePruneResult> {
+	return pruneAllUnused({
+		listImages: (filters) => dockerJsonRequest(filters ? `/images/json?filters=${filters}` : '/images/json', {}, envId),
+		listContainers: () => dockerJsonRequest('/containers/json?all=true', {}, envId),
+		prune: () => dockerJsonRequest<ImagePruneResult>(`/images/prune?filters=${buildImagePruneFilters(false)}`, { method: 'POST' }, envId),
+		remove: (ref) => dockerJsonRequest(`/images/${encodeURIComponent(ref)}`, { method: 'DELETE' }, envId),
+		log: (message) => console.log(`[Prune] env ${envId ?? 'local'}: ${message}`)
+	});
+}
+
+export async function pruneImages(dangling = true, envId?: number | null): Promise<ImagePruneResult> {
 	// dangling=true: only remove untagged images. Pass straight through —
 	// scanner images are always tagged so they can't be dangling anyway.
 	if (dangling) {
-		return dockerJsonRequest(
+		return dockerJsonRequest<ImagePruneResult>(
 			`/images/prune?filters=${buildImagePruneFilters(true)}`,
 			{ method: 'POST' },
 			envId
@@ -4953,11 +4963,7 @@ export async function pruneImages(dangling = true, envId?: number | null) {
 	// in a finally (#625). Scanner images are third-party so we can't label them.
 	const protect = (await getSetting('protect_scanner_images')) !== false;
 	if (!protect) {
-		return dockerJsonRequest(
-			`/images/prune?filters=${buildImagePruneFilters(false)}`,
-			{ method: 'POST' },
-			envId
-		);
+		return pruneAllUnusedImages(envId);
 	}
 
 	const { DEFAULT_GRYPE_IMAGE, DEFAULT_TRIVY_IMAGE } = await import('./scanner');
@@ -4988,11 +4994,7 @@ export async function pruneImages(dangling = true, envId?: number | null) {
 	}
 
 	try {
-		return await dockerJsonRequest(
-			`/images/prune?filters=${buildImagePruneFilters(false)}`,
-			{ method: 'POST' },
-			envId
-		);
+		return await pruneAllUnusedImages(envId);
 	} finally {
 		for (const id of holderIds) {
 			try {
