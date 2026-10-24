@@ -40,6 +40,7 @@ import {
 	getTagArtifactKind,
 	getRegistryTagCreatedAt,
 } from '../../docker';
+import { withPullRetry } from '../../pull-retry';
 import type { ImageEnvLabels } from '../../container-env-merge';
 import { sendEventNotification } from '../../notifications';
 import { getScannerSettings, scanImage, type VulnerabilitySeverity } from '../../scanner';
@@ -444,7 +445,7 @@ export async function runEnvUpdateCheckJob(
 
 						// Step 1: Pull new image
 						await log(`  Pulling ${update.imageName}...`);
-						const pulled = await pullImage(update.imageName, () => {}, environmentId, true);
+						const pulled = await withPullRetry(() => pullImage(update.imageName, () => {}, environmentId, true), { log: (m) => log(`  ${m}`) });
 						verifiedImageId = pulled?.imageId;
 						verifiedImageReference = pulled?.reference;
 						if (pulled) update.newDigest = pulled.digest;
@@ -565,7 +566,7 @@ export async function runEnvUpdateCheckJob(
 					} else {
 						// Simple pull (no scanning or digest-based image)
 						await log(`  Pulling ${update.imageName}...`);
-						const pulled = await pullImage(update.imageName, () => {}, environmentId, true);
+						const pulled = await withPullRetry(() => pullImage(update.imageName, () => {}, environmentId, true), { log: (m) => log(`  ${m}`) });
 						verifiedImageId = pulled?.imageId;
 						verifiedImageReference = pulled?.reference;
 						if (pulled) update.newDigest = pulled.digest;

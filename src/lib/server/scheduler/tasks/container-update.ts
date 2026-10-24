@@ -37,6 +37,7 @@ import {
 	recreateContainerFromInspect,
 	inspectImage
 } from '../../docker';
+import { withPullRetry } from '../../pull-retry';
 import type { ImageEnvLabels } from '../../container-env-merge';
 import { getScannerSettings, scanImage, type ScanResult, type VulnerabilitySeverity } from '../../scanner';
 import { sendEventNotification } from '../../notifications';
@@ -494,7 +495,7 @@ export async function runContainerUpdate(
 			try {
 				// Pull new image
 				log(`Pulling new image: ${imageNameFromConfig}`);
-				const pulled = await pullImage(imageNameFromConfig, undefined, envId, true);
+				const pulled = await withPullRetry(() => pullImage(imageNameFromConfig, undefined, envId, true), { log });
 				verifiedImageId = pulled?.imageId;
 				verifiedImageReference = pulled?.reference;
 				if (pulled) newDigest = pulled.digest;
@@ -588,7 +589,7 @@ export async function runContainerUpdate(
 			// No scanning - simple pull
 			log(`Pulling update (no vulnerability scan)...`);
 			try {
-				const pulled = await pullImage(imageNameFromConfig, undefined, envId, true);
+				const pulled = await withPullRetry(() => pullImage(imageNameFromConfig, undefined, envId, true), { log });
 				verifiedImageId = pulled?.imageId;
 				verifiedImageReference = pulled?.reference;
 				if (pulled) newDigest = pulled.digest;

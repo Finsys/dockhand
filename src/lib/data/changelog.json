@@ -5,6 +5,7 @@
     "comingSoon": true,
     "changes": [
       { "type": "fix", "text": "backups list shows a schedule's snapshots from every destination it has used (#1783)" },
+      { "type": "fix", "text": "scheduled updates retry a rate-limited pull (toomanyrequests) and honour the registry's retry-after instead of failing (#1268)" },
       { "type": "fix", "text": "pruning unused images works on older Docker engines (#1490)" }
     ],
     "imageTag": "fnsys/dockhand:v1.0.56"
