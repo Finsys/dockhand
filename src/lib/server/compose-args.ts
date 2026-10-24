@@ -75,3 +75,39 @@ export function shouldRunSeparateBuildStep(
 	const isHawser = connectionType === 'hawser-standard' || connectionType === 'hawser-edge';
 	return !!build && !!noBuildCache && !isHawser;
 }
+
+/**
+ * The pull policy a deploy request asks for. "Respect pull_policy" swaps `--pull always`,
+ * which overrides every service's pull_policy, for a separate `docker compose pull`
+ * that honours it.
+ */
+export function deployPullPolicy(pull?: boolean, respectPullPolicy?: boolean): 'always' | 'respect' | undefined {
+	if (!pull) return undefined;
+	return respectPullPolicy ? 'respect' : 'always';
+}
+
+/**
+ * How a deploy pulls for a pull policy: 'respect' runs a separate `docker compose pull`
+ * before a plain `up`; any other value goes to `up` as `--pull <value>`.
+ */
+export function pullSteps(pullPolicy?: string): { separatePull: boolean; upPullPolicy?: string } {
+	return pullPolicy === 'respect' ? { separatePull: true } : { separatePull: false, upPullPolicy: pullPolicy };
+}
+
+/** What a deploy logs when its separate pull fails and it goes on with the local images. */
+export const PULL_FAILED_WARNING = 'Some images could not be pulled; continuing with the images present locally';
+
+/**
+ * Run a deploy's pull and up for its pull policy. With 'respect' a separate
+ * `docker compose pull` runs first; when it fails, `warn` is told and `up` runs anyway.
+ * The result is always the `up` result.
+ */
+export async function pullThenUp<R extends { success: boolean }>(
+	pullPolicy: string | undefined,
+	run: (operation: 'pull' | 'up', upPullPolicy?: string) => Promise<R>,
+	warn: (message: string) => void
+): Promise<R> {
+	const { separatePull, upPullPolicy } = pullSteps(pullPolicy);
+	if (separatePull && !(await run('pull')).success) warn(PULL_FAILED_WARNING);
+	return run('up', upPullPolicy);
+}

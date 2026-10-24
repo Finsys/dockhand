@@ -26,7 +26,7 @@ import {
 	type DeletionApplyResult,
 	type DeletionSkipReason
 } from './git-deletions';
-import { buildComposeOperationArgs, shouldRunSeparateBuildStep } from './compose-args';
+import { buildComposeOperationArgs, shouldRunSeparateBuildStep, pullThenUp } from './compose-args';
 import { findStackNameCollision, getStackPathHintsFromContainers, moveStackFilePathCrossDevice, resolveStackDirForLayout } from './stack-path-utils';
 import { isValidStackName } from './stack-name-guard';
 import { db, environments, eq } from './db/drizzle.js';
@@ -3470,13 +3470,14 @@ export async function deployStack(options: DeployStackOptions): Promise<StackOpe
 		}
 
 		console.log(`${logPrefix} Calling executeComposeCommand...`);
-		const result = await executeComposeCommand(
-			'up',
-			cmdOptions,
-			compose,
-			composeEnvVars,
-			secretVars,
-			onLine
+		const result = await pullThenUp(
+			pullPolicy,
+			(operation, upPullPolicy) =>
+				executeComposeCommand(operation, { ...cmdOptions, pullPolicy: upPullPolicy }, compose, composeEnvVars, secretVars, onLine),
+			(warning) => {
+				console.warn(`${logPrefix} ${warning}`);
+				onLine?.(warning);
+			}
 		);
 		// F4 fix: `secretVars` here is POST-resolveProviderEnvVars (line ~3059 above) --
 		// the same set executeComposeCommand just redacted streamed lines against. This

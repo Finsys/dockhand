@@ -1274,7 +1274,7 @@
 		}
 	}
 
-	async function redeployStack(name: string, options: { pull: boolean; build: boolean; forceRecreate: boolean }) {
+	async function redeployStack(name: string, options: { pull: boolean; respectPullPolicy?: boolean; build: boolean; forceRecreate: boolean }) {
 		operationError = null;
 		stackActionLoading = name;
 		startComposeOutput(m.stacks_list_output_redeploying({ name }), name, 'deploy');
@@ -1282,6 +1282,7 @@
 		// otherwise visible once the popover closes).
 		const chosen = [
 			options.pull && m.stacks_list_output_option_pull(),
+			options.respectPullPolicy && m.stacks_redeploy_respect_pull_policy(),
 			options.build && m.stacks_list_output_option_build(),
 			options.forceRecreate && m.stacks_list_output_option_force_recreate()
 		].filter(Boolean);

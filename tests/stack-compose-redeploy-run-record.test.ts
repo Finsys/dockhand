@@ -336,6 +336,18 @@ describe('PUT /api/stacks/[name]/compose -- restart:true build/pull/forceRecreat
 		expect(deployStackCalls[0].pullPolicy).toBe('always');
 	});
 
+	test('pull with respectPullPolicy asks deployStack for the separate pull that honours pull_policy', async () => {
+		await (await composeRoute.PUT(makeComposeEvent({ content: 'x', restart: true, pull: true, respectPullPolicy: true }))).json();
+
+		expect(deployStackCalls[0].pullPolicy).toBe('respect');
+	});
+
+	test('respectPullPolicy without pull pulls nothing', async () => {
+		await (await composeRoute.PUT(makeComposeEvent({ content: 'x', restart: true, pull: false, respectPullPolicy: true }))).json();
+
+		expect(deployStackCalls[0].pullPolicy).toBeUndefined();
+	});
+
 	test('pull:false leaves pullPolicy undefined (not "never" or "missing") -- deployStack treats a missing pullPolicy as "do not pull", which is also why it skips its own post-deploy pending-update badge reconciliation in that case (stacks.ts, untouched by this task)', async () => {
 		await (await composeRoute.PUT(makeComposeEvent({ content: 'x', restart: true, pull: false }))).json();
 

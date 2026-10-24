@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import { listComposeStacks, deployStack, saveStackComposeFile, writeStackEnvFile, writeRawStackEnvFile, saveStackEnvVarsToDb } from '$lib/server/stacks';
+import { deployPullPolicy } from '$lib/server/compose-args';
 import { EnvironmentNotFoundError, DockerConnectionError } from '$lib/server/docker';
 import { upsertStackSource, getStackSources, secretProviderExists } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
@@ -89,7 +90,7 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
  * summary: Create and (optionally) deploy a compose stack
  * description: Writes the compose + .env to the stack dir, stores secrets in the DB, and with start deploys it. Can bind a secret provider. Target environment comes from the env query param, or from envId/environmentId in the body when the query is absent.
  * query: env:integer Target environment id (takes precedence over envId/environmentId in the body)
- * body: {name:string!, compose:string!, composePath:string, envPath:string, envVars:array<object>, rawEnvContent:string, secretProviderId:integer, start:boolean, envId:integer, environmentId:integer, pull:boolean, build:boolean, forceRecreate:boolean}
+ * body: {name:string!, compose:string!, composePath:string, envPath:string, envVars:array<object>, rawEnvContent:string, secretProviderId:integer, start:boolean, envId:integer, environmentId:integer, pull:boolean, respectPullPolicy:boolean, build:boolean, forceRecreate:boolean}
  * resp-400: Invalid request (e.g. missing name/compose, or secretProviderId wrong type)
  * resp-403: Permission denied (needs stacks:create; binding a secret provider also needs secrets:view)
  * resp-500: Failed to create or deploy the stack
@@ -123,7 +124,7 @@ export const POST: RequestHandler = async (event) => {
 	}
 
 	try {
-		const { name, compose, start, envVars, rawEnvContent, composePath, envPath, secretProviderId, pull, build, forceRecreate } = body;
+		const { name, compose, start, envVars, rawEnvContent, composePath, envPath, secretProviderId, pull, respectPullPolicy, build, forceRecreate } = body;
 
 		if (!name || typeof name !== 'string') {
 			return json({ error: 'Stack name is required' }, { status: 400 });
@@ -289,7 +290,7 @@ export const POST: RequestHandler = async (event) => {
 					build: buildOpt,
 					// pullPolicy undefined (pull unchecked) also skips deployStack's post-deploy
 					// reconcileStackPendingUpdates() call -- accepted tradeoff, not a bug.
-					pullPolicy: pullOpt ? 'always' : undefined,
+					pullPolicy: deployPullPolicy(pullOpt, respectPullPolicy),
 					composePath: composePath || undefined,
 					envPath: envPath || undefined,
 					onLine: (line) => send('progress', { type: 'line', line })

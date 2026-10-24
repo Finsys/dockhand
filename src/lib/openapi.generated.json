@@ -27245,6 +27245,9 @@
                   "pull": {
                     "type": "boolean"
                   },
+                  "respectPullPolicy": {
+                    "type": "boolean"
+                  },
                   "build": {
                     "type": "boolean"
                   },
@@ -27271,6 +27274,7 @@
                 "envId": 0,
                 "environmentId": 0,
                 "pull": true,
+                "respectPullPolicy": true,
                 "build": true,
                 "forceRecreate": true
               }
@@ -27624,6 +27628,9 @@
                   "pull": {
                     "type": "boolean"
                   },
+                  "respectPullPolicy": {
+                    "type": "boolean"
+                  },
                   "build": {
                     "type": "boolean"
                   },
@@ -27645,6 +27652,7 @@
                 "restart": true,
                 "secretProviderId": 0,
                 "pull": true,
+                "respectPullPolicy": true,
                 "build": true,
                 "forceRecreate": true
               }
@@ -27803,6 +27811,9 @@
                 "type": "object",
                 "properties": {
                   "pull": {
+                    "type": "boolean"
+                  },
+                  "respectPullPolicy": {
                     "type": "boolean"
                   },
                   "build": {

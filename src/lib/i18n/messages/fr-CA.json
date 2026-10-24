@@ -2951,6 +2951,8 @@
 	"stacks_redeploy_trigger_title": "Redéployer",
 	"stacks_redeploy_more_options": "Plus d'options de déploiement",
 	"stacks_redeploy_pull_images": "Télécharger les images",
+	"stacks_redeploy_respect_pull_policy": "Respecter pull_policy",
+	"stacks_redeploy_respect_pull_policy_hint": "Exécute d'abord docker compose pull, qui suit la pull_policy de chaque service : les services réglés sur never ou build, ou sur missing avec l'image déjà présente, ne sont pas téléchargés. Un pull en échec est journalisé et le déploiement continue, mais il peut interrompre le téléchargement des autres services, qui gardent alors leurs images actuelles.",
 	"stacks_redeploy_build_images": "Construire les images",
 	"stacks_redeploy_force_recreate": "Forcer la recréation",
 	"stacks_redeploy_deploying": "Déploiement...",
