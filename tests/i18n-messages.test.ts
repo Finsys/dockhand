@@ -23,7 +23,7 @@ import { fileURLToPath } from 'node:url';
  * keeps it complete as each area lands.
  */
 
-const COMPLETE_LOCALES = ['de'];
+const COMPLETE_LOCALES = ['de', 'es-ES'];
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const MESSAGES = join(ROOT, 'src/lib/i18n/messages');
