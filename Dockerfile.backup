@@ -10,12 +10,12 @@
 # (use write-capable dockerhub token so the Docker Hub push authorizes)
 # (revert rclone — the rclone: backend is unfinished/removed; see vault rclone.md)
 # (rebuild: registry GC orphaned a helper-image blob; force a clean multi-arch republish)
-FROM alpine:3.21 AS os-builder
+FROM alpine:3.24 AS os-builder
 
 ARG TARGETARCH
 WORKDIR /work
 
-ARG APKO_VERSION=0.30.34
+ARG APKO_VERSION=1.4.13
 RUN apk add --no-cache curl \
     && ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "arm64" || echo "amd64") \
     && curl -sL "https://github.com/chainguard-dev/apko/releases/download/v${APKO_VERSION}/apko_${APKO_VERSION}_linux_${ARCH}.tar.gz" \

@@ -9,14 +9,14 @@
 # -----------------------------------------------------------------------------
 # Stage 1: OS Generator (Alpine + apko tool)
 # -----------------------------------------------------------------------------
-FROM alpine:3.21 AS os-builder
+FROM alpine:3.24 AS os-builder
 
 ARG TARGETARCH
 
 WORKDIR /work
 
 # Install apko tool
-ARG APKO_VERSION=0.30.34
+ARG APKO_VERSION=1.4.13
 RUN apk add --no-cache curl unzip \
     && ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "arm64" || echo "amd64") \
     && curl -sL "https://github.com/chainguard-dev/apko/releases/download/v${APKO_VERSION}/apko_${APKO_VERSION}_linux_${ARCH}.tar.gz" \
@@ -101,7 +101,7 @@ RUN cp -r node_modules/better-sqlite3/build /tmp/better-sqlite3-build \
     && rm -rf node_modules/@types /tmp/better-sqlite3-build
 
 # Build Go collector
-FROM --platform=$BUILDPLATFORM golang:1.26.9 AS go-builder
+FROM --platform=$BUILDPLATFORM golang:1.27.3 AS go-builder
 ARG TARGETARCH
 WORKDIR /app
 COPY collector/ ./collector/
