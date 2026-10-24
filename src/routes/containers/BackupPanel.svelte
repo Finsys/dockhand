@@ -24,7 +24,7 @@
 	import { watchJob } from '$lib/utils/sse-fetch';
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
 	import { Checkbox } from '$lib/components/ui/checkbox';
-	import { getRepoTypeIcon, parseRetention, parseOptions, retentionSummary as getRetentionSummary, formatCron, runBackupAction, classifyJobResult, tagLogLine, fetchBackupExecutions, pickDuplicateDestinationId, duplicateStartsEnabled, type BackupAction, type BackupFormState } from '$lib/utils/backup';
+	import { getRepoTypeIcon, parseRetention, parseOptions, retentionSummary as getRetentionSummary, formatCron, runBackupAction, classifyJobResult, tagLogLine, fetchBackupExecutions, pickDuplicateDestinationId, duplicateStartsEnabled, scheduleToSave, retentionOnScheduleToggle, type RetentionFields, type BackupAction, type BackupFormState } from '$lib/utils/backup';
 	import { cronstrueLocale } from '$lib/i18n/cron';
 	import { reconcileSelectedVolumeKeys, fileBindKeys } from '$lib/utils/mounts';
 	import { m } from '$lib/paraglide/messages.js';
@@ -101,6 +101,9 @@
 	let isNew = $state(false);
 	let editDestinationId = $state(0);
 	let editEnabled = $state(true);
+	// Off for a manual (run-once) config: a save then keeps it manual, with no cron.
+	let editScheduled = $state(true);
+	let retentionBeforeSchedule: RetentionFields | null = null;
 	let editSchedule = $state('0 2 * * *');
 	let editScheduleInvalid = $state(false);
 	let editKeepLast = $state(7);
@@ -225,6 +228,8 @@
 		duplicating = false;
 		editDestinationId = destinations[0]?.id || 0;
 		editEnabled = true;
+		editScheduled = true;
+		retentionBeforeSchedule = null;
 		editSchedule = '0 2 * * *';
 		editKeepLast = 7; editKeepDaily = 0; editKeepWeekly = 0; editKeepMonthly = 0; editKeepYearly = 0;
 		editExclude = ''; editExcludeCaches = true; editCompression = 'auto'; editLimitUpload = ''; editLimitDownload = '';
@@ -240,6 +245,8 @@
 		isNew = false;
 		editDestinationId = cfg.destinationId;
 		editEnabled = cfg.enabled;
+		editScheduled = !!cfg.schedule;
+		retentionBeforeSchedule = null;
 		editSchedule = cfg.schedule || '0 2 * * *';
 		const ret = parseRetention(cfg.retention);
 		editKeepLast = ret.keepLast || 0;
@@ -264,12 +271,21 @@
 		showAdvanced = false;
 	}
 
+	function onScheduledToggle(on: boolean) {
+		if (on) editEnabled = editingConfig?.schedule ? editingConfig.enabled : true;
+		const current = { keepLast: editKeepLast, keepDaily: editKeepDaily, keepWeekly: editKeepWeekly, keepMonthly: editKeepMonthly, keepYearly: editKeepYearly };
+		const next = retentionOnScheduleToggle(on, current, retentionBeforeSchedule);
+		({ keepLast: editKeepLast, keepDaily: editKeepDaily, keepWeekly: editKeepWeekly, keepMonthly: editKeepMonthly, keepYearly: editKeepYearly } = next.retention);
+		retentionBeforeSchedule = next.saved;
+	}
+
 	/** Open a NEW-schedule form prefilled from an existing config (#1578). */
 	function startDuplicateConfig(cfg: BackupConfig) {
 		startEditConfig(cfg);
 		editingConfig = null;
 		isNew = true;
 		duplicating = true;
+		editScheduled = true;
 		editEnabled = duplicateStartsEnabled(cfg);
 		editDestinationId = pickDuplicateDestinationId(
 			cfg.destinationId,
@@ -300,8 +316,9 @@
 		if (!editingConfig) return false;
 		const cfg = editingConfig;
 		if (editDestinationId !== cfg.destinationId) return true;
-		if (editEnabled !== cfg.enabled) return true;
-		if (editSchedule !== (cfg.schedule || '0 2 * * *')) return true;
+		if (editScheduled !== !!cfg.schedule) return true;
+		if (editScheduled && editEnabled !== cfg.enabled) return true;
+		if (editScheduled && editSchedule !== (cfg.schedule || '0 2 * * *')) return true;
 		const ret = parseRetention(cfg.retention);
 		if (editKeepLast !== (ret.keepLast || 0)) return true;
 		if (editKeepDaily !== (ret.keepDaily || 0)) return true;
@@ -371,7 +388,7 @@
 		// time via the helper's localRepoGuard rather than being blocked up front.
 		// Cron only matters when the schedule will be persisted. run-once
 		// clears it server-side so the field value is irrelevant.
-		if ((action === 'save' || action === 'save-run') && editScheduleInvalid) {
+		if ((action === 'save' || action === 'save-run') && editScheduled && editScheduleInvalid) {
 			toast.error(m.containers_backup_schedule_invalid());
 			return;
 		}
@@ -394,8 +411,7 @@
 				form: currentForm(),
 				action,
 				editingConfigId: editingConfig?.id ?? null,
-				schedule: editSchedule,
-				enabled: editEnabled,
+				...scheduleToSave(editScheduled, editSchedule, editEnabled),
 				onStarted: runsBackup ? (id) => (progressConfigId = id) : undefined,
 				onProgress: runsBackup ? (line) => {
 					const msg = (line.data as { message?: string } | null)?.message;
@@ -695,14 +711,23 @@
 						env={fullEnv}
 						triggerClass="h-9 w-[220px] flex-shrink-0"
 					/>
-					<CronEditor bind:value={editSchedule} bind:invalid={editScheduleInvalid} />
+					{#if editScheduled}<CronEditor bind:value={editSchedule} bind:invalid={editScheduleInvalid} />{/if}
 				</div>
 
 				<!-- Toggles -->
-				<div class="flex items-center gap-3 max-w-md">
-					<TogglePill bind:checked={editEnabled} />
-					<Label class="text-xs">{m.containers_backup_enabled()}</Label>
-				</div>
+				{#if editingConfig}
+					<!-- Turning a schedule on shows the config enabled, as the server stores it. -->
+					<div class="flex items-center gap-3 max-w-md">
+						<TogglePill bind:checked={editScheduled} onchange={onScheduledToggle} />
+						<Label class="text-xs">{m.containers_backup_on_schedule()}</Label>
+					</div>
+				{/if}
+				{#if editScheduled}
+					<div class="flex items-center gap-3 max-w-md">
+						<TogglePill bind:checked={editEnabled} />
+						<Label class="text-xs">{m.containers_backup_enabled()}</Label>
+					</div>
+				{/if}
 				<div class="flex items-center gap-3 max-w-md">
 					<TogglePill bind:checked={editStopBefore} />
 					<Label class="text-xs">{type === 'stack' ? m.containers_backup_stop_stack_during() : m.containers_backup_stop_container_during()}</Label>
@@ -825,7 +850,7 @@
 				<div class="flex justify-end gap-2 pt-2 border-t">
 					<Button size="sm" variant="outline" onclick={cancelEdit}>{m.containers_backup_cancel()}</Button>
 					{#if editingConfig}
-						<Button size="sm" onclick={() => submitForm('save')} disabled={saving || editScheduleInvalid}>
+						<Button size="sm" onclick={() => submitForm('save')} disabled={saving || (editScheduled && editScheduleInvalid)}>
 							{#if saving}<Loader2 class="w-3.5 h-3.5 mr-1 animate-spin" />{:else}<Save class="w-3.5 h-3.5 mr-1" />{/if}
 							{m.containers_backup_save()}
 						</Button>

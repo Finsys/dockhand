@@ -88,7 +88,7 @@ export const PUT: RequestHandler = async (event) => {
 	const resolvedEnabled = resolveEnabledOnScheduleChange({
 		requestedEnabled: body.enabled,
 		existingSchedule: existing.schedule,
-		newSchedule: body.schedule ?? existing.schedule
+		newSchedule: body.schedule !== undefined ? body.schedule : existing.schedule
 	});
 
 	try {
