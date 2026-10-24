@@ -143,12 +143,12 @@ export type StackDirEntry = { name: string; type: 'dir' | 'file'; size: number; 
 
 /**
  * Tag each stack-dir entry that is ALSO captured as its own volume/bind channel, so the picker
- * can show it as non-deselectable ("captured as a bind mount below") - the user controls it in
- * the Volumes section, not here. An entry is a bind when EITHER `<hostPath>/<name>` matches a
+ * can label it ("also a bind below"). It stays deselectable: an unticked bind is still captured
+ * in the stack files. An entry is a bind when EITHER `<hostPath>/<name>` matches a
  * daemon-reported bind source (runtime) OR its name is a compose relative-bind dir. The compose
  * source is load-bearing: `bindSources` comes from inspecting the RUNNING containers, so a STOPPED
- * stack reports none and a bind dir (e.g. `./memos`) would wrongly show as a plain, deselectable
- * stack file. `bindDirNames` (from the compose, always available) fixes that. Pure + unit-testable.
+ * stack reports none and a bind dir (e.g. `./memos`) would show as a plain stack file.
+ * `bindDirNames` (from the compose, always available) fixes that. Pure + unit-testable.
  */
 export function tagCapturedEntries(entries: StackDirEntry[], hostPath: string, bindSources: string[], bindDirNames: string[] = []): StackDirEntry[] {
 	const base = hostPath.replace(/\/+$/, '');
