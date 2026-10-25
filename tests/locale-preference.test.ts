@@ -27,10 +27,11 @@ describe('asLocale', () => {
 	test('accepts a locale this build carries', () => {
 		expect(asLocale('pl')).toBe('pl');
 		expect(asLocale('zh-CN')).toBe('zh-CN');
+		expect(asLocale('es-ES')).toBe('es-ES');
 	});
 
 	test('refuses anything else, so a stale or hand-edited value cannot take effect', () => {
-		for (const bad of ['xx', 'PL', 'zh', '', 'en-US', null, undefined, 42, {}]) {
+		for (const bad of ['xx', 'PL', 'zh', 'ES', 'es', '', 'en-US', null, undefined, 42, {}]) {
 			expect(asLocale(bad)).toBeUndefined();
 		}
 	});

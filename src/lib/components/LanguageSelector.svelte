@@ -31,6 +31,7 @@
 	/** Endonyms: each language is listed the way its own speakers write it. */
 	const NAMES: Record<string, string> = {
 		en: 'English',
+		'es-ES': 'Español (España)',
 		de: 'Deutsch',
 		'fr-FR': 'Français',
 		'fr-CA': 'Français (Canada)',
