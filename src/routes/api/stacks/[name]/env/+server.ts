@@ -4,6 +4,7 @@ import { getStackEnvVars, setStackEnvVars, getStackSource, getStackInjectedSecre
 import { findStackDir } from '$lib/server/stacks';
 import { authorize } from '$lib/server/authorize';
 import { existsSync, readFileSync } from 'node:fs';
+import { isForbiddenStackPath } from '$lib/server/fs-guard';
 import { join, dirname } from 'node:path';
 import { parseEnvFileForForm } from '$lib/utils/env-file-values';
 import type { RequestHandler } from './$types';
@@ -25,7 +26,7 @@ import type { RequestHandler } from './$types';
  * query: env:integer Environment id the stack belongs to
  * resp-400: Invalid stack name (or malformed request body)
  * resp-200: {variables:array<{key:string!, value:string!, isSecret:boolean!}>!, injectedSecretKeys:array<string>, secretProvider:object}
- * resp-403: Permission denied (needs stacks:view)
+ * resp-403: Permission denied (needs stacks:view), or the env file path is a protected location
  * resp-500: Failed to read env vars
  */
 export const GET: RequestHandler = async ({ params, url, cookies }) => {
@@ -85,6 +86,10 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 			}
 		} else {
 			// Internal/adopted stacks: non-secrets from file, secrets from DB
+			// The stored path is client-chosen; never read or write a protected location through it.
+			if (envFilePath && isForbiddenStackPath(envFilePath)) {
+				return json({ error: 'Env file path is not allowed' }, { status: 403 });
+			}
 			if (envFilePath && existsSync(envFilePath)) {
 				try {
 					const content = readFileSync(envFilePath, 'utf-8');

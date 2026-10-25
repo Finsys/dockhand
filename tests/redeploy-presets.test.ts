@@ -10,7 +10,7 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { buildComposeOperationArgs } from '../src/lib/server/compose-args';
+import { buildComposeOperationArgs, deployPullPolicy, pullSteps } from '../src/lib/server/compose-args';
 import {
 	REDEPLOY_PRESETS,
 	composeCommandFor,
@@ -20,23 +20,27 @@ import {
 
 const ALL_CHOICES: DeployChoice[] = [false, true].flatMap((pull) =>
 	[false, true].flatMap((build) =>
-		[false, true].map((forceRecreate) => ({ pull, build, forceRecreate }))
+		[false, true].flatMap((forceRecreate) =>
+			[false, true].map((respectPullPolicy) => ({ pull, build, forceRecreate, respectPullPolicy }))
+		)
 	)
 );
 
-/** What the server would actually run for the same choice. */
+/** What the server would actually run for the same choice: the deploy route's policy, then deployStack's steps. */
 function serverCommand(choice: DeployChoice): string {
-	const args = buildComposeOperationArgs('up', {
+	const { separatePull, upPullPolicy } = pullSteps(deployPullPolicy(choice.pull, choice.respectPullPolicy));
+	const up = buildComposeOperationArgs('up', {
 		forceRecreate: choice.forceRecreate,
 		build: choice.build,
-		...(choice.pull ? { pullPolicy: 'always' as const } : {})
+		pullPolicy: upPullPolicy
 	});
-	return `docker compose ${args.join(' ')}`;
+	const upCommand = `docker compose ${up.join(' ')}`;
+	return separatePull ? `docker compose ${buildComposeOperationArgs('pull').join(' ')}; ${upCommand}` : upCommand;
 }
 
 describe('the preview matches what the server runs', () => {
-	test('all eight combinations agree, flag for flag and in order', () => {
-		expect(ALL_CHOICES).toHaveLength(8);
+	test('all sixteen combinations agree, flag for flag and in order', () => {
+		expect(ALL_CHOICES).toHaveLength(16);
 		for (const choice of ALL_CHOICES) {
 			expect(composeCommandFor(choice)).toBe(serverCommand(choice));
 		}
@@ -51,6 +55,18 @@ describe('the preview matches what the server runs', () => {
 	test('force recreate is the only difference when it is ticked', () => {
 		expect(composeCommandFor({ pull: false, build: false, forceRecreate: true })).toBe(
 			'docker compose up -d --remove-orphans --force-recreate'
+		);
+	});
+
+	test('respecting pull_policy pulls separately and drops --pull always', () => {
+		expect(composeCommandFor({ pull: true, respectPullPolicy: true, build: false, forceRecreate: false })).toBe(
+			'docker compose pull; docker compose up -d --remove-orphans'
+		);
+	});
+
+	test('respecting pull_policy without pull changes nothing', () => {
+		expect(composeCommandFor({ pull: false, respectPullPolicy: true, build: false, forceRecreate: false })).toBe(
+			'docker compose up -d --remove-orphans'
 		);
 	});
 

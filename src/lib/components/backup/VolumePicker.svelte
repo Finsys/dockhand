@@ -35,6 +35,8 @@
 		emptyLabel?: string;
 		/** When true, surface the bind-mount-portability warning when binds are present. */
 		showBindWarning?: boolean;
+		/** Keys of binds whose host source is a single file (shown with a file icon). */
+		fileKeys?: Set<string>;
 	}
 
 	let {
@@ -42,7 +44,8 @@
 		allVolumes = $bindable(),
 		selectedVolumes = $bindable(),
 		emptyLabel = m.backupui_no_volumes_detected(),
-		showBindWarning = true
+		showBindWarning = true,
+		fileKeys
 	}: Props = $props();
 
 	// Unbackupable binds (docker.sock, host system paths) are listed for context but
@@ -88,7 +91,7 @@
 						onCheckedChange={() => !vol.unbackupable && toggleVolume(vol.key)}
 						class="h-3.5 w-3.5"
 					/>
-					<MountTypeBadge type={vol.mountType} size="sm" />
+					<MountTypeBadge type={vol.mountType} size="sm" file={fileKeys?.has(vol.key) ?? false} />
 						<span class="font-mono truncate">{vol.name}</span>
 						{#if vol.source && vol.source !== vol.name}
 							<span class="text-muted-foreground font-mono truncate">{m.backupui_from_source({ source: vol.source })}</span>

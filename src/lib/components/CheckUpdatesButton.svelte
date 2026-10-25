@@ -3,51 +3,24 @@
 	import { Button } from '$lib/components/ui/button';
 	import { CircleArrowUp, Check, XCircle } from 'lucide-svelte';
 	import { toast } from 'svelte-sonner';
+	import { noUpdatesOutcome, summarizeCheck, type UpdateCheckResultItem, type PinnedDigestItem, type NewerVersionItem, type FailedCheckItem, type CheckResult } from '$lib/utils/update-check-outcome';
+	import CheckUpdatesToast from './CheckUpdatesToast.svelte';
 	import { appendEnvParam } from '$lib/stores/environment';
 	import { watchJob } from '$lib/utils/sse-fetch';
 	import type { NewerVersion } from '$lib/types';
 	import { m } from '$lib/paraglide/messages.js';
 
-	export interface UpdateCheckResultItem {
-		containerId: string;
-		containerName: string;
-		imageName: string;
-	}
-
-	/**
-	 * A container running `repo:tag@sha256:...` whose tag now resolves to a different
-	 * digest. Reported, never applied: pulling that reference returns the pinned manifest,
-	 * so the digest in the user's compose is what has to change.
-	 */
-	export interface PinnedDigestItem {
-		containerId: string;
-		containerName: string;
-		imageName: string;
-		newDigest?: string;
-	}
-
-	/** A container that has a newer VERSION tag (semver) — independent of digest updates. */
-	export interface NewerVersionItem {
-		containerId: string;
-		newerVersion: NewerVersion;
-	}
-
-	export interface FailedCheckItem {
-		containerId: string;
-		containerName: string;
-		imageName: string;
-		error: string;
-	}
-
 	interface Props {
 		envId: number | null;
 		/** When true and no check is running, the button reflects the "updates found" (green) state — e.g. from persisted pending updates loaded on mount. */
 		hasPendingUpdates?: boolean;
+		/** Only these containers count toward the result; the stacks page passes its stacks' containers. */
+		containerIds?: Set<string>;
 		/** Called when a check finishes with the containers that have updates and any failures. */
 		onComplete?: (result: {
 			withUpdates: UpdateCheckResultItem[];
 			failed: FailedCheckItem[];
-			newerVersions: NewerVersionItem[];
+			newerVersions: NewerVersionItem<NewerVersion>[];
 			/** Containers whose tag moved to a new digest but which stay pinned to the old one. */
 			pinned: PinnedDigestItem[];
 			/** Containers whose update is held by the minimum image age, as id -> hours left. */
@@ -55,7 +28,7 @@
 		}) => void;
 	}
 
-	let { envId, hasPendingUpdates = false, onComplete }: Props = $props();
+	let { envId, hasPendingUpdates = false, containerIds, onComplete }: Props = $props();
 
 	type Status = 'idle' | 'checking' | 'found' | 'none' | 'error';
 	let status = $state<Status>('idle');
@@ -91,14 +64,15 @@
 	// When idle, reflect persisted pending updates as the "found" (green) state.
 	const displayStatus = $derived(status === 'idle' && hasPendingUpdates ? 'found' : status);
 
-	function showFailedChecksToast(failed: FailedCheckItem[], prefix: string) {
-		const details = failed.map((f) => `• ${f.containerName}: ${f.error}`).join('\n');
-		toast.warning(m.updates_failed_checks_summary({ summary: prefix, count: failed.length }), {
-			description: details,
-			descriptionClass: 'whitespace-pre-line',
-			class: '!w-[28rem] !max-w-[28rem]',
-			duration: Infinity,
-			action: { label: 'OK', onClick: () => {} }
+	type SummaryCounts = { updates: number; newerTags: number; pinned: number; coolingDown: number };
+	const NO_COUNTS: SummaryCounts = { updates: 0, newerTags: 0, pinned: 0, coolingDown: 0 };
+
+	// A toast with failures stays until dismissed, so the list can be read.
+	function showSummaryToast(counts: SummaryCounts, failed: FailedCheckItem[], headline?: string) {
+		toast.custom(CheckUpdatesToast, {
+			componentProps: { ...counts, failed, headline, envId },
+			duration: failed.length > 0 ? Infinity : undefined,
+			unstyled: true
 		});
 	}
 
@@ -140,37 +114,24 @@
 			}
 
 			unlockWidth();
-
-			// A `repo:tag@sha256:...` image is left out of the updatable set on purpose:
-			// pulling that reference returns the pinned manifest, so the move is reported
-			// and the digest in the user's compose is theirs to replace.
-			const withUpdates: UpdateCheckResultItem[] = data.results
-				.filter((r: any) => r.hasUpdate && !r.pinnedToDigest && !r.systemContainer && !r.updateDisabled && !r.isLocalImage)
-				.map((r: any) => ({ containerId: r.containerId, containerName: r.containerName, imageName: r.imageName }));
-			const pinned: PinnedDigestItem[] = data.results
-				.filter((r: any) => r.hasUpdate && r.pinnedToDigest && !r.systemContainer && !r.updateDisabled)
-				.map((r: any) => ({ containerId: r.containerId, containerName: r.containerName, imageName: r.imageName, newDigest: r.newDigest }));
-			const failed: FailedCheckItem[] = data.results
-				.filter((r: any) => r.error && !r.hasUpdate)
-				.map((r: any) => ({ containerId: r.containerId, containerName: r.containerName, imageName: r.imageName, error: r.error }));
-			const deferred = data.results.filter((r: any) => r.releaseAgeRemainingHours && !r.systemContainer && !r.updateDisabled);
-			// Semver suggestions are independent of digest updates: a container can be
-			// digest-current yet run an outdated version tag.
-			const newerVersions: NewerVersionItem[] = data.results
-				.filter((r: any) => r.newerVersion && !r.systemContainer && !r.updateDisabled)
-				.map((r: any) => ({ containerId: r.containerId, newerVersion: r.newerVersion }));
-
-			// A newer version tag is a real result even when no digest update exists,
-			// so it counts toward the "found" state and the summary message.
-			const semverNote = newerVersions.length > 0
-				? m.updates_newer_version_tags({ count: newerVersions.length })
-				: '';
+			const { withUpdates, pinned, failed, deferred, newerVersions, counts } = summarizeCheck(data.results as CheckResult<NewerVersion>[], containerIds);
 
 			if (withUpdates.length === 0 && newerVersions.length === 0 && pinned.length === 0) {
-				// Keep the "Latest" status until re-check / env-switch — don't auto-revert (#1019)
-				status = 'none';
+				const outcome = noUpdatesOutcome(counts.failed, counts.checkable, deferred.length);
+				if (outcome.status === 'error') {
+					// Every check failed: nothing is known to be current, so no "Latest" state.
+					failError();
+				} else {
+					// Keep the "Latest" status until re-check / env-switch - don't auto-revert (#1019)
+					status = 'none';
+				}
 				if (failed.length > 0) {
-					showFailedChecksToast(failed, deferred.length > 0 ? m.updates_cooling_down({ count: deferred.length }) : m.updates_all_up_to_date());
+					// Held updates show as their own count; a headline stands in only when there is none.
+					if (outcome.headline === 'cooling-down') {
+						showSummaryToast({ ...NO_COUNTS, coolingDown: deferred.length }, failed);
+					} else {
+						showSummaryToast(NO_COUNTS, failed, outcome.headline === 'all-failed' ? m.updates_check_failed_all() : m.updates_rest_up_to_date());
+					}
 				} else if (deferred.length > 0) {
 					toast.info(m.updates_cooling_down({ count: deferred.length }), {
 						description: deferred.map((r: any) => m.updates_hours_remaining({ name: r.containerName, count: r.releaseAgeRemainingHours })).join('\n'),
@@ -181,18 +142,12 @@
 				}
 			} else {
 				status = 'found';
-				const parts = [
-					withUpdates.length > 0 ? m.updates_available_count({ count: withUpdates.length }) : '',
-					semverNote,
-					pinned.length > 0 ? m.updates_pinned_digest_short({ count: pinned.length }) : '',
-					deferred.length > 0 ? m.updates_cooling_down_short({ count: deferred.length }) : ''
-				].filter(Boolean);
-				const summary = parts.join(', ');
-				if (failed.length > 0) {
-					showFailedChecksToast(failed, summary);
-				} else {
-					toast.info(summary);
-				}
+				// A newer version tag is a real result even when no digest update exists,
+				// so it counts toward the "found" state and the summary.
+				showSummaryToast(
+					{ updates: withUpdates.length, newerTags: newerVersions.length, pinned: pinned.length, coolingDown: deferred.length },
+					failed
+				);
 			}
 
 			onComplete?.({

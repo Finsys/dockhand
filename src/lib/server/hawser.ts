@@ -10,7 +10,7 @@ import { transportTimeoutError } from './docker-probe-core';
 import { logContainerEvent, type ContainerEventAction } from './db.js';
 import { containerEventEmitter } from './event-collector.js';
 import { sendEnvironmentNotification } from './notifications/index.js';
-import { isNotifyDisabledByLabel } from './container-labels.js';
+import { shouldNotifyContainerEvent } from './container-event-notify.js';
 import { isHealthTransition } from './subprocess-manager.js';
 import { pushMetric } from './metrics-store.js';
 import { secureGetRandomValues, secureRandomUUID } from './crypto-fallback.js';
@@ -221,9 +221,8 @@ export async function handleEdgeContainerEvent(
 		// Broadcast to SSE clients
 		containerEventEmitter.emit('event', savedEvent);
 
-		// Check dockhand.notify label before sending notification
-		// Docker includes container labels in actorAttributes
-		if (!isNotifyDisabledByLabel(event.actorAttributes)) {
+		// Docker includes container labels in actorAttributes.
+		if (shouldNotifyContainerEvent(event.containerId, event.action, event.actorAttributes)) {
 			const actionLabel = event.action.charAt(0).toUpperCase() + event.action.slice(1);
 			const containerLabel = event.containerName || event.containerId.substring(0, 12);
 			const notificationType =

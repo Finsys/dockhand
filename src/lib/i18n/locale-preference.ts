@@ -1,10 +1,12 @@
 /**
  * Which language the interface speaks, and where that choice lives.
  *
- * Paraglide decides the locale the first time a message renders, before anything
- * could be fetched, so the choice lives in localStorage and is read synchronously
- * at startup. It is a per-device preference: a shared or auth-less install has no
- * user row to hang it on.
+ * Paraglide decides the locale the first time a message renders, so the choice is
+ * read synchronously from localStorage. The server keeps it too (per user with
+ * auth, for the install without). The client init hook copies it into localStorage
+ * before the first render, and the root layout does it once the signed-in user is
+ * known (the sign-in page cannot read it), so a browser that clears its storage on
+ * close still gets it back.
  *
  * Paraglide's own `cookie` and `localStorage` strategies cannot be used for this:
  * its `getLocale()` writes the resolved locale back through `setLocale()` on first
@@ -80,4 +82,120 @@ export function makeLocaleGetter(
 		}
 		return resolved;
 	};
+}
+
+export const LANGUAGE_PREFERENCE_URL = '/api/preferences/language';
+
+/**
+ * The language the server keeps for this user or install: a locale, null when none is
+ * chosen, or undefined when it could not say (signed out, offline, too slow). Gives up
+ * after `timeoutMs` so a slow server never holds the first render for long.
+ */
+export async function fetchServerLocale(fetchFn: typeof fetch, timeoutMs = 1500): Promise<Locale | null | undefined> {
+	try {
+		const res = await fetchFn(LANGUAGE_PREFERENCE_URL, { signal: AbortSignal.timeout(timeoutMs) });
+		if (!res.ok) return undefined;
+		const data = await res.json();
+		return data?.language === null ? null : asLocale(data?.language);
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * What localStorage should hold once the server answered: its choice wins, since it
+ * follows the user across browsers. No server choice leaves the local one alone, so a
+ * choice made before the server kept it is not lost.
+ */
+export function storedAfterServer(server: Locale | null | undefined, local: string | null): string | null {
+	return server ?? local;
+}
+
+/**
+ * The locale to switch to once the signed-in user is known: the server's choice when it
+ * differs from the one rendered, otherwise null. Signing in does not reload the page, so
+ * the locale picked before the user was known can be the wrong one.
+ */
+export function localeToApply(server: Locale | null | undefined, rendered: Locale): Locale | null {
+	return server && server !== rendered ? server : null;
+}
+
+type LocaleStore = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
+
+/** Before the first render: copy the server's language into the store. Never throws. */
+export async function restoreServerLocale(fetchFn: typeof fetch, store: LocaleStore): Promise<void> {
+	const server = await fetchServerLocale(fetchFn);
+	try {
+		const next = storedAfterServer(server, store.getItem(LOCALE_STORAGE_KEY));
+		if (next) store.setItem(LOCALE_STORAGE_KEY, next);
+	} catch {
+		// A blocked store: the browser's language decides.
+	}
+}
+
+/** The user whose language still has to be checked, or undefined when there is none. */
+export function signedInUserToCheck(
+	auth: { loading: boolean; authEnabled: boolean; user: { id: number } | null | undefined },
+	checkedFor: number | undefined
+): number | undefined {
+	if (auth.loading || !auth.authEnabled || !auth.user || auth.user.id === checkedFor) return undefined;
+	return auth.user.id;
+}
+
+/** After sign-in: switch to the server's language with one reload when it differs from the rendered one. */
+export async function applySignedInLocale(
+	fetchFn: typeof fetch,
+	rendered: Locale,
+	store: LocaleStore,
+	reload: () => void
+): Promise<void> {
+	const next = localeToApply(await fetchServerLocale(fetchFn), rendered);
+	if (!next) return;
+	try {
+		store.setItem(LOCALE_STORAGE_KEY, next);
+	} catch {
+		return; // a blocked store would reload forever
+	}
+	reload();
+}
+
+export type ChooseResult = 'saved' | 'failed' | 'blocked' | 'ignored';
+
+/**
+ * Store a picked language: on the server first, since its copy wins on the next load and a
+ * failed save must not leave a local choice that the reload would undo; then locally, then
+ * reload. A request that errors or times out is checked once more with a GET, because the
+ * server may have saved it anyway.
+ */
+export async function chooseLanguage(
+	value: string,
+	fetchFn: typeof fetch,
+	store: LocaleStore,
+	reload: () => void,
+	timeoutMs = 5000
+): Promise<ChooseResult> {
+	const language = value === FOLLOW_BROWSER ? null : asLocale(value);
+	if (language === undefined) return 'ignored';
+	let saved = false;
+	try {
+		const res = await fetchFn(LANGUAGE_PREFERENCE_URL, {
+			method: 'PUT',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ language }),
+			signal: AbortSignal.timeout(timeoutMs)
+		});
+		saved = res.ok;
+	} catch {
+		saved = (await fetchServerLocale(fetchFn)) === language;
+	}
+	if (!saved) return 'failed';
+	try {
+		// An absent key, not a marker, is what hands the decision back to Accept-Language.
+		if (language === null) store.removeItem(LOCALE_STORAGE_KEY);
+		else store.setItem(LOCALE_STORAGE_KEY, language);
+	} catch {
+		return 'blocked';
+	}
+	reload();
+	return 'saved';
 }

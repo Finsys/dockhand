@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Dockhand API",
-    "version": "1.0.53",
+    "version": "1.0.55",
     "description": "Auto-generated from src/routes/**/+server.ts by scripts/generate-openapi.ts. Path, HTTP method, tag, and auth requirement are derived automatically from the route tree and hooks.server.ts PUBLIC_PATHS. Parameters, response status codes, and request body fields are additionally auto-detected from each handler’s own source (query params via url.searchParams, status codes via status:/error(), body fields via destructuring) — adding a new endpoint therefore requires ZERO manual spec edits to show up with real params/responses. An optional, additive `@openapi` JSDoc annotation on a handler replaces the generic auto-descriptions with hand-written summaries, exact types, and examples."
   },
   "servers": [
@@ -121,6 +121,9 @@
     },
     {
       "name": "roles"
+    },
+    {
+      "name": "scheduled-actions"
     },
     {
       "name": "schedules"
@@ -8319,7 +8322,7 @@
             "description": "Path is missing"
           },
           "403": {
-            "description": "Permission denied to access the path"
+            "description": "Permission denied (requires containers:exec, like reading a file)"
           },
           "404": {
             "description": "File not found"
@@ -20912,6 +20915,107 @@
         ]
       }
     },
+    "/api/preferences/language": {
+      "get": {
+        "operationId": "get_api_preferences_language",
+        "tags": [
+          "preferences"
+        ],
+        "summary": "Get the chosen interface language (null when the browser's language is followed)",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "language is a locale code, or null when the browser's language is followed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "language": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "example": {
+                  "language": "en"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Failed to get the language preference"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "operationId": "put_api_preferences_language",
+        "tags": [
+          "preferences"
+        ],
+        "summary": "Set the interface language; null goes back to following the browser",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "The stored language, a locale code or null",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "language": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "example": {
+                  "language": "en"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "language is not one of the interface languages, or null"
+          },
+          "500": {
+            "description": "Failed to save the language preference"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "language": {
+                    "type": "string"
+                  }
+                }
+              },
+              "example": {
+                "language": "en"
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/preferences/sidebar": {
       "get": {
         "operationId": "get_api_preferences_sidebar",
@@ -23569,13 +23673,251 @@
         ]
       }
     },
+    "/api/scheduled-actions/{containerName}": {
+      "get": {
+        "operationId": "get_api_scheduled-actions_containerName",
+        "tags": [
+          "scheduled-actions"
+        ],
+        "summary": "Get a container's scheduled start and stop times, from its dockhand.start.at / dockhand.stop.at labels when it carries them",
+        "parameters": [
+          {
+            "name": "containerName",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Container name (URL-encoded)"
+          },
+          {
+            "name": "env",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Environment the container belongs to (from GET /api/environments)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "startAt": {
+                      "type": "string"
+                    },
+                    "stopAt": {
+                      "type": "string"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "source": {
+                      "type": "string"
+                    },
+                    "labelErrors": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "systemContainer": {
+                      "type": "boolean"
+                    },
+                    "lastStarted": {
+                      "type": "string"
+                    },
+                    "lastStopped": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "enabled",
+                    "source",
+                    "labelErrors",
+                    "systemContainer"
+                  ]
+                },
+                "example": {
+                  "startAt": "07:00",
+                  "stopAt": "23:00",
+                  "enabled": true,
+                  "source": "ui",
+                  "labelErrors": [],
+                  "systemContainer": false,
+                  "lastStarted": null,
+                  "lastStopped": null
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The env query parameter is missing"
+          },
+          "403": {
+            "description": "Permission denied, or no access to the environment"
+          },
+          "500": {
+            "description": "Failed to read the schedule"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "operationId": "put_api_scheduled-actions_containerName",
+        "tags": [
+          "scheduled-actions"
+        ],
+        "summary": "Set a container's scheduled start and stop times (HH:MM every day, or a five-field cron expression); both empty removes the schedule",
+        "parameters": [
+          {
+            "name": "containerName",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Container name (URL-encoded)"
+          },
+          {
+            "name": "env",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Environment the container belongs to (from GET /api/environments)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "startAt": {
+                      "type": "string"
+                    },
+                    "stopAt": {
+                      "type": "string"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "source": {
+                      "type": "string"
+                    },
+                    "labelErrors": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "systemContainer": {
+                      "type": "boolean"
+                    },
+                    "lastStarted": {
+                      "type": "string"
+                    },
+                    "lastStopped": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "enabled",
+                    "source",
+                    "labelErrors",
+                    "systemContainer"
+                  ]
+                },
+                "example": {
+                  "startAt": "string",
+                  "stopAt": "string",
+                  "enabled": true,
+                  "source": "string",
+                  "labelErrors": [
+                    "string"
+                  ],
+                  "systemContainer": true,
+                  "lastStarted": "string",
+                  "lastStopped": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The env query parameter is missing, or a time is neither HH:MM nor a cron expression"
+          },
+          "403": {
+            "description": "Permission denied (needs schedules:edit and containers start and stop), no access to the environment, or a system container"
+          },
+          "404": {
+            "description": "Container not found"
+          },
+          "409": {
+            "description": "The container's labels set its schedule"
+          },
+          "500": {
+            "description": "Failed to save the schedule"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "startAt": {
+                    "type": "string"
+                  },
+                  "stopAt": {
+                    "type": "string"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                }
+              },
+              "example": {
+                "startAt": "07:00",
+                "stopAt": "0 23 * * 1-5",
+                "enabled": true
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/schedules": {
       "get": {
         "operationId": "get_api_schedules",
         "tags": [
           "schedules"
         ],
-        "summary": "List all schedules (container/env auto-updates, git syncs, image-prune, backups, repo maintenance, system jobs)",
+        "summary": "List all schedules (container/env auto-updates, scheduled container start/stop, git syncs, image-prune, backups, repo maintenance, system jobs)",
         "parameters": [],
         "responses": {
           "200": {
@@ -23683,7 +24025,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Schedule type (container_update, git_stack_sync, env_update_check, image_prune, backup, repo_prune, repo_check, repo_verify, system_cleanup)"
+            "description": "Schedule type (container_update, container_start, container_stop (removes that one time), git_stack_sync, env_update_check, image_prune, backup, repo_prune, repo_check, repo_verify, system_cleanup)"
           },
           {
             "name": "id",
@@ -23721,10 +24063,13 @@
             "description": "Invalid schedule id, invalid/unsupported type, or system_cleanup (cannot be removed)"
           },
           "403": {
-            "description": "Permission denied"
+            "description": "Permission denied (removing one container start/stop time while the other stays also needs containers start and stop)"
           },
           "404": {
             "description": "Schedule (or backup destination, for repo_* types) not found"
+          },
+          "409": {
+            "description": "A container start/stop set by the container's labels; remove the label instead"
           },
           "500": {
             "description": "Unexpected error while deleting the schedule"
@@ -23755,7 +24100,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Schedule type (container_update, git_stack_sync, system_cleanup, env_update_check, image_prune, backup, repo_prune, repo_check, repo_verify, deploy_log_reconcile)"
+            "description": "Schedule type (container_update, container_start, container_stop, git_stack_sync, system_cleanup, env_update_check, image_prune, backup, repo_prune, repo_check, repo_verify, deploy_log_reconcile)"
           },
           {
             "name": "id",
@@ -23798,7 +24143,7 @@
             "description": "Invalid schedule id/type, or the triggered task itself reported failure"
           },
           "403": {
-            "description": "Permission denied"
+            "description": "Permission denied (container_start/container_stop also need containers start/stop)"
           },
           "404": {
             "description": "Schedule, backup config, or backup destination not found (or backup feature disabled)"
@@ -23832,7 +24177,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Schedule type (container_update, git_stack_sync, env_update_check, image_prune, backup, repo_prune, repo_check, repo_verify, system_cleanup, deploy_log_reconcile)"
+            "description": "Schedule type (container_update, container_start, container_stop (toggles both of the container's times), git_stack_sync, env_update_check, image_prune, backup, repo_prune, repo_check, repo_verify, system_cleanup, deploy_log_reconcile)"
           },
           {
             "name": "id",
@@ -23875,7 +24220,7 @@
             "description": "Invalid schedule id, unsupported type, or system_cleanup/deploy_log_reconcile (cannot be paused)"
           },
           "403": {
-            "description": "Permission denied"
+            "description": "Permission denied (switching a container start/stop on also needs containers start and stop)"
           },
           "404": {
             "description": "Schedule, backup config, or backup destination not found"
@@ -26027,6 +26372,113 @@
         }
       }
     },
+    "/api/settings/pinned-digest-report": {
+      "get": {
+        "operationId": "get_api_settings_pinned-digest-report",
+        "tags": [
+          "settings"
+        ],
+        "summary": "Get whether a moved digest on a pinned image is reported (#1780)",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "enabled"
+                  ]
+                },
+                "example": {
+                  "enabled": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied (needs settings:view)"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "operationId": "post_api_settings_pinned-digest-report",
+        "tags": [
+          "settings"
+        ],
+        "summary": "Set whether a moved digest on a pinned image is reported (#1780)",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "success"
+                  ]
+                },
+                "example": {
+                  "success": true
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Permission denied (needs settings:edit)"
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "enabled"
+                ]
+              },
+              "example": {
+                "enabled": false
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/settings/scanner": {
       "get": {
         "operationId": "get_api_settings_scanner",
@@ -26793,6 +27245,9 @@
                   "pull": {
                     "type": "boolean"
                   },
+                  "respectPullPolicy": {
+                    "type": "boolean"
+                  },
                   "build": {
                     "type": "boolean"
                   },
@@ -26819,6 +27274,7 @@
                 "envId": 0,
                 "environmentId": 0,
                 "pull": true,
+                "respectPullPolicy": true,
                 "build": true,
                 "forceRecreate": true
               }
@@ -27172,6 +27628,9 @@
                   "pull": {
                     "type": "boolean"
                   },
+                  "respectPullPolicy": {
+                    "type": "boolean"
+                  },
                   "build": {
                     "type": "boolean"
                   },
@@ -27193,6 +27652,7 @@
                 "restart": true,
                 "secretProviderId": 0,
                 "pull": true,
+                "respectPullPolicy": true,
                 "build": true,
                 "forceRecreate": true
               }
@@ -27351,6 +27811,9 @@
                 "type": "object",
                 "properties": {
                   "pull": {
+                    "type": "boolean"
+                  },
+                  "respectPullPolicy": {
                     "type": "boolean"
                   },
                   "build": {
@@ -27907,7 +28370,7 @@
             "description": "Invalid stack name (or malformed request body)"
           },
           "403": {
-            "description": "Permission denied (needs stacks:view)"
+            "description": "Permission denied (needs stacks:view), or the env file path is a protected location"
           },
           "500": {
             "description": "Failed to read env vars"
@@ -28080,7 +28543,7 @@
             "description": "Invalid stack name (or malformed request body)"
           },
           "403": {
-            "description": "Permission denied (requires stacks:view, or environment access denied on enterprise)"
+            "description": "Permission denied (requires stacks:view, or environment access denied on enterprise), or the env file path is a protected location"
           },
           "500": {
             "description": "Failed to get environment file"
@@ -28153,7 +28616,7 @@
             "description": "Invalid body (content string required) or refusal to write a masked \"***\" placeholder"
           },
           "403": {
-            "description": "Permission denied (requires stacks:edit, or environment access denied on enterprise)"
+            "description": "Permission denied (requires stacks:edit, or environment access denied on enterprise), or the env file path is a protected location"
           },
           "500": {
             "description": "Failed to save environment file"
@@ -28641,7 +29104,7 @@
             "description": "oldDir and newComposePath are required, or the source directory does not exist"
           },
           "403": {
-            "description": "Permission denied (requires stacks:edit), or a supplied path is not allowed"
+            "description": "Permission denied (requires stacks:edit), a supplied path is not allowed, or oldDir is not the stack's current directory"
           },
           "404": {
             "description": "No stack source row for this name and environment"
@@ -33260,7 +33723,7 @@
         "tags": [
           "metrics"
         ],
-        "summary": "Prometheus metrics endpoint (disabled and 404s unless EXPORT_METRICS=true; public if app auth is disabled, otherwise requires a session or bearer token)",
+        "summary": "Prometheus metrics endpoint (disabled and 404s unless EXPORT_METRICS=true; public if app auth is disabled or EXPORT_METRICS_PUBLIC=true, otherwise requires a session or bearer token)",
         "parameters": [],
         "responses": {
           "200": {

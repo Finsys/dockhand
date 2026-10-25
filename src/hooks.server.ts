@@ -22,6 +22,7 @@ import { redirect } from '@sveltejs/kit';
 import { startRssTracker, stopRssTracker, rssBeforeOp, rssAfterOp } from '$lib/server/rss-tracker';
 import { getClientIp } from '$lib/server/client-ip';
 import { isPublicPath } from '$lib/server/public-paths-core';
+import { METRICS_PUBLIC } from '$lib/server/metrics';
 import { BACKUPS_ENABLED, API_DOCS_ENABLED } from '$lib/server/features';
 // Side-effect import: installs globalThis.__authenticateWsUpgrade and
 // globalThis.__canAccessEnvForUser used by the raw WS upgrade handlers in
@@ -352,7 +353,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 		const ctx = { user, authEnabled: true, authMethod };
 
 		// Public paths don't require authentication
-		if (isPublicPath(event.url.pathname)) {
+		if (isPublicPath(event.url.pathname, METRICS_PUBLIC)) {
 			return requestContext.run(ctx, async () => compressResponse(event.request, await resolve(event)));
 		}
 

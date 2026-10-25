@@ -28,10 +28,11 @@ import {
 import { getNextRun, getSystemSchedules } from '$lib/server/scheduler';
 import { getGlobalScannerDefaults, getScannerSettingsWithDefaults } from '$lib/server/scanner';
 import { authorize } from '$lib/server/authorize';
+import { containerActionScheduleRows } from '$lib/server/scheduled-actions-list';
 
 export interface ScheduleInfo {
 	id: number;
-	type: 'container_update' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune' | 'backup' | 'repo_prune' | 'repo_check' | 'repo_verify' | 'stack_deploy' | 'deploy_log_reconcile' | 'env_report';
+	type: 'container_update' | 'container_start' | 'container_stop' | 'git_stack_sync' | 'system_cleanup' | 'env_update_check' | 'image_prune' | 'backup' | 'repo_prune' | 'repo_check' | 'repo_verify' | 'stack_deploy' | 'deploy_log_reconcile' | 'env_report';
 	name: string;
 	entityName: string;
 	description?: string;
@@ -47,11 +48,13 @@ export interface ScheduleInfo {
 	// Container update specific fields
 	envHasScanning?: boolean;
 	vulnerabilityCriteria?: VulnerabilityCriteria | null;
+	// Scheduled start/stop: whether the container's labels set it
+	source?: 'ui' | 'label';
 }
 
 /**
  * @openapi
- * summary: List all schedules (container/env auto-updates, git syncs, image-prune, backups, repo maintenance, system jobs)
+ * summary: List all schedules (container/env auto-updates, scheduled container start/stop, git syncs, image-prune, backups, repo maintenance, system jobs)
  * resp-200: {schedules:array<{id:integer!, type:string!, name:string!, entityName:string!, environmentId:integer, enabled:boolean!, cronExpression:string, nextRun:string, isSystem:boolean!}>!}
  * resp-403: Permission denied (missing schedules:view)
  * resp-500: Unexpected error while assembling the schedule list
@@ -104,6 +107,7 @@ export const GET: RequestHandler = async ({ cookies }) => {
 			})
 		);
 		schedules.push(...containerSchedules);
+		schedules.push(...(await containerActionScheduleRows()));
 
 		// Get git stack auto-sync schedules
 		const gitStacks = await getAllAutoUpdateGitStacks();

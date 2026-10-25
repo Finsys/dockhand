@@ -9,8 +9,10 @@ import { existsSync, mkdirSync, rmSync, readdirSync, cpSync, statSync, lstatSync
 import { attachResolvedSecrets } from './resolved-secrets.js';
 import { join, resolve, relative, dirname, basename, isAbsolute, normalize as pathNormalize, sep as pathSep } from 'node:path';
 import { judgeSymlink } from './stack-symlinks';
+import { isForbiddenStackPath, holdsForbiddenStackPath } from './fs-guard';
 import { spawn as nodeSpawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
+import type { StackSourceWithRepo } from './db';
 import { redactSecretVars } from './secret-redact';
 import { collectProcess } from './process-output-core';
 import { dockerTlsEnv } from './docker-tls-env';
@@ -24,12 +26,12 @@ import {
 	type DeletionApplyResult,
 	type DeletionSkipReason
 } from './git-deletions';
-import { buildComposeOperationArgs, shouldRunSeparateBuildStep } from './compose-args';
+import { buildComposeOperationArgs, shouldRunSeparateBuildStep, pullThenUp } from './compose-args';
 import { findStackNameCollision, getStackPathHintsFromContainers, moveStackFilePathCrossDevice, resolveStackDirForLayout } from './stack-path-utils';
 import { isValidStackName } from './stack-name-guard';
 import { db, environments, eq } from './db/drizzle.js';
 import { isAllowedStackFilename } from './stack-filename';
-import { coolingDown as coolingDownRows } from '$lib/utils/pending-update-rows';
+import { coolingDown as coolingDownRows, containerCooldownFields } from '$lib/utils/pending-update-rows';
 import { getMinimumReleaseAgeConfig } from './minimum-release-age';
 
 import { deriveStackStatus, deriveStackHealth } from './stack-status';
@@ -56,8 +58,10 @@ import {
 } from './db';
 import { getProvider } from './secretproviders';
 import { stripSurroundingQuotes } from './secretproviders/shared';
+import { envFileKeys, isSopsDotenv, mergeDecryptedEnvFile, withoutSopsArtifacts } from './secretproviders/sops-core';
+import { gitStackEnvFileRelPath } from './git-stack-env-path';
 import { resolveComposeDockerHost, buildComposeBaseArgs } from './compose-docker-args';
-import { unregisterSchedule } from './scheduler';
+import { unregisterSchedule, forgetScheduledContainerAction } from './scheduler';
 import { sendEventNotification } from './notifications';
 import { deleteGitStackFiles, parseEnvFileContent } from './git';
 import { isDeletableStackDir } from './stack-delete-guard';
@@ -146,6 +150,10 @@ export interface ContainerDetail {
 	labels: Record<string, string>;
 	/** The tag's digest moved but this container pins the old one (reported, not applied). */
 	pinnedToDigest?: boolean;
+	/** An update exists but the image is too young to apply (waiting out the minimum age). */
+	coolingDown?: boolean;
+	/** Hours still left on that minimum-age wait. */
+	coolingDownHours?: number;
 }
 
 /**
@@ -531,6 +539,7 @@ export interface StackPathValidation {
  *   - filename matches the stack-filename gate (.yml/.yaml/.env family)
  *   - normalized form contains no .. segments (parent directory resolved
  *     via realpath so a symlinked component can't smuggle traversal in)
+ *   - it does not reach Dockhand's own secrets, /proc or a .ssh/.git path (isForbiddenStackPath)
  */
 export async function validateStackPath(input: string): Promise<StackPathValidation> {
 	if (!input || typeof input !== 'string') {
@@ -551,6 +560,10 @@ export async function validateStackPath(input: string): Promise<StackPathValidat
 			ok: false,
 			error: `File "${filename}" is not an allowed stack filename (must end in .yml, .yaml, or .env)`
 		};
+	}
+
+	if (isForbiddenStackPath(resolvedPath)) {
+		return { ok: false, error: 'Path is not allowed' };
 	}
 
 	return { ok: true, resolved: resolvedPath };
@@ -761,6 +774,10 @@ export async function getStackComposeFile(
 
 	// Case 2: Stack has custom composePath set - use it
 	if (source.composePath) {
+		// Checked on every read, so a path stored before the check existed is refused too.
+		if (isForbiddenStackPath(source.composePath)) {
+			return { success: false, error: 'Compose path is not allowed', composePath: source.composePath, envPath: source.envPath };
+		}
 		try {
 			if (!existsSync(source.composePath)) {
 				return {
@@ -836,6 +853,15 @@ export async function getStackComposeFile(
 	};
 }
 
+/** A symlink whose target, links followed, is a forbidden stack path. */
+function linksIntoForbidden(p: string): boolean {
+	try {
+		return lstatSync(p).isSymbolicLink() && isForbiddenStackPath(p);
+	} catch {
+		return false;
+	}
+}
+
 /**
  * Save or create a stack compose file without deploying.
  * @param name - Stack name
@@ -883,6 +909,21 @@ export async function saveStackComposeFile(
 		if (!v.ok) return { success: false, error: v.error };
 	}
 
+	// The paths a save moves FROM must be this stack's own: its stored files or its current
+	// directory. Anything else would let a save move another stack's (or any) files.
+	if (options?.oldComposePath || options?.oldEnvPath || options?.moveFromDir) {
+		const currentDir = source?.composePath ? dirname(source.composePath) : await findStackDir(name, envId);
+		const own = (p: string, stored: string | null | undefined) =>
+			(!!stored && resolve(p) === resolve(stored)) || (!!currentDir && dirname(resolve(p)) === resolve(currentDir));
+		if (
+			(options.oldComposePath && !own(options.oldComposePath, source?.composePath)) ||
+			(options.oldEnvPath && !own(options.oldEnvPath, source?.envPath)) ||
+			(options.moveFromDir && (!currentDir || resolve(options.moveFromDir) !== resolve(currentDir)))
+		) {
+			return { success: false, error: 'Path is not allowed' };
+		}
+	}
+
 	// Handle compose file move/rename when path changes
 	if (options?.oldComposePath && options?.composePath &&
 		options.oldComposePath !== options.composePath &&
@@ -923,6 +964,10 @@ export async function saveStackComposeFile(
 	// Get the new directory from composePath
 	const newDir = options?.composePath ? dirname(options.composePath) : null;
 
+	// Every entry of moveFromDir is moved, so neither directory may hold a protected location.
+	if (options?.moveFromDir && newDir && (holdsForbiddenStackPath(options.moveFromDir) || holdsForbiddenStackPath(newDir))) {
+		return { success: false, error: 'Path is not allowed' };
+	}
 	if (options?.moveFromDir && newDir && options.moveFromDir !== newDir && existsSync(options.moveFromDir)) {
 		try {
 			// Ensure new directory exists
@@ -943,6 +988,11 @@ export async function saveStackComposeFile(
 				} catch (renameErr: any) {
 					// If rename fails (e.g., cross-filesystem), try copy+delete
 					if (renameErr.code === 'EXDEV') {
+						// The copy follows a link at either end; the stack's own .git or .ssh is copied.
+						if (linksIntoForbidden(oldFilePath) || linksIntoForbidden(newFilePath)) {
+							console.warn(`[Stack] Skipped ${file}: path is not allowed`);
+							continue;
+						}
 						const stat = statSync(oldFilePath);
 						if (stat.isDirectory()) {
 							// For directories, use recursive copy
@@ -1915,7 +1965,12 @@ async function executeComposeCommand(
 			if (envPath && existsSync(envPath)) {
 				try {
 					const envFileContent = readFileSync(envPath, 'utf-8');
-					const envFileVars = parseEnvFileContent(envFileContent, stackName);
+					const parsedEnvFileVars = parseEnvFileContent(envFileContent, stackName);
+					// A SOPS file's metadata and ciphertext are no values to inject; its
+					// decrypted values arrive as secretVars.
+					const envFileVars = isSopsDotenv(envFileContent)
+						? withoutSopsArtifacts(parsedEnvFileVars)
+						: parsedEnvFileVars;
 					// Merge: envFileVars (lowest) < envVars (DB overrides)
 					// secretVars are handled separately in executeComposeViaHawser
 					hawserEnvVars = { ...envFileVars, ...(envVars || {}) };
@@ -2094,7 +2149,7 @@ export async function listComposeStacks(envId?: number | null): Promise<ComposeS
 	const newerVersionIds = new Set<string>();
 	// A held update: an update exists but the image is too young to apply. Counted
 	// separately so it never reaches updateCount, which offers a redeploy.
-	const coolingDownIds = new Set<string>();
+	const coolingDownHoursById = new Map<string, number>();
 	// The tag's digest moved but the image pins the old one. Reported, never applied
 	// (the compose file is what has to change), so kept out of updateCount too.
 	const pinnedDigestIds = new Set<string>();
@@ -2106,7 +2161,7 @@ export async function listComposeStacks(envId?: number | null): Promise<ComposeS
 			pending.forEach((p) => {
 				if (p.hasImageUpdate) pendingUpdateIds.add(p.containerId);
 				if (p.pinnedToDigest) pinnedDigestIds.add(p.containerId);
-				if (heldIds.has(p.containerId)) coolingDownIds.add(p.containerId);
+				if (heldIds.has(p.containerId)) coolingDownHoursById.set(p.containerId, heldIds.get(p.containerId)!);
 				if (p.newerVersion) {
 					newerVersionIds.add(p.containerId);
 					try {
@@ -2182,6 +2237,7 @@ export async function listComposeStacks(envId?: number | null): Promise<ComposeS
 					labels: c.labels || {},
 					updateAvailable: pendingUpdateIds.has(c.id),
 					pinnedToDigest: pinnedDigestIds.has(c.id),
+					...containerCooldownFields(coolingDownHoursById, c.id),
 					newerVersion: newerVersionById.get(c.id) ?? null
 				};
 			})
@@ -2200,7 +2256,7 @@ export async function listComposeStacks(envId?: number | null): Promise<ComposeS
 			// Newer-version-tag (semver) suggestions in this stack - drives the Tag badge.
 			newerVersionCount: stackContainers.filter((c) => newerVersionIds.has(c.id)).length,
 			// Held updates in this stack - shown as waiting, never offered for redeploy.
-			coolingDownCount: stackContainers.filter((c) => coolingDownIds.has(c.id)).length,
+			coolingDownCount: stackContainers.filter((c) => coolingDownHoursById.has(c.id)).length,
 			// Containers whose pinned digest moved - reported, never applied.
 			pinnedDigestCount: stackContainers.filter((c) => pinnedDigestIds.has(c.id)).length,
 			status: deriveStackStatus({
@@ -2435,6 +2491,12 @@ export async function requireComposeFile(
 		envFilePath = join(stackDir, '.env');
 	}
 
+	// The env file reaches compose (--env-file, or read into the Hawser request), so a stored
+	// or derived path into a protected location is refused like the compose path itself.
+	if (envFilePath && isForbiddenStackPath(envFilePath)) {
+		return { success: false, error: 'Env file path is not allowed' };
+	}
+
 	// Docker Compose reads non-secrets from the .env file via --env-file.
 	// Secrets and non-secrets from DB need to be injected via shell environment
 	// for stacks without .env files (e.g., git stacks with manual env vars).
@@ -2476,9 +2538,13 @@ export async function redeployStackFromDir(
 		throw new Error('restored compose file is empty; cannot redeploy');
 	}
 	const envPath = join(stackDir, '.env');
-	const hasEnv = existsSync(envPath);
+	// A restored .env can be a link; never read one into a protected location.
+	const hasEnv = existsSync(envPath) && !isForbiddenStackPath(envPath);
 	const envFileContent = hasEnv ? readFileSync(envPath, 'utf-8') : undefined;
 	let envVars = envFileContent ? parseEnvFileContent(envFileContent, stackName) : undefined;
+	// A SOPS .env's metadata is no value, and its ciphertext is replaced by the
+	// decrypted values the resolver below adds as secrets.
+	if (envVars && isSopsDotenv(envFileContent)) envVars = withoutSopsArtifacts(envVars);
 	// Secret env vars are stored encrypted in the DB and deliberately never written
 	// to the snapshot's .env, so the extracted dir has no copy of them. Load them
 	// from the DB and inject them like every other compose path does (#1329) —
@@ -2494,7 +2560,8 @@ export async function redeployStackFromDir(
 		`[Stack:${stackName}]`,
 		source?.secretProviderId,
 		envFileContent,
-		{ stackName, envId: envId ?? undefined }
+		{ stackName, envId: envId ?? undefined },
+		readConfiguredGitEnvFile(source, stackDir, envPath, `[Stack:${stackName}]`)
 	);
 	envVars = resolved.dbNonSecretVars;
 	secretVars = resolved.secretVars;
@@ -2941,6 +3008,7 @@ export async function removeStack(
 			} catch {
 				// Ignore cleanup errors
 			}
+			await forgetScheduledContainerAction(containerName, envIdNum).catch(() => {});
 
 			// Clean up pending container update
 			try {
@@ -3338,6 +3406,19 @@ export async function deployStack(options: DeployStackOptions): Promise<StackOpe
 		const initialDbNonSecretVars = await getNonSecretEnvVarsAsRecord(name, envId);
 		const initialSecretVars = await getSecretEnvVarsAsRecord(name, envId);
 
+		// A Git stack's configured env file is not necessarily the .env read above: a
+		// repo can carry both, and only the configured one may be SOPS-encrypted.
+		// Only a file inside the stack directory: one outside it (an env file path above
+		// the compose directory) was never copied from the repository.
+		let configuredEnvFileContent: string | undefined;
+		if (sourceDir && envFileName && !envFileName.startsWith('..') && actualEnvPath && existsSync(actualEnvPath)) {
+			try {
+				configuredEnvFileContent = readFileSync(actualEnvPath, 'utf-8');
+			} catch (err) {
+				console.warn(`${logPrefix} Failed to read env file at ${actualEnvPath}:`, err);
+			}
+		}
+
 		// Add environment variables from 1Password
 		const source = await getStackSource(name, envId);
 		const { dbNonSecretVars, secretVars } = await resolveProviderEnvVars(
@@ -3346,7 +3427,8 @@ export async function deployStack(options: DeployStackOptions): Promise<StackOpe
 			logPrefix,
 			source?.secretProviderId,
 			envFileContent,
-			{ stackName: name, envId }
+			{ stackName: name, envId },
+			configuredEnvFileContent
 		);
 		console.log(`${logPrefix} DB non-secret override vars:`, Object.keys(dbNonSecretVars).length);
 		console.log(`${logPrefix} DB secret vars:`, Object.keys(secretVars).length);
@@ -3388,13 +3470,14 @@ export async function deployStack(options: DeployStackOptions): Promise<StackOpe
 		}
 
 		console.log(`${logPrefix} Calling executeComposeCommand...`);
-		const result = await executeComposeCommand(
-			'up',
-			cmdOptions,
-			compose,
-			composeEnvVars,
-			secretVars,
-			onLine
+		const result = await pullThenUp(
+			pullPolicy,
+			(operation, upPullPolicy) =>
+				executeComposeCommand(operation, { ...cmdOptions, pullPolicy: upPullPolicy }, compose, composeEnvVars, secretVars, onLine),
+			(warning) => {
+				console.warn(`${logPrefix} ${warning}`);
+				onLine?.(warning);
+			}
 		);
 		// F4 fix: `secretVars` here is POST-resolveProviderEnvVars (line ~3059 above) --
 		// the same set executeComposeCommand just redacted streamed lines against. This
@@ -3602,6 +3685,9 @@ export async function writeStackEnvFile(
 		}
 	}
 
+	// The derived path (stored, or the .env beside the compose file) can be a link into a
+	// protected location; it is checked here, where it is finally known.
+	if (isForbiddenStackPath(envFilePath)) throw new Error('Path is not allowed');
 	// Ensure parent directory exists
 	const dir = dirname(envFilePath);
 	if (!existsSync(dir)) {
@@ -3651,6 +3737,9 @@ export async function writeRawStackEnvFile(
 		}
 	}
 
+	// The derived path (stored, or the .env beside the compose file) can be a link into a
+	// protected location; it is checked here, where it is finally known.
+	if (isForbiddenStackPath(envFilePath)) throw new Error('Path is not allowed');
 	// Ensure parent directory exists
 	const dir = dirname(envFilePath);
 	if (!existsSync(dir)) {
@@ -3715,7 +3804,10 @@ async function resolveProviderEnvVars(
 	logPrefix: string,
 	secretProviderId?: number | null,
 	stackEnvFileContent?: string,
-	persistTo?: { stackName: string; envId: number | null | undefined }
+	persistTo?: { stackName: string; envId: number | null | undefined },
+	// A Git stack's configured env file when it is not the .env read above (e.g.
+	// secrets.sops.env). Only consulted for whole-file decryption.
+	configuredEnvFileContent?: string
 ): Promise<EnrichedEnvVars> {
 	const envFileVars = stackEnvFileContent ? parseEnvFileContent(stackEnvFileContent) : {};
 
@@ -3740,6 +3832,40 @@ async function resolveProviderEnvVars(
 
 	const providerRow = secretProviderId ? await getSecretProviderById(secretProviderId) : undefined;
 	const provider = providerRow ? getProvider(providerRow.type) : undefined;
+
+	// --- Encrypted env file (SOPS) -------------------------------------------
+	// A provider that decrypts whole env files gets the stack's env file(s) when
+	// they are in its format; see mergeDecryptedEnvFile for the precedence. Compose
+	// reads `--env-file .env` before the configured file and the later one wins, so
+	// the configured file is merged first (the first merged wins), and a key a
+	// later-read plain file defines is left to that file rather than overridden
+	// from the shell.
+	const envFiles = [configuredEnvFileContent, stackEnvFileContent].filter(
+		(content, i, all): content is string => !!content && all.indexOf(content) === i
+	);
+	if (envFiles.some(isSopsDotenv)) {
+		if (!providerRow || !provider?.decryptEnvFile) {
+			console.warn(`${logPrefix} The env file is SOPS-encrypted but no SOPS secret provider is bound to this stack; its values stay encrypted`);
+		} else {
+			const definedByPlainFile = new Set<string>();
+			for (const content of envFiles) {
+				if (!isSopsDotenv(content)) {
+					for (const key of envFileKeys(content)) definedByPlainFile.add(key);
+					continue;
+				}
+				let decrypted: Record<string, string>;
+				try {
+					decrypted = await provider.decryptEnvFile(providerRow.config, content, logPrefix);
+				} catch (e: unknown) {
+					const msg = e instanceof Error ? e.message : String(e);
+					throw new Error(`Failed to decrypt the env file: ${msg}`);
+				}
+				for (const key of definedByPlainFile) delete decrypted[key];
+				const injected = mergeDecryptedEnvFile(decrypted, dbNonSecretVars, secretVars);
+				console.log(`${logPrefix} ${provider.label} decrypted ${injected} secret(s) from the env file`);
+			}
+		}
+	}
 
 	// --- Bulk pull (environment / path) --------------------------------------
 	// Priority: secrets > DB non-secrets > .env file (each overrides the previous)
@@ -3860,6 +3986,31 @@ async function resolveProviderEnvVars(
 }
 
 /**
+ * A Git stack's configured env file (possibly SOPS-encrypted) as a deploy copied it
+ * into `stackDir`, for the paths that otherwise only read the .env beside the
+ * compose file (`alreadyReadPath`). Undefined when no provider is bound - only a
+ * provider consumes it - or when there is no such file to read.
+ */
+function readConfiguredGitEnvFile(
+	source: StackSourceWithRepo | null | undefined,
+	stackDir: string,
+	alreadyReadPath: string | null | undefined,
+	logPrefix: string
+): string | undefined {
+	if (!source?.secretProviderId || !source.gitStack) return undefined;
+	const rel = gitStackEnvFileRelPath(source.gitStack);
+	if (!rel) return undefined;
+	const path = join(stackDir, rel);
+	if (path === alreadyReadPath || !existsSync(path)) return undefined;
+	try {
+		return readFileSync(path, 'utf-8');
+	} catch (err) {
+		console.warn(`${logPrefix} Failed to read env file at ${path}:`, err);
+		return undefined;
+	}
+}
+
+/**
  * Resolve the bound provider's secrets over a raw (nonSecretVars, secretVars) pair.
  * Returns the merged vars. bestEffort=true (lifecycle paths that must not be blocked by
  * an unreachable provider: stop/restart/down/remove) logs and returns the inputs
@@ -3877,7 +4028,7 @@ async function resolveProviderVarsBestEffort(
 	bestEffort = false
 ): Promise<{ nonSecretVars: Record<string, string>; secretVars: Record<string, string> }> {
 	let envFileContent: string | undefined;
-	if (envPath && existsSync(envPath)) {
+	if (envPath && existsSync(envPath) && !isForbiddenStackPath(envPath)) {
 		try {
 			envFileContent = readFileSync(envPath, 'utf-8');
 		} catch (err) {
@@ -3887,13 +4038,17 @@ async function resolveProviderVarsBestEffort(
 
 	try {
 		const source = await getStackSource(stackName, envId ?? undefined);
+		const configuredEnvFileContent = source?.gitStack
+			? readConfiguredGitEnvFile(source, await getStackDir(stackName, envId), envPath, logPrefix)
+			: undefined;
 		const resolved = await resolveProviderEnvVars(
 			{ ...nonSecretVars },
 			{ ...secretVars },
 			logPrefix,
 			source?.secretProviderId,
 			envFileContent,
-			{ stackName, envId: envId ?? undefined }
+			{ stackName, envId: envId ?? undefined },
+			configuredEnvFileContent
 		);
 		return { nonSecretVars: resolved.dbNonSecretVars, secretVars: resolved.secretVars };
 	} catch (err) {

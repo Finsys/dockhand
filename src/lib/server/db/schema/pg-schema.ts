@@ -140,6 +140,22 @@ export const autoUpdateSettings = pgTable('auto_update_settings', {
 	envContainerUnique: unique().on(table.environmentId, table.containerName)
 }));
 
+export const scheduledContainerActions = pgTable('scheduled_container_actions', {
+	id: serial('id').primaryKey(),
+	environmentId: integer('environment_id').notNull().references(() => environments.id, { onDelete: 'cascade' }),
+	containerName: text('container_name').notNull(),
+	enabled: boolean('enabled').notNull().default(true),
+	startAt: text('start_at'),
+	stopAt: text('stop_at'),
+	source: text('source').notNull().default('ui'),
+	lastStarted: timestamp('last_started', { mode: 'string' }),
+	lastStopped: timestamp('last_stopped', { mode: 'string' }),
+	createdAt: timestamp('created_at', { mode: 'string' }).defaultNow(),
+	updatedAt: timestamp('updated_at', { mode: 'string' }).defaultNow()
+}, (table) => ({
+	envContainerUnique: unique().on(table.environmentId, table.containerName)
+}));
+
 export const notificationSettings = pgTable('notification_settings', {
 	id: serial('id').primaryKey(),
 	type: text('type').notNull(),

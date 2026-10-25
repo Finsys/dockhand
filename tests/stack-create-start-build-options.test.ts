@@ -59,10 +59,9 @@ describe('POST /api/stacks -- build/pull/forceRecreate options (source-level)', 
 		// build: must reference the coerced request value, not a literal false --
 		// `build: false` would match `build:` alone, so anchor on the variable name.
 		expect(body).toMatch(/build:\s*buildOpt/);
-		// pullPolicy must be conditional on the request's pull flag, not omitted or a
-		// hardcoded 'always'/undefined -- the ternary is the actual translation from
-		// deployOptions.pull (boolean) to deployStack's pullPolicy (string | undefined).
-		expect(body).toMatch(/pullPolicy:\s*pullOpt\s*\?\s*'always'\s*:\s*undefined/);
+		// pullPolicy must come from the request's pull flags, not be omitted or hardcoded;
+		// deployPullPolicy (tested in compose-args.test.ts) does the translation.
+		expect(body).toMatch(/pullPolicy:\s*deployPullPolicy\(pullOpt,\s*respectPullPolicy\)/);
 		expect(body).toMatch(/forceRecreate:\s*forceRecreateOpt/);
 	});
 

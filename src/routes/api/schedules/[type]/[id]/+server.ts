@@ -8,6 +8,9 @@ import type { RequestHandler } from './$types';
 import {
 	getAutoUpdateSettingById,
 	deleteAutoUpdateSchedule,
+	getScheduledContainerActionById,
+	upsertScheduledContainerAction,
+	deleteScheduledContainerActionById,
 	getGitStack,
 	updateGitStack,
 	deleteEnvUpdateCheckSettings,
@@ -17,18 +20,19 @@ import {
 	getBackupDestination,
 	updateBackupDestination
 } from '$lib/server/db';
-import { unregisterSchedule } from '$lib/server/scheduler';
+import { unregisterSchedule, registerContainerActionSchedules, unregisterContainerActionSchedules } from '$lib/server/scheduler';
 import { authorize } from '$lib/server/authorize';
 
 /**
  * @openapi
  * summary: Delete (or disable, for policy-driven types) a schedule by type and id
- * path: type:string! Schedule type (container_update, git_stack_sync, env_update_check, image_prune, backup, repo_prune, repo_check, repo_verify, system_cleanup)
+ * path: type:string! Schedule type (container_update, container_start, container_stop (removes that one time), git_stack_sync, env_update_check, image_prune, backup, repo_prune, repo_check, repo_verify, system_cleanup)
  * path: id:integer! Schedule id (semantics depend on type — container/git-stack/backup-config id, environment id, or a synthetic repo-policy id) (from GET /api/schedules)
  * resp-200: {success:boolean!}
  * resp-400: Invalid schedule id, invalid/unsupported type, or system_cleanup (cannot be removed)
- * resp-403: Permission denied
+ * resp-403: Permission denied (removing one container start/stop time while the other stays also needs containers start and stop)
  * resp-404: Schedule (or backup destination, for repo_* types) not found
+ * resp-409: A container start/stop set by the container's labels; remove the label instead
  * resp-500: Unexpected error while deleting the schedule
  */
 export const DELETE: RequestHandler = async ({ params, cookies }) => {
@@ -54,6 +58,34 @@ export const DELETE: RequestHandler = async ({ params, cookies }) => {
 				await deleteAutoUpdateSchedule(schedule.containerName, schedule.environmentId ?? undefined);
 				// Unregister from croner
 				unregisterSchedule(scheduleId, 'container_update');
+			}
+			return json({ success: true });
+
+		} else if (type === 'container_start' || type === 'container_stop') {
+			const row = await getScheduledContainerActionById(scheduleId);
+			if (!row) {
+				return json({ error: 'Schedule not found' }, { status: 404 });
+			}
+			const envDenied = await auth.requireEnvAccess(row.environmentId);
+			if (envDenied) return envDenied;
+			if (row.source === 'label') {
+				return json({ error: 'Set by the container\'s dockhand.start.at / dockhand.stop.at labels; remove the label instead' }, { status: 409 });
+			}
+			const startAt = type === 'container_start' ? null : row.startAt;
+			const stopAt = type === 'container_stop' ? null : row.stopAt;
+			// Keeping the other time keeps a start or stop scheduled, which needs those rights.
+			const remains = startAt !== null || stopAt !== null;
+			const denied =
+				(await auth.requirePermission('schedules', 'edit', row.environmentId)) ??
+				(remains ? await auth.requirePermission('containers', 'start', row.environmentId) : null) ??
+				(remains ? await auth.requirePermission('containers', 'stop', row.environmentId) : null);
+			if (denied) return denied;
+			unregisterContainerActionSchedules(scheduleId);
+			if (startAt === null && stopAt === null) {
+				await deleteScheduledContainerActionById(scheduleId);
+			} else {
+				await upsertScheduledContainerAction(row.containerName, row.environmentId, { startAt, stopAt, source: 'ui' });
+				await registerContainerActionSchedules(scheduleId, row.environmentId);
 			}
 			return json({ success: true });
 

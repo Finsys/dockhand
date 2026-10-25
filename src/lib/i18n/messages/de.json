@@ -68,7 +68,9 @@
 	"layout_search": "Suchen…",
 	"language_label": "Sprache der Oberfläche",
 	"language_follow_browser": "Dem Browser folgen ({language})",
-	"language_hint": "In diesem Browser gespeichert. Beim Wechsel wird die Seite neu geladen.",
+	"language_hint": "Auf dem Server gespeichert, geht also beim Löschen der Browserdaten nicht verloren. Beim Wechsel wird die Seite neu geladen.",
+	"language_save_failed": "Die Oberflächensprache konnte nicht gespeichert werden",
+	"language_storage_blocked": "Dieser Browser blockiert den Websitespeicher, daher kann die Sprache hier nicht geändert werden",
 	"hostinfo_environment_fallback": "Umgebung {id}",
 	"hostinfo_switch_offline": "Wechsel zu „{name}“ nicht möglich - Umgebung ist offline",
 	"hostinfo_switch_error": "Wechsel zu „{name}“ nicht möglich - {error}",
@@ -235,6 +237,8 @@
 	"containers_item_backup_schedule": "Backup-Zeitplan",
 	"containers_list_search_placeholder": "Name, Image, Label suchen…",
 	"containers_list_filter_all_statuses": "Alle Status",
+	"containers_list_cooldown_hours": "{count} h",
+	"containers_list_filter_cooling_down": "Wartet auf Abklingzeit",
 	"containers_list_filter_plural": "Filter",
 	"containers_list_filter_running": "Läuft",
 	"containers_list_filter_paused": "Pausiert",
@@ -600,12 +604,14 @@
 	"containers_inspect_action_stop": "Stoppen",
 	"containers_inspect_action_restart": "Neu starten",
 	"containers_inspect_action_start": "Starten",
+	"containers_inspect_action_terminal": "Terminal",
 	"containers_inspect_action_edit": "Bearbeiten",
 	"containers_inspect_action_delete": "Löschen",
 	"containers_inspect_view_raw_title": "Rohe Inspect-Daten anzeigen",
 	"containers_inspect_raw": "Inspect",
 	"containers_inspect_tab_overview": "Übersicht",
 	"containers_inspect_tab_logs": "Logs",
+	"containers_inspect_tab_terminal": "Terminal",
 	"containers_inspect_tab_layers": "Layer",
 	"containers_inspect_tab_processes": "Prozesse",
 	"containers_inspect_tab_network": "Netzwerk",
@@ -1009,6 +1015,15 @@
 	"containers_settings_ulimit_soft": "Soft-Limit",
 	"containers_settings_ulimit_hard": "Hard-Limit",
 	"containers_settings_auto_update": "Auto-Update",
+	"containers_settings_scheduled_actions": "Geplanter Start und Stopp",
+	"containers_schedule_start_at": "Starten um",
+	"containers_schedule_stop_at": "Stoppen um",
+	"containers_schedule_hint": "Zeiten gelten in der Zeitzone der Umgebung. Die Labels dockhand.start.at und dockhand.stop.at akzeptieren auch HH:MM.",
+	"containers_schedule_from_labels": "Durch die Labels dockhand.start.at / dockhand.stop.at dieses Containers festgelegt. Ändern Sie die Labels, um den Zeitplan zu ändern.",
+	"containers_schedule_label_errors": "Diese Labels wurden ignoriert:",
+	"containers_schedule_system": "Dockhand- und Hawser-Container können nicht nach Zeitplan gestartet oder gestoppt werden.",
+	"containers_schedule_restart_always": "Dieser Container verwendet die Neustart-Richtlinie \"always\": Startet Docker oder der Host neu, während er gestoppt ist, startet er trotz Zeitplan wieder. Verwenden Sie \"unless-stopped\", damit er gestoppt bleibt.",
+	"containers_schedule_save_failed": "Geplanter Start und Stopp konnten nicht gespeichert werden: {error}",
 	"containers_autoupdate_scheduled_unavailable": "Zeitgesteuerte Auto-Updates nicht verfügbar",
 	"containers_autoupdate_dockhand_hint_before": "Dockhand aktualisiert sich nicht automatisch nach Zeitplan. Sobald eine neue Version erscheint, aktualisiere es unter",
 	"containers_autoupdate_dockhand_hint_link": "Einstellungen > Über",
@@ -1348,6 +1363,7 @@
 	"containers_backup_no_schedules_stack": "Für diesen Stack sind keine Backup-Zeitpläne eingerichtet.",
 	"containers_backup_new_schedule": "Neuer Backup-Zeitplan",
 	"containers_backup_edit_schedule": "Zeitplan bearbeiten",
+	"containers_backup_on_schedule": "Nach Zeitplan ausführen",
 	"containers_backup_enabled": "Aktiviert",
 	"containers_backup_stop_container_during": "Container während des Backups stoppen",
 	"containers_backup_stop_stack_during": "Stack während des Backups stoppen",
@@ -1594,22 +1610,6 @@
 	"containers_restore_checking_target": "Ziel wird geprüft…",
 	"containers_restore_overwrite_and_restore": "Überschreiben & wiederherstellen",
 	"containers_restore_restore_and_start": "Wiederherstellen & starten",
-	"updates_failed_checks_summary": [
-		{
-			"declarations": [
-				"input summary",
-				"input count",
-				"local countPlural = count: plural"
-			],
-			"selectors": [
-				"countPlural"
-			],
-			"match": {
-				"countPlural=one": "{summary} ({count} Prüfung fehlgeschlagen)",
-				"countPlural=other": "{summary} ({count} Prüfungen fehlgeschlagen)"
-			}
-		}
-	],
 	"updates_newer_version_tags": [
 		{
 			"declarations": [
@@ -1641,6 +1641,9 @@
 		}
 	],
 	"updates_all_up_to_date": "Alle Container sind aktuell",
+	"updates_rest_up_to_date": "Die übrigen Container sind aktuell",
+	"updates_check_failed_all": "Update-Prüfung fehlgeschlagen",
+	"updates_failed_checks_header": "{count} Container konnten nicht geprüft werden",
 	"updates_hours_remaining": [
 		{
 			"declarations": [
@@ -1993,7 +1996,7 @@
 	"backupui_hawser_default_set_under": ", trage es unter",
 	"backupui_hawser_default_after": "ein und öffne diesen Dialog erneut.",
 	"backupui_backup_all_files": "Alle Dateien sichern ({count})",
-	"backupui_captured_as_bind": "unten als Bind erfasst",
+	"backupui_captured_as_bind": "auch unten als Bind",
 	"backupui_captured_as_volume": "unten als Volume erfasst",
 	"backupui_always_kept": "immer enthalten",
 	"backupui_helper_failed_title": "Der Backup-Helfer kann auf dieser Umgebung nicht ausgeführt werden",
@@ -3117,6 +3120,8 @@
 	"stacks_redeploy_trigger_title": "Neu bereitstellen",
 	"stacks_redeploy_more_options": "Weitere Bereitstellungsoptionen",
 	"stacks_redeploy_pull_images": "Images pullen",
+	"stacks_redeploy_respect_pull_policy": "pull_policy beachten",
+	"stacks_redeploy_respect_pull_policy_hint": "Führt zuerst docker compose pull aus, das die pull_policy jedes Services befolgt: Services mit never oder build oder mit missing und vorhandenem Image werden nicht gepullt. Ein fehlgeschlagener Pull wird protokolliert und das Deployment läuft weiter, er kann aber die Pulls anderer Services abbrechen, die dann ihre aktuellen Images behalten.",
 	"stacks_redeploy_build_images": "Images bauen",
 	"stacks_redeploy_force_recreate": "Neu erstellen erzwingen",
 	"stacks_redeploy_deploying": "Wird bereitgestellt…",
@@ -3312,6 +3317,21 @@
 			"match": {
 				"countPlural=one": "{count} Image bereinigt, {size} freigegeben",
 				"countPlural=other": "{count} Images bereinigt, {size} freigegeben"
+			}
+		}
+	],
+	"images_list_toast_pruned_count": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Image bereinigt",
+				"countPlural=other": "{count} Images bereinigt"
 			}
 		}
 	],
@@ -3829,7 +3849,6 @@
 	"logs_streaming_paused": "Streaming pausiert",
 	"logs_pause_live_streaming": "Live-Streaming pausieren",
 	"logs_resume_live_streaming": "Live-Streaming fortsetzen",
-	"logs_stream": "Streamen",
 	"logs_toggle_auto_scroll": "Auto-Scroll umschalten",
 	"logs_auto_scroll": "Auto-Scroll",
 	"logs_tail_lines_title": "Anzahl der zu ladenden Log-Zeilen",
@@ -4353,6 +4372,13 @@
 	"schedules_empty_hint": "Aktiviere Auto-Update für Container oder Auto-Sync für Git-Stacks, damit sie hier erscheinen",
 	"schedules_execution_details": "Ausführungsdetails",
 	"schedules_type_container_update": "Container-Update",
+	"schedules_type_container_start": "Container-Start",
+	"schedules_type_container_stop": "Container-Stopp",
+	"schedules_type_container_starts": "Container-Starts",
+	"schedules_type_container_stops": "Container-Stopps",
+	"schedules_desc_container_start": "Startet den Container",
+	"schedules_desc_container_stop": "Stoppt den Container",
+	"schedules_badge_from_labels": "Aus Labels",
 	"schedules_type_environment_update": "Umgebungs-Update",
 	"schedules_type_git_stack_sync": "Git-Stack-Synchronisierung",
 	"schedules_type_backup": "Backup",
@@ -4368,6 +4394,7 @@
 	"backups_already_finishing": "Das Backup war bereits in der Abschlussphase - es wird fertiggestellt.",
 	"backups_stop_failed": "Backup konnte nicht gestoppt werden",
 	"backups_load_failed": "Backups konnten nicht geladen werden",
+	"backups_diff_other_destination": "Snapshots auf verschiedenen Zielen können nicht verglichen werden",
 	"backups_log_title": "Backup: {name}",
 	"backups_completed_with_warnings_for": "Backup für {name} mit Warnungen abgeschlossen",
 	"backups_config_removed": "Backup-Konfiguration für {name} entfernt",
@@ -5148,6 +5175,12 @@
 	"settings_envs_event_container_oom_desc": "Wenn ein Container wegen Arbeitsspeichermangels beendet wird",
 	"settings_envs_event_container_updated": "Container aktualisiert",
 	"settings_envs_event_container_updated_desc": "Wenn das Image eines Containers aktualisiert wird",
+	"settings_envs_event_container_scheduled_start": "Geplanter Start",
+	"settings_envs_event_container_scheduled_start_desc": "Wenn ein Container nach Zeitplan gestartet wird",
+	"settings_envs_event_container_scheduled_stop": "Geplanter Stopp",
+	"settings_envs_event_container_scheduled_stop_desc": "Wenn ein Container nach Zeitplan gestoppt wird",
+	"settings_envs_event_container_scheduled_failed": "Geplante Aktion fehlgeschlagen",
+	"settings_envs_event_container_scheduled_failed_desc": "Wenn ein geplanter Start oder Stopp eines Containers fehlschlägt",
 	"settings_envs_event_group_auto_update": "Auto-Update-Ereignisse",
 	"settings_envs_event_auto_update_success": "Update erfolgreich",
 	"settings_envs_event_auto_update_success_desc": "Container erfolgreich auf neues Image aktualisiert",
@@ -5374,6 +5407,21 @@
 			"match": {
 				"countPlural=one": "{count} Image entfernt, {size} freigegeben",
 				"countPlural=other": "{count} Images entfernt, {size} freigegeben"
+			}
+		}
+	],
+	"settings_envs_prune_last_result_count": [
+		{
+			"declarations": [
+				"input count",
+				"local countPlural = count: plural"
+			],
+			"selectors": [
+				"countPlural"
+			],
+			"match": {
+				"countPlural=one": "{count} Image entfernt",
+				"countPlural=other": "{count} Images entfernt"
 			}
 		}
 	],
@@ -6438,6 +6486,11 @@
 	"settings_general_min_age_set_by_env": "Festgelegt durch MINIMUM_RELEASE_AGE_HOURS.",
 	"settings_general_newer_version_tags": "Neuere Versions-Tags",
 	"settings_general_newer_version_tags_description": "Wie die Update-Prüfung bei festgelegten Images nach neueren Versions-Tags sucht. Gilt für jede Prüfung - geplant und manuell. Die Einstellungen pro Umgebung legen fest, ob nach Zeitplan geprüft wird; hier wird festgelegt, wie Versionen verglichen werden.",
+	"settings_general_pinned_digest_title": "Berichte zu angehefteten Digests",
+	"settings_general_pinned_digest_description": "Ein neuerer Digest hinter einem von dir angehefteten Tag (tag@sha256:...) wird mit einer Pin-Markierung und einer Anzahl gemeldet. Dockhand wendet ihn nie an - der Digest steht in deiner Compose-Datei. Schalte dies aus, wenn du bewusst anheftest und auf Upstream-Rebuilds nicht reagierst.",
+	"settings_general_pinned_digest_toggle": "Verschobene Digests bei angehefteten Images melden",
+	"settings_general_pinned_digest_hint": "Ein: eine Pin-Markierung erscheint, wenn sich der Digest des Tags verschiebt (nie automatisch angewendet). Aus: angeheftete Images bleiben still. Pro Container mit dem Label dockhand.pin.report überschreibbar.",
+	"settings_general_toast_pinned_digest_save_failed": "Einstellung für angeheftete Digests konnte nicht gespeichert werden",
 	"settings_general_event_collection_mode": "Erfassungsmodus für Aktivitätsereignisse",
 	"settings_general_event_mode_stream_hint": "Kontinuierlicher Ereignisstream von Docker, sofortige Benachrichtigungen, höhere CPU-Auslastung",
 	"settings_general_event_mode_poll_hint": "Regelmäßige Abfrage neuer Ereignisse, leicht verzögerte Benachrichtigungen, geringere CPU-Auslastung",
@@ -7008,7 +7061,7 @@
 	"settings_secrets_psono_note_with": " mit ",
 	"settings_secrets_psono_note_on_and": " ein und ",
 	"settings_secrets_psono_note_off": " aus, und hänge die Secrets an, die er lesen darf. Dockhand entschlüsselt jedes Secret lokal, der geheime Schlüssel wird also nie an den Psono-Server gesendet. Unterstützt einen Sammelabruf der Secrets des Keys sowie Inline-Referenzen der Form ",
-	"settings_secrets_psono_note_after": ".",
+	"settings_secrets_psono_note_after": " Referenzen. Ein Secret vom Typ Umgebungsvariablen stellt jeden seiner Schlüssel als eigene Variable bereit, und psono://<id>/<KEY> liest einen einzelnen Schlüssel.",
 	"settings_secrets_psono_note_api_keys": "API keys",
 	"settings_secrets_psono_note_restrict": "Restrict to secrets",
 	"settings_secrets_psono_note_insecure": "Allow insecure access",
@@ -7034,6 +7087,11 @@
 	"settings_secrets_keepass_note_override_before": "(oder einen absoluten Pfad in",
 	"settings_secrets_keepass_note_database_before": "als Prozess-Override). Die Datenbank im Format",
 	"settings_secrets_keepass_note_database_after": "muss schreibgeschützt unter dem oben angegebenen Pfad in den Container eingebunden sein (Bind-Mount). Unterstützt sowohl das Laden einer ganzen Gruppe als auch das Präfix",
+	"settings_secrets_field_sops_age_key": "Geheimer age-Schlüssel",
+	"settings_secrets_field_sops_age_key_hint": "Eine oder mehrere age-Identitäten (AGE-SECRET-KEY-...), die Empfänger der verschlüsselten Env-Datei sind. Die ganze von age-keygen erzeugte keys.txt kann ebenfalls eingefügt werden.",
+	"settings_secrets_sops_note_before": "Entschlüsselt die Env-Datei des Git-Stacks, wenn sie mit",
+	"settings_secrets_sops_note_override_before": "für einen dieser Schlüssel verschlüsselt wurde. Die Werte werden als Secrets eingefügt und nie auf die Festplatte geschrieben. Der sops-Client ist im Image enthalten; für einen anderen einen absoluten Pfad in",
+	"settings_secrets_sops_note_after": " setzen.",
 	"settings_secrets_proton_note_before": "Proton Pass benötigt den offiziellen, extern installierten oder eingebundenen Client",
 	"settings_secrets_proton_note_override_after": "als Prozess-Override). Unterstützt sowohl das Laden eines ganzen Tresors als auch das Präfix",
 	"settings_secrets_config_encrypted": "Die Konfiguration wird verschlüsselt gespeichert.",

@@ -14,6 +14,7 @@ import {
 	appendScheduleExecutionLog
 } from '../../db';
 import { pruneImages } from '../../docker';
+import { prunedImageCount } from '../../../utils/pruned-image-count';
 import { sendEventNotification } from '../../notifications';
 
 /**
@@ -72,19 +73,10 @@ export async function runImagePrune(
 		// Execute prune
 		const result = await pruneImages(dangling, envId);
 
-		// Extract space reclaimed and images removed from result
-		const spaceReclaimed = result?.SpaceReclaimed || 0;
-		// Count unique images removed.
-		// Docker returns: Untagged (tag), Untagged (digest @sha256:), Deleted (layer sha256:)
-		// For tagged images: count Untagged entries that are NOT digest references (tag-based)
-		// For dangling images: there are no tag-based entries, only digest-based Untagged entries
-		// So count tag-based Untagged first, fall back to digest-based Untagged for dangling prune
-		const deleted = result?.ImagesDeleted || [];
-		const tagEntries = deleted.filter((img: any) => img.Untagged && !img.Untagged.includes('@sha256:'));
-		const digestEntries = deleted.filter((img: any) => img.Untagged && img.Untagged.includes('@sha256:'));
-		const imagesRemoved = tagEntries.length > 0
-			? tagEntries.length
-			: digestEntries.length;
+		// Extract space reclaimed and images removed from result; the one-by-one prune
+		// on an engine with a broken label filter does not know the space.
+		const spaceReclaimed: number | undefined = result?.SpaceReclaimed;
+		const imagesRemoved = prunedImageCount(result?.ImagesDeleted);
 
 		// Format space for human-readable output
 		const formatBytes = (bytes: number): string => {
@@ -95,7 +87,8 @@ export async function runImagePrune(
 			return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
 		};
 
-		await log(`Prune completed: ${imagesRemoved} images removed, ${formatBytes(spaceReclaimed)} reclaimed`);
+		const reclaimed = spaceReclaimed === undefined ? '' : `, ${formatBytes(spaceReclaimed)} reclaimed`;
+		await log(`Prune completed: ${imagesRemoved} images removed${reclaimed}`);
 
 		// Update settings with last prune info
 		const updatedSettings: ImagePruneSettings = {
@@ -125,7 +118,7 @@ export async function runImagePrune(
 		if (imagesRemoved > 0) {
 			await sendEventNotification('image_prune_success', {
 				title: `Image prune completed — ${env.name}`,
-				message: `${imagesRemoved} unused images removed, ${formatBytes(spaceReclaimed)} disk space reclaimed`,
+				message: `${imagesRemoved} unused images removed${spaceReclaimed === undefined ? '' : `, ${formatBytes(spaceReclaimed)} disk space reclaimed`}`,
 				type: 'success'
 			}, envId);
 		}

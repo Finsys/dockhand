@@ -15,7 +15,7 @@ import * as tls from 'node:tls';
 import { createHash } from 'node:crypto';
 import { pumpWebStreamToWritable } from './stream-pump';
 import { toWebReadableStream } from './node-readable-stream';
-import { buildImagePruneFilters } from './image-prune-core';
+import { buildImagePruneFilters, pruneAllUnused, type ImagePruneResult } from './image-prune-core';
 import { demuxDockerStream } from './docker-demux-core';
 import { isExpectedConnectionError, isQuietDockerFailure, transportTimeoutError } from './docker-probe-core';
 import {
@@ -47,16 +47,21 @@ import { parseImageReference } from './registry/image-ref';
 import { fetchImageCreatedAt, imagePlatform } from './registry/image-age';
 export { parseImageReference } from './registry/image-ref';
 import { rebaseEnvOntoImage, rebaseLabelsOntoImage, rebaseCommand, describeEnvRebase, describeLabelRebase, composeImageLabelForRecreate, composeImageLabelForm, COMPOSE_IMAGE_LABEL, type ImageEnvLabels } from './container-env-merge';
-import { encodeRegistryAuth, fetchRegistryToken, isSafeRegistryHost } from './registry-auth';
+import { encodeRegistryAuth, isSafeRegistryHost } from './registry-auth';
+import { registryAuthHeader } from './registry/auth-header';
+import { forgetRegistryAuth } from './registry/auth-cache';
+import { parseRegistryUrl, pickRegistryCredentials } from './registry/credential-match';
+export { parseRegistryUrl };
 import { describeRegistryFailure } from './registry-failure-core';
 import {
 	getRegistryBearerToken as registryBearerToken,
 	getRegistryManifestDigestDirectDetailed as manifestDigestDirect,
 	getRegistrySchemeForHost as registrySchemeForHost,
+	readManifestIndex,
 	type RegistryPorts
 } from './registry/manifest-digest';
 import { classifyManifest, type ArtifactKind } from './semver/manifest-artifact';
-import { isSystemContainer, classifyEmptyDigestImage, localDigestIsIndexChild, indexChildDigests, samePlatformImage } from './scheduler/tasks/update-utils';
+import { isSystemContainer, classifyEmptyDigestImage, indexChildDigests, multiArchVerdict, readWithRetry, cachedIndexReader, type MultiArchVerdict } from './scheduler/tasks/update-utils';
 import { deepDiff } from '../utils/diff.js';
 import { getInstanceId } from './backups/identity';
 import { isOwnedBackupHelper } from './backups/reap-core';
@@ -3271,8 +3276,8 @@ function logAuthDiagnostics(
 export async function buildRegistryAuthHeader(imageName: string): Promise<Record<string, string>> {
 	const headers: Record<string, string> = {};
 	try {
-		const { registry } = parseImageReference(imageName);
-		const creds = await findRegistryCredentials(registry);
+		const { registry, repo } = parseImageReference(imageName);
+		const creds = await findRegistryCredentials(registry, repo);
 		if (creds) {
 			// Docker Engine requires 'https://index.docker.io/v1/' as serveraddress
 			// for Docker Hub auth — just the hostname is treated as unauthenticated
@@ -3498,79 +3503,23 @@ export async function imageManifestDigest(id: string, envId?: number | null): Pr
 
 
 /**
- * Parse a registry URL into host and path components.
- * Handles URLs with or without protocol, and preserves organization paths.
- *
- * Examples:
- *   'https://registry.example.com/org' -> { host: 'registry.example.com', path: '/org', fullRegistry: 'registry.example.com/org' }
- *   'ghcr.io' -> { host: 'ghcr.io', path: '', fullRegistry: 'ghcr.io' }
- *   'registry.example.com:5000/myorg' -> { host: 'registry.example.com:5000', path: '/myorg', fullRegistry: 'registry.example.com:5000/myorg' }
+ * Find registry credentials from Dockhand's stored registries for an image's registry
+ * host and repo. Matching rules: pickRegistryCredentials (longest stored path wins).
  */
-export function parseRegistryUrl(url: string): { host: string; path: string; fullRegistry: string; protocol: string } {
-	// Detect protocol (default to https)
-	const protocol = url.startsWith('http://') ? 'http' : 'https';
-	// Remove protocol
-	const withoutProtocol = url.replace(/^https?:\/\//, '');
-	// Remove trailing slash
-	const trimmed = withoutProtocol.replace(/\/$/, '');
-	// Split on first slash (after port if present)
-	const slashIndex = trimmed.indexOf('/');
-	if (slashIndex === -1) {
-		return { host: trimmed, path: '', fullRegistry: trimmed, protocol };
-	}
-	const host = trimmed.substring(0, slashIndex);
-	const path = trimmed.substring(slashIndex); // includes leading /
-	return { host, path, fullRegistry: trimmed, protocol };
-}
-
-/**
- * Find registry credentials from Dockhand's stored registries.
- * Matches by registry URL including organization path if present.
- *
- * Matching logic:
- * - Full match: stored 'registry.example.com/org' matches requested 'registry.example.com/org'
- * - Host-only stored: stored 'registry.example.com' matches requested 'registry.example.com/org'
- *   (allows a single credential entry to work for all org paths)
- */
-export async function findRegistryCredentials(registryHost: string): Promise<{ username: string; password: string } | null> {
+export async function findRegistryCredentials(registryHost: string, repo: string): Promise<{ username: string; password: string } | null> {
 	try {
 		// Import here to avoid circular dependency
 		const { getRegistries } = await import('./db.js');
 		const registries = await getRegistries();
 
+		const picked = pickRegistryCredentials(registries, registryHost, repo, DOCKER_HUB_HOSTS);
+		if (picked) {
+			console.log(`[Registry] matched stored=${picked.registry.url} requested=${registryHost}/${repo} via=${picked.via}`);
+			// Older rows may hold untrimmed credentials
+			return { username: picked.registry.username!.trim(), password: picked.registry.password!.trim() };
+		}
+
 		const requested = parseRegistryUrl(registryHost);
-
-		for (const reg of registries) {
-			const stored = parseRegistryUrl(reg.url);
-
-			// Match if:
-			// 1. Full registry paths match exactly, OR
-			// 2. Hosts match and stored registry has no path (applies to any org)
-			if (stored.fullRegistry === requested.fullRegistry ||
-			    (stored.host === requested.host && !stored.path)) {
-				if (reg.username && reg.password) {
-					const via = stored.fullRegistry === requested.fullRegistry ? 'full' : 'host-only';
-					console.log(`[Registry] matched stored=${reg.url} requested=${registryHost} via=${via}`);
-					// Normalize legacy creds saved before #1105 trim fix
-					return { username: reg.username.trim(), password: reg.password.trim() };
-				}
-			}
-		}
-
-		// Bidirectional Docker Hub alias matching:
-		// If the requested host is any Docker Hub variant, match against any stored Docker Hub variant
-		if (DOCKER_HUB_HOSTS.has(requested.host)) {
-			for (const reg of registries) {
-				const stored = parseRegistryUrl(reg.url);
-				if (DOCKER_HUB_HOSTS.has(stored.host)) {
-					if (reg.username && reg.password) {
-						console.log(`[Registry] matched stored=${reg.url} requested=${registryHost} via=hub-alias`);
-						return { username: reg.username.trim(), password: reg.password.trim() };
-					}
-				}
-			}
-		}
-
 		// No stored credentials matched. This is NOT an error for public images —
 		// anonymous access still works; it just means no auth header is attached.
 		// (A Docker Hub entry configured without a username/password is anonymous,
@@ -3617,117 +3566,18 @@ async function getRegistryBearerToken(registry: string, repo: string, signal?: A
  * @param registryUrl - Full registry URL (e.g., 'https://ghcr.io' or 'https://registry.example.com/org')
  * @param scope - Token scope (e.g., 'registry:catalog:*' or 'repository:user/repo:pull')
  * @param credentials - Optional credentials { username, password }
+ * @param signal - Optional deadline for the challenge and token requests together
+ * @param cache - false to always ask the registry (callers that do not drop a rejected header)
  * @returns Authorization header value (e.g., 'Bearer xxx' or 'Basic xxx') or null
  */
 export async function getRegistryAuthHeader(
 	registryUrl: string,
 	scope: string,
-	credentials?: { username: string; password: string } | null
+	credentials?: { username: string; password: string } | null,
+	signal?: AbortSignal,
+	cache = true
 ): Promise<string | null> {
-	try {
-		// Parse URL to extract host (V2 API is always at the host root)
-		const parsed = parseRegistryUrl(registryUrl);
-		const hostSafety = isSafeRegistryHost(parsed.host);
-		if (!hostSafety.ok) {
-			console.error(`[Registry] Refusing auth challenge for ${parsed.host}: ${hostSafety.reason}`);
-			return null;
-		}
-		const apiBaseUrl = `${parsed.protocol}://${parsed.host}`;
-
-		// Step 1: Challenge request to /v2/ (always at registry root, not under org path).
-		// Do not follow redirects; a 3xx is treated as a non-401 below.
-		const challengeResponse = await fetch(`${apiBaseUrl}/v2/`, {
-			method: 'GET',
-			headers: { 'User-Agent': 'Dockhand/1.0' },
-			redirect: 'manual'
-		});
-
-		// If 200, no auth needed
-		if (challengeResponse.ok) {
-			await drainResponse(challengeResponse);
-			return null;
-		}
-
-		// If not 401, something else is wrong
-		if (challengeResponse.status !== 401) {
-			await drainResponse(challengeResponse);
-			console.error(`Registry challenge failed: ${challengeResponse.status}`);
-			return null;
-		}
-
-		// Step 2: Parse WWW-Authenticate header
-		const wwwAuth = challengeResponse.headers.get('WWW-Authenticate') || '';
-		const challenge = wwwAuth.toLowerCase();
-
-		if (challenge.startsWith('basic')) {
-			// Basic auth - use credentials if we have them
-			await drainResponse(challengeResponse);
-			if (credentials) {
-				const basicAuth = Buffer.from(`${credentials.username}:${credentials.password}`).toString('base64');
-				return `Basic ${basicAuth}`;
-			}
-			return null;
-		}
-
-		if (!challenge.startsWith('bearer')) {
-			await drainResponse(challengeResponse);
-			console.error(`Unsupported auth type: ${wwwAuth}`);
-			return null;
-		}
-
-		// Drain 401 response body before bearer token fetch (required by Node.js/Undici for connection reuse)
-		await drainResponse(challengeResponse);
-
-		// Parse bearer challenge: Bearer realm="...",service="...",scope="..."
-		const realmMatch = wwwAuth.match(/realm="([^"]+)"/i);
-		const serviceMatch = wwwAuth.match(/service="([^"]+)"/i);
-
-		if (!realmMatch) {
-			console.error('No realm in WWW-Authenticate header');
-			return null;
-		}
-
-		const realm = realmMatch[1];
-		const service = serviceMatch ? serviceMatch[1] : '';
-
-		// Step 3: Request token from realm (with credentials if available).
-		// Empty scope is allowed — means "no specific resource permission".
-		// Useful for credential validation: some registries (Docker Hub)
-		// reject privileged scopes like registry:catalog:* even for valid
-		// users, so omitting scope is the only reliable login check.
-		const tokenUrl = new URL(realm);
-		if (service) tokenUrl.searchParams.set('service', service);
-		if (scope) tokenUrl.searchParams.set('scope', scope);
-
-		const authHeader = credentials
-			? `Basic ${Buffer.from(`${credentials.username}:${credentials.password}`).toString('base64')}`
-			: null;
-		const tokenResponse = await fetchRegistryToken(tokenUrl.toString(), authHeader);
-
-		if (!tokenResponse.ok) {
-			const errorBody = (await tokenResponse.text().catch(() => '')).slice(0, 300).replace(/\s+/g, ' ').trim();
-			const finalNote = tokenResponse.url && tokenResponse.url !== tokenUrl.toString()
-				? ` (final ${new URL(tokenResponse.url).origin})`
-				: '';
-			const identity = credentials
-				? ` as ${credentials.username.slice(0, 4)}...(len=${credentials.username.length})`
-				: ' anonymously';
-			console.error(`[Registry] Token request failed: ${tokenResponse.status} at ${tokenUrl.origin}${finalNote}, sent${identity}${errorBody ? ` - response: ${errorBody}` : ''}`);
-			return null;
-		}
-
-		const tokenData = await tokenResponse.json() as { token?: string; access_token?: string };
-		const token = tokenData.token || tokenData.access_token || null;
-
-		return token ? `Bearer ${token}` : null;
-
-	} catch (e) {
-		const errorMsg = e instanceof Error ? e.message : String(e);
-		const cause = (e as any)?.cause;
-		const causeMsg = cause ? ` (cause: ${cause})` : '';
-		console.error('[Registry] Failed to get auth header:', errorMsg + causeMsg);
-		return null;
-	}
+	return registryAuthHeader(registryUrl, scope, credentials, { parseRegistryUrl, signal, cache });
 }
 
 /**
@@ -3753,7 +3603,8 @@ export async function getRegistryAuth(
 		? { username: registry.username, password: registry.password }
 		: null;
 
-	const authHeader = await getRegistryAuthHeader(registry.url, scope, credentials);
+	// Registry browsing makes few requests and does not drop a rejected header, so it skips the cache.
+	const authHeader = await getRegistryAuthHeader(registry.url, scope, credentials, undefined, false);
 
 	return { baseUrl, orgPath: parsed.path, authHeader };
 }
@@ -4006,54 +3857,14 @@ export async function harborSearchRepositories(
 	return results;
 }
 
-/**
- * Check the registry for the current manifest digest of an image.
- * Simple HEAD request to get Docker-Content-Digest header.
- * Docker stores the manifest list digest in RepoDigests, so we compare that directly.
- */
-/** Direct registry request with upstream diagnostic details. */
-async function getRegistryManifestDigestDirectDetailed(
-	imageName: string, signal?: AbortSignal
-): Promise<{ digest: string | null; reason?: string }> {
-	return manifestDigestDirect(imageName, registryPorts(), signal);
+/** The tag's digest, read by Dockhand straight from the registry with its stored credentials. */
+export async function getRegistryManifestDigest(imageName: string, _envId?: number | null, signal?: AbortSignal): Promise<string | null> {
+	return (await getRegistryManifestDigestDetailed(imageName, _envId, signal)).digest;
 }
 
-/** The target daemon can resolve private registries that Dockhand itself cannot
- * reach (especially through Hawser). This endpoint reads metadata, not layers. */
-async function getDockerDistributionDigest(imageName: string, envId?: number | null, signal?: AbortSignal): Promise<string | null> {
-	try {
-		const headers = await buildRegistryAuthHeader(imageName);
-		const response = await dockerFetch(`/distribution/${encodeURIComponent(imageName)}/json`, { headers, signal }, envId);
-		if (!response.ok) {
-			console.warn(`[Registry] Docker distribution inspect for ${imageName} returned HTTP ${response.status}`);
-			await drainResponse(response);
-			return null;
-		}
-		const data = await response.json() as { Descriptor?: { digest?: unknown } };
-		const digest = data.Descriptor?.digest;
-		return typeof digest === 'string' && /^sha256:[a-f0-9]{64}$/i.test(digest) ? digest : null;
-	} catch (error) {
-		console.warn(`[Registry] Docker distribution inspect failed for ${imageName}:`, error);
-		return null;
-	}
-}
-
-/** With a cooldown enabled, resolve the digest on the target environment first.
- * Otherwise retain the direct registry HEAD without an extra daemon request. */
-export async function getRegistryManifestDigest(imageName: string, envId?: number | null, signal?: AbortSignal): Promise<string | null> {
-	return (await getRegistryManifestDigestDetailed(imageName, envId, signal)).digest;
-}
-
-export async function getRegistryManifestDigestDetailed(imageName: string, envId?: number | null, signal?: AbortSignal): Promise<{ digest: string | null; reason?: string }> {
-	const { registry } = parseImageReference(imageName);
-	if (!isSafeRegistryHost(registry).ok) return { digest: null, reason: describeRegistryFailure({ kind: 'blocked-host', registry }) };
+export async function getRegistryManifestDigestDetailed(imageName: string, _envId?: number | null, signal?: AbortSignal): Promise<{ digest: string | null; reason?: string }> {
 	signal?.throwIfAborted();
-	if ((await getMinimumReleaseAgeConfig(envId)).hours > 0) {
-		const daemonDigest = await getDockerDistributionDigest(imageName, envId, signal);
-		signal?.throwIfAborted();
-		if (daemonDigest) return { digest: daemonDigest };
-	}
-	return getRegistryManifestDigestDirectDetailed(imageName, signal);
+	return manifestDigestDirect(imageName, registryPorts(), signal);
 }
 
 // Cache only verified creation dates, keyed by immutable digest and target platform.
@@ -4147,6 +3958,7 @@ export async function getTagArtifactKind(
 		});
 		if (!res.ok) {
 			await drainResponse(res);
+			if (res.status === 401) forgetRegistryAuth(token, registry);
 			return { kind: 'image', digest: null };
 		}
 		const digest = res.headers.get('Docker-Content-Digest');
@@ -4162,77 +3974,44 @@ export async function getTagArtifactKind(
 	}
 }
 
-/** Fetch a manifest/index body by tag or digest. Null on any failure; never throws. */
-async function fetchManifestBody(
-	registry: string,
-	repo: string,
-	reference: string,
-	token: string | null,
-	scheme: string
-): Promise<unknown | null> {
-	const headers: Record<string, string> = {
-		'User-Agent': 'Dockhand/1.0',
-		'Accept': [
-			'application/vnd.docker.distribution.manifest.list.v2+json',
-			'application/vnd.oci.image.index.v1+json'
-		].join(', ')
-	};
-	if (token) headers['Authorization'] = token;
-	const response = await fetch(`${scheme}://${registry}/v2/${repo}/manifests/${reference}`, {
-		method: 'GET',
-		headers,
-		signal: AbortSignal.timeout(8000)
-	});
-	if (!response.ok) {
-		await drainResponse(response);
-		return null;
-	}
-	return response.json();
-}
+/** Index reads by digest, shared by every check (see cachedIndexReader). */
+const indexByDigest = new Map<string, unknown>();
 
 /**
- * Rule out a multi-arch false positive after the index digest did not match any local
- * digest. Two shapes, both resolved from the registry's CURRENT index for the tag:
- *  - the local image recorded a per-arch CHILD of the current index, or
- *  - the local image recorded an OLD index whose entry for the daemon's platform is the
- *    SAME image as the new index's entry - the tag was republished with only another
- *    architecture or the attestations changed.
- * Best-effort: ANY failure (network, non-index, unauthenticated) returns false so the
- * caller keeps its "update available" verdict. Never throws; own short timeouts; runs
- * only on the already-flagged path.
+ * Whether an index-digest mismatch on a multi-arch tag is a real update (see
+ * `multiArchVerdict`). Each read gets one retry after a transient failure; a check that
+ * still cannot read the registry answers `unknown` rather than guessing.
  */
 async function localImageMatchesRegistry(
 	imageName: string,
 	localDigests: string[],
-	envId?: number | null
-): Promise<boolean> {
-	try {
-		const { registry, repo, tag } = parseImageReference(imageName);
-		if (!isSafeRegistryHost(registry).ok) return false;
-		const token = await getRegistryBearerToken(registry, repo);
-		const scheme = await getRegistrySchemeForHost(registry);
-
-		const registryIndex = await fetchManifestBody(registry, repo, tag, token, scheme);
-		if (registryIndex === null) return false;
-
-		// Local per-arch child of the current index.
-		if (localDigestIsIndexChild(localDigests, registryIndex)) return true;
-
-		// Local digest is an OLD index; compare the daemon-platform entry of both.
-		// Only worth the /info and the extra manifest reads when the registry side is
-		// actually a multi-arch index - a single-arch tag has no platform entry to compare.
-		if (indexChildDigests(registryIndex).length === 0) return false;
-		const info = await dockerJsonRequest('/info', { signal: AbortSignal.timeout(8000) }, envId) as { OSType?: string; Architecture?: string };
-		const platform = imagePlatform(info?.OSType, info?.Architecture);
-		if (!platform) return false;
-		for (const localDigest of localDigests) {
-			const localIndex = await fetchManifestBody(registry, repo, localDigest, token, scheme);
-			if (localIndex && samePlatformImage(localIndex, registryIndex, platform)) return true;
+	envId?: number | null,
+	registryDigest?: string
+): Promise<MultiArchVerdict> {
+	const { registry, repo, tag } = parseImageReference(imageName);
+	if (!isSafeRegistryHost(registry).ok) return { kind: 'unknown', reason: describeRegistryFailure({ kind: 'blocked-host', registry }) };
+	// Authenticated only when a read misses the cache.
+	let auth: Promise<[string | null, string]> | null = null;
+	const credentials = () => (auth ??= Promise.all([getRegistryBearerToken(registry, repo), getRegistrySchemeForHost(registry)]));
+	const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+	const readIndex = cachedIndexReader(async (reference) => {
+		const [token, scheme] = await credentials();
+		return readWithRetry(() => readManifestIndex(registry, repo, reference, token, scheme), sleep);
+	}, indexByDigest, `${registry}/${repo}`);
+	return multiArchVerdict({
+		tag,
+		currentDigest: registryDigest,
+		localDigests,
+		readIndex,
+		platform: async () => {
+			try {
+				const info = await dockerJsonRequest('/info', { signal: AbortSignal.timeout(8000) }, envId) as { OSType?: string; Architecture?: string };
+				return imagePlatform(info?.OSType, info?.Architecture);
+			} catch {
+				return null;
+			}
 		}
-		return false;
-	} catch {
-		return false;
-	}
+	});
 }
 
 export interface ImageUpdateCheckResult {
@@ -4269,7 +4048,10 @@ export interface ImageUpdateCheckResult {
 export async function checkImageUpdateAvailable(
 	imageName: string,
 	currentImageId: string,
-	envId?: number
+	envId?: number,
+	reportPinnedDigest = true,
+	skipCooldown = false,
+	watchDigest = true
 ): Promise<ImageUpdateCheckResult> {
 	// A digest with no tag names one manifest, so there is nothing to follow. A tag that
 	// records its digest - the shape a base image patched for a CVE takes - is checked by
@@ -4277,19 +4059,25 @@ export async function checkImageUpdateAvailable(
 	// means "a newer digest exists but the compose pins the old one", so the caller
 	// reports the move without applying it. A pinned tag whose digest has NOT moved is
 	// simply up to date and carries no flag, so the pin marker and the update counters
-	// never fire on a quiet pin.
-	const plan = imageCheckPlan(imageName);
+	// never fire on a quiet pin. `reportPinnedDigest` is the admin opt-out (#1780): off,
+	// a pinned tag's digest is not asked about (plan.watchDigest), for someone who pins
+	// deliberately and never acts on a move.
+	const plan = imageCheckPlan(imageName, reportPinnedDigest);
 	if (plan.skip) {
 		return { hasUpdate: false, currentDigest: imageName.split('@')[1] };
 	}
-	const result = await checkTagForUpdate(plan.reference, currentImageId, envId);
-	return resolvePinnedToDigest(plan, result.hasUpdate) ? { ...result, pinnedToDigest: true } : result;
+	const result = await checkTagForUpdate(plan.reference, currentImageId, envId, skipCooldown, watchDigest && plan.watchDigest);
+	if (!resolvePinnedToDigest(plan, result.hasUpdate)) return result;
+	// A moved digest on a pinned tag: reported with the pinned flag, never applied.
+	return { ...result, pinnedToDigest: true };
 }
 
 async function checkTagForUpdate(
 	checkedReference: string,
 	currentImageId: string,
-	envId?: number
+	envId?: number,
+	skipCooldown = false,
+	watchDigest = true
 ): Promise<ImageUpdateCheckResult> {
 	const imageName = checkedReference;
 	try {
@@ -4327,6 +4115,12 @@ async function checkTagForUpdate(
 			.map(extractDigest)
 			.filter((d): d is string => d !== null);
 
+		// Digest watching off (dockhand.watch.digest=false): no registry request at all.
+		// The local digests are still returned for the newer-version check.
+		if (!watchDigest) {
+			return { hasUpdate: false, currentDigest: currentRepoDigests[0] ?? currentImageId, localDigests };
+		}
+
 		// The RUNNING image has no repo digests. That is ambiguous: it can be a
 		// genuinely local/built image (no registry to check against), OR a registry
 		// image whose tag has since moved to a newer pull — leaving the container
@@ -4344,7 +4138,7 @@ async function checkTagForUpdate(
 			const { hasUpdate, isLocalImage, registryDigest: rd } = classifyEmptyDigestImage(registryDigest);
 			if (hasUpdate && rd) {
 				const remaining = await imageCooldownRemainingMs(checkedReference, rd, envId);
-				if (remaining > 0) return { hasUpdate: false, currentDigest: currentImageId, registryDigest: rd, releaseAgeRemainingHours: Math.ceil(remaining / 3600000) };
+				if (remaining > 0 && !skipCooldown) return { hasUpdate: false, currentDigest: currentImageId, registryDigest: rd, releaseAgeRemainingHours: Math.ceil(remaining / 3600000) };
 			}
 			return { hasUpdate, isLocalImage, currentDigest: currentImageId, registryDigest: rd };
 		}
@@ -4372,13 +4166,23 @@ async function checkTagForUpdate(
 		// The HEAD digest (always the manifest-list/index digest) didn't match. Before
 		// declaring an update, rule out the multi-arch false positives: a local per-arch
 		// child digest never equals the index digest, and an index that moved while the
-		// daemon-platform image stayed the same is not an update either. Both are
-		// best-effort registry reads; on any failure hasUpdate stays true.
-		if (await localImageMatchesRegistry(imageName, localDigests, envId)) {
+		// daemon-platform image stayed the same is not an update either. A registry that
+		// cannot be read to decide is an error, never a guessed update.
+		const multiArch = await localImageMatchesRegistry(imageName, localDigests, envId, registryDigest);
+		if (multiArch.kind === 'same') {
 			return { hasUpdate: false, currentDigest: currentRepoDigests[0], localDigests };
 		}
+		if (multiArch.kind === 'unknown') {
+			return {
+				hasUpdate: false,
+				currentDigest: currentRepoDigests[0],
+				registryDigest,
+				localDigests,
+				error: `Could not confirm whether the multi-arch image is current: ${multiArch.reason}`
+			};
+		}
 		const remaining = await imageCooldownRemainingMs(checkedReference, registryDigest, envId);
-		if (remaining > 0) {
+		if (remaining > 0 && !skipCooldown) {
 			return { hasUpdate: false, currentDigest: currentRepoDigests[0], registryDigest, localDigests, releaseAgeRemainingHours: Math.ceil(remaining / 3600000) };
 		}
 
@@ -5131,11 +4935,21 @@ export async function pruneContainers(envId?: number | null) {
 	return dockerJsonRequest('/containers/prune', { method: 'POST' }, envId);
 }
 
-export async function pruneImages(dangling = true, envId?: number | null) {
+function pruneAllUnusedImages(envId?: number | null): Promise<ImagePruneResult> {
+	return pruneAllUnused({
+		listImages: (filters) => dockerJsonRequest(filters ? `/images/json?filters=${filters}` : '/images/json', {}, envId),
+		listContainers: () => dockerJsonRequest('/containers/json?all=true', {}, envId),
+		prune: () => dockerJsonRequest<ImagePruneResult>(`/images/prune?filters=${buildImagePruneFilters(false)}`, { method: 'POST' }, envId),
+		remove: (ref) => dockerJsonRequest(`/images/${encodeURIComponent(ref)}`, { method: 'DELETE' }, envId),
+		log: (message) => console.log(`[Prune] env ${envId ?? 'local'}: ${message}`)
+	});
+}
+
+export async function pruneImages(dangling = true, envId?: number | null): Promise<ImagePruneResult> {
 	// dangling=true: only remove untagged images. Pass straight through —
 	// scanner images are always tagged so they can't be dangling anyway.
 	if (dangling) {
-		return dockerJsonRequest(
+		return dockerJsonRequest<ImagePruneResult>(
 			`/images/prune?filters=${buildImagePruneFilters(true)}`,
 			{ method: 'POST' },
 			envId
@@ -5149,11 +4963,7 @@ export async function pruneImages(dangling = true, envId?: number | null) {
 	// in a finally (#625). Scanner images are third-party so we can't label them.
 	const protect = (await getSetting('protect_scanner_images')) !== false;
 	if (!protect) {
-		return dockerJsonRequest(
-			`/images/prune?filters=${buildImagePruneFilters(false)}`,
-			{ method: 'POST' },
-			envId
-		);
+		return pruneAllUnusedImages(envId);
 	}
 
 	const { DEFAULT_GRYPE_IMAGE, DEFAULT_TRIVY_IMAGE } = await import('./scanner');
@@ -5184,11 +4994,7 @@ export async function pruneImages(dangling = true, envId?: number | null) {
 	}
 
 	try {
-		return await dockerJsonRequest(
-			`/images/prune?filters=${buildImagePruneFilters(false)}`,
-			{ method: 'POST' },
-			envId
-		);
+		return await pruneAllUnusedImages(envId);
 	} finally {
 		for (const id of holderIds) {
 			try {

@@ -66,7 +66,7 @@
 	// Options picked in the RedeployPopover next to "Save & redeploy" / "Create & Start"
 	// (see the pull/build/forceRecreate contract RedeployPopover.svelte already uses for
 	// the stack-grid redeploy actions).
-	type DeployOptions = { pull: boolean; build: boolean; forceRecreate: boolean };
+	type DeployOptions = { pull: boolean; respectPullPolicy?: boolean; build: boolean; forceRecreate: boolean };
 
 	interface Props {
 		open: boolean;
@@ -1664,6 +1664,7 @@
 			// plain "Create" button, which never reaches deployStack server-side anyway.
 			if (start && deployOptions) {
 				requestBody.pull = deployOptions.pull;
+				requestBody.respectPullPolicy = deployOptions.respectPullPolicy;
 				requestBody.build = deployOptions.build;
 				requestBody.forceRecreate = deployOptions.forceRecreate;
 			}
@@ -1844,6 +1845,7 @@
 			// plain "Save" button, which never reaches deployStack server-side anyway.
 			if (restart && deployOptions) {
 				requestBody.pull = deployOptions.pull;
+				requestBody.respectPullPolicy = deployOptions.respectPullPolicy;
 				requestBody.build = deployOptions.build;
 				requestBody.forceRecreate = deployOptions.forceRecreate;
 			}

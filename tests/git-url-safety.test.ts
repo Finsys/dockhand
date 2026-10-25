@@ -1,5 +1,8 @@
 import { describe, test, expect } from 'bun:test';
-import { assertSafeRepoUrl, assertSafeGitRef, repoFilePath } from '../src/lib/server/git-url-safety';
+import { assertSafeRepoUrl, assertSafeGitRef, repoFilePath, repoBaseEnvPath } from '../src/lib/server/git-url-safety';
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync, realpathSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { containedPath } from '../src/lib/server/git-deletions';
 
 describe('assertSafeRepoUrl — rejects dangerous URLs, allows every legit scheme', () => {
@@ -138,5 +141,48 @@ describe('repoFilePath — compose/env path guard (resolve-then-containment)', (
 	test('dotty filenames that are NOT .. / . segments still resolve', () => {
 		expect(repoFilePath(root, '..foo/compose.yml', 'Compose path')).toBe(`${root}/..foo/compose.yml`);
 		expect(repoFilePath(root, 'foo..bar/compose.yml', 'Compose path')).toBe(`${root}/foo..bar/compose.yml`);
+	});
+});
+
+describe('repoFilePath - a committed symlink cannot reach Dockhand secrets', () => {
+	const base = realpathSync(mkdtempSync(join(tmpdir(), 'repo-links-')));
+	const repo = join(base, 'repo');
+	const outside = join(base, 'outside');
+	const data = join(base, 'data');
+	const previousDataDir = process.env.DATA_DIR;
+	process.env.DATA_DIR = data;
+	mkdirSync(join(repo, 'app'), { recursive: true });
+	mkdirSync(outside);
+	mkdirSync(join(data, 'db'), { recursive: true });
+	writeFileSync(join(data, '.encryption_key'), 'K');
+	writeFileSync(join(outside, 'shared.env'), 'A=1');
+	writeFileSync(join(repo, 'app', 'compose.yaml'), 'services: {}');
+	symlinkSync('/', join(repo, 'root'));
+	symlinkSync(join(data, '.encryption_key'), join(repo, 'key.env'));
+	symlinkSync(join(outside, 'shared.env'), join(repo, 'shared.env'));
+	mkdirSync(join(repo, 'evil'));
+	writeFileSync(join(repo, 'evil', 'compose.yaml'), 'services: {}');
+	symlinkSync(join(data, '.encryption_key'), join(repo, 'evil', '.env'));
+
+	test('a link to the encryption key or into /proc is refused', () => {
+		expect(() => repoFilePath(repo, 'key.env', 'Env file path')).toThrow('not allowed');
+		expect(() => repoFilePath(repo, 'root/proc/self/environ', 'Env file path')).toThrow('not allowed');
+		expect(() => repoFilePath(repo, `root${data}/db/dockhand.db`, 'Compose path')).toThrow('not allowed');
+	});
+
+	test('a link to an ordinary file outside the clone keeps working', () => {
+		expect(repoFilePath(repo, 'shared.env', 'Env file path')).toBe(join(repo, 'shared.env'));
+		expect(repoFilePath(repo, 'root/etc/hosts', 'Compose path')).toBe(join(repo, 'root', 'etc', 'hosts'));
+	});
+
+	test('the base .env beside a compose file is held to the same rule', () => {
+		expect(repoBaseEnvPath(repo, 'app/compose.yaml')).toBe(join(repo, 'app', '.env'));
+		expect(() => repoBaseEnvPath(repo, 'evil/compose.yaml')).toThrow('not allowed');
+	});
+
+	test('cleanup', () => {
+		rmSync(base, { recursive: true, force: true });
+		if (previousDataDir === undefined) delete process.env.DATA_DIR;
+		else process.env.DATA_DIR = previousDataDir;
 	});
 });

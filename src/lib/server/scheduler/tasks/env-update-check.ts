@@ -10,6 +10,7 @@ import type { ScheduleTrigger, VulnerabilityCriteria } from '../../db';
 import {
 	getEnvUpdateCheckSettings,
 	getGlobalSemverConfig,
+	getPinnedDigestReportEnabled,
 	getEnvironment,
 	createScheduleExecution,
 	updateScheduleExecution,
@@ -21,6 +22,7 @@ import {
 	getPendingContainerUpdates
 } from '../../db';
 import { checkNewerVersion, type ImageCreatedAtProbe } from '../../semver/check';
+import { userCheckListedAfter } from '../../semver/tag-source-core';
 import { parseTag } from '../../semver/tag-parser';
 import { parseImageReference } from '../../registry/image-ref';
 import type { NewerVersion } from '../../semver/find-newer';
@@ -38,14 +40,17 @@ import {
 	getTagArtifactKind,
 	getRegistryTagCreatedAt,
 } from '../../docker';
+import { withPullRetry } from '../../pull-retry';
 import type { ImageEnvLabels } from '../../container-env-merge';
 import { sendEventNotification } from '../../notifications';
 import { getScannerSettings, scanImage, type VulnerabilitySeverity } from '../../scanner';
 import { parseImageNameAndTag, combineScanSummaries, isSystemContainer, isPodmanInfraContainer } from './update-utils';
 import { resolveBlockDecision } from './block-decision';
-import { isUpdateDisabledByLabel, isHiddenByLabel, getVersionPatternOverride, getVersionPatternRejection, digestUpdateVisible } from '../../container-labels';
+import { isUpdateDisabledByLabel, isHiddenByLabel, getVersionPatternOverride, getVersionPatternRejection, digestUpdateVisible, pinnedDigestReportVisible, isCooldownSkippedByLabel, isDigestWatchDisabledByLabel } from '../../container-labels';
 import { tagFilterFromLabels } from '$lib/server/semver/tag-filter-labels';
+import { tagTransformFromLabels } from '$lib/server/semver/tag-transform';
 import { recreateContainer } from './container-update';
+import { withPreviousOnError } from '../../../utils/pending-update-rows';
 
 interface UpdateInfo {
 	containerId: string;
@@ -126,12 +131,17 @@ export async function runEnvUpdateCheckJob(
 			matchFlavor: semverConfig.matchFlavor,
 			includePrerelease: semverConfig.includePrerelease
 		} as const;
+		// The global opt-out for moved-digest reports on pinned images (#1780); the
+		// per-container label can still override it either way.
+		const reportPinnedGlobal = await getPinnedDigestReportEnabled();
 		// Remember the target we last surfaced per container, so we only notify when
 		// a NEW newer version appears - not on every scheduled run. Read before clear.
 		const previousSemverTargets = new Map<string, string>();
+		// Read before clear: also what a container whose check fails keeps.
+		const previousRows = await getPendingContainerUpdates(environmentId).catch(() => []);
 		if (semverEnabled) {
 			try {
-				for (const row of await getPendingContainerUpdates(environmentId)) {
+				for (const row of previousRows) {
 					if (row.newerVersion) {
 						try {
 							const nv = JSON.parse(row.newerVersion) as NewerVersion;
@@ -149,9 +159,7 @@ export async function runEnvUpdateCheckJob(
 	// Pinned moves: found, recorded, never offered for an update.
 	const pinnedByContainer = new Map<string, boolean>();
 		const semverByContainer = new Map<string, NewerVersion>();
-
-		// Clear pending updates at the start - we'll re-add as we discover updates
-		await clearPendingContainerUpdates(environmentId);
+		const erroredIds = new Set<string>();
 
 		// Get all containers in this environment, excluding ones hidden via
 		// dockhand.hidden=true (consistent with manual check-updates, #1083).
@@ -193,7 +201,12 @@ export async function runEnvUpdateCheckJob(
 				checkedCount++;
 				await log(`  Checking: ${container.name} (${imageName})`);
 
-				const result = await checkImageUpdateAvailable(imageName, currentImageId, environmentId);
+				const result = await checkImageUpdateAvailable(
+					imageName, currentImageId, environmentId,
+					pinnedDigestReportVisible(reportPinnedGlobal, inspectData.Config?.Labels),
+					isCooldownSkippedByLabel(inspectData.Config?.Labels),
+					!isDigestWatchDisabledByLabel(inspectData.Config?.Labels)
+				);
 
 				if (result.isLocalImage) {
 					await log(`    Local image - skipping update check`);
@@ -203,6 +216,7 @@ export async function runEnvUpdateCheckJob(
 				if (result.error) {
 					await log(`    Error: ${result.error}`);
 					errorCount++;
+					erroredIds.add(container.id);
 					continue;
 				}
 
@@ -290,10 +304,12 @@ export async function runEnvUpdateCheckJob(
 					}
 					const newer = await checkNewerVersion(
 						imageName,
-						{ ...semverOptions, versionPattern, tagFilter: tagFilterFromLabels(inspectData.Config?.Labels) },
+						{ ...semverOptions, versionPattern, tagFilter: tagFilterFromLabels(inspectData.Config?.Labels), tagTransform: tagTransformFromLabels(inspectData.Config?.Labels) },
 						getTagArtifactKind,
 						result.localDigests ?? [],
-						staleCheck
+						staleCheck,
+						// Run now from Schedules lists afresh, like the containers page button.
+						triggeredBy === 'manual' ? userCheckListedAfter(startTime) : undefined
 					).catch(() => null);
 					if (newer) {
 						semverByContainer.set(container.id, newer);
@@ -306,6 +322,7 @@ export async function runEnvUpdateCheckJob(
 			} catch (err: any) {
 				await log(`  [${container.name}] Error: ${err.message}`);
 				errorCount++;
+				erroredIds.add(container.id);
 			}
 		}
 
@@ -317,22 +334,26 @@ export async function runEnvUpdateCheckJob(
 			...cooldownByContainer.keys(),
 			...pinnedByContainer.keys()
 		]);
-		for (const cid of pendingContainerIds) {
+		const freshRows = [...pendingContainerIds].map((cid) => {
 			const digest = updatesAvailable.find((u) => u.containerId === cid);
-			const semver = semverByContainer.get(cid) ?? null;
 			const container = containers.find((c) => c.id === cid);
-			await addPendingContainerUpdate(
-				environmentId,
-				cid,
-				digest?.containerName ?? container?.name ?? cid,
-				digest?.imageName ?? container?.image ?? '',
-				{
+			return {
+				containerId: cid,
+				containerName: digest?.containerName ?? container?.name ?? cid,
+				imageName: digest?.imageName ?? container?.image ?? '',
+				options: {
 					hasImageUpdate: !!digest,
-					newerVersion: semver,
+					newerVersion: semverByContainer.get(cid) ?? null,
 					releaseAgeRemainingHours: cooldownByContainer.get(cid) ?? null,
 					pinnedToDigest: pinnedByContainer.get(cid) ?? false
 				}
-			);
+			};
+		});
+		// Replace the saved rows only now: while the run is going, and when it fails before
+		// this point, the environment keeps showing what the previous run found.
+		await clearPendingContainerUpdates(environmentId);
+		for (const row of withPreviousOnError(freshRows, previousRows, erroredIds)) {
+			await addPendingContainerUpdate(environmentId, row.containerId, row.containerName, row.imageName, row.options);
 		}
 
 		// Notify about NEW newer-version tags (advisory, never auto-applied). Fires
@@ -424,7 +445,7 @@ export async function runEnvUpdateCheckJob(
 
 						// Step 1: Pull new image
 						await log(`  Pulling ${update.imageName}...`);
-						const pulled = await pullImage(update.imageName, () => {}, environmentId, true);
+						const pulled = await withPullRetry(() => pullImage(update.imageName, () => {}, environmentId, true), { log: (m) => log(`  ${m}`) });
 						verifiedImageId = pulled?.imageId;
 						verifiedImageReference = pulled?.reference;
 						if (pulled) update.newDigest = pulled.digest;
@@ -545,7 +566,7 @@ export async function runEnvUpdateCheckJob(
 					} else {
 						// Simple pull (no scanning or digest-based image)
 						await log(`  Pulling ${update.imageName}...`);
-						const pulled = await pullImage(update.imageName, () => {}, environmentId, true);
+						const pulled = await withPullRetry(() => pullImage(update.imageName, () => {}, environmentId, true), { log: (m) => log(`  ${m}`) });
 						verifiedImageId = pulled?.imageId;
 						verifiedImageReference = pulled?.reference;
 						if (pulled) update.newDigest = pulled.digest;
@@ -628,7 +649,7 @@ export async function runEnvUpdateCheckJob(
 			// Check-only mode: just send notification
 			await log('');
 			await log('Check-only mode - sending notification about available updates');
-			// Pending updates already added as we discovered them
+			// Pending rows were persisted above
 
 			await sendEventNotification('updates_detected', {
 				title: `Container updates available in ${env.name}`,

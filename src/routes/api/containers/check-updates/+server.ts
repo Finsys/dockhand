@@ -2,15 +2,17 @@ import { trackedImageReference } from '$lib/utils/tracked-image';
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { authorize } from '$lib/server/authorize';
-import { rowsToPersist } from '$lib/utils/pending-update-rows';
+import { rowsToPersist, withPreviousOnError } from '$lib/utils/pending-update-rows';
 import { listContainers, inspectContainer, checkImageUpdateAvailable, getTagArtifactKind, getRegistryTagCreatedAt, inspectImage } from '$lib/server/docker';
-import { clearPendingContainerUpdates, addPendingContainerUpdate, getPendingContainerUpdates, getGlobalSemverConfig } from '$lib/server/db';
+import { clearPendingContainerUpdates, addPendingContainerUpdate, getPendingContainerUpdates, getGlobalSemverConfig, getPinnedDigestReportEnabled } from '$lib/server/db';
 import { isSystemContainer, isPodmanInfraContainer } from '$lib/server/scheduler/tasks/update-utils';
-import { isUpdateDisabledByLabel, isHiddenByLabel, getVersionPatternOverride, digestUpdateVisible } from '$lib/server/container-labels';
+import { isUpdateDisabledByLabel, isHiddenByLabel, getVersionPatternOverride, digestUpdateVisible, pinnedDigestReportVisible, isCooldownSkippedByLabel, isDigestWatchDisabledByLabel } from '$lib/server/container-labels';
 import { createJobResponse } from '$lib/server/sse';
 import { checkNewerVersion, type ImageCreatedAtProbe } from '$lib/server/semver/check';
+import { userCheckListedAfter } from '$lib/server/semver/tag-source-core';
 import { parseTag } from '$lib/server/semver/tag-parser';
 import { tagFilterFromLabels } from '$lib/server/semver/tag-filter-labels';
+import { tagTransformFromLabels } from '$lib/server/semver/tag-transform';
 import { parseImageReference } from '$lib/server/registry/image-ref';
 import type { NewerVersion } from '$lib/server/semver/find-newer';
 
@@ -103,10 +105,10 @@ export const POST: RequestHandler = async ({ url, cookies, request }) => {
 	}
 
 	return createJobResponse(async (send) => {
-		// Clear existing pending updates for this environment before checking
-		if (envIdNum) {
-			await clearPendingContainerUpdates(envIdNum);
-		}
+		// A manual check reads tag lists listed during this check, or in the minute before it.
+		const listedAfter = userCheckListedAfter(Date.now());
+		// The saved rows, kept in hand so a container whose check fails retains what was known.
+		const previousRows = envIdNum ? await getPendingContainerUpdates(envIdNum).catch(() => []) : [];
 
 		const allContainers = await listContainers(true, envIdNum);
 		// Skip:
@@ -128,6 +130,9 @@ export const POST: RequestHandler = async ({ url, cookies, request }) => {
 			matchFlavor: semverConfig.matchFlavor,
 			includePrerelease: semverConfig.includePrerelease
 		} as const;
+		// Global opt-out for moved-digest reports on pinned images (#1780); a
+		// per-container label can still override it either way.
+		const reportPinnedGlobal = await getPinnedDigestReportEnabled();
 
 		// Check container for updates
 		let checked = 0;
@@ -160,7 +165,12 @@ export const POST: RequestHandler = async ({ url, cookies, request }) => {
 					};
 				}
 
-				const result = await checkImageUpdateAvailable(imageName, currentImageId, envIdNum);
+				const result = await checkImageUpdateAvailable(
+					imageName, currentImageId, envIdNum,
+					pinnedDigestReportVisible(reportPinnedGlobal, inspectData.Config?.Labels),
+					isCooldownSkippedByLabel(inspectData.Config?.Labels),
+					!isDigestWatchDisabledByLabel(inspectData.Config?.Labels)
+				);
 
 				// System containers (Dockhand itself, Hawser) have their own update path and are
 				// never shown/counted as a container update, so skip the extra registry call and
@@ -195,8 +205,9 @@ export const POST: RequestHandler = async ({ url, cookies, request }) => {
 					? await checkNewerVersion(imageName, {
 							...semverOptions,
 							versionPattern,
-							tagFilter: tagFilterFromLabels(inspectData.Config?.Labels)
-						}, getTagArtifactKind, result.localDigests ?? [], staleCheck).catch(() => null)
+							tagFilter: tagFilterFromLabels(inspectData.Config?.Labels),
+						tagTransform: tagTransformFromLabels(inspectData.Config?.Labels)
+						}, getTagArtifactKind, result.localDigests ?? [], staleCheck, listedAfter).catch(() => null)
 					: null;
 
 				// Matches the scheduled check: the label suppresses the same-tag digest
@@ -252,7 +263,10 @@ export const POST: RequestHandler = async ({ url, cookies, request }) => {
 		// keeping. A held update persists with hasImageUpdate false, so it shows as
 		// waiting without ever being offered for a bulk update.
 		if (envIdNum) {
-			for (const row of rowsToPersist(results)) {
+			const erroredIds = new Set(results.filter((r) => r.error).map((r) => r.containerId));
+			// Replace the saved rows only now, so a check that fails before this point leaves them as they were.
+			await clearPendingContainerUpdates(envIdNum);
+			for (const row of withPreviousOnError(rowsToPersist(results), previousRows, erroredIds)) {
 				await addPendingContainerUpdate(
 					envIdNum,
 					row.containerId,

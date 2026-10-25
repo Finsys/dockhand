@@ -4,13 +4,13 @@
 # stop/rm/rename/network-connect/start via Docker CLI.
 
 # Stage 1: Build minimal Wolfi rootfs with apko
-FROM alpine:3.21 AS os-builder
+FROM alpine:3.24 AS os-builder
 
 ARG TARGETARCH
 
 WORKDIR /work
 
-ARG APKO_VERSION=0.30.34
+ARG APKO_VERSION=1.4.13
 RUN apk add --no-cache curl \
     && ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "arm64" || echo "amd64") \
     && curl -sL "https://github.com/chainguard-dev/apko/releases/download/v${APKO_VERSION}/apko_${APKO_VERSION}_linux_${ARCH}.tar.gz" \

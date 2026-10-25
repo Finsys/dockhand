@@ -2255,12 +2255,12 @@ export async function readGitStackEnvFile(
 		return { vars: {}, error: 'Repository not synced - deploy the stack first' };
 	}
 
-	// Security check: ensure the path doesn't escape the repo
-	const normalizedPath = envFilePath.replace(/\.\./g, '').replace(/^\//, '');
-	const fullPath = join(repoPath, normalizedPath);
-
-	if (!fullPath.startsWith(repoPath)) {
-		return { vars: {}, error: 'Invalid file path' };
+	// Must stay inside the clone; a committed link may lead out, never into a forbidden stack path.
+	let fullPath: string;
+	try {
+		fullPath = repoFilePath(repoPath, envFilePath, 'Env file path');
+	} catch (error) {
+		return { vars: {}, error: error instanceof Error ? error.message : 'Invalid file path' };
 	}
 
 	if (!existsSync(fullPath)) {

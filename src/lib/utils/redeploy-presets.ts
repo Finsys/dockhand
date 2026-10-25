@@ -14,6 +14,8 @@ export interface DeployChoice {
 	pull: boolean;
 	build: boolean;
 	forceRecreate: boolean;
+	/** With pull: a separate `docker compose pull`, which honours each service's pull_policy, instead of `--pull always`. */
+	respectPullPolicy?: boolean;
 }
 
 export interface RedeployPreset {
@@ -40,12 +42,14 @@ export function isPresetActive(preset: RedeployPreset, choice: Pick<DeployChoice
 
 /** The command the chosen options will run, for the preview under the checkboxes. */
 export function composeCommandFor(choice: DeployChoice): string {
-	return [
+	const separatePull = choice.pull && choice.respectPullPolicy;
+	const up = [
 		'docker compose up -d --remove-orphans',
 		choice.forceRecreate ? '--force-recreate' : '',
 		choice.build ? '--build' : '',
-		choice.pull ? '--pull always' : ''
+		choice.pull && !separatePull ? '--pull always' : ''
 	]
 		.filter(Boolean)
 		.join(' ');
+	return separatePull ? `docker compose pull; ${up}` : up;
 }

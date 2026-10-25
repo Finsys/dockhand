@@ -32,8 +32,9 @@ const UNREACHABLE_CODES = new Set([
 ]);
 
 /** Error codes and messages along the cause chain (Node's fetch wraps the socket error in `cause`). */
-function collectErrorInfo(error: unknown): { codes: string[]; text: string } {
+function collectErrorInfo(error: unknown): { codes: string[]; names: string[]; text: string } {
 	const codes: string[] = [];
+	const names: string[] = [];
 	const messages: string[] = [];
 	const seen = new Set<unknown>();
 	const queue: unknown[] = [error];
@@ -42,13 +43,14 @@ function collectErrorInfo(error: unknown): { codes: string[]; text: string } {
 		if (typeof e === 'string') messages.push(e);
 		if (!e || typeof e !== 'object' || seen.has(e)) continue;
 		seen.add(e);
-		const err = e as { code?: unknown; message?: unknown; cause?: unknown; errors?: unknown };
+		const err = e as { code?: unknown; name?: unknown; message?: unknown; cause?: unknown; errors?: unknown };
 		if (typeof err.code === 'string') codes.push(err.code);
+		if (typeof err.name === 'string') names.push(err.name);
 		if (typeof err.message === 'string') messages.push(err.message);
 		if (err.cause !== undefined) queue.push(err.cause);
 		if (Array.isArray(err.errors)) queue.push(...err.errors);
 	}
-	return { codes, text: messages.join(' ') };
+	return { codes, names, text: messages.join(' ') };
 }
 
 /** Retry-After is registry-controlled: only echo a seconds count or a short HTTP-date. */
@@ -77,7 +79,7 @@ export function describeRegistryFailure(failure: RegistryFailure): string {
 		}
 		case 'error': {
 			const { registry } = failure;
-			const { codes, text } = collectErrorInfo(failure.error);
+			const { codes, names, text } = collectErrorInfo(failure.error);
 			if (codes.some((c) => DNS_CODES.has(c)) || /\b(ENOTFOUND|EAI_AGAIN)\b/.test(text)) {
 				return `DNS resolution failed for ${registry}`;
 			}
@@ -88,6 +90,8 @@ export function describeRegistryFailure(failure: RegistryFailure): string {
 			if (cert) return `TLS certificate not trusted for ${registry} (${cert})`;
 			const unreachable = codes.find((c) => UNREACHABLE_CODES.has(c));
 			if (unreachable) return `Registry unreachable: ${registry} (${unreachable})`;
+			// AbortSignal.timeout carries no errno, only the name.
+			if (names.includes('TimeoutError')) return `Registry did not answer in time: ${registry}`;
 			return codes.length > 0 ? `Could not query registry (${codes[0]})` : 'Could not query registry';
 		}
 	}

@@ -40,6 +40,14 @@ export const DOCKHAND_LABELS = {
 	ADOPT: 'dockhand.adopt',
 	VERSION_PATTERN: 'dockhand.version.pattern',
 	WATCH_DIGEST: 'dockhand.watch.digest',
+	/** dockhand.pin.report=false silences the moved-digest report for a `tag@sha256:`
+	 *  pinned container (#1780), independent of the same-tag WATCH_DIGEST check. */
+	PIN_REPORT: 'dockhand.pin.report',
+	/** dockhand.skip.cooldown=true exempts this container from the minimum image age
+	 *  cooldown, so a frequently-rebuilt image (an active-dev `latest`) is not held
+	 *  back forever waiting out a clock that keeps resetting. A boolean switch, not a
+	 *  per-container duration - the duration stays the global/env setting. */
+	SKIP_COOLDOWN: 'dockhand.skip.cooldown',
 } as const;
 
 /**
@@ -150,6 +158,31 @@ export function isDigestWatchDisabledByLabel(labels: Record<string, string> | un
 	const own = parseLabelBool(getLabel(labels, DOCKHAND_LABELS.WATCH_DIGEST));
 	if (own !== undefined) return own === false;
 	return wudWatchDisabled(firstLabelValue(labels, WUD_LABELS.WATCH_DIGEST));
+}
+
+/**
+ * Whether this container skips the minimum image age cooldown.
+ * `dockhand.skip.cooldown=true` lets a frequently-rebuilt image (an active-dev
+ * `latest` whose clock keeps resetting, so it would never pass the cooldown) update
+ * immediately. Only an EXPLICIT true exempts it; absent or any other value keeps the
+ * cooldown, so the safe default is unchanged.
+ */
+export function isCooldownSkippedByLabel(labels: Record<string, string> | undefined | null): boolean {
+	return parseLabelBool(getLabel(labels, DOCKHAND_LABELS.SKIP_COOLDOWN)) === true;
+}
+
+/**
+ * Whether a moved digest on a `tag@sha256:` pinned image should be REPORTED for this
+ * container (#1780). The per-container `dockhand.pin.report` label wins over the global
+ * setting: an explicit value on the container decides, absent falls through to `global`.
+ * So global-off can be re-enabled for one container, and global-on silenced for one.
+ */
+export function pinnedDigestReportVisible(
+	global: boolean,
+	labels: Record<string, string> | undefined | null
+): boolean {
+	const own = parseLabelBool(getLabel(labels, DOCKHAND_LABELS.PIN_REPORT));
+	return own !== undefined ? own : global;
 }
 
 /**

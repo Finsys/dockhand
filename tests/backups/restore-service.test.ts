@@ -62,6 +62,7 @@ function makePorts(overrides: Partial<RestorePorts> = {}, rec?: Rec): RestorePor
 	const base_: RestorePorts = {
 		guardSnapshotAccess: async () => { r.guarded = true; },
 		listSnapshotVolumes: async () => ['data', 'config'],
+		listSnapshotFileVolumes: async () => [],
 		resolveTargets: async () => ({ containers: [{ id: 'c1', name: 'web', state: 'running' }] }),
 		stopBeforeRestore: async () => { r.stopped = true; return { restart: async () => { r.restarted = true; } }; },
 		stopStackBeforeRestore: async (name) => { r.stackStopped.push(name); return { restart: async () => { r.restarted = true; } }; },
@@ -706,3 +707,176 @@ describe('RestoreService — clone (cross-env restore with per-volume destinatio
 function base(): Rec {
 	return { guarded: false, helperRuns: 0, stopped: false, restarted: false, stackStopped: [], notifications: [], progress: [], started: [], recreated: [], redeployed: [], localStackFilesWritten: [], localStackFilesOverwrite: [], localStackFilesEnvId: [], localStackFilesTargetPath: [], existingVolumes: [], createdVolumes: [] };
 }
+
+// A single-file bind is written into its host directory, bound into the helper, because a
+// missing file bind source is created by Docker as a directory.
+describe('single-file volumes are restored into their host directory', () => {
+	const fileJob = (over: Partial<RestoreJob> = {}): RestoreJob => ({
+		destinationId: 3, snapshotId: SNAP, mode: 'new-location', targetType: 'stack', volumes: ['cfg_yaml', 'data'],
+		environmentId: 9, targetName: 'web',
+		volumeDestinations: [
+			{ volume: 'cfg_yaml', kind: 'path', target: '/data/stacks/web/config.yaml' },
+			{ volume: 'data', kind: 'volume', target: 'data' }
+		],
+		postRestore: 'none', ...over,
+	});
+
+	it('a clone binds the file\'s directory and writes the file by name; a directory volume is unchanged', async () => {
+		let spec: any;
+		const svc = new RestoreService(makePorts({
+			listSnapshotVolumes: async () => ['cfg_yaml', 'data'],
+			listSnapshotFileVolumes: async () => ['cfg_yaml'],
+			containerExists: async () => false,
+			runInHelper: async (s) => { spec = s; return { exitCode: 0, stdout: '', stderr: '' }; },
+		}));
+		const res = await svc.run(fileJob());
+		expect(res.status).toBe('success');
+		expect(spec.binds).toContain('/data/stacks/web:/restore-files/cfg_yaml:rw');
+		expect(spec.binds.some((b: string) => b.startsWith('/data/stacks/web/config.yaml:'))).toBe(false);
+		expect(spec.binds.some((b: string) => b.endsWith(':/volumes/data:rw') || b.includes(':/volumes/data'))).toBe(true);
+		expect(spec.script).toContain("'/restore-files/cfg_yaml/config.yaml'");
+		expect(spec.script).toContain("Cloning into /volumes/data");
+	});
+
+	it('a clone of only a single-file volume runs a valid script', async () => {
+		let spec: any;
+		const svc = new RestoreService(makePorts({
+			listSnapshotVolumes: async () => ['cfg_yaml'],
+			listSnapshotFileVolumes: async () => ['cfg_yaml'],
+			containerExists: async () => false,
+			runInHelper: async (s) => { spec = s; return { exitCode: 0, stdout: '', stderr: '' }; },
+		}));
+		const res = await svc.run(fileJob({ volumes: ['cfg_yaml'], volumeDestinations: [{ volume: 'cfg_yaml', kind: 'path', target: '/data/stacks/web/config.yaml' }] }));
+		expect(res.status).toBe('success');
+		expect(spec.script.startsWith('set -e; ')).toBe(true);
+		expect(spec.script).not.toContain('; ;');
+	});
+
+	it('a single-file volume mapped to a named volume lands in it under its name on the source host', async () => {
+		// The key is slugged and collision-suffixed (`..__my_config.yml_2`); the name comes from
+		// the snapshot's record of the bind source.
+		const key = 'etc_cfg__my_config.yml_2';
+		const rec = base();
+		let spec: any;
+		const svc = new RestoreService(makePorts({
+			listSnapshotVolumes: async () => [key],
+			listSnapshotFileVolumes: async () => [key],
+			readSnapshotMetadata: async () => ({ version: 1, type: 'stack', targetName: 'web', volumes: [{ key, name: '/etc/cfg', source: '/srv/web/my config.yml', type: 'bind' }] } as any),
+			containerExists: async () => false,
+			runInHelper: async (s) => { spec = s; return { exitCode: 0, stdout: '', stderr: '' }; },
+		}, rec));
+		const res = await svc.run(fileJob({ volumes: [key], volumeDestinations: [{ volume: key, kind: 'volume', target: 'cfg' }] }));
+		expect(res.status).toBe('success');
+		expect(rec.createdVolumes).toEqual(['cfg']);
+		expect(spec.script).toContain(`'/volumes/${key}/my config.yml'`);
+		expect(spec.script).not.toContain('Cloning into');
+	});
+
+	it('in place: a single-file bind is restored through its directory, a directory volume through the swap', async () => {
+		let spec: any;
+		const svc = new RestoreService(makePorts({
+			listSnapshotVolumes: async () => ['cfg_yaml', 'data'],
+			listSnapshotFileVolumes: async () => ['cfg_yaml'],
+			resolveVolumeBind: async (_m, _e, v) => v === 'cfg_yaml'
+				? { bind: '/srv/app/config.yaml:/volumes/cfg_yaml:rw', include: '/volumes/cfg_yaml', source: '/srv/app/config.yaml', type: 'bind' as const }
+				: { bind: `${v}:/volumes/${v}:rw`, include: `/volumes/${v}`, source: v, type: 'volume' as const },
+			runInHelper: async (s) => { spec = s; return { exitCode: 0, stdout: '', stderr: '' }; },
+		}));
+		const res = await svc.run({ ...inPlace, volumes: ['cfg_yaml', 'data'] });
+		expect(res.status).toBe('success');
+		expect(spec.binds).toContain('/srv/app:/restore-files/cfg_yaml:rw');
+		expect(spec.binds).not.toContain('/srv/app/config.yaml:/volumes/cfg_yaml:rw');
+		expect(spec.script).toContain("'/restore-files/cfg_yaml/config.yaml'");
+		expect(spec.script).not.toContain("if [ -d '/volumes/cfg_yaml' ]");
+		expect(spec.script).toContain("if [ -d '/volumes/data' ]");
+	});
+
+	it('in place: a file under a named Dockhand data volume (/var/lib/docker/volumes) is restored through its directory', async () => {
+		// The default `-v dockhand_data:/app/data` puts every stack folder there; the source comes
+		// from the snapshot, like a directory bind's, so it is not refused as a protected path.
+		let spec: any;
+		const src = '/var/lib/docker/volumes/dockhand_data/_data/stacks/local/web/config.yaml';
+		const svc = new RestoreService(makePorts({
+			listSnapshotVolumes: async () => ['cfg_yaml'],
+			listSnapshotFileVolumes: async () => ['cfg_yaml'],
+			resolveVolumeBind: async () => ({ bind: `${src}:/volumes/cfg_yaml:rw`, include: '/volumes/cfg_yaml', source: src, type: 'bind' as const }),
+			runInHelper: async (s) => { spec = s; return { exitCode: 0, stdout: '', stderr: '' }; },
+		}));
+		const res = await svc.run({ ...inPlace, volumes: ['cfg_yaml'], restoreFlags: ['--exclude-xattr'] });
+		expect(res.status).toBe('success');
+		// Only the file: the helper runs, binds the directory, and the script runs under set -e.
+		expect(spec.binds).toEqual(['/var/lib/docker/volumes/dockhand_data/_data/stacks/local/web:/restore-files/cfg_yaml:rw']);
+		expect(spec.script.startsWith('set -e; ')).toBe(true);
+		expect(spec.script).toContain(`restic 'restore' '--json' '${SNAP}' '--target' '/tmp/dockhand-file-cfg_yaml' '--include' '/volumes/cfg_yaml' '--exclude-xattr'`);
+	});
+
+	it('a file in a subfolder, bound under another name in the container, comes back to its own host path', async () => {
+		// Host /x/y/z.txt bound as /a/b/c.txt: the restore is host-side, the container path plays no part.
+		const key = 'a_b_c.txt__z.txt';
+		let inPlaceSpec: any;
+		const inPlaceSvc = new RestoreService(makePorts({
+			listSnapshotVolumes: async () => [key],
+			listSnapshotFileVolumes: async () => [key],
+			resolveVolumeBind: async () => ({ bind: `/x/y/z.txt:/volumes/${key}:rw`, include: `/volumes/${key}`, source: '/x/y/z.txt', type: 'bind' as const }),
+			runInHelper: async (s) => { inPlaceSpec = s; return { exitCode: 0, stdout: '', stderr: '' }; },
+		}));
+		expect((await inPlaceSvc.run({ ...inPlace, volumes: [key] })).status).toBe('success');
+		expect(inPlaceSpec.binds).toEqual([`/x/y:/restore-files/${key}:rw`]);
+		expect(inPlaceSpec.script).toContain(`'/restore-files/${key}/z.txt'`);
+
+		let cloneSpec: any;
+		const cloneSvc = new RestoreService(makePorts({
+			listSnapshotVolumes: async () => [key],
+			listSnapshotFileVolumes: async () => [key],
+			containerExists: async () => false,
+			runInHelper: async (s) => { cloneSpec = s; return { exitCode: 0, stdout: '', stderr: '' }; },
+		}));
+		expect((await cloneSvc.run(fileJob({ volumes: [key], volumeDestinations: [{ volume: key, kind: 'path', target: '/x/y/z.txt' }] }))).status).toBe('success');
+		expect(cloneSpec.binds).toEqual([`/x/y:/restore-files/${key}:rw`]);
+		expect(cloneSpec.script).toContain(`'/restore-files/${key}/z.txt'`);
+	});
+
+	it('in place: the live-target lock names the file, the same key a backup of it takes', async () => {
+		const keys: string[] = [];
+		const svc = new RestoreService(makePorts({
+			listSnapshotVolumes: async () => ['cfg_yaml'],
+			listSnapshotFileVolumes: async () => ['cfg_yaml'],
+			resolveVolumeBind: async () => ({ bind: '/srv/app/config.yaml:/volumes/cfg_yaml:rw', include: '/volumes/cfg_yaml', source: '/srv/app/config.yaml', type: 'bind' as const }),
+			acquireLiveTarget: (k) => { keys.push(k); return () => {}; },
+		}));
+		await svc.run({ ...inPlace, volumes: ['cfg_yaml'] });
+		expect(keys[0]).toContain('/srv/app/config.yaml');
+	});
+
+	it('a clone refuses a file target, or its directory, in a protected location', async () => {
+		// '/config.yaml': only its directory (/) is refused; '/home/u/.ssh': only the file path is.
+		for (const target of ['/etc/passwd', '/config.yaml', '/home/u/.ssh']) {
+			let ran = false;
+			const svc = new RestoreService(makePorts({
+				listSnapshotVolumes: async () => ['cfg_yaml'],
+				listSnapshotFileVolumes: async () => ['cfg_yaml'],
+				containerExists: async () => false,
+				runInHelper: async () => { ran = true; return { exitCode: 0, stdout: '', stderr: '' }; },
+			}));
+			const res = await svc.run(fileJob({ volumes: ['cfg_yaml'], volumeDestinations: [{ volume: 'cfg_yaml', kind: 'path', target }] }));
+			expect({ target, status: res.status, ran }).toEqual({ target, status: 'error', ran: false });
+		}
+	});
+
+	it('a file cloned onto a named volume that already exists is refused, nothing written', async () => {
+		const rec = base();
+		rec.existingVolumes.push('cfg');
+		let ran = false;
+		const svc = new RestoreService(makePorts({
+			listSnapshotVolumes: async () => ['etc_cfg__config.yaml'],
+			listSnapshotFileVolumes: async () => ['etc_cfg__config.yaml'],
+			containerExists: async () => false,
+			runInHelper: async () => { ran = true; return { exitCode: 0, stdout: '', stderr: '' }; },
+		}, rec));
+		const res = await svc.run(fileJob({ volumes: ['etc_cfg__config.yaml'], volumeDestinations: [{ volume: 'etc_cfg__config.yaml', kind: 'volume', target: 'cfg' }] }));
+		expect(res.status).toBe('error');
+		if (res.status === 'error') expect(res.error).toContain('already exists');
+		expect(rec.createdVolumes).toEqual([]);
+		expect(ran).toBe(false);
+	});
+});

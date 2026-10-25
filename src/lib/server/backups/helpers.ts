@@ -11,6 +11,7 @@ import { privateIpReason, dangerousHostReason, isSafeWebhookUrl, isSafeNotificat
 import { BackupError, isLocalRepo } from './models';
 export { buildRestRepository, parseRestRepository, redactUrlCredentials } from '$lib/utils/rest-repository';
 import { parseSftpRepository, validateSftpRepository } from '$lib/shared/sftp-repository';
+import { DEFAULT_SCHEDULED_RETENTION } from '$lib/shared/backup-retention';
 export { validateSftpCredentials } from '$lib/shared/sftp-repository';
 export { privateIpReason };
 
@@ -488,13 +489,6 @@ export function sanitizeRestoreFlags(flags: string | null | undefined): string[]
 }
 
 /**
- * Conservative default retention for SCHEDULED configs created without a policy —
- * otherwise their snapshots grow forever, since pruning is gated on a non-empty
- * keep-* policy.
- */
-export const DEFAULT_SCHEDULED_RETENTION = { keepDaily: 7, keepWeekly: 4, keepMonthly: 6 };
-
-/**
  * Serialize the retention to store: keep an explicit non-empty policy; apply the
  * default only for scheduled configs with no policy; otherwise null. Used by the
  * config create and update routes so both apply the same default.
@@ -522,7 +516,7 @@ export function resolveRetentionForUpdate(
 	const retentionProvided = retention !== undefined;
 	const scheduleChanged = newSchedule !== undefined && newSchedule !== existingSchedule;
 	if (!retentionProvided && !scheduleChanged) return undefined; // leave stored value as-is
-	return retentionToStore(retention, newSchedule ?? existingSchedule);
+	return retentionToStore(retention, newSchedule !== undefined ? newSchedule : existingSchedule);
 }
 
 /**
@@ -637,6 +631,21 @@ export async function withTimeout<T>(p: Promise<T>, ms: number, message: string)
 	});
 	try {
 		return await Promise.race([p, timeout]);
+	} finally {
+		if (timer) clearTimeout(timer);
+	}
+}
+
+/** Like withTimeout, but hands the work an AbortSignal that fires on expiry, so the
+ * work itself stops (a spawned restic is killed) instead of running on unobserved. */
+export async function withAbortTimeout<T>(work: (signal: AbortSignal) => Promise<T>, ms: number, message: string): Promise<T> {
+	const controller = new AbortController();
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const timeout = new Promise<never>((_, reject) => {
+		timer = setTimeout(() => { controller.abort(); reject(new Error(message)); }, ms);
+	});
+	try {
+		return await Promise.race([work(controller.signal), timeout]);
 	} finally {
 		if (timer) clearTimeout(timer);
 	}

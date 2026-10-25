@@ -8,13 +8,17 @@
  * limit, a redirect on the challenge - are pinned rather than hoped for.
  */
 
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test, beforeEach } from 'bun:test';
 import {
 	getRegistryBearerToken,
 	getRegistryManifestDigestDirectDetailed,
 	getRegistrySchemeForHost,
 	type RegistryPorts
 } from '../src/lib/server/registry/manifest-digest';
+import { registryAuthCache } from '../src/lib/server/registry/auth-cache';
+
+// The auth handshake is cached process-wide; each test starts from an empty cache.
+beforeEach(() => registryAuthCache.clear());
 
 const HUB = new Set(['docker.io', 'index.docker.io', 'registry-1.docker.io']);
 
@@ -128,6 +132,22 @@ describe('the v2 auth challenge', () => {
 		const p = ports({ fetch: fn, findCredentials: async () => ({ username: 'u', password: 'p' }) });
 		expect(await getRegistryBearerToken('reg.example.com', 'app', p))
 			.toBe(`Basic ${Buffer.from('u:p').toString('base64')}`);
+	});
+
+	test('the credential lookup gets the image repo, so an org-path entry can match', async () => {
+		const { fn } = fakeFetch({
+			CHALLENGE: () => new Response('', { status: 401, headers: { 'WWW-Authenticate': 'Basic realm="reg"' } })
+		});
+		const asked: string[][] = [];
+		const p = ports({
+			fetch: fn,
+			findCredentials: async (host, repo) => {
+				asked.push([host, repo]);
+				return null;
+			}
+		});
+		await getRegistryManifestDigestDirectDetailed('ghcr.io/team/app:1.0', p);
+		expect(asked[0]).toEqual(['ghcr.io', 'team/app']);
 	});
 
 	test('a basic challenge without credentials yields no token', async () => {
@@ -268,9 +288,9 @@ describe('the manifest digest behind a tag', () => {
 		expect(r.reason).toBeTruthy();
 	});
 
-	test('the abort signal reaches every request, so a cancelled check stops', async () => {
-		const seen: (AbortSignal | undefined)[] = [];
-		const signal = AbortSignal.timeout(60_000);
+	test('cancelling the check aborts every request, so a cancelled check stops', async () => {
+		const seen: AbortSignal[] = [];
+		const controller = new AbortController();
 		const fn = (async (url: string, init?: any) => {
 			seen.push(init?.signal);
 			if (String(url).endsWith('/v2/')) {
@@ -283,10 +303,82 @@ describe('the manifest digest behind a tag', () => {
 			return new Response('', { status: 200, headers: digestHeaders });
 		}) as unknown as typeof fetch;
 
-		await getRegistryManifestDigestDirectDetailed('ghcr.io/team/app:1', ports({ fetch: fn }), signal);
-		// challenge, token and manifest requests: all three must carry it
+		await getRegistryManifestDigestDirectDetailed('ghcr.io/team/app:1', ports({ fetch: fn }), controller.signal);
+		// challenge, token and manifest requests, each with a live signal
 		expect(seen).toHaveLength(3);
-		for (const s of seen) expect(s).toBe(signal);
+		for (const s of seen) expect(s.aborted).toBe(false);
+		// The sign-in is shared and already finished; the manifest request follows the caller.
+		controller.abort();
+		expect(seen[2].aborted).toBe(true);
+	});
+
+	test('cancelling the only check waiting on a sign-in aborts the sign-in', async () => {
+		const seen: AbortSignal[] = [];
+		const controller = new AbortController();
+		const fn = (async (_url: string, init?: any) => {
+			seen.push(init?.signal);
+			if (init?.signal?.aborted) return Promise.reject(init.signal.reason);
+			return new Promise((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(init.signal.reason)));
+		}) as unknown as typeof fetch;
+		const pending = getRegistryManifestDigestDirectDetailed('ghcr.io/team/app:1', ports({ fetch: fn }), controller.signal);
+		await new Promise((r) => setTimeout(r, 10));
+		controller.abort();
+		const r = await pending;
+		expect(r.digest).toBeNull();
+		expect(seen[0].aborted).toBe(true);
+	});
+
+	test('a registry that never answers the HEAD is cut off and reported as a timeout', async () => {
+		const fn = (async (url: string, init?: any) => {
+			if (String(url).endsWith('/v2/')) return new Response('{}');
+			return new Promise((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(init.signal.reason)));
+		}) as unknown as typeof fetch;
+		const r = await getRegistryManifestDigestDirectDetailed('ghcr.io/team/app:1', ports({ fetch: fn, requestTimeoutMs: 30 }));
+		expect(r).toEqual({ digest: null, reason: 'Registry did not answer in time: ghcr.io' });
+	});
+
+	test('a token endpoint that never answers is cut off instead of stalling the check', async () => {
+		const fn = (async (url: string, init?: any) => {
+			if (String(url).endsWith('/v2/')) {
+				return new Response('', { status: 401, headers: { 'WWW-Authenticate': 'Bearer realm="https://auth.example.com/token"' } });
+			}
+			return new Promise((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(init.signal.reason)));
+		}) as unknown as typeof fetch;
+		const started = Date.now();
+		expect(await getRegistryBearerToken('ghcr.io', 'team/app', ports({ fetch: fn, requestTimeoutMs: 30 }))).toBe(null);
+		expect(Date.now() - started).toBeLessThan(2000);
+	});
+
+	test('a caller signal that never aborts still leaves each request its timeout', async () => {
+		const hang = (async (url: string, init?: any) => {
+			if (String(url).endsWith('/v2/')) {
+				return new Response('', { status: 401, headers: { 'WWW-Authenticate': 'Bearer realm="https://auth.example.com/token"' } });
+			}
+			return new Promise((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(init.signal.reason)));
+		}) as unknown as typeof fetch;
+		const caller = new AbortController();
+		const started = Date.now();
+		expect(await getRegistryBearerToken('ghcr.io', 'team/app', ports({ fetch: hang, requestTimeoutMs: 30 }), caller.signal)).toBe(null);
+		expect(Date.now() - started).toBeLessThan(2000);
+
+		const headHangs = (async (url: string, init?: any) => {
+			if (String(url).endsWith('/v2/')) return new Response('{}');
+			return new Promise((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(init.signal.reason)));
+		}) as unknown as typeof fetch;
+		const r = await getRegistryManifestDigestDirectDetailed('ghcr.io/team/app:1', ports({ fetch: headHangs, requestTimeoutMs: 30 }), caller.signal);
+		expect(r).toEqual({ digest: null, reason: 'Registry did not answer in time: ghcr.io' });
+		expect(caller.signal.aborted).toBe(false);
+	});
+
+	test('without an override each request gets the default timeout signal', async () => {
+		const seen: AbortSignal[] = [];
+		const fn = (async (url: string, init?: any) => {
+			seen.push(init?.signal);
+			return new Response('', { status: 200, headers: digestHeaders });
+		}) as unknown as typeof fetch;
+		await getRegistryManifestDigestDirectDetailed('ghcr.io/team/app:1', ports({ fetch: fn }));
+		expect(seen.length).toBeGreaterThan(0);
+		for (const s of seen) expect(s).toBeInstanceOf(AbortSignal);
 	});
 
 	test('a plain-http registry is read over http', async () => {

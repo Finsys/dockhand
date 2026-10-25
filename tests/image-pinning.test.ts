@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { imageCheckPlan, resolvePinnedToDigest, imagePinning, imageReferenceWithoutDigest, isDigestBasedImage } from '../src/lib/utils/tracked-image';
+import { summarizeCheck } from '../src/lib/utils/update-check-outcome';
 
 /**
  * `repo@sha256:...` and `repo:tag@sha256:...` read alike and mean opposite things.
@@ -69,8 +70,22 @@ describe('a moved digest is reported, not applied', () => {
 		// the move would never be seen. The plan sends the tag half and flags the answer so
 		// the caller can report the move without applying it.
 		expect(imageCheckPlan('mariadb:13.0.2-ubi@sha256:856f')).toEqual({
-			skip: false, reference: 'mariadb:13.0.2-ubi', pinned: true
+			skip: false, reference: 'mariadb:13.0.2-ubi', pinned: true, watchDigest: true
 		});
+	});
+
+	test("a pinned tag whose move would not be reported does not ask about its digest", () => {
+		// Each check of a moved pin costs manifest GETs that Docker Hub counts as pulls. It is
+		// not skipped outright: the local digests still feed the newer-version check, which
+		// must recognise a candidate tag that resolves to the image already running.
+		expect(imageCheckPlan('mariadb:13.0.2-ubi@sha256:856f', false)).toEqual({
+			skip: false, reference: 'mariadb:13.0.2-ubi', pinned: true, watchDigest: false
+		});
+		expect(imageCheckPlan('mariadb:13.0.2-ubi@sha256:856f', true).watchDigest).toBe(true);
+		// The opt-out concerns pins only: a plain tag is still checked, and a bare digest
+		// is still skipped.
+		expect(imageCheckPlan('nginx:latest', false).watchDigest).toBe(true);
+		expect(imageCheckPlan('mariadb@sha256:856f', false).skip).toBe(true);
 	});
 
 	test('a digest with no tag is skipped outright', () => {
@@ -82,7 +97,7 @@ describe('a moved digest is reported, not applied', () => {
 		// The near miss for the flag: an ordinary update must stay applicable, or the
 		// feature would withhold every update rather than only the pinned ones.
 		expect(imageCheckPlan('nginx:latest')).toEqual({
-			skip: false, reference: 'nginx:latest', pinned: false
+			skip: false, reference: 'nginx:latest', pinned: false, watchDigest: true
 		});
 	});
 
@@ -104,8 +119,8 @@ describe('a moved digest is reported, not applied', () => {
 	test('the check consults the plan rather than deciding for itself', () => {
 		// Behaviour above, wiring here: the pure plan protects nothing if the check
 		// recomputes the reference or drops the flag.
-		expect(source).toContain('const plan = imageCheckPlan(imageName)');
-		expect(source).toContain('checkTagForUpdate(plan.reference');
+		expect(source).toContain('const plan = imageCheckPlan(imageName, reportPinnedDigest)');
+		expect(source).toContain('checkTagForUpdate(plan.reference, currentImageId, envId, skipCooldown, watchDigest && plan.watchDigest)');
 		expect(source).toContain('resolvePinnedToDigest(plan, result.hasUpdate)');
 	});
 
@@ -182,10 +197,10 @@ describe('a pinned image is reported apart from an applicable update', () => {
 	test('it is kept out of the set a bulk update acts on', () => {
 		// withUpdates is what the update modal is handed, so a pinned image joining it
 		// would offer a button whose pull returns the manifest already running.
-		const line = checkButton.split('\n').find((l) => l.includes('const withUpdates'));
-		const filter = checkButton.slice(checkButton.indexOf('const withUpdates'));
-		expect(line).toBeTruthy();
-		expect(filter.slice(0, 300)).toContain('!r.pinnedToDigest');
+		const s = summarizeCheck([{ containerId: 'a', containerName: 'a', imageName: 'a:1', hasUpdate: true, pinnedToDigest: true }]);
+		expect(s.withUpdates).toEqual([]);
+		expect(s.pinned).toHaveLength(1);
+		expect(checkButton).toContain('summarizeCheck(');
 	});
 
 	test('it still counts as a result, so a check does not report "all up to date"', () => {
