@@ -71,6 +71,22 @@ describe('fromNavigator', () => {
 		expect(fromNavigator(['fr-CA'])).toBe('fr-CA');
 	});
 
+	test('a language carried only with a region resolves to that region', () => {
+		expect(fromNavigator(['es'])).toBe('es-ES');
+		expect(fromNavigator(['es-MX'])).toBe('es-ES');
+		expect(fromNavigator(['fr'])).toBe('fr-FR');
+		expect(fromNavigator(['fr-BE'])).toBe('fr-FR');
+	});
+
+	test('a sibling region of an earlier language beats a later exact match', () => {
+		expect(fromNavigator(['es-MX', 'de'])).toBe('es-ES');
+	});
+
+	test('a language prefix is not a sibling of a longer language code', () => {
+		// "e" must not match es-ES or en.
+		expect(fromNavigator(['e'])).toBeUndefined();
+	});
+
 	test('gives up when nothing matches', () => {
 		expect(fromNavigator(['ja', 'ko'])).toBeUndefined();
 		expect(fromNavigator([])).toBeUndefined();

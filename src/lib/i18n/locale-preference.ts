@@ -41,11 +41,15 @@ export function asLocale(value: unknown): Locale | undefined {
 /** What the browser asks for, narrowed to a locale this build carries. */
 export function fromNavigator(languages: readonly string[]): Locale | undefined {
 	for (const tag of languages) {
-		// An exact match wins (zh-CN over zh), then the bare language (de-AT -> de).
+		// An exact match wins (zh-CN over zh), then the bare language (de-AT -> de),
+		// then the first carried region of that language (es-MX or es -> es-ES).
 		const exact = asLocale(tag);
 		if (exact) return exact;
-		const bare = asLocale(tag.split('-')[0]);
+		const language = tag.split('-')[0];
+		const bare = asLocale(language);
 		if (bare) return bare;
+		const sibling = locales.find((l) => l.split('-')[0] === language);
+		if (sibling) return sibling;
 	}
 	return undefined;
 }
