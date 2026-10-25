@@ -97,7 +97,14 @@ export interface ImagePrunePorts {
  */
 export async function pruneAllUnused(docker: ImagePrunePorts): Promise<ImagePruneResult> {
 	const all = await docker.listImages();
-	const withoutKept = await docker.listImages(buildKeepLabelFilter(true));
+	let withoutKept: PruneImageSummary[];
+	try {
+		withoutKept = await docker.listImages(buildKeepLabelFilter(true));
+	} catch (err) {
+		// Older engines (Docker 20.10) refuse `label!` on the image list but honour it in prune.
+		docker.log(`label! image listing refused (${err instanceof Error ? err.message : err}); using the ordinary prune`);
+		return docker.prune();
+	}
 	if (!labelNegationBroken(all.length, withoutKept.length)) return docker.prune();
 
 	docker.log('label! filter matches no image; removing unused images one by one');

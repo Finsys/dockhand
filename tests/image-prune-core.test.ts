@@ -98,7 +98,7 @@ describe('pruneAllUnused', () => {
 				if (img.RepoTags?.includes(ref)) removed.push(ref);
 				return tagsLeft.length > 1 ? [{ Untagged: ref }] : [{ Untagged: ref }, { Deleted: img.Id }];
 			},
-			log: () => {}
+			log: (_message: string) => {}
 		};
 		return { ports, calls };
 	}
@@ -141,6 +141,22 @@ describe('pruneAllUnused', () => {
 		ports.remove = async (ref) => { if (ref === 'two:a') throw new Error('conflict'); return remove(ref); };
 		await pruneAllUnused(ports);
 		expect(calls.filter((c) => c.startsWith('delete'))).toEqual(['delete hello-world:latest']);
+	});
+
+	test('an engine that refuses label! on the image list gets the ordinary prune', async () => {
+		// Docker 20.10, measured: GET /images/json?filters={"label!":[...]} answers 400
+		// "Invalid filter 'label!'", while /images/prune accepts the same filter.
+		const { ports, calls } = engine(images, ['sha256:busybox'], false);
+		const listImages = ports.listImages;
+		ports.listImages = async (filters?: string) => {
+			if (filters && decode(filters)['label!']) throw new Error("Invalid filter 'label!'");
+			return listImages(filters);
+		};
+		const logs: string[] = [];
+		ports.log = (m: string) => { logs.push(m); };
+		expect(await pruneAllUnused(ports)).toEqual({ ImagesDeleted: [{ Deleted: 'sha256:x' }], SpaceReclaimed: 42 });
+		expect(calls.filter((c) => c === 'prune')).toEqual(['prune']);
+		expect(logs).toEqual(["label! image listing refused (Invalid filter 'label!'); using the ordinary prune"]);
 	});
 
 	test('nothing to remove is reported as no images, like an empty prune', async () => {
