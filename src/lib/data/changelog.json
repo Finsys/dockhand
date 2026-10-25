@@ -4,8 +4,11 @@
     "date": "",
     "comingSoon": true,
     "changes": [
+      { "type": "feature", "text": "Spanish interface translation (PR#1811, @hugomon)" },
+      { "type": "feature", "text": "Russian interface translation (PR#1809, @Kirill901)" },
+      { "type": "feature", "text": "stack redeploy can respect each service's pull_policy and pull newer base images (#1800)" },
       { "type": "fix", "text": "backups list shows a schedule's snapshots from every destination it has used (#1783)" },
-      { "type": "fix", "text": "scheduled updates retry a rate-limited pull (toomanyrequests) and honour the registry's retry-after instead of failing (#1268)" },
+      { "type": "fix", "text": "scheduled updates retry a rate-limited pull (toomanyrequests) and honour the registry's retry-after (#1268)" },
       { "type": "fix", "text": "pruning unused images works on older Docker engines (#1490)" }
     ],
     "imageTag": "fnsys/dockhand:v1.0.56"
