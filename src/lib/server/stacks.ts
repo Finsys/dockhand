@@ -26,7 +26,7 @@ import {
 	type DeletionApplyResult,
 	type DeletionSkipReason
 } from './git-deletions';
-import { buildComposeOperationArgs, shouldRunSeparateBuildStep, pullThenUp } from './compose-args';
+import { buildComposeOperationArgs, shouldRunSeparateBuildStep, pullThenUp, pullBuildThenUp, stepOptions } from './compose-args';
 import { findStackNameCollision, getStackPathHintsFromContainers, moveStackFilePathCrossDevice, resolveStackDirForLayout } from './stack-path-utils';
 import { isValidStackName } from './stack-name-guard';
 import { db, environments, eq } from './db/drizzle.js';
@@ -187,6 +187,7 @@ export interface DeployStackOptions {
 	forceRecreate?: boolean;
 	build?: boolean; // Build images before starting (--build)
 	noBuildCache?: boolean; // Disable build cache (--no-cache, requires --build)
+	pullBase?: boolean; // Pull newer base images in a separate `build --pull` (requires build)
 	pullPolicy?: string; // Pull policy: 'always' | 'missing' | 'never'
 	composePath?: string; // Custom compose file path (for adopted/imported stacks)
 	envPath?: string; // Custom env file path (for adopted/imported stacks)
@@ -1218,6 +1219,8 @@ interface ComposeCommandOptions {
 	forceRecreate?: boolean;
 	build?: boolean; // Build images before starting (--build)
 	noBuildCache?: boolean; // Disable build cache (--no-cache, requires --build)
+	pullBase?: boolean; // Pull newer base images in a separate `build --pull` (requires build)
+	noBuild?: boolean; // up only: --no-build, after the separate build step built the images
 	pullPolicy?: string; // Pull policy: 'always' | 'missing' | 'never'
 	removeVolumes?: boolean;
 	stackFiles?: Record<string, string>; // All files to send to Hawser
@@ -1299,6 +1302,8 @@ async function executeLocalCompose(
 	build?: boolean,
 	noBuildCache?: boolean,
 	pullPolicy?: string,
+	pullBase?: boolean,
+	noBuild?: boolean,
 	// direct-remote only: when the stack folder was staged to <remoteStackHostDir> on the target
 	// host, rewrite the compose's same-dir relative binds (`./x`) to <remoteStackHostDir>/x so the
 	// remote daemon binds the staged files. undefined = no staging, compose unchanged.
@@ -1539,7 +1544,7 @@ async function executeLocalCompose(
 		console.log(`${logPrefix} [HostPath] Using stdin for compose content (paths translated)`);
 	}
 
-	args.push(...buildComposeOperationArgs(operation, { forceRecreate, removeVolumes, build, noBuildCache, pullPolicy, serviceName }));
+	args.push(...buildComposeOperationArgs(operation, { forceRecreate, removeVolumes, build, noBuildCache, pullBase, noBuild, pullPolicy, serviceName }));
 
 	const commandStr = args.join(' ');
 
@@ -1560,8 +1565,8 @@ async function executeLocalCompose(
 		console.log(`${logPrefix} Env vars being injected (masked):`, JSON.stringify(redactEnvVarsForLog(envVars), null, 2));
 	}
 
-	// Login to registries before pulling images
-	if (operation === 'up' || operation === 'pull') {
+	// Login to registries before pulling images (a build pulls its base images)
+	if (operation === 'up' || operation === 'pull' || operation === 'build') {
 		await loginToRegistries(dockerHost, logPrefix, spawnEnv.DOCKER_API_VERSION,
 			tlsCertDir ? { certDir: tlsCertDir, skipVerify: tlsConfig?.skipVerify } : undefined);
 	}
@@ -1711,6 +1716,7 @@ async function executeComposeViaHawser(
 	build?: boolean,
 	noBuildCache?: boolean,
 	pullPolicy?: string,
+	pullBase?: boolean,
 	filesToDelete?: FileToDelete[],
 	removeFiles?: boolean,
 	onLine?: (line: string) => void
@@ -1796,6 +1802,8 @@ async function executeComposeViaHawser(
 			build: build || false,
 			noBuildCache: (build && noBuildCache) || false,
 			pullPolicy: pullPolicy || '',
+			// `build --pull`; an agent older than 0.2.51 has no build operation at all.
+			pullBase: pullBase || false,
 			registries, // Registry credentials for docker login
 			serviceName, // Target specific service only (with --no-deps)
 			// Git deletion sync (#966): agent re-verifies containment + content
@@ -1922,7 +1930,7 @@ async function executeComposeCommand(
 	secretVars?: Record<string, string>,
 	onLine?: (line: string) => void
 ): Promise<StackOperationResult> {
-	const { stackName, envId, forceRecreate, build, noBuildCache, pullPolicy, removeVolumes, stackFiles, workingDir, composePath, envPath, useOverrideFile, serviceName, composeFileName, filesToDelete, removeFiles } = options;
+	const { stackName, envId, forceRecreate, build, noBuildCache, pullBase, noBuild, pullPolicy, removeVolumes, stackFiles, workingDir, composePath, envPath, useOverrideFile, serviceName, composeFileName, filesToDelete, removeFiles } = options;
 
 	// Stack deployments (including Git automation) are outside the container-update cooldown.
 
@@ -1950,6 +1958,8 @@ async function executeComposeCommand(
 			build,
 			noBuildCache,
 			pullPolicy,
+			pullBase,
+			noBuild,
 			undefined,    // remoteStackHostDir
 			onLine
 		);
@@ -2021,6 +2031,7 @@ async function executeComposeCommand(
 				build,
 				noBuildCache,
 				pullPolicy,
+				pullBase,
 				filesToDelete,
 				removeFiles,
 				onLine
@@ -2086,6 +2097,8 @@ async function executeComposeCommand(
 				build,
 				noBuildCache,
 				pullPolicy,
+				pullBase,
+				noBuild,
 				remoteStackHostDir,
 				onLine
 			);
@@ -2120,6 +2133,8 @@ async function executeComposeCommand(
 				build,
 				noBuildCache,
 				pullPolicy,
+				pullBase,
+				noBuild,
 				undefined,    // remoteStackHostDir
 				onLine
 			);
@@ -3200,7 +3215,7 @@ async function reconcileStackPendingUpdates(stackName: string, envId: number): P
  * Uses stack locking to prevent concurrent deployments.
  */
 export async function deployStack(options: DeployStackOptions): Promise<StackOperationResult> {
-	const { name, compose, envId, sourceDir, forceRecreate, build, noBuildCache, pullPolicy, composePath, envPath, composeFileName, envFileName, filesToDelete, isGitDeploy, onLine } = options;
+	const { name, compose, envId, sourceDir, forceRecreate, build, noBuildCache, pullBase, pullPolicy, composePath, envPath, composeFileName, envFileName, filesToDelete, isGitDeploy, onLine } = options;
 	const logPrefix = `[Stack:${name}]`;
 
 	console.log(`${logPrefix} ========================================`);
@@ -3446,6 +3461,7 @@ export async function deployStack(options: DeployStackOptions): Promise<StackOpe
 			forceRecreate,
 			build,
 			noBuildCache,
+			pullBase: build && pullBase,
 			pullPolicy,
 			stackFiles,
 			workingDir,
@@ -3463,22 +3479,31 @@ export async function deployStack(options: DeployStackOptions): Promise<StackOpe
 		// then a plain `up`. Skipped on Hawser (its agent has no build op) - the up below
 		// then omits --build for a no-cache request, so nothing crashes there.
 		const deployEnv = envId ? await getEnvironment(envId) : null;
-		if (shouldRunSeparateBuildStep(build, noBuildCache, deployEnv?.connectionType)) {
+		if (!pullBase && shouldRunSeparateBuildStep(build, noBuildCache, deployEnv?.connectionType)) {
 			console.log(`${logPrefix} Running separate 'build --no-cache' step before up...`);
 			const buildResult = await executeComposeCommand('build', cmdOptions, compose, composeEnvVars, secretVars);
 			if (!buildResult.success) return buildResult;
 		}
 
+		const warn = (warning: string) => {
+			console.warn(`${logPrefix} ${warning}`);
+			onLine?.(warning);
+		};
 		console.log(`${logPrefix} Calling executeComposeCommand...`);
-		const result = await pullThenUp(
-			pullPolicy,
-			(operation, upPullPolicy) =>
-				executeComposeCommand(operation, { ...cmdOptions, pullPolicy: upPullPolicy }, compose, composeEnvVars, secretVars, onLine),
-			(warning) => {
-				console.warn(`${logPrefix} ${warning}`);
-				onLine?.(warning);
-			}
-		);
+		const result = build && pullBase
+			? await pullBuildThenUp(
+					pullPolicy,
+					// The Hawser agent's up has no --no-build and its pull takes no flags.
+					(operation, opts) =>
+						executeComposeCommand(operation, stepOptions(cmdOptions, opts), compose, composeEnvVars, secretVars, onLine),
+					warn
+				)
+			: await pullThenUp(
+					pullPolicy,
+					(operation, upPullPolicy) =>
+						executeComposeCommand(operation, { ...cmdOptions, pullPolicy: upPullPolicy }, compose, composeEnvVars, secretVars, onLine),
+					warn
+				);
 		// F4 fix: `secretVars` here is POST-resolveProviderEnvVars (line ~3059 above) --
 		// the same set executeComposeCommand just redacted streamed lines against. This
 		// is the single call site inside deployStack(), so setting it here covers both

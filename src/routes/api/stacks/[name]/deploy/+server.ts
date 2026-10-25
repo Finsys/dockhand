@@ -14,7 +14,7 @@ import type { RequestHandler } from './$types';
  * summary: Deploy (docker compose up) a stack, optionally pulling images, building, and force-recreating; progress and the final result stream over Server-Sent Events
  * path: name:string! Stack name (from GET /api/stacks)
  * query: env:integer Environment ID the stack belongs to (from GET /api/environments)
- * body: {pull:boolean, respectPullPolicy:boolean, build:boolean, forceRecreate:boolean}
+ * body: {pull:boolean, respectPullPolicy:boolean, build:boolean, pullBase:boolean, forceRecreate:boolean}
  * body-example: {"pull":true,"build":false,"forceRecreate":false}
  * resp-400: Invalid stack name
  * resp-200: Server-Sent-Events job stream with progress events and a final result event ({success, output})
@@ -38,10 +38,11 @@ export const POST: RequestHandler = async (event) => {
 	}
 
 	const body = await request.json().catch(() => ({}));
-	const { pull, respectPullPolicy, build, forceRecreate } = body as {
+	const { pull, respectPullPolicy, build, pullBase, forceRecreate } = body as {
 		pull?: boolean;
 		respectPullPolicy?: boolean;
 		build?: boolean;
+		pullBase?: boolean;
 		forceRecreate?: boolean;
 	};
 
@@ -100,6 +101,7 @@ export const POST: RequestHandler = async (event) => {
 				envId: envIdNum,
 				pullPolicy: deployPullPolicy(pull, respectPullPolicy),
 				build,
+				pullBase: !!pullBase,
 				forceRecreate,
 				composePath: composeResult.composePath,
 				envPath: composeResult.envPath,
@@ -116,7 +118,7 @@ export const POST: RequestHandler = async (event) => {
 
 			// Audit log
 			await auditStack(event, 'deploy', stackName, envIdNum, {
-				pull, respectPullPolicy, build, forceRecreate
+				pull, respectPullPolicy, build, pullBase, forceRecreate
 			});
 
 			if (!result.success) {

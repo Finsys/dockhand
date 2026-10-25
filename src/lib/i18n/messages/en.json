@@ -2953,6 +2953,8 @@
 	"stacks_redeploy_pull_images": "Pull images",
 	"stacks_redeploy_respect_pull_policy": "Respect pull_policy",
 	"stacks_redeploy_respect_pull_policy_hint": "Runs docker compose pull first, which follows each service's pull_policy: services set to never or build, or to missing with the image present, are not pulled. A failed pull is logged and the deploy continues, but it can stop the other services' pulls, which then keep their current images.",
+	"stacks_redeploy_pull_base_images": "Pull base images",
+	"stacks_redeploy_pull_base_images_hint": "Runs docker compose build --pull first, which pulls a newer version of each Dockerfile's FROM image; a plain build reuses the cached one. On Hawser this needs agent 0.2.51 or newer; an older agent builds with the local base images and logs a warning.",
 	"stacks_redeploy_build_images": "Build images",
 	"stacks_redeploy_force_recreate": "Force recreate",
 	"stacks_redeploy_deploying": "Deploying...",

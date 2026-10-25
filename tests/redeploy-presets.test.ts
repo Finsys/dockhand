@@ -10,7 +10,7 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { buildComposeOperationArgs, deployPullPolicy, pullSteps } from '../src/lib/server/compose-args';
+import { buildComposeOperationArgs, deployPullPolicy, pullBuildThenUp, pullThenUp, stepOptions } from '../src/lib/server/compose-args';
 import {
 	REDEPLOY_PRESETS,
 	composeCommandFor,
@@ -21,28 +21,47 @@ import {
 const ALL_CHOICES: DeployChoice[] = [false, true].flatMap((pull) =>
 	[false, true].flatMap((build) =>
 		[false, true].flatMap((forceRecreate) =>
-			[false, true].map((respectPullPolicy) => ({ pull, build, forceRecreate, respectPullPolicy }))
+			[false, true].flatMap((respectPullPolicy) =>
+				[false, true].map((pullBase) => ({ pull, build, forceRecreate, respectPullPolicy, pullBase }))
+			)
 		)
 	)
 );
 
-/** What the server would actually run for the same choice: the deploy route's policy, then deployStack's steps. */
-function serverCommand(choice: DeployChoice): string {
-	const { separatePull, upPullPolicy } = pullSteps(deployPullPolicy(choice.pull, choice.respectPullPolicy));
-	const up = buildComposeOperationArgs('up', {
-		forceRecreate: choice.forceRecreate,
-		build: choice.build,
-		pullPolicy: upPullPolicy
-	});
-	const upCommand = `docker compose ${up.join(' ')}`;
-	return separatePull ? `docker compose ${buildComposeOperationArgs('pull').join(' ')}; ${upCommand}` : upCommand;
+/** What the server would actually run for the same choice: the deploy route's policy, then deployStack's real step functions. */
+async function serverCommand(choice: DeployChoice): Promise<string> {
+	const commands: string[] = [];
+	const ok = { success: true };
+	const pullPolicy = deployPullPolicy(choice.pull, choice.respectPullPolicy);
+	if (choice.build && choice.pullBase) {
+		const base = { forceRecreate: choice.forceRecreate, build: choice.build, pullBase: true };
+		await pullBuildThenUp(
+			pullPolicy,
+			async (operation, opts) => {
+				commands.push(`docker compose ${buildComposeOperationArgs(operation, stepOptions(base, opts)).join(' ')}`);
+				return ok;
+			},
+			() => {}
+		);
+	} else {
+		await pullThenUp(
+			pullPolicy,
+			async (operation, upPullPolicy) => {
+				const args = buildComposeOperationArgs(operation, { forceRecreate: choice.forceRecreate, build: choice.build, pullPolicy: upPullPolicy });
+				commands.push(`docker compose ${args.join(' ')}`);
+				return ok;
+			},
+			() => {}
+		);
+	}
+	return commands.join('; ');
 }
 
 describe('the preview matches what the server runs', () => {
-	test('all sixteen combinations agree, flag for flag and in order', () => {
-		expect(ALL_CHOICES).toHaveLength(16);
+	test('all thirty-two combinations agree, flag for flag and in order', async () => {
+		expect(ALL_CHOICES).toHaveLength(32);
 		for (const choice of ALL_CHOICES) {
-			expect(composeCommandFor(choice)).toBe(serverCommand(choice));
+			expect(composeCommandFor(choice)).toBe(await serverCommand(choice));
 		}
 	});
 
@@ -66,6 +85,31 @@ describe('the preview matches what the server runs', () => {
 
 	test('respecting pull_policy without pull changes nothing', () => {
 		expect(composeCommandFor({ pull: false, respectPullPolicy: true, build: false, forceRecreate: false })).toBe(
+			'docker compose up -d --remove-orphans'
+		);
+	});
+
+	// Measured on Docker 20.10 / compose 5.0.2: an up that builds again after `build --pull`,
+	// with --build or for a pull_policy: build service, uses the stale cached base.
+	test('pulling base images builds with --pull first, then starts without building again', () => {
+		expect(composeCommandFor({ pull: false, build: true, pullBase: true, forceRecreate: false })).toBe(
+			'docker compose build --pull; docker compose up -d --remove-orphans --no-build'
+		);
+	});
+
+	// A pull after the build would replace the fresh image of a service whose tag is in a
+	// registry (measured on compose 5.1.2), so the pull comes first.
+	test('with pull too, images are pulled before the build and up does not pull again', () => {
+		expect(composeCommandFor({ pull: true, build: true, pullBase: true, forceRecreate: false })).toBe(
+			'docker compose pull --policy always --ignore-buildable; docker compose build --pull; docker compose up -d --remove-orphans --no-build'
+		);
+		expect(composeCommandFor({ pull: true, respectPullPolicy: true, build: true, pullBase: true, forceRecreate: false })).toBe(
+			'docker compose pull --ignore-buildable; docker compose build --pull; docker compose up -d --remove-orphans --no-build'
+		);
+	});
+
+	test('pulling base images without build changes nothing', () => {
+		expect(composeCommandFor({ pull: false, build: false, pullBase: true, forceRecreate: false })).toBe(
 			'docker compose up -d --remove-orphans'
 		);
 	});

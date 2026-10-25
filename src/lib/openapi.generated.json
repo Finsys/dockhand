@@ -27251,6 +27251,9 @@
                   "build": {
                     "type": "boolean"
                   },
+                  "pullBase": {
+                    "type": "boolean"
+                  },
                   "forceRecreate": {
                     "type": "boolean"
                   }
@@ -27276,6 +27279,7 @@
                 "pull": true,
                 "respectPullPolicy": true,
                 "build": true,
+                "pullBase": true,
                 "forceRecreate": true
               }
             }
@@ -27634,6 +27638,9 @@
                   "build": {
                     "type": "boolean"
                   },
+                  "pullBase": {
+                    "type": "boolean"
+                  },
                   "forceRecreate": {
                     "type": "boolean"
                   }
@@ -27654,6 +27661,7 @@
                 "pull": true,
                 "respectPullPolicy": true,
                 "build": true,
+                "pullBase": true,
                 "forceRecreate": true
               }
             }
@@ -27817,6 +27825,9 @@
                     "type": "boolean"
                   },
                   "build": {
+                    "type": "boolean"
+                  },
+                  "pullBase": {
                     "type": "boolean"
                   },
                   "forceRecreate": {

@@ -62,6 +62,7 @@ describe('POST /api/stacks -- build/pull/forceRecreate options (source-level)', 
 		// pullPolicy must come from the request's pull flags, not be omitted or hardcoded;
 		// deployPullPolicy (tested in compose-args.test.ts) does the translation.
 		expect(body).toMatch(/pullPolicy:\s*deployPullPolicy\(pullOpt,\s*respectPullPolicy\)/);
+		expect(body).toMatch(/pullBase:\s*!!pullBase/);
 		expect(body).toMatch(/forceRecreate:\s*forceRecreateOpt/);
 	});
 

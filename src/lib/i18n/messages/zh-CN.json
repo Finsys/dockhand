@@ -2953,6 +2953,8 @@
 	"stacks_redeploy_pull_images": "拉取镜像",
 	"stacks_redeploy_respect_pull_policy": "遵循 pull_policy",
 	"stacks_redeploy_respect_pull_policy_hint": "先运行 docker compose pull，按每个服务的 pull_policy 拉取：设为 never 或 build，或设为 missing 且镜像已存在的服务不会拉取。拉取失败会记录在日志中，部署继续进行，但它可能中断其他服务的拉取，这些服务将保留当前镜像。",
+	"stacks_redeploy_pull_base_images": "拉取基础镜像",
+	"stacks_redeploy_pull_base_images_hint": "先运行 docker compose build --pull，为每个 Dockerfile 的 FROM 镜像拉取更新版本；普通构建会复用缓存中的镜像。在 Hawser 上需要 0.2.51 或更新版本的代理；较旧的代理会使用本地基础镜像构建并记录警告。",
 	"stacks_redeploy_build_images": "构建镜像",
 	"stacks_redeploy_force_recreate": "强制重建",
 	"stacks_redeploy_deploying": "部署中...",

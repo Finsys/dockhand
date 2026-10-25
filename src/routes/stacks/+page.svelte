@@ -1274,7 +1274,7 @@
 		}
 	}
 
-	async function redeployStack(name: string, options: { pull: boolean; respectPullPolicy?: boolean; build: boolean; forceRecreate: boolean }) {
+	async function redeployStack(name: string, options: { pull: boolean; respectPullPolicy?: boolean; build: boolean; pullBase?: boolean; forceRecreate: boolean }) {
 		operationError = null;
 		stackActionLoading = name;
 		startComposeOutput(m.stacks_list_output_redeploying({ name }), name, 'deploy');
@@ -1284,6 +1284,7 @@
 			options.pull && m.stacks_list_output_option_pull(),
 			options.respectPullPolicy && m.stacks_redeploy_respect_pull_policy(),
 			options.build && m.stacks_list_output_option_build(),
+			options.pullBase && m.stacks_redeploy_pull_base_images(),
 			options.forceRecreate && m.stacks_list_output_option_force_recreate()
 		].filter(Boolean);
 		appendComposeOutputLine(m.stacks_list_output_options({ options: chosen.length ? chosen.join(', ') : m.stacks_list_output_option_none() }));

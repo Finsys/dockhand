@@ -16,6 +16,8 @@ export interface DeployChoice {
 	forceRecreate: boolean;
 	/** With pull: a separate `docker compose pull`, which honours each service's pull_policy, instead of `--pull always`. */
 	respectPullPolicy?: boolean;
+	/** With build: a separate `docker compose build --pull` first, which refreshes each Dockerfile's FROM image. */
+	pullBase?: boolean;
 }
 
 export interface RedeployPreset {
@@ -42,14 +44,20 @@ export function isPresetActive(preset: RedeployPreset, choice: Pick<DeployChoice
 
 /** The command the chosen options will run, for the preview under the checkboxes. */
 export function composeCommandFor(choice: DeployChoice): string {
-	const separatePull = choice.pull && choice.respectPullPolicy;
+	// A separate build (pullBuildThenUp) pulls first, then builds, then starts without building.
+	const separateBuild = !!(choice.build && choice.pullBase);
+	const separatePull = choice.pull && (choice.respectPullPolicy || separateBuild);
 	const up = [
 		'docker compose up -d --remove-orphans',
 		choice.forceRecreate ? '--force-recreate' : '',
-		choice.build ? '--build' : '',
+		choice.build && !separateBuild ? '--build' : '',
+		separateBuild ? '--no-build' : '',
 		choice.pull && !separatePull ? '--pull always' : ''
 	]
 		.filter(Boolean)
 		.join(' ');
-	return separatePull ? `docker compose pull; ${up}` : up;
+	const pull = separatePull
+		? ['docker compose pull', choice.respectPullPolicy ? '' : '--policy always', separateBuild ? '--ignore-buildable' : ''].filter(Boolean).join(' ')
+		: '';
+	return [pull, separateBuild ? 'docker compose build --pull' : '', up].filter(Boolean).join('; ');
 }

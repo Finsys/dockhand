@@ -342,6 +342,14 @@ describe('PUT /api/stacks/[name]/compose -- restart:true build/pull/forceRecreat
 		expect(deployStackCalls[0].pullPolicy).toBe('respect');
 	});
 
+	test('pullBase in the request body reaches deployStack, and is off when omitted', async () => {
+		await (await composeRoute.PUT(makeComposeEvent({ content: 'x', restart: true, build: true, pullBase: true }))).json();
+		expect(deployStackCalls[0].pullBase).toBe(true);
+		deployStackCalls.length = 0;
+		await (await composeRoute.PUT(makeComposeEvent({ content: 'x', restart: true, build: true }))).json();
+		expect(deployStackCalls[0].pullBase).toBe(false);
+	});
+
 	test('respectPullPolicy without pull pulls nothing', async () => {
 		await (await composeRoute.PUT(makeComposeEvent({ content: 'x', restart: true, pull: false, respectPullPolicy: true }))).json();
 

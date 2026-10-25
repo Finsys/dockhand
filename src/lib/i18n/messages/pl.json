@@ -3361,6 +3361,8 @@
 	"stacks_redeploy_pull_images": "Pobierz obrazy",
 	"stacks_redeploy_respect_pull_policy": "Uwzględnij pull_policy",
 	"stacks_redeploy_respect_pull_policy_hint": "Najpierw uruchamia docker compose pull, które stosuje pull_policy każdej usługi: usługi z never lub build albo z missing i obecnym obrazem nie są pobierane. Nieudany pull trafia do logu, a wdrożenie jest kontynuowane, ale może on przerwać pobieranie innych usług, które zostają wtedy przy obecnych obrazach.",
+	"stacks_redeploy_pull_base_images": "Pobierz obrazy bazowe",
+	"stacks_redeploy_pull_base_images_hint": "Najpierw uruchamia docker compose build --pull, które pobiera nowszą wersję obrazu z FROM każdego Dockerfile; zwykły build używa tego z pamięci podręcznej. Na Hawserze wymaga agenta 0.2.51 lub nowszego; starszy agent buduje z lokalnymi obrazami bazowymi i zapisuje ostrzeżenie w logu.",
 	"stacks_redeploy_build_images": "Zbuduj obrazy",
 	"stacks_redeploy_force_recreate": "Wymuś odtworzenie",
 	"stacks_redeploy_deploying": "Wdrażanie...",

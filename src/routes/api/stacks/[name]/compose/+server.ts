@@ -68,7 +68,7 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
  * description: Every accepted PUT persists the compose content; with restart it also redeploys. Supports moving the compose/env to a new path and binding a secret provider.
  * path: name:string The stack name
  * query: env:integer Environment id the stack belongs to
- * body: {content:string!, composePath:string, envPath:string, oldComposePath:string, oldEnvPath:string, moveFromDir:string, restart:boolean, secretProviderId:integer, pull:boolean, respectPullPolicy:boolean, build:boolean, forceRecreate:boolean}
+ * body: {content:string!, composePath:string, envPath:string, oldComposePath:string, oldEnvPath:string, moveFromDir:string, restart:boolean, secretProviderId:integer, pull:boolean, respectPullPolicy:boolean, build:boolean, pullBase:boolean, forceRecreate:boolean}
  * resp-400: Invalid request (e.g. missing content, or secretProviderId wrong type)
  * resp-403: Permission denied (needs stacks:edit; binding a secret provider also needs secrets:view)
  * resp-500: Failed to save or deploy the compose file
@@ -94,7 +94,7 @@ export const PUT: RequestHandler = async ({ params, request, url, cookies }) => 
 
 	try {
 		const body = await request.json();
-		const { content, restart = false, composePath, envPath, moveFromDir, oldComposePath, oldEnvPath, secretProviderId, pull, respectPullPolicy, build, forceRecreate } = body;
+		const { content, restart = false, composePath, envPath, moveFromDir, oldComposePath, oldEnvPath, secretProviderId, pull, respectPullPolicy, build, pullBase, forceRecreate } = body;
 
 		if (!content || typeof content !== 'string') {
 			return json({ error: 'Compose file content is required' }, { status: 400 });
@@ -196,6 +196,7 @@ export const PUT: RequestHandler = async ({ params, request, url, cookies }) => 
 						envId: envIdNum,
 						forceRecreate: forceRecreateOpt,
 						build: buildOpt,
+						pullBase: !!pullBase,
 						// pullPolicy undefined (pull unchecked) means deployStack's post-deploy
 						// reconcileStackPendingUpdates() call is skipped too -- a stale "update
 						// available" badge on this stack won't clear until the next pull. Accepted

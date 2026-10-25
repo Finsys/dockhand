@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { buildComposeOperationArgs, shouldRunSeparateBuildStep, deployPullPolicy, pullSteps, pullThenUp, PULL_FAILED_WARNING } from '../src/lib/server/compose-args';
+import { buildComposeOperationArgs, shouldRunSeparateBuildStep, deployPullPolicy, pullSteps, pullThenUp, PULL_FAILED_WARNING, runBuildStep, pullBuildThenUp, stepOptions, BUILD_STEP_UNSUPPORTED_WARNING } from '../src/lib/server/compose-args';
 
 describe('buildComposeOperationArgs', () => {
 	it('plain up: no --build, no --no-cache (back-compat, the common case)', () => {
@@ -34,6 +34,24 @@ describe('buildComposeOperationArgs', () => {
 		expect(buildComposeOperationArgs('build', { noBuildCache: false })).toEqual(['build']);
 	});
 
+	// Measured on compose 5.1.3: only `build --pull` refreshes a Dockerfile's FROM image;
+	// `up --build` and `compose pull` both leave the cached base in place.
+	it('build operation pulls base images only when asked, in the order the Hawser agent uses', () => {
+		expect(buildComposeOperationArgs('build', { pullBase: true })).toEqual(['build', '--pull']);
+		expect(buildComposeOperationArgs('build', { pullBase: true, noBuildCache: true })).toEqual(['build', '--pull', '--no-cache']);
+		expect(buildComposeOperationArgs('build', {})).toEqual(['build']);
+	});
+
+	it('pullBase never reaches up, which has its own --pull for service images', () => {
+		expect(buildComposeOperationArgs('up', { build: true, pullBase: true })).toEqual(['up', '-d', '--remove-orphans', '--build']);
+	});
+
+	it('noBuild starts without building, and wins over build', () => {
+		expect(buildComposeOperationArgs('up', { noBuild: true })).toEqual(['up', '-d', '--remove-orphans', '--no-build']);
+		expect(buildComposeOperationArgs('up', { build: true, noBuild: true, pullPolicy: 'always' })).toEqual(['up', '-d', '--remove-orphans', '--no-build', '--pull', 'always']);
+		expect(buildComposeOperationArgs('build', { noBuild: true })).toEqual(['build']);
+	});
+
 	it('build operation scopes to a single service when given', () => {
 		expect(buildComposeOperationArgs('build', { noBuildCache: true, serviceName: 'web' })).toEqual(['build', '--no-cache', 'web']);
 	});
@@ -46,6 +64,17 @@ describe('buildComposeOperationArgs', () => {
 		expect(buildComposeOperationArgs('restart', {})).toEqual(['restart']);
 		expect(buildComposeOperationArgs('pull', {})).toEqual(['pull']);
 		expect(buildComposeOperationArgs('pull', { serviceName: 'web' })).toEqual(['pull', 'web']);
+	});
+
+	it("pull forces every image only for the 'always' policy", () => {
+		expect(buildComposeOperationArgs('pull', { pullPolicy: 'always' })).toEqual(['pull', '--policy', 'always']);
+		expect(buildComposeOperationArgs('pull', { pullPolicy: 'missing' })).toEqual(['pull']);
+		expect(buildComposeOperationArgs('pull', { pullPolicy: 'always', serviceName: 'web' })).toEqual(['pull', '--policy', 'always', 'web']);
+	});
+
+	it('the pull before a base-image build skips buildable services', () => {
+		expect(buildComposeOperationArgs('pull', { pullPolicy: 'always', pullBase: true })).toEqual(['pull', '--policy', 'always', '--ignore-buildable']);
+		expect(buildComposeOperationArgs('pull', { pullBase: true })).toEqual(['pull', '--ignore-buildable']);
 	});
 });
 
@@ -66,6 +95,118 @@ describe('shouldRunSeparateBuildStep', () => {
 		expect(shouldRunSeparateBuildStep(true, false, 'socket')).toBe(false);
 		expect(shouldRunSeparateBuildStep(false, false, 'socket')).toBe(false);
 		expect(shouldRunSeparateBuildStep(undefined, undefined, 'socket')).toBe(false);
+	});
+});
+
+describe('runBuildStep', () => {
+	function collect() {
+		const warnings: string[] = [];
+		return { warnings, warn: (m: string) => warnings.push(m) };
+	}
+
+	it('a successful build goes on to an up that does not build again', async () => {
+		const c = collect();
+		expect(await runBuildStep(async () => ({ success: true }), c.warn)).toEqual({ built: true });
+		expect(c.warnings).toEqual([]);
+	});
+
+	it('a failed build stops the deploy with its own result', async () => {
+		const c = collect();
+		const failed = { success: false, error: 'failed to solve: process "/bin/sh -c make" did not complete successfully' };
+		const step = await runBuildStep(async () => failed, c.warn);
+		expect(step.stop).toBe(failed);
+		expect(step.built).toBe(false);
+		expect(c.warnings).toEqual([]);
+	});
+
+	// The error a Hawser agent before 0.2.51 returns for operation "build", over HTTP
+	// (result.error) and over edge (wrapped by the transport).
+	it('an agent without the build operation is a warning and the deploy goes on', async () => {
+		for (const error of ['unsupported compose operation: build', 'Failed to build via Hawser: unsupported compose operation: build']) {
+			const c = collect();
+			// built:false keeps up's --build, the only build an old agent can do.
+			expect(await runBuildStep(async () => ({ success: false, error }), c.warn)).toEqual({ built: false });
+			expect(c.warnings).toEqual([BUILD_STEP_UNSUPPORTED_WARNING]);
+		}
+	});
+
+	it('a build error that only mentions compose still stops the deploy', async () => {
+		const c = collect();
+		const failed = { success: false, error: 'unsupported compose file version' };
+		expect((await runBuildStep(async () => failed, c.warn)).stop).toBe(failed);
+	});
+});
+
+describe('pullBuildThenUp', () => {
+	type Op = 'pull' | 'build' | 'up';
+	function recorder(outcome: Partial<Record<Op, { success: boolean; error?: string }>> = {}) {
+		const calls: string[] = [];
+		const warnings: string[] = [];
+		const run = async (operation: Op, opts: { pullPolicy?: string; noBuild?: boolean }) => {
+			calls.push([operation, opts.pullPolicy && `policy=${opts.pullPolicy}`, opts.noBuild && 'no-build'].filter(Boolean).join(' '));
+			return { ...(outcome[operation] ?? { success: true }), operation };
+		};
+		return { calls, warnings, run, warn: (m: string) => warnings.push(m) };
+	}
+
+	it("'always' pulls every image first, then builds, then starts without building or pulling", async () => {
+		const r = recorder();
+		const result = await pullBuildThenUp('always', r.run, r.warn);
+		expect(r.calls).toEqual(['pull policy=always', 'build', 'up no-build']);
+		expect(result.operation).toBe('up');
+	});
+
+	it("'respect' pulls by each service's pull_policy before the build", async () => {
+		const r = recorder();
+		await pullBuildThenUp('respect', r.run, r.warn);
+		expect(r.calls).toEqual(['pull', 'build', 'up no-build']);
+	});
+
+	it('no pull policy skips the pull', async () => {
+		const r = recorder();
+		await pullBuildThenUp(undefined, r.run, r.warn);
+		expect(r.calls).toEqual(['build', 'up no-build']);
+	});
+
+	it('a failed pull is a warning; the build and up still run', async () => {
+		const r = recorder({ pull: { success: false, error: 'pull access denied for app' } });
+		const result = await pullBuildThenUp('always', r.run, r.warn);
+		expect(r.calls).toEqual(['pull policy=always', 'build', 'up no-build']);
+		expect(r.warnings).toEqual([PULL_FAILED_WARNING]);
+		expect(result.success).toBe(true);
+	});
+
+	it('a failed build stops before up and is the result', async () => {
+		const r = recorder({ build: { success: false, error: 'failed to solve' } });
+		const result = await pullBuildThenUp('always', r.run, r.warn);
+		expect(r.calls).toEqual(['pull policy=always', 'build']);
+		expect(result).toEqual({ success: false, error: 'failed to solve', operation: 'build' });
+	});
+
+	it('an agent without the build operation warns, and up builds the only way it can', async () => {
+		const r = recorder({ build: { success: false, error: 'Compose error: unsupported compose operation: build' } });
+		const result = await pullBuildThenUp(undefined, r.run, r.warn);
+		expect(r.calls).toEqual(['build', 'up']);
+		expect(r.warnings).toEqual([BUILD_STEP_UNSUPPORTED_WARNING]);
+		expect(result.success).toBe(true);
+	});
+});
+
+describe('stepOptions', () => {
+	const base = { stackName: 's', build: true, pullBase: true, pullPolicy: 'respect', forceRecreate: true };
+
+	it('a step runs with its own pull policy, the rest unchanged', () => {
+		expect(stepOptions(base, { pullPolicy: 'always' })).toEqual({ ...base, pullPolicy: 'always' });
+		expect(stepOptions(base, {})).toEqual({ ...base, pullPolicy: undefined });
+	});
+
+	it('an up after a successful build neither builds nor pulls', () => {
+		expect(stepOptions(base, { noBuild: true })).toEqual({ ...base, pullPolicy: undefined, build: false, noBuild: true });
+		expect(buildComposeOperationArgs('up', stepOptions(base, { noBuild: true }))).toEqual(['up', '-d', '--remove-orphans', '--force-recreate', '--no-build']);
+	});
+
+	it('an up after an old agent refused the build keeps --build', () => {
+		expect(buildComposeOperationArgs('up', stepOptions(base, { noBuild: false }))).toEqual(['up', '-d', '--remove-orphans', '--force-recreate', '--build']);
 	});
 });
 
@@ -148,7 +289,18 @@ describe('the deploy paths hand the policy on', () => {
 
 	it('the deploy route reads respectPullPolicy and passes it on', () => {
 		const src = read('../src/routes/api/stacks/[name]/deploy/+server.ts');
-		expect(src).toMatch(/const \{ pull, respectPullPolicy, build, forceRecreate \} = body/);
+		expect(src).toMatch(/const \{ pull, respectPullPolicy, build, pullBase, forceRecreate \} = body/);
 		expect(src).toMatch(/pullPolicy:\s*deployPullPolicy\(pull,\s*respectPullPolicy\)/);
+		expect(src).toMatch(/pullBase:\s*!!pullBase/);
+	});
+
+	it('deployStack runs "Pull base images" through pullBuildThenUp with stepOptions', () => {
+		const src = read('../src/lib/server/stacks.ts');
+		expect(src).toMatch(/const result = build && pullBase\s*\?\s*await pullBuildThenUp\(\s*pullPolicy,/);
+		expect(src).toContain('executeComposeCommand(operation, stepOptions(cmdOptions, opts), compose, composeEnvVars, secretVars, onLine)');
+		expect(src).toContain('pullBase: build && pullBase,');
+		expect(src).toMatch(/if \(!pullBase && shouldRunSeparateBuildStep\(build, noBuildCache, deployEnv\?\.connectionType\)\)/);
+		expect(src).toMatch(/pullBase: pullBase \|\| false/);
+		expect(src).toContain("if (operation === 'up' || operation === 'pull' || operation === 'build') {");
 	});
 });
