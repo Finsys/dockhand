@@ -26,7 +26,7 @@ import {
 	type DeletionApplyResult,
 	type DeletionSkipReason
 } from './git-deletions';
-import { buildComposeOperationArgs, runsSeparateBuild, pullThenUp, pullBuildThenUp, stepOptions } from './compose-args';
+import { buildComposeOperationArgs, runsSeparateBuild, pullThenUp, pullBuildThenUp, stepOptions, deployPlan } from './compose-args';
 import { findStackNameCollision, getStackPathHintsFromContainers, moveStackFilePathCrossDevice, resolveStackDirForLayout } from './stack-path-utils';
 import { isValidStackName } from './stack-name-guard';
 import { db, environments, eq } from './db/drizzle.js';
@@ -1619,17 +1619,17 @@ async function executeLocalCompose(
 			console.log(`${logPrefix} Timed out:`, timedOut);
 			if (stdout) {
 				console.log(`${logPrefix} STDOUT:`);
-				console.log(stdout);
+				console.log(redactSecretVars(stdout, secretVars));
 			}
 			if (stderr) {
 				console.log(`${logPrefix} STDERR:`);
-				console.log(stderr);
+				console.log(redactSecretVars(stderr, secretVars));
 			}
 
 			if (timedOut) {
 				return {
 					success: false,
-					output: stdout,
+					output: redactSecretVars(stdout, secretVars),
 					error: `docker compose ${operation} timed out after ${COMPOSE_TIMEOUT_MS / 1000} seconds. If a service has a long stop_grace_period, raise the COMPOSE_TIMEOUT env var (seconds) above it.`,
 					command: commandStr
 				};
@@ -1638,7 +1638,7 @@ async function executeLocalCompose(
 			if (code === 0) {
 				return {
 					success: true,
-					output: stdout || stderr || `Stack "${stackName}" ${operation} completed successfully`,
+					output: redactSecretVars(stdout || stderr, secretVars) || `Stack "${stackName}" ${operation} completed successfully`,
 					command: commandStr,
 					exitCode: code
 				};
@@ -1658,7 +1658,7 @@ async function executeLocalCompose(
 			clearTimeout(timeoutId);
 		}
 	} catch (err: any) {
-		console.log(`${logPrefix} EXCEPTION in executeLocalCompose:`, err.message);
+		console.log(`${logPrefix} EXCEPTION in executeLocalCompose:`, redactSecretVars(err.message, secretVars));
 		return {
 			success: false,
 			output: '',
@@ -1741,6 +1741,7 @@ async function executeComposeViaHawser(
 	console.log(`${logPrefix} Force recreate:`, forceRecreate ?? false);
 	console.log(`${logPrefix} Remove volumes:`, removeVolumes ?? false);
 	console.log(`${logPrefix} Service name:`, serviceName ?? '(all services)');
+	console.log(`${logPrefix} Build flags: build=${!!build}, noBuildCache=${!!noBuildCache}, pullBase=${!!pullBase}, pullPolicy=${pullPolicy || '(none)'}`);
 	console.log(`${logPrefix} Compose filename:`, composeFileName ?? '(auto-detect)');
 	console.log(`${logPrefix} Non-secret env vars count:`, envVars ? Object.keys(envVars).length : 0);
 	console.log(`${logPrefix} Secret env vars count:`, secretCount);
@@ -1842,10 +1843,10 @@ async function executeComposeViaHawser(
 		console.log(`${logPrefix} ----------------------------------------`);
 		console.log(`${logPrefix} Success:`, result.success);
 		if (result.output) {
-			console.log(`${logPrefix} Output:`, result.output);
+			console.log(`${logPrefix} Output:`, redactSecretVars(result.output, secretVars));
 		}
 		if (result.error) {
-			console.log(`${logPrefix} Error:`, result.error);
+			console.log(`${logPrefix} Error:`, redactSecretVars(result.error, secretVars));
 		}
 
 		// Only reaches the operator when the agent streamed nothing -- otherwise they would
@@ -1888,7 +1889,7 @@ async function executeComposeViaHawser(
 		if (result.success) {
 			return {
 				success: true,
-				output: result.output || `Stack "${stackName}" ${operation} completed via Hawser`,
+				output: redactSecretVars(result.output || '', secretVars) || `Stack "${stackName}" ${operation} completed via Hawser`,
 				deletion
 			};
 		} else {
@@ -1902,7 +1903,7 @@ async function executeComposeViaHawser(
 			};
 		}
 	} catch (err: any) {
-		console.log(`${logPrefix} EXCEPTION in executeComposeViaHawser:`, err.message);
+		console.log(`${logPrefix} EXCEPTION in executeComposeViaHawser:`, redactSecretVars(err.message, secretVars));
 		const isStringLength = err.message?.includes('Invalid string length');
 		return {
 			success: false,
@@ -1968,6 +1969,7 @@ async function executeComposeCommand(
 	switch (env.connectionType) {
 		case 'hawser-standard':
 		case 'hawser-edge': {
+			console.log(`[Stack:${stackName}] ${operation} via ${env.connectionType}, agent ${env.hawserVersion ?? 'unknown'}`);
 			// For Hawser deployments, we need to read the .env file and send variables via envVars
 			// because Docker Compose on the remote host may not auto-read the .env file reliably.
 			// Local deployments use --env-file flag, but Hawser needs variables injected via shell env.
@@ -3160,7 +3162,8 @@ export async function notifyStackDeploy(
 	isGitDeploy = false
 ): Promise<void> {
 	const eventType = result.success ? 'stack_deployed' : 'stack_deploy_failed';
-	const coveredBy = isGitDeploy ? (result.success ? 'git_sync_success' : 'git_sync_failed') : undefined;
+	const gitSyncEvent = result.success ? 'git_sync_success' : 'git_sync_failed';
+	const coveredBy = isGitDeploy ? gitSyncEvent : undefined;
 	try {
 		await sendEventNotification(eventType, {
 			title: result.success ? 'Stack deployed' : 'Stack deploy failed',
@@ -3169,7 +3172,10 @@ export async function notifyStackDeploy(
 				: `Stack "${name}" deploy failed: ${result.error || 'unknown error'}`,
 			type: result.success ? 'success' : 'error'
 		}, envId ?? undefined, coveredBy);
-	} catch { /* never changes the deploy outcome */ }
+	} catch (error) {
+		// Logged only: a notification never changes the deploy outcome.
+		console.error(`[Stack:${name}] ${eventType} notification failed:`, error instanceof Error ? error.message : String(error));
+	}
 }
 
 /**
@@ -3234,11 +3240,13 @@ export async function deployStack(options: DeployStackOptions): Promise<StackOpe
 	// Must also start with a letter or number
 	if (!isValidStackName(name)) {
 		console.log(`${logPrefix} ERROR: Invalid stack name format`);
-		return {
+		const invalid = {
 			success: false,
 			output: '',
 			error: 'Stack name must be lowercase, start with a letter or number, and contain only letters, numbers, hyphens, and underscores'
 		};
+		await notifyStackDeploy(name, envId, invalid, isGitDeploy);
+		return invalid;
 	}
 
 	try {
@@ -3264,7 +3272,10 @@ export async function deployStack(options: DeployStackOptions): Promise<StackOpe
 			if (!existingGitSource && await usesFlatLocalStacksDir(envId)) {
 				const collisionError = await checkFlatLocalStackNameCollision(name, envId);
 				if (collisionError) {
-					return { success: false, output: '', error: collisionError };
+					console.log(`${logPrefix} ERROR: ${collisionError}`);
+					const collision = { success: false, output: '', error: collisionError };
+					await notifyStackDeploy(name, envId, collision, isGitDeploy);
+					return collision;
 				}
 			}
 			workingDir = await getStackDir(name, envId);
@@ -3380,7 +3391,10 @@ export async function deployStack(options: DeployStackOptions): Promise<StackOpe
 					if (!existing) {
 						const collisionError = await checkFlatLocalStackNameCollision(name, envId);
 						if (collisionError) {
-							return { success: false, output: '', error: collisionError };
+							console.log(`${logPrefix} ERROR: ${collisionError}`);
+							const collision = { success: false, output: '', error: collisionError };
+							await notifyStackDeploy(name, envId, collision, isGitDeploy);
+							return collision;
 						}
 					}
 				}
@@ -3480,6 +3494,7 @@ export async function deployStack(options: DeployStackOptions): Promise<StackOpe
 			console.warn(`${logPrefix} ${warning}`);
 			onLine?.(warning);
 		};
+		console.log(`${logPrefix} Deploy plan: ${deployPlan(build, build && pullBase, noBuildCache, pullPolicy)}`);
 		console.log(`${logPrefix} Calling executeComposeCommand...`);
 		// `--no-cache` and `--pull` are `build` flags that `up` lacks, so either one builds in its own step.
 		const result = runsSeparateBuild(build, pullBase, noBuildCache)
@@ -3519,9 +3534,9 @@ export async function deployStack(options: DeployStackOptions): Promise<StackOpe
 		if (!result.deletion && localDeletionResult) {
 			result.deletion = localDeletionResult;
 		}
-		// Fire stack_deployed / stack_deploy_failed. This is the single point every deploy
-		// path funnels through, so all of them notify. A git deploy skips the channels that
-		// get its git_sync_* event instead.
+		// Fire stack_deployed / stack_deploy_failed. Every deploy path that gets this far
+		// funnels through here; the early returns above notify on their own. A git deploy
+		// skips the channels that get its git_sync_* event instead.
 		await notifyStackDeploy(name, envId, result, isGitDeploy);
 
 		// Clear stale pending-update badges (#1311). Fire-and-forget with a timeout so a
