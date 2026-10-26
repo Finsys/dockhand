@@ -3109,6 +3109,7 @@
 	"stackenv_add_first": "Add your first variable",
 	"secretprovider_label": "Secret provider",
 	"secretprovider_unknown": "Unknown provider",
+	"secretprovider_readonly_hint": "Set the provider in the git stack settings (Edit git stack).",
 	"secretprovider_none_disabled": "None - disabled",
 	"secretprovider_none": "None",
 	"stacks_list_restart_stack": "Restart stack {name}",

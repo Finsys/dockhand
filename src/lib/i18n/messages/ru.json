@@ -3367,6 +3367,7 @@
 	"stackenv_add_first": "Добавить первую переменную",
 	"secretprovider_label": "Провайдер секретов",
 	"secretprovider_unknown": "Неизвестный провайдер",
+	"secretprovider_readonly_hint": "Провайдер задаётся в настройках Git-стека (Редактировать Git-стек).",
 	"secretprovider_none_disabled": "Нет (отключено)",
 	"secretprovider_none": "Нет",
 	"stacks_list_restart_stack": "Перезапустить стек {name}",

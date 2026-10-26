@@ -3278,6 +3278,7 @@
 	"stackenv_add_first": "Füge deine erste Variable hinzu",
 	"secretprovider_label": "Secret-Provider",
 	"secretprovider_unknown": "Unbekannter Provider",
+	"secretprovider_readonly_hint": "Den Provider in den Einstellungen des Git-Stacks festlegen (Git-Stack bearbeiten).",
 	"secretprovider_none_disabled": "Keiner - deaktiviert",
 	"secretprovider_none": "Keiner",
 	"stacks_list_restart_stack": "Stack {name} neu starten",

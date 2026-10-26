@@ -3151,6 +3151,7 @@
 	"stackenv_add_first": "Añade tu primera variable",
 	"secretprovider_label": "Proveedor de secretos",
 	"secretprovider_unknown": "Proveedor desconocido",
+	"secretprovider_readonly_hint": "Elige el proveedor en los ajustes del stack de Git (Editar stack de Git).",
 	"secretprovider_none_disabled": "Ninguno: desactivado",
 	"secretprovider_none": "Ninguno",
 	"stacks_list_restart_stack": "Reiniciar stack {name}",

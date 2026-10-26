@@ -3527,6 +3527,7 @@
 	"stackenv_add_first": "Dodaj pierwszą zmienną",
 	"secretprovider_label": "Dostawca sekretów",
 	"secretprovider_unknown": "Nieznany dostawca",
+	"secretprovider_readonly_hint": "Dostawcę ustawia się w ustawieniach stacka z Gita (Edytuj stack z Gita).",
 	"secretprovider_none_disabled": "Brak - wyłączone",
 	"secretprovider_none": "Brak",
 	"stacks_list_restart_stack": "Zrestartuj stack {name}",

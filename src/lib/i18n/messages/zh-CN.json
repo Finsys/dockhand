@@ -3109,6 +3109,7 @@
 	"stackenv_add_first": "添加您的第一个变量",
 	"secretprovider_label": "密钥提供商",
 	"secretprovider_unknown": "未知提供者",
+	"secretprovider_readonly_hint": "请在 Git 堆栈设置中选择提供商（编辑 Git 堆栈）。",
 	"secretprovider_none_disabled": "无——已禁用",
 	"secretprovider_none": "无",
 	"stacks_list_restart_stack": "重启堆栈 {name}",

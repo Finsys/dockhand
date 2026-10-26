@@ -1456,17 +1456,17 @@
 						console.error('Failed to fetch stack containers:', e);
 					}
 
-					// Load the stack's icon even when the compose isn't local (read-only git
-					// stack): the icon is Dockhand metadata, not repo content, so the header
-					// must still show a custom icon the user set.
+					// Load the stack's icon and secret provider even when the compose isn't local
+					// (read-only git stack): both are Dockhand metadata, not repo content.
 					try {
 						const sourcesRes = await fetch(appendEnvParam('/api/stacks/sources', envId));
 						if (sourcesRes.ok) {
 							const sourceMap = await sourcesRes.json();
 							formIcon = sourceMap?.[stackName]?.icon ?? null;
+							formSecretProviderId = sourceMap?.[stackName]?.secretProviderId ?? null;
 						}
 					} catch (e) {
-						console.warn('Failed to load stack icon:', e);
+						console.warn('Failed to load stack source (icon / secret provider):', e);
 					}
 					return;
 				}
@@ -2636,6 +2636,7 @@
 									bind:secretProviderId={formSecretProviderId}
 									bind:envVars
 									providers={secretProviders}
+									{readonly}
 									onchange={() => { secretProviderTouched = true; markDirty(); debouncedValidate(); }}
 								/>
 								<StackEnvVarsPanel
