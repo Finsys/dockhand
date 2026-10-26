@@ -26,7 +26,7 @@ import {
 	type DeletionApplyResult,
 	type DeletionSkipReason
 } from './git-deletions';
-import { buildComposeOperationArgs, shouldRunSeparateBuildStep, pullThenUp, pullBuildThenUp, stepOptions } from './compose-args';
+import { buildComposeOperationArgs, runsSeparateBuild, pullThenUp, pullBuildThenUp, stepOptions } from './compose-args';
 import { findStackNameCollision, getStackPathHintsFromContainers, moveStackFilePathCrossDevice, resolveStackDirForLayout } from './stack-path-utils';
 import { isValidStackName } from './stack-name-guard';
 import { db, environments, eq } from './db/drizzle.js';
@@ -195,11 +195,10 @@ export interface DeployStackOptions {
 	envFileName?: string; // Env filename relative to compose dir (e.g., ".env") for git stacks
 	/** Git deletion sync (#966): files confirmed safe to delete from the stack dir */
 	filesToDelete?: FileToDelete[];
-	/** Set by deployGitStack: this deploy is a git sync, so deployStack must NOT emit
-	 * the stack_deployed/stack_deploy_failed notification — the caller emits the more
-	 * specific git_sync_success/git_sync_failed instead, avoiding a double notification
-	 * (Stack events and Git sync are separate user-facing groups). stack_events is
-	 * still recorded regardless. (#1295) */
+	/** Set by both git deploys (deployGitStack and deployGitStackWithProgress), which send
+	 * git_sync_success / git_sync_failed after the deploy: stack_deployed /
+	 * stack_deploy_failed then goes only to the channels not subscribed to that git_sync
+	 * event, so no channel gets both. */
 	isGitDeploy?: boolean;
 	/** Optional callback invoked per redacted output line as the compose command runs. */
 	onLine?: (line: string) => void;
@@ -1876,7 +1875,8 @@ async function executeComposeViaHawser(
 					if (skip.reason === 'already-absent') continue;
 					console.warn(`${logPrefix} Agent kept "${skip.path}" — ${skipReasonMessage(skip.reason)}`);
 				}
-			} else {
+			} else if (operation !== 'build') {
+				// 0.2.51/0.2.52 delete only on up, so a build without a report says nothing yet.
 				deletion = {
 					deleted: [],
 					skipped: filesToDelete.map(f => ({ path: f.path, reason: 'agent-no-support' as DeletionSkipReason }))
@@ -3149,17 +3149,18 @@ export async function removeStack(
 }
 
 /**
- * Fire the stack_deployed / stack_deploy_failed notification for a completed deploy.
- * Called from the single deployStack() return point, so EVERY deploy path (local,
- * Hawser, git webhook/manual) dispatches it — previously nothing did, so these
- * notifications never fired (#1295). Best-effort: a notification failure never changes
- * the deploy outcome (mirrors backups/index.ts notify()).
+ * Fire stack_deployed / stack_deploy_failed. deployStack() calls it for every deploy, and
+ * git.ts for a git deploy that fails before deployStack runs. For a git deploy it skips the
+ * channels that get git_sync_success / git_sync_failed. Best-effort: never changes the outcome.
  */
-async function notifyStackDeploy(name: string, envId: number | null | undefined, result: StackOperationResult, isGitDeploy: boolean): Promise<void> {
+export async function notifyStackDeploy(
+	name: string,
+	envId: number | null | undefined,
+	result: { success: boolean; error?: string },
+	isGitDeploy = false
+): Promise<void> {
 	const eventType = result.success ? 'stack_deployed' : 'stack_deploy_failed';
-	// A git deploy suppresses the stack_* notification — deployGitStack emits the more
-	// specific git_sync_success/git_sync_failed instead (no double notification).
-	if (isGitDeploy) return;
+	const coveredBy = isGitDeploy ? (result.success ? 'git_sync_success' : 'git_sync_failed') : undefined;
 	try {
 		await sendEventNotification(eventType, {
 			title: result.success ? 'Stack deployed' : 'Stack deploy failed',
@@ -3167,7 +3168,7 @@ async function notifyStackDeploy(name: string, envId: number | null | undefined,
 				? `Stack "${name}" deployed successfully`
 				: `Stack "${name}" deploy failed: ${result.error || 'unknown error'}`,
 			type: result.success ? 'success' : 'error'
-		}, envId ?? undefined);
+		}, envId ?? undefined, coveredBy);
 	} catch { /* never changes the deploy outcome */ }
 }
 
@@ -3240,7 +3241,8 @@ export async function deployStack(options: DeployStackOptions): Promise<StackOpe
 		};
 	}
 
-	return withStackLock(name, async () => {
+	try {
+	return await withStackLock(name, async () => {
 		// Determine working directory: use custom composePath directory if provided,
 		// otherwise fall back to internal stack directory
 		let workingDir: string;
@@ -3474,23 +3476,13 @@ export async function deployStack(options: DeployStackOptions): Promise<StackOpe
 		};
 		const composeEnvVars = isGitStack ? dbNonSecretVars : undefined;
 
-		// `--no-cache` is a `build` flag, not an `up` flag (#1479). When a no-cache
-		// rebuild is requested, run a separate `docker compose build --no-cache` first,
-		// then a plain `up`. Skipped on Hawser (its agent has no build op) - the up below
-		// then omits --build for a no-cache request, so nothing crashes there.
-		const deployEnv = envId ? await getEnvironment(envId) : null;
-		if (!pullBase && shouldRunSeparateBuildStep(build, noBuildCache, deployEnv?.connectionType)) {
-			console.log(`${logPrefix} Running separate 'build --no-cache' step before up...`);
-			const buildResult = await executeComposeCommand('build', cmdOptions, compose, composeEnvVars, secretVars);
-			if (!buildResult.success) return buildResult;
-		}
-
 		const warn = (warning: string) => {
 			console.warn(`${logPrefix} ${warning}`);
 			onLine?.(warning);
 		};
 		console.log(`${logPrefix} Calling executeComposeCommand...`);
-		const result = build && pullBase
+		// `--no-cache` and `--pull` are `build` flags that `up` lacks, so either one builds in its own step.
+		const result = runsSeparateBuild(build, pullBase, noBuildCache)
 			? await pullBuildThenUp(
 					pullPolicy,
 					// The Hawser agent's up has no --no-build and its pull takes no flags.
@@ -3528,9 +3520,9 @@ export async function deployStack(options: DeployStackOptions): Promise<StackOpe
 			result.deletion = localDeletionResult;
 		}
 		// Fire stack_deployed / stack_deploy_failed. This is the single point every deploy
-		// path funnels through, so all of them notify (#1295). A git deploy suppresses the
-		// stack_* notification (deployGitStack sends git_sync_*).
-		await notifyStackDeploy(name, envId, result, isGitDeploy ?? false);
+		// path funnels through, so all of them notify. A git deploy skips the channels that
+		// get its git_sync_* event instead.
+		await notifyStackDeploy(name, envId, result, isGitDeploy);
 
 		// Clear stale pending-update badges (#1311). Fire-and-forget with a timeout so a
 		// slow Docker API can't delay or affect the already-succeeded deploy.
@@ -3543,6 +3535,11 @@ export async function deployStack(options: DeployStackOptions): Promise<StackOpe
 		}
 		return result;
 	});
+	} catch (error) {
+		// A throw (secret provider, env file decryption, database) is a failed deploy too.
+		await notifyStackDeploy(name, envId, { success: false, error: error instanceof Error ? error.message : String(error) }, isGitDeploy);
+		throw error;
+	}
 }
 
 /**
