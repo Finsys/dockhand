@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { buildComposeOperationArgs, shouldRunSeparateBuildStep, deployPullPolicy, pullSteps, pullThenUp, PULL_FAILED_WARNING, runBuildStep, pullBuildThenUp, stepOptions, BUILD_STEP_UNSUPPORTED_WARNING } from '../src/lib/server/compose-args';
+import { buildComposeOperationArgs, runsSeparateBuild, deployPullPolicy, pullSteps, pullThenUp, PULL_FAILED_WARNING, runBuildStep, pullBuildThenUp, stepOptions, BUILD_STEP_UNSUPPORTED_WARNING } from '../src/lib/server/compose-args';
+import type { DeletionApplyResult } from '../src/lib/server/git-deletions';
 
 describe('buildComposeOperationArgs', () => {
 	it('plain up: no --build, no --no-cache (back-compat, the common case)', () => {
@@ -19,9 +20,12 @@ describe('buildComposeOperationArgs', () => {
 		expect(a).not.toContain('--no-cache');
 	});
 
-	it('up omits --build when a no-cache rebuild is requested (the separate build step handles it)', () => {
-		const a = buildComposeOperationArgs('up', { build: true, noBuildCache: true });
-		expect(a).not.toContain('--build');
+	// The two ups a no-cache deploy sends (stepOptions): after its build, and after an old
+	// agent refused the build.
+	it('a no-cache deploy starts with --no-build after its build, and with --build when the build step was refused', () => {
+		const base = { build: true, noBuildCache: true, pullPolicy: 'always' };
+		expect(buildComposeOperationArgs('up', stepOptions(base, { noBuild: true, noBuildCache: false }))).toEqual(['up', '-d', '--remove-orphans', '--no-build']);
+		expect(buildComposeOperationArgs('up', stepOptions(base, { noBuild: false, noBuildCache: false }))).toEqual(['up', '-d', '--remove-orphans', '--build']);
 	});
 
 	it('up passes forceRecreate, pull policy, and a target service', () => {
@@ -76,25 +80,47 @@ describe('buildComposeOperationArgs', () => {
 		expect(buildComposeOperationArgs('pull', { pullPolicy: 'always', pullBase: true })).toEqual(['pull', '--policy', 'always', '--ignore-buildable']);
 		expect(buildComposeOperationArgs('pull', { pullBase: true })).toEqual(['pull', '--ignore-buildable']);
 	});
+
+	// Measured on compose 5.1.2: pulling a buildable service whose tag is in no registry exits 1.
+	it('the pull before a no-cache build skips buildable services', () => {
+		expect(buildComposeOperationArgs('pull', { pullPolicy: 'always', noBuildCache: true })).toEqual(['pull', '--policy', 'always', '--ignore-buildable']);
+		expect(buildComposeOperationArgs('pull', { build: true })).toEqual(['pull']);
+	});
 });
 
-describe('shouldRunSeparateBuildStep', () => {
-	it('runs for local socket (no env) and direct when a no-cache rebuild is requested', () => {
-		expect(shouldRunSeparateBuildStep(true, true, undefined)).toBe(true);
-		expect(shouldRunSeparateBuildStep(true, true, 'socket')).toBe(true);
-		expect(shouldRunSeparateBuildStep(true, true, 'direct')).toBe(true);
+describe('runsSeparateBuild', () => {
+	it('builds separately for a base-image pull and for a no-cache rebuild, on every connection type', () => {
+		expect(runsSeparateBuild(true, true, false)).toBe(true);
+		expect(runsSeparateBuild(true, false, true)).toBe(true);
+		expect(runsSeparateBuild(true, true, true)).toBe(true);
 	});
 
-	it('never runs for Hawser (its agent has no build op) - a no-cache request is a no-op there', () => {
-		expect(shouldRunSeparateBuildStep(true, true, 'hawser-standard')).toBe(false);
-		expect(shouldRunSeparateBuildStep(true, true, 'hawser-edge')).toBe(false);
+	it('a plain build, or no build at all, stays in up', () => {
+		expect(runsSeparateBuild(true, false, false)).toBe(false);
+		expect(runsSeparateBuild(false, true, true)).toBe(false);
+		expect(runsSeparateBuild(undefined, undefined, undefined)).toBe(false);
 	});
+});
 
-	it('does not run without both build and noBuildCache (back-compat: normal deploys unaffected)', () => {
-		expect(shouldRunSeparateBuildStep(false, true, 'socket')).toBe(false);
-		expect(shouldRunSeparateBuildStep(true, false, 'socket')).toBe(false);
-		expect(shouldRunSeparateBuildStep(false, false, 'socket')).toBe(false);
-		expect(shouldRunSeparateBuildStep(undefined, undefined, 'socket')).toBe(false);
+// The commands a no-cache deploy with --pull always runs, end to end through the helpers.
+// Measured on compose 5.1.2: this order leaves the fresh build running.
+describe('a no-cache deploy', () => {
+	it('pulls the other images, builds without cache, then starts without building', async () => {
+		const base = { build: true, noBuildCache: true, pullBase: false, pullPolicy: 'always' };
+		const commands: string[][] = [];
+		await pullBuildThenUp(
+			base.pullPolicy,
+			async (operation, opts) => {
+				commands.push(buildComposeOperationArgs(operation, stepOptions(base, opts)));
+				return { success: true };
+			},
+			() => {}
+		);
+		expect(commands).toEqual([
+			['pull', '--policy', 'always', '--ignore-buildable'],
+			['build', '--no-cache'],
+			['up', '-d', '--remove-orphans', '--no-build']
+		]);
 	});
 });
 
@@ -183,12 +209,73 @@ describe('pullBuildThenUp', () => {
 		expect(result).toEqual({ success: false, error: 'failed to solve', operation: 'build' });
 	});
 
+	it('up is never asked for noBuildCache, so an old agent does not run up --no-cache', async () => {
+		const opts: Record<string, unknown>[] = [];
+		await pullBuildThenUp(undefined, async (operation, o) => {
+			if (operation === 'up') opts.push(o);
+			return operation === 'build' ? { success: false, error: 'unsupported compose operation: build' } : { success: true };
+		}, () => {});
+		expect(opts).toEqual([{ noBuild: false, noBuildCache: false }]);
+		const base = { build: true, noBuildCache: true };
+		expect(stepOptions(base, opts[0]).noBuildCache).toBe(false);
+	});
+
 	it('an agent without the build operation warns, and up builds the only way it can', async () => {
 		const r = recorder({ build: { success: false, error: 'Compose error: unsupported compose operation: build' } });
 		const result = await pullBuildThenUp(undefined, r.run, r.warn);
 		expect(r.calls).toEqual(['build', 'up']);
 		expect(r.warnings).toEqual([BUILD_STEP_UNSUPPORTED_WARNING]);
 		expect(result.success).toBe(true);
+	});
+});
+
+// Each step reports the file deletions it was sent. Agent 0.2.51/0.2.52 delete on up only and
+// do not answer for a build; 0.2.53 deletes on the build, so its up finds the file gone.
+describe('pullBuildThenUp reports the deletions of build and up together', () => {
+	type Step = { success: boolean; error?: string; deletion?: DeletionApplyResult };
+	const run = (build: Partial<Step>, up: Partial<Step>) => async (operation: 'pull' | 'build' | 'up'): Promise<Step> =>
+		({ success: true, ...(operation === 'build' ? build : operation === 'up' ? up : {}) });
+
+	it('an agent that deletes on up', async () => {
+		const result = await pullBuildThenUp(undefined, run({}, { deletion: { deleted: ['old.conf'], skipped: [] } }), () => {});
+		expect(result.deletion).toEqual({ deleted: ['old.conf'], skipped: [] });
+	});
+
+	it('a file in both reports is listed once', async () => {
+		const result = await pullBuildThenUp(undefined, run(
+			{ deletion: { deleted: ['old.conf'], skipped: [] } },
+			{ deletion: { deleted: ['old.conf'], skipped: [] } }
+		), () => {});
+		expect(result.deletion).toEqual({ deleted: ['old.conf'], skipped: [] });
+	});
+
+	it('an agent that deletes on the build', async () => {
+		const result = await pullBuildThenUp(undefined, run(
+			{ deletion: { deleted: ['old.conf'], skipped: [] } },
+			{ deletion: { deleted: [], skipped: [{ path: 'old.conf', reason: 'already-absent' }] } }
+		), () => {});
+		expect(result.deletion).toEqual({ deleted: ['old.conf'], skipped: [] });
+	});
+
+	it('a file no step deleted keeps the last step\'s reason', async () => {
+		const result = await pullBuildThenUp(undefined, run(
+			{ deletion: { deleted: [], skipped: [{ path: 'edited.conf', reason: 'agent-no-support' }] } },
+			{ deletion: { deleted: [], skipped: [{ path: 'edited.conf', reason: 'locally-modified' }] } }
+		), () => {});
+		expect(result.deletion).toEqual({ deleted: [], skipped: [{ path: 'edited.conf', reason: 'locally-modified' }] });
+	});
+
+	it('no deletions sent, no report', async () => {
+		const result = await pullBuildThenUp(undefined, run({}, {}), () => {});
+		expect(result).toEqual({ success: true });
+	});
+
+	it('a failed build is the result, with its own report', async () => {
+		const result = await pullBuildThenUp(undefined, run(
+			{ success: false, error: 'failed to solve', deletion: { deleted: ['old.conf'], skipped: [] } },
+			{ deletion: { deleted: [], skipped: [] } }
+		), () => {});
+		expect(result).toEqual({ success: false, error: 'failed to solve', deletion: { deleted: ['old.conf'], skipped: [] } });
 	});
 });
 
@@ -294,12 +381,11 @@ describe('the deploy paths hand the policy on', () => {
 		expect(src).toMatch(/pullBase:\s*!!pullBase/);
 	});
 
-	it('deployStack runs "Pull base images" through pullBuildThenUp with stepOptions', () => {
+	it('deployStack runs a separate build through pullBuildThenUp with stepOptions', () => {
 		const src = read('../src/lib/server/stacks.ts');
-		expect(src).toMatch(/const result = build && pullBase\s*\?\s*await pullBuildThenUp\(\s*pullPolicy,/);
+		expect(src).toMatch(/const result = runsSeparateBuild\(build, pullBase, noBuildCache\)\s*\?\s*await pullBuildThenUp\(\s*pullPolicy,/);
 		expect(src).toContain('executeComposeCommand(operation, stepOptions(cmdOptions, opts), compose, composeEnvVars, secretVars, onLine)');
 		expect(src).toContain('pullBase: build && pullBase,');
-		expect(src).toMatch(/if \(!pullBase && shouldRunSeparateBuildStep\(build, noBuildCache, deployEnv\?\.connectionType\)\)/);
 		expect(src).toMatch(/pullBase: pullBase \|\| false/);
 		expect(src).toContain("if (operation === 'up' || operation === 'pull' || operation === 'build') {");
 	});
