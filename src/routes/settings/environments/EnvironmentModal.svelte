@@ -90,7 +90,7 @@
 	import { getLabelColor, getLabelBgColor, parseLabels, MAX_LABELS } from '$lib/utils/label-colors';
 	import { MEMORY_SUPPORT_DOC_URL } from '$lib/utils/memory-support';
 	import { labelColorOverrides } from '$lib/stores/label-colors';
-	import EventTypesEditor from './EventTypesEditor.svelte';
+	import EventTypesEditor, { ENVIRONMENT_EVENT_IDS, shownEventCount } from './EventTypesEditor.svelte';
 	import UpdatesTab from './tabs/UpdatesTab.svelte';
 	import ActivityTab from './tabs/ActivityTab.svelte';
 	import ReportsTab from './tabs/ReportsTab.svelte';
@@ -172,89 +172,6 @@
 
 	type ScannerType = 'none' | 'grype' | 'trivy' | 'both';
 
-	// Notification event types - grouped by category
-	const NOTIFICATION_EVENT_GROUPS = [
-		{
-			id: 'container',
-			label: 'Container events',
-			events: [
-				{ id: 'container_started', label: 'Container started', description: 'When a container starts running' },
-				{ id: 'container_stopped', label: 'Container stopped', description: 'When a container is stopped' },
-				{ id: 'container_restarted', label: 'Container restarted', description: 'When a container restarts' },
-				{ id: 'container_exited', label: 'Container exited', description: 'When a container exits unexpectedly' },
-				{ id: 'container_unhealthy', label: 'Container unhealthy', description: 'When a container health check fails' },
-				{ id: 'container_oom', label: 'Container OOM killed', description: 'When a container is killed due to out of memory' },
-				{ id: 'container_updated', label: 'Container updated', description: 'When a container image is updated' },
-				{ id: 'container_scheduled_start', label: 'Scheduled start', description: 'When a container is started by its schedule' },
-				{ id: 'container_scheduled_stop', label: 'Scheduled stop', description: 'When a container is stopped by its schedule' },
-				{ id: 'container_scheduled_failed', label: 'Scheduled action failed', description: 'When a scheduled start or stop of a container fails' }
-			]
-		},
-		{
-			id: 'auto_update',
-			label: 'Auto-update events',
-			events: [
-				{ id: 'auto_update_success', label: 'Update succeeded', description: 'Container successfully updated to new image' },
-				{ id: 'auto_update_failed', label: 'Update failed', description: 'Container auto-update failed' },
-				{ id: 'auto_update_blocked', label: 'Update blocked by vulns', description: 'Update blocked due to vulnerability criteria' },
-				{ id: 'updates_detected', label: 'Updates detected', description: 'Container image updates are available (scheduled check)' },
-				{ id: 'newer_version_available', label: 'Newer version tag', description: 'A newer version tag is published for a pinned image (semver, advisory)' },
-				{ id: 'batch_update_success', label: 'Batch update completed', description: 'Scheduled container updates completed successfully' }
-			]
-		},
-		{
-			id: 'git_stack',
-			label: 'Git stack events',
-			events: [
-				{ id: 'git_sync_success', label: 'Git sync succeeded', description: 'Git stack synced and deployed successfully' },
-				{ id: 'git_sync_failed', label: 'Git sync failed', description: 'Git stack sync or deploy failed' },
-				{ id: 'git_sync_skipped', label: 'Git sync skipped', description: 'Git stack sync skipped (no changes)' }
-			]
-		},
-		{
-			id: 'stack',
-			label: 'Stack events',
-			events: [
-				{ id: 'stack_started', label: 'Stack started', description: 'When a compose stack starts' },
-				{ id: 'stack_stopped', label: 'Stack stopped', description: 'When a compose stack stops' },
-				{ id: 'stack_deployed', label: 'Stack deployed', description: 'Stack deployed (new or update)' },
-				{ id: 'stack_deploy_failed', label: 'Stack deploy failed', description: 'Stack deployment failed' }
-			]
-		},
-		{
-			id: 'security',
-			label: 'Security events',
-			events: [
-				{ id: 'vulnerability_critical', label: 'Critical vulns found', description: 'Critical vulnerabilities found in image scan' },
-				{ id: 'vulnerability_high', label: 'High vulns found', description: 'High severity vulnerabilities found' },
-				{ id: 'vulnerability_any', label: 'Any vulns found', description: 'Any vulnerabilities found (medium/low)' }
-			]
-		},
-		{
-			id: 'backup',
-			label: 'Backup events',
-			events: [
-				{ id: 'backup_success', label: 'Backup succeeded', description: 'Backup completed successfully' },
-				{ id: 'backup_failed', label: 'Backup failed', description: 'Backup failed' },
-				{ id: 'restore_success', label: 'Restore succeeded', description: 'Restore completed successfully' },
-				{ id: 'restore_failed', label: 'Restore failed', description: 'Restore failed' }
-			]
-		},
-		{
-			id: 'system',
-			label: 'System events',
-			events: [
-				{ id: 'image_pulled', label: 'Image pulled', description: 'When a new image is pulled' },
-				{ id: 'environment_offline', label: 'Environment offline', description: 'Environment became unreachable' },
-				{ id: 'environment_online', label: 'Environment online', description: 'Environment came back online' },
-				{ id: 'disk_space_warning', label: 'Disk space warning', description: 'Docker disk usage exceeds threshold' }
-				// Note: license_expiring is a global event configured at the notification channel level
-			]
-		}
-	];
-
-	// Flat list of all event types (for backwards compatibility)
-	const NOTIFICATION_EVENT_TYPES = NOTIFICATION_EVENT_GROUPS.flatMap(g => g.events);
 
 	// Props
 	interface Props {
@@ -3138,7 +3055,7 @@
 														if (isSelected) {
 															formSelectedNotifications = formSelectedNotifications.filter(n => n.id !== channel.id);
 														} else {
-															formSelectedNotifications = [...formSelectedNotifications, { id: channel.id, eventTypes: NOTIFICATION_EVENT_TYPES.map(e => e.id) }];
+															formSelectedNotifications = [...formSelectedNotifications, { id: channel.id, eventTypes: [...ENVIRONMENT_EVENT_IDS] }];
 														}
 													}}
 												/>
@@ -3166,7 +3083,7 @@
 													{:else}
 														<ChevronDown class="w-3 h-3 text-muted-foreground" />
 													{/if}
-													<span class="text-xs text-muted-foreground">{m.envmodal_event_types_count({ count: selectedNotif.eventTypes.length })}</span>
+													<span class="text-xs text-muted-foreground">{m.envmodal_event_types_count({ count: shownEventCount(selectedNotif.eventTypes, !!$page.data.backupsEnabled) })}</span>
 												</div>
 												{#if !isCollapsed}
 													<EventTypesEditor
@@ -3222,7 +3139,7 @@
 														<Send class="w-4 h-4 shrink-0 text-purple-500" />
 													{/if}
 													<span class="text-sm font-medium truncate">{notif.channelName}</span>
-													<span class="text-xs text-muted-foreground">{m.envmodal_events_count({ count: notif.eventTypes.length })}</span>
+													<span class="text-xs text-muted-foreground">{m.envmodal_events_count({ count: shownEventCount(notif.eventTypes, !!$page.data.backupsEnabled) })}</span>
 												</div>
 												<div class="flex items-center gap-1 shrink-0" role="group" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()}>
 													<TogglePill
