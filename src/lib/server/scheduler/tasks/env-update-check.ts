@@ -445,7 +445,7 @@ export async function runEnvUpdateCheckJob(
 
 						// Step 1: Pull new image
 						await log(`  Pulling ${update.imageName}...`);
-						const pulled = await withPullRetry(() => pullImage(update.imageName, () => {}, environmentId, true), { log: (m) => log(`  ${m}`) });
+						const pulled = await withPullRetry(() => pullImage(update.imageName, () => {}, environmentId, true), { log: (m) => log(`  ${m}`), label: `${update.containerName} (${update.imageName}), env ${env.name}` });
 						verifiedImageId = pulled?.imageId;
 						verifiedImageReference = pulled?.reference;
 						if (pulled) update.newDigest = pulled.digest;
@@ -566,7 +566,7 @@ export async function runEnvUpdateCheckJob(
 					} else {
 						// Simple pull (no scanning or digest-based image)
 						await log(`  Pulling ${update.imageName}...`);
-						const pulled = await withPullRetry(() => pullImage(update.imageName, () => {}, environmentId, true), { log: (m) => log(`  ${m}`) });
+						const pulled = await withPullRetry(() => pullImage(update.imageName, () => {}, environmentId, true), { log: (m) => log(`  ${m}`), label: `${update.containerName} (${update.imageName}), env ${env.name}` });
 						verifiedImageId = pulled?.imageId;
 						verifiedImageReference = pulled?.reference;
 						if (pulled) update.newDigest = pulled.digest;

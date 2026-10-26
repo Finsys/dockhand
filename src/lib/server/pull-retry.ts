@@ -27,24 +27,53 @@ export function retryAfterMs(message: string): number | null {
 	return parts.reduce((ms, [, n, unit]) => ms + Number(n) * UNIT_MS[unit], 0);
 }
 
+/** A duration in a log line: milliseconds below a second, else seconds. */
+function formatMs(ms: number): string {
+	return ms < 1000 ? `${Number(ms.toPrecision(3))}ms` : `${Number((ms / 1000).toFixed(1))}s`;
+}
+
+/** How long to wait before the next attempt, and where that number came from, for the log. */
+export function retryWait(message: string, delay: number): { wait: number; source: string } {
+	const requested = retryAfterMs(message);
+	if (requested === null) return { wait: delay, source: 'backoff' };
+	if (requested > MAX_RETRY_AFTER_MS) {
+		return { wait: MAX_RETRY_AFTER_MS, source: `retry-after ${formatMs(requested)}, capped at ${formatMs(MAX_RETRY_AFTER_MS)}` };
+	}
+	if (requested > delay) return { wait: requested, source: `retry-after ${formatMs(requested)}` };
+	return { wait: delay, source: `backoff, retry-after ${formatMs(requested)} is shorter` };
+}
+
 /**
  * Run a pull, retrying it while the registry rate-limits it. Each wait is the
  * backoff step, or the registry's retry-after when that is longer. Any other error,
- * or a rate limit after the last retry, is thrown as it came.
+ * or a rate limit after the last retry, is thrown as it came. `label` names the pull
+ * in the log lines (container, image, environment).
  */
 export async function withPullRetry<T>(
 	pull: () => Promise<T>,
-	opts: { delays?: number[]; sleep?: (ms: number) => Promise<void>; log?: (message: string) => void } = {}
+	opts: { delays?: number[]; sleep?: (ms: number) => Promise<void>; log?: (message: string) => unknown; label?: string } = {}
 ): Promise<T> {
-	const { delays = PULL_RETRY_DELAYS_MS, sleep = (ms) => new Promise<void>((r) => setTimeout(r, ms)), log } = opts;
+	const { delays = PULL_RETRY_DELAYS_MS, sleep = (ms) => new Promise<void>((r) => setTimeout(r, ms)), log, label } = opts;
+	const on = label ? ` on ${label}` : '';
+	const say = async (line: string) => {
+		try {
+			await log?.(line);
+		} catch {
+			// A log write that fails never changes the outcome of the pull.
+		}
+	};
 	for (let attempt = 0; ; attempt++) {
 		try {
 			return await pull();
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
-			if (attempt >= delays.length || !isTooManyRequests(message)) throw error;
-			const wait = Math.max(delays[attempt], Math.min(retryAfterMs(message) ?? 0, MAX_RETRY_AFTER_MS));
-			log?.(`Registry rate limit, retrying the pull in ${Math.round(wait / 1000)}s (attempt ${attempt + 2} of ${delays.length + 1})`);
+			if (!isTooManyRequests(message)) throw error;
+			if (attempt >= delays.length) {
+				await say(`Registry rate limit${on}: giving up after ${delays.length + 1} attempts`);
+				throw error;
+			}
+			const { wait, source } = retryWait(message, delays[attempt]);
+			await say(`Registry rate limit${on}, retrying the pull in ${Math.round(wait / 1000)}s (${source}; attempt ${attempt + 2} of ${delays.length + 1})`);
 			await sleep(wait);
 		}
 	}

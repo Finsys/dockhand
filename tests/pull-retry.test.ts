@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { isTooManyRequests, retryAfterMs, withPullRetry, PULL_RETRY_DELAYS_MS } from '../src/lib/server/pull-retry';
+import { isTooManyRequests, retryAfterMs, withPullRetry, retryWait, PULL_RETRY_DELAYS_MS } from '../src/lib/server/pull-retry';
 
 // Error messages exactly as pullImage throws them, taken from GHCR rate-limit logs.
 const STREAM = 'Failed to pull image: toomanyrequests: retry-after: 738.501µs, allowed: 44000/minute';
@@ -87,11 +87,60 @@ describe('withPullRetry', () => {
 		expect(s.waits).toEqual([]);
 	});
 
-	test('each retry is logged', async () => {
+	test('each retry is logged with what was pulled and where the wait came from', async () => {
 		const s = scripted([STREAM, null]);
 		const lines: string[] = [];
-		await withPullRetry(s.pull, { sleep: s.sleep, log: (m) => lines.push(m) });
-		expect(lines).toEqual(['Registry rate limit, retrying the pull in 1s (attempt 2 of 4)']);
+		await withPullRetry(s.pull, { sleep: s.sleep, log: (m) => lines.push(m), label: 'web (ghcr.io/x/y:1), env 3' });
+		expect(lines).toEqual(['Registry rate limit on web (ghcr.io/x/y:1), env 3, retrying the pull in 1s (backoff, retry-after 0.739ms is shorter; attempt 2 of 4)']);
+	});
+
+	test('giving up after the last retry is logged', async () => {
+		const s = scripted([STREAM, STREAM, STREAM, STREAM]);
+		const lines: string[] = [];
+		await expect(withPullRetry(s.pull, { sleep: s.sleep, log: (m) => lines.push(m) })).rejects.toThrow('toomanyrequests');
+		expect(lines.at(-1)).toBe('Registry rate limit: giving up after 4 attempts');
+		expect(lines).toHaveLength(4);
+	});
+
+	test('an async log is awaited before the wait, so its lines stay in order', async () => {
+		const s = scripted([STREAM, null]);
+		const order: string[] = [];
+		const log = async (m: string) => { await new Promise((r) => setTimeout(r, 5)); order.push(`logged: ${m.slice(0, 20)}`); };
+		await withPullRetry(s.pull, { sleep: async (ms) => { order.push(`slept ${ms}`); }, log });
+		expect(order).toEqual(['logged: Registry rate limit,', 'slept 1000']);
+	});
+
+	test('a log write that fails does not change the outcome', async () => {
+		const ok = scripted([STREAM, null]);
+		await expect(withPullRetry(ok.pull, { sleep: ok.sleep, log: async () => { throw new Error('db down'); } })).resolves.toBeDefined();
+		expect(ok.calls()).toBe(2);
+		const sync = scripted([STREAM, null]);
+		await expect(withPullRetry(sync.pull, { sleep: sync.sleep, log: () => { throw new Error('db down'); } })).resolves.toBeDefined();
+		const gaveUp = scripted([STREAM, STREAM, STREAM, STREAM]);
+		await expect(withPullRetry(gaveUp.pull, { sleep: gaveUp.sleep, log: async () => { throw new Error('db down'); } })).rejects.toThrow('toomanyrequests');
+	});
+
+	test('a failure that is not a rate limit logs nothing', async () => {
+		const s = scripted(['Failed to pull image: manifest unknown']);
+		const lines: string[] = [];
+		await expect(withPullRetry(s.pull, { sleep: s.sleep, log: (m) => lines.push(m) })).rejects.toThrow('manifest unknown');
+		expect(lines).toEqual([]);
+	});
+});
+
+describe('retryWait', () => {
+	test('names where the wait came from', () => {
+		expect(retryWait('toomanyrequests', 1000)).toEqual({ wait: 1000, source: 'backoff' });
+		expect(retryWait('toomanyrequests: retry-after: 2.5s', 1000)).toEqual({ wait: 2500, source: 'retry-after 2.5s' });
+		expect(retryWait('toomanyrequests: retry-after: 5m', 1000)).toEqual({ wait: 60_000, source: 'retry-after 300s, capped at 60s' });
+		expect(retryWait(STREAM, 1000)).toEqual({ wait: 1000, source: 'backoff, retry-after 0.739ms is shorter' });
+	});
+
+	test('waits as long as max(backoff, min(retry-after, 60s))', () => {
+		const messages = [STREAM, CONFIG, BODY_429, 'toomanyrequests: retry-after: 2.5s', 'toomanyrequests: retry-after: 5m', 'toomanyrequests: retry-after: 15s', 'toomanyrequests: retry-after: 60s'];
+		for (const m of messages) for (const d of PULL_RETRY_DELAYS_MS) {
+			expect(retryWait(m, d).wait).toBe(Math.max(d, Math.min(retryAfterMs(m) ?? 0, 60_000)));
+		}
 	});
 });
 
@@ -103,8 +152,8 @@ describe('scheduled pulls go through withPullRetry', () => {
 		test(file, () => {
 			const src = readFileSync(new URL(`../src/lib/server/scheduler/tasks/${file}`, import.meta.url), 'utf8');
 			const shape = file === 'container-update.ts'
-				? /withPullRetry\(\(\) => pullImage\(imageNameFromConfig, undefined, envId, true\), \{ log \}\)/g
-				: /withPullRetry\(\(\) => pullImage\(update\.imageName, \(\) => \{\}, environmentId, true\), \{ log: \(m\) => log\(`  \$\{m\}`\) \}\)/g;
+				? /withPullRetry\(\(\) => pullImage\(imageNameFromConfig, undefined, envId, true\), \{ log, label: `\$\{containerName\} \(\$\{imageNameFromConfig\}\)\$\{envId \? `, env \$\{envId\}` : ''\}` \}\)/g
+				: /withPullRetry\(\(\) => pullImage\(update\.imageName, \(\) => \{\}, environmentId, true\), \{ log: \(m\) => log\(`  \$\{m\}`\), label: `\$\{update\.containerName\} \(\$\{update\.imageName\}\), env \$\{env\.name\}` \}\)/g;
 			expect(src.match(shape)?.length).toBe(2);
 			expect(src.match(/withPullRetry\(/g)?.length).toBe(2);
 			expect(src.match(/await pullImage\(/g)).toBeNull();

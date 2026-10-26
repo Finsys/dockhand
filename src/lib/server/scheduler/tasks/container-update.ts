@@ -495,7 +495,7 @@ export async function runContainerUpdate(
 			try {
 				// Pull new image
 				log(`Pulling new image: ${imageNameFromConfig}`);
-				const pulled = await withPullRetry(() => pullImage(imageNameFromConfig, undefined, envId, true), { log });
+				const pulled = await withPullRetry(() => pullImage(imageNameFromConfig, undefined, envId, true), { log, label: `${containerName} (${imageNameFromConfig})${envId ? `, env ${envId}` : ''}` });
 				verifiedImageId = pulled?.imageId;
 				verifiedImageReference = pulled?.reference;
 				if (pulled) newDigest = pulled.digest;
@@ -589,7 +589,7 @@ export async function runContainerUpdate(
 			// No scanning - simple pull
 			log(`Pulling update (no vulnerability scan)...`);
 			try {
-				const pulled = await withPullRetry(() => pullImage(imageNameFromConfig, undefined, envId, true), { log });
+				const pulled = await withPullRetry(() => pullImage(imageNameFromConfig, undefined, envId, true), { log, label: `${containerName} (${imageNameFromConfig})${envId ? `, env ${envId}` : ''}` });
 				verifiedImageId = pulled?.imageId;
 				verifiedImageReference = pulled?.reference;
 				if (pulled) newDigest = pulled.digest;
