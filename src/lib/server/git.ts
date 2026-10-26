@@ -15,7 +15,7 @@ import {
 	getSecretEnvVarsAsRecord,
 	getNonSecretEnvVarsAsRecord,
 	type GitRepository,
-	type GitCredential,
+	type GitCredentialData,
 	type GitStackWithRepo,
 	type ScheduleTrigger
 } from './db';
@@ -236,7 +236,7 @@ async function ensurePasswdEntry(env: GitEnv): Promise<void> {
 	}
 }
 
-async function buildGitEnv(credential: GitCredential | null): Promise<GitEnv> {
+async function buildGitEnv(credential: GitCredentialData | null): Promise<GitEnv> {
 	const env: GitEnv = {
 		...process.env as GitEnv,
 		GIT_TERMINAL_PROMPT: '0',
@@ -310,7 +310,7 @@ async function buildGitEnv(credential: GitCredential | null): Promise<GitEnv> {
 	return env;
 }
 
-function cleanupSshKey(credential: GitCredential | null, env?: GitEnv): void {
+function cleanupSshKey(credential: GitCredentialData | null, env?: GitEnv): void {
 	if (credential?.authType === 'ssh') {
 		// Removes the exact per-operation key this env created; falls back to the old
 		// deterministic path only if no env is available (legacy callers). See #1413.
@@ -318,7 +318,7 @@ function cleanupSshKey(credential: GitCredential | null, env?: GitEnv): void {
 	}
 }
 
-function buildRepoUrl(url: string, credential: GitCredential | null): string {
+function buildRepoUrl(url: string, credential: GitCredentialData | null): string {
 	assertSafeRepoUrl(url);
 	// Never embed credentials in the URL — they leak via /proc/<pid>/cmdline (see #1081).
 	// HTTPS credentials are injected via GIT_CONFIG_COUNT env vars in buildGitEnv().
@@ -427,7 +427,7 @@ function execGit(
  */
 async function getChangedFilesInDir(
 	repoPath: string,
-	previousCommit: string,
+	previousCommit: string | null,
 	newCommit: string,
 	dirPath: string,
 	env: GitEnv
@@ -641,7 +641,7 @@ function cleanGitError(stderr: string, ctx?: { authType?: string | null; url?: s
 async function testRepositoryConnection(options: {
 	url: string;
 	branch: string;
-	credential: GitCredential | null;
+	credential: GitCredentialData | null;
 }): Promise<TestResult> {
 	const { url, branch, credential } = options;
 
@@ -1343,7 +1343,10 @@ async function notifyGitSync(stackName: string, envId: number | null | undefined
 				type: 'error'
 			}, envId ?? undefined);
 		}
-	} catch { /* never changes the deploy outcome */ }
+	} catch (error) {
+		// Logged only: a notification never changes the deploy outcome.
+		console.error(`[Stack:${stackName}] git sync notification failed:`, error instanceof Error ? error.message : String(error));
+	}
 }
 
 /**
@@ -2341,8 +2344,8 @@ export async function previewRepoEnvFiles(options: PreviewEnvOptions): Promise<P
 		mkdirSync(tempDir, { recursive: true });
 
 		// Build git environment with credentials
-		// Cast credential to GitCredential type (only uses id, authType, sshPrivateKey)
-		env = await buildGitEnv(credential as GitCredential | null);
+		// Cast credential to GitCredentialData (only uses id, authType, sshPrivateKey)
+		env = await buildGitEnv(credential as GitCredentialData | null);
 
 		// Security: the preview endpoint clones a
 		// USER-SUPPLIED URL and reads env files from it — the same SSRF / RCE /
@@ -2360,7 +2363,7 @@ export async function previewRepoEnvFiles(options: PreviewEnvOptions): Promise<P
 		repoFilePath(tempDir, composePath, 'Compose path');
 		const safeEnvFilePath = envFilePath ? repoFilePath(tempDir, envFilePath, 'Env file path') : null;
 		assertSafeGitRef(branch);
-		const authenticatedUrl = buildRepoUrl(repoUrl, credential as GitCredential | null);
+		const authenticatedUrl = buildRepoUrl(repoUrl, credential as GitCredentialData | null);
 
 		// Clone with depth 1 (shallow clone for speed)
 		const cloneProc = nodeSpawn(
@@ -2437,7 +2440,7 @@ export async function previewRepoEnvFiles(options: PreviewEnvOptions): Promise<P
 		return { vars: {}, sources: {}, error: error.message };
 	} finally {
 		// Always clean up temp directory
-		cleanupSshKey(credential as GitCredential | null, env);
+		cleanupSshKey(credential as GitCredentialData | null, env);
 		try {
 			if (existsSync(tempDir)) {
 				rmSync(tempDir, { recursive: true, force: true });
