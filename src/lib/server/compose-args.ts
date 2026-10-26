@@ -80,7 +80,7 @@ export function runsSeparateBuild(build?: boolean, pullBase?: boolean, noBuildCa
 
 /** What a deploy logs when the Hawser agent has no build operation, so the separate build step cannot run. */
 export const BUILD_STEP_UNSUPPORTED_WARNING =
-	'The Hawser agent is older than 0.2.51 and has no build operation; update the agent to pull base images or to build without cache';
+	'The Hawser agent is older than 0.2.51 and has no build operation, so this deploy builds with the layer cache and without pulling base images; update the agent to get either';
 
 /**
  * Run a deploy's separate build step. `stop` is the failed result when the deploy must stop.
@@ -155,6 +155,19 @@ export function deployPullPolicy(pull?: boolean, respectPullPolicy?: boolean): '
  */
 export function pullSteps(pullPolicy?: string): { separatePull: boolean; upPullPolicy?: string } {
 	return pullPolicy === 'respect' ? { separatePull: true } : { separatePull: false, upPullPolicy: pullPolicy };
+}
+
+/** The steps a deploy runs and the flags that chose them, for the server log. */
+export function deployPlan(build?: boolean, pullBase?: boolean, noBuildCache?: boolean, pullPolicy?: string): string {
+	let steps: string;
+	if (runsSeparateBuild(build, pullBase, noBuildCache)) {
+		const buildFlags = [pullBase && '--pull', noBuildCache && '--no-cache'].filter(Boolean).join(' ');
+		steps = `${pullPolicy ? 'pull -> ' : ''}build${buildFlags ? ` ${buildFlags}` : ''} -> up --no-build`;
+	} else {
+		const { separatePull, upPullPolicy } = pullSteps(pullPolicy);
+		steps = `${separatePull ? 'pull -> ' : ''}up${build ? ' --build' : ''}${upPullPolicy ? ` --pull ${upPullPolicy}` : ''}`;
+	}
+	return `${steps} (build=${!!build}, pullBase=${!!pullBase}, noBuildCache=${!!noBuildCache}, pullPolicy=${pullPolicy ?? 'none'})`;
 }
 
 /** What a deploy logs when its separate pull fails and it goes on with the local images. */

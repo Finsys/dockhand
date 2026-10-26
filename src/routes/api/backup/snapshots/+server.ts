@@ -7,13 +7,26 @@ import { listSnapshots } from '$lib/server/backups';
 import { withAbortTimeout } from '$lib/server/backups/helpers';
 import { filterSnapshotsByEnvAccess } from '$lib/server/backups/route-guards';
 import { jobResult } from '$lib/server/sse';
+import { redactUrlCredentials } from '$lib/utils/rest-repository';
 
 // Bounds one destination's listing so a slow or unreachable repo can't stall a
 // response for minutes (restic keeps retrying); a timed-out destination is a failed one
 // and its restic is killed.
 const PER_DEST_MS = Number(process.env.SNAPSHOT_LIST_TIMEOUT_MS ?? 30_000);
 const listWithTimeout = (destinationId: number, configId?: number) =>
-	withAbortTimeout((signal) => listSnapshots(destinationId, configId, signal), PER_DEST_MS, `timed out after ${PER_DEST_MS}ms`);
+	logListingFailure(destinationId, configId, () =>
+		withAbortTimeout((signal) => listSnapshots(destinationId, configId, signal), PER_DEST_MS, `timed out after ${PER_DEST_MS}ms`));
+
+/** A listing that fails reaches only the browser otherwise; the server log gets it too. */
+async function logListingFailure<T>(destinationId: number, configId: number | undefined, list: () => Promise<T>): Promise<T> {
+	try {
+		return await list();
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		console.warn(`[Backup] snapshots dest=${destinationId}${configId != null ? ` config=${configId}` : ''}: listing failed: ${redactUrlCredentials(msg)}`);
+		throw err;
+	}
+}
 
 /**
  * @openapi
@@ -83,14 +96,14 @@ export const GET: RequestHandler = async ({ url, cookies, request }) => {
 				});
 				allSnapshots.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
 				if (failed.length > 0) {
-					console.warn(`[Backup] Snapshot search incomplete — ${failed.length} destination(s) failed: ${failed.join('; ')}`);
+					console.warn(`[Backup] Snapshot search for config ${config.id} incomplete - ${results.length - failed.length} of ${results.length} destination(s) listed; failed: ${redactUrlCredentials(failed.join('; '))}`);
 				}
 				return allSnapshots;
 			});
 		}
 
 		// Default: only search the config's current destination.
-		return jobResult(request, () => listSnapshots(config.destinationId, config.id));
+		return jobResult(request, () => logListingFailure(config.destinationId, config.id, () => listSnapshots(config.destinationId, config.id)));
 	} else if (destIdParam) {
 		const destinationId = parseInt(destIdParam);
 		if (isNaN(destinationId)) return json({ error: 'Invalid destinationId' }, { status: 400 });

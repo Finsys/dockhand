@@ -43,3 +43,20 @@ export function withoutSubscribersOf<T extends { eventTypes?: string[] | null }>
 	if (!covered) return channels;
 	return channels.filter((c) => !c.eventTypes?.includes(covered));
 }
+
+/** The log line for one delivery, so a missing notification can be traced. Never the channel config: its URLs hold tokens. */
+export function deliveryLogLine(
+	eventType: string,
+	channelName: string | null | undefined,
+	channelType: string | null | undefined,
+	result: { success: boolean; error?: string }
+): string {
+	const to = `[Notifications] ${eventType} -> ${channelName} (${channelType})`;
+	return result.success ? `${to}: sent` : `${to}: failed: ${(result.error || 'no error given').slice(0, 300)}`;
+}
+
+/** The log line for the channels withoutSubscribersOf dropped, or null when it dropped none. */
+export function coveredLogLine(eventType: string, coveredBy: string | undefined, skipped: Array<string | null | undefined>): string | null {
+	if (skipped.length === 0) return null;
+	return `[Notifications] ${eventType}: skipped ${skipped.join(', ')} (subscribed to ${coveredBy}, which they get instead)`;
+}

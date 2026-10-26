@@ -109,6 +109,8 @@ export const PUT: RequestHandler = async (event) => {
 		});
 
 		if (!updated) return json({ error: 'Update failed' }, { status: 500 });
+		const retentionSent = body.retention === undefined ? 'not sent' : body.retention === null ? 'none' : 'set';
+		console.log(`[Backup] config ${id} "${updated.targetName}" env=${updated.environmentId ?? 'none'} saved: schedule ${existing.schedule || 'manual'} -> ${updated.schedule || 'manual'}, enabled ${existing.enabled} -> ${updated.enabled} (sent ${body.enabled ?? 'nothing'}), retention ${retentionSent}`);
 
 		// Update schedule registration
 		if (updated.enabled && updated.schedule) {
@@ -120,6 +122,8 @@ export const PUT: RequestHandler = async (event) => {
 		await auditBackup(event, 'update', updated.targetName, updated.environmentId, { configId: id });
 		return json(updated);
 	} catch (error: any) {
+		// The driver's message, not error.message: a failed query's carries its params, the options JSON with webhook URLs.
+		console.error(`[Backup] config ${id}: saving failed:`, error?.cause instanceof Error ? error.cause.message : error?.message);
 		return json({ error: error.message }, { status: 500 });
 	}
 };

@@ -102,25 +102,55 @@ export async function pruneAllUnused(docker: ImagePrunePorts): Promise<ImagePrun
 		withoutKept = await docker.listImages(buildKeepLabelFilter(true));
 	} catch (err) {
 		// Older engines (Docker 20.10) refuse `label!` on the image list but honour it in prune.
-		docker.log(`label! image listing refused (${err instanceof Error ? err.message : err}); using the ordinary prune`);
+		docker.log(`label! image listing failed (${failure(err)}); using the ordinary prune`);
 		return docker.prune();
 	}
-	if (!labelNegationBroken(all.length, withoutKept.length)) return docker.prune();
+	if (!labelNegationBroken(all.length, withoutKept.length)) {
+		docker.log(`label! filter works (${all.length} images, ${withoutKept.length} without the keep label); using the engine prune`);
+		return docker.prune();
+	}
 
-	docker.log('label! filter matches no image; removing unused images one by one');
 	const kept = await docker.listImages(buildKeepLabelFilter(false));
 	const containers = await docker.listContainers();
+	const usedIds = new Set(containers.map((c) => c.ImageID));
+	const targets = imageRefsToRemove(all, new Set(kept.map((i) => i.Id)), usedIds);
+	docker.log(`label! filter matches no image (${all.length} listed, ${kept.length} with the keep label, ${usedIds.size} in use by containers); removing ${targets.length} unused images one by one`);
 	const deleted: ImageDeleteEntry[] = [];
-	for (const refs of imageRefsToRemove(all, new Set(kept.map((i) => i.Id)), new Set(containers.map((c) => c.ImageID)))) {
+	let refused = 0;
+	for (const refs of targets) {
 		for (const ref of refs) {
 			try {
 				deleted.push(...await docker.remove(ref));
 			} catch (err) {
 				// In use since the listing, or a parent of another image: Docker's refusal keeps it.
-				docker.log(`Kept image "${ref}": ${err instanceof Error ? err.message : err}`);
+				refused++;
+				if (refused <= MAX_LOGGED_REFUSALS) docker.log(`Kept image "${ref}" (${failure(err)})`);
 				break;
 			}
 		}
 	}
+	if (refused > MAX_LOGGED_REFUSALS) docker.log(`${refused - MAX_LOGGED_REFUSALS} more images kept by the engine`);
+	docker.log(`one-by-one prune done: ${targets.length - refused} of ${targets.length} images removed, ${refused} kept by the engine, space freed not known`);
 	return { ImagesDeleted: deleted.length ? deleted : null };
+}
+
+/** Refusals logged one per line; the rest are counted, so a large host does not flood the log. */
+const MAX_LOGGED_REFUSALS = 5;
+
+/**
+ * The warning for a prune holder container that could not be created, or null for a
+ * 404: the image is not on the host, so there is nothing to protect.
+ */
+export function holderFailureWarning(err: unknown, image: string, envId: number | null | undefined): string | null {
+	const status = (err as { statusCode?: number } | null)?.statusCode;
+	if (status === 404) return null;
+	const message = err instanceof Error ? err.message : String(err);
+	return `[Prune] env ${envId ?? 'local'}: could not protect ${image} from the prune (HTTP ${status ?? 'no response'}): ${message}`;
+}
+
+/** An engine error for the log: its HTTP status, when it has one, and its message. */
+function failure(err: unknown): string {
+	const status = (err as { statusCode?: number } | null)?.statusCode;
+	const message = err instanceof Error ? err.message : String(err);
+	return status ? `HTTP ${status}: ${message}` : message;
 }

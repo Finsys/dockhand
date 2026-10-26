@@ -15,7 +15,7 @@ import * as tls from 'node:tls';
 import { createHash } from 'node:crypto';
 import { pumpWebStreamToWritable } from './stream-pump';
 import { toWebReadableStream } from './node-readable-stream';
-import { buildImagePruneFilters, pruneAllUnused, type ImagePruneResult } from './image-prune-core';
+import { buildImagePruneFilters, pruneAllUnused, holderFailureWarning, type ImagePruneResult } from './image-prune-core';
 import { demuxDockerStream } from './docker-demux-core';
 import { isExpectedConnectionError, isQuietDockerFailure, transportTimeoutError } from './docker-probe-core';
 import {
@@ -4988,8 +4988,9 @@ export async function pruneImages(dangling = true, envId?: number | null): Promi
 				envId
 			);
 			holderIds.push(created.Id);
-		} catch {
-			// Image not present locally → nothing to protect → no-op
+		} catch (err) {
+			const warning = holderFailureWarning(err, image, envId);
+			if (warning) console.warn(warning);
 		}
 	}
 
