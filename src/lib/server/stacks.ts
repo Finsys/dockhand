@@ -1239,6 +1239,9 @@ interface ComposeCommandOptions {
 	filesToDelete?: FileToDelete[];
 	/** On down: ask the Hawser agent to remove the stack directory entirely (#1162, stack deletion only) */
 	removeFiles?: boolean;
+	/** Direct env staging: stack-dir-relative bind sources to leave as they are on the host
+	 *  (an in-place restore has just written them there from the snapshot). */
+	keepOnHost?: string[];
 }
 
 /**
@@ -1931,7 +1934,7 @@ async function executeComposeCommand(
 	secretVars?: Record<string, string>,
 	onLine?: (line: string) => void
 ): Promise<StackOperationResult> {
-	const { stackName, envId, forceRecreate, build, noBuildCache, pullBase, noBuild, pullPolicy, removeVolumes, stackFiles, workingDir, composePath, envPath, useOverrideFile, serviceName, composeFileName, filesToDelete, removeFiles } = options;
+	const { stackName, envId, forceRecreate, build, noBuildCache, pullBase, noBuild, pullPolicy, removeVolumes, stackFiles, workingDir, composePath, envPath, useOverrideFile, serviceName, composeFileName, filesToDelete, removeFiles, keepOnHost } = options;
 
 	// Stack deployments (including Git automation) are outside the container-update cooldown.
 
@@ -2073,10 +2076,26 @@ async function executeComposeCommand(
 					operation, remoteStacksDir, stackName, composeContent, hasStackFiles: hasLocalDir,
 				});
 				if (plan.stage && plan.hostDir && workingDir) {
-					const { stageStackDirOnRemote } = await import('./stage-remote-stackfiles');
-					const { staged } = await stageStackDirOnRemote(envId!, plan.hostDir, workingDir);
-					console.log(`[Stack:${stackName}] direct env: staged ${staged} file(s) to ${plan.hostDir} on the remote host (${plan.reason})`);
-					remoteStackHostDir = plan.hostDir;
+					const { stagingDecision } = await import('./remote-staging-plan');
+					const { getOwnDockerHost, getCachedContainerMounts } = await import('./host-path');
+					let self = null;
+					try {
+						self = {
+							envDockerHost: dockerHost, ownDockerHost: getOwnDockerHost(), workingDir: realpathSync(workingDir),
+							hostDir: plan.hostDir, mounts: getCachedContainerMounts(),
+							realpath: (p: string) => { try { return realpathSync(p); } catch { return p; } },
+						};
+					} catch { self = null; }
+					const decision = stagingDecision(plan, self);
+					if (decision.copy) {
+						const { stageStackDirOnRemote } = await import('./stage-remote-stackfiles');
+						if (keepOnHost?.length) console.log(`[Stack:${stackName}] direct env: leaving restored bind source(s) as they are on the host: [${keepOnHost.join(', ')}]`);
+						const { staged } = await stageStackDirOnRemote(envId!, plan.hostDir, workingDir, keepOnHost ?? []);
+						console.log(`[Stack:${stackName}] direct env: staged ${staged} file(s) to ${plan.hostDir} on the remote host (${plan.reason})`);
+					} else {
+						console.log(`[Stack:${stackName}] direct env: ${plan.hostDir} is Dockhand's own stack folder on the same daemon, nothing to copy`);
+					}
+					remoteStackHostDir = decision.rewriteHostDir;
 				}
 			}
 
@@ -2535,7 +2554,9 @@ export async function requireComposeFile(
  * Reproduces the stack 1:1 — `include:`, override files, and sibling configs
  * referenced by relative paths resolve from the extracted dir, and the compose
  * file keeps its real name (e.g. immich.yaml). For Hawser envs every file in the
- * dir is shipped as stackFiles so the remote host gets the full tree too.
+ * dir is shipped as stackFiles so the remote host gets the full tree too, except
+ * the bind sources in `keepOnHost` (an in-place restore has just written those on
+ * the host); a direct env's stager skips the same paths.
  *
  * The caller owns `stackDir`'s lifecycle (extract then remove). Throws if the
  * chosen compose file is missing from the dir.
@@ -2544,7 +2565,8 @@ export async function redeployStackFromDir(
 	stackName: string,
 	stackDir: string,
 	composeFileName: string,
-	envId?: number | null
+	envId?: number | null,
+	keepOnHost: string[] = []
 ): Promise<StackOperationResult> {
 	const composePath = join(stackDir, composeFileName);
 	if (!existsSync(composePath)) {
@@ -2582,8 +2604,10 @@ export async function redeployStackFromDir(
 	);
 	envVars = resolved.dbNonSecretVars;
 	secretVars = resolved.secretVars;
-	// For Hawser, ship the entire tree (compose + include:d files + sidecars + .env).
-	const stackFiles = await readDirFilesAsMap(stackDir);
+	// For Hawser, ship the entire tree (compose + include:d files + sidecars + .env), except the
+	// bind sources an in-place restore has just written on the host (`keepOnHost`).
+	const { withoutBindSources } = await import('./remote-staging-plan');
+	const stackFiles = withoutBindSources(await readDirFilesAsMap(stackDir), keepOnHost);
 	return await executeComposeCommand(
 		'up',
 		{
@@ -2597,7 +2621,8 @@ export async function redeployStackFromDir(
 			// stack. Force-recreate so the container is rebuilt fresh against the restored
 			// state; a plain `up` sees the unchanged compose and only restarts the stopped
 			// container, which can leave it not-yet-running after an in-place swap.
-			forceRecreate: true
+			forceRecreate: true,
+			keepOnHost
 		},
 		composeContent,
 		envVars,

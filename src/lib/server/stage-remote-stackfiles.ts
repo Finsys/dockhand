@@ -19,6 +19,7 @@ import { runContainerWithStreaming } from './docker';
 import { buildTarStream, type TarFileSource } from './backups/tar';
 import { putContainerArchiveStreaming } from './backups/put-archive-stream';
 import { readdirSync } from 'node:fs';
+import { stagedPathSent } from './remote-staging-plan';
 import { join, relative, sep } from 'node:path';
 
 const STAGER_IMAGE = 'alpine:latest';
@@ -31,14 +32,16 @@ export interface StageResult {
 /** Walk a stack dir into TarFileSource[] (disk paths, no in-RAM contents), so the tar
  * streams lazily. `.git` is skipped. There is deliberately NO per-file size cap: the tar
  * streams from disk with O(1) RAM, so a large relative-bind file (a big ./data config)
- * must stage in full - a cap would defeat the whole point of streaming. */
-function collectSources(rootDir: string): TarFileSource[] {
+ * must stage in full - a cap would defeat the whole point of streaming. Paths that
+ * `keepOnHost` holds back (see stagedPathSent) are left out. */
+function collectSources(rootDir: string, keepOnHost: string[]): TarFileSource[] {
 	const sources: TarFileSource[] = [];
 	const skipped: string[] = [];
 	const walk = (dir: string) => {
 		for (const entry of readdirSync(dir, { withFileTypes: true })) {
 			if (entry.name === '.git') continue;
 			const full = join(dir, entry.name);
+			if (!stagedPathSent(relative(rootDir, full).split(sep).join('/'), keepOnHost)) continue;
 			// A tar entry carries contents, not a link, so a symlink is not staged. It is
 			// named rather than passed over in silence, so a file missing on the remote
 			// host has a reason next to it.
@@ -67,13 +70,15 @@ function collectSources(rootDir: string): TarFileSource[] {
  * @param envId     the direct env whose daemon hosts the files
  * @param remoteDir absolute path on the remote host (validated by the API layer)
  * @param localDir  the local stack dir to stage (its files land under remoteDir 1:1)
+ * @param keepOnHost stack-dir-relative paths not to send (left as they are on the host)
  */
 export async function stageStackDirOnRemote(
 	envId: number,
 	remoteDir: string,
-	localDir: string
+	localDir: string,
+	keepOnHost: string[] = []
 ): Promise<StageResult> {
-	const sources = collectSources(localDir);
+	const sources = collectSources(localDir, keepOnHost);
 	if (sources.length === 0) return { staged: 0, remoteDir };
 
 	const name = `dockhand-stage-${envId}-${Math.floor(Date.now() / 1000)}`;

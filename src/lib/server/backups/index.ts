@@ -950,7 +950,7 @@ function restorePorts(destination: any, access: { isEnterprise: boolean; canAcce
 		// override files, and sibling configs referenced by relative paths resolve, and the
 		// file keeps its real name (e.g. immich.yaml). The backup always captures the full dir
 		// plus the recorded compose filename, so there is no normalized-compose.yaml fallback.
-		redeployStack: async (name, envId, destId, snapId, restoreSecrets) => {
+		redeployStack: async (name, envId, destId, snapId, restoreSecrets, restoredBinds) => {
 			const { redeployStackFromDir, getStackDir } = await import('../stacks');
 			const { existsSync } = await import('fs');
 			const { join } = await import('path');
@@ -1011,7 +1011,14 @@ function restorePorts(destination: any, access: { isEnterprise: boolean; canAcce
 					// into. A backup restore's redeploy could get its own recorder the same
 					// way -- there is nothing structural stopping it -- it just hasn't been
 					// done yet.
-					const r = await redeployStackFromDir(name, stackDir, composeFileName, envId ?? undefined);
+					// The binds the in-place swap just wrote on the host, as stack-dir paths.
+					const { readFileSync } = await import('fs');
+					const { relativeBindsRestored } = await import('./stackfile-filter');
+					const keepOnHost = restoredBinds?.length
+						? relativeBindsRestored(readFileSync(composePath, 'utf8'), stackDir, restoredBinds)
+						: [];
+					if (keepOnHost.length) log(`leaving the restored bind(s) as they are on the host: [${keepOnHost.join(', ')}]`);
+					const r = await redeployStackFromDir(name, stackDir, composeFileName, envId ?? undefined, keepOnHost);
 					if (!r.success) throw new Error(r.error || 'docker compose up failed');
 				}
 			});

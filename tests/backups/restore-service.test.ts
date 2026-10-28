@@ -532,6 +532,48 @@ describe('RestoreService — config-only (metadata-only) snapshot restore', () =
 	});
 });
 
+describe('RestoreService — which binds the stack redeploy leaves on the host', () => {
+	// The snapshot holds ./data (a bind, target /data) and ./scripts (a bind, target /scripts)
+	// as volumes; the in-place job restores only 'data'.
+	const withBinds = (): SnapshotLayout => layout({ volumes: [
+		{ key: 'data__data', name: '/data', source: '/srv/stack/data', type: 'bind' },
+		{ key: 'scripts__scripts', name: '/scripts', source: '/srv/stack/scripts', type: 'bind' },
+		{ key: 'db', name: 'db', source: 'db', type: 'volume' },
+	] });
+	const capture = () => {
+		const calls: { name: string; binds?: { target: string; source: string }[] }[] = [];
+		return { calls, redeployStack: async (name: string, _e: unknown, _d: number, _s: string, _r?: boolean, binds?: { target: string; source: string }[]) => { calls.push({ name, binds }); } };
+	};
+
+	it('in place: only the bind volumes this swap wrote are left on the host', async () => {
+		const c = capture();
+		const svc = new RestoreService(makePorts({
+			readSnapshotMetadata: async () => withBinds(), redeployStack: c.redeployStack,
+			listSnapshotVolumes: async () => ['data__data', 'scripts__scripts', 'db'],
+		}, base()));
+		const res = await svc.run({ ...inPlaceStack, volumes: ['data__data', 'db'] });
+		expect(res.status).toBe('success');
+		// /scripts was not restored, so its stack-file copy still goes out; a named volume is no bind.
+		expect(c.calls).toEqual([{ name: 'mystack', binds: [{ target: '/data', source: '/srv/stack/data' }] }]);
+	});
+
+	it('a clone wrote nothing into the target stack dir, so its redeploy sends everything', async () => {
+		const c = capture();
+		const svc = new RestoreService(makePorts({
+			readSnapshotMetadata: async () => withBinds(), redeployStack: c.redeployStack, containerExists: async () => false, stackExists: async () => false,
+			listSnapshotVolumes: async () => ['data__data', 'scripts__scripts', 'db'],
+		}, base()));
+		const res = await svc.run({
+			destinationId: 3, snapshotId: SNAP, mode: 'new-location', volumes: ['data__data'], environmentId: 9, targetName: 'web',
+			targetPath: '/restore/here', volumeDestinations: [{ volume: 'data__data', kind: 'volume', target: 'data' }],
+			targetType: 'stack', postRestore: 'redeploy'
+		});
+		if (res.status === 'error') throw new Error(res.error);
+		expect(res.status).toBe('success');
+		expect(c.calls).toEqual([{ name: 'web', binds: [] }]);
+	});
+});
+
 describe('RestoreService — clone (cross-env restore with per-volume destinations)', () => {
 	const cloneJob = (over: Partial<RestoreJob> = {}): RestoreJob => ({
 		destinationId: 3, snapshotId: SNAP, mode: 'new-location', volumes: ['data'],

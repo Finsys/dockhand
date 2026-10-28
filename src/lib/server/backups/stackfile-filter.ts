@@ -231,3 +231,60 @@ export function isUnderRelDir(relPath: string, relDirs: string[]): boolean {
 	}
 	return false;
 }
+
+/** The container `target` of one compose `volumes:` entry, short or long syntax, or null. */
+function bindTargetOf(entry: unknown): string | null {
+	if (typeof entry === 'string') {
+		const parts = entry.split(':');
+		return parts.length >= 2 && parts[1] ? parts[1] : null;
+	}
+	if (entry && typeof entry === 'object') {
+		const t = (entry as { target?: unknown }).target;
+		return typeof t === 'string' ? t : null;
+	}
+	return null;
+}
+
+/**
+ * The stack-dir-relative bind sources (files and dirs) a restore wrote back. Each restored
+ * volume stands for ONE compose bind: the one with its container `target` whose source path
+ * is the longest tail of the volume's host `source` (`./app/config` and `./config` can share
+ * `/config`; only the restored one is it). `${VAR}` and escaping sources are left out, as in
+ * relativeBindDirsFromCompose.
+ */
+export function relativeBindsRestored(
+	composeContent: string,
+	stackDir: string,
+	restored: { target: string; source: string }[]
+): string[] {
+	const trim = (p: string) => p.replace(/\/+$/, '') || '/';
+	if (restored.length === 0) return [];
+	let doc: unknown;
+	try { doc = yaml.load(composeContent); } catch { return []; }
+	const services = (doc as { services?: Record<string, unknown> } | null)?.services;
+	if (!services || typeof services !== 'object') return [];
+	const binds: { rel: string; target: string }[] = [];
+	for (const svc of Object.values(services)) {
+		const vols = (svc as { volumes?: unknown[] } | null)?.volumes;
+		if (!Array.isArray(vols)) continue;
+		for (const entry of vols) {
+			const src = bindSourceOf(entry);
+			const target = bindTargetOf(entry);
+			if (!src || !target || src.includes('${')) continue;
+			const rel = src.startsWith('/') ? relativePosix(stackDir, src) : normRel(src);
+			if (rel === '' || rel === '.' || rel.startsWith('..')) continue;
+			binds.push({ rel, target: trim(target) });
+		}
+	}
+	const rels = new Set<string>();
+	for (const r of restored) {
+		const source = trim(r.source) + '/';
+		let best: string | null = null;
+		for (const b of binds) {
+			if (b.target !== trim(r.target) || !source.endsWith('/' + b.rel + '/')) continue;
+			if (best === null || b.rel.length > best.length) best = b.rel;
+		}
+		if (best !== null) rels.add(best);
+	}
+	return [...rels];
+}
