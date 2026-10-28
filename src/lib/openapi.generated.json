@@ -63,6 +63,9 @@
       "name": "events"
     },
     {
+      "name": "exposure-status"
+    },
+    {
       "name": "git"
     },
     {
@@ -13829,6 +13832,41 @@
             "bearerAuth": []
           }
         ]
+      }
+    },
+    "/api/exposure-status": {
+      "get": {
+        "operationId": "get_api_exposure-status",
+        "tags": [
+          "exposure-status"
+        ],
+        "summary": "Whether this instance is listening beyond localhost with auth off and the Docker socket writable, and whether that warning was dismissed",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "{ warn: boolean, dismissed: boolean }"
+          }
+        },
+        "security": [],
+        "description": "Public so the warning can render while authentication is disabled. Returns {warn, dismissed}; warn is true only when auth is off, the bind host is not loopback, and the Docker socket is mounted read-write."
+      },
+      "post": {
+        "operationId": "post_api_exposure-status",
+        "tags": [
+          "exposure-status"
+        ],
+        "summary": "Dismiss the unsecured-exposure warning for this instance",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "{ dismissed: true }"
+          },
+          "403": {
+            "description": "Authentication is enabled; the warning never fires, so there is nothing to dismiss"
+          }
+        },
+        "security": [],
+        "description": "Reachable without a session only while authentication is disabled (the warning's only state); once auth is on it returns 403, so a secured instance exposes no public write. Stores a per-instance flag so the warning does not show again."
       }
     },
     "/api/git/branches": {
