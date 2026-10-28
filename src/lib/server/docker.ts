@@ -26,7 +26,7 @@ import {
 } from './backups/request-timeout';
 import { helperWaitDeadline, helperExitFromState, helperFailureDetail, needsDaemonErrorLookup } from './helper-wait-core';
 import { cancelReaderOnAbort } from './reader-abort-core';
-import { configuredMacAddress, endpointWithoutGeneratedMac } from './endpoint-mac-core';
+import { configuredMacAddress, endpointForRecreate } from './endpoint-mac-core';
 import { rescopeForPrimarySwitch } from './primary-network-switch-core';
 import { mapContainerNetworks } from '$lib/utils/network-identity';
 import type { Environment } from './db';
@@ -2558,9 +2558,9 @@ export async function recreateContainerFromInspect(
 	if (!isSharedNetwork && initialNetworkName && initialNetworkConfig) {
 		// An auto-assigned MAC must not follow the container: on daemons that derive it
 		// from the IP, the replacement gets a new address and the carried MAC then
-		// collides with whoever inherits the old one (#1618). Only a configured MAC
-		// survives; otherwise Docker derives a fresh one.
-		const endpointConfig = endpointWithoutGeneratedMac({ ...initialNetworkConfig });
+		// collides with whoever inherits the old one (#1618). Only a configured MAC, or one
+		// derived from an IP the endpoint pins, survives; otherwise Docker derives a fresh one.
+		const endpointConfig = endpointForRecreate({ ...initialNetworkConfig });
 		createConfig.NetworkingConfig = {
 			EndpointsConfig: {
 				[initialNetworkName]: endpointConfig
@@ -2599,8 +2599,8 @@ export async function recreateContainerFromInspect(
 			const nc = netConfig as any;
 			if (nc.NetworkID) {
 				try {
-					// Same rule as the creation endpoint above: never carry a generated MAC.
-					const settings = endpointWithoutGeneratedMac({ ...nc });
+					// Same rule as the creation endpoint above.
+					const settings = endpointForRecreate({ ...nc });
 					await connectContainerToNetworkRaw(nc.NetworkID, newContainerId, settings, envId);
 				} catch (netError: any) {
 					log?.(`Warning: Failed to connect to network "${netName}": ${netError.message}`);

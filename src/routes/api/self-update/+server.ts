@@ -1,6 +1,6 @@
 import { json } from '@sveltejs/kit';
 import { authorize } from '$lib/server/authorize';
-import { planNetworkEnvVars } from '$lib/server/self-update-network-core';
+import { applySelfUpdateNetworks } from '$lib/server/self-update-network-core';
 import { getAdditionalVolumeBinds, dedupeVolumesForRecreate } from '$lib/server/mount-dedupe';
 import {
 	getOwnContainerId,
@@ -147,8 +147,8 @@ async function cleanupExistingUpdaters(): Promise<void> {
 
 /**
  * Build the container create config from inspect data (same logic as recreateContainerFromInspect).
- * Does NOT include NetworkingConfig — the new container is created without networks
- * to avoid static IP conflicts with the still-running old container.
+ * Does NOT include NetworkingConfig: applySelfUpdateNetworks adds the primary network when
+ * it pins an IP, and the sidecar connects the rest.
  */
 function buildCreateConfig(inspectData: any, newImage: string): any {
 	const config = inspectData.Config || {};
@@ -185,9 +185,6 @@ function buildCreateConfig(inspectData: any, newImage: string): any {
 			Binds: [...(createConfig.HostConfig.Binds || []), ...additionalBinds]
 		};
 	}
-
-	// No NetworkingConfig — avoids static IP conflicts with still-running old container.
-	// Networks are connected by the sidecar after the old container is removed.
 
 	return createConfig;
 }
@@ -279,7 +276,8 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 				}
 				const inspectData = await inspectResponse.json();
 				const createConfig = buildCreateConfig(inspectData, newImage);
-				const networkPlan = planNetworkEnvVars(inspectData.NetworkSettings?.Networks);
+				const { primary, reconnect: networkPlan } = applySelfUpdateNetworks(createConfig, inspectData);
+				if (primary) send('log', { message: `Creating on ${primary} to keep its pinned IP` });
 				if (networkPlan.skipped.length > 0) {
 					send('log', {
 						message: `Not reconnecting ${networkPlan.skipped.length} network(s) whose names are not plain network names: ${networkPlan.skipped.join(', ')}`
@@ -296,7 +294,7 @@ export const POST: RequestHandler = async ({ request, cookies }) => {
 				sendStep('pulling_updater', 'completed', 'Updater ready');
 				send('log', { message: 'Updater image ready' });
 
-				// Step 4: Create new container with temp name (no NetworkingConfig)
+				// Step 4: Create new container with temp name
 				sendStep('creating_container', 'active', 'Creating new container...');
 				send('log', { message: 'Cleaning up previous updater containers...' });
 				await cleanupExistingUpdaters();
