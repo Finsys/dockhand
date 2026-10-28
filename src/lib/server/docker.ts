@@ -44,7 +44,7 @@ import { expectedEvents, EXPECTED_EVENT_TTL_MS } from './expected-events-core';
 import { decideRespawnOutcome, isExactNameMatch, isSystemdManagedUnit } from './systemd-recreate-core';
 // Import-light image parsing shared with the semver layer; re-exported below for callers.
 import { parseImageReference } from './registry/image-ref';
-import { fetchImageCreatedAt, imagePlatform } from './registry/image-age';
+import { fetchImageCreatedAt, fetchImageConfigMetadata, imagePlatform, type ImageConfigMetadata } from './registry/image-age';
 export { parseImageReference } from './registry/image-ref';
 import { rebaseEnvOntoImage, rebaseLabelsOntoImage, rebaseCommand, describeEnvRebase, describeLabelRebase, composeImageLabelForRecreate, composeImageLabelForm, COMPOSE_IMAGE_LABEL, type ImageEnvLabels } from './container-env-merge';
 import { encodeRegistryAuth, isSafeRegistryHost } from './registry-auth';
@@ -3899,28 +3899,55 @@ async function getRegistryImageCreatedAt(imageName: string, digest: string, envI
 	}
 }
 
+// Keyed by immutable digest and target platform, like imageCreationTimes.
+const tagImageIdentities = new Map<string, ImageConfigMetadata>();
+
 /**
- * When a candidate tag's image was built, for the semver check's stale-candidate
- * rule. Takes the candidate's already-known manifest digest, so only the single
- * chosen candidate is looked up - never a sweep over the tag list.
+ * Which image a candidate tag's manifest digest holds for the target platform, and
+ * when it was built, for the semver check: the config digest tells a re-wrapped
+ * copy of the running image from a real update, the date orders candidates and
+ * feeds the stale-candidate rule. Takes the candidate's already-known manifest
+ * digest, so only probed candidates are looked up - never a sweep over the tag list.
  *
  * `envId` selects the daemon whose os/arch decides which per-arch manifest to read;
  * without it a remote environment would be judged by Dockhand's own platform.
- * Dates are cached per digest+platform, so a repeat check costs nothing. The
- * cooldown feature's persisted fallback is deliberately NOT used: it records when
- * Dockhand first SAW a digest, which for an old tag is today - the opposite of the
- * build date this rule needs.
+ * Cached per digest+platform, so a repeat check costs nothing. The cooldown
+ * feature's persisted fallback is deliberately NOT used: it records when Dockhand
+ * first SAW a digest, which for an old tag is today - the opposite of the build
+ * date this needs.
  * Returns null on any failure, which keeps the candidate (fail-open).
  */
-export async function getRegistryTagCreatedAt(
+export async function getRegistryTagImage(
 	registry: string,
 	repo: string,
 	digest: string,
 	envId?: number | null
-): Promise<string | null> {
-	const meta = await getRegistryImageCreatedAt(`${registry}/${repo}`, digest, envId);
-	return meta?.createdAt ?? null;
+): Promise<ImageConfigMetadata | null> {
+	try {
+		if (!isSafeRegistryHost(registry).ok) return null;
+		const signal = AbortSignal.timeout(8000);
+		const info = await dockerJsonRequest('/info', { signal }, envId) as { OSType?: string; Architecture?: string };
+		const platform = imagePlatform(info?.OSType, info?.Architecture);
+		if (!platform) return null;
+		const key = `${registry}/${repo}@${digest}/${platform.os}/${platform.architecture}/${platform.variant ?? ''}`;
+		const cached = tagImageIdentities.get(key);
+		if (cached) return cached;
+		const [authorization, scheme] = await Promise.all([
+			getRegistryBearerToken(registry, repo, signal), getRegistrySchemeForHost(registry)
+		]);
+		const meta = await fetchImageConfigMetadata({ registry, repo, digest, platform, scheme, authorization, signal });
+		if (meta) {
+			if (tagImageIdentities.size >= 256) tagImageIdentities.delete(tagImageIdentities.keys().next().value!);
+			tagImageIdentities.set(key, meta);
+		}
+		return meta;
+	} catch {
+		return null;
+	}
 }
+
+// What a manifest is, by its immutable digest (see getTagArtifactKind).
+const tagKindByDigest = new Map<string, { kind: ArtifactKind; childDigests: string[] }>();
 
 /**
  * Classify what a `registry/repo:tag` actually is (image vs Helm chart vs other
@@ -3951,7 +3978,20 @@ export async function getTagArtifactKind(
 		};
 		if (token) headers['Authorization'] = token;
 
-		const res = await fetch(`${scheme}://${registry}/v2/${repo}/manifests/${tag}`, {
+		// Several candidates are probed per check, and a manifest GET counts as a pull
+		// on Docker Hub, so the tag is resolved with a HEAD and the manifest read once
+		// per digest: a repeat check of an unmoved tag costs a HEAD only.
+		const head = await fetch(`${scheme}://${registry}/v2/${repo}/manifests/${tag}`, {
+			method: 'HEAD',
+			headers,
+			signal: AbortSignal.timeout(8000)
+		}).catch(() => null);
+		if (head) await drainResponse(head);
+		const headDigest = head?.ok ? head.headers.get('Docker-Content-Digest') : null;
+		const known = headDigest ? tagKindByDigest.get(`${registry}/${repo}@${headDigest}`) : undefined;
+		if (headDigest && known) return { ...known, digest: headDigest };
+
+		const res = await fetch(`${scheme}://${registry}/v2/${repo}/manifests/${headDigest ?? tag}`, {
 			method: 'GET',
 			headers,
 			signal: AbortSignal.timeout(8000)
@@ -3961,14 +4001,19 @@ export async function getTagArtifactKind(
 			if (res.status === 401) forgetRegistryAuth(token, registry);
 			return { kind: 'image', digest: null };
 		}
-		const digest = res.headers.get('Docker-Content-Digest');
+		const digest = res.headers.get('Docker-Content-Digest') ?? headDigest;
 		const topMediaType = res.headers.get('Content-Type');
 		const body = (await res.json().catch(() => null)) as
 			| { mediaType?: string; config?: { mediaType?: string }; manifests?: unknown[] }
 			| null;
 		// Per-arch child digests of a multi-arch index, so a same-image check can match
 		// a host that recorded the child digest in RepoDigests instead of the index (#1367).
-		return { kind: classifyManifest(body, topMediaType), digest, childDigests: indexChildDigests(body) };
+		const kind = { kind: classifyManifest(body, topMediaType), childDigests: indexChildDigests(body) };
+		if (digest && body) {
+			if (tagKindByDigest.size >= 512) tagKindByDigest.delete(tagKindByDigest.keys().next().value!);
+			tagKindByDigest.set(`${registry}/${repo}@${digest}`, kind);
+		}
+		return { ...kind, digest };
 	} catch {
 		return { kind: 'image', digest: null, childDigests: [] };
 	}

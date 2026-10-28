@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { fetchImageCreatedAt, imagePlatform, type ImageAgeRequest } from '../src/lib/server/registry/image-age';
+import { fetchImageCreatedAt, fetchImageConfigMetadata, imagePlatform, type ImageAgeRequest } from '../src/lib/server/registry/image-age';
 
 const IMAGE = 'application/vnd.oci.image.manifest.v1+json';
 const INDEX = 'application/vnd.oci.image.index.v1+json';
@@ -42,6 +42,18 @@ describe('generic registry image creation time', () => {
 		]);
 		expect(f.calls.every(call => (call.init.headers as Record<string, string>).Authorization === 'Bearer test-token')).toBe(true);
 		expect(f.calls.every(call => call.init.redirect === 'manual' && call.init.signal)).toBe(true);
+	});
+
+	test('names the platform image by its config digest, through an index', async () => {
+		// Two indexes holding the same platform image end on the same config digest.
+		const f = fixture();
+		addIndex(f, [{ digest: digestOf(f.manifest), mediaType: IMAGE, platform: { os: 'linux', architecture: 'amd64' } }]);
+		expect(await fetchImageConfigMetadata(f.request, f.fetcher)).toEqual({ configDigest: f.configDigest, createdAt: created });
+	});
+
+	test('keeps the config digest when the build date is unusable', async () => {
+		const f = fixture({ os: 'linux', architecture: 'amd64' });
+		expect(await fetchImageConfigMetadata(f.request, f.fetcher)).toEqual({ configDigest: f.configDigest, createdAt: null });
 	});
 
 	test('uses the same API for Docker Hub, GHCR and private registries', async () => {

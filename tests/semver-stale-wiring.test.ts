@@ -24,18 +24,25 @@ const CALLERS = [
 	{ name: 'the manual Check for updates', path: MANUAL }
 ];
 
-describe('every caller hands the stale check to checkNewerVersion', () => {
+describe('every caller hands the running image to checkNewerVersion', () => {
 	for (const caller of CALLERS) {
-		test(`${caller.name} passes staleCheck`, () => {
+		test(`${caller.name} passes runningImage`, () => {
 			const src = read(caller.path);
 			// The call spans lines, so match from the function name to its closing
 			// paren-and-catch rather than assuming a single line.
 			const call = src.match(/checkNewerVersion\([\s\S]{0,600}?\)\s*\.catch/);
 			expect(call).not.toBeNull();
-			expect(call![0]).toContain('staleCheck');
+			expect(call![0]).toContain('runningImage');
 		});
 
-		test(`${caller.name} builds staleCheck from the stored flag`, () => {
+		test(`${caller.name} compares candidates with the running image id`, () => {
+			// The identity check runs whatever rejectOlderImages says: built before the
+			// flag test, not inside it.
+			const src = read(caller.path);
+			expect(src).toMatch(/const runningImage: RunningImageCheck = \{[\s\S]{0,200}currentImageId\s*\}/);
+		});
+
+		test(`${caller.name} builds the stale check from the stored flag`, () => {
 			const src = read(caller.path);
 			expect(src).toContain('rejectOlderImages');
 			// The running image's own build date is the thing compared against.
@@ -46,7 +53,7 @@ describe('every caller hands the stale check to checkNewerVersion', () => {
 			// Without an env id the candidate's platform is resolved against Dockhand's
 			// own daemon, so a remote environment would be judged by the wrong os/arch.
 			const src = read(caller.path);
-			const probe = src.match(/getRegistryTagCreatedAt\([^)]*\)/);
+			const probe = src.match(/getRegistryTagImage\([^)]*\)/);
 			expect(probe).not.toBeNull();
 			expect(probe![0]).toMatch(/env(Id|IdNum|ironmentId)/);
 		});
@@ -61,12 +68,13 @@ describe('every caller hands the stale check to checkNewerVersion', () => {
 });
 
 describe('the probe reaches the real registry reader', () => {
-	test('getRegistryTagCreatedAt forwards its env id', () => {
+	test('getRegistryTagImage reads the platform of its env', () => {
 		const src = read('../src/lib/server/docker.ts');
-		const fn = src.match(/export async function getRegistryTagCreatedAt[\s\S]{0,400}?\n}/);
+		const fn = src.match(/export async function getRegistryTagImage[\s\S]{0,1600}?\n}/);
 		expect(fn).not.toBeNull();
-		// Third positional argument of getRegistryImageCreatedAt is the env id.
-		expect(fn![0]).toMatch(/getRegistryImageCreatedAt\(`\$\{registry\}\/\$\{repo\}`,\s*digest,\s*envId\)/);
+		// The daemon asked for its os/arch is the target environment's.
+		expect(fn![0]).toMatch(/dockerJsonRequest\('\/info',\s*\{ signal \},\s*envId\)/);
+		expect(fn![0]).toContain('fetchImageConfigMetadata(');
 	});
 });
 
