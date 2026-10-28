@@ -28,7 +28,8 @@ import { assertSafeRepoUrl, assertSafeGitRef, repoFilePath, repoBaseEnvPath } fr
 import { assertSafeRepoTarget } from './git-branch-lookup';
 import { gitDeployDecision, isDeployFailure, DEPLOY_FAILURE_PREFIX } from './git-deploy-policy';
 import { resolveStackBranch } from '../git-stack-branch';
-import { expandValue, parseEnvFileForForm } from '$lib/utils/env-file-values';
+import { expandValue } from '$lib/utils/env-file-values';
+import { envFileFormVars } from './secretproviders/sops-core';
 import {
 	parseManifest,
 	serializeManifest,
@@ -2289,9 +2290,7 @@ export async function readGitStackEnvFile(
 		// wrote it rather than being resolved the way a deploy would. This is also the
 		// diff base the editor decides overrides against, so it has to match what the
 		// form shows or an untouched variable reads as an override.
-		const vars = Object.fromEntries(
-			parseEnvFileForForm(content).map((row) => [row.key, row.value])
-		);
+		const vars = envFileFormVars(content);
 		return { vars };
 	} catch (error: any) {
 		return { vars: {}, error: error.message };
@@ -2400,9 +2399,7 @@ export async function previewRepoEnvFiles(options: PreviewEnvOptions): Promise<P
 		if (existsSync(baseEnvPath)) {
 			console.log(`${logPrefix} Reading .env from: ${baseEnvPath}`);
 			const content = readFileSync(baseEnvPath, 'utf-8');
-			const baseVars = Object.fromEntries(
-				parseEnvFileForForm(content).map((row) => [row.key, row.value])
-			);
+			const baseVars = envFileFormVars(content);
 			for (const [key, value] of Object.entries(baseVars)) {
 				vars[key] = value;
 				sources[key] = '.env';
@@ -2419,9 +2416,7 @@ export async function previewRepoEnvFiles(options: PreviewEnvOptions): Promise<P
 			if (existsSync(additionalEnvPath)) {
 				console.log(`${logPrefix} Reading additional env file: ${additionalEnvPath}`);
 				const content = readFileSync(additionalEnvPath, 'utf-8');
-				const additionalVars = Object.fromEntries(
-					parseEnvFileForForm(content).map((row) => [row.key, row.value])
-				);
+				const additionalVars = envFileFormVars(content);
 				for (const [key, value] of Object.entries(additionalVars)) {
 					vars[key] = value;
 					sources[key] = 'envFile';

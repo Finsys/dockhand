@@ -16,8 +16,10 @@ import {
 	normalizeAgeIdentities,
 	parseSopsDecryptOutput,
 	sopsEncryptedKeys,
-	withoutSopsArtifacts
+	withoutSopsArtifacts,
+	envFileFormVars
 } from '../src/lib/server/secretproviders/sops-core';
+import { parseEnvFileForForm } from '../src/lib/utils/env-file-values';
 import { gitStackEnvFileRelPath } from '../src/lib/server/git-stack-env-path';
 import { redactProviderConfig, SECRET_CONFIG_KEYS } from '../src/lib/server/secretproviders/shared';
 
@@ -276,5 +278,27 @@ describe.skipIf(!sopsPath)('SOPS provider (real sops binary)', () => {
 		const bad = await sopsProvider.testConnection({ ageKey: 'nope' });
 		expect(bad.ok).toBe(false);
 		expect(bad.error).toMatch(/AGE-SECRET-KEY-\.\.\./);
+	});
+});
+
+// The stack editor shows a SOPS file's own variables, never its sops_* metadata.
+describe('envFileFormVars', () => {
+	const METADATA = ['sops_age__list_0__map_enc', 'sops_age__list_0__map_recipient', 'sops_lastmodified', 'sops_mac', 'sops_unencrypted_suffix', 'sops_version'];
+
+	test('a SOPS file loses exactly its sops_* metadata', () => {
+		const all = Object.fromEntries(parseEnvFileForForm(ENCRYPTED).map((r) => [r.key, r.value]));
+		const shown = envFileFormVars(ENCRYPTED);
+		expect(Object.keys(all).filter((k) => !(k in shown)).sort()).toEqual(METADATA);
+		for (const key of Object.keys(shown)) expect(shown[key]).toBe(all[key]);
+	});
+
+	test('the encrypted variables and the unencrypted one stay, under their names', () => {
+		const shown = envFileFormVars(ENCRYPTED);
+		expect(shown.DB_PASSWORD).toStartWith('ENC[AES256_GCM,');
+		expect(shown.PUBLIC_unencrypted).toBe('visible');
+	});
+
+	test('a plain env file keeps a variable of its own that starts with sops_', () => {
+		expect(envFileFormVars('sops_mode=strict\nAPP=1\n')).toEqual({ sops_mode: 'strict', APP: '1' });
 	});
 });
