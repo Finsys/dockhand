@@ -37,7 +37,7 @@ import {
 	recreateContainerFromInspect,
 	inspectImage
 } from '../../docker';
-import { withPullRetry } from '../../pull-retry';
+import { withPullRetry, withCheckRetry } from '../../pull-retry';
 import type { ImageEnvLabels } from '../../container-env-merge';
 import { getScannerSettings, scanImage, type ScanResult, type VulnerabilitySeverity } from '../../scanner';
 import { sendEventNotification } from '../../notifications';
@@ -430,10 +430,10 @@ export async function runContainerUpdate(
 		}
 
 		log(`Checking registry for updates: ${imageNameFromConfig}`);
-		const registryCheck = await checkImageUpdateAvailable(
+		const registryCheck = await withCheckRetry(() => checkImageUpdateAvailable(
 			imageNameFromConfig, currentImageId, envId, true,
 			isCooldownSkippedByLabel(inspectData.Config?.Labels)
-		);
+		), { log, label: `${containerName} (${imageNameFromConfig})${envId ? `, env ${envId}` : ''}` });
 
 		if (registryCheck.isLocalImage) {
 			log(`Local image detected - skipping (auto-update requires registry)`);
