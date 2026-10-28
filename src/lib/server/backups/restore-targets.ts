@@ -11,6 +11,7 @@
  * This module computes targets in PARALLEL to the write path (runClonePopulate / runInPlaceSwap /
  * writeLocalStackFiles) - it does not replace their bind construction. Identity is enforced by
  * tests asserting resolveRestoreTargets(...).target === the source those paths actually bind.
+ * A single-file volume shares only `target`: restore-service binds its directory instead of `bind`.
  */
 import { resolveBindFromMetadata, volumeBind, volumeInclude, type SnapshotMetadata } from './restore-core';
 import { isReservedVolumeKey } from './stackdir-plan';

@@ -30,3 +30,16 @@ export function mapActionToEventType(action: string): NotificationEventType | nu
 	};
 	return mapping[action] || null;
 }
+
+/**
+ * The channels left after dropping those subscribed to `covered`: an event that a more
+ * specific one already reports (a git deploy's stack_deployed next to git_sync_success)
+ * goes only to the channels that will not get the specific one.
+ */
+export function withoutSubscribersOf<T extends { eventTypes?: string[] | null }>(
+	channels: T[],
+	covered?: NotificationEventType
+): T[] {
+	if (!covered) return channels;
+	return channels.filter((c) => !c.eventTypes?.includes(covered));
+}

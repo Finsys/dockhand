@@ -281,6 +281,19 @@ export function computeDeletions(
 	return { toDelete, skipped };
 }
 
+/**
+ * One report for a deploy that sent the same deletions to several steps (a separate build,
+ * then up): a file any step deleted is deleted, otherwise the last step's skip stands.
+ */
+export function mergeDeletionReports(reports: (DeletionApplyResult | undefined)[]): DeletionApplyResult | undefined {
+	const present = reports.filter((r): r is DeletionApplyResult => !!r);
+	if (present.length === 0) return undefined;
+	const deleted = [...new Set(present.flatMap((r) => r.deleted))];
+	const skips = new Map<string, DeletionSkip>();
+	for (const r of present) for (const s of r.skipped) skips.set(s.path, s);
+	return { deleted, skipped: [...skips.values()].filter((s) => !deleted.includes(s.path)) };
+}
+
 // =============================================================================
 // Applier — the single chokepoint that touches the filesystem
 // =============================================================================

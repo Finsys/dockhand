@@ -26,6 +26,7 @@
 	import { shouldShowWhatsNew } from '$lib/utils/version';
 	import { AlertTriangle, Search } from 'lucide-svelte';
 	import { getLocale } from '$lib/paraglide/runtime.js';
+	import { applySignedInLocale, signedInUserToCheck } from '$lib/i18n/locale-preference';
 	import { m } from '$lib/paraglide/messages.js';
 
 	// Check if current route is login page (no sidebar needed)
@@ -79,6 +80,19 @@
 			// Use user-specific preferences if authenticated, otherwise global settings
 			const userId = $authStore.authEnabled && $authStore.user ? $authStore.user.id : undefined;
 			themeStore.init(userId);
+		}
+	});
+
+	// The language the signed-in user chose, applied with one reload when it differs from the rendered one
+	let languageCheckedFor: number | undefined;
+	$effect(() => {
+		const userId = signedInUserToCheck($authStore, languageCheckedFor);
+		if (userId === undefined) return;
+		languageCheckedFor = userId;
+		try {
+			applySignedInLocale(fetch, getLocale(), localStorage, () => location.reload());
+		} catch {
+			// A blocked store: nothing to apply.
 		}
 	});
 

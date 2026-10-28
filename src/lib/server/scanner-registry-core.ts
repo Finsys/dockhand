@@ -28,6 +28,23 @@ export function isDaemonExportFailure(output: string | null | undefined): boolea
 	);
 }
 
+/**
+ * The scanner's full output for classification, from the error the helper threw. The
+ * helper's `message` is truncated to ~1000 chars for display, and the export-bug signal
+ * usually lands AFTER that point (behind the scanner's INFO lines or a cold-DB progress
+ * bar), so the untruncated `stderr`/`stdout` it also carries is what must be classified.
+ * Falls back to the message for an error raised anywhere that does not carry them.
+ */
+export function scanErrorOutput(error: unknown): string {
+	if (error && typeof error === 'object') {
+		const e = error as { stderr?: unknown; stdout?: unknown; message?: unknown };
+		if (typeof e.stderr === 'string' && e.stderr) return e.stderr;
+		if (typeof e.stdout === 'string' && e.stdout) return e.stdout;
+		if (typeof e.message === 'string') return e.message;
+	}
+	return String(error);
+}
+
 /** A bare image ID: `sha256:<64 hex>` or the digest alone, as the auto-update passes. */
 function isBareImageId(ref: string): boolean {
 	return /^(sha256:)?[0-9a-f]{64}$/.test(ref);

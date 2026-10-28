@@ -61,10 +61,15 @@ describe('prefixMatches', () => {
 });
 
 describe('flavorMatches', () => {
-	it('is an exact suffix match', () => {
+	it('matches a plain variant but keeps a version-bearing variant distinct', () => {
 		expect(flavorMatches(parseTag('1.0-alpine')!, parseTag('2.0-alpine')!)).toBe(true);
 		expect(flavorMatches(parseTag('1.0-alpine')!, parseTag('2.0')!)).toBe(false);
+		// `alpine` (any Alpine) and `alpine3.19` (a specific one) are different variants:
+		// a version baked into the variant token forks the flavor, so one is not offered
+		// as an update to the other. Build counters (-rN, -lsNNN) are the exception.
 		expect(flavorMatches(parseTag('1.0-alpine')!, parseTag('2.0-alpine3.19')!)).toBe(false);
+		expect(flavorMatches(parseTag('1.0-alpine3.19')!, parseTag('2.0-alpine3.20')!)).toBe(false);
+		expect(flavorMatches(parseTag('7.4-php8.1')!, parseTag('8.1-php8.2')!)).toBe(false);
 	});
 
 	it('collapses a trailing commit hash so hashed releases share a flavor (searxng)', () => {
@@ -77,7 +82,9 @@ describe('flavorMatches', () => {
 		// -ubuntu22.04 is a variant, not a hash; a pure-numeric build isn't a hash either.
 		expect(flavorMatches(parseTag('1.0-ubuntu22.04')!, parseTag('2.0-ubuntu22.04')!)).toBe(true);
 		expect(flavorMatches(parseTag('1.0-ubuntu22.04')!, parseTag('2.0')!)).toBe(false);
-		expect(flavorMatches(parseTag('1.0-12345678')!, parseTag('2.0')!)).toBe(false);
+		// A pure-numeric build carries no flavor skeleton, so it shares the (empty)
+		// flavor of a bare tag - the digits order it, they don't fork a variant.
+		expect(flavorMatches(parseTag('1.0-12345678')!, parseTag('2.0')!)).toBe(true);
 	});
 
 	// linuxserver.io increments -lsNNN on every rebuild of the same upstream version,
@@ -85,8 +92,9 @@ describe('flavorMatches', () => {
 	// every release its own flavor, and an image pinned as <version>-ls<build> matches
 	// no candidate.
 	it('collapses the linuxserver build counter so its releases share a flavor', () => {
-		expect(flavorOf(parseTag('v2.5.1-ls121')!)).toBe('-ls');
-		expect(flavorOf(parseTag('v2.5.2-ls122')!)).toBe('-ls');
+		// The flavor is the non-numeric skeleton: the -lsNNN counter reduces to `ls`.
+		expect(flavorOf(parseTag('v2.5.1-ls121')!)).toBe('ls');
+		expect(flavorOf(parseTag('v2.5.2-ls122')!)).toBe('ls');
 		expect(flavorMatches(parseTag('v2.5.1-ls121')!, parseTag('v2.5.2-ls122')!)).toBe(true);
 		// Any counter width, and a bare -ls with no digits.
 		expect(flavorMatches(parseTag('1.0-ls1')!, parseTag('1.1-ls999')!)).toBe(true);
@@ -96,9 +104,9 @@ describe('flavorMatches', () => {
 	it('still keeps the linuxserver flavor apart from bare and from other variants', () => {
 		expect(flavorMatches(parseTag('v2.5.1-ls121')!, parseTag('2.5.2')!)).toBe(false);
 		expect(flavorMatches(parseTag('v2.5.1-ls121')!, parseTag('2.5.2-alpine')!)).toBe(false);
-		// A counter that is not at the end is left alone: linuxserver always puts it
-		// last, so this is some other suffix that merely starts with -ls.
-		expect(flavorOf(parseTag('1.0-ls121.1')!)).toBe('-ls121.1');
+		// A counter is <prefix><digits> with no dot; `ls121.1` has a dotted number, so it
+		// is treated as a version-bearing variant and kept whole, not collapsed to `ls`.
+		expect(flavorOf(parseTag('1.0-ls121.1')!)).toBe('ls121.1');
 		expect(flavorMatches(parseTag('1.0-lsio')!, parseTag('1.1-lsio')!)).toBe(true);
 		expect(flavorMatches(parseTag('1.0-lsio')!, parseTag('1.1-ls2')!)).toBe(false);
 	});

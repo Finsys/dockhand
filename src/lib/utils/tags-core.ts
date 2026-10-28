@@ -82,9 +82,16 @@ export function normalizeTag(raw: unknown): string | null {
 export type TagFilterMode = 'all' | 'any';
 
 /**
+ * Sentinel ID for filtering untagged items (items with no tags).
+ * Placed in the filterTagIds array alongside ordinary tag IDs.
+ */
+export const UNTAGGED_TAG_ID = -1;
+
+/**
  * True if an item's tags satisfy the filter. `mode` 'all' requires every selected
- * tag id (AND); 'any' requires at least one (OR). An empty filter matches everything;
- * a non-empty filter never matches an untagged item.
+ * tag id (AND); 'any' requires at least one (OR). An empty filter matches everything.
+ *
+ * Supports `UNTAGGED_TAG_ID` (-1) to match untagged items.
  */
 export function matchesTagFilter(
 	itemTagIds: number[] | undefined,
@@ -92,11 +99,25 @@ export function matchesTagFilter(
 	mode: TagFilterMode = 'all'
 ): boolean {
 	if (!filterTagIds.length) return true;
-	if (!itemTagIds?.length) return false;
+	const isUntagged = !itemTagIds?.length;
+	const wantsUntagged = filterTagIds.includes(UNTAGGED_TAG_ID);
+
+	if (mode === 'any') {
+		if (isUntagged) return wantsUntagged;
+		const have = new Set(itemTagIds);
+		return filterTagIds.some((id) => id !== UNTAGGED_TAG_ID && have.has(id));
+	}
+
+	// mode === 'all'
+	// An item cannot simultaneously be untagged and carry real tags.
+	const realFilterIds = filterTagIds.filter((id) => id !== UNTAGGED_TAG_ID);
+	if (wantsUntagged) {
+		if (realFilterIds.length > 0) return false;
+		return isUntagged;
+	}
+	if (isUntagged) return false;
 	const have = new Set(itemTagIds);
-	return mode === 'any'
-		? filterTagIds.some((id) => have.has(id))
-		: filterTagIds.every((id) => have.has(id));
+	return realFilterIds.every((id) => have.has(id));
 }
 
 /** Case-insensitive name order, tie-broken by id so it is total and stable. #1625 */
@@ -373,6 +394,43 @@ export function withStackTags(ownTags: Tag[], stackTags: Tag[]): Tag[] {
 }
 
 /**
+ * Every tag a container row shows: the ones assigned to it in Dockhand, the ones its own
+ * `dockhand.tags` label names, and - when the containers page is set to inherit - the ones
+ * assigned to its stack.
+ *
+ * What is NOT inherited is the union of the stack's services' labels. A stack row gets its
+ * tags from that union, because compose stamps no label of its own on a stack; handing the
+ * union back down would put every service's label on every other service in the project.
+ * A label belongs to the container that carries it.
+ */
+export function containerTags(
+	container: { name: string; labels?: Record<string, string> },
+	options: {
+		assignedTagIds: Readonly<Record<string, number[]>>;
+		stackTagIds: Readonly<Record<string, number[]>>;
+		tagById: ReadonlyMap<number, Tag>;
+		catalog: Tag[];
+		inheritStackTags: boolean;
+		iconKnown?: IconNameCheck;
+	}
+): Tag[] {
+	const resolve = (ids: number[] | undefined) =>
+		(ids ?? []).map((id) => options.tagById.get(id)).filter((t): t is Tag => !!t);
+
+	const own = mergeLabelTags(
+		resolve(options.assignedTagIds[container.name]),
+		container.labels,
+		options.catalog,
+		options.iconKnown
+	);
+	if (!options.inheritStackTags) return own;
+
+	const stack = container.labels?.['com.docker.compose.project'];
+	if (!stack) return own;
+	return withStackTags(own, resolve(options.stackTagIds[stack]));
+}
+
+/**
  * The tags the filter offers: the catalogue, plus any tag only a label names.
  *
  * Without the second half a label tag could be seen on a row but not filtered or
@@ -404,5 +462,6 @@ export function filterTagList(catalog: Tag[], rowTags: Tag[][]): Tag[] {
 export function prunedTagFilter(saved: number[], offered: Tag[], ready: boolean): number[] {
 	if (!ready) return saved;
 	const ids = new Set(offered.map((t) => t.id));
+	ids.add(UNTAGGED_TAG_ID);
 	return saved.every((id) => ids.has(id)) ? saved : saved.filter((id) => ids.has(id));
 }

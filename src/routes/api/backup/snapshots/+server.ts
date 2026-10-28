@@ -4,8 +4,16 @@ import { authorize } from '$lib/server/authorize';
 import { requireBackups } from '$lib/server/backups/route-guards';
 import { getBackupConfig, getBackupDestinations } from '$lib/server/db';
 import { listSnapshots } from '$lib/server/backups';
+import { withAbortTimeout } from '$lib/server/backups/helpers';
 import { filterSnapshotsByEnvAccess } from '$lib/server/backups/route-guards';
 import { jobResult } from '$lib/server/sse';
+
+// Bounds one destination's listing so a slow or unreachable repo can't stall a
+// response for minutes (restic keeps retrying); a timed-out destination is a failed one
+// and its restic is killed.
+const PER_DEST_MS = Number(process.env.SNAPSHOT_LIST_TIMEOUT_MS ?? 30_000);
+const listWithTimeout = (destinationId: number, configId?: number) =>
+	withAbortTimeout((signal) => listSnapshots(destinationId, configId, signal), PER_DEST_MS, `timed out after ${PER_DEST_MS}ms`);
 
 /**
  * @openapi
@@ -49,17 +57,8 @@ export const GET: RequestHandler = async ({ url, cookies, request }) => {
 			// old X-Incomplete-Destinations header is now log-only.
 			return jobResult(request, async () => {
 				const destinations = await getBackupDestinations();
-				// Bound each destination's listing so one slow or unreachable repo
-				// can't stall the whole response for minutes (restic's own timeout is
-				// several minutes). A timed-out destination is treated as a failed one.
-				const PER_DEST_MS = Number(process.env.SNAPSHOT_LIST_TIMEOUT_MS ?? 30_000);
-				const withTimeout = <T>(p: Promise<T>, name: string): Promise<T> =>
-					Promise.race([
-						p,
-						new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`timed out after ${PER_DEST_MS}ms`)), PER_DEST_MS)),
-					]);
 				const results = await Promise.allSettled(
-					destinations.map(dest => withTimeout(listSnapshots(dest.id, config.id), dest.name).then(snaps =>
+					destinations.map(dest => listWithTimeout(dest.id, config.id).then(snaps =>
 						snaps.map(s => ({ ...s, _destinationId: dest.id, _destinationName: dest.name }))
 					))
 				);
@@ -103,7 +102,7 @@ export const GET: RequestHandler = async ({ url, cookies, request }) => {
 		return jobResult(request, async () => {
 			// No target filter — return all snapshots in this destination (incl. snapshots
 			// from OTHER Dockhand instances sharing/copied into the repo).
-			const snapshots = await listSnapshots(destinationId);
+			const snapshots = await listWithTimeout(destinationId);
 			// (HIGH #8) On enterprise, a non-admin must not see snapshots belonging to
 			// environments they can't access — the ids/paths alone are disclosure. Drop
 			// any snapshot whose owning env (from its dockhand:env tag) isn't accessible.

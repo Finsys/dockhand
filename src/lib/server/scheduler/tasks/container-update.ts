@@ -38,12 +38,13 @@ import {
 	recreateContainerFromInspect,
 	inspectImage
 } from '../../docker';
+import { withPullRetry } from '../../pull-retry';
 import type { ImageEnvLabels } from '../../container-env-merge';
 import { getScannerSettings, scanImage, type ScanResult, type VulnerabilitySeverity } from '../../scanner';
 import { sendEventNotification } from '../../notifications';
 import { parseImageNameAndTag, combineScanSummaries, isSystemContainer, isPodmanInfraContainer } from './update-utils';
 import { resolveBlockDecision } from './block-decision';
-import { isUpdateDisabledByLabel, isHiddenByLabel, isDigestWatchDisabledByLabel } from '../../container-labels';
+import { isUpdateDisabledByLabel, isHiddenByLabel, isDigestWatchDisabledByLabel, isCooldownSkippedByLabel } from '../../container-labels';
 import {
 	parseStackUpdatePolicy,
 	planStackUpdate,
@@ -520,8 +521,23 @@ export async function runContainerUpdate(
 		let newDigest: string | undefined;
 
 		if (!buildFromContext) {
+			// This label suppresses digest-watch updates, not local compose builds.
+			if (isDigestWatchDisabledByLabel(inspectData.Config?.Labels)) {
+				log(`Skipping - dockhand.watch.digest=false label set on container`);
+				await updateScheduleExecution(execution.id, {
+					status: 'skipped',
+					completedAt: new Date().toISOString(),
+					duration: Date.now() - startTime,
+					details: { reason: 'Skipped by dockhand.watch.digest=false label' }
+				});
+				return;
+			}
+
 			log(`Checking registry for updates: ${imageNameFromConfig}`);
-			const registryCheck = await checkImageUpdateAvailable(imageNameFromConfig, currentImageId, envId);
+			const registryCheck = await checkImageUpdateAvailable(
+				imageNameFromConfig, currentImageId, envId, true,
+				isCooldownSkippedByLabel(inspectData.Config?.Labels)
+			);
 
 			if (registryCheck.isLocalImage) {
 				log(`Local image detected - skipping (auto-update requires registry)`);
@@ -541,20 +557,6 @@ export async function runContainerUpdate(
 					completedAt: new Date().toISOString(),
 					duration: Date.now() - startTime,
 					details: { reason: `Registry check failed: ${registryCheck.error}` }
-				});
-				return;
-			}
-
-			// The label says this container's re-pushed tags are not news. Honoured here as
-			// well as in the update CHECK, or the badge would be hidden while the container
-			// was recreated anyway - the opposite of what the label asks for.
-			if (registryCheck.hasUpdate && isDigestWatchDisabledByLabel(inspectData.Config?.Labels)) {
-				log(`Skipping - dockhand.watch.digest=false label set on container`);
-				await updateScheduleExecution(execution.id, {
-					status: 'skipped',
-					completedAt: new Date().toISOString(),
-					duration: Date.now() - startTime,
-					details: { reason: 'Skipped by dockhand.watch.digest=false label' }
 				});
 				return;
 			}
@@ -600,7 +602,7 @@ export async function runContainerUpdate(
 			try {
 				// Pull new image
 				log(`Pulling new image: ${imageNameFromConfig}`);
-				const pulled = await pullImage(imageNameFromConfig, undefined, envId, true);
+				const pulled = await withPullRetry(() => pullImage(imageNameFromConfig, undefined, envId, true), { log });
 				verifiedImageId = pulled?.imageId;
 				verifiedImageReference = pulled?.reference;
 				if (pulled) newDigest = pulled.digest;
@@ -692,7 +694,7 @@ export async function runContainerUpdate(
 			}
 		} else if (!buildFromContext) {
 			try {
-				const pulled = await pullImage(imageNameFromConfig, undefined, envId, true);
+				const pulled = await withPullRetry(() => pullImage(imageNameFromConfig, undefined, envId, true), { log });
 				verifiedImageId = pulled?.imageId;
 				verifiedImageReference = pulled?.reference;
 				if (pulled) newDigest = pulled.digest;

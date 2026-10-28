@@ -26,8 +26,9 @@ import {
 	type PostRestoreOutcome,
 	type ResticRun,
 } from './models';
+import { posix } from 'node:path';
 import { describeFsError } from '../fs-error';
-import { buildInPlaceRestore, buildNewLocationRestore, buildCloneRestore } from './restore-script';
+import { buildInPlaceRestore, buildNewLocationRestore, buildCloneRestore, buildFileRestores, FILE_MOUNT_ROOT, type FileRestoreTarget } from './restore-script';
 import { assertSafeVolumeInclude, assertSafeRestoreTarget } from './security';
 import { liveTargetKey } from './locks';
 import { cleanErrorMsg } from './helpers';
@@ -36,12 +37,24 @@ import type { OperationHandle } from './backup-service';
 import { formatResticLines } from './backup-service';
 import { EXIT_MARKER } from './restic-script';
 
+/**
+ * A single-file volume is written into its host DIRECTORY, bound into the helper, rather than
+ * by binding the file itself (see buildFileRestores). The caller guards the paths: a clone
+ * target is client-chosen, an in-place source comes from the snapshot like a directory bind's.
+ */
+function fileBind(key: string, hostFile: string): { bind: string; target: FileRestoreTarget } {
+	const mountDir = `${FILE_MOUNT_ROOT}/${key}`;
+	return { bind: `${posix.dirname(hostFile)}:${mountDir}:rw`, target: { include: `/volumes/${key}`, mountDir, name: posix.basename(hostFile) } };
+}
+
 /** What the restore service needs from the outside. All injected for testability. */
 export interface RestorePorts {
 	/** Verify instance + env ownership of the snapshot; throws if not allowed. */
 	guardSnapshotAccess(destinationId: number, snapshotId: string): Promise<void>;
 	/** List the volume names present in a snapshot (for existence checks). */
 	listSnapshotVolumes(destinationId: number, snapshotId: string): Promise<string[]>;
+	/** The volume keys in a snapshot that are a single FILE (a single-file bind). */
+	listSnapshotFileVolumes(destinationId: number, snapshotId: string): Promise<string[]>;
 	/** Resolve the target container(s) for an in-place restore. `type` selects a
 	 * single container (name match) or a whole compose stack (project-label match);
 	 * defaults to 'container'. */
@@ -63,7 +76,7 @@ export interface RestorePorts {
 	 * Takes the metadata the caller already loaded so the swap resolves from one read - no second
 	 * dump that could transiently fail and slug-bind a bind into an orphan volume. */
 	resolveVolumeBind(metadata: SnapshotLayout | null, envId: number | null | undefined, volumeName: string):
-		Promise<{ bind: string; include: string }>;
+		Promise<{ bind: string; include: string; source?: string; type?: 'bind' | 'volume' }>;
 	/** Resolve clone destinations through the shared resolver (the SAME one the dialog preview
 	 * uses), so the previewed path and the populated path are one computation. Returns per-volume
 	 * bind material; the caller still does the side effects (volumeExists / createTargetVolume). */
@@ -417,9 +430,36 @@ export class RestoreService {
 					// EFFECTS (collision check / volume creation), not bind construction.
 					const resolved = await this.ports.resolveCloneTargets(job, mapped);
 					const byKey = new Map(resolved.map((r) => [r.key, r]));
+					const fileKeys = new Set(await this.ports.listSnapshotFileVolumes(job.destinationId, job.snapshotId));
+					const files: FileRestoreTarget[] = [];
+					let meta: SnapshotLayout | null | undefined;
 					for (const v of mapped) {
 						const r = byKey.get(v)!;
 						assertSafeVolumeInclude(r.include);
+						if (fileKeys.has(v)) {
+							// Mapped to a named volume (a directory): the file lands in it under the name it
+							// had on the source host. The volume key is not a name: it is slugged and suffixed.
+							if (r.type !== 'bind') {
+								if (await this.ports.volumeExists(r.target, env)) {
+									throw new BackupError('VALIDATION',
+										`volume "${r.target}" already exists on the target environment; remove it or choose another destination before cloning`);
+								}
+								await this.ports.createTargetVolume(r.target, env);
+								meta ??= await this.ports.readSnapshotMetadata(job.destinationId, job.snapshotId).catch(() => null);
+								const source = meta?.volumes?.find((m) => m.key === v)?.source;
+								binds.push(r.bind);
+								files.push({ include: r.include, mountDir: r.include, name: source ? posix.basename(source) : v });
+								continue;
+							}
+							// The same last line of defense as a directory target, on the file and the
+							// directory now bound rw.
+							assertSafeRestoreTarget(r.target);
+							assertSafeRestoreTarget(posix.dirname(r.target));
+							const file = fileBind(v, r.target);
+							binds.push(file.bind);
+							files.push(file.target);
+							continue;
+						}
 						// Last line of defense (independent of validate.ts): a host-path clone target
 						// is bind-mounted rw as root, so refuse a protected system dir even if a
 						// crafted request reached the service directly.
@@ -435,7 +475,10 @@ export class RestoreService {
 						binds.push(r.bind);
 						mountRoots.push(r.include);
 					}
-					const script = buildCloneRestore(job.snapshotId, mountRoots, job.restoreFlags ?? []);
+					const fileScript = buildFileRestores(job.snapshotId, files, job.restoreFlags ?? []);
+					const script = mountRoots.length > 0
+						? `${buildCloneRestore(job.snapshotId, mountRoots, job.restoreFlags ?? [])}${fileScript ? `; ${fileScript}` : ''}`
+						: `set -e; ${fileScript}`;
 					op.progress('restoring', `Populating ${mapped.length} volume(s) on the target environment...`);
 						this.emitVolumeList(op, mapped);
 					const run = await this.ports.runInHelper({ script, binds, envId: env, name: this.ports.helperName(job.snapshotId),
@@ -589,10 +632,22 @@ export class RestoreService {
 
 		// Resolve each volume's live bind + include (rw — the swap writes to it).
 		const binds: string[] = [];
+		// The live data each restore writes, for the live-target lock: a file is locked by its own
+		// path, the one a backup of it locks, not by the directory the helper binds.
+		const lockBinds: string[] = [];
 		const liveRoots: string[] = [];
+		const files: FileRestoreTarget[] = [];
+		const fileKeys = volumes.length > 0 ? new Set(await this.ports.listSnapshotFileVolumes(job.destinationId, job.snapshotId)) : new Set<string>();
 		for (const v of volumes) {
-			const { bind, include } = await this.ports.resolveVolumeBind(meta, env, v);
+			const { bind, include, source, type } = await this.ports.resolveVolumeBind(meta, env, v);
 			assertSafeVolumeInclude(include);
+			lockBinds.push(bind);
+			if (fileKeys.has(v) && type === 'bind' && source) {
+				const file = fileBind(v, source);
+				binds.push(file.bind);
+				files.push(file.target);
+				continue;
+			}
 			binds.push(bind);
 			liveRoots.push(include);
 		}
@@ -600,7 +655,7 @@ export class RestoreService {
 		// Lock the live targets (reject a concurrent op on this data). The fallback identity
 		// matches backup-service's `${type}:${targetName}` so a backup and a restore of the
 		// SAME config-only target still collide, while disjoint config-only targets don't.
-		const key = liveTargetKey(env, binds, `${job.targetType ?? 'container'}:${job.targetName}`);
+		const key = liveTargetKey(env, lockBinds, `${job.targetType ?? 'container'}:${job.targetName}`);
 		const release = this.ports.acquireLiveTarget(key);
 		if (!release) return { status: 'skipped', reason: `Another backup or restore is already running for "${job.targetName ?? key}".` };
 
@@ -618,8 +673,11 @@ export class RestoreService {
 					// is atomic per volume (staging + rename) and self-recovers on the next
 					// restore via the on-disk phase marker, so a crash mid-swap leaves the
 					// live data either fully-old or fully-new, never half-swapped.
-					if (liveRoots.length > 0) {
-						const script = buildInPlaceRestore(job.snapshotId, liveRoots, job.restoreFlags ?? []);
+					if (liveRoots.length > 0 || files.length > 0) {
+						const fileScript = buildFileRestores(job.snapshotId, files, job.restoreFlags ?? []);
+						const script = liveRoots.length > 0
+							? `${buildInPlaceRestore(job.snapshotId, liveRoots, job.restoreFlags ?? [])}${fileScript ? `; ${fileScript}` : ''}`
+							: `set -e; ${fileScript}`;
 						op.progress('restoring', `Restoring ${volumes.length} volume(s) in place...`);
 						this.emitVolumeList(op, volumes);
 						const run = await this.ports.runInHelper({ script, binds, envId: env, name: this.ports.helperName(job.snapshotId),

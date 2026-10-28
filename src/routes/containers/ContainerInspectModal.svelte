@@ -5,7 +5,7 @@
 	import * as Tabs from '$lib/components/ui/tabs';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
-	import { Loader2, Box, Info, Layers, Cpu, MemoryStick, HardDrive, Network, Shield, Settings2, Code, Copy, Check, XCircle, Activity, Wifi, Pencil, RefreshCw, X, Folder, FolderOpen, Moon, Tags, ExternalLink, Gpu, Globe, Link, Unlink, Play, Square as SquareIcon, RotateCw, Trash2, CircleArrowUp, Clock } from 'lucide-svelte';
+	import { Loader2, Box, Info, Layers, Cpu, MemoryStick, HardDrive, Network, Shield, Settings2, Code, Copy, Check, XCircle, Activity, Wifi, Pencil, RefreshCw, X, Folder, FolderOpen, Moon, Tags, ExternalLink, Gpu, Globe, Link, Unlink, Play, Square as SquareIcon, RotateCw, Trash2, CircleArrowUp, Clock, Terminal } from 'lucide-svelte';
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
 	import ContainerIcon from '$lib/components/ContainerIcon.svelte';
 	import * as Select from '$lib/components/ui/select';
@@ -18,9 +18,12 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import { currentEnvironment, appendEnvParam, environments } from '$lib/stores/environment';
+	import { canAccess } from '$lib/stores/auth';
 	import ImageLayersView from '../images/ImageLayersView.svelte';
 	import ContainerComposeTab from './ContainerComposeTab.svelte';
 	import LogsPanel from '../logs/LogsPanel.svelte';
+	import TerminalPanel from '../terminal/TerminalPanel.svelte';
+	import ShellUserPicker from '../terminal/ShellUserPicker.svelte';
 	import FileBrowserPanel from './FileBrowserPanel.svelte';
 	import { fileBrowserStartPath } from '$lib/utils/file-browser-start';
 	import { formatDateTime, appSettings } from '$lib/stores/settings';
@@ -117,6 +120,19 @@
 		open = false;
 		onEdit(containerId);
 	}
+	function doTerminal() {
+		// Open the terminal as a tab inside this modal rather than closing it: the
+		// session lives in the modal and switching tabs leaves it running.
+		terminalStarted = true;
+		showLogs = false;
+		activeTab = 'terminal';
+	}
+
+	// Shell/user selection for the terminal tab, owned by the shared ShellUserPicker
+	// (same component the full terminal page uses). The panel re-keys on these, so a
+	// change reconnects the session.
+	let terminalShell = $state('/bin/sh');
+	let terminalUser = $state('root');
 
 	// Rename state
 	let isEditing = $state(false);
@@ -150,6 +166,11 @@
 
 	// Logs panel state
 	let showLogs = $state(false);
+
+	// Terminal tab: mounted lazily on first open so its WebSocket is not created until
+	// wanted, then kept mounted while the modal lives so switching tabs never kills the
+	// session. Reset when the modal closes, which tears the terminal down with it.
+	let terminalStarted = $state(false);
 
 	// Raw JSON modal state
 	let showRawJson = $state(false);
@@ -428,6 +449,7 @@
 	$effect(() => {
 		if (!open) {
 			showLogs = false;
+			terminalStarted = false;
 			activeTab = 'overview';
 			stopStatsCollection();
 			stopProcessesCollection();
@@ -660,7 +682,7 @@
 </script>
 
 <Dialog.Root bind:open>
-	<Dialog.Content class="max-w-6xl w-[calc(100%-2rem)] h-[calc(100vh-2rem)] flex flex-col">
+	<Dialog.Content class="max-w-7xl w-[calc(100%-2rem)] h-[calc(100vh-2rem)] flex flex-col">
 		<Dialog.Header class="shrink-0">
 			<Dialog.Title class="flex items-center gap-2">
 				<ContainerIcon image={containerData?.Config?.Image ?? ''} name={displayName} class="w-5 h-5" fallbackIcon={Box} showFallbackWhenOff />
@@ -768,6 +790,16 @@
 							</ConfirmPopover>
 						{/if}
 						{#if containerData.State?.Running}
+							{#if $canAccess('containers', 'exec')}
+								<button
+									type="button"
+									onclick={doTerminal}
+									title={m.containers_inspect_action_terminal()}
+									class="p-1 rounded hover:bg-muted transition-colors cursor-pointer"
+								>
+									<Terminal class="w-4 h-4 text-muted-foreground hover:text-foreground" />
+								</button>
+							{/if}
 							{#if onStop}
 								<ConfirmPopover
 									localized
@@ -870,6 +902,9 @@
 					<Tabs.List class="w-full justify-start shrink-0 flex-wrap h-auto min-h-10 bg-muted rounded-lg">
 						<Tabs.Trigger value="overview" onclick={() => showLogs = false}>{m.containers_inspect_tab_overview()}</Tabs.Trigger>
 						<Tabs.Trigger value="logs" onclick={() => showLogs = true}>{m.containers_inspect_tab_logs()}</Tabs.Trigger>
+						{#if containerData?.State?.Running && $canAccess('containers', 'exec')}
+							<Tabs.Trigger value="terminal" onclick={doTerminal}>{m.containers_inspect_tab_terminal()}</Tabs.Trigger>
+						{/if}
 						<Tabs.Trigger value="layers" onclick={() => showLogs = false}>{m.containers_inspect_tab_layers()}</Tabs.Trigger>
 						<Tabs.Trigger value="processes" onclick={() => { showLogs = false; if (processesAutoRefresh) startProcessesCollection(); else fetchProcesses(); }}>{m.containers_inspect_tab_processes()}</Tabs.Trigger>
 						<Tabs.Trigger value="network" onclick={() => showLogs = false}>{m.containers_inspect_tab_network()}</Tabs.Trigger>
@@ -1167,6 +1202,36 @@
 							showCloseButton={false}
 							onClose={() => showLogs = false}
 						/>
+					</Tabs.Content>
+
+					<!-- Terminal Tab: mounted once started, kept alive while the modal is open
+					     (data-[state=inactive]:hidden hides it on other tabs without unmounting,
+					     so the session survives tab switches). It closes when the modal closes. -->
+					<Tabs.Content value="terminal" class="flex-1 min-h-0 flex flex-col gap-2 data-[state=inactive]:hidden">
+						{#if terminalStarted}
+							<div class="flex items-center gap-4 flex-wrap shrink-0">
+								<ShellUserPicker
+									containerId={containerId}
+									envId={$currentEnvironment?.id ?? null}
+									bind:shell={terminalShell}
+									bind:user={terminalUser}
+									mode="exec"
+								/>
+							</div>
+							<div class="flex-1 min-h-0">
+								<TerminalPanel
+									containerId={containerId}
+									containerName={containerName || containerId.slice(0, 12)}
+									shell={terminalShell}
+									user={terminalUser}
+									mode="exec"
+									visible={activeTab === 'terminal'}
+									envId={$currentEnvironment?.id ?? null}
+									fillHeight={true}
+									onClose={() => { terminalStarted = false; activeTab = 'overview'; }}
+								/>
+							</div>
+						{/if}
 					</Tabs.Content>
 
 					<!-- Layers Tab -->

@@ -26,7 +26,7 @@
 	import { formatDateTime, formatRelativeTime } from '$lib/stores/settings';
 	import { currentEnvironment } from '$lib/stores/environment';
 	import { watchJob, readJobResponse } from '$lib/utils/sse-fetch';
-	import { getRepoTypeIcon, formatCron, retentionSummary, classifyJobResult, tagLogLine, bulkDeleteSnapshots, bulkDeleteToast, bulkDeleteFailure } from '$lib/utils/backup';
+	import { getRepoTypeIcon, formatCron, retentionSummary, classifyJobResult, tagLogLine, bulkDeleteSnapshots, indexDestinationSnapshots, rowDestinationIds, withoutConfigSnapshots, applyDestinationListing, canDiffSnapshots, bulkDeleteToast, bulkDeleteFailure } from '$lib/utils/backup';
 	import { cronstrueLocale } from '$lib/i18n/cron';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import BulkDeleteSnapshotsDialog from '$lib/components/BulkDeleteSnapshotsDialog.svelte';
@@ -68,9 +68,7 @@
 		hostname: string;
 		tags: string[] | null;
 		paths: string[];
-		// Attached by loadSnapshots so the Repo column shows an icon + name. For orphans
-		// (searched across all destinations) it comes per-snapshot; for a config's own
-		// snapshots it falls back to the config's destination.
+		// The destination it was listed from, for the Repo column, delete, browse and diff.
 		_destinationId?: number;
 		_destinationName?: string;
 		_destinationRepository?: string;
@@ -102,8 +100,15 @@
 
 	// Expand state
 	let expandedKeys = $state<Set<string>>(new Set());
-	let snapshotsMap = $state<Map<string, Snapshot[]>>(new Map());
-	let loadingSnapshots = $state<Set<string>>(new Set());
+	// Each destination's full snapshot list from its last listing. Every row and count is
+	// derived from these, so expanding a row reads no repository.
+	let destinationSnapshots = $state<Map<number, Snapshot[]>>(new Map());
+	let destinationErrors = $state<Map<number, string>>(new Map());
+	let listingDestinations = $state<Set<number>>(new Set());
+	let thisInstance = $state('');
+	// Only a destination's newest listing applies.
+	const listingSeq = new Map<number, number>();
+	const statsLoaded = new Set<string>();
 	// Map of snapshotId → { filesNew, filesChanged, dataAdded }
 	let snapshotStats = $state<Map<string, { filesNew: number; filesChanged: number; dataAdded: number }>>(new Map());
 
@@ -154,18 +159,15 @@
 				const t = bulkDeleteToast(result);
 				toast[t.type](t.message);
 			}
+			const destIds = new Set(configSelectedTargets(config).map((t) => t._destinationId));
 			selectedSnapshots = new Set();
-			await loadSnapshots(config);
-			const loaded = snapshotsMap.get(config.key);
-			if (loaded !== undefined) snapshotCounts = new Map(snapshotCounts).set(config.key, loaded.length);
+			await Promise.all(destinations.filter((d) => destIds.has(d.id)).map((d) => listDestination(d)));
 		} finally {
 			bulkDeleting = false;
 			bulkDialogOpen = false;
 		}
 	}
 
-	// Snapshot counts loaded async per destination, keyed by targetName:destId
-	let snapshotCounts = $state<Map<string, number>>(new Map());
 	let snapshotCountsLoading = $state(true);
 	// Progress of the per-destination snapshot count sweep: how many destinations have
 	// responded out of the total. Drives an "X / N" indicator so a slow/unreachable
@@ -175,7 +177,30 @@
 	let snapshotCountsTotal = $state(0);
 	// Orphan targets: found in repos but no config exists
 	interface OrphanTarget { key: string; targetName: string; type: string; destinationId: number; destinationName?: string; destinationRepository?: string; snapshotCount: number; latestSnapshot?: string; }
-	let orphanTargets = $state<OrphanTarget[]>([]);
+	// Without this install's id no snapshot can be told own from foreign, so none is shown.
+	const snapshotIndex = $derived(thisInstance
+		? indexDestinationSnapshots(destinationSnapshots, new Set(configs.map((c) => c.id)), thisInstance)
+		: { perConfig: new Map<number, Snapshot[]>(), orphans: [] });
+	const orphanTargets = $derived<OrphanTarget[]>(snapshotIndex.orphans.map((o) => {
+		const dest = destinations.find((d) => d.id === o.destinationId);
+		const typeTag = (o.snapshots[0]?.tags || []).find((t) => t.startsWith('dockhand:type='));
+		return {
+			key: o.key,
+			targetName: o.targetName,
+			type: typeTag?.replace('dockhand:type=', '') || 'container',
+			destinationId: o.destinationId,
+			destinationName: dest?.name,
+			destinationRepository: dest?.repository,
+			snapshotCount: o.snapshots.length,
+			latestSnapshot: o.snapshots[0]?.time
+		};
+	}));
+	// Each row's snapshots, and its count once some destination has listed it.
+	const snapshotsMap = $derived(new Map<string, Snapshot[]>([
+		...configs.map((c): [string, Snapshot[]] => [c.key, snapshotIndex.perConfig.get(c.id) ?? []]),
+		...snapshotIndex.orphans.map((o): [string, Snapshot[]] => [o.key, o.snapshots])
+	]));
+	const snapshotCounts = $derived(new Map([...snapshotsMap].filter(([, snaps]) => snaps.length > 0).map(([key, snaps]) => [key, snaps.length])));
 	let showCreateModal = $state(false);
 
 	// Action states
@@ -247,24 +272,28 @@
 	let diffSnapA = $state<{ id: string; shortId: string; time: string }>({ id: '', shortId: '', time: '' });
 	let diffSnapB = $state<{ id: string; shortId: string; time: string }>({ id: '', shortId: '', time: '' });
 	// Single pending snapshot for diff — click one to select, click another to compare
-	let diffPending = $state<{ snapshot: any; configDestId: number } | null>(null);
+	let diffPending = $state<{ snapshot: any } | null>(null);
 
-	function toggleDiffSnapshot(snapshot: any, configDestId: number) {
+	function toggleDiffSnapshot(snapshot: any) {
 		if (diffPending?.snapshot.id === snapshot.id) {
 			// Deselect
 			diffPending = null;
 		} else if (diffPending) {
 			// Second selection — open diff (older first)
+			if (!canDiffSnapshots(diffPending.snapshot, snapshot)) {
+				toast.error(m.backups_diff_other_destination());
+				return;
+			}
 			const snaps = [diffPending.snapshot, snapshot];
 			snaps.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
-			diffDestId = snaps[0]._destinationId || configDestId;
+			diffDestId = snaps[0]._destinationId;
 			diffSnapA = snaps[0];
 			diffSnapB = snaps[1];
 			showDiff = true;
 			diffPending = null;
 		} else {
 			// First selection
-			diffPending = { snapshot, configDestId };
+			diffPending = { snapshot };
 		}
 	}
 
@@ -338,10 +367,6 @@
 
 	async function fetchData() {
 		loading = true;
-		// Clear stale data before refresh
-		snapshotsMap = new Map();
-		snapshotCounts = new Map();
-		orphanTargets = [];
 		try {
 			const [configRes, destRes, envRes] = await Promise.all([
 				fetch('/api/backup/configs'),
@@ -371,171 +396,92 @@
 		} finally {
 			loading = false;
 		}
-		// Kick off async snapshot count loading
+		// A removed destination's list goes; the rest stay shown until relisted.
+		destinationSnapshots = new Map([...destinationSnapshots].filter(([id]) => destinations.some((d) => d.id === id)));
 		loadSnapshotCounts();
-
-		// fetchData() cleared snapshotsMap, but any EXPANDED config still shows its
-		// (now-empty) snapshot list — reload those so an expanded row doesn't flip to
-		// "No snapshots yet" after a refresh (e.g. right after a restore completes).
+		statsLoaded.clear();
 		for (const config of configs) {
-			if (expandedKeys.has(config.key)) void loadSnapshots(config);
+			if (expandedKeys.has(config.key)) void loadRowStats(config);
 		}
 	}
 
+	async function listDestination(dest: { id: number; name: string; repository: string }) {
+		const seq = (listingSeq.get(dest.id) ?? 0) + 1;
+		listingSeq.set(dest.id, seq);
+		listingDestinations = new Set(listingDestinations).add(dest.id);
+		let result: { snapshots: Snapshot[] } | { error: string };
+		try {
+			// Job-polling so a slow `restic snapshots` behind a proxy isn't aborted at ~15s.
+			const res = await fetch(`/api/backup/snapshots?destinationId=${dest.id}`, { headers: { Accept: 'text/event-stream' } });
+			const d = await readJobResponse(res);
+			const list = d?.snapshots ?? d;
+			result = d?.error ? { error: d.error } : {
+				snapshots: (Array.isArray(list) ? list : []).map((s: Snapshot) => ({
+					...s, _destinationId: dest.id, _destinationName: dest.name, _destinationRepository: dest.repository
+				}))
+			};
+		} catch (e: any) {
+			result = { error: e?.message || String(e) };
+		}
+		if (listingSeq.get(dest.id) !== seq) return;
+		const next = applyDestinationListing(destinationSnapshots, destinationErrors, dest.id, result);
+		destinationSnapshots = next.lists;
+		destinationErrors = next.errors;
+		const listing = new Set(listingDestinations);
+		listing.delete(dest.id);
+		listingDestinations = listing;
+	}
+
+	// Lists every destination; each fills its rows and counts as soon as it answers, so a
+	// slow or unreachable repo (30s server timeout) holds back only its own snapshots.
 	async function loadSnapshotCounts() {
 		snapshotCountsLoading = true;
 		snapshotCountsDone = 0;
 		snapshotCountsTotal = destinations.length;
-		// Live config ids per destination — a snapshot's dockhand:configid tag matching
-		// one of these belongs to a shown config; anything else is orphaned.
-		const liveConfigIds = new Set(configs.map(c => c.id));
-
-		// This install's id, fetched once: a snapshot is a LOCAL config's only when THIS
-		// instance wrote it (configid collides across installs - #1351). Formerly read from
-		// the snapshots list's X-Dockhand-Instance header, which job polling can't carry.
-		const thisInstance = await fetch('/api/backup/instance')
-			.then(r => r.ok ? r.json() : { instanceId: '' })
-			.then(d => d.instanceId || '')
-			.catch(() => '');
-
-		// Query each destination once, then split its snapshots two ways: PER CONFIG
-		// (by dockhand:configid) for the shown rows, and PER NAME for the orphan rows
-		// (snapshots whose config was deleted). The right-column count must match the
-		// expanded per-config list, so it's keyed by config, NOT by target name — two
-		// configs backing the same container to the same repo have DIFFERENT counts.
-		//
-		// Each destination updates snapshotCounts as soon as IT responds, and the
-		// "Loading" indicator clears after the FIRST one finishes - so a single slow or
-		// unreachable repo can't hold the whole list hostage for its 30s timeout. The
-		// rest keep filling in counts progressively behind the scenes.
-		await Promise.allSettled(destinations.map(async (dest) => {
-			try {
-				// Job-polling so a slow `restic snapshots` behind a proxy isn't aborted at ~15s.
-				const res = await fetch(`/api/backup/snapshots?destinationId=${dest.id}`, {
-					headers: { Accept: 'text/event-stream' }
-				});
-				const d = await readJobResponse(res);
-				if (!d || d.error) return;
-				const snaps: any[] = d.snapshots ?? d;
-				if (!Array.isArray(snaps)) return;
-
-				const tagVal = (snap: any, prefix: string): string | undefined =>
-					(snap.tags || []).find((t: string) => t.startsWith(prefix))?.slice(prefix.length);
-
-				// Per-config counts (keyed by config.key = `backup-<id>`), and per-name
-				// buckets of snapshots that belong to NO live config (orphans).
-				const perConfig = new Map<number, number>();
-				const orphanByName = new Map<string, any[]>();
-				for (const snap of snaps) {
-					const cid = Number(tagVal(snap, "dockhand:configid="));
-					const isOwn = tagVal(snap, "dockhand:instance=") === thisInstance;
-					if (isOwn && Number.isInteger(cid) && liveConfigIds.has(cid)) {
-						perConfig.set(cid, (perConfig.get(cid) || 0) + 1);
-					} else {
-						const name = tagVal(snap, 'dockhand:name=') || 'unknown';
-						const arr = orphanByName.get(name) || [];
-						arr.push(snap);
-						orphanByName.set(name, arr);
-					}
-				}
-
-				const newCounts = new Map(snapshotCounts);
-				for (const [cid, count] of perConfig) newCounts.set(`backup-${cid}`, count);
-
-				const newOrphans = [...orphanTargets];
-				for (const [name, orphanSnaps] of orphanByName) {
-					newCounts.set(`orphan-${name}-${dest.id}`, orphanSnaps.length);
-					if (!newOrphans.some(o => o.key === `orphan-${name}-${dest.id}`)) {
-						const typeTag = (orphanSnaps[0]?.tags || []).find((t: string) => t.startsWith('dockhand:type='));
-						newOrphans.push({
-							key: `orphan-${name}-${dest.id}`,
-							targetName: name,
-							type: typeTag?.replace('dockhand:type=', '') || 'container',
-							destinationId: dest.id,
-							destinationName: dest.name,
-							destinationRepository: dest.repository,
-							snapshotCount: orphanSnaps.length,
-							latestSnapshot: orphanSnaps[0]?.time
-						});
-					}
-				}
-				snapshotCounts = newCounts;
-				orphanTargets = newOrphans;
-			} catch {} finally { snapshotCountsDone += 1; }
-		}));
-
-		// Backstop: if there were zero destinations, nothing cleared it above.
+		// This install's id: a snapshot is a LOCAL config's only when THIS instance wrote
+		// it, since configid collides across installs (#1351).
+		if (!thisInstance) {
+			thisInstance = await fetch('/api/backup/instance')
+				.then(r => r.ok ? r.json() : { instanceId: '' })
+				.then(d => d.instanceId || '')
+				.catch(() => '');
+			if (!thisInstance) toast.error(m.backups_load_failed());
+		}
+		await Promise.allSettled(destinations.map((dest) => listDestination(dest).finally(() => { snapshotCountsDone += 1; })));
 		snapshotCountsLoading = false;
 	}
 
-	async function loadSnapshots(config: BackupConfig) {
-		const key = config.key;
-		const newLoading = new Set(loadingSnapshots);
-		newLoading.add(key);
-		loadingSnapshots = newLoading;
+	function rowDestIds(config: BackupConfig): number[] {
+		if (config.isOrphan) return [config.destinationId];
+		return rowDestinationIds(config.destinationId, snapshotsMap.get(config.key) ?? [], destinations.map((d) => d.id), (id) => destinationSnapshots.has(id));
+	}
 
+	function refreshRow(config: BackupConfig) {
+		const ids = new Set(rowDestIds(config));
+		for (const dest of destinations) if (ids.has(dest.id)) void listDestination(dest);
+		void loadRowStats(config);
+	}
+
+	// Per-snapshot file and size stats come from the schedule's execution history.
+	async function loadRowStats(config: BackupConfig) {
+		if (config.isOrphan) return;
+		statsLoaded.add(config.key);
 		try {
-			// Query snapshots for this config's destination only (not allDestinations).
-			// Job-polling so a slow `restic snapshots` behind a proxy isn't aborted at ~15s.
-			const snapUrl = config.isOrphan
-				? `/api/backup/snapshots?destinationId=${config.destinationId}`
-				: `/api/backup/snapshots?configId=${config.id}`;
-			const [snapJson, execRes] = await Promise.all([
-				fetch(snapUrl, { headers: { Accept: 'text/event-stream' } }).then(readJobResponse),
-				config.isOrphan ? Promise.resolve(new Response('{"executions":[]}')) : fetch(`/api/schedules/executions?scheduleType=backup&scheduleId=${config.id}&limit=50`)
-			]);
-			const snapError = snapJson?.error;
-			let snapData = snapJson?.snapshots ?? snapJson;
-			// For orphans, filter by target name (they can span destinations).
-			if (config.isOrphan && Array.isArray(snapData)) {
-				snapData = snapData.filter((s: any) => (s.tags || []).some((t: string) => t === `dockhand:name=${config.targetName}`));
-			}
-			// Attach the destination name + repository to every snapshot so the Repo
-			// column shows an icon + name (not only for orphans — regular configs need
-			// it too). Prefer per-snapshot dest info when present (multi-destination
-			// searches), else fall back to the config's destination.
-			if (Array.isArray(snapData)) {
-				snapData = snapData.map((s: any) => ({
-					...s,
-					_destinationId: s._destinationId ?? config.destinationId,
-					_destinationName: s._destinationName ?? config.destinationName,
-					_destinationRepository: s._destinationRepository ?? config.destinationRepository
-				}));
-			}
-			const newMap = new Map(snapshotsMap);
-			if (!snapError) {
-				newMap.set(key, Array.isArray(snapData) ? snapData : []);
-			} else {
-				newMap.set(key, []);
-				toast.error(cleanErrorMessage(snapError || m.containers_snapshot_error_load()));
-			}
-			snapshotsMap = newMap;
-
-			// Build snapshotId → stats map from executions
-			if (execRes.ok) {
-				const execData = await execRes.json();
-				const newStats = new Map(snapshotStats);
-				for (const exec of execData.executions || []) {
-					if (exec.details?.snapshotId) {
-						newStats.set(exec.details.snapshotId, {
-							filesNew: exec.details.filesNew ?? 0,
-							filesChanged: exec.details.filesChanged ?? 0,
-							dataAdded: exec.details.dataAdded ?? 0
-						});
-					}
+			const res = await fetch(`/api/schedules/executions?scheduleType=backup&scheduleId=${config.id}&limit=50`);
+			if (!res.ok) return;
+			const execData = await res.json();
+			const newStats = new Map(snapshotStats);
+			for (const exec of execData.executions || []) {
+				if (exec.details?.snapshotId) {
+					newStats.set(exec.details.snapshotId, {
+						filesNew: exec.details.filesNew ?? 0,
+						filesChanged: exec.details.filesChanged ?? 0,
+						dataAdded: exec.details.dataAdded ?? 0
+					});
 				}
-				snapshotStats = newStats;
 			}
-		} catch (error) {
-			const newMap = new Map(snapshotsMap);
-			newMap.set(key, []);
-			snapshotsMap = newMap;
-			toast.error(m.containers_snapshot_error_load());
-		} finally {
-			const newLoading = new Set(loadingSnapshots);
-			newLoading.delete(key);
-			loadingSnapshots = newLoading;
-		}
+			snapshotStats = newStats;
+		} catch {}
 	}
 
 	function toggleExpand(config: BackupConfig) {
@@ -544,18 +490,14 @@
 			newSet.delete(config.key);
 		} else {
 			newSet.add(config.key);
-			if (!snapshotsMap.has(config.key)) {
-				loadSnapshots(config);
-			}
+			if (!statsLoaded.has(config.key)) void loadRowStats(config);
 		}
 		expandedKeys = newSet;
 	}
 
 	function handleExpandChange(key: unknown, expanded: boolean) {
 		const config = configs.find(c => c.key === key);
-		if (config && expanded && !snapshotsMap.has(config.key)) {
-			loadSnapshots(config);
-		}
+		if (config && expanded && !statsLoaded.has(config.key)) void loadRowStats(config);
 	}
 
 	async function runBackupNow(config: BackupConfig) {
@@ -607,7 +549,7 @@
 					if (outcome === 'warning') toast.warning(message || m.backups_completed_with_warnings_for({ name: config.targetName }));
 					else toast.success(m.containers_backup_completed_for({ name: config.targetName }));
 				}
-				loadSnapshots(config);
+				void loadRowStats(config);
 				fetchData();
 			} else if (data.error) {
 				logModalStatus = 'error';
@@ -664,6 +606,9 @@
 				const data = await res.json().catch(() => ({}));
 				const n = data.snapshots?.deleted ?? 0;
 				toast.success(withSnaps ? m.backups_config_removed_with_snapshots({ name: config.targetName, count: n }) : m.backups_config_removed({ name: config.targetName }));
+				// The server forgets them on the config's destination; they leave that list now, not
+				// as an orphan row until the relist. Ones on earlier destinations stay, as orphans.
+				if (withSnaps) destinationSnapshots = withoutConfigSnapshots(destinationSnapshots, config.destinationId, config.id, thisInstance);
 				fetchData();
 			} else {
 				const data = await res.json().catch(() => ({}));
@@ -687,12 +632,8 @@
 			});
 			if (res.ok) {
 				toast.success(m.containers_snapshot_deleted());
-				await loadSnapshots(config);
-				// Update the async snapshot count (keyed per config, matching the column)
-				const loaded = snapshotsMap.get(config.key);
-				if (loaded !== undefined) {
-					snapshotCounts = new Map(snapshotCounts).set(config.key, loaded.length);
-				}
+				const dest = destinations.find((d) => d.id === destId);
+				if (dest) await listDestination(dest);
 			} else {
 				const data = await res.json();
 				toast.error(data.error || m.containers_snapshot_error_delete());
@@ -1019,7 +960,8 @@
 			{#snippet expandedRow(config, rowState)}
 				{@const key = config.key}
 				{@const snapshots = snapshotsMap.get(key) || []}
-				{@const isLoading = loadingSnapshots.has(key)}
+				{@const rowDests = rowDestIds(config)}
+				{@const isLoading = rowDests.some((id) => listingDestinations.has(id))}
 				<div class="p-4 pl-12 shadow-inner bg-muted/50 isolate sticky left-0 max-w-[calc(100vw-18rem)]">
 					{#if lastError?.configId === config.id}
 						<div class="flex items-start gap-2 mb-3 p-2 rounded bg-destructive/10 border border-destructive/20 text-xs">
@@ -1036,7 +978,7 @@
 						     finishes; the table rows below stay visible in the meantime. Fades
 						     out on refresh, back in once the fresh count lands. -->
 						{#if !isLoading && snapshots.length > 0}<span class="rounded-full bg-primary/15 px-1.5 text-xs text-primary" transition:fade={{ duration: 200 }}>{snapshots.length}</span>{/if}
-						<button type="button" class="p-0.5 rounded hover:bg-muted transition-colors" onclick={() => loadSnapshots(config)} disabled={isLoading}>
+						<button type="button" class="p-0.5 rounded hover:bg-muted transition-colors" onclick={() => refreshRow(config)} disabled={isLoading}>
 							<RefreshCw class="w-2.5 h-2.5 text-muted-foreground {isLoading ? 'animate-spin' : ''}" />
 						</button>
 						{#if snapshots.some((s) => selectedSnapshots.has(s.id))}
@@ -1046,6 +988,12 @@
 							</button>
 						{/if}
 					</div>
+					{#each rowDests.filter((id) => destinationErrors.has(id)) as destId (destId)}
+						<div class="flex items-start gap-2 mb-2 text-xs text-destructive">
+							<XCircle class="w-3.5 h-3.5 shrink-0 mt-0.5" />
+							<span>{destinations.find((d) => d.id === destId)?.name ?? `#${destId}`}: {cleanErrorMessage(destinationErrors.get(destId) ?? '')}</span>
+						</div>
+					{/each}
 					{#if isLoading && snapshots.length === 0}
 						<!-- First load only: a quiet inline spinner, no skeleton. On a refresh
 						     where rows already exist we fall through and keep the real table
@@ -1104,7 +1052,7 @@
 											<td class="px-3 py-1.5 text-right">
 												<div class="flex items-center justify-end gap-0.5">
 													{#if snapshots.length >= 2}
-														<button type="button" class="p-1 rounded transition-colors {isDiffPending ? 'bg-primary/20 text-primary' : 'hover:bg-muted'}" onclick={() => toggleDiffSnapshot(snapshot, config.destinationId)} title={isDiffPending ? m.containers_snapshot_compare_cancel() : diffPending ? m.containers_snapshot_compare_with_selected() : m.containers_snapshot_compare()}>
+														<button type="button" class="p-1 rounded transition-colors {isDiffPending ? 'bg-primary/20 text-primary' : 'hover:bg-muted'}" onclick={() => toggleDiffSnapshot(snapshot)} title={isDiffPending ? m.containers_snapshot_compare_cancel() : diffPending ? m.containers_snapshot_compare_with_selected() : m.containers_snapshot_compare()}>
 															<ArrowLeftRight class="w-3 h-3 {isDiffPending ? 'text-primary' : 'text-muted-foreground'}" />
 														</button>
 													{/if}

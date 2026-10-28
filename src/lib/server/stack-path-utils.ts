@@ -1,5 +1,6 @@
 import { readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve, sep } from 'node:path';
+import { isValidStackName } from './stack-name-guard';
 
 export function getStackPathHintsFromContainers(containers: { labels?: Record<string, string> | null }[]): {
 	workingDir: string | null;
@@ -25,7 +26,23 @@ export function resolveStackDirForLayout(
 	environmentName: string | undefined,
 	flatLocal: boolean
 ): string {
-	return join(flatLocal ? localRoot : defaultRoot, ...(!flatLocal && environmentName ? [environmentName] : []), stackName);
+	// Defence in depth: the routes reject a bad name before they get here, but this is the
+	// one place every stack path is built, and a future caller that skips the route guard
+	// must not be able to escape the root. A name that is not a plain stack name - a '..',
+	// a '/', a percent-escape that decoded to one - can only ever name a child of the root,
+	// so it is refused here rather than joined.
+	if (!isValidStackName(stackName)) {
+		throw new Error('Invalid stack name');
+	}
+	const root = flatLocal ? localRoot : defaultRoot;
+	const dir = join(root, ...(!flatLocal && environmentName ? [environmentName] : []), stackName);
+	// The environment name comes from the database, not the request, but assert containment
+	// on the final path anyway so this function can never hand back a path outside the root.
+	const resolvedRoot = resolve(root);
+	if (resolve(dir) !== resolvedRoot && !resolve(dir).startsWith(resolvedRoot + sep)) {
+		throw new Error('Resolved stack path escapes the stacks root');
+	}
+	return dir;
 }
 
 export function findStackNameCollision<T extends { stackName: string; environmentId: number | null }>(

@@ -4,12 +4,12 @@
 	import StackEnvVarsEditor, { type EnvVar, type ValidationResult } from '$lib/components/StackEnvVarsEditor.svelte';
 	import CodeEditor from '$lib/components/CodeEditor.svelte';
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
-	import { Plus, Upload, Trash2, List, FileText, AlertTriangle, ShieldAlert, HelpCircle, Info, Check, KeyRound } from 'lucide-svelte';
+	import { Plus, Upload, Trash2, List, FileText, AlertTriangle, ShieldAlert, HelpCircle, Info, Check, KeyRound, ChevronRight } from 'lucide-svelte';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { getProviderIcon } from '$lib/components/provider-icons';
 	import { providerTypeLabel } from '../../routes/settings/secrets/ProviderModal.svelte';
 	import { effectiveMissing, isInlineProviderRef } from '$lib/utils/invault-markers';
-	import { parseRawContent, generateRawContent, keysInRawContent, mergeParsedIntoVariables, textEditorContent as deriveTextEditorContent } from '$lib/utils/env-panel-core';
+	import { parseRawContent, generateRawContent, keysInRawContent, mergeParsedIntoVariables, mergeVariablesIntoRawContent, textEditorContent as deriveTextEditorContent, injectedKeysNeedCollapse } from '$lib/utils/env-panel-core';
 	import { m } from '$lib/paraglide/messages.js';
 
 	interface Props {
@@ -86,11 +86,26 @@
 	});
 
 	const STORAGE_KEY_VIEW_MODE = 'dockhand-env-vars-view-mode';
+	// Collapsed by default: a provider can inject dozens of keys, and the full badge
+	// list otherwise dominates the panel. The choice is remembered across sessions.
+	const STORAGE_KEY_INJECTED_EXPANDED = 'dockhand-env-vars-injected-expanded';
 
 	let fileInputRef: HTMLInputElement;
 	let viewMode = $state<'form' | 'text'>(
 		(typeof localStorage !== 'undefined' && localStorage.getItem(STORAGE_KEY_VIEW_MODE) as 'form' | 'text') || 'form'
 	);
+	let injectedKeysExpanded = $state<boolean>(
+		typeof localStorage !== 'undefined' && localStorage.getItem(STORAGE_KEY_INJECTED_EXPANDED) === 'true'
+	);
+	function toggleInjectedKeys() {
+		injectedKeysExpanded = !injectedKeysExpanded;
+		if (typeof localStorage !== 'undefined') {
+			localStorage.setItem(STORAGE_KEY_INJECTED_EXPANDED, String(injectedKeysExpanded));
+		}
+	}
+	// A short list stays inline (no toggle); a long one gets the collapse control.
+	const injectedKeysCollapsible = $derived(injectedKeysNeedCollapse(injectedSecretKeys.length));
+	const injectedKeysVisible = $derived(!injectedKeysCollapsible || injectedKeysExpanded);
 	let confirmClearOpen = $state(false);
 	let contentAreaRef: HTMLDivElement;
 	let parseWarnings = $state<string[]>([]);
@@ -152,52 +167,7 @@
 			return;
 		}
 
-		// Update existing raw content - preserve comments, update/add/remove variables
-		const varMap = new Map(nonSecretVars.map(v => [v.key.trim(), v]));
-		const usedKeys = new Set<string>();
-		const lines = rawContent.split('\n');
-		const resultLines: string[] = [];
-
-		for (const line of lines) {
-			const trimmed = line.trim();
-
-			// Keep comments and blank lines
-			if (!trimmed || trimmed.startsWith('#')) {
-				resultLines.push(line);
-				continue;
-			}
-
-			// Check if this is a variable line
-			const eqIndex = trimmed.indexOf('=');
-			if (eqIndex > 0) {
-				const key = trimmed.slice(0, eqIndex).trim();
-				if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key)) {
-					const varData = varMap.get(key);
-					if (varData) {
-						// Update value
-						resultLines.push(`${key}=${varData.value}`);
-						usedKeys.add(key);
-					}
-					// If not in varMap, variable was deleted - skip line
-					continue;
-				}
-			}
-
-			resultLines.push(line);
-		}
-
-		// Append new variables
-		for (const v of nonSecretVars) {
-			if (!usedKeys.has(v.key.trim())) {
-				resultLines.push(`${v.key.trim()}=${v.value}`);
-			}
-		}
-
-		let result = resultLines.join('\n');
-		if (result && !result.endsWith('\n')) {
-			result += '\n';
-		}
-		rawContent = result;
+		rawContent = mergeVariablesIntoRawContent(rawContent, variables);
 	}
 
 	/**
@@ -513,15 +483,28 @@
 						{:else}
 							<span class="font-medium">{m.stackenv_injected_the_provider()}</span>
 						{/if}
+						{#if injectedKeysCollapsible}
+							<button
+								type="button"
+								onclick={toggleInjectedKeys}
+								class="inline-flex items-center gap-0.5 ml-0.5 font-medium text-emerald-600 dark:text-emerald-400 hover:text-emerald-800 dark:hover:text-emerald-200 transition-colors"
+								aria-expanded={injectedKeysExpanded}
+							>
+								<ChevronRight class="w-3 h-3 transition-transform {injectedKeysExpanded ? 'rotate-90' : ''}" />
+								{injectedKeysExpanded ? m.stackenv_injected_hide() : m.stackenv_injected_show()}
+							</button>
+						{/if}
 					</div>
 					<p class="text-emerald-600 dark:text-emerald-400 mt-0.5">{m.stackenv_injected_detail_before()} <code>.env</code>{m.stackenv_injected_detail_after()}</p>
-					<div class="flex flex-wrap gap-1.5 mt-1.5">
-						{#each injectedSecretKeys as key}
-							<span class="inline-flex items-center gap-1 font-mono text-2xs font-semibold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-800/40 border border-emerald-300 dark:border-emerald-700">
-								<KeyRound class="w-2.5 h-2.5" />{key}
-							</span>
-						{/each}
-					</div>
+					{#if injectedKeysVisible}
+						<div class="flex flex-wrap gap-1.5 mt-1.5">
+							{#each injectedSecretKeys as key}
+								<span class="inline-flex items-center gap-1 font-mono text-2xs font-semibold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-800/40 border border-emerald-300 dark:border-emerald-700">
+									<KeyRound class="w-2.5 h-2.5" />{key}
+								</span>
+							{/each}
+						</div>
+					{/if}
 				</div>
 			</div>
 		{:else if injectedSecretKeys.length > 0 && !providerBound}
@@ -529,17 +512,32 @@
 			<div class="flex items-start gap-2 px-2.5 py-2 rounded bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50">
 				<AlertTriangle class="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
 				<div class="text-xs text-amber-700 dark:text-amber-300 min-w-0">
-					<div class="font-semibold">{m.stackenv_unbound_title()}</div>
+					<div class="flex items-center gap-1.5 flex-wrap">
+						<span class="font-semibold">{m.stackenv_unbound_title()}</span>
+						{#if injectedKeysCollapsible}
+							<button
+								type="button"
+								onclick={toggleInjectedKeys}
+								class="inline-flex items-center gap-0.5 font-medium text-amber-600 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-200 transition-colors"
+								aria-expanded={injectedKeysExpanded}
+							>
+								<ChevronRight class="w-3 h-3 transition-transform {injectedKeysExpanded ? 'rotate-90' : ''}" />
+								{injectedKeysExpanded ? m.stackenv_injected_hide() : m.stackenv_injected_show()}
+							</button>
+						{/if}
+					</div>
 					<p class="text-amber-600 dark:text-amber-400 mt-0.5">
 						{m.stackenv_unbound_detail({ count: injectedSecretKeys.length })}
 					</p>
-					<div class="flex flex-wrap gap-1.5 mt-1.5">
-						{#each injectedSecretKeys as key}
-							<span class="inline-flex items-center gap-1 font-mono text-2xs font-semibold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-800/40 border border-amber-300 dark:border-amber-700 line-through decoration-amber-500/60">
-								<KeyRound class="w-2.5 h-2.5" />{key}
-							</span>
-						{/each}
-					</div>
+					{#if injectedKeysVisible}
+						<div class="flex flex-wrap gap-1.5 mt-1.5">
+							{#each injectedSecretKeys as key}
+								<span class="inline-flex items-center gap-1 font-mono text-2xs font-semibold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-800/40 border border-amber-300 dark:border-amber-700 line-through decoration-amber-500/60">
+									<KeyRound class="w-2.5 h-2.5" />{key}
+								</span>
+							{/each}
+						</div>
+					{/if}
 				</div>
 			</div>
 		{/if}

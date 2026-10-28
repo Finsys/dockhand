@@ -1,12 +1,6 @@
 import { describe, test, expect } from 'bun:test';
-import {
-	parseRawContent,
-	generateRawContent,
-	textEditorContent,
-	keysInRawContent,
-	mergeParsedIntoVariables,
-	type EnvVarLike
-} from '../src/lib/utils/env-panel-core';
+import { parseRawContent, generateRawContent, textEditorContent, keysInRawContent, mergeParsedIntoVariables, type EnvVarLike, mergeVariablesIntoRawContent, injectedKeysNeedCollapse } from '../src/lib/utils/env-panel-core';
+import { envValueToText, envValueToTextPreserving } from '../src/lib/utils/env-file-values';
 
 /**
  * Replays what the panel does on save, so the #1620 data loss is covered by an
@@ -175,5 +169,162 @@ describe('parseRawContent', () => {
 		const rows: EnvVarLike[] = [{ key: 'A', value: '1' }, { key: 'B', value: 'x=y' }];
 		const { vars } = parseRawContent(generateRawContent(rows));
 		expect(vars.map((v) => ({ key: v.key, value: v.value }))).toEqual(rows);
+	});
+});
+
+describe('quoting across the text view', () => {
+	test('a quoted .env value reaches the form without its quotes', () => {
+		// The quotes are the file's syntax. Left on, a row marked secret is injected
+		// through the process environment and the container receives them as content.
+		const { vars } = parseRawContent('FOO="bar"\nBAZ=\'qux\'\nPLAIN=raw\n');
+		expect(vars.map((v) => [v.key, v.value])).toEqual([
+			['FOO', 'bar'],
+			['BAZ', 'qux'],
+			['PLAIN', 'raw']
+		]);
+	});
+
+	test('a value is quoted on the way out only when it needs to be', () => {
+		expect(generateRawContent([{ key: 'A', value: 'plain', isSecret: false }])).toBe('A=plain\n');
+		expect(generateRawContent([{ key: 'A', value: 'has#hash', isSecret: false }])).toBe('A="has#hash"\n');
+		expect(generateRawContent([{ key: 'A', value: ' pad ', isSecret: false }])).toBe('A=" pad "\n');
+	});
+
+	test('a value survives the round trip the panel puts it through', () => {
+		// Either side of the panel can be edited, so a row rendered to text and parsed
+		// back must be the same row - this is what stops a save rewriting a password.
+		const values = [
+			'bar', 'a b', 'has#hash', 'with"quote', "with'quote", 'dollar$VAR',
+			'p@$$w0rd#1', '  pad  ', 'a=b', '"already"', 'back\\slash', 'line\nbreak', '$'
+		];
+		for (const value of values) {
+			const text = generateRawContent([{ key: 'K', value, isSecret: false }]);
+			expect(parseRawContent(text).vars[0]?.value).toBe(value);
+		}
+	});
+});
+
+/**
+ * The panel is edited from both sides, so a value makes this trip on every save. Without
+ * a matching reader and writer each save eats another layer of quoting until a
+ * JSON-style list is no longer valid, so stability is the property that matters here,
+ * not the exact spelling of the text.
+ *
+ * `mergeVariablesIntoRawContent` is the write side, called straight from the panel's
+ * syncVariablesToRaw - so this exercises the real function rather than a copy of it.
+ * A line whose value is unchanged keeps its own text, which is what makes an untouched
+ * file byte-identical after a save.
+ */
+describe('a value survives repeated saves', () => {
+	function save(rawContent: string, variables: EnvVarLike[]) {
+		const shownBefore = keysInRawContent(rawContent);
+		const { vars } = parseRawContent(rawContent);
+		const merged = mergeParsedIntoVariables(vars, variables, shownBefore);
+		return { rawContent: mergeVariablesIntoRawContent(rawContent, merged), variables: merged };
+	}
+
+	test('a nested-quote list is not eaten a layer at a time', () => {
+		// A JSON-style list is the shape that shows the damage: one lost layer leaves
+		// `"sub1.com","sub2.com"`, a second leaves `sub1.com","sub2.com`.
+		let state = {
+			rawContent: `HOSTNAMES='"sub1.com","sub2.com"'\n# a comment\nSIMPLE=value\n`,
+			variables: [] as EnvVarLike[]
+		};
+		for (let i = 0; i < 5; i++) state = save(state.rawContent, state.variables);
+
+		const hostnames = state.variables.find((v) => v.key === 'HOSTNAMES');
+		expect(hostnames?.value).toBe('"sub1.com","sub2.com"');
+		expect(state.rawContent).toContain('# a comment');
+	});
+
+	test('the text stops changing after the first save', () => {
+		// A value is written in one canonical form, so a later save is a no-op. Without
+		// that the file drifts on every visit even when nobody edited anything.
+		let state = {
+			rawContent: `HOSTNAMES='"sub1.com","sub2.com"'\nQUOTED="hello world"\nSPECIAL='password$123#!'\nPLAIN=value\n`,
+			variables: [] as EnvVarLike[]
+		};
+		state = save(state.rawContent, state.variables);
+		const afterFirst = state.rawContent;
+		for (let i = 0; i < 4; i++) {
+			state = save(state.rawContent, state.variables);
+			expect(state.rawContent).toBe(afterFirst);
+		}
+	});
+
+	test('an untouched file comes back byte-identical', () => {
+		// The strongest statement of the property: a user who opens a stack and saves it
+		// without editing anything must get their file back unchanged. A writer that
+		// re-spells each line cannot promise that, and a `${NAME}` reference re-spelled as
+		// a literal dollar stops resolving at deploy time.
+		const file = [
+			'DIRECTORY=/srv/data',
+			'UPLOAD_LOCATION="${DIRECTORY}/immich"',
+			"LITERAL='${NOT_A_REF}'",
+			'DB_PASSWORD=p@$$w0rd',
+			'# a comment',
+			'PLAIN=value',
+			''
+		].join('\n');
+
+		let state = { rawContent: file, variables: [] as EnvVarLike[] };
+		for (let i = 0; i < 3; i++) state = save(state.rawContent, state.variables);
+		expect(state.rawContent).toBe(file);
+	});
+
+	test('a variable with no line yet is appended, quoted as it needs', () => {
+		const written = mergeVariablesIntoRawContent('EXISTING=keep\n', [
+			{ key: 'EXISTING', value: 'keep', isSecret: false },
+			{ key: 'ADDED', value: 'has#hash', isSecret: false },
+			{ key: 'PLAIN', value: 'simple', isSecret: false }
+		]);
+		// The trailing newline leaves an empty field, which is kept as the blank line it
+		// is, so an appended variable lands after it rather than on it.
+		expect(written).toBe('EXISTING=keep\n\nADDED="has#hash"\nPLAIN=simple\n');
+	});
+
+	test('comments and blank lines are carried over, and a deleted variable is dropped', () => {
+		const written = mergeVariablesIntoRawContent(
+			'# header\n\nKEEP=yes\nGONE=no\n# trailing\n',
+			[{ key: 'KEEP', value: 'yes', isSecret: false }]
+		);
+		expect(written).toBe('# header\n\nKEEP=yes\n# trailing\n');
+	});
+
+	test('a secret never reaches the file', () => {
+		const written = mergeVariablesIntoRawContent('PUBLIC=yes\n', [
+			{ key: 'PUBLIC', value: 'yes', isSecret: false },
+			{ key: 'TOKEN', value: 'hunter2', isSecret: true }
+		]);
+		expect(written).toBe('PUBLIC=yes\n');
+		expect(written).not.toContain('hunter2');
+	});
+
+	test('a single-quoted value keeps its dollar and hash through a save', () => {
+		// A single quote makes a raw string, so eating it changes the password itself.
+		let state = { rawContent: `SPECIAL='password$123#!'\n`, variables: [] as EnvVarLike[] };
+		for (let i = 0; i < 3; i++) state = save(state.rawContent, state.variables);
+		expect(state.variables.find((v) => v.key === 'SPECIAL')?.value).toBe('password$123#!');
+	});
+});
+
+describe('injectedKeysNeedCollapse (provider banner collapse threshold)', () => {
+	// A short injected list reads better inline; a long one gets a collapse toggle.
+	// The default threshold is 5, so the boundary is 4 (inline) vs 5 (collapsible).
+	test('a list shorter than the threshold stays inline', () => {
+		expect(injectedKeysNeedCollapse(0)).toBe(false);
+		expect(injectedKeysNeedCollapse(1)).toBe(false);
+		expect(injectedKeysNeedCollapse(4)).toBe(false);
+	});
+
+	test('a list at or above the threshold is collapsible', () => {
+		expect(injectedKeysNeedCollapse(5)).toBe(true);
+		expect(injectedKeysNeedCollapse(6)).toBe(true);
+		expect(injectedKeysNeedCollapse(46)).toBe(true);
+	});
+
+	test('the threshold is overridable', () => {
+		expect(injectedKeysNeedCollapse(2, 3)).toBe(false);
+		expect(injectedKeysNeedCollapse(3, 3)).toBe(true);
 	});
 });

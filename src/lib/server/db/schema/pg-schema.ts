@@ -140,6 +140,22 @@ export const autoUpdateSettings = pgTable('auto_update_settings', {
 	envContainerUnique: unique().on(table.environmentId, table.containerName)
 }));
 
+export const scheduledContainerActions = pgTable('scheduled_container_actions', {
+	id: serial('id').primaryKey(),
+	environmentId: integer('environment_id').notNull().references(() => environments.id, { onDelete: 'cascade' }),
+	containerName: text('container_name').notNull(),
+	enabled: boolean('enabled').notNull().default(true),
+	startAt: text('start_at'),
+	stopAt: text('stop_at'),
+	source: text('source').notNull().default('ui'),
+	lastStarted: timestamp('last_started', { mode: 'string' }),
+	lastStopped: timestamp('last_stopped', { mode: 'string' }),
+	createdAt: timestamp('created_at', { mode: 'string' }).defaultNow(),
+	updatedAt: timestamp('updated_at', { mode: 'string' }).defaultNow()
+}, (table) => ({
+	envContainerUnique: unique().on(table.environmentId, table.containerName)
+}));
+
 export const notificationSettings = pgTable('notification_settings', {
 	id: serial('id').primaryKey(),
 	type: text('type').notNull(),
@@ -546,6 +562,10 @@ export const pendingContainerUpdates = pgTable('pending_container_updates', {
 	hasImageUpdate: boolean('has_image_update').notNull().default(true),
 	// A newer VERSION tag (semver) for a pinned image, as JSON {tag,bump,skipped}.
 	// Null when there's no semver suggestion. Advisory - never auto-applied.
+	// True when the image is `repo:tag@sha256:...` and the digest behind its tag has
+	// moved. Reported, never applied: the pull returns the pinned manifest, so the
+	// compose file is what has to change. Defaults false so existing rows are unchanged.
+	pinnedToDigest: boolean('pinned_to_digest').notNull().default(false),
 	newerVersion: text('newer_version'),
 	// Hours left before a held update may be applied. Null when no cooldown applies,
 	// so a row can record "waiting" without claiming the update is ready.

@@ -1,6 +1,7 @@
 import { describe, test, expect } from 'bun:test';
 import {
 	isDaemonExportFailure,
+	scanErrorOutput,
 	toRegistryScanCmd,
 	toRegistryRef,
 	registryAuthEnv,
@@ -292,5 +293,49 @@ describe('RegistryFallbackMemory', () => {
 		m.markBroken(5);
 		m.clear();
 		expect(m.prefersRegistry(5)).toBe(false);
+	});
+});
+
+describe('scanErrorOutput (classify on the full output, not the truncated message)', () => {
+	// A real scanner prints many INFO/progress lines before it fails, so the
+	// export-bug signature lands well past the 1000-char point the helper's error
+	// MESSAGE is truncated to. The helper carries the untruncated output on the
+	// error so the fallback can still classify it.
+	const padding = Array.from(
+		{ length: 40 },
+		(_, i) => `[0000] INFO cataloging package catalogers index=${i} name=some-catalog-name`
+	).join('\n');
+	const signatureLine =
+		` - docker: unable to provide image from tarball: file blobs/sha256/59a242dc0cb5 does not exist`;
+	const fullStderr = `${padding}\n${signatureLine}`;
+	const truncatedMessage = `Container exited with code 1: ${fullStderr}`.substring(0, 1000);
+
+	test('the signature is genuinely past the 1000-char message cut', () => {
+		// Guards the premise: if this ever fits in the message, the test proves nothing.
+		expect(fullStderr.length).toBeGreaterThan(1000);
+		expect(isDaemonExportFailure(truncatedMessage)).toBe(false);
+		expect(isDaemonExportFailure(fullStderr)).toBe(true);
+	});
+
+	test('prefers the error stderr over its truncated message', () => {
+		const err = Object.assign(new Error(truncatedMessage), { stderr: fullStderr });
+		expect(isDaemonExportFailure(scanErrorOutput(err))).toBe(true);
+	});
+
+	test('falls back to stdout when stderr is empty', () => {
+		const err = Object.assign(new Error('Container exited with code 1'), {
+			stderr: '',
+			stdout: fullStderr
+		});
+		expect(scanErrorOutput(err)).toBe(fullStderr);
+	});
+
+	test('falls back to the message for an error that carries no output', () => {
+		expect(scanErrorOutput(new Error('plain failure'))).toBe('plain failure');
+	});
+
+	test('handles a non-Error thrown value', () => {
+		expect(scanErrorOutput('string failure')).toBe('string failure');
+		expect(scanErrorOutput(null)).toBe('null');
 	});
 });

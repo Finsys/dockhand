@@ -18,6 +18,8 @@
 		providers: ProviderOption[];
 		/** Suffix for element ids so two pickers on one page don't collide. */
 		idSuffix?: string;
+		/** A view with no Save (the git stack's read-only view): show the binding, do not let it change. */
+		readonly?: boolean;
 		onchange?: () => void;
 	}
 
@@ -26,6 +28,7 @@
 		envVars = $bindable([]),
 		providers,
 		idSuffix = '',
+		readonly = false,
 		onchange
 	}: Props = $props();
 
@@ -55,6 +58,7 @@
 			<Label for="secret-provider-select{idSuffix}" class="text-xs text-muted-foreground shrink-0">{m.secretprovider_label()}</Label>
 			<Select.Root
 				type="single"
+				disabled={readonly}
 				value={secretProviderId !== null ? String(secretProviderId) : ''}
 				onValueChange={(v) => { secretProviderId = v ? parseInt(v) : null; onchange?.(); }}
 			>
@@ -94,10 +98,14 @@
 					class="h-7 text-xs font-mono flex-1 min-w-0 max-w-xs"
 					placeholder={bulkSelectorField.placeholder ?? ''}
 					value={bulkSelectorValue}
+					readonly={readonly}
 					oninput={(e) => writeSelector(e.currentTarget.value)}
 				/>
 			{/if}
 		</div>
+		{#if readonly}
+			<p class="text-2xs text-muted-foreground/70 pl-0.5">{m.secretprovider_readonly_hint()}</p>
+		{/if}
 		{#if bulkSelectorField?.hint}
 			<p class="text-2xs text-muted-foreground/70 pl-0.5">{bulkSelectorField.hint}</p>
 		{/if}

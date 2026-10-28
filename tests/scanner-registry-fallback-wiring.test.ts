@@ -160,7 +160,17 @@ describe('registry-first wiring in scanner.ts', () => {
 		// The original fallback must survive: a blob-export failure still switches the env
 		// to registry-first, which is what makes the doomed docker save skippable.
 		expect(scannerSrc).toContain('markBroken(envId)');
-		expect(scannerSrc).toContain('isDaemonExportFailure(msg)');
+		expect(scannerSrc).toContain('isDaemonExportFailure(scanErrorOutput(error))');
+	});
+
+	test('both failure branches classify on the full output, not the truncated message', () => {
+		// The helper message is cut to ~1000 chars; the export-bug signature lands after
+		// that, so the fallback must classify on scanErrorOutput (the untruncated stderr),
+		// not the Error message. scanner.ts is not importable under bun, so this is the
+		// only guard on the wiring - a revert to error.message would pass unit tests but
+		// silently reinstate the bug.
+		expect(scannerSrc).toContain('isDaemonExportFailure(scanErrorOutput(error))');
+		expect(preferBranch()).toContain('chooseReportedError(rmsg, scanErrorOutput(daemonError))');
 	});
 });
 

@@ -1,29 +1,13 @@
 import { json } from '@sveltejs/kit';
+import { isValidStackName } from '$lib/server/stack-name-guard';
 import { getStackEnvVars, setStackEnvVars, getStackSource, getStackInjectedSecretKeys, getSecretProviderById } from '$lib/server/db';
 import { findStackDir } from '$lib/server/stacks';
 import { authorize } from '$lib/server/authorize';
 import { existsSync, readFileSync } from 'node:fs';
+import { isForbiddenStackPath } from '$lib/server/fs-guard';
 import { join, dirname } from 'node:path';
+import { parseEnvFileForForm } from '$lib/utils/env-file-values';
 import type { RequestHandler } from './$types';
-
-/**
- * Parse a .env file content into key-value pairs
- */
-function parseEnvFile(content: string): Record<string, string> {
-	const result: Record<string, string> = {};
-	for (const line of content.split('\n')) {
-		const trimmed = line.trim();
-		// Skip empty lines and comments
-		if (!trimmed || trimmed.startsWith('#')) continue;
-		const eqIndex = trimmed.indexOf('=');
-		if (eqIndex > 0) {
-			const key = trimmed.substring(0, eqIndex).trim();
-			const value = trimmed.substring(eqIndex + 1);
-			result[key] = value;
-		}
-	}
-	return result;
-}
 
 /**
  * GET /api/stacks/[name]/env?env=X
@@ -40,8 +24,9 @@ function parseEnvFile(content: string): Record<string, string> {
  * description: The source of `variables` depends on the stack type. For a GIT stack, ALL variables (secret and non-secret) come from the database via this endpoint - the DB is the canonical store the UI, `POST /env/validate`, and deploys read. For an INTERNAL/adopted stack, non-secrets come from the on-disk `.env` file (written via `PUT /env/raw`) and only secrets come from the DB. Secret values are masked as `***` and never returned in plaintext. Each variable is `{ key, value, isSecret }`.
  * path: name:string The stack name
  * query: env:integer Environment id the stack belongs to
+ * resp-400: Invalid stack name (or malformed request body)
  * resp-200: {variables:array<{key:string!, value:string!, isSecret:boolean!}>!, injectedSecretKeys:array<string>, secretProvider:object}
- * resp-403: Permission denied (needs stacks:view)
+ * resp-403: Permission denied (needs stacks:view), or the env file path is a protected location
  * resp-500: Failed to read env vars
  */
 export const GET: RequestHandler = async ({ params, url, cookies }) => {
@@ -60,7 +45,11 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 	}
 
 	try {
-		const stackName = decodeURIComponent(params.name);
+		// Validate the name shape before it is used in a filesystem path.
+		const stackName = params.name;
+		if (!isValidStackName(stackName)) {
+			return json({ error: 'Invalid stack name' }, { status: 400 });
+		}
 
 		// Get secrets from database (masked - values show as '***')
 		const dbSecrets = await getStackEnvVars(stackName, envIdNum, true);
@@ -97,11 +86,14 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 			}
 		} else {
 			// Internal/adopted stacks: non-secrets from file, secrets from DB
+			// The stored path is client-chosen; never read or write a protected location through it.
+			if (envFilePath && isForbiddenStackPath(envFilePath)) {
+				return json({ error: 'Env file path is not allowed' }, { status: 403 });
+			}
 			if (envFilePath && existsSync(envFilePath)) {
 				try {
 					const content = readFileSync(envFilePath, 'utf-8');
-					const fileVars = parseEnvFile(content);
-					for (const [key, value] of Object.entries(fileVars)) {
+					for (const { key, value } of parseEnvFileForForm(content)) {
 						variables.push({ key, value, isSecret: false });
 					}
 				} catch {
@@ -172,7 +164,11 @@ export const PUT: RequestHandler = async ({ params, url, cookies, request }) => 
 	}
 
 	try {
-		const stackName = decodeURIComponent(params.name);
+		// Validate the name shape before it is used in a filesystem path.
+		const stackName = params.name;
+		if (!isValidStackName(stackName)) {
+			return json({ error: 'Invalid stack name' }, { status: 400 });
+		}
 		const body = await request.json();
 
 		if (!body.variables || !Array.isArray(body.variables)) {

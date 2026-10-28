@@ -146,9 +146,9 @@ export function classifyProcClose(
 }
 
 /**
- * Classify a spawn `error` (restic missing / not spawnable): a real failure surfaced
- * as data with `exitCode: undefined` (never thrown), the error message appended to
- * stderr so the caller sees why.
+ * Classify a spawn `error` (restic missing / not spawnable, or aborted by the caller's
+ * signal): a real failure surfaced as data with `exitCode: undefined` (never thrown),
+ * the error message appended to stderr so the caller sees why.
  */
 export function classifyProcError(
 	err: Error,

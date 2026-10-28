@@ -9,6 +9,7 @@
 	import { type EnvVar, type ValidationResult } from '$lib/components/StackEnvVarsEditor.svelte';
 	import SecretProviderPicker from '$lib/components/SecretProviderPicker.svelte';
 	import { SELECTOR_VARS } from '$lib/utils/bulk-selector';
+	import { parseEnvFileForForm } from '$lib/utils/env-file-values';
 	import { classifyMarker, isInlineProviderRef, resolvedRefVarNames } from '$lib/utils/invault-markers';
 	import { applyQuickFix, findingKey } from '$lib/utils/compose-quick-fix';
 	import { Layers, Save, Play, Code, GitGraph, GitBranch, GitCommitHorizontal, Github, Loader2, AlertCircle, X, Sun, Moon, TriangleAlert, GripVertical, GripHorizontal, FolderOpen, Copy, Check, XCircle, MapPin, ArrowRight, ArrowDown, Info, Box, FolderSync, Archive, ListChecks, History, ChevronDown } from 'lucide-svelte';
@@ -19,7 +20,7 @@
 	import { deployTallyFromRuns } from '$lib/utils/deploy-run-view';
 	import { volumesForStack, type VolumeInfo } from '$lib/utils/mounts';
 	import { fetchBackupExecutions } from '$lib/utils/backup';
-	import type { Component } from 'svelte';
+	import type { IconComponent } from '$lib/types';
 	import FilesystemBrowser from './FilesystemBrowser.svelte';
 	import DetectedComposeFile from './DetectedComposeFile.svelte';
 	import { canAccess } from '$lib/stores/auth';
@@ -65,7 +66,7 @@
 	// Options picked in the RedeployPopover next to "Save & redeploy" / "Create & Start"
 	// (see the pull/build/forceRecreate contract RedeployPopover.svelte already uses for
 	// the stack-grid redeploy actions).
-	type DeployOptions = { pull: boolean; build: boolean; forceRecreate: boolean };
+	type DeployOptions = { pull: boolean; respectPullPolicy?: boolean; build: boolean; pullBase?: boolean; forceRecreate: boolean };
 
 	interface Props {
 		open: boolean;
@@ -586,7 +587,7 @@
 	let showFileBrowser = $state(false);
 	let fileBrowserConfig = $state<{
 		title: string;
-		icon?: Component<{ class?: string }>;
+		icon?: IconComponent;
 		selectFilter?: RegExp;
 		selectMode: 'file' | 'directory' | 'file_or_directory';
 		onSelect: (path: string, name: string) => void;
@@ -854,19 +855,7 @@
 
 	// Parse env vars from raw content
 	function parseEnvVarsFromRaw(content: string) {
-		const vars: EnvVar[] = [];
-		const lines = content.split('\n');
-		for (const line of lines) {
-			const trimmed = line.trim();
-			if (!trimmed || trimmed.startsWith('#')) continue;
-			const eqIndex = trimmed.indexOf('=');
-			if (eqIndex > 0) {
-				const key = trimmed.substring(0, eqIndex);
-				const value = trimmed.substring(eqIndex + 1);
-				vars.push({ key, value, isSecret: false });
-			}
-		}
-		envVars = vars;
+		envVars = parseEnvFileForForm(content).map((row) => ({ ...row, isSecret: false }));
 	}
 
 	// Handle compose file selection from browser
@@ -1467,17 +1456,17 @@
 						console.error('Failed to fetch stack containers:', e);
 					}
 
-					// Load the stack's icon even when the compose isn't local (read-only git
-					// stack): the icon is Dockhand metadata, not repo content, so the header
-					// must still show a custom icon the user set.
+					// Load the stack's icon and secret provider even when the compose isn't local
+					// (read-only git stack): both are Dockhand metadata, not repo content.
 					try {
 						const sourcesRes = await fetch(appendEnvParam('/api/stacks/sources', envId));
 						if (sourcesRes.ok) {
 							const sourceMap = await sourcesRes.json();
 							formIcon = sourceMap?.[stackName]?.icon ?? null;
+							formSecretProviderId = sourceMap?.[stackName]?.secretProviderId ?? null;
 						}
 					} catch (e) {
-						console.warn('Failed to load stack icon:', e);
+						console.warn('Failed to load stack source (icon / secret provider):', e);
 					}
 					return;
 				}
@@ -1675,7 +1664,9 @@
 			// plain "Create" button, which never reaches deployStack server-side anyway.
 			if (start && deployOptions) {
 				requestBody.pull = deployOptions.pull;
+				requestBody.respectPullPolicy = deployOptions.respectPullPolicy;
 				requestBody.build = deployOptions.build;
+				requestBody.pullBase = deployOptions.pullBase;
 				requestBody.forceRecreate = deployOptions.forceRecreate;
 			}
 
@@ -1855,7 +1846,9 @@
 			// plain "Save" button, which never reaches deployStack server-side anyway.
 			if (restart && deployOptions) {
 				requestBody.pull = deployOptions.pull;
+				requestBody.respectPullPolicy = deployOptions.respectPullPolicy;
 				requestBody.build = deployOptions.build;
+				requestBody.pullBase = deployOptions.pullBase;
 				requestBody.forceRecreate = deployOptions.forceRecreate;
 			}
 
@@ -2473,19 +2466,12 @@
 								<PathBarItem
 									label={m.stacks_modal_env_file()}
 									path={displayEnvPath || null}
-									selectedPath={workingEnvPath || suggestedEnvPath || ''}
 									placeholder={m.stacks_modal_env_path_placeholder()}
 									copied={envPathCopied}
 									onCopy={() => copyText(displayEnvPath, (v) => envPathCopied = v)}
 									onBrowse={readonly ? undefined : openEnvBrowser}
-									isEditable={!readonly}
-									isCustom={!!workingEnvPath}
 									defaultText={mode === 'create' ? m.stacks_modal_path_enter_name_above() : m.stacks_modal_path_not_specified()}
 									isSuggested={isEnvPathSuggested}
-									onPathChange={(value) => {
-										workingEnvPath = value;
-										isDirty = true;
-									}}
 								/>
 							</div>
 							<!-- Theme toggle -->
@@ -2650,6 +2636,7 @@
 									bind:secretProviderId={formSecretProviderId}
 									bind:envVars
 									providers={secretProviders}
+									{readonly}
 									onchange={() => { secretProviderTouched = true; markDirty(); debouncedValidate(); }}
 								/>
 								<StackEnvVarsPanel

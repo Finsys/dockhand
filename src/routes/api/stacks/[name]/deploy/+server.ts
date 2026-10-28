@@ -1,5 +1,7 @@
 import { json } from '@sveltejs/kit';
+import { isValidStackName } from '$lib/server/stack-name-guard';
 import { deployStack, requireComposeFile, ComposeFileNotFoundError } from '$lib/server/stacks';
+import { deployPullPolicy } from '$lib/server/compose-args';
 import { authorize } from '$lib/server/authorize';
 import { auditStack } from '$lib/server/audit';
 import { createJobResponse } from '$lib/server/sse';
@@ -12,8 +14,9 @@ import type { RequestHandler } from './$types';
  * summary: Deploy (docker compose up) a stack, optionally pulling images, building, and force-recreating; progress and the final result stream over Server-Sent Events
  * path: name:string! Stack name (from GET /api/stacks)
  * query: env:integer Environment ID the stack belongs to (from GET /api/environments)
- * body: {pull:boolean, build:boolean, forceRecreate:boolean}
+ * body: {pull:boolean, respectPullPolicy:boolean, build:boolean, pullBase:boolean, forceRecreate:boolean}
  * body-example: {"pull":true,"build":false,"forceRecreate":false}
+ * resp-400: Invalid stack name
  * resp-200: Server-Sent-Events job stream with progress events and a final result event ({success, output})
  * resp-403: Permission denied (requires stacks:start, or environment access denied on enterprise)
  */
@@ -35,13 +38,19 @@ export const POST: RequestHandler = async (event) => {
 	}
 
 	const body = await request.json().catch(() => ({}));
-	const { pull, build, forceRecreate } = body as {
+	const { pull, respectPullPolicy, build, pullBase, forceRecreate } = body as {
 		pull?: boolean;
+		respectPullPolicy?: boolean;
 		build?: boolean;
+		pullBase?: boolean;
 		forceRecreate?: boolean;
 	};
 
-	const stackName = decodeURIComponent(params.name);
+	// Validate the name shape before it is used in a filesystem path.
+	const stackName = params.name;
+	if (!isValidStackName(stackName)) {
+		return json({ error: 'Invalid stack name' }, { status: 400 });
+	}
 
 	// Read up-front (not inside createJobResponse's callback, as before): the run
 	// record needs a compose/env hash and a schedule_executions row BEFORE the job
@@ -90,8 +99,9 @@ export const POST: RequestHandler = async (event) => {
 				name: stackName,
 				compose: composeResult.content!,
 				envId: envIdNum,
-				pullPolicy: pull ? 'always' : undefined,
+				pullPolicy: deployPullPolicy(pull, respectPullPolicy),
 				build,
+				pullBase: !!pullBase,
 				forceRecreate,
 				composePath: composeResult.composePath,
 				envPath: composeResult.envPath,
@@ -108,7 +118,7 @@ export const POST: RequestHandler = async (event) => {
 
 			// Audit log
 			await auditStack(event, 'deploy', stackName, envIdNum, {
-				pull, build, forceRecreate
+				pull, respectPullPolicy, build, pullBase, forceRecreate
 			});
 
 			if (!result.success) {

@@ -27,7 +27,7 @@ import {
 import type { NotificationPayload, NotificationResult } from './shared';
 export type { NotificationPayload, NotificationResult } from './shared';
 // The pure docker-action -> event-type map lives in events-core (unit-testable).
-import { mapActionToEventType } from './events-core';
+import { mapActionToEventType, withoutSubscribersOf } from './events-core';
 export { mapActionToEventType } from './events-core';
 
 import { sendSmtpNotification } from './smtp';
@@ -248,7 +248,9 @@ export async function sendEnvironmentNotification(
 export async function sendEventNotification(
 	eventType: NotificationEventType,
 	payload: NotificationPayload,
-	environmentId?: number
+	environmentId?: number,
+	/** Skip the channels subscribed to this event: they get it instead of this one. */
+	coveredBy?: NotificationEventType
 ): Promise<{ success: boolean; sent: number }> {
 	let enrichedPayload: NotificationPayload = { ...payload, eventType };
 	if (environmentId) {
@@ -267,7 +269,7 @@ export async function sendEventNotification(
 
 	if (environmentId) {
 		const envNotifications = await getEnabledEnvironmentNotifications(environmentId, eventType);
-		channels = envNotifications
+		channels = withoutSubscribersOf(envNotifications, coveredBy)
 			.filter(n => n.channelType && n.channelName)
 			.map(n => ({
 				channel_type: n.channelType!,
@@ -276,7 +278,7 @@ export async function sendEventNotification(
 			}));
 	} else {
 		const globalSettings = await getEnabledNotificationSettings();
-		channels = globalSettings
+		channels = withoutSubscribersOf(globalSettings, coveredBy)
 			.filter(s => s.eventTypes?.includes(eventType))
 			.map(s => ({
 				channel_type: s.type,

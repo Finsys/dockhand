@@ -21,6 +21,7 @@
 	import { parseHostPort, expandPortBindings, formatHostPort } from '$lib/utils/port-parse';
 	import { formatBytes } from '$lib/utils/format';
 	import { m } from '$lib/paraglide/messages.js';
+	import { actionTimeToCron } from '$lib/utils/scheduled-action-time';
 
 	// Parse shell command respecting quotes
 	function parseShellCommand(cmd: string): string[] {
@@ -229,6 +230,9 @@
 	let autoUpdateEnabled = $state(false);
 	let autoUpdateCronExpression = $state('0 3 * * *');
 	let vulnerabilityCriteria = $state<VulnerabilityCriteria>('never');
+	// Scheduled start/stop, and the times as loaded, to save only a change
+	let schedule = $state<{ startAt: string; stopAt: string; source: 'ui' | 'label'; labelErrors: string[]; systemContainer: boolean } | null>(null);
+	let originalSchedule = $state<{ startAt: string; stopAt: string } | null>(null);
 	let currentEnvId = $state<number | null>(null);
 	currentEnvironment.subscribe(env => currentEnvId = env?.id || null);
 
@@ -375,6 +379,55 @@
 			}
 		} catch (err) {
 			console.error('Failed to fetch auto-update settings:', err);
+		}
+	}
+
+	async function fetchSchedule(containerName: string) {
+		schedule = null;
+		originalSchedule = null;
+		if (!currentEnvId) return;
+		try {
+			const response = await fetch(`/api/scheduled-actions/${encodeURIComponent(containerName)}?env=${currentEnvId}`);
+			if (!response.ok) return;
+			const data = await response.json();
+			// The editor works in cron; HH:MM (from labels or the API) becomes its cron form.
+			const asCron = (value: string | null) => {
+				if (!value) return '';
+				const parsed = actionTimeToCron(value);
+				return 'cron' in parsed ? parsed.cron : value;
+			};
+			schedule = {
+				startAt: asCron(data.startAt),
+				stopAt: asCron(data.stopAt),
+				source: data.source,
+				labelErrors: data.labelErrors ?? [],
+				systemContainer: data.systemContainer
+			};
+			originalSchedule = { startAt: schedule.startAt, stopAt: schedule.stopAt };
+		} catch (err) {
+			console.error('Failed to fetch the scheduled start/stop:', err);
+		}
+	}
+
+	function hasScheduleChanged(): boolean {
+		return !!schedule && !!originalSchedule && schedule.source === 'ui' && !schedule.systemContainer &&
+			(schedule.startAt.trim() !== originalSchedule.startAt || schedule.stopAt.trim() !== originalSchedule.stopAt);
+	}
+
+	/** Saves the scheduled start/stop; returns the server's error, or null. */
+	async function saveSchedule(containerName: string): Promise<string | null> {
+		if (!schedule || !currentEnvId) return null;
+		try {
+			const response = await fetch(`/api/scheduled-actions/${encodeURIComponent(containerName)}?env=${currentEnvId}`, {
+				method: 'PUT',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ startAt: schedule.startAt, stopAt: schedule.stopAt })
+			});
+			if (response.ok) return null;
+			const body = await response.json().catch(() => ({}));
+			return body.error || `HTTP ${response.status}`;
+		} catch (err) {
+			return err instanceof Error ? err.message : String(err);
 		}
 	}
 
@@ -631,8 +684,8 @@
 			runtime = (data.HostConfig?.Runtime && data.HostConfig.Runtime !== 'runc')
 				? data.HostConfig.Runtime : '';
 
-			// Fetch auto-update settings
-			await fetchAutoUpdateSettings(name);
+			// Fetch auto-update settings and the scheduled start/stop
+			await Promise.all([fetchAutoUpdateSettings(name), fetchSchedule(name)]);
 
 			// Store original config for change detection
 			originalConfig = {
@@ -899,8 +952,20 @@
 
 		const containerConfigChanged = hasContainerConfigChanged();
 		const autoUpdateChanged = hasAutoUpdateChanged();
+		const scheduleChanged = hasScheduleChanged();
+		// Checked before anything is saved, so a bad time cannot follow a recreate.
+		if (scheduleChanged && schedule) {
+			for (const value of [schedule.startAt, schedule.stopAt]) {
+				const parsed = value.trim() ? actionTimeToCron(value) : null;
+				if (parsed && 'error' in parsed) {
+					error = m.containers_schedule_save_failed({ error: parsed.error });
+					loading = false;
+					return;
+				}
+			}
+		}
 
-		if (!containerConfigChanged && !autoUpdateChanged) {
+		if (!containerConfigChanged && !autoUpdateChanged && !scheduleChanged) {
 			onClose();
 			loading = false;
 			return;
@@ -933,6 +998,14 @@
 
 				if (autoUpdateChanged) {
 					await saveAutoUpdateSettings(name.trim());
+				}
+				if (scheduleChanged) {
+					const scheduleError = await saveSchedule(name.trim());
+					if (scheduleError) {
+						error = m.containers_schedule_save_failed({ error: scheduleError });
+						loading = false;
+						return;
+					}
 				}
 
 				await new Promise(resolve => setTimeout(resolve, 500));
@@ -1111,6 +1184,15 @@
 				await saveAutoUpdateSettings(name.trim());
 				if (!containerConfigChanged) {
 					statusMessage = m.containers_edit_status_auto_update_saved();
+				}
+			}
+
+			if (scheduleChanged) {
+				const scheduleError = await saveSchedule(name.trim());
+				if (scheduleError) {
+					error = m.containers_schedule_save_failed({ error: scheduleError });
+					loading = false;
+					return;
 				}
 			}
 
@@ -1367,6 +1449,7 @@
 					bind:autoUpdateEnabled
 					bind:autoUpdateCronExpression
 					bind:vulnerabilityCriteria
+					bind:schedule
 					{configSets}
 					bind:selectedConfigSetId
 					bind:errors

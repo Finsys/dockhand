@@ -1,12 +1,12 @@
 <script lang="ts">
 	import * as Select from '$lib/components/ui/select';
-	import type { Component } from 'svelte';
+	import type { IconComponent } from '$lib/types';
 	import { m } from '$lib/paraglide/messages.js';
 
 	interface FilterOption {
 		value: string;
 		label: string;
-		icon?: Component;
+		icon?: IconComponent;
 		color?: string;
 		/** Colour the label too, not just the icon - for an entry that needs to stand out. */
 		colorLabel?: boolean;
@@ -18,7 +18,7 @@
 		placeholder: string;
 		pluralLabel?: string;
 		width?: string;
-		defaultIcon?: Component;
+		defaultIcon?: IconComponent;
 	}
 
 	let {

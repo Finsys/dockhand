@@ -1,4 +1,5 @@
 import { json } from '@sveltejs/kit';
+import { isValidStackName } from '$lib/server/stack-name-guard';
 import { getScheduleExecutions } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
 import type { RequestHandler } from './$types';
@@ -113,7 +114,11 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 		return json({ error: 'Access denied to this environment' }, { status: 403 });
 	}
 
-	const stackName = decodeURIComponent(params.name);
+	// Validate the name shape before it is used in a filesystem path.
+	const stackName = params.name;
+	if (!isValidStackName(stackName)) {
+		return json({ error: 'Invalid stack name' }, { status: 400 });
+	}
 	const { executions } = await getScheduleExecutions({
 		scheduleType: 'stack_deploy',
 		entityName: stackName,

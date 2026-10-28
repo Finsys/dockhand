@@ -61,7 +61,10 @@
 				{ id: 'container_unhealthy', label: m.settings_envs_event_container_unhealthy, description: m.settings_envs_event_container_unhealthy_desc },
 				{ id: 'container_healthy', label: m.settings_envs_event_container_healthy, description: m.settings_envs_event_container_healthy_desc },
 				{ id: 'container_oom', label: m.settings_envs_event_container_oom, description: m.settings_envs_event_container_oom_desc },
-				{ id: 'container_updated', label: m.settings_envs_event_container_updated, description: m.settings_envs_event_container_updated_desc }
+				{ id: 'container_updated', label: m.settings_envs_event_container_updated, description: m.settings_envs_event_container_updated_desc },
+				{ id: 'container_scheduled_start', label: m.settings_envs_event_container_scheduled_start, description: m.settings_envs_event_container_scheduled_start_desc },
+				{ id: 'container_scheduled_stop', label: m.settings_envs_event_container_scheduled_stop, description: m.settings_envs_event_container_scheduled_stop_desc },
+				{ id: 'container_scheduled_failed', label: m.settings_envs_event_container_scheduled_failed, description: m.settings_envs_event_container_scheduled_failed_desc }
 			]
 		},
 		{

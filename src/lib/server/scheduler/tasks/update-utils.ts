@@ -4,6 +4,9 @@
 
 import type { VulnerabilityCriteria } from '../../db';
 import type { VulnerabilitySeverity } from '../../scanner';
+import type { IndexRead } from '../../registry/manifest-digest';
+
+export type { IndexRead };
 
 /**
  * Parse image name and tag from a full image reference.
@@ -87,6 +90,127 @@ export function indexChildDigests(indexBody: unknown): string[] {
 export function localDigestIsIndexChild(localDigests: string[], indexBody: unknown): boolean {
 	const children = indexChildDigests(indexBody);
 	return children.some((d) => localDigests.includes(d));
+}
+
+/**
+ * The digest of the index entry for one platform, or null if the body is not an index or
+ * has no entry for that platform. Match is os + architecture, and variant only when the
+ * entry declares one (so a plain arm64 entry still matches a daemon that reports no
+ * variant). Attestation/unknown entries carry no usable platform and are skipped.
+ */
+export function platformChildDigest(
+	indexBody: unknown,
+	platform: { os: string; architecture: string; variant?: string }
+): string | null {
+	const manifests = (indexBody as { manifests?: unknown })?.manifests;
+	if (!Array.isArray(manifests)) return null;
+	for (const entry of manifests) {
+		const p = (entry as { platform?: { os?: unknown; architecture?: unknown; variant?: unknown } })?.platform;
+		const digest = (entry as { digest?: unknown })?.digest;
+		if (!p || typeof digest !== 'string' || !digest) continue;
+		if (p.os !== platform.os || p.architecture !== platform.architecture) continue;
+		if (typeof p.variant === 'string' && p.variant && platform.variant && p.variant !== platform.variant) continue;
+		return digest;
+	}
+	return null;
+}
+
+/**
+ * Whether two multi-arch indexes carry the SAME image for one platform. A tag republished
+ * with only another architecture or the attestations rebuilt moves the index digest while
+ * the platform image is byte-for-byte unchanged, so comparing index digests reports a
+ * phantom update. Returns true only when BOTH bodies are indexes AND each has an
+ * entry for the platform AND those entries' digests are equal - any other case returns
+ * false so the caller keeps its existing verdict.
+ */
+export function samePlatformImage(
+	localIndexBody: unknown,
+	registryIndexBody: unknown,
+	platform: { os: string; architecture: string; variant?: string }
+): boolean {
+	const local = platformChildDigest(localIndexBody, platform);
+	const registry = platformChildDigest(registryIndexBody, platform);
+	return local !== null && local === registry;
+}
+
+/** Read once more after `delayMs` when the first read failed transiently. */
+export async function readWithRetry(
+	read: () => Promise<IndexRead>,
+	sleep: (ms: number) => Promise<void>,
+	delayMs = 2000
+): Promise<IndexRead> {
+	const first = await read();
+	if (first.ok || !first.retryable) return first;
+	await sleep(delayMs);
+	return read();
+}
+
+/**
+ * What a digest names never changes, so a read by digest is kept - the index, or that it
+ * is no index (404) - keyed by `scope` (registry and repository), bounded, oldest out. A
+ * check repeated while an update waits then costs no manifest GETs, which Docker Hub
+ * counts as pulls. Reads by tag and failed reads are not kept.
+ */
+export function cachedIndexReader(
+	read: (reference: string) => Promise<IndexRead>,
+	cache: Map<string, unknown>,
+	scope: string,
+	max = 500
+): (reference: string) => Promise<IndexRead> {
+	return async (reference) => {
+		if (!reference.startsWith('sha256:')) return read(reference);
+		const key = `${scope}@${reference}`;
+		if (cache.has(key)) return { ok: true, body: cache.get(key) };
+		const result = await read(reference);
+		if (result.ok) {
+			if (cache.size >= max) cache.delete(cache.keys().next().value as string);
+			cache.set(key, result.body);
+		}
+		return result;
+	};
+}
+
+/**
+ * same: the running image is the tag's current image for the daemon's platform.
+ * different: it is not - a real update. unknown: a read failed, so neither can be shown;
+ * the caller reports an error instead of guessing either way.
+ */
+export type MultiArchVerdict = { kind: 'same' } | { kind: 'different' } | { kind: 'unknown'; reason: string };
+
+/**
+ * Decide whether an index-digest mismatch is a real update, for a tag whose HEAD digest
+ * matched no local digest. Two shapes are the same image: the local digest is a per-arch
+ * CHILD of the tag's current index, or it is an OLD index whose entry for the daemon's
+ * platform equals the current index's entry (republished with only another architecture
+ * or new attestations). A per-arch pin always reaches this point, because HEAD returns the
+ * index digest, never the child.
+ */
+export async function multiArchVerdict(opts: {
+	tag: string;
+	/** The index digest the tag resolved to; read by it rather than the tag when known. */
+	currentDigest?: string;
+	localDigests: string[];
+	readIndex: (reference: string) => Promise<IndexRead>;
+	platform: () => Promise<{ os: string; architecture: string; variant?: string } | null>;
+}): Promise<MultiArchVerdict> {
+	const current = await opts.readIndex(opts.currentDigest ?? opts.tag);
+	if (!current.ok) return { kind: 'unknown', reason: current.reason };
+	if (current.body === null) return { kind: 'different' };
+	if (localDigestIsIndexChild(opts.localDigests, current.body)) return { kind: 'same' };
+	if (indexChildDigests(current.body).length === 0) return { kind: 'different' };
+
+	const platform = await opts.platform();
+	if (!platform) return { kind: 'unknown', reason: 'could not read the daemon platform' };
+	let failure: string | null = null;
+	for (const digest of opts.localDigests) {
+		const local = await opts.readIndex(digest);
+		if (!local.ok) {
+			failure ??= local.reason;
+			continue;
+		}
+		if (local.body !== null && samePlatformImage(local.body, current.body, platform)) return { kind: 'same' };
+	}
+	return failure ? { kind: 'unknown', reason: failure } : { kind: 'different' };
 }
 
 /**

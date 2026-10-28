@@ -132,6 +132,9 @@ export const GET: RequestHandler = async () => {
 				'container_oom',
 				'container_updated',
 				'image_pulled',
+				'container_scheduled_start',
+				'container_scheduled_stop',
+				'container_scheduled_failed',
 			],
 			autoUpdate: [
 				'auto_update_success',

@@ -24,6 +24,7 @@
 	import { Trash2, Upload, RefreshCw, Play, Layers, Server, ShieldCheck, ShieldAlert, Shield, ShieldQuestion, CheckSquare, SquareMinus, Square, Tag, Check, XCircle, Icon, AlertTriangle, X, Images, Copy, Download, ChevronRight, ChevronDown, Loader2, ArrowUp, ArrowDown, ArrowUpDown, CircleDashed, CircleDot, Circle, Filter, FileJson, FileSpreadsheet, ShieldPlus } from 'lucide-svelte';
 	import { broom, whale } from '@lucide/lab';
 	import { formatBytes } from '$lib/utils/format';
+	import { prunedImageCount } from '$lib/utils/pruned-image-count';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { copyToClipboard } from '$lib/utils/clipboard';
 	import { buildPinnedRef, shortDigest } from '$lib/utils/pinned-ref';
@@ -743,9 +744,8 @@
 			const data = await readJobResponse(response);
 			if (data.success) {
 				pruneStatus = 'success';
-				const deleted = data.result?.ImagesDeleted;
 				const spaceReclaimed = data.result?.SpaceReclaimed ?? 0;
-				const count = deleted?.length ?? 0;
+				const count = prunedImageCount(data.result?.ImagesDeleted);
 				if (count > 0) {
 					toast.success(m.images_list_toast_pruned({ count, size: formatBytes(spaceReclaimed) }));
 				} else {
@@ -771,11 +771,12 @@
 			const data = await readJobResponse(response);
 			if (data.success) {
 				pruneUnusedStatus = 'success';
-				const deleted = data.result?.ImagesDeleted;
-				const spaceReclaimed = data.result?.SpaceReclaimed ?? 0;
-				const count = deleted?.length ?? 0;
+				const spaceReclaimed: number | undefined = data.result?.SpaceReclaimed;
+				const count = prunedImageCount(data.result?.ImagesDeleted);
 				if (count > 0) {
-					toast.success(m.images_list_toast_pruned({ count, size: formatBytes(spaceReclaimed) }));
+					toast.success(spaceReclaimed === undefined
+						? m.images_list_toast_pruned_count({ count })
+						: m.images_list_toast_pruned({ count, size: formatBytes(spaceReclaimed) }));
 				} else {
 					toast.success(m.images_list_toast_no_unused());
 				}

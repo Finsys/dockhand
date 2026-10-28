@@ -26,7 +26,7 @@
 	import { shouldSaveBackupImage, syncBackupImageFromStore } from '$lib/utils/backup-image';
 	import { summarizeTestResults, formatTestSummary, type TestOutcome } from '$lib/utils/backup-test-summary';
 	import SnapshotBrowser from '../../containers/SnapshotBrowser.svelte';
-	import type { Component } from 'svelte';
+	import type { IconComponent } from '$lib/types';
 	import ConfirmPopover from '$lib/components/ConfirmPopover.svelte';
 	import { canAccess } from '$lib/stores/auth';
 	import DestinationModal from './DestinationModal.svelte';
@@ -649,7 +649,7 @@
 		<p class="text-muted-foreground text-sm">{m.settings_backups_loading()}</p>
 	{:else if destinations.length === 0}
 		<EmptyState
-			icon={Archive as unknown as Component}
+			icon={Archive as unknown as IconComponent}
 			title={m.settings_backups_empty_title()}
 			description={m.settings_backups_empty_description()}
 		/>

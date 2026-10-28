@@ -6,10 +6,11 @@
  */
 
 import { db, hawserTokens, environments, eq, and } from './db/drizzle.js';
+import { transportTimeoutError } from './docker-probe-core';
 import { logContainerEvent, type ContainerEventAction } from './db.js';
 import { containerEventEmitter } from './event-collector.js';
 import { sendEnvironmentNotification } from './notifications/index.js';
-import { isNotifyDisabledByLabel } from './container-labels.js';
+import { shouldNotifyContainerEvent } from './container-event-notify.js';
 import { isHealthTransition } from './subprocess-manager.js';
 import { pushMetric } from './metrics-store.js';
 import { secureGetRandomValues, secureRandomUUID } from './crypto-fallback.js';
@@ -124,7 +125,7 @@ export function initializeEdgeManager(): void {
 				for (const [requestId, pending] of conn.pendingRequests) {
 					console.log(`[Hawser] Rejecting pending request ${requestId} due to connection timeout`);
 					clearTimeout(pending.timeout);
-					pending.reject(new Error('Connection timeout'));
+					pending.reject(transportTimeoutError('Connection timeout'));
 				}
 				for (const [requestId, pending] of conn.pendingStreamRequests) {
 					console.log(`[Hawser] Ending stream request ${requestId} due to connection timeout`);
@@ -220,9 +221,8 @@ export async function handleEdgeContainerEvent(
 		// Broadcast to SSE clients
 		containerEventEmitter.emit('event', savedEvent);
 
-		// Check dockhand.notify label before sending notification
-		// Docker includes container labels in actorAttributes
-		if (!isNotifyDisabledByLabel(event.actorAttributes)) {
+		// Docker includes container labels in actorAttributes.
+		if (shouldNotifyContainerEvent(event.containerId, event.action, event.actorAttributes)) {
 			const actionLabel = event.action.charAt(0).toUpperCase() + event.action.slice(1);
 			const containerLabel = event.containerName || event.containerId.substring(0, 12);
 			const notificationType =
@@ -623,14 +623,14 @@ export async function sendEdgeRequest(
 			if (streaming) {
 				connection.pendingStreamRequests.delete(requestId);
 			}
-			reject(new Error('Request timeout'));
+			reject(transportTimeoutError('Request timeout'));
 		}, timeout);
 
 		// Honor AbortSignal from caller (e.g., AbortSignal.timeout(5000) for dockerPing)
 		if (signal) {
 			if (signal.aborted) {
 				clearTimeout(timeoutHandle);
-				reject(new Error('Request aborted'));
+				reject(transportTimeoutError('Request aborted'));
 				return;
 			}
 			signal.addEventListener(
@@ -642,7 +642,7 @@ export async function sendEdgeRequest(
 						connection.pendingStreamRequests.delete(requestId);
 					}
 					clearTimeout(timeoutHandle);
-					reject(new Error('Request aborted'));
+					reject(transportTimeoutError('Request aborted'));
 				},
 				{ once: true }
 			);

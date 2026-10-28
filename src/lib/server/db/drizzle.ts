@@ -318,6 +318,7 @@ const REQUIRED_TABLES = [
 	'host_metrics',
 	'config_sets',
 	'auto_update_settings',
+	'scheduled_container_actions',
 	'notification_settings',
 	'environment_notifications',
 	'auth_settings',
@@ -911,6 +912,7 @@ export const stackEvents = schemaProxy.stackEvents;
 export const hostMetrics = schemaProxy.hostMetrics;
 export const configSets = schemaProxy.configSets;
 export const autoUpdateSettings = schemaProxy.autoUpdateSettings;
+export const scheduledContainerActions = schemaProxy.scheduledContainerActions;
 export const notificationSettings = schemaProxy.notificationSettings;
 export const environmentNotifications = schemaProxy.environmentNotifications;
 export const authSettings = schemaProxy.authSettings;

@@ -4,7 +4,15 @@
  * The panel holds the same data twice: `variables` (rows, including secrets) and
  * `rawContent` (the .env text). Either side can be edited, so every crossing between
  * them goes through here.
+ *
+ * A row holds the VALUE; the text holds it in the file's syntax. Quoting and escaping
+ * belong to the text alone, so `envValueFromText` and `envValueToText` are a matching
+ * pair and every crossing uses them - a secret reaches the container through the
+ * process environment rather than the file, so a quote left on a value becomes part of
+ * it.
  */
+
+import { envValueFromText, envValueToText, envValueToTextPreserving } from './env-file-values';
 
 export interface EnvVarLike {
 	key: string;
@@ -37,7 +45,7 @@ export function parseRawContent(content: string): ParsedRawContent<EnvVarLike & 
 		}
 
 		const key = trimmed.slice(0, eqIndex).trim();
-		const value = trimmed.slice(eqIndex + 1);
+		const value = envValueFromText(trimmed.slice(eqIndex + 1));
 		if (!key) continue;
 
 		if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key)) {
@@ -54,7 +62,58 @@ export function parseRawContent(content: string): ParsedRawContent<EnvVarLike & 
 export function generateRawContent(variables: EnvVarLike[]): string {
 	const nonSecrets = variables.filter((v) => v.key.trim() && !v.isSecret);
 	if (nonSecrets.length === 0) return '';
-	return nonSecrets.map((v) => `${v.key.trim()}=${v.value}`).join('\n') + '\n';
+	return nonSecrets.map((v) => `${v.key.trim()}=${envValueToText(v.value)}`).join('\n') + '\n';
+}
+
+/**
+ * Rows written back over an existing .env text, keeping its comments and its layout.
+ *
+ * A line whose value is unchanged is left exactly as it stands, which is what makes an
+ * untouched file byte-identical after a save - and keeps a `${NAME}` reference from being
+ * re-spelled as a literal dollar. A line whose variable is gone is dropped; a row with no
+ * line yet is appended.
+ */
+export function mergeVariablesIntoRawContent(
+	rawContent: string,
+	variables: EnvVarLike[]
+): string {
+	const nonSecrets = variables.filter((v) => v.key.trim() && !v.isSecret);
+	const byKey = new Map(nonSecrets.map((v) => [v.key.trim(), v]));
+	const written = new Set<string>();
+	const out: string[] = [];
+
+	for (const line of rawContent.split('\n')) {
+		const trimmed = line.trim();
+		if (!trimmed || trimmed.startsWith('#')) {
+			out.push(line);
+			continue;
+		}
+
+		const eqIndex = trimmed.indexOf('=');
+		if (eqIndex > 0) {
+			const key = trimmed.slice(0, eqIndex).trim();
+			if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key)) {
+				const row = byKey.get(key);
+				if (row) {
+					const existing = trimmed.slice(eqIndex + 1);
+					out.push(`${key}=${envValueToTextPreserving(row.value, existing)}`);
+					written.add(key);
+				}
+				continue;
+			}
+		}
+
+		out.push(line);
+	}
+
+	for (const row of nonSecrets) {
+		if (!written.has(row.key.trim())) {
+			out.push(`${row.key.trim()}=${envValueToText(row.value)}`);
+		}
+	}
+
+	const joined = out.join('\n');
+	return joined && !joined.endsWith('\n') ? `${joined}\n` : joined;
 }
 
 /**
@@ -97,4 +156,13 @@ export function mergeParsedIntoVariables<T extends EnvVarLike>(
 /** The non-secret keys a given editor text is displaying. */
 export function keysInRawContent(content: string): Set<string> {
 	return new Set(parseRawContent(content).vars.map((v) => v.key));
+}
+
+/**
+ * Whether the provider-injected key list is long enough to warrant a collapse toggle.
+ * A handful of keys reads better shown inline; a long list otherwise dominates the
+ * env-vars panel. The threshold is the default, overridable for a test.
+ */
+export function injectedKeysNeedCollapse(count: number, threshold = 5): boolean {
+	return count >= threshold;
 }

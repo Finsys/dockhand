@@ -37,13 +37,17 @@ export type ImageCreatedAtProbe = (
  * repo (monorepos do this). A non-image target is dropped and the next-highest
  * version is tried. Only the candidate is probed. A probe failure is treated as
  * "is an image" (fail-open) so a registry hiccup never hides a real update.
+ *
+ * `listedAfter` makes the tag list fresh: a cached list is reused only if its listing
+ * started at or after that time (a manual check passes its own start).
  */
 export async function checkNewerVersion(
 	imageRef: string,
 	options: FindNewerOptions = {},
 	probeTagKind?: TagKindProbe,
 	currentImageDigests: readonly (string | null | undefined)[] = [],
-	staleCheck?: { probeCreatedAt: ImageCreatedAtProbe; currentCreatedAt: string | null }
+	staleCheck?: { probeCreatedAt: ImageCreatedAtProbe; currentCreatedAt: string | null },
+	listedAfter?: number
 ): Promise<NewerVersion | null> {
 	const { registry, repo, tag } = parseImageReference(imageRef);
 
@@ -52,7 +56,7 @@ export async function checkNewerVersion(
 	// isn't wrongly dismissed as floating before the registry fetch.
 	if (!parseTag(tag, options.versionPattern ?? null)) return null;
 
-	const tags = await listVersionTags(imageRef);
+	const tags = await listVersionTags(imageRef, listedAfter);
 
 	if (!probeTagKind) return findNewerVersionTag(tag, tags, options);
 

@@ -7,5 +7,5 @@
  * paraglide runtime does not exist in a fresh checkout - which is where the unit
  * tests run. A test asserts this list still matches the settings file.
  */
-export const LOCALES = ['en', 'de', 'fr-FR', 'fr-CA', 'pl', 'zh-CN'] as const;
+export const LOCALES = ['en', 'de', 'es-ES', 'fr-FR', 'fr-CA', 'pl', 'zh-CN', 'ru'] as const;
 export const BASE_LOCALE = 'en';

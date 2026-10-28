@@ -184,7 +184,10 @@
 				{ id: 'container_exited', label: 'Container exited', description: 'When a container exits unexpectedly' },
 				{ id: 'container_unhealthy', label: 'Container unhealthy', description: 'When a container health check fails' },
 				{ id: 'container_oom', label: 'Container OOM killed', description: 'When a container is killed due to out of memory' },
-				{ id: 'container_updated', label: 'Container updated', description: 'When a container image is updated' }
+				{ id: 'container_updated', label: 'Container updated', description: 'When a container image is updated' },
+				{ id: 'container_scheduled_start', label: 'Scheduled start', description: 'When a container is started by its schedule' },
+				{ id: 'container_scheduled_stop', label: 'Scheduled stop', description: 'When a container is stopped by its schedule' },
+				{ id: 'container_scheduled_failed', label: 'Scheduled action failed', description: 'When a scheduled start or stop of a container fails' }
 			]
 		},
 		{
@@ -559,7 +562,6 @@
 	// Only an administrator configures the scheduled report: the mail leaves the
 	// installation unattended, carrying the full inventory and its vulnerabilities.
 	const isAdmin = $derived($authStore.user?.isAdmin === true || $authStore.authEnabled === false);
-	const tabCount = $derived(($page.data.backupsEnabled ? 6 : 5) + (isAdmin ? 1 : 0));
 
 	// Scheduled state report (admin only; the mail leaves the installation unattended)
 	let reportLoading = $state(false);
@@ -583,7 +585,7 @@
 	let imagePruneCron = $state('0 3 * * 0'); // Default: 3 AM Sunday
 	let imagePruneMode = $state<'dangling' | 'all'>('dangling');
 	let imagePruneLastPruned = $state<string | undefined>(undefined);
-	let imagePruneLastResult = $state<{ spaceReclaimed: number; imagesRemoved: number } | undefined>(undefined);
+	let imagePruneLastResult = $state<{ spaceReclaimed?: number; imagesRemoved: number } | undefined>(undefined);
 	let imagePruneLoading = $state(false);
 
 	// === Validation Functions ===
@@ -1856,36 +1858,36 @@
 		{/if}
 
 		<Tabs.Root bind:value={modalTab} class="flex-1 flex flex-col overflow-hidden mt-4">
-			<Tabs.List class="flex-shrink-0 mb-0 w-full grid" style="grid-template-columns: repeat({tabCount}, minmax(0, 1fr));">
-				<Tabs.Trigger value="general" class="flex items-center justify-center gap-1.5">
+			<Tabs.List class="flex-shrink-0 mb-0 w-full flex flex-wrap h-auto gap-1 p-1">
+				<Tabs.Trigger value="general" class="flex-1 flex items-center justify-center gap-1.5">
 					<Globe class="w-3.5 h-3.5" />
 					{m.envmodal_tab_general()}
 				</Tabs.Trigger>
-				<Tabs.Trigger value="updates" class="flex items-center justify-center gap-1.5">
+				<Tabs.Trigger value="updates" class="flex-1 flex items-center justify-center gap-1.5">
 					<CircleFadingArrowUp class="w-3.5 h-3.5" />
 					{m.envmodal_tab_updates()}
 				</Tabs.Trigger>
-				<Tabs.Trigger value="activity" class="flex items-center justify-center gap-1.5">
+				<Tabs.Trigger value="activity" class="flex-1 flex items-center justify-center gap-1.5">
 					<Activity class="w-3.5 h-3.5" />
 					{m.nav_activity()}
 				</Tabs.Trigger>
-				<Tabs.Trigger value="security" class="flex items-center justify-center gap-1.5">
+				<Tabs.Trigger value="security" class="flex-1 flex items-center justify-center gap-1.5">
 					<ShieldCheck class="w-3.5 h-3.5" />
 					{m.containers_settings_security()}
 				</Tabs.Trigger>
 				<!-- BETA GATE: Backups tab hidden unless FEAT_BACKUPS_ENABLED (see features.ts) -->
 				{#if $page.data.backupsEnabled}
-					<Tabs.Trigger value="backup" class="flex items-center justify-center gap-1.5">
+					<Tabs.Trigger value="backup" class="flex-1 flex items-center justify-center gap-1.5">
 						<Archive class="w-3.5 h-3.5" />
 						{m.nav_backups()}
 					</Tabs.Trigger>
 				{/if}
-				<Tabs.Trigger value="notifications" class="flex items-center justify-center gap-1.5">
+				<Tabs.Trigger value="notifications" class="flex-1 flex items-center justify-center gap-1.5">
 					<Bell class="w-3.5 h-3.5" />
 					{m.envmodal_tab_notifications()}
 				</Tabs.Trigger>
 				{#if isAdmin}
-					<Tabs.Trigger value="reports" class="flex items-center justify-center gap-1.5">
+					<Tabs.Trigger value="reports" class="flex-1 flex items-center justify-center gap-1.5">
 						<FileText class="w-3.5 h-3.5" />
 						{m.envmodal_tab_reports()}
 					</Tabs.Trigger>

@@ -1,12 +1,8 @@
 import { describe, test, expect } from 'bun:test';
 import { readFileSync } from 'node:fs';
+import { parseRawContent } from '../src/lib/utils/env-panel-core';
 import { isGitStackOverride } from '../src/lib/env-merge';
-import {
-	unquote,
-	expandValue,
-	resolveEnvValues,
-	quoteForEnvFile
-} from '../src/lib/utils/env-file-values';
+import { unquote, expandValue, resolveEnvValues, quoteForEnvFile, envValueFromText, envValueToText, parseEnvFileForForm, envValueToTextPreserving } from '../src/lib/utils/env-file-values';
 
 // Every expectation below was measured against `docker compose config` with the same
 // .env file, so these pin real behaviour rather than an assumption about it.
@@ -135,9 +131,14 @@ describe('where values are resolved and where they are not', () => {
 	// would let a save flatten ${DIRECTORY} into a path for good.
 	const git = readFileSync(new URL('../src/lib/server/git.ts', import.meta.url), 'utf8');
 
-	test('the editor read and the previews keep the raw text', () => {
-		const views = git.match(/parseEnvFileContent\([^)]*expand: false[^)]*\)/g) ?? [];
-		expect(views.length).toBe(3);
+	test('the editor read and the previews leave a reference alone', () => {
+		// Three reads feed the editor - the stack's repo file and the two repo previews -
+		// and all three go through the form reader, which resolves quoting but not a
+		// reference. None of them may use the deploy reader.
+		const formReads = git.match(/parseEnvFileForForm\(content\)/g) ?? [];
+		expect(formReads.length).toBe(3);
+		expect(git).not.toContain('expand: false');
+		expect(parseEnvFileForForm('A="${B}/y"\n')).toEqual([{ key: 'A', value: '${B}/y' }]);
 	});
 
 	test('the deploy paths resolve', () => {
@@ -278,8 +279,9 @@ describe('what the editor is given', () => {
 	// path in place of the variable - the shape of the bug #1112 was closed for.
 	const git = readFileSync(new URL('../src/lib/server/git.ts', import.meta.url), 'utf8');
 
-	test('the editor read and the two previews keep the raw text', () => {
-		expect((git.match(/parseEnvFileContent\([^)]*expand: false[^)]*\)/g) ?? []).length).toBe(3);
+	test('the editor read and the two previews leave a reference alone', () => {
+		expect((git.match(/parseEnvFileForForm\(content\)/g) ?? []).length).toBe(3);
+		expect(git).not.toContain('expand: false');
 	});
 
 	test('an untouched variable is not mistaken for an override', () => {
@@ -330,5 +332,242 @@ describe('what a Hawser agent is sent', () => {
 		const calls = stacks.match(/parseEnvFileContent\([^;]*?\)/g) ?? [];
 		expect(calls.length).toBeGreaterThan(0);
 		expect(calls.filter((c) => c.includes('expand: false'))).toEqual([]);
+	});
+});
+
+/**
+ * The form/text pair for the env-var panel.
+ *
+ * A row holds the value; the .env text holds it in the file's syntax. The two functions
+ * are inverses, so a value the user typed survives being written out and read back - a
+ * quote left on the way in reaches the container as part of a secret, and a quote lost
+ * on the way out silently rewrites one.
+ */
+describe('envValueFromText / envValueToText', () => {
+	test('quotes are syntax, so the form shows the value without them', () => {
+		expect(envValueFromText('"bar"')).toBe('bar');
+		expect(envValueFromText("'qux'")).toBe('qux');
+		expect(envValueFromText('raw')).toBe('raw');
+	});
+
+	test('a reference is the user\'s text and is left for them to see', () => {
+		// expandValue resolves these for a deploy; a form must not, or an edit saved
+		// from that view flattens the variable for good.
+		expect(envValueFromText('"${DIRECTORY}/immich"')).toBe('${DIRECTORY}/immich');
+		expect(envValueFromText('$PLAIN')).toBe('$PLAIN');
+	});
+
+	test('a single-quoted value is literal, as in a .env file', () => {
+		expect(envValueFromText("'p@$$w0rd#1'")).toBe('p@$$w0rd#1');
+		expect(envValueFromText("'no \\n escape'")).toBe('no \\n escape');
+	});
+
+	test('double quotes resolve the escapes the writer emits', () => {
+		expect(envValueFromText('"a\\"b"')).toBe('a"b');
+		expect(envValueFromText('"line\\nbreak"')).toBe('line\nbreak');
+		expect(envValueFromText('"tab\\there"')).toBe('tab\there');
+		expect(envValueFromText('"back\\\\slash"')).toBe('back\\slash');
+		expect(envValueFromText('"dollar$$VAR"')).toBe('dollar$VAR');
+		expect(envValueFromText('"dollar$VAR"')).toBe('dollar$VAR');
+	});
+
+	test('space around the value is the file\'s layout, not content', () => {
+		// `KEY=  "value"` is how a file gets lined up, and compose reads the quotes as
+		// syntax there just the same. Without this the quotes would reach the container.
+		expect(envValueFromText('  "bar"  ')).toBe('bar');
+		expect(envValueFromText("\t'qux'")).toBe('qux');
+		expect(envValueFromText('  plain  ')).toBe('plain');
+		// A quoted value keeps the space INSIDE its quotes.
+		expect(envValueFromText('  "  pad  "  ')).toBe('  pad  ');
+	});
+
+	test('an unmatched or partial quote is part of the value', () => {
+		expect(envValueFromText('"unclosed')).toBe('"unclosed');
+		expect(envValueFromText('mid"dle')).toBe('mid"dle');
+		expect(envValueFromText('"')).toBe('"');
+	});
+
+	test('only a value the bare form would not survive gets quoted', () => {
+		expect(envValueToText('plain')).toBe('plain');
+		expect(envValueToText('a b')).toBe('a b');
+		expect(envValueToText('')).toBe('');
+		expect(envValueToText(' lead')).toBe('" lead"');
+		expect(envValueToText('has#hash')).toBe('"has#hash"');
+	});
+
+	test('a reference is written through, a literal dollar is escaped', () => {
+		// Measured against `docker compose run`: compose resolves ${NAME} and $NAME, and
+		// reads $$ as one literal dollar. Escaping a reference here would turn it into
+		// that literal and the variable would stop resolving.
+		expect(envValueToText('${DIRECTORY}/immich')).toBe('"${DIRECTORY}/immich"');
+		expect(envValueToText('$DIRECTORY/immich')).toBe('"$DIRECTORY/immich"');
+		expect(envValueToText('cost$5')).toBe('"cost$$5"');
+		expect(envValueToText('ends$')).toBe('"ends$$"');
+		expect(envValueToText('p@$$w0rd')).toBe('"p@$$$$w0rd"');
+		expect(envValueToText('$')).toBe('"$$"');
+	});
+
+	test('a line keeps its own spelling when its value is unchanged', () => {
+		// A form value cannot say which spelling produced it, so re-spelling a line the
+		// user never edited would turn a literal into a reference, or back.
+		expect(envValueToTextPreserving('${A}/y', "'${A}/y'")).toBe("'${A}/y'");
+		expect(envValueToTextPreserving('${A}/y', '"${A}/y"')).toBe('"${A}/y"');
+		expect(envValueToTextPreserving('${A}/y', '${A}/y')).toBe('${A}/y');
+		expect(envValueToTextPreserving('p@$$w0rd', 'p@$$w0rd')).toBe('p@$$w0rd');
+		// An edited value is written afresh.
+		expect(envValueToTextPreserving('other', '"${A}/y"')).toBe('other');
+		expect(envValueToTextPreserving('a b', 'plain')).toBe('a b');
+	});
+
+	test('an edited value keeps the line\'s quoting style', () => {
+		// A single-quoted line is a raw string, so a dollar in it is literal. Rewriting an
+		// edited password as double-quoted would make that dollar a reference, and compose
+		// would resolve it away.
+		expect(envValueToTextPreserving('p@$$new', "'p@$$w0rd'")).toBe("'p@$$new'");
+		expect(envValueToTextPreserving('${OTHER}', "'${NOPE}'")).toBe("'${OTHER}'");
+		expect(envValueToTextPreserving('c#d', "'a#b'")).toBe("'c#d'");
+		// A value a single-quoted line cannot hold falls back to the escaping form.
+		expect(envValueToTextPreserving("it's", "'plain'")).toBe('"it\'s"');
+		// A double-quoted or bare line is written the normal way.
+		expect(envValueToTextPreserving('a b', '"old"')).toBe('a b');
+	});
+
+	test('the deploy reading of a value survives a save', () => {
+		// Self-consistency of the pair is not enough: the text it writes is handed to
+		// compose, so what matters is that resolveEnvValues sees the same value before and
+		// after. This is the assertion a form/text round trip alone cannot make.
+		const lines = [
+			'B=${A}/y',
+			'B="${A}/y"',
+			"B='${A}/y'",
+			'B=p@$$w0rd',
+			'B="p@$$w0rd"',
+			'B=cost$5',
+			"B='p@$$w0rd#1'",
+			'B="hello world"',
+			"B='\"a\",\"b\"'"
+		];
+		for (const line of lines) {
+			const file = `A=x\n${line}\n`;
+			const asEntries = (text: string) =>
+				text
+					.split('\n')
+					.filter((l) => l.trim())
+					.map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)] as const);
+			const before = resolveEnvValues(asEntries(file));
+			const original = new Map(asEntries(file));
+			const rewritten = parseEnvFileForForm(file)
+				.map((row) => `${row.key}=${envValueToTextPreserving(row.value, original.get(row.key) ?? '')}`)
+				.join('\n');
+			expect(resolveEnvValues(asEntries(rewritten))).toEqual(before);
+			// Nothing was edited, so the bytes must not move either.
+			expect(`${rewritten}\n`).toBe(file);
+		}
+	});
+
+	test('every value survives a round trip through the text', () => {
+		const values = [
+			'bar', 'a b', 'has#hash', 'with"quote', "with'quote", 'dollar$VAR',
+			'p@$$w0rd#1', '', '  pad  ', 'a=b', '"already"', "'already'",
+			'back\\slash', '#lead', 'trail ', ' lead', 'line\nbreak', 'tab\there',
+			'$', '""', "''", 'a"b\'c', '${NESTED}', '$$literal',
+			'mixed "q" and $V and #h', '\\', '\\\\', '"'
+		];
+		for (const value of values) {
+			expect(envValueFromText(envValueToText(value))).toBe(value);
+		}
+	});
+
+	test('the form agrees with what compose hands a service', () => {
+		// Measured against a real `docker compose run`: a double-quoted $$ collapses to
+		// one dollar, a single-quoted one does not, and \" becomes a quote.
+		expect(envValueFromText('"bar"')).toBe('bar');
+		expect(envValueFromText("'p@$$w0rd#1'")).toBe('p@$$w0rd#1');
+		expect(envValueFromText('"p@$$w0rd#1"')).toBe('p@$w0rd#1');
+		expect(envValueFromText('"a\\"b"')).toBe('a"b');
+	});
+});
+
+/**
+ * Three callers fill the same editor form from a `.env` file - the stack env API, the
+ * relocate response, and the browser reading a file off disk. Each one parsing the file
+ * itself is how the same file comes to show different values depending on how the stack
+ * was opened, so this pins the single reader and that nobody rolls their own.
+ */
+describe('parseEnvFileForForm is the one reader', () => {
+	test('a row carries the value, not the file syntax', () => {
+		expect(parseEnvFileForForm('FOO="bar"\nBAZ=\'qux\'\nPLAIN=raw\n')).toEqual([
+			{ key: 'FOO', value: 'bar' },
+			{ key: 'BAZ', value: 'qux' },
+			{ key: 'PLAIN', value: 'raw' }
+		]);
+	});
+
+	test('comments, blanks and unusable lines are skipped', () => {
+		const rows = parseEnvFileForForm('# note\n\nNO_EQUALS\n=novalue\n9BAD=x\nGOOD=y\n');
+		expect(rows).toEqual([{ key: 'GOOD', value: 'y' }]);
+	});
+
+	test('space around the key is layout too', () => {
+		// `KEY = value` and a lined-up `KEY   =value` are both ordinary .env; dropping the
+		// key's trim makes the name fail validation and the whole row disappear.
+		expect(parseEnvFileForForm('FOO = bar\n')).toEqual([{ key: 'FOO', value: 'bar' }]);
+		expect(parseEnvFileForForm('FOO\t=bar\n')).toEqual([{ key: 'FOO', value: 'bar' }]);
+	});
+
+	test('a commented-out assignment stays out, by its key as well as its hash', () => {
+		// `# FOO=bar` is dropped by the key check alone - `# FOO` is not a valid variable
+		// name - so the comment skip is what keeps the loop cheap rather than what makes
+		// this correct. Either way, a commented-out assignment never comes back as a row.
+		expect(parseEnvFileForForm('# FOO=bar\n')).toEqual([]);
+		expect(parseEnvFileForForm('#FOO=bar\n')).toEqual([]);
+		expect(parseEnvFileForForm('  # FOO=bar\n')).toEqual([]);
+	});
+
+	test('it agrees with the panel on the same file', () => {
+		// The panel keeps its own loop, to collect a warning per unusable line, so the two
+		// can disagree on a VALUE unless both read through envValueFromText. Running the
+		// panel's own parser is the only way to see that they do.
+		const content = 'A="bar"\nB=\'p@$$w0rd#1\'\nC="a\\"b"\nD=${REF}\nE=plain\n';
+		const fromReader = parseEnvFileForForm(content);
+		const fromPanel = parseRawContent(content).vars;
+		expect(fromReader.map((row) => [row.key, row.value])).toEqual(
+			fromPanel.map((row) => [row.key, row.value])
+		);
+		// And the values are the ones the file means, not its syntax.
+		expect(fromReader).toEqual([
+			{ key: 'A', value: 'bar' },
+			{ key: 'B', value: 'p@$$w0rd#1' },
+			{ key: 'C', value: 'a"b' },
+			{ key: 'D', value: '${REF}' },
+			{ key: 'E', value: 'plain' }
+		]);
+	});
+
+	test('every caller that fills the form reads through it', () => {
+		// Three callers fill the same form, and a unit test cannot invoke an API route or a
+		// Svelte component, so this reads their sources. Importing the reader proves
+		// nothing - an unused import survives a caller going back to its own loop - so what
+		// is checked is that each one CALLS it and that no line in it slices a value out of
+		// the text itself.
+		const callers = [
+			'../src/routes/api/stacks/[name]/env/+server.ts',
+			'../src/routes/api/stacks/[name]/relocate/+server.ts',
+			'../src/routes/stacks/StackModal.svelte',
+			'../src/lib/server/git.ts'
+		];
+		for (const caller of callers) {
+			const source = readFileSync(new URL(caller, import.meta.url), 'utf8');
+			expect(source).toMatch(/parseEnvFileForForm\(/);
+			// A hand-rolled value split is how the callers drifted apart, whatever it names
+			// its locals. git.ts legitimately has one in `parseEnvFileContent`, the
+			// DEPLOY-time reader, so that function's body is the one exception.
+			const deployReader = source.indexOf('export function parseEnvFileContent');
+			const deployReaderEnd = deployReader < 0 ? -1 : source.indexOf('\n}', deployReader);
+			const handRolled = [...source.matchAll(/\.(slice|substring)\(\s*\w+\s*\+\s*1\s*\)/g)]
+				.filter((hit) => deployReader < 0 || hit.index! < deployReader || hit.index! > deployReaderEnd)
+				.map((hit) => source.slice(source.lastIndexOf('\n', hit.index!) + 1, source.indexOf('\n', hit.index!)).trim());
+			expect(handRolled).toEqual([]);
+		}
 	});
 });

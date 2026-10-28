@@ -141,6 +141,20 @@
       "when": 1791395551648,
       "tag": "0019_add_backup_sftp",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1792055758210,
+      "tag": "0020_pending_update_pinned_digest",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1792505667043,
+      "tag": "0021_scheduled_container_actions",
+      "breakpoints": true
     }
   ]
 }

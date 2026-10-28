@@ -34,6 +34,8 @@
 	let showModal = $state(false);
 	let editingRepo = $state<GitRepository | null>(null);
 	let confirmDeleteId = $state<number | null>(null);
+	let deleteAffectedStacks = $state<Array<{ stackName: string; environmentId: number | null }>>([]);
+	let loadingAffected = $state(false);
 	let testingId = $state<number | null>(null);
 	let testResult = $state<{ id: number; success: boolean; message: string } | null>(null);
 
@@ -71,6 +73,22 @@
 
 	async function handleSaved() {
 		await fetchRepositories();
+	}
+
+	async function loadAffectedStacks(id: number) {
+		loadingAffected = true;
+		deleteAffectedStacks = [];
+		try {
+			const res = await fetch(`/api/git/repositories/${id}`);
+			if (res.ok) {
+				const data = await res.json();
+				deleteAffectedStacks = data.stacksUsing ?? [];
+			}
+		} catch {
+			// Non-fatal: the confirmation still works, just without the stack list.
+		} finally {
+			loadingAffected = false;
+		}
 	}
 
 	async function deleteRepository(id: number) {
@@ -229,11 +247,30 @@
 								itemType={m.settings_git_item_repository()}
 								itemName={repo.name}
 								title={m.settings_git_delete()}
+								autoHideMs={0}
 								onConfirm={() => deleteRepository(repo.id)}
-								onOpenChange={(open) => confirmDeleteId = open ? repo.id : null}
+								onOpenChange={(open) => {
+									confirmDeleteId = open ? repo.id : null;
+									if (open) loadAffectedStacks(repo.id);
+									else deleteAffectedStacks = [];
+								}}
 							>
 								{#snippet children({ open })}
 									<Trash2 class="w-3.5 h-3.5 {open ? 'text-destructive' : 'text-muted-foreground hover:text-destructive'}" />
+								{/snippet}
+								{#snippet extraContent()}
+									{#if loadingAffected}
+										<p class="text-xs text-muted-foreground">{m.settings_git_checking_stacks()}</p>
+									{:else if deleteAffectedStacks.length > 0}
+										<p class="text-xs text-amber-600 dark:text-amber-500">
+											{m.settings_git_delete_affects_stacks({ count: deleteAffectedStacks.length })}
+										</p>
+										<ul class="mt-1 text-xs text-muted-foreground list-disc list-inside max-h-24 overflow-y-auto">
+											{#each deleteAffectedStacks as s}
+												<li>{s.stackName}</li>
+											{/each}
+										</ul>
+									{/if}
 								{/snippet}
 							</ConfirmPopover>
 						{/if}

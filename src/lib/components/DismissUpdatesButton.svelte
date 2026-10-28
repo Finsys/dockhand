@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui/button';
-	import { CircleArrowUp, Clock, Tag } from 'lucide-svelte';
+	import { CircleArrowUp, Clock, Tag, Pin } from 'lucide-svelte';
 	import { scale } from 'svelte/transition';
 	import { backOut } from 'svelte/easing';
 	import { m } from '$lib/paraglide/messages.js';
@@ -15,10 +15,13 @@
 		/** Number of items whose update is held by the minimum image age. Muted, not
 		 *  amber: there is nothing to act on until the image is old enough. */
 		coolingDownCount?: number;
+		/** Number of items whose pinned digest moved - shows the pin icon + count. Amber:
+		 *  a newer image exists, but applying it is an edit to the compose file. */
+		pinnedCount?: number;
 		onDismiss: () => void;
 	}
 
-	let { show, digestCount, newerVersionCount, coolingDownCount = 0, onDismiss }: Props = $props();
+	let { show, digestCount, newerVersionCount, coolingDownCount = 0, pinnedCount = 0, onDismiss }: Props = $props();
 </script>
 
 {#if show}
@@ -48,7 +51,13 @@
 				<span class="text-xs font-medium tabular-nums">{coolingDownCount}</span>
 			</span>
 		{/if}
-		{#if digestCount === 0 && newerVersionCount === 0 && coolingDownCount === 0}
+		{#if pinnedCount > 0}
+			<span class="flex items-center gap-0.5" title={m.containers_list_pinned_digest_heading()}>
+				<Pin class="w-3 h-3" />
+				<span class="text-xs font-medium tabular-nums">{pinnedCount}</span>
+			</span>
+		{/if}
+		{#if digestCount === 0 && newerVersionCount === 0 && coolingDownCount === 0 && pinnedCount === 0}
 			<!-- only failed checks remain - fall back to the update icon -->
 			<CircleArrowUp class="w-3.5 h-3.5" />
 		{/if}

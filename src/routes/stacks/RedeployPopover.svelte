@@ -54,7 +54,7 @@
 		 * open with no preset highlighted and nothing to tell the user where they are.
 		 */
 		showPresets?: boolean;
-		onDeploy: (options: { pull: boolean; build: boolean; forceRecreate: boolean }) => Promise<void>;
+		onDeploy: (options: { pull: boolean; respectPullPolicy: boolean; build: boolean; pullBase: boolean; forceRecreate: boolean }) => Promise<void>;
 		children: Snippet;
 	}
 
@@ -79,14 +79,16 @@
 
 	let open = $state(false);
 	let pull = $state(defaultPull);
+	let respectPullPolicy = $state(false);
 	let build = $state(defaultBuild);
+	let pullBase = $state(false);
 	let forceRecreate = $state(defaultForceRecreate);
 	let deploying = $state(false);
 
 	async function handleDeploy() {
 		// Close the popover immediately: the output modal opens and owns the progress
 		// display, so leaving the popover stuck on "Deploying..." behind it is noise.
-		const opts = { pull, build, forceRecreate };
+		const opts = { pull, respectPullPolicy: pull && respectPullPolicy, build, pullBase, forceRecreate };
 		open = false;
 		await onDeploy(opts);
 	}
@@ -99,7 +101,9 @@
 			// defaultBuild in particular tracks the live compose content and can change
 			// between two opens of the same popover.
 			pull = defaultPull;
+			respectPullPolicy = false;
 			build = defaultBuild;
+			pullBase = false;
 			forceRecreate = defaultForceRecreate;
 		}
 		open = !open;
@@ -112,7 +116,7 @@
 		forceRecreate = p.forceRecreate;
 	}
 
-	const composeCommand = $derived(composeCommandFor({ pull, build, forceRecreate }));
+	const composeCommand = $derived(composeCommandFor({ pull, respectPullPolicy, build, pullBase, forceRecreate }));
 </script>
 
 <Popover.Root bind:open>
@@ -165,10 +169,24 @@
 					<Checkbox bind:checked={pull} disabled={deploying} />
 					<span class="text-xs">{m.stacks_redeploy_pull_images()}</span>
 				</label>
+				<label class="flex items-center gap-2 pl-6 {pull ? 'cursor-pointer' : 'opacity-50'}">
+					<Checkbox bind:checked={respectPullPolicy} disabled={deploying || !pull} />
+					<span class="text-xs">{m.stacks_redeploy_respect_pull_policy()}</span>
+				</label>
+				{#if pull && respectPullPolicy}
+					<p class="text-2xs text-muted-foreground pl-12 -mt-1">{m.stacks_redeploy_respect_pull_policy_hint()}</p>
+				{/if}
 				<label class="flex items-center gap-2 cursor-pointer">
 					<Checkbox bind:checked={build} disabled={deploying} />
 					<span class="text-xs">{m.stacks_redeploy_build_images()}</span>
 				</label>
+				<label class="flex items-center gap-2 pl-6 {build ? 'cursor-pointer' : 'opacity-50'}">
+					<Checkbox bind:checked={pullBase} disabled={deploying || !build} />
+					<span class="text-xs">{m.stacks_redeploy_pull_base_images()}</span>
+				</label>
+				{#if build && pullBase}
+					<p class="text-2xs text-muted-foreground pl-12 -mt-1">{m.stacks_redeploy_pull_base_images_hint()}</p>
+				{/if}
 				{#if reason}
 					<p class="text-2xs text-muted-foreground pl-6 -mt-1">{reason}</p>
 				{/if}

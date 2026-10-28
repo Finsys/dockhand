@@ -1,8 +1,10 @@
 import { json } from '@sveltejs/kit';
+import { isValidStackName } from '$lib/server/stack-name-guard';
 import { findStackDir, getStackDir } from '$lib/server/stacks';
 import { getStackSource } from '$lib/server/db';
 import { authorize } from '$lib/server/authorize';
 import { existsSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import { isForbiddenStackPath } from '$lib/server/fs-guard';
 import { join, dirname } from 'node:path';
 import type { RequestHandler } from './$types';
 
@@ -13,9 +15,10 @@ import type { RequestHandler } from './$types';
  * summary: Get the raw .env file content as-is (comments and formatting preserved) for a stack
  * path: name:string! Stack name (from GET /api/stacks)
  * query: env:integer Environment ID the stack belongs to (from GET /api/environments)
+ * resp-400: Invalid stack name (or malformed request body)
  * resp-200: {content:string!, noEnvFile:boolean}
  * resp-200-example: {"content":"FOO=bar\n# comment\nBAZ=qux\n"}
- * resp-403: Permission denied (requires stacks:view, or environment access denied on enterprise)
+ * resp-403: Permission denied (requires stacks:view, or environment access denied on enterprise), or the env file path is a protected location
  * resp-500: Failed to get environment file
  */
 export const GET: RequestHandler = async ({ params, url, cookies }) => {
@@ -34,7 +37,11 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 	}
 
 	try {
-		const stackName = decodeURIComponent(params.name);
+		// Validate the name shape before it is used in a filesystem path.
+		const stackName = params.name;
+		if (!isValidStackName(stackName)) {
+			return json({ error: 'Invalid stack name' }, { status: 400 });
+		}
 
 		// Check if this stack has custom paths configured
 		const source = await getStackSource(stackName, envIdNum);
@@ -64,6 +71,10 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
 		}
 
 		let content = '';
+		// The stored path is client-chosen; never read or write a protected location through it.
+		if (envFilePath && isForbiddenStackPath(envFilePath)) {
+			return json({ error: 'Env file path is not allowed' }, { status: 403 });
+		}
 		if (envFilePath && existsSync(envFilePath)) {
 			try {
 				content = readFileSync(envFilePath, 'utf-8');
@@ -91,7 +102,7 @@ export const GET: RequestHandler = async ({ params, url, cookies }) => {
  * resp-200: {success:boolean!, noEnvFile:boolean, deleted:boolean}
  * resp-200-example: {"success":true}
  * resp-400: Invalid body (content string required) or refusal to write a masked "***" placeholder
- * resp-403: Permission denied (requires stacks:edit, or environment access denied on enterprise)
+ * resp-403: Permission denied (requires stacks:edit, or environment access denied on enterprise), or the env file path is a protected location
  * resp-500: Failed to save environment file
  */
 export const PUT: RequestHandler = async ({ params, url, cookies, request }) => {
@@ -110,7 +121,11 @@ export const PUT: RequestHandler = async ({ params, url, cookies, request }) => 
 	}
 
 	try {
-		const stackName = decodeURIComponent(params.name);
+		// Validate the name shape before it is used in a filesystem path.
+		const stackName = params.name;
+		if (!isValidStackName(stackName)) {
+			return json({ error: 'Invalid stack name' }, { status: 400 });
+		}
 		const body = await request.json();
 
 		if (typeof body.content !== 'string') {
@@ -144,6 +159,10 @@ export const PUT: RequestHandler = async ({ params, url, cookies, request }) => 
 			}
 		}
 
+		// The stored path is client-chosen; never read or write a protected location through it.
+		if (envFilePath && isForbiddenStackPath(envFilePath)) {
+			return json({ error: 'Env file path is not allowed' }, { status: 403 });
+		}
 		// Only write if we have a valid path
 		if (!envFilePath) {
 			return json({ success: true });
