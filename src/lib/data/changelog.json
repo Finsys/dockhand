@@ -12,7 +12,12 @@
       { "type": "fix", "text": "pruning unused images works on older Docker engines (#1490)" },
       { "type": "fix", "text": "the stacks page update check counts only containers that belong to a stack (#1803)" },
       { "type": "fix", "text": "the secret provider of a git stack shows correctly in its read-only view (#1812)" },
-      { "type": "fix", "text": "git stack deploys notify channels subscribed to stack events, once per deploy (#1295)" }
+      { "type": "fix", "text": "git stack deploys notify channels subscribed to stack events, once per deploy (#1295)" },
+      { "type": "fix", "text": "the git stack editor no longer lists a SOPS env file's metadata as variables (#1815)" },
+      { "type": "feature", "text": "wildcard search (* and ?) in the containers and stacks search boxes (#1814)" },
+      { "type": "fix", "text": "self-update keeps a pinned IP and the MAC derived from it (#1816)" },
+      { "type": "fix", "text": "editing a container's env var no longer corrupts a command with embedded quotes (#1821)" },
+      { "type": "feature", "text": "release notes for a held update are available during the cooldown (#1824)" }
     ],
     "imageTag": "fnsys/dockhand:v1.0.56"
   },
