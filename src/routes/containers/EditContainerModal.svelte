@@ -16,6 +16,7 @@
 	import { additionalNetworkNames } from '$lib/utils/network-identity';
 	import BackupPanel from './BackupPanel.svelte';
 	import { volumeInfoFromBind } from '$lib/utils/mounts';
+	import { containerMountBindings } from '$lib/utils/container-mounts';
 	import { fetchBackupExecutions } from '$lib/utils/backup';
 	import type { VulnerabilityCriteria } from '$lib/components/VulnerabilityCriteriaSelector.svelte';
 	import { parseHostPort, expandPortBindings, formatHostPort } from '$lib/utils/port-parse';
@@ -495,7 +496,7 @@
 				: [{ hostPort: '', containerPort: '', protocol: 'tcp' }];
 
 			// Parse volume mappings
-			const binds = data.HostConfig.Binds || [];
+			const binds = containerMountBindings(data);
 			volumeMappings = binds.length > 0
 				? binds.map((bind: string) => {
 						const [hostPath, containerPath, mode] = bind.split(':');
