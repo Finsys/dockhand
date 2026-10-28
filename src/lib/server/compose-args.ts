@@ -9,6 +9,18 @@
 import { mergeDeletionReports, type DeletionApplyResult } from './git-deletions';
 export interface ComposeOperationArgOptions {
 	forceRecreate?: boolean;
+	/**
+	 * Include `--remove-orphans` on `up` (default true, preserving every existing
+	 * caller). The auto-update path passes false: a background job must not delete
+	 * containers that merely drifted from the on-disk compose file. (#1539 review)
+	 */
+	removeOrphans?: boolean;
+	/**
+	 * Add `--no-deps` to `up` so dependencies of the named services are not started.
+	 * An explicit target list is an update, not a cold start: without this, a service
+	 * an operator `exclude`d is still recreated when another target depends on it. (#1539 review)
+	 */
+	noDeps?: boolean;
 	removeVolumes?: boolean;
 	build?: boolean;
 	/** `build`: build without the layer cache (`--no-cache`). `pull` then skips the services that are built. */
@@ -19,24 +31,42 @@ export interface ComposeOperationArgOptions {
 	noBuild?: boolean;
 	pullPolicy?: string;
 	serviceName?: string;
+	/**
+	 * Multiple target services (#1539 cascade updates). Appended after
+	 * `serviceName` so a caller can pass either. Compose accepts a space-separated
+	 * service list for `up`/`pull`/`build`.
+	 */
+	serviceNames?: string[];
 }
 
 export function buildComposeOperationArgs(
 	operation: 'up' | 'down' | 'stop' | 'start' | 'restart' | 'pull' | 'build',
 	options: ComposeOperationArgOptions = {}
 ): string[] {
-	const { forceRecreate, removeVolumes, build, noBuildCache, pullBase, noBuild, pullPolicy, serviceName } = options;
+	const { forceRecreate, removeOrphans, noDeps, removeVolumes, build, noBuildCache, pullBase, noBuild, pullPolicy, serviceName, serviceNames } = options;
 	const args: string[] = [];
+	// One service arg list for every operation: the legacy single `serviceName` plus
+	// any explicit list (#1539). De-duplicated, order preserved (changed service first).
+	const targets: string[] = [];
+	if (serviceName) targets.push(serviceName);
+	for (const name of serviceNames ?? []) {
+		if (name && !targets.includes(name)) targets.push(name);
+	}
 
 	switch (operation) {
 		case 'up':
-			args.push('up', '-d', '--remove-orphans');
+			args.push('up', '-d');
+			// Opt-out exists for the unattended auto-update path (#1539 review); every
+			// other caller keeps the historical --remove-orphans default.
+			if (removeOrphans !== false) args.push('--remove-orphans');
+			// Keep an excluded service out of the redeploy even when a target depends on it.
+			if (noDeps) args.push('--no-deps');
 			if (forceRecreate) args.push('--force-recreate');
 			// Never --no-cache, which up doesn't accept: a no-cache rebuild is a separate build.
 			if (build && !noBuild) args.push('--build');
 			if (noBuild) args.push('--no-build');
 			if (pullPolicy) args.push('--pull', pullPolicy);
-			if (serviceName) args.push(serviceName);
+			args.push(...targets);
 			break;
 		case 'down':
 			args.push('down', '--remove-orphans');
@@ -57,13 +87,13 @@ export function buildComposeOperationArgs(
 			// Before a separate build: the build replaces those images, and a service whose
 			// tag is in no registry would fail the pull.
 			if (pullBase || noBuildCache) args.push('--ignore-buildable');
-			if (serviceName) args.push(serviceName);
+			args.push(...targets);
 			break;
 		case 'build':
 			args.push('build');
 			if (pullBase) args.push('--pull');
 			if (noBuildCache) args.push('--no-cache');
-			if (serviceName) args.push(serviceName);
+			args.push(...targets);
 			break;
 	}
 
