@@ -16,45 +16,13 @@
 	import { additionalNetworkNames } from '$lib/utils/network-identity';
 	import BackupPanel from './BackupPanel.svelte';
 	import { volumeInfoFromBind } from '$lib/utils/mounts';
+	import { commandPayload, commandTextError, formatCommandArgs } from '$lib/utils/command-field';
 	import { fetchBackupExecutions } from '$lib/utils/backup';
 	import type { VulnerabilityCriteria } from '$lib/components/VulnerabilityCriteriaSelector.svelte';
 	import { parseHostPort, expandPortBindings, formatHostPort } from '$lib/utils/port-parse';
 	import { formatBytes } from '$lib/utils/format';
 	import { m } from '$lib/paraglide/messages.js';
 	import { actionTimeToCron } from '$lib/utils/scheduled-action-time';
-
-	// Parse shell command respecting quotes
-	function parseShellCommand(cmd: string): string[] {
-		const args: string[] = [];
-		let current = '';
-		let inQuotes = false;
-		let quoteChar = '';
-
-		for (let i = 0; i < cmd.length; i++) {
-			const char = cmd[i];
-
-			if ((char === '"' || char === "'") && !inQuotes) {
-				inQuotes = true;
-				quoteChar = char;
-			} else if (char === quoteChar && inQuotes) {
-				inQuotes = false;
-				quoteChar = '';
-			} else if (char === ' ' && !inQuotes) {
-				if (current) {
-					args.push(current);
-					current = '';
-				}
-			} else {
-				current += char;
-			}
-		}
-
-		if (current) {
-			args.push(current);
-		}
-
-		return args;
-	}
 
 	interface ConfigSet {
 		id: number;
@@ -311,7 +279,7 @@
 	let visible = $state(false);
 
 	// Field-specific errors for inline validation
-	let errors = $state<{ name?: string; image?: string }>({});
+	let errors = $state<{ name?: string; image?: string; command?: string; entrypoint?: string }>({});
 
 	// Inline rename state (for title bar)
 	let isEditingTitle = $state(false);
@@ -462,12 +430,8 @@
 			name = data.Name.replace(/^\//, '');
 			image = trackedImageReference(data.Config.Image, data.Config.Labels);
 			loadIconOverride(name);
-			command = data.Config.Cmd ? data.Config.Cmd.map((arg: string) =>
-				arg.includes(' ') ? `"${arg}"` : arg
-			).join(' ') : '';
-			entrypoint = data.Config.Entrypoint ? data.Config.Entrypoint.map((arg: string) =>
-				arg.includes(' ') ? `"${arg}"` : arg
-			).join(' ') : '';
+			command = formatCommandArgs(data.Config.Cmd);
+			entrypoint = formatCommandArgs(data.Config.Entrypoint);
 			restartPolicy = data.HostConfig.RestartPolicy?.Name || 'no';
 			restartMaxRetries = data.HostConfig.RestartPolicy?.MaximumRetryCount ?? '';
 
@@ -942,6 +906,17 @@
 			hasErrors = true;
 		}
 
+		const cmdError = commandTextError(command);
+		if (cmdError) {
+			errors.command = cmdError;
+			hasErrors = true;
+		}
+		const entrypointError = commandTextError(entrypoint);
+		if (entrypointError) {
+			errors.entrypoint = entrypointError;
+			hasErrors = true;
+		}
+
 		if (hasErrors) {
 			return;
 		}
@@ -1043,10 +1018,10 @@
 						labelsObj[l.key] = l.value;
 					});
 
-				// null (not undefined) when cleared, so JSON.stringify keeps the key and
-				// the server's merge treats it as "clear" and falls back to the image CMD.
-				const cmd = command.trim() ? parseShellCommand(command.trim()) : null;
-				const entrypointArr = entrypoint.trim() ? parseShellCommand(entrypoint.trim()) : null;
+				// null when cleared, so the server's merge clears it and falls back to the image
+				// CMD; undefined when untouched, so the key is dropped and Cmd is kept as is.
+				const cmd = commandPayload(command, originalConfig?.command ?? '');
+				const entrypointArr = commandPayload(entrypoint, originalConfig?.entrypoint ?? '');
 
 				let healthcheck: any = undefined;
 				if (healthcheckEnabled && healthcheckCommand.trim()) {

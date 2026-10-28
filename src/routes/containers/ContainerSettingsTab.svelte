@@ -159,7 +159,7 @@
 		configSets: ConfigSet[];
 		selectedConfigSetId: string;
 		// Errors
-		errors: { name?: string; image?: string };
+		errors: { name?: string; image?: string; command?: string; entrypoint?: string };
 		// Create mode specific
 		imageSummary?: {
 			isPulling: boolean;
@@ -919,12 +919,30 @@
 
 		<div class="space-y-1.5">
 			<Label for="command" class="text-xs font-medium">{m.containers_settings_command_optional()}</Label>
-			<Input id="command" bind:value={command} placeholder="/bin/sh -c 'echo hello'" class="h-9" />
+			<Input
+				id="command"
+				bind:value={command}
+				placeholder="/bin/sh -c 'echo hello'"
+				class="h-9 {errors.command ? 'border-destructive focus-visible:ring-destructive' : ''}"
+				oninput={() => (errors.command = undefined)}
+			/>
+			{#if errors.command}
+				<p class="text-xs text-destructive">{errors.command}</p>
+			{/if}
 		</div>
 
 		<div class="space-y-1.5">
 			<Label for="entrypoint" class="text-xs font-medium">{m.containers_settings_entrypoint_optional()}</Label>
-			<Input id="entrypoint" bind:value={entrypoint} placeholder="/docker-entrypoint.sh" class="h-9" />
+			<Input
+				id="entrypoint"
+				bind:value={entrypoint}
+				placeholder="/docker-entrypoint.sh"
+				class="h-9 {errors.entrypoint ? 'border-destructive focus-visible:ring-destructive' : ''}"
+				oninput={() => (errors.entrypoint = undefined)}
+			/>
+			{#if errors.entrypoint}
+				<p class="text-xs text-destructive">{errors.entrypoint}</p>
+			{/if}
 		</div>
 
 		<div class="grid grid-cols-2 gap-3">
