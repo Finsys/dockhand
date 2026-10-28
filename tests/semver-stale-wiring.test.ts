@@ -6,7 +6,7 @@
  *
  * So these read the source. Source assertions are the fallback this repo already uses
  * for exactly this situation (see env-file-values.test.ts). They catch the failure
- * that unit tests cannot see: a staleCheck that is computed and then dropped on the
+ * that unit tests cannot see: a running-image check that is computed and then dropped on the
  * floor, which looks identical to one that works.
  */
 
