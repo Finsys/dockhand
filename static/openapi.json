@@ -9621,7 +9621,7 @@
             "bearerAuth": []
           }
         ],
-        "description": "The body carries the container create-options (image, name, env, ports, volumes, …) alongside the two control flags below; `repullImage` pulls the image before recreation and `startAfterUpdate` starts the new container once created.",
+        "description": "The body carries the container create-options (image, name, env, ports, volumes, …) alongside the two control flags below; `repullImage` pulls the image before recreation and `startAfterUpdate` starts the new container once created. Omit `volumeBinds` or send null to preserve existing mounts; send an array to replace the mappings, including an empty array to remove them all.",
         "requestBody": {
           "required": true,
           "content": {

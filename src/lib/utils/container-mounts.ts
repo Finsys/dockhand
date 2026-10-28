@@ -52,11 +52,12 @@ export function containerMountBindings(inspect: MountInspect): string[] {
 /** Keep unchanged structured mounts intact so unrelated edits retain their full Docker options. */
 export function containerMountOptions(inspect: MountInspect, requested?: string[] | null) {
 	const current = containerMountBindings(inspect);
-	const binds = requested === undefined ? current : requested || [];
+	// Older editors send null when their volume list is empty; only [] explicitly clears it.
+	const binds = requested == null ? current : requested;
 	const wanted = new Set(binds.map(bindKey));
 	const byTarget = new Map(current.map(bind => [bindTarget(bind), bindKey(bind)]));
 	const mounts = (inspect.HostConfig?.Mounts || []).filter(mount =>
-		requested === undefined || !['bind', 'volume'].includes(mount.Type) || wanted.has(byTarget.get(target(mount.Target)) || '')
+		requested == null || !['bind', 'volume'].includes(mount.Type) || wanted.has(byTarget.get(target(mount.Target)) || '')
 	).map(mount => {
 		if (mount.Type !== 'volume' || mount.Source) return mount;
 		const source = inspect.Mounts?.find(m => m.Destination && target(m.Destination) === target(mount.Target))?.Name;

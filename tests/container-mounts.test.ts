@@ -23,10 +23,14 @@ describe('container edit mounts', () => {
 		expect(containerMountOptions(structured)).toEqual({ volumeBinds: [], mounts: structured.HostConfig.Mounts });
 	});
 
+	test('preserves storage when an older editor submits null for its empty volume list', () => {
+		expect(containerMountOptions(structured, null)).toEqual({ volumeBinds: [], mounts: structured.HostConfig.Mounts });
+	});
+
 	test('applies explicit source changes, removals and read-only changes without duplicate targets', () => {
 		const changed = containerMountOptions(structured, ['/srv/replacement/config:/config:rw', '/srv/app/data:/data:rw']);
 		expect(changed).toEqual({ volumeBinds: ['/srv/replacement/config:/config:rw', '/srv/app/data:/data:rw'], mounts: [] });
-		expect(containerMountOptions(structured, null)).toEqual({ volumeBinds: [], mounts: [] });
+		expect(containerMountOptions(structured, [])).toEqual({ volumeBinds: [], mounts: [] });
 		expect(containerMountOptions(structured, ['/srv/app/config:/config'])).toEqual({ volumeBinds: [], mounts: [structured.HostConfig.Mounts[0]] });
 	});
 
@@ -37,6 +41,7 @@ describe('container edit mounts', () => {
 		] };
 		expect(containerMountBindings(inspect)).toEqual(['/old:/data:ro,z', 'anonymous-id:/config:rw']);
 		expect(containerMountOptions(inspect)).toEqual({ volumeBinds: ['/old:/data:ro,z', 'anonymous-id:/config:rw'], mounts: [] });
+		expect(containerMountOptions(inspect, null)).toEqual({ volumeBinds: ['/old:/data:ro,z', 'anonymous-id:/config:rw'], mounts: [] });
 	});
 
 	test('retains structured volume options and resolves anonymous sources to their existing names', () => {
@@ -50,7 +55,8 @@ describe('container edit mounts', () => {
 	test('refuses to recreate an anonymous volume whose existing name is missing', () => {
 		const inspect = { HostConfig: { Mounts: [{ Type: 'volume', Target: '/data' }] } };
 		expect(() => containerMountOptions(inspect)).toThrow('volume name missing');
-		expect(containerMountOptions(inspect, null)).toEqual({ volumeBinds: [], mounts: [] });
+		expect(() => containerMountOptions(inspect, null)).toThrow('volume name missing');
+		expect(containerMountOptions(inspect, [])).toEqual({ volumeBinds: [], mounts: [] });
 	});
 
 	test('keeps mount types that the volume form does not edit', () => {

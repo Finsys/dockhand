@@ -1029,8 +1029,9 @@
 						Object.assign(ports, bindings);
 					});
 
-				const volumeBinds = volumeMappings
-					.filter((v) => v.hostPath && v.containerPath)
+				const currentVolumes = volumeMappings.filter((v) => v.hostPath && v.containerPath);
+				const originalVolumes = originalConfig?.volumeMappings.filter((v) => v.hostPath && v.containerPath);
+				const volumeBinds = currentVolumes
 					.map((v) => `${v.hostPath}:${v.containerPath}:${v.mode}`);
 
 				const env = envVars
@@ -1110,7 +1111,7 @@
 					name: name.trim(),
 					image: image.trim(),
 					ports: Object.keys(ports).length > 0 ? ports : null,
-					volumeBinds: volumeBinds.length > 0 ? volumeBinds : null,
+					volumeBinds: originalConfig && JSON.stringify(currentVolumes) !== JSON.stringify(originalVolumes) ? volumeBinds : undefined,
 					// Fields the form manages: send `null` when the user cleared them
 					// so the server can distinguish "cleared" from "absent" (#1119).
 					// Server's updateContainer merges payload over existing config and
