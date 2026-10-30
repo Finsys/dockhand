@@ -24,7 +24,7 @@ import { createRunRecorder } from './deploy-run-record';
 import { hashComposeContent, hashEnvFingerprint } from './deploy-run-record-core';
 import { sendEventNotification } from './notifications';
 import { buildBasicAuthHeader } from './git-auth';
-import { assertSafeRepoUrl, assertSafeGitRef, repoFilePath, repoBaseEnvPath } from './git-url-safety';
+import { assertSafeRepoUrl, assertSafeGitRef, repoFilePath, repoBaseEnvPath, stripUrlCredentials } from './git-url-safety';
 import { assertSafeRepoTarget } from './git-branch-lookup';
 import { gitDeployDecision, isDeployFailure, DEPLOY_FAILURE_PREFIX } from './git-deploy-policy';
 import { resolveStackBranch } from '../git-stack-branch';
@@ -321,20 +321,7 @@ function cleanupSshKey(credential: GitCredentialData | null, env?: GitEnv): void
 
 function buildRepoUrl(url: string, credential: GitCredentialData | null): string {
 	assertSafeRepoUrl(url);
-	// Never embed credentials in the URL — they leak via /proc/<pid>/cmdline (see #1081).
-	// HTTPS credentials are injected via GIT_CONFIG_COUNT env vars in buildGitEnv().
-	// Strip any existing credentials from the URL for safety.
-	if (credential?.authType === 'password' && !url.startsWith('git@')) {
-		try {
-			const parsed = new URL(url);
-			parsed.username = '';
-			parsed.password = '';
-			return parsed.toString();
-		} catch {
-			return url;
-		}
-	}
-	return url;
+	return stripUrlCredentials(url, credential?.authType);
 }
 
 /**
